@@ -188,6 +188,13 @@ for p in "$VERIFY" "$VERIFY/apps/node_modules" "$VERIFY/apps/web/dist" \
 cd "$VERIFY"
 (cd apps && pnpm install --frozen-lockfile --store-dir "$SNAPSHOT/pnpm-store")
 (cd apps/web && pnpm exec vitest run components/task/chat/use-session-read-tracking.test.ts components/task/task-unread-dot-visibility.test.ts lib/session-unread-divider.test.ts)
+(cd apps/web && pnpm exec vitest run \
+  lib/ws/handlers/task-primary-focus.test.ts \
+  lib/ws/handlers/agent-session.test.ts \
+  lib/ws/handlers/agent-session-pure.test.ts \
+  lib/ws/handlers/tasks.test.ts \
+  lib/state/workflow-session-focus.test.ts \
+  lib/task-agent-error.test.ts)
 (cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/task/task-unread-dot.spec.ts)
 (cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts)
 make fmt
@@ -215,6 +222,13 @@ Production ownership narrowed by the failed-resume reproduction (see
 - `apps/web/lib/ws/handlers/tasks.ts` and `tasks.test.ts`
 - `apps/web/lib/ws/handlers/task-primary-focus.ts` and `task-primary-focus.test.ts`
   (authoritative, selection-owned previous-session verification).
+- `apps/web/lib/ws/handlers/session-selection.ts` and `agent-session-pure.test.ts`
+  (existing pin/terminal predicates moved unchanged to avoid a controller cycle).
+- `apps/web/lib/state/workflow-session-focus.ts` (idempotent empty cancellation).
+  The existing workflow-focus tests remain part of the focused command.
+- Terminal-predicate consumers in coordinator copilot, passthrough toolbar,
+  agent-error acknowledgements, and `lib/task-agent-error.ts`: import relocation
+  only, with no UI copy/layout change.
 
 The R1 gateway callback-ordering change and its queue-model regression were
 withdrawn after R2 showed later hub/client inversions. That historical Go
@@ -424,6 +438,67 @@ R2 verification, in the cache-backed working-tree snapshot:
   Changed-file configured Oxlint (warnings denied), Prettier, and the
   new-code i18n ratchet passed.
 
+### Production-fix review round 3 remediation
+
+F1: with a healthy predecessor and a held verification GET, a terminal frame
+could select the last eligible sibling instead of the already-promoted primary.
+The real-handler/store regression seeded a third eligible session and failed
+with `latest` selected instead of `next`, for both completion and cancellation.
+The ended-session handler now settles a matching still-owned primary follow
+before its existing fallback, aborting the read. Late responses cannot undo it.
+No-pending fallback, explicit workflow focus, and FAILED focus stay unchanged.
+The initial transition-observer approach also failed accepted terminal replays;
+the final coordination handles accepted notifications directly, including replays.
+The shared pin/terminal predicates moved unchanged into `session-selection.ts`,
+so neither controller imports the other cyclically. Every consumer was migrated;
+no compatibility re-export remains.
+
+F2: scoped cancellation with neither a workflow intent nor request now returns
+the same empty state. Deleting another task no longer invalidates a healthy
+follow; a real newer workflow intent still does. The real task-deleted handler
+reproduced the incorrect retained `old` session before this correction.
+
+F3: both runnable verification sections now include the deterministic
+`task-primary-focus.test.ts`, real workflow-focus tests, handler tests and
+relocated-predicate coverage. Broad `make test` is not the only way to exercise
+promotion-first delivery and ownership cancellation.
+
+R3 focused verification:
+
+- The focused handlers, predicate, workflow-focus, task-agent-error and read
+  tracking tests passed: 9 files / 223 tests (`r3-final-units.log`).
+- Changed-file configured Oxlint (warnings denied) and Prettier passed.
+- Final authority-helper regression after completing the deletion event's typed
+  payload: 25 passed (`r3-final-regression.log`). Web typecheck passed
+  (`r3-typecheck-ready.log`).
+- Fresh frontend build passed (`r3-build-ready.log`). Desktop unread-dot:
+  3 passed; phone unread-dot: 3 passed; session-handoff: 1 passed. Each used
+  one worker/shard and no retries (`r3-desktop.log`, `r3-mobile.log`,
+  `r3-handoff.log`), with the unchanged R2 backend/plugin artifacts.
+- Parent inspected the passing phone capture: failed session 1/2 stays selected,
+  with the failure entry and Resume/Start fresh/Restore read-only controls visible.
+  Captures are retained under `r3-mobile-results/`.
+- Architecture lint and the new-code i18n ratchet passed. Earlier broad-suite
+  limitations remain unchanged; no live NATS-server validation is claimed.
+- The first direct frontend build lacked ignored `generated/changelog.json`
+  and `generated/release-notes.json` after refreshing the overlay. The
+  `pretypecheck` generators restore those inputs; run typecheck before building.
+  This was a build-input failure, not a behavioral RED.
+
+The R3 browser recipe below rebuilds the frontend, while reusing the recorded
+R2 managed backend and fixture-plugin archive, whose sources are unchanged.
+`--no-build` is valid only with those prepared artifacts; a fresh snapshot must
+use the managed runner's full build from the main verification setup.
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm run typecheck
+pnpm run build:vite
+pnpm e2e:run --host --no-build --shards 1 --project chromium tests/task/task-unread-dot.spec.ts -- --retries=0 --output "$SNAPSHOT/r3-desktop-results"
+pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts -- --retries=0 --output "$SNAPSHOT/r3-mobile-results"
+pnpm e2e:run --host --no-build --shards 1 --project chromium tests/session/session-handoff.spec.ts -- --retries=0 --output "$SNAPSHOT/r3-handoff-results"
+```
+
 ## New reported incident: existing cursor behind a failed resume
 
 The user supplied task `eae34524-3f77-45ef-9d72-677f11d03cd4` ("Add message
@@ -536,7 +611,13 @@ cancelled are unchanged. Read tracking, the unread predicate, and the
 unread contract are unchanged. Narrow commands, from `apps/web`:
 
 ```bash
-pnpm exec vitest run lib/ws/handlers/agent-session.test.ts lib/ws/handlers/tasks.test.ts
+pnpm exec vitest run \
+  lib/ws/handlers/task-primary-focus.test.ts \
+  lib/ws/handlers/agent-session.test.ts \
+  lib/ws/handlers/agent-session-pure.test.ts \
+  lib/ws/handlers/tasks.test.ts \
+  lib/state/workflow-session-focus.test.ts \
+  lib/task-agent-error.test.ts
 pnpm e2e:run --host --shards 1 --project chromium tests/task/task-unread-dot.spec.ts
 pnpm e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts
 ```

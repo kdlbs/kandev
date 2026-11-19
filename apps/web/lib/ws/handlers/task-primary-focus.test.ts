@@ -20,7 +20,7 @@ function response(state: TaskSession["state"], id = "old", taskId = "t1"): TaskS
 function deferred() {
   return Promise.withResolvers<TaskSessionResponse>();
 }
-function selectedStore() {
+function selectedStore(initialState: TaskSession["state"] = "STARTING") {
   const store = createAppStore({
     kanban: {
       workflowId: "wf1",
@@ -38,7 +38,7 @@ function selectedStore() {
     },
   });
   for (const [id, state] of [
-    ["old", "STARTING"],
+    ["old", initialState],
     ["next", "WAITING_FOR_INPUT"],
     ["latest", "WAITING_FOR_INPUT"],
   ] as const) {
@@ -234,5 +234,75 @@ describe("primary follow readback", () => {
     read.reject(new Error("read unavailable"));
     await expect(read.promise).rejects.toThrow("read unavailable");
     expect(store.getState().tasks.activeSessionId).toBe("old");
+  });
+});
+
+describe("primary follow coordination", () => {
+  it.each([
+    ["COMPLETED", true, "next", "RUNNING"],
+    ["CANCELLED", true, "next", "RUNNING"],
+    ["COMPLETED", false, "latest", "RUNNING"],
+    ["CANCELLED", false, "latest", "RUNNING"],
+    ["COMPLETED", true, "next", "COMPLETED"],
+    ["CANCELLED", true, "next", "CANCELLED"],
+  ] as const)(
+    "selects %s with pending=%s at %s after %s",
+    async (terminal, pending, expected, initialState) => {
+      const store = selectedStore(initialState);
+      store.setState(({ taskSessions, taskSessionsByTask }) => ({
+        taskSessionsByTask: {
+          ...taskSessionsByTask,
+          itemsByTaskId: {
+            ...taskSessionsByTask.itemsByTaskId,
+            t1: ["old", "next", "latest"].map((id) => taskSessions.items[id]),
+          },
+        },
+      }));
+      const read = deferred();
+      vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+      if (pending) promote(store);
+      registerTaskSessionHandlers(store)["session.state_changed"]!({
+        id: "terminal",
+        type: "notification",
+        action: "session.state_changed",
+        payload: { task_id: "t1", session_id: "old", new_state: terminal },
+      });
+      expect(store.getState().tasks.activeSessionId).toBe(expected);
+      read.resolve(response(terminal));
+      await read.promise;
+      expect(store.getState().tasks.activeSessionId).toBe(expected);
+    },
+  );
+
+  it("follows the promoted primary after an unrelated task is deleted", async () => {
+    const store = selectedStore();
+    store.setState(({ kanban }) => ({
+      kanban: {
+        ...kanban,
+        tasks: [
+          ...kanban.tasks,
+          { ...kanban.tasks[0], id: "other-task", primarySessionId: "other-session" },
+        ],
+      },
+    }));
+    const read = deferred();
+    vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+    promote(store);
+    registerTasksHandlers(store)["task.deleted"]!({
+      id: "unrelated-deletion",
+      type: "notification",
+      action: "task.deleted",
+      payload: {
+        task_id: "other-task",
+        workflow_id: "wf1",
+        workflow_step_id: "step1",
+        title: "Task",
+        is_ephemeral: false,
+      },
+    });
+    expect(store.getState().tasks.activeTaskId).toBe("t1");
+    read.resolve(response("WAITING_FOR_INPUT"));
+    await read.promise;
+    expect(store.getState().tasks.activeSessionId).toBe("next");
   });
 });

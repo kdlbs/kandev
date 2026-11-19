@@ -9,7 +9,7 @@ import {
 import {
   clearPinnedSessionIfOverridden,
   shouldPreservePinnedSessionForTask,
-} from "./agent-session";
+} from "./session-selection";
 import type { KanbanTask } from "./task-archive-cache";
 
 const debug = createDebugLogger("task-lifecycle:ws");
@@ -50,6 +50,30 @@ function ownsSelection(store: StoreApi<AppState>, pending: FollowOwner): boolean
   );
 }
 
+function completePendingFollow(store: StoreApi<AppState>, pending: PendingFollow): boolean {
+  if (pendingByStore.get(store) !== pending || !ownsSelection(store, pending)) return false;
+  const primary = findTaskInState(store.getState(), pending.taskId)?.primarySessionId;
+  if (primary !== pending.targetSessionId) return false;
+  pending.cancel();
+  clearPinnedSessionIfOverridden(store, pending.targetSessionId);
+  store.getState().setActiveSessionAuto(pending.taskId, pending.targetSessionId);
+  return true;
+}
+
+/** Accepted terminal state settles a still-owned primary change before list fallback. */
+export function finishPrimaryFollowFromTerminal(
+  store: StoreApi<AppState>,
+  taskId: string,
+  sessionId: string,
+): boolean {
+  const pending = pendingByStore.get(store);
+  if (!pending || pending.taskId !== taskId || pending.previousSessionId !== sessionId)
+    return false;
+  const sessionState = store.getState().taskSessions.items[sessionId]?.state;
+  if (sessionState !== "COMPLETED" && sessionState !== "CANCELLED") return false;
+  return completePendingFollow(store, pending);
+}
+
 function verifyPreviousSession(store: StoreApi<AppState>, owner: FollowOwner): void {
   const controller = new AbortController();
   const pending: PendingFollow = {
@@ -76,19 +100,14 @@ function verifyPreviousSession(store: StoreApi<AppState>, owner: FollowOwner): v
     init: { signal: controller.signal },
   })
     .then(({ session }) => {
-      if (pendingByStore.get(store) !== pending || !ownsSelection(store, pending)) return;
-      const currentPrimary = findTaskInState(store.getState(), pending.taskId)?.primarySessionId;
       if (
-        currentPrimary !== pending.targetSessionId ||
         session.id !== pending.previousSessionId ||
         session.task_id !== pending.taskId ||
         !session.state ||
         session.state === "FAILED"
       )
         return;
-      finish();
-      clearPinnedSessionIfOverridden(store, pending.targetSessionId);
-      store.getState().setActiveSessionAuto(pending.taskId, pending.targetSessionId);
+      completePendingFollow(store, pending);
     })
     .catch(() => {
       if (!controller.signal.aborted) {

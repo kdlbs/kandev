@@ -33,9 +33,10 @@ Task 02 repairs both automatic selection paths, retaining the failed view and
 its recovery controls while normal acknowledgement catches up. Unread scope,
 backend primary promotion, and completed/cancelled handoff remain unchanged.
 
-Generic primary-follow now reads the previous session's authoritative state
-before changing focus. This does not depend on notification order: hub routing
-and session-message barriers can invert frames even after an ordered callback.
+Generic primary-follow verifies the previous session's authoritative state
+before changing focus; a matching accepted completion/cancellation can settle
+the same owned target first. This does not depend on primary/failure frame order:
+hub routing and session-message barriers can invert an ordered callback stream.
 Verification owns a navigation/selection intent, aborts when superseded, and
 never hydrates session/cursor state from its response. The tradeoff is one
 session GET for an eligible generic primary change; explicit workflow focus
@@ -509,5 +510,11 @@ fix. It is separate from the five design-only rounds above.
   FIFO) and one P3 finding (remaining stale plan/Task 01 status), accepted.
   R2 moves the focus decision to authoritative session readback and withdraws
   the insufficient transport guarantee; see Task 02 Results.
-- Completed rounds: 2. Consecutive clean: 0. The stop condition is three
+- Round 3: Sol child `e24cbb17-d8c5-45a1-bbb4-fc5aa9831963` reviewed
+  `c3007ea060`. Two P2 findings (terminal list fallback defeats a pending primary
+  follow; unrelated task deletion invalidates one) and one P3 finding (the
+  runnable narrow command omits the deterministic regression), accepted.
+  R3 coordinates accepted terminal notifications with the owned target and makes
+  empty workflow cancellation a no-op; see Task 02 Results.
+- Completed rounds: 3. Consecutive clean: 0. The stop condition is three
   consecutive clean rounds or 50 rounds. No earlier loop counts toward it.

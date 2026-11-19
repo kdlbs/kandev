@@ -213,7 +213,8 @@ recovery card, then the backend promotes another active session to primary.
 hand off from a session entering `FAILED`, and `task.updated` primary-follow
 (`lib/ws/handlers/tasks.ts`) does not leave a `FAILED` previous primary.
 Generic primary-follow verifies the previously displayed session through the
-existing session GET endpoint with `cache: "no-store"` before changing selection.
+existing session GET endpoint with `cache: "no-store"`, unless a matching
+accepted non-failed terminal notification settles the same pending target first.
 Its task/session identity must match and its authoritative state must not be
 `FAILED`. Cached non-failed state is insufficient: workspace fan-out and client
 message barriers can deliver a primary update before the failed-state frame.
@@ -226,6 +227,14 @@ focus eligibility, never to overwrite session/cursor state. Explicit committed
 workflow focus still precedes generic following; completed/cancelled handoff
 retains its behavior. This costs one session read for an eligible generic
 primary switch and needs neither a new payload schema nor transport ordering.
+
+A matching accepted `COMPLETED`/`CANCELLED` notification consumes the still-owned
+promoted target before the ended-session handler's list fallback, then aborts
+the pending read. This also applies to accepted terminal replays. An unrelated
+eligible sibling cannot steal that selection. Without a pending follow, the
+existing terminal fallback remains unchanged; `FAILED` never settles a follow.
+An empty workflow-focus cancellation preserves state identity, so deletion of an
+unrelated task does not invalidate an otherwise healthy pending follow.
 
 An unread failed sibling that was never displayed is not evidence of a failed
 cursor write. It remains unread under AC .2, .9, .12, and .17. Preserve this

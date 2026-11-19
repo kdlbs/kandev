@@ -220,6 +220,7 @@ export function cancelWorkflowSessionFocus(
   state: WorkflowSessionFocusState,
   scope: WorkflowSessionFocusCancelScope = {},
 ): WorkflowSessionFocusState {
+  if (!state.intent && !state.request) return state;
   const activeValues = [state.intent, state.request].filter(
     (value): value is WorkflowSessionFocusIntent | WorkflowSessionFocusRequest => value !== null,
   );

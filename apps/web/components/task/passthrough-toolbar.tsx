@@ -33,7 +33,7 @@ import type { KeyboardShortcut } from "@/lib/keyboard/constants";
 import type { ReviewComment } from "@/lib/state/slices/comments";
 import { AgentTerminalInput } from "./mobile/mobile-agent-terminal";
 import { TaskChatPanel } from "./task-chat-panel";
-import { isTerminalSessionState } from "@/lib/ws/handlers/agent-session";
+import { isTerminalSessionState } from "@/lib/ws/handlers/session-selection";
 import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
 import { hasPendingClarification, shouldShowProceed } from "./chat/types";
 import { Trans, useTranslation } from "react-i18next";
