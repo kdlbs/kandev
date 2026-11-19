@@ -230,8 +230,10 @@ An unchanged primary preserves a pending lifecycle predicate. A changed primary
 retargets the original predecessor; creation only retargets an existing check.
 Explicit committed workflow focus remains separate.
 
-Healthy terminal handoffs revalidate recipient ownership/eligibility before
-activation and reuse the newest eligible sibling if the captured recipient ended.
+Healthy terminal handoffs revalidate ownership/eligibility and rank fallback by
+`started_at`, then session ID, not insertion order. A missing projected recipient
+waits for admission under predecessor authority; newer selection intent or
+predecessor state supersedes it.
 Agentctl readiness is only a fallback: preserve recipient-owned status/execution
 and never borrow the predecessor's execution identity.
 
@@ -241,13 +243,15 @@ known membership or the matching active identity; conflicting scope is rejected.
 Complete, unique, task-matching membership must exclude the deleted ID; malformed
 or multiple-primary lists fail closed. Zero primaries can prove retirement.
 
-Retirement retains backend/auth/workspace scope and membership generation
-through publication, independent of view intent. Invalidation rechecks absence;
-navigation or a newer pin does not cancel valid retirement. Focus separately
-requires a current view owner and unique proven primary. Otherwise a still-
-selected deleted ID is cleared without guessing a successor. Surviving pins and
-cursors remain untouched. Proof may initialize a missing recipient's identity
-and lifecycle fields, never overwrite existing data or hydrate its cursor.
+Retirement is scoped to backend/auth/workspace and membership generation, not view
+intent. Trusted task-matched removals invalidate membership and exclude the ID
+from automatic candidates; complete absence alone authorizes retirement.
+Invalidation rechecks absence. Focus requires its current owner and a uniquely
+proven primary. Clearing the deleted selection preserves independent workflow
+intent, cancelling only a request targeting that ID. An owned empty slot can
+follow a changed primary after fresh membership proof; newer user/workflow
+selection supersedes it. Surviving pins/cursors are untouched. Proof can initialize
+missing recipient identity/lifecycle, never overwrite data or hydrate a cursor.
 
 `invalidateTaskSessionMembership` fences foreground/removal-dialog pending,
 admitted and queued publications; newer reads and unrelated keys remain usable.

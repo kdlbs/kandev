@@ -2,7 +2,10 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { dwell, watchWs } from "../../helpers/causal-waits";
-import { expectLastStoppedSessionRemoval } from "../../helpers/session-removal";
+import {
+  expectLastStoppedSessionRemoval,
+  expectLatePromotionAfterRemoval,
+} from "../../helpers/session-removal";
 import {
   FAILED_SESSION_ERROR,
   TASK_UNREAD_DOT_LABEL,
@@ -265,4 +268,15 @@ test("retires the last stopped session deleted from another client without reloa
 }) => {
   await expectLastStoppedSessionRemoval(testPage, desktopTestPage, apiClient, seedData);
   await testPage.screenshot({ path: test.info().outputPath("phone-last-session-removed.png") });
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.11
+test("fills a retired session slot after the later primary promotion", async ({
+  testPage,
+  desktopTestPage,
+  apiClient,
+  seedData,
+}) => {
+  await expectLatePromotionAfterRemoval(testPage, desktopTestPage, apiClient, seedData, true);
+  await testPage.screenshot({ path: test.info().outputPath("phone-late-session-promotion.png") });
 });

@@ -193,6 +193,7 @@ cd "$VERIFY"
 (cd apps/web && pnpm exec vitest run \
   lib/ws/handlers/task-primary-focus.test.ts \
   lib/ws/handlers/task-primary-lifecycle.test.ts \
+  lib/ws/handlers/task-primary-continuation.test.ts \
   lib/ws/handlers/task-primary-removal-admission.test.ts \
   lib/ws/handlers/tasks.deleted.test.ts \
   lib/ws/handlers/agent-session.test.ts \
@@ -1076,3 +1077,108 @@ pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
   passed. Only a scope doc-comment changed after the final unit/type run; no
   functional code changed. Historical-incident, backend-artifact, broad-suite
   and list-convergence limitations above remain in force.
+
+### Production-fix review round 8 remediation
+
+Accepted source-derived schedules preserve .6/.8/.9/.11 and explicit workflow focus:
+
+- Retirement clears only the deleted selection/pin, not an independent newer
+  workflow move. A request whose own destination is retired is cancelled.
+- A still-owned deleted view can become an empty selection slot. A genuinely
+  changed primary then re-proves membership before filling it; navigation,
+  pins, restart and explicit workflow ownership still supersede the continuation.
+  No later promotion means the slot remains empty, without polling.
+- A trusted, task-matched removal notification immediately invalidates older
+  membership proof and excludes that ID from automatic candidate publication.
+  Final UUID retirement still requires complete scoped absence, not an error.
+- Unknown projected recipients retain the original predecessor authority until
+  real scoped admission proves their current ownership/eligibility. A newer
+  predecessor state or user intent invalidates that authority.
+- Rank eligible recipients by parsed `started_at`, with a deterministic ID tie,
+  rather than HTTP/event insertion direction. Preserve both load orders.
+
+Owners: primary-focus controller, its session-selection policy, and existing
+workflow/cursor/retirement boundaries. No new endpoint, wire field, persistence,
+unread predicate, cursor writer, layout or touch composition. Unit owner:
+`lib/ws/handlers/task-primary-continuation.test.ts` using real handlers/store
+and deferred external reads. Seven original cases failed before the fixes; the
+five-file owner/control run then passed 140 tests. Desktop/phone removal tests
+also hold real successor notifications and expose a controlled zero-primary HTTP
+snapshot before releasing the unchanged promotion frame. This models the valid
+commit-before-promotion interval without changing page state. The retained
+pre-R08 frontend failed the phone case after release: the conversation stayed
+empty instead of selecting the proven survivor (`r8-empty-slot-red.log`).
+Run full affected checks and fresh-frontend E2Es below; retain R02 backend/plugin
+provenance and one worker/retries 0. No SQL timing or live NATS claim.
+
+R08 verification commands (same cache snapshot/environment; no source build):
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run lib/ws/handlers lib/state/slices/session \
+  lib/state/hydration lib/ssr/session-page src/task-detail-route \
+  hooks/use-task-sessions hooks/use-task-removal \
+  hooks/domains/session/use-session-actions \
+  hooks/domains/session/use-workspace-restoration.test.ts \
+  lib/state/task-session-reads.test.ts lib/state/shared-resource-reads.test.ts \
+  lib/state/workflow-session-focus.test.ts lib/task-agent-error.test.ts \
+  components/task/chat/use-session-read-tracking.test.ts \
+  components/task/task-unread-dot-visibility.test.ts lib/session-unread-divider.test.ts
+pnpm run typecheck
+pnpm run build:e2e
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  tests/session/session-primary-removal.spec.ts tests/task/task-unread-dot.spec.ts \
+  tests/session/session-tab-management.spec.ts tests/session/session-handoff.spec.ts \
+  tests/session/multi-session-ux.spec.ts tests/session/session-recovery.spec.ts \
+  -- --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+The existing public recovery guidance (`docs/public/operations.md`) already
+promises the failed transcript stays displayed. R08 repairs its selection and
+retirement boundaries without a new user action or public interface; the owning
+design and this work order record the internal changes.
+
+R08 retained author evidence in `~/.cache/tmp/unread-verification.zWhGjx`:
+
+- `r8-red.log`: original owner/control run, 7 behavioral failures / 8 passes.
+  `r8-owner.log`: 5 files / 140 passed after repair.
+- `r8-unit-final.log`: 155 affected files / 1644 passed. Typecheck then rejected
+  a test-only `started_at` on a lifecycle payload. The ranking fixture now uses
+  the real event-admission action instead of inventing a wire field; its final
+  16 cases passed (`r8-final-continuation.log`). Production code did not change.
+- `r8-typecheck-final.log`, `r8-build.log`: typecheck with the recorded 8 GiB heap
+  and fresh E2E frontend build passed. `r8-green-bundle.txt` records asset hashes.
+  Configured changed-file lint and formatting passed.
+- `r8-desktop.log`: 36 existing desktop cases passed. The new pre-release
+  assertion initially imposed a blank desktop surface. Dockview may expose an
+  existing tab without app selection: `setupSessionTabSync` rejects activations
+  without user intent. Preserve that layout contract. Require the empty surface
+  on phone; desktop checks the final proven successor/transcript/no-reload
+  outcome. Real-handler tests separately verify selected-ID ownership throughout.
+- `r8-i18n.log`, `r8-sleeps.log`, `r8-architecture.log`, `r8-docs.log`:
+  i18n ratchet, causal-wait policy, architecture, docs catalog, 36 spec-linter
+  tests and all-spec lint passed.
+
+No broad backend/web suite or live NATS certification is added. The frontend is
+fresh; backend/plugin artifacts retain the earlier R02 provenance. HTTP absence
+proof is convergence evidence, not isolated cursor-event delivery. The historical
+incident attribution and seeded-RUNNING/live-execution distinction remain unchanged.
+
+Final viewport receipts: `r8-desktop-continuation.log` passed the corrected new
+desktop case (1/1); `r8-phone.log` passed the complete phone file (5/5).
+Both used one worker, retries 0 and the same fresh R08 frontend. The desktop
+37-case run is not relabelled fully green: retain its 36 passes plus the separate
+corrected-case replay. Exact replay:
+
+```bash
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  tests/session/session-primary-removal.spec.ts \
+  -- --workers=1 --retries=0 --grep 'fills a retired session slot'
+```
+
+Inspected the preserved phone images in `r8-phone-artifacts`: failed-resume cause
+and recovery controls remain visible; last-session removal leaves no deleted
+conversation; delayed promotion shows the surviving stored conversation without
+reload. The controlled empty window is phone-only; no new desktop layout policy.

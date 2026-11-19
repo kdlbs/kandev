@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { watchWs } from "../../helpers/causal-waits";
-import { expectLastStoppedSessionRemoval } from "../../helpers/session-removal";
+import {
+  expectLastStoppedSessionRemoval,
+  expectLatePromotionAfterRemoval,
+} from "../../helpers/session-removal";
 import {
   cleanupFailingResumeTask,
   seedFailingResumeTask,
@@ -131,4 +134,14 @@ test("retires the last stopped session deleted from another client without reloa
   seedData,
 }) => {
   await expectLastStoppedSessionRemoval(testPage, desktopTestPage, apiClient, seedData);
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.11
+test("fills a retired session slot after the later primary promotion", async ({
+  testPage,
+  desktopTestPage,
+  apiClient,
+  seedData,
+}) => {
+  await expectLatePromotionAfterRemoval(testPage, desktopTestPage, apiClient, seedData);
 });

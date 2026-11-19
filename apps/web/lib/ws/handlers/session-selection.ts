@@ -1,6 +1,7 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
-import type { TaskSessionState } from "@/lib/types/http";
+import type { TaskSession, TaskSessionState } from "@/lib/types/http";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 
 const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
   "COMPLETED",
@@ -12,15 +13,52 @@ export function isTerminalSessionState(state: TaskSessionState | undefined): boo
   return !!state && TERMINAL_SESSION_STATES.has(state);
 }
 
+export function isEligibleReplacementSession(
+  row: TaskSession | undefined,
+  taskId: string,
+  excluded?: ReadonlySet<string>,
+): row is TaskSession {
+  return (
+    !!row &&
+    row.task_id === taskId &&
+    !!row.state &&
+    !isTerminalSessionState(row.state) &&
+    !excluded?.has(row.id)
+  );
+}
+
+function isNewerSession(
+  id: string,
+  time: bigint | null,
+  newestId: string | undefined,
+  newestTime: bigint | null,
+): boolean {
+  return (
+    !newestId ||
+    (time !== null && (newestTime === null || time > newestTime)) ||
+    (time === newestTime && id < newestId)
+  );
+}
+
 /** Newest currently eligible same-task lifecycle recipient. */
-export function pickReplacementSessionId(state: AppState, taskId: string): string | null {
+export function pickReplacementSessionId(
+  state: AppState,
+  taskId: string,
+  excluded?: ReadonlySet<string>,
+): string | null {
   const sessions = state.taskSessionsByTask?.itemsByTaskId[taskId];
-  if (!sessions) return null;
-  for (let i = sessions.length - 1; i >= 0; i -= 1) {
-    const row = state.taskSessions?.items[sessions[i].id] ?? sessions[i];
-    if (row.task_id === taskId && row.state && !isTerminalSessionState(row.state)) return row.id;
+  let newest: TaskSession | undefined;
+  let newestTime: bigint | null = null;
+  for (const candidate of sessions ?? []) {
+    const row = state.taskSessions?.items[candidate.id] ?? candidate;
+    if (!isEligibleReplacementSession(row, taskId, excluded)) continue;
+    const time = parseTurnTimestamp(row.started_at);
+    if (isNewerSession(row.id, time, newest?.id, newestTime)) {
+      newest = row;
+      newestTime = time;
+    }
   }
-  return null;
+  return newest?.id ?? null;
 }
 
 function findSessionForTask(state: AppState, taskId: string, sessionId: string) {

@@ -1,6 +1,6 @@
 ---
 created: 2026-11-16
-status: implemented
+status: done
 requirements:
   - REQ-TASKS-TASK-UNREAD-DOT-001
 system_design:
@@ -547,5 +547,14 @@ fix. It is separate from the five design-only rounds above.
   is implemented: 1628 focused tests, desktop 36 and phone 4 passed. Task 02
   records exact checks, assertion-mutation proof and runtime limits. The
   production review loop remains open.
-- Completed rounds: 7. Consecutive clean: 0. The stop condition is three
+- Round 8: Sol child `fd1d93e3-0a92-403e-b79e-d090dcb649b4` reviewed
+  `3275ffafc4`. Four P2s and one P3 accepted: preserve independent workflow
+  intent; continue an owned empty slot after promotion; exclude observed remote
+  deletion before proof; reconsider an unhydrated projected recipient; rank
+  eligible recipients by actual start time. R8 remediation is implemented:
+  1644 affected tests and the final 16-case fixture run passed; 36 existing
+  desktop cases plus the corrected new-case replay and 5 phone cases passed.
+  Task 02 records intermediate failures, exact commands, captures and limits.
+  The separate production review loop remains open.
+- Completed rounds: 8. Consecutive clean: 0. The stop condition is three
   consecutive clean rounds or 50 rounds. No earlier loop counts toward it.
