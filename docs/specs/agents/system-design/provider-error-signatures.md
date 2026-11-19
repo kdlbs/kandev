@@ -1,7 +1,7 @@
 ---
 status: current
 system: agents
-updated: 2026-11-08
+updated: 2026-11-19
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
   - REQ-AGENTS-CODEX-RATE-SIGNATURE-001
@@ -23,7 +23,7 @@ the established higher-priority signals and sanitized excerpt contract.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose) |
+| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose), [Devin free-model rate limit](#devin-free-model-rate-limit) |
 | `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002` | [Opt-in unmatched diagnostic prefilter](#opt-in-unmatched-diagnostic-prefilter) |
 
 ## Components and responsibilities
@@ -236,3 +236,35 @@ This addition creates no new classification code, public field, or retry owner.
 
 The [implementation package](../../../plans/opencode-capacity-retry/plan.md)
 delivers the positive fixture, collision negatives, and reset-hint bounds.
+
+## Devin free-model rate limit
+
+`AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.13` adds
+`devin.stderr.free_model_rate_limit.v1` to the `devin-acp` entry of
+`providerRules` in `routingerr/rules.go`. Before it, `devin-acp` had no
+provider rule, so its free-plan notice fell through to the phase default
+(`agent_runtime_error`, low confidence, no fallback) and dynamic routing kept
+retrying the throttled candidate. The notice wording is:
+
+```text
+Reached free model rate limit. Upgrade to Max for higher limits, or switch to a different model. Your limit will reset in 8 minutes (at 12:01 UTC)
+```
+
+The rule uses `mustRuleOutsideMarkdownFences` with a line-anchored pattern
+and the established optional error labels, so fenced examples and quoted
+prose do not match. It maps to `CodeRateLimited` (`ClassTransient`,
+auto-retryable, fallback allowed) rather than `CodeQuotaLimited`: the window
+reopens within minutes or hours and names its own reset. The text does not
+match the shared `rate limit exceeded/reached` signature, so no other rule
+changes.
+
+`ruleUsesScopedTextReset` includes the rule, so only the matched line can
+supply a reset. When no structured hint exists, `Classify` calls
+`parseResetAtClockHintAt` for this rule and marks `ResetHintInferred`. The
+clock has no date: `resolveResetAtClock` evaluates today's and the next day's
+occurrence in the stated zone and picks the one closest to observation time
+plus the line's relative duration (`in N hours M minutes`, bounded to 24 hours
+and 59 minutes). Without a usable duration, `nextDailyResetAt`, the existing
+clock-only rule extracted from the Claude parser, picks the first occurrence
+after observation time. A hint that has just elapsed only lets routing retry
+sooner; it never parks the candidate for a day.

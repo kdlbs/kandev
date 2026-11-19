@@ -225,6 +225,13 @@ func Classify(in Input) *Error {
 			hint = parseResetClockHintAt(text, observedAt)
 			e.ResetHintInferred = hint != nil
 		}
+		if hint == nil && e.ClassifierRule == ruleDevinFreeModelRateLimit {
+			// Devin states its reset as "(at 12:01 UTC)": a clock without a
+			// date. The notice's relative duration disambiguates the day, so
+			// the hint is inferred for the occurrence closest to it.
+			hint = parseResetAtClockHintAt(text, observedAt)
+			e.ResetHintInferred = hint != nil
+		}
 		if hint != nil {
 			e.ResetHint = hint
 		}
