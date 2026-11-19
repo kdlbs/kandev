@@ -250,7 +250,7 @@ func (c *Controller) prepareNativeUpdateCheck(agentName string, spec agents.Nati
 	for attempt := 1; ; attempt++ {
 		seq := c.nextNativeObservation()
 		currentVersion := c.observedRuntimeVersion(agentName)
-		lookup, ok := c.observeNativeUpdateCheckIdentity(lifetime, agentName, currentVersion, spec)
+		lookup, ok := c.observeNativeUpdateCheckIdentity(lifetime, true, agentName, currentVersion, spec)
 		if !ok {
 			return nativeUpdateCheckLookup{
 				agentName: agentName, currentVersion: currentVersion, spec: spec, abandoned: true,
@@ -271,11 +271,16 @@ func (c *Controller) prepareNativeUpdateCheck(agentName string, spec agents.Nati
 // observeNativeUpdateCheckIdentity computes the identity off the caller's
 // goroutine so shutdown never waits on its filesystem reads, which cannot be
 // interrupted. It reports false when the lifetime closed first; the abandoned
-// observation finishes in the background and its result is discarded. Once
-// the lifetime is already closed, shutdown no longer waits for this caller,
-// so the observation runs inline.
-func (c *Controller) observeNativeUpdateCheckIdentity(lifetime *nativeCheckLifetime, agentName, currentVersion string, spec agents.NativeUpdateCheckSpec) (nativeUpdateCheckLookup, bool) {
+// observation finishes in the background and its result is discarded. With
+// inlineWhenClosed, an unadmitted pre-run caller observes inline once the
+// lifetime is closed, since shutdown no longer waits for it. An admitted
+// caller passes false: it still holds the lifetime, so it never observes
+// after close.
+func (c *Controller) observeNativeUpdateCheckIdentity(lifetime *nativeCheckLifetime, inlineWhenClosed bool, agentName, currentVersion string, spec agents.NativeUpdateCheckSpec) (nativeUpdateCheckLookup, bool) {
 	if lifetime.isClosed() {
+		if !inlineWhenClosed {
+			return nativeUpdateCheckLookup{}, false
+		}
 		return c.nativeUpdateCheckIdentity(agentName, currentVersion, spec), true
 	}
 	observed := make(chan nativeUpdateCheckLookup, 1)
@@ -458,7 +463,7 @@ func (c *Controller) executeNativeUpdateCheck(ctx context.Context, lifetime *nat
 	if entry.expiresAt.IsZero() || launched.Executable != lookup.executable || launched.RealExecutable != lookup.realExecutable {
 		return entry
 	}
-	if after, ok := c.observeNativeUpdateCheckIdentity(lifetime, lookup.agentName, lookup.currentVersion, lookup.spec); ok && after.identity == lookup.identity {
+	if after, ok := c.observeNativeUpdateCheckIdentity(lifetime, false, lookup.agentName, lookup.currentVersion, lookup.spec); ok && after.identity == lookup.identity {
 		c.storeNativeUpdateCheckEntry(lookup, entry)
 	}
 	return entry

@@ -417,11 +417,15 @@ func TestNativeCheckShutdownDoesNotWaitForBlockedObservation(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		afterRun  bool
+		shutInRun bool
 		wantState dto.AgentUpdateCheckState
 		wantRuns  int
 	}{
 		{name: "before the run", wantState: dto.AgentUpdateCheckStateUnknown, wantRuns: 0},
 		{name: "after the run", afterRun: true, wantState: dto.AgentUpdateCheckStateUpToDate, wantRuns: 1},
+		// Shutdown closes the lifetime after the CLI finished but before the
+		// revalidation starts; the revalidation must not run inline.
+		{name: "closed before revalidation", shutInRun: true, wantState: dto.AgentUpdateCheckStateUpToDate, wantRuns: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
@@ -437,9 +441,15 @@ func TestNativeCheckShutdownDoesNotWaitForBlockedObservation(t *testing.T) {
 			}
 			parent, cancelParent := context.WithCancel(context.Background())
 			stop := h.ctrl.StartRuntimeUpdateBackground(parent, make(chan struct{}))
-			if tc.afterRun {
+			switch {
+			case tc.shutInRun:
+				h.runner.setRunHook(func() {
+					h.ctrl.currentNativeCheckLifetime().shut()
+					h.runner.setEnvironmentHook(block)
+				})
+			case tc.afterRun:
 				h.runner.setRunHook(func() { h.runner.setEnvironmentHook(block) })
-			} else {
+			default:
 				h.runner.setEnvironmentHook(block)
 			}
 			result := make(chan dto.AgentUpdateStatusDTO, 1)
@@ -451,8 +461,11 @@ func TestNativeCheckShutdownDoesNotWaitForBlockedObservation(t *testing.T) {
 				}
 				result <- dto.AgentUpdateStatusDTO{}
 			}()
-			<-entered
-			cancelParent()
+			defer cancelParent()
+			if !tc.shutInRun {
+				<-entered
+				cancelParent()
+			}
 			select {
 			case status := <-result:
 				if status.CheckState != tc.wantState {
