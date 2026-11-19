@@ -213,7 +213,11 @@ func applySidebarWorkspacePatch(settings *models.UserSettings, req *UpdateUserSe
 	}
 	state := normalizeSidebarWorkspace(settings.SidebarViewsByWorkspace[patch.WorkspaceID])
 	temporary := &models.UserSettings{SidebarViews: state.Views, SidebarActiveViewID: state.ActiveViewID, SidebarDraft: state.Draft}
-	if err := applySidebarViews(temporary, &UpdateUserSettingsRequest{SidebarViews: patch.Views}); err != nil {
+	views, err := mergeSidebarWorkspaceViews(state.Views, patch)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrValidation, err)
+	}
+	if err := applySidebarViews(temporary, &UpdateUserSettingsRequest{SidebarViews: views}); err != nil {
 		return fmt.Errorf("%w: %s", ErrValidation, err)
 	}
 	state = normalizeSidebarWorkspace(models.SidebarWorkspaceState{Views: temporary.SidebarViews, ActiveViewID: temporary.SidebarActiveViewID, Draft: temporary.SidebarDraft})
