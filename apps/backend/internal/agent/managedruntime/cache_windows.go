@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/kandev/kandev/internal/system/winpath"
+	"github.com/kandev/kandev/internal/common/winpath"
 )
 
 // Windows uses native handles rooted at the cache. Absolute paths are opened

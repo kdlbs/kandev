@@ -228,7 +228,7 @@ Implementation is complete in the
 
 The pinned-directory boundary (`storageworkspaces.OpenDirectoryNoFollow`,
 `CreateDirectoryNoFollow`, and `RemoveDirectoryNoFollow`) opens absolute paths
-through `internal/system/winpath`, which implements
+through `internal/common/winpath`, which implements
 `AC-TASKS-WORKTREE-METADATA-RECOVERY-002.10`. A single `NtCreateFile` of the
 whole NT path (`\??\C:\...`) with `OBJ_DONT_REPARSE` cannot work: `\??\C:` is an
 object-manager symbolic link to the volume device, so the open fails with
@@ -246,9 +246,9 @@ with traverse and attribute access only; the final component keeps the caller's
 access, so the existing sharing contract for DELETE requests is unchanged.
 Handles use synchronous I/O because they back `os.File` reads.
 
-`winpath` is a leaf package that depends only on the standard library and
-`golang.org/x/sys/windows`; the storage workspace boundary and the managed npm
-cache repair share it.
+`internal/common/winpath` is the shared leaf package for the storage workspace
+boundary and managed npm cache repair. Its path parser is platform independent;
+its native handle operations are Windows-only.
 
 ## Multiple repositories
 

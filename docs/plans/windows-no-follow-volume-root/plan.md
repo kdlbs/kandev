@@ -29,14 +29,14 @@ below it without following links, as defined by
 
 ## Scope
 
-In scope: a shared `internal/system/winpath` leaf package; the storage
+In scope: a shared `internal/common/winpath` leaf package; the storage
 workspace no-follow open, create, and remove paths; the managed runtime cache
 root, execution-tree inventory, and repair-lock configuration opens; Windows
 tests with junctions, which need no symbolic-link privilege; and a Git shim
 that Windows can resolve in the main-checkout inspection tests, which this fix
 lets reach Git inspection for the first time.
 
-Out of scope: non-Windows behavior, the share-mode contract for DELETE opens,
+Out of scope: non-Windows filesystem operations, the share-mode contract for DELETE opens,
 Git shims in the branch-cleanup interruption tests, and any change to what
 admission accepts.
 
@@ -49,11 +49,12 @@ Windows verification boundary.
 
 ## Verification strategy
 
-Windows unit tests in `internal/system/storage/workspaces` and
-`internal/agent/managedruntime`, plus the existing worktree and inventory
-repair packages that consume the boundary. Junction tests prove that a link
-at, above, or below the task root is still refused. The code is
-`//go:build windows`; `GOOS=linux go vet` keeps the stub buildable elsewhere.
+The untagged Windows path parser is tested on every platform. The Windows
+test allowlist includes `internal/common/winpath`; tests in
+`internal/system/storage/workspaces` and `internal/agent/managedruntime`
+exercise the native handle boundary, plus the existing worktree and inventory
+repair packages that consume it. Junction tests prove that a link at, above,
+or below the task root is still refused.
 
 ## Risks
 

@@ -1,14 +1,9 @@
 //go:build windows
 
-// Package winpath opens Windows filesystem paths without following reparse
-// points. It is a leaf package: it must only depend on the standard library
-// and golang.org/x/sys/windows so both the storage workspace cleanup and the
-// managed runtime cache can share it without creating import cycles.
 package winpath
 
 import (
 	"errors"
-	"fmt"
 	"path/filepath"
 	"strings"
 	"unsafe"
@@ -48,6 +43,16 @@ const openOptions uint32 = windows.FILE_OPEN_REPARSE_POINT | windows.FILE_SYNCHR
 // its parent without following links, and each handle is checked for a reparse
 // point before it is used as a parent.
 func OpenDirectoryPath(path string, desiredAccess uint32) (windows.Handle, error) {
+	return OpenDirectoryPathWithDisposition(path, desiredAccess, windows.FILE_OPEN)
+}
+
+// OpenDirectoryPathWithDisposition opens an absolute directory path with an
+// explicit disposition for each component below its volume root.
+func OpenDirectoryPathWithDisposition(
+	path string,
+	desiredAccess uint32,
+	disposition uint32,
+) (windows.Handle, error) {
 	root, parts, err := PathParts(path)
 	if err != nil {
 		return 0, err
@@ -67,7 +72,7 @@ func OpenDirectoryPath(path string, desiredAccess uint32) (windows.Handle, error
 		if index == len(parts)-1 {
 			access = desiredAccess
 		}
-		next, openErr := OpenDirectoryRelative(handle, part, access)
+		next, openErr := OpenHandleWithDisposition(handle, part, access, disposition, windows.FILE_DIRECTORY_FILE)
 		_ = windows.CloseHandle(handle)
 		if openErr != nil {
 			return 0, openErr
@@ -80,15 +85,8 @@ func OpenDirectoryPath(path string, desiredAccess uint32) (windows.Handle, error
 	return handle, nil
 }
 
-// OpenVolumeRoot opens the volume or share root named by root ("C:\",
-// "\\server\share\"). The NT path starts in the object-manager namespace, where
-// "\??\C:" is itself a symbolic link to the volume device, so OBJ_DONT_REPARSE
-// would reject the system link with STATUS_REPARSE_POINT_ENCOUNTERED before any
-// filesystem component is reached. This is the only open that relaxes the
-// no-reparse attributes: every component below the root is opened relative to
-// this handle with OBJ_DONT_REPARSE and FILE_OPEN_REPARSE_POINT and is rejected
-// when it is a filesystem reparse point, so a user-controlled link cannot
-// redirect the walk.
+// OpenVolumeRoot opens a volume or share root. Callers must open each
+// user-controlled component relative to this handle and reject reparse points.
 func OpenVolumeRoot(root string, desiredAccess uint32) (windows.Handle, error) {
 	return createFile(
 		0,
@@ -190,7 +188,7 @@ func OpenTarget(rootHandle windows.Handle, relative string, targetAccess uint32)
 			if parent != rootHandle {
 				_ = windows.CloseHandle(parent)
 			}
-			return 0, 0, fmt.Errorf("dependency path is a reparse point")
+			return 0, 0, errors.New("path is a reparse point")
 		}
 		if index == len(parts)-1 {
 			return parent, next, nil
@@ -200,27 +198,7 @@ func OpenTarget(rootHandle windows.Handle, relative string, targetAccess uint32)
 		}
 		parent = next
 	}
-	return 0, 0, fmt.Errorf("dependency target is empty")
-}
-
-// PathParts splits an absolute path into its volume root and the components
-// below it.
-func PathParts(path string) (string, []string, error) {
-	if !filepath.IsAbs(path) {
-		return "", nil, fmt.Errorf("dependency workspace root must be absolute")
-	}
-	clean := filepath.Clean(path)
-	volume := filepath.VolumeName(clean)
-	if volume == "" {
-		return "", nil, fmt.Errorf("dependency workspace root has no volume")
-	}
-	remainder := strings.TrimPrefix(clean, volume)
-	remainder = strings.TrimLeft(remainder, `\`+`/`)
-	root := volume + `\`
-	if remainder == "" {
-		return root, nil, nil
-	}
-	return root, strings.FieldsFunc(remainder, func(r rune) bool { return r == '\\' || r == '/' }), nil
+	return 0, 0, errors.New("relative path is empty")
 }
 
 // HandleIsReparsePoint reports whether the opened handle names a reparse point.
@@ -242,7 +220,7 @@ func RejectReparse(handle windows.Handle) (windows.Handle, error) {
 	}
 	if reparse {
 		_ = windows.CloseHandle(handle)
-		return 0, fmt.Errorf("dependency path is a reparse point")
+		return 0, errors.New("path is a reparse point")
 	}
 	return handle, nil
 }
@@ -272,19 +250,6 @@ func MarkForDelete(handle windows.Handle) error {
 		(*byte)(unsafe.Pointer(&info)),
 		uint32(unsafe.Sizeof(info)),
 	)
-}
-
-// NTPath converts a Win32 path to the NT object-manager path used for the
-// volume-root open.
-func NTPath(path string) string {
-	clean := filepath.Clean(path)
-	if strings.HasPrefix(clean, `\\?\`) {
-		return `\??\` + strings.TrimPrefix(clean, `\\?\`)
-	}
-	if strings.HasPrefix(clean, `\\`) {
-		return `\??\UNC\` + strings.TrimPrefix(clean, `\\`)
-	}
-	return `\??\` + clean
 }
 
 // createFile issues the native open with explicit object attributes and open

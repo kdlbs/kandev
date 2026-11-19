@@ -26,13 +26,15 @@ root.
 
 ## In scope
 
-- `internal/system/winpath` (new, Windows implementation plus a non-Windows
-  stub): `OpenDirectoryPath`, `OpenVolumeRoot`, relative opens with explicit
-  disposition and sharing, `OpenTarget`, `PathParts`, reparse checks, handle
-  duplication, and delete marking.
-- `internal/system/storage/workspaces`: the dependency cleanup and directory
-  handle helpers delegate to `winpath`; `openOrCreateWindowsDependencyDirectoryPath`
-  walks from the volume root; ancestors use traverse access.
+- `internal/common/winpath` (shared path parsing and Windows native opens):
+  `PathParts` and `NTPath` use explicit Windows rules and are tested on every
+  platform. Windows builds provide `OpenDirectoryPath`,
+  `OpenDirectoryPathWithDisposition`, `OpenVolumeRoot`, relative opens with
+  explicit disposition and sharing, `OpenTarget`, reparse
+  checks, handle duplication, and delete marking.
+- `internal/system/storage/workspaces`: cleanup and directory-handle code call
+  `winpath` directly. Creation uses the shared disposition-aware path walk;
+  ancestors use traverse access.
 - `internal/agent/managedruntime`: the cache root, inventory, and repair-lock
   configuration file open through `winpath`.
 - Windows tests for plain directories, nested creation, junctions as a path
@@ -46,17 +48,21 @@ root.
 
 ## Out of scope
 
-- Non-Windows code paths and the DELETE share-mode contract.
+- Non-Windows filesystem operations and the DELETE share-mode contract.
 - Git shims in `branch_cleanup_interruption_test.go`.
 
 ## Acceptance
 
 1. `OpenDirectoryNoFollow`, `CreateDirectoryNoFollow`, and the managed runtime
    cache root open ordinary directories below a drive letter.
-2. A junction at any component below the volume root, including an ancestor of
+2. `PathParts` returns the complete server and share as the root for ordinary
+   and extended UNC paths, so native opens start at the share root.
+3. A junction at any component below the volume root, including an ancestor of
    the task root, makes open, create, and remove fail before they touch the
    junction target.
-3. The packages that consume the boundary (`internal/worktree`,
+4. Managed npm cache validation refuses drive and share roots before file access
+   and accepts an ordinary cache directory.
+5. The packages that consume the boundary (`internal/worktree`,
    `internal/task/inventoryrepair`) pass on Windows without new failures.
 
 ## Verification
@@ -64,24 +70,27 @@ root.
 ```bash
 # from the repository root, on Windows
 (cd apps/backend && go test -trimpath -tags fts5 -count=1 \
-  ./internal/system/winpath/ ./internal/system/storage/workspaces/ \
+  ./internal/common/winpath/ ./internal/system/storage/workspaces/ \
   ./internal/agent/managedruntime/ ./internal/worktree/ ./internal/task/inventoryrepair/)
-(cd apps/backend && GOOS=linux CGO_ENABLED=0 go vet ./internal/system/winpath/ \
+(cd apps/backend && GOOS=linux CGO_ENABLED=0 go vet ./internal/common/winpath/ \
   ./internal/system/storage/workspaces/ ./internal/agent/managedruntime/)
 bash scripts/lint-go-changed $(git diff --name-only origin/main -- 'apps/backend/*.go')
 ```
 
 ## Likely files
 
-- `apps/backend/internal/system/winpath/winpath_windows.go` (new)
-- `apps/backend/internal/system/winpath/winpath_other.go` (new)
+- `apps/backend/internal/common/winpath/path.go` (new)
+- `apps/backend/internal/common/winpath/path_test.go` (new)
+- `apps/backend/internal/common/winpath/winpath_windows.go` (moved)
 - `apps/backend/internal/system/storage/workspaces/dependency_cleanup_windows.go`
 - `apps/backend/internal/system/storage/workspaces/directory_handle_windows.go`
 - `apps/backend/internal/system/storage/workspaces/directory_handle_windows_test.go`
 - `apps/backend/internal/agent/managedruntime/cache_windows.go`
 - `apps/backend/internal/agent/managedruntime/repair_lock_windows.go`
 - `apps/backend/internal/agent/managedruntime/cache_windows_test.go`
+- `apps/backend/internal/agent/managedruntime/cache_test.go` (volume-root cases)
 - `apps/backend/internal/worktree/checkout_inspection_test.go`
+- `.github/workflows/backend-tests.yml` (Windows package allowlist)
 
 ## Results
 
@@ -105,3 +114,27 @@ Measured on Windows 10 22H2 (build 19045) with `go test -trimpath -tags fts5
 - The Windows CI job runs `./internal/system/storage/workspaces/...`; this
   host reproduces the open failure that those tests would hit wherever the
   object manager rejects `\??\C:` under `OBJ_DONT_REPARSE`.
+
+### Maintainer follow-up
+
+- From `apps/backend`, `go test ./internal/common/winpath ./internal/agent/managedruntime ./internal/system/storage/workspaces` passes on Linux.
+- `GOOS=windows GOARCH=amd64 go test -c -o /tmp/kandev-winpath.test.exe ./internal/common/winpath` passes.
+- `GOOS=windows GOARCH=amd64 go test -c -o /tmp/kandev-managedruntime.test.exe ./internal/agent/managedruntime` passes.
+- `GOOS=windows GOARCH=amd64 go test -c -o /tmp/kandev-workspaces.test.exe ./internal/system/storage/workspaces` passes.
+- This changed-file Go lint command reports `0 issues`:
+
+  ```bash
+  bash scripts/lint-go-changed \
+    apps/backend/internal/agent/managedruntime/cache.go \
+    apps/backend/internal/agent/managedruntime/cache_test.go \
+    apps/backend/internal/agent/managedruntime/cache_windows.go \
+    apps/backend/internal/agent/managedruntime/repair_lock_windows.go \
+    apps/backend/internal/common/winpath/path.go \
+    apps/backend/internal/common/winpath/path_test.go \
+    apps/backend/internal/common/winpath/winpath_windows.go \
+    apps/backend/internal/system/storage/workspaces/dependency_cleanup_windows.go \
+    apps/backend/internal/system/storage/workspaces/directory_handle_windows.go \
+    apps/backend/internal/system/storage/workspaces/directory_handle_windows_test.go
+  ```
+- `python3 scripts/list-docs.py validate` passes.
+- `python3 scripts/lint-spec-files.py --all` passes.

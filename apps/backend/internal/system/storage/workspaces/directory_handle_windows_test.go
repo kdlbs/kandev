@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/kandev/kandev/internal/common/winpath"
 )
 
 // createWindowsJunction links a directory through an NTFS junction. Unlike a
@@ -297,7 +299,7 @@ func TestOpenDirectoryNoFollowSucceedsWithShareIncompatibleHolder(t *testing.T) 
 
 	// Guard the root cause: requesting DELETE against such a holder is exactly
 	// what used to fail resume, so validation must not request it.
-	deleteHandle, err := openWindowsDependencyDirectoryPath(worktree, windowsDependencyDeleteAccess)
+	deleteHandle, err := winpath.OpenDirectoryPath(worktree, windowsDependencyDeleteAccess)
 	if err == nil {
 		_ = windows.CloseHandle(deleteHandle)
 		t.Fatal("expected a DELETE-access open to fail against a share-incompatible holder")

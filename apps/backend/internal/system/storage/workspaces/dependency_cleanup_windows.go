@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/kandev/kandev/internal/system/winpath"
+	"github.com/kandev/kandev/internal/common/winpath"
 )
 
 const (
@@ -29,10 +29,6 @@ const (
 	// Creation writes new components and the ownership marker; it never needs to
 	// delete the already-existing managed root.
 	windowsDependencyWriteAccess uint32 = winpath.WriteAccess
-	// Ancestors of the target are only traversed and attribute-checked. Asking
-	// for generic read would additionally require FILE_LIST_DIRECTORY, which a
-	// share or folder may deny even when traversal is allowed.
-	windowsDependencyTraverseAccess uint32 = winpath.TraverseAccess
 )
 
 // RemoveDirectoryNoFollow opens every path component without following links and
@@ -60,13 +56,13 @@ func removeDependencyDirectoryWithHook(
 	if err != nil {
 		return err
 	}
-	rootHandle, err := openWindowsDependencyDirectoryPath(root, windowsDependencyReadAccess)
+	rootHandle, err := winpath.OpenDirectoryPath(root, windowsDependencyReadAccess)
 	if err != nil {
 		return fmt.Errorf("open dependency workspace root: %w", err)
 	}
 	defer windows.CloseHandle(rootHandle)
 
-	parentHandle, targetHandle, err := openWindowsDependencyTarget(rootHandle, relative, windowsDependencyDeleteAccess)
+	parentHandle, targetHandle, err := winpath.OpenTarget(rootHandle, relative, windowsDependencyDeleteAccess)
 	if err != nil {
 		return err
 	}
@@ -83,7 +79,7 @@ func removeDependencyDirectoryWithHook(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return markWindowsDependencyForDelete(targetHandle)
+	return winpath.MarkForDelete(targetHandle)
 }
 
 func dependencyRelativePath(root, target string) (string, error) {
@@ -107,70 +103,8 @@ func dependencyRelativePath(root, target string) (string, error) {
 	return relative, nil
 }
 
-func openWindowsDependencyDirectoryPath(path string, desiredAccess uint32) (windows.Handle, error) {
-	return winpath.OpenDirectoryPath(path, desiredAccess)
-}
-
-func openWindowsDependencyVolumeRoot(root string, desiredAccess uint32) (windows.Handle, error) {
-	return winpath.OpenVolumeRoot(root, desiredAccess)
-}
-
-func openWindowsDependencyDirectoryRelative(parent windows.Handle, name string, desiredAccess uint32) (windows.Handle, error) {
-	return winpath.OpenDirectoryRelative(parent, name, desiredAccess)
-}
-
-func openWindowsDependencyEntryRelative(parent windows.Handle, name string, desiredAccess uint32) (windows.Handle, error) {
-	return winpath.OpenEntryRelative(parent, name, desiredAccess)
-}
-
-func openWindowsDependencyHandle(
-	parent windows.Handle,
-	name string,
-	desiredAccess uint32,
-	createOption uint32,
-) (windows.Handle, error) {
-	return winpath.OpenHandle(parent, name, desiredAccess, createOption)
-}
-
-func openWindowsDependencyHandleWithDisposition(
-	parent windows.Handle,
-	name string,
-	desiredAccess uint32,
-	disposition uint32,
-	createOption uint32,
-) (windows.Handle, error) {
-	return winpath.OpenHandleWithDisposition(parent, name, desiredAccess, disposition, createOption)
-}
-
-func openWindowsDependencyHandleWithSharing(
-	parent windows.Handle,
-	name string,
-	desiredAccess uint32,
-	disposition uint32,
-	createOption uint32,
-	shareMode uint32,
-) (windows.Handle, error) {
-	return winpath.OpenHandleWithSharing(parent, name, desiredAccess, disposition, createOption, shareMode)
-}
-
-func openWindowsDependencyTarget(rootHandle windows.Handle, relative string, targetAccess uint32) (parent, target windows.Handle, err error) {
-	return winpath.OpenTarget(rootHandle, relative, targetAccess)
-}
-
-func windowsDependencyPathParts(path string) (string, []string, error) {
-	return winpath.PathParts(path)
-}
-
-func rejectWindowsDependencyReparse(handle windows.Handle) (windows.Handle, error) {
-	return winpath.RejectReparse(handle)
-}
-
-func windowsDependencyHandleIsReparsePoint(handle windows.Handle) (bool, error) {
-	return winpath.HandleIsReparsePoint(handle)
-}
-
 func removeWindowsDependencyContents(ctx context.Context, dirHandle windows.Handle) error {
-	readHandle, err := duplicateWindowsDependencyHandle(dirHandle)
+	readHandle, err := winpath.DuplicateHandle(dirHandle)
 	if err != nil {
 		return err
 	}
@@ -188,9 +122,9 @@ func removeWindowsDependencyContents(ctx context.Context, dirHandle windows.Hand
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		child, dirErr := openWindowsDependencyDirectoryRelative(dirHandle, name, windowsDependencyDeleteAccess)
+		child, dirErr := winpath.OpenDirectoryRelative(dirHandle, name, windowsDependencyDeleteAccess)
 		if dirErr == nil {
-			reparse, checkErr := windowsDependencyHandleIsReparsePoint(child)
+			reparse, checkErr := winpath.HandleIsReparsePoint(child)
 			if checkErr != nil {
 				_ = windows.CloseHandle(child)
 				return checkErr
@@ -203,18 +137,18 @@ func removeWindowsDependencyContents(ctx context.Context, dirHandle windows.Hand
 				_ = windows.CloseHandle(child)
 				return err
 			}
-			err := markWindowsDependencyForDelete(child)
+			err := winpath.MarkForDelete(child)
 			_ = windows.CloseHandle(child)
 			if err != nil {
 				return err
 			}
 			continue
 		}
-		file, fileErr := openWindowsDependencyEntryRelative(dirHandle, name, windowsDependencyDeleteAccess)
+		file, fileErr := winpath.OpenEntryRelative(dirHandle, name, windowsDependencyDeleteAccess)
 		if fileErr != nil {
 			return fmt.Errorf("open dependency entry %s: %w", name, fileErr)
 		}
-		reparse, checkErr := windowsDependencyHandleIsReparsePoint(file)
+		reparse, checkErr := winpath.HandleIsReparsePoint(file)
 		if checkErr != nil {
 			_ = windows.CloseHandle(file)
 			return checkErr
@@ -223,19 +157,11 @@ func removeWindowsDependencyContents(ctx context.Context, dirHandle windows.Hand
 			_ = windows.CloseHandle(file)
 			continue
 		}
-		err = markWindowsDependencyForDelete(file)
+		err = winpath.MarkForDelete(file)
 		_ = windows.CloseHandle(file)
 		if err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func duplicateWindowsDependencyHandle(handle windows.Handle) (windows.Handle, error) {
-	return winpath.DuplicateHandle(handle)
-}
-
-func markWindowsDependencyForDelete(handle windows.Handle) error {
-	return winpath.MarkForDelete(handle)
 }
