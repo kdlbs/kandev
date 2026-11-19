@@ -19,14 +19,16 @@ func TestTruncateContextCutsAndMarks(t *testing.T) {
 
 	got := truncateContext(value, 100)
 
-	if !strings.HasPrefix(got, strings.Repeat("a", 100)) {
-		t.Fatalf("truncated value does not keep the leading 100 bytes: %q", got)
+	if len(got) > 100 {
+		t.Fatalf("truncated value is %d bytes, cap is 100", len(got))
 	}
-	if !strings.Contains(got, "[... truncated 20 bytes ...]") {
-		t.Fatalf("truncated value is missing the marker: %q", got)
+	body, marker, found := strings.Cut(got, "\n[... truncated")
+	if !found || !strings.HasPrefix(value, body) {
+		t.Fatalf("truncated value does not keep a marked prefix: %q", got)
 	}
-	if len(got) <= 100 {
-		t.Fatalf("truncated value = %d bytes, want more than the cap for the marker", len(got))
+	wantMarker := fmt.Sprintf(" %d bytes ...]", len(value)-len(body))
+	if !strings.HasPrefix(marker, wantMarker) {
+		t.Fatalf("marker = %q, want omitted byte count %q", marker, wantMarker)
 	}
 }
 
@@ -44,11 +46,15 @@ func TestTruncateContextKeepsUTF8Valid(t *testing.T) {
 	if !found {
 		t.Fatalf("truncated value is missing the marker: %q", got)
 	}
-	if utf8.RuneCountInString(body) != 50 {
-		t.Fatalf("kept %d runes, want 50 whole runes", utf8.RuneCountInString(body))
+	if len(got) > 101 {
+		t.Fatalf("truncated value is %d bytes, cap is 101", len(got))
 	}
-	if !strings.HasPrefix(marker, " 20 bytes ...]") {
-		t.Fatalf("marker = %q, want the 20 dropped bytes (10 runes)", marker)
+	wantMarker := fmt.Sprintf(" %d bytes ...]", len(value)-len(body))
+	if !strings.HasPrefix(marker, wantMarker) {
+		t.Fatalf("marker = %q, want omitted byte count %q", marker, wantMarker)
+	}
+	if !strings.HasPrefix(value, body) {
+		t.Fatalf("retained text is not a prefix of the input: %q", body)
 	}
 }
 
@@ -112,8 +118,18 @@ func TestTruncateConversationHistoryKeepsNewestMessagesInOrder(t *testing.T) {
 	if lateAt < 0 || latestAt <= lateAt {
 		t.Fatalf("newest messages were not retained in chronological order: %q", got[len(got)-100:])
 	}
-	body := got[strings.IndexByte(got, '\n')+1:]
-	if len(body) > MaxConversationHistoryBytes {
-		t.Fatalf("retained history is %d bytes, cap is %d", len(body), MaxConversationHistoryBytes)
+	if len(got) > MaxConversationHistoryBytes {
+		t.Fatalf("history with marker is %d bytes, cap is %d", len(got), MaxConversationHistoryBytes)
+	}
+	markerEnd := strings.IndexByte(got, '\n')
+	var omitted int
+	if _, err := fmt.Sscanf(got[:markerEnd], "[... truncated %d bytes ...]", &omitted); err != nil {
+		t.Fatalf("parse truncation marker: %v", err)
+	}
+	if omitted < 0 || omitted > len(conversation) {
+		t.Fatalf("marker reports invalid omitted-byte count %d", omitted)
+	}
+	if conversation[omitted:] != got[markerEnd+1:] {
+		t.Fatalf("marker reports %d omitted bytes, but retained history is not the matching suffix", omitted)
 	}
 }

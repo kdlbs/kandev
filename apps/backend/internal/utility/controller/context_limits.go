@@ -22,11 +22,21 @@ func truncateContext(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	cut := max
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
+	if max <= 0 {
+		return ""
 	}
-	return s[:cut] + fmt.Sprintf(truncationMarkerFormat, len(s)-cut)
+	cut := max
+	for {
+		marker := fmt.Sprintf(truncationMarkerFormat, len(s)-cut)
+		if len(marker) > max {
+			return ""
+		}
+		next := utf8PrefixLength(s, max-len(marker))
+		if next == cut {
+			return s[:cut] + marker
+		}
+		cut = next
+	}
 }
 
 // truncateConversationHistory keeps the newest text within the history cap.
@@ -36,8 +46,32 @@ func truncateConversationHistory(s string) string {
 		return s
 	}
 	cut := len(s) - MaxConversationHistoryBytes
-	for cut < len(s) && !utf8.RuneStart(s[cut]) {
-		cut++
+	for {
+		marker := fmt.Sprintf("[... truncated %d bytes ...]", cut)
+		available := MaxConversationHistoryBytes - len(marker) - 1
+		if available < 0 {
+			return ""
+		}
+		next := len(s) - available
+		for next < len(s) && !utf8.RuneStart(s[next]) {
+			next++
+		}
+		if next == cut {
+			return marker + "\n" + s[cut:]
+		}
+		cut = next
 	}
-	return fmt.Sprintf("[... truncated %d bytes ...]\n%s", cut, s[cut:])
+}
+
+func utf8PrefixLength(s string, max int) int {
+	if max >= len(s) {
+		return len(s)
+	}
+	if max <= 0 {
+		return 0
+	}
+	for !utf8.RuneStart(s[max]) {
+		max--
+	}
+	return max
 }

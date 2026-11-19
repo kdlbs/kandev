@@ -61,9 +61,11 @@ the new template, and a call abandoned by its caller ends as `cancelled`.
 
 ```bash
 # from the repository root
+(cd apps && pnpm install --frozen-lockfile)
 (cd apps/backend && go test -trimpath -tags fts5 -count=1 ./internal/utility/...)
 (cd apps/web && pnpm exec vitest run hooks/use-utility-agent-generator.test.tsx)
 (cd apps/web && pnpm run i18n:check && pnpm run typecheck)
+(cd apps/web && pnpm e2e:run tests/chat/quick-chat.spec.ts -- --grep "keeps an edited active-session prompt and offers recovery")
 bash scripts/lint-go-changed $(git diff --name-only origin/main -- 'apps/backend/*.go')
 ```
 
@@ -103,3 +105,8 @@ bash scripts/lint-go-changed $(git diff --name-only origin/main -- 'apps/backend
   success writes finish for session-bound and sessionless calls, profile fallback
   attribution survives cancellation, and profile-only edits do not block an
   exact shipped prompt refresh. Focused Go and Vitest checks pass.
+- Fixup checks also enforce each full rendered field cap, preserve a successful
+  profile result when cancellation races with its return, and inspect the active
+  Quick Chat Enhance request in a browser test. The refresh fixture now applies
+  the profile edit before replay, and its call repository returns independent
+  snapshots so rejected writes cannot look persisted.

@@ -136,7 +136,14 @@ func TestRefreshUneditedBuiltinPromptPreservesUserEdit(t *testing.T) {
 }
 
 func TestRefreshBuiltinPromptAfterProfileOnlyUpdate(t *testing.T) {
-	repo := seedStoredEnhancePrompt(t, enhancePromptV1)
+	sqlxDB := openTestDB(t)
+	repo, err := newSQLiteRepositoryWithDB(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("initial schema init: %v", err)
+	}
+	if _, err := sqlxDB.Exec(`UPDATE utility_agents SET prompt = ? WHERE id = ?`, enhancePromptV1, enhancePromptAgentID); err != nil {
+		t.Fatalf("seed stored prompt: %v", err)
+	}
 	ctx := context.Background()
 	agent, err := repo.GetAgentByID(ctx, enhancePromptAgentID)
 	if err != nil {
@@ -153,6 +160,9 @@ func TestRefreshBuiltinPromptAfterProfileOnlyUpdate(t *testing.T) {
 	}
 	if updated.CreatedAt.Equal(updated.UpdatedAt) {
 		t.Fatal("profile-only update did not advance updated_at")
+	}
+	if updated.Prompt != enhancePromptV1 {
+		t.Fatalf("profile-only update changed the legacy prompt before replay: %q", updated.Prompt)
 	}
 
 	replayed, err := newSQLiteRepositoryWithDB(repo.db, repo.db)

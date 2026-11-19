@@ -24,16 +24,23 @@ type profilePromptCall struct {
 type profilePromptExecutor struct {
 	responses []*agentctlutil.PromptResponse
 	calls     []profilePromptCall
+	cancel    context.CancelFunc
 }
 
 type profileHostPromptExecutor struct {
 	results []*hostutility.PromptResult
 	errs    []error
+	calls   int
+	cancel  context.CancelFunc
 }
 
 func (e *profileHostPromptExecutor) ExecuteProfilePrompt(context.Context, string, string) (*hostutility.PromptResult, error) {
 	result, err := e.results[0], e.errs[0]
 	e.results, e.errs = e.results[1:], e.errs[1:]
+	e.calls++
+	if e.cancel != nil && e.calls == 2 {
+		e.cancel()
+	}
 	return result, err
 }
 
@@ -49,6 +56,9 @@ func (e *profilePromptExecutor) ExecuteInferenceProfilePrompt(_ context.Context,
 	e.calls = append(e.calls, profilePromptCall{sessionID: sessionID, profileID: profileID})
 	response := e.responses[0]
 	e.responses = e.responses[1:]
+	if e.cancel != nil && len(e.calls) == 2 {
+		e.cancel()
+	}
 	return response, nil
 }
 
@@ -116,7 +126,9 @@ func TestExecuteSessionProfilePromptKeepsFallbackAttributionAfterCancellation(t 
 		AgentProfileID: "logical", ExecutionProfileID: "first", RouteSessionID: "route-session",
 		RouteGeneration: 1, AgentCLI: "codex-acp", ResolvedPrompt: "prompt",
 	}
-	ctx := &cancelAfterContextErrors{Context: context.Background(), remaining: 4}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	executor.cancel = cancel
 
 	response, err := h.executeSessionProfilePrompt(ctx, executor, "task-session", prepared, call.ID)
 	if err != nil || response == nil || !response.Success {
@@ -124,6 +136,10 @@ func TestExecuteSessionProfilePromptKeepsFallbackAttributionAfterCancellation(t 
 	}
 	if got := repo.call(call.ID).ExecutionProfileID; got != "second" {
 		t.Fatalf("execution profile attribution = %q, want successful fallback profile second", got)
+	}
+	h.recordCompletedCall(ctx, call.ID, response.Response, response.PromptTokens, response.ResponseTokens, response.DurationMs)
+	if got := repo.call(call.ID); got == nil || got.Status != "completed" || got.CompletedAt == nil || got.ExecutionProfileID != "second" {
+		t.Fatalf("completed fallback call = %#v, want terminal success", got)
 	}
 }
 
@@ -148,7 +164,9 @@ func TestExecuteSessionlessProfilePromptKeepsFallbackAttributionAfterCancellatio
 		AgentProfileID: "logical", ExecutionProfileID: "first", RouteSessionID: "route-session",
 		RouteGeneration: 1, AgentCLI: "codex-acp", ResolvedPrompt: "prompt",
 	}
-	ctx := &cancelAfterContextErrors{Context: context.Background(), remaining: 4}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	executor.cancel = cancel
 
 	response, err := h.executeSessionlessProfilePrompt(ctx, executor, prepared, call.ID)
 	if err != nil || response == nil || response.Response != "done" {
@@ -157,19 +175,10 @@ func TestExecuteSessionlessProfilePromptKeepsFallbackAttributionAfterCancellatio
 	if got := repo.call(call.ID).ExecutionProfileID; got != "second" {
 		t.Fatalf("execution profile attribution = %q, want successful fallback profile second", got)
 	}
-}
-
-type cancelAfterContextErrors struct {
-	context.Context
-	remaining int
-}
-
-func (c *cancelAfterContextErrors) Err() error {
-	if c.remaining == 0 {
-		return context.Canceled
+	h.recordCompletedCall(ctx, call.ID, response.Response, response.PromptTokens, response.ResponseTokens, response.DurationMs)
+	if got := repo.call(call.ID); got == nil || got.Status != "completed" || got.CompletedAt == nil || got.ExecutionProfileID != "second" {
+		t.Fatalf("completed fallback call = %#v, want terminal success", got)
 	}
-	c.remaining--
-	return nil
 }
 
 func TestExecuteSessionProfilePromptDoesNotFallbackAfterPartialResponse(t *testing.T) {

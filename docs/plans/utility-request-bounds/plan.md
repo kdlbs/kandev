@@ -43,9 +43,8 @@ request path and one verification boundary.
 
 Backend unit tests for truncation, prompt refresh (shipped, dotted-placeholder,
 unknown, customized, and profile-only-updated rows), and call settlement through
-the production router; Vitest for the hook payload. No end-to-end test: the visible outcome
-is the absence of a provider rejection, which the mock agent cannot produce,
-and the call history has no UI.
+the production router; Vitest for the hook payload; and a Quick Chat browser
+check that the active-session Enhance action omits the diff from its request.
 
 ## Risks
 
