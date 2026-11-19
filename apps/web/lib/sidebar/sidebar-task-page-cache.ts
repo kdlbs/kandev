@@ -6,10 +6,8 @@ import type { AppState } from "@/lib/state/store";
 import { generateUUID } from "@/lib/utils";
 import { reconcileSidebarPage, sidebarPageMembership } from "./sidebar-page-overviews";
 import { repositoryIdentityForSavedRepository } from "./repository-rule-identity";
-import {
-  startSidebarPageRecoveryCycle,
-  type SidebarPageRecoveryCycle,
-} from "./sidebar-task-page-recovery";
+import { startSidebarPageRecoveryCycle } from "./sidebar-task-page-recovery";
+import type { ReadAttempt, RecoveryRecord } from "./sidebar-task-page-record";
 
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { usesSavedSidebarDisclosure } from "./sidebar-disclosure-query";
@@ -35,24 +33,6 @@ type PageSnapshot = {
   groupingReference: string;
   groupingIdentity: string;
 };
-type ReadAttempt = {
-  controller: AbortController;
-  owner: string;
-  readId?: string;
-  released: boolean;
-  settled: boolean;
-};
-type RecoveryRecord = {
-  cacheKey: string;
-  consumers: number;
-  exhausted: boolean;
-  lastError?: unknown;
-  promise?: Promise<SidebarTaskPageResponse>;
-  cycle?: SidebarPageRecoveryCycle<SidebarTaskPageResponse>;
-  attempt?: ReadAttempt;
-  retainedOwner?: string;
-  lastForegroundEpisode?: object;
-};
 type SidebarPageRequestOptions = {
   manualRetry?: boolean;
   foregroundRecoveryEpisode?: object;
@@ -68,6 +48,8 @@ type PageStore = {
   subscribe?: (listener: (state: AppState, previous: AppState) => void) => () => void;
 };
 const byteSize = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+
+class SidebarDisclosureSyncError extends Error {}
 
 /** Bounded ID memberships and shared reads. All retained overview objects live in Zustand. */
 export class SidebarTaskPageCache {
@@ -403,7 +385,11 @@ export class SidebarTaskPageCache {
     }
     const newEpisode = Boolean(episode && episode !== record.lastForegroundEpisode);
     if (episode) record.lastForegroundEpisode = episode;
-    if (record.exhausted && !options.manualRetry && !newEpisode) {
+    if (
+      record.exhausted &&
+      !options.manualRetry &&
+      (!newEpisode || record.lastError instanceof SidebarDisclosureSyncError)
+    ) {
       return Promise.reject(record.lastError ?? new Error("Sidebar page recovery exhausted"));
     }
     return this.startCycle(record, read);
@@ -429,7 +415,8 @@ export class SidebarTaskPageCache {
         },
         (error) => {
           if (!isReadAbort(error)) {
-            record.exhausted = isTemporaryReadError(error);
+            record.exhausted =
+              isTemporaryReadError(error) || error instanceof SidebarDisclosureSyncError;
             record.lastError = error;
           }
           throw error;
@@ -459,7 +446,7 @@ export class SidebarTaskPageCache {
       identity.groupingIdentity !== pluginRegistry.sidebarGroupingIdentity(query.group, workspaceId)
     )
       return;
-    this.store
+    return this.store
       .getState()
       .reconcileSidebarGroupDisclosure(
         query.disclosure_view_id,
@@ -513,14 +500,19 @@ export class SidebarTaskPageCache {
       cache: "no-store",
       init: { signal: attempt.controller.signal },
     })
-      .then((page) => {
+      .then(async (page) => {
         if (savedDisclosure) {
-          this.reconcileDisclosure(read, page, attempt.controller.signal);
+          const compacted = await this.reconcileDisclosure(read, page, attempt.controller.signal);
+          if (compacted === false) {
+            throw new SidebarDisclosureSyncError(
+              this.store.getState().sidebarViewsByWorkspace[workspaceId]?.syncError ?? "",
+            );
+          }
           // The bounded successor query carries the exact client disclosure.
           throw new DOMException("", "AbortError");
         }
         const settled = this.settle(attempt, page, query, identity);
-        this.reconcileDisclosure(read, page, attempt.controller.signal);
+        void this.reconcileDisclosure(read, page, attempt.controller.signal);
         attempt.settled = true;
         if (record) {
           if (record.retainedOwner && record.retainedOwner !== attempt.owner) {

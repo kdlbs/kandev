@@ -1,4 +1,5 @@
 import { createSidebarWorkspaceState, mapSidebarWorkspaces } from "./sidebar-workspace-state";
+import { produce } from "immer";
 import type { WorkspaceSliceState } from "../workspace/types";
 import { requestUserSettingsUpdateWithRetry } from "@/lib/user-settings-sync";
 import type { UserSettingsUpdatePayload } from "@/lib/types/http-user-settings";
@@ -6,8 +7,13 @@ import type { UISlice, UISliceState } from "./types";
 import type { FilterClause, GroupKey, SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 import { cloneSidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
 import { toApiSidebarDraft } from "./sidebar-view-wire";
-import { sidebarViewDelta } from "./sidebar-view-delta";
+import {
+  rebaseSidebarMutation,
+  sidebarViewDelta,
+  type SidebarSnapshot,
+} from "./sidebar-view-delta";
 import { cloneView, cloneDraft } from "./sidebar-view-clone";
+import { sidebarViewDisclosure } from "./sidebar-view-disclosure";
 import { createDefaultSidebarView, MAX_SIDEBAR_VIEWS } from "./sidebar-view-builtins";
 import { t } from "@/lib/i18n";
 import {
@@ -58,21 +64,16 @@ function nextNewViewName(views: SidebarView[]): string {
 
 const sidebarSettingsQueues = new WeakMap<ImmerSet, Promise<void>>();
 
-type SidebarSnapshot = {
-  views: SidebarView[];
-  activeViewId: string;
-  draft: SidebarViewDraft | null;
-};
-
 type SidebarWriteJournal = {
   latestRequestId: number;
   pending: number;
   confirmed?: SidebarSnapshot;
   failedRollback?: SidebarSnapshot;
   failedWriteKind?: SidebarWriteKind;
+  failedViewMutations?: { before: SidebarSnapshot; after: SidebarSnapshot }[];
 };
 
-type SidebarWriteKind = "views" | "local";
+type SidebarWriteKind = "views" | "local" | "compaction";
 
 const sidebarWriteJournals = new WeakMap<ImmerSet, SidebarWriteJournal>();
 
@@ -95,8 +96,10 @@ function snapshotSidebar(s: UISliceState["sidebarViews"]): SidebarSnapshot {
 function toSidebarSettingsDelta(before: SidebarSnapshot, after: SidebarSnapshot) {
   return {
     ...sidebarViewDelta(before.views, after.views),
-    active_view_id: after.activeViewId,
-    draft: after.draft ? toApiSidebarDraft(after.draft) : null,
+    ...(before.activeViewId !== after.activeViewId ? { active_view_id: after.activeViewId } : {}),
+    ...(!draftsEqual(before.draft, after.draft)
+      ? { draft: after.draft ? toApiSidebarDraft(after.draft) : null }
+      : {}),
   };
 }
 
@@ -147,7 +150,7 @@ function draftsEqual(a: SidebarViewDraft | null, b: SidebarViewDraft | null): bo
 function enqueueSidebarSettingsSync(
   set: ImmerSet,
   payload: () => SidebarViewPatch,
-  after: SidebarSnapshot,
+  after: () => SidebarSnapshot,
   kind: SidebarWriteKind,
 ): Promise<void> {
   const workspaceId = workspaceBySetter.get(set);
@@ -166,7 +169,7 @@ function enqueueSidebarSettingsSync(
     const journal = getSidebarWriteJournal(set);
     journal.confirmed = server
       ? snapshotSidebar(mapSidebarWorkspaces({ [workspaceId]: server })[workspaceId])
-      : { ...after, views: kind === "views" ? after.views : journal.confirmed!.views };
+      : { ...after(), views: kind !== "local" ? after().views : journal.confirmed!.views };
     if (!server) return;
     set((state) => {
       const mapped = mapSidebarWorkspaces(
@@ -183,7 +186,7 @@ function syncSidebarWrite(
   set: ImmerSet,
   before: SidebarSnapshot,
   after: SidebarSnapshot,
-  payload: SidebarViewPatch | ((confirmed: SidebarSnapshot) => SidebarViewPatch),
+  payload: SidebarViewPatch | undefined,
   kind: SidebarWriteKind,
 ) {
   const journal = getSidebarWriteJournal(set);
@@ -193,14 +196,22 @@ function syncSidebarWrite(
   set((state) => {
     state.sidebarViews.syncPending = true;
   });
-  const completed = enqueueSidebarSettingsSync(
-    set,
-    () => (typeof payload === "function" ? payload(journal.confirmed!) : payload),
-    after,
-    kind,
-  ).then(
+  let desired = after;
+  let succeeded = false;
+  const writePayload = () => {
+    if (kind === "local") return payload!;
+    let rebased = journal.confirmed!;
+    for (const failed of journal.failedViewMutations ?? [])
+      rebased = rebaseSidebarMutation(rebased, failed.before, failed.after);
+    desired = rebaseSidebarMutation(rebased, before, after);
+    return toSidebarSettingsDelta(journal.confirmed!, desired);
+  };
+  const completed = enqueueSidebarSettingsSync(set, writePayload, () => desired, kind).then(
     () => {
+      succeeded = true;
       journal.pending--;
+      if (kind !== "local" || thisRequestId === journal.latestRequestId)
+        journal.failedViewMutations = undefined;
       if (
         thisRequestId === journal.latestRequestId &&
         journal.failedWriteKind === "views" &&
@@ -215,12 +226,18 @@ function syncSidebarWrite(
         set((state) => {
           const server = state.sidebarViews.deferredServerState;
           if (server) Object.assign(state.sidebarViews, server);
+          else if (kind === "compaction") {
+            state.sidebarViews.views = journal.confirmed!.views;
+            state.sidebarViews.activeViewId = journal.confirmed!.activeViewId;
+            state.sidebarViews.draft = journal.confirmed!.draft;
+          }
           state.sidebarViews.syncPending = false;
           state.sidebarViews.deferredServerState = null;
         });
     },
     (err) => {
       journal.pending--;
+      if (kind === "views") (journal.failedViewMutations ??= []).push({ before, after });
       const rollback = journal.failedRollback ?? before;
       journal.failedRollback = rollback;
       journal.failedWriteKind ??= kind;
@@ -242,31 +259,36 @@ function syncSidebarWrite(
       });
       journal.failedRollback = undefined;
       journal.failedWriteKind = undefined;
+      journal.failedViewMutations = undefined;
     },
   );
   sidebarSettingsQueues.set(set, completed);
+  return completed.then(() => succeeded);
 }
 
 function mutateViews(
   set: ImmerSet,
   get: () => SidebarActionState,
   mutate: (slice: UISliceState["sidebarViews"]) => boolean | void,
-): void {
+  kind: "views" | "compaction" = "views",
+): Promise<boolean> {
   const snapshot = snapshotSidebar(get().sidebarViews);
   let committed = false;
-  set((draft) => {
-    committed = mutate(draft.sidebarViews) !== false;
-  });
-  if (!committed) return;
-  const after = get().sidebarViews;
+  let after: UISliceState["sidebarViews"];
+  if (kind === "compaction") {
+    // Compaction changes query identity only after persistence acknowledges it.
+    after = produce(get().sidebarViews, (draft) => {
+      committed = mutate(draft) !== false;
+    });
+  } else {
+    set((draft) => {
+      committed = mutate(draft.sidebarViews) !== false;
+    });
+    after = get().sidebarViews;
+  }
+  if (!committed) return Promise.resolve(true);
   const afterSnapshot = snapshotSidebar(after);
-  syncSidebarWrite(
-    set,
-    snapshot,
-    afterSnapshot,
-    (confirmed) => toSidebarSettingsDelta(confirmed, afterSnapshot),
-    "views",
-  );
+  return syncSidebarWrite(set, snapshot, afterSnapshot, undefined, kind);
 }
 
 type SidebarDraftPatch = Partial<{
@@ -299,6 +321,11 @@ function updateSidebarDraft(
       groupIndent: active.groupIndent,
       taskRow: cloneSidebarTaskRowPresentation(active.taskRow),
     };
+    const group = patch.group ?? current.group;
+    let collapsedGroups: string[] | undefined;
+    if (group !== active.group) {
+      collapsedGroups = group === current.group ? (current.collapsedGroups ?? []) : [];
+    }
     const next: SidebarViewDraft = {
       baseViewId: active.id,
       filters: patch.filters ?? current.filters,
@@ -306,8 +333,9 @@ function updateSidebarDraft(
       ...(current.sortWarningCount !== undefined
         ? { sortWarningCount: current.sortWarningCount }
         : {}),
-      group: patch.group ?? current.group,
+      group,
       groupIndent: patch.groupIndent ?? current.groupIndent,
+      ...(collapsedGroups ? { collapsedGroups } : {}),
       taskRow: cloneSidebarTaskRowPresentation(patch.taskRow ?? current.taskRow),
     };
     draft.sidebarViews.draft = next;
@@ -405,22 +433,31 @@ function createSidebarView(
 
 function buildSidebarDisclosureReconciler(set: ImmerSet, get: () => SidebarActionState) {
   return (viewId: string, reference: string, expected: string[], valid: string[]) => {
-    const views = get().sidebarViews.views;
-    const index = views.findIndex((view) => view.id === viewId);
-    const view = views[index];
+    const state = get().sidebarViews;
+    const index = state.views.findIndex((view) => view.id === viewId);
+    const view = state.views[index];
+    if (!view) return Promise.resolve(true);
+    const draft = state.draft?.baseViewId === viewId ? state.draft : null;
+    const keys = sidebarViewDisclosure(view, draft);
     if (
-      !view ||
-      view.group !== reference ||
-      view.collapsedGroups.length !== expected.length ||
-      view.collapsedGroups.some((key, position) => key !== expected[position])
+      (draft?.group ?? view.group) !== reference ||
+      keys.length !== expected.length ||
+      keys.some((key, position) => key !== expected[position])
     )
-      return;
+      return Promise.resolve(true);
     const allowed = new Set(valid);
-    const kept = view.collapsedGroups.filter((key) => allowed.delete(key));
-    if (kept.length === view.collapsedGroups.length) return;
-    mutateViews(set, get, (s) => {
-      s.views[index].collapsedGroups = kept;
-    });
+    const kept = keys.filter((key) => allowed.delete(key));
+    if (kept.length === keys.length) return Promise.resolve(true);
+    return mutateViews(
+      set,
+      get,
+      (s) => {
+        const owner =
+          s.draft?.baseViewId === viewId && s.draft.group !== view.group ? s.draft : s.views[index];
+        owner.collapsedGroups = kept;
+      },
+      "compaction",
+    );
   };
 }
 
@@ -435,14 +472,18 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState
       mv((s) => {
         const view = s.views.find((v) => v.id === viewId);
         if (!view) return false;
-        const idx = view.collapsedGroups.indexOf(groupKey);
-        if (idx === -1) view.collapsedGroups.push(groupKey);
-        else view.collapsedGroups.splice(idx, 1);
+        const owner =
+          s.draft?.baseViewId === viewId && s.draft.group !== view.group ? s.draft : view;
+        const keys = (owner.collapsedGroups ??= []);
+        const idx = keys.indexOf(groupKey);
+        if (idx === -1) keys.push(groupKey);
+        else keys.splice(idx, 1);
       }),
     saveSidebarDraftAs: (name: string) =>
       mv((s) => {
         if (!s.draft) return false;
         const base = s.views.find((view) => view.id === s.draft!.baseViewId);
+        if (!base) return false;
         s.views.push({
           id: makeId("view"),
           name: name.trim() || t("sidebar:untitledView"),
@@ -453,7 +494,7 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState
             : {}),
           group: s.draft.group,
           groupIndent: s.draft.groupIndent,
-          collapsedGroups: base?.group === s.draft.group ? [...base.collapsedGroups] : [],
+          collapsedGroups: [...sidebarViewDisclosure(base, s.draft)],
           taskRow: cloneSidebarTaskRowPresentation(s.draft.taskRow),
         });
         s.activeViewId = s.views[s.views.length - 1].id;
@@ -467,6 +508,7 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState
         view.filters = s.draft.filters;
         view.sort = s.draft.sort;
         view.sortWarningCount = s.draft.sortWarningCount;
+        view.collapsedGroups = [...sidebarViewDisclosure(view, s.draft)];
         view.group = s.draft.group;
         view.groupIndent = s.draft.groupIndent;
         view.taskRow = cloneSidebarTaskRowPresentation(s.draft.taskRow);
@@ -564,7 +606,11 @@ export function buildSidebarViewActions(
           typeof explicitScope === "string"
             ? explicitScope
             : (get() as UISlice & WorkspaceSliceState).workspaces?.activeId;
-        if (!workspaceId) return name === "createSidebarView" ? null : undefined;
+        if (!workspaceId) {
+          if (name === "createSidebarView") return null;
+          if (name === "reconcileSidebarGroupDisclosure") return Promise.resolve(false);
+          return;
+        }
         if (name === "clearSidebarSyncError" && args[0] !== undefined && args[0] !== workspaceId) {
           return;
         }

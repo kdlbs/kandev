@@ -11,6 +11,7 @@ import {
   saveGroupingView,
   writeGroupingState,
 } from "./sidebar-plugin-grouping-helpers";
+import { exerciseChangedGroupingDraft } from "./sidebar-grouping-draft-helpers";
 
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.1
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.6
@@ -307,3 +308,22 @@ test("phone task switcher restores its controls when an open grouping provider d
   await expect(group).toContainText(task.title);
   await expect(tasks.getByTestId("sidebar-task-page-load-error")).toBeHidden();
 });
+
+for (const finish of ["discard", "save as", "overwrite"] as const) {
+  test(`phone changed-group draft disclosure survives ${finish} with touch controls`, async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, info) => {
+    test.setTimeout(120000);
+    await installFixturePlugin(testPage);
+    await exerciseChangedGroupingDraft({
+      page: testPage,
+      api: apiClient,
+      seed: seedData,
+      mobile: true,
+      finish,
+      info,
+    });
+  });
+}

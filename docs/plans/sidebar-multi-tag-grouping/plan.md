@@ -145,6 +145,13 @@ boundary cases and four phone cases passed after lint cleanup. Fresh real
 control names and a different-group draft. This does not advance the source
 clean streak; Sol round 4 reviews the corrected commits independently.
 
+Round 4's eight corrections have targeted regressions. Rebuilt desktop
+acceptance passed 17/17 and true-touch phone emulation passed 8/8. A fresh
+actual 0.20.0 install passed separate desktop/320/393 smoke, including
+persisted changed-group previews and distinct escaped headings. The work order
+records failing attempts and the final receipts; this does not advance the
+independent source-clean streak. Round 5 reviews the published corrective heads.
+
 
 ## Risks
 

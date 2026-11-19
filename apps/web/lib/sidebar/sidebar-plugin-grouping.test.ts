@@ -1,23 +1,65 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { createAppStore } from "@/lib/state/store";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
-import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+import {
+  createSidebarWorkspaceState,
+  mapSidebarWorkspaces,
+  selectSidebarViews,
+} from "@/lib/state/slices/ui/sidebar-workspace-state";
+import { toApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
+import type {
+  SidebarWorkspaceStateApi,
+  UserSettingsResponse,
+} from "@/lib/types/http-user-settings";
 import { pluginRegistry } from "@/lib/plugins/registry";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   updateUserSettings: vi.fn(() => Promise.resolve({ settings: {} })),
 }));
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.mocked(updateUserSettings).mockReset();
+  vi.mocked(updateUserSettings).mockResolvedValue({ settings: {} } as UserSettingsResponse);
+});
 const grouping = { reference: "plugin:acme:labels" as const, label: "Tag" };
 
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.1
-it("creates one ordinary grouped view and reuses only its unchanged generated view", () => {
-  const store = createAppStore({ workspaces: { items: [], activeId: "a" } });
+it("persists an ordinary generated view and reuses only its unchanged identity after reload", async () => {
+  const workspaces: Record<string, SidebarWorkspaceStateApi> = {};
+  let revision = 0;
+  vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
+    const patch = payload.sidebar_view_state!;
+    const current = workspaces[patch.workspace_id] ?? {
+      views: createSidebarWorkspaceState().views.map(toApiSidebarView),
+      active_view_id: "view-all-tasks",
+      draft: null,
+    };
+    const views = new Map(current.views.map((view) => [view.id, view]));
+    for (const id of patch.view_ids_delete ?? []) views.delete(id);
+    for (const view of patch.views_upsert ?? []) views.set(view.id, view);
+    workspaces[patch.workspace_id] = {
+      views: (patch.view_order ?? [...views.keys()]).map((id) => views.get(id)!),
+      active_view_id: patch.active_view_id ?? current.active_view_id,
+      draft: "draft" in patch ? patch.draft! : current.draft,
+    };
+    return {
+      settings: { revision: ++revision, sidebar_views_by_workspace: structuredClone(workspaces) },
+    } as UserSettingsResponse;
+  });
+  const reload = () =>
+    createAppStore({
+      workspaces: { items: [], activeId: "a" },
+      sidebarViewsByWorkspace: mapSidebarWorkspaces(workspaces),
+    });
+  let store = reload();
   const id = store.getState().createSidebarView(grouping);
+  await store.getState().waitForSidebarViewSync("a");
+  store = reload();
+  expect(selectSidebarViews(store.getState()).activeViewId).toBe(id);
   const generated = selectSidebarViews(store.getState()).views.find((v) => v.id === id)!;
   expect(generated.group).toBe(grouping.reference);
   expect(generated.name).toBe("Tag");
   expect(store.getState().createSidebarView(grouping)).toBe(id);
+  await store.getState().waitForSidebarViewSync("a");
   expect(selectSidebarViews(store.getState()).views.map((v) => v.id)).toEqual([
     "view-all-tasks",
     id,
@@ -26,18 +68,16 @@ it("creates one ordinary grouped view and reuses only its unchanged generated vi
   const next = store.getState().createSidebarView(grouping);
   expect(next).not.toBe(id);
   expect(selectSidebarViews(store.getState()).views.find((v) => v.id === id)?.name).toBe("My tags");
-  expect(updateUserSettings).toHaveBeenCalledWith(
-    expect.objectContaining({
-      sidebar_view_state: expect.objectContaining({
-        workspace_id: "a",
-        active_view_id: id,
-        views: expect.arrayContaining([expect.objectContaining({ group: grouping.reference })]),
-      }),
-    }),
+  await store.getState().waitForSidebarViewSync("a");
+  store = reload();
+  expect(selectSidebarViews(store.getState()).views.find((view) => view.id === id)?.name).toBe(
+    "My tags",
   );
+  expect(store.getState().createSidebarView(grouping)).toBe(next);
+  await store.getState().waitForSidebarViewSync("a");
 });
 
-it("preserves drafts and view limits without losing workspace isolation or name collisions", () => {
+it("preserves drafts and view limits without losing workspace isolation or name collisions", async () => {
   const store = createAppStore({ workspaces: { items: [], activeId: "a" } });
   const custom = store.getState().createSidebarView()!;
   store.getState().renameSidebarView(custom, "Tag");
@@ -59,6 +99,8 @@ it("preserves drafts and view limits without losing workspace isolation or name 
     store.getState().createSidebarView({ ...grouping, reference: "plugin:acme:other" }),
   ).toBeNull();
   expect(store.getState().createSidebarView(grouping)).toBe(inB);
+  await store.getState().waitForSidebarViewSync("a");
+  await store.getState().waitForSidebarViewSync("b");
 });
 
 it("keeps complete host declarations independent of browser facets and fences provider/workspace generations", () => {

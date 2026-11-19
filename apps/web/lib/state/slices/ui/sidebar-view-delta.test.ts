@@ -8,6 +8,8 @@ import { createDefaultSidebarView } from "./sidebar-view-builtins";
 import type { UISlice } from "./types";
 import type { UserSettingsResponse, SidebarViewApi } from "@/lib/types/http-user-settings";
 import { toApiSidebarView } from "./sidebar-view-wire";
+import { mapSidebarWorkspaces } from "./sidebar-workspace-state";
+import { ApiError } from "@/lib/api/client";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({ updateUserSettings: vi.fn() }));
 beforeEach(() => {
@@ -97,7 +99,7 @@ it("a queued successor persists earlier unsaved intent against the acknowledged 
     });
   const created = store.getState().createSidebarView()!;
   store.getState().renameSidebarView("base", "Renamed");
-  first.reject(new Error("first write failed"));
+  first.reject(new ApiError("first write failed", 500, {}));
   await waitFor(() => expect(store.getState().sidebarViewsByWorkspace.ws.syncPending).toBe(false));
   expect(persisted.get("base")?.name).toBe("Renamed");
   expect(persisted.has(created)).toBe(true);
@@ -105,4 +107,106 @@ it("a queued successor persists earlier unsaved intent against the acknowledged 
     "base",
     created,
   ]);
+});
+
+it.each(["add", "delete"])(
+  "rebases queued local edits without undoing a remote view %s",
+  async (remoteChange) => {
+    const store = makeStore();
+    const base = createDefaultSidebarView("base", "Base");
+    const remote = createDefaultSidebarView("remote", "Remote");
+    const created = createDefaultSidebarView("created-remotely", "Created elsewhere");
+    store.setState({
+      sidebarViewsByWorkspace: {
+        ws: { views: [base, remote], activeViewId: base.id, draft: null, syncError: null },
+      },
+    });
+    const persisted = new Map([base, remote].map((view) => [view.id, toApiSidebarView(view)]));
+    let active = base.id;
+    let revision = 1;
+    const acknowledge = () =>
+      ({
+        settings: {
+          revision: revision++,
+          sidebar_views_by_workspace: {
+            ws: { views: [...persisted.values()], active_view_id: active, draft: null },
+          },
+        },
+      }) as UserSettingsResponse;
+    const apply = (payload: Parameters<typeof updateUserSettings>[0]) => {
+      const patch = payload.sidebar_view_state!;
+      for (const id of patch.view_ids_delete ?? []) persisted.delete(id);
+      for (const view of patch.views_upsert ?? []) persisted.set(view.id, view);
+      if (patch.active_view_id) active = patch.active_view_id;
+      return acknowledge();
+    };
+    const first = Promise.withResolvers<UserSettingsResponse>();
+    vi.mocked(updateUserSettings)
+      .mockReturnValueOnce(first.promise)
+      .mockImplementation(async (payload) => apply(payload));
+    store.getState().renameSidebarView(base.id, "Locally renamed");
+    store.getState().toggleSidebarGroupCollapsed(base.id, "workflow:local");
+    if (remoteChange === "add") {
+      persisted.set(created.id, toApiSidebarView(created));
+      active = created.id;
+    } else persisted.delete(remote.id);
+    first.resolve(apply(vi.mocked(updateUserSettings).mock.calls[0][0]));
+    await waitFor(() =>
+      expect(store.getState().sidebarViewsByWorkspace.ws.syncPending).toBe(false),
+    );
+    expect(persisted.has(created.id)).toBe(remoteChange === "add");
+    expect(persisted.has(remote.id)).toBe(remoteChange !== "delete");
+    expect(persisted.get(base.id)).toMatchObject({
+      name: "Locally renamed",
+      collapsed_groups: ["workflow:local"],
+    });
+    if (remoteChange === "add") expect(active).toBe(created.id);
+    const reloaded = makeStore();
+    reloaded.setState({
+      sidebarViewsByWorkspace: mapSidebarWorkspaces(
+        acknowledge().settings.sidebar_views_by_workspace,
+      ),
+    });
+    expect(reloaded.getState().sidebarViewsByWorkspace.ws.views.map((view) => view.id)).toEqual([
+      ...persisted.keys(),
+    ]);
+    expect(reloaded.getState().sidebarViewsByWorkspace.ws.views[0]).toMatchObject({
+      name: "Locally renamed",
+      collapsedGroups: ["workflow:local"],
+    });
+  },
+);
+
+it("does not replay a discarded failed creation on a later unrelated edit", async () => {
+  const store = makeStore();
+  const base = createDefaultSidebarView("base", "Base");
+  store.setState({
+    sidebarViewsByWorkspace: {
+      ws: { views: [base], activeViewId: base.id, draft: null, syncError: null },
+    },
+  });
+  const persisted = new Map([[base.id, toApiSidebarView(base)]]);
+  const first = Promise.withResolvers<UserSettingsResponse>();
+  vi.mocked(updateUserSettings)
+    .mockReturnValueOnce(first.promise)
+    .mockImplementation(async (payload) => {
+      for (const view of payload.sidebar_view_state?.views_upsert ?? [])
+        persisted.set(view.id, view);
+      return {
+        settings: {
+          sidebar_views_by_workspace: {
+            ws: { views: [...persisted.values()], active_view_id: base.id, draft: null },
+          },
+        },
+      } as UserSettingsResponse;
+    });
+  const failed = store.getState().createSidebarView()!;
+  store.getState().setSidebarActiveView(base.id);
+  first.reject(new ApiError("creation refused", 500, {}));
+  await waitFor(() => expect(store.getState().sidebarViewsByWorkspace.ws.syncPending).toBe(false));
+  expect(persisted.has(failed)).toBe(false);
+  store.getState().renameSidebarView(base.id, "After rollback");
+  await waitFor(() => expect(store.getState().sidebarViewsByWorkspace.ws.syncPending).toBe(false));
+  expect(persisted.has(failed)).toBe(false);
+  expect(persisted.get(base.id)?.name).toBe("After rollback");
 });

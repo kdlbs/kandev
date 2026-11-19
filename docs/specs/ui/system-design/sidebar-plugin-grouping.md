@@ -110,21 +110,25 @@ Each complete snapshot has at most 1,000 compact value keys plus Untagged.
 Normal reads carry the exact client disclosure inline. A view with accumulated
 retired keys can recover using `disclosure_view_id` instead of transmitting its
 oversized array. The authenticated settings reader resolves that personal view
-only within the requested workspace; a draft with a different grouping starts
-expanded. The service intersects its disclosure with the complete verified
-provider snapshot, not the current page, and returns `grouping_keys`.
+only within the requested workspace, with authorization checked before lookup
+and renewed before reporting a missing view. A different-group draft starts
+expanded and owns optional `collapsed_groups`; heading toggles update that draft,
+not its saved base. Recovery resolves the matching draft's disclosure as well.
+The service intersects disclosure with the complete verified provider snapshot,
+not the current page, and returns `grouping_keys`.
 
 The client waits for its captured workspace journal before that recovery read.
 It admits only the complete keys, not that read's task page: current
 store/workspace/provider/view/expected-disclosure fences guard reconciliation
-through the ordinary settings journal. The bounded successor read again carries
-the exact client keys inline. This avoids turning a concurrent settings change
-into task rows cached under another disclosure. Valid surviving keys remain
-collapsed; retired and duplicate keys are removed. Neither the 256 KiB query
-limit nor the 2 MiB settings request limit is raised.
-Save as retains independent collapsed-group keys when its draft keeps the
-base view's grouping; a different grouping starts expanded. Duplicate clones
-the source disclosure so expanding a copy never expands its source.
+through the ordinary settings journal. Compaction publishes its bounded keys
+only after persistence succeeds. A rejected write keeps saved intent and exposes
+manual Retry, without rollback-driven automatic writes or probe-page admission.
+The bounded successor read again carries exact client keys inline. Valid surviving
+keys remain collapsed; retired and duplicate keys are removed. Neither the
+256 KiB query limit nor the 2 MiB settings request limit is raised.
+Save and Save as retain the effective draft's disclosure in independent arrays;
+Discard leaves its base unchanged. A same-group draft inherits saved disclosure.
+Duplicate clones source disclosure so expanding a copy never expands its source.
 
 ## Repository projection and pagination
 
@@ -182,9 +186,11 @@ Host workspace state mutations emit identity-only
 `plugin.sidebar-grouping.updated` only to authorized workspace subscribers;
 global catalog changes contain no workspace classification data. Catalog records
 are captured under the persistence guard, then projected after releasing it.
-Policy versions publish after Save; generation binds installation, policy and a
-per-plugin lifecycle epoch. Committed status changes invalidate even if cleanup
-fails; failed commits do not. Catalog refreshes preserve unchanged provider identities.
+Policy and status updates persist a private record before registry publication;
+real dispatch admission cannot observe a provisional status. Generation binds
+installation, policy and a per-plugin lifecycle epoch. Committed status changes
+invalidate even if cleanup fails; failed commits do not. Catalog refreshes preserve
+unchanged provider identities.
 Status publication advances its epoch inside the commit critical section, then
 releases both service and persistence guards before cleanup or publication.
 Per-plugin completion guards preserve cleanup order without blocking another
@@ -236,10 +242,10 @@ legacy migration, inactive/deleted filtering or duplicate normalization; more
 than 10,000 fails explicitly. Typed inactive rows and valid empty arrays remain
 valid, and reads never rewrite shared state.
 
-Names legitimately written with interior control characters remain readable:
-sidebar labels escape those characters deterministically without changing
-catalog IDs or rewriting shared state. Apply the real encoded label bound after
-escaping; malformed identity/type/shape data still fails closed.
+Names legitimately written with interior controls remain readable. Tag labels
+escape both controls and literal backslashes reversibly; Multi-tag quotes each
+original name once. Catalog IDs and shared state are unchanged. Apply real
+encoded label bounds only to emitted labels; malformed definitions still fail closed.
 
 The manifest exposes the new entry only for this action. Old hosts either
 reject the newer minimum host requirement at install or keep using their old

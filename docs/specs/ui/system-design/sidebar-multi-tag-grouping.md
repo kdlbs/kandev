@@ -64,9 +64,10 @@ references keep their group disclosure namespaces separate.
 
 ## Identity and revision
 
-A value label joins JSON-quoted current tag names with ' + ' in canonical ID
-order, for example "Backend" + "Frontend". Quoting makes a literal plus sign
-inside one tag unambiguous. Singleton values retain their normalized tag color;
+A value label joins JSON-quoted original tag names with ' + ' in canonical ID
+order, for example "Backend" + "Frontend". Escape each raw name once, including
+controls and literal backslashes; never quote a pre-escaped Tag label.
+Quoting makes a literal plus sign inside one tag unambiguous. Singleton values retain their normalized tag color;
 compound values omit color rather than imply a single tag owns the combination.
 No generic host chip renderer or multi-color DTO is introduced.
 Sort groups/memberships deterministically and reuse sidebarTagRevision's
@@ -93,6 +94,8 @@ Marshal once, verify actual encoded bytes and validate the final complete snapsh
 An overlong quoted label, value/member overflow or response above 1 MiB returns
 an error and no successful snapshot. Do not shorten labels, cap tags per task,
 truncate subsets, increase limits or return complete:false as a healthy response.
+Only emitted observed subsets consume the encoded-label budget; an unused valid
+catalog definition does not fail Multi-tag merely because its Tag label expands.
 Existing unavailable/retained-stale/retry behavior owns presentation and recovery.
 Tag's original action remains independent of combination-only overflow.
 

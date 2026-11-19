@@ -92,6 +92,7 @@ export function toApiSidebarDraft(draft: SidebarViewDraft): SidebarViewDraftApi 
     sort: toApiSort(draft.sort),
     group: draft.group,
     group_indent: draft.groupIndent,
+    ...(draft.collapsedGroups ? { collapsed_groups: [...draft.collapsedGroups] } : {}),
     task_row: toApiTaskRow(draft.taskRow),
   };
 }
@@ -103,6 +104,7 @@ export function fromApiSidebarDraft(api: SidebarViewDraftApi): SidebarViewDraft 
     sort: fromApiSort(api.sort),
     group: api.group as SidebarView["group"],
     groupIndent: typeof api.group_indent === "boolean" ? api.group_indent : true,
+    ...(api.collapsed_groups ? { collapsedGroups: [...api.collapsed_groups] } : {}),
     taskRow: fromApiTaskRow(api.task_row),
   };
 }

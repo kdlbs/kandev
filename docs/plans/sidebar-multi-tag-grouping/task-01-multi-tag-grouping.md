@@ -362,3 +362,78 @@ remote-CI certification is inferred. The earlier long desktop stall remains
 unexplained and native MaxListeners warnings remain unsuppressed. No release,
 deployment or user-demo upgrade is authorized.
 
+
+### Post-rebase round 4 corrections
+
+The fourth post-rebase review reported eight findings; the independent source
+clean streak remains zero until another review of the corrected commits.
+
+- Queued writes capture intent relative to their optimistic predecessor and
+  rebase only that intent on the latest ACK. Concurrently added/deleted views
+  survive unrelated queued edits; terminally failed predecessor intent remains
+  available to queued successors without replay after a discarded failure.
+- Different-group drafts own optional disclosure independently of their base,
+  including wire cloning, backend persistence, effective desktop/phone views,
+  recovery lookup, Save, Save as and Discard.
+  Repeated draft PATCHes decode a private record before change detection rather
+  than mutating the prior draft through a shared pointer. The HTTP/SQLite
+  regression failed with lost disclosure before this correction and passes
+  with the handler/workspace race cases afterward.
+- Disclosure compaction publishes only after its settings ACK. Terminal failure
+  keeps saved intent and an actionable manual Retry instead of changing query
+  identity through optimistic prune/rollback loops. Probe task rows are never
+  admitted. A later explicit Retry can persist and load the bounded successor.
+- Saved-disclosure recovery authorizes before personal-settings lookup and
+  renews denial precedence after lookup errors. A real SQLite member-removal
+  barrier with the production user-settings projection returns denial, not
+  malformed-query status; retained-member and missing-view controls remain.
+- Status transitions save a private registry clone before publishing it. The
+  real Resolve/InvokeAction dispatch lease and gRPC action regression rejects
+  committed Error but keeps healthy classification after failed persistence.
+  The obsolete provisional-status mutation method is removed.
+- Managed SDK setup stays private through compatibility compilation, then
+  requires HEAD to match the requested pin on reuse. Explicit existing
+  checkouts stay compile-only and are never reset. A compile-phase concurrency
+  barrier, completed wrong-pin reuse, fetch recovery and explicit-checkout
+  controls pass.
+- Generated-view coverage now acknowledges real deltas and reloads their saved
+  identity/reuse behavior instead of requiring the removed full-list payload.
+- Tag display escapes literal backslashes and controls distinctly; Multi-tag
+  JSON-quotes original names once. Encoded labels retain their real byte cap,
+  applied only to emitted values. Both actions retain strict raw validation,
+  canonical identities and zero read-side writes.
+
+Behavioral REDs were observed before fixes. Three new native regressions also
+failed against the unchanged round-3 production mirror: preview collapse stayed
+expanded, queued edits deleted/resurrected remote views, and failed compaction
+did not expose Retry. Their source baseline was byte-compared to committed
+`f2b8577707b51ea4da3b1789d132c7795a9374d5`.
+
+Targeted frontend verification passed 118 tests in 12 files. Scoped production
+typecheck passed. Affected Go lint reports zero issues. Real dispatch/status race
+checks and handler/user-settings race checks passed. Plugin fmt/test/vet passed,
+with 204 existing UI cases and four setup regressions; a new absent-destination
+setup fetched and compiled the exact SDK pin. Final native and actual-package
+receipts are recorded after those runs, without waiving historical broad gates.
+
+Round-4 runtime proof:
+
+- Freshly rebuilt desktop acceptance: 17/17 passed. Phone acceptance: 8/8
+  passed with true-touch emulation, including all three preview finish modes.
+- The separate actual 0.20.0 archive was installed through native upload into
+  a fresh cache-drive runtime. SHA-256:
+  `c1ae9ad50f3708df1db7bf4d70d2207debb2964c4448328671e48ae90b1cf885`.
+  The final driver exited zero with 82 mixed assertion, screenshot and narrative
+  records, not 82 independent tests.
+- Real-package proof includes 103 unique tasks / 119 occurrences, repeated
+  complete trees, saved copies, live mutations, explicit overflow and settled
+  recovery, 320/393 touch pagination, persisted changed-group disclosure and
+  distinct tab/backslash headings in both modes. Retained PNGs were inspected.
+- The first rebuilt run exposed the repeated-draft persistence defect
+  described above. A second smoke run failed the driver's two-read geometry
+  assertion despite logging a 44px rectangle. It now stabilizes the control,
+  verifies 44px CSS height and uses one rectangle with 0.01px numeric tolerance.
+  No product change was made for that measurement failure.
+- Evidence remains under `~/.cache/sidebar-multi-tag-build/evidence/r4-*`.
+  Historical broad gates remain non-green or unproven; no physical-phone,
+  PostgreSQL, remote-CI, publication or deployment certification is added.

@@ -42,6 +42,7 @@ export type SidebarViewDraftApi = {
   };
   group: string;
   group_indent?: boolean;
+  collapsed_groups?: string[];
   task_row?: SidebarTaskRowPresentationApi | null;
 };
 

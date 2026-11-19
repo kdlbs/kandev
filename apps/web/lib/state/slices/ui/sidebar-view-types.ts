@@ -100,5 +100,6 @@ export type SidebarViewDraft = {
   sortWarningCount?: number;
   group: GroupKey;
   groupIndent: boolean;
+  collapsedGroups?: string[];
   taskRow?: SidebarTaskRowPresentation;
 };

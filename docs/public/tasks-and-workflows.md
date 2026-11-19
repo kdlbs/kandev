@@ -1133,6 +1133,11 @@ display occurrences; repeated rows still navigate, select, and act on the same
 task. Group collapse belongs to the saved workspace view, while subtask collapse
 applies to the canonical task.
 
+Changing a draft's grouping starts its groups expanded. Collapse choices made
+in that preview belong to the draft: **Discard** leaves the saved view unchanged,
+while **Save** and **Save as** retain the preview's choices. A copied view's
+collapse choices remain independent of its source.
+
 If the plugin is disabled, unavailable, or returns an incomplete classification,
 the saved view remains selected with its original grouping. Enable the plugin,
 use **Retry**, or choose another view. Recovery restores the grouping without

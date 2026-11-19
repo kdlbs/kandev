@@ -33,6 +33,7 @@ export function cloneDraft(draft: SidebarViewDraft | null): SidebarViewDraft | n
     ...(draft.sortWarningCount !== undefined ? { sortWarningCount: draft.sortWarningCount } : {}),
     group: draft.group,
     groupIndent: typeof draft.groupIndent === "boolean" ? draft.groupIndent : true,
+    ...(draft.collapsedGroups ? { collapsedGroups: [...draft.collapsedGroups] } : {}),
     taskRow: draft.taskRow ? cloneSidebarTaskRowPresentation(draft.taskRow) : undefined,
   };
 }

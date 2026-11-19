@@ -102,12 +102,14 @@ payloads, queues, journals and rollback. Use per-workspace journals and queued
 writes. A view ID alone cannot identify an asynchronous operation. Bind open
 editor/confirmation state to its originating workspace and close on context
 change; stale callbacks must no-op after that binding changes.
-Build each queued view delta against the last acknowledged server snapshot at
-dispatch time, not a prior optimistic view. A successor therefore includes
-unsaved earlier intent after an earlier request fails. Local selection/draft
-writes retain their existing intent-aware rollback. Queue settlement includes
-response projection and rollback; scoped disclosure recovery can await that
-completion without binding to a successor active workspace.
+Capture each mutation's field/disclosure/order intent relative to its own
+optimistic predecessor, then rebase that intent onto the latest acknowledged
+snapshot at dispatch. A stale after-image must not delete a remotely added view
+or resurrect a remotely deleted one. Retain unacknowledged predecessor intent
+while queued successors can still persist it. Local selection/draft writes retain
+their intent-aware rollback. Queue settlement includes response projection and
+rollback; scoped disclosure recovery awaits that completion without binding to
+a successor active workspace.
 
 ## Failure handling
 

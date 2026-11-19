@@ -116,17 +116,6 @@ describe("createSidebarView semantics", () => {
     expect(created?.filters).not.toBe(DEFAULT_VIEW.filters);
     expect(created?.sort).not.toBe(DEFAULT_VIEW.sort);
     expect(created?.collapsedGroups).not.toBe(DEFAULT_VIEW.collapsedGroups);
-    expect(updateUserSettings).toHaveBeenCalledWith({
-      sidebar_view_state: {
-        workspace_id: "ws",
-        views_upsert: [
-          expect.objectContaining({ id: createdId, name: "New view 2", group: "repository" }),
-        ],
-        view_order: ["custom", "new-1", "new-3", createdId],
-        active_view_id: createdId,
-        draft: null,
-      },
-    });
   });
 
   it("does nothing while the active view has an unsaved draft", () => {

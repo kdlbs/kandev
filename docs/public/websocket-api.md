@@ -377,11 +377,20 @@ complete `view_order` mutate one `workspace_id` under the normal settings revisi
 CAS. Do not mix those mutations with `views` replacement. Active view and draft
 remain scoped to the same collection. The 50-view and 2 MiB request limits remain.
 
+For a draft whose grouping differs from its base view, optional draft
+`collapsed_groups` stores that preview's disclosure independently. Omitting it
+starts the different grouping expanded; a same-group draft uses its base view.
+Saved-disclosure recovery also resolves the matching draft. A failed cleanup
+write retains saved preferences and offers manual Retry; its probe page is never
+admitted as task data.
+
 
 Complete plugin groupings use `group: "plugin:<plugin-id>:<grouping-id>"`.
 These always use the server query, even when the browser has complete resident
-task coverage. The server authorizes the workspace before invoking the provider;
-classification is joined to filtered roots before pagination and never grants
+task coverage. The server authorizes before saved-preference lookup and provider
+execution, then renews workspace authorization after the RPC before reading
+tasks. Missing personal preferences cannot mask a workspace-access denial.
+Classification is joined to filtered roots before pagination and never grants
 access to another workspace's tasks.
 
 Successful plugin pages add `grouping_revision` and `grouping_generation`;

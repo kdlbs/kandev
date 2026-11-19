@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { cloneSidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
 import { DEFAULT_VIEW } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { sidebarViewDisclosure } from "@/lib/state/slices/ui/sidebar-view-disclosure";
 
 /**
  * Active sidebar view merged with any in-flight draft. Used by both desktop
@@ -22,7 +23,7 @@ export function useEffectiveSidebarView(workspaceId?: string | null) {
       sort: d.sort,
       group: d.group,
       groupIndent: d.groupIndent,
-      collapsedGroups: d.group === active.group ? active.collapsedGroups : [],
+      collapsedGroups: sidebarViewDisclosure(active, d),
       taskRow: cloneSidebarTaskRowPresentation(d.taskRow ?? active.taskRow),
     };
   }, [sidebarSlice.views, sidebarSlice.activeViewId, sidebarSlice.draft]);

@@ -7,6 +7,9 @@ import {
   writeGroupingState,
 } from "./sidebar-plugin-grouping-helpers";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
+import { exerciseChangedGroupingDraft } from "./sidebar-grouping-draft-helpers";
+import type { Route } from "@playwright/test";
+import { dwell } from "../../helpers/causal-waits";
 
 test.afterEach(async ({ apiClient }) => {
   await uninstallFixturePlugin(apiClient);
@@ -235,4 +238,260 @@ test("normal Save as and disclosure edits remain writable after 27 large copies"
   });
   await editor.selectViewByName("Large 0");
   await expect(header).toHaveAttribute("aria-expanded", "false");
+});
+
+for (const finish of ["discard", "save as", "overwrite"] as const) {
+  test(`changed-group draft disclosure survives ${finish} without mutating its saved base`, async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, info) => {
+    test.setTimeout(120000);
+    await installFixturePlugin(testPage);
+    await exerciseChangedGroupingDraft({
+      page: testPage,
+      api: apiClient,
+      seed: seedData,
+      mobile: false,
+      finish,
+      info,
+    });
+  });
+}
+
+test("queued disclosure preserves another tab's added and deleted saved views", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, info) => {
+  test.setTimeout(120000);
+  await installFixturePlugin(testPage);
+  const baseline = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+    seedData.workspaceId
+  ];
+  const released = Promise.withResolvers<void>();
+  const arrived = Promise.withResolvers<void>();
+  let held = false;
+  const route = async (request: Route) => {
+    if (
+      !held &&
+      request.request().method() === "PATCH" &&
+      request.request().postDataJSON()?.sidebar_view_state
+    ) {
+      held = true;
+      arrived.resolve();
+      await released.promise;
+    }
+    await request.continue();
+  };
+  try {
+    const root = await apiClient.createTask(seedData.workspaceId, "Queued disclosure root", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await writeGroupingState(apiClient, seedData.workspaceId, {
+      snapshot: {
+        version: 1,
+        revision: "queued",
+        complete: true,
+        groups: [{ id: "keep", label: "Keep" }],
+        memberships: [{ task_id: root.id, group_id: "keep" }],
+      },
+    });
+    await saveGroupingView(apiClient, seedData.workspaceId);
+    const current = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+      seedData.workspaceId
+    ];
+    const source = current.views.find((view) => view.id === current.active_view_id)!;
+    await apiClient.saveUserSettings({
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views_upsert: [{ ...source, id: "remote-delete", name: "Remote deletion" }],
+      },
+    });
+    await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
+    const header = testPage
+      .getByTestId("task-sidebar")
+      .locator(
+        `[data-testid="sidebar-group-header"][data-group-key="${groupingValueKey("keep")}"]`,
+      );
+    await expect(header).toHaveAttribute("aria-expanded", "true");
+    await testPage.route("**/api/v1/user/settings", route);
+    const editor = new SidebarFilterPopoverPage(testPage);
+    await editor.open();
+    await editor.openGroupSettings();
+    await editor.popover
+      .getByRole("switch", { name: "Indent grouped tasks", exact: true })
+      .uncheck();
+    await arrived.promise;
+    await editor.close();
+    await header.click();
+    await expect(header).toHaveAttribute("aria-expanded", "false");
+    await apiClient.saveUserSettings({
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        view_ids_delete: ["remote-delete"],
+        views_upsert: [{ ...source, id: "remote-add", name: "Remote addition" }],
+      },
+    });
+    released.resolve();
+    await expect
+      .poll(async () => {
+        const state = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+          seedData.workspaceId
+        ];
+        return [
+          state.views.some((view) => view.id === "remote-add"),
+          state.views.some((view) => view.id === "remote-delete"),
+          state.draft?.group_indent,
+          state.views.find((view) => view.id === source.id)?.collapsed_groups,
+        ];
+      })
+      .toEqual([true, false, false, [groupingValueKey("keep")]]);
+    await testPage.reload();
+    await expect(header).toHaveAttribute("aria-expanded", "false");
+    await editor.open();
+    await editor.openGroupSettings();
+    await expect(
+      editor.popover.getByRole("switch", { name: "Indent grouped tasks", exact: true }),
+    ).not.toBeChecked();
+    await editor.close();
+    await editor.openViewPicker();
+    await expect(editor.chipByName("Remote addition")).toBeVisible();
+    await expect(editor.chipByName("Remote deletion")).toHaveCount(0);
+    await testPage.screenshot({
+      path: info.outputPath("concurrent-views-preserved.png"),
+      animations: "disabled",
+    });
+    await editor.closeViewPicker();
+  } finally {
+    released.resolve();
+    await testPage.unroute("**/api/v1/user/settings", route);
+    if (baseline)
+      await apiClient.saveUserSettings({
+        sidebar_view_state: { workspace_id: seedData.workspaceId, ...baseline },
+      });
+  }
+});
+
+test("failed retired-disclosure cleanup offers Retry without an automatic write loop", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, info) => {
+  test.setTimeout(120000);
+  await installFixturePlugin(testPage);
+  const baseline = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+    seedData.workspaceId
+  ];
+  let fail = true;
+  let writes = 0;
+  const route = async (request: Route) => {
+    const patch =
+      request.request().method() === "PATCH"
+        ? request.request().postDataJSON()?.sidebar_view_state
+        : null;
+    if (patch?.views_upsert?.some((view: { id: string }) => view.id === "complete-plugin-view")) {
+      writes++;
+      if (fail) {
+        await request.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "Settings write unavailable" }),
+        });
+        return;
+      }
+    }
+    await request.continue();
+  };
+  try {
+    const root = await apiClient.createTask(seedData.workspaceId, "Cleanup recovery root", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await writeGroupingState(apiClient, seedData.workspaceId, {
+      snapshot: {
+        version: 1,
+        revision: "retry",
+        complete: true,
+        groups: [
+          { id: "keep", label: "Keep" },
+          { id: "other", label: "Other" },
+        ],
+        memberships: [
+          { task_id: root.id, group_id: "keep" },
+          { task_id: root.id, group_id: "other" },
+        ],
+      },
+    });
+    await saveGroupingView(apiClient, seedData.workspaceId);
+    const current = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+      seedData.workspaceId
+    ];
+    const source = current.views.find((view) => view.id === current.active_view_id)!;
+    const kept = groupingValueKey("keep");
+    const keys = [
+      ...Array.from({ length: 6000 }, (_, i) => `plugin-group:${i.toString(16).padStart(64, "0")}`),
+      kept,
+    ];
+    await apiClient.saveUserSettings({
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views_upsert: [{ ...source, collapsed_groups: keys }],
+      },
+    });
+    await testPage.route("**/api/v1/user/settings", route);
+    await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
+    const sidebar = testPage.getByTestId("task-sidebar");
+    const error = sidebar.getByTestId("sidebar-task-page-load-error");
+    await expect(error).toBeVisible();
+    const retry = error.getByRole("button", { name: "Retry", exact: true });
+    await expect(retry).toBeEnabled();
+    await expect(sidebar.locator(`[data-task-row-id="${root.id}"]`)).toHaveCount(0);
+    await dwell(
+      testPage,
+      3000,
+      "negative-assertion",
+      "Observe beyond the first automatic read-retry interval while settings writes remain unavailable.",
+    );
+    expect(writes).toBe(1);
+    expect(
+      (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+        seedData.workspaceId
+      ].views.find((view) => view.id === source.id)?.collapsed_groups,
+    ).toEqual(keys);
+    await testPage.screenshot({
+      path: info.outputPath("disclosure-write-retry.png"),
+      animations: "disabled",
+    });
+    fail = false;
+    await retry.click();
+    await expect(error).toBeHidden();
+    await expect(
+      sidebar.locator(`[data-testid="sidebar-group-header"][data-group-key="${kept}"]`),
+    ).toHaveAttribute("aria-expanded", "false");
+    await expect(sidebar.locator(`[data-task-row-id="${root.id}"]`)).toHaveCount(1);
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+            seedData.workspaceId
+          ].views.find((view) => view.id === source.id)?.collapsed_groups,
+      )
+      .toEqual([kept]);
+    expect(writes).toBe(2);
+    await testPage.reload();
+    await expect(sidebar.locator(`[data-task-row-id="${root.id}"]`)).toHaveCount(1);
+    await testPage.screenshot({
+      path: info.outputPath("disclosure-write-recovered.png"),
+      animations: "disabled",
+    });
+  } finally {
+    fail = false;
+    await testPage.unroute("**/api/v1/user/settings", route);
+    if (baseline)
+      await apiClient.saveUserSettings({
+        sidebar_view_state: { workspace_id: seedData.workspaceId, ...baseline },
+      });
+  }
 });

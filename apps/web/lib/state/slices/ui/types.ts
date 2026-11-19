@@ -515,7 +515,7 @@ export type UISliceActions = {
     expected: string[],
     valid: string[],
     workspaceId?: string,
-  ) => void;
+  ) => Promise<boolean>;
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: (workspaceId?: string) => void;
   setThreadActiveView: (viewId: string) => void;
