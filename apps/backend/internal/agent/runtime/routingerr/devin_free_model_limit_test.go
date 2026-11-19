@@ -1,6 +1,7 @@
 package routingerr
 
 import (
+	"net/http"
 	"testing"
 	"time"
 )
@@ -99,6 +100,18 @@ func TestClassifyDevinFreeModelRateLimitUsesRelativeDuration(t *testing.T) {
 			notice:     "Reached free model rate limit. Your limit will reset in 1 hour 30 minutes (at 00:30 UTC)",
 			want:       time.Date(2026, time.November, 19, 0, 30, 0, 0, time.UTC),
 		},
+		{
+			name:       "clock elapsed just after midnight",
+			observedAt: time.Date(2026, time.November, 19, 0, 0, 5, 0, time.UTC),
+			notice:     "Reached free model rate limit. Your limit will reset in 0 minutes (at 23:59 UTC)",
+			want:       time.Date(2026, time.November, 18, 23, 59, 0, 0, time.UTC),
+		},
+		{
+			name:       "duration extends beyond next calendar day",
+			observedAt: time.Date(2026, time.November, 18, 23, 55, 0, 0, time.UTC),
+			notice:     "Reached free model rate limit. Your limit will reset in 24 hours 10 minutes (at 00:05 UTC)",
+			want:       time.Date(2026, time.November, 20, 0, 5, 0, 0, time.UTC),
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -111,6 +124,53 @@ func TestClassifyDevinFreeModelRateLimitUsesRelativeDuration(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestClassifyDevinFreeModelRateLimitUsesMatchedLineForStructuredHTTP429(t *testing.T) {
+	resetInjection()
+	observedAt := time.Date(2026, time.November, 18, 11, 53, 0, 0, time.UTC)
+	want := time.Date(2026, time.November, 18, 12, 1, 0, 0, time.UTC)
+	notice := "Reached free model rate limit. Your limit will reset in 8 minutes (at 12:01 UTC)"
+
+	t.Run("infers from Devin line and preserves structured classification", func(t *testing.T) {
+		got := Classify(Input{
+			HTTPStatus: http.StatusTooManyRequests, ProviderID: providerDevinACP,
+			Phase: PhasePromptSend, OccurredAt: observedAt,
+			Stderr: "Another job: reset in 2 minutes (at 11:55 UTC)\n" + notice,
+		})
+		if got.Code != CodeRateLimited || got.ClassifierRule != ruleHTTP429 {
+			t.Fatalf("classification = %s/%s, want structured HTTP rate limit", got.Code, got.ClassifierRule)
+		}
+		if got.ResetHint == nil || !got.ResetHint.Equal(want) || !got.ResetHintInferred {
+			t.Fatalf("reset hint = %v inferred=%t, want %s inferred from Devin notice", got.ResetHint, got.ResetHintInferred, want)
+		}
+	})
+
+	t.Run("explicit reset takes precedence", func(t *testing.T) {
+		explicit := observedAt.Add(2 * time.Hour)
+		got := Classify(Input{
+			HTTPStatus: http.StatusTooManyRequests, ProviderID: providerDevinACP,
+			Phase: PhasePromptSend, OccurredAt: observedAt, ResetHint: &explicit,
+			Stderr: notice,
+		})
+		if got.Code != CodeRateLimited || got.ClassifierRule != ruleHTTP429 {
+			t.Fatalf("classification = %s/%s, want structured HTTP rate limit", got.Code, got.ClassifierRule)
+		}
+		if got.ResetHint == nil || !got.ResetHint.Equal(explicit) || got.ResetHintInferred {
+			t.Fatalf("reset hint = %v inferred=%t, want explicit %s", got.ResetHint, got.ResetHintInferred, explicit)
+		}
+	})
+
+	t.Run("unmatched text cannot supply a reset", func(t *testing.T) {
+		got := Classify(Input{
+			HTTPStatus: http.StatusTooManyRequests, ProviderID: providerDevinACP,
+			Phase: PhasePromptSend, OccurredAt: observedAt,
+			Stderr: "Another job: reset in 2 minutes (at 11:55 UTC)",
+		})
+		if got.Code != CodeRateLimited || got.ClassifierRule != ruleHTTP429 || got.ResetHint != nil {
+			t.Fatalf("classification = %s/%s reset=%v, want structured rate limit without inferred reset", got.Code, got.ClassifierRule, got.ResetHint)
+		}
+	})
 }
 
 func TestClassifyDevinFreeModelRateLimitRejectsUnrelatedText(t *testing.T) {

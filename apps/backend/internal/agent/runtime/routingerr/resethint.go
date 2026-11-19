@@ -138,10 +138,10 @@ func parseResetClockHintAt(text string, now time.Time) *time.Time {
 }
 
 // parseResetAtClockHintAt derives the next occurrence of Devin's explicit
-// reset clock. The notice carries no date, so the clock is resolved against
-// today in the stated zone and the following calendar day. When the notice
-// also states a relative duration, the occurrence closest to now+duration wins:
-// a clock that has just elapsed by a few seconds must not roll a whole day.
+// reset clock. The notice carries no date, so the clock is resolved near the
+// estimated reset date in the stated zone. When the notice also states a
+// relative duration, the occurrence closest to now+duration wins: a clock that
+// has just elapsed by a few seconds must not roll a whole day.
 func parseResetAtClockHintAt(text string, now time.Time) *time.Time {
 	match := resetAtClockHintPattern.FindStringSubmatch(text)
 	if match == nil {
@@ -200,13 +200,13 @@ func resolveResetAtClock(
 	if !hasDuration {
 		return nextDailyResetAt(now, hour, minute, location)
 	}
-	localNow := now.In(location)
-	firstDate := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, time.UTC)
 	target := now.Add(duration)
+	localTarget := target.In(location)
+	firstDate := time.Date(localTarget.Year(), localTarget.Month(), localTarget.Day(), 0, 0, 0, 0, time.UTC)
 	var best time.Time
 	var bestDelta time.Duration
 	found := false
-	for dayOffset := 0; dayOffset <= 1; dayOffset++ {
+	for dayOffset := -1; dayOffset <= 1; dayOffset++ {
 		for _, candidate := range resetClockWallTimeInstants(firstDate.AddDate(0, 0, dayOffset), hour, minute, location) {
 			delta := candidate.Sub(target)
 			if delta < 0 {

@@ -9,6 +9,7 @@ const (
 	ruleOpenCodeUsageLimit      = "opencode.stderr.usage_limit.v1"
 	ruleOpenCodeCredit          = "opencode.stderr.credit.v1"
 	ruleDevinFreeModelRateLimit = "devin.stderr.free_model_rate_limit.v1"
+	ruleHTTP429                 = "http.429"
 	providerClaudeACP           = "claude-acp"
 	providerOpenCodeACP         = "opencode-acp"
 	providerAntigravityACP      = "antigravity-acp"

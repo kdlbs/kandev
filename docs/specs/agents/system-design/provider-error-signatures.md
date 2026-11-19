@@ -259,12 +259,18 @@ match the shared `rate limit exceeded/reached` signature, so no other rule
 changes.
 
 `ruleUsesScopedTextReset` includes the rule, so only the matched line can
-supply a reset. When no structured hint exists, `Classify` calls
-`parseResetAtClockHintAt` for this rule and marks `ResetHintInferred`. The
-clock has no date: `resolveResetAtClock` evaluates today's and the next day's
-occurrence in the stated zone and picks the one closest to observation time
-plus the line's relative duration (`in N hours M minutes`, bounded to 24 hours
-and 59 minutes). Without a usable duration, `nextDailyResetAt`, the existing
+supply a reset. When no explicit reset hint exists, `Classify` calls
+`parseResetAtClockHintAt` for this rule and marks `ResetHintInferred`. A
+structured HTTP 429 keeps its `http.429` classification, but the matched Devin
+line can supply an inferred reset when the response has no reset hint. An
+explicit reset hint always takes precedence.
+
+The clock has no date. With a valid relative duration, `resolveResetAtClock`
+estimates the reset time as observation time plus the duration, then compares
+the clock occurrence on that local date and the adjacent calendar dates in the
+stated zone. This handles clocks just before or after midnight and durations
+that reach beyond the next date. The duration is bounded to 24 hours and 59
+minutes. Without a usable duration, `nextDailyResetAt`, the existing
 clock-only rule extracted from the Claude parser, picks the first occurrence
 after observation time. A hint that has just elapsed only lets routing retry
 sooner; it never parks the candidate for a day.

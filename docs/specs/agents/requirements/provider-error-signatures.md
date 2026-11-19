@@ -115,12 +115,13 @@ errors does not take its own healthy account out of rotation.
   classify as high-confidence `rate_limited` (transient, fallback allowed).
   Matching is case-insensitive, accepts horizontal whitespace between words,
   and ignores fenced code examples, mid-sentence prose, and other providers.
-  When that line carries an `(at HH:MM <zone>)` clock, the reset hint is the
-  occurrence of that clock, today or on the next day in the stated zone, that
-  is closest to the observation time plus the line's relative `in N hours M
-  minutes` duration; without a usable duration it is the first occurrence
-  after the observation time. Only the matched line may supply the clock, and
-  a line without a clock classifies without a reset hint.
+  When that line carries an `(at HH:MM <zone>)` clock and a valid relative
+  duration, the reset hint is the occurrence of that clock on the estimated
+  reset date or either adjacent calendar date in the stated zone that is
+  closest to the observation time plus the duration. Without a usable duration,
+  use the first occurrence after the observation time. Only the matched line
+  may supply the clock, and a line without a clock classifies without a reset
+  hint.
 
 Criterion 001.11 was added by the October 28
 [OpenCode capacity package](../../../plans/opencode-capacity-retry/plan.md).

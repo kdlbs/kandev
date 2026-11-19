@@ -43,12 +43,16 @@ classifies as high-confidence `rate_limited` with fallback allowed, and its
    an `Error:` label classifies as high-confidence transient `rate_limited`
    with fallback allowed in the prompt-send and streaming phases, with an
    inferred reset at the stated clock.
-2. A clock that elapsed seconds ago with `in 1 minute` or `in 0 minutes`
-   resolves to the same day; a duration that crosses midnight resolves to the
-   next day; a notice without a duration rolls an elapsed clock to the next day.
+2. Relative duration selects the clock occurrence closest to the estimated
+   reset date, including the prior date when the clock elapsed just after
+   midnight and dates beyond the next calendar day. Without a usable duration,
+   a clock-only notice selects the first occurrence after observation time.
 3. Prose, mid-sentence quotes, fenced examples, incomplete notices, a missing
    word boundary, and other providers stay unmatched; an unrelated clock on
    another line never becomes the reset.
+4. A structured HTTP 429 for `devin-acp` keeps the `http.429` classification.
+   Without an explicit reset hint, only a matched Devin notice may supply an
+   inferred reset. An explicit reset hint keeps precedence.
 
 ## Verification
 
