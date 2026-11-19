@@ -44,8 +44,9 @@ not have to notice the failure and retry by hand.
   through runtime retry recovery, keeping the session's profile and resume
   token.
 - **AC-TASKS-TRANSIENT-LAUNCH-RETRY-001.2:** The system shall not retry a
-  launch failure that is not transient, a failure of an Office or automation
-  task, or a session parked by a workflow profile switch.
+  launch failure that is not transient, a cancelled launch (for example a user
+  stop while the agent runtime is still starting), a failure of an Office or
+  automation task, or a session parked by a workflow profile switch.
 - **AC-TASKS-TRANSIENT-LAUNCH-RETRY-001.3:** When the retried launch fails
   again, the task shall stay `FAILED` with its existing recovery actions, and
   the system shall log the cause. A session shall not be retried automatically

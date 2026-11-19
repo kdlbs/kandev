@@ -3676,6 +3676,7 @@ func (s *Service) Stop() error {
 		return ErrServiceNotRunning
 	}
 	s.running = false
+	cancelLaunchRetries, launchRetryWorkers := s.closeTransientLaunchRetries()
 	recoveryLifecycleCancel := s.recoveryLifecycleCancel
 	stopRecoveryParent := s.stopRecoveryParent
 	s.recoveryLifecycleCtx = nil
@@ -3690,7 +3691,7 @@ func (s *Service) Stop() error {
 	}
 
 	s.logger.Info("stopping orchestrator service")
-	s.stopTransientLaunchRetries()
+	s.awaitTransientLaunchRetries(cancelLaunchRetries, launchRetryWorkers)
 	// Stop owns every in-flight resume attempt. Its detached request context
 	// must not let startup callbacks outlive the service generation.
 	s.cancelResumeAttempts()

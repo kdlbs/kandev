@@ -11,9 +11,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -31,6 +33,9 @@ func TestIsTransientLaunchFailure(t *testing.T) {
 		nil,
 		errors.New("fatal: couldn't find remote ref feature/deleted-pr"),
 		errors.New("repository has no clone URL"),
+		context.Canceled,
+		fmt.Errorf("agentctl not ready: %w", context.Canceled),
+		errors.New("agentctl not ready: context canceled"),
 	} {
 		if isTransientLaunchFailure(err) {
 			t.Fatalf("%v was classified as transient", err)
@@ -410,4 +415,95 @@ func TestStopTransientLaunchRetriesCancelsPendingRetry(t *testing.T) {
 	svc.launchRetries.Wait()
 
 	require.False(t, called.Load(), "no relaunch may run once the service is stopping")
+	_, claimed := svc.transientLaunchRetries.Load("session2")
+	require.False(t, claimed, "a refused retry does not consume the session's attempt")
+}
+
+// A user stop while agentctl is still starting surfaces as a cancelled launch
+// that the executor records FAILED; it is never retried.
+func TestTransientLaunchRetry_CancelledLaunchIsNotRetried(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-cancelled-launch", "session-cancelled-launch", models.TaskSessionStateCreated)
+	launchErr := fmt.Errorf("agentctl not ready: %w", context.Canceled)
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task-cancelled-launch"] = &v1.Task{
+		ID: "task-cancelled-launch", WorkspaceID: "ws1", WorkflowID: "wf1", State: v1.TaskStateInProgress,
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor.SetOnSessionStateChange(func(callbackCtx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
+		svc.updateTaskSessionState(callbackCtx, taskID, sessionID, state, errorMessage, true)
+		return nil
+	})
+	svc.executor.SetOnTaskStateChange(func(callbackCtx context.Context, taskID string, state v1.TaskState) error {
+		_, _, err := repo.UpdateTaskStateIfNotArchived(callbackCtx, taskID, state)
+		return err
+	})
+	svc.executor.SetOnLaunchFailureRecorded(svc.handleRecordedLaunchFailure)
+	svc.launchRetryDelay = time.Millisecond
+	called := atomic.Bool{}
+	svc.launchRetry = func(context.Context, string, string) error {
+		called.Store(true)
+		return nil
+	}
+
+	_, err := svc.StartCreatedSession(ctx, "task-cancelled-launch", "session-cancelled-launch", "profile1", "start", true, false, false, nil, nil)
+	require.ErrorIs(t, err, context.Canceled)
+	svc.stopTransientLaunchRetries()
+	require.False(t, called.Load(), "a cancelled launch is not retried")
+	_, claimed := svc.transientLaunchRetries.Load("session-cancelled-launch")
+	require.False(t, claimed)
+}
+
+// Stop closes the retries under the service mutex and cancels the closed
+// generation afterwards; a Start that runs in between keeps its new generation.
+func TestTransientLaunchRetriesSurviveStartBetweenCloseAndAwait(t *testing.T) {
+	svc := &Service{logger: testLogger()}
+	svc.resetTransientLaunchRetries()
+	_, workers, started := svc.beginTransientLaunchRetryWorker()
+	require.True(t, started)
+	workers.Done()
+
+	cancelClosed, closedWorkers := svc.closeTransientLaunchRetries()
+	svc.resetTransientLaunchRetries()
+	svc.awaitTransientLaunchRetries(cancelClosed, closedWorkers)
+
+	workerCtx, workers, started := svc.beginTransientLaunchRetryWorker()
+	require.True(t, started, "the restarted service accepts automatic retries")
+	workers.Done()
+	require.NoError(t, workerCtx.Err(), "the late cancel did not reach the new generation")
+	svc.stopTransientLaunchRetries()
+	require.Error(t, workerCtx.Err())
+}
+
+// A real Stop then Start keeps automatic retries available.
+func TestServiceRestartReopensTransientLaunchRetries(t *testing.T) {
+	log := testLogger()
+	repo := setupTestRepo(t)
+	svc := NewService(DefaultServiceConfig(), bus.NewMemoryEventBus(log), &mockAgentManager{repoForExecutionLookup: repo},
+		newMockTaskRepo(), repo, nil, nil, nil, log)
+	svc.SetWorkflowStepGetter(newMockStepGetter())
+	svc.SetBackgroundProbe(&spyBackgroundProbe{})
+	svc.SetTurnService(taskservice.NewService(taskservice.Repos{
+		Tasks: repo, TaskRepos: repo, Workspaces: repo, Workflows: repo, Messages: repo,
+		Turns: repo, Sessions: repo, Executors: repo, TaskEnvironments: repo,
+	}, bus.NewMemoryEventBus(log), log, taskservice.RepositoryDiscoveryConfig{}))
+	ctx := context.Background()
+
+	require.NoError(t, svc.Start(ctx))
+	require.NoError(t, svc.Stop())
+	_, _, open := svc.beginTransientLaunchRetryWorker()
+	require.False(t, open, "a stopped service accepts no automatic retry")
+
+	require.NoError(t, svc.Start(ctx))
+	t.Cleanup(func() { _ = svc.Stop() })
+	workerCtx, workers, open := svc.beginTransientLaunchRetryWorker()
+	require.True(t, open, "a restarted service accepts automatic retries")
+	workers.Done()
+	require.NoError(t, workerCtx.Err(), "the restarted worker context is live")
 }

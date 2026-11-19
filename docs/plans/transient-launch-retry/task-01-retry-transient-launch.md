@@ -87,3 +87,13 @@ bash scripts/lint-go-changed $(git diff --name-only origin/main -- 'apps/backend
   agent start settles. The focused retry suite passed with and without `-race`.
   `scripts/lint-go-changed` reported no issues. Specification validation and
   specification lint passed.
+- Contributor follow-up on top of the maintainer fixup:
+  `TestTransientLaunchRetry_CancelledLaunchIsNotRetried` (a real `LaunchAgent`
+  failure with `agentctl not ready: context canceled`) and the cancellation
+  cases of `TestIsTransientLaunchFailure` failed before the cancellation rule;
+  `TestStopTransientLaunchRetriesCancelsPendingRetry` now also checks that a
+  refused retry keeps the session's attempt;
+  `TestTransientLaunchRetriesSurviveStartBetweenCloseAndAwait` covers a Start
+  between Stop's close and its wait; and
+  `TestServiceRestartReopensTransientLaunchRetries` drives a real `Start`,
+  `Stop`, and `Start`.

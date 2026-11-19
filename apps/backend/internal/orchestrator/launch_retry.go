@@ -96,10 +96,15 @@ func isTransientLaunchFailure(err error) bool {
 	if err == nil {
 		return false
 	}
+	message := strings.ToLower(err.Error())
+	// A cancelled launch was stopped on purpose, for example by the user, even
+	// when the cancellation surfaced while agentctl was still starting.
+	if errors.Is(err, context.Canceled) || strings.Contains(message, context.Canceled.Error()) {
+		return false
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
-	message := strings.ToLower(err.Error())
 	for _, text := range transientLaunchFailureText {
 		if strings.Contains(message, text) {
 			return true
@@ -159,15 +164,16 @@ func (s *Service) scheduleTransientLaunchRetryForFailure(
 	if _, parked := models.LoadWorkflowParking(session.Metadata); parked {
 		return
 	}
+	workerCtx, workers, ok := s.beginTransientLaunchRetryWorker()
+	if !ok {
+		return
+	}
 	if !s.claimTransientLaunchRetry(sessionID) {
+		workers.Done()
 		s.logger.Warn("automatic launch retry already attempted; keeping the task FAILED",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(launchErr))
-		return
-	}
-	workerCtx, workers, ok := s.beginTransientLaunchRetryWorker()
-	if !ok {
 		return
 	}
 	s.logger.Info("scheduling one automatic retry after a transient launch failure",
@@ -244,11 +250,22 @@ func (s *Service) beginTransientLaunchRetryWorker() (context.Context, *sync.Wait
 // stopTransientLaunchRetries cancels pending automatic retries and waits for
 // their workers, bounded so shutdown cannot hang on a slow relaunch.
 func (s *Service) stopTransientLaunchRetries() {
+	s.awaitTransientLaunchRetries(s.closeTransientLaunchRetries())
+}
+
+// closeTransientLaunchRetries refuses new automatic retries and returns the
+// current worker generation. Stop calls it under the service mutex, so a racing
+// Start resets only after it and its fresh generation stays open.
+func (s *Service) closeTransientLaunchRetries() (context.CancelFunc, *sync.WaitGroup) {
 	s.launchRetryMu.Lock()
+	defer s.launchRetryMu.Unlock()
 	s.launchRetryStopped = true
-	cancel := s.launchRetryCancel
-	workers := s.launchRetries
-	s.launchRetryMu.Unlock()
+	return s.launchRetryCancel, s.launchRetries
+}
+
+// awaitTransientLaunchRetries cancels a closed worker generation and waits for
+// its workers, bounded by the shared shutdown timeout.
+func (s *Service) awaitTransientLaunchRetries(cancel context.CancelFunc, workers *sync.WaitGroup) {
 	if cancel != nil {
 		cancel()
 	}
