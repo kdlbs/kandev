@@ -91,11 +91,10 @@ func (m *bootstrapJobManager) start(
 	go func() {
 		defer m.workers.Done()
 		response, publicError := prepare(ctx)
-		if ctx.Err() != nil {
+		if publicError != "" {
 			response = nil
-			if publicError == "" {
-				publicError = "bootstrap preparation was interrupted"
-			}
+		} else if ctx.Err() != nil && response == nil {
+			publicError = "bootstrap preparation was interrupted"
 		}
 		cancel()
 		m.finish(id, response, publicError)

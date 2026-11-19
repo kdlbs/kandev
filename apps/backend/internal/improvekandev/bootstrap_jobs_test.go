@@ -40,6 +40,33 @@ func TestBootstrapJobManagerScopesOwnerAndExpiresResults(t *testing.T) {
 	require.False(t, ok, "expired results must be removed")
 }
 
+func TestBootstrapJobManagerRetainsSuccessfulResultAfterCancellation(t *testing.T) {
+	manager := newBootstrapJobManager()
+	t.Cleanup(manager.stop)
+	identity := authn.Identity{UserID: "user-1", OrgID: "org-1"}
+	started := make(chan struct{})
+	jobID, err := manager.start(identity, func(ctx context.Context) (*BootstrapResponse, string) {
+		close(started)
+		<-ctx.Done()
+		return &BootstrapResponse{WorkspaceID: "workspace-1"}, ""
+	})
+	require.NoError(t, err)
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("bootstrap worker did not start")
+	}
+
+	manager.stop()
+
+	snapshot, ok := manager.get(jobID, ownerForIdentity(identity))
+	require.True(t, ok)
+	require.False(t, snapshot.pending)
+	require.Empty(t, snapshot.publicError)
+	require.NotNil(t, snapshot.response)
+	require.Equal(t, "workspace-1", snapshot.response.WorkspaceID)
+}
+
 func TestBootstrapJobManagerBoundsActiveJobsAndEvictsFinishedJobs(t *testing.T) {
 	manager := newBootstrapJobManager()
 	t.Cleanup(manager.stop)

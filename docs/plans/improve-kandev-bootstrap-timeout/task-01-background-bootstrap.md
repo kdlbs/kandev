@@ -86,6 +86,9 @@ and a target of at least 44px on phones. Covers
 - Use the deadline regression to show that a worker survives the end of
   the admitting request. Cover failure followed by retry, overlapping
   requests, another caller's status read, and shutdown in the Go tests.
+- Cancel the manager while a worker is held at its completion boundary, then
+  let preparation return success. The successful response must remain ready
+  even when cancellation races with result recording.
 - Use the clone test to show that an interrupted attempt cannot publish
   a partial checkout. Recreate the handler to check that a fresh attempt
   reuses completed resources after the job map is cleared.
@@ -100,15 +103,16 @@ For a fresh worktree, run `(cd apps && pnpm install --frozen-lockfile)` before
 the first frontend command. The shared worktree already had dependencies
 installed, so that setup command was not needed here.
 
-- `bash scripts/lint-go-changed apps/backend/internal/backendapp/helpers.go apps/backend/internal/backendapp/restore_quiesce_test.go apps/backend/internal/improvekandev/handler.go apps/backend/internal/improvekandev/handler_test.go apps/backend/internal/improvekandev/goleak_test.go apps/backend/internal/integration/improve_kandev_bootstrap_jobs_test.go apps/backend/internal/integration/improve_kandev_bootstrap_recovery_test.go apps/backend/internal/integrations/workspacescope/workspacescope.go apps/backend/internal/integrations/workspacescope/workspacescope_test.go apps/backend/internal/repoclone/clone.go apps/backend/internal/repoclone/clone_test.go apps/backend/internal/repoclone/clone_staging_test.go` — 12 changed Go files, 0 lint issues; `gofmt` clean.
+- `bash scripts/lint-go-changed apps/backend/internal/backendapp/helpers.go apps/backend/internal/backendapp/httpserver_test.go apps/backend/internal/backendapp/main.go apps/backend/internal/backendapp/restore_quiesce.go apps/backend/internal/backendapp/restore_quiesce_test.go apps/backend/internal/backendapp/startup_mcp_order_test.go apps/backend/internal/improvekandev/bootstrap_jobs.go apps/backend/internal/improvekandev/bootstrap_jobs_test.go apps/backend/internal/improvekandev/goleak_test.go apps/backend/internal/improvekandev/handler.go apps/backend/internal/improvekandev/handler_test.go apps/backend/internal/integration/improve_kandev_bootstrap_jobs_test.go apps/backend/internal/integration/improve_kandev_bootstrap_recovery_test.go apps/backend/internal/integrations/workspacescope/workspacescope.go apps/backend/internal/integrations/workspacescope/workspacescope_test.go apps/backend/internal/repoclone/checkout_options.go apps/backend/internal/repoclone/clone.go apps/backend/internal/repoclone/clone_staging_test.go apps/backend/internal/repoclone/clone_test.go` — all 19 changed Go files, 0 lint issues.
 - `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/backendapp ./internal/improvekandev ./internal/integration ./internal/repoclone ./internal/integrations/workspacescope -count=1)` — passed.
+- `go test -v -run '^TestBootstrapJobManagerRetainsSuccessfulResultAfterCancellation$' ./internal/improvekandev` — passed after the test first reproduced the interrupted-result regression.
 - `(cd apps/backend && go test -c -trimpath -tags fts5 -o /tmp/repoclone-staging.test ./internal/repoclone && runuser -u nobody -- /tmp/repoclone-staging.test -test.run '^TestCloneIntoExistingEmptyDestinationWhenParentIsNotWritable$' -test.count=1)` — passed as an unprivileged user.
 - `(cd apps/backend && make build)` — passed.
 - `(cd apps/web && pnpm exec vitest run lib/api/domains/improve-kandev-api.test.ts components/improve-kandev-dialog.test.tsx && pnpm run typecheck && pnpm run i18n:check && pnpm run build:vite)` — 23 tests passed; typecheck, i18n checks, and Vite production build passed.
 - `(cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --no-build --project chromium tests/improve-kandev.spec.ts -g 'retries a failed bootstrap')` — passed.
 - `(cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --no-build --project mobile-chrome tests/mobile-improve-kandev.spec.ts)` — passed at 700px touch width; Retry target measured at least 44px.
 - `node --test scripts/validate-public-docs.test.mjs .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs` — 174 tests passed.
-- `python3 scripts/list-docs.py validate` — passed; 457 decisions and 2,046 specifications validated.
+- `python3 scripts/list-docs.py validate` — passed; 457 decisions and 2,048 specifications validated.
 - `python3 scripts/lint-spec-files.py --all` — passed.
 - `node scripts/validate-public-docs.mjs` — passed; 55 published pages validated.
 - `git diff --check` — passed.
@@ -153,6 +157,10 @@ empty-target compatibility, lock cancellation, cold overlapping attempts, and
 recovery of a repository row whose checkout is missing. Integration fixtures
 close their servers before database cleanup. The desktop and phone retries keep
 the draft, and the phone retry target is at least 44px.
+
+The job manager also keeps a successful preparation response when cancellation
+arrives just before the worker records its result. A deterministic test cancels
+the manager while preparation is gated, then returns a successful response.
 
 The UI behavior remains covered by the existing public recovery guidance in
 `docs/public/use-kandev.md`; this remediation changed no public contract or
