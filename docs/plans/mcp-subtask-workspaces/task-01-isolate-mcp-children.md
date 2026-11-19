@@ -78,6 +78,7 @@ Run from the repository root. Run the new handler regression before changing
 production code and require the baseline failure.
 
 ```bash
+(cd apps && pnpm install --frozen-lockfile)
 (cd apps/backend && go test ./internal/mcp/handlers ./internal/mcp/server -count=1)
 (cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --shards 1 --project containers tests/kubernetes/kubernetes-inherited-workspace.spec.ts)
 node --test scripts/validate-public-docs.test.mjs

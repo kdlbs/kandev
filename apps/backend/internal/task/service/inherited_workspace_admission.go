@@ -130,7 +130,7 @@ func activeInheritedWorktreeMatches(
 	if len(canonical) > 0 {
 		return canonical
 	}
-	if !inheritedRepositoryHasBranchScopedRows(repository.RepositoryID, environmentID, rows) {
+	if !inheritedRepositoryHasBranchScopedRows(repository, environmentID, rows) {
 		legacy := make([]*models.TaskEnvironmentRepo, 0, 1)
 		for _, row := range rows {
 			if inheritedWorktreeInventoryRowEligible(row, repository, environmentID) && row.BranchSlug == "" {
@@ -167,18 +167,26 @@ func inheritedWorktreeInventoryRowEligible(
 	repository TaskRepositoryInput,
 	environmentID string,
 ) bool {
-	return row != nil && row.TaskEnvironmentID == environmentID && row.RepositoryID == repository.RepositoryID &&
-		row.WorkspaceRelativePath == repository.WorkspaceRelativePath && row.WorktreeID != "" && row.DeletedAt == nil &&
-		row.Status != inheritedWorkspaceRepoStatusFailed && row.Status != inheritedWorkspaceRepoStatusDeleted &&
-		row.Status != models.TaskEnvironmentRepoStatusDetached
+	return inheritedWorktreeInventoryRowLive(row, repository.RepositoryID, environmentID) &&
+		row.WorkspaceRelativePath == repository.WorkspaceRelativePath
+}
+
+func inheritedWorktreeInventoryRowLive(
+	row *models.TaskEnvironmentRepo,
+	repositoryID, environmentID string,
+) bool {
+	return row != nil && row.TaskEnvironmentID == environmentID && row.RepositoryID == repositoryID &&
+		row.WorktreeID != "" && row.DeletedAt == nil && row.Status != inheritedWorkspaceRepoStatusFailed &&
+		row.Status != inheritedWorkspaceRepoStatusDeleted && row.Status != models.TaskEnvironmentRepoStatusDetached
 }
 
 func inheritedRepositoryHasBranchScopedRows(
-	repositoryID, environmentID string,
+	repository TaskRepositoryInput,
+	environmentID string,
 	rows []*models.TaskEnvironmentRepo,
 ) bool {
 	for _, row := range rows {
-		if row != nil && row.TaskEnvironmentID == environmentID && row.RepositoryID == repositoryID &&
+		if inheritedWorktreeInventoryRowLive(row, repository.RepositoryID, environmentID) &&
 			worktree.SanitizeBranchSlug(row.BranchSlug) != "" {
 			return true
 		}
@@ -273,7 +281,11 @@ func countActiveInventoryMatches(
 	repository TaskRepositoryInput,
 	rows []*models.TaskEnvironmentRepo,
 ) int {
-	expectedBranch := worktree.SanitizeBranchSlug(repository.BaseBranch)
+	branch := repository.CheckoutBranch
+	if branch == "" {
+		branch = repository.BaseBranch
+	}
+	expectedBranch := worktree.SanitizeBranchSlug(branch)
 	hasBranchScopedRow := false
 	for _, row := range rows {
 		if row != nil && row.RepositoryID == repository.RepositoryID &&

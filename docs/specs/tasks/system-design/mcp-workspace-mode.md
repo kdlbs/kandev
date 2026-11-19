@@ -152,11 +152,14 @@ checkout name as reuse-only in the existing repository metadata.
 Extend `ValidateInheritedWorkspaceRepositorySelection` to check copied slots
 after external-ID lookup and before insertion. For a ready Worktree parent,
 use the existing branch identity planner and include relative placement in
-the match. A named branch can also identify its unique active holder at that
-placement. Each slot needs a distinct eligible row. Count only live Worktree
-rows with a worktree ID. On failure, return the repository and requested
-checkout or base through the existing validation response. If the parent is
-still preparing, the existing launch check runs once inventory is ready.
+the match, following the same canonical slot rules as launch. Keep distinct
+row selection. When no canonical slot matches, the exact Git branch name may
+identify its unique active holder at that placement; reject multiple holders.
+Retain launch compatibility for a legacy unscoped Worktree row when no scoped
+rows for that repository are live. Count only live Worktree rows with a
+worktree ID. On failure, return the repository and requested checkout or base
+through the existing validation response. If the parent is still preparing,
+the existing launch check runs once inventory is ready.
 
 The existing launch matcher and workspace group binding reuse the worktree
 IDs. Use the copied name to derive the slot. Omit that name from fresh Git

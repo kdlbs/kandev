@@ -149,4 +149,6 @@ Review regressions pass: first launch after an executor mismatch clears a
 copied secondary checkout selector while preserving its branch identity and
 explicit pins; canonical slots win over colliding branch slugs; one legacy
 unscoped Worktree row remains launch-compatible; and exact branch-name
-fallback rejects ambiguous named holders without a canonical slot.
+fallback rejects ambiguous named holders without a canonical slot. Inactive
+scoped rows do not suppress a live legacy fallback, while a live scoped row at
+another placement prevents that fallback for the repository.

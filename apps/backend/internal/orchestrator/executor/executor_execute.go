@@ -2989,6 +2989,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if err != nil {
 		return nil, execConfig, err
 	}
+	if req.UseWorktree && !req.WorkspaceReuseRequired {
+		applyFreshInheritedCheckoutIdentity(req, repoInfo.RepositoryID, allRepos)
+	}
 	// Multi-repo: when more than one repository is associated with the task,
 	// populate req.Repositories so the lifecycle preparer creates one worktree
 	// per repo. The legacy single-repo top-level fields above stay populated

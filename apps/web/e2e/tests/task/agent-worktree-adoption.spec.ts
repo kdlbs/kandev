@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
+import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import {
+  agentWorktreeGroup,
   agentWorktreePrompt,
   AGENT_WORKTREE_BRANCH,
   AGENT_WORKTREE_FILE,
@@ -18,6 +20,33 @@ import { SessionPage } from "../../pages/session-page";
 type MCPChild = Awaited<ReturnType<typeof inspectMCPChild>>;
 type TaskEnvironment = NonNullable<Awaited<ReturnType<ApiClient["getTaskEnvironment"]>>>;
 type EnvironmentRepository = NonNullable<TaskEnvironment["repos"]>[number];
+
+async function waitForMCPChildChanges(page: Page) {
+  const session = new SessionPage(page);
+  await session.waitForLoad();
+  await session.waitForChatIdle();
+  await session.clickTab("Changes");
+}
+
+async function expectMCPChildChanges(page: Page, shared: boolean) {
+  if (shared) {
+    const group = await expectAgentWorktreeGroup(page);
+    await expect(group.getByText(AGENT_WORKTREE_FILE, { exact: true })).toBeVisible();
+    return;
+  }
+  await expect(agentWorktreeGroup(page)).toHaveCount(0);
+  await expect(page.getByText(AGENT_WORKTREE_FILE, { exact: true })).toHaveCount(0);
+}
+
+async function expectMCPChildWorkspaceInChanges(page: Page, taskId: string, shared: boolean) {
+  await page.goto(`/t/${taskId}`);
+  await waitForMCPChildChanges(page);
+  await expectMCPChildChanges(page, shared);
+
+  await page.reload();
+  await waitForMCPChildChanges(page);
+  await expectMCPChildChanges(page, shared);
+}
 
 async function waitForMCPChildren(
   apiClient: ApiClient,
@@ -271,5 +300,8 @@ test.describe("Agent worktree adoption", () => {
       }),
     );
     expectMCPWorkspaceOutcomes(children, parentEnvironment, adopted);
+    for (const child of children) {
+      await expectMCPChildWorkspaceInChanges(testPage, child.task.id, child.key === "shared");
+    }
   });
 });

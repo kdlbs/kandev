@@ -3,8 +3,10 @@ created: 2026-11-18
 status: completed
 requirements:
   - REQ-TASKS-MCP-WORKSPACE-MODE-004
+  - REQ-WORKSPACES-WORKTREE-BASE-REFRESH-001
 system_design:
   - ../../specs/tasks/system-design/mcp-workspace-mode.md
+  - ../../specs/workspaces/system-design/worktree-base-refresh.md
 legacy_specs: []
 ---
 
@@ -86,7 +88,7 @@ for a fresh child and keep identity for every shared checkout.
 | `004.5`, `004.8`, `004.9` | New `TestMCPSubtaskSharedWorkspaceRepositorySelection` exercises create-time validation with SQLite. Cover valid mixed inventory, missing and ambiguous slots, and absence of task/session writes in this test. Keep the explicit selection and override regressions. |
 | `004.8` and executor transition | New `TestInheritedCheckoutSelectorsStayOutOfMaterialization` covers the lifecycle request. Existing canonical slot and inherited launch tests cover eligibility and binding. |
 | `004.8` and first launch after executor mismatch | `TestLaunchPreparedSession_InheritedExecutorMismatchDoesNotPinCopiedSecondaryCheckout` checks that a copied secondary selector is cleared, its slot identity remains, and an explicit checkout pin survives. |
-| `004.5`, `004.8`, and `004.9` | MCP handler cases cover slug-colliding managed checkouts, a legacy unscoped slot, and named-holder ambiguity without an exact canonical slot. |
+| `004.5`, `004.8`, and `004.9` | MCP handler and task-service cases cover slug-colliding managed checkouts, a legacy unscoped slot, inactive scoped rows, a live scoped row at another placement, and named-holder ambiguity without an exact canonical slot. |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.25` | The fresh selection override regression checks persisted explicit provenance and strict base fallback policy. |
 
 The new MCP handler tests assert successful creation for the reported
