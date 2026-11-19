@@ -112,6 +112,26 @@ func (c *Controller) SetNativeUpdateCheckRunner(runner nativeUpdateCheckRunner) 
 	// Active identities are kept so their epochs stay monotonic.
 }
 
+// DisableNativeUpdateCheckExecution makes every native check report
+// not_installed without starting a process. Fixture backends whose release
+// lookups are canned use it so status never runs a host executable or reaches
+// a real release feed.
+func (c *Controller) DisableNativeUpdateCheckExecution() {
+	c.SetNativeUpdateCheckRunner(offlineNativeUpdateCheckRunner{})
+}
+
+type offlineNativeUpdateCheckRunner struct{}
+
+func (offlineNativeUpdateCheckRunner) Resolve(agents.Command) (string, error) {
+	return "", errNativeUpdateCheckOffline
+}
+
+func (offlineNativeUpdateCheckRunner) Environment() []string { return nil }
+
+func (offlineNativeUpdateCheckRunner) Run(context.Context, agents.Command) nativeUpdateCheckRun {
+	return nativeUpdateCheckRun{Reason: agents.NativeUpdateCheckReasonNotInstalled}
+}
+
 func (c *Controller) nativeRunner() nativeUpdateCheckRunner {
 	c.runtimeUpdateStatusMu.Lock()
 	defer c.runtimeUpdateStatusMu.Unlock()

@@ -331,3 +331,24 @@ func TestNativeCheckOverlayResolvesAgainstPhysicalWorkingDir(t *testing.T) {
 	_ = h.status(t, ompAgentID)
 	requireRuns(t, h.runner, 2, "after editing the overlay OMP reads through the physical directory")
 }
+
+// A fixture backend with canned release lookups must never run a host agent
+// CLI for a native check, even when one is on PATH.
+func TestNativeCheckDisabledExecutionNeverRunsHostBinary(t *testing.T) {
+	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+	marker := filepath.Join(h.home, "ran")
+	binary := filepath.Join(h.home, "bin", "omp")
+	writeNativeCheckFile(t, binary, "#!/bin/sh\ntouch "+marker+"\n")
+	if err := os.Chmod(binary, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Dir(binary))
+	h.ctrl.DisableNativeUpdateCheckExecution()
+	status := h.status(t, ompAgentID)
+	if status.CheckState != dto.AgentUpdateCheckStateUnknown || status.CheckReason != dto.AgentUpdateCheckReason(agents.NativeUpdateCheckReasonNotInstalled) {
+		t.Errorf("status = %+v, want unknown/not_installed", status)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the host omp binary ran")
+	}
+}

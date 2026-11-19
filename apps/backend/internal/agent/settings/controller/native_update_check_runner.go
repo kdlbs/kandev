@@ -29,6 +29,7 @@ var (
 	errNativeUpdateCheckTimeout     = errors.New("native update check timed out")
 	errNativeUpdateCheckOutputLimit = errors.New("native update check output limit exceeded")
 	errNativeUpdateCheckEmpty       = errors.New("native update check command is empty")
+	errNativeUpdateCheckOffline     = errors.New("native update check execution is disabled")
 )
 
 // nativeUpdateCheckRun is one finished check. Output is set only when Reason

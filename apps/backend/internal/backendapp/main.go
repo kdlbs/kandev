@@ -1392,6 +1392,9 @@ func startGatewayAndServe(
 	e2eRuntimeUpdateHooks := newE2ERuntimeUpdateHooks()
 	if e2eRuntimeUpdateHooks != nil {
 		agentSettingsController.SetRuntimeUpdateStatusResolver(e2eRuntimeUpdateHooks.resolveLatestVersion)
+		// Canned release lookups also cover native checks: never run a host
+		// agent CLI or reach a real release feed from a fixture backend.
+		agentSettingsController.DisableNativeUpdateCheckExecution()
 	}
 	// Build the real router and register all handlers, which wires the real
 	// dispatcher into lifecycleMgr.SetMCPHandler and installs MCP scope handlers

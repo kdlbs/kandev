@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -103,30 +104,48 @@ func TestNativeCheckCacheTTLsAndSingleFlight(t *testing.T) {
 		requireRuns(t, h.runner, 2, "after a cancelled check")
 	})
 	t.Run("concurrent requests share one run", func(t *testing.T) {
-		h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
-		h.runner.setOutput(ompUpToDate, 0)
-		started, release := h.runner.gated()
-		var wg sync.WaitGroup
-		statuses := make([]dto.AgentUpdateStatusDTO, 4)
-		for i := range statuses {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				result, err := h.ctrl.ListAgentUpdateStatuses(context.Background())
-				if err == nil && len(result.Statuses) == 1 {
-					statuses[i] = result.Statuses[0]
-				}
-			}()
-		}
-		<-started
-		release()
-		wg.Wait()
-		requireRuns(t, h.runner, 1, "concurrent requests")
-		for _, status := range statuses {
-			if status.CheckState != dto.AgentUpdateCheckStateUpToDate {
-				t.Errorf("subscriber status = %+v", status)
+		synctest.Test(t, func(t *testing.T) {
+			h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+			h.runner.setOutput(ompUpToDate, 0)
+			_, release := h.runner.gated()
+			var wg sync.WaitGroup
+			statuses := make([]dto.AgentUpdateStatusDTO, 4)
+			for i := range statuses {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					result, err := h.ctrl.ListAgentUpdateStatuses(context.Background())
+					if err == nil && len(result.Statuses) == 1 {
+						statuses[i] = result.Statuses[0]
+					}
+				}()
 			}
-		}
+			cancelled, cancel := context.WithCancel(context.Background())
+			cancelledDone := make(chan struct{})
+			go func() {
+				defer close(cancelledDone)
+				_, _ = h.ctrl.ListAgentUpdateStatuses(cancelled)
+			}()
+			// Every request is now blocked: one in the gated run, the rest
+			// waiting on the shared flight rather than running their own.
+			synctest.Wait()
+			requireRuns(t, h.runner, 1, "while the first run is in flight")
+			cancel()
+			synctest.Wait()
+			select {
+			case <-cancelledDone:
+			default:
+				t.Fatal("a cancelled subscriber did not return while the shared run was in flight")
+			}
+			release()
+			wg.Wait()
+			requireRuns(t, h.runner, 1, "concurrent requests")
+			for _, status := range statuses {
+				if status.CheckState != dto.AgentUpdateCheckStateUpToDate {
+					t.Errorf("subscriber status = %+v", status)
+				}
+			}
+		})
 	})
 }
 
