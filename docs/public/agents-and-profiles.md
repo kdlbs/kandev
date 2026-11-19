@@ -342,10 +342,13 @@ authoritative preview before any update starts. If the check is unavailable,
 the control has no dot but remains usable.
 
 1. Select **Runtime updates**, or select the update icon on an agent card.
-2. Review the current version, active version, available stable versions, and command.
-3. Keep the latest version selected for a normal update, or select an older stable version to roll back.
-4. Select **Update runtime**, **Roll back runtime**, or **Repair runtime**.
+2. Review the current and selected versions.
+3. To choose another stable version or restore the default, select **Change version**.
+4. Select **Update to** for the selected version, or use the action for rollback, repair, or the default.
 5. Wait for the exact version to prepare and pass its runtime capability probe.
+
+**Runtime details** shows the package, who manages it, and any manual update guidance.
+Open **Command Preview** to review the command for the selected version.
 
 OpenCode has two runtime families. Fresh Kandev installations use the managed
 v2 package `@opencode/cli`. Kandev keeps an existing v1 selection on
