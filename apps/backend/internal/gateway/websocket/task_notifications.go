@@ -43,6 +43,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.AgentProfileUpdated, ws.ActionAgentProfileUpdated)
 	b.subscribe(eventBus, events.AgentProfileDeleted, ws.ActionAgentProfileDeleted)
 	b.subscribe(eventBus, events.TaskCreated, ws.ActionTaskCreated)
+	b.subscribe(eventBus, events.TaskUpdated, ws.ActionTaskUpdated)
 	b.subscribe(eventBus, events.TaskReordered, ws.ActionTaskReordered)
 	b.subscribe(eventBus, events.SessionWorkspaceSourcesUpdated, ws.ActionSessionWorkspaceSourcesUpdated)
 	b.subscribe(eventBus, events.TaskDeleted, ws.ActionTaskDeleted)
@@ -138,8 +139,8 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 	b.subscribeWithResolver(eventBus, subject, func(*bus.Event) string { return action })
 }
 
-// subscribeLifecycleStateEvents uses one NATS subscription so session failures
-// reach clients before the task.updated primary promotion they cause.
+// subscribeLifecycleStateEvents uses one NATS subscription so task and session
+// state notifications remain ordered for clients when the event bus is remote.
 func (b *TaskEventBroadcaster) subscribeLifecycleStateEvents(eventBus bus.EventBus) {
 	b.subscribeWithResolver(eventBus, ">", func(event *bus.Event) string {
 		switch event.EffectiveSubject() {
@@ -147,8 +148,6 @@ func (b *TaskEventBroadcaster) subscribeLifecycleStateEvents(eventBus bus.EventB
 			return ws.ActionTaskStateChanged
 		case events.TaskSessionStateChanged:
 			return ws.ActionSessionStateChanged
-		case events.TaskUpdated:
-			return ws.ActionTaskUpdated
 		default:
 			return ""
 		}

@@ -220,9 +220,11 @@ this order producing a demonstrated violation, not merely on running a test.
 
 ## Results
 
-Done: contract conformance. No violation of AC .6 was reproduced on desktop
-or phone, so no failing boundary or owning production file exists. Task 02
-stays blocked. No production file was changed.
+Initial diagnostic checkpoint: done, contract conformance. At that checkpoint,
+no violation of AC .6 was reproduced on desktop or phone; Task 02 was blocked
+and no production file had changed. The later failed-resume focus-loss
+reproduction unblocked the repair, recorded in
+[Task 02's causal reproduction and results](task-02-repair-read-path.md#results).
 
 ### Disposable desktop/phone scenario
 
@@ -327,8 +329,10 @@ stayed read. Backend logs from that day have rotated, so the trigger cannot be
 attributed [INFERENCE: the user viewed it]. This is consistent with the
 conformance above.
 
-### Missing prerequisite for Task 02
+### Historical prerequisite for Task 02
 
-A reproduction where explicitly viewing a stored session leaves its own cursor
-or summary contribution unacknowledged. Neither the disposable desktop/phone
-runs nor the reported task's persisted history shows one.
+At the initial checkpoint, explicitly viewing a stored session did not leave
+its own cursor or summary contribution unacknowledged. That case still conforms.
+The later incident exposed automatic focus loss before history loaded, not a
+failure after explicit viewing. See [Task 02](task-02-repair-read-path.md#results)
+for the causal reproduction, production correction, and independent review loop.

@@ -10,10 +10,6 @@ import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { toKanbanTask } from "@/lib/kanban/map-task";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import { hasPayloadField, mergeTaskUpdate } from "@/lib/ws/handlers/task-merge";
-import {
-  clearPinnedSessionIfOverridden,
-  shouldPreservePinnedSessionForTask,
-} from "@/lib/ws/handlers/agent-session";
 import { syncQuickChatFromTaskEvent } from "@/lib/ws/handlers/quick-chat";
 import {
   archivedTaskWorkspaceId,
@@ -35,9 +31,9 @@ import {
   updateTaskStatusSummaryInBothKanbans,
 } from "@/lib/ws/handlers/task-status-summary";
 import { taskRemovalOwnsDepartureForTask } from "@/lib/state/task-removal";
-import { isSessionRestartPending } from "@/lib/session/session-restart-state";
 import { applyTaskOverviewEvent, applyTaskOverviewPatch } from "./task-overview";
 import { taskOverviewPatch } from "@/lib/state/slices/task-overview-patch";
+import { findTaskInState, followUpdatedTaskPrimary } from "./task-primary-focus";
 const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
 function upsertTask(
@@ -124,17 +120,6 @@ function upsertTaskInBothKanbans(
   next = upsertMultiTask(next, wfId, nextTask, payload);
 
   return next;
-}
-
-/** Look up a task across both single-kanban and multi-kanban snapshots. */
-function findTaskInState(state: AppState, taskId: string): KanbanTask | undefined {
-  const fromKanban = state.kanban.tasks.find((t) => t.id === taskId);
-  if (fromKanban) return fromKanban;
-  for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
-    const found = snapshot.tasks.find((t) => t.id === taskId);
-    if (found) return found;
-  }
-  return undefined;
 }
 
 function taskEventIdForLog(payload: TaskEventPayload): string {
@@ -307,43 +292,6 @@ function removeArchivedTaskSideEffects(store: StoreApi<AppState>, taskId: string
   state.setOfficeRefetchTrigger("tasks");
 }
 
-/** Follows a changed primary only when neither a pending restart nor a user pin owns selection. */
-function maybeFollowUpdatedTaskPrimary(
-  store: StoreApi<AppState>,
-  beforeState: AppState,
-  taskId: string,
-  previousPrimary: string | null,
-  payload: TaskEventPayload,
-): void {
-  // Follow focus to the new primary when:
-  //  - the user is currently viewing this task,
-  //  - the user was sitting on the previous primary,
-  //  - they do NOT have a non-terminal pinned session for this task,
-  //  - the previous primary did not fail, and
-  //  - a real previous primary actually changed.
-  // This makes workflow profile switches transparent for unpinned users
-  // without yanking users off a live session they deliberately selected. A
-  // pinned user whose session is being retired is followed via the session
-  // state-transition handoff (maybeAdoptSessionOnTransition) once that session
-  // actually reaches a terminal state — not from here, where we cannot yet tell
-  // a retirement from a manual "Set as Primary" that leaves the old session live.
-  // A failed primary keeps focus: its failure output and recovery actions
-  // belong on screen, where they are read.
-  const afterState = store.getState();
-  logTaskMerge("task.updated", beforeState, afterState, payload);
-  const newPrimary = findTaskInState(afterState, taskId)?.primarySessionId ?? null;
-  if (!newPrimary || !previousPrimary || newPrimary === previousPrimary) return;
-  const shouldFollow =
-    afterState.tasks.activeTaskId === taskId &&
-    afterState.tasks.activeSessionId === previousPrimary &&
-    afterState.taskSessions?.items?.[previousPrimary]?.state !== "FAILED" &&
-    !isSessionRestartPending(store, previousPrimary) &&
-    !shouldPreservePinnedSessionForTask(afterState, taskId);
-  if (!shouldFollow) return;
-  clearPinnedSessionIfOverridden(store, newPrimary);
-  afterState.setActiveSessionAuto(taskId, newPrimary);
-}
-
 function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessage): void {
   // Ephemeral tasks never reach the Kanban board, but quick chats are shared
   // across devices — mirror them into the tab strip before bailing out.
@@ -396,7 +344,8 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
     return;
   }
 
-  maybeFollowUpdatedTaskPrimary(store, beforeState, taskId, previousPrimary, message.payload);
+  logTaskMerge("task.updated", beforeState, store.getState(), message.payload);
+  followUpdatedTaskPrimary(store, taskId, previousPrimary);
 }
 
 function handleTaskUpsert(

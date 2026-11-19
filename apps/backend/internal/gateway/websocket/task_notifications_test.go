@@ -115,7 +115,6 @@ func TestTaskEventBroadcaster_UsesOrderedWildcardsForRelatedTaskEvents(t *testin
 	orderedSubjects := map[string]bool{
 		events.TaskStateChanged:        true,
 		events.TaskSessionStateChanged: true,
-		events.TaskUpdated:             true,
 		events.MessageAdded:            true,
 		events.MessageUpdated:          true,
 		events.MessageDeleted:          true,
@@ -157,55 +156,6 @@ func TestTaskEventBroadcaster_OrdersLifecycleStateNotifications(t *testing.T) {
 	second := <-hub.broadcast
 	if first.Action != ws.ActionTaskStateChanged || second.Action != ws.ActionSessionStateChanged {
 		t.Fatalf("lifecycle notification order = %q, %q; want task state then session state", first.Action, second.Action)
-	}
-}
-
-func TestTaskEventBroadcaster_OrdersFailureBeforePrimaryPromotion(t *testing.T) {
-	for _, queued := range []bool{false, true} {
-		name := "memory"
-		if queued {
-			name = "nats-callback-queues"
-		}
-		t.Run(name, func(t *testing.T) {
-			log := testLogger()
-			memory := bus.NewMemoryEventBus(log)
-			var eventBus bus.EventBus = memory
-			transport := &queuedTransportEventBus{MemoryEventBus: memory}
-			if queued {
-				eventBus = transport
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			hub := NewHub(nil, log)
-			broadcaster := RegisterTaskNotifications(ctx, eventBus, hub, log)
-			defer broadcaster.Close()
-			require.NoError(t, eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
-				events.TaskSessionStateChanged, "test", map[string]interface{}{
-					"task_id": "task-1", "workspace_id": "ws-1",
-					"session_id": "failed", "new_state": "FAILED",
-				})))
-			require.NoError(t, eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
-				events.TaskUpdated, "test", map[string]interface{}{
-					"task_id": "task-1", "workspace_id": "ws-1", "primary_session_id": "sibling",
-				})))
-			if queued {
-				require.NoError(t, transport.deliverSubjectFirst(ctx, events.TaskUpdated))
-				require.NoError(t, transport.deliverAll(ctx))
-			}
-			for _, action := range []string{ws.ActionSessionStateChanged, ws.ActionTaskUpdated} {
-				select {
-				case notification := <-hub.broadcast:
-					require.Equal(t, action, notification.Action)
-				default:
-					t.Fatalf("missing %s notification", action)
-				}
-			}
-			select {
-			case extra := <-hub.broadcast:
-				t.Fatalf("duplicate notification: %s", extra.Action)
-			default:
-			}
-		})
 	}
 }
 

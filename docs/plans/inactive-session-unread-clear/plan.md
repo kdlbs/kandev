@@ -33,6 +33,14 @@ Task 02 repairs both automatic selection paths, retaining the failed view and
 its recovery controls while normal acknowledgement catches up. Unread scope,
 backend primary promotion, and completed/cancelled handoff remain unchanged.
 
+Generic primary-follow now reads the previous session's authoritative state
+before changing focus. This does not depend on notification order: hub routing
+and session-message barriers can invert frames even after an ordered callback.
+Verification owns a navigation/selection intent, aborts when superseded, and
+never hydrates session/cursor state from its response. The tradeoff is one
+session GET for an eligible generic primary change; explicit workflow focus
+still applies immediately through its existing committed-recipient path.
+
 ## Evidence and confidence
 
 Prior read-only inspection of reported task
@@ -264,7 +272,7 @@ the same causal scenario after Task 01 proves a violation:
 Execute sequentially. No subagent authorization is implied.
 
 - [x] [Task 01: Establish the inactive-session failure boundary](task-01-establish-failure-boundary.md) (done: conformance, no violation reproduced).
-- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: failed-resume focus loss reproduced and corrected in `agent-session.ts`/`tasks.ts`; desktop/phone and related selection checks passed. Broad backend checks were not rerun because Go code is unchanged; earlier suite failures remain recorded below).
+- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: FAILED state handoff is retained and generic primary-follow verifies authoritative previous-session state. R1 changed Go gateway routing and added queue-model evidence; R2 superseded that transport-only experiment with consumer-side verification. Scoped Go race checks are recorded in Results; no live NATS-server validation or clean broad backend suite is claimed).
 
 The prior [task unread dot package](../task-unread-dot/plan.md) is historical
 completed delivery. The [visible-visit divider package](../unread-divider-visible-session-clear/plan.md)
@@ -496,5 +504,10 @@ fix. It is separate from the five design-only rounds above.
   `e4e01b8b35` over `7087545475`. Two P2 findings (promotion-first delivery
   and incomplete E2E causal assertions) and one P3 finding (stale delivery
   status/diagnostic ledger), accepted for remediation.
-- Completed rounds: 1. Consecutive clean: 0. The stop condition is three
+- Round 2: Sol child `41d1583a-0bbc-4e5d-9d8b-b9865b4dd1f3` reviewed
+  `460e55434d`. One P2 finding (hub/client-queue inversions survive callback
+  FIFO) and one P3 finding (remaining stale plan/Task 01 status), accepted.
+  R2 moves the focus decision to authoritative session readback and withdraws
+  the insufficient transport guarantee; see Task 02 Results.
+- Completed rounds: 2. Consecutive clean: 0. The stop condition is three
   consecutive clean rounds or 50 rounds. No earlier loop counts toward it.

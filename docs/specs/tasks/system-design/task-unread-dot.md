@@ -212,16 +212,20 @@ recovery card, then the backend promotes another active session to primary.
 `maybeAdoptSessionOnTransition` (`lib/ws/handlers/agent-session.ts`) does not
 hand off from a session entering `FAILED`, and `task.updated` primary-follow
 (`lib/ws/handlers/tasks.ts`) does not leave a `FAILED` previous primary.
-The orchestrator publishes the failed session state before promoting a sibling.
-The gateway routes `task.updated` through the same ordered lifecycle subscription
-as `session.state_changed` and `task.state_changed`. A separate NATS subscription
-could otherwise deliver the promoted primary first, before the cached session
-state becomes `FAILED`. One subscription preserves publisher order without
-new payload fields or client-side retries. Gateway regressions cover synchronous
-in-memory delivery and independent NATS-style callback queues. Explicit workflow
-focus and completed/cancelled handoff retain their existing behavior. The failed
-panel stays visible while history loads, allowing normal acknowledgement without
-hiding recovery actions or reading a sibling.
+Generic primary-follow verifies the previously displayed session through the
+existing session GET endpoint with `cache: "no-store"` before changing selection.
+Its task/session identity must match and its authoritative state must not be
+`FAILED`. Cached non-failed state is insufficient: workspace fan-out and client
+message barriers can deliver a primary update before the failed-state frame.
+Missing or failed readback preserves the current view without retries.
+The pending read belongs to the current navigation, pin, workflow-focus intent,
+and selected session. Departure, selection changes (including away and back),
+restart, or a newer workflow intent aborts it. Successive primary changes replace
+the pending target and invalidate earlier responses. Readback is used only for
+focus eligibility, never to overwrite session/cursor state. Explicit committed
+workflow focus still precedes generic following; completed/cancelled handoff
+retains its behavior. This costs one session read for an eligible generic
+primary switch and needs neither a new payload schema nor transport ordering.
 
 An unread failed sibling that was never displayed is not evidence of a failed
 cursor write. It remains unread under AC .2, .9, .12, and .17. Preserve this

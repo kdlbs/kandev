@@ -213,8 +213,13 @@ Production ownership narrowed by the failed-resume reproduction (see
 
 - `apps/web/lib/ws/handlers/agent-session.ts` and `agent-session.test.ts`
 - `apps/web/lib/ws/handlers/tasks.ts` and `tasks.test.ts`
-- `apps/backend/internal/gateway/websocket/task_notifications.go` and
-  `task_notifications_test.go` (ordered failure/primary notification delivery).
+- `apps/web/lib/ws/handlers/task-primary-focus.ts` and `task-primary-focus.test.ts`
+  (authoritative, selection-owned previous-session verification).
+
+The R1 gateway callback-ordering change and its queue-model regression were
+withdrawn after R2 showed later hub/client inversions. That historical Go
+experiment is not an end-to-end ordering guarantee or a claim that broad
+backend checks passed.
 
 Shared verification and delivery records:
 
@@ -331,19 +336,13 @@ logs; their results are 3, 3, and 30 passed, respectively.
 
 ### Production-fix review round 1 remediation
 
-F1: retain the publisher's ordering rather than introduce a new payload schema.
-`TaskEventBroadcaster` now routes `task.updated` through the existing lifecycle
-wildcard alongside session/task state changes. The orchestrator publishes the
-failed state before promoting a sibling; NATS callbacks on separate subscriptions
-could invert those notifications. A single callback queue prevents that inversion.
-No workflow focus, primary promotion, or unread predicate changes are needed.
-
-`TestTaskEventBroadcaster_OrdersFailureBeforePrimaryPromotion` exercises both
-the memory bus and the existing deterministic NATS-style callback-queue fake.
-Before the fix, the fake's task-first scheduling produced `task.updated` before
-`session.state_changed`; the memory counterpart passed. After the fix both
-preserve order and deliver exactly once. The obsolete hard-coded subscription
-count/counter test was removed rather than re-pinned to another count.
+F1 (historical, superseded by R2): R1 routed `task.updated` through the lifecycle
+wildcard alongside session/task state changes. Its memory/NATS-style queue-model
+test preserved publisher callback order, unlike separate callbacks.
+R2 showed that later hub fan-out and client barriers can invert wire delivery;
+the routing change and its limited ordering regression were therefore withdrawn.
+The obsolete hard-coded subscription count/counter test remains removed rather
+than re-pinned. No end-to-end ordering guarantee is inferred from R1's evidence.
 
 Final backend command in the cache snapshot:
 `go test -race ./internal/gateway/websocket ./internal/events/bus -count=1`:
@@ -383,6 +382,47 @@ Final E2E commands used `--host --no-build --shards 1`, owning projects, and
 
 F3: delivery-time statements and earlier reviews are labelled historical.
 The plan records the actual pushed production head and a separate review ledger.
+
+### Production-fix review round 2 remediation
+
+R2 showed two later inversion boundaries: the real FAILED payload can take the
+global hub lane while a workspace-scoped primary update fans out directly, and
+a session message barrier can defer FAILED behind replaceable output while
+the task update uses the direct client lane. Callback FIFO is insufficient.
+The R1 routing change and its limited queue regression are removed, rather than
+adding more global queue constraints or weakening transcript barriers.
+
+Generic primary-follow now verifies the previous session through the existing
+session GET (`cache: no-store`). Until matching non-failed readback arrives,
+selection remains unchanged while the authoritative task primary still updates.
+Failure, missing identity/state, or read errors preserve the view. The response
+does not hydrate a stale session or cursor. Selection, navigation (including away
+and back), restart, and newer workflow-focus intents cancel/abort the request;
+successive primary changes replace its target and reject old responses.
+Explicit committed workflow focus still precedes generic follow.
+
+The real app-store/handler regression fails before correction with a promoted
+sibling active before the delayed FAILED frame. Its verification response is
+held by a deferred API fake, so both delivery orders and ownership races are
+deterministic, without needing to control every transport lane.
+
+R2 verification, in the cache-backed working-tree snapshot:
+
+- WS handlers plus the real workflow-focus store tests: 74 files / 717 passed
+  (`r2-ws-tests.log`). Coverage includes both event orders, healthy terminal
+  states, a committed workflow recipient, ownership cancellation, overlapping
+  reads, and preservation of a newer cursor.
+- Gateway/event-bus packages: `go test -race -count=1` passed for both
+  (`r2-gateway.log`), after withdrawing the transport-only change.
+- Fresh managed backend/web/plugin build, then the full desktop unread-dot
+  spec: 3 passed. The full phone spec reused that build: 3 passed.
+- Related desktop selection/reopen/handoff/recovery specs: 30 passed.
+  All three E2E invocations used one host worker, one shard, and no retries
+  (`r2-desktop.log`, `r2-mobile.log`, `r2-selection.log`).
+- Production web typecheck: exit 0 (`r2-typecheck.log`).
+- Final authority-helper regression after test grouping: 18 passed.
+  Changed-file configured Oxlint (warnings denied), Prettier, and the
+  new-code i18n ratchet passed.
 
 ## New reported incident: existing cursor behind a failed resume
 
