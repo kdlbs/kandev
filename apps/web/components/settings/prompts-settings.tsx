@@ -8,6 +8,8 @@ import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
 import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
 import { PromptRowActions } from "@/components/settings/prompt-row-actions";
+import { PromptSyncedBadge } from "@/components/settings/prompt-synced-badge";
+import { PromptSyncSection } from "@/components/settings/prompt-sync-section";
 import {
   filterSavedPrompts,
   PromptCreateButton,
@@ -203,17 +205,20 @@ function PromptListItem({
               {t("settings:builtIn")}
             </Badge>
           )}
+          {prompt.source === "sync" && <PromptSyncedBadge sourcePath={prompt.source_path} />}
         </div>
-        <PromptRowActions
-          prompt={prompt}
-          deleteAnchorRef={deleteAnchorRef}
-          onStartEditing={onStartEditing}
-          onOpenDelete={onOpenDelete}
-          isBusy={isBusy}
-          showCreate={showCreate}
-          isFinePointer={isFinePointer}
-          isDeleteTarget={isDeleteTarget}
-        />
+        {prompt.source !== "sync" && (
+          <PromptRowActions
+            prompt={prompt}
+            deleteAnchorRef={deleteAnchorRef}
+            onStartEditing={onStartEditing}
+            onOpenDelete={onOpenDelete}
+            isBusy={isBusy}
+            showCreate={showCreate}
+            isFinePointer={isFinePointer}
+            isDeleteTarget={isDeleteTarget}
+          />
+        )}
       </div>
       <PromptDeleteConfirmation
         promptId={prompt.id}
@@ -570,6 +575,7 @@ export function PromptsSettings() {
             place.
           </Trans>
         </div>
+        <PromptSyncSection />
         <SettingsGroup
           title={t("settings:promptsCustomHeading")}
           contentClassName="space-y-6 divide-y-0"

@@ -1,0 +1,81 @@
+package promptsync
+
+import (
+	"context"
+	"errors"
+
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/authcircuit"
+	"github.com/kandev/kandev/internal/reposync"
+)
+
+// errorClassWorkspaceMissing is the stored error class for a deleted
+// credential workspace.
+const errorClassWorkspaceMissing authcircuit.FailureClass = "credential_workspace_missing"
+
+func (s *Service) failureDirective(cfg *Config, syncErr error) reposync.FailureDirective {
+	if errors.Is(syncErr, ErrCredentialWorkspaceMissing) {
+		return reposync.FailureDirective{
+			Class: string(errorClassWorkspaceMissing), Consecutive: cfg.ConsecutiveFailures + 1,
+			Suspended: true, SuspensionReason: ErrCredentialWorkspaceMissing.Error(),
+			CircuitClass: authcircuit.FailureClassConfig,
+		}
+	}
+	return reposync.BuildFailureDirective(reposync.FailureInput{
+		Provider:            cfg.Provider,
+		IntervalSeconds:     cfg.IntervalSeconds,
+		ConsecutiveFailures: cfg.ConsecutiveFailures,
+		Circuit:             cfg.circuitState(),
+		GenericMessage:      genericFailureMessage,
+	}, syncErr, s.now().UTC(), s.jitter)
+}
+
+func safeErrorMessage(err error) string {
+	if errors.Is(err, ErrCredentialWorkspaceMissing) {
+		return ErrCredentialWorkspaceMissing.Error()
+	}
+	return reposync.SafeErrorMessage(err, genericFailureMessage)
+}
+
+// safeStoredMessage keeps only the exact safe summaries this package writes.
+func safeStoredMessage(message string) string {
+	if message == ErrCredentialWorkspaceMissing.Error() {
+		return message
+	}
+	return reposync.SafeStoredErrorMessage(message, genericFailureMessage)
+}
+
+func (s *Service) recordFailure(ctx context.Context, cfg *Config, syncErr error) {
+	directive := s.failureDirective(cfg, syncErr)
+	incRun("failure")
+	if err := s.store.RecordFailure(context.WithoutCancel(ctx), safeErrorMessage(syncErr), directive, s.now().UTC()); err != nil {
+		s.logger.Warn("failed to record prompt sync failure", zap.Error(err))
+		return
+	}
+	fields := []zap.Field{
+		zap.String("provider", cfg.Provider),
+		zap.String("failure_class", directive.Class),
+		zap.Bool("poll_suspended", directive.Suspended),
+		zap.String("error", safeErrorMessage(syncErr)),
+	}
+	if directive.NextAttemptAt != nil {
+		fields = append(fields, zap.Time("next_attempt_at", *directive.NextAttemptAt))
+	}
+	if directive.Suspended && !cfg.PollSuspended {
+		s.logger.Warn("prompt sync polling suspended", fields...)
+		return
+	}
+	s.logger.Warn("prompt sync attempt failed", fields...)
+}
+
+func (s *Service) recordSuccess(cfg *Config, result *SyncResult) {
+	incRun("success")
+	if cfg.ConsecutiveFailures > 0 || cfg.PollSuspended {
+		s.logger.Info("prompt sync polling recovered",
+			zap.String("provider", cfg.Provider), zap.String("previous_failure_class", cfg.LastErrorClass))
+	}
+	s.logger.Info("applied prompt sync",
+		zap.Int("created", len(result.Created)), zap.Int("updated", len(result.Updated)),
+		zap.Int("deleted", len(result.Deleted)), zap.Int("warnings", len(result.Warnings)))
+}

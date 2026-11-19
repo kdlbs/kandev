@@ -18,4 +18,11 @@ type Repository interface {
 	UpdatePrompt(ctx context.Context, prompt *models.Prompt) error
 	UpdatePromptForAgent(ctx context.Context, prompt *models.Prompt, expectedName string) error
 	DeletePrompt(ctx context.Context, id string) error
+
+	// Sync-only writes. Each is guarded by sync ownership and never touches a
+	// manual or built-in prompt.
+	CreateSyncedPrompt(ctx context.Context, name, content, sourcePath string) (*models.Prompt, error)
+	UpdateSyncedPrompt(ctx context.Context, id, content, sourcePath string) (bool, error)
+	DeleteSyncedPrompt(ctx context.Context, id string) (bool, error)
+	ReleaseSyncedPrompts(ctx context.Context) (int64, error)
 }

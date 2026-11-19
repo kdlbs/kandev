@@ -35,6 +35,9 @@ func (s *Service) updateAgentPrompt(ctx context.Context, prompt *models.Prompt, 
 	if prompt.Builtin {
 		return nil, ErrBuiltinPrompt
 	}
+	if prompt.IsSynced() {
+		return nil, ErrPromptSyncManaged
+	}
 	expectedName := prompt.Name
 	if err := s.applyPromptFields(ctx, prompt, name, content); err != nil {
 		return nil, err

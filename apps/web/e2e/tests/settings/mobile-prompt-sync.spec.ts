@@ -1,0 +1,33 @@
+import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
+import {
+  cleanUpPromptSync,
+  configureThroughDialog,
+  promptRow,
+  seedPromptFiles,
+  SYNC_PATH,
+} from "../../helpers/prompt-sync";
+
+test.describe("Prompt Sync on a phone", () => {
+  test.afterEach(async ({ apiClient }) => {
+    await cleanUpPromptSync(apiClient);
+  });
+
+  test("configures and syncs on a phone", async ({ testPage, apiClient, seedData }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await seedPromptFiles(
+      apiClient,
+      seedData.workspaceId,
+      { "phone-rule.md": "Tap targets matter." },
+      { first: true },
+    );
+    await testPage.goto("/settings/prompts");
+    await configureThroughDialog(testPage, true);
+    const response = waitForHttp(testPage, "POST", SYNC_PATH);
+    await testPage.getByTestId("prompt-sync-now").tap();
+    expect((await response).ok()).toBe(true);
+    const row = promptRow(testPage, "phone-rule");
+    await expect(row.getByTestId("prompt-synced-badge")).toBeVisible();
+    await expect(row.getByTestId("prompt-delete-button")).toHaveCount(0);
+  });
+});

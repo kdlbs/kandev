@@ -12,6 +12,8 @@ type PromptDTO struct {
 	Content         string `json:"content"`
 	Builtin         bool   `json:"builtin"`
 	AllowAgentEdits bool   `json:"allow_agent_edits"`
+	Source          string `json:"source"`
+	SourcePath      string `json:"source_path"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 }
@@ -39,8 +41,24 @@ func FromPrompt(prompt *models.Prompt) PromptDTO {
 		Name:            prompt.Name,
 		Content:         prompt.Content,
 		Builtin:         prompt.Builtin,
-		AllowAgentEdits: !prompt.Builtin,
+		AllowAgentEdits: AgentEditable(prompt),
+		Source:          Source(prompt),
+		SourcePath:      prompt.SourcePath,
 		CreatedAt:       prompt.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:       prompt.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
+}
+
+// AgentEditable reports whether agents may write the prompt: built-in and
+// synced prompts are read-only to agents.
+func AgentEditable(prompt *models.Prompt) bool {
+	return !prompt.Builtin && !prompt.IsSynced()
+}
+
+// Source returns the prompt's ownership, defaulting to manual.
+func Source(prompt *models.Prompt) string {
+	if prompt.IsSynced() {
+		return models.PromptSourceSync
+	}
+	return models.PromptSourceManual
 }

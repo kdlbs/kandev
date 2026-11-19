@@ -1,4 +1,4 @@
-package workflowsync
+package reposync
 
 import (
 	"errors"
@@ -14,17 +14,17 @@ import (
 )
 
 func TestClassifySyncErr_NilIsNone(t *testing.T) {
-	assert.Equal(t, authcircuit.FailureClassNone, classifySyncErr(nil))
+	assert.Equal(t, authcircuit.FailureClassNone, ClassifyError(nil))
 }
 
 func TestClassifySyncErr_NotConfiguredIsConfig(t *testing.T) {
-	assert.Equal(t, authcircuit.FailureClassConfig, classifySyncErr(github.ErrGitHubHostMismatch))
-	assert.Equal(t, authcircuit.FailureClassConfig, classifySyncErr(errGitHubClientNotConfigured))
-	assert.Equal(t, authcircuit.FailureClassConfig, classifySyncErr(errGitLabClientNotConfigured))
+	assert.Equal(t, authcircuit.FailureClassConfig, ClassifyError(github.ErrGitHubHostMismatch))
+	assert.Equal(t, authcircuit.FailureClassConfig, ClassifyError(ErrGitHubClientNotConfigured))
+	assert.Equal(t, authcircuit.FailureClassConfig, ClassifyError(ErrGitLabClientNotConfigured))
 	// Wrapped sentinels must still classify correctly — fetchFiles/list
 	// helpers wrap these with additional context.
 	assert.Equal(t, authcircuit.FailureClassConfig,
-		classifySyncErr(fmt.Errorf("listing failed: %w", errGitHubClientNotConfigured)))
+		ClassifyError(fmt.Errorf("listing failed: %w", ErrGitHubClientNotConfigured)))
 }
 
 func TestClassifySyncErr_GitHubAPIErrorByStatus(t *testing.T) {
@@ -44,17 +44,17 @@ func TestClassifySyncErr_GitHubAPIErrorByStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := &github.GitHubAPIError{StatusCode: tt.status, Endpoint: "/repos/x/y", Body: "irrelevant"}
-			assert.Equal(t, tt.want, classifySyncErr(err))
+			assert.Equal(t, tt.want, ClassifyError(err))
 			// Wrapped through a %w chain (the real call sites always wrap).
 			wrapped := fmt.Errorf("failed to list x/y: %w", err)
-			assert.Equal(t, tt.want, classifySyncErr(wrapped))
+			assert.Equal(t, tt.want, ClassifyError(wrapped))
 		})
 	}
 }
 
 func TestClassifySyncErr_GitHubRateLimit403IsTransient(t *testing.T) {
 	err := &github.GitHubAPIError{StatusCode: http.StatusForbidden, Endpoint: "/repos/x/y", Body: "API rate limit exceeded for installation"}
-	assert.Equal(t, authcircuit.FailureClassTransient, classifySyncErr(err))
+	assert.Equal(t, authcircuit.FailureClassTransient, ClassifyError(err))
 }
 
 func TestClassifySyncErr_GitLabAPIErrorByStatus(t *testing.T) {
@@ -71,20 +71,20 @@ func TestClassifySyncErr_GitLabAPIErrorByStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := &gitlab.APIError{StatusCode: tt.status, Endpoint: "/projects/x"}
-			assert.Equal(t, tt.want, classifySyncErr(err))
+			assert.Equal(t, tt.want, ClassifyError(err))
 		})
 	}
 }
 
 func TestClassifySyncErr_SentinelFallbacksAreAuth(t *testing.T) {
-	assert.Equal(t, authcircuit.FailureClassAuth, classifySyncErr(github.ErrNoClient))
-	assert.Equal(t, authcircuit.FailureClassAuth, classifySyncErr(github.ErrGitHubConnectionInvalid))
-	assert.Equal(t, authcircuit.FailureClassAuth, classifySyncErr(github.ErrGitHubNotConfigured))
-	assert.Equal(t, authcircuit.FailureClassAuth, classifySyncErr(gitlab.ErrInvalidToken))
+	assert.Equal(t, authcircuit.FailureClassAuth, ClassifyError(github.ErrNoClient))
+	assert.Equal(t, authcircuit.FailureClassAuth, ClassifyError(github.ErrGitHubConnectionInvalid))
+	assert.Equal(t, authcircuit.FailureClassAuth, ClassifyError(github.ErrGitHubNotConfigured))
+	assert.Equal(t, authcircuit.FailureClassAuth, ClassifyError(gitlab.ErrInvalidToken))
 }
 
 func TestClassifySyncErr_UnrecognizedErrorIsTransient(t *testing.T) {
-	assert.Equal(t, authcircuit.FailureClassTransient, classifySyncErr(errors.New("connection reset by peer")))
+	assert.Equal(t, authcircuit.FailureClassTransient, ClassifyError(errors.New("connection reset by peer")))
 }
 
 // TestClassifySyncErr_TypedErrorTakesPrecedenceOverSentinel confirms the
@@ -93,5 +93,5 @@ func TestClassifySyncErr_UnrecognizedErrorIsTransient(t *testing.T) {
 // checks, because the status code is the more specific signal.
 func TestClassifySyncErr_TypedErrorTakesPrecedenceOverSentinel(t *testing.T) {
 	err := &github.GitHubAPIError{StatusCode: http.StatusNotFound, Endpoint: "/repos/x/y"}
-	assert.Equal(t, authcircuit.FailureClassConfig, classifySyncErr(err))
+	assert.Equal(t, authcircuit.FailureClassConfig, ClassifyError(err))
 }

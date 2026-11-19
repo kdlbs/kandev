@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	promptdto "github.com/kandev/kandev/internal/prompts/dto"
 	"github.com/kandev/kandev/internal/prompts/models"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -16,6 +17,7 @@ type sharedPromptSummary struct {
 	Name            string `json:"name"`
 	Builtin         bool   `json:"builtin"`
 	AllowAgentEdits bool   `json:"allow_agent_edits"`
+	Source          string `json:"source"`
 	ContentBytes    int    `json:"content_bytes"`
 }
 
@@ -24,6 +26,8 @@ type sharedPromptRead struct {
 	Content         string `json:"content"`
 	Builtin         bool   `json:"builtin"`
 	AllowAgentEdits bool   `json:"allow_agent_edits"`
+	Source          string `json:"source"`
+	SourcePath      string `json:"source_path"`
 	ContentBytes    int    `json:"content_bytes"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
@@ -49,7 +53,8 @@ func (h *Handlers) handleListSharedPrompts(ctx context.Context, msg *ws.Message)
 		summaries = append(summaries, sharedPromptSummary{
 			Name:            prompt.Name,
 			Builtin:         prompt.Builtin,
-			AllowAgentEdits: !prompt.Builtin,
+			AllowAgentEdits: promptdto.AgentEditable(prompt),
+			Source:          promptdto.Source(prompt),
 			ContentBytes:    len(prompt.Content),
 		})
 	}
@@ -87,7 +92,9 @@ func (h *Handlers) handleGetSharedPrompt(ctx context.Context, msg *ws.Message) (
 func sharedPromptResult(prompt *models.Prompt) sharedPromptRead {
 	return sharedPromptRead{
 		Name: prompt.Name, Content: prompt.Content, Builtin: prompt.Builtin,
-		AllowAgentEdits: !prompt.Builtin,
+		AllowAgentEdits: promptdto.AgentEditable(prompt),
+		Source:          promptdto.Source(prompt),
+		SourcePath:      prompt.SourcePath,
 		ContentBytes:    len(prompt.Content),
 		CreatedAt:       prompt.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:       prompt.UpdatedAt.UTC().Format(time.RFC3339),

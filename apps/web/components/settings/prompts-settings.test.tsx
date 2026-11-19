@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CustomPrompt } from "@/lib/types/http";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { SettingsSaveProvider } from "./settings-save-provider";
 import { PromptsSettings } from "./prompts-settings";
 
@@ -16,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   isMobile: false,
   promptEditor: vi.fn(),
 }));
+
+// Prompt Sync has its own tests; this file covers the prompt list.
+vi.mock("@/components/settings/prompt-sync-section", () => ({ PromptSyncSection: () => null }));
 
 vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
   useCustomPrompts: () => ({ loaded: true }),
@@ -60,6 +64,7 @@ const promptId = "prompt-1";
 const promptName = "Review";
 const promptContent = "Review this change";
 const promptRowTestId = "prompt-list-item";
+const promptNameAttribute = "data-prompt-name";
 const promptContentInputTestId = "prompt-content-input";
 const promptDeleteButtonTestId = "prompt-delete-button";
 const promptDeletePopoverTestId = "prompt-delete-confirm-popover";
@@ -338,7 +343,7 @@ describe("PromptsSettings search", () => {
       target: { value: "hidden body" },
     });
     expect(screen.getAllByTestId(promptRowTestId)).toHaveLength(1);
-    expect(screen.getByTestId(promptRowTestId).getAttribute("data-prompt-name")).toBe("Review");
+    expect(screen.getByTestId(promptRowTestId).getAttribute(promptNameAttribute)).toBe("Review");
   });
 
   it("matches literal name and raw body case insensitively, preserves order and data, and resets", () => {
@@ -362,7 +367,7 @@ describe("PromptsSettings search", () => {
     );
     const search = screen.getByRole("searchbox", { name: searchLabel });
     const names = () =>
-      screen.queryAllByTestId(promptRowTestId).map((row) => row.getAttribute("data-prompt-name"));
+      screen.queryAllByTestId(promptRowTestId).map((row) => row.getAttribute(promptNameAttribute));
 
     fireEvent.change(search, { target: { value: "  nEeDlE  " } });
     expect(names()).toEqual([builtinNeedleName, "Second"]);
@@ -561,5 +566,36 @@ describe("PromptsSettings search during delete confirmation refresh", () => {
     expect(screen.getByText(noResultsText)).toBeTruthy();
     expect(search.hasAttribute("disabled")).toBe(false);
     expect(mocks.deletePrompt).not.toHaveBeenCalled();
+  });
+});
+
+// @covers AC-INTEGRATIONS-PROMPT-SYNC-004.3
+describe("synced prompts", () => {
+  it("show a synced badge and no edit or delete controls", () => {
+    mocks.prompts = [
+      {
+        ...existingPrompt,
+        id: "synced-1",
+        name: "principles",
+        source: "sync",
+        source_path: "p/principles.md",
+      },
+      { ...existingPrompt, id: "manual-1", name: "mine", source: "manual" },
+    ];
+    render(
+      <TooltipProvider>
+        <SettingsSaveProvider>
+          <PromptsSettings />
+        </SettingsSaveProvider>
+      </TooltipProvider>,
+    );
+    const rows = screen.getAllByTestId(promptRowTestId);
+    const synced = rows.find((row) => row.getAttribute(promptNameAttribute) === "principles")!;
+    const manual = rows.find((row) => row.getAttribute(promptNameAttribute) === "mine")!;
+    expect(within(synced).getByTestId("prompt-synced-badge")).toBeTruthy();
+    expect(within(synced).queryByTestId(promptEditButtonTestId)).toBeNull();
+    expect(within(synced).queryByTestId(promptDeleteButtonTestId)).toBeNull();
+    expect(within(manual).queryByTestId("prompt-synced-badge")).toBeNull();
+    expect(within(manual).getByTestId(promptEditButtonTestId)).toBeTruthy();
   });
 });

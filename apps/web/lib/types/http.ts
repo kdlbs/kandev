@@ -910,6 +910,10 @@ export type CustomPrompt = {
   name: string;
   content: string;
   builtin: boolean;
+  /** "sync" when Prompt Sync owns the prompt; it is then read-only. */
+  source?: "manual" | "sync";
+  /** Repository file a synced prompt comes from. */
+  source_path?: string;
   created_at: string;
   updated_at: string;
 };

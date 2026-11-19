@@ -368,6 +368,13 @@ func handleE2EReset(
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: "workflow sync config cleanup failed"})
 			return
 		}
+		// The prompt-sync poller reads the install-wide row the same way;
+		// synced prompts go with it so the next spec starts without them.
+		if err := deletePromptSyncForReset(ctx, repo.DB(), workspaceID); err != nil {
+			log.Error("e2e reset: prompt sync cleanup failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: "prompt sync cleanup failed"})
+			return
+		}
 		// Office config sync's poller reads office_config_sync_configs the
 		// same way the workflow-sync poller reads workflow_sync_configs
 		// above; office_config_sync_manifest has no FK/cascade onto it
@@ -787,6 +794,17 @@ func resetGitHubAppRegistrationsForE2E(
 		return nil
 	}
 	return service.ResetAppRegistrationsForE2E(ctx, workspaceID)
+}
+
+// deletePromptSyncForReset removes the workspace's prompt sync row and, once
+// no configuration remains, the synced prompts it created.
+func deletePromptSyncForReset(ctx context.Context, database *sql.DB, workspaceID string) error {
+	if _, err := database.ExecContext(ctx, `DELETE FROM prompt_sync_config WHERE workspace_id = ?`, workspaceID); err != nil {
+		return err
+	}
+	_, err := database.ExecContext(ctx,
+		`DELETE FROM custom_prompts WHERE source = 'sync' AND NOT EXISTS (SELECT 1 FROM prompt_sync_config)`)
+	return err
 }
 
 func deleteGitHubAuthForReset(ctx context.Context, database *sql.DB, workspaceID string) error {
