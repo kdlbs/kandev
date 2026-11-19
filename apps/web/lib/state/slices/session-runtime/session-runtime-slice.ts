@@ -95,6 +95,7 @@ function purgeEnvScopedRuntime(state: SessionRuntimeSliceState, envKey: string) 
   delete state.gitStatus.refreshByEnvironmentId?.[envKey];
   delete state.gitStatus.refreshByEnvironmentRepo?.[envKey];
   delete state.gitStatus.inventoryByEnvironment?.[envKey];
+  delete state.workspaceRootFiles.byEnvironmentId[envKey];
   delete state.sessionCommits.byEnvironmentId[envKey];
   delete state.sessionCommits.loading[envKey];
   delete state.sessionCommits.refetchTrigger[envKey];
@@ -159,6 +160,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionPollMode: { bySessionId: {} },
   embeddedVscodeSupport: { bySessionId: {} },
   workspaceFilesRefresh: { bySessionId: {} },
+  workspaceRootFiles: { byEnvironmentId: {} },
   workspaceRestoration: { byEnvironmentId: {} },
   backgroundWork: {
     workloadsBySessionId: {},
@@ -509,6 +511,11 @@ export const createSessionRuntimeSlice: SliceCreator<SessionRuntimeSlice> = (set
     set((draft) => {
       draft.workspaceFilesRefresh.bySessionId[sessionId] =
         (draft.workspaceFilesRefresh.bySessionId[sessionId] ?? 0) + 1;
+    }),
+  setWorkspaceRootFiles: (environmentId, files) =>
+    set((draft) => {
+      if (!environmentId) return;
+      draft.workspaceRootFiles.byEnvironmentId[environmentId] = files;
     }),
   clearLegacyGitStatusEntry: (sessionId) =>
     set((draft) => {

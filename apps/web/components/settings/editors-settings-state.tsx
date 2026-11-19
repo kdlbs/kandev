@@ -29,6 +29,12 @@ export function useEditorsSettingsState() {
     editors ?? [],
     currentUserSettings.defaultEditorId ?? "",
   );
+  const [markdownPreviewByDefault, setMarkdownPreviewByDefault] = useState(
+    () => currentUserSettings.markdownPreviewByDefault ?? true,
+  );
+  const [baselineMarkdownPreviewByDefault, setBaselineMarkdownPreviewByDefault] = useState(
+    () => currentUserSettings.markdownPreviewByDefault ?? true,
+  );
   const [defaultEditorId, setDefaultEditorId] = useState(initialDefaultId);
   const [baselineDefaultId, setBaselineDefaultId] = useState(initialDefaultId);
   const [isAdding, setIsAdding] = useState(false);
@@ -68,6 +74,10 @@ export function useEditorsSettingsState() {
   const [lspConfigErrors, setLspConfigErrors] = useState<Record<string, string>>({});
 
   return {
+    markdownPreviewByDefault,
+    setMarkdownPreviewByDefault,
+    baselineMarkdownPreviewByDefault,
+    setBaselineMarkdownPreviewByDefault,
     setEditors,
     setUserSettings,
     currentUserSettings,
@@ -360,7 +370,10 @@ export function useSaveRequest(state: EditorsSettingsState) {
       statusLocation: lspStatusLocation,
       serverConfigs: parsedConfigs,
     });
+    payload.markdown_preview_by_default = state.markdownPreviewByDefault;
+    const submittedMarkdownPreview = state.markdownPreviewByDefault;
     const response = await updateUserSettings(payload, { cache: "no-store" });
+    state.setBaselineMarkdownPreviewByDefault(submittedMarkdownPreview);
     setBaselineDefaultId(defaultEditorId);
     setBaselineLspAutoStart([...lspAutoStartLanguages]);
     setBaselineLspAutoInstall([...lspAutoInstallLanguages]);

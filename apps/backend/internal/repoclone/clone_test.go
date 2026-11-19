@@ -642,6 +642,8 @@ printf '%s\n' "$@" > "$KANDEV_TEST_CAPTURE.args"
 helper_command=${GIT_CONFIG_VALUE_1#!}
 sh -c "$helper_command get" > "$KANDEV_TEST_CAPTURE.helper"
 printf '%s\n' "$GH_TOKEN|$GITHUB_TOKEN|$GIT_CONFIG_GLOBAL|$GIT_CONFIG_NOSYSTEM|$KANDEV_REPOCLONE_GITHUB_USERNAME|$KANDEV_REPOCLONE_GITHUB_TOKEN|$GIT_CONFIG_VALUE_1" > "$KANDEV_TEST_CAPTURE.env"
+for clone_target do :; done
+mkdir -p "$clone_target/.git"
 `
 	if err := os.WriteFile(gitPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake git: %v", err)

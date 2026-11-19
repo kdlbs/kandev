@@ -1119,6 +1119,9 @@ func (c *Controller) httpListRepoBranches(ctx *gin.Context) {
 			})
 			return
 		}
+		if writeGitHubOperationalAuthError(ctx, err) {
+			return
+		}
 		status := http.StatusInternalServerError
 		var apiErr *GitHubAPIError
 		if errors.As(err, &apiErr) {
@@ -1149,6 +1152,9 @@ func (c *Controller) httpGetRepoMergeMethods(ctx *gin.Context) {
 				"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
 				"code":  "github_not_configured",
 			})
+			return
+		}
+		if writeGitHubOperationalAuthError(ctx, err) {
 			return
 		}
 		status := http.StatusInternalServerError

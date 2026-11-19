@@ -13,6 +13,10 @@ The integration system owns GitHub watch filters and the workspace GitHub
 repository scope. Both store GitHub `owner/name` identities, so they select
 from provider repositories, not from workspace repositories.
 
+The current scope contract uses `all` or the union of selected owners and exact
+repositories. See [GitHub repository scope](../requirements/github-repository-scope.md)
+for canonical mode and migration behavior.
+
 Kandev has two repository pickers with different domains:
 
 - **Workspace mode:** `WorkspaceRepoChips` selects registered and
@@ -189,15 +193,19 @@ it.
 
 ### Repository scope setting
 
-`GitHubRepoScopeSection` stores the repository draft as `RepoFilter[]` instead
-of a comma-separated string. In `repos` mode it renders
-`GitHubRepositoryMultiSelect` without `scope`. The baseline, dirty check,
-discard, save payload (`repo_scope_repos`), and stale-response guards compare
-canonical `owner/name` lists. The invalid-entry message, its
-`useCommaSeparatedOwnerRepoValues` locale key, and `invalidReason` disappear because the control can no longer hold a malformed
-value. The organizations draft is likewise a login list rendered by
-`GitHubOrganizationMultiSelect` without a scope filter, disabled unless the
-mode is `orgs`; the save payload (`repo_scope_orgs`) is unchanged.
+`GitHubRepoScopeSection` stores both owner and exact repository lists. In
+`selected` mode it renders both shared pickers. The repository picker has no
+saved-scope filter, so it can add an exact selection or an owner even when the
+current selection is empty. The All repositories switch hides the pickers but
+retains their local values until save. Saving `all` clears both lists; saving
+`selected` sends both lists through the existing request. The baseline, dirty
+check, discard, and stale-response guards compare the complete selection. The
+invalid-entry message, its `useCommaSeparatedOwnerRepoValues` locale key, and
+`invalidReason` disappear because the control can no longer hold a malformed
+value. The owners draft is a login list rendered by
+`GitHubOrganizationMultiSelect` without a scope filter. Watch filters keep their
+own scope-aware owner picker. An exact repository selection does not authorize
+an owner wildcard.
 
 The scope editor sets `repositorySource="scope-editor"` on the repository
 multi-select. This selects

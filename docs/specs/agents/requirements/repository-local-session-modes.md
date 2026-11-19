@@ -2,6 +2,7 @@
 status: active
 system: agents
 created: 2026-11-02
+updated: 2026-11-18
 owners:
   - kandev
 ---
@@ -22,6 +23,11 @@ session startup contract.
 - **AC-AGENTS-REPOSITORY-LOCAL-MODE-001.4:** When an explicit mode is requested for a task session, the executor shall confirm that exact mode before the first prompt. A rejected, unconfirmed, or different effective mode shall fail the session start.
 - **AC-AGENTS-REPOSITORY-LOCAL-MODE-001.5:** The mode picker shall clear its search when it closes, including after selection, so that reopening it shows the available choices.
 - **AC-AGENTS-REPOSITORY-LOCAL-MODE-001.6:** The profile mode flow shall support keyboard and touch interaction on desktop and phone without horizontal document overflow.
+- **AC-AGENTS-REPOSITORY-LOCAL-MODE-001.7:** If the agent advertises an ACP mode
+  config select during discovery, **Start mode** shall show its choice names.
+  Selecting a choice shall save its exact value. An empty select shall yield
+  no advertised choices. If the agent supplies only a legacy mode list, the
+  picker shall show those names and save their IDs.
 
 ## Boundaries
 
@@ -30,3 +36,8 @@ not prove that a repository mode exists or describe all of its options. An empty
 selection retains the provider default. Model fallback follows the separate
 [model policy](no-silent-model-fallback.md); this requirement adds no mode
 fallback policy or new persistence field.
+
+## Implementation plans
+
+- [Repository-local session modes](../../../plans/repository-local-session-modes/plan.md)
+- [ACP profile mode discovery repair](../../../plans/acp-profile-mode-discovery/plan.md)

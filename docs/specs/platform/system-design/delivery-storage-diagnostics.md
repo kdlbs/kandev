@@ -1,11 +1,12 @@
 ---
-status: draft
+status: current
 system: platform
-updated: 2026-11-09
+updated: 2026-11-16
 requirements:
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003
+  - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004
 ---
 
 # Delivery storage diagnostics system design
@@ -29,6 +30,8 @@ Existing delivery and recovery documents remain authoritative for their outcomes
 | REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001 | Source classification; Wire and persistence; Compatibility |
 | REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002 | Live observations; Ownership and failure behavior |
 | REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003 | Shared presentation; Mobile composition; Recovery actions |
+
+| REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004 | Composer notice dismissal |
 
 ## Current behavior
 
@@ -285,7 +288,7 @@ Rejected responses cannot renew either clock.
 Use pressure age for a blocked-output headline and capacity age for disk measurements.
 Use the existing localized last-reported label after 90 seconds or when pressure age is unknown.
 An older backend's capacity age cannot substitute for missing pressure age.
-Keep the pressure visible as last reported until a supported status proves recovery.
+Keep undismissed pressure visible as last reported until a supported status proves recovery.
 Expanded Details distinguishes the pressure observation time from the capacity observation time.
 Preserve historical failure time separately in the existing recovery card.
 
@@ -408,3 +411,34 @@ Use provider/client fixtures for this matrix. No real cloud account is required 
 Exercise the actual advisory route to prove twenty concurrent shared-instance requests perform one capacity read.
 Verify that it never invokes per-journal pressure refresh, and that legacy-delivery Sprites still report workspace capacity.
 Verify that inactive remote environments cause no restore, launch, wake, or new proxy creation for capacity polling.
+
+## Composer notice dismissal
+
+This extension implements requirement 004. Platform retains ownership because dismissal controls presentation of its runtime diagnostics.
+The [dismissal package](../../../plans/storage-notice-dismissal/plan.md) owns implementation. Earlier packages retain their existing results.
+
+Pass the resolved task identity from `ComposerStatusNotices` to `SessionDeliveryStorageNotice`.
+Use `panelState.taskId`, with the session's task identity as a fallback when available.
+Never persist a shared empty task key. Without a task identity, allow only mounted local dismissal.
+
+Follow the PR banner's task-scoped `sessionStorage` pattern in `lib/local-storage.ts`.
+Add dedicated read/write helpers and a separate prefix. Include the prefix in existing storage cleanup ownership.
+Read failures mean undismissed. Write failures do not prevent the local state update.
+Key or reset the notice's dismissal state when task identity changes, including same-instance prop changes.
+Do not key dismissal by health revision, epoch, reason, or session. Later samples do not undo the user's dismissal.
+Do not mutate runtime health or issue a backend request. Independently mounted notices read the saved value on mount.
+No new shared registry, backend preference, or dependency is needed.
+
+Add an `IconX` button after Details, with `type="button"`, `aria-label={t("task:dismiss")}`, and a stable test ID.
+Reuse the existing warning colors, rounded control treatment, focus ring, and control-sizing utilities.
+Use a compact desktop target and a target of at least 44px on phones and coarse pointers.
+The PR archive notice is the dismissal exemplar. The shipped storage notice remains the layout exemplar.
+The inline row suits a single immediate action. It needs no dialog, animation, or new scroll owner.
+Keep Storage and Details reachable. Allow the primary label to wrap while controls stay within the row.
+Preserve the existing chat scroll region and safe-area handling. Do not remount the editor when hiding the notice.
+Reuse the existing translated Dismiss key. No locale additions are expected.
+
+Component tests cover hiding, task changes, remount, later pressure samples, and storage failures.
+Storage helper tests cover key isolation and tab-session lifetime. Existing recovery tests protect independent cards and controls.
+Desktop and mobile browser tests cover dismissal, reload, task switching, draft retention, keyboard activation, and phone geometry.
+A narrow fine-pointer viewport must also retain the phone target size.

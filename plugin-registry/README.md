@@ -79,6 +79,11 @@ usage telemetry** — there is no "most installed" metric, by design.
    The `id` **MUST match the `id` in your plugin manifest** and be unique across
    the file. `repo` is `owner/name`. `featured` is a maintainer-only pin and
    should be left out of submissions.
+
+   Catalog categories combine the release manifest categories with the
+   categories in the registry entry. The builder removes duplicate values,
+   so maintainers can add catalog labels without changing the release.
+
 4. **Open a pull request.** The index-build workflow runs on your PR (build +
    tests, no Pages deploy) and resolves your entry against the GitHub API. The
    latest release must contain the exact `<id>-<version>.tar.gz` package. The

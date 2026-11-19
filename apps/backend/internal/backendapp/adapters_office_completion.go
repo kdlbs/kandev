@@ -42,9 +42,14 @@ func (a officeApproverNameResolverAdapter) ResolvePendingApproverNames(ctx conte
 type officeHumanDoneCompleterAdapter struct{ tasks *taskservice.Service }
 
 func (a officeHumanDoneCompleterAdapter) CompleteOfficeTaskAsHuman(ctx context.Context, id, stepID string) (*dashboard.FinalStepMoveResult, error) {
-	task, err := a.tasks.CompleteOfficeTaskAsHuman(ctx, id, stepID)
+	change, err := a.tasks.CompleteOfficeTaskAsHuman(ctx, id, stepID)
 	if err != nil {
 		return nil, classifyFinalStepMoveError(err)
 	}
-	return &dashboard.FinalStepMoveResult{State: string(task.State), StepID: task.WorkflowStepID}, nil
+	return &dashboard.FinalStepMoveResult{
+		State:           string(change.Task.State),
+		OldState:        string(change.OldState),
+		StepID:          change.Task.WorkflowStepID,
+		ActivityHandled: true,
+	}, nil
 }

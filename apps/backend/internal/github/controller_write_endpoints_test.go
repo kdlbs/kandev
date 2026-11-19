@@ -540,11 +540,26 @@ func TestController_WorkspaceSettings_UpdateAndRead(t *testing.T) {
 	}
 	var settings WorkspaceSettings
 	decodeControllerBody(t, updated, &settings)
-	if settings.RepoScopeMode != RepoScopeModeOrgs {
-		t.Errorf("repo_scope_mode = %q, want orgs", settings.RepoScopeMode)
+	if settings.RepoScopeMode != RepoScopeModeSelected {
+		t.Errorf("repo_scope_mode = %q, want selected", settings.RepoScopeMode)
 	}
 	if len(settings.RepoScopeOrgs) != 1 || settings.RepoScopeOrgs[0] != "acme" {
 		t.Errorf("repo_scope_orgs = %#v", settings.RepoScopeOrgs)
+	}
+	if len(settings.RepoScopeRepos) != 0 {
+		t.Errorf("legacy organizations request retained repositories: %#v", settings.RepoScopeRepos)
+	}
+
+	selected := RepoScopeModeSelected
+	repos := []RepoFilter{{Owner: "outside", Name: "tool"}}
+	updated = doControllerJSON(t, router, http.MethodPut, "/api/v1/github/workspace-settings",
+		UpdateWorkspaceSettingsRequest{WorkspaceID: "ws-1", RepoScopeMode: &selected, RepoScopeOrgs: &orgs, RepoScopeRepos: &repos})
+	if updated.Code != http.StatusOK {
+		t.Fatalf("mixed update status = %d, want 200; body = %s", updated.Code, updated.Body)
+	}
+	decodeControllerBody(t, updated, &settings)
+	if settings.RepoScopeMode != RepoScopeModeSelected || len(settings.RepoScopeOrgs) != 1 || len(settings.RepoScopeRepos) != 1 {
+		t.Fatalf("mixed update settings = %#v", settings)
 	}
 
 	readBack := doControllerRequest(
@@ -555,7 +570,7 @@ func TestController_WorkspaceSettings_UpdateAndRead(t *testing.T) {
 	}
 	var stored WorkspaceSettings
 	decodeControllerBody(t, readBack, &stored)
-	if stored.RepoScopeMode != RepoScopeModeOrgs || len(stored.RepoScopeOrgs) != 1 {
+	if stored.RepoScopeMode != RepoScopeModeSelected || len(stored.RepoScopeOrgs) != 1 || len(stored.RepoScopeRepos) != 1 {
 		t.Fatalf("stored settings = %#v, want the update persisted", stored)
 	}
 }

@@ -1,6 +1,14 @@
 "use client";
 
-import { useLayoutEffect, useRef, type ElementType, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type ElementType,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 import { dockedBarStyle, useDockedBarPosition } from "@/hooks/use-docked-bar-position";
 import { SELECTION_ACTION_DOCK_ATTRIBUTE } from "@/hooks/use-touch-selection-tracking";
@@ -11,15 +19,18 @@ export const SELECTION_DOCK_HOST_SELECTOR = "[data-selection-dock-host]";
 
 /** Resolves the nearest dock host above `rootRef` after every render. */
 export function useSelectionDockHost(rootRef: RefObject<HTMLElement | null>) {
-  const hostRef = useRef<HTMLElement | null>(null);
+  const [host, setHost] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
-    hostRef.current = rootRef.current?.closest<HTMLElement>(SELECTION_DOCK_HOST_SELECTOR) ?? null;
+    const nextHost = rootRef.current?.closest<HTMLElement>(SELECTION_DOCK_HOST_SELECTOR) ?? null;
+    setHost((currentHost) => (currentHost === nextHost ? currentHost : nextHost));
   });
-  return hostRef;
+  return useMemo(() => ({ current: host }), [host]);
 }
 
 type SelectionActionDockProps = {
   hostRef?: RefObject<HTMLElement | null>;
+  reserveRef?: RefObject<HTMLElement | null> | null;
+  onReservationChange?: (clearance: number) => void;
   portalContainer?: HTMLElement | null;
   label: string;
   testId?: string;
@@ -34,15 +45,33 @@ type SelectionActionDockProps = {
  */
 export function SelectionActionDock({
   hostRef,
+  reserveRef,
+  onReservationChange,
   portalContainer,
   label,
-  testId,
+  testId = "selection-action-dock",
   children,
 }: SelectionActionDockProps) {
   const position = useDockedBarPosition({
     containerRef: hostRef,
     barHeight: SELECTION_ACTION_DOCK_HEIGHT_PX,
   });
+  const reservationTarget =
+    reserveRef === undefined ? (hostRef?.current ?? null) : reserveRef?.current;
+  const clearance = position.clearance;
+
+  useEffect(() => {
+    onReservationChange?.(clearance);
+    if (!reservationTarget) return () => onReservationChange?.(0);
+    const baseInline = reservationTarget.style.paddingBottom;
+    const baseComputed = window.getComputedStyle(reservationTarget).paddingBottom || "0px";
+    reservationTarget.style.paddingBottom = `calc(${baseComputed} + ${clearance}px)`;
+    return () => {
+      reservationTarget.style.paddingBottom = baseInline;
+      onReservationChange?.(0);
+    };
+  }, [clearance, onReservationChange, reservationTarget]);
+
   if (typeof document === "undefined") return null;
   const portalRect = portalContainer?.getBoundingClientRect();
   const origin = portalRect ? { left: portalRect.left, top: portalRect.top } : undefined;

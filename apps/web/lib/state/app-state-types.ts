@@ -176,6 +176,7 @@ export type AppState = AppStateBase & {
   usageInvalidation: (typeof defaultSessionRuntimeState)["usageInvalidation"];
   sessionPollMode: (typeof defaultSessionRuntimeState)["sessionPollMode"];
   embeddedVscodeSupport: (typeof defaultSessionRuntimeState)["embeddedVscodeSupport"];
+  workspaceRootFiles: (typeof defaultSessionRuntimeState)["workspaceRootFiles"];
   backgroundWork: (typeof defaultSessionRuntimeState)["backgroundWork"];
 
   // GitHub slice
@@ -380,6 +381,7 @@ export type AppState = AppStateBase & {
   ) => void;
   clearShellOutput: (sessionId: string) => void;
   appendProcessOutput: (processId: string, data: string) => void;
+  setWorkspaceRootFiles: import("./slices/session-runtime/types").SessionRuntimeSliceActions["setWorkspaceRootFiles"];
   upsertProcessStatus: (status: ProcessStatusEntry) => void;
   clearProcessOutput: (processId: string) => void;
   setActiveProcess: (sessionId: string, processId: string) => void;

@@ -1,3 +1,4 @@
+import { ACTIVE_UPDATE_STATUSES } from "@/lib/agent-runtime-update";
 import type { AgentUpdateJob, AgentUpdateStatus, InstallJob } from "@/lib/api";
 
 export type RuntimeUpdateGroup =
@@ -14,15 +15,6 @@ export const RUNTIME_UPDATE_GROUPS: readonly RuntimeUpdateGroup[] = [
   "external",
   "unavailable",
 ];
-
-const ACTIVE_UPDATE_STATUSES = new Set<AgentUpdateJob["status"]>([
-  "queued",
-  "resolving",
-  "updating",
-  "probing",
-  "saving",
-  "refreshing",
-]);
 
 export type RuntimeUpdateManagerOptions = {
   hasRuntimeControl: (agentName: string) => boolean;

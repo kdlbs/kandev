@@ -1232,5 +1232,7 @@
   "builtinMcp.inheritedValue": "ワークスペースから継承：{{value}}",
   "builtinMcp.overrideValue": "タスクの設定：{{value}}。ワークスペースの既定値：{{default}}。",
   "builtinMcp.useInherited": "継承した値を使用",
-  "builtinMcp.allowTasks": "タスクによるこのパッケージの使用を許可"
+  "builtinMcp.allowTasks": "タスクによるこのパッケージの使用を許可",
+  "markdownPreviewByDefault": "Markdown ファイルをプレビューで開く",
+  "markdownPreviewByDefaultDescription": "新しく開く Markdown ファイルの初期モードを選択します。モードはいつでも切り替えられます。"
 }
