@@ -251,19 +251,60 @@ func (h nativeCheckHarness) status(t *testing.T, agentName string) dto.AgentUpda
 	return listStatus(t, h.ctrl, agentName)
 }
 
-func listStatus(t *testing.T, ctrl *Controller, agentName string) dto.AgentUpdateStatusDTO {
-	t.Helper()
+type nativeStatusResult struct {
+	status dto.AgentUpdateStatusDTO
+	err    error
+}
+
+func fetchNativeStatus(ctrl *Controller, agentName string) nativeStatusResult {
 	result, err := ctrl.ListAgentUpdateStatuses(context.Background())
 	if err != nil {
-		t.Fatal(err)
+		return nativeStatusResult{err: err}
 	}
 	for _, status := range result.Statuses {
 		if status.AgentName == agentName {
-			return status
+			return nativeStatusResult{status: status}
 		}
 	}
-	t.Fatalf("%s missing from statuses", agentName)
-	return dto.AgentUpdateStatusDTO{}
+	return nativeStatusResult{err: fmt.Errorf("%s missing from statuses", agentName)}
+}
+
+func fetchNativeStatusAsync(ctrl *Controller, agentName string) <-chan nativeStatusResult {
+	result := make(chan nativeStatusResult, 1)
+	go func() { result <- fetchNativeStatus(ctrl, agentName) }()
+	return result
+}
+
+func awaitNativeStatus(t *testing.T, operation string, result <-chan nativeStatusResult) dto.AgentUpdateStatusDTO {
+	t.Helper()
+	select {
+	case fetched := <-result:
+		if fetched.err != nil {
+			t.Fatalf("%s failed: %v", operation, fetched.err)
+		}
+		return fetched.status
+	case <-time.After(10 * time.Second):
+		t.Fatalf("timed out waiting for %s", operation)
+		return dto.AgentUpdateStatusDTO{}
+	}
+}
+
+func awaitNativeSignal(t *testing.T, operation string, signal <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("timed out waiting for %s", operation)
+	}
+}
+
+func listStatus(t *testing.T, ctrl *Controller, agentName string) dto.AgentUpdateStatusDTO {
+	t.Helper()
+	fetched := fetchNativeStatus(ctrl, agentName)
+	if fetched.err != nil {
+		t.Fatal(fetched.err)
+	}
+	return fetched.status
 }
 
 // harnessOnlyFixture is a harness-owned updater without a native check, which

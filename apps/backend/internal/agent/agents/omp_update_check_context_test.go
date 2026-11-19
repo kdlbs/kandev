@@ -74,7 +74,7 @@ func (f ompContextFixture) defaultFiles(agentDir, root string) []string {
 		filepath.Join(f.cwd, ".claude", "settings.json"), filepath.Join(f.cwd, ".claude", "settings.yml"),
 		filepath.Join(f.root, "install", "manager.json"),
 		filepath.Join(f.home, ".npmrc"), filepath.Join(f.home, ".bunfig.toml"),
-		filepath.Join(f.home, ".env"), filepath.Join(root, ".env"), filepath.Join(base, ".env"), filepath.Join(agentDir, ".env"),
+		filepath.Join(f.cwd, ".env"), filepath.Join(f.home, ".env"), filepath.Join(root, ".env"), filepath.Join(base, ".env"), filepath.Join(agentDir, ".env"),
 	}
 }
 
@@ -332,6 +332,26 @@ func TestOmpUpdateCheckContextFingerprintTracksDeclaredInputs(t *testing.T) {
 	writeTestFile(t, extra, "longer")
 	if declared.Fingerprint(resolver) == withExtra {
 		t.Error("project file size change kept the fingerprint")
+	}
+}
+
+func TestOmpUpdateCheckFingerprintTracksWorkingDirectoryEnvBeyondScanLimit(t *testing.T) {
+	f := newOmpContextFixture(t)
+	if err := os.MkdirAll(f.cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for i := range nativeUpdateCheckDirEntryLimit + 1 {
+		path := filepath.Join(f.cwd, fmt.Sprintf("unrelated-%03d", i))
+		writeTestFile(t, path, "ordinary file")
+	}
+	envPath := filepath.Join(f.cwd, ".env")
+	writeTestFile(t, envPath, "A")
+	context := NewOmpACP().NativeUpdateCheck().Context
+	resolver := NativeUpdateCheckResolver{WorkingDir: f.cwd, HomeDir: f.home, Executable: f.exe}
+	before := context.Fingerprint(resolver)
+	writeTestFile(t, envPath, "a longer environment value")
+	if context.Fingerprint(resolver) == before {
+		t.Error("working-directory .env edit was hidden by the directory scan limit")
 	}
 }
 

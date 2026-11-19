@@ -215,9 +215,10 @@ type nativeUpdateCheckLookup struct {
 	key            string
 	generation     uint64
 	spec           agents.NativeUpdateCheckSpec
-	// abandoned is set when shutdown began before the observation finished;
-	// the lookup then resolves to unknown/cancelled and commits nothing.
-	abandoned bool
+	// abandoned is set when a bounded observation cannot complete; its result
+	// is not shared or cached.
+	abandoned       bool
+	abandonedReason agents.NativeUpdateCheckReason
 }
 
 // nativeActiveIdentity is an agent's current native identity, the epoch at
@@ -245,16 +246,19 @@ const nativeStaleObservationAttempts = 3
 // observation that started before the one that committed the active identity
 // never replaces it; it observes again, and after repeated losses it uses an
 // isolated key that is neither shared nor cached.
-func (c *Controller) prepareNativeUpdateCheck(agentName string, spec agents.NativeUpdateCheckSpec) nativeUpdateCheckLookup {
+func (c *Controller) prepareNativeUpdateCheck(ctx context.Context, agentName string, spec agents.NativeUpdateCheckSpec) nativeUpdateCheckLookup {
 	lifetime := c.currentNativeCheckLifetime()
+	observationCtx, cancel := context.WithTimeout(ctx, runtimeUpdateStatusLookupTimeout)
+	defer cancel()
 	for attempt := 1; ; attempt++ {
 		seq := c.nextNativeObservation()
 		currentVersion := c.observedRuntimeVersion(agentName)
-		lookup, ok := c.observeNativeUpdateCheckIdentity(lifetime, agentName, currentVersion, spec)
+		lookup, ok := c.observeNativeUpdateCheckIdentity(observationCtx, lifetime, agentName, currentVersion, spec)
 		if !ok {
 			return nativeUpdateCheckLookup{
 				agentName: agentName, currentVersion: currentVersion, spec: spec, abandoned: true,
-				key: nativeUpdateCheckKeyPrefix(agentName) + "abandoned" + strconv.FormatUint(seq, 10),
+				abandonedReason: nativeUpdateCheckObservationAbortReason(observationCtx),
+				key:             nativeUpdateCheckKeyPrefix(agentName) + "abandoned" + strconv.FormatUint(seq, 10),
 			}
 		}
 		if key, ok := c.commitNativeObservation(agentName, lookup.identity, seq); ok {
@@ -268,24 +272,54 @@ func (c *Controller) prepareNativeUpdateCheck(agentName string, spec agents.Nati
 	}
 }
 
-// observeNativeUpdateCheckIdentity computes the identity off the caller's
-// goroutine so shutdown never waits on its filesystem reads, which cannot be
-// interrupted. It reports false when the lifetime closed first, including
-// before the observation began (a background pass still building targets is
-// joined by stop); the abandoned observation finishes in the background and
-// its result is discarded.
-func (c *Controller) observeNativeUpdateCheckIdentity(lifetime *nativeCheckLifetime, agentName, currentVersion string, spec agents.NativeUpdateCheckSpec) (nativeUpdateCheckLookup, bool) {
-	if lifetime.isClosed() {
+// observeNativeUpdateCheckIdentity bounds filesystem reads that cannot be
+// interrupted. Cancellation stops the caller's wait while the read keeps its
+// slot until the underlying operation returns.
+func (c *Controller) observeNativeUpdateCheckIdentity(ctx context.Context, lifetime *nativeCheckLifetime, agentName, currentVersion string, spec agents.NativeUpdateCheckSpec) (nativeUpdateCheckLookup, bool) {
+	if ctx.Err() != nil || lifetime.isClosed() {
 		return nativeUpdateCheckLookup{}, false
 	}
-	observed := make(chan nativeUpdateCheckLookup, 1)
-	go func() { observed <- c.nativeUpdateCheckIdentity(agentName, currentVersion, spec) }()
+	slots := c.nativeUpdateCheckIdentityReadSlots()
 	select {
-	case lookup := <-observed:
-		return lookup, true
+	case slots <- struct{}{}:
+	case <-ctx.Done():
+		return nativeUpdateCheckLookup{}, false
 	case <-lifetime.ctx.Done():
 		return nativeUpdateCheckLookup{}, false
 	}
+	if ctx.Err() != nil || lifetime.isClosed() {
+		<-slots
+		return nativeUpdateCheckLookup{}, false
+	}
+	observed := make(chan nativeUpdateCheckLookup, 1)
+	go func() {
+		defer func() { <-slots }()
+		observed <- c.nativeUpdateCheckIdentity(agentName, currentVersion, spec)
+	}()
+	select {
+	case lookup := <-observed:
+		return lookup, true
+	case <-ctx.Done():
+		return nativeUpdateCheckLookup{}, false
+	case <-lifetime.ctx.Done():
+		return nativeUpdateCheckLookup{}, false
+	}
+}
+
+func (c *Controller) nativeUpdateCheckIdentityReadSlots() chan struct{} {
+	c.runtimeUpdateStatusMu.Lock()
+	defer c.runtimeUpdateStatusMu.Unlock()
+	if c.nativeUpdateCheckIdentityReads == nil {
+		c.nativeUpdateCheckIdentityReads = make(chan struct{}, runtimeUpdateStatusMaxConcurrent)
+	}
+	return c.nativeUpdateCheckIdentityReads
+}
+
+func nativeUpdateCheckObservationAbortReason(ctx context.Context) agents.NativeUpdateCheckReason {
+	if ctx.Err() == context.DeadlineExceeded {
+		return agents.NativeUpdateCheckReasonTimeout
+	}
+	return agents.NativeUpdateCheckReasonCancelled
 }
 
 func (c *Controller) nextNativeObservation() uint64 {
@@ -394,7 +428,7 @@ func (c *Controller) nativeUpdateCheckEntry(ctx context.Context, lookup nativeUp
 		return runtimeUpdateStatusCacheEntry{}
 	}
 	if lookup.abandoned {
-		return nativeCancelledEntry()
+		return nativeUnknownUpdateCheckEntry(lookup.abandonedReason)
 	}
 	if entry, ok := c.freshRuntimeUpdateStatusEntry(lookup.key, now); ok {
 		return entry
@@ -403,7 +437,9 @@ func (c *Controller) nativeUpdateCheckEntry(ctx context.Context, lookup nativeUp
 	shared := context.WithoutCancel(ctx)
 	flightKey := lookup.key + "\x00l" + strconv.FormatUint(lifetime.id, 10)
 	result := c.runtimeUpdateStatusFlight.DoChan(flightKey, func() (interface{}, error) {
-		entry := c.executeNativeUpdateCheck(shared, lifetime, lookup, now)
+		executionCtx, cancel := context.WithTimeoutCause(shared, UpdateStatusResponseBudget, errNativeUpdateCheckTimeout)
+		defer cancel()
+		entry := c.executeNativeUpdateCheck(executionCtx, lifetime, lookup, now)
 		if hook := c.nativeCheckBeforePublish; hook != nil {
 			hook()
 		}
@@ -432,6 +468,8 @@ func (c *Controller) executeNativeUpdateCheck(ctx context.Context, lifetime *nat
 	slots := c.runtimeUpdateStatusSemaphore()
 	select {
 	case slots <- struct{}{}:
+	case <-ctx.Done():
+		return nativeUpdateCheckContextEntry(ctx)
 	case <-lifetime.ctx.Done():
 		return nativeCancelledEntry()
 	}
@@ -458,7 +496,10 @@ func (c *Controller) executeNativeUpdateCheck(ctx context.Context, lifetime *nat
 	if entry.expiresAt.IsZero() || launched.Executable != lookup.executable || launched.RealExecutable != lookup.realExecutable {
 		return entry
 	}
-	if after, ok := c.observeNativeUpdateCheckIdentity(lifetime, lookup.agentName, lookup.currentVersion, lookup.spec); ok && after.identity == lookup.identity {
+	observationCtx, cancel := context.WithTimeout(ctx, runtimeUpdateStatusLookupTimeout)
+	after, observed := c.observeNativeUpdateCheckIdentity(observationCtx, lifetime, lookup.agentName, lookup.currentVersion, lookup.spec)
+	cancel()
+	if observed && after.identity == lookup.identity {
 		c.storeNativeUpdateCheckEntry(lookup, entry)
 	}
 	return entry
@@ -501,9 +542,19 @@ func sameRuntimeVersion(left, right string) bool {
 }
 
 func nativeCancelledEntry() runtimeUpdateStatusCacheEntry {
-	return newNativeUpdateCheckEntry(agents.NativeUpdateCheckResult{
-		State: agents.NativeUpdateCheckStateUnknown, Reason: agents.NativeUpdateCheckReasonCancelled,
-	}, time.Time{})
+	return nativeUnknownUpdateCheckEntry(agents.NativeUpdateCheckReasonCancelled)
+}
+
+func nativeUnknownUpdateCheckEntry(reason agents.NativeUpdateCheckReason) runtimeUpdateStatusCacheEntry {
+	if reason == "" {
+		reason = agents.NativeUpdateCheckReasonCancelled
+	}
+	return runtimeUpdateStatusCacheEntry{native: true, state: dto.AgentUpdateCheckStateUnknown, reason: reason}
+}
+
+func nativeUpdateCheckContextEntry(ctx context.Context) runtimeUpdateStatusCacheEntry {
+	reason := nativeUpdateCheckContextReason(context.Background(), ctx)
+	return nativeUnknownUpdateCheckEntry(reason)
 }
 
 // newNativeUpdateCheckEntry applies the native TTLs. Cancelled and
@@ -624,7 +675,7 @@ func (c *Controller) previewNativeUpdateCheck(ctx context.Context, ag agents.Age
 	if !c.nativeUpdateCheckEligible(ag, available) {
 		return nativeUpdateCheckViewFor(runtimeUpdateStatusCacheEntry{}, false)
 	}
-	lookup := c.prepareNativeUpdateCheck(ag.ID(), spec)
+	lookup := c.prepareNativeUpdateCheck(ctx, ag.ID(), spec)
 	view := nativeUpdateCheckViewFor(c.nativeUpdateCheckEntry(ctx, lookup, c.runtimeUpdateStatusTime()), true)
 	view.runtimeVersion, view.observed = lookup.currentVersion, true
 	return view

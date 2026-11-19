@@ -90,8 +90,8 @@ func writeDirFingerprint(digest hash.Hash, dir NativeUpdateCheckDir) {
 	}
 }
 
-// listDirFiles returns the sorted non-directory entries selected by dir.Match.
-// It stops reading once the entry limit is exceeded.
+// listDirFiles returns sorted non-directory entries selected by dir.Match. It
+// counts every directory entry toward the scan limit.
 func listDirFiles(dir NativeUpdateCheckDir) ([]string, bool) {
 	handle, err := openFingerprintDir(dir.Path)
 	if err != nil {
@@ -99,16 +99,18 @@ func listDirFiles(dir NativeUpdateCheckDir) ([]string, bool) {
 	}
 	defer func() { _ = handle.Close() }()
 	var names []string
+	visited := 0
 	for {
 		entries, readErr := handle.ReadDir(nativeUpdateCheckDirReadBatch)
 		for _, entry := range entries {
+			visited++
+			if visited > nativeUpdateCheckDirEntryLimit {
+				return nil, true
+			}
 			if entry.IsDir() || (dir.Match != nil && !dir.Match(entry.Name())) {
 				continue
 			}
 			names = append(names, entry.Name())
-			if len(names) > nativeUpdateCheckDirEntryLimit {
-				return nil, true
-			}
 		}
 		if readErr != nil {
 			if !errors.Is(readErr, io.EOF) {

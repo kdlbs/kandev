@@ -2,8 +2,10 @@ package controller
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -31,32 +33,61 @@ func waitFor(t *testing.T, what string, condition func() bool) {
 	}
 }
 
+func stopWithin(t *testing.T, stop func(), releaseBlockers ...func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return
+	case <-time.After(5 * time.Second):
+	}
+	for _, release := range releaseBlockers {
+		release()
+	}
+	select {
+	case <-done:
+		t.Fatal("stop exceeded its deadline and needed test cleanup to finish")
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not finish after test-owned blockers were released")
+	}
+}
+
 // @covers AC-AGENTS-RUNTIME-NATIVE-CHECK-001.3
 func TestNativeCheckLifetimeAdmissionRacingStop(t *testing.T) {
-	lifetime := newNativeCheckLifetime()
-	if !lifetime.admit() {
-		t.Fatal("open lifetime refused admission")
-	}
-	closed := make(chan struct{})
-	go func() {
-		lifetime.close()
-		close(closed)
-	}()
-	<-lifetime.ctx.Done()
-	if lifetime.admit() {
-		t.Fatal("closing lifetime admitted a new execution")
-	}
-	select {
-	case <-closed:
-		t.Fatal("stop returned while an admitted execution was still running")
-	default:
-	}
-	lifetime.done()
-	select {
-	case <-closed:
-	case <-time.After(5 * time.Second):
-		t.Fatal("stop did not return after the admitted execution ended")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		lifetime := newNativeCheckLifetime()
+		if !lifetime.admit() {
+			t.Fatal("open lifetime refused admission")
+		}
+		closed := make(chan struct{})
+		go func() {
+			lifetime.close()
+			close(closed)
+		}()
+		synctest.Wait()
+		if lifetime.ctx.Err() == nil {
+			t.Fatal("close did not cancel the lifetime")
+		}
+		if lifetime.admit() {
+			t.Fatal("closing lifetime admitted a new execution")
+		}
+		select {
+		case <-closed:
+			t.Fatal("stop returned while an admitted execution was still running")
+		default:
+		}
+		lifetime.done()
+		synctest.Wait()
+		select {
+		case <-closed:
+		default:
+			t.Fatal("stop did not return after the admitted execution ended")
+		}
+	})
 }
 
 // @covers AC-AGENTS-RUNTIME-NATIVE-CHECK-001.3
@@ -68,23 +99,21 @@ func TestNativeCheckBackgroundStopReleasesSlotWaiters(t *testing.T) {
 	for range cap(slots) {
 		slots <- struct{}{}
 	}
-	defer func() {
-		for range cap(slots) {
-			<-slots
-		}
-	}()
-	waiter := make(chan dto.AgentUpdateStatusDTO, 1)
-	go func() { waiter <- listStatus(t, h.ctrl, ompAgentID) }()
+	var releaseSlotsOnce sync.Once
+	releaseSlots := func() {
+		releaseSlotsOnce.Do(func() {
+			for range cap(slots) {
+				<-slots
+			}
+		})
+	}
+	defer releaseSlots()
+	waiter := fetchNativeStatusAsync(h.ctrl, ompAgentID)
 	lifetime := h.ctrl.currentNativeCheckLifetime()
 	waitFor(t, "the request to wait for a slot", func() bool { return lifetime.inFlight() == 1 })
-	stop()
-	select {
-	case status := <-waiter:
-		if status.CheckReason != dto.AgentUpdateCheckReason(agents.NativeUpdateCheckReasonCancelled) {
-			t.Errorf("slot waiter status = %+v, want cancelled", status)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("stop left a slot waiter blocked")
+	stopWithin(t, stop, releaseSlots)
+	if status := awaitNativeStatus(t, "slot waiter status", waiter); status.CheckReason != dto.AgentUpdateCheckReason(agents.NativeUpdateCheckReasonCancelled) {
+		t.Errorf("slot waiter status = %+v, want cancelled", status)
 	}
 	requireRuns(t, h.runner, 0, "after releasing slot waiters")
 }
@@ -95,16 +124,20 @@ func TestNativeCheckBackgroundStopCancelsProcess(t *testing.T) {
 	h.runner.setOutput(ompUpToDate, 0)
 	stop := startIdleRuntimeBackground(t, h.ctrl)
 	started, release := h.runner.gated()
-	subscriber := make(chan dto.AgentUpdateStatusDTO, 1)
-	go func() { subscriber <- listStatus(t, h.ctrl, ompAgentID) }()
-	<-started
+	t.Cleanup(release)
+	subscriber := fetchNativeStatusAsync(h.ctrl, ompAgentID)
+	awaitNativeSignal(t, "native check start", started)
 	stopped := make(chan struct{})
 	go func() {
 		stop()
 		close(stopped)
 	}()
 	select {
-	case status := <-subscriber:
+	case fetched := <-subscriber:
+		if fetched.err != nil {
+			t.Fatalf("live subscriber failed: %v", fetched.err)
+		}
+		status := fetched.status
 		if status.CheckState != dto.AgentUpdateCheckStateUnknown || status.CheckReason != dto.AgentUpdateCheckReason(agents.NativeUpdateCheckReasonCancelled) {
 			t.Errorf("live subscriber status = %+v, want cancelled", status)
 		}
@@ -139,7 +172,11 @@ func TestNativeCheckRestartDoesNotJoinStoppedLifetimeFlight(t *testing.T) {
 	h.runner.setOutput(ompUpToDate, 0)
 	stop := startIdleRuntimeBackground(t, h.ctrl)
 	started, release := h.runner.gated()
+	t.Cleanup(release)
 	paused, resume := make(chan struct{}), make(chan struct{})
+	var resumeOnce sync.Once
+	releasePublication := func() { resumeOnce.Do(func() { close(resume) }) }
+	t.Cleanup(releasePublication)
 	var pausing atomic.Bool
 	pausing.Store(true)
 	h.ctrl.nativeCheckBeforePublish = func() {
@@ -148,22 +185,26 @@ func TestNativeCheckRestartDoesNotJoinStoppedLifetimeFlight(t *testing.T) {
 			<-resume
 		}
 	}
-	defer close(resume)
-	go func() { _ = listStatus(t, h.ctrl, ompAgentID) }()
-	<-started
-	stop()
-	<-paused
+	stale := fetchNativeStatusAsync(h.ctrl, ompAgentID)
+	awaitNativeSignal(t, "native check start", started)
+	stopWithin(t, stop, release, releasePublication)
+	awaitNativeSignal(t, "pre-publication hook", paused)
 	release()
 	startIdleRuntimeBackground(t, h.ctrl)
-	fresh := make(chan dto.AgentUpdateStatusDTO, 1)
-	go func() { fresh <- listStatus(t, h.ctrl, ompAgentID) }()
+	fresh := fetchNativeStatusAsync(h.ctrl, ompAgentID)
 	select {
-	case status := <-fresh:
+	case fetched := <-fresh:
+		if fetched.err != nil {
+			t.Fatalf("status after restart failed: %v", fetched.err)
+		}
+		status := fetched.status
 		if status.CheckState != dto.AgentUpdateCheckStateUpToDate {
 			t.Errorf("status after restart = %+v, want a fresh check", status)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("request after restart joined the stopped lifetime's unpublished flight")
 	}
+	releasePublication()
+	_ = awaitNativeStatus(t, "previous lifetime subscriber", stale)
 	requireRuns(t, h.runner, 2, "after restart with an unpublished stopped flight")
 }

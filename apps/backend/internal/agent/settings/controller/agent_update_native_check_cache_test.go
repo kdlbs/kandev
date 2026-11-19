@@ -325,22 +325,21 @@ func TestNativeCheckStaleFlightCannotRepopulateAfterInvalidation(t *testing.T) {
 	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
 	h.runner.queue(ompUpToDate, ompCanaryAvailable)
 	started, release := h.runner.gated()
-	stale := make(chan dto.AgentUpdateStatusDTO, 1)
-	go func() { stale <- listStatus(t, h.ctrl, ompAgentID) }()
-	<-started
+	t.Cleanup(release)
+	stale := fetchNativeStatusAsync(h.ctrl, ompAgentID)
+	awaitNativeSignal(t, "stale check start", started)
 	h.ctrl.InvalidateNativeUpdateCheck(ompAgentID)
-	fresh := make(chan dto.AgentUpdateStatusDTO, 1)
-	go func() { fresh <- listStatus(t, h.ctrl, ompAgentID) }()
+	fresh := fetchNativeStatusAsync(h.ctrl, ompAgentID)
 	select {
 	case <-started:
 	case <-time.After(5 * time.Second):
 		t.Fatal("post-invalidation request joined the stale check")
 	}
 	release()
-	if got := <-stale; got.CheckState != dto.AgentUpdateCheckStateUpToDate {
+	if got := awaitNativeStatus(t, "stale subscriber status", stale); got.CheckState != dto.AgentUpdateCheckStateUpToDate {
 		t.Errorf("stale subscriber = %+v", got)
 	}
-	if got := <-fresh; got.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
+	if got := awaitNativeStatus(t, "fresh subscriber status", fresh); got.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
 		t.Errorf("fresh subscriber = %+v", got)
 	}
 	if got := h.status(t, ompAgentID); got.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
@@ -365,9 +364,8 @@ func TestNativeCheckTerminalJobPublishesAfterInvalidation(t *testing.T) {
 			h.ctrl.updateJobStore.onRefresh = nil
 			started, release := h.runner.gated()
 			defer release()
-			preJob := make(chan dto.AgentUpdateStatusDTO, 1)
-			go func() { preJob <- listStatus(t, h.ctrl, ompAgentID) }()
-			<-started
+			preJob := fetchNativeStatusAsync(h.ctrl, ompAgentID)
+			awaitNativeSignal(t, "pre-job check start", started)
 			job, err := h.ctrl.EnqueueAgentUpdate(context.Background(), ompAgentID, "")
 			if err != nil {
 				t.Fatal(err)
@@ -376,16 +374,15 @@ func TestNativeCheckTerminalJobPublishesAfterInvalidation(t *testing.T) {
 			if outcome == dto.AgentUpdateJobStatusSucceeded {
 				h.updater.setACPVersion("18.13.3")
 			}
-			post := make(chan dto.AgentUpdateStatusDTO, 1)
-			go func() { post <- listStatus(t, h.ctrl, ompAgentID) }()
+			post := fetchNativeStatusAsync(h.ctrl, ompAgentID)
 			select {
 			case <-started:
 			case <-time.After(5 * time.Second):
 				t.Fatal("status after the terminal job joined the pre-job check")
 			}
 			release()
-			<-preJob
-			if got := <-post; got.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
+			_ = awaitNativeStatus(t, "pre-job status", preJob)
+			if got := awaitNativeStatus(t, "post-job status", post); got.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
 				t.Errorf("post-job status = %+v, want the fresh check", got)
 			}
 			<-hub.completed

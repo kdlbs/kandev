@@ -132,7 +132,7 @@ func (c *Controller) runtimeUpdateStatusEntries(
 			if !target.nativeEligible {
 				continue
 			}
-			lookup := c.prepareNativeUpdateCheck(target.agentName, *target.nativeCheck)
+			lookup := c.prepareNativeUpdateCheck(ctx, target.agentName, *target.nativeCheck)
 			// Project the runtime version this observation used, so the DTO
 			// agrees with the version that keyed and normalized the result.
 			targets[i].currentVersion, targets[i].effectiveVersion = lookup.currentVersion, lookup.currentVersion

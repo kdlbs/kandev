@@ -73,19 +73,22 @@ func (execNativeUpdateCheckRunner) Resolve(command agents.Command) (string, erro
 func (execNativeUpdateCheckRunner) Environment() []string { return filteredInstallEnv() }
 
 func (r execNativeUpdateCheckRunner) Run(ctx context.Context, command agents.Command) nativeUpdateCheckRun {
-	path, real, err, ok := r.launchPaths(ctx, command)
-	if !ok {
-		return nativeUpdateCheckRun{Reason: agents.NativeUpdateCheckReasonCancelled}
-	}
-	if err != nil {
-		return nativeUpdateCheckRun{Reason: agents.NativeUpdateCheckReasonNotInstalled}
-	}
 	timeout := r.timeout
 	if timeout <= 0 {
 		timeout = nativeUpdateCheckTimeout
 	}
 	runCtx, cancelRun := context.WithTimeoutCause(ctx, timeout, errNativeUpdateCheckTimeout)
 	defer cancelRun()
+	path, real, err, ok := r.launchPaths(runCtx, command)
+	if !ok {
+		return nativeUpdateCheckRun{Reason: nativeUpdateCheckContextReason(ctx, runCtx)}
+	}
+	if reason := nativeUpdateCheckContextReason(ctx, runCtx); reason != "" {
+		return nativeUpdateCheckRun{Reason: reason}
+	}
+	if err != nil {
+		return nativeUpdateCheckRun{Reason: agents.NativeUpdateCheckReasonNotInstalled}
+	}
 	limitCtx, cancelLimit := context.WithCancelCause(runCtx)
 	defer cancelLimit(nil)
 
@@ -97,13 +100,12 @@ func (r execNativeUpdateCheckRunner) Run(ctx context.Context, command agents.Com
 	cmd.WaitDelay = nativeUpdateCheckWaitDelay
 	exitCode, started, waitErr := runContainedCommand(cmd)
 	run := nativeUpdateCheckRun{Executable: path, RealExecutable: real}
+	contextReason := nativeUpdateCheckContextReason(ctx, runCtx)
 	switch {
 	case budget.exceeded():
 		run.Reason = agents.NativeUpdateCheckReasonOutputLimit
-	case errors.Is(context.Cause(runCtx), errNativeUpdateCheckTimeout):
-		run.Reason = agents.NativeUpdateCheckReasonTimeout
-	case ctx.Err() != nil:
-		run.Reason = agents.NativeUpdateCheckReasonCancelled
+	case contextReason != "":
+		run.Reason = contextReason
 	case !started:
 		run.Reason = agents.NativeUpdateCheckReasonNotInstalled
 	case waitErr != nil:
@@ -114,6 +116,16 @@ func (r execNativeUpdateCheckRunner) Run(ctx context.Context, command agents.Com
 		run.Output = agents.NativeUpdateCheckOutput{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: exitCode}
 	}
 	return run
+}
+
+func nativeUpdateCheckContextReason(ctx, runCtx context.Context) agents.NativeUpdateCheckReason {
+	if errors.Is(context.Cause(runCtx), errNativeUpdateCheckTimeout) || errors.Is(context.Cause(runCtx), context.DeadlineExceeded) {
+		return agents.NativeUpdateCheckReasonTimeout
+	}
+	if ctx.Err() != nil || runCtx.Err() != nil {
+		return agents.NativeUpdateCheckReasonCancelled
+	}
+	return ""
 }
 
 // launchPaths resolves the launcher and its real executable off the caller's

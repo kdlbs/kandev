@@ -6,13 +6,128 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 )
+
+func TestNativeCheckIdentityObservationsAreBoundedAndRequestCancellable(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+		gate := make(chan struct{})
+		var gateOnce sync.Once
+		release := func() { gateOnce.Do(func() { close(gate) }) }
+		entered := make(chan struct{}, runtimeUpdateStatusMaxConcurrent+1)
+		h.runner.setEnvironmentHook(func() {
+			entered <- struct{}{}
+			<-gate
+		})
+
+		type result struct {
+			status dto.AgentUpdateStatusDTO
+			err    error
+		}
+		requestsStarted := make(chan struct{}, runtimeUpdateStatusMaxConcurrent+1)
+		results := make(chan result, runtimeUpdateStatusMaxConcurrent+1)
+		cancels := make([]context.CancelFunc, 0, runtimeUpdateStatusMaxConcurrent+1)
+		defer func() {
+			for _, cancel := range cancels {
+				cancel()
+			}
+			release()
+			synctest.Wait()
+		}()
+		for range runtimeUpdateStatusMaxConcurrent + 1 {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancels = append(cancels, cancel)
+			go func() {
+				requestsStarted <- struct{}{}
+				statuses, err := h.ctrl.ListAgentUpdateStatuses(ctx)
+				item := result{err: err}
+				if err == nil && len(statuses.Statuses) == 1 {
+					item.status = statuses.Statuses[0]
+				}
+				results <- item
+			}()
+		}
+		for range runtimeUpdateStatusMaxConcurrent + 1 {
+			<-requestsStarted
+		}
+		synctest.Wait()
+		activeReads := len(entered)
+
+		for _, cancel := range cancels {
+			cancel()
+		}
+		synctest.Wait()
+		completedAfterCancellation := len(results)
+		release()
+		synctest.Wait()
+		if activeReads != runtimeUpdateStatusMaxConcurrent {
+			t.Errorf("active identity reads = %d, want the limit %d", activeReads, runtimeUpdateStatusMaxConcurrent)
+		}
+		if completedAfterCancellation != runtimeUpdateStatusMaxConcurrent+1 {
+			t.Errorf("completed requests after cancellation = %d, want %d", completedAfterCancellation, runtimeUpdateStatusMaxConcurrent+1)
+		}
+		for range len(results) {
+			item := <-results
+			if item.err != nil || item.status.AgentName != ompAgentID {
+				t.Errorf("cancelled status result = %+v, want one OMP status without error", item)
+			}
+		}
+	})
+}
+
+func TestNativeCheckPostRunObservationDoesNotDelayDecidedResultPastDeadline(t *testing.T) {
+	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+	h.runner.setOutput(ompUpToDate, 0)
+	lookup := h.ctrl.prepareNativeUpdateCheck(context.Background(), ompAgentID, agents.NewOmpACP().NativeUpdateCheck())
+	gate, entered, exited := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(gate) }) }
+	defer release()
+	h.runner.setEnvironmentHook(func() {
+		close(entered)
+		<-gate
+		close(exited)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	result := make(chan runtimeUpdateStatusCacheEntry, 1)
+	lifetime := h.ctrl.currentNativeCheckLifetime()
+	go func() { result <- h.ctrl.executeNativeUpdateCheck(ctx, lifetime, lookup, time.Now()) }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("post-run identity observation did not start")
+	}
+	var entry runtimeUpdateStatusCacheEntry
+	select {
+	case entry = <-result:
+	case <-time.After(2 * time.Second):
+		t.Fatal("post-run identity observation delayed the completed check")
+	}
+	if entry.state != dto.AgentUpdateCheckStateUpToDate {
+		t.Errorf("decided result = %+v, want up_to_date", entry)
+	}
+	if entry.expiresAt.IsZero() {
+		t.Error("the completed result was discarded instead of being returned uncached")
+	}
+	if _, cached := h.ctrl.freshRuntimeUpdateStatusEntry(lookup.key, time.Now()); cached {
+		t.Error("a result with incomplete identity revalidation was cached")
+	}
+	release()
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the underlying identity observation did not finish after release")
+	}
+}
 
 func TestNativeCheckSymlinkRetargetChangesIdentity(t *testing.T) {
 	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
@@ -26,14 +141,14 @@ func TestNativeCheckSymlinkRetargetChangesIdentity(t *testing.T) {
 	}
 	h.runner.setPath(link)
 	spec := agents.NewOmpACP().NativeUpdateCheck()
-	before := h.ctrl.prepareNativeUpdateCheck(ompAgentID, spec)
+	before := h.ctrl.prepareNativeUpdateCheck(context.Background(), ompAgentID, spec)
 	if err := os.Remove(link); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(second, link); err != nil {
 		t.Fatal(err)
 	}
-	after := h.ctrl.prepareNativeUpdateCheck(ompAgentID, spec)
+	after := h.ctrl.prepareNativeUpdateCheck(context.Background(), ompAgentID, spec)
 	if before.key == after.key {
 		t.Fatal("retargeted executable to a different real path but cache identity did not change")
 	}
@@ -46,9 +161,9 @@ func TestNativeCheckFoldedXDGBunfigChangesIdentity(t *testing.T) {
 	config := filepath.Join(xdg, ".bunfig.toml")
 	writeNativeCheckFile(t, config, "[install]\nregistry = 'https://old.invalid'\n")
 	spec := agents.NewOmpACP().NativeUpdateCheck()
-	before := h.ctrl.prepareNativeUpdateCheck(ompAgentID, spec)
+	before := h.ctrl.prepareNativeUpdateCheck(context.Background(), ompAgentID, spec)
 	writeNativeCheckFile(t, config, "[install]\nregistry = 'https://new-and-longer.invalid'\n")
-	after := h.ctrl.prepareNativeUpdateCheck(ompAgentID, spec)
+	after := h.ctrl.prepareNativeUpdateCheck(context.Background(), ompAgentID, spec)
 	if before.key == after.key {
 		t.Fatal("changed upstream-selected XDG bunfig size but cache identity did not change")
 	}
@@ -66,12 +181,12 @@ func TestNativeCheckIdentityChangeDuringRunIsNotCached(t *testing.T) {
 	h.runner.setPath(first)
 	h.runner.queue(ompUpToDate, ompCanaryAvailable)
 	started, release := h.runner.gated()
-	done := make(chan dto.AgentUpdateStatusDTO, 1)
-	go func() { done <- h.status(t, ompAgentID) }()
-	<-started
+	t.Cleanup(release)
+	done := fetchNativeStatusAsync(h.ctrl, ompAgentID)
+	awaitNativeSignal(t, "native check start", started)
 	h.runner.setPath(second)
 	release()
-	<-done
+	_ = awaitNativeStatus(t, "status after identity change", done)
 	h.runner.setPath(first)
 	if status := h.status(t, ompAgentID); status.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
 		t.Errorf("status after identity change = %+v; the result from another executable was cached", status)
@@ -115,17 +230,7 @@ func TestNativeCheckReturnToIdentityWhileInFlightStartsNewCheck(t *testing.T) {
 	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
 	h.runner.queue(ompUpToDate, ompUpToDate, ompCanaryAvailable)
 	started, release := h.runner.gated()
-	results := make(chan dto.AgentUpdateStatusDTO, 3)
-	request := func() {
-		go func() {
-			resp, err := h.ctrl.ListAgentUpdateStatuses(context.Background())
-			if err != nil || len(resp.Statuses) != 1 {
-				results <- dto.AgentUpdateStatusDTO{}
-				return
-			}
-			results <- resp.Statuses[0]
-		}()
-	}
+	t.Cleanup(release)
 	awaitStart := func(step string) {
 		t.Helper()
 		select {
@@ -136,20 +241,20 @@ func TestNativeCheckReturnToIdentityWhileInFlightStartsNewCheck(t *testing.T) {
 		}
 	}
 	npmrc := filepath.Join(h.home, ".npmrc")
-	request()
+	first := fetchNativeStatusAsync(h.ctrl, ompAgentID)
 	awaitStart("first A")
 	writeNativeCheckFile(t, npmrc, "registry=https://registry.invalid/\n")
-	request()
+	second := fetchNativeStatusAsync(h.ctrl, ompAgentID)
 	awaitStart("B")
 	if err := os.Remove(npmrc); err != nil {
 		t.Fatal(err)
 	}
-	request()
+	third := fetchNativeStatusAsync(h.ctrl, ompAgentID)
 	awaitStart("returning A")
 	release()
-	for range 3 {
-		<-results
-	}
+	_ = awaitNativeStatus(t, "first A status", first)
+	_ = awaitNativeStatus(t, "B status", second)
+	_ = awaitNativeStatus(t, "returning A status", third)
 	if status := h.status(t, ompAgentID); status.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
 		t.Errorf("cached status = %+v; want the returning A check's result, not the stale first A", status)
 	}
@@ -167,6 +272,9 @@ func TestNativeCheckStaleObservationDoesNotEvictNewerIdentity(t *testing.T) {
 	h.runner.setPath(first)
 	h.runner.setOutput(ompUpToDate, 0)
 	paused, resume := make(chan struct{}), make(chan struct{})
+	var resumeOnce sync.Once
+	releaseObservation := func() { resumeOnce.Do(func() { close(resume) }) }
+	t.Cleanup(releaseObservation)
 	var pausing atomic.Bool
 	pausing.Store(true)
 	h.runner.setEnvironmentHook(func() {
@@ -175,14 +283,13 @@ func TestNativeCheckStaleObservationDoesNotEvictNewerIdentity(t *testing.T) {
 			<-resume
 		}
 	})
-	stale := make(chan dto.AgentUpdateStatusDTO, 1)
-	go func() { stale <- listStatus(t, h.ctrl, ompAgentID) }()
-	<-paused
+	stale := fetchNativeStatusAsync(h.ctrl, ompAgentID)
+	awaitNativeSignal(t, "first identity observation", paused)
 	h.runner.setPath(second)
 	_ = h.status(t, ompAgentID)
 	requireRuns(t, h.runner, 1, "after the newer observation")
-	close(resume)
-	<-stale
+	releaseObservation()
+	_ = awaitNativeStatus(t, "stale observation status", stale)
 	if status := h.status(t, ompAgentID); status.CheckState != dto.AgentUpdateCheckStateUpToDate {
 		t.Errorf("status = %+v", status)
 	}
@@ -239,12 +346,12 @@ func TestNativeCheckLaunchedExecutableMustMatchPreparedIdentity(t *testing.T) {
 		}
 	})
 	started, release := h.runner.gated()
-	done := make(chan dto.AgentUpdateStatusDTO, 1)
-	go func() { done <- listStatus(t, h.ctrl, ompAgentID) }()
-	<-started
+	t.Cleanup(release)
+	done := fetchNativeStatusAsync(h.ctrl, ompAgentID)
+	awaitNativeSignal(t, "native check start", started)
 	h.runner.setPath(first)
 	release()
-	<-done
+	_ = awaitNativeStatus(t, "status after executable replacement", done)
 	if status := h.status(t, ompAgentID); status.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
 		t.Errorf("status at A = %+v; A reused the result launched from B", status)
 	}
@@ -278,12 +385,12 @@ func TestNativeCheckLaunchTimeRealExecutableMustMatch(t *testing.T) {
 		}
 	})
 	started, release := h.runner.gated()
-	done := make(chan dto.AgentUpdateStatusDTO, 1)
-	go func() { done <- listStatus(t, h.ctrl, ompAgentID) }()
-	<-started
+	t.Cleanup(release)
+	done := fetchNativeStatusAsync(h.ctrl, ompAgentID)
+	awaitNativeSignal(t, "native check start", started)
 	retarget(first)
 	release()
-	<-done
+	_ = awaitNativeStatus(t, "status after symlink retarget", done)
 	if status := h.status(t, ompAgentID); status.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
 		t.Errorf("status = %+v; the result from the temporary symlink target was cached", status)
 	}
@@ -386,7 +493,7 @@ func TestNativeCheckParentCancellationCancelsRunningCheck(t *testing.T) {
 		}
 		result <- dto.AgentUpdateStatusDTO{}
 	}()
-	<-started
+	awaitNativeSignal(t, "native check start", started)
 	// A post-run fingerprint can block on unreachable storage. A cancelled
 	// run must publish and release without one.
 	fingerprintGate := make(chan struct{})
@@ -463,7 +570,7 @@ func TestNativeCheckShutdownDoesNotWaitForBlockedObservation(t *testing.T) {
 			}()
 			defer cancelParent()
 			if !tc.shutInRun {
-				<-entered
+				awaitNativeSignal(t, "blocked identity observation", entered)
 				cancelParent()
 			}
 			select {

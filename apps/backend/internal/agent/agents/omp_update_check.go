@@ -155,7 +155,8 @@ func ompUpdateCheckSources(r NativeUpdateCheckResolver) NativeUpdateCheckSources
 		filepath.Join(agentDir, "config.yml"), filepath.Join(agentDir, "config.yaml"),
 		filepath.Join(r.WorkingDir, ".omp", "config.yml"), filepath.Join(r.WorkingDir, ".omp", "settings.json"),
 		filepath.Join(r.WorkingDir, ".claude", "settings.json"), filepath.Join(r.WorkingDir, ".claude", "settings.yml"),
-		filepath.Join(r.HomeDir, ".env"), filepath.Join(root, ".env"), filepath.Join(base, ".env"), filepath.Join(agentDir, ".env"),
+		filepath.Join(r.WorkingDir, ".env"), filepath.Join(r.HomeDir, ".env"),
+		filepath.Join(root, ".env"), filepath.Join(base, ".env"), filepath.Join(agentDir, ".env"),
 		filepath.Join(r.HomeDir, ".bunfig.toml"),
 	}
 	files = append(files, ompConfigOverlays(r)...)

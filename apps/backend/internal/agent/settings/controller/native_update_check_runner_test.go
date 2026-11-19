@@ -138,7 +138,7 @@ func TestNativeCheckRunnerCancelDuringBlockedLaunchResolution(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan nativeUpdateCheckRun, 1)
 	go func() { done <- runner.Run(ctx, nativeCheckHelperCommand()) }()
-	<-entered
+	awaitNativeSignal(t, "blocked launch resolution", entered)
 	cancel()
 	select {
 	case run := <-done:
@@ -151,10 +151,54 @@ func TestNativeCheckRunnerCancelDuringBlockedLaunchResolution(t *testing.T) {
 	// Resolution recovers after cancellation; nothing may start from it. A
 	// started helper writes the marker within milliseconds.
 	release()
-	<-resolved
+	awaitNativeSignal(t, "launch resolution after release", resolved)
 	time.Sleep(500 * time.Millisecond)
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatal("the check started after its resolution recovered")
+	}
+}
+
+func TestNativeCheckRunnerTimeoutCoversBlockedLaunchResolution(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "started")
+	t.Setenv(nativeCheckHelperEnv, "heartbeat")
+	t.Setenv(nativeCheckHeartbeatEnv, marker)
+	entered, gate, resolved := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(gate) }) }
+	t.Cleanup(release)
+	runner := execNativeUpdateCheckRunner{
+		timeout: 100 * time.Millisecond,
+		resolveLaunch: func(command agents.Command) (string, string, error) {
+			defer close(resolved)
+			close(entered)
+			<-gate
+			return execNativeUpdateCheckRunner{}.resolveLaunchPaths(command)
+		},
+	}
+	done := make(chan nativeUpdateCheckRun, 1)
+	go func() { done <- runner.Run(context.Background(), nativeCheckHelperCommand()) }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("launch resolution did not start")
+	}
+	select {
+	case run := <-done:
+		if run.Reason != agents.NativeUpdateCheckReasonTimeout {
+			t.Fatalf("reason = %q, want timeout", run.Reason)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout did not include blocked launch resolution")
+	}
+	release()
+	select {
+	case <-resolved:
+	case <-time.After(5 * time.Second):
+		t.Fatal("blocked launch resolution did not return")
+	}
+	time.Sleep(500 * time.Millisecond)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the check started after launch resolution returned past its deadline")
 	}
 }
 

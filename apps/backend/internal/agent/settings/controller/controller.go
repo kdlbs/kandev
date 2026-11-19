@@ -73,43 +73,44 @@ var (
 )
 
 type Controller struct {
-	repo                        store.Repository
-	accountBlockReleaser        AccountBlockReleaser
-	routingCircuitReader        RoutingCircuitReader
-	discovery                   *discovery.Registry
-	agentRegistry               *registry.Registry
-	sessionChecker              SessionChecker
-	watcherDeps                 WatcherDependencyChecker
-	routingTierDeps             RoutingTierDependencyChecker
-	automationDeps              AutomationDependencyChecker
-	utilityDeps                 UtilityDependencyChecker
-	mcpService                  *mcpconfig.Service
-	cursorMCPDiscoverySource    *cursorMCPDiscoverySource
-	copilotPluginRunnerImpl     copilotplugins.Runner
-	copilotPluginCache          *copilotPluginDiscoveryCache
-	copilotPluginMu             sync.Mutex
-	copilotPluginGenerations    map[string]uint64
-	copilotPluginGeneration     uint64
-	copilotPluginKey            []byte
-	copilotPluginRandom         io.Reader
-	hostUtility                 hostUtilityProvider
-	jobStore                    *JobStore
-	updateJobStore              *AgentUpdateJobStore
-	runtimeUpdater              RuntimeUpdater
-	managedRuntimeSelections    managedruntime.SelectionStore
-	openCodeMigrationGuard      OpenCodeMigrationGuard
-	maintenance                 *maintenanceCoordinator
-	hub                         JobBroadcaster
-	logger                      *logger.Logger
-	secretStore                 secrets.SecretStore
-	runtimeUpdateStatusMu       sync.Mutex
-	runtimeUpdateStatusCache    map[string]runtimeUpdateStatusCacheEntry
-	runtimeUpdateStatusNow      func() time.Time
-	runtimeUpdateStatusResolver RuntimeUpdateStatusResolver
-	runtimeUpdateStatusLookup   chan struct{}
-	runtimeUpdateStatusFlight   singleflight.Group
-	nativeUpdateCheckRunner     nativeUpdateCheckRunner
-	nativeUpdateCheckGeneration map[string]uint64
+	repo                           store.Repository
+	accountBlockReleaser           AccountBlockReleaser
+	routingCircuitReader           RoutingCircuitReader
+	discovery                      *discovery.Registry
+	agentRegistry                  *registry.Registry
+	sessionChecker                 SessionChecker
+	watcherDeps                    WatcherDependencyChecker
+	routingTierDeps                RoutingTierDependencyChecker
+	automationDeps                 AutomationDependencyChecker
+	utilityDeps                    UtilityDependencyChecker
+	mcpService                     *mcpconfig.Service
+	cursorMCPDiscoverySource       *cursorMCPDiscoverySource
+	copilotPluginRunnerImpl        copilotplugins.Runner
+	copilotPluginCache             *copilotPluginDiscoveryCache
+	copilotPluginMu                sync.Mutex
+	copilotPluginGenerations       map[string]uint64
+	copilotPluginGeneration        uint64
+	copilotPluginKey               []byte
+	copilotPluginRandom            io.Reader
+	hostUtility                    hostUtilityProvider
+	jobStore                       *JobStore
+	updateJobStore                 *AgentUpdateJobStore
+	runtimeUpdater                 RuntimeUpdater
+	managedRuntimeSelections       managedruntime.SelectionStore
+	openCodeMigrationGuard         OpenCodeMigrationGuard
+	maintenance                    *maintenanceCoordinator
+	hub                            JobBroadcaster
+	logger                         *logger.Logger
+	secretStore                    secrets.SecretStore
+	runtimeUpdateStatusMu          sync.Mutex
+	runtimeUpdateStatusCache       map[string]runtimeUpdateStatusCacheEntry
+	runtimeUpdateStatusNow         func() time.Time
+	runtimeUpdateStatusResolver    RuntimeUpdateStatusResolver
+	runtimeUpdateStatusLookup      chan struct{}
+	nativeUpdateCheckIdentityReads chan struct{}
+	runtimeUpdateStatusFlight      singleflight.Group
+	nativeUpdateCheckRunner        nativeUpdateCheckRunner
+	nativeUpdateCheckGeneration    map[string]uint64
 	// nativeUpdateCheckActive is each agent's current native identity and
 	// epoch; a different identity evicts the agent's other entries.
 	nativeUpdateCheckActive map[string]nativeActiveIdentity
