@@ -14,6 +14,7 @@ type SidebarWorkspacePatch struct {
 	WorkspaceID   string          `json:"workspace_id"`
 	Views         *[]SidebarView  `json:"views,omitempty"`
 	ViewsUpsert   []SidebarView   `json:"views_upsert,omitempty"`
+	ViewsUpdate   []SidebarView   `json:"views_update,omitempty"`
 	ViewIDsDelete []string        `json:"view_ids_delete,omitempty"`
 	ViewOrder     *[]string       `json:"view_order,omitempty"`
 	ActiveViewID  *string         `json:"active_view_id,omitempty"`

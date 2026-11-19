@@ -2,13 +2,13 @@ package service
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/kandev/kandev/internal/user/models"
 )
 
 func mergeSidebarWorkspaceViews(current []models.SidebarView, patch *models.SidebarWorkspacePatch) (*[]models.SidebarView, error) {
-	delta := patch.ViewsUpsert != nil || patch.ViewIDsDelete != nil || patch.ViewOrder != nil
-	if !delta {
+	if !hasSidebarWorkspaceMutations(patch) {
 		return patch.Views, nil
 	}
 	if err := validateSidebarWorkspaceMutations(patch); err != nil {
@@ -29,7 +29,7 @@ func mergeSidebarWorkspaceViews(current []models.SidebarView, patch *models.Side
 			order = append(order, view.ID)
 		}
 	}
-	seen := make(map[string]bool, len(patch.ViewsUpsert))
+	seen := make(map[string]bool, len(patch.ViewsUpsert)+len(patch.ViewsUpdate))
 	for _, view := range patch.ViewsUpsert {
 		if seen[view.ID] || deleted[view.ID] {
 			return nil, errors.New("sidebar_views: duplicate or conflicting mutation")
@@ -40,6 +40,9 @@ func mergeSidebarWorkspaceViews(current []models.SidebarView, patch *models.Side
 		}
 		byID[view.ID] = view
 	}
+	if err := applySidebarViewUpdates(byID, seen, deleted, patch.ViewsUpdate); err != nil {
+		return nil, err
+	}
 	if patch.ViewOrder != nil {
 		order = *patch.ViewOrder
 	}
@@ -47,11 +50,30 @@ func mergeSidebarWorkspaceViews(current []models.SidebarView, patch *models.Side
 	return &views, err
 }
 
+func hasSidebarWorkspaceMutations(patch *models.SidebarWorkspacePatch) bool {
+	return patch.ViewsUpsert != nil || patch.ViewsUpdate != nil || patch.ViewIDsDelete != nil || patch.ViewOrder != nil
+}
+
+func applySidebarViewUpdates(
+	byID map[string]models.SidebarView, seen, deleted map[string]bool, updates []models.SidebarView,
+) error {
+	for _, view := range updates {
+		if strings.TrimSpace(view.ID) == "" || seen[view.ID] || deleted[view.ID] {
+			return errors.New("sidebar_views: duplicate or conflicting mutation")
+		}
+		seen[view.ID] = true
+		if _, exists := byID[view.ID]; exists {
+			byID[view.ID] = view
+		}
+	}
+	return nil
+}
+
 func validateSidebarWorkspaceMutations(patch *models.SidebarWorkspacePatch) error {
 	if patch.Views != nil {
 		return errors.New("sidebar_views: cannot mix replacement and mutations")
 	}
-	if len(patch.ViewsUpsert) > maxSidebarViews || len(patch.ViewIDsDelete) > maxSidebarViews ||
+	if len(patch.ViewsUpsert)+len(patch.ViewsUpdate) > maxSidebarViews || len(patch.ViewIDsDelete) > maxSidebarViews ||
 		(patch.ViewOrder != nil && len(*patch.ViewOrder) > maxSidebarViews) {
 		return errors.New("sidebar_views: too many mutations")
 	}

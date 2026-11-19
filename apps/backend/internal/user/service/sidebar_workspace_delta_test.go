@@ -68,3 +68,33 @@ func TestSidebarWorkspaceDeltaOrderAndDeletionAreAtomic(t *testing.T) {
 	require.ErrorIs(t, apply(`{"SidebarViewState":{"workspace_id":"a","views":[],"views_upsert":[{"id":"x","name":"X"}]}}`), ErrValidation)
 	require.ErrorIs(t, apply(`{"SidebarViewState":{"workspace_id":"a","views":[],"views_upsert":[]}}`), ErrValidation)
 }
+
+func TestSidebarWorkspaceUpdateDoesNotRecreateDeletedView(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deleted=%t", deleted), func(t *testing.T) {
+			svc, _, _ := sidebarService(t)
+			ctx := context.Background()
+			apply := func(raw string) {
+				t.Helper()
+				_, err := svc.UpdateUserSettings(ctx, sidebarPatch(t, raw))
+				require.NoError(t, err)
+			}
+			apply(`{"SidebarViewState":{"workspace_id":"a","views_upsert":[{"id":"grouped","name":"Original","group":"plugin:tags:tags"}],"active_view_id":"grouped"}}`)
+			if deleted {
+				apply(`{"SidebarViewState":{"workspace_id":"a","view_ids_delete":["grouped"],"active_view_id":"legacy"}}`)
+			}
+			apply(`{"SidebarViewState":{"workspace_id":"a","views_update":[{"id":"grouped","name":"Edited","group":"plugin:tags:tags","collapsed_groups":["kept"]}]}}`)
+			reloaded, err := svc.GetUserSettings(ctx)
+			require.NoError(t, err)
+			state := reloaded.SidebarViewsByWorkspace["a"]
+			if deleted {
+				require.Len(t, state.Views, 1)
+				require.Equal(t, "legacy", state.ActiveViewID)
+			} else {
+				require.Len(t, state.Views, 2)
+				require.Equal(t, "Edited", state.Views[1].Name)
+				require.Equal(t, []string{"kept"}, state.Views[1].CollapsedGroups)
+			}
+		})
+	}
+}
