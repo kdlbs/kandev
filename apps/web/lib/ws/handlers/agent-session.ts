@@ -43,6 +43,7 @@ import { applyForegroundActivity, applyCancellationPending } from "./session-act
 import {
   clearPinnedSessionIfOverridden,
   isTerminalSessionState,
+  pickReplacementSessionId,
   shouldPreservePinnedSessionForTask,
 } from "./session-selection";
 import { followRemovedSession, followSessionTransition } from "./task-primary-focus";
@@ -128,21 +129,6 @@ export function shouldAdoptNewSession(
     }
   }
   return true;
-}
-
-/**
- * Pick the newest non-terminal session for a task. Used when the currently
- * active session just reached a terminal state — we want to hand focus to the
- * session that replaced it (typically created by a workflow step transition).
- */
-export function pickReplacementSessionId(state: AppState, taskId: string): string | null {
-  const sessions = state.taskSessionsByTask.itemsByTaskId[taskId];
-  if (!sessions) return null;
-  for (let i = sessions.length - 1; i >= 0; i -= 1) {
-    const candidate = sessions[i];
-    if (!isTerminalSessionState(candidate.state)) return candidate.id;
-  }
-  return null;
 }
 
 /**

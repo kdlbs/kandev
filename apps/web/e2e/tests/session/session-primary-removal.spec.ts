@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { watchWs } from "../../helpers/causal-waits";
+import { expectLastStoppedSessionRemoval } from "../../helpers/session-removal";
 import {
   cleanupFailingResumeTask,
   seedFailingResumeTask,
@@ -120,4 +121,14 @@ test("follows removal after a failed resume has already lost primary", async ({
   } finally {
     await cleanupFailingResumeTask(apiClient, seeded);
   }
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.11
+test("retires the last stopped session deleted from another client without reloading", async ({
+  testPage,
+  desktopTestPage,
+  apiClient,
+  seedData,
+}) => {
+  await expectLastStoppedSessionRemoval(testPage, desktopTestPage, apiClient, seedData);
 });

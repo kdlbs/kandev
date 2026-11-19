@@ -5,7 +5,10 @@ import { ApiError } from "@/lib/api/client";
 import { getOwnedTaskSessionId } from "@/src/task-route-projection";
 import { invalidateTaskSessionMembership } from "@/lib/state/task-session-reads";
 import { registerTaskSessionHandlers } from "./agent-session";
+import { registerTasksHandlers } from "./tasks";
+import { makeMessage, makeTask } from "./tasks.test-helpers";
 import {
+  SESSION_STATE_CHANGED,
   deferred,
   flushFocusWork,
   membership,
@@ -31,6 +34,9 @@ beforeEach(() => {
 const SNAPSHOT_TIME = "2026-11-19T12:00:00Z";
 const REMOVED = "session.removed";
 const RECIPIENT_EXECUTION_ID = "recipient-execution";
+const FAILURE_TIME = "2026-11-19T12:00:02Z";
+const OTHER_TASK_ID = "other-task";
+const STARTING_TIME = "2026-11-19T12:00:01Z";
 function removeDisplayed(store: ReturnType<typeof withSiblings>, taskId?: string) {
   registerTaskSessionHandlers(store)[REMOVED]?.({
     id: "removed",
@@ -84,8 +90,8 @@ describe("lifecycle observations before promotion", () => {
     await flushFocusWork();
     expect(store.getState().tasks.activeSessionId).toBe("old");
     promote(store);
-    notifyState(store, "STARTING", "2026-11-19T12:00:01Z");
-    notifyState(store, "FAILED", "2026-11-19T12:00:02Z");
+    notifyState(store, "STARTING", STARTING_TIME);
+    notifyState(store, "FAILED", FAILURE_TIME);
     await flushFocusWork();
     expect(store.getState().tasks.activeSessionId).toBe("old");
   });
@@ -109,7 +115,7 @@ describe("lifecycle observations before promotion", () => {
     const read = deferred();
     vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
     notifyState(store, "CANCELLED", SNAPSHOT_TIME);
-    notifyState(store, "STARTING", "2026-11-19T12:00:01Z");
+    notifyState(store, "STARTING", STARTING_TIME);
     read.resolve(response("CANCELLED"));
     await flushFocusWork();
     expect(store.getState().tasks.activeSessionId).toBe("old");
@@ -132,6 +138,75 @@ describe("lifecycle observations before promotion", () => {
     await flushFocusWork();
     expect(store.getState().tasks.activeSessionId).toBe("old");
   });
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+describe("lifecycle authority at publication", () => {
+  it.each(["STARTING", "CANCELLED"] as const)(
+    "keeps lifecycle authority across an unchanged primary with durable %s",
+    async (durable) => {
+      const store = withSiblings("CANCELLED");
+      store.getState().setActiveTask(OTHER_TASK_ID);
+      promote(store);
+      store.getState().setActiveSessionAuto("t1", "old");
+      const read = deferred();
+      vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+      notifyState(store, "CANCELLED", SNAPSHOT_TIME);
+      const payload = makeTask("t1", "next");
+      payload.title = "Edited task title";
+      registerTasksHandlers(store)["task.updated"]!(makeMessage(payload));
+      read.resolve(response(durable));
+      await flushFocusWork();
+      expect(store.getState().tasks.activeSessionId).toBe(
+        durable === "STARTING" ? "old" : "latest",
+      );
+      if (durable === "STARTING") {
+        notifyState(store, "STARTING", STARTING_TIME);
+        notifyState(store, "FAILED", FAILURE_TIME);
+        await flushFocusWork();
+        expect(store.getState().tasks.activeSessionId).toBe("old");
+      }
+    },
+  );
+
+  it.each(["FAILED", "WAITING_FOR_INPUT"] as const)(
+    "revalidates the lifecycle recipient after its %s observation",
+    async (state) => {
+      const store = withSiblings("CANCELLED");
+      store.getState().setActiveTask(OTHER_TASK_ID);
+      promote(store);
+      store.getState().setActiveSessionAuto("t1", "old");
+      store.getState().upsertTaskSessionFromEvent("t1", {
+        ...store.getState().taskSessions.items.latest,
+        state: "STARTING",
+      });
+      const read = deferred();
+      vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+      const selected: Array<string | null> = [];
+      const release = store.subscribe((value) => selected.push(value.tasks.activeSessionId));
+      try {
+        notifyState(store, "CANCELLED", SNAPSHOT_TIME);
+        registerTaskSessionHandlers(store)[SESSION_STATE_CHANGED]!({
+          id: "recipient-settled",
+          type: "notification",
+          action: SESSION_STATE_CHANGED,
+          payload: {
+            task_id: "t1",
+            session_id: "latest",
+            new_state: state,
+            old_state: "STARTING",
+            updated_at: STARTING_TIME,
+          },
+        });
+        read.resolve(response("CANCELLED"));
+        await flushFocusWork();
+        expect(store.getState().tasks.activeSessionId).toBe(state === "FAILED" ? "next" : "latest");
+        if (state === "FAILED") expect(selected).not.toContain("latest");
+      } finally {
+        release();
+      }
+    },
+  );
 });
 
 // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
@@ -225,7 +300,10 @@ describe("removing a retained non-primary failure", () => {
     proof.resolve(membership("next", "latest"));
     await flushFocusWork();
     expect(store.getState().tasks.activeSessionId).toBe(pin ? "latest" : "next");
-    if (!pin) expect(store.getState().taskSessions.items.old).toBeUndefined();
+    expect(store.getState().taskSessions.items.old).toBeUndefined();
+    expect(
+      store.getState().taskSessionsByTask.itemsByTaskId.t1.some((row) => row.id === "old"),
+    ).toBe(false);
   });
 
   it.each(["promotion-first", "proof-first"])(
@@ -324,4 +402,78 @@ it("does not inherit readiness into an independent recipient environment", async
   await flushFocusWork();
   expect(store.getState().tasks.activeSessionId).toBe("latest");
   expect(store.getState().sessionAgentctl.itemsBySessionId.latest).toBeUndefined();
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.11
+describe("retirement without a view successor", () => {
+  it.each(["empty", "terminal-only"] as const)("retires with %s membership", async (kind) => {
+    const store = withSiblings("FAILED");
+    const stale = store.getState().taskSessionsByTask.itemsByTaskId.t1;
+    const proof = membership(...(kind === "empty" ? [] : ["next", "latest"]));
+    for (const row of proof.sessions) {
+      row.is_primary = false;
+      row.state = "COMPLETED";
+      store.getState().upsertTaskSessionFromEvent("t1", row);
+    }
+    vi.mocked(listTaskSessions).mockResolvedValue(proof);
+    removeDisplayed(store);
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBeNull();
+    expect(store.getState().taskSessions.items.old).toBeUndefined();
+    store.getState().setTaskSessionsForTask("t1", stale, {});
+    notifyState(store, "FAILED", FAILURE_TIME);
+    expect(store.getState().taskSessions.items.old).toBeUndefined();
+    expect(
+      store.getState().taskSessionsByTask.itemsByTaskId.t1.some((row) => row.id === "old"),
+    ).toBe(false);
+    expect(store.getState().tasks.activeSessionId).toBeNull();
+  });
+
+  it("retires after navigation while preserving the new task and surviving cursor", async () => {
+    const store = withSiblings("FAILED");
+    store.getState().setTaskSession({
+      ...store.getState().taskSessions.items.next,
+      last_read_message_id: "next-read",
+    });
+    const proof = Promise.withResolvers<Awaited<ReturnType<typeof listTaskSessions>>>();
+    vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
+    removeDisplayed(store);
+    store.getState().setActiveTask(OTHER_TASK_ID);
+    proof.resolve(membership("next", "latest"));
+    await flushFocusWork();
+    expect(store.getState().taskSessions.items.old).toBeUndefined();
+    expect(store.getState().tasks.activeTaskId).toBe(OTHER_TASK_ID);
+    expect(store.getState().tasks.activeSessionId).toBeNull();
+    expect(store.getState().taskSessions.items.next.last_read_message_id).toBe("next-read");
+  });
+
+  it("retires a background removal without cancelling another session's pending follow", async () => {
+    const store = withSiblings("FAILED");
+    store.getState().setActiveTask(OTHER_TASK_ID);
+    promote(store);
+    store.getState().setActiveSessionAuto("t1", "next");
+    const read = deferred();
+    vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+    promote(store, "latest");
+    vi.mocked(listTaskSessions).mockResolvedValue(membership("latest", "next"));
+    removeDisplayed(store, "t1");
+    await flushFocusWork();
+    expect(store.getState().taskSessions.items.old).toBeUndefined();
+    expect(store.getState().tasks.activeSessionId).toBe("next");
+    read.resolve(response("WAITING_FOR_INPUT", "next"));
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("latest");
+  });
+
+  it("does not retire from a prior workspace-context proof", async () => {
+    const store = withSiblings("FAILED");
+    const proof = Promise.withResolvers<Awaited<ReturnType<typeof listTaskSessions>>>();
+    vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
+    removeDisplayed(store);
+    store.setState({ workspaceContextGeneration: 1 });
+    proof.resolve(membership("next", "latest"));
+    await flushFocusWork();
+    expect(store.getState().taskSessions.items.old?.id).toBe("old");
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+  });
 });

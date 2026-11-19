@@ -15,6 +15,7 @@ acceptance_criteria:
   - AC-TASKS-TASK-UNREAD-DOT-001.6
   - AC-TASKS-TASK-UNREAD-DOT-001.8
   - AC-TASKS-TASK-UNREAD-DOT-001.9
+  - AC-TASKS-TASK-UNREAD-DOT-001.11
   - AC-TASKS-TASK-UNREAD-DOT-001.12
   - AC-TASKS-TASK-UNREAD-DOT-001.14
   - AC-TASKS-TASK-UNREAD-DOT-001.15
@@ -952,3 +953,126 @@ pnpm exec vitest run \
 pnpm e2e:run --host --shards 1 --project chromium tests/task/task-unread-dot.spec.ts tests/session/session-primary-removal.spec.ts -- --retries=0
 pnpm e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts -- --retries=0
 ```
+
+### Production-fix review round 7 remediation
+
+Accepted source-derived races extend .6/.8/.9/.11 without changing unread semantics:
+
+- An unchanged primary identity must preserve the pending lifecycle predicate.
+  Only a changed primary projection supersedes it; explicit workflow focus is
+  still separate. Prove a title update cannot turn durable STARTING into terminal
+  handoff authority, with genuine promotion and settled-predecessor controls.
+- Revalidate lifecycle recipients at publication. A captured recipient that has
+  since failed or left the task is not eligible; reuse the current live fallback.
+  Retain predecessor, pin, restart and workflow ownership.
+- Complete, task/backend-scoped, generation-current absence proves retirement
+  independently of focus intent or a successor. Zero-primary membership retires
+  the deleted ID without choosing a guess. Clear a still-selected deleted ID;
+  preserve a newer surviving pin and its cursor. Late snapshots remain fenced.
+  Incomplete/ambiguous lists and generic read failures remain fail-closed.
+
+Owners: primary-focus controller, shared session candidate policy and its existing
+consumers/tests. Reuse the shipped empty-session surface on desktop and phone:
+`deleted A -> no active transcript`, or `newer pin B -> B remains displayed`.
+No layout, touch target, protocol, backend promotion or cursor change.
+
+Regression owners: `task-primary-lifecycle.test.ts`, candidate policy tests, and
+the real two-client removal scenario on desktop/phone. Run the focused handler
+and policy files, then the affected selection/unread/removal E2Es from the cache
+snapshot with one worker/retries 0 after a fresh frontend build. Final invocations
+and outcomes are recorded below.
+
+R7 evidence and ownership:
+
+- `r7-red-unit.log`: 8 behavioral failures/24 controls passed. An unchanged
+  primary selected C over both the failing and healthy lifecycle candidates;
+  a newly failed recipient was activated; newer pins/navigation and zero-primary
+  proof prevented retirement. The strengthened pin cases require actual eviction.
+- `r7-red-desktop.log` and `r7-red-phone.log`: each new two-client last-session
+  case failed against the retained R6 frontend after persisted membership was
+  empty: the observer still displayed the deleted session ID. No reload or
+  fixture mark-read was used. The desktop deleting client uses the shipped
+  context menu and confirmation in both viewport cases.
+- `r7-partial-unit.log`: 58 controls passed; one additional background-removal
+  regression still failed. Retirement must not replace/cancel a healthy follow
+  owned by another active session, not merely survive a pin after it started.
+- Reuse keyed backend/auth/workspace membership ownership for retirement, but
+  keep view ownership for focus only. Coupling both to navigation cancellation
+  loses committed deletion; suppressing all selection guards would overwrite
+  newer user intent. Existing requirements/design/tests preserve this local
+  rationale; no separate ADR, new endpoint or persistence boundary is needed.
+
+Narrow invocation, from cache-backed `apps/web`:
+
+```bash
+pnpm exec vitest run lib/ws/handlers/task-primary-focus.test.ts \
+  lib/ws/handlers/task-primary-lifecycle.test.ts \
+  lib/ws/handlers/task-primary-removal-admission.test.ts \
+  lib/ws/handlers/agent-session.test.ts lib/ws/handlers/agent-session-pure.test.ts \
+  lib/ws/handlers/tasks.test.ts lib/ws/handlers/tasks.deleted.test.ts \
+  lib/state/task-session-reads.test.ts lib/state/shared-resource-reads.test.ts
+```
+
+- The expanded first run (`r7-final-unit-v3.log`) passed 1626 tests and exposed
+  two retarget-order regressions plus one obsolete zero-primary negative case.
+  Changed primary identity now invalidates membership and starts fresh scoped
+  proof; old responses cannot choose the prior recipient. These original
+  old-first/new-first controls remain unchanged.
+- Zero-primary complete absence is no longer classified as ambiguous. Its old
+  negative table entry was removed in favor of the positive empty/terminal-only
+  retirement cases. Incomplete, foreign, duplicate and generic-failure controls
+  remain. `r7-owner-green.log`: 109 owner/lifecycle/policy tests passed.
+- The existing candidate policy moved from `agent-session.ts` to the shared
+  session-selection module, with every caller migrated and no re-export shim.
+  Lifecycle publication consults current canonical ownership/state before fallback.
+
+- Final logic/type/build: `r7-final-unit-v6.log`, 154 files/1628 tests passed;
+  `r7-typecheck-v6.log` passed with the documented 8 GiB Node heap;
+  `r7-build-v6.log` is a fresh frontend build. The fixture now copies the real
+  stored recipient row rather than casting an incomplete branded-ID shape.
+  Configured changed-file lint/format passed; complexity and duplicate-string
+  warnings and the intermediate fixture type errors were corrected, not waived.
+- Final i18n ratchet and architecture passed (`r7-final-i18n.log`,
+  `r7-final-architecture.log`); rename-detection warnings remain qualified.
+  Broad backend/web and live NATS certification remain excluded.
+
+The expanded final unit invocation is the R06 command above, with the complete
+`lib/ws/handlers` owner rather than only the narrow R7 files. Runtime uses a fresh
+R7 frontend and explicitly retained R02 backend/plugin artifacts (`--no-build`),
+one worker and retries 0; no R7 Go or protocol change.
+
+- First final-bundle removal run: two original cases passed; the new case's
+  negated attribute assertion failed because the corrected UI removed the element
+  entirely. It now requires zero transcript nodes for the deleted ID, not an
+  existing node with a different attribute.
+- Assertion repair proof: `r7-assertion-mutant.log` fails with expected count 0,
+  received 1 after a cache-snapshot-only guard rejects zero-primary retirement.
+  The production working tree was not mutated. The guard was restored through
+  an anchored edit before rebuilding the real final frontend.
+
+Final runtime invocation, from the prepared cache snapshot's `apps/web`:
+
+```bash
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  tests/session/session-primary-removal.spec.ts -- --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  tests/task/task-unread-dot.spec.ts tests/session/session-tab-management.spec.ts \
+  tests/session/session-handoff.spec.ts tests/session/multi-session-ux.spec.ts \
+  tests/session/session-recovery.spec.ts -- --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+- Final restored bundle: `r7-final-removal-v2.log`, 3 passed;
+  `r7-final-related.log`, 33 passed; `r7-final-phone.log`, 4 passed. All three
+  commands above used one worker/retries 0, after `r7-final-build.log` rebuilt
+  the unmutated frontend. `r7-final-format.log` and `r7-final-lint.log` passed.
+- The final phone image `phone-last-session-removed.png` was inspected: the
+  same task remains open with the shipped empty-conversation surface, no deleted
+  transcript or error card, and normal input/bottom navigation. The two-client
+  test also requires persisted empty membership and unchanged document origin.
+  This is actual UI proof, not injected page state.
+- `r7-docs.log`: catalog validation, all 36 spec-linter tests and full spec lint
+  passed. Only a scope doc-comment changed after the final unit/type run; no
+  functional code changed. Historical-incident, backend-artifact, broad-suite
+  and list-convergence limitations above remain in force.

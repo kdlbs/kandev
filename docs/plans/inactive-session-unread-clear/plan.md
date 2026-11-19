@@ -540,5 +540,12 @@ fix. It is separate from the five design-only rounds above.
   readiness. Final author checks: 1620 focused tests, full desktop selection/
   unread/removal 35 and phone unread 3 passed. Task 02 records exact commands,
   frontend/backend provenance and limits. This review loop remains open.
-- Completed rounds: 6. Consecutive clean: 0. The stop condition is three
+- Round 7: Sol child `49b23364-853b-4497-98df-2186bbdf8ee2` reviewed
+  `56850cf647`. Three P2 findings accepted: unchanged primary weakens lifecycle
+  authority; a delayed recipient can fail before activation; remote retirement
+  incorrectly requires a successor and retained view ownership. R7 remediation
+  is implemented: 1628 focused tests, desktop 36 and phone 4 passed. Task 02
+  records exact checks, assertion-mutation proof and runtime limits. The
+  production review loop remains open.
+- Completed rounds: 7. Consecutive clean: 0. The stop condition is three
   consecutive clean rounds or 50 rounds. No earlier loop counts toward it.

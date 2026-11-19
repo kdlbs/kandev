@@ -224,28 +224,30 @@ cancellation; a newly observed sibling may also replace persisted `IDLE`.
 A newer cached nonterminal observation blocks terminal fallback. Initial adoption
 without a same-task predecessor remains immediate.
 
-Navigation, pin, restart, workflow intent and selected-session identity own each
-check. Denied or uncertain reads preserve the view and guard until scope changes;
-there are no timed retries. Lifecycle observations refresh checks. Primary
-projections start a new read against the original predecessor, even for the same
-candidate. `task.updated`/`task.state_changed` retarget an owned check even if the
-target is cached; creation only retargets. Explicit workflow focus precedes
-generic following; empty workflow cancellation is a no-op.
+Navigation, pin, restart, workflow intent and selected-session identity own focus
+checks. Denied or uncertain reads preserve the view; there are no timed retries.
+An unchanged primary preserves a pending lifecycle predicate. A changed primary
+retargets the original predecessor; creation only retargets an existing check.
+Explicit committed workflow focus remains separate.
 
-Healthy terminal handoffs retain their candidate policy. Agentctl readiness is
-only a fallback: preserve recipient-owned status/execution and use only the
-recipient's execution identity, never an unrelated predecessor's identity.
+Healthy terminal handoffs revalidate recipient ownership/eligibility before
+activation and reuse the newest eligible sibling if the captured recipient ended.
+Agentctl readiness is only a fallback: preserve recipient-owned status/execution
+and never borrow the predecessor's execution identity.
 
-The core `session.removed` handler verifies displayed-session membership, including
-a retained non-primary failure without promotion. Missing `task_id` uses matching
-active identity; foreign tasks are rejected. Session GET 404 uses the same proof.
+Core `session.removed` and session GET 404 verify task-scoped absence, including
+background or retained non-primary sessions. Missing wire task identity uses
+known membership or the matching active identity; conflicting scope is rejected.
+Complete, unique, task-matching membership must exclude the deleted ID; malformed
+or multiple-primary lists fail closed. Zero primaries can prove retirement.
 
-A complete task-matching list must exclude the predecessor and name exactly one
-primary. The reader retains its membership generation through publication;
-invalidation rereads under the original owner before choosing a target. Newer
-projection/selection intent still retargets or cancels the decision. Even before
-WS projection, proof can initialize a missing recipient's required identity and
-lifecycle fields, never overwrite an existing recipient or hydrate its cursor.
+Retirement retains backend/auth/workspace scope and membership generation
+through publication, independent of view intent. Invalidation rechecks absence;
+navigation or a newer pin does not cancel valid retirement. Focus separately
+requires a current view owner and unique proven primary. Otherwise a still-
+selected deleted ID is cleared without guessing a successor. Surviving pins and
+cursors remain untouched. Proof may initialize a missing recipient's identity
+and lifecycle fields, never overwrite existing data or hydrate its cursor.
 
 `invalidateTaskSessionMembership` fences foreground/removal-dialog pending,
 admitted and queued publications; newer reads and unrelated keys remain usable.

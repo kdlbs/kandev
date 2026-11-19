@@ -413,10 +413,6 @@ describe("confirmed primary removal", () => {
 
   it.each([
     membership("old", "next"),
-    {
-      sessions: membership("next", "latest").sessions.map((row) => ({ ...row, is_primary: false })),
-      total: 2,
-    },
     { ...membership("next"), total: 2 },
     membership("next", "next"),
     { sessions: [response("WAITING_FOR_INPUT", "next", "foreign").session], total: 1 },

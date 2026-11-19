@@ -12,6 +12,17 @@ export function isTerminalSessionState(state: TaskSessionState | undefined): boo
   return !!state && TERMINAL_SESSION_STATES.has(state);
 }
 
+/** Newest currently eligible same-task lifecycle recipient. */
+export function pickReplacementSessionId(state: AppState, taskId: string): string | null {
+  const sessions = state.taskSessionsByTask?.itemsByTaskId[taskId];
+  if (!sessions) return null;
+  for (let i = sessions.length - 1; i >= 0; i -= 1) {
+    const row = state.taskSessions?.items[sessions[i].id] ?? sessions[i];
+    if (row.task_id === taskId && row.state && !isTerminalSessionState(row.state)) return row.id;
+  }
+  return null;
+}
+
 function findSessionForTask(state: AppState, taskId: string, sessionId: string) {
   const byTask = state.taskSessionsByTask;
   const sessionsForTask = byTask?.itemsByTaskId?.[taskId];
