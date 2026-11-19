@@ -366,6 +366,7 @@ describe("usePreviewCapture pausing the tool", () => {
 
 describe("usePreviewCapture region alignment", () => {
   const layoutRect = { x: 50, y: 60, width: 20, height: 20 };
+  const clipRect = { x: 0, y: 55, width: 300, height: 100 };
 
   it("marks a region drifted when the page reports it", async () => {
     mockRaster();
@@ -383,11 +384,16 @@ describe("usePreviewCapture region alignment", () => {
       dispatch(
         iframe.contentWindow,
         bridgeMessage("region-layout", {
-          regions: [{ id, rect: layoutRect, visible: true, drifted: true }],
+          regions: [{ id, rect: layoutRect, visible: true, drifted: true, clip: clipRect }],
         }),
       ),
     );
-    expect(result.current.regions[0]).toMatchObject({ id, rect: layoutRect, drifted: true });
+    expect(result.current.regions[0]).toMatchObject({
+      id,
+      rect: layoutRect,
+      drifted: true,
+      clip: clipRect,
+    });
   });
 
   it("opens a saved item's editor beside its highlighted marker", () => {

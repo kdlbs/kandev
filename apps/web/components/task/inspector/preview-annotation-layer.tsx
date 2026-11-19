@@ -121,6 +121,7 @@ function ActiveAnnotation({
           title: region.title,
           number: region.number,
           imageUrl: region.imageUrl,
+          clip: region.clip,
         }))}
         selectedIndex={null}
         draft={null}

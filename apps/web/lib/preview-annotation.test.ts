@@ -115,7 +115,9 @@ describe("recaptureRect", () => {
       anchor_height: 200,
     };
     const moved = { x: 1, y: 2, width: 10, height: 10 };
-    expect(recaptureRect(anchored, moved, frame, anchor)).toMatchObject(anchor);
+    expect(recaptureRect(anchored, moved, frame, { anchor, container: null })).toMatchObject(
+      anchor,
+    );
 
     const unanchored = recaptureRect(anchored, moved, frame, null);
     expect(unanchored.anchor_selector).toBeUndefined();
@@ -160,5 +162,41 @@ describe("closeCommentStep", () => {
 
   it("does nothing when no comment is open", () => {
     expect(closeCommentStep({ draftComment: null, editing: false })).toBe("none");
+  });
+});
+
+describe("recaptureRect placement", () => {
+  const original = {
+    x: 10,
+    y: 20,
+    width: 100,
+    height: 50,
+    scroll_container_selector: "div#list",
+    container_scroll_x: 0,
+    container_scroll_y: 40,
+  };
+
+  it("takes the scroll container the page reports for the new position", () => {
+    const frame = {
+      scrollX: 0,
+      scrollY: 0,
+      innerWidth: 800,
+      innerHeight: 600,
+      containerScroll: () => ({ x: 0, y: 90 }),
+    };
+    const moved = { x: 1, y: 2, width: 10, height: 10 };
+
+    const outside = recaptureRect(original, moved, frame, { anchor: null, container: null });
+    expect(outside.scroll_container_selector).toBeUndefined();
+    expect(outside.container_scroll_y).toBeUndefined();
+
+    const container = {
+      scroll_container_selector: "div#panel",
+      container_scroll_x: 3,
+      container_scroll_y: 4,
+    };
+    expect(recaptureRect(original, moved, frame, { anchor: null, container })).toMatchObject(
+      container,
+    );
   });
 });

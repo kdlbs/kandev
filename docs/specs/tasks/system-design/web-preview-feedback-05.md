@@ -186,10 +186,29 @@ layout pass draws the outline from that content.
   observers run only while regions are projected for the current route.
 - **Moves and resizes.** A moved or resized region needs a new anchor. The
   parent sends `anchor-region {request_id, rect}` with the outline's viewport
-  rectangle, and the inspector answers `region-anchored {request_id, anchor}`
-  using the same rule, or `anchor: null`. The parent requests the anchor while
+  rectangle, and the inspector answers
+  `region-anchored {request_id, anchor, container}` using the same rule, or
+  `anchor: null`. `container` is the scroll container under the new position
+  (selector and scroll offsets), or `null` when there is none; the moved
+  region replaces its previous container with it, so a region moved out of a
+  panel stops following that panel. The parent requests the anchor while
   rasterizing and waits at most 500 ms; without an answer, such as from an
-  older inspector, the region is saved unanchored.
+  older inspector, the region is saved unanchored and keeps its previous
+  container at that container's current scroll.
+- **Overlapping captures.** Each capture or recapture of a draft's image
+  takes a generation number, and only the latest generation applies its
+  image or failure. An earlier capture that finishes later is dropped
+  instead of overwriting a newer rectangle, and its failure no longer
+  discards the draft. Saving checks that the uploaded image is still the
+  draft's image; when a recapture replaced it during the upload, the stale
+  upload is deleted and the current image and rectangle are saved.
+- **Scroll containers.** A region scrolled partly outside its scroll
+  container's box reports that box as `clip`, and the overlay cuts the
+  outline, its controls, and its hit area to it; a region scrolled entirely
+  outside is reported not visible. Moving or resizing draws the region whole.
+  Revealing a region from the comment list scrolls its container, then the
+  document, using its layout, because region captures have no in-page marker.
+  Starting a move or a corner resize hides a shown saved capture.
 - **What a capture contains.** Capture and recapture rasterize the outline's
   current viewport rectangle, so they take what is visible inside it at that
   moment. A layout change only moves or flags the outline; nothing is captured
@@ -238,7 +257,8 @@ The changes are additive, so the protocol stays at version 3:
 
 - inspector to parent: `screenshot-region-selected` capture rectangles carry
   the anchor fields; `region-layout` regions gain `drifted`, and the payload
-  gains `highlighted`; new `region-anchored {request_id, anchor}`;
+  gains `highlighted`, and regions may carry `clip`; new
+  `region-anchored {request_id, anchor, container}`;
 - parent to inspector: new `anchor-region {request_id, rect}`.
 
 Parent validators bound `anchor_selector` like other selectors and treat a

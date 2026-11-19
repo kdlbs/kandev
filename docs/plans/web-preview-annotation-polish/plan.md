@@ -244,3 +244,9 @@ Delivered as planned, with these refinements recorded in part 5:
   the comment is open (`005.9`). The inspector script test harness moved to
   `lib/preview-inspector-script.test-helpers.ts` so the new highlight suite
   can share it.
+- PR review: overlapping captures of one draft now apply only the latest
+  image, and saving re-uploads when a recapture replaced the image mid-upload.
+  Regions are clipped to, or hidden outside, their scroll container; region
+  captures are revealed from the comment list through their layout; moved
+  regions take the scroll container the page reports; a corner resize hides
+  a shown saved capture. The part 5 design records each rule.

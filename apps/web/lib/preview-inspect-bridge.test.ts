@@ -366,3 +366,14 @@ describe("preview region anchors", () => {
     ).toBe(false);
   });
 });
+
+describe("preview region layout clips", () => {
+  const region = { x: 10, y: 20, width: 100, height: 40 };
+  const entry = { id: "r1", rect: region, visible: true };
+
+  it("accepts a valid clip box and rejects a malformed one", () => {
+    const layout = (clip: unknown) => message(REGION_LAYOUT, { regions: [{ ...entry, clip }] });
+    expect(isInspectorMessage(layout(region))).toBe(true);
+    expect(isInspectorMessage(layout({ ...region, width: -1 }))).toBe(false);
+  });
+});

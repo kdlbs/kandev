@@ -125,7 +125,7 @@ describe("usePreviewScreenshots recapture", () => {
       anchor_width: 300,
       anchor_height: 200,
     };
-    anchorRequest.requestRegionAnchor.mockResolvedValue(anchor);
+    anchorRequest.requestRegionAnchor.mockResolvedValue({ anchor, container: null });
     const { result } = renderScreenshots();
     act(() => result.current.screenshots.captureRegion(region));
     await waitFor(() => expect(result.current.screenshots.isRasterizing).toBe(false));
@@ -153,5 +153,82 @@ describe("usePreviewScreenshots recapture", () => {
       x: 40,
       ...anchor,
     });
+  });
+});
+
+describe("usePreviewScreenshots overlapping captures", () => {
+  const moved = { x: 40, y: 50, width: 80, height: 30 };
+  const recaptured = { ...image, width: 80, height: 30 };
+
+  function screenshotOf(result: ReturnType<typeof renderScreenshots>["result"]) {
+    const payload = result.current.drafts.drafts[0]?.payload;
+    return payload?.kind === "screenshot" ? payload : null;
+  }
+
+  beforeEach(() => anchorRequest.requestRegionAnchor.mockResolvedValue(null));
+
+  it("keeps a recapture that finishes before the first capture", async () => {
+    const first = deferred<typeof image>();
+    raster.rasterizePreviewRegion
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce(recaptured);
+    const { result } = renderScreenshots();
+    act(() => result.current.screenshots.captureRegion(region));
+    const id = result.current.drafts.drafts[0].id;
+
+    await act(async () => {
+      await result.current.screenshots.recaptureRegion(id, moved);
+    });
+    await act(async () => first.resolve(image));
+
+    await waitFor(() => expect(result.current.screenshots.isRasterizing).toBe(false));
+    expect(screenshotOf(result)?.screenshot?.width).toBe(80);
+    expect(screenshotOf(result)?.capture_rect).toMatchObject({ x: 40, width: 80 });
+  });
+
+  it("keeps the recaptured draft when the first capture fails late", async () => {
+    const first = deferred<typeof image>();
+    raster.rasterizePreviewRegion
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce(recaptured);
+    const { result } = renderScreenshots();
+    act(() => result.current.screenshots.captureRegion(region));
+    const id = result.current.drafts.drafts[0].id;
+
+    await act(async () => {
+      await result.current.screenshots.recaptureRegion(id, moved);
+    });
+    await act(async () => first.reject(new Error("timed out")));
+
+    await waitFor(() => expect(result.current.screenshots.isRasterizing).toBe(false));
+    expect(result.current.drafts.drafts).toHaveLength(1);
+    expect(result.current.screenshots.captureError).toBeNull();
+  });
+
+  it("keeps the latest of two recaptures when the earlier one finishes last", async () => {
+    raster.rasterizePreviewRegion.mockResolvedValueOnce(image);
+    const { result } = renderScreenshots();
+    act(() => result.current.screenshots.captureRegion(region));
+    await waitFor(() => expect(result.current.screenshots.isRasterizing).toBe(false));
+    const id = result.current.drafts.drafts[0].id;
+
+    const earlier = deferred<typeof image>();
+    raster.rasterizePreviewRegion
+      .mockReturnValueOnce(earlier.promise)
+      .mockResolvedValueOnce(recaptured);
+    let earlierDone: Promise<boolean> = Promise.resolve(false);
+    act(() => {
+      earlierDone = result.current.screenshots.recaptureRegion(id, { ...moved, x: 5 });
+    });
+    await act(async () => {
+      await result.current.screenshots.recaptureRegion(id, moved);
+    });
+    await act(async () => {
+      earlier.resolve({ ...image, width: 7 });
+      await earlierDone;
+    });
+
+    expect(screenshotOf(result)?.screenshot?.width).toBe(80);
+    expect(screenshotOf(result)?.capture_rect).toMatchObject({ x: 40 });
   });
 });

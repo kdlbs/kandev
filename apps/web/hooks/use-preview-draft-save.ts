@@ -21,28 +21,33 @@ type Options = {
   setCaptureError: (error: PreviewCaptureError | null) => void;
 };
 
-/** Uploads a screenshot draft once and records the staged attachment on the draft. */
+/**
+ * Uploads a screenshot draft's current image once and records the staged
+ * attachment on the draft. When the image is replaced during the upload, the
+ * stale upload is deleted and the new image is uploaded instead, so the saved
+ * attachment always matches the saved rectangle.
+ */
 async function ensureUploaded(
   entry: PreviewDraftEntry,
   workspaceId: string,
   drafts: ReturnType<typeof usePreviewDrafts>,
-) {
+): Promise<{ attachmentId: string; payload: PreviewDraftEntry["payload"] } | null> {
   const payload = entry.payload;
-  if (payload.kind !== "screenshot") return undefined;
-  if (!payload.screenshot) return null;
-  if (payload.screenshot.attachmentId) return payload.screenshot.attachmentId;
-  const attachmentId = await uploadPreviewScreenshot(workspaceId, payload.screenshot);
-  const current = drafts.find(entry.id);
-  if (current?.payload.kind !== "screenshot" || !current.payload.screenshot) {
-    void deleteAttachment(attachmentId).catch(() => undefined);
-    return null;
+  if (payload.kind !== "screenshot" || !payload.screenshot) return null;
+  if (payload.screenshot.attachmentId) {
+    return { attachmentId: payload.screenshot.attachmentId, payload };
   }
-  const screenshot = { ...current.payload.screenshot, attachmentId };
-  drafts.update(entry.id, (draft) => ({
-    ...draft,
-    payload: { ...current.payload, screenshot } as PreviewDraftEntry["payload"],
-  }));
-  return attachmentId;
+  const uploadedImage = payload.screenshot;
+  const attachmentId = await uploadPreviewScreenshot(workspaceId, uploadedImage);
+  const current = drafts.find(entry.id);
+  const currentImage = current?.payload.kind === "screenshot" ? current.payload.screenshot : null;
+  if (!current || currentImage !== uploadedImage) {
+    void deleteAttachment(attachmentId).catch(() => undefined);
+    return current && currentImage ? ensureUploaded(current, workspaceId, drafts) : null;
+  }
+  const uploadedPayload = { ...payload, screenshot: { ...uploadedImage, attachmentId } };
+  drafts.update(entry.id, (draft) => ({ ...draft, payload: uploadedPayload }));
+  return { attachmentId, payload: uploadedPayload };
 }
 
 /** Saves the open draft: uploads its screenshot when needed, then creates the item. */
@@ -61,7 +66,7 @@ export function usePreviewDraftSave({
     async (comment: string) => {
       const entry = openDraft;
       if (!entry || !comment.trim()) return false;
-      const draft = entry.payload;
+      let draft = entry.payload;
       let screenshotAttachmentId: string | undefined;
       if (draft.kind === "screenshot") {
         if (!workspaceId) {
@@ -73,7 +78,8 @@ export function usePreviewDraftSave({
         try {
           const uploaded = await ensureUploaded(entry, workspaceId, drafts);
           if (uploaded === null) return false;
-          screenshotAttachmentId = uploaded;
+          screenshotAttachmentId = uploaded.attachmentId;
+          draft = uploaded.payload;
         } catch {
           setCaptureError("upload");
           return false;

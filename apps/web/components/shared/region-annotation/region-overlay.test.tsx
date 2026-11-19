@@ -198,3 +198,42 @@ describe("RegionOverlay alignment controls", () => {
     expect(screen.queryByTestId("region-drift-warning")).toBeNull();
   });
 });
+
+describe("RegionOverlay resizing and clipping", () => {
+  const captured = [
+    { index: 0, rect: { x: 1, y: 2, width: 30, height: 20 }, imageUrl: "blob:one" },
+  ];
+
+  it("hides the capture when a corner resize starts", () => {
+    const onHandlePointerDown = vi.fn();
+    render(
+      <RegionOverlay
+        items={captured}
+        selectedIndex={null}
+        draft={null}
+        testId="region"
+        labels={labels}
+        onHandlePointerDown={onHandlePointerDown}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(CAPTURE_TOGGLE));
+    expect(screen.getByTestId(CAPTURE_IMAGE)).toBeTruthy();
+    fireEvent.pointerDown(screen.getAllByTestId("region-handle")[3]);
+    expect(onHandlePointerDown).toHaveBeenCalledWith(0, "se", expect.anything());
+    expect(screen.queryByTestId(CAPTURE_IMAGE)).toBeNull();
+  });
+
+  it("clips a region to the box the host gives, in the region's own coordinates", () => {
+    const clipped = [
+      {
+        index: 0,
+        rect: { x: 10, y: -20, width: 100, height: 50 },
+        clip: { x: 0, y: 0, width: 300, height: 100 },
+      },
+    ];
+    render(<RegionOverlay items={clipped} selectedIndex={null} draft={null} testId="region" />);
+    expect(screen.getByTestId("region").style.clipPath).toBe(
+      "polygon(-10px 20px, 290px 20px, 290px 120px, -10px 120px)",
+    );
+  });
+});

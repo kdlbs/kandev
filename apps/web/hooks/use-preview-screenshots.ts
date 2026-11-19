@@ -69,11 +69,37 @@ async function rasterizeMoved(
   // i18n-exempt: internal raster failure; callers display localized recovery copy.
   if (!iframe || !metrics) throw new Error("Preview document is unavailable");
   const unanchored = recaptureRect(previous, rect, metrics);
-  const [screenshot, anchor] = await Promise.all([
+  const [screenshot, placement] = await Promise.all([
     rasterize(iframe, unanchored),
     requestRegionAnchor(iframe, rect),
   ]);
-  return { screenshot, captureRect: recaptureRect(previous, rect, metrics, anchor) };
+  return { screenshot, captureRect: recaptureRect(previous, rect, metrics, placement) };
+}
+
+function useMountedRef() {
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  return mountedRef;
+}
+
+/** Each capture of a draft's image gets a generation; only the latest may apply its result. */
+function useImageGenerations() {
+  const generations = useRef(new Map<string, number>());
+  const beginImage = useCallback((id: string) => {
+    const generation = (generations.current.get(id) ?? 0) + 1;
+    generations.current.set(id, generation);
+    return generation;
+  }, []);
+  const isLatestImage = useCallback(
+    (id: string, generation: number) => generations.current.get(id) === generation,
+    [],
+  );
+  return { beginImage, isLatestImage };
 }
 
 /** Region rasterization for new captures and for moved or resized regions. */
@@ -87,13 +113,8 @@ export function usePreviewScreenshots({
   const [captureError, setCaptureError] = useState<PreviewCaptureError | null>(null);
   const [rasterizing, setRasterizing] = useState(0);
   const [recaptureFailed, setRecaptureFailed] = useState(false);
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  const mountedRef = useMountedRef();
+  const { beginImage, isLatestImage } = useImageGenerations();
 
   const track = useCallback(async <T>(work: () => Promise<T>) => {
     setRasterizing((count) => count + 1);
@@ -110,33 +131,41 @@ export function usePreviewScreenshots({
       setCaptureError(null);
       const payload = { ...region, kind: "screenshot" as const, screenshot: null };
       const id = drafts.add(payload);
+      const generation = beginImage(id);
       void track(() => rasterize(iframeRef.current, region.capture_rect))
         .then((screenshot) => {
           const current = drafts.find(id)?.payload;
-          if (!mountedRef.current || current?.kind !== "screenshot") {
+          const stale = !isLatestImage(id, generation);
+          if (!mountedRef.current || stale || current?.kind !== "screenshot") {
             URL.revokeObjectURL(screenshot.previewUrl);
             return;
           }
           drafts.update(id, (draft) => ({ ...draft, payload: { ...current, screenshot } }));
         })
         .catch(() => {
-          if (!mountedRef.current) return;
+          if (!mountedRef.current || !isLatestImage(id, generation)) return;
           drafts.discard(id);
           setCaptureError("raster");
         });
     },
-    [drafts, iframeRef, track],
+    [beginImage, drafts, iframeRef, isLatestImage, track],
   );
 
   const recaptureDraft = useCallback(
     async (draft: PreviewScreenshotDraft, id: string, rect: ViewportRect) => {
+      const generation = beginImage(id);
       const { screenshot, captureRect } = await track(() =>
         rasterizeMoved(iframeRef.current, draft.capture_rect, rect),
       );
+      // A newer capture of this draft owns its image now.
+      if (!isLatestImage(id, generation) || !drafts.find(id)) {
+        URL.revokeObjectURL(screenshot.previewUrl);
+        return true;
+      }
       drafts.replaceScreenshot(id, { ...draft, capture_rect: captureRect, screenshot });
       return true;
     },
-    [drafts, iframeRef, track],
+    [beginImage, drafts, iframeRef, isLatestImage, track],
   );
 
   const recaptureItem = useCallback(

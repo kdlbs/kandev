@@ -120,6 +120,7 @@ describe("inspector regions and markers", () => {
     const list = document.getElementById("list") as HTMLElement;
     Object.defineProperty(list, "scrollHeight", { value: 400, configurable: true });
     Object.defineProperty(list, "clientHeight", { value: 100, configurable: true });
+    const listBox = vi.spyOn(list, "getBoundingClientRect").mockReturnValue(rect(0, 0, 300, 100));
     document.elementFromPoint = () => document.getElementById("row");
     command(SET_CAPTURE_MODE, { mode: "screenshot" });
 
@@ -153,7 +154,13 @@ describe("inspector regions and markers", () => {
     list.dispatchEvent(new Event("scroll"));
     flushFrames();
     expect(sentOfType(REGION_LAYOUT).at(-1)?.payload.regions).toEqual([
-      { id: "r1", rect: { x: 10, y: -20, width: 100, height: 50 }, visible: true, drifted: false },
+      {
+        id: "r1",
+        rect: { x: 10, y: -20, width: 100, height: 50 },
+        visible: true,
+        drifted: false,
+        clip: { x: 0, y: 0, width: 300, height: 100 },
+      },
     ]);
 
     const layouts = sentOfType(REGION_LAYOUT).length;
@@ -167,6 +174,7 @@ describe("inspector regions and markers", () => {
     expect(sentOfType(REGION_LAYOUT).at(-1)?.payload.regions).toEqual([
       expect.objectContaining({ id: "r1", visible: false }),
     ]);
+    listBox.mockRestore();
   });
 
   it("draws pending markers dashed", () => {
@@ -466,6 +474,7 @@ describe("inspector anchor requests", () => {
         anchor_width: 300,
         anchor_height: 200,
       },
+      container: null,
     });
 
     document.elementFromPoint = () => document.body;
@@ -473,6 +482,21 @@ describe("inspector anchor requests", () => {
     expect(sentOfType("region-anchored").at(-1)?.payload).toEqual({
       request_id: "req-2",
       anchor: null,
+      container: null,
+    });
+  });
+
+  it("reports the scroll container a moved region now sits in", () => {
+    const list = document.getElementById("list") as HTMLElement;
+    Object.defineProperty(list, "scrollHeight", { value: 400, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 100, configurable: true });
+    list.scrollTop = 15;
+    document.elementFromPoint = () => document.getElementById("row");
+    command("anchor-region", { request_id: "req-3", rect: { x: 1, y: 1, width: 5, height: 5 } });
+    expect(sentOfType("region-anchored").at(-1)?.payload.container).toEqual({
+      scroll_container_selector: "div#list",
+      container_scroll_x: 0,
+      container_scroll_y: 15,
     });
   });
 
@@ -493,5 +517,75 @@ describe("inspector anchor requests", () => {
       id: "m1",
       rect: { x: 5, y: 15, width: 0, height: 0 },
     });
+  });
+});
+
+describe("inspector region scroll containers", () => {
+  setupAnchorFixture();
+
+  it("scrolls a revealed region into view inside its container and the page", () => {
+    const list = placeElement("list", rect(0, 400, 300, 100));
+    const listScroll = vi.fn();
+    list.scrollBy = listScroll as unknown as typeof list.scrollBy;
+    const pageScroll = vi.spyOn(window, "scrollBy").mockImplementation(() => undefined);
+    const inList = {
+      x: 10,
+      y: 700,
+      width: 50,
+      height: 20,
+      document_x: 10,
+      document_y: 700,
+      scroll_container_selector: "div#list",
+      container_scroll_x: 0,
+      container_scroll_y: 0,
+    };
+    const regions = [{ id: "r1", page_route: location.pathname, capture_rect: inList }];
+    command(PROJECT_MARKERS, { markers: [], regions, reveal_id: "r1" });
+
+    expect(listScroll).toHaveBeenCalledWith(expect.objectContaining({ top: 260 }));
+    expect(pageScroll).not.toHaveBeenCalled();
+
+    const far = { ...inList, y: 5000, document_y: 5000, scroll_container_selector: undefined };
+    command(PROJECT_MARKERS, {
+      markers: [],
+      regions: [{ ...regions[0], id: "r2", capture_rect: far }],
+      reveal_id: "r2",
+    });
+    expect(pageScroll).toHaveBeenCalledTimes(1);
+    expect(pageScroll.mock.calls[0][0]).toMatchObject({ top: expect.any(Number) });
+    pageScroll.mockRestore();
+  });
+
+  it("clips a region to its scroll container and hides it once scrolled out", () => {
+    const list = placeElement("list", rect(0, 400, 300, 100));
+    project({
+      x: 10,
+      y: 410,
+      width: 50,
+      height: 20,
+      scroll_container_selector: "div#list",
+      container_scroll_x: 0,
+      container_scroll_y: 0,
+      anchor_selector: "div#list",
+      anchor_offset_x: 10,
+      anchor_offset_y: 10,
+      anchor_width: 300,
+      anchor_height: 100,
+    });
+    expect(lastLayout().regions[0]).toMatchObject({ visible: true });
+    expect(lastLayout().regions[0].clip).toBeUndefined();
+
+    list.scrollTop = 20;
+    list.dispatchEvent(new Event("scroll"));
+    flushFrames();
+    expect(lastLayout().regions[0]).toMatchObject({
+      visible: true,
+      clip: { x: 0, y: 400, width: 300, height: 100 },
+    });
+
+    list.scrollTop = 40;
+    list.dispatchEvent(new Event("scroll"));
+    flushFrames();
+    expect(lastLayout().regions[0]).toMatchObject({ visible: false });
   });
 });

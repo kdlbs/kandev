@@ -119,7 +119,8 @@ export function useRegionDrag({ regions, bounds, onOpen, onRecapture }: Options)
 
   const displayed = regions.map((region) => {
     const override = overrides[region.id];
-    return override ? { ...region, rect: override.rect } : region;
+    // A region being moved or resized is drawn whole, without its container clip.
+    return override ? { ...region, rect: override.rect, clip: undefined } : region;
   });
   return { regions: displayed, onHandlePointerDown };
 }

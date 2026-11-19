@@ -60,6 +60,8 @@ export type PreviewRegionLayout = {
   visible: boolean;
   /** The outline no longer lines up reliably with the content it was drawn over. */
   drifted?: boolean;
+  /** The scroll container's box, when the region is scrolled partly outside it. */
+  clip?: { x: number; y: number; width: number; height: number };
 };
 
 /** Viewport rectangle of the highlighted marker, used to place its comment box. */
@@ -75,6 +77,20 @@ export type PreviewContentAnchor = Required<
     "anchor_selector" | "anchor_offset_x" | "anchor_offset_y" | "anchor_width" | "anchor_height"
   >
 >;
+
+/** The scroll container a region sits in, as stored on its capture rectangle. */
+export type PreviewScrollContainer = Required<
+  Pick<
+    PreviewCaptureRect,
+    "scroll_container_selector" | "container_scroll_x" | "container_scroll_y"
+  >
+>;
+
+/** What the page reports about a moved region's new position. */
+export type PreviewRegionPlacement = {
+  anchor: PreviewContentAnchor | null;
+  container: PreviewScrollContainer | null;
+};
 
 /** How long a moved region waits for its new anchor before saving without one. */
 export const REGION_ANCHOR_TIMEOUT_MS = 500;
@@ -154,7 +170,11 @@ interface PreviewRegionAnchoredMessage {
   source: typeof INSPECTOR_SOURCE;
   version: typeof INSPECTOR_PROTOCOL_VERSION;
   type: "region-anchored";
-  payload: { request_id: string; anchor: PreviewContentAnchor | null };
+  payload: {
+    request_id: string;
+    anchor: PreviewContentAnchor | null;
+    container?: PreviewScrollContainer | null;
+  };
 }
 
 export type PreviewScreenshotRegion = {
@@ -266,7 +286,10 @@ const PAYLOAD_VALIDATORS = new Map<string, (payload: Record<string, unknown>) =>
     "region-anchored",
     (payload) =>
       isBoundedString(payload.request_id, MAX_REGION_ID_LENGTH) &&
-      (payload.anchor === null || isContentAnchor(payload.anchor)),
+      (payload.anchor === null || isContentAnchor(payload.anchor)) &&
+      (payload.container === undefined ||
+        payload.container === null ||
+        isScrollContainer(payload.container)),
   ],
   [
     "screenshot-region-selected",
@@ -344,6 +367,14 @@ function isCaptureRect(value: unknown): value is PreviewCaptureRect {
   );
 }
 
+function isScrollContainer(value: unknown): value is PreviewScrollContainer {
+  return (
+    isRecord(value) &&
+    isBoundedString(value.scroll_container_selector, MAX_SELECTOR_LENGTH) &&
+    hasFiniteNumberFields(value, ["container_scroll_x", "container_scroll_y"])
+  );
+}
+
 function isContentAnchor(value: unknown): value is PreviewContentAnchor {
   return (
     isRecord(value) &&
@@ -370,6 +401,7 @@ function isRegionLayout(value: unknown): value is PreviewRegionLayout {
     isBoundedString(value.id, MAX_REGION_ID_LENGTH) &&
     typeof value.visible === "boolean" &&
     (value.drifted === undefined || typeof value.drifted === "boolean") &&
+    (value.clip === undefined || isCaptureRect(value.clip)) &&
     isCaptureRect(value.rect)
   );
 }
@@ -532,27 +564,27 @@ export function sendProjectPreviewMarkers(
 }
 
 /**
- * Asks the page for the element a moved or resized region now sits on.
- * Resolves `null` when the page has none or does not answer in time.
+ * Asks the page for the element and scroll container a moved or resized
+ * region now sits in. Resolves `null` when the page does not answer in time.
  */
 export function requestRegionAnchor(
   iframe: HTMLIFrameElement,
   rect: { x: number; y: number; width: number; height: number },
-): Promise<PreviewContentAnchor | null> {
+): Promise<PreviewRegionPlacement | null> {
   const target = iframe.contentWindow;
   if (!target) return Promise.resolve(null);
   const requestId = generateUUID();
   return new Promise((resolve) => {
-    const finish = (anchor: PreviewContentAnchor | null) => {
+    const finish = (placement: PreviewRegionPlacement | null) => {
       window.removeEventListener("message", onMessage);
       window.clearTimeout(timer);
-      resolve(anchor);
+      resolve(placement);
     };
     const onMessage = (event: MessageEvent) => {
       if (event.source !== target || !isInspectorMessage(event.data)) return;
       const data = event.data;
       if (data.type === "region-anchored" && data.payload.request_id === requestId) {
-        finish(data.payload.anchor);
+        finish({ anchor: data.payload.anchor, container: data.payload.container ?? null });
       }
     };
     const timer = window.setTimeout(() => finish(null), REGION_ANCHOR_TIMEOUT_MS);

@@ -19,6 +19,8 @@ export type PreviewRegionView = {
   title?: string;
   /** The captured image, once there is one. */
   imageUrl?: string;
+  /** The scroll container's box the outline is clipped to, when it is partly scrolled out. */
+  clip?: { x: number; y: number; width: number; height: number };
 };
 
 type RegionSource = {
@@ -87,6 +89,7 @@ export function regionViews(
           imageUrl: region.imageUrl,
           number: labels.numbers.get(region.id) ?? index + 1,
           title: labels.comments[region.id],
+          clip: layout?.clip,
         },
       ];
     });

@@ -559,6 +559,18 @@
   }
 
   // Nearest scrollable ancestor under a point, or null for the document scroller.
+  // The scroll container under a point, as stored on a capture rectangle.
+  function scrollContainerSnapshot(x, y) {
+    var container = scrollContainerAt(x, y);
+    var selector = container ? getSelector(container) : '';
+    if (!selector) return null;
+    return {
+      scroll_container_selector: selector,
+      container_scroll_x: container.scrollLeft,
+      container_scroll_y: container.scrollTop,
+    };
+  }
+
   function scrollContainerAt(x, y) {
     var current = pageElementAt(x, y);
     while (current && current !== document.body && current !== document.documentElement) {
@@ -653,6 +665,15 @@
   // Current viewport rectangle of a region, and whether it still lines up with
   // the content it was drawn over.
   function regionLayout(region) {
+    var unclipped = unclippedRegionLayout(region);
+    var container = unclipped.container;
+    var layout = unclipped.layout;
+    return container && layout.visible
+      ? clipToContainer(layout, container.getBoundingClientRect())
+      : layout;
+  }
+
+  function unclippedRegionLayout(region) {
     var rect = region.capture_rect || {};
     var container = null;
     var visible = true;
@@ -668,7 +689,7 @@
       position = documentPosition(rect, container);
       drifted = rect.anchor_selector ? true : viewportWidthChanged(rect);
     }
-    return {
+    var layout = {
       id: region.id,
       rect: {
         x: position.x,
@@ -679,6 +700,23 @@
       visible: visible,
       drifted: drifted,
     };
+    return { layout: layout, container: container };
+  }
+
+  // A region scrolled partly out of its container is clipped to the container's
+  // box; one scrolled entirely out is hidden, so it never covers other content.
+  function clipToContainer(layout, box) {
+    var r = layout.rect;
+    var right = r.x + r.width;
+    var bottom = r.y + r.height;
+    if (right <= box.left || r.x >= box.right || bottom <= box.top || r.y >= box.bottom) {
+      layout.visible = false;
+      return layout;
+    }
+    if (r.x < box.left || r.y < box.top || right > box.right || bottom > box.bottom) {
+      layout.clip = { x: box.left, y: box.top, width: box.width, height: box.height };
+    }
+    return layout;
   }
 
   function routeMarker(id, route) {
@@ -981,14 +1019,52 @@
   }
 
   // Only a capture picked from the comment list scrolls the page; new captures never do.
+  // Scrolls by the distance that centers a span [top, bottom] in [start, end], if it is outside.
+  function centeringScroll(top, bottom, start, end) {
+    if (top >= start && bottom <= end) return 0;
+    return top - start - (end - start - (bottom - top)) / 2;
+  }
+
+  // A region capture has no in-page marker, so it is revealed from its layout,
+  // first inside its scroll container and then in the document.
+  function revealRegion(region) {
+    var unclipped = unclippedRegionLayout(region);
+    if (!unclipped.layout.visible) return;
+    var rect = unclipped.layout.rect;
+    var top = rect.y;
+    var bottom = rect.y + rect.height;
+    if (unclipped.container) {
+      var box = unclipped.container.getBoundingClientRect();
+      var inner = centeringScroll(top, bottom, box.top, box.bottom);
+      if (inner) {
+        unclipped.container.scrollBy({ top: inner, behavior: 'smooth' });
+        top = box.top + Math.max(0, (box.height - rect.height) / 2);
+        bottom = top + rect.height;
+      }
+    }
+    var outer = centeringScroll(top, bottom, 0, window.innerHeight);
+    if (outer) window.scrollBy({ top: outer, behavior: 'smooth' });
+  }
+
   function scrollRevealIntoView() {
     if (!revealId || revealId === revealedId) return;
     var node = document.querySelector('[data-kandev-inspector-marker="' + revealId.replace(/["\\]/g, '') + '"]');
-    if (!node) return;
+    var region = node ? null : routeRegion(revealId, currentPageRoute());
+    if (!node && !region) return;
     revealedId = revealId;
+    if (region) {
+      revealRegion(region);
+      return;
+    }
     var rect = node.getBoundingClientRect();
     if (rect.top >= 0 && rect.bottom <= window.innerHeight) return;
     window.scrollBy({ top: rect.top - window.innerHeight / 2, behavior: 'smooth' });
+  }
+
+  function routeRegion(id, route) {
+    return projectedRegions.filter(function (candidate) {
+      return candidate.id === id && candidate.page_route === route;
+    })[0] || null;
   }
 
   function onPagePointerDown(event) {
@@ -1022,7 +1098,11 @@
     var anchor = valid
       ? regionAnchor({ left: rect.x, top: rect.y, width: rect.width, height: rect.height })
       : null;
-    send('region-anchored', { request_id: String(payload.request_id || ''), anchor: anchor });
+    send('region-anchored', {
+      request_id: String(payload.request_id || ''),
+      anchor: anchor,
+      container: valid ? scrollContainerSnapshot(rect.x + rect.width / 2, rect.y + rect.height / 2) : null,
+    });
   }
 
   function routeDidChange() {

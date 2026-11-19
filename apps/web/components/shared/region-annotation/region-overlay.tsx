@@ -25,6 +25,8 @@ export type RegionOverlayItem = {
   number?: number;
   /** The saved capture, which the user can show in place of the live content. */
   imageUrl?: string;
+  /** Box in the host's coordinates that the outline, its controls and its hit area are cut to. */
+  clip?: RegionRect;
 };
 
 type Props = {
@@ -54,6 +56,15 @@ type Props = {
 
 const CORNERS: readonly RegionCorner[] = ["nw", "ne", "sw", "se"];
 
+/** The clip box relative to the region, so content outside it, handles included, is cut away. */
+function clipPolygon(rect: RegionRect, clip: RegionRect) {
+  const left = clip.x - rect.x;
+  const top = clip.y - rect.y;
+  const right = left + clip.width;
+  const bottom = top + clip.height;
+  return `polygon(${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px)`;
+}
+
 const CORNER_POSITION: Record<RegionCorner, string> = {
   nw: "top-0 left-0 cursor-nwse-resize",
   ne: "top-0 left-full cursor-nesw-resize",
@@ -64,9 +75,12 @@ const CORNER_POSITION: Record<RegionCorner, string> = {
 function CornerHandles({
   index,
   onHandlePointerDown,
+  onStart,
 }: {
   index: number;
   onHandlePointerDown: NonNullable<Props["onHandlePointerDown"]>;
+  /** Runs before a resize is reported, like the move area's start. */
+  onStart: () => void;
 }) {
   return CORNERS.map((corner) => (
     <span
@@ -79,6 +93,7 @@ function CornerHandles({
       )}
       onPointerDown={(event) => {
         event.stopPropagation();
+        onStart();
         onHandlePointerDown(index, corner, event);
       }}
     >
@@ -205,6 +220,7 @@ function RegionOutline({
         height: rect.height,
         borderWidth: line,
         forcedColorAdjust: "none",
+        clipPath: item.clip ? clipPolygon(rect, item.clip) : undefined,
       }}
       onPointerDown={startMove}
       onMouseDown={startMove ? (event) => event.stopPropagation() : undefined}
@@ -219,7 +235,11 @@ function RegionOutline({
         />
       )}
       {onHandlePointerDown && (
-        <CornerHandles index={index} onHandlePointerDown={onHandlePointerDown} />
+        <CornerHandles
+          index={index}
+          onHandlePointerDown={onHandlePointerDown}
+          onStart={view.hide}
+        />
       )}
     </div>
   );

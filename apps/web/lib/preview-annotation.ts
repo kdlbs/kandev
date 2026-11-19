@@ -1,4 +1,4 @@
-import type { PreviewCaptureMode, PreviewContentAnchor } from "@/lib/preview-inspect-bridge";
+import type { PreviewCaptureMode, PreviewRegionPlacement } from "@/lib/preview-inspect-bridge";
 import type { PreviewCaptureRect } from "@/lib/types/http";
 
 export type PreviewAnnotationTool = "interact" | "text" | "element" | "region";
@@ -89,23 +89,49 @@ function withoutAnchor(rect: PreviewCaptureRect): PreviewCaptureRect {
   return rest;
 }
 
+/** The previous rectangle without its scroll container, once the page reports the new one. */
+function withoutContainer(rect: PreviewCaptureRect): PreviewCaptureRect {
+  const {
+    scroll_container_selector: _selector,
+    container_scroll_x: _scrollX,
+    container_scroll_y: _scrollY,
+    ...rest
+  } = rect;
+  return rest;
+}
+
 /**
  * Capture rectangle for a moved or resized region, anchored at the page's
- * current document and container scroll so the bridge keeps tracking it, and
- * at the element the region now sits on when the page reports one.
+ * current document scroll so the bridge keeps tracking it. When the page
+ * reports the new position, the region takes that element and scroll
+ * container; otherwise it keeps its previous container at its current scroll.
  */
 export function recaptureRect(
   previous: PreviewCaptureRect,
   rect: ViewportRect,
   frame: PreviewFrameMetrics,
-  anchor: PreviewContentAnchor | null = null,
+  placement: PreviewRegionPlacement | null = null,
 ): PreviewCaptureRect {
+  if (placement) {
+    return {
+      ...withoutContainer(withoutAnchor(previous)),
+      ...placement.anchor,
+      ...placement.container,
+      ...documentPlacement(rect, frame),
+    };
+  }
   const container = previous.scroll_container_selector
     ? frame.containerScroll(previous.scroll_container_selector)
     : null;
   return {
     ...withoutAnchor(previous),
-    ...anchor,
+    ...documentPlacement(rect, frame),
+    ...(container ? { container_scroll_x: container.x, container_scroll_y: container.y } : {}),
+  };
+}
+
+function documentPlacement(rect: ViewportRect, frame: PreviewFrameMetrics) {
+  return {
     ...rect,
     document_x: rect.x + frame.scrollX,
     document_y: rect.y + frame.scrollY,
@@ -113,7 +139,6 @@ export function recaptureRect(
     scroll_y: frame.scrollY,
     viewport_width: frame.innerWidth,
     viewport_height: frame.innerHeight,
-    ...(container ? { container_scroll_x: container.x, container_scroll_y: container.y } : {}),
   };
 }
 
