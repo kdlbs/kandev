@@ -285,8 +285,12 @@ list, the `unchanged` flag, and the stored status match the current output
   **Configure** and **Sync now**. `prompt-sync-dialog.tsx`
   holds a workspace select (credential workspace) plus the shared fields, and
   **Save** and **Remove sync** with inline or mobile confirmation.
-- Prompt rows: `prompt.source === "sync"` renders a `PromptSyncedBadge`
-  (tooltip: source path) and hides `PromptRowActions`.
+- Prompt rows: `prompt.source === "sync"` renders `SyncedPromptListItem`
+  (`prompt-synced-view.tsx`) instead of the editable row: a
+  `PromptSyncedBadge` (tooltip: source path) and a View toggle
+  (`aria-expanded`, stable accessible name, 44px on phones and coarse
+  pointers) that shows the full content in `SettingsPromptEditor` with
+  `readOnly`, plus a note naming the source file. No edit or delete controls.
 - All copy goes through `t()` in the `settings` namespace, in seven locales.
 
 ## Observability

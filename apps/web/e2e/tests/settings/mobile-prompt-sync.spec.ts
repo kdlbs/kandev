@@ -29,5 +29,10 @@ test.describe("Prompt Sync on a phone", () => {
     const row = promptRow(testPage, "phone-rule");
     await expect(row.getByTestId("prompt-synced-badge")).toBeVisible();
     await expect(row.getByTestId("prompt-delete-button")).toHaveCount(0);
+    const view = row.getByTestId("prompt-view-button");
+    const box = await view.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await view.tap();
+    await expect(row.getByTestId("prompt-view-content")).toContainText("Tap targets matter.");
   });
 });

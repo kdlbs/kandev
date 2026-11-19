@@ -1253,5 +1253,7 @@
   "promptSyncFailed": "プロンプト同期に失敗しました: {{error}}",
   "promptSyncLoadFailed": "プロンプト同期を読み込めませんでした: {{error}}",
   "promptSynced": "同期済み",
-  "promptSyncedTooltip": "{{path}} から同期されています。変更するにはリポジトリでファイルを編集してください。"
+  "promptSyncedTooltip": "{{path}} から同期されています。変更するにはリポジトリでファイルを編集してください。",
+  "promptViewContent": "内容を表示",
+  "promptSyncedReadOnlyNote": "読み取り専用です。{{path}} から同期されています。変更するにはリポジトリでファイルを編集してください。"
 }

@@ -65,6 +65,8 @@ const promptName = "Review";
 const promptContent = "Review this change";
 const promptRowTestId = "prompt-list-item";
 const promptNameAttribute = "data-prompt-name";
+const viewButtonTestId = "prompt-view-button";
+const viewContentTestId = "prompt-view-content";
 const promptContentInputTestId = "prompt-content-input";
 const promptDeleteButtonTestId = "prompt-delete-button";
 const promptDeletePopoverTestId = "prompt-delete-confirm-popover";
@@ -597,5 +599,47 @@ describe("synced prompts", () => {
     expect(within(synced).queryByTestId(promptDeleteButtonTestId)).toBeNull();
     expect(within(manual).queryByTestId("prompt-synced-badge")).toBeNull();
     expect(within(manual).getByTestId(promptEditButtonTestId)).toBeTruthy();
+    expect(within(manual).queryByTestId(viewButtonTestId)).toBeNull();
+  });
+
+  // @covers AC-INTEGRATIONS-PROMPT-SYNC-004.3
+  it("open the full content read-only from a View button", () => {
+    const fullContent = "Line one of the synced rule.\nLine two only visible when viewing.";
+    mocks.prompts = [
+      {
+        ...existingPrompt,
+        id: "synced-1",
+        name: "principles",
+        content: fullContent,
+        source: "sync",
+        source_path: "p/principles.md",
+      },
+    ];
+    render(
+      <TooltipProvider>
+        <SettingsSaveProvider>
+          <PromptsSettings />
+        </SettingsSaveProvider>
+      </TooltipProvider>,
+    );
+    const row = screen.getByTestId(promptRowTestId);
+    const view = within(row).getByTestId(viewButtonTestId);
+    expect(view.getAttribute("aria-expanded")).toBe("false");
+    expect(within(row).queryByTestId(viewContentTestId)).toBeNull();
+
+    fireEvent.click(view);
+    expect(view.getAttribute("aria-expanded")).toBe("true");
+    const content = within(row).getByTestId(viewContentTestId) as HTMLTextAreaElement;
+    expect(content.value).toBe(fullContent);
+    expect(mocks.promptEditor).toHaveBeenCalledWith(
+      expect.objectContaining({ testId: viewContentTestId, readOnly: true }),
+    );
+    expect(within(row).getByTestId("prompt-view-source-note").textContent).toContain(
+      "p/principles.md",
+    );
+    expect(within(row).queryByRole("button", { name: saveChangesLabel })).toBeNull();
+
+    fireEvent.click(view);
+    expect(within(row).queryByTestId(viewContentTestId)).toBeNull();
   });
 });

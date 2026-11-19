@@ -52,7 +52,7 @@ Renaming a file is a delete of the old name and a create of the new one.
 
 Synced prompts are owned by the repository:
 
-- Settings shows a **Synced** badge with the source file and no edit or delete controls.
+- Settings shows a **Synced** badge with the source file. Instead of edit and delete, a **View** button (eye icon) opens the full content read-only.
 - The prompt HTTP API rejects updates and deletes with `409`.
 - Agent prompt-write tools reject changes, and `allow_agent_edits` reports `false`.
 - Creating a prompt with a synced prompt's name fails as a duplicate.

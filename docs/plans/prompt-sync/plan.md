@@ -49,6 +49,7 @@ Each layer is shippable on its own:
 | 2 | [Task 04: Workflow Sync unresolved-reference warnings](task-04-workflow-sync-reference-warnings.md) | 02 |
 | 3 | [Task 05: Prompt Sync settings UI](task-05-prompt-sync-ui.md) | 02, 03 |
 | 4 | [Task 06: E2E coverage and public docs](task-06-e2e-and-docs.md) | 03, 04, 05 |
+| 5 | [Task 07: View synced prompt content](task-07-view-synced-prompts.md) | 05, 06 |
 
 Tasks 01 and 02 touch separate packages and can run in parallel, as can 03
 and 04. Waves mark parallel-safe candidates only; they do not authorize
@@ -78,7 +79,7 @@ are illustrative; use the existing shadcn primitives and localized copy.
 | [ Search prompts...                                ]                 |
 |                                                                      |
 | +------------------------------------------------------------------+ |
-| | @principles  [Synced]                                            | |
+| | @principles  [Synced]                                    [view]  | |
 | | Always prefer the simplest implementation that ...               | |
 | +------------------------------------------------------------------+ |
 | | @code-review  [Built-in]                          [edit] [del]   | |
@@ -88,6 +89,8 @@ are illustrative; use the existing shadcn primitives and localized copy.
 | +------------------------------------------------------------------+ |
 +----------------------------------------------------------------------+
   Hovering or focusing [Synced] shows "Synced from prompts/principles.md".
+  [view] toggles the full content read-only below the name, with a note
+  naming the source file (Task 07).
 ```
 
 ### UI-02: Settings > Prompts, not configured (desktop)
@@ -132,7 +135,7 @@ are illustrative; use the existing shadcn primitives and localized copy.
 | | [Sync now] [Configure]   | |
 | +--------------------------+ |
 | +--------------------------+ |
-| | @principles  [Synced]    | |
+| | @principles [Synced] [o] | |
 | | Always prefer the ...    | |
 | +--------------------------+ |
 | | @my-notes     [edit][del]| |
@@ -140,7 +143,8 @@ are illustrative; use the existing shadcn primitives and localized copy.
 +------------------------------+
   On phones the actions wrap below the status line, and the dialog follows the
   existing Workflow Sync dialog's mobile presentation, which is a full-height
-  sheet with stacked fields. Tapping the badge shows the source path.
+  sheet with stacked fields. Tapping the badge shows the source path, and the
+  touch-sized [o] (view) toggles the full read-only content.
 ```
 
 These previews map to AC-INTEGRATIONS-PROMPT-SYNC-001.1, 001.3, 003.7,

@@ -1253,5 +1253,7 @@
   "promptSyncFailed": "Prompt sync failed: {{error}}",
   "promptSyncLoadFailed": "Could not load Prompt Sync: {{error}}",
   "promptSynced": "Synced",
-  "promptSyncedTooltip": "Synced from {{path}}. Edit the file in the repository to change it."
+  "promptSyncedTooltip": "Synced from {{path}}. Edit the file in the repository to change it.",
+  "promptViewContent": "View content",
+  "promptSyncedReadOnlyNote": "Read-only. Synced from {{path}}; edit the file in the repository to change it."
 }

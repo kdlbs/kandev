@@ -1253,5 +1253,7 @@
   "promptSyncFailed": "프롬프트 동기화 실패: {{error}}",
   "promptSyncLoadFailed": "프롬프트 동기화를 불러올 수 없습니다: {{error}}",
   "promptSynced": "동기화됨",
-  "promptSyncedTooltip": "{{path}}에서 동기화되었습니다. 변경하려면 저장소에서 파일을 편집하세요."
+  "promptSyncedTooltip": "{{path}}에서 동기화되었습니다. 변경하려면 저장소에서 파일을 편집하세요.",
+  "promptViewContent": "내용 보기",
+  "promptSyncedReadOnlyNote": "읽기 전용입니다. {{path}}에서 동기화되었습니다. 변경하려면 저장소에서 파일을 편집하세요."
 }

@@ -41,6 +41,13 @@ test.describe("Prompt Sync", () => {
     await expect(principles.getByTestId("prompt-synced-badge")).toBeVisible();
     await expect(principles.getByTestId("prompt-edit-button")).toHaveCount(0);
     await expect(principles.getByTestId("prompt-delete-button")).toHaveCount(0);
+    await principles.getByTestId("prompt-view-button").click();
+    await expect(principles.getByTestId("prompt-view-content")).toContainText("rev 1");
+    await expect(principles.getByTestId("prompt-view-source-note")).toContainText(
+      ".kandev/prompts/principles.md",
+    );
+    await principles.getByTestId("prompt-view-button").click();
+    await expect(principles.getByTestId("prompt-view-content")).toHaveCount(0);
 
     await seedPromptFiles(apiClient, seedData.workspaceId, {
       "principles.md": "Prefer the simplest design. rev 2",

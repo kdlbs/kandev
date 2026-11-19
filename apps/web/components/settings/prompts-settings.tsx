@@ -8,7 +8,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
 import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
 import { PromptRowActions } from "@/components/settings/prompt-row-actions";
-import { PromptSyncedBadge } from "@/components/settings/prompt-synced-badge";
+import { SyncedPromptListItem } from "@/components/settings/prompt-synced-view";
 import { PromptSyncSection } from "@/components/settings/prompt-sync-section";
 import {
   filterSavedPrompts,
@@ -205,20 +205,17 @@ function PromptListItem({
               {t("settings:builtIn")}
             </Badge>
           )}
-          {prompt.source === "sync" && <PromptSyncedBadge sourcePath={prompt.source_path} />}
         </div>
-        {prompt.source !== "sync" && (
-          <PromptRowActions
-            prompt={prompt}
-            deleteAnchorRef={deleteAnchorRef}
-            onStartEditing={onStartEditing}
-            onOpenDelete={onOpenDelete}
-            isBusy={isBusy}
-            showCreate={showCreate}
-            isFinePointer={isFinePointer}
-            isDeleteTarget={isDeleteTarget}
-          />
-        )}
+        <PromptRowActions
+          prompt={prompt}
+          deleteAnchorRef={deleteAnchorRef}
+          onStartEditing={onStartEditing}
+          onOpenDelete={onOpenDelete}
+          isBusy={isBusy}
+          showCreate={showCreate}
+          isFinePointer={isFinePointer}
+          isDeleteTarget={isDeleteTarget}
+        />
       </div>
       <PromptDeleteConfirmation
         promptId={prompt.id}
@@ -309,25 +306,29 @@ function PromptListContent({
   }
   return (
     <>
-      {prompts.map((prompt: CustomPrompt) => (
-        <PromptListItem
-          key={prompt.id}
-          prompt={prompt}
-          isEditing={editingId === prompt.id}
-          editingRef={editingRef}
-          formState={formState}
-          onFormChange={onFormChange}
-          onStartEditing={onStartEditing}
-          onOpenDelete={onOpenDelete}
-          onDeleteCancel={onDeleteCancel}
-          onDeleteConfirm={onDeleteConfirm}
-          onCancel={onCancel}
-          isBusy={isBusy}
-          showCreate={showCreate}
-          isFinePointer={isFinePointer}
-          isDeleteTarget={deleteTargetId === prompt.id}
-        />
-      ))}
+      {prompts.map((prompt: CustomPrompt) =>
+        prompt.source === "sync" ? (
+          <SyncedPromptListItem key={prompt.id} prompt={prompt} />
+        ) : (
+          <PromptListItem
+            key={prompt.id}
+            prompt={prompt}
+            isEditing={editingId === prompt.id}
+            editingRef={editingRef}
+            formState={formState}
+            onFormChange={onFormChange}
+            onStartEditing={onStartEditing}
+            onOpenDelete={onOpenDelete}
+            onDeleteCancel={onDeleteCancel}
+            onDeleteConfirm={onDeleteConfirm}
+            onCancel={onCancel}
+            isBusy={isBusy}
+            showCreate={showCreate}
+            isFinePointer={isFinePointer}
+            isDeleteTarget={deleteTargetId === prompt.id}
+          />
+        ),
+      )}
     </>
   );
 }

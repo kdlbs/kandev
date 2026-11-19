@@ -1253,5 +1253,7 @@
   "promptSyncFailed": "提示词同步失败：{{error}}",
   "promptSyncLoadFailed": "无法加载提示词同步：{{error}}",
   "promptSynced": "已同步",
-  "promptSyncedTooltip": "同步自 {{path}}。请在仓库中编辑该文件以进行修改。"
+  "promptSyncedTooltip": "同步自 {{path}}。请在仓库中编辑该文件以进行修改。",
+  "promptViewContent": "查看内容",
+  "promptSyncedReadOnlyNote": "只读。同步自 {{path}}；请在仓库中编辑该文件以进行修改。"
 }

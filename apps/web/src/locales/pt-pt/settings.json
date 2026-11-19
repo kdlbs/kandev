@@ -1253,5 +1253,7 @@
   "promptSyncFailed": "A sincronização de prompts falhou: {{error}}",
   "promptSyncLoadFailed": "Não foi possível carregar a sincronização de prompts: {{error}}",
   "promptSynced": "Sincronizado",
-  "promptSyncedTooltip": "Sincronizado a partir de {{path}}. Edite o ficheiro no repositório para o alterar."
+  "promptSyncedTooltip": "Sincronizado a partir de {{path}}. Edite o ficheiro no repositório para o alterar.",
+  "promptViewContent": "Ver conteúdo",
+  "promptSyncedReadOnlyNote": "Só de leitura. Sincronizado a partir de {{path}}; edite o ficheiro no repositório para o alterar."
 }
