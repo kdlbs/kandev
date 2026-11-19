@@ -172,6 +172,12 @@ controller-owned `nativeCheckLifetime`, which holds `ctx`, `cancel`, `mu`,
   drain. A background goroutine then calls `lifetime.shut()`, which sets
   `closed` and cancels without waiting, so a check held by a live request
   returns `cancelled` before the drain. The later stop callback still joins.
+- Identity observation (before the run and the post-run revalidation) does
+  filesystem reads that cannot be interrupted. While the lifetime is open it
+  runs in its own goroutine and the caller selects on `lifetime.ctx`. If
+  shutdown wins, the pre-run lookup is `abandoned` (it resolves to `unknown` /
+  `cancelled` and commits nothing), and the post-run result is returned
+  uncached. The abandoned read finishes in the background and is discarded.
 - `StartRuntimeUpdateBackground` installs a fresh open lifetime when the
   current one is closed. It never reopens a closed lifetime.
 

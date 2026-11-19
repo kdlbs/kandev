@@ -215,6 +215,9 @@ type nativeUpdateCheckLookup struct {
 	key            string
 	generation     uint64
 	spec           agents.NativeUpdateCheckSpec
+	// abandoned is set when shutdown began before the observation finished;
+	// the lookup then resolves to unknown/cancelled and commits nothing.
+	abandoned bool
 }
 
 // nativeActiveIdentity is an agent's current native identity, the epoch at
@@ -243,9 +246,17 @@ const nativeStaleObservationAttempts = 3
 // never replaces it; it observes again, and after repeated losses it uses an
 // isolated key that is neither shared nor cached.
 func (c *Controller) prepareNativeUpdateCheck(agentName string, spec agents.NativeUpdateCheckSpec) nativeUpdateCheckLookup {
+	lifetime := c.currentNativeCheckLifetime()
 	for attempt := 1; ; attempt++ {
 		seq := c.nextNativeObservation()
-		lookup := c.nativeUpdateCheckIdentity(agentName, c.observedRuntimeVersion(agentName), spec)
+		currentVersion := c.observedRuntimeVersion(agentName)
+		lookup, ok := c.observeNativeUpdateCheckIdentity(lifetime, agentName, currentVersion, spec)
+		if !ok {
+			return nativeUpdateCheckLookup{
+				agentName: agentName, currentVersion: currentVersion, spec: spec, abandoned: true,
+				key: nativeUpdateCheckKeyPrefix(agentName) + "abandoned" + strconv.FormatUint(seq, 10),
+			}
+		}
 		if key, ok := c.commitNativeObservation(agentName, lookup.identity, seq); ok {
 			lookup.key = key
 			return lookup
@@ -254,6 +265,26 @@ func (c *Controller) prepareNativeUpdateCheck(agentName string, spec agents.Nati
 			lookup.key = lookup.identity + "\x00stale" + strconv.FormatUint(seq, 10)
 			return lookup
 		}
+	}
+}
+
+// observeNativeUpdateCheckIdentity computes the identity off the caller's
+// goroutine so shutdown never waits on its filesystem reads, which cannot be
+// interrupted. It reports false when the lifetime closed first; the abandoned
+// observation finishes in the background and its result is discarded. Once
+// the lifetime is already closed, shutdown no longer waits for this caller,
+// so the observation runs inline.
+func (c *Controller) observeNativeUpdateCheckIdentity(lifetime *nativeCheckLifetime, agentName, currentVersion string, spec agents.NativeUpdateCheckSpec) (nativeUpdateCheckLookup, bool) {
+	if lifetime.isClosed() {
+		return c.nativeUpdateCheckIdentity(agentName, currentVersion, spec), true
+	}
+	observed := make(chan nativeUpdateCheckLookup, 1)
+	go func() { observed <- c.nativeUpdateCheckIdentity(agentName, currentVersion, spec) }()
+	select {
+	case lookup := <-observed:
+		return lookup, true
+	case <-lifetime.ctx.Done():
+		return nativeUpdateCheckLookup{}, false
 	}
 }
 
@@ -362,6 +393,9 @@ func (c *Controller) nativeUpdateCheckEntry(ctx context.Context, lookup nativeUp
 	if ctx.Err() != nil {
 		return runtimeUpdateStatusCacheEntry{}
 	}
+	if lookup.abandoned {
+		return nativeCancelledEntry()
+	}
 	if entry, ok := c.freshRuntimeUpdateStatusEntry(lookup.key, now); ok {
 		return entry
 	}
@@ -419,8 +453,12 @@ func (c *Controller) executeNativeUpdateCheck(ctx context.Context, lifetime *nat
 	// the run describes another identity and is returned without caching. The
 	// launched launcher and its real executable at launch must be the
 	// prepared ones, and the identity observed after the run must still match.
-	if !entry.expiresAt.IsZero() && launched.Executable == lookup.executable && launched.RealExecutable == lookup.realExecutable &&
-		c.nativeUpdateCheckIdentity(lookup.agentName, lookup.currentVersion, lookup.spec).identity == lookup.identity {
+	// If shutdown abandons that observation, the decided result is returned
+	// uncached.
+	if entry.expiresAt.IsZero() || launched.Executable != lookup.executable || launched.RealExecutable != lookup.realExecutable {
+		return entry
+	}
+	if after, ok := c.observeNativeUpdateCheckIdentity(lifetime, lookup.agentName, lookup.currentVersion, lookup.spec); ok && after.identity == lookup.identity {
 		c.storeNativeUpdateCheckEntry(lookup, entry)
 	}
 	return entry

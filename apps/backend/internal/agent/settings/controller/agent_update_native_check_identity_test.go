@@ -409,3 +409,66 @@ func TestNativeCheckParentCancellationCancelsRunningCheck(t *testing.T) {
 		t.Fatal("stop did not join the cancelled check")
 	}
 }
+
+// Identity observation reads files that can block on unreachable storage.
+// Process shutdown must not wait for an observation before or after the run:
+// the waiting request settles and stop joins while the observation is stuck.
+func TestNativeCheckShutdownDoesNotWaitForBlockedObservation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		afterRun  bool
+		wantState dto.AgentUpdateCheckState
+		wantRuns  int
+	}{
+		{name: "before the run", wantState: dto.AgentUpdateCheckStateUnknown, wantRuns: 0},
+		{name: "after the run", afterRun: true, wantState: dto.AgentUpdateCheckStateUpToDate, wantRuns: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+			h.runner.setOutput(ompUpToDate, 0)
+			gate, entered := make(chan struct{}), make(chan struct{}, 1)
+			defer close(gate)
+			block := func() {
+				select {
+				case entered <- struct{}{}:
+				default:
+				}
+				<-gate
+			}
+			parent, cancelParent := context.WithCancel(context.Background())
+			stop := h.ctrl.StartRuntimeUpdateBackground(parent, make(chan struct{}))
+			if tc.afterRun {
+				h.runner.setRunHook(func() { h.runner.setEnvironmentHook(block) })
+			} else {
+				h.runner.setEnvironmentHook(block)
+			}
+			result := make(chan dto.AgentUpdateStatusDTO, 1)
+			go func() {
+				statuses, err := h.ctrl.ListAgentUpdateStatuses(context.Background())
+				if err == nil && len(statuses.Statuses) == 1 {
+					result <- statuses.Statuses[0]
+					return
+				}
+				result <- dto.AgentUpdateStatusDTO{}
+			}()
+			<-entered
+			cancelParent()
+			select {
+			case status := <-result:
+				if status.CheckState != tc.wantState {
+					t.Errorf("status = %+v, want %s", status, tc.wantState)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the request waited for a blocked observation after shutdown")
+			}
+			stopped := make(chan struct{})
+			go func() { stop(); close(stopped) }()
+			select {
+			case <-stopped:
+			case <-time.After(5 * time.Second):
+				t.Fatal("stop waited for a blocked observation")
+			}
+			requireRuns(t, h.runner, tc.wantRuns, "with a blocked observation")
+		})
+	}
+}
