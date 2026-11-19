@@ -1,12 +1,14 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpserver "github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,6 +57,16 @@ func TestRegisteredToolSchemasDeclareArrayItems(t *testing.T) {
 	surfaces["profile_coordinator"] = newProfileServer(mcpprofile.NewCoordinator())
 	surfaces["profile_managed_conversation"] = newManagedConversationServer(t)
 
+	packageProfile := NewWithProfile(
+		&testBackend{}, "session", "task", 10005, log, "", false,
+		packageTestProfile(mcpprofile.PackageCore, mcpprofile.PackageConfiguration),
+	)
+	t.Cleanup(func() { require.NoError(t, packageProfile.Close(context.Background())) })
+	configurationPackage := packageProfile.builtinPackages[mcpprofile.PackageConfiguration]
+	require.NotNil(t, configurationPackage)
+	require.Contains(t, configurationPackage.registry.ListTools(), "reorder_workflow_steps_kandev")
+	surfaces["package_manifest"] = packageProfile
+
 	// The default profile of each surface leaves out tools gated by a
 	// capability, provider, or coordinator binding. Register those groups too so
 	// every Kandev-owned tool is guarded.
@@ -90,17 +102,11 @@ func TestRegisteredToolSchemasDeclareArrayItems(t *testing.T) {
 	registered := make(map[string]struct{})
 	for name, server := range surfaces {
 		t.Run(name, func(t *testing.T) {
-			tools := server.mcpServer.ListTools()
-			require.NotEmpty(t, tools, "surface must register tools")
-			for toolName, tool := range tools {
-				registered[toolName] = struct{}{}
-				raw, err := json.Marshal(tool.Tool)
-				require.NoError(t, err, "marshal tool %q", toolName)
-				var advertised map[string]any
-				require.NoError(t, json.Unmarshal(raw, &advertised), "unmarshal tool %q", toolName)
-				schema, ok := advertised["inputSchema"].(map[string]any)
-				require.True(t, ok, "tool %q must advertise an input schema", toolName)
-				assertArraySchemasDeclareItems(t, toolName, "inputSchema", schema)
+			assertRegistryArraySchemasDeclareItems(t, server.mcpServer, registered)
+			for packageID, packageServer := range server.builtinPackages {
+				t.Run(string(packageID), func(t *testing.T) {
+					assertRegistryArraySchemasDeclareItems(t, packageServer.registry, registered)
+				})
 			}
 		})
 	}
@@ -146,12 +152,79 @@ func TestRegisteredToolSchemasDeclareArrayItems(t *testing.T) {
 			"type":  "object",
 			"items": map[string]any{"type": "string"},
 		}))
+		require.Empty(t, arraySchemasMissingItems("synthetic", "inputSchema", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"description": map[string]any{
+					"type":    "object",
+					"default": map[string]any{"type": "array"},
+				},
+			},
+		}))
+		t.Run("schema-bearing keywords are traversed", func(t *testing.T) {
+			arraySchema := func() map[string]any { return map[string]any{"type": "array"} }
+			cases := []struct {
+				name  string
+				key   string
+				value any
+			}{
+				{name: "properties", key: "properties", value: map[string]any{"value": arraySchema()}},
+				{name: "patternProperties", key: "patternProperties", value: map[string]any{"^value$": arraySchema()}},
+				{name: "definitions", key: "definitions", value: map[string]any{"value": arraySchema()}},
+				{name: "dollar definitions", key: "$defs", value: map[string]any{"value": arraySchema()}},
+				{name: "dependent schemas", key: "dependentSchemas", value: map[string]any{"value": arraySchema()}},
+				{name: "dependencies", key: "dependencies", value: map[string]any{"value": arraySchema()}},
+				{name: "items", key: "items", value: arraySchema()},
+				{name: "tuple items", key: "items", value: []any{arraySchema()}},
+				{name: "prefix items", key: "prefixItems", value: []any{arraySchema()}},
+				{name: "additional items", key: "additionalItems", value: arraySchema()},
+				{name: "additional properties", key: "additionalProperties", value: arraySchema()},
+				{name: "contains", key: "contains", value: arraySchema()},
+				{name: "property names", key: "propertyNames", value: arraySchema()},
+				{name: "not", key: "not", value: arraySchema()},
+				{name: "if", key: "if", value: arraySchema()},
+				{name: "then", key: "then", value: arraySchema()},
+				{name: "else", key: "else", value: arraySchema()},
+				{name: "allOf", key: "allOf", value: []any{arraySchema()}},
+				{name: "anyOf", key: "anyOf", value: []any{arraySchema()}},
+				{name: "oneOf", key: "oneOf", value: []any{arraySchema()}},
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					missing := arraySchemasMissingItems("synthetic", "inputSchema", map[string]any{
+						"type": "object",
+						tc.key: tc.value,
+					})
+					require.Len(t, missing, 1)
+					require.Contains(t, missing[0], "inputSchema."+tc.key)
+				})
+			}
+		})
 	})
 }
 
-// arraySchemasMissingItems walks properties, items, and every JSON Schema
-// combinator so a nested array cannot escape the check, and reports each
-// array node that does not declare items.
+func assertRegistryArraySchemasDeclareItems(
+	t *testing.T,
+	registry *mcpserver.MCPServer,
+	registered map[string]struct{},
+) {
+	t.Helper()
+	tools := registry.ListTools()
+	require.NotEmpty(t, tools, "registry must advertise tools")
+	for toolName, tool := range tools {
+		registered[toolName] = struct{}{}
+		raw, err := json.Marshal(tool.Tool)
+		require.NoError(t, err, "marshal tool %q", toolName)
+		var advertised map[string]any
+		require.NoError(t, json.Unmarshal(raw, &advertised), "unmarshal tool %q", toolName)
+		schema, ok := advertised["inputSchema"].(map[string]any)
+		require.True(t, ok, "tool %q must advertise an input schema", toolName)
+		assertArraySchemasDeclareItems(t, toolName, "inputSchema", schema)
+	}
+}
+
+// arraySchemasMissingItems walks JSON Schema keywords that contain schemas and
+// reports each array node that does not declare items.
 func arraySchemasMissingItems(toolName, path string, node any) []string {
 	var missing []string
 	var walk func(path string, node any)
@@ -166,7 +239,7 @@ func arraySchemasMissingItems(toolName, path string, node any) []string {
 			}
 			for key, child := range value {
 				switch key {
-				case "properties", "patternProperties", "definitions", "$defs", "dependentSchemas":
+				case "properties", "patternProperties", "definitions", "$defs", "dependencies", "dependentSchemas":
 					entries, ok := child.(map[string]any)
 					if !ok {
 						continue
@@ -174,7 +247,9 @@ func arraySchemasMissingItems(toolName, path string, node any) []string {
 					for name, entry := range entries {
 						walk(fmt.Sprintf("%s.%s.%s", path, key, name), entry)
 					}
-				default:
+				case "items", "prefixItems", "additionalItems", "additionalProperties",
+					"contains", "propertyNames", "not", "if", "then", "else",
+					"allOf", "anyOf", "oneOf":
 					walk(fmt.Sprintf("%s.%s", path, key), child)
 				}
 			}
