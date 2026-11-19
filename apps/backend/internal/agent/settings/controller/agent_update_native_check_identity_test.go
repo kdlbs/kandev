@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,14 +25,14 @@ func TestNativeCheckSymlinkRetargetChangesIdentity(t *testing.T) {
 	}
 	h.runner.setPath(link)
 	spec := agents.NewOmpACP().NativeUpdateCheck()
-	before := h.ctrl.prepareNativeUpdateCheck(ompAgentID, "18.13.3", spec)
+	before := h.ctrl.prepareNativeUpdateCheck(ompAgentID, spec)
 	if err := os.Remove(link); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(second, link); err != nil {
 		t.Fatal(err)
 	}
-	after := h.ctrl.prepareNativeUpdateCheck(ompAgentID, "18.13.3", spec)
+	after := h.ctrl.prepareNativeUpdateCheck(ompAgentID, spec)
 	if before.key == after.key {
 		t.Fatal("retargeted executable to a different real path but cache identity did not change")
 	}
@@ -44,9 +45,9 @@ func TestNativeCheckFoldedXDGBunfigChangesIdentity(t *testing.T) {
 	config := filepath.Join(xdg, ".bunfig.toml")
 	writeNativeCheckFile(t, config, "[install]\nregistry = 'https://old.invalid'\n")
 	spec := agents.NewOmpACP().NativeUpdateCheck()
-	before := h.ctrl.prepareNativeUpdateCheck(ompAgentID, "18.13.3", spec)
+	before := h.ctrl.prepareNativeUpdateCheck(ompAgentID, spec)
 	writeNativeCheckFile(t, config, "[install]\nregistry = 'https://new-and-longer.invalid'\n")
-	after := h.ctrl.prepareNativeUpdateCheck(ompAgentID, "18.13.3", spec)
+	after := h.ctrl.prepareNativeUpdateCheck(ompAgentID, spec)
 	if before.key == after.key {
 		t.Fatal("changed upstream-selected XDG bunfig size but cache identity did not change")
 	}
@@ -152,4 +153,48 @@ func TestNativeCheckReturnToIdentityWhileInFlightStartsNewCheck(t *testing.T) {
 		t.Errorf("cached status = %+v; want the returning A check's result, not the stale first A", status)
 	}
 	requireRuns(t, h.runner, 3, "after A, B, and a returning A")
+}
+
+// An observation that started before a newer one committed must not replace
+// the newer identity or evict its cached result.
+func TestNativeCheckStaleObservationDoesNotEvictNewerIdentity(t *testing.T) {
+	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+	first := filepath.Join(h.home, "install", "a", "omp")
+	second := filepath.Join(h.home, "install", "b", "omp")
+	writeNativeCheckFile(t, first, "a")
+	writeNativeCheckFile(t, second, "b")
+	h.runner.setPath(first)
+	h.runner.setOutput(ompUpToDate, 0)
+	paused, resume := make(chan struct{}), make(chan struct{})
+	var pausing atomic.Bool
+	pausing.Store(true)
+	h.runner.setEnvironmentHook(func() {
+		if pausing.CompareAndSwap(true, false) {
+			close(paused)
+			<-resume
+		}
+	})
+	stale := make(chan dto.AgentUpdateStatusDTO, 1)
+	go func() { stale <- listStatus(t, h.ctrl, ompAgentID) }()
+	<-paused
+	h.runner.setPath(second)
+	_ = h.status(t, ompAgentID)
+	requireRuns(t, h.runner, 1, "after the newer observation")
+	close(resume)
+	<-stale
+	if status := h.status(t, ompAgentID); status.CheckState != dto.AgentUpdateCheckStateUpToDate {
+		t.Errorf("status = %+v", status)
+	}
+	requireRuns(t, h.runner, 1, "after a stale observation resumed")
+}
+
+// The standalone build service origin (PI_BUILD_URL) selects the release
+// source in check mode, so changing it reruns the check.
+func TestNativeCheckBuildURLChangeRechecks(t *testing.T) {
+	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+	h.runner.setOutput(ompUpToDate, 0)
+	_ = h.status(t, ompAgentID)
+	h.runner.setEnv(append(h.baseEnv(), "PI_BUILD_URL=https://builds.invalid")...)
+	_ = h.status(t, ompAgentID)
+	requireRuns(t, h.runner, 2, "after PI_BUILD_URL changed")
 }

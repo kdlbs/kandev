@@ -37,7 +37,7 @@ func (c *Controller) previewHarnessUpdate(
 	}
 	// A native check replaces the stable reference; it never changes approval.
 	if check, native := nativeUpdateCheckSpec(ag); native {
-		c.previewNativeUpdateCheck(ctx, ag, check, current).applyPreview(preview)
+		c.previewNativeUpdateCheck(ctx, ag, check).applyPreview(preview)
 		return preview, nil
 	}
 	preview.StableLatestVersion, _ = c.resolveHarnessLatest(ctx, spec.Package)

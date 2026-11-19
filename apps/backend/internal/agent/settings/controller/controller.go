@@ -112,7 +112,13 @@ type Controller struct {
 	nativeUpdateCheckGeneration map[string]uint64
 	// nativeUpdateCheckActive is each agent's current native identity and
 	// epoch; a different identity evicts the agent's other entries.
-	nativeUpdateCheckActive    map[string]nativeActiveIdentity
+	nativeUpdateCheckActive map[string]nativeActiveIdentity
+	// nativeUpdateCheckObserved orders identity observations; an observation
+	// never replaces an identity committed by a later-started one.
+	nativeUpdateCheckObserved uint64
+	// nativeCheckBeforePublish is a test seam run before a native flight
+	// publishes its result; nil in production.
+	nativeCheckBeforePublish   func()
 	nativeCheckLifetime        *nativeCheckLifetime
 	runtimeAutoUpdateStore     *managedruntime.AutoUpdateStore
 	runtimeUpdateNotifier      RuntimeUpdateNotifier

@@ -132,7 +132,7 @@ func (c *Controller) runtimeUpdateStatusEntries(
 			if !target.nativeEligible {
 				continue
 			}
-			lookup := c.prepareNativeUpdateCheck(target.agentName, target.currentVersion, *target.nativeCheck)
+			lookup := c.prepareNativeUpdateCheck(target.agentName, *target.nativeCheck)
 			keys[i] = lookup.key
 			lookups[lookup.key] = func() runtimeUpdateStatusCacheEntry { return c.nativeUpdateCheckEntry(ctx, lookup, now) }
 		case target.packageName != "" && target.available && target.enabled:

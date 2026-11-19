@@ -14,7 +14,7 @@ func TestOmpUpdateCheckContextDeclaresUpstreamEnvKeys(t *testing.T) {
 	want := []string{
 		"OMP_PROFILE", "PI_PROFILE", "PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "PI_CONFIG_FILES",
 		"HOME", "XDG_CONFIG_HOME", "npm_config_userconfig", "npm_config_registry", "BUN_CONFIG_REGISTRY",
-		"MISE_DATA_DIR", "XDG_DATA_HOME", "LOCALAPPDATA", "BUN_INSTALL_GLOBAL_DIR",
+		"MISE_DATA_DIR", "XDG_DATA_HOME", "LOCALAPPDATA", "BUN_INSTALL_GLOBAL_DIR", "PI_BUILD_URL",
 	}
 	got := NewOmpACP().NativeUpdateCheck().Context.EnvKeys
 	if !slices.Equal(got, want) {

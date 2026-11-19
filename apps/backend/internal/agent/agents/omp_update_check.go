@@ -135,8 +135,9 @@ func ompUpdateCheckContext() NativeUpdateCheckContext {
 			"OMP_PROFILE", "PI_PROFILE", "PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "PI_CONFIG_FILES",
 			envHome, envXDGConfigHome, "npm_config_userconfig", "npm_config_registry", "BUN_CONFIG_REGISTRY",
 			// Install-method classification (update-cli.ts getMiseDataDir and
-			// resolveUpdateTarget) chooses npm metadata or the build service.
-			"MISE_DATA_DIR", envXDGDataHome, "LOCALAPPDATA", "BUN_INSTALL_GLOBAL_DIR",
+			// resolveUpdateTarget) chooses npm metadata or the build service;
+			// PI_BUILD_URL is the build service origin (build-service.ts).
+			"MISE_DATA_DIR", envXDGDataHome, "LOCALAPPDATA", "BUN_INSTALL_GLOBAL_DIR", "PI_BUILD_URL",
 		},
 		Sources: ompUpdateCheckSources,
 	}

@@ -108,7 +108,9 @@ adds after the pinned commit.
   the install-method selectors `MISE_DATA_DIR`, `XDG_DATA_HOME`,
   `LOCALAPPDATA`, and `BUN_INSTALL_GLOBAL_DIR` (upstream `getMiseDataDir` and
   `resolveUpdateTarget`, which choose between npm metadata and the build
-  service). Any change to these values changes the key.
+  service), and `PI_BUILD_URL`, the build service origin
+  (`build-service.ts` `buildServiceUrl`). Any change to these values changes
+  the key.
 - Channel settings: the profile is `OMP_PROFILE` when that variable is
   defined, even if it is empty, and otherwise `PI_PROFILE`. After trimming, an
   empty or `default` value selects the default profile. The base root is
@@ -232,7 +234,11 @@ controller-owned `nativeCheckLifetime`, which holds `ctx`, `cancel`, `mu`,
   while the mutex is still held, before the execution waits for a semaphore
   slot. Slot waiters are therefore counted.
 - A lookup waits for its semaphore slot with `select` on `lifetime.ctx`. The
-  process context attaches `context.AfterFunc(lifetime.ctx, cancel)`.
+  process context attaches `context.AfterFunc(lifetime.ctx, cancel)`. The
+  lifetime is captured before the single-flight call. The flight key, though
+  not the cache key, includes the lifetime's unique id. After a stop and
+  restart, a request therefore never joins a cancelled flight that has not
+  yet published.
 - The background stop function sets `closed`, cancels `lifetime.ctx` under
   `lifetime.mu`, releases the mutex, and calls `wg.Wait()`. Because `Add` only
   happens while the lifetime is open and under the same mutex, no lookup can
@@ -353,6 +359,14 @@ Invalidation:
   earlier identity therefore uses a new key and starts a new check. It does
   not reuse a cached result or join a check still in flight for the earlier
   occurrence. The cache holds at most one native entry per agent.
+- Observations are ordered. `prepareNativeUpdateCheck` takes a sequence
+  number from `nativeUpdateCheckObserved` before it reads the runtime version
+  and the other identity inputs. A different identity replaces the active one
+  only if its sequence is newer than the newest observation that confirmed
+  the active identity. Otherwise the observation is stale. It observes again,
+  up to three times, and then uses an isolated key that is neither shared nor
+  cached. A paused, out-of-date request can therefore never evict, or
+  restart, a newer identity's result.
 - After a check finishes, the identity is recomputed. The result is cached
   only if the recomputed identity equals the prepared one, the identity and
   epoch are still active, and the generation is unchanged. A result from an

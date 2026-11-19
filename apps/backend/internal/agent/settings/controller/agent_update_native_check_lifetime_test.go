@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -126,4 +127,43 @@ func TestNativeCheckBackgroundStopCancelsProcess(t *testing.T) {
 		t.Errorf("status after restart = %+v, want a fresh check", status)
 	}
 	requireRuns(t, h.runner, 2, "after restart")
+}
+
+// After a stop, the cancelled flight can still be unpublished when the
+// restarted owner receives a request; that request must start its own check
+// rather than join the stopped lifetime's flight.
+//
+// @covers AC-AGENTS-RUNTIME-NATIVE-CHECK-001.3
+func TestNativeCheckRestartDoesNotJoinStoppedLifetimeFlight(t *testing.T) {
+	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+	h.runner.setOutput(ompUpToDate, 0)
+	stop := startIdleRuntimeBackground(t, h.ctrl)
+	started, release := h.runner.gated()
+	paused, resume := make(chan struct{}), make(chan struct{})
+	var pausing atomic.Bool
+	pausing.Store(true)
+	h.ctrl.nativeCheckBeforePublish = func() {
+		if pausing.CompareAndSwap(true, false) {
+			close(paused)
+			<-resume
+		}
+	}
+	defer close(resume)
+	go func() { _ = listStatus(t, h.ctrl, ompAgentID) }()
+	<-started
+	stop()
+	<-paused
+	release()
+	startIdleRuntimeBackground(t, h.ctrl)
+	fresh := make(chan dto.AgentUpdateStatusDTO, 1)
+	go func() { fresh <- listStatus(t, h.ctrl, ompAgentID) }()
+	select {
+	case status := <-fresh:
+		if status.CheckState != dto.AgentUpdateCheckStateUpToDate {
+			t.Errorf("status after restart = %+v, want a fresh check", status)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("request after restart joined the stopped lifetime's unpublished flight")
+	}
+	requireRuns(t, h.runner, 2, "after restart with an unpublished stopped flight")
 }

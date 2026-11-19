@@ -39,6 +39,7 @@ type fakeNativeCheckRunner struct {
 	resolveCalls int
 	gate         chan struct{}
 	started      chan struct{}
+	envHook      func()
 }
 
 func (r *fakeNativeCheckRunner) Resolve(agents.Command) (string, error) {
@@ -53,8 +54,18 @@ func (r *fakeNativeCheckRunner) Resolve(agents.Command) (string, error) {
 
 func (r *fakeNativeCheckRunner) Environment() []string {
 	r.mu.Lock()
+	hook, env := r.envHook, slices.Clone(r.env)
+	r.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	return env
+}
+
+func (r *fakeNativeCheckRunner) setEnvironmentHook(hook func()) {
+	r.mu.Lock()
 	defer r.mu.Unlock()
-	return slices.Clone(r.env)
+	r.envHook = hook
 }
 
 func (r *fakeNativeCheckRunner) Run(ctx context.Context, _ agents.Command) nativeUpdateCheckRun {
