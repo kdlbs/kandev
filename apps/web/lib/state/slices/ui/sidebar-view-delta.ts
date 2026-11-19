@@ -6,6 +6,7 @@ export type SidebarSnapshot = {
   views: SidebarView[];
   activeViewId: string;
   draft: SidebarViewDraft | null;
+  serverRevision?: number | null;
 };
 
 function mergeViewEdit(current: SidebarView, before: SidebarView, after: SidebarView) {
@@ -63,6 +64,41 @@ function rebaseViews(current: SidebarView[], before: SidebarView[], after: Sideb
   );
 }
 
+function sameDraftOwner(left: SidebarViewDraft, right: SidebarViewDraft): boolean {
+  return left.baseViewId === right.baseViewId && left.group === right.group;
+}
+
+function rebaseSidebarDraft(
+  current: SidebarViewDraft | null,
+  before: SidebarViewDraft | null,
+  after: SidebarViewDraft | null,
+): SidebarViewDraft | null {
+  if (JSON.stringify(before) === JSON.stringify(after)) return current;
+  if (!before || !after || !sameDraftOwner(before, after)) return after;
+  if (!current || !sameDraftOwner(current, before)) return current;
+  const fields = (
+    ["filters", "sort", "sortWarningCount", "groupIndent", "taskRow"] as const
+  ).filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+  const disclosureChanged =
+    JSON.stringify(before.collapsedGroups) !== JSON.stringify(after.collapsedGroups);
+  if (!fields.length && !disclosureChanged) return current;
+  const next = Object.assign(
+    cloneDraft(current)!,
+    Object.fromEntries(fields.map((key) => [key, after[key]])),
+  );
+  if (disclosureChanged) {
+    const old = new Set(before.collapsedGroups ?? []);
+    const wanted = new Set(after.collapsedGroups ?? []);
+    next.collapsedGroups = [
+      ...new Set([
+        ...(current.collapsedGroups ?? []).filter((key) => !old.has(key) || wanted.has(key)),
+        ...(after.collapsedGroups ?? []).filter((key) => !old.has(key)),
+      ]),
+    ];
+  }
+  return next;
+}
+
 export function rebaseSidebarMutation(
   current: SidebarSnapshot,
   before: SidebarSnapshot,
@@ -72,19 +108,19 @@ export function rebaseSidebarMutation(
   let activeViewId =
     before.activeViewId !== after.activeViewId ? after.activeViewId : current.activeViewId;
   if (!views.some((view) => view.id === activeViewId)) activeViewId = views[0]?.id ?? "";
-  const draft =
-    JSON.stringify(before.draft) !== JSON.stringify(after.draft) ? after.draft : current.draft;
+  const draft = rebaseSidebarDraft(current.draft, before.draft, after.draft);
   return {
     views,
     activeViewId,
     draft: draft?.baseViewId === activeViewId ? cloneDraft(draft) : null,
+    serverRevision: current.serverRevision,
   };
 }
 
 export function sidebarViewDelta(before: SidebarView[], after: SidebarView[]) {
   const previous = new Map(before.map((view) => [view.id, view]));
   const next = new Set(after.map((view) => view.id));
-  const upserts = after
+  const changed = after
     .filter((view) => {
       const old = previous.get(view.id);
       return (
@@ -93,12 +129,18 @@ export function sidebarViewDelta(before: SidebarView[], after: SidebarView[]) {
       );
     })
     .map(toApiSidebarView);
+  const created = changed.filter((view) => !previous.has(view.id));
+  const updated = changed.filter((view) => previous.has(view.id));
   const deleted = before.filter((view) => !next.has(view.id)).map((view) => view.id);
   const order = after.map((view) => view.id);
-  const reordered =
-    before.length !== after.length || before.some((view, index) => view.id !== order[index]);
+  const naturalOrder = [
+    ...before.filter((view) => next.has(view.id)).map((view) => view.id),
+    ...after.filter((view) => !previous.has(view.id)).map((view) => view.id),
+  ];
+  const reordered = naturalOrder.some((id, index) => id !== order[index]);
   return {
-    ...(upserts.length ? { views_upsert: upserts } : {}),
+    ...(created.length ? { views_upsert: created } : {}),
+    ...(updated.length ? { views_update: updated } : {}),
     ...(deleted.length ? { view_ids_delete: deleted } : {}),
     ...(reordered ? { view_order: order } : {}),
   };

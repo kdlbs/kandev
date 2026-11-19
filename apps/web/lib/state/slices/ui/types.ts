@@ -5,6 +5,7 @@ import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import type {
   FilterClause,
   GroupKey,
+  SidebarDisclosureContext,
   SidebarSliceState,
   SidebarTaskRowPresentation,
   SidebarView,
@@ -514,7 +515,7 @@ export type UISliceActions = {
     reference: string,
     expected: string[],
     valid: string[],
-    workspaceId?: string,
+    context?: SidebarDisclosureContext,
   ) => Promise<boolean>;
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: (workspaceId?: string) => void;

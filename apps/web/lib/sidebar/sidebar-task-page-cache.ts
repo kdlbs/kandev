@@ -407,6 +407,17 @@ export class SidebarTaskPageCache {
     });
     record.cycle = cycle;
     const promise = cycle.promise
+      .then(async (page) => {
+        if (!usesSavedSidebarDisclosure(read.query)) return page;
+        const compacted = await this.reconcileDisclosure(read, page, cycle.signal);
+        if (compacted === false) {
+          throw new SidebarDisclosureSyncError(
+            this.store.getState().sidebarViewsByWorkspace[read.workspaceId]?.syncError ?? "",
+          );
+        }
+        // Probe rows remain excluded; the bounded successor owns its task read.
+        throw new DOMException("", "AbortError");
+      })
       .then(
         (page) => {
           record.exhausted = false;
@@ -438,14 +449,17 @@ export class SidebarTaskPageCache {
   ) {
     const { workspaceId, query, identity } = read;
     if (!query.disclosure_view_id || !page.grouping_keys) return;
-    this.synchronize();
-    if (
-      signal.aborted ||
-      identity.scope !== this.scope ||
-      this.store.getState().workspaces.activeId !== workspaceId ||
-      identity.groupingIdentity !== pluginRegistry.sidebarGroupingIdentity(query.group, workspaceId)
-    )
-      return;
+    const isCurrent = () => {
+      this.synchronize();
+      return (
+        !signal.aborted &&
+        identity.scope === this.scope &&
+        this.store.getState().workspaces.activeId === workspaceId &&
+        identity.groupingIdentity ===
+          pluginRegistry.sidebarGroupingIdentity(query.group, workspaceId)
+      );
+    };
+    if (!isCurrent()) return;
     return this.store
       .getState()
       .reconcileSidebarGroupDisclosure(
@@ -453,7 +467,7 @@ export class SidebarTaskPageCache {
         query.group,
         query.collapsed_group_keys,
         page.grouping_keys,
-        workspaceId,
+        { workspaceId, isCurrent },
       );
   }
 
@@ -500,17 +514,8 @@ export class SidebarTaskPageCache {
       cache: "no-store",
       init: { signal: attempt.controller.signal },
     })
-      .then(async (page) => {
-        if (savedDisclosure) {
-          const compacted = await this.reconcileDisclosure(read, page, attempt.controller.signal);
-          if (compacted === false) {
-            throw new SidebarDisclosureSyncError(
-              this.store.getState().sidebarViewsByWorkspace[workspaceId]?.syncError ?? "",
-            );
-          }
-          // The bounded successor query carries the exact client disclosure.
-          throw new DOMException("", "AbortError");
-        }
+      .then((page) => {
+        if (savedDisclosure) return page;
         const settled = this.settle(attempt, page, query, identity);
         void this.reconcileDisclosure(read, page, attempt.controller.signal);
         attempt.settled = true;

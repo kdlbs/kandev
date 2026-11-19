@@ -36,6 +36,7 @@ function draftWorkspace() {
     const views = new Map(server.views.map((view) => [view.id, view]));
     for (const id of patch.view_ids_delete ?? []) views.delete(id);
     for (const view of patch.views_upsert ?? []) views.set(view.id, view);
+    for (const view of patch.views_update ?? []) if (views.has(view.id)) views.set(view.id, view);
     server = {
       views: (patch.view_order ?? [...views.keys()]).map((id) => views.get(id)!),
       active_view_id: patch.active_view_id ?? server.active_view_id,

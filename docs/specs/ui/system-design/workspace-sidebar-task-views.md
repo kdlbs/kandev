@@ -37,8 +37,11 @@ legacy IDs may be identical in independent workspaces. Keep the map inside the
 existing users.settings JSON and revision CAS mechanism; no separate view table.
 
 The single-workspace `sidebar_view_state` PATCH requires `workspace_id`.
-Normal collection mutations use `views_upsert`, `view_ids_delete` and optional
-complete `view_order`, alongside `active_view_id` and nullable `draft`.
+Normal collection mutations use `views_upsert` for creation, `views_update`
+for existing-view edits, and `view_ids_delete`, alongside `active_view_id` and
+nullable `draft`. Updates to absent IDs are ignored rather than recreating a
+remotely deleted view. Natural order preserves surviving IDs and appends new
+ones; send a complete `view_order` only for an explicit reorder.
 Only changed views cross the wire, so ordinary copies and edits of valid
 1,000-group disclosures remain below the existing 2 MiB request cap throughout
 the 50-view collection. Explicit `views` replacement remains available but
@@ -103,11 +106,15 @@ writes. A view ID alone cannot identify an asynchronous operation. Bind open
 editor/confirmation state to its originating workspace and close on context
 change; stale callbacks must no-op after that binding changes.
 Capture each mutation's field/disclosure/order intent relative to its own
-optimistic predecessor, then rebase that intent onto the latest acknowledged
-snapshot at dispatch. A stale after-image must not delete a remotely added view
-or resurrect a remotely deleted one. Retain unacknowledged predecessor intent
-while queued successors can still persist it. Local selection/draft writes retain
-their intent-aware rollback. Queue settlement includes response projection and
+optimistic predecessor, then rebase that intent onto the latest admitted
+authoritative snapshot at dispatch. Admission is monotonic across PATCH replies
+and scoped deferred WebSocket snapshots, not only response projection. A stale
+after-image must not delete a remotely added view or resurrect a remotely
+deleted one. Retain unacknowledged predecessor intent while queued successors
+can still persist it. Draft edits merge changed fields and disclosure separately
+for the same base/group; an unrelated presentation edit cannot replay keys
+discarded by acknowledged compaction. Local selection/draft writes retain their
+intent-aware rollback. Queue settlement includes response projection and
 rollback; scoped disclosure recovery awaits that completion without binding to
 a successor active workspace.
 

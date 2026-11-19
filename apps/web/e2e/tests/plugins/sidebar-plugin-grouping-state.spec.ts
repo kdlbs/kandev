@@ -391,7 +391,7 @@ test("failed retired-disclosure cleanup offers Retry without an automatic write 
       request.request().method() === "PATCH"
         ? request.request().postDataJSON()?.sidebar_view_state
         : null;
-    if (patch?.views_upsert?.some((view: { id: string }) => view.id === "complete-plugin-view")) {
+    if (patch?.views_update?.some((view: { id: string }) => view.id === "complete-plugin-view")) {
       writes++;
       if (fail) {
         await request.fulfill({

@@ -36,6 +36,7 @@ it("persists an ordinary generated view and reuses only its unchanged identity a
     const views = new Map(current.views.map((view) => [view.id, view]));
     for (const id of patch.view_ids_delete ?? []) views.delete(id);
     for (const view of patch.views_upsert ?? []) views.set(view.id, view);
+    for (const view of patch.views_update ?? []) if (views.has(view.id)) views.set(view.id, view);
     workspaces[patch.workspace_id] = {
       views: (patch.view_order ?? [...views.keys()]).map((id) => views.get(id)!),
       active_view_id: patch.active_view_id ?? current.active_view_id,

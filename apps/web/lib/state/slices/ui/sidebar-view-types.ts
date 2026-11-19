@@ -103,3 +103,8 @@ export type SidebarViewDraft = {
   collapsedGroups?: string[];
   taskRow?: SidebarTaskRowPresentation;
 };
+
+export type SidebarDisclosureContext = {
+  workspaceId?: string;
+  isCurrent?: () => boolean;
+};

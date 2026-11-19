@@ -82,6 +82,8 @@ it("a queued successor persists earlier unsaved intent against the acknowledged 
     .mockImplementation(async (payload) => {
       const patch = payload.sidebar_view_state!;
       for (const view of patch.views_upsert ?? []) persisted.set(view.id, view);
+      for (const view of patch.views_update ?? [])
+        if (persisted.has(view.id)) persisted.set(view.id, view);
       const order = patch.view_order ?? [...persisted.keys()];
       const views = order.map((id) => {
         const view = persisted.get(id);
@@ -137,6 +139,8 @@ it.each(["add", "delete"])(
       const patch = payload.sidebar_view_state!;
       for (const id of patch.view_ids_delete ?? []) persisted.delete(id);
       for (const view of patch.views_upsert ?? []) persisted.set(view.id, view);
+      for (const view of patch.views_update ?? [])
+        if (persisted.has(view.id)) persisted.set(view.id, view);
       if (patch.active_view_id) active = patch.active_view_id;
       return acknowledge();
     };
@@ -192,6 +196,8 @@ it("does not replay a discarded failed creation on a later unrelated edit", asyn
     .mockImplementation(async (payload) => {
       for (const view of payload.sidebar_view_state?.views_upsert ?? [])
         persisted.set(view.id, view);
+      for (const view of payload.sidebar_view_state?.views_update ?? [])
+        if (persisted.has(view.id)) persisted.set(view.id, view);
       return {
         settings: {
           sidebar_views_by_workspace: {

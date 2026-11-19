@@ -18,6 +18,10 @@ import type {
   WorkflowAgentOverrides,
   Repository,
 } from "../../lib/types/http";
+import type {
+  SidebarWorkspaceStateApi,
+  UserSettingsResponse,
+} from "../../lib/types/http-user-settings";
 import type { RetryPolicy } from "../../lib/types/automation";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
 import type {
@@ -1501,10 +1505,8 @@ export class ApiClient {
 
   async getUserSettings(): Promise<{
     settings: {
-      sidebar_views_by_workspace: Record<
-        string,
-        { views: Array<Record<string, unknown>>; active_view_id: string; draft: unknown }
-      >;
+      sidebar_views_by_workspace: Record<string, SidebarWorkspaceStateApi>;
+      sidebar_task_prefs?: UserSettingsResponse["settings"]["sidebar_task_prefs"];
       workspace_id?: string;
       workflow_filter_id?: string;
       terminal_link_behavior?: string;
@@ -1571,6 +1573,10 @@ export class ApiClient {
     sidebar_view_state?: {
       workspace_id: string;
       views?: unknown[];
+      views_upsert?: unknown[];
+      views_update?: unknown[];
+      view_ids_delete?: string[];
+      view_order?: string[];
       active_view_id?: string;
       draft?: unknown;
     };

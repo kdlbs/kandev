@@ -218,6 +218,14 @@ error. Missing provider identity remains saved, and successful reactivation
 requeries it. Access denial clears visible/retained data. Error messages are
 localized, sanitized and exclude plugin response bodies and credentials.
 
+Saved-disclosure compaction carries the probe's workspace/provider/owner and
+expected-key fence through journal dispatch. Invalidating a provider while a
+prune waits behind another write retires that prune without saving or adopting
+its rows. The metadata read has the ordinary bounded read deadline; an admitted
+compaction write is awaited outside automatic read retries. Its terminal
+failure preserves preferences and requires manual Retry, including when the
+write outlasts the metadata-read deadline.
+
 ## Tags implementation and compatibility
 
 Extend the real Tags plugin with a declared read-only grouping action over its
@@ -242,10 +250,11 @@ legacy migration, inactive/deleted filtering or duplicate normalization; more
 than 10,000 fails explicitly. Typed inactive rows and valid empty arrays remain
 valid, and reads never rewrite shared state.
 
-Names legitimately written with interior controls remain readable. Tag labels
-escape both controls and literal backslashes reversibly; Multi-tag quotes each
-original name once. Catalog IDs and shared state are unchanged. Apply real
-encoded label bounds only to emitted labels; malformed definitions still fail closed.
+Names legitimately written with controls remain readable, using the writer's
+blank-name semantics, including a U+0085-only name. Tag labels escape both
+controls and literal backslashes reversibly; Multi-tag quotes each original
+name once. Catalog IDs and shared state are unchanged. Apply real encoded label
+bounds only to emitted labels; malformed definitions still fail closed.
 
 The manifest exposes the new entry only for this action. Old hosts either
 reject the newer minimum host requirement at install or keep using their old

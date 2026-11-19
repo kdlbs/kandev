@@ -372,17 +372,23 @@ disclosure without increasing the request cap. The web client reconciles those
 keys through its saved-view journal before admitting a bounded successor page.
 
 Saved-view edits use the scoped `sidebar_view_state` object on
-`PATCH /api/v1/user/settings`: `views_upsert`, `view_ids_delete` and optional
-complete `view_order` mutate one `workspace_id` under the normal settings revision
-CAS. Do not mix those mutations with `views` replacement. Active view and draft
-remain scoped to the same collection. The 50-view and 2 MiB request limits remain.
+`PATCH /api/v1/user/settings`. `views_upsert` creates or intentionally replaces
+views; `views_update` edits existing IDs only and never recreates a deleted view.
+`view_ids_delete` removes IDs. Surviving views keep their order and new views
+append; send a complete `view_order` only for an explicit reorder. These mutate
+one `workspace_id` under the normal settings revision CAS. Do not mix delta
+fields with `views` replacement. Active view and draft remain scoped to the
+same collection. The 50-view and 2 MiB request limits remain.
 
 For a draft whose grouping differs from its base view, optional draft
 `collapsed_groups` stores that preview's disclosure independently. Omitting it
 starts the different grouping expanded; a same-group draft uses its base view.
-Saved-disclosure recovery also resolves the matching draft. A failed cleanup
-write retains saved preferences and offers manual Retry; its probe page is never
-admitted as task data.
+Saved-disclosure recovery also resolves the matching draft. The client checks
+the captured workspace, provider identity, owner and expected disclosure again
+when queued compaction is admitted. Draft edits merge only changed fields and
+disclosure intent onto the latest acknowledged state. A failed cleanup write
+retains saved preferences and offers manual Retry; the metadata-read deadline
+does not retry an admitted settings write. The probe page is never task data.
 
 
 Complete plugin groupings use `group: "plugin:<plugin-id>:<grouping-id>"`.

@@ -437,3 +437,82 @@ Round-4 runtime proof:
 - Evidence remains under `~/.cache/sidebar-multi-tag-build/evidence/r4-*`.
   Historical broad gates remain non-green or unproven; no physical-phone,
   PostgreSQL, remote-CI, publication or deployment certification is added.
+
+### Post-rebase round 5 corrections
+
+The fifth post-rebase review reported seven findings. The independent source
+streak remains zero pending review of the corrected commits.
+
+- Journal admission is monotonic across scoped deferred WebSocket snapshots
+  and delayed HTTP ACKs. Normal edits use update-only deltas, so even an unseen
+  concurrent deletion cannot be undone by a queued disclosure write.
+- Draft mutations rebase only their changed fields and disclosure intent for
+  the same base/group. A presentation edit cannot restore keys discarded by
+  acknowledged compaction or replace independently acknowledged draft fields.
+- Queued compaction rechecks the captured workspace/provider fence, owner and
+  expected disclosure immediately before dispatch. A retired probe is a no-op,
+  not a stale settings write or save error.
+- Metadata-read deadlines and automatic retries do not surround admitted
+  settings writes. A slow rejected compaction remains a terminal manual Retry;
+  the saved disclosure is intact and probe rows remain excluded.
+- Ordinary append/delete deltas use natural survivor-plus-append ordering.
+  Only an explicit reorder supplies a complete collection order, preserving
+  independently added views under the existing revision CAS and transport caps.
+- Projection shares the writer's blank-name semantics. A legitimately created
+  U+0085-only tag is escaped and classified in both modes without read-side
+  writes, while malformed storage and encoded output limits remain enforced.
+- Every public SDK consumer checks pending managed setup, including an explicit
+  SDK override. Only the owning compatibility compile can read its reservation;
+  successful validation admits later builds and packages at the requested pin.
+
+Behavioral REDs preceded each correction. Four permanent native journal cases
+also failed against the retained round-4 production build: deleted-view
+resurrection, independent append/delete conflicts, and replay of 6,000 retired
+draft keys. The source fixtures exercise the exact deferred-WS, queued-provider
+invalidation and 11-second rejected-write schedules; native tests exercise real
+HTTP revision/CAS and visible saved-view behavior, not mocked app state.
+
+Focused formatting and lint checks also constrained the implementation: journal
+snapshot/admission helpers own a separate module, disclosure carries one context
+object, and the backend update-only loop is extracted without extra allocation.
+The expanded E2E typecheck exposed two errors at unchanged fixture lines also
+present in the frozen upstream base (duplicate settings property and undeclared
+Window flag). Those are not silently removed from verification or represented
+as a green broad gate.
+
+Round-5 final verification and runtime proof:
+
+- Final focused frontend tests: 86/86 in 11 files. Production/unit scoped
+  typecheck and affected ESLint with zero warnings pass. Backend Sidebar race
+  checks pass for models/service/handlers; the extracted service helper also
+  passes its final race check and affected Go lint reports zero issues.
+- Fresh absent-destination setup fetched and compiled the pinned compatible
+  SDK. Plugin fmt/test/vet and race targets pass, including 204 UI cases and
+  five setup cases. Public pending-consumer checks include SDK overrides.
+- The first corrected desktop build passed 20/20. After the final lint-driven
+  refactors, native journal/workspace acceptance passed 5/5 and phone acceptance
+  passed 9/9 with touch emulation. One prior phone command selected incorrect
+  filenames and ran no tests; the corrected `mobile-*` paths produced the 9/9
+  receipt. No product correction or retry setting hid that command failure.
+- The final real 0.20.0 package has SHA-256
+  `d77d9abdf6f76bd9b815507b483931c787077c94ebcad5d217edf85aae306c8f`.
+  Native upload returned HTTP 201 and Active in a fresh owned cache-drive
+  runtime on loopback 55937. The driver exited zero with 88 mixed assertion,
+  screenshot and narrative records, not 88 independent tests.
+- Real-package proof covers 103 canonical tasks/119 occurrences, complete
+  repeated trees, saved reuse/copy/reload/workspace separation, live mutation,
+  explicit overflow with independent Tag availability, settled recovery,
+  disable/enable, single-page counts, and 320/393-pixel touch pagination.
+  A normally created/applied U+0085-only name classifies and has readable
+  desktop/phone headings in both modes. Native journal and real-package PNGs
+  were inspected, including the visible Page 2 and settled recovery.
+- The owned runtime was stopped; OWNER and open-file checks preceded removal
+  of its state/profile. Driver, launcher and typecheck inputs remain as data in
+  `~/.cache/sidebar-multi-tag-build/evidence/r5-smoke-evidence.json` and
+  `r5-typecheck-configs.json`; throwaway executable scripts were removed.
+  Demo 52121, its mirror, 59390 and primary instances were untouched.
+
+The expanded E2E typecheck and historical broad gates remain non-green or
+unproven. No PostgreSQL, physical-phone, remote-CI, release, deployment or
+user-demo upgrade certification is added. Independent source review remains
+open, with clean streak 0/3.

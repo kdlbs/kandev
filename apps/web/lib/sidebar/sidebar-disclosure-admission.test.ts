@@ -1,0 +1,174 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { workspaceId } from "@/lib/types/ids";
+import { createAppStore } from "@/lib/state/store";
+import { createDefaultSidebarView } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { toApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
+import { querySidebarTasks } from "@/lib/api/domains/kanban-api";
+import { updateUserSettings } from "@/lib/api/domains/settings-api";
+import { ApiError } from "@/lib/api/client";
+import type { UserSettingsResponse } from "@/lib/types/http-user-settings";
+import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http";
+import { pluginRegistry } from "@/lib/plugins/registry";
+import { SidebarTaskPageCache } from "./sidebar-task-page-cache";
+import { sidebarTaskQueryError } from "./sidebar-task-query-error";
+
+vi.mock("@/lib/api/domains/kanban-api", () => ({ querySidebarTasks: vi.fn() }));
+vi.mock("@/lib/api/domains/settings-api", () => ({ updateUserSettings: vi.fn() }));
+afterEach(() => {
+  vi.resetAllMocks();
+  vi.useRealTimers();
+  pluginRegistry.setSidebarGroupings([]);
+});
+
+function disclosureFixture() {
+  const reference = "plugin:acme:labels" as const;
+  const keep = `plugin-group:${"f".repeat(64)}`;
+  const keys = [
+    ...Array.from({ length: 6000 }, (_, i) => `plugin-group:${i.toString(16).padStart(64, "0")}`),
+    keep,
+  ];
+  const view = {
+    ...createDefaultSidebarView("saved", "Saved"),
+    group: reference,
+    collapsedGroups: keys,
+  };
+  const store = createAppStore({
+    workspaces: { items: [], activeId: "ws" },
+    sidebarViewsByWorkspace: {
+      ws: { views: [view], activeViewId: view.id, draft: null, syncError: null },
+    },
+  });
+  pluginRegistry.setSidebarGroupings([{ reference, label: "Labels", generation: "g1" }]);
+  const query: SidebarTaskQuery = {
+    group: reference,
+    disclosure_view_id: view.id,
+    collapsed_group_keys: keys,
+    collapsed_task_ids: [],
+    filters: [],
+    sort: { key: "title", direction: "asc" },
+    page: 1,
+    page_size: 100,
+    locale: "en",
+  };
+  const metadata = (valid: string[]): SidebarTaskPageResponse => ({
+    query_key: "probe",
+    page: 1,
+    page_size: 100,
+    total_entries: 0,
+    total_tasks: 0,
+    total_visible_tasks: 0,
+    has_next: false,
+    has_previous: false,
+    grouping_generation: "g1",
+    grouping_revision: "r1",
+    grouping_keys: valid,
+    entries: [],
+  });
+  return {
+    store,
+    reference,
+    keep,
+    keys,
+    view,
+    query,
+    metadata,
+    cache: new SidebarTaskPageCache(store),
+  };
+}
+
+it.each([false, true])(
+  "admits queued compaction only for its current provider: invalidated=%s",
+  async (invalidated) => {
+    const f = disclosureFixture();
+    let persisted = toApiSidebarView(f.view);
+    let revision = 0;
+    const acknowledge = (): UserSettingsResponse => ({
+      settings: {
+        user_id: "default-user",
+        workspace_id: workspaceId("ws"),
+        repository_ids: [],
+        updated_at: "",
+        revision: ++revision,
+        sidebar_views_by_workspace: {
+          ws: { views: [structuredClone(persisted)], active_view_id: f.view.id, draft: null },
+        },
+      },
+    });
+    const rename = Promise.withResolvers<UserSettingsResponse>();
+    let renameAck: UserSettingsResponse | undefined;
+    vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
+      for (const view of payload.sidebar_view_state?.views_update ?? []) persisted = view;
+      if (!renameAck) {
+        renameAck = acknowledge();
+        return rename.promise;
+      }
+      return acknowledge();
+    });
+    const response = Promise.withResolvers<SidebarTaskPageResponse>();
+    vi.mocked(querySidebarTasks).mockReturnValueOnce(response.promise);
+    const reconcile = f.store.getState().reconcileSidebarGroupDisclosure;
+    const observed = vi.fn((...args: Parameters<typeof reconcile>) => reconcile(...args));
+    f.store.setState({ reconcileSidebarGroupDisclosure: observed });
+    const read = f.cache.request("ws", f.query, "old-provider");
+    const outcome = read.promise.catch((error: unknown) => error);
+    try {
+      await vi.waitFor(() => expect(querySidebarTasks).toHaveBeenCalledTimes(1));
+      f.store.getState().renameSidebarView(f.view.id, "Renamed");
+      response.resolve(f.metadata([]));
+      await vi.waitFor(() => expect(observed).toHaveBeenCalledTimes(1));
+      if (invalidated) pluginRegistry.invalidateSidebarGroupings("acme", "ws");
+      rename.resolve(renameAck!);
+      await expect(outcome).resolves.toMatchObject({ name: "AbortError" });
+      await f.store.getState().waitForSidebarViewSync("ws");
+      expect(persisted.collapsed_groups).toEqual(invalidated ? f.keys : []);
+      expect(f.cache.get("old-provider")).toBeNull();
+      if (invalidated) {
+        vi.mocked(querySidebarTasks).mockResolvedValueOnce(f.metadata([f.keep]));
+        const current = f.cache.request("ws", f.query, "current-provider");
+        await expect(current.promise).rejects.toMatchObject({ name: "AbortError" });
+        current.release();
+        expect(persisted.collapsed_groups).toEqual([f.keep]);
+      }
+    } finally {
+      rename.resolve(renameAck!);
+      read.release();
+      f.cache.clear();
+    }
+  },
+);
+
+it("a compaction rejected after the metadata deadline requires manual Retry", async () => {
+  vi.useFakeTimers();
+  const f = disclosureFixture();
+  vi.mocked(querySidebarTasks).mockResolvedValue(f.metadata([f.keep]));
+  const write = Promise.withResolvers<UserSettingsResponse>();
+  vi.mocked(updateUserSettings)
+    .mockReturnValueOnce(write.promise)
+    .mockResolvedValue({ settings: {} } as UserSettingsResponse);
+  const read = f.cache.request("ws", f.query, "slow-compaction");
+  const outcome = read.promise.catch((error: unknown) => error);
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(updateUserSettings).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(11_000);
+    write.reject(new ApiError("Settings unavailable", 503, {}));
+    await vi.advanceTimersByTimeAsync(5_000);
+    const error = await outcome;
+    expect(updateUserSettings).toHaveBeenCalledTimes(1);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(1);
+    expect(sidebarTaskQueryError(error, false, ((key: string) => key) as never).canRetry).toBe(
+      true,
+    );
+    expect(f.store.getState().sidebarViewsByWorkspace.ws.views[0].collapsedGroups).toEqual(f.keys);
+    const retry = f.cache.request("ws", f.query, "slow-compaction", { manualRetry: true });
+    await expect(retry.promise).rejects.toMatchObject({ name: "AbortError" });
+    retry.release();
+    expect(updateUserSettings).toHaveBeenCalledTimes(2);
+    expect(f.store.getState().sidebarViewsByWorkspace.ws.views[0].collapsedGroups).toEqual([
+      f.keep,
+    ]);
+  } finally {
+    read.release();
+    f.cache.clear();
+  }
+});
