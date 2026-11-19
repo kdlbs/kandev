@@ -134,6 +134,9 @@ func ompUpdateCheckContext() NativeUpdateCheckContext {
 		EnvKeys: []string{
 			"OMP_PROFILE", "PI_PROFILE", "PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "PI_CONFIG_FILES",
 			envHome, envXDGConfigHome, "npm_config_userconfig", "npm_config_registry", "BUN_CONFIG_REGISTRY",
+			// Install-method classification (update-cli.ts getMiseDataDir and
+			// resolveUpdateTarget) chooses npm metadata or the build service.
+			"MISE_DATA_DIR", envXDGDataHome, "LOCALAPPDATA", "BUN_INSTALL_GLOBAL_DIR",
 		},
 		Sources: ompUpdateCheckSources,
 	}
@@ -156,6 +159,12 @@ func ompUpdateCheckSources(r NativeUpdateCheckResolver) NativeUpdateCheckSources
 	files = append(files, ompConfigOverlays(r)...)
 	if r.Executable != "" {
 		files = append(files, filepath.Join(filepath.Dir(filepath.Dir(r.Executable)), "manager.json"))
+	}
+	if r.Launcher != "" {
+		// Upstream bunShimMarkerPath: bun's `<name>.bunx` sidecar marks a
+		// bun-owned launcher.
+		name := strings.TrimSuffix(filepath.Base(r.Launcher), filepath.Ext(r.Launcher))
+		files = append(files, filepath.Join(filepath.Dir(r.Launcher), name+".bunx"))
 	}
 	if userconfig, ok := r.GetenvFold("npm_config_userconfig"); ok && userconfig != "" {
 		files = append(files, r.absolute(userconfig))

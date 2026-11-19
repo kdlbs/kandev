@@ -93,7 +93,7 @@ func writeDirFingerprint(digest hash.Hash, dir NativeUpdateCheckDir) {
 // listDirFiles returns the sorted non-directory entries selected by dir.Match.
 // It stops reading once the entry limit is exceeded.
 func listDirFiles(dir NativeUpdateCheckDir) ([]string, bool) {
-	handle, err := os.Open(dir.Path)
+	handle, err := openFingerprintDir(dir.Path)
 	if err != nil {
 		return nil, false
 	}

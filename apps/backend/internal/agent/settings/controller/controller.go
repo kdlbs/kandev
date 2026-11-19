@@ -110,9 +110,9 @@ type Controller struct {
 	runtimeUpdateStatusFlight   singleflight.Group
 	nativeUpdateCheckRunner     nativeUpdateCheckRunner
 	nativeUpdateCheckGeneration map[string]uint64
-	// nativeUpdateCheckActive is each agent's current native cache key; a
-	// different identity evicts the agent's other entries.
-	nativeUpdateCheckActive    map[string]string
+	// nativeUpdateCheckActive is each agent's current native identity and
+	// epoch; a different identity evicts the agent's other entries.
+	nativeUpdateCheckActive    map[string]nativeActiveIdentity
 	nativeCheckLifetime        *nativeCheckLifetime
 	runtimeAutoUpdateStore     *managedruntime.AutoUpdateStore
 	runtimeUpdateNotifier      RuntimeUpdateNotifier

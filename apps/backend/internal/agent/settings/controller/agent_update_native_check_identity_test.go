@@ -1,10 +1,12 @@
 package controller
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
@@ -102,4 +104,52 @@ func TestNativeCheckReturnToPriorIdentityRechecks(t *testing.T) {
 	if native != 1 {
 		t.Errorf("native cache entries = %d, want only the active identity", native)
 	}
+}
+
+// A request that returns to identity A while the first A check is still in
+// flight must start a new check rather than join it, and the stale A result
+// must not fill the cache.
+func TestNativeCheckReturnToIdentityWhileInFlightStartsNewCheck(t *testing.T) {
+	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+	h.runner.queue(ompUpToDate, ompUpToDate, ompCanaryAvailable)
+	started, release := h.runner.gated()
+	results := make(chan dto.AgentUpdateStatusDTO, 3)
+	request := func() {
+		go func() {
+			resp, err := h.ctrl.ListAgentUpdateStatuses(context.Background())
+			if err != nil || len(resp.Statuses) != 1 {
+				results <- dto.AgentUpdateStatusDTO{}
+				return
+			}
+			results <- resp.Statuses[0]
+		}()
+	}
+	awaitStart := func(step string) {
+		t.Helper()
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+			release()
+			t.Fatalf("%s did not start its own check", step)
+		}
+	}
+	npmrc := filepath.Join(h.home, ".npmrc")
+	request()
+	awaitStart("first A")
+	writeNativeCheckFile(t, npmrc, "registry=https://registry.invalid/\n")
+	request()
+	awaitStart("B")
+	if err := os.Remove(npmrc); err != nil {
+		t.Fatal(err)
+	}
+	request()
+	awaitStart("returning A")
+	release()
+	for range 3 {
+		<-results
+	}
+	if status := h.status(t, ompAgentID); status.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
+		t.Errorf("cached status = %+v; want the returning A check's result, not the stale first A", status)
+	}
+	requireRuns(t, h.runner, 3, "after A, B, and a returning A")
 }

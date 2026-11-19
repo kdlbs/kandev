@@ -97,13 +97,18 @@ pins this list to that commit.
 
 These cases take effect no later than when the cache entry expires: edits to
 configuration files at a location chosen only through a dotenv value,
-environment values interpolated into `.npmrc`, and inputs that upstream adds
-after the pinned commit.
+environment values interpolated into `.npmrc`, output of the package-manager
+probes upstream runs to classify the install method (`bun pm bin -g`,
+`npm prefix -g`, `brew --prefix`, `mise bin-paths`), and inputs that upstream
+adds after the pinned commit.
 
 - `EnvKeys`: `OMP_PROFILE`, `PI_PROFILE`, `PI_CODING_AGENT_DIR`,
   `PI_CONFIG_DIR`, `PI_CONFIG_FILES`, `HOME`, `XDG_CONFIG_HOME`,
-  `npm_config_userconfig`, `npm_config_registry`, and `BUN_CONFIG_REGISTRY`.
-  Any change to these values changes the key.
+  `npm_config_userconfig`, `npm_config_registry`, `BUN_CONFIG_REGISTRY`, and
+  the install-method selectors `MISE_DATA_DIR`, `XDG_DATA_HOME`,
+  `LOCALAPPDATA`, and `BUN_INSTALL_GLOBAL_DIR` (upstream `getMiseDataDir` and
+  `resolveUpdateTarget`, which choose between npm metadata and the build
+  service). Any change to these values changes the key.
 - Channel settings: the profile is `OMP_PROFILE` when that variable is
   defined, even if it is empty, and otherwise `PI_PROFILE`. After trimming, an
   empty or `default` value selects the default profile. The base root is
@@ -136,7 +141,11 @@ after the pinned commit.
     directory's modification time records file creation and removal, and the
     known candidates remain individually fingerprinted.
 - Installation ownership: `<dir(dir(realpath(executable)))>/manager.json`,
-  which is the manifest that `managedInstallName` reads before any lookup.
+  which is the manifest that `managedInstallName` reads before any lookup,
+  and bun's `<launcherDir>/<name>.bunx` ownership marker (upstream
+  `bunShimMarkerPath`). The resolver's `Launcher` is the PATH-resolved path
+  before symlinks are evaluated. The cache key includes both `Launcher` and
+  the real `Executable`.
 - Release feed: `$npm_config_userconfig` or `$HOME/.npmrc`,
   `$XDG_CONFIG_HOME/.bunfig.toml`, and `$HOME/.bunfig.toml`.
 - Startup dotenv files: `$HOME/.env`, `<root>/.env` (the active profile
@@ -336,16 +345,23 @@ Invalidation:
 - Because the key includes the resolved path, runtime version, and context
   fingerprint, a change to any of them misses the cache.
 - Each agent has one active identity, `nativeUpdateCheckActive[agentName]`.
-  When a status or preview lookup computes a different key, the agent's other
-  native entries are evicted and the new key becomes active. Returning to an
-  earlier identity, for example by creating and then removing a file before
-  the TTL expires, therefore runs a new check. The cache holds at most one
-  native entry per agent.
+  It holds the identity (generation, argv, launcher, real executable, runtime
+  version, and fingerprint) and an epoch. When a status or preview lookup
+  computes a different identity, the agent's other native entries are
+  evicted, the epoch increases, and the new identity becomes active. The
+  cache and single-flight key is the identity plus its epoch. Returning to an
+  earlier identity therefore uses a new key and starts a new check. It does
+  not reuse a cached result or join a check still in flight for the earlier
+  occurrence. The cache holds at most one native entry per agent.
 - After a check finishes, the identity is recomputed. The result is cached
-  only if the recomputed key equals the prepared key, the key is still the
-  active one, and the generation is unchanged. A result from an executable or
-  configuration that changed during the slot wait or the run is returned to
-  its waiting subscribers but never cached.
+  only if the recomputed identity equals the prepared one, the identity and
+  epoch are still active, and the generation is unchanged. A result from an
+  executable or configuration that changed during the slot wait or the run is
+  returned to its waiting subscribers but never cached.
+- Project directories are opened with `openFingerprintDir`. On Unix it uses
+  `O_DIRECTORY|O_NONBLOCK`, so a FIFO or other non-directory, including one
+  reached through a symlink, is rejected without blocking. On Windows it
+  checks the type before opening.
 - `InvalidateNativeUpdateCheck(agentName)` increments
   `nativeUpdateCheckGeneration[agentName]` under `runtimeUpdateStatusMu` and
   removes that agent's native cache entries. A native lookup records its

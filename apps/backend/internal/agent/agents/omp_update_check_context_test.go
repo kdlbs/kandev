@@ -14,10 +14,35 @@ func TestOmpUpdateCheckContextDeclaresUpstreamEnvKeys(t *testing.T) {
 	want := []string{
 		"OMP_PROFILE", "PI_PROFILE", "PI_CODING_AGENT_DIR", "PI_CONFIG_DIR", "PI_CONFIG_FILES",
 		"HOME", "XDG_CONFIG_HOME", "npm_config_userconfig", "npm_config_registry", "BUN_CONFIG_REGISTRY",
+		"MISE_DATA_DIR", "XDG_DATA_HOME", "LOCALAPPDATA", "BUN_INSTALL_GLOBAL_DIR",
 	}
 	got := NewOmpACP().NativeUpdateCheck().Context.EnvKeys
 	if !slices.Equal(got, want) {
 		t.Errorf("EnvKeys = %v, want %v", got, want)
+	}
+}
+
+// Upstream classifies the install method from MISE_DATA_DIR (with its
+// LOCALAPPDATA/XDG_DATA_HOME fallbacks), BUN_INSTALL_GLOBAL_DIR, and the
+// launcher's `<name>.bunx` marker; each selects a different release source.
+func TestOmpUpdateCheckContextFingerprintTracksInstallMethodSelectors(t *testing.T) {
+	f := newOmpContextFixture(t)
+	declared := NewOmpACP().NativeUpdateCheck().Context
+	launcher := filepath.Join(f.root, "shims", "omp")
+	resolver := NativeUpdateCheckResolver{WorkingDir: f.cwd, HomeDir: f.home, Executable: f.exe, Launcher: launcher}
+	base := declared.Fingerprint(resolver)
+	for _, entry := range []string{
+		"MISE_DATA_DIR=" + f.root, "XDG_DATA_HOME=" + f.root, "LOCALAPPDATA=" + f.root, "BUN_INSTALL_GLOBAL_DIR=" + f.root,
+	} {
+		changed := resolver
+		changed.Env = []string{entry}
+		if declared.Fingerprint(changed) == base {
+			t.Errorf("%s did not change the fingerprint", entry)
+		}
+	}
+	writeTestFile(t, filepath.Join(f.root, "shims", "omp.bunx"), "marker")
+	if declared.Fingerprint(resolver) == base {
+		t.Error("creating the launcher's .bunx ownership marker did not change the fingerprint")
 	}
 }
 

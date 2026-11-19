@@ -10,6 +10,7 @@ import (
 const (
 	envHome          = "HOME"
 	envXDGConfigHome = "XDG_CONFIG_HOME"
+	envXDGDataHome   = "XDG_DATA_HOME"
 )
 
 // NativeUpdateCheckState is the single outcome of one native update check.
@@ -57,12 +58,14 @@ type NativeUpdateCheckResult struct {
 
 // NativeUpdateCheckResolver supplies the inputs a context declaration may use
 // to locate configuration. Env is the check process environment ("KEY=value"
-// entries); Executable is the resolved check executable with symlinks
-// evaluated, or empty when it could not be resolved.
+// entries); Launcher is the executable path as resolved from PATH; Executable
+// is that path with symlinks evaluated. Both are empty when the executable
+// could not be resolved.
 type NativeUpdateCheckResolver struct {
 	Env        []string
 	WorkingDir string
 	HomeDir    string
+	Launcher   string
 	Executable string
 }
 
@@ -70,7 +73,7 @@ type NativeUpdateCheckResolver struct {
 // environment, the way the checker's own runtime does, and evaluates
 // executable symlinks so ownership manifests are found beside the real binary.
 func NewNativeUpdateCheckResolver(env []string, workingDir, executable string) NativeUpdateCheckResolver {
-	resolver := NativeUpdateCheckResolver{Env: env, WorkingDir: workingDir, Executable: executable}
+	resolver := NativeUpdateCheckResolver{Env: env, WorkingDir: workingDir, Launcher: executable, Executable: executable}
 	homeKey, lookup := envHome, resolver.Getenv
 	if runtime.GOOS == osWindows {
 		homeKey, lookup = "USERPROFILE", resolver.GetenvFold

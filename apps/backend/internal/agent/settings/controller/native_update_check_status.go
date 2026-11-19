@@ -104,7 +104,7 @@ func (c *Controller) SetNativeUpdateCheckRunner(runner nativeUpdateCheckRunner) 
 	defer c.runtimeUpdateStatusMu.Unlock()
 	c.nativeUpdateCheckRunner = runner
 	c.runtimeUpdateStatusCache = make(map[string]runtimeUpdateStatusCacheEntry)
-	c.nativeUpdateCheckActive = nil
+	// Active identities are kept so their epochs stay monotonic.
 }
 
 func (c *Controller) nativeRunner() nativeUpdateCheckRunner {
@@ -180,30 +180,48 @@ type nativeUpdateCheckLookup struct {
 	agentName      string
 	currentVersion string
 	executable     string
+	identity       string
 	key            string
 	generation     uint64
 	spec           agents.NativeUpdateCheckSpec
 }
 
+// nativeActiveIdentity is an agent's current native identity and the epoch at
+// which it became current. The epoch increases on every identity change, so a
+// return to an earlier identity gets a new cache and single-flight key.
+type nativeActiveIdentity struct {
+	identity string
+	epoch    uint64
+}
+
+func (a nativeActiveIdentity) key() string {
+	return a.identity + "\x00e" + strconv.FormatUint(a.epoch, 10)
+}
+
 // prepareNativeUpdateCheck computes the cache identity without starting a
 // process and makes it the agent's active identity. Switching identity evicts
-// the agent's other entries, so returning to an earlier identity rechecks.
+// the agent's other entries and advances its epoch, so returning to an
+// earlier identity rechecks instead of reusing or joining an older check.
 func (c *Controller) prepareNativeUpdateCheck(agentName, currentVersion string, spec agents.NativeUpdateCheckSpec) nativeUpdateCheckLookup {
 	lookup := c.nativeUpdateCheckIdentity(agentName, currentVersion, spec)
 	c.runtimeUpdateStatusMu.Lock()
 	defer c.runtimeUpdateStatusMu.Unlock()
-	if c.nativeUpdateCheckActive[agentName] != lookup.key {
+	active := c.nativeUpdateCheckActive[agentName]
+	if active.identity != lookup.identity {
 		c.deleteNativeEntriesLocked(nativeUpdateCheckKeyPrefix(agentName))
+		active = nativeActiveIdentity{identity: lookup.identity, epoch: active.epoch + 1}
 		if c.nativeUpdateCheckActive == nil {
-			c.nativeUpdateCheckActive = make(map[string]string)
+			c.nativeUpdateCheckActive = make(map[string]nativeActiveIdentity)
 		}
-		c.nativeUpdateCheckActive[agentName] = lookup.key
+		c.nativeUpdateCheckActive[agentName] = active
 	}
+	lookup.key = active.key()
 	return lookup
 }
 
-// nativeUpdateCheckIdentity resolves the executable, runtime version,
-// generation, and update configuration fingerprint into one cache key.
+// nativeUpdateCheckIdentity resolves the launcher and real executable,
+// runtime version, generation, and update configuration fingerprint into one
+// identity. The cache key adds the agent's identity epoch.
 func (c *Controller) nativeUpdateCheckIdentity(agentName, currentVersion string, spec agents.NativeUpdateCheckSpec) nativeUpdateCheckLookup {
 	runner := c.nativeRunner()
 	executable, err := runner.Resolve(spec.Command)
@@ -219,7 +237,8 @@ func (c *Controller) nativeUpdateCheckIdentity(agentName, currentVersion string,
 	return nativeUpdateCheckLookup{
 		agentName: agentName, currentVersion: currentVersion, executable: executable,
 		generation: generation, spec: spec,
-		key: nativeUpdateCheckCacheKey(agentName, generation, spec.Command.Args(), resolver.Executable, currentVersion, fingerprint),
+		identity: nativeUpdateCheckCacheKey(agentName, generation, spec.Command.Args(),
+			resolver.Launcher, resolver.Executable, currentVersion, fingerprint),
 	}
 }
 
@@ -227,11 +246,11 @@ func nativeUpdateCheckKeyPrefix(agentName string) string {
 	return "native\x00" + agentName + "\x00"
 }
 
-func nativeUpdateCheckCacheKey(agentName string, generation uint64, argv []string, executable, version, fingerprint string) string {
-	parts := make([]string, 0, len(argv)+4)
+func nativeUpdateCheckCacheKey(agentName string, generation uint64, argv []string, launcher, executable, version, fingerprint string) string {
+	parts := make([]string, 0, len(argv)+5)
 	parts = append(parts, strconv.FormatUint(generation, 10), strconv.Itoa(len(argv)))
 	parts = append(parts, argv...)
-	parts = append(parts, executable, version, fingerprint)
+	parts = append(parts, launcher, executable, version, fingerprint)
 	return nativeUpdateCheckKeyPrefix(agentName) + strings.Join(parts, "\x00")
 }
 
@@ -289,7 +308,7 @@ func (c *Controller) executeNativeUpdateCheck(ctx context.Context, lookup native
 	}
 	// A result whose executable or configuration changed during the wait or
 	// the run describes another identity and is returned without caching.
-	if c.nativeUpdateCheckIdentity(lookup.agentName, lookup.currentVersion, lookup.spec).key == lookup.key {
+	if c.nativeUpdateCheckIdentity(lookup.agentName, lookup.currentVersion, lookup.spec).identity == lookup.identity {
 		c.storeNativeUpdateCheckEntry(lookup, entry)
 	}
 	return entry
@@ -364,7 +383,7 @@ func (c *Controller) storeNativeUpdateCheckEntry(lookup nativeUpdateCheckLookup,
 	c.runtimeUpdateStatusMu.Lock()
 	defer c.runtimeUpdateStatusMu.Unlock()
 	if c.nativeUpdateCheckGeneration[lookup.agentName] != lookup.generation ||
-		c.nativeUpdateCheckActive[lookup.agentName] != lookup.key {
+		c.nativeUpdateCheckActive[lookup.agentName].key() != lookup.key {
 		return
 	}
 	if c.runtimeUpdateStatusCache == nil {
