@@ -440,6 +440,18 @@ describe("AgentRuntimeUpdateManager native update check rows", () => {
     expect(screen.getByTestId("runtime-update-channel-omp-acp").textContent).toContain("canary");
   });
 
+  it("shows the check-reported installed version when the runtime has not reported one", () => {
+    const text = renderNativeRow(
+      nativeStatus({
+        effective_version: "",
+        current_version: "18.13.3",
+        check_state: "update_available",
+        latest_version: "18.22.0-canary.3",
+      }),
+    );
+    expect(text).toContain("18.13.3 → 18.22.0-canary.3");
+  });
+
   it("omits the channel when the check does not report one", () => {
     render(
       <Harness

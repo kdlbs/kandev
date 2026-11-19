@@ -293,8 +293,22 @@ func (c *Controller) nativeUpdateCheckIdentity(agentName, currentVersion string,
 		agentName: agentName, currentVersion: currentVersion, executable: executable,
 		realExecutable: resolver.Executable, generation: generation, spec: spec,
 		identity: nativeUpdateCheckCacheKey(agentName, generation, spec.Command.Args(),
-			resolver.Launcher, resolver.Executable, currentVersion, fingerprint),
+			resolver.Launcher, resolver.Executable+"\x00"+nativeExecutableStat(resolver.Executable), currentVersion, fingerprint),
 	}
+}
+
+// nativeExecutableStat identifies the executable file's content without
+// reading it: size, modification time, and mode. A same-path replacement,
+// as OMP's own updater performs, changes it.
+func nativeExecutableStat(path string) string {
+	if path == "" {
+		return ""
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "absent"
+	}
+	return strconv.FormatInt(info.Size(), 10) + ":" + strconv.FormatInt(info.ModTime().UnixNano(), 10) + ":" + info.Mode().String()
 }
 
 func nativeUpdateCheckKeyPrefix(agentName string) string {

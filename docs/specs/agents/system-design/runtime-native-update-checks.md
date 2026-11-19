@@ -273,8 +273,10 @@ ACP reports a version, any disagreement with the check is already handled as
 
 Invalidation:
 
-- Because the key includes the resolved path, runtime version, and context
-  fingerprint, a change to any of them misses the cache.
+- Because the key includes the resolved path, the executable file's size,
+  modification time, and mode (`nativeExecutableStat`), the runtime version,
+  and the context fingerprint, a change to any of them misses the cache. This
+  covers a same-path replacement, as OMP's own updater performs.
 - Each agent has one active identity, `nativeUpdateCheckActive[agentName]`.
   It holds the identity (generation, argv, launcher, real executable, runtime
   version, and fingerprint) and an epoch. When a status or preview lookup
@@ -384,7 +386,10 @@ closed backend set. Unknown values fall back to the existing unknown copy.
 - `RuntimeOverviewRow` in `agent-runtime-update-rows.tsx` keeps its version
   line and grouping. When `update_channel` is present, it adds a muted channel
   label. `rowDescription` maps `check_reason` to a reason-specific locale key
-  before falling back to `agents:runtimeCheckUnknown`.
+  before falling back to `agents:runtimeCheckUnknown`. When
+  `effective_version` is empty, the row displays the check-reported
+  `current_version` for native rows. This is display only: approval and
+  classification still use `effective_version`.
 - `RuntimeVersionSummary` renders the self-update branch for
   `check_source === "native"` without `agent-update-stable-reference-*`. It
   shows the installed version, then one native result line with test ID

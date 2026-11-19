@@ -288,3 +288,23 @@ func TestNativeCheckLaunchTimeRealExecutableMustMatch(t *testing.T) {
 	}
 	requireRuns(t, h.runner, 2, "after a launch-time symlink retarget")
 }
+
+// OMP's own updater replaces a standalone executable at the same path. That
+// replacement changes the resolved executable and must trigger a new check.
+func TestNativeCheckSamePathExecutableReplacementRechecks(t *testing.T) {
+	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+	binary := filepath.Join(h.home, "install", "bin", "omp")
+	writeNativeCheckFile(t, binary, "old binary")
+	h.runner.setPath(binary)
+	h.runner.queue(ompCanaryAvailable, ompUpToDate)
+	_ = h.status(t, ompAgentID)
+	replacement := binary + ".new"
+	writeNativeCheckFile(t, replacement, "a different, longer binary")
+	if err := os.Rename(replacement, binary); err != nil {
+		t.Fatal(err)
+	}
+	if status := h.status(t, ompAgentID); status.CheckState != dto.AgentUpdateCheckStateUpToDate {
+		t.Errorf("status after replacing the executable = %+v; the old result was reused", status)
+	}
+	requireRuns(t, h.runner, 2, "after a same-path executable replacement")
+}

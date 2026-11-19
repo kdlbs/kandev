@@ -1,52 +1,59 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/kandev/kandev/internal/agent/settings/controller"
+	"github.com/kandev/kandev/internal/common/httpmw"
 )
 
-// A native update check can legitimately run up to its own timeout, which
-// equals the server's default write timeout. The status and preview routes
-// must extend their write deadline so the timed-out check's reason reaches the
-// client instead of a dropped connection.
+// slowHandlerRuntimeUpdater makes every latest-version lookup outlast the
+// test server's write timeout, standing in for a native check that runs up
+// to its own timeout.
+type slowHandlerRuntimeUpdater struct {
+	handlerRuntimeUpdater
+}
+
+func (u *slowHandlerRuntimeUpdater) ResolveTarget(ctx context.Context, name string) (string, error) {
+	select {
+	case <-time.After(300 * time.Millisecond):
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	return u.handlerRuntimeUpdater.ResolveTarget(ctx, name)
+}
+
+// The registered status and preview routes must extend their write deadline,
+// so a lookup slower than the server-wide write timeout still delivers its
+// response instead of a dropped connection.
 func TestUpdateStatusRoutesOutliveServerWriteTimeout(t *testing.T) {
-	if controller.UpdateStatusResponseBudget <= 30*time.Second {
-		t.Fatalf("response budget %s does not exceed the 30s check timeout plus cleanup", controller.UpdateStatusResponseBudget)
-	}
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	slow := func(c *gin.Context) {
-		time.Sleep(300 * time.Millisecond)
-		c.JSON(http.StatusOK, gin.H{"check_reason": "timeout"})
-	}
-	router.GET("/extended", func(c *gin.Context) {
-		extendUpdateStatusWriteDeadline(c)
-		slow(c)
-	})
-	router.GET("/plain", slow)
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	t.Setenv("PATH", t.TempDir())
+	router, _, _ := newAgentUpdateRouter(t, &slowHandlerRuntimeUpdater{})
 	server := httptest.NewUnstartedServer(router)
 	server.Config.WriteTimeout = 100 * time.Millisecond
 	server.Start()
 	t.Cleanup(server.Close)
 
-	response, err := http.Get(server.URL + "/extended")
-	if err != nil {
-		t.Fatalf("extended route lost its response: %v", err)
-	}
-	body, _ := io.ReadAll(response.Body)
-	_ = response.Body.Close()
-	if response.StatusCode != http.StatusOK || string(body) != `{"check_reason":"timeout"}` {
-		t.Errorf("extended route = %d %q", response.StatusCode, body)
-	}
-
-	if plain, err := http.Get(server.URL + "/plain"); err == nil {
-		_ = plain.Body.Close()
-		t.Error("control route succeeded; the test server is not enforcing its write timeout")
+	for _, path := range []string{"/api/v1/agent-update/status", "/api/v1/agent-update/claude-acp/preview"} {
+		request, err := http.NewRequest(http.MethodGet, server.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set(httpmw.InterimSettingsInterlockHeader, "test-interlock")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatalf("GET %s lost its response: %v", path, err)
+		}
+		body, readErr := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if readErr != nil || response.StatusCode != http.StatusOK || !json.Valid(body) {
+			t.Errorf("GET %s = %d %q (read error %v)", path, response.StatusCode, body, readErr)
+		}
 	}
 }

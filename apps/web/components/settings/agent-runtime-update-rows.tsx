@@ -184,12 +184,16 @@ function RuntimeOverviewRow({
   const { t } = useTranslation();
   const { status } = row;
   const description = rowDescription(row);
+  // A native check can report the installed version before the runtime does;
+  // it is display-only and never changes effective_version.
+  const installed =
+    status.effective_version ||
+    (status.check_source === "native" ? status.current_version : "") ||
+    t("agents:runtimeUnknown");
   const versions =
     status.check_state === "update_available"
-      ? `${status.effective_version || t("agents:runtimeUnknown")} → ${status.latest_version || t("agents:runtimeUnknown")}`
-      : t("agents:runtimeEffectiveShort", {
-          version: status.effective_version || t("agents:runtimeUnknown"),
-        });
+      ? `${installed} → ${status.latest_version || t("agents:runtimeUnknown")}`
+      : t("agents:runtimeEffectiveShort", { version: installed });
   return (
     <li
       className="flex min-w-0 flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between"
