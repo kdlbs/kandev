@@ -33,6 +33,8 @@ installation ownership, and release feed. The sources are
 `packages/coding-agent/src/cli/npm-registry.ts`, and
 `packages/coding-agent/src/cli/build-service.ts`. Kandev resolves source paths
 from the check's process environment only and does not parse dotenv files.
+When the home variable is unset or empty, the home directory is the
+effective account's home (`user.Current`), matching Node `os.homedir()`.
 The working directory is the backend's physical directory (symlinks
 evaluated), matching OMP's `process.cwd()`.
 The dotenv files that upstream loads at startup are fingerprinted themselves,

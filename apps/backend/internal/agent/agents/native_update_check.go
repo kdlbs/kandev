@@ -2,6 +2,7 @@ package agents
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -80,8 +81,8 @@ func NewNativeUpdateCheckResolver(env []string, workingDir, executable string) N
 	}
 	if home, ok := lookup(homeKey); ok && home != "" {
 		resolver.HomeDir = home
-	} else if home, err := os.UserHomeDir(); err == nil {
-		resolver.HomeDir = home
+	} else {
+		resolver.HomeDir = accountHomeDir()
 	}
 	if executable != "" {
 		if real, err := filepath.EvalSymlinks(executable); err == nil {
@@ -89,6 +90,18 @@ func NewNativeUpdateCheckResolver(env []string, workingDir, executable string) N
 		}
 	}
 	return resolver
+}
+
+// accountHomeDir mirrors Node's os.homedir() fallback when the home variable
+// is unset or empty: the effective account's home from the user database.
+func accountHomeDir() string {
+	if account, err := user.Current(); err == nil && account.HomeDir != "" {
+		return account.HomeDir
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return home
+	}
+	return ""
 }
 
 // Getenv returns the last exact match for key, matching process semantics.

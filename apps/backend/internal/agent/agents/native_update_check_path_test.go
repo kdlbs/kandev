@@ -2,6 +2,7 @@ package agents
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -55,5 +56,24 @@ func TestOmpFingerprintFollowsNpmUserconfigThroughSymlink(t *testing.T) {
 	writeTestFile(t, actual, "registry=https://a-longer-registry.invalid/\n")
 	if declared.Fingerprint(resolver) == before {
 		t.Error("editing the npmrc OMP actually reads did not change the fingerprint")
+	}
+}
+
+// OMP takes its configuration root from os.homedir(), which falls back to the
+// effective account's home when HOME is unset or empty. The resolver must
+// use that home rather than a working-directory-relative path.
+func TestNativeUpdateCheckResolverFallsBackToAccountHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX account home lookup")
+	}
+	account, err := user.Current()
+	if err != nil || account.HomeDir == "" {
+		t.Skip("no account home available")
+	}
+	t.Setenv("HOME", "")
+	for _, env := range [][]string{nil, {"HOME="}} {
+		if got := NewNativeUpdateCheckResolver(env, t.TempDir(), "").HomeDir; got != account.HomeDir {
+			t.Errorf("env %q: HomeDir = %q, want account home %q", env, got, account.HomeDir)
+		}
 	}
 }
