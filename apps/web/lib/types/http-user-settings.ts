@@ -334,6 +334,9 @@ export type UserSettingsUpdatePayload = {
   sidebar_view_state?: {
     workspace_id: string;
     views?: SidebarViewApi[];
+    views_upsert?: SidebarViewApi[];
+    view_ids_delete?: string[];
+    view_order?: string[];
     active_view_id?: string;
     draft?: SidebarViewDraftApi | null;
   };

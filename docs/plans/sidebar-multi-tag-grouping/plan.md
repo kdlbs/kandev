@@ -137,6 +137,15 @@ E2Es passed. The separate plan and source Sol review gates each reached
 three consecutive clean rounds. See the work order Results for exact source,
 archive and retained evidence; historical broad gates remain non-green.
 
+The later post-rebase review gate remains open. Round 3's eight findings now
+have corrections and regressions; see the work order's corrective receipt.
+Rebuilt desktop acceptance passed 11 cases, then the final rebuilt three
+boundary cases and four phone cases passed after lint cleanup. Fresh real
+0.20.0 installation, desktop and 320/393 touch smoke passed, including readable
+control names and a different-group draft. This does not advance the source
+clean streak; Sol round 4 reviews the corrected commits independently.
+
+
 ## Risks
 
 - Exponential growth is intentional; ten tags already exceed the existing value

@@ -363,6 +363,21 @@ When a view is not covered by current workspace data, the web sidebar reads one 
 
 The route is read-only. It rejects unknown request fields and limits the request body to 256 KiB. Clients must not send pin, manual ordering, or subtask-order preferences in the query; the server reads those from the authenticated user's settings. The existing workspace task-list route remains available for its other callers.
 
+Complete plugin groupings also return their `grouping_revision`,
+`grouping_generation` and complete `grouping_keys`. With empty inline collapse
+keys, `disclosure_view_id` resolves disclosure from that authenticated user's
+saved view in the requested workspace. The server intersects it with the full
+provider snapshot, not the current page. This supports recovery of retired
+disclosure without increasing the request cap. The web client reconciles those
+keys through its saved-view journal before admitting a bounded successor page.
+
+Saved-view edits use the scoped `sidebar_view_state` object on
+`PATCH /api/v1/user/settings`: `views_upsert`, `view_ids_delete` and optional
+complete `view_order` mutate one `workspace_id` under the normal settings revision
+CAS. Do not mix those mutations with `views` replacement. Active view and draft
+remain scoped to the same collection. The 50-view and 2 MiB request limits remain.
+
+
 Complete plugin groupings use `group: "plugin:<plugin-id>:<grouping-id>"`.
 These always use the server query, even when the browser has complete resident
 task coverage. The server authorizes the workspace before invoking the provider;

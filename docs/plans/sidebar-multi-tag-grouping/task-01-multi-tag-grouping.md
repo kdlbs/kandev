@@ -286,3 +286,79 @@ are updated. Native unrelated-plugin page-two and collapse-below-limit coverage
 is included in the desktop grouping scenario. Final corrective verification,
 artifact provenance and commit/push receipts are recorded in the platform task
 plan after their commands complete. No release or user-demo upgrade is authorized.
+
+### Post-rebase round 3 corrections
+
+The third post-rebase Sol review reported eight findings. Its clean streak
+remains zero pending a new independent review of the corrected commits.
+
+- Workspace access is renewed after the provider RPC, immediately before the
+  task repository read. A real member-removal barrier regression preserves the
+  typed denial and has a retained-membership control.
+- Catalog and resolver checks capture the committed record and scoped epoch
+  together. Projection and RPCs run outside the commit guard; pending failed
+  status writes cannot publish or reject provisional identities.
+- Responses carry the complete provider `grouping_keys`, not only page keys.
+  Ordinary queries retain exact client disclosure. Oversized retired disclosure
+  waits for its captured workspace journal and reads saved preferences only to
+  recover complete metadata. That recovery page is discarded; reconciliation
+  preserves surviving keys and a bounded successor performs the real read.
+  A different-group draft starts expanded without modifying its base view.
+- Normal saved-view writes send `views_upsert`, `view_ids_delete` and `view_order`
+  under the existing workspace CAS. Queued deltas use the last acknowledged
+  server snapshot, so a failed earlier write cannot silently lose later intent.
+  Neither the 256 KiB query cap nor the 2 MiB settings cap was raised.
+- Shift ranges are sliced in rendered occurrence order before canonical task-ID
+  deduplication. Selected origins survive anchor realignment and partial bulk
+  failures. Row/menu callbacks bind their occurrence without changing canonical
+  actions or selected styling.
+- Existing typed tag names containing controls get deterministic readable
+  sidebar escaping, without ID changes or read-side writes. Both real actions
+  retain their label, snapshot and malformed-input bounds.
+- Fresh SDK setup reserves the destination exclusively before fetching. Failure
+  removes only its owned reservation; concurrent and late explicit destinations
+  cannot receive nested checkouts or succeed against the wrong pin.
+- The browser authoring contract now agrees on the unreleased 0.103.0 floor.
+  The development SDK/package-tool pin is
+  `Fclem/kandev@1154f0ff1771aef71091b8f7457ada905e97af3b`; no release is authorized.
+
+Targeted final frontend regressions passed 152 tests in 15 files. Scoped
+production typecheck and affected-file lint passed. Plugin Go/vet/race, 204 UI
+tests and three real Git setup regressions passed. Targeted host race checks and
+SQLite plugin grouping regressions passed. Native boundary checks and the fresh
+real-package receipt are recorded below after execution; these targeted passes
+do not certify the historical broad backend/web failures.
+
+Final native verification passed desktop 11/11, then a fresh rebuild passed
+the three new disclosure/copy/range boundary cases and phone 4/4. Frontend lint
+cleanup was followed by 22 affected disclosure tests, a clean scoped production
+typecheck and zero-warning affected frontend lint. Changed Go lint reports zero
+issues; final handler/user race checks also passed after validation extraction.
+Specification validation and all 55 published docs pages passed.
+
+The fresh 0.20.0 archive has SHA-256
+`b5e85ea8803f352dcdea5c15e8b535c96d95ec440dd777b461bfdeb8c3975ada`.
+Native upload returned HTTP 201 and active status in an owned cache-drive
+runtime on loopback 55931. Its cleared environment selected the mock profile
+and separate HOME/state/database; no primary credentials or user data were used.
+The driver completed with exit zero: complete powersets and repeated trees,
+103 unique tasks/119 occurrences, normal saved-view reuse/copy/reload,
+workspace separation, mutation, overflow/independent Tag availability and
+settled recovery, disable/enable, single-page totals, and touch paging at
+320/393 pixels. A separate workspace verified a human-created interior-tab
+name through both actions, desktop preview/Save as and phone selectors.
+
+Desktop control-name and settled-recovery PNGs and the 320-pixel Page 2 and
+control-name PNGs were inspected. The 77 evidence records include screenshots
+and narrative, not 77 independent assertions. Driver and launcher source are
+retained as data in `~/.cache/sidebar-multi-tag-build/evidence/r3-smoke-evidence.json`
+alongside raw logs, results and PNGs. The owned runtime was stopped, checked
+for open files, and its marked state removed. A separate absent-destination
+SDK setup fetched the exact development pin and compiled the plugin successfully.
+Demo 52121, its separate mirror, 59390 and primary instances were untouched.
+
+No broad backend/web/SQLite Sidebar, PostgreSQL-without-DSN, physical-phone or
+remote-CI certification is inferred. The earlier long desktop stall remains
+unexplained and native MaxListeners warnings remain unsuppressed. No release,
+deployment or user-demo upgrade is authorized.
+

@@ -508,6 +508,14 @@ export type UISliceActions = {
   duplicateSidebarView: (viewId: string, name: string) => void;
   reorderSidebarViews: (activeViewId: string, overViewId: string) => void;
   toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
+  waitForSidebarViewSync: (workspaceId: string) => Promise<void>;
+  reconcileSidebarGroupDisclosure: (
+    viewId: string,
+    reference: string,
+    expected: string[],
+    valid: string[],
+    workspaceId?: string,
+  ) => void;
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: (workspaceId?: string) => void;
   setThreadActiveView: (viewId: string) => void;

@@ -12,6 +12,7 @@ import {
 } from "./sidebar-task-page-recovery";
 
 import { pluginRegistry } from "@/lib/plugins/registry";
+import { usesSavedSidebarDisclosure } from "./sidebar-disclosure-query";
 const MAX_PAGES = 5;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_AGE_MS = 5 * 60 * 1000;
@@ -443,8 +444,51 @@ export class SidebarTaskPageCache {
     return promise;
   }
 
-  private runAttempt(read: SidebarPageRead, signal: AbortSignal): Promise<SidebarTaskPageResponse> {
+  private reconcileDisclosure(
+    read: SidebarPageRead,
+    page: SidebarTaskPageResponse,
+    signal: AbortSignal,
+  ) {
+    const { workspaceId, query, identity } = read;
+    if (!query.disclosure_view_id || !page.grouping_keys) return;
+    this.synchronize();
+    if (
+      signal.aborted ||
+      identity.scope !== this.scope ||
+      this.store.getState().workspaces.activeId !== workspaceId ||
+      identity.groupingIdentity !== pluginRegistry.sidebarGroupingIdentity(query.group, workspaceId)
+    )
+      return;
+    this.store
+      .getState()
+      .reconcileSidebarGroupDisclosure(
+        query.disclosure_view_id,
+        query.group,
+        query.collapsed_group_keys,
+        page.grouping_keys,
+        workspaceId,
+      );
+  }
+
+  private async runAttempt(
+    read: SidebarPageRead,
+    signal: AbortSignal,
+  ): Promise<SidebarTaskPageResponse> {
     const { workspaceId, query, requestKey, identity } = read;
+    const savedDisclosure = usesSavedSidebarDisclosure(query);
+    if (savedDisclosure) {
+      await this.store.getState().waitForSidebarViewSync(workspaceId);
+      this.synchronize();
+      if (
+        signal.aborted ||
+        identity.scope !== this.scope ||
+        this.store.getState().workspaces.activeId !== workspaceId ||
+        identity.groupingIdentity !==
+          pluginRegistry.sidebarGroupingIdentity(query.group, workspaceId)
+      ) {
+        throw new DOMException("", "AbortError");
+      }
+    }
     const attempt: ReadAttempt = {
       controller: new AbortController(),
       owner: `sidebar:read:${generateUUID()}`,
@@ -470,7 +514,13 @@ export class SidebarTaskPageCache {
       init: { signal: attempt.controller.signal },
     })
       .then((page) => {
+        if (savedDisclosure) {
+          this.reconcileDisclosure(read, page, attempt.controller.signal);
+          // The bounded successor query carries the exact client disclosure.
+          throw new DOMException("", "AbortError");
+        }
         const settled = this.settle(attempt, page, query, identity);
+        this.reconcileDisclosure(read, page, attempt.controller.signal);
         attempt.settled = true;
         if (record) {
           if (record.retainedOwner && record.retainedOwner !== attempt.owner) {

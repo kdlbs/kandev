@@ -248,6 +248,17 @@ Implementation and the requested review loop are complete; the historical broad
 backend/web gates remain non-green. No physical-phone, remote-CI, release or
 deployment certification is claimed. The user retains the Test-step transition.
 
+## Post-rebase round 3 checkpoint
+
+The subsequent post-rebase review gate is separate from the historical closure
+above. Round 3 reported eight findings; corrections and failing-first coverage
+are recorded in [the Multi-tag work order](../sidebar-multi-tag-grouping/task-01-multi-tag-grouping.md#post-rebase-round-3-corrections).
+Complete provider identities now reconcile disclosure, normal saved-view writes
+use bounded CAS deltas, and selection ranges retain rendered occurrence identity.
+Post-RPC workspace authorization and committed record/epoch captures fence reads.
+The new review streak remains zero pending independent review of these changes.
+
+
 ## Risks
 
 - Group/task occurrence keys must not collide in virtual lists or tree actions.

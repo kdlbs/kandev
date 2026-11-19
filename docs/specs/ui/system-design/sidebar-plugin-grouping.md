@@ -106,8 +106,22 @@ localized metadata at render time; saved names follow normal user view-name
 semantics. Collapsed value identity is `plugin-group:` plus SHA-256 of the
 complete provider reference, a NUL delimiter (forbidden in references), and the
 opaque value ID. Labels are excluded, so rename/recolor preserves disclosure.
-This fixed-size unreleased format keeps every valid snapshot's disclosure below
-the existing 256 KiB query cap. Untagged retains a separate reference namespace.
+Each complete snapshot has at most 1,000 compact value keys plus Untagged.
+Normal reads carry the exact client disclosure inline. A view with accumulated
+retired keys can recover using `disclosure_view_id` instead of transmitting its
+oversized array. The authenticated settings reader resolves that personal view
+only within the requested workspace; a draft with a different grouping starts
+expanded. The service intersects its disclosure with the complete verified
+provider snapshot, not the current page, and returns `grouping_keys`.
+
+The client waits for its captured workspace journal before that recovery read.
+It admits only the complete keys, not that read's task page: current
+store/workspace/provider/view/expected-disclosure fences guard reconciliation
+through the ordinary settings journal. The bounded successor read again carries
+the exact client keys inline. This avoids turning a concurrent settings change
+into task rows cached under another disclosure. Valid surviving keys remain
+collapsed; retired and duplicate keys are removed. Neither the 256 KiB query
+limit nor the 2 MiB settings request limit is raised.
 Save as retains independent collapsed-group keys when its draft keeps the
 base view's grouping; a different grouping starts expanded. Duplicate clones
 the source disclosure so expanding a copy never expands its source.
@@ -135,9 +149,11 @@ and off-page parent context retain their existing meanings.
 count visible task occurrences, explicitly labeled in pagination copy when
 multi-group duplication exists. Page/entry DTOs carry optional group color,
 source revision and provider generation across Go/TS/HTTP and boot projection.
-React keys and virtual row IDs must use provider/group/task occurrence identity; task actions,
-selection and routes continue to use the canonical task ID. Tree expansion and
-manual child preferences remain task-scoped; group collapse stays group-scoped.
+React keys and virtual row IDs use provider/group/task occurrence identity;
+selection styling and task actions continue to use canonical task IDs. Shift
+ranges locate both endpoints by rendered group/task occurrence and deduplicate
+canonical IDs only after slicing that span. Tree expansion and manual child
+preferences remain task-scoped; group collapse stays group-scoped.
 
 Do not feed plugin queries into the current complete-local-scope optimization
 until it can prove the same complete, current snapshot revision and ordering.
@@ -219,6 +235,11 @@ not empty classification. Both v1 and v2 count every raw application before
 legacy migration, inactive/deleted filtering or duplicate normalization; more
 than 10,000 fails explicitly. Typed inactive rows and valid empty arrays remain
 valid, and reads never rewrite shared state.
+
+Names legitimately written with interior control characters remain readable:
+sidebar labels escape those characters deterministically without changing
+catalog IDs or rewriting shared state. Apply the real encoded label bound after
+escaping; malformed identity/type/shape data still fails closed.
 
 The manifest exposes the new entry only for this action. Old hosts either
 reject the newer minimum host requirement at install or keep using their old

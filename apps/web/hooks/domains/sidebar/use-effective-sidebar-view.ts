@@ -22,6 +22,7 @@ export function useEffectiveSidebarView(workspaceId?: string | null) {
       sort: d.sort,
       group: d.group,
       groupIndent: d.groupIndent,
+      collapsedGroups: d.group === active.group ? active.collapsedGroups : [],
       taskRow: cloneSidebarTaskRowPresentation(d.taskRow ?? active.taskRow),
     };
   }, [sidebarSlice.views, sidebarSlice.activeViewId, sidebarSlice.draft]);

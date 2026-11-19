@@ -36,15 +36,19 @@ using existing view/draft models. Identity is `(user_id, workspace_id, view_id)`
 legacy IDs may be identical in independent workspaces. Keep the map inside the
 existing users.settings JSON and revision CAS mechanism; no separate view table.
 
-Add a single-workspace `sidebar_view_state` PATCH object containing a required
-`workspace_id` and optional `views`, `active_view_id`, and nullable `draft`.
-Omitted fields stay unchanged; explicit null clears only draft; an empty view
-array normalizes through `DefaultSidebarViews`. Validate active/draft references
-against that entry and enforce the existing 50-view bound per entry. Each CAS
-retry re-reads settings, replaces only the target map entry, and preserves other
-entries and unrelated settings. Clone maps and nested data rather than mutating
-references: the existing shallow-before/DeepEqual change detector depends on it.
-Do not expose replacement of the entire map through PATCH.
+The single-workspace `sidebar_view_state` PATCH requires `workspace_id`.
+Normal collection mutations use `views_upsert`, `view_ids_delete` and optional
+complete `view_order`, alongside `active_view_id` and nullable `draft`.
+Only changed views cross the wire, so ordinary copies and edits of valid
+1,000-group disclosures remain below the existing 2 MiB request cap throughout
+the 50-view collection. Explicit `views` replacement remains available but
+cannot be mixed with delta fields. Omitted fields stay unchanged; null clears
+only draft; an empty replacement normalizes through `DefaultSidebarViews`.
+Validate active/draft references, duplicate/conflicting mutations, complete
+ordering and the existing 50-view bound atomically in the existing revision CAS.
+Each retry merges only the target entry and preserves other entries/unrelated
+settings. Clone maps and nested data rather than mutating references; the
+shallow-before/DeepEqual detector depends on it. Do not PATCH the entire map.
 
 Wire a narrow workspace-access dependency into `internal/user/service` from
 `internal/backendapp/services.go`, backed by the existing authorized workspace
@@ -98,6 +102,12 @@ payloads, queues, journals and rollback. Use per-workspace journals and queued
 writes. A view ID alone cannot identify an asynchronous operation. Bind open
 editor/confirmation state to its originating workspace and close on context
 change; stale callbacks must no-op after that binding changes.
+Build each queued view delta against the last acknowledged server snapshot at
+dispatch time, not a prior optimistic view. A successor therefore includes
+unsaved earlier intent after an earlier request fails. Local selection/draft
+writes retain their existing intent-aware rollback. Queue settlement includes
+response projection and rollback; scoped disclosure recovery can await that
+completion without binding to a successor active workspace.
 
 ## Failure handling
 

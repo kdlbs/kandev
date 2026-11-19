@@ -33,7 +33,7 @@ vi.mock("@/hooks/domains/sidebar/use-sidebar-task-prefs", () => ({
 }));
 
 import { groupSidebarTaskPage, useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
-import { flattenVisibleTaskIds } from "@/lib/sidebar/apply-view";
+import { flattenVisibleSidebarTasks } from "@/lib/sidebar/visible-task-order";
 
 const WORKFLOW_A = "Workflow A";
 const WORKFLOW_A_ID = "wf-a";
@@ -229,8 +229,16 @@ it("keeps repeated plugin trees independent while selecting canonical tasks once
     expect(group.tasks.map((task) => task.id)).toEqual([PARENT_ID]);
     expect(group.subTasksByParentId?.get(PARENT_ID)?.map((task) => task.id)).toEqual([CHILD_ID]);
   }
-  expect(flattenVisibleTaskIds(grouped, [], [])).toEqual([PARENT_ID, CHILD_ID]);
-  expect(flattenVisibleTaskIds(grouped, [], [PARENT_ID])).toEqual([PARENT_ID]);
+  const visible = flattenVisibleSidebarTasks(grouped, [], []);
+  expect(visible.taskIds).toEqual([PARENT_ID, CHILD_ID]);
+  expect(visible.occurrences.map((row) => row.taskId)).toEqual([
+    PARENT_ID,
+    CHILD_ID,
+    PARENT_ID,
+    CHILD_ID,
+  ]);
+  expect(new Set(visible.occurrences.map((row) => row.key)).size).toBe(4);
+  expect(flattenVisibleSidebarTasks(grouped, [], [PARENT_ID]).taskIds).toEqual([PARENT_ID]);
   expect(parent.subtaskCount).toBeUndefined();
 });
 

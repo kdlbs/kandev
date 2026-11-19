@@ -12,6 +12,7 @@ import type { SidebarTaskQuery } from "@/lib/types/http";
 import { sidebarSortToWire } from "@/lib/sidebar/sidebar-sort-chain";
 
 import { usePluginRegistry } from "@/lib/plugins/registry";
+import { isSidebarPluginGrouping } from "@/lib/sidebar/sidebar-plugin-grouping";
 const PAGE_SIZE = 100;
 function buildSidebarQuery(
   view: ReturnType<typeof useEffectiveSidebarView>,
@@ -24,6 +25,7 @@ function buildSidebarQuery(
     sort: sidebarSortToWire(view.sort),
     group: view.group,
     collapsed_group_keys: view.collapsedGroups,
+    ...(isSidebarPluginGrouping(view.group) ? { disclosure_view_id: view.id } : {}),
     collapsed_task_ids: collapsedTaskIDs,
     page,
     page_size: PAGE_SIZE,

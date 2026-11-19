@@ -119,12 +119,10 @@ describe("createSidebarView semantics", () => {
     expect(updateUserSettings).toHaveBeenCalledWith({
       sidebar_view_state: {
         workspace_id: "ws",
-        views: [
-          expect.objectContaining({ id: "custom", name: "Custom" }),
-          expect.objectContaining({ id: "new-1", name: "New view" }),
-          expect.objectContaining({ id: "new-3", name: "New view 3" }),
+        views_upsert: [
           expect.objectContaining({ id: createdId, name: "New view 2", group: "repository" }),
         ],
+        view_order: ["custom", "new-1", "new-3", createdId],
         active_view_id: createdId,
         draft: null,
       },
@@ -191,7 +189,7 @@ describe("copied sidebar view disclosure", () => {
             sidebar_view_state: expect.objectContaining({
               workspace_id: "ws",
               active_view_id: copied.id,
-              views: expect.arrayContaining([
+              views_upsert: expect.arrayContaining([
                 expect.objectContaining({ id: copied.id, group, collapsed_groups: [collapsed] }),
               ]),
             }),

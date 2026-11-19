@@ -576,35 +576,6 @@ export function countGroupTasks(
 }
 
 /**
- * Flatten the grouped sidebar tree into the exact top-to-bottom order of the
- * task rows the user currently sees, honoring collapsed groups and collapsed
- * subtask parents. This is the ordered list shift-click range selection walks.
- */
-export function flattenVisibleTaskIds(
-  grouped: GroupedSidebarList,
-  collapsedGroupKeys: string[],
-  collapsedSubtaskParentIds: string[],
-): string[] {
-  const collapsedGroups = new Set(collapsedGroupKeys);
-  const collapsedSubs = new Set(collapsedSubtaskParentIds);
-  const out: string[] = [];
-  const emitted = new Set<string>();
-  const visit = (task: TaskSwitcherItem, children: Map<string, TaskSwitcherItem[]>) => {
-    if (!emitted.has(task.id)) out.push(task.id);
-    emitted.add(task.id);
-    if (collapsedSubs.has(task.id)) return;
-    const subs = children.get(task.id);
-    if (subs) for (const sub of subs) visit(sub, children);
-  };
-  for (const group of grouped.groups) {
-    if (collapsedGroups.has(group.key)) continue;
-    for (const task of group.tasks)
-      visit(task, group.subTasksByParentId ?? grouped.subTasksByParentId);
-  }
-  return out;
-}
-
-/**
  * Order `ids` by their position in the rendered `visibleTaskIds` list. Used
  * before bulk moves so a backward range selection (anchor after target, which
  * leaves the selection Set in insertion rather than visible order) still lands

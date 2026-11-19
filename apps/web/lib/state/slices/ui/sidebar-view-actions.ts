@@ -5,7 +5,9 @@ import type { UserSettingsUpdatePayload } from "@/lib/types/http-user-settings";
 import type { UISlice, UISliceState } from "./types";
 import type { FilterClause, GroupKey, SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 import { cloneSidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
-import { toApiSidebarDraft, toApiSidebarView } from "./sidebar-view-wire";
+import { toApiSidebarDraft } from "./sidebar-view-wire";
+import { sidebarViewDelta } from "./sidebar-view-delta";
+import { cloneView, cloneDraft } from "./sidebar-view-clone";
 import { createDefaultSidebarView, MAX_SIDEBAR_VIEWS } from "./sidebar-view-builtins";
 import { t } from "@/lib/i18n";
 import {
@@ -64,6 +66,8 @@ type SidebarSnapshot = {
 
 type SidebarWriteJournal = {
   latestRequestId: number;
+  pending: number;
+  confirmed?: SidebarSnapshot;
   failedRollback?: SidebarSnapshot;
   failedWriteKind?: SidebarWriteKind;
 };
@@ -75,7 +79,7 @@ const sidebarWriteJournals = new WeakMap<ImmerSet, SidebarWriteJournal>();
 function getSidebarWriteJournal(set: ImmerSet): SidebarWriteJournal {
   const existing = sidebarWriteJournals.get(set);
   if (existing) return existing;
-  const created = { latestRequestId: 0 };
+  const created: SidebarWriteJournal = { latestRequestId: 0, pending: 0 };
   sidebarWriteJournals.set(set, created);
   return created;
 }
@@ -88,11 +92,11 @@ function snapshotSidebar(s: UISliceState["sidebarViews"]): SidebarSnapshot {
   };
 }
 
-function toSidebarSettingsPayload(s: SidebarSnapshot | UISliceState["sidebarViews"]) {
+function toSidebarSettingsDelta(before: SidebarSnapshot, after: SidebarSnapshot) {
   return {
-    views: s.views.map(toApiSidebarView),
-    active_view_id: s.activeViewId,
-    draft: s.draft ? toApiSidebarDraft(s.draft) : null,
+    ...sidebarViewDelta(before.views, after.views),
+    active_view_id: after.activeViewId,
+    draft: after.draft ? toApiSidebarDraft(after.draft) : null,
   };
 }
 
@@ -140,21 +144,29 @@ function draftsEqual(a: SidebarViewDraft | null, b: SidebarViewDraft | null): bo
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-function enqueueSidebarSettingsSync(set: ImmerSet, payload: SidebarViewPatch): Promise<void> {
+function enqueueSidebarSettingsSync(
+  set: ImmerSet,
+  payload: () => SidebarViewPatch,
+  after: SidebarSnapshot,
+  kind: SidebarWriteKind,
+): Promise<void> {
   const workspaceId = workspaceBySetter.get(set);
   if (!workspaceId) {
     // i18n-exempt: programmer invariant diagnostic; this setter is registered before use.
     return Promise.reject(new Error("sidebar set not bound to a workspace"));
   }
-  const scopedPayload: UserSettingsUpdatePayload = {
-    sidebar_view_state: { workspace_id: workspaceId, ...payload },
-  };
+  const send = () =>
+    requestUserSettingsUpdateWithRetry({
+      sidebar_view_state: { workspace_id: workspaceId, ...payload() },
+    });
   const previous = sidebarSettingsQueues.get(set);
-  const write = previous
-    ? previous.then(() => requestUserSettingsUpdateWithRetry(scopedPayload))
-    : requestUserSettingsUpdateWithRetry(scopedPayload);
-  const request = write.then((response) => {
+  const write = previous ? previous.then(send) : send();
+  return write.then((response) => {
     const server = response.settings.sidebar_views_by_workspace?.[workspaceId];
+    const journal = getSidebarWriteJournal(set);
+    journal.confirmed = server
+      ? snapshotSidebar(mapSidebarWorkspaces({ [workspaceId]: server })[workspaceId])
+      : { ...after, views: kind === "views" ? after.views : journal.confirmed!.views };
     if (!server) return;
     set((state) => {
       const mapped = mapSidebarWorkspaces(
@@ -165,27 +177,30 @@ function enqueueSidebarSettingsSync(set: ImmerSet, payload: SidebarViewPatch): P
       Object.assign(state.sidebarViews, mapped[workspaceId]);
     });
   });
-  sidebarSettingsQueues.set(
-    set,
-    request.catch(() => undefined),
-  );
-  return request;
 }
 
 function syncSidebarWrite(
   set: ImmerSet,
   before: SidebarSnapshot,
   after: SidebarSnapshot,
-  payload: SidebarViewPatch,
+  payload: SidebarViewPatch | ((confirmed: SidebarSnapshot) => SidebarViewPatch),
   kind: SidebarWriteKind,
 ) {
   const journal = getSidebarWriteJournal(set);
+  if (journal.pending === 0) journal.confirmed = before;
+  journal.pending++;
   const thisRequestId = ++journal.latestRequestId;
   set((state) => {
     state.sidebarViews.syncPending = true;
   });
-  enqueueSidebarSettingsSync(set, payload).then(
+  const completed = enqueueSidebarSettingsSync(
+    set,
+    () => (typeof payload === "function" ? payload(journal.confirmed!) : payload),
+    after,
+    kind,
+  ).then(
     () => {
+      journal.pending--;
       if (
         thisRequestId === journal.latestRequestId &&
         journal.failedWriteKind === "views" &&
@@ -205,6 +220,7 @@ function syncSidebarWrite(
         });
     },
     (err) => {
+      journal.pending--;
       const rollback = journal.failedRollback ?? before;
       journal.failedRollback = rollback;
       journal.failedWriteKind ??= kind;
@@ -228,6 +244,7 @@ function syncSidebarWrite(
       journal.failedWriteKind = undefined;
     },
   );
+  sidebarSettingsQueues.set(set, completed);
 }
 
 function mutateViews(
@@ -243,7 +260,13 @@ function mutateViews(
   if (!committed) return;
   const after = get().sidebarViews;
   const afterSnapshot = snapshotSidebar(after);
-  syncSidebarWrite(set, snapshot, afterSnapshot, toSidebarSettingsPayload(after), "views");
+  syncSidebarWrite(
+    set,
+    snapshot,
+    afterSnapshot,
+    (confirmed) => toSidebarSettingsDelta(confirmed, afterSnapshot),
+    "views",
+  );
 }
 
 type SidebarDraftPatch = Partial<{
@@ -305,6 +328,8 @@ function updateSidebarDraft(
 
 function buildSidebarLocalActions(set: ImmerSet, get: () => SidebarActionState) {
   return {
+    waitForSidebarViewSync: (_workspaceId: string) =>
+      sidebarSettingsQueues.get(set) ?? Promise.resolve(),
     setSidebarActiveView: (viewId: string) => {
       const before = snapshotSidebar(get().sidebarViews);
       let committed = false;
@@ -378,10 +403,32 @@ function createSidebarView(
   return createdViewId;
 }
 
+function buildSidebarDisclosureReconciler(set: ImmerSet, get: () => SidebarActionState) {
+  return (viewId: string, reference: string, expected: string[], valid: string[]) => {
+    const views = get().sidebarViews.views;
+    const index = views.findIndex((view) => view.id === viewId);
+    const view = views[index];
+    if (
+      !view ||
+      view.group !== reference ||
+      view.collapsedGroups.length !== expected.length ||
+      view.collapsedGroups.some((key, position) => key !== expected[position])
+    )
+      return;
+    const allowed = new Set(valid);
+    const kept = view.collapsedGroups.filter((key) => allowed.delete(key));
+    if (kept.length === view.collapsedGroups.length) return;
+    mutateViews(set, get, (s) => {
+      s.views[index].collapsedGroups = kept;
+    });
+  };
+}
+
 function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState) {
   const mv = (mutate: (s: UISliceState["sidebarViews"]) => boolean | void) =>
     mutateViews(set, get, mutate);
   return {
+    reconcileSidebarGroupDisclosure: buildSidebarDisclosureReconciler(set, get),
     createSidebarView: (grouping?: SidebarPluginGroupingChoice) =>
       createSidebarView(set, get, grouping),
     toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) =>
@@ -510,7 +557,13 @@ export function buildSidebarViewActions(
     names.map((name) => [
       name,
       (...args: unknown[]) => {
-        const workspaceId = (get() as UISlice & WorkspaceSliceState).workspaces?.activeId;
+        let explicitScope: unknown;
+        if (name === "waitForSidebarViewSync") explicitScope = args[0];
+        else if (name === "reconcileSidebarGroupDisclosure") explicitScope = args[4];
+        const workspaceId =
+          typeof explicitScope === "string"
+            ? explicitScope
+            : (get() as UISlice & WorkspaceSliceState).workspaces?.activeId;
         if (!workspaceId) return name === "createSidebarView" ? null : undefined;
         if (name === "clearSidebarSyncError" && args[0] !== undefined && args[0] !== workspaceId) {
           return;
@@ -520,40 +573,4 @@ export function buildSidebarViewActions(
       },
     ]),
   ) as Actions;
-}
-
-function cloneView(v: SidebarView): SidebarView {
-  return {
-    id: v.id,
-    name: v.name,
-    filters: v.filters.map((f) => ({
-      ...f,
-      value: Array.isArray(f.value) ? [...f.value] : f.value,
-    })),
-    sort: { ...v.sort, thenBy: v.sort.thenBy?.map((rule) => ({ ...rule })) },
-    ...(v.sortWarningCount !== undefined ? { sortWarningCount: v.sortWarningCount } : {}),
-    groupIndent: typeof v.groupIndent === "boolean" ? v.groupIndent : true,
-    group: v.group,
-    collapsedGroups: [...v.collapsedGroups],
-    taskRow: v.taskRow ? cloneSidebarTaskRowPresentation(v.taskRow) : undefined,
-    ...(v.generatedPluginGrouping
-      ? { generatedPluginGrouping: { ...v.generatedPluginGrouping } }
-      : {}),
-  };
-}
-
-function cloneDraft(draft: SidebarViewDraft | null): SidebarViewDraft | null {
-  if (!draft) return null;
-  return {
-    baseViewId: draft.baseViewId,
-    filters: draft.filters.map((filter) => ({
-      ...filter,
-      value: Array.isArray(filter.value) ? [...filter.value] : filter.value,
-    })),
-    sort: { ...draft.sort, thenBy: draft.sort.thenBy?.map((rule) => ({ ...rule })) },
-    ...(draft.sortWarningCount !== undefined ? { sortWarningCount: draft.sortWarningCount } : {}),
-    group: draft.group,
-    groupIndent: typeof draft.groupIndent === "boolean" ? draft.groupIndent : true,
-    taskRow: draft.taskRow ? cloneSidebarTaskRowPresentation(draft.taskRow) : undefined,
-  };
 }

@@ -2025,7 +2025,9 @@ catches callback errors and revokes registrations and active subscriptions on un
 
 Complete sidebar classification is manifest-owned, not a browser registration.
 `sidebar_groupings: [{id, label, label_key?, action}]` names an authenticated
-workspace action and requires `min_kandev_version` at least `0.102.0`.
+workspace action and requires the unreleased `min_kandev_version` floor `0.103.0`.
+Stable 0.102.0 lacks this contract; coordinate publication with the supporting
+Host release. Matching development builds remain usable.
 Backend-only plugins are eligible. Active catalog metadata contains
 `{reference, label, labelKey?, generation}`, where `reference` is
 `plugin:<plugin-id>:<grouping-id>`.
