@@ -292,6 +292,31 @@ func (e *SessionStateSupersededError) Error() string {
 
 func (e *SessionStateSupersededError) Unwrap() error { return ErrSessionStateSuperseded }
 
+// ErrSessionStateSwitched means a concurrent workflow session switch took
+// ownership of the session before this launch could persist its runtime data.
+// The session is still live under the new owner, so the losing launch exits
+// without failing the task.
+var ErrSessionStateSwitched = errors.New("session taken over by a concurrent workflow session switch")
+
+// SessionStateSwitchedError records the state a workflow session switch left
+// behind when it superseded a stale launch.
+type SessionStateSwitchedError struct {
+	SessionID string
+	State     models.TaskSessionState
+}
+
+func (e *SessionStateSwitchedError) Error() string {
+	return fmt.Sprintf("%s: session %s is %s", ErrSessionStateSwitched, e.SessionID, e.State)
+}
+
+func (e *SessionStateSwitchedError) Unwrap() error { return ErrSessionStateSwitched }
+
+// IsSessionStateSwitched reports whether err is a launch that lost its session
+// to a concurrent workflow session switch.
+func IsSessionStateSwitched(err error) bool {
+	return errors.Is(err, ErrSessionStateSwitched)
+}
+
 // PromptResult contains the result of a prompt operation
 type PromptResult struct {
 	StopReason   string // The reason the agent stopped (e.g., "end_turn")

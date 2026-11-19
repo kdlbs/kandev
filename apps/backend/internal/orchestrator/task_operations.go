@@ -489,6 +489,15 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 			}
 			prepExec, launchErr := s.executor.LaunchPreparedSession(bgCtx, task, sessionID, executor.LaunchOptions{AgentProfileID: launchProfileID, ExecutorID: executorID, WorkflowStepID: workflowStepID})
 			if launchErr != nil {
+				if executor.IsSessionStateSwitched(launchErr) {
+					// A concurrent workflow session switch owns this session now.
+					// This launch is not a failure of its own dynamic route.
+					launchOwned = true
+					s.logger.Info("prepared session launch superseded by a concurrent workflow session switch",
+						zap.String("task_id", taskID),
+						zap.String("session_id", sessionID))
+					return
+				}
 				// LaunchAgent failures persist FAILED in the executor. Earlier
 				// workspace failures return here and are recorded through the same
 				// session-level recovery claim.
@@ -1281,6 +1290,15 @@ func (s *Service) handleSessionLaunchFailure(
 	failureCtx := context.WithoutCancel(ctx)
 	if isFixedProfileSuspendedError(launchErr) {
 		return launchErr
+	}
+	// A workflow profile switch parks its source session while a replacement
+	// session takes over. The losing launch must exit silently: failing the
+	// task here would abort the switch and surface a spurious toast.
+	if executor.IsSessionStateSwitched(launchErr) {
+		s.logger.Info("ignoring launch superseded by a concurrent workflow session switch",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return routingerr.SanitizeError(launchErr)
 	}
 	if recordErr := s.recordSessionRecoveryBlock(failureCtx, sessionID, "interactive", launchErr); recordErr != nil {
 		s.logger.Warn("failed to persist session recovery block",

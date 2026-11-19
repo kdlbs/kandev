@@ -1255,6 +1255,16 @@ func (e *Executor) persistSessionFullRowIfCurrentState(
 	if isStopTerminalSessionState(current.State) {
 		return &SessionStateSupersededError{SessionID: session.ID, State: current.State}
 	}
+	// A workflow profile switch parks its source session in WAITING_FOR_INPUT
+	// while another session becomes the destination. The parking marker is the
+	// durable proof of that deliberate takeover: without it, an unexpected state
+	// stays a real launch failure.
+	if current.State == models.TaskSessionStateWaitingForInput {
+		if parking, ok := models.LoadWorkflowParking(current.Metadata); ok &&
+			parking.SourceSessionID == session.ID {
+			return &SessionStateSwitchedError{SessionID: session.ID, State: current.State}
+		}
+	}
 	if current.State == models.TaskSessionStateStarting || current.State == models.TaskSessionStateRunning {
 		if current.State == models.TaskSessionStateRunning {
 			return fmt.Errorf(
@@ -2446,6 +2456,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return execution, finalizeErr
 	}()
 	if err != nil && sessionOwned && task != nil && !errors.Is(err, ErrExecutionAlreadyRunning) &&
+		!IsSessionStateSwitched(err) &&
 		(!isCancellableResumeContext(ctx) || ctx.Err() == nil) {
 		// Release while the session lock is still held so a losing launch
 		// cannot fail a claim a later same-session launch already elected.
@@ -2674,6 +2685,12 @@ func (e *Executor) handleEarlyLaunchFailure(
 	taskID, sessionID, repositoryID string,
 	launchErr error,
 ) error {
+	if IsSessionStateSwitched(launchErr) {
+		e.logger.Info("launch superseded by a concurrent workflow session switch",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return routingerr.SanitizeError(launchErr)
+	}
 	failCtx := context.WithoutCancel(ctx)
 	session, loadErr := e.repo.GetTaskSession(failCtx, sessionID)
 	if loadErr != nil || session == nil || session.TaskID != taskID {

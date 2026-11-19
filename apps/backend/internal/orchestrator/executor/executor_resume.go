@@ -964,6 +964,13 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 				buildPrepareResultMetadata(resp.PrepareResult),
 			)
 		}
+		if IsSessionStateSwitched(updateErr) {
+			e.logger.Info("launch superseded by a concurrent workflow session switch",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(updateErr))
+			return updateErr
+		}
 		e.logger.Error("failed to update agent session after launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),

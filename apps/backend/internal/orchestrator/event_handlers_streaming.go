@@ -2699,6 +2699,16 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 	if isTerminalSessionState(latest.State) {
 		return &executor.SessionStateSupersededError{SessionID: session.ID, State: latest.State}
 	}
+	// A workflow profile switch parks its source session in WAITING_FOR_INPUT
+	// while a replacement session takes over. The parking marker is the durable
+	// proof of that deliberate takeover; without it an unexpected state remains
+	// a real launch failure.
+	if latest.State == models.TaskSessionStateWaitingForInput {
+		if parking, ok := models.LoadWorkflowParking(latest.Metadata); ok &&
+			parking.SourceSessionID == session.ID {
+			return &executor.SessionStateSwitchedError{SessionID: session.ID, State: latest.State}
+		}
+	}
 	if latest.State == models.TaskSessionStateRunning {
 		return fmt.Errorf(
 			"session %s state advanced from %s to %s before full-row persistence: %w",

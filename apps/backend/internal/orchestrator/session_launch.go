@@ -421,6 +421,11 @@ func IsBenignLaunchTeardownErr(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return true
 	}
+	// A launch that lost its session to a concurrent workflow switch is an
+	// expected handover, not a fault.
+	if executor.IsSessionStateSwitched(err) {
+		return true
+	}
 	msg := err.Error()
 	return strings.Contains(msg, context.Canceled.Error()) ||
 		strings.Contains(msg, sessionTerminalErrText)
