@@ -178,7 +178,7 @@ export async function selectFinalCodeLine({
     provider === "codemirror"
       ? owner.locator(".cm-line").filter({ hasText: CODE_SELECTION_QUOTE }).last()
       : owner.locator(".view-line").filter({ hasText: CODE_SELECTION_QUOTE }).last();
-  await finalLine.scrollIntoViewIfNeeded();
+  await expect(finalLine).toBeVisible();
   const { start, end } = await finalLine.evaluate((line, quote) => {
     const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
     const textNodes: Text[] = [];
