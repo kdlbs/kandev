@@ -178,9 +178,10 @@ controller-owned `nativeCheckLifetime`, which holds `ctx`, `cancel`, `mu`,
   shutdown wins, the pre-run lookup is `abandoned` (it resolves to `unknown` /
   `cancelled` and commits nothing), and the post-run result is returned
   uncached. The abandoned read finishes in the background and is discarded.
-  An unadmitted pre-run observation runs inline once the lifetime is closed,
-  because shutdown no longer waits for it. The post-run revalidation holds the
-  lifetime, so after close it never observes and returns the result uncached.
+  Once the lifetime is closed, no observation starts: a pre-run lookup is
+  `abandoned` and the post-run result is returned uncached. The runner's
+  launch-time `LookPath` and `EvalSymlinks` likewise run off the caller and
+  return `cancelled` on cancellation, before any process starts.
 - `StartRuntimeUpdateBackground` installs a fresh open lifetime when the
   current one is closed. It never reopens a closed lifetime.
 

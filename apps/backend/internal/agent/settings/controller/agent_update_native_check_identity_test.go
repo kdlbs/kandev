@@ -485,3 +485,16 @@ func TestNativeCheckShutdownDoesNotWaitForBlockedObservation(t *testing.T) {
 		})
 	}
 }
+
+// A pass still building targets when shutdown closes the lifetime is joined
+// by stop, so it must not begin an identity observation at all.
+func TestNativeCheckClosedLifetimeSkipsObservation(t *testing.T) {
+	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+	h.ctrl.currentNativeCheckLifetime().shut()
+	h.runner.setEnvironmentHook(func() { t.Error("observed identity after the lifetime closed") })
+	status := h.status(t, ompAgentID)
+	if status.CheckState != dto.AgentUpdateCheckStateUnknown || status.CheckReason != dto.AgentUpdateCheckReason(agents.NativeUpdateCheckReasonCancelled) {
+		t.Errorf("status = %+v, want unknown/cancelled", status)
+	}
+	requireRuns(t, h.runner, 0, "after the lifetime closed")
+}

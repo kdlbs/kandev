@@ -117,6 +117,33 @@ func TestNativeCheckRunnerMissingExecutable(t *testing.T) {
 	}
 }
 
+// Launch resolution reads PATH directories and symlinks that can block on
+// unreachable storage before a process exists. Cancellation must return at
+// once without starting the process, even after the resolution completes.
+func TestNativeCheckRunnerCancelDuringBlockedLaunchResolution(t *testing.T) {
+	t.Setenv(nativeCheckHelperEnv, "update-available")
+	entered, gate := make(chan struct{}), make(chan struct{})
+	runner := execNativeUpdateCheckRunner{resolveLaunch: func(command agents.Command) (string, string, error) {
+		close(entered)
+		<-gate
+		return execNativeUpdateCheckRunner{}.resolveLaunchPaths(command)
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan nativeUpdateCheckRun, 1)
+	go func() { done <- runner.Run(ctx, nativeCheckHelperCommand()) }()
+	<-entered
+	cancel()
+	select {
+	case run := <-done:
+		if run.Reason != agents.NativeUpdateCheckReasonCancelled {
+			t.Errorf("reason = %q, want cancelled", run.Reason)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancellation waited for blocked launch resolution")
+	}
+	close(gate)
+}
+
 func TestNativeCheckRunnerTimeout(t *testing.T) {
 	t.Setenv(nativeCheckHelperEnv, "sleep")
 	started := time.Now()

@@ -56,6 +56,8 @@ type nativeUpdateCheckRunner interface {
 // environment and executable resolution, contained in a process tree.
 type execNativeUpdateCheckRunner struct {
 	timeout time.Duration
+	// resolveLaunch overrides launch resolution in tests.
+	resolveLaunch func(agents.Command) (path, real string, err error)
 }
 
 var _ nativeUpdateCheckRunner = execNativeUpdateCheckRunner{}
@@ -71,7 +73,10 @@ func (execNativeUpdateCheckRunner) Resolve(command agents.Command) (string, erro
 func (execNativeUpdateCheckRunner) Environment() []string { return filteredInstallEnv() }
 
 func (r execNativeUpdateCheckRunner) Run(ctx context.Context, command agents.Command) nativeUpdateCheckRun {
-	path, err := r.Resolve(command)
+	path, real, err, ok := r.launchPaths(ctx, command)
+	if !ok {
+		return nativeUpdateCheckRun{Reason: agents.NativeUpdateCheckReasonCancelled}
+	}
 	if err != nil {
 		return nativeUpdateCheckRun{Reason: agents.NativeUpdateCheckReasonNotInstalled}
 	}
@@ -90,10 +95,6 @@ func (r execNativeUpdateCheckRunner) Run(ctx context.Context, command agents.Com
 	cmd.Env = r.Environment()
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	cmd.WaitDelay = nativeUpdateCheckWaitDelay
-	real := path
-	if evaluated, evalErr := filepath.EvalSymlinks(path); evalErr == nil {
-		real = evaluated
-	}
 	exitCode, started, waitErr := runContainedCommand(cmd)
 	run := nativeUpdateCheckRun{Executable: path, RealExecutable: real}
 	switch {
@@ -113,6 +114,44 @@ func (r execNativeUpdateCheckRunner) Run(ctx context.Context, command agents.Com
 		run.Output = agents.NativeUpdateCheckOutput{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: exitCode}
 	}
 	return run
+}
+
+// launchPaths resolves the launcher and its real executable off the caller's
+// goroutine. Both reads can block on unreachable storage before any process
+// exists to cancel, so cancellation returns ok=false at once; the abandoned
+// resolution has no spawn authority and its result is discarded.
+func (r execNativeUpdateCheckRunner) launchPaths(ctx context.Context, command agents.Command) (path, real string, err error, ok bool) {
+	resolve := r.resolveLaunch
+	if resolve == nil {
+		resolve = r.resolveLaunchPaths
+	}
+	type resolved struct {
+		path, real string
+		err        error
+	}
+	done := make(chan resolved, 1)
+	go func() {
+		path, real, err := resolve(command)
+		done <- resolved{path, real, err}
+	}()
+	select {
+	case got := <-done:
+		return got.path, got.real, got.err, true
+	case <-ctx.Done():
+		return "", "", nil, false
+	}
+}
+
+func (r execNativeUpdateCheckRunner) resolveLaunchPaths(command agents.Command) (string, string, error) {
+	path, err := r.Resolve(command)
+	if err != nil {
+		return "", "", err
+	}
+	real := path
+	if evaluated, evalErr := filepath.EvalSymlinks(path); evalErr == nil {
+		real = evaluated
+	}
+	return path, real, nil
 }
 
 // runContainedCommand starts cmd in its own process tree, terminates the tree
