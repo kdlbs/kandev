@@ -100,20 +100,19 @@ func (r NativeUpdateCheckResolver) Getenv(key string) (string, bool) {
 	return value, found
 }
 
-// GetenvFold prefers an exact match and otherwise matches key
-// case-insensitively, as npm does for npm_config_* names.
+// GetenvFold mirrors OMP's envLookup: a nonempty exact match wins; otherwise
+// the first nonempty case-insensitive match. Empty values never match.
 func (r NativeUpdateCheckResolver) GetenvFold(key string) (string, bool) {
-	if value, ok := r.Getenv(key); ok {
+	if value, ok := r.Getenv(key); ok && value != "" {
 		return value, true
 	}
-	value, found := "", false
 	for _, entry := range r.Env {
-		name, v, ok := strings.Cut(entry, "=")
-		if ok && strings.EqualFold(name, key) {
-			value, found = v, true
+		name, value, ok := strings.Cut(entry, "=")
+		if ok && value != "" && strings.EqualFold(name, key) {
+			return value, true
 		}
 	}
-	return value, found
+	return "", false
 }
 
 // NativeUpdateCheckDir names a directory whose direct regular files are

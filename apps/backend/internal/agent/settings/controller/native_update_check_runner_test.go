@@ -162,21 +162,31 @@ func TestNativeCheckRunnerKillsDescendants(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		reason agents.NativeUpdateCheckReason
-		run    func(command agents.Command) nativeUpdateCheckRun
+		run    func(command agents.Command, heartbeat string) nativeUpdateCheckRun
 	}{
 		{
+			// Generous enough for the descendant to start under -race load.
 			name:   "timeout",
 			reason: agents.NativeUpdateCheckReasonTimeout,
-			run: func(command agents.Command) nativeUpdateCheckRun {
-				return execNativeUpdateCheckRunner{timeout: time.Second}.Run(context.Background(), command)
+			run: func(command agents.Command, _ string) nativeUpdateCheckRun {
+				return execNativeUpdateCheckRunner{timeout: 5 * time.Second}.Run(context.Background(), command)
 			},
 		},
 		{
+			// Cancel only once the descendant is observably running.
 			name:   "cancellation",
 			reason: agents.NativeUpdateCheckReasonCancelled,
-			run: func(command agents.Command) nativeUpdateCheckRun {
+			run: func(command agents.Command, heartbeat string) nativeUpdateCheckRun {
 				ctx, cancel := context.WithCancel(context.Background())
-				time.AfterFunc(time.Second, cancel)
+				defer cancel()
+				go func() {
+					defer cancel()
+					for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+						if _, err := os.Stat(heartbeat); err == nil {
+							return
+						}
+					}
+				}()
 				return execNativeUpdateCheckRunner{}.Run(ctx, command)
 			},
 		},
@@ -185,7 +195,7 @@ func TestNativeCheckRunnerKillsDescendants(t *testing.T) {
 			heartbeat := filepath.Join(t.TempDir(), "heartbeat")
 			t.Setenv(nativeCheckHelperEnv, "spawn")
 			t.Setenv(nativeCheckHeartbeatEnv, heartbeat)
-			run := tc.run(nativeCheckHelperCommand())
+			run := tc.run(nativeCheckHelperCommand(), heartbeat)
 			if run.Reason != tc.reason {
 				t.Fatalf("reason = %q, want %q", run.Reason, tc.reason)
 			}
