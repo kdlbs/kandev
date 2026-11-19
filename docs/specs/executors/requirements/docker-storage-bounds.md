@@ -39,9 +39,10 @@ lets them manage disk use and choose where temporary files are stored.
   containers shall use that size limit for a tmpfs with executable files, mode
   1777, `nosuid`, and `nodev`. An explicit mount at `/tmp` or an equivalent
   path shall take precedence and retain its settings.
-- **AC-EXECUTORS-STORAGE-001.7:** When Kandev cannot read the profile's `/tmp`
-  size as a positive byte size, a fresh launch shall fail with an error that
-  identifies the setting.
+- **AC-EXECUTORS-STORAGE-001.7:** When a profile supplies a nonblank `/tmp`
+  size that Kandev cannot read as a positive byte size, a fresh launch shall
+  fail with an error that identifies the setting. Blank or absent values use
+  the Docker or image default as defined by AC-EXECUTORS-STORAGE-001.4.
 - **AC-EXECUTORS-STORAGE-001.8:** Authorized users shall be able to set and
   clear each limit independently from either Docker profile editor on desktop
   and phone. Discard shall restore saved values, and a successful save shall

@@ -64,6 +64,11 @@ test.describe("Docker profile storage limits", () => {
             logMaxFiles: "3",
             customStorageKey: "keep-me",
           });
+
+        await testPage.reload();
+        await expect(tmpSize).toHaveValue("");
+        await expect(logMaxSize).toHaveValue("100m");
+        await expect(logMaxFiles).toHaveValue("3");
       } finally {
         await deleteDockerStorageProfile(apiClient, executor.id, profile.id);
       }

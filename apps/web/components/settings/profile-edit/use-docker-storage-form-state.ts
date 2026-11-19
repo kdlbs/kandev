@@ -9,7 +9,7 @@ function refreshDockerStorageDraft(
   current: DockerStorageDraft,
   savedValue: string,
 ): DockerStorageDraft {
-  if (current.dirty && current.value !== savedValue) return current;
+  if (current.dirty && current.value.trim() !== savedValue) return current;
   return { value: savedValue, dirty: false };
 }
 

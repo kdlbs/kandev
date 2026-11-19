@@ -155,9 +155,10 @@ Task 01 passed its profile projection, launch parsing, client request, and
 container configuration tests. The independent tmpfs and rotation canaries
 passed on Engine `26.1.5+dfsg1` with the `json-file` driver. The unsupported
 log-option test passed under `-race`, and the backend binary built. Task 02
-passed 24 focused profile tests, web typecheck and lint, i18n checks and
+passed 26 focused profile tests, web typecheck and lint, i18n checks and
 ratchet, desktop and mobile E2E tests, public-doc tests and validation. The
-refreshed-profile save regression passed. The changed Go files passed
+refreshed-profile and whitespace-normalization save regressions passed. The
+post-clear config reload E2E assertion passed. The changed Go files passed
 `lint-go-changed` with 0 issues.
 
 ## Risks

@@ -84,15 +84,17 @@ card. Compare both rendered views with the preview during the browser checks.
 
 ## Verification
 
-From `apps/web`:
+From the repository root, run the workspace installation first in a fresh
+worktree. Then run the frontend checks, each rooted at `apps/web`:
 
 ```bash
-pnpm test components/settings/profile-edit/serialize-executor-config.test.ts components/settings/profile-edit/executor-profile-reset.test.tsx
-pnpm run typecheck
-pnpm run i18n:check
-pnpm run i18n:ratchet
-pnpm e2e:run --project=chromium e2e/tests/settings/docker-storage-limits.spec.ts
-pnpm e2e:run --project=mobile-chrome e2e/tests/settings/mobile-docker-storage-limits.spec.ts
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm test components/settings/profile-edit/serialize-executor-config.test.ts components/settings/profile-edit/executor-profile-reset.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm run i18n:check)
+(cd apps/web && pnpm run i18n:ratchet)
+(cd apps/web && pnpm e2e:run --project=chromium e2e/tests/settings/docker-storage-limits.spec.ts)
+(cd apps/web && pnpm e2e:run --project=mobile-chrome e2e/tests/settings/mobile-docker-storage-limits.spec.ts)
 ```
 
 Run the two Playwright commands in sequence. From the repository root:
@@ -134,8 +136,11 @@ existing draft, reset, and save flow. Saves preserve unrelated profile keys,
 and blank fields clear their settings. Untouched fields follow refreshed profile
 data; edited fields, including explicit clears, remain in the save payload.
 The temporary-storage label states that the `/tmp` mount is in memory in all
-locales. All 24 focused profile tests passed. The web typecheck and lint, i18n
+locales. All 26 focused profile tests passed. The web typecheck and lint, i18n
 checks and ratchet passed. Desktop and mobile E2E tests passed for Local Docker
 and Remote Docker profiles. Public-doc tests passed (63 tests), and all 55
 published docs pages validated. Task 01 results are recorded in the parent
-plan.
+plan. The whitespace-save refresh regression and post-clear reload assertion
+passed. Specification gates `python3 scripts/list-docs.py validate` and
+`python3 scripts/lint-spec-files.py --all` passed. The diff gate
+`git diff --check` passed.

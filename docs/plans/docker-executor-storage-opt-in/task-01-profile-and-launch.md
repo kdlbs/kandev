@@ -42,8 +42,9 @@ migration and daemon-wide policies are outside the work package.
 
 ## Acceptance
 
-1. Profile values reach both Docker runtimes. A malformed or nonpositive
-   `/tmp` size fails fresh launch with the setting named in the error.
+1. Profile values reach both Docker runtimes. A nonblank malformed or
+   nonpositive `/tmp` size fails fresh launch with the setting named in the
+   error.
 2. Both create paths use zero-value storage settings by default and honor
    independent options. An explicit mount at a normalized `/tmp` takes
    precedence. Other HostConfig values remain intact.
@@ -104,3 +105,6 @@ the unsupported-log-option no-retry case under `-race`. The separate
 `TestContainerLogRotationOnCompatibleLocalDaemon` canaries passed on Docker
 Engine `26.1.5+dfsg1` with the `json-file` driver.
 `go build -trimpath -o /tmp/kandev-backend-check ./cmd/kandev` passed.
+Specification gates `python3 scripts/list-docs.py validate` and
+`python3 scripts/lint-spec-files.py --all` passed. The diff gate
+`git diff --check` passed.
