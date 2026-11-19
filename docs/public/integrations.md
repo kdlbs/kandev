@@ -239,6 +239,11 @@ path on desktop hover or focus and in a touch-accessible drawer on mobile.
   through Kandev's task/repository-scoped broker. Kandev provides a short-lived Git helper and `gh`
   shim; stored PATs and App private keys are not exposed to the task. An executor-profile
   `GH_TOKEN` or `GITHUB_TOKEN` takes precedence.
+- Managed leases expire after 12 hours without use. Eligible launches receive a 30-day bearer
+  capability for automatic lease recovery by default. The signer is derived from the installation's
+  `master.key`; configuration, backup, and retained-process recovery guidance is in
+  [Managed GitHub credentials](executors.md#managed-github-credentials). Use **Restart session**
+  when a retained process needs fresh launch credentials.
 - **Inherit executor Git credentials** does not install Kandev's helper or `gh` shim. Local and
   Worktree tasks use host Git credentials. For GitHub HTTPS remotes, Kandev checks the host
   account's `gh` login for each attached GitHub host. When `gh auth token` succeeds, Kandev adds a
@@ -735,6 +740,8 @@ Deleting a Jira watch leaves its previously created tasks in place. **Reset** is
 Linear configuration is workspace-specific. Enter a personal API key and optionally a default team. Kandev calls the fixed Linear GraphQL endpoint at `https://api.linear.app/graphql` and sends the key as its authorization value. Leaving the credential blank during an edit keeps the stored key.
 
 After saving and testing the connection, use `/linear` to search by text, team, or assignee, view issue details, change supported states, and launch tasks. Linear launch uses fixed title/description construction, has no prompt-preset editor, and does not store a durable Linear issue association.
+
+Changing a Linear issue state requires `task.write` on the workspace. A viewer can read issue details but cannot use the saved connection to change an issue state. Kandev checks this permission before it sends the state change to Linear.
 
 Linear watches can filter by team, states, labels, projects, priorities, assignee, creator, estimate range, and free-text query. At least one of those filters is required. Filters combine with AND; within states, labels, or projects, an issue matches any selected value. Pick a team to choose its projects, so one team can route each project to its own repository with a separate watch. Saved projects remain removable even if no team is selected or a project is no longer available. They also define dispatch order, workflow and starting step, optional repository/base branch/profile overrides, prompt, poll interval, and a maximum in-flight count. New watches default to five in-flight tasks and **Priority (high → low)** dispatch. The poll interval defaults to 300 seconds and accepts 60–3,600 seconds; clear the in-flight field for no cap.
 

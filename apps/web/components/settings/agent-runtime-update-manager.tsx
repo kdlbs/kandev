@@ -16,7 +16,7 @@ import {
   type RuntimeUpdateGroup,
 } from "@/lib/agents/runtime-update-manager";
 import { useSettingsSaveCoordinator, type SettingsSaveCoordinator } from "./settings-save-provider";
-import { RuntimePolicyDetail, useRuntimePolicyControllers } from "./agent-runtime-policies";
+import { useRuntimePolicyControllers } from "./agent-runtime-policies";
 import { RuntimePolicyDirtyFooter } from "./agent-runtime-policy-footer";
 import { AgentRuntimeUpdateDetail } from "./agent-runtime-update-detail";
 import { RuntimeUpdateGuidanceSurface } from "./agent-runtime-update-guidance-surface";
@@ -145,7 +145,7 @@ function RuntimeManagerDetail({
   const dirty = controllers.some(
     (controller) => controller.agentName === agentName && controller.isDirty,
   );
-  const dirtyFooter = (
+  const dirtyFooter = controllers.some((controller) => controller.isDirty) && (
     <RuntimePolicyDirtyFooter controllers={controllers} canManage={canManage} embedded />
   );
   if (!runtimeUpdate?.supported) {
@@ -178,7 +178,6 @@ function RuntimeManagerDetail({
       onOpenChange={(open) => !open && onClose()}
       isMobile={isMobile}
       onBack={onBack}
-      beforeBody={status ? <RuntimePolicyDetail status={status} /> : null}
       footerBefore={dirtyFooter}
       approveDisabledReason={dirty ? dirtyBlockedLabel : undefined}
     />

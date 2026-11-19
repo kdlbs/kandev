@@ -2661,6 +2661,7 @@ func TestHandleCreateTask_InheritParentRejectsUnmatchedMaterializedRepository(t 
 		"title":            "Child",
 		"description":      "do the thing",
 		"parent_id":        parentID,
+		"workspace_mode":   "inherit_parent",
 		"repositories":     []map[string]interface{}{{"repository_id": "repo-parent", "base_branch": "main"}},
 		"agent_profile_id": "profile-1",
 		"start_agent":      false,
@@ -2702,6 +2703,7 @@ func TestHandleCreateTask_InheritParentRejectsUnmatchedBaseBranchOverride(t *tes
 		"title":            "Child",
 		"description":      "do the thing",
 		"parent_id":        parentID,
+		"workspace_mode":   "inherit_parent",
 		"base_branch":      "main",
 		"agent_profile_id": "profile-1",
 		"start_agent":      false,
@@ -2753,7 +2755,7 @@ func TestHandleCreateTask_SubtaskDefaultsToParentWorkspaceAndWorkflow(t *testing
 
 	workspaceMeta, ok := subtask.Metadata["workspace"].(map[string]interface{})
 	require.True(t, ok, "MCP subtasks should persist a workspace policy by default")
-	assert.Equal(t, "inherit_parent", workspaceMeta["mode"], "MCP subtasks should reuse the parent's materialized workspace by default")
+	assert.Equal(t, "new_workspace", workspaceMeta["mode"], "MCP subtasks should use a separate workspace by default")
 }
 
 func TestHandleCreateTask_SubtaskCanRequestNewWorkspaceMode(t *testing.T) {

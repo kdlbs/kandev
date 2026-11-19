@@ -157,6 +157,12 @@ agent response and all other preparation/profile error handling unchanged.
   creation and mutation retain the operator-owned launcher-settings boundary.
 - Utility execution never grants more access than the selected profile configures. It does not
   overlay utility-specific allowlists or copy permissions from the active task's profile.
+- When a profile specifies a mode and the ACP session advertises a mode config
+  select, `executeACPSession` sends the exact advertised value after it applies
+  model settings. A successful config RPC must confirm the value before
+  inference sends its prompt. Utility execution shares the exact-ID fallback
+  rules with [profile mode discovery](repository-local-session-modes.md#probe-and-session-lifecycle).
+  When there is no mode select, utility execution uses the existing legacy RPC.
 - A profile with auto-approval enabled receives the same automatic ACP approval behavior as a
   normal launch. When auto-approval is disabled, any permission request not prevented or answered by
   the profile's own CLI policy is rejected promptly because utility calls have no interactive

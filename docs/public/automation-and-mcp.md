@@ -59,15 +59,15 @@ Task creation depends on the caller surface and the destination workspace:
 
 Office sessions do not receive an MCP task-creation tool. A direct backend call from an Office session is also denied. External MCP uses the same `create_task_kandev` contract for both workspace modes, subject to the client's authorization. The `workspace_mode` argument controls materialized workspace behavior, not Kanban or Office mode. `agent_profile_id` selects a launch profile and is not an Office assignee.
 
-The optional `workspace_mode` field advertises exactly two values: `inherit_parent` normally reuses the parent's materialized workspace/worktree and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `inherit_parent`. There is no unconditional schema default for top-level tasks.
+The optional `workspace_mode` field advertises exactly two values: `inherit_parent` reuses the parent's exact materialized checkouts and files and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `new_workspace`, including when the parent has a saved child-workspace preference. Omission on a top-level task keeps its existing behavior.
 
 If a new launch for an inherited child selects a different non-Kubernetes executor from the parent's materialized environment, Kandev creates a separate workspace owned by the child. Uncommitted parent changes are not copied into that workspace. A session that is still bound to the inherited environment must resume with its original executor. Kubernetes environments remain task-owned and cannot be shared across tasks.
 
 For a Kubernetes parent, use `workspace_mode: "new_workspace"` when creating a child that will run. Kubernetes Pods belong to one task, so a child cannot attach to the parent's environment.
 
-Queued creation with `start_agent: false` still succeeds with the default `inherit_parent`, but opening or launching that child returns `workspace_reuse_unsupported` before a session is created. Create a separate-workspace task to proceed; retrying or restoring the healthy parent does not enable cross-task attachment. Additional sessions on the same Kubernetes task remain supported.
+Queued creation with `start_agent: false` omits the materialized workspace until launch. If you explicitly select `inherit_parent`, creation still succeeds, but opening or launching that child returns `workspace_reuse_unsupported` before a session is created. Select `new_workspace` to proceed; retrying or restoring the healthy parent does not enable cross-task attachment. Additional sessions on the same Kubernetes task remain supported.
 
-Omit `workspace_mode` to use defaulting instead of sending an empty string. MCP schema validation rejects empty, whitespace-only, and padded values before backend dispatch, even though the backend policy resolver still trims strings. `shared` and `shared_group` are not supported by this MCP endpoint.
+Omit `workspace_mode` to create an isolated subtask by default; send `inherit_parent` to share the parent's existing files and checkout. Use omission instead of an empty string to request defaulting. MCP schema validation rejects empty, whitespace-only, and padded values before backend dispatch, even though the backend policy resolver still trims strings. `shared` and `shared_group` are not supported by this MCP endpoint.
 
 ## Quick path
 

@@ -319,11 +319,12 @@ Two current preparation exceptions are easy to miss:
 
 ## Managed GitHub credentials
 
-The workspace's GitHub connection and the task's Git transport policy are separate. **Managed
-workspace credentials** is the default and provides the broker behavior below. Select **Inherit
-executor Git credentials** in the workspace GitHub settings to leave Git and `gh` to the host or
-selected executor; Kandev then injects no GitHub broker helper or shim. Local and Worktree use
-host-visible Git/SSH credentials, while Docker, Kubernetes, SSH, and cloud require executor-configured
+The workspace's GitHub connection and the task's Git transport policy are separate. New workspaces
+default to **Inherit executor Git credentials**. Existing workspaces keep their saved policy, and a
+legacy compatibility fallback can still select **Managed workspace credentials**. Select the
+inheritance option in workspace GitHub settings to leave Git and `gh` to the host or selected
+executor; Kandev then injects no GitHub broker helper or shim. Local and Worktree use host-visible
+Git/SSH credentials, while Docker, Kubernetes, SSH, and cloud require executor-configured
 credentials. An explicit executor-profile `GH_TOKEN` or `GITHUB_TOKEN` overrides the managed
 workspace route.
 
@@ -351,6 +352,22 @@ lease matching prevents accidental cross-repository redemption, but the trusted 
 receives a bearer token with all scopes and repositories granted by GitHub. An explicit profile
 `GITHUB_TOKEN` or `GH_TOKEN` bypasses managed broker selection entirely and is the operator's
 unmanaged grant. Personal GitHub tokens and App registration private keys never enter executors.
+
+Managed Git leases expire after 12 hours without use. With reissue enabled, eligible launches also
+receive a 30-day bearer capability that lets the helper request a replacement lease after expiry or
+broker restart. The default signer is derived from the installation's `data/master.key`; the
+optional `githubCredentialBroker.reissueSigningKey` setting overrides it. Because the capability is
+a bearer, treat executor environments that use managed Git as trusted. Set
+`githubCredentialBroker.disableReissue` to suspend capability issuance and exchange while ordinary
+leases continue to work. For configuration, backup, and rotation details, see
+[Git credential reissue settings](configuration.md#authentication-office-plugins-and-feature-flags)
+and [Operations](operations.md#state-and-storage).
+
+If a retained process has only a lease and receives an invalid or expired lease response, use
+**Restart session** to stop it and launch a fresh process in the same session. If the session is
+already stopped, **Resume** starts a fresh process. A warm Resume can reconnect to an existing live
+process and keep its original environment. See [managed Git recovery](git-operations.md) for the
+helper's error guidance.
 
 For Kubernetes tasks using managed Git access, both preparation and the agent's
 commands use the session's current repository leases. Stop/Resume on a retained
@@ -599,7 +616,7 @@ All sessions in a task share one credential trust boundary. Same-UID agents can 
 3. Select that secret for the required `SPRITES_API_TOKEN` profile environment variable.
 4. Review remote credential methods, Git identity, prepare/cleanup scripts, and network policy.
 
-Sprites profiles do not copy the host-active `gh` CLI token. Kandev may copy explicitly selected agent credential files, resolve selected Kandev secrets into agent environment variables, or run an agent auth setup script. A profile-selected GitHub token is an unmanaged override; otherwise an attached GitHub repository uses the workspace credential broker. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to an HTTPS Kandev URL reachable from remote executors. To recover managed Git credentials after a backend restart, configure the stable secret `githubCredentialBroker.reissueSigningKey` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY`); changing it invalidates outstanding execution capabilities. Drain or quiesce active agent sessions before key rotation. The broker uses `/api/v1/git/credentials/resolve` and `/api/v1/git/credentials/reissue`; the older GitHub paths remain compatibility aliases. These settings are independent of GitHub App registration. Credential upload is best-effort: provisioning can continue while later agent authentication fails. The remote sandbox receives highly sensitive data; use a scoped provider token and least-privilege repository credentials.
+Sprites profiles do not copy the host-active `gh` CLI token. Kandev may copy explicitly selected agent credential files, resolve selected Kandev secrets into agent environment variables, or run an agent auth setup script. A profile-selected GitHub token is an unmanaged override. With **Managed workspace credentials**, an attached GitHub repository uses the workspace credential broker. With **Inherit executor Git credentials**, configure Git credentials for the Sprite because Kandev injects no broker helper. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to an HTTPS Kandev URL reachable from remote executors. Managed launches receive automatic lease recovery by default. The signer uses the installation's `data/master.key`; the sensitive `githubCredentialBroker.reissueSigningKey` setting remains an optional override, and `githubCredentialBroker.disableReissue` suspends capability issuance and exchange. Preserve the matching `master.key` with the database to keep encrypted secrets and outstanding default capabilities usable. A 30-day execution capability is a bearer, so treat the remote sandbox as trusted. The broker uses `/api/v1/git/credentials/resolve` and `/api/v1/git/credentials/reissue`; the older GitHub paths remain compatibility aliases. These settings are independent of GitHub App registration. Credential upload is best-effort: provisioning can continue while later agent authentication fails. Use a scoped provider token and least-privilege repository credentials.
 
 Network rules are stored in `sprites_network_policy_rules` as JSON entries with `domain`, `action` (`allow` or `deny`), and optional `include`. Kandev applies them only on fresh sandbox creation, and currently does so after credential upload, prepare, controller startup, and agent-instance creation. Bootstrap traffic can therefore occur before the profile policy is installed. A parse/provider failure is reported as skipped and does not abort launch. Provider semantics remain authoritative; do not treat this late, best-effort step as a security boundary, and test the resulting policy.
 
@@ -714,7 +731,7 @@ Task-directory reclamation stays off by default. When enabled, terminal archive/
 
 Default SSH preparation creates or reuses a standalone checkout at the task root. Custom scripts or existing repositories can use linked worktrees. For a linked worktree, Git checks the task's `HEAD` and stashes whose recorded branch matches its current branch. Reclamation leaves the shared repository and other worktrees intact. For a standalone clone, Git checks every local branch and stash. Unknown layouts, nested repositories, unknown stash attribution, locked worktrees, and checkouts with submodules stay on disk. Reclamation requires Git 2.36 or later for its complete probe set; safe path detection alone requires 2.31. Older Git preserves the directory but does not affect SSH launch support. Kandev does not sweep old task directories.
 
-The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` remain for later sessions. Periodically audit remote processes, session directories, and `<workdir-root>/tasks/`. An explicit resume reconnects to SSH and reuses a live recorded PID when possible. Otherwise Kandev starts a fresh remote controller and runs preparation again.
+The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` remain for later sessions. Periodically audit remote processes, session directories, and `<workdir-root>/tasks/`. An explicit **Resume** reconnects to SSH and reuses a live recorded PID when possible. Otherwise Kandev starts a fresh remote controller and runs preparation again. Use **Restart session** when a retained live process needs fresh launch credentials; it stops the current process and launches a new one in the same session.
 
 When a receipt proves that the recorded controller is absent, Resume starts a
 new controller in the preserved task workspace. This also applies after a

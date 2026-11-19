@@ -334,7 +334,8 @@ func genericCredentialBrokerErrorCode(err error) string {
 		return "git_credential_lease_expired"
 	case errors.Is(err, ErrCredentialLeaseRevoked):
 		return "git_credential_lease_revoked"
-	case errors.Is(err, ErrCredentialReissueCapabilityInvalid), errors.Is(err, ErrCredentialReissueCapabilityExpired):
+	case errors.Is(err, ErrCredentialReissueCapabilityInvalid), errors.Is(err, ErrCredentialReissueCapabilityExpired),
+		errors.Is(err, ErrCredentialReissueUnavailable):
 		return "git_credential_reissue_denied"
 	case errors.Is(err, ErrCredentialScopeDenied):
 		return "git_credential_denied"
@@ -379,7 +380,8 @@ func githubAuthErrorResponse(err error) (int, string) {
 		status, code = http.StatusUnauthorized, "github_credential_lease_expired"
 	case errors.Is(err, ErrCredentialLeaseRevoked):
 		status, code = http.StatusUnauthorized, "github_credential_lease_revoked"
-	case errors.Is(err, ErrCredentialReissueCapabilityInvalid), errors.Is(err, ErrCredentialReissueCapabilityExpired):
+	case errors.Is(err, ErrCredentialReissueCapabilityInvalid), errors.Is(err, ErrCredentialReissueCapabilityExpired),
+		errors.Is(err, ErrCredentialReissueUnavailable):
 		status, code = http.StatusUnauthorized, "github_credential_reissue_denied"
 	case errors.Is(err, ErrCredentialScopeDenied):
 		status, code = http.StatusUnauthorized, "github_credential_denied"
