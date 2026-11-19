@@ -1609,6 +1609,9 @@ func bootActivePlugins(p routeParams) []webapp.ActivePluginPayload {
 			BundleURL: pluginBundleURL(rec),
 			StyleURLs: pluginStyleURLs(rec),
 		}
+		for _, viewer := range rec.UI.FileViewers {
+			entry.FileViewers = append(entry.FileViewers, webapp.FileViewerPayload{ID: viewer.ID, Title: viewer.Title, Extensions: append([]string(nil), viewer.Extensions...)})
+		}
 		if rec.RepositoryProviders != nil {
 			providerIDs := make([]string, len(rec.RepositoryProviders))
 			copy(providerIDs, rec.RepositoryProviders)
@@ -2113,6 +2116,8 @@ func registerSecondaryRoutes(
 		conversationReaders := make([]plugins.ConversationReader, 0, 1)
 		if p.services.Task != nil {
 			conversationReaders = append(conversationReaders, p.services.Task)
+			p.services.Plugins.SetFilePreviewWorkspaceAuthorizer(p.services.Task.AuthorizeWorkspaceAccess)
+			wirePluginFilePreviews(p)
 			p.services.Plugins.SetCapabilityApprovalWorkspaceAuthorizer(func(ctx context.Context, workspaceID string) error {
 				return p.services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage)
 			})

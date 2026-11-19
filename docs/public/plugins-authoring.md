@@ -4053,3 +4053,89 @@ repackaging.
 
 Related: [Plugins](plugins.md), [Plugin manifest reference](plugins-manifest.md),
 [Plugin marketplace](plugins-marketplace.md), and [Extending Kandev](extending-kandev.md).
+
+## File viewer plugins
+
+A native UI plugin can register a viewer for formats declared in its manifest:
+
+```yaml
+ui:
+  bundle: /ui/index.js
+  file_viewers:
+    - id: stl
+      title: STL viewer
+      extensions: [stl]
+```
+
+```ts
+registry.registerFileViewer({ id: "stl", Component: Viewer });
+```
+
+`Viewer` receives `file` metadata (`name`, `sizeBytes`, `generation`) and
+`readBytes(signal)`. It receives no file-path or URL read API. Registration must
+match an installed manifest declaration. Built-in previews retain priority.
+Use `file.generation` to reset work when the host selects a new preview.
+
+Kandev owns file access and the external-file prompt. Use the file handle supplied
+to the viewer. Do not read a selected path through a separate webhook, Host
+request, or backend process to bypass a denied or pending preview. Paths refer to
+the selected local or remote execution environment, including its user home.
+
+External file previews default to **Ask** in the plugin's host settings. **Allow**
+permits authorized external files for the current user and workspace. **Deny**
+blocks them. **Preview once** applies to one file selection and revision; it does
+not change the persistent setting. A changed policy, file, execution, or plugin
+can invalidate a pending preview. Handle rejection without automatic retries.
+
+Native plugins remain trusted code. This setting controls the supported preview
+flow; it is not an operating-system or browser sandbox. It grants no new OS
+permissions. Do not claim that a worker provides a security sandbox.
+
+The host limits each file to 64 MiB and each transfer to 30 seconds. One viewer
+owns the preview reservation in a browser page at a time. Parse off the UI thread, bound
+allocations before parsing, and terminate parsing after 10 seconds. The STL viewer
+also limits models to 1,000,000 triangles. Release requests, workers, listeners,
+observers, animation frames, geometry, materials, and renderers on unmount.
+Never retain model bytes in plugin storage or log paths, model headers, or content.
+
+A model format may have no physical units. The STL viewer displays dimensions
+and grid spacing in **model units**.
+
+The file-viewer contract is under development. Before publishing a viewer,
+set its minimum host version to the release that first includes this contract and
+use the corresponding released SDK. The standalone STL package in this work is
+for development testing, not a release for older hosts.
+
+### Reuse viewers in rich file previews
+
+A single `registerFileViewer({ id, Component })` registration serves both file
+panels and rich output `FilePreview` cards. Declare formats in `ui.file_viewers`;
+do not register a separate chat renderer. Kandev selects the viewer, supplies
+admitted bytes, and owns external-file approval in both surfaces. Built-in
+previews and source-editor defaults retain priority.
+
+Agents use the existing version 2 rich-output catalog:
+
+```json
+{"version":2,"catalog_version":1,"title":"Model","spec":{"root":"model","elements":{"model":{"type":"FilePreview","props":{"path":"models/part.stl"},"children":[]}}}}
+```
+
+Use workspace-relative paths and supply `repo` when the task has multiple
+repositories. A symlink outside the repository follows Ask/Allow/Deny. Agents
+cannot grant permission, supply renderer code, or override the viewer choice.
+Cards render the current file, not a saved model snapshot. Installed matching
+viewers expand automatically; unavailable formats retain preview/discovery
+controls. Multiple eligible viewers require the normal Open with choice.
+
+Design the component for both a full file panel and a bounded chat card. Use
+container resize observation, touch-sized controls, keyboard focus, and no
+page-wide gesture handlers. Chat scrolling remains available outside the model
+viewport. Collapse and scrolling out of view unmount the viewer and abort its
+work. Re-expansion uses a fresh selection and repeats external approval when
+required. Plugin unload and session changes also release resources. Persist
+only UI metadata, never file bytes or permission receipts.
+
+The shared host currently permits one live plugin preview per browser. Other
+visible cards can show Busy; collapse the active card and retry the other one.
+No additional plugin capability or MCP schema field is needed. Follow the
+plugin template's opt-in `recipes/file-viewer` example for read/disposal wiring.

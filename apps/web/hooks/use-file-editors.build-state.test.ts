@@ -226,3 +226,16 @@ describe("getPreviewItemIdToRemoveOnReplace", () => {
     expect(getPreviewItemIdToRemoveOnReplace(dockApi, previousItemId)).toBeNull();
   });
 });
+
+it("opens an STL selection without the text reader", async () => {
+  mockRequestFileContent.mockClear();
+  const state = await fetchFileEditorState({
+    client: FAKE_CLIENT,
+    sessionId: SESSION_ID,
+    filePath: "model.stl",
+    repo: REPO,
+    activeSessionIdRef: { current: SESSION_ID },
+  });
+  expect(state).toMatchObject({ path: "model.stl", previewOnly: true, content: "" });
+  expect(mockRequestFileContent).not.toHaveBeenCalled();
+});

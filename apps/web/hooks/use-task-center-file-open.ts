@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  shouldOpenFilePreview,
+  previewFileState,
+  canOfferViewerAfterReadFailure,
+} from "@/lib/plugins/file-viewer-selection";
 import { useAppStoreApi } from "@/components/state-provider";
 import { isRenameReserved, trackRenameOpen } from "./file-rename-continuity";
 import { useCallback } from "react";
@@ -32,6 +37,10 @@ export function useTaskCenterFileOpen({
         });
         return;
       }
+      if (shouldOpenFilePreview(filePath)) {
+        addFileTab(previewFileState(filePath, repo));
+        return;
+      }
       const pending = trackRenameOpen(store, activeSessionId, filePath, repo);
       try {
         const response: FileContentResponse = await requestFileContent(
@@ -55,6 +64,10 @@ export function useTaskCenterFileOpen({
           resolvedPath: response.resolved_path,
         });
       } catch (error) {
+        if (canOfferViewerAfterReadFailure(filePath) && pending.current()) {
+          addFileTab(previewFileState(filePath, repo));
+          return;
+        }
         toast({
           title: t("task:failedToOpenFile"),
           description: error instanceof Error ? error.message : t("task:unknownError"),
