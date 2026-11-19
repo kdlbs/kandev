@@ -21,6 +21,9 @@ func (b *SystemEventBroadcaster) subscribeSidebarGrouping(eventBus bus.EventBus)
 		switch {
 		case catalog:
 			payload["catalog"] = true
+			if pluginID != "" {
+				payload["plugin_id"] = pluginID
+			}
 		case pluginID != "":
 			payload["plugin_id"] = pluginID
 		default:

@@ -47,7 +47,9 @@ key. Validate duplicate IDs, referenced action existence/scope, field bounds and
 cross-entry conflicts at installation. Include eligible descriptors in active
 plugin boot/HTTP metadata. Existing manifests default to no entries.
 
-Declarations require `min_kandev_version` at least `0.102.0`. The authenticated
+Declarations require the unreleased `min_kandev_version` floor `0.103.0`;
+Stable 0.102.0 lacks the contract. Coordinate package publication with the
+supporting Host release; matching development builds remain usable. The authenticated
 `GET /api/plugins/sidebar-groupings` endpoint returns `{groupings: [...]}`;
 `sidebarGroupings` in the boot payload seeds the same independent catalog.
 Declaration bounds are 16 providers per plugin, 128-byte plugin/grouping IDs
@@ -140,6 +142,10 @@ Initially use the existing bounded server query for these views; built-in local
 optimization is unchanged. No automatic page traversal or browser grouping of
 an already-sliced page.
 
+Cold task-detail boot does not resolve plugin groupings synchronously. Keep the
+provider metadata in boot; the existing authenticated sidebar read resolves
+classification after the task route can paint.
+
 ## Lifecycle, freshness and failure
 
 Carry provider source revision and plugin lifecycle generation in query identity
@@ -157,9 +163,11 @@ Host workspace state mutations emit identity-only
 `plugin.sidebar-grouping.updated` only to authorized workspace subscribers;
 global catalog changes contain no workspace classification data. Catalog records
 are captured under the persistence guard, then projected after releasing it.
-Policy versions publish after Save; generation binds installation, policy and epoch.
-Committed status changes invalidate even if cleanup fails; failed commits do not.
-Config completion, registry epochs, store/scope and metadata requests stay fenced.
+Policy versions publish after Save; generation binds installation, policy and a
+per-plugin lifecycle epoch. Committed status changes invalidate even if cleanup
+fails; failed commits do not. Catalog refreshes preserve unchanged provider identities.
+Only store/auth/reconnect boundaries invalidate every provider; unrelated plugin
+configuration or lifecycle changes preserve the selected page.
 Boot metadata is owned by its concrete store and scope. Context reconciliation
 clears it even while disconnected. Failed catalog transport reads do not publish
 an authoritative empty catalog: eligible same-context metadata is retained,

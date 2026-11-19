@@ -3941,11 +3941,12 @@ registry.registerTaskListFacet({
 Use a manifest `sidebar_groupings` declaration when classification must cover
 the complete sidebar view before its 100-row page boundary. This is a backend
 contract, not a `registerTaskListFacet` option. It works without a browser bundle.
-Declare `min_kandev_version: "0.102.0"` or later; this contract requires a host
-build containing complete sidebar grouping support.
+Declare `min_kandev_version: "0.103.0"` or later. This unreleased floor excludes
+Stable 0.102.0, which lacks the contract. Until a supporting release ships, use
+a matching development checkout and do not publish the package.
 
 ```yaml
-min_kandev_version: "0.102.0"
+min_kandev_version: "0.103.0"
 actions:
   - key: "sidebar-labels"
     scope: "workspace"

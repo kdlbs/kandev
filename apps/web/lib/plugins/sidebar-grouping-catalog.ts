@@ -18,6 +18,8 @@ export function seedSidebarGroupingCatalog(
   providers: readonly SidebarGroupingProvider[],
 ): void {
   catalogGeneration++;
+  if (catalogOwner !== store || catalogScope !== sidebarTaskPageScope(store.getState()))
+    pluginRegistry.invalidateSidebarGroupings();
   catalogOwner = store;
   catalogScope = sidebarTaskPageScope(store.getState());
   pluginRegistry.setSidebarGroupings(providers);

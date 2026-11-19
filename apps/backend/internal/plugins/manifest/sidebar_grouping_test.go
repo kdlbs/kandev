@@ -20,7 +20,7 @@ func TestSidebarPluginGroupingManifestRejectsInvalidDeclarations(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m, err := Parse([]byte(validManifestYAML + "\nmin_kandev_version: '0.102.0'\n" + tc.actions + "sidebar_groupings:\n" + tc.groupings + "\n"))
+			m, err := Parse([]byte(validManifestYAML + "\nmin_kandev_version: '" + MinimumSidebarGroupingVersion + "'\n" + tc.actions + "sidebar_groupings:\n" + tc.groupings + "\n"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -42,7 +42,7 @@ func repeatedGroupingYAML(count int) string {
 }
 
 func TestSidebarPluginGroupingManifestRoundTripAndClone(t *testing.T) {
-	m, err := Parse([]byte(validManifestYAML + "\nmin_kandev_version: '0.102.0'\n" + groupingActionYAML + `sidebar_groupings:
+	m, err := Parse([]byte(validManifestYAML + "\nmin_kandev_version: '" + MinimumSidebarGroupingVersion + "'\n" + groupingActionYAML + `sidebar_groupings:
   - {id: labels, label: Labels, label_key: plugin:labels, action: labels.snapshot}
 `))
 	if err != nil {
@@ -62,14 +62,14 @@ func TestSidebarPluginGroupingManifestRoundTripAndClone(t *testing.T) {
 }
 
 func TestSidebarPluginGroupingMinimumHostVersion(t *testing.T) {
-	for _, minimum := range []string{"", "0.101.0", "0.102.0"} {
+	for _, minimum := range []string{"", "0.101.0", "0.102.0", "0.103.0"} {
 		t.Run(minimum, func(t *testing.T) {
 			m := managedManifest(t)
 			m.MinKandevVersion = minimum
 			m.Actions = []Action{{Key: "labels.snapshot", ResourceScope: ActionScopeWorkspace, MaxBodyBytes: 16}}
 			m.SidebarGroupings = []SidebarGrouping{{ID: "labels", Label: "Labels", Action: "labels.snapshot"}}
 			err := m.Validate()
-			if minimum == "0.102.0" {
+			if minimum == "0.103.0" {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -80,10 +80,19 @@ func TestSidebarPluginGroupingMinimumHostVersion(t *testing.T) {
 	}
 }
 
+func TestSidebarGroupingPackageRejectsReleasedHostWithoutProviders(t *testing.T) {
+	if err := CheckMinimumKandevVersion(MinimumSidebarGroupingVersion, "0.102.0"); err == nil {
+		t.Fatal("released host without sidebar providers accepted the package")
+	}
+	if err := CheckMinimumKandevVersion(MinimumSidebarGroupingVersion, "0.103.0"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSidebarPluginGroupingRequiresAddressablePluginIdentity(t *testing.T) {
 	m := managedManifest(t)
 	m.ID = strings.Repeat("a", 129)
-	m.MinKandevVersion = "0.102.0"
+	m.MinKandevVersion = MinimumSidebarGroupingVersion
 	m.Actions = []Action{{Key: "labels.snapshot", ResourceScope: ActionScopeWorkspace, MaxBodyBytes: 16}}
 	m.SidebarGroupings = []SidebarGrouping{{ID: "labels", Label: "Labels", Action: "labels.snapshot"}}
 	if err := m.Validate(); err == nil {

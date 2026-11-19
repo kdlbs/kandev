@@ -27,12 +27,21 @@ func (h *pluginHost) notifySidebarGroupingState(ctx context.Context, scope, scop
 	}
 }
 
-func (s *Service) notifySidebarGroupingCatalog() {
-	s.sidebarGroupingCatalogGeneration.Add(1)
+func (s *Service) notifySidebarGroupingCatalog(pluginID string) {
+	payload := map[string]any{"catalog": true}
+	if pluginID != "" {
+		s.mu.Lock()
+		if s.sidebarGroupingCatalogGenerations == nil {
+			s.sidebarGroupingCatalogGenerations = make(map[string]uint64)
+		}
+		s.sidebarGroupingCatalogGenerations[pluginID]++
+		s.mu.Unlock()
+		payload[pluginIDPayloadKey] = pluginID
+	}
 	if s.eventBus == nil {
 		return
 	}
-	event := bus.NewEvent(events.PluginSidebarGroupingUpdated, "plugins", map[string]any{"catalog": true})
+	event := bus.NewEvent(events.PluginSidebarGroupingUpdated, "plugins", payload)
 	if err := s.eventBus.Publish(context.Background(), events.PluginSidebarGroupingUpdated, event); err != nil {
 		s.log.Warn("sidebar grouping catalog invalidation failed", zap.Error(err))
 	}

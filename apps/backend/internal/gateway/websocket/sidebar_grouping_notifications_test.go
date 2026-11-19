@@ -46,7 +46,7 @@ func TestSidebarPluginGroupingInvalidationKeepsWorkspaceStatePrivate(t *testing.
 		if err := json.Unmarshal(message.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if len(payload) != 1 || payload["catalog"] != true {
+		if len(payload) != 2 || payload["catalog"] != true || payload["plugin_id"] != "acme" {
 			t.Fatalf("global catalog notification exposed workspace or state: %#v", payload)
 		}
 	}

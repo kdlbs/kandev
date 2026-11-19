@@ -13,6 +13,7 @@ import (
 	userdto "github.com/kandev/kandev/internal/user/dto"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func (b bootStateBuilder) taskDetailRouteData(ctx context.Context, req *http.Request, taskID, requestedSessionID string) map[string]any {
@@ -76,6 +77,10 @@ func (b bootStateBuilder) taskDetailSidebarTaskPage(
 		settingsDTO = &settings.Settings
 	}
 	query, prefs := taskDetailSidebarQuery(settingsDTO, task.WorkspaceID, i18n.FromRequest(req))
+	// Provider RPCs belong to the asynchronous sidebar read, not cold route paint.
+	if _, _, plugin := pluginsdk.ParseSidebarGroupingReference(query.Group); plugin {
+		return nil
+	}
 	page, err := b.p.taskSvc.QuerySidebarTaskPage(ctx, task.WorkspaceID, query, prefs)
 	if err != nil {
 		b.logBootError("query task detail sidebar page", err)

@@ -33,8 +33,8 @@ All suffixes refer to AC-UI-SIDEBAR-MULTI-TAG-001.
 Keep manifest sidebar_groupings entry tags / Tag / sidebar-tags unchanged.
 Add entry multi-tags / Multi-tag / sidebar-multi-tags with authenticated,
 workspace-scoped action and max_body_bytes 16, matching the existing action.
-Canonical reference: plugin:kandev-plugin-tags:multi-tags. Retain the existing
-host floor 0.102.0 and exact compatible standalone SDK pins: no wire change.
+Canonical reference: plugin:kandev-plugin-tags:multi-tags. Use the corrected
+unreleased host floor 0.103.0 and a pinned compatible standalone SDK: no wire change.
 Bump the local plugin manifest/Makefile package version from 0.19.0 to 0.20.0
 for installable iteration; that is not release/publication authorization.
 Provider copy follows the existing manifest-owned Tag label convention, not a

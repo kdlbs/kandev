@@ -14,8 +14,9 @@ const MinimumInstanceReadContextsVersion = "0.99.0"
 // workspace-scoped agent tools.
 const MinimumWorkspaceScopeVersion = "0.100.0"
 
-// MinimumSidebarGroupingVersion gates complete server-owned sidebar classification.
-const MinimumSidebarGroupingVersion = "0.102.0"
+// MinimumSidebarGroupingVersion reserves the unreleased Host compatibility floor.
+// Stable 0.102.0 predates complete server-owned sidebar classification.
+const MinimumSidebarGroupingVersion = "0.103.0"
 
 // RequiresMessagesCapabilityMinimum reports whether a manifest opts into the
 // messages read resource whose Host contract requires a minimum release.

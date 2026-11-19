@@ -53,17 +53,19 @@ function PageButtons({
       );
   return (
     <div className="flex items-center justify-between gap-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        className={buttonSize}
-        aria-label={t("sidebar:previousPage")}
-        disabled={pending || !page.has_previous}
-        onClick={() => onPageChange(page.page - 1)}
-      >
-        <IconChevronLeft className="h-4 w-4" />
-        <span className={touchTargets ? "" : "sr-only"}>{t("sidebar:previousPage")}</span>
-      </Button>
+      {totalPages > 1 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className={buttonSize}
+          aria-label={t("sidebar:previousPage")}
+          disabled={pending || !page.has_previous}
+          onClick={() => onPageChange(page.page - 1)}
+        >
+          <IconChevronLeft className="h-4 w-4" />
+          <span className={touchTargets ? "" : "sr-only"}>{t("sidebar:previousPage")}</span>
+        </Button>
+      )}
       <span className="min-w-0 text-center text-xs text-muted-foreground" aria-live="polite">
         {t(page.grouping_revision ? "sidebar:pluginPageStatus" : "sidebar:pageStatus", {
           page: page.page,
@@ -71,17 +73,19 @@ function PageButtons({
           ...(page.grouping_revision ? { count: page.total_tasks } : {}),
         })}
       </span>
-      <Button
-        variant="ghost"
-        size="sm"
-        className={buttonSize}
-        aria-label={t("sidebar:nextPage")}
-        disabled={pending || !page.has_next}
-        onClick={() => onPageChange(page.page + 1)}
-      >
-        <span className={touchTargets ? "" : "sr-only"}>{t("sidebar:nextPage")}</span>
-        <IconChevronRight className="h-4 w-4" />
-      </Button>
+      {totalPages > 1 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className={buttonSize}
+          aria-label={t("sidebar:nextPage")}
+          disabled={pending || !page.has_next}
+          onClick={() => onPageChange(page.page + 1)}
+        >
+          <span className={touchTargets ? "" : "sr-only"}>{t("sidebar:nextPage")}</span>
+          <IconChevronRight className="h-4 w-4" />
+        </Button>
+      )}
     </div>
   );
 }

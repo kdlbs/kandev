@@ -9,6 +9,7 @@ import {
   reconcileSidebarGroupingCatalogScope,
   refreshSidebarGroupingCatalog,
 } from "./sidebar-grouping-catalog";
+import { registerSidebarGroupingHandlers } from "@/lib/ws/handlers/sidebar-grouping";
 
 vi.mock("@/lib/api/domains/plugins-api", () => ({ listSidebarGroupingProviders: vi.fn() }));
 vi.mock("./host", () => ({ installPluginGlobal: vi.fn(), loadPlugins: vi.fn() }));
@@ -24,6 +25,42 @@ afterEach(() => {
   pluginRegistry.setSidebarGroupings([]);
 });
 
+it("preserves other provider identities through catalog additions and replacements", () => {
+  pluginRegistry.setSidebarGroupings([provider]);
+  const before = pluginRegistry.sidebarGroupingIdentity(provider.reference, "workspace");
+  const other = { reference: "plugin:other:labels", label: "Other", generation: "g1" };
+  pluginRegistry.setSidebarGroupings([provider, other]);
+  expect(pluginRegistry.sidebarGroupingIdentity(provider.reference, "workspace")).toBe(before);
+  const otherBefore = pluginRegistry.sidebarGroupingIdentity(other.reference, "workspace");
+  pluginRegistry.setSidebarGroupings([provider, { ...other, generation: "g2" }]);
+  expect(pluginRegistry.sidebarGroupingIdentity(provider.reference, "workspace")).toBe(before);
+  expect(pluginRegistry.sidebarGroupingIdentity(other.reference, "workspace")).not.toBe(
+    otherBefore,
+  );
+  pluginRegistry.setSidebarGroupings([{ ...provider, generation: "new" }]);
+  expect(pluginRegistry.sidebarGroupingIdentity(provider.reference, "workspace")).not.toBe(before);
+});
+
+it("catalog events fence only the changed provider before refreshing metadata", async () => {
+  const store = createAppStore();
+  bootPlugins({ sidebarGroupings: [provider] }, store);
+  const before = pluginRegistry.sidebarGroupingIdentity(provider.reference, "workspace");
+  vi.mocked(listSidebarGroupingProviders).mockResolvedValue([provider]);
+  const handler = registerSidebarGroupingHandlers(store)["plugin.sidebar-grouping.updated"]!;
+  handler({
+    type: "notification",
+    action: "plugin.sidebar-grouping.updated",
+    payload: { catalog: true, plugin_id: "other" },
+  });
+  await vi.waitFor(() => expect(listSidebarGroupingProviders).toHaveBeenCalledOnce());
+  expect(pluginRegistry.sidebarGroupingIdentity(provider.reference, "workspace")).toBe(before);
+  handler({
+    type: "notification",
+    action: "plugin.sidebar-grouping.updated",
+    payload: { catalog: true, plugin_id: "acme" },
+  });
+  expect(pluginRegistry.sidebarGroupingIdentity(provider.reference, "workspace")).not.toBe(before);
+});
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.4
 it("does not restore a removed provider from an older catalog response", async () => {
   const store = createAppStore();

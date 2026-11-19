@@ -53,7 +53,7 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	if err != nil {
 		return err
 	}
-	defer s.notifySidebarGroupingCatalog()
+	defer s.notifySidebarGroupingCatalog(id)
 	catalogNotified := false
 	notifyCatalog := func() {
 		if catalogNotified {

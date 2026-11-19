@@ -103,7 +103,7 @@ func TestSidebarGroupingCatalogRefreshesAfterConfigRotation(t *testing.T) {
 				synctest.Wait()
 				select {
 				case payload := <-received:
-					require.Equal(t, map[string]any{"catalog": true}, payload)
+					require.Equal(t, map[string]any{"catalog": true, "plugin_id": record.ID}, payload)
 				default:
 					t.Fatal("admitted config rotation left connected sidebar consumers on the old catalog")
 				}
@@ -180,5 +180,26 @@ func TestSidebarGroupingCatalogTracksCommittedStatusOnCleanupFailure(t *testing.
 				})
 			})
 		}
+	}
+}
+
+func TestSidebarGroupingCatalogPreservesUnrelatedProvider(t *testing.T) {
+	for _, operation := range []string{"config", "disable"} {
+		t.Run(operation, func(t *testing.T) {
+			svc, _, fsStore, _ := newTestServiceWithDir(t)
+			provider := installTestPlugin(t, svc, "kandev-plugin-slack")
+			provider.SidebarGroupings = []manifest.SidebarGrouping{{ID: "labels", Label: "Labels", Action: "labels.snapshot"}}
+			provider.Actions = []manifest.Action{{Key: "labels.snapshot", ResourceScope: manifest.ActionScopeWorkspace}}
+			require.NoError(t, fsStore.Save(provider))
+			svc.registry.Add(provider)
+			unrelated := installTestPlugin(t, svc, "kandev-plugin-other")
+			before := svc.SidebarGroupingCatalog()
+			if operation == "config" {
+				require.NoError(t, svc.UpdateConfig(t.Context(), unrelated.ID, map[string]any{"label": "Changed"}))
+			} else {
+				require.NoError(t, svc.Disable(unrelated.ID))
+			}
+			require.Equal(t, before, svc.SidebarGroupingCatalog(), "unrelated lifecycle must not change provider generations")
+		})
 	}
 }

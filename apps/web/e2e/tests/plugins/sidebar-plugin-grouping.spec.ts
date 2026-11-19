@@ -8,12 +8,15 @@ import {
   readGroupingPage,
   saveGroupingView,
   writeGroupingState,
+  installUnrelatedGroupingControl,
+  UNRELATED_GROUPING_PLUGIN_ID,
 } from "./sidebar-plugin-grouping-helpers";
 
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.1
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.2
 test.afterEach(async ({ apiClient }) => {
   await uninstallFixturePlugin(apiClient);
+  await apiClient.rawRequest("DELETE", `/api/plugins/${UNRELATED_GROUPING_PLUGIN_ID}`);
 });
 
 test("complete plugin grouping is a normal saved sidebar view", async ({
@@ -225,9 +228,11 @@ test("groups the whole saved forest before pagination and recovers without rewri
   testPage,
   apiClient,
   seedData,
+  backend,
 }, testInfo) => {
   test.setTimeout(180_000);
   await installFixturePlugin(testPage);
+  await installUnrelatedGroupingControl(apiClient, backend.tmpDir);
   const data = await seedCompleteGrouping(apiClient, seedData);
   const plain = await readGroupingPage(apiClient, seedData.workspaceId, { group: "none" });
   expect(plain.entries.some((entry) => entry.task_id === data.roots[100].id)).toBe(false);
@@ -288,6 +293,21 @@ test("groups the whole saved forest before pagination and recovers without rewri
   await sidebar.getByRole("button", { name: "Next", exact: true }).click();
   await expect(bulk.locator(`[data-task-row-id="${data.roots[100].id}"]`)).toBeVisible();
   await expect(sidebar).toContainText(data.untagged.title);
+  for (const operation of ["config", "disable", "enable"]) {
+    const refreshedCatalog = testPage.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/plugins/sidebar-groupings") && response.status() === 200,
+    );
+    const changed = await apiClient.rawRequest(
+      operation === "config" ? "PATCH" : "POST",
+      `/api/plugins/${UNRELATED_GROUPING_PLUGIN_ID}${operation === "config" ? "" : `/${operation}`}`,
+      operation === "config" ? { config: {} } : undefined,
+    );
+    expect(changed.ok, await changed.text()).toBe(true);
+    await (await refreshedCatalog).finished();
+    await expect(sidebar.getByTestId("sidebar-page-controls")).toContainText("Page 2 of 2");
+    await expect(sidebar).toContainText(data.untagged.title);
+  }
   const renamed = {
     ...data.snapshot,
     revision: "r2",
@@ -320,6 +340,15 @@ test("groups the whole saved forest before pagination and recovers without rewri
     .toEqual([`${SIDEBAR_GROUPING}:value:late`]);
   await testPage.reload();
   await expect(alpha.getByTestId("sidebar-group-header")).toHaveAttribute("aria-expanded", "false");
+  await bulk.getByTestId("sidebar-group-header").click();
+  await expect(sidebar.getByRole("button", { name: "Next", exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: "Previous", exact: true })).toHaveCount(0);
+  await expect(sidebar.getByTestId("sidebar-page-controls")).toContainText("unique tasks");
+  await testPage.screenshot({
+    path: testInfo.outputPath("single-page-grouping-count.png"),
+    animations: "disabled",
+  });
+  await bulk.getByTestId("sidebar-group-header").click();
   const disabled = await apiClient.rawRequest("POST", `/api/plugins/${PLUGIN_ID}/disable`);
   expect(disabled.ok, await disabled.text()).toBe(true);
   await expect(sidebar.getByRole("alert")).toContainText("plugin grouping", { timeout: 30_000 });

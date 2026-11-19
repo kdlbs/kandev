@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"go.uber.org/zap"
 
@@ -108,29 +107,29 @@ type Service struct {
 	// directory belongs to an install still waiting for it.
 	extractingPaths map[string]int
 
-	pluginsDir                       string
-	store                            store.Store
-	approvals                        *approvalLedger
-	registry                         *Registry
-	state                            *state.Store
-	exactCommandStore                *state.CommandStore
-	userState                        *state.UserStore
-	instances                        *instances.Store
-	instanceState                    *state.InstanceStore
-	webArtifacts                     *webapp.ArtifactStore
-	webRuntime                       *webapp.Runtime
-	eventHub                         *webapp.EventHub
-	eventSubscription                bus.Subscription
-	userStateCleanup                 userStateCleanupStore
-	agentConvs                       AgentConversationService
-	managedConvs                     ManagedAgentConversationService
-	managedAutomationSchedules       ManagedConversationScheduleService
-	automationHistoryData            AutomationHistoryDataSource
-	eventBus                         bus.EventBus
-	sidebarGroupingCatalogGeneration atomic.Uint64
-	conversationTokens               *conversationTokenManager
-	conversationEpoch                string
-	log                              *logger.Logger
+	pluginsDir                        string
+	store                             store.Store
+	approvals                         *approvalLedger
+	registry                          *Registry
+	state                             *state.Store
+	exactCommandStore                 *state.CommandStore
+	userState                         *state.UserStore
+	instances                         *instances.Store
+	instanceState                     *state.InstanceStore
+	webArtifacts                      *webapp.ArtifactStore
+	webRuntime                        *webapp.Runtime
+	eventHub                          *webapp.EventHub
+	eventSubscription                 bus.Subscription
+	userStateCleanup                  userStateCleanupStore
+	agentConvs                        AgentConversationService
+	managedConvs                      ManagedAgentConversationService
+	managedAutomationSchedules        ManagedConversationScheduleService
+	automationHistoryData             AutomationHistoryDataSource
+	eventBus                          bus.EventBus
+	sidebarGroupingCatalogGenerations map[string]uint64
+	conversationTokens                *conversationTokenManager
+	conversationEpoch                 string
+	log                               *logger.Logger
 
 	deliverer                       Deliverer
 	agentToolCatalogListener        AgentToolCatalogListener
@@ -960,7 +959,7 @@ func (s *Service) notifyDeliverer() {
 	if d != nil {
 		d.Refresh()
 	}
-	s.notifySidebarGroupingCatalog()
+	s.notifySidebarGroupingCatalog("")
 }
 
 // List returns every installed plugin, sorted by id.

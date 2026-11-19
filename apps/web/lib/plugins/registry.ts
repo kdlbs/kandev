@@ -133,7 +133,6 @@ class PluginRegistryStore {
   setSidebarGroupings(providers: readonly SidebarGroupingProvider[]): void {
     if (JSON.stringify(providers) === JSON.stringify(this.sidebarGroupings)) return;
     this.sidebarGroupings = providers.map((provider) => ({ ...provider }));
-    this.sidebarGroupingEpoch++;
     this.notify();
   }
 

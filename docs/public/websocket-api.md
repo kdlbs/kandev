@@ -384,11 +384,12 @@ separate and clear previously retained results.
 `GET /api/plugins/sidebar-groupings` returns active compatible provider metadata,
 also supplied as boot `sidebarGroupings`. The
 `plugin.sidebar-grouping.updated` WebSocket notification carries either
-`{plugin_id, workspace_id}`, install-wide `{plugin_id}`, or `{catalog: true}`.
-Workspace notifications use workspace authorization; global notifications
-contain identity only. They never contain classification/state values.
-Clients invalidate scoped results and refresh catalog metadata on catalog events
-or reconnect, fencing old provider, workspace, and account generations.
+`{plugin_id, workspace_id}`, install-wide `{plugin_id}`, or
+`{catalog: true, plugin_id?}`. Workspace notifications use workspace authorization;
+global notifications contain identity only, never classification/state values.
+Catalog events with a plugin identity fence only that provider before metadata
+refresh. A catalog refresh preserves unchanged provider generations and pages;
+store/account/workspace changes and reconnect retain their broader fences.
 
 A query accepts up to 20 filter clauses. Each `in` or `not_in` membership filter
 accepts up to 1,000 values, including an empty list. Each decoded string is

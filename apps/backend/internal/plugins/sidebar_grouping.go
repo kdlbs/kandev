@@ -97,7 +97,10 @@ func sidebarGroupingAction(record *store.Record, groupID string) (string, bool) 
 }
 
 func (s *Service) sidebarGroupingGeneration(record *store.Record) string {
-	value, _ := json.Marshal([]any{record.InstallationID, record.Version, record.InstallPath, record.InstalledAt, record.AgentToolPolicyVersion, s.sidebarGroupingCatalogGeneration.Load()})
+	s.mu.Lock()
+	epoch := s.sidebarGroupingCatalogGenerations[record.ID]
+	s.mu.Unlock()
+	value, _ := json.Marshal([]any{record.InstallationID, record.Version, record.InstallPath, record.InstalledAt, record.AgentToolPolicyVersion, epoch})
 	digest := sha256.Sum256(value)
 	return hex.EncodeToString(digest[:])
 }

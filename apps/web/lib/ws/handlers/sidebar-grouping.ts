@@ -8,7 +8,7 @@ export function registerSidebarGroupingHandlers(store: StoreApi<AppState>): WsHa
   return {
     "plugin.sidebar-grouping.updated": ({ payload }) => {
       if (payload.catalog) {
-        pluginRegistry.invalidateSidebarGroupings();
+        if (payload.plugin_id) pluginRegistry.invalidateSidebarGroupings(payload.plugin_id);
         void refreshSidebarGroupingCatalog(store);
         return;
       }

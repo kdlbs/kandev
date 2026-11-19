@@ -324,7 +324,7 @@ preview, cancellation, and whole-pair fallback rules.
 | `actions[].scope`                  | yes\*                                | `workspace` \| `task` \| `repository` \| `notification_provider` | Resource selector the host authorizes. Notification provider actions require an owning formatter declaration and the exact management context above. A task-scoped invocation may additionally name one repository attached to that verified task. Use the canonical field name `scope`; `resource_scope` is only a legacy read-compatibility spelling and must not be authored. |
 | `actions[].access`                 | no                                   | `authenticated` \| `admin`            | Defaults to `authenticated`. `admin` is enforced before the action envelope is read and requires `min_kandev_version: "0.91.1"` or later so older hosts cannot silently treat it as authenticated.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `actions[].max_body_bytes`         | yes\*                                | int                                   | Maximum size of the decoded untrusted `body`, from 1 through 1,048,576 bytes. The whole HTTP envelope has a slightly larger hard cap.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `sidebar_groupings[]` | no | object[] | Complete saved-sidebar providers, independent of `ui.bundle`. At most 16; requires `min_kandev_version` at least `0.102.0`. |
+| `sidebar_groupings[]` | no | object[] | Complete saved-sidebar providers, independent of `ui.bundle`. At most 16; requires `min_kandev_version` at least `0.103.0` (unreleased). |
 | `sidebar_groupings[].id` | yes\* | string | Unique plugin-local ID matching the manifest ID grammar, at most 128 bytes. The plugin ID must also be at most 128 bytes when declaring a grouping. Saved identity is `plugin:<plugin-id>:<id>`. |
 | `sidebar_groupings[].label` | yes\* | string | Nonblank UTF-8 selector label, at most 256 bytes. |
 | `sidebar_groupings[].label_key` | no | string | Optional translation key, at most 256 bytes; `label` is the fallback. |
@@ -402,8 +402,10 @@ declares `agent_tools[].invocation_scope: workspace` must set
 `min_kandev_version: "0.100.0"` or later.
 
 Complete saved-sidebar grouping declarations require
-`min_kandev_version: "0.102.0"` or later. Development hosts still validate that
-declared minimum even when their own version comparison is exempt.
+`min_kandev_version: "0.103.0"` or later. This is an unreleased compatibility
+floor: Stable 0.102.0 does not support the contract. Coordinate publication with
+a supporting Host release. Matching development hosts still validate the declared
+minimum even when their own version comparison is exempt.
 
 ### Static web app network origins
 

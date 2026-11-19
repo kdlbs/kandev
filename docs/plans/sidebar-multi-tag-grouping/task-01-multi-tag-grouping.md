@@ -255,3 +255,34 @@ recovery coverage. The 67 smoke records include screenshots and narrative
 entries, not 67 independent assertions. Physical-phone and remote-CI proof
 remain absent; historical broad gates remain non-green. No new commit, push,
 release, deployment or user-demo upgrade was performed.
+
+### Post-rebase round 1 corrections
+
+The later post-publication review found six regressions in the complete feature.
+The source clean streak reset to zero; earlier clean rounds remain historical.
+
+- Compatibility now reserves an unreleased 0.103.0 minimum. Released 0.102.0
+  predates this contract; development builds require the matching implementation.
+  Publication must wait for the supporting Host release, not merely this floor.
+- Dedicated plugin setup and workflows use reachable
+  `Fclem/kandev@a717a8db0b51c29c01a4d3655cb2649f529dacec`. Setup compile-checks
+  existing SDKs without resetting them. A clean sparse setup/build passed;
+  the released 0.102.0 SDK was incorrectly accepted before, and is now rejected.
+- A barrier regression demonstrated cold task-detail boot waiting on a plugin
+  RPC. Boot now leaves grouped pages to the authenticated asynchronous read;
+  the same regression also proves that later grouped reads reach the provider.
+- Lifecycle generations and immediate invalidations are provider-scoped.
+  Metadata refreshes preserve unchanged identities; the gateway retains plugin
+  identity without publishing workspace classification. Real config/disable
+  regressions and frontend identity tests failed before the correction.
+- A 1,001-definition catalog with one observed singleton now succeeds in
+  Multi-tag. The emitted subset, expanded-pair and encoded-byte limits remain
+  independent; the existing Tag action is unchanged.
+- Plugin totals remain visible on a single page without Previous/Next buttons.
+  The 0/100/101-occurrence component regression failed before the correction.
+
+The owning original system design and public plugin compatibility references
+are updated. Native unrelated-plugin page-two and collapse-below-limit coverage
+is included in the desktop grouping scenario. Final corrective verification,
+artifact provenance and commit/push receipts are recorded in the platform task
+plan after their commands complete. No release or user-demo upgrade is authorized.

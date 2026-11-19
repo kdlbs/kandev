@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { expect } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import { PLUGIN_ID } from "../../helpers/plugin-fixture";
@@ -5,6 +7,47 @@ import type { SidebarGroupingSnapshot } from "@kdlbs/plugin-sdk";
 import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http";
 
 export const SIDEBAR_GROUPING = `plugin:${PLUGIN_ID}:fixture-labels`;
+export const UNRELATED_GROUPING_PLUGIN_ID = "kandev-plugin-grouping-control";
+
+export async function installUnrelatedGroupingControl(api: ApiClient, tempDir: string) {
+  const response = await api.rawRequest("GET", "/api/plugins");
+  expect(response.ok).toBe(true);
+  const body = (await response.json()) as {
+    plugins: Array<{ id: string; install_path: string; runtime: unknown }>;
+  };
+  const source = body.plugins.find((record) => record.id === PLUGIN_ID)!;
+  const stage = path.join(tempDir, ".kandev", "plugins", UNRELATED_GROUPING_PLUGIN_ID, "1.0.0");
+  fs.mkdirSync(stage, { recursive: true });
+  fs.cpSync(path.join(source.install_path, "server"), path.join(stage, "server"), {
+    recursive: true,
+  });
+  fs.writeFileSync(
+    path.join(stage, "manifest.yaml"),
+    JSON.stringify({
+      id: UNRELATED_GROUPING_PLUGIN_ID,
+      api_version: 2,
+      version: "1.0.0",
+      display_name: "Unrelated grouping control",
+      description: "Lifecycle control without sidebar providers",
+      author: "kandev",
+      runtime: source.runtime,
+      capabilities: { state: true },
+    }),
+  );
+  const sync = await api.rawRequest("POST", "/api/plugins/sync");
+  expect(sync.ok, await sync.text()).toBe(true);
+  const enabled = await api.rawRequest(
+    "POST",
+    `/api/plugins/${UNRELATED_GROUPING_PLUGIN_ID}/enable`,
+  );
+  expect(enabled.ok, await enabled.text()).toBe(true);
+  await expect
+    .poll(async () => {
+      const current = await api.rawRequest("GET", `/api/plugins/${UNRELATED_GROUPING_PLUGIN_ID}`);
+      return (await current.json()).status;
+    })
+    .toBe("active");
+}
 
 export async function writeGroupingState(
   api: ApiClient,
