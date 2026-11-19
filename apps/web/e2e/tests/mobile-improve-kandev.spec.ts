@@ -1,6 +1,7 @@
 import { test, expect } from "../fixtures/test-base";
 
 const BOOTSTRAP_URL = "**/api/v1/system/improve-kandev/bootstrap";
+const BOOTSTRAP_STATUS_URL = "**/api/v1/system/improve-kandev/bootstrap/*";
 const HEALTH_URL = "**/api/v1/system/health";
 
 test.describe("Improve Kandev on mobile", () => {
@@ -9,6 +10,7 @@ test.describe("Improve Kandev on mobile", () => {
     apiClient,
     seedData,
   }) => {
+    await testPage.setViewportSize({ width: 700, height: 900 });
     await apiClient.saveUserSettings({ agent_generated_task_titles: false });
     await testPage.route(HEALTH_URL, (route) =>
       route.fulfill({
@@ -19,8 +21,25 @@ test.describe("Improve Kandev on mobile", () => {
     );
     await testPage.route(BOOTSTRAP_URL, (route) =>
       route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({ job_id: "mobile-job-1" }),
+      }),
+    );
+    let firstStatusRead = true;
+    await testPage.route(BOOTSTRAP_STATUS_URL, (route) => {
+      if (firstStatusRead) {
+        firstStatusRead = false;
+        return route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "Temporary bootstrap failure" }),
+        });
+      }
+      return route.fulfill({
         status: 200,
         contentType: "application/json",
+        headers: { "Cache-Control": "no-store" },
         body: JSON.stringify({
           workspace_id: seedData.workspaceId,
           repository_id: seedData.repositoryId,
@@ -34,8 +53,8 @@ test.describe("Improve Kandev on mobile", () => {
           fork_status: "blocked_managed",
           fork_reason_code: "managed_unavailable",
         }),
-      }),
-    );
+      });
+    });
 
     await testPage.goto("/");
     await testPage.getByTestId("app-nav-trigger").tap();
@@ -52,13 +71,21 @@ test.describe("Improve Kandev on mobile", () => {
 
     const createDialog = testPage.getByTestId("create-task-dialog");
     await expect(createDialog).toBeVisible({ timeout: 10_000 });
+    const title = "Mobile issue fallback";
+    const description = "Describe the problem";
+    await createDialog.getByTestId("task-title-input").fill(title);
+    await createDialog.getByTestId("task-description-input").fill(description);
+    const retry = createDialog.getByTestId("improve-kandev-retry");
+    await expect(retry).toBeVisible({ timeout: 10_000 });
+    expect((await retry.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await retry.tap();
     await expect(
       createDialog.getByText(
         "Managed GitHub access could not prepare a verified fork for this task. Check the workspace GitHub connection or open an issue instead.",
       ),
-    ).toBeVisible();
-    await createDialog.getByTestId("task-title-input").fill("Mobile issue fallback");
-    await createDialog.getByTestId("task-description-input").fill("Describe the problem");
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(createDialog.getByTestId("task-title-input")).toHaveValue(title);
+    await expect(createDialog.getByTestId("task-description-input")).toContainText(description);
     await expect(createDialog.getByTestId("submit-start-agent")).toBeDisabled();
     await createDialog.getByRole("tab", { name: "Open issue" }).tap();
     await expect(

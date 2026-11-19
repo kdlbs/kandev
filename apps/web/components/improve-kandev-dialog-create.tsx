@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
@@ -51,7 +52,7 @@ function bootstrapBlockedReason(t: TFunction, bootstrap: BootstrapState): string
     return t("common:preparingKandevRepository");
   }
   if (bootstrap.kind === "error") {
-    return t("common:bootstrapFailedCloseAndReopen");
+    return t("task:retry");
   }
   return null;
 }
@@ -83,6 +84,7 @@ type CreateModeViewProps = {
   onOpenChange: (open: boolean) => void;
   workspaceId: string | null;
   bootstrap: BootstrapState;
+  onRetry: () => void;
   captureLogs: boolean;
   setCaptureLogs: (v: boolean) => void;
   transformDescription: (description: string) => Promise<string>;
@@ -131,6 +133,7 @@ export function CreateModeView(props: CreateModeViewProps) {
       extraFormSlot={
         <BootstrapStatusSlot
           bootstrap={bootstrap}
+          onRetry={props.onRetry}
           kind={kind}
           captureLogs={captureLogs}
           setCaptureLogs={setCaptureLogs}
@@ -285,11 +288,13 @@ function KindTabs({
 
 function BootstrapStatusSlot({
   bootstrap,
+  onRetry,
   kind,
   captureLogs,
   setCaptureLogs,
 }: {
   bootstrap: BootstrapState;
+  onRetry: () => void;
   kind: ImproveKind;
   captureLogs: boolean;
   setCaptureLogs: (v: boolean) => void;
@@ -297,7 +302,7 @@ function BootstrapStatusSlot({
   const { t } = useTranslation();
   return (
     <div className="space-y-2">
-      <BootstrapBanner bootstrap={bootstrap} kind={kind} />
+      <BootstrapBanner bootstrap={bootstrap} kind={kind} onRetry={onRetry} />
       {kind === "issue" && (
         <div
           className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-muted-foreground"
@@ -332,7 +337,15 @@ function BootstrapStatusSlot({
   );
 }
 
-function BootstrapBanner({ bootstrap, kind }: { bootstrap: BootstrapState; kind: ImproveKind }) {
+function BootstrapBanner({
+  bootstrap,
+  kind,
+  onRetry,
+}: {
+  bootstrap: BootstrapState;
+  kind: ImproveKind;
+  onRetry: () => void;
+}) {
   const { t } = useTranslation();
   if (bootstrap.kind === "loading" || bootstrap.kind === "idle") {
     return (
@@ -344,9 +357,21 @@ function BootstrapBanner({ bootstrap, kind }: { bootstrap: BootstrapState; kind:
   }
   if (bootstrap.kind === "error") {
     return (
-      <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-        <IconAlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-        <span>{bootstrap.message}</span>
+      <div className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive sm:flex-row sm:items-start">
+        <span className="flex items-start gap-2">
+          <IconAlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span>{bootstrap.message}</span>
+        </span>
+        <Button
+          type="button"
+          size="default"
+          variant="outline"
+          className="w-full sm:w-auto"
+          data-testid="improve-kandev-retry"
+          onClick={onRetry}
+        >
+          {t("task:retry")}
+        </Button>
       </div>
     );
   }
