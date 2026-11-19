@@ -950,9 +950,15 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		h.logMCPCreateAdmissionRejection(ctx, code, message)
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
+	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 
 	// Resolve repositories and default workspace/workflow from parent if needed.
-	resolved, err := h.resolveTaskRepositories(ctx, req.ParentID, req.SourceTaskID, req.Repositories)
+	resolved, err := h.resolveTaskRepositoriesForWorkspaceMode(
+		ctx, req.ParentID, req.SourceTaskID, req.Repositories, workspacePolicy.Mode, req.BaseBranch,
+	)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
@@ -1013,23 +1019,11 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
 
-	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
-	}
-
 	identity, _ := authn.IdentityFromContext(ctx)
 	contributions, err := h.resolveMCPRemoteContributions(ctx, req.WorkspaceID, identity.UserID, repos)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
-	if workspacePolicy.Mode == mcpWorkspaceModeInheritParent &&
-		(len(req.Repositories) > 0 || req.BaseBranch != "") {
-		if err := h.taskSvc.ValidateInheritedWorkspaceRepositorySelection(ctx, req.ParentID, repos); err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
-		}
-	}
-
 	// Resolve the destination step before launch metadata. The profile lookup
 	// below reads it off pendingTask, and CreateTask sends an agent start to
 	// the first auto_start_agent step rather than to the start step — leaving
@@ -1110,7 +1104,8 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		ExecutorProfileIDExplicit: req.ExecutorProfileID != "",
 		ExternalID:                req.ExternalID,
 		WorkspacePolicy:           &workspacePolicy,
-		MCPServerIDs:              req.MCPServerIDs,
+		ValidateInheritedWorkspaceRepositorySelection: workspacePolicy.Mode == mcpWorkspaceModeInheritParent,
+		MCPServerIDs: req.MCPServerIDs,
 	}
 	result, err := h.taskSvc.CreateTask(createCtx, createReq)
 	if err != nil {
@@ -1239,6 +1234,8 @@ type mcpCreateTaskResult struct {
 
 func classifyCreateTaskError(err error) string {
 	switch {
+	case errors.Is(err, models.ErrWorkspaceReuseUnsafe):
+		return ws.ErrorCodeValidation
 	case errors.Is(err, service.ErrWIPLimitExceeded):
 		return ws.ErrorCodeConflict
 	case errors.Is(err, service.ErrTaskTitleTooLong):
@@ -1341,28 +1338,23 @@ func (h *Handlers) resolveTaskRepositories(
 	parentID, sourceTaskID string,
 	explicit []mcpRepositoryInput,
 ) (taskRepoResult, error) {
+	return h.resolveTaskRepositoriesForWorkspaceMode(
+		ctx, parentID, sourceTaskID, explicit, "", "",
+	)
+}
+
+func (h *Handlers) resolveTaskRepositoriesForWorkspaceMode(
+	ctx context.Context,
+	parentID, sourceTaskID string,
+	explicit []mcpRepositoryInput,
+	workspaceMode, baseBranchOverride string,
+) (taskRepoResult, error) {
 	explicitRepos := h.explicitRepoInputsWithDefaults(ctx, explicit)
 
 	if parentID != "" {
-		parent, err := h.taskSvc.GetTask(ctx, parentID)
-		if err != nil {
-			return taskRepoResult{}, fmt.Errorf("invalid parent_id: %w", err)
-		}
-		if parent.IsEphemeral {
-			return taskRepoResult{}, fmt.Errorf("cannot create subtasks of an ephemeral task (quick chat); omit parent_id to create a top-level task")
-		}
-		if parent.ParentID != "" && !parent.IsFromOffice {
-			return taskRepoResult{}, service.ErrSubtaskDepthExceeded
-		}
-		repos := explicitRepos
-		if repos == nil {
-			repos = inheritedRepoInputs(parent.Repositories)
-		}
-		return taskRepoResult{
-			Repos:       repos,
-			WorkspaceID: parent.WorkspaceID,
-			WorkflowID:  parent.WorkflowID,
-		}, nil
+		return h.resolveParentTaskRepositoriesForWorkspaceMode(
+			ctx, parentID, explicitRepos, workspaceMode, baseBranchOverride,
+		)
 	}
 
 	if explicitRepos != nil {
@@ -1398,6 +1390,49 @@ func (h *Handlers) resolveTaskRepositories(
 	return taskRepoResult{}, nil
 }
 
+func (h *Handlers) resolveParentTaskRepositoriesForWorkspaceMode(
+	ctx context.Context,
+	parentID string,
+	explicitRepos []service.TaskRepositoryInput,
+	workspaceMode, baseBranchOverride string,
+) (taskRepoResult, error) {
+	parent, err := h.taskSvc.GetTask(ctx, parentID)
+	if err != nil {
+		return taskRepoResult{}, fmt.Errorf("invalid parent_id: %w", err)
+	}
+	if parent.IsEphemeral {
+		return taskRepoResult{}, fmt.Errorf("cannot create subtasks of an ephemeral task (quick chat); omit parent_id to create a top-level task")
+	}
+	if parent.ParentID != "" && !parent.IsFromOffice {
+		return taskRepoResult{}, service.ErrSubtaskDepthExceeded
+	}
+
+	return taskRepoResult{
+		Repos:       h.parentRepositoryInputs(ctx, explicitRepos, parent.Repositories, workspaceMode, baseBranchOverride),
+		WorkspaceID: parent.WorkspaceID,
+		WorkflowID:  parent.WorkflowID,
+	}, nil
+}
+
+func (h *Handlers) parentRepositoryInputs(
+	ctx context.Context,
+	explicitRepos []service.TaskRepositoryInput,
+	parentRepos []*models.TaskRepository,
+	workspaceMode, baseBranchOverride string,
+) []service.TaskRepositoryInput {
+	if explicitRepos != nil {
+		return explicitRepos
+	}
+	switch {
+	case workspaceMode == mcpWorkspaceModeNewWorkspace:
+		return h.freshInheritedRepoInputs(ctx, parentRepos, baseBranchOverride)
+	case workspaceMode == mcpWorkspaceModeInheritParent && baseBranchOverride == "":
+		return inheritedWorkspaceRepoInputs(parentRepos)
+	default:
+		return inheritedRepoInputs(parentRepos)
+	}
+}
+
 const (
 	mcpWorkspaceModeInheritParent = "inherit_parent"
 	mcpWorkspaceModeNewWorkspace  = "new_workspace"
@@ -1406,7 +1441,7 @@ const (
 func (h *Handlers) resolveMCPWorkspacePolicy(parentID, workspaceMode string) (service.WorkspacePolicy, error) {
 	mode := strings.TrimSpace(workspaceMode)
 	if mode == "" && parentID != "" {
-		mode = mcpWorkspaceModeInheritParent
+		mode = mcpWorkspaceModeNewWorkspace
 	}
 	if mode == "" {
 		return service.WorkspacePolicy{}, nil
@@ -1423,6 +1458,56 @@ func (h *Handlers) resolveMCPWorkspacePolicy(parentID, workspaceMode string) (se
 	}
 
 	return service.WorkspacePolicy{Mode: mode}, nil
+}
+
+func (h *Handlers) freshInheritedRepoInputs(
+	ctx context.Context,
+	src []*models.TaskRepository,
+	baseBranchOverride string,
+) []service.TaskRepositoryInput {
+	if len(src) == 0 {
+		return nil
+	}
+
+	repositories := make([]service.TaskRepositoryInput, 0, len(src))
+	seen := make(map[string]struct{}, len(src))
+	defaultBranches := make(map[string]string)
+	for _, repository := range src {
+		if repository == nil {
+			continue
+		}
+		baseBranch := repository.BaseBranch
+		if baseBranchOverride != "" {
+			baseBranch = baseBranchOverride
+		}
+		effectiveBaseBranch := baseBranch
+		if effectiveBaseBranch == "" && repository.RepositoryID != "" && h.taskSvc != nil {
+			defaultBranch, known := defaultBranches[repository.RepositoryID]
+			if !known {
+				if stored, err := h.taskSvc.GetRepository(ctx, repository.RepositoryID); err == nil && stored != nil {
+					defaultBranch = stored.DefaultBranch
+				}
+				defaultBranches[repository.RepositoryID] = defaultBranch
+			}
+			effectiveBaseBranch = defaultBranch
+		}
+
+		key := repository.RepositoryID + "\x00" + effectiveBaseBranch
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		selectionSource := models.BaseBranchSelectionSourceInherited
+		if baseBranchOverride != "" {
+			selectionSource = models.BaseBranchSelectionSourceExplicit
+		}
+		repositories = append(repositories, service.TaskRepositoryInput{
+			RepositoryID:              repository.RepositoryID,
+			BaseBranch:                baseBranch,
+			BaseBranchSelectionSource: selectionSource,
+		})
+	}
+	return repositories
 }
 
 func applyMCPTaskScopeDefaults(parentID, workspaceID, workflowID, workflowStepID string, explicitWorkspaceID, explicitWorkflowID bool, resolved taskRepoResult) (string, string, string) {
@@ -1537,6 +1622,29 @@ func inheritedRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryI
 		})
 	}
 	return repos
+}
+
+func inheritedWorkspaceRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryInput {
+	if len(src) == 0 {
+		return nil
+	}
+	repositories := make([]service.TaskRepositoryInput, 0, len(src))
+	for _, repository := range src {
+		if repository == nil {
+			continue
+		}
+		repositories = append(repositories, service.TaskRepositoryInput{
+			RepositoryID:              repository.RepositoryID,
+			BaseBranch:                repository.BaseBranch,
+			CheckoutBranch:            repository.CheckoutBranch,
+			WorkspaceRelativePath:     repository.WorkspaceRelativePath,
+			Position:                  repository.Position,
+			InheritedWorkspaceSlot:    true,
+			ReuseOnlyCheckoutBranch:   repository.CheckoutBranch != "",
+			BaseBranchSelectionSource: models.BaseBranchSelectionSourceInherited,
+		})
+	}
+	return repositories
 }
 
 type mcpAutoStartConfig struct {
