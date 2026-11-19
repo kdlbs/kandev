@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -32,10 +33,13 @@ var (
 
 // nativeUpdateCheckRun is one finished check. Output is set only when Reason
 // is empty; a stopped or unstarted run never exposes partial output.
+// Executable is the launched path as resolved from PATH and RealExecutable
+// that path with symlinks evaluated immediately before launch.
 type nativeUpdateCheckRun struct {
-	Output     agents.NativeUpdateCheckOutput
-	Executable string
-	Reason     agents.NativeUpdateCheckReason
+	Output         agents.NativeUpdateCheckOutput
+	Executable     string
+	RealExecutable string
+	Reason         agents.NativeUpdateCheckReason
 }
 
 // nativeUpdateCheckRunner executes trusted native check argv. Resolve and
@@ -85,8 +89,12 @@ func (r execNativeUpdateCheckRunner) Run(ctx context.Context, command agents.Com
 	cmd.Env = r.Environment()
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	cmd.WaitDelay = nativeUpdateCheckWaitDelay
+	real := path
+	if evaluated, evalErr := filepath.EvalSymlinks(path); evalErr == nil {
+		real = evaluated
+	}
 	exitCode, started, waitErr := runContainedCommand(cmd)
-	run := nativeUpdateCheckRun{Executable: path}
+	run := nativeUpdateCheckRun{Executable: path, RealExecutable: real}
 	switch {
 	case budget.exceeded():
 		run.Reason = agents.NativeUpdateCheckReasonOutputLimit

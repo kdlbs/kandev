@@ -81,9 +81,9 @@ test.describe("OMP harness-owned updates", () => {
     await expect(dialog.getByTestId(`agent-update-current-${runtime.agentName}`)).toContainText(
       CANARY_LATEST,
     );
-    await expect(
-      dialog.getByTestId(`agent-update-native-check-${runtime.agentName}`),
-    ).toContainText(CANARY_LATEST);
+    await expect(dialog.getByTestId(`agent-update-native-check-${runtime.agentName}`)).toHaveCount(
+      0,
+    );
     await prCapture.screenshot("desktop-omp-update-result", {
       caption: "OMP post-update version comes from the configured channel",
     });

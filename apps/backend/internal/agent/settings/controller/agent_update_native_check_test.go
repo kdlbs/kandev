@@ -40,6 +40,7 @@ type fakeNativeCheckRunner struct {
 	gate         chan struct{}
 	started      chan struct{}
 	envHook      func()
+	runHook      func()
 }
 
 func (r *fakeNativeCheckRunner) Resolve(agents.Command) (string, error) {
@@ -70,12 +71,22 @@ func (r *fakeNativeCheckRunner) setEnvironmentHook(hook func()) {
 
 func (r *fakeNativeCheckRunner) Run(ctx context.Context, _ agents.Command) nativeUpdateCheckRun {
 	r.mu.Lock()
+	hook := r.runHook
+	r.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	r.mu.Lock()
 	r.calls++
 	result := r.fallback
 	if len(r.results) > 0 {
 		result, r.results = r.results[0], r.results[1:]
 	}
 	result.Executable = r.path
+	result.RealExecutable = r.path
+	if real, err := filepath.EvalSymlinks(r.path); err == nil {
+		result.RealExecutable = real
+	}
 	gate, started := r.gate, r.started
 	r.mu.Unlock()
 	if started != nil {
@@ -85,10 +96,16 @@ func (r *fakeNativeCheckRunner) Run(ctx context.Context, _ agents.Command) nativ
 		select {
 		case <-gate:
 		case <-ctx.Done():
-			return nativeUpdateCheckRun{Reason: agents.NativeUpdateCheckReasonCancelled, Executable: result.Executable}
+			return nativeUpdateCheckRun{Reason: agents.NativeUpdateCheckReasonCancelled, Executable: result.Executable, RealExecutable: result.RealExecutable}
 		}
 	}
 	return result
+}
+
+func (r *fakeNativeCheckRunner) setRunHook(hook func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.runHook = hook
 }
 
 func (r *fakeNativeCheckRunner) setOutput(stdout string, exitCode int) {

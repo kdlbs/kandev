@@ -249,3 +249,42 @@ func TestNativeCheckLaunchedExecutableMustMatchPreparedIdentity(t *testing.T) {
 	}
 	requireRuns(t, h.runner, 2, "after a run launched a different executable")
 }
+
+// A symlinked launcher briefly retargeted while the check launches, then
+// restored before publication, must not cache the other target's result.
+func TestNativeCheckLaunchTimeRealExecutableMustMatch(t *testing.T) {
+	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+	first := filepath.Join(h.home, "install", "a", "omp")
+	second := filepath.Join(h.home, "install", "b", "omp")
+	writeNativeCheckFile(t, first, "a")
+	writeNativeCheckFile(t, second, "b")
+	link := filepath.Join(h.home, "bin", "omp")
+	mustMkdir(t, filepath.Dir(link))
+	retarget := func(target string) {
+		t.Helper()
+		_ = os.Remove(link)
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	retarget(first)
+	h.runner.setPath(link)
+	h.runner.queue(ompUpToDate, ompCanaryAvailable)
+	var once atomic.Bool
+	h.runner.setRunHook(func() {
+		if once.CompareAndSwap(false, true) {
+			retarget(second)
+		}
+	})
+	started, release := h.runner.gated()
+	done := make(chan dto.AgentUpdateStatusDTO, 1)
+	go func() { done <- listStatus(t, h.ctrl, ompAgentID) }()
+	<-started
+	retarget(first)
+	release()
+	<-done
+	if status := h.status(t, ompAgentID); status.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
+		t.Errorf("status = %+v; the result from the temporary symlink target was cached", status)
+	}
+	requireRuns(t, h.runner, 2, "after a launch-time symlink retarget")
+}

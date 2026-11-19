@@ -1,6 +1,11 @@
 package agents
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+)
 
 // resolvePathAgainst mirrors Node's path.resolve(cwd, entry) used by OMP for
 // PI_CONFIG_FILES and npm_config_userconfig, including Windows root-relative
@@ -20,5 +25,35 @@ func TestResolvePathAgainstWindowsSemantics(t *testing.T) {
 		if got := resolvePathAgainst(cwd, tc.entry, true); got != tc.want {
 			t.Errorf("resolvePathAgainst(%q) = %q, want %q", tc.entry, got, tc.want)
 		}
+	}
+}
+
+// OMP reads npm_config_userconfig with fs.readFile, so the filesystem follows
+// a symlink before "..". The fingerprint must stat that same file.
+func TestOmpFingerprintFollowsNpmUserconfigThroughSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink traversal semantics")
+	}
+	f := newOmpContextFixture(t)
+	resolved := filepath.Join(f.root, "resolved")
+	if err := os.MkdirAll(filepath.Join(resolved, "child"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(f.cwd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(resolved, "child"), filepath.Join(f.cwd, "link")); err != nil {
+		t.Fatal(err)
+	}
+	actual := filepath.Join(resolved, "npmrc")
+	writeTestFile(t, actual, "registry=https://a.invalid/\n")
+	declared := NewOmpACP().NativeUpdateCheck().Context
+	resolver := NativeUpdateCheckResolver{
+		Env: []string{"npm_config_userconfig=link/../npmrc"}, WorkingDir: f.cwd, HomeDir: f.home,
+	}
+	before := declared.Fingerprint(resolver)
+	writeTestFile(t, actual, "registry=https://a-longer-registry.invalid/\n")
+	if declared.Fingerprint(resolver) == before {
+		t.Error("editing the npmrc OMP actually reads did not change the fingerprint")
 	}
 }

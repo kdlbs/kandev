@@ -169,7 +169,9 @@ func ompUpdateCheckSources(r NativeUpdateCheckResolver) NativeUpdateCheckSources
 		files = append(files, filepath.Join(filepath.Dir(r.Launcher), name+".bunx"))
 	}
 	if userconfig, ok := r.GetenvFold("npm_config_userconfig"); ok && userconfig != "" {
-		files = append(files, r.absolute(userconfig))
+		// OMP reads this path with fs.readFile, so the filesystem resolves
+		// symlinks before "..": anchor it without lexical cleanup.
+		files = append(files, resolvePathAgainst(r.WorkingDir, userconfig, runtime.GOOS == osWindows))
 	} else {
 		files = append(files, filepath.Join(r.HomeDir, ".npmrc"))
 	}

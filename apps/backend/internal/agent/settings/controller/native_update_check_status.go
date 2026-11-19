@@ -184,6 +184,7 @@ type nativeUpdateCheckLookup struct {
 	agentName      string
 	currentVersion string
 	executable     string
+	realExecutable string
 	identity       string
 	key            string
 	generation     uint64
@@ -290,7 +291,7 @@ func (c *Controller) nativeUpdateCheckIdentity(agentName, currentVersion string,
 	c.runtimeUpdateStatusMu.Unlock()
 	return nativeUpdateCheckLookup{
 		agentName: agentName, currentVersion: currentVersion, executable: executable,
-		generation: generation, spec: spec,
+		realExecutable: resolver.Executable, generation: generation, spec: spec,
 		identity: nativeUpdateCheckCacheKey(agentName, generation, spec.Command.Args(),
 			resolver.Launcher, resolver.Executable, currentVersion, fingerprint),
 	}
@@ -369,20 +370,21 @@ func (c *Controller) executeNativeUpdateCheck(ctx context.Context, lifetime *nat
 	}
 	// A result whose executable or configuration changed during the wait or
 	// the run describes another identity and is returned without caching. The
-	// launched executable must be the prepared one, and the identity observed
-	// after the run must still match.
-	if launched == lookup.executable &&
+	// launched launcher and its real executable at launch must be the
+	// prepared ones, and the identity observed after the run must still match.
+	if launched.Executable == lookup.executable && launched.RealExecutable == lookup.realExecutable &&
 		c.nativeUpdateCheckIdentity(lookup.agentName, lookup.currentVersion, lookup.spec).identity == lookup.identity {
 		c.storeNativeUpdateCheckEntry(lookup, entry)
 	}
 	return entry
 }
 
-// runNativeUpdateCheck returns the normalized result and the executable the
-// runner actually launched (empty when nothing was launched).
-func (c *Controller) runNativeUpdateCheck(ctx context.Context, lifetime *nativeCheckLifetime, lookup nativeUpdateCheckLookup) (agents.NativeUpdateCheckResult, string) {
+// runNativeUpdateCheck returns the normalized result and the run, whose
+// Executable and RealExecutable identify what was launched (empty when
+// nothing was).
+func (c *Controller) runNativeUpdateCheck(ctx context.Context, lifetime *nativeCheckLifetime, lookup nativeUpdateCheckLookup) (agents.NativeUpdateCheckResult, nativeUpdateCheckRun) {
 	if lookup.executable == "" {
-		return agents.NativeUpdateCheckResult{State: agents.NativeUpdateCheckStateUnknown, Reason: agents.NativeUpdateCheckReasonNotInstalled}, ""
+		return agents.NativeUpdateCheckResult{State: agents.NativeUpdateCheckStateUnknown, Reason: agents.NativeUpdateCheckReasonNotInstalled}, nativeUpdateCheckRun{}
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -390,9 +392,9 @@ func (c *Controller) runNativeUpdateCheck(ctx context.Context, lifetime *nativeC
 	defer stop()
 	run := c.nativeRunner().Run(runCtx, lookup.spec.Command)
 	if run.Reason != "" {
-		return agents.NativeUpdateCheckResult{State: agents.NativeUpdateCheckStateUnknown, Reason: run.Reason}, run.Executable
+		return agents.NativeUpdateCheckResult{State: agents.NativeUpdateCheckStateUnknown, Reason: run.Reason}, run
 	}
-	return normalizeNativeUpdateCheck(lookup.spec.Parse(run.Output), lookup.currentVersion), run.Executable
+	return normalizeNativeUpdateCheck(lookup.spec.Parse(run.Output), lookup.currentVersion), run
 }
 
 // normalizeNativeUpdateCheck rejects a result about another installation than

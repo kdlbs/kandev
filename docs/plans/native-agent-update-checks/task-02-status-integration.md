@@ -19,6 +19,7 @@ acceptance_criteria:
   - AC-AGENTS-RUNTIME-NATIVE-CHECK-002.3
 system_design:
   - ../../specs/agents/system-design/runtime-native-update-checks.md
+  - ../../specs/agents/system-design/runtime-native-update-check-omp-context.md
 ---
 
 # Task 02: Native results in status, cache, preview, and notifications

@@ -83,92 +83,9 @@ combination.
 `HarnessUpdate()`, `BuildCommand`, `Runtime()`, `InstallScript`, and
 passthrough configuration do not change.
 
-`ompUpdateCheckContext` declares the configuration sources that upstream
-`omp update --check` reads at commit `2b562c5b7e3f` to select its channel,
-installation ownership, and release feed. The sources are
-`packages/utils/src/dirs.ts`, `packages/utils/src/env.ts`,
-`packages/coding-agent/src/config/settings.ts`,
-`packages/coding-agent/src/cli/managed-install.ts`, and
-`packages/coding-agent/src/cli/npm-registry.ts`. Kandev resolves source paths
-from the check's process environment only and does not parse dotenv files.
-The dotenv files that upstream loads at startup are themselves fingerprinted
-(see below), so any edit to them changes the key. `TestOmpUpdateCheckContext`
-pins this list to that commit.
-
-These cases take effect no later than when the cache entry expires: edits to
-configuration files at a location chosen only through a dotenv value,
-environment values interpolated into `.npmrc`, output of the package-manager
-probes upstream runs to classify the install method (`bun pm bin -g`,
-`npm prefix -g`, `brew --prefix`, `mise bin-paths`), and inputs that upstream
-adds after the pinned commit.
-
-- `EnvKeys`: `OMP_PROFILE`, `PI_PROFILE`, `PI_CODING_AGENT_DIR`,
-  `PI_CONFIG_DIR`, `PI_CONFIG_FILES`, `HOME`, `XDG_CONFIG_HOME`,
-  `npm_config_userconfig`, `npm_config_registry`, `BUN_CONFIG_REGISTRY`, and
-  the install-method selectors `MISE_DATA_DIR`, `XDG_DATA_HOME`,
-  `LOCALAPPDATA`, and `BUN_INSTALL_GLOBAL_DIR` (upstream `getMiseDataDir` and
-  `resolveUpdateTarget`, which choose between npm metadata and the build
-  service), and `PI_BUILD_URL`, the build service origin
-  (`build-service.ts` `buildServiceUrl`). Any change to these values changes
-  the key.
-- Channel settings: the profile is `OMP_PROFILE` when that variable is
-  defined, even if it is empty, and otherwise `PI_PROFILE`. After trimming, an
-  empty or `default` value selects the default profile. The base root is
-  `<base>` = `$HOME/<PI_CONFIG_DIR or .omp>`. The active profile config root,
-  equivalent to upstream `getConfigRootDir()`, is `<root>` =
-  `<base>/profiles/<profile>` for a named profile and `<base>` for the default
-  profile. A named profile uses `<root>/agent`. The default profile uses
-  `$PI_CODING_AGENT_DIR` when it is set, unless that value equals the agent
-  directory derived from the normalized `PI_PROFILE`. In that case it uses
-  `<root>/agent`, matching upstream `resolvePreProfileAgentDir` and
-  `isProfileDerivedAgentDir`, so an inherited profile-derived directory is not
-  treated as an override. This applies both when `OMP_PROFILE` is explicitly
-  empty or `default` and `PI_PROFILE` names another profile. Without an
-  override, the default profile uses `<root>/agent`. An invalid profile name
-  is fingerprinted as the default profile, matching upstream's module-load
-  fallback. The check itself reports OMP's error.
-  - Global files: `<agentDir>/config.yml` and `<agentDir>/config.yaml`, which
-    are upstream `MAIN_CONFIG_FILENAMES`.
-  - Overlay files: `PI_CONFIG_FILES` split on the OS path-list separator,
-    with empty entries dropped and others kept verbatim, whitespace
-    included. Each entry is expanded like upstream `expandTilde`: `~`,
-    `~/`, `~\`, and a bare `~name` meaning `<home>/name`. Relative paths
-    resolve against the working directory like Node `path.resolve`. On
-    Windows a root-relative path (`\dir`) keeps the working directory's
-    drive. A drive-relative path (`E:dir`) resolves against the working
-    directory on the same drive and against that drive's root otherwise
-    (`resolvePathAgainst`). The same rule applies to `npm_config_userconfig`.
-  - Project files: the known project candidates are `<cwd>/.omp/config.yml`,
-    `<cwd>/.omp/settings.json`, `<cwd>/.claude/settings.json`, and
-    `<cwd>/.claude/settings.yml`. They are always fingerprinted individually.
-    Upstream project settings providers are open-ended, so every other regular
-    file directly inside `<cwd>/.omp` and `<cwd>/.claude` is also
-    fingerprinted, up to 256 entries per directory. Above that limit, the
-    directory's modification time records file creation and removal, and the
-    known candidates remain individually fingerprinted.
-- Installation ownership: `<dir(dir(realpath(executable)))>/manager.json`,
-  which is the manifest that `managedInstallName` reads before any lookup,
-  and bun's `<launcherDir>/<name>.bunx` ownership marker (upstream
-  `bunShimMarkerPath`). The resolver's `Launcher` is the PATH-resolved path
-  before symlinks are evaluated. The cache key includes both `Launcher` and
-  the real `Executable`.
-- Release feed: `$npm_config_userconfig` or `$HOME/.npmrc`,
-  `$XDG_CONFIG_HOME/.bunfig.toml`, and `$HOME/.bunfig.toml`.
-- Startup dotenv files: `$HOME/.env`, `<root>/.env` (the active profile
-  config root), `<base>/.env`, `<agentDir>/.env`, and every regular file in
-  `<cwd>` named `.env` or starting with `.env.`. `$HOME/.env`, `<root>/.env`,
-  and `<agentDir>/.env` are the files `env.ts` applies before
-  `refreshDirsFromEnv()`. `<base>/.env` is also fingerprinted, which is
-  harmless when it equals `<root>/.env`.
-  The `<cwd>` files cover upstream's project `.env` and Bun's dotenv autoload.
-
-For every candidate file, the fingerprint records whether it exists, its size,
-and its modification time. Creating or removing a candidate, or changing its
-size or modification time, changes the key. Kandev never reads file contents,
-because `.npmrc` and `.env` files can hold credentials. An edit that keeps
-both size and modification time is therefore the one declared-file case
-bounded by the cache TTL (AC-AGENTS-RUNTIME-NATIVE-CHECK-002.2). Normal
-editors and atomic writes update the modification time.
+`ompUpdateCheckContext`, including its declared environment keys, source
+files, fingerprint, and the inputs bounded by the cache TTL, is specified in
+the [OMP native update check context design](runtime-native-update-check-omp-context.md).
 
 ## Execution
 
@@ -377,7 +294,9 @@ Invalidation:
   restart, a newer identity's result.
 - After a check finishes, the result is cached only if the executable the
   runner actually launched (`nativeUpdateCheckRun.Executable`) is the
-  prepared launcher, the identity recomputed after the run equals the
+  prepared launcher, its real path evaluated just before launch
+  (`RealExecutable`) is the prepared real executable, the identity recomputed
+  after the run equals the
   prepared one, the identity and epoch are still active, and the generation
   is unchanged. Otherwise, for example when an executable or configuration
   changed during the slot wait or the run, even if PATH was restored before
@@ -477,6 +396,12 @@ closed backend set. Unknown values fall back to the existing unknown copy.
 - Existing grouping in `lib/agents/runtime-update-manager.ts` already maps
   self-update states to available, up to date, and unknown. It keeps native
   OMP out of bulk selection because bulk eligibility requires a pinned target.
+
+After an update job finishes, successfully or not, the dialog hides the
+native result line and the channel line, because both describe the
+installation before the job ran. The dialog shows the job's installed
+version and outcome. A fresh native result appears the next time the dialog
+is opened.
 
 Desktop and phone share the dialog and drawer composition. Channel and reason
 text wrap within the existing columns and add no new controls or overlays.

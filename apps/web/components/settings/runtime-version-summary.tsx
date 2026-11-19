@@ -59,6 +59,8 @@ function SelfUpdateSummary({
 }) {
   const { t } = useTranslation();
   const native = preview.check_source === "native";
+  // The native result describes the installation before the job ran.
+  const finished = job?.status === "succeeded" || job?.status === "failed";
   const current = job?.current_version || preview.current_version || t("common:unknown");
   return (
     <div className="space-y-2" data-testid={`agent-update-version-summary-${agentName}`}>
@@ -73,7 +75,7 @@ function SelfUpdateSummary({
           {t("agents:installedRuntimeVersion", { version: current })}
         </p>
         {native ? (
-          <NativeCheckResult agentName={agentName} preview={preview} />
+          !finished && <NativeCheckResult agentName={agentName} preview={preview} />
         ) : (
           <p data-testid={`agent-update-stable-reference-${agentName}`}>
             {t("agents:stableLatestReference", {

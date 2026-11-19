@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateStatus } from "@/lib/api";
 import { AgentRuntimeUpdateControl } from "./agent-runtime-update-control";
+import { RuntimeVersionSummary } from "./runtime-version-summary";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: false }),
@@ -147,5 +148,44 @@ describe("AgentRuntimeUpdateControl native update check", () => {
     const fallbackText = screen.getByTestId(NATIVE_LINE).textContent;
     expect(reasonText).toBeTruthy();
     expect(reasonText).not.toBe(fallbackText);
+  });
+});
+
+// The native result describes the installation before the job ran, so a
+// finished job must not pair it with the newly installed version.
+// @covers AC-AGENTS-RUNTIME-NATIVE-CHECK-002.4
+describe("RuntimeVersionSummary after a finished native update job", () => {
+  it.each(["succeeded", "failed"] as const)(
+    "hides the pre-update native result once the job %s",
+    (status) => {
+      const job: AgentUpdateJob = {
+        job_id: "omp-job",
+        agent_name: AGENT,
+        update_mode: "self_update",
+        status,
+        current_version: "18.23.0",
+        started_at: "2026-11-17T12:00:00Z",
+      };
+      render(<RuntimeVersionSummary agentName={AGENT} preview={nativePreview()} job={job} />);
+      expect(screen.queryByTestId(NATIVE_LINE)).toBeNull();
+      expect(screen.queryByTestId(CHANNEL_LINE)).toBeNull();
+      if (status === "succeeded") {
+        expect(screen.getByTestId(`agent-update-current-${AGENT}`).textContent).toContain(
+          "18.23.0",
+        );
+      }
+    },
+  );
+
+  it("keeps the native result while the job is still running", () => {
+    const job: AgentUpdateJob = {
+      job_id: "omp-job",
+      agent_name: AGENT,
+      update_mode: "self_update",
+      status: "updating",
+      started_at: "2026-11-17T12:00:00Z",
+    };
+    render(<RuntimeVersionSummary agentName={AGENT} preview={nativePreview()} job={job} />);
+    expect(screen.getByTestId(NATIVE_LINE).textContent).toContain(CANARY_LATEST);
   });
 });

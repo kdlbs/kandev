@@ -6,6 +6,7 @@ requirements:
   - REQ-AGENTS-RUNTIME-NATIVE-CHECK-002
 system_design:
   - ../../specs/agents/system-design/runtime-native-update-checks.md
+  - ../../specs/agents/system-design/runtime-native-update-check-omp-context.md
 legacy_specs: []
 ---
 
