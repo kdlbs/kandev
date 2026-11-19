@@ -481,31 +481,37 @@ func openOrCreateWindowsDependencyDirectoryPath(path string) (windows.Handle, er
 	if err != nil {
 		return 0, err
 	}
-	rootHandle, err := openWindowsDependencyHandle(0, windowsDependencyNTPath(root), windowsDependencyWriteAccess, windows.FILE_DIRECTORY_FILE)
+	// The volume root resolves the object-manager drive-letter link, so it is
+	// opened without OBJ_DONT_REPARSE; every component below it keeps the
+	// no-reparse open and the explicit reparse rejection.
+	rootAccess := windowsDependencyTraverseAccess
+	if len(parts) == 0 {
+		rootAccess = windowsDependencyWriteAccess
+	}
+	handle, err := openWindowsDependencyVolumeRoot(root, rootAccess)
 	if err != nil {
 		return 0, err
 	}
-	for _, part := range parts {
+	for index, part := range parts {
+		// Only the final component needs write access: ancestors are traversed,
+		// matching the previous single-open semantics for the managed root.
+		access := windowsDependencyTraverseAccess
+		if index == len(parts)-1 {
+			access = windowsDependencyWriteAccess
+		}
 		next, openErr := openWindowsDependencyHandleWithDisposition(
-			rootHandle, part, windowsDependencyWriteAccess, windows.FILE_OPEN_IF, windows.FILE_DIRECTORY_FILE,
+			handle, part, access, windows.FILE_OPEN_IF, windows.FILE_DIRECTORY_FILE,
 		)
+		_ = windows.CloseHandle(handle)
 		if openErr != nil {
-			_ = windows.CloseHandle(rootHandle)
 			return 0, openErr
 		}
-		if reparse, checkErr := windowsDependencyHandleIsReparsePoint(next); checkErr != nil {
-			_ = windows.CloseHandle(next)
-			_ = windows.CloseHandle(rootHandle)
-			return 0, checkErr
-		} else if reparse {
-			_ = windows.CloseHandle(next)
-			_ = windows.CloseHandle(rootHandle)
-			return 0, fmt.Errorf("dependency path is a reparse point")
+		handle, openErr = rejectWindowsDependencyReparse(next)
+		if openErr != nil {
+			return 0, openErr
 		}
-		_ = windows.CloseHandle(rootHandle)
-		rootHandle = next
 	}
-	return rootHandle, nil
+	return handle, nil
 }
 
 func openOrCreateWindowsDependencyTarget(rootHandle windows.Handle, relative string) (parent, target windows.Handle, err error) {
@@ -543,22 +549,4 @@ func openOrCreateWindowsDependencyTarget(rootHandle windows.Handle, relative str
 		parent = next
 	}
 	return 0, 0, fmt.Errorf("dependency target is empty")
-}
-
-func windowsDependencyPathParts(path string) (string, []string, error) {
-	if !filepath.IsAbs(path) {
-		return "", nil, fmt.Errorf("dependency workspace root must be absolute")
-	}
-	clean := filepath.Clean(path)
-	volume := filepath.VolumeName(clean)
-	if volume == "" {
-		return "", nil, fmt.Errorf("dependency workspace root has no volume")
-	}
-	remainder := strings.TrimPrefix(clean, volume)
-	remainder = strings.TrimLeft(remainder, `\`+`/`)
-	root := volume + `\`
-	if remainder == "" {
-		return root, nil, nil
-	}
-	return root, strings.FieldsFunc(remainder, func(r rune) bool { return r == '\\' || r == '/' }), nil
 }
