@@ -33,13 +33,14 @@ Task 02 repairs both automatic selection paths, retaining the failed view and
 its recovery controls while normal acknowledgement catches up. Unread scope,
 backend primary promotion, and completed/cancelled handoff remain unchanged.
 
-Generic primary-follow reads authoritative predecessor state before changing
-focus. Terminal snapshots and unseen siblings defer to an owned authoritative check.
-Accepted primary projections retarget the owned decision even when another
-event cached the target first. A 404 needs task-scoped membership proof of
-removal, not a generic error fallback. Superseded reads cannot hydrate session
-or cursor state, displace a newer pin, or select an older target. Explicit
-workflow focus still owns its existing committed-recipient path.
+Automatic lifecycle and primary-follow decisions read authoritative predecessor
+state before changing focus, even when a terminal snapshot or unseen sibling
+beats promotion. Accepted primary projections retarget the owned decision.
+Committed removal also triggers scoped membership proof without a primary change.
+A complete list with exactly one replacement primary permits removal handoff;
+generic errors do not. Confirmed eviction fences older membership publications.
+Superseded reads cannot overwrite cursors, displace a newer pin, or select an
+older target. Explicit workflow focus retains its committed-recipient path.
 
 ## Evidence and confidence
 
@@ -522,5 +523,14 @@ fix. It is separate from the five design-only rounds above.
   shortcut, reconciles primary projections, and proves removal through scoped
   membership. Author checks: 804 focused tests, final authority replay 50,
   desktop selection/unread/removal 34 and phone unread 3; see Task 02 Results.
-- Completed rounds: 4. Consecutive clean: 0. The stop condition is three
+- Round 5: Sol child `4671b416-e21a-4eb8-885a-8e9fe1f1a459` reviewed
+  `6b472c16f3`. Three P2 findings (lifecycle fallback before promotion bypasses
+  authority; removing a retained non-primary failure has no core subscriber;
+  stale membership reads recreate a proven-removed row), accepted and remediated.
+  R5 verifies lifecycle focus before promotion, observes retained-session removal,
+  and fences pending/admitted/dialog membership reads. Final author checks:
+  1019 focused tests, 22 retirement-consumer tests, final desktop unread/removal
+  5 and phone unread 3 passed; the earlier related desktop run passed 35.
+  See Task 02 Results for exact commands, bundle provenance and limitations.
+- Completed rounds: 5. Consecutive clean: 0. The stop condition is three
   consecutive clean rounds or 50 rounds. No earlier loop counts toward it.

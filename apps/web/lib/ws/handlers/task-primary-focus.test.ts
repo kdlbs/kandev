@@ -1,7 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAppStore, type AppState } from "@/lib/state/store";
-import type { StoreApi } from "zustand";
-import type { TaskSession, TaskSessionResponse, TaskSessionsResponse } from "@/lib/types/http";
+import type { TaskSessionResponse, TaskSessionsResponse } from "@/lib/types/http";
 import type * as SessionApi from "@/lib/api/domains/session-api";
 import { fetchTaskSession, listTaskSessions } from "@/lib/api/domains/session-api";
 import { ApiError } from "@/lib/api/client";
@@ -10,99 +8,24 @@ import { registerTaskSessionHandlers } from "./agent-session";
 import { registerTasksHandlers } from "./tasks";
 import { makeMessage, makeStateChangedMessage, makeTask } from "./tasks.test-helpers";
 
-const SESSION_STATE_CHANGED = "session.state_changed";
+import {
+  SESSION_STATE_CHANGED,
+  deferred,
+  fail,
+  flushFocusWork,
+  membership,
+  notifySibling,
+  notifyState,
+  promote,
+  response,
+  selectedStore,
+} from "./task-primary-focus.test-helpers";
 
 vi.mock("@/lib/api/domains/session-api", async (original) => ({
   ...(await original<typeof SessionApi>()),
   fetchTaskSession: vi.fn(),
   listTaskSessions: vi.fn(),
 }));
-
-function response(state: TaskSession["state"], id = "old", taskId = "t1"): TaskSessionResponse {
-  return { session: { id, task_id: taskId, state } as TaskSession };
-}
-function deferred() {
-  return Promise.withResolvers<TaskSessionResponse>();
-}
-function selectedStore(initialState: TaskSession["state"] = "STARTING") {
-  const store = createAppStore({
-    kanban: {
-      workflowId: "wf1",
-      steps: [],
-      tasks: [
-        {
-          id: "t1",
-          workflowId: "wf1",
-          workflowStepId: "step1",
-          title: "Task",
-          position: 0,
-          primarySessionId: "old",
-        },
-      ],
-    },
-  });
-  for (const [id, state] of [
-    ["old", initialState],
-    ["next", "WAITING_FOR_INPUT"],
-    ["latest", "WAITING_FOR_INPUT"],
-  ] as const) {
-    store
-      .getState()
-      .setTaskSession({ id, task_id: "t1", state, started_at: "", updated_at: "" } as TaskSession);
-  }
-  store.getState().setActiveSessionAuto("t1", "old");
-  return store;
-}
-function promote(store: StoreApi<AppState>, sessionId = "next") {
-  registerTasksHandlers(store)["task.updated"]!(makeMessage(makeTask("t1", sessionId)));
-}
-function fail(store: StoreApi<AppState>) {
-  registerTaskSessionHandlers(store)[SESSION_STATE_CHANGED]!({
-    id: "failed",
-    type: "notification",
-    action: SESSION_STATE_CHANGED,
-    payload: { task_id: "t1", session_id: "old", new_state: "FAILED" },
-  });
-}
-
-function notifyState(
-  store: StoreApi<AppState>,
-  state: NonNullable<TaskSession["state"]>,
-  updatedAt: string,
-) {
-  registerTaskSessionHandlers(store)[SESSION_STATE_CHANGED]!({
-    id: "state",
-    type: "notification",
-    action: SESSION_STATE_CHANGED,
-    payload: { task_id: "t1", session_id: "old", new_state: state, updated_at: updatedAt },
-  });
-}
-
-function notifySibling(store: StoreApi<AppState>) {
-  registerTaskSessionHandlers(store)[SESSION_STATE_CHANGED]!({
-    id: "new-session",
-    type: "notification",
-    action: SESSION_STATE_CHANGED,
-    payload: { task_id: "t1", session_id: "latest", new_state: "WAITING_FOR_INPUT" },
-  });
-}
-
-function membership(...ids: string[]): TaskSessionsResponse {
-  return {
-    sessions: ids.map((id) => response("WAITING_FOR_INPUT", id).session),
-    total: ids.length,
-  };
-}
-
-// Resolved HTTP chains settle before assertions of no selection change.
-async function flushFocusWork(): Promise<void> {
-  vi.useFakeTimers();
-  try {
-    await vi.advanceTimersByTimeAsync(0);
-  } finally {
-    vi.useRealTimers();
-  }
-}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -314,7 +237,7 @@ describe("primary follow coordination", () => {
         action: SESSION_STATE_CHANGED,
         payload: { task_id: "t1", session_id: "old", new_state: terminal },
       });
-      expect(store.getState().tasks.activeSessionId).toBe(pending ? "old" : expected);
+      expect(store.getState().tasks.activeSessionId).toBe("old");
       read.resolve(response(terminal));
       await read.promise;
       expect(store.getState().tasks.activeSessionId).toBe(expected);
@@ -469,25 +392,31 @@ describe("primary projection reconciliation", () => {
 });
 
 describe("confirmed primary removal", () => {
-  it("follows only after task-scoped membership proves the old session is absent", async () => {
-    const store = selectedStore("COMPLETED");
-    const read = deferred();
-    const members = Promise.withResolvers<TaskSessionsResponse>();
-    vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
-    vi.mocked(listTaskSessions).mockReturnValue(members.promise);
-    promote(store);
-    read.reject(new ApiError("", 404, null));
-    await flushFocusWork();
-    expect(store.getState().tasks.activeSessionId).toBe("old");
-    members.resolve(membership("next", "latest"));
-    await flushFocusWork();
-    expect(store.getState().tasks.activeSessionId).toBe("next");
-    expect(store.getState().taskSessions.items.old).toBeUndefined();
-  });
+  it.each(["next", "latest"])(
+    "follows the proven primary %s only after scoped absence",
+    async (target) => {
+      const store = selectedStore("COMPLETED");
+      const read = deferred();
+      const members = Promise.withResolvers<TaskSessionsResponse>();
+      vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+      vi.mocked(listTaskSessions).mockReturnValue(members.promise);
+      promote(store);
+      read.reject(new ApiError("", 404, null));
+      await flushFocusWork();
+      expect(store.getState().tasks.activeSessionId).toBe("old");
+      members.resolve(membership(target));
+      await flushFocusWork();
+      expect(store.getState().tasks.activeSessionId).toBe(target);
+      expect(store.getState().taskSessions.items.old).toBeUndefined();
+    },
+  );
 
   it.each([
     membership("old", "next"),
-    membership("latest"),
+    {
+      sessions: membership("next", "latest").sessions.map((row) => ({ ...row, is_primary: false })),
+      total: 2,
+    },
     { ...membership("next"), total: 2 },
     membership("next", "next"),
     { sessions: [response("WAITING_FOR_INPUT", "next", "foreign").session], total: 1 },
@@ -579,10 +508,15 @@ describe("removed primary proof ownership", () => {
 describe("newly observed sessions", () => {
   it.each(["FAILED", "COMPLETED", "CANCELLED", "IDLE"] as const)(
     "preserves failed focus but retains normal adoption after %s",
-    (state) => {
+    async (state) => {
       const store = selectedStore(state);
       store.getState().removeTaskSession("t1", "latest");
+      const read = deferred();
+      vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
       notifySibling(store);
+      expect(store.getState().tasks.activeSessionId).toBe("old");
+      read.resolve(response(state));
+      await read.promise;
       expect(store.getState().tasks.activeSessionId).toBe(state === "FAILED" ? "old" : "latest");
     },
   );

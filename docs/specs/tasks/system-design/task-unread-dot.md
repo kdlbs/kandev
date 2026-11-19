@@ -217,34 +217,54 @@ Generic primary-follow (`lib/ws/handlers/task-primary-focus.ts`) verifies the
 previously displayed session through the existing session GET with
 `cache: "no-store"`. Identity must match, the returned state must not be `FAILED`,
 and the check must not override a cached FAILED observation.
-Workspace fan-out and client barriers can reorder a primary update and lifecycle
-frames. Even an accepted terminal snapshot can predate the durable resume failure.
-Terminal notifications and newly observed siblings defer automatic selection
-to the owned primary check and restart verification. They never authorize it
-themselves while that check is owned.
+Workspace fan-out and client barriers can reorder primary and lifecycle events.
+Both lifecycle entry paths use the same selection-owned GET even before a
+promotion is observed. Terminal fallback requires persisted completion or
+cancellation; a newly observed sibling may also replace persisted `IDLE`.
+A newer cached nonterminal observation blocks terminal fallback. Initial adoption
+without a same-task predecessor remains immediate.
 
 The guard belongs to navigation, pin, workflow-focus intent, restart state and
 the selected session. A denied or uncertain read preserves both the view and
-the guard until ownership changes. There is no timer/retry loop. A new accepted
-primary or terminal observation starts fresh verification and invalidates older
-responses. Explicit committed workflow focus still precedes generic following.
+the guard until ownership changes. There is no timer/retry loop. A relevant
+lifecycle observation refreshes verification. A promotion that arrives during
+that check starts a new primary-owned read even for the same candidate, so an
+earlier result cannot authorize a later promotion. Explicit committed workflow
+focus still precedes generic following.
 
 Primary projections accepted through `task.updated` or `task.state_changed`
 reconcile an existing follow against the latest target and original predecessor.
 Creation snapshots can retarget an already-owned follow but do not initiate one.
-An already-cached primary must not strand an older target. Without an owned
-follow, the normal terminal list fallback remains unchanged. Empty workflow
-cancellation preserves identity, so unrelated task deletion does not invalidate
-the selected task's follow.
+An already-cached primary must not strand an older target. Healthy terminal
+fallback preserves its candidate policy after confirmation, including agentctl
+readiness inheritance before focus changes. Empty workflow cancellation preserves
+identity, so unrelated task deletion does not invalidate the selected task's follow.
 
-A session GET returning 404 is not proof that the predecessor was deleted.
-The existing task-scoped session list must succeed with a complete count,
-task-matching rows, no predecessor, and exactly one projected replacement.
-Only that absence proof permits selection and retirement/eviction of the removed
-session's cached resources. Generic errors and ambiguous membership preserve
-the view. Remaining session/cursor data is never hydrated from these reads.
-The cost is one session GET per relevant observation and, after a 404, one
-membership read; no payload schema, unread predicate, or transport ordering change.
+The core `session.removed` handler verifies displayed-session membership, including
+a retained non-primary failure without promotion. Missing `task_id` uses matching
+active session/task identity; foreign tasks are rejected. Session GET 404 uses the
+same proof rather than assuming deletion.
+
+The task-scoped list must have a complete count, task-matching rows, no predecessor,
+and exactly one primary recipient. That proof can identify the replacement before
+its WS projection arrives. A newer accepted projection retargets and re-verifies;
+newer selection/navigation/pin/restart ownership still cancels the old decision.
+Only a still-owned proof permits selection and retirement/eviction of the removed
+session. If the recipient is not indexed yet, its proven identity and required
+lifecycle fields initialize the row before focus so route ownership resolves;
+normal loading fills the rest. Existing recipient fields and cursors are never
+overwritten from the proof.
+
+`invalidateTaskSessionMembership` fences local, remote, task and config-chat
+removals with keyed generations. `useTaskSessions` and the removal-dialog loader
+reject older pending, admitted or queued publications; newer reads and unrelated
+tasks stay usable. Comment-conflict refresh uses its existing membership
+fingerprint. No wire or persisted schema changes.
+
+Lifecycle and generic follows cost a state GET; removal signals use the scoped
+list directly, and GET 404s fall back to it. Generic errors and ambiguous membership
+preserve the view. Unread predicates, backend promotion and transport ordering
+remain unchanged.
 
 An unread failed sibling that was never displayed is not evidence of a failed
 cursor write. It remains unread under AC .2, .9, .12, and .17. Preserve this

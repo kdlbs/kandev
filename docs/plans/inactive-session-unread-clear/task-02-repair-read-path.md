@@ -190,10 +190,16 @@ cd "$VERIFY"
 (cd apps/web && pnpm exec vitest run components/task/chat/use-session-read-tracking.test.ts components/task/task-unread-dot-visibility.test.ts lib/session-unread-divider.test.ts)
 (cd apps/web && pnpm exec vitest run \
   lib/ws/handlers/task-primary-focus.test.ts \
+  lib/ws/handlers/task-primary-lifecycle.test.ts \
   lib/ws/handlers/agent-session.test.ts \
   lib/ws/handlers/agent-session-pure.test.ts \
   lib/ws/handlers/tasks.test.ts \
   lib/state/workflow-session-focus.test.ts \
+  lib/state/shared-resource-reads.test.ts \
+  lib/state/task-session-reads.test.ts \
+  hooks/use-task-sessions.removal.test.ts \
+  hooks/use-task-removal-session-loading.test.ts \
+  hooks/domains/session/use-session-actions.test.ts \
   lib/task-agent-error.test.ts)
 (cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/task/task-unread-dot.spec.ts tests/session/session-primary-removal.spec.ts -- --retries=0)
 (cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts -- --retries=0)
@@ -226,6 +232,14 @@ Production ownership narrowed by the failed-resume reproduction (see
   (existing pin/terminal predicates moved unchanged to avoid a controller cycle).
 - `apps/web/lib/state/workflow-session-focus.ts` (idempotent empty cancellation).
   The existing workflow-focus tests remain part of the focused command.
+- `apps/web/lib/ws/handlers/task-primary-lifecycle.test.ts` and shared test
+  fixtures (pre-promotion lifecycle and committed removal coverage).
+- `apps/web/lib/state/shared-resource-reads.ts`, `task-session-reads.ts`,
+  `hooks/use-task-sessions.ts`, and their focused tests (membership publication fence).
+- `apps/web/hooks/task-removal-session-loading.ts` and `use-task-removal.ts`
+  (removal-dialog admission shares the fence while preserving latest forced reads).
+- Local delete, task-delete and config-chat retirement callers invalidate
+  membership before evicting session data; no component markup changes.
 - Terminal-predicate consumers in coordinator copilot, passthrough toolbar,
   agent-error acknowledgements, and `lib/task-agent-error.ts`: import relocation
   only, with no UI copy/layout change.
@@ -592,6 +606,99 @@ pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome \
   -- --retries=0 --output "$SNAPSHOT/r4-phone-results"
 ```
 
+### Production-fix review round 5 remediation
+
+F1: lifecycle fallback now enters the same view-owned authority controller before
+any promotion exists. Persisted `COMPLETED`/`CANCELLED` is required for terminal
+fallback; new-sibling adoption also permits persisted `IDLE`. Cached `STARTING`
+does not establish completion. Initial adoption without a same-task predecessor,
+explicit workflow routing and protected pin/restart behavior retain their roles.
+A later promotion replaces the lifecycle check even for the same candidate.
+
+F2: the core registry now observes `session.removed` for the displayed predecessor,
+with active-task scoping when `task_id` is absent. It verifies current membership
+even if a failed predecessor is already non-primary and no task update follows.
+Complete scoped absence plus exactly one primary proves the recipient, including
+when the notification beats the primary projection. An unindexed recipient gets
+its proven identity and required lifecycle fields before focus; existing rows and
+cursors are never overwritten. Newer user selection still wins.
+
+F3: confirmed removals invalidate the keyed membership generation before cache
+eviction. Mounted consumers remain retained; stale transports, admitted but
+unpublished results and queued refreshes are rejected. The removal-dialog loader
+also joins that generation, retaining its independent latest-forced-read guard.
+All existing explicit session-eviction callers use the shared invalidation entry.
+Comment-conflict refresh already has a permanent routing-change guard including
+membership IDs. No generic task-navigation ownership or unread contract changed.
+
+Evidence retained under `~/.cache/tmp/unread-verification.zWhGjx`:
+
+- `r5-red-boundaries.log`: 12 behavioral failures/5 controls passed. The earlier
+  `r5-red.log` included a fixture arity error and is not the new-boundary RED proof.
+- `r5-red-admitted.log` and `r5-red-dialog.log`: accepted-but-unpublished and
+  removal-dialog responses each recreated the deleted row before their fences.
+- `r5-red-local-removal.log`: a local successful deletion left its old shared
+  membership read fulfilled before the invalidation entry was wired in.
+- `r5-removal-red.log`: one real two-client case against the retained R4 frontend
+  failed with deleted A still selected after B was already primary and the page
+  received removal. This is not a no-promotion mock.
+- Initial GREEN: lifecycle 15 tests, membership/read owners 25, expanded owners
+  221, then removal callers 40. Final change-aware checks are recorded below.
+- `r5-red-recipient.log`: a proof arriving before the recipient's lifecycle row
+  left route ownership unresolved. Minimal canonical-row initialization repairs
+  that boundary without copying the membership response's cursor.
+- `r5-config-chat.log`: the nearest config-chat retirement consumer passed 22 tests.
+- `r5-desktop.log` / `r5-phone.log`: full R5 desktop selection/unread/removal
+  35 and phone unread 3 passed, one worker, retries 0. The retained phone capture
+  shows the failed session, failure cause and recovery controls still visible.
+  These runs precede the final unindexed-recipient correction; its affected
+  final-bundle replay is recorded below.
+- Final logic checks: `r5-final-unit-v4.log`, 98 files/1019 tests passed;
+  `r5-config-chat.log`, 22 retirement-consumer tests passed. Configured changed-file
+  Oxlint, final formatting, typecheck (8 GiB Node heap) and fresh Vite build passed
+  (`r5-final-{lint,format,typecheck,build}-v4.log`). The intermediate v2 complexity
+  failure and v3 canonical-row type error were repaired, not waived.
+- Final-bundle replay: `r5-final-desktop.log`, 5 passed; `r5-final-phone.log`,
+  3 passed. Both full unread files and the full removal file ran with one worker,
+  retries 0, after the final canonical-row correction. The new two-client case
+  proves a deleted, retained non-primary failure leaves the tab without reload.
+- Final i18n ratchet and architecture checks passed (`r5-final-i18n.log`,
+  `r5-final-architecture.log`). Ratchet rename-detection warnings remain reported;
+  they are not broad-suite certification. Documentation uses the catalog and
+  full specification-lint commands above, including the design's size budget.
+
+Expanded final unit invocation, from the cache snapshot's `apps/web`:
+
+```bash
+pnpm exec vitest run lib/ws/handlers \
+  lib/state/workflow-session-focus.test.ts lib/task-agent-error.test.ts \
+  components/task/chat/use-session-read-tracking.test.ts \
+  components/task/task-unread-dot-visibility.test.ts lib/session-unread-divider.test.ts \
+  hooks/use-task-sessions hooks/use-task-removal \
+  hooks/domains/session/use-session-actions.test.ts \
+  lib/state/task-session-reads.test.ts lib/state/shared-resource-reads.test.ts \
+  hooks/journey-metadata-resources.test.ts hooks/use-workflow-snapshot.test.ts \
+  hooks/domains/kanban/use-all-workflow-snapshots
+```
+
+Final browser replay used the fresh `r5-final-build-v4.log` frontend and the
+unchanged recorded R02 backend/plugin binaries. From the same cache snapshot:
+
+```bash
+pnpm e2e:run --host --no-build --shards 1 --project chromium \
+  tests/task/task-unread-dot.spec.ts tests/session/session-primary-removal.spec.ts \
+  -- --retries=0 --output "$SNAPSHOT/r5-final-desktop-results"
+pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome \
+  tests/task/mobile-task-unread-dot.spec.ts \
+  -- --retries=0 --output "$SNAPSHOT/r5-final-phone-results"
+```
+
+The state/read fixes are shared across viewports. Existing phone unread tests
+exercise failure retention and persisted acknowledgement; the new desktop
+two-client case adds the distinct committed-removal boundary. No layout, touch
+surface or copy changed. R5 uses a fresh frontend over the recorded unchanged
+backend/plugin artifacts. No broad-suite or live NATS certification is implied.
+
 ## New reported incident: existing cursor behind a failed resume
 
 The user supplied task `eae34524-3f77-45ef-9d72-677f11d03cd4` ("Add message
@@ -706,10 +813,16 @@ unread contract are unchanged. Narrow commands, from `apps/web`:
 ```bash
 pnpm exec vitest run \
   lib/ws/handlers/task-primary-focus.test.ts \
+  lib/ws/handlers/task-primary-lifecycle.test.ts \
   lib/ws/handlers/agent-session.test.ts \
   lib/ws/handlers/agent-session-pure.test.ts \
   lib/ws/handlers/tasks.test.ts \
   lib/state/workflow-session-focus.test.ts \
+  lib/state/shared-resource-reads.test.ts \
+  lib/state/task-session-reads.test.ts \
+  hooks/use-task-sessions.removal.test.ts \
+  hooks/use-task-removal \
+  hooks/domains/session/use-session-actions.test.ts \
   lib/task-agent-error.test.ts
 pnpm e2e:run --host --shards 1 --project chromium tests/task/task-unread-dot.spec.ts tests/session/session-primary-removal.spec.ts -- --retries=0
 pnpm e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-unread-dot.spec.ts -- --retries=0

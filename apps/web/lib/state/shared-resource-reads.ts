@@ -6,6 +6,7 @@ type SharedRead<T> = (signal: AbortSignal) => Promise<T>;
 
 type SharedReadRecord<T> = {
   consumers: number;
+  generation: number;
   controller?: AbortController;
   request?: Promise<T>;
   trailingRefresh?: Promise<T>;
@@ -15,6 +16,7 @@ type SharedReadRecord<T> = {
 /** Coalesces reads by resource key and cancels them after their final consumer leaves. */
 export class SharedResourceReads<T> {
   private records = new Map<string, SharedReadRecord<T>>();
+  private nextGeneration = 0;
 
   constructor(private readonly scopeIsCurrent: () => boolean = () => true) {}
 
@@ -44,14 +46,34 @@ export class SharedResourceReads<T> {
     return this.start(key, record, load);
   }
 
-  isCurrent(key?: string): boolean {
+  isCurrent(key?: string, generation?: number): boolean {
+    if (!this.scopeIsCurrent()) return false;
+    if (key === undefined) return true;
+    const record = this.records.get(key);
     return (
-      this.scopeIsCurrent() && (key === undefined || (this.records.get(key)?.consumers ?? 0) > 0)
+      (record?.consumers ?? 0) > 0 &&
+      (generation === undefined || record?.generation === generation)
     );
   }
 
   isReading(key: string): boolean {
     return this.scopeIsCurrent() && this.records.get(key)?.request !== undefined;
+  }
+
+  generation(key: string): number {
+    return this.record(key).generation;
+  }
+
+  /** Retire an old snapshot without releasing its mounted consumers. */
+  invalidate(key: string): void {
+    const record = this.records.get(key);
+    if (!record) return;
+    record.generation = ++this.nextGeneration;
+    record.refreshQueued = false;
+    record.controller?.abort();
+    record.controller = undefined;
+    record.request = undefined;
+    record.trailingRefresh = undefined;
   }
 
   dispose() {
@@ -62,7 +84,7 @@ export class SharedResourceReads<T> {
   private record(key: string): SharedReadRecord<T> {
     let record = this.records.get(key);
     if (!record) {
-      record = { consumers: 0, refreshQueued: false };
+      record = { consumers: 0, generation: ++this.nextGeneration, refreshQueued: false };
       this.records.set(key, record);
     }
     return record;
@@ -107,6 +129,7 @@ export class SharedResourceReads<T> {
     load: SharedRead<T>,
     activeRequest: Promise<T>,
   ): Promise<T> {
+    const generation = record.generation;
     record.refreshQueued = true;
     if (record.trailingRefresh) return record.trailingRefresh;
     const trailing = activeRequest
@@ -118,7 +141,8 @@ export class SharedResourceReads<T> {
           record.refreshQueued &&
           record.consumers > 0 &&
           this.scopeIsCurrent() &&
-          this.records.get(key) === record
+          this.records.get(key) === record &&
+          record.generation === generation
         ) {
           record.refreshQueued = false;
           try {
@@ -128,7 +152,12 @@ export class SharedResourceReads<T> {
             lastError = error;
           }
         }
-        if (!this.scopeIsCurrent() || this.records.get(key) !== record) throw abortError();
+        if (
+          !this.scopeIsCurrent() ||
+          this.records.get(key) !== record ||
+          record.generation !== generation
+        )
+          throw abortError();
         if (lastError !== undefined) throw lastError;
         if (latest !== undefined) return latest;
         throw abortError();

@@ -28,3 +28,8 @@ export function getTaskSessionReads(store: StoreApi<AppState>): TaskSessionReads
   }
   return owner.reads;
 }
+
+/** Confirmed removals invalidate old membership snapshots without creating an owner. */
+export function invalidateTaskSessionMembership(store: StoreApi<AppState>, taskId: string): void {
+  owners.get(store)?.reads.invalidate(taskId);
+}

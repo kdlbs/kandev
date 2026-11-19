@@ -44,7 +44,7 @@ import {
   isTerminalSessionState,
   shouldPreservePinnedSessionForTask,
 } from "./session-selection";
-import { deferOwnedPrimaryFollow } from "./task-primary-focus";
+import { followRemovedSession, followSessionTransition } from "./task-primary-focus";
 
 const debug = createDebugLogger("session:state");
 
@@ -340,12 +340,8 @@ function shouldPreserveSessionSelection(
 
 /**
  * After a `session.state_changed` event, decide whether the chat UI should
- * follow a workflow-driven session switch. Covers both event orderings:
- *   1. New non-terminal session appears for the active task before the old
- *      one is torn down — adopt immediately.
- *   2. The current active session transitions to a terminal state — hand off
- *      to the newest non-terminal session for the same task, if any. A failed
- *      session is not a switch and keeps focus.
+ * follow a workflow-driven session switch. Same-task lifecycle handoffs verify
+ * predecessor state before changing focus; a failed session keeps its recovery view.
  */
 // eslint-disable-next-line max-params -- newState/previousState/wasKnownToStore are all needed by downstream branches
 function maybeAdoptSessionOnTransition(
@@ -360,7 +356,7 @@ function maybeAdoptSessionOnTransition(
   if (shouldPreserveSessionSelection(store, taskId, { sessionId, newState })) return;
 
   if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
-    if (deferOwnedPrimaryFollow(store, taskId)) return;
+    if (followSessionTransition(store, taskId, sessionId, "new-session")) return;
     const oldSessionId = state.tasks.activeSessionId;
     if (oldSessionId) inheritAgentctlStatus(state, oldSessionId, sessionId);
     clearPinnedSessionIfOverridden(store, sessionId);
@@ -400,18 +396,13 @@ function handOffFromEndedSession(
     isTerminalSessionState(previousState)
   )
     return;
-  if (deferOwnedPrimaryFollow(store, taskId)) return;
   // Prefer a non-terminal session already in the per-task list; fall back to
   // the task's promoted primary when the switch's new session hasn't landed
   // there yet (task.updated beats the old session's terminal state_changed).
   const replacement =
     pickReplacementSessionId(state, taskId) ??
     pickPrimarySessionReplacement(state, taskId, sessionId);
-  if (replacement && replacement !== sessionId) {
-    inheritAgentctlStatus(state, sessionId, replacement);
-    clearPinnedSessionIfOverridden(store, replacement);
-    state.setActiveSessionAuto(taskId, replacement);
-  }
+  followSessionTransition(store, taskId, replacement ?? undefined, "terminal");
 }
 
 /** Seed the session→environment mapping from an agentctl event payload.
@@ -901,6 +892,8 @@ function clearResumeAndLaunchWarnings(store: StoreApi<AppState>, sessionId: stri
 // eslint-disable-next-line max-lines-per-function -- session events remain one ordered registry.
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
+    "session.removed": (message) =>
+      followRemovedSession(store, message.payload?.session_id, message.payload?.task_id),
     "message.queue.status_changed": (message) =>
       handleQueueStatusChangedMessage(store, message.payload),
     // eslint-disable-next-line complexity -- ordered session reconciliation keeps stale-event guards together

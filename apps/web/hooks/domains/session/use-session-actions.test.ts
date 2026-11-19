@@ -6,6 +6,10 @@ import {
   isSessionResumable,
   useSessionActions,
 } from "./use-session-actions";
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import type { TaskSession, TaskSessionsResponse } from "@/lib/types/http";
+import { getTaskSessionReads } from "@/lib/state/task-session-reads";
 
 const mockToast = vi.fn().mockReturnValue("toast-1");
 const mockUpdateToast = vi.fn();
@@ -146,6 +150,35 @@ describe("useSessionActions", () => {
       title: "Deleting session successful",
       variant: "success",
     });
+  });
+
+  it("retires pre-delete membership reads after a successful local deletion", async () => {
+    const owner = getTaskSessionReads(mockStoreApi as unknown as StoreApi<AppState>);
+    const release = owner.retain("t1");
+    const response = Promise.withResolvers<TaskSessionsResponse>();
+    const retired = Promise.allSettled([owner.read("t1", () => response.promise)]);
+    const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
+    try {
+      await result.current.remove();
+      response.resolve({
+        sessions: [
+          {
+            id: "s1",
+            task_id: "t1",
+            state: "FAILED",
+            started_at: "2026-11-19T12:00:00Z",
+            updated_at: "2026-11-19T12:00:00Z",
+          } as TaskSession,
+        ],
+        total: 1,
+      });
+      expect((await retired)[0]).toMatchObject({
+        status: "rejected",
+        reason: { name: "AbortError" },
+      });
+    } finally {
+      release();
+    }
   });
 
   it("remove deletes the backing task for a Quick Chat session", async () => {

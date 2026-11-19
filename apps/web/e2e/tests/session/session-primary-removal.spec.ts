@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { watchWs } from "../../helpers/causal-waits";
+import {
+  cleanupFailingResumeTask,
+  seedFailingResumeTask,
+  waitForFailedResume,
+} from "../../helpers/unread-divider";
 
 // Following confirmed removal must not require a full document reload.
 test("follows a stopped primary deleted from another client without reloading", async ({
@@ -60,4 +66,58 @@ test("follows a stopped primary deleted from another client without reloading", 
   });
   await expect(observer.sessionTabBySessionId(old.session_id)).toHaveCount(0);
   expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
+});
+
+test("follows removal after a failed resume has already lost primary", async ({
+  testPage,
+  desktopTestPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(240_000);
+  const seeded = await seedFailingResumeTask(
+    apiClient,
+    seedData,
+    backend.tmpDir,
+    "Remote retained failure removal",
+  );
+  try {
+    const observer = new SessionPage(testPage);
+    const deletingClient = new SessionPage(desktopTestPage);
+    const watcher = watchWs(testPage);
+    const failed = waitForFailedResume(watcher, seeded);
+    await testPage.goto(`/t/${seeded.taskId}`);
+    await expect(observer.activeChat()).toBeVisible({ timeout: 30_000 });
+    await failed;
+    await expect(observer.activeChat()).toHaveAttribute("data-session-id", seeded.failingSessionId);
+    await expect(observer.activeChat().getByTestId("session-recovery-card")).toBeVisible();
+    const before = (await apiClient.listTaskSessions(seeded.taskId)).sessions;
+    expect(before.find((row) => row.is_primary)?.id).toBe(seeded.siblingSessionId);
+    expect(before.find((row) => row.id === seeded.failingSessionId)?.state).toBe("FAILED");
+    const documentStart = await testPage.evaluate(() => performance.timeOrigin);
+
+    await desktopTestPage.goto(`/t/${seeded.taskId}`);
+    await deletingClient.waitForLoad();
+    const removed = watcher.waitForEvent("session.removed", {
+      where: (payload) => payload.session_id === seeded.failingSessionId,
+    });
+    await deletingClient.sessionTabBySessionId(seeded.failingSessionId).click({ button: "right" });
+    await deletingClient.contextMenuItem("Delete").click();
+    const confirmation = desktopTestPage.getByTestId("session-delete-confirm-popover");
+    await expect(confirmation).toBeVisible();
+    await confirmation.getByTestId("session-delete-confirm").click();
+    await removed;
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(seeded.taskId);
+        return sessions.map((row) => ({ id: row.id, primary: row.is_primary }));
+      })
+      .toEqual([{ id: seeded.siblingSessionId, primary: true }]);
+    await expect(observer.activeChat()).toHaveAttribute("data-session-id", seeded.siblingSessionId);
+    await expect(observer.sessionTabBySessionId(seeded.failingSessionId)).toHaveCount(0);
+    expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
+  } finally {
+    await cleanupFailingResumeTask(apiClient, seeded);
+  }
 });

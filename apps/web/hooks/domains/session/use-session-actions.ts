@@ -8,6 +8,7 @@ import { deleteTaskAfterUserAction } from "@/lib/api/domains/kanban-api";
 import { resolveSessionDeletionTarget } from "@/lib/session/session-deletion";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useSessionRestart } from "./use-session-restart";
+import { invalidateTaskSessionMembership } from "@/lib/state/task-session-reads";
 
 export { isSessionStoppable, isSessionDeletable, isSessionResumable } from "./session-action-state";
 
@@ -166,6 +167,7 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
         }
       }
 
+      invalidateTaskSessionMembership(appStoreApi, taskId);
       removeTaskSession(taskId, sessionId);
       removeQuickChatSession(sessionId);
       onDeleted?.();
