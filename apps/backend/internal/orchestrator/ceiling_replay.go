@@ -939,16 +939,29 @@ func (s *Service) replayCeilingLaunchQueueDrainEnsure(ctx context.Context, task 
 
 // replayCeilingLaunchResume replays an AC-42 "resume" record.
 func (s *Service) replayCeilingLaunchResume(ctx context.Context, task *models.Task, payload map[string]interface{}, origins ...launchOrigin) ceilingReplayResult {
+	identity, hasIdentity, identityErr := transientLaunchIdentityFromPayload(payload)
+	if identityErr != nil {
+		return ceilingReplaySupersededResult()
+	}
+	options := executor.ResumeOptions{
+		AllowBranchReplacement:          boolField(payload, "allow_branch_replacement"),
+		AllowCompletedSessionResume:     boolField(payload, resumePayloadAllowCompletedKey),
+		RequireIdleSuspensionProvenance: boolField(payload, resumePayloadIdleProvenanceKey),
+		Origin:                          string(ceilingAdmissionOrigin(origins...)),
+	}
+	if hasIdentity {
+		options.TransientRetryAttemptID = identity.attemptID
+		options.TransientRetryErrorStamp = identity.errorStamp
+		options.TransientRetryUpdatedAt = identity.updatedAt
+	}
 	execution, err := s.ResumeTaskSessionWithOptions(
 		ctx, task.ID,
 		stringField(payload, metaKeySessionID),
-		executor.ResumeOptions{
-			AllowBranchReplacement:          boolField(payload, "allow_branch_replacement"),
-			AllowCompletedSessionResume:     boolField(payload, resumePayloadAllowCompletedKey),
-			RequireIdleSuspensionProvenance: boolField(payload, resumePayloadIdleProvenanceKey),
-			Origin:                          string(ceilingAdmissionOrigin(origins...)),
-		},
+		options,
 	)
+	if errors.Is(err, errTransientLaunchRetrySuperseded) {
+		return ceilingReplaySupersededResult()
+	}
 	if errors.Is(err, ErrIdleSuspensionProvenanceRequired) {
 		// The session is no longer parked by the idle policy, so the focus
 		// resume this record carries no longer applies.

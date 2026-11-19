@@ -1475,7 +1475,7 @@ type Service struct {
 	launchRetryCtx     context.Context
 	launchRetryCancel  context.CancelFunc
 	launchRetryStopped bool
-	launchRetries      sync.WaitGroup
+	launchRetries      *sync.WaitGroup
 	launchRetryDelay   time.Duration
 	launchRetry        func(context.Context, string, string) error
 
@@ -2036,6 +2036,7 @@ func NewService(
 		)
 	})
 	exec.SetOnLaunchFailed(s.handleLaunchFailed)
+	exec.SetOnLaunchFailureRecorded(s.handleRecordedLaunchFailure)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
 	exec.SetOnStaleExecutionCleanup(func(ctx context.Context, sessionID string) {
 		s.settleBackgroundWorkLocked(ctx, sessionID, "")
@@ -3439,6 +3440,7 @@ func (s *Service) Start(ctx context.Context) (startErr error) {
 	// sweep while the service is active.
 	s.resetLifecycleSweepWorkers()
 	s.resetSilentRestoreRecovery()
+	s.resetTransientLaunchRetries()
 	s.running = true
 	s.startedAt = time.Now()
 	recoveryLifecycleCtx, recoveryLifecycleCancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -3688,6 +3690,7 @@ func (s *Service) Stop() error {
 	}
 
 	s.logger.Info("stopping orchestrator service")
+	s.stopTransientLaunchRetries()
 	// Stop owns every in-flight resume attempt. Its detached request context
 	// must not let startup callbacks outlive the service generation.
 	s.cancelResumeAttempts()
@@ -3696,7 +3699,6 @@ func (s *Service) Stop() error {
 	// workers can otherwise observe the shutdown only after those components
 	// have already stopped, and may launch or recover a session during teardown.
 	s.stopDynamicSuccessorWorkers()
-	s.stopTransientLaunchRetries()
 	s.stopBackgroundWorkSettleWorkers()
 	s.stopDynamicPolicyRecovery()
 	s.stopLifecycleSweepAsync()

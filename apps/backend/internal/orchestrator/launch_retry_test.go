@@ -76,6 +76,104 @@ func TestScheduleTransientLaunchRetry_RetriesOnce(t *testing.T) {
 	}, 100*time.Millisecond, 5*time.Millisecond, "the automatic retry must run at most once per session")
 }
 
+func TestTransientLaunchRetry_RecordsRealAgentLaunchFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-real-launch", "session-real-launch", models.TaskSessionStateCreated)
+	launchErr := errors.New("agentctl not ready: context deadline exceeded")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task-real-launch"] = &v1.Task{
+		ID: "task-real-launch", WorkspaceID: "ws1", WorkflowID: "wf1", State: v1.TaskStateInProgress,
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor.SetOnSessionStateChange(func(callbackCtx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
+		svc.updateTaskSessionState(callbackCtx, taskID, sessionID, state, errorMessage, true)
+		return nil
+	})
+	svc.executor.SetOnTaskStateChange(func(callbackCtx context.Context, taskID string, state v1.TaskState) error {
+		_, _, err := repo.UpdateTaskStateIfNotArchived(callbackCtx, taskID, state)
+		return err
+	})
+	svc.executor.SetOnLaunchFailureRecorded(svc.handleRecordedLaunchFailure)
+	svc.launchRetryDelay = time.Millisecond
+	started := make(chan struct{}, 1)
+	svc.launchRetry = func(context.Context, string, string) error {
+		started <- struct{}{}
+		return nil
+	}
+
+	_, err := svc.StartCreatedSession(ctx, "task-real-launch", "session-real-launch", "profile1", "start", true, false, false, nil, nil)
+	require.ErrorIs(t, err, launchErr)
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a real executor launch failure did not schedule the automatic retry")
+	}
+	svc.launchRetries.Wait()
+}
+
+func TestTransientLaunchRetry_DoesNotRetryReplacementFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-retry-replacement", "session-retry-replacement", models.TaskSessionStateFailed)
+	require.NoError(t, repo.UpdateTaskState(ctx, "task-retry-replacement", v1.TaskStateFailed))
+	session, err := repo.GetTaskSession(ctx, "session-retry-replacement")
+	require.NoError(t, err)
+	session.Metadata[models.SessionMetaKeyAgentStartAttemptID] = "attempt-a"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.launchRetryDelay = 300 * time.Millisecond
+	started := make(chan struct{}, 1)
+	svc.launchRetry = func(context.Context, string, string) error {
+		started <- struct{}{}
+		return nil
+	}
+	svc.scheduleTransientLaunchRetry(ctx, "task-retry-replacement", "session-retry-replacement", errors.New("agentctl not ready"))
+
+	// A user starts attempt B and it fails before attempt A's timer expires.
+	session, err = repo.GetTaskSession(ctx, "session-retry-replacement")
+	require.NoError(t, err)
+	session.Metadata[models.SessionMetaKeyAgentStartAttemptID] = "attempt-b"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	svc.launchRetries.Wait()
+	select {
+	case <-started:
+		t.Fatal("the retry for attempt A acted on failed attempt B")
+	default:
+	}
+}
+
+func TestTransientLaunchRetryContextCancelsResumeAttempt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = withTransientLaunchRetryContext(ctx, transientLaunchFailureIdentity{updatedAt: time.Now().UTC()})
+	attempt, started := newResumeAttemptRegistry().begin(ctx, "task", "session")
+	require.True(t, started)
+	cancel()
+	select {
+	case <-attempt.ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("the retry deadline did not cancel the owned resume attempt")
+	}
+}
+
+func TestResetTransientLaunchRetriesStartsNewWorkerGeneration(t *testing.T) {
+	svc := &Service{}
+	svc.stopTransientLaunchRetries()
+
+	svc.resetTransientLaunchRetries()
+	_, workers, started := svc.beginTransientLaunchRetryWorker()
+	require.True(t, started, "a restarted service accepts retry workers")
+	workers.Done()
+	svc.stopTransientLaunchRetries()
+}
+
 // A transient timeout while resuming a session with history must retry
 // through the real RecoverSession as a native resume: the stored resume token
 // reaches the relaunch, is never cleared, and the session leaves FAILED.

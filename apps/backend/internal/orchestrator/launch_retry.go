@@ -4,13 +4,69 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type transientLaunchFailureIdentity struct {
+	attemptID  string
+	errorStamp string
+	updatedAt  time.Time
+}
+
+type transientLaunchRetryContextKey struct{}
+
+func transientLaunchIdentity(session *models.TaskSession) transientLaunchFailureIdentity {
+	if session == nil {
+		return transientLaunchFailureIdentity{}
+	}
+	identity := transientLaunchFailureIdentity{
+		attemptID: models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]),
+		updatedAt: session.UpdatedAt,
+	}
+	if lastError, ok := models.LoadLastAgentError(session.Metadata); ok {
+		identity.errorStamp = lastError.Stamp()
+	}
+	return identity
+}
+
+func (identity transientLaunchFailureIdentity) matches(session *models.TaskSession) bool {
+	if session == nil || session.State != models.TaskSessionStateFailed ||
+		!session.UpdatedAt.Equal(identity.updatedAt) ||
+		models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]) != identity.attemptID {
+		return false
+	}
+	lastError, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok {
+		return identity.errorStamp == ""
+	}
+	return lastError.Stamp() == identity.errorStamp
+}
+
+func withTransientLaunchRetryContext(ctx context.Context, identity transientLaunchFailureIdentity) context.Context {
+	ctx = context.WithValue(ctx, transientLaunchRetryContextKey{}, true)
+	return context.WithValue(ctx, transientLaunchFailureIdentityContextKey{}, identity)
+}
+
+type transientLaunchFailureIdentityContextKey struct{}
+
+var errTransientLaunchRetrySuperseded = errors.New("transient launch retry failure was replaced")
+
+func transientLaunchFailureFromContext(ctx context.Context) (transientLaunchFailureIdentity, bool) {
+	identity, ok := ctx.Value(transientLaunchFailureIdentityContextKey{}).(transientLaunchFailureIdentity)
+	return identity, ok
+}
+
+func isTransientLaunchRetryContext(ctx context.Context) bool {
+	owned, _ := ctx.Value(transientLaunchRetryContextKey{}).(bool)
+	return owned
+}
 
 const (
 	// transientLaunchRetryDelay gives a transiently unavailable runtime
@@ -56,15 +112,48 @@ func isTransientLaunchFailure(err error) bool {
 // session's own (current step) profile, after a transient launch failure left
 // the task FAILED. A second failure keeps FAILED and is logged.
 func (s *Service) scheduleTransientLaunchRetry(ctx context.Context, taskID, sessionID string, launchErr error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return
+	}
+	s.scheduleTransientLaunchRetryForFailure(ctx, taskID, sessionID, launchErr, transientLaunchIdentity(session))
+}
+
+func (s *Service) handleRecordedLaunchFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	launchErr error,
+	failureStamp string,
+) {
+	if failureStamp == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return
+	}
+	lastError, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok || lastError.Stamp() != failureStamp {
+		return
+	}
+	s.scheduleTransientLaunchRetryForFailure(ctx, taskID, sessionID, launchErr, transientLaunchIdentity(session))
+}
+
+func (s *Service) scheduleTransientLaunchRetryForFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	launchErr error,
+	identity transientLaunchFailureIdentity,
+) {
 	if !isTransientLaunchFailure(launchErr) {
 		return
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil || task.IsFromOffice || models.IsAutomationTaskOrigin(task.Origin) {
+	if err != nil || task == nil || task.State != v1.TaskStateFailed || task.IsFromOffice || models.IsAutomationTaskOrigin(task.Origin) {
 		return
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil || session.State != models.TaskSessionStateFailed {
+	if err != nil || session == nil || session.TaskID != taskID || !identity.matches(session) {
 		return
 	}
 	if _, parked := models.LoadWorkflowParking(session.Metadata); parked {
@@ -77,7 +166,7 @@ func (s *Service) scheduleTransientLaunchRetry(ctx context.Context, taskID, sess
 			zap.Error(launchErr))
 		return
 	}
-	workerCtx, ok := s.beginTransientLaunchRetryWorker()
+	workerCtx, workers, ok := s.beginTransientLaunchRetryWorker()
 	if !ok {
 		return
 	}
@@ -86,14 +175,18 @@ func (s *Service) scheduleTransientLaunchRetry(ctx context.Context, taskID, sess
 		zap.String("session_id", sessionID),
 		zap.Error(launchErr))
 	go func() {
-		defer s.launchRetries.Done()
-		s.runTransientLaunchRetry(workerCtx, taskID, sessionID)
+		defer workers.Done()
+		s.runTransientLaunchRetry(workerCtx, taskID, sessionID, identity)
 	}()
 }
 
 // runTransientLaunchRetry waits out the retry delay, re-reads the task and
 // session, and relaunches only while both are still FAILED.
-func (s *Service) runTransientLaunchRetry(workerCtx context.Context, taskID, sessionID string) {
+func (s *Service) runTransientLaunchRetry(
+	workerCtx context.Context,
+	taskID, sessionID string,
+	identity transientLaunchFailureIdentity,
+) {
 	delay := transientLaunchRetryDelay
 	if s.launchRetryDelay > 0 {
 		delay = s.launchRetryDelay
@@ -112,10 +205,10 @@ func (s *Service) runTransientLaunchRetry(workerCtx context.Context, taskID, ses
 		return
 	}
 	currentSession, sessionErr := s.repo.GetTaskSession(retryCtx, sessionID)
-	if sessionErr != nil || currentSession == nil || currentSession.State != models.TaskSessionStateFailed {
+	if sessionErr != nil || !identity.matches(currentSession) {
 		return
 	}
-	if retryErr := s.launchRetrySession(retryCtx, taskID, sessionID); retryErr != nil {
+	if retryErr := s.launchRetrySession(retryCtx, taskID, sessionID, identity); retryErr != nil {
 		s.logger.Warn("automatic launch retry failed; the task stays FAILED",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -132,17 +225,20 @@ func (s *Service) runTransientLaunchRetry(workerCtx context.Context, taskID, ses
 // beginTransientLaunchRetryWorker registers one retry worker under the
 // service-owned retry context. Stop cancels that context and waits for the
 // workers, so a pending retry never outlives the service.
-func (s *Service) beginTransientLaunchRetryWorker() (context.Context, bool) {
+func (s *Service) beginTransientLaunchRetryWorker() (context.Context, *sync.WaitGroup, bool) {
 	s.launchRetryMu.Lock()
 	defer s.launchRetryMu.Unlock()
 	if s.launchRetryStopped {
-		return nil, false
+		return nil, nil, false
 	}
 	if s.launchRetryCtx == nil {
 		s.launchRetryCtx, s.launchRetryCancel = context.WithCancel(context.Background())
 	}
+	if s.launchRetries == nil {
+		s.launchRetries = &sync.WaitGroup{}
+	}
 	s.launchRetries.Add(1)
-	return s.launchRetryCtx, true
+	return s.launchRetryCtx, s.launchRetries, true
 }
 
 // stopTransientLaunchRetries cancels pending automatic retries and waits for
@@ -151,13 +247,16 @@ func (s *Service) stopTransientLaunchRetries() {
 	s.launchRetryMu.Lock()
 	s.launchRetryStopped = true
 	cancel := s.launchRetryCancel
+	workers := s.launchRetries
 	s.launchRetryMu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	done := make(chan struct{})
 	go func() {
-		s.launchRetries.Wait()
+		if workers != nil {
+			workers.Wait()
+		}
 		close(done)
 	}()
 	select {
@@ -165,6 +264,62 @@ func (s *Service) stopTransientLaunchRetries() {
 	case <-time.After(sendNowClaimRecoveryTimeout):
 		s.logger.Warn("timed out waiting for automatic launch retries during shutdown")
 	}
+}
+
+func (s *Service) resetTransientLaunchRetries() {
+	s.launchRetryMu.Lock()
+	s.launchRetryStopped = false
+	s.launchRetryCtx = nil
+	s.launchRetryCancel = nil
+	s.launchRetries = &sync.WaitGroup{}
+	s.launchRetryMu.Unlock()
+}
+
+func (s *Service) validateTransientLaunchFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	identity transientLaunchFailureIdentity,
+) error {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil || task.State != v1.TaskStateFailed || task.IsFromOffice || models.IsAutomationTaskOrigin(task.Origin) {
+		return errTransientLaunchRetrySuperseded
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.TaskID != taskID || !identity.matches(session) {
+		return errTransientLaunchRetrySuperseded
+	}
+	return nil
+}
+
+func transientLaunchIdentityFromResumeOptions(options executor.ResumeOptions) (transientLaunchFailureIdentity, bool) {
+	if options.TransientRetryUpdatedAt.IsZero() {
+		return transientLaunchFailureIdentity{}, false
+	}
+	return transientLaunchFailureIdentity{
+		attemptID:  options.TransientRetryAttemptID,
+		errorStamp: options.TransientRetryErrorStamp,
+		updatedAt:  options.TransientRetryUpdatedAt,
+	}, true
+}
+
+func transientLaunchIdentityFromPayload(payload map[string]interface{}) (transientLaunchFailureIdentity, bool, error) {
+	rawUpdatedAt, found := payload["transient_retry_updated_at"]
+	if !found {
+		return transientLaunchFailureIdentity{}, false, nil
+	}
+	updatedAtText, ok := rawUpdatedAt.(string)
+	if !ok {
+		return transientLaunchFailureIdentity{}, false, errors.New("invalid transient retry timestamp")
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, updatedAtText)
+	if err != nil {
+		return transientLaunchFailureIdentity{}, false, err
+	}
+	return transientLaunchFailureIdentity{
+		attemptID:  stringField(payload, "transient_retry_attempt_id"),
+		errorStamp: stringField(payload, "transient_retry_error_stamp"),
+		updatedAt:  updatedAt,
+	}, true, nil
 }
 
 // claimTransientLaunchRetry records the one automatic attempt per session and
@@ -195,13 +350,22 @@ func (s *Service) sweepExpiredTransientLaunchRetries(now time.Time) {
 	})
 }
 
-func (s *Service) launchRetrySession(ctx context.Context, taskID, sessionID string) error {
+func (s *Service) launchRetrySession(
+	ctx context.Context,
+	taskID, sessionID string,
+	identity transientLaunchFailureIdentity,
+) error {
 	if s.launchRetry != nil {
 		return s.launchRetry(ctx, taskID, sessionID)
 	}
 	// runtime_retry resumes sessions that hold a resume token and only falls
 	// back to a fresh start for first-launch failures, so the automatic retry
 	// never discards conversation history.
-	_, err := s.RecoverSession(ctx, taskID, sessionID, recoveryActionRuntimeRetry)
+	ctx = withTransientLaunchRetryContext(ctx, identity)
+	_, err := s.RecoverSessionWithOptions(ctx, taskID, sessionID, recoveryActionRuntimeRetry, RecoverSessionOptions{
+		SettingsPolicy:         executor.ResumeSettingsPolicyStrict,
+		Origin:                 string(launchOriginAutomatic),
+		transientLaunchFailure: &identity,
+	})
 	return err
 }

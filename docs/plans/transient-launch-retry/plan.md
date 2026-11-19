@@ -37,17 +37,18 @@ boundary.
 
 ## Verification strategy
 
-Orchestrator unit tests: transient classification, once-only retry, a real
-`RecoverSession` retry that keeps the resume token and leaves `FAILED`, the
-claim TTL and sweep, no retry for a non-transient failure, and no relaunch
-once `Stop` has begun. No end-to-end test: the mock agent cannot fail its
+Orchestrator tests cover a real executor launch failure, resume-token
+preservation, automatic capacity deferral, replacement failures, workspace-only
+preparation, worker restart, shutdown cancellation, once-per-hour claims, and
+non-transient failures. No end-to-end test: the mock agent cannot fail its
 startup transiently on demand.
 
 ## Risks
 
 - A retry could repeat side effects of a failed start. It is limited to a
   closed list of startup failures, runs once per session per hour, re-checks
-  state first, and uses the same recovery path as the manual retry action.
+  failure identity at resume admission, keeps automatic capacity provenance,
+  and uses the same recovery path as the manual retry action.
 
 ## References
 

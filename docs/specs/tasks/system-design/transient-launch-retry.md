@@ -21,13 +21,16 @@ display, the recovery actions, or the dynamic routing fallback.
 | AC-TASKS-TRANSIENT-LAUNCH-RETRY-001.1, 001.2 | Eligibility, Retry worker |
 | AC-TASKS-TRANSIENT-LAUNCH-RETRY-001.3 | Once per session |
 | AC-TASKS-TRANSIENT-LAUNCH-RETRY-001.4 | Retry worker |
+| AC-TASKS-TRANSIENT-LAUNCH-RETRY-001.5 | Eligibility, Retry worker |
 
 ## Eligibility
 
-`Service.handleSessionLaunchFailure` records the failure through
-`recordSessionLaunchFailure`, which reports whether the session and the task
-were both moved to `FAILED`. Only then does it call
-`scheduleTransientLaunchRetry` (`internal/orchestrator/launch_retry.go`).
+An early interactive launch failure is eligible after
+`recordSessionLaunchFailure` moves both the session and task to `FAILED`. An
+executor-owned launch failure is eligible after the executor records the
+session failure and task failure. Workspace-only preparation uses the same
+failure bookkeeping but does not request an agent start and cannot schedule a
+retry.
 
 `isTransientLaunchFailure` accepts `context.DeadlineExceeded` and a closed list
 of sanitized messages: `agentctl not ready`, `context deadline exceeded`,
@@ -44,13 +47,17 @@ bounded and a failure long after the first one can still recover.
 
 ## Retry worker
 
+The worker captures the failed session's start-attempt ID, error stamp, and
+updated time. It checks that identity after its two-second delay and again at
+resume admission. It stops if a later attempt replaced the failure. The worker
+passes automatic origin to the existing session ceiling. If capacity defers the
+resume, the replay record keeps the failure identity and checks it again.
+
 The worker runs under a service-owned context (`launchRetryCtx`).
-`beginTransientLaunchRetryWorker` registers it in `launchRetries` unless the
-service is stopping; `Service.Stop` calls `stopTransientLaunchRetries`, which
-cancels the context and waits for the workers with the shared shutdown
-timeout. After a two-second delay the worker re-reads the task and the session
-and gives up unless both are still `FAILED`. It then calls `RecoverSession`
-with `recoveryActionRuntimeRetry` under a five-minute timeout. A second failure
+`beginTransientLaunchRetryWorker` registers it unless the service is stopping.
+`Service.Stop` cancels and waits for that worker generation. `Service.Start`
+opens a new generation. The retry deadline remains attached to the resume
+attempt, so shutdown can cancel a launch already in progress. A second failure
 is logged and leaves the task `FAILED`.
 
 ## Failure and recovery

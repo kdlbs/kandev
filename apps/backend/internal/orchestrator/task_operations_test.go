@@ -3985,6 +3985,59 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 	})
 }
 
+func TestPrepareTaskSession_TransientWorkspaceFailureDoesNotRetryAgent(t *testing.T) {
+	const taskID = "task-workspace-only-retry"
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedTaskAndSession(t, baseRepo, taskID, "session-workspace-only-retry", models.TaskSessionStateCreated)
+	failureRepo := &taskEnvironmentFailureRepo{
+		Repository: baseRepo,
+		err:        errors.New("failed to launch workspace: context deadline exceeded"),
+		called:     make(chan struct{}),
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, WorkspaceID: "ws1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{}
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, failureRepo, testLogger(), executor.ExecutorConfig{}))
+	svc := &Service{
+		logger:             testLogger(),
+		repo:               failureRepo,
+		workflowStepGetter: newMockStepGetter(),
+		taskRepo:           taskRepo,
+		agentManager:       agentMgr,
+		executor:           exec,
+		messageQueue:       messagequeue.NewServiceMemory(testLogger()),
+		scheduler:          scheduler.NewScheduler(queue.NewTaskQueue(1), exec, taskRepo, testLogger(), scheduler.SchedulerConfig{}),
+	}
+	svc.launchRetryDelay = time.Millisecond
+	retried := atomic.Bool{}
+	svc.launchRetry = func(context.Context, string, string) error {
+		retried.Store(true)
+		return nil
+	}
+
+	sessionID, err := svc.PrepareTaskSession(ctx, taskID, "profile1", "", "", "", true)
+	if err != nil {
+		t.Fatalf("PrepareTaskSession: %v", err)
+	}
+	select {
+	case <-failureRepo.called:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for workspace preparation")
+	}
+	require.Eventually(t, func() bool {
+		session, err := baseRepo.GetTaskSession(ctx, sessionID)
+		return err == nil && session.State == models.TaskSessionStateFailed
+	}, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		taskRepo.mu.Lock()
+		defer taskRepo.mu.Unlock()
+		return taskRepo.updatedStates[taskID] == v1.TaskStateFailed
+	}, time.Second, 10*time.Millisecond)
+	require.Never(t, retried.Load, 100*time.Millisecond, 5*time.Millisecond,
+		"workspace-only preparation must not schedule an agent-start retry")
+}
+
 // TestPrepareTaskSession_MarksRouteActionRequiredWhenWorkspaceLaunchFails is
 // the regression test for review finding F2: PrepareTaskSession's own
 // background workspace launch resolves and claims a dynamic route ahead of

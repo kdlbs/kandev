@@ -53,6 +53,10 @@ not have to notice the failure and retry by hand.
 - **AC-TASKS-TRANSIENT-LAUNCH-RETRY-001.4:** When the task or session leaves
   `FAILED` before the delay ends, the system shall not relaunch it. When the
   backend stops, a pending retry shall be cancelled.
+- **AC-TASKS-TRANSIENT-LAUNCH-RETRY-001.5:** A retry shall retain the failed
+  launch identity and automatic launch origin through admission and capacity
+  deferral. It shall not act on a later failure or on a workspace-only prepare
+  that did not request an agent start.
 
 ## Out of scope
 

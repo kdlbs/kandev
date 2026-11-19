@@ -1098,6 +1098,10 @@ type AgentProcessStartFailedFunc func(ctx context.Context, taskID, sessionID, ag
 // creating repository-scoped user-facing status messages tied to launch errors.
 type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID string, err error)
 
+// LaunchFailureRecordedFunc runs after a pre-agent launch failure and its task
+// state have been persisted. The stamp identifies the exact session failure.
+type LaunchFailureRecordedFunc func(ctx context.Context, taskID, sessionID string, err error, stamp string)
+
 // CeilingReservationReleaseFunc releases the orchestrator's session-ceiling
 // reservation for a session this package just moved out of the counted
 // population through a write that bypasses onSessionStateChange /
@@ -1257,7 +1261,8 @@ type Executor struct {
 
 	// Callback for session launch failures (pre-start). Allows orchestrator
 	// to emit user-friendly guidance for known failure patterns.
-	onLaunchFailed LaunchFailedFunc
+	onLaunchFailed          LaunchFailedFunc
+	onLaunchFailureRecorded LaunchFailureRecordedFunc
 
 	// Callback releasing the session-ceiling reservation for writes this
 	// package makes directly against the repository, bypassing
@@ -1685,6 +1690,12 @@ func (e *Executor) SetOnContextWindowReset(fn ContextWindowResetFunc) {
 // the agent process has started.
 func (e *Executor) SetOnLaunchFailed(fn LaunchFailedFunc) {
 	e.onLaunchFailed = fn
+}
+
+// SetOnLaunchFailureRecorded sets a callback for a launch failure after both
+// session and task failure bookkeeping has completed.
+func (e *Executor) SetOnLaunchFailureRecorded(fn LaunchFailureRecordedFunc) {
+	e.onLaunchFailureRecorded = fn
 }
 
 // SetLaunchFailureReviewEligibility wires the narrow review-completion

@@ -481,7 +481,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 						s.logger.Warn("failed to persist dynamic route for prepared session",
 							zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(routeErr))
 					}
-					_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, routeErr, launchSession)
+					_ = s.handleSessionPreparationFailure(bgCtx, taskID, sessionID, routeErr, launchSession)
 					return
 				}
 				launchProfileID = route.launchProfileID
@@ -492,7 +492,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 				// LaunchAgent failures persist FAILED in the executor. Earlier
 				// workspace failures return here and are recorded through the same
 				// session-level recovery claim.
-				launchErr = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, launchErr)
+				launchErr = s.handleSessionPreparationFailure(bgCtx, taskID, sessionID, launchErr)
 				s.logger.Warn("failed to launch workspace for prepared session (file browsing may be unavailable)",
 					zap.String("task_id", taskID),
 					zap.String("session_id", sessionID),
@@ -1278,6 +1278,25 @@ func (s *Service) handleSessionLaunchFailure(
 	launchErr error,
 	preloadedSession ...*models.TaskSession,
 ) error {
+	return s.handleSessionLaunchFailureWithRetry(ctx, taskID, sessionID, launchErr, true, preloadedSession...)
+}
+
+func (s *Service) handleSessionPreparationFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	launchErr error,
+	preloadedSession ...*models.TaskSession,
+) error {
+	return s.handleSessionLaunchFailureWithRetry(ctx, taskID, sessionID, launchErr, false, preloadedSession...)
+}
+
+func (s *Service) handleSessionLaunchFailureWithRetry(
+	ctx context.Context,
+	taskID, sessionID string,
+	launchErr error,
+	allowTransientRetry bool,
+	preloadedSession ...*models.TaskSession,
+) error {
 	failureCtx := context.WithoutCancel(ctx)
 	if isFixedProfileSuspendedError(launchErr) {
 		return launchErr
@@ -1296,11 +1315,13 @@ func (s *Service) handleSessionLaunchFailure(
 	// replay payload here so an early admission or startup failure does not keep
 	// attachment data alive until a later session event.
 	s.clearTransientRetryState(sessionID)
-	sessionFailed, taskFailed := s.recordSessionLaunchFailure(
+	sessionFailed, taskFailed, failedSession := s.recordSessionLaunchFailure(
 		failureCtx, taskID, sessionID, safeErr, preloadedSession...,
 	)
-	if sessionFailed && taskFailed {
-		s.scheduleTransientLaunchRetry(failureCtx, taskID, sessionID, safeErr)
+	if allowTransientRetry && sessionFailed && taskFailed {
+		s.scheduleTransientLaunchRetryForFailure(
+			failureCtx, taskID, sessionID, safeErr, transientLaunchIdentity(failedSession),
+		)
 	}
 	return safeErr
 }
@@ -1309,13 +1330,13 @@ func (s *Service) handleSessionLaunchFailure(
 // updates the task only while the same failed session still owns it. Typed
 // launch-error persistence belongs to the executor's session transition.
 // It reports whether the session and the task were durably transitioned.
-func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) (sessionFailed, taskFailed bool) {
-	_, changed := s.updateTaskSessionStateWithHook(
+func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) (sessionFailed, taskFailed bool, failedSession *models.TaskSession) {
+	failedSession, changed := s.updateTaskSessionStateWithHook(
 		ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), false,
 		nil, preloadedSession...,
 	)
 	if !changed {
-		return false, false
+		return false, false, nil
 	}
 	updated, err := s.updateTaskStateForEarlyLaunchFailure(ctx, taskID, sessionID)
 	if err != nil {
@@ -1323,13 +1344,13 @@ func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessio
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return true, false
+		return true, false, failedSession
 	}
 	if !updated {
-		return true, false
+		return true, false, failedSession
 	}
 	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateFailed)
-	return true, true
+	return true, true, failedSession
 }
 
 func (s *Service) updateTaskStateForEarlyLaunchFailure(
@@ -3617,6 +3638,9 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	continuation func(context.Context, *resumeAttempt, *executor.TaskExecution) error,
 	preReserved *sessionKeyedCeilingReservation,
 ) (*executor.TaskExecution, error) {
+	if identity, ok := transientLaunchIdentityFromResumeOptions(options); ok {
+		ctx = withTransientLaunchRetryContext(ctx, identity)
+	}
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
@@ -3635,6 +3659,11 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	defer releaseRouteOperationLock()
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
+	if identity, ok := transientLaunchFailureFromContext(ctx); ok {
+		if err := s.validateTransientLaunchFailure(ctx, taskID, sessionID, identity); err != nil {
+			return nil, err
+		}
+	}
 
 	admission, err := s.prepareResumeSessionAdmission(ctx, taskID, sessionID, options, continuation != nil, entryBinding)
 	if err != nil {
