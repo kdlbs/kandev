@@ -168,6 +168,10 @@ controller-owned `nativeCheckLifetime`, which holds `ctx`, `cancel`, `mu`,
   happens while the lifetime is open and under the same mutex, no lookup can
   register after stop begins waiting. Every admitted lookup returns
   `cancelled` at its slot wait or kills its process tree.
+- Process shutdown cancels the background parent context before the HTTP
+  drain. A background goroutine then calls `lifetime.shut()`, which sets
+  `closed` and cancels without waiting, so a check held by a live request
+  returns `cancelled` before the drain. The later stop callback still joins.
 - `StartRuntimeUpdateBackground` installs a fresh open lifetime when the
   current one is closed. It never reopens a closed lifetime.
 

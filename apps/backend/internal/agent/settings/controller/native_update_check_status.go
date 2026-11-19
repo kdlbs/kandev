@@ -68,11 +68,16 @@ func (l *nativeCheckLifetime) isClosed() bool {
 	return l.closed
 }
 
-func (l *nativeCheckLifetime) close() {
+// shut refuses new executions and cancels admitted ones without waiting.
+func (l *nativeCheckLifetime) shut() {
 	l.mu.Lock()
 	l.closed = true
 	l.cancel()
 	l.mu.Unlock()
+}
+
+func (l *nativeCheckLifetime) close() {
+	l.shut()
 	l.wg.Wait()
 }
 

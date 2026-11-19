@@ -34,7 +34,15 @@ func (c *Controller) StartRuntimeUpdateBackground(parent context.Context, readin
 		deliveries: newRuntimeUpdateDeliveryQueue(),
 	}
 	c.runtimeBackground = worker
-	worker.wg.Add(3)
+	lifetime := c.nativeCheckLifetime
+	worker.wg.Add(4)
+	go func() {
+		defer worker.wg.Done()
+		// Process shutdown cancels the parent before the HTTP drain; refuse
+		// and cancel native checks then. The stop callback still joins them.
+		<-ctx.Done()
+		lifetime.shut()
+	}()
 	go func() {
 		defer worker.wg.Done()
 		c.runRuntimeAvailabilityCollector(ctx, worker.collector, worker.deliveries)

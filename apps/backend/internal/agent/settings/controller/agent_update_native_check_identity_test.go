@@ -365,3 +365,35 @@ func TestNativeCheckDisabledExecutionNeverRunsHostBinary(t *testing.T) {
 		t.Error("the host omp binary ran")
 	}
 }
+
+// Process shutdown cancels the parent context before HTTP drain; that alone
+// must cancel a running native check so a waiting request returns
+// unknown/cancelled without waiting for the later stop callback.
+func TestNativeCheckParentCancellationCancelsRunningCheck(t *testing.T) {
+	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+	h.runner.setOutput(ompUpToDate, 0)
+	started, release := h.runner.gated()
+	defer release()
+	parent, cancelParent := context.WithCancel(context.Background())
+	stop := h.ctrl.StartRuntimeUpdateBackground(parent, make(chan struct{}))
+	defer stop()
+	result := make(chan dto.AgentUpdateStatusDTO, 1)
+	go func() {
+		statuses, err := h.ctrl.ListAgentUpdateStatuses(context.Background())
+		if err == nil && len(statuses.Statuses) == 1 {
+			result <- statuses.Statuses[0]
+			return
+		}
+		result <- dto.AgentUpdateStatusDTO{}
+	}()
+	<-started
+	cancelParent()
+	select {
+	case status := <-result:
+		if status.CheckState != dto.AgentUpdateCheckStateUnknown || status.CheckReason != dto.AgentUpdateCheckReason(agents.NativeUpdateCheckReasonCancelled) {
+			t.Errorf("status after parent cancellation = %+v, want unknown/cancelled", status)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("parent cancellation did not cancel the running native check")
+	}
+}
