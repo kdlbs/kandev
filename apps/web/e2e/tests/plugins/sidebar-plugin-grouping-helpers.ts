@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { expect } from "@playwright/test";
@@ -8,6 +9,15 @@ import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http
 
 export const SIDEBAR_GROUPING = `plugin:${PLUGIN_ID}:fixture-labels`;
 export const UNRELATED_GROUPING_PLUGIN_ID = "kandev-plugin-grouping-control";
+
+export function groupingValueKey(value: string): string {
+  return (
+    "plugin-group:" +
+    createHash("sha256")
+      .update(SIDEBAR_GROUPING + "\0" + value)
+      .digest("hex")
+  );
+}
 
 export async function installUnrelatedGroupingControl(api: ApiClient, tempDir: string) {
   const response = await api.rawRequest("GET", "/api/plugins");
@@ -153,4 +163,46 @@ export async function seedCompleteGrouping(
   };
   await writeGroupingState(api, seed.workspaceId, { snapshot });
   return { roots, child, untagged, snapshot };
+}
+
+export async function seedLargeDisclosure(
+  api: ApiClient,
+  seed: { workspaceId: string; workflowId: string; startStepId: string },
+) {
+  const { workspaceId } = seed;
+  const task = await api.createTask(workspaceId, "Long identity root", {
+    workflow_id: seed.workflowId,
+    workflow_step_id: seed.startStepId,
+  });
+  const groups = Array.from({ length: 320 }, (_, index) => ({
+    id: "界".repeat(84) + String(index).padStart(3, "0"),
+    label: `Long group ${String(index).padStart(3, "0")}`,
+  }));
+  await writeGroupingState(api, workspaceId, {
+    snapshot: {
+      version: 1,
+      complete: true,
+      revision: "long",
+      groups,
+      memberships: groups.map((group) => ({ task_id: task.id, group_id: group.id })),
+    },
+  });
+  await saveGroupingView(api, workspaceId);
+  const { settings } = await api.getUserSettings();
+  const state = settings.sidebar_views_by_workspace[workspaceId];
+  const keys = groups.map((group) => groupingValueKey(group.id));
+  await api.saveUserSettings({
+    sidebar_view_state: {
+      workspace_id: workspaceId,
+      views: state.views.map((view) => ({
+        ...view,
+        collapsed_groups: view.id === "complete-plugin-view" ? keys : view.collapsed_groups,
+      })),
+      active_view_id: "complete-plugin-view",
+      draft: null,
+    },
+  });
+  const page = await readGroupingPage(api, workspaceId, { collapsed_group_keys: keys });
+  expect(page.total_visible_tasks).toBe(0);
+  return task;
 }

@@ -305,3 +305,27 @@ Review closure: rounds 12/13/14 each reported CLEAN, zero findings, on host
 `763babaf87d29b4e767f7285b409a80f792b713d` and the unchanged Tags snapshot.
 The three-consecutive-clean gate is satisfied. The plan retains broad test
 limitations; completion here does not mean all repository tests are green.
+
+### Post-rebase round 2 corrections
+
+The second post-rebase review identified lifecycle lock inversion, unscoped
+uninstall fencing, authorization-denial cache ABA, oversized disclosure keys and
+anonymous boot catalog exposure. Status epoch advancement now shares the durable
+commit boundary; both guards release before cleanup/publication. Removal emits
+the plugin identity. Access denial retires cached/in-flight plugin identities.
+Value disclosure uses fixed-size framed digests; Untagged remains distinct.
+Anonymous enforced-auth boot no longer advertises backend-only providers.
+
+Regression coverage includes synchronous subscriber lock admission and concurrent
+unrelated metadata progress, real service uninstall publication, cached/deferred
+pages through denial and identical rediscovery, 260 maximum-identity groups below
+the public query budget, and anonymous/signed-in/auth-off boot. A native 320-value
+saved-disclosure scenario and updated desktop/phone consumers own hash cutover
+proof. Verification receipts and the next review snapshot are recorded in the
+platform task plan; earlier sections remain historical evidence.
+The status-admission barrier also reproduced same-plugin overtaking after global
+guard release. A per-plugin completion guard preserves the existing cleanup
+order and releases before synchronous publication. The native disclosure fixture
+supplies explicit workflow identity and permits a 1 MiB test-writer input; the
+production action response and public query caps remain unchanged.
+

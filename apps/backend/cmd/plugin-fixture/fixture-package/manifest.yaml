@@ -159,7 +159,7 @@ actions:
     max_body_bytes: 16
   - key: "sidebar-labels-write"
     scope: "workspace"
-    max_body_bytes: 65536
+    max_body_bytes: 1048576
   - key: "utility-default"
     scope: "workspace"
     max_body_bytes: 4096

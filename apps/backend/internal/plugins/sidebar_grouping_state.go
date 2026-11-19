@@ -28,14 +28,24 @@ func (h *pluginHost) notifySidebarGroupingState(ctx context.Context, scope, scop
 }
 
 func (s *Service) notifySidebarGroupingCatalog(pluginID string) {
-	payload := map[string]any{"catalog": true}
 	if pluginID != "" {
 		s.mu.Lock()
-		if s.sidebarGroupingCatalogGenerations == nil {
-			s.sidebarGroupingCatalogGenerations = make(map[string]uint64)
-		}
-		s.sidebarGroupingCatalogGenerations[pluginID]++
+		s.advanceSidebarGroupingCatalogLocked(pluginID)
 		s.mu.Unlock()
+	}
+	s.publishSidebarGroupingCatalog(pluginID)
+}
+
+func (s *Service) advanceSidebarGroupingCatalogLocked(pluginID string) {
+	if s.sidebarGroupingCatalogGenerations == nil {
+		s.sidebarGroupingCatalogGenerations = make(map[string]uint64)
+	}
+	s.sidebarGroupingCatalogGenerations[pluginID]++
+}
+
+func (s *Service) publishSidebarGroupingCatalog(pluginID string) {
+	payload := map[string]any{"catalog": true}
+	if pluginID != "" {
 		payload[pluginIDPayloadKey] = pluginID
 	}
 	if s.eventBus == nil {

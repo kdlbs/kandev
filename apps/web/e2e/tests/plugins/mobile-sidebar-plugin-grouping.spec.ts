@@ -6,6 +6,7 @@ import {
 } from "../../helpers/plugin-fixture";
 import {
   SIDEBAR_GROUPING,
+  groupingValueKey,
   seedCompleteGrouping,
   saveGroupingView,
   writeGroupingState,
@@ -124,7 +125,7 @@ test("phone complete grouped pages survive live changes and workspace switching"
   await testPage.getByTestId("app-nav-trigger").tap();
   const tasks = testPage.getByTestId("app-nav-sheet");
   const alpha = tasks.locator(
-    `[data-testid="sidebar-group"][data-group-key="${SIDEBAR_GROUPING}:value:late"]`,
+    `[data-testid="sidebar-group"][data-group-key="${groupingValueKey("late")}"]`,
   );
   const controls = tasks.getByTestId("sidebar-page-controls");
   await expect(alpha.getByTestId("sidebar-task-item")).toHaveCount(3);
@@ -164,7 +165,7 @@ test("phone complete grouped pages survive live changes and workspace switching"
       ];
       return state.views.find((view) => view.id === state.active_view_id)?.collapsed_groups;
     })
-    .toEqual([`${SIDEBAR_GROUPING}:value:late`]);
+    .toEqual([groupingValueKey("late")]);
   await testPage.getByTestId("mobile-workspace-trigger").tap();
   await testPage.getByTestId(`mobile-workspace-item-${other.id}`).tap();
   await testPage.getByTestId("app-nav-trigger").tap();
@@ -280,7 +281,7 @@ test("phone task switcher restores its controls when an open grouping provider d
   await chooser.getByRole("button", { name: "Fixture grouping", exact: true }).tap();
   await expect(chooser).toBeHidden();
   const group = tasks.locator(
-    `[data-testid="sidebar-group"][data-group-key="${SIDEBAR_GROUPING}:value:only"]`,
+    `[data-testid="sidebar-group"][data-group-key="${groupingValueKey("only")}"]`,
   );
   await expect(group).toContainText(task.title);
   const saved = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[

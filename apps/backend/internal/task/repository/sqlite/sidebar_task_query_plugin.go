@@ -1,9 +1,10 @@
 package sqlite
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"sort"
 	"strings"
 
@@ -53,7 +54,9 @@ func sidebarPluginGroupingCTEs(driver string, query models.SidebarTaskViewQuery,
 }
 
 func sidebarPluginValueKey(reference, value string) string {
-	return reference + ":value:" + url.QueryEscape(value)
+	// Valid provider references exclude NUL, framing the opaque value unambiguously.
+	digest := sha256.Sum256([]byte(reference + "\x00" + value))
+	return "plugin-group:" + hex.EncodeToString(digest[:])
 }
 
 func validateSidebarPluginGrouping(query models.SidebarTaskViewQuery, prefs models.SidebarTaskViewPreferences) error {

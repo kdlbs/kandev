@@ -1581,7 +1581,7 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	)
 	payload.RouteData = routeData
 	payload.Plugins = bootActivePlugins(p)
-	if p.services != nil && p.services.Plugins != nil {
+	if canLoadTaskDetailFallback(req, p.authSvc) && p.services != nil && p.services.Plugins != nil {
 		payload.SidebarGroupings = p.services.Plugins.SidebarGroupingCatalog()
 	}
 	payload.InterimSettingsInterlockToken = p.interimSettingsInterlockToken

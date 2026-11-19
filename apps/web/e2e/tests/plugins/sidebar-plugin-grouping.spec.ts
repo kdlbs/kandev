@@ -4,6 +4,8 @@ import { PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 import {
   SIDEBAR_GROUPING,
+  groupingValueKey,
+  seedLargeDisclosure,
   seedCompleteGrouping,
   readGroupingPage,
   saveGroupingView,
@@ -129,9 +131,7 @@ test("Save as preserves collapsed plugin groups through reload independently of 
   await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
   const header = testPage
     .getByTestId("task-sidebar")
-    .locator(
-      `[data-testid="sidebar-group-header"][data-group-key="${SIDEBAR_GROUPING}:value:late"]`,
-    );
+    .locator(`[data-testid="sidebar-group-header"][data-group-key="${groupingValueKey("late")}"]`);
   await expect(header).toHaveAttribute("aria-expanded", "true");
   await header.click();
   await expect(header).toHaveAttribute("aria-expanded", "false");
@@ -152,7 +152,7 @@ test("Save as preserves collapsed plugin groups through reload independently of 
       ];
       return state.views.find((view) => view.id === state.active_view_id)?.collapsed_groups;
     })
-    .toEqual([`${SIDEBAR_GROUPING}:value:late`]);
+    .toEqual([groupingValueKey("late")]);
   await testPage.reload();
   await expect(header).toHaveAttribute("aria-expanded", "false");
   await header.click();
@@ -247,10 +247,10 @@ test("groups the whole saved forest before pagination and recovers without rewri
     .press("Home");
   const sidebar = testPage.getByTestId("task-sidebar");
   const alpha = sidebar.locator(
-    `[data-testid="sidebar-group"][data-group-key="${SIDEBAR_GROUPING}:value:late"]`,
+    `[data-testid="sidebar-group"][data-group-key="${groupingValueKey("late")}"]`,
   );
   const bulk = sidebar.locator(
-    `[data-testid="sidebar-group"][data-group-key="${SIDEBAR_GROUPING}:value:bulk"]`,
+    `[data-testid="sidebar-group"][data-group-key="${groupingValueKey("bulk")}"]`,
   );
   const rootSelector = `[data-task-row-id="${data.roots[0].id}"]`;
   const childSelector = `[data-task-row-id="${data.child.id}"]`;
@@ -337,7 +337,7 @@ test("groups the whole saved forest before pagination and recovers without rewri
       ];
       return state.views.find((view) => view.id === state.active_view_id)?.collapsed_groups;
     })
-    .toEqual([`${SIDEBAR_GROUPING}:value:late`]);
+    .toEqual([groupingValueKey("late")]);
   await testPage.reload();
   await expect(alpha.getByTestId("sidebar-group-header")).toHaveAttribute("aria-expanded", "false");
   await bulk.getByTestId("sidebar-group-header").click();
@@ -478,9 +478,7 @@ test("overlapping combination values repeat whole trees before pagination", asyn
   await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
   const sidebar = testPage.getByTestId("task-sidebar");
   const group = (id: string) =>
-    sidebar.locator(
-      `[data-testid="sidebar-group"][data-group-key="${SIDEBAR_GROUPING}:value:${id}"]`,
-    );
+    sidebar.locator(`[data-testid="sidebar-group"][data-group-key="${groupingValueKey(id)}"]`);
   const rootRows = sidebar.locator(`[data-task-row-id="${root.id}"]`);
   const childRows = sidebar.locator(`[data-task-row-id="${data.child.id}"]`);
   await expect(sidebar.getByTestId("sidebar-task-item")).toHaveCount(100);
@@ -488,7 +486,7 @@ test("overlapping combination values repeat whole trees before pagination", asyn
     await sidebar
       .getByTestId("sidebar-group-header")
       .evaluateAll((headers) => headers.map((header) => header.getAttribute("data-group-key"))),
-  ).toEqual(["set-a", "set-ab", "set-b"].map((id) => `${SIDEBAR_GROUPING}:value:${id}`));
+  ).toEqual(["set-a", "set-ab", "set-b"].map(groupingValueKey));
   await expect(group("set-ab").getByTestId("sidebar-group-header")).toContainText(
     '"Alpha" + "Beta"',
   );
@@ -524,7 +522,7 @@ test("overlapping combination values repeat whole trees before pagination", asyn
       ];
       return state.views.find((view) => view.id === state.active_view_id)?.collapsed_groups;
     })
-    .toEqual([`${SIDEBAR_GROUPING}:value:set-ab`]);
+    .toEqual([groupingValueKey("set-ab")]);
   await testPage.reload();
   await expect(combined).toHaveAttribute("aria-expanded", "false");
 
@@ -556,4 +554,25 @@ test("overlapping combination values repeat whole trees before pagination", asyn
   const foreign = await readGroupingPage(apiClient, other.id);
   expect(foreign.total_tasks).toBe(0);
   expect(foreign.entries.some((entry) => entry.task_id === root.id)).toBe(false);
+});
+
+test("long provider value disclosure survives the bounded public query and reload", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, testInfo) => {
+  await installFixturePlugin(testPage);
+  const task = await seedLargeDisclosure(apiClient, seedData);
+  await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
+  const sidebar = testPage.getByTestId("task-sidebar");
+  const first = sidebar.getByTestId("sidebar-group-header").filter({ hasText: "Long group 000" });
+  await expect(first).toHaveAttribute("aria-expanded", "false");
+  await testPage.reload();
+  await expect(first).toHaveAttribute("aria-expanded", "false");
+  await first.click();
+  await expect(first).toHaveAttribute("aria-expanded", "true");
+  await expect(sidebar.getByTestId("sidebar-task-item")).toContainText(task.title);
+  await testPage.reload();
+  await expect(first).toHaveAttribute("aria-expanded", "true");
+  await testPage.screenshot({ path: testInfo.outputPath("long-disclosure.png") });
 });

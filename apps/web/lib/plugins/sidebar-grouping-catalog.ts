@@ -52,6 +52,7 @@ export async function refreshSidebarGroupingCatalog(store: StoreApi<AppState>): 
     } catch (error) {
       if (!isCurrentCatalog(store, generation, scope)) return;
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        pluginRegistry.invalidateSidebarGroupings();
         pluginRegistry.setSidebarGroupings([]);
         return;
       }

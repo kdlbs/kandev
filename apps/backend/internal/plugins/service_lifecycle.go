@@ -239,23 +239,48 @@ func (s *Service) setStatus(id string, status Status) error {
 // reports (for example, a failed retry while the record is already in error);
 // public SetStatus keeps same-state transitions invalid.
 func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error, allowSame bool) error {
+	committed := false
+	defer func() {
+		if committed {
+			s.publishSidebarGroupingCatalog(id)
+		}
+	}()
+	completion := s.statusCompletionLocks.lockFor(id)
+	completion.Lock()
+	defer completion.Unlock()
+	updated, err := s.persistStatusAndDiagnostic(id, status, failure, allowSame)
+	if err != nil {
+		return err
+	}
+	committed = true
+	if status != StatusActive {
+		s.closeExecutorProviderAdmission(id)
+		if err := s.cancelAutomationDeliveries(id); err != nil {
+			return err
+		}
+		s.revokeGitCredentialProviderLeases(updated.RepositoryProviders)
+	} else {
+		s.openExecutorProviderAdmission(id)
+	}
+	return nil
+}
+
+func (s *Service) persistStatusAndDiagnostic(id string, status Status, failure error, allowSame bool) (*store.Record, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.recordPersistMu.Lock()
 	defer s.recordPersistMu.Unlock()
 
 	rec, ok := s.registry.Get(id)
 	if !ok {
-		s.mu.Unlock()
-		return store.ErrNotFound
+		return nil, store.ErrNotFound
 	}
 	if rec.Status == status {
 		if !allowSame {
-			s.mu.Unlock()
-			return &ErrInvalidTransition{ID: id, From: rec.Status, To: status}
+			return nil, &ErrInvalidTransition{ID: id, From: rec.Status, To: status}
 		}
 	} else if !canTransition(rec.Status, status) {
-		s.mu.Unlock()
-		return &ErrInvalidTransition{ID: id, From: rec.Status, To: status}
+		return nil, &ErrInvalidTransition{ID: id, From: rec.Status, To: status}
 	}
 
 	lastError := rec.LastError
@@ -272,27 +297,15 @@ func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error
 
 	updated, ok := s.registry.SetRuntimeState(id, status, lastError, lastErrorAt)
 	if !ok {
-		s.mu.Unlock()
-		return store.ErrNotFound
+		return nil, store.ErrNotFound
 	}
 	if err := s.store.Save(updated); err != nil {
 		// Roll back the in-memory change so registry and disk stay in sync.
 		s.registry.Add(rec)
-		s.mu.Unlock()
-		return err
+		return nil, err
 	}
-	s.mu.Unlock()
-	defer s.notifySidebarGroupingCatalog(id)
-	if status != StatusActive {
-		s.closeExecutorProviderAdmission(id)
-		if err := s.cancelAutomationDeliveries(id); err != nil {
-			return err
-		}
-		s.revokeGitCredentialProviderLeases(updated.RepositoryProviders)
-	} else {
-		s.openExecutorProviderAdmission(id)
-	}
-	return nil
+	s.advanceSidebarGroupingCatalogLocked(id)
+	return updated, nil
 }
 
 // handleStatusChange is the runtime.Manager OnStatusChange callback (see

@@ -475,6 +475,7 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		return err
 	}
 	s.registry.Remove(id)
+	s.notifySidebarGroupingCatalog(id)
 	s.deletePluginState(id)
 	s.notifyDeliverer()
 	s.notifyAgentToolCatalogChanged()

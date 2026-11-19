@@ -103,8 +103,11 @@ Keep a missing saved provider visible as unavailable rather than deleting it.
 
 No Tags-specific constant is added to the host. Plugin group captions use their
 localized metadata at render time; saved names follow normal user view-name
-semantics. Collapsed group identity includes the complete provider reference
-and value ID, not labels, so rename/recolor does not reset disclosure.
+semantics. Collapsed value identity is `plugin-group:` plus SHA-256 of the
+complete provider reference, a NUL delimiter (forbidden in references), and the
+opaque value ID. Labels are excluded, so rename/recolor preserves disclosure.
+This fixed-size unreleased format keeps every valid snapshot's disclosure below
+the existing 256 KiB query cap. Untagged retains a separate reference namespace.
 Save as retains independent collapsed-group keys when its draft keeps the
 base view's grouping; a different grouping starts expanded. Duplicate clones
 the source disclosure so expanding a copy never expands its source.
@@ -166,6 +169,12 @@ are captured under the persistence guard, then projected after releasing it.
 Policy versions publish after Save; generation binds installation, policy and a
 per-plugin lifecycle epoch. Committed status changes invalidate even if cleanup
 fails; failed commits do not. Catalog refreshes preserve unchanged provider identities.
+Status publication advances its epoch inside the commit critical section, then
+releases both service and persistence guards before cleanup or publication.
+Per-plugin completion guards preserve cleanup order without blocking another
+plugin's metadata writes, and release before synchronous event publication.
+Successful uninstall publishes the removed plugin ID immediately;
+discovery latency cannot admit an old page after that event.
 Only store/auth/reconnect boundaries invalidate every provider; unrelated plugin
 configuration or lifecycle changes preserve the selected page.
 Boot metadata is owned by its concrete store and scope. Context reconciliation
@@ -173,8 +182,11 @@ clears it even while disconnected. Failed catalog transport reads do not publish
 an authoritative empty catalog: eligible same-context metadata is retained,
 with at most two retries after 1s and 2s admitted within a 5s retry budget.
 Server Retry-After is never shortened; delays beyond the remaining budget stop
-recovery. Authoritative empty reads and access denial clear metadata. Success,
-failure and queued retries all retain the request/store/scope fences.
+recovery. Authoritative empty reads clear metadata. Authorization denial also
+advances the monotonic plugin fence, so identical rediscovery cannot resurrect
+pre-denial cached or in-flight pages. Success, failure and queued retries retain
+the request/store/scope fences. Enforced-auth anonymous boot omits the catalog;
+signed-in and auth-off boot follow the discovery identity policy.
 
 Loading, timeout, disabled/replaced plugin and incomplete snapshot are distinct
 from a successful empty classification. Retain same-context eligible pages

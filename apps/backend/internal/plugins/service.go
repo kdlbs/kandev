@@ -85,6 +85,8 @@ type Service struct {
 	// holding a lifecycleLocks entry while calling into PluginRuntime
 	// cannot deadlock against it.
 	lifecycleLocks *keyedMutex
+	// Status cleanup stays ordered per plugin without retaining global commit guards.
+	statusCompletionLocks *keyedMutex
 	// dispatchLocks keep lifecycle replacement/disable boundaries from racing
 	// authenticated actions and reference RPCs. Dispatch holds a read lease for
 	// the full RPC; lifecycle mutation holds the write side.
@@ -241,6 +243,7 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 		log:                             log,
 		httpClient:                      &http.Client{},
 		lifecycleLocks:                  newKeyedMutex(),
+		statusCompletionLocks:           newKeyedMutex(),
 		dispatchLocks:                   newKeyedContextRWMutex(),
 		agentToolGeneration:             uuid.NewString(),
 		eventHub:                        webapp.NewEventHub(),
