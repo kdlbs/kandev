@@ -6,7 +6,7 @@ import type { AppState } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
 import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
 import { getSessionRestartStore } from "@/lib/session/session-restart-state";
-import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
+import { sessionId as toSessionId, type TaskSession } from "@/lib/types/http";
 import type {
   TaskSessionActivityChangedPayload,
   TaskSessionCancellationChangedPayload,
@@ -2502,81 +2502,5 @@ describe("session.state_changed resume-skipped clearing", () => {
   it("does NOT clear the marker on a STARTING transition (failed resumes keep the retry button)", () => {
     handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "STARTING" }));
     expect(store.getState().setResumeSkipped).not.toHaveBeenCalled();
-  });
-});
-
-// @covers AC-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001.15
-it("orders live sort and merge policy tuples independently and keeps unavailable state authoritative", () => {
-  const store = createAppStore();
-  store.getState().setTaskSession({
-    id: toSessionId("s-1"),
-    task_id: toTaskId("task-1"),
-    state: "RUNNING",
-    started_at: "2026-11-05T00:00:00Z",
-    updated_at: "2026-11-05T00:00:00Z",
-    queue_incarnation_id: CURRENT_INCARNATION,
-  });
-  store.getState().setQueueEntries("s-1", [], {
-    count: 0,
-    max: 10,
-    mergeEnabled: true,
-    autoRun: true,
-    sessionIncarnationId: CURRENT_INCARNATION,
-    statusEpoch: CURRENT_STATUS_EPOCH,
-    statusGeneration: 4,
-    autoMergeAvailable: true,
-    autoMergeEnabled: false,
-    autoMergeSource: "session",
-    autoMergeRevision: 1,
-    autoSortMergeAvailable: true,
-    autoSortMergeEnabled: true,
-    autoSortMergeSource: "session",
-    autoSortMergeRevision: 3,
-  });
-  const handler = registerTaskSessionHandlers(store)[QUEUE_STATUS_ACTION]!;
-  const payload = {
-    task_id: "task-1",
-    session_id: "s-1",
-    session_incarnation_id: CURRENT_INCARNATION,
-    status_epoch: CURRENT_STATUS_EPOCH,
-    status_generation: 5,
-    entries: [],
-    count: 0,
-    max: 10,
-    auto_merge_available: true,
-    auto_merge_enabled: true,
-    auto_merge_source: "session",
-    auto_merge_revision: 2,
-    auto_sort_merge_available: true,
-    auto_sort_merge_enabled: false,
-    auto_sort_merge_source: "global",
-    auto_sort_merge_revision: 99,
-  };
-  handler({ payload } as never);
-  expect(store.getState().queue.metaBySessionId["s-1"]).toMatchObject({
-    autoMergeEnabled: true,
-    autoMergeRevision: 2,
-    autoSortMergeEnabled: true,
-    autoSortMergeSource: "session",
-    autoSortMergeRevision: 3,
-  });
-  handler({
-    payload: {
-      task_id: "task-1",
-      session_id: "s-1",
-      session_incarnation_id: CURRENT_INCARNATION,
-      status_epoch: CURRENT_STATUS_EPOCH,
-      status_generation: 6,
-      entries: [],
-      count: 0,
-      max: 10,
-      auto_sort_merge_available: false,
-    },
-  } as never);
-  handler({ payload } as never);
-  expect(store.getState().queue.metaBySessionId["s-1"]).toMatchObject({
-    autoSortMergeAvailable: false,
-    autoSortMergeEnabled: true,
-    autoSortMergeRevision: 3,
   });
 });

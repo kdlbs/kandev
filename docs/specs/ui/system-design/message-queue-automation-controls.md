@@ -13,14 +13,14 @@ requirements:
 This design owns the task-workbench queue automation controls and their
 end-to-end policy projection. The UI owns the operator outcomes; the backend
 message queue remains the source of truth. The
-[Auto-sort-merge design](message-queue-auto-sort-merge.md) extends this design
-with independent sort policy, non-adjacent targets, and session compaction.
+[sorted Auto-merge design](message-queue-auto-sort-merge.md) extends Auto-merge
+with non-adjacent agent targets and session-enable compaction, without another policy.
 
 It changes no compatibility rule, manual merge operation, capacity value, Send
 Now behavior, or Auto-run state machine. An eligible message can fold into an
 existing target at or above the positive row limit; staged attachments still
-require insertion capacity. Without effective Auto-sort-merge, that target
-remains the pending tail.
+require insertion capacity. Agent sources try their latest same-sender target;
+all eligible sources retain ordinary adjacent folding.
 
 ## Requirement mapping
 
@@ -33,9 +33,9 @@ remains the pending tail.
 
 | Component | Responsibility |
 | --- | --- |
-| `internal/system/queuesettings.Service` | Persists both global policy values and independent revisions in one settings envelope, then publishes the committed combined snapshot. |
-| `internal/orchestrator/messagequeue.Service` | Owns the immutable combined global snapshot and generation source; resolves both policies, serializes session writes with admission, and invokes effective-rise compaction. |
-| `internal/orchestrator/messagequeue.Repository` | Persists both nullable overrides and independent revisions; atomically validates policy and applies admission or session compaction for memory, SQLite, and PostgreSQL. |
+| `internal/system/queuesettings.Service` | Persists the global Auto-merge value/revision and publishes the committed snapshot. |
+| `internal/orchestrator/messagequeue.Service` | Resolves Auto-merge, serializes session writes with admission, and invokes effective-rise compaction. |
+| `internal/orchestrator/messagequeue.Repository` | Persists the nullable Auto-merge override/revision; atomically validates admission and session compaction for memory, SQLite, and PostgreSQL. |
 | Session-scoped queue-status producers | Receive an expected `QueueSessionIdentity` and publish only its identity-bound snapshot. |
 | `internal/orchestrator/handlers.QueueHandlers` | Authorizes the supplied task/session pair, passes the unchanged triplet to queue operations, and publishes status for that identity. |
 | `pkg/websocket` | Defines queue action names. |
@@ -53,16 +53,15 @@ session override read fails        -> disable merge for this admission
 ```
 
 `messagequeue.Service` holds one immutable
-`GlobalQueuePolicy { AutoMerge AutoMergePolicy, AutoSortMerge AutoSortMergePolicy }`
-through an `atomic.Pointer`. `SetGlobalQueuePolicy` publishes both value/revision
-pairs from one committed settings envelope. Admissions and status reads capture
-one combined result, never policy pairs from different settings generations.
+`GlobalQueuePolicy { AutoMerge AutoMergePolicy }` through an `atomic.Pointer`.
+`SetGlobalQueuePolicy` publishes the value/revision pair from one committed
+settings envelope.
 
-At startup, `backendapp/orchestrator.go` hydrates that combined snapshot from
+At startup, `backendapp/orchestrator.go` hydrates that snapshot from
 `queuesettings.Resolution` and installs `SetGlobalQueuePolicyLoader`. The loader
-performs one persisted-envelope read for both policies. It is never called
-inside a queue transaction: an identity-bound status snapshot captures its
-generation and session overrides and commits before loading global policy.
+reads the persisted envelope outside queue transactions. An identity-bound
+status snapshot captures its generation and session override and commits before
+loading global policy.
 This avoids re-entering the production single-connection SQLite writer while
 retaining the generation captured at the start of the status operation.
 
@@ -90,11 +89,11 @@ every session without an override uses the new committed global policy on its
 next admission and successful queue-status read, while an overridden session
 stays independent.
 
-Each override is independent; effective sorting is `AutoMerge.Enabled &&
-AutoSortMerge.Enabled`. A sort-policy read failure disables only sorted folding,
-not an otherwise authoritative ordinary Auto-merge policy. The
-[Auto-sort-merge policy model](message-queue-auto-sort-merge.md#policy-model)
-defines the additional fields and independent revision ordering.
+Effective Auto-merge enables both adjacent and sorted folds. A session override
+read failure disables both; a readable explicit override remains authoritative
+for admission even if the global loader fails. The
+[sorted-fold policy model](message-queue-auto-sort-merge.md#policy-model)
+defines selection and compaction without a second policy tuple.
 
 A user mutation always writes an explicit boolean. There is no clear-override
 WebSocket operation or third UI state.
@@ -129,11 +128,10 @@ rebuild must project the column unchanged. Recreating a deleted textual session
 ID therefore produces a different incarnation without retaining queue policy
 state.
 
-The persisted install-wide settings envelope contains independent
-`auto_merge_revision` and `auto_sort_merge_revision` counters. Both default to
-`0` for legacy values and increment only when their corresponding boolean
-changes. `auto_sort_merge_enabled` defaults to `false`; public settings expose
-the boolean, not the internal revision metadata.
+The persisted settings envelope contains `auto_merge_revision`, defaulting to
+`0` for legacy values and increasing only when `auto_merge_enabled` changes.
+Auto-merge defaults ON; public settings expose the boolean, not its revision.
+There are no separate sorting columns, settings, or internal revisions.
 
 The memory repository stores override presence, value, and revision under its
 existing mutex. SQL override writes increment and return the revision while
@@ -366,24 +364,23 @@ scopes. Restore/retry/transfer retains both endpoint identities.
    task/session/incarnation still exists before reading policy or queue rows.
    The memory implementation performs identity validation and admission under
    its incarnation-tagged bucket mutex.
-3. Under that boundary, read both nullable overrides, resolve them against the
-   captured combined global policy, and validate and insert the candidate under
-   the current queue-capacity rules.
+3. Under that boundary, validate the nullable Auto-merge override against the
+   captured global snapshot and insert the candidate under current capacity
+   rules.
 4. If insertion reports `queue_full`, effective Auto-merge is ON, and admission
    does not require a staged attachment claim, try a direct fold in the same
-   transaction. With effective Auto-sort-merge, try its eligible latest
-   same-sender target first; otherwise, or when that fold skips, try the
-   compatible tail. This applies at or above the positive limit without adding
-   a row. If both folds skip, retain `queue_full`.
+   transaction. Agent sources try the eligible latest same-sender target first;
+   otherwise, or when that fold skips, try the compatible tail. This applies
+   at or above the positive limit without adding a row. If both folds skip,
+   retain `queue_full`.
 5. If Auto-merge resolution fails, roll back the policy-aware attempt and retry
    only ordinary insertion with automatic merge disabled. Repeat identity
-   validation and lock order; capacity still returns `queue_full`. If only
-   Auto-sort-merge resolution fails, retain ordinary adjacent Auto-merge.
+   validation and lock order; capacity still returns `queue_full`.
 6. A staged-attachment admission at or above the positive limit returns
    `queue_full` before claiming the attachment or changing the prior tail.
 7. For a successful ordinary insert, claim staged attachments in the same
    transaction, then apply the sorted target selection before ordinary adjacent
-   folding when the captured policies permit it. Claim or identity failure
+   folding when captured Auto-merge permits it. Claim or identity failure
    rolls back all queue and attachment writes. Later policy writes do not
    change the policy used by this admission.
 8. A successful fold preserves the target row identity and FIFO position, but
@@ -392,7 +389,7 @@ scopes. Restore/retry/transfer retains both endpoint identities.
 9. Publish final authoritative queue status.
 
 Global policy changes never scan or rewrite pending rows. Session policy
-changes do so only when effective Auto-sort-merge rises from OFF to ON:
+changes do so only when effective Auto-merge rises from OFF to ON:
 the override and full-backlog compaction commit atomically under the same
 identity and lock boundary. ON-to-ON and OFF writes never compact; OFF does not
 split content. The [compaction design](message-queue-auto-sort-merge.md#compaction-pass)
@@ -412,9 +409,9 @@ layer. Local function parameter names may be camel case, but every normalized
 session ownership join and status comparison reads the snake-case
 `TaskSession` properties.
 
-`QueueStatus`, `QueueStatusChangedPayload`, and `QueueMeta` gain the
-incarnation, status epoch/generation, and independent availability, enabled,
-source, and revision fields for Auto-merge and Auto-sort-merge.
+`QueueStatus`, `QueueStatusChangedPayload`, and `QueueMeta` carry incarnation,
+status epoch/generation, and availability, enabled, source, and revision fields
+for Auto-merge only.
 Every `setQueueEntries` call that synthesizes metadata preserves the known
 policy state alongside `autoRun` and `mergeEnabled` so optimistic clear and
 reorder operations cannot reset or regress the control.
@@ -442,9 +439,8 @@ refetch, or `finally` therefore cannot clear the replacement's token or
 re-enable its controls.
 
 One shared per-session predicate is true only for the active token matching the
-current incarnation. It disables all three automation pills, row Send Now, and
-reorder together. Each merge control also respects policy availability, and
-Auto-sort-merge is disabled and rendered OFF while Auto-merge is OFF.
+current incarnation. It disables both automation pills, row Send Now, and reorder
+together. Auto-merge also respects policy availability.
 
 The WebSocket handler applies the status-ordering rules below when an available
 tuple is present. An unavailable payload marks the control unavailable but
@@ -472,10 +468,10 @@ Frontend policy ordering is:
 5. An accepted unavailable status preserves the tuple and disables Auto-merge;
    a newer complete tuple restores availability.
 
-Apply tuple ordering independently to each merge policy through the shared
-`queue-policy-meta.ts` projection. One policy's unavailable or stale tuple
-cannot erase the other's newer authoritative value. Mutation responses are
-not ordered status and are ignored in favor of the shared-token refetch.
+Apply Auto-merge tuple ordering through `queue-policy-meta.ts`. An unavailable
+status preserves the last authoritative value; stale tuples cannot regress it.
+Mutation responses are not ordered status and are ignored in favor of the
+shared-token refetch.
 
 All session- and task-removal reducers delete queue entries, `QueueMeta`, and
 the incarnation/generation-tagged operation token for each removed session.
@@ -502,16 +498,17 @@ operation generation completes.
 `QueuePanelHeader` keeps one responsive header region with three logical groups:
 
 1. queue icon, **Queued**, and capacity text;
-2. compact bordered Auto-run, Auto-merge, and Auto-sort-merge pills, each
-   containing its visible label and shared `Switch`;
+2. compact bordered Auto-run and Auto-merge pills, each containing its visible
+   label and shared `Switch`;
 3. Clear all, the desktop-only pin, and collapse.
 
 The groups use wrapping rather than truncating or horizontally scrolling the
 controls. The former dedicated Auto-run help row is removed. Its localized ON
 and OFF explanations remain available as the Auto-run switch's accessible
-description. Both merge pills have localized accessible names, and
-Auto-sort-merge's description includes its Auto-merge dependency. All labels
-are clickable; whole pills wrap rather than splitting label and switch.
+description. Auto-merge's localized help explains adjacent and same-sender agent
+folding plus immediate session-enable compaction. All labels are clickable;
+whole pills wrap rather than splitting label and switch. The remaining tooltips
+retain their Escape boundary so Escape does not close an outer queue/dialog.
 
 Desktop retains the current dense header sizing. Coarse pointers enlarge each
 pill's effective target to at least 44 CSS pixels without inflating desktop
@@ -523,9 +520,9 @@ horizontal overflow.
 Mobile reuses `QueueChip` pill geometry and the current Auto-run coarse-pointer
 target in this inline surface, not a compressed desktop workbench.
 
-The global settings switches remain admin-only, with localized descriptions in
-every shipped locale. The dependent sort draft/save/discard contract is defined
-by the [Auto-sort-merge UI design](message-queue-auto-sort-merge.md#queue-header-and-settings-ui).
+Global settings remain admin-only, with localized descriptions in every shipped
+locale. There is one automatic-merge draft, no dependent sort control or touch
+help drawer. Shared Save/Discard and newer-draft preservation remain unchanged.
 
 ## Failure and recovery
 

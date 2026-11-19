@@ -8,7 +8,6 @@ import {
   restoreMessageQueueSettings,
 } from "../../helpers/message-queue-settings";
 import { openTaskBehaviorRuntime } from "../../helpers/settings-composition";
-import { exerciseAutoSortMergeSettings } from "../../helpers/message-queue-auto-sort-merge-settings";
 
 let baseline: MessageQueueSettingsValue | undefined;
 
@@ -20,13 +19,6 @@ test.afterEach(async ({ apiClient }) => {
   if (!baseline) return;
   await restoreMessageQueueSettings(apiClient, baseline);
   baseline = undefined;
-});
-
-test("mobile dependent auto-sort-merge setting saves, resets, and survives reload", async ({
-  testPage,
-  apiClient,
-}) => {
-  await exerciseAutoSortMergeSettings(testPage, apiClient, true);
 });
 
 test("mobile navigation reaches the Message Queue section with touch-safe shared settings layout", async ({
@@ -112,7 +104,6 @@ test("mobile configuration lock keeps the source and accessible controls consist
           max_per_session: baseline?.max_per_session ?? 10,
           merge_enabled: true,
           auto_merge_enabled: true,
-          auto_sort_merge_enabled: false,
         },
         effective: {
           max_per_session: 44,
@@ -120,7 +111,6 @@ test("mobile configuration lock keeps the source and accessible controls consist
           locked: true,
           merge_enabled: true,
           auto_merge_enabled: true,
-          auto_sort_merge_enabled: false,
         },
       }),
     });

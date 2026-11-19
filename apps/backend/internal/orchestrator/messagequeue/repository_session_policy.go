@@ -36,7 +36,7 @@ func (r *sqliteRepository) SetSessionPolicyAndCompact(ctx context.Context, ident
 	if err != nil {
 		return SessionPolicyResult{}, err
 	}
-	if (!before.AutoMerge.Enabled || !before.AutoSortMerge.Enabled) && result.AutoMerge.Enabled && result.AutoSortMerge.Enabled {
+	if !before.AutoMerge.Enabled && result.AutoMerge.Enabled {
 		result.compactionRan = true
 		result.CompactedCount, err = r.compactSessionQueueTx(ctx, tx, identity, change.Leased)
 		if err != nil {
@@ -50,10 +50,10 @@ func (r *sqliteRepository) SetSessionPolicyAndCompact(ctx context.Context, ident
 }
 
 func (r *sqliteRepository) resolveSessionPolicyTx(ctx context.Context, tx *sqlx.Tx, identity QueueSessionIdentity, global GlobalQueuePolicy) (SessionPolicyResult, error) {
-	var mergeEnabled, sortEnabled sql.NullInt64
-	var mergeRevision, sortRevision int64
-	err := tx.QueryRowxContext(ctx, tx.Rebind(`SELECT auto_merge_override,auto_merge_revision,auto_sort_merge_override,auto_sort_merge_revision
- FROM queue_session_state WHERE session_id = ? AND session_incarnation_id = ?`), identity.SessionID, identity.SessionIncarnationID).Scan(&mergeEnabled, &mergeRevision, &sortEnabled, &sortRevision)
+	var mergeEnabled sql.NullInt64
+	var mergeRevision int64
+	err := tx.QueryRowxContext(ctx, tx.Rebind(`SELECT auto_merge_override,auto_merge_revision
+ FROM queue_session_state WHERE session_id = ? AND session_incarnation_id = ?`), identity.SessionID, identity.SessionIncarnationID).Scan(&mergeEnabled, &mergeRevision)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return SessionPolicyResult{}, err
 	}
@@ -61,11 +61,7 @@ func (r *sqliteRepository) resolveSessionPolicyTx(ctx context.Context, tx *sqlx.
 	if mergeEnabled.Valid {
 		merge = &AutoMergeOverride{Enabled: mergeEnabled.Int64 != 0, Revision: mergeRevision}
 	}
-	var sortPolicy *AutoSortMergeOverride
-	if sortEnabled.Valid {
-		sortPolicy = &AutoSortMergeOverride{Enabled: sortEnabled.Int64 != 0, Revision: sortRevision}
-	}
-	return SessionPolicyResult{AutoMerge: resolveAutoMergeOverride(merge, global.AutoMerge), AutoSortMerge: resolveAutoSortMergeOverride(sortPolicy, global.AutoSortMerge)}, nil
+	return SessionPolicyResult{AutoMerge: resolveAutoMergeOverride(merge, global.AutoMerge)}, nil
 }
 
 func (r *sqliteRepository) writeSessionPolicyTx(ctx context.Context, tx *sqlx.Tx, identity QueueSessionIdentity, change SessionPolicyChange) error {
@@ -73,12 +69,6 @@ func (r *sqliteRepository) writeSessionPolicyTx(ctx context.Context, tx *sqlx.Tx
  ON CONFLICT(session_id) DO UPDATE SET session_incarnation_id = excluded.session_incarnation_id,
  auto_merge_override = excluded.auto_merge_override,auto_merge_revision = queue_session_state.auto_merge_revision + 1
  WHERE queue_session_state.session_incarnation_id = '' OR queue_session_state.session_incarnation_id = excluded.session_incarnation_id`
-	if change.AutoSortMerge {
-		query = `INSERT INTO queue_session_state (session_id,session_incarnation_id,auto_sort_merge_override,auto_sort_merge_revision) VALUES (?,?,?,1)
- ON CONFLICT(session_id) DO UPDATE SET session_incarnation_id = excluded.session_incarnation_id,
- auto_sort_merge_override = excluded.auto_sort_merge_override,auto_sort_merge_revision = queue_session_state.auto_sort_merge_revision + 1
- WHERE queue_session_state.session_incarnation_id = '' OR queue_session_state.session_incarnation_id = excluded.session_incarnation_id`
-	}
 	result, err := tx.ExecContext(ctx, tx.Rebind(query), identity.SessionID, identity.SessionIncarnationID, boolToInt(change.Enabled))
 	if err != nil {
 		return err

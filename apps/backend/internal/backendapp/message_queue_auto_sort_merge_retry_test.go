@@ -24,16 +24,16 @@ type changingSortPolicyRepository struct {
 	once sync.Once
 }
 
-func (r *changingSortPolicyRepository) GetAutoSortMergeOverride(ctx context.Context, identity messagequeue.QueueSessionIdentity) (*messagequeue.AutoSortMergeOverride, error) {
-	value, err := r.policyAdmissionQueueRepository.GetAutoSortMergeOverride(ctx, identity)
+func (r *changingSortPolicyRepository) GetAutoMergeOverride(ctx context.Context, identity messagequeue.QueueSessionIdentity) (*messagequeue.AutoMergeOverride, error) {
+	value, err := r.policyAdmissionQueueRepository.GetAutoMergeOverride(ctx, identity)
 	if err != nil {
 		return nil, err
 	}
-	r.once.Do(func() { _, err = r.SetAutoSortMergeOverride(ctx, identity, false) })
+	r.once.Do(func() { _, err = r.SetAutoMergeOverride(ctx, identity, false) })
 	return value, err
 }
 
-func TestAutoSortMergePolicyRetryWithSharedSingleConnectionSettingsLoader(t *testing.T) {
+func TestAutoMergePolicyRetryWithSharedSingleConnectionSettingsLoader(t *testing.T) {
 	pool := newMessageQueueSettingsTestPool(t)
 	database := pool.Writer()
 	_, err := database.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY,archived_at TIMESTAMP,updated_at TIMESTAMP);
@@ -50,7 +50,7 @@ func TestAutoSortMergePolicyRetryWithSharedSingleConnectionSettingsLoader(t *tes
 	settings := queuesettings.NewService(queuesettings.NewStore(raw), queue, func() queuesettings.Environment { return queuesettings.Environment{} }, testLogger(t))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, err = settings.Update(ctx, queuesettings.SettingsPatch{AutoSortMergeEnabled: new(true)})
+	_, err = settings.Update(ctx, queuesettings.SettingsPatch{AutoMergeEnabled: new(true)})
 	require.NoError(t, err)
 	identity := messagequeue.QueueSessionIdentity{TaskID: "task", SessionID: "session", SessionIncarnationID: "inc"}
 	for _, item := range []struct{ content, sender string }{{"A1", "A"}, {"B1", "B"}} {
@@ -67,6 +67,5 @@ func TestAutoSortMergePolicyRetryWithSharedSingleConnectionSettingsLoader(t *tes
 	require.Equal(t, []string{"A1", "B1", "A2"}, contents)
 	status, err := queue.Snapshot(ctx, identity)
 	require.NoError(t, err)
-	require.Equal(t, new(false), status.AutoSortMergeEnabled)
-	require.Equal(t, new(true), status.AutoMergeEnabled)
+	require.Equal(t, new(false), status.AutoMergeEnabled)
 }

@@ -93,9 +93,6 @@ func TestSortedAdmissionScansPastOneMetadataBatch(t *testing.T) {
 		require.NoError(t, repo.InsertForSession(ctx, identity, sortTestEntry(fmt.Sprintf("other-%d", i), fmt.Sprintf("sender-%d", i)), 0))
 	}
 	service := NewService(repo, 0, logger.Default())
-	service.SetGlobalQueuePolicy(GlobalQueuePolicy{
-		AutoMerge: AutoMergePolicy{Enabled: true}, AutoSortMerge: AutoSortMergePolicy{Enabled: true},
-	})
 
 	_, err := service.QueueMessageWithMetadataForSession(ctx, identity, "A2", "", QueuedByAgent, false, nil,
 		map[string]any{MetadataSenderTaskID: "A"})
@@ -132,9 +129,6 @@ func TestSortedAdmissionFindsTargetAcrossTiedBatchBoundary(t *testing.T) {
 	require.Equal(t, 2, tied, "precondition: restore and reorder leave two rows at position 1")
 
 	service := NewService(repo, len(entries), logger.Default())
-	service.SetGlobalQueuePolicy(GlobalQueuePolicy{
-		AutoMerge: AutoMergePolicy{Enabled: true}, AutoSortMerge: AutoSortMergePolicy{Enabled: true},
-	})
 	for _, sender := range []string{"sender-0", "sender-1"} {
 		_, err = service.QueueMessageWithMetadataForSession(ctx, identity, sender+"-again", "", QueuedByAgent, false, nil,
 			map[string]any{MetadataSenderTaskID: sender})

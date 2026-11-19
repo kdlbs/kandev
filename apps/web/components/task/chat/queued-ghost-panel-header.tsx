@@ -12,15 +12,12 @@ export type QueuePanelHeaderProps = {
   autoRun: boolean;
   autoMerge: boolean;
   autoMergeAvailable: boolean;
-  autoSortMerge: boolean;
-  autoSortMergeAvailable: boolean;
   isLoading: boolean;
   cancellationPending: boolean;
   pinned: boolean;
   onClear: () => void;
   onAutoRunChange: (enabled: boolean) => void;
   onAutoMergeChange: (enabled: boolean) => void;
-  onAutoSortMergeChange: (enabled: boolean) => void;
   onTogglePin: () => void;
   onClose: () => void;
 };
@@ -32,15 +29,12 @@ export function QueuePanelHeader({
   autoRun,
   autoMerge,
   autoMergeAvailable,
-  autoSortMerge,
-  autoSortMergeAvailable,
   isLoading,
   cancellationPending,
   pinned,
   onClear,
   onAutoRunChange,
   onAutoMergeChange,
-  onAutoSortMergeChange,
   onTogglePin,
   onClose,
 }: QueuePanelHeaderProps) {
@@ -64,13 +58,10 @@ export function QueuePanelHeader({
         autoRun={autoRun}
         autoMerge={autoMerge}
         autoMergeAvailable={autoMergeAvailable}
-        autoSortMerge={autoSortMerge}
-        autoSortMergeAvailable={autoSortMergeAvailable}
         isLoading={isLoading}
         cancellationPending={cancellationPending}
         onAutoRunChange={onAutoRunChange}
         onAutoMergeChange={onAutoMergeChange}
-        onAutoSortMergeChange={onAutoSortMergeChange}
       />
       <div className="ml-auto flex shrink-0 items-center justify-end gap-1">
         <Button

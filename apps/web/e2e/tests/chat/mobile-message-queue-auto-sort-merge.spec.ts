@@ -1,7 +1,7 @@
 import { test } from "../../fixtures/test-base";
 import { exerciseAutoSortMergeQueue } from "../../helpers/message-queue-auto-sort-merge";
 
-test("mobile tap compaction, later sorted admission, and retained dependency preference", async ({
+test("mobile Auto-merge sorts by default and tapping it on compacts the pending queue", async ({
   testPage,
   apiClient,
   seedData,

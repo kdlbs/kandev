@@ -109,9 +109,6 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
 		if patch.AutoMergeEnabled != nil && *patch.AutoMergeEnabled != resolution.Settings.AutoMergeEnabled {
 			updated.AutoMergeRevision = resolution.Settings.AutoMergeRevision + 1
 		}
-		if patch.AutoSortMergeEnabled != nil && *patch.AutoSortMergeEnabled != resolution.Settings.AutoSortMergeEnabled {
-			updated.AutoSortMergeRevision = resolution.Settings.AutoSortMergeRevision + 1
-		}
 		if validateErr := Validate(updated); validateErr != nil {
 			return Settings{}, validateErr
 		}

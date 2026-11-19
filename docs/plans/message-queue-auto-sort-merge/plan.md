@@ -10,6 +10,50 @@ legacy_specs: []
 
 # Implementation Plan: Message Queue Auto-sort-merge
 
+## Design revision: fold into Auto-merge
+
+The maintainer/user decision on #5086 supersedes the separate-policy design in
+tasks 01-05. Sorted sender-task folding is included in effective Auto-merge,
+which remains ON by default. Only session Auto-merge OFF-to-ON compacts pending
+rows. Global changes affect later messages only.
+
+Current work order:
+[Task 06: Fold into Auto-merge](task-06-fold-into-auto-merge.md) (`done`).
+It owns backend/frontend removal, regression coverage, localized copy,
+desktop/mobile E2E, and reconciliation of the existing public/spec contracts.
+
+### Current ASCII UI preview
+
+```text
+Desktop: Queued 3/10  [Auto-run off] [Auto-merge on]  Clear all
+Phone:   Queued 3/10                         Clear all
+         [Auto-run off] [Auto-merge on]
+         A1 + A2 + A3                    Send / Remove
+         B1 + B2                         Send / Remove
+Settings: Automatically merge queued messages             [on]
+```
+
+The existing inline panel remains the mobile surface with one message-list
+scroll owner and wrapping 44px coarse-pointer targets. There is no third pill,
+dependent draft, or sort help drawer. Remaining tooltip Escape boundaries stay.
+This preview supersedes historical UI-01, UI-02, and UI-03 below.
+
+### Revision evidence
+
+- Backend RED: default sorted admission failed in memory/SQLite, including
+  full-capacity paths; session Auto-merge OFF-to-ON removed 0 instead of 4 rows.
+- Minimal GREEN: the same focused command passed after gating sorted folds and
+  compaction directly on Auto-merge.
+- After clean policy removal, the full messagequeue package passed.
+- Targeted race checks passed. Chromium: 22 passed; mobile-chrome: 13 passed,
+  both with retries disabled. Verification results and limits are in Task 06.
+
+## Historical implementation through Task 05
+
+The remaining plan records the original separate-option implementation and its
+historical verification. It is not the current product contract; use Task 06
+and the revised requirement/design for the fold-in.
+
 ## Overview
 
 Add Auto-sort-merge as a third message-queue automation policy. Work order 01

@@ -31,19 +31,16 @@ var (
 )
 
 type Settings struct {
-	MaxPerSession         int   `json:"max_per_session"`
-	MergeEnabled          bool  `json:"merge_enabled"`
-	AutoMergeEnabled      bool  `json:"auto_merge_enabled"`
-	AutoMergeRevision     int64 `json:"-"`
-	AutoSortMergeEnabled  bool  `json:"auto_sort_merge_enabled"`
-	AutoSortMergeRevision int64 `json:"-"`
+	MaxPerSession     int   `json:"max_per_session"`
+	MergeEnabled      bool  `json:"merge_enabled"`
+	AutoMergeEnabled  bool  `json:"auto_merge_enabled"`
+	AutoMergeRevision int64 `json:"-"`
 }
 
-// GlobalQueuePolicy retains the two revisions from this settings envelope.
+// GlobalQueuePolicy retains the revision from this settings envelope.
 func (s Settings) GlobalQueuePolicy() messagequeue.GlobalQueuePolicy {
 	return messagequeue.GlobalQueuePolicy{
-		AutoMerge:     messagequeue.AutoMergePolicy{Enabled: s.AutoMergeEnabled, Source: messagequeue.AutoMergeSourceGlobal, Revision: s.AutoMergeRevision},
-		AutoSortMerge: messagequeue.AutoSortMergePolicy{Enabled: s.AutoSortMergeEnabled, Source: messagequeue.AutoMergeSourceGlobal, Revision: s.AutoSortMergeRevision},
+		AutoMerge: messagequeue.AutoMergePolicy{Enabled: s.AutoMergeEnabled, Source: messagequeue.AutoMergeSourceGlobal, Revision: s.AutoMergeRevision},
 	}
 }
 
@@ -52,10 +49,9 @@ func (s Settings) GlobalQueuePolicy() messagequeue.GlobalQueuePolicy {
 // client that PATCHes one field would otherwise silently reset either merge
 // setting to false, since Settings has no way to represent omission.
 type SettingsPatch struct {
-	MaxPerSession        *int  `json:"max_per_session"`
-	MergeEnabled         *bool `json:"merge_enabled"`
-	AutoMergeEnabled     *bool `json:"auto_merge_enabled"`
-	AutoSortMergeEnabled *bool `json:"auto_sort_merge_enabled"`
+	MaxPerSession    *int  `json:"max_per_session"`
+	MergeEnabled     *bool `json:"merge_enabled"`
+	AutoMergeEnabled *bool `json:"auto_merge_enabled"`
 }
 
 // Apply returns base with every non-nil patch field overlaid.
@@ -68,9 +64,6 @@ func (p SettingsPatch) Apply(base Settings) Settings {
 	}
 	if p.AutoMergeEnabled != nil {
 		base.AutoMergeEnabled = *p.AutoMergeEnabled
-	}
-	if p.AutoSortMergeEnabled != nil {
-		base.AutoSortMergeEnabled = *p.AutoSortMergeEnabled
 	}
 	return base
 }
@@ -90,8 +83,7 @@ type Effective struct {
 	MergeEnabled bool `json:"merge_enabled"`
 	// AutoMergeEnabled mirrors Settings.AutoMergeEnabled and has no
 	// environment override.
-	AutoMergeEnabled     bool `json:"auto_merge_enabled"`
-	AutoSortMergeEnabled bool `json:"auto_sort_merge_enabled"`
+	AutoMergeEnabled bool `json:"auto_merge_enabled"`
 }
 
 type Environment struct {

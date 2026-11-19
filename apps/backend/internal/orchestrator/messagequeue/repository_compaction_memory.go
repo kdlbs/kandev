@@ -8,35 +8,20 @@ func (r *memoryRepository) SetSessionPolicyAndCompact(_ context.Context, identit
 	if err := r.bindIdentityLocked(identity); err != nil {
 		return SessionPolicyResult{}, err
 	}
-	merge, sortPolicy := r.autoMergeOverrides[identity], r.autoSortMergeOverrides[identity]
+	merge := r.autoMergeOverrides[identity]
 	var mergeOverride *AutoMergeOverride
 	if _, ok := r.autoMergeOverrides[identity]; ok {
 		mergeOverride = &merge
 	}
-	var sortOverride *AutoSortMergeOverride
-	if _, ok := r.autoSortMergeOverrides[identity]; ok {
-		sortOverride = &sortPolicy
-	}
-	before := SessionPolicyResult{AutoMerge: resolveAutoMergeOverride(mergeOverride, global.AutoMerge), AutoSortMerge: resolveAutoSortMergeOverride(sortOverride, global.AutoSortMerge)}
-	if change.AutoSortMerge {
-		sortPolicy.Enabled = change.Enabled
-		sortPolicy.Revision++
-		sortOverride = &sortPolicy
-	} else {
-		merge.Enabled = change.Enabled
-		merge.Revision++
-		mergeOverride = &merge
-	}
-	result := SessionPolicyResult{AutoMerge: resolveAutoMergeOverride(mergeOverride, global.AutoMerge), AutoSortMerge: resolveAutoSortMergeOverride(sortOverride, global.AutoSortMerge)}
-	if (!before.AutoMerge.Enabled || !before.AutoSortMerge.Enabled) && result.AutoMerge.Enabled && result.AutoSortMerge.Enabled {
+	before := resolveAutoMergeOverride(mergeOverride, global.AutoMerge)
+	merge.Enabled = change.Enabled
+	merge.Revision++
+	result := SessionPolicyResult{AutoMerge: resolveAutoMergeOverride(&merge, global.AutoMerge)}
+	if !before.Enabled && result.AutoMerge.Enabled {
 		result.CompactedCount = r.compactSessionQueueLocked(identity.SessionID, change.Leased)
 		result.compactionRan = true
 	}
-	if change.AutoSortMerge {
-		r.autoSortMergeOverrides[identity] = sortPolicy
-	} else {
-		r.autoMergeOverrides[identity] = merge
-	}
+	r.autoMergeOverrides[identity] = merge
 	return result, nil
 }
 

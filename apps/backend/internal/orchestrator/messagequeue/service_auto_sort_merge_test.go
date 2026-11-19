@@ -35,7 +35,6 @@ func TestAutoSortMergeInterleavedAdmissions(t *testing.T) {
 						capacity = 3
 					}
 					service := NewService(repo, capacity, logger.Default())
-					service.SetGlobalQueuePolicy(GlobalQueuePolicy{AutoMerge: AutoMergePolicy{Enabled: true}, AutoSortMerge: AutoSortMergePolicy{Enabled: true}})
 					var accepted *QueuedMessage
 					var err error
 					if clientID {
@@ -79,7 +78,6 @@ func TestAutoSortMergeLegacyAdmissionUsesChosenTarget(t *testing.T) {
 				require.NoError(t, repo.Insert(ctx, row, 0))
 			}
 			service := NewService(repo, 3, logger.Default())
-			service.SetGlobalQueuePolicy(GlobalQueuePolicy{AutoMerge: AutoMergePolicy{Enabled: true}, AutoSortMerge: AutoSortMergePolicy{Enabled: true}})
 			_, err := service.QueueMessageWithMetadata(ctx, "session", "task", "B2", "", QueuedByAgent, false, nil, map[string]any{MetadataSenderTaskID: "B"})
 			require.NoError(t, err)
 			rows, err := repo.ListBySession(ctx, "session")

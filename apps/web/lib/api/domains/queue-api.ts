@@ -440,10 +440,7 @@ export async function sendQueuedNow(
 }
 
 async function setQueueBooleanPolicy<T>(
-  action:
-    | "message.queue.auto_run.set"
-    | "message.queue.auto_merge.set"
-    | "message.queue.auto_sort_merge.set",
+  action: "message.queue.auto_run.set" | "message.queue.auto_merge.set",
   identity: QueueSessionIdentity,
   enabled: boolean,
   context: QueueErrorContext = "operation",
@@ -477,22 +474,6 @@ export function setQueueAutoMerge(
   enabled: boolean,
 ): Promise<QueueAutoMergePolicyResponse> {
   return setQueueBooleanPolicy("message.queue.auto_merge.set", identity, enabled);
-}
-
-export type QueueAutoSortMergePolicyResponse = QueueSessionIdentity & {
-  auto_sort_merge_available: boolean;
-  auto_sort_merge_enabled: boolean;
-  auto_sort_merge_source: "global" | "session";
-  auto_sort_merge_revision: number;
-  compacted_count: number;
-};
-
-/** Persist the preference and reconcile the resulting compaction by status. */
-export function setQueueAutoSortMerge(
-  identity: QueueSessionIdentity,
-  enabled: boolean,
-): Promise<QueueAutoSortMergePolicyResponse> {
-  return setQueueBooleanPolicy("message.queue.auto_sort_merge.set", identity, enabled);
 }
 
 /** Fetch the full queue snapshot for one immutable session identity. */

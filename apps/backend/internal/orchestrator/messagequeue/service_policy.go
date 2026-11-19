@@ -13,7 +13,6 @@ func (s *Service) loadGlobalQueuePolicy(ctx context.Context) (GlobalQueuePolicy,
 		}
 		s.SetGlobalQueuePolicy(policy)
 		policy.AutoMerge.Source = AutoMergeSourceGlobal
-		policy.AutoSortMerge.Source = AutoMergeSourceGlobal
 		return policy, nil
 	}
 	return s.globalQueuePolicy(), nil
@@ -26,30 +25,7 @@ func resolveAutoMergeOverride(override *AutoMergeOverride, global AutoMergePolic
 	return global
 }
 
-func resolveAutoSortMergeOverride(override *AutoSortMergeOverride, global AutoSortMergePolicy) AutoSortMergePolicy {
-	if override != nil {
-		return AutoSortMergePolicy{Enabled: override.Enabled, Source: AutoMergeSourceSession, Revision: override.Revision}
-	}
-	return global
-}
-
-func (s *Service) ResolveAutoSortMergePolicy(ctx context.Context, identity QueueSessionIdentity) (AutoSortMergePolicy, error) {
-	override, err := s.repo.GetAutoSortMergeOverride(ctx, identity)
-	if err != nil {
-		return AutoSortMergePolicy{}, err
-	}
-	if override != nil {
-		return resolveAutoSortMergeOverride(override, AutoSortMergePolicy{}), nil
-	}
-	global, err := s.loadGlobalQueuePolicy(ctx)
-	return global.AutoSortMerge, err
-}
-
-func (s *Service) SetSessionAutoSortMerge(ctx context.Context, identity QueueSessionIdentity, enabled bool) (SessionPolicyResult, error) {
-	return s.setSessionPolicy(ctx, identity, enabled, true)
-}
-
-func (s *Service) setSessionPolicy(ctx context.Context, identity QueueSessionIdentity, enabled, sortPolicy bool) (SessionPolicyResult, error) {
+func (s *Service) setSessionPolicy(ctx context.Context, identity QueueSessionIdentity, enabled bool) (SessionPolicyResult, error) {
 	var result SessionPolicyResult
 	err := s.WithSessionAdmission(ctx, identity.SessionID, func(ctx context.Context) error {
 		global, err := s.loadGlobalQueuePolicy(ctx)
@@ -57,14 +33,10 @@ func (s *Service) setSessionPolicy(ctx context.Context, identity QueueSessionIde
 			return err
 		}
 		result, err = s.repo.SetSessionPolicyAndCompact(ctx, identity, SessionPolicyChange{
-			AutoSortMerge: sortPolicy, Enabled: enabled, Leased: s.sessionEditLeases(identity.SessionID),
+			Enabled: enabled, Leased: s.sessionEditLeases(identity.SessionID),
 		}, global)
 		if err == nil && result.compactionRan {
-			trigger := "auto_merge"
-			if sortPolicy {
-				trigger = "auto_sort_merge"
-			}
-			s.logger.Info("compacted session queue", zap.String("session_id", identity.SessionID), zap.Int("compacted_count", result.CompactedCount), zap.String("trigger", trigger))
+			s.logger.Info("compacted session queue", zap.String("session_id", identity.SessionID), zap.Int("compacted_count", result.CompactedCount), zap.String("trigger", "auto_merge"))
 		}
 		return err
 	})

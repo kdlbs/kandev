@@ -11,16 +11,6 @@ const POLICIES = [
     wireSource: "auto_merge_source",
     wireRevision: "auto_merge_revision",
   },
-  {
-    available: "autoSortMergeAvailable",
-    enabled: "autoSortMergeEnabled",
-    source: "autoSortMergeSource",
-    revision: "autoSortMergeRevision",
-    wireAvailable: "auto_sort_merge_available",
-    wireEnabled: "auto_sort_merge_enabled",
-    wireSource: "auto_sort_merge_source",
-    wireRevision: "auto_sort_merge_revision",
-  },
 ] as const;
 
 type PolicyFields = (typeof POLICIES)[number];

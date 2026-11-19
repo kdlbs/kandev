@@ -52,7 +52,6 @@ function useMessageQueueSettingsLoad() {
   const [draft, setDraft] = useState("");
   const [mergeDraft, setMergeDraft] = useState(true);
   const [autoMergeDraft, setAutoMergeDraft] = useState(true);
-  const [autoSortMergeDraft, setAutoSortMergeDraft] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const loadVersion = useRef(0);
@@ -68,7 +67,6 @@ function useMessageQueueSettingsLoad() {
       setDraft(String(response.settings.max_per_session));
       setMergeDraft(response.settings.merge_enabled);
       setAutoMergeDraft(response.settings.auto_merge_enabled);
-      setAutoSortMergeDraft(response.settings.auto_sort_merge_enabled);
     } catch {
       if (version === loadVersion.current) setLoadFailed(true);
     } finally {
@@ -92,8 +90,6 @@ function useMessageQueueSettingsLoad() {
     setMergeDraft,
     autoMergeDraft,
     setAutoMergeDraft,
-    autoSortMergeDraft,
-    setAutoSortMergeDraft,
     loading,
     loadFailed,
     reload,
@@ -106,7 +102,6 @@ type QueueSettingsContributorOptions = {
   isMaxDirty: boolean;
   isMergeDirty: boolean;
   isAutoMergeDirty: boolean;
-  isAutoSortMergeDirty: boolean;
   isAdmin: boolean;
   isLocked: boolean;
   invalidReason: string | undefined;
@@ -120,7 +115,6 @@ function useQueueSettingsContributor({
   isMaxDirty,
   isMergeDirty,
   isAutoMergeDirty,
-  isAutoSortMergeDirty,
   isAdmin,
   isLocked,
   invalidReason,
@@ -135,17 +129,14 @@ function useQueueSettingsContributor({
     setMergeDraft,
     autoMergeDraft,
     setAutoMergeDraft,
-    autoSortMergeDraft,
-    setAutoSortMergeDraft,
   } = load;
   const baseline = snapshot?.settings.max_per_session;
   const mergeBaseline = snapshot?.settings.merge_enabled;
   const autoMergeBaseline = snapshot?.settings.auto_merge_enabled;
-  const autoSortMergeBaseline = snapshot?.settings.auto_sort_merge_enabled;
-  const isDirty = isMaxDirty || isMergeDirty || isAutoMergeDirty || isAutoSortMergeDirty;
+  const isDirty = isMaxDirty || isMergeDirty || isAutoMergeDirty;
   useSettingsSaveContributor({
     id: "system-message-queue",
-    revision: `${draft}:${mergeDraft}:${autoMergeDraft}:${autoSortMergeDraft}`,
+    revision: `${draft}:${mergeDraft}:${autoMergeDraft}`,
     isDirty,
     canSave: parsed !== null && isAdmin && (!isMaxDirty || !isLocked),
     invalidReason,
@@ -156,16 +147,12 @@ function useQueueSettingsContributor({
       const submitted = draft;
       const submittedMerge = mergeDraft;
       const submittedAutoMerge = autoMergeDraft;
-      const submittedAutoSortMerge = autoSortMergeDraft;
       onSaveFailed(false);
       try {
         const response = await updateMessageQueueSettings({
           ...(isMaxDirty ? { max_per_session: parsed } : {}),
           ...(isMergeDirty ? { merge_enabled: mergeDraft } : {}),
           ...(isAutoMergeDirty ? { auto_merge_enabled: autoMergeDraft } : {}),
-          ...(autoMergeDraft && isAutoSortMergeDirty
-            ? { auto_sort_merge_enabled: autoSortMergeDraft }
-            : {}),
         });
         setSnapshot(response);
         setDraft((current) =>
@@ -177,9 +164,6 @@ function useQueueSettingsContributor({
         setAutoMergeDraft((current) =>
           current === submittedAutoMerge ? response.settings.auto_merge_enabled : current,
         );
-        setAutoSortMergeDraft((current) =>
-          current === submittedAutoSortMerge ? response.settings.auto_sort_merge_enabled : current,
-        );
       } catch (error) {
         onSaveFailed(true);
         throw error;
@@ -189,7 +173,6 @@ function useQueueSettingsContributor({
       if (baseline !== undefined) setDraft(String(baseline));
       if (mergeBaseline !== undefined) setMergeDraft(mergeBaseline);
       if (autoMergeBaseline !== undefined) setAutoMergeDraft(autoMergeBaseline);
-      if (autoSortMergeBaseline !== undefined) setAutoSortMergeDraft(autoSortMergeBaseline);
       onSaveFailed(false);
     },
   });
@@ -211,13 +194,6 @@ export function useMessageQueueSettingsDraft() {
   const isMaxDirty = baseline !== undefined && draft !== String(baseline);
   const isMergeDirty = mergeBaseline !== undefined && mergeDraft !== mergeBaseline;
   const isAutoMergeDirty = autoMergeBaseline !== undefined && autoMergeDraft !== autoMergeBaseline;
-  const sortBaseline = snapshot?.settings.auto_sort_merge_enabled;
-  const isAutoSortMergeDirty =
-    autoMergeDraft && sortBaseline !== undefined && load.autoSortMergeDraft !== sortBaseline;
-  const changeAutoMerge = (enabled: boolean) => {
-    load.setAutoMergeDraft(enabled);
-    if (!enabled || !autoMergeDraft) load.setAutoSortMergeDraft(sortBaseline ?? false);
-  };
   const isLocked = snapshot?.effective.locked === true;
   const lockSource = snapshot?.effective.source;
   const invalidReason = queueSettingsInvalidReason(t, {
@@ -234,7 +210,6 @@ export function useMessageQueueSettingsDraft() {
     isMaxDirty,
     isMergeDirty,
     isAutoMergeDirty,
-    isAutoSortMergeDirty,
     isAdmin,
     isLocked,
     invalidReason,
@@ -248,14 +223,12 @@ export function useMessageQueueSettingsDraft() {
     mergeDraft,
     setMergeDraft: load.setMergeDraft,
     autoMergeDraft,
-    setAutoMergeDraft: changeAutoMerge,
-    autoSortMergeDraft: load.autoSortMergeDraft,
-    setAutoSortMergeDraft: load.setAutoSortMergeDraft,
+    setAutoMergeDraft: load.setAutoMergeDraft,
     loading: load.loading,
     loadFailed: load.loadFailed,
     saveFailed,
     invalidReason,
-    isDirty: isMaxDirty || isMergeDirty || isAutoMergeDirty || isAutoSortMergeDirty,
+    isDirty: isMaxDirty || isMergeDirty || isAutoMergeDirty,
     isAdmin,
     isLocked,
     lockSource,

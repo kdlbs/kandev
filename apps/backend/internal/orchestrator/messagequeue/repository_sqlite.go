@@ -684,8 +684,6 @@ func (r *sqliteRepository) initSchema() error {
 		auto_run              INTEGER NOT NULL DEFAULT 1,
 		auto_merge_override   INTEGER,
 		auto_merge_revision   BIGINT NOT NULL DEFAULT 0,
-		auto_sort_merge_override INTEGER,
-		auto_sort_merge_revision BIGINT NOT NULL DEFAULT 0,
 		send_now_generation   BIGINT NOT NULL DEFAULT 0,
 		status_generation     BIGINT NOT NULL DEFAULT 0,
 		next_position         BIGINT NOT NULL DEFAULT 0
@@ -741,8 +739,6 @@ func (r *sqliteRepository) initSchema() error {
 		{"session incarnation", `ALTER TABLE queue_session_state ADD COLUMN session_incarnation_id TEXT NOT NULL DEFAULT ''`},
 		{"Auto-merge override", `ALTER TABLE queue_session_state ADD COLUMN auto_merge_override INTEGER`},
 		{"Auto-merge revision", `ALTER TABLE queue_session_state ADD COLUMN auto_merge_revision BIGINT NOT NULL DEFAULT 0`},
-		{"Auto-sort-merge override", `ALTER TABLE queue_session_state ADD COLUMN auto_sort_merge_override INTEGER`},
-		{"Auto-sort-merge revision", `ALTER TABLE queue_session_state ADD COLUMN auto_sort_merge_revision BIGINT NOT NULL DEFAULT 0`},
 		{"Send Now generation", `ALTER TABLE queue_session_state ADD COLUMN send_now_generation BIGINT NOT NULL DEFAULT 0`},
 		{"Status generation", `ALTER TABLE queue_session_state ADD COLUMN status_generation BIGINT NOT NULL DEFAULT 0`},
 		{"Queue position", `ALTER TABLE queue_session_state ADD COLUMN next_position BIGINT NOT NULL DEFAULT 0`},
@@ -944,9 +940,6 @@ func (r *sqliteRepository) validateAutoMergePolicyTx(
 ) error {
 	if identity == nil || policy == nil {
 		return nil
-	}
-	if err := r.validateAutoSortMergePolicyTx(ctx, tx, identity, policy.AutoSortMerge); err != nil {
-		return err
 	}
 	var enabled sql.NullInt64
 	var revision int64
@@ -2457,7 +2450,6 @@ func (r *sqliteRepository) Snapshot(
 			Enabled: enabled.Int64 != 0, Revision: revision,
 		}
 	}
-	snapshot.AutoSortMergeOverride, snapshot.AutoSortMergeError = r.getAutoSortMergeOverrideTx(ctx, tx, identity)
 	if err := tx.Commit(); err != nil {
 		return RepositorySnapshot{}, err
 	}
@@ -2490,12 +2482,6 @@ func (r *sqliteRepository) nextStatusGenerationTx(
 				THEN queue_session_state.auto_merge_revision
 				ELSE 0
 			END,
-			auto_sort_merge_override = CASE
-				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
-				THEN queue_session_state.auto_sort_merge_override ELSE NULL END,
-			auto_sort_merge_revision = CASE
-				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
-				THEN queue_session_state.auto_sort_merge_revision ELSE 0 END,
 			send_now_generation = CASE
 				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
 				THEN queue_session_state.send_now_generation
@@ -3092,12 +3078,6 @@ func (r *sqliteRepository) setAutoRunTx(
 				THEN queue_session_state.auto_merge_revision
 				ELSE 0
 			END,
-			auto_sort_merge_override = CASE
-				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
-				THEN queue_session_state.auto_sort_merge_override ELSE NULL END,
-			auto_sort_merge_revision = CASE
-				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
-				THEN queue_session_state.auto_sort_merge_revision ELSE 0 END,
 			send_now_generation = CASE
 				WHEN queue_session_state.session_incarnation_id = excluded.session_incarnation_id
 				THEN queue_session_state.send_now_generation

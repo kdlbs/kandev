@@ -12,7 +12,7 @@ import (
 )
 
 // @covers AC-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001.3
-func TestAutoSortMergeSharedSingleConnectionSettingsLoader(t *testing.T) {
+func TestAutoMergeSharedSingleConnectionSettingsLoader(t *testing.T) {
 	pool := newMessageQueueSettingsTestPool(t)
 	database := pool.Writer()
 	_, err := database.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY,archived_at TIMESTAMP,updated_at TIMESTAMP);
@@ -28,19 +28,19 @@ func TestAutoSortMergeSharedSingleConnectionSettingsLoader(t *testing.T) {
 	settings := queuesettings.NewService(queuesettings.NewStore(raw), queue, func() queuesettings.Environment { return queuesettings.Environment{} }, testLogger(t))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, err = settings.Update(ctx, queuesettings.SettingsPatch{AutoSortMergeEnabled: new(true)})
+	_, err = settings.Update(ctx, queuesettings.SettingsPatch{AutoMergeEnabled: new(true)})
 	require.NoError(t, err)
 	identity := messagequeue.QueueSessionIdentity{TaskID: "task", SessionID: "session", SessionIncarnationID: "inc"}
 	status, err := queue.Snapshot(ctx, identity)
 	require.NoError(t, err)
-	require.Equal(t, new(true), status.AutoSortMergeEnabled)
-	result, err := queue.SetSessionAutoSortMerge(ctx, identity, false)
+	require.Equal(t, new(true), status.AutoMergeEnabled)
+	result, err := queue.SetSessionAutoMerge(ctx, identity, false)
 	require.NoError(t, err)
-	require.False(t, result.AutoSortMerge.Enabled)
+	require.False(t, result.AutoMerge.Enabled)
 	for _, item := range []struct{ content, sender string }{{"A1", "A"}, {"B1", "B"}, {"A2", "A"}} {
 		require.NoError(t, repo.InsertForSession(ctx, identity, &messagequeue.QueuedMessage{TaskID: "task", SessionID: "session", Content: item.content, QueuedBy: messagequeue.QueuedByAgent, Metadata: map[string]any{messagequeue.MetadataSenderTaskID: item.sender}}, 0))
 	}
-	result, err = queue.SetSessionAutoSortMerge(ctx, identity, true)
+	result, err = queue.SetSessionAutoMerge(ctx, identity, true)
 	require.NoError(t, err)
 	require.Equal(t, 1, result.CompactedCount)
 	result, err = queue.SetSessionAutoMerge(ctx, identity, false)

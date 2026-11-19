@@ -49,7 +49,7 @@ func tiedRepos() map[string]func(*testing.T) Repository {
 
 func enableSortedFolds(service *Service) {
 	service.SetGlobalQueuePolicy(GlobalQueuePolicy{
-		AutoMerge: AutoMergePolicy{Enabled: true}, AutoSortMerge: AutoSortMergePolicy{Enabled: true},
+		AutoMerge: AutoMergePolicy{Enabled: true},
 	})
 }
 

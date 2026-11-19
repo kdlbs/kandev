@@ -245,10 +245,6 @@ export type QueueStatusChangedPayload = {
   auto_merge_enabled?: boolean;
   auto_merge_source?: "global" | "session";
   auto_merge_revision?: number;
-  auto_sort_merge_available?: boolean;
-  auto_sort_merge_enabled?: boolean;
-  auto_sort_merge_source?: "global" | "session";
-  auto_sort_merge_revision?: number;
 };
 
 export type ConversationChangedOperation = {

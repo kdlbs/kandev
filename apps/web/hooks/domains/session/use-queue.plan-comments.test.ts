@@ -20,7 +20,6 @@ const queueApiMock = vi.hoisted(() => {
     sendQueuedNow: vi.fn(),
     setQueueAutoRun: vi.fn(),
     setQueueAutoMerge: vi.fn(),
-    setQueueAutoSortMerge: vi.fn(),
   };
 });
 

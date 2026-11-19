@@ -5,11 +5,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// AdmissionPolicy binds both policy decisions to one settings read.
-// A nil sort policy means its override could not be read.
+// AdmissionPolicy binds automatic folding to one effective Auto-merge snapshot.
 type AdmissionPolicy struct {
-	AutoMerge     AutoMergePolicy
-	AutoSortMerge *AutoSortMergePolicy
+	AutoMerge AutoMergePolicy
 	// leased is the session's in-process edit-lease set, captured under the
 	// session admission gate before any repository lock is taken.
 	leased map[string]struct{}
@@ -17,7 +15,7 @@ type AdmissionPolicy struct {
 }
 
 func (p *AdmissionPolicy) sortedEnabled() bool {
-	return p != nil && p.AutoMerge.Enabled && p.AutoSortMerge != nil && p.AutoSortMerge.Enabled
+	return p != nil && p.AutoMerge.Enabled
 }
 
 func isFoldBarrier(row *QueuedMessage) bool {

@@ -394,11 +394,9 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   const rowSendNow = panel.getByTestId("queue-entry-send-now").nth(1);
   const autoRun = panel.getByTestId("queue-auto-run");
   const autoMerge = panel.getByTestId("queue-auto-merge");
-  const autoSortMerge = panel.getByTestId("queue-auto-sort-merge");
   await expectTouchTarget(rowSendNow);
   await expectEffectiveTouchTarget(autoRun);
   await expectEffectiveTouchTarget(autoMerge);
-  await expectEffectiveTouchTarget(autoSortMerge);
   await expect(autoRun).toHaveAttribute("data-state", "checked");
   await autoRun.tap();
   await expect(autoRun).toHaveAttribute("data-state", "unchecked");
@@ -406,17 +404,6 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   await expect(autoMerge).toBeEnabled();
   await expect
     .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.auto_run))
-    .toBe(false);
-  await autoMerge.tap();
-  await expect
-    .poll(async () => (await apiClient.getQueueStatus(queueIdentity)).auto_merge_enabled)
-    .toBe(true);
-  await expect(autoMerge).toHaveAttribute("data-state", "checked");
-  await expect(autoMerge).toBeEnabled();
-  await autoMerge.tap();
-  await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
-  await expect
-    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.auto_merge_enabled))
     .toBe(false);
 
   await assertNoDocumentHorizontalOverflow(testPage);
@@ -465,7 +452,6 @@ test("mobile queue panel hides the desktop-only pin and keeps its controls", asy
   await expect(panel.getByTestId("queue-pin")).toHaveCount(0);
   await expectEffectiveTouchTarget(panel.getByTestId("queue-auto-run"));
   await expectEffectiveTouchTarget(panel.getByTestId("queue-auto-merge"));
-  await expectEffectiveTouchTarget(panel.getByTestId("queue-auto-sort-merge"));
   await expectTouchTarget(panel.getByTestId("queue-clear-all"));
   await expectTouchTarget(panel.getByTestId("queue-close"));
 });

@@ -868,16 +868,6 @@ func (h *QueueHandlers) publishIdentityStatus(
 	if status.AutoMergeRevision != nil {
 		eventData["auto_merge_revision"] = *status.AutoMergeRevision
 	}
-	eventData["auto_sort_merge_available"] = status.AutoSortMergeAvailable
-	if status.AutoSortMergeEnabled != nil {
-		eventData["auto_sort_merge_enabled"] = *status.AutoSortMergeEnabled
-	}
-	if status.AutoSortMergeSource != "" {
-		eventData["auto_sort_merge_source"] = status.AutoSortMergeSource
-	}
-	if status.AutoSortMergeRevision != nil {
-		eventData["auto_sort_merge_revision"] = *status.AutoSortMergeRevision
-	}
 	if len(admitted) > 0 && admitted[0] != nil &&
 		admitted[0].QueuedBy != "" &&
 		!messagequeue.IsReservedQueuedBy(admitted[0].QueuedBy) {

@@ -90,7 +90,6 @@ type QueuePanelHandlerArgs = {
   sendEntryNow: (entryId: string) => Promise<void>;
   setAutoRun: (enabled: boolean) => Promise<void>;
   setAutoMerge: (enabled: boolean) => Promise<void>;
-  setAutoSortMerge: (enabled: boolean) => Promise<void>;
 };
 
 function useSendNowPanelHandlers(sendEntryNow: (entryId: string) => Promise<void>) {
@@ -137,7 +136,6 @@ function useQueuePanelHandlers({
   sendEntryNow,
   setAutoRun,
   setAutoMerge,
-  setAutoSortMerge,
 }: QueuePanelHandlerArgs) {
   // Tracks merge requests still in flight so a rapid second click on the same
   // row cannot fire a second request for an entry that is already gone — the
@@ -220,14 +218,6 @@ function useQueuePanelHandlers({
     },
     [setAutoMerge, t],
   );
-  const handleAutoSortMergeChange = useCallback(
-    (enabled: boolean) => {
-      setAutoSortMerge(enabled).catch((err) => {
-        toast.error(t(queueMutationErrorKey(err, "chat:failedToSetQueueAutoSortMerge")));
-      });
-    },
-    [setAutoSortMerge, t],
-  );
   const handleReorder = useCallback(
     async (orderedIds: string[]) => {
       try {
@@ -250,7 +240,6 @@ function useQueuePanelHandlers({
     handleClear,
     handleAutoRunChange,
     handleAutoMergeChange,
-    handleAutoSortMergeChange,
     handleReorder,
     handleSendEntryNow,
   };
@@ -266,8 +255,6 @@ type QueuePanelDisclosureProps = {
   autoRun: boolean;
   autoMerge: boolean;
   autoMergeAvailable: boolean;
-  autoSortMerge: boolean;
-  autoSortMergeAvailable: boolean;
   isLoading: boolean;
   cancellationPending: boolean;
   mergeEnabled: boolean;
@@ -278,7 +265,6 @@ type QueuePanelDisclosureProps = {
   onClear: () => void;
   onAutoRunChange: (enabled: boolean) => void;
   onAutoMergeChange: (enabled: boolean) => void;
-  onAutoSortMergeChange: (enabled: boolean) => void;
   onTogglePin: () => void;
   onSave: (
     entryId: string,
@@ -306,8 +292,6 @@ function QueuePanelDisclosure({
   autoRun,
   autoMerge,
   autoMergeAvailable,
-  autoSortMerge,
-  autoSortMergeAvailable,
   isLoading,
   cancellationPending,
   mergeEnabled,
@@ -318,7 +302,6 @@ function QueuePanelDisclosure({
   onClear,
   onAutoRunChange,
   onAutoMergeChange,
-  onAutoSortMergeChange,
   onTogglePin,
   onSave,
   onRemove,
@@ -344,8 +327,6 @@ function QueuePanelDisclosure({
           autoRun={autoRun}
           autoMerge={autoMerge}
           autoMergeAvailable={autoMergeAvailable}
-          autoSortMerge={autoSortMerge}
-          autoSortMergeAvailable={autoSortMergeAvailable}
           isLoading={isLoading}
           cancellationPending={cancellationPending}
           editingEntryId={editingEntryId}
@@ -356,7 +337,6 @@ function QueuePanelDisclosure({
           onClear={onClear}
           onAutoRunChange={onAutoRunChange}
           onAutoMergeChange={onAutoMergeChange}
-          onAutoSortMergeChange={onAutoSortMergeChange}
           onTogglePin={onTogglePin}
           onSave={onSave}
           onRemove={onRemove}
@@ -395,13 +375,10 @@ export function QueueAffordance({
     autoRun,
     autoMerge,
     autoMergeAvailable,
-    autoSortMerge,
-    autoSortMergeAvailable,
     isLoading,
     clearAll,
     setAutoRun,
     setAutoMerge,
-    setAutoSortMerge,
     editEntry,
     removeEntry,
     mergeEntry,
@@ -423,7 +400,6 @@ export function QueueAffordance({
     handleClear,
     handleAutoRunChange,
     handleAutoMergeChange,
-    handleAutoSortMergeChange,
     handleReorder,
     handleSendEntryNow,
   } = useQueuePanelHandlers({
@@ -435,7 +411,6 @@ export function QueueAffordance({
     sendEntryNow,
     setAutoRun,
     setAutoMerge,
-    setAutoSortMerge,
   });
 
   const handleSave = useCallback(
@@ -489,8 +464,6 @@ export function QueueAffordance({
         autoRun={autoRun}
         autoMerge={autoMerge}
         autoMergeAvailable={autoMergeAvailable}
-        autoSortMerge={autoSortMerge}
-        autoSortMergeAvailable={autoSortMergeAvailable}
         isLoading={isLoading}
         cancellationPending={cancellationPending}
         mergeEnabled={mergeEnabled}
@@ -502,7 +475,6 @@ export function QueueAffordance({
         onClear={handleClear}
         onAutoRunChange={handleAutoRunChange}
         onAutoMergeChange={handleAutoMergeChange}
-        onAutoSortMergeChange={handleAutoSortMergeChange}
         onTogglePin={togglePin}
         onSave={handleSave}
         onRemove={handleRemove}
@@ -579,8 +551,6 @@ type QueuePanelProps = {
   autoRun: boolean;
   autoMerge: boolean;
   autoMergeAvailable: boolean;
-  autoSortMerge: boolean;
-  autoSortMergeAvailable: boolean;
   isLoading: boolean;
   cancellationPending: boolean;
   mergeEnabled: boolean;
@@ -591,7 +561,6 @@ type QueuePanelProps = {
   onClear: () => void;
   onAutoRunChange: (enabled: boolean) => void;
   onAutoMergeChange: (enabled: boolean) => void;
-  onAutoSortMergeChange: (enabled: boolean) => void;
   onTogglePin: () => void;
   onSave: (
     entryId: string,
@@ -724,8 +693,6 @@ function QueuePanel({
   autoRun,
   autoMerge,
   autoMergeAvailable,
-  autoSortMerge,
-  autoSortMergeAvailable,
   isLoading,
   cancellationPending,
   mergeEnabled,
@@ -736,7 +703,6 @@ function QueuePanel({
   onClear,
   onAutoRunChange,
   onAutoMergeChange,
-  onAutoSortMergeChange,
   onTogglePin,
   onSave,
   onRemove,
@@ -774,15 +740,12 @@ function QueuePanel({
         autoRun={autoRun}
         autoMerge={autoMerge}
         autoMergeAvailable={autoMergeAvailable}
-        autoSortMerge={autoSortMerge}
-        autoSortMergeAvailable={autoSortMergeAvailable}
         isLoading={isLoading || editingEntryId !== null}
         cancellationPending={cancellationPending}
         pinned={pinned}
         onClear={onClear}
         onAutoRunChange={onAutoRunChange}
         onAutoMergeChange={onAutoMergeChange}
-        onAutoSortMergeChange={onAutoSortMergeChange}
         onTogglePin={onTogglePin}
         onClose={onClose}
       />

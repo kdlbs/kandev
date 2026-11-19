@@ -1,17 +1,12 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { QueuePanelHeader, type QueuePanelHeaderProps } from "./queued-ghost-panel-header";
-const touchMocks = vi.hoisted(() => ({ usesTouchDrawer: false }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: false }),
 }));
-vi.mock("@/hooks/use-compact-task-chrome", () => ({
-  useTouchDrawer: () => touchMocks.usesTouchDrawer,
-}));
 afterEach(() => {
   cleanup();
-  touchMocks.usesTouchDrawer = false;
 });
 
 const props: QueuePanelHeaderProps = {
@@ -21,15 +16,12 @@ const props: QueuePanelHeaderProps = {
   autoRun: false,
   autoMerge: true,
   autoMergeAvailable: true,
-  autoSortMerge: true,
-  autoSortMergeAvailable: true,
   isLoading: false,
   cancellationPending: false,
   pinned: false,
   onClear: vi.fn(),
   onAutoRunChange: vi.fn(),
   onAutoMergeChange: vi.fn(),
-  onAutoSortMergeChange: vi.fn(),
   onTogglePin: vi.fn(),
   onClose: vi.fn(),
 };
@@ -94,71 +86,5 @@ describe("QueuePanelHeader", () => {
     expect(label?.className).toContain("pointer-events-none");
     expect(label?.parentElement?.tagName).toBe("SPAN");
     expect(label?.parentElement?.getAttribute("tabindex")).toBe("0");
-  });
-});
-
-describe("Auto-sort-merge dependency", () => {
-  it.each([
-    {
-      autoMerge: false,
-      autoMergeAvailable: true,
-      autoSortMergeAvailable: true,
-      checked: false,
-      disabled: true,
-    },
-    {
-      autoMerge: true,
-      autoMergeAvailable: false,
-      autoSortMergeAvailable: true,
-      checked: true,
-      disabled: true,
-    },
-    {
-      autoMerge: true,
-      autoMergeAvailable: true,
-      autoSortMergeAvailable: false,
-      checked: true,
-      disabled: true,
-    },
-    {
-      autoMerge: true,
-      autoMergeAvailable: true,
-      autoSortMergeAvailable: true,
-      checked: true,
-      disabled: false,
-    },
-  ])("renders the effective dependency state %j", ({ checked, disabled, ...policy }) => {
-    render(
-      <TooltipProvider>
-        <QueuePanelHeader {...props} {...policy} />
-      </TooltipProvider>,
-    );
-    const control = screen.getByTestId("queue-auto-sort-merge");
-    expect(control.getAttribute("aria-checked")).toBe(String(checked));
-    expect(control).toHaveProperty("disabled", disabled);
-    const description = document.getElementById(control.getAttribute("aria-describedby") ?? "");
-    expect(description).not.toBeNull();
-  });
-
-  it("explains a disabled Auto-sort-merge pill through a focused touch drawer", async () => {
-    touchMocks.usesTouchDrawer = true;
-    render(
-      <TooltipProvider>
-        <QueuePanelHeader {...props} autoMerge={false} />
-      </TooltipProvider>,
-    );
-    expect(screen.getByTestId("queue-auto-sort-merge")).toHaveProperty("disabled", true);
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    const trigger = screen.getByTestId("queue-auto-sort-merge-help");
-    trigger.focus();
-    fireEvent.click(trigger);
-
-    const dialog = screen.getByRole("dialog");
-    expect(dialog.textContent).toContain("Requires Auto-merge.");
-    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
-
-    fireEvent.click(screen.getByTestId("queue-auto-sort-merge-help-close"));
-    await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
   });
 });

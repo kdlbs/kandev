@@ -9,7 +9,6 @@ import {
   restoreMessageQueueSettings,
 } from "../../helpers/message-queue-settings";
 import { openTaskBehaviorRuntime } from "../../helpers/settings-composition";
-import { exerciseAutoSortMergeSettings } from "../../helpers/message-queue-auto-sort-merge-settings";
 
 test.describe.serial("Message Queue task behavior settings", () => {
   let baseline: MessageQueueSettingsValue | undefined;
@@ -22,13 +21,6 @@ test.describe.serial("Message Queue task behavior settings", () => {
     if (!baseline) return;
     await restoreMessageQueueSettings(apiClient, baseline);
     baseline = undefined;
-  });
-
-  test("auto-sort-merge persists and discards only dependent unsaved edits", async ({
-    testPage,
-    apiClient,
-  }) => {
-    await exerciseAutoSortMergeSettings(testPage, apiClient, false);
   });
 
   test("admin navigates to Task behavior, saves, and reloads the live setting", async ({
@@ -166,7 +158,6 @@ test.describe.serial("Message Queue task behavior settings", () => {
             max_per_session: baseline?.max_per_session ?? 10,
             merge_enabled: true,
             auto_merge_enabled: true,
-            auto_sort_merge_enabled: false,
           },
           effective: {
             max_per_session: 41,
@@ -174,7 +165,6 @@ test.describe.serial("Message Queue task behavior settings", () => {
             locked: true,
             merge_enabled: true,
             auto_merge_enabled: true,
-            auto_sort_merge_enabled: false,
           },
         } satisfies MessageQueueSettingsResponse),
       });
@@ -202,7 +192,6 @@ test.describe.serial("Message Queue task behavior settings", () => {
             max_per_session: baseline?.max_per_session ?? 10,
             merge_enabled: true,
             auto_merge_enabled: true,
-            auto_sort_merge_enabled: false,
           },
           effective: {
             max_per_session: 43,
@@ -210,7 +199,6 @@ test.describe.serial("Message Queue task behavior settings", () => {
             locked: true,
             merge_enabled: true,
             auto_merge_enabled: true,
-            auto_sort_merge_enabled: false,
           },
         } satisfies MessageQueueSettingsResponse),
       });
@@ -256,7 +244,6 @@ test.describe.serial("Message Queue task behavior settings", () => {
     await expect(testPage.getByTestId("message-queue-max-per-session")).toBeDisabled();
     await expect(testPage.getByTestId("message-queue-merge-enabled")).toBeDisabled();
     await expect(testPage.getByTestId("message-queue-auto-merge-enabled")).toBeDisabled();
-    await expect(testPage.getByTestId("message-queue-auto-sort-merge-enabled")).toBeDisabled();
     await expect(
       testPage
         .getByTestId("message-queue-settings")

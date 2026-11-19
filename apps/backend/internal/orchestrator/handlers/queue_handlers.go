@@ -206,10 +206,6 @@ type QueueAutoMergeController interface {
 	SetSessionAutoMerge(context.Context, messagequeue.QueueSessionIdentity, bool) (messagequeue.SessionPolicyResult, error)
 }
 
-type QueueAutoSortMergeController interface {
-	SetSessionAutoSortMerge(context.Context, messagequeue.QueueSessionIdentity, bool) (messagequeue.SessionPolicyResult, error)
-}
-
 // QueueEditLeaseController owns target-bound queued-message edit leases.
 type QueueEditLeaseController interface {
 	BeginEdit(context.Context, string, string, string) (*messagequeue.QueueEditLease, error)
@@ -562,7 +558,6 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMessageQueueSendNow, h.wsSendNow)
 	d.RegisterFunc(ws.ActionMessageQueueAutoRunSet, h.wsSetAutoRun)
 	d.RegisterFunc(ws.ActionMessageQueueAutoMergeSet, h.wsSetAutoMerge)
-	d.RegisterFunc(ws.ActionMessageQueueAutoSortMergeSet, h.wsSetAutoSortMerge)
 	d.RegisterFunc(ws.ActionMessageQueueRemove, h.wsRemoveEntry)
 	d.RegisterFunc(ws.ActionMessageQueueMerge, h.wsMergeIntoAbove)
 	d.RegisterFunc(ws.ActionMessageQueueReorder, h.wsReorder)

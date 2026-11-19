@@ -13,45 +13,43 @@ import (
 // memoryRepository is an in-memory Repository implementation used in tests and
 // any deployment that explicitly opts into ephemeral queueing.
 type memoryRepository struct {
-	mu                     sync.Mutex
-	entries                map[string][]*QueuedMessage // sessionID -> ordered list (head = index 0)
-	nextPosition           map[string]int64            // sessionID -> monotonic counter
-	pendingMoves           map[string]*PendingMove
-	generation             map[string]int64
-	sessionGeneration      map[string]int64
-	sendNowGeneration      map[string]int64
-	sendNowClaims          map[string]map[string]struct{}
-	autoRun                map[string]bool
-	autoRunIncarnation     map[string]string
-	autoMergeOverrides     map[QueueSessionIdentity]AutoMergeOverride
-	autoSortMergeOverrides map[QueueSessionIdentity]AutoSortMergeOverride
-	identities             map[string]QueueSessionIdentity
-	admissionReceipts      map[queueAdmissionKey]queueAdmissionReceipt
-	managedInputs          map[managedInputIDKey]ManagedInputReceipt
-	managedOccurrences     map[managedInputOccurrenceKey]managedInputIDKey
-	statusGeneration       map[string]int64
-	authority              func(context.Context, string, string) (QueueSessionIdentity, error)
+	mu                 sync.Mutex
+	entries            map[string][]*QueuedMessage // sessionID -> ordered list (head = index 0)
+	nextPosition       map[string]int64            // sessionID -> monotonic counter
+	pendingMoves       map[string]*PendingMove
+	generation         map[string]int64
+	sessionGeneration  map[string]int64
+	sendNowGeneration  map[string]int64
+	sendNowClaims      map[string]map[string]struct{}
+	autoRun            map[string]bool
+	autoRunIncarnation map[string]string
+	autoMergeOverrides map[QueueSessionIdentity]AutoMergeOverride
+	identities         map[string]QueueSessionIdentity
+	admissionReceipts  map[queueAdmissionKey]queueAdmissionReceipt
+	managedInputs      map[managedInputIDKey]ManagedInputReceipt
+	managedOccurrences map[managedInputOccurrenceKey]managedInputIDKey
+	statusGeneration   map[string]int64
+	authority          func(context.Context, string, string) (QueueSessionIdentity, error)
 }
 
 // NewMemoryRepository returns an in-memory Repository. Suitable for tests.
 func NewMemoryRepository() Repository {
 	return &memoryRepository{
-		entries:                make(map[string][]*QueuedMessage),
-		nextPosition:           make(map[string]int64),
-		pendingMoves:           make(map[string]*PendingMove),
-		generation:             make(map[string]int64),
-		sessionGeneration:      make(map[string]int64),
-		sendNowGeneration:      make(map[string]int64),
-		sendNowClaims:          make(map[string]map[string]struct{}),
-		autoRun:                make(map[string]bool),
-		autoRunIncarnation:     make(map[string]string),
-		autoMergeOverrides:     make(map[QueueSessionIdentity]AutoMergeOverride),
-		autoSortMergeOverrides: make(map[QueueSessionIdentity]AutoSortMergeOverride),
-		statusGeneration:       make(map[string]int64),
-		identities:             make(map[string]QueueSessionIdentity),
-		admissionReceipts:      make(map[queueAdmissionKey]queueAdmissionReceipt),
-		managedInputs:          make(map[managedInputIDKey]ManagedInputReceipt),
-		managedOccurrences:     make(map[managedInputOccurrenceKey]managedInputIDKey),
+		entries:            make(map[string][]*QueuedMessage),
+		nextPosition:       make(map[string]int64),
+		pendingMoves:       make(map[string]*PendingMove),
+		generation:         make(map[string]int64),
+		sessionGeneration:  make(map[string]int64),
+		sendNowGeneration:  make(map[string]int64),
+		sendNowClaims:      make(map[string]map[string]struct{}),
+		autoRun:            make(map[string]bool),
+		autoRunIncarnation: make(map[string]string),
+		autoMergeOverrides: make(map[QueueSessionIdentity]AutoMergeOverride),
+		statusGeneration:   make(map[string]int64),
+		identities:         make(map[string]QueueSessionIdentity),
+		admissionReceipts:  make(map[queueAdmissionKey]queueAdmissionReceipt),
+		managedInputs:      make(map[managedInputIDKey]ManagedInputReceipt),
+		managedOccurrences: make(map[managedInputOccurrenceKey]managedInputIDKey),
 	}
 }
 
@@ -95,7 +93,6 @@ func (r *memoryRepository) clearSessionStateLocked(sessionID string) {
 			delete(r.autoMergeOverrides, identity)
 		}
 	}
-	r.clearSortPolicyLocked(sessionID)
 }
 
 func (r *memoryRepository) bindIdentityLocked(identity QueueSessionIdentity) error {
@@ -174,10 +171,6 @@ func (r *memoryRepository) Snapshot(
 		copy := stored
 		override = &copy
 	}
-	var sortOverride *AutoSortMergeOverride
-	if stored, ok := r.autoSortMergeOverrides[identity]; ok {
-		sortOverride = &stored
-	}
 	var pendingMove *PendingMove
 	if stored := r.pendingMoves[identity.SessionID]; stored != nil {
 		copy := *stored
@@ -185,12 +178,11 @@ func (r *memoryRepository) Snapshot(
 	}
 	r.statusGeneration[identity.SessionID]++
 	return RepositorySnapshot{
-		Entries:               entries,
-		PendingMove:           pendingMove,
-		AutoRun:               autoRun,
-		AutoMergeOverride:     override,
-		AutoSortMergeOverride: sortOverride,
-		StatusGeneration:      r.statusGeneration[identity.SessionID],
+		Entries:           entries,
+		PendingMove:       pendingMove,
+		AutoRun:           autoRun,
+		AutoMergeOverride: override,
+		StatusGeneration:  r.statusGeneration[identity.SessionID],
 	}, nil
 }
 
@@ -456,14 +448,6 @@ func (r *memoryRepository) validateIdentityLocked(identity QueueSessionIdentity)
 }
 
 func (r *memoryRepository) validateAutoMergePolicyLocked(identity QueueSessionIdentity, policy AdmissionPolicy) error {
-	if policy.AutoSortMerge != nil {
-		override, exists := r.autoSortMergeOverrides[identity]
-		sorted := policy.AutoSortMerge
-		if (sorted.Source == AutoMergeSourceGlobal && exists) ||
-			(sorted.Source == AutoMergeSourceSession && (!exists || override.Enabled != sorted.Enabled || override.Revision != sorted.Revision)) {
-			return ErrAutoMergePolicyChanged
-		}
-	}
 	override, exists := r.autoMergeOverrides[identity]
 	switch policy.AutoMerge.Source {
 	case AutoMergeSourceGlobal:
@@ -2374,7 +2358,6 @@ func (r *memoryRepository) PurgeSession(_ context.Context, sessionID string) (in
 	}
 	delete(r.pendingMoves, sessionID)
 	delete(r.autoRun, sessionID)
-	r.clearSortPolicyLocked(sessionID)
 	r.sessionGeneration[sessionID]++
 	return removed, nil
 }
@@ -2475,7 +2458,6 @@ func (r *memoryRepository) transferSessionLocked(
 	r.setAutoRunLocked(destination, newSessionID, sourceAutoRun && destinationAutoRun)
 	delete(r.autoRun, oldSessionID)
 	delete(r.autoRunIncarnation, oldSessionID)
-	r.clearSortPolicyLocked(oldSessionID)
 	delete(r.identities, oldSessionID)
 	return nil
 }

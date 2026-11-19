@@ -174,36 +174,6 @@ function AutoMergeToggleFields({ enabled, onChange, disabled }: MergeToggleField
   );
 }
 
-function AutoSortMergeToggleFields({ enabled, onChange, disabled }: MergeToggleFieldsProps) {
-  const { t } = useTranslation();
-  const label = t("system:messageQueueAutoSortMergeToggleLabel");
-  return (
-    <SettingsRow
-      label={label}
-      description={t("settings:queueAutoSortMergeShort")}
-      controlId="message-queue-auto-sort-merge-enabled"
-      touchTarget="switch"
-      controlWrapperTestId="message-queue-auto-sort-merge-touch-target"
-      info={
-        <SettingsInfo label={label}>
-          {t("system:messageQueueAutoSortMergeDescription")}
-        </SettingsInfo>
-      }
-      control={
-        <Switch
-          id="message-queue-auto-sort-merge-enabled"
-          data-testid="message-queue-auto-sort-merge-enabled"
-          checked={enabled}
-          disabled={disabled}
-          onCheckedChange={onChange}
-          aria-label={label}
-          className="cursor-pointer disabled:cursor-not-allowed"
-        />
-      }
-    />
-  );
-}
-
 function MessageQueueLoadingState({ withinGroup }: { withinGroup: boolean }) {
   const { t } = useTranslation();
   const loadingContent = (
@@ -297,11 +267,6 @@ function MessageQueueSettingsReady({
           enabled={state.autoMergeDraft}
           onChange={state.setAutoMergeDraft}
           disabled={!state.isAdmin}
-        />
-        <AutoSortMergeToggleFields
-          enabled={state.autoMergeDraft && state.autoSortMergeDraft}
-          onChange={state.setAutoSortMergeDraft}
-          disabled={!state.isAdmin || !state.autoMergeDraft}
         />
       </CardContent>
     </>

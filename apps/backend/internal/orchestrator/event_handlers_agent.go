@@ -161,16 +161,6 @@ func queueStatusEventData(status *messagequeue.QueueStatus) map[string]interface
 	if status.AutoMergeRevision != nil {
 		data["auto_merge_revision"] = *status.AutoMergeRevision
 	}
-	data["auto_sort_merge_available"] = status.AutoSortMergeAvailable
-	if status.AutoSortMergeEnabled != nil {
-		data["auto_sort_merge_enabled"] = *status.AutoSortMergeEnabled
-	}
-	if status.AutoSortMergeSource != "" {
-		data["auto_sort_merge_source"] = status.AutoSortMergeSource
-	}
-	if status.AutoSortMergeRevision != nil {
-		data["auto_sort_merge_revision"] = *status.AutoSortMergeRevision
-	}
 	return data
 }
 

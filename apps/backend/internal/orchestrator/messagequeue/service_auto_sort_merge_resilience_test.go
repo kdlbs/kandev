@@ -24,62 +24,37 @@ func resilienceRepos() map[string]func(*testing.T) Repository {
 // across its own repository write.
 func TestAutoFoldInsideRepositoryDoesNotAcquireEditLeaseMutex(t *testing.T) {
 	for name, makeRepo := range resilienceRepos() {
-		for sortName, sortOn := range map[string]bool{"sort off": false, "sort on": true} {
-			t.Run(name+"/"+sortName, func(t *testing.T) {
-				ctx := context.Background()
-				repo := makeRepo(t)
-				identity := QueueSessionIdentity{TaskID: "task", SessionID: "session", SessionIncarnationID: "inc"}
-				seedQueueSessionIdentity(t, repo, identity)
-				service := NewService(repo, 10, logger.Default())
-				service.SetGlobalQueuePolicy(GlobalQueuePolicy{
-					AutoMerge:     AutoMergePolicy{Enabled: true},
-					AutoSortMerge: AutoSortMergePolicy{Enabled: sortOn},
-				})
-				require.NoError(t, repo.InsertForSession(ctx, identity, sortTestEntry("A1", "A"), 0))
-				source := sortTestEntry("A2", "A")
-				require.NoError(t, repo.InsertForSession(ctx, identity, source, 0))
-				policy := service.resolveAdmissionAutoMergePolicy(ctx, &identity, identity.SessionID)
-				require.NotNil(t, policy)
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := makeRepo(t)
+			identity := QueueSessionIdentity{TaskID: "task", SessionID: "session", SessionIncarnationID: "inc"}
+			seedQueueSessionIdentity(t, repo, identity)
+			service := NewService(repo, 10, logger.Default())
+			require.NoError(t, repo.InsertForSession(ctx, identity, sortTestEntry("A1", "A"), 0))
+			source := sortTestEntry("A2", "A")
+			require.NoError(t, repo.InsertForSession(ctx, identity, source, 0))
+			policy := service.resolveAdmissionAutoMergePolicy(ctx, &identity, identity.SessionID)
+			require.NotNil(t, policy)
 
-				service.editLeaseMu.Lock()
-				done := make(chan error, 1)
-				go func() {
-					_, merged, err := repo.(autoMergeAdmissionRepository).AutoMergeIntoAboveForSessionWithPolicy(ctx, identity, source.ID, *policy)
-					if err == nil && !merged {
-						err = errors.New("adjacent same-sender rows did not fold")
-					}
-					done <- err
-				}()
-				select {
-				case err := <-done:
-					service.editLeaseMu.Unlock()
-					require.NoError(t, err)
-				case <-time.After(5 * time.Second):
-					service.editLeaseMu.Unlock()
-					t.Fatal("repository fold waited on the service edit-lease mutex")
+			service.editLeaseMu.Lock()
+			done := make(chan error, 1)
+			go func() {
+				_, merged, err := repo.(autoMergeAdmissionRepository).AutoMergeIntoAboveForSessionWithPolicy(ctx, identity, source.ID, *policy)
+				if err == nil && !merged {
+					err = errors.New("adjacent same-sender rows did not fold")
 				}
-			})
-		}
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				service.editLeaseMu.Unlock()
+				require.NoError(t, err)
+			case <-time.After(5 * time.Second):
+				service.editLeaseMu.Unlock()
+				t.Fatal("repository fold waited on the service edit-lease mutex")
+			}
+		})
 	}
-}
-
-func TestSnapshotResolvesSortPolicyWhenAutoMergeOverrideIsUnreadable(t *testing.T) {
-	ctx := context.Background()
-	repo := newTestSQLiteRepo(t).(*sqliteRepository)
-	identity := QueueSessionIdentity{TaskID: "task", SessionID: "session", SessionIncarnationID: "inc"}
-	seedQueueSessionIdentity(t, repo, identity)
-	_, err := repo.SetAutoSortMergeOverride(ctx, identity, true)
-	require.NoError(t, err)
-	_, err = repo.db.Exec(`UPDATE queue_session_state SET auto_merge_override = 'unreadable' WHERE session_id = 'session'`)
-	require.NoError(t, err)
-
-	status, err := NewService(repo, 10, logger.Default()).Snapshot(ctx, identity)
-	require.NoError(t, err)
-	require.False(t, status.AutoMergeAvailable)
-	require.True(t, status.AutoSortMergeAvailable)
-	require.Equal(t, AutoMergeSourceSession, status.AutoSortMergeSource)
-	require.NotNil(t, status.AutoSortMergeEnabled)
-	require.True(t, *status.AutoSortMergeEnabled)
 }
 
 func TestAdmissionUsesExplicitSessionPoliciesWhenGlobalLoaderFails(t *testing.T) {
@@ -87,7 +62,7 @@ func TestAdmissionUsesExplicitSessionPoliciesWhenGlobalLoaderFails(t *testing.T)
 		return GlobalQueuePolicy{}, errGlobalSettingsUnavailable
 	}
 	for name, makeRepo := range resilienceRepos() {
-		t.Run(name+"/adjacent with sort inherited", func(t *testing.T) {
+		t.Run(name+"/adjacent with explicit auto-merge", func(t *testing.T) {
 			ctx := context.Background()
 			repo := makeRepo(t)
 			identity := QueueSessionIdentity{TaskID: "task", SessionID: "session", SessionIncarnationID: "inc"}
@@ -105,15 +80,13 @@ func TestAdmissionUsesExplicitSessionPoliciesWhenGlobalLoaderFails(t *testing.T)
 			require.NoError(t, err)
 			require.Equal(t, []string{"first\n\nsecond"}, sortTestContents(rows))
 		})
-		t.Run(name+"/sorted with both explicit", func(t *testing.T) {
+		t.Run(name+"/sorted with explicit auto-merge", func(t *testing.T) {
 			ctx := context.Background()
 			repo := makeRepo(t)
 			identity := QueueSessionIdentity{TaskID: "task", SessionID: "session", SessionIncarnationID: "inc"}
 			seedQueueSessionIdentity(t, repo, identity)
 			service := NewService(repo, 2, logger.Default())
 			_, err := service.SetSessionAutoMerge(ctx, identity, true)
-			require.NoError(t, err)
-			_, err = service.SetSessionAutoSortMerge(ctx, identity, true)
 			require.NoError(t, err)
 			require.NoError(t, repo.InsertForSession(ctx, identity, sortTestEntry("A1", "A"), 0))
 			require.NoError(t, repo.InsertForSession(ctx, identity, sortTestEntry("B1", "B"), 0))

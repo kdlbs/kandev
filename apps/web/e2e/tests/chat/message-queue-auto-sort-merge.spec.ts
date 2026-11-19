@@ -1,7 +1,7 @@
 import { test } from "../../fixtures/test-base";
 import { exerciseAutoSortMergeQueue } from "../../helpers/message-queue-auto-sort-merge";
 
-test("inherited sorted admission, session compaction, and incompatible latest sender", async ({
+test("default Auto-merge sorts sender messages, session enable compacts, and global changes do not", async ({
   testPage,
   apiClient,
   seedData,

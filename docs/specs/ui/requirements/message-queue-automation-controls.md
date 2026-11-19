@@ -10,9 +10,9 @@ owners:
 
 ## Overview
 
-The expanded queue panel presents queue progress and all three session
-automation policies in one responsive header. Auto-run retains its
-backend-owned behavior; Auto-merge and Auto-sort-merge expose session policies.
+The expanded queue panel presents queue progress and its two session automation
+policies in one responsive header. Auto-run retains backend-owned delivery
+behavior; Auto-merge controls adjacent folding and sorted agent-sender folding.
 
 This requirement supersedes `REQ-UI-MESSAGE-QUEUE-RUN-001` when activated. It
 preserves that requirement's queue execution behavior while replacing its
@@ -29,7 +29,7 @@ on desktop and mobile.
 
 - **AC-UI-MESSAGE-QUEUE-AUTOMATION-CONTROLS-001.1:** When the queue panel is
   expanded, one responsive header composition shall contain the queue summary,
-  labeled Auto-run, Auto-merge, and Auto-sort-merge switch pills, and the existing queue actions.
+  labeled Auto-run and Auto-merge switch pills, and the existing queue actions.
   Layouts with enough width shall keep the groups on the first visual line;
   narrower layouts may wrap groups but shall not render a dedicated second
   Auto-run row.

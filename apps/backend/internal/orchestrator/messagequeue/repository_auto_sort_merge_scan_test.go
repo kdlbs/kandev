@@ -30,9 +30,6 @@ func TestSortedAdmissionDoesNotDecodeBacklogPayloads(t *testing.T) {
 				capacity = 3
 			}
 			service := NewService(repo, capacity, logger.Default())
-			service.SetGlobalQueuePolicy(GlobalQueuePolicy{
-				AutoMerge: AutoMergePolicy{Enabled: true}, AutoSortMerge: AutoSortMergePolicy{Enabled: true},
-			})
 
 			for _, sender := range []string{"A", "B"} {
 				_, err = service.QueueMessageWithMetadataForSession(ctx, identity, sender+"2", "", QueuedByAgent, false, nil,

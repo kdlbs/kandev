@@ -247,10 +247,9 @@ func (s *Service) SetAutoMergeEnabled(enabled bool) {
 	s.SetGlobalQueuePolicy(current)
 }
 
-// SetGlobalQueuePolicy atomically publishes both global policy pairs.
+// SetGlobalQueuePolicy atomically publishes the global Auto-merge snapshot.
 func (s *Service) SetGlobalQueuePolicy(policy GlobalQueuePolicy) {
 	policy.AutoMerge.Source = AutoMergeSourceGlobal
-	policy.AutoSortMerge.Source = AutoMergeSourceGlobal
 	s.globalPolicy.Store(&policy)
 }
 
@@ -268,8 +267,7 @@ func (s *Service) globalQueuePolicy() GlobalQueuePolicy {
 		return *policy
 	}
 	return GlobalQueuePolicy{
-		AutoMerge:     AutoMergePolicy{Enabled: true, Source: AutoMergeSourceGlobal},
-		AutoSortMerge: AutoSortMergePolicy{Source: AutoMergeSourceGlobal},
+		AutoMerge: AutoMergePolicy{Enabled: true, Source: AutoMergeSourceGlobal},
 	}
 }
 
@@ -308,7 +306,7 @@ func (s *Service) SetSessionAutoMerge(
 	identity QueueSessionIdentity,
 	enabled bool,
 ) (SessionPolicyResult, error) {
-	return s.setSessionPolicy(ctx, identity, enabled, false)
+	return s.setSessionPolicy(ctx, identity, enabled)
 }
 
 // WithSessionAdmission runs fn under the per-session queue admission lock.
@@ -1386,8 +1384,8 @@ func (s *Service) resolveAdmissionAutoMergePolicy(
 			return nil
 		}
 		return &AdmissionPolicy{
-			AutoMerge: global.AutoMerge, AutoSortMerge: &global.AutoSortMerge,
-			leased: s.sessionEditLeases(sessionID), log: s.logger,
+			AutoMerge: global.AutoMerge,
+			leased:    s.sessionEditLeases(sessionID), log: s.logger,
 		}
 	}
 	mergeOverride, err := s.repo.GetAutoMergeOverride(ctx, *identity)
@@ -1399,21 +1397,10 @@ func (s *Service) resolveAdmissionAutoMergePolicy(
 		s.logger.Warn("queue policy unavailable; admitting separate message", zap.String("session_id", sessionID), zap.Error(globalErr))
 		return nil
 	}
-	policy := &AdmissionPolicy{
+	return &AdmissionPolicy{
 		AutoMerge: resolveAutoMergeOverride(mergeOverride, global.AutoMerge),
 		leased:    s.sessionEditLeases(sessionID), log: s.logger,
 	}
-	sortOverride, err := s.repo.GetAutoSortMergeOverride(ctx, *identity)
-	switch {
-	case err != nil:
-		s.logger.Warn("automatic sort-merge policy unavailable; preserving adjacent automatic merge", zap.String("session_id", sessionID), zap.Error(err))
-	case sortOverride == nil && globalErr != nil:
-		s.logger.Warn("global sort-merge policy unavailable; preserving adjacent automatic merge", zap.String("session_id", sessionID), zap.Error(globalErr))
-	default:
-		resolved := resolveAutoSortMergeOverride(sortOverride, global.AutoSortMerge)
-		policy.AutoSortMerge = &resolved
-	}
-	return policy
 }
 
 func (s *Service) autoMergeCandidateAtWorkflowEntry(
@@ -3547,13 +3534,6 @@ func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (
 		status.AutoMergeEnabled = &policy.Enabled
 		status.AutoMergeSource = policy.Source
 		status.AutoMergeRevision = &policy.Revision
-	}
-	if snapshot.AutoSortMergeError == nil && (snapshot.AutoSortMergeOverride != nil || globalErr == nil) {
-		policy := resolveAutoSortMergeOverride(snapshot.AutoSortMergeOverride, global.AutoSortMerge)
-		status.AutoSortMergeAvailable = true
-		status.AutoSortMergeEnabled = &policy.Enabled
-		status.AutoSortMergeSource = policy.Source
-		status.AutoSortMergeRevision = &policy.Revision
 	}
 	return status, nil
 }

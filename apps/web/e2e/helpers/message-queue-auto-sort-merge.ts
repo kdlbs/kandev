@@ -36,7 +36,7 @@ const bodies = {
   b2: "ASM B2",
   b3: "ASM B3",
 };
-const initial = [bodies.a1, bodies.b1, bodies.a2];
+const initial = [`${bodies.a1}\n\n${bodies.a2}`, bodies.b1];
 const combined = (keys: Array<keyof typeof bodies>) => keys.map((key) => bodies[key]).join("\n\n");
 const peerMessage = (taskId: string, prompt: string) =>
   `e2e:mcp:kandev:message_task_kandev(${JSON.stringify({ task_id: taskId, prompt })})`;
@@ -60,7 +60,7 @@ async function expectQueue(
 }
 
 async function seedQueue(options: Options, gates: QueueFixture["gates"]): Promise<QueueFixture> {
-  const { apiClient, seedData, mobile } = options;
+  const { apiClient, seedData } = options;
   const taskOptions = {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
@@ -76,7 +76,6 @@ async function seedQueue(options: Options, gates: QueueFixture["gates"]): Promis
   expect(parent.session_id).toBeTruthy();
   const identity = await apiClient.getQueueSessionIdentity(parent.id, parent.session_id!);
   await apiClient.setQueueAutoRun(identity, false);
-  if (mobile) await apiClient.setQueueAutoSortMerge(identity, false);
   const childOptions = {
     ...taskOptions,
     parent_id: parent.id,
@@ -134,18 +133,11 @@ async function openQueue(page: Page, identity: QueueSessionIdentityInput) {
   return panel;
 }
 
-async function togglePolicy(
-  panel: Locator,
-  watcher: WsWatcher,
-  mobile: boolean,
-  kind: "merge" | "sort",
-  enabled: boolean,
-) {
-  const pill = panel.getByTestId(kind === "sort" ? "queue-auto-sort-merge" : "queue-auto-merge");
+async function togglePolicy(panel: Locator, watcher: WsWatcher, mobile: boolean, enabled: boolean) {
+  const pill = panel.getByTestId("queue-auto-merge");
+  await expect(pill).toHaveCount(1);
   await expect(pill).toBeEnabled();
-  const response = watcher.waitForResponse(
-    `message.queue.auto_${kind === "sort" ? "sort_merge" : "merge"}.set`,
-  );
+  const response = watcher.waitForResponse("message.queue.auto_merge.set");
   await (mobile ? pill.tap() : pill.click());
   await response;
   await expect(pill).toBeChecked({ checked: enabled });
@@ -159,27 +151,14 @@ async function expectRows(panel: Locator, expected: string[]) {
   }
 }
 
-async function checkAdmissions(options: Options, fixture: QueueFixture, watcher: WsWatcher) {
-  const { page, apiClient, mobile } = options;
+async function checkAdmissions(options: Options, fixture: QueueFixture) {
+  const { page, apiClient } = options;
   const { identity, gates } = fixture;
-  let panel = await openQueue(page, identity);
+  const panel = await openQueue(page, identity);
+  await expect(panel.getByTestId("queue-auto-merge")).toBeChecked();
   await expectRows(panel, initial);
-  await requestMessageQueueSettings(apiClient, "PATCH", { auto_sort_merge_enabled: true });
-  await expectQueue(apiClient, identity, initial);
-  panel = await openQueue(page, identity);
-  const sort = panel.getByTestId("queue-auto-sort-merge");
-  if (mobile) {
-    await expect(sort).not.toBeChecked();
-    await togglePolicy(panel, watcher, mobile, "sort", true);
-    await expectQueue(apiClient, identity, [combined(["a1", "a2"]), bodies.b1]);
-  } else {
-    await expect(sort).toBeChecked();
-    await expectRows(panel, initial);
-  }
   await gates.b2.release();
-  const expected = mobile
-    ? [combined(["a1", "a2"]), combined(["b1", "b2"])]
-    : [bodies.a1, combined(["b1", "b2"]), bodies.a2];
+  const expected = [combined(["a1", "a2"]), combined(["b1", "b2"])];
   await expectQueue(apiClient, identity, expected);
   await expectRows(panel, expected);
   return panel;
@@ -193,24 +172,22 @@ async function checkCompaction(
 ) {
   const { apiClient, page, mobile } = options;
   const { identity, gates } = fixture;
-  await togglePolicy(panel, watcher, mobile, "sort", false);
+  await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: false });
   await gates.b3.release();
-  await expectQueue(
-    apiClient,
-    identity,
-    mobile
-      ? [combined(["a1", "a2"]), combined(["b1", "b2", "b3"])]
-      : [bodies.a1, combined(["b1", "b2"]), bodies.a2, bodies.b3],
-  );
+  await expectQueue(apiClient, identity, [
+    combined(["a1", "a2"]),
+    combined(["b1", "b2"]),
+    bodies.b3,
+  ]);
   await gates.a3.release();
-  await expectQueue(
-    apiClient,
-    identity,
-    mobile
-      ? [combined(["a1", "a2"]), combined(["b1", "b2", "b3"]), bodies.a3]
-      : [bodies.a1, combined(["b1", "b2"]), bodies.a2, bodies.b3, bodies.a3],
-  );
-  await togglePolicy(panel, watcher, mobile, "sort", true);
+  const separate = [combined(["a1", "a2"]), combined(["b1", "b2"]), bodies.b3, bodies.a3];
+  await expectQueue(apiClient, identity, separate);
+  await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: true });
+  await expectQueue(apiClient, identity, separate);
+  panel = await openQueue(page, identity);
+  await expectRows(panel, separate);
+  await togglePolicy(panel, watcher, mobile, false);
+  await togglePolicy(panel, watcher, mobile, true);
   const compacted = [combined(["a1", "a2", "a3"]), combined(["b1", "b2", "b3"])];
   await expectQueue(apiClient, identity, compacted);
   await expectRows(panel, compacted);
@@ -218,55 +195,15 @@ async function checkCompaction(
   const admitted = [combined(["a1", "a2", "a3", "a4"]), compacted[1]];
   await expectQueue(apiClient, identity, admitted);
   await expectRows(panel, admitted);
-  await togglePolicy(panel, watcher, mobile, "merge", false);
-  const sort = panel.getByTestId("queue-auto-sort-merge");
-  await expect(sort).toBeDisabled();
-  await expect(sort).not.toBeChecked();
-  if (mobile) await expectTouchDependencyHelp(page, panel);
-  await togglePolicy(panel, watcher, mobile, "merge", true);
-  await expect(sort).toBeChecked();
   panel = await openQueue(page, identity);
-  await expect(panel.getByTestId("queue-auto-sort-merge")).toBeChecked();
+  await expect(panel.getByTestId("queue-auto-merge")).toBeChecked();
   await expectRows(panel, admitted);
   expect((await apiClient.getQueueStatus(identity)).auto_run).toBe(false);
   return { panel, admitted };
 }
 
-async function expectTouchDependencyHelp(page: Page, panel: Locator) {
-  const help = panel.getByTestId("queue-auto-sort-merge-help");
-  const box = await help.boundingBox();
-  expect(box?.width).toBeGreaterThanOrEqual(44);
-  expect(box?.height).toBeGreaterThanOrEqual(44);
-  await help.tap();
-  const drawer = page.getByRole("dialog");
-  await expect(drawer).toContainText("Requires Auto-merge.");
-  await page.locator('[data-slot="drawer-overlay"][data-state="open"]').tap({
-    position: { x: 16, y: 16 },
-  });
-  await expect(drawer).toBeHidden();
-  await help.focus();
-  await page.keyboard.press("Enter");
-  await expect(drawer).toBeVisible();
-  await expect
-    .poll(() => drawer.evaluate((node) => node.contains(document.activeElement)))
-    .toBe(true);
-  for (const key of ["Tab", "Shift+Tab", "Tab"]) {
-    await page.keyboard.press(key);
-    expect(await drawer.evaluate((node) => node.contains(document.activeElement))).toBe(true);
-  }
-  await drawer.getByTestId("queue-auto-sort-merge-help-close").tap();
-  await expect(drawer).toBeHidden();
-  await expect(help).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(drawer).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(drawer).toBeHidden();
-  await expect(help).toBeFocused();
-  await expect(panel.getByTestId("queue-auto-merge")).toBeVisible();
-}
-
 async function checkMobileTargets(page: Page, panel: Locator) {
-  for (const id of ["queue-auto-run", "queue-auto-merge", "queue-auto-sort-merge"]) {
+  for (const id of ["queue-auto-run", "queue-auto-merge"]) {
     const target = panel.getByTestId(id).locator("xpath=..");
     const box = await target.boundingBox();
     expect(box?.width).toBeGreaterThanOrEqual(44);
@@ -289,13 +226,8 @@ export async function exerciseAutoSortMergeQueue(options: Options) {
     b3: gate("B3"),
   };
   try {
-    await requestMessageQueueSettings(apiClient, "PATCH", {
-      merge_enabled: true,
-      auto_merge_enabled: true,
-      auto_sort_merge_enabled: false,
-    });
     const fixture = await seedQueue(options, gates);
-    let panel = await checkAdmissions(options, fixture, watcher);
+    let panel = await checkAdmissions(options, fixture);
     const result = await checkCompaction(options, fixture, panel, watcher);
     panel = result.panel;
     if (mobile) await checkMobileTargets(page, panel);

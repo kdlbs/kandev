@@ -214,7 +214,6 @@ export interface MessageQueueSettingsValue {
   max_per_session: number;
   merge_enabled: boolean;
   auto_merge_enabled: boolean;
-  auto_sort_merge_enabled: boolean;
 }
 
 /** Partial PATCH payload: omitted fields are left unchanged server-side. */

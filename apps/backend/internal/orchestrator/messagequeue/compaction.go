@@ -2,9 +2,8 @@ package messagequeue
 
 // SessionPolicyChange changes exactly one session preference.
 type SessionPolicyChange struct {
-	AutoSortMerge bool
-	Enabled       bool
-	Leased        map[string]struct{}
+	Enabled bool
+	Leased  map[string]struct{}
 }
 
 type compactionRow struct {

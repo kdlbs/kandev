@@ -161,23 +161,22 @@ const (
 	ActionOrchestratorStop   = "orchestrator.stop"
 
 	// Message Queue actions
-	ActionMessageQueueAdd              = "message.queue.add"
-	ActionMessageQueueCancel           = "message.queue.cancel" // Clears the entire queue for a session
-	ActionMessageQueueGet              = "message.queue.get"
-	ActionMessageQueueUpdate           = "message.queue.update"
-	ActionMessageQueueEditBegin        = "message.queue.edit.begin"
-	ActionMessageQueueEditRenew        = "message.queue.edit.renew"
-	ActionMessageQueueEditEnd          = "message.queue.edit.end"
-	ActionMessageQueueAppend           = "message.queue.append"
-	ActionMessageQueueDrain            = "message.queue.drain"               // Dispatch one queued entry now when the session is promptable
-	ActionMessageQueueSendNow          = "message.queue.send_now"            // Interrupt and replace the active turn with an exact queue selection
-	ActionMessageQueueAutoRunSet       = "message.queue.auto_run.set"        // Persist automatic queue processing and optionally dispatch the head
-	ActionMessageQueueAutoMergeSet     = "message.queue.auto_merge.set"      // Persist a per-session automatic-merge override
-	ActionMessageQueueAutoSortMergeSet = "message.queue.auto_sort_merge.set" // Persist a per-session sorted-merge preference
-	ActionMessageQueueRemove           = "message.queue.remove"              // Delete a single entry by id
-	ActionMessageQueueMerge            = "message.queue.merge"               // Fold an entry into the entry above it
-	ActionMessageQueueReorder          = "message.queue.reorder"             // Rewrite the visible pending order for a session
-	ActionMessageQueueStatusChanged    = "message.queue.status_changed"      // Notification: queue status changed
+	ActionMessageQueueAdd           = "message.queue.add"
+	ActionMessageQueueCancel        = "message.queue.cancel" // Clears the entire queue for a session
+	ActionMessageQueueGet           = "message.queue.get"
+	ActionMessageQueueUpdate        = "message.queue.update"
+	ActionMessageQueueEditBegin     = "message.queue.edit.begin"
+	ActionMessageQueueEditRenew     = "message.queue.edit.renew"
+	ActionMessageQueueEditEnd       = "message.queue.edit.end"
+	ActionMessageQueueAppend        = "message.queue.append"
+	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
+	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
+	ActionMessageQueueAutoRunSet    = "message.queue.auto_run.set"   // Persist automatic queue processing and optionally dispatch the head
+	ActionMessageQueueAutoMergeSet  = "message.queue.auto_merge.set" // Persist a per-session automatic-merge override
+	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
+	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
+	ActionMessageQueueReorder       = "message.queue.reorder"        // Rewrite the visible pending order for a session
+	ActionMessageQueueStatusChanged = "message.queue.status_changed" // Notification: queue status changed
 
 	// Workflow template/step actions
 	ActionWorkflowTemplateList = "workflow.template.list"

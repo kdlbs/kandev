@@ -260,10 +260,6 @@ export type QueueMeta = {
   autoMergeEnabled?: boolean;
   autoMergeSource?: "global" | "session";
   autoMergeRevision?: number;
-  autoSortMergeAvailable?: boolean;
-  autoSortMergeEnabled?: boolean;
-  autoSortMergeSource?: "global" | "session";
-  autoSortMergeRevision?: number;
 };
 
 export type QueueMetaUpdateOptions = {
@@ -285,10 +281,6 @@ export type QueueStatus = {
   auto_merge_enabled?: boolean;
   auto_merge_source?: "global" | "session";
   auto_merge_revision?: number;
-  auto_sort_merge_available?: boolean;
-  auto_sort_merge_enabled?: boolean;
-  auto_sort_merge_source?: "global" | "session";
-  auto_sort_merge_revision?: number;
 };
 export type QueueOperationToken = {
   sessionIncarnationId: string;

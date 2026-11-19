@@ -24,13 +24,14 @@ func TestCompactionPreservesLeasedSourceAgainstCompatiblePredecessor(t *testing.
 				require.NoError(t, repo.InsertForSession(ctx, identity, first, 0))
 				require.NoError(t, repo.InsertForSession(ctx, identity, second, 0))
 				service := NewService(repo, 10, logger.Default())
+				service.SetAutoMergeEnabled(false)
 				var lease *QueueEditLease
 				if leaseSource {
 					var err error
 					lease, err = service.BeginEdit(ctx, "session", second.ID, "connection")
 					require.NoError(t, err)
 				}
-				result, err := service.SetSessionAutoSortMerge(ctx, identity, true)
+				result, err := service.SetSessionAutoMerge(ctx, identity, true)
 				require.NoError(t, err)
 				after, err := repo.ListBySession(ctx, "session")
 				require.NoError(t, err)
@@ -66,9 +67,10 @@ func TestCompactionCrossesLeasedOtherSenderButNotHiddenBarrier(t *testing.T) {
 				require.NoError(t, repo.InsertForSession(ctx, identity, row, 0))
 			}
 			service := NewService(repo, 10, logger.Default())
+			service.SetAutoMergeEnabled(false)
 			_, err := service.BeginEdit(ctx, "session", user.ID, "connection")
 			require.NoError(t, err)
-			result, err := service.SetSessionAutoSortMerge(ctx, identity, true)
+			result, err := service.SetSessionAutoMerge(ctx, identity, true)
 			require.NoError(t, err)
 			require.Equal(t, 1, result.CompactedCount)
 			after, err := repo.ListBySession(ctx, "session")
@@ -100,10 +102,11 @@ func TestCompactionWriteFailureRollsBackPolicyAndQueue(t *testing.T) {
 			_, err := repo.db.Exec(trigger)
 			require.NoError(t, err)
 			service := NewService(repo, 10, logger.Default())
-			_, err = service.SetSessionAutoSortMerge(ctx, identity, true)
+			service.SetAutoMergeEnabled(false)
+			_, err = service.SetSessionAutoMerge(ctx, identity, true)
 			require.Error(t, err)
 			require.Equal(t, before, autoQueueSnapshot(t, repo, "session"))
-			override, err := repo.GetAutoSortMergeOverride(ctx, identity)
+			override, err := repo.GetAutoMergeOverride(ctx, identity)
 			require.NoError(t, err)
 			require.Nil(t, override)
 		})

@@ -43,13 +43,11 @@ const queue: MessageQueueSettingsResponse = {
     max_per_session: 0,
     merge_enabled: true,
     auto_merge_enabled: true,
-    auto_sort_merge_enabled: false,
   },
   effective: {
     max_per_session: 0,
     merge_enabled: true,
     auto_merge_enabled: true,
-    auto_sort_merge_enabled: false,
     source: "default",
     locked: false,
   },

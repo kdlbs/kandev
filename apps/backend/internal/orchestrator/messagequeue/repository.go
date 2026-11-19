@@ -5,14 +5,12 @@ import "context"
 // RepositorySnapshot is one identity-validated queue/state read. A policy-only
 // failure preserves independently readable queue entries and Auto-run state.
 type RepositorySnapshot struct {
-	Entries               []QueuedMessage
-	PendingMove           *PendingMove
-	AutoRun               bool
-	AutoMergeOverride     *AutoMergeOverride
-	AutoMergeError        error
-	AutoSortMergeOverride *AutoSortMergeOverride
-	AutoSortMergeError    error
-	StatusGeneration      int64
+	Entries           []QueuedMessage
+	PendingMove       *PendingMove
+	AutoRun           bool
+	AutoMergeOverride *AutoMergeOverride
+	AutoMergeError    error
+	StatusGeneration  int64
 }
 
 // Repository abstracts persistent storage of queued messages and pending moves.
@@ -129,8 +127,6 @@ type Repository interface {
 	// SetAutoMergeOverride writes an explicit value and advances its session revision.
 	SetAutoMergeOverride(ctx context.Context, identity QueueSessionIdentity, enabled bool) (AutoMergeOverride, error)
 
-	GetAutoSortMergeOverride(ctx context.Context, identity QueueSessionIdentity) (*AutoSortMergeOverride, error)
-	SetAutoSortMergeOverride(ctx context.Context, identity QueueSessionIdentity, enabled bool) (AutoSortMergeOverride, error)
 	SetSessionPolicyAndCompact(ctx context.Context, identity QueueSessionIdentity, change SessionPolicyChange, global GlobalQueuePolicy) (SessionPolicyResult, error)
 
 	// PauseAutoRunIfPending atomically persists OFF only when at least one

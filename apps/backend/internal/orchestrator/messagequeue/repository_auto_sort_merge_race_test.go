@@ -32,7 +32,7 @@ func newSortPolicyRaceRepositories(t *testing.T, backend string) (Repository, Re
 }
 
 // @covers AC-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001.9, AC-UI-MESSAGE-QUEUE-AUTO-SORT-MERGE-001.10
-func TestAutoSortMergePolicyAndCompactionRaceAcrossConnections(t *testing.T) {
+func TestAutoMergePolicyAndCompactionRaceAcrossConnections(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, enable := range []bool{false, true} {
 			name := map[bool]string{false: "disable", true: "enable-and-compact"}[enable]
@@ -58,7 +58,7 @@ func TestAutoSortMergePolicyAndCompactionRaceAcrossConnections(t *testing.T) {
 				release := sync.OnceFunc(func() { close(paused.release) })
 				defer release()
 				queue := NewService(paused, 10, logger.Default())
-				global := GlobalQueuePolicy{AutoMerge: AutoMergePolicy{Enabled: true}, AutoSortMerge: AutoSortMergePolicy{Enabled: !enable}}
+				global := GlobalQueuePolicy{AutoMerge: AutoMergePolicy{Enabled: !enable}}
 				queue.SetGlobalQueuePolicy(global)
 				writer := NewService(second, 10, logger.Default())
 				writer.SetGlobalQueuePolicy(global)
@@ -72,9 +72,9 @@ func TestAutoSortMergePolicyAndCompactionRaceAcrossConnections(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal("admission did not capture the pre-write policy")
 				}
-				result, err := writer.SetSessionAutoSortMerge(ctx, identity, enable)
+				result, err := writer.SetSessionAutoMerge(ctx, identity, enable)
 				require.NoError(t, err)
-				require.Equal(t, enable, result.AutoSortMerge.Enabled)
+				require.Equal(t, enable, result.AutoMerge.Enabled)
 				if enable {
 					require.Equal(t, 1, result.CompactedCount)
 				} else {

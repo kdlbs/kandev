@@ -31,11 +31,10 @@ func Resolve(configured *Settings, environment Environment, startup ...Configura
 	resolution := Resolution{Response: Response{
 		Settings: settings,
 		Effective: Effective{
-			MaxPerSession:        settings.MaxPerSession,
-			Source:               source,
-			MergeEnabled:         settings.MergeEnabled,
-			AutoMergeEnabled:     settings.AutoMergeEnabled,
-			AutoSortMergeEnabled: settings.AutoSortMergeEnabled,
+			MaxPerSession:    settings.MaxPerSession,
+			Source:           source,
+			MergeEnabled:     settings.MergeEnabled,
+			AutoMergeEnabled: settings.AutoMergeEnabled,
 		},
 	}}
 	raw := strings.TrimSpace(environment.Value)
@@ -51,12 +50,11 @@ func Resolve(configured *Settings, environment Environment, startup ...Configura
 		value = 0
 	}
 	resolution.Effective = Effective{
-		MaxPerSession:        value,
-		Source:               SourceEnvironment,
-		Locked:               true,
-		MergeEnabled:         settings.MergeEnabled,
-		AutoMergeEnabled:     settings.AutoMergeEnabled,
-		AutoSortMergeEnabled: settings.AutoSortMergeEnabled,
+		MaxPerSession:    value,
+		Source:           SourceEnvironment,
+		Locked:           true,
+		MergeEnabled:     settings.MergeEnabled,
+		AutoMergeEnabled: settings.AutoMergeEnabled,
 	}
 	return resolution, nil
 }
@@ -66,12 +64,11 @@ func resolveConfiguration(resolution Resolution, configuration Configuration) Re
 		return resolution
 	}
 	resolution.Effective = Effective{
-		MaxPerSession:        configuration.Value,
-		Source:               SourceConfiguration,
-		Locked:               true,
-		MergeEnabled:         resolution.Settings.MergeEnabled,
-		AutoMergeEnabled:     resolution.Settings.AutoMergeEnabled,
-		AutoSortMergeEnabled: resolution.Settings.AutoSortMergeEnabled,
+		MaxPerSession:    configuration.Value,
+		Source:           SourceConfiguration,
+		Locked:           true,
+		MergeEnabled:     resolution.Settings.MergeEnabled,
+		AutoMergeEnabled: resolution.Settings.AutoMergeEnabled,
 	}
 	return resolution
 }

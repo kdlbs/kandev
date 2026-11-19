@@ -124,7 +124,7 @@ function useQueueActions({
     finishQueueOperation,
     refetch,
   );
-  const { setAutoRun, setAutoMerge, setAutoSortMerge } = useQueueAutomationActions({
+  const { setAutoRun, setAutoMerge } = useQueueAutomationActions({
     identity,
     beginQueueOperation,
     finishQueueOperation,
@@ -158,7 +158,6 @@ function useQueueActions({
     sendEntryNow,
     setAutoRun,
     setAutoMerge,
-    setAutoSortMerge,
     editEntry,
     removeEntry,
     mergeEntry,
@@ -501,8 +500,6 @@ function queueSummary(meta: QueueMeta | undefined, entries: QueuedMessage[]) {
       autoRun: true,
       autoMerge: false,
       autoMergeAvailable: false,
-      autoSortMerge: false,
-      autoSortMergeAvailable: false,
     };
   }
   return {
@@ -513,8 +510,6 @@ function queueSummary(meta: QueueMeta | undefined, entries: QueuedMessage[]) {
     autoRun: meta.autoRun ?? true,
     autoMerge: meta.autoMergeEnabled ?? false,
     autoMergeAvailable: meta.autoMergeAvailable ?? false,
-    autoSortMerge: meta.autoSortMergeEnabled ?? false,
-    autoSortMergeAvailable: meta.autoSortMergeAvailable ?? false,
   };
 }
 
@@ -538,7 +533,6 @@ export function useQueue(sessionId: string | null, options: { detailActive?: boo
     clearAll,
     sendEntryNow,
     setAutoMerge,
-    setAutoSortMerge,
     setAutoRun,
     editEntry,
     removeEntry,
@@ -569,7 +563,6 @@ export function useQueue(sessionId: string | null, options: { detailActive?: boo
     sendEntryNow,
     setAutoRun,
     setAutoMerge,
-    setAutoSortMerge,
     editEntry,
     removeEntry,
     mergeEntry,

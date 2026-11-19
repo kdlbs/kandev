@@ -1,10 +1,5 @@
 import { useCallback } from "react";
-import {
-  sendQueuedNow,
-  setQueueAutoRun,
-  setQueueAutoMerge,
-  setQueueAutoSortMerge,
-} from "@/lib/api/domains/queue-api";
+import { sendQueuedNow, setQueueAutoRun, setQueueAutoMerge } from "@/lib/api/domains/queue-api";
 import type { QueueSessionIdentity } from "@/lib/api/domains/queue-api";
 import type { SessionSlice } from "@/lib/state/slices/session/types";
 import type { QueueRefetch } from "./use-queue-refetch";
@@ -99,12 +94,5 @@ export function useQueueAutomationActions({
     refetch,
     setQueueAutoMerge,
   );
-  const setAutoSortMerge = useBooleanQueueAction(
-    identity,
-    beginQueueOperation,
-    finishQueueOperation,
-    refetch,
-    setQueueAutoSortMerge,
-  );
-  return { setAutoRun, setAutoMerge, setAutoSortMerge };
+  return { setAutoRun, setAutoMerge };
 }
