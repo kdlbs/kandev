@@ -122,9 +122,11 @@ after the pinned commit.
   fallback. The check itself reports OMP's error.
   - Global files: `<agentDir>/config.yml` and `<agentDir>/config.yaml`, which
     are upstream `MAIN_CONFIG_FILENAMES`.
-  - Overlay files: `PI_CONFIG_FILES` split on the OS path-list separator. A
-    leading `~` expands to home, and relative paths resolve against the
-    working directory.
+  - Overlay files: `PI_CONFIG_FILES` split on the OS path-list separator,
+    with empty entries dropped and others kept verbatim, whitespace
+    included. Each entry is expanded like upstream `expandTilde`: `~`,
+    `~/`, `~\`, and a bare `~name` meaning `<home>/name`. Relative paths
+    resolve against the working directory.
   - Project files: the known project candidates are `<cwd>/.omp/config.yml`,
     `<cwd>/.omp/settings.json`, `<cwd>/.claude/settings.json`, and
     `<cwd>/.claude/settings.yml`. They are always fingerprinted individually.
@@ -333,6 +335,17 @@ Invalidation:
 
 - Because the key includes the resolved path, runtime version, and context
   fingerprint, a change to any of them misses the cache.
+- Each agent has one active identity, `nativeUpdateCheckActive[agentName]`.
+  When a status or preview lookup computes a different key, the agent's other
+  native entries are evicted and the new key becomes active. Returning to an
+  earlier identity, for example by creating and then removing a file before
+  the TTL expires, therefore runs a new check. The cache holds at most one
+  native entry per agent.
+- After a check finishes, the identity is recomputed. The result is cached
+  only if the recomputed key equals the prepared key, the key is still the
+  active one, and the generation is unchanged. A result from an executable or
+  configuration that changed during the slot wait or the run is returned to
+  its waiting subscribers but never cached.
 - `InvalidateNativeUpdateCheck(agentName)` increments
   `nativeUpdateCheckGeneration[agentName]` under `runtimeUpdateStatusMu` and
   removes that agent's native cache entries. A native lookup records its
@@ -435,9 +448,18 @@ verbatim as an upstream channel identifier.
 Only built-in metadata supplies the check argv and adapter. Request fields
 cannot add a command, flag, path, or environment value. Execution uses direct
 argv, no shell, and the same filtered host environment as the existing trusted
-updater. The check mode returns before upstream acquires an install lock or
-changes the installation. Output is bounded, check reasons are fixed codes,
-and raw check output is not added to DTOs, notifications, logs, or metrics.
+updater. Check mode returns before upstream acquires an install lock or
+changes the installation. It is not side-effect free, however. Like every
+`omp` start, including the `omp acp` probe that Kandev already runs on the
+host, it initializes OMP settings and local state. That creates
+`<agentDir>/agent.db` and logs. A config file that fails to parse is moved
+aside to `config.yml.broken-*` and the process exits non-zero, which is
+reported as `check_failed`. This was verified with `omp/19.0.0` in a
+disposable home directory. The `omp acp` startup produced the same files and
+the same move. The native check therefore adds no side effect that Kandev's
+existing automatic ACP probe does not already cause. Output is bounded,
+check reasons are fixed codes, and raw check output is not added to DTOs,
+notifications, logs, or metrics.
 
 ## Observability
 

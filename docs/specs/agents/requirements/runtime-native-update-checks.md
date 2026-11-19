@@ -27,7 +27,9 @@ AC-AGENTS-RUNTIME-UPDATES-003.2, 003.6, 003.7, and 003.11.
 ## Terminology
 
 - **Native update check:** A trusted built-in command that reports update
-  availability for the agent's own installation without installing anything.
+  availability for the agent's own installation without installing or
+  changing it. Like any start of the agent, it can initialize the agent's
+  local state.
 - **Check reason:** A stable code that explains an `unknown` native result,
   such as a failed check, an externally managed installation, or unrecognized
   output.

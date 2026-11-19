@@ -110,14 +110,17 @@ type Controller struct {
 	runtimeUpdateStatusFlight   singleflight.Group
 	nativeUpdateCheckRunner     nativeUpdateCheckRunner
 	nativeUpdateCheckGeneration map[string]uint64
-	nativeCheckLifetime         *nativeCheckLifetime
-	runtimeAutoUpdateStore      *managedruntime.AutoUpdateStore
-	runtimeUpdateNotifier       RuntimeUpdateNotifier
-	runtimeBackgroundMu         sync.Mutex
-	runtimeBackground           *runtimeUpdateBackground
-	runtimeAutoUpdateMu         sync.Mutex
-	runtimeUpdatePassMu         sync.Mutex
-	dynamicAgentRoutingEnabled  bool
+	// nativeUpdateCheckActive is each agent's current native cache key; a
+	// different identity evicts the agent's other entries.
+	nativeUpdateCheckActive    map[string]string
+	nativeCheckLifetime        *nativeCheckLifetime
+	runtimeAutoUpdateStore     *managedruntime.AutoUpdateStore
+	runtimeUpdateNotifier      RuntimeUpdateNotifier
+	runtimeBackgroundMu        sync.Mutex
+	runtimeBackground          *runtimeUpdateBackground
+	runtimeAutoUpdateMu        sync.Mutex
+	runtimeUpdatePassMu        sync.Mutex
+	dynamicAgentRoutingEnabled bool
 
 	hostCLIMu         sync.Mutex
 	hostCLIRunner     hostcli.Runner

@@ -19,6 +19,8 @@ the agent runtime to use the check that the harness provides
 ([kdlbs/kandev#5156](https://github.com/kdlbs/kandev/issues/5156)). The updater
 already resolves the configured channel and installation method, and its check
 mode returns before it acquires an install lock or changes the installation.
+Like every `omp` start, it still initializes settings and local state. The
+`omp acp` probe that Kandev already runs has the same side effects.
 
 ## Decision
 

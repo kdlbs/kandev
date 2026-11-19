@@ -104,6 +104,7 @@ func (c *Controller) SetNativeUpdateCheckRunner(runner nativeUpdateCheckRunner) 
 	defer c.runtimeUpdateStatusMu.Unlock()
 	c.nativeUpdateCheckRunner = runner
 	c.runtimeUpdateStatusCache = make(map[string]runtimeUpdateStatusCacheEntry)
+	c.nativeUpdateCheckActive = nil
 }
 
 func (c *Controller) nativeRunner() nativeUpdateCheckRunner {
@@ -138,6 +139,12 @@ func (c *Controller) InvalidateNativeUpdateCheck(agentName string) {
 		c.nativeUpdateCheckGeneration = make(map[string]uint64)
 	}
 	c.nativeUpdateCheckGeneration[agentName]++
+	c.deleteNativeEntriesLocked(prefix)
+}
+
+// deleteNativeEntriesLocked removes every cache entry with prefix. The caller
+// holds runtimeUpdateStatusMu.
+func (c *Controller) deleteNativeEntriesLocked(prefix string) {
 	for key := range c.runtimeUpdateStatusCache {
 		if strings.HasPrefix(key, prefix) {
 			delete(c.runtimeUpdateStatusCache, key)
@@ -179,9 +186,25 @@ type nativeUpdateCheckLookup struct {
 }
 
 // prepareNativeUpdateCheck computes the cache identity without starting a
-// process: the resolved executable, runtime version, generation, and update
-// configuration fingerprint.
+// process and makes it the agent's active identity. Switching identity evicts
+// the agent's other entries, so returning to an earlier identity rechecks.
 func (c *Controller) prepareNativeUpdateCheck(agentName, currentVersion string, spec agents.NativeUpdateCheckSpec) nativeUpdateCheckLookup {
+	lookup := c.nativeUpdateCheckIdentity(agentName, currentVersion, spec)
+	c.runtimeUpdateStatusMu.Lock()
+	defer c.runtimeUpdateStatusMu.Unlock()
+	if c.nativeUpdateCheckActive[agentName] != lookup.key {
+		c.deleteNativeEntriesLocked(nativeUpdateCheckKeyPrefix(agentName))
+		if c.nativeUpdateCheckActive == nil {
+			c.nativeUpdateCheckActive = make(map[string]string)
+		}
+		c.nativeUpdateCheckActive[agentName] = lookup.key
+	}
+	return lookup
+}
+
+// nativeUpdateCheckIdentity resolves the executable, runtime version,
+// generation, and update configuration fingerprint into one cache key.
+func (c *Controller) nativeUpdateCheckIdentity(agentName, currentVersion string, spec agents.NativeUpdateCheckSpec) nativeUpdateCheckLookup {
 	runner := c.nativeRunner()
 	executable, err := runner.Resolve(spec.Command)
 	if err != nil {
@@ -264,7 +287,11 @@ func (c *Controller) executeNativeUpdateCheck(ctx context.Context, lookup native
 			zap.String("agent", lookup.agentName), zap.String("state", string(result.State)),
 			zap.String("reason", string(result.Reason)), zap.Duration("duration", time.Since(started)))
 	}
-	c.storeNativeUpdateCheckEntry(lookup, entry)
+	// A result whose executable or configuration changed during the wait or
+	// the run describes another identity and is returned without caching.
+	if c.nativeUpdateCheckIdentity(lookup.agentName, lookup.currentVersion, lookup.spec).key == lookup.key {
+		c.storeNativeUpdateCheckEntry(lookup, entry)
+	}
 	return entry
 }
 
@@ -327,15 +354,17 @@ func newNativeUpdateCheckEntry(result agents.NativeUpdateCheckResult, now time.T
 	return entry
 }
 
-// storeNativeUpdateCheckEntry writes only while the lookup's generation is
-// current, so a check that overlapped an invalidation cannot repopulate it.
+// storeNativeUpdateCheckEntry writes only while the lookup's generation and
+// identity are current, so an overlapping invalidation or identity change
+// cannot repopulate the cache.
 func (c *Controller) storeNativeUpdateCheckEntry(lookup nativeUpdateCheckLookup, entry runtimeUpdateStatusCacheEntry) {
 	if entry.expiresAt.IsZero() {
 		return
 	}
 	c.runtimeUpdateStatusMu.Lock()
 	defer c.runtimeUpdateStatusMu.Unlock()
-	if c.nativeUpdateCheckGeneration[lookup.agentName] != lookup.generation {
+	if c.nativeUpdateCheckGeneration[lookup.agentName] != lookup.generation ||
+		c.nativeUpdateCheckActive[lookup.agentName] != lookup.key {
 		return
 	}
 	if c.runtimeUpdateStatusCache == nil {

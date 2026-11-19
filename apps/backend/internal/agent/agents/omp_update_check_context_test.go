@@ -125,6 +125,13 @@ func TestOmpUpdateCheckContextConfigDirAndOverlays(t *testing.T) {
 			filepath.Join(f.home, "overlay.yml"), filepath.Join(f.cwd, "rel", "local.yml"), abs)
 		assertSourceFiles(t, got, want)
 	})
+	t.Run("overlay paths keep whitespace and expand bare tilde like upstream expandTilde", func(t *testing.T) {
+		list := strings.Join([]string{"overlay.yml ", "~team.yml"}, string(os.PathListSeparator))
+		got := f.sources("PI_CONFIG_FILES=" + list)
+		want := append(f.defaultFiles(filepath.Join(f.home, ".omp", "agent"), filepath.Join(f.home, ".omp")),
+			filepath.Join(f.cwd, "overlay.yml "), filepath.Join(f.home, "team.yml"))
+		assertSourceFiles(t, got, want)
+	})
 }
 
 func (f ompContextFixture) defaultFilesWithBase(base, agentDir, root string) []string {

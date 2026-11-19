@@ -207,22 +207,33 @@ func ompNormalizeProfile(raw string) string {
 	return profile
 }
 
+// ompConfigOverlays mirrors upstream: split PI_CONFIG_FILES on the path-list
+// separator, drop empty entries, expandTilde each untouched entry, and resolve
+// it against the working directory.
 func ompConfigOverlays(r NativeUpdateCheckResolver) []string {
 	list, _ := r.Getenv("PI_CONFIG_FILES")
 	var files []string
 	for _, entry := range filepath.SplitList(list) {
-		entry = strings.TrimSpace(entry)
-		switch {
-		case entry == "":
+		if entry == "" {
 			continue
-		case entry == "~":
-			entry = r.HomeDir
-		case strings.HasPrefix(entry, "~/"), strings.HasPrefix(entry, `~\`):
-			entry = filepath.Join(r.HomeDir, entry[2:])
 		}
-		files = append(files, r.absolute(entry))
+		files = append(files, r.absolute(ompExpandTilde(entry, r.HomeDir)))
 	}
 	return files
+}
+
+// ompExpandTilde mirrors upstream utils/path.ts expandTilde, including a bare
+// "~name" resolving to "<home>/name".
+func ompExpandTilde(path, home string) string {
+	switch {
+	case path == "~":
+		return home
+	case strings.HasPrefix(path, "~/"), strings.HasPrefix(path, `~\`):
+		return home + path[1:]
+	case strings.HasPrefix(path, "~"):
+		return filepath.Join(home, path[1:])
+	}
+	return path
 }
 
 func (r NativeUpdateCheckResolver) absolute(path string) string {
