@@ -1634,9 +1634,7 @@ func startGatewayAndServe(
 	addCleanup(stopRuntimeUpdatesCleanup)
 	restoreCleanups = append(restoreCleanups, stopRuntimeUpdatesCleanup)
 	gateway.Hub.AddUserSubscriptionListener(func(string) {
-		if err := agentSettingsController.ReplayRuntimeUpdateNotices(ctx); err != nil && ctx.Err() == nil {
-			log.Debug("runtime update replay unavailable")
-		}
+		agentSettingsController.RequestRuntimeUpdateReplay()
 	})
 	startup.AfterReady(ctx, func() { systemSvc.StartBackground(ctx) })
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })

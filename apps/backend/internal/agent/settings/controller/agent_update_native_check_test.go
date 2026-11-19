@@ -542,6 +542,34 @@ func TestNativeCheckNotifiesOnlyAvailable(t *testing.T) {
 	}
 }
 
+// A subscription replay is requested from the WebSocket subscribe path, which
+// acknowledges only after the request returns. A cold native check must not
+// hold that acknowledgement; the replay still delivers its notice later.
+func TestNativeCheckReplayRequestDoesNotWaitForCheck(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+		h.runner.setOutput(ompCanaryAvailable, 0)
+		started, release := h.runner.gated()
+		notices := &runtimeNoticeCapture{}
+		h.ctrl.SetRuntimeUpdateNotifier(notices)
+		stop := h.ctrl.StartRuntimeUpdateBackground(context.Background(), make(chan struct{}))
+		defer stop()
+		h.ctrl.RequestRuntimeUpdateReplay()
+		h.ctrl.RequestRuntimeUpdateReplay()
+		<-started
+		synctest.Wait()
+		requireRuns(t, h.runner, 1, "while the replayed check is gated")
+		release()
+		synctest.Wait()
+		time.Sleep(runtimeUpdateAvailabilityWindow)
+		synctest.Wait()
+		delivered, _ := notices.snapshot()
+		if len(delivered) != 1 || delivered[0].Version != "18.22.0-canary.3" {
+			t.Fatalf("replayed notices = %+v", delivered)
+		}
+	})
+}
+
 func mustMkdir(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {
