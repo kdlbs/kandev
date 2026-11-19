@@ -206,6 +206,16 @@ list-load reconciliation must agree. Verify the persisted cursor and the row
 after leaving and returning: hiding the displayed session's dot alone does not
 prove that acknowledgement succeeded.
 
+A displayed session that fails keeps focus. Opening a task can resume its
+displayed session; a failed resume writes a qualifying resume boot row and a
+recovery card, then the backend promotes another active session to primary.
+`maybeAdoptSessionOnTransition` (`lib/ws/handlers/agent-session.ts`) does not
+hand off from a session entering `FAILED`, and `task.updated` primary-follow
+(`lib/ws/handlers/tasks.ts`) does not leave a `FAILED` previous primary. The
+failed panel stays visible until its history loads, so the normal path above
+acknowledges the failure. Handing focus away there would leave the boot row
+unread behind the old cursor and hide the recovery actions.
+
 An unread failed sibling that was never displayed is not evidence of a failed
 cursor write. It remains unread under AC .2, .9, .12, and .17. Preserve this
 distinction when diagnosing a task with no running sessions: opening its

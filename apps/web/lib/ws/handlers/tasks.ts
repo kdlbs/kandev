@@ -318,7 +318,8 @@ function maybeFollowUpdatedTaskPrimary(
   // Follow focus to the new primary when:
   //  - the user is currently viewing this task,
   //  - the user was sitting on the previous primary,
-  //  - they do NOT have a non-terminal pinned session for this task, and
+  //  - they do NOT have a non-terminal pinned session for this task,
+  //  - the previous primary did not fail, and
   //  - a real previous primary actually changed.
   // This makes workflow profile switches transparent for unpinned users
   // without yanking users off a live session they deliberately selected. A
@@ -326,18 +327,19 @@ function maybeFollowUpdatedTaskPrimary(
   // state-transition handoff (maybeAdoptSessionOnTransition) once that session
   // actually reaches a terminal state — not from here, where we cannot yet tell
   // a retirement from a manual "Set as Primary" that leaves the old session live.
+  // A failed primary keeps focus: its failure output and recovery actions
+  // belong on screen, where they are read.
   const afterState = store.getState();
   logTaskMerge("task.updated", beforeState, afterState, payload);
   const newPrimary = findTaskInState(afterState, taskId)?.primarySessionId ?? null;
+  if (!newPrimary || !previousPrimary || newPrimary === previousPrimary) return;
   const shouldFollow =
-    Boolean(newPrimary) &&
-    Boolean(previousPrimary) &&
-    newPrimary !== previousPrimary &&
     afterState.tasks.activeTaskId === taskId &&
     afterState.tasks.activeSessionId === previousPrimary &&
+    afterState.taskSessions?.items?.[previousPrimary]?.state !== "FAILED" &&
     !isSessionRestartPending(store, previousPrimary) &&
     !shouldPreservePinnedSessionForTask(afterState, taskId);
-  if (!shouldFollow || !newPrimary) return;
+  if (!shouldFollow) return;
   clearPinnedSessionIfOverridden(store, newPrimary);
   afterState.setActiveSessionAuto(taskId, newPrimary);
 }

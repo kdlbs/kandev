@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { ApiClient } from "./api-client";
 import type { SeedData } from "../fixtures/test-base";
+import { withDatabase } from "./interrupted-prompt-recovery";
 import { multiMessageScript } from "./seed-session-messages";
+import { createFailOnResumeProfile } from "./session-resume-prompt-queue";
 import { waitForSessionDone } from "./session";
 import type { WsFrame, WsWatcher } from "./causal-waits";
 import { attachGatewayTrafficCapture } from "./ws-traffic";
@@ -285,6 +287,127 @@ export async function seedFailedSiblingTask(
     liveSessionId: live.session_id,
     liveTailMessageId: liveTail.messageId,
   };
+}
+
+export type FailingResumeTask = {
+  navTitle: string;
+  navTaskId: string;
+  title: string;
+  taskId: string;
+  failingSessionId: string;
+  failingCursor: string;
+  siblingSessionId: string;
+  siblingCursor: string;
+  profileId: string;
+};
+
+/**
+ * Seeds the reported failed-resume shape with a real agent: a primary session
+ * with more than one history page, read through its newest row, whose saved
+ * agent refuses to resume. Opening the task resumes it automatically; the
+ * resume fails and stores a resume boot row plus a recovery card after the
+ * cursor. A read sibling waiting for input shares its environment.
+ */
+export async function seedFailingResumeTask(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  backendTmpDir: string,
+  prefix: string,
+): Promise<FailingResumeTask> {
+  const stepOptions = { workflow_id: seedData.workflowId, workflow_step_id: seedData.startStepId };
+  const navTitle = `${prefix} navigation`;
+  const nav = await apiClient.seedTask(seedData.workspaceId, navTitle, stepOptions);
+  await apiClient.seedTaskSession(nav.task_id, {
+    state: "WAITING_FOR_INPUT",
+    agentProfileId: seedData.agentProfileId,
+  });
+  const profile = await createFailOnResumeProfile(apiClient, `${prefix} ${randomUUID()}`);
+  const title = `${prefix} failed resume`;
+  const task = await apiClient.createTaskWithAgent(seedData.workspaceId, title, profile.id, {
+    description: "/e2e:simple-message",
+    repository_ids: [seedData.repositoryId],
+    ...stepOptions,
+  });
+  const failingSessionId = task.session_id;
+  if (!failingSessionId) throw new Error("failed-resume task has no session");
+  await waitForSessionDone(apiClient, task.id, failingSessionId, "initial prompt", 60_000);
+  for (let index = 0; index < 105; index++) {
+    await apiClient.seedSessionMessage(failingSessionId, {
+      type: index % 3 === 0 ? "tool_read" : "thinking",
+      content: `stored history ${index}`,
+    });
+  }
+  const failingCursor = await newestStoredMessageId(apiClient, failingSessionId);
+  await apiClient.forceSetSessionReadCursor(failingSessionId, failingCursor);
+  await apiClient.stopSession({ session_id: failingSessionId, force: true });
+  await expect
+    .poll(
+      async () =>
+        (
+          await apiClient.wsRequest<{ is_agent_running: boolean }>("task.session.status", {
+            task_id: task.id,
+            session_id: failingSessionId,
+          })
+        ).is_agent_running,
+      { timeout: 30_000 },
+    )
+    .toBe(false);
+
+  const sibling = await apiClient.seedTaskSession(task.id, {
+    state: "WAITING_FOR_INPUT",
+    sessionId: randomUUID(),
+    agentProfileId: seedData.agentProfileId,
+  });
+  const siblingRead = await apiClient.seedSessionMessage(sibling.session_id, {
+    type: "message",
+    content: "sibling output already read",
+  });
+  await apiClient.forceSetSessionReadCursor(sibling.session_id, siblingRead.messageId);
+  // Make the stopped session resumable on the next visit, as after a restart.
+  withDatabase(backendTmpDir, (db) => {
+    db.prepare(
+      `UPDATE task_sessions SET state = 'WAITING_FOR_INPUT', error_message = '',
+       metadata = json_remove(metadata, '$.last_agent_error', '$.agent_delivery_recovery')
+       WHERE id = ?`,
+    ).run(failingSessionId);
+    db.prepare(
+      `UPDATE task_sessions SET task_environment_id =
+       (SELECT task_environment_id FROM task_sessions WHERE id = ?) WHERE id = ?`,
+    ).run(failingSessionId, sibling.session_id);
+  });
+  return {
+    navTitle,
+    navTaskId: nav.task_id,
+    title,
+    taskId: task.id,
+    failingSessionId,
+    failingCursor,
+    siblingSessionId: sibling.session_id,
+    siblingCursor: siblingRead.messageId,
+    profileId: profile.id,
+  };
+}
+
+/** Stops the seeded agent and removes its failing profile. */
+export async function cleanupFailingResumeTask(
+  apiClient: ApiClient,
+  seeded: FailingResumeTask,
+): Promise<void> {
+  await apiClient
+    .stopSession({ session_id: seeded.failingSessionId, force: true })
+    .catch(() => undefined);
+  await apiClient.deleteAgentProfile(seeded.profileId, true).catch(() => undefined);
+}
+
+/** The newest stored message of a session; reading it to its end acknowledges this row. */
+export async function newestStoredMessageId(
+  apiClient: ApiClient,
+  sessionId: string,
+): Promise<string> {
+  const { messages } = await apiClient.listSessionMessages(sessionId);
+  const newest = messages.at(-1);
+  if (!newest) throw new Error(`Session ${sessionId} has no stored messages`);
+  return newest.id;
 }
 
 /** The authoritative (backend-projected) unread session IDs for a task, sorted. */

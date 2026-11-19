@@ -7,9 +7,12 @@ import {
   TASK_UNREAD_DOT_LABEL,
   type UnreadSettings,
   captureUnreadSettings,
+  cleanupFailingResumeTask,
+  newestStoredMessageId,
   observeReadTraffic,
   rowHeight,
   seedFailedSiblingTask,
+  seedFailingResumeTask,
   seedUnreadDotTasks,
   sessionReadState,
   taskUnreadSessionIds,
@@ -170,5 +173,62 @@ test.describe("Mobile task unread dot", () => {
     );
     expect(traffic.agentStarts()).toEqual([]);
     expect((await failedState()).state).toBe("FAILED");
+  });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.15
+  test("keeps a session whose resume fails on screen until its failure is read", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(240_000);
+    const seeded = await seedFailingResumeTask(
+      apiClient,
+      seedData,
+      backend.tmpDir,
+      "Mobile failed resume",
+    );
+    try {
+      const unreadIds = () => taskUnreadSessionIds(apiClient, seedData.workspaceId, seeded.taskId);
+      const failingState = () => sessionReadState(apiClient, seeded.failingSessionId);
+      const traffic = observeReadTraffic(testPage);
+      await testPage.goto(`/t/${seeded.taskId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect
+        .poll(async () => (await failingState()).state, { timeout: 60_000 })
+        .toBe("FAILED");
+      await dwell(testPage, 1_500, "negative-assertion", "a failed resume must keep focus");
+      await expect(session.activeChat()).toHaveAttribute(
+        "data-session-id",
+        seeded.failingSessionId,
+      );
+      const failureTail = await newestStoredMessageId(apiClient, seeded.failingSessionId);
+      await expect
+        .poll(async () => (await failingState()).cursor, { timeout: 15_000 })
+        .toBe(failureTail);
+      await expect.poll(unreadIds, { timeout: 15_000 }).toEqual([]);
+      expect(traffic.markReads.map((read) => read.sessionId)).not.toContain(
+        seeded.siblingSessionId,
+      );
+      expect(
+        await testPage.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+      await testPage.screenshot({ path: test.info().outputPath("phone-failed-resume.png") });
+
+      await (await openTaskSwitcherRow(testPage, seeded.navTitle)).tap();
+      await expect(testPage).toHaveURL(new RegExp(`/t/${seeded.navTaskId}`));
+      await testPage.reload();
+      await session.waitForLoad();
+      const taskRow = await openTaskSwitcherRow(testPage, seeded.title);
+      await expect(taskRow.getByRole("img", { name: TASK_UNREAD_DOT_LABEL })).toHaveCount(0);
+      expect((await failingState()).cursor).toBe(failureTail);
+    } finally {
+      await cleanupFailingResumeTask(apiClient, seeded);
+    }
   });
 });

@@ -1463,6 +1463,50 @@ describe("session.state_changed → active session handoff on terminal", () => {
   });
 });
 
+describe("session.state_changed → failed start keeps focus", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("keeps the active session when it fails to start or resume", () => {
+    const store = makeStore({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-resume",
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: { "s-resume": { id: "s-resume", task_id: "t-1", state: "STARTING" } },
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          "t-1": [
+            { id: "s-resume", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
+            {
+              id: "s-waiting",
+              task_id: "t-1",
+              state: "WAITING_FOR_INPUT",
+              started_at: "",
+              updated_at: "",
+            },
+          ],
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      payload: { task_id: "t-1", session_id: "s-resume", new_state: "FAILED" },
+    });
+
+    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
+  });
+});
+
 describe("session.state_changed → respects user-pinned session", () => {
   beforeEach(() => {
     vi.clearAllMocks();

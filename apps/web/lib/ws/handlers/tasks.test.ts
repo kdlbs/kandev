@@ -140,6 +140,35 @@ describe("task.updated primary-session focus follow", () => {
   });
 });
 
+describe("task.updated primary-session focus follow after a failure", () => {
+  it("keeps focus on a failed previous primary so its failure stays on screen", () => {
+    const setActiveSessionAuto = vi.fn();
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
+      } as unknown as AppState["kanban"],
+      tasks: {
+        activeTaskId: "t1",
+        activeSessionId: "sess-old",
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
+        resumeSkippedSessionIds: {},
+      },
+      taskSessions: {
+        items: { "sess-old": { id: "sess-old", task_id: "t1", state: "FAILED" } },
+      } as unknown as AppState["taskSessions"],
+      setActiveSessionAuto,
+    });
+
+    registerTasksHandlers(store)["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
+
+    expect(store.getState().kanban.tasks[0].primarySessionId).toBe("sess-new");
+    expect(setActiveSessionAuto).not.toHaveBeenCalled();
+  });
+});
+
 describe("task.updated workspace sources", () => {
   it("merges authoritative workspace folders into the kanban task", () => {
     const store = makeStore({

@@ -7,9 +7,12 @@ import {
   TASK_UNREAD_DOT_LABEL,
   type UnreadSettings,
   captureUnreadSettings,
+  cleanupFailingResumeTask,
+  newestStoredMessageId,
   observeReadTraffic,
   rowHeight,
   seedFailedSiblingTask,
+  seedFailingResumeTask,
   seedUnreadDotTasks,
   sessionReadState,
   taskUnreadSessionIds,
@@ -238,5 +241,70 @@ test.describe("Task unread dot", () => {
     );
     expect(traffic.agentStarts()).toEqual([]);
     expect((await failedState()).state).toBe("FAILED");
+  });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.8
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.9
+  test("keeps a session whose resume fails on screen until its failure is read", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(240_000);
+    await apiClient.saveUserSettings({ unread_task_dot_hide_delay_seconds: 0 });
+    const seeded = await seedFailingResumeTask(
+      apiClient,
+      seedData,
+      backend.tmpDir,
+      "Failed resume",
+    );
+    try {
+      const unreadIds = () => taskUnreadSessionIds(apiClient, seedData.workspaceId, seeded.taskId);
+      const failingState = () => sessionReadState(apiClient, seeded.failingSessionId);
+      expect(await unreadIds()).toEqual([]);
+
+      const traffic = observeReadTraffic(testPage);
+      await testPage.goto(`/t/${seeded.taskId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      // Opening the task resumes the displayed session; its saved agent refuses.
+      await expect
+        .poll(async () => (await failingState()).state, { timeout: 60_000 })
+        .toBe("FAILED");
+      await dwell(testPage, 1_500, "negative-assertion", "a failed resume must keep focus");
+      await expect(session.activeChat()).toHaveAttribute(
+        "data-session-id",
+        seeded.failingSessionId,
+      );
+      // The failure stored a resume boot row after the old cursor; reading the
+      // transcript to its end acknowledges it and the recovery card after it.
+      const failureTail = await newestStoredMessageId(apiClient, seeded.failingSessionId);
+      expect(failureTail).not.toBe(seeded.failingCursor);
+      await expect
+        .poll(async () => (await failingState()).cursor, { timeout: 15_000 })
+        .toBe(failureTail);
+      await expect.poll(unreadIds, { timeout: 15_000 }).toEqual([]);
+      expect((await sessionReadState(apiClient, seeded.siblingSessionId)).cursor).toBe(
+        seeded.siblingCursor,
+      );
+      expect(traffic.markReads.map((read) => read.sessionId)).not.toContain(
+        seeded.siblingSessionId,
+      );
+      expect(traffic.agentStarts().join(" ")).not.toContain(seeded.siblingSessionId);
+
+      const taskRow = session.sidebarTaskItem(seeded.title);
+      await session.sidebarTaskItem(seeded.navTitle).click();
+      await expect(testPage).toHaveURL(new RegExp(`/t/${seeded.navTaskId}`));
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(taskRow).toBeVisible({ timeout: 15_000 });
+      await expect(unreadDot(taskRow)).toHaveCount(0);
+      expect(await unreadIds()).toEqual([]);
+      expect((await failingState()).cursor).toBe(failureTail);
+    } finally {
+      await cleanupFailingResumeTask(apiClient, seeded);
+    }
   });
 });

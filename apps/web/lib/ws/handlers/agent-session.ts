@@ -407,7 +407,8 @@ function shouldPreserveSessionSelection(
  *   1. New non-terminal session appears for the active task before the old
  *      one is torn down — adopt immediately.
  *   2. The current active session transitions to a terminal state — hand off
- *      to the newest non-terminal session for the same task, if any.
+ *      to the newest non-terminal session for the same task, if any. A failed
+ *      session is not a switch and keeps focus.
  */
 // eslint-disable-next-line max-params -- newState/previousState/wasKnownToStore are all needed by downstream branches
 function maybeAdoptSessionOnTransition(
@@ -429,31 +430,48 @@ function maybeAdoptSessionOnTransition(
     return;
   }
 
-  const isActive = state.tasks.activeSessionId === sessionId;
-  if (isActive && newState && isTerminalSessionState(newState)) {
-    // When the user clicked open a terminal session (e.g. to review a
-    // completed run), setActiveSession pins it. If the backend then
-    // re-emits the same terminal state_changed (a replay — the previous
-    // stored state was already terminal), honor the pin and do NOT hand
-    // off to a running session. A genuine RUNNING→COMPLETED transition
-    // (previousState non-terminal) still hands off normally.
-    if (
-      state.tasks.pinnedSessionId === sessionId &&
-      previousState &&
-      isTerminalSessionState(previousState)
-    )
-      return;
-    // Prefer a non-terminal session already in the per-task list; fall back to
-    // the task's promoted primary when the switch's new session hasn't landed
-    // there yet (task.updated beats the old session's terminal state_changed).
-    const replacement =
-      pickReplacementSessionId(state, taskId) ??
-      pickPrimarySessionReplacement(state, taskId, sessionId);
-    if (replacement && replacement !== sessionId) {
-      inheritAgentctlStatus(state, sessionId, replacement);
-      clearPinnedSessionIfOverridden(store, replacement);
-      state.setActiveSessionAuto(taskId, replacement);
-    }
+  if (state.tasks.activeSessionId !== sessionId) return;
+  handOffFromEndedSession(store, { taskId, sessionId, newState, previousState });
+}
+
+/** Follows a workflow switch away from the active session once it ends. */
+function handOffFromEndedSession(
+  store: StoreApi<AppState>,
+  transition: {
+    taskId: string;
+    sessionId: string;
+    newState: TaskSessionState | undefined;
+    previousState: TaskSessionState | undefined;
+  },
+): void {
+  const { taskId, sessionId, newState, previousState } = transition;
+  if (!newState || !isTerminalSessionState(newState)) return;
+  // A failed session has no successor to follow. Its failure output and
+  // recovery actions belong on screen, where they are read.
+  if (newState === "FAILED") return;
+  const state = store.getState();
+  // When the user clicked open a terminal session (e.g. to review a
+  // completed run), setActiveSession pins it. If the backend then
+  // re-emits the same terminal state_changed (a replay — the previous
+  // stored state was already terminal), honor the pin and do NOT hand
+  // off to a running session. A genuine RUNNING→COMPLETED transition
+  // (previousState non-terminal) still hands off normally.
+  if (
+    state.tasks.pinnedSessionId === sessionId &&
+    previousState &&
+    isTerminalSessionState(previousState)
+  )
+    return;
+  // Prefer a non-terminal session already in the per-task list; fall back to
+  // the task's promoted primary when the switch's new session hasn't landed
+  // there yet (task.updated beats the old session's terminal state_changed).
+  const replacement =
+    pickReplacementSessionId(state, taskId) ??
+    pickPrimarySessionReplacement(state, taskId, sessionId);
+  if (replacement && replacement !== sessionId) {
+    inheritAgentctlStatus(state, sessionId, replacement);
+    clearPinnedSessionIfOverridden(store, replacement);
+    state.setActiveSessionAuto(taskId, replacement);
   }
 }
 

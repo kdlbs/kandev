@@ -1,6 +1,6 @@
 ---
 created: 2026-11-16
-status: blocked
+status: implemented
 requirements:
   - REQ-TASKS-TASK-UNREAD-DOT-001
 system_design:
@@ -26,11 +26,12 @@ it owns the task's unread aggregate; Office's
 [read cursor design](../../specs/office/system-design/unread-divider.md)
 remains the acknowledgement contract.
 
-First establish whether selecting the failed session actually fails to
-acknowledge it. Then repair only a demonstrated violation of .6. Production
-changes are blocked on that causal evidence, not on a requirement to redefine
-read scope. This package does not select an implicit task-wide mark-read
-behavior from the unanswered earlier clarification.
+Task 01 found that explicitly reading stored failed output conforms. The later
+reported failed-resume incident exposed a different boundary: automatic session
+handoff hid the failed transcript before history recovery loaded its new output.
+Task 02 repairs both automatic selection paths, retaining the failed view and
+its recovery controls while normal acknowledgement catches up. Unread scope,
+backend primary promotion, and completed/cancelled handoff remain unchanged.
 
 ## Evidence and confidence
 
@@ -145,8 +146,8 @@ product contract requires revising this package before implementation.
 
 Entry: existing task sidebar and Dockview chat. Dot enabled, divider disabled,
 hide delay zero for the regression. The before state below is supported by the
-stored unread summary and source display rule; a failure after opening session
-#2 has not been observed yet.
+stored unread summary and source display rule. This explicit stored-session
+case now conforms; the reproduced resume-failure focus loss is shown below.
 
 ```text
 BEFORE: primary displayed; failed sibling unread
@@ -167,6 +168,17 @@ EXPECTED: explicitly open #2 and load its stored transcript
 After persisted acknowledgement, returning to #1 or another task must not bring
 it back. If any other session is unread, the dot remains. Preserve existing
 row height, error indicator, tab ordering, focus, and transcript scroll owner.
+
+The reproduced resume-failure variant retains the same selected tab:
+
+```text
+Before: #1 Starting -> #1 Failed -> #2 Waiting (failure hidden, #1 unread)
+After:  #1 Starting -> #1 Failed [still selected]
+        history loads -> failure + recovery actions visible -> #1 read
+```
+
+The backend may promote #2 to primary without dismissing #1. Explicit session
+selection remains available; completed/cancelled handoff is unchanged.
 
 ### UI-02: Phone inactive-session read transition
 
@@ -200,6 +212,16 @@ both layouts. Check absence of document horizontal overflow and capture the
 rendered phone view. ASCII labels and spacing are illustrative, not new copy.
 Both previews map to .6/.9/.12/.14/.15/.16/.17.
 
+For the failed-resume variant, keep the same phone chat selected:
+
+```text
+[Session #1 v] Starting -> Failed [same selected chat]
+                         failure + recovery actions
+                         history loads -> #1 read
+```
+
+The existing session picker remains the explicit way to choose a sibling.
+
 ## Tests
 
 All abbreviated AC IDs below use prefix `AC-TASKS-TASK-UNREAD-DOT-001`.
@@ -211,11 +233,12 @@ All abbreviated AC IDs below use prefix `AC-TASKS-TASK-UNREAD-DOT-001`.
 | .5, .9, .17 | Retain `task-unread-dot-visibility.test.ts`, particularly `keeps the open task's dot while another of its sessions is unread`. Do not re-pin its expectation to hide unread siblings. |
 | .6, .8, .9 | Desktop and phone regression `clears a cursorless failed sibling only after its transcript is read` in the existing unread-dot spec files; final empty list is correlated with the remaining sibling's exact persisted tail before and after reload. |
 | .12 | Desktop variant hides the unread failed tab, verifies its null cursor/unread contribution across reload, hides it again in the new environment-less visit, and reopens through the session menu. Phone picker selection does not claim desktop hidden-tab coverage. |
+| .6, .8 | Failed-resume focus regressions in `agent-session.test.ts`, `tasks.test.ts`, and both unread-dot E2E specs reproduce a real resume failure with paged history and primary promotion; the failed view remains selected until its persisted tail is acknowledged. |
 
 The first RED assertion must expose the actual failed boundary recorded by Task
-01. A test that is already green, a missing selector, or an intentionally unread
-sibling is not RED. Never alter production behavior to force a hypothetical
-lifecycle defect to exist.
+01 or the later incident's causal reproduction. A test that is already green,
+a missing selector, or an intentionally unread sibling is not RED. Never alter
+production behavior to force a hypothetical lifecycle defect to exist.
 
 ## E2E tests
 
@@ -241,7 +264,7 @@ the same causal scenario after Task 01 proves a violation:
 Execute sequentially. No subagent authorization is implied.
 
 - [x] [Task 01: Establish the inactive-session failure boundary](task-01-establish-failure-boundary.md) (done: conformance, no violation reproduced).
-- [ ] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (blocked: no demonstrated contract violation, causal owner, or regression command).
+- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: failed-resume focus loss reproduced and corrected in `agent-session.ts`/`tasks.ts`; desktop/phone and related selection checks passed. Broad backend checks were not rerun because Go code is unchanged; earlier suite failures remain recorded below).
 
 The prior [task unread dot package](../task-unread-dot/plan.md) is historical
 completed delivery. The [visible-visit divider package](../unread-divider-visible-session-clear/plan.md)
@@ -340,9 +363,18 @@ Design-package validation:
 Product verification (implementation run, cache-backed snapshot): Task 01
 reproduced the reported shape on desktop and phone and found conformance;
 its Results record commands, statuses, a mutation check, and browser smoke.
-Task 02 remains blocked and no production code changed. The package is
-`blocked`, not `implemented`: the reported failure was not reproduced. Final
-checks for the retained E2E regressions are recorded below.
+The later failed-resume incident was reproduced with a real mock-agent resume
+failure: focus moved from the failed session to its waiting sibling before its
+failure output loaded, leaving it unread. Task 02 corrects the two selection
+rules in `apps/web/lib/ws/handlers` and records RED/GREEN, E2E, and browser
+smoke in its Results. Parent integration accepts retaining the failure view:
+it preserves loaded-transcript acknowledgement (AC .6) and the visible recovery
+error required by
+[launch failure recovery AC .8](../../specs/tasks/requirements/task-launch-failure-recovery.md).
+This is not task-wide read authorization or a change to workflow recipients.
+The package is implemented; the new fix is uncommitted and has not undergone
+the earlier post-push review loop.
+Final checks for the retained E2E regressions from the first run are below.
 
 These checks ran after the last source edit in snapshot
 `~/.cache/tmp/unread-verification.m9zRZH`, using the Task 01 environment
@@ -422,8 +454,9 @@ with no Go or production web source:
   resolved. No product reproduction or implementation approval implied.
 - Completed rounds: 5. Consecutive clean rounds: 3 (rounds 3, 4, and 5).
   Review loop stopped at the requested three-consecutive-clean condition.
-  At the design checkpoint Task 01 was pending. Its subsequent implementation
-  run completed with conformance; Task 02 remains blocked on causal reproduction.
+  At the design checkpoint Task 01 was pending. Its first implementation run
+  found conformance; the later failed-resume reproduction and Task 02 repair
+  are separate evidence, not findings certified by these design reviews.
 
 ## Post-push review loop
 
