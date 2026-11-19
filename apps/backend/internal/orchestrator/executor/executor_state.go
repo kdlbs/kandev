@@ -432,6 +432,9 @@ var profileConfigAuthoritativeKeys = []string{
 	lifecycle.MetadataKeyDockerNetwork,
 	lifecycle.MetadataKeyDockerNetworkGwPriority,
 	lifecycle.MetadataKeyDockerAdditionalNetworks,
+	lifecycle.MetadataKeyDockerTmpSize,
+	lifecycle.MetadataKeyDockerLogMaxSize,
+	lifecycle.MetadataKeyDockerLogMaxFiles,
 }
 
 // clearAuthoritativeMetadataKeys blanks every profile-owned key in the

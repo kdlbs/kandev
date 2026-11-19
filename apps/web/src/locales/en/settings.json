@@ -1232,5 +1232,7 @@
   "builtinMcp.inheritedValue": "Inherited from workspace: {{value}}",
   "builtinMcp.overrideValue": "Task override: {{value}}. Workspace default: {{default}}.",
   "builtinMcp.useInherited": "Use inherited value",
-  "builtinMcp.allowTasks": "Allow tasks to use this package"
+  "builtinMcp.allowTasks": "Allow tasks to use this package",
+  "markdownPreviewByDefault": "Open Markdown files in Preview",
+  "markdownPreviewByDefaultDescription": "Choose the initial mode for newly opened Markdown files. You can switch modes at any time."
 }

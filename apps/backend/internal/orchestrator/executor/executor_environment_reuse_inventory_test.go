@@ -11,6 +11,53 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// @covers AC-TASKS-MCP-WORKSPACE-MODE-004.8
+func TestInheritedCheckoutSelectorsStayOutOfMaterialization(t *testing.T) {
+	repo := newMockRepository()
+	repo.repositories["repo-inherited"] = &models.Repository{
+		ID: "repo-inherited", Name: "repo", LocalPath: "/tmp/repo", DefaultBranch: "main",
+	}
+	repo.tasks["task-inherited"] = &models.Task{ID: "task-inherited"}
+	repo.taskRepositories["task-repo-inherited"] = &models.TaskRepository{
+		ID: "task-repo-inherited", TaskID: "task-inherited", RepositoryID: "repo-inherited",
+		BaseBranch: "main", CheckoutBranch: "feature/adopted",
+		Metadata: map[string]interface{}{"inherited_checkout_reuse_only": true},
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID: "task-inherited", SessionID: "session-inherited", ExecutorType: string(models.ExecutorTypeWorktree),
+	}
+	_, err := exec.applyResumeRepoConfig(
+		context.Background(), &v1.Task{ID: "task-inherited"},
+		&models.TaskSession{ID: "session-inherited", TaskID: "task-inherited"}, req, nil,
+	)
+	if err != nil {
+		t.Fatalf("applyResumeRepoConfig: %v", err)
+	}
+	if req.CheckoutBranch != "" {
+		t.Fatalf("fresh materialization requested inherited checkout %q", req.CheckoutBranch)
+	}
+	if req.BranchIdentitySlug != "feature-adopted" {
+		t.Fatalf("fresh materialization identity = %q, want inherited slot feature-adopted", req.BranchIdentitySlug)
+	}
+
+	reuseReq := &LaunchAgentRequest{
+		TaskID: "task-inherited", SessionID: "session-inherited", ExecutorType: string(models.ExecutorTypeWorktree),
+		WorkspaceReuseRequired: true,
+	}
+	_, err = exec.applyResumeRepoConfig(
+		context.Background(), &v1.Task{ID: "task-inherited"},
+		&models.TaskSession{ID: "session-inherited", TaskID: "task-inherited"}, reuseReq,
+		&models.TaskEnvironment{ID: "parent-environment"},
+	)
+	if err != nil {
+		t.Fatalf("applyResumeRepoConfig for inherited reuse: %v", err)
+	}
+	if reuseReq.CheckoutBranch != "feature/adopted" {
+		t.Fatalf("inherited reuse checkout selector = %q, want feature/adopted", reuseReq.CheckoutBranch)
+	}
+}
+
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.1
 func TestValidateReuseEnvironmentInventory_ZeroRowsFailsClosed(t *testing.T) {
 	repo := newMockRepository()

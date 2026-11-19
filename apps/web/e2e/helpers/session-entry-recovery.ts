@@ -214,6 +214,8 @@ function interceptServerResponse(
     return true;
   }
 
+  if (consumeDropRule(context, state.dropRules, state.droppedCounts)) return true;
+
   if (context && consumeHoldRule(context, state.holdRules, state.heldCounts)) {
     const messages = state.heldMessages.get(context.action) ?? [];
     messages.push(message);
@@ -236,7 +238,6 @@ function interceptServerResponse(
     return true;
   }
 
-  if (consumeDropRule(context, state.dropRules, state.droppedCounts)) return true;
   return consumeDelayRule(
     context?.action,
     message,

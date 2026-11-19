@@ -1,6 +1,15 @@
 import type { AgentUpdateJob, AgentUpdateOperation, AgentUpdatePreview } from "@/lib/api";
 import { t } from "@/lib/i18n";
 
+export const ACTIVE_UPDATE_STATUSES = new Set<AgentUpdateJob["status"]>([
+  "queued",
+  "resolving",
+  "updating",
+  "probing",
+  "saving",
+  "refreshing",
+]);
+
 export type RuntimeVersionPair = {
   /** Display copy — localized, and therefore never compared. */
   currentVersion: string;
@@ -34,12 +43,12 @@ export function resolveRuntimeActiveVersion(
 export function resolveRuntimeEffectiveVersion(
   preview: AgentUpdatePreview,
   job?: AgentUpdateJob,
-): string {
+): string | undefined {
   return (
     job?.effective_version ??
     preview.effective_version ??
     resolveRuntimeActiveVersion(preview, job) ??
-    resolveRuntimeVersionPair(preview, job).currentVersion
+    (job?.current_version || preview.current_version || undefined)
   );
 }
 

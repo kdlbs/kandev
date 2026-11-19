@@ -2238,6 +2238,17 @@
   "youCanAttachUpToFiles": "You can attach up to {{maxFiles}} files.",
   "yourBranchesLabel": "Your branches:",
   "yourChangedFilesWillAppearHere": "Your changed files will appear here",
+  "outsideRepositories": "Outside repositories",
+  "openWorkspaceRootFile": "Open",
+  "workspaceRootFilesTruncated": "Some workspace root files are not shown.",
+  "moveToRepository": "Move to repository...",
+  "moveWorkspaceRootFileTitle": "Move file to a repository",
+  "moveWorkspaceRootFileDescription": "Select a destination for {{path}}. The file will not be staged.",
+  "moveWorkspaceRootFileDestination": "Repository destination",
+  "moveWorkspaceRootFileTarget": "New path",
+  "moveWorkspaceRootFileMove": "Move",
+  "moveWorkspaceRootFileError": "Could not move file",
+  "moveWorkspaceRootFileErrorFallback": "The destination may already contain a file with this name.",
   "yourCodeLivesInLabel": "Your code lives in:",
   "yourReviewIsRequestedOnThis": "Your review is requested on this task.",
   "autopilot": "Autopilot",
@@ -3305,5 +3316,7 @@
   "removeRootFailed": "Could not remove the root from this task",
   "removeFromTask": "Remove from task",
   "rootDisabledNoTracker": "This root has no Git tracker yet",
-  "refreshRepositories": "Refresh repositories"
+  "refreshRepositories": "Refresh repositories",
+  "referenceCurrentTitle": "Current title: {{title}}",
+  "referenceOpenForDetails": "Open the task for details."
 }

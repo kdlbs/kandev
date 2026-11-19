@@ -292,13 +292,15 @@ export function MobileFileViewerPanel({
     [file.path, file.content, file.isBinary],
   );
 
-  const initialMarkdownPreview = initialRenderedPreview && previewKind === "markdown";
+  const defaultPreview = useAppStore((s) => s.userSettings?.markdownPreviewByDefault ?? true);
+  const initialMarkdownPreview =
+    (initialRenderedPreview || defaultPreview) && previewKind === "markdown";
   const [renderedPreview, setRenderedPreview] = useState(initialMarkdownPreview);
   const fileIdentity = `${file.repo ?? ""}\u0000${file.path}`;
   const [lastFileIdentity, setLastFileIdentity] = useState(fileIdentity);
 
-  // Reset preview mode when the file changes so reopening a previewable file
-  // always starts in editor view, not the previous preview state.
+  // Restore the initial mode for each file identity, using the saved default
+  // or the caller-supplied Preview request.
   // Adjust state during render per React docs recommendation.
   if (lastFileIdentity !== fileIdentity) {
     setLastFileIdentity(fileIdentity);

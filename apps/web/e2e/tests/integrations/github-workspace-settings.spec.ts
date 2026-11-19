@@ -386,6 +386,11 @@ test.describe("GitHub workspace settings", () => {
       repo_scope_repos: [{ owner: "kdlbs", name: "kandev" }],
     });
     expect(initialSettings.status).toBe(200);
+    expect(await initialSettings.json()).toMatchObject({
+      repo_scope_mode: "selected",
+      repo_scope_orgs: [],
+      repo_scope_repos: [{ owner: "kdlbs", name: "kandev" }],
+    });
     await apiClient.mockGitHubAddPRs([
       {
         number: 6101,
@@ -462,7 +467,7 @@ test.describe("GitHub workspace settings", () => {
       repo_scope_mode: string;
       repo_scope_repos: Array<{ owner: string; name: string }>;
     };
-    expect(settings.repo_scope_mode).toBe("repos");
+    expect(settings.repo_scope_mode).toBe("selected");
     expect(settings.repo_scope_repos).toEqual([
       { owner: "kdlbs", name: "kandev" },
       { owner: "other", name: "repo" },
@@ -479,89 +484,54 @@ test.describe("GitHub workspace settings", () => {
     await expect(testPage.getByText("blocked/repo#6103")).toHaveCount(0);
   });
 
-  test("repository scope save only submits fields for the active mode", async ({
+  test("legacy scope writes stay exclusive and return canonical selected settings", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(90_000);
-
     await apiClient.mockGitHubReset();
-    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubSetUser("scope-user");
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+    await apiClient.mockGitHubAddOrgs([{ login: "kdlbs" }]);
+    await apiClient.mockGitHubAddRepos("outside", [
+      { full_name: "outside/tool", owner: "outside", name: "tool" },
+    ]);
 
-    // Pin the seed workspace in the URL: the install-level path redirects to
-    // the active workspace, which may be one another test created — the API
-    // assertions below read seedData.workspaceId.
+    const organizations = await apiClient.rawRequest("PUT", "/api/v1/github/workspace-settings", {
+      workspace_id: seedData.workspaceId,
+      repo_scope_mode: "orgs",
+      repo_scope_orgs: ["kdlbs"],
+    });
+    expect(organizations.status).toBe(200);
+    expect(await organizations.json()).toMatchObject({
+      repo_scope_mode: "selected",
+      repo_scope_orgs: ["kdlbs"],
+      repo_scope_repos: [],
+    });
     await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
-    await expect(testPage.getByTestId("github-integration-heading")).toBeVisible();
+    const scope = testPage.getByTestId("github-repo-scope-section");
+    await expect(scope.getByTestId("github-organization-chip")).toHaveText(["kdlbs"]);
+    await expect(scope.getByTestId("github-repository-chip")).toHaveCount(0);
 
-    await testPage.getByTestId("github-scope-mode").click();
-    await testPage.getByRole("option", { name: "Selected repositories" }).click();
-    await addScopeRepository(testPage, "kdlbs/kandev");
-    await testPage.getByTestId("github-scope-mode").click();
-    await testPage.getByRole("option", { name: "Organizations" }).click();
-    await addScopeOrganization(testPage, "kdlbs");
-    await testPage
-      .getByTestId("settings-floating-save")
-      .getByRole("button", { name: "Save changes" })
-      .click();
-    await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
-      timeout: 10_000,
+    const repositories = await apiClient.rawRequest("PUT", "/api/v1/github/workspace-settings", {
+      workspace_id: seedData.workspaceId,
+      repo_scope_mode: "repos",
+      repo_scope_repos: [{ owner: "outside", name: "tool" }],
     });
-
-    const firstSettingsResponse = await apiClient.rawRequest(
-      "GET",
-      `/api/v1/github/workspace-settings?workspace_id=${seedData.workspaceId}`,
-    );
-    expect(firstSettingsResponse.status).toBe(200);
-    const firstSettings = (await firstSettingsResponse.json()) as {
-      repo_scope_mode: string;
-      repo_scope_orgs: string[];
-      repo_scope_repos: Array<{ owner: string; name: string }>;
-    };
-    expect(firstSettings.repo_scope_mode).toBe("orgs");
-    expect(firstSettings.repo_scope_orgs).toEqual(["kdlbs"]);
-    expect(firstSettings.repo_scope_repos).toEqual([]);
-
-    await testPage.getByTestId("github-scope-mode").click();
-    await testPage.getByRole("option", { name: "Selected repositories" }).click();
-    await addScopeRepository(testPage, "other/repo");
-    await testPage.getByTestId("github-scope-mode").click();
-    await testPage.getByRole("option", { name: "Organizations" }).click();
-    await testPage
-      .getByTestId("settings-floating-save")
-      .getByRole("button", { name: "Save changes" })
-      .click();
-    await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
-      timeout: 10_000,
+    expect(repositories.status).toBe(200);
+    expect(await repositories.json()).toMatchObject({
+      repo_scope_mode: "selected",
+      repo_scope_orgs: [],
+      repo_scope_repos: [{ owner: "outside", name: "tool" }],
     });
-
-    const secondSettingsResponse = await apiClient.rawRequest(
-      "GET",
-      `/api/v1/github/workspace-settings?workspace_id=${seedData.workspaceId}`,
-    );
-    expect(secondSettingsResponse.status).toBe(200);
-    const secondSettings = (await secondSettingsResponse.json()) as {
-      repo_scope_mode: string;
-      repo_scope_orgs: string[];
-      repo_scope_repos: Array<{ owner: string; name: string }>;
-    };
-    expect(secondSettings.repo_scope_mode).toBe("orgs");
-    expect(secondSettings.repo_scope_orgs).toEqual(["kdlbs"]);
-    expect(secondSettings.repo_scope_repos).toEqual([]);
+    await testPage.reload();
+    await expect(scope.getByTestId("github-organization-chip")).toHaveCount(0);
+    await expect(scope.getByTestId("github-repository-chip")).toHaveText(["outside/tool"]);
   });
 });
-
-async function addScopeRepository(page: Page, repository: string): Promise<void> {
-  const field = page.getByTestId("github-scope-repos");
-  await field.getByRole("button", { name: "Add repository" }).click();
-  const input = field.getByTestId("remote-repo-input");
-  await input.fill(repository);
-  await input.press("Enter");
-  await expect(
-    field.getByTestId("github-repository-chip").filter({ hasText: repository }),
-  ).toBeVisible();
-}
 
 async function addListedScopeRepository(page: Page, repository: string): Promise<void> {
   const field = page.getByTestId("github-scope-repos");
@@ -572,13 +542,4 @@ async function addListedScopeRepository(page: Page, repository: string): Promise
   await expect(
     field.getByTestId("github-repository-chip").filter({ hasText: repository }),
   ).toBeVisible();
-}
-
-async function addScopeOrganization(page: Page, login: string): Promise<void> {
-  const field = page.getByTestId("github-scope-orgs");
-  await field.getByRole("button", { name: "Add organization" }).click();
-  const input = field.getByTestId("github-organization-input");
-  await input.fill(login);
-  await input.press("Enter");
-  await expect(field.getByTestId("github-organization-chip")).toHaveText([login]);
 }

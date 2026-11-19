@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "sdk_version": "0.3.0",
+  "sdk_version": "0.4.0",
   "host_release": null,
   "min_kandev_version": null,
   "api_versions": [1, 2],

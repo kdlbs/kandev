@@ -181,6 +181,12 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("master key: %w", err)
 	}
+	reissueSigner, reissueSignerSource, err := selectGitCredentialReissueSigner(
+		cfg.GitHubCredentialBroker, masterKeyProvider.Key(),
+	)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	if err := checkStartupContext(ctx, "secret store"); err != nil {
 		return nil, nil, nil, err
 	}
@@ -215,29 +221,32 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 	activateTelemetryContracts(ctx, telemetryStore, log)
 
 	repos := &Repositories{
-		RequiredStores: tracker,
-		Task:           taskRepoImpl,
-		Analytics:      analyticsRepo,
-		AgentSettings:  agentSettingsRepo,
-		User:           supportRepos.user,
-		UserAccounts:   supportRepos.userAccounts,
-		Notification:   supportRepos.notification,
-		Editor:         supportRepos.editor,
-		Prompts:        supportRepos.prompts,
-		Utility:        supportRepos.utility,
-		Workflow:       workflowRepo,
-		Secrets:        secretStore,
-		Office:         officeRepo,
-		Terminal:       terminalRepoImpl,
-		QuickTerminal:  quickTerminalRepoImpl,
-		RuntimeFlags:   runtimeFlagsStore,
-		Auth:           authRepo,
-		HostnameCache:  hostnameCache,
-		SystemSettings: systemSettings,
+		RequiredStores:                   tracker,
+		gitCredentialReissueSigner:       reissueSigner,
+		gitCredentialReissueSignerSource: reissueSignerSource,
+		Task:                             taskRepoImpl,
+		Analytics:                        analyticsRepo,
+		AgentSettings:                    agentSettingsRepo,
+		User:                             supportRepos.user,
+		UserAccounts:                     supportRepos.userAccounts,
+		Notification:                     supportRepos.notification,
+		Editor:                           supportRepos.editor,
+		Prompts:                          supportRepos.prompts,
+		Utility:                          supportRepos.utility,
+		Workflow:                         workflowRepo,
+		Secrets:                          secretStore,
+		Office:                           officeRepo,
+		Terminal:                         terminalRepoImpl,
+		QuickTerminal:                    quickTerminalRepoImpl,
+		RuntimeFlags:                     runtimeFlagsStore,
+		Auth:                             authRepo,
+		HostnameCache:                    hostnameCache,
+		SystemSettings:                   systemSettings,
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, nil, nil, err
 	}
+	logGitCredentialReissueSignerSelected(log, reissueSignerSource)
 	initialized = true
 	if projector, ok := analyticsRepo.(analyticsservice.UsageProjectionBatchStore); ok && cfg.Features.UsageHistory {
 		control := newUsageHistoryProjection(ctx, projector, log)

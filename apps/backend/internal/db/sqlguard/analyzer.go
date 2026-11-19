@@ -575,7 +575,7 @@ func sourceSymbol(node ast.Node, parents map[ast.Node]ast.Node) string {
 
 func isExecutorCall(call *ast.CallExpr) bool {
 	switch functionName(call.Fun) {
-	case "Exec", "ExecContext", "Query", "QueryContext", "QueryRow", "QueryRowContext", "Get", "Select", "NamedExec", "Prepare", "PrepareContext":
+	case "Exec", "ExecContext", "Query", "QueryContext", "QueryRow", "QueryRowContext", "Get", "GetContext", "Select", "SelectContext", "NamedExec", "Prepare", "PrepareContext":
 		return true
 	default:
 		return false

@@ -63,7 +63,7 @@ func TestEnterprisePostgresAuthHostRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings, err := store.GetWorkspaceSettings(ctx, "ws-1")
-	if err != nil || settings.GitHubHost != replacement.GitHubHost || settings.RepoScopeMode != RepoScopeModeRepos {
+	if err != nil || settings.GitHubHost != replacement.GitHubHost || settings.RepoScopeMode != RepoScopeModeSelected {
 		t.Fatalf("host scope roundtrip = %+v, error %v", settings, err)
 	}
 	read, err = store.GetAuthFlow(ctx, flow.StateHash)
@@ -88,5 +88,5 @@ func TestEnterprisePostgresReconnectRetainedHost(t *testing.T) {
 	settings, err := store.GetWorkspaceSettings(ctx, "ws-1")
 	require.NoError(t, err)
 	require.Equal(t, "github.com", settings.GitHubHost)
-	require.Equal(t, RepoScopeModeRepos, settings.RepoScopeMode)
+	require.Equal(t, RepoScopeModeSelected, settings.RepoScopeMode)
 }

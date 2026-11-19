@@ -162,6 +162,15 @@ func (s *Service) clearRecoveryNoticePendingMarker(ctx context.Context, sessionI
 		return err
 	}
 	if !cleared {
+		current, err := s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if current != nil {
+			if _, pendingStillExists := current.Metadata[models.SessionMetaKeyRecoveryNoticePending]; !pendingStillExists {
+				return nil
+			}
+		}
 		return errors.New("recovery notice pending marker changed before publication completed")
 	}
 	return nil

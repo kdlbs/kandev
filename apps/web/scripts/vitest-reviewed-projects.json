@@ -1121,7 +1121,6 @@
     "components/settings/kubernetes-settings-cards.test.tsx",
     "components/settings/kubernetes-workload-card.test.tsx",
     "components/settings/layouts/layout-editor-actions.test.ts",
-    "components/settings/layouts/layout-editor.test.ts",
     "components/settings/layouts/layout-profile-delete-confirmation.test.tsx",
     "components/settings/layouts/layout-settings.test.tsx",
     "components/settings/legacy-executor-settings-route.test.tsx",

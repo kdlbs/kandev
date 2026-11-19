@@ -342,10 +342,13 @@ authoritative preview before any update starts. If the check is unavailable,
 the control has no dot but remains usable.
 
 1. Select **Runtime updates**, or select the update icon on an agent card.
-2. Review the current version, active version, available stable versions, and command.
-3. Keep the latest version selected for a normal update, or select an older stable version to roll back.
-4. Select **Update runtime**, **Roll back runtime**, or **Repair runtime**.
+2. Review the current and selected versions.
+3. To choose another stable version or restore the default, select **Change version**.
+4. Select **Update to** for the selected version, or use the action for rollback, repair, or the default.
 5. Wait for the exact version to prepare and pass its runtime capability probe.
+
+**Runtime details** shows the package, who manages it, and any manual update guidance.
+Open **Command Preview** to review the command for the selected version.
 
 OpenCode has two runtime families. Fresh Kandev installations use the managed
 v2 package `@opencode/cli`. Kandev keeps an existing v1 selection on
@@ -686,12 +689,17 @@ interactive credential flow when a secret is required.
 
 Model and mode choices are probed from the locally installed CLI. Opening a saved concrete profile probes its saved environment, CLI flags, and command prefix. If you edit any of these launch settings, select **Refresh models** before you choose a model. Kandev probes the current draft without saving it or sending a prompt. A secret reference is resolved on the Kandev host and its value is not sent back to the browser. Probe status can report **auth required**, **not installed**, **not configured**, **unsupported**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
+When an ACP agent returns a mode config select, **Start mode** shows its choice
+names and saves the exact values. Kandev uses legacy mode IDs only when the agent
+does not return that select. A saved ID outside the current catalog stays visible
+as a custom entry. Keep it when the task repository defines that mode. Otherwise,
+select an advertised choice and save the profile. Startup stops before the first
+prompt if the active session rejects the saved ID.
+
 For a mode defined in a repository, open **Start mode**, type its exact ID,
 select the custom entry, and save the profile. The host probe runs outside the
 task repository, so it may omit that mode and show options for the host default.
-At task startup, the selected executor must confirm the requested mode before
-the first prompt. If it cannot, startup fails. Leaving the mode unset uses the
-agent's default.
+Leaving the mode unset uses the agent's default.
 
 ### Use an OpenAI-compatible provider
 

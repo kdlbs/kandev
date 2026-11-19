@@ -108,17 +108,21 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
     );
   }
 
-  return provider === "monaco" ? (
-    <MonacoCodeEditor
-      {...props}
-      onPreviewHtml={props.previewKind === "html" ? publishCurrentHtmlPreview : undefined}
-      isPublishingHtmlPreview={htmlPreview.isPublishing}
-    />
-  ) : (
-    <CodeMirrorCodeEditor
-      {...props}
-      onPreviewHtml={props.previewKind === "html" ? publishCurrentHtmlPreview : undefined}
-      isPublishingHtmlPreview={htmlPreview.isPublishing}
-    />
+  return (
+    <div className="h-full min-h-0" data-testid="file-editor-content">
+      {provider === "monaco" ? (
+        <MonacoCodeEditor
+          {...props}
+          onPreviewHtml={props.previewKind === "html" ? publishCurrentHtmlPreview : undefined}
+          isPublishingHtmlPreview={htmlPreview.isPublishing}
+        />
+      ) : (
+        <CodeMirrorCodeEditor
+          {...props}
+          onPreviewHtml={props.previewKind === "html" ? publishCurrentHtmlPreview : undefined}
+          isPublishingHtmlPreview={htmlPreview.isPublishing}
+        />
+      )}
+    </div>
   );
 });

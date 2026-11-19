@@ -1398,7 +1398,8 @@ func startGatewayAndServe(
 	// BEFORE lifecycleMgr.Start recovers sessions.
 	builtServer, err := buildHTTPServer(ctx, cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, notificationSvc, msgCreator, agentRegistry, hostUtilityMgr,
-		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
+		addCleanup, restoreWorkerCleanupRegistrar(addCleanup, &restoreCleanups),
+		repoCloner, systemSvc, storageComposition.workspaceRestorer,
 		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, e2eRuntimeUpdateHooks, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
@@ -3108,6 +3109,7 @@ func buildHTTPServer(
 	agentRegistry *registry.Registry,
 	hostUtilityMgr *hostutility.Manager,
 	addCleanup func(func() error),
+	addRestoreCleanup func(func() error),
 	repoCloner *repoclone.Cloner,
 	systemSvc *systemsvc.Service,
 	workspaceRestorer taskhandlers.WorkspaceQuarantineRestorer,
@@ -3240,6 +3242,7 @@ func buildHTTPServer(
 		authSvc:                       services.Auth,
 		agentRuntimeAvailability:      agentRuntimeAvailability,
 		addCleanup:                    addCleanup,
+		addRestoreCleanup:             addRestoreCleanup,
 		repoCloner:                    repoCloner,
 		version:                       Version,
 		commit:                        Commit,

@@ -1232,5 +1232,7 @@
   "builtinMcp.inheritedValue": "繼承自工作區：{{value}}",
   "builtinMcp.overrideValue": "任務覆蓋值：{{value}}。工作區預設值：{{default}}。",
   "builtinMcp.useInherited": "使用繼承值",
-  "builtinMcp.allowTasks": "允許任務使用此包"
+  "builtinMcp.allowTasks": "允許任務使用此包",
+  "markdownPreviewByDefault": "預設以預覽模式開啟 Markdown 檔案",
+  "markdownPreviewByDefaultDescription": "選擇新開啟的 Markdown 檔案的初始模式。您可以隨時切換模式。"
 }

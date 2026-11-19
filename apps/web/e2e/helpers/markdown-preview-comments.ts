@@ -73,7 +73,6 @@ export async function openMarkdownPreviewForSelectionComment({
   }
   const previewToggle = page.getByTestId("markdown-preview-toggle").first();
   await expect(previewToggle).toBeVisible({ timeout: 10_000 });
-  await previewToggle.click();
 
   const preview = page.getByTestId("markdown-preview");
   await expect(preview).toBeVisible({ timeout: 10_000 });
