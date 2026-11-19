@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -16,10 +17,22 @@ import (
 )
 
 const maxWorkspaceRootFiles = 500
+const maxWorkspaceRootEntriesScanned = 2048
+const workspaceRootReadDirBatchSize = 128
 
 type workspaceRootFileObserverState struct {
 	lastFiles     []types.WorkspaceRootFile
+	lastTruncated bool
 	publishedOnce bool
+}
+
+type workspaceRootFilesWalk struct {
+	rootPath       string
+	checkoutRoots  []string
+	exclusions     []string
+	files          []types.WorkspaceRootFile
+	truncated      bool
+	entriesScanned int
 }
 
 // SetCheckoutRoots sets repository directories excluded from root-file scans.
@@ -97,6 +110,9 @@ func (m *Manager) WorkspaceRootFiles(ctx context.Context) (types.WorkspaceRootFi
 		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			continue
 		}
+		if !isWorkspaceRootCheckoutDirectory(rootPath, rel) {
+			continue
+		}
 		listing.Destinations = append(listing.Destinations, types.WorkspaceRootDestination{
 			RepositoryName: tracker.RepositoryName(),
 			Path:           filepath.ToSlash(rel),
@@ -123,33 +139,39 @@ func workspaceCheckoutRoots(root string, trackers []*WorkspaceTracker) []string 
 
 func walkWorkspaceRootFiles(
 	ctx context.Context,
-	root string,
+	rootPath string,
 	checkoutRoots []string,
 	exclusions []string,
 ) ([]types.WorkspaceRootFile, bool, error) {
-	files := make([]types.WorkspaceRootFile, 0)
-	truncated := false
-	err := walkWorkspaceRootFilesDirectory(ctx, root, "", checkoutRoots, exclusions, &files, &truncated)
-	return files, truncated, err
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("open workspace root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	walk := &workspaceRootFilesWalk{
+		rootPath:      filepath.Clean(rootPath),
+		checkoutRoots: checkoutRoots,
+		exclusions:    exclusions,
+		files:         make([]types.WorkspaceRootFile, 0),
+	}
+	err = walkWorkspaceRootFilesDirectory(ctx, root, "", walk)
+	sort.Slice(walk.files, func(left, right int) bool {
+		return walk.files[left].Path < walk.files[right].Path
+	})
+	return walk.files, walk.truncated, err
 }
 
 func walkWorkspaceRootFilesDirectory(
 	ctx context.Context,
-	root string,
+	directory *os.Root,
 	relDir string,
-	checkoutRoots []string,
-	exclusions []string,
-	files *[]types.WorkspaceRootFile,
-	truncated *bool,
+	walk *workspaceRootFilesWalk,
 ) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	dir := root
-	if relDir != "" {
-		dir = filepath.Join(root, filepath.FromSlash(relDir))
-	}
-	entries, err := os.ReadDir(dir)
+	entries, err := readWorkspaceRootDirectoryEntries(directory, relDir, walk)
 	if err != nil {
 		if relDir != "" && (errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission)) {
 			return nil
@@ -160,85 +182,176 @@ func walkWorkspaceRootFilesDirectory(
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		relPath := filepath.ToSlash(filepath.Join(filepath.FromSlash(relDir), entry.Name()))
-		fullPath := filepath.Join(dir, entry.Name())
-		done, err := processWorkspaceRootFileEntry(ctx, root, relPath, fullPath, entry.Name(), checkoutRoots, exclusions, files, truncated)
-		if err != nil {
+		if err := processWorkspaceRootFileEntry(ctx, directory, relDir, entry.Name(), walk); err != nil {
 			return err
 		}
-		if done {
+		if walk.truncated && len(walk.files) == maxWorkspaceRootFiles {
 			return nil
 		}
 	}
 	return nil
 }
 
+func readWorkspaceRootDirectoryEntries(
+	directory *os.Root,
+	relDir string,
+	walk *workspaceRootFilesWalk,
+) ([]os.DirEntry, error) {
+	dirFile, err := directory.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = dirFile.Close() }()
+
+	remaining := maxWorkspaceRootEntriesScanned - walk.entriesScanned
+	limit := remaining + 1
+	entries := make([]os.DirEntry, 0, min(limit, workspaceRootReadDirBatchSize))
+	for len(entries) < limit {
+		batchSize := min(workspaceRootReadDirBatchSize, limit-len(entries))
+		batch, readErr := dirFile.ReadDir(batchSize)
+		entries = append(entries, batch...)
+		if len(entries) > remaining {
+			entries = entries[:remaining]
+			walk.truncated = true
+			break
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return nil, readErr
+		}
+	}
+	walk.entriesScanned += len(entries)
+	sort.Slice(entries, func(left, right int) bool {
+		return entries[left].Name() < entries[right].Name()
+	})
+	return entries, nil
+}
+
 func processWorkspaceRootFileEntry(
 	ctx context.Context,
-	root, relPath, fullPath, name string,
-	checkoutRoots, exclusions []string,
-	files *[]types.WorkspaceRootFile,
-	truncated *bool,
-) (bool, error) {
-	info, err := os.Lstat(fullPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+	directory *os.Root,
+	relDir, name string,
+	walk *workspaceRootFilesWalk,
+) error {
+	relPath := filepath.ToSlash(filepath.Join(filepath.FromSlash(relDir), name))
+	info, err := directory.Lstat(name)
+	if errors.Is(err, fs.ErrNotExist) || (relPath != "" && errors.Is(err, fs.ErrPermission)) {
+		return nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("stat workspace root path %q: %w", relPath, err)
+		return fmt.Errorf("stat workspace root path %q: %w", relPath, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return false, nil
+		return nil
 	}
 	if info.IsDir() {
-		return walkWorkspaceRootSubdirectory(ctx, root, relPath, fullPath, name, checkoutRoots, exclusions, files, truncated)
+		return walkWorkspaceRootSubdirectory(ctx, directory, relPath, name, info, walk)
 	}
-	return appendWorkspaceRootFile(relPath, info, exclusions, files, truncated)
+	appendWorkspaceRootFile(relPath, info, walk)
+	return nil
 }
 
 func walkWorkspaceRootSubdirectory(
 	ctx context.Context,
-	root, relPath, fullPath, name string,
-	checkoutRoots, exclusions []string,
-	files *[]types.WorkspaceRootFile,
-	truncated *bool,
-) (bool, error) {
-	if skipWorkspaceRootDirectory(name, fullPath, checkoutRoots) {
-		return false, nil
+	parent *os.Root,
+	relPath, name string,
+	info os.FileInfo,
+	walk *workspaceRootFilesWalk,
+) error {
+	fullPath := filepath.Join(walk.rootPath, filepath.FromSlash(relPath))
+	if skipWorkspaceRootDirectory(name, fullPath, walk.checkoutRoots) {
+		return nil
 	}
-	hasGitEntry, err := hasWorkspaceGitEntry(fullPath)
+	child, err := openWorkspaceRootSubdirectory(parent, name, info)
 	if err != nil {
-		return false, fmt.Errorf("inspect workspace directory %q: %w", relPath, err)
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+			return nil
+		}
+		if errors.Is(err, errWorkspaceRootDirectoryChanged) {
+			walk.truncated = true
+			return nil
+		}
+		postOpenInfo, statErr := parent.Lstat(name)
+		if statErr == nil && postOpenInfo.Mode()&os.ModeSymlink != 0 {
+			walk.truncated = true
+			return nil
+		}
+		return fmt.Errorf("open workspace directory %q: %w", relPath, err)
+	}
+	defer func() { _ = child.Close() }()
+	hasGitEntry, err := hasWorkspaceGitEntry(child)
+	if err != nil {
+		return fmt.Errorf("inspect workspace directory %q: %w", relPath, err)
 	}
 	if hasGitEntry {
-		return false, nil
+		return nil
 	}
-	if err := walkWorkspaceRootFilesDirectory(ctx, root, relPath, checkoutRoots, exclusions, files, truncated); err != nil {
-		return false, err
+	return walkWorkspaceRootFilesDirectory(ctx, child, relPath, walk)
+}
+
+var errWorkspaceRootDirectoryChanged = errors.New("workspace root directory changed while opening")
+
+func openWorkspaceRootSubdirectory(parent *os.Root, name string, expected os.FileInfo) (*os.Root, error) {
+	child, err := parent.OpenRoot(name)
+	if err != nil {
+		return nil, err
 	}
-	return *truncated, nil
+	opened, err := child.Stat(".")
+	if err != nil {
+		_ = child.Close()
+		return nil, err
+	}
+	if !os.SameFile(expected, opened) {
+		_ = child.Close()
+		return nil, errWorkspaceRootDirectoryChanged
+	}
+	return child, nil
 }
 
 func appendWorkspaceRootFile(
 	relPath string,
 	info os.FileInfo,
-	exclusions []string,
-	files *[]types.WorkspaceRootFile,
-	truncated *bool,
-) (bool, error) {
-	if !info.Mode().IsRegular() || isRootOwnershipMarkerPath(relPath) || relativePathExcluded(relPath, exclusions) {
-		return false, nil
+	walk *workspaceRootFilesWalk,
+) {
+	if !info.Mode().IsRegular() || isRootOwnershipMarkerPath(relPath) || relativePathExcluded(relPath, walk.exclusions) {
+		return
 	}
-	if len(*files) == maxWorkspaceRootFiles {
-		*truncated = true
-		return true, nil
+	if len(walk.files) == maxWorkspaceRootFiles {
+		walk.truncated = true
+		return
 	}
-	*files = append(*files, types.WorkspaceRootFile{
+	walk.files = append(walk.files, types.WorkspaceRootFile{
 		Path:       relPath,
 		Size:       info.Size(),
 		ModifiedAt: info.ModTime().UTC(),
 	})
-	return false, nil
+}
+
+func isWorkspaceRootCheckoutDirectory(rootPath, relPath string) bool {
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return false
+	}
+	current := root
+	defer func() { _ = current.Close() }()
+	for _, part := range strings.Split(filepath.Clean(relPath), string(filepath.Separator)) {
+		if part == "" || part == "." || part == string(filepath.Separator) {
+			continue
+		}
+		info, err := current.Lstat(part)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return false
+		}
+		child, err := openWorkspaceRootSubdirectory(current, part, info)
+		if err != nil {
+			return false
+		}
+		_ = current.Close()
+		current = child
+	}
+	return true
 }
 
 func skipWorkspaceRootDirectory(name, fullPath string, checkoutRoots []string) bool {
@@ -258,8 +371,8 @@ func pathWithinRoot(path, root string) bool {
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func hasWorkspaceGitEntry(dir string) (bool, error) {
-	_, err := os.Lstat(filepath.Join(dir, ".git"))
+func hasWorkspaceGitEntry(dir *os.Root) (bool, error) {
+	_, err := dir.Lstat(".git")
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 		return false, nil
 	}
@@ -278,18 +391,25 @@ func (wt *WorkspaceTracker) observeWorkspaceRootFiles(ctx context.Context) {
 	state := &wt.workspaceRootFileObserver
 	if !state.publishedOnce {
 		state.lastFiles = listing.Files
+		state.lastTruncated = listing.Truncated
 		state.publishedOnce = true
 		return
 	}
 	changes := diffWorkspaceRootFiles(state.lastFiles, listing.Files)
-	if len(changes) == 0 {
+	truncationChanged := state.lastTruncated != listing.Truncated
+	if len(changes) == 0 && !truncationChanged {
 		return
 	}
 	state.lastFiles = listing.Files
+	state.lastTruncated = listing.Truncated
 	wt.logger.Debug("workspace.root_files",
 		zap.Int("count", len(listing.Files)),
 		zap.Bool("truncated", listing.Truncated),
 		zap.Duration("walk_duration", time.Since(started)))
+	if len(changes) == 0 {
+		wt.notifyFileChange("", types.FileOpRefresh)
+		return
+	}
 	for _, change := range changes {
 		wt.notifyFileChange(change.Path, change.Operation)
 	}

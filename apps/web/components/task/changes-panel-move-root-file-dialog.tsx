@@ -113,7 +113,8 @@ export function ChangesPanelMoveRootFileDialog({
   );
   const targetPath = selectedDestination ? `${selectedDestination.path}/${path}` : "";
 
-  const handleOpenChange = (nextOpen: boolean) => {
+  const handleOpenChange = (nextOpen: boolean, force = false) => {
+    if (!nextOpen && isMoving && !force) return;
     if (!nextOpen) setSelectedPath("");
     onOpenChange(nextOpen);
   };
@@ -133,7 +134,7 @@ export function ChangesPanelMoveRootFileDialog({
         toastMoveFailure(toast, errorTitle, response.error || errorFallback);
         return;
       }
-      handleOpenChange(false);
+      handleOpenChange(false, true);
     } catch (error) {
       toastMoveFailure(toast, errorTitle, error instanceof Error ? error.message : errorFallback);
     } finally {

@@ -61,10 +61,14 @@ See [UI-02 and UI-03 in the plan](plan.md#ascii-ui-preview).
 ## Verification
 
 ```bash
-cd apps/web && pnpm exec vitest run components/task/changes-panel-move-root-file-dialog.test.tsx components/task/changes-panel-root-files.test.tsx
-cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check
-cd apps/web && pnpm e2e:run --project chromium tests/git/workspace-root-files.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/git/mobile-workspace-root-files.spec.ts
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm exec vitest run components/task/changes-panel-move-root-file-dialog.test.tsx components/task/changes-panel-root-files.test.tsx)
+(cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check)
+(cd apps/web && pnpm e2e:run --project chromium tests/git/workspace-root-files.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/git/mobile-workspace-root-files.spec.ts)
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
 ```
 
 ## Files likely touched
@@ -104,3 +108,8 @@ Task 02.
   second repository as unstaged, then confirmed a conflicting repeat move left
   the recreated root file and destination file unchanged. Each managed run
   built the backend and Vite assets.
+- Review regressions passed for rejecting overwrite races, not offering
+  symlinked checkout destinations, binding dialog state to its session, and
+  ignoring dismissal while a move is pending. Focused Vitest passed (26 tests
+  across four files), and desktop and phone E2E each passed.
+- Passed the specification validation, spec lint, and diff whitespace checks.

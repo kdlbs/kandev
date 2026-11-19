@@ -63,6 +63,11 @@ beforeEach(() => {
   mocks.state = {
     connection: { status: "connected" },
     environmentIdBySessionId: { [SESSION_ID]: ENVIRONMENT_ID },
+    gitStatus: {
+      inventoryByEnvironment: {
+        [ENVIRONMENT_ID]: { generation: 1, scopes: ["web"] },
+      },
+    },
     workspaceRootFiles: { byEnvironmentId: {} },
     setWorkspaceRootFiles: vi.fn(),
   } as unknown as AppState;
@@ -106,6 +111,23 @@ describe("useWorkspaceRootFiles fetch lifecycle", () => {
       "environment-root-files-next",
       listing(ROOT_FILE),
     );
+  });
+
+  it("refreshes the listing when repository inventory changes", async () => {
+    mocks.list.mockResolvedValue(listing(ROOT_FILE));
+    const hook = renderHook(() => useWorkspaceRootFiles(SESSION_ID));
+    expect(mocks.list).toHaveBeenCalledTimes(1);
+    await act(async () => Promise.resolve());
+
+    mocks.state.gitStatus.inventoryByEnvironment![ENVIRONMENT_ID] = {
+      generation: 2,
+      scopes: ["api", "web"],
+    };
+    hook.rerender();
+    act(() => vi.advanceTimersByTime(300));
+
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+    await act(async () => Promise.resolve());
   });
 
   it("fetches after the WebSocket reconnects", async () => {
@@ -230,5 +252,29 @@ describe("useWorkspaceRootFiles notification refresh", () => {
       ENVIRONMENT_ID,
       listing("newer.json"),
     );
+  });
+
+  it("starts a fresh read after the last observer unmounts with a request pending", async () => {
+    const oldRequest = deferred<WorkspaceRootFilesResponse>();
+    mocks.list.mockReturnValueOnce(oldRequest.promise).mockResolvedValueOnce(listing("fresh.json"));
+
+    const first = renderHook(() => useWorkspaceRootFiles(SESSION_ID));
+    expect(mocks.list).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    const second = renderHook(() => useWorkspaceRootFiles(SESSION_ID));
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+    await act(async () => Promise.resolve());
+    expect(mocks.state.setWorkspaceRootFiles).toHaveBeenLastCalledWith(
+      ENVIRONMENT_ID,
+      listing("fresh.json"),
+    );
+
+    await act(async () => oldRequest.resolve(listing("stale.json")));
+    expect(mocks.state.setWorkspaceRootFiles).toHaveBeenLastCalledWith(
+      ENVIRONMENT_ID,
+      listing("fresh.json"),
+    );
+    second.unmount();
   });
 });

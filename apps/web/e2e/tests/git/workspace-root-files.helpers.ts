@@ -197,7 +197,8 @@ export async function moveRootFileToSecondRepository(
     !(outcome.error instanceof Error) ||
     !outcome.error.message.startsWith(
       'watchWs.waitForResponse: "workspace.file.rename" was rejected:',
-    )
+    ) ||
+    !outcome.error.message.includes("target already exists")
   ) {
     throw outcome.error;
   }

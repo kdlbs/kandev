@@ -81,6 +81,7 @@ test("opens and moves workspace root files on a phone without staging or overwri
   await expect(
     testPage.getByTestId("toast-message").filter({ hasText: "Could not move file" }),
   ).toBeVisible();
+  await expect(testPage.getByTestId("toast-message")).toContainText("target already exists");
   await expect(dialog).toBeVisible();
   expectWorkspaceRootFileContents(workspaceRoot, "dashboard.json", conflictContent);
   expect(fs.readFileSync(path.join(repoPaths[1], "dashboard.json"), "utf8")).toBe(

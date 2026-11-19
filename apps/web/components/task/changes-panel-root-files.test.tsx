@@ -10,6 +10,21 @@ const listing: WorkspaceRootFilesResponse = {
   destinations: [{ repository_name: "web", path: "apps/web" }],
 };
 
+const mocks = vi.hoisted(() => ({
+  renameFile: vi.fn(),
+  toast: vi.fn(),
+}));
+
+vi.mock("@/lib/ws/connection", () => ({
+  getWebSocketClient: () => ({}),
+}));
+vi.mock("@/lib/ws/workspace-files", () => ({
+  renameFile: mocks.renameFile,
+}));
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: mocks.toast }),
+}));
+
 afterEach(cleanup);
 
 describe("ChangesPanelRootFiles", () => {
@@ -60,5 +75,27 @@ describe("ChangesPanelRootFiles", () => {
     await waitFor(() => {
       expect(screen.getByRole("menuitem", { name: "Move to repository..." })).toBeTruthy();
     });
+  });
+
+  it("closes the move dialog when the session changes", async () => {
+    const { rerender } = render(
+      <ChangesPanelRootFiles listing={listing} sessionId="session-1" onEditFile={vi.fn()} />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Show more actions" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("menuitem", { name: "Move to repository..." })).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to repository..." }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+
+    rerender(
+      <ChangesPanelRootFiles listing={listing} sessionId="session-2" onEditFile={vi.fn()} />,
+    );
+
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

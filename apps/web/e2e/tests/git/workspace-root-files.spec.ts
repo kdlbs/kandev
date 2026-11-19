@@ -38,10 +38,10 @@ test("opens and moves workspace root files without staging or overwriting", asyn
   await expect(rootFiles.getByRole("heading", { name: "Outside repositories" })).toBeVisible();
   await rootFiles.getByRole("button", { name: "dashboard.json" }).click();
 
-  const editor = testPage.getByTestId("preview-tab-file-editor");
-  await expect(editor).toBeVisible();
-  const activeEditor = testPage.locator(".monaco-editor:visible").first();
-  await expect(activeEditor.locator(".view-lines")).toContainText(workspaceRootFileMarker);
+  const editor = testPage.getByTestId("file-editor-content");
+  const editorContent = editor.locator(".cm-content:visible, .monaco-editor:visible .view-lines");
+  await expect(editorContent).toHaveCount(1);
+  await expect(editorContent).toContainText(workspaceRootFileMarker);
 
   const destinationName = await moveRootFileToSecondRepository(testPage, rootFiles, "click", {
     watcher,
@@ -73,6 +73,7 @@ test("opens and moves workspace root files without staging or overwriting", asyn
   await expect(
     testPage.getByTestId("toast-message").filter({ hasText: "Could not move file" }),
   ).toBeVisible();
+  await expect(testPage.getByTestId("toast-message")).toContainText("target already exists");
   await expect(dialog).toBeVisible();
   expectWorkspaceRootFileContents(workspaceRoot, "dashboard.json", conflictContent);
   expect(fs.readFileSync(path.join(repoPaths[1], "dashboard.json"), "utf8")).toBe(

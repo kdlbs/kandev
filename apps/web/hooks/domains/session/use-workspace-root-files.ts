@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { listWorkspaceRootFiles } from "@/lib/ws/workspace-files";
@@ -31,6 +31,11 @@ function releaseEnvironmentObserver(environmentId: string) {
     clearTimeout(timer);
     refetchTimersByEnvironment.delete(environmentId);
   }
+  pendingByEnvironment.delete(environmentId);
+  latestGenerationByEnvironment.set(
+    environmentId,
+    (latestGenerationByEnvironment.get(environmentId) ?? 0) + 1,
+  );
 }
 
 function fetchRootFiles(
@@ -85,6 +90,13 @@ export function useWorkspaceRootFiles(sessionId: string | null) {
     environmentId ? state.workspaceRootFiles.byEnvironmentId[environmentId] : undefined,
   );
   const setWorkspaceRootFiles = useAppStore((state) => state.setWorkspaceRootFiles);
+  const inventoryFingerprint = useAppStore((state) => {
+    if (!environmentId) return "";
+    const inventory = state.gitStatus.inventoryByEnvironment?.[environmentId];
+    if (!inventory) return "";
+    return JSON.stringify([inventory.generation, [...(inventory.scopes ?? [])].sort()]);
+  });
+  const previousInventory = useRef({ environmentId, fingerprint: inventoryFingerprint });
 
   useEffect(() => {
     if (!sessionId || !environmentId || connectionStatus !== "connected") return;
@@ -106,6 +118,23 @@ export function useWorkspaceRootFiles(sessionId: string | null) {
       releaseEnvironmentObserver(environmentId);
     };
   }, [connectionStatus, environmentId, sessionId, setWorkspaceRootFiles]);
+
+  useEffect(() => {
+    const previous = previousInventory.current;
+    previousInventory.current = { environmentId, fingerprint: inventoryFingerprint };
+    if (
+      !environmentId ||
+      !sessionId ||
+      connectionStatus !== "connected" ||
+      previous.environmentId !== environmentId ||
+      previous.fingerprint === inventoryFingerprint
+    ) {
+      return;
+    }
+    const client = getWebSocketClient();
+    if (!client) return;
+    scheduleRootFilesRefetch(environmentId, sessionId, client, setWorkspaceRootFiles);
+  }, [connectionStatus, environmentId, inventoryFingerprint, sessionId, setWorkspaceRootFiles]);
 
   return files;
 }

@@ -648,7 +648,7 @@ Dismiss on a Git push error card hides only that historical message and does not
 
 ### Files outside repositories
 
-In a multi-repository task, files at the task workspace root appear under **Outside repositories** in **Changes**. Select a file to open it in the editor. To add it to a repository, choose **Move to repository**, select a checkout, and confirm. Kandev moves the file to the same relative path inside that checkout. The move does not stage, commit, or push the file.
+In a multi-repository task, files at the task workspace root appear under **Outside repositories** in **Changes**. Hidden directories, `node_modules`, nested Git repositories, and checkout contents are omitted. Kandev lists up to 500 files; when the list reaches that limit, the section shows a note that more files are hidden. Select a file to open it in the editor. To add it to a repository, choose **Move to repository**, select a checkout, and confirm. Kandev moves the file to the same relative path inside that checkout. The move does not stage, commit, or push the file.
 
 ### Multi-repository tasks
 

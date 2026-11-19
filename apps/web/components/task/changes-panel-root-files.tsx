@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { IconDots } from "@tabler/icons-react";
+import { useEffect, useState } from "react";
+import { IconDots, IconFile } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
   DropdownMenu,
@@ -10,7 +10,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
-import { FileIcon } from "@/components/ui/file-icon";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { WorkspaceRootFilesResponse } from "@/lib/types/workspace-files";
 import { ChangesPanelMoveRootFileDialog } from "./changes-panel-move-root-file-dialog";
@@ -42,10 +41,10 @@ function WorkspaceRootFileRow({
       <button
         type="button"
         aria-label={path}
-        className={`flex min-w-0 flex-1 items-center gap-2 text-left ${touchMode ? "min-h-11" : "min-h-8"}`}
+        className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left ${touchMode ? "min-h-11" : "min-h-8"}`}
         onClick={openFile}
       >
-        <FileIcon fileName={path.split("/").at(-1) ?? path} className="size-4 shrink-0" />
+        <IconFile className="size-4 shrink-0" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-xs font-medium">{path}</span>
       </button>
       <DropdownMenu>
@@ -53,7 +52,7 @@ function WorkspaceRootFileRow({
           <button
             type="button"
             aria-label={t("common:showMoreActions")}
-            className={`flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground ${touchMode ? "size-11" : "size-8 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"}`}
+            className={`flex shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground ${touchMode ? "size-11" : "size-8 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"}`}
             onClick={(event) => event.stopPropagation()}
           >
             <IconDots className="size-4" />
@@ -90,7 +89,8 @@ export function ChangesPanelRootFiles({
 }: ChangesPanelRootFilesProps) {
   const { t } = useTranslation();
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
-  const [fileToMove, setFileToMove] = useState<string | null>(null);
+  const [fileToMove, setFileToMove] = useState<{ path: string; sessionId: string } | null>(null);
+  useEffect(() => setFileToMove(null), [sessionId]);
   if (!listing?.supported || listing.files.length === 0) return null;
 
   const touchMode = isMobile || !isFinePointer;
@@ -117,7 +117,11 @@ export function ChangesPanelRootFiles({
             key={file.path}
             path={file.path}
             onEditFile={onEditFile}
-            onMoveFile={sessionId && listing.destinations.length > 0 ? setFileToMove : undefined}
+            onMoveFile={
+              sessionId && listing.destinations.length > 0
+                ? (path) => setFileToMove({ path, sessionId })
+                : undefined
+            }
             touchMode={touchMode}
           />
         ))}
@@ -127,14 +131,19 @@ export function ChangesPanelRootFiles({
           {t("task:workspaceRootFilesTruncated")}
         </p>
       )}
-      {sessionId && fileToMove && (
+      {sessionId && fileToMove?.sessionId === sessionId && (
         <ChangesPanelMoveRootFileDialog
+          key={`${fileToMove.sessionId}:${fileToMove.path}`}
           open
           onOpenChange={(open) => {
-            if (!open) setFileToMove(null);
+            if (!open) {
+              setFileToMove((selection) =>
+                selection?.sessionId === fileToMove.sessionId ? null : selection,
+              );
+            }
           }}
-          sessionId={sessionId}
-          path={fileToMove}
+          sessionId={fileToMove.sessionId}
+          path={fileToMove.path}
           destinations={listing.destinations}
         />
       )}

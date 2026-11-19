@@ -73,8 +73,12 @@ and metrics.
 (cd apps/backend && go test -race -trimpath ./internal/agentctl/server/process -run 'WorkspaceRootFiles' -count=1)
 (cd apps/backend && go test -race -trimpath ./internal/agentctl/server/api -run 'WorkspaceRootFiles' -count=1)
 (cd apps/backend && go test -race -trimpath ./internal/agent/handlers -run 'WorkspaceRootFiles' -count=1)
+(cd apps/backend && go test -race -trimpath ./internal/agent/runtime/agentctl -run 'WorkspaceRootFiles' -count=1)
 (cd apps/backend && go test -race -trimpath ./internal/agentctl/server/process -count=1)
 bash scripts/lint-go-changed $(git diff --name-only -- '*.go')
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
 ```
 
 ## Files likely touched
@@ -112,5 +116,9 @@ None. Read `observeWorktreeInventory` (`workspace_worktree_observer.go`) and
 - Added the agentctl HTTP route, runtime client method, and session-keyed WebSocket
   action.
 - Passed the focused race-enabled process, API, handler, and runtime-client
-  tests; passed the full process package race test (464.149s).
+  tests; passed the full process package race test (531.373s).
+- Added regressions for unreadable and vanished directories, bounded scans,
+  symlink replacement, checkout roots under a symlinked parent, and refreshes
+  when the truncation state changes. The targeted tests passed.
 - Passed `bash scripts/lint-go-changed` for all changed Go files.
+- Passed `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`.

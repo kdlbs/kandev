@@ -35,6 +35,14 @@ function renderDialog(onOpenChange = vi.fn()) {
   );
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   mocks.renameFile.mockReset();
   mocks.toast.mockReset();
@@ -87,5 +95,21 @@ describe("ChangesPanelMoveRootFileDialog", () => {
       }),
     );
     expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("ignores dismissal while a move is pending", async () => {
+    const response = deferred<{ success: boolean }>();
+    const onOpenChange = vi.fn();
+    mocks.renameFile.mockReturnValue(response.promise);
+    renderDialog(onOpenChange);
+
+    fireEvent.click(screen.getByRole("radio", { name: /backend/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Move" }));
+    await waitFor(() => expect(mocks.renameFile).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    response.resolve({ success: true });
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 });

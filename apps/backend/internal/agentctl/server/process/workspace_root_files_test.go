@@ -198,21 +198,139 @@ func TestWorkspaceRootFilesListingSkipsReadDirPermissionAndKeepsSiblings(t *test
 	}
 }
 
+func TestWorkspaceRootFilesListingSkipsNonSearchableDirectoryAndKeepsSiblings(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions are not enforced for this test user")
+	}
+	root := t.TempDir()
+	nonSearchable := filepath.Join(root, "a-no-search")
+	if err := os.Mkdir(nonSearchable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeWorkspaceRootFile(t, nonSearchable, "hidden.txt", "hidden")
+	writeWorkspaceRootFile(t, root, "sibling.txt", "visible")
+	if err := os.Chmod(nonSearchable, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(nonSearchable, 0o700) })
+
+	tracker := NewWorkspaceTrackerForRepo(root, "", newTestLogger(t))
+	listing, err := tracker.ListWorkspaceRootFiles(context.Background())
+	if err != nil {
+		t.Fatalf("ListWorkspaceRootFiles: %v", err)
+	}
+	if got := rootFilePaths(listing.Files); len(got) != 1 || got[0] != "sibling.txt" {
+		t.Fatalf("root file paths = %v, want [sibling.txt]", got)
+	}
+}
+
+func TestWorkspaceRootFilesListingBoundsDirectoryEntryScan(t *testing.T) {
+	root := t.TempDir()
+	for index := 0; index < 2049; index++ {
+		if err := os.Mkdir(filepath.Join(root, fmt.Sprintf(".hidden-%04d", index)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tracker := NewWorkspaceTrackerForRepo(root, "", newTestLogger(t))
+	listing, err := tracker.ListWorkspaceRootFiles(context.Background())
+	if err != nil {
+		t.Fatalf("ListWorkspaceRootFiles: %v", err)
+	}
+	if len(listing.Files) != 0 || !listing.Truncated {
+		t.Fatalf("listing has %d files, truncated=%v, want empty and truncated after scan limit", len(listing.Files), listing.Truncated)
+	}
+}
+
+func TestOpenWorkspaceRootSubdirectoryRejectsSymlinkReplacement(t *testing.T) {
+	rootPath := t.TempDir()
+	checkedPath := filepath.Join(rootPath, "checked")
+	otherPath := filepath.Join(rootPath, "other")
+	if err := os.Mkdir(checkedPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(otherPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	checkedInfo, err := root.Lstat("checked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(checkedPath, filepath.Join(rootPath, "checked-original")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("other", checkedPath); err != nil {
+		t.Skipf("create in-root symlink: %v", err)
+	}
+
+	child, err := openWorkspaceRootSubdirectory(root, "checked", checkedInfo)
+	if child != nil {
+		_ = child.Close()
+	}
+	if err == nil || err != errWorkspaceRootDirectoryChanged {
+		t.Fatalf("open replaced directory error = %v, want %v", err, errWorkspaceRootDirectoryChanged)
+	}
+}
+
+func TestWorkspaceRootFilesObserverRefreshesWhenTruncationChanges(t *testing.T) {
+	root := t.TempDir()
+	for index := 0; index < maxWorkspaceRootFiles; index++ {
+		writeWorkspaceRootFile(t, root, fmt.Sprintf("file-%03d.txt", index), "x")
+	}
+	tracker := NewWorkspaceTrackerForRepo(root, "", newTestLogger(t))
+	tracker.suppressGitPublication = true
+	sub := tracker.SubscribeWorkspaceStream()
+	defer tracker.UnsubscribeWorkspaceStream(sub)
+	t.Cleanup(tracker.Stop)
+
+	last := &workspaceState{}
+	failures := 0
+	tracker.monitorTick(context.Background(), last, &failures)
+	assertNoRootFileNotification(t, sub)
+
+	writeWorkspaceRootFile(t, root, "zzz.txt", "x")
+	tracker.monitorTick(context.Background(), last, &failures)
+	assertRootFileRefreshNotification(t, sub)
+
+	if err := os.Remove(filepath.Join(root, "zzz.txt")); err != nil {
+		t.Fatal(err)
+	}
+	tracker.monitorTick(context.Background(), last, &failures)
+	assertRootFileRefreshNotification(t, sub)
+	assertNoRootFileNotification(t, sub)
+}
+
 func TestWorkspaceRootFilesSkipsVanishedNestedDirectoryAndKeepsSiblings(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceRootFile(t, root, "sibling/sibling.txt", "visible")
-	if err := os.Mkdir(filepath.Join(root, "vanished"), 0o755); err != nil {
+	vanishedPath := filepath.Join(root, "vanished")
+	if err := os.Mkdir(vanishedPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	files := make([]types.WorkspaceRootFile, 0)
-	truncated := false
-	if err := walkWorkspaceRootFilesDirectory(context.Background(), root, "sibling", nil, nil, &files, &truncated); err != nil {
-		t.Fatalf("walk sibling directory: %v", err)
-	}
-	if err := os.RemoveAll(filepath.Join(root, "vanished")); err != nil {
+	rootHandle, err := os.OpenRoot(root)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := walkWorkspaceRootFilesDirectory(context.Background(), root, "vanished", nil, nil, &files, &truncated); err != nil {
+	defer func() { _ = rootHandle.Close() }()
+	vanishedInfo, err := rootHandle.Lstat("vanished")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(vanishedPath); err != nil {
+		t.Fatal(err)
+	}
+	files, _, err := walkWorkspaceRootFiles(context.Background(), root, nil, nil)
+	if err != nil {
+		t.Fatalf("walk workspace root: %v", err)
+	}
+	walk := &workspaceRootFilesWalk{rootPath: root, files: files}
+	if err := walkWorkspaceRootSubdirectory(context.Background(), rootHandle, "vanished", "vanished", vanishedInfo, walk); err != nil {
 		t.Fatalf("walk vanished directory: %v", err)
 	}
 	if got := rootFilePaths(files); len(got) != 1 || got[0] != "sibling/sibling.txt" {
@@ -300,6 +418,34 @@ func TestManagerWorkspaceRootFilesOnlySupportsBareMultiRepoRoot(t *testing.T) {
 	}
 }
 
+func TestManagerWorkspaceRootFilesDoesNotOfferSymlinkCheckout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory symlink behavior differs on Windows")
+	}
+	rootPath := t.TempDir()
+	outsideCheckout := t.TempDir()
+	linkPath := filepath.Join(rootPath, "linked")
+	if err := os.Symlink(outsideCheckout, linkPath); err != nil {
+		t.Skipf("create checkout symlink: %v", err)
+	}
+	root := NewWorkspaceTrackerForRepo(rootPath, "", newTestLogger(t))
+	root.suppressGitPublication = true
+	manager := &Manager{
+		workspaceTracker: root,
+		repoTrackers: []*WorkspaceTracker{
+			NewWorkspaceTrackerForRepo(linkPath, "linked", newTestLogger(t)),
+		},
+	}
+
+	listing, err := manager.WorkspaceRootFiles(context.Background())
+	if err != nil {
+		t.Fatalf("WorkspaceRootFiles: %v", err)
+	}
+	if len(listing.Destinations) != 0 {
+		t.Fatalf("destinations = %+v, want no symlinked checkout", listing.Destinations)
+	}
+}
+
 func writeWorkspaceRootFile(t *testing.T, root, rel, body string) {
 	t.Helper()
 	fullPath := filepath.Join(root, filepath.FromSlash(rel))
@@ -346,5 +492,26 @@ func assertNoRootFileNotification(t *testing.T, sub types.WorkspaceStreamSubscri
 	case message := <-sub:
 		t.Fatalf("unexpected root file notification: %+v", message)
 	default:
+	}
+}
+
+func assertRootFileRefreshNotification(t *testing.T, sub types.WorkspaceStreamSubscriber) {
+	t.Helper()
+	select {
+	case message := <-sub:
+		if message.FileChange == nil {
+			t.Fatalf("workspace message = %+v, want root-file refresh", message)
+		}
+		if got := message.FileChange.Path; got != "" {
+			t.Errorf("refresh path = %q, want empty", got)
+		}
+		if got := message.FileChange.Operation; got != types.FileOpRefresh {
+			t.Errorf("refresh operation = %q, want %q", got, types.FileOpRefresh)
+		}
+		if got := message.FileChange.RepositoryName; got != "" {
+			t.Errorf("refresh repository name = %q, want empty for the workspace root", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for root-file refresh notification")
 	}
 }

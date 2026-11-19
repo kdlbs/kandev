@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -22,16 +23,31 @@ func TestWorkspaceRootFilesRouteListsMultiRepoRootAndDoesNotRunGit(t *testing.T)
 	if err := os.WriteFile(filepath.Join(root, "dashboard.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	server := newWorkspaceRootFilesServer(t, root)
 	marker := filepath.Join(t.TempDir(), "git-invoked")
 	if runtime.GOOS != "windows" {
-		binDir := t.TempDir()
-		fakeGit := filepath.Join(binDir, "git")
-		if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\nprintf called >> \"$GIT_MARKER\"\nexit 1\n"), 0o755); err != nil {
+		realGit, err := exec.LookPath("git")
+		if err != nil {
 			t.Fatal(err)
 		}
-		t.Setenv("PATH", binDir)
+		binDir := t.TempDir()
+		fakeGit := filepath.Join(binDir, "git")
+		shim := "#!/bin/sh\nprintf called >> \"$GIT_MARKER\"\nexec \"$REAL_GIT\" \"$@\"\n"
+		if err := os.WriteFile(fakeGit, []byte(shim), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(marker, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		pathParts := append([]string{binDir}, filepath.SplitList(os.Getenv("PATH"))...)
+		t.Setenv("PATH", strings.Join(pathParts, string(os.PathListSeparator)))
 		t.Setenv("GIT_MARKER", marker)
+		t.Setenv("REAL_GIT", realGit)
+	}
+	server := newWorkspaceRootFilesServer(t, root)
+	if runtime.GOOS != "windows" {
+		if err := os.WriteFile(marker, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	response := workspaceRequest(t, server, http.MethodGet, "/api/v1/workspace/root-files", nil)
@@ -46,8 +62,12 @@ func TestWorkspaceRootFilesRouteListsMultiRepoRootAndDoesNotRunGit(t *testing.T)
 		t.Fatalf("destinations = %+v, want backend then frontend", listing.Destinations)
 	}
 	if runtime.GOOS != "windows" {
-		if _, err := os.Stat(marker); !os.IsNotExist(err) {
-			t.Fatalf("root-file route invoked git; marker stat error = %v", err)
+		invocations, err := os.ReadFile(marker)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(invocations) != 0 {
+			t.Fatalf("root-file route invoked git: %q", invocations)
 		}
 	}
 }

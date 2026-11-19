@@ -74,10 +74,14 @@ repository…** item appears in Task 03.
 ## Verification
 
 ```bash
-cd apps/web && pnpm exec vitest run hooks/domains/session/use-workspace-root-files.test.ts components/task/changes-panel-root-files.test.tsx components/task/changes-panel-body-context.test.tsx
-cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check
-cd apps/web && pnpm e2e:run --project chromium tests/git/workspace-root-files.spec.ts -- --grep "shows"
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/git/mobile-workspace-root-files.spec.ts -- --grep "shows"
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm exec vitest run hooks/domains/session/use-workspace-root-files.test.ts components/task/changes-panel-root-files.test.tsx components/task/changes-panel-body-context.test.tsx)
+(cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check)
+(cd apps/web && pnpm e2e:run --project chromium tests/git/workspace-root-files.spec.ts -- --grep "shows")
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/git/mobile-workspace-root-files.spec.ts -- --grep "shows")
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
 ```
 
 ## Files likely touched
@@ -114,3 +118,6 @@ Task 01. Load `/mobile-parity` and `/e2e` before you start.
 - Added translations for all supported locales and regenerated the pseudo locale. The browser demo returns an unsupported listing.
 - Focused Vitest: passed (45 tests across six files); web typecheck, lint, i18n check, and i18n ratchet passed.
 - Desktop and phone managed E2E passed. Each opened the root file and verified both repository checkouts remained clean. The mobile case uses its own `mobile-*` filename so Playwright discovers it in the `mobile-chrome` project.
+- Hook and section regressions passed, including inventory changes triggering a refresh and pending requests being invalidated after the last observer unmounts. Focused Vitest passed (26 tests across four files); typecheck, lint, i18n check, and the Vite E2E build passed.
+- Desktop and phone workspace-root-files E2E passed after the review updates.
+- Passed the specification validation, spec lint, and diff whitespace checks.
