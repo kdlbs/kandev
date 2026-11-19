@@ -17,11 +17,20 @@ import (
 // message. Satisfied by the orchestrator through PromptDreamEpisode.
 type DreamPrompter func(ctx context.Context, taskID, sessionID, prompt string) (string, error)
 
-// PromptDreamEpisode adapts orchestrator.PromptTask to a DreamPrompter.
+// PromptDreamEpisode starts a prepared session without a prompt, then prompts it.
 func PromptDreamEpisode(o interface {
+	LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 }) DreamPrompter {
 	return func(ctx context.Context, taskID, sessionID, prompt string) (string, error) {
+		_, err := o.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+			TaskID: taskID, SessionID: sessionID,
+			Intent: orchestrator.IntentStartCreated, AutoStart: true,
+			NoInitialPrompt: true, SkipMessageRecord: true,
+		})
+		if err != nil {
+			return "", fmt.Errorf("start dream episode session: %w", err)
+		}
 		res, err := o.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, false)
 		if err != nil {
 			return "", err
