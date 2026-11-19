@@ -141,3 +141,12 @@ func TestSyncWarningTextsCheckFailedHasNoStepList(t *testing.T) {
 		syncWarningTexts([]ImportWarning{{Code: ImportWarningCheckFailed}}))
 	assert.Empty(t, syncWarningTexts(nil))
 }
+
+func TestSyncWarningTextsExplainsBoundProfileAgents(t *testing.T) {
+	bound := func(wf string) ImportWarning {
+		return ImportWarning{Code: "agent_bound_profile", WorkflowName: wf, StepName: "Review", Role: "reviewer", AgentName: "QA"}
+	}
+	assert.Equal(t, []string{
+		`Agent "QA" uses its own execution profile, which Review on a different provider does not cover, so its reviews can run on the provider that did the work. Affected steps: Alpha workflow, Review step (reviewer); Beta workflow, Review step (reviewer). Clear the Execution profile in "QA"'s configuration so it follows Office provider routing.`,
+	}, syncWarningTexts([]ImportWarning{bound("Alpha"), bound("Beta")}))
+}

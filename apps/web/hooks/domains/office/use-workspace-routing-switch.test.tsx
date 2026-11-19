@@ -110,4 +110,28 @@ describe("useWorkspaceRouting after switching workspace", () => {
     expect(result.current.authorExclusionSteps).toEqual([stepFor("b")]);
     expect(result.current.authorExclusionWarnings).toEqual([warningFor("b")]);
   });
+
+  it("reloads the steps when the save succeeded but the server could not read them back", async () => {
+    const saved = { ...stepFor("a"), enabled: false };
+    mocks.getWorkspaceRouting
+      .mockResolvedValueOnce(loaded("a"))
+      .mockResolvedValueOnce({ ...loaded("a"), author_exclusion_steps: [saved] });
+    mocks.updateSeatAuthorExclusion.mockResolvedValueOnce({
+      author_exclusion_steps: null,
+      author_exclusion_warnings: [],
+    });
+    const { result } = renderForWorkspace("ws-a");
+    await waitFor(() => expect(result.current.authorExclusionSteps).toEqual([stepFor("a")]));
+
+    let warnings: unknown;
+    await act(async () => {
+      warnings = await result.current.updateAuthorExclusion([
+        { step_id: "step-a", role: "reviewer", enabled: false },
+      ]);
+    });
+
+    expect(warnings).toEqual([]);
+    await waitFor(() => expect(result.current.authorExclusionSteps).toEqual([saved]));
+    expect(mocks.getWorkspaceRouting).toHaveBeenCalledTimes(2);
+  });
 });

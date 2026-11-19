@@ -49,6 +49,7 @@ is persisted on seats or runs, and no migration is needed. See the
 
 | 6 | [task-07-grouped-warnings-save-bar](task-07-grouped-warnings-save-bar.md) | Backend and web: group warnings that share a cause and fix; floating settings save bar on the routing page |
 | 7 | [task-08-seat-write-integrity](task-08-seat-write-integrity.md) | Backend and web: all-or-nothing, version-guarded switch saves; release parked runs when a switch turns off; author skip on exhausted fallback; no stale switches after a workspace change |
+| 8 | [task-09-maintainer-review-scope-and-safety](task-09-maintainer-review-scope-and-safety.md) | Backend and web: legacy-routing scope with a bound-profile warning; manage-only switch endpoint; release only author-exclusion parks; record the replayed work provider; report a committed save as saved |
 
 Task 02 depends on Task 01, because its E2E needs the backend behavior. Task 03
 depends on Task 01 (the shared declaration helper). Task 04 depends on Task 03.
@@ -62,6 +63,12 @@ Task 06. Task 08 comes from PR review: switch saves must be all-or-nothing
 and must not lose a concurrent change, turning a switch off must release
 reviews it parked, and every park must record the author skip. It depends on
 Task 07.
+Task 09 comes from maintainer review: the setting is scoped to agents on
+workspace provider routing until the Office routing handoff (dynamic-agent-routing
+task 10) carries it into the shared resolver, the switch endpoint needs
+workspace-manage authority, the release must not touch session-ceiling holds,
+a replayed work launch must record its provider, and a committed save must not
+read as a failure. It depends on Task 08.
 
 ## ASCII UI preview
 

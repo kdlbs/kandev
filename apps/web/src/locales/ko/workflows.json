@@ -350,6 +350,8 @@
   "authorExclusionAgentSingleProviderFixHere_other": "\"{{agent}}\"의 라우팅 설정에서 다른 공급자를 허용하거나 해당 단계의 다른 공급자에서 리뷰를 끄세요.",
   "authorExclusionAgentSingleProviderFixElsewhere_one": "\"{{agent}}\"의 라우팅 설정에서 다른 공급자를 허용하거나, 오피스 > 라우팅에서 해당 단계의 다른 공급자에서 리뷰를 끄세요.",
   "authorExclusionAgentSingleProviderFixElsewhere_other": "\"{{agent}}\"의 라우팅 설정에서 다른 공급자를 허용하거나, 오피스 > 라우팅에서 해당 단계의 다른 공급자에서 리뷰를 끄세요.",
+  "authorExclusionAgentBoundProfile": "에이전트 \"{{agent}}\"은(는) 자체 실행 프로필을 사용하며, 다른 공급자에서 리뷰는 이를 다루지 않으므로 해당 리뷰가 작업을 수행한 공급자에서 실행될 수 있습니다.",
+  "authorExclusionAgentBoundProfileFix": "\"{{agent}}\"의 구성에서 실행 프로필을 지워 Office 공급자 라우팅을 따르도록 하세요.",
   "authorExclusionCheckFailed": "다른 공급자에서 리뷰를 확인할 수 없습니다.",
   "authorExclusionCheckFailedFixHere": "페이지를 새로 고친 후 다시 시도하세요.",
   "authorExclusionCheckFailedFixElsewhere": "오피스 > 라우팅을 열어 확인하세요.",

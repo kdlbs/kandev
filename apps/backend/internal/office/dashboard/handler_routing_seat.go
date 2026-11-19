@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/routing"
 )
 
@@ -49,7 +50,13 @@ type seatAuthorExclusionRequest struct {
 }
 
 // updateSeatAuthorExclusion serves PUT /workspaces/:wsId/routing/author-exclusion.
+// The switches edit workflow steps, so only a user may change them; the Office
+// scope middleware also requires workspace.manage for this route.
 func (h *Handler) updateSeatAuthorExclusion(c *gin.Context) {
+	if agents.CallerFromContext(c) != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "agents cannot change workflow step settings"})
+		return
+	}
 	rp := h.svc.RoutingProviderImpl()
 	writer := h.svc.seatExclusionWriter
 	if rp == nil || writer == nil {
@@ -79,36 +86,40 @@ func (h *Handler) updateSeatAuthorExclusion(c *gin.Context) {
 		c.JSON(seatChangeStatus(err), gin.H{"error": err.Error()})
 		return
 	}
-	if anySeatChangeDisables(changes) {
-		h.releaseParkedRuns(ctx, rp, wsID)
-	}
-	steps, err := h.seatSteps(ctx, rp, wsID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
+	h.releaseParkedRuns(ctx, rp, wsID, disabledSeatSteps(changes))
+	// The switches are saved from here on, so the response is a success. A
+	// failed read-back sends null steps, telling the client to reload them.
+	steps, _ := h.seatSteps(ctx, rp, wsID)
 	c.JSON(http.StatusOK, SeatAuthorExclusionResponse{
 		AuthorExclusionSteps:    steps,
 		AuthorExclusionWarnings: h.authorExclusionWarnings(ctx, rp, wsID),
 	})
 }
 
-// anySeatChangeDisables reports whether a change turns the setting off, which
-// can unblock a review parked because only the author's provider was left.
-func anySeatChangeDisables(changes []SeatAuthorExclusionChange) bool {
+// disabledSeatSteps returns the steps a change turns the setting off for,
+// each once. Their reviews may be parked because only the author's provider
+// was left.
+func disabledSeatSteps(changes []SeatAuthorExclusionChange) []string {
+	var out []string
+	seen := map[string]bool{}
 	for _, ch := range changes {
-		if !ch.Enabled {
-			return true
+		if !ch.Enabled && !seen[ch.StepID] {
+			seen[ch.StepID] = true
+			out = append(out, ch.StepID)
 		}
 	}
-	return false
+	return out
 }
 
-// releaseParkedRuns re-queues parked runs after the switches are saved. The
-// save already succeeded, so a failure here is logged rather than returned;
-// the operator can still retry a parked run from its detail page.
-func (h *Handler) releaseParkedRuns(ctx context.Context, rp RoutingProvider, workspaceID string) {
-	if err := rp.ReleaseParkedRuns(ctx, workspaceID); err != nil && h.logger != nil {
+// releaseParkedRuns re-queues the runs at stepIDs that parked after skipping
+// the author's provider. The save already succeeded, so a failure here is
+// logged rather than returned; the operator can still retry a parked run from
+// its detail page.
+func (h *Handler) releaseParkedRuns(ctx context.Context, rp RoutingProvider, workspaceID string, stepIDs []string) {
+	if len(stepIDs) == 0 {
+		return
+	}
+	if err := rp.ReleaseAuthorExclusionParkedRuns(ctx, workspaceID, stepIDs); err != nil && h.logger != nil {
 		h.logger.Warn("release parked runs after seat exclusion change failed",
 			zap.String("workspace_id", workspaceID), zap.Error(err))
 	}

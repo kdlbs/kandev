@@ -350,6 +350,8 @@
   "authorExclusionAgentSingleProviderFixHere_other": "Dê a \"{{agent}}\" outro fornecedor nas definições de encaminhamento dele ou desative a Revisão noutro fornecedor para estes passos.",
   "authorExclusionAgentSingleProviderFixElsewhere_one": "Dê a \"{{agent}}\" outro fornecedor nas definições de encaminhamento dele ou desative a Revisão noutro fornecedor para este passo em Escritório > Encaminhamento.",
   "authorExclusionAgentSingleProviderFixElsewhere_other": "Dê a \"{{agent}}\" outro fornecedor nas definições de encaminhamento dele ou desative a Revisão noutro fornecedor para estes passos em Escritório > Encaminhamento.",
+  "authorExclusionAgentBoundProfile": "O agente \"{{agent}}\" usa o seu próprio perfil de execução, que a Revisão noutro fornecedor não abrange, por isso as revisões dele podem correr no fornecedor que fez o trabalho.",
+  "authorExclusionAgentBoundProfileFix": "Limpe o Perfil de execução na configuração de \"{{agent}}\" para que siga o encaminhamento de fornecedores do Office.",
   "authorExclusionCheckFailed": "Não foi possível verificar a Revisão noutro fornecedor.",
   "authorExclusionCheckFailedFixHere": "Recarregue a página para tentar novamente.",
   "authorExclusionCheckFailedFixElsewhere": "Abra Escritório > Encaminhamento para verificar.",

@@ -1028,7 +1028,7 @@
   "failedToLoadRoutingPreview": "Falha ao carregar a pré-visualização do encaminhamento",
   "failedToLoadTaskQuorum": "Falha ao carregar o quórum da tarefa",
   "authorExclusionStepsTitle": "Revisão noutro fornecedor",
-  "authorExclusionStepsDescription": "Mantenha o revisor ou aprovador de um passo fora do fornecedor que fez o trabalho da tarefa, para que a revisão seja uma verificação independente. Se não houver outro fornecedor disponível, a revisão fica à espera até agir. Requer o Recurso automático a outro fornecedor e pelo menos dois fornecedores.",
+  "authorExclusionStepsDescription": "Mantenha o revisor ou aprovador de um passo fora do fornecedor que fez o trabalho da tarefa, para que a revisão seja uma verificação independente. Se não houver outro fornecedor disponível, a revisão fica à espera até agir. Requer o Recurso automático a outro fornecedor e pelo menos dois fornecedores. Os agentes com o seu próprio perfil de execução não são abrangidos.",
   "authorExclusionStepsEmpty": "Nenhum fluxo de trabalho deste espaço de trabalho tem um passo de revisor ou aprovador.",
   "authorExclusionStepLabel": "Fluxo de trabalho {{workflow}}, passo {{step}}",
   "authorExclusionStepSwitchLabel": "Revisão noutro fornecedor para o fluxo de trabalho {{workflow}}, passo {{step}} ({{role}})"

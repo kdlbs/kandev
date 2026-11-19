@@ -35,6 +35,14 @@ spec: "../../specs/agents/requirements/dynamic-agent-routing.md"
 - **Verification:** `cd apps/backend && go test -tags fts5 ./internal/office/... ./internal/orchestrator/... ./internal/backendapp/... ./internal/agent/runtime/lifecycle/... && cd ../../apps && pnpm install --frozen-lockfile && pnpm --filter @kandev/web test -- app/office hooks/domains/office lib/state/slices/office`
 - **Risks:** Do not drop, rewrite, or display legacy Office routing rows.
   Unrelated Office data and disabled-mode behavior must remain valid.
+  Removing the legacy dispatcher also removes the Office review author-provider
+  exclusion (`exclude_author_provider` on `ensure_participant_seat`), which
+  today runs only there and is not enforced for profile-bound agents. Carry
+  the author skip, its run events and route-attempt record, and the
+  Review on a different provider control into the shared resolver and the
+  replacement settings surface, then retire the `agent_bound_profile` setup
+  warning. See
+  [review-author-provider-exclusion](../../specs/office/requirements/review-author-provider-exclusion.md).
 
 ## Results
 

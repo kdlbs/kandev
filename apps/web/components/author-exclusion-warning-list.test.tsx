@@ -29,6 +29,7 @@ describe("AuthorExclusionWarningList", () => {
       { ...base, code: "routing_disabled" },
       { ...base, code: "single_provider", provider_id: CLAUDE },
       { ...base, code: "agent_single_provider", provider_id: "codex-acp", agent_name: "QA" },
+      { ...base, code: "agent_bound_profile", agent_name: "Lead" },
       { code: "check_failed" },
     ];
     const label = (id: string) => (id === "codex-acp" ? "Codex (ACP)" : id);
@@ -55,6 +56,12 @@ describe("AuthorExclusionWarningList", () => {
           'Agent "QA" can only use Codex (ACP), so its reviews wait whenever the work ran on Codex (ACP).',
         steps: [step],
         fix: 'Give "QA" another provider in its routing settings, or turn off Review on a different provider for this step.',
+      },
+      {
+        problem:
+          'Agent "Lead" uses its own execution profile, which Review on a different provider does not cover, so its reviews can run on the provider that did the work.',
+        steps: [step],
+        fix: 'Clear the Execution profile in "Lead"\'s configuration so it follows Office provider routing.',
       },
       {
         problem: "Review on a different provider could not be checked.",

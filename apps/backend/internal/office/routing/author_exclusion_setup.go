@@ -31,13 +31,17 @@ const (
 	// SetupWarningAgentSingleProvider: a seat-pool agent's override pins it
 	// to exactly one provider, so its reviews wait whenever the work ran on it.
 	SetupWarningAgentSingleProvider SetupWarningCode = "agent_single_provider"
+	// SetupWarningAgentBoundProfile: a seat-pool agent runs through its own
+	// bound execution profile, which workspace provider routing does not
+	// govern, so its reviews are not kept off the author's provider.
+	SetupWarningAgentBoundProfile SetupWarningCode = "agent_bound_profile"
 	// SetupWarningCheckFailed: the prediction could not be computed.
 	SetupWarningCheckFailed SetupWarningCode = "check_failed"
 )
 
 // SetupWarning is one predicted problem for one declaration. ProviderID is set
-// for the single-provider codes; AgentID and AgentName only for
-// SetupWarningAgentSingleProvider.
+// for the single-provider codes; AgentID and AgentName only for the agent
+// codes.
 type SetupWarning struct {
 	Code        SetupWarningCode
 	Declaration ExclusionDeclaration
@@ -74,6 +78,13 @@ func evaluateDeclaration(
 			continue
 		}
 		poolSize++
+		if agent.ExecutionAgentProfileID != "" {
+			out = append(out, SetupWarning{
+				Code: SetupWarningAgentBoundProfile, Declaration: decl,
+				AgentID: agent.ID, AgentName: agent.Name,
+			})
+			continue
+		}
 		ov, err := ReadAgentOverrides(agent.Settings)
 		if err != nil {
 			continue

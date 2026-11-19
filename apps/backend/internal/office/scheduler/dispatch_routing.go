@@ -44,7 +44,7 @@ const (
 	RouteAttemptOutcomeSkippedUserAction     = "skipped_user_action"
 	RouteAttemptOutcomeSkippedMissingMapping = "skipped_missing_mapping"
 	RouteAttemptOutcomeMaxAttempts           = "skipped_max_attempts"
-	RouteAttemptOutcomeDeferredCapacity      = "deferred_capacity"
+	RouteAttemptOutcomeDeferredCapacity      = models.RouteAttemptOutcomeDeferredCapacity
 	RouteAttemptOutcomeDeferredCircuit       = models.RouteAttemptOutcomeDeferredCircuit
 )
 

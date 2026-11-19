@@ -24,7 +24,8 @@ export type RoutingConfigResponse = {
 };
 
 export type SeatAuthorExclusionResponse = {
-  author_exclusion_steps: AuthorExclusionStep[];
+  /** Null when the save succeeded but the steps could not be read back. */
+  author_exclusion_steps: AuthorExclusionStep[] | null;
   author_exclusion_warnings: AuthorExclusionWarning[];
 };
 

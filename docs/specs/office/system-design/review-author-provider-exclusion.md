@@ -34,7 +34,20 @@ Three existing paths meet here:
   (`internal/office/scheduler/dispatch_routing.go`) resolves candidates with
   `routing.Resolver.Resolve` on every dispatch: first launch, post-start
   fallback, park lift, and manual retry. A successful launch writes
-  `runs.resolved_provider_id` through `SetRunResolvedRoute`.
+  `runs.resolved_provider_id` through `SetRunResolvedRoute`. A launch the
+  session ceiling deferred parks the run with a `deferred_capacity` route
+  attempt that carries the candidate; when the ceiling's replay launches it,
+  `SettleCeilingDeferredRun` copies that attempt's execution profile,
+  provider, and model onto the run in the same update, so a replayed
+  work-stage run records its author provider too
+  (AC-OFFICE-REVIEW-AUTHOR-EXCL-002.6).
+- **Scope during the dynamic-routing migration.** An Office agent with an
+  `execution_agent_profile_id` skips `DispatchWithRouting`
+  (`SchedulerIntegration.tryRoutingDispatch`) and launches through its bound
+  profile, so the exclusion never reaches it (AC-OFFICE-REVIEW-AUTHOR-EXCL-002.7).
+  The setup evaluator warns about each such seat-pool agent (§7). The Office
+  routing handoff (dynamic-agent-routing task 10) moves Office launches to the
+  shared resolver and must carry the author skip with it.
 
 The policy is evaluated at dispatch time, not stored on the seat or the run.
 Every resolution re-reads the declaration and the author provider, so retries
@@ -186,11 +199,13 @@ type SetupWarningCode string // closed set:
 //   "routing_disabled"        exclusion will not be enforced (AC-005.2)
 //   "single_provider"         workspace order has exactly 1 provider (AC-005.1)
 //   "agent_single_provider"   a seat-pool agent's effective order has exactly 1
+//   "agent_bound_profile"     a seat-pool agent is bound to its own execution
+//                             profile, which the exclusion does not reach (AC-005.2)
 type SetupWarning struct {
     Code         SetupWarningCode
     Declaration  ExclusionDeclaration
     ProviderID   ProviderID // the only provider; single_provider and agent_single_provider
-    AgentID, AgentName string // agent_single_provider only
+    AgentID, AgentName string // agent_single_provider and agent_bound_profile
 }
 func EvaluateExclusionSetup(
     cfg *WorkspaceConfig, agents []settingsmodels.AgentProfile,
@@ -207,7 +222,10 @@ func EvaluateExclusionSetup(
   the seat pool is empty (casting falls back to the runner, whose order is
   unknown) or at least one pool agent inherits the workspace order. Then, for each
   agent whose Office role is in the declared role's seat pool and whose status
-  is neither `stopped` nor `pending_approval`, `agent_single_provider` when
+  is neither `stopped` nor `pending_approval`: `agent_bound_profile` when it
+  has an `execution_agent_profile_id` (its routing override is then
+  irrelevant, and it does not count as inheriting the workspace order), else
+  `agent_single_provider` when
   its override (`provider_order_source: override`) has exactly one entry. An agent with an unreadable override blob is skipped; the resolver
   already fails such an agent's dispatch.
 - The seat-pool mapping moves from `engine_adapters/seat_caster.go` to
@@ -348,21 +366,39 @@ the updated steps with their new versions. The Office dashboard reaches it throu
 `PUT /workspaces/:wsId/routing/author-exclusion` takes
 `{changes: [{step_id, role, enabled}]}` and returns
 `{author_exclusion_steps, author_exclusion_warnings}` computed after the
-write. An invalid change is a 400, a step the caller cannot see is a 404, and
+write. The Office scope middleware requires `workspace.manage` for this route
+(`requiresOfficeWorkspaceManage`), and the handler refuses an agent JWT caller
+with 403 before reading the body (AC-OFFICE-REVIEW-AUTHOR-EXCL-006.11). An
+invalid change is a 400, a step the caller cannot see is a 404, and
 a read-only workflow, or a step that kept changing through every attempt, is
-a 409. A failed request writes nothing, so it publishes nothing. When any
-change turns the setting off, the handler then calls the routing provider's
-`ReleaseParkedRuns`, which re-queues the workspace's routing-parked runs the
-same way a material routing settings change does
-(`ClearAllParkedRoutingForWorkspace`). A run that is still blocked parks
-again. A failure to release is logged, because the switches are already
-saved (AC-OFFICE-REVIEW-AUTHOR-EXCL-006.8).
+a 409. A failed request writes nothing, so it publishes nothing.
+
+After a successful write the handler calls the routing provider's
+`ReleaseAuthorExclusionParkedRuns` with the steps a change turned off. The
+repository method of the same name selects the workspace's runs that are
+queued and parked (any status except `session_recovery_required`), whose
+current retry cycle (route attempts with `seq > route_cycle_baseline_seq`)
+has a `skipped_author_provider` attempt and no `deferred_capacity` attempt,
+and whose payload `workflow_step_id` is one of those steps. It re-queues them
+with an update that repeats the same predicate, so a run that launched or
+changed park reason in between is left alone. A launch the session ceiling
+deferred stays parked because the ceiling's replay owns it, and re-queueing
+it would launch it twice. A run that is still blocked parks again. A failure
+to release is logged, because the switches are already saved
+(AC-OFFICE-REVIEW-AUTHOR-EXCL-006.8).
+
+The write has succeeded once the release starts, so the response is 200
+whatever follows. If the seat steps cannot be read back,
+`author_exclusion_steps` is `null` and the client reloads the page data
+(AC-OFFICE-REVIEW-AUTHOR-EXCL-006.12).
 
 **Web:** `useWorkspaceRouting` exposes `authorExclusionSteps` and
 `updateAuthorExclusion(changes)`. It returns steps, warnings, and execution
 profiles only once they were loaded for the current workspace, and ignores a
 save response that arrives after the operator switched workspace
-(AC-OFFICE-REVIEW-AUTHOR-EXCL-006.10). The routing page keeps the switches in its
+(AC-OFFICE-REVIEW-AUTHOR-EXCL-006.10). A save response with null steps
+triggers `refresh()` instead of replacing the list
+(AC-OFFICE-REVIEW-AUTHOR-EXCL-006.12). The routing page keeps the switches in its
 existing draft, so one Save applies routing changes first and then the
 switch changes; the warnings come from the last response. The section is an
 `AuthorExclusionStepsCard` under the provider order: a title, a description
@@ -409,6 +445,8 @@ the provider's navigation guard covers leaving with unsaved changes.
 | AC-001.5 | §1 (engine does not read the field in casting) |
 | AC-002.1 to .4 | §2, §2a, §3, §4, §5 |
 | AC-002.5 | §4 (disabled branch), §5 (`routing_disabled` event) |
+| AC-002.6 | Context (ceiling settlement) |
+| AC-002.7 | Context (scope), §7 (`agent_bound_profile`) |
 | AC-003.1 to .4 | §4, §5 (`parkRunBlocked`), §6 |
 | AC-004.1 to .4 | §3, §5 |
 | AC-005.1, .2 | §7 |
@@ -422,5 +460,5 @@ the provider's navigation guard covers leaving with unsaved changes.
 | AC-006.2, .3, .4 | §10 (write) |
 | AC-006.6 | §10 (web), §9 (locales) |
 | AC-006.7 | §10 (save bar) |
-| AC-006.8, .9 | §10 (write) |
-| AC-006.10 | §10 (web) |
+| AC-006.8, .9, .11 | §10 (write) |
+| AC-006.10, .12 | §10 (web, write) |

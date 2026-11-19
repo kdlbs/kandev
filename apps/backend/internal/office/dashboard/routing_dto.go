@@ -33,7 +33,9 @@ type AuthorExclusionStepDTO struct {
 }
 
 // SeatAuthorExclusionResponse is the PUT /workspaces/:wsId/routing/author-exclusion
-// payload: the seat steps and setup warnings after the write.
+// payload: the seat steps and setup warnings after the write. The write has
+// succeeded whenever this is returned; AuthorExclusionSteps is null when the
+// steps could not be read back, and the client reloads them.
 type SeatAuthorExclusionResponse struct {
 	AuthorExclusionSteps    []AuthorExclusionStepDTO    `json:"author_exclusion_steps"`
 	AuthorExclusionWarnings []AuthorExclusionWarningDTO `json:"author_exclusion_warnings"`

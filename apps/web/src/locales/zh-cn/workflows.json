@@ -350,6 +350,8 @@
   "authorExclusionAgentSingleProviderFixHere_other": "请在“{{agent}}”的路由设置中为其添加其他提供商，或为受影响的步骤关闭“在其他提供商上审阅”。",
   "authorExclusionAgentSingleProviderFixElsewhere_one": "请在“{{agent}}”的路由设置中为其添加其他提供商，或在 办公室 > 路由 中为受影响的步骤关闭“在其他提供商上审阅”。",
   "authorExclusionAgentSingleProviderFixElsewhere_other": "请在“{{agent}}”的路由设置中为其添加其他提供商，或在 办公室 > 路由 中为受影响的步骤关闭“在其他提供商上审阅”。",
+  "authorExclusionAgentBoundProfile": "智能体“{{agent}}”使用自己的执行配置，“在其他提供商上审阅”不覆盖这种情况，因此它的审阅可能在完成工作的提供商上运行。",
+  "authorExclusionAgentBoundProfileFix": "请在“{{agent}}”的配置中清除执行配置，使其遵循 Office 提供商路由。",
   "authorExclusionCheckFailed": "无法检查“在其他提供商上审阅”。",
   "authorExclusionCheckFailedFixHere": "请重新加载页面后重试。",
   "authorExclusionCheckFailedFixElsewhere": "请打开 办公室 > 路由 进行检查。",

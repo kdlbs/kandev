@@ -4,6 +4,7 @@ export type AuthorExclusionWarningCode =
   | "routing_disabled"
   | "single_provider"
   | "agent_single_provider"
+  | "agent_bound_profile"
   | "check_failed";
 
 export type AuthorExclusionWarning = {

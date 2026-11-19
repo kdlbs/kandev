@@ -14,7 +14,7 @@ import (
 // RouteAttemptOutcomeSkippedAuthorProvider records the provider that did the
 // task's work, skipped for a seat run at a step declaring
 // exclude_author_provider.
-const RouteAttemptOutcomeSkippedAuthorProvider = "skipped_author_provider"
+const RouteAttemptOutcomeSkippedAuthorProvider = models.RouteAttemptOutcomeSkippedAuthorProvider
 
 // runEventAuthorExclusion is the run event written on every resolution of a
 // seat run whose step declares exclude_author_provider.

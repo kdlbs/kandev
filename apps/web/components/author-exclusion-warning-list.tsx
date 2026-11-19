@@ -41,6 +41,11 @@ const WARNING_KEYS: Record<AuthorExclusionWarning["code"], WarningKeys> = {
     fixHere: "workflows:authorExclusionAgentSingleProviderFixHere",
     fixElsewhere: "workflows:authorExclusionAgentSingleProviderFixElsewhere",
   },
+  agent_bound_profile: {
+    problem: "workflows:authorExclusionAgentBoundProfile",
+    fixHere: "workflows:authorExclusionAgentBoundProfileFix",
+    fixElsewhere: "workflows:authorExclusionAgentBoundProfileFix",
+  },
   check_failed: {
     problem: "workflows:authorExclusionCheckFailed",
     fixHere: "workflows:authorExclusionCheckFailedFixHere",

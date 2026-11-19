@@ -350,6 +350,8 @@
   "authorExclusionAgentSingleProviderFixHere_other": "Ĝĩvē \"{{agent}}\" àńōţĥēŕ ƥŕōvĩďēŕ ĩń ĩţś ŕōũţĩńĝ śēţţĩńĝś, ōŕ ţũŕń ōƒƒ Ŕēvĩēŵ ōń à ďĩƒƒēŕēńţ ƥŕōvĩďēŕ ƒōŕ ţĥēśē śţēƥś.",
   "authorExclusionAgentSingleProviderFixElsewhere_one": "Ĝĩvē \"{{agent}}\" àńōţĥēŕ ƥŕōvĩďēŕ ĩń ĩţś ŕōũţĩńĝ śēţţĩńĝś, ōŕ ţũŕń ōƒƒ Ŕēvĩēŵ ōń à ďĩƒƒēŕēńţ ƥŕōvĩďēŕ ƒōŕ ţĥĩś śţēƥ ĩń Ōƒƒĩćē > Ŕōũţĩńĝ.",
   "authorExclusionAgentSingleProviderFixElsewhere_other": "Ĝĩvē \"{{agent}}\" àńōţĥēŕ ƥŕōvĩďēŕ ĩń ĩţś ŕōũţĩńĝ śēţţĩńĝś, ōŕ ţũŕń ōƒƒ Ŕēvĩēŵ ōń à ďĩƒƒēŕēńţ ƥŕōvĩďēŕ ƒōŕ ţĥēśē śţēƥś ĩń Ōƒƒĩćē > Ŕōũţĩńĝ.",
+  "authorExclusionAgentBoundProfile": "Àĝēńţ \"{{agent}}\" ũśēś ĩţś ōŵń ēxēćũţĩōń ƥŕōƒĩĺē, ŵĥĩćĥ Ŕēvĩēŵ ōń à ďĩƒƒēŕēńţ ƥŕōvĩďēŕ ďōēś ńōţ ćōvēŕ, śō ĩţś ŕēvĩēŵś ćàń ŕũń ōń ţĥē ƥŕōvĩďēŕ ţĥàţ ďĩď ţĥē ŵōŕķ.",
+  "authorExclusionAgentBoundProfileFix": "Ćĺēàŕ ţĥē Ēxēćũţĩōń ƥŕōƒĩĺē ĩń \"{{agent}}\"'ś ćōńƒĩĝũŕàţĩōń śō ĩţ ƒōĺĺōŵś Ōƒƒĩćē ƥŕōvĩďēŕ ŕōũţĩńĝ.",
   "authorExclusionCheckFailed": "Ŕēvĩēŵ ōń à ďĩƒƒēŕēńţ ƥŕōvĩďēŕ ćōũĺď ńōţ ƀē ćĥēćķēď.",
   "authorExclusionCheckFailedFixHere": "Ŕēĺōàď ţĥē ƥàĝē ţō ţŕŷ àĝàĩń.",
   "authorExclusionCheckFailedFixElsewhere": "Ōƥēń Ōƒƒĩćē > Ŕōũţĩńĝ ţō ćĥēćķ ĩţ.",

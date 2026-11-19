@@ -109,13 +109,15 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
       if (!workspaceName || changes.length === 0) return [];
       const res = await updateSeatAuthorExclusion(workspaceName, changes);
       const warnings = res.author_exclusion_warnings ?? [];
-      if (currentWorkspace.current === workspaceName) {
-        setAuthorExclusionSteps(res.author_exclusion_steps ?? []);
-        setAuthorExclusionWarnings(warnings);
-      }
+      if (currentWorkspace.current !== workspaceName) return warnings;
+      setAuthorExclusionWarnings(warnings);
+      // The switches are saved either way; null steps mean the server could
+      // not read them back, so reload instead of showing a stale list.
+      if (res.author_exclusion_steps) setAuthorExclusionSteps(res.author_exclusion_steps);
+      else void refresh();
       return warnings;
     },
-    [workspaceName],
+    [workspaceName, refresh],
   );
 
   const retry = useCallback(

@@ -1028,7 +1028,7 @@
   "failedToLoadRoutingPreview": "Failed to load routing preview",
   "failedToLoadTaskQuorum": "Failed to load task quorum",
   "authorExclusionStepsTitle": "Review on a different provider",
-  "authorExclusionStepsDescription": "Keep a step's reviewer or approver off the provider that did the task's work, so the review is an independent check. If no other provider is available, the review waits until you act. Needs Automatic provider fallback and at least two providers.",
+  "authorExclusionStepsDescription": "Keep a step's reviewer or approver off the provider that did the task's work, so the review is an independent check. If no other provider is available, the review waits until you act. Needs Automatic provider fallback and at least two providers. Agents with their own execution profile are not covered.",
   "authorExclusionStepsEmpty": "No workflow in this workspace has a reviewer or approver step.",
   "authorExclusionStepLabel": "{{workflow}} workflow, {{step}} step",
   "authorExclusionStepSwitchLabel": "Review on a different provider for {{workflow}} workflow, {{step}} step ({{role}})"

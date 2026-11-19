@@ -16,7 +16,8 @@ const ImportWarningCheckFailed = "check_failed"
 
 // ImportWarning is a non-blocking notice about an imported or synced
 // workflow. Code is a closed set the client localizes:
-// routing_disabled, single_provider, agent_single_provider, check_failed.
+// routing_disabled, single_provider, agent_single_provider,
+// agent_bound_profile, check_failed.
 type ImportWarning struct {
 	Code         string `json:"code"`
 	WorkflowName string `json:"workflow_name,omitempty"`
@@ -123,6 +124,11 @@ func syncWarningGroupText(w ImportWarning, steps []string) string {
 			w.AgentName, w.ProviderID, w.ProviderID) + affected +
 			fmt.Sprintf(" Give %q another provider in its routing settings, or turn off %s for %s in Office > Routing.",
 				w.AgentName, rule, target)
+	case "agent_bound_profile":
+		return fmt.Sprintf("Agent %q uses its own execution profile, which %s does not cover,"+
+			" so its reviews can run on the provider that did the work.", w.AgentName, rule) + affected +
+			fmt.Sprintf(" Clear the Execution profile in %q's configuration so it follows Office provider routing.",
+				w.AgentName)
 	default:
 		return rule + " could not be checked. Open Office > Routing to check it."
 	}

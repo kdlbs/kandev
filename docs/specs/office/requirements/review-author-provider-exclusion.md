@@ -27,6 +27,14 @@ settings page, under the name **Review on a different provider**. The control
 lives there until the editable Office workflow surface (issue #5347) exists;
 it then moves into that editor.
 
+The setting covers seat agents that resolve their provider through the
+workspace's Office provider routing. An Office agent bound to its own
+execution profile launches through that profile instead, and the setting does
+not reach it during the migration to shared dynamic routing; the setup
+warnings name each such agent. Carrying the setting into the shared resolver
+is part of the Office routing handoff
+([dynamic-agent-routing task 10](../../../plans/dynamic-agent-routing/task-10-office-routing-handoff.md)).
+
 Because the setting can halt a review flow, the system also warns, without
 blocking, when the workspace's current setup predicts that a declaring step
 can park reviews (whenever the work ran on a reviewer's only provider) or
@@ -119,6 +127,14 @@ the author provider.
   seat run shall launch through the existing non-routed path, and the run
   detail shall record that the exclusion did not apply because routing is
   disabled.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-002.6:** When a work-stage run whose launch the
+  session ceiling deferred is later launched by the ceiling's replay, the
+  system shall record the provider of that launch as the run's provider, so
+  the next seat-run resolution excludes it.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-002.7:** A seat run for an agent bound to its
+  own execution profile launches through that profile, and the exclusion does
+  not apply to it. AC-OFFICE-REVIEW-AUTHOR-EXCL-005.2 warns about each such
+  agent.
 
 ### REQ-OFFICE-REVIEW-AUTHOR-EXCL-003: No candidate parks the run
 
@@ -181,7 +197,9 @@ prediction uses the setup at that moment; it is a hint, not a guarantee.
   provider and state that review runs wait only when the work ran on it.
 - **AC-OFFICE-REVIEW-AUTHOR-EXCL-005.2:** The system shall predict that the
   exclusion will not be enforced for a declaring step when workspace routing
-  is disabled or not configured.
+  is disabled or not configured, and, while routing is enabled, for each agent
+  in the declared role's seat pool that is bound to its own execution profile.
+  The agent warning shall name the agent.
 - **AC-OFFICE-REVIEW-AUTHOR-EXCL-005.3:** When a workflow import is previewed
   or applied for a workspace and an imported declaring step meets
   AC-OFFICE-REVIEW-AUTHOR-EXCL-005.1 or .2, the preview and the result shall list an exclusion
@@ -210,8 +228,8 @@ prediction uses the setup at that moment; it is a hint, not a guarantee.
   and the step by type (for example "Office Default workflow, Review step");
   why that state is bad, as its concrete consequence for reviews; and the
   change that clears it, naming each control by its on-screen label
-  (**Automatic provider fallback**, **Review on a different provider**, or the
-  provider order). A warning shown outside the routing page shall say where
+  (**Automatic provider fallback**, **Review on a different provider**, the
+  provider order, or the agent's **Execution profile**). A warning shown outside the routing page shall say where
   that control is (Office > Routing).
 - **AC-OFFICE-REVIEW-AUTHOR-EXCL-005.10:** Warnings that share a cause and a fix
   (the same warning kind, provider, and agent) shall be shown as one warning:
@@ -258,9 +276,11 @@ YAML.
   offers Save and Discard. Leaving the page with unsaved changes shall ask the
   operator to save or discard them first.
 - **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.8:** When a save turns a switch off, runs
-  that routing parked in the workspace shall resolve their route again under
-  the saved settings, so a review that waited only because the author's
-  provider was excluded can launch without a manual retry.
+  queued at that step that parked after the author's provider was excluded
+  shall resolve their route again under the saved settings, so the review can
+  launch without a manual retry. Runs held for any other reason, including a
+  launch the session ceiling deferred and will replay, a session that needs
+  recovery, or a park at another step, shall stay as they are.
 - **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.9:** When two saves change the same step at
   the same time, neither save shall overwrite the other's change. The system
   shall apply each save to the step's current state, or reject it with a
@@ -269,6 +289,13 @@ YAML.
   another workspace, the page shall not show the previous workspace's
   switches or warnings, including while the new workspace loads or after its
   load fails.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.11:** Only a user allowed to manage the
+  workspace shall be able to change the switches. A request from an Office
+  agent, or from a user who may only view the workspace, shall be refused and
+  shall change nothing.
+- **AC-OFFICE-REVIEW-AUTHOR-EXCL-006.12:** When the switches are saved but the
+  updated list cannot be read back, the save shall be reported as successful
+  and the page shall reload the list rather than report a failed save.
 
 ## Exclusions
 
@@ -283,6 +310,12 @@ YAML.
   the routing page (REQ-OFFICE-REVIEW-AUTHOR-EXCL-006). When #5347 lands, the
   control moves into that editor, and it is expected to reuse the
   REQ-OFFICE-REVIEW-AUTHOR-EXCL-005 prediction.
+- Enforcing the setting for agents bound to their own execution profile. The
+  Office routing handoff
+  ([dynamic-agent-routing task 10](../../../plans/dynamic-agent-routing/task-10-office-routing-handoff.md))
+  routes Office launches through the shared resolver and carries the setting
+  there; until then AC-OFFICE-REVIEW-AUTHOR-EXCL-005.2 warns about each such
+  agent.
 - Blocking any save, import, or sync because of a predicted halt.
 - Warnings on the per-agent routing override form. Its effect appears on the
   provider routing settings banner (AC-OFFICE-REVIEW-AUTHOR-EXCL-005.5).

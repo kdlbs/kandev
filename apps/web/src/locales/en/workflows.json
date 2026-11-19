@@ -350,6 +350,8 @@
   "authorExclusionAgentSingleProviderFixHere_other": "Give \"{{agent}}\" another provider in its routing settings, or turn off Review on a different provider for these steps.",
   "authorExclusionAgentSingleProviderFixElsewhere_one": "Give \"{{agent}}\" another provider in its routing settings, or turn off Review on a different provider for this step in Office > Routing.",
   "authorExclusionAgentSingleProviderFixElsewhere_other": "Give \"{{agent}}\" another provider in its routing settings, or turn off Review on a different provider for these steps in Office > Routing.",
+  "authorExclusionAgentBoundProfile": "Agent \"{{agent}}\" uses its own execution profile, which Review on a different provider does not cover, so its reviews can run on the provider that did the work.",
+  "authorExclusionAgentBoundProfileFix": "Clear the Execution profile in \"{{agent}}\"'s configuration so it follows Office provider routing.",
   "authorExclusionCheckFailed": "Review on a different provider could not be checked.",
   "authorExclusionCheckFailedFixHere": "Reload the page to try again.",
   "authorExclusionCheckFailedFixElsewhere": "Open Office > Routing to check it.",

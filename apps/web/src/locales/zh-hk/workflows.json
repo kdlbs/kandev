@@ -350,6 +350,8 @@
   "authorExclusionAgentSingleProviderFixHere_other": "請在「{{agent}}」的路由設定中為其新增其他提供者，或為受影響的步驟關閉「在其他提供者上審閱」。",
   "authorExclusionAgentSingleProviderFixElsewhere_one": "請在「{{agent}}」的路由設定中為其新增其他提供者，或在 辦公室 > 路由 中為受影響的步驟關閉「在其他提供者上審閱」。",
   "authorExclusionAgentSingleProviderFixElsewhere_other": "請在「{{agent}}」的路由設定中為其新增其他提供者，或在 辦公室 > 路由 中為受影響的步驟關閉「在其他提供者上審閱」。",
+  "authorExclusionAgentBoundProfile": "代理程式「{{agent}}」使用自己的執行設定，「在其他提供者上審閱」不覆蓋這種情況，因此它的審閱可能在完成工作的提供者上執行。",
+  "authorExclusionAgentBoundProfileFix": "請在「{{agent}}」的設定中清除執行設定，使其遵循 Office 提供者路由。",
   "authorExclusionCheckFailed": "無法檢查「在其他提供者上審閱」。",
   "authorExclusionCheckFailedFixHere": "請重新載入頁面後重試。",
   "authorExclusionCheckFailedFixElsewhere": "請開啟 辦公室 > 路由 進行檢查。",

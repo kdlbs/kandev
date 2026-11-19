@@ -21,12 +21,16 @@ func (p *Provider) SeatSteps(ctx context.Context, workspaceID string) ([]SeatSte
 	return p.repo.ListSeatSteps(ctx, workspaceID)
 }
 
-// ReleaseParkedRuns re-queues the workspace's runs parked by routing so they
-// resolve again under the current settings, for example after a step stops
-// excluding the author's provider. A run that is still blocked parks again.
-func (p *Provider) ReleaseParkedRuns(ctx context.Context, workspaceID string) error {
-	if err := p.repo.ClearAllParkedRoutingForWorkspace(ctx, workspaceID); err != nil {
-		return fmt.Errorf("routing: release parked runs: %w", err)
+// ReleaseAuthorExclusionParkedRuns re-queues runs at stepIDs that parked after
+// skipping the author's provider, so they resolve again once those steps stop
+// excluding it. Runs held for any other reason, such as a session-ceiling
+// deferral whose replay owns the launch, stay parked.
+func (p *Provider) ReleaseAuthorExclusionParkedRuns(ctx context.Context, workspaceID string, stepIDs []string) error {
+	if len(stepIDs) == 0 {
+		return nil
+	}
+	if _, err := p.repo.ReleaseAuthorExclusionParkedRuns(ctx, workspaceID, stepIDs); err != nil {
+		return fmt.Errorf("routing: release author-exclusion parked runs: %w", err)
 	}
 	return nil
 }
