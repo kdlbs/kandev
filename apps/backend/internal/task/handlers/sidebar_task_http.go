@@ -26,6 +26,7 @@ type sidebarTaskPageResponse struct {
 	TotalVisibleTasks  int                            `json:"total_visible_tasks"`
 	HasPrevious        bool                           `json:"has_previous"`
 	HasNext            bool                           `json:"has_next"`
+	GroupingKeys       []string                       `json:"grouping_keys,omitempty"`
 	GroupingRevision   string                         `json:"grouping_revision,omitempty"`
 	GroupingGeneration string                         `json:"grouping_generation,omitempty"`
 	Entries            []sidebarTaskPageEntryResponse `json:"entries"`
@@ -71,37 +72,18 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 		return
 	}
 
-	var prefs models.SidebarTaskViewPreferences
-	if h.sidebarSettingsReader != nil {
-		settings, err := h.sidebarSettingsReader.GetUserSettings(c.Request.Context())
-		if err != nil {
-			if h.abortSidebarRequestAfterRead(c, "failed to read sidebar task preferences", err) {
-				return
-			}
-			h.logger.Error("failed to read sidebar task preferences", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+	prefs, err := h.sidebarTaskPreferences(c.Request.Context(), c.Param("id"), query)
+	if h.abortSidebarRequestAfterRead(c, "failed to read sidebar task preferences", err) {
+		return
+	}
+	if err != nil {
+		if errors.Is(err, errSidebarDisclosureView) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "error_code": "sidebar_query_invalid"})
 			return
 		}
-		if abortSidebarRequestIfCanceled(c) {
-			return
-		}
-		if settings != nil {
-			automation, marshalErr := json.Marshal(settings.SidebarTaskColorAutomation)
-			if marshalErr != nil {
-				h.logger.Error("failed to prepare sidebar task color settings", zap.Error(marshalErr))
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
-				return
-			}
-			prefs = models.SidebarTaskViewPreferences{
-				PinnedTaskIDs:          settings.SidebarTaskPrefs.PinnedTaskIDs,
-				OrderedTaskIDs:         settings.SidebarTaskPrefs.OrderedTaskIDs,
-				SubtaskOrderByParentID: settings.SidebarTaskPrefs.SubtaskOrderByParentID,
-				ColorSettings: &models.SidebarTaskColorSettings{
-					ManualColors: settings.SidebarTaskColors,
-					Automation:   automation,
-				},
-			}
-		}
+		h.logger.Error("failed to read sidebar task preferences", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": requestFailedMessage})
+		return
 	}
 
 	page, err := h.service.QuerySidebarTaskPage(c.Request.Context(), c.Param("id"), query, prefs)
@@ -115,12 +97,12 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 		}
 		if errors.Is(err, service.ErrSidebarTaskViewUnavailable) {
 			h.logger.Error("sidebar task query repository unavailable", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": requestFailedMessage})
 			return
 		}
 		if errors.Is(err, context.Canceled) {
 			h.logger.Error("sidebar task query failed", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": requestFailedMessage})
 			return
 		}
 		handleNotFound(c, h.logger, err, "tasks not found")
@@ -132,7 +114,7 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 	}
 	if err != nil {
 		h.logger.Error("failed to enrich sidebar task page", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": requestFailedMessage})
 		return
 	}
 	if abortSidebarRequestIfCanceled(c) {
@@ -220,5 +202,6 @@ func (h *TaskHandlers) sidebarTaskPageResponse(c *gin.Context, page *models.Side
 		TotalVisibleTasks: page.TotalVisibleTasks, HasPrevious: page.HasPrevious,
 		HasNext: page.HasNext, Entries: entries,
 		GroupingRevision: page.GroupingRevision, GroupingGeneration: page.GroupingGeneration,
+		GroupingKeys: page.GroupingKeys,
 	}, nil
 }

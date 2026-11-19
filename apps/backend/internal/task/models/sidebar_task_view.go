@@ -28,6 +28,7 @@ type SidebarTaskViewQuery struct {
 	Sort               SidebarTaskViewSort     `json:"sort"`
 	Group              string                  `json:"group"`
 	CollapsedGroupKeys []string                `json:"collapsed_group_keys"`
+	DisclosureViewID   string                  `json:"disclosure_view_id,omitempty"`
 	CollapsedTaskIDs   []string                `json:"collapsed_task_ids"`
 	Page               int                     `json:"page"`
 	PageSize           int                     `json:"page_size"`
@@ -72,11 +73,12 @@ type SidebarTaskViewClause struct {
 // SidebarTaskViewPreferences are authenticated user settings. They are
 // supplied by the settings service, not accepted from the query body.
 type SidebarTaskViewPreferences struct {
-	PinnedTaskIDs          []string                  `json:"pinned_task_ids"`
-	OrderedTaskIDs         []string                  `json:"ordered_task_ids"`
-	SubtaskOrderByParentID map[string][]string       `json:"subtask_order_by_parent_id"`
-	ColorSettings          *SidebarTaskColorSettings `json:"-"`
-	PluginGrouping         *SidebarPluginGrouping    `json:"-"`
+	PinnedTaskIDs           []string                  `json:"pinned_task_ids"`
+	OrderedTaskIDs          []string                  `json:"ordered_task_ids"`
+	SubtaskOrderByParentID  map[string][]string       `json:"subtask_order_by_parent_id"`
+	ColorSettings           *SidebarTaskColorSettings `json:"-"`
+	PluginGrouping          *SidebarPluginGrouping    `json:"-"`
+	SavedCollapsedGroupKeys []string                  `json:"-"`
 }
 
 // SidebarPluginGrouping is verified by the host before opening the task read
@@ -118,6 +120,7 @@ type SidebarTaskPageResult struct {
 	Page               int                    `json:"page"`
 	PageSize           int                    `json:"page_size"`
 	TotalEntries       int                    `json:"total_entries"`
+	GroupingKeys       []string               `json:"grouping_keys,omitempty"`
 	TotalTasks         int                    `json:"total_tasks"`
 	TotalVisibleTasks  int                    `json:"total_visible_tasks"`
 	HasPrevious        bool                   `json:"has_previous"`
@@ -162,6 +165,9 @@ func (q SidebarTaskViewQuery) Validate() error {
 		return err
 	}
 	_, _, pluginGroup := pluginsdk.ParseSidebarGroupingReference(q.Group)
+	if q.DisclosureViewID != "" && (!pluginGroup || len(q.CollapsedGroupKeys) > 0) {
+		return sidebarValidationError("disclosure", "saved disclosure requires a plugin view without inline keys", 0)
+	}
 	if !pluginGroup && !oneOf(q.Group, "none", "repository", "workflow", "workflowStep", "executorType", "state") {
 		return sidebarValidationError("grouping", "unsupported group", 0)
 	}

@@ -1,8 +1,6 @@
 package sqlite
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -27,7 +25,7 @@ func sidebarPluginGroupingCTEs(driver string, query models.SidebarTaskViewQuery,
 	}
 	values := make([]value, len(grouping.Snapshot.Groups))
 	for index, group := range grouping.Snapshot.Groups {
-		values[index] = value{Key: sidebarPluginValueKey(query.Group, group.ID), ID: group.ID, Label: group.Label, sortLabel: strings.ToLower(group.Label)}
+		values[index] = value{Key: models.SidebarPluginValueKey(query.Group, group.ID), ID: group.ID, Label: group.Label, sortLabel: strings.ToLower(group.Label)}
 	}
 	sort.Slice(values, func(i, j int) bool {
 		if values[i].sortLabel != values[j].sortLabel {
@@ -53,12 +51,6 @@ func sidebarPluginGroupingCTEs(driver string, query models.SidebarTaskViewQuery,
 	return ctes, join, key, label, order, args
 }
 
-func sidebarPluginValueKey(reference, value string) string {
-	// Valid provider references exclude NUL, framing the opaque value unambiguously.
-	digest := sha256.Sum256([]byte(reference + "\x00" + value))
-	return "plugin-group:" + hex.EncodeToString(digest[:])
-}
-
 func validateSidebarPluginGrouping(query models.SidebarTaskViewQuery, prefs models.SidebarTaskViewPreferences) error {
 	_, _, plugin := pluginsdk.ParseSidebarGroupingReference(query.Group)
 	if !plugin {
@@ -79,7 +71,7 @@ func projectSidebarPluginGrouping(result *models.SidebarTaskPageResult, grouping
 	result.GroupingGeneration = grouping.Generation
 	colors := make(map[string]string, len(grouping.Snapshot.Groups))
 	for _, value := range grouping.Snapshot.Groups {
-		colors[sidebarPluginValueKey(grouping.Reference, value.ID)] = value.Color
+		colors[models.SidebarPluginValueKey(grouping.Reference, value.ID)] = value.Color
 	}
 	for index := range result.Entries {
 		result.Entries[index].GroupColor = colors[result.Entries[index].GroupKey]

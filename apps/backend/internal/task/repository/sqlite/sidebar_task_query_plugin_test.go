@@ -54,7 +54,7 @@ func TestSidebarPluginGroupingBeforePagination(t *testing.T) {
 			if second.TotalVisibleTasks != 104 || len(second.Tasks) != 4 || !second.Entries[0].Continuation || second.HasNext {
 				t.Fatalf("second occurrence page: %+v", second)
 			}
-			q.CollapsedGroupKeys = []string{sidebarPluginValueKey(q.Group, "late")}
+			q.CollapsedGroupKeys = []string{models.SidebarPluginValueKey(q.Group, "late")}
 			collapsed, err := repo.QuerySidebarTaskPage(t.Context(), "plugin-ws", q, prefs)
 			if err != nil {
 				t.Fatal(err)
@@ -136,10 +136,10 @@ func TestSidebarPluginGroupingContinuationIsPerOccurrence(t *testing.T) {
 			}
 			continuation := false
 			for _, entry := range page.Entries {
-				if entry.Kind == "continuation" && entry.GroupKey == sidebarPluginValueKey(reference, "a") && entry.ParentTitle == "Root" {
+				if entry.Kind == "continuation" && entry.GroupKey == models.SidebarPluginValueKey(reference, "a") && entry.ParentTitle == "Root" {
 					continuation = true
 				}
-				if entry.TaskID == "child-2" && entry.GroupKey == sidebarPluginValueKey(reference, "a") && entry.ParentTitle != "Root" {
+				if entry.TaskID == "child-2" && entry.GroupKey == models.SidebarPluginValueKey(reference, "a") && entry.ParentTitle != "Root" {
 					t.Fatalf("continuation task lost parent context: %+v", entry)
 				}
 			}
@@ -175,7 +175,7 @@ func TestSidebarPluginGroupingClassifiesFilteredRootsAndUntagged(t *testing.T) {
 					groups[entry.TaskID] = entry.GroupKey
 				}
 			}
-			if page.TotalTasks != 3 || page.TotalVisibleTasks != 3 || groups["child"] != sidebarPluginValueKey(reference, "parent") || groups["untagged"] != reference+":untagged" {
+			if page.TotalTasks != 3 || page.TotalVisibleTasks != 3 || groups["child"] != models.SidebarPluginValueKey(reference, "parent") || groups["untagged"] != reference+":untagged" {
 				t.Fatalf("root inheritance or untagged membership lost: %+v", page)
 			}
 			query.Filters = []models.SidebarTaskViewClause{{Dimension: "titleMatch", Op: "matches", Value: json.RawMessage(`"Child"`)}}
@@ -192,7 +192,7 @@ func TestSidebarPluginGroupingClassifiesFilteredRootsAndUntagged(t *testing.T) {
 					child = entry
 				}
 			}
-			if child.TaskID != "child" || child.GroupKey != sidebarPluginValueKey(reference, "child") || child.Depth != 0 || child.ParentID != "" {
+			if child.TaskID != "child" || child.GroupKey != models.SidebarPluginValueKey(reference, "child") || child.Depth != 0 || child.ParentID != "" {
 				t.Fatalf("promoted filtered root ignored its own value or display context: %+v", child)
 			}
 		})

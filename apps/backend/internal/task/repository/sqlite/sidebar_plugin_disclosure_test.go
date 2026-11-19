@@ -23,7 +23,7 @@ func TestSidebarPluginDisclosureFitsPublicQueryBudget(t *testing.T) {
 		id := strings.Repeat("界", 84) + fmt.Sprintf("%03d", i)
 		snapshot.Groups = append(snapshot.Groups, pluginsdk.SidebarGroupingValue{ID: id, Label: fmt.Sprint(i)})
 		snapshot.Memberships = append(snapshot.Memberships, pluginsdk.SidebarGroupingMembership{TaskID: "root", GroupID: id})
-		query.CollapsedGroupKeys = append(query.CollapsedGroupKeys, sidebarPluginValueKey(reference, id))
+		query.CollapsedGroupKeys = append(query.CollapsedGroupKeys, models.SidebarPluginValueKey(reference, id))
 	}
 	wire, err := json.Marshal(query)
 	require.NoError(t, err)
@@ -43,5 +43,5 @@ func TestSidebarPluginDisclosureFitsPublicQueryBudget(t *testing.T) {
 	reopened, err := repo.QuerySidebarTaskPage(t.Context(), "ws", restored, prefs)
 	require.NoError(t, err)
 	require.Equal(t, 1, reopened.TotalVisibleTasks)
-	require.NotEqual(t, sidebarPluginValueKey(reference, "untagged"), reference+":untagged")
+	require.NotEqual(t, models.SidebarPluginValueKey(reference, "untagged"), reference+":untagged")
 }
