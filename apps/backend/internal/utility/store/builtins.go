@@ -67,11 +67,8 @@ var builtinPromptRefreshes = []builtinPromptRefresh{
 	{id: "builtin-enhance-prompt", promptFile: "enhance-prompt", legacyHashes: []string{enhancePromptV1SHA256}},
 }
 
-// refreshUneditedBuiltinPrompts upgrades untouched built-in prompts in place.
-// A row qualifies only when its prompt hashes to a known shipped revision and
-// it was never updated after insert (updated_at == created_at); the update is
-// conditional on the values read, so a concurrent edit always wins. updated_at
-// is left alone so the row stays recognizable as untouched.
+// refreshUneditedBuiltinPrompts upgrades known built-in prompt revisions.
+// Custom prompt text and profile bindings remain unchanged.
 func (r *sqliteRepository) refreshUneditedBuiltinPrompts() error {
 	for _, refresh := range builtinPromptRefreshes {
 		if err := r.refreshUneditedBuiltinPrompt(refresh); err != nil {
@@ -84,26 +81,25 @@ func (r *sqliteRepository) refreshUneditedBuiltinPrompts() error {
 func (r *sqliteRepository) refreshUneditedBuiltinPrompt(refresh builtinPromptRefresh) error {
 	var storedPrompt string
 	var builtinInt int
-	var createdAt, updatedAt time.Time
 	err := r.db.QueryRow(r.db.Rebind(`
-		SELECT prompt, builtin, created_at, updated_at
+		SELECT prompt, builtin
 		FROM utility_agents
 		WHERE id = ?
-	`), refresh.id).Scan(&storedPrompt, &builtinInt, &createdAt, &updatedAt)
+	`), refresh.id).Scan(&storedPrompt, &builtinInt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("read stored built-in prompt %s: %w", refresh.id, err)
 	}
-	if builtinInt != 1 || !createdAt.Equal(updatedAt) || !isShippedPromptRevision(storedPrompt, refresh.legacyHashes) {
+	if builtinInt != 1 || !isShippedPromptRevision(storedPrompt, refresh.legacyHashes) {
 		return nil
 	}
 	if _, err := r.db.Exec(r.db.Rebind(`
 		UPDATE utility_agents
 		SET prompt = ?
-		WHERE id = ? AND builtin = 1 AND prompt = ? AND created_at = ? AND updated_at = ?
-	`), utilcfg.Get(refresh.promptFile), refresh.id, storedPrompt, createdAt, updatedAt); err != nil {
+		WHERE id = ? AND builtin = 1 AND prompt = ?
+	`), utilcfg.Get(refresh.promptFile), refresh.id, storedPrompt); err != nil {
 		return fmt.Errorf("refresh stored built-in prompt %s: %w", refresh.id, err)
 	}
 	return nil

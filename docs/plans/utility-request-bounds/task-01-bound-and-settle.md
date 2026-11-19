@@ -31,10 +31,12 @@ the new template, and a call abandoned by its caller ends as `cancelled`.
   bytes below the 100,000-byte server cap, leaving room for its marker.
 - `config/utilityagents/enhance-prompt.md`: `{{ChangedFiles}}` replaces
   `{{GitDiff}}`.
-- `internal/utility/controller`: `truncateContext` and the per-field caps.
-- `internal/utility/store`: hash- and timestamp-guarded refresh of the stored
+- `internal/utility/controller`: `truncateContext`, newest-history retention,
+  and the per-field caps.
+- `internal/utility/store`: hash-guarded refresh of the stored
   Enhance prompt, run after the placeholder migration.
-- `internal/utility/handlers`, `service`, `models`: `settleFailedCall`,
+- `internal/utility/handlers`, `service`, `models`: atomic profile-attributed
+  call creation, detached terminal writes for completion and failure,
   `CancelCall`, `CallStatusCancelled`, and the 499 response.
 
 ## Out of scope
@@ -46,11 +48,14 @@ the new template, and a call abandoned by its caller ends as `cancelled`.
 1. Enhance prompt requests carry `changed_files` and no `git_diff`; commit
    message requests still carry the diff; a list longer than 200 names ends
    with the remaining count.
-2. Oversized template inputs are cut at a rune boundary with a marker; a
-   stored Enhance prompt equal to the shipped revision is refreshed, and an
-   edited or unknown one is kept.
-3. A request cancelled before a result answers 499 and leaves a `cancelled`
-   call row with a completion time.
+2. Oversized template inputs are cut at a rune boundary with a marker. History
+   keeps the newest text in chronological order and places the marker first.
+3. A stored Enhance prompt equal to a shipped revision is refreshed, including
+   after profile-only edits; customized or unknown prompt text is kept.
+4. Profile IDs are present in the initial call insert. A request cancelled
+   before a result answers 499 and leaves a `cancelled` call row with a
+   completion time. A successful execution leaves a `completed` row after a
+   client disconnect on both execution paths.
 
 ## Verification
 
@@ -93,3 +98,8 @@ bash scripts/lint-go-changed $(git diff --name-only origin/main -- 'apps/backend
 - `go test ./internal/utility/...`, the hook Vitest file, `pnpm run
   i18n:check`, `pnpm run typecheck`, Oxlint, Prettier, and
   `scripts/lint-go-changed` pass.
+- Fixup regression tests confirm that Enhance does not read file diffs, history
+  keeps recent messages, call creation inserts both profile IDs once, detached
+  success writes finish for session-bound and sessionless calls, profile fallback
+  attribution survives cancellation, and profile-only edits do not block an
+  exact shipped prompt refresh. Focused Go and Vitest checks pass.

@@ -133,6 +133,26 @@ describe("useUtilityAgentGenerator request context", () => {
     );
   });
 
+  it("does not read changed-file diffs when enhancing a prompt", async () => {
+    const file = Object.defineProperty({}, "diff", {
+      get: () => {
+        throw new Error("Enhance prompt must not assemble file diffs");
+      },
+    });
+    mockUseSessionGitStatus.mockReturnValue({ files: { "src/a.ts": file } });
+    mockExecuteUtilityPrompt.mockResolvedValue({ success: true, response: "improved" });
+    const { result } = renderHook(() => useUtilityAgentGenerator({ sessionId: "session-1" }));
+
+    await act(async () => {
+      await result.current.enhancePrompt("original", () => true);
+    });
+
+    expect(mockExecuteUtilityPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ git_diff: undefined, changed_files: "src/a.ts" }),
+    );
+    expect(mockToast).not.toHaveBeenCalled();
+  });
+
   it("still sends the diff for generators that need it", async () => {
     mockUseSessionGitStatus.mockReturnValue({
       files: { "src/a.ts": { diff: "@@ -1 +1 @@\n-old\n+new" } },

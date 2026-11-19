@@ -5,10 +5,7 @@ import (
 	"unicode/utf8"
 )
 
-// Template context ceilings, in UTF-8 bytes. A utility prompt is assembled from
-// session data whose size the caller does not control: a large diff alone can
-// exceed a provider's context window and fail the whole call. These caps keep
-// the request in a range a model can actually accept.
+// Template context ceilings are measured in UTF-8 bytes.
 const (
 	MaxGitDiffBytes             = 100_000
 	MaxChangedFilesBytes        = 20_000
@@ -19,9 +16,8 @@ const (
 
 const truncationMarkerFormat = "\n[... truncated %d bytes ...]"
 
-// truncateContext bounds s to max bytes without splitting a UTF-8 sequence and
-// appends a marker naming how many bytes were dropped. A string that already
-// fits is returned unchanged.
+// truncateContext keeps the leading text within max bytes and appends a marker
+// with the number of omitted bytes. A fitting string is returned unchanged.
 func truncateContext(s string, max int) string {
 	if len(s) <= max {
 		return s
@@ -31,4 +27,17 @@ func truncateContext(s string, max int) string {
 		cut--
 	}
 	return s[:cut] + fmt.Sprintf(truncationMarkerFormat, len(s)-cut)
+}
+
+// truncateConversationHistory keeps the newest text within the history cap.
+// Its marker precedes the retained text and reports the omitted byte count.
+func truncateConversationHistory(s string) string {
+	if len(s) <= MaxConversationHistoryBytes {
+		return s
+	}
+	cut := len(s) - MaxConversationHistoryBytes
+	for cut < len(s) && !utf8.RuneStart(s[cut]) {
+		cut++
+	}
+	return fmt.Sprintf("[... truncated %d bytes ...]\n%s", cut, s[cut:])
 }

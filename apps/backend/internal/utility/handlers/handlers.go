@@ -22,22 +22,17 @@ import (
 	"github.com/kandev/kandev/internal/utility/service"
 )
 
-// statusClientClosedRequest is nginx's 499. Go defines no constant for it and
-// no standard 4xx says "the client hung up", which is what actually happened.
+// statusClientClosedRequest is nginx's HTTP 499 client-closed-request code.
 const statusClientClosedRequest = 499
 
-// callSettlementTimeout bounds the terminal write for a call whose request
-// context can no longer carry it.
+// callSettlementTimeout bounds each detached write to a utility call record.
 const callSettlementTimeout = 5 * time.Second
 
-// settleFailedCall records the terminal state of a call that produced no
-// result, and reports whether the client cancelled it.
-//
-// A cancelled request also cancels its context, so writing the terminal state
-// through that context would fail and leave the row pending forever. The write
-// therefore runs detached, with its own deadline.
+// settleFailedCall records a terminal state for an unsuccessful call. Its write
+// ignores request cancellation and has a five-second deadline. It reports
+// whether the caller cancelled the request.
 func (h *Handlers) settleFailedCall(ctx context.Context, callID string, cause error, durationMs int) bool {
-	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), callSettlementTimeout)
+	writeCtx, cancel := callSettlementContext(ctx)
 	defer cancel()
 	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(cause, context.Canceled) {
 		if err := h.controller.CancelCall(writeCtx, callID, durationMs); err != nil {
@@ -49,6 +44,18 @@ func (h *Handlers) settleFailedCall(ctx context.Context, callID string, cause er
 		h.logger.Warn("failed to mark failed call", zap.Error(err), zap.String("call_id", callID))
 	}
 	return false
+}
+
+func callSettlementContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), callSettlementTimeout)
+}
+
+func (h *Handlers) recordCompletedCall(ctx context.Context, callID string, response string, promptTokens, responseTokens, durationMs int) {
+	writeCtx, cancel := callSettlementContext(ctx)
+	defer cancel()
+	if err := h.controller.CompleteCall(writeCtx, callID, response, promptTokens, responseTokens, durationMs); err != nil {
+		h.logger.Warn("failed to update call record", zap.Error(err), zap.String("call_id", callID))
+	}
 }
 
 // InferenceExecutor executes inference prompts via agentctl.
@@ -331,9 +338,7 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 	}
 
 	// Mark call as completed
-	if err := h.controller.CompleteCall(ctx, callID, resp.Response, resp.PromptTokens, resp.ResponseTokens, resp.DurationMs); err != nil {
-		h.logger.Warn("failed to update call record", zap.Error(err), zap.String("call_id", callID))
-	}
+	h.recordCompletedCall(ctx, callID, resp.Response, resp.PromptTokens, resp.ResponseTokens, resp.DurationMs)
 
 	c.JSON(http.StatusOK, dto.ExecutePromptResponse{
 		Success:        true,
@@ -391,9 +396,7 @@ func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepa
 		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: message})
 		return
 	}
-	if err := h.controller.CompleteCall(ctx, callID, result.Response, result.PromptTokens, result.ResponseTokens, result.DurationMs); err != nil {
-		h.logger.Warn("failed to update call record", zap.Error(err), zap.String("call_id", callID))
-	}
+	h.recordCompletedCall(ctx, callID, result.Response, result.PromptTokens, result.ResponseTokens, result.DurationMs)
 	c.JSON(http.StatusOK, dto.ExecutePromptResponse{
 		Success:        true,
 		CallID:         callID,
@@ -411,7 +414,9 @@ func (h *Handlers) executeSessionProfilePrompt(ctx context.Context, executor pro
 		return executor.ExecuteInferenceProfilePrompt(attempt, sessionID, id, prepared.ResolvedPrompt)
 	})
 	if err == nil && response != nil && response.Success && prepared.ExecutionProfileID != initial {
-		if saveErr := h.controller.SetCallExecutionProfile(ctx, callID, prepared.ExecutionProfileID); saveErr != nil {
+		writeCtx, cancel := callSettlementContext(ctx)
+		defer cancel()
+		if saveErr := h.controller.SetCallExecutionProfile(writeCtx, callID, prepared.ExecutionProfileID); saveErr != nil {
 			h.logger.Warn("failed to update utility route attribution", zap.Error(saveErr), zap.String("call_id", callID))
 		}
 	}
@@ -431,7 +436,9 @@ func (h *Handlers) executeSessionlessProfilePrompt(ctx context.Context, executor
 		return nil, err
 	}
 	if err == nil && response.Success && prepared.ExecutionProfileID != initial {
-		if saveErr := h.controller.SetCallExecutionProfile(ctx, callID, prepared.ExecutionProfileID); saveErr != nil {
+		writeCtx, cancel := callSettlementContext(ctx)
+		defer cancel()
+		if saveErr := h.controller.SetCallExecutionProfile(writeCtx, callID, prepared.ExecutionProfileID); saveErr != nil {
 			h.logger.Warn("failed to update sessionless utility route attribution", zap.Error(saveErr), zap.String("call_id", callID))
 		}
 	}

@@ -113,7 +113,7 @@ func (c *Controller) PreparePromptRequest(ctx context.Context, req dto.ExecutePr
 		TaskDescription:     truncateContext(req.TaskDescription, MaxTaskDescriptionBytes),
 		SessionID:           req.SessionID,
 		UserPrompt:          req.UserPrompt,
-		ConversationHistory: truncateContext(req.ConversationHistory, MaxConversationHistoryBytes),
+		ConversationHistory: truncateConversationHistory(req.ConversationHistory),
 	}
 	return c.svc.PreparePromptRequest(ctx, req.UtilityAgentID, tmplCtx, defaults, sessionless)
 }

@@ -89,16 +89,20 @@ export function useUtilityAgentGenerator({
   const { toast } = useToast();
   const gitStatus = useSessionGitStatus(sessionId, { detailActive });
 
-  const collectGitContext = useCallback(() => {
-    const changedFiles = gitStatus?.files ? Object.keys(gitStatus.files) : [];
-    const diffs = gitStatus?.files
-      ? Object.values(gitStatus.files as Record<string, FileInfo>)
-          .filter((f) => f.diff)
-          .map((f) => f.diff)
-          .join("\n\n")
-      : "";
-    return { changedFiles, diffs: diffs ? truncateGitDiff(diffs) : undefined };
-  }, [gitStatus]);
+  const collectGitContext = useCallback(
+    (includeDiff: boolean) => {
+      const changedFiles = gitStatus?.files ? Object.keys(gitStatus.files) : [];
+      const diffs =
+        includeDiff && gitStatus?.files
+          ? Object.values(gitStatus.files as Record<string, FileInfo>)
+              .filter((f) => f.diff)
+              .map((f) => f.diff)
+              .join("\n\n")
+          : "";
+      return { changedFiles, diffs: diffs ? truncateGitDiff(diffs) : undefined };
+    },
+    [gitStatus],
+  );
 
   const clearType = useCallback(
     (type: GeneratorType) =>
@@ -113,12 +117,10 @@ export function useUtilityAgentGenerator({
   const buildRequest = useCallback(
     (type: GeneratorType, options?: GenerateOptions): ExecutePromptRequest => {
       const sessionless = type === ENHANCE_PROMPT && !sessionId;
+      const includeDiff = type !== ENHANCE_PROMPT;
       const { changedFiles, diffs } = sessionless
         ? { changedFiles: [] as string[], diffs: undefined }
-        : collectGitContext();
-      // Enhance needs only the changed file names; the diff stays with the
-      // generators whose output describes the change itself.
-      const includeDiff = type !== ENHANCE_PROMPT;
+        : collectGitContext(includeDiff);
       return {
         utility_agent_id: UTILITY_AGENT_IDS[type],
         session_id: sessionId ?? "",

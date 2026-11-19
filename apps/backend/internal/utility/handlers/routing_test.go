@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/hostutility"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -22,6 +24,17 @@ type profilePromptCall struct {
 type profilePromptExecutor struct {
 	responses []*agentctlutil.PromptResponse
 	calls     []profilePromptCall
+}
+
+type profileHostPromptExecutor struct {
+	results []*hostutility.PromptResult
+	errs    []error
+}
+
+func (e *profileHostPromptExecutor) ExecuteProfilePrompt(context.Context, string, string) (*hostutility.PromptResult, error) {
+	result, err := e.results[0], e.errs[0]
+	e.results, e.errs = e.results[1:], e.errs[1:]
+	return result, err
 }
 
 func (e *profilePromptExecutor) ExecuteInferencePrompt(context.Context, string, string, string, string) (*agentctlutil.PromptResponse, error) {
@@ -80,6 +93,83 @@ func TestExecuteSessionProfilePromptUsesConcreteProfileAndUpdatesAttribution(t *
 	if got := repo.call(call.ID).ExecutionProfileID; got != "second" {
 		t.Fatalf("execution profile attribution = %q, want second", got)
 	}
+}
+
+func TestExecuteSessionProfilePromptKeepsFallbackAttributionAfterCancellation(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	repo := newFakeUtilityRepo()
+	svc := service.NewService(repo)
+	svc.SetExecutionProfileResolver(typedProfileFailureResolver{})
+	h := NewHandlers(controller.NewController(svc), nil, nil, nil, log)
+	call, err := svc.CreateCallWithExecutionProfile(context.Background(), "utility-1", "task-session", "prompt", "gpt-5", "logical", "first")
+	if err != nil {
+		t.Fatalf("CreateCallWithExecutionProfile: %v", err)
+	}
+	executor := &profilePromptExecutor{responses: []*agentctlutil.PromptResponse{
+		{Success: false, Error: "too many requests"},
+		{Success: true, Response: "done"},
+	}}
+	prepared := &service.PromptRequest{
+		AgentProfileID: "logical", ExecutionProfileID: "first", RouteSessionID: "route-session",
+		RouteGeneration: 1, AgentCLI: "codex-acp", ResolvedPrompt: "prompt",
+	}
+	ctx := &cancelAfterContextErrors{Context: context.Background(), remaining: 4}
+
+	response, err := h.executeSessionProfilePrompt(ctx, executor, "task-session", prepared, call.ID)
+	if err != nil || response == nil || !response.Success {
+		t.Fatalf("executeSessionProfilePrompt() = (%#v, %v), want success", response, err)
+	}
+	if got := repo.call(call.ID).ExecutionProfileID; got != "second" {
+		t.Fatalf("execution profile attribution = %q, want successful fallback profile second", got)
+	}
+}
+
+func TestExecuteSessionlessProfilePromptKeepsFallbackAttributionAfterCancellation(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	repo := newFakeUtilityRepo()
+	svc := service.NewService(repo)
+	svc.SetExecutionProfileResolver(typedProfileFailureResolver{})
+	h := NewHandlers(controller.NewController(svc), nil, nil, nil, log)
+	call, err := svc.CreateCallWithExecutionProfile(context.Background(), "utility-1", "", "prompt", "gpt-5", "logical", "first")
+	if err != nil {
+		t.Fatalf("CreateCallWithExecutionProfile: %v", err)
+	}
+	executor := &profileHostPromptExecutor{
+		results: []*hostutility.PromptResult{{}, {Response: "done"}},
+		errs:    []error{errors.New("too many requests"), nil},
+	}
+	prepared := &service.PromptRequest{
+		AgentProfileID: "logical", ExecutionProfileID: "first", RouteSessionID: "route-session",
+		RouteGeneration: 1, AgentCLI: "codex-acp", ResolvedPrompt: "prompt",
+	}
+	ctx := &cancelAfterContextErrors{Context: context.Background(), remaining: 4}
+
+	response, err := h.executeSessionlessProfilePrompt(ctx, executor, prepared, call.ID)
+	if err != nil || response == nil || response.Response != "done" {
+		t.Fatalf("executeSessionlessProfilePrompt() = (%#v, %v), want success", response, err)
+	}
+	if got := repo.call(call.ID).ExecutionProfileID; got != "second" {
+		t.Fatalf("execution profile attribution = %q, want successful fallback profile second", got)
+	}
+}
+
+type cancelAfterContextErrors struct {
+	context.Context
+	remaining int
+}
+
+func (c *cancelAfterContextErrors) Err() error {
+	if c.remaining == 0 {
+		return context.Canceled
+	}
+	c.remaining--
+	return nil
 }
 
 func TestExecuteSessionProfilePromptDoesNotFallbackAfterPartialResponse(t *testing.T) {

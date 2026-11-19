@@ -120,9 +120,8 @@ func TestRefreshUneditedBuiltinPromptPreservesUserEdit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read builtin: %v", err)
 	}
-	// The user saves the shipped legacy text verbatim: the edit timestamp, not
-	// the content, marks the row as theirs.
-	agent.Prompt = enhancePromptV1
+	const customizedPrompt = enhancePromptV1 + "\n\nKeep the response under three sentences."
+	agent.Prompt = customizedPrompt
 	if err := repo.UpdateAgent(ctx, agent); err != nil {
 		t.Fatalf("edit builtin prompt: %v", err)
 	}
@@ -131,7 +130,43 @@ func TestRefreshUneditedBuiltinPromptPreservesUserEdit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replay schema: %v", err)
 	}
-	if got := storedEnhancePrompt(t, replayed); got != enhancePromptV1 {
+	if got := storedEnhancePrompt(t, replayed); got != customizedPrompt {
 		t.Fatalf("user-edited prompt = %q, want it preserved", got)
+	}
+}
+
+func TestRefreshBuiltinPromptAfterProfileOnlyUpdate(t *testing.T) {
+	repo := seedStoredEnhancePrompt(t, enhancePromptV1)
+	ctx := context.Background()
+	agent, err := repo.GetAgentByID(ctx, enhancePromptAgentID)
+	if err != nil {
+		t.Fatalf("read builtin: %v", err)
+	}
+	agent.AgentProfileID = "profile-1"
+	agent.ProfileBindingState = "explicit"
+	if err := repo.UpdateAgent(ctx, agent); err != nil {
+		t.Fatalf("update builtin profile binding: %v", err)
+	}
+	updated, err := repo.GetAgentByID(ctx, enhancePromptAgentID)
+	if err != nil {
+		t.Fatalf("read updated builtin: %v", err)
+	}
+	if updated.CreatedAt.Equal(updated.UpdatedAt) {
+		t.Fatal("profile-only update did not advance updated_at")
+	}
+
+	replayed, err := newSQLiteRepositoryWithDB(repo.db, repo.db)
+	if err != nil {
+		t.Fatalf("replay schema: %v", err)
+	}
+	refreshed, err := replayed.GetAgentByID(ctx, enhancePromptAgentID)
+	if err != nil {
+		t.Fatalf("read refreshed builtin: %v", err)
+	}
+	if refreshed.Prompt != utilcfg.Get("enhance-prompt") {
+		t.Fatalf("prompt was not refreshed after profile-only update: %q", refreshed.Prompt)
+	}
+	if refreshed.AgentProfileID != "profile-1" || refreshed.ProfileBindingState != "explicit" {
+		t.Fatalf("profile binding changed during prompt refresh: (%q, %q)", refreshed.AgentProfileID, refreshed.ProfileBindingState)
 	}
 }

@@ -36,25 +36,30 @@ instead of `{{GitDiff}}`.
 `ChangedFiles`, `CommitLog`, `TaskDescription`, and `ConversationHistory`
 through `truncateContext` (`internal/utility/controller/context_limits.go`)
 before template rendering. Every cap is in UTF-8 bytes; the cut backs off to
-a rune boundary and appends `[... truncated N bytes ...]`. These caps are
-defensive ceilings for every caller, including the API and sessionless calls,
-not per-provider tuning.
+a rune boundary and includes `[... truncated N bytes ...]`. Conversation
+history uses a separate tail truncation: it retains the newest text in its
+original order and puts the marker before that text. Other fields retain their
+leading text and put the marker after it. These caps apply to every caller,
+including the API and sessionless calls.
 
 **Stored prompt refresh.** Built-in rows are seeded with `ON CONFLICT DO
 NOTHING`, so an existing install keeps the old diff-based template.
 `refreshUneditedBuiltinPrompts` (`internal/utility/store/builtins.go`) runs
 after the placeholder migration and replaces a stored built-in prompt only when
-its trimmed text hashes to a known shipped revision and `created_at` equals
-`updated_at`. The update is conditional on the values read, so a concurrent
-edit wins, and it leaves `updated_at` unchanged.
+its trimmed text hashes to a known shipped revision. The update is conditional
+on the stored prompt text, so a concurrent prompt edit wins. It changes only
+the prompt field, so profile bindings and other agent settings remain intact.
 
-**Call settlement.** `settleFailedCall` (`internal/utility/handlers`) writes the
-terminal state through `context.WithoutCancel` with a five-second deadline,
-because the request context is already cancelled when the caller leaves. A
-cancelled context or a `context.Canceled` cause records
+**Call records and settlement.** `CreateCallWithExecutionProfile`
+(`internal/utility/service`) creates the pending row with both logical and
+concrete profile IDs in one repository insert. `settleFailedCall` and completed
+call writes (`internal/utility/handlers`) use a cancellation-independent context
+with a five-second deadline. A cancelled context or a `context.Canceled` cause records
 `models.CallStatusCancelled` through `Service.CancelCall` and answers 499, the
-status the backend already uses for a closed client request. Every other
-failure records `failed` as before.
+status the backend uses for a closed client request. Successful calls record
+`completed` even if the client disconnects after the result. A successful
+dynamic fallback stores its concrete execution profile with the same bounded
+write context. Every other failure records `failed`.
 
 ## Migrated source detail
 

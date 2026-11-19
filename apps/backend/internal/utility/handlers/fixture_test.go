@@ -35,6 +35,9 @@ type fakeUtilityRepo struct {
 	lastListCallsLimit int
 	errs               map[string]error
 	seq                int
+	createCallCount    int
+	updateCallCount    int
+	cancelAfterCreate  context.CancelFunc
 }
 
 func newFakeUtilityRepo() *fakeUtilityRepo {
@@ -93,6 +96,18 @@ func (r *fakeUtilityRepo) callCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.calls)
+}
+
+func (r *fakeUtilityRepo) callWriteCounts() (int, int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.createCallCount, r.updateCallCount
+}
+
+func (r *fakeUtilityRepo) cancelAfterNextCallCreate(cancel context.CancelFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cancelAfterCreate = cancel
 }
 
 func (r *fakeUtilityRepo) ListAgents(context.Context) ([]*models.UtilityAgent, error) {
@@ -221,13 +236,19 @@ func (r *fakeUtilityRepo) CreateCall(_ context.Context, call *models.UtilityAgen
 		return err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.seq++
+	r.createCallCount++
 	if call.ID == "" {
 		call.ID = fmt.Sprintf("call-%d", r.seq)
 	}
 	r.calls[call.ID] = call
 	r.callOrder = append(r.callOrder, call.ID)
+	cancel := r.cancelAfterCreate
+	r.cancelAfterCreate = nil
+	r.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	return nil
 }
 
@@ -237,6 +258,7 @@ func (r *fakeUtilityRepo) UpdateCall(ctx context.Context, call *models.UtilityAg
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.updateCallCount++
 	r.calls[call.ID] = call
 	return nil
 }

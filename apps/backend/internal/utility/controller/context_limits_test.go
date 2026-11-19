@@ -90,3 +90,30 @@ func TestTruncateContextKeepsUncutBrowserDiff(t *testing.T) {
 		t.Fatalf("an uncut %d-byte diff changed to %d bytes", len(diff), len(got))
 	}
 }
+
+func TestTruncateConversationHistoryKeepsNewestMessagesInOrder(t *testing.T) {
+	const early = "early message: choose the old plan"
+	const late = "late update: keep the revised plan!"
+	const latest = "latest decision: use the new API"
+	conversation := early + "\n" + strings.Repeat("é", MaxConversationHistoryBytes/2) + "\n" + late + "\n" + latest
+
+	got := truncateConversationHistory(conversation)
+
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncated history is invalid UTF-8: %q", got[:min(len(got), 80)])
+	}
+	if !strings.HasPrefix(got, "[... truncated ") {
+		t.Fatalf("truncation marker is not before retained history: %q", got[:min(len(got), 80)])
+	}
+	if strings.Contains(got, early) {
+		t.Fatalf("truncated history kept the oldest message: %q", got[:min(len(got), 120)])
+	}
+	lateAt, latestAt := strings.Index(got, late), strings.Index(got, latest)
+	if lateAt < 0 || latestAt <= lateAt {
+		t.Fatalf("newest messages were not retained in chronological order: %q", got[len(got)-100:])
+	}
+	body := got[strings.IndexByte(got, '\n')+1:]
+	if len(body) > MaxConversationHistoryBytes {
+		t.Fatalf("retained history is %d bytes, cap is %d", len(body), MaxConversationHistoryBytes)
+	}
+}

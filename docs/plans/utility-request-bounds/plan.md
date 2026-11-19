@@ -25,8 +25,9 @@ This package implements `REQ-AGENTS-UTILITY-AGENT-PROFILES-002` as described in
 ## Scope
 
 In scope: the Enhance prompt payload and template, client and server context
-caps, the refresh of untouched stored Enhance prompts, and the `cancelled`
-call state with a 499 response.
+caps, newest-first conversation-history retention, stored Enhance prompt
+refresh, atomic profile attribution at call creation, and terminal call state
+updates on success, failure, and cancellation.
 
 Out of scope: per-provider context budgets, a client-side cancel control,
 other built-in templates, and the settings UI.
@@ -41,8 +42,8 @@ request path and one verification boundary.
 ## Verification strategy
 
 Backend unit tests for truncation, prompt refresh (shipped, dotted-placeholder,
-unknown, and user-edited rows), and cancellation through the production
-router; Vitest for the hook payload. No end-to-end test: the visible outcome
+unknown, customized, and profile-only-updated rows), and call settlement through
+the production router; Vitest for the hook payload. No end-to-end test: the visible outcome
 is the absence of a provider rejection, which the mock agent cannot produce,
 and the call history has no UI.
 
@@ -53,6 +54,12 @@ and the call history has no UI.
 - An install whose stored Enhance prompt was normalized by a system write
   keeps the old template; without a diff it renders that section empty, which
   is still within bounds.
+- Conversation history keeps the newest 200,000 UTF-8 bytes. The omitted-byte
+  marker precedes the retained tail so the model can read recent messages in
+  their original order.
+- Terminal writes run with a five-second deadline that does not inherit request
+  cancellation. A database write can still fail for other reasons, and the
+  handler logs that failure.
 
 ## References
 
