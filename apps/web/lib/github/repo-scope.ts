@@ -11,11 +11,12 @@ export function repoAllowedByScope(
   repo: string,
 ): boolean {
   if (!settings || settings.repo_scope_mode === "all") return true;
-  if (settings.repo_scope_mode === "orgs") {
-    return (settings.repo_scope_orgs ?? []).some((allowed) => same(allowed, owner));
-  }
-  return (settings.repo_scope_repos ?? []).some(
-    (allowed) => same(allowed.owner, owner) && same(allowed.name, repo),
+  if (settings.repo_scope_mode !== "selected") return false;
+  return (
+    (settings.repo_scope_orgs ?? []).some((allowed) => same(allowed, owner)) ||
+    (settings.repo_scope_repos ?? []).some(
+      (allowed) => same(allowed.owner, owner) && same(allowed.name, repo),
+    )
   );
 }
 
@@ -25,10 +26,8 @@ export function orgAllowedByScope(
   org: string,
 ): boolean {
   if (!settings || settings.repo_scope_mode === "all") return true;
-  if (settings.repo_scope_mode === "orgs") {
-    return (settings.repo_scope_orgs ?? []).some((allowed) => same(allowed, org));
-  }
-  return false;
+  if (settings.repo_scope_mode !== "selected") return false;
+  return (settings.repo_scope_orgs ?? []).some((allowed) => same(allowed, org));
 }
 
 /** Case-insensitive identity match for repository filters. */

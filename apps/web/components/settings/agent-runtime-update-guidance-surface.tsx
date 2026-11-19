@@ -1,26 +1,12 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { IconChevronLeft } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@kandev/ui/dialog";
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from "@kandev/ui/drawer";
+import { Dialog, DialogContent, DialogFooter } from "@kandev/ui/dialog";
+import { Drawer, DrawerContent, DrawerFooter } from "@kandev/ui/drawer";
 import type { AgentUpdateStatus } from "@/lib/api";
 import { RuntimePolicyDetail } from "./agent-runtime-policies";
+import { RuntimeUpdateDetailHeader } from "./agent-runtime-update-surface";
 
 /**
  * Read-only detail for an externally managed, unsupported, or vanished runtime.
@@ -42,18 +28,13 @@ export function RuntimeUpdateGuidanceSurface({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const back = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className="cursor-pointer self-start px-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-      onClick={onBack}
-      data-testid="runtime-guidance-back"
-    >
-      <IconChevronLeft className="mr-1 size-4" aria-hidden="true" />
-      {t("agents:runtimeUpdateBackToAll")}
-    </Button>
+  const header = (
+    <RuntimeUpdateDetailHeader
+      isMobile={isMobile}
+      title={displayName}
+      description={t("agents:runtimeManagerDescription")}
+      back={{ onClick: onBack, testId: "runtime-guidance-back" }}
+    />
   );
   const body = (
     <>
@@ -78,13 +59,7 @@ export function RuntimeUpdateGuidanceSurface({
           className="flex max-h-[92dvh] flex-col overflow-hidden data-[vaul-drawer-direction=bottom]:max-h-[92dvh]"
           data-testid={`runtime-guidance-drawer-${agentName}`}
         >
-          <DrawerHeader className="shrink-0 px-4 py-3 text-left">
-            {back}
-            <DrawerTitle>{displayName}</DrawerTitle>
-            <DrawerDescription className="sr-only">
-              {t("agents:runtimeManagerDescription")}
-            </DrawerDescription>
-          </DrawerHeader>
+          {header}
           <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
           <DrawerFooter className="border-t px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
             {footer}
@@ -99,13 +74,7 @@ export function RuntimeUpdateGuidanceSurface({
         className="flex max-h-[92dvh] flex-col gap-0 overflow-hidden p-0 sm:min-w-[34rem] sm:max-w-xl"
         data-testid={`runtime-guidance-dialog-${agentName}`}
       >
-        <DialogHeader className="shrink-0 px-4 pb-1 pt-3">
-          {back}
-          <DialogTitle>{displayName}</DialogTitle>
-          <DialogDescription className="sr-only">
-            {t("agents:runtimeManagerDescription")}
-          </DialogDescription>
-        </DialogHeader>
+        {header}
         <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
         <DialogFooter className="border-t px-4 py-2">{footer}</DialogFooter>
       </DialogContent>

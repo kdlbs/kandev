@@ -3318,5 +3318,7 @@
   "previewRegionDrifted": "O esquema da página mudou desde esta captura. A captura de ecrã continua a mostrar a área original. Mover ou redimensionar esta região captura-a novamente na nova posição.",
   "previewShowCapture": "Mostrar captura",
   "previewHideCapture": "Ocultar captura",
-  "previewHideComments": "Ocultar comentários"
+  "previewHideComments": "Ocultar comentários",
+  "referenceCurrentTitle": "Título atual: {{title}}",
+  "referenceOpenForDetails": "Abra a tarefa para ver os detalhes."
 }

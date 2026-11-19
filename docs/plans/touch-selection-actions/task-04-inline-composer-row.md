@@ -31,7 +31,8 @@ joins the end of the utilities while text is selected.
 
 - `SelectionActionSlotProvider` / `SelectionActionSlot` /
   `useSelectionActionSlot`; providers in `TaskChatPanel` and
-  `QuickChatContent`; slot at the end of `ChatStatusBar`'s utility controls.
+  `QuickChatContent`; slot at the end of `ChatStatusBar`'s utility controls and
+  in the Office Simple Pane comment composer footer.
 - `MessageCommentControls` portals the Comment button into the slot when
   mounted, otherwise uses the dock.
 - Phone workflow action no longer forces a full-width row.
@@ -40,7 +41,7 @@ joins the end of the utilities while text is selected.
 ## Out of scope
 
 - Desktop status-bar order and density.
-- Office threads, Markdown preview, and code editors (keep the dock).
+- Markdown preview and code editors (keep the dock).
 
 ## ASCII UI preview
 
@@ -51,12 +52,22 @@ See [plan.md UI-02](plan.md#ascii-ui-preview).
 | [ Message the agent...         ] (>) |
 ```
 
+Office Simple Pane thread extract:
+
+```text
+| Agent transcript (one scroll owner)    |
+| Final paragraph stays above composer   |
+| [Add a comment...              ]        |
+| [Attach] [Enhance]         [(C)] [Send] |  Comment stays in the composer footer
+```
+
 ## Acceptance
 
 - Slot, status-bar, and chat-surface tests fail first, then pass.
 - `mobile-chrome` E2E: the chat Comment icon is in the utility controls and
   vertically aligned with them; a short workflow action shares the utility row;
-  crowded rows wrap without overlap.
+  crowded rows wrap without overlap; an Office extract action sits in the
+  composer footer and the final transcript text remains clear above it.
 
 ## Verification
 
@@ -127,3 +138,14 @@ Verification:
 - Related Vitest: 2,829 passed across 274 files. The full web suite was not
   rerun because it cannot finish within this environment's time limit.
 - Typecheck, lint, Prettier, i18n, docs, spec, and architecture checks passed.
+
+## PR fixup follow-up (2026-11-17)
+
+`TaskChat` now provides the selection action slot in the Office comment
+composer footer. Office thread extract actions appear in that existing row,
+so the final transcript paragraph can scroll above the composer without a dock
+covering it. The Office mobile E2E asserts the action is in the slot, no dock
+is rendered, and the final paragraph ends above the composer.
+
+Verification: `task-chat.extracts.test.tsx` passed in the focused unit suite.
+`mobile-thread-extract-comments.spec.ts` passed both Office cases.

@@ -156,3 +156,10 @@ Verification:
 
 Physical Android Chrome and iOS Safari checks were not available; Playwright
 cannot render the native selection menu.
+
+## PR fixup follow-up (2026-11-17)
+
+Office thread extracts now use the `TaskChat` comment composer footer slot from
+task 04. The Office Simple Pane retains its marked transcript scroll owner for
+surfaces without a slot. The Office mobile E2E confirms the extract action is
+inside the composer row and no transcript dock overlays the final paragraph.

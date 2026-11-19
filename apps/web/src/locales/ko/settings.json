@@ -1232,5 +1232,7 @@
   "builtinMcp.inheritedValue": "작업 공간에서 상속: {{value}}",
   "builtinMcp.overrideValue": "작업 재정의: {{value}}. 작업 공간 기본값: {{default}}.",
   "builtinMcp.useInherited": "상속된 값 사용",
-  "builtinMcp.allowTasks": "작업에서 이 패키지 사용 허용"
+  "builtinMcp.allowTasks": "작업에서 이 패키지 사용 허용",
+  "markdownPreviewByDefault": "Markdown 파일을 미리보기로 열기",
+  "markdownPreviewByDefaultDescription": "새로 여는 Markdown 파일의 초기 모드를 선택합니다. 언제든지 모드를 전환할 수 있습니다."
 }

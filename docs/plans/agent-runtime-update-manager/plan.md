@@ -20,7 +20,8 @@ First connect existing actions directly to shared details. Then add the overview
 Each work order leaves a usable flow and includes its own tests.
 
 The user accepted the proposed desktop and phone sketches on 2026-11-10 and requested this design package.
-All three work orders are implemented, with targeted unit, static, documentation, backend, and managed Playwright checks recorded below.
+A follow-up detail redesign was accepted on 2026-11-18 and is recorded in Task 04.
+All four work orders are implemented, with targeted unit, static, documentation, backend, and managed Playwright checks recorded below.
 
 ## Scope
 
@@ -28,6 +29,7 @@ All three work orders are implemented, with targeted unit, static, documentation
 
 - The visible Runtime updates entry and available count.
 - Direct per-agent version details and one overview-to-detail surface.
+- A concise individual update view with one version picker and collapsed technical details.
 - Existing capability-specific recovery, manual guidance, policy drafts, and notification destinations.
 - Update all and Update selected for eligible managed exact-version updates.
 - Review preconditions on individual requests, partial results, retry, and interrupted-request recovery.
@@ -86,6 +88,10 @@ Extend existing preview and POST types with optional `reviewed_runtime` evidence
 Guarded requests require the same trusted managed identity, current selection, family/source, and update operation.
 Compare evidence before policy mutation and at the guarded activation boundary.
 Guarded jobs always prepare the captured managed candidate and cannot switch to native preparation.
+
+### Task 04: Simplified runtime details
+
+Keep selected and current versions, one searchable **Change version** action, automatic updates, and the selected-target action in the primary view. Move package, ownership, command preview, guidance, and successful output into a collapsed **Runtime details** disclosure. Reuse existing update and policy controllers so the visual change does not alter admission, saved-policy, or job lifecycles.
 Legacy individual requests retain their current contract. Servers without review evidence keep bulk disabled.
 
 ### Compatibility matrix
@@ -175,29 +181,36 @@ Individual-only availability can exceed the bulk count. The overview explains th
 ### UI-03: Runtime detail and dirty policy
 
 Entry: Manage versions, installed-card trigger, or `#runtime-update-claude-acp`.
-Covers 001.3 through 001.5, 002.1, and 003.6.
+Covers 001.3 through 001.5, 001.8, 002.1, and 003.6.
 
 ```text
 +------------------------------------------------------------------------+
-| [< All runtimes]                    Claude                         [X] |
+| [<] Update Claude                                                 [X] |
 |------------------------------------------------------------------------|
-| Current runtime   0.100.0                                              |
-| Latest stable     0.103.0                                              |
-| Version           [0.103.0 (latest)                                  v] |
-| [Use Kandev default]                                                   |
+| Selected version                     [Change version >]                |
+| 0.103.0                                                                  |
+| Current version: 0.100.0                                                |
+|------------------------------------------------------------------------|
 | Automatic updates                                             [ Off ] |
-| > Runtime source and technical details                                 |
-| [Retained outcome, job output, or required compatibility notice]        |
+| Applies to new sessions.                                               |
 |------------------------------------------------------------------------|
-| Unsaved policy changes                 [Reset] [Save changes]          |
-| Save or reset this policy before updating this runtime.                |
-| [Cancel]                                     [Update Claude: disabled] |
+| > Runtime details                                                      |
+|------------------------------------------------------------------------|
+| [Update to 0.103.0]                                                     |
 +------------------------------------------------------------------------+
+
+Expanded details:
+  Package: @agentclientprotocol/claude-agent-acp
+  Managed by: Kandev
+  > Command preview
+  Manual update guidance, when available
 ```
 
-The dirty row disappears after Save or Reset. The version action uses the existing operation label.
-An older version offers Roll back. Harness details omit the version picker. External details offer guidance.
-Back retains overview state. Task 01 uses the same detail region without All runtimes until overview exists.
+Phone uses the same information order in the bottom drawer with 44px-or-larger touch controls.
+The detail body and footer use a shared horizontal inset. Technical details start collapsed.
+The dirty policy row remains reachable with Save and Reset. An older version offers Roll back.
+Harness details omit the version picker. External details offer guidance.
+Back retains overview state. Versions, counts, widths, and spacing are illustrative.
 
 ### UI-04: Phone page and overview drawer
 
@@ -292,6 +305,7 @@ The following test names are implemented additions or extensions. Every requirem
 | 001.1, 001.2, 002.4 | `lib/agents/runtime-update-manager.test.ts`: available count excludes unknown, external, unavailable, and busy rows |
 | 001.3, 001.4 | `components/settings/agent-runtime-update-control.test.tsx`: external opener selects one runtime without a card jump |
 | 001.4 | Existing Copilot, self-update, fallback, operation, and runtime-identity tests retain their mode-specific assertions |
+| 001.8 | `components/settings/agent-runtime-update-control.test.tsx`: selected-target action and compact detail composition |
 | 001.5, 003.6 | `components/settings/agent-runtime-update-manager.test.tsx`: dirty policy saves explicitly, survives dismissal, and blocks conflicting admission |
 | 001.7, 002.1, 002.2 | `lib/settings-discovery/target.test.ts` and `settings-target-provider.test.tsx`: action targets handle initial, repeated, and late requests without changing element targets |
 | 002.3, 002.4 | `agent-runtime-update-manager.test.tsx`: back navigation and breakpoint changes preserve state, stale previews cannot replace newer detail |
@@ -315,6 +329,7 @@ Task 03 adds `agent-runtime-bulk-update.spec.ts` and `mobile-agent-runtime-bulk-
 | Header entry, direct details, initial/same-route/late/inactive targets | 001.1-001.3, 002.1, 002.2 | Existing `agent-runtime-notifications.spec.ts` / `chromium` and mobile counterpart / `mobile-chrome` |
 | Saved policy, failed save, draft retained after close, clean/dirty refresh | 001.5, 002.3, 003.6 | Existing notification suites plus focused manager scenarios |
 | Pinned update, rollback/default, self-update, Copilot notice, fallback identity | 001.4 | Existing runtime-update, self-update, Copilot, and identity suites on both projects |
+| Selected/current versions, searchable Change version, collapsed Runtime details, and selected-target action | 001.8 | Desktop `agent-runtime-update.spec.ts` / `chromium`; phone `mobile-agent-runtime-update.spec.ts` / `mobile-chrome` |
 | Containment, single scroll owner, footer reachability, focus return | 001.6, 001.7 | Phone notification suite, 767/768px desktop cases, and coarse-pointer tablet case |
 | Review all/subset/none, exclude individual-only rows, preserved deselection | 003.1, 003.2 | New bulk desktop and phone specs |
 | Partial failure, duplicate click, stale review, different active job, retry only failed | 003.3, 003.4 | New bulk desktop and phone specs |
@@ -330,6 +345,7 @@ Compare focused desktop and phone screenshots with UI-01 through UI-06 during ea
 1. [x] [Task 01: Open version details directly](task-01-direct-runtime-details.md) (`done`, wave 1, no dependencies).
 2. [x] [Task 02: Add the responsive update manager](task-02-runtime-update-manager.md) (`done`, wave 2, depends on Task 01).
 3. [x] [Task 03: Add reviewed bulk updates](task-03-reviewed-bulk-updates.md) (`done`, wave 3, depends on Task 02).
+4. [x] [Task 04: Simplify runtime update details](task-04-simplify-runtime-update-details.md) (`done`, wave 4, depends on Task 02).
 
 Execute sequentially. No work order is parallel-safe because they share the page, update controller, API, fixtures, and locale catalogs.
 
@@ -409,6 +425,9 @@ Implementation completed on 2026-11-10 and review remediation completed the same
 - Bulk E2E: `agent-runtime-bulk-update.spec.ts` passed 2/2 and `mobile-agent-runtime-bulk-update.spec.ts` passed 2/2 on their Playwright projects.
 - Runtime E2E: desktop notifications passed 7/7; phone notifications passed 4/4; the desktop runtime update, self-update, Copilot, identity, and profile-discovery group passed 27/27; the phone group passed 20/20 after the scroll-owner assertion was corrected.
 - Managed Playwright runs rebuilt production web/backend assets through the repository runner. After review remediation, the desktop notifications suite (7/7), phone notifications suite (4/4), and both bulk suites (2/2 each) were rerun and passed.
+- Runtime detail follow-up (2026-11-18): focused Vitest passed 29 tests across four files. The committed desktop and phone runtime update flows each passed one focused Playwright test. Settled desktop and phone screenshots were captured with the temporary `prCapture` specs, then those specs were removed.
+- Follow-up documentation: `python3 scripts/list-docs.py validate` validated 455 decisions and 2,040 specifications; `python3 scripts/lint-spec-files.test.py` passed 36 tests; `python3 scripts/lint-spec-files.py --all` passed. The PR `validateCoverage` preflight accepted Task 04 and its runtime-update requirement and design.
+- PR fixup (2026-11-18): focused Vitest passed 63 tests across five files; the desktop Chromium group passed all 29 scenarios across the full run and a rerun of the 767px boundary case after waiting for drawer animation; the mobile Chromium group passed 19/19. Fast typecheck, i18n checks, changed-file Oxlint, documentation validation, specification lint, and `git diff --check` passed. The fixup addresses the stale success expectation, runtime disclosure and keyboard behavior, version reset facts, touch target sizing, and PR review findings.
 
 New requirement and design documents are active. All work orders are done.
 

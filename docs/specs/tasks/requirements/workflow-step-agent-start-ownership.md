@@ -1,8 +1,8 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-08-05
-updated: 2026-09-18
+updated: 2026-11-16
 owners:
   - Kandev
 ---
@@ -146,6 +146,35 @@ This draft extension addresses [issue #3804](https://github.com/kdlbs/kandev/iss
 
 The extension covers immediate REST and MCP dispatch. Dependency-deferred creation, historical stuck tasks, and changes to workflow action semantics are excluded.
 The [initial creation prompt package](../../../plans/task-create-initial-turn-start/plan.md) owns implementation and regression evidence.
+
+### REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007: Current step context on ordinary starts
+
+**Intent:** An ordinary task start uses consistent workflow guidance and launch configuration when the caller omits the current step ID.
+This extension covers ordinary, non-ephemeral tasks. Office runs and explicitly spawned helper sessions retain their separate prompt contracts.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.1:** When an ordinary task start omits the step ID and the task's current step is successfully read, its first prompt shall use that step.
+  An otherwise identical start with that step ID shall receive equivalent workflow guidance, profile selection, and applicable session configuration.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.2:** When a start supplies a step ID, that selection shall remain authoritative for prompt composition.
+  A different stored step shall not replace the explicit selection.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.3:** Both forms of start shall retain existing template semantics.
+  `{{task_prompt}}` inserts the supplied prompt, or the task description when input is empty. A nonempty template without that token replaces the base text.
+  An empty step template retains the base text.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.4:** When `skip_step_prompt` applies, omission of the step ID shall not bypass suppression.
+  The system shall suppress the step prompt and task-description fallback while retaining applicable workflow guidance, one-time instructions, and session configuration.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.5:** Omitted-ID starts shall retain the selected step's plan-mode behavior and existing saved-prompt expansion rules.
+  Stored first-prompt content and agent input shall retain the same composed instructions without duplicate context blocks.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.6:** Starts without a workflow step and ephemeral starts shall retain their existing direct-prompt behavior.
+  Office runs and explicitly spawned helper sessions without a step argument shall retain their caller-owned prompts.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.7:** Resolving an omitted step ID for prompt composition shall not initiate another workflow transition or repeat entry actions.
+  Explicit profile selections shall retain their existing precedence.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.8:** If the task read used to resolve an omitted step ID fails after task classification succeeds, the start shall retain its existing direct-prompt behavior and log the lookup failure.
+  The start continues without workflow-step template composition.
+
+The [start-context design](../system-design/workflow-task-start-context.md) defines this extension.
+The [current-step prompt package](../../../plans/task-start-current-step-prompt/plan.md) owns delivery.
+Historical transcript repair, recovery replay, and new launch admission rules are excluded.
 
 ## Migrated source detail
 

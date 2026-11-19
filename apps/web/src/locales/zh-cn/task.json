@@ -3318,5 +3318,7 @@
   "previewRegionDrifted": "自此次截取以来，页面布局已发生变化。截图仍显示原始区域。移动或调整此区域的大小会在新位置重新截取。",
   "previewShowCapture": "显示截取内容",
   "previewHideCapture": "隐藏截取内容",
-  "previewHideComments": "隐藏评论"
+  "previewHideComments": "隐藏评论",
+  "referenceCurrentTitle": "当前标题：{{title}}",
+  "referenceOpenForDetails": "打开任务以查看详情。"
 }

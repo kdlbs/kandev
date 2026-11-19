@@ -3318,5 +3318,7 @@
   "previewRegionDrifted": "自此次擷取以來，頁面佈局已發生變化。截圖仍顯示原始區域。移動或調整此區域的大小會在新位置重新擷取。",
   "previewShowCapture": "顯示擷取內容",
   "previewHideCapture": "隱藏擷取內容",
-  "previewHideComments": "隱藏評論"
+  "previewHideComments": "隱藏評論",
+  "referenceCurrentTitle": "目前標題：{{title}}",
+  "referenceOpenForDetails": "開啟任務以檢視詳情。"
 }

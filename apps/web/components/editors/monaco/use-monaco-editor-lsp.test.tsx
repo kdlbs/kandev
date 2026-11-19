@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   promoteDocumentModel: vi.fn(),
   openDocument: vi.fn(),
   closeDocument: vi.fn(),
+  useLsp: vi.fn((_sessionId: string | null, _language: string) => undefined),
   lspStatus: { state: "disabled" as "disabled" | "ready" | "reconnecting" },
 }));
 
@@ -16,7 +17,14 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/use-lsp", () => ({
-  useLsp: () => ({ status: mocks.lspStatus, lspLanguage: "typescript", toggle: vi.fn() }),
+  useLsp: (sessionId: string | null, language: string) => {
+    mocks.useLsp(sessionId, language);
+    return {
+      status: sessionId ? mocks.lspStatus : { state: "disabled" },
+      lspLanguage: "typescript",
+      toggle: vi.fn(),
+    };
+  },
 }));
 
 vi.mock("@/lib/lsp/lsp-client-manager", () => ({
@@ -35,6 +43,28 @@ vi.mock("@/components/toast-provider", () => ({
 import { useMonacoEditorLsp } from "./use-monaco-editor-lsp";
 
 describe("useMonacoEditorLsp model identity", () => {
+  it("keeps the session model scoped without starting LSP when disabled", () => {
+    const contentRef = { current: "class Target {}" };
+    const editorRef = { current: null };
+    const { result } = renderHook(() =>
+      useMonacoEditorLsp({
+        sessionId: "session",
+        worktreePath: "/host/worktree",
+        language: "kotlin",
+        path: "src/Target.kt",
+        contentRef,
+        editorRef,
+        editorReady: true,
+        enableLsp: false,
+      }),
+    );
+
+    expect(mocks.useLsp).toHaveBeenCalledWith(null, "kotlin");
+    expect(mocks.promoteDocumentModel).not.toHaveBeenCalled();
+    expect(mocks.openDocument).not.toHaveBeenCalled();
+    expect(result.current.lspStatus.state).toBe("disabled");
+  });
+
   it("keeps the cached task-host URI and promotes files without an active LSP", () => {
     const contentRef = { current: "class Target {}" };
     const editorRef = { current: null };

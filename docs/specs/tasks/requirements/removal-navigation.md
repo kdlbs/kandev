@@ -168,7 +168,7 @@ Existing archive confirmation preferences and cascade choices remain governed
 by [archive confirmation](archive-confirmation.md). Backend deletion admission,
 cleanup, and discard consent remain governed by [runtime cleanup](runtime-cleanup.md).
 This adds local user-action presentation guarantees; it does not change task APIs,
-permissions, session-only deletion, Quick Chat expiration/close, or server cleanup.
+permissions, session-only deletion, Quick Chat manual lifetime and tab close, or server cleanup.
 Remote/API/MCP removal retains existing lifecycle reconciliation and redirects.
 Cold unavailable task routes retain [their current contract](missing-task-route-recovery.md).
 Undo, new settings, and a new mobile navigation composition are excluded.

@@ -665,16 +665,20 @@ func workspaceScopeFanoutFetchedAll(providerPage, fetchPerPage, totalCount, item
 
 func workspaceScopeFanoutTotal(settings *WorkspaceSettings, counts []int, uniqueFetched int) int {
 	settings = normalizeWorkspaceSettings(settings)
-	if settings == nil || settings.RepoScopeMode != RepoScopeModeOrgs {
+	if settings == nil {
 		return sumInts(counts)
 	}
 	total := 0
-	for i := 0; i < len(counts); i += 2 {
+	ownerQualifierCount := min(len(settings.RepoScopeOrgs)*2, len(counts))
+	for i := 0; i < ownerQualifierCount; i += 2 {
 		if i+1 >= len(counts) {
 			total += counts[i]
 			continue
 		}
 		total += max(counts[i], counts[i+1])
+	}
+	if ownerQualifierCount < len(counts) {
+		total += sumInts(counts[ownerQualifierCount:])
 	}
 	if uniqueFetched > total {
 		return uniqueFetched
@@ -744,12 +748,7 @@ func workspaceSettingsHasScope(settings *WorkspaceSettings) bool {
 	if settings == nil {
 		return false
 	}
-	switch settings.RepoScopeMode {
-	case RepoScopeModeOrgs, RepoScopeModeRepos:
-		return true
-	default:
-		return false
-	}
+	return settings.RepoScopeMode != RepoScopeModeAll
 }
 
 func workspaceSettingsHasEmptyScope(settings *WorkspaceSettings) bool {
@@ -758,7 +757,7 @@ func workspaceSettingsHasEmptyScope(settings *WorkspaceSettings) bool {
 
 func isValidRepoScopeMode(mode string) bool {
 	switch strings.TrimSpace(strings.ToLower(mode)) {
-	case RepoScopeModeAll, RepoScopeModeOrgs, RepoScopeModeRepos:
+	case RepoScopeModeAll, RepoScopeModeOrgs, RepoScopeModeRepos, RepoScopeModeSelected:
 		return true
 	default:
 		return false
@@ -790,12 +789,21 @@ func workspaceScopeQualifiers(settings *WorkspaceSettings) []string {
 		return nil
 	}
 	switch settings.RepoScopeMode {
-	case RepoScopeModeOrgs:
+	case RepoScopeModeOrgs, RepoScopeModeSelected:
 		qualifiers := make([]string, 0, len(settings.RepoScopeOrgs)*2)
+		owners := make(map[string]struct{}, len(settings.RepoScopeOrgs))
 		for _, org := range settings.RepoScopeOrgs {
 			if org = strings.TrimSpace(org); org != "" {
+				owners[strings.ToLower(org)] = struct{}{}
 				qualifiers = append(qualifiers, "org:"+org)
 				qualifiers = append(qualifiers, "user:"+org)
+			}
+		}
+		if settings.RepoScopeMode == RepoScopeModeSelected {
+			for _, repo := range settings.RepoScopeRepos {
+				if _, covered := owners[strings.ToLower(repo.Owner)]; !covered {
+					qualifiers = append(qualifiers, repoFilterToQualifier(repo))
+				}
 			}
 		}
 		return qualifiers
@@ -818,11 +826,20 @@ func workspaceScopeRepoFilters(settings *WorkspaceSettings) []RepoFilter {
 		return nil
 	}
 	switch settings.RepoScopeMode {
-	case RepoScopeModeOrgs:
+	case RepoScopeModeOrgs, RepoScopeModeSelected:
 		repos := make([]RepoFilter, 0, len(settings.RepoScopeOrgs))
+		owners := make(map[string]struct{}, len(settings.RepoScopeOrgs))
 		for _, org := range settings.RepoScopeOrgs {
 			if org = strings.TrimSpace(org); org != "" {
+				owners[strings.ToLower(org)] = struct{}{}
 				repos = append(repos, RepoFilter{Owner: org})
+			}
+		}
+		if settings.RepoScopeMode == RepoScopeModeSelected {
+			for _, repo := range settings.RepoScopeRepos {
+				if _, covered := owners[strings.ToLower(repo.Owner)]; !covered {
+					repos = append(repos, repo)
+				}
 			}
 		}
 		return repos
@@ -840,9 +857,10 @@ func workspaceSearchScopeKey(settings *WorkspaceSettings) string {
 	}
 	var parts []string
 	switch settings.RepoScopeMode {
-	case RepoScopeModeOrgs:
+	case RepoScopeModeOrgs, RepoScopeModeSelected:
 		parts = append(parts, settings.RepoScopeOrgs...)
-	case RepoScopeModeRepos:
+	}
+	if settings.RepoScopeMode == RepoScopeModeRepos || settings.RepoScopeMode == RepoScopeModeSelected {
 		for _, repo := range settings.RepoScopeRepos {
 			parts = append(parts, repo.Owner+"/"+repo.Name)
 		}
@@ -889,19 +907,5 @@ func repoAllowedByWorkspaceScope(owner, name string, settings *WorkspaceSettings
 	}
 	owner = strings.ToLower(strings.TrimSpace(owner))
 	name = strings.ToLower(strings.TrimSpace(name))
-	switch settings.RepoScopeMode {
-	case RepoScopeModeOrgs:
-		for _, org := range settings.RepoScopeOrgs {
-			if strings.ToLower(org) == owner {
-				return true
-			}
-		}
-	case RepoScopeModeRepos:
-		for _, repo := range settings.RepoScopeRepos {
-			if strings.ToLower(repo.Owner) == owner && strings.ToLower(repo.Name) == name {
-				return true
-			}
-		}
-	}
-	return false
+	return repositoryInWorkspaceScope(settings, owner, name)
 }

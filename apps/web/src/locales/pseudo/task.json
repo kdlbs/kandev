@@ -3318,5 +3318,7 @@
   "previewShowCapture": "Śĥōŵ ćàƥţũŕē",
   "previewHideCapture": "Ĥĩďē ćàƥţũŕē",
   "previewMoveToolbarHint": "Ďŕàĝ ţō ḿōvē. Ďōũƀĺē-ćĺĩćķ ţō ƥũţ ĩţ ƀàćķ àţ ţĥē ţōƥ.",
-  "previewHideComments": "Ĥĩďē ćōḿḿēńţś"
+  "previewHideComments": "Ĥĩďē ćōḿḿēńţś",
+  "referenceCurrentTitle": "Ćũŕŕēńţ ţĩţĺē: {{title}}",
+  "referenceOpenForDetails": "Ōƥēń ţĥē ţàśķ ƒōŕ ďēţàĩĺś."
 }

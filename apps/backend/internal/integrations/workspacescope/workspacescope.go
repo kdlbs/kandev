@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // FallbackWorkspaceID is used only in isolated tests or malformed databases
@@ -55,6 +56,18 @@ func ResolveMigrationTarget(db *sqlx.DB) (string, error) {
 }
 
 func tableExists(db *sqlx.DB, name string) (bool, error) {
+	if dialect.IsPostgres(db.DriverName()) {
+		var exists bool
+		err := db.Get(&exists, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_catalog.pg_class AS relation
+				WHERE relation.relname = $1
+					AND relation.relkind IN ('r', 'p')
+					AND pg_catalog.pg_table_is_visible(relation.oid)
+			)`, name)
+		return exists, err
+	}
 	var count int
 	if err := db.Get(&count, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, name); err != nil {
 		return false, err
@@ -88,6 +101,11 @@ func activeWorkspaceFromUsers(db *sqlx.DB) (string, error) {
 }
 
 func workspaceExists(db *sqlx.DB, id string) (bool, error) {
+	if dialect.IsPostgres(db.DriverName()) {
+		var exists bool
+		err := db.Get(&exists, `SELECT EXISTS (SELECT 1 FROM workspaces WHERE id = $1)`, id)
+		return exists, err
+	}
 	var count int
 	if err := db.Get(&count, `SELECT COUNT(*) FROM workspaces WHERE id = ?`, id); err != nil {
 		return false, err

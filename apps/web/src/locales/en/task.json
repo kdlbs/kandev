@@ -3318,5 +3318,7 @@
   "previewShowCapture": "Show capture",
   "previewHideCapture": "Hide capture",
   "previewMoveToolbarHint": "Drag to move. Double-click to put it back at the top.",
-  "previewHideComments": "Hide comments"
+  "previewHideComments": "Hide comments",
+  "referenceCurrentTitle": "Current title: {{title}}",
+  "referenceOpenForDetails": "Open the task for details."
 }

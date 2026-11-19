@@ -57,7 +57,9 @@ See [plan.md UI-03](plan.md#ascii-ui-preview).
   dock and no floating button; fine pointer renders the floating button.
 - `mobile-chrome` E2E: the Markdown preview selection shows the docked Comment
   button at the preview bottom; tapping it opens the composer and saves a
-  comment.
+  comment. Visual-viewport resize and pan also keep the final Markdown,
+  CodeMirror, and Monaco lines above the dock while `window.innerHeight` and
+  owner layout bounds stay fixed.
 
 ## Verification
 
@@ -120,3 +122,62 @@ Verification:
 - `chromium` E2E: `markdown-preview` and `agent-message-comments` passed
   (13 tests), covering unchanged desktop behavior.
 - `pnpm run typecheck`, `pnpm run lint`, and Prettier checks passed.
+
+## PR fixup follow-up (2026-11-17)
+
+The shared dock now reports viewport-relative clearance as the overlap between
+its top edge and the owner's bottom edge, bounded below by the dock height.
+The shared reservation and Monaco editor padding use that clearance; CodeMirror
+reserves it in the editor scroller. Visual viewport resize and pan updates are
+covered while `window.innerHeight` and the owner layout bounds remain fixed.
+The Markdown preview uses the shared reservation. Office extracts use the
+composer slot recorded in tasks 01 and 04. Mobile file viewer editors now keep
+the code read-only and hide the desktop toolbar while retaining comment
+selection.
+
+CodeMirror transfers touch-selection ownership back to mouse and pen input in
+the same editor. Markdown selection capture cancels and generation-fences
+pending callbacks when ownership ends, an unrelated outside action dismisses
+the dock, the composer opens, or preview identity changes. Opening the
+composer preserves the latest validated quote.
+
+Verification:
+
+- Focused Vitest: 41 tests passed across seven files; a second focused run after
+  the lint refactor passed 28 tests across five files.
+- Changed-source and E2E lint passed. `pnpm run typecheck` passed.
+- Managed `mobile-chrome` E2E passed for `mobile-thread-extract-comments`
+  (2 tests), `mobile-file-viewer` (12 tests),
+  `mobile-markdown-selection-comments` (2 tests), and
+  `mobile-file-selection-comments` (2 tests). The editor cases assert that the
+  final line stays above the dock after simulated keyboard clipping with
+  unchanged layout bounds.
+- The managed E2E build completed for the backend and web assets. Native
+  Android Chrome and iOS Safari were not exercised.
+
+### CI follow-up (2026-11-17)
+
+The mobile viewer assertions, including the natural-order file-tree case, now
+accept both CodeMirror and Monaco markup.
+Read-only mobile viewers do not acquire LSP connections. Monaco lays out a
+newly mounted editor before revealing a pending cursor, including requests
+without a line flash. CodeMirror receives read-only mode through the editor
+component prop, avoiding a duplicate `@codemirror/state` extension instance.
+The PR popover geometry case waits for its finite menu animation before
+measuring the conflict glyph.
+
+Verification:
+
+- Focused Vitest for CodeMirror workspace sync and Monaco cursor/LSP navigation:
+  15 passed across three files.
+- Managed `mobile-chrome` E2E for eight changed mobile viewer specs:
+  14 passed in 1.6 minutes. This run built the backend and Vite assets.
+- Focused Chromium E2E for the conflicted PR row's 8 px glyph geometry:
+  1 passed after waiting for finite menu animations.
+- After the final Monaco session-identity adjustment, the focused Vitest set
+  passed again (15 tests) and the mobile LSP suppression/requested-line E2Es
+  passed again (2 tests).
+- Current-head CI follow-up: the focused `use-file-editors` and CodeMirror
+  selection tests passed (23 tests across two files), and the
+  exact mobile file-tree natural-order E2E passed (1 test, retries disabled).
+- Native Android Chrome and iOS Safari remain untested.

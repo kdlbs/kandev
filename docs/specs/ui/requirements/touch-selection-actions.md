@@ -92,10 +92,11 @@ device's selection menu cannot cover it and I can reach it with my thumb.
   accept today (streaming replies, read-only Office tasks, disabled editor
   comments, whitespace-only text) shall not show the dock.
 - **AC-UI-TOUCH-SELECTION-ACTIONS-001.10:** When the surface already has a
-  persistent toolbar row near the bottom of the screen (the Task Chat and Quick
-  Chat composer status row), the Comment action shall appear inline at the
-  trailing end of that row's utility icons instead of in a separate dock, so
-  the selection adds no row. Surfaces without such a row use the dock.
+  persistent toolbar or action row near the bottom of the screen (the Task Chat
+  and Quick Chat composer status row, or the Office Simple Pane comment
+  composer footer), the Comment action shall appear inline at the trailing end
+  of that row instead of in a separate dock, so the selection adds no overlay
+  over the transcript. Surfaces without such a row use the dock.
 
 ## Out of scope
 

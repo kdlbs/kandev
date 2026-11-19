@@ -527,6 +527,16 @@ export function markPRClosedBannerDismissed(taskId: string): void {
   }
 }
 
+const STORAGE_NOTICE_DISMISSED_PREFIX = "kandev.storage-notice-dismissed.";
+
+export function wasStorageNoticeDismissed(taskId: string): boolean {
+  return getSessionStorage<boolean>(`${STORAGE_NOTICE_DISMISSED_PREFIX}${taskId}`, false) === true;
+}
+
+export function markStorageNoticeDismissed(taskId: string): void {
+  setSessionStorage(`${STORAGE_NOTICE_DISMISSED_PREFIX}${taskId}`, true);
+}
+
 // Internal storage keys for open file tabs
 const OPEN_FILES_KEY = "kandev.openFiles";
 const ACTIVE_TAB_KEY = "kandev.activeTab";
@@ -784,6 +794,8 @@ export function cleanupTaskStorage(
   // PR merged / closed banner dismissal (sessionStorage, keyed per task)
   removeSessionStorage(`${PR_MERGED_BANNER_DISMISSED_PREFIX}${taskId}`);
   removeSessionStorage(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`);
+
+  removeSessionStorage(`${STORAGE_NOTICE_DISMISSED_PREFIX}${taskId}`);
 
   // Sidebar collapsed-subtask set (sessionStorage, array keyed by parent taskId)
   const collapsed = getStoredCollapsedSubtaskParents();
