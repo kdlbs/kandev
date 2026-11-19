@@ -308,3 +308,26 @@ func TestNativeCheckSamePathExecutableReplacementRechecks(t *testing.T) {
 	}
 	requireRuns(t, h.runner, 2, "after a same-path executable replacement")
 }
+
+// OMP resolves overlays against process.cwd(), the physical directory. When
+// the backend runs from a symlinked directory, a "../" overlay must be
+// fingerprinted where OMP actually reads it.
+func TestNativeCheckOverlayResolvesAgainstPhysicalWorkingDir(t *testing.T) {
+	h := newNativeCheckHarness(t, "18.13.3", agents.NewOmpACP())
+	real := filepath.Join(h.home, "real", "project")
+	mustMkdir(t, real)
+	logical := filepath.Join(h.home, "logical")
+	mustMkdir(t, logical)
+	if err := os.Symlink(real, filepath.Join(logical, "project")); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(filepath.Join(logical, "project"))
+	overlay := filepath.Join(h.home, "real", "channel.yml")
+	writeNativeCheckFile(t, overlay, "update:\n  channel: stable\n")
+	h.runner.setEnv(append(h.baseEnv(), "PI_CONFIG_FILES=../channel.yml")...)
+	h.runner.setOutput(ompUpToDate, 0)
+	_ = h.status(t, ompAgentID)
+	writeNativeCheckFile(t, overlay, "update:\n  channel: canary-longer\n")
+	_ = h.status(t, ompAgentID)
+	requireRuns(t, h.runner, 2, "after editing the overlay OMP reads through the physical directory")
+}

@@ -134,9 +134,7 @@ describe("AgentRuntimeUpdateControl native update check", () => {
         update_channel: undefined,
       }),
     );
-    const line = screen.getByTestId(NATIVE_LINE).textContent ?? "";
-    expect(line).not.toContain(CANARY_LATEST);
-    expect(line.trim().length).toBeGreaterThan(0);
+    expect(screen.getByTestId(NATIVE_LINE).textContent).toBe("Up to date.");
     expect(screen.queryByTestId(CHANNEL_LINE)).toBeNull();
   });
 

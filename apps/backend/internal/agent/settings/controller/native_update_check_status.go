@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -284,6 +285,11 @@ func (c *Controller) nativeUpdateCheckIdentity(agentName, currentVersion string,
 		executable = ""
 	}
 	workingDir, _ := os.Getwd()
+	// OMP resolves relative paths against process.cwd(), the physical
+	// directory; os.Getwd may return a logical $PWD through a symlink.
+	if physical, err := filepath.EvalSymlinks(workingDir); err == nil {
+		workingDir = physical
+	}
 	resolver := agents.NewNativeUpdateCheckResolver(runner.Environment(), workingDir, executable)
 	fingerprint := spec.Context.Fingerprint(resolver)
 	c.runtimeUpdateStatusMu.Lock()
