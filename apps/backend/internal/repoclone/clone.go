@@ -859,6 +859,9 @@ func (c *Cloner) ensureClonedAtPathWithOriginVerification(
 	}
 	stagingRoot, err := os.MkdirTemp(parent, ".kandev-clone-")
 	if err != nil {
+		if emptyDestination != nil {
+			return c.cloneIntoExistingEmptyDestination(ctx, cloneURL, targetPath, auth, emptyDestination)
+		}
 		return "", fmt.Errorf("create clone staging directory: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(stagingRoot) }()
@@ -872,6 +875,11 @@ func (c *Cloner) ensureClonedAtPathWithOriginVerification(
 	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
 		return "", err
 	}
+	if emptyDestination != nil {
+		if err := os.Chmod(stagingPath, emptyDestination.Mode().Perm()); err != nil {
+			return "", fmt.Errorf("apply destination permissions: %w", err)
+		}
+	}
 	if err := prepareCloneDestinationForPublication(targetPath, emptyDestination); err != nil {
 		return "", err
 	}
@@ -879,6 +887,44 @@ func (c *Cloner) ensureClonedAtPathWithOriginVerification(
 		return "", fmt.Errorf("publish cloned repository: %w", err)
 	}
 	return targetPath, c.validateManagedAttachmentMutation(ctx, targetPath)
+}
+
+func (c *Cloner) cloneIntoExistingEmptyDestination(
+	ctx context.Context,
+	cloneURL string,
+	targetPath string,
+	auth *cloneAuth,
+	emptyDestination os.FileInfo,
+) (string, error) {
+	current, err := inspectCloneDestination(targetPath)
+	if err != nil {
+		return "", err
+	}
+	if current == nil || !os.SameFile(emptyDestination, current) {
+		return "", errManagedCloneDestinationExists
+	}
+	if err := c.clone(ctx, cloneURL, targetPath, auth); err != nil {
+		return "", errors.Join(err, clearCloneDestination(targetPath))
+	}
+	if err := ctx.Err(); err != nil {
+		return "", errors.Join(err, clearCloneDestination(targetPath))
+	}
+	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
+		return "", err
+	}
+	return targetPath, nil
+}
+
+func clearCloneDestination(path string) error {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	var cleanupErr error
+	for _, entry := range entries {
+		cleanupErr = errors.Join(cleanupErr, os.RemoveAll(filepath.Join(path, entry.Name())))
+	}
+	return cleanupErr
 }
 
 // EnsureClonedWithBasicAuth retains the legacy basic-auth clone path.

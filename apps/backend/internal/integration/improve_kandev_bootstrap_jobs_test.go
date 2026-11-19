@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/improvekandev"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,6 +29,22 @@ type gatedImproveKandevCloner struct {
 	started  chan struct{}
 	release  <-chan struct{}
 	canceled chan struct{}
+}
+
+type pairedImproveKandevCloner struct {
+	path    string
+	started chan struct{}
+	release <-chan struct{}
+}
+
+func (c pairedImproveKandevCloner) EnsureWorkspaceCloned(ctx context.Context, _, _, _, _, _ string) (string, error) {
+	c.started <- struct{}{}
+	select {
+	case <-c.release:
+		return c.path, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 }
 
 func (c gatedImproveKandevCloner) EnsureWorkspaceCloned(ctx context.Context, _, _, _, _, _ string) (string, error) {
@@ -186,15 +203,16 @@ func TestImproveKandevBootstrapAsyncDeadline(t *testing.T) {
 	require.NotEmpty(t, admitted.JobID)
 
 	statusURL := proxyServer.URL + "/api/v1/system/improve-kandev/bootstrap/" + admitted.JobID
-	requestStatus := func() *http.Response {
-		t.Helper()
+	requestStatus := func() (*http.Response, error) {
 		request, requestErr := http.NewRequest(http.MethodGet, statusURL, nil)
-		require.NoError(t, requestErr)
+		if requestErr != nil {
+			return nil, requestErr
+		}
 		response, requestErr := client.Do(request)
-		require.NoError(t, requestErr)
-		return response
+		return response, requestErr
 	}
-	status := requestStatus()
+	status, err := requestStatus()
+	require.NoError(t, err)
 	require.Equal(t, http.StatusAccepted, status.StatusCode)
 	require.Equal(t, "no-store", status.Header.Get("Cache-Control"))
 	closeImproveKandevResponseBody(t, status)
@@ -205,21 +223,30 @@ func TestImproveKandevBootstrapAsyncDeadline(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("bootstrap worker did not continue to clone after GitHub completed")
 	}
-	status = requestStatus()
+	status, err = requestStatus()
+	require.NoError(t, err)
 	require.Equal(t, http.StatusAccepted, status.StatusCode)
 	closeImproveKandevResponseBody(t, status)
 
 	releaseClone.Do(func() { close(cloneRelease) })
 	var ready *http.Response
-	require.Eventually(t, func() bool {
-		response := requestStatus()
+	var lastRequestErr error
+	if !assert.Eventually(t, func() bool {
+		response, requestErr := requestStatus()
+		if requestErr != nil {
+			lastRequestErr = requestErr
+			return false
+		}
+		lastRequestErr = nil
 		if response.StatusCode != http.StatusOK {
 			closeImproveKandevResponseBody(t, response)
 			return false
 		}
 		ready = response
 		return true
-	}, 10*time.Second, 25*time.Millisecond, "bootstrap did not become ready")
+	}, 10*time.Second, 25*time.Millisecond, "bootstrap did not become ready") {
+		t.Fatalf("bootstrap did not become ready; last request error: %v", lastRequestErr)
+	}
 	defer closeImproveKandevResponseBody(t, ready)
 	var result improvekandev.BootstrapResponse
 	require.NoError(t, json.NewDecoder(ready.Body).Decode(&result))
@@ -263,16 +290,24 @@ func postImproveKandevBootstrap(t *testing.T, client *http.Client, baseURL strin
 	return "", responseBody
 }
 
-func getImproveKandevBootstrapStatus(t *testing.T, client *http.Client, baseURL, jobID string) (int, []byte) {
-	t.Helper()
+func getImproveKandevBootstrapStatus(client *http.Client, baseURL, jobID string) (int, []byte, error) {
 	request, err := http.NewRequest(http.MethodGet, baseURL+"/api/v1/system/improve-kandev/bootstrap/"+jobID, nil)
-	require.NoError(t, err)
+	if err != nil {
+		return 0, nil, err
+	}
 	response, err := client.Do(request)
-	require.NoError(t, err)
-	defer closeImproveKandevResponseBody(t, response)
+	if err != nil {
+		return 0, nil, err
+	}
 	body, err := io.ReadAll(response.Body)
-	require.NoError(t, err)
-	return response.StatusCode, body
+	closeErr := response.Body.Close()
+	if err != nil {
+		return 0, nil, err
+	}
+	if closeErr != nil {
+		return 0, nil, closeErr
+	}
+	return response.StatusCode, body, nil
 }
 
 func closeImproveKandevResponseBody(t *testing.T, response *http.Response) {
@@ -285,11 +320,19 @@ func closeImproveKandevResponseBody(t *testing.T, response *http.Response) {
 func waitForImproveKandevBootstrapStatus(t *testing.T, client *http.Client, baseURL, jobID string, want int) []byte {
 	t.Helper()
 	var body []byte
-	require.Eventually(t, func() bool {
-		status, responseBody := getImproveKandevBootstrapStatus(t, client, baseURL, jobID)
+	var lastRequestErr error
+	if !assert.Eventually(t, func() bool {
+		status, responseBody, err := getImproveKandevBootstrapStatus(client, baseURL, jobID)
+		if err != nil {
+			lastRequestErr = err
+			return false
+		}
+		lastRequestErr = nil
 		body = responseBody
 		return status == want
-	}, 10*time.Second, 25*time.Millisecond, "bootstrap job did not reach status %d", want)
+	}, 10*time.Second, 25*time.Millisecond, "bootstrap job did not reach status %d", want) {
+		t.Fatalf("bootstrap job did not reach status %d; last request error: %v", want, lastRequestErr)
+	}
 	return body
 }
 
@@ -310,7 +353,8 @@ func TestImproveKandevBootstrapRetryOwnerScopeAndRestartReuse(t *testing.T) {
 	firstJob, _ := postImproveKandevBootstrap(t, ownerServer.Client(), ownerServer.URL, true)
 	firstResult := waitForImproveKandevBootstrapStatus(t, ownerServer.Client(), ownerServer.URL, firstJob, http.StatusInternalServerError)
 	require.Contains(t, string(firstResult), "failed to register kandev repository")
-	otherStatus, _ := getImproveKandevBootstrapStatus(t, otherServer.Client(), otherServer.URL, firstJob)
+	otherStatus, _, err := getImproveKandevBootstrapStatus(otherServer.Client(), otherServer.URL, firstJob)
+	require.NoError(t, err)
 	require.Equal(t, http.StatusNotFound, otherStatus)
 
 	secondJob, _ := postImproveKandevBootstrap(t, ownerServer.Client(), ownerServer.URL, true)
@@ -385,6 +429,62 @@ func TestImproveKandevBootstrapOverlappingAttemptsConverge(t *testing.T) {
 	require.NotEqual(t, first.BundleDir, second.BundleDir)
 }
 
+func TestImproveKandevBootstrapColdOverlappingAttemptsConverge(t *testing.T) {
+	ts := NewOrchestratorTestServer(t)
+	t.Cleanup(ts.Close)
+	repoPath := t.TempDir()
+	require.NoError(t, exec.Command("git", "init", repoPath).Run())
+	githubStarted := make(chan struct{}, 2)
+	githubRelease := make(chan struct{})
+	cloneStarted := make(chan struct{}, 2)
+	cloneRelease := make(chan struct{})
+	handler := improvekandev.NewHandler(ts.TaskSvc,
+		pairedImproveKandevCloner{path: repoPath, started: cloneStarted, release: cloneRelease},
+		nil, nil, "test", ts.Logger)
+	t.Cleanup(func() { _ = handler.Stop() })
+	handler.SetManagedGitHubForkProber(pairedImproveKandevGitHub{started: githubStarted, release: githubRelease})
+	server := httptest.NewServer(newImproveKandevTestRouter(handler))
+	t.Cleanup(server.Close)
+
+	firstJob, _ := postImproveKandevBootstrap(t, server.Client(), server.URL, true)
+	secondJob, _ := postImproveKandevBootstrap(t, server.Client(), server.URL, true)
+	for range 2 {
+		select {
+		case <-githubStarted:
+		case <-time.After(5 * time.Second):
+			t.Fatal("both cold attempts did not reach the gated GitHub probe")
+		}
+	}
+	close(githubRelease)
+	for range 2 {
+		select {
+		case <-cloneStarted:
+		case <-time.After(5 * time.Second):
+			t.Fatal("both cold attempts did not pass the empty repository lookup")
+		}
+	}
+	close(cloneRelease)
+
+	firstBody := waitForImproveKandevBootstrapStatus(t, server.Client(), server.URL, firstJob, http.StatusOK)
+	secondBody := waitForImproveKandevBootstrapStatus(t, server.Client(), server.URL, secondJob, http.StatusOK)
+	var first, second improvekandev.BootstrapResponse
+	require.NoError(t, json.Unmarshal(firstBody, &first))
+	require.NoError(t, json.Unmarshal(secondBody, &second))
+	require.NotEmpty(t, first.RepositoryID)
+	require.Equal(t, first.WorkspaceID, second.WorkspaceID)
+	require.Equal(t, first.RepositoryID, second.RepositoryID)
+	require.Equal(t, first.WorkflowID, second.WorkflowID)
+	require.Equal(t, first.IssueWorkflowID, second.IssueWorkflowID)
+	require.NotEqual(t, first.BundleDir, second.BundleDir)
+
+	repositories, err := ts.TaskSvc.ListRepositories(context.Background(), first.WorkspaceID)
+	require.NoError(t, err)
+	require.Len(t, repositories, 1)
+	workflows, err := ts.TaskSvc.ListWorkflows(context.Background(), first.WorkspaceID, true)
+	require.NoError(t, err)
+	require.Len(t, workflows, 2)
+}
+
 func TestImproveKandevBootstrapShutdownCancelsActiveWorker(t *testing.T) {
 	ts := NewOrchestratorTestServer(t)
 	t.Cleanup(ts.Close)
@@ -412,6 +512,21 @@ func TestImproveKandevBootstrapShutdownCancelsActiveWorker(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("handler shutdown did not cancel the active clone")
 	}
-	status, _ := getImproveKandevBootstrapStatus(t, server.Client(), server.URL, jobID)
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- handler.Stop() }()
+	select {
+	case err := <-stopDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		close(cloneRelease)
+		select {
+		case <-stopDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("handler Stop remained blocked after releasing the gated clone")
+		}
+		t.Fatal("handler Stop did not cancel and join the active bootstrap worker")
+	}
+	status, _, err := getImproveKandevBootstrapStatus(server.Client(), server.URL, jobID)
+	require.NoError(t, err)
 	require.Equal(t, http.StatusInternalServerError, status)
 }

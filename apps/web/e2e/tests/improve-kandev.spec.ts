@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../fixtures/test-base";
+import { waitForHttp } from "../helpers/causal-waits";
 
 /**
  * E2E tests for the Improve Kandev dialog. The bootstrap endpoint is mocked
@@ -11,6 +12,8 @@ import { test, expect } from "../fixtures/test-base";
 const BOOTSTRAP_URL = "**/api/v1/system/improve-kandev/bootstrap";
 const BOOTSTRAP_STATUS_URL = "**/api/v1/system/improve-kandev/bootstrap/*";
 const HEALTH_URL = "**/api/v1/system/health";
+const BOOTSTRAP_PATH = /^\/api\/v1\/system\/improve-kandev\/bootstrap$/;
+const BOOTSTRAP_STATUS_PATH = /^\/api\/v1\/system\/improve-kandev\/bootstrap\/[^/]+$/;
 
 type ForkStatus =
   | "writable"
@@ -140,6 +143,7 @@ test.describe("Improve Kandev dialog", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await apiClient.createWorkspace("Improve Kandev");
     await apiClient.saveUserSettings({ agent_generated_task_titles: false });
@@ -147,6 +151,9 @@ test.describe("Improve Kandev dialog", () => {
     await testPage.goto("/");
     await testPage.getByTestId("sidebar-footer-more-button").click();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
+    const failedStatusRead = waitForHttp(testPage, "GET", BOOTSTRAP_STATUS_PATH, {
+      predicate: (response) => response.status() === 500,
+    });
     await testPage.getByTestId("improve-kandev-proceed").click();
 
     const createDialog = testPage.getByTestId("create-task-dialog");
@@ -156,8 +163,20 @@ test.describe("Improve Kandev dialog", () => {
     const descriptionInput = createDialog.getByTestId("task-description-input");
     await titleInput.fill(title);
     await descriptionInput.fill(description);
-    await testPage.getByTestId("improve-kandev-retry").waitFor({ state: "visible" });
-    await testPage.getByTestId("improve-kandev-retry").click();
+    await failedStatusRead;
+    await expect(createDialog.getByText("Temporary bootstrap failure")).toBeVisible();
+    await expect(testPage.getByText("Could not prepare Improve Kandev")).toBeHidden();
+    await prCapture.screenshot("desktop-bootstrap-retry", {
+      caption: "Desktop Improve Kandev form with its draft preserved and inline Retry",
+    });
+    const retriedBootstrap = waitForHttp(testPage, "POST", BOOTSTRAP_PATH, {
+      predicate: (response) => response.status() === 202,
+    });
+    const readyStatusRead = waitForHttp(testPage, "GET", BOOTSTRAP_STATUS_PATH, {
+      predicate: (response) => response.status() === 200,
+    });
+    await createDialog.getByTestId("improve-kandev-retry").click();
+    await Promise.all([retriedBootstrap, readyStatusRead]);
 
     await expect(createDialog.getByText("@octocat")).toBeVisible({ timeout: 10_000 });
     await expect(titleInput).toHaveValue(title);
@@ -169,6 +188,9 @@ test.describe("Improve Kandev dialog", () => {
     await expect
       .poll(async () => (await apiClient.listTasks(seedData.workspaceId)).tasks)
       .toContainEqual(expect.objectContaining({ title }));
+
+    await testPage.reload();
+    await expect(testPage.getByTestId("task-topbar-title")).toHaveText(title);
   });
 
   test("dismissed intro is persisted and later opens the create dialog directly", async ({

@@ -5,13 +5,25 @@ import { useAppStore } from "@/components/state-provider";
 import {
   bootstrapImproveKandev,
   getImproveKandevBootstrapJob,
+  type ImproveKandevBootstrapResponse,
 } from "@/lib/api/domains/improve-kandev-api";
 import { listRepositories } from "@/lib/api/domains/workspace-api";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { t as tStatic } from "@/lib/i18n";
-import type { BootstrapState } from "./improve-kandev-dialog-create";
+import type { WorkflowStep } from "@/lib/types/http";
 
-const BOOTSTRAP_STATUS_TIMEOUT_MS = 30_000;
+const BOOTSTRAP_REQUEST_TIMEOUT_MS = 30_000;
+
+export type BootstrapState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | {
+      kind: "ready";
+      data: ImproveKandevBootstrapResponse;
+      steps: WorkflowStep[];
+      issueSteps: WorkflowStep[];
+    }
+  | { kind: "error"; message: string };
 
 type UseBootstrapKandevOptions = {
   open: boolean;
@@ -40,15 +52,20 @@ export function useBootstrapKandev({
     setBootstrap({ kind: "loading" });
     (async () => {
       try {
-        let data = await bootstrapImproveKandev(workspaceId, {
-          async: true,
-          createWorkspace,
-          init: { signal: controller.signal },
-        });
+        let data = await requestBootstrapWithTimeout(controller.signal, (signal) =>
+          bootstrapImproveKandev(workspaceId, {
+            async: true,
+            createWorkspace,
+            init: { signal },
+          }),
+        );
         if (cancelled || controller.signal.aborted) return;
         while (isBootstrapJob(data)) {
+          const jobID = data.job_id;
           await waitForBootstrapPoll(controller.signal);
-          data = await readBootstrapStatusWithTimeout(data.job_id, controller.signal);
+          data = await requestBootstrapWithTimeout(controller.signal, (signal) =>
+            getImproveKandevBootstrapJob(jobID, { init: { signal } }),
+          );
           if (cancelled || controller.signal.aborted) return;
         }
         // Refresh the dedicated workspace's repository list so the newly-created
@@ -102,51 +119,54 @@ function isBootstrapJob(
   return "job_id" in result;
 }
 
-function readBootstrapStatusWithTimeout(
-  jobID: string,
+function requestBootstrapWithTimeout<T>(
   parentSignal: AbortSignal,
-): ReturnType<typeof getImproveKandevBootstrapJob> {
+  request: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const requestController = new AbortController();
+    if (parentSignal.aborted) {
+      requestController.abort();
+      reject(new Error());
+      return;
+    }
     let settled = false;
-    const cleanup = () => {
+    const timeoutID = window.setTimeout(onTimeout, BOOTSTRAP_REQUEST_TIMEOUT_MS);
+    function cleanup() {
       window.clearTimeout(timeoutID);
       parentSignal.removeEventListener("abort", abortForParent);
-    };
-    const abortForParent = () => {
+    }
+    function abortForParent() {
       if (settled) return;
       settled = true;
       requestController.abort();
       cleanup();
       reject(new Error());
-    };
-    const timeout = () => {
+    }
+    function onTimeout() {
       if (settled) return;
       settled = true;
       requestController.abort();
       cleanup();
       reject(new Error(tStatic("common:bootstrapFailed")));
-    };
-    const timeoutID = window.setTimeout(timeout, BOOTSTRAP_STATUS_TIMEOUT_MS);
-    if (parentSignal.aborted) {
-      abortForParent();
-      return;
+    }
+    function fail(error: unknown) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
     }
     parentSignal.addEventListener("abort", abortForParent, { once: true });
-    getImproveKandevBootstrapJob(jobID, { init: { signal: requestController.signal } }).then(
-      (response) => {
+    try {
+      request(requestController.signal).then((response) => {
         if (settled) return;
         settled = true;
         cleanup();
         resolve(response);
-      },
-      (error: unknown) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        reject(error);
-      },
-    );
+      }, fail);
+    } catch (error) {
+      fail(error);
+    }
   });
 }
 
@@ -159,7 +179,7 @@ function waitForBootstrapPoll(signal: AbortSignal): Promise<void> {
     const onAbort = () => {
       window.clearTimeout(timer);
       signal.removeEventListener("abort", onAbort);
-      reject(new Error("bootstrap polling canceled"));
+      reject(new Error());
     };
     if (signal.aborted) {
       onAbort();

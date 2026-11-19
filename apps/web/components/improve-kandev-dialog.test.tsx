@@ -123,6 +123,28 @@ afterEach(() => {
 });
 
 describe("ImproveKandevDialog bootstrap job status", () => {
+  it("shows Retry when bootstrap admission does not answer before its deadline", async () => {
+    vi.useFakeTimers();
+    setStoreWorkspaces([ACTIVE_WORKSPACE, IMPROVE_WORKSPACE]);
+    window.localStorage.setItem(IMPROVE_KANDEV_SKIP_INTRO_KEY, "true");
+    mocks.bootstrap.mockReturnValue(new Promise(() => {}));
+    renderDialog();
+
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect(mocks.bootstrap).toHaveBeenCalledWith(
+      "ws-active",
+      expect.objectContaining({
+        init: expect.objectContaining({ signal: expect.anything() }),
+      }),
+    );
+    expect(screen.getByTestId("improve-kandev-retry")).toBeTruthy();
+    expect(mocks.bootstrapStatus).not.toHaveBeenCalled();
+  });
+
   it("polls an admitted bootstrap job and hydrates its ready payload", async () => {
     setStoreWorkspaces([ACTIVE_WORKSPACE, IMPROVE_WORKSPACE]);
     window.localStorage.setItem(IMPROVE_KANDEV_SKIP_INTRO_KEY, "true");
@@ -171,7 +193,9 @@ describe("ImproveKandevDialog bootstrap job status", () => {
     expect(mocks.listWorkflowSteps).not.toHaveBeenCalled();
     expect(mocks.listRepositories).not.toHaveBeenCalled();
   });
+});
 
+describe("ImproveKandevDialog bootstrap cancellation", () => {
   it("ignores a late status response after the dialog closes", async () => {
     setStoreWorkspaces([ACTIVE_WORKSPACE, IMPROVE_WORKSPACE]);
     window.localStorage.setItem(IMPROVE_KANDEV_SKIP_INTRO_KEY, "true");
@@ -195,6 +219,27 @@ describe("ImproveKandevDialog bootstrap job status", () => {
     expect(mocks.listWorkflowSteps).not.toHaveBeenCalled();
     expect(mocks.listRepositories).not.toHaveBeenCalled();
     expect(mocks.setRepositories).not.toHaveBeenCalled();
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
+
+  it("silences a pending status request when the workspace changes", async () => {
+    setStoreWorkspaces([ACTIVE_WORKSPACE, IMPROVE_WORKSPACE]);
+    window.localStorage.setItem(IMPROVE_KANDEV_SKIP_INTRO_KEY, "true");
+    mocks.bootstrap.mockResolvedValueOnce({ job_id: "job-old-workspace" });
+    mocks.bootstrapStatus.mockReturnValue(new Promise(() => {}));
+    const props = { onOpenChange: () => {}, open: true };
+    const { rerender } = render(<ImproveKandevDialog {...props} workspaceId="ws-old" />);
+
+    await waitFor(
+      () =>
+        expect(mocks.bootstrapStatus).toHaveBeenCalledWith("job-old-workspace", expect.anything()),
+      { timeout: 5_000 },
+    );
+    await act(async () => {
+      rerender(<ImproveKandevDialog {...props} workspaceId="ws-new" />);
+    });
+
+    expect(mocks.toast).not.toHaveBeenCalled();
   });
 });
 

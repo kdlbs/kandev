@@ -474,6 +474,21 @@ func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID, providerR
 		if err := h.ensureKandevProviderRepoID(ctx, existing, providerRepoID); err != nil {
 			return nil, err
 		}
+		if !repositoryCheckoutExists(existing.LocalPath) {
+			if h.cloner == nil {
+				return nil, errors.New("kandev repository checkout is missing and no cloner is available")
+			}
+			localPath, err := h.cloner.EnsureWorkspaceCloned(
+				ctx, workspaceID, repoProvider, repoCloneURL, repoOwner, repoName,
+			)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := h.taskSvc.UpdateRepository(ctx, existing.ID, &taskservice.UpdateRepositoryRequest{LocalPath: &localPath}); err != nil {
+				return nil, err
+			}
+			existing.LocalPath = localPath
+		}
 		return existing, nil
 	}
 
@@ -506,6 +521,14 @@ func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID, providerR
 		LocalPath:      localPath,
 	})
 	return repo, err
+}
+
+func repositoryCheckoutExists(localPath string) bool {
+	if localPath == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(localPath, ".git"))
+	return err == nil && (info.IsDir() || info.Mode().IsRegular())
 }
 
 // findKandevRepoByLocalRemote returns the first repo with a local path whose

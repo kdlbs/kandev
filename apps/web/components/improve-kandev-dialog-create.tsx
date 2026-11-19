@@ -20,6 +20,7 @@ import { TaskCreateDialog } from "@/components/task-create-dialog";
 import type { ImproveKandevBootstrapResponse } from "@/lib/api/domains/improve-kandev-api";
 import { cn } from "@/lib/utils";
 import type { Task, WorkflowStep } from "@/lib/types/http";
+import type { BootstrapState } from "@/hooks/domains/system/use-improve-kandev-bootstrap";
 import {
   contributorAccessMessage,
   getImproveKandevForkBlockedReason,
@@ -30,17 +31,6 @@ import {
 } from "./improve-kandev-dialog-model";
 import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-
-export type BootstrapState =
-  | { kind: "idle" }
-  | { kind: "loading" }
-  | {
-      kind: "ready";
-      data: ImproveKandevBootstrapResponse;
-      steps: WorkflowStep[];
-      issueSteps: WorkflowStep[];
-    }
-  | { kind: "error"; message: string };
 
 type ImproveKind = ImproveKandevKind;
 
@@ -366,7 +356,7 @@ function BootstrapBanner({
           type="button"
           size="default"
           variant="outline"
-          className="w-full sm:w-auto"
+          className="w-full sm:w-auto [@media(any-pointer:coarse)]:min-h-11"
           data-testid="improve-kandev-retry"
           onClick={onRetry}
         >

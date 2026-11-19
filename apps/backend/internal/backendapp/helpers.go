@@ -2213,8 +2213,8 @@ func registerImproveKandevRoutes(p routeParams) {
 	var resolveDefaultWorkspace improvekandev.DefaultWorkspaceResolver
 	if p.services.GitHub != nil && p.dbPool != nil {
 		ghCopier = p.services.GitHub
-		resolveDefaultWorkspace = func(context.Context) (string, error) {
-			return workspacescope.ResolveMigrationTarget(p.dbPool.Reader())
+		resolveDefaultWorkspace = func(ctx context.Context) (string, error) {
+			return workspacescope.ResolveMigrationTargetContext(ctx, p.dbPool.Reader())
 		}
 	}
 	ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, ghCopier, resolveDefaultWorkspace, p.version, p.log)

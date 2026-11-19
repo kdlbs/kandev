@@ -94,16 +94,24 @@ and a target of at least 44px on phones. Covers
 
 ## Verification
 
-```bash
-(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/improvekandev ./internal/integration ./internal/repoclone -run 'Test(BootstrapJob|ImproveKandevBootstrap|ImproveKandevClonePublishesOnSuccess)' -count=1)
-(cd apps/web && pnpm exec vitest run lib/api/domains/improve-kandev-api.test.ts components/improve-kandev-dialog.test.tsx)
-(cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm run i18n:check)
-(cd apps/web && pnpm e2e:run --project chromium tests/improve-kandev.spec.ts)
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/mobile-improve-kandev.spec.ts)
-node --test scripts/validate-public-docs.test.mjs
-node scripts/validate-public-docs.mjs
-```
+Run from the repository root unless a working directory is shown. All commands
+listed here passed after the review fixes.
+For a fresh worktree, run `(cd apps && pnpm install --frozen-lockfile)` before
+the first frontend command. The shared worktree already had dependencies
+installed, so that setup command was not needed here.
+
+- `bash scripts/lint-go-changed apps/backend/internal/backendapp/helpers.go apps/backend/internal/backendapp/restore_quiesce_test.go apps/backend/internal/improvekandev/handler.go apps/backend/internal/improvekandev/handler_test.go apps/backend/internal/improvekandev/goleak_test.go apps/backend/internal/integration/improve_kandev_bootstrap_jobs_test.go apps/backend/internal/integration/improve_kandev_bootstrap_recovery_test.go apps/backend/internal/integrations/workspacescope/workspacescope.go apps/backend/internal/integrations/workspacescope/workspacescope_test.go apps/backend/internal/repoclone/clone.go apps/backend/internal/repoclone/clone_test.go apps/backend/internal/repoclone/clone_staging_test.go` — 12 changed Go files, 0 lint issues; `gofmt` clean.
+- `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/backendapp ./internal/improvekandev ./internal/integration ./internal/repoclone ./internal/integrations/workspacescope -count=1)` — passed.
+- `(cd apps/backend && go test -c -trimpath -tags fts5 -o /tmp/repoclone-staging.test ./internal/repoclone && runuser -u nobody -- /tmp/repoclone-staging.test -test.run '^TestCloneIntoExistingEmptyDestinationWhenParentIsNotWritable$' -test.count=1)` — passed as an unprivileged user.
+- `(cd apps/backend && make build)` — passed.
+- `(cd apps/web && pnpm exec vitest run lib/api/domains/improve-kandev-api.test.ts components/improve-kandev-dialog.test.tsx && pnpm run typecheck && pnpm run i18n:check && pnpm run build:vite)` — 23 tests passed; typecheck, i18n checks, and Vite production build passed.
+- `(cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --no-build --project chromium tests/improve-kandev.spec.ts -g 'retries a failed bootstrap')` — passed.
+- `(cd apps/web && CAPTURE_PR_ASSETS=1 pnpm e2e:run --no-build --project mobile-chrome tests/mobile-improve-kandev.spec.ts)` — passed at 700px touch width; Retry target measured at least 44px.
+- `node --test scripts/validate-public-docs.test.mjs .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs` — 174 tests passed.
+- `python3 scripts/list-docs.py validate` — passed; 457 decisions and 2,046 specifications validated.
+- `python3 scripts/lint-spec-files.py --all` — passed.
+- `node scripts/validate-public-docs.mjs` — passed; 55 published pages validated.
+- `git diff --check` — passed.
 
 ## Files likely touched
 
@@ -137,13 +145,16 @@ Improve Kandev handler. Staging must preserve any existing checkout.
 
 ## Results
 
-Implemented the async owner-scoped bootstrap job endpoint, retrying dialog
-poller, cleanup integration, and staged initial clone publication. Added
-coverage for deadline independence, ownership, retry after clone failure,
-restart reuse, overlapping jobs, shutdown cancellation, capacity/retention,
-and canceled clone staging. Desktop and phone flows retain the draft through
-retry; the phone Retry target is at least 44px. Added public recovery guidance.
+The review fixes register bootstrap cancellation and join in the restore path,
+preserve empty destination cloning while rejecting occupied paths, cancel
+workers waiting for a repository lock, and bound each browser status read.
+Coverage now exercises production restore registration with a gated clone,
+empty-target compatibility, lock cancellation, cold overlapping attempts, and
+recovery of a repository row whose checkout is missing. Integration fixtures
+close their servers before database cleanup. The desktop and phone retries keep
+the draft, and the phone retry target is at least 44px.
 
-All listed verification passed, including the race-enabled Go suite, web unit
-tests, typecheck, i18n check, desktop and phone Playwright tests, and public
-documentation tests and validation. Backend and Vite production builds passed.
+The UI behavior remains covered by the existing public recovery guidance in
+`docs/public/use-kandev.md`; this remediation changed no public contract or
+terminology. The screenshots in the PR were recaptured after the touch-target
+change.

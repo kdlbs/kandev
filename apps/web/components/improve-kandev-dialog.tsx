@@ -10,9 +10,12 @@ import { IconAlertTriangle, IconStethoscope, IconCheck } from "@tabler/icons-rea
 import { useAppStore } from "@/components/state-provider";
 import { fetchSystemHealth } from "@/lib/api/domains/health-api";
 import type { Task } from "@/lib/types/http";
+import {
+  useBootstrapKandev,
+  type BootstrapState,
+} from "@/hooks/domains/system/use-improve-kandev-bootstrap";
 import { buildImproveKandevDescription } from "./improve-kandev-dialog-helpers";
-import { CreateModeView, type BootstrapState } from "./improve-kandev-dialog-create";
-import { useBootstrapKandev } from "./improve-kandev-bootstrap-hook";
+import { CreateModeView } from "./improve-kandev-dialog-create";
 import {
   IMPROVE_KANDEV_WORKSPACE_NAME,
   initialImproveKandevMode,

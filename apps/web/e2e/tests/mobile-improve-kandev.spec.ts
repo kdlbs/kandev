@@ -1,16 +1,23 @@
 import { test, expect } from "../fixtures/test-base";
+import { waitForHttp } from "../helpers/causal-waits";
 
 const BOOTSTRAP_URL = "**/api/v1/system/improve-kandev/bootstrap";
 const BOOTSTRAP_STATUS_URL = "**/api/v1/system/improve-kandev/bootstrap/*";
 const HEALTH_URL = "**/api/v1/system/health";
+const BOOTSTRAP_PATH = /^\/api\/v1\/system\/improve-kandev\/bootstrap$/;
+const BOOTSTRAP_STATUS_PATH = /^\/api\/v1\/system\/improve-kandev\/bootstrap\/[^/]+$/;
 
 test.describe("Improve Kandev on mobile", () => {
   test("dismisses the intro and reaches the issue-only task option without overflow", async ({
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
-    await testPage.setViewportSize({ width: 700, height: 900 });
+    await testPage.setViewportSize({
+      width: process.env.CAPTURE_PR_ASSETS ? 390 : 700,
+      height: 900,
+    });
     await apiClient.saveUserSettings({ agent_generated_task_titles: false });
     await testPage.route(HEALTH_URL, (route) =>
       route.fulfill({
@@ -67,6 +74,9 @@ test.describe("Improve Kandev on mobile", () => {
     const preferenceBox = await preference.boundingBox();
     expect(preferenceBox?.height).toBeGreaterThanOrEqual(44);
     await preference.tap();
+    const failedStatusRead = waitForHttp(testPage, "GET", BOOTSTRAP_STATUS_PATH, {
+      predicate: (response) => response.status() === 500,
+    });
     await testPage.getByTestId("improve-kandev-proceed").tap();
 
     const createDialog = testPage.getByTestId("create-task-dialog");
@@ -75,10 +85,23 @@ test.describe("Improve Kandev on mobile", () => {
     const description = "Describe the problem";
     await createDialog.getByTestId("task-title-input").fill(title);
     await createDialog.getByTestId("task-description-input").fill(description);
+    await failedStatusRead;
     const retry = createDialog.getByTestId("improve-kandev-retry");
     await expect(retry).toBeVisible({ timeout: 10_000 });
     expect((await retry.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await expect(createDialog.getByText("Temporary bootstrap failure")).toBeVisible();
+    await expect(testPage.getByText("Could not prepare Improve Kandev")).toBeHidden();
+    await prCapture.screenshot("phone-bootstrap-retry", {
+      caption: "Phone Improve Kandev form with its draft preserved and touch-sized inline Retry",
+    });
+    const retryAdmission = waitForHttp(testPage, "POST", BOOTSTRAP_PATH, {
+      predicate: (response) => response.status() === 202,
+    });
+    const readyStatusRead = waitForHttp(testPage, "GET", BOOTSTRAP_STATUS_PATH, {
+      predicate: (response) => response.status() === 200,
+    });
     await retry.tap();
+    await Promise.all([retryAdmission, readyStatusRead]);
     await expect(
       createDialog.getByText(
         "Managed GitHub access could not prepare a verified fork for this task. Check the workspace GitHub connection or open an issue instead.",
