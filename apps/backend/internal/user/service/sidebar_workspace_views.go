@@ -229,9 +229,11 @@ func applySidebarWorkspacePatch(settings *models.UserSettings, req *UpdateUserSe
 		state.ActiveViewID = id
 	}
 	if len(patch.Draft) > 0 {
-		if err := json.Unmarshal(patch.Draft, &state.Draft); err != nil {
+		var draft *models.SidebarViewDraft
+		if err := json.Unmarshal(patch.Draft, &draft); err != nil {
 			return fmt.Errorf("%w: invalid sidebar draft", ErrValidation)
 		}
+		state.Draft = draft
 		if state.Draft != nil {
 			if err := validateSidebarPluginGrouping(state.Draft.Group); err != nil {
 				return fmt.Errorf("%w: %s", ErrValidation, err)

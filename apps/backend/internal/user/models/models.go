@@ -290,12 +290,13 @@ type SidebarViewSortCriterion struct {
 }
 
 type SidebarViewDraft struct {
-	BaseViewID  string                      `json:"base_view_id"`
-	Filters     []SidebarViewClause         `json:"filters"`
-	Sort        SidebarViewSort             `json:"sort"`
-	Group       string                      `json:"group"`
-	GroupIndent *bool                       `json:"group_indent,omitempty"`
-	TaskRow     *SidebarTaskRowPresentation `json:"task_row,omitempty"`
+	BaseViewID      string                      `json:"base_view_id"`
+	Filters         []SidebarViewClause         `json:"filters"`
+	Sort            SidebarViewSort             `json:"sort"`
+	Group           string                      `json:"group"`
+	GroupIndent     *bool                       `json:"group_indent,omitempty"`
+	CollapsedGroups []string                    `json:"collapsed_groups,omitempty"`
+	TaskRow         *SidebarTaskRowPresentation `json:"task_row,omitempty"`
 }
 
 // SidebarTaskRowPresentation controls the optional metadata and trailing

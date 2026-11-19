@@ -47,9 +47,14 @@ func (h *TaskHandlers) sidebarTaskPreferences(ctx context.Context, workspaceID s
 }
 
 func sidebarSavedDisclosure(settings *usermodels.UserSettings, workspaceID string, query models.SidebarTaskViewQuery) ([]string, error) {
-	for _, view := range settings.SidebarViewsByWorkspace[workspaceID].Views {
+	state := settings.SidebarViewsByWorkspace[workspaceID]
+	for _, view := range state.Views {
 		if view.ID != query.DisclosureViewID {
 			continue
+		}
+		if draft := state.Draft; draft != nil && draft.BaseViewID == view.ID &&
+			draft.Group != view.Group && draft.Group == query.Group {
+			return draft.CollapsedGroups, nil
 		}
 		if view.Group == query.Group {
 			return view.CollapsedGroups, nil

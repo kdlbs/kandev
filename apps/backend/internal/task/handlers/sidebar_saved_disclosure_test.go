@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -51,4 +52,23 @@ func TestSidebarSavedDisclosureIntersectsTheCompleteProviderSnapshot(t *testing.
 	require.Equal(t, http.StatusOK, read("saved"))
 	require.Empty(t, repo.sidebarQuery.CollapsedGroupKeys, "reopening must not revive retired keys")
 	require.Equal(t, http.StatusBadRequest, read("another-users-view"))
+}
+
+func TestSidebarSavedDraftDisclosureUsesItsOwnGrouping(t *testing.T) {
+	reference := "plugin:acme:labels"
+	keep := fmt.Sprintf("plugin-group:%x", sha256.Sum256([]byte(reference+"\x00keep")))
+	var state usermodels.SidebarWorkspaceState
+	require.NoError(t, json.Unmarshal([]byte(`{"views":[{"id":"saved","name":"Tag","group":"plugin:acme:other","collapsed_groups":["base-only"]}],"active_view_id":"saved","draft":{"base_view_id":"saved","group":"plugin:acme:labels","collapsed_groups":["`+keep+`"]}}`), &state))
+	repo := &httpTaskRepo{sidebarPage: &models.SidebarTaskPageResult{Page: 1, PageSize: 100}}
+	h := newHTTPTaskHandlers(t, repo)
+	h.service.SetSidebarGroupingResolver(savedDisclosureResolver{})
+	h.SetSidebarTaskSettingsReader(sidebarSettingsReader{settings: &usermodels.UserSettings{
+		SidebarViewsByWorkspace: map[string]usermodels.SidebarWorkspaceState{"ws-b": state},
+	}})
+	c, rec := taskRequestAs(t, "", http.MethodPost, "/api/v1/workspaces/ws-b/sidebar/query", "ws-b")
+	c.Request.Body = io.NopCloser(strings.NewReader(`{"group":"plugin:acme:labels","disclosure_view_id":"saved"}`))
+	h.httpQuerySidebarTasks(c)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []string{keep}, repo.sidebarQuery.CollapsedGroupKeys)
+	require.Equal(t, []string{"base-only"}, state.Views[0].CollapsedGroups)
 }

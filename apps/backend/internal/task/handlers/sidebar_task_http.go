@@ -72,11 +72,17 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 		return
 	}
 
+	if h.abortSidebarDisclosureIfUnauthorized(c, query) {
+		return
+	}
 	prefs, err := h.sidebarTaskPreferences(c.Request.Context(), c.Param("id"), query)
 	if h.abortSidebarRequestAfterRead(c, "failed to read sidebar task preferences", err) {
 		return
 	}
 	if err != nil {
+		if h.abortSidebarDisclosureIfUnauthorized(c, query) {
+			return
+		}
 		if errors.Is(err, errSidebarDisclosureView) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "error_code": "sidebar_query_invalid"})
 			return
@@ -121,6 +127,21 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+func (h *TaskHandlers) abortSidebarDisclosureIfUnauthorized(c *gin.Context, query models.SidebarTaskViewQuery) bool {
+	if query.DisclosureViewID == "" {
+		return false
+	}
+	err := h.service.AuthorizeWorkspaceAccess(c.Request.Context(), c.Param("id"))
+	if h.abortSidebarRequestAfterRead(c, "sidebar disclosure authorization failed", err) {
+		return true
+	}
+	if err == nil {
+		return false
+	}
+	handleNotFound(c, h.logger, err, "tasks not found")
+	return true
 }
 
 func abortSidebarRequestIfCanceled(c *gin.Context) bool {
