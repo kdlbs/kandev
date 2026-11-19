@@ -148,7 +148,7 @@
   "detectedAt": "Detetado em {{path}}",
   "disableProfile": "Desativar perfil",
   "disableProfileAnyway": "Desativar perfil",
-  "disableProfileDynamicWarning": "Perfis dinâmicos usam este perfil como candidato de encaminhamento. Enquanto estiver desativado, estes perfis dinâmicos ignoram-no e encaminham para os outros candidatos até ser reativado ou substituído.",
+  "disableProfileDynamicWarning": "Perfis dinâmicos usam este perfil como candidato de encaminhamento. Se for o único candidato, o encaminhamento para e requer uma ação até reativar este perfil ou substituir o candidato.",
   "disableProfileUtilityWarning": "Agentes utilitários usam este perfil. Desativá-lo impede novas chamadas até reparar cada ligação.",
   "disableSetting": "Desativar {{name}}",
   "displayName": "Nome a apresentar",

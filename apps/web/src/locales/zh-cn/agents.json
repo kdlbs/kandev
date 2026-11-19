@@ -157,7 +157,7 @@
   "detectedAt": "检测路径：{{path}}",
   "disableProfile": "禁用智能体配置",
   "disableProfileAnyway": "禁用配置",
-  "disableProfileDynamicWarning": "动态配置将此配置用作路由候选。禁用期间，这些动态配置会跳过它，改为路由到其他候选，直到重新启用或替换。",
+  "disableProfileDynamicWarning": "动态配置将此配置用作路由候选。如果它是唯一候选，路由会停止并需要处理，直到重新启用此配置或替换候选。",
   "disableProfileUtilityWarning": "辅助智能体正在使用此配置。禁用后，新调用会停止，直到修复每个绑定。",
   "disableSetting": "禁用 {{name}}",
   "displayName": "显示名称",

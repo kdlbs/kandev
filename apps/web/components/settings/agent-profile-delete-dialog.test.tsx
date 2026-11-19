@@ -115,6 +115,21 @@ describe("AgentProfileDisableConflictDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Disable profile" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
+
+  it("lists utility agents and dynamic profiles together before confirmation", () => {
+    render(
+      <AgentProfileDisableConflictDialog
+        agents={[{ id: "utility-1", name: "Commit message" }]}
+        dynamicProfiles={[DYNAMIC_PROFILE_REFERENCE]}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText("Commit message")).toBeTruthy();
+    expect(within(dialog).getByText(DYNAMIC_PROFILE_REFERENCE.name)).toBeTruthy();
+  });
 });
 
 const FIXTURE_TIMESTAMP = "2026-01-01T00:00:00.000Z";

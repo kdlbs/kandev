@@ -11,6 +11,20 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/store"
 )
 
+type profileUtilityDependencyChecker struct {
+	refs []UtilityAgentReference
+}
+
+func (f *profileUtilityDependencyChecker) ListUtilityAgentsByAgentProfile(
+	context.Context, string,
+) ([]UtilityAgentReference, error) {
+	return f.refs, nil
+}
+
+func (*profileUtilityDependencyChecker) ClearUtilityAgentProfileBindings(context.Context, string) error {
+	return nil
+}
+
 func seedDynamicReference(
 	t *testing.T,
 	repo store.Repository,
@@ -173,6 +187,37 @@ func TestUpdateProfile_DisableLiveDynamicReferenceBlocks(t *testing.T) {
 	}
 	if len(detail.DynamicProfiles) != 1 {
 		t.Fatalf("dynamic profiles = %#v, want 1", detail.DynamicProfiles)
+	}
+}
+
+func TestUpdateProfile_DisableReportsDynamicAndUtilityReferencesTogether(t *testing.T) {
+	ctrl, repo := newSQLiteBackedController(t)
+	ctx := context.Background()
+
+	candidate := seedCandidateProfile(t, repo, "Candidate")
+	dynamic := seedDynamicReference(t, repo, candidate.ID, "Live selector")
+	utility := UtilityAgentReference{ID: "utility-1", Name: "Commit message"}
+	ctrl.SetUtilityDependencyChecker(&profileUtilityDependencyChecker{refs: []UtilityAgentReference{utility}})
+
+	disabled := false
+	_, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{ID: candidate.ID, Enabled: &disabled})
+	var detail *ErrProfileInUseDetail
+	if !errors.As(err, &detail) {
+		t.Fatalf("disable err = %v, want ErrProfileInUseDetail", err)
+	}
+	if len(detail.DynamicProfiles) != 1 || detail.DynamicProfiles[0].Name != dynamic.Name {
+		t.Fatalf("dynamic profiles = %#v, want %q", detail.DynamicProfiles, dynamic.Name)
+	}
+	if len(detail.UtilityAgents) != 1 || detail.UtilityAgents[0].Name != utility.Name {
+		t.Fatalf("utility agents = %#v, want %q", detail.UtilityAgents, utility.Name)
+	}
+
+	stored, err := repo.GetAgentProfile(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("read candidate profile: %v", err)
+	}
+	if !stored.Enabled {
+		t.Fatal("blocked disable changed the stored enabled flag")
 	}
 }
 

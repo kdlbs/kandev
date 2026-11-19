@@ -127,6 +127,10 @@ export function AgentProfileDisableConflictDialog({
 }) {
   const { t } = useTranslation();
   const hasConflict = agents.length > 0 || dynamicProfiles.length > 0;
+  const actionClassName = settingsActionClassName(
+    "w-full cursor-pointer sm:w-auto max-md:min-h-12 " +
+      "[@media(pointer:coarse)]:min-h-12 [@media(any-pointer:coarse)]:min-h-12",
+  );
   return (
     <AlertDialog
       open={hasConflict}
@@ -134,38 +138,50 @@ export function AgentProfileDisableConflictDialog({
         if (!open) onCancel();
       }}
     >
-      <AlertDialogContent>
+      <AlertDialogContent
+        data-testid="agent-profile-disable-conflict-dialog"
+        data-layout="contained"
+        className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden"
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{t("agents:disableProfile")}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {[
-              agents.length > 0 ? t("agents:disableProfileUtilityWarning") : "",
-              dynamicProfiles.length > 0 ? t("agents:disableProfileDynamicWarning") : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-          </AlertDialogDescription>
         </AlertDialogHeader>
-        {agents.length > 0 ? (
-          <ul className="list-disc list-inside max-h-40 overflow-y-auto">
-            {agents.map((agent) => (
-              <li key={agent.id}>{agent.name || agent.id}</li>
-            ))}
-          </ul>
-        ) : null}
-        {dynamicProfiles.length > 0 ? (
-          <div className="space-y-1" data-testid="disable-conflict-dynamic-profiles">
-            <p className="font-medium text-sm">{t("agents:conflictDynamicProfilesTitle")}</p>
-            <ul className="list-disc list-inside max-h-40 overflow-y-auto">
-              {dynamicProfiles.map((profile) => (
-                <li key={profile.id}>{profile.name || profile.id}</li>
-              ))}
-            </ul>
+        <AlertDialogDescription
+          asChild
+          data-testid="disable-profile-conflict-body"
+          className="min-h-0 min-w-0 space-y-2 overflow-x-hidden overflow-y-auto overscroll-contain text-left"
+        >
+          <div>
+            <p>
+              {[
+                agents.length > 0 ? t("agents:disableProfileUtilityWarning") : "",
+                dynamicProfiles.length > 0 ? t("agents:disableProfileDynamicWarning") : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            </p>
+            {agents.length > 0 ? (
+              <ul className="list-disc list-inside" data-testid="disable-conflict-utility-agents">
+                {agents.map((agent) => (
+                  <li key={agent.id}>{agent.name || agent.id}</li>
+                ))}
+              </ul>
+            ) : null}
+            {dynamicProfiles.length > 0 ? (
+              <div className="space-y-1" data-testid="disable-conflict-dynamic-profiles">
+                <p className="font-medium text-sm">{t("agents:conflictDynamicProfilesTitle")}</p>
+                <ul className="list-disc list-inside">
+                  {dynamicProfiles.map((profile) => (
+                    <li key={profile.id}>{profile.name || profile.id}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t(CANCEL_LABEL_KEY)}</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} className="cursor-pointer">
+        </AlertDialogDescription>
+        <AlertDialogFooter data-testid="disable-profile-conflict-footer">
+          <AlertDialogCancel className={actionClassName}>{t(CANCEL_LABEL_KEY)}</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm} className={actionClassName}>
             {t("agents:disableProfileAnyway")}
           </AlertDialogAction>
         </AlertDialogFooter>

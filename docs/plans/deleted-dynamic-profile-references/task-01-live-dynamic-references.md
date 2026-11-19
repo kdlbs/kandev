@@ -18,8 +18,8 @@ system_design:
 ## Summary
 
 Soft-deleted dynamic profiles stop blocking delete and disable of their
-candidates, the delete 409 reports every blocker at once, and both conflict
-dialogs name the live dynamic profiles. See UI-01 and UI-02 in the
+candidates, delete and disable conflicts report all relevant references, and
+both conflict dialogs name the live dynamic profiles. See UI-01 and UI-02 in the
 [plan](plan.md).
 
 ## In scope
@@ -31,34 +31,54 @@ dialogs name the live dynamic profiles. See UI-01 and UI-02 in the
   repository, called best-effort after a profile delete.
 - `prepareProfileDeletion` collects all references and returns one
   `ErrProfileInUseDetail`; routing tiers stay a hard blocker.
+- An unforced disable collects dynamic profile and utility agent references
+  before returning one `ErrProfileInUseDetail`; it leaves the profile enabled.
 - Web: `DynamicProfileReference` type, `dynamic_profiles` in the delete server
   action, `profileConflictReferences` for both 409 shapes, the dynamic profile
   sections in both dialogs, and the two new keys in every shipped catalog.
 
 ## Out of scope
 
-- The disable path's blocker order and the routes of live dynamic profiles.
+- Dynamic profile editing, route selection, and routes of live dynamic
+  profiles.
 
 ## Acceptance
 
 1. A candidate referenced only by a soft-deleted dynamic profile can be deleted
-   and disabled without force, and its routes in that parent are removed.
-2. A live dynamic reference blocks without force, is reported together with
-   active sessions in one 409, and force still deletes or disables.
+   and disabled without force. Route cleanup runs best-effort; a failed cleanup
+   may leave inert routes in the deleted parent.
+2. A live dynamic reference blocks without force. Delete reports it with every
+   other delete reference in one 409. Disable reports it with utility agent
+   references in one 409 and leaves the profile enabled.
 3. The delete and disable dialogs list live dynamic profiles and confirm with
-   force; saving with a conflict opens the dialog without the generic toast.
+   force; saving with a conflict opens the dialog without a generic toast.
+4. The disable dialog uses one scrollable phone body and keeps its touch-sized
+   Cancel and Disable actions inside a short viewport.
 
 ## Verification
 
-```bash
-# from the repository root
-(cd apps/backend && go test -trimpath -tags fts5 -count=1 ./internal/agent/settings/...)
-(cd apps/web && pnpm exec vitest run app/actions/agents.test.ts \
-  components/settings/agent-profile-delete-dialog.test.tsx \
-  components/settings/agent-profile-page-state.test.ts)
-(cd apps/web && pnpm run i18n:check && pnpm run typecheck)
-(cd apps/web && pnpm e2e:run tests/settings/agent-profile-delete-dynamic.spec.ts)
-```
+Commands ran from the repository root unless the working directory is shown.
+
+- `go test ./internal/agent/settings/controller -count=1` (from
+  `apps/backend`): passed.
+- `pnpm exec vitest run app/actions/agents.test.ts components/settings/agent-profile-delete-dialog.test.tsx components/settings/agent-profile-page-state.test.ts`
+  (from `apps/web`): passed, 32 tests.
+- `pnpm run i18n:check` and `pnpm run typecheck` (from `apps/web`): passed.
+- `bash scripts/lint-go-changed apps/backend/internal/agent/settings/controller/profile_crud.go apps/backend/internal/agent/settings/controller/profile_crud_dynamic_references_test.go`:
+  passed, 0 issues.
+- `pnpm run lint` and `pnpm run lint:e2e-sleeps` (from `apps/web`): passed.
+- `node --test scripts/validate-public-docs.test.mjs` and
+  `node scripts/validate-public-docs.mjs`: passed, 63 tests and 55 published
+  pages.
+- `python3 scripts/list-docs.py validate` and
+  `python3 scripts/lint-spec-files.py --all`: passed, 456 decisions and 2045
+  specifications validated.
+- `pnpm e2e:run --no-build --host --shards 1 --project chromium tests/settings/agent-profile-delete-dynamic.spec.ts`
+  (from `apps/web`): passed, 2 tests.
+- `pnpm e2e:run --no-build --host --shards 1 --project mobile-chrome tests/settings/mobile-agent-profile-disable-conflict.spec.ts`
+  (from `apps/web`): passed, 1 test.
+
+The broader settings test suite and full web test suite were not run.
 
 ## Likely files
 
@@ -72,25 +92,19 @@ dialogs name the live dynamic profiles. See UI-01 and UI-02 in the
 - `apps/web/components/settings/agent-profile-page.tsx`
 - `apps/web/lib/types/agent-profile-errors.ts`
 - `apps/web/src/locales/*/agents.json`
-- `apps/web/e2e/tests/settings/agent-profile-delete-dynamic.spec.ts` (new)
+- `apps/web/e2e/tests/settings/agent-profile-delete-dynamic.spec.ts`
+- `apps/web/e2e/tests/settings/mobile-agent-profile-disable-conflict.spec.ts` (new)
 
 ## Results
 
-- Before the change, `TestDeleteProfile_IgnoresSoftDeletedDynamicReferences`,
-  `TestUpdateProfile_DisableIgnoresSoftDeletedDynamicReferences`, and
-  `TestDeleteProfile_ReportsDynamicAndSessionReferencesTogether` failed, and
-  the Vitest cases for the `dynamic_profiles` conflict, both dialogs, and the
-  save toast failed; all pass with the change.
-- `pnpm run i18n:check`, `pnpm run typecheck`, the i18n and E2E sleep
-  ratchets, Oxlint, and Prettier pass on the changed files.
-- On the Windows development host, `internal/agent/settings/controller` and
-  `internal/agent/settings/store` show the same failures before and after the
-  change (Copilot plugin discovery, managed npm, and timestamp-ordering tests
-  such as `TestAgentGETsUseProfileOrderSnapshot`, which fails intermittently on
-  both); none involves profile references.
-- Playwright on the `chromium` project: both cases of
-  `e2e/tests/settings/agent-profile-delete-dynamic.spec.ts` pass (they enable
-  `features.dynamicAgentRouting` through the backend fixture), and the
-  existing `agent-profile-delete.spec.ts` and `agent-profile-disable.spec.ts`
-  still pass (10 tests). The spec captures the conflict dialog for the PR when
-  `CAPTURE_PR_ASSETS` is set.
+- The new controller regression failed before the implementation because the
+  response omitted utility references when a live dynamic reference existed.
+  It passed with the combined dependency response, and the stored profile stays
+  enabled after the unforced 409.
+- The first mobile run showed that a long conflict dialog extended above the
+  viewport. After adding a viewport cap and one scroll body, the action height
+  check found a 43.575-pixel control. The final mobile run passed with both
+  actions at least 48 pixels high and visible in a 320 by 480 viewport.
+- The focused desktop and mobile Playwright cases, controller package test,
+  32 focused Vitest tests, i18n/type checks, changed-file lint, docs checks,
+  and specification checks passed.

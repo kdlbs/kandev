@@ -614,16 +614,16 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		if err != nil {
 			return nil, err
 		}
-		if !*req.Enabled && !req.Force && len(dynamicRefs) > 0 {
-			return nil, &ErrProfileInUseDetail{DynamicProfiles: dynamicRefs}
-		}
-		if !*req.Enabled && !req.Force && c.utilityDeps != nil {
-			refs, err := c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, req.ID)
-			if err != nil {
-				return nil, fmt.Errorf("check utility agents using this profile: %w", err)
+		if !*req.Enabled && !req.Force {
+			detail := &ErrProfileInUseDetail{DynamicProfiles: dynamicRefs}
+			if c.utilityDeps != nil {
+				detail.UtilityAgents, err = c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, req.ID)
+				if err != nil {
+					return nil, fmt.Errorf("check utility agents using this profile: %w", err)
+				}
 			}
-			if len(refs) > 0 {
-				return nil, &ErrProfileInUseDetail{UtilityAgents: refs}
+			if len(detail.DynamicProfiles) > 0 || len(detail.UtilityAgents) > 0 {
+				return nil, detail
 			}
 		}
 		profile.Enabled = *req.Enabled

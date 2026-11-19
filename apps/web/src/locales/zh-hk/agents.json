@@ -157,7 +157,7 @@
   "detectedAt": "檢測路徑：{{path}}",
   "disableProfile": "停用代理程式設定檔",
   "disableProfileAnyway": "停用設定",
-  "disableProfileDynamicWarning": "動態設定將此設定用作路由候選。停用期間，這些動態設定會跳過它，改為路由到其他候選，直到重新啓用或替換。",
+  "disableProfileDynamicWarning": "動態設定將此設定用作路由候選。如果它是唯一候選，路由會停止並需要處理，直到重新啓用此設定或替換候選。",
   "disableProfileUtilityWarning": "輔助代理程式正在使用此設定。停用後，新呼叫會停止，直到修復每個綁定。",
   "disableSetting": "停用 {{name}}",
   "displayName": "顯示名稱",

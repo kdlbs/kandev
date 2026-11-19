@@ -133,7 +133,7 @@
   "conflictTierMappingsTitle": "ワークスペースのティアマッピング:",
   "conflictWatchersTitle": "ウォッチャー (無効化される):",
   "conflictUtilityAgentsTitle": "ユーティリティエージェント (古いバインドを保持):",
-  "disableProfileDynamicWarning": "動的プロファイルはこのプロファイルをルーティング候補として使用しています。無効化すると、再有効化または置き換えられるまで、これらの動的プロファイルはこのプロファイルをスキップし、他の候補にルーティングします。",
+  "disableProfileDynamicWarning": "動的プロファイルはこのプロファイルをルーティング候補として使います。唯一の候補である場合、再有効化するか候補を置き換えるまでルーティングが停止し、操作が必要になります。",
   "disableProfileUtilityWarning": "ユーティリティエージェントがこのプロファイルを使っている。無効化すると、各バインドを修復するまで新しいユーティリティ呼び出しは止まる。",
   "disableProfileAnyway": "プロファイルを無効化",
   "copied": "コピー済み",
