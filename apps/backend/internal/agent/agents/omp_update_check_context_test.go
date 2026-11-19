@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -174,6 +175,27 @@ func TestOmpUpdateCheckContextFoldsKeyCaseOnWindows(t *testing.T) {
 	masked := NativeUpdateCheckResolver{Env: []string{"omp_profile=", "PI_PROFILE=work"}, FoldCase: true}
 	if value, ok := masked.Getenv("OMP_PROFILE"); !ok || value != "" {
 		t.Errorf("Getenv(OMP_PROFILE) = %q, %v; want a present empty value", value, ok)
+	}
+}
+
+// Through the production constructor, a lowercase PI_CONFIG_FILES selects the
+// overlay on Windows, where environment keys are case-insensitive, and not on
+// POSIX. Editing the overlay must change the Windows fingerprint.
+func TestNativeUpdateCheckResolverPlatformCase(t *testing.T) {
+	dir := t.TempDir()
+	overlay := filepath.Join(dir, "channel.yml")
+	if err := os.WriteFile(overlay, []byte("update:\n  channel: stable\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	context := NewOmpACP().NativeUpdateCheck().Context
+	resolver := NewNativeUpdateCheckResolver([]string{"pi_config_files=" + overlay}, dir, "")
+	before := context.Fingerprint(resolver)
+	if err := os.WriteFile(overlay, []byte("update:\n  channel: canary-longer\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changed := context.Fingerprint(resolver) != before
+	if want := runtime.GOOS == "windows"; changed != want {
+		t.Errorf("on %s, editing a lowercase-keyed overlay changed the fingerprint = %v, want %v", runtime.GOOS, changed, want)
 	}
 }
 

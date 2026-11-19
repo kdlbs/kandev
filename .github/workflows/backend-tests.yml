@@ -1177,7 +1177,7 @@ jobs:
         env:
           GOMAXPROCS: '2'
           GOMEMLIMIT: 2GiB
-        run: go test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run '^Test(HermesACP|RunCommandCheck)'
+        run: go test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run '^Test(HermesACP|RunCommandCheck|NativeUpdateCheckResolverPlatformCase)'
 
       # Native update checks contain the check in a kill-on-close job on
       # Windows; these helper-process tests cover timeout, overflow,
