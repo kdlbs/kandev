@@ -29,20 +29,47 @@ type SyncApplyInput struct {
 	// ReferenceTexts are the workflow and step prompts that block deleting a
 	// synced prompt they still reference.
 	ReferenceTexts []PromptReferenceText
+	// Resolutions are the user's choices for name conflicts, by prompt name.
+	// A conflict without a choice is adopted as a conflicted override.
+	Resolutions map[string]ConflictChoice
+}
+
+// ConflictChoice is the user's side in a name conflict between a repository
+// file and a manual, built-in, or conflicted override prompt.
+type ConflictChoice string
+
+const (
+	// ChoiceLocal keeps the existing content as an override of the file.
+	ChoiceLocal ConflictChoice = "local"
+	// ChoiceRepository uses the file's content and keeps the existing content
+	// as the local version.
+	ChoiceRepository ConflictChoice = "repository"
+)
+
+// Valid reports whether c is a known choice.
+func (c ConflictChoice) Valid() bool {
+	return c == ChoiceLocal || c == ChoiceRepository
 }
 
 // SyncApplyResult reports what one sync run changed. Overridden lists files
-// skipped because an operator overrides that prompt locally.
+// whose prompt is overridden locally. Conflicts lists overrides still waiting
+// for the user to pick a side. Restored lists synced prompts that left the
+// source and became manual again with their kept or current content.
 type SyncApplyResult struct {
 	Created    []string
 	Updated    []string
 	Deleted    []string
+	Restored   []string
 	Overridden []string
+	Conflicts  []string
 	Warnings   []string
+	// wrote records ownership changes that are not content changes, so the
+	// change event still reaches open prompt lists.
+	wrote bool
 }
 
 func (r *SyncApplyResult) changed() bool {
-	return len(r.Created)+len(r.Updated)+len(r.Deleted) > 0
+	return r.wrote || len(r.Created)+len(r.Updated)+len(r.Deleted)+len(r.Restored) > 0
 }
 
 // ApplySyncedPrompts reconciles synced prompts with the desired files.
@@ -70,59 +97,120 @@ func (s *Service) ApplySyncedPrompts(ctx context.Context, input SyncApplyInput) 
 	desired := make(map[string]bool, len(input.Desired))
 	for _, file := range input.Desired {
 		desired[file.Name] = true
-		if err := s.applySyncedFile(ctx, file, byName[file.Name], result); err != nil {
+		if err := s.applySyncedFile(ctx, file, byName[file.Name], input.Resolutions[file.Name], result); err != nil {
 			return nil, err
 		}
 	}
 	if err := s.removeVanishedSyncedPrompts(ctx, existing, desired, input, result); err != nil {
 		return nil, err
 	}
-	sort.Strings(result.Created)
-	sort.Strings(result.Updated)
-	sort.Strings(result.Deleted)
-	sort.Strings(result.Overridden)
+	for _, names := range [][]string{
+		result.Created, result.Updated, result.Deleted, result.Restored, result.Overridden, result.Conflicts,
+	} {
+		sort.Strings(names)
+	}
 	return result, nil
 }
 
-func (s *Service) applySyncedFile(ctx context.Context, file SyncedPromptFile, current *models.Prompt, result *SyncApplyResult) error {
+func (s *Service) applySyncedFile(
+	ctx context.Context, file SyncedPromptFile, current *models.Prompt, choice ConflictChoice, result *SyncApplyResult,
+) error {
 	switch {
 	case current == nil:
-		_, err := s.repo.CreateSyncedPrompt(ctx, file.Name, file.Content, file.Path)
-		if err == nil {
-			result.Created = append(result.Created, file.Name)
-			return nil
-		}
-		if translateNameConflict(err) == ErrPromptAlreadyExists {
-			result.Warnings = append(result.Warnings, clashWarning(file))
-			return nil
-		}
-		if errors.Is(err, promptstore.ErrPromptListLimit) {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: prompt %q was not created because the saved prompt limit is reached", file.Path, file.Name))
-			return nil
-		}
-		return err
+		return s.createSyncedFile(ctx, file, result)
 	case current.IsOverride():
-		result.Overridden = append(result.Overridden, file.Name)
-		return nil
+		return s.applyToOverride(ctx, file, current, choice, result)
 	case !current.IsSynced():
-		result.Warnings = append(result.Warnings, clashWarning(file))
-		return nil
+		return s.adoptClashingPrompt(ctx, file, current, choice, result)
 	case current.Content == file.Content && current.SourcePath == file.Path:
 		return nil
 	default:
-		updated, err := s.repo.UpdateSyncedPrompt(ctx, current.ID, file.Content, file.Path)
+		return s.updateSyncedFile(ctx, current.ID, file, result)
+	}
+}
+
+func (s *Service) createSyncedFile(ctx context.Context, file SyncedPromptFile, result *SyncApplyResult) error {
+	_, err := s.repo.CreateSyncedPrompt(ctx, file.Name, file.Content, file.Path)
+	switch {
+	case err == nil:
+		result.Created = append(result.Created, file.Name)
+		return nil
+	case translateNameConflict(err) == ErrPromptAlreadyExists:
+		result.Warnings = append(result.Warnings, fmt.Sprintf("%s: a prompt named %q was created during this sync; sync again to review it", file.Path, file.Name))
+		return nil
+	case errors.Is(err, promptstore.ErrPromptListLimit):
+		result.Warnings = append(result.Warnings, fmt.Sprintf("%s: prompt %q was not created because the saved prompt limit is reached", file.Path, file.Name))
+		return nil
+	default:
+		return err
+	}
+}
+
+func (s *Service) updateSyncedFile(ctx context.Context, id string, file SyncedPromptFile, result *SyncApplyResult) error {
+	updated, err := s.repo.UpdateSyncedPrompt(ctx, id, file.Content, file.Path)
+	if err != nil {
+		return err
+	}
+	if updated {
+		result.Updated = append(result.Updated, file.Name)
+	}
+	return nil
+}
+
+// applyToOverride leaves an override's content alone unless the user chose
+// the repository version for it; a conflicted override stays reported until
+// the user picks a side.
+func (s *Service) applyToOverride(
+	ctx context.Context, file SyncedPromptFile, current *models.Prompt, choice ConflictChoice, result *SyncApplyResult,
+) error {
+	switch {
+	case choice == ChoiceRepository:
+		reverted, err := s.repo.RevertOverride(ctx, current.ID)
+		if err != nil || !reverted {
+			return err
+		}
+		result.wrote = true
+		return s.updateSyncedFile(ctx, current.ID, file, result)
+	case choice == ChoiceLocal && current.Conflict:
+		cleared, err := s.repo.ClearOverrideConflict(ctx, current.ID)
 		if err != nil {
 			return err
 		}
-		if updated {
+		result.wrote = result.wrote || cleared
+	case current.Conflict:
+		result.Conflicts = append(result.Conflicts, file.Name)
+	}
+	result.Overridden = append(result.Overridden, file.Name)
+	return nil
+}
+
+// adoptClashingPrompt brings a manual or built-in prompt whose name the file
+// also uses under sync, following the user's choice; without one it becomes
+// a conflicted override that keeps its content.
+func (s *Service) adoptClashingPrompt(
+	ctx context.Context, file SyncedPromptFile, current *models.Prompt, choice ConflictChoice, result *SyncApplyResult,
+) error {
+	if choice == ChoiceRepository {
+		adopted, err := s.repo.AdoptPromptAsSynced(ctx, current.ID, file.Content, file.Path)
+		if err != nil {
+			return err
+		}
+		if adopted {
 			result.Updated = append(result.Updated, file.Name)
 		}
 		return nil
 	}
-}
-
-func clashWarning(file SyncedPromptFile) string {
-	return fmt.Sprintf("%s: a manual or built-in prompt named %q already exists; it was left unchanged and this file was skipped", file.Path, file.Name)
+	conflict := choice != ChoiceLocal
+	adopted, err := s.repo.AdoptPromptAsOverride(ctx, current.ID, file.Path, conflict)
+	if err != nil || !adopted {
+		return err
+	}
+	result.wrote = true
+	result.Overridden = append(result.Overridden, file.Name)
+	if conflict {
+		result.Conflicts = append(result.Conflicts, file.Name)
+	}
+	return nil
 }
 
 func (s *Service) removeVanishedSyncedPrompts(
@@ -131,11 +219,20 @@ func (s *Service) removeVanishedSyncedPrompts(
 	var vanished []*models.Prompt
 	var survivors []*models.Prompt
 	for _, prompt := range existing {
-		if prompt.IsSynced() && !desired[prompt.Name] && !input.FrozenNames[prompt.Name] {
-			vanished = append(vanished, prompt)
+		gone := !desired[prompt.Name] && !input.FrozenNames[prompt.Name]
+		if !gone {
+			survivors = append(survivors, prompt)
 			continue
 		}
-		survivors = append(survivors, prompt)
+		kept, err := s.settleVanishedPrompt(ctx, prompt, result)
+		if err != nil {
+			return err
+		}
+		if kept {
+			survivors = append(survivors, prompt)
+			continue
+		}
+		vanished = append(vanished, prompt)
 	}
 	if len(vanished) == 0 {
 		return nil
@@ -160,6 +257,27 @@ func (s *Service) removeVanishedSyncedPrompts(
 		}
 	}
 	return nil
+}
+
+// settleVanishedPrompt handles a prompt whose file left the source, and
+// reports whether it stays without the reference check: a conflicted
+// override loses its conflict, and a synced prompt with a kept local version
+// or a built-in prompt becomes manual instead of being deleted.
+func (s *Service) settleVanishedPrompt(ctx context.Context, prompt *models.Prompt, result *SyncApplyResult) (bool, error) {
+	switch {
+	case prompt.IsOverride() && prompt.Conflict:
+		cleared, err := s.repo.ClearOverrideConflict(ctx, prompt.ID)
+		result.wrote = result.wrote || cleared
+		return true, err
+	case prompt.IsSynced() && (prompt.LocalContent != "" || prompt.Builtin):
+		restored, err := s.repo.RestoreSyncedPrompt(ctx, prompt.ID)
+		if err == nil && restored {
+			result.Restored = append(result.Restored, prompt.Name)
+		}
+		return true, err
+	default:
+		return !prompt.IsSynced(), nil
+	}
 }
 
 // vanishedPromptReferences counts the referrers of each vanished prompt. A

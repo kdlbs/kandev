@@ -809,13 +809,21 @@ func resetPromptSync(ctx context.Context, svc *promptsync.Service, database *sql
 }
 
 // deletePromptSyncForReset removes the workspace's prompt sync row and, once
-// no configuration remains, the synced prompts it created.
+// no configuration remains, the synced prompts it created, returning adopted
+// built-in prompts to manual with their own content.
 func deletePromptSyncForReset(ctx context.Context, database *sql.DB, workspaceID string) error {
 	if _, err := database.ExecContext(ctx, `DELETE FROM prompt_sync_config WHERE workspace_id = ?`, workspaceID); err != nil {
 		return err
 	}
-	_, err := database.ExecContext(ctx,
-		`DELETE FROM custom_prompts WHERE source = 'sync' AND NOT EXISTS (SELECT 1 FROM prompt_sync_config)`)
+	if _, err := database.ExecContext(ctx,
+		`DELETE FROM custom_prompts WHERE source = 'sync' AND builtin = ? AND NOT EXISTS (SELECT 1 FROM prompt_sync_config)`, 0); err != nil {
+		return err
+	}
+	_, err := database.ExecContext(ctx, `
+		UPDATE custom_prompts
+		SET source = 'manual', source_path = '', conflict = 0, local_content = '',
+			content = CASE WHEN source = 'sync' AND local_content <> '' THEN local_content ELSE content END
+		WHERE builtin = ? AND source <> 'manual' AND NOT EXISTS (SELECT 1 FROM prompt_sync_config)`, 1)
 	return err
 }
 

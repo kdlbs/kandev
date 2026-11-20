@@ -7,6 +7,11 @@ import { Button } from "@kandev/ui/button";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import { WorkflowSyncStatusCard } from "@/components/settings/workflow-sync-status-banner";
 import { PromptSyncDialog } from "@/components/settings/prompt-sync-dialog";
+import {
+  PromptConflictBanner,
+  PromptConflictReviewDialog,
+} from "@/components/settings/prompt-conflict-review-dialog";
+import { usePromptConflictResolver } from "@/hooks/domains/settings/use-prompt-conflict-resolver";
 import { useAppStore } from "@/components/state-provider";
 import { usePromptSync } from "@/hooks/domains/settings/use-prompt-sync";
 
@@ -21,7 +26,13 @@ export function PromptSyncSection() {
   const sync = usePromptSync(activeWorkspaceId);
   const prompts = useAppStore((state) => state.prompts.items);
   const overridden = prompts.filter((prompt) => prompt.source === "override");
+  const conflicted = prompts.filter((prompt) => prompt.source === "override" && prompt.conflict);
   const [open, setOpen] = useState(false);
+  const resolver = usePromptConflictResolver(sync.acceptConfig);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const startReview = async () => {
+    if (await resolver.load()) setReviewOpen(true);
+  };
   const openDialog = () => {
     sync.reset(sync.config);
     setOpen(true);
@@ -48,6 +59,13 @@ export function PromptSyncSection() {
       action={sync.config ? undefined : configureButton}
       data-testid="prompt-sync-section"
     >
+      {sync.config && conflicted.length > 0 && (
+        <PromptConflictBanner
+          count={conflicted.length}
+          busy={resolver.busy}
+          onReview={startReview}
+        />
+      )}
       {sync.config && overridden.length > 0 && (
         <p className="text-xs text-muted-foreground" data-testid="prompt-sync-overridden">
           {t("settings:promptSyncOverriddenList", {
@@ -65,6 +83,11 @@ export function PromptSyncSection() {
         />
       )}
       <PromptSyncDialog open={open} onOpenChange={setOpen} sync={sync} />
+      <PromptConflictReviewDialog
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        resolver={resolver}
+      />
     </SettingsGroup>
   );
 }

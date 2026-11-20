@@ -13,11 +13,14 @@ import (
 )
 
 // addSourceColumns adds the sync ownership columns. Existing rows default to
-// manual, so upgrades keep every prompt editable.
+// manual with no kept copy and no conflict, so upgrades keep every prompt
+// editable.
 func (r *sqliteRepository) addSourceColumns() error {
 	columns := []struct{ name, ddl string }{
 		{"source", `ALTER TABLE custom_prompts ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`},
 		{"source_path", `ALTER TABLE custom_prompts ADD COLUMN source_path TEXT NOT NULL DEFAULT ''`},
+		{"local_content", `ALTER TABLE custom_prompts ADD COLUMN local_content TEXT NOT NULL DEFAULT ''`},
+		{"conflict", `ALTER TABLE custom_prompts ADD COLUMN conflict INTEGER NOT NULL DEFAULT 0`},
 	}
 	for _, column := range columns {
 		exists, err := db.ColumnExists(r.db, "custom_prompts", column.name)
@@ -65,18 +68,22 @@ type promptScanner interface {
 	Scan(dest ...any) error
 }
 
-// scanPrompt reads one row selected as
-// id, name, content, builtin, source, source_path, created_at, updated_at.
+// promptColumns is the column list scanPrompt reads.
+const promptColumns = "id, name, content, builtin, source, source_path, local_content, conflict, created_at, updated_at"
+
+// scanPrompt reads one row selected with promptColumns.
 func scanPrompt(row promptScanner) (*models.Prompt, error) {
 	prompt := &models.Prompt{}
-	var builtinInt int
+	var builtinInt, conflictInt int
 	if err := row.Scan(
 		&prompt.ID, &prompt.Name, &prompt.Content, &builtinInt,
-		&prompt.Source, &prompt.SourcePath, &prompt.CreatedAt, &prompt.UpdatedAt,
+		&prompt.Source, &prompt.SourcePath, &prompt.LocalContent, &conflictInt,
+		&prompt.CreatedAt, &prompt.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
 	prompt.Builtin = builtinInt == 1
+	prompt.Conflict = conflictInt == 1
 	return prompt, nil
 }
 
@@ -122,24 +129,10 @@ func (r *sqliteRepository) UpdateSyncedPrompt(ctx context.Context, id, content, 
 }
 
 // DeleteSyncedPrompt deletes a synced prompt. It reports false, without
-// deleting, when the row is not owned by sync.
+// deleting, when the row is not owned by sync or is a built-in prompt.
 func (r *sqliteRepository) DeleteSyncedPrompt(ctx context.Context, id string) (bool, error) {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(
-		`DELETE FROM custom_prompts WHERE id = ? AND source = ?`), id, models.PromptSourceSync)
-	if err != nil {
-		return false, err
-	}
-	rows, err := result.RowsAffected()
-	return rows > 0, err
-}
-
-// SetPromptSource moves a prompt from one ownership to another, guarded by
-// its current source, and reports whether the row changed.
-func (r *sqliteRepository) SetPromptSource(ctx context.Context, id, from, to string) (bool, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE custom_prompts SET source = ?, updated_at = ?
-		WHERE id = ? AND source = ?
-	`), to, time.Now().UTC(), id, from)
+		`DELETE FROM custom_prompts WHERE id = ? AND source = ? AND builtin = ?`), id, models.PromptSourceSync, 0)
 	if err != nil {
 		return false, err
 	}
@@ -148,10 +141,11 @@ func (r *sqliteRepository) SetPromptSource(ctx context.Context, id, from, to str
 }
 
 // ReleaseSyncedPrompts converts every synced prompt and override to a manual
-// prompt, keeping identity and content, and returns the number released.
+// prompt, keeping identity and current content, drops kept copies and
+// conflicts, and returns the number released.
 func (r *sqliteRepository) ReleaseSyncedPrompts(ctx context.Context) (int64, error) {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE custom_prompts SET source = ?, source_path = ''
+		UPDATE custom_prompts SET source = ?, source_path = '', local_content = '', conflict = 0
 		WHERE source IN (?, ?)
 	`), models.PromptSourceManual, models.PromptSourceSync, models.PromptSourceOverride)
 	if err != nil {

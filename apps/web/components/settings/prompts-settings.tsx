@@ -2,16 +2,16 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { IconLock } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
 import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
 import { PromptRowActions } from "@/components/settings/prompt-row-actions";
 import { SyncedPromptListItem } from "@/components/settings/prompt-synced-view";
 import {
-  PromptOverrideBadge,
-  PromptOverrideToggle,
+  PromptOverrideSwitch,
+  PromptRowBadges,
+  PromptRevertConfirmation,
+  usePromptOverrideSwitch,
 } from "@/components/settings/prompt-override-controls";
 import { PromptSyncSection } from "@/components/settings/prompt-sync-section";
 import {
@@ -188,8 +188,9 @@ function PromptListItem({
   isFinePointer,
   isDeleteTarget,
 }: PromptListItemProps) {
-  const { t } = useTranslation();
   const deleteAnchorRef = useRef<HTMLButtonElement | null>(null);
+  const overridden = prompt.source === "override";
+  const overrideSwitch = usePromptOverrideSwitch(prompt);
   const nameIsDirty = isEditing && formState.name !== prompt.name;
   const contentIsDirty = isEditing && formState.content !== prompt.content;
   return (
@@ -201,28 +202,25 @@ function PromptListItem({
       data-settings-dirty={nameIsDirty || contentIsDirty}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <div className="text-sm font-medium text-foreground">@{prompt.name}</div>
-          {prompt.builtin && (
-            <Badge variant="secondary" className="text-xs">
-              <IconLock className="h-3 w-3 mr-1" />
-              {t("settings:builtIn")}
-            </Badge>
-          )}
-          {prompt.source === "override" && <PromptOverrideBadge prompt={prompt} />}
+          <PromptRowBadges prompt={prompt} />
         </div>
-        {prompt.source === "override" && <PromptOverrideToggle prompt={prompt} />}
-        <PromptRowActions
-          prompt={prompt}
-          deleteAnchorRef={deleteAnchorRef}
-          onStartEditing={onStartEditing}
-          onOpenDelete={onOpenDelete}
-          isBusy={isBusy}
-          showCreate={showCreate}
-          isFinePointer={isFinePointer}
-          isDeleteTarget={isDeleteTarget}
-        />
+        <div className="flex shrink-0 items-center gap-1" data-testid="prompt-row-trailing">
+          {overridden && <PromptOverrideSwitch state={overrideSwitch} />}
+          <PromptRowActions
+            prompt={prompt}
+            deleteAnchorRef={deleteAnchorRef}
+            onStartEditing={onStartEditing}
+            onOpenDelete={onOpenDelete}
+            isBusy={isBusy}
+            showCreate={showCreate}
+            isFinePointer={isFinePointer}
+            isDeleteTarget={isDeleteTarget}
+          />
+        </div>
       </div>
+      {overridden && <PromptRevertConfirmation state={overrideSwitch} />}
       <PromptDeleteConfirmation
         promptId={prompt.id}
         promptName={prompt.name}

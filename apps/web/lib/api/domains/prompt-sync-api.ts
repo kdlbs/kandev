@@ -1,5 +1,7 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
 import type {
+  PromptConflictResolutions,
+  PromptSyncCheckResponse,
   PromptSyncConfig,
   PromptSyncRunResponse,
   PromptSyncSetConfigRequest,
@@ -17,11 +19,13 @@ export async function getPromptSyncConfig(
   return res ?? null;
 }
 
+// setPromptSyncConfig saves the configuration and runs one sync with the
+// given conflict choices; a failed sync still saves and resolves with `error`.
 export async function setPromptSyncConfig(
   payload: PromptSyncSetConfigRequest,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<PromptSyncConfig>(CONFIG_PATH, {
+  return fetchJson<PromptSyncRunResponse>(CONFIG_PATH, {
     ...options,
     init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
   });
@@ -34,12 +38,37 @@ export async function deletePromptSyncConfig(options?: ApiRequestOptions) {
   });
 }
 
-// runPromptSync triggers an immediate sync. It rejects (404) only when no
-// configuration exists; a failed attempt resolves with `error` set.
-export async function runPromptSync(options?: ApiRequestOptions) {
+// checkPromptSync lists the conflicts a source would cause without saving or
+// changing anything; without a payload it checks the saved configuration. It
+// rejects when the source cannot be read.
+export async function checkPromptSync(
+  payload?: PromptSyncSetConfigRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<PromptSyncCheckResponse>("/api/v1/prompt-sync/check", {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      ...(payload ? { body: JSON.stringify(payload) } : {}),
+    },
+  });
+}
+
+// runPromptSync triggers an immediate sync, applying any conflict choices. It
+// rejects (404) only when no configuration exists; a failed attempt resolves
+// with `error` set.
+export async function runPromptSync(
+  resolutions?: PromptConflictResolutions,
+  options?: ApiRequestOptions,
+) {
   return fetchJson<PromptSyncRunResponse>("/api/v1/prompt-sync/sync", {
     ...options,
-    init: { ...(options?.init ?? {}), method: "POST" },
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      ...(resolutions ? { body: JSON.stringify({ resolutions }) } : {}),
+    },
   });
 }
 

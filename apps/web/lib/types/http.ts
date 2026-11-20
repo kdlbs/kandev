@@ -917,6 +917,11 @@ export type CustomPrompt = {
   source?: "manual" | "sync" | "override";
   /** Repository file a synced or overridden prompt comes from. */
   source_path?: string;
+  /**
+   * True for an override adopted from a prompt whose name a repository file
+   * also uses, until the user chooses the local or repository version.
+   */
+  conflict?: boolean;
   created_at: string;
   updated_at: string;
 };

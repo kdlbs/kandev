@@ -15,9 +15,9 @@ Saved prompts are shared across the whole installation, so there is exactly one 
 2. Open **Settings → Prompts → Prompt Sync** and select **Set up**.
 3. Choose the provider and the **credential workspace**. Prompt Sync reads the repository through that workspace's existing GitHub or GitLab connection.
 4. Enter the repository, branch, and directory, then **Save**.
-5. Select **Sync now** and review the result. Synced prompts show a **Synced** badge.
+5. If the repository has prompts with the same names as prompts you already have, choose which version to use for each (see [Name conflicts](#name-conflicts)).
 
-Saving stores the configuration only. Use **Sync now** for the first sync, or wait for auto-sync.
+**Save** first reads the repository without changing anything. If it cannot be read, nothing is saved and the dialog shows the error. Otherwise Kandev saves the configuration and runs the first sync straight away. Synced prompts show a **Synced** badge.
 
 ## Prompt files
 
@@ -41,7 +41,7 @@ Every sync compares the files with the prompts Prompt Sync owns:
 
 - A new file creates a synced prompt. A changed file updates it. An unchanged file writes nothing.
 - A removed file deletes its prompt only when nothing still references it: no workflow prompt or step prompt in any workspace, and no remaining saved prompt (including prompts kept by this rule). A prompt that is still referenced is kept, and the sync reports which prompt and how many workflows or prompts use it. Remove the references, then sync again.
-- A file whose name matches a prompt created in Kandev, or a built-in prompt, is skipped with a warning. Prompt Sync never takes over a prompt it did not create.
+- A file whose name matches a prompt created in Kandev, or a built-in prompt, is a [name conflict](#name-conflicts). Prompt Sync never skips it silently and never replaces your text without your choice.
 - After applying changes, Prompt Sync warns about any `@name` inside a remaining synced prompt (including kept and unchanged ones) that does not resolve to a saved prompt.
 - A successful listing with no prompt files is an empty source and removes unreferenced synced prompts.
 - A listing or download failure fails the run before anything changes.
@@ -54,7 +54,7 @@ Synced prompts are owned by the repository:
 
 - Settings shows a **Synced** badge with the source file. Instead of edit and delete, a **View** button (eye icon) opens the full content read-only.
 - The prompt HTTP API rejects updates and deletes with `409`.
-- Agent prompt-write tools reject changes, and `allow_agent_edits` reports `false`.
+- Agent prompt-write tools reject changes, and `allow_agent_edits` reports `false`. See [Agents](#agents).
 - Creating a prompt with a synced prompt's name fails as a duplicate.
 
 To change a synced prompt, edit its file and sync again.
@@ -65,9 +65,27 @@ A shared repository can ship a default prompt at a chosen point, for example a `
 
 1. On the synced prompt in **Settings → Prompts**, turn on the **Local override** switch. The prompt keeps its name and content but becomes an editable, deletable local copy with an **Overridden** badge.
 2. Edit it like any prompt. Syncs leave it alone and list it under **Overridden locally** on the status card instead of warning.
-3. To go back to the shared default, turn the switch off and confirm **Use repository version**. Kandev returns the prompt to sync and runs a sync, so the repository text replaces your local version. Deleting the override has the same effect on the next sync.
+3. To go back to the shared default, turn the switch off and confirm **Use repository version**. Kandev returns the prompt to sync and runs a sync, so the repository text is used. Your local version is kept: turning the switch on again brings it back. Deleting the override instead drops your version, and the next sync recreates the synced prompt.
 
-Overrides are created from synced prompts only. A prompt you created yourself with the same name as a file still produces a name-clash warning. Removing Prompt Sync turns overrides into normal prompts.
+The switch is always the first control on the right of the row, so it stays in the same place whether the prompt is synced or overridden. Removing Prompt Sync turns overrides into normal prompts.
+
+## Name conflicts
+
+A name conflict is a repository file whose name matches a prompt you created in Kandev or a built-in prompt. Built-in prompts are treated the same way as your own.
+
+- **When you save the configuration**, Kandev lists the conflicts before saving anything. For each prompt, choose **Keep local** (the default) or **Use repository version**; **Compare versions** shows both texts. **Back** returns to the fields; closing the dialog saves nothing. **Save and sync** applies your choices:
+  - **Keep local** makes your prompt a local override of the file. Your text stays in use.
+  - **Use repository version** makes it a synced prompt with the repository text. Your text is kept, and turning on **Local override** brings it back.
+- **When a later sync finds a new conflict** (for example, someone adds a matching file), your prompt becomes an override marked **Conflict** and keeps your text. It stays flagged until you choose: the row shows a **Conflict** badge, **Settings → Prompts** shows a banner with **Review**, and the Prompts settings entry, the sidebar **Settings** button, and the phone menu's **Settings** row show an amber dot. **Review** opens the same choices; **Apply choices** runs a sync with them. Turning the row's **Local override** switch off also resolves the conflict in favour of the repository version.
+- If the conflicting file is removed from the repository, the conflict is cleared and your override stays.
+- If a synced prompt whose local version Kandev kept is removed from the repository, it becomes a normal prompt with your local text again. Sync never deletes a built-in prompt.
+
+## Agents
+
+- Agents cannot change synced prompts. The error tells the agent that a local change would have no effect, that you can turn on **Local override** for the prompt in **Settings → Prompts**, and that agents cannot change that setting, so the agent can pass the steps on to you.
+- Agent prompt reads report each prompt's source (`manual`, `sync`, or `override`), whether it has an unresolved conflict, and editing guidance for synced and overridden prompts.
+- Agents can edit overrides; the edit changes your local version, which is in use. It does not resolve a conflict.
+- No agent tool can turn **Local override** on or off or resolve a conflict.
 
 ## Workflow Sync reference warnings
 
@@ -88,7 +106,7 @@ Error messages never include tokens or provider response bodies.
 
 ## Stop syncing
 
-Select **Configure → Remove sync**. Kandev first turns every synced prompt and override into a normal, editable prompt, keeping its name and content, and then removes the configuration. If that fails, the configuration stays so you can retry.
+Select **Configure → Remove sync**. Kandev first turns every synced prompt and override into a normal, editable prompt, keeping its name and current content, and then removes the configuration. Kept local versions and conflict flags are dropped. If that fails, the configuration stays so you can retry.
 
 Changing the provider, credential workspace, repository, branch, or directory keeps existing synced prompts. The next sync reconciles them against the new source.
 
@@ -102,11 +120,12 @@ Reading the configuration and status follows saved-prompt read access. Saving, r
 | Method | Route | Behavior |
 |--------|-------|----------|
 | `GET` | `/api/v1/prompt-sync/config` | `200` with the configuration and status, or `204` when not configured. |
-| `POST` | `/api/v1/prompt-sync/config` | Validate and save. Does not sync. |
+| `POST` | `/api/v1/prompt-sync/check` | List the name conflicts a source would cause, without saving anything. Send the configuration as the body, or no body to check the saved one. `422` with `error` if the repository cannot be read. |
+| `POST` | `/api/v1/prompt-sync/config` | Validate, save, and run one sync. Optional `resolutions` maps prompt names to `local` or `repository`. Returns `config` plus `result` or `error`. |
 | `DELETE` | `/api/v1/prompt-sync/config` | Release synced prompts, then delete. Returns `{"deleted":true}`. |
-| `POST` | `/api/v1/prompt-sync/sync` | Run now. Returns `config` plus `result` or `error`; `404` when not configured. |
+| `POST` | `/api/v1/prompt-sync/sync` | Run now, with optional `{"resolutions": {...}}`. Returns `config` plus `result` or `error`; `404` when not configured. |
 | `POST` | `/api/v1/prompt-sync/prompts/{id}/override` | Turn a synced prompt into a local override. `409` if the prompt is not synced. |
-| `POST` | `/api/v1/prompt-sync/prompts/{id}/revert` | Return an override to sync and run a sync. `409` if the prompt is not an override. |
+| `POST` | `/api/v1/prompt-sync/prompts/{id}/revert` | Return an override to sync, keeping its text as the local version, and run a sync. `409` if the prompt is not an override. |
 
 ```bash
 curl -fsS -X POST -H 'Content-Type: application/json' \
@@ -121,7 +140,7 @@ A completed sync returns HTTP `200` even when the response contains `error`; ins
 
 ## Troubleshooting
 
-- **A prompt was skipped as a name clash:** a prompt with that name was created in Kandev. Rename the file, or delete or rename the Kandev prompt, then sync again.
+- **A prompt shows a Conflict badge:** a repository file has the same name. Select **Review** on the banner and choose a version.
 - **A removed prompt is still listed:** a workflow or another saved prompt still references it. The warning gives the number of referrers; remove the references and sync again.
 - **Suspended after deleting a workspace:** choose another credential workspace and save.
 - **Edits revert:** synced prompts are repository-owned. Change the file instead.

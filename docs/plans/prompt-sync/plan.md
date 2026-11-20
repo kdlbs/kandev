@@ -9,6 +9,9 @@ requirements:
   - REQ-INTEGRATIONS-PROMPT-SYNC-005
   - REQ-INTEGRATIONS-PROMPT-SYNC-006
   - REQ-INTEGRATIONS-PROMPT-SYNC-007
+  - REQ-INTEGRATIONS-PROMPT-SYNC-008
+  - REQ-INTEGRATIONS-PROMPT-SYNC-009
+  - REQ-INTEGRATIONS-PROMPT-SYNC-010
 system_design:
   - ../../specs/integrations/system-design/prompt-sync.md
 ---
@@ -54,6 +57,7 @@ Each layer is shippable on its own:
 | 6 | [Task 08: Review remediation](task-08-review-remediation.md) | 03, 05 |
 | 7 | [Task 09: Local overrides](task-09-local-overrides.md) | 07, 08 |
 | 8 | [Task 10: Override switch](task-10-override-switch.md) | 09 |
+| 9 | [Task 11: Name conflicts, lossless switching, and agent guidance](task-11-conflicts-and-agents.md) | 10 |
 
 Tasks 01 and 02 touch separate packages and can run in parallel, as can 03
 and 04. Waves mark parallel-safe candidates only; they do not authorize
@@ -101,17 +105,47 @@ are illustrative; use the existing shadcn primitives and localized copy.
 
 ```text
 | +------------------------------------------------------------------+ |
-| | @post-pr-review [Synced]        (o ) Local override        [view] | |
+| | @post-pr-review [Synced]          (o ) Local override  [view]     | |
 | | Run the default reviewer after the PR opens.                      | |
 | +------------------------------------------------------------------+ |
-| | @principles [Overridden]  ( o) Local override       [edit] [del]  | |
+| | @principles [Overridden]          ( o) Local override  [edit][del]| |
+| |   Use the repository version? Your local version is kept and      | |
+| |   comes back if you turn Local override on again.                 | |
+| |                              [Cancel] [Use repository version]    | |
 | | My local principles ...                                           | |
 | +------------------------------------------------------------------+ |
+| | @house-rules [Overridden] [Conflict] ( o) Local override [edit][del]|
+| +------------------------------------------------------------------+ |
+  The switch is always the first trailing control, so it never moves; the
+  turn-off confirmation opens below the row header (a sheet on phones).
   Status card adds: "Overridden locally: @principles" below warnings.
-  [Overridden] tooltip names the repository file it replaces. Turning the
-  switch off asks "Discard your local version and use the repository
-  version?" (inline on desktop, confirmation sheet on phones). Phones use the
-  same row with a touch-sized switch label (Task 10).
+  [Overridden] and [Conflict] tooltips name the repository file.
+```
+
+### UI-06: Name conflicts (desktop and phone)
+
+```text
++---------------------------------------------------+
+| Review name conflicts                          [x]|
+| The repository has prompts with the same names... |
+| 1 prompt needs a choice.                          |
+| +-----------------------------------------------+ |
+| | @house-rules     .kandev/prompts/house-rules.md| |
+| | (o) Keep local          ( ) Use repository    | |
+| |     stays in use as an      version; yours is | |
+| |     override                kept               | |
+| | [v Compare versions]                          | |
+| +-----------------------------------------------+ |
+| [Back]                          [Save and sync]   |
++---------------------------------------------------+
+
+Settings > Prompts, after a later sync found a conflict:
+| [!] 1 prompt shares its name with a file in the prompt  [Review] |
+|     repository. The repository version is not used until ...     |
+  The Prompts settings row, the sidebar Settings button, and the phone
+  navigation Settings row show an amber dot until it is resolved. Review
+  opens the same list with [Cancel] [Apply choices]. On phones the two
+  choices stack and each is at least 44px tall.
 ```
 
 ### UI-02: Settings > Prompts, not configured (desktop)
@@ -181,8 +215,9 @@ These previews map to AC-INTEGRATIONS-PROMPT-SYNC-001.1, 001.3, 003.7,
 - Lint the changed Go files with `bash scripts/lint-go-changed`.
 - Web: vitest for the new and changed components, plus `pnpm run typecheck`,
   `pnpm run lint`, and `pnpm run i18n:check`.
-- E2E: `apps/web/e2e/tests/settings/prompt-sync.spec.ts` (chromium) and
-  `mobile-prompt-sync.spec.ts` (mobile-chrome) against the mock GitLab
-  provider (the same fixture `workflow-sync-gitlab.spec.ts` uses).
+- E2E: `apps/web/e2e/tests/settings/prompt-sync.spec.ts` and
+  `prompt-sync-conflicts.spec.ts` (chromium) and `mobile-prompt-sync.spec.ts`
+  (mobile-chrome) against the mock GitLab provider (the same fixture
+  `workflow-sync-gitlab.spec.ts` uses).
 - Specs: `python3 scripts/list-docs.py validate` and
   `python3 scripts/lint-spec-files.py --all`.

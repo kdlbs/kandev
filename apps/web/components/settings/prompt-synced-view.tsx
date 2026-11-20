@@ -4,7 +4,11 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconEye, IconEyeOff } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { PromptOverrideToggle } from "@/components/settings/prompt-override-controls";
+import {
+  PromptOverrideSwitch,
+  PromptRevertConfirmation,
+  usePromptOverrideSwitch,
+} from "@/components/settings/prompt-override-controls";
 import { PromptSyncedBadge } from "@/components/settings/prompt-synced-badge";
 import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import type { CustomPrompt } from "@/lib/types/http";
@@ -59,6 +63,7 @@ function PromptSyncedContent({ prompt }: { prompt: CustomPrompt }) {
 // and a View toggle in place of edit and delete, which the repository owns.
 export function SyncedPromptListItem({ prompt }: { prompt: CustomPrompt }) {
   const [viewing, setViewing] = useState(false);
+  const overrideSwitch = usePromptOverrideSwitch(prompt);
   return (
     <div
       className="rounded-lg border border-border/70 bg-background p-4 flex flex-col gap-3"
@@ -66,12 +71,12 @@ export function SyncedPromptListItem({ prompt }: { prompt: CustomPrompt }) {
       data-prompt-name={prompt.name}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <div className="text-sm font-medium text-foreground">@{prompt.name}</div>
           <PromptSyncedBadge sourcePath={prompt.source_path} />
         </div>
-        <div className="flex items-center gap-1">
-          <PromptOverrideToggle prompt={prompt} />
+        <div className="flex shrink-0 items-center gap-1" data-testid="prompt-row-trailing">
+          <PromptOverrideSwitch state={overrideSwitch} />
           <PromptViewButton
             promptId={prompt.id}
             expanded={viewing}
@@ -79,6 +84,7 @@ export function SyncedPromptListItem({ prompt }: { prompt: CustomPrompt }) {
           />
         </div>
       </div>
+      <PromptRevertConfirmation state={overrideSwitch} />
       {viewing ? (
         <PromptSyncedContent prompt={prompt} />
       ) : (

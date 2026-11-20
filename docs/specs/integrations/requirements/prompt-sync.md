@@ -73,9 +73,10 @@ text.
   shall store no credential. A GitHub configuration shall keep its repository
   host, which must match that workspace's connection host. Repository, branch,
   and directory validation shall match Workflow Sync.
-- **AC-INTEGRATIONS-PROMPT-SYNC-001.3:** Saving the configuration shall
-  validate and store it without fetching. **Sync now** shall run one sync
-  immediately and return its result.
+- **AC-INTEGRATIONS-PROMPT-SYNC-001.3:** Saving the configuration shall first
+  check the source under AC-INTEGRATIONS-PROMPT-SYNC-008.1, then store it and
+  run one sync immediately, applying the conflict choices made in the dialog.
+  **Sync now** shall run one sync immediately and return its result.
 - **AC-INTEGRATIONS-PROMPT-SYNC-001.4:** When authentication is enforced,
   saving, removing, and **Sync now** shall require configuration-management
   authority plus access to the credential workspace. Anyone who can read saved
@@ -144,10 +145,10 @@ installation automatically, so that agents act on the reviewed text.
   survives too, so its own references are followed. A kept prompt shall be
   reported with a warning that names it and the number of referrers.
 - **AC-INTEGRATIONS-PROMPT-SYNC-003.3:** When a prompt file's name matches an
-  existing manual or built-in prompt, the sync shall skip that file and report
-  a warning. The existing prompt shall keep its content, ownership, and
-  identity. Sync shall never adopt a manual prompt. A file whose name matches
-  an override follows AC-INTEGRATIONS-PROMPT-SYNC-007.3 instead.
+  existing manual or built-in prompt, that is a conflict, handled under
+  REQ-INTEGRATIONS-PROMPT-SYNC-008. The sync shall never skip it silently or
+  overwrite the existing content without the user's choice. A file whose name
+  matches an override follows AC-INTEGRATIONS-PROMPT-SYNC-007.3 instead.
 - **AC-INTEGRATIONS-PROMPT-SYNC-003.4:** A successful listing with no prompt
   files shall be treated as an empty source. It shall remove unreferenced
   synced prompts under REQ-INTEGRATIONS-PROMPT-SYNC-003.2.
@@ -176,7 +177,8 @@ that every change goes through review.
 
 - **AC-INTEGRATIONS-PROMPT-SYNC-004.1:** Settings, HTTP updates, HTTP deletes,
   and agent MCP writes shall reject changes to a synced prompt. The rejection
-  shall tell the user to edit the prompt in the synced repository. The
+  shall tell the user to edit the prompt in the synced repository; the agent
+  rejection follows AC-INTEGRATIONS-PROMPT-SYNC-010.1. The
   prompt's content shall stay unchanged. The prompt's `allow_agent_edits`
   value shall be false.
 - **AC-INTEGRATIONS-PROMPT-SYNC-004.2:** Prompt reads (HTTP, boot payload, and
@@ -194,7 +196,8 @@ that every change goes through review.
   fail with the existing duplicate-name error.
 - **AC-INTEGRATIONS-PROMPT-SYNC-004.5:** Removing the configuration shall
   first release every synced prompt and every override to a manual, editable
-  prompt, keeping its identity and content, and then delete the configuration. If any release
+  prompt, keeping its identity and current content and clearing any conflict
+  and kept local content, and then delete the configuration. If any release
   fails, the configuration shall be kept so the user can retry.
 - **AC-INTEGRATIONS-PROMPT-SYNC-004.6:** Changing the provider, credential
   workspace, repository, branch, or directory shall keep existing synced
@@ -253,49 +256,16 @@ run.
   all resolve, or that has none, shall return the same result and status as
   before this change.
 
-### REQ-INTEGRATIONS-PROMPT-SYNC-007: Local overrides
+### Local versions, conflicts, and agent access
 
-**Intent:** A shared repository can ship a default prompt at a chosen point
-(for example `@post-pr-review`) that one installation replaces with its own
-version, and can return to the shared default later.
-
-**User story:** As an operator syncing a shared prompt repository, I want to
-override one synced prompt locally, so that a shared workflow step uses my
-version without forking the repository.
-
-#### Acceptance criteria
-
-- **AC-INTEGRATIONS-PROMPT-SYNC-007.1:** Settings > Prompts shall show a
-  labelled "Local override" switch on each synced prompt and each override, on
-  desktop and phone, visually distinct from the edit and delete controls; on
-  phones and coarse pointers its hit area shall be touch-sized. Turning it on
-  shall turn the prompt into an override with the same name, identity, and
-  current content, editable and deletable like a manual prompt by operators
-  and agents.
-- **AC-INTEGRATIONS-PROMPT-SYNC-007.2:** An override shall show an
-  "Overridden" badge naming the repository file it replaces, with the switch
-  on. Turning the switch off shall first ask the user to confirm discarding the
-  local version; cancelling shall keep the override unchanged. Confirming shall
-  return the prompt to sync ownership and run a sync, so the repository version
-  replaces the local content.
-- **AC-INTEGRATIONS-PROMPT-SYNC-007.3:** A sync shall leave an override's
-  content and ownership unchanged when its file is present, report its name as
-  overridden rather than as a warning, and leave it in place when its file is
-  removed.
-- **AC-INTEGRATIONS-PROMPT-SYNC-007.4:** Deleting an override shall let the
-  next sync recreate the synced prompt from its file.
-- **AC-INTEGRATIONS-PROMPT-SYNC-007.5:** The Prompt Sync status card shall
-  list prompts that are overridden locally, separately from warnings.
-- **AC-INTEGRATIONS-PROMPT-SYNC-007.6:** Override and Revert shall require
-  configuration-management authority, reject prompts that are not synced or
-  not overrides respectively, and never change a manual or built-in prompt.
+REQ-INTEGRATIONS-PROMPT-SYNC-007 through REQ-INTEGRATIONS-PROMPT-SYNC-010
+(local overrides, name conflicts, lossless switching, and agent access) are
+defined in [Prompt Sync local versions](prompt-sync-local-versions.md).
 
 ## Out of scope
 
 - Prompts scoped to a workspace, or more than one prompt source per
   installation.
-- Turning an existing manual prompt that clashes with a file into an override;
-  overrides are created only from synced prompts.
 - Running prompt sync as part of a Workflow Sync run, or reading prompts from
   the Workflow Sync directory.
 - Recursive directories, YAML or JSON prompt envelopes, and front-matter

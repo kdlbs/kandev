@@ -2,15 +2,23 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { PromptSyncController } from "@/hooks/domains/settings/use-prompt-sync";
-import type { PromptSyncConfig } from "@/lib/types/prompt-sync";
+import type { PromptSyncConfig, PromptSyncConflict } from "@/lib/types/prompt-sync";
+import type { PromptConflictResolver } from "@/hooks/domains/settings/use-prompt-conflict-resolver";
+import type { PromptConflictReview } from "@/hooks/domains/settings/use-prompt-conflict-review";
 
-const mocks = vi.hoisted(() => ({ controller: null as unknown as PromptSyncController }));
+const mocks = vi.hoisted(() => ({
+  controller: null as unknown as PromptSyncController,
+  resolver: null as unknown as PromptConflictResolver,
+}));
 
 vi.mock("@/hooks/domains/settings/use-prompt-sync", () => ({
   usePromptSync: () => mocks.controller,
 }));
+vi.mock("@/hooks/domains/settings/use-prompt-conflict-resolver", () => ({
+  usePromptConflictResolver: () => mocks.resolver,
+}));
 const storeState = vi.hoisted(() => ({
-  prompts: [] as Array<{ id: string; name: string; source?: string }>,
+  prompts: [] as Array<{ id: string; name: string; source?: string; conflict?: boolean }>,
 }));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
@@ -72,7 +80,37 @@ function makeController(overrides: Partial<PromptSyncController> = {}): PromptSy
     handleSave: vi.fn().mockResolvedValue(true),
     handleDelete: vi.fn().mockResolvedValue(true),
     handleSyncNow: vi.fn().mockResolvedValue(undefined),
+    review: makeReview(),
+    backToFields: vi.fn(),
+    acceptConfig: vi.fn(),
     ...overrides,
+  };
+}
+
+const conflict: PromptSyncConflict = {
+  name: "principles",
+  path: ".kandev/prompts/principles.md",
+  local_content: "Mine",
+  repository_content: "Repo",
+};
+
+function makeReview(conflicts: PromptSyncConflict[] = []): PromptConflictReview {
+  return {
+    active: conflicts.length > 0,
+    conflicts,
+    choices: Object.fromEntries(conflicts.map((item) => [item.name, "local" as const])),
+    open: vi.fn(),
+    setChoice: vi.fn(),
+    close: vi.fn(),
+  };
+}
+
+function makeResolver(conflicts: PromptSyncConflict[] = []): PromptConflictResolver {
+  return {
+    review: makeReview(conflicts),
+    busy: false,
+    load: vi.fn().mockResolvedValue(true),
+    apply: vi.fn().mockResolvedValue(true),
   };
 }
 
@@ -86,6 +124,7 @@ function renderSection() {
 
 beforeEach(() => {
   mocks.controller = makeController();
+  mocks.resolver = makeResolver();
 });
 afterEach(cleanup);
 
@@ -140,5 +179,51 @@ describe("PromptSyncSection overrides", () => {
     expect(list.textContent).toContain("@hook");
     expect(list.textContent).not.toContain("@rule");
     storeState.prompts = [];
+  });
+});
+
+// @covers AC-INTEGRATIONS-PROMPT-SYNC-008.2
+describe("PromptSyncSection conflict review before saving", () => {
+  it("replaces the fields with the review step and goes back without saving", () => {
+    mocks.controller = makeController({ review: makeReview([conflict]) });
+    renderSection();
+    fireEvent.click(screen.getByTestId(OPEN_TEST_ID));
+    expect(screen.queryByTestId("prompt-sync-workspace-select")).toBeNull();
+    const item = screen.getByTestId("prompt-conflict-item");
+    expect(item.getAttribute("data-prompt-name")).toBe("principles");
+    fireEvent.click(screen.getByTestId("prompt-conflict-compare"));
+    expect(screen.getByTestId("prompt-conflict-local-content").textContent).toBe("Mine");
+    expect(screen.getByTestId("prompt-conflict-repository-content").textContent).toBe("Repo");
+    fireEvent.click(screen.getByTestId("prompt-sync-review-back"));
+    expect(mocks.controller.backToFields).toHaveBeenCalled();
+    expect(mocks.controller.handleSave).not.toHaveBeenCalled();
+  });
+});
+
+// @covers AC-INTEGRATIONS-PROMPT-SYNC-008.5 AC-INTEGRATIONS-PROMPT-SYNC-008.6
+describe("PromptSyncSection unresolved conflicts", () => {
+  afterEach(() => {
+    storeState.prompts = [];
+  });
+
+  it("shows a banner whose Review opens the review dialog and applies the choices", async () => {
+    storeState.prompts = [{ id: "1", name: "principles", source: "override", conflict: true }];
+    mocks.controller = makeController({ config });
+    mocks.resolver = makeResolver([conflict]);
+    renderSection();
+    expect(screen.getByTestId("prompt-conflict-banner").textContent).toContain("1");
+    fireEvent.click(screen.getByTestId("prompt-conflict-banner-review"));
+    await waitFor(() => expect(screen.getByTestId("prompt-conflict-dialog")).toBeTruthy());
+    expect(mocks.resolver.load).toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("prompt-conflict-apply"));
+    expect(mocks.resolver.apply).toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByTestId("prompt-conflict-dialog")).toBeNull());
+  });
+
+  it("shows no banner without conflicts", () => {
+    storeState.prompts = [{ id: "1", name: "hook", source: "override" }];
+    mocks.controller = makeController({ config });
+    renderSection();
+    expect(screen.queryByTestId("prompt-conflict-banner")).toBeNull();
   });
 });

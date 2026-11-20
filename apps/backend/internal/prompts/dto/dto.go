@@ -14,6 +14,7 @@ type PromptDTO struct {
 	AllowAgentEdits bool   `json:"allow_agent_edits"`
 	Source          string `json:"source"`
 	SourcePath      string `json:"source_path"`
+	Conflict        bool   `json:"conflict"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 }
@@ -44,6 +45,7 @@ func FromPrompt(prompt *models.Prompt) PromptDTO {
 		AllowAgentEdits: AgentEditable(prompt),
 		Source:          Source(prompt),
 		SourcePath:      prompt.SourcePath,
+		Conflict:        prompt.Conflict,
 		CreatedAt:       prompt.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:       prompt.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
@@ -53,6 +55,21 @@ func FromPrompt(prompt *models.Prompt) PromptDTO {
 // synced prompts are read-only to agents.
 func AgentEditable(prompt *models.Prompt) bool {
 	return !prompt.Builtin && !prompt.IsSynced()
+}
+
+// EditGuidance explains to an agent how a synced prompt or an override can
+// be changed, so it can relay the steps to the user. Other prompts need none.
+func EditGuidance(prompt *models.Prompt) string {
+	switch {
+	case prompt.IsSynced():
+		return "Synced from the prompt repository and read-only. Only the user can make it editable, by turning on Local override for it in Settings > Prompts; agents cannot change that setting."
+	case prompt.IsOverride() && prompt.Conflict:
+		return "A local version that conflicts with the repository file of the same name. Edits change the local version, which is in use. Only the user can resolve the conflict, in Settings > Prompts."
+	case prompt.IsOverride():
+		return "A local override of a synced prompt. Edits change the local version, which is in use. Only the user can switch back to the repository version, in Settings > Prompts."
+	default:
+		return ""
+	}
 }
 
 // Source returns the prompt's ownership, defaulting to manual.

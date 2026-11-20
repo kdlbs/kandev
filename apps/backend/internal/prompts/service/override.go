@@ -15,19 +15,22 @@ var (
 )
 
 // OverrideSyncedPrompt turns a synced prompt into a local, editable override
-// with the same identity and content. Sync then leaves it alone.
+// with the same identity. It starts from the kept local version when there is
+// one, otherwise from the synced content. Sync then leaves it alone.
 func (s *Service) OverrideSyncedPrompt(ctx context.Context, id string) (*models.Prompt, error) {
-	return s.moveSource(ctx, id, models.PromptSourceSync, models.PromptSourceOverride, ErrPromptNotSynced)
+	return s.transition(ctx, id, s.repo.OverrideSyncedPrompt, ErrPromptNotSynced)
 }
 
-// RevertOverride returns an override to sync ownership; the next sync
-// replaces its content with the repository version.
+// RevertOverride returns an override to sync ownership, keeping its content
+// as the local version; the next sync writes the repository version.
 func (s *Service) RevertOverride(ctx context.Context, id string) (*models.Prompt, error) {
-	return s.moveSource(ctx, id, models.PromptSourceOverride, models.PromptSourceSync, ErrPromptNotOverride)
+	return s.transition(ctx, id, s.repo.RevertOverride, ErrPromptNotOverride)
 }
 
-func (s *Service) moveSource(ctx context.Context, id, from, to string, wrongSource error) (*models.Prompt, error) {
-	changed, err := s.repo.SetPromptSource(ctx, id, from, to)
+func (s *Service) transition(
+	ctx context.Context, id string, write func(context.Context, string) (bool, error), wrongSource error,
+) (*models.Prompt, error) {
+	changed, err := write(ctx, id)
 	if err != nil {
 		return nil, err
 	}

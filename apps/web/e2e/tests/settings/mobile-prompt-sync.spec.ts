@@ -1,9 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import {
+  CONFIG_PATH,
   cleanUpPromptSync,
   configureThroughDialog,
+  fillSyncDialog,
   promptRow,
+  saveToReview,
   seedPromptFiles,
   SYNC_PATH,
 } from "../../helpers/prompt-sync";
@@ -51,5 +54,39 @@ test.describe("Prompt Sync on a phone", () => {
     await testPage.getByTestId("prompt-revert-confirm").tap();
     expect((await reverted).ok()).toBe(true);
     await expect(row.getByTestId("prompt-synced-badge")).toBeVisible();
+  });
+
+  // @covers AC-INTEGRATIONS-PROMPT-SYNC-008.2 AC-INTEGRATIONS-PROMPT-SYNC-008.3
+  test("reviews name conflicts with touch-sized choices on a phone", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await apiClient.createPrompt("phone-house", "My phone rules");
+    await seedPromptFiles(
+      apiClient,
+      seedData.workspaceId,
+      { "phone-house.md": "Repository phone rules" },
+      { first: true },
+    );
+    await testPage.goto("/settings/prompts");
+    const dialog = await fillSyncDialog(testPage, true);
+    await saveToReview(testPage, dialog, true);
+    await dialog.getByTestId("prompt-sync-review-back").tap();
+    await expect(dialog.getByTestId("prompt-sync-url-input")).toHaveValue("platform/prompts");
+    await saveToReview(testPage, dialog, true);
+
+    const repository = dialog.getByTestId("prompt-conflict-choice-repository");
+    expect((await repository.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await repository.tap();
+    const saved = waitForHttp(testPage, "POST", CONFIG_PATH);
+    await dialog.getByTestId("prompt-sync-save").tap();
+    expect((await saved).ok()).toBe(true);
+    await expect(dialog).toHaveCount(0);
+    const row = promptRow(testPage, "phone-house");
+    await expect(row.getByTestId("prompt-synced-badge")).toBeVisible();
+    await row.getByTestId("prompt-override-switch-label").tap();
+    await expect(row).toContainText("My phone rules");
   });
 });

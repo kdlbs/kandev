@@ -5,7 +5,8 @@ import type { PromptSyncConfig } from "@/lib/types/prompt-sync";
 const mocks = vi.hoisted(() => ({
   host: undefined as string | undefined,
   get: vi.fn<() => Promise<PromptSyncConfig | null>>(),
-  set: vi.fn<(payload: unknown) => Promise<PromptSyncConfig>>(),
+  set: vi.fn<(payload: unknown) => Promise<{ config: PromptSyncConfig }>>(),
+  check: vi.fn<(payload?: unknown) => Promise<unknown>>(),
   del: vi.fn<() => Promise<unknown>>(),
   toast: vi.fn(),
 }));
@@ -19,6 +20,7 @@ vi.mock("@/hooks/domains/github/use-github-status", () => ({
 vi.mock("@/lib/api/domains/prompt-sync-api", () => ({
   getPromptSyncConfig: () => mocks.get(),
   setPromptSyncConfig: (payload: unknown) => mocks.set(payload),
+  checkPromptSync: (payload?: unknown) => mocks.check(payload),
   deletePromptSyncConfig: () => mocks.del(),
   runPromptSync: vi.fn(),
 }));
@@ -56,6 +58,7 @@ describe("usePromptSync review fixes", () => {
     vi.clearAllMocks();
     mocks.host = undefined;
     mocks.get.mockResolvedValue(null);
+    mocks.check.mockResolvedValue({ conflicts: [] });
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -88,7 +91,7 @@ describe("usePromptSync review fixes", () => {
     const { result } = renderHook(() => usePromptSync("ws-1"));
     await waitFor(() => expect(result.current.config).not.toBeNull());
 
-    const pending = deferred<PromptSyncConfig>();
+    const pending = deferred<{ config: PromptSyncConfig }>();
     mocks.set.mockReturnValueOnce(pending.promise);
     let saving!: Promise<boolean>;
     act(() => {
@@ -97,7 +100,8 @@ describe("usePromptSync review fixes", () => {
     act(() => result.current.update("branch", "edited-after-save"));
     let accepted = true;
     await act(async () => {
-      pending.resolve(makeConfig());
+      await waitFor(() => expect(mocks.set).toHaveBeenCalled());
+      pending.resolve({ config: makeConfig() });
       accepted = await saving;
     });
     expect(accepted).toBe(false);

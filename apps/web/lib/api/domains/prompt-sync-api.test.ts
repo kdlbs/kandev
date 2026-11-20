@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  checkPromptSync,
   deletePromptSyncConfig,
   getPromptSyncConfig,
   overridePrompt,
@@ -73,6 +74,28 @@ describe("prompt-sync-api", () => {
     expect(calls[1]![1].method).toBe("DELETE");
     expect(calls[2]![0]).toContain("/api/v1/prompt-sync/sync");
     expect(run.result?.created).toEqual(["a"]);
+  });
+});
+
+describe("prompt sync conflict api", () => {
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("checks a candidate source or the saved one, and sends conflict choices with Sync now", async () => {
+    const spy = vi.fn().mockImplementation(async () => mockResponse({ conflicts: [], config }));
+    global.fetch = spy as unknown as typeof fetch;
+    await checkPromptSync({ workspace_id: "ws-1", provider: "gitlab", project_path: "acme/eng" });
+    await checkPromptSync();
+    await runPromptSync({ principles: "repository" });
+    const calls = spy.mock.calls as [string, RequestInit][];
+    expect(calls[0]![0]).toContain("/api/v1/prompt-sync/check");
+    expect(calls[0]![1].method).toBe("POST");
+    expect(JSON.parse(calls[0]![1].body as string).project_path).toBe("acme/eng");
+    expect(calls[1]![1].body).toBeUndefined();
+    expect(JSON.parse(calls[2]![1].body as string)).toEqual({
+      resolutions: { principles: "repository" },
+    });
   });
 });
 

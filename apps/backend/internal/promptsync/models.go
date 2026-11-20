@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/authcircuit"
+	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/reposync"
 )
 
@@ -96,6 +97,9 @@ type SetConfigRequest struct {
 	Path            string `json:"path"`
 	IntervalSeconds int    `json:"interval_seconds"`
 	PollEnabled     *bool  `json:"poll_enabled"`
+	// Resolutions are the user's conflict choices for the sync that runs
+	// after saving. They are not stored.
+	Resolutions map[string]promptservice.ConflictChoice `json:"resolutions,omitempty"`
 }
 
 // Normalize validates the request and fills defaults.
@@ -113,6 +117,9 @@ func (r *SetConfigRequest) Normalize() error {
 	if err != nil {
 		return err
 	}
+	if err := validateResolutions(r.Resolutions); err != nil {
+		return err
+	}
 	if r.PollEnabled == nil {
 		enabled := true
 		r.PollEnabled = &enabled
@@ -120,12 +127,38 @@ func (r *SetConfigRequest) Normalize() error {
 	return nil
 }
 
-// SyncResult reports the outcome of one prompt sync run.
+// validateResolutions rejects a conflict choice other than local or
+// repository.
+func validateResolutions(resolutions map[string]promptservice.ConflictChoice) error {
+	for name, choice := range resolutions {
+		if !choice.Valid() {
+			return errors.Join(ErrInvalidConfig, errors.New("resolution for "+name+" must be local or repository"))
+		}
+	}
+	return nil
+}
+
+// configFromRequest is the unsaved configuration a normalized request
+// describes, used to read a candidate source.
+func configFromRequest(req *SetConfigRequest) *Config {
+	return &Config{
+		WorkspaceID: req.WorkspaceID, Provider: req.Provider, GitHubHost: req.GitHubHost,
+		RepoOwner: req.RepoOwner, RepoName: req.RepoName, ProjectPath: req.ProjectPath,
+		Branch: req.Branch, Path: req.Path,
+	}
+}
+
+// SyncResult reports the outcome of one prompt sync run. Conflicts lists
+// prompts still waiting for the user to choose between the local and
+// repository versions; Restored lists synced prompts that left the source
+// and became manual again.
 type SyncResult struct {
 	Created    []string `json:"created"`
 	Updated    []string `json:"updated"`
 	Deleted    []string `json:"deleted"`
+	Restored   []string `json:"restored"`
 	Overridden []string `json:"overridden"`
+	Conflicts  []string `json:"conflicts"`
 	Warnings   []string `json:"warnings"`
 	Unchanged  bool     `json:"unchanged"`
 }

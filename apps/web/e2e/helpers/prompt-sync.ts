@@ -6,6 +6,8 @@ import type { ApiClient } from "./api-client";
 export const GITLAB_PROJECT = "platform/prompts";
 export const PROMPTS_DIR = ".kandev/prompts";
 export const SYNC_PATH = /^\/api\/v1\/prompt-sync\/sync$/;
+export const CONFIG_PATH = /^\/api\/v1\/prompt-sync\/config$/;
+export const CHECK_PATH = /^\/api\/v1\/prompt-sync\/check$/;
 
 export function promptRow(page: Page, name: string) {
   return page.locator(`[data-testid="prompt-list-item"][data-prompt-name="${name}"]`);
@@ -36,9 +38,10 @@ export async function syncNow(page: Page) {
   expect((await response).ok()).toBe(true);
 }
 
-// configureThroughDialog sets up a GitLab source. With tap, every activation
-// uses touch input so the phone path is exercised end to end.
-export async function configureThroughDialog(page: Page, tap: boolean) {
+// fillSyncDialog opens the Prompt Sync dialog and enters a GitLab source.
+// With tap, every activation uses touch input so the phone path is exercised
+// end to end.
+export async function fillSyncDialog(page: Page, tap: boolean) {
   const activate = (target: Locator) => (tap ? target.tap() : target.click());
   await activate(page.getByTestId("prompt-sync-open"));
   const dialog = page.getByTestId("prompt-sync-dialog");
@@ -46,10 +49,29 @@ export async function configureThroughDialog(page: Page, tap: boolean) {
   await activate(dialog.getByRole("tab", { name: "GitLab" }));
   await dialog.getByTestId("prompt-sync-url-input").fill(GITLAB_PROJECT);
   await activate(dialog.getByTestId("prompt-sync-poll-toggle"));
-  const saved = waitForHttp(page, "POST", /^\/api\/v1\/prompt-sync\/config$/);
-  await activate(dialog.getByTestId("prompt-sync-save"));
+  return dialog;
+}
+
+// configureThroughDialog sets up a GitLab source with no name conflicts:
+// Save checks the source, then saves and runs the first sync.
+export async function configureThroughDialog(page: Page, tap: boolean) {
+  const dialog = await fillSyncDialog(page, tap);
+  const saved = waitForHttp(page, "POST", CONFIG_PATH);
+  await (tap
+    ? dialog.getByTestId("prompt-sync-save").tap()
+    : dialog.getByTestId("prompt-sync-save").click());
   expect((await saved).ok()).toBe(true);
   await expect(dialog).toHaveCount(0);
+}
+
+// saveToReview clicks Save on a filled dialog and waits for the check that
+// opens the conflict review step instead of saving.
+export async function saveToReview(page: Page, dialog: Locator, tap: boolean) {
+  const checked = waitForHttp(page, "POST", CHECK_PATH);
+  const save = dialog.getByTestId("prompt-sync-save");
+  await (tap ? save.tap() : save.click());
+  expect((await checked).ok()).toBe(true);
+  await expect(dialog.getByTestId("prompt-conflict-review")).toBeVisible();
 }
 
 // cleanUpPromptSync removes the install-wide configuration and every

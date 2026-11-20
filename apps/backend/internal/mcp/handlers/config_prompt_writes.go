@@ -81,7 +81,8 @@ func (h *Handlers) sharedPromptWriteError(msg *ws.Message, err error) (*ws.Messa
 		code, message = ws.ErrorCodeValidation, "name must be 1-512 bytes and content 1-1048576 bytes after trimming"
 	case errors.Is(err, promptservice.ErrPromptAlreadyExists), errors.Is(err, promptservice.ErrPromptListLimit):
 		code, message = ws.ErrorCodeValidation, err.Error()
-	case errors.Is(err, promptservice.ErrBuiltinPrompt), errors.Is(err, promptservice.ErrPromptSyncManaged):
+	case errors.Is(err, promptservice.ErrBuiltinPrompt), errors.Is(err, promptservice.ErrPromptSyncManaged),
+		errors.Is(err, promptservice.ErrPromptSyncManagedForAgent):
 		code, message = ws.ErrorCodeForbidden, err.Error()
 	case errors.Is(err, promptstore.ErrPromptWriteRejected):
 		code, message = ws.ErrorCodeConflict, err.Error()

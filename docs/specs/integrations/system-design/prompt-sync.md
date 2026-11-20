@@ -9,6 +9,9 @@ requirements:
   - REQ-INTEGRATIONS-PROMPT-SYNC-005
   - REQ-INTEGRATIONS-PROMPT-SYNC-006
   - REQ-INTEGRATIONS-PROMPT-SYNC-007
+  - REQ-INTEGRATIONS-PROMPT-SYNC-008
+  - REQ-INTEGRATIONS-PROMPT-SYNC-009
+  - REQ-INTEGRATIONS-PROMPT-SYNC-010
 ---
 
 # Prompt Sync System Design
@@ -54,6 +57,9 @@ contracts are used but not owned here:
 | `REQ-INTEGRATIONS-PROMPT-SYNC-005` | [Failure and recovery](#failure-and-recovery) |
 | `REQ-INTEGRATIONS-PROMPT-SYNC-006` | [Workflow Sync reference warnings](#workflow-sync-reference-warnings) |
 | `REQ-INTEGRATIONS-PROMPT-SYNC-007` | [Local overrides](#local-overrides) |
+| `REQ-INTEGRATIONS-PROMPT-SYNC-008` | [Name conflicts](#name-conflicts), [HTTP API](#http-api), [Frontend](#frontend) |
+| `REQ-INTEGRATIONS-PROMPT-SYNC-009` | [Lossless switching](#lossless-switching) |
+| `REQ-INTEGRATIONS-PROMPT-SYNC-010` | [Agent access](#agent-access) |
 
 ## Components and responsibilities
 
@@ -105,11 +111,14 @@ that keeps its row ID, name, content, and `source_path`. Overrides follow the
 manual rules for operator and agent writes; the store's operator, agent, and
 delete guards check `source <> 'sync'` instead of `source = 'manual'`.
 
-- `Repository.SetPromptSource(ctx, id, from, to)` changes ownership with a
-  `WHERE id = ? AND source = ?` guard and reports whether a row changed.
-- `Service.OverrideSyncedPrompt(ctx, id)` moves `sync -> override`;
-  `Service.RevertOverride(ctx, id)` moves `override -> sync`. Each returns
-  `ErrPromptSyncManaged`-style typed errors (`ErrPromptNotSynced`,
+- Ownership transitions live in `store/ownership_writes.go`. Each is one
+  `UPDATE ... WHERE id = ? AND source = ?` statement that reports whether a
+  row changed: `OverrideSyncedPrompt` (`sync -> override`), `RevertOverride`
+  (`override -> sync`), `AdoptPromptAsOverride` and `AdoptPromptAsSynced`
+  (`manual -> override|sync`), `ClearOverrideConflict`, and
+  `RestoreSyncedPrompt` (`sync -> manual`).
+- `Service.OverrideSyncedPrompt(ctx, id)` and `Service.RevertOverride(ctx, id)`
+  wrap the first two. Each returns a typed error (`ErrPromptNotSynced`,
   `ErrPromptNotOverride`) for any other source and publishes the change event.
 - `promptsync.Service.Override` and `Revert` run under the service lock and
   require configuration-management authority via their routes
@@ -118,10 +127,82 @@ delete guards check `source <> 'sync'` instead of `source = 'manual'`.
   version replaces the local content; a failed sync leaves the prompt synced
   and records the failure like any other run.
 - In `ApplySyncedPrompts`, a desired file whose name matches an override is
-  skipped and added to `SyncApplyResult.Overridden` (not to warnings). A
-  vanished file never deletes an override because only synced rows are
-  candidates. Overrides count as survivors for the reference closure.
-- `ReleaseSyncedPrompts` releases `sync` and `override` rows to `manual`.
+  left alone and added to `SyncApplyResult.Overridden` (not to warnings),
+  unless the user chose the repository version for it. A vanished file never
+  deletes an override because only synced rows are candidates. Overrides
+  count as survivors for the reference closure.
+- `ReleaseSyncedPrompts` releases `sync` and `override` rows to `manual`,
+  keeping current content and clearing `local_content` and `conflict`.
+
+### Name conflicts
+
+A conflict is a desired file whose name an existing prompt uses while sync
+does not own it: a manual or built-in prompt, or an override whose `conflict`
+flag is set. Built-in prompts follow exactly the manual rules, except that
+sync never deletes them.
+
+- `SyncApplyInput.Resolutions` maps a prompt name to `ChoiceLocal` or
+  `ChoiceRepository`. `ApplySyncedPrompts` applies a clash as follows:
+
+  | Existing prompt | Choice | Result |
+  | --- | --- | --- |
+  | manual or built-in | none | `AdoptPromptAsOverride(conflict=true)`; reported in `Conflicts` and `Overridden` |
+  | manual or built-in | local | `AdoptPromptAsOverride(conflict=false)` |
+  | manual or built-in | repository | `AdoptPromptAsSynced`: file content, old content kept in `local_content` |
+  | conflicted override | none | unchanged; reported in `Conflicts` |
+  | conflicted override | local | `ClearOverrideConflict` |
+  | conflicted override | repository | `RevertOverride`, then `UpdateSyncedPrompt` with the file |
+
+- `promptsync.Service.Check(ctx, req)` normalizes and authorizes a candidate
+  request (or, with `nil`, loads and authorizes the stored configuration),
+  binds the GitHub host, fetches and parses the files, and returns
+  `CheckResult{Conflicts, Warnings}`. Each `Conflict` carries the name, file
+  path, local content, and repository content. It writes nothing.
+- `promptsync.Service.SaveAndSync(ctx, req)` normalizes and authorizes the
+  request, then holds the service lock across the upsert and one manual sync
+  with `req.Resolutions`. A failed sync is returned in `SaveOutcome.SyncErr`
+  with the saved configuration. `SyncWithResolutions` runs Sync now with
+  choices; plain `Sync` passes none. Resolutions are validated
+  (`local` or `repository`) and never stored.
+- When a conflicted override's file leaves the source, the vanished-file pass
+  clears its conflict and keeps it (AC-INTEGRATIONS-PROMPT-SYNC-008.7).
+- `SyncResult` adds `conflicts` and `restored`. A run that leaves a conflict
+  is not `unchanged`.
+
+### Lossless switching
+
+`custom_prompts.local_content` holds the local version while the repository
+version is in use. Empty means no kept copy; prompt content is never empty
+after trimming, so the empty string is unambiguous.
+
+- `RevertOverride` and `AdoptPromptAsSynced` copy `content` into
+  `local_content` in the same statement (`SET local_content = content,
+  content = ?` reads the pre-update row on SQLite and PostgreSQL).
+- `OverrideSyncedPrompt` sets `content` to `local_content` when it is not
+  empty, then clears it.
+- `UpdateSyncedPrompt` leaves `local_content` alone.
+- In the vanished-file pass, a synced prompt with a kept copy, or a built-in
+  prompt, goes through `RestoreSyncedPrompt` (back to `manual`, kept copy
+  restored) instead of the reference check and `DeleteSyncedPrompt`. It is
+  reported in `Restored`. `DeleteSyncedPrompt` also guards `builtin = ?` with
+  `0`.
+
+### Agent access
+
+- `updateAgentPrompt` checks synced ownership before the built-in check and
+  returns `ErrPromptSyncManagedForAgent`. Its message says sync owns the
+  prompt, that a local change has no effect, that the user can turn on Local
+  override in Settings > Prompts, and that agents cannot change that setting.
+  The error also matches `ErrPromptSyncManaged`. MCP maps it to forbidden.
+- MCP list and read results add `conflict` and `edit_guidance` (from
+  `promptdto.EditGuidance`) for synced prompts and overrides. Agent writes to
+  overrides use the agent write guard, which leaves `conflict` unchanged.
+- No MCP tool overrides, reverts, or resolves. The `update_shared_prompt`
+  and `list_shared_prompts` tool descriptions say that only the user changes
+  Local override. A server test asserts that no tool name on any surface
+  mentions override, revert, or prompt sync.
+- The HTTP routes cannot tell an agent holding the user's own credential from
+  the user; they keep the configuration-management requirement.
 - Prompt DTOs and MCP reads report `source: "override"`;
   `allow_agent_edits` is true for overrides.
 
@@ -166,9 +247,10 @@ caller.
 | Method | Route | Behavior |
 | --- | --- | --- |
 | `GET` | `/api/v1/prompt-sync/config` | `200` config + status, or `204` |
-| `POST` | `/api/v1/prompt-sync/config` | Validate and upsert. Does not sync. |
+| `POST` | `/api/v1/prompt-sync/check` | Read a candidate source (request body) or the stored one (empty body) and return `{conflicts, warnings}`. Writes nothing. `422` with a sanitized `error` when the source cannot be read. |
+| `POST` | `/api/v1/prompt-sync/config` | Validate, upsert, then run one sync with the body's `resolutions`. Returns `{config, result}` or `{config, error}`. |
 | `DELETE` | `/api/v1/prompt-sync/config` | Release synced prompts, then delete. Returns `{"deleted":true}`. |
-| `POST` | `/api/v1/prompt-sync/sync` | Run now. Returns `{config, result}` or `{config, error}`. `404` when not configured. |
+| `POST` | `/api/v1/prompt-sync/sync` | Run now, with optional `{"resolutions": {...}}`. Returns `{config, result}` or `{config, error}`. `404` when not configured; `400` for an unknown choice. |
 
 `result` uses the Workflow Sync shape: `created`, `updated`, `deleted`,
 `warnings`, `unchanged`. A completed run returns `200` even when it carries
@@ -233,9 +315,11 @@ in its `WHERE` clause:
 | none | yes | Insert with `source='sync'`, `source_path`. A unique conflict (a concurrent manual create) becomes a clash warning. |
 | sync | yes, content or path differs | `UPDATE … WHERE id=? AND source='sync'` |
 | sync | yes, identical | none |
-| manual or built-in | yes | Skip and warn (AC-INTEGRATIONS-PROMPT-SYNC-003.3) |
+| manual or built-in | yes | Conflict (see [Name conflicts](#name-conflicts)) |
 | sync | no, name frozen | none |
-| sync | no | Referenced by a workflow text or a surviving saved prompt (followed to a fixpoint through prompts kept this way): keep and warn; else `DELETE … WHERE id=? AND source='sync'` |
+| sync, with a kept copy or built-in | no | `RestoreSyncedPrompt` to manual with the kept copy |
+| override with conflict | no | Clear the conflict |
+| sync | no | Referenced by a workflow text or a surviving saved prompt (followed to a fixpoint through prompts kept this way): keep and warn; else `DELETE … WHERE id=? AND source='sync' AND builtin=0` |
 
 The method returns sorted `created`, `updated`, `deleted`, and `warnings`. It
 publishes the existing `prompts changed` event once when anything changed,
@@ -244,7 +328,7 @@ which drives AC-INTEGRATIONS-PROMPT-SYNC-003.6 through the current WS
 refresh path. Removal releases prompts before deleting the configuration, in two
 statements owned by different stores. If the delete fails after the release,
 the configuration remains while its prompts are already manual; later syncs
-report clash warnings for those files instead of updating them. The caller
+adopt those files as conflicted overrides instead of updating them. The caller
 receives the error, and a retried removal releases nothing and deletes the
 configuration, so the state recovers without losing prompt content.
 `ReleaseSyncedPrompts` runs one statement,
@@ -290,8 +374,9 @@ list, the `unchanged` flag, and the stored status match the current output
   transaction-scoped `pg_advisory_xact_lock` on PostgreSQL, so concurrent
   creates cannot both pass the 2,000-prompt limit. SQLite's single writer
   already serializes the statement.
-- `custom_prompts` gains `source TEXT NOT NULL DEFAULT 'manual'` and
-  `source_path TEXT NOT NULL DEFAULT ''`. These are idempotent `ADD COLUMN`
+- `custom_prompts` gains `source TEXT NOT NULL DEFAULT 'manual'`,
+  `source_path TEXT NOT NULL DEFAULT ''`, `local_content TEXT NOT NULL
+  DEFAULT ''`, and `conflict INTEGER NOT NULL DEFAULT 0`. These are idempotent `ADD COLUMN`
   migrations in the prompt store's `initSchema`, run after `CREATE TABLE`,
   on SQLite and PostgreSQL. Existing rows become `manual`, so upgrades keep
   every prompt editable.
@@ -300,7 +385,8 @@ list, the `unchanged` flag, and the stored status match the current output
   Workflow Sync uses. It is registered in `internal/persistence/requiredstores`
   with a fixed adapter in `internal/persistence/storeconformance`.
 - E2E reset deletes the workspace's `prompt_sync_config` row and, once no
-  configuration remains, the synced prompts it created.
+  configuration remains, the non-built-in synced prompts it created, and
+  returns adopted built-in prompts to manual with their own content.
 - Deleting a workspace leaves the config in place. The next run fails and
   suspends with an actionable reason (AC-INTEGRATIONS-PROMPT-SYNC-005.3).
 
@@ -336,14 +422,32 @@ list, the `unchanged` flag, and the stored status match the current output
   **Configure** and **Sync now**. `prompt-sync-dialog.tsx`
   holds a workspace select (credential workspace) plus the shared fields, and
   **Save** and **Remove sync** with inline or mobile confirmation.
-- `PromptOverrideToggle` (`prompt-override-controls.tsx`) is a labelled
-  "Local override" switch shown on synced rows (off) and override rows (on),
-  with a 44px label hit area on phones and coarse pointers. Turning it on calls
-  Override directly. Turning it off opens `MobileActionConfirmation` (inline
-  `InlineConfirmActions` fallback on desktop) and calls Revert only on
-  confirmation. Overrides render as the normal editable row plus a
-  `PromptOverrideBadge` (tooltip: source file) and the switch. The status card lists overridden prompt names, derived
-  from the prompt list, separately from warnings.
+- `prompt-override-controls.tsx` splits the "Local override" control into
+  `usePromptOverrideSwitch` (state), `PromptOverrideSwitch` (the labelled
+  switch, 44px label hit area on phones and coarse pointers), and
+  `PromptRevertConfirmation`. Both synced and override rows render the switch
+  as the first child of a `prompt-row-trailing` group, before View or edit and
+  delete, and render the confirmation below the row header, so the switch
+  never moves. Turning it on calls Override directly. Turning it off opens
+  `MobileActionConfirmation` (inline `InlineConfirmActions` fallback on
+  desktop) and calls Revert only on confirmation. Overrides render as the
+  normal editable row plus `PromptOverrideBadge` and, while conflicted,
+  `PromptConflictBadge`. The status card lists overridden prompt names,
+  derived from the prompt list, separately from warnings.
+- Save in `prompt-sync-dialog.tsx` runs `usePromptSync.handleSave`: a
+  `checkPromptSync(payload)` first; conflicts open `usePromptConflictReview`
+  and the dialog swaps its fields for `PromptConflictReviewList` (Keep local
+  by default, Compare versions, Back). Saving from the review step posts the
+  choices as `resolutions`. When the save's sync reports conflicts the check
+  did not list, the hook checks the stored configuration and reopens the
+  review instead of closing.
+- `PromptSyncSection` shows `PromptConflictBanner` while any override is
+  conflicted; **Review** uses `usePromptConflictResolver` (check the stored
+  configuration, then Sync now with the choices) in
+  `PromptConflictReviewDialog`.
+- `PromptConflictIndicator` (count from `usePromptConflictCount`, which loads
+  the prompt list) marks the Prompts row of the settings menu, the sidebar
+  Settings button, and the Settings row of phone navigation.
 - Prompt rows: `prompt.source === "sync"` renders `SyncedPromptListItem`
   (`prompt-synced-view.tsx`) instead of the editable row: a
   `PromptSyncedBadge` (tooltip: source path) and a View toggle

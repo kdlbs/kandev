@@ -8,13 +8,15 @@ vi.mock("@/components/toast-provider", () => ({
 }));
 
 const getMock = vi.fn<() => Promise<PromptSyncConfig | null>>();
-const setMock = vi.fn<(payload: unknown) => Promise<PromptSyncConfig>>();
+const setMock = vi.fn<(payload: unknown) => Promise<{ config: PromptSyncConfig }>>();
+const checkMock = vi.fn<(payload?: unknown) => Promise<unknown>>();
 const deleteMock = vi.fn<() => Promise<unknown>>();
 const runMock = vi.fn<() => Promise<unknown>>();
 
 vi.mock("@/lib/api/domains/prompt-sync-api", () => ({
   getPromptSyncConfig: () => getMock(),
   setPromptSyncConfig: (payload: unknown) => setMock(payload),
+  checkPromptSync: (payload?: unknown) => checkMock(payload),
   deletePromptSyncConfig: () => deleteMock(),
   runPromptSync: () => runMock(),
 }));
@@ -49,6 +51,7 @@ describe("usePromptSync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getMock.mockResolvedValue(null);
+    checkMock.mockResolvedValue({ conflicts: [] });
   });
 
   it("defaults the form to the prompts directory and the given workspace", async () => {
@@ -68,7 +71,7 @@ describe("usePromptSync", () => {
   });
 
   it("saves the workspace with the repository payload", async () => {
-    setMock.mockResolvedValue(makeConfig());
+    setMock.mockResolvedValue({ config: makeConfig() });
     const { result } = renderHook(() => usePromptSync("ws-1"));
     await waitFor(() => expect(result.current.loading).toBe(false));
     act(() => result.current.setProvider("gitlab"));

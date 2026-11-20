@@ -26,6 +26,7 @@ import {
   resolvedTarget,
 } from "@/components/settings/repo-sync-fields";
 import { RepoSyncRemovalActions } from "@/components/settings/repo-sync-removal-actions";
+import { PromptConflictReviewList } from "@/components/settings/prompt-conflict-review";
 import { useAppStore } from "@/components/state-provider";
 import type {
   PromptSyncController,
@@ -113,7 +114,67 @@ function saveDisabled(sync: PromptSyncController): boolean {
 
 function saveButtonLabel(t: TFunction, sync: PromptSyncController): string {
   if (sync.saving) return t("workflows:saving");
+  if (sync.review.active) return t("settings:promptConflictSaveChoices");
   return sync.config ? t("workflows:update") : t("workflows:save");
+}
+
+type FooterProps = {
+  sync: PromptSyncController;
+  removeConfirming: boolean;
+  setRemoveConfirming: (confirming: boolean) => void;
+  onSave: () => void;
+  onRemove: () => Promise<void>;
+};
+
+// PromptSyncDialogFooter shows Remove and Save on the fields step, and Back
+// and Save on the conflict review step.
+function PromptSyncDialogFooter({
+  sync,
+  removeConfirming,
+  setRemoveConfirming,
+  onSave,
+  onRemove,
+}: FooterProps) {
+  const { t } = useTranslation();
+  return (
+    <DialogFooter>
+      {sync.review.active ? (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={sync.backToFields}
+          disabled={sync.saving}
+          className="cursor-pointer"
+          data-testid="prompt-sync-review-back"
+        >
+          {t("common:back")}
+        </Button>
+      ) : (
+        <RepoSyncRemovalActions
+          testIdPrefix={ID_PREFIX}
+          description={t("settings:promptSyncRemoveConfirm")}
+          targetKey={JSON.stringify([sync.config?.workspace_id, sync.config?.path])}
+          subject={resolvedTarget(t, sync.config ?? sync.form)}
+          hasConfig={!!sync.config}
+          confirming={removeConfirming}
+          saving={sync.saving}
+          onRequest={() => setRemoveConfirming(true)}
+          onCancel={() => setRemoveConfirming(false)}
+          onConfirm={onRemove}
+        />
+      )}
+      <Button
+        type="button"
+        onClick={onSave}
+        disabled={saveDisabled(sync) || removeConfirming}
+        className="cursor-pointer"
+        data-testid="prompt-sync-save"
+        data-dialog-default-action
+      >
+        {saveButtonLabel(t, sync)}
+      </Button>
+    </DialogFooter>
+  );
 }
 
 type PromptSyncDialogProps = {
@@ -128,7 +189,10 @@ export function PromptSyncDialog({ open, onOpenChange, sync }: PromptSyncDialogP
   const { t } = useTranslation();
   const [removeConfirming, setRemoveConfirming] = useState(false);
   const changeOpen = (next: boolean) => {
-    if (!next) setRemoveConfirming(false);
+    if (!next) {
+      setRemoveConfirming(false);
+      sync.backToFields();
+    }
     onOpenChange(next);
   };
   const handleSave = async () => {
@@ -142,7 +206,7 @@ export function PromptSyncDialog({ open, onOpenChange, sync }: PromptSyncDialogP
     // The confirmation owns retry state; the controller owns failure feedback.
     return Promise.reject();
   };
-  const saveLabel = saveButtonLabel(t, sync);
+  const reviewing = sync.review.active;
 
   return (
     <MobileConfirmationHost open={open}>
@@ -158,34 +222,29 @@ export function PromptSyncDialog({ open, onOpenChange, sync }: PromptSyncDialogP
             <MobileConfirmationHostBody>
               <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle>{t("settings:promptSyncTitle")}</DialogTitle>
-                  <DialogDescription>{t("settings:promptSyncDescription")}</DialogDescription>
+                  <DialogTitle>
+                    {reviewing
+                      ? t("settings:promptConflictReviewTitle")
+                      : t("settings:promptSyncTitle")}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {reviewing
+                      ? t("settings:promptConflictReviewDescription")
+                      : t("settings:promptSyncDescription")}
+                  </DialogDescription>
                 </DialogHeader>
-                <PromptSyncFields sync={sync} />
-                <DialogFooter>
-                  <RepoSyncRemovalActions
-                    testIdPrefix={ID_PREFIX}
-                    description={t("settings:promptSyncRemoveConfirm")}
-                    targetKey={JSON.stringify([sync.config?.workspace_id, sync.config?.path])}
-                    subject={resolvedTarget(t, sync.config ?? sync.form)}
-                    hasConfig={!!sync.config}
-                    confirming={removeConfirming}
-                    saving={sync.saving}
-                    onRequest={() => setRemoveConfirming(true)}
-                    onCancel={() => setRemoveConfirming(false)}
-                    onConfirm={handleRemove}
-                  />
-                  <Button
-                    type="button"
-                    onClick={handleSave}
-                    disabled={saveDisabled(sync) || removeConfirming}
-                    className="cursor-pointer"
-                    data-testid="prompt-sync-save"
-                    data-dialog-default-action
-                  >
-                    {saveLabel}
-                  </Button>
-                </DialogFooter>
+                {reviewing ? (
+                  <PromptConflictReviewList review={sync.review} />
+                ) : (
+                  <PromptSyncFields sync={sync} />
+                )}
+                <PromptSyncDialogFooter
+                  sync={sync}
+                  removeConfirming={removeConfirming}
+                  setRemoveConfirming={setRemoveConfirming}
+                  onSave={handleSave}
+                  onRemove={handleRemove}
+                />
               </div>
             </MobileConfirmationHostBody>
           </DialogContent>

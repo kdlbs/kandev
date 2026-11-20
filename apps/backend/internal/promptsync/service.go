@@ -131,6 +131,11 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*Config
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.saveLocked(ctx, req)
+}
+
+// saveLocked stores a normalized, authorized request. The caller holds s.mu.
+func (s *Service) saveLocked(ctx context.Context, req *SetConfigRequest) (*Config, error) {
 	if req.Provider != reposync.ProviderGitHub || s.github == nil {
 		return s.store.Upsert(ctx, req)
 	}
@@ -176,13 +181,22 @@ func (s *Service) DeleteConfig(ctx context.Context) error {
 // same snapshot drives the run, so a concurrent save cannot swap in a
 // workspace the caller was never checked against.
 func (s *Service) Sync(ctx context.Context) (*SyncResult, error) {
+	return s.SyncWithResolutions(ctx, nil)
+}
+
+// SyncWithResolutions runs one sync immediately, applying the user's choices
+// for name conflicts; a conflict without a choice stays unresolved.
+func (s *Service) SyncWithResolutions(ctx context.Context, resolutions map[string]promptservice.ConflictChoice) (*SyncResult, error) {
+	if err := validateResolutions(resolutions); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cfg, err := s.lockedAuthorizedConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return s.syncLocked(ctx, syncManual, cfg)
+	return s.syncLocked(ctx, syncManual, cfg, resolutions)
 }
 
 // SyncIfDue runs an automatic sync when the configuration is due. Failures
@@ -208,7 +222,7 @@ func (s *Service) SyncIfDue(ctx context.Context) {
 	if !cfg.due(s.now().UTC()) {
 		return
 	}
-	_, _ = s.syncLocked(ctx, syncAutomatic, cfg)
+	_, _ = s.syncLocked(ctx, syncAutomatic, cfg, nil)
 }
 
 // refreshCredentialFingerprint resumes a suspended or backed-off config as
@@ -245,7 +259,9 @@ func (s *Service) fingerprintProvider(provider string) (CredentialFingerprintPro
 
 // syncLocked runs one sync for cfg. The caller holds s.mu and passes the
 // configuration snapshot it loaded (and, for manual runs, authorized).
-func (s *Service) syncLocked(ctx context.Context, mode syncMode, cfg *Config) (*SyncResult, error) {
+func (s *Service) syncLocked(
+	ctx context.Context, mode syncMode, cfg *Config, resolutions map[string]promptservice.ConflictChoice,
+) (*SyncResult, error) {
 	var err error
 	if err = s.checkWorkspace(ctx, cfg.WorkspaceID); err != nil {
 		s.recordFailure(ctx, cfg, err)
@@ -269,7 +285,7 @@ func (s *Service) syncLocked(ctx context.Context, mode syncMode, cfg *Config) (*
 	var result *SyncResult
 	apply := func(applyCtx context.Context) error {
 		var applyErr error
-		result, applyErr = s.apply(applyCtx, files)
+		result, applyErr = s.apply(applyCtx, files, resolutions)
 		return applyErr
 	}
 	if useGitHub {
@@ -328,7 +344,9 @@ func (s *Service) fetch(ctx context.Context, cfg *Config) ([]fetchedFile, error)
 	return files, nil
 }
 
-func (s *Service) apply(ctx context.Context, files []fetchedFile) (*SyncResult, error) {
+func (s *Service) apply(
+	ctx context.Context, files []fetchedFile, resolutions map[string]promptservice.ConflictChoice,
+) (*SyncResult, error) {
 	desired, frozen, warnings := parsePromptFiles(files)
 	var texts []promptservice.PromptReferenceText
 	if s.refs != nil {
@@ -338,7 +356,7 @@ func (s *Service) apply(ctx context.Context, files []fetchedFile) (*SyncResult, 
 		}
 	}
 	applied, err := s.prompts.ApplySyncedPrompts(ctx, promptservice.SyncApplyInput{
-		Desired: desired, FrozenNames: frozen, ReferenceTexts: texts,
+		Desired: desired, FrozenNames: frozen, ReferenceTexts: texts, Resolutions: resolutions,
 	})
 	if err != nil {
 		return nil, err
@@ -350,9 +368,10 @@ func (s *Service) apply(ctx context.Context, files []fetchedFile) (*SyncResult, 
 	}
 	warnings = append(warnings, unresolved...)
 	return &SyncResult{
-		Created: applied.Created, Updated: applied.Updated, Deleted: applied.Deleted,
-		Overridden: applied.Overridden, Warnings: warnings,
-		Unchanged: len(applied.Created)+len(applied.Updated)+len(applied.Deleted) == 0 && len(warnings) == 0,
+		Created: applied.Created, Updated: applied.Updated, Deleted: applied.Deleted, Restored: applied.Restored,
+		Overridden: applied.Overridden, Conflicts: applied.Conflicts, Warnings: warnings,
+		Unchanged: len(applied.Created)+len(applied.Updated)+len(applied.Deleted)+len(applied.Restored) == 0 &&
+			len(applied.Conflicts) == 0 && len(warnings) == 0,
 	}, nil
 }
 

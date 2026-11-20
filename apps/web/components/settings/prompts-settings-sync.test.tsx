@@ -191,4 +191,47 @@ describe("prompt overrides", () => {
     fireEvent.click(within(row).getByTestId("prompt-revert-confirm"));
     await waitFor(() => expect(mocks.revert).toHaveBeenCalledWith("o1"));
   });
+
+  // @covers AC-INTEGRATIONS-PROMPT-SYNC-007.1
+  it("keeps the switch first among the trailing controls in every row state", () => {
+    mocks.prompts = [
+      { ...existingPrompt, id: "s1", name: "synced", source: "sync", source_path: "p/s.md" },
+      { ...existingPrompt, id: "o1", name: "local", source: "override", source_path: "p/o.md" },
+    ];
+    renderPrompts();
+    const rows = screen.getAllByTestId(promptRowTestId);
+    for (const row of rows) {
+      const trailing = within(row).getByTestId("prompt-row-trailing");
+      expect(trailing.firstElementChild?.getAttribute("data-testid")).toBe(
+        "prompt-override-switch-label",
+      );
+    }
+    const overrideRow = rows.find((row) => row.getAttribute(promptNameAttribute) === "local")!;
+    fireEvent.click(within(overrideRow).getByTestId(switchTestId));
+    const trailing = within(overrideRow).getByTestId("prompt-row-trailing");
+    const confirmation = within(overrideRow).getByTestId("prompt-revert-confirmation");
+    expect(trailing.contains(confirmation)).toBe(false);
+    expect(trailing.firstElementChild?.getAttribute("data-testid")).toBe(
+      "prompt-override-switch-label",
+    );
+  });
+
+  // @covers AC-INTEGRATIONS-PROMPT-SYNC-008.5
+  it("marks a conflicted override with a Conflict badge", () => {
+    mocks.prompts = [
+      {
+        ...existingPrompt,
+        id: "c1",
+        name: "clash",
+        source: "override",
+        source_path: "p/c.md",
+        conflict: true,
+      },
+      { ...existingPrompt, id: "o1", name: "plain", source: "override", source_path: "p/o.md" },
+    ];
+    renderPrompts();
+    const [clash, plain] = screen.getAllByTestId(promptRowTestId);
+    expect(within(clash!).getByTestId("prompt-conflict-badge").textContent).toBe("Conflict");
+    expect(within(plain!).queryByTestId("prompt-conflict-badge")).toBeNull();
+  });
 });

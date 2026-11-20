@@ -17,10 +17,10 @@ func TestOverridePromptsAreLocallyWritable(t *testing.T) {
 	synced, err := repo.CreateSyncedPrompt(ctx, "post-pr-review", "Default", "p/post-pr-review.md")
 	require.NoError(t, err)
 
-	changed, err := repo.SetPromptSource(ctx, synced.ID, models.PromptSourceManual, models.PromptSourceOverride)
+	changed, err := repo.RevertOverride(ctx, synced.ID)
 	require.NoError(t, err)
 	assert.False(t, changed, "the from-source guard must match")
-	changed, err = repo.SetPromptSource(ctx, synced.ID, models.PromptSourceSync, models.PromptSourceOverride)
+	changed, err = repo.OverrideSyncedPrompt(ctx, synced.ID)
 	require.NoError(t, err)
 	assert.True(t, changed)
 
@@ -54,7 +54,7 @@ func TestDeleteOverridePrompt(t *testing.T) {
 	ctx := context.Background()
 	synced, err := repo.CreateSyncedPrompt(ctx, "gone", "x", "p/gone.md")
 	require.NoError(t, err)
-	_, err = repo.SetPromptSource(ctx, synced.ID, models.PromptSourceSync, models.PromptSourceOverride)
+	_, err = repo.OverrideSyncedPrompt(ctx, synced.ID)
 	require.NoError(t, err)
 	require.NoError(t, repo.DeletePrompt(ctx, synced.ID))
 	_, err = repo.GetPromptByID(ctx, synced.ID)

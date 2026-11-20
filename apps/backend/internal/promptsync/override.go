@@ -48,7 +48,7 @@ func (s *Service) Revert(ctx context.Context, promptID string) (*promptmodels.Pr
 	if _, err := s.prompts.RevertOverride(ctx, promptID); err != nil {
 		return nil, err
 	}
-	if _, err := s.syncLocked(ctx, syncManual, cfg); err != nil {
+	if _, err := s.syncLocked(ctx, syncManual, cfg, nil); err != nil {
 		s.logger.Warn("sync after reverting a prompt override failed", zap.String("error", safeErrorMessage(err)))
 	}
 	return s.prompts.GetPromptByID(ctx, promptID)

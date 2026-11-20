@@ -91,7 +91,7 @@ func (r *sqliteRepository) Close() error {
 
 func (r *sqliteRepository) ListPrompts(ctx context.Context) ([]*models.Prompt, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, name, content, builtin, source, source_path, created_at, updated_at
+		SELECT `+promptColumns+`
 		FROM custom_prompts
 		ORDER BY builtin DESC, name ASC
 		LIMIT ?
@@ -133,7 +133,7 @@ func (r *sqliteRepository) ListPromptsForReferenceExpansion(
 	nameLength := dialect.ByteLength(r.ro.DriverName(), "name")
 	contentLength := dialect.ByteLength(r.ro.DriverName(), "content")
 	query := fmt.Sprintf(`
-		SELECT id, name, content, builtin, source, source_path, created_at, updated_at
+		SELECT id, name, content, builtin, source, source_path, '' AS local_content, 0 AS conflict, created_at, updated_at
 		FROM custom_prompts
 		WHERE %s > 0
 			AND %s <= ?
@@ -178,7 +178,7 @@ func (r *sqliteRepository) ListPromptsForReferenceExpansion(
 
 func (r *sqliteRepository) GetPromptByID(ctx context.Context, id string) (*models.Prompt, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, content, builtin, source, source_path, created_at, updated_at
+		SELECT `+promptColumns+`
 		FROM custom_prompts
 		WHERE id = ?
 	`), id)
@@ -187,7 +187,7 @@ func (r *sqliteRepository) GetPromptByID(ctx context.Context, id string) (*model
 
 func (r *sqliteRepository) GetPromptByName(ctx context.Context, name string) (*models.Prompt, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, content, builtin, source, source_path, created_at, updated_at
+		SELECT `+promptColumns+`
 		FROM custom_prompts
 		WHERE name = ?
 	`), name)

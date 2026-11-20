@@ -18,6 +18,8 @@ type sharedPromptSummary struct {
 	Builtin         bool   `json:"builtin"`
 	AllowAgentEdits bool   `json:"allow_agent_edits"`
 	Source          string `json:"source"`
+	Conflict        bool   `json:"conflict"`
+	EditGuidance    string `json:"edit_guidance,omitempty"`
 	ContentBytes    int    `json:"content_bytes"`
 }
 
@@ -28,6 +30,8 @@ type sharedPromptRead struct {
 	AllowAgentEdits bool   `json:"allow_agent_edits"`
 	Source          string `json:"source"`
 	SourcePath      string `json:"source_path"`
+	Conflict        bool   `json:"conflict"`
+	EditGuidance    string `json:"edit_guidance,omitempty"`
 	ContentBytes    int    `json:"content_bytes"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
@@ -55,6 +59,8 @@ func (h *Handlers) handleListSharedPrompts(ctx context.Context, msg *ws.Message)
 			Builtin:         prompt.Builtin,
 			AllowAgentEdits: promptdto.AgentEditable(prompt),
 			Source:          promptdto.Source(prompt),
+			Conflict:        prompt.Conflict,
+			EditGuidance:    promptdto.EditGuidance(prompt),
 			ContentBytes:    len(prompt.Content),
 		})
 	}
@@ -95,6 +101,8 @@ func sharedPromptResult(prompt *models.Prompt) sharedPromptRead {
 		AllowAgentEdits: promptdto.AgentEditable(prompt),
 		Source:          promptdto.Source(prompt),
 		SourcePath:      prompt.SourcePath,
+		Conflict:        prompt.Conflict,
+		EditGuidance:    promptdto.EditGuidance(prompt),
 		ContentBytes:    len(prompt.Content),
 		CreatedAt:       prompt.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:       prompt.UpdatedAt.UTC().Format(time.RFC3339),

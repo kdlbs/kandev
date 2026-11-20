@@ -67,29 +67,6 @@ func TestApplySyncedPromptsCreatesUpdatesAndSkipsUnchanged(t *testing.T) {
 	assert.Equal(t, "Be simpler", prompt.Content)
 }
 
-func TestApplySyncedPromptsNeverAdoptsManualOrBuiltinPrompts(t *testing.T) {
-	svc, cleanup := createService(t)
-	t.Cleanup(cleanup)
-	ctx := context.Background()
-	_, err := svc.CreatePrompt(ctx, "mine", "Manual text")
-	require.NoError(t, err)
-
-	result := applySynced(t, svc, SyncApplyInput{Desired: []SyncedPromptFile{
-		{Name: "mine", Content: "Repo text", Path: "p/mine.md"},
-		{Name: "code-review", Content: "Repo review", Path: "p/code-review.md"},
-	}})
-	assert.Empty(t, result.Created)
-	assert.Len(t, result.Warnings, 2)
-	mine, err := svc.GetPromptByName(ctx, "mine")
-	require.NoError(t, err)
-	assert.Equal(t, "Manual text", mine.Content)
-	assert.False(t, mine.IsSynced())
-	builtin, err := svc.GetPromptByName(ctx, "code-review")
-	require.NoError(t, err)
-	assert.True(t, builtin.Builtin)
-	assert.NotEqual(t, "Repo review", builtin.Content)
-}
-
 func TestApplySyncedPromptsRemovalRespectsFrozenAndReferences(t *testing.T) {
 	svc, cleanup := createService(t)
 	t.Cleanup(cleanup)

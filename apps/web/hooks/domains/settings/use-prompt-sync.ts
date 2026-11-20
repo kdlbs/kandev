@@ -6,12 +6,21 @@ import { useToast } from "@/components/toast-provider";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import { t } from "@/lib/i18n";
 import {
+  checkPromptSync,
   deletePromptSyncConfig,
   getPromptSyncConfig,
   runPromptSync,
   setPromptSyncConfig,
 } from "@/lib/api/domains/prompt-sync-api";
-import type { PromptSyncConfig } from "@/lib/types/prompt-sync";
+import type {
+  PromptConflictResolutions,
+  PromptSyncConfig,
+  PromptSyncSetConfigRequest,
+} from "@/lib/types/prompt-sync";
+import {
+  usePromptConflictReview,
+  type PromptConflictReview,
+} from "@/hooks/domains/settings/use-prompt-conflict-review";
 import type { WorkflowSyncProvider } from "@/lib/types/workflow-sync";
 import { PUBLIC_GITHUB_HOST } from "@/lib/github/host";
 import {
@@ -201,6 +210,62 @@ function draftsEqual(left: Draft, right: Draft): boolean {
   return left.url === right.url && JSON.stringify(left.form) === JSON.stringify(right.form);
 }
 
+function saveToast(error?: string) {
+  if (error) {
+    return {
+      description: t("settings:promptSyncSavedSyncFailed", { error }),
+      variant: "error" as const,
+    };
+  }
+  return { description: t("settings:promptSyncSaved"), variant: "success" as const };
+}
+
+function draftPayload(draft: Draft): PromptSyncSetConfigRequest {
+  return { ...repoSyncPayload(draft.form), workspace_id: draft.form.workspace_id };
+}
+
+// reviewUnresolved reopens the review for conflicts a sync left unresolved,
+// with their contents from a check of the saved configuration. It reports
+// whether the review is open; a failed check leaves the conflicts to the
+// Prompts page banner.
+async function reviewUnresolved(review: PromptConflictReview, names: string[] | undefined) {
+  if (!names?.length) return false;
+  try {
+    const details = await checkPromptSync();
+    if (details.conflicts.length === 0) return false;
+    review.open(details.conflicts);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+type SaveDeps = {
+  latest: React.RefObject<Draft>;
+  reset: (cfg: PromptSyncConfig | null) => void;
+  setConfig: (cfg: PromptSyncConfig | null) => void;
+  toast: ReturnType<typeof useToast>["toast"];
+  review: PromptConflictReview;
+};
+
+// persistDraft saves the draft, which runs one sync with the choices. It
+// resolves true only when the dialog may close: no conflict is left to review
+// and the saved draft is still the one on screen.
+async function persistDraft(
+  submitted: Draft,
+  resolutions: PromptConflictResolutions,
+  deps: SaveDeps,
+): Promise<boolean> {
+  const res = await setPromptSyncConfig({ ...draftPayload(submitted), resolutions });
+  deps.setConfig(res.config);
+  if (await reviewUnresolved(deps.review, res.result?.conflicts)) return false;
+  deps.review.close();
+  deps.toast(saveToast(res.error));
+  if (!draftsEqual(deps.latest.current, submitted)) return false;
+  deps.reset(res.config);
+  return true;
+}
+
 function syncToast(error?: string, warnings?: string[]) {
   if (error)
     return { description: t("settings:promptSyncFailed", { error }), variant: "error" as const };
@@ -213,37 +278,31 @@ function syncToast(error?: string, warnings?: string[]) {
   return { description: t("settings:promptSyncCompleted"), variant: "success" as const };
 }
 
-// usePromptSync owns the install-wide Prompt Sync configuration, its editable
-// draft, and the save, remove, and Sync now actions. Prompt list changes
-// arrive through the existing prompts.changed WebSocket refresh.
-export function usePromptSync(defaultWorkspaceId: string) {
-  const { toast } = useToast();
-  const [config, setConfig] = useState<PromptSyncConfig | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const { draft, latest, urlInvalid, update, setUrlInput, setProvider, reset } =
-    useDraft(defaultWorkspaceId);
-  const fence = useRequestFence();
-  useInitialLoad(setConfig, reset, setLoading, toast, fence);
-  useConfigRefresh(!!config, setConfig, fence);
-
-  // handleSave resolves true only when the saved draft is still the one on
-  // screen; edits made while the request was in flight are kept, not reset.
-  const handleSave = useCallback(async () => {
+// useSaveHandler returns Save: it first checks the entered source without
+// saving. Conflicts open the review step instead of saving; from the review
+// step it saves with the choices. It resolves true only when the dialog may
+// close; edits made while a request was in flight are kept, not reset.
+function useSaveHandler(
+  draft: Draft,
+  setSaving: (saving: boolean) => void,
+  fence: Fence,
+  deps: SaveDeps,
+) {
+  const { latest, reset, setConfig, toast, review } = deps;
+  return useCallback(async () => {
     const submitted = draft;
     setSaving(true);
     fence.begin();
     try {
-      const saved = await setPromptSyncConfig({
-        ...repoSyncPayload(submitted.form),
-        workspace_id: submitted.form.workspace_id,
-      });
-      setConfig(saved);
-      toast({ description: t("settings:promptSyncSaved"), variant: "success" });
-      if (!draftsEqual(latest.current, submitted)) return false;
-      reset(saved);
-      return true;
+      if (!review.active) {
+        const check = await checkPromptSync(draftPayload(submitted));
+        if (check.conflicts.length > 0) {
+          review.open(check.conflicts);
+          return false;
+        }
+      }
+      const saveDeps = { latest, reset, setConfig, toast, review };
+      return await persistDraft(submitted, review.active ? review.choices : {}, saveDeps);
     } catch (err) {
       toast({
         description: t("settings:promptSyncSaveFailed", { error: String(err) }),
@@ -254,7 +313,47 @@ export function usePromptSync(defaultWorkspaceId: string) {
       fence.end();
       setSaving(false);
     }
-  }, [draft, latest, reset, toast, fence]);
+  }, [draft, latest, reset, setConfig, toast, fence, review, setSaving]);
+}
+
+// usePromptSync owns the install-wide Prompt Sync configuration, its editable
+// draft, and the save, remove, and Sync now actions. Prompt list changes
+// arrive through the existing prompts.changed WebSocket refresh.
+export function usePromptSync(defaultWorkspaceId: string) {
+  const { toast } = useToast();
+  const [config, setConfig] = useState<PromptSyncConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const {
+    draft,
+    latest,
+    urlInvalid,
+    update,
+    setUrlInput,
+    setProvider,
+    reset: resetDraft,
+  } = useDraft(defaultWorkspaceId);
+  const review = usePromptConflictReview();
+  const closeReview = review.close;
+  const reset = useCallback(
+    (cfg: PromptSyncConfig | null) => {
+      closeReview();
+      resetDraft(cfg);
+    },
+    [closeReview, resetDraft],
+  );
+  const fence = useRequestFence();
+  useInitialLoad(setConfig, reset, setLoading, toast, fence);
+  useConfigRefresh(!!config, setConfig, fence);
+
+  const handleSave = useSaveHandler(draft, setSaving, fence, {
+    latest,
+    reset,
+    setConfig,
+    toast,
+    review,
+  });
 
   const handleDelete = useCallback(async () => {
     fence.begin();
@@ -305,6 +404,9 @@ export function usePromptSync(defaultWorkspaceId: string) {
     setUrlInput,
     setProvider,
     reset,
+    review,
+    backToFields: closeReview,
+    acceptConfig: setConfig,
     handleSave,
     handleDelete,
     handleSyncNow,
