@@ -2432,6 +2432,60 @@ func (r *Repository) UpdateTaskSessionIfCurrentStateForLaunch(
 	return true, nil
 }
 
+// UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch stores only the
+// process-attempt identity while the session state and parking stamp still
+// match the launch snapshot. The launch request can carry a newly allocated
+// environment ID before its task_environments row exists, so this ownership
+// claim must not persist the rest of the in-memory session.
+func (r *Repository) UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, error) {
+	if session == nil {
+		return false, fmt.Errorf("session is required for start attempt claim")
+	}
+	if attemptID == "" {
+		return false, fmt.Errorf("start attempt identity is required")
+	}
+	payload, err := json.Marshal(attemptID)
+	if err != nil {
+		return false, fmt.Errorf("serialize start attempt identity: %w", err)
+	}
+
+	sourceSessionID := "COALESCE(json_extract(" + sqliteMetadataObject + ", '$.workflow_parking.source_session_id'), '')"
+	parkingStamp := "COALESCE(json_extract(" + sqliteMetadataObject + ", '$.workflow_parking.stamp'), '')"
+	if dialect.IsPostgres(r.db.DriverName()) {
+		sourceSessionID = "COALESCE(jsonb_extract_path_text(" + postgresMetadataObject + ", 'workflow_parking', 'source_session_id'), '')"
+		parkingStamp = "COALESCE(jsonb_extract_path_text(" + postgresMetadataObject + ", 'workflow_parking', 'stamp'), '')"
+	}
+	query := metadataKeyUpdateQuery("task_sessions", r.db.DriverName()) +
+		" AND state = ? AND NOT (" + sourceSessionID + " = ? AND " + parkingStamp + " != ?)"
+	now := r.nowUTC()
+	args := metadataKeyUpdateArgs(
+		r.db.DriverName(), models.SessionMetaKeyAgentStartAttemptID, string(payload), now, session.ID,
+	)
+	args = append(args, string(expected), session.ID, models.WorkflowParkingSourceStamp(session))
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rows == 0 {
+		return false, nil
+	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[models.SessionMetaKeyAgentStartAttemptID] = attemptID
+	session.UpdatedAt = now
+	return true, nil
+}
+
 // UpdateTaskSessionIfCurrentSnapshot restores a full session snapshot only
 // while both its lifecycle state and row revision still match the captured
 // owner. The metadata write shares the same transaction as the row CAS.

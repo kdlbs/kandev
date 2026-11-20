@@ -321,6 +321,15 @@ func (r *runningStateRaceRepository) UpdateTaskSessionIfCurrentStateForLaunch(
 	return r.advanceToRunningAndReject(session, expected)
 }
 
+func (r *runningStateRaceRepository) UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+	_ context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	_ string,
+) (bool, error) {
+	return r.advanceToRunningAndReject(session, expected)
+}
+
 func TestSessionStartingRaceWithRunningStateReturnsBusy(t *testing.T) {
 	repo := &runningStateRaceRepository{mockRepository: newMockRepository()}
 	session := &models.TaskSession{ID: "session-race", TaskID: "task-race", State: models.TaskSessionStateWaitingForInput}

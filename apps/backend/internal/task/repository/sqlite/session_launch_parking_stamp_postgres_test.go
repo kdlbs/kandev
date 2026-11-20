@@ -82,6 +82,43 @@ func TestPostgresUpdateTaskSessionIfCurrentStateForLaunch(t *testing.T) {
 	}
 }
 
+func TestPostgresUpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	const taskID = "task-agent-attempt-only-pg"
+	const sessionID = "session-agent-attempt-only-pg"
+	seedPostgresTaskSession(t, repo, taskID, sessionID)
+
+	launch, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("load launch snapshot: %v", err)
+	}
+	launch.TaskEnvironmentID = "environment-not-yet-persisted"
+	changed, err := repo.UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+		ctx, launch, launch.State, "attempt-pg",
+	)
+	if err != nil {
+		t.Fatalf("claim start attempt: %v", err)
+	}
+	if !changed {
+		t.Fatal("start attempt was not claimed")
+	}
+	current, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if current.TaskEnvironmentID != "" {
+		t.Fatalf("task environment binding = %q, want unchanged empty binding", current.TaskEnvironmentID)
+	}
+	if got := models.StringFromAny(current.Metadata[models.SessionMetaKeyAgentStartAttemptID]); got != "attempt-pg" {
+		t.Fatalf("stored attempt = %q, want attempt-pg", got)
+	}
+}
+
 func TestPostgresUpdateTaskSessionStateIfCurrentStartAttempt(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)

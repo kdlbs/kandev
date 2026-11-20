@@ -187,7 +187,7 @@ func (r *gatedSessionPersistRepo) UpdateTaskSessionIfCurrentStateForLaunch(
 	attemptID string,
 ) (bool, error) {
 	if id, _ := r.sessionID.Load().(string); id != "" && session.ID == id {
-		if r.calls.Add(1) == 2 {
+		if r.calls.Add(1) == 1 {
 			r.once.Do(func() {
 				close(r.reached)
 				<-r.release
@@ -195,6 +195,15 @@ func (r *gatedSessionPersistRepo) UpdateTaskSessionIfCurrentStateForLaunch(
 		}
 	}
 	return r.Repository.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
+}
+
+func (r *gatedSessionPersistRepo) UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+	ctx context.Context, session *models.TaskSession, expected models.TaskSessionState,
+	attemptID string,
+) (bool, error) {
+	return r.Repository.UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+		ctx, session, expected, attemptID,
+	)
 }
 
 func (r *gatedSessionPersistRepo) releaseGate() {

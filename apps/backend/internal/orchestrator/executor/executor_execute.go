@@ -1240,6 +1240,43 @@ func (e *Executor) persistSessionFullRowIfCurrentState(
 	if changed {
 		return nil
 	}
+	return e.classifyFailedSessionLaunchWrite(ctx, session, expected)
+}
+
+func (e *Executor) persistAgentStartAttemptIfCurrentState(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) error {
+	updater, ok := e.repo.(interface {
+		UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+			context.Context,
+			*models.TaskSession,
+			models.TaskSessionState,
+			string,
+		) (bool, error)
+	})
+	if !ok {
+		return fmt.Errorf("session launch requires parking-aware start-attempt writes")
+	}
+	changed, err := updater.UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+		ctx, session, expected, attemptID,
+	)
+	if err != nil {
+		return err
+	}
+	if changed {
+		return nil
+	}
+	return e.classifyFailedSessionLaunchWrite(ctx, session, expected)
+}
+
+func (e *Executor) classifyFailedSessionLaunchWrite(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+) error {
 	current, err := e.repo.GetTaskSession(ctx, session.ID)
 	if err != nil {
 		return err
@@ -2395,7 +2432,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			expectedState := session.State
 			startAttemptID = claimAgentStartAttempt(session)
 			session.UpdatedAt = time.Now().UTC()
-			if err := e.persistSessionFullRowIfCurrentState(launchCtx, session, expectedState); err != nil {
+			if err := e.persistAgentStartAttemptIfCurrentState(launchCtx, session, expectedState, startAttemptID); err != nil {
 				return nil, err
 			}
 			if opts.OnStartAttemptClaimed != nil {
