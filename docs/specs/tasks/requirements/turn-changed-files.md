@@ -38,7 +38,7 @@ Older captures retain an explicit repository-snapshot label because they lack th
 
 #### Acceptance criteria
 
-- **AC-TASKS-TURN-CHANGES-001.1:** New accounts and unsaved settings reads shall default to disabled, including frontend hydration. Existing saved preferences shall remain unchanged; no preference reset is performed.
+- **AC-TASKS-TURN-CHANGES-001.1:** The preference shall default to enabled for new accounts and settings with no saved value. The same default shall apply during frontend hydration. A saved value shall take precedence over the default.
 - **AC-TASKS-TURN-CHANGES-001.2:** Explicit disabled values shall survive unrelated saves, reloads, backend restarts, and upgrades.
 - **AC-TASKS-TURN-CHANGES-001.3:** Settings > General shall show the switch beside chat preferences through the existing Save/Discard flow.
   Its label shall be "Show changed files after each turn".
