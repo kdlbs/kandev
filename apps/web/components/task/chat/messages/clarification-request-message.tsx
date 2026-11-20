@@ -11,9 +11,12 @@ import type {
 } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 import { QuestionImages } from "../question-images";
+import { QuestionImageGallery } from "../question-image-gallery";
 import { ClarificationChoiceImages } from "../clarification-choice-images";
 import { ClarificationMarkdown } from "../clarification-markdown";
 import { ClarificationInputOverlay } from "../clarification-input-overlay";
+import { ClarificationAttachmentSummary } from "../clarification-answer-attachments";
+import { AnswerRegionSummary } from "../question-review/answer-region-summary";
 import type {
   LateClarificationSnapshot,
   LateClarificationState,
@@ -126,96 +129,107 @@ export function ClarificationRequestMessage({
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-w-0">
-          <QuestionImages
-            pendingId={metadata.pending_id}
-            questionId={metadata.question_id ?? question.id}
-            sessionId={comment.session_id}
-            images={question.images}
-            historical
-          />
-          {/* Question */}
-          {question.title && (
+        <QuestionImageGallery question={question}>
+          <div className="flex-1 min-w-0">
+            <QuestionImages
+              pendingId={metadata.pending_id}
+              questionId={metadata.question_id ?? question.id}
+              sessionId={comment.session_id}
+              images={question.images}
+              historical
+            />
+            {/* Question */}
+            {question.title && (
+              <ClarificationMarkdown
+                variant="inline"
+                className="mb-0.5 text-xs font-medium text-foreground/80"
+              >
+                {question.title}
+              </ClarificationMarkdown>
+            )}
             <ClarificationMarkdown
-              variant="inline"
-              className="mb-0.5 text-xs font-medium text-foreground/80"
+              variant="block"
+              className="max-w-none text-xs text-muted-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
             >
-              {question.title}
+              {question.prompt}
             </ClarificationMarkdown>
-          )}
-          <ClarificationMarkdown
-            variant="block"
-            className="max-w-none text-xs text-muted-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-          >
-            {question.prompt}
-          </ClarificationMarkdown>
 
-          {/* Answer - indented below question */}
-          <ClarificationChoiceImages metadata={metadata} sessionId={comment.session_id} />
-          {isAnswered && (
-            <div className="mt-1 ml-3 flex items-start gap-1.5 text-xs text-foreground/80">
-              {getStatusIndicator()}
-              <AnswerSummary question={question} response={metadata.response} />
-              {metadata.agent_disconnected && (
-                <span className="text-muted-foreground">{t("task:sentAsNewMessage")}</span>
-              )}
-            </div>
-          )}
-          {isSkipped && (
-            <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-              {getStatusIndicator()}
-              {t("task:skipped")}
-            </div>
-          )}
-          {isCancelled && (
-            <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-              {getStatusIndicator()}
-              {t("task:cancelled")}
-            </div>
-          )}
-          {isExpired && (
-            <div
-              data-testid="clarification-expired-notice"
-              className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-orange-500/80"
-            >
-              {getStatusIndicator()}
-              {t("task:timedOutAgentMovedOn")}
-            </div>
-          )}
-          {canAnswerAsNewMessage && !isAnswering && (
-            <Button
-              ref={answerButtonRef}
-              type="button"
-              variant="outline"
-              size="sm"
-              className="mt-2 min-h-11 cursor-pointer gap-1.5 md:min-h-0"
-              onClick={() => {
-                if (lateAnswerState?.status === "sent" || lateAnswerState?.status === "queued") {
-                  onResetLateAnswer?.();
-                }
-                setIsAnswering(true);
-              }}
-              data-testid="clarification-answer-as-new-message"
-            >
-              <IconMessagePlus className="h-3.5 w-3.5" />
-              {t("task:answerAsNewMessage")}
-            </Button>
-          )}
-          {canAnswerAsNewMessage && isAnswering && (
-            <div ref={answerScopeRef} className="mt-3 -ml-3 border-l border-border/60 pl-3">
-              <ClarificationInputOverlay
-                messages={messages}
-                mode="late"
-                onLateAnswer={onLateAnswer}
-                initialAnswers={lateAnswerState?.snapshot?.answers ?? lateAnswerSnapshot?.answers}
-                lateAnswerState={lateAnswerState}
-                onResolved={() => {}}
-                shortcutScopeRef={answerScopeRef}
-                onDismiss={closeAnswerForm}
-              />
-            </div>
-          )}
-        </div>
+            {/* Answer - indented below question */}
+            <ClarificationChoiceImages metadata={metadata} sessionId={comment.session_id} />
+            {isAnswered && (
+              <div className="mt-1 ml-3 flex items-start gap-1.5 text-xs text-foreground/80">
+                {getStatusIndicator()}
+                <span className="min-w-0">
+                  <AnswerSummary question={question} response={metadata.response} />
+                  <ClarificationAttachmentSummary
+                    attachments={metadata.response?.attachments ?? []}
+                  />
+                  <AnswerRegionSummary
+                    question={question}
+                    annotations={metadata.response?.annotations}
+                  />
+                </span>
+                {metadata.agent_disconnected && (
+                  <span className="text-muted-foreground">{t("task:sentAsNewMessage")}</span>
+                )}
+              </div>
+            )}
+            {isSkipped && (
+              <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+                {getStatusIndicator()}
+                {t("task:skipped")}
+              </div>
+            )}
+            {isCancelled && (
+              <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+                {getStatusIndicator()}
+                {t("task:cancelled")}
+              </div>
+            )}
+            {isExpired && (
+              <div
+                data-testid="clarification-expired-notice"
+                className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-orange-500/80"
+              >
+                {getStatusIndicator()}
+                {t("task:timedOutAgentMovedOn")}
+              </div>
+            )}
+            {canAnswerAsNewMessage && !isAnswering && (
+              <Button
+                ref={answerButtonRef}
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-2 min-h-11 cursor-pointer gap-1.5 md:min-h-0"
+                onClick={() => {
+                  if (lateAnswerState?.status === "sent" || lateAnswerState?.status === "queued") {
+                    onResetLateAnswer?.();
+                  }
+                  setIsAnswering(true);
+                }}
+                data-testid="clarification-answer-as-new-message"
+              >
+                <IconMessagePlus className="h-3.5 w-3.5" />
+                {t("task:answerAsNewMessage")}
+              </Button>
+            )}
+            {canAnswerAsNewMessage && isAnswering && (
+              <div ref={answerScopeRef} className="mt-3 -ml-3 border-l border-border/60 pl-3">
+                <ClarificationInputOverlay
+                  messages={messages}
+                  mode="late"
+                  onLateAnswer={onLateAnswer}
+                  initialAnswers={lateAnswerState?.snapshot?.answers ?? lateAnswerSnapshot?.answers}
+                  lateAnswerState={lateAnswerState}
+                  onResolved={() => {}}
+                  shortcutScopeRef={answerScopeRef}
+                  onDismiss={closeAnswerForm}
+                />
+              </div>
+            )}
+          </div>
+        </QuestionImageGallery>
       </div>
     </div>
   );

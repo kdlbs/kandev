@@ -11,7 +11,6 @@ describe("integration navigation shortcuts", () => {
   it("covers every built-in integration with its existing page and no default chord", () => {
     const entries = buildIntegrationShortcutEntries();
     expect(entries.map(({ id, href, default: shortcut }) => [id, href, shortcut])).toEqual([
-      ["integration:azure-devops", "/azure-devops", { key: "" }],
       ["integration:github", "/github", { key: "" }],
       ["integration:gitlab", "/gitlab", { key: "" }],
       ["integration:jira", "/jira", { key: "" }],
@@ -53,7 +52,7 @@ describe("integration navigation shortcuts", () => {
       },
     ]);
     expect(entries).toHaveLength(WORKSPACE_INTEGRATIONS.length + 2);
-    expect(entries[1].label).toBe("Open GitHub");
+    expect(entries[0].label).toBe("Open GitHub");
   });
 });
 

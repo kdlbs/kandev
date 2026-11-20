@@ -24,6 +24,9 @@ export type FileEditorContentProps = {
   repositoryId?: string | null;
   worktreePath?: string;
   repo?: string;
+  readOnly?: boolean;
+  enableLsp?: boolean;
+  showToolbar?: boolean;
   enableComments?: boolean;
   previewKind?: FilePreviewKind;
   renderedPreview?: boolean;
@@ -105,17 +108,21 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
     );
   }
 
-  return provider === "monaco" ? (
-    <MonacoCodeEditor
-      {...props}
-      onPreviewHtml={props.previewKind === "html" ? publishCurrentHtmlPreview : undefined}
-      isPublishingHtmlPreview={htmlPreview.isPublishing}
-    />
-  ) : (
-    <CodeMirrorCodeEditor
-      {...props}
-      onPreviewHtml={props.previewKind === "html" ? publishCurrentHtmlPreview : undefined}
-      isPublishingHtmlPreview={htmlPreview.isPublishing}
-    />
+  return (
+    <div className="h-full min-h-0" data-testid="file-editor-content">
+      {provider === "monaco" ? (
+        <MonacoCodeEditor
+          {...props}
+          onPreviewHtml={props.previewKind === "html" ? publishCurrentHtmlPreview : undefined}
+          isPublishingHtmlPreview={htmlPreview.isPublishing}
+        />
+      ) : (
+        <CodeMirrorCodeEditor
+          {...props}
+          onPreviewHtml={props.previewKind === "html" ? publishCurrentHtmlPreview : undefined}
+          isPublishingHtmlPreview={htmlPreview.isPublishing}
+        />
+      )}
+    </div>
   );
 });

@@ -1,7 +1,8 @@
 "use client";
 
+import { TaskGraphPanelRequest } from "@/components/task-graph/task-graph-panel-request";
 import { memo, useCallback, useState } from "react";
-import { QuestionImageDraftProvider } from "./chat/question-image-draft-context";
+import { ClarificationDraftProvider } from "./chat/clarification-draft-context";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useRouter } from "@/lib/routing/client-router";
@@ -58,15 +59,19 @@ type TaskLayoutProps = {
 };
 
 export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
+  const { usesDesktopWorkbench } = useResponsiveBreakpoint();
   const [pickerWorkspaceId, setPickerWorkspaceId] = useState(props.workspaceId);
   if (props.workspaceId && props.workspaceId !== pickerWorkspaceId) {
     setPickerWorkspaceId(props.workspaceId);
   }
   return (
     <TaskSheetSelectionProvider workspaceId={props.workspaceId}>
-      <QuestionImageDraftProvider taskId={props.taskId ?? null}>
+      <ClarificationDraftProvider taskId={props.taskId ?? null}>
         <ResponsiveTaskLayout {...props} />
-      </QuestionImageDraftProvider>
+      </ClarificationDraftProvider>
+      {props.taskId && (
+        <TaskGraphPanelRequest taskId={props.taskId} usesDockview={usesDesktopWorkbench} />
+      )}
       <ResponsiveTaskPicker
         key={pickerWorkspaceId}
         workspaceId={props.workspaceId}
@@ -165,6 +170,7 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
   // Desktop layout - dockview
   return (
     <DockviewDesktopLayout
+      taskId={taskId}
       workspaceId={workspaceId}
       workflowId={workflowId}
       sessionId={sessionId}

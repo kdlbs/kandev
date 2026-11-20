@@ -5,6 +5,7 @@ requirements:
   - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001
   - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002
   - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-003
+  - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-004
   - REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001
 ---
 
@@ -24,6 +25,7 @@ and task-owned deferred record. It does not replace either queue or change WIP a
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001 | Inspection intent; Conversation recovery and workflow stop history; Recovery metadata and prompt turns |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002 | Deferred entry ownership; Task reconciliation |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-003 | Queue projection; Desktop and mobile surfaces; Failure and observability |
+| REQ-TASKS-QUEUED-SESSION-OWNERSHIP-004 | Explicit discard |
 | REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001 | Replay and reconciliation locking |
 
 ## Existing components
@@ -247,6 +249,74 @@ prompt ownership on retry; a second sweep must not create a second step message.
 An already-dispatched exact execution is acknowledged through existing correlated
 launch identity. No new scheduler, fan-out queue, or launch lease system is added.
 
+## Explicit discard
+
+Criteria 004.1 through 004.6 add one user-decided disposition for a pending
+ceiling-deferred launch, delivered by the [explicit discard package](../../../plans/explicit-deferred-launch-discard/plan.md).
+It is separate from the automatic invalid-replay drop: that path cleans up a
+record no later pass could use, whereas this is a user decision about a launch
+that is still valid. Both share one settlement routine so their ordering and
+ownership rules cannot diverge.
+
+`DeferredLaunchDiscardOutcome` is a closed set: `already_clear` (nothing was
+written), `discarded` (the ceiling half is gone, the served automation run was
+settled, and the launch's automation start ownership was released or never
+belonged to it), and `retained` (the record is still durable). A retained
+outcome carries one closed reason: `claim_in_flight`, `settlement_incomplete`,
+`ownership_incomplete`, `clear_incomplete`, `record_unreadable`, or
+`record_superseded`. `retained` reports the record state. If the reason is
+`clear_incomplete`, the user-requested run settlement may already be terminal;
+the next discard or sweep completes cleanup and does not replay that run.
+A failure is never reported as a no-op or as a success.
+
+The durable work reuses the established ceiling boundaries. The request first
+takes the existing dispatch claim for the exact record it observed, under the
+entry-admission lock and bound to the record's full identity, so no replay or
+Send Now can start dispatching in between and a successor record with the same
+destination session is never settled under the old decision. Only after that
+claim is held does the explicit path reload the task. If its automation-start
+marker belongs to the served run, it proves session-inventory readability and
+the atomic-clear capability before settling anything. It then settles the
+automation run, reads release eligibility again, removes only `ceiling_`
+prefixed keys under the same identity-bound compare-and-set, and releases the
+captured automation owner in the same task transaction. Automatic replay drops
+keep their existing eligibility checks. Because the clear and release share
+one transaction, neither task-metadata effect can commit alone. A failure before
+settlement returns `retained` with the run unchanged. If the final task
+transaction fails after settlement, it rolls back both task-metadata effects,
+releases the claim, and returns `retained`; the run stays terminal because the
+user explicitly chose discard. The durable record and ownership marker remain
+for retry, and the next discard or sweep completes cleanup instead of replaying
+the closed run.
+
+Ownership release is conditional on the captured marker value. A marker that is
+absent, already replaced, or that belongs to a bound or live run is not this
+request's to remove; a failed, unbound ordinary run with no persisted session
+is released. A retry run's marker is released only when the exact retry ledger
+proves the reserved launch stopped. An unreadable run or session inventory
+detected before settlement leaves the run unchanged. If the post-settlement
+eligibility read fails, the record and marker remain for cleanup retry.
+
+A live dispatch claim is authoritative for this path: the claim is another
+dispatcher's key and may already be launching, so the discard reports
+`claim_in_flight` and leaves the record alone. A record that claims the ceiling
+half but cannot be decoded is reported as `record_unreadable` rather than
+silently removed, because its identity cannot be compared. A record replaced or
+consumed between the read and the claim is reported as `record_superseded`
+because nothing was settled under the observed identity.
+
+The task service keeps authorization: `ScopeTaskWrite` plus the existing
+executor-mutation check run before any record work, exactly as the deferred
+prompt edit does. The candidate transport is a synchronous request scoped to one
+task. Its path, verb, response fields, and whether an operator receives an
+additional permission are proposals awaiting the existing maintainer direction;
+they are not an agreed public contract. Because the safety rules live in the
+shared service, a different public shape does not weaken them.
+
+No session is started, resumed, or stopped, and no manual launch occurs. A
+running sibling session and the task's state are untouched, and a coexisting WIP
+or dependency intent on the same record survives.
+
 ## Task reconciliation
 
 Within `writeTaskReviewState`, use the same task-runtime serialization as running
@@ -468,3 +538,4 @@ or claim its cause without a failing regression.
 - [Historical passive inspection decision](../../../decisions/2026-09-16-passive-session-inspection.md)
 - [Runtime state publication](runtime-state-publication-order.md)
 - [Implementation package](../../../plans/queued-session-ownership/plan.md)
+- [Explicit discard package](../../../plans/explicit-deferred-launch-discard/plan.md)

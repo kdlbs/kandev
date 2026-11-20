@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"encoding/pem"
 	"io"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/sshlaunch"
 	"github.com/kandev/kandev/internal/githubauth"
 )
 
@@ -236,10 +239,21 @@ func TestSSHExecutorCloseSSHClientFallsBackToTheRealClose(t *testing.T) {
 	exec.closeClient = nil
 	server := newFakeSSHServer(t, nil)
 	client := server.dial(t)
+	closed := make(chan struct{})
+	go func() {
+		_ = client.Wait()
+		close(closed)
+	}()
+	t.Cleanup(func() {
+		_ = client.Close()
+		<-closed
+	})
 	if err := exec.closeSSHClient(client); err != nil {
 		t.Fatalf("closeSSHClient: %v", err)
 	}
-	if _, err := client.NewSession(); err == nil {
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
 		t.Fatal("client must actually be closed when no closeClient seam is set")
 	}
 }
@@ -252,6 +266,7 @@ type sshLaunchHarness struct {
 	// createRequests captures each create-instance body the control server saw.
 	createRequests []string
 	handshakes     int
+	launchBinding  sshlaunch.Binding
 	mu             sync.Mutex
 }
 
@@ -262,15 +277,31 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		switch r.URL.Path {
-		case "/auth/handshake":
+		switch {
+		case r.URL.Path == "/auth/handshake":
 			h.handshakes++
-			_, _ = io.WriteString(w, `{"token":"launch-token"}`)
-		case "/api/v1/instances":
+			response := map[string]interface{}{"token": "launch-token"}
+			if h.launchBinding.Owner.TaskID != "" {
+				receipt := newTestSSHLaunchReceipt(h.launchBinding.Owner, 4242)
+				receipt.Generation = h.launchBinding.Generation
+				response["launch"] = receipt
+			}
+			_ = json.NewEncoder(w).Encode(response)
+		case r.URL.Path == "/api/v1/instances":
 			body, _ := io.ReadAll(r.Body)
 			h.createRequests = append(h.createRequests, string(body))
 			_, _ = io.WriteString(w, `{"id":"remote-instance","port":41234}`)
-		case "/health":
+		case strings.HasPrefix(r.URL.Path, "/api/v1/instances/"):
+			if r.Header.Get("Authorization") != "Bearer persisted-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			id := strings.TrimPrefix(r.URL.Path, "/api/v1/instances/")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"id": id, "port": 41234, "status": "running", "workspace_path": h.remoteHome,
+				"session_id": "session-1", "task_id": "task-1", "scoped_mcp_routes": true,
+			})
+		case r.URL.Path == "/health":
 			_, _ = io.WriteString(w, "ok")
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -284,7 +315,7 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 		t.Fatalf("seed remote bin dir: %v", err)
 	}
 
-	h.server = newFakeSSHServer(t, func(command, _ string) sshExecResult {
+	h.server = newFakeSSHServer(t, func(command, stdin string) sshExecResult {
 		switch {
 		case command == "uname -a":
 			return sshOut("Linux remote 6.1.0\n")
@@ -301,9 +332,14 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 		case strings.Contains(command, "test -x"):
 			return sshOK
 		case strings.Contains(command, "nohup"):
+			if binding, ok := sshLaunchBindingFromEnvScript(stdin); ok {
+				h.mu.Lock()
+				h.launchBinding = binding
+				h.mu.Unlock()
+			}
 			return sshOut(pid + "\n")
 		case strings.Contains(command, "agentctl.log"):
-			return sshOut("HTTP server bound successfully\n")
+			return sshOut("{\"msg\":\"HTTP server bound successfully\",\"address\":\"127.0.0.1:41235\"}\n")
 		case strings.Contains(command, "kill -0"):
 			return sshOK
 		default:
@@ -314,6 +350,23 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 	h.server.enableSFTP()
 	h.server.forwardTo(strings.TrimPrefix(control.URL, "http://"))
 	return h
+}
+
+// sshLaunchBindingFromEnvScript reads the managed startup contract out of the
+// launch environment the executor feeds to the remote shell.
+func sshLaunchBindingFromEnvScript(stdin string) (sshlaunch.Binding, bool) {
+	for _, line := range strings.Split(stdin, "\n") {
+		raw, ok := strings.CutPrefix(line, commonconfig.InternalAgentctlStartupConfigEnv+"=")
+		if !ok {
+			continue
+		}
+		decoded, err := commonconfig.DecodeAgentctlStartupConfig(strings.Trim(strings.TrimSpace(raw), "'"))
+		if err != nil || decoded.SSHLaunch == nil {
+			return sshlaunch.Binding{}, false
+		}
+		return *decoded.SSHLaunch, true
+	}
+	return sshlaunch.Binding{}, false
 }
 
 func (h *sshLaunchHarness) createInstanceBodies() []string {

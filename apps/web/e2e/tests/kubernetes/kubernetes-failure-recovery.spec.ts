@@ -65,7 +65,7 @@ for (const restart of [false, true]) {
       ]);
       const session = new SessionPage(testPage);
       const logOffset = fs.readFileSync(backend.logPath, "utf8").length;
-      await apiClient.addUserMessage(task.id, sessionId, "/transport-lost");
+      await apiClient.addUserMessage(task.id, sessionId, "/crash");
       await waitForTaskSessionState(apiClient, task.id, sessionId, "WAITING_FOR_INPUT");
       await expect
         .poll(

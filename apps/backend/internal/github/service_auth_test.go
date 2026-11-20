@@ -105,18 +105,15 @@ func TestCoordinateLegacyClientGatesIdentityProbe(t *testing.T) {
 		Limit: 5000, ResetAt: reset, UpdatedAt: time.Now().UTC(),
 	})
 	var requests atomic.Int32
-	client := &PATClient{
-		token:       "token",
-		rateTracker: tracker,
-		httpClient: &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
-			requests.Add(1)
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Header:     make(http.Header),
-				Body:       http.NoBody,
-			}, nil
-		})},
-	}
+	client := NewPATClient("token").WithRateTracker(tracker)
+	client.httpClient = &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		requests.Add(1)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       http.NoBody,
+		}, nil
+	})}
 	service := &Service{
 		rateTracker:     tracker,
 		rateCoordinator: NewRateCoordinator(nil, testLogger(t)),

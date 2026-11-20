@@ -1,18 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 
+const hostScope = vi.hoisted(() => ({ host: undefined as string | undefined }));
+
 const fetchRepoBranchesMock = vi.fn();
 const listProjectBranchesMock = vi.fn();
-const listAzureDevOpsBranchesMock = vi.fn();
 
 vi.mock("@/lib/api/domains/github-api", () => ({
   fetchRepoBranches: (...args: unknown[]) => fetchRepoBranchesMock(...args),
 }));
 vi.mock("@/lib/api/domains/gitlab-api", () => ({
   listProjectBranches: (...args: unknown[]) => listProjectBranchesMock(...args),
-}));
-vi.mock("@/lib/api/domains/azure-devops-api", () => ({
-  listAzureDevOpsBranches: (...args: unknown[]) => listAzureDevOpsBranchesMock(...args),
 }));
 
 // Import after mocks so the hook picks up the mocked module.
@@ -22,12 +20,12 @@ import type { RepositoryInspection } from "@/lib/plugins/types";
 
 afterEach(() => {
   cleanup();
+  hostScope.host = undefined;
   pluginRegistry.unregisterPlugin(PROVIDER_PLUGIN_ID);
   pluginRegistry.unregisterPlugin("test-coarse-provider");
   pluginRegistry.unregisterPlugin("test-exact-provider");
   fetchRepoBranchesMock.mockReset();
   listProjectBranchesMock.mockReset();
-  listAzureDevOpsBranchesMock.mockReset();
   vi.useRealTimers();
 });
 
@@ -74,21 +72,17 @@ describe("useBranchesByURL", () => {
 });
 
 describe("useBranchesByURL built-in provider routing", () => {
-  it("dispatches GitLab and Azure URLs without calling GitHub", async () => {
+  it("dispatches GitLab URLs without calling GitHub", async () => {
     listProjectBranchesMock.mockResolvedValue({ branches: [{ name: "develop" }] });
-    listAzureDevOpsBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
     const { result } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
     const gitlab = "https://gitlab.com/acme/platform/api.git";
-    const azure = "https://dev.azure.com/acme/Platform/_git/api";
 
     act(() => {
       result.current.ensure(gitlab);
-      result.current.ensure(azure);
     });
 
     await waitFor(() => {
       expect(result.current.branches(gitlab)).toHaveLength(1);
-      expect(result.current.branches(azure)).toHaveLength(1);
     });
     expect(fetchRepoBranchesMock).not.toHaveBeenCalled();
     expect(listProjectBranchesMock).toHaveBeenCalledWith(
@@ -98,30 +92,6 @@ describe("useBranchesByURL built-in provider routing", () => {
         expectedHost: "https://gitlab.com",
         init: expect.objectContaining({ signal: expect.any(AbortSignal) }),
       }),
-    );
-    expect(listAzureDevOpsBranchesMock).toHaveBeenCalledWith(
-      WORKSPACE_ID,
-      "acme",
-      "Platform",
-      "api",
-      expect.anything(),
-    );
-  });
-
-  it("passes the organization parsed from an Azure SSH URL", async () => {
-    listAzureDevOpsBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
-    const { result } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
-    const azure = "git@ssh.dev.azure.com:v3/acme/Platform/api";
-
-    act(() => result.current.ensure(azure));
-
-    await waitFor(() => expect(result.current.branches(azure)).toHaveLength(1));
-    expect(listAzureDevOpsBranchesMock).toHaveBeenCalledWith(
-      WORKSPACE_ID,
-      "acme",
-      "Platform",
-      "api",
-      expect.anything(),
     );
   });
 
@@ -591,4 +561,39 @@ describe("useBranchesByURL — cache invalidation", () => {
     });
     await waitFor(() => expect(fetchRepoBranchesMock).toHaveBeenCalledTimes(2));
   });
+});
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      githubStatus: {
+        byWorkspaceId: {
+          "workspace-1": { status: { automation: { github_host: hostScope.host } } },
+        },
+      },
+    }),
+}));
+
+it("uses the configured GHES host and discards branches after host replacement", async () => {
+  hostScope.host = "git.company.example";
+  let release: (value: { branches: { name: string }[] }) => void = () => {};
+  fetchRepoBranchesMock.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  const { result, rerender } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
+  const url = "https://git.company.example/acme/site";
+  act(() => result.current.ensure(url));
+  expect(fetchRepoBranchesMock).toHaveBeenCalledWith(
+    WORKSPACE_ID,
+    "acme",
+    "site",
+    expect.objectContaining({ expectedHost: "git.company.example" }),
+  );
+  hostScope.host = "other.company.example";
+  rerender();
+  await act(async () => release({ branches: [{ name: "old-host-branch" }] }));
+  expect(result.current.branches(url)).toEqual([]);
 });

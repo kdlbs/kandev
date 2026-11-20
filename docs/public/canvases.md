@@ -202,7 +202,7 @@ Kandev starts a normal Quick Chat with a trusted canvas target. The agent receiv
 The agent publishes through the canvas release flow. The active release changes
 only after validation and permission review. A new permission request uses the
 same review as promotion. If another edit publishes first, the stale edit is
-rejected and cannot silently replace the newer release. An expired Quick Chat
+rejected and cannot silently replace the newer release. Deleting a Quick Chat
 does not remove the active or prior release.
 
 ## Recover, archive, and remove a canvas

@@ -210,8 +210,9 @@ func (j *Journal) PutSubmission(ctx context.Context, submission Submission) (Sub
 	if submission.ID == "" || submission.Hash == "" {
 		return Submission{}, fmt.Errorf("submission id and hash are required")
 	}
-	if int64(len(submission.Payload)) > j.config.MaxEventBytes {
-		return Submission{}, fmt.Errorf("%w: %d bytes", ErrStreamFull, len(submission.Payload))
+	if int64(len(submission.Payload)) > j.config.MaxSubmissionBytes {
+		return Submission{}, NewStorageError(StorageReasonEventTooLarge, ErrStreamFull,
+			WithEventBytes(int64(len(submission.Payload))), withLimitBytes(j.config.MaxSubmissionBytes))
 	}
 	if submission.CreatedAt.IsZero() {
 		submission.CreatedAt = time.Now().UTC()
@@ -301,15 +302,17 @@ func putSubmissionTx(ctx context.Context, tx *bolt.Tx, submission Submission, jo
 			return Submission{}, false, err
 		}
 		if count >= MaxStreamSubmissions {
-			return Submission{}, false, ErrStreamFull
+			return Submission{}, false, NewStorageError(StorageReasonStreamLimitReached, ErrStreamFull,
+				WithLogicalMeasurements(int64(count), MaxStreamSubmissions))
 		}
 	}
 	encoded, err := json.Marshal(submission)
 	if err != nil {
 		return Submission{}, false, err
 	}
-	if exceedsLimit(journalBytes, int64(len(encoded)), logicalLimit(maxJournalBytes, reserveBytes)) {
-		return Submission{}, false, ErrJournalFull
+	if limit := logicalLimit(maxJournalBytes, reserveBytes); exceedsLimit(journalBytes, int64(len(encoded)), limit) {
+		return Submission{}, false, NewStorageError(StorageReasonJournalLimitReached, ErrJournalFull,
+			WithLogicalMeasurements(journalBytes, limit), WithEventBytes(int64(len(encoded))))
 	}
 	if err := bucket.Put([]byte(submission.ID), encoded); err != nil {
 		return Submission{}, false, err
@@ -402,7 +405,8 @@ func markSubmissionTerminalTx(ctx context.Context, tx *bolt.Tx, event Event, max
 		return err
 	}
 	if newBytes > oldBytes && exceedsLimit(journalBytes, newBytes-oldBytes, maxJournalBytes) {
-		return ErrJournalFull
+		return NewStorageError(StorageReasonJournalLimitReached, ErrJournalFull,
+			WithLogicalMeasurements(journalBytes, maxJournalBytes), WithEventBytes(newBytes-oldBytes))
 	}
 	if err := bucket.Put([]byte(event.SubmissionID), encoded); err != nil {
 		return err
@@ -568,7 +572,8 @@ func (j *Journal) transitionSubmissionTx(ctx context.Context, tx *bolt.Tx, id st
 	oldBytes := int64(len(raw))
 	newBytes := int64(len(encoded))
 	if newBytes > oldBytes && exceedsLimit(journalBytes, newBytes-oldBytes, j.config.MaxJournalBytes) {
-		return submission, ErrJournalFull
+		return submission, NewStorageError(StorageReasonJournalLimitReached, ErrJournalFull,
+			WithLogicalMeasurements(journalBytes, j.config.MaxJournalBytes), WithEventBytes(newBytes-oldBytes))
 	}
 	if err := bucket.Put([]byte(id), encoded); err != nil {
 		return submission, err

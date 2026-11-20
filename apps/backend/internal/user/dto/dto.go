@@ -30,12 +30,16 @@ type UserSettingsDTO struct {
 	PreferredShell                    string                                  `json:"preferred_shell"`
 	DefaultEditorID                   string                                  `json:"default_editor_id"`
 	EnablePreviewOnClick              bool                                    `json:"enable_preview_on_click"`
+	EscapeCancelsAgent                bool                                    `json:"escape_cancels_agent"`
 	ChatSubmitKey                     string                                  `json:"chat_submit_key"`
 	ReviewAutoMarkOnScroll            bool                                    `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive                bool                                    `json:"confirm_task_archive"`
 	PreventAutoStartAgentOnOpen       bool                                    `json:"prevent_auto_start_agent_on_open"`
 	UnreadDivider                     bool                                    `json:"unread_divider"`
+	UnreadTaskDot                     bool                                    `json:"unread_task_dot"`
+	UnreadTaskDotHideDelaySeconds     int                                     `json:"unread_task_dot_hide_delay_seconds"`
 	AgentGeneratedTaskTitles          bool                                    `json:"agent_generated_task_titles"`
+	PromptSuggestions                 bool                                    `json:"prompt_suggestions"`
 	AutoFocusNewTasks                 bool                                    `json:"auto_focus_new_tasks"`
 	MCPTaskAgentProfileDefault        string                                  `json:"mcp_task_agent_profile_default"`
 	ShowAnchoredPromptBar             bool                                    `json:"show_anchored_prompt_bar"`
@@ -50,6 +54,7 @@ type UserSettingsDTO struct {
 	LspAutoStartLanguages             []string                                `json:"lsp_auto_start_languages"`
 	LspAutoInstallLanguages           []string                                `json:"lsp_auto_install_languages"`
 	LspServerConfigs                  map[string]map[string]interface{}       `json:"lsp_server_configs,omitempty"`
+	MarkdownPreviewByDefault          bool                                    `json:"markdown_preview_by_default"`
 	LspStatusLocation                 string                                  `json:"lsp_status_location"`
 	SavedLayouts                      []models.SavedLayout                    `json:"saved_layouts"`
 	SidebarViews                      []models.SidebarView                    `json:"sidebar_views"`
@@ -68,7 +73,6 @@ type UserSettingsDTO struct {
 	GitHubSavedPresets                json.RawMessage                         `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets         json.RawMessage                         `json:"github_default_query_presets,omitempty"`
 	GitLabSavedPresets                json.RawMessage                         `json:"gitlab_saved_presets,omitempty"`
-	AzureDevOpsBrowsePreferences      json.RawMessage                         `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID             string                                  `json:"default_utility_agent_id"`
 	DefaultUtilityModel               string                                  `json:"default_utility_model"`
 	DefaultUtilityAgentProfileID      string                                  `json:"default_utility_agent_profile_id"`
@@ -152,12 +156,16 @@ type UpdateUserSettingsRequest struct {
 	PreferredShell                    *string                            `json:"preferred_shell,omitempty"`
 	DefaultEditorID                   *string                            `json:"default_editor_id,omitempty"`
 	EnablePreviewOnClick              *bool                              `json:"enable_preview_on_click,omitempty"`
+	EscapeCancelsAgent                *bool                              `json:"escape_cancels_agent,omitempty"`
 	ChatSubmitKey                     *string                            `json:"chat_submit_key,omitempty"`
 	ReviewAutoMarkOnScroll            *bool                              `json:"review_auto_mark_on_scroll,omitempty"`
 	ConfirmTaskArchive                *bool                              `json:"confirm_task_archive,omitempty"`
 	PreventAutoStartAgentOnOpen       *bool                              `json:"prevent_auto_start_agent_on_open,omitempty"`
 	UnreadDivider                     *bool                              `json:"unread_divider,omitempty"`
+	UnreadTaskDot                     *bool                              `json:"unread_task_dot,omitempty"`
+	UnreadTaskDotHideDelaySeconds     *int                               `json:"unread_task_dot_hide_delay_seconds,omitempty"`
 	AgentGeneratedTaskTitles          *bool                              `json:"agent_generated_task_titles,omitempty"`
+	PromptSuggestions                 *bool                              `json:"prompt_suggestions,omitempty"`
 	AutoFocusNewTasks                 *bool                              `json:"auto_focus_new_tasks,omitempty"`
 	MCPTaskAgentProfileDefault        *string                            `json:"mcp_task_agent_profile_default,omitempty"`
 	ShowAnchoredPromptBar             *bool                              `json:"show_anchored_prompt_bar,omitempty"`
@@ -172,6 +180,7 @@ type UpdateUserSettingsRequest struct {
 	LspAutoStartLanguages             *[]string                          `json:"lsp_auto_start_languages,omitempty"`
 	LspAutoInstallLanguages           *[]string                          `json:"lsp_auto_install_languages,omitempty"`
 	LspServerConfigs                  *map[string]map[string]interface{} `json:"lsp_server_configs,omitempty"`
+	MarkdownPreviewByDefault          *bool                              `json:"markdown_preview_by_default,omitempty"`
 	LspStatusLocation                 *string                            `json:"lsp_status_location,omitempty"`
 	SavedLayouts                      *[]models.SavedLayout              `json:"saved_layouts,omitempty"`
 	SidebarViews                      *[]models.SidebarView              `json:"sidebar_views,omitempty"`
@@ -190,7 +199,6 @@ type UpdateUserSettingsRequest struct {
 	GitHubSavedPresets                NullableRawMessage                 `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets         NullableRawMessage                 `json:"github_default_query_presets,omitempty"`
 	GitLabSavedPresets                NullableRawMessage                 `json:"gitlab_saved_presets,omitempty"`
-	AzureDevOpsBrowsePreferences      NullableRawMessage                 `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID             *string                            `json:"default_utility_agent_id,omitempty"`
 	DefaultUtilityModel               *string                            `json:"default_utility_model,omitempty"`
 	DefaultUtilityAgentProfileID      *string                            `json:"default_utility_agent_profile_id,omitempty"`
@@ -357,12 +365,16 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		PreferredShell:                    settings.PreferredShell,
 		DefaultEditorID:                   settings.DefaultEditorID,
 		EnablePreviewOnClick:              settings.EnablePreviewOnClick,
+		EscapeCancelsAgent:                settings.EscapeCancelsAgent,
 		ChatSubmitKey:                     settings.ChatSubmitKey,
 		ReviewAutoMarkOnScroll:            settings.ReviewAutoMarkOnScroll,
 		ConfirmTaskArchive:                settings.ConfirmTaskArchive,
 		PreventAutoStartAgentOnOpen:       settings.PreventAutoStartAgentOnOpen,
 		UnreadDivider:                     settings.UnreadDivider,
+		UnreadTaskDot:                     settings.UnreadTaskDot,
+		UnreadTaskDotHideDelaySeconds:     settings.UnreadTaskDotHideDelaySeconds,
 		AgentGeneratedTaskTitles:          settings.AgentGeneratedTaskTitles,
+		PromptSuggestions:                 settings.PromptSuggestions,
 		AutoFocusNewTasks:                 settings.AutoFocusNewTasks,
 		MCPTaskAgentProfileDefault:        models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		ShowAnchoredPromptBar:             settings.ShowAnchoredPromptBar,
@@ -377,6 +389,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		LspAutoStartLanguages:             settings.LspAutoStartLanguages,
 		LspAutoInstallLanguages:           settings.LspAutoInstallLanguages,
 		LspServerConfigs:                  settings.LspServerConfigs,
+		MarkdownPreviewByDefault:          settings.MarkdownPreviewByDefault,
 		LspStatusLocation:                 models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		SavedLayouts:                      settings.SavedLayouts,
 		SidebarViews:                      settings.SidebarViews,
@@ -396,7 +409,6 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		GitHubSavedPresets:                settings.GitHubSavedPresets,
 		GitHubDefaultQueryPresets:         settings.GitHubDefaultQueryPresets,
 		GitLabSavedPresets:                settings.GitLabSavedPresets,
-		AzureDevOpsBrowsePreferences:      settings.AzureDevOpsBrowsePreferences,
 		DefaultUtilityAgentID:             settings.DefaultUtilityAgentID,
 		DefaultUtilityModel:               settings.DefaultUtilityModel,
 		DefaultUtilityAgentProfileID:      settings.DefaultUtilityAgentProfileID,

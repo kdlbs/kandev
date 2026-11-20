@@ -14,11 +14,13 @@ import (
 )
 
 type shutdownBlockingGitHubClients struct {
+	fakeGitHubClients
 	started chan struct{}
 	release chan struct{}
 }
 
 type contextAwareGitHubClients struct {
+	fakeGitHubClients
 	started  chan struct{}
 	canceled chan struct{}
 }

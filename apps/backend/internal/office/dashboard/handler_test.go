@@ -2,7 +2,9 @@ package dashboard_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,9 +26,115 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type directTaskStateWriter struct {
+	db *sqlx.DB
+}
+
+func (w directTaskStateWriter) CommitTaskState(
+	ctx context.Context, taskID string, write taskmodels.TaskStateWrite,
+) (taskmodels.TaskStateChange, error) {
+	tx, err := w.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return taskmodels.TaskStateChange{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var current v1.TaskState
+	var workflowID, stepID string
+	if err := tx.QueryRowxContext(ctx, `SELECT state, workflow_id, workflow_step_id FROM tasks WHERE id = ?`, taskID).
+		Scan(&current, &workflowID, &stepID); err != nil {
+		return taskmodels.TaskStateChange{}, err
+	}
+	if (write.ExpectedState != nil && current != *write.ExpectedState) ||
+		(write.ExpectedWorkflowStepID != nil && stepID != *write.ExpectedWorkflowStepID) {
+		return taskmodels.TaskStateChange{}, nil
+	}
+	changed := current != write.State
+	if changed {
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, write.State, taskID); err != nil {
+			return taskmodels.TaskStateChange{}, err
+		}
+	}
+	task := &taskmodels.Task{}
+	if err := tx.QueryRowxContext(ctx, `SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, parent_id, created_at, updated_at FROM tasks WHERE id = ?`, taskID).
+		Scan(&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &task.Title, &task.Description,
+			&task.State, &task.Priority, &task.ParentID, &task.CreatedAt, &task.UpdatedAt); err != nil {
+		return taskmodels.TaskStateChange{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return taskmodels.TaskStateChange{}, err
+	}
+	return taskmodels.TaskStateChange{Matched: true, Changed: changed, OldState: current, Task: task}, nil
+}
+
+func (w directTaskStateWriter) UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
+	result, err := w.db.ExecContext(ctx, `UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, state, taskID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	return nil
+}
+
+func (w directTaskStateWriter) UpdateTaskStateIfWorkflowStep(
+	ctx context.Context, taskID, expectedStepID string, state v1.TaskState,
+) (bool, error) {
+	result, err := w.db.ExecContext(ctx, `
+		UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?
+	`, state, taskID, expectedStepID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows > 0 {
+		return rows > 0, err
+	}
+	var exists int
+	if err := w.db.QueryRowxContext(ctx, `SELECT 1 FROM tasks WHERE id = ?`, taskID).Scan(&exists); err != nil {
+		if err == sql.ErrNoRows {
+			return false, fmt.Errorf("task not found: %s", taskID)
+		}
+		return false, err
+	}
+	return false, nil
+}
+
+func (w directTaskStateWriter) UpdateTaskStateIfWorkflowStepAndState(
+	ctx context.Context, taskID, expectedStepID string, expectedState, state v1.TaskState,
+) (bool, error) {
+	result, err := w.db.ExecContext(ctx, `
+		UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND COALESCE(workflow_step_id, '') = ? AND state = ?
+	`, state, taskID, expectedStepID, expectedState)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows > 0 {
+		return rows > 0, err
+	}
+	var exists int
+	if err := w.db.QueryRowxContext(ctx, `SELECT 1 FROM tasks WHERE id = ?`, taskID).Scan(&exists); err != nil {
+		if err == sql.ErrNoRows {
+			return false, fmt.Errorf("task not found: %s", taskID)
+		}
+		return false, err
+	}
+	return false, nil
+}
 
 // stubPermissionLister satisfies shared.PermissionLister for testing.
 type stubPermissionLister struct {
@@ -171,7 +279,19 @@ func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
 	}
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS workspaces (
 		id TEXT PRIMARY KEY,
-		office_workflow_id TEXT DEFAULT ''
+		name TEXT NOT NULL DEFAULT '',
+		description TEXT DEFAULT '',
+		owner_id TEXT DEFAULT '',
+		org_id TEXT NOT NULL DEFAULT '',
+		default_executor_id TEXT DEFAULT '',
+		default_environment_id TEXT DEFAULT '',
+		default_agent_profile_id TEXT DEFAULT '',
+		default_config_agent_profile_id TEXT DEFAULT '',
+		acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120,
+		office_workflow_id TEXT DEFAULT '',
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`)
 	if err != nil {
 		t.Fatalf("create workspaces table: %v", err)
@@ -183,7 +303,8 @@ func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS workflows (
 		id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '',
 		workflow_template_id TEXT DEFAULT '', name TEXT NOT NULL,
-		description TEXT DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+		description TEXT DEFAULT '', is_system INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
 	)`)
 	if err != nil {
 		t.Fatalf("create workflows: %v", err)
@@ -195,9 +316,9 @@ func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL DEFAULT '',
-		agent_execution_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT,
 		state TEXT NOT NULL DEFAULT 'CREATED',
+		metadata TEXT DEFAULT '{}',
 		started_at TIMESTAMP,
 		completed_at TIMESTAMP,
 		updated_at TIMESTAMP
@@ -211,7 +332,6 @@ func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
 	if err != nil {
 		t.Fatalf("workflow repo: %v", err)
 	}
-
 	// Create label tables used by the issues endpoints.
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS office_labels (
@@ -244,6 +364,8 @@ func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
 	agentSvc := &stubAgentReader{}
 	costSvc := &stubCostChecker{}
 	svc := dashboard.NewDashboardService(repo, log, activity, agentSvc, costSvc)
+	svc.SetTaskStateWriter(directTaskStateWriter{db: db})
+	svc.SetTaskStateChangePublisher(statusStateChangePublisher{})
 	svc.SetDecisionStore(wfRepo)
 	svc.SetWorkflowEngineDispatcher(newTestEngineDispatcher(wfRepo, log))
 
@@ -322,7 +444,7 @@ func insertTestTask(t *testing.T, db *sqlx.DB, id, wsID, title, state string, pr
 
 // seedTerminalWorkflowStep backs stepID with a single-step workflow whose
 // step is last-by-position and named "Done" — the shape
-// IsTaskWorkflowStepTerminal treats as terminal.
+// IsTaskOnFinalStep treats as terminal.
 func seedTerminalWorkflowStep(t *testing.T, db *sqlx.DB, stepID string) {
 	t.Helper()
 	workflowID := "wf-" + stepID

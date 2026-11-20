@@ -109,19 +109,14 @@ func RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections(
 	if repo != nil {
 		catalog := mcpconfig.NewCatalogService(repo)
 		catalog.SetWorkspaceAuthorizer(authorizer)
-		catalog.SetSelectionRepository(selectionRepositoryForCatalog(selections))
+		if selections != nil {
+			selections.ConfigureCatalogUsage(catalog)
+		}
 		handlers.catalog = catalog
 	}
 	handlers.marketplace = marketplace
 	handlers.selections = selections
 	handlers.registerHTTP(router)
-}
-
-func selectionRepositoryForCatalog(selections *mcpconfig.SelectionService) mcpconfig.SelectionRepository {
-	if selections == nil {
-		return nil
-	}
-	return selections.Repository()
 }
 
 func (h *Handlers) registerHTTP(router *gin.Engine) {
@@ -136,6 +131,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agents/available", h.httpListAvailableAgents)
 	api.GET("/agents", h.httpListAgents)
 	api.GET("/agents/:id/mcp-discovery", h.httpDiscoverAgentMCP)
+	api.POST("/agents/:id/plugin-discovery", cfg, h.httpDiscoverCopilotPlugins)
 	api.POST("/agents", cfg, h.interlock, h.httpCreateAgent)
 	api.POST("/agents/tui", cfg, h.interlock, h.httpCreateCustomTUIAgent)
 	api.GET("/agents/tui/mcp-strategies", h.httpListMCPStrategies)
@@ -187,6 +183,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	// The owner release is the only way to lift a provider account-block hold;
 	// profile edits and enablement never release it.
 	api.POST("/agent-profiles/:id/account-block/release", cfg, h.interlock, h.httpReleaseAccountBlock)
+	api.GET("/routing/circuits", h.httpListRoutingCircuits)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
@@ -269,6 +266,9 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version is required"})
 		return
 	}
+	if request.ReviewedRuntime != nil && !validReviewedRuntimeRequest(c, name, h, request) {
+		return
+	}
 	h.enqueueMaintenance(c, name, "update", func() (any, error) {
 		if request.UseDefault {
 			return h.controller.EnqueueAgentUpdateUseDefault(c.Request.Context(), name)
@@ -284,8 +284,41 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		if request.ExpectedRuntimeRevision != 0 {
 			return nil, controller.ErrRuntimeMigrationUnsupported
 		}
+		if request.ReviewedRuntime != nil {
+			return h.controller.EnqueueReviewedAgentUpdate(
+				c.Request.Context(), name, request.TargetVersion, *request.ReviewedRuntime,
+			)
+		}
 		return h.controller.EnqueueAgentUpdate(c.Request.Context(), name, request.TargetVersion)
 	}, classifyUpdateError)
+}
+
+// validReviewedRuntimeRequest keeps review evidence on the ordinary pinned
+// update form. Migration, return-to-default, harness, and revision-shaped
+// requests keep their legacy wire contracts and reject mixed evidence.
+func validReviewedRuntimeRequest(
+	c *gin.Context,
+	name string,
+	h *Handlers,
+	request dto.AgentUpdateRequest,
+) bool {
+	if h.controller.IsHarnessUpdate(name) ||
+		request.UseDefault ||
+		request.TargetFamily != "" ||
+		request.ExpectedRuntimeRevision != 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reviewed runtime cannot be combined with this update form"})
+		return false
+	}
+	evidence := request.ReviewedRuntime
+	if evidence == nil ||
+		strings.TrimSpace(evidence.RuntimeID) == "" ||
+		strings.TrimSpace(evidence.Package) == "" ||
+		strings.TrimSpace(evidence.CurrentVersion) == "" ||
+		strings.TrimSpace(evidence.EffectiveVersion) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reviewed runtime evidence is incomplete"})
+		return false
+	}
+	return true
 }
 
 func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
@@ -308,6 +341,7 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
 		return
 	}
+	extendUpdateStatusWriteDeadline(c)
 	var preview *dto.AgentUpdatePreviewDTO
 	var err error
 	switch {
@@ -335,6 +369,7 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 }
 
 func (h *Handlers) httpListAgentUpdateStatuses(c *gin.Context) {
+	extendUpdateStatusWriteDeadline(c)
 	resp, err := h.controller.ListAgentUpdateStatuses(c.Request.Context())
 	if err != nil {
 		h.logger.Error("failed to list agent runtime update statuses", zap.Error(err))
@@ -390,6 +425,17 @@ func writeMaintenanceConflictIfPresent(c *gin.Context, err error) bool {
 	return true
 }
 
+func writeReviewChangedIfPresent(c *gin.Context, err error) bool {
+	if !errors.Is(err, controller.ErrRuntimeReviewChanged) {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"error": "runtime changed after review; refresh the preview",
+		"code":  "runtime_review_changed",
+	})
+	return true
+}
+
 type maintenanceErrorClassifier func(error) (int, string, bool)
 
 func (h *Handlers) enqueueMaintenance(
@@ -405,6 +451,9 @@ func (h *Handlers) enqueueMaintenance(
 		return
 	}
 	if writeMaintenanceConflictIfPresent(c, err) {
+		return
+	}
+	if writeReviewChangedIfPresent(c, err) {
 		return
 	}
 	if status, message, matched := classify(err); matched {
@@ -443,6 +492,10 @@ func classifyUpdateError(err error) (int, string, bool) {
 		return http.StatusBadRequest, "target version is invalid", true
 	case errors.Is(err, controller.ErrRuntimeUpdateTargetMissing):
 		return http.StatusBadRequest, "target version is not published", true
+	case errors.Is(err, controller.ErrRuntimeReviewInvalid):
+		return http.StatusBadRequest, "runtime review evidence is invalid", true
+	case errors.Is(err, controller.ErrRuntimeReviewChanged):
+		return http.StatusConflict, "runtime changed after review; refresh the preview", true
 	case errors.Is(err, controller.ErrRuntimeMigrationUnsupported):
 		return http.StatusBadRequest, "OpenCode runtime migration is unavailable", true
 	case errors.Is(err, controller.ErrRuntimeMigrationBlocked):
@@ -554,6 +607,7 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
+	ExecutionGrade          string                 `json:"execution_grade,omitempty"`
 	Name                    string                 `json:"name"`
 	Model                   string                 `json:"model"`
 	FallbackModel           string                 `json:"fallback_model,omitempty"`
@@ -564,6 +618,7 @@ type createAgentProfileRequest struct {
 	Mode                    string                 `json:"mode,omitempty"`
 	CLIFlags                []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars                 []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	DevinSandboxInherited   bool                   `json:"devin_sandbox_inherited,omitempty"`
 	CommandPrefix           string                 `json:"command_prefix,omitempty"`
 }
 
@@ -583,8 +638,13 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
 			return
 		}
+		if err := (dto.ProfileCreateRequest{AgentID: body.Name, Name: profile.Name, ExecutionGrade: profile.ExecutionGrade}).Validate(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
 			Name:                    profile.Name,
+			ExecutionGrade:          profile.ExecutionGrade,
 			Model:                   profile.Model,
 			FallbackModel:           profile.FallbackModel,
 			AutoFallback:            profile.AutoFallback,
@@ -594,6 +654,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			Mode:                    profile.Mode,
 			CLIFlags:                profile.CLIFlags,
 			EnvVars:                 profile.EnvVars,
+			DevinSandboxInherited:   profile.DevinSandboxInherited,
 			CommandPrefix:           profile.CommandPrefix,
 		})
 	}
@@ -604,7 +665,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 	})
 	if err != nil {
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
-			errors.Is(err, controller.ErrInvalidProviderConfig) ||
+			errors.Is(err, controller.ErrInvalidProviderConfig) || errors.Is(err, controller.ErrInvalidDevinPermissionIntent) ||
 			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -676,11 +737,12 @@ func (h *Handlers) httpDeleteAgent(c *gin.Context) {
 }
 
 type commandPreviewRequest struct {
-	Model              string           `json:"model"`
-	PermissionSettings map[string]bool  `json:"permission_settings"`
-	CLIPassthrough     bool             `json:"cli_passthrough"`
-	CLIFlags           []dto.CLIFlagDTO `json:"cli_flags"`
-	CommandPrefix      string           `json:"command_prefix,omitempty"`
+	Model                  string           `json:"model"`
+	PermissionSettings     map[string]bool  `json:"permission_settings"`
+	CLIPassthrough         bool             `json:"cli_passthrough"`
+	CLIFlags               []dto.CLIFlagDTO `json:"cli_flags"`
+	CommandPrefix          string           `json:"command_prefix,omitempty"`
+	CopilotSelectedPlugins []string         `json:"copilot_selected_plugins,omitempty"`
 }
 
 func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
@@ -697,11 +759,12 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 	}
 
 	resp, err := h.controller.PreviewAgentCommand(c.Request.Context(), agentName, controller.CommandPreviewRequest{
-		Model:              body.Model,
-		PermissionSettings: body.PermissionSettings,
-		CLIPassthrough:     body.CLIPassthrough,
-		CLIFlags:           body.CLIFlags,
-		CommandPrefix:      body.CommandPrefix,
+		Model:                  body.Model,
+		PermissionSettings:     body.PermissionSettings,
+		CLIPassthrough:         body.CLIPassthrough,
+		CLIFlags:               body.CLIFlags,
+		CommandPrefix:          body.CommandPrefix,
+		CopilotSelectedPlugins: body.CopilotSelectedPlugins,
 	})
 	if err != nil {
 		h.logger.Error("failed to preview agent command", zap.Error(err))

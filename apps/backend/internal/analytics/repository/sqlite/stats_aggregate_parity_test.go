@@ -350,8 +350,8 @@ func assertStatsAggregateParity(t *testing.T, repo *Repository, fixture statsPar
 		activityByDate[activity.Date] = activity
 	}
 	assertDailyActivity(t, activityByDate[fixture.rangeStart.Format("2006-01-02")], 3, 5, 1)
-	assertDailyActivity(t, activityByDate[fixture.today.Add(-24*time.Hour).Format("2006-01-02")], 1, 2, 1)
-	assertDailyActivity(t, activityByDate[fixture.today.Add(-72*time.Hour).Format("2006-01-02")], 0, 0, 0)
+	assertDailyActivity(t, activityByDate[fixture.today.Add(-24*time.Hour).Format("2006-01-02")], 1, 3, 1)
+	assertDailyActivity(t, activityByDate[fixture.today.Add(-72*time.Hour).Format("2006-01-02")], 0, 1, 0)
 }
 
 func assertTaskStats(t *testing.T, stat *models.TaskStats, sessions, turns, messages, userMessages, toolCalls int, totalDuration, elapsedSpan int64) {

@@ -145,6 +145,74 @@ func TestHTTPGetBackgroundWorkload(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "Build")
 }
 
+// TestToWorkloadObservationUsesPersistedCapabilities pins that HTTP/WS
+// hydration reads the adapter's recorded declaration instead of reconstructing
+// controls from the row state or kind.
+func TestToWorkloadObservationUsesPersistedCapabilities(t *testing.T) {
+	stopSupported := streams.WorkloadCapabilities{
+		Discovery: "snapshot",
+		Output:    "stream",
+		Actions: map[streams.WorkloadActionKind]streams.ActionCapability{
+			streams.WorkloadActionStop: {Supported: true, Available: true},
+			streams.WorkloadActionInterrupt: {
+				Supported: false,
+				Available: false,
+				Reason:    string(streams.ActionReasonUnsupported),
+			},
+		},
+	}
+	row := &models.BackgroundWorkload{
+		State:        string(streams.RunStateRunning),
+		Kind:         string(streams.WorkloadKindShell),
+		Capabilities: streams.EncodeWorkloadCapabilities(stopSupported),
+	}
+
+	running := toWorkloadObservation(row)
+	require.Equal(t, "snapshot", running.Capabilities.Discovery)
+	require.Equal(t, "stream", running.Capabilities.Output)
+	require.True(t, running.Capabilities.Actions[streams.WorkloadActionStop].Available)
+
+	row.State = string(streams.RunStateCompleted)
+	completed := toWorkloadObservation(row)
+	require.True(t, completed.Capabilities.Actions[streams.WorkloadActionStop].Supported,
+		"static support is preserved")
+	require.False(t, completed.Capabilities.Actions[streams.WorkloadActionStop].Available,
+		"a terminal workload cannot accept a control")
+}
+
+// TestToWorkloadObservationHydratesObservationOnlyDeclaration pins the
+// observation-only OpenCode shape through the same HTTP/WS projection: output
+// is explicitly unavailable and no control is exposed, even while running.
+func TestToWorkloadObservationHydratesObservationOnlyDeclaration(t *testing.T) {
+	declaration := streams.WorkloadCapabilities{
+		Discovery: "events_only",
+		Output:    "none",
+	}
+	row := &models.BackgroundWorkload{
+		State:        string(streams.RunStateRunning),
+		Kind:         string(streams.WorkloadKindShell),
+		Capabilities: streams.EncodeWorkloadCapabilities(declaration),
+	}
+	obs := toWorkloadObservation(row)
+	require.Equal(t, "events_only", obs.Capabilities.Discovery)
+	require.Equal(t, "none", obs.Capabilities.Output)
+	require.Empty(t, obs.Capabilities.Actions)
+}
+
+// TestToWorkloadObservationWithoutDeclarationFallsBackToUnavailable pins the
+// truthful fallback for rows with no adapter declaration, including legacy rows
+// and observation-only OpenCode jobs. No control or live output is invented.
+func TestToWorkloadObservationWithoutDeclarationFallsBackToUnavailable(t *testing.T) {
+	row := &models.BackgroundWorkload{
+		State: string(streams.RunStateRunning),
+		Kind:  string(streams.WorkloadKindShell),
+	}
+	obs := toWorkloadObservation(row)
+	require.Empty(t, obs.Capabilities.Discovery)
+	require.Empty(t, obs.Capabilities.Output)
+	require.Empty(t, obs.Capabilities.Actions)
+}
+
 func TestHTTPExecuteBackgroundAction(t *testing.T) {
 	h, _ := newTestBackgroundWorkHandlers(t)
 	rec := httptest.NewRecorder()

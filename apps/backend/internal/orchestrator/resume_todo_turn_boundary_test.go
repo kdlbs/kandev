@@ -252,7 +252,7 @@ func TestWorkflowAutoStartAfterResumeTodos(t *testing.T) {
 				svc.workflowStepGetter = stepGetter
 				svc.messageCreator = workflowMessages
 			}
-			svc.executor = executor.NewExecutor(agent, fixture.repo, testLogger(), executor.ExecutorConfig{})
+			svc.executor = withTestCapabilities(executor.NewExecutor(agent, fixture.repo, testLogger(), executor.ExecutorConfig{}))
 			session, err := fixture.repo.GetTaskSession(ctx, fixture.workerID)
 			require.NoError(t, err)
 			require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)

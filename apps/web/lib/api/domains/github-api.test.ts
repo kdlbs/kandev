@@ -1,3 +1,4 @@
+const ENTERPRISE_HOST = "git.company.example";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/config", () => ({
@@ -11,12 +12,11 @@ import {
   createTaskPR,
   deleteTaskPR,
   deletePRWatch,
-  deleteGitHubAppRegistration,
   disconnectGitHubPersonal,
   disconnectGitHubWorkspace,
   fetchAccessibleRepos,
+  fetchGitHubScopeEditorRepos,
   fetchGitHubCLIAccounts,
-  fetchGitHubAppRegistrations,
   fetchGitHubStatus,
   fetchIssueInfo,
   fetchPRInfo,
@@ -27,7 +27,6 @@ import {
   getRepoMergeMethods,
   getTaskCIAutomationOptions,
   GitHubUnavailableError,
-  importGitHubAppRegistration,
   linkTaskIssue,
   listUserOrgs,
   listIssueWatches,
@@ -35,23 +34,18 @@ import {
   listReviewWatches,
   listWorkspaceTaskIssues,
   mergePR,
-  prepareGitHubAppImport,
-  renameGitHubAppRegistration,
   searchOrgRepos,
   setGitHubWorkspaceConnection,
   startGitHubAppInstall,
-  startGitHubAppManifest,
   startGitHubPersonalConnect,
   submitPRReview,
   unlinkTaskIssue,
   updateTaskCIAutomationOptions,
   type AccessibleRepo,
 } from "./github-api";
-import * as githubAuthApi from "./github-auth-api";
 
 const workspaceID = "ws/1";
 const appRegistrationID = "registration/one";
-const publicKandevURL = "https://kandev.example";
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
 const fetchSpy = vi.fn<(...args: [FetchInput, FetchInit?]) => Promise<Response>>();
@@ -212,102 +206,6 @@ describe("workspace-scoped GitHub watches", () => {
   });
 });
 
-describe("workspace GitHub App registrations", () => {
-  it("exposes the registration catalog API", () => {
-    expect(githubAuthApi).toMatchObject({
-      fetchGitHubAppRegistrations: expect.any(Function),
-      startGitHubAppManifest: expect.any(Function),
-      prepareGitHubAppImport: expect.any(Function),
-      importGitHubAppRegistration: expect.any(Function),
-      renameGitHubAppRegistration: expect.any(Function),
-      deleteGitHubAppRegistration: expect.any(Function),
-    });
-  });
-
-  it("uses workspace-scoped catalog and registration lifecycle routes", async () => {
-    fetchSpy
-      .mockResolvedValueOnce(jsonResponse({ workspace_id: workspaceID, registrations: [] }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          registration_id: appRegistrationID,
-          workspace_id: workspaceID,
-          state: "state",
-          expires_at: "2026-07-20T22:00:00Z",
-          revision: 1,
-          registration_url: "https://github.com/organizations/acme/settings/apps/new",
-          manifest: { name: "Kandev acme" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          registration_id: appRegistrationID,
-          public_base_url: publicKandevURL,
-          webhook_url: "https://kandev.example/webhook",
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ id: appRegistrationID }))
-      .mockResolvedValueOnce(jsonResponse({ id: appRegistrationID, display_name: "Renamed" }))
-      .mockResolvedValueOnce(jsonResponse({ deleted: true }));
-
-    await fetchGitHubAppRegistrations(workspaceID);
-    await startGitHubAppManifest({
-      workspace_id: workspaceID,
-      display_name: "Work App",
-      owner_type: "organization",
-      owner_login: "acme",
-      visibility: "private",
-      public_base_url: publicKandevURL,
-    });
-    await prepareGitHubAppImport({
-      workspace_id: workspaceID,
-      public_base_url: publicKandevURL,
-    });
-    await importGitHubAppRegistration({
-      registration_id: "registration-1",
-      workspace_id: workspaceID,
-      display_name: "Existing App",
-      github_host: "github.com",
-      app_id: 42,
-      client_id: "Iv1.client",
-      client_secret: "client-secret",
-      private_key: "private-key",
-      webhook_secret: "webhook-secret",
-      slug: "existing-app",
-      owner_login: "acme",
-      owner_type: "Organization",
-      visibility: "private",
-      public_base_url: publicKandevURL,
-    });
-    await renameGitHubAppRegistration(appRegistrationID, "Renamed");
-    await deleteGitHubAppRegistration(appRegistrationID);
-
-    expect(fetchSpy.mock.calls.map((call) => [String(call[0]), call[1]?.method])).toEqual([
-      ["http://api.test/api/v1/github/app/registrations?workspace_id=ws%2F1", undefined],
-      ["http://api.test/api/v1/github/app/registrations/manifest/start", "POST"],
-      ["http://api.test/api/v1/github/app/registrations/import/prepare", "POST"],
-      ["http://api.test/api/v1/github/app/registrations/import", "POST"],
-      ["http://api.test/api/v1/github/app/registrations/registration%2Fone", "PATCH"],
-      ["http://api.test/api/v1/github/app/registrations/registration%2Fone", "DELETE"],
-    ]);
-    expect(fetchSpy.mock.calls[0]?.[1]?.cache).toBe("no-store");
-    expect(JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body))).toEqual({
-      workspace_id: workspaceID,
-      display_name: "Work App",
-      owner_type: "organization",
-      owner_login: "acme",
-      visibility: "private",
-      public_base_url: publicKandevURL,
-    });
-    expect(JSON.parse(String(fetchSpy.mock.calls[2]?.[1]?.body))).toEqual({
-      workspace_id: workspaceID,
-      public_base_url: publicKandevURL,
-    });
-    expect(JSON.parse(String(fetchSpy.mock.calls[4]?.[1]?.body))).toEqual({
-      display_name: "Renamed",
-    });
-  });
-});
-
 describe("workspace-scoped GitHub operations", () => {
   it("scopes PR reads, review, merge, and repository metadata", async () => {
     fetchSpy.mockImplementation(async () => jsonResponse({}));
@@ -374,6 +272,14 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
     expect(url).toContain("workspace_id=ws%2F1");
   });
 
+  it("asks the server to bypass its cache on refresh", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ repos: [] }));
+
+    await fetchAccessibleRepos({ workspaceId: workspaceID, refresh: true });
+
+    expect(lastCallUrl()).toContain("refresh=true");
+  });
+
   it("omits empty query and missing limit from the URL", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ repos: [] }));
 
@@ -383,6 +289,7 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
     expect(url).toContain("/api/v1/github/repos");
     expect(url).not.toContain("q=");
     expect(url).not.toContain("limit=");
+    expect(url).not.toContain("refresh=");
   });
 
   it("parses the 200 response and injects provider: 'github' on each entry", async () => {
@@ -432,6 +339,26 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
     });
     expect(repos[1].pushed_at).toBeUndefined();
     expect(repos[1].description).toBeUndefined();
+  });
+});
+
+describe("fetchGitHubScopeEditorRepos", () => {
+  it("uses the workspace-settings discovery route", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ repos: [] }));
+
+    await fetchGitHubScopeEditorRepos({
+      workspaceId: workspaceID,
+      q: "next",
+      limit: 25,
+      refresh: true,
+    });
+
+    const url = lastCallUrl();
+    expect(url).toContain("/api/v1/github/workspace-settings/repositories");
+    expect(url).toContain("workspace_id=ws%2F1");
+    expect(url).toContain("q=next");
+    expect(url).toContain("limit=25");
+    expect(url).toContain("refresh=true");
   });
 });
 
@@ -681,4 +608,14 @@ describe("copyGitHubWorkspaceSettings", () => {
     expect(call?.[1]?.method).toBe("POST");
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ targetWorkspaceId: "ws-dst" });
   });
+});
+
+it("passes the explicit repository host into branch and item lookups", async () => {
+  fetchSpy.mockImplementation(async () => jsonResponse({ branches: [] }));
+  await fetchRepoBranches(workspaceID, "acme", "site", { expectedHost: ENTERPRISE_HOST });
+  expect(new URL(lastCallUrl()).searchParams.get("expected_host")).toBe(ENTERPRISE_HOST);
+  await fetchPRInfo(workspaceID, "acme", "site", 42, { expectedHost: "tenant.ghe.com" });
+  expect(new URL(lastCallUrl()).searchParams.get("expected_host")).toBe("tenant.ghe.com");
+  await fetchIssueInfo(workspaceID, "acme", "site", 42, { expectedHost: ENTERPRISE_HOST });
+  expect(new URL(lastCallUrl()).searchParams.get("expected_host")).toBe(ENTERPRISE_HOST);
 });

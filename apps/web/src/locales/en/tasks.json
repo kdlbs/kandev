@@ -76,5 +76,20 @@
   "filtersButton_one": "Filters ({{count}})",
   "filtersButton_other": "Filters ({{count}})",
   "appliedWorkflow": "Workflow: {{name}}",
-  "appliedRepository": "Repository: {{name}}"
+  "appliedRepository": "Repository: {{name}}",
+  "ungrouped": "Ungrouped",
+  "collaborationTitle": "Workspace collaboration",
+  "collaborationDescription": "{{task}} in {{workspace}}. Manage this conversation's access to other workspaces.",
+  "collaborationNativePermissions": "Read, report, prompt and control are independent. Native user permissions still apply. Clearing all four revokes access.",
+  "collaborationRead": "Read",
+  "collaborationReport": "Report",
+  "collaborationPrompt": "Prompt",
+  "collaborationControl": "Control",
+  "collaborationTargetUnavailable": "This target is outside your current native read access. Its saved grant is shown without allowing edits.",
+  "collaborationLoadDenied": "You do not have permission to manage this conversation's workspace access.",
+  "collaborationLoadFailed": "Workspace access could not be loaded. Existing edits are retained; retry before saving.",
+  "collaborationSaveDenied": "This row could not be saved because permission was denied. Your edits are retained.",
+  "collaborationSaveFailed": "This row could not be saved. Your edits are retained.",
+  "collaborationNoTargets": "No other workspaces are available.",
+  "collaborationRetry": "Retry loading"
 }

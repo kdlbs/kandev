@@ -9,6 +9,11 @@ import { matchesShortcut } from "@/lib/keyboard/utils";
 import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import type { DockviewApi } from "dockview-react";
 import { t } from "@/lib/i18n";
+import {
+  captureUserShellPublicationOwner,
+  isActiveUserShellPublicationOwner,
+  makeUserShellScope,
+} from "@/lib/state/user-shell-scope";
 
 function handleTabNavigation(e: KeyboardEvent, api: DockviewApi) {
   const activePanel = api.activePanel;
@@ -33,9 +38,8 @@ function handleTabNavigation(e: KeyboardEvent, api: DockviewApi) {
 function handleTerminalToggle(
   e: KeyboardEvent,
   api: DockviewApi,
+  appStore: ReturnType<typeof useAppStoreApi>,
   previousPanelIdRef: React.MutableRefObject<string | null>,
-  getEnvironmentId: () => string | null,
-  getTaskID: () => string | null,
 ) {
   e.preventDefault();
   e.stopPropagation();
@@ -61,13 +65,29 @@ function handleTerminalToggle(
     return;
   }
 
-  const environmentId = getEnvironmentId();
+  const state = appStore.getState();
+  const activeSessionId = state.tasks.activeSessionId;
+  const environmentId = activeSessionId
+    ? (state.environmentIdBySessionId[activeSessionId] ?? null)
+    : null;
   if (!environmentId) return;
-  const taskID = getTaskID();
+  const taskID = state.tasks?.activeTaskId ?? null;
+  const scope = makeUserShellScope(environmentId, taskID);
+  if (!scope) return;
+  const owner = captureUserShellPublicationOwner(appStore.getState(), scope);
 
   createUserShell(environmentId, { taskId: taskID ?? undefined })
     .then((result) => {
       const title = result.displayName ?? result.label ?? t("common:terminal");
+      appStore.getState().addUserShell(scope, {
+        ...result,
+        kind: result.kind,
+        state: result.state ?? "open",
+        label: title,
+        closable: result.closable ?? true,
+        running: result.ptyStatus === "running",
+      });
+      if (!isActiveUserShellPublicationOwner(appStore.getState(), owner)) return;
       useDockviewStore
         .getState()
         .addTerminalPanel(result.terminalId, undefined, environmentId, taskID ?? undefined, title);
@@ -161,17 +181,7 @@ export function useEditorKeybinds() {
       const isTerminalToggle = e.ctrlKey && !e.metaKey && !e.shiftKey && e.code === "Backquote";
 
       if (isTerminalToggle) {
-        handleTerminalToggle(
-          e,
-          api,
-          previousPanelIdRef,
-          () => {
-            const state = appStore.getState();
-            const sid = state.tasks.activeSessionId;
-            return sid ? (state.environmentIdBySessionId[sid] ?? null) : null;
-          },
-          () => appStore.getState().tasks?.activeTaskId ?? null,
-        );
+        handleTerminalToggle(e, api, appStore, previousPanelIdRef);
         return;
       }
 

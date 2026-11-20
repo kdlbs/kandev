@@ -1,12 +1,15 @@
 import { test, expect } from "../../fixtures/test-base";
+import { seededAgentProfile } from "../../helpers/seeded-agent-profile";
 
 test.describe("Agent settings profile layout on mobile", () => {
-  test("keeps creation reachable without horizontal overflow", async ({ testPage, apiClient }) => {
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    if (!agent || agent.profiles.length === 0) {
-      throw new Error("The E2E fixture must provide a configured agent profile");
-    }
+  test("keeps creation reachable without horizontal overflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // The seeded profile's owner is stable; list order is not, and a virtual
+    // family such as Dynamic can sort first with no profiles of its own.
+    const { agent } = await seededAgentProfile(apiClient, seedData.agentProfileId);
 
     await testPage.goto("/settings/agents");
 
@@ -57,12 +60,12 @@ test.describe("Agent settings profile layout on mobile", () => {
   test("wraps the saved fallback summary without horizontal overflow", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    if (!agent || agent.profiles.length === 0) {
-      throw new Error("The E2E fixture must provide a configured agent profile");
-    }
+    const { agent, profile: seedProfile } = await seededAgentProfile(
+      apiClient,
+      seedData.agentProfileId,
+    );
 
     const fallbackModel = `saved-explicit-model-${"x".repeat(128)}`;
     const profileName = "Mobile fallback summary";
@@ -72,11 +75,11 @@ test.describe("Agent settings profile layout on mobile", () => {
       await testPage.goto("/settings/agents");
       const seededRow = testPage
         .getByTestId("agent-profile-row")
-        .filter({ hasText: agent.profiles[0].name });
+        .filter({ hasText: seedProfile.name });
       await expect(seededRow).toBeVisible({ timeout: 15_000 });
 
       const profile = await apiClient.createAgentProfile(agent.id, profileName, {
-        model: agent.profiles[0].model,
+        model: seedProfile.model,
         fallback_model: fallbackModel,
       });
       profileId = profile.id;

@@ -295,6 +295,34 @@ it("keeps the rendered selection surface locked during a deferred final submit",
   await waitFor(() => expect(screen.queryByTestId("workflow-import-profile-selection")).toBeNull());
 });
 
+it("never shows an empty review view while an import with nothing to review submits", async () => {
+  let resolveImport!: (value: { created: string[]; skipped: string[] }) => void;
+  vi.mocked(previewWorkflowImportAction).mockResolvedValueOnce({
+    skipped: [],
+    profiles: [],
+    steps: [],
+  });
+  vi.mocked(importWorkflowsAction).mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveImport = resolve;
+    }),
+  );
+
+  render(<DeferredSubmitDialog />);
+  fireEvent.click(screen.getByTestId("open-import"));
+  fireEvent.change(screen.getByRole("textbox"), {
+    target: { value: "yaml with nothing to review" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Import$/ }));
+
+  await waitFor(() => expect(importWorkflowsAction).toHaveBeenCalledOnce());
+  expect(screen.queryByText("Review imported workflows")).toBeNull();
+  expect(screen.getByRole("textbox").hasAttribute("disabled")).toBe(true);
+
+  resolveImport({ created: ["Imported"], skipped: [] });
+  await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+});
+
 it("disables draft inputs while the initial preview is pending", () => {
   render(
     <ImportWorkflowsDialog

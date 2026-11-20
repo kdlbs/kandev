@@ -97,6 +97,9 @@ func scanParsedGoFile(fileSet *token.FileSet, path string, file *ast.File) []str
 			return true
 		}
 		if (execPkg.Name == "unix" || execPkg.Name == "syscall") && selector.Sel.Name == "Exec" {
+			if len(call.Args) == 0 || !isGitString(call.Args[0]) {
+				return true
+			}
 			position := fileSet.Position(call.Pos())
 			violations = append(violations, fmt.Sprintf("%s:%d: direct exec", filepath.ToSlash(path), position.Line))
 			return true
@@ -223,6 +226,34 @@ func run() error {
 `)
 	if len(violations) != 0 {
 		t.Fatalf("classified Git lifecycle violations = %v", violations)
+	}
+}
+
+func TestScanGoSourceRejectsDirectGitExec(t *testing.T) {
+	violations := scanGoSource(t, "fixture.go", `package fixture
+
+import "syscall"
+
+func run() {
+	_ = syscall.Exec("git", []string{"git", "status"}, nil)
+}
+`)
+	if len(violations) != 1 || !strings.Contains(violations[0], "direct exec") {
+		t.Fatalf("direct Git exec violations = %v", violations)
+	}
+}
+
+func TestScanGoSourceAllowsNonGitExec(t *testing.T) {
+	violations := scanGoSource(t, "fixture.go", `package fixture
+
+import "syscall"
+
+func run() {
+	_ = syscall.Exec("/bin/zsh", []string{"/bin/zsh", "-l"}, nil)
+}
+`)
+	if len(violations) != 0 {
+		t.Fatalf("non-Git exec violations = %v", violations)
 	}
 }
 

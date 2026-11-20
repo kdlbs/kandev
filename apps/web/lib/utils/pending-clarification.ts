@@ -5,38 +5,48 @@ import type {
   Turn,
 } from "@/lib/types/http";
 import { isInputCapableSessionState } from "./task-pending-input";
+import {
+  permissionPresentationFromMetadata,
+  permissionRequestsInput,
+} from "@/lib/permissions/presentation";
 
 export type PendingClarificationScope = {
   /**
-   * Undefined means turn history is not loaded, so pendingAction gates the
-   * fallback. Null means history is loaded but has no durable turns, so all
-   * messages are hidden except a pending request explicitly detached after
-   * agent disconnection. A string scopes detection to that exact turn. An
-   * empty object disables detection.
+   * Undefined means turn history is not loaded, so the clarification
+   * projection gates the message-based fallback. Null means history is loaded
+   * without an eligible turn, so detection is disabled. A string scopes
+   * detection to that exact turn. An empty object disables detection.
    */
   currentTurnId?: string | null;
   /** True when currentTurnId identifies a completed turn. */
   currentTurnCompleted?: boolean;
   /**
-   * Allows detached clarification requests to remain answerable after their
-   * turn is no longer the newest durable turn.
+   * Session clarification projection. Undefined means the projection is not
+   * available. Null or another action suppresses active discovery. A detached
+   * question does not widen turn ownership.
    */
   pendingAction?: TaskPendingAction | null;
-  allowDetached?: boolean;
 };
-
-function hasDetachedPendingClarification(messages: readonly Message[]): boolean {
-  return messages.some((message) => {
-    if (!isPendingClarificationMessage(message)) return false;
-    const metadata = message.metadata as ClarificationRequestMetadata | undefined;
-    return metadata?.agent_disconnected === true;
-  });
-}
 
 export function isPendingClarificationMessage(message: Message): boolean {
   if (message.type !== "clarification_request") return false;
   const metadata = message.metadata as ClarificationRequestMetadata | undefined;
   return !metadata?.status || metadata.status === "pending";
+}
+
+function clarificationMessagesInScope(
+  messages: readonly Message[],
+  scope?: PendingClarificationScope,
+): readonly Message[] {
+  if (!scope) return messages;
+  if (scope.pendingAction !== undefined && scope.pendingAction !== "clarification") {
+    return [];
+  }
+  if (scope.currentTurnId === null) return [];
+  if (scope.currentTurnId === undefined) {
+    return scope.pendingAction === "clarification" ? messages : [];
+  }
+  return messages.filter((message) => message.turn_id === scope.currentTurnId);
 }
 
 // TurnDTO timestamps are normalized by the backend to UTC with a Z suffix.
@@ -111,30 +121,6 @@ export function clarificationTurnIdForSession(
   return newestDurableTurnId(turns);
 }
 
-function clarificationMessagesInScope(
-  messages: readonly Message[],
-  scope?: PendingClarificationScope,
-): readonly Message[] {
-  if (!scope) return messages;
-  const allowDetached =
-    (scope.allowDetached === true || scope.pendingAction === null) &&
-    scope.currentTurnCompleted !== true &&
-    hasDetachedPendingClarification(messages);
-  if (
-    scope.pendingAction !== undefined &&
-    scope.pendingAction !== "clarification" &&
-    !allowDetached
-  ) {
-    return [];
-  }
-  if (scope.currentTurnId === null && !allowDetached) return [];
-  if (allowDetached) return messages;
-  if (scope.currentTurnId === undefined) {
-    return scope.pendingAction === "clarification" ? messages : [];
-  }
-  return messages.filter((message) => message.turn_id === scope.currentTurnId);
-}
-
 function newestMessageTurnId(messages: readonly Message[]): string | undefined {
   let newest: Message | undefined;
   for (const message of messages) {
@@ -158,14 +144,11 @@ export function findPendingClarification(
 ): Message | null {
   if (!messages?.length) return null;
   const scoped = clarificationMessagesInScope(messages, scope);
-  // Sidebar callers do not have durable turn history. Use persisted message
+  // Legacy callers without durable turn history use the newest message turn as
+  // the inferred boundary. Detached metadata cannot cross it.
   const latestTurnId = newestMessageTurnId(scoped);
   for (let i = scoped.length - 1; i >= 0; i -= 1) {
-    const metadata = scoped[i].metadata as ClarificationRequestMetadata | undefined;
-    const isDetached = metadata?.agent_disconnected === true;
-    const detachedAllowed =
-      (scope?.allowDetached === true || scope?.pendingAction === null) && isDetached;
-    if (latestTurnId && scoped[i].turn_id !== latestTurnId && !detachedAllowed) continue;
+    if (latestTurnId && scoped[i].turn_id !== latestTurnId) continue;
     if (scoped[i].type !== "clarification_request") continue;
     if (isPendingClarificationMessage(scoped[i])) return scoped[i];
   }
@@ -225,7 +208,10 @@ export function hasPendingClarificationForSession(
 
 export function isPendingPermissionMessage(message: Message): boolean {
   if (message.type !== "permission_request") return false;
-  const metadata = message.metadata as { status?: string } | undefined;
+  const metadata = message.metadata as
+    | { status?: string; permission_presentation?: unknown }
+    | undefined;
+  if (!permissionRequestsInput(permissionPresentationFromMetadata(metadata))) return false;
   return !metadata?.status || metadata.status === "pending";
 }
 

@@ -946,6 +946,7 @@ export const NativeMessageList = memo(
       childrenByParentToolCallId,
       taskId,
       sessionId,
+      detailActive,
       messagesLoading,
       historyRefreshPending = false,
       historyStatus = "ready",
@@ -975,7 +976,7 @@ export const NativeMessageList = memo(
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const showTurnChangedFiles = useAppStore((state) => state.userSettings.showTurnChangedFiles);
-    const turnChanges = useSessionTurnChanges(sessionId);
+    const turnChanges = useSessionTurnChanges(sessionId, { detailActive });
 
     const visibleItems = useMemo(
       () =>
@@ -1066,6 +1067,7 @@ export const NativeMessageList = memo(
         ref={scrollRef}
         sessionId={sessionId ?? undefined}
         tabIndex={-1}
+        selectionDockHost
         className={`relative chat-message-list p-0 ${
           autoScrollEnabled &&
           (!motionEnabled || messagesLoading || historyRefreshPending || isLoadingMore)

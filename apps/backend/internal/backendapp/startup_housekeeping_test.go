@@ -7,7 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/internal/startup"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"testing"
 	"time"
 )
@@ -80,7 +80,7 @@ func TestHousekeepingPluginStartupDoesNotBlockOtherActivation(t *testing.T) {
 	}()
 	reporter := startup.New(nil)
 	ctx = startup.WithReporter(ctx, reporter)
-	startPluginsSubsystems(ctx, svc, lifecycle, bus.NewMemoryEventBus(logger.Default()), logger.Default(), func(fn func() error) { cleanups = append(cleanups, fn) })
+	startPluginsSubsystems(ctx, svc, lifecycle, lifecycle, bus.NewMemoryEventBus(logger.Default()), logger.Default(), func(fn func() error) { cleanups = append(cleanups, fn) })
 	later := make(chan struct{})
 	startup.AfterReady(ctx, func() { close(later) })
 	reporter.Set(startup.Ready)

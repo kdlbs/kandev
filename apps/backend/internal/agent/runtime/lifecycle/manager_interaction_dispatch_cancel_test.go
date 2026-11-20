@@ -647,7 +647,7 @@ func TestManager_CancelAgent_DispatchCompletionAtTimeoutBoundary(t *testing.T) {
 	fixture.execution.promptMu.Lock()
 	fixture.complete(t, fixture.generation)
 	err := fixture.manager.finishDispatchCancelTimeout(
-		context.Background(), fixture.execution, fixture.generation, nil,
+		context.Background(), fixture.execution, fixture.generation, nil, nil,
 	)
 	fixture.execution.promptMu.Unlock()
 	require.NoError(t, err, "an accepted completion available at the deadline must win")
@@ -736,7 +736,7 @@ func TestManager_CancelAgent_DispatchCompletionTimeoutPreservesTransportFailure(
 	}
 
 	err := fixture.manager.finishDispatchCancelTimeout(
-		context.Background(), fixture.execution, fixture.generation, nil,
+		context.Background(), fixture.execution, fixture.generation, nil, nil,
 	)
 	require.ErrorIs(t, err, ErrCancelEscalated)
 	require.ErrorContains(t, err, "dispatch completion transport failure")

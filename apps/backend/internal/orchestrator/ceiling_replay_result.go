@@ -15,6 +15,11 @@ type ceilingReplayResult struct {
 	outcome ceilingReplayOutcome
 	err     error
 	detail  string
+	// sessionID and turnID identify the launch an admitted replay created.
+	// They are empty for outcomes that did not launch and for replay kinds
+	// that create neither.
+	sessionID string
+	turnID    string
 }
 
 // failureDetail is the card-note and log text for a failed replay: the short
@@ -71,7 +76,10 @@ func ceilingReplayResultFromExecution(execution *executor.TaskExecution, err err
 	case execution == nil:
 		return ceilingReplayDeferredResult()
 	default:
-		return ceilingReplaySucceededResult()
+		result := ceilingReplaySucceededResult()
+		result.sessionID = execution.SessionID
+		result.turnID = execution.TurnID
+		return result
 	}
 }
 

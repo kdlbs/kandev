@@ -30,6 +30,17 @@ var validPriorities = map[string]struct{}{
 	"low":      {},
 }
 
+const postCommitSideEffectTimeout = 5 * time.Second
+
+// detachedPostCommitContext keeps committed state side effects ordered even
+// when the request is cancelled immediately after the database commit.
+func detachedPostCommitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), postCommitSideEffectTimeout)
+}
+
 // UpdateTaskPriority sets the priority field. Validates the value against
 // the four-value enum; rejects anything else.
 func (s *DashboardService) UpdateTaskPriority(ctx context.Context, taskID, priority string) error {
@@ -582,11 +593,13 @@ type TaskStatusUpdateRequest struct {
 	// ResumeIntent=true is an explicit "pick this up again" with required
 	// follow-up comment. Forces task_reopened_via_comment.
 	ResumeIntent bool
-	// SuppressStatusActivity is used by the orchestrator when it will publish
-	// the canonical task.state_changed event that owns the activity row. Gate
-	// redirects still log here because they do not publish that event.
-	SuppressStatusActivity bool
+	// Automatic terminal writes must not overwrite a later business-state change.
+	ExpectedCurrentState   string
+	ExpectedWorkflowStepID string
 }
+
+// ErrAutomaticCompletionStale means a newer task state owns the outcome.
+var ErrAutomaticCompletionStale = errors.New("task changed before automatic completion")
 
 // UpdateTaskStatus persists a new task status, optionally creates a comment,
 // and publishes an office.task.status_changed event so execution policy
@@ -612,10 +625,11 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 	if dbState == "" {
 		return &InvalidTaskStatusError{Status: req.NewStatus}
 	}
-
-	preStatus := ""
-	if exec, err := s.repo.GetTaskExecutionFields(ctx, req.TaskID); err == nil && exec != nil {
-		preStatus = exec.State
+	if s.taskStateWriter == nil {
+		return errors.New("task status writer is not configured")
+	}
+	if s.taskStateChangeEvents == nil {
+		return errors.New("task state change publisher is not configured")
 	}
 
 	expectedStepID := ""
@@ -625,26 +639,23 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 		return gateErr
 	}
 
-	if dbState == stateCompleted {
-		updated, err := s.repo.UpdateTaskStateIfWorkflowStep(ctx, req.TaskID, expectedStepID, dbState)
-		if err != nil {
-			return fmt.Errorf("update task state: %w", err)
-		}
-		if !updated {
-			return &WorkflowStepChangedError{TaskID: req.TaskID}
-		}
-	} else if err := s.repo.UpdateTaskState(ctx, req.TaskID, dbState); err != nil {
-		return fmt.Errorf("update task state: %w", err)
+	change, err := s.persistTaskStatus(ctx, req, dbState, expectedStepID)
+	if err != nil {
+		return err
 	}
 
-	commentID := s.maybeCreateStatusComment(ctx, req)
-	if !req.SuppressStatusActivity || pendingErr != nil {
-		s.logTaskStatusChangeActivity(ctx, req)
+	postCommitCtx, cancelPostCommit := detachedPostCommitContext(ctx)
+	defer cancelPostCommit()
+	commentID := s.maybeCreateStatusComment(postCommitCtx, req)
+	if change.Changed {
+		s.logTaskStatusChangeActivity(postCommitCtx, req)
+		s.taskStateChangeEvents.PublishCommittedTaskStateChange(postCommitCtx, change, true)
 	}
-	s.publishTaskStatusChanged(ctx, req)
-	s.publishCanonicalTaskUpdated(ctx, req.TaskID)
-	s.runReactivityForStatus(ctx, req, commentID, preStatus)
-	s.maybeSupersedeOnRework(ctx, req.TaskID, preStatus, dbState)
+	s.publishTaskStatusChanged(postCommitCtx, req)
+	s.publishCanonicalTaskUpdated(postCommitCtx, req.TaskID)
+	preStatus := string(change.OldState)
+	s.runReactivityForStatus(postCommitCtx, req, commentID, preStatus)
+	s.maybeSupersedeOnRework(postCommitCtx, req.TaskID, preStatus, dbState)
 
 	return gateErr
 }
@@ -707,8 +718,8 @@ func (s *DashboardService) logTaskStatusChangeActivity(ctx context.Context, req 
 // through to the approver check exactly like a terminal-step task rather
 // than being redirected forever.
 //
-// The step-position check fails CLOSED, but a lookup error is not the same
-// as a confirmed non-terminal step: it aborts the whole update (a plain,
+// The final-step check fails CLOSED, but a lookup error is not the same
+// as a confirmed non-final step: it aborts the whole update (a plain,
 // non-ApprovalsPendingError error, leaving dbState/apiStatus untouched) so
 // the caller persists nothing rather than writing a redirect it cannot
 // justify. Only a successful read reporting "not terminal" persists the
@@ -724,11 +735,11 @@ func (s *DashboardService) applyApprovalGate(
 		return fmt.Errorf("approval gate: resolve task workflow step: %w", err)
 	}
 	*expectedStepID = currentStepID
-	terminal, hasStep, err := s.repo.IsTaskWorkflowStepTerminal(ctx, taskID)
+	final, hasStep, err := s.repo.IsTaskOnFinalStep(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("approval gate: resolve workflow step: %w", err)
 	}
-	if hasStep && !terminal {
+	if hasStep && !final {
 		*dbState = stateInReview
 		*apiStatus = statusInReviewLowercase
 		return &ApprovalsPendingError{Reason: ApprovalGateReasonWorkflowStep}

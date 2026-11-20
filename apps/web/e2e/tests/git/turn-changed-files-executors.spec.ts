@@ -1,7 +1,11 @@
 import { dockerTest as test, expect } from "../../fixtures/docker-test-base";
 import { dockerInspectExists, dockerRemove } from "../../helpers/docker";
 import { waitForLatestSessionDone } from "../../helpers/session";
-import { enableTurnChangedFiles, waitForTurnChangeCount } from "./turn-changed-files-helpers";
+import {
+  enableTurnChangedFiles,
+  waitForTurnChangeCount,
+  waitForTurnChangeFileContent,
+} from "./turn-changed-files-helpers";
 
 test.describe("Docker executor turn change retention", () => {
   test("keeps exported turn content after container removal and backend restart", async ({
@@ -57,6 +61,11 @@ test.describe("Docker executor turn change retention", () => {
       };
       const file = filePage.files.find((entry) => entry.path === "untracked_test.txt");
       expect(file?.id).toBeTruthy();
+      // The card is published before content preservation settles. Wait for the
+      // durable export before destroying the executor source it reads from.
+      expect(
+        await waitForTurnChangeFileContent(apiClient, sessionId, changeSet!.id, file!.id),
+      ).toContain("INITIAL_CONTENT");
 
       dockerRemove(containerId);
       expect(dockerInspectExists(containerId)).toBe(false);

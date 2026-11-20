@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,7 +18,7 @@ func TestCanonicalDeliveryAttemptCancellation(t *testing.T) {
 			defer cancel()
 			attemptError := fmt.Errorf("%s: %w", stage, driver.ErrBadConn)
 			calls := 0
-			result, err := projectCanonicalDeliveryWithRetry(ctx, func() ([]bool, error) {
+			result, err := projectCanonicalDeliveryWithRetry(ctx, func() ([]models.CanonicalAgentDeliveryProjectionResult, error) {
 				calls++
 				cancel()
 				return nil, attemptError
@@ -34,18 +35,18 @@ func TestCanonicalDeliveryAttemptCancellation(t *testing.T) {
 func TestCanonicalDeliveryAttemptSuccessfulCommitAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	result, err := projectCanonicalDeliveryWithRetry(ctx, func() ([]bool, error) {
+	result, err := projectCanonicalDeliveryWithRetry(ctx, func() ([]models.CanonicalAgentDeliveryProjectionResult, error) {
 		cancel()
-		return []bool{true, false}, nil
+		return []models.CanonicalAgentDeliveryProjectionResult{{Appended: true}, {Appended: false}}, nil
 	})
 	require.NoError(t, err)
-	require.Equal(t, []bool{true, false}, result)
+	require.Equal(t, []models.CanonicalAgentDeliveryProjectionResult{{Appended: true}, {Appended: false}}, result)
 }
 
 func TestCanonicalDeliveryAttemptActiveContextError(t *testing.T) {
 	attemptError := fmt.Errorf("commit: %w", driver.ErrBadConn)
 	calls := 0
-	_, err := projectCanonicalDeliveryWithRetry(t.Context(), func() ([]bool, error) {
+	_, err := projectCanonicalDeliveryWithRetry(t.Context(), func() ([]models.CanonicalAgentDeliveryProjectionResult, error) {
 		calls++
 		return nil, attemptError
 	})
@@ -55,14 +56,14 @@ func TestCanonicalDeliveryAttemptActiveContextError(t *testing.T) {
 
 func TestCanonicalDeliveryAttemptContentionRetry(t *testing.T) {
 	calls := 0
-	result, err := projectCanonicalDeliveryWithRetry(t.Context(), func() ([]bool, error) {
+	result, err := projectCanonicalDeliveryWithRetry(t.Context(), func() ([]models.CanonicalAgentDeliveryProjectionResult, error) {
 		calls++
 		if calls == 1 {
 			return nil, &pgconn.PgError{Code: "55P03"}
 		}
-		return []bool{true}, nil
+		return []models.CanonicalAgentDeliveryProjectionResult{{Appended: true}}, nil
 	})
 	require.NoError(t, err)
-	require.Equal(t, []bool{true}, result)
+	require.Equal(t, []models.CanonicalAgentDeliveryProjectionResult{{Appended: true}}, result)
 	require.Equal(t, 2, calls)
 }

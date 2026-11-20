@@ -155,6 +155,11 @@ func TestSyncDueConfigs_FirstKnownFingerprintRearmsSuspendedConfig(t *testing.T)
 		cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 		return err == nil && cfg != nil && cfg.PollSuspended
 	}, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool {
+		svc.automaticMu.Lock()
+		defer svc.automaticMu.Unlock()
+		return svc.automaticInFlight["ws-1"] == nil
+	}, time.Second, time.Millisecond)
 
 	clients.fingerprint = "active:2"
 	clients.client = seededMockClient()

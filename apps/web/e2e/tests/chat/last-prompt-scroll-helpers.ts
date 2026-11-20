@@ -134,13 +134,26 @@ export async function seedScrolledPastLastPrompt(
     } else {
       await session.sendMessage(text);
     }
-    await session.waitForChatIdle({ timeout: 30_000 });
+    // An idle composer or an empty turn list can still describe the prior
+    // turn before this submission has been accepted by the backend.
     await expect
-      .poll(async () => {
-        const { turns } = await apiClient.listSessionTurns(sessionId);
-        return turns.filter((turn) => !turn.completed_at).length;
-      })
-      .toBe(0);
+      .poll(
+        async () => {
+          const [{ messages }, { turns }] = await Promise.all([
+            apiClient.listSessionMessages(sessionId),
+            apiClient.listSessionTurns(sessionId),
+          ]);
+          const prompt = messages.find(
+            (message) => message.author_type === "user" && message.content === text,
+          );
+          return prompt?.turn_id
+            ? (turns.find((turn) => turn.id === prompt.turn_id)?.completed_at ?? null)
+            : null;
+        },
+        { timeout: 60_000, message: "Waiting for the submitted prompt's turn to finish" },
+      )
+      .toBeTruthy();
+    await session.waitForChatIdle({ timeout: 30_000 });
   };
 
   await send(FIRST_PROMPT_MARKER);

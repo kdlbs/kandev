@@ -1,6 +1,7 @@
 "use client";
 
-import { useId, useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useMCPAssignmentFocus } from "@/hooks/domains/workspace/use-mcp-assignment-focus";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
@@ -31,6 +32,7 @@ import type {
 export type { MCPInheritedSelection } from "@/lib/types/http-mcp";
 
 type MCPSelectionPickerProps = {
+  assignment?: { ownerKey: string; active: boolean; ready: boolean };
   workspaceId?: string | null;
   definitions: MCPServerDefinition[];
   selectedIds: string[];
@@ -45,6 +47,9 @@ type MCPSelectionPickerProps = {
   renderServerAnnotation?: (id: string) => ReactNode;
 };
 
+/**
+ * Render inherited selections with owner labels and the session-specific origin sections.
+ */
 function InheritedServers({
   inherited,
   context,
@@ -58,6 +63,7 @@ function InheritedServers({
 }) {
   const { t } = useTranslation();
   const labels: Record<MCPSelectionOrigin["scope"], string> = {
+    automation: t("automations:automation"),
     profile: t("settings:mcpOriginProfile"),
     repository: t("settings:mcpOriginRepository"),
     task: t("settings:mcpOriginTask"),
@@ -80,7 +86,9 @@ function InheritedServers({
           <div
             key={item.definition.id}
             data-testid={`mcp-inherited-server-${item.definition.id}`}
-            className="rounded-md border border-dashed p-3"
+            data-mcp-definition-id={item.definition.id}
+            tabIndex={-1}
+            className="rounded-md border border-dashed p-3 data-[mcp-highlighted=true]:ring-2 data-[mcp-highlighted=true]:ring-primary/60"
           >
             <div className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-sm font-medium">
@@ -124,8 +132,10 @@ function ServerRow({
   return (
     <label
       data-testid={`mcp-choice-${server.id}`}
+      data-mcp-definition-id={server.id}
+      tabIndex={-1}
       className={cn(
-        "flex items-start gap-3 cursor-pointer hover:bg-muted/40",
+        "flex items-start gap-3 cursor-pointer hover:bg-muted/40 data-[mcp-highlighted=true]:ring-2 data-[mcp-highlighted=true]:ring-inset data-[mcp-highlighted=true]:ring-primary/60",
         sessionPresentation
           ? "min-h-7 px-3 py-2.5 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           : "min-h-11 rounded-md border p-3",
@@ -183,7 +193,42 @@ function AdditionalServersHeading({
   );
 }
 
+/**
+ * Supply workspace owner data for selection provenance labels.
+ */
+function useMCPOriginContext(workspaceId?: string | null) {
+  return useAppStore(
+    useShallow((state) => ({
+      workspaceId: workspaceId ?? state.workspaces.activeId,
+      profiles: state.agentProfiles.items,
+      repositories: state.repositories.itemsByWorkspaceId,
+      tasks: state.kanban.tasks,
+      workflows: state.workflows.items,
+      sessions: state.taskSessions.items,
+      automations:
+        state.automations.byWorkspace?.[workspaceId ?? state.workspaces.activeId ?? ""]?.items ??
+        state.automations.items,
+    })),
+  );
+}
+
+function AssignmentFocus({
+  container,
+  workspaceId,
+  definitions,
+  assignment,
+}: {
+  container: RefObject<HTMLDivElement | null>;
+  workspaceId: string;
+  definitions: MCPServerDefinition[];
+  assignment: NonNullable<MCPSelectionPickerProps["assignment"]>;
+}) {
+  useMCPAssignmentFocus({ container, workspaceId, definitions, ...assignment });
+  return null;
+}
+
 export function MCPSelectionContent({
+  assignment,
   workspaceId,
   definitions,
   selectedIds,
@@ -203,16 +248,7 @@ export function MCPSelectionContent({
   onQueryChange: (query: string) => void;
 }) {
   const { t } = useTranslation();
-  const context = useAppStore(
-    useShallow((state) => ({
-      workspaceId: workspaceId ?? definitions[0]?.workspace_id ?? state.workspaces.activeId,
-      profiles: state.agentProfiles.items,
-      repositories: state.repositories.itemsByWorkspaceId,
-      tasks: state.kanban.tasks,
-      workflows: state.workflows.items,
-      sessions: state.taskSessions.items,
-    })),
-  );
+  const context = useMCPOriginContext(workspaceId ?? definitions[0]?.workspace_id);
   const inheritedIds = useMemo(
     () => new Set((inherited ?? []).map((item) => item.definition.id)),
     [inherited],
@@ -230,12 +266,22 @@ export function MCPSelectionContent({
     onSelectedIdsChange([...new Set(next)]);
   };
   const errorKey = mcpSelectionErrorKey(error);
+  const container = useRef<HTMLDivElement>(null);
 
   return (
     <div
       className={cn("min-h-0", sessionPresentation ? "space-y-6" : "space-y-4")}
       data-testid={testId}
+      ref={container}
     >
+      {assignment && workspaceId && (
+        <AssignmentFocus
+          container={container}
+          workspaceId={workspaceId}
+          definitions={definitions}
+          assignment={assignment}
+        />
+      )}
       {errorKey && (
         <p className="text-sm text-destructive" role="alert">
           {t(errorKey)}
@@ -321,6 +367,7 @@ function ServerChoices({
 }
 
 export function MCPSelectionPicker({
+  assignment,
   workspaceId,
   definitions,
   selectedIds,
@@ -340,6 +387,7 @@ export function MCPSelectionPicker({
   const title = label ?? t("settings:mcpServers");
   const pickerBody = (
     <MCPSelectionContent
+      assignment={assignment && { ...assignment, active: assignment.active && open }}
       workspaceId={workspaceId}
       query={query}
       onQueryChange={setQuery}

@@ -371,6 +371,64 @@ func TestWorkflowStore_ApplyTransitionPullsNextFeederTaskOnVacate(t *testing.T) 
 	}
 }
 
+// TestWorkflowStore_ApplyTransitionFeederPullClearsQueueMarker pins
+// AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.2: an engine transition that vacates a
+// limited step pulls a feeder-queued task into it, and the pulled task must
+// leave the queued band (queued_for_step_id and queued_at cleared). A stale
+// marker on an admitted task makes autoStartTaskForLoadedStep skip entry
+// effects, so the task holds a WIP slot without ever starting.
+func TestWorkflowStore_ApplyTransitionFeederPullClearsQueueMarker(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step-limited")
+	if err := repo.CreateTaskWithWorkflowStepAdmission(ctx, &models.Task{
+		ID:          "task-fed",
+		WorkspaceID: "ws1",
+		WorkflowID:  "wf1",
+		Title:       "Fed",
+		State:       "TODO",
+		Priority:    "medium",
+	}, "step-limited", 1, "step-feeder", 0); err != nil {
+		t.Fatalf("CreateTaskWithWorkflowStepAdmission: %v", err)
+	}
+	fed, err := repo.GetTask(ctx, "task-fed")
+	if err != nil {
+		t.Fatalf("GetTask(task-fed): %v", err)
+	}
+	if fed.WorkflowStepID != "step-feeder" || fed.QueuedForStepID != "step-limited" {
+		t.Fatalf("precondition: feeder-queued placement step=%q queue=%q", fed.WorkflowStepID, fed.QueuedForStepID)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-feeder"] = &wfmodels.WorkflowStep{
+		ID: "step-feeder", WorkflowID: "wf1", Name: "Feeder", Position: 0,
+	}
+	stepGetter.steps["step-limited"] = &wfmodels.WorkflowStep{
+		ID: "step-limited", WorkflowID: "wf1", Name: "Limited", Position: 1,
+		WIPLimit: 1, PullFromStepID: "step-feeder",
+	}
+	stepGetter.steps["step-next"] = &wfmodels.WorkflowStep{
+		ID: "step-next", WorkflowID: "wf1", Name: "Next", Position: 2,
+	}
+	store := newWorkflowStore(repo, stepGetter, nil, noopPublisher, testLogger(), &operationLedger{},
+		func(context.Context, *models.Task, string, string, string, string) {})
+
+	if err := store.ApplyTransition(ctx, "t1", "s1", "step-limited", "step-next", "on_turn_complete"); err != nil {
+		t.Fatalf("ApplyTransition: %v", err)
+	}
+
+	pulled, err := repo.GetTask(ctx, "task-fed")
+	if err != nil {
+		t.Fatalf("GetTask(task-fed): %v", err)
+	}
+	if pulled.WorkflowStepID != "step-limited" || !pulled.WIPAdmitted {
+		t.Fatalf("pulled placement: step=%q admitted=%t, want step-limited admitted", pulled.WorkflowStepID, pulled.WIPAdmitted)
+	}
+	if pulled.QueuedForStepID != "" || pulled.QueuedAt != nil {
+		t.Fatalf("pulled task kept queue marker: queued_for_step_id=%q queued_at=%v", pulled.QueuedForStepID, pulled.QueuedAt)
+	}
+}
+
 // TestWorkflowStore_ApplyTransitionIfAtStep_AppliesWhenStepMatches is the
 // AC-46/48 orchestrator-level happy path: the CAS precondition holds, so the
 // move lands and behaves like ApplyTransition (task moved, review status

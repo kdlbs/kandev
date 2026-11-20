@@ -95,25 +95,28 @@ export function McpToolList({
   const { t } = useTranslation();
   const counts = getMcpToolCounts(server);
   const hasEstimates = server.tools?.some((tool) => tool.estimated_tokens !== undefined);
+  const summary = (
+    <>
+      <McpServerSummary server={server} />
+      {hasEstimates && (
+        <p className="py-2 text-[13px] text-muted-foreground">{t("task:mcpTokenEstimateHelp")}</p>
+      )}
+      {counts.truncated && (
+        <p className="py-2 text-[13px] text-muted-foreground">
+          {t("task:mcpStoredToolCount", { count: counts.stored })}
+        </p>
+      )}
+    </>
+  );
   return (
     <div data-testid="mcp-tool-list" className="flex h-full min-h-0 flex-col text-[13px] leading-5">
-      <div className="shrink-0">
-        {onBack && <BackToServers onBack={onBack} />}
-        <McpServerSummary server={server} />
-        {hasEstimates && (
-          <p className="py-2 text-[13px] text-muted-foreground">{t("task:mcpTokenEstimateHelp")}</p>
-        )}
-        {counts.truncated && (
-          <p className="py-2 text-[13px] text-muted-foreground">
-            {t("task:mcpStoredToolCount", { count: counts.stored })}
-          </p>
-        )}
-      </div>
+      <div className="shrink-0">{onBack ? <BackToServers onBack={onBack} /> : summary}</div>
       <div
         ref={scrollRef}
         data-testid="mcp-tool-list-scroll"
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-2 pr-1"
       >
+        {onBack && summary}
         <CatalogNotice server={server} />
         <ToolRows server={server} onSelect={onSelect} />
         {counts.truncated && (

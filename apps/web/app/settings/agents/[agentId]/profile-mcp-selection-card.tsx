@@ -13,7 +13,7 @@ import {
 import { MCPSelectionContent } from "@/components/mcp/mcp-selection-picker";
 import { useAppStore } from "@/components/state-provider";
 import { useMCPWorkspaceDefinitions } from "@/hooks/domains/workspace/use-mcp-workspace-settings";
-import { isHandledApiError } from "@/lib/api/client";
+import { MCPSelectionSaveFeedback } from "@/components/mcp/mcp-selection-save-feedback";
 import { useMCPSelectionEditor } from "@/hooks/domains/workspace/use-mcp-selection-editor";
 import { Button } from "@kandev/ui/button";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
@@ -70,6 +70,12 @@ function ProfileMCPSelectionContent({
       <MCPSelectionContent
         query={query}
         onQueryChange={setQuery}
+        assignment={{
+          ownerKey: profileId,
+          active: !workspaceRequired,
+          ready:
+            Boolean(editor.selection) && !definitions.loading && !editor.loading && !hasLoadError,
+        }}
         workspaceId={selectedWorkspaceId ?? undefined}
         definitions={definitions.definitions}
         selectedIds={selectedIds}
@@ -112,11 +118,7 @@ function ProfileMCPSelectionContent({
           {t("settings:mcpLoadFailed")}
         </p>
       )}
-      {Boolean(editor.saveError) && !isHandledApiError(editor.saveError) && (
-        <p className="text-sm text-destructive" role="alert">
-          {t("settings:mcpSelectionSaveFailed")}
-        </p>
-      )}
+      <MCPSelectionSaveFeedback error={editor.saveError} reload={editor.reload} />
     </CardContent>
   );
 }
@@ -160,6 +162,7 @@ function useProfileMCPDraft(
       !editor.loading &&
       !editor.saving &&
       !editor.loadError &&
+      !editor.saveError &&
       !definitions.error,
     save: async () => {
       if (!(await draft.save())) throw new SettingsSaveCancelledError();

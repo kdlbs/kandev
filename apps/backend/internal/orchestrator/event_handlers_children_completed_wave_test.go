@@ -17,7 +17,7 @@ func TestChildCompletionPayload_DerivesWaveIdentityFromIDSortedRows(t *testing.T
 	// Deliberately out of id order (as if ordered by an earlier created_at).
 	rows := []models.ChildCompletionRow{
 		{ID: "child-b", State: v1.TaskStateCompleted},
-		{ID: "child-a", State: v1.TaskStateCancelled},
+		{ID: "child-a", State: v1.TaskStateCompleted},
 	}
 
 	payload := childCompletionPayload("parent-1", rows)

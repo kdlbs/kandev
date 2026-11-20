@@ -1,5 +1,6 @@
 import type { TaskSession } from "@/lib/types/http";
 import type { SessionModeState, SessionModelsState } from "./types";
+import { normalizeModelCatalog } from "@/lib/model-catalog";
 
 type SessionModelsHydration = {
   sessionModels?: { bySessionId: SessionModelsState["bySessionId"] };
@@ -70,6 +71,7 @@ function mapSessionConfigOption(
     options: Array.isArray(option.options)
       ? (option.options as { value: string; name: string; description?: string }[])
       : undefined,
+    catalog: normalizeModelCatalog(option.catalog),
   };
 }
 

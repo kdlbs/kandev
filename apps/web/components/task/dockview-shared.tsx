@@ -1,5 +1,6 @@
 "use client";
 
+import { TaskGraphPanel } from "@/components/task-graph/task-graph-panel";
 import React, { useCallback, useEffect } from "react";
 import {
   DockviewDefaultTab,
@@ -129,6 +130,7 @@ export const dockviewComponents: Record<string, React.FunctionComponent<IDockvie
   "mr-detail": PortalSlot,
   "review-detail": PortalSlot,
   "background-work": PortalSlot,
+  "task-graph": PortalSlot,
   // Generic component every plugin-contributed task panel shares (Approach
   // A1) — panel identity lives in params.pluginId/params.panelKey, resolved
   // by PluginTaskPanel. See lib/state/layout-manager/plugin-panels.ts.
@@ -249,6 +251,7 @@ function DiffViewerContent({
   panelId: string;
   params: Record<string, unknown>;
 }) {
+  const detailActive = usePanelActive(panelId);
   const selectedDiff = useDockviewStore((s) => s.selectedDiff);
   const setSelectedDiff = useDockviewStore((s) => s.setSelectedDiff);
   const { openFile } = useFileEditors();
@@ -271,6 +274,7 @@ function DiffViewerContent({
 
   return (
     <TaskChangesPanel
+      detailActive={detailActive}
       mode={panelKind as "all" | "file"}
       filePath={selectedPath}
       fileRepositoryName={selectedRepositoryName}
@@ -418,6 +422,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
     />
   ),
   "background-work": (panelId, params) => <BackgroundWorkPanel panelId={panelId} params={params} />,
+  "task-graph": () => <TaskGraphPanel />,
 };
 
 /** Render a dockview panel's portal content by looking up its (alias-resolved)

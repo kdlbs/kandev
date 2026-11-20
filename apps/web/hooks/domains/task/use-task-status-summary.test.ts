@@ -32,6 +32,31 @@ describe("collectTaskStatusSummaryCandidates", () => {
     expect(collectTaskStatusSummaryCandidates(state, "task-1")).toEqual([queuedSummary]);
   });
 
+  it("finds an ephemeral Quick Chat task only in the retained summary cache", () => {
+    const quickChatSummary: TaskStatusSummary = {
+      ...summary(7),
+      turn_error: {
+        session_id: "quick-session",
+        message_id: "failure-7",
+        stamp: "failure-7",
+        occurred_at: "2026-10-29T20:32:55Z",
+        preview: "Failed to execute statement",
+      },
+    };
+    const candidates = collectTaskStatusSummaryCandidates(
+      {
+        taskOverview: { byId: {} },
+        kanban: { tasks: [] },
+        kanbanMulti: { snapshots: {} },
+        sidebarArchivedTasks: { itemsByWorkspaceId: {} },
+        sidebarStatusSummaryByWorkspaceId: { workspace: { "quick-task": quickChatSummary } },
+      },
+      "quick-task",
+    );
+
+    expect(candidates).toEqual([quickChatSummary]);
+  });
+
   it("collects the task from live kanban, snapshots, and archived lists", () => {
     const liveSummary = summary(4);
     const candidates = collectTaskStatusSummaryCandidates(

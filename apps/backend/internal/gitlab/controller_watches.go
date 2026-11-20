@@ -69,6 +69,7 @@ func (c *Controller) RegisterWatchHTTPRoutes(router *gin.Engine) {
 
 	// MR write actions
 	api.PUT("/mrs/merge", c.httpMergeMR)
+	api.PUT("/mrs/ready", c.httpMarkMRReady)
 	api.POST("/mrs/approve", c.httpApproveMR)
 	api.POST("/mrs/unapprove", c.httpUnapproveMR)
 	api.PUT("/mrs/labels", c.httpSetMRLabels)
@@ -412,10 +413,73 @@ func (c *Controller) httpMergeMR(ctx *gin.Context) {
 	}
 	mr, err := c.service.MergeMRForWorkspaceHost(ctx.Request.Context(), c.workspaceID(ctx), ctx.Query("expected_host"), req.Project, req.IID, req.Method, req.SquashCommitMessage)
 	if err != nil {
-		writeWorkspaceClientActionError(ctx, err, "merge request merge")
+		writeMergeActionError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, mr)
+}
+
+// writeMergeActionError maps the merge route's own failures to fixed messages
+// and leaves every other error to the shared provider-action mapping.
+func writeMergeActionError(ctx *gin.Context, err error) {
+	var refused *MergeRefusedError
+	switch {
+	case errors.Is(err, ErrMRIsDraft):
+		ctx.JSON(http.StatusConflict, gin.H{responseErrorKey: "This merge request is a draft; mark it ready first"})
+	case errors.As(err, &refused):
+		switch refused.Status {
+		case http.StatusConflict:
+			ctx.JSON(http.StatusConflict, gin.H{responseErrorKey: "The source branch changed after it was read; refresh and retry"})
+		case http.StatusUnprocessableEntity:
+			ctx.JSON(http.StatusUnprocessableEntity, gin.H{responseErrorKey: "GitLab rejected the merge options"})
+		default:
+			ctx.JSON(http.StatusConflict, gin.H{responseErrorKey: "GitLab cannot merge this merge request yet"})
+		}
+	default:
+		writeWorkspaceClientActionError(ctx, err, "merge request merge")
+	}
+}
+
+type markMRReadyRequest struct {
+	Project string `json:"project"`
+	IID     int    `json:"iid"`
+}
+
+func (c *Controller) httpMarkMRReady(ctx *gin.Context) {
+	var req markMRReadyRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Project) == "" || req.IID < 1 {
+		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "project and a positive iid are required"})
+		return
+	}
+	mr, err := c.service.MarkMRReadyForWorkspaceHost(ctx.Request.Context(), c.workspaceID(ctx), ctx.Query("expected_host"), req.Project, req.IID)
+	if err != nil {
+		writeMarkReadyError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, mr)
+}
+
+var markReadyErrorResponses = []struct {
+	err     error
+	status  int
+	message string
+}{
+	{ErrMRNotOpen, http.StatusConflict, "This merge request is not open; reopen it in GitLab before marking it ready"},
+	{ErrDraftMarkerNotFound, http.StatusUnprocessableEntity, "The draft marker is not at the start of the title; edit the title in GitLab"},
+	{ErrDraftTitleEmpty, http.StatusUnprocessableEntity, "The title would be empty without the draft marker; edit the title in GitLab"},
+	{ErrMRReadAfterReady, http.StatusBadGateway, "Merge request title updated, but its status could not be refreshed; refresh the panel"},
+	{ErrMRStillDraft, http.StatusConflict, "GitLab still reports this merge request as a draft; refresh and try again, or check it in GitLab"},
+	{ErrMRNilResult, http.StatusBadGateway, "GitLab returned no merge request; try again"},
+}
+
+func writeMarkReadyError(ctx *gin.Context, err error) {
+	for _, response := range markReadyErrorResponses {
+		if errors.Is(err, response.err) {
+			ctx.JSON(response.status, gin.H{responseErrorKey: response.message})
+			return
+		}
+	}
+	writeWorkspaceClientActionError(ctx, err, "mark merge request ready")
 }
 
 type approveMRRequest struct {

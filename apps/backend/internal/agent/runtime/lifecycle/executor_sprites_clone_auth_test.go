@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,10 +23,10 @@ func (c *recordingSpriteReconnectControl) Delete(_ context.Context, _ string) er
 func (c *recordingSpriteReconnectControl) Create(
 	_ context.Context,
 	req *ExecutorCreateRequest,
-) (int, error) {
+) (*agentctl.CreateInstanceResponse, error) {
 	c.calls = append(c.calls, "POST")
 	c.created = req
-	return 41002, nil
+	return &agentctl.CreateInstanceResponse{ID: req.InstanceID, Port: 41002, ScopedMCPRoutes: true}, nil
 }
 
 func TestRewriteGitHubSSHToHTTPS(t *testing.T) {
@@ -174,12 +175,12 @@ func TestSpritesBrokerReconnectRequiresCredentialRefresh(t *testing.T) {
 	}
 	control := &recordingSpriteReconnectControl{}
 	req := &ExecutorCreateRequest{Env: managed}
-	port, err := replaceSpriteReconnectInstance(context.Background(), control, req, "instance-1")
+	response, err := replaceSpriteReconnectInstance(context.Background(), control, req, "instance-1")
 	if err != nil {
 		t.Fatalf("replaceSpriteReconnectInstance() error = %v", err)
 	}
-	if port != 41002 || strings.Join(control.calls, ",") != "DELETE,POST" {
-		t.Fatalf("replacement result: port=%d calls=%v", port, control.calls)
+	if response.Port != 41002 || !response.ScopedMCPRoutes || strings.Join(control.calls, ",") != "DELETE,POST" {
+		t.Fatalf("replacement result: response=%+v calls=%v", response, control.calls)
 	}
 	if control.created.Env[envKeyGitHubCredentialLease] != "new-lease" {
 		t.Fatalf("replacement lease = %q", control.created.Env[envKeyGitHubCredentialLease])

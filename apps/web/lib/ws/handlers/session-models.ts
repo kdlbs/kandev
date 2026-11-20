@@ -7,17 +7,13 @@ import type {
   SessionModelsState,
 } from "@/lib/state/slices/session-runtime/types";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { normalizeModelCatalog } from "@/lib/model-catalog";
+import type {
+  PersistedRuntimeConfig,
+  SessionModelConfigOption,
+} from "@/lib/ws/handlers/session-models-types";
 
 const debug = createDebugLogger("model-selector:ws");
-
-type SessionModelConfigOption = SessionModelsPayload["config_options"][number];
-
-type PersistedRuntimeConfig = {
-  model?: string;
-  configOptions?: Record<string, string>;
-  baseline?: Record<string, string>;
-};
-
 type ResolvedModelsUpdate = {
   currentModelId: string;
   isEmpty: boolean;
@@ -266,6 +262,7 @@ function resolveConfigOptions(
     currentValue: resolvedConfigOptionValue(option, pendingRuntime, currentModelId),
     category: option.category,
     options: option.options,
+    catalog: normalizeModelCatalog(option.catalog),
   }));
 }
 

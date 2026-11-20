@@ -1,10 +1,13 @@
 import { type Locator, type Page } from "@playwright/test";
+import { assertDirtyQuickChatDeletion } from "./quick-chat-dirty-delete-helpers";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { attachAvailableCommandsCapture, attachShellInputCapture } from "../../helpers/ws-capture";
+import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionState } from "../../helpers/session";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
+import type { ExecutePromptRequest } from "@/lib/api/domains/utility-api";
 import {
   openQuickChatSetup,
   openQuickChatWithAgent,
@@ -57,6 +60,49 @@ async function dragQuickChatTab(page: Page, source: Locator, target: Locator) {
 }
 
 test.describe("Quick Chat", () => {
+  test("Escape cancels a running Quick Chat turn without closing the dialog", async ({
+    testPage,
+    apiClient,
+  }) => {
+    test.setTimeout(90_000);
+    const ws = watchWs(testPage);
+    await apiClient.saveUserSettings({ escape_cancels_agent: true });
+
+    const dialog = await openQuickChatSetup(testPage);
+    const started = await startQuickChatFromSetup(dialog, testPage);
+    await sendQuickChatMessage(dialog, testPage, "/slow 8s");
+    await waitForSessionState(apiClient, {
+      taskId: started.task_id,
+      sessionId: started.session_id,
+      expectedState: "RUNNING",
+      message: "Quick Chat did not start the slow turn",
+      timeout: 30_000,
+    });
+
+    const editor = dialog.locator('.tiptap.ProseMirror[contenteditable="true"]:visible').first();
+    const cancelResponse = ws.waitForResponse("agent.cancel");
+    await editor.press("Escape");
+    await cancelResponse;
+
+    await expect(dialog).toBeVisible();
+  });
+
+  // @covers AC-UI-TASK-CLEANUP-CONFIRMATION-001.12 AC-UI-TASK-CLEANUP-CONFIRMATION-001.13
+  test("deletes dirty repository quick chat with consent", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await assertDirtyQuickChatDeletion(
+      testPage,
+      apiClient,
+      seedData.repositoryId,
+      false,
+      prCapture,
+    );
+  });
+
   // @covers AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.1 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.2 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.3 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.4 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.6
   test("keeps the viewport layout contained for new and long chats", async ({ testPage }) => {
     await testPage.setViewportSize({ width: 1440, height: 800 });
@@ -807,7 +853,9 @@ test.describe("Quick Chat", () => {
       default_utility_agent_id: "mock",
       default_utility_model: "mock-fast",
     });
+    let executeBody: ExecutePromptRequest | null = null;
     await testPage.route("**/api/v1/utility/execute", async (route) => {
+      executeBody = route.request().postDataJSON() as ExecutePromptRequest;
       requestStarted?.();
       await responseGate;
       await route.fulfill({
@@ -823,6 +871,12 @@ test.describe("Quick Chat", () => {
     await editor.fill(initialPrompt);
     await dialog.getByLabel("Enhance prompt with AI").click();
     await requestGate;
+    expect(executeBody).toMatchObject({ utility_agent_id: "builtin-enhance-prompt" });
+    expect(executeBody).not.toHaveProperty("git_diff");
+    const changedFiles = executeBody?.changed_files;
+    if (typeof changedFiles === "string") {
+      expect(changedFiles.split("\n").length).toBeLessThanOrEqual(201);
+    }
     await editor.focus();
     await editor.pressSequentially(" with an added constraint");
     await expect(editor).toHaveText(editedPrompt);

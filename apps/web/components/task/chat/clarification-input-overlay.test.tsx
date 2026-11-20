@@ -13,6 +13,12 @@ import {
   type ClarificationEscapeGuardRegistry,
 } from "@/hooks/use-clarification-escape-guard";
 import { ClarificationInputOverlay } from "./clarification-input-overlay";
+import { ClarificationDraftProvider } from "./clarification-draft-context";
+import {
+  answerDraftIdentity,
+  clearAnswerDrafts,
+  readAnswerDraft,
+} from "@/lib/clarification/answer-draft-cache";
 import type { ClarificationOutcome } from "@/hooks/domains/session/use-clarification-group";
 
 /* eslint-disable max-lines -- overlay lifecycle regressions share one deterministic harness. */
@@ -22,10 +28,14 @@ vi.mock("@/lib/config", () => ({
 }));
 
 const mockUpdateMessage = vi.fn();
+const mockStore = {
+  getState: () => ({ updateMessage: mockUpdateMessage }),
+  subscribe: () => () => {},
+};
 vi.mock("@/components/state-provider", () => ({
-  useAppStoreApi: () => ({
-    getState: () => ({ updateMessage: mockUpdateMessage }),
-  }),
+  useAppStoreApi: () => mockStore,
+  useOptionalAppStoreApi: () => mockStore,
+  useOptionalAppStore: (_selector: unknown, fallback: unknown) => fallback,
 }));
 
 vi.mock("@kandev/ui/tooltip", () => ({
@@ -39,6 +49,8 @@ const fetchMock = vi.fn();
 const TESTID_OPTION = "clarification-option";
 const TESTID_STEP = "clarification-step";
 const TESTID_SKIP = "clarification-skip";
+const TESTID_INPUT = "clarification-input";
+const TESTID_SIZE_TOGGLE = "clarification-panel-size-toggle";
 const TESTID_SUBMIT_ERROR = "clarification-submit-error";
 const TESTID_RETRY = "clarification-retry";
 const DATA_SELECTED = "data-selected";
@@ -49,6 +61,7 @@ function clarMessage(opts: {
   index: number;
   total: number;
   pendingId?: string;
+  attachments?: Array<Record<string, unknown>>;
 }): Message {
   return {
     id: opts.id,
@@ -64,6 +77,7 @@ function clarMessage(opts: {
       question_index: opts.index,
       question_total: opts.total,
       status: "pending",
+      ...(opts.attachments ? { attachments: opts.attachments } : {}),
       question: {
         id: opts.questionId,
         title: "",
@@ -94,6 +108,9 @@ function renderOverlay(
         custom_text?: string;
       }[];
     }) => Promise<"sent" | "queued">;
+    onToggleSize: () => void;
+    sizeExpanded: boolean;
+    canExpandPanel: boolean;
   }> = {},
 ) {
   const scopeRef = createRef<HTMLDivElement>();
@@ -109,6 +126,9 @@ function renderOverlay(
         mode={overrides.mode}
         onLateAnswer={overrides.onLateAnswer}
         initialAnswers={overrides.initialAnswers}
+        onToggleSize={overrides.onToggleSize}
+        sizeExpanded={overrides.sizeExpanded}
+        canExpandPanel={overrides.canExpandPanel}
         shortcutScopeRef={scopeRef}
       />
     </div>,
@@ -249,7 +269,7 @@ describe("ClarificationInputOverlay — Escape guard predicate (F1 regression)",
     expect(onDismiss).not.toHaveBeenCalled();
   });
 
-  it("does not claim Escape while submitting", () => {
+  it("does not claim Escape while submitting", async () => {
     // Never resolves, so submitState stays "submitting" for the rest of the
     // test instead of racing a real fetch's microtask resolution.
     fetchMock.mockImplementationOnce(() => new Promise(() => {}));
@@ -257,6 +277,7 @@ describe("ClarificationInputOverlay — Escape guard predicate (F1 regression)",
     const { composerRef, getGuard } = renderOverlayWithGuard(messages);
 
     fireEvent.click(screen.getByTestId("clarification-option"));
+    await submitSingleOverlayAnswer();
 
     expect(getGuard()?.test(fakeEscape(composerRef.current!))).toBe(false);
   });
@@ -269,6 +290,7 @@ describe("ClarificationInputOverlay — Escape guard predicate (F1 regression)",
     const { composerRef, onDismiss, getGuard } = renderOverlayWithGuard(messages);
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
     await vi.waitFor(() => screen.getByTestId("clarification-expired"));
 
     expect(getGuard()?.test(fakeEscape(composerRef.current!))).not.toBe(true);
@@ -418,6 +440,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     ]);
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => screen.getByTestId(TESTID_SUBMIT_ERROR));
     expect(onResolved).not.toHaveBeenCalled();
@@ -454,6 +477,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     ]);
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
     await vi.waitFor(() => expect(screen.getByTestId(TESTID_SUBMIT_ERROR)).toBeTruthy());
 
     expect(screen.getByTestId(TESTID_RETRY)).toBeTruthy();
@@ -486,6 +510,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     ]);
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => screen.getByTestId("clarification-expired"));
     expect(onResolved).not.toHaveBeenCalled();
@@ -506,6 +531,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     );
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => expect(onLateAnswer).toHaveBeenCalledTimes(1));
     expect(onLateAnswer.mock.calls[0][0].answers).toEqual([
@@ -544,6 +570,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     });
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
     await vi.waitFor(() => expect(screen.getByTestId(TESTID_SUBMIT_ERROR)).toBeTruthy());
     expect(screen.getByTestId(TESTID_OPTION).getAttribute(DATA_SELECTED)).toBe("true");
 
@@ -567,6 +594,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     ]);
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
     await vi.waitFor(() => screen.getByTestId(TESTID_SUBMIT_ERROR));
 
     rerender(
@@ -589,6 +617,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
 
     fetchMock.mockClear();
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url] = fetchMock.mock.calls[0];
@@ -612,6 +641,7 @@ describe("ClarificationInputOverlay — outcome lifetime", () => {
     );
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     unmount();
 
@@ -649,7 +679,7 @@ describe("ClarificationInputOverlay — bundle-local state", () => {
     ];
     const { rerender, scopeRef, onResolved, onDismiss } = renderOverlay(bundleA);
 
-    fireEvent.change(screen.getByTestId("clarification-input"), {
+    fireEvent.change(screen.getByTestId(TESTID_INPUT), {
       target: { value: "stale draft" },
     });
     fireEvent.click(screen.getAllByTestId(TESTID_STEP)[1]);
@@ -669,7 +699,53 @@ describe("ClarificationInputOverlay — bundle-local state", () => {
     await vi.waitFor(() =>
       expect(screen.getAllByTestId(TESTID_STEP)[0].getAttribute("data-active")).toBe("true"),
     );
-    expect((screen.getByTestId("clarification-input") as HTMLTextAreaElement).value).toBe("");
+    expect((screen.getByTestId(TESTID_INPUT) as HTMLTextAreaElement).value).toBe("");
+  });
+});
+
+describe("ClarificationInputOverlay — shared size control", () => {
+  const messages = [
+    clarMessage({ id: "m-size-1", questionId: "q1", index: 0, total: 2 }),
+    clarMessage({ id: "m-size-2", questionId: "q2", index: 1, total: 2 }),
+  ];
+
+  it("renders one action-specific size toggle and forwards its action", () => {
+    const onToggleSize = vi.fn();
+    renderOverlay(messages, { onToggleSize, sizeExpanded: false, canExpandPanel: true });
+
+    const toggle = screen.getByTestId(TESTID_SIZE_TOGGLE);
+    expect(screen.getAllByTestId(TESTID_SIZE_TOGGLE)).toHaveLength(1);
+    expect(toggle.getAttribute("aria-label")).toBe("Expand");
+    expect(toggle.getAttribute("aria-disabled")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(onToggleSize).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows Restore as the next action while expanded and keeps it enabled without headroom", () => {
+    const onToggleSize = vi.fn();
+    renderOverlay(messages, { onToggleSize, sizeExpanded: true, canExpandPanel: false });
+
+    const toggle = screen.getByTestId(TESTID_SIZE_TOGGLE) as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-label")).toBe("Restore");
+    expect(toggle.getAttribute("aria-disabled")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(onToggleSize).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Expand visible but disabled when the host has no usable headroom", () => {
+    const onToggleSize = vi.fn();
+    renderOverlay(messages, { onToggleSize, sizeExpanded: false, canExpandPanel: false });
+
+    const toggle = screen.getByTestId(TESTID_SIZE_TOGGLE) as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-label")).toBe("Expand");
+    expect(toggle.getAttribute("aria-disabled")).toBe("true");
+    expect(toggle.disabled).toBe(false);
+
+    fireEvent.click(toggle);
+    expect(onToggleSize).not.toHaveBeenCalled();
   });
 });
 
@@ -683,7 +759,8 @@ describe("ClarificationInputOverlay — lightweight Markdown", () => {
     );
     const message = clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 });
     const metadata = message.metadata as ClarificationRequestMetadata;
-    metadata.context = "Keep `context` literal";
+    metadata.context =
+      "Keep **context** readable.\n\n| Signal | Value |\n| --- | --- |\n| Ready | yes |\n\n[Context guide](https://example.com/context)";
     metadata.question = {
       id: "q1",
       title: "Use `fast` mode",
@@ -715,10 +792,18 @@ describe("ClarificationInputOverlay — lightweight Markdown", () => {
     expect(optionDescription.querySelector("strong")?.textContent).toBe("small");
 
     const context = screen.getByTestId("clarification-context");
-    expect(context.textContent).toBe("Keep `context` literal");
-    expect(context.querySelector("code")).toBeNull();
+    expect(context.querySelector("strong")?.textContent).toBe("context");
+    expect(context.querySelector("table")?.textContent).toContain("Ready");
+    const contextGuide = context.querySelector<HTMLAnchorElement>(
+      'a[href="https://example.com/context"]',
+    );
+    expect(contextGuide?.target).toBe("_blank");
+
+    fireEvent.click(contextGuide!);
+    expect(fetchMock).not.toHaveBeenCalled();
 
     fireEvent.click(optionLabel.querySelector("code")!);
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [, init] = fetchMock.mock.calls[0];
@@ -732,6 +817,12 @@ describe("ClarificationInputOverlay — lightweight Markdown", () => {
 // AC .39: onOutcome is an additive, optional prop. Omitting it (as the task
 // session and Quick Chat hosts both do) must leave every existing behavior
 // -- including onResolved -- byte-identical to before this prop existed.
+async function submitSingleOverlayAnswer() {
+  const button = await screen.findByTestId("clarification-custom-submit");
+  await vi.waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(button);
+}
+
 describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
   it("does not change onResolved or submit behavior when onOutcome is omitted", async () => {
     const { onResolved } = renderOverlay([
@@ -739,6 +830,7 @@ describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
     ]);
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -757,6 +849,7 @@ describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
     });
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() =>
       expect(onOutcome).toHaveBeenCalledWith({
@@ -787,6 +880,7 @@ describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
     });
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() =>
       expect(onOutcome).toHaveBeenCalledWith({
@@ -810,6 +904,7 @@ describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
     });
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => expect(onOutcome).toHaveBeenCalledWith({ kind: "no_longer_active" }));
   });
@@ -822,7 +917,245 @@ describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
     });
 
     fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await submitSingleOverlayAnswer();
 
     await vi.waitFor(() => expect(onOutcome).toHaveBeenCalledWith({ kind: "submission_failed" }));
+  });
+});
+
+describe("ClarificationInputOverlay — explicit single-question submission", () => {
+  it("keeps a choice pending until Send and sends its restored files with the answer", async () => {
+    const attachment = {
+      attachment_id: "att-restored",
+      type: "image",
+      name: "evidence.png",
+      mime_type: "image/png",
+      size_bytes: 3,
+      delivery_mode: "path",
+    };
+    const messages = [
+      clarMessage({
+        id: "m1",
+        questionId: "q1",
+        index: 0,
+        total: 1,
+        attachments: [attachment],
+      }),
+    ];
+    renderOverlay(messages);
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, claimed: true, status: "answered" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId(TESTID_OPTION).getAttribute(DATA_SELECTED)).toBe("true");
+
+    await submitSingleOverlayAnswer();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init.body))).toEqual({
+      answers: [
+        {
+          question_id: "q1",
+          selected_options: ["o1"],
+          attachments: [attachment],
+        },
+      ],
+      rejected: false,
+    });
+  });
+});
+
+const DRAFT_DATA_ACTIVE = "data-active";
+type RetainedViewOptions = {
+  taskId?: string;
+  onResolved?: () => void;
+  mode?: "active" | "late";
+};
+
+function retainedBundle(pendingId = "p1") {
+  return [
+    clarMessage({ id: "m-q1", questionId: "q1", index: 0, total: 2, pendingId }),
+    clarMessage({ id: "m-q2", questionId: "q2", index: 1, total: 2, pendingId }),
+  ];
+}
+
+function retainedView() {
+  const scopeRef = createRef<HTMLDivElement>();
+  const onResolved = vi.fn();
+  const onDismiss = vi.fn();
+  const view = (messages: Message[], options: RetainedViewOptions = {}) => (
+    <ClarificationDraftProvider taskId={options.taskId ?? "task-a"}>
+      <div ref={scopeRef} tabIndex={-1}>
+        <ClarificationInputOverlay
+          messages={messages}
+          onResolved={options.onResolved ?? onResolved}
+          onDismiss={onDismiss}
+          mode={options.mode}
+          shortcutScopeRef={scopeRef}
+        />
+      </div>
+    </ClarificationDraftProvider>
+  );
+  return { view, scopeRef, onResolved, onDismiss };
+}
+
+function enterRetainedAnswers() {
+  fireEvent.click(screen.getByTestId(TESTID_OPTION));
+  fireEvent.change(screen.getByTestId(TESTID_INPUT), {
+    target: { value: "Use Go for the service" },
+  });
+}
+
+describe("ClarificationInputOverlay — retained answer drafts", () => {
+  beforeEach(() => {
+    clearAnswerDrafts(mockStore);
+  });
+
+  it("restores keyed selections, unfinished custom text, and the question after unmount", async () => {
+    const { view } = retainedView();
+    const bundle = retainedBundle();
+    const { rerender } = render(view(bundle));
+    enterRetainedAnswers();
+
+    rerender(<div />);
+    rerender(view(bundle));
+
+    await vi.waitFor(() =>
+      expect(screen.getAllByTestId(TESTID_STEP)[1].getAttribute(DRAFT_DATA_ACTIVE)).toBe("true"),
+    );
+    expect((screen.getByTestId(TESTID_INPUT) as HTMLTextAreaElement).value).toBe(
+      "Use Go for the service",
+    );
+    fireEvent.click(screen.getAllByTestId(TESTID_STEP)[0]);
+    await vi.waitFor(() =>
+      expect(screen.getByTestId(TESTID_OPTION).getAttribute(DATA_SELECTED)).toBe("true"),
+    );
+  });
+
+  it("rejects question and option identities the current bundle no longer contains", async () => {
+    const { view } = retainedView();
+    const { rerender } = render(view(retainedBundle()));
+    enterRetainedAnswers();
+    rerender(<div />);
+
+    const changed = [
+      clarMessage({ id: "m-q1", questionId: "q1", index: 0, total: 2 }),
+      clarMessage({ id: "m-q3", questionId: "q3", index: 1, total: 2 }),
+    ];
+    const question = (changed[0].metadata as ClarificationRequestMetadata).question;
+    question.options = [{ option_id: "o2", label: "Option 2", description: "" }];
+    rerender(view(changed));
+
+    fireEvent.click(screen.getAllByTestId(TESTID_STEP)[0]);
+    await vi.waitFor(() =>
+      expect(screen.getByTestId(TESTID_OPTION).getAttribute(DATA_SELECTED)).not.toBe("true"),
+    );
+    fireEvent.click(screen.getAllByTestId(TESTID_STEP)[1]);
+    expect((screen.getByTestId(TESTID_INPUT) as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("does not leak the previous bundle's answers into a replacement bundle", async () => {
+    const { view } = retainedView();
+    const { rerender } = render(view(retainedBundle("pA")));
+    enterRetainedAnswers();
+
+    const replacement = retainedBundle("pB");
+    rerender(view(replacement));
+    rerender(<div />);
+    rerender(view(replacement));
+
+    expect(screen.getAllByTestId(TESTID_STEP)[0].getAttribute(DRAFT_DATA_ACTIVE)).toBe("true");
+    expect((screen.getByTestId(TESTID_INPUT) as HTMLTextAreaElement).value).toBe("");
+    expect(screen.getByTestId(TESTID_OPTION).getAttribute(DATA_SELECTED)).not.toBe("true");
+  });
+
+  it("preserves the exact raw custom text across restoration and submission", async () => {
+    const { view } = retainedView();
+    const bundle = retainedBundle("p-raw");
+    const { rerender } = render(view(bundle, { taskId: "task-raw" }));
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    const rawDraft = "  Use Go\n";
+    fireEvent.change(screen.getByTestId(TESTID_INPUT), { target: { value: rawDraft } });
+    expect((screen.getByTestId(TESTID_INPUT) as HTMLTextAreaElement).value).toBe(rawDraft);
+
+    rerender(<div />);
+    rerender(view(bundle, { taskId: "task-raw" }));
+
+    await vi.waitFor(() =>
+      expect(screen.getAllByTestId(TESTID_STEP)[1].getAttribute(DRAFT_DATA_ACTIVE)).toBe("true"),
+    );
+    expect((screen.getByTestId(TESTID_INPUT) as HTMLTextAreaElement).value).toBe(rawDraft);
+
+    const submit = screen.getByTestId("clarification-submit") as HTMLButtonElement;
+    await vi.waitFor(() => expect(submit.disabled).toBe(false));
+    fireEvent.click(submit);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as {
+      answers: Array<{ question_id: string; custom_text?: string }>;
+    };
+    expect(body.answers.find((answer) => answer.question_id === "q2")?.custom_text).toBe("Use Go");
+  });
+
+  it("retains answers for questions that have not arrived yet", async () => {
+    const { view } = retainedView();
+    const bundle = retainedBundle("p-partial");
+    const { rerender } = render(view(bundle));
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    fireEvent.change(screen.getByTestId(TESTID_INPUT), {
+      target: { value: "  Use Go\n" },
+    });
+
+    // A partial bundle must not filter the not-yet-arrived answer out of the
+    // cache before the remaining question renders.
+    rerender(view([bundle[0]]));
+    await vi.waitFor(() =>
+      expect(screen.getByTestId(TESTID_OPTION).getAttribute(DATA_SELECTED)).toBe("true"),
+    );
+    rerender(<div />);
+    rerender(view(bundle));
+
+    await vi.waitFor(() =>
+      expect(screen.getAllByTestId(TESTID_STEP)[1].getAttribute(DRAFT_DATA_ACTIVE)).toBe("true"),
+    );
+    expect((screen.getByTestId(TESTID_INPUT) as HTMLTextAreaElement).value).toBe("  Use Go\n");
+    fireEvent.click(screen.getAllByTestId(TESTID_STEP)[0]);
+    expect(screen.getByTestId(TESTID_OPTION).getAttribute(DATA_SELECTED)).toBe("true");
+  });
+});
+
+describe("ClarificationInputOverlay — retained answer draft isolation", () => {
+  beforeEach(() => {
+    clearAnswerDrafts(mockStore);
+  });
+
+  it("keeps late-answer forms out of the shared navigation cache", () => {
+    const { view } = retainedView();
+    const bundle = retainedBundle("p-late");
+    const { rerender } = render(view(bundle, { taskId: "task-late", mode: "late" }));
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    fireEvent.change(screen.getByTestId(TESTID_INPUT), {
+      target: { value: "late draft" },
+    });
+
+    rerender(<div />);
+    rerender(view(bundle, { taskId: "task-late", mode: "late" }));
+
+    expect(screen.getAllByTestId(TESTID_STEP)[0].getAttribute(DRAFT_DATA_ACTIVE)).toBe("true");
+    expect((screen.getByTestId(TESTID_INPUT) as HTMLTextAreaElement).value).toBe("");
+    expect(screen.getByTestId(TESTID_OPTION).getAttribute(DATA_SELECTED)).not.toBe("true");
+  });
+
+  it("does not retain an empty form mount", () => {
+    const { view } = retainedView();
+    render(view(retainedBundle("p-empty"), { taskId: "task-empty" }));
+
+    const identity = answerDraftIdentity("task-empty", JSON.stringify(["s1", "p-empty", "active"]));
+    expect(readAnswerDraft(mockStore, identity)).toBeUndefined();
   });
 });

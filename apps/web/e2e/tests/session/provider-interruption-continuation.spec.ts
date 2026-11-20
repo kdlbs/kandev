@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import {
   createContinuationFixture,
+  hasAttestedContinuationRefusal,
   waitForContinuationMessage,
   waitForNativeContinuationPrompt,
   assertNativeContinuationTrace,
@@ -18,6 +19,7 @@ for (const scenario of [
   "read",
   "write",
   "shell",
+  "pending-v3",
   "output",
   "read-restore-transient",
   "read-restore-hard",
@@ -122,10 +124,14 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
     const notice = await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
-      (message) => message.metadata?.recovery_phase === "continuing",
+      (message) => message.metadata?.recovery_activity_confirmed === true,
     );
     await expect(session.transientRetryCard()).toHaveCount(1);
-    await expect(session.transientRetryCard()).toContainText("Continuing");
+    await expect(session.transientRetryCard()).toContainText("Agent resumed");
+    await expect(session.transientRetryCard()).not.toContainText("Continuing");
+    await expect(session.transientRetryCard()).not.toContainText("Agent connection lost");
+    await expect(session.transientRetryCard()).not.toContainText("Attempt 1 of 5");
+    await expect(session.recoveryCancelRetryButton()).toBeVisible();
     await expect(session.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
     assertNativeContinuationTrace(fixture.tracePath, "read-hold");
     const screenshot = path.join(backend.tmpDir, "provider-interruption-continuation-desktop.png");
@@ -137,14 +143,18 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
     await testPage.reload();
     await session.waitForLoad();
     await expect(session.transientRetryCard()).toHaveCount(1);
+    await expect(session.transientRetryCard()).toContainText("Agent resumed");
     const after = await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
-      (message) => message.metadata?.recovery_phase === "continuing",
+      (message) => message.metadata?.recovery_activity_confirmed === true,
     );
     expect(after.id).toBe(notice.id);
     await expect(session.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
     const { messages: reloadedMessages } = await apiClient.listSessionMessages(fixture.sessionId);
+    expect(
+      reloadedMessages.some((message) => message.metadata?.recovery_activity_confirmed === true),
+    ).toBe(true);
     expect(
       reloadedMessages.filter(
         (message) => message.author_type === "user" && message.content === "continue",
@@ -156,7 +166,8 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
       const second = new SessionPage(viewer);
       await second.waitForLoad();
       await expect(second.transientRetryCard()).toHaveCount(1);
-      await expect(second.transientRetryCard()).toContainText("Continuing");
+      await expect(second.transientRetryCard()).toContainText("Agent resumed");
+      await expect(second.transientRetryCard()).not.toContainText("Attempt 1 of 5");
       await expect(second.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
       assertNativeContinuationTrace(fixture.tracePath, "read-hold");
     } finally {
@@ -197,7 +208,12 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
       fixture.sessionId,
       (message) => message.author_type === "user" && message.content === "continue",
     );
-    await expect(session.activeChat().getByText("continue", { exact: true })).toBeVisible();
+    await expect(
+      session
+        .activeChat()
+        .getByTestId("user-message-bubble")
+        .getByText("continue", { exact: true }),
+    ).toBeVisible();
     await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
@@ -239,7 +255,10 @@ for (const scenario of ["pending", "unknown"]) {
         fixture.sessionId,
         (message) => message.metadata?.runtime_retained === true,
       );
-      expect(failure.metadata?.attempts_started ?? 0).toBe(0);
+      expect(hasAttestedContinuationRefusal(failure, "unsafe_work", 0)).toBe(true);
+      await expect(session.activeChat()).toContainText(
+        "Kandev cannot continue automatically because a tool is pending or its outcome is uncertain.",
+      );
       await expect(session.recoveryResumeButton()).toHaveCount(0);
       await expect(session.recoveryFreshButton()).toHaveCount(0);
       await expect(session.transientRetryCard()).toBeHidden();

@@ -8,6 +8,7 @@ import {
   useMCPSelectionEditor,
   type MCPSelectionScopeRef,
 } from "../workspace/use-mcp-selection-editor";
+import { useMCPSelectionDraft } from "../workspace/use-mcp-selection-draft";
 import { isHandledApiError } from "@/lib/api/client";
 import type { MCPInheritedSelection, MCPSessionSelectionState } from "@/lib/types/http-mcp";
 
@@ -87,38 +88,74 @@ export function useTaskSessionMCPSelection(context: SessionMCPContext) {
     available ? ownerWorkspace : null,
     inheritedScopes,
   );
+  const draft = useMCPSelectionDraft(contextKey, editor.selection);
   const error = editor.saveError ?? editor.loadError ?? definitions.error;
-  usePendingSelectionRefresh(
-    editor.selection?.mcp_state,
-    editor.reload,
-    editor.saving || isHandledApiError(error),
-  );
+  const {
+    mcp_state: state,
+    definition_ids: savedSelectedIds = [],
+    excluded_definition_ids: excludedIds = [],
+  } = editor.selection ?? {};
+  const blocked = editor.saving || Boolean(editor.saveError);
+  usePendingSelectionRefresh(state, editor.reload, blocked || isHandledApiError(error));
   const inherited = useMemo<MCPInheritedSelection[]>(
     () =>
       Object.entries(editor.inheritedOrigins).flatMap(([id, origins]) => {
         const definition = definitions.definitions.find((item) => item.id === id);
-        return definition ? [{ definition, origins }] : [];
+        const ownOrigin =
+          editor.selection?.definition_ids.includes(id) && context.sessionId && ownerWorkspace
+            ? [
+                {
+                  scope: "task_session" as const,
+                  workspace_id: ownerWorkspace,
+                  owner_id: context.sessionId,
+                },
+              ]
+            : [];
+        return definition ? [{ definition, origins: [...origins, ...ownOrigin] }] : [];
       }),
-    [editor.inheritedOrigins, definitions.definitions],
+    [
+      editor.inheritedOrigins,
+      editor.selection,
+      definitions.definitions,
+      context.sessionId,
+      ownerWorkspace,
+    ],
   );
   const save = useCallback(
     (ids: string[]) => {
-      void editor.save(ids).catch(() => undefined);
+      draft.setSelectedIds(ids);
+      void editor
+        .save(ids)
+        .then(draft.acknowledge)
+        .catch(() => undefined);
     },
-    [editor.save],
+    [editor.save, draft.setSelectedIds, draft.acknowledge],
+  );
+  const onExcludedIdsChange = useCallback(
+    (ids: string[]) => {
+      void editor.save(editor.selection?.definition_ids ?? [], ids).catch(() => undefined);
+    },
+    [editor.save, editor.selection],
   );
   if (!available) return null;
   return {
     contextKey,
+    ...(context.sessionId ? { assignmentSessionId: context.sessionId } : {}),
+    taskId: context.taskId,
+    sessionId: context.sessionId,
     workspaceId: ownerWorkspace,
     definitions: definitions.definitions,
     definitionsLoading: definitions.loading || editor.loading,
-    selectedIds: editor.selection?.definition_ids ?? [],
+    selectedIds: draft.selectedIds,
+    savedSelectedIds,
+    excludedIds,
+    onExcludedIdsChange,
     inherited,
     onSelectedIdsChange: save,
-    state: editor.selection?.mcp_state,
-    disabled: editor.saving,
-    retry: () => save(editor.selection?.definition_ids ?? []),
+    state,
+    disabled: blocked,
+    reload: editor.reload,
+    retry: blocked ? undefined : () => void editor.save(savedSelectedIds).catch(() => undefined),
     retrying: editor.saving,
     error,
   };

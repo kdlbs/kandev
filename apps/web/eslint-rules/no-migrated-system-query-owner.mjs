@@ -355,3 +355,6 @@ export const noMigratedSystemQueryOwner = {
 export const systemQueryOwnerPlugin = {
   rules: { "no-migrated-system-zustand-owner": noMigratedSystemQueryOwner },
 };
+
+/** Default export so an Oxlint JS-plugin registration can load this module directly. */
+export default systemQueryOwnerPlugin;

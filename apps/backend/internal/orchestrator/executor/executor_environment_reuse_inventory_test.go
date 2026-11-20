@@ -11,6 +11,53 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// @covers AC-TASKS-MCP-WORKSPACE-MODE-004.8
+func TestInheritedCheckoutSelectorsStayOutOfMaterialization(t *testing.T) {
+	repo := newMockRepository()
+	repo.repositories["repo-inherited"] = &models.Repository{
+		ID: "repo-inherited", Name: "repo", LocalPath: "/tmp/repo", DefaultBranch: "main",
+	}
+	repo.tasks["task-inherited"] = &models.Task{ID: "task-inherited"}
+	repo.taskRepositories["task-repo-inherited"] = &models.TaskRepository{
+		ID: "task-repo-inherited", TaskID: "task-inherited", RepositoryID: "repo-inherited",
+		BaseBranch: "main", CheckoutBranch: "feature/adopted",
+		Metadata: map[string]interface{}{"inherited_checkout_reuse_only": true},
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID: "task-inherited", SessionID: "session-inherited", ExecutorType: string(models.ExecutorTypeWorktree),
+	}
+	_, err := exec.applyResumeRepoConfig(
+		context.Background(), &v1.Task{ID: "task-inherited"},
+		&models.TaskSession{ID: "session-inherited", TaskID: "task-inherited"}, req, nil,
+	)
+	if err != nil {
+		t.Fatalf("applyResumeRepoConfig: %v", err)
+	}
+	if req.CheckoutBranch != "" {
+		t.Fatalf("fresh materialization requested inherited checkout %q", req.CheckoutBranch)
+	}
+	if req.BranchIdentitySlug != "feature-adopted" {
+		t.Fatalf("fresh materialization identity = %q, want inherited slot feature-adopted", req.BranchIdentitySlug)
+	}
+
+	reuseReq := &LaunchAgentRequest{
+		TaskID: "task-inherited", SessionID: "session-inherited", ExecutorType: string(models.ExecutorTypeWorktree),
+		WorkspaceReuseRequired: true,
+	}
+	_, err = exec.applyResumeRepoConfig(
+		context.Background(), &v1.Task{ID: "task-inherited"},
+		&models.TaskSession{ID: "session-inherited", TaskID: "task-inherited"}, reuseReq,
+		&models.TaskEnvironment{ID: "parent-environment"},
+	)
+	if err != nil {
+		t.Fatalf("applyResumeRepoConfig for inherited reuse: %v", err)
+	}
+	if reuseReq.CheckoutBranch != "feature/adopted" {
+		t.Fatalf("inherited reuse checkout selector = %q, want feature/adopted", reuseReq.CheckoutBranch)
+	}
+}
+
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.1
 func TestValidateReuseEnvironmentInventory_ZeroRowsFailsClosed(t *testing.T) {
 	repo := newMockRepository()
@@ -81,6 +128,89 @@ func TestValidateReuseEnvironmentInventory_MismatchedRowsStillRefused(t *testing
 	err := e.validateReuseEnvironmentInventory(context.Background(), req, env)
 	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
 		t.Fatalf("validateReuseEnvironmentInventory() with mismatched rows = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+}
+
+func TestCheckoutBranchCanonicalSlotIgnoresDeletedHistoricalHolder(t *testing.T) {
+	active := &models.TaskEnvironmentRepo{
+		ID: "active-slot", RepositoryID: "repo-1", BranchSlug: "assigned-slot",
+		WorktreeID: "active-worktree", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive,
+	}
+	deleted := *active
+	deleted.ID = "deleted-slot"
+	deleted.BranchSlug = "historical-slot"
+	deleted.WorktreeID = "deleted-worktree"
+	deleted.Status = taskEnvironmentRepoStatusDeleted
+
+	slug, ok := checkoutBranchCanonicalSlot(
+		RepoSpec{RepositoryID: "repo-1", CheckoutBranch: "feature/retained"}, nil,
+		[]*models.TaskEnvironmentRepo{active, &deleted},
+	)
+	if !ok || slug != active.BranchSlug {
+		t.Fatalf("checkoutBranchCanonicalSlot() = %q, %t; want active slot %q", slug, ok, active.BranchSlug)
+	}
+}
+
+func TestAdoptCheckoutBranchCanonicalSlotsForTopLevelLaunch(t *testing.T) {
+	rows := []*models.TaskEnvironmentRepo{{
+		ID: "assigned-slot", RepositoryID: "repo-1", BranchSlug: "retained-slot",
+		WorktreeID: "worktree-1", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive,
+	}}
+	req := &LaunchAgentRequest{UseWorktree: true, RepositoryID: "repo-1", CheckoutBranch: "feature/retained"}
+
+	if !adoptCheckoutBranchCanonicalSlots(req, rows) {
+		t.Fatal("adoptCheckoutBranchCanonicalSlots() = false, want top-level slot adoption")
+	}
+	if req.BranchIdentitySlug != "retained-slot" {
+		t.Fatalf("top-level branch identity = %q, want retained-slot", req.BranchIdentitySlug)
+	}
+}
+
+func TestAdoptCheckoutBranchCanonicalSlotsForMultipleRepositories(t *testing.T) {
+	rows := []*models.TaskEnvironmentRepo{
+		{ID: "slot-1", RepositoryID: "repo-1", BranchSlug: "slot-one", WorktreeID: "wt-1", WorktreeBranch: "feature/one", Status: taskEnvironmentRepoStatusActive},
+		{ID: "slot-2", RepositoryID: "repo-2", BranchSlug: "slot-two", WorktreeID: "wt-2", WorktreeBranch: "feature/two", Status: taskEnvironmentRepoStatusActive},
+	}
+	req := &LaunchAgentRequest{UseWorktree: true, Repositories: []RepoSpec{
+		{RepositoryID: "repo-1", CheckoutBranch: "feature/one"},
+		{RepositoryID: "repo-2", CheckoutBranch: "feature/two"},
+	}}
+
+	if !adoptCheckoutBranchCanonicalSlots(req, rows) {
+		t.Fatal("adoptCheckoutBranchCanonicalSlots() = false, want multi-repository slot adoption")
+	}
+	if req.Repositories[0].BranchIdentitySlug != "slot-one" || req.Repositories[1].BranchIdentitySlug != "slot-two" {
+		t.Fatalf("multi-repository branch identities = %q, %q; want slot-one, slot-two", req.Repositories[0].BranchIdentitySlug, req.Repositories[1].BranchIdentitySlug)
+	}
+}
+
+func TestCheckoutBranchCanonicalSlotRejectsAmbiguousActiveHolders(t *testing.T) {
+	rows := []*models.TaskEnvironmentRepo{
+		{ID: "slot-1", RepositoryID: "repo-1", BranchSlug: "slot-one", WorktreeID: "wt-1", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive},
+		{ID: "slot-2", RepositoryID: "repo-1", BranchSlug: "slot-two", WorktreeID: "wt-2", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive},
+	}
+	spec := RepoSpec{RepositoryID: "repo-1", CheckoutBranch: "feature/retained"}
+
+	if slug, ok := checkoutBranchCanonicalSlot(spec, nil, rows); ok || slug != "" {
+		t.Fatalf("ambiguous checkout slot = %q, %t; want no adoption", slug, ok)
+	}
+}
+
+func TestCheckoutBranchCanonicalSlotRejectsSiblingCollision(t *testing.T) {
+	row := &models.TaskEnvironmentRepo{
+		ID: "slot-1", RepositoryID: "repo-1", BranchSlug: "retained-slot",
+		WorktreeID: "wt-1", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive,
+	}
+	req := &LaunchAgentRequest{UseWorktree: true, Repositories: []RepoSpec{
+		{RepositoryID: "repo-1", CheckoutBranch: "feature/retained"},
+		{RepositoryID: "repo-1", BranchIdentitySlug: "retained-slot"},
+	}}
+
+	if adoptCheckoutBranchCanonicalSlots(req, []*models.TaskEnvironmentRepo{row}) {
+		t.Fatal("sibling selection of the same canonical row must prevent slot adoption")
+	}
+	if req.Repositories[0].BranchIdentitySlug != "" {
+		t.Fatalf("ambiguous sibling launch changed branch identity to %q", req.Repositories[0].BranchIdentitySlug)
 	}
 }
 

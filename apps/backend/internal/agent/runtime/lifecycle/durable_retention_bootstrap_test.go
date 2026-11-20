@@ -99,7 +99,7 @@ func TestDurableRetentionBootstrapWaitsForCommittedGeneration(t *testing.T) {
 	defer manager.Wait()
 	execution, event := retentionBootstrapOwner()
 	execution.agentctl = client
-	processor := newStreamEventProcessor(manager, ctx, execution, client, repo, 0)
+	processor := newStreamEventProcessor(manager, ctx, execution, client, repo, 0, nil)
 	defer func() { _ = processor.close() }()
 	if !processor.enqueue(event) {
 		t.Fatal("bootstrap frame was refused before processing")

@@ -150,6 +150,14 @@ func gitStatusValueFingerprint(status types.GitStatusUpdate) string {
 }
 
 func (wt *WorkspaceTracker) publishGitStatus(status types.GitStatusUpdate, ordinal uint64, fingerprint string, retryOption ...bool) (types.GitStatusUpdate, bool) {
+	// A bare manager-built task-root tracker still answers an explicit status
+	// query with its unavailable capture, but it must never publish that
+	// capture as the Changes panel's unnamed repository. One stale unavailable
+	// publication outlives every later named recovery because no successor
+	// owns the empty key.
+	if wt.suppressGitPublication {
+		return cloneGitStatusUpdate(status), false
+	}
 	explicitRetry := len(retryOption) > 0 && retryOption[0]
 	wt.gitStatusPublishMu.Lock()
 	defer wt.gitStatusPublishMu.Unlock()

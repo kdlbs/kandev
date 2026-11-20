@@ -20,6 +20,11 @@ This system owns executor profiles, environment construction, SSH lifecycle,
 runtime resource admission, plugin-provided remote environments, process and port safety, control-credential containment at executor proxies, agent process lifetime
 across a backend restart, and executor-specific failure and recovery contracts.
 
+Required runtime admission and observed execution identity belong here. The
+[requirements](requirements/runtime-selection.md) and
+[design](system-design/runtime-selection.md) distinguish configured selection
+from actual execution, including retained workers and authorized Stop.
+
 ## Exclusions
 
 - Agent identity and provider capabilities belong to the [agent
@@ -50,6 +55,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Remote Docker Executor](requirements/remote-docker-executor.md)
 - [Remote Docker container inputs](requirements/remote-docker-container-inputs.md)
 - [Docker container network selection](requirements/docker-container-networks.md)
+- [Task MCP executor discovery](requirements/task-mcp-discovery.md)
 
 ### System design
 
@@ -75,6 +81,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Remote Docker Executor](system-design/remote-docker-executor.md)
 - [Remote Docker container inputs](system-design/remote-docker-container-inputs.md)
 - [Docker container network selection](system-design/docker-container-networks.md)
+- [Task MCP executor discovery](system-design/task-mcp-discovery.md)
 
 ## Migration record
 
@@ -109,3 +116,8 @@ and desktop/touch disclosure. The foundation retains task-page controls.
 Executor proxies consume control credentials before forwarding to applications.
 The contract is in [requirements](requirements/proxy-control-credential-containment.md)
 and [design](system-design/proxy-control-credential-containment.md).
+
+## Docker storage bounds
+
+- [Requirements](requirements/docker-storage-bounds.md)
+- [System design](system-design/docker-storage-bounds.md)

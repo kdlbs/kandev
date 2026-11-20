@@ -22,7 +22,8 @@ const transport = vi.hoisted(() => ({
   getStatus: () => "connected",
   on: () => () => {},
   subscribeSession: () => () => {},
-  subscribeUser: () => () => {},
+  subscribeUser: () => {},
+  unsubscribeUser: () => {},
 }));
 
 const SESSION = "context-submission-session" as TaskSession["id"];

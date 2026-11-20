@@ -15,7 +15,13 @@ import type { ApiClient } from "../helpers/api-client";
  * completely broken.
  */
 
-type Seed = { workspaceId: string; workflowId: string; startStepId: string };
+type Seed = {
+  workspaceId: string;
+  workflowId: string;
+  startStepId: string;
+  agentProfileId: string;
+  repositoryId: string;
+};
 
 /** The standing instruction, seeded so the run-detail panel has one to show. */
 const STANDING_INSTRUCTION = "Check the overnight drift report and summarise what changed.";
@@ -52,43 +58,28 @@ async function openDetail(testPage: Page, automationId: string) {
   await expect(testPage.getByTestId("runs-drawer-trigger")).toBeVisible({ timeout: 15_000 });
 }
 
-async function seedOpenRun(
-  apiClient: import("../helpers/api-client").ApiClient,
-  seed: Seed & { agentProfileId: string; repositoryId: string },
-  name: string,
-) {
+async function seedOpenRun(apiClient: ApiClient, seed: Seed, name: string) {
   const automation = await apiClient.seedAutomation({
     workspaceId: seed.workspaceId,
     name,
     workflowId: seed.workflowId,
     workflowStepId: seed.startStepId,
-    prompt: STANDING_INSTRUCTION,
+    prompt: "/sleep 30",
     agentProfileId: seed.agentProfileId,
+    repositoryIds: [seed.repositoryId],
   });
-  const task = await apiClient.createTaskWithAgent(
-    seed.workspaceId,
-    `${name} — running task`,
-    seed.agentProfileId,
-    {
-      description: "/sleep 30",
-      workflow_id: seed.workflowId,
-      workflow_step_id: seed.startStepId,
-      repository_ids: [seed.repositoryId],
-    },
-  );
-  await apiClient.setTaskOrigin(task.id, "automation_run");
+  const fired = await apiClient.triggerAutomationManual(automation.id);
+  expect(fired.run_task_id).toBeTruthy();
+  const task = await apiClient.getTask(fired.run_task_id!);
   await expect
     .poll(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(task.id);
-        return sessions.find((session) => session.id === task.session_id)?.state;
+        return sessions.some((session) => session.state === "RUNNING");
       },
       { timeout: 30_000 },
     )
-    .toBe("RUNNING");
-  const run = await apiClient.seedAutomationRun(automation.id, "task_created", task.id);
-  expect(run.session_id).not.toBe("");
-  expect(run.turn_id).not.toBe("");
+    .toBe(true);
   return automation;
 }
 

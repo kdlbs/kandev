@@ -168,6 +168,33 @@ describe("useAgentSelection — supersession", () => {
 });
 
 describe("late quick chat creation with real store actions", () => {
+  it("does not activate or add an archived session from a same-token retry", async () => {
+    const store = makeStore();
+    mockStartQuickChat.mockResolvedValueOnce({
+      task_id: "archived-task",
+      session_id: "archived-session",
+      creation_id: "creation-token",
+      creation_complete: true,
+      archived: true,
+    });
+
+    const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
+    let selected!: boolean;
+    await act(async () => {
+      selected = await result.current.handleSelectAgent(
+        "agent-a",
+        [],
+        { message: "Keep the opening" },
+        "creation-token",
+      );
+    });
+
+    expect(selected).toBe(false);
+    expect(store.openQuickChat).not.toHaveBeenCalled();
+    expect(store.setQuickChatInitialPrompt).not.toHaveBeenCalled();
+    expect(store.upsertQuickChatSessionFromEvent).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])(
     "preserves newer selection for a late response (failed: %s)",
     async (failed) => {

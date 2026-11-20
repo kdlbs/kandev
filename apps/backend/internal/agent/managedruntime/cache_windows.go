@@ -7,16 +7,17 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/kandev/kandev/internal/common/winpath"
 )
 
-// Windows uses native handles rooted at the cache. OBJ_DONT_REPARSE and
-// FILE_OPEN_REPARSE_POINT reject junctions and symlinks while each component
-// is opened; deletion is then requested on the opened handle.
+// Windows uses native handles rooted at the cache. Absolute paths are opened
+// through the shared no-follow walk, which resolves the object-manager volume
+// link once and then opens each component relative to its parent with
+// OBJ_DONT_REPARSE and FILE_OPEN_REPARSE_POINT, rejecting junctions and
+// symlinks; deletion is then requested on the opened handle.
 func removeNpxExecutionTree(cacheRoot, key string) error {
 	rootHandle, err := openManagedRuntimeDirectoryPath(cacheRoot)
 	if isManagedRuntimeNotFound(err) {
@@ -70,7 +71,8 @@ func isManagedRuntimeNotFound(err error) bool {
 }
 
 func openManagedRuntimeDirectoryPath(path string) (windows.Handle, error) {
-	return openManagedRuntimeHandle(0, managedRuntimeWindowsNTPath(path), windows.FILE_DIRECTORY_FILE)
+	return winpath.OpenDirectoryPath(path,
+		windows.FILE_GENERIC_READ|windows.FILE_GENERIC_WRITE|windows.DELETE)
 }
 
 func openManagedRuntimeDirectoryRelative(parent windows.Handle, name string) (windows.Handle, error) {
@@ -82,60 +84,70 @@ func openManagedRuntimeEntryRelative(parent windows.Handle, name string) (window
 }
 
 func openManagedRuntimeHandle(parent windows.Handle, name string, createOption uint32) (windows.Handle, error) {
-	objectName, err := windows.NewNTUnicodeString(name)
-	if err != nil {
-		return 0, err
-	}
-	objectAttributes := &windows.OBJECT_ATTRIBUTES{
-		Length:        uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})),
-		RootDirectory: parent,
-		ObjectName:    objectName,
-		Attributes:    windows.OBJ_CASE_INSENSITIVE | windows.OBJ_DONT_REPARSE,
-	}
-	var ioStatus windows.IO_STATUS_BLOCK
-	var allocationSize int64
-	var handle windows.Handle
-	err = windows.NtCreateFile(
-		&handle,
-		windows.FILE_GENERIC_READ|windows.FILE_GENERIC_WRITE|windows.DELETE,
-		objectAttributes,
-		&ioStatus,
-		&allocationSize,
-		0,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		windows.FILE_OPEN,
-		createOption|windows.FILE_OPEN_REPARSE_POINT,
-		0,
-		0,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return handle, nil
+	return openManagedRuntimeHandleWithAccess(parent, name, createOption,
+		windows.FILE_GENERIC_READ|windows.FILE_GENERIC_WRITE|windows.DELETE)
 }
 
-func managedRuntimeWindowsNTPath(path string) string {
-	clean := filepath.Clean(path)
-	if strings.HasPrefix(clean, `\\?\`) {
-		return `\??\` + strings.TrimPrefix(clean, `\\?\`)
+func openManagedRuntimeReadHandle(parent windows.Handle, name string, createOption uint32) (windows.Handle, error) {
+	return openManagedRuntimeHandleWithAccess(parent, name, createOption, windows.FILE_GENERIC_READ)
+}
+
+func openManagedRuntimeHandleWithAccess(parent windows.Handle, name string, createOption, access uint32) (windows.Handle, error) {
+	return winpath.OpenHandleWithSharing(
+		parent, name, access, windows.FILE_OPEN, createOption,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+	)
+}
+
+func openNpxInventoryDirectoryPath(path string) (*os.File, error) {
+	handle, err := winpath.OpenDirectoryPath(path, windows.FILE_GENERIC_READ)
+	if err != nil {
+		return nil, normalizeNpxInventoryOpenError(err)
 	}
-	if strings.HasPrefix(clean, `\\`) {
-		return `\??\UNC\` + strings.TrimPrefix(clean, `\\`)
+	if err := rejectManagedRuntimeReparse(handle); err != nil {
+		return nil, err
 	}
-	return `\??\` + clean
+	return os.NewFile(uintptr(handle), "npm-cache"), nil
+}
+
+func openNpxInventoryDirectory(parent *os.File, name string) (*os.File, error) {
+	if !validInventoryEntryName(name) {
+		return nil, errors.New("invalid npm execution entry name")
+	}
+	handle, err := openManagedRuntimeReadHandle(windows.Handle(parent.Fd()), name, windows.FILE_DIRECTORY_FILE)
+	if err != nil {
+		return nil, normalizeNpxInventoryOpenError(err)
+	}
+	if err := rejectManagedRuntimeReparse(handle); err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(handle), name), nil
+}
+
+func openNpxInventoryFile(parent *os.File, name string) (*os.File, error) {
+	if !validInventoryEntryName(name) {
+		return nil, errors.New("invalid npm execution entry name")
+	}
+	handle, err := openManagedRuntimeReadHandle(windows.Handle(parent.Fd()), name, windows.FILE_NON_DIRECTORY_FILE)
+	if err != nil {
+		return nil, normalizeNpxInventoryOpenError(err)
+	}
+	if err := rejectManagedRuntimeReparse(handle); err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(handle), name), nil
+}
+
+func normalizeNpxInventoryOpenError(err error) error {
+	if isManagedRuntimeNotFound(err) {
+		return os.ErrNotExist
+	}
+	return err
 }
 
 func rejectManagedRuntimeReparse(handle windows.Handle) error {
-	var info windows.ByHandleFileInformation
-	if err := windows.GetFileInformationByHandle(handle, &info); err != nil {
-		_ = windows.CloseHandle(handle)
-		return err
-	}
-	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-		_ = windows.CloseHandle(handle)
-		return fmt.Errorf("refusing to invalidate execution cache through reparse point")
-	}
-	return nil
+	_, err := winpath.RejectReparse(handle)
+	return err
 }
 
 func removeManagedRuntimeWindowsContents(dirHandle windows.Handle) error {
@@ -188,26 +200,9 @@ func removeManagedRuntimeWindowsContents(dirHandle windows.Handle) error {
 }
 
 func duplicateManagedRuntimeHandle(handle windows.Handle) (windows.Handle, error) {
-	var duplicate windows.Handle
-	if err := windows.DuplicateHandle(
-		windows.CurrentProcess(), handle, windows.CurrentProcess(), &duplicate, 0, false,
-		windows.DUPLICATE_SAME_ACCESS,
-	); err != nil {
-		return 0, err
-	}
-	return duplicate, nil
+	return winpath.DuplicateHandle(handle)
 }
 
 func markManagedRuntimeForDelete(handle windows.Handle) error {
-	info := struct{ Flags uint32 }{
-		Flags: windows.FILE_DISPOSITION_DELETE |
-			windows.FILE_DISPOSITION_POSIX_SEMANTICS |
-			windows.FILE_DISPOSITION_IGNORE_READONLY_ATTRIBUTE,
-	}
-	return windows.SetFileInformationByHandle(
-		handle,
-		windows.FileDispositionInfoEx,
-		(*byte)(unsafe.Pointer(&info)),
-		uint32(unsafe.Sizeof(info)),
-	)
+	return winpath.MarkForDelete(handle)
 }

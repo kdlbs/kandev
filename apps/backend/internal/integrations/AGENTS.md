@@ -84,10 +84,6 @@ sibling.
 - Opening the PR/MR in the code host's web UI with no corresponding push
   event reaching Kandev (e.g. the agent's worktree was never pushed) — there
   is nothing for push detection to observe.
-- **Azure DevOps** (`internal/azuredevops`) has no auto-link of any kind —
-  it persists PR summaries against tasks but has no watch loop or push
-  detection. Same gap GitHub/GitLab had before this guarantee; file
-  separately if wanted.
 
 ## Where Jira and Linear deliberately diverge
 
@@ -95,4 +91,4 @@ sibling.
 - **Watch filter persistence:** Jira stores the JQL string verbatim; Linear stores the structured `SearchFilter` as JSON in `filter_json` (Linear has no JQL equivalent). The orchestrator emits `NewJiraIssueEvent` / `NewLinearIssueEvent` respectively and dedups by issue key (Jira) vs identifier (Linear).
 - **Health column extras:** Linear's `linear_configs` row carries an `org_slug` captured from successful probes; Jira's row does not.
 - **Sentry — multiple instances per workspace:** unlike the one-config-per-workspace integrations, `sentry_configs` is keyed by an instance `id` (UUID) with a `workspace_id` column + `UNIQUE(workspace_id, name)`, so a workspace holds several named instances. Secrets are keyed `sentry:instance:<id>:token`. Issue watches carry a nullable `sentry_instance_id` FK (`ON DELETE RESTRICT`); the bound instance is immutable. The HTTP surface is instance CRUD under `/api/v1/sentry/instances?workspace_id=` (no install-wide `/config`); deleting an in-use instance is 409 `SENTRY_INSTANCE_IN_USE`. See ADR-0030.
-- **Azure DevOps — REST browse, task links, and watchers:** `internal/azuredevops` accepts only canonical Azure DevOps Services organization URLs, stores one encrypted PAT per workspace through `secretadapter`, and uses REST API 7.1 without `gh` or `az`. It reuses `healthpoll` and the standard mock-provider gate, and its independent watcher poller persists generation-safe work-item/PR reservations before publishing orchestrator events. Azure pull-request summaries are persisted against tasks in the integration package; provider-native feedback remains transient and Azure-specific.
+- **Azure DevOps is a plugin, not a built-in integration:** it ships as the `kandev-plugin-azure-devops` runtime plugin. Do not add Azure DevOps code to the host; plugin-provider gaps belong in generic plugin contracts.

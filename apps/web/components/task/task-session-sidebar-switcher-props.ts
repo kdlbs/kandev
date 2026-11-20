@@ -50,6 +50,9 @@ export function buildTaskSwitcherProps(args: {
   retryWorkspaceContext: (() => void) | undefined;
   totalTaskCount: number;
   selection: ReturnType<typeof useSidebarSelection>;
+  unreadMessagesEnabled: boolean;
+  unreadDotHideDelayMs: number;
+  displayedSessionId: string | null;
 }): TaskSwitcherComponentProps {
   return {
     grouped: args.grouped,
@@ -80,14 +83,15 @@ export function buildTaskSwitcherProps(args: {
     onNestTask: args.handleNestTask,
     pinnedTaskIds: args.pinnedTaskIds,
     deletingTaskId: args.sidebarActions.deletingTaskId,
-    archivingTaskId: args.sidebarActions.archivingTaskId,
-    isArchiving: args.sidebarActions.isArchiving,
     isLoading:
       args.isLoadingWorkflow || (args.workspaceContextPending && args.totalTaskCount === 0),
     loadError: resolveSidebarLoadError(args),
     onRetryLoad: resolveSidebarRetry(args),
     retryLabel: resolveSidebarRetryLabel(args),
     totalTaskCount: args.totalTaskCount,
+    unreadMessagesEnabled: args.unreadMessagesEnabled,
+    unreadDotHideDelayMs: args.unreadDotHideDelayMs,
+    displayedSessionId: args.displayedSessionId,
     ...args.selection.switcherProps,
   };
 }

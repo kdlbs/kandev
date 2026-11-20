@@ -10,6 +10,7 @@ import {
   searchMCPMarketplace,
   updateMCPServer,
 } from "@/lib/api/domains/mcp-api";
+import { useMCPRegistrationCompletion } from "./use-mcp-registration-completion";
 import type {
   MCPDefinitionInput,
   MCPDefinitionPatch,
@@ -77,110 +78,138 @@ export function useMCPWorkspaceDefinitions(workspaceId: string | null | undefine
   };
 }
 
-export function useMCPWorkspaceSettings(workspaceId: string) {
+function useMCPWorkspaceCatalog(workspaceId: string) {
   const [servers, setServers] = useState<MCPServerDefinition[]>([]);
+  const requestRef = useRef(0);
+  const generationRef = useRef(0);
+  const workspaceRef = useRef(workspaceId);
+  workspaceRef.current = workspaceId;
+  useEffect(() => {
+    setServers([]);
+    return () => {
+      generationRef.current += 1;
+      requestRef.current += 1;
+    };
+  }, [workspaceId]);
+  const load = useCallback(async () => {
+    const request = ++requestRef.current;
+    const next = await listMCPServers(workspaceId, { cache: "no-store" });
+    if (request !== requestRef.current || workspaceRef.current !== workspaceId) return false;
+    setServers(next);
+    return true;
+  }, [workspaceId]);
+  const reconcile = useCallback((created: MCPServerDefinition) => {
+    requestRef.current += 1;
+    setServers((current) =>
+      current.some((server) => server.id === created.id)
+        ? current.map((server) => (server.id === created.id ? created : server))
+        : [...current, created],
+    );
+  }, []);
+  const update = useCallback(
+    async (id: string, payload: MCPDefinitionPatch) => {
+      const generation = generationRef.current;
+      const updated = await updateMCPServer(workspaceId, id, payload);
+      if (generation === generationRef.current && workspaceRef.current === workspaceId)
+        reconcile(updated);
+      return updated;
+    },
+    [workspaceId, reconcile],
+  );
+  const remove = useCallback(
+    async (server: MCPServerDefinition, confirm = false) => {
+      const generation = generationRef.current;
+      await deleteMCPServer(workspaceId, server.id, server.revision, confirm);
+      if (generation === generationRef.current && workspaceRef.current === workspaceId) {
+        requestRef.current += 1;
+        setServers((current) => current.filter((item) => item.id !== server.id));
+      }
+    },
+    [workspaceId],
+  );
+  return { servers, load, reconcile, update, remove };
+}
+
+export function useMCPWorkspaceSettings(workspaceId: string) {
+  const catalog = useMCPWorkspaceCatalog(workspaceId);
+  const registration = useMCPRegistrationCompletion(workspaceId);
   const [marketplace, setMarketplace] = useState<MCPMarketplaceSearchResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [marketplaceLoading, setMarketplaceLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const serverRequestRef = useRef(0);
   const marketplaceRequestRef = useRef(0);
   const reloadRequestRef = useRef(0);
   const workspaceRef = useRef(workspaceId);
   workspaceRef.current = workspaceId;
-
-  const loadServers = useCallback(async () => {
-    const requestID = ++serverRequestRef.current;
-    const next = await listMCPServers(workspaceId, { cache: "no-store" });
-    if (serverRequestRef.current === requestID) setServers(next);
-    return next;
-  }, [workspaceId]);
-
   const searchMarketplace = useCallback(async (query = "") => {
     const requestID = ++marketplaceRequestRef.current;
     setMarketplaceLoading(true);
     try {
       const next = await searchMCPMarketplace(query);
-      if (marketplaceRequestRef.current !== requestID) return next;
-      setMarketplace(next);
-      setError(null);
+      if (marketplaceRequestRef.current === requestID) setMarketplace(next);
       return next;
     } finally {
       if (marketplaceRequestRef.current === requestID) setMarketplaceLoading(false);
     }
   }, []);
-
   const reload = useCallback(async () => {
     const requestID = ++reloadRequestRef.current;
     const isCurrent = () =>
       reloadRequestRef.current === requestID && workspaceRef.current === workspaceId;
-    if (isCurrent()) setLoading(true);
+    setLoading(true);
     try {
-      await Promise.all([loadServers(), searchMarketplace()]);
+      await Promise.all([catalog.load(), searchMarketplace()]);
       if (isCurrent()) setError(null);
     } catch (cause) {
       if (isCurrent()) setError(cause);
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [loadServers, searchMarketplace]);
-
+  }, [catalog.load, workspaceId, searchMarketplace]);
   useEffect(() => {
+    setError(null);
     void reload();
+    return () => {
+      reloadRequestRef.current += 1;
+      marketplaceRequestRef.current += 1;
+    };
   }, [reload]);
-
-  const create = useCallback(
-    async (payload: MCPDefinitionInput) => {
-      const created = await createMCPServer(workspaceId, payload);
-      setServers((current) => [...current, created]);
-      return created;
-    },
-    [workspaceId],
-  );
-
-  const update = useCallback(
-    async (serverId: string, payload: MCPDefinitionPatch) => {
-      const updated = await updateMCPServer(workspaceId, serverId, payload);
-      setServers((current) => current.map((server) => (server.id === serverId ? updated : server)));
-      return updated;
-    },
-    [workspaceId],
-  );
-
-  const remove = useCallback(
-    async (server: MCPServerDefinition, confirm = false) => {
-      await deleteMCPServer(workspaceId, server.id, server.revision, confirm);
-      setServers((current) => current.filter((item) => item.id !== server.id));
-    },
-    [workspaceId],
-  );
-
-  const install = useCallback(
-    async (payload: MCPMarketplaceInstallInput) => {
-      const created = await installMCPMarketplaceEntry(workspaceId, payload);
-      setServers((current) => [...current, created]);
-      return created;
-    },
-    [workspaceId],
-  );
-
-  const refresh = useCallback(async () => {
-    await refreshMCPMarketplace();
-    return searchMarketplace();
-  }, [searchMarketplace]);
-
+  const register = async (operation: () => Promise<MCPServerDefinition>) => {
+    const result = await registration.register(operation);
+    if (result.status === "saved") catalog.reconcile(result.definition);
+    return result;
+  };
+  const reviewRegistration = async () => {
+    const generation = reloadRequestRef.current;
+    const isCurrent = () =>
+      generation === reloadRequestRef.current && workspaceRef.current === workspaceId;
+    try {
+      if ((await catalog.load()) && isCurrent()) {
+        registration.reviewed();
+        setError(null);
+      }
+    } catch (cause) {
+      if (isCurrent()) setError(cause);
+    }
+  };
   return {
-    servers,
+    servers: catalog.servers,
     marketplace,
     loading,
     marketplaceLoading,
     error,
     reload,
     searchMarketplace,
-    create,
-    update,
-    remove,
-    install,
-    refresh,
+    registration,
+    reviewRegistration,
+    create: (payload: MCPDefinitionInput) => register(() => createMCPServer(workspaceId, payload)),
+    install: (payload: MCPMarketplaceInstallInput) =>
+      register(() => installMCPMarketplaceEntry(workspaceId, payload)),
+    update: catalog.update,
+    remove: catalog.remove,
+    refresh: async () => {
+      await refreshMCPMarketplace();
+      return searchMarketplace();
+    },
   };
 }

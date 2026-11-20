@@ -45,6 +45,19 @@ func (s *Store) ReconcileTaskPROwnership(
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	changed, err := s.ReconcileTaskPROwnershipTx(ctx, tx, memberTaskID, ownerTaskID, repositoryID, prNumber)
+	if err != nil || !changed {
+		return changed, err
+	}
+	return true, tx.Commit()
+}
+
+func (s *Store) ReconcileTaskPROwnershipTx(
+	ctx context.Context, tx *sqlx.Tx, memberTaskID, ownerTaskID, repositoryID string, prNumber int,
+) (bool, error) {
+	if !validTaskPROwnershipArgs(s, memberTaskID, ownerTaskID, prNumber) {
+		return false, nil
+	}
 
 	memberID, source, found, err := findTaskPRMemberTx(ctx, tx, memberTaskID, repositoryID, prNumber)
 	if err != nil {
@@ -62,7 +75,7 @@ func (s *Store) ReconcileTaskPROwnership(
 		if err := reconcileExistingOwnerTaskPRTx(ctx, tx, memberID, memberTaskID, ownerTaskID, repositoryID, prNumber); err != nil {
 			return false, err
 		}
-		return true, tx.Commit()
+		return true, nil
 	}
 	if ownerState == taskPROwnerDetached {
 		// A detached owner tombstone is an explicit opt-out. Do not resurrect
@@ -70,13 +83,13 @@ func (s *Store) ReconcileTaskPROwnership(
 		if err := detachTaskPROwnershipRowTx(ctx, tx, memberID, memberTaskID, repositoryID, prNumber); err != nil {
 			return false, err
 		}
-		return true, tx.Commit()
+		return true, nil
 	}
 
 	if err := moveTaskPROwnershipTx(ctx, tx, memberID, memberTaskID, ownerTaskID, repositoryID, prNumber); err != nil {
 		return false, err
 	}
-	return true, tx.Commit()
+	return true, nil
 }
 
 func validTaskPROwnershipArgs(s *Store, memberTaskID, ownerTaskID string, prNumber int) bool {

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { IconChartBar } from "@tabler/icons-react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -457,7 +457,7 @@ describe("AppSidebarFooter current-user chip", () => {
     expect(screen.queryByTestId("current-user-chip")).toBeNull();
   });
 
-  it("renders the current-user chip and logs out when enabled with a user", () => {
+  it("renders the current-user chip and logs out when enabled with a user", async () => {
     state.auth = {
       mode: "enabled",
       user: { display_name: "Jane Doe", email: "jane@example.com" },
@@ -470,7 +470,7 @@ describe("AppSidebarFooter current-user chip", () => {
 
     fireEvent.click(screen.getByTestId("current-user-logout"));
 
-    expect(mocks.logout).toHaveBeenCalledOnce();
+    await waitFor(() => expect(mocks.logout).toHaveBeenCalledOnce());
   });
 });
 

@@ -85,8 +85,8 @@ func validateProviderScope(raw string) (string, error) {
 // requires a paired provider_repo_id, because the scope-isolated clone
 // layout needs both to build a unique path. A bare provider_repo_id with no
 // scope is fine — that's the normal shape for every built-in provider
-// (GitHub, GitLab, Azure DevOps), none of which resolve a provider
-// connection scope — and falls through to the legacy owner/name layout.
+// (GitHub, GitLab), neither of which resolves a provider connection scope —
+// and falls through to the legacy owner/name layout.
 func validateProviderScopeAndRepoIDPair(scope, repoID string) error {
 	if strings.TrimSpace(scope) != "" && strings.TrimSpace(repoID) == "" {
 		return fmt.Errorf("%w: provider_scope requires a paired provider_repo_id", ErrInvalidRepositorySettings)
@@ -203,12 +203,19 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 
 // GetWorkspace retrieves a workspace by ID
 func (s *Service) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
+	return s.getWorkspaceAction(ctx, id, models.CollaborationRead)
+}
+
+func (s *Service) getWorkspaceAction(ctx context.Context, id string, action models.WorkspaceCollaborationAction) (*models.Workspace, error) {
 	workspace, err := s.workspaces.GetWorkspace(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	if scoped := s.workspaceDecision(ctx, workspace); !scoped.CanRead() {
 		return nil, repoerrors.ErrWorkspaceNotFound
+	}
+	if err := s.authorizeWorkspaceCollaboration(ctx, id, action); err != nil {
+		return nil, err
 	}
 	return workspace, nil
 }
@@ -424,6 +431,10 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 			s.logger.Error("failed to delete workspace secrets", zap.String("workspace_id", workspace.ID), zap.Error(err))
 			postCommitErr = errors.Join(postCommitErr, err)
 		}
+	}
+	// The edge tables have no foreign key to tasks, so the cascade leaves them behind.
+	for _, task := range deletedTasks {
+		s.deleteDependencyEdgesForTask(ctx, task.ID)
 	}
 	var lateCleanupErr error
 	cleanups, lateCleanupErr = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
@@ -734,7 +745,8 @@ func (s *Service) ListWorkspaces(ctx context.Context) ([]*models.Workspace, erro
 	if err != nil {
 		return nil, err
 	}
-	return s.filterWorkspacesForCaller(ctx, workspaces), nil
+	workspaces = s.filterWorkspacesForCaller(ctx, workspaces)
+	return s.filterCollaborationWorkspaces(ctx, workspaces)
 }
 
 // Workflow operations
@@ -773,19 +785,38 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 	}
 
 	// Create workflow steps from template if specified
-	if req.WorkflowTemplateID != nil && *req.WorkflowTemplateID != "" && s.workflowStepCreator != nil {
+	if req.WorkflowTemplateID != nil && *req.WorkflowTemplateID != "" {
+		if s.workflowStepCreator == nil {
+			initErr := errors.New("workflow step creator is not configured")
+			return nil, s.rollbackVisibleWorkflowAfterTemplateFailure(ctx, workflow, initErr)
+		}
 		if err := s.workflowStepCreator.CreateStepsFromTemplate(ctx, workflow.ID, *req.WorkflowTemplateID); err != nil {
 			s.logger.Error("failed to create workflow steps from template",
 				zap.String("workflow_id", workflow.ID),
 				zap.String("template_id", *req.WorkflowTemplateID),
 				zap.Error(err))
-			// Don't fail workflow creation, just log the error
+			initErr := fmt.Errorf("failed to create workflow steps from template: %w", err)
+			return nil, s.rollbackVisibleWorkflowAfterTemplateFailure(ctx, workflow, initErr)
 		}
 	}
 
 	s.publishWorkflowEvent(ctx, events.WorkflowCreated, workflow)
 	s.logger.Info("workflow created", zap.String("workflow_id", workflow.ID), zap.String("name", workflow.Name))
 	return workflow, nil
+}
+
+func (s *Service) rollbackVisibleWorkflowAfterTemplateFailure(
+	ctx context.Context,
+	workflow *models.Workflow,
+	initErr error,
+) error {
+	if workflow.Hidden {
+		return initErr
+	}
+	if err := s.workflows.DeleteWorkflow(ctx, workflow.ID); err != nil {
+		return errors.Join(initErr, fmt.Errorf("failed to remove workflow after template initialization failure: %w", err))
+	}
+	return initErr
 }
 
 // GetWorkflow retrieves a workflow by ID
@@ -798,7 +829,7 @@ func (s *Service) GetWorkflow(ctx context.Context, id string) (*models.Workflow,
 
 // UpdateWorkflow updates an existing workflow
 func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWorkflowRequest) (*models.Workflow, error) {
-	if err := s.authorizeWorkflowID(ctx, id); err != nil {
+	if err := s.authorizeWorkflowAction(ctx, id, models.CollaborationControl); err != nil {
 		return nil, err
 	}
 	workflow, err := s.workflows.GetWorkflow(ctx, id)
@@ -924,7 +955,7 @@ func (s *Service) listWorkflowTasksForDelete(
 }
 
 func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
-	if err := s.authorizeWorkflowID(ctx, id); err != nil {
+	if err := s.authorizeWorkflowAction(ctx, id, models.CollaborationControl); err != nil {
 		return err
 	}
 	workflow, err := s.workflows.GetWorkflow(ctx, id)
@@ -1035,7 +1066,7 @@ func (s *Service) GetOfficeWorkflowIDs(ctx context.Context) map[string]struct{} 
 
 // ReorderWorkflows updates sort_order for workflows within a workspace.
 func (s *Service) ReorderWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) error {
-	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
+	if err := s.authorizeWorkspaceAction(ctx, workspaceID, models.CollaborationControl); err != nil {
 		return err
 	}
 	if err := s.workflows.ReorderWorkflows(ctx, workspaceID, workflowIDs); err != nil {
@@ -1051,7 +1082,7 @@ func (s *Service) ReorderWorkflows(ctx context.Context, workspaceID string, work
 func (s *Service) ReorderWorkflowsIfUnchanged(
 	ctx context.Context, workspaceID string, workflowIDs []string, expectedWorkspace time.Time, expectedByID map[string]time.Time,
 ) error {
-	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
+	if err := s.authorizeWorkspaceAction(ctx, workspaceID, models.CollaborationControl); err != nil {
 		return err
 	}
 	reorderer, ok := s.workflows.(exactWorkflowReorderer)
@@ -1425,6 +1456,13 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 		return nil, repoerrors.ErrTaskVersionConflict
 	}
 	updates := *req
+	if req.RemoteURL != nil {
+		if err := s.applyRepositoryRemoteURLUpdate(ctx, repository, &updates); err != nil {
+			return nil, err
+		}
+	} else {
+		updates.ObservedIdentity = nil
+	}
 	if req.LocalPath != nil {
 		localPath, pathErr := canonicalRepositoryLocalPath(*req.LocalPath)
 		if pathErr != nil {
@@ -1443,8 +1481,6 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 		}
 		repository.SecretBindings = replacement
 	}
-	repository.UpdatedAt = time.Now().UTC()
-
 	if req.SecretBindings != nil {
 		mutator, ok := s.repoEntities.(taskrepo.RepositorySecretBindingMutator)
 		if !ok {
@@ -1458,7 +1494,10 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 			}
 			updateErr = exact.UpdateRepositoryWithSecretBindingsIfUnchanged(ctx, repository, replacement, *req.ExpectedUpdatedAt)
 		} else {
-			updateErr = mutator.UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx, repository, replacement, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree})
+			updateErr = mutator.UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx, repository, replacement, taskrepo.RepositoryCheckoutIntent{
+				DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree,
+				RemoteURL: updates.RemoteURL, ObservedIdentity: updates.ObservedIdentity,
+			})
 		}
 		if updateErr != nil {
 			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(updateErr))
@@ -1473,7 +1512,10 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 			return nil, err
 		}
-	} else if err := s.repoEntities.UpdateRepositoryWithCheckoutIntent(ctx, repository, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree}); err != nil {
+	} else if err := s.repoEntities.UpdateRepositoryWithCheckoutIntent(ctx, repository, taskrepo.RepositoryCheckoutIntent{
+		DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree,
+		RemoteURL: updates.RemoteURL, ObservedIdentity: updates.ObservedIdentity,
+	}); err != nil {
 		s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -1783,7 +1825,7 @@ func (s *Service) CountActiveSessionsByRepository(ctx context.Context, id string
 // Repository script operations
 
 func (s *Service) CreateRepositoryScript(ctx context.Context, req *CreateRepositoryScriptRequest) (*models.RepositoryScript, error) {
-	if err := s.authorizeRepositoryID(ctx, req.RepositoryID); err != nil {
+	if err := s.authorizeRepositoryMutation(ctx, req.RepositoryID); err != nil {
 		return nil, err
 	}
 	script := &models.RepositoryScript{
@@ -1818,7 +1860,7 @@ func (s *Service) UpdateRepositoryScript(ctx context.Context, id string, req *Up
 	if err != nil {
 		return nil, err
 	}
-	if err := s.authorizeRepositoryID(ctx, script.RepositoryID); err != nil {
+	if err := s.authorizeRepositoryMutation(ctx, script.RepositoryID); err != nil {
 		return nil, err
 	}
 	if req.Name != nil {
@@ -1846,7 +1888,7 @@ func (s *Service) DeleteRepositoryScript(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.authorizeRepositoryID(ctx, script.RepositoryID); err != nil {
+	if err := s.authorizeRepositoryMutation(ctx, script.RepositoryID); err != nil {
 		return err
 	}
 	if err := s.repoEntities.DeleteRepositoryScript(ctx, id); err != nil {

@@ -3,6 +3,7 @@ package mcpconfig
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
 )
 
@@ -30,22 +31,24 @@ type MCPSetupChange struct {
 }
 
 type MCPSetupComparison struct {
-	Version             int              `json:"version"`
-	Status              string           `json:"status"`
-	Reason              string           `json:"reason,omitempty"`
-	DesiredRevision     int64            `json:"desired_revision"`
-	AppliedRevision     int64            `json:"applied_revision"`
-	AttachmentAttemptID string           `json:"attachment_attempt_id,omitempty"`
-	SelectionIDs        []string         `json:"selection_ids,omitempty"`
-	Changes             []MCPSetupChange `json:"changes,omitempty"`
+	Version               int              `json:"version"`
+	Status                string           `json:"status"`
+	Reason                string           `json:"reason,omitempty"`
+	DesiredRevision       int64            `json:"desired_revision"`
+	AppliedRevision       int64            `json:"applied_revision"`
+	AttachmentAttemptID   string           `json:"attachment_attempt_id,omitempty"`
+	ExcludedDefinitionIDs []string         `json:"excluded_definition_ids,omitempty"`
+	SelectionIDs          []string         `json:"selection_ids,omitempty"`
+	Changes               []MCPSetupChange `json:"changes,omitempty"`
 }
 
 // ResolutionInputs is an immutable catalog/selection read, never a wire payload.
 type ResolutionInputs struct {
-	Origins             map[string][]SelectionOrigin
-	Definitions         map[string]*MCPServerDefinition
-	DesiredRevision     int64
-	SessionSelectionIDs []string
+	Origins               map[string][]SelectionOrigin
+	Definitions           map[string]*MCPServerDefinition
+	DesiredRevision       int64
+	SessionSelectionIDs   []string
+	ExcludedDefinitionIDs []string
 }
 
 type ResolutionInputsRepository interface {
@@ -84,4 +87,15 @@ func setupFromDefinitions(definitions map[string]*MCPServerDefinition) *MCPSetup
 		return nil
 	}
 	return setup
+}
+
+// setupFromInputs uses the same exclusion boundary for delivery and comparison.
+func setupFromInputs(inputs *ResolutionInputs) *MCPSetupSnapshot {
+	definitions := make(map[string]*MCPServerDefinition, len(inputs.Definitions))
+	for id, definition := range inputs.Definitions {
+		if !slices.Contains(inputs.ExcludedDefinitionIDs, id) {
+			definitions[id] = definition
+		}
+	}
+	return setupFromDefinitions(definitions)
 }

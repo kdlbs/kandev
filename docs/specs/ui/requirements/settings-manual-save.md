@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-07-14
-updated: 2026-08-09
+updated: 2026-10-26
 owners:
   - kandev
 ---
@@ -28,6 +28,7 @@ Settings pages currently mix immediate persistence, section-level Save buttons, 
 - **AC-UI-SETTINGS-MANUAL-SAVE-001.6:** Existing page-level and section-level Save buttons move to the shared floating action when their fields belong to the route. Dialog and sheet forms keep their own explicit Create or Save button.
 - **AC-UI-SETTINGS-MANUAL-SAVE-001.7:** A draftable reset-to-default action, including keyboard shortcut, feature-toggle, query, and preset resets, updates the draft and requires Save. It is not treated as an immediate command.
 - **AC-UI-SETTINGS-MANUAL-SAVE-001.8:** A visual preview may react immediately when that is the purpose of the setting, such as changing the color theme, but the durable value is not updated until Save. Reloading or discarding before Save restores the saved value.
+- **AC-UI-SETTINGS-MANUAL-SAVE-001.9:** A settings page shows and saves the server's current value for every field the user did not edit. Navigating to it from another route, then saving an unrelated change, never clears a value such as a workflow prompt or description that the server still holds.
 
 ## Migrated source detail
 

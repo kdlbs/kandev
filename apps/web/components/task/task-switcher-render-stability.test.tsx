@@ -145,6 +145,9 @@ function switcher(grouped: GroupedSidebarList, selectTask = onSelectTask) {
       grouped={grouped}
       activeTaskId={null}
       selectedTaskId={null}
+      unreadMessagesEnabled={false}
+      unreadDotHideDelayMs={0}
+      displayedSessionId={null}
       onSelectTask={selectTask}
       onToggleSubtasks={onToggleSubtasks}
     />
@@ -167,12 +170,37 @@ describe("TaskSwitcher render stability", () => {
       task(TASK_B, WORKFLOW_A),
       task("Task C", WORKFLOW_A),
     ]);
-    const props = { grouped, onSelectTask, onToggleSubtasks, selectedTaskId: null };
+    const props = {
+      grouped,
+      onSelectTask,
+      onToggleSubtasks,
+      selectedTaskId: null,
+      unreadMessagesEnabled: true,
+      unreadDotHideDelayMs: 0,
+      displayedSessionId: null,
+    };
     const view = render(<TaskSwitcher {...props} activeTaskId={TASK_A} />);
     view.rerender(<TaskSwitcher {...props} activeTaskId={TASK_B} />);
 
     expect(screen.getByRole("button", { name: TASK_A }).getAttribute("aria-pressed")).toBe("false");
     expect(screen.getByRole("button", { name: TASK_B }).getAttribute("aria-pressed")).toBe("true");
+    expect(renderCounts.rows.get("Task C")).toBe(1);
+  });
+
+  it("does not rerender unrelated rows when the displayed session changes", () => {
+    const grouped = groupedTogether([task(TASK_A, WORKFLOW_A), task("Task C", WORKFLOW_A)]);
+    const props = {
+      grouped,
+      onSelectTask,
+      onToggleSubtasks,
+      activeTaskId: TASK_A,
+      selectedTaskId: null,
+      unreadMessagesEnabled: true,
+      unreadDotHideDelayMs: 0,
+    };
+    const view = render(<TaskSwitcher {...props} displayedSessionId="session-1" />);
+    view.rerender(<TaskSwitcher {...props} displayedSessionId="session-2" />);
+
     expect(renderCounts.rows.get("Task C")).toBe(1);
   });
 

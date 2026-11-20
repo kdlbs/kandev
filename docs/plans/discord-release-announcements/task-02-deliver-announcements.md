@@ -112,3 +112,22 @@ Validation:
 - The production helper previewed published `v0.98.0` through real GitHub reads: 385 total changes, six highlights, correct category counts, and no unresolved credits. No Discord message was sent. An isolated temporary bare repository supplied release history because this shared checkout has an unrelated broken branch reference that prevents tag fetches.
 
 Public setup and recovery docs and the release skill are updated. Prepared for PR review; no workflow was dispatched or release published. Existing workflow-security findings are tracked in Kandev subtask `4bb81949-c018-421a-9f85-8a10674a7695`, created after checking open PRs for overlap.
+
+
+SDK integration adds `publish-plugin-sdk` and `stable-complete` to automatic
+delivery and recovery-notice prerequisites. This preserves the requirement that
+announcements describe complete Stable publication after the SDK work lands.
+The workflow contract tests cover failed, skipped, and cancelled prerequisites.
+
+### Environment-secret forwarding correction
+
+Release run `43107458248` received an empty webhook value because the caller
+did not pass the environment secret to the reusable workflow. The release job
+now passes only `DISCORD_GENERAL_WEBHOOK_URL`. The reusable workflow declares
+that secret as optional so preview remains usable without credentials.
+
+The new caller/declaration regression failed before the correction and passed
+after it. Workflow contracts (5), delivery tests (16), release contracts (78),
+and action-pinning tests (9) passed. `git diff --check` passed. The offline
+Zizmor scan reported findings in unchanged workflow code. Public setup and
+recovery instructions remain accurate. No live announcement was sent.

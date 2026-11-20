@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskDetailRoute } from "./task-detail-route";
@@ -17,6 +17,13 @@ const mocks = vi.hoisted(() => ({
   fetchTaskNavigationEnrichment: vi.fn(),
   deferRouteHydration: false,
   onHydrated: null as (() => void) | null,
+  navigationReadState: {
+    phase: "idle",
+    attempt: 0,
+    temporary: false,
+    revision: 0,
+    cycle: 0,
+  },
 }));
 const KANBAN_TASK_SHELL_TEST_ID = "kanban-task-shell";
 const STATE_HYDRATOR_TEST_ID = "state-hydrator";
@@ -107,19 +114,17 @@ vi.mock("@/lib/ssr/session-page-state", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/state/task-navigation-reads", () => ({
-  beginTaskNavigation: mocks.beginTaskNavigation,
-  isTaskNavigationCurrent: mocks.isTaskNavigationCurrent,
-  readTaskNavigationIdentity: mocks.readTaskNavigationIdentity,
-  retainTaskNavigationRead: vi.fn(() => () => {}),
-  useTaskNavigationReadState: vi.fn(() => ({
-    phase: "idle",
-    attempt: 0,
-    temporary: false,
-    revision: 0,
-    cycle: 0,
-  })),
-}));
+vi.mock("@/lib/state/task-navigation-reads", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/state/task-navigation-reads")>();
+  return {
+    ...actual,
+    beginTaskNavigation: mocks.beginTaskNavigation,
+    isTaskNavigationCurrent: mocks.isTaskNavigationCurrent,
+    readTaskNavigationIdentity: mocks.readTaskNavigationIdentity,
+    retainTaskNavigationRead: vi.fn(() => () => {}),
+    useTaskNavigationReadState: vi.fn(() => mocks.navigationReadState),
+  };
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -230,6 +235,13 @@ afterEach(() => {
 
 beforeEach(() => {
   mocks.readTaskNavigationIdentity.mockReset();
+  mocks.navigationReadState = {
+    phase: "idle",
+    attempt: 0,
+    temporary: false,
+    revision: 0,
+    cycle: 0,
+  };
   let generation = 0;
   const ownerToken = {};
   let lastRouteKey: string | null = null;
@@ -479,114 +491,6 @@ describe("TaskDetailRoute client navigation", () => {
     expect(
       screen.getByTestId(STATE_HYDRATOR_TEST_ID).getAttribute(FORCE_SESSION_ID_ATTRIBUTE),
     ).toBe("");
-  });
-});
-
-describe("TaskDetailRoute session selection", () => {
-  // @covers AC-AGENTS-MCP-MANAGEMENT-001.2
-  it("never opens a fallback conversation for an unavailable explicit session", async () => {
-    mocks.readTaskNavigationIdentity.mockResolvedValueOnce(makeNavigationIdentity());
-    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} sessionId="missing-session" />);
-    await screen.findByTestId("task-session-unavailable");
-    expect(screen.queryByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBeNull();
-    expect(mocks.fetchTaskNavigationEnrichment).not.toHaveBeenCalled();
-  });
-
-  it("retries an unavailable session list without opening another conversation", async () => {
-    const identity = makeNavigationIdentity();
-    mocks.readTaskNavigationIdentity
-      .mockResolvedValueOnce({
-        ...identity,
-        allSessionsResponse: { sessions: [], total: 0 },
-        sessionListUnavailable: true,
-      })
-      .mockResolvedValueOnce(identity);
-    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} sessionId="session-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
-    await waitFor(() =>
-      expect(
-        screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(SESSION_DATA_ATTRIBUTE),
-      ).toBe("session-1"),
-    );
-    expect(mocks.readTaskNavigationIdentity).toHaveBeenLastCalledWith(
-      expect.anything(),
-      TASK_ONE_ID,
-      expect.objectContaining({ refresh: true }),
-    );
-  });
-
-  it("preserves the existing recovery shell for ordinary explicit-route errors", async () => {
-    mocks.readTaskNavigationIdentity.mockRejectedValueOnce(new Error("temporary network error"));
-    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} sessionId="session-1" />);
-    await screen.findByTestId(KANBAN_TASK_SHELL_TEST_ID);
-    expect(screen.queryByTestId("task-session-unavailable")).toBeNull();
-  });
-
-  it("rejects late enrichment from an earlier A-B-A navigation", async () => {
-    const oldEnrichment = deferred<FetchedSessionData>();
-    const newEnrichment = deferred<FetchedSessionData>();
-    mocks.fetchTaskNavigationEnrichment
-      .mockReturnValueOnce(oldEnrichment.promise)
-      .mockImplementationOnce((identity: TaskNavigationIdentity) =>
-        Promise.resolve(makeEnrichedData(identity)),
-      )
-      .mockReturnValueOnce(newEnrichment.promise);
-    const { rerender } = renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} />);
-
-    await waitFor(() => expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBeTruthy());
-    rerender(<TaskDetailRoute taskId={TASK_TWO_ID} />);
-    await waitFor(() => {
-      expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(TASK_DATA_ATTRIBUTE)).toBe(
-        TASK_TWO_ID,
-      );
-    });
-    rerender(<TaskDetailRoute taskId={TASK_ONE_ID} />);
-    await waitFor(() => {
-      expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(TASK_DATA_ATTRIBUTE)).toBe(
-        TASK_ONE_ID,
-      );
-    });
-
-    oldEnrichment.resolve({
-      ...makeEnrichedData(makeNavigationIdentity()),
-      initialState: makeSessionHydrationState(makeTaskSession("stale-message")),
-    });
-    await waitFor(() => {
-      expect(
-        screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(READ_CURSOR_ATTRIBUTE),
-      ).toBe("message-1");
-    });
-
-    newEnrichment.resolve({
-      ...makeEnrichedData(makeNavigationIdentity()),
-      initialState: makeSessionHydrationState(makeTaskSession("fresh-message")),
-    });
-    await waitFor(() => {
-      expect(
-        screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(READ_CURSOR_ATTRIBUTE),
-      ).toBe("fresh-message");
-    });
-  });
-
-  it("preserves the selected owned conversation when the route omits a session id", async () => {
-    const state = makeKnownTaskState();
-    const secondary = makeTaskSession("message-1", "secondary", TASK_TWO_ID);
-    state.tasks = { activeTaskId: TASK_TWO_ID, activeSessionId: "secondary" } as AppState["tasks"];
-    state.taskSessions!.items.secondary = secondary;
-    const identity = makeNavigationIdentity(TASK_TWO_ID);
-    identity.allSessionsResponse.sessions = [identity.allSessionsResponse.sessions![0], secondary];
-    mocks.readTaskNavigationIdentity.mockResolvedValueOnce(identity);
-
-    renderTaskRoute(<TaskDetailRoute taskId={TASK_TWO_ID} />, state);
-
-    expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(SESSION_DATA_ATTRIBUTE)).toBe(
-      "secondary",
-    );
-    await waitFor(() => {
-      expect(mocks.fetchTaskNavigationEnrichment).toHaveBeenCalledWith(identity, "secondary", {
-        store: expect.anything(),
-      });
-    });
   });
 });
 

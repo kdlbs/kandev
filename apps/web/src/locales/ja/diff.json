@@ -44,6 +44,7 @@
   "undo": "元に戻す",
   "update": "更新",
   "walkthrough": "ウォークスルー",
+  "walkthroughGeneratedAt": "生成日時: {{date}}",
   "walkthroughNoteAdded": "ウォークスルー ノート追加",
   "walkthroughNoteQueued": "ウォークスルー ノートをキューに追加",
   "walkthroughNoteSent": "ウォークスルー ノート送信済み",

@@ -3,6 +3,8 @@ import { waitForActiveTaskSession } from "../../helpers/session-store";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe("Workflow automation", () => {
   /**
    * Seeds a 4-step workflow (Todo → In Progress → Review → Done) and validates
@@ -118,8 +120,8 @@ test.describe("Workflow automation", () => {
     });
 
     // --- Send another message in Review: verify manual step stays ---
-    // Wait for agent to become idle before sending (auto-start cascade may still be settling)
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    // Wait for the persisted idle state and editable composer after the auto-start cascade.
+    await session.waitForChatIdle({ timeout: 15_000, requireEditable: true });
 
     await session.sendMessage("/e2e:simple-message");
 

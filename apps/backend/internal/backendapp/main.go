@@ -40,6 +40,7 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/profiles"
 	"github.com/kandev/kandev/internal/startup"
+	taskchanges "github.com/kandev/kandev/internal/task/changes"
 	"github.com/kandev/kandev/internal/task/deliveryretention"
 	"github.com/kandev/kandev/internal/task/inventoryrepair"
 
@@ -51,7 +52,6 @@ import (
 	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
 
 	// GitHub integration
-	azuredevopspkg "github.com/kandev/kandev/internal/azuredevops"
 	githubpkg "github.com/kandev/kandev/internal/github"
 	gitlabpkg "github.com/kandev/kandev/internal/gitlab"
 
@@ -136,6 +136,7 @@ import (
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/workflow/stepevents"
 
 	// Repository cloning
 	"github.com/kandev/kandev/internal/repoclone"
@@ -388,6 +389,12 @@ func initializeApplication(ctx context.Context, cfg *config.Config, log *logger.
 	return startServices(ctx, cfg, log, addCleanup, eventBus, runCleanups, workerCancelFromContext(ctx))
 }
 
+func startTaskBackgroundWorkers(ctx context.Context, taskSvc *taskservice.Service, stallDetectionThreshold time.Duration) {
+	startup.AfterReady(ctx, func() { taskSvc.StartAutoArchiveLoop(ctx) })
+	taskSvc.SetStallDetectionThreshold(stallDetectionThreshold)
+	startup.AfterReady(ctx, func() { taskSvc.StartSessionReconciliationLoop(ctx) })
+}
+
 // applyStartupRuntimeFlags resolves persisted runtime-flag overrides and
 // applies them to the config, returning false if resolution fails. It is a
 // no-op when no runtime-flag repository is configured.
@@ -445,6 +452,10 @@ func startServices( //nolint:cyclop
 		log.Error("Failed to initialize services", zap.Error(err))
 		return false
 	}
+	if dbPool != nil && dbPool.Writer() != nil && dbPool.Writer().DriverName() == "sqlite3" {
+		services.TurnHistoryStore = taskchanges.NewGitHistoryStore(filepath.Join(cfg.ResolvedDataDir(), "turn-history"), nil)
+	}
+	services.TurnHistory = taskchanges.NewHistoryService(repos.Task, services.TurnHistoryStore, nil)
 	if services.PluginsCleanup != nil {
 		addCleanup(services.PluginsCleanup)
 	}
@@ -484,12 +495,9 @@ func startServices( //nolint:cyclop
 	if services.Org != nil && services.Org.Enabled() {
 		// A suspended organization fails every session and token closed, which
 		// is what makes suspension a real lever rather than a label. An
-		// unreadable status fails closed too: an org we cannot verify does not
-		// get to keep serving requests.
-		services.Auth.SetOrgStatusChecker(func(ctx context.Context, orgID string) bool {
-			record, err := services.Org.Get(ctx, orgID)
-			return err == nil && record.Active()
-		})
+		// unreadable status is unavailable rather than invalid: the credential
+		// may still be valid once the organization store recovers.
+		services.Auth.SetOrgStatusChecker(organizationStatusChecker(services.Org))
 	}
 	hostnameStore := repos.HostnameCache
 	if hostnameStore == nil {
@@ -702,12 +710,16 @@ func startAgentInfrastructure(
 		services.Task,
 		repos.Task,
 		startupRecoveryGuard,
+		services.Auth,
 	)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
 	}
 	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
+	if services.DynamicProfileResolver != nil {
+		lifecycleMgr.SetResourceCircuitKeyResolver(services.DynamicProfileResolver.ResourceCircuitKeyForProfile)
+	}
 
 	// ============================================
 	// WORKTREE MANAGER
@@ -728,7 +740,15 @@ func startAgentInfrastructure(
 	services.Task.SetBranchMaterializer(liveBranchMaterializer)
 	workspaceSourceMaterializer := newWorkspaceSourceMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log)
 	services.Task.SetWorkspaceSourceMaterializer(workspaceSourceMaterializer)
+	services.Task.SetWorkspaceSourceRescanner(lifecycleMgr)
+	services.Task.SetNestedWorkspaceExclusioner(worktreeMgr)
 	services.Task.SetWorkspaceSourceProviderRefresher(newTaskMCPProviderRefresher(repos.Task, lifecycleMgr, log))
+	services.Task.StartWorktreeAdoptionWorker(ctx)
+	addRuntimeCleanup(func() error {
+		services.Task.StopWorktreeAdoptionWorker()
+		return nil
+	})
+	registerWorktreeAdoptionSubscriber(eventBus, services.Task, log)
 	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
 	services.Task.SetAgentComparisonTargetPusher(lifecycleMgr)
 	services.Task.SetExecutorCapabilityProber(lifecycleMgr)
@@ -762,9 +782,6 @@ func startAgentInfrastructure(
 	}
 	if services.Sentry != nil {
 		services.Sentry.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
-	}
-	if services.AzureDevOps != nil {
-		services.AzureDevOps.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
 	}
 	if services.Automation != nil {
 		services.Automation.Service.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
@@ -824,7 +841,7 @@ func startAgentInfrastructure(
 
 	sessionCapacityEnvironment := sessioncapacity.ReadEnvironment()
 	services.capacityRetryClock = newE2ECapacityRetryClock()
-	orchestratorSvc, msgCreator, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.Auth, services.User,
+	orchestratorSvc, msgCreator, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.TurnHistoryStore, services.Auth, services.User,
 		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
 		repos.SystemSettings, sessionCapacityEnvironment, services.capacityRetryClock, repos.RequiredStores)
 	if err != nil {
@@ -841,8 +858,12 @@ func startAgentInfrastructure(
 		repos.Task,
 		repos.AgentSettings,
 		services.DynamicProfileResolver,
+		orchestratorSvc.PersistDynamicCandidateSwitch,
 		orchestratorSvc.LaunchDynamicRouteAction,
 	))
+	if services.DynamicProfileResolver != nil {
+		services.DynamicProfileResolver.SetKeywordCredentialBindingResolver(keywordCredentialBindingResolver(lifecycleMgr, agentRegistry))
+	}
 	orchestratorSvc.SetProfileExecutionResolver(services.DynamicProfileResolver)
 
 	// Wire the soft-deleted-profile pre-flight into the watcher dispatch.
@@ -873,6 +894,7 @@ func startAgentInfrastructure(
 	})
 	if services.DynamicProfileResolver != nil {
 		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
+		agentSettingsController.SetRoutingCircuitReader(newRoutingCircuitReader(services.DynamicProfileResolver))
 	}
 	// An enabled automation is a standing instruction to launch against a
 	// profile. Nothing is running, so it never reaches the active-session list,
@@ -929,23 +951,6 @@ func startAgentInfrastructure(
 	// and workspace-scoped GitLab credential resolver are both configured.
 	workspaceSourceMaterializer.SetHostRepositoryCloner(orchestratorSvc)
 	liveBranchMaterializer.SetHostRepositoryCloner(orchestratorSvc)
-
-	// Azure DevOps owns connection-health and work-item/pull-request watcher
-	// polling. Watch matches flow through the shared orchestrator coordinator.
-	if services.AzureDevOps != nil {
-		orchestratorSvc.SetAzureDevOpsService(services.AzureDevOps)
-		services.AzureDevOps.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
-		azureLifecycle, lifecycleErr := azuredevopspkg.RegisterLifecycleCleanup(eventBus, services.AzureDevOps)
-		if lifecycleErr != nil {
-			log.Warn("Azure DevOps lifecycle cleanup unavailable", zap.Error(lifecycleErr))
-		} else {
-			addRuntimeCleanup(azureLifecycle.Close)
-		}
-		azurePoller := azuredevopspkg.NewPoller(services.AzureDevOps, log)
-		startup.AfterReady(ctx, func() { azurePoller.Start(ctx) })
-		addRuntimeCleanup(func() error { azurePoller.Stop(); return nil })
-		log.Info("Azure DevOps auth poller started")
-	}
 
 	// Start JIRA poller. Drives two background loops sharing one service: an
 	// auth-health probe (so the UI can show connect status without polling
@@ -1042,7 +1047,8 @@ func startAgentInfrastructure(
 	// Start the plugin system's event delivery and health monitor
 	// background loops.
 	if services.Plugins != nil {
-		startPluginsSubsystems(ctx, services.Plugins, lifecycleMgr, eventBus, log,
+		services.PluginToolCatalog = newPluginToolCatalogFanout(lifecycleMgr, log)
+		startPluginsSubsystems(ctx, services.Plugins, lifecycleMgr, services.PluginToolCatalog, eventBus, log,
 			func(fn func() error) { addRuntimeCleanup(fn) })
 	}
 
@@ -1181,10 +1187,12 @@ func startGatewayAndServe(
 		// Notifications drop rather than redirect when a task's owner cannot
 		// be resolved while authentication is enforced.
 		services.Auth,
+		cfg.Notifications,
 		cfg.ResolvedHomeDir(),
 		func(fn func() error) { addCleanup(fn) },
 		cfg.Features.LSPBrowserContinuity,
 		orchestratorSvc.AcquireSessionLifecycleFence,
+		cfg.Notifications.WebhookAllowPrivateNetworks,
 		cfg.Limits.LSPMaxConnections,
 	)
 	if terminalSvc != nil {
@@ -1194,12 +1202,17 @@ func startGatewayAndServe(
 		log.Error("Failed to initialize WebSocket gateway", zap.Error(err))
 		return false
 	}
+	if services.Plugins != nil {
+		services.Plugins.SetNotificationProviderAccess(notificationSvc)
+		notificationSvc.SetFormatterRuntime(services.Plugins)
+	}
+	addCleanup(func() error { notificationSvc.CloseFormatterCaptures(); return nil })
 
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
 	if cfg.Features.Canvases {
 		gateways.RegisterCanvasNotifications(ctx, eventBus, gateway.Hub, log)
 	}
-	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, log))
+	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, orchestratorSvc, log))
 	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, log))
 	gateway.Hub.SetSessionGitRefreshProvider(buildSessionGitRefreshProvider(repos.Task, lifecycleMgr, log))
 	gateway.Hub.SetConversationSourceReader(services.Task)
@@ -1229,6 +1242,7 @@ func startGatewayAndServe(
 	hostUtilityMgr.SetProfileEnvironmentResolver(lifecycleMgr.ResolveUtilityProfileEnvironment)
 	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
+	hostUtilityMgr.SetManagedRuntimeSingleUserOwner(singleUserManagedRuntimeOwner(services.Auth))
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
@@ -1301,6 +1315,8 @@ func startGatewayAndServe(
 		SessionCapacity:            orchestratorSvc,
 		SessionCapacityEnvironment: sessionCapacityEnvironment,
 		TaskSessions:               repos.Task,
+		HistoryCompaction:          historyCompactorAdapter{service: services.TurnHistory},
+		HistoryBackup:              services.TurnHistory,
 		AgentRuntimeRecovery:       agentRuntimeRecovery,
 		ToolPayloadChanged: func(eventCtx context.Context, ids []string) {
 			for _, id := range ids {
@@ -1378,12 +1394,17 @@ func startGatewayAndServe(
 	if e2eRuntimeUpdateHooks != nil {
 		agentSettingsController.SetRuntimeUpdateStatusResolver(e2eRuntimeUpdateHooks.resolveLatestVersion)
 	}
+	if e2eDisablesNativeUpdateChecks() {
+		// E2E backends never run a host agent CLI or reach a real release feed.
+		agentSettingsController.DisableNativeUpdateCheckExecution()
+	}
 	// Build the real router and register all handlers, which wires the real
 	// dispatcher into lifecycleMgr.SetMCPHandler and installs MCP scope handlers
 	// BEFORE lifecycleMgr.Start recovers sessions.
 	builtServer, err := buildHTTPServer(ctx, cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, notificationSvc, msgCreator, agentRegistry, hostUtilityMgr,
-		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
+		addCleanup, restoreWorkerCleanupRegistrar(addCleanup, &restoreCleanups),
+		repoCloner, systemSvc, storageComposition.workspaceRestorer,
 		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, e2eRuntimeUpdateHooks, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
@@ -1540,10 +1561,7 @@ func startGatewayAndServe(
 		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 	}
 
-	startup.AfterReady(ctx, func() { services.Task.StartAutoArchiveLoop(ctx) })
-	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)
-	startup.AfterReady(ctx, func() { services.Task.StartSessionReconciliationLoop(ctx) })
-	startup.AfterReady(ctx, func() { services.Task.StartQuickChatExpirationLoop(ctx) })
+	startTaskBackgroundWorkers(ctx, services.Task, cfg.Tasks.StallDetectionThreshold)
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
 	hostUtilityReady := make(chan struct{})
 	var hostUtilityWG sync.WaitGroup
@@ -1618,9 +1636,7 @@ func startGatewayAndServe(
 	addCleanup(stopRuntimeUpdatesCleanup)
 	restoreCleanups = append(restoreCleanups, stopRuntimeUpdatesCleanup)
 	gateway.Hub.AddUserSubscriptionListener(func(string) {
-		if err := agentSettingsController.ReplayRuntimeUpdateNotices(ctx); err != nil && ctx.Err() == nil {
-			log.Debug("runtime update replay unavailable")
-		}
+		agentSettingsController.RequestRuntimeUpdateReplay()
 	})
 	startup.AfterReady(ctx, func() { systemSvc.StartBackground(ctx) })
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
@@ -1746,6 +1762,7 @@ func constructOfficeServices(
 	// below. Wiring it after left a Kanban-only install with no dependency store
 	// at all: blocked_by on create failed and list_related_tasks reported nothing.
 	services.Task.SetBlockerRepository(repos.Office)
+	services.Task.SetRelationRepository(repos.Office)
 
 	// office-costs Wave B: lazy models.dev pricing lookup. The Client
 	// allocates no resources at startup — the first non-claude-acp cost
@@ -1844,6 +1861,13 @@ func activateOfficeServices(
 	// block startup and cannot affect its result.
 	startup.AfterReady(ctx, func() { go officeroutines.RunStartupScan(ctx, reconcileSignal, repos.Office, log, time.Now().UTC()) })
 
+	// Handoff completion reports are opt-in behind the same cross-workspace
+	// collaboration flag their report grant belongs to. Wire the policy before
+	// the subscribers so a disabled flag stays the default-off state.
+	services.Office.SetHandoffCompletionPolicy(
+		newOfficeHandoffCompletionPolicy(cfg.Features.WorkspaceCollaboration, repos.Task, repos.Office),
+	)
+
 	// Register Office-only event subscribers. Global scheduling starts after
 	// this initializer returns, regardless of the feature flag.
 	if err := services.Office.RegisterEventSubscribers(eventBus); err != nil {
@@ -1853,6 +1877,11 @@ func activateOfficeServices(
 
 	if err := services.OfficeSvcs.Scheduler.RegisterTaskCompletionSubscriber(eventBus); err != nil {
 		log.Error("Failed to register office completion subscriber", zap.Error(err))
+		return false
+	}
+
+	if err := services.OfficeSvcs.Scheduler.RegisterBlockerFailureSubscriber(eventBus); err != nil {
+		log.Error("Failed to register office blocker failure subscriber", zap.Error(err))
 		return false
 	}
 
@@ -1870,7 +1899,7 @@ func newRunProcessorService(
 	agentctlBinaryPath string,
 	cfgLoader *configloader.ConfigLoader,
 	cfgWriter *configloader.FileWriter,
-	lifecycleMgr *lifecycle.Manager,
+	runtimeBackend officeRunProcessorRuntime,
 	log *logger.Logger,
 ) *officeservice.Service {
 	apiPort := cfg.Server.Port
@@ -1892,7 +1921,8 @@ func newRunProcessorService(
 		AgentctlBinaryPath: agentctlBinaryPath,
 		EventBus:           eventBus,
 	})
-	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, services.DynamicProfileResolver, log))
+	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, runtimeBackend, services.DynamicProfileResolver, log))
+	wireOfficeRunClaimSessionProbe(svc, repos.Task, runtimeBackend)
 	return svc
 }
 
@@ -1909,6 +1939,18 @@ func wireOfficeSvcsDependencies(
 	// Wire the workflow-domain decisions store so approve/request-changes
 	// route to workflow_step_decisions (ADR 0005 Wave E).
 	services.OfficeSvcs.Dashboard.SetDecisionStore(repos.Workflow)
+	registerOfficeCompletionPolicy(repos.Task, repos.Office, repos.Workflow)
+	if orchestratorSvc != nil && repos.Office != nil {
+		orchestratorSvc.SetParentChildrenCompletionWakeRecorder(func(
+			ctx context.Context, parentID, childSetKey, generation, operationID string,
+		) error {
+			return repos.Office.RecordWorkflowChildrenCompletedWake(ctx, parentID, childSetKey, generation, operationID)
+		})
+	}
+	if !repos.Task.CompletionPoliciesConfigured() {
+		panic("Office completion gate not configured")
+	}
+	services.OfficeSvcs.Dashboard.SetTaskHumanDoneCompleter(officeHumanDoneCompleterAdapter{tasks: services.Task})
 	// Wire the event bus into the dashboard service for status-change events.
 	services.OfficeSvcs.Dashboard.SetEventBus(eventBus)
 	services.OfficeSvcs.Channels.SetEventBus(eventBus)
@@ -1932,6 +1974,9 @@ func wireOfficeSvcsDependencies(
 	// Route an Office task's terminal-step completion through Office's own
 	// status pipeline (approval gate included) instead of a raw state write.
 	orchestratorSvc.SetOfficeTaskStatusUpdater(services.OfficeSvcs.Dashboard)
+	// A human move that would complete an Office task is refused while its
+	// approvers are pending.
+	services.Task.SetApproverNameResolver(officeApproverNameResolverAdapter{reader: services.OfficeSvcs.Dashboard})
 	// Wire the office service as the retry canceller for task reassignment.
 	services.OfficeSvcs.Dashboard.SetRetryCanceller(services.Office)
 	// Wire the office service as the terminal-shape recorder so a
@@ -1943,10 +1988,16 @@ func wireOfficeSvcsDependencies(
 	// Route the Office "No parent" mutation through the canonical task detach
 	// operation so inherited workspace sharing remains valid.
 	services.OfficeSvcs.Dashboard.SetTaskDetacher(services.Task)
+	// A user's Done request on a task before its final workflow step moves the
+	// task to that step through the human move path.
+	if services.Workflow != nil {
+		services.OfficeSvcs.Dashboard.SetTaskFinalStepMover(officeFinalStepMoverAdapter{tasks: services.Task, steps: services.Workflow})
+	}
 	// Publish task.updated for Office status changes so WS-driven UI outside
 	// the Office board (All-Workflows kanban, task views, task/statussummary)
 	// sees the mutation instead of rendering stale state until a refetch.
 	services.OfficeSvcs.Dashboard.SetTaskLifecyclePublisher(services.Task)
+	services.OfficeSvcs.Dashboard.SetTaskStateChangePublisher(services.Task)
 	// Human assignee writes from the office PATCH surface go through the task
 	// service, which authorizes the caller and validates the assignee. That
 	// route carries no :wsId, so it is not covered by the office
@@ -1997,6 +2048,9 @@ func wireOfficeProviderRouting(
 	resolver := routing.NewResolver(&officeRoutingRepoAdapter{repo: repos.Office}, nil)
 	resolver.SetExecutionProfileStore(repos.AgentSettings, agentRegistry)
 	scheduler.SetResolver(resolver)
+	orchestratorSvc.SetOfficeLaunchProfilePreview((&officeLaunchProfilePreview{
+		agents: repos.Office, resolver: resolver,
+	}).Preview)
 	scheduler.SetTaskStarter(&schedulerTaskStarterAdapter{orch: orchestratorSvc})
 	scheduler.SetRunSessionLauncher(services.Office.RunSessionLauncherHandle())
 	scheduler.SetEventBus(eventBus)
@@ -2006,6 +2060,13 @@ func wireOfficeProviderRouting(
 	provider.SetExecutionProfileStore(repos.AgentSettings)
 	services.OfficeSvcs.Dashboard.SetRoutingProvider(provider)
 	services.OfficeSvcs.Dashboard.SetRouteAttemptLister(repos.Office)
+	if services.Workflow != nil {
+		services.Workflow.SetImportExclusionAdvisor(&importExclusionAdvisorAdapter{setup: provider})
+		services.OfficeSvcs.Dashboard.SetSeatAuthorExclusionWriter(&seatExclusionWriterAdapter{
+			workflow:  services.Workflow,
+			publisher: stepevents.NewPublisher(eventBus, "office-routing", logger.Default()),
+		})
+	}
 	services.OfficeSvcs.Agents.SetKnownProvidersFn(func() []routing.ProviderID {
 		return routing.KnownProviders(agentRegistry)
 	})
@@ -2156,9 +2217,16 @@ func startSchedulingRuntime(
 	orchScheduler := officeservice.NewSchedulerIntegration(
 		runProcessorSvc, tickInterval,
 	)
+	if services.Task != nil {
+		orchScheduler.SetTaskCreationAttachmentReader(services.Task)
+	}
 	// Bind Office credentials to the concrete launch session before dispatch.
 	// Deferred starts refresh credentials after their persisted-token redaction.
 	orchestratorSvc.SetLaunchCredentialReminter(orchScheduler)
+	// Let the run processor settle an Office run whose deferred launch the
+	// session ceiling replayed or terminally dropped. The ceiling remains the
+	// only launcher; this only records the outcome on the run it queued.
+	orchestratorSvc.SetCeilingDeferredLaunchSettler(runProcessorSvc)
 	// Office task-handoffs prompt enrichment. The HandoffService is
 	// constructed alongside the HTTP routes (helpers.go); we stash the
 	// scheduler reference on the Services struct so registerRoutes can
@@ -2173,6 +2241,7 @@ func startSchedulingRuntime(
 		runsRepo, eventBus, log, nil,
 	)
 	runsSvc.SetLaunchSafetyLimits(safetyLimits.maxCausationDepth, safetyLimits.selfTriggerAllowance, safetyLimits.selfTriggerTotalAllowance)
+	runsSvc.SetTaskStepResolver(repos.Office.GetTaskWorkflowStepID)
 	runProcessorSvc.SetRunsService(runsSvc)
 	// office/scheduler.SchedulerService.QueueRun/QueueRunCtx (approval-resolved
 	// and reactivity wakes) also delegate through the same seam, gaining
@@ -2835,6 +2904,11 @@ func buildOfficeFeatureServices(
 	jwtSigningKey string,
 ) *office.Services {
 	activity := officeshared.NewActivityLogger(repo, log)
+	if services.Office != nil {
+		services.Office.SetTaskStateWriter(taskRepo)
+		services.Office.SetTaskStateBatchWriter(taskRepo)
+		services.Office.SetTaskStateChangePublisher(services.Task)
+	}
 
 	agentSvc := officeagents.NewAgentService(repo, log, activity)
 	agentSvc.SetProfileStore(settingsRepo)
@@ -2864,6 +2938,9 @@ func buildOfficeFeatureServices(
 	// that field when Dispatch is actually called, well after startup
 	// completes (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.2).
 	routineWakeupDispatcher.SetRunQueuer(services.Office)
+	if services.Office != nil {
+		services.Office.SetWakeupRequestDispatcher(routineWakeupDispatcher)
+	}
 	routineSvc.SetWakeupEnqueuer(&routineWakeupAdapter{
 		repo:       repo,
 		dispatcher: routineWakeupDispatcher,
@@ -2875,13 +2952,14 @@ func buildOfficeFeatureServices(
 	// isn't gated by a task that already finished.
 	if services.Office != nil {
 		services.Office.SetRoutineRunSyncer(routineSvc)
+		services.Office.SetRoutineRunTaskStateReader(taskRepo)
 	}
 	approvalSvc := officeapprovals.NewApprovalService(repo, log, activity, services.Office)
 	approvalSvc.SetAgentWriter(agentSvc)
 	channelSvc := officechannels.NewChannelService(repo, log, activity, agentSvc)
 	configSvc := officeconfig.NewConfigService(repo, cfgLoader, cfgWriter, log, activity)
 	dashboardSvc := buildOfficeDashboardService(
-		repo, log, activity, agentSvc, costSvc,
+		repo, taskRepo, log, activity, agentSvc, costSvc,
 		skillSvc, routineSvc, approvalSvc,
 		cfgLoader, cfgWriter,
 	)
@@ -2912,7 +2990,9 @@ func buildOfficeFeatureServices(
 	pauseSvc := officepause.NewService(repo, services.Office, services.Task, log)
 	pauseSvc.SetRunExecutionStopper(runtimeapi.New(lifecycleMgr))
 	if services.Office != nil {
-		services.Office.SetRunExecutionStopper(runtimeapi.New(lifecycleMgr))
+		runRuntime := runtimeapi.New(lifecycleMgr)
+		services.Office.SetRunExecutionStopper(runRuntime)
+		services.Office.SetRunPermissionResolver(runRuntime)
 	}
 	routineSvc.SetPauseGate(pauseSvc)
 	routineWakeupDispatcher.SetPauseGate(pauseSvc)
@@ -2976,6 +3056,7 @@ func initOfficeConfigSyncService(
 // buildOfficeFeatureServices to keep the parent under funlen's 80-line cap.
 func buildOfficeDashboardService(
 	repo *officesqlite.Repository,
+	taskRepo *tasksqlite.Repository,
 	log *logger.Logger,
 	activity officeshared.ActivityLogger,
 	agentSvc *officeagents.AgentService,
@@ -2987,6 +3068,7 @@ func buildOfficeDashboardService(
 	cfgWriter *configloader.FileWriter,
 ) *officedashboard.DashboardService {
 	dashboardSvc := officedashboard.NewDashboardService(repo, log, activity, agentSvc, costSvc)
+	dashboardSvc.SetTaskStateWriter(taskRepo)
 	dashboardSvc.SetProjectBudgetEvaluator(costSvc)
 	dashboardSvc.SetGovernanceStore(repo)
 	dashboardSvc.SetSkillLister(skillSvc)
@@ -3038,6 +3120,7 @@ func buildHTTPServer(
 	agentRegistry *registry.Registry,
 	hostUtilityMgr *hostutility.Manager,
 	addCleanup func(func() error),
+	addRestoreCleanup func(func() error),
 	repoCloner *repoclone.Cloner,
 	systemSvc *systemsvc.Service,
 	workspaceRestorer taskhandlers.WorkspaceQuarantineRestorer,
@@ -3169,6 +3252,7 @@ func buildHTTPServer(
 		authSvc:                       services.Auth,
 		agentRuntimeAvailability:      agentRuntimeAvailability,
 		addCleanup:                    addCleanup,
+		addRestoreCleanup:             addRestoreCleanup,
 		repoCloner:                    repoCloner,
 		version:                       Version,
 		commit:                        Commit,

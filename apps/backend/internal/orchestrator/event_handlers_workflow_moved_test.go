@@ -230,6 +230,7 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 
 	t.Run("auto-start uses executor_id from task metadata", func(t *testing.T) {
 		repo := setupTestRepo(t)
+		seedExecutorRow(t, repo, "exec-special", models.ExecutorTypeLocal)
 		now := time.Now().UTC()
 		requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
 		requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))

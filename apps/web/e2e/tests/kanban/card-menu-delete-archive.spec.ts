@@ -31,7 +31,15 @@ test.describe("Kanban card actions menu — delete/archive does not navigate", (
     const menuLabels = (await menu.locator(":scope > [role='menuitem']").allTextContents()).map(
       (text) => text.replace(/\s+/g, " ").trim(),
     );
-    expect(menuLabels).toEqual(["Priority", "Edit", "Link", "Move to", "Archive", "Delete"]);
+    expect(menuLabels).toEqual([
+      "Priority",
+      "Edit",
+      "Show in graph",
+      "Link",
+      "Move to",
+      "Archive",
+      "Delete",
+    ]);
     await expect(menu.locator(":scope > [data-slot='dropdown-menu-separator']")).toHaveCount(4);
 
     const deleteItem = testPage.getByRole("menuitem", { name: "Delete" });
@@ -195,18 +203,22 @@ test("deletes a damaged task while keeping its workspace files", async ({
   seedData,
 }) => {
   test.setTimeout(120_000);
-  const { task, assertRetained } = await createDamagedDeleteTask(
+  const { task, assertRetained, restore } = await createDamagedDeleteTask(
     apiClient,
     seedData,
     "Damaged task keep files",
   );
-  const kanban = new KanbanPage(testPage);
-  await kanban.goto();
-  await kanban.openTaskActionsMenu(task.id);
-  await testPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
-  await deleteDamagedTaskKeepingFiles(testPage, testPage.getByRole("alertdialog"), task.id);
-  expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
-  assertRetained();
+  try {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.openTaskActionsMenu(task.id);
+    await testPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
+    await deleteDamagedTaskKeepingFiles(testPage, testPage.getByRole("alertdialog"), task.id);
+    expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
+    assertRetained();
+  } finally {
+    restore();
+  }
 });
 
 test("deletes a damaged task with workspace cleanup pending", async ({
@@ -216,21 +228,25 @@ test("deletes a damaged task with workspace cleanup pending", async ({
   seedData,
 }) => {
   test.setTimeout(120_000);
-  const { task, assertRetained } = await createDamagedDeleteTask(
+  const { task, assertRetained, restore } = await createDamagedDeleteTask(
     apiClient,
     seedData,
     "Damaged task pending cleanup",
   );
-  const kanban = new KanbanPage(testPage);
-  await kanban.goto();
-  await kanban.openTaskActionsMenu(task.id);
-  await testPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
-  await deleteDamagedTaskWithPendingCleanup(
-    testPage,
-    testPage.getByRole("alertdialog"),
-    task.id,
-    prCapture,
-  );
-  expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
-  assertRetained();
+  try {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.openTaskActionsMenu(task.id);
+    await testPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
+    await deleteDamagedTaskWithPendingCleanup(
+      testPage,
+      testPage.getByRole("alertdialog"),
+      task.id,
+      prCapture,
+    );
+    expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
+    assertRetained();
+  } finally {
+    restore();
+  }
 });

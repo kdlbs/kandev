@@ -1,7 +1,12 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { StateProvider } from "@/components/state-provider";
+import { act, cleanup, fireEvent, render as renderBase, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import { QueuedGhostMessage } from "./queued-ghost-message";
+
+function render(ui: React.ReactNode) {
+  return renderBase(ui, { wrapper: StateProvider });
+}
 
 const PREVIEW_TEST_ID = "queue-entry-text";
 const EXPAND_TEST_ID = "queue-entry-expand";

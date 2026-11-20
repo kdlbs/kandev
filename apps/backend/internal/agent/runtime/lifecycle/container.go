@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/docker/seccomp"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -41,6 +42,8 @@ const (
 
 // ContainerConfig holds configuration for launching a Docker container
 type ContainerConfig struct {
+	// CopilotNativeSessionEvents is the manager-resolved native-event opt-in.
+	CopilotNativeSessionEvents bool
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth            *acpprovider.GatewayAuth
@@ -61,6 +64,7 @@ type ContainerConfig struct {
 	MainRepoGitDir                 string // Path to main repo's .git directory (for worktrees)
 	McpServers                     []McpServerConfig
 	McpMode                        string
+	PromptSuggestions              bool
 	McpProviders                   []string
 	McpProfile                     *mcpprofile.Context
 	PrepareScript                  string // Script to run inside container before agent starts (e.g., clone repo)
@@ -82,6 +86,7 @@ type ContainerConfig struct {
 	DeliveryStreamID            string
 	DeliveryIncarnationID       string
 	DeliveryHarnessGeneration   uint64
+	OpenCodePluginRuntime       *agentctltypes.OpenCodePluginRuntime
 	// OnProgress streams preparation progress for this launch. The remote
 	// runtime seeds container inputs during the launch rather than before it,
 	// so its warnings reach the user through the launch's own callback rather
@@ -90,7 +95,10 @@ type ContainerConfig struct {
 	// Network is the resolved primary network for this launch. It is resolved
 	// on the launch path rather than held on the manager, because one manager
 	// serves every profile that reaches its daemon.
-	Network containerNetwork
+	Network            containerNetwork
+	DockerTmpSizeBytes int64
+	DockerLogMaxSize   string
+	DockerLogMaxFiles  string
 }
 
 func boolPtr(v bool) *bool {
@@ -126,6 +134,7 @@ func buildContainerCreateInstanceRequest(
 ) *agentctl.CreateInstanceRequest {
 	return &agentctl.CreateInstanceRequest{
 		ID:                    config.InstanceID,
+		ScopedMCPRoutes:       true,
 		WorkspacePath:         "/workspace",
 		AgentCommand:          "",
 		AgentType:             agentType,
@@ -144,6 +153,8 @@ func buildContainerCreateInstanceRequest(
 		AssumeMcpSse:               assumeMcpSse,
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    config.McpMode,
+		PromptSuggestions:          config.PromptSuggestions,
+		CopilotNativeSessionEvents: config.CopilotNativeSessionEvents,
 		McpProviders:               config.McpProviders,
 		McpProfile:                 config.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),
@@ -158,6 +169,7 @@ func buildContainerCreateInstanceRequest(
 		DeliveryStreamID:           config.DeliveryStreamID,
 		DeliveryIncarnationID:      config.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  config.DeliveryHarnessGeneration,
+		OpenCodePluginRuntime:      config.OpenCodePluginRuntime,
 	}
 }
 
@@ -387,7 +399,8 @@ func (cm *ContainerManager) createInstanceAndClient(
 	client := agentctl.NewClient(instanceHost, instancePort, cm.logger,
 		agentctl.WithExecutionID(config.InstanceID),
 		agentctl.WithSessionID(config.SessionID),
-		agentctl.WithAuthToken(ctl.AuthToken()))
+		agentctl.WithAuthToken(ctl.AuthToken()),
+		agentctl.WithBuiltinMCPScopedRoutes(resp.ScopedMCPRoutes))
 
 	return client, nil
 }
@@ -625,11 +638,14 @@ func (cm *ContainerManager) buildContainerConfigWithContext(ctx context.Context,
 		// whose OpenAI-compatible provider is a service on the developer's host
 		// (loopback URLs are rewritten to this hostname) resolves on Linux too,
 		// matching Docker Desktop. Requires Docker Engine 20.10+.
-		ExtraHosts: []string{acpprovider.DockerHostGatewayHost + ":host-gateway"},
-		Memory:     memoryBytes,
-		CPUQuota:   cpuQuota,
-		Labels:     buildContainerLabels(imageName, config),
-		AutoRemove: false, // We manage cleanup ourselves
+		ExtraHosts:     []string{acpprovider.DockerHostGatewayHost + ":host-gateway"},
+		Memory:         memoryBytes,
+		CPUQuota:       cpuQuota,
+		Labels:         buildContainerLabels(imageName, config),
+		AutoRemove:     false, // We manage cleanup ourselves
+		TmpfsSizeBytes: config.DockerTmpSizeBytes,
+		LogMaxSize:     config.DockerLogMaxSize,
+		LogMaxFiles:    config.DockerLogMaxFiles,
 	}
 	if config.AllowUserNamespaces {
 		securityOpt, err := securityOptsForUserNamespaces()

@@ -83,6 +83,8 @@ function applyWorkflowCreated(state: AppState, payload: WorkflowPayload): AppSta
           id: payload.id,
           workspaceId: payload.workspace_id,
           name: payload.name,
+          source: payload.source,
+          source_path: payload.source_path,
           hidden: isHidden,
           style: payload.style,
         },
@@ -102,6 +104,8 @@ function applyWorkflowUpdated(state: AppState, payload: WorkflowPayload): AppSta
           description: payload.description,
           prompt: payload.prompt,
           agent_profile_id: payload.agent_profile_id,
+          source: payload.source ?? item.source,
+          source_path: payload.source_path ?? item.source_path,
           hidden: payload.hidden !== undefined ? Boolean(payload.hidden) : item.hidden,
           style: payload.style ?? item.style,
         }

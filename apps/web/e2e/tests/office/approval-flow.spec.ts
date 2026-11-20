@@ -1,4 +1,5 @@
 import { test, expect, moveTaskToTerminalStep } from "../../fixtures/office-fixture";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 /**
  * E2E coverage for the office task approval gate (in_review → done is
@@ -135,17 +136,26 @@ test.describe("Office task approval flow", () => {
     // Click status picker → Done. With every approver having an "approved"
     // decision, the backend allows the transition.
     await testPage.getByTestId("status-picker-trigger").click();
+    const markedDone = waitForHttp(
+      testPage,
+      "PATCH",
+      new RegExp(`/api/v1/office/tasks/${task.id}$`),
+    );
     await testPage.getByTestId("status-picker-option-done").click();
+    expect((await markedDone).ok()).toBe(true);
 
     await expect(testPage.getByTestId("status-picker-trigger")).toContainText(/Done/i, {
       timeout: 10_000,
     });
 
-    // Confirm via API.
-    const persisted = (await officeApi.getTask(task.id)) as Record<string, unknown>;
-    const inner = (persisted.task as Record<string, unknown>) ?? persisted;
-    const status = (inner.status as string) ?? "";
-    expect(status.toLowerCase()).toBe("done");
+    // The picker updates optimistically; confirm the committed status.
+    await expect
+      .poll(async () => {
+        const persisted = (await officeApi.getTask(task.id)) as Record<string, unknown>;
+        const inner = (persisted.task as Record<string, unknown>) ?? persisted;
+        return ((inner.status as string) ?? "").toLowerCase();
+      })
+      .toBe("done");
   });
 
   test("request-changes records a decision visible in the timeline and queues a run for the assignee", async ({

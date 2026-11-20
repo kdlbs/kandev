@@ -63,12 +63,13 @@ export type MCPDefinitionPatch = Partial<MCPDefinitionInput> & {
 export type MCPSelectionScope = "profile" | "repository" | "task" | "task_session";
 
 export type MCPSelectionOrigin = {
-  scope: MCPSelectionScope;
+  scope: MCPSelectionScope | "automation";
   workspace_id: string;
   owner_id: string;
 };
 
 export type MCPSelectionImpact = {
+  automation?: number;
   profile: number;
   repository: number;
   task: number;
@@ -100,6 +101,7 @@ export type MCPSetupComparison = {
   applied_revision: number;
   attachment_attempt_id?: string;
   selection_ids?: string[];
+  excluded_definition_ids?: string[];
   changes?: MCPSetupChange[];
 };
 
@@ -119,6 +121,8 @@ export type MCPSelectionResponse = {
   scope: MCPSelectionScope;
   owner_id: string;
   definition_ids: string[];
+  selection_revision?: number;
+  excluded_definition_ids?: string[];
   mcp_state?: MCPSessionSelectionState;
 };
 

@@ -67,6 +67,46 @@ session, incarnation, and historical harness generation. Foreign streams remain 
 
 ## Automatic repair of provable restart inconsistencies
 
+### Definitive remote absence
+
+Startup reconciliation and periodic remote attachment consume the same
+`DetailedRecoveryBackend` result. A missing returned instance alone leaves
+ownership unknown. `no_matching_instance` ends pending attachment only for
+runtime shapes accepted by `remoteRecoveryNoMatchProvesStopped`. Remote Docker
+and Sprites currently satisfy that predicate. SSH, Kubernetes, plugin runtimes,
+transport failures, and omitted outcomes retain their existing guards.
+
+Before settlement, re-read the pinned task, session, environment, recovery
+identity, and executor row. Fence changed owners, tracked successors, Stop,
+cleanup, and shutdown through the existing pending-attempt arbitration.
+Repair the exact executor row with `RepairExecutorRunningDeadIfCurrent`, using
+the execution ID and observed nonzero `UpdatedAt`. Preserve its resume token,
+workspace, metadata, and historical execution identity. Missing CAS support,
+storage failure, or changed evidence cannot authorize an unconditional write.
+Do not use a cleanup helper whose boolean hides persistence errors.
+
+After a successful repair, remove only the matching pending entry and release
+its retryable guard. Repeat attempts converge after interruption between SQL
+repair and guard release. Never clear an unstoppable guard or release a
+successor's pending entry. Network and storage operations run outside the
+global remote-recovery mutex. Final entry arbitration remains atomic.
+
+This disposition establishes completion of startup attachment, not prompt
+completion or authority to restore native state. Keep delivery blocks,
+uncertain submissions, queue claims, and independent admission gates unchanged.
+Existing recovery actions can then return their actual evidence-based result.
+Native restoration still requires the separate exact source-termination and
+journal proof. No Stop, launch, prompt, queue drain, availability notification,
+or terminal event accompanies absence settlement.
+
+Verification covers startup, deferred startup, periodic retries, SQL failure,
+crash after repair, changed owners, and concurrent Stop. A mixed inventory
+contains an absent owner and an independently live or unknown owner.
+The [remote absence fix package](../../../plans/remote-recovery-absence/plan.md)
+owns this correction. Older recovery results do not verify it.
+
+### Existing restore reconciliation
+
 Use the same bounded reconciliation worker at backend startup and after confirmed local
 shared-runtime replacement. Its inventory must include retained unresolved delivery records
 and execution identities even when an older row lacks current recovery metadata. A typed
@@ -135,6 +175,31 @@ original runtime process birth identity and admitted prompt generation. A replac
 execution may retain that historical binding, but its own PID, runtime epoch, and prompt
 counter never stand in for the source. Reconstruction rechecks the exact saved binding
 around payload inspection. Legacy bindings without process proof remain blocked.
+
+A local agentctl runtime is shared by every session and can outlive the backend, so its
+termination is not the only proof that one session's agent stopped writing. The binding also
+records the agent child's process-group birth identity, which agentctl reports in its
+authenticated delivery descriptor. On Linux, original-owner termination is proven when either
+the runtime's owned session has terminated or the recorded agent group no longer exists.
+A valid group birth token names its boot. On the same boot, a kernel existence check must
+report `ESRCH`. A procfs snapshot cannot prove absence while members can fork and exit.
+An existing or reused group blocks group proof. Unreaped members can delay proof until the
+operating system removes the group. Missing or malformed evidence proves nothing.
+Darwin retains runtime-session proof. Windows retains its existing unverifiable result.
+Bindings without group identity keep the runtime-only rule. Remote executors keep
+their existing authenticated surviving-execution evidence. See
+[agent process-group termination proof](../../../decisions/2026-11-02-agent-process-group-termination-proof.md)
+and the delivery record
+[agent group termination proof](../../../plans/agent-group-termination-proof/plan.md).
+
+Standalone row liveness reports whether the shared agentctl still lists the session. It does
+not prove that the session's agent child is still active. When this row is alive and its
+execution ID matches the pinned source, lifecycle may use only the recorded agent-group proof;
+runtime-session termination cannot override the live shared-runtime evidence. When row
+liveness is unknown, lifecycle uses `processidentity.OriginalOwnerTerminated` for the pinned
+source. It validates the session and execution IDs before proof, then revalidates the recovery
+owner before cleanup. Cleanup remains conditional on that execution ID and row timestamp, so a
+successor cannot inherit the source proof.
 
 The restart inventory includes matching dispatching SQL rows without recovery metadata.
 The worker reconstructs a uniquely identified recovery block and source snapshot, including

@@ -39,6 +39,9 @@ func isSSHPassthrough(execution *AgentExecution) bool {
 }
 
 func (m *Manager) passthroughRunnerForExecution(execution *AgentExecution) executionPassthroughRunner {
+	if m.passthroughRunnerOverride != nil {
+		return m.passthroughRunnerOverride
+	}
 	if isSSHPassthrough(execution) {
 		return &remotePassthroughRunner{execution: execution, manager: m}
 	}
@@ -72,6 +75,13 @@ func (r *remotePassthroughRunner) snapshot(ctx context.Context) (*types.Passthro
 		return nil, err
 	}
 	defer release()
+	return r.snapshotWithClient(ctx, client)
+}
+
+func (r *remotePassthroughRunner) snapshotWithClient(ctx context.Context, client *agentctl.Client) (*types.PassthroughSnapshot, error) {
+	if client == nil {
+		return nil, errors.New("remote passthrough controller is unavailable")
+	}
 	snapshot, err := client.GetPassthrough(ctx)
 	if err != nil {
 		return nil, err

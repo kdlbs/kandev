@@ -167,14 +167,14 @@ func (s *Service) pruneTaskOwnedStateForTask(ctx context.Context, taskID, reason
 }
 
 func (s *Service) pruneWatchesForTask(ctx context.Context, taskID, reason string) {
-	watches, listErr := s.store.ListPRWatchesByTask(ctx, taskID)
+	watches, listErr := s.store.ListPRWatchesByTaskIncludingRetired(ctx, taskID)
 	if listErr != nil {
 		s.logger.Error("failed to list PR watches for task",
 			zap.String("task_id", taskID),
 			zap.String("reason", reason),
 			zap.Error(listErr))
 	}
-	n, err := s.store.DeletePRWatchesByTaskID(ctx, taskID)
+	n, err := s.store.DeleteActivePRWatchesByTaskID(ctx, taskID)
 	if err != nil {
 		s.logger.Error("failed to delete PR watches for task",
 			zap.String("task_id", taskID),

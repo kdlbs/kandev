@@ -293,8 +293,6 @@ func TestBuiltinMentionProvidersRemainDescriptorDrivenWhenIntegrationsAreNil(t *
 		{"github_pull_requests", 41},
 		{"gitlab_issues", 50},
 		{"gitlab_merge_requests", 51},
-		{"azure_work_items", 60},
-		{"azure_pull_requests", 61},
 		{"sentry_issues", 70},
 	}
 	if len(providers) != len(want) {
@@ -310,7 +308,7 @@ func TestBuiltinMentionProvidersRemainDescriptorDrivenWhenIntegrationsAreNil(t *
 
 func TestBuiltinMentionProvidersIncludePluginSourceRegistrar(t *testing.T) {
 	providers := builtinMentionProviders(&Services{Plugins: &plugins.Service{}}, nil)
-	if len(providers) != 10 {
+	if len(providers) != 8 {
 		t.Fatalf("provider count = %d, want builtins plus plugin source registrar", len(providers))
 	}
 	if _, ok := providers[len(providers)-1].(mentions.SourceRegistrar); !ok {

@@ -22,6 +22,7 @@ This is a local extension of an existing renderer. No new dependency, parser, st
 | AC-UI-CLARIFICATION-MARKDOWN-001.2, .6 | History integration |
 | AC-UI-CLARIFICATION-MARKDOWN-001.3, .7 | Links and state |
 | AC-UI-CLARIFICATION-MARKDOWN-001.5 | Responsive behavior |
+| AC-UI-CLARIFICATION-MARKDOWN-001.8 | Pending context policy |
 
 ## Renderer adoption
 
@@ -32,10 +33,25 @@ The delivery record and failure reproduction are in the [implementation plan](..
 
 ## Shared renderer
 
-Reuse `apps/web/components/task/chat/clarification-markdown.tsx` without widening its element or URL policies.
+Reuse `apps/web/components/task/chat/clarification-markdown.tsx`. Preserve the block and inline policies and the shared URL policy.
 It uses `react-markdown`, `remark-gfm`, `remark-breaks`, `skipHtml`, `unwrapDisallowed`, and `defaultUrlTransform`.
 Its block variant permits paragraphs and lists alongside inline marks. Its inline variant omits block containers.
 Keep unsupported code panels as text. Do not introduce the comment normalizer, raw HTML plugins, syntax highlighting, or a second Markdown parser.
+
+## Pending context policy
+
+The [context usability package](../../../plans/clarification-context-usability/plan.md) implements AC-UI-CLARIFICATION-MARKDOWN-001.8.
+Add an explicit `context` variant alongside `block` and `inline`.
+Only this variant adds `table`, `thead`, `tbody`, `tr`, `th`, and `td` to the block allowlist.
+Wrap each table in a width-bounded horizontal scroll region. Use semantic table elements and existing tokens.
+Keep `skipHtml`, URL filtering, and interactive HTTP(S) links. Do not add raw HTML or the rich comment renderer.
+Headings, images, blockquotes, and code panels remain unsupported. Existing inline code behavior remains available.
+
+`ClarificationInputOverlay` uses this variant for the single shared context region before the active question.
+Remove the enclosing pre-wrap style that conflicts with block layout. Preserve ordinary breaks through `remark-breaks`.
+Do not alter `readSharedContext`, the stored value, or answer callbacks for formatting.
+Question prompts, options, collapsed summaries, and resolved History context retain their existing variants.
+The [context design](clarification-context.md) owns panel sizing and agent guidance.
 
 ## History integration
 

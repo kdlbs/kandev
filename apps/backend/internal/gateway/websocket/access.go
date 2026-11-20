@@ -42,8 +42,10 @@ type AuthPolicy struct {
 	// (auth mode != disabled). Consulted per connection attempt.
 	Enforced func() bool
 	// ResolveToken authenticates a ?token=<PAT> query credential for
-	// programmatic WS clients that cannot send cookies or headers.
-	ResolveToken func(ctx context.Context, token string) (authn.Identity, bool)
+	// programmatic WS clients that cannot send cookies or headers. A nil error
+	// with ok=false is a definitive rejection; a non-nil error means the
+	// credential could not be verified and the connection must not proceed.
+	ResolveToken func(ctx context.Context, token string) (authn.Identity, bool, error)
 	// ActiveUser reports whether a user account is still active. It is
 	// consulted after capability authentication: the subtree capability
 	// restores the signed identity without a live credential, so without this
@@ -103,7 +105,12 @@ func (g *Gateway) requireConnectionAuth() gin.HandlerFunc {
 			// forwarded query (never reach agentctl or the app), while a
 			// cookie-authenticated app's own token parameter is preserved.
 			if token := c.Query("token"); token != "" && policy.ResolveToken != nil {
-				if _, ok := policy.ResolveToken(c.Request.Context(), token); ok {
+				_, ok, err := policy.ResolveToken(c.Request.Context(), token)
+				if err != nil {
+					authn.AbortAuthenticationUnavailable(c)
+					return
+				}
+				if ok {
 					c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), proxyTokenConsumedKey{}, true))
 				}
 			}
@@ -111,7 +118,12 @@ func (g *Gateway) requireConnectionAuth() gin.HandlerFunc {
 			return
 		}
 		if token := c.Query("token"); token != "" && policy.ResolveToken != nil {
-			if identity, ok := policy.ResolveToken(c.Request.Context(), token); ok {
+			identity, ok, err := policy.ResolveToken(c.Request.Context(), token)
+			if err != nil {
+				authn.AbortAuthenticationUnavailable(c)
+				return
+			}
+			if ok {
 				authn.SetOnGin(c, identity)
 				// Remember that the gateway consumed ?token= so the port proxy
 				// can strip it from the forwarded query; a cookie-authenticated

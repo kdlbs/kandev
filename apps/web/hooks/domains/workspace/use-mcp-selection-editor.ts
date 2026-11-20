@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getMCPSelections, replaceMCPSelections } from "@/lib/api/domains/mcp-api";
 import type {
   MCPSelectionOrigin,
@@ -48,6 +48,7 @@ function resetMCPSelectionEditor({
 
 async function saveMCPSelection({
   definitionIds,
+  excludedDefinitionIds,
   ownerId,
   workspaceId,
   scope,
@@ -55,11 +56,14 @@ async function saveMCPSelection({
   requestRef,
   saveRequestRef,
   contextRef,
+  acceptedRef,
+  savingRef,
   setSelection,
   setSaveError,
   setSaving,
 }: {
   definitionIds: string[];
+  excludedDefinitionIds?: string[];
   ownerId: string;
   workspaceId: string;
   scope: MCPSelectionScope;
@@ -67,10 +71,23 @@ async function saveMCPSelection({
   requestRef: { current: number };
   saveRequestRef: { current: number };
   contextRef: { current: string };
+  acceptedRef: { current: MCPSelectionResponse | null };
+  savingRef: { current: boolean };
   setSelection: (value: MCPSelectionResponse) => void;
   setSaveError: (value: unknown) => void;
   setSaving: (value: boolean) => void;
 }) {
+  const accepted = acceptedRef.current;
+  if (
+    savingRef.current ||
+    !accepted ||
+    contextRef.current !== contextKey ||
+    accepted.owner_id !== ownerId ||
+    accepted.workspace_id !== workspaceId
+  ) {
+    // i18n-exempt: Internal rejected operation; callers render localized save feedback.
+    throw new Error("MCP selection is not ready to save");
+  }
   // Invalidate an in-flight reload before writing. A polling response
   // from before this save must not replace the user's newer selection.
   requestRef.current += 1;
@@ -80,13 +97,26 @@ async function saveMCPSelection({
     saveRequestRef.current === requestID && contextRef.current === requestContext;
   setSaving(true);
   try {
-    const next = await replaceMCPSelections(scope, ownerId, workspaceId, definitionIds);
+    const condition =
+      scope === "task_session"
+        ? {
+            expected_revision:
+              accepted.selection_revision ?? accepted.mcp_state?.desired_revision ?? 0,
+            ...(excludedDefinitionIds !== undefined
+              ? { excluded_definition_ids: excludedDefinitionIds }
+              : {}),
+          }
+        : { expected_definition_ids: accepted.definition_ids };
+    const next = await replaceMCPSelections(scope, ownerId, workspaceId, definitionIds, condition);
     if (!isCurrent()) return null;
     setSelection(next);
     setSaveError(null);
     return next;
   } catch (cause) {
-    if (isCurrent()) setSaveError(cause);
+    if (isCurrent()) {
+      acceptedRef.current = null;
+      setSaveError(cause);
+    }
     throw cause;
   } finally {
     if (isCurrent()) {
@@ -104,6 +134,8 @@ function useMCPSelectionSave({
   requestRef,
   saveRequestRef,
   contextRef,
+  acceptedRef,
+  savingRef,
   setSelection,
   setSaveError,
   setSaving,
@@ -115,15 +147,18 @@ function useMCPSelectionSave({
   requestRef: { current: number };
   saveRequestRef: { current: number };
   contextRef: { current: string };
+  acceptedRef: { current: MCPSelectionResponse | null };
+  savingRef: { current: boolean };
   setSelection: (value: MCPSelectionResponse) => void;
   setSaveError: (value: unknown) => void;
   setSaving: (value: boolean) => void;
 }) {
   return useCallback(
-    (definitionIds: string[]) => {
+    (definitionIds: string[], excludedDefinitionIds?: string[]) => {
       if (!ownerId || !workspaceId) throw new Error("MCP selection context is required");
       return saveMCPSelection({
         definitionIds,
+        excludedDefinitionIds,
         ownerId,
         workspaceId,
         scope,
@@ -131,6 +166,8 @@ function useMCPSelectionSave({
         requestRef,
         saveRequestRef,
         contextRef,
+        acceptedRef,
+        savingRef,
         setSelection,
         setSaveError,
         setSaving,
@@ -267,39 +304,61 @@ function inheritedScopesKey(inheritedScopes: MCPSelectionScopeRef[]) {
     .join(",");
 }
 
+function useAcceptedSelection() {
+  const [selection, setSelectionState] = useState<MCPSelectionResponse | null>(null);
+  const acceptedRef = useRef<MCPSelectionResponse | null>(null);
+  const setSelection = useCallback((next: MCPSelectionResponse | null) => {
+    acceptedRef.current = next;
+    setSelectionState(next);
+  }, []);
+  return { selection, acceptedRef, setSelection };
+}
+
+function useSelectionSaving(
+  setLoading: (value: boolean) => void,
+  setRefreshing: (value: boolean) => void,
+) {
+  const [saving, setSavingState] = useState(false);
+  const savingRef = useRef(false);
+  const setSaving = useCallback(
+    (value: boolean) => {
+      savingRef.current = value;
+      if (value) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+      setSavingState(value);
+    },
+    [setLoading, setRefreshing],
+  );
+  return { saving, savingRef, setSaving };
+}
+
 export function useMCPSelectionEditor(
   scope: MCPSelectionScope,
   ownerId: string | null | undefined,
   workspaceId: string | null | undefined,
   inheritedScopes: MCPSelectionScopeRef[] = EMPTY_MCP_SELECTION_SCOPES,
 ) {
-  const [selection, setSelection] = useState<MCPSelectionResponse | null>(null);
+  const { selection, acceptedRef, setSelection } = useAcceptedSelection();
   const [inheritedOrigins, setInheritedOrigins] = useState<MCPSelectionOrigins>({});
   const [loading, setLoading] = useState(false);
-  const [saving, setSavingState] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadedContext, setLoadedContext] = useState<string | null>(null);
   const loadedContextRef = useRef<string | null>(null);
-  const savingRef = useRef(false);
-  const setSaving = useCallback((value: boolean) => {
-    savingRef.current = value;
-    if (value) {
-      setLoading(false);
-      setRefreshing(false);
-    }
-    setSavingState(value);
-  }, []);
+  const { saving, savingRef, setSaving } = useSelectionSaving(setLoading, setRefreshing);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [saveError, setSaveError] = useState<unknown>(null);
   const requestRef = useRef(0);
   const saveRequestRef = useRef(0);
   const scopesRef = useRef(inheritedScopes);
-  scopesRef.current = inheritedScopes;
-
   const inheritedKey = inheritedScopesKey(inheritedScopes);
   const contextKey = `${scope}:${ownerId ?? ""}:${workspaceId ?? ""}:${inheritedKey}`;
   const contextRef = useRef(contextKey);
-  contextRef.current = contextKey;
+  useLayoutEffect(() => {
+    contextRef.current = contextKey;
+    scopesRef.current = inheritedScopes;
+  });
 
   useEffect(() => {
     loadedContextRef.current = null;
@@ -334,7 +393,10 @@ export function useMCPSelectionEditor(
     setLoading,
     setRefreshing,
     setLoadedContext,
-    setSelection,
+    setSelection: (next) => {
+      setSelection(next);
+      setSaveError(null);
+    },
     setInheritedOrigins,
     setLoadError,
   });
@@ -347,6 +409,8 @@ export function useMCPSelectionEditor(
     requestRef,
     saveRequestRef,
     contextRef,
+    acceptedRef,
+    savingRef,
     setSelection: (next) => {
       loadedContextRef.current = contextKey;
       setLoadedContext(contextKey);

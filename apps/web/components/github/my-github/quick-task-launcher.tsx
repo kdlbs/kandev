@@ -1,5 +1,6 @@
 "use client";
 
+import { githubOrigin, PUBLIC_GITHUB_HOST } from "@/lib/github/host";
 import { useMemo } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { linkToTask } from "@/lib/links";
@@ -37,11 +38,16 @@ type DialogState = {
 const LOCAL_SOURCE_TYPE = "local";
 const REJECT_REPO_MATCH = Number.POSITIVE_INFINITY;
 
-function matchRepo(repos: Repository[], owner: string, name: string): Repository | undefined {
+function matchRepo(
+  repos: Repository[],
+  owner: string,
+  name: string,
+  host = PUBLIC_GITHUB_HOST,
+): Repository | undefined {
   let best: Repository | undefined;
   let bestRank = REJECT_REPO_MATCH;
   for (const repo of repos) {
-    if (!matchesProviderIdentity(repo, owner, name)) continue;
+    if (!matchesProviderIdentity(repo, owner, name, host)) continue;
     const rank = repositoryLaunchRank(repo);
     if (rank < bestRank) {
       best = repo;
@@ -51,8 +57,14 @@ function matchRepo(repos: Repository[], owner: string, name: string): Repository
   return bestRank === REJECT_REPO_MATCH ? undefined : best;
 }
 
-function matchesProviderIdentity(repo: Repository, owner: string, name: string): boolean {
+function matchesProviderIdentity(
+  repo: Repository,
+  owner: string,
+  name: string,
+  host = PUBLIC_GITHUB_HOST,
+): boolean {
   return (
+    githubOrigin(repo.provider_host ?? PUBLIC_GITHUB_HOST) === githubOrigin(host) &&
     (repo.provider_owner || "").toLowerCase() === owner.toLowerCase() &&
     (repo.provider_name || "").toLowerCase() === name.toLowerCase()
   );
@@ -81,7 +93,9 @@ function emptyToUndefined(value: string | undefined): string | undefined {
 
 function prURL(pr: GitHubPR): string {
   return (
-    pr.html_url || pr.url || `https://github.com/${pr.repo_owner}/${pr.repo_name}/pull/${pr.number}`
+    pr.html_url ||
+    pr.url ||
+    `${githubOrigin(pr.github_host) ?? ""}/${pr.repo_owner}/${pr.repo_name}/pull/${pr.number}`
   );
 }
 
@@ -110,6 +124,7 @@ function pickRepositoryIdForPR(
 function extractPayload(payload: LaunchPayload) {
   if (payload.kind === "pr") {
     return {
+      host: payload.pr.github_host ?? PUBLIC_GITHUB_HOST,
       url: prURL(payload.pr),
       title: payload.pr.title,
       owner: payload.pr.repo_owner,
@@ -118,6 +133,7 @@ function extractPayload(payload: LaunchPayload) {
     };
   }
   return {
+    host: payload.issue.github_host ?? PUBLIC_GITHUB_HOST,
     url: payload.issue.html_url,
     title: payload.issue.title,
     owner: payload.issue.repo_owner,
@@ -146,7 +162,7 @@ function buildDialogState(payload: LaunchPayload, repositories: Repository[]): D
       prBaseBranch: payload.pr.base_branch,
     };
   }
-  const repo = matchRepo(repositories, data.owner, data.name);
+  const repo = matchRepo(repositories, data.owner, data.name, data.host);
   if (repo) {
     return {
       title,
@@ -159,7 +175,7 @@ function buildDialogState(payload: LaunchPayload, repositories: Repository[]): D
   return {
     title,
     description,
-    githubUrl: `github.com/${data.owner}/${data.name}`,
+    githubUrl: `${data.host}/${data.owner}/${data.name}`,
     branch: data.branch,
     checkoutBranch,
   };

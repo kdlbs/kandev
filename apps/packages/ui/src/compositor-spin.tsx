@@ -29,49 +29,53 @@ function CompositorSpin({ className, style, ...props }: React.ComponentProps<"sp
 
     const inlineAnimation = element.style.animation;
     const inlineTransform = element.style.transform;
-    element.style.removeProperty("animation");
-    const computedStyle = window.getComputedStyle(element);
-    const duration = parseAnimationDuration(computedStyle.animationDuration);
-    element.style.animation = "none";
-    void window.getComputedStyle(element).animationName;
-    element.style.transform = "translateZ(0)";
-    let animation: Animation;
-    try {
-      animation = element.animate(
-        [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
-        {
-          duration,
-          easing: "linear",
-          iterations: Infinity,
-        },
-      );
-    } catch {
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    let animation: Animation | null = null;
+    const restore = () => {
+      if (animation) releaseAnimation(animation);
+      animation = null;
+      registration.setAnimation(null);
       element.style.animation = inlineAnimation;
       element.style.transform = inlineTransform;
-      registration.unregister();
-      visibility.dispose();
-      return;
-    }
-    registration.setAnimation(animation);
-    setCompositorReady(true);
+    };
+    const updateMotion = () => {
+      restore();
+      setCompositorReady(false);
+      if (reducedMotion?.matches) return;
+      element.style.removeProperty("animation");
+      const duration = parseAnimationDuration(window.getComputedStyle(element).animationDuration);
+      element.style.animation = "none";
+      void window.getComputedStyle(element).animationName;
+      element.style.transform = "translateZ(0)";
+      try {
+        animation = element.animate(
+          [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
+          { duration, easing: "linear", iterations: Infinity },
+        );
+        registration.setAnimation(animation);
+        setCompositorReady(true);
+      } catch {
+        restore();
+      }
+    };
+    updateMotion();
+    reducedMotion?.addEventListener("change", updateMotion);
 
     return () => {
-      releaseAnimation(animation);
+      reducedMotion?.removeEventListener("change", updateMotion);
+      restore();
       registration.unregister();
       visibility.dispose();
     };
   }, [className]);
-
-  const compositorStyle = compositorReady
-    ? { ...style, animation: "none", transform: "translateZ(0)" }
-    : style;
 
   return (
     <span
       {...props}
       ref={elementRef}
       className={cn("inline-flex animate-spin will-change-transform", className)}
-      style={compositorStyle}
+      data-compositor-spin=""
+      style={compositorReady ? { ...style, animation: "none", transform: "translateZ(0)" } : style}
     />
   );
 }

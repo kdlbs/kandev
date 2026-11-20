@@ -31,6 +31,14 @@ func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sess
 		s.finishContinuationManual(ctx, taskID, sessionID, execID, entry)
 		return
 	}
+	if entry.continuationPolicy == continuationPolicyAgentManagedPendingLive {
+		if entry.retainedRuntime == nil ||
+			s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry) != retainedRuntimeRetryUsable ||
+			!s.retryRetainedRuntimeContinuation(ctx, taskID, sessionID, entry, continuationInstruction) {
+			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, s.retainedRetryRefusal(entry))
+		}
+		return
+	}
 	if entry.continuationPolicy == continuationPolicyCapacityLive {
 		if entry.retainedRuntime == nil {
 			s.finishContinuationManual(ctx, taskID, sessionID, execID, entry)
@@ -88,7 +96,8 @@ func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sess
 			entry.restoredExecution = attempt.execution()
 			entry.mu.Unlock()
 			_, err := s.promptTask(promptCtx, taskID, sessionID, continuationInstruction, "", false, nil, true, launchOriginAutomatic, promptTaskOptions{
-				resumeAttempt: attempt, internalContinuation: true, preservePromptContext: true, disableDispatchRetry: true, requireNonterminalSession: true, reserveTurnUntilDispatch: true,
+				capacityIntent: turnCapacityOverride,
+				resumeAttempt:  attempt, internalContinuation: true, preservePromptContext: true, disableDispatchRetry: true, requireNonterminalSession: true, reserveTurnUntilDispatch: true,
 				deliverySubmissionID: "continuation:" + uuid.NewString(),
 				beforeDispatch: func() error {
 					if err := s.validateContinuationOwner(promptCtx, taskID, sessionID, entry); err != nil {
@@ -134,7 +143,8 @@ func (s *Service) retryRetainedRuntimeContinuation(
 		return false
 	}
 	var liveExecutionFence *promptTaskLiveExecutionFence
-	if entry.continuationPolicy == continuationPolicyCapacityLive {
+	if entry.continuationPolicy == continuationPolicyCapacityLive ||
+		entry.continuationPolicy == continuationPolicyAgentManagedPendingLive {
 		if entry.retainedRuntime == nil || entry.continuation == nil {
 			return false
 		}
@@ -195,6 +205,7 @@ func (s *Service) retryRetainedRuntimeContinuation(
 	}
 	_, err := s.promptTask(ctx, taskID, sessionID, instruction, "", false, nil, true,
 		launchOriginAutomatic, promptTaskOptions{
+			capacityIntent:            turnCapacityOverride,
 			internalContinuation:      true,
 			preservePromptContext:     true,
 			disableDispatchRetry:      true,
@@ -349,6 +360,7 @@ func (s *Service) validateContinuationOwner(ctx context.Context, taskID, session
 	switch entry.continuationPolicy {
 	case continuationPolicySavedHistoryRestore:
 	case continuationPolicyCapacityLive:
+	case continuationPolicyAgentManagedPendingLive:
 	default:
 		return ErrResumeAttemptCancelled
 	}

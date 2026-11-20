@@ -83,7 +83,7 @@ Use a footer such as “6 highlights shown · 385 changes in the full release”
 ## Workflow integration
 
 Add `announce-discord` beside `notify-contributors`, with the same publication dependencies.
-Require `!cancelled()`, manual Stable mode, and explicit success for prepare and all four publication jobs.
+Require `!cancelled()`, manual Stable mode, and explicit success for prepare, all publication jobs including `publish-plugin-sdk`, and `stable-complete`.
 Exclude dry runs, desktop validation, nonempty `backfill_tag`, and `github.run_attempt != 1`.
 There is no per-release opt-in checkbox. Normal eligible releases announce automatically after setup.
 Reruns and backfills report that announcement recovery requires the standalone workflow.

@@ -107,55 +107,63 @@ function wireResize(
   return observer;
 }
 
-function reportExit(
-  sessionId: string,
-  exitCode: number | null,
-  report: (state: PtyTerminalState) => void,
-  disarm: () => void,
-) {
-  disarm();
-  report({ status: "exited", sessionId, exitCode, error: null });
+type SessionStreamContext = {
+  sessionId: string;
+  term: Terminal;
+  initialInput?: string;
+  report: (state: PtyTerminalState) => void;
+  disarm: () => void;
+  cancelledRef: { value: boolean };
+};
+
+function reportExit(context: SessionStreamContext, exitCode: number | null): void {
+  if (context.cancelledRef.value) return;
+  context.disarm();
+  context.report({ status: "exited", sessionId: context.sessionId, exitCode, error: null });
 }
 
-function openSessionWebSocket(
-  sessionId: string,
-  term: Terminal,
-  initialInput: string | undefined,
-  report: (state: PtyTerminalState) => void,
-  disarm: () => void,
-): WebSocket {
-  const ws = new WebSocket(agentLoginStreamUrl(sessionId));
+function openSessionWebSocket(context: SessionStreamContext): WebSocket {
+  const ws = new WebSocket(agentLoginStreamUrl(context.sessionId));
   ws.binaryType = "arraybuffer";
   ws.onmessage = (event) => {
+    if (context.cancelledRef.value) return;
     if (typeof event.data === "string") {
       try {
         const message = JSON.parse(event.data) as { type: string; exit_code?: number };
         if (message.type === "exit") {
-          reportExit(sessionId, message.exit_code ?? null, report, disarm);
+          reportExit(context, message.exit_code ?? null);
         }
       } catch {
         // Ignore non-JSON text frames.
       }
       return;
     }
-    term.write(new Uint8Array(event.data as ArrayBuffer));
+    context.term.write(new Uint8Array(event.data as ArrayBuffer));
   };
   ws.onerror = () => {
-    disarm();
-    report({
+    if (context.cancelledRef.value) return;
+    context.disarm();
+    context.report({
       status: "error",
-      sessionId,
+      sessionId: context.sessionId,
       exitCode: null,
       error: translate("agents:ptyConnectionError"),
     });
   };
   ws.onclose = () => {
-    disarm();
+    if (!context.cancelledRef.value) context.disarm();
   };
-  if (initialInput) {
-    ws.addEventListener("open", () => ws.send(new TextEncoder().encode(initialInput)), {
-      once: true,
-    });
+  if (context.initialInput) {
+    ws.addEventListener(
+      "open",
+      () => {
+        if (context.cancelledRef.value) return;
+        ws.send(new TextEncoder().encode(context.initialInput));
+      },
+      {
+        once: true,
+      },
+    );
   }
   return ws;
 }
@@ -239,18 +247,20 @@ function reportSession(
   session: AgentLoginSession,
   term: Terminal,
   isAttached: boolean,
+  cancelledRef: { value: boolean },
 ): void {
   args.sessionIdRef.current = session.session_id;
   reportSessionState(args, session);
-  args.wsRef.current = openSessionWebSocket(
-    session.session_id,
+  args.wsRef.current = openSessionWebSocket({
+    sessionId: session.session_id,
     term,
-    isAttached ? undefined : args.initialInput,
-    args.report,
-    () => {
+    initialInput: isAttached ? undefined : args.initialInput,
+    report: args.report,
+    disarm: () => {
       args.sessionIdRef.current = null;
     },
-  );
+    cancelledRef,
+  });
 }
 
 function reportSessionState(args: MountArgs, session: AgentLoginSession): void {
@@ -303,7 +313,7 @@ async function attachOrStart(args: MountArgs, cancelledRef: { value: boolean }):
       return;
     }
 
-    reportSession(args, session, term, isAttached);
+    reportSession(args, session, term, isAttached, cancelledRef);
   } catch (error) {
     clearPendingStart(args.ownerId, pending);
     const detachedQuickTab =

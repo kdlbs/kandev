@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/common/githubhost"
+	"go.uber.org/zap"
 	"strings"
 	"sync"
 	"time"
@@ -132,11 +134,15 @@ func (s *Service) SetWorkspaceConnection(
 		if token == "" {
 			return nil, fmt.Errorf("GitHub token is required")
 		}
-		login, err := s.validateWorkspaceToken(ctx, token)
+		host, err := connectionHost(req.Host)
 		if err != nil {
 			return nil, err
 		}
-		return s.commitWorkspacePAT(ctx, workspaceID, login, token, expectedGeneration)
+		login, err := s.validateWorkspaceTokenForHost(ctx, token, host)
+		if err != nil {
+			return nil, err
+		}
+		return s.commitWorkspacePAT(ctx, workspaceID, login, token, expectedGeneration, host.String())
 	case ConnectionSourceGHCLI:
 		if err := requireGHCLIOperator(ctx); err != nil {
 			return nil, err
@@ -201,6 +207,7 @@ func (s *Service) commitWorkspacePAT(
 	ctx context.Context,
 	workspaceID, login, token string,
 	expectedGeneration int64,
+	hosts ...string,
 ) (*WorkspaceConnection, error) {
 	lock := s.workspaceConnectionMutationLock(workspaceID)
 	lock.Lock()
@@ -214,7 +221,10 @@ func (s *Service) commitWorkspacePAT(
 	}
 	connection := s.newWorkspaceConnection(workspaceID, ConnectionSourcePAT, existing)
 	connection.Login = login
-	secretKey := WorkspacePATSecretKey(connection.WorkspaceID)
+	if len(hosts) > 0 {
+		connection.GitHubHost = hosts[0]
+	}
+	secretKey := WorkspacePATSecretKeyForHost(connection.WorkspaceID, connection.GitHubHost)
 	previous, hadPrevious, err := revealOptionalSecret(ctx, s.connectionSecrets, secretKey)
 	if err != nil {
 		return nil, fmt.Errorf("load previous workspace PAT: %w", err)
@@ -223,13 +233,18 @@ func (s *Service) commitWorkspacePAT(
 		return nil, fmt.Errorf("store workspace PAT: %w", err)
 	}
 	if err := s.applyAutomationTransition(ctx, existing, connection, func() error {
-		return s.store.UpsertWorkspaceConnection(ctx, connection)
+		return s.store.ReplaceWorkspaceHostConnection(ctx, existing, connection)
 	}); err != nil {
 		s.compensatePATWrite(ctx, secretKey, previous, hadPrevious)
 		return nil, fmt.Errorf("replace workspace GitHub connection: %w", err)
 	}
 	if existing != nil && existing.InstallationID != nil {
 		s.InvalidateAppInstallationCredentials(existing.AppRegistrationID, *existing.InstallationID)
+	}
+	if existing != nil && existing.Source == ConnectionSourcePAT && WorkspacePATSecretKeyForHost(existing.WorkspaceID, existing.GitHubHost) != WorkspacePATSecretKeyForHost(connection.WorkspaceID, connection.GitHubHost) {
+		if err := deleteOptionalSecret(ctx, s.connectionSecrets, WorkspacePATSecretKeyForHost(existing.WorkspaceID, existing.GitHubHost)); err != nil {
+			s.warnObsoletePATCleanup(existing)
+		}
 	}
 	s.invalidateWorkspaceCredential(connection.WorkspaceID)
 	return connection, nil
@@ -240,10 +255,11 @@ func (s *Service) validateAndCommitWorkspaceGHCLI(
 	workspaceID, host, login string,
 	expectedGeneration int64,
 ) (*WorkspaceConnection, error) {
-	host = strings.TrimSpace(host)
-	if host == "" {
-		host = defaultGitHubHost
+	parsedHost, err := connectionHost(host)
+	if err != nil {
+		return nil, err
 	}
+	host = parsedHost.String()
 	login = strings.TrimSpace(login)
 	if login == "" {
 		return nil, fmt.Errorf("GitHub login is required")
@@ -256,7 +272,7 @@ func (s *Service) validateAndCommitWorkspaceGHCLI(
 	if err != nil {
 		return nil, err
 	}
-	validatedLogin, err := s.validateWorkspaceToken(ctx, token)
+	validatedLogin, err := s.validateWorkspaceTokenForHost(ctx, token, parsedHost)
 	if err != nil {
 		return nil, err
 	}
@@ -285,13 +301,16 @@ func (s *Service) commitWorkspaceGHCLI(
 	connection.GitHubHost = host
 	connection.Login = login
 	if err := s.applyAutomationTransition(ctx, existing, connection, func() error {
-		return s.store.UpsertWorkspaceConnection(ctx, connection)
+		return s.store.ReplaceWorkspaceHostConnection(ctx, existing, connection)
 	}); err != nil {
 		return nil, fmt.Errorf("replace workspace GitHub connection: %w", err)
 	}
 	if existing != nil && existing.Source == ConnectionSourcePAT {
-		if err := deleteOptionalSecret(ctx, s.connectionSecrets, WorkspacePATSecretKey(workspaceID)); err != nil {
-			return nil, errors.Join(err, restoreWorkspaceConnection(ctx, s.store, existing, workspaceID))
+		if err := deleteOptionalSecret(ctx, s.connectionSecrets, WorkspacePATSecretKeyForHost(workspaceID, existing.GitHubHost)); err != nil {
+			if defaultAuthFlowHost(existing.GitHubHost) == defaultAuthFlowHost(connection.GitHubHost) {
+				return nil, errors.Join(err, restoreWorkspaceConnection(ctx, s.store, existing, workspaceID))
+			}
+			s.warnObsoletePATCleanup(existing)
 		}
 	}
 	if existing != nil && existing.InstallationID != nil {
@@ -392,7 +411,7 @@ func (s *Service) DeleteWorkspaceConnection(ctx context.Context, workspaceID str
 		return err
 	}
 	if connection != nil && connection.Source == ConnectionSourcePAT && s.connectionSecrets != nil {
-		err = s.deleteWorkspacePATConnection(ctx, workspaceID)
+		err = s.deleteWorkspacePATConnection(ctx, workspaceID, connection.GitHubHost)
 	} else {
 		err = s.deleteWorkspaceConnectionMetadata(ctx, workspaceID, connection)
 	}
@@ -406,8 +425,8 @@ func (s *Service) DeleteWorkspaceConnection(ctx context.Context, workspaceID str
 	return nil
 }
 
-func (s *Service) deleteWorkspacePATConnection(ctx context.Context, workspaceID string) error {
-	secretKey := WorkspacePATSecretKey(workspaceID)
+func (s *Service) deleteWorkspacePATConnection(ctx context.Context, workspaceID, hostname string) error {
+	secretKey := WorkspacePATSecretKeyForHost(workspaceID, hostname)
 	previous, hadPrevious, err := revealOptionalSecret(ctx, s.connectionSecrets, secretKey)
 	if err != nil {
 		return fmt.Errorf("load workspace PAT: %w", err)
@@ -512,14 +531,45 @@ func (s *Service) CopyWorkspaceConnectionToWorkspace(ctx context.Context, srcWor
 		return fmt.Errorf("store destination workspace connection: %w", err)
 	}
 	if src.Source == ConnectionSourcePAT {
-		token, err := s.connectionSecrets.Reveal(ctx, WorkspacePATSecretKey(srcWorkspaceID))
+		token, err := s.connectionSecrets.Reveal(ctx, WorkspacePATSecretKeyForHost(srcWorkspaceID, src.GitHubHost))
 		if err != nil {
 			return fmt.Errorf("reveal source workspace PAT: %w", err)
 		}
-		if err := s.connectionSecrets.Set(ctx, WorkspacePATSecretKey(dstWorkspaceID), workspacePATSecretName, token); err != nil {
+		if err := s.connectionSecrets.Set(ctx, WorkspacePATSecretKeyForHost(dstWorkspaceID, src.GitHubHost), workspacePATSecretName, token); err != nil {
 			return fmt.Errorf("store destination workspace PAT: %w", err)
 		}
 	}
 	s.invalidateWorkspaceCredential(dstWorkspaceID)
 	return nil
+}
+
+func connectionHost(value string) (githubhost.Host, error) {
+	if value == "" {
+		return githubhost.Public(), nil
+	}
+	return githubhost.Parse(value)
+}
+
+func (s *Service) validateWorkspaceTokenForHost(ctx context.Context, token string, host githubhost.Host) (string, error) {
+	if host.IsPublic() && s.hostTokenClientFactory == nil {
+		return s.validateWorkspaceToken(ctx, token)
+	}
+	factory := s.hostTokenClientFactory
+	if factory == nil {
+		factory = func(value string, selected githubhost.Host) Client { return NewPATClientForHost(value, selected) }
+	}
+	login, err := factory(token, host).GetAuthenticatedUser(ctx)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidToken, err)
+	}
+	if strings.TrimSpace(login) == "" {
+		return "", ErrInvalidToken
+	}
+	return strings.TrimSpace(login), nil
+}
+
+func (s *Service) warnObsoletePATCleanup(connection *WorkspaceConnection) {
+	if s.logger != nil {
+		s.logger.Warn("failed to remove obsolete GitHub PAT", zap.String("workspace_id", connection.WorkspaceID), zap.String("github_host", defaultAuthFlowHost(connection.GitHubHost)))
+	}
 }

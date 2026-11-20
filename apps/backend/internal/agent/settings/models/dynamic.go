@@ -22,11 +22,10 @@ type DynamicAgentRoute struct {
 	RulesJSON          string `json:"rules_json"`
 }
 
-// DynamicProfileReference describes a dynamic profile that still points at a
-// concrete profile. Soft-deleted parents are included so delete confirmation
-// can explain stale configuration instead of silently losing the dependency.
+// DynamicProfileReference describes a live dynamic profile that still points
+// at a concrete profile. Soft-deleted parents are excluded: their routes can
+// never run, so they must not keep the candidate profile in use.
 type DynamicProfileReference struct {
-	ProfileID string     `json:"profile_id"`
-	Name      string     `json:"name"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	ProfileID string `json:"profile_id"`
+	Name      string `json:"name"`
 }

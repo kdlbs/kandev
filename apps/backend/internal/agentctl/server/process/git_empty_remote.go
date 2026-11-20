@@ -186,8 +186,8 @@ func (g *GitOperator) validatePublishedEmptyRemoteBase(
 
 func (g *GitOperator) emptyRemoteBaseBranch(requestedBaseBranch string) string {
 	branch := strings.TrimSpace(requestedBaseBranch)
-	if branch == "" && g.workspaceTracker != nil {
-		branch = strings.TrimSpace(g.workspaceTracker.BaseBranch())
+	if tracker := g.currentWorkspaceTracker(); branch == "" && tracker != nil {
+		branch = strings.TrimSpace(tracker.BaseBranch())
 	}
 	return normalizeEmptyRemoteBaseBranch(branch)
 }

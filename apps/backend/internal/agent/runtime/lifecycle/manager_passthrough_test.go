@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentruntime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -107,11 +108,13 @@ func newPassthroughMCPTestManager(t *testing.T, agentName string) (*Manager, *Ag
 		AgentProfileID: "profile-1",
 		WorkspacePath:  t.TempDir(),
 		ExecutorType:   "local",
+		RuntimeName:    agentruntime.RuntimeStandalone,
 		metadata: map[string]interface{}{
 			"standalone_port": 45678,
 		},
 		standalonePort: 45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	profile := &AgentProfileInfo{
 		ProfileID:      "profile-1",
 		AgentName:      agentName,
@@ -684,10 +687,10 @@ func TestWritePassthroughMCPFilesUnionTrackingOnRelaunch(t *testing.T) {
 	file := mcpconfig.PassthroughConfigFile{Path: path, Content: []byte("{}\n")}
 
 	// Two launches writing the same path must track it exactly once.
-	if err := mgr.writePassthroughMCPFiles(context.Background(), exec, []mcpconfig.PassthroughConfigFile{file}); err != nil {
+	if _, err := mgr.writePassthroughMCPFiles(context.Background(), exec, []mcpconfig.PassthroughConfigFile{file}); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
-	if err := mgr.writePassthroughMCPFiles(context.Background(), exec, []mcpconfig.PassthroughConfigFile{file}); err != nil {
+	if _, err := mgr.writePassthroughMCPFiles(context.Background(), exec, []mcpconfig.PassthroughConfigFile{file}); err != nil {
 		t.Fatalf("second write: %v", err)
 	}
 	if files := getPassthroughMCPFiles(exec); len(files) != 1 || files[0] != path {
@@ -819,7 +822,7 @@ func TestWritePassthroughMCPFilesSkipsDanglingLeafSymlink(t *testing.T) {
 	}
 
 	execution := &AgentExecution{WorkspacePath: ws, metadata: map[string]interface{}{}}
-	if err := mgr.writePassthroughMCPFiles(context.Background(), execution, []mcpconfig.PassthroughConfigFile{
+	if _, err := mgr.writePassthroughMCPFiles(context.Background(), execution, []mcpconfig.PassthroughConfigFile{
 		{Path: leaf, Content: []byte(`{"mcpServers":{}}`), MergeKey: "mcpServers"},
 	}); err != nil {
 		t.Fatalf("writePassthroughMCPFiles: %v", err)

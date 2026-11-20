@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { mcpStatusPresentation } from "./mcp-explorer-view-model";
 import { McpStatusDot } from "./mcp-status-presentation";
+import { BuiltinPendingPackages } from "./builtin-session-evidence";
 
 function mcpStatusIcon(status: MCPAttachmentServer["status"]) {
   switch (status) {
@@ -46,8 +47,9 @@ export function McpServerList({
       data-testid="mcp-server-list"
       className="h-full min-h-0 overflow-y-auto text-[13px] leading-5"
     >
+      <BuiltinPendingPackages />
       <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-        {t("task:mcpServerList")}
+        {t("task:mcpCurrentAgent")}
       </div>
       {servers.length === 0 ? (
         <p className="px-1 py-4 text-[13px] text-muted-foreground">{t("task:mcpNoServers")}</p>

@@ -48,6 +48,24 @@ afterEach(() => {
   cleanup();
 });
 
+describe("AgentGoalChip click activation", () => {
+  it.each(["hover", "focus"])(
+    "keeps desktop details exposed when clicking after %s",
+    async (opening) => {
+      render(<AgentGoalChip goal={activeGoal()} />);
+      const trigger = screen.getByTestId(GOAL_CHIP_TEST_ID);
+      if (opening === "hover") fireEvent.mouseEnter(trigger);
+      else fireEvent.focus(trigger);
+      expect(await screen.findByTestId(GOAL_POPOVER_TEST_ID)).toBeTruthy();
+
+      fireEvent.click(trigger);
+
+      expect(screen.getByTestId(GOAL_POPOVER_TEST_ID)).toBeTruthy();
+      expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    },
+  );
+});
+
 describe("AgentGoalChip", () => {
   it("opens the goal details on desktop hover", async () => {
     render(<AgentGoalChip goal={activeGoal()} />);

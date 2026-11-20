@@ -581,7 +581,8 @@ export function useWebSocketConnection({
   ]);
 }
 
-function buildResizeBuffer(cols: number, rows: number): Uint8Array {
+/** `new Uint8Array(length)` allocates a plain ArrayBuffer; declare exactly that. */
+function buildResizeBuffer(cols: number, rows: number): Uint8Array<ArrayBuffer> {
   const json = JSON.stringify({ cols, rows });
   const encoder = new TextEncoder();
   const jsonBytes = encoder.encode(json);

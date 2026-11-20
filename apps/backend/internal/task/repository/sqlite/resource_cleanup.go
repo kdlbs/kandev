@@ -54,6 +54,17 @@ func (r *Repository) createTaskResourceCleanupJob(
 	if claim, err := managed.DeletionEnvelope(job.ResourceSnapshot); err != nil || claim != nil {
 		return false, managed.ErrUnavailable
 	}
+	if expectedArchivedAt != nil {
+		// Persisted reclaim operations need no admission or mutation. New intents
+		// still pass every authority and generation check in the writer transaction.
+		var persisted bool
+		err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+			SELECT EXISTS (SELECT 1 FROM task_resource_cleanup_jobs WHERE operation_id = ?)
+		`), job.OperationID).Scan(&persisted)
+		if err != nil || persisted {
+			return false, err
+		}
+	}
 	if job.ID == "" {
 		job.ID = uuid.NewString()
 	}

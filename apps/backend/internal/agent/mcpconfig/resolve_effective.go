@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -26,6 +27,7 @@ type SelectionOrigin struct {
 // selections. RepositoryIDs are ordered only for reproducible reads; the
 // effective set itself has no scope precedence.
 type ResolutionContext struct {
+	Automation    *AutomationMCPContribution
 	WorkspaceID   string
 	RepositoryIDs []string
 	ProfileID     string
@@ -107,9 +109,15 @@ func (r *Resolver) Resolve(ctx context.Context, resolutionContext ResolutionCont
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	result := &EffectiveMCPResolution{Setup: setupFromDefinitions(inputs.Definitions), DesiredRevision: inputs.DesiredRevision}
+	result := &EffectiveMCPResolution{Setup: setupFromInputs(inputs), DesiredRevision: inputs.DesiredRevision}
 	names := make(map[string]string, len(ids))
 	for _, id := range ids {
+		if slices.Contains(inputs.ExcludedDefinitionIDs, id) {
+			if definition := inputs.Definitions[id]; definition != nil {
+				result.Decisions = append(result.Decisions, definitionDecision(definition, "session_excluded", "MCP definition is excluded from this session", origins[id]))
+			}
+			continue
+		}
 		resolved, decision, err := r.resolveDefinition(ctx, resolutionContext, policy, id, origins[id], legacyServers, names, inputs.Definitions[id])
 		if err != nil {
 			return nil, err
@@ -131,6 +139,8 @@ func (r *Resolver) Resolve(ctx context.Context, resolutionContext ResolutionCont
 	return result, nil
 }
 
+// resolveDefinition returns attachment evidence for unavailable definitions and rejects runtime name
+// collisions.
 func (r *Resolver) resolveDefinition(
 	ctx context.Context,
 	resolutionContext ResolutionContext,
@@ -146,12 +156,12 @@ func (r *Resolver) resolveDefinition(
 	}
 	if definition == nil {
 		return nil, &MCPResolutionDecision{
-			DefinitionID: id, ReasonCode: "definition_missing",
+			DefinitionID: id, ReasonCode: reasonDefinitionMissing,
 			Summary: "MCP definition is no longer available", Origins: origins,
 		}, nil
 	}
 	if !definition.Enabled {
-		return nil, decisionPointer(definitionDecision(definition, "definition_disabled", "MCP definition is disabled", origins)), nil
+		return nil, decisionPointer(definitionDecision(definition, reasonDefinitionDisabled, "MCP definition is disabled", origins)), nil
 	}
 	server, secretErr := r.deliveryServer(ctx, resolutionContext.WorkspaceID, definition)
 	if secretErr != nil {
@@ -183,6 +193,7 @@ func (r *Resolver) ResolveEffective(ctx context.Context, resolutionContext Resol
 	return r.Resolve(ctx, resolutionContext, policy)
 }
 
+// loadOrigins combines workspace-scoped selections while retaining each contributing owner.
 func (r *Resolver) loadOrigins(ctx context.Context, rc ResolutionContext) (map[string][]SelectionOrigin, map[string]ServerDef, error) {
 	origins := make(map[string][]SelectionOrigin)
 	legacyServers := make(map[string]ServerDef)
@@ -214,6 +225,9 @@ func (r *Resolver) loadOrigins(ctx context.Context, rc ResolutionContext) (map[s
 			return nil, nil, err
 		}
 		addOrigins(origins, ids, SelectionOrigin{Scope: SelectionScopeTaskSession, WorkspaceID: rc.WorkspaceID, OwnerID: rc.SessionID})
+	}
+	if err := AddAutomationMCPOrigins(rc, origins); err != nil {
+		return nil, nil, err
 	}
 	return origins, legacyServers, nil
 }

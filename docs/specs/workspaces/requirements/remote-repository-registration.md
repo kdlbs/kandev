@@ -1,6 +1,7 @@
 ---
-status: draft
+status: active
 system: workspaces
+updated: 2026-11-08
 created: 2026-09-28
 owners:
   - kandev
@@ -93,6 +94,44 @@ before any task exists.
   viewport, the **Add repository** menu and the remote repository dialog shall
   stay reachable by touch with the same composition the **New Task** Remote
   tab uses, and the page shall not scroll horizontally.
+
+## Clone URL repair
+
+### REQ-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-002: Repair an existing clone URL
+
+**Intent:** Correct a registered repository's clone URL through supported interfaces while preserving its saved identity and task associations.
+
+#### Acceptance criteria
+
+- **AC-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-002.1:** An authorized caller shall inspect the saved locator and validate a proposed replacement without a write.
+  The preview shall identify the registration, saved provider identity, effective replacement URL, and validation scope.
+  It shall not reveal embedded credentials in an invalid saved or proposed locator.
+- **AC-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-002.2:** A valid replacement shall update the existing registration and preserve its ID, workspace, source type, local path, and provider identity.
+  Provider identity includes host, full namespace/project, name, scope, and immutable provider repository ID when present.
+  Every attached task, session, repository set, and branch policy shall retain its associations.
+- **AC-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-002.3:** Validation shall reject embedded credentials, malformed or local locators, and replacements for a different repository, provider, host, or scope.
+  Missing or ambiguous saved identity shall fail closed. Plugin-backed replacements shall require the active owning provider's verified descriptor.
+  A repair shall not fill missing identity or silently accept a repository rename.
+- **AC-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-002.4:** Inspection and validation shall preserve existing workspace access rules.
+  Mutation shall require repository-management authority and shall refuse the read-only Improve Kandev workspace.
+  Unauthorized requests shall cause no provider inspection, mutation, or success event and shall retain existing existence-hiding behavior.
+- **AC-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-002.5:** HTTP, WebSocket, and compact MCP settings callers shall receive equivalent validation, mutation, and readback behavior.
+  Existing MCP settings discovery shall describe the supported clone-URL field and validation option.
+  Legacy task base-branch tools shall retain their separate meaning.
+- **AC-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-002.6:** An ordinary settings save that omits the clone URL shall preserve the persisted URL, including a concurrent successful repair.
+  A supplied empty replacement shall fail. Optional-pointer HTTP/WS null shall mean omission; the non-nullable MCP field shall reject null.
+  Existing default-branch and pull-before-worktree omission guarantees shall remain in force.
+- **AC-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-002.7:** A successful update shall return and publish the clone URL committed by that mutation.
+  A combined settings and secret-binding update shall commit atomically or change nothing.
+  A failed or rejected update shall publish no success event. Concurrent valid replacements shall follow commit order.
+- **AC-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-002.8:** Update shall validate again even after a successful preview.
+  A change to saved identity before commit shall cause a conflict without partial changes.
+  Existing exact-administration version fences shall remain effective.
+- **AC-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-002.9:** Repair shall change registration data only.
+  It shall not change a Git origin, fetch, clone, restart a session, or replace existing materialized source identity.
+  Existing exact-origin reuse checks can still require separate deliberate checkout recovery.
+- **AC-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-002.10:** Omitted clone-URL updates shall retain existing stored SSH locators and managed SSH credential normalization.
+  Re-registration shall continue to reuse the existing registration without replacing a nonempty clone URL.
 
 ## Out of scope
 

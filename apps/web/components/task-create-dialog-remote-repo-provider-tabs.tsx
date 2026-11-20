@@ -3,7 +3,6 @@
 import { IconBrandGithub, IconBrandGitlab, IconGitBranch } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import type { RemoteRepositoryProvider } from "@/hooks/domains/integrations/use-remote-repositories";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
@@ -12,14 +11,12 @@ import { cn } from "@/lib/utils";
 const PROVIDER_LABELS: Record<string, string> = {
   github: "GitHub",
   gitlab: "GitLab",
-  azure_devops: "Azure DevOps",
 };
 
 export function RemoteRepositoryProviderIcon({ provider }: { provider: RemoteRepositoryProvider }) {
   const registry = usePluginRegistry();
   if (provider === "github") return <IconBrandGithub className="size-3.5 shrink-0" />;
   if (provider === "gitlab") return <IconBrandGitlab className="size-3.5 shrink-0" />;
-  if (provider === "azure_devops") return <AzureDevOpsIcon className="size-3.5 shrink-0" />;
   const registration = registry.getRepositoryProvider(provider);
   const Icon = registration ? resolvePluginIcon(registration.icon) : IconGitBranch;
   return <Icon className="size-3.5 shrink-0" />;

@@ -61,6 +61,7 @@ func TestLoadedNativeRecoveryClearsAdmissionWithoutReplay(t *testing.T) {
 			ctx := context.Background()
 			service, manager, block, submission, _, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
 			repo := service.repo.(*sqliterepo.Repository)
+			manager.isAgentRunning = entry == "restart"
 			require.NoError(t, repo.SetSessionMetadataKey(ctx, submission.SessionID, models.SessionMetaKeyAgentDeliveryRecovery, nil))
 			_, err := repo.DB().ExecContext(ctx, `UPDATE session_recovery_blocks SET delivery_stream_id = '' WHERE id = ?`, block.ID)
 			require.NoError(t, err)

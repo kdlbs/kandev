@@ -91,8 +91,9 @@ export function hasActiveAttemptForScope(
   attempts: Iterable<[string, { controller: AbortController }]>,
   scopeKey: string,
   generation: number,
+  inventoryGeneration: number,
 ): boolean {
-  const prefix = `${scopeKey}\u0000${generation}\u0000`;
+  const prefix = `${scopeKey}\u0000${generation}\u0000${inventoryGeneration}\u0000`;
   for (const [key, attempt] of attempts) {
     if (key.startsWith(prefix) && !attempt.controller.signal.aborted) return true;
   }
