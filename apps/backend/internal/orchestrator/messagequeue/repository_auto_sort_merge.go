@@ -71,11 +71,13 @@ func (r *sqliteRepository) readSortedFoldTargetTx(
 
 // sourcePositionBound is the upper position for rows above source. A
 // full-queue candidate has no persisted position, so every row is above it.
+// The bound is the largest INTEGER column value: PostgreSQL stores position as
+// int4 and rejects a wider bind parameter.
 func sourcePositionBound(source *QueuedMessage) int64 {
 	if source.Position > 0 {
 		return source.Position
 	}
-	return math.MaxInt64
+	return math.MaxInt32
 }
 
 // sortedFoldScanBatch bounds each metadata read so a match near the tail never
