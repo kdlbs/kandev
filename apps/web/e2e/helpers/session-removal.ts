@@ -5,13 +5,8 @@ import type { ApiClient } from "./api-client";
 import { SessionPage } from "../pages/session-page";
 import { watchWs } from "./causal-waits";
 
-export async function expectLastStoppedSessionRemoval(
-  observerPage: Page,
-  deletingPage: Page,
-  api: ApiClient,
-  seed: SeedData,
-): Promise<void> {
-  const task = await api.seedTask(seed.workspaceId, "Remote last stopped session removal", {
+export async function seedStoppedRemovalTask(api: ApiClient, seed: SeedData) {
+  const task = await api.seedTask(seed.workspaceId, "Stored session removal", {
     workflow_id: seed.workflowId,
     workflow_step_id: seed.startStepId,
   });
@@ -27,6 +22,16 @@ export async function expectLastStoppedSessionRemoval(
     content: "Last stored conversation",
   });
   await api.setPrimarySession(old.session_id);
+  return { task, old };
+}
+
+export async function expectLastStoppedSessionRemoval(
+  observerPage: Page,
+  deletingPage: Page,
+  api: ApiClient,
+  seed: SeedData,
+): Promise<void> {
+  const { task, old } = await seedStoppedRemovalTask(api, seed);
   const observer = new SessionPage(observerPage);
   const deletingClient = new SessionPage(deletingPage);
   const watcher = watchWs(observerPage);

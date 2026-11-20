@@ -556,5 +556,15 @@ fix. It is separate from the five design-only rounds above.
   desktop cases plus the corrected new-case replay and 5 phone cases passed.
   Task 02 records intermediate failures, exact commands, captures and limits.
   The separate production review loop remains open.
-- Completed rounds: 8. Consecutive clean: 0. The stop condition is three
+- Round 9: Sol child `700e9f77-6a66-4c93-a172-fcdb55d2b276` reviewed
+  `eb7ea5cb39`. Three P2s and one P3 accepted: older genuine promotions can
+  displace a new STARTING attempt; observe-before-terminal loses a healthy
+  handoff; selected local deletion guesses from stale membership; partial
+  lifecycle rows lack durable chronology. R09 remediation is implemented,
+  including existing-workflow precedence and preservation of an already selected
+  chat across tab reordering. Final desktop 37/37 and phone 6/6 passed, with
+  owning-file tests, typecheck and a fresh frontend. Task 02 distinguishes the
+  intermediate fixture/browser failures from final targeted GREEN. The separate
+  production review loop remains open.
+- Completed rounds: 9. Consecutive clean: 0. The stop condition is three
   consecutive clean rounds or 50 rounds. No earlier loop counts toward it.

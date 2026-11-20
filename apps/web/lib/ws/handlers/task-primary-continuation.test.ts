@@ -31,6 +31,8 @@ const TIME = "2026-11-19T12:00:00Z";
 const LATER = "2026-11-19T12:00:01Z";
 const OTHER_TASK = "other-task";
 const ENTRY = "entry:00000000000000000042";
+const SURVIVOR_CURSOR = "survivor-read";
+const NEW_SESSION_ENTRY = "new-session";
 function proofRead() {
   return Promise.withResolvers<Awaited<ReturnType<typeof listTaskSessions>>>();
 }
@@ -161,7 +163,7 @@ describe("competing committed remote removals", () => {
       store.getState().setActiveSessionAuto("t1", "old");
       store.getState().setTaskSession({
         ...store.getState().taskSessions.items.latest,
-        last_read_message_id: "survivor-read",
+        last_read_message_id: SURVIVOR_CURSOR,
       });
       const oldProof = proofRead();
       const nextProof = proofRead();
@@ -186,7 +188,7 @@ describe("competing committed remote removals", () => {
         expect(store.getState().taskSessions.items.next).toBeUndefined();
         expect(store.getState().tasks.activeSessionId).toBe("latest");
         expect(store.getState().taskSessions.items.latest.last_read_message_id).toBe(
-          "survivor-read",
+          SURVIVOR_CURSOR,
         );
       } finally {
         release();
@@ -282,4 +284,147 @@ describe("chronological lifecycle replacement", () => {
     store.getState().setTaskSessionsForTask("t1", [...rows].reverse(), {});
     expect(pickReplacementSessionId(store.getState(), "t1")).toBe("latest");
   });
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.11
+describe("lifecycle handoff competing with a background deletion", () => {
+  it.each(["removal-first", "terminal-first"] as const)(
+    "chooses the survivor with %s arrival",
+    async (order) => {
+      const store = withSiblings("RUNNING");
+      store.getState().setActiveTask(OTHER_TASK);
+      promote(store, "latest");
+      const rows = store.getState().taskSessionsByTask.itemsByTaskId.t1.map((row) => ({
+        ...row,
+        started_at: row.id === "next" ? LATER : TIME,
+        last_read_message_id: row.id === "latest" ? SURVIVOR_CURSOR : row.last_read_message_id,
+      }));
+      store.getState().setTaskSessionsForTask("t1", rows, {});
+      store.getState().setActiveSessionAuto("t1", "old");
+      const ended = deferred();
+      const deletion = proofRead();
+      vi.mocked(fetchTaskSession).mockReturnValue(ended.promise);
+      vi.mocked(listTaskSessions).mockReturnValue(deletion.promise);
+      const selected: Array<string | null> = [];
+      const release = store.subscribe((state) => selected.push(state.tasks.activeSessionId));
+      try {
+        if (order === "removal-first") remove(store, "next");
+        notifyState(store, "COMPLETED", LATER);
+        if (order === "terminal-first") remove(store, "next");
+        expect(store.getState().tasks.activeSessionId).toBe("old");
+        ended.resolve(response("COMPLETED"));
+        await flushFocusWork();
+        expect(selected).not.toContain("next");
+        expect(store.getState().tasks.activeSessionId).toBe("latest");
+        deletion.resolve(membership("latest"));
+        await flushFocusWork();
+        expect(store.getState().taskSessions.items.next).toBeUndefined();
+        expect(store.getState().taskSessions.items.latest.last_read_message_id).toBe(
+          SURVIVOR_CURSOR,
+        );
+      } finally {
+        release();
+      }
+    },
+  );
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+describe("durable chronology after a real partial lifecycle event", () => {
+  it.each(["continue", "newer-pin", "newer-navigation", "predecessor-starts"] as const)(
+    "waits for normal membership admission with %s",
+    async (outcome) => {
+      const store = withSiblings("RUNNING");
+      store.getState().removeTaskSession("t1", "next");
+      store.getState().setActiveTask(OTHER_TASK);
+      promote(store, "latest");
+      store.getState().setActiveSessionAuto("t1", "old");
+      const ended = deferred();
+      vi.mocked(fetchTaskSession).mockReturnValue(ended.promise);
+      const hydration = proofRead();
+      const admitted = hydration.promise.then(({ sessions }) => {
+        store.getState().setTaskSessionsForTask("t1", sessions, {});
+      });
+      registerTaskSessionHandlers(store)[SESSION_STATE_CHANGED]!({
+        id: "new-partial",
+        type: "notification",
+        action: SESSION_STATE_CHANGED,
+        payload: {
+          task_id: "t1",
+          session_id: "next",
+          new_state: "WAITING_FOR_INPUT",
+          updated_at: LATER,
+        },
+      });
+      const selected: Array<string | null> = [];
+      const release = store.subscribe((state) => selected.push(state.tasks.activeSessionId));
+      try {
+        const endTime = "2026-11-19T12:00:02Z";
+        notifyState(store, "COMPLETED", endTime);
+        const endedRow = response("COMPLETED");
+        endedRow.session.updated_at = endTime;
+        ended.resolve(endedRow);
+        await flushFocusWork();
+        expect(store.getState().tasks.activeSessionId).toBe("old");
+        expect(selected).not.toContain("latest");
+        if (outcome === "newer-pin") store.getState().setActiveSession("t1", "latest");
+        if (outcome === "newer-navigation") store.getState().setActiveTask(OTHER_TASK);
+        if (outcome === "predecessor-starts") {
+          notifyState(store, "STARTING", "2026-11-19T12:00:03Z");
+        }
+        const rows = [
+          {
+            ...response("WAITING_FOR_INPUT", "next").session,
+            started_at: LATER,
+            updated_at: LATER,
+          },
+          response("WAITING_FOR_INPUT", "latest").session,
+          endedRow.session,
+        ];
+        hydration.resolve({ sessions: rows, total: rows.length });
+        await admitted;
+        await flushFocusWork();
+        if (outcome === "continue") expect(store.getState().tasks.activeSessionId).toBe("next");
+        if (outcome === "newer-pin") {
+          expect(store.getState().tasks.activeSessionId).toBe("latest");
+          expect(store.getState().tasks.pinnedSessionId).toBe("latest");
+        }
+        if (outcome === "newer-navigation")
+          expect(store.getState().tasks.activeTaskId).toBe(OTHER_TASK);
+        if (outcome === "predecessor-starts")
+          expect(store.getState().tasks.activeSessionId).toBe("old");
+      } finally {
+        release();
+      }
+    },
+  );
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.11
+describe("workflow intent preceding automatic focus", () => {
+  it.each(["primary", "terminal", NEW_SESSION_ENTRY, "initial-adoption"] as const)(
+    "keeps the committed workflow as the %s winner",
+    async (entry) => {
+      const store = withSiblings(entry === NEW_SESSION_ENTRY ? "IDLE" : "RUNNING");
+      if (entry === NEW_SESSION_ENTRY || entry === "initial-adoption") {
+        store.getState().removeTaskSession("t1", "latest");
+      }
+      if (entry === "initial-adoption") {
+        store.setState(({ tasks }) => ({ tasks: { ...tasks, activeSessionId: null } }));
+      }
+      const expectedBeforeCommit = store.getState().tasks.activeSessionId;
+      const move = beginMove(store);
+      let proofState: "RUNNING" | "COMPLETED" | "IDLE" = "RUNNING";
+      if (entry === "terminal") proofState = "COMPLETED";
+      if (entry === NEW_SESSION_ENTRY) proofState = "IDLE";
+      vi.mocked(fetchTaskSession).mockResolvedValue(response(proofState));
+      if (entry === "primary") promote(store);
+      else if (entry === "terminal") notifyState(store, "COMPLETED", LATER);
+      else notifySibling(store);
+      await flushFocusWork();
+      expect(store.getState().tasks.activeSessionId).toBe(expectedBeforeCommit);
+      commitMove(store, move, "next");
+      expect(store.getState().tasks.activeSessionId).toBe("next");
+    },
+  );
 });

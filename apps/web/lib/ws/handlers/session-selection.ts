@@ -2,6 +2,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
+import { isConfirmedSessionRemoved } from "@/lib/state/session-removal";
 
 const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
   "COMPLETED",
@@ -45,19 +46,25 @@ export function pickReplacementSessionId(
   state: AppState,
   taskId: string,
   excluded?: ReadonlySet<string>,
-): string | null {
+): string | null | undefined {
   const sessions = state.taskSessionsByTask?.itemsByTaskId[taskId];
   let newest: TaskSession | undefined;
   let newestTime: bigint | null = null;
+  let eligible = 0;
+  let unknownTime = false;
   for (const candidate of sessions ?? []) {
     const row = state.taskSessions?.items[candidate.id] ?? candidate;
     if (!isEligibleReplacementSession(row, taskId, excluded)) continue;
+    if (isConfirmedSessionRemoved(state.taskSessions, row.id)) continue;
+    eligible += 1;
     const time = parseTurnTimestamp(row.started_at);
+    unknownTime ||= time === null;
     if (isNewerSession(row.id, time, newest?.id, newestTime)) {
       newest = row;
       newestTime = time;
     }
   }
+  if (eligible > 1 && unknownTime) return undefined;
   return newest?.id ?? null;
 }
 

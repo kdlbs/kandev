@@ -33,6 +33,8 @@ beforeEach(() => {
   vi.mocked(listTaskSessions).mockReset();
 });
 
+const AFTER_STARTUP = "2026-11-19T12:00:02Z";
+
 // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
 // @covers AC-TASKS-TASK-UNREAD-DOT-001.8
 describe("authoritative primary focus follow", () => {
@@ -288,7 +290,7 @@ describe("primary follow durable authority", () => {
     async (terminal, order) => {
       const store = selectedStore(terminal);
       const oldTime = "2026-11-19T12:00:00Z";
-      const failedTime = "2026-11-19T12:00:02Z";
+      const failedTime = AFTER_STARTUP;
       store.getState().setTaskSession({
         ...response(terminal).session,
         started_at: oldTime,
@@ -328,7 +330,7 @@ describe("primary follow durable authority", () => {
     const read = deferred();
     vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
     promote(store);
-    notifyState(store, "FAILED", "2026-11-19T12:00:02Z");
+    notifyState(store, "FAILED", AFTER_STARTUP);
     read.resolve(response("WAITING_FOR_INPUT"));
     await read.promise;
     expect(store.getState().tasks.activeSessionId).toBe("old");
@@ -527,6 +529,72 @@ describe("newly observed sessions", () => {
     expect(store.getState().tasks.activeSessionId).toBe("old");
     read.resolve(response("COMPLETED"));
     await read.promise;
+    expect(store.getState().tasks.activeSessionId).toBe("next");
+  });
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+describe("primary promotions across an in-place startup", () => {
+  it.each(["CANCELLED", "STARTING"] as const)(
+    "keeps the displayed attempt when cached %s but durable state is STARTING",
+    async (state) => {
+      const store = selectedStore(state);
+      const read = deferred();
+      vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+      const selected: Array<string | null> = [];
+      const release = store.subscribe((current) => selected.push(current.tasks.activeSessionId));
+      try {
+        promote(store);
+        read.resolve(response("STARTING"));
+        await flushFocusWork();
+        expect(store.getState().tasks.activeSessionId).toBe("old");
+        notifyState(store, "FAILED", AFTER_STARTUP);
+        await flushFocusWork();
+        expect(selected).not.toContain("next");
+        expect(store.getState().kanban.tasks[0].primarySessionId).toBe("next");
+      } finally {
+        release();
+      }
+    },
+  );
+
+  it("rejects an older healthy read after an accepted STARTING observation", async () => {
+    const store = selectedStore("CANCELLED");
+    const read = deferred();
+    vi.mocked(fetchTaskSession).mockReturnValue(read.promise);
+    promote(store);
+    notifyState(store, "STARTING", "2026-11-19T12:00:01Z");
+    read.resolve(response("WAITING_FOR_INPUT"));
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    notifyState(store, "FAILED", AFTER_STARTUP);
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+  });
+
+  it("reproves a healthy accepted lifecycle state under the original owner", async () => {
+    const store = selectedStore("CANCELLED");
+    const starting = deferred();
+    const healthy = deferred();
+    vi.mocked(fetchTaskSession)
+      .mockReturnValueOnce(starting.promise)
+      .mockReturnValue(healthy.promise);
+    promote(store);
+    starting.resolve(response("STARTING"));
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    notifyState(store, "WAITING_FOR_INPUT", AFTER_STARTUP);
+    await flushFocusWork();
+    healthy.resolve(response("WAITING_FOR_INPUT"));
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("next");
+  });
+
+  it("retains healthy manual-primary following", async () => {
+    const store = selectedStore("RUNNING");
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("RUNNING"));
+    promote(store);
+    await flushFocusWork();
     expect(store.getState().tasks.activeSessionId).toBe("next");
   });
 });

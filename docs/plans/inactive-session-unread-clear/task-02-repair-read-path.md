@@ -1182,3 +1182,191 @@ Inspected the preserved phone images in `r8-phone-artifacts`: failed-resume caus
 and recovery controls remain visible; last-session removal leaves no deleted
 conversation; delayed promotion shows the surviving stored conversation without
 reload. The controlled empty window is phone-only; no new desktop layout policy.
+
+### Production-fix review round 9 remediation
+
+Four accepted source-derived schedules refine existing .6/.8/.9/.11:
+
+- Preserve a displayed STARTING attempt against an older genuine primary
+  promotion, whether STARTING comes from the scoped GET or a newer accepted
+  cached lifecycle observation. A later healthy accepted lifecycle projection
+  can re-prove under the same selection owner, without timers.
+- Apply scoped observed-removal exclusions before lifecycle candidate choice
+  and at publication. Capture the predecessor even when chronology/recipient
+  admission is pending; a removed projected ID is not an unknown valid recipient.
+- Capture local deletion ownership before the WS request. A successful
+  task-scoped acknowledgement retires that ID through the shared removal
+  boundary, without a raw-list selection. Select a successor only from complete
+  current membership; preserve newer pins and independent workflow intent.
+- Real lifecycle rows omit `started_at`. When an eligible partial row can affect
+  ranking, retain predecessor authority until normal membership hydration can
+  establish chronology. Never use `updated_at` as a start-time substitute.
+
+Regression owners: `task-primary-focus.test.ts`,
+`task-primary-continuation.test.ts`, and
+`hooks/domains/session/use-session-actions.removal-proof.test.ts`.
+Use deferred external reads/WS acknowledgements and real store/handlers; cover
+both arrival orders, newer selection/workflow controls, real partial payloads,
+and unchanged survivor cursors. Existing desktop/phone composition and cursor,
+unread, backend promotion, transport and persistence contracts remain unchanged.
+Run those tests RED before implementation, then the focused affected checks
+and fresh-frontend desktop/phone scenarios recorded for this work order.
+
+R09 evidence and test-boundary reconciliation:
+
+- `r9-red.log`: 11 behavioral failures / 70 controls across the real-handler and
+  local-action owners, before production changes. Durable STARTING and newer
+  cached STARTING displaced A; observe-before-terminal stranded A; local ACK
+  selected observed-deleted B; real untimed lifecycle admission selected older C.
+- `r9-starting.log`: 55 primary-focus tests passed after startup protection and
+  event-driven re-proving. Generic healthy fixtures now default to waiting;
+  startup negatives explicitly select STARTING. No synthetic cursor hydration.
+- `r9-candidates.log`: 48 candidate/continuation/pure cases passed. R09 partial
+  chronology uses the real lifecycle payload without `started_at`, a deferred
+  complete membership response and real slice admission. Normal hook loading
+  remains activated by the existing partial-row invalidation; no new fetch loop.
+- `r9-owner.log`: 107 controls passed; two older positive fixtures had no durable
+  start times for competing candidates. The complete-list fixture now has valid
+  start times rather than an insertion-order expectation. Explicit partial-row,
+  HTTP-order and ID-tie controls remain.
+- Local deletion's obsolete raw-list handoff and callback-only/wording tests are
+  replaced by real-store ACK, membership-generation, last-conversation and error
+  outcomes in `use-session-actions.removal-proof.test.ts`. Keep Quick Chat task
+  deletion and restart coverage separate and unchanged.
+- `r9-existing-intent-red.log` additionally exposed a workflow already in flight
+  before deletion admission. Automatic focus must defer to current task-owned
+  intent/request, not just detect a later reference change. Shared-entry controls
+  retain explicit committed workflow selection as the positive winner.
+
+The added phone scenario uses the shipped Sessions sheet, touch action menu and
+delete confirmation, then requires the surviving row to become current while
+the picker stays open. It verifies the local `useSessionActions` entry, not just
+an observer of another client. No new layout/control or touch-specific logic.
+Its concurrent failure boundary is already RED at the real-handler/hook level;
+the browser check is integration/viewport proof after the minimal state fix.
+
+R09 affected-suite/browser commands (same cache-backed working-tree environment):
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run lib/ws/handlers lib/state/slices/session \
+  lib/state/hydration lib/ssr/session-page src/task-detail-route \
+  hooks/use-task-sessions hooks/use-task-removal \
+  hooks/domains/session/use-session-actions \
+  hooks/domains/session/use-workspace-restoration.test.ts \
+  lib/state/task-session-reads.test.ts lib/state/shared-resource-reads.test.ts \
+  lib/state/workflow-session-focus.test.ts lib/task-agent-error.test.ts \
+  components/task/chat/use-session-read-tracking.test.ts \
+  components/task/task-unread-dot-visibility.test.ts lib/session-unread-divider.test.ts
+pnpm run typecheck
+pnpm run build:e2e
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  tests/session/session-primary-removal.spec.ts tests/task/task-unread-dot.spec.ts \
+  tests/session/session-tab-management.spec.ts tests/session/session-handoff.spec.ts \
+  tests/session/multi-session-ux.spec.ts tests/session/session-recovery.spec.ts \
+  -- --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+Frontend must be freshly built after the final production edit. Retained R02
+backend/plugin artifacts remain an explicit reuse, not a fresh backend or live
+NATS claim. Keep prior broad-suite and historical-attribution limits.
+
+R09 scoped check receipts:
+
+- `r9-explicit-intent-red.log`: all five preceding-workflow entry cases failed
+  before the shared precedence guard (primary, terminal, new-session, initial
+  adoption and local ACK). Committed workflow reconciliation remains the winner.
+- `r9-owner-green.log`: 115 owner/action controls passed before the lint-only
+  unavailable-recipient extraction and shared literal constants.
+- `r9-unit-final.log`: 155 affected files, 1658 passed / 2 failed. Both failures
+  were legacy no-successor fixtures with an incomplete mocked AppState. Those
+  spy-only checks were replaced with real-store terminal outcomes, without a
+  production fallback for missing `kanban`.
+  `r9-agent-session-final.log`: all 80 handler cases then passed.
+- Typecheck rejected a test-only null cursor on an optional string field.
+  Each unaffected row's cursor was preserved instead; no wire type or
+  production cursor code changed. Final continuation/typecheck receipts follow.
+- Configured changed-file lint passed after the small complexity/literal
+  extractions. `r9-i18n.log`, `r9-sleeps.log`, `r9-architecture.log` and
+  `r9-docs.log` passed (catalog, 36 spec-linter tests and all-spec lint included).
+
+These are targeted receipts, not a relabelled all-green 1660-test run or broad
+web/backend certification. Source behavior was unchanged by both fixture repairs.
+
+R09 first browser pass and replacement-panel regression:
+
+- `r9-continuation-final.log`: 26 passed. `r9-typecheck-final.log` passed
+  with the recorded 8 GiB heap. `r9-build.log` and `r9-green-bundle.txt`
+  identify the fresh frontend used by this pass.
+- `r9-phone.log`: 6 passed, including the shipped phone picker, row Delete
+  action and confirmation. `r9-desktop.log`: 36 passed / 1 failed. The existing
+  only-session deletion/workspace-reuse case found a replacement response in
+  a mounted but hidden chat; the assertion was not weakened.
+- The cache-only observational probe in `r9-replacement-diagnostic.log`
+  recorded the replacement selected and pinned in AppState, with no workflow
+  intent. Creating it selected its real Dockview panel. The subsequent tab-order
+  pass moved the selected tab before Files/Changes and made Changes active.
+  `shouldActivate=false` left the replacement hidden because the preceding
+  session was null. This is an observed UI ordering failure, not a cursor bug
+  or evidence that the original incident recurred.
+- `activateSessionPanel` now restores the effective session only if it was the
+  active panel before reordering and reordering displaced it. Existing
+  non-agent-panel preservation and workflow activation rules are unchanged.
+  The existing consumer-visible E2E is the RED regression coverage; no source-text
+  or call-count test was added. The diagnostic script observed state only and
+  was confined to the disposable cache copy.
+- The phone local-delete capture now waits for the successful-delete toast to
+  disappear so it does not obscure the surviving selected row.
+
+Final verification uses the normal source overlay (without the diagnostic
+script), the Dockview activation/tab/sync/dialog tests, typecheck, a fresh
+frontend, and both full selected viewport runs with one worker and no retries.
+
+Final owning-file commands after the fixture repairs and UI correction:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run lib/ws/handlers/agent-session.test.ts
+pnpm exec vitest run lib/ws/handlers/task-primary-continuation.test.ts
+pnpm exec vitest run components/task/dockview-session-tabs.test.ts \
+  components/task/dockview-session-tab-activation.test.ts \
+  components/task/dockview-session-tab-sync.test.ts \
+  components/task/new-session-dialog.test.tsx
+```
+
+The first two owning-file runs passed before the UI-only correction; the last
+run and the fresh frontend/browser results are recorded separately below.
+
+R09 final results:
+
+- `r9-dockview-final.log`: 4 files / 82 tests passed after the UI correction.
+  The earlier final owning-file receipts remain 80 handler and 26 continuation
+  tests, after their test-only fixture repairs. Do not sum overlapping runs
+  or relabel the affected-suite's initial 1658/1660 result.
+- `r9-ui-format.log` and `r9-ui-lint.log` passed for the final UI/capture edits.
+  `r9-typecheck-ui-final.log` passed with the recorded 8 GiB heap.
+  `r9-build-final.log` and `r9-final-bundle.txt` identify the final fresh frontend.
+- `r9-phone-final.log`: 6 passed. `r9-desktop-final.log`: 37 passed.
+  Both runs used one worker and zero retries against that final frontend.
+  The existing replacement-transcript visibility assertion passed unchanged.
+- Inspected `desktop-replacement-visible.png`: selected replacement, actual
+  response and composer visible beside the preserved workspace.
+  Inspected `r9-phone-final-artifacts/**/phone-local-session-removed.png`:
+  one surviving selected row, no deleted row or obscuring toast.
+  The failed-resume recovery, last-removal empty surface and later-primary
+  phone captures were also inspected in the first six-case run.
+- Cache-only diagnostic instrumentation was overwritten by the normal actual
+  source overlay before final verification. No diagnostic script, app-state
+  injection, generated artifact or dependency alias belongs in the commit.
+
+Task 02 implementation is done; the production review loop remains open.
+Parent delivery uses the selective commit API with normal hooks, verifies the
+exact fork push, then dispatches the next independent Sol review. No broad
+web/backend or live NATS certification is implied. Backend/plugin artifacts
+remain the retained R02 build. Original incident rows were deleted before live
+tracing; historical attribution stays qualified. Task-list readback proves
+convergence, not isolated cursor-event delivery; seeded RUNNING is not live
+execution continuity. No unread predicate, cursor, backend promotion, wire,
+persistence or Go change was introduced in R09.

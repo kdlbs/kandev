@@ -27,7 +27,7 @@ export function response(
 export function deferred() {
   return Promise.withResolvers<TaskSessionResponse>();
 }
-export function selectedStore(initialState: TaskSession["state"] = "STARTING") {
+export function selectedStore(initialState: TaskSession["state"] = "WAITING_FOR_INPUT") {
   const store = createAppStore({
     kanban: {
       workflowId: "wf1",
@@ -50,14 +50,18 @@ export function selectedStore(initialState: TaskSession["state"] = "STARTING") {
     ["next", "WAITING_FOR_INPUT"],
     ["latest", "WAITING_FOR_INPUT"],
   ] as const) {
-    store
-      .getState()
-      .setTaskSession({ id, task_id: "t1", state, started_at: "", updated_at: "" } as TaskSession);
+    store.getState().setTaskSession({
+      id,
+      task_id: "t1",
+      state,
+      started_at: SNAPSHOT_TIME,
+      updated_at: "",
+    } as TaskSession);
   }
   store.getState().setActiveSessionAuto("t1", "old");
   return store;
 }
-export function withSiblings(initialState: TaskSession["state"] = "STARTING") {
+export function withSiblings(initialState: TaskSession["state"] = "WAITING_FOR_INPUT") {
   const store = selectedStore(initialState);
   const sessions = Object.values(store.getState().taskSessions.items).map((session) => ({
     ...session,

@@ -214,53 +214,47 @@ card, then the backend promotes another active session to primary.
 hands off from `FAILED` nor adopts an unseen sibling over a failed view.
 
 Generic primary-follow (`lib/ws/handlers/task-primary-focus.ts`) verifies the
-previously displayed session through the existing session GET with
-`cache: "no-store"`. Identity must match, the returned state must not be `FAILED`,
-and the check must not override a cached FAILED observation.
-Workspace fan-out and client barriers can reorder primary and lifecycle events.
-Both lifecycle entry paths use the same selection-owned GET even before a
-promotion is observed. Terminal fallback requires persisted completion or
-cancellation; a newly observed sibling may also replace persisted `IDLE`.
-A newer cached nonterminal observation blocks terminal fallback. Initial adoption
-without a same-task predecessor remains immediate.
+predecessor with the existing no-store session GET. Durable or cached STARTING
+and FAILED preserve the view. Accepted healthy lifecycle versions re-prove under
+the original owner; verification never hydrates cursors. Workspace fan-out/client
+barriers can reorder primary and lifecycle events. Both lifecycle entry paths
+verify even before promotion: terminal fallback needs COMPLETED/CANCELLED;
+new-sibling adoption also permits IDLE. Initial adoption without a predecessor
+remains immediate, subject to explicit workflow ownership.
 
-Navigation, pin, restart, workflow intent and selected-session identity own focus
-checks. Denied or uncertain reads preserve the view; there are no timed retries.
-An unchanged primary preserves a pending lifecycle predicate. A changed primary
-retargets the original predecessor; creation only retargets an existing check.
-Explicit committed workflow focus remains separate.
+Navigation, pin, restart, workflow intent/request and selected identity own focus.
+Unchanged primary preserves the lifecycle predicate; changed primary retargets
+the original predecessor. Creation only retargets an existing check. Explicit
+committed workflow focus stays separate. Denied/uncertain reads never use timers.
 
-Healthy terminal handoffs revalidate ownership/eligibility and rank fallback by
-`started_at`, then session ID, not insertion order. A missing projected recipient
-waits for admission under predecessor authority; newer selection intent or
-predecessor state supersedes it.
-Agentctl readiness is only a fallback: preserve recipient-owned status/execution
-and never borrow the predecessor's execution identity.
+Terminal handoffs exclude observed/confirmed removals before choice/publication.
+Rank durable `started_at`, then session ID. When eligible partial rows can affect
+order, wait for normal membership hydration under the original authority; never
+substitute `updated_at`. Missing projected recipients also wait unless removed.
+New intent or predecessor state supersedes the check. Preserve recipient-owned
+agentctl readiness/execution; fallback readiness never borrows an execution ID.
 
-Core `session.removed` and session GET 404 verify task-scoped absence, including
-background or retained non-primary sessions. Missing wire task identity uses
-known membership or the matching active identity; conflicting scope is rejected.
-Complete, unique, task-matching membership must exclude the deleted ID; malformed
-or multiple-primary lists fail closed. Zero primaries can prove retirement.
+Core `session.removed` and session GET 404 derive task scope from known membership
+or active identity; reject conflicting scope. Complete unique same-task membership
+must exclude the deleted ID; malformed/incomplete/multiple-primary lists fail
+closed. Zero primaries prove retirement. Local deletion captures ownership before
+WS admission. A successful scoped acknowledgement retires that ID through the
+same boundary, never a raw-list guess; successor membership is verified separately.
 
-Retirement is scoped to backend/auth/workspace and membership generation, not view
-intent. Trusted task-matched removals invalidate membership and exclude the ID
-from automatic candidates; complete absence alone authorizes retirement.
-Invalidation rechecks absence. Focus requires its current owner and a uniquely
-proven primary. Clearing the deleted selection preserves independent workflow
-intent, cancelling only a request targeting that ID. An owned empty slot can
-follow a changed primary after fresh membership proof; newer user/workflow
-selection supersedes it. Surviving pins/cursors are untouched. Proof can initialize
-missing recipient identity/lifecycle, never overwrite data or hydrate a cursor.
+Retirement owns backend/auth/workspace and membership generation, not view intent.
+Trusted removals invalidate membership and exclude pending automatic candidates.
+Invalidation rechecks absence. Focus needs its original owner and a unique proven
+primary. Clearing the deleted selection/pin preserves independent workflow intent,
+cancelling only a request targeting that ID. An owned empty slot can re-prove after
+a changed primary; newer user/workflow selection wins. Surviving pins/cursors stay
+untouched. Proof initializes missing recipient identity/lifecycle only.
 
 `invalidateTaskSessionMembership` fences foreground/removal-dialog pending,
-admitted and queued publications; newer reads and unrelated keys remain usable.
-Confirmed deletion also records a client-only UUID fence for the store/backend.
-Canonical, list, event, route and selection admission reject late deleted IDs. Ordinary cache
-eviction and in-place restart do not record deletion; a queue-incarnation change
-cannot prove a deleted UUID exists again. Hydration cannot replace this evidence.
-Survivors retain membership, canonical freshness and cursors; comment-conflict
-reads keep their routing fingerprint.
+admitted and queued publications. New reads/unrelated keys remain usable.
+Confirmed UUID deletion fences canonical/list/event/route/selection admission for
+the store/backend. Ordinary eviction/restart is not deletion; queue incarnation
+cannot recreate a deleted UUID. Hydration cannot replace this evidence. Survivors
+retain membership, freshness and cursors; comment-conflict reads keep routing scope.
 
 Uncertain state/membership preserves the view. Unread predicates, promotion,
 transport ordering, wire contracts and persisted schemas remain unchanged.

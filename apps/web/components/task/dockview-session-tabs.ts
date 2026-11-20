@@ -342,7 +342,10 @@ function activateSessionPanel({
       activeGroupId: activePanel.group.id,
     });
   }
-  if (shouldActivate) {
+  const restoreSelectedSession =
+    activation.activePanelIdBeforeEnsure === activePanel.id &&
+    activePanelIdAfterReorder !== activePanel.id;
+  if (shouldActivate || restoreSelectedSession) {
     activePanel.api.setActive();
     if (workflowFocusRequestId !== null) {
       appStore.getState().acknowledgeWorkflowSessionFocus(workflowFocusRequestId);

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
@@ -5,6 +6,7 @@ import { dwell, watchWs } from "../../helpers/causal-waits";
 import {
   expectLastStoppedSessionRemoval,
   expectLatePromotionAfterRemoval,
+  seedStoppedRemovalTask,
 } from "../../helpers/session-removal";
 import {
   FAILED_SESSION_ERROR,
@@ -279,4 +281,56 @@ test("fills a retired session slot after the later primary promotion", async ({
 }) => {
   await expectLatePromotionAfterRemoval(testPage, desktopTestPage, apiClient, seedData, true);
   await testPage.screenshot({ path: test.info().outputPath("phone-late-session-promotion.png") });
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.11, AC-TASKS-TASK-UNREAD-DOT-001.15
+test("deletes the displayed session through the phone picker and follows its proven survivor", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const { task, old } = await seedStoppedRemovalTask(apiClient, seedData);
+  const survivor = await apiClient.seedTaskSession(task.task_id, {
+    sessionId: randomUUID(),
+    agentProfileId: seedData.agentProfileId,
+    state: "WAITING_FOR_INPUT",
+  });
+  await apiClient.setPrimarySession(old.session_id);
+  const watcher = watchWs(testPage);
+  await testPage.goto(`/t/${task.task_id}`);
+  await expect(new SessionPage(testPage).activeChat()).toHaveAttribute(
+    "data-session-id",
+    old.session_id,
+  );
+  const documentStart = await testPage.evaluate(() => performance.timeOrigin);
+  await testPage.getByTestId("mobile-sessions-pill").tap();
+  const picker = testPage.getByRole("dialog", { name: "Sessions", exact: true });
+  const row = picker.getByTestId(`mobile-session-row-${old.session_id}`);
+  await expect(row).toHaveAttribute("aria-current", "true");
+  await row.getByRole("button", { name: "Session actions", exact: true }).tap();
+  await testPage.getByRole("menuitem", { name: "Delete", exact: true }).tap();
+  const confirmation = testPage.getByTestId("mobile-session-delete-confirm");
+  await expect(confirmation).toBeVisible();
+  const acknowledged = watcher.waitForResponse("session.delete");
+  await confirmation.tap();
+  await acknowledged;
+  await expect
+    .poll(async () =>
+      (await apiClient.listTaskSessions(task.task_id)).sessions.map((item) => item.id),
+    )
+    .toEqual([survivor.session_id]);
+  await expect(picker).toBeVisible();
+  await expect(row).toHaveCount(0);
+  await expect(picker.getByTestId(`mobile-session-row-${survivor.session_id}`)).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  await expect(
+    testPage.locator(`[data-testid="session-chat"][data-session-id="${old.session_id}"]`),
+  ).toHaveCount(0);
+  expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
+  await expect(testPage.getByText("Deleting session successful", { exact: true })).toBeHidden({
+    timeout: 10_000,
+  });
+  await testPage.screenshot({ path: test.info().outputPath("phone-local-session-removed.png") });
 });

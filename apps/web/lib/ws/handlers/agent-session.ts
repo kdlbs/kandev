@@ -43,7 +43,6 @@ import { applyForegroundActivity, applyCancellationPending } from "./session-act
 import {
   clearPinnedSessionIfOverridden,
   isTerminalSessionState,
-  pickReplacementSessionId,
   shouldPreservePinnedSessionForTask,
 } from "./session-selection";
 import { followRemovedSession, followSessionTransition } from "./task-primary-focus";
@@ -129,29 +128,6 @@ export function shouldAdoptNewSession(
     }
   }
   return true;
-}
-
-/**
- * The authoritative primary session for a task, read from the kanban task row
- * (kept in sync by task.updated's primary_session_id). Fallback replacement
- * target when a retired session has no non-terminal successor in the per-task
- * session list yet: a workflow step switch promotes the new primary via
- * task.updated *before* the old session's terminal state_changed arrives, so
- * the new session row can be momentarily absent from taskSessionsByTask. Using
- * the promoted primary lets focus follow the switch regardless of that race.
- */
-export function pickPrimarySessionReplacement(
-  state: AppState,
-  taskId: string,
-  retiredSessionId: string,
-): string | null {
-  const task =
-    state.kanban.tasks.find((t) => t.id === taskId) ??
-    Object.values(state.kanbanMulti.snapshots)
-      .flatMap((snapshot) => snapshot.tasks)
-      .find((t) => t.id === taskId);
-  const primary = task?.primarySessionId ?? null;
-  return primary && primary !== retiredSessionId ? primary : null;
 }
 
 // Fields carried onto the update object verbatim whenever the payload defines
@@ -373,13 +349,7 @@ function handOffFromEndedSession(
     isTerminalSessionState(previousState)
   )
     return;
-  // Prefer a non-terminal session already in the per-task list; fall back to
-  // the task's promoted primary when the switch's new session hasn't landed
-  // there yet (task.updated beats the old session's terminal state_changed).
-  const replacement =
-    pickReplacementSessionId(state, taskId) ??
-    pickPrimarySessionReplacement(state, taskId, sessionId);
-  followSessionTransition(store, taskId, replacement ?? undefined, "terminal");
+  followSessionTransition(store, taskId, undefined, "terminal");
 }
 
 /** Seed the session→environment mapping from an agentctl event payload.

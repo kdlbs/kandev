@@ -1369,71 +1369,31 @@ describe("session.state_changed → active session handoff on terminal", () => {
     }
   });
 
-  // The per-task list here still shows s-old as RUNNING (pre-event state), so
-  // pickReplacementSessionId returns s-old itself. This exercises the
-  // `replacement !== sessionId` guard — without it, we'd set activeSessionId
-  // to the same session that just became terminal.
-  it("does not hand off when the only candidate is the terminating session itself", () => {
-    const store = makeStore({
-      tasks: {
-        activeTaskId: "t-1",
-        activeSessionId: "s-old",
-        pinnedSessionId: null,
-        lastSessionByTaskId: {},
-      },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
-      taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
-          ],
-        },
-      },
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
-    });
-
-    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
+  it("keeps the completed conversation when it is the only stored session", async () => {
+    const store = withSiblings("RUNNING");
+    store.getState().removeTaskSession("t1", "next");
+    store.getState().removeTaskSession("t1", "latest");
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifyState(store, "COMPLETED", "2026-11-19T12:00:01Z");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    expect(store.getState().taskSessions.items.old.state).toBe("COMPLETED");
   });
 
-  it("does not hand off when all other sessions for the task are terminal", () => {
-    const store = makeStore({
-      tasks: {
-        activeTaskId: "t-1",
-        activeSessionId: "s-old",
-        pinnedSessionId: null,
-        lastSessionByTaskId: {},
-      },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
-      taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-done", task_id: "t-1", state: "COMPLETED", started_at: "", updated_at: "" },
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
-          ],
-        },
-      },
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
-    });
-
-    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
+  it("keeps the completed conversation when all siblings are terminal", async () => {
+    const store = withSiblings("RUNNING");
+    store
+      .getState()
+      .setTaskSession({ ...store.getState().taskSessions.items.next, state: "CANCELLED" });
+    store
+      .getState()
+      .setTaskSession({ ...store.getState().taskSessions.items.latest, state: "FAILED" });
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifyState(store, "COMPLETED", "2026-11-19T12:00:01Z");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    expect(store.getState().taskSessions.items.next.state).toBe("CANCELLED");
+    expect(store.getState().taskSessions.items.latest.state).toBe("FAILED");
   });
 });
 

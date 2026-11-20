@@ -24,6 +24,8 @@ import {
 import type { KanbanTask } from "./task-archive-cache";
 
 const debug = createDebugLogger("task-lifecycle:ws");
+// i18n-exempt: Internal follow-source discriminant, never rendered.
+const NEW_SESSION_SOURCE = "new-session";
 type FollowSource = "primary" | "terminal" | "new-session" | "removed";
 type FollowOwner = {
   taskId: string;
@@ -72,6 +74,11 @@ export function findTaskInState(state: AppState, taskId: string): KanbanTask | u
   return undefined;
 }
 
+function hasExplicitWorkflowFocus(state: AppState, taskId: string): boolean {
+  const focus = state.workflowSessionFocus;
+  return focus?.intent?.taskId === taskId || focus?.request?.taskId === taskId;
+}
+
 function ownsSelection(store: StoreApi<AppState>, pending: FollowOwner): boolean {
   const state = store.getState();
   return (
@@ -81,6 +88,7 @@ function ownsSelection(store: StoreApi<AppState>, pending: FollowOwner): boolean
     state.tasks.pinnedSessionId === pending.pinnedSessionId &&
     state.taskRemoval?.navigationRevision === pending.navigationRevision &&
     state.workflowSessionFocus === pending.workflowFocus &&
+    !hasExplicitWorkflowFocus(state, pending.taskId) &&
     !isSessionRestartPending(store, pending.previousSessionId) &&
     (!shouldPreservePinnedSessionForTask(state, pending.taskId) ||
       (pending.source === "removed" &&
@@ -93,15 +101,39 @@ function ownsPendingFollow(store: StoreApi<AppState>, pending: PendingFollow): b
   return pendingByStore.get(store) === pending && ownsSelection(store, pending);
 }
 
+function isUnavailableSession(
+  state: AppState,
+  sessionId: string | null | undefined,
+  observed?: ReadonlySet<string>,
+): boolean {
+  return (
+    !!sessionId &&
+    (observed?.has(sessionId) || isConfirmedSessionRemoved(state.taskSessions, sessionId))
+  );
+}
+
 function lifecycleTarget(store: StoreApi<AppState>, pending: FollowOwner): string | null {
   const state = store.getState();
   const excluded = observedRemovals(store);
-  const target = pending.targetSessionId;
-  const candidate = target ? state.taskSessions.items[target] : undefined;
-  if (!candidate && target === pending.projectedPrimaryId) return null;
-  return isEligibleReplacementSession(candidate, pending.taskId, excluded)
-    ? target
-    : pickReplacementSessionId(state, pending.taskId, excluded);
+  const primary = pending.projectedPrimaryId;
+  const projected = primary ? state.taskSessions.items[primary] : undefined;
+  const unavailable = isUnavailableSession(state, primary, excluded);
+  if (primary && primary !== pending.previousSessionId && !projected && !unavailable) return null;
+  const hinted = pending.targetSessionId
+    ? state.taskSessions.items[pending.targetSessionId]
+    : undefined;
+  if (
+    pending.source === NEW_SESSION_SOURCE &&
+    isEligibleReplacementSession(hinted, pending.taskId, excluded)
+  ) {
+    if (!isConfirmedSessionRemoved(state.taskSessions, hinted.id)) return hinted.id;
+  }
+  const ranked = pickReplacementSessionId(state, pending.taskId, excluded);
+  if (ranked === undefined) return null;
+  if (ranked) return ranked;
+  return isEligibleReplacementSession(projected, pending.taskId, excluded)
+    ? (primary ?? null)
+    : null;
 }
 
 function prepareFollowTarget(
@@ -113,14 +145,13 @@ function prepareFollowTarget(
   const excluded = observedRemovals(store);
   const target =
     removedTarget?.id ??
-    (pending.source === "terminal" || pending.source === "new-session"
+    (pending.source === "terminal" || pending.source === NEW_SESSION_SOURCE
       ? lifecycleTarget(store, pending)
       : pending.targetSessionId);
   if (
     !target ||
     target === pending.previousSessionId ||
-    isConfirmedSessionRemoved(state.taskSessions, target) ||
-    excluded?.has(target)
+    isUnavailableSession(state, target, excluded)
   )
     return null;
   if (removedTarget && !state.taskSessions.items[target]) {
@@ -171,7 +202,7 @@ function completePendingFollow(
   const target = prepareFollowTarget(store, pending, removedTarget);
   if (!target) return false;
   pending.cancel();
-  if (!removedTarget && (pending.source === "terminal" || pending.source === "new-session")) {
+  if (!removedTarget && (pending.source === "terminal" || pending.source === NEW_SESSION_SOURCE)) {
     inheritFallbackReadiness(state, pending.previousSessionId, target);
   }
   clearPinnedSessionIfOverridden(store, target);
@@ -204,12 +235,12 @@ function provenRemoval(
 }
 
 function allowsFollowState(source: FollowSource, state: TaskSession["state"]): boolean {
-  if (!state || state === "FAILED") return false;
+  if (!state || state === "FAILED" || state === "STARTING") return false;
   return (
     source === "primary" ||
     state === "COMPLETED" ||
     state === "CANCELLED" ||
-    (source === "new-session" && state === "IDLE")
+    (source === NEW_SESSION_SOURCE && state === "IDLE")
   );
 }
 
@@ -246,6 +277,20 @@ function ownsEmptySelection(store: StoreApi<AppState>, removal: RemovalOwner): b
   );
 }
 
+function retireRemovalMembership(store: StoreApi<AppState>, pending: RemovalOwner): void {
+  const state = store.getState();
+  if (state.workflowSessionFocus.request?.sessionId === pending.previousSessionId) {
+    state.cancelWorkflowSessionFocus({ taskId: pending.taskId });
+  }
+  if (isConfirmedSessionRemoved(store.getState().taskSessions, pending.previousSessionId)) return;
+  invalidateTaskSessionMembership(store, pending.taskId);
+  retireSessionReads(store, pending.previousSessionId);
+  store
+    .getState()
+    .removeTaskSession(pending.taskId, pending.previousSessionId, { confirmed: true });
+  observedRemovals(store)?.delete(pending.previousSessionId);
+}
+
 function commitRemovalMembership(
   store: StoreApi<AppState>,
   pending: RemovalOwner,
@@ -265,18 +310,7 @@ function commitRemovalMembership(
   ) {
     retainEmptySelection(store, pending, matchingView);
   }
-  const state = store.getState();
-  if (state.workflowSessionFocus.request?.sessionId === pending.previousSessionId) {
-    state.cancelWorkflowSessionFocus({ taskId: pending.taskId });
-  }
-  if (!isConfirmedSessionRemoved(store.getState().taskSessions, pending.previousSessionId)) {
-    invalidateTaskSessionMembership(store, pending.taskId);
-    retireSessionReads(store, pending.previousSessionId);
-    store
-      .getState()
-      .removeTaskSession(pending.taskId, pending.previousSessionId, { confirmed: true });
-    observedRemovals(store)?.delete(pending.previousSessionId);
-  }
+  retireRemovalMembership(store, pending);
 }
 
 async function verifyRemoval(store: StoreApi<AppState>, pending: RemovalOwner) {
@@ -326,9 +360,39 @@ function verifyPreviousSession(store: StoreApi<AppState>, owner: FollowOwner): v
       finish();
     },
   };
+  let observed = store.getState().taskSessions.items[pending.previousSessionId];
+  let recheckQueued = false;
   const releaseView = store.subscribe(() => {
-    if (!ownsSelection(store, pending)) pending.cancel();
-    else reconcileAuthorizedFollow(store, pending);
+    if (!ownsSelection(store, pending)) {
+      pending.cancel();
+      return;
+    }
+    const current = store.getState().taskSessions.items[pending.previousSessionId];
+    const changed =
+      current?.state !== observed?.state || current?.updated_at !== observed?.updated_at;
+    observed = current;
+    if (pending.source === "primary" && changed) {
+      pending.authorized = false;
+      if (allowsFollowState(pending.source, current?.state) && !recheckQueued) {
+        controller.abort();
+        recheckQueued = true;
+        queueMicrotask(() => {
+          recheckQueued = false;
+          if (!ownsPendingFollow(store, pending)) return;
+          if (
+            !allowsFollowState(
+              pending.source,
+              store.getState().taskSessions.items[pending.previousSessionId]?.state,
+            )
+          )
+            return;
+          pending.cancel();
+          verifyPreviousSession(store, pending);
+        });
+      }
+      return;
+    }
+    reconcileAuthorizedFollow(store, pending);
   });
   const releaseRestart = getSessionRestartStore(store).subscribe(() => {
     if (isSessionRestartPending(store, pending.previousSessionId)) pending.cancel();
@@ -347,6 +411,7 @@ function verifyPreviousSession(store: StoreApi<AppState>, owner: FollowOwner): v
           init: { signal: controller.signal },
         })
           .then(({ session }) => {
+            if (controller.signal.aborted) return;
             const cached = store.getState().taskSessions.items[pending.previousSessionId]?.state;
             if (
               session.id !== pending.previousSessionId ||
@@ -414,7 +479,7 @@ export function followSessionTransition(
 ): boolean {
   const state = store.getState();
   if (state.tasks.activeTaskId !== taskId) return true;
-  if (targetSessionId && observedRemovals(store)?.has(targetSessionId)) return true;
+  if (hasExplicitWorkflowFocus(state, taskId)) return true;
   const existing = pendingByStore.get(store);
   if (existing?.taskId === taskId && ownsSelection(store, existing)) {
     if (existing.source === "removed") return true;
@@ -423,21 +488,27 @@ export function followSessionTransition(
     return true;
   }
   const previous = state.tasks.activeSessionId;
-  if (!hasSameTaskPredecessor(state, taskId, previous)) return false;
-  if (!targetSessionId || targetSessionId === previous) return true;
+  const unavailable = isUnavailableSession(state, targetSessionId, observedRemovals(store));
+  if (!hasSameTaskPredecessor(state, taskId, previous)) return unavailable;
+  if (source === NEW_SESSION_SOURCE && (!targetSessionId || targetSessionId === previous))
+    return true;
   existing?.cancel();
-  const owner = captureOwner(state, taskId, previous, targetSessionId, source);
+  const owner = captureOwner(
+    state,
+    taskId,
+    previous,
+    unavailable ? null : (targetSessionId ?? null),
+    source,
+  );
   if (ownsSelection(store, owner)) verifyPreviousSession(store, owner);
   return true;
 }
 
-/** Committed removal uses known membership or matching active identity for task scope. */
-export function followRemovedSession(
+function captureRemovalOwner(
   store: StoreApi<AppState>,
-  sessionId: string | undefined,
+  sessionId: string,
   taskId?: string,
-): void {
-  if (!sessionId) return;
+): FollowOwner | undefined {
   const state = store.getState();
   const knownTask =
     state.taskSessions.items[sessionId]?.task_id ??
@@ -447,8 +518,49 @@ export function followRemovedSession(
   const owningTask =
     knownTask ?? (state.tasks.activeSessionId === sessionId ? state.tasks.activeTaskId : null);
   if (!owningTask || (taskId && taskId !== owningTask)) return;
+  return captureOwner(state, owningTask, sessionId, null, "removed");
+}
+
+/** Capture view ownership before admitting a local deletion request. */
+export function prepareSessionRemoval(
+  store: StoreApi<AppState>,
+  sessionId: string,
+  taskId: string,
+): () => void {
+  const owner = captureRemovalOwner(store, sessionId, taskId);
+  return () => {
+    if (!owner || stateReadScopeIdentity(store.getState()) !== owner.scopeIdentity) return;
+    if (isConfirmedSessionRemoved(store.getState().taskSessions, sessionId)) return;
+    observeRemoval(store, owner.taskId, sessionId);
+    const existing = pendingByStore.get(store);
+    if (existing?.taskId === owner.taskId && existing.previousSessionId === sessionId)
+      existing.cancel();
+    const owned = ownsSelection(store, owner);
+    if (owned) {
+      owner.selectedSessionId = null;
+      owner.pinnedSessionId =
+        store.getState().tasks.pinnedSessionId === sessionId
+          ? null
+          : store.getState().tasks.pinnedSessionId;
+      owner.projectedPrimaryId = findTaskInState(store.getState(), owner.taskId)?.primarySessionId;
+    }
+    retainEmptySelection(store, owner);
+    retireRemovalMembership(store, owner);
+    if (owned && ownsSelection(store, owner)) verifyPreviousSession(store, owner);
+  };
+}
+
+/** Committed removal uses known membership or matching active identity for task scope. */
+export function followRemovedSession(
+  store: StoreApi<AppState>,
+  sessionId: string | undefined,
+  taskId?: string,
+): void {
+  if (!sessionId) return;
+  const owner = captureRemovalOwner(store, sessionId, taskId);
+  if (!owner) return;
+  const owningTask = owner.taskId;
   observeRemoval(store, owningTask, sessionId);
-  const owner = captureOwner(state, owningTask, sessionId, null, "removed");
   if (ownsSelection(store, owner)) {
     pendingByStore.get(store)?.cancel();
     verifyPreviousSession(store, owner);
