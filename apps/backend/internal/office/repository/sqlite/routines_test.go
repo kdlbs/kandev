@@ -454,3 +454,67 @@ func TestGetRoutineRunByLinkedTaskID_EmptyTaskIDGuarded(t *testing.T) {
 		t.Errorf("expected nil for empty taskID, got run %q (would have matched an arbitrary lightweight run)", got.ID)
 	}
 }
+
+func TestRoutineTriggerUpdateIfCurrent_RejectsEditThatRestoredValues(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	routine := &models.Routine{
+		WorkspaceID:       "ws-1",
+		Name:              "Trigger Update ABA",
+		TaskTemplate:      "{}",
+		Status:            "active",
+		ConcurrencyPolicy: "skip_if_active",
+		Variables:         "{}",
+	}
+	if err := repo.CreateRoutine(ctx, routine); err != nil {
+		t.Fatalf("create routine: %v", err)
+	}
+	trigger := &models.RoutineTrigger{
+		RoutineID: routine.ID,
+		Kind:      "webhook",
+		PublicID:  "wh-update-aba",
+		Enabled:   false,
+	}
+	if err := repo.CreateRoutineTrigger(ctx, trigger); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	stale, err := repo.GetRoutineTrigger(ctx, trigger.ID)
+	if err != nil {
+		t.Fatalf("get trigger: %v", err)
+	}
+
+	enabled := *stale
+	enabled.Enabled = true
+	enabled.UpdatedAt = stale.UpdatedAt.Add(time.Second)
+	if ok, err := repo.UpdateRoutineTriggerIfCurrent(ctx, stale, &enabled); err != nil || !ok {
+		t.Fatalf("competing enable: ok=%v err=%v", ok, err)
+	}
+
+	disabled := enabled
+	disabled.Enabled = false
+	disabled.UpdatedAt = stale.UpdatedAt.Add(2 * time.Second)
+	if ok, err := repo.UpdateRoutineTriggerIfCurrent(ctx, &enabled, &disabled); err != nil || !ok {
+		t.Fatalf("competing disable: ok=%v err=%v", ok, err)
+	}
+
+	wantEnabled := *stale
+	wantEnabled.Enabled = true
+	wantEnabled.UpdatedAt = stale.UpdatedAt.Add(3 * time.Second)
+	ok, err := repo.UpdateRoutineTriggerIfCurrent(ctx, stale, &wantEnabled)
+	if err != nil {
+		t.Fatalf("stale update: %v", err)
+	}
+	if ok {
+		t.Fatal("stale snapshot must not overwrite a newer edit that restored the same schedule values")
+	}
+
+	got, err := repo.GetRoutineTrigger(ctx, trigger.ID)
+	if err != nil {
+		t.Fatalf("reload trigger: %v", err)
+	}
+	if got.Enabled {
+		t.Error("trigger must remain disabled after the stale update lost")
+	}
+}
