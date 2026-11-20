@@ -1461,6 +1461,14 @@ Deleting a profile is irreversible. Kandev checks references before deletion:
 - feature-flagged Office routing-tier references are hard conflicts and cannot be forced;
 - Kandev attempts to clean every ephemeral task with a session using the profile, including matching Quick Chat and Configuration Chat. A cleanup failure is logged and does not prevent profile deletion, so audit leftover resources afterward.
 
+You can also disable a profile that live dynamic profiles or utility agents use.
+The confirmation lists both kinds of references. A dynamic profile skips a
+disabled candidate. If that profile has no other eligible candidate, routing
+stops and needs action. New utility calls stop until you re-enable the profile
+or repair the binding. Soft-deleted dynamic profiles do not block their former
+candidates. When you delete a candidate, Kandev tries to remove its routes from
+soft-deleted dynamic profiles; a cleanup failure can leave inert routes there.
+
 Only custom TUI agents can be deleted from the agent list. Built-in definitions remain registered even when their CLI is not installed.
 
 ## Troubleshooting

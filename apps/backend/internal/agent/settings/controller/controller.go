@@ -194,13 +194,12 @@ type UtilityAgentReference struct {
 	Name string `json:"name"`
 }
 
-// DynamicProfileReference identifies a dynamic profile that contains the
-// concrete profile as a candidate. The route remains stored after a forced
-// disable or delete so the router can skip it and the user can repair it.
+// DynamicProfileReference identifies a live dynamic profile that contains the
+// concrete profile as a candidate. A soft-deleted dynamic profile is never
+// reported: its routes cannot execute and must not block the candidate.
 type DynamicProfileReference struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Deleted bool   `json:"deleted"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type UtilityDependencyChecker interface {
