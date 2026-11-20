@@ -21,7 +21,8 @@ func TestClaudeMonitorTerminalDispatchPreservesNativeOutcomeDuringSuccessorHando
 	taskService := taskservice.NewService(taskservice.Repos{BackgroundWork: repo}, nil, testLogger(), taskservice.RepositoryDiscoveryConfig{})
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.backgroundWorkObserver = taskService
-	svc.messageCreator = &mockMessageCreator{}
+	messageCreator := &mockMessageCreator{}
+	svc.messageCreator = messageCreator
 	recorded := &recordingEventBus{}
 	svc.eventBus = recorded
 
@@ -46,11 +47,13 @@ func TestClaudeMonitorTerminalDispatchPreservesNativeOutcomeDuringSuccessorHando
 	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
 		TaskID: taskID, SessionID: sessionID,
 		Data: &lifecycle.AgentStreamEventData{
-			Type: agentEventToolUpdate, ToolCallID: first.SourceCallID, ToolStatus: agentEventComplete, Normalized: normalized,
+			Type: agentEventToolUpdate, ToolCallID: first.SourceCallID, ToolStatus: "cancelled", Normalized: normalized,
 		},
 	})
 
 	assertNativeMonitorDispatchState(t, ctx, repo, svc, recorded, sessionID, first, sibling, finishedAt, successorTurnID)
+	require.Equal(t, first.SourceCallID, messageCreator.lastToolUpdateID)
+	require.Equal(t, 1, messageCreator.toolUpdateWrites)
 }
 
 type nativeMonitorDispatchRepository interface {

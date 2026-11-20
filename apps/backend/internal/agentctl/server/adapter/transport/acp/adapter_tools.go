@@ -800,7 +800,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 			earlyMonitorCompletion = &completion
 		}
 	}
-	var earlyMonitorSettlement *AgentEvent
+	var earlyMonitorSettlement *claudeMonitorSettlement
 
 	// A terminal tool_call_update for an already-tracked Monitor (the agent
 	// proactively ended the watch). NormalizeToolResult would otherwise stomp
@@ -948,9 +948,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	}
 	emittedPayload := cloneSubagentPayload(payload)
 	a.mu.Unlock()
-	if earlyMonitorSettlement != nil {
-		a.sendUpdate(*earlyMonitorSettlement)
-	}
+	earlyMonitorSettlement.sendBackgroundWork(a)
 	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
 
 	// ScheduleWakeup tracking: tool_call_update is where rawInput.prompt and

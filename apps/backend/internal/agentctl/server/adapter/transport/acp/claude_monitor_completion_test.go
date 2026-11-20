@@ -136,9 +136,7 @@ func TestClaudeMonitorAttachmentAndUserCompletionDeduplicate(t *testing.T) {
 	a.registerClaudeMonitorCompletion(a.sessionID, userCompletion)
 
 	events := drainEvents(a)
-	if len(events) != 1 || events[0].Type != streams.EventTypeBackgroundWorkUpdated {
-		t.Fatalf("attachment plus user duplicate emitted events = %+v, want one background-work update", events)
-	}
+	requireClaudeMonitorSettlementEvents(t, events, "monitor-task-1", "toolu_monitor_1", streams.RunStateCompleted)
 }
 
 func TestClaudeMonitorCompletionReaderDiscardsOversizedRecordAndContinues(t *testing.T) {
@@ -338,22 +336,33 @@ func TestClaudeMonitorCompletionObservationUsesTrackedIdentity(t *testing.T) {
 	})
 
 	events := drainEvents(a)
-	if len(events) != 1 {
-		t.Fatalf("got %d completion events, want one: %+v", len(events), events)
-	}
-	event := events[0]
-	if event.Type != streams.EventTypeBackgroundWorkUpdated || event.ToolCallID != "" || event.ToolStatus != "" {
-		t.Fatalf("completion event = %+v, want dedicated background-work update", event)
-	}
-	if event.BackgroundWork == nil || event.BackgroundWork.WorkID != taskID || event.BackgroundWork.SourceCallID != toolCallID || event.BackgroundWork.State != streams.RunStateFailed {
-		t.Fatalf("background observation = %+v, want exact failed Monitor identity", event.BackgroundWork)
-	}
+	requireClaudeMonitorSettlementEvents(t, events, taskID, toolCallID, streams.RunStateFailed)
 	if payload.IsActiveMonitor() || a.isTrackedMonitor(sessionID, toolCallID) {
 		t.Fatal("completed Monitor remains active")
 	}
 	if _, ok := a.activeToolCalls[toolCallID]; ok {
 		t.Fatal("terminal Monitor payload remains in active tool calls")
 	}
+}
+
+func TestClaudeMonitorInterruptedCompletionMarksSourceCardCancelled(t *testing.T) {
+	const sessionID, taskID, toolCallID = "native-session-1", "monitor-task-interrupted", "toolu_monitor_interrupted"
+	a := newTestAdapterForAgent(claudeAgentID)
+	t.Cleanup(func() { _ = a.Close() })
+	a.sessionID = sessionID
+	a.nativeGeneration = 1
+	a.agentInfo = &AgentInfo{Name: claudeMonitorEvidenceBridgeName, Version: claudeMonitorEvidenceBridgeBuild}
+	payload := newMonitorGeneric()
+	payload.SetMonitorIdentity(taskID, false)
+	seedMonitor(t, a, sessionID, taskID, toolCallID)
+	a.activeToolCalls[toolCallID] = payload
+
+	a.registerClaudeMonitorCompletion(sessionID, claudeMonitorCompletion{
+		SessionID: sessionID, TaskID: taskID, ToolUseID: toolCallID,
+		State: streams.RunStateInterrupted, FinishedAt: time.Now().UTC(),
+	})
+
+	requireClaudeMonitorSettlementEvents(t, drainEvents(a), taskID, toolCallID, streams.RunStateInterrupted)
 }
 
 func TestClaudeMonitorCompletionBeforeRegistrationSettlesMatchingMonitor(t *testing.T) {
@@ -394,15 +403,52 @@ func TestClaudeMonitorCompletionBeforeRegistrationSettlesMatchingMonitor(t *test
 	if event == nil || event.ToolStatus != toolStatusComplete || event.BackgroundWork != nil {
 		t.Fatalf("early completion registration event = %+v", event)
 	}
+	require.True(t, event.NormalizedPayload.Monitor().Ended)
 	events := drainEvents(a)
-	if len(events) != 1 || events[0].Type != streams.EventTypeBackgroundWorkUpdated ||
-		events[0].BackgroundWork == nil || events[0].BackgroundWork.WorkID != taskID ||
-		events[0].BackgroundWork.State != streams.RunStateCompleted {
-		t.Fatalf("early completion dispatch = %+v, want dedicated terminal observation", events)
-	}
+	require.Len(t, events, 1)
+	require.Equal(t, streams.EventTypeBackgroundWorkUpdated, events[0].Type)
+	require.Equal(t, streams.RunStateCompleted, events[0].BackgroundWork.State)
 	if a.isTrackedMonitor(sessionID, toolCallID) {
 		t.Fatal("early terminal evidence left its Monitor active")
 	}
+}
+
+func requireClaudeMonitorSettlementEvents(
+	t *testing.T,
+	events []AgentEvent,
+	taskID, toolCallID string,
+	state streams.RunState,
+) {
+	t.Helper()
+	require.Len(t, events, 2, "native completion updates both the workload and its source Monitor card")
+	var workloadUpdate, cardUpdate *AgentEvent
+	for i := range events {
+		event := &events[i]
+		switch event.Type {
+		case streams.EventTypeBackgroundWorkUpdated:
+			workloadUpdate = event
+		case streams.EventTypeToolUpdate:
+			cardUpdate = event
+		}
+	}
+	require.NotNil(t, workloadUpdate)
+	require.NotNil(t, workloadUpdate.BackgroundWork)
+	require.Equal(t, taskID, workloadUpdate.BackgroundWork.WorkID)
+	require.Equal(t, toolCallID, workloadUpdate.BackgroundWork.SourceCallID)
+	require.Equal(t, state, workloadUpdate.BackgroundWork.State)
+	require.Empty(t, workloadUpdate.ToolCallID)
+	require.Empty(t, workloadUpdate.ToolStatus)
+
+	require.NotNil(t, cardUpdate)
+	require.Equal(t, toolCallID, cardUpdate.ToolCallID)
+	require.Nil(t, cardUpdate.BackgroundWork, "card presentation must not settle the workload projection")
+	wantStatus, _ := claudeMonitorToolStatus(state)
+	require.Equal(t, wantStatus, cardUpdate.ToolStatus)
+	require.NotNil(t, cardUpdate.NormalizedPayload)
+	monitor := cardUpdate.NormalizedPayload.Monitor()
+	require.NotNil(t, monitor)
+	require.Equal(t, taskID, monitor.TaskID)
+	require.True(t, monitor.Ended)
 }
 
 func TestClaudeMonitorCompletionFromPreviousSessionGenerationIsIgnored(t *testing.T) {
@@ -463,9 +509,11 @@ func TestClaudeMonitorReaderRebindsOnSameSessionResume(t *testing.T) {
 		FinishedAt: time.Now().UTC(),
 	})
 
-	if events := drainEvents(a); len(events) != 1 || payload.IsActiveMonitor() {
+	events := drainEvents(a)
+	if len(events) != 2 || payload.IsActiveMonitor() {
 		t.Fatalf("same-session resume did not retain the reader binding: events=%+v payload=%+v", events, payload)
 	}
+	requireClaudeMonitorSettlementEvents(t, events, taskID, toolCallID, streams.RunStateCompleted)
 }
 
 func TestClaudeMonitorCompletionReaderUsesAppendWindowAndStableFileIdentity(t *testing.T) {

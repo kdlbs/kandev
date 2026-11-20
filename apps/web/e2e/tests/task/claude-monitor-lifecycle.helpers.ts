@@ -59,6 +59,37 @@ async function expectMonitorState(
     .toBe(state);
 }
 
+async function expectMonitorCardStatus(
+  session: SessionPage,
+  monitorIndex: number,
+  status: "watching" | "ended",
+): Promise<void> {
+  await expect(session.activeChat().getByTestId("monitor-card").nth(monitorIndex)).toContainText(
+    status,
+  );
+}
+
+async function expandMonitorCards(session: SessionPage): Promise<void> {
+  const cards = session.activeChat().getByTestId("monitor-card");
+  if ((await cards.count()) === 2) return;
+  const groups = session.activeChat().getByRole("button", { name: /2 tool calls/ });
+  const groupCount = await groups.count();
+  for (let groupIndex = groupCount - 1; groupIndex >= 0; groupIndex--) {
+    const group = groups.nth(groupIndex);
+    await expect(group).toBeVisible({ timeout: 30_000 });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await group.click();
+      try {
+        await expect(cards).toHaveCount(2, { timeout: 1_500 });
+        return;
+      } catch {
+        // Reopen a group if it was auto-expanded while its owning turn was active.
+      }
+    }
+  }
+  await expect(cards).toHaveCount(2, { timeout: 30_000 });
+}
+
 async function expectMonitorLabels(page: Page): Promise<void> {
   const summary = page.getByTestId("background-work-summary-list");
   await expect(summary).toBeVisible();
@@ -137,12 +168,17 @@ export async function expectClaudeMonitorLifecycle(
 
   await session.sendMessageViaButton("/claude-monitor-lifecycle");
   await session.expectChatResponseVisible("Two Claude Monitors are watching.");
+  await session.waitForChatIdle({ timeout: 30_000 });
   await expect
     .poll(() => runningMonitorCount(apiClient, sessionId), {
       message: "both Monitor registrations should be projected as running",
       timeout: 30_000,
     })
     .toBe(2);
+  await expandMonitorCards(session);
+  const monitorCards = session.activeChat().getByTestId("monitor-card");
+  await expectMonitorCardStatus(session, 0, "watching");
+  await expectMonitorCardStatus(session, 1, "watching");
 
   const chip = page.getByTestId("background-work-chip");
   await expect(chip).toBeVisible();
@@ -165,6 +201,10 @@ export async function expectClaudeMonitorLifecycle(
       timeout: 30_000,
     })
     .toBe(2);
+  await expandMonitorCards(session);
+  await expect(monitorCards).toHaveCount(2, { timeout: 30_000 });
+  await expectMonitorCardStatus(session, 0, "watching");
+  await expectMonitorCardStatus(session, 1, "watching");
   await expect(chip).toBeVisible();
   await expect(chip).toContainText("2 Background Jobs");
   if ((page.viewportSize()?.width ?? 0) < 768) {
@@ -177,6 +217,7 @@ export async function expectClaudeMonitorLifecycle(
 
   await session.sendMessageViaButton("Continue while the Monitors watch.");
   await session.expectChatResponseVisible("I've completed the analysis of your request");
+  await session.waitForChatIdle({ timeout: 30_000 });
   await expect
     .poll(() => runningMonitorCount(apiClient, sessionId), {
       message: "the successor prompt should leave both Monitors live",
@@ -193,10 +234,27 @@ export async function expectClaudeMonitorLifecycle(
       timeout: 30_000,
     })
     .toBe(1);
+  await expectMonitorCardStatus(session, 0, "ended");
+  await expectMonitorCardStatus(session, 1, "watching");
   await expect(chip).toBeVisible();
   await expect(chip).toContainText("1 Background Job");
   await expect(chip).not.toContainText("2 Background Jobs");
 
+  await expect(editor).toHaveText(DRAFT);
+  await page.reload();
+  await session.waitForLoad();
+  await expectMonitorState(apiClient, sessionId, MONITOR_IDS[0], "completed");
+  await expect
+    .poll(() => runningMonitorCount(apiClient, sessionId), {
+      message: "the sibling Monitor should stay live after reload",
+      timeout: 30_000,
+    })
+    .toBe(1);
+  await expandMonitorCards(session);
+  await expect(monitorCards).toHaveCount(2, { timeout: 30_000 });
+  await expectMonitorCardStatus(session, 0, "ended");
+  await expectMonitorCardStatus(session, 1, "watching");
+  await expect(page.getByTestId("background-work-chip")).toContainText("1 Background Job");
   fs.appendFileSync(signalFile, "complete-second\n");
   await expectMonitorState(apiClient, sessionId, MONITOR_IDS[1], "completed");
   await expect
@@ -206,7 +264,8 @@ export async function expectClaudeMonitorLifecycle(
     })
     .toBe(0);
   await expect(chip).toHaveCount(0);
-  await expect(editor).toHaveText(DRAFT);
+  await expectMonitorCardStatus(session, 0, "ended");
+  await expectMonitorCardStatus(session, 1, "ended");
 
   await openHistory(page, sessionId);
   for (const workId of MONITOR_IDS) {

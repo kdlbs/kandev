@@ -87,11 +87,8 @@ func TestClaudeMonitorReaderRecoversFromFIFOReplacementWithoutNewPrompt(t *testi
 
 	var settled []AgentEvent
 	require.Eventually(t, func() bool {
-		settled = drainEvents(a)
-		return len(settled) > 0
+		settled = append(settled, drainEvents(a)...)
+		return len(settled) == 2
 	}, time.Second, 10*time.Millisecond, "the retained reader should retry without another prompt")
-	require.Len(t, settled, 1)
-	require.Equal(t, streams.EventTypeBackgroundWorkUpdated, settled[0].Type)
-	require.Equal(t, taskID, settled[0].BackgroundWork.WorkID)
-	require.Equal(t, streams.RunStateCompleted, settled[0].BackgroundWork.State)
+	requireClaudeMonitorSettlementEvents(t, settled, taskID, toolCallID, streams.RunStateCompleted)
 }

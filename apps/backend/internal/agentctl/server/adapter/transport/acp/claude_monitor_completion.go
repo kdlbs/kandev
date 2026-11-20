@@ -19,6 +19,26 @@ type claudeMonitorReaderState struct {
 	started       bool
 }
 
+type claudeMonitorSettlement struct {
+	backgroundWork AgentEvent
+	toolUpdate     AgentEvent
+}
+
+func (s *claudeMonitorSettlement) send(a *Adapter) {
+	if s == nil {
+		return
+	}
+	s.sendBackgroundWork(a)
+	a.sendUpdate(s.toolUpdate)
+}
+
+func (s *claudeMonitorSettlement) sendBackgroundWork(a *Adapter) {
+	if s == nil {
+		return
+	}
+	a.sendUpdate(s.backgroundWork)
+}
+
 func (a *Adapter) beginClaudeMonitorPrompt(sessionID string) *claudeMonitorReaderState {
 	generation, existing, eligible := a.claudeMonitorReaderAdmission(sessionID)
 	if !eligible {
@@ -286,11 +306,9 @@ func (a *Adapter) registerClaudeMonitorCompletionForGeneration(
 		a.mu.Unlock()
 		return
 	}
-	event := a.applyClaudeMonitorCompletionLocked(sessionID, completion)
+	settlement := a.applyClaudeMonitorCompletionLocked(sessionID, completion)
 	a.mu.Unlock()
-	if event != nil {
-		a.sendUpdate(*event)
-	}
+	settlement.send(a)
 }
 
 func (a *Adapter) registerClaudeMonitorCompletionFromReader(
@@ -307,11 +325,9 @@ func (a *Adapter) registerClaudeMonitorCompletionFromReader(
 		a.mu.Unlock()
 		return
 	}
-	event := a.applyClaudeMonitorCompletionLocked(sessionID, completion)
+	settlement := a.applyClaudeMonitorCompletionLocked(sessionID, completion)
 	a.mu.Unlock()
-	if event != nil {
-		a.sendUpdate(*event)
-	}
+	settlement.send(a)
 }
 
 func (a *Adapter) validClaudeMonitorCompletion(sessionID string, completion claudeMonitorCompletion) bool {
@@ -324,7 +340,7 @@ func (a *Adapter) validClaudeMonitorCompletion(sessionID string, completion clau
 func (a *Adapter) applyClaudeMonitorCompletionLocked(
 	sessionID string,
 	completion claudeMonitorCompletion,
-) *AgentEvent {
+) *claudeMonitorSettlement {
 	key := claudeMonitorCompletionKey{taskID: completion.TaskID, toolUseID: completion.ToolUseID}
 	if _, done := a.completedClaudeMonitorCompletions[sessionID][key]; done {
 		return nil
@@ -377,7 +393,7 @@ func (a *Adapter) settleClaudeMonitorLocked(
 	sessionID string,
 	completion claudeMonitorCompletion,
 	payload *streams.NormalizedPayload,
-) *AgentEvent {
+) *claudeMonitorSettlement {
 	key := claudeMonitorCompletionKey{taskID: completion.TaskID, toolUseID: completion.ToolUseID}
 	completed := a.completedClaudeMonitorCompletions[sessionID]
 	if completed == nil {
@@ -392,10 +408,21 @@ func (a *Adapter) settleClaudeMonitorLocked(
 	a.dropMonitorByToolCallIDLocked(sessionID, completion.ToolUseID)
 	a.forgetPromptHandoffToolLocked(completion.ToolUseID)
 	observation := claudeMonitorRunObservation(sessionID, completion, payload)
-	return &AgentEvent{
-		Type:           streams.EventTypeBackgroundWorkUpdated,
-		SessionID:      sessionID,
-		BackgroundWork: observation,
+	toolStatus, _ := claudeMonitorToolStatus(completion.State)
+	return &claudeMonitorSettlement{
+		backgroundWork: AgentEvent{
+			Type:           streams.EventTypeBackgroundWorkUpdated,
+			SessionID:      sessionID,
+			BackgroundWork: observation,
+		},
+		toolUpdate: AgentEvent{
+			Type:              streams.EventTypeToolUpdate,
+			SessionID:         sessionID,
+			ToolCallID:        completion.ToolUseID,
+			ToolName:          monitorToolName,
+			ToolStatus:        toolStatus,
+			NormalizedPayload: payload,
+		},
 	}
 }
 
