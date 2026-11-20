@@ -64,3 +64,10 @@ i18n:check` and `pnpm run i18n:ratchet` clean; `python3
 scripts/lint-spec-files.py --all` passes.
 
 PR: https://github.com/kdlbs/kandev/pull/3679
+
+## Related delivery
+
+The [clarification Markdown package](../clarification-markdown/plan.md) adds
+formatted question summaries and details, including reference links. Its work
+order owns the new scope and verification. This package's results remain the
+record of the original History delivery.

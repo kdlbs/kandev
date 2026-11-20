@@ -1,7 +1,16 @@
 "use client";
 
-import { createContext, isValidElement, useContext, type MouseEvent, type ReactNode } from "react";
-import type { Options as MarkdownOptions } from "react-markdown";
+import {
+  createContext,
+  isValidElement,
+  useContext,
+  useMemo,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
+import { useShallow } from "zustand/react/shallow";
+import ReactMarkdown, { type Options as MarkdownOptions } from "react-markdown";
+import { MarkdownImage } from "./markdown-image";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkGemoji from "remark-gemoji";
@@ -17,6 +26,7 @@ import { useAppStore } from "@/components/state-provider";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { remarkMathCompat } from "@/lib/markdown/remark-math-compat";
 import {
+  buildMarkdownWorkspaceSourcePrefixes,
   resolveMarkdownFileTarget,
   type MarkdownFileRootAlias,
 } from "@/lib/markdown/file-link-target";
@@ -24,12 +34,55 @@ import {
 /** Shared remark plugins used by all markdown renderers */
 type MarkdownPluginList = NonNullable<MarkdownOptions["remarkPlugins"]>;
 
+type MarkdownReferenceNode = {
+  type: string;
+  lang?: string | null;
+  position?: { start?: { offset?: number }; end?: { offset?: number } };
+  data?: Record<string, unknown>;
+  children?: MarkdownReferenceNode[];
+};
+
+type MarkdownReferenceRoot = MarkdownReferenceNode & {
+  type: "root";
+  children: MarkdownReferenceNode[];
+};
+
+const preserveReferenceDefinitions: MarkdownPluginList[number] =
+  () => (tree: MarkdownReferenceRoot, file: { value: string | Uint8Array }) => {
+    if (typeof file.value !== "string") return;
+
+    const definitions = tree.children.flatMap((node) => {
+      if (node.type !== "definition") return [];
+      const { start, end } = node.position ?? {};
+      if (start?.offset === undefined || end?.offset === undefined) return [];
+      return [file.value.slice(start.offset, end.offset)];
+    });
+    if (definitions.length === 0) return;
+
+    const serializedDefinitions = definitions.join("\n");
+    const visit = (nodes: MarkdownReferenceNode[]): void => {
+      for (const node of nodes) {
+        if (node.type === "code" && node.lang === "mermaid") {
+          const data = (node.data ??= {});
+          const properties = (data.hProperties as Record<string, string> | undefined) ?? {};
+          data.hProperties = {
+            ...properties,
+            "data-markdown-reference-definitions": serializedDefinitions,
+          };
+        }
+        if (node.children) visit(node.children);
+      }
+    };
+    visit(tree.children);
+  };
+
 export const remarkPlugins: MarkdownPluginList = [
   remarkGfm,
   remarkBreaks,
   remarkGemoji,
   remarkMath,
   remarkMathCompat,
+  preserveReferenceDefinitions,
 ];
 
 /** Shared rehype plugins used by non-raw Markdown renderers. */
@@ -69,10 +122,16 @@ export function getTextContent(children: ReactNode): string {
 type MarkdownCodeProps = {
   className?: string;
   children?: ReactNode;
+  "data-markdown-reference-definitions"?: string;
 };
 
 export type MarkdownFileLinkContextValue = {
+  sessionId?: string | null;
   worktreePath?: string | null;
+  /** Confirmed native workspace used as the base for relative links. */
+  relativeBasePath?: string | null;
+  /** Files-root-relative checkout directories that preserve explicit prefixes. */
+  sourcePrefixes?: readonly string[];
   onOpenFile?: (path: string) => void;
   fileRootAliases?: readonly MarkdownFileRootAlias[];
 };
@@ -93,15 +152,21 @@ function MarkdownFileAnchor({
   href,
   children,
   worktreePath,
+  relativeBasePath,
+  sourcePrefixes,
   openFile,
   fileRootAliases,
 }: MarkdownLinkProps & {
   worktreePath: string | null | undefined;
+  relativeBasePath?: string | null;
+  sourcePrefixes?: readonly string[];
   openFile: (path: string) => void;
   fileRootAliases?: readonly MarkdownFileRootAlias[];
 }) {
   const target = resolveMarkdownFileTarget(href, {
     workspaceRoot: worktreePath,
+    relativeBasePath,
+    sourcePrefixes,
     fileRootAliases,
   });
   const filePath = target?.kind === "file" ? target.path : null;
@@ -132,20 +197,65 @@ function MarkdownFileAnchor({
 function MarkdownFallbackLink(
   props: MarkdownLinkProps & {
     worktreePath?: string | null;
+    relativeBasePath?: string | null;
+    sourcePrefixes?: readonly string[];
     fileRootAliases?: readonly MarkdownFileRootAlias[];
   },
 ) {
   const { openFile } = usePanelActions();
-  const activeWorktreePath = useAppStore((state) => {
-    const sessionId = state.tasks.activeSessionId;
-    if (!sessionId) return null;
-    return getSessionWorkspacePath(state.taskSessions.items[sessionId]);
-  });
+  // Choose primitives into one shallow-compared snapshot. Returning a fresh
+  // object from a bare Zustand selector makes React's external-store check see
+  // a new snapshot on every read and re-render without end.
+  const activeWorkspace = useAppStore(
+    useShallow((state) => {
+      const activeSession = state.tasks.activeSessionId
+        ? state.taskSessions.items[state.tasks.activeSessionId]
+        : undefined;
+      // A surface that supplies its own worktree (for example a run
+      // transcript) must use that session's native base, not another
+      // globally active session's checkout.
+      const renderingSession = props.worktreePath
+        ? Object.values(state.taskSessions.items).find(
+            (session) =>
+              session.worktree_path === props.worktreePath ||
+              getSessionWorkspacePath(session) === props.worktreePath,
+          )
+        : undefined;
+      const session = renderingSession ?? activeSession;
+      const sessionId = session?.id ?? state.tasks.activeSessionId;
+      if (!session || !sessionId) return null;
+      const liveWorktreeIds =
+        state.sessionWorktreesBySessionId?.itemsBySessionId?.[sessionId] ?? [];
+      const worktreePaths = [
+        ...(session.worktrees ?? []).map((worktree) => worktree.worktree_path),
+        ...liveWorktreeIds.map((id) => state.worktrees?.items?.[id]?.path),
+      ].filter((path): path is string => Boolean(path));
+      return {
+        workspacePath: props.worktreePath ?? getSessionWorkspacePath(session) ?? null,
+        agentWorkspacePath: session.agent_workspace_path ?? null,
+        // Primitive key keeps the shallow snapshot stable; the prefix list is
+        // derived outside the selector.
+        worktreePaths: [...new Set(worktreePaths)].sort().join("\u0000"),
+      };
+    }),
+  );
+  const fallbackSourcePrefixes = useMemo(
+    () =>
+      buildMarkdownWorkspaceSourcePrefixes({
+        workspaceRoot: activeWorkspace?.workspacePath,
+        sessionWorktrees: activeWorkspace?.worktreePaths
+          ? activeWorkspace.worktreePaths.split("\u0000").map((path) => ({ path }))
+          : [],
+      }),
+    [activeWorkspace?.workspacePath, activeWorkspace?.worktreePaths],
+  );
 
   return (
     <MarkdownFileAnchor
       {...props}
-      worktreePath={props.worktreePath ?? activeWorktreePath}
+      worktreePath={props.worktreePath ?? activeWorkspace?.workspacePath}
+      relativeBasePath={props.relativeBasePath ?? activeWorkspace?.agentWorkspacePath}
+      sourcePrefixes={props.sourcePrefixes ?? fallbackSourcePrefixes}
       fileRootAliases={props.fileRootAliases}
       openFile={openFile}
     />
@@ -159,6 +269,8 @@ function MarkdownLink(props: MarkdownLinkProps) {
       <MarkdownFileAnchor
         {...props}
         worktreePath={linkContext.worktreePath}
+        relativeBasePath={linkContext.relativeBasePath}
+        sourcePrefixes={linkContext.sourcePrefixes}
         fileRootAliases={linkContext.fileRootAliases}
         openFile={linkContext.onOpenFile}
       />
@@ -168,6 +280,8 @@ function MarkdownLink(props: MarkdownLinkProps) {
     <MarkdownFallbackLink
       {...props}
       worktreePath={linkContext.worktreePath}
+      relativeBasePath={linkContext.relativeBasePath}
+      sourcePrefixes={linkContext.sourcePrefixes}
       fileRootAliases={linkContext.fileRootAliases}
     />
   );
@@ -189,6 +303,41 @@ function MarkdownCode({ className, children }: MarkdownCodeProps) {
   return <InlineCode>{content}</InlineCode>;
 }
 
+function renderFollowingMarkdown(source: string, referenceDefinitions?: string): ReactNode {
+  // i18n-exempt: internal Markdown separator, not UI copy.
+  const recoveredSource = referenceDefinitions ? `${referenceDefinitions}\n\n${source}` : source;
+  return (
+    <ReactMarkdown
+      remarkPlugins={remarkPlugins}
+      rehypePlugins={rehypePlugins}
+      components={markdownComponents}
+    >
+      {recoveredSource}
+    </ReactMarkdown>
+  );
+}
+
+function MarkdownPre({ className, children }: { className?: string; children?: ReactNode }) {
+  const taskId = useContext(MarkdownTaskContext);
+  if (isValidElement(children)) {
+    const codeProps = children.props as MarkdownCodeProps;
+    const isExplicitMermaid = codeProps.className?.split(/\s+/).includes("language-mermaid");
+    if (isExplicitMermaid) {
+      const referenceDefinitions = codeProps["data-markdown-reference-definitions"];
+      return (
+        <MermaidBlock
+          code={getTextContent(codeProps.children).replace(/\n$/, "")}
+          taskId={taskId}
+          renderFollowingMarkdown={(source) =>
+            renderFollowingMarkdown(source, referenceDefinitions)
+          }
+        />
+      );
+    }
+  }
+  return <pre className={className}>{children}</pre>;
+}
+
 /**
  * Shared markdown component overrides for ReactMarkdown.
  * Element styles (headings, lists, inline code, etc.) are handled by
@@ -196,7 +345,9 @@ function MarkdownCode({ className, children }: MarkdownCodeProps) {
  * (code routing, link target, table overflow wrapper) remain here.
  */
 export const markdownComponents = {
+  pre: MarkdownPre,
   code: MarkdownCode,
   a: MarkdownLink,
+  img: MarkdownImage,
   table: ResizableMarkdownTable,
 };

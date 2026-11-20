@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
@@ -235,7 +237,7 @@ func TestContinuationSummary_InterruptedAttemptRecoveredAtStartup_PreservesPrior
 	if err != nil || len(runs) != 2 {
 		t.Fatalf("list second run: runs=%#v err=%v", runs, err)
 	}
-	var second *officemodels.Run
+	var second *runsmodels.Run
 	for _, r := range runs {
 		if r.ID != first.ID {
 			second = r
@@ -271,7 +273,7 @@ func TestContinuationSummary_InterruptedAttemptRecoveredAtStartup_PreservesPrior
 	if err != nil {
 		t.Fatalf("list runs after reconcile: %v", err)
 	}
-	var secondAfterReconcile *officemodels.Run
+	var secondAfterReconcile *runsmodels.Run
 	for _, r := range runsAfterReconcile {
 		if r.ID == second.ID {
 			secondAfterReconcile = r

@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
 
@@ -28,7 +29,7 @@ func ensureTaskSessionMessagesTable(t *testing.T, svc *service.Service) {
 	)`)
 }
 
-func findRunByID(t *testing.T, svc *service.Service, wsID, runID string) *models.Run {
+func findRunByID(t *testing.T, svc *service.Service, wsID, runID string) *runsmodels.Run {
 	t.Helper()
 	runs, err := svc.ListRuns(context.Background(), wsID)
 	if err != nil {
@@ -48,7 +49,7 @@ func findRunByID(t *testing.T, svc *service.Service, wsID, runID string) *models
 // timestamps in these tests are built relative to it rather than a fixed
 // past literal — the run-scoped lookup in recordRunOutputSummary would
 // otherwise exclude every fixture message seeded before "now".
-func requireClaimedAt(t *testing.T, run *models.Run) time.Time {
+func requireClaimedAt(t *testing.T, run *runsmodels.Run) time.Time {
 	t.Helper()
 	if run.ClaimedAt == nil {
 		t.Fatalf("run %q has nil ClaimedAt", run.ID)

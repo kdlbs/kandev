@@ -72,7 +72,7 @@ func TestGetTaskSessionStatus_ArchivedTaskDisablesRecovery(t *testing.T) {
 
 			manager := &archiveRestoreProbe{mockAgentManager: &mockAgentManager{repoForExecutionLookup: repo}}
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-			svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+			svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 			resp, err := svc.GetTaskSessionStatus(ctx, "task-archive", "session-archive")
 			require.NoError(t, err)
@@ -101,7 +101,7 @@ func TestRecoverSession_ArchivedTaskDoesNotClearResumeToken(t *testing.T) {
 
 	manager := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 
 	_, err := svc.RecoverSession(ctx, "task-archive", "session-archive", "fresh_start")
 	require.Error(t, err)

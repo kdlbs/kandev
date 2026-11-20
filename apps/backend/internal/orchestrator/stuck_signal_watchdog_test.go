@@ -37,6 +37,7 @@ func TestReclaimStuckSignalSessionsOnce_ReclaimsStuckRunningSession(t *testing.T
 		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
 	}
 	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+	svc.repo = watchdogNarrowOnlyRepo{Repository: repo, t: t}
 
 	// The agent called step_complete_kandev well over the watchdog's
 	// threshold ago, but the turn never reached turn-end and never failed —
@@ -47,6 +48,7 @@ func TestReclaimStuckSignalSessionsOnce_ReclaimsStuckRunningSession(t *testing.T
 		Summary:    "all done",
 		SignaledAt: time.Now().UTC().Add(-30 * time.Minute),
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -111,6 +113,7 @@ func TestReclaimStuckSignalSessionsOnce_BelowThreshold(t *testing.T) {
 		Summary:    "all done",
 		SignaledAt: time.Now().UTC().Add(-1 * time.Minute), // well under threshold
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -186,6 +189,7 @@ func TestReclaimStuckSignalSessionsOnce_UnblocksAutoStart(t *testing.T) {
 		Summary:    "all done",
 		SignaledAt: time.Now().UTC().Add(-30 * time.Minute),
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -281,6 +285,7 @@ func TestReclaimStuckSignalSessionsOnce_SkipsWhenStillActive(t *testing.T) {
 		Summary:    "all done",
 		SignaledAt: time.Now().UTC().Add(-30 * time.Minute),
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -366,6 +371,7 @@ func TestReclaimStuckSignalSessionsOnce_ExcludesPassthrough(t *testing.T) {
 		Summary:    "all done",
 		SignaledAt: time.Now().UTC().Add(-30 * time.Minute),
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -441,6 +447,7 @@ func TestReclaimStuckSignalSessionsOnce_ReclaimsOnGenuineInactivity(t *testing.T
 		Summary:    "all done",
 		SignaledAt: time.Now().UTC().Add(-30 * time.Minute),
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -534,6 +541,7 @@ func TestReclaimStuckSignalSessionsOnce_SettlesStuckExecutionBeforeReclaiming(t 
 		Summary:    "all done",
 		SignaledAt: time.Now().UTC().Add(-30 * time.Minute),
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, "s1")
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}

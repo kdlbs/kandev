@@ -57,8 +57,12 @@ function TerminalSlot({
   useEffect(() => {
     if (!isActive || !ws || ws.readyState !== WebSocket.OPEN) return;
     const sender = (data: string) => ws.send(new TextEncoder().encode(data));
-    return setActiveTerminalSender(sender, sessionId);
-  }, [isActive, terminal.id, sessionId, ws]);
+    return setActiveTerminalSender(
+      sender,
+      sessionId,
+      () => xterm?.modes.applicationCursorKeysMode ?? false,
+    );
+  }, [isActive, terminal.id, sessionId, ws, xterm]);
 
   return (
     <div

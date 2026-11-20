@@ -1,5 +1,7 @@
 "use client";
 
+import { useInlineEditFocus } from "@/hooks/use-inline-edit-focus";
+
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Input } from "@kandev/ui/input";
 import { IconMessageDots } from "@tabler/icons-react";
@@ -178,6 +180,34 @@ type FileContextMenuSurfaceProps = {
   onDelete: (event: Event) => void;
 };
 
+function useFileContextMenuFocus(
+  onStartRename: () => void,
+  setDeleteConfirmationOpen: (open: boolean) => void,
+) {
+  const renamePendingRef = useRef(false);
+  const deletePendingRef = useRef(false);
+  const touchTriggerRef = useRef<HTMLButtonElement>(null);
+  const handleStartRename = useCallback(() => {
+    renamePendingRef.current = true;
+  }, []);
+  const handleCloseAutoFocus = useCallback(
+    (event: Event) => {
+      if (deletePendingRef.current) {
+        event.preventDefault();
+        deletePendingRef.current = false;
+        setDeleteConfirmationOpen(true);
+        return;
+      }
+      if (!renamePendingRef.current) return;
+      event.preventDefault();
+      renamePendingRef.current = false;
+      onStartRename();
+    },
+    [onStartRename, setDeleteConfirmationOpen],
+  );
+  return { deletePendingRef, touchTriggerRef, handleStartRename, handleCloseAutoFocus };
+}
+
 function FileContextMenuSurface({
   children,
   node,
@@ -201,30 +231,8 @@ function FileContextMenuSurface({
   onConfirmDelete,
   onDelete,
 }: FileContextMenuSurfaceProps) {
-  const renamePendingRef = useRef(false);
-  const deletePendingRef = useRef(false);
-  const touchTriggerRef = useRef<HTMLButtonElement>(null);
-
-  const handleStartRename = useCallback(() => {
-    renamePendingRef.current = true;
-  }, []);
-
-  const handleCloseAutoFocus = useCallback(
-    (event: Event) => {
-      if (deletePendingRef.current) {
-        event.preventDefault();
-        deletePendingRef.current = false;
-        // Transfer focus to the confirmation after the context menu closes.
-        setDeleteConfirmationOpen(true);
-        return;
-      }
-      if (!renamePendingRef.current) return;
-      event.preventDefault();
-      renamePendingRef.current = false;
-      onStartRename();
-    },
-    [onStartRename, setDeleteConfirmationOpen],
-  );
+  const { deletePendingRef, touchTriggerRef, handleStartRename, handleCloseAutoFocus } =
+    useFileContextMenuFocus(onStartRename, setDeleteConfirmationOpen);
 
   return (
     <FileDeleteActionContext.Provider
@@ -371,7 +379,7 @@ export function FileContextMenu({
   // A bulk selection would make a single-node "Open in <editor>" ambiguous.
   const showOpenInEditor = !isBulk && canOpenNodeInEditor(editorActions, node);
   const hasFileActions =
-    !!onDeleteFile || !!onRenameFile || !!onDownloadFile || !!onUploadFilesHere;
+    !isBulk || !!onDeleteFile || !!onRenameFile || !!onDownloadFile || !!onUploadFilesHere;
   const showAddToChatContext = !isBulk && !!onAddToChatContext;
   const fallbackAnchorRef = useRef<HTMLElement>(null);
   const anchorRef = providedAnchorRef ?? fallbackAnchorRef;
@@ -549,9 +557,12 @@ export function TreeNodeName({
     }
   }, [rename.isRenaming]);
 
-  const handleBlur = useCallback(() => {
-    rename.handleConfirmRename();
-  }, [rename]);
+  const { onBlur, cancelPendingBlur } = useInlineEditFocus({
+    active: rename.isRenaming,
+    identity: node.path,
+    inputRef,
+    onLeave: rename.handleConfirmRename,
+  });
 
   if (rename.isRenaming) {
     return (
@@ -560,8 +571,11 @@ export function TreeNodeName({
         controlSize="none"
         value={rename.renameValue}
         onChange={(e) => rename.setRenameValue(e.target.value)}
-        onKeyDown={rename.handleRenameKeyDown}
-        onBlur={handleBlur}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === "Escape") cancelPendingBlur();
+          rename.handleRenameKeyDown(event);
+        }}
+        onBlur={onBlur}
         onClick={(e) => e.stopPropagation()}
         className="h-5 text-xs px-1 py-0 flex-1 min-w-0"
       />

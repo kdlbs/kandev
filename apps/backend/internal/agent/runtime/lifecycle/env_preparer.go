@@ -84,18 +84,19 @@ type RepoPrepareSpec struct {
 	// CopyFiles is the repository's seeding spec. Carried here only so the
 	// preparer can report a seed the agent cannot reach in a multi-repository
 	// layout; materialization itself still happens in the worktree manager.
-	CopyFiles          string
-	RepositoryPath     string
-	RepoName           string
-	BaseBranch         string
-	IntegrationRef     string
-	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch     string
-	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	QualifiedPRBase    *models.PRBase
-	RemoteContribution *models.RemoteContribution
-	CheckoutOptions    *models.RepositoryCheckoutOptions
-	WorktreeID         string
+	CopyFiles                string
+	RepositoryPath           string
+	RepoName                 string
+	BaseBranch               string
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
+	IntegrationRef           string
+	DefaultBranch            string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch           string
+	PRNumber                 int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase          *models.PRBase
+	RemoteContribution       *models.RemoteContribution
+	CheckoutOptions          *models.RepositoryCheckoutOptions
+	WorktreeID               string
 	// WorkspaceReuseRequired makes preparation attach to the exact canonical
 	// environment. It forbids worktree creation/recreation and all repository
 	// mutating setup paths.
@@ -124,35 +125,39 @@ type RepoPrepareSpec struct {
 	// persisted environment metadata. It may be non-empty even when BranchSlug
 	// is empty so primary branches can keep the flat legacy path.
 	BranchIdentitySlug string
+	// WorkspaceRelativePath is a server-owned destination relative to the task
+	// root. It is empty for the legacy repository layout.
+	WorkspaceRelativePath string
 }
 
 // EnvPrepareRequest contains the parameters for environment preparation.
 type EnvPrepareRequest struct {
-	TaskID                  string
-	WorkspaceID             string
-	SessionID               string
-	TaskEnvironmentID       string
-	TaskTitle               string
-	ExecutionID             string
-	ExecutorType            executor.Name
-	WorkspacePath           string
-	RepositoryPath          string
-	RepositoryID            string
-	TaskRepositoryID        string
-	UseWorktree             bool
-	SetupScript             string
-	RepoSetupScript         string // Repository-level setup script (e.g. "make install")
-	BaseBranch              string
-	IntegrationRef          string
-	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch          string
-	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	QualifiedPRBase         *models.PRBase
-	RemoteContribution      *models.RemoteContribution
-	CheckoutOptions         *models.RepositoryCheckoutOptions
-	ContributionDestination *models.ContributionDestination
-	WorktreeID              string
-	WorktreeBranch          string
+	TaskID                   string
+	WorkspaceID              string
+	SessionID                string
+	TaskEnvironmentID        string
+	TaskTitle                string
+	ExecutionID              string
+	ExecutorType             executor.Name
+	WorkspacePath            string
+	RepositoryPath           string
+	RepositoryID             string
+	TaskRepositoryID         string
+	UseWorktree              bool
+	SetupScript              string
+	RepoSetupScript          string // Repository-level setup script (e.g. "make install")
+	BaseBranch               string
+	BaseBranchFallbackPolicy models.BaseBranchFallbackPolicy
+	IntegrationRef           string
+	DefaultBranch            string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch           string
+	PRNumber                 int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	QualifiedPRBase          *models.PRBase
+	RemoteContribution       *models.RemoteContribution
+	CheckoutOptions          *models.RepositoryCheckoutOptions
+	ContributionDestination  *models.ContributionDestination
+	WorktreeID               string
+	WorktreeBranch           string
 	// WorkspaceReuseRequired applies attach-only semantics to every repository
 	// in this request. RepoPrepareSpec carries the same value so multi-repo
 	// callers can retain it while requests are split.
@@ -179,6 +184,13 @@ type EnvPrepareRequest struct {
 	// It may be non-empty when BranchSlug is empty to preserve a flat path.
 	// Empty leaves the synthesized spec identity empty; worktree code falls back.
 	BranchIdentitySlug string
+	// WorkspaceRelativePath is a server-owned destination relative to the task
+	// root. It is empty for the legacy repository layout.
+	WorkspaceRelativePath string
+	// WorkspaceLayout controls the effective agent root for Worktree launches.
+	// Empty preserves legacy behavior until a validated environment row supplies
+	// its classification.
+	WorkspaceLayout string
 
 	// Repositories carries one entry per repository when the request is
 	// multi-repo. When non-empty it is the source of truth; the legacy
@@ -206,6 +218,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		RepositoryPath:             r.RepositoryPath,
 		RepoName:                   r.RepoName,
 		BaseBranch:                 r.BaseBranch,
+		BaseBranchFallbackPolicy:   r.BaseBranchFallbackPolicy,
 		IntegrationRef:             r.IntegrationRef,
 		DefaultBranch:              r.DefaultBranch,
 		CheckoutBranch:             r.CheckoutBranch,
@@ -257,6 +270,7 @@ type PrepareStep struct {
 type RepoWorktreeResult struct {
 	TaskRepositoryID          string `json:"task_repository_id,omitempty"`
 	RepositoryID              string `json:"repository_id"`
+	WorkspaceRelativePath     string `json:"workspace_relative_path,omitempty"`
 	BranchSlug                string `json:"branch_slug,omitempty"`
 	WorktreeID                string `json:"worktree_id,omitempty"`
 	WorktreeBranch            string `json:"worktree_branch,omitempty"`
@@ -283,6 +297,7 @@ type EnvPrepareResult struct {
 	// Worktree fields (populated when worktree preparer runs).
 	// Legacy single-worktree fields; for multi-repo results they mirror Worktrees[0].
 	WorktreeID                string `json:"worktree_id,omitempty"`
+	WorktreePath              string `json:"worktree_path,omitempty"`
 	WorktreeBranch            string `json:"worktree_branch,omitempty"`
 	WorktreeBranchOwner       string `json:"-"`
 	WorktreeIntegrationRef    string `json:"-"`

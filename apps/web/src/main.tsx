@@ -21,9 +21,12 @@ import { installVitePreloadRecovery } from "./vite-preload-recovery";
 import { installBfcacheRestoreReload } from "./bfcache-restore-reload";
 import { markRenderingEngine } from "@/lib/browser/rendering-engine";
 import { applyTitlePrefix } from "@/lib/browser/document-title";
+import { registerServiceWorker } from "@/lib/pwa/register-sw";
+import { useServiceWorkerNavigation } from "@/lib/pwa/sw-messages";
 
 installVitePreloadRecovery();
 installBfcacheRestoreReload();
+registerServiceWorker();
 markRenderingEngine(document.documentElement);
 setBackendReloadDiagnosticReporter((source) => {
   scheduleFrontendErrorReport({ source: "backend-reload", title: source });
@@ -48,6 +51,7 @@ function useUnauthorizedRedirect() {
 
 function AppBody({ payload }: { payload: BootPayload }) {
   useUnauthorizedRedirect();
+  useServiceWorkerNavigation();
   const decision = useAuthGateDecision();
   if (decision !== "app") {
     return <AuthGatedScreen decision={decision} />;

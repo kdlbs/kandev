@@ -9,15 +9,25 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
 )
 
-func TestDeliveryPreflightRetainedStartupEventBeforeNativeInitialization(t *testing.T) {
+type bootstrapPreflightFixture struct {
+	repo       *tasksqlite.Repository
+	descriptor *agentctl.DeliveryStatus
+	client     *agentctl.Client
+	sm         *StreamManager
+	execution  *AgentExecution
+}
+
+func newBootstrapPreflightFixture(t *testing.T) *bootstrapPreflightFixture {
+	t.Helper()
 	ctx := context.Background()
 	repo, _ := runOwnerTestRepository(t)
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task", Title: "Managed startup"}))
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session", TaskID: "task", QueueIncarnationID: "incarnation"}))
-	descriptor := agentctl.DeliveryStatus{
+	descriptor := &agentctl.DeliveryStatus{
 		StorageCapability: journal.StorageCapability{Version: journal.CurrentVersion, Durable: true},
 		SessionID:         "session", IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "incarnation:g1",
 		Stream: &journal.Stream{SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "incarnation:g1", HighWater: 1, FirstRetained: 1},
@@ -30,33 +40,65 @@ func TestDeliveryPreflightRetainedStartupEventBeforeNativeInitialization(t *test
 	t.Cleanup(sm.Wait)
 	execution := &AgentExecution{SessionID: "session", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1, DeliveryStreamID: "incarnation:g1"}
 	execution.deliveryBootstrap.Store(true)
-	after, err := sm.initialDeliveryReplayCursor(ctx, execution, repo, client, execution.DeliveryStreamID)
+	return &bootstrapPreflightFixture{repo: repo, descriptor: descriptor, client: client, sm: sm, execution: execution}
+}
+
+func (f *bootstrapPreflightFixture) preflight() (uint64, error) {
+	return f.sm.initialDeliveryReplayCursor(context.Background(), f.execution, f.repo, f.client, f.execution.DeliveryStreamID)
+}
+
+func (f *bootstrapPreflightFixture) requireNoCursor(t *testing.T, msg string) {
+	t.Helper()
+	_, err := f.repo.GetAgentDeliveryCursor(context.Background(), f.execution.DeliveryStreamID)
+	require.Error(t, err, msg)
+}
+
+func TestDeliveryPreflightRetainedStartupEventBeforeNativeInitialization(t *testing.T) {
+	f := newBootstrapPreflightFixture(t)
+	after, err := f.preflight()
 	require.NoError(t, err, "a retained pre-initialize child exit must not prevent ACP initialization and its managed-runtime retry")
 	require.Zero(t, after, "replay the real startup event; do not fabricate a receipt")
-	_, err = repo.GetAgentDeliveryCursor(ctx, execution.DeliveryStreamID)
-	require.Error(t, err, "preflight must leave the absent SQL receipt absent")
+	f.requireNoCursor(t, "preflight must leave the absent SQL receipt absent")
 
-	execution.ACPSessionID = "existing-native"
-	_, err = sm.initialDeliveryReplayCursor(ctx, execution, repo, client, execution.DeliveryStreamID)
-	require.Error(t, err, "a restored native conversation is not a fresh bootstrap")
-	execution.ACPSessionID = ""
-	execution.isResumedSession = true
-	_, err = sm.initialDeliveryReplayCursor(ctx, execution, repo, client, execution.DeliveryStreamID)
-	require.Error(t, err, "replacement recovery is not a fresh bootstrap")
-	execution.isResumedSession = false
-	descriptor.SubmissionCount = 1
-	_, err = sm.initialDeliveryReplayCursor(ctx, execution, repo, client, execution.DeliveryStreamID)
-	require.Error(t, err, "retained prompt work must be reconciled")
-	descriptor.SubmissionCount = 0
-	descriptor.Stream.Acknowledged = 1
-	descriptor.Stream.FirstRetained = 2
-	_, err = sm.initialDeliveryReplayCursor(ctx, execution, repo, client, execution.DeliveryStreamID)
-	require.ErrorIs(t, err, ErrAgentDeliveryHistoryGap, "fresh bootstrap cannot bypass pruned history")
-	descriptor.Stream.Acknowledged = 0
-	descriptor.Stream.FirstRetained = 1
-	require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
-		SessionID: "session", IncarnationID: "incarnation", Generation: 1, NativeSessionID: "committed-native", CreationReason: "native_started",
-	}))
-	_, err = sm.initialDeliveryReplayCursor(ctx, execution, repo, client, execution.DeliveryStreamID)
-	require.Error(t, err, "an existing SQL native generation cannot bypass a missing checkpoint")
+	f.execution.isResumedSession = true
+	after, err = f.preflight()
+	require.NoError(t, err, "a relaunch after a first launch that never committed a native conversation is a generation-one bootstrap")
+	require.Zero(t, after, "replay the retained startup events from the beginning")
+	f.requireNoCursor(t, "relaunch preflight must leave the absent SQL receipt absent")
+}
+
+func TestDeliveryPreflightRelaunchKeepsDurableRefusals(t *testing.T) {
+	for _, resumed := range []bool{false, true} {
+		f := newBootstrapPreflightFixture(t)
+		f.execution.isResumedSession = resumed
+
+		f.execution.ACPSessionID = "existing-native"
+		_, err := f.preflight()
+		require.Error(t, err, "a restored native conversation is not a fresh bootstrap (resumed=%v)", resumed)
+		f.execution.ACPSessionID = ""
+
+		f.execution.RequiredNativeConversationID = "required-native"
+		_, err = f.preflight()
+		require.Error(t, err, "a pinned native conversation is not a fresh bootstrap (resumed=%v)", resumed)
+		f.execution.RequiredNativeConversationID = ""
+
+		f.descriptor.SubmissionCount = 1
+		_, err = f.preflight()
+		require.Error(t, err, "retained prompt work must be reconciled (resumed=%v)", resumed)
+		f.descriptor.SubmissionCount = 0
+
+		f.descriptor.Stream.Acknowledged = 1
+		f.descriptor.Stream.FirstRetained = 2
+		_, err = f.preflight()
+		require.ErrorIs(t, err, ErrAgentDeliveryHistoryGap, "fresh bootstrap cannot bypass pruned history (resumed=%v)", resumed)
+		f.descriptor.Stream.Acknowledged = 0
+		f.descriptor.Stream.FirstRetained = 1
+
+		require.NoError(t, f.repo.CreateHarnessSessionGeneration(context.Background(), &models.HarnessSessionGeneration{
+			SessionID: "session", IncarnationID: "incarnation", Generation: 1, NativeSessionID: "committed-native", CreationReason: "native_started",
+		}))
+		_, err = f.preflight()
+		require.Error(t, err, "an existing SQL native generation cannot bypass a missing checkpoint (resumed=%v)", resumed)
+		f.requireNoCursor(t, "refused preflight must not create a SQL receipt")
+	}
 }

@@ -1,0 +1,26 @@
+PR #3680 browser QA, 2026-10-09
+Tested head: cd502a858b41f32d6ad51c0e50db832717b4cb7b
+
+desktop:
+  ✓  1 [chromium] › e2e/tests/task/add-workspace-sources.spec.ts:104:7 › Attach local workspace sources › adds a local repository and folder successively, scopes Changes to Git, and persists (23.1s)
+  ✓  2 [chromium] › e2e/tests/task/add-workspace-sources.spec.ts:345:7 › Attach local workspace sources › explains the disabled action while an active turn is running (11.8s)
+  2 passed (39.8s)
+
+mobile:
+  ✓  1 [mobile-chrome] › e2e/tests/task/mobile-add-workspace-sources.spec.ts:29:5 › mobile Files drawer attaches sources with fixed controls and persisted workspace (19.2s)
+  ✓  2 [mobile-chrome] › e2e/tests/task/mobile-create-task-repository-selection.spec.ts:11:7 › Create task workspace repository picker on mobile › opens parent workspace help and persists the selected layout (7.8s)
+  2 passed (31.3s)
+
+creation:
+  ✓  1 [chromium] › e2e/tests/task/create-task.spec.ts:412:7 › Task creation › creates a single-repository task in the optional parent workspace layout (4.2s)
+  1 passed (8.8s)
+
+remote:
+  ✓  1 [containers] › e2e/tests/docker/add-workspace-sources.spec.ts:47:7 › Docker executor — attach workspace sources › materializes an HTTP repository, rejects folders, and reconstructs the sibling (35.6s)
+  ✓  2 [containers] › e2e/tests/docker/add-workspace-sources.spec.ts:193:7 › Docker executor — attach workspace sources › rolls back a partially materialized remote batch (17.6s)
+  ✓  3 [containers] › e2e/tests/ssh/add-workspace-sources.spec.ts:34:7 › SSH executor — attach workspace sources › materializes a cloneable repository across repeated backend reconnects without leaking credentials (22.9s)
+  3 passed (1.6m)
+
+unit:
+ Test Files  2 passed (2)
+      Tests  23 passed (23)

@@ -1,6 +1,8 @@
 # Choosing a Kandev Image
 
-Kandev publishes two container image flavors to GitHub Container Registry. Both are functionally identical kandev - same backend, same web UI, same persistence model. They differ only in what *else* is preinstalled in the image.
+Kandev publishes two container image flavors to GitHub Container Registry. Both contain the same backend and web UI and use the same data layout. They differ in preinstalled tools and startup permissions.
+
+These images run the Kandev server. Their tools are available to local/worktree agents inside that server container. Task Docker executors use separate agent containers with their own images. See [Docker agent environments](public/docker.md#using-docker-for-agent-environments) for executor configuration and the limitations of a containerized server.
 
 | Tag                                     | Size (compressed) | Contents                                                                 | Pick when…                                                                                                       |
 |-----------------------------------------|-------------------|--------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
@@ -39,7 +41,7 @@ We **decline** additions that fail any of these. The escape hatch is always *der
 
 ## Switching between flavors
 
-There is no migration. Both images mount `/data` the same way and use the same database schema. To switch a running deployment:
+At the same release version, both flavors use the same database schema and `/data` layout. Before switching to universal, ensure the mounted data is writable by `kandev` (UID 1000). Universal does not repair volume ownership at startup. See [image runtime behavior](public/docker.md#image-runtime-behavior) for ownership requirements. For a version upgrade, also follow the [upgrade procedure](public/docker.md#upgrade-and-remove).
 
 **Docker:**
 ```bash
@@ -59,7 +61,11 @@ All your data (database, worktrees, npm globals, agent auth state) carries over 
 
 Universal is opinionated. If you need something it doesn't include - a JDK, a private apt repository, a specific Node version, your company's CA cert - **derive your own image** from whichever base fits.
 
-The pattern: a tiny Dockerfile that does `FROM ghcr.io/kdlbs/kandev:X.Y.Z` (or `…:X.Y.Z-universal`), drops back to root, installs what you need, drops back to `kandev`. Build it, push it to a registry you control, point your deployment at it.
+Start from a pinned published image and use `USER root` to install tools. For a vanilla derivative, leave the final configured user as root. The inherited entrypoint repairs `/data` ownership, then uses `gosu` to run Kandev as UID 1000.
+
+The universal recipes retain `USER kandev`. Before running them, provision `/data` and its required paths with ownership that lets `kandev` write to them. This also applies to any vanilla derivative that ends with `USER kandev`. Do not assume the primary group has GID 1000. See [image runtime behavior and persistence](public/docker.md#image-runtime-behavior) for the authoritative ownership guidance.
+
+Save each recipe as a Dockerfile in its own build directory. Build it there, push it to your registry, and configure your deployment to use it.
 
 ### Recipe: add a JDK on top of universal
 
@@ -70,6 +76,7 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
         openjdk-21-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
+# Requires writable /data ownership before startup, as described above.
 USER kandev
 ```
 
@@ -91,7 +98,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         make \
         rsync \
     && rm -rf /var/lib/apt/lists/*
-USER kandev
 ```
 
 ### Recipe: bake a corporate CA cert
@@ -102,6 +108,7 @@ FROM ghcr.io/kdlbs/kandev:0.45.0-universal
 USER root
 COPY corporate-ca.crt /usr/local/share/ca-certificates/
 RUN update-ca-certificates
+# Requires writable /data ownership before startup, as described above.
 USER kandev
 ```
 
@@ -118,7 +125,6 @@ USER root
 # PATH after /data/.npm-global/bin, so a user-installed runtime version
 # would still win if anyone adds one later.
 RUN npm install -g --prefix /usr/local @anthropic-ai/claude-code@1.2.3
-USER kandev
 ```
 
 Note: kandev users will see the agent as already installed on the agents page. Baking it in means the version is tied to your image rather than to user choice - if a user runtime-installs a different version, that one wins (because the runtime path `/data/.npm-global/bin` precedes `/usr/local/bin` on `$PATH`).
@@ -132,15 +138,14 @@ Two reasonable paths:
 
 ## A note on building locally
 
-The repository also contains the source Dockerfiles (`Dockerfile` and `Dockerfile.universal`). You can build either locally:
+The root `Dockerfile` packages prebuilt release artifacts. A plain `docker build .` from the checkout cannot build it. Follow the [release build context instructions](public/docker.md#published-images) for the required full bundle and entrypoint.
+
+`Dockerfile.universal` can build from a published base image without preparing that release context. From the repository root, replace `X.Y.Z` with a real release:
 
 ```bash
-# Vanilla
-docker build -t kandev:dev .
-
-# Universal (depends on a vanilla base - build vanilla first if you want a
-# fully-from-source universal, or let BASE_IMAGE default to the published one)
-docker build -f Dockerfile.universal --build-arg BASE_IMAGE=kandev:dev -t kandev:dev-universal .
+docker build -f Dockerfile.universal \
+  --build-arg BASE_IMAGE=ghcr.io/kdlbs/kandev:X.Y.Z \
+  -t kandev:dev-universal .
 ```
 
-In CI we always build vanilla first and pass its tag as `BASE_IMAGE` to the universal build, so a single release run produces a matched `vX.Y.Z` + `vX.Y.Z-universal` pair.
+To extend a locally packaged base, substitute its tag for `BASE_IMAGE`. The resulting universal image has the same volume-ownership prerequisites as the published universal flavor.

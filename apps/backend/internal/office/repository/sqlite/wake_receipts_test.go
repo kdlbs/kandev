@@ -44,6 +44,54 @@ func seedWakeCandidate(t *testing.T, repo *sqlite.Repository, ctx context.Contex
 	return childID + ":COMPLETED"
 }
 
+func TestRecordWorkflowChildrenCompletedWakeSuppressesReconcileForEvaluatedWave(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+	parentID := "parent-state-path"
+	waveSetKey := seedWakeCandidate(t, repo, ctx, "ws-1", parentID)
+	_, waveGeneration, err := repo.GetChildSetKeyAndGeneration(ctx, parentID)
+	if err != nil {
+		t.Fatalf("get initial wave generation: %v", err)
+	}
+
+	// A non-wave child can change independently. The state path receipt must
+	// validate the evaluated wave, then record the broader snapshot that the
+	// reconciler uses for candidate detection.
+	insertTask(t, repo, ctx, parentID+"-ephemeral", "ws-1", "Ephemeral", "", "")
+	if _, err := repo.ExecRaw(ctx,
+		"UPDATE tasks SET parent_id = ?, state = 'COMPLETED', is_ephemeral = 1, updated_at = datetime('now', '+5 seconds') WHERE id = ?",
+		parentID, parentID+"-ephemeral"); err != nil {
+		t.Fatalf("add non-wave child: %v", err)
+	}
+
+	if err := repo.RecordWorkflowChildrenCompletedWake(
+		ctx, parentID, waveSetKey, waveGeneration, "on_children_completed:state-path",
+	); err != nil {
+		t.Fatalf("record state-path wake: %v", err)
+	}
+
+	rows, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("list stuck parents after state-path receipt: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("state-path receipt left a duplicate reconciler candidate: %#v", rows)
+	}
+
+	receipt, err := repo.GetWakeReceipt(ctx, parentID)
+	if err != nil {
+		t.Fatalf("read state-path receipt: %v", err)
+	}
+	childSetKey, childGeneration, err := repo.GetChildSetKeyAndGeneration(ctx, parentID)
+	if err != nil {
+		t.Fatalf("get broad child snapshot: %v", err)
+	}
+	if receipt == nil || receipt.ChildSetKey != childSetKey || receipt.ChildGeneration != childGeneration {
+		t.Fatalf("state-path receipt = %+v, want current reconciler snapshot %q at %q",
+			receipt, childSetKey, childGeneration)
+	}
+}
+
 // seedWakeAgentProfile inserts (or, for a second call against the same
 // agentID, replaces) an agent_profiles row with the given status, using
 // the same columns TestListStuckParents_ExcludesUnresolvedOrPausedAssignee
@@ -623,8 +671,8 @@ func TestListStuckParents_ReadmitsAfterChildReopenedAndRecompleted(t *testing.T)
 	seedWakeAgentProfile(t, repo, ctx, parentID+"-agent", "idle")
 	seedRunner(t, repo, ctx, parentID)
 
-	if err := repo.UpdateTaskState(ctx, childID, "COMPLETED"); err != nil {
-		t.Fatalf("complete child: %v", err)
+	if _, err := repo.ExecRaw(ctx, `UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, "COMPLETED", childID); err != nil {
+		t.Fatalf("complete child fixture: %v", err)
 	}
 
 	preDelivery, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
@@ -668,15 +716,14 @@ func TestListStuckParents_ReadmitsAfterChildReopenedAndRecompleted(t *testing.T)
 		t.Fatalf("after delivery: candidates = %#v, want none (receipt already covers this child set)", afterDelivery)
 	}
 
-	// The child is reopened and re-completed through the same production
-	// writer used above, immediately after delivery — landing in the same
-	// wall-clock second as delivered_at. The resulting child_set_key is
-	// byte-identical to before (same "id:state").
-	if err := repo.UpdateTaskState(ctx, childID, "IN_PROGRESS"); err != nil {
-		t.Fatalf("reopen child: %v", err)
+	// The child is reopened and re-completed immediately after delivery,
+	// landing in the same wall-clock second as delivered_at. The resulting
+	// child_set_key is byte-identical to before (same "id:state").
+	if _, err := repo.ExecRaw(ctx, `UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, "IN_PROGRESS", childID); err != nil {
+		t.Fatalf("reopen child fixture: %v", err)
 	}
-	if err := repo.UpdateTaskState(ctx, childID, "COMPLETED"); err != nil {
-		t.Fatalf("recomplete child: %v", err)
+	if _, err := repo.ExecRaw(ctx, `UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, "COMPLETED", childID); err != nil {
+		t.Fatalf("recomplete child fixture: %v", err)
 	}
 
 	after, err := repo.ListStuckParents(ctx, "task_children_completed", 5)

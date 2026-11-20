@@ -89,6 +89,18 @@ happens inside `Work` directly — the assignee opens the PR as part of
 its turn — or in a delegated child task with the Kanban Default
 workflow.
 
+### Hold steps
+
+A step may declare `stage_type='hold'` to record that it parks a task on
+a person's decision. The value is stored on the step, so a consumer reads
+the stored nature instead of the step's name: renaming a hold step keeps
+it a hold, and naming a step `hold` does not make it one. The execution
+engine does not branch on it, so a hold step stops no run and moves no
+task. The value round-trips through export, import, and workflow sync,
+and a one-time backfill converts a step whose stored nature is the
+default (empty or `custom`) and whose name is a hold name, leaving a step
+that already declares `work`, `review`, `approval`, or `hold` unchanged.
+
 Users can copy either template and edit it; existing custom kanban
 workflows continue to work unchanged.
 
@@ -102,9 +114,10 @@ today's four (`on_enter`, `on_turn_start`, `on_turn_complete`,
   it's in this step. Trigger context carries the comment id, body, and
   author.
 - `on_blocker_resolved` — all blockers on the task cleared.
-- `on_children_completed` — all child tasks of this task reached terminal
-  state. Payload includes the child summaries (identifiers, last
-  comments, PR links if any).
+- `on_children_completed` — every counted active direct child task of this
+  task reached `COMPLETED`. Failed or cancelled children do not trigger it.
+  Payload includes the child summaries (identifiers, last comments, PR links
+  if any).
 - `on_approval_resolved` — an approval request the task owns resolved.
 - `on_heartbeat` — periodic timer (cron-driven) for *background*
   check-ins when nothing else is happening. Fires per-(task, step)

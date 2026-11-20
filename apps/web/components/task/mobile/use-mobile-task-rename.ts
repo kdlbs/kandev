@@ -28,7 +28,7 @@ export function useMobileTaskRename() {
           variant: "error",
         });
       } finally {
-        setRenamingTask(null);
+        setRenamingTask((current) => (current === renamingTask ? null : current));
       }
     },
     [renameTaskById, renamingTask, toast, t],

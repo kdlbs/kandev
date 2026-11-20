@@ -12,7 +12,7 @@
   "anotherCallerRejected": "Outra pessoa já rejeitou \"{{question}}\".",
   "bundleNoLongerActive": "\"{{question}}\" já não está à espera de uma resposta.",
   "errorTitle": "Não foi possível carregar a sua caixa de entrada",
-  "errorDescription": "Ocorreu um erro ao carregar as perguntas que aguardam a sua resposta.",
+  "errorDescription": "Não foi possível carregar as perguntas que aguardam a sua resposta.",
   "retry": "Repetir",
   "emptyTitle": "Nada está à sua espera em {{workspace}}.",
   "emptyDescription": "Esta lista abrange apenas perguntas que bloqueiam um agente neste espaço de trabalho. Não conta bundles noutros espaços de trabalho, pedidos de permissão pendentes, registos de perguntas-mãe, nem as suas próprias linhas adiadas ou ignoradas.",

@@ -85,18 +85,24 @@ Chat, plan, changes, files, terminal, editor/diff, preview, commit, and pull-req
 
 Every new user-facing string must go through i18next: `t("namespace:key")` or `<Trans>`, never an inline literal. That covers visible copy, `placeholder`, `aria-label`, `title`, `alt`, toasts, validation and empty-state text, and dialog copy. Externalization of the existing UI is complete, so a hardcoded literal is now a regression rather than unfinished migration.
 
-Catalogs live in `apps/web/src/locales/<locale>/<namespace>.json`. English is the source locale and the only hand-authored catalog; it is bundled into the entry chunk, while each other locale is a lazily fetched chunk loaded before that locale activates. Shipped locales are English, European Portuguese, Simplified Chinese, Traditional Chinese (Taiwan), Traditional Chinese (Hong Kong), Japanese, and Korean, plus a generated `pseudo` catalog that only development and E2E builds contain. A missing key falls back to English at runtime.
+Catalogs live in `apps/web/src/locales/<locale>/<namespace>.json`. English (`en`) is the source locale and is bundled into the entry chunk; other locales load lazily before activation. Add matching translations for European Portuguese (`pt-pt`), Simplified Chinese (`zh-cn`), Traditional Chinese Taiwan (`zh-tw`), Traditional Chinese Hong Kong (`zh-hk`), Japanese (`ja`), and Korean (`ko`) with each English copy change. Generate the Traditional Chinese catalogs from `zh-cn` with `i18n:zh-hant` and review the output. Regenerate the `pseudo` catalog for development and E2E builds. A missing key falls back to English at runtime, but catalog gaps fail the check.
 
 Three mistakes cause silent bugs: never translate a string compared with `===`, never call `t()` at module scope, and never pass an English plural ending as a value; use `count` with `_one`/`_other` keys.
 
+Run these commands from the repository root. Paths passed to `i18n:sweep` are relative to `apps/web`.
+
 ```bash
-pnpm run i18n:check     # gate: plurals, module-scope t(), Trans indices
-pnpm run i18n:ratchet   # gate: no new hardcoded literals in changed lines
-pnpm run i18n:parity    # advisory report: per-locale missing and extra keys
-pnpm run i18n:sweep <path>  # advisory report: copy the jsx-only lint rule cannot see
+pnpm --dir apps/web run i18n:pseudo
+pnpm --dir apps/web run i18n:zh-hant
+pnpm --dir apps/web run i18n:check
+pnpm --dir apps/web run i18n:ratchet
+pnpm --dir apps/web run i18n:parity
+pnpm --dir apps/web run i18n:sweep lib/i18n
 ```
 
-The first two run in pre-commit and CI. The last two are reports that always exit zero and are wired into neither, because real-locale translation is maintained out of band and must not fail an English-only change. A clean lint does not prove a file is done: the rule only inspects JSX literals and skips anything assigned to a SCREAMING_CASE identifier, so review config tables by eye and use the pseudo-locale (**Settings > General > Appearance** in development builds) as the completeness check. Shared `@kandev/ui` primitives cannot import the app's i18n runtime, so their accessibility labels are localized at the call site. Full guide: [`docs/i18n.md`](../i18n.md).
+`i18n:check` is a CI gate for catalog parity, placeholders, untranslated values, plurals, module-scope `t()`, `<Trans>` indices, punctuation, and non-JSX copy. `i18n:ratchet` gates added and changed code in pre-commit and CI. The separate parity and sweep commands are advisory reports: findings do not fail them, though unreadable or malformed input can. They do not relax the catalog gate.
+
+The JSX lint rule cannot inspect every copy position, including SCREAMING_CASE config tables. The non-JSX check scans the web tree by exclusion and covers those positions; use the pseudo-locale (**Settings > General > Appearance** in development builds) for a visual completeness check too. Shared `@kandev/ui` primitives cannot import the app's i18n runtime, so their accessibility labels are localized at the call site. Full guide: [`docs/i18n.md`](../i18n.md).
 
 ## Security, accessibility, and responsiveness
 

@@ -5,7 +5,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { PRStatusChip, aggregateChipStatus } from "./pr-status-chip";
-import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS } from "./pr-ci-popover";
+import { PR_CI_DESKTOP_POPOVER_CLASS } from "./pr-ci-popover";
 import {
   makeTestCIOptions as makeCIOptions,
   makeTestPR as makePR,
@@ -105,12 +105,10 @@ function multiState(prs: TaskPR[]): Partial<AppState> {
 async function expectDesktopHoverPopoverConstrained() {
   fireEvent.mouseEnter(screen.getByTestId(CHIP_TESTID));
   const inner = await screen.findByTestId("pr-topbar-popover-inner");
-  const content = inner.closest<HTMLElement>(".overflow-y-auto");
+  const content = inner.closest<HTMLElement>('[data-slot="popover-content"]');
   expect(content).not.toBeNull();
   const classNames = content!.className.split(/\s+/);
-  expect(classNames).toEqual(
-    expect.arrayContaining(PR_CI_DESKTOP_POPOVER_SCROLL_CLASS.split(/\s+/)),
-  );
+  expect(classNames).toEqual(expect.arrayContaining(PR_CI_DESKTOP_POPOVER_CLASS.split(/\s+/)));
 }
 
 describe("PRStatusChip", () => {

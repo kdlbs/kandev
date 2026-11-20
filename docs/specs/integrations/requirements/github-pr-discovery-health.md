@@ -2,6 +2,7 @@
 status: draft
 system: integrations
 created: 2026-09-11
+updated: 2026-11-16
 owners:
   - kandev
 ---
@@ -14,6 +15,12 @@ Users need task PR discovery to work and its failures to remain visible.
 Reported quota is not proof that a PR request succeeded.
 Integrations owns this contract because it owns GitHub discovery, credentials,
 and provider status. Task and UI systems consume its results.
+
+## Retirement boundary
+
+The discovery and polling criteria apply to eligible watches.
+[Explicit watch retirement](github-pr-watch-retirement.md) suspends that eligibility until authorized resumption.
+Idle discovery and explicit refresh do not override retirement.
 
 ## Requirements
 
@@ -41,6 +48,15 @@ and provider status. Task and UI systems consume its results.
   Provider errors shall include a credential-safe category and target identity.
   Successful empty searches shall not produce warnings. Cancellation shall not
   report provider failure. A later success shall not retain a failed final outcome.
+- **AC-INTEGRATIONS-GITHUB-PR-DISCOVERY-001.6:** When a watched repository is a
+  fork and the workspace credential cannot read the fork's parent repository,
+  discovery shall treat the parent as having no visible PR for that branch.
+  It shall not report a discovery failure for that target, and a later PR
+  opened in the fork shall still be discovered. Rate-limit, authentication,
+  and transient parent errors shall keep their existing failure categories.
+  After the cached unreadable-parent result expires, the next eligible
+  discovery attempt shall search a parent that has become readable to the
+  credential. Expiry does not schedule an extra attempt.
 
 ### REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001: Explain discovery failures
 
@@ -71,6 +87,10 @@ and provider status. Task and UI systems consume its results.
   be identified separately from a quota failure. It shall not trigger an
   immediate fallback using the same invalid query or an automatic retry more
   often than once per minute for that discovery target.
+- **AC-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001.8:** Whenever the warning
+  renders, it shall show a retry time only for a valid deadline in the future.
+  Missing, invalid, or expired deadlines shall not remove an unresolved failure
+  or imply recovery. Desktop and phone shall apply the same rule.
 
 ### REQ-INTEGRATIONS-GITHUB-PR-POLLING-001: Adaptive background discovery
 
@@ -79,6 +99,15 @@ and provider status. Task and UI systems consume its results.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.3:** Idle discovery shall not stop permanently. A PR opened externally on an unchanged branch shall remain discoverable. Known PRs shall retain their 1-minute background cadence.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.4:** Explicit PR refresh shall bypass the idle schedule but obey existing rate-limit and authentication admission. Passive frontend refreshes shall obey the idle schedule for searching targets. An explicit refresh shall not reuse the result of an active passive provider attempt.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.5:** Poll attempts and provider status writes shall not count as task activity. Shared targets shall use the fastest eligible member's schedule. Archived and deleted members shall not accelerate it.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.6:** When at least one known-PR
+  status read completes, unrelated deferred branch searches shall not withhold
+  those completed updates. Deferred targets shall retain their previous status.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.7:** Adding, removing, or rescheduling
+  unrelated searching targets shall not restart completed reads for unchanged
+  known PRs or prevent their publication.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-001.8:** Automatic PR updates shall reach
+  inactive task rows on desktop and phone without task selection, icon
+  disclosure, manual refresh, or page reload. Existing display rules shall apply.
 
 ### REQ-INTEGRATIONS-GITHUB-PR-POLLING-002: Bounded batch fallback
 
@@ -86,10 +115,22 @@ and provider status. Task and UI systems consume its results.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.2:** Transient failures shall permit at most 5 fallback target checks per workspace and 10 across one poll cycle. Deferred targets shall retain their state and receive a fair opportunity on later cycles.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.3:** A rate-limit or authentication error during fallback shall stop remaining checks for that workspace. Cancellation shall stop the cycle. Existing retry deadlines remain authoritative.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.4:** Clients without GraphQL support shall retain REST support under the same bounded schedule. Deferral shall not imply a successful provider observation or discard pending status events.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.5:** Local admission deferral shall
+  preserve pending work without immediate REST fallback or a provider-failure
+  diagnosis. Completed updates shall not consume another fallback opportunity.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.6:** When local admission supplies a
+  retry boundary, automatic PR monitoring shall resume each pending target at
+  its own boundary without an additional one-minute delay. One target's
+  deferral shall not replace another target's boundary. Resumption shall obey
+  current admission and shall not block an independently eligible workspace.
+- **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.7:** Resumed work shall use current
+  workspace authorization and active watch lifetimes. Removed, retired,
+  detached, or superseded targets shall not receive delayed writes or events.
+  Changed credentials shall invalidate retained results from the previous context.
 
 ## Exclusions
 
-No new credentials, automatic PR creation, inferred PR links from chat, changed
+No new credentials, no discovery of parent-repository PRs the workspace credential cannot read, automatic PR creation, inferred PR links from chat, changed
 fork eligibility, unlink behavior, or task/workflow transitions. No promise
 that the quota endpoint explains all provider throttling. Failure history is
 runtime status, not a permanent incident archive.
@@ -101,7 +142,10 @@ runtime status, not a permanent incident archive.
 - [System design](../system-design/github-pr-discovery-health.md)
 - [Implementation package](../../../plans/github-pr-discovery-health/plan.md)
 - [Watch reconciliation repair](../../../plans/github-pr-watch-reconciliation/plan.md)
+- [Discovery deferral repair](../../../plans/github-pr-discovery-deferrals/plan.md)
+- [Unreadable fork parent repair](../../../plans/github-fork-parent-unreadable/plan.md)
 
 ## Polling efficiency package
 
 - [Implementation plan](../../../plans/watch-task-cleanup/plan.md)
+- [Sidebar freshness repair](../../../plans/github-sidebar-pr-freshness/plan.md)

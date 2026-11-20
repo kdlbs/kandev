@@ -31,6 +31,17 @@ func TestUsageService_GetUsage_NoClient(t *testing.T) {
 	}
 }
 
+func TestUsageService_IsRegistered(t *testing.T) {
+	svc := usage.NewUsageService()
+	if svc.IsRegistered("profile") {
+		t.Fatal("expected an unregistered profile to report false")
+	}
+	svc.Register("profile", &mockClient{}, usage.CacheKey("anthropic", "/creds"))
+	if !svc.IsRegistered("profile") {
+		t.Fatal("expected a registered profile to report true")
+	}
+}
+
 func TestUsageService_GetUsage_CachesResult(t *testing.T) {
 	svc := usage.NewUsageService()
 	now := time.Now()

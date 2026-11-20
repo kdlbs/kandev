@@ -93,6 +93,9 @@ type Service struct {
 	wakeFinder           WakeMessageFinder
 	wakeSender           WakeSender
 	conversationSessions SessionEnsurer
+	// pluginBindings supplies exact instance-read plugin references for a new
+	// phase-2 conversation binding; nil grants none.
+	pluginBindings CoordinatorPluginBindingSource
 
 	// decisionTasks, decisionSteps and eventBus back Approve and Reject
 	// (task-07). Wired by SetDecisionDeps; nil until the decisions

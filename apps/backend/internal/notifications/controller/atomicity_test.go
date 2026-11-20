@@ -30,7 +30,7 @@ func TestControllerProviderEventSelection(t *testing.T) {
 			require.NoError(t, err)
 			log, err := logger.NewFromZap(zap.NewNop())
 			require.NoError(t, err)
-			controller := NewController(service.NewService(repo, nil, nil, log, nil))
+			controller := NewController(service.NewService(repo, nil, nil, log, nil, false))
 			provider, err := controller.CreateProvider(context.Background(), decodeCreateProviderRequest(t, `{"type":"local","events":null}`))
 			require.NoError(t, err)
 			require.Equal(t, []string{service.EventTaskSessionClarificationAsked}, provider.Events)

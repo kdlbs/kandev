@@ -98,6 +98,7 @@ func TestMCPCreateTaskSelfPlacementInheritance(t *testing.T) {
 			}
 			selfPlacementWorkflowSteps(t, f, workflowProfile)
 			payload := selfPlacementCreatePayload(f, f.child.ID)
+			payload["workspace_mode"] = mcpWorkspaceModeInheritParent
 			delete(payload, "workspace_id")
 			delete(payload, "workflow_id")
 			delete(payload, "agent_profile_id")
@@ -107,9 +108,17 @@ func TestMCPCreateTaskSelfPlacementInheritance(t *testing.T) {
 			switch name {
 			case "explicit overrides":
 				wantProfile, wantWorkflow, wantRepo, wantBase = "explicit-profile", f.child.WorkflowID, f.child.ID+"-repo", "override-base"
-				wantExecutor = "explicit-executor"
+				executor, err := f.svc.CreateExecutor(f.ctx, &service.CreateExecutorRequest{
+					Name: "Explicit executor", Type: models.ExecutorTypeLocal, Status: models.ExecutorStatusActive,
+				})
+				require.NoError(t, err)
+				profile, err := f.svc.CreateExecutorProfile(f.ctx, &service.CreateExecutorProfileRequest{
+					ExecutorID: executor.ID, Name: "Explicit profile",
+				})
+				require.NoError(t, err)
+				wantExecutor = profile.ID
 				payload["workflow_id"], payload["workspace_mode"] = wantWorkflow, "new_workspace"
-				payload["agent_profile_id"], payload["executor_profile_id"] = wantProfile, wantExecutor
+				payload["agent_profile_id"], payload["executor_profile_id"] = wantProfile, profile.ID
 				payload["repositories"] = []mcpRepositoryInput{{RepositoryID: wantRepo, BaseBranch: wantBase}}
 			case "workspace profile":
 				wantProfile = "workspace-profile"

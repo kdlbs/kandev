@@ -11,7 +11,7 @@ const TIMESTAMP = "2026-07-26T10:00:00Z";
 const NEWER_TIMESTAMP = "2026-07-26T11:00:00Z";
 
 function makeStore() {
-  return create<SettingsSlice>()(immer((set, get, store) => createSettingsSlice(set, get, store)));
+  return create<SettingsSlice>()(immer((set, get) => createSettingsSlice(set, get)));
 }
 
 function updateJob(overrides: Record<string, unknown> = {}) {

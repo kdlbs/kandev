@@ -45,7 +45,7 @@ describe("useSessionRecoveryActions", () => {
     expect(result.current.guardDetails?.kind).toBe("session_recovery_in_progress");
     expect(result.current.branchDetails).toBeNull();
     expect(result.current.recoveryError?.message).toBe(
-      "This session's agent is still being reconciled after the backend restarted. This clears automatically; try again in a few seconds.",
+      "Kandev is checking the agent after a restart. Wait for this check to finish before resuming.",
     );
   });
 

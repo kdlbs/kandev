@@ -13,6 +13,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
@@ -22,7 +24,7 @@ import (
 // findRunForAgent locates the run queued for agentID with the given reason
 // after a scheduler tick has processed it. Mirrors the lookup pattern in
 // TestSchedulerIntegration_ResolvesExecutorFromTaskProject.
-func findRunForAgent(t *testing.T, svc *service.Service, ctx context.Context, wsID, agentID, reason string) *models.Run {
+func findRunForAgent(t *testing.T, svc *service.Service, ctx context.Context, wsID, agentID, reason string) *runsmodels.Run {
 	t.Helper()
 	runs, err := svc.ListRuns(ctx, wsID)
 	if err != nil {
@@ -37,7 +39,7 @@ func findRunForAgent(t *testing.T, svc *service.Service, ctx context.Context, ws
 	return nil
 }
 
-func assertOutcome(t *testing.T, run *models.Run, want string) {
+func assertOutcome(t *testing.T, run *runsmodels.Run, want string) {
 	t.Helper()
 	if run.Status != "finished" {
 		t.Fatalf("status = %q, want finished", run.Status)
@@ -148,7 +150,7 @@ func TestSchedulerOutcome_TaskTreeHeld_WritesOutcome(t *testing.T) {
 // assertRetriedNotFinished asserts a run was requeued for retry rather than
 // finished: still non-terminal, retry_count bumped, a scheduled_retry_at set,
 // and no outcome written (outcome is only ever set on the finished path).
-func assertRetriedNotFinished(t *testing.T, run *models.Run, wantRetryCount int) {
+func assertRetriedNotFinished(t *testing.T, run *runsmodels.Run, wantRetryCount int) {
 	t.Helper()
 	if run.Status == "finished" || run.Status == "failed" {
 		t.Fatalf("status = %q, want a non-terminal (retried) status", run.Status)

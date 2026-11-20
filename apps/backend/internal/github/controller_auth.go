@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 const defaultGitHubUserID = DefaultUserID
@@ -240,25 +241,11 @@ func (c *Controller) httpGitHubAppWebhook(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, result)
 }
 
-type credentialBrokerHTTPRequest struct {
-	Lease            string `json:"lease"`
-	Capability       string `json:"capability"`
-	TaskID           string `json:"task_id"`
-	SessionID        string `json:"session_id"`
-	RepositoryID     string `json:"repository_id"`
-	Owner            string `json:"owner"`
-	Repo             string `json:"repo"`
-	Host             string `json:"host"`
-	Path             string `json:"path"`
-	ProviderID       string `json:"provider_id"`
-	ParentProviderID string `json:"parent_provider_id"`
-}
-
-func decodeCredentialBrokerHTTPRequest(ctx *gin.Context) (credentialBrokerHTTPRequest, bool) {
-	var request credentialBrokerHTTPRequest
+func decodeCredentialBrokerHTTPRequest(ctx *gin.Context) (githubauth.CredentialBrokerRequest, bool) {
+	var request githubauth.CredentialBrokerRequest
 	if err := ctx.ShouldBindJSON(&request); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": credentialBrokerInvalidRequestCode(ctx), "error": "invalid payload"})
-		return credentialBrokerHTTPRequest{}, false
+		return githubauth.CredentialBrokerRequest{}, false
 	}
 	return request, true
 }
@@ -287,7 +274,7 @@ func (c *Controller) httpReissueCredentialLease(ctx *gin.Context) {
 		return
 	}
 	lease, err := c.service.ReissueGitHubCredentialLease(ctx.Request.Context(), CredentialLeaseReissueRequest{
-		Capability: request.Capability, TaskID: request.TaskID, SessionID: request.SessionID,
+		Capability: request.ReissueCapability, TaskID: request.TaskID, SessionID: request.SessionID,
 		RepositoryID: request.RepositoryID, Owner: request.Owner, Repo: request.Repo,
 		Host: request.Host, Path: request.Path, ProviderID: request.ProviderID,
 		ParentProviderID: request.ParentProviderID,
@@ -347,7 +334,8 @@ func genericCredentialBrokerErrorCode(err error) string {
 		return "git_credential_lease_expired"
 	case errors.Is(err, ErrCredentialLeaseRevoked):
 		return "git_credential_lease_revoked"
-	case errors.Is(err, ErrCredentialReissueCapabilityInvalid), errors.Is(err, ErrCredentialReissueCapabilityExpired):
+	case errors.Is(err, ErrCredentialReissueCapabilityInvalid), errors.Is(err, ErrCredentialReissueCapabilityExpired),
+		errors.Is(err, ErrCredentialReissueUnavailable):
 		return "git_credential_reissue_denied"
 	case errors.Is(err, ErrCredentialScopeDenied):
 		return "git_credential_denied"
@@ -392,7 +380,8 @@ func githubAuthErrorResponse(err error) (int, string) {
 		status, code = http.StatusUnauthorized, "github_credential_lease_expired"
 	case errors.Is(err, ErrCredentialLeaseRevoked):
 		status, code = http.StatusUnauthorized, "github_credential_lease_revoked"
-	case errors.Is(err, ErrCredentialReissueCapabilityInvalid), errors.Is(err, ErrCredentialReissueCapabilityExpired):
+	case errors.Is(err, ErrCredentialReissueCapabilityInvalid), errors.Is(err, ErrCredentialReissueCapabilityExpired),
+		errors.Is(err, ErrCredentialReissueUnavailable):
 		status, code = http.StatusUnauthorized, "github_credential_reissue_denied"
 	case errors.Is(err, ErrCredentialScopeDenied):
 		status, code = http.StatusUnauthorized, "github_credential_denied"
@@ -414,9 +403,19 @@ func writeGitHubOperationalAuthError(ctx *gin.Context, err error) bool {
 		})
 		return true
 	}
+	if errors.Is(err, ErrRepoOutsideWorkspaceScope) {
+		// The public code and message identify the local policy rejection.
+		// Neither the requested repository identity nor the allowlist is returned.
+		ctx.JSON(http.StatusNotFound, gin.H{
+			"code":  "github_repository_out_of_scope",
+			"error": "This repository is outside the workspace's GitHub repository scope. Update the workspace repository scope in Settings to include it.",
+		})
+		return true
+	}
 	if errors.Is(err, ErrRepoNotResolvable) {
-		// A repository outside the workspace scope is indistinguishable from a
-		// missing repository. Do not leak the workspace's authorization details.
+		// Genuinely unresolvable upstream (missing, deleted, or not visible to
+		// the automation identity). Don't leak the workspace's authorization
+		// details.
 		ctx.JSON(http.StatusNotFound, gin.H{
 			"code":  "github_repository_not_found",
 			"error": "GitHub repository is not available in this workspace.",

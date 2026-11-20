@@ -2,19 +2,17 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 
 	"github.com/kandev/kandev/internal/prompts/models"
 )
 
 var (
-	ErrBuiltinPrompt            = errors.New("built-in prompts cannot be modified by agents")
-	ErrPromptAgentEditsDisabled = errors.New("shared prompt does not allow agent edits; an operator can enable Allow agent edits in Settings > Prompts")
+	ErrBuiltinPrompt = errors.New("built-in prompts cannot be modified by agents")
 )
 
 func (s *Service) CreatePromptForAgent(ctx context.Context, name, content string) (*models.Prompt, error) {
-	return s.createPrompt(ctx, name, content, true)
+	return s.CreatePrompt(ctx, name, content)
 }
 
 func (s *Service) UpdatePromptContentForAgent(ctx context.Context, name, content string) (*models.Prompt, error) {
@@ -26,10 +24,7 @@ func (s *Service) UpdatePromptContentForAgent(ctx context.Context, name, content
 }
 
 func (s *Service) UpdatePromptForAgent(ctx context.Context, id string, name, content *string) (*models.Prompt, error) {
-	prompt, err := s.repo.GetPromptByID(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && prompt == nil) {
-		return nil, ErrPromptNotFound
-	}
+	prompt, err := s.GetPromptByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -39,9 +34,6 @@ func (s *Service) UpdatePromptForAgent(ctx context.Context, id string, name, con
 func (s *Service) updateAgentPrompt(ctx context.Context, prompt *models.Prompt, name, content *string) (*models.Prompt, error) {
 	if prompt.Builtin {
 		return nil, ErrBuiltinPrompt
-	}
-	if !prompt.AllowAgentEdits {
-		return nil, ErrPromptAgentEditsDisabled
 	}
 	expectedName := prompt.Name
 	if err := s.applyPromptFields(ctx, prompt, name, content); err != nil {

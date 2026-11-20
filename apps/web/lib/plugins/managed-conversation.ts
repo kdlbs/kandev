@@ -1,4 +1,4 @@
-import type { PluginHostV2ManagedAgentInputReceipt } from "@kandev/plugin-sdk";
+import type { PluginHostV2ManagedAgentInputReceipt } from "@kdlbs/plugin-sdk";
 
 export type ManagedConversationSubmitState =
   | "loading"

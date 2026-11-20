@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/githubauth"
+	"github.com/stretchr/testify/require"
 )
 
 // A fresh launch has no per-run runtime_env overlay. The managed credential
@@ -68,5 +69,99 @@ func TestHasRuntimeEnvOverlayDistinguishesAbsentAndEmptyOverlay(t *testing.T) {
 		"runtime_env": map[string]string{},
 	}) {
 		t.Fatal("an explicitly delivered empty runtime_env must report an overlay")
+	}
+}
+
+func TestLaunch_PromotionConfiguresFreshManagedGitEnvironment(t *testing.T) {
+	for _, overlay := range []struct {
+		name string
+		env  map[string]string
+	}{
+		{name: "workspace-only"},
+		{name: "previous lease-only overlay", env: map[string]string{
+			githubauth.CredentialBrokerURLEnv: "http://127.0.0.1:38429/previous-broker",
+			githubauth.CredentialLeaseEnv:     "previous-lease",
+			"RUN_LABEL":                       "kept",
+		}},
+	} {
+		t.Run(overlay.name, func(t *testing.T) {
+			mgr, execution, configuredEnv := newManagedGitWorkspaceForPromotion(t)
+			if overlay.env != nil {
+				require.NoError(t, mgr.SetExecutionEnv(t.Context(), execution.ID, overlay.env))
+			}
+			req := managedGitWorkspacePromotionRequest(execution)
+
+			promoted, err := mgr.Launch(t.Context(), req)
+			require.NoError(t, err)
+			require.Same(t, execution, promoted)
+			_, err = mgr.configureAndStartAgent(t.Context(), promoted)
+			require.NoError(t, err)
+
+			for _, key := range []string{
+				githubauth.CredentialBrokerURLEnv,
+				githubauth.CredentialLeaseEnv,
+				githubauth.CredentialReissueCapabilityEnv,
+				githubauth.CredentialSessionIDEnv,
+				githubauth.CredentialHelperPathEnv,
+			} {
+				require.Equal(t, req.Env[key], (*configuredEnv)[key], key)
+			}
+			require.Equal(t, "3", (*configuredEnv)["GIT_CONFIG_COUNT"])
+			require.Equal(t, "http.version", (*configuredEnv)["GIT_CONFIG_KEY_0"])
+			require.Equal(t, githubauth.ManagedGitCredentialHelper, (*configuredEnv)["GIT_CONFIG_VALUE_2"])
+			require.Equal(t, overlay.env["RUN_LABEL"], (*configuredEnv)["RUN_LABEL"])
+			require.Nil(t, managedRuntimeInstallContext(promoted), "the workspace installer digest predates the launch environment")
+		})
+	}
+}
+
+func TestLaunch_PromotionRejectsManagedGitEnvironmentWithoutLease(t *testing.T) {
+	mgr, execution, configuredEnv := newManagedGitWorkspaceForPromotion(t)
+	req := managedGitWorkspacePromotionRequest(execution)
+	delete(req.Env, githubauth.CredentialLeaseEnv)
+
+	_, err := mgr.Launch(t.Context(), req)
+	require.ErrorContains(t, err, "managed Git credential lease is missing")
+	require.Empty(t, execution.AgentCommand)
+	require.Empty(t, *configuredEnv)
+}
+
+func newManagedGitWorkspaceForPromotion(t *testing.T) (*Manager, *AgentExecution, *map[string]string) {
+	t.Helper()
+	mgr := newTestManager(t)
+	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-1", AgentName: "auggie",
+	}}
+	var configuredEnv map[string]string
+	execution := &AgentExecution{
+		ID: "exec-workspace-only", TaskID: "task-1", SessionID: "session-1",
+		WorkspacePath:                    t.TempDir(),
+		ManagedRuntimeOwnerUserID:        "user-1",
+		ManagedRuntimeInstallerEnvDigest: "workspace-environment-digest",
+		agentctl:                         newConfigureCaptureAgentctlClient(t, mgr.logger, &configuredEnv),
+	}
+	execution.setRuntimeEnvironment(map[string]string{
+		"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.version", "GIT_CONFIG_VALUE_0": "HTTP/1.1",
+	})
+	require.NoError(t, mgr.executionStore.Add(execution))
+	return mgr, execution, &configuredEnv
+}
+
+func managedGitWorkspacePromotionRequest(execution *AgentExecution) *LaunchRequest {
+	return &LaunchRequest{
+		TaskID: execution.TaskID, SessionID: execution.SessionID, AgentProfileID: "profile-1",
+		StartAgent: true, PreviousExecutionID: "exec-previous", ACPSessionID: "acp-session-previous",
+		Env: map[string]string{
+			githubauth.CredentialBrokerURLEnv:         "http://127.0.0.1:38429/broker",
+			githubauth.CredentialLeaseEnv:             "fresh-lease",
+			githubauth.CredentialReissueCapabilityEnv: "fresh-capability",
+			githubauth.CredentialSessionIDEnv:         execution.SessionID,
+			githubauth.CredentialHelperPathEnv:        "/opt/kandev/agentctl",
+			"GIT_CONFIG_COUNT":                        "2",
+			"GIT_CONFIG_KEY_0":                        "credential.https://github.com.helper",
+			"GIT_CONFIG_VALUE_0":                      "",
+			"GIT_CONFIG_KEY_1":                        "credential.https://github.com.helper",
+			"GIT_CONFIG_VALUE_1":                      githubauth.ManagedGitCredentialHelper,
+		},
 	}
 }

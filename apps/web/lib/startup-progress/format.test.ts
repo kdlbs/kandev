@@ -3,6 +3,7 @@ import i18next from "i18next";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   formatDuration,
+  formatTimingDuration,
   formatElapsed,
   formatEta,
   formatPhaseLabel,
@@ -84,9 +85,18 @@ describe("formatStepProgress", () => {
     );
   });
 
-  it("pluralizes a counting step's unit off done", () => {
+  it("formats a counting byte step through the readable-size policy", () => {
     expect(formatStepProgress(t, step({ measure: "counting", unit: "bytes", done: 1 }))).toBe(
-      "1 byte",
+      "1 B",
+    );
+  });
+
+  it("pluralizes a counting step's unit off done", () => {
+    expect(formatStepProgress(t, step({ measure: "counting", unit: "sessions", done: 1 }))).toBe(
+      "1 session",
+    );
+    expect(formatStepProgress(t, step({ measure: "counting", unit: "sessions", done: 2 }))).toBe(
+      "2 sessions",
     );
   });
 
@@ -103,6 +113,37 @@ describe("formatStepProgress", () => {
   });
 });
 
+describe("formatStepProgress byte units", () => {
+  it.each([
+    [0, "0 B"],
+    [1, "1 B"],
+    [1023, "1023 B"],
+    [1024, "1.0 KB"],
+    [1280, "1.3 KB"],
+    [1048575, "1024.0 KB"],
+    [1048576, "1.0 MB"],
+    [15389753344, "14.3 GB"],
+    [1099511627776, "1.0 TB"],
+    [2199023255552, "2.0 TB"],
+    // Just below a decimal midpoint: a preliminary multiply by ten rounds this
+    // up to 4097.0, while the shared formatBytes policy keeps 4096.9.
+    [4504644163416883, "4096.9 TB"],
+  ])("formats a counting byte step of %d as %s", (done, expected) => {
+    expect(formatStepProgress(t, step({ measure: "counting", unit: "bytes", done }))).toBe(
+      expected,
+    );
+  });
+
+  it("formats a counted byte step's done and total independently", () => {
+    expect(
+      formatStepProgress(
+        t,
+        step({ measure: "counted", unit: "bytes", done: 1048576, total: 15389753344 }),
+      ),
+    ).toBe("1.0 MB of 14.3 GB");
+  });
+});
+
 describe("percentDone", () => {
   it("computes the plain percentage", () => {
     expect(percentDone(5, 10)).toBe(50);
@@ -115,4 +156,9 @@ describe("percentDone", () => {
   it("clamps above 100", () => {
     expect(percentDone(15, 10)).toBe(100);
   });
+});
+
+it("keeps subsecond startup timing visible without a zero-second estimate", () => {
+  expect(formatTimingDuration(t, 82)).toBe("82 milliseconds");
+  expect(formatTimingDuration(t, 2000)).toBe("2 seconds");
 });

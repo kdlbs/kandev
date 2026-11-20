@@ -109,7 +109,7 @@ func TestExecNativeMCPCommandRunnerBoundsInheritedPipeAfterCancellation(t *testi
 	}
 	finished := make(chan result, 1)
 	go func() {
-		value, err := (ExecNativeMCPCommandRunner{}).Run(ctx, command, []string{"mcp"}, root, map[string]string{"PATH": "/usr/bin:/bin"})
+		value, err := (ExecNativeMCPCommandRunner{}).Run(ctx, command, []string{"mcp"}, root, map[string]string{"PATH": os.Getenv("PATH")})
 		finished <- result{value: value, err: err}
 	}()
 	waitForNativeMCPFile(t, started)

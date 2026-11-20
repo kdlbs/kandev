@@ -324,6 +324,12 @@ func (h *ShellHandlers) wsUserShellList(ctx context.Context, msg *ws.Message) (*
 			return nil, fmt.Errorf("list ordinary terminals: %w", err)
 		}
 		for _, it := range ordinary {
+			// An environment-qualified list may only contain rows that belong
+			// to that environment. Service.List is task-wide because tasks can
+			// span environments; the requested scope wins here.
+			if it.EnvironmentID != req.TaskEnvironmentID {
+				continue
+			}
 			items = append(items, userShellListItem{
 				ID:             it.ID,
 				Kind:           it.Kind,
@@ -431,6 +437,7 @@ type UserShellCreateRequest struct {
 	ScriptID          string `json:"script_id,omitempty"`
 	Command           string `json:"command,omitempty"`
 	Label             string `json:"label,omitempty"`
+	WorkingDir        string `json:"working_dir,omitempty"`
 }
 
 // wsUserShellCreate creates a new user shell terminal and returns the assigned ID and label.
@@ -474,7 +481,7 @@ func (h *ShellHandlers) wsUserShellCreate(ctx context.Context, msg *ws.Message) 
 
 	// Plain ordinary shell — DB-backed when the terminal service is wired.
 	if h.terminalSvc != nil && req.TaskID != "" {
-		term, err := h.terminalSvc.Create(ctx, req.TaskID, scopeID, "")
+		term, err := h.terminalSvc.CreateWithWorkingDir(ctx, req.TaskID, scopeID, "", req.WorkingDir)
 		if err != nil {
 			return nil, fmt.Errorf("create ordinary terminal: %w", err)
 		}
@@ -823,6 +830,13 @@ func (h *ShellHandlers) httpListTaskTerminals(c *gin.Context) {
 			return
 		}
 		for _, it := range ordinary {
+			// The task-only list stays task-wide. When the caller also names
+			// an environment, the request is environment-qualified: merging a
+			// sibling environment's ordinary rows with this environment's
+			// unmanaged shells would mix unrelated scopes.
+			if envID != "" && it.EnvironmentID != envID {
+				continue
+			}
 			items = append(items, userShellListItem{
 				ID:             it.ID,
 				Kind:           it.Kind,

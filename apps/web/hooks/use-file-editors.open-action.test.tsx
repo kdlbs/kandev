@@ -1,10 +1,16 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileContentResponse } from "@/lib/types/backend";
 import type { FileEditorState } from "@/lib/state/dockview-store";
 
 const mocks = vi.hoisted(() => {
   const fakeClient = {};
+  const appStore = {
+    getState: () => ({
+      environmentIdBySessionId: {},
+      userSettings: { markdownPreviewByDefault: mocks.markdownPreviewByDefault },
+    }),
+  };
   const toast = vi.fn();
   const requestFileContent = vi.fn();
   const addFileEditorPanel = vi.fn();
@@ -62,7 +68,11 @@ const mocks = vi.hoisted(() => {
   resetDockState();
 
   return {
+    markdownPreviewByDefault: true,
+    savedTabs: [] as Array<{ path: string; name: string }>,
+    sessionId: "sess-1",
     fakeClient,
+    appStore,
     toast,
     requestFileContent,
     addFileEditorPanel,
@@ -78,7 +88,8 @@ vi.mock("@/components/editors/monaco/monaco-init", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: { tasks: { activeSessionId: string } }) => unknown) =>
-    selector({ tasks: { activeSessionId: "sess-1" } }),
+    selector({ tasks: { activeSessionId: mocks.sessionId } }),
+  useAppStoreApi: () => mocks.appStore,
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -90,7 +101,7 @@ vi.mock("@/hooks/domains/session/use-session-git-status", () => ({
 }));
 
 vi.mock("@/lib/local-storage", () => ({
-  getOpenFileTabs: () => [],
+  getOpenFileTabs: () => mocks.savedTabs,
   setOpenFileTabs: vi.fn(),
   getActiveTabForSession: () => "chat",
   setActiveTabForSession: vi.fn(),
@@ -163,6 +174,48 @@ describe("useFileEditors open actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.resetDockState();
+    mocks.markdownPreviewByDefault = true;
+  });
+
+  it("opens ordinary Markdown in Preview by default", async () => {
+    mocks.requestFileContent.mockResolvedValueOnce(fileResponse("README.md", "# Read me"));
+    const { result } = renderHook(() => useFileEditors());
+    await act(async () => result.current.openFile("README.md"));
+    expect(mocks.getDockState().openFiles.get("README.md")?.renderedPreview).toBe(true);
+  });
+
+  it.each([
+    ["README.md", false, false, false],
+    ["README.mdx", true, false, true],
+    ["image.md", true, true, false],
+    ["index.html", true, false, false],
+  ])("opens %s with default %s and binary %s", async (path, enabled, binary, expected) => {
+    mocks.markdownPreviewByDefault = enabled;
+    mocks.requestFileContent.mockResolvedValueOnce({
+      ...fileResponse(path, "content"),
+      is_binary: binary,
+    });
+    const { result } = renderHook(() => useFileEditors());
+    await act(async () => result.current.openFile(path));
+    expect(mocks.getDockState().openFiles.get(path)?.renderedPreview).toBe(expected);
+  });
+
+  it("preserves a buffer loaded while the ordinary open request is pending", async () => {
+    const pending = defer<FileContentResponse>();
+    mocks.requestFileContent.mockReturnValueOnce(pending.promise);
+    const { result } = renderHook(() => useFileEditors());
+    const opening = result.current.openFile("README.md");
+    const buffer = {
+      ...fileState("README.md", "user edit"),
+      renderedPreview: false,
+      isDirty: true,
+    };
+    mocks.getDockState().openFiles.set("README.md", buffer);
+    await act(async () => {
+      pending.resolve(fileResponse("README.md", "disk"));
+      await opening;
+    });
+    expect(mocks.getDockState().openFiles.get("README.md")).toBe(buffer);
   });
 
   it("keeps a pending file open request alive when focusing an already-open file", async () => {
@@ -184,6 +237,19 @@ describe("useFileEditors open actions", () => {
     expect(mocks.addFileEditorPanel).toHaveBeenCalledWith(FIRST_PATH, "first.ts", {
       repo: undefined,
     });
+  });
+
+  // @covers AC-UI-FILE-EDITOR-MUTATION-002.1
+  it("selects an existing repo-scoped buffer when Files uses the workspace path", async () => {
+    const { result } = renderHook(() => useFileEditors());
+    const existing = { ...fileState("src/renamed.ts", "dirty"), repo: "frontend", isDirty: true };
+    mocks.getDockState().openFiles.set("frontend:src/renamed.ts", existing);
+    await result.current.openFile("frontend/src/renamed.ts");
+    expect(mocks.requestFileContent).not.toHaveBeenCalled();
+    expect(mocks.addFileEditorPanel).toHaveBeenCalledWith("src/renamed.ts", "renamed.ts", {
+      repo: "frontend",
+    });
+    expect(mocks.getDockState().openFiles.get("frontend:src/renamed.ts")).toBe(existing);
   });
 
   it("keeps a pending markdown preview request alive when focusing an already-open file", async () => {
@@ -210,3 +276,46 @@ describe("useFileEditors open actions", () => {
     });
   });
 });
+
+it.each(["current", "replaced"])(
+  "restores four files concurrently with %s session ownership",
+  async (ownership) => {
+    mocks.requestFileContent.mockReset();
+    mocks.resetDockState();
+    mocks.sessionId = `restore-concurrency-${ownership}`;
+    mocks.savedTabs = Array.from({ length: 6 }, (_, index) => ({
+      path: `restored-${index}.ts`,
+      name: `restored-${index}.ts`,
+    }));
+    const pending = mocks.savedTabs.map(() => defer<FileContentResponse>());
+    mocks.requestFileContent.mockImplementation(
+      (_client, _session, path) => pending[Number(path.match(/\d+/)[0])].promise,
+    );
+    const view = renderHook(() => useFileEditors());
+    const started = mocks.requestFileContent.mock.calls.length;
+    const saved = [...mocks.savedTabs];
+    if (ownership === "replaced") {
+      mocks.savedTabs = [];
+      mocks.sessionId = "replacement-session";
+      view.rerender();
+    }
+    await act(async () => {
+      pending.forEach((read, index) =>
+        read.resolve(fileResponse(saved[index].path, "old session")),
+      );
+    });
+    expect(started).toBe(4);
+    if (ownership === "replaced") {
+      expect(mocks.requestFileContent).toHaveBeenCalledTimes(4);
+      expect(mocks.getDockState().openFiles.size).toBe(0);
+    } else {
+      expect(mocks.requestFileContent).toHaveBeenCalledTimes(6);
+      expect([...mocks.getDockState().openFiles.values()].map((file) => file.content)).toEqual(
+        Array(6).fill("old session"),
+      );
+    }
+    view.unmount();
+    mocks.savedTabs = [];
+    mocks.sessionId = "sess-1";
+  },
+);

@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
-import { createScopedMetadataRead } from "./journey-metadata-resources";
+import { createScopedMetadataRead, readJourneyWorkflowSteps } from "./journey-metadata-resources";
+
+const workflowApiMocks = vi.hoisted(() => ({
+  listWorkflowSteps: vi.fn(),
+}));
+
+vi.mock("@/lib/api/domains/workflow-api", () => ({
+  listWorkflowSteps: workflowApiMocks.listWorkflowSteps,
+}));
 
 function fixture() {
   const state = { workspaceContextGeneration: 0 } as AppState;
@@ -109,5 +117,47 @@ describe("journey metadata ownership", () => {
       }),
     ).rejects.toThrow("unavailable");
     expect(await read(store, "ci", async () => "recovered")).toBe("recovered");
+  });
+});
+
+describe("journey workflow step metadata ownership", () => {
+  it("shares selected workflow step reads and keeps a second consumer after one releases", async () => {
+    workflowApiMocks.listWorkflowSteps.mockReset();
+    const pending = deferred<{ steps: never[]; total: number }>();
+    workflowApiMocks.listWorkflowSteps.mockReturnValue(pending.promise);
+    const { store } = fixture();
+    const controller = new AbortController();
+    const dialog = readJourneyWorkflowSteps(store, "shared-workflow", {
+      signal: controller.signal,
+    });
+    const picker = readJourneyWorkflowSteps(store, "shared-workflow");
+    const cancelled = expect(dialog).rejects.toMatchObject({ name: "AbortError" });
+
+    controller.abort();
+    await cancelled;
+    pending.resolve({ steps: [], total: 0 });
+
+    expect(await picker).toEqual({ steps: [], total: 0 });
+    expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledTimes(1);
+  });
+
+  it("queues explicit retry through the scoped shared workflow step owner", async () => {
+    workflowApiMocks.listWorkflowSteps.mockReset();
+    const first = deferred<{ steps: never[]; total: number }>();
+    const retry = deferred<{ steps: never[]; total: number }>();
+    workflowApiMocks.listWorkflowSteps
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(retry.promise);
+    const { store } = fixture();
+    const initial = readJourneyWorkflowSteps(store, "retry-workflow");
+    const refreshed = readJourneyWorkflowSteps(store, "retry-workflow", { refresh: true });
+
+    first.resolve({ steps: [], total: 0 });
+    expect(await initial).toEqual({ steps: [], total: 0 });
+    await Promise.resolve();
+    retry.resolve({ steps: [], total: 0 });
+
+    expect(await refreshed).toEqual({ steps: [], total: 0 });
+    expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledTimes(2);
   });
 });

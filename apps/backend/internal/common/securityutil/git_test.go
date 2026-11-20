@@ -193,6 +193,25 @@ func TestIsKnownSafeGitFlagAllowsRequiredGitOperationFlags(t *testing.T) {
 	}
 }
 
+func TestIsKnownSafeGitFlagAllowsTurnCheckpointCommands(t *testing.T) {
+	for _, flag := range []string{
+		"--absolute-git-dir", "--show-object-format", "--raw", "--no-abbrev", "--numstat",
+		"--binary", "--ignore-all-space",
+		"--bool", "--default=false", "--find-copies-harder", "--no-assume-unchanged",
+		"--no-skip-worktree", "--renormalize", "--sparse", "--stdin", "--no-split-index",
+		"-r", "-v", "-s", "-u", "-q",
+	} {
+		if !IsKnownSafeGitFlag(flag) {
+			t.Errorf("turn checkpoint flag %q rejected", flag)
+		}
+	}
+	for _, flag := range []string{"--sparse=true", "--show-object-format=storage", "--default=false-extra", "--no-split-index=true"} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("unsafe turn checkpoint flag variant %q accepted", flag)
+		}
+	}
+}
+
 func TestIsKnownSafeGitFlagRejectsPushOptionPrefixes(t *testing.T) {
 	for _, flag := range []string{"--push", "--push-option=notify"} {
 		if IsKnownSafeGitFlag(flag) {

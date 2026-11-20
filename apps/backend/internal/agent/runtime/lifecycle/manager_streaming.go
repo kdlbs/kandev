@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"errors"
+	"github.com/kandev/kandev/internal/task/models"
 	"strings"
 	"time"
 
@@ -40,6 +41,16 @@ func trackCanonicalResponseAttemptMessage(execution *AgentExecution, messageID s
 	execution.messageMu.Lock()
 	execution.trackResponseAttemptMessageLocked(messageID)
 	execution.messageMu.Unlock()
+}
+
+func (e *AgentExecution) trackLastAssistantMessageLocked(messageID string, promptGeneration uint64) {
+	if messageID == "" || promptGeneration == 0 {
+		return
+	}
+	if e.lastAssistantMessageIDByGeneration == nil {
+		e.lastAssistantMessageIDByGeneration = make(map[uint64]string)
+	}
+	e.lastAssistantMessageIDByGeneration[promptGeneration] = messageID
 }
 
 func (e *AgentExecution) commitResponseAttemptLocked() {
@@ -93,6 +104,7 @@ func (m *Manager) streamCoalescer(execution *AgentExecution) *streamCoalescer {
 					true,
 					chunk.diagnostic,
 					chunk.promptGeneration,
+					chunk.conversationReceipt,
 				)
 				return
 			}
@@ -166,6 +178,7 @@ func (e *AgentExecution) resetStreamingStateLocked() {
 	e.assistantHistoryBuffer.Reset()
 	e.currentMessageID = ""
 	e.currentThinkingID = ""
+	e.lastAssistantMessageIDByGeneration = nil
 	e.clearProtocolMessageCorrelationLocked()
 	e.commitResponseAttemptLocked()
 }
@@ -194,6 +207,7 @@ func (m *Manager) publishProtocolMessage(
 	if !isAppend {
 		execution.trackResponseAttemptMessageLocked(messageID)
 	}
+	execution.trackLastAssistantMessageLocked(messageID, promptGeneration)
 	execution.messageMu.Unlock()
 
 	m.publishStreamingContent(execution, "message_streaming", messageID, content, isAppend, promptGeneration, attemptID)
@@ -387,7 +401,7 @@ func (m *Manager) publishStreamingContentNow(
 		attemptID = execution.currentStartupAttemptID()
 	}
 	m.publishStreamingContentNowWithProjection(
-		execution, eventType, messageID, content, isAppend, attemptID, false, false, promptGeneration,
+		execution, eventType, messageID, content, isAppend, attemptID, false, false, promptGeneration, nil,
 	)
 }
 
@@ -398,6 +412,7 @@ func (m *Manager) publishCanonicalStreamingContent(
 	content string,
 	isAppend bool,
 	diagnostic bool,
+	receipt *models.ConversationMutationReceipt,
 ) {
 	if content == "" {
 		return
@@ -409,6 +424,7 @@ func (m *Manager) publishCanonicalStreamingContent(
 		isAppend:            isAppend,
 		attemptID:           execution.currentStartupAttemptID(),
 		canonicalProjection: true,
+		conversationReceipt: receipt,
 		diagnostic:          diagnostic,
 		promptGeneration:    execution.promptGenerationSnapshot(),
 	})
@@ -424,6 +440,7 @@ func (m *Manager) publishStreamingContentNowWithProjection(
 	canonicalProjection bool,
 	diagnostic bool,
 	promptGeneration uint64,
+	receipt *models.ConversationMutationReceipt,
 ) {
 	if attemptID == "" {
 		attemptID = execution.currentStartupAttemptID()
@@ -436,6 +453,7 @@ func (m *Manager) publishStreamingContentNowWithProjection(
 		ProviderDiagnosticCandidate: diagnostic,
 		PromptGeneration:            promptGeneration,
 		CanonicalProjection:         canonicalProjection,
+		ConversationReceipt:         receipt,
 	}
 	if eventType == thinkingStreamingEventType {
 		event.MessageType = "thinking"
@@ -475,6 +493,7 @@ func (m *Manager) publishStreamingMessage(execution *AgentExecution, content str
 		execution.currentMessageID = messageID
 		execution.trackResponseAttemptMessageLocked(messageID)
 	}
+	execution.trackLastAssistantMessageLocked(messageID, promptGeneration)
 	execution.messageMu.Unlock()
 
 	m.logger.Debug("publishing streaming message",

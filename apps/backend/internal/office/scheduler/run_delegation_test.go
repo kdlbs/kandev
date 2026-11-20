@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -47,8 +49,8 @@ func buildSchedulerForQueueRun(t *testing.T, repo *officesqlite.Repository) *sch
 // so it works whether or not the run row's own workspace_id column was
 // stamped — exactly the thing these tests are distinguishing).
 func onlyQueuedRun(t *testing.T, repo interface {
-	ListRuns(ctx context.Context, workspaceID string) ([]*models.Run, error)
-}, workspaceID string) *models.Run {
+	ListRuns(ctx context.Context, workspaceID string) ([]*runsmodels.Run, error)
+}, workspaceID string) *runsmodels.Run {
 	t.Helper()
 	reqs, err := repo.ListRuns(context.Background(), workspaceID)
 	if err != nil {
@@ -95,8 +97,8 @@ func TestQueueRun_DelegatesToRunsServiceWhenWired(t *testing.T) {
 	if got.ChainCausationID != got.ID {
 		t.Errorf("causation_id = %q, want self-rooted %q (only the delegated causation path sets this)", got.ChainCausationID, got.ID)
 	}
-	if got.PriorityClass != models.PriorityClassEvent {
-		t.Errorf("priority_class = %d, want %d (PriorityClassEvent)", got.PriorityClass, models.PriorityClassEvent)
+	if got.PriorityClass != runsmodels.PriorityClassEvent {
+		t.Errorf("priority_class = %d, want %d (PriorityClassEvent)", got.PriorityClass, runsmodels.PriorityClassEvent)
 	}
 }
 
@@ -180,14 +182,14 @@ func TestQueueRunCtx_DelegatesRealActorFromRunContext(t *testing.T) {
 	}
 
 	got := onlyQueuedRun(t, repo, testWorkspaceID)
-	if got.ActorKind != models.ActorKindUser {
-		t.Errorf("actor_kind = %q, want %q", got.ActorKind, models.ActorKindUser)
+	if got.ActorKind != runsmodels.ActorKindUser {
+		t.Errorf("actor_kind = %q, want %q", got.ActorKind, runsmodels.ActorKindUser)
 	}
 	if got.ActorID != "user-42" {
 		t.Errorf("actor_id = %q, want %q", got.ActorID, "user-42")
 	}
-	if got.PriorityClass != models.PriorityClassHuman {
-		t.Errorf("priority_class = %d, want %d (PriorityClassHuman, since the actor is now a real user)", got.PriorityClass, models.PriorityClassHuman)
+	if got.PriorityClass != runsmodels.PriorityClassHuman {
+		t.Errorf("priority_class = %d, want %d (PriorityClassHuman, since the actor is now a real user)", got.PriorityClass, runsmodels.PriorityClassHuman)
 	}
 }
 

@@ -16,6 +16,7 @@ import {
   STEP_COLORS,
   hasOnEnterAction,
   hasOnExitAction,
+  stageTypeOnHoldToggle,
   type TransitionEventKey,
 } from "./workflow-pipeline-editor-helpers";
 import {
@@ -326,7 +327,36 @@ function StepToggleRows({
         onUpdate={onUpdate}
         readOnly={readOnly}
       />
+      <StepHoldRow step={step} savedStep={savedStep} onUpdate={onUpdate} readOnly={readOnly} />
     </>
+  );
+}
+
+type StepHoldRowProps = {
+  step: WorkflowStep;
+  savedStep?: WorkflowStep;
+  onUpdate: (updates: Partial<WorkflowStep>) => void;
+  readOnly: boolean;
+};
+
+// The step's hold nature, stored as stage_type. Consumers read the stored value
+// instead of the step's name, so renaming a hold step keeps it a hold and naming
+// a step "hold" does not make it one.
+function StepHoldRow({ step, savedStep, onUpdate, readOnly }: StepHoldRowProps) {
+  const { t } = useTranslation();
+  const stageType = step.stage_type ?? "custom";
+  return (
+    <StepCheckboxRow
+      id={`${step.id}-hold-step`}
+      checked={stageType === "hold"}
+      onCheckedChange={(checked) =>
+        !readOnly && onUpdate({ stage_type: stageTypeOnHoldToggle(checked, savedStep?.stage_type) })
+      }
+      disabled={readOnly}
+      label={t("workflows:holdStep")}
+      helpText={t("workflows:holdStepHelp")}
+      isDirty={isWorkflowStepValueDirty(step, savedStep, (item) => item.stage_type ?? "custom")}
+    />
   );
 }
 

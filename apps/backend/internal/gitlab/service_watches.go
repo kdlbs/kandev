@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"net/url"
 	"strings"
 	"time"
@@ -459,7 +460,7 @@ func (s *Service) CreateReviewWatch(ctx context.Context, req *CreateReviewWatchR
 		return nil, errStoreUnavailable
 	}
 
-	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), rw.ExecutorProfileID, rw.WorkspaceID); err != nil {
+	if _, err := s.executorActorContext(ctx, executoridentity.CreatorUserID(ctx), rw.ExecutorProfileID, rw.WorkspaceID); err != nil {
 		return nil, err
 	}
 	if err := store.CreateReviewWatch(ctx, rw); err != nil {

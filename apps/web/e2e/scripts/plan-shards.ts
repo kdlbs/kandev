@@ -84,7 +84,14 @@ export function catalogUnitsFromCases(
   cases: CatalogCase[],
 ): CatalogUnit[] {
   const allowedProjects = new Set(
-    cohort === "containers" ? ["containers"] : ["chromium", "mobile-chrome"],
+    cohort === "containers"
+      ? ["containers"]
+      : [
+          "chromium",
+          "mobile-chrome",
+          "first-profile-capability",
+          "mobile-first-profile-capability",
+        ],
   );
   const counts = new Map<string, { project: string; file: string; testCount: number }>();
   for (const { project, file } of cases) {

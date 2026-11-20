@@ -35,7 +35,7 @@ func TestWithPromptLifecycleLockRejectsRemovedOrReplacedExecution(t *testing.T) 
 				done <- store.WithPromptLifecycleLock(original.ID, func(*AgentExecution) { called = true })
 			}()
 			require.Eventually(t, func() bool {
-				return goroutineParkedIn("(*ExecutionStore).WithPromptLifecycleLock", "sync.(*Mutex).Lock")
+				return goroutineParkedIn("(*ExecutionStore).WithPromptLifecycleLock", "(*Mutex).LockContext")
 			}, lockOrderDeadlockGuard, time.Millisecond, "helper must finish its lookup before removal")
 			store.Remove(original.ID)
 			if replace {

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -78,7 +80,7 @@ func TestNewDashboardResponseUsesPublicJSONShape(t *testing.T) {
 }
 
 func TestRunToListItemPreservesCausationID(t *testing.T) {
-	item := runToListItem(&models.Run{
+	item := runToListItem(&runsmodels.Run{
 		ID:          "run-1",
 		CausationID: "routine-fire-1",
 	})

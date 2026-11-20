@@ -100,6 +100,11 @@ func dialWorkspaceInputLoop(t *testing.T, shell io.Writer) *websocket.Conn {
 // the client, the listener, and the handler's goroutines — the forwarding loop
 // parks in its select — for the rest of the package run.
 func dialWorkspaceStreamEndpoint(t *testing.T) (*Server, *websocket.Conn) {
+	srv, conn, _ := dialWorkspaceStreamEndpointWithCompletion(t)
+	return srv, conn
+}
+
+func dialWorkspaceStreamEndpointWithCompletion(t *testing.T) (*Server, *websocket.Conn, <-chan struct{}) {
 	t.Helper()
 	srv := newTestServer(t)
 	handlerReturned := make(chan struct{})
@@ -122,7 +127,22 @@ func dialWorkspaceStreamEndpoint(t *testing.T) (*Server, *websocket.Conn) {
 		_ = conn.Close()
 		waitForWorkspaceStreamShutdown(t, srv.procMgr.GetWorkspaceTracker().NotifyGitCommit, handlerReturned)
 	})
-	return srv, conn
+	return srv, conn, handlerReturned
+}
+
+func TestHandleWorkspaceStreamWS_ReturnsWhenIdleClientCloses(t *testing.T) {
+	_, conn, handlerReturned := dialWorkspaceStreamEndpointWithCompletion(t)
+	if got := readWorkspaceMessage(t, conn); got.Type != types.WorkspaceMessageTypeConnected {
+		t.Fatalf("first frame type = %q, want %q", got.Type, types.WorkspaceMessageTypeConnected)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close workspace client: %v", err)
+	}
+	select {
+	case <-handlerReturned:
+	case <-time.After(wsTestTimeout):
+		t.Fatal("workspace handler did not return after client close without further events")
+	}
 }
 
 func readWorkspaceMessage(t *testing.T, conn *websocket.Conn) types.WorkspaceStreamMessage {

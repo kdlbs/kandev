@@ -9,6 +9,8 @@ import (
 	"context"
 	"encoding/json"
 
+	"go.uber.org/zap"
+
 	runtimeskill "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -25,15 +27,33 @@ type officeInstructionLister interface {
 	ListInstructions(ctx context.Context, agentProfileID string) ([]*models.InstructionFile, error)
 }
 
+// promptReferenceExpander appends saved-prompt definitions for the
+// @name references in skill content.
+type promptReferenceExpander interface {
+	AppendSkillReferenceExpansions(ctx context.Context, content string, log *zap.Logger) string
+}
+
 // SkillReaderAdapter bridges an office Service / repo to the
 // runtime-tier SkillReader interface used by skill.Deployer.
 type SkillReaderAdapter struct {
-	inner officeSkillReader
+	inner       officeSkillReader
+	expander    promptReferenceExpander
+	expanderLog *zap.Logger
 }
 
 // NewSkillReaderAdapter wraps an office skill reader for the runtime.
 func NewSkillReaderAdapter(inner officeSkillReader) *SkillReaderAdapter {
 	return &SkillReaderAdapter{inner: inner}
+}
+
+// WithPromptReferenceExpander makes delivered skill content carry the
+// current definitions of the saved prompts it references. Stored skill
+// content is never modified. log receives non-fatal lookup failures and may
+// be nil.
+func (a *SkillReaderAdapter) WithPromptReferenceExpander(expander promptReferenceExpander, log *zap.Logger) *SkillReaderAdapter {
+	a.expander = expander
+	a.expanderLog = log
+	return a
 }
 
 // GetSkillFromConfig satisfies runtimeskill.SkillReader. Returns nil
@@ -50,9 +70,13 @@ func (a *SkillReaderAdapter) GetSkillFromConfig(ctx context.Context, idOrSlug st
 	if sk == nil {
 		return nil, nil
 	}
+	content := sk.Content
+	if a.expander != nil {
+		content = a.expander.AppendSkillReferenceExpansions(ctx, content, a.expanderLog)
+	}
 	return &runtimeskill.Skill{
 		Slug:       sk.Slug,
-		Content:    sk.Content,
+		Content:    content,
 		Files:      runtimeSkillFiles(sk.FileInventory),
 		SourceType: string(sk.SourceType),
 		IsSystem:   sk.IsSystem,

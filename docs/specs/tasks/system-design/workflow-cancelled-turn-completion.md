@@ -3,6 +3,7 @@ status: current
 system: tasks
 requirements:
   - REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001
+updated: 2026-11-10
 ---
 
 # Cancelled turn completion: dispatch and stream coordination
@@ -18,7 +19,9 @@ The [queued ownership design](queued-session-ownership.md#replay-and-reconciliat
 continues to own task admission and review reconciliation locking.
 The [UI progress design](../../ui/system-design/cancel-turn-progress.md) owns the
 existing cancellation projection and desktop/phone presentation.
-This design describes the implemented repair and the compatibility invariants that govern it.
+The preparation repair and acknowledgement amendment are implemented.
+The [settlement deadlock package](../../../plans/cancellation-completion-delete-deadlock/plan.md)
+records the acknowledgement and prompt-identity deadline regressions.
 
 ## Existing components
 
@@ -97,7 +100,7 @@ attempt and a completed pause no longer has an active operation.
 | Lifecycle prompt serialization before admission | Prior stream drain and preparation | Holding the session guard while waiting for publication |
 | Final admission through acceptance | Revalidation, generation allocation, transport acceptance, ownership publication | Turn completion or synchronous stream-consumer re-entry |
 | Stream publication | Existing ordered delivery and guarded persistence | A reverse dependency from guarded dispatch to the same publisher |
-| Cancellation reconciliation | Captured-identity validation and local writes | Lifecycle cancellation while holding the session guard |
+| Cancellation reconciliation | Captured-identity validation and local writes | Lifecycle cancellation or settlement acknowledgement while holding the session guard |
 
 Preserve `emitMu` ordering and `handleAgentStreamEvent` serialization.
 Removing either lock or making each publication an independent goroutine would weaken existing guarantees.
@@ -106,12 +109,47 @@ Admission rejection uses a cleanup callback distinct from provider delivery fail
 replacement cannot mark an already-running execution failed. Preparation failure callbacks must
 run after any dispatch guard is released.
 
+## Settlement acknowledgement and late completion
+
+This amendment applies the existing lock invariant to retained-failure acknowledgement.
+It covers AC-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001.1 and .2.
+
+`runExplicitCancellationOwned` retains logical operation ownership while it releases
+the physical session guard before `AcknowledgeRetainedPromptFailure`.
+That lifecycle call can wait for `promptLifecycleMu`.
+Completion can hold that mutex while `flushMessageBuffer` waits for `emitMu`.
+The publisher can hold `emitMu` while its synchronous consumer needs the session guard.
+Acknowledgement under the guard therefore creates a circular wait after cancellation escalation.
+
+The cancellation registry, captured execution identity, and prompt generation remain authoritative during this interval.
+Concurrent cancellation sources still join the same operation.
+Queued prompts remain parked. Acknowledgement validates the registered execution and generation before it changes settlement state.
+A stale acknowledgement cannot release successor admission.
+
+Reacquire through `lockedCancelInFlightGuard.relockWithContext` before any remaining guarded mutation.
+Revalidate the captured cancellation identity after reacquisition.
+If reacquisition expires, return the existing operation error and release only this operation's projection reference.
+Do not dispatch a joined action after its operation expires.
+
+`handleAgentTurnFailed` applies the same boundary after durable turn and delivery settlement.
+Release its session guard before `acknowledgeRetainedTurnFailure` enters lifecycle code.
+Keep runtime settlement fenced until the acknowledgement validates the captured generation.
+Do not weaken stream serialization or change event-bus delivery to hide the circular wait.
+
+Verification requires the real lifecycle completion handler, stream coalescer, and synchronous event bus.
+Use barriers to overlap a timer publication, a late completion, and cancellation acknowledgement.
+Prove exact transcript order, one cancellation outcome, cleared pending progress, and safe successor admission.
+Separate service tests prove that both acknowledgement callers release their actual session guard.
+An isolated fixture must terminate after an expected pre-fix failure without stranding the test process.
+
 ## Bounded cancellation guard acquisition
 
 The existing `cancellationOperationTTL` remains the service-owned operation deadline.
 Every guard acquisition performed by that operation must observe its context.
 This includes initial preparation, reacquisition after lifecycle cancellation, explicit joined
 reconciliation, and source-specific actions in `finishCancellationWithActions`.
+`GetPromptGenerationForSession` also observes that context when it reads the identity under `promptLifecycleMu`.
+A blocked prompt-identity read returns the context error without acquiring the mutex after expiry.
 
 Use the same reference-counted guard registry with a FIFO, context-aware lock.
 `LockContext` places a blocked caller in the waiter queue, and unlock hands ownership directly to
@@ -132,6 +170,40 @@ The initiating request may disconnect without aborting the accepted operation.
 Runtime cancellation escalation and its timeouts remain unchanged.
 If runtime cancellation succeeded but reconciliation could not acquire its guard,
 return an error and preserve existing retry reconciliation instead of claiming completion.
+
+## Cancellation client lease and concurrent stop
+
+`cancelAgentExecution` acquires one agentctl client lease and releases it on return.
+Every cancellation helper uses that captured client through escalation and durable submission settlement.
+These helpers must not acquire the lease again.
+The [client lease design](../../platform/system-design/agentctl-client-lease.md) defines the existing reader and writer boundary.
+
+`stopExecutionAgentctl` takes the write side to stop and close the transport.
+Go blocks new readers behind a queued writer, including a second reader from an existing lease holder.
+A nested read therefore prevents both cancellation and Stop from completing.
+The caller's context cannot interrupt that `RWMutex.RLock` wait.
+
+Pass the captured client explicitly through `waitForPromptFinishedAfterCancel`,
+`cancelDispatchOnlyPrompt`, `waitForCapturedDispatchCompletion`, and `finishDispatchCancelTimeout`.
+`escalateStuckCancel` requires that client argument and does not contain an implicit lease acquisition.
+Immediate rejection, disconnected streams, missing dispatch gates, and timeout escalation use the same rule.
+The contended-prompt path through `escalateCapturedDispatchWithoutPromptLock` retains its existing local settlement behavior.
+
+The lease remains held through `CancelDeliverySubmission` for the captured submission.
+Stop cannot close or replace that transport before settlement finishes.
+Prompt, startup, execution, and turn fencing remain authoritative throughout this operation.
+Escalation keeps its asynchronous ready publication and existing error semantics.
+Neither a queued Stop nor successful local escalation authorizes deletion of an unconfirmed live runtime.
+
+For session deletion, the existing [quiescence contract](session-delete-resource-cleanup.md#runtime-quiescence)
+continues to stop the captured execution before removing the session row.
+The cancellation lease must release so queued stop and deletion requests can proceed.
+This rule applies to all cancellation sources that enter `cancelAgentExecution`.
+
+Regression tests queue a real stop writer behind cancellation's client lease, then exercise each escalation branch.
+They prove cancellation and teardown drain without manual lease release.
+Additional cases preserve durable settlement, late completion ordering, and successor identity.
+The [cancel/stop fix package](../../../plans/cancel-stop-client-deadlock/plan.md) defines the exact tests and commands.
 
 ## Compatibility and persistence
 

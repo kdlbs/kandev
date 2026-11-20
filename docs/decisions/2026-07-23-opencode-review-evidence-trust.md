@@ -2,6 +2,7 @@
 
 **Status:** accepted
 **Date:** 2026-07-23
+**Amended:** 2026-10-26
 **Area:** workflow, infra
 
 ## Context
@@ -10,7 +11,7 @@ Routine PR review can use OpenCode running inside a trusted base-commit wrapper,
 
 ## Decision
 
-Trusted jobs run only from the base-controlled `pull_request_target` workflow, check out and assert the immutable head SHA, use only `BASE_SHA...HEAD_SHA`, and load the publisher from `BASE_SHA`; no App credential reaches the model step. Only same-repository review attaches the protected `opencode-review-trusted` environment and mints the dedicated current-repository-only installed GitHub App pull-request-write token; it uses `OPENCODE_REVIEW_ENV_APP_PRIVATE_KEY`, created only in that environment with no repository/org fallback secret, and administrators restrict environment deployment branches to the protected default branch. Its login is `${OPENCODE_REVIEW_APP_SLUG}[bot]`. Fork review never attaches this environment, remains advisory under the base-controlled workflow's GitHub token, and can never qualify.
+Trusted jobs run only from the base-controlled `pull_request_target` workflow, check out and assert `github.workflow_sha`, fetch and verify the event head as a Git object, use only `BASE_SHA...HEAD_SHA`, and load the publisher from the workflow checkout; no App credential reaches the model step. Only same-repository review attaches the protected `opencode-review-trusted` environment and mints the dedicated current-repository-only installed GitHub App pull-request-write token; it uses `OPENCODE_REVIEW_ENV_APP_PRIVATE_KEY`, created only in that environment with no repository/org fallback secret, and administrators restrict environment deployment branches to the protected default branch. Its login is `${OPENCODE_REVIEW_APP_SLUG}[bot]`. Fork review never attaches this environment, remains advisory under the base-controlled workflow's GitHub token, and can never qualify.
 
 The wrapper accepts exactly one findings block covering the whole trimmed model output (an optional JSON fence is allowed inside it). Valid empty output emits the wrapper clean marker in an exact-head `COMMENT` review; valid findings emit an action-required terminal review. Every malformed, missing, or failed model result attempts an exact-head non-clean diagnostic review and fails the job. A same-head non-clean review remains blocking even if a later clean review appears; only a new head can recover. Historical no-findings issue comments are non-actionable, while diagnostic and fallback comments remain actionable.
 
@@ -27,7 +28,7 @@ likewise limited to high-impact new/changed authz, workspace-isolation, secrets,
 untrusted-execution, or credential-trust boundaries, explicit request, or
 concrete automated security concerns.
 
-No product spec applies because this is workflow and infrastructure evidence policy.
+Execution input isolation is defined by [automatic review input isolation](2026-10-25-automatic-review-input-isolation.md) and the [CI input design](../specs/ci/system-design/privileged-workflow-inputs.md). This amendment preserves the producer identity and exact-head evidence policy.
 
 ## Consequences
 

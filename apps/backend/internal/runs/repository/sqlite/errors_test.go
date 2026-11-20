@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // TestReadMethodsPropagateDatabaseErrors closes the reader pool and
@@ -17,7 +17,7 @@ import (
 func TestReadMethodsPropagateDatabaseErrors(t *testing.T) {
 	repo, _, reader := newTestRepoWithHandles(t)
 	ctx := context.Background()
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "run-1", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":"t1","comment_id":"cm-1"}`,
 	})
@@ -44,6 +44,10 @@ func TestReadMethodsPropagateDatabaseErrors(t *testing.T) {
 		},
 		"ListPendingRunsForTask": func() error {
 			_, err := repo.ListPendingRunsForTask(ctx, "t1")
+			return err
+		},
+		"ListStaleClaimedRuns": func() error {
+			_, err := repo.ListStaleClaimedRuns(ctx, time.Now().UTC())
 			return err
 		},
 		"ListRunsForAgentPaged(first page)": func() error {
@@ -92,16 +96,20 @@ func TestReadMethodsPropagateDatabaseErrors(t *testing.T) {
 func TestWriteMethodsPropagateDatabaseErrors(t *testing.T) {
 	repo, writer, _ := newTestRepoWithHandles(t)
 	ctx := context.Background()
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "run-1", AgentProfileID: "a1", Reason: "task_assigned",
 	})
+	claimedAt := time.Now().UTC().Add(-time.Hour)
+	observedClaim := &runsmodels.Run{
+		ID: run.ID, Status: runsmodels.RunStatusClaimed, ClaimedAt: &claimedAt,
+	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close writer: %v", err)
 	}
 
 	checks := map[string]func() error{
 		"CreateRun": func() error {
-			return repo.CreateRun(ctx, &models.Run{AgentProfileID: "a1", Reason: "r"})
+			return repo.CreateRun(ctx, &runsmodels.Run{AgentProfileID: "a1", Reason: "r"})
 		},
 		"UpdateRunRuntimeSnapshot": func() error {
 			return repo.UpdateRunRuntimeSnapshot(ctx, run.ID, "{}", "{}", "s")
@@ -138,8 +146,8 @@ func TestWriteMethodsPropagateDatabaseErrors(t *testing.T) {
 			_, err := repo.CleanExpired(ctx, time.Now().UTC())
 			return err
 		},
-		"RecoverStale": func() error {
-			_, err := repo.RecoverStale(ctx, time.Now().UTC())
+		"RecoverStaleClaimedRun": func() error {
+			_, err := repo.RecoverStaleClaimedRun(ctx, observedClaim, time.Now().UTC())
 			return err
 		},
 		"CancelRunsWhere": func() error {

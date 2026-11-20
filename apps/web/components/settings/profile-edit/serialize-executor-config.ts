@@ -40,6 +40,12 @@ export type ExecutorProfileConfigForm = {
   primaryNetwork: string;
   primaryGwPriority: string;
   additionalNetworks: AdditionalNetworkRow[];
+  dockerTmpSize: string;
+  dockerTmpSizeDirty: boolean;
+  dockerLogMaxSize: string;
+  dockerLogMaxSizeDirty: boolean;
+  dockerLogMaxFiles: string;
+  dockerLogMaxFilesDirty: boolean;
 };
 
 export function buildSaveConfig(
@@ -71,6 +77,7 @@ export function buildSaveConfig(
   setTextConfig(config, "ssh_shell", form.isSSH ? form.sshShell.trim() : "");
   setBoolConfig(config, "ssh_reclaim_task_dir", form.isSSH, form.sshReclaimTaskDir);
   applyDockerNetworkConfig(config, form);
+  applyDockerStorageConfig(config, form);
   return config;
 }
 
@@ -89,6 +96,28 @@ function applyDockerNetworkConfig(
 
   const additional = form.isDocker ? serializeAdditionalNetworks(form.additionalNetworks) : [];
   setJsonConfig(config, "docker_additional_networks", form.isDocker, additional);
+}
+
+function applyDockerStorageConfig(
+  config: Record<string, string>,
+  form: ExecutorProfileConfigForm,
+): void {
+  if (!form.isDocker) {
+    delete config.docker_tmp_size;
+    delete config.docker_log_max_size;
+    delete config.docker_log_max_files;
+    return;
+  }
+
+  if (form.dockerTmpSizeDirty) {
+    setTextConfig(config, "docker_tmp_size", form.dockerTmpSize.trim());
+  }
+  if (form.dockerLogMaxSizeDirty) {
+    setTextConfig(config, "docker_log_max_size", form.dockerLogMaxSize.trim());
+  }
+  if (form.dockerLogMaxFilesDirty) {
+    setTextConfig(config, "docker_log_max_files", form.dockerLogMaxFiles.trim());
+  }
 }
 
 function setJsonConfig(

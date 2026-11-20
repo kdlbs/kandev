@@ -1,5 +1,5 @@
 "use client";
-import { useState, type ReactNode } from "react";
+import { forwardRef, useState, type ComponentPropsWithoutRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { SIDEBAR_LAYOUT_TAB_HREF } from "@/lib/settings-discovery/catalog/preferences";
 import { useRouter } from "@/lib/routing/client-router";
@@ -15,11 +15,34 @@ import {
   ContextMenuRadioGroup,
   ContextMenuRadioItem,
 } from "@kandev/ui/context-menu";
+import {
+  sidebarEditorNodes,
+  sidebarNodeSiblings,
+  isIntegrationPlugin,
+} from "@/lib/sidebar/integration-plugin-layout";
 import { moveSection, toggleNodeVisibility } from "@/lib/sidebar/layout-operations";
 import type { ShortcutCatalogEntry } from "@/lib/sidebar/shortcut-catalog";
 import type { ProjectedSidebarNode } from "@/lib/sidebar/layout-projection";
 import { SidebarCustomizationFeedback } from "./sidebar-customization-feedback";
 import { useSidebarCustomization } from "@/hooks/domains/sidebar/use-sidebar-customization";
+
+// Radix activation belongs to the navigation DOM, not its portaled React descendants.
+const SidebarCustomizeTrigger = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<"div">>(
+  function SidebarCustomizeTrigger({ onPointerDown, onContextMenu, ...props }, ref) {
+    return (
+      <div
+        {...props}
+        ref={ref}
+        onPointerDown={(event) => {
+          if (event.currentTarget.contains(event.target as Node)) onPointerDown?.(event);
+        }}
+        onContextMenu={(event) => {
+          if (event.currentTarget.contains(event.target as Node)) onContextMenu?.(event);
+        }}
+      />
+    );
+  },
+);
 
 export function SidebarCustomizeMenu({
   nodes,
@@ -36,11 +59,12 @@ export function SidebarCustomizeMenu({
   const style = useAppStore((s) => s.userSettings.sidebarNewTaskStyle);
   const { mutate, preferences, status, enabled } = useSidebarCustomization(catalog);
   const [target, setTarget] = useState<string | null>(null);
-  const targetIndex = nodes.findIndex((node) => node.id === target);
+  const siblings = sidebarNodeSiblings(nodes, target ?? "");
+  const targetIndex = siblings.findIndex((node) => node.id === target);
   const move = (delta: number) =>
     void mutate((layout) => {
       const index = layout.nodes.findIndex((node) => node.id === target);
-      const neighbour = nodes[targetIndex + delta];
+      const neighbour = siblings[targetIndex + delta];
       return neighbour && index >= 0
         ? moveSection(
             layout,
@@ -52,7 +76,7 @@ export function SidebarCustomizeMenu({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild disabled={!enabled}>
-        <div
+        <SidebarCustomizeTrigger
           className="min-h-6 min-w-0 shrink-0"
           aria-label={t("settings:sidebarCustomize")}
           tabIndex={nodes.every((node) => !node.visible) ? 0 : undefined}
@@ -65,7 +89,7 @@ export function SidebarCustomizeMenu({
           }}
         >
           {children}
-        </div>
+        </SidebarCustomizeTrigger>
       </ContextMenuTrigger>
       <ContextMenuContent
         className="w-64 max-h-[80dvh] overflow-y-auto"
@@ -73,9 +97,10 @@ export function SidebarCustomizeMenu({
       >
         <ContextMenuLabel>{t("settings:sidebarSettingsTitle")}</ContextMenuLabel>
         <ContextMenuSeparator />
-        {nodes.map((node) => (
+        {sidebarEditorNodes(nodes).map((node) => (
           <ContextMenuCheckboxItem
             key={node.id}
+            className={isIntegrationPlugin(node) ? "ml-4" : undefined}
             checked={node.visible}
             disabled={status === "saving"}
             data-testid={`sidebar-visibility-${node.id}`}
@@ -103,7 +128,7 @@ export function SidebarCustomizeMenu({
               {t("settings:moveUp")}
             </ContextMenuItem>
             <ContextMenuItem
-              disabled={targetIndex === nodes.length - 1 || status === "saving"}
+              disabled={targetIndex === siblings.length - 1 || status === "saving"}
               onSelect={() => move(1)}
             >
               {t("settings:moveDown")}

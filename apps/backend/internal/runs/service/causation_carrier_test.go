@@ -12,7 +12,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
@@ -29,7 +30,7 @@ func TestQueueRun_CarrierCreatingRunIDInheritsLineage(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "creating_run_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 	}); err != nil {
 		t.Fatalf("queue creating run: %v", err)
@@ -39,7 +40,7 @@ func TestQueueRun_CarrierCreatingRunIDInheritsLineage(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID:        "agent-primary",
 		Reason:                "carrier_followup",
-		ActorKind:             models.ActorKindAgent,
+		ActorKind:             runsmodels.ActorKindAgent,
 		ActorID:               "some-agent",
 		CarrierCreatingRunID:  creating.ID,
 		CarrierCausationID:    creating.ChainCausationID,
@@ -71,7 +72,7 @@ func TestQueueRun_EmptyCarrierCreatingRunIDRoots(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID:        "agent-primary",
 		Reason:                "routine_fire_reason",
-		ActorKind:             models.ActorKindSystem,
+		ActorKind:             runsmodels.ActorKindSystem,
 		CarrierCreatingRunID:  "",
 		CarrierCausationID:    "should-be-ignored",
 		CarrierCausationDepth: 7,
@@ -100,7 +101,7 @@ func TestQueueRun_HumanActorDiscardsCarrierLineage(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "carrier_source",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 	}); err != nil {
 		t.Fatalf("queue carrier source: %v", err)
@@ -110,7 +111,7 @@ func TestQueueRun_HumanActorDiscardsCarrierLineage(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID:        "agent-primary",
 		Reason:                "human_via_carrier",
-		ActorKind:             models.ActorKindUser,
+		ActorKind:             runsmodels.ActorKindUser,
 		ActorID:               "user-1",
 		CarrierCreatingRunID:  source.ID,
 		CarrierCausationID:    source.ChainCausationID,
@@ -141,7 +142,7 @@ func TestQueueRun_CarrierHumanRootedInheritsAcrossBoundary(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID:     "agent-primary",
 		Reason:             "carrier_human_rooted",
-		ActorKind:          models.ActorKindAgent,
+		ActorKind:          runsmodels.ActorKindAgent,
 		ActorID:            "agent-primary",
 		CarrierHumanRooted: boolPtr(true),
 	}); err != nil {

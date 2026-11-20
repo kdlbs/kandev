@@ -18,6 +18,12 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { requestNewTaskCreation } from "@/lib/desktop/new-task-request";
 import type { ProjectedSidebarNode, ProjectedShortcut } from "@/lib/sidebar/layout-projection";
 
+import {
+  integrationPluginLayout,
+  integrationPluginDestinations,
+} from "@/lib/sidebar/integration-plugin-layout";
+import type { ResolvedDestination } from "@/lib/navigation/types";
+
 type SidebarLayoutNavigationProps = {
   collapsed: boolean;
   inOffice: boolean;
@@ -44,7 +50,12 @@ function LayoutPluginItem({
   );
 }
 
-function builtinNode(node: ProjectedSidebarNode, collapsed: boolean): React.ReactNode {
+function builtinNode(
+  node: ProjectedSidebarNode,
+  collapsed: boolean,
+  plugins: ResolvedDestination[],
+  catalog: ReturnType<typeof useSidebarLayoutNavigation>["catalog"]["catalog"],
+): React.ReactNode {
   switch (node.destinationId) {
     case "inbox":
       return (
@@ -65,7 +76,9 @@ function builtinNode(node: ProjectedSidebarNode, collapsed: boolean): React.Reac
     case "canvases":
       return <CanvasesSection collapsed={collapsed} />;
     case "integrations":
-      return <IntegrationsSection collapsed={collapsed} includePluginItems={false} />;
+      return (
+        <IntegrationsSection collapsed={collapsed} pluginDestinations={plugins} catalog={catalog} />
+      );
     default:
       return null;
   }
@@ -98,7 +111,11 @@ export function SidebarLayoutNavigation({ collapsed, inOffice }: SidebarLayoutNa
     [openQuickChat, openQuickTerminal],
   );
 
-  const visibleNodes = projection.nodes.filter(
+  const plugins = integrationPluginDestinations(projection.nodes, catalog.catalog);
+  const renderNodes = inOffice
+    ? projection.nodes
+    : integrationPluginLayout(projection.nodes).topLevel;
+  const visibleNodes = renderNodes.filter(
     (node) => node.visible && (!inOffice || !isKanbanOnlyNode(node)),
   );
   const hasVisibleNewTask = visibleNodes.some((node) => node.destinationId === "new_task");
@@ -106,7 +123,7 @@ export function SidebarLayoutNavigation({ collapsed, inOffice }: SidebarLayoutNa
 
   for (const node of visibleNodes) {
     if (node.kind === "builtin") {
-      items.push({ id: node.id, content: builtinNode(node, collapsed) });
+      items.push({ id: node.id, content: builtinNode(node, collapsed, plugins, catalog.catalog) });
       continue;
     }
     if (node.kind === "plugin") {

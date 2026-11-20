@@ -10,6 +10,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/common/wsinput"
+	"github.com/kandev/kandev/internal/common/wskeepalive"
 )
 
 // wsWriter wraps a gorilla WebSocket to implement process.DirectOutputWriter.
@@ -48,6 +50,13 @@ func (w *wsWriter) Close() error {
 // bridgeBinaryWebSockets forwards binary WebSocket frames bidirectionally between
 // a client connection and an agentctl connection until either side disconnects.
 func (h *TerminalHandler) bridgeBinaryWebSockets(clientConn, agentctlConn *gorillaws.Conn, terminalID string) {
+	stopKeepalive, err := wskeepalive.Start(clientConn, h.keepalive)
+	if err != nil {
+		h.logger.Debug("remote terminal keepalive setup failed", zap.String("terminal_id", terminalID), zap.Error(err))
+		_ = agentctlConn.Close()
+		_ = clientConn.Close()
+		return
+	}
 	done := make(chan struct{}, 2)
 
 	// agentctl → client (shell output)
@@ -75,29 +84,32 @@ func (h *TerminalHandler) bridgeBinaryWebSockets(clientConn, agentctlConn *goril
 	// client → agentctl (input + resize)
 	go func() {
 		defer func() { done <- struct{}{} }()
-		for {
-			msgType, data, err := clientConn.ReadMessage()
-			if err != nil {
-				if !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
-					h.logger.Debug("remote terminal shell client read error",
-						zap.String("terminal_id", terminalID),
-						zap.Error(err))
-				}
-				_ = agentctlConn.Close()
-				return
-			}
-			if err := agentctlConn.WriteMessage(msgType, data); err != nil {
+		reader := wsinput.New(clientConn)
+		defer func() {
+			_ = clientConn.Close()
+			_ = reader.Err()
+		}()
+		for message := range reader.Messages() {
+			reader.Consume(message)
+			if err := agentctlConn.WriteMessage(message.Type, message.Data); err != nil {
 				h.logger.Debug("remote terminal shell upstream write error",
 					zap.String("terminal_id", terminalID),
 					zap.Error(err))
 				return
 			}
 		}
+		if err := reader.Err(); err != nil && !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
+			h.logger.Debug("remote terminal shell client read error",
+				zap.String("terminal_id", terminalID),
+				zap.Error(err))
+		}
+		_ = agentctlConn.Close()
 	}()
 
 	<-done
 	_ = agentctlConn.Close()
 	_ = clientConn.Close()
+	stopKeepalive()
 	<-done
 }
 
@@ -112,28 +124,29 @@ func (h *TerminalHandler) runTerminalBridge(
 ) {
 	var ptyWriter io.Writer
 	var directOutputSet bool
+	stopKeepalive := func() {}
 
 	defer func() {
+		_ = conn.Close()
+		stopKeepalive()
 		// Clean up: clear direct output at session level (process may have been restarted with new ID)
 		interactiveRunner.ClearDirectOutputBySession(sessionID)
 		_ = wsw.Close()
-		_ = conn.Close()
 
 		h.logger.Info("terminal WebSocket disconnected",
 			zap.String("session_id", sessionID))
 	}()
+	stop, err := wskeepalive.Start(conn, h.keepalive)
+	if err != nil {
+		h.logger.Debug("terminal keepalive setup failed", zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	stopKeepalive = stop
 
-	// Read from WebSocket and handle input/resize
-	for {
-		messageType, data, err := conn.ReadMessage()
-		if err != nil {
-			if !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
-				h.logger.Debug("WebSocket read error",
-					zap.String("session_id", sessionID),
-					zap.Error(err))
-			}
-			return
-		}
+	reader := wsinput.New(conn)
+	for message := range reader.Messages() {
+		reader.Consume(message)
+		messageType, data := message.Type, message.Data
 
 		if messageType != gorillaws.BinaryMessage && messageType != gorillaws.TextMessage {
 			continue
@@ -153,6 +166,11 @@ func (h *TerminalHandler) runTerminalBridge(
 		newID, newDirect := h.handleTerminalInput(data, sessionID, processID, interactiveRunner, wsw, &ptyWriter, directOutputSet)
 		processID = newID
 		directOutputSet = newDirect
+	}
+	if err := reader.Err(); err != nil && !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
+		h.logger.Debug("WebSocket read error",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 }
 
@@ -424,15 +442,17 @@ func (h *TerminalHandler) runUserShellBridge(
 ) {
 	var ptyWriter io.Writer
 	var directOutputSet bool
+	stopKeepalive := func() {}
 
 	defer func() {
+		_ = conn.Close()
+		stopKeepalive()
 		// Clean up WebSocket resources but DON'T stop the process
 		// The process is stopped by explicit user_shell.stop/destroy or task cleanup.
 		// Keeping it alive here allows reconnect after React remounts or temporary disconnects.
 		interactiveRunner.ClearUserShellDirectOutput(scopeID, terminalID)
 
 		_ = wsw.Close()
-		_ = conn.Close()
 
 		h.logger.Info("user shell WebSocket disconnected (process still running for potential reconnect)",
 			zap.String("session_id", sessionID),
@@ -440,19 +460,17 @@ func (h *TerminalHandler) runUserShellBridge(
 			zap.String("process_id", processID),
 			zap.Int("os_pid", osPIDForInteractiveProcess(interactiveRunner, processID)))
 	}()
+	stop, err := wskeepalive.Start(conn, h.keepalive)
+	if err != nil {
+		h.logger.Debug("user shell keepalive setup failed", zap.String("session_id", sessionID), zap.String("terminal_id", terminalID), zap.Error(err))
+		return
+	}
+	stopKeepalive = stop
 
-	// Read from WebSocket and handle input/resize
-	for {
-		messageType, data, err := conn.ReadMessage()
-		if err != nil {
-			if !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
-				h.logger.Debug("WebSocket read error",
-					zap.String("session_id", sessionID),
-					zap.String("terminal_id", terminalID),
-					zap.Error(err))
-			}
-			return
-		}
+	reader := wsinput.New(conn)
+	for message := range reader.Messages() {
+		reader.Consume(message)
+		messageType, data := message.Type, message.Data
 
 		if messageType != gorillaws.BinaryMessage && messageType != gorillaws.TextMessage {
 			continue
@@ -474,6 +492,12 @@ func (h *TerminalHandler) runUserShellBridge(
 			data, sessionID, scopeID, terminalID, processID,
 			interactiveRunner, wsw, &ptyWriter, directOutputSet,
 		)
+	}
+	if err := reader.Err(); err != nil && !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
+		h.logger.Debug("WebSocket read error",
+			zap.String("session_id", sessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Error(err))
 	}
 }
 

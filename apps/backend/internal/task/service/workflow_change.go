@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -137,6 +138,10 @@ func (s *Service) normalizeWorkflowChangeAgentOverrides(
 	if err != nil {
 		return nil, invalidWorkflowChange(WorkflowChangeErrorInvalid, "")
 	}
+	ctx, err = s.authorizeWorkflowChangeExecutor(ctx, executor, executorProfile)
+	if err != nil {
+		return nil, invalidWorkflowChange(WorkflowChangeErrorAgentIncompat, "")
+	}
 	bindings := make([]models.WorkflowAgentOverrideBinding, 0, len(requested))
 	validatedProfiles := make(map[string]struct{})
 	sources := sortedWorkflowChangeSources(fixedSteps)
@@ -251,6 +256,35 @@ func (s *Service) workflowChangeExecutor(
 		return nil, nil, fmt.Errorf("task executor is unavailable")
 	}
 	return executor, executorProfile, nil
+}
+
+// authorizeWorkflowChangeExecutor validates the caller against the resolved
+// executor before any compatibility check reads credentials. Remote executors
+// additionally require an established actor so the scoped secret store never
+// falls back to its unscoped internal context.
+func (s *Service) authorizeWorkflowChangeExecutor(
+	ctx context.Context,
+	executor *models.Executor,
+	executorProfile *models.ExecutorProfile,
+) (context.Context, error) {
+	if executor == nil {
+		return ctx, fmt.Errorf("task executor is unavailable")
+	}
+	profileID := ""
+	if executorProfile != nil {
+		profileID = executorProfile.ID
+	}
+	if err := s.AuthorizeExecutorConfiguration(ctx, executor.ID, profileID); err != nil {
+		return ctx, err
+	}
+	if !models.IsRemoteExecutorType(executor.Type) {
+		return ctx, nil
+	}
+	identity, ok := s.executorCaller(ctx)
+	if !ok {
+		return ctx, fmt.Errorf("executor actor is unavailable")
+	}
+	return authn.WithIdentity(ctx, identity), nil
 }
 
 func workflowChangeGuard(request *models.WorkflowChangeRequest) *models.WorkflowChangeSource {

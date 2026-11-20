@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import { t } from "@/lib/i18n";
 import { renderPanel, resolveChatPanelTitle } from "./dockview-panel-content";
 import { DESKTOP_COMPONENT_NAMES, DESKTOP_VALID_COMPONENTS } from "./dockview-desktop-layout";
+import { resolveDockviewSessionId } from "./dockview-desktop-layout-hooks";
 import { RENDERABLE_COMPONENT_NAMES } from "@/lib/state/layout-manager/renderable-components";
 
 /** The element type `renderPanel` resolves a component to. A name with no
@@ -74,5 +75,54 @@ describe("resolveChatPanelTitle", () => {
     for (const name of ["Mock", "Claude Code", "GPT-5", "amp"]) {
       expect(resolveChatPanelTitle(name, t)).toBe(name);
     }
+  });
+});
+
+describe("resolveDockviewSessionId", () => {
+  const otherTask = "task-other";
+  const renderedTask = "task-rendered";
+
+  it("keeps an owned global selection ahead of the guarded route session", () => {
+    expect(
+      resolveDockviewSessionId({
+        activeSessionId: "session-active",
+        activeSessionTaskId: renderedTask,
+        taskId: renderedTask,
+        guardedSessionId: "session-route",
+      }),
+    ).toBe("session-active");
+  });
+
+  it("falls back to the guarded route session when the global selection belongs to another task", () => {
+    expect(
+      resolveDockviewSessionId({
+        activeSessionId: "session-child",
+        activeSessionTaskId: otherTask,
+        taskId: renderedTask,
+        guardedSessionId: "session-parent",
+      }),
+    ).toBe("session-parent");
+  });
+
+  it("falls back when the global selection row has not hydrated", () => {
+    expect(
+      resolveDockviewSessionId({
+        activeSessionId: "session-pending",
+        activeSessionTaskId: null,
+        taskId: renderedTask,
+        guardedSessionId: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("falls back to the guarded route session when there is no global selection", () => {
+    expect(
+      resolveDockviewSessionId({
+        activeSessionId: null,
+        activeSessionTaskId: null,
+        taskId: renderedTask,
+        guardedSessionId: "session-route",
+      }),
+    ).toBe("session-route");
   });
 });

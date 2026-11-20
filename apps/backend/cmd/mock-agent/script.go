@@ -79,6 +79,9 @@ func executeCommand(e *emitter, fullPrompt, line string, planVersion *string) {
 
 	case strings.HasPrefix(line, "e2e:shell_result("):
 		executeSimulatedShellResult(e, line)
+
+	case strings.HasPrefix(line, "e2e:shell_stream("):
+		executeShellStream(e, line)
 	}
 }
 

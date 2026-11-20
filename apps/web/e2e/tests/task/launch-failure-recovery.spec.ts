@@ -489,7 +489,11 @@ test.describe("task launch failure recovery", () => {
     const failureRows = testPage.getByTestId("session-recovery-history");
     await expect(failureRows).toHaveCount(1, { timeout: 30_000 });
     const failureRow = failureRows.first();
-    await expect(failureRow).toContainText("This failure is explained in the recovery card above.");
+    await expect(failureRow).toContainText("Required contribution access was denied.");
+    await failureRow.getByText("Technical details", { exact: true }).click();
+    await expect(failureRow.locator("details")).toContainText("Attempt: resume-1");
+    await expect(failureRow.locator("details")).toContainText(failureText);
+    await failureRow.getByText("Technical details", { exact: true }).click();
     await expect(testPage.getByTestId("task-shared-error")).toHaveCount(0);
     const transcript = session.activeChat().locator(".chat-message-list").first();
     await expect
@@ -500,6 +504,10 @@ test.describe("task launch failure recovery", () => {
     expect(initialScroll.scrollTop).toBeGreaterThan(0);
     await expect(session.activeChat().getByTestId("session-recovery-card")).toBeVisible();
 
+    await prCapture.screenshot("active-recovery-desktop", {
+      caption: "Desktop chat shows the failure summary alongside the recovery actions.",
+      fullPage: true,
+    });
     const recoveryCard = session.activeChat().getByTestId("session-recovery-card");
     const details = recoveryCard.getByText("Technical details", { exact: true });
     await details.click();
@@ -643,9 +651,7 @@ test.describe("task launch failure recovery", () => {
     });
     await expect(failureRows).toHaveCount(2);
     const currentFailureRow = failureRows.last();
-    await expect(currentFailureRow).toContainText(
-      "This failure is explained in the recovery card above.",
-    );
+    await expect(currentFailureRow).toContainText("The startup operation could not be completed.");
     await expect(currentFailureRow.getByTestId("recovery-resume-button")).toHaveCount(0);
     await expect(
       testPage.getByTestId("session-recovery-card").getByTestId("recovery-resume-button"),
@@ -660,7 +666,7 @@ test.describe("task launch failure recovery", () => {
       reloadedFailureRows.first().getByTestId("session-recovery-resolved"),
     ).toBeVisible();
     await expect(reloadedFailureRows.last()).toContainText(
-      "This failure is explained in the recovery card above.",
+      "The startup operation could not be completed.",
     );
     await reloadedFailureRows.first().getByText("Technical details", { exact: true }).click();
     await expect(reloadedFailureRows.first().locator("details")).toContainText("Attempt: resume-1");

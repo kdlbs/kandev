@@ -10,8 +10,10 @@ import (
 )
 
 type repositorySelectionResolverStub struct {
-	calls   []TaskRepositoryInput
-	resolve func(TaskRepositoryInput) (TaskRepositoryInput, error)
+	calls       []TaskRepositoryInput
+	resolve     func(TaskRepositoryInput) (TaskRepositoryInput, error)
+	discover    func(TaskRepositoryInput) (RepositorySelectionDiscoveryResult, error)
+	discoveries []TaskRepositoryInput
 }
 
 func (r *repositorySelectionResolverStub) ResolveRepositorySelection(
@@ -22,6 +24,16 @@ func (r *repositorySelectionResolverStub) ResolveRepositorySelection(
 		return input, nil
 	}
 	return r.resolve(input)
+}
+
+func (r *repositorySelectionResolverStub) DiscoverRepositorySelections(
+	_ context.Context, _ string, input TaskRepositoryInput,
+) (RepositorySelectionDiscoveryResult, error) {
+	r.discoveries = append(r.discoveries, input)
+	if r.discover == nil {
+		return RepositorySelectionDiscoveryResult{}, nil
+	}
+	return r.discover(input)
 }
 
 func TestCreateTaskPreflightsPluginRepositoryBeforePersistence(t *testing.T) {

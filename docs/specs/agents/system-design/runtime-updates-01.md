@@ -1,10 +1,10 @@
 ---
-status: draft
+status: current
 system: agents
 requirements:
   - REQ-AGENTS-RUNTIME-UPDATES-001
 created: 2026-07-26
-updated: 2026-09-07
+updated: 2026-11-05
 owners:
   - Kandev
 ---
@@ -524,6 +524,44 @@ approve pull requests** must remain enabled for the built-in token to create or
 refresh the grouped PR. GitHub may still apply its approval policy to generated
 workflow runs; that policy is operationally distinct from the event-suppression
 problem solved by explicit dispatch.
+
+### Validation fixtures and delivery records
+
+Default-command and metadata tests obtain shipped versions from the central
+catalogue. They still assert trusted package identities, exact version
+selection, and complete argument order. Explicit override and historical
+migration fixtures retain fixed versions.
+
+Copilot plugin success fixtures can select an explicit runtime version without
+depending on the mutable shipped default. The current
+[Copilot compatibility contract](copilot-plugin-contract-compatibility.md)
+checks native capability and inventory shape instead of an exact-version list.
+An npm release number alone does not prove compatibility.
+
+The generated PR includes a delivery record under
+`docs/plans/managed-runtime-pin-automation/`: `plan.md` and
+`task-01-refresh-pins.md`. The record lists the changed packages, previous and
+proposed versions, requirement/design references, and actual validation results.
+The generator writes a completed record only after managed-runtime validation
+succeeds. An unchanged catalogue produces no record change.
+
+The workflow commits the catalogue and those two record files together. This
+satisfies the existing
+[PR documentation coverage contract](../../ci/system-design/pull-request-documentation-coverage.md)
+without a new exemption or an automatic exception label. The records at those
+stable paths change with each proposed version set, so each PR contains a
+changed work order. The six validation dispatches remain. A separate
+`pr-docs.yml` dispatch uses `--ref main` and the generated PR number, because
+that evaluator runs only from the trusted default branch.
+
+The [repair package](../../../plans/agent-cli-pin-automation-repair/plan.md)
+records implementation and verification. It does not change runtime activation
+or authorize a native compatibility claim before evidence exists.
+
+Copilot `1.0.105` has recorded inventory and installation-metadata evidence.
+Authenticated ACP behavior, physical-device coverage, and enterprise-policy
+enforcement remain untested by that fixture. The current compatibility contract
+governs runtime admission independently of those diagnostic observations.
 
 ## Out of scope
 

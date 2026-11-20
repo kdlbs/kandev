@@ -14,7 +14,7 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -463,6 +463,10 @@ func exactReadSpecificUnavailableReason(method string, host *pluginHost) string 
 	case exactReadTaskUsage:
 		if _, ok := host.taskData.(exactTaskObservationSource); !ok {
 			return "task_usage_data_unavailable"
+		}
+	case automationHistoryListDefinitionsMethod, automationHistoryListRunsMethod, automationHistoryGetRunMethod:
+		if host.automationHistoryDataDep == nil || host.automationHistoryDataDep() == nil {
+			return "automation_history_data_unavailable"
 		}
 	}
 	return ""

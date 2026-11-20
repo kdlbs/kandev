@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // RuntimeTransport adapts a PluginRuntime (runtime.Manager in production)
@@ -31,4 +31,14 @@ func (t *RuntimeTransport) DeliverEvent(ctx context.Context, pluginID string, e 
 		return fmt.Errorf("plugins: plugin %q is not running", pluginID)
 	}
 	return remote.DeliverEvent(ctx, e)
+}
+
+// EventOriginContext restores the issuing invocation even when a different
+// plugin subscribes, or the existing queue retries after serialization.
+func (t *RuntimeTransport) EventOriginContext(ctx context.Context, pluginID, reference string) (context.Context, context.CancelFunc) {
+	remote, ok := t.runtime.Get(pluginID)
+	if !ok {
+		return pluginsdk.UnidentifiedEventContext(ctx), func() {}
+	}
+	return remote.EventOriginContext(ctx, reference)
 }

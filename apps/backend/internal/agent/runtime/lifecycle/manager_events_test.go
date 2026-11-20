@@ -289,6 +289,78 @@ func TestHandleAgentEvent_CompleteCarriesPromptTurnID(t *testing.T) {
 	t.Fatal("no complete stream event published")
 }
 
+func TestHandleAgentEvent_CompleteConsumesCausingRunIDAfterReady(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-run-cause", "task-1", "session-1")
+	execution.CausingRunID = "office-run-1"
+	execution.setMetadataValue(MetadataKeyCausingRunID, "office-run-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	generation, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin prompt: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:                      streams.EventTypeComplete,
+		SessionID:                 execution.SessionID,
+		PromptGeneration:          generation,
+		DeliveryStreamID:          "stream-office",
+		DeliveryIncarnationID:     "incarnation-office",
+		DeliveryHarnessGeneration: 3,
+		DeliverySequence:          9,
+		DeliverySubmissionID:      "submission-office",
+	})
+
+	var readyPayload *AgentEventPayload
+	for _, published := range eventBus.PublishedEvents {
+		if published.Subject != events.AgentReady {
+			continue
+		}
+		payload, ok := published.Event.Data.(AgentEventPayload)
+		if ok {
+			readyPayload = &payload
+		}
+	}
+	if readyPayload == nil {
+		t.Fatal("AgentReady payload was not published")
+	}
+	if readyPayload.CausingRunID != "office-run-1" {
+		t.Fatalf("ready event causing run ID = %q, want office-run-1", readyPayload.CausingRunID)
+	}
+	if readyPayload.TerminalCausingRunID != "office-run-1" {
+		t.Fatalf("ready event terminal causing run ID = %q, want office-run-1", readyPayload.TerminalCausingRunID)
+	}
+	if readyPayload.DeliveryStreamID != "stream-office" ||
+		readyPayload.DeliveryIncarnationID != "incarnation-office" ||
+		readyPayload.DeliveryHarnessGeneration != 3 || readyPayload.DeliverySequence != 9 ||
+		readyPayload.DeliverySubmissionID != "submission-office" || readyPayload.DeliveryOutcome != "completed" {
+		t.Fatalf("ready event lost delivery identity: %+v", readyPayload)
+	}
+	if execution.CausingRunID != "" {
+		t.Fatalf("execution causing run ID after ready = %q, want empty", execution.CausingRunID)
+	}
+	if _, ok := execution.metadataValue(MetadataKeyCausingRunID); ok {
+		t.Fatal("causing run metadata remains after the first turn completed")
+	}
+	if execution.TerminalCausingRunID != "office-run-1" {
+		t.Fatalf("terminal causing run ID after ready = %q, want office-run-1", execution.TerminalCausingRunID)
+	}
+	if execution.metadataString(MetadataKeyTerminalCausingRunID) != "office-run-1" {
+		t.Fatalf("terminal causing run metadata = %q, want office-run-1", execution.metadataString(MetadataKeyTerminalCausingRunID))
+	}
+	if _, err := mgr.executionStore.BeginPrompt(execution.ID); err != nil {
+		t.Fatalf("begin follow-up prompt: %v", err)
+	}
+	if execution.TerminalCausingRunID != "" {
+		t.Fatalf("terminal causing run ID on follow-up prompt = %q, want empty", execution.TerminalCausingRunID)
+	}
+	if _, ok := execution.metadataValue(MetadataKeyTerminalCausingRunID); ok {
+		t.Fatal("terminal causing run metadata remains on a follow-up prompt")
+	}
+}
+
 func TestUsageObservationUsesItsPromptGenerationTurnID(t *testing.T) {
 	execution := &AgentExecution{}
 	execution.setPromptTurnID("turn-a")

@@ -464,13 +464,9 @@ func TestResetAgentContext_FailureFromRotatedExecutionDoesNotOverwrite(t *testin
 }
 
 // TestResetAgentContext_FailureReconcileDroppedWhenSessionMovesMidFlight models
-// the race the reconcile write is exposed to: the ACP session can move again
-// between resetAgentContext reading the live id and storeResumeToken
-// re-reading it for its stale-generation guard. Staged deterministically by
-// returning a different id on each lookup — the first is what the reconcile
-// tries to persist, the second is the newer generation the guard compares
-// against. The reconcile must lose: a fresher generation already owns the
-// session, and its own event will persist the correct token.
+// the race where the ACP session moves after reset reconciliation reads it but
+// before the guarded write. The stale write must lose, preserve the previous
+// token, and keep prompt admission blocked until the new identity can be saved.
 func TestResetAgentContext_FailureReconcileDroppedWhenSessionMovesMidFlight(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -521,5 +517,8 @@ func TestResetAgentContext_FailureReconcileDroppedWhenSessionMovesMidFlight(t *t
 	if running.ResumeToken != seededToken {
 		t.Fatalf("stale reconcile beat a newer ACP session generation: got %q, want %q",
 			running.ResumeToken, seededToken)
+	}
+	if err := svc.validatePromptTaskStart(session.ID); !errors.Is(err, ErrSessionResetInProgress) {
+		t.Fatalf("expected reset to stay blocked after a newer generation wins, got %v", err)
 	}
 }

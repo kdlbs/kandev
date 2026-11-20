@@ -78,7 +78,7 @@ func (r *Repository) updateAgentPlanMessage(
 	if existing.RequestsInput {
 		requestsInput = 1
 	}
-	if err := r.updateMessageWithPayloadGuardTx(ctx, tx, existing, existingMetadata, requestsInput); err != nil {
+	if err := r.updateMessageWithPayloadGuardTx(ctx, tx, existing, existingMetadata, requestsInput, true); err != nil {
 		return nil, nil, false, err
 	}
 	receipt := &models.ConversationMutationReceipt{}

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback } from "react";
-import { KEY_SEQUENCES } from "@/lib/terminal/key-sequences";
+import { isArrowKey, KEY_SEQUENCES } from "@/lib/terminal/key-sequences";
+import { sendShellArrow } from "@/lib/terminal/send-shell-input";
 import { useShellKeySender } from "@/hooks/domains/session/use-shell-key-sender";
 import {
   resolveVisualViewportPosition,
@@ -44,11 +45,12 @@ export function MobileTerminalKeybar({
   const toggleShift = useShellModifiersStore((s) => s.toggleShift);
 
   const tapSend = useCallback(
-    (data: string) => {
+    (data: string, key?: string) => {
       onFocus();
-      (onSend ?? send)(data);
+      if (!onSend && sessionId && key && isArrowKey(key)) sendShellArrow(sessionId, key);
+      else (onSend ?? send)(data);
     },
-    [onFocus, onSend, send],
+    [onFocus, onSend, send, sessionId],
   );
 
   const onCtrlTap = useCallback(() => {
@@ -114,7 +116,7 @@ export function MobileTerminalKeybar({
             key={key.id}
             id={key.id}
             ariaLabel={t(key.ariaLabelKey)}
-            onTap={() => tapSend(key.seq)}
+            onTap={() => tapSend(key.seq, key.id)}
           >
             {key.label}
           </KeybarButton>

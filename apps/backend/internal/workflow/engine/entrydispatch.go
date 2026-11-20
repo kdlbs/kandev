@@ -95,7 +95,9 @@ func (e *Engine) DispatchStepEntry(ctx context.Context, taskID, workflowID, step
 			continue
 		}
 		if e.markerExecutor != nil && markerEntryID != 0 && stepentry.MarkerBearing(string(action.Kind)) {
-			abandon, execErr := e.markerExecutor.ExecuteMarkerBearingStepEntryAction(ctx, taskID, step, action, action.DeclaredPosition, markerEntryID)
+			abandon, execErr := e.markerExecutor.ExecuteMarkerBearingStepEntryAction(
+				ctx, taskID, step, action, action.DeclaredPosition, entryID, markerEntryID,
+			)
 			if abandon {
 				break
 			}
@@ -144,11 +146,12 @@ func (e *Engine) executeStepEntryAction(ctx context.Context, state MachineState,
 		return nil
 	}
 	_, err := callback.Execute(ctx, ActionInput{
-		Trigger: TriggerOnEnter,
-		State:   state,
-		Step:    step,
-		Action:  action,
-		EntryID: entryID,
+		Trigger:                 TriggerOnEnter,
+		State:                   state,
+		Step:                    step,
+		Action:                  action,
+		EntryID:                 entryID,
+		CausingStepTransitionID: entryID,
 	})
 	return err
 }

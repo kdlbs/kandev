@@ -120,7 +120,7 @@ func restartSubmissionStatesMatch(sqlState models.DeliverySubmissionState, peerS
 }
 
 func restartJournalOwnerMatches(inputs *silentRestoreInputs, descriptor journal.RecoveryDescriptor) bool {
-	return descriptor.Durable && descriptor.Version == journal.CurrentVersion && !descriptor.SubmissionsTruncated &&
+	return descriptor.Durable && journal.SupportsDeliveryVersion(descriptor.Version) && !descriptor.SubmissionsTruncated &&
 		descriptor.SessionID == inputs.session.ID && descriptor.IncarnationID == inputs.recovery.IncarnationID &&
 		descriptor.HarnessGeneration == uint64(inputs.recovery.HarnessGeneration)
 }

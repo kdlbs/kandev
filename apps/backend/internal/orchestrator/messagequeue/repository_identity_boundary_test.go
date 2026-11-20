@@ -483,9 +483,9 @@ func TestRepositoriesTransferSessionIdentitiesRejectCrossTaskStateMove(t *testin
 				WorkflowStepID:       "step-source",
 			}))
 			require.NoError(t, repository.SetAutoRunForSession(ctx, source, false))
-			_, err := repository.SetAutoMergeOverride(ctx, source, true)
+			_, err := setAutoMergeOverrideForTest(ctx, repository, source, true)
 			require.NoError(t, err)
-			_, err = repository.SetAutoMergeOverride(ctx, destination, false)
+			_, err = setAutoMergeOverrideForTest(ctx, repository, destination, false)
 			require.NoError(t, err)
 
 			sourceBefore, err := repository.Snapshot(ctx, source)

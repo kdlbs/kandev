@@ -117,6 +117,7 @@ type DeploymentAppManifestSubmission struct {
 }
 
 type AppRegistrationManifestRequest struct {
+	GitHubHost     string
 	RegistrationID string
 	OwnerType      ManifestOwnerType
 	OwnerLogin     string
@@ -152,6 +153,16 @@ func BuildAppRegistrationManifest(
 	}
 	submission.Manifest.SetupURL = ""
 	submission.Manifest.Public = public
+	host, err := connectionHost(request.GitHubHost)
+	if err != nil {
+		return DeploymentAppManifestSubmission{}, err
+	}
+	registrationURL, err := url.Parse(submission.RegistrationURL)
+	if err != nil {
+		return DeploymentAppManifestSubmission{}, err
+	}
+	registrationURL.Host = host.String()
+	submission.RegistrationURL = registrationURL.String()
 	return submission, nil
 }
 

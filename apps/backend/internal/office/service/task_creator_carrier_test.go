@@ -13,6 +13,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/office/shared"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
@@ -62,7 +65,7 @@ func TestCreateOfficeTaskAsAgent_WithCausingRunID_PersistsCarrier(t *testing.T) 
 		t.Fatalf("create agent: %v", err)
 	}
 	if _, err := svc.QueueRunWithActor(ctx, agent.ID, "heartbeat", `{}`, "",
-		models.ActorKindUser, "user-1", ""); err != nil {
+		runsmodels.ActorKindUser, "user-1", ""); err != nil {
 		t.Fatalf("queue causing run: %v", err)
 	}
 	runs, err := repo.ListRuns(ctx, "ws-1")
@@ -75,7 +78,7 @@ func TestCreateOfficeTaskAsAgent_WithCausingRunID_PersistsCarrier(t *testing.T) 
 	causingRun := runs[0]
 
 	taskID, err := svc.CreateOfficeTaskAsAgent(
-		ctx, agent.ID, "ws-1", "project-1", "agent-assignee", "Build widget", "A description", causingRun.ID,
+		ctx, agent.ID, "ws-1", "project-1", "agent-assignee", "Build widget", "A description", causingRun.ID, shared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskAsAgent: %v", err)
@@ -110,9 +113,9 @@ func TestCreateOfficeTaskAsAgent_WithCausingRunID_PersistsCarrier(t *testing.T) 
 		t.Errorf("carrier routine_id = %v, want %q",
 			metadata[taskmodels.MetaKeyOfficeCarrierRoutineID], causingRun.RoutineID)
 	}
-	if metadata[taskmodels.MetaKeyOfficeCarrierActorKind] != string(models.ActorKindAgent) {
+	if metadata[taskmodels.MetaKeyOfficeCarrierActorKind] != string(runsmodels.ActorKindAgent) {
 		t.Errorf("carrier actor_kind = %v, want %q",
-			metadata[taskmodels.MetaKeyOfficeCarrierActorKind], models.ActorKindAgent)
+			metadata[taskmodels.MetaKeyOfficeCarrierActorKind], runsmodels.ActorKindAgent)
 	}
 	if metadata[taskmodels.MetaKeyOfficeCarrierActorID] != agent.ID {
 		t.Errorf("carrier actor_id = %v, want %q",
@@ -126,7 +129,7 @@ func TestCreateOfficeTaskAsAgent_EmptyCausingRunID_NoCarrier(t *testing.T) {
 	ctx := context.Background()
 
 	taskID, err := svc.CreateOfficeTaskAsAgent(
-		ctx, "", "ws-1", "project-1", "agent-assignee", "Build widget", "A description", "",
+		ctx, "", "ws-1", "project-1", "agent-assignee", "Build widget", "A description", "", shared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskAsAgent: %v", err)
@@ -148,7 +151,7 @@ func TestCreateOfficeTaskAsAgent_UnreadableCausingRunID_NoCarrierButTaskCreated(
 	ctx := context.Background()
 
 	taskID, err := svc.CreateOfficeTaskAsAgent(
-		ctx, "", "ws-1", "project-1", "agent-assignee", "Build widget", "A description", "does-not-exist",
+		ctx, "", "ws-1", "project-1", "agent-assignee", "Build widget", "A description", "does-not-exist", shared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskAsAgent: %v", err)

@@ -136,6 +136,7 @@ export type TaskEventPayload = {
     updated_at?: string;
   }>;
   primary_session_id?: string | null;
+  quick_chat_creation_id?: string;
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
   task_pending_action?: TaskPendingAction | null;
@@ -301,6 +302,8 @@ export type WorkflowPayload = {
   description?: string;
   prompt?: string;
   agent_profile_id?: string;
+  source?: string;
+  source_path?: string;
   hidden?: boolean;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */
   style?: "kanban" | "office" | "custom";
@@ -329,7 +332,7 @@ export type StepPayload = {
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */
-  stage_type?: "work" | "review" | "approval" | "custom";
+  stage_type?: "work" | "review" | "approval" | "custom" | "hold";
   created_at?: string;
   updated_at?: string;
 };
@@ -437,6 +440,7 @@ export {
   type SessionModelsPayload,
   type SessionMCPStatusPayload,
   type SessionInfoPayload,
+  type SessionPromptSuggestionPayload,
   type SessionTodosPayload,
 } from "./session-runtime-payloads";
 

@@ -41,7 +41,7 @@ func TestEnsureWorkspaceClonedWithBasicAuthKeepsCredentialScopedToGitChild(t *te
 			binDir := canonicalTempDir(t)
 			capturePath := filepath.Join(canonicalTempDir(t), "git-env")
 			fakeGit := "#!/bin/sh\nprintf '%s\\n%s' \"$GIT_CONFIG_KEY_1\" \"$GIT_CONFIG_VALUE_1\" > \"$CAPTURE_PATH\"\n" +
-				"helper=${GIT_CONFIG_VALUE_1#!}\n\"$helper\" get > \"$CAPTURE_PATH.helper\"\n" +
+				"helper_command=${GIT_CONFIG_VALUE_1#!}\nsh -c \"$helper_command get\" > \"$CAPTURE_PATH.helper\"\n" +
 				"if [ \"$BLOCK_GIT\" = 1 ]; then exec sleep 10; fi\nexit 1\n"
 			if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(fakeGit), 0o755); err != nil {
 				t.Fatal(err)
@@ -159,8 +159,8 @@ if [ "$3" = "config" ]; then printf '%s\n' "https://bitbucket.org/acme/repositor
 if [ "$3" = "remote" ]; then exit 0; fi
 	printf '%s\n' "$@" >> "$CAPTURE_PATH.args"
 printf '%s\n' "$GIT_CONFIG_KEY_1" > "$CAPTURE_PATH.scope"
-helper=${GIT_CONFIG_VALUE_1#!}
-"$helper" get > "$CAPTURE_PATH.helper"
+helper_command=${GIT_CONFIG_VALUE_1#!}
+sh -c "$helper_command get" > "$CAPTURE_PATH.helper"
 `
 	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(fakeGit), 0o755); err != nil {
 		t.Fatal(err)
@@ -233,8 +233,8 @@ if [ "$3" = "config" ]; then printf '%s\n' "https://dev.azure.com/acme/p/_git/re
 if [ "$3" = "remote" ]; then exit 0; fi
 printf '%s\n' "$@" > "$CAPTURE_PATH.args"
 printf '%s\n' "$GIT_CONFIG_KEY_1" > "$CAPTURE_PATH.scope"
-helper=${GIT_CONFIG_VALUE_1#!}
-"$helper" get > "$CAPTURE_PATH.helper"
+helper_command=${GIT_CONFIG_VALUE_1#!}
+sh -c "$helper_command get" > "$CAPTURE_PATH.helper"
 `
 	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(fakeGit), 0o755); err != nil {
 		t.Fatal(err)

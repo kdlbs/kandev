@@ -4,7 +4,7 @@
   "emptyTitleUnnamedWorkspace": "이 워크스페이스에 기록이 없습니다.",
   "emptyDescription": "이 탭은 에이전트가 질문했지만 아무도 답하지 않은 항목을 나열합니다. 이후 작업으로 대체되었거나, 세션이 종료되어 남았거나, 읽을 수 없는 경우입니다. 비우는 대기열이 아니라 읽기 전용 감사 기록입니다.",
   "errorTitle": "기록을 불러올 수 없습니다",
-  "errorDescription": "이 워크스페이스 기록의 질문을 불러오는 중 문제가 발생했습니다.",
+  "errorDescription": "이 워크스페이스의 질문 기록을 불러오지 못했습니다.",
   "retry": "다시 시도",
   "reasonSuperseded": "이후 작업으로 대체됨",
   "reasonSessionEnded": "답변 없이 세션 종료",

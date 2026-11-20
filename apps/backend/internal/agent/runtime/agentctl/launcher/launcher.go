@@ -435,6 +435,7 @@ func (l *Launcher) Stop(ctx context.Context) error {
 	case <-l.exited:
 		l.mu.Unlock()
 		l.logger.Info("agentctl already stopped")
+		l.closeStopResources()
 		return nil
 	default:
 	}
@@ -446,12 +447,12 @@ func (l *Launcher) Stop(ctx context.Context) error {
 	l.logger.Info("stopping agentctl subprocess", zap.Int("pid", pid))
 	l.logger.Debug("agentctl subprocess stop requested", zap.Int("pid", pid))
 
-	// Close the liveness pipe first — this signals agentctl that the parent
-	// is shutting down, complementing the SIGTERM that follows.
-	l.closeParentPipe()
-
-	// Send graceful stop signal (SIGTERM on Unix, interrupt on Windows)
+	// Send the graceful stop signal (SIGTERM on Unix, interrupt on Windows)
+	// while the parent-liveness writer stays open. Closing the writer first
+	// would look like an abrupt parent loss to the child and produce a false
+	// parent-death warning even though this is a planned stop.
 	if err := l.gracefulStop(pid); err != nil {
+		l.closeStopResources()
 		return err
 	}
 
@@ -459,7 +460,7 @@ func (l *Launcher) Stop(ctx context.Context) error {
 	select {
 	case <-l.exited:
 		l.logger.Info("agentctl stopped gracefully")
-		l.releaseChildLifecycle()
+		l.closeStopResources()
 		return nil
 	case <-ctx.Done():
 		l.logger.Warn("graceful shutdown timed out, force killing")
@@ -467,13 +468,20 @@ func (l *Launcher) Stop(ctx context.Context) error {
 		// Wait a bit for the kill to take effect
 		select {
 		case <-l.exited:
-			l.releaseChildLifecycle()
+			l.closeStopResources()
 			return nil
 		case <-time.After(1 * time.Second):
-			l.releaseChildLifecycle()
+			l.closeStopResources()
 			return fmt.Errorf("agentctl did not exit after force kill")
 		}
 	}
+}
+
+// closeStopResources releases the owned liveness writer and process
+// containment handle on every Stop return path.
+func (l *Launcher) closeStopResources() {
+	l.closeParentPipe()
+	l.releaseChildLifecycle()
 }
 
 // closeParentPipe closes and nils the parent liveness pipe if open.
@@ -715,7 +723,7 @@ func childJSONLogLevel(line string) string {
 }
 
 func childJSONLogRecord(line string) (string, string, bool) {
-	values, ok := childJSONLogEnvelope(line)
+	values, context, ok := childJSONLogEnvelope(line)
 	if !ok {
 		return "", "", false
 	}
@@ -734,47 +742,48 @@ func childJSONLogRecord(line string) (string, string, bool) {
 	if level == "" {
 		return "", "", false
 	}
-	encoded, err := json.Marshal(struct {
-		Level     string `json:"level"`
-		Timestamp string `json:"timestamp"`
-		Caller    string `json:"caller"`
-		Message   string `json:"msg"`
-	}{
-		Level: declaredLevel, Timestamp: timestamp, Caller: caller, Message: message,
-	})
+	record := childLogRecordFields{
+		Level:     declaredLevel,
+		Timestamp: timestamp,
+		Caller:    caller,
+		Message:   message,
+	}
+	context.apply(&record)
+	encoded, err := json.Marshal(record)
 	if err != nil {
 		return "", "", false
 	}
 	return level, string(encoded), true
 }
 
-func childJSONLogEnvelope(line string) ([4]json.RawMessage, bool) {
+func childJSONLogEnvelope(line string) ([4]json.RawMessage, *childLogContext, bool) {
 	var empty [4]json.RawMessage
+	context := newChildLogContext()
 	decoder := json.NewDecoder(strings.NewReader(line))
 	token, err := decoder.Token()
 	if err != nil {
-		return empty, false
+		return empty, context, false
 	}
 	delimiter, ok := token.(json.Delim)
 	if !ok || delimiter != '{' {
-		return empty, false
+		return empty, context, false
 	}
 
-	values, ok := childJSONLogFields(decoder)
+	values, ok := childJSONLogFields(decoder, context)
 	if !ok {
-		return empty, false
+		return empty, context, false
 	}
 	closing, err := decoder.Token()
 	if err != nil || closing != json.Delim('}') {
-		return empty, false
+		return empty, context, false
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return empty, false
+		return empty, context, false
 	}
-	return values, true
+	return values, context, true
 }
 
-func childJSONLogFields(decoder *json.Decoder) ([4]json.RawMessage, bool) {
+func childJSONLogFields(decoder *json.Decoder, context *childLogContext) ([4]json.RawMessage, bool) {
 	var values [4]json.RawMessage
 	var seen uint8
 	for decoder.More() {
@@ -792,6 +801,7 @@ func childJSONLogFields(decoder *json.Decoder) ([4]json.RawMessage, bool) {
 			return values, false
 		}
 		if field < 0 {
+			context.observe(key, value)
 			continue
 		}
 		mask := uint8(1 << field)

@@ -41,7 +41,8 @@ func authenticatedDeliveryReplayCursor(
 		if status.Stream.FirstRetained > 1 && status.Stream.FirstRetained <= status.Stream.HighWater+1 {
 			return 0, fmt.Errorf("%w: %s", ErrAgentDeliveryHistoryGap, models.AgentDeliveryHistoryGapDetails(status.StreamID, 1, int64(status.Stream.FirstRetained-1)))
 		}
-		if canReplayFreshBootstrapEvents(ctx, execution, repository, status) {
+		if canReplayFreshBootstrapEvents(ctx, execution, repository, status) ||
+			canReplaySilentRestoreSetup(ctx, execution, repository, status) {
 			return 0, nil
 		}
 		return 0, repoerrors.ErrAgentDeliveryCheckpointMissing
@@ -63,7 +64,7 @@ func validateAuthenticatedDeliveryDescriptor(execution *AgentExecution, status *
 	if expectedStreamID == "" {
 		expectedStreamID = execution.SessionID
 	}
-	if status == nil || !status.Durable || status.Version != journal.CurrentVersion ||
+	if status == nil || !status.Durable || !journal.SupportsDeliveryVersion(status.Version) ||
 		status.SessionID != execution.SessionID || status.IncarnationID != execution.DeliveryIncarnationID ||
 		status.HarnessGeneration != execution.DeliveryHarnessGeneration || status.StreamID != expectedStreamID {
 		return fmt.Errorf("authenticated delivery descriptor mismatch: %w", ErrDurableAdoptionIdentityMismatch)
@@ -106,6 +107,7 @@ func reconcileExpiredAgentDeliveryReplay(
 	repository AgentDeliveryRepository,
 	statusReader agentDeliveryStatusReader,
 	acknowledger agentDeliveryAcknowledger,
+	durability func(context.Context) error,
 ) (uint64, error) {
 	if event == nil || statusReader == nil || acknowledger == nil {
 		return 0, fmt.Errorf("expired delivery recovery dependencies are unavailable: %w", ErrDurableAdoptionBlocked)
@@ -127,7 +129,9 @@ func reconcileExpiredAgentDeliveryReplay(
 		return 0, fmt.Errorf("expired replay is not covered by both retained checkpoints: %w", repoerrors.ErrAgentDeliveryCheckpointMissing)
 	}
 	if status.Stream.Acknowledged < projected {
-		if err := acknowledger.AcknowledgeDelivery(ctx, event.StreamID, projected); err != nil {
+		if err := (deliveryJournalReleaser{durability: durability}).acknowledge(
+			ctx, acknowledger, event.StreamID, projected,
+		); err != nil {
 			return 0, fmt.Errorf("acknowledge projected delivery cursor after expiry: %w", err)
 		}
 	}

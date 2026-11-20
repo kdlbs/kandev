@@ -65,7 +65,7 @@ export function LoginPage() {
         setError(loginErrorMessage(err, t));
         return;
       }
-      setError(t("auth:somethingWentWrong"));
+      setError(t("auth:signInFailed"));
     }
   }
 

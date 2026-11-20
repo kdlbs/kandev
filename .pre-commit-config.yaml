@@ -68,7 +68,7 @@ repos:
 
       - id: web-lint
         name: Web lint (changed files only)
-        entry: bash -c 'cd apps/web || exit 1; args=(); for f in "$@"; do args+=("${f#apps/web/}"); done; pnpm exec eslint --max-warnings 0 "${args[@]}"' --
+        entry: bash -c 'cd apps/web || exit 1; args=(); for f in "$@"; do args+=("${f#apps/web/}"); done; pnpm exec oxlint -c oxlint.config.mjs --deny-warnings "${args[@]}"' --
         language: system
         files: ^apps/web/.*\.(ts|tsx|js|jsx)$
         pass_filenames: true

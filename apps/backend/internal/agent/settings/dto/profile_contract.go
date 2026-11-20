@@ -1,27 +1,36 @@
 package dto
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
 // ProfileCreateRequest is the shared wire contract for HTTP and MCP profile
 // creation. Value fields retain the existing create defaults; omitted optional
 // fields are left at their domain defaults.
 type ProfileCreateRequest struct {
-	AgentID                 string                  `json:"agent_id"`
-	Name                    string                  `json:"name"`
-	Model                   string                  `json:"model,omitempty"`
-	FallbackModel           string                  `json:"fallback_model,omitempty"`
-	AutoFallback            bool                    `json:"auto_fallback,omitempty"`
-	RequireExactModel       bool                    `json:"require_exact_model,omitempty"`
-	Mode                    string                  `json:"mode,omitempty"`
-	ConfigOptions           map[string]string       `json:"config_options,omitempty"`
-	AllowIndexing           bool                    `json:"allow_indexing,omitempty"`
-	AutoApprove             bool                    `json:"auto_approve,omitempty"`
-	CLIPassthrough          bool                    `json:"cli_passthrough,omitempty"`
-	CLIFlags                []CLIFlagDTO            `json:"cli_flags,omitempty"`
-	EnvVars                 []ProfileEnvVarDTO      `json:"env_vars,omitempty"`
+	ExecutionGrade    string             `json:"execution_grade,omitempty"`
+	AgentID           string             `json:"agent_id"`
+	Name              string             `json:"name"`
+	Model             string             `json:"model,omitempty"`
+	FallbackModel     string             `json:"fallback_model,omitempty"`
+	AutoFallback      bool               `json:"auto_fallback,omitempty"`
+	RequireExactModel bool               `json:"require_exact_model,omitempty"`
+	Mode              string             `json:"mode,omitempty"`
+	ConfigOptions     map[string]string  `json:"config_options,omitempty"`
+	AllowIndexing     bool               `json:"allow_indexing,omitempty"`
+	AutoApprove       bool               `json:"auto_approve,omitempty"`
+	CLIPassthrough    bool               `json:"cli_passthrough,omitempty"`
+	CLIFlags          []CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars           []ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	// DevinSandboxInherited marks an explicit "Use CLI settings" choice on a
+	// new Devin profile. It is request-only and never persisted.
+	DevinSandboxInherited   bool                    `json:"devin_sandbox_inherited,omitempty"`
 	CommandPrefix           string                  `json:"command_prefix,omitempty"`
 	ProviderKind            string                  `json:"provider_kind,omitempty"`
 	ProviderBaseURL         string                  `json:"provider_base_url,omitempty"`
@@ -30,6 +39,7 @@ type ProfileCreateRequest struct {
 	CursorPluginsMCPEnabled *bool                   `json:"cursor_plugins_mcp_enabled,omitempty"`
 	MCPSelectionMode        *string                 `json:"mcp_selection_mode,omitempty"`
 	MCPSelectedServers      *[]string               `json:"mcp_selected_servers,omitempty"`
+	CopilotSelectedPlugins  OptionalStringList      `json:"copilot_selected_plugins,omitempty"`
 	Dynamic                 *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 }
 
@@ -37,6 +47,7 @@ type ProfileCreateRequest struct {
 // means that the caller omitted the field. A non-nil pointer preserves an
 // explicit false, empty string, empty map, or empty list.
 type ProfileUpdateRequest struct {
+	ExecutionGrade    *string             `json:"execution_grade,omitempty"`
 	ID                string              `json:"id"`
 	Name              *string             `json:"name,omitempty"`
 	Model             *string             `json:"model,omitempty"`
@@ -61,25 +72,82 @@ type ProfileUpdateRequest struct {
 	CursorPluginsMCPEnabled *bool                   `json:"cursor_plugins_mcp_enabled,omitempty"`
 	MCPSelectionMode        *string                 `json:"mcp_selection_mode,omitempty"`
 	MCPSelectedServers      *[]string               `json:"mcp_selected_servers,omitempty"`
+	CopilotSelectedPlugins  OptionalStringList      `json:"copilot_selected_plugins,omitempty"`
 	Dynamic                 *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 	Force                   bool                    `json:"force,omitempty"`
 }
 
 func (r ProfileCreateRequest) Validate() error {
+	if err := sessioncapacity.ValidateGrade(r.ExecutionGrade); err != nil {
+		return err
+	}
 	if strings.TrimSpace(r.AgentID) == "" {
 		return fmt.Errorf("agent_id is required")
 	}
 	if strings.TrimSpace(r.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
-	return ValidateMCPSelection(r.MCPSelectionMode, r.MCPSelectedServers)
+	if err := ValidateMCPSelection(r.MCPSelectionMode, r.MCPSelectedServers); err != nil {
+		return err
+	}
+	return ValidateCopilotPluginSelection(r.CopilotSelectedPlugins)
 }
 
 func (r ProfileUpdateRequest) Validate() error {
+	if r.ExecutionGrade != nil {
+		if err := sessioncapacity.ValidateGrade(*r.ExecutionGrade); err != nil {
+			return err
+		}
+	}
 	if strings.TrimSpace(r.ID) == "" {
 		return fmt.Errorf("id is required")
 	}
-	return ValidateMCPSelection(r.MCPSelectionMode, r.MCPSelectedServers)
+	if err := ValidateMCPSelection(r.MCPSelectionMode, r.MCPSelectedServers); err != nil {
+		return err
+	}
+	return ValidateCopilotPluginSelection(r.CopilotSelectedPlugins)
+}
+
+// OptionalStringList distinguishes an omitted JSON field from an explicit
+// empty list. JSON null is invalid for Copilot plugin selections.
+type OptionalStringList struct {
+	Set   bool
+	Value []string
+}
+
+// UnmarshalJSON implements the supplied-field contract for plugin selections.
+func (o *OptionalStringList) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return fmt.Errorf("copilot_selected_plugins cannot be null")
+	}
+	var values []string
+	if err := json.Unmarshal(data, &values); err != nil {
+		return fmt.Errorf("copilot_selected_plugins must be an array of strings: %w", err)
+	}
+	o.Set = true
+	o.Value = values
+	return nil
+}
+
+// Pointer returns a copy in the controller's supplied-field representation.
+func (o OptionalStringList) Pointer() *[]string {
+	if !o.Set {
+		return nil
+	}
+	values := append([]string{}, o.Value...)
+	return &values
+}
+
+// ValidateCopilotPluginSelection checks count, byte bounds, canonical
+// identities, and duplicate set semantics.
+func ValidateCopilotPluginSelection(selection OptionalStringList) error {
+	if !selection.Set {
+		return nil
+	}
+	if err := copilotplugins.ValidateSelection(selection.Value); err != nil {
+		return fmt.Errorf("copilot_selected_plugins is invalid: %w", err)
+	}
+	return nil
 }
 
 const (
@@ -127,6 +195,7 @@ type ProfileContractField struct {
 // contract root used by schema export and coverage checks.
 func ProfileContractFields() []ProfileContractField {
 	return []ProfileContractField{
+		{Path: "execution_grade", JSONType: "string", Support: "read_write", Description: "Explicit execution classification; empty is unconfigured."},
 		{Path: "name", JSONType: "string", Support: "read_write", Description: "Profile display name."},
 		{Path: "model", JSONType: "string", Support: "read_write", Description: "Preferred model; empty uses the agent default."},
 		{Path: "fallback_model", JSONType: "string", Support: "read_write", Description: "Optional fallback model."},
@@ -148,6 +217,7 @@ func ProfileContractFields() []ProfileContractField {
 		{Path: "cursor_plugins_mcp_enabled", JSONType: "boolean", Support: "read_write", Description: "Import local Cursor plugin MCP servers. Defaults to true for new profiles."},
 		{Path: "mcp_selection_mode", JSONType: "string", Support: "read_write", Description: "Choose all enabled imported MCP servers or only selected native server identities."},
 		{Path: "mcp_selected_servers", JSONType: "array", Support: "read_write", Description: "Exact native MCP server identities selected for automatic preparation.", Replacement: true},
+		{Path: "copilot_selected_plugins", JSONType: "array", Support: "read_write", Description: "Stable Copilot plugin identities loaded natively by new local/worktree processes. Omitted updates preserve the committed selection; an explicit empty list clears it.", Replacement: true},
 		{Path: "dynamic", JSONType: "object", Support: "read_write", Description: "Versioned dynamic routing document.", Replacement: true},
 	}
 }

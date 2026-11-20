@@ -93,3 +93,11 @@ Check translated labels without reducing their text size to fit a fixed height.
 
 The durable contract is in
 [Control sizing requirements](../../../../docs/specs/ui/requirements/control-sizing.md).
+
+## Inline agent task references
+
+Agent-authored task links inside prose use a 24px minimum height on phones
+and coarse pointers. This user-approved exception preserves the surrounding
+text line height; long titles grow with their content. Keep hit areas within
+the visible chip to avoid overlapping adjacent text links. Verify wrapping
+and direct tap navigation in the mobile task-reference browser test.

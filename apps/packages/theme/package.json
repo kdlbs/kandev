@@ -15,7 +15,6 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
-    "hono": "^4.12.34",
     "tailwindcss": "^4.0.0"
   }
 }

@@ -146,6 +146,10 @@ func (s *Service) validateWorkflowAgentOverrides(ctx context.Context, req *Creat
 	if err != nil {
 		return fmt.Errorf("%w: %v", models.ErrInvalidWorkflowAgentOverrides, err)
 	}
+	ctx, err = s.authorizeWorkflowChangeExecutor(ctx, executor, executorProfile)
+	if err != nil {
+		return fmt.Errorf("%w: %v", models.ErrInvalidWorkflowAgentOverrides, err)
+	}
 	if s.agentProfileExecutorValidator == nil {
 		return fmt.Errorf("%w: executor compatibility validation unavailable", models.ErrInvalidWorkflowAgentOverrides)
 	}

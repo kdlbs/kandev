@@ -53,7 +53,7 @@ one contained horizontal scroll owner with directional fades.
   wrappers keep the strip item's width at 32px while preserving a real touch target.
 - Keep desktop plugin contribution sizing unchanged. Keep existing plugin slot fields and lifecycle
   compatible; the mobile presentation adds the `presentation` value described by the public SDK.
-- Export `MainTopBarSlotProps` from `@kandev/plugin-sdk` and assert the host binding remains an exact
+- Export `MainTopBarSlotProps` from `@kdlbs/plugin-sdk` and assert the host binding remains an exact
   consumer of that public type.
 
 ### Plugin contract documentation

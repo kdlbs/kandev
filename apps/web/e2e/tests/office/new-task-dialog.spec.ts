@@ -1,6 +1,21 @@
 import { test as base, expect } from "../../fixtures/test-base";
 import { OfficeApiClient } from "../../helpers/office-api-client";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
+import {
+  addProjectSourceThroughPicker,
+  expectProjectSourceAfterReload,
+  GITLAB_PROJECT_HOST,
+  GITLAB_PROJECT_ORIGIN,
+  GITLAB_PROJECT_SOURCE,
+  listWorkspaceRepositories,
+  openProject,
+  PLUGIN_PROJECT_CLONE_URL,
+  PLUGIN_PROJECT_PROVIDER,
+  PLUGIN_PROJECT_REPOSITORY_ID,
+  PLUGIN_PROJECT_SOURCE,
+  removeRepositoriesByProvider,
+} from "./project-provider-source-helpers";
 
 type DialogSeed = {
   workspaceId: string;
@@ -237,5 +252,190 @@ test.describe("Office New Task dialog", () => {
     // Failure never closes the dialog or clears the draft (only success does).
     await expect(dialog).toBeVisible();
     await expect(dialog.getByPlaceholder("Task title")).toHaveValue("New Task Dialog E2E Failure");
+  });
+});
+
+/**
+ * Provider-neutral project sources. A project stores literal source strings
+ * without provider hints, so these suites prove the server resolves a
+ * self-managed GitLab origin and an installed repository plugin from the bare
+ * URL alone.
+ *
+ * @covers AC-TASKS-PROJECT-REPOSITORIES-001.1, AC-TASKS-PROJECT-REPOSITORIES-001.3,
+ * AC-TASKS-PROJECT-REPOSITORIES-001.9, AC-TASKS-PROJECT-REPOSITORIES-001.10,
+ * AC-TASKS-PROJECT-REPOSITORIES-001.12
+ */
+test.describe("Office New Task provider-neutral project sources", () => {
+  test.afterEach(async ({ apiClient, dialogSeed }) => {
+    await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
+    await removeRepositoriesByProvider(
+      apiClient,
+      dialogSeed.workspaceId,
+      (repository) =>
+        repository.provider === PLUGIN_PROJECT_PROVIDER || repository.provider === "gitlab",
+    ).catch(() => undefined);
+  });
+
+  test("self-managed GitLab project sources attach before launch", async ({
+    testPage,
+    officeApi,
+    dialogSeed,
+    apiClient,
+  }) => {
+    test.setTimeout(120_000);
+    await apiClient.configureGitLab(dialogSeed.workspaceId, GITLAB_PROJECT_HOST);
+    const project = (await officeApi.createProject(
+      dialogSeed.workspaceId,
+      `GitLab Project Source ${Date.now()}`,
+    )) as { id: string; name: string };
+
+    await openProject(testPage, project.id);
+    await addProjectSourceThroughPicker(testPage, project.id, GITLAB_PROJECT_SOURCE);
+    await expectProjectSourceAfterReload(testPage, project.id, GITLAB_PROJECT_SOURCE);
+
+    const dialog = await openNewTaskDialog(testPage);
+    await dialog.getByPlaceholder("Task title").fill("GitLab Project Source Task");
+    await dialog.getByRole("button", { name: "Project" }).click();
+    await testPage.getByRole("button", { name: project.name, exact: true }).click();
+
+    const created = waitForHttp(testPage, "POST", /^\/api\/v1\/tasks$/);
+    await dialog.getByTestId("new-task-create-button").click();
+    const response = await created;
+    const body = (await response.json()) as {
+      id?: string;
+      repositories?: Array<{ repository_id: string }>;
+    };
+    expect(body.id).toBeTruthy();
+    expect(body.repositories).toHaveLength(1);
+    const repositoryID = body.repositories?.[0]?.repository_id as string;
+    expect(repositoryID).toBeTruthy();
+
+    const stored = await apiClient.getTask(body.id as string);
+    expect(stored.repositories?.map((repository) => repository.repository_id)).toEqual([
+      repositoryID,
+    ]);
+    const repositories = await listWorkspaceRepositories(apiClient, dialogSeed.workspaceId);
+    expect(repositories.find((repository) => repository.id === repositoryID)).toMatchObject({
+      provider: "gitlab",
+      provider_host: GITLAB_PROJECT_ORIGIN,
+      provider_owner: "group/subgroup",
+      provider_name: "project",
+      remote_url: `${GITLAB_PROJECT_ORIGIN}/group/subgroup/project.git`,
+    });
+  });
+
+  test("a mismatched GitLab origin shows the existing error without a task", async ({
+    testPage,
+    officeApi,
+    dialogSeed,
+    apiClient,
+  }) => {
+    test.setTimeout(120_000);
+    await apiClient.configureGitLab(dialogSeed.workspaceId, "https://gitlab.other.example.test");
+    const project = (await officeApi.createProject(
+      dialogSeed.workspaceId,
+      `GitLab Mismatch ${Date.now()}`,
+    )) as { id: string; name: string };
+    await openProject(testPage, project.id);
+    await addProjectSourceThroughPicker(testPage, project.id, GITLAB_PROJECT_SOURCE);
+
+    const dialog = await openNewTaskDialog(testPage);
+    const title = "GitLab Mismatch Task";
+    await dialog.getByPlaceholder("Task title").fill(title);
+    await dialog.getByRole("button", { name: "Project" }).click();
+    await testPage.getByRole("button", { name: project.name, exact: true }).click();
+    await dialog.getByTestId("new-task-create-button").click();
+
+    await expect(
+      testPage.getByText("The selected repository could not be verified.", { exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(dialog).toBeVisible();
+    const tasks = await apiClient.listTasks(dialogSeed.workspaceId);
+    expect(tasks.tasks.some((task) => task.title === title)).toBe(false);
+  });
+
+  test("installed plugin project URL resolves without a provider hint", async ({
+    testPage,
+    officeApi,
+    dialogSeed,
+    apiClient,
+  }) => {
+    test.setTimeout(120_000);
+    await installFixturePlugin(testPage);
+    const project = (await officeApi.createProject(
+      dialogSeed.workspaceId,
+      `Plugin Project Source ${Date.now()}`,
+    )) as { id: string; name: string };
+
+    await openProject(testPage, project.id);
+    await addProjectSourceThroughPicker(testPage, project.id, PLUGIN_PROJECT_SOURCE);
+    await expectProjectSourceAfterReload(testPage, project.id, PLUGIN_PROJECT_SOURCE);
+
+    const dialog = await openNewTaskDialog(testPage);
+    await dialog.getByPlaceholder("Task title").fill("Plugin Project Source Task");
+    await dialog.getByRole("button", { name: "Project" }).click();
+    await testPage.getByRole("button", { name: project.name, exact: true }).click();
+
+    const created = waitForHttp(testPage, "POST", /^\/api\/v1\/tasks$/);
+    await dialog.getByTestId("new-task-create-button").click();
+    const response = await created;
+    const body = (await response.json()) as {
+      id?: string;
+      repositories?: Array<{ repository_id: string }>;
+    };
+    expect(body.id).toBeTruthy();
+    expect(body.repositories).toHaveLength(1);
+    const repositoryID = body.repositories?.[0]?.repository_id as string;
+
+    const repositories = await listWorkspaceRepositories(apiClient, dialogSeed.workspaceId);
+    expect(repositories.find((repository) => repository.id === repositoryID)).toMatchObject({
+      provider: PLUGIN_PROJECT_PROVIDER,
+      provider_repo_id: PLUGIN_PROJECT_REPOSITORY_ID,
+      provider_owner: "TEAM",
+      provider_name: "fixture",
+      remote_url: PLUGIN_PROJECT_CLONE_URL,
+      default_branch: "main",
+    });
+    const stored = await apiClient.getTask(body.id as string);
+    expect(stored.repositories?.map((repository) => repository.repository_id)).toEqual([
+      repositoryID,
+    ]);
+  });
+
+  test("a disabled plugin refuses a new project source without writes", async ({
+    testPage,
+    officeApi,
+    dialogSeed,
+    apiClient,
+  }) => {
+    test.setTimeout(120_000);
+    await installFixturePlugin(testPage);
+    const project = (await officeApi.createProject(
+      dialogSeed.workspaceId,
+      `Disabled Plugin ${Date.now()}`,
+    )) as { id: string; name: string };
+    await openProject(testPage, project.id);
+    await addProjectSourceThroughPicker(testPage, project.id, PLUGIN_PROJECT_SOURCE);
+
+    const disable = await apiClient.rawRequest("POST", `/api/plugins/${PLUGIN_ID}/disable`);
+    expect(disable.ok, await disable.text()).toBe(true);
+
+    const dialog = await openNewTaskDialog(testPage);
+    const title = "Disabled Plugin Task";
+    await dialog.getByPlaceholder("Task title").fill(title);
+    await dialog.getByRole("button", { name: "Project" }).click();
+    await testPage.getByRole("button", { name: project.name, exact: true }).click();
+    await dialog.getByTestId("new-task-create-button").click();
+
+    await expect(
+      testPage.getByText("The selected repository could not be verified.", { exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(dialog).toBeVisible();
+    const tasks = await apiClient.listTasks(dialogSeed.workspaceId);
+    expect(tasks.tasks.some((task) => task.title === title)).toBe(false);
+    const repositories = await listWorkspaceRepositories(apiClient, dialogSeed.workspaceId);
+    expect(repositories.some((repository) => repository.provider === PLUGIN_PROJECT_PROVIDER)).toBe(
+      false,
+    );
   });
 });

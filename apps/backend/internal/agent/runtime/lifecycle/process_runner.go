@@ -10,6 +10,10 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
 
+// ErrAgentctlClientUnavailable indicates that the execution has no agentctl
+// client or that its client was detached while readiness was being checked.
+var ErrAgentctlClientUnavailable = errors.New("agentctl client not available")
+
 type StartProcessRequest struct {
 	SessionID  string
 	Kind       string
@@ -69,11 +73,18 @@ func (m *Manager) WaitForAgentctlReadyForSession(ctx context.Context, sessionID 
 		return fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
-	defer releaseClient()
 	if client == nil {
-		return fmt.Errorf("agentctl client not available for session %s", sessionID)
+		return fmt.Errorf("%w for session %s", ErrAgentctlClientUnavailable, sessionID)
 	}
-	return client.WaitForReady(ctx, 10*time.Second)
+	releaseClient()
+
+	readyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	err := execution.waitForAgentctlReady(readyCtx)
+	if errors.Is(err, errReadinessClientDetached) {
+		return fmt.Errorf("%w for session %s", ErrAgentctlClientUnavailable, sessionID)
+	}
+	return err
 }
 
 func (m *Manager) StopProcess(ctx context.Context, processID string) error {

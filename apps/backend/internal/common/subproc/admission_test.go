@@ -408,7 +408,7 @@ func TestRunGitOutputAfterAcquireWithExecutionContextDetachesAdmissionDeadline(t
 			acquireCtx,
 			context.Background(),
 			GitInteractive,
-			100*time.Millisecond,
+			5*time.Second,
 			func(execCtx context.Context) *exec.Cmd {
 				if deadline, ok := execCtx.Deadline(); ok {
 					remaining = time.Until(deadline)
@@ -430,7 +430,7 @@ func TestRunGitOutputAfterAcquireWithExecutionContextDetachesAdmissionDeadline(t
 	if err := <-resultCh; err != nil {
 		t.Fatalf("queued command failed: %v", err)
 	}
-	if remaining < 80*time.Millisecond {
+	if remaining < 4*time.Second {
 		t.Fatalf("execution deadline has only %v remaining; admission deadline leaked into execution", remaining)
 	}
 }

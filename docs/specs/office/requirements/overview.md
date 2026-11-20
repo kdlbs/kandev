@@ -39,6 +39,27 @@ scheduler, costs, routines, inbox, assistant) live in sibling specs under `docs/
 - **AC-OFFICE-OVERVIEW-001.7:** **Projects**: expandable project list with `+` to create.
 - **AC-OFFICE-OVERVIEW-001.8:** **Agents**: expandable agent list with `+` to create. Each entry shows a status dot and channel indicators (Telegram, Slack icons) if configured.
 
+### REQ-OFFICE-TASK-CREATION-001: Supported creation controls
+
+**Intent:** Users can identify the available actions in the Office task creation
+dialog. Office owns this dialog within its workspace navigation.
+
+#### Acceptance criteria
+
+- **AC-OFFICE-TASK-CREATION-001.1:** The creation dialog shall expose working
+  Status, Priority, and Attach files controls. An empty More options control
+  shall be absent from the dialog and keyboard navigation.
+- **AC-OFFICE-TASK-CREATION-001.2:** Status and Priority selections shall update
+  the draft. Attachment support shall preserve existing title, project,
+  assignee, parent, priority, discard, and error-feedback behavior.
+- **AC-OFFICE-TASK-CREATION-001.3:** Desktop and phone users shall retain the
+  same creation actions. Keyboard and touch users shall reach the remaining
+  controls and create a task with the selected priority.
+
+The task system owns [creation attachments](../../tasks/requirements/task-creation-attachments.md),
+including the shared composer, previews, draft descriptors, and delivery.
+Additional creation fields and blocker selection remain separate capabilities.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/overview-01.md), [part 2](../system-design/overview-02.md).

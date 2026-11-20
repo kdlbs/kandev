@@ -28,7 +28,8 @@ The rule uses the adapter's agent ID. A dollar prefix from an unknown provider d
 The adapter preserves `Name` exactly and adds `kind: "skill"` to the normalized command.
 The prefix rule rejects a bare `$`. It removes exactly one dollar marker for display and preserves other punctuation.
 
-`acpdbg` captures on 2026-10-05 establish these shapes:
+`acpdbg` captures on 2026-10-05 establish these historical shapes. The captured
+versions are evidence, not the current managed pin set:
 
 | Provider and version | Transport | Advertised retro entry | Initial presentation | Evidence and fallback |
 | --- | --- | --- | --- | --- |

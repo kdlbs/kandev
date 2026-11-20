@@ -3,6 +3,11 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { Locator } from "@playwright/test";
 import {
+  seedSizedImage,
+  expectTouchTarget,
+  expectImageDialogContained,
+} from "./rich-output-image-helpers";
+import {
   RICH_OUTPUT_FILE,
   RICH_OUTPUT_FILE_CONTENT,
   RICH_OUTPUT_IMAGE,
@@ -28,7 +33,7 @@ test("image file previews expand automatically while text remains lazy", async (
   const imageCard = report.getByTestId("rich-output-file").filter({ hasText: RICH_OUTPUT_IMAGE });
   const textCard = report.getByTestId("rich-output-file").filter({ hasText: RICH_OUTPUT_FILE });
   const toggle = imageCard.getByTestId("rich-output-file-preview-toggle");
-  const image = imageCard.getByRole("img", { name: RICH_OUTPUT_IMAGE, exact: true });
+  const image = imageCard.locator("img");
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect(image).toBeVisible();
   await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(640);
@@ -37,6 +42,30 @@ test("image file previews expand automatically while text remains lazy", async (
     "false",
   );
   await expect(textCard).not.toContainText(RICH_OUTPUT_FILE_CONTENT.trim());
+  // @covers AC-AGENTS-IMAGE-PREVIEW-EXPANSION-001.1, AC-AGENTS-IMAGE-PREVIEW-EXPANSION-001.2
+  const trigger = imageCard.getByRole("button", { name: `Open ${RICH_OUTPUT_IMAGE}`, exact: true });
+  const dialog = testPage.getByRole("dialog", { name: "Image preview" });
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("img")).toHaveAttribute("src", (await image.getAttribute("src"))!);
+  expect((await dialog.getByRole("img").boundingBox())!.width).toBeGreaterThan(
+    (await image.boundingBox())!.width,
+  );
+  await testPage.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await testPage.keyboard.press("Enter");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await testPage.keyboard.press("Space");
+  await expect(dialog).toBeVisible();
+  await testPage.locator('[data-slot="dialog-overlay"]').click({ position: { x: 2, y: 2 } });
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(testPage.locator(`.dv-default-tab:has-text('${RICH_OUTPUT_IMAGE}')`)).toHaveCount(0);
   await toggle.click();
   await expect(image).toHaveCount(0);
   await testPage.setViewportSize({ width: 390, height: 844 });
@@ -297,4 +326,33 @@ test("narrow mouse-input layouts use phone composition and touch-sized controls"
   await toggle.click();
   await expect(report).toContainText(RICH_OUTPUT_FILE_CONTENT.trim());
   await testPage.screenshot({ path: testInfo.outputPath("narrow-fine-pointer.png") });
+});
+
+// @covers AC-AGENTS-IMAGE-PREVIEW-EXPANSION-001.5
+test("narrow fine-pointer image inspection retains touch-sized controls", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await testPage.setViewportSize({ width: 390, height: 844 });
+  await testPage.emulateMedia({ reducedMotion: "reduce" });
+  const payload = await seedSizedImage(testPage, seedData.repositoryPath, { width: 1, height: 1 });
+  const session = await seedRichOutputTask({
+    page: testPage,
+    apiClient,
+    seedData,
+    title: "Narrow image inspection",
+    payload,
+  });
+  expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+  const trigger = session
+    .activeChat()
+    .getByRole("button", { name: `Open ${RICH_OUTPUT_IMAGE}`, exact: true });
+  await expect(trigger).toBeVisible();
+  await expectTouchTarget(trigger);
+  await trigger.click();
+  const close = await expectImageDialogContained(testPage);
+  await close.click();
+  await expect(testPage.getByRole("dialog")).toBeHidden();
+  await expect(trigger).toBeFocused();
 });

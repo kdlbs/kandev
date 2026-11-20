@@ -17,6 +17,7 @@ import (
 type mockTaskStarterWithSession struct {
 	*mockTaskStarter
 	sessionID string
+	launch    service.LaunchContext
 }
 
 func (m *mockTaskStarterWithSession) StartTaskWithEnvReturningSession(
@@ -26,6 +27,18 @@ func (m *mockTaskStarterWithSession) StartTaskWithEnvReturningSession(
 ) (string, error) {
 	if err := m.StartTaskWithEnv(ctx, taskID, agentProfileID, executorID,
 		executorProfileID, priority, prompt, workflowStepID, planMode, attachments, env); err != nil {
+		return "", err
+	}
+	return m.sessionID, nil
+}
+
+func (m *mockTaskStarterWithSession) StartTaskWithLaunchContextReturningSession(
+	ctx context.Context, taskID, agentProfileID string, launch service.LaunchContext,
+) (string, error) {
+	m.launch = launch
+	if err := m.StartTaskWithEnv(ctx, taskID, agentProfileID, launch.ExecutorID,
+		launch.ExecutorProfileID, launch.Priority, launch.Prompt, launch.WorkflowStepID,
+		launch.PlanMode, launch.Attachments, launch.Env); err != nil {
 		return "", err
 	}
 	return m.sessionID, nil
@@ -89,6 +102,9 @@ func TestSchedulerTick_DirectLaunchPersistsSessionID(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].SessionID != "sess-direct-1" {
 		t.Fatalf("session_id = %q, want sess-direct-1", runs[0].SessionID)
+	}
+	if mock.launch.CausingRunID != runs[0].ID {
+		t.Fatalf("launch causing run ID = %q, want launched run %q", mock.launch.CausingRunID, runs[0].ID)
 	}
 	after := directHopExpvarInt(t, "office_loop_launch_total", "workspace=ws-1")
 	if after != before+1 {

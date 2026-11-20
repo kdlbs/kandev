@@ -1,4 +1,5 @@
-export type ExternalVcsProvider = "github" | "gitlab" | "azure_devops";
+import { githubOrigin } from "@/lib/github/host";
+export type ExternalVcsProvider = "github" | "gitlab";
 
 export type ExternalVcsRepository = {
   provider: string;
@@ -203,20 +204,34 @@ function repositoryPathMatches(parts: string[], owner: string, name: string): bo
   );
 }
 
+function githubRepositoryOrigin(repository: ExternalVcsRepository) {
+  return githubOrigin(repository.provider_host ?? "github.com");
+}
+
+function githubSSHRemote(
+  repository: ExternalVcsRepository,
+  identity: SSHCloneIdentity,
+): URL | null {
+  if (repository.provider.toLowerCase() !== "github") return null;
+  const origin = githubRepositoryOrigin(repository);
+  if (
+    !origin ||
+    identity.hostname !== new URL(origin).hostname ||
+    !repositoryPathMatches(identity.parts, repository.provider_owner, repository.provider_name)
+  )
+    return null;
+  return new URL(
+    `${origin}/${encodeRepositoryPath(repository.provider_owner, repository.provider_name)}`,
+  );
+}
+
 function sshRemoteForRepository(repository: ExternalVcsRepository): URL | null {
   const identity = parseSSHCloneIdentity(repository.remote_url);
   if (!identity) return null;
   const provider = repository.provider.toLowerCase();
 
-  if (
-    provider === "github" &&
-    identity.hostname === "github.com" &&
-    repositoryPathMatches(identity.parts, repository.provider_owner, repository.provider_name)
-  ) {
-    return new URL(
-      `https://github.com/${encodeRepositoryPath(repository.provider_owner, repository.provider_name)}`,
-    );
-  }
+  const githubRemote = githubSSHRemote(repository, identity);
+  if (githubRemote) return githubRemote;
 
   if (provider === "gitlab") {
     const origin = parseProviderOrigin(repository.provider_host);
@@ -231,19 +246,6 @@ function sshRemoteForRepository(repository: ExternalVcsRepository): URL | null {
     }
   }
 
-  if (
-    provider === "azure_devops" &&
-    identity.hostname === "ssh.dev.azure.com" &&
-    identity.parts.length === 4 &&
-    identity.parts[0] === "v3" &&
-    identity.parts[2] === repository.provider_owner &&
-    identity.parts[3] === repository.provider_name
-  ) {
-    const organization = encodeURIComponent(identity.parts[1]);
-    const project = encodeURIComponent(repository.provider_owner);
-    const name = encodeURIComponent(repository.provider_name);
-    return new URL(`https://dev.azure.com/${organization}/${project}/_git/${name}`);
-  }
   return null;
 }
 
@@ -256,10 +258,9 @@ function githubRemoteMatches(
   remote: URL,
   parts: string[],
 ): boolean {
-  const origin = parseProviderOrigin(repository.provider_host) ?? "https://github.com";
+  const origin = githubRepositoryOrigin(repository);
   return (
     remote.origin === origin &&
-    origin === "https://github.com" &&
     repositoryPathMatches(parts, repository.provider_owner, repository.provider_name)
   );
 }
@@ -277,20 +278,6 @@ function gitlabRemoteMatches(
   );
 }
 
-function azureRemoteMatches(
-  repository: ExternalVcsRepository,
-  remote: URL,
-  parts: string[],
-): boolean {
-  return (
-    remote.hostname === "dev.azure.com" &&
-    parts.length === 4 &&
-    parts[1] === repository.provider_owner &&
-    parts[2] === "_git" &&
-    parts[3] === repository.provider_name
-  );
-}
-
 function resolveProvider(
   repository: ExternalVcsRepository,
   remote: URL,
@@ -301,9 +288,6 @@ function resolveProvider(
 
   if (provider === "github" && githubRemoteMatches(repository, remote, parts)) return "github";
   if (provider === "gitlab" && gitlabRemoteMatches(repository, remote, parts)) return "gitlab";
-  if (provider === "azure_devops" && azureRemoteMatches(repository, remote, parts)) {
-    return "azure_devops";
-  }
   return null;
 }
 
@@ -321,13 +305,6 @@ function buildFileURL(
   remote: URL,
   target: ResolvedTarget,
 ): string {
-  if (provider === "azure_devops") {
-    const url = new URL(remote.toString());
-    url.pathname = url.pathname.replace(/\/+$/, "").replace(/\.git$/, "");
-    url.searchParams.set("path", `/${target.path}`);
-    url.searchParams.set("version", `GB${target.revision}`);
-    return url.toString();
-  }
   const repositoryPath = encodeRepositoryPath(repository.provider_owner, repository.provider_name);
   const route = provider === "gitlab" ? "-/blob" : "blob";
   const filePath = target.path.split("/").map(encodeURIComponent).join("/");

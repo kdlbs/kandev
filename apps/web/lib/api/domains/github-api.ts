@@ -309,6 +309,8 @@ export async function triggerAllReviewWatches(workspaceId: string, options?: Api
 // without a round-trip. `description` is optional because the backend uses
 // `omitempty` — null/empty descriptions are dropped from the JSON.
 export type AccessibleRepo = {
+  github_host?: string;
+  html_url?: string;
   provider: "github" | "gitlab";
   owner: string;
   name: string;
@@ -354,13 +356,41 @@ export async function fetchAccessibleRepos(opts: {
   workspaceId: string;
   q?: string;
   limit?: number;
+  /** Bypasses the server's short-lived repository-list cache. */
+  refresh?: boolean;
   signal?: AbortSignal;
 }): Promise<AccessibleRepo[]> {
+  return fetchReposFromEndpoint("/api/v1/github/repos", opts);
+}
+
+/** Lists repos that the settings editor can add to the saved workspace scope. */
+export async function fetchGitHubScopeEditorRepos(opts: {
+  workspaceId: string;
+  q?: string;
+  limit?: number;
+  /** Bypasses the server's short-lived repository-list cache. */
+  refresh?: boolean;
+  signal?: AbortSignal;
+}): Promise<AccessibleRepo[]> {
+  return fetchReposFromEndpoint("/api/v1/github/workspace-settings/repositories", opts);
+}
+
+async function fetchReposFromEndpoint(
+  endpoint: string,
+  opts: {
+    workspaceId: string;
+    q?: string;
+    limit?: number;
+    refresh?: boolean;
+    signal?: AbortSignal;
+  },
+): Promise<AccessibleRepo[]> {
   const params = new URLSearchParams({ workspace_id: opts.workspaceId });
   if (opts.q) params.set("q", opts.q);
   if (typeof opts.limit === "number") params.set("limit", String(opts.limit));
+  if (opts.refresh) params.set("refresh", "true");
   const suffix = params.toString();
-  const path = `/api/v1/github/repos${suffix ? `?${suffix}` : ""}`;
+  const path = `${endpoint}${suffix ? `?${suffix}` : ""}`;
   try {
     const res = await fetchJson<AccessibleReposResponse>(path, {
       cache: "no-store",
@@ -402,9 +432,10 @@ export async function fetchPRInfo(
   owner: string,
   repo: string,
   number: number,
-  options?: ApiRequestOptions,
+  options?: ApiRequestOptions & { expectedHost?: string },
 ) {
   const query = new URLSearchParams({ workspace_id: workspaceId });
+  if (options?.expectedHost) query.set("expected_host", options.expectedHost);
   return fetchJsonWithRetry<GitHubPR>(
     `/api/v1/github/prs/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/info?${query}`,
     options,
@@ -417,9 +448,10 @@ export async function fetchIssueInfo(
   owner: string,
   repo: string,
   number: number,
-  options?: ApiRequestOptions,
+  options?: ApiRequestOptions & { expectedHost?: string },
 ) {
   const query = new URLSearchParams({ workspace_id: workspaceId });
+  if (options?.expectedHost) query.set("expected_host", options.expectedHost);
   return fetchJsonWithRetry<GitHubIssue>(
     `/api/v1/github/issues/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/info?${query}`,
     options,
@@ -431,9 +463,10 @@ export async function fetchRepoBranches(
   workspaceId: string,
   owner: string,
   repo: string,
-  options?: ApiRequestOptions,
+  options?: ApiRequestOptions & { expectedHost?: string },
 ) {
   const query = new URLSearchParams({ workspace_id: workspaceId });
+  if (options?.expectedHost) query.set("expected_host", options.expectedHost);
   return fetchJsonWithRetry<{ branches: { name: string }[] }>(
     `/api/v1/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?${query}`,
     options,

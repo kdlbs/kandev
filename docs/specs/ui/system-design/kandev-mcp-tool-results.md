@@ -63,6 +63,59 @@ observed Cursor title `kandev: <tool>_kandev` and unwraps
 remainder is a valid suffixed tool name. Bare categories, foreign namespaces,
 and unrelated tools remain generic activity.
 
+### Copilot ACP title compatibility
+
+The observed Copilot message retains `generic.name: "other"`, the title
+`kandev-<tool>_kandev`, and direct report arguments in `input.raw_input`.
+The shared frontend parser recognizes the exact `kandev-` prefix with the
+existing non-empty stem, suffix, and namespace-separator checks. It does not
+split arbitrary hyphenated names or infer a provider from the tool suffix.
+Only a registered stem selects a native renderer.
+
+`kandevToolStemOf` remains the shared scanner for renderer dispatch and
+rich-output grouping. Explicit foreign normalized identities and foreign
+`raw_input.providerIdentifier` values continue to block title fallback.
+Existing `extractKandevArgs` already handles direct `raw_input` objects.
+Live messages and stored history use this same path without a database rewrite.
+
+This compatibility path repairs the observed serialized shape. It does not
+establish a Copilot wire-envelope contract. Adapter normalization requires a
+verified explicit provider envelope; a display title alone is insufficient.
+The [Copilot fix package](../../../plans/copilot-rich-output-identity/plan.md)
+records the reproduction and planned regression coverage.
+
+### Built-in package namespaces
+
+The shared identity parser must also recognize the exact runtime server names
+declared by `internal/mcp/profile/builtin_descriptors.go`: `kandev`,
+`kandev-configuration`, `kandev-rich-output`, `kandev-walkthroughs`, and
+`kandev-diagnostics`. The package split changes the server name, not the tool
+stem, arguments, result, or renderer. Existing bare and monolithic identities
+remain compatible.
+
+Apply this finite server set to the already supported slash, dotted,
+double-underscore, colon-space, and hyphenated identity formats. Match a full
+server name and delimiter before removing the tool suffix. Match longer server
+names before `kandev-` so package names cannot become part of the tool stem.
+Qualified namespaces use the exact server inventory. The legacy
+`kandev-<tool>_kandev` format still permits hyphens in the tool stem; such a stem
+selects native rendering only if it has a registered renderer. This parser is a
+presentation selector, not proof of built-in authorization or execution origin.
+
+Preserve the historical provider fallback guard for both
+`raw_input.providerIdentifier` and Codex `raw_input.server`: only `kandev`
+permits title fallback. A legacy imported external definition can retain
+one of the new reserved package names, so that name alone must not relax this
+guard. Current package calls use the normalized qualified identity. An explicit
+foreign normalized identity still prevents fallback to a trusted-looking title.
+
+Both renderer dispatch and rich-output grouping continue through
+`kandevToolStemOf`. Existing package-qualified messages recover on replay
+without a database rewrite, tool retry, or package enablement. Normal file
+preview reads retain session authorization and existing image visibility rules.
+The [repair plan](../../../plans/builtin-rich-output-identity/plan.md) records
+the observed Codex message, supported serialized formats, and negative controls.
+
 ## Result selection
 
 `extractMcpResult` uses this precedence:

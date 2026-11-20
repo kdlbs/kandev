@@ -102,7 +102,7 @@ func (r *Repository) insertTemplateSteps(ctx context.Context, tx *sqlx.Tx, workf
 
 func normalizeBootstrapStageType(stageType wfmodels.StageType) string {
 	switch stageType {
-	case wfmodels.StageTypeWork, wfmodels.StageTypeReview, wfmodels.StageTypeApproval, wfmodels.StageTypeCustom:
+	case wfmodels.StageTypeWork, wfmodels.StageTypeReview, wfmodels.StageTypeApproval, wfmodels.StageTypeCustom, wfmodels.StageTypeHold:
 		return string(stageType)
 	default:
 		return string(wfmodels.StageTypeCustom)

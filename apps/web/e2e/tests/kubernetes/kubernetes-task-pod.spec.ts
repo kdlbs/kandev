@@ -134,3 +134,9 @@ test("sessions share one task pod through stop and backend restart", async ({
     rows.map(() => ({ pod: pod.metadata.name, failure: "" })),
   );
 });
+
+test.afterEach(async ({ backend }, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus) {
+    await testInfo.attach("backend-log", { path: backend.logPath, contentType: "text/plain" });
+  }
+});

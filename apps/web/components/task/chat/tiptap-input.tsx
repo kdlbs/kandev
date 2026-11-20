@@ -10,19 +10,17 @@ import {
   useMemo,
   type RefObject,
 } from "react";
-import { EditorContent } from "@tiptap/react";
+import { TipTapInputSurface } from "./tiptap-input-surface";
+import { handleMenuKeyDown } from "./tiptap-menu-keyboard";
 import { exitSuggestion } from "@tiptap/suggestion";
 import type { Editor } from "@tiptap/core";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
-import { EditorContextProvider } from "./editor-context";
-import { TipTapPopups } from "./tiptap-popups";
-import { useReverseSearchSelectHandler } from "./use-reverse-search-select-handler";
 import { storeReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 import { loadTaskMentionItems } from "./task-mention-items";
-import { createMessageHistorySelector, type MessageHistoryEntry } from "./message-history";
+import { useChatHistory } from "./tiptap-message-history";
 import { useDrainOlderMessages } from "./use-drain-older-messages";
 import {
   createMentionSuggestion,
@@ -47,6 +45,7 @@ import type { ImagePasteIssue } from "./clipboard-attachments";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import { rankMentionItems, recordChatMentionSelection } from "@/lib/chat-mention-recency";
+import { createComposerEscapeCaptureHandler } from "./chat-escape-cancel";
 
 const RAW_DRAIN = { rawPagination: true } as const;
 
@@ -58,6 +57,8 @@ type TipTapInputProps = {
   value: string;
   onChange: (value: string) => void;
   onSubmit?: () => void;
+  onEscape?: (event: React.KeyboardEvent<HTMLElement>) => void;
+  shouldHandleEscape?: (event: KeyboardEvent) => boolean;
   placeholder?: string;
   disabled?: boolean;
   className?: string;
@@ -76,34 +77,10 @@ type TipTapInputProps = {
   planContextEnabled?: boolean;
   onImagePaste?: (files: File[], issue?: ImagePasteIssue) => void;
   onPlanModeChange?: (enabled: boolean) => void;
+  /** Next-prompt suggestion rendered as ghost text while the draft is empty. */
+  promptSuggestion?: string | null;
+  onPromptSuggestionDismiss?: () => void;
 };
-
-// ── Menu keyboard navigation helper ──────────────────────────────
-
-function handleMenuKeyDown<T>(
-  event: KeyboardEvent,
-  menu: MenuState<T>,
-  setIndex: React.Dispatch<React.SetStateAction<number>>,
-  indexRef: React.RefObject<number>,
-): boolean {
-  if (!menu.isOpen) return false;
-  if (event.key === "ArrowDown") {
-    setIndex((i) => Math.min(i + 1, menu.items.length - 1));
-    return true;
-  }
-  if (event.key === "ArrowUp") {
-    setIndex((i) => Math.max(i - 1, 0));
-    return true;
-  }
-  if (event.key === "Enter" || event.key === "Tab") {
-    if (menu.items.length > 0 && menu.command) {
-      const item = menu.items[indexRef.current];
-      if (item) menu.command(item);
-      return true;
-    }
-  }
-  return false;
-}
 
 // ── Mention items fetcher hook ───────────────────────────────────────
 
@@ -119,12 +96,13 @@ async function fetchFileResults(
   query: string,
   owner: FileSearchOwner,
   isCurrent: () => boolean,
+  signal: AbortSignal,
 ): Promise<string[]> {
   const client = getWebSocketClient();
   if (!client) return [];
   const cached = owner.completed;
   if (cached?.sessionId === sessionId && cached.query === query) return cached.results;
-  const response = await searchWorkspaceFiles(client, sessionId, query || "", 20);
+  const response = await searchWorkspaceFiles(client, sessionId, query || "", 20, signal);
   if (!isCurrent()) return [];
   owner.completed = { sessionId, query, results: response.files || [] };
   return owner.completed.results;
@@ -169,13 +147,17 @@ function useMentionItems(
         lastFileSearchRef.current === owner &&
         owner.lookup === lookup &&
         storeReadScopeIdentity(storeApi) === scope;
-      const allItems = await loadTaskMentionItems(
-        storeApi.getState(),
-        taskIdRef.current,
-        workspace,
-        query,
-        { signal: controller.signal, isCurrent },
-      );
+      const [allItems, files] = await Promise.all([
+        loadTaskMentionItems(storeApi.getState(), taskIdRef.current, workspace, query, {
+          signal: controller.signal,
+          isCurrent,
+        }),
+        owner.sessionId
+          ? fetchFileResults(owner.sessionId, query, owner, isCurrent, controller.signal).catch(
+              () => [],
+            )
+          : Promise.resolve([]),
+      ]);
       if (!isCurrent()) return [];
       allItems.push({
         id: "__plan__",
@@ -193,20 +175,14 @@ function useMentionItems(
           onSelect: () => {},
         });
       }
-      if (owner.sessionId) {
-        try {
-          const files = await fetchFileResults(owner.sessionId, query, owner, isCurrent);
-          if (!isCurrent()) return [];
-          for (const filePath of files) {
-            allItems.push({
-              id: filePath,
-              kind: "file",
-              label: filePath,
-              description: t("task:file"),
-              onSelect: () => {},
-            });
-          }
-        } catch {}
+      for (const filePath of files) {
+        allItems.push({
+          id: filePath,
+          kind: "file",
+          label: filePath,
+          description: t("task:file"),
+          onSelect: () => {},
+        });
       }
       return isCurrent() ? rankMentionItems(allItems, query, workspace) : [];
     },
@@ -406,46 +382,37 @@ function useEntityReferenceMenuClose(editorRef: RefObject<Editor | null>, close:
 // `editorRef` is created before `editor` exists (it backs a close handler
 // composed earlier, in useSuggestionMenuOpenState) -- resync it every render
 // so callers reading `editorRef.current` always see the latest instance.
-function useEditorRefSync(editorRef: RefObject<Editor | null>, editor: Editor | null) {
-  useLayoutEffect(() => {
-    editorRef.current = editor;
-  });
-}
-
 // ── Component ───────────────────────────────────────────────────────
 
-export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(function TipTapInput(
-  {
-    value,
-    onChange,
-    onSubmit,
-    placeholder = "",
-    disabled = false,
-    className,
-    planModeEnabled = false,
-    onPlanModeChange,
-    submitKey = "cmd_enter",
-    onFocus,
-    onBlur,
-    sessionId,
-    detailActive = true,
-    taskId,
-    workspaceId = null,
-    entityReferencesEnabled = false,
-    onImagePaste,
-  },
-  ref,
+function useComposerMenus(
+  sessionId: string | null,
+  taskId: string | null,
+  workspaceId: string | null,
 ) {
   const menu = useMenuHandlers();
-  const { mentionSuggestion, slashSuggestion, slashCommands } = useSuggestionConfigs({
+  const configs = useSuggestionConfigs({
     sessionId,
-    taskId: taskId ?? null,
+    taskId,
     workspaceId,
     onMentionKeyDown: menu.onMentionKeyDown,
     onSlashKeyDown: menu.onSlashKeyDown,
     setMentionMenu: menu.setMentionMenu,
     setSlashMenu: menu.setSlashMenu,
   });
+  return { menu, ...configs };
+}
+
+function useChatComposerInputSurface(
+  sessionId: string | null,
+  taskId: string | null,
+  workspaceId: string | null,
+  entityReferencesEnabled: boolean,
+) {
+  const { menu, mentionSuggestion, slashSuggestion, slashCommands } = useComposerMenus(
+    sessionId,
+    taskId,
+    workspaceId,
+  );
   const entityReferences = useEntityReferenceComposer({
     enabled: entityReferencesEnabled,
     workspaceId,
@@ -460,6 +427,65 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
   );
   const { history, getHistory } = useChatHistory(sessionId);
   const { isDraining } = useDrainOlderMessages(sessionId, overlay.isReverseSearchOpen, RAW_DRAIN);
+  return {
+    menu,
+    mentionSuggestion,
+    slashSuggestion,
+    slashCommands,
+    entityReferences,
+    editorWrapperRef,
+    editorRef,
+    overlay,
+    isSuggestionMenuOpen,
+    closeEntityReferenceMenu,
+    history,
+    getHistory,
+    isDraining,
+  };
+}
+
+export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(function TipTapInput(
+  {
+    value,
+    onChange,
+    onSubmit,
+    onEscape,
+    shouldHandleEscape,
+    placeholder = "",
+    disabled = false,
+    className,
+    planModeEnabled = false,
+    onPlanModeChange,
+    submitKey = "cmd_enter",
+    onFocus,
+    onBlur,
+    sessionId,
+    detailActive = true,
+    taskId,
+    workspaceId = null,
+    entityReferencesEnabled = false,
+    onImagePaste,
+    promptSuggestion: suggestion = null,
+    onPromptSuggestionDismiss: dismissSuggestion,
+  },
+  ref,
+) {
+  const inputSurface = useChatComposerInputSurface(
+    sessionId,
+    taskId ?? null,
+    workspaceId,
+    entityReferencesEnabled,
+  );
+  const {
+    mentionSuggestion,
+    slashSuggestion,
+    slashCommands,
+    entityReferences,
+    overlay,
+    isSuggestionMenuOpen,
+    closeEntityReferenceMenu,
+    getHistory,
+  } = inputSurface;
   const { editor, applyHistoryEntry } = useTipTapEditor({
     value,
     onChange,
@@ -486,78 +512,36 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     isReverseSearchOpen: overlay.isReverseSearchOpen,
     ref,
   });
-  useEditorRefSync(editorRef, editor);
-  const handleReverseSearchSelect = useReverseSearchSelectHandler(
-    applyHistoryEntry,
-    overlay.closeReverseSearch,
-    editor,
-  );
   return (
-    <>
-      <TipTapPopups
-        menu={menu}
-        slashCommands={slashCommands}
-        entityReferences={entityReferences}
-        overlay={overlay}
-        history={history}
-        isDraining={isDraining}
-        onReverseSearchSelect={handleReverseSearchSelect}
-        onEntityReferenceClose={closeEntityReferenceMenu}
-      />
-      <TipTapEditorArea
-        editor={editor}
-        editorWrapperRef={editorWrapperRef}
-        sessionId={sessionId}
-        taskId={taskId ?? null}
-        detailActive={detailActive}
-      />
-    </>
+    <TipTapInputSurface
+      {...inputSurface}
+      onEntityReferenceClose={closeEntityReferenceMenu}
+      editor={editor}
+      sessionId={sessionId}
+      taskId={taskId ?? null}
+      detailActive={detailActive}
+      promptSuggestion={suggestion}
+      onPromptSuggestionDismiss={dismissSuggestion}
+      applyHistoryEntry={applyHistoryEntry}
+      escapeGuard={{
+        shouldHandleEscape,
+        isPromptSuggestionVisible: Boolean(suggestion && !value.trim()),
+      }}
+      onKeyDownCapture={createComposerEscapeCaptureHandler(
+        onEscape,
+        isSuggestionMenuOpen,
+        overlay.isReverseSearchOpen,
+        Boolean(suggestion && !value.trim()),
+      )}
+    />
   );
 });
-
-function TipTapEditorArea(p: {
-  editor: Editor | null;
-  editorWrapperRef: RefObject<HTMLDivElement | null>;
-  sessionId: string | null;
-  taskId: string | null;
-  detailActive: boolean;
-}) {
-  return (
-    <EditorContextProvider
-      value={{ sessionId: p.sessionId, taskId: p.taskId, detailActive: p.detailActive }}
-    >
-      <div ref={p.editorWrapperRef} className="h-full">
-        <EditorContent
-          editor={p.editor}
-          className="h-full [&_.tiptap]:h-full [&_.tiptap]:outline-none"
-        />
-      </div>
-    </EditorContextProvider>
-  );
-}
 
 export type MenuHandlers = ReturnType<typeof useMenuHandlers>;
 export type ReverseSearchOverlay = Omit<
   ReturnType<typeof useReverseSearchOverlay>,
   "editorWrapperRef" | "editorRef"
 >;
-
-function useMessageHistoryForSession(sessionId: string | null): MessageHistoryEntry[] {
-  // The memoized selector keeps its snapshot stable while agent messages
-  // stream, but still reacts to user content or reference-metadata changes.
-  const selector = useMemo(() => createMessageHistorySelector(sessionId), [sessionId]);
-  return useAppStore(selector);
-}
-
-function useChatHistory(sessionId: string | null) {
-  const history = useMessageHistoryForSession(sessionId);
-  const historyRef = useRef(history);
-  useLayoutEffect(() => {
-    historyRef.current = history;
-  });
-  const getHistory = useCallback(() => historyRef.current, []);
-  return { history, getHistory };
-}
 
 function useSuggestionMenuOpenState(
   menu: ReturnType<typeof useMenuHandlers>,

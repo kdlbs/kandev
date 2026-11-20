@@ -121,7 +121,7 @@ export function SetupWizard() {
         );
         return;
       }
-      setError(t("auth:somethingWentWrong"));
+      setError(t("auth:setupFailed"));
     }
   }
 

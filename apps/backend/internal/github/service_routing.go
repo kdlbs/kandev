@@ -60,6 +60,9 @@ func (s *Service) resolveServiceClient(
 	if s == nil || s.resolver == nil {
 		return nil, ErrGitHubNotConfigured
 	}
+	if err := s.validateExpectedGitHubHost(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	resolved, err := s.resolver.Resolve(ctx, ResolveCredentialRequest{
 		WorkspaceID: workspaceID,
 		UserID:      userID,
@@ -73,14 +76,18 @@ func (s *Service) resolveServiceClient(
 	if resolved == nil || resolved.Client == nil {
 		return nil, ErrGitHubNotConfigured
 	}
-	return &resolvedServiceClient{
+	client := &resolvedServiceClient{
 		Client:       resolved.Client,
 		Principal:    resolved.Principal,
 		CacheScope:   credentialCacheScope(resolved, purpose),
 		Capabilities: resolved.Capabilities,
 		RateTracker:  resolved.RateTracker,
 		credential:   resolved,
-	}, nil
+	}
+	if err := requireExpectedGitHubHost(ctx, client.host()); err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 // cacheScopeForPurpose keeps cache invalidation tied to the same resolved
@@ -96,7 +103,8 @@ func (r *resolvedServiceClient) cacheScopeForPurpose(purpose CredentialPurpose) 
 func credentialCacheScope(resolved *ResolvedCredential, purpose CredentialPurpose) string {
 	principal := resolved.Principal
 	return fmt.Sprintf(
-		"%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d|%d|%d:%s|%d|%d:%s",
+		"%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d|%d|%d:%s|%d|%d:%s",
+		len(resolved.GitHubHost), resolved.GitHubHost,
 		len(principal.WorkspaceID), principal.WorkspaceID,
 		len(principal.UserID), principal.UserID,
 		len(principal.Source), principal.Source,
@@ -278,6 +286,12 @@ func repositoryIdentityKey(owner, repo string) string {
 // ensureRepositoryInWorkspaceScope enforces Kandev's configured repository
 // boundary before a provider call. GitHub App installation visibility is
 // enforced by GitHub itself, so the two checks form an intersection.
+//
+// A rejection here returns an error that is BOTH ErrRepoOutsideWorkspaceScope
+// (so HTTP handlers can answer with an actionable message, still under the 404
+// used for every unresolvable repository) and ErrRepoNotResolvable
+// (so callers that only know the "stop retrying this repo" contract keep
+// working unchanged) — see repoOutsideScopeErr.
 func (s *Service) ensureRepositoryInWorkspaceScope(ctx context.Context, workspaceID, owner, repo string) error {
 	if strings.TrimSpace(owner) == "" || strings.TrimSpace(repo) == "" {
 		return nil
@@ -289,26 +303,35 @@ func (s *Service) ensureRepositoryInWorkspaceScope(ctx context.Context, workspac
 	if repositoryInWorkspaceScope(settings, owner, repo) {
 		return nil
 	}
-	return ErrRepoNotResolvable
+	return newRepoOutsideScopeErr(owner, repo)
 }
 
 func repositoryInWorkspaceScope(settings *WorkspaceSettings, owner, repo string) bool {
 	if settings == nil || settings.RepoScopeMode == "" || settings.RepoScopeMode == RepoScopeModeAll {
 		return true
 	}
+	owner = strings.TrimSpace(owner)
+	repo = strings.TrimSpace(repo)
 	switch settings.RepoScopeMode {
-	case RepoScopeModeOrgs:
+	case RepoScopeModeOrgs, RepoScopeModeSelected:
 		for _, org := range settings.RepoScopeOrgs {
 			if strings.EqualFold(strings.TrimSpace(org), strings.TrimSpace(owner)) {
 				return true
 			}
 		}
-	case RepoScopeModeRepos:
+	}
+	if settings.RepoScopeMode == RepoScopeModeRepos || settings.RepoScopeMode == RepoScopeModeSelected {
 		for _, candidate := range settings.RepoScopeRepos {
-			if strings.EqualFold(candidate.Owner, owner) && strings.EqualFold(candidate.Name, repo) {
+			if strings.EqualFold(strings.TrimSpace(candidate.Owner), owner) && strings.EqualFold(strings.TrimSpace(candidate.Name), repo) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// RepositoryInWorkspaceScope reports whether a repository matches the saved
+// workspace GitHub scope.
+func RepositoryInWorkspaceScope(settings *WorkspaceSettings, owner, repo string) bool {
+	return repositoryInWorkspaceScope(settings, owner, repo)
 }

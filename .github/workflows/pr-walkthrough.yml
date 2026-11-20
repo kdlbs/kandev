@@ -7,12 +7,6 @@ on:
   pull_request_target:
     types: [opened, ready_for_review, reopened, synchronize, labeled]
 
-env:
-  # Free model with zero retention and no training on the PR patch or prepared
-  # head context. Keep this policy when replacing a retired model.
-  PR_WALKTHROUGH_MODEL: opencode/deepseek-v4.1-flash-free
-  PR_WALKTHROUGH_VARIANT: high
-
 concurrency:
   # GitHub resolves workflow concurrency before it evaluates the job `if`.
   # Keep every event rejected by the generation gate out of the canceling
@@ -83,6 +77,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+    outputs:
+      generated: ${{ steps.report.outputs.generated }}
 
     steps:
       - name: Checkout trusted workflow
@@ -168,7 +164,14 @@ jobs:
         timeout-minutes: 1
         uses: ./.trusted-actions/setup-opencode
 
+      # The walkthrough is best effort: a model or provider outage must not block
+      # the pull request, so a failed attempt warns and skips publication. The
+      # trusted runner discovers free models and rotates on model quota or
+      # availability errors; the selected models can retain or train on the
+      # submitted PR context.
       - name: Run OpenCode walkthrough
+        id: generate
+        continue-on-error: true
         timeout-minutes: 11
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
@@ -189,7 +192,6 @@ jobs:
           ---
           description: Generate and render a visual pull request walkthrough.
           mode: primary
-          model: "opencode/deepseek-v4.1-flash-free"
           temperature: 0.1
           permission:
             "*": deny
@@ -215,7 +217,7 @@ jobs:
           Rules:
           - Use read, glob, and grep to inspect the trusted workflow checkout and prepared context.
           - Read .pr-walkthrough/guidelines.md, .pr-walkthrough/walkthrough.patch, and .pr-walkthrough/head-context/manifest.json first.
-          - Use materialized files under .pr-walkthrough/head-context/head/files/ for exact PR-head excerpts.
+          - Map original paths to context_path in the manifest. Use those neutral filenames for exact PR-head excerpts.
           - Use the patch when the manifest records that a file was omitted.
           - Use edit only for .pr-walkthrough/draft.json. Never modify source files or skill files.
           - Use only the exact allowed Bash command to run the trusted renderer. Pass no arguments and no JSON on standard input.
@@ -236,9 +238,10 @@ jobs:
 
           python3 .github/scripts/pr-walkthrough-runner.py -- \
             "$HOME/.opencode/bin/opencode" run \
+            --print-logs \
             --agent github-pr-walkthrough \
-            --model "$PR_WALKTHROUGH_MODEL" \
-            --variant "$PR_WALKTHROUGH_VARIANT" \
+            --model '{model}' \
+            --variant '{variant}' \
             --title "PR #${PR_NUMBER} walkthrough" \
             --file .pr-walkthrough/guidelines.md \
             --file .pr-walkthrough/walkthrough.patch \
@@ -248,6 +251,7 @@ jobs:
 
       - name: Stage walkthrough artifact
         if: always()
+        continue-on-error: ${{ steps.generate.outcome != 'success' }}
         run: |
           set -euo pipefail
           rm -rf pr-walkthrough-artifact
@@ -262,16 +266,41 @@ jobs:
 
       - name: Upload walkthrough artifact
         if: always()
+        continue-on-error: ${{ steps.generate.outcome != 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pr-walkthrough-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
           path: pr-walkthrough-artifact/
-          if-no-files-found: error
+          if-no-files-found: warn
+
+      - name: Report walkthrough generation outcome
+        id: report
+        if: always()
+        env:
+          GENERATE_OUTCOME: ${{ steps.generate.outcome }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$GENERATE_OUTCOME" = "success" ]; then
+            echo "generated=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "generated=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "## PR walkthrough skipped"
+            echo
+            echo "Generation did not complete (outcome: \`${GENERATE_OUTCOME:-unknown}\`). The walkthrough is best effort, so publication and linking are skipped and this job stays successful."
+            echo
+            echo "Diagnostics are in the \`pr-walkthrough-${PR_NUMBER}-${HEAD_SHA}\` artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning title=PR walkthrough skipped::Walkthrough generation did not complete; it is best effort and does not block this pull request."
 
   pr-walkthrough-publish:
     if: >
+      vars.PR_WALKTHROUGH_ENABLED == 'true' &&
       needs.pr-walkthrough-generate.result == 'success' &&
-      vars.PR_WALKTHROUGH_ENABLED == 'true'
+      needs.pr-walkthrough-generate.outputs.generated == 'true'
     needs: pr-walkthrough-generate
     runs-on: ubuntu-latest
     timeout-minutes: 10

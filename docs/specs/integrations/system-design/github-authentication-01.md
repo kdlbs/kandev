@@ -95,7 +95,7 @@ automation under different GitHub Apps without operating separate Kandev deploym
   actions because they leave Kandev for GitHub rather than saving a local connection draft.
 - For Kandev-managed GitHub checkouts used by Local and Worktree tasks, the selected task policy
   also controls the persisted `origin` transport. Managed routing uses canonical GitHub HTTPS.
-  Executor inheritance resolves the current `github.com` protocol from host `gh` configuration at
+  Executor inheritance resolves the current repository host's protocol from host `gh` configuration at
   the clone or origin-reconciliation boundary. Resolution accepts the host-specific value first,
   then the global value, and defaults to SSH when neither scope supplies `ssh` or `https`. Launch
   and resume do not use a backend-startup snapshot, so a later host configuration change applies
@@ -237,7 +237,7 @@ workspace use is represented only by an explicit workspace connection.
 | `id` | UUID text | Primary key; allocated before manifest creation |
 | `source` | enum text | `managed` (manifest-created) or `imported` |
 | `display_name` | text | Non-empty user-facing disambiguator |
-| `github_host` | text | `github.com` in this feature |
+| `github_host` | text | Validated GitHub web authority; see [host design](github-enterprise-hosts.md) |
 | `app_id` | int64 | Positive; unique with `github_host` |
 | `client_id` | text | Non-secret App OAuth client identifier |
 | `slug` | text | Verified App slug |
@@ -310,14 +310,16 @@ failed launch/resume does not replace the last successful snapshot.
 
 One optional personal identity per `(workspace_id, user_id)`. Add required
 `app_registration_id`, which must equal the current workspace App connection's registration. Access
-and refresh tokens remain encrypted under workspace/user-derived keys. Switching away from that
-App deletes the old personal secrets and increments its generation before the new automation
-connection becomes visible.
+and refresh tokens remain encrypted under workspace/user/host-derived keys, retaining the public
+legacy key format. Reads use the captured connection registration's immutable host. Switching
+away from that App invalidates personal records and generations atomically; obsolete secret
+cleanup follows the committed transition. See [host transition design](github-enterprise-hosts.md).
 
 ### `github_auth_flows`
 
 Installation and personal OAuth flows include `app_registration_id` in addition to workspace,
-user, expected connection generation, PKCE material, expiry, and consumption state. A callback is
+user, expected connection generation, immutable host and OAuth policy, policy-specific PKCE
+material, expiry, and consumption state. A callback is
 valid only when both its route registration ID and stored registration ID match.
 
 ### `github_webhook_deliveries`
@@ -386,9 +388,11 @@ before exposing registration management.
 ### Personal identity
 
 - `POST /api/v1/github/personal-connection/start` uses the workspace's active App registration and
-  returns its PKCE/state authorization URL.
+  returns its state-bound authorization URL. GitHub.com and GHE.com use PKCE; GHES uses the
+  confidential-client policy described in the [host design](github-enterprise-hosts.md).
 - `GET /api/v1/github/app/registrations/:registrationId/personal/callback` validates route, state,
-  PKCE, current workspace registration, and GitHub user before storing tokens.
+  the captured OAuth policy, current workspace registration, and GitHub user before storing tokens.
+  PKCE is verified when that policy requires it; a failed exchange never weakens the policy.
 - `DELETE /api/v1/github/personal-connection?workspace_id=<id>` deletes only the current user's
   workspace personal connection and secrets.
 

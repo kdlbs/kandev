@@ -48,6 +48,7 @@ func (r *Repository) initSchema() error {
 			custom_name     TEXT,
 			state           TEXT NOT NULL DEFAULT 'open',
 			initial_command TEXT NOT NULL DEFAULT '',
+			working_dir     TEXT NOT NULL DEFAULT '',
 			initial_command_once BOOLEAN NOT NULL DEFAULT FALSE,
 			initial_command_consumed BOOLEAN NOT NULL DEFAULT FALSE,
 			created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -64,7 +65,7 @@ func (r *Repository) initSchema() error {
 	if err := r.ensureInitialCommandOnceColumns(); err != nil {
 		return err
 	}
-	return nil
+	return r.ensureWorkingDirColumn()
 }
 
 func (r *Repository) ensureInitialCommandOnceColumns() error {
@@ -126,6 +127,26 @@ func (r *Repository) ensurePostgresInitialCommandOnceColumns() error {
 	return nil
 }
 
+func (r *Repository) ensureWorkingDirColumn() error {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		if _, err := r.db.Exec(`ALTER TABLE user_terminals ADD COLUMN IF NOT EXISTS working_dir TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add terminal working_dir column: %w", err)
+		}
+		return nil
+	}
+	columns, err := r.sqliteTerminalColumns()
+	if err != nil {
+		return err
+	}
+	if columns["working_dir"] {
+		return nil
+	}
+	if _, err := r.db.Exec(`ALTER TABLE user_terminals ADD COLUMN working_dir TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add terminal working_dir column: %w", err)
+	}
+	return nil
+}
+
 // Create inserts a new terminal row. The seq is computed as MAX(seq)+1 for
 // the task — never reused, so deletes leave gaps.
 //
@@ -141,15 +162,25 @@ func (r *Repository) Create(ctx context.Context, taskID, envID, id, initialComma
 	return r.CreateWithInitialCommandOnce(ctx, taskID, envID, id, initialCommand, false)
 }
 
+// CreateWithWorkingDir inserts a terminal whose first shell starts in
+// workingDir. The terminal handler validates containment before use.
+func (r *Repository) CreateWithWorkingDir(ctx context.Context, taskID, envID, id, initialCommand, workingDir string, once bool) (*models.Terminal, error) {
+	return r.createWithOptions(ctx, taskID, envID, id, initialCommand, workingDir, once)
+}
+
 // CreateWithInitialCommandOnce persists whether initialCommand may run only
 // once. Existing ordinary/script terminal commands keep their default repeat
 // behavior; native authentication commands opt into one-shot delivery.
 func (r *Repository) CreateWithInitialCommandOnce(ctx context.Context, taskID, envID, id, initialCommand string, once bool) (*models.Terminal, error) {
+	return r.createWithOptions(ctx, taskID, envID, id, initialCommand, "", once)
+}
+
+func (r *Repository) createWithOptions(ctx context.Context, taskID, envID, id, initialCommand, workingDir string, once bool) (*models.Terminal, error) {
 	if _, err := r.db.ExecContext(ctx,
-		r.db.Rebind(`INSERT INTO user_terminals (id, task_id, environment_id, seq, custom_name, state, initial_command, initial_command_once, initial_command_consumed)
-		 SELECT ?, ?, ?, COALESCE(MAX(seq), 0) + 1, NULL, 'open', ?, ?, FALSE
+		r.db.Rebind(`INSERT INTO user_terminals (id, task_id, environment_id, seq, custom_name, state, initial_command, working_dir, initial_command_once, initial_command_consumed)
+		 SELECT ?, ?, ?, COALESCE(MAX(seq), 0) + 1, NULL, 'open', ?, ?, ?, FALSE
 		 FROM user_terminals WHERE task_id = ?`),
-		id, taskID, envID, initialCommand, once, taskID,
+		id, taskID, envID, initialCommand, workingDir, once, taskID,
 	); err != nil {
 		return nil, fmt.Errorf("insert terminal: %w", err)
 	}
@@ -180,7 +211,7 @@ func (r *Repository) ConsumeInitialCommandOnce(ctx context.Context, taskID, envi
 func (r *Repository) Get(ctx context.Context, id string) (*models.Terminal, error) {
 	var t models.Terminal
 	err := r.ro.GetContext(ctx, &t,
-		r.ro.Rebind(`SELECT id, task_id, environment_id, seq, custom_name, state, initial_command, initial_command_once, initial_command_consumed, created_at
+		r.ro.Rebind(`SELECT id, task_id, environment_id, seq, custom_name, state, initial_command, working_dir, initial_command_once, initial_command_consumed, created_at
 		 FROM user_terminals WHERE id = ?`),
 		id,
 	)
@@ -196,7 +227,7 @@ func (r *Repository) Get(ctx context.Context, id string) (*models.Terminal, erro
 // ListByTask returns terminals for taskID ordered by seq ascending.
 // includeParked controls whether parked rows are included.
 func (r *Repository) ListByTask(ctx context.Context, taskID string, includeParked bool) ([]*models.Terminal, error) {
-	q := `SELECT id, task_id, environment_id, seq, custom_name, state, initial_command, initial_command_once, initial_command_consumed, created_at
+	q := `SELECT id, task_id, environment_id, seq, custom_name, state, initial_command, working_dir, initial_command_once, initial_command_consumed, created_at
 	      FROM user_terminals WHERE task_id = ?`
 	args := []any{taskID}
 	if !includeParked {

@@ -440,3 +440,73 @@ describe("AgentConfigOptions", () => {
     );
   });
 });
+
+describe("RemoteCredentialsCard Claude authentication", () => {
+  it("renders independent Claude API-key and OAuth secret choices", async () => {
+    vi.mocked(listRemoteCredentials).mockResolvedValueOnce({
+      auth_specs: [
+        {
+          id: "claude-acp",
+          display_name: "Claude",
+          methods: [
+            {
+              method_id: "agent:claude-acp:env:CLAUDE_CODE_OAUTH_TOKEN",
+              type: "env",
+              env_var: "CLAUDE_CODE_OAUTH_TOKEN",
+            },
+            {
+              method_id: "agent:claude-acp:env:ANTHROPIC_API_KEY",
+              type: "env",
+              env_var: "ANTHROPIC_API_KEY",
+            },
+          ],
+        },
+      ],
+    });
+    const onChange = vi.fn();
+    const onEnvVarChange = vi.fn();
+    const claudeSecrets: SecretListItem[] = [
+      { id: "secret-oauth", name: "OAuth token", has_value: true, created_at: "", updated_at: "" },
+      { id: "secret-api-key", name: "API key", has_value: true, created_at: "", updated_at: "" },
+    ];
+    renderRemoteCredentialsCard(onChange, vi.fn(), [], {
+      onAgentEnvVarChange: onEnvVarChange,
+      secrets: claudeSecrets,
+    });
+
+    fireEvent.click(await screen.findByText("Claude"));
+    const oauth = screen.getByRole("checkbox", {
+      name: "Provide secret for CLAUDE_CODE_OAUTH_TOKEN",
+    });
+    const apiKey = screen.getByRole("checkbox", {
+      name: "Provide secret for ANTHROPIC_API_KEY",
+    });
+
+    fireEvent.click(oauth);
+    fireEvent.click(apiKey);
+
+    const secretSelects = await screen.findAllByRole("combobox");
+    expect(secretSelects).toHaveLength(2);
+    fireEvent.click(secretSelects[0]);
+    fireEvent.click(await screen.findByRole("option", { name: "OAuth token" }));
+    fireEvent.click(secretSelects[1]);
+    fireEvent.click(await screen.findByRole("option", { name: "API key" }));
+
+    expect(onChange).toHaveBeenLastCalledWith([
+      "agent:claude-acp:env:CLAUDE_CODE_OAUTH_TOKEN",
+      "agent:claude-acp:env:ANTHROPIC_API_KEY",
+    ]);
+    expect(onEnvVarChange).toHaveBeenNthCalledWith(
+      1,
+      "agent:claude-acp:env:CLAUDE_CODE_OAUTH_TOKEN",
+      "secret-oauth",
+    );
+    expect(onEnvVarChange).toHaveBeenNthCalledWith(
+      2,
+      "agent:claude-acp:env:ANTHROPIC_API_KEY",
+      "secret-api-key",
+    );
+    expect(oauth.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
+    expect(apiKey.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
+  });
+});
