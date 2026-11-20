@@ -42,6 +42,11 @@ const (
 	SkipReasonDegraded            = "skipped_degraded"
 	SkipReasonUserAction          = "skipped_user_action"
 	SkipReasonMissingModelMapping = "missing_model_mapping"
+	// SkipReasonAuthorProvider marks the provider that did the task's work,
+	// skipped for a seat run whose step declares exclude_author_provider.
+	// It is never auto-retryable: only another provider recovering frees
+	// the run.
+	SkipReasonAuthorProvider = "author_provider"
 )
 
 // IsAutoRetryableCode derives the legacy Office health hint from the shared
@@ -143,6 +148,10 @@ type Resolution struct {
 // fallback never re-picks a provider that has already failed this run.
 type ResolveOptions struct {
 	ExcludeProviders []ProviderID
+	// AuthorProvider is skipped with a SkipReasonAuthorProvider record when
+	// routing is enabled. Unlike ExcludeProviders it leaves a trace, because
+	// a run parked by it must say why. Empty disables the skip.
+	AuthorProvider ProviderID
 	// Reason is the run's wake reason (heartbeat / routine_trigger /
 	// budget_alert / …). When the effective TierPerReason map carries
 	// a tier for this reason, that tier wins over the agent tier
@@ -208,6 +217,13 @@ func (r *Resolver) Resolve(
 	now := r.clock()
 	for _, pid := range order {
 		if _, skip := excluded[pid]; skip {
+			continue
+		}
+		if opts.AuthorProvider != "" && pid == opts.AuthorProvider {
+			res.SkippedDegraded = append(res.SkippedDegraded, SkippedCandidate{
+				ProviderID: pid,
+				Reason:     SkipReasonAuthorProvider,
+			})
 			continue
 		}
 		shortRetry, err := r.evaluateProvider(ctx, workspaceID, res, cfg, idx, pid, tier, now, false)

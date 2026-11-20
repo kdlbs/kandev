@@ -211,9 +211,12 @@ type QueueRunForEachParticipantAction struct {
 // decision-required seat somewhere in the task's workflow before fan-out
 // runs. Role is read from the action config's "role" key by CompileStep. An
 // empty or unrecognized Role is a runtime condition the callback reports and
-// skips, not a build-time compile failure.
+// skips, not a build-time compile failure. ExcludeAuthorProvider is read from
+// "exclude_author_provider"; the engine does not act on it. Office routing
+// applies it when dispatching the seat's runs.
 type EnsureParticipantSeatAction struct {
-	Role string
+	Role                  string
+	ExcludeAuthorProvider bool
 }
 
 // CreateChildTaskAction defines a "spawn a child task" action. The new
@@ -546,7 +549,10 @@ func readEnsureParticipantSeatConfig(config map[string]any) *EnsureParticipantSe
 		return &EnsureParticipantSeatAction{}
 	}
 	role, _ := config["role"].(string)
-	return &EnsureParticipantSeatAction{Role: role}
+	return &EnsureParticipantSeatAction{
+		Role:                  role,
+		ExcludeAuthorProvider: wfmodels.ExcludesAuthorProvider(config),
+	}
 }
 
 // readSessionMode reads the target mode for a set_session_mode action from its

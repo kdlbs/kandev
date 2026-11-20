@@ -36,6 +36,7 @@ type Service struct {
 	workflowAuthorizationRequired  func(context.Context) bool
 	repo                           *repository.Repository
 	logger                         *logger.Logger
+	exclusionAdvisor               ImportExclusionAdvisor
 	workflowProvider               WorkflowProvider
 	workspaceProvider              WorkspaceProvider
 	resolveProfile                 models.AgentProfileResolver
@@ -786,8 +787,9 @@ func (s *Service) ListHistoryBySession(ctx context.Context, sessionID string) ([
 
 // ImportResult holds the outcome of an import operation.
 type ImportResult struct {
-	Created []string `json:"created"`
-	Skipped []string `json:"skipped"`
+	Created  []string        `json:"created"`
+	Skipped  []string        `json:"skipped"`
+	Warnings []ImportWarning `json:"warnings,omitempty"`
 }
 
 // ExportWorkflow exports a single workflow with its steps as portable JSON.
@@ -890,6 +892,7 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 		}
 		result.Created = append(result.Created, pw.Name)
 	}
+	result.Warnings = s.exclusionWarnings(ctx, workspaceID, selectedWorkflows(export, selection.indexes))
 
 	s.logger.Info("imported workflows",
 		zap.String("workspace_id", workspaceID),

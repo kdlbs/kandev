@@ -7,6 +7,11 @@ import type {
   ProviderHealth,
   WorkspaceRouting,
 } from "@/lib/state/slices/office/types";
+import type {
+  AuthorExclusionStep,
+  AuthorExclusionStepChange,
+  AuthorExclusionWarning,
+} from "@/lib/types/author-exclusion";
 
 const BASE = "/api/v1/office";
 
@@ -14,7 +19,34 @@ export type RoutingConfigResponse = {
   config: WorkspaceRouting | null;
   known_providers: string[];
   execution_profiles: ExecutionProfileSummary[];
+  author_exclusion_warnings?: AuthorExclusionWarning[];
+  author_exclusion_steps?: AuthorExclusionStep[];
 };
+
+export type SeatAuthorExclusionResponse = {
+  /** Null when the save succeeded but the steps could not be read back. */
+  author_exclusion_steps: AuthorExclusionStep[] | null;
+  author_exclusion_warnings: AuthorExclusionWarning[];
+};
+
+export type RoutingUpdateResponse = {
+  ok: boolean;
+  author_exclusion_warnings?: AuthorExclusionWarning[];
+};
+
+export function updateSeatAuthorExclusion(
+  workspaceId: string,
+  changes: AuthorExclusionStepChange[],
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<SeatAuthorExclusionResponse>(
+    `${BASE}/workspaces/${workspaceId}/routing/author-exclusion`,
+    {
+      ...options,
+      init: { method: "PUT", body: JSON.stringify({ changes }), ...options?.init },
+    },
+  );
+}
 
 export function getWorkspaceRouting(workspaceId: string, options?: ApiRequestOptions) {
   return fetchJson<RoutingConfigResponse>(`${BASE}/workspaces/${workspaceId}/routing`, options);
@@ -25,7 +57,7 @@ export function updateWorkspaceRouting(
   cfg: WorkspaceRouting,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<{ ok: boolean }>(`${BASE}/workspaces/${workspaceId}/routing`, {
+  return fetchJson<RoutingUpdateResponse>(`${BASE}/workspaces/${workspaceId}/routing`, {
     ...options,
     init: { method: "PUT", body: JSON.stringify(cfg), ...options?.init },
   });
