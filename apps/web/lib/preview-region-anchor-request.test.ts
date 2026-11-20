@@ -19,6 +19,7 @@ const anchor = {
   anchor_width: 300,
   anchor_height: 200,
 };
+const PREVIEW_ORIGIN = "https://preview.example";
 
 function message(type: string, payload: Record<string, unknown>) {
   return { source: INSPECTOR_SOURCE, version: INSPECTOR_PROTOCOL_VERSION, type, payload };
@@ -36,12 +37,13 @@ describe("requestRegionAnchor", () => {
             new MessageEvent("message", {
               source: contentWindow as unknown as Window,
               data,
+              origin: PREVIEW_ORIGIN,
             }),
           );
         }
       }),
     };
-    return { contentWindow } as unknown as HTMLIFrameElement;
+    return { contentWindow, src: `${PREVIEW_ORIGIN}/page` } as unknown as HTMLIFrameElement;
   }
 
   it("resolves the anchor the page reports for a moved region", async () => {

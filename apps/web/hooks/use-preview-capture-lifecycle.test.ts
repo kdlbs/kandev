@@ -11,6 +11,7 @@ const SCREENSHOT_EVENT_TYPE = "screenshot-region-selected";
 const MARKER_ACTIVATED = "marker-activated";
 const PREVIEW_URL = "blob:preview-screenshot";
 const SOURCE_LABEL = "http://localhost:3000";
+const PREVIEW_ORIGIN = new URL(SOURCE_LABEL).origin;
 const CREATED_AT = "2026-09-15T00:00:00Z";
 
 const feedback = vi.hoisted(() => ({
@@ -68,6 +69,7 @@ const source = {
 
 function setup() {
   const iframe = document.createElement("iframe");
+  iframe.src = SOURCE_LABEL;
   document.body.appendChild(iframe);
   const iframeRef = { current: iframe };
   const rendered = renderHook(() =>
@@ -76,8 +78,8 @@ function setup() {
   return { iframe, iframeRef, ...rendered };
 }
 
-function dispatch(sourceWindow: MessageEventSource | null, data: unknown) {
-  window.dispatchEvent(new MessageEvent("message", { source: sourceWindow, data }));
+function dispatch(sourceWindow: MessageEventSource | null, data: unknown, origin = PREVIEW_ORIGIN) {
+  window.dispatchEvent(new MessageEvent("message", { source: sourceWindow, data, origin }));
 }
 
 function bridgeMessage(type: string, payload: unknown) {
