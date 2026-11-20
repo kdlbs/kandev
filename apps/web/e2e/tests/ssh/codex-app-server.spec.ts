@@ -1,5 +1,6 @@
 import { expect, test } from "../../fixtures/ssh-test-base";
 import { readRemoteFile } from "../../helpers/ssh";
+import { managedRuntimePackageSpec } from "../../helpers/managed-runtime-catalogue";
 import {
   disableNativeCodexAppServer,
   createNativeCodexExecutorProbe,
@@ -45,8 +46,8 @@ ${probe.prepareScript}`,
       probe.profile.id,
       "SSH native Codex command launch",
     );
-    expect(readRemoteFile(seedData.sshTarget, probe.markerPath)).toMatch(
-      /@openai\/codex@0\.154\.0 app-server/,
+    expect(readRemoteFile(seedData.sshTarget, probe.markerPath)).toContain(
+      `${managedRuntimePackageSpec("@openai/codex")} app-server`,
     );
 
     await disableNativeCodexAppServer(backend, apiClient, probe.profile.id);

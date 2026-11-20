@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentruntime"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -116,6 +117,8 @@ func (m *Manager) resolveEffectiveMcpServers(
 	return mcpconfig.ToACPServers(result.Servers), nil
 }
 
+// resolveEffectiveMCPResolution applies executor policy to the process-bound automation selection.
+// Unavailable template definitions remain visible as resolution decisions.
 func (m *Manager) resolveEffectiveMCPResolution(
 	ctx context.Context,
 	resolutionContext mcpconfig.ResolutionContext,
@@ -135,10 +138,21 @@ func (m *Manager) resolveEffectiveMCPResolution(
 	if err != nil {
 		return nil, err
 	}
+	if raw, ok := metadata[mcpprofile.BuiltinBindingMetadataKey]; ok {
+		binding, err := mcpprofile.ParseBuiltinBindingMetadata(raw)
+		if err != nil {
+			return nil, err
+		}
+		manifest := binding.BuiltinPackages
+		if manifest.AutomationID != "" {
+			resolutionContext.Automation = &mcpconfig.AutomationMCPContribution{AutomationID: manifest.AutomationID, WorkspaceID: manifest.WorkspaceID, TaskID: manifest.TaskID, Revision: manifest.AutomationRevision, DefinitionIDs: append([]string(nil), manifest.AutomationDefinitionIDs...)}
+		}
+	}
 	result, err := m.mcpResolver.Resolve(ctx, resolutionContext, policy)
 	if err != nil {
 		return nil, err
 	}
+	mcpconfig.AddTemplateUnavailableDecisions(result, metadata)
 	for _, decision := range result.Decisions {
 		m.logger.Warn("MCP server was not attached",
 			zap.String("profile_id", profileID), zap.String("executor_id", executorID),

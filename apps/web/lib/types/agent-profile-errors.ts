@@ -2,6 +2,9 @@ export type ActiveSessionInfo = {
   task_id: string;
   task_title: string;
   is_ephemeral: boolean;
+  // Optional so a conflict body from an older backend still renders.
+  workspace_id?: string;
+  workspace_name?: string;
 };
 
 // WatcherReference points at one issue/PR watcher row that uses the agent
@@ -31,3 +34,8 @@ export type AutomationReference = {
 };
 
 export type UtilityAgentReference = { id: string; name: string };
+
+// DynamicProfileReference points at one live dynamic profile that lists the
+// agent profile as a routing candidate. Soft-deleted dynamic profiles are
+// never reported: their routes can no longer run.
+export type DynamicProfileReference = { id: string; name: string };

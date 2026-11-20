@@ -42,6 +42,29 @@ func (r *coordinatorStopRepoHooks) UpdateTaskSessionIfCurrentState(
 	return r.repoStore.UpdateTaskSessionIfCurrentState(ctx, session, expected)
 }
 
+func (r *coordinatorStopRepoHooks) UpdateTaskSessionIfCurrentStateForLaunch(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, error) {
+	if r.updateFullRowCAS != nil {
+		return r.updateFullRowCAS(ctx, session, expected)
+	}
+	updater, ok := r.repoStore.(interface {
+		UpdateTaskSessionIfCurrentStateForLaunch(
+			context.Context,
+			*models.TaskSession,
+			models.TaskSessionState,
+			string,
+		) (bool, error)
+	})
+	if !ok {
+		return false, errors.New("coordinator stop test repository cannot persist launch state")
+	}
+	return updater.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
+}
+
 func (r *coordinatorStopRepoHooks) ListActiveTaskSessionsByTaskID(
 	ctx context.Context,
 	taskID string,

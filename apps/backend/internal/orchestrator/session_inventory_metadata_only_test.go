@@ -25,6 +25,9 @@ const (
 // environment holds one local repository checkout with a stale inventory slug.
 func newMetadataOnlyRecoveryService(t *testing.T) (*Service, *sqliterepo.Repository, *int) {
 	t.Helper()
+	// The fixture owns its Git configuration, including content-filter absence.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()

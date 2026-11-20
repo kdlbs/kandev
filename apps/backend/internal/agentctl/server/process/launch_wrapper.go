@@ -45,6 +45,14 @@ func (m *Manager) prepareOneShotArgs() error {
 	if !m.cfg.LaunchWrapper.IsZero() {
 		initial, continuation = m.cfg.AgentArgs, m.cfg.ContinueArgs
 	}
+	initial, err := m.prepareManagedRuntimeCommand(initial)
+	if err != nil {
+		return err
+	}
+	continuation, err = m.prepareManagedRuntimeCommand(continuation)
+	if err != nil {
+		return err
+	}
 	preparedInitial, err := m.prepareSessionArgs(initial)
 	if err != nil {
 		return err

@@ -149,11 +149,44 @@ func parseBirthToken(token string) (string, uint64, error) {
 	return parts[1], start, nil
 }
 
+// InspectProcStat verifies identity against a previously read /proc/<pid>/stat
+// payload and the current kernel boot id. A caller that holds an opened
+// process-directory handle uses this to compare immutable process evidence
+// without re-reading the procfs path, which could already name a replacement.
+func InspectProcStat(identity Identity, bootID string, statData []byte) (State, error) {
+	if err := identity.Validate(); err != nil {
+		return StateUnknown, err
+	}
+	if identity.GroupID <= 0 || identity.SessionID <= 0 {
+		return StateUnknown, ErrUnverifiableIdentity
+	}
+	wantBoot, wantStart, err := parseBirthToken(identity.BirthToken)
+	if err != nil {
+		return StateUnknown, err
+	}
+	stat, err := parseProcStat(identity.PID, statData)
+	if err != nil {
+		return StateUnknown, err
+	}
+	if stat.startTime != wantStart || strings.TrimSpace(bootID) != wantBoot ||
+		stat.groupID != identity.GroupID || stat.sessionID != identity.SessionID {
+		return StateReused, nil
+	}
+	if stat.state == 'Z' || stat.state == 'X' {
+		return StateExited, nil
+	}
+	return StateAlive, nil
+}
+
 func readProcStat(pid int) (procStat, error) {
 	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
 	if err != nil {
 		return procStat{}, err
 	}
+	return parseProcStat(pid, data)
+}
+
+func parseProcStat(pid int, data []byte) (procStat, error) {
 	line := string(data)
 	end := strings.LastIndexByte(line, ')')
 	if end < 0 || end+1 >= len(line) {
@@ -255,6 +288,75 @@ func waitForOwnedSessionExit(ctx context.Context, sessionID int, rootStartTime u
 		case <-ticker.C:
 		}
 	}
+}
+
+// BirthBootMatches reports whether the recorded birth token belongs to the
+// current kernel boot. A malformed or unsupported token is unverifiable.
+func BirthBootMatches(identity Identity) (bool, error) {
+	if err := identity.Validate(); err != nil {
+		return false, err
+	}
+	wantBoot, _, err := parseBirthToken(identity.BirthToken)
+	if err != nil {
+		return false, err
+	}
+	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return false, fmt.Errorf("read kernel boot identity: %w", err)
+	}
+	return strings.TrimSpace(string(boot)) == wantBoot, nil
+}
+
+// SessionMembersRemain reports whether a live process other than the recorded
+// root still belongs to the recorded session and started at or after it. A
+// controller started from a login shell shares that shell's session with the
+// agent children it launches, so this is the post-exit child-drain evidence for
+// a controller that is not itself a session leader.
+func SessionMembersRemain(identity Identity) (bool, error) {
+	if err := identity.Validate(); err != nil {
+		return false, err
+	}
+	if identity.SessionID <= 0 {
+		return false, ErrUnverifiableIdentity
+	}
+	wantBoot, rootStart, err := parseBirthToken(identity.BirthToken)
+	if err != nil {
+		return false, err
+	}
+	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return false, fmt.Errorf("read kernel boot identity: %w", err)
+	}
+	if strings.TrimSpace(string(boot)) != wantBoot {
+		// A different boot cannot contain members of this launch.
+		return false, nil
+	}
+	return sessionMembersRemain(identity, rootStart)
+}
+
+func sessionMembersRemain(identity Identity, rootStart uint64) (bool, error) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return false, fmt.Errorf("enumerate processes: %w", err)
+	}
+	for _, entry := range entries {
+		pid, convErr := strconv.Atoi(entry.Name())
+		if convErr != nil || !entry.IsDir() || pid == identity.PID {
+			continue
+		}
+		stat, statErr := readProcStat(pid)
+		if processNoLongerExists(statErr) {
+			continue
+		}
+		if statErr != nil {
+			return false, statErr
+		}
+		if stat.sessionID == identity.SessionID && stat.startTime >= rootStart &&
+			stat.state != 'Z' && stat.state != 'X' {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // OwnedSessionTerminated verifies process and descendant termination without signaling them.

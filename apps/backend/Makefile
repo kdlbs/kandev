@@ -161,7 +161,7 @@ else
   BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' $(NULL_REDIR) || echo unknown)
 endif
 
-VERSION ?= $(shell git describe --tags --always --dirty $(NULL_REDIR) || echo dev)
+VERSION ?= $(shell git describe --tags --match "v[0-9]*" --exclude "*/*" --always --dirty $(NULL_REDIR) || echo dev)
 COMMIT := $(shell git rev-parse HEAD $(NULL_REDIR) || echo unknown)
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
@@ -186,7 +186,7 @@ endif
 DEADCODE_VERSION ?= v0.48.0
 DEADCODE_GO_TOOLCHAIN ?= go1.26.0
 
-.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-codexdbg codexdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-ui e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
+.PHONY: all build build-dev build-runtime build-kandev build-kandev-linux build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-codexdbg codexdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-ui e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
 
 ## Default target
 all: build
@@ -320,6 +320,14 @@ build-mock-agent-linux:
 	@$(call MKDIR,$(BUILD_DIR))
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent-linux-amd64 ./cmd/mock-agent
 
+## Build the backend for linux/amd64 when the host binary cannot run in the
+## disposable containerized E2E backend. The backend imports the cgo SQLite
+## driver, so this target requires a Linux host with a working C compiler.
+build-kandev-linux:
+	@echo "Building kandev for linux/amd64..."
+	@$(call MKDIR,$(BUILD_DIR))
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 $(GO) build -trimpath $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/kandev-linux-amd64 ./cmd/kandev
+
 
 ## Package the plugin-fixture SDK plugin (cmd/plugin-fixture) as a kandev
 ## plugin tar.gz for backend integration tests and Playwright e2e: stages
@@ -396,7 +404,10 @@ test-windows:
 	@echo "Running Windows Git executable memo tests..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -v -timeout 10m ./internal/common/subproc -run "^TestNewGitCommand"
 	@echo "Running Windows Hermes ACP detection tests..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run "^Test(HermesACP|RunCommandCheck)"
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run "^Test(HermesACP|RunCommandCheck|NativeUpdateCheckResolverPlatformCase)"
+	@echo "Running Windows native update check containment tests..."
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 10m ./internal/agent/proctree/...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 10m ./internal/agent/settings/controller -run "^TestNativeCheckRunner"
 	@echo "Running Windows helper console-behavior tests..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg -run "^(TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow|TestWindowsDetachedParentKeepsConsoleHiddenForDescendants|TestPrepareNativeMCPProcessHidesConsoleWindow|TestWindowsACPCommandProcAttrHidesConsoleWindow|TestConfigureProcessTreeHidesConsoleWindow)$$"
 	@echo "Running Windows runtime observation command-shim tests..."

@@ -52,6 +52,7 @@ vi.mock("@/components/state-provider", () => ({
       kanban: { tasks: [] },
       workflows: { items: [] },
       taskSessions: { items: {} },
+      automations: { items: [], byWorkspace: {} },
     }),
 }));
 

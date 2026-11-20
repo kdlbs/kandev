@@ -184,17 +184,24 @@ func TestPluginExecutorRestartRecovery(t *testing.T) {
 		record:  pluginExecutorRecoveryRecord(t, "ready", resource),
 		session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", State: models.TaskSessionStateRunning},
 	}
+	const nativeRuntimeIdentity = "native-runtime-plugin-recovery"
+	inventory, err := decodePluginExecutorInventory(store.record.Metadata)
+	if err != nil {
+		t.Fatalf("decode plugin recovery inventory: %v", err)
+	}
+	inventory.RuntimeIdentity = nativeRuntimeIdentity
+	store.record.Metadata[MetadataKeyPluginExecutor] = inventory
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 	runtime.SetRecoveryDependencies(loader, store)
-	setPluginRecoveredInstanceInfoFixture(t, runtime)
-	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
-		if executionID != "execution-plugin-recovery" || token != "agentctl-secret" {
+	setPluginRecoveredInstanceInfoFixture(t, runtime, nativeRuntimeIdentity)
+	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string, scopedMCPRoutes bool) (*agentctl.Client, error) {
+		if executionID != nativeRuntimeIdentity || token != "agentctl-secret" {
 			t.Fatalf("recovered client identity = %q token=%q", executionID, token)
 		}
 		if _, err := resolver(ctx); err != nil {
 			return nil, err
 		}
-		return agentctl.NewClient("unused", 0, log, agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token)), nil
+		return agentctl.NewClient("unused", 0, log, agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token), agentctl.WithBuiltinMCPScopedRoutes(scopedMCPRoutes)), nil
 	}
 	runtime.ready = func(_ context.Context, client *agentctl.Client) error {
 		if client.AuthToken() != "agentctl-secret" {
@@ -223,7 +230,7 @@ func TestPluginExecutorRestartRecovery(t *testing.T) {
 		t.Fatalf("recorded profile snapshot was not restored: called=%v config=%v refs=%v", loader.called, loader.config, loader.refs)
 	}
 	if operations.attachRequest == nil || operations.attachRequest.GetResource().GetResourceHandle() != "resource-recovery" ||
-		operations.attachRequest.GetExpectedRuntimeIdentity() != "execution-plugin-recovery" {
+		operations.attachRequest.GetExpectedRuntimeIdentity() != nativeRuntimeIdentity {
 		t.Fatalf("attach request = %#v", operations.attachRequest)
 	}
 	if len(operations.inspectRequests) != 2 || store.checkpoints < 3 {
@@ -248,7 +255,7 @@ func TestPluginExecutorRecoveredClientRequiresRecordedInstancePort(t *testing.T)
 	var clientFactoryCalled bool
 	operations := &pluginExecutorOperationsFake{}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
-	runtime.newAgentctlClient = func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, error) {
+	runtime.newAgentctlClient = func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string, bool) (*agentctl.Client, error) {
 		clientFactoryCalled = true
 		return nil, errors.New("unexpected client creation")
 	}
@@ -417,15 +424,15 @@ func TestPluginExecutorPostHandshakeRecoveryAttachesEveryCheckpointPhase(t *test
 			}
 			runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 			runtime.SetRecoveryDependencies(loader, store)
-			setPluginRecoveredInstanceInfoFixture(t, runtime)
-			runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
+			setPluginRecoveredInstanceInfoFixture(t, runtime, "execution-plugin-recovery")
+			runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string, scopedMCPRoutes bool) (*agentctl.Client, error) {
 				if executionID != "execution-plugin-recovery" || token != "agentctl-secret" {
 					t.Fatalf("recovered client execution=%q token=%q", executionID, token)
 				}
 				if _, err := resolver(ctx); err != nil {
 					return nil, err
 				}
-				return agentctl.NewClient("unused", 0, log, agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token)), nil
+				return agentctl.NewClient("unused", 0, log, agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token), agentctl.WithBuiltinMCPScopedRoutes(scopedMCPRoutes)), nil
 			}
 			runtime.ready = func(_ context.Context, client *agentctl.Client) error {
 				if client.AuthToken() != "agentctl-secret" {
@@ -450,10 +457,10 @@ func TestPluginExecutorPostHandshakeRecoveryAttachesEveryCheckpointPhase(t *test
 	}
 }
 
-func setPluginRecoveredInstanceInfoFixture(t *testing.T, runtime *PluginRemoteExecutor) {
+func setPluginRecoveredInstanceInfoFixture(t *testing.T, runtime *PluginRemoteExecutor, expectedIdentity string) {
 	t.Helper()
 	runtime.recoveredAgentctlInfoReader = func(_ context.Context, _ agentctl.ConnectionLeaseResolver, _ *logger.Logger, executionID, token string) (*agentctl.InstanceInfo, error) {
-		if executionID != "execution-plugin-recovery" || token != "agentctl-secret" {
+		if executionID != expectedIdentity || token != "agentctl-secret" {
 			t.Fatalf("instance metadata read identity = %q token=%q", executionID, token)
 		}
 		return &agentctl.InstanceInfo{
@@ -505,7 +512,9 @@ func TestPluginRecoveredInstanceMetadataUsesAuthenticatedControlReader(t *testin
 		},
 		operationContext: &pluginsdk.ExecutorProviderRequestContext{},
 	}
-	info, err := runtime.readRecoveredAgentctlInstance(context.Background(), record, state)
+	info, err := runtime.readRecoveredAgentctlInstance(
+		context.Background(), record, state, record.AgentExecutionID, record.TransientAuthToken,
+	)
 	require.NoError(t, err)
 	require.Equal(t, "execution-plugin-recovery", gotExecutionID)
 	require.Equal(t, "agentctl-secret", gotAuthToken)
@@ -513,7 +522,9 @@ func TestPluginRecoveredInstanceMetadataUsesAuthenticatedControlReader(t *testin
 	require.Equal(t, "run-plugin-recovery", info.Env["KANDEV_RUN_ID"])
 	require.Equal(t, []string{"/workspace/src"}, info.WorkspaceSourceRoots)
 	responseSession = "different-session"
-	_, err = runtime.readRecoveredAgentctlInstance(context.Background(), record, state)
+	_, err = runtime.readRecoveredAgentctlInstance(
+		context.Background(), record, state, record.AgentExecutionID, record.TransientAuthToken,
+	)
 	require.Error(t, err, "a control endpoint must not hydrate metadata from a different task session")
 }
 

@@ -35,6 +35,9 @@ type fakeUtilityRepo struct {
 	lastListCallsLimit int
 	errs               map[string]error
 	seq                int
+	createCallCount    int
+	updateCallCount    int
+	cancelAfterCreate  context.CancelFunc
 }
 
 func newFakeUtilityRepo() *fakeUtilityRepo {
@@ -78,7 +81,19 @@ func (r *fakeUtilityRepo) putAgent(agent *models.UtilityAgent) *models.UtilityAg
 func (r *fakeUtilityRepo) call(id string) *models.UtilityAgentCall {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.calls[id]
+	return cloneUtilityCall(r.calls[id])
+}
+
+func cloneUtilityCall(call *models.UtilityAgentCall) *models.UtilityAgentCall {
+	if call == nil {
+		return nil
+	}
+	clone := *call
+	if call.CompletedAt != nil {
+		completedAt := *call.CompletedAt
+		clone.CompletedAt = &completedAt
+	}
+	return &clone
 }
 
 // listCallsLimit returns the limit the handler last resolved.
@@ -93,6 +108,18 @@ func (r *fakeUtilityRepo) callCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.calls)
+}
+
+func (r *fakeUtilityRepo) callWriteCounts() (int, int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.createCallCount, r.updateCallCount
+}
+
+func (r *fakeUtilityRepo) cancelAfterNextCallCreate(cancel context.CancelFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cancelAfterCreate = cancel
 }
 
 func (r *fakeUtilityRepo) ListAgents(context.Context) ([]*models.UtilityAgent, error) {
@@ -194,7 +221,7 @@ func (r *fakeUtilityRepo) ListCalls(_ context.Context, utilityID string, limit i
 	out := make([]*models.UtilityAgentCall, 0, len(r.callOrder))
 	for _, id := range r.callOrder {
 		if c, ok := r.calls[id]; ok && c.UtilityID == utilityID {
-			out = append(out, c)
+			out = append(out, cloneUtilityCall(c))
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -204,11 +231,14 @@ func (r *fakeUtilityRepo) ListCalls(_ context.Context, utilityID string, limit i
 	return out, nil
 }
 
-func (r *fakeUtilityRepo) GetCallByID(_ context.Context, id string) (*models.UtilityAgentCall, error) {
+func (r *fakeUtilityRepo) GetCallByID(ctx context.Context, id string) (*models.UtilityAgentCall, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if c, ok := r.calls[id]; ok {
-		return c, nil
+		return cloneUtilityCall(c), nil
 	}
 	return nil, sql.ErrNoRows
 }
@@ -218,21 +248,62 @@ func (r *fakeUtilityRepo) CreateCall(_ context.Context, call *models.UtilityAgen
 		return err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.seq++
+	r.createCallCount++
 	if call.ID == "" {
 		call.ID = fmt.Sprintf("call-%d", r.seq)
 	}
-	r.calls[call.ID] = call
+	r.calls[call.ID] = cloneUtilityCall(call)
 	r.callOrder = append(r.callOrder, call.ID)
+	cancel := r.cancelAfterCreate
+	r.cancelAfterCreate = nil
+	r.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	return nil
 }
 
-func (r *fakeUtilityRepo) UpdateCall(_ context.Context, call *models.UtilityAgentCall) error {
+func (r *fakeUtilityRepo) UpdateCall(ctx context.Context, call *models.UtilityAgentCall) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.calls[call.ID] = call
+	r.updateCallCount++
+	r.calls[call.ID] = cloneUtilityCall(call)
 	return nil
+}
+
+func TestFakeUtilityRepoCallWritesAreIsolated(t *testing.T) {
+	repo := newFakeUtilityRepo()
+	call := &models.UtilityAgentCall{ID: "call-1", Status: "pending"}
+	if err := repo.CreateCall(context.Background(), call); err != nil {
+		t.Fatalf("CreateCall: %v", err)
+	}
+	call.Status = "failed"
+	if got := repo.call(call.ID); got == nil || got.Status != "pending" {
+		t.Fatalf("mutating the create argument changed storage: %#v", got)
+	}
+
+	read, err := repo.GetCallByID(context.Background(), call.ID)
+	if err != nil {
+		t.Fatalf("GetCallByID: %v", err)
+	}
+	read.Status = "cancelled"
+	if got := repo.call(call.ID); got == nil || got.Status != "pending" {
+		t.Fatalf("mutating a read result changed storage: %#v", got)
+	}
+
+	update := cloneUtilityCall(read)
+	update.Status = "completed"
+	if err := repo.UpdateCall(context.Background(), update); err != nil {
+		t.Fatalf("UpdateCall: %v", err)
+	}
+	update.Status = "failed"
+	if got := repo.call(call.ID); got == nil || got.Status != "completed" {
+		t.Fatalf("mutating the update argument changed storage: %#v", got)
+	}
 }
 
 // stubUserSettings supplies the user's default utility agent/model pair.
@@ -267,6 +338,7 @@ func (r stubProfileResolver) MatchLegacy(
 // store under the real service and controller, with every route from
 // RegisterRoutes wired to stub executors.
 type utilityFixture struct {
+	router   *gin.Engine
 	server   *httptest.Server
 	repo     *fakeUtilityRepo
 	service  *service.Service
@@ -336,6 +408,7 @@ func newUtilityFixture(t *testing.T, opts utilityFixtureOptions) *utilityFixture
 	t.Cleanup(server.Close)
 
 	return &utilityFixture{
+		router:   router,
 		server:   server,
 		repo:     repo,
 		service:  svc,

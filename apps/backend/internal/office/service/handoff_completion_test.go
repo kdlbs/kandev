@@ -6,10 +6,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/service"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
@@ -55,6 +57,13 @@ func seedHandoffCompletionTasks(t *testing.T, svc *service.Service, assigneeID s
 	}
 }
 
+func seedLegacyHandoffCompletionComment(t *testing.T, svc *service.Service, comment *models.TaskComment) {
+	t.Helper()
+	if err := svc.RepoForTest().CreateTaskComment(context.Background(), comment); err != nil {
+		t.Fatalf("seed legacy handoff completion comment: %v", err)
+	}
+}
+
 func publishHandoffCompletion(t *testing.T, eb bus.EventBus) {
 	t.Helper()
 	event := bus.NewEvent(events.TaskStateChanged, "test", map[string]string{
@@ -68,6 +77,93 @@ func publishHandoffCompletion(t *testing.T, eb bus.EventBus) {
 func TestHandoffCompletion_ReportOnlyGrantStoresCommentWithoutWake(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	seedHandoffCompletionTasks(t, svc, "source-agent")
+	completionKey := service.RunReasonHandoffCompleted + ":delivery-task:COMPLETED"
+	legacyComment := &models.TaskComment{
+		ID:         "11111111-1111-4111-8111-111111111111",
+		TaskID:     "source-task",
+		AuthorType: "agent",
+		AuthorID:   "source-agent",
+		Body:       "Handed-off task \"Delivery task\" (delivery-task) reached state COMPLETED.\nLegacy detail retained.\n<!-- handoff-completion:" + completionKey + " -->",
+		Source:     "handoff",
+		CreatedAt:  time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC),
+	}
+	seedLegacyHandoffCompletionComment(t, svc, legacyComment)
+	var publishedComments []service.CommentPostedData
+	sub, err := eb.Subscribe(events.OfficeCommentCreated, func(_ context.Context, event *bus.Event) error {
+		if data, ok := event.Data.(service.CommentPostedData); ok {
+			publishedComments = append(publishedComments, data)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe to comment events: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	svc.SetHandoffCompletionPolicy(func(context.Context, service.HandoffCompletionSource) (service.HandoffCompletionAuthorization, error) {
+		return service.HandoffCompletionAuthorization{Report: true}, nil
+	})
+
+	publishHandoffCompletion(t, eb)
+	publishHandoffCompletion(t, eb)
+
+	comments, err := svc.RepoForTest().ListTaskComments(context.Background(), "source-task")
+	if err != nil {
+		t.Fatalf("list report comments: %v", err)
+	}
+	if len(comments) != 1 {
+		t.Fatalf("report comments = %d, want 1", len(comments))
+	}
+	if comments[0].ID != legacyComment.ID {
+		t.Fatalf("report ID = %q, want legacy UUID %q", comments[0].ID, legacyComment.ID)
+	}
+	if comments[0].Body != legacyComment.Body || comments[0].AuthorID != legacyComment.AuthorID ||
+		!comments[0].CreatedAt.Equal(legacyComment.CreatedAt) {
+		t.Fatalf("legacy report changed after replay: got %+v, want %+v", comments[0], legacyComment)
+	}
+	receipt, err := svc.RepoForTest().GetHandoffCompletionOutbox(context.Background(), completionKey)
+	if err != nil {
+		t.Fatalf("read handoff completion receipt: %v", err)
+	}
+	if receipt == nil || receipt.CommentID != legacyComment.ID {
+		t.Fatalf("receipt comment ID = %+v, want legacy UUID %q", receipt, legacyComment.ID)
+	}
+	if len(publishedComments) != 1 || publishedComments[0].CommentID != legacyComment.ID ||
+		publishedComments[0].TaskID != legacyComment.TaskID || publishedComments[0].AuthorID != legacyComment.AuthorID {
+		t.Fatalf("published comment events = %+v, want the single stored legacy comment", publishedComments)
+	}
+	var wakeCount int
+	if err := svc.RepoForTest().ReaderDB().Get(&wakeCount,
+		`SELECT COUNT(*) FROM runs WHERE reason = ?`, service.RunReasonHandoffCompleted); err != nil {
+		t.Fatalf("count completion wakes: %v", err)
+	}
+	if wakeCount != 0 {
+		t.Fatalf("completion wakes = %d, want none for a report-only grant", wakeCount)
+	}
+}
+
+func TestHandoffCompletion_UnrelatedAnchorsCreateCleanReport(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	seedHandoffCompletionTasks(t, svc, "")
+	completionKey := service.RunReasonHandoffCompleted + ":delivery-task:COMPLETED"
+	for _, comment := range []*models.TaskComment{
+		{
+			ID: "22222222-2222-4222-8222-222222222222", TaskID: "delivery-task", AuthorType: "agent",
+			AuthorID: "source-agent", Body: "Wrong task.\n<!-- handoff-completion:" + completionKey + " -->",
+			Source: "handoff", CreatedAt: time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			ID: "33333333-3333-4333-8333-333333333333", TaskID: "source-task", AuthorType: "agent",
+			AuthorID: "source-agent", Body: "Wrong source.\n<!-- handoff-completion:" + completionKey + " -->",
+			Source: "user", CreatedAt: time.Date(2026, 11, 1, 12, 1, 0, 0, time.UTC),
+		},
+		{
+			ID: "44444444-4444-4444-8444-444444444444", TaskID: "source-task", AuthorType: "agent",
+			AuthorID: "source-agent", Body: "Wrong marker.\n<!-- handoff-completion:" + completionKey + "-other -->",
+			Source: "handoff", CreatedAt: time.Date(2026, 11, 1, 12, 2, 0, 0, time.UTC),
+		},
+	} {
+		seedLegacyHandoffCompletionComment(t, svc, comment)
+	}
 	svc.SetHandoffCompletionPolicy(func(context.Context, service.HandoffCompletionSource) (service.HandoffCompletionAuthorization, error) {
 		return service.HandoffCompletionAuthorization{Report: true}, nil
 	})
@@ -78,19 +174,28 @@ func TestHandoffCompletion_ReportOnlyGrantStoresCommentWithoutWake(t *testing.T)
 	if err != nil {
 		t.Fatalf("list report comments: %v", err)
 	}
-	if len(comments) != 1 {
-		t.Fatalf("report comments = %d, want 1", len(comments))
+	if len(comments) != 3 {
+		t.Fatalf("source comments = %d, want two unrelated comments and one new report", len(comments))
 	}
-	if comments[0].AuthorID != "source-agent" {
-		t.Fatalf("report author = %q, want source-agent", comments[0].AuthorID)
+	var newReport *models.TaskComment
+	for _, comment := range comments {
+		if comment.ID == completionKey {
+			newReport = comment
+			break
+		}
 	}
-	var wakeCount int
-	if err := svc.RepoForTest().ReaderDB().Get(&wakeCount,
-		`SELECT COUNT(*) FROM runs WHERE reason = ?`, service.RunReasonHandoffCompleted); err != nil {
-		t.Fatalf("count completion wakes: %v", err)
+	if newReport == nil {
+		t.Fatalf("new report with completion key %q was not stored: %+v", completionKey, comments)
 	}
-	if wakeCount != 0 {
-		t.Fatalf("completion wakes = %d, want none for a report-only grant", wakeCount)
+	if strings.Contains(newReport.Body, "<!-- handoff-completion:") {
+		t.Fatalf("new report exposes the legacy lookup marker: %q", newReport.Body)
+	}
+	receipt, err := svc.RepoForTest().GetHandoffCompletionOutbox(context.Background(), completionKey)
+	if err != nil {
+		t.Fatalf("read handoff completion receipt: %v", err)
+	}
+	if receipt == nil || receipt.CommentID != completionKey {
+		t.Fatalf("receipt comment ID = %+v, want completion key %q", receipt, completionKey)
 	}
 }
 
@@ -180,6 +285,14 @@ func TestHandoffCompletion_PromptGrantCanWakeWithoutPublishingReport(t *testing.
 func TestHandoffCompletion_PausedWakeRetriesFromDurableOutbox(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	seedHandoffCompletionTasks(t, svc, "source-agent")
+	completionKey := service.RunReasonHandoffCompleted + ":delivery-task:COMPLETED"
+	seedLegacyHandoffCompletionComment(t, svc, &models.TaskComment{
+		ID: "55555555-5555-4555-8555-555555555555", TaskID: "source-task", AuthorType: "agent",
+		AuthorID: "source-agent",
+		Body: "Handed-off task \"Delivery task\" (delivery-task) reached state COMPLETED.\n" +
+			"Persisted detail: keep this report body.\n<!-- handoff-completion:" + completionKey + " -->",
+		Source: "handoff", CreatedAt: time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC),
+	})
 	svc.SetHandoffCompletionPolicy(func(context.Context, service.HandoffCompletionSource) (service.HandoffCompletionAuthorization, error) {
 		return service.HandoffCompletionAuthorization{Report: true, Prompt: true}, nil
 	})
@@ -232,7 +345,7 @@ func TestHandoffCompletion_PausedWakeRetriesFromDurableOutbox(t *testing.T) {
 	}
 	pc := service.BuildPromptContextForTest(svc, ctx, service.RunReasonHandoffCompleted, completionPayload)
 	prompt := service.BuildPrompt(pc)
-	for _, want := range []string{"Delivery task", "COMPLETED", "Handed-off task"} {
+	for _, want := range []string{"Delivery task", "COMPLETED", "Handed-off task", "Persisted detail: keep this report body."} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("handoff wake prompt missing %q: %s", want, prompt)
 		}

@@ -114,9 +114,10 @@ today's four (`on_enter`, `on_turn_start`, `on_turn_complete`,
   it's in this step. Trigger context carries the comment id, body, and
   author.
 - `on_blocker_resolved` — all blockers on the task cleared.
-- `on_children_completed` — all child tasks of this task reached terminal
-  state. Payload includes the child summaries (identifiers, last
-  comments, PR links if any).
+- `on_children_completed` — every counted active direct child task of this
+  task reached `COMPLETED`. Failed or cancelled children do not trigger it.
+  Payload includes the child summaries (identifiers, last comments, PR links
+  if any).
 - `on_approval_resolved` — an approval request the task owns resolved.
 - `on_heartbeat` — periodic timer (cron-driven) for *background*
   check-ins when nothing else is happening. Fires per-(task, step)

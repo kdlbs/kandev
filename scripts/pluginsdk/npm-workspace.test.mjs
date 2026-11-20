@@ -117,7 +117,7 @@ test("checker follows an npm workspace's installed resolution and binds its exac
   await rm(shadow);
 
   const lock = JSON.parse(before);
-  lock.packages["node_modules/@kdlbs/plugin-sdk"].version = "0.2.0";
+  lock.packages["node_modules/@kdlbs/plugin-sdk"].version = "9.9.9";
   await writeFile(lockPath, JSON.stringify(lock));
   await assert.rejects(check(), (error) => /lock version/.test(error.stderr));
   // A nearer lockfile cannot authorize a package installed outside its tree.

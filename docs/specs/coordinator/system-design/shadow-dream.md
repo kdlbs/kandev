@@ -158,6 +158,21 @@ any other action as unknown before policy evaluation and writes no activity
 row. A test asserts the constant's length and content, and asserts a guarded
 call of each registered action from that session is refused.
 
+**Session start.** The episode's `CreateSession` step prepares the session without an
+agent (`EnsureSession` with `AutoStart=false`, state `CREATED`), because a
+prepared session cannot take a prompt. Inside the episode bound, the prompter
+first starts the agent on that prepared session through
+`LaunchSession{Intent: start_created, NoInitialPrompt: true,
+SkipMessageRecord: true, AutoStart: true}`. This start sends no prompt, records
+no message and opens no turn, so it adds no ledger row. An admitted start is
+followed by `PromptTask`, which waits for a `STARTING` session to become
+promptable and delivers the one prompt. If the launch reports `queued` because
+session capacity is full, the prompter waits on the same episode context until
+the session and agent become promptable, then calls `PromptTask`. The wait is
+bounded by the episode context and orchestrator launch timeout. A launch error
+or readiness-wait error fails the row with the reason `run_error`, and no
+evidence prompt is sent.
+
 **One turn, bounded.** One prompt, a 20-minute wall clock that covers the episode only (the gate and
 each replay have their own bound, [replay](replay.md#budget)); at expiry the system
 cancels the session and sets the row `failed`, reason `timeout` (`002.4`). The

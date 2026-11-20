@@ -49,6 +49,7 @@ type legacyEnv struct {
 	containerID, containerBootstrapNonceSecretID, containerControlAuthTokenSecretID string
 	sandboxID, taskDirName                                                          string
 	createdAt, updatedAt                                                            time.Time
+	retiredAt                                                                       *time.Time
 }
 
 type legacySession struct {
@@ -96,6 +97,10 @@ func (c *worktreeCutover) loadLegacy(tx *sqlx.Tx, legacyEnvColumns, legacyRepoCo
 }
 
 func (c *worktreeCutover) loadLegacyEnvs(tx *sqlx.Tx, columns map[string]bool) error {
+	retiredAtExpr := "NULL"
+	if columns["retired_at"] {
+		retiredAtExpr = "retired_at"
+	}
 	// Every interpolated expression comes from the fixed deprecated-column allowlist.
 	//nolint:gosec
 	rows, err := tx.QueryContext(c.ctx, fmt.Sprintf(`
@@ -103,26 +108,31 @@ func (c *worktreeCutover) loadLegacyEnvs(tx *sqlx.Tx, columns map[string]bool) e
 			executor_profile_id, control_port, status,
 			%s, %s, %s, COALESCE(workspace_path, ''),
 			COALESCE(container_id, ''), %s, %s, COALESCE(sandbox_id, ''),
-			COALESCE(task_dir_name, ''), created_at, updated_at
+			COALESCE(task_dir_name, ''), created_at, updated_at, %s
 		FROM task_environments`,
 		legacyEnvColumnExpr(columns, "repository_id"),
 		legacyEnvColumnExpr(columns, "worktree_id"),
 		legacyEnvColumnExpr(columns, "worktree_path"),
 		legacyEnvColumnExpr(columns, "worktree_branch"),
 		legacyEnvColumnExpr(columns, "container_bootstrap_nonce_secret_id"),
-		legacyEnvColumnExpr(columns, "container_control_auth_token_secret_id")))
+		legacyEnvColumnExpr(columns, "container_control_auth_token_secret_id"),
+		retiredAtExpr))
 	if err != nil {
 		return fmt.Errorf("cutover: read legacy environments: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		env := &legacyEnv{}
+		var retiredAt sql.NullTime
 		if err := rows.Scan(&env.id, &env.taskID, &env.repositoryID, &env.executorType,
 			&env.executorID, &env.executorProfileID, &env.controlPort, &env.status,
 			&env.worktreeID, &env.worktreePath, &env.worktreeBranch, &env.workspacePath,
 			&env.containerID, &env.containerBootstrapNonceSecretID, &env.containerControlAuthTokenSecretID,
-			&env.sandboxID, &env.taskDirName, &env.createdAt, &env.updatedAt); err != nil {
+			&env.sandboxID, &env.taskDirName, &env.createdAt, &env.updatedAt, &retiredAt); err != nil {
 			return fmt.Errorf("cutover: scan legacy environment: %w", err)
+		}
+		if retiredAt.Valid {
+			env.retiredAt = &retiredAt.Time
 		}
 		c.envs[env.id] = env
 		c.taskEnvs[env.taskID] = append(c.taskEnvs[env.taskID], env)

@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/sshlaunch"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -57,6 +58,7 @@ type sshSessionState struct {
 	remoteTaskDir    string
 	authToken        string
 	reusingProcess   bool
+	launchReceipt    *sshlaunch.Receipt
 	metadata         map[string]interface{}
 	prepareEnv       map[string]string
 	platform         SSHRemotePlatform
@@ -106,8 +108,11 @@ type SSHExecutor struct {
 	brokerPreflight      func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error
 	stopRemote           func(context.Context, *ssh.Client, string, int) error
 	verifyRemoteIdentity func(ctx context.Context, client *ssh.Client, pid int, sessionDir, taskDir string) (bool, error)
-	closeClient          func(*ssh.Client) error
-	cleanupScript        func(context.Context, *ssh.Client, string, map[string]interface{}, map[string]string, SSHRemotePlatform, string, string) error
+	// reconcileRemote is the directory-loss helper boundary. It returns a
+	// closed outcome and never reports success it could not prove.
+	reconcileRemote func(context.Context, *ssh.Client, sshlaunch.ReconcileRequest) sshlaunch.ReconcileResult
+	closeClient     func(*ssh.Client) error
+	cleanupScript   func(context.Context, *ssh.Client, string, map[string]interface{}, map[string]string, SSHRemotePlatform, string, string) error
 
 	mu       sync.Mutex
 	sessions map[string]*sshSessionState // keyed by ExecutorInstance.InstanceID
@@ -131,6 +136,7 @@ func NewSSHExecutor(
 	executor.brokerPreflight = executor.preflightGitHubCredentialBroker
 	executor.stopRemote = stopRemoteAgentctl
 	executor.verifyRemoteIdentity = verifyRemoteAgentctlIdentity
+	executor.reconcileRemote = executor.reconcileRemoteController
 	executor.closeClient = func(client *ssh.Client) error { return client.Close() }
 	executor.cleanupScript = executor.runCleanupScript
 	return executor
@@ -327,10 +333,26 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		return nil, err
 	}
 
-	port, controlPort, pid, fwd, authToken, err := r.startAndForwardAgentctl(launchCtx, client, agentctlBin, taskDir, sessionDir, req, platform)
+	launchOwner := sshlaunch.Owner{
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		ControllerInstanceID: req.InstanceID,
+		TaskDir:              taskDir,
+		SessionDir:           sessionDir,
+		Target: sshlaunch.TargetBinding{
+			Host:            target.Host,
+			Port:            strconv.Itoa(target.Port),
+			User:            target.User,
+			HostFingerprint: target.PinnedFingerprint,
+		},
+	}
+	launch, err := r.startAndForwardAgentctl(launchCtx, client, agentctlBin, taskDir, sessionDir, launchOwner, req, platform)
 	if err != nil {
 		return nil, err
 	}
+	port, controlPort, pid, fwd, authToken := launch.instancePort, launch.controlPort, launch.pid, launch.forwarder, launch.authToken
+	instance := r.buildInstance(req, target, fwd, taskDir, sessionDir, port, controlPort, pid, workdir, authToken,
+		launch.receipt, launch.createResponse)
 
 	r.mu.Lock()
 	if existing, ok := r.sessions[req.InstanceID]; ok {
@@ -354,10 +376,12 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		target:           target,
 		client:           client,
 		forwarder:        fwd,
+		agentctlClient:   instance.Client,
 		pid:              pid,
 		remoteDir:        sessionDir,
 		remoteTaskDir:    taskDir,
 		authToken:        authToken,
+		launchReceipt:    launch.receipt,
 		metadata:         cloneSSHMetadata(req.Metadata),
 		prepareEnv:       sshRemoteContributionEnv(req, agentctlBin),
 		platform:         platform,
@@ -371,7 +395,7 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	r.mu.Unlock()
 	released = true // ownership transferred to session state; released on StopInstance
 
-	return r.buildInstance(req, target, fwd, taskDir, sessionDir, port, controlPort, pid, workdir, authToken), nil
+	return instance, nil
 }
 
 // buildInstanceForLostRace builds an ExecutorInstance for a caller that lost
@@ -404,6 +428,7 @@ func (r *SSHExecutor) buildInstanceForLostRace(req *ExecutorCreateRequest, exist
 	if existing.controlPort > 0 {
 		metadata[MetadataKeySSHRemoteControlPort] = strconv.Itoa(existing.controlPort)
 	}
+	applySSHLaunchReceiptMetadata(metadata, existing.launchReceipt)
 	// existing.metadata is the winning session's own cloned request metadata
 	// (cloneSSHMetadata(req.Metadata), captured after openSSHRuntimeAPITunnelForRequest
 	// ran for the winner), so it carries the winner's still-open tunnel's keys —
@@ -524,6 +549,17 @@ func (r *SSHExecutor) prepareRemoteSessionDir(ctx context.Context, client *ssh.C
 	return sessionDir, nil
 }
 
+// sshAgentctlLaunch is everything a successful controlled launch produced.
+type sshAgentctlLaunch struct {
+	createResponse *agentctl.CreateInstanceResponse
+	instancePort   int
+	controlPort    int
+	pid            int
+	authToken      string
+	forwarder      *SSHPortForwarder
+	receipt        *sshlaunch.Receipt
+}
+
 // startAndForwardAgentctl spawns the per-session agentctl on the remote,
 // creates a per-instance sub-server inside it, and stands up the SSH local
 // port forward to the *instance* port (not the control port). Returns the
@@ -540,17 +576,21 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	ctx context.Context,
 	client *ssh.Client,
 	agentctlBin, taskDir, sessionDir string,
+	owner sshlaunch.Owner,
 	req *ExecutorCreateRequest,
 	platform SSHRemotePlatform,
-) (int, int, int, *SSHPortForwarder, string, error) {
+) (*sshAgentctlLaunch, error) {
 	if err := uploadSSHSkillManifest(ctx, client, taskDir, req.Metadata); err != nil {
-		return 0, 0, 0, nil, "", fmt.Errorf("ssh: upload skill manifest: %w", err)
+		return nil, fmt.Errorf("ssh: upload skill manifest: %w", err)
 	}
 	shell := sshShellForRemote(req.Metadata, platform)
-	controlPort, pid, authToken, err := r.startAgentctlAndHandshake(ctx, client, shell, agentctlBin, taskDir, sessionDir, req)
+	controlPort, pid, authToken, receipt, err := r.startAgentctlAndHandshake(
+		ctx, client, shell, agentctlBin, taskDir, sessionDir, owner,
+		platform.GOOS == sshRemoteGOOSLinux, req,
+	)
 	if err != nil {
 		r.report(req.OnProgress, "Starting agent controller", PrepareStepFailed, err.Error())
-		return 0, 0, 0, nil, "", err
+		return nil, err
 	}
 	r.report(req.OnProgress, "Starting agent controller", PrepareStepCompleted,
 		fmt.Sprintf("pid=%d control_port=%d", pid, controlPort))
@@ -558,30 +598,38 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	// The per-instance server's workspace is the remote task dir, not the
 	// host-side req.WorkspacePath (which is meaningless on the remote).
 	// Passed explicitly so we don't briefly mutate the caller's request.
-	instancePort, ierr := createRemoteAgentInstance(
+	createResponse, ierr := createRemoteAgentInstance(
 		ctx, client, controlPort, taskDir, agentctlBin, req, authToken, r.logger,
 	)
 	if ierr != nil {
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
 		r.report(req.OnProgress, "Creating agent instance", PrepareStepFailed, ierr.Error())
-		return 0, 0, 0, nil, "", ierr
+		return nil, ierr
 	}
 	r.report(req.OnProgress, "Creating agent instance", PrepareStepCompleted,
-		fmt.Sprintf("instance_port=%d", instancePort))
+		fmt.Sprintf("instance_port=%d", createResponse.Port))
 
-	fwd, err := StartPortForward(client, instancePort, r.logger)
+	fwd, err := StartPortForward(client, createResponse.Port, r.logger)
 	if err != nil {
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
-		return 0, 0, 0, nil, "", fmt.Errorf("ssh: port forward: %w", err)
+		return nil, fmt.Errorf("ssh: port forward: %w", err)
 	}
 	if err := waitAgentctlHealthy(ctx, fwd.LocalPort(), sshAgentctlHealthTimeout); err != nil {
 		_ = fwd.Close()
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
-		return 0, 0, 0, nil, "", fmt.Errorf("ssh: agentctl health: %w", err)
+		return nil, fmt.Errorf("ssh: agentctl health: %w", err)
 	}
 	r.report(req.OnProgress, "Connecting to agent controller", PrepareStepCompleted,
-		fmt.Sprintf("local:%d -> remote:%d", fwd.LocalPort(), instancePort))
-	return instancePort, controlPort, pid, fwd, authToken, nil
+		fmt.Sprintf("local:%d -> remote:%d", fwd.LocalPort(), createResponse.Port))
+	return &sshAgentctlLaunch{
+		createResponse: createResponse,
+		instancePort:   createResponse.Port,
+		controlPort:    controlPort,
+		pid:            pid,
+		authToken:      authToken,
+		forwarder:      fwd,
+		receipt:        receipt,
+	}, nil
 }
 
 // startAgentctlAndHandshake starts a fresh agentctl instance and completes
@@ -592,14 +640,37 @@ func (r *SSHExecutor) startAgentctlAndHandshake(
 	ctx context.Context,
 	client *ssh.Client,
 	shell, agentctlBin, taskDir, sessionDir string,
+	owner sshlaunch.Owner,
+	launchProofSupported bool,
 	req *ExecutorCreateRequest,
-) (int, int, string, error) {
-	attempt := func() (int, int, string, error) {
+) (int, int, string, *sshlaunch.Receipt, error) {
+	if launchProofSupported {
+		if err := owner.Validate(); err != nil {
+			return 0, 0, "", nil, fmt.Errorf("ssh: build launch owner binding: %w", err)
+		}
+	}
+	attempt := func() (int, int, sshHandshakeSuccess, error) {
 		nonce, err := generateBootstrapNonce()
 		if err != nil {
-			return 0, 0, "", fmt.Errorf("ssh: generate bootstrap nonce: %w", err)
+			return 0, 0, sshHandshakeSuccess{}, fmt.Errorf("ssh: generate bootstrap nonce: %w", err)
 		}
 		nonceFingerprint := commonconfig.NonceFingerprint(nonce)
+		startup := req.AgentctlStartupConfig
+		// A managed launch always carries the resolved child contract and is
+		// therefore strictly required to return proof. An unmanaged/direct
+		// caller (Configured=false) cannot carry the binding at all; that is
+		// the same compatibility boundary as a backend older than this field.
+		var binding *sshlaunch.Binding
+		if startup.Configured && launchProofSupported {
+			// Every attempt carries its own generation. A retried attempt must
+			// not inherit a proof that a rejected launch never published.
+			generation, err := sshlaunch.NewGeneration()
+			if err != nil {
+				return 0, 0, sshHandshakeSuccess{}, err
+			}
+			binding = &sshlaunch.Binding{Generation: generation, Owner: owner}
+			startup.SSHLaunch = binding
+		}
 		// Keep only the managed broker values in the long-lived remote
 		// process. sshAgentctlLaunchEnv adds the bootstrap credentials
 		// required for the authenticated control handshake without
@@ -608,18 +679,18 @@ func (r *SSHExecutor) startAgentctlAndHandshake(
 		if selectedCheckoutIsPullRequest(req.Metadata) {
 			brokerEnv = nil
 		}
-		env := sshAgentctlLaunchEnv(brokerEnv, nonce, req.AgentctlStartupConfig)
+		env := sshAgentctlLaunchEnv(brokerEnv, nonce, startup)
 		port, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, env, r.logger)
 		if err != nil {
 			// Preserve port/pid so retryAgentctlHandshake's "if pid > 0"
 			// teardown fires even for a start-time failure (e.g. a
 			// ready-timeout) that left a live process behind.
-			return port, pid, "", err
+			return port, pid, sshHandshakeSuccess{}, err
 		}
 		r.logger.Debug("ssh: sending agentctl bootstrap handshake",
 			zap.Int("port", port), zap.Int("pid", pid),
 			zap.String("nonce_fingerprint", nonceFingerprint))
-		token, err := remoteControlHandshake(ctx, client, port, nonce)
+		handshake, err := remoteControlHandshake(ctx, client, port, nonce)
 		if err != nil {
 			if errors.Is(err, errSSHAgentctlHandshakeRejected) {
 				// The fingerprint lets this rejection be correlated against
@@ -632,16 +703,64 @@ func (r *SSHExecutor) startAgentctlAndHandshake(
 				err = fmt.Errorf("%w (port %d, pid %d, nonce %s); log:\n%s",
 					err, port, pid, nonceFingerprint, logTail)
 			}
-			return port, pid, "", err
+			return port, pid, sshHandshakeSuccess{}, err
 		}
-		return port, pid, token, nil
+		var receipt *sshlaunch.Receipt
+		if binding != nil {
+			receipt, err = validateLaunchedReceipt(handshake.Launch, *binding, pid)
+			if err != nil {
+				return port, pid, sshHandshakeSuccess{}, fmt.Errorf("ssh: verify controller launch receipt: %w", err)
+			}
+		}
+		return port, pid, sshHandshakeSuccess{token: handshake.Token, receipt: receipt}, nil
 	}
 	teardown := func(_, pid int) error {
 		cleanupCtx, cleanupCancel := sshRemoteCleanupContext(ctx)
 		defer cleanupCancel()
 		return stopRemoteAgentctl(cleanupCtx, client, sessionDir, pid)
 	}
-	return retryAgentctlHandshake(ctx, attempt, teardown, sleepOrContextDone)
+	port, pid, success, err := retryAgentctlHandshake(ctx, attempt, teardown, sleepOrContextDone)
+	return port, pid, success.token, success.receipt, err
+}
+
+// sshHandshakeSuccess is the per-attempt success payload: the issued bearer
+// token plus the controller's self-captured launch proof.
+type sshHandshakeSuccess struct {
+	token   string
+	receipt *sshlaunch.Receipt
+}
+
+// validateLaunchedReceipt is the publication gate for a managed SSH launch.
+// The receipt must match this attempt's binding exactly and must describe the
+// wrapper PID the launcher just reported. Any mismatch fails the launch: a
+// published row whose proof cannot be trusted is worse than a failed launch
+// the caller can retry.
+func validateLaunchedReceipt(
+	receipt *sshlaunch.Receipt,
+	binding sshlaunch.Binding,
+	wrapperPID int,
+) (*sshlaunch.Receipt, error) {
+	if receipt == nil {
+		return nil, errors.New("controller did not return launch identity")
+	}
+	if err := receipt.ValidateBinding(binding); err != nil {
+		return nil, err
+	}
+	if err := wrapperPIDMatches(wrapperPID, receipt.Process.PID); err != nil {
+		return nil, err
+	}
+	copied := *receipt
+	return &copied, nil
+}
+
+// wrapperPIDMatches ties the self-captured process identity to the PID the
+// remote launch wrapper echoed. A receipt for any other PID is a different
+// process's proof.
+func wrapperPIDMatches(wrapperPID, receiptPID int) error {
+	if wrapperPID <= 0 || receiptPID <= 0 || wrapperPID != receiptPID {
+		return fmt.Errorf("receipt pid %d does not match launched wrapper pid %d", receiptPID, wrapperPID)
+	}
+	return nil
 }
 
 func sshAgentctlLaunchEnv(base map[string]string, nonce string, startup ...commonconfig.AgentctlStartupConfig) map[string]string {
@@ -659,6 +778,13 @@ func sshAgentctlLaunchEnv(base map[string]string, nonce string, startup ...commo
 		for key, value := range agentctlStartupEnvironment(startup[0]) {
 			env[key] = value
 		}
+		if startup[0].SSHLaunch != nil {
+			// The marker is what the remote reconciliation helper re-reads
+			// after a backend restart, when only the persisted receipt and the
+			// live process environment remain. It is stripped from agent
+			// subprocess environments like the other control values.
+			env[sshlaunch.GenerationEnv] = startup[0].SSHLaunch.Generation
+		}
 	}
 	return env
 }
@@ -670,7 +796,18 @@ func (r *SSHExecutor) buildInstance(
 	taskDir, sessionDir string,
 	port, controlPort, pid int,
 	workdir, authToken string,
+	receipt *sshlaunch.Receipt,
+	responses ...*agentctl.CreateInstanceResponse,
 ) *ExecutorInstance {
+	var response *agentctl.CreateInstanceResponse
+	if len(responses) > 0 {
+		response = responses[0]
+	}
+	helperID := req.InstanceID
+	if response != nil && response.ID != "" {
+		helperID = response.ID
+	}
+	scopedMCPRoutes := response != nil && response.ScopedMCPRoutes
 	metadata := map[string]interface{}{
 		MetadataKeySSHHost:               target.Host,
 		MetadataKeySSHPort:               strconv.Itoa(target.Port),
@@ -680,7 +817,7 @@ func (r *SSHExecutor) buildInstance(
 		MetadataKeySSHRemoteSessionDir:   sessionDir,
 		MetadataKeySSHRemoteAgentctlPort: strconv.Itoa(port),
 		MetadataKeySSHRemoteAgentctlPID:  strconv.Itoa(pid),
-		MetadataKeySSHAgentctlInstanceID: req.InstanceID,
+		MetadataKeySSHAgentctlInstanceID: helperID,
 		MetadataKeySSHLocalForwardPort:   strconv.Itoa(fwd.LocalPort()),
 		MetadataKeySSHWorkdirRoot:        workdir,
 		MetadataKeyIsRemote:              true,
@@ -688,6 +825,7 @@ func (r *SSHExecutor) buildInstance(
 	if controlPort > 0 {
 		metadata[MetadataKeySSHRemoteControlPort] = strconv.Itoa(controlPort)
 	}
+	applySSHLaunchReceiptMetadata(metadata, receipt)
 	copySSHRuntimeAPIMetadata(metadata, req.Metadata)
 	return &ExecutorInstance{
 		InstanceID:  req.InstanceID,
@@ -695,8 +833,9 @@ func (r *SSHExecutor) buildInstance(
 		SessionID:   req.SessionID,
 		RuntimeName: r.Name(),
 		Client: agentctl.NewClient(sshAgentctlLoopbackHost, fwd.LocalPort(), r.logger,
-			agentctl.WithExecutionID(req.InstanceID),
-			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(authToken)),
+			agentctl.WithExecutionID(helperID),
+			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(authToken),
+			agentctl.WithBuiltinMCPScopedRoutes(scopedMCPRoutes)),
 		WorkspacePath: taskDir,
 		AuthToken:     authToken,
 		Metadata:      metadata,
@@ -740,6 +879,7 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 	if controlPort > 0 {
 		metadata[MetadataKeySSHRemoteControlPort] = strconv.Itoa(controlPort)
 	}
+	applySSHLaunchReceiptMetadata(metadata, state.launchReceipt)
 	copySSHRuntimeAPIMetadata(metadata, req.Metadata)
 	return &ExecutorInstance{
 		InstanceID:    req.InstanceID,
@@ -820,8 +960,24 @@ func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstan
 
 	// Use the same SSH client we used for CreateInstance — if it's still
 	// alive we can kill the remote agentctl gracefully; otherwise just drop
-	// the connection on the floor.
-	if classification == sshTransportAnswering && state.client != nil && !r.isTransportLost(state) {
+	// the connection on the floor. A receipt-bearing tracked session
+	// revalidates directory ownership and live launch proof first.
+	trackedStopHandled := false
+	if classification == sshTransportAnswering && state.client != nil &&
+		!r.isTransportLost(state) && state.launchReceipt != nil {
+		cleanupCtx, cancel := sshRemoteCleanupContext(ctx)
+		handled, verifyErr := r.verifyTrackedControllerBeforeStop(cleanupCtx, state.client, instance, state)
+		cancel()
+		if verifyErr != nil {
+			_ = r.closeClientOnce(state)
+			_ = state.runtimeAPITunnel.Close()
+			r.awaitProbeExit(state)
+			return verifyErr
+		}
+		trackedStopHandled = handled
+	}
+	if !trackedStopHandled && classification == sshTransportAnswering &&
+		state.client != nil && !r.isTransportLost(state) {
 		stopRemote := r.stopRemote
 		if stopRemote == nil {
 			stopRemote = stopRemoteAgentctl
@@ -873,6 +1029,17 @@ func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance 
 	if taskDir == "" {
 		return fmt.Errorf("ssh: no persisted remote task dir for instance %q: agentctl identity is unprovable", instance.InstanceID)
 	}
+	// Every destructive branch below is authorized by this record. Validate any
+	// present receipt, including its PID, before verification, signalling, or
+	// directory removal. Only a genuinely absent key is legacy evidence.
+	receipt, err := persistedSSHLaunchReceipt(instance.Metadata, instance.TaskID, instance.SessionID)
+	if err != nil {
+		return fmt.Errorf("ssh: persisted launch receipt for instance %q: %w", instance.InstanceID, err)
+	}
+	if receipt != nil && receipt.Process.PID != pid {
+		return fmt.Errorf("%w: receipt pid %d does not match recorded pid %d",
+			errSSHLaunchIdentityConflict, receipt.Process.PID, pid)
+	}
 	target, err := r.targetFromMetadata(instance.Metadata)
 	if err != nil {
 		return fmt.Errorf("ssh: resolve persisted target for instance %q: %w", instance.InstanceID, err)
@@ -891,6 +1058,9 @@ func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance 
 	}
 	isOurs, err := verifyIdentity(cleanupCtx, client, pid, sessionDir, taskDir)
 	if err != nil {
+		if errors.Is(err, errSSHRemoteSessionDirectoryMissing) {
+			return r.reconcileLostSSHSessionDirectory(cleanupCtx, client, instance, pid, err)
+		}
 		return fmt.Errorf("ssh: verify persisted agentctl identity for instance %q: %w", instance.InstanceID, err)
 	}
 	if !isOurs {
@@ -899,10 +1069,39 @@ func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance 
 		// taskDir. Unproven identity arrives as an error above and never
 		// here, which is what makes reclaiming the directory safe — a
 		// directory is only removed once nothing is known to be using it.
+		// A receipt-bearing row adds one condition: the helper must prove the
+		// recorded process absent AND its recorded session children gone. A
+		// live holder, a conflicting birth/generation, or a surviving child is
+		// contradictory evidence, never a removal reason.
+		if receipt != nil {
+			result := r.reconcileRecordedController(cleanupCtx, client, sshReconcileVerifyRequest(*receipt))
+			if err := result.Validate(); err != nil {
+				return fmt.Errorf("ssh: verify absent persisted controller for instance %q: %w", instance.InstanceID, err)
+			}
+			if result.Outcome != sshlaunch.OutcomeAbsent {
+				return fmt.Errorf("%w: outcome=%s reason=%s (%s)",
+					errSSHLaunchReconciliationUnresolved, result.Outcome, result.Reason, result.Detail)
+			}
+			// A receipt proves the old launch is absent, not ownership of a
+			// session directory that may belong to a later launch.
+			r.logger.Info("preserving SSH session directory after controller absence",
+				zap.String("instance_id", instance.InstanceID),
+				zap.String("session_dir", sessionDir))
+			return nil
+		}
 		if _, _, err := runSSHCommand(cleanupCtx, client, removeRemoteDirCommand(sessionDir)); err != nil {
 			return fmt.Errorf("ssh: remove persisted session dir for unmatched pid on instance %q: %w", instance.InstanceID, err)
 		}
 		return nil
+	}
+
+	// A matching command and pidfile are only this record's own proof. For a
+	// receipt-bearing launch, re-prove the live process birth identity and
+	// generation through the retained-handle helper before the legacy kill.
+	if receipt != nil {
+		if err := r.verifyRecordedControllerIdentity(cleanupCtx, client, *receipt); err != nil {
+			return fmt.Errorf("ssh: verify persisted controller launch proof for instance %q: %w", instance.InstanceID, err)
+		}
 	}
 
 	stopRemote := r.stopRemote
@@ -959,8 +1158,23 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	if pidStr == "" || portStr == "" || sessionDir == "" || taskDir == "" {
 		return nil // not a resume — proceed with normal create
 	}
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil || pid <= 0 {
+		return fmt.Errorf("ssh resume: invalid remote agentctl pid %q", pidStr)
+	}
+	// Durable proof is validated before either resume branch can adopt or
+	// signal the recorded process. The broker-refresh branch historically
+	// signalled first, so this check must stay ahead of it.
+	receipt, err := persistedSSHLaunchReceipt(req.Metadata, req.TaskID, req.SessionID)
+	if err != nil {
+		return fmt.Errorf("ssh resume: persisted launch receipt is invalid: %w", err)
+	}
+	if receipt != nil && receipt.Process.PID != pid {
+		return fmt.Errorf("%w: resume receipt pid %d does not match recorded pid %d",
+			errSSHLaunchIdentityConflict, receipt.Process.PID, pid)
+	}
 	if hasManagedGitHubBrokerEnv(req.Env) {
-		return r.resetManagedBrokerResume(ctx, req, pidStr, sessionDir)
+		return r.resetManagedBrokerResume(ctx, req, pid, sessionDir, receipt)
 	}
 	if err := requireSSHAgentctlAuthToken(req.AuthToken); err != nil {
 		return err
@@ -994,26 +1208,31 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		return fmt.Errorf("ssh resume: resolve agentctl path: %w", err)
 	}
 
-	// SSH liveness is judged on the REMOTE host: MetadataKeySSHRemoteAgentctlPID
-	// (mirrored into executors_running.pid) is a pid on the remote box, so it is
-	// probed with a remote `kill -0` over this SSH client — never with a local
-	// os.FindProcess. The runtime-aware row predicate (RowProcessLiveness in
-	// liveness.go) deliberately returns Unknown for SSH rows so nothing applies a
-	// host-local check here (#1597 runtime-aware liveness).
-	pid, err := strconv.Atoi(pidStr)
-	if err != nil || pid <= 0 {
-		_ = client.Close()
-		return fmt.Errorf("ssh resume: invalid remote agentctl pid %q", pidStr)
-	}
-	alive, err := probeRemoteAgentctlLiveness(ctx, client, pid)
-	if err != nil {
-		_ = client.Close()
-		return fmt.Errorf("ssh resume: probe agentctl pid %d: %w", pid, err)
-	}
-	if !alive {
-		_ = client.Close()
-		clearSSHResumeRuntimeMetadata(req.Metadata)
-		return nil
+	if receipt != nil {
+		absent, err := r.verifySSHResumeController(ctx, client, *receipt)
+		if err != nil {
+			_ = client.Close()
+			return fmt.Errorf("ssh resume: verify controller launch proof: %w", err)
+		}
+		if absent {
+			_ = client.Close()
+			clearSSHResumeRuntimeMetadata(req.Metadata)
+			return nil
+		}
+	} else {
+		// Legacy records have no launch receipt, so remote kill -0 remains their
+		// only liveness evidence. Never use it to classify a receipt-backed PID:
+		// another user's process can reuse that number after a host reboot.
+		alive, err := probeRemoteAgentctlLiveness(ctx, client, pid)
+		if err != nil {
+			_ = client.Close()
+			return fmt.Errorf("ssh resume: probe agentctl pid %d: %w", pid, err)
+		}
+		if !alive {
+			_ = client.Close()
+			clearSSHResumeRuntimeMetadata(req.Metadata)
+			return nil
+		}
 	}
 	runtimeAPITunnel, _, err := openSSHRuntimeAPITunnelForRequest(client, req)
 	if err != nil {
@@ -1034,8 +1253,15 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		_ = runtimeAPITunnel.Close()
 		return fmt.Errorf("ssh resume: agentctl health: %w", err)
 	}
+	instanceInfo, err := r.readResumedSSHInstanceInfo(ctx, client, req)
+	if err != nil {
+		_ = fwd.Close()
+		_ = client.Close()
+		_ = runtimeAPITunnel.Close()
+		return fmt.Errorf("ssh resume: read authenticated agentctl instance: %w", err)
+	}
 	instanceClient, reusingProcess, probeErr := r.newResumedAgentctlClient(
-		ctx, fwd.LocalPort(), req,
+		ctx, fwd.LocalPort(), req, instanceInfo,
 	)
 
 	if probeErr != nil {
@@ -1068,6 +1294,7 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		remoteTaskDir:    taskDir,
 		authToken:        req.AuthToken,
 		reusingProcess:   reusingProcess,
+		launchReceipt:    receipt,
 		metadata:         cloneSSHMetadata(req.Metadata),
 		prepareEnv:       sshRemoteContributionEnv(req, agentctlBin),
 		runtimeAPITunnel: runtimeAPITunnel,
@@ -1093,10 +1320,18 @@ func (r *SSHExecutor) newResumedAgentctlClient(
 	ctx context.Context,
 	localPort int,
 	req *ExecutorCreateRequest,
+	infos ...*agentctl.InstanceInfo,
 ) (*agentctl.Client, bool, error) {
+	helperID := resumedSSHAgentctlInstanceID(req)
+	scopedMCPRoutes := false
+	if len(infos) > 0 && infos[0] != nil {
+		helperID = infos[0].ID
+		scopedMCPRoutes = infos[0].ScopedMCPRoutes
+	}
 	client := agentctl.NewClient(sshAgentctlLoopbackHost, localPort, r.logger,
-		agentctl.WithExecutionID(resumedSSHAgentctlInstanceID(req)),
-		agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(req.AuthToken))
+		agentctl.WithExecutionID(helperID),
+		agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(req.AuthToken),
+		agentctl.WithBuiltinMCPScopedRoutes(scopedMCPRoutes))
 	if req.IsPassthrough {
 		snapshot, err := client.GetPassthrough(ctx)
 		if err != nil {
@@ -1115,6 +1350,57 @@ func (r *SSHExecutor) newResumedAgentctlClient(
 		return client, false, nil
 	}
 	return client, status != nil && status.IsAgentRunning(), nil
+}
+
+func (r *SSHExecutor) readResumedSSHInstanceInfo(
+	ctx context.Context,
+	connection *ssh.Client,
+	req *ExecutorCreateRequest,
+) (*agentctl.InstanceInfo, error) {
+	controlPort, instancePort, err := r.resumedSSHAgentctlPorts(ctx, connection, req.Metadata)
+	if err != nil {
+		return nil, err
+	}
+	forward, err := StartPortForward(connection, controlPort, r.logger)
+	if err != nil {
+		return nil, fmt.Errorf("forward agentctl control listener: %w", err)
+	}
+	defer func() { _ = forward.Close() }()
+	control := agentctl.NewControlClient(sshAgentctlLoopbackHost, forward.LocalPort(), r.logger,
+		agentctl.WithControlAuthToken(req.AuthToken))
+	defer control.Close()
+	helperID := resumedSSHAgentctlInstanceID(req)
+	info, err := control.GetInstance(ctx, helperID)
+	if err != nil {
+		return nil, err
+	}
+	if info == nil || info.ID != helperID || info.Port != instancePort ||
+		(info.SessionID != "" && info.SessionID != req.SessionID) ||
+		(info.TaskID != "" && req.TaskID != "" && info.TaskID != req.TaskID) {
+		return nil, errors.New("authenticated agentctl instance does not match the persisted owner")
+	}
+	return info, nil
+}
+
+func (r *SSHExecutor) resumedSSHAgentctlPorts(
+	ctx context.Context,
+	connection *ssh.Client,
+	metadata map[string]interface{},
+) (int, int, error) {
+	controlPort, controlPortValid := sshRecoveryControlPort(metadata)
+	instancePort, err := strconv.Atoi(getMetadataString(metadata, MetadataKeySSHRemoteAgentctlPort))
+	if !controlPortValid || err != nil || instancePort <= 0 {
+		return 0, 0, errors.New("persisted agentctl control or instance port is unavailable")
+	}
+	if controlPort == 0 {
+		controlPort, err = r.readSSHRecoveryControlPortFromLog(
+			ctx, connection, getMetadataString(metadata, MetadataKeySSHRemoteSessionDir),
+		)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	return controlPort, instancePort, nil
 }
 
 func resumedSSHAgentctlInstanceID(req *ExecutorCreateRequest) string {
@@ -1138,7 +1424,9 @@ func requireSSHAgentctlAuthToken(token string) error {
 func (r *SSHExecutor) resetManagedBrokerResume(
 	ctx context.Context,
 	req *ExecutorCreateRequest,
-	pidStr, sessionDir string,
+	pid int,
+	sessionDir string,
+	receipt *sshlaunch.Receipt,
 ) error {
 	brokerPreflight := r.brokerPreflight
 	if brokerPreflight == nil {
@@ -1153,7 +1441,7 @@ func (r *SSHExecutor) resetManagedBrokerResume(
 	state := r.sessions[req.InstanceID]
 	r.mu.Unlock()
 	if state != nil {
-		return r.resetTrackedManagedBrokerResume(ctx, req, state, brokerPreflight, stopRemote)
+		return r.resetTrackedManagedBrokerResume(ctx, req, state, receipt, brokerPreflight, stopRemote)
 	}
 
 	target, err := r.targetFromMetadata(req.Metadata)
@@ -1168,9 +1456,27 @@ func (r *SSHExecutor) resetManagedBrokerResume(
 	if err := brokerPreflight(ctx, client, req, SSHRemotePlatform{}); err != nil {
 		return err
 	}
-	pid, _ := strconv.Atoi(pidStr)
+	if receipt != nil {
+		absent, err := r.verifySSHResumeController(ctx, client, *receipt)
+		if err != nil {
+			return fmt.Errorf("ssh resume: verify stale broker-backed controller: %w", err)
+		}
+		if absent {
+			clearSSHResumeRuntimeMetadata(req.Metadata)
+			return nil
+		}
+	}
 	if err := stopRemote(ctx, client, sessionDir, pid); err != nil {
 		return fmt.Errorf("ssh resume: stop stale broker-backed agentctl: %w", err)
+	}
+	if receipt != nil {
+		result := r.reconcileRecordedController(ctx, client, sshReconcileVerifyRequest(*receipt))
+		if err := result.Validate(); err != nil {
+			return fmt.Errorf("ssh resume: verify drained broker-backed controller: %w", err)
+		}
+		if result.Outcome != sshlaunch.OutcomeAbsent {
+			return fmt.Errorf("%w: %s (%s)", errSSHLaunchReconciliationUnresolved, result.Reason, result.Detail)
+		}
 	}
 	clearSSHResumeRuntimeMetadata(req.Metadata)
 	return nil
@@ -1187,6 +1493,7 @@ func (r *SSHExecutor) resetTrackedManagedBrokerResume(
 	ctx context.Context,
 	req *ExecutorCreateRequest,
 	state *sshSessionState,
+	receipt *sshlaunch.Receipt,
 	brokerPreflight func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error,
 	stopRemote func(context.Context, *ssh.Client, string, int) error,
 ) error {
@@ -1247,11 +1554,33 @@ func (r *SSHExecutor) resetTrackedManagedBrokerResume(
 		return ErrSSHTransportLost
 	}
 
+	stopRequired := true
 	stopErr := r.runWithTransportBackstop(state, sshAgentctlCleanupTimeout, func() error {
 		cleanupCtx, cancel := sshRemoteCleanupContext(ctx)
 		defer cancel()
+		if receipt != nil {
+			absent, err := r.verifySSHResumeController(cleanupCtx, state.client, *receipt)
+			if err != nil {
+				return fmt.Errorf("verify stale broker-backed controller: %w", err)
+			}
+			if absent {
+				stopRequired = false
+				return nil
+			}
+		}
 		return stopRemote(cleanupCtx, state.client, state.remoteDir, state.pid)
 	})
+	if stopErr == nil && receipt != nil && stopRequired {
+		verifyCtx, cancel := sshRemoteCleanupContext(ctx)
+		result := r.reconcileRecordedController(verifyCtx, state.client, sshReconcileVerifyRequest(*receipt))
+		cancel()
+		if err := result.Validate(); err != nil {
+			stopErr = fmt.Errorf("verify drained broker-backed controller: %w", err)
+		} else if result.Outcome != sshlaunch.OutcomeAbsent {
+			stopErr = fmt.Errorf("%w: outcome=%s reason=%s (%s)",
+				errSSHLaunchReconciliationUnresolved, result.Outcome, result.Reason, result.Detail)
+		}
+	}
 	// Step 5: close the session SSH client, through its once-guard.
 	_ = r.closeClientOnce(state)
 	_ = state.runtimeAPITunnel.Close()
@@ -1267,6 +1596,20 @@ func (r *SSHExecutor) resetTrackedManagedBrokerResume(
 	return nil
 }
 
+// applySSHLaunchReceiptMetadata projects a validated launch receipt into the
+// runtime metadata map. A nil receipt writes nothing: absence is the only
+// representation of legacy or unsupported proof.
+func applySSHLaunchReceiptMetadata(metadata map[string]interface{}, receipt *sshlaunch.Receipt) {
+	if metadata == nil || receipt == nil {
+		return
+	}
+	projected, err := receipt.Metadata()
+	if err != nil {
+		return
+	}
+	metadata[MetadataKeySSHLaunchReceipt] = projected
+}
+
 func clearSSHResumeRuntimeMetadata(metadata map[string]interface{}) {
 	for _, key := range []string{
 		MetadataKeySSHRemoteSessionDir,
@@ -1277,6 +1620,7 @@ func clearSSHResumeRuntimeMetadata(metadata map[string]interface{}) {
 		MetadataKeySSHLocalForwardPort,
 		MetadataKeySSHRemoteAgentctlURL,
 		MetadataKeySSHRuntimeAPIRemotePort,
+		MetadataKeySSHLaunchReceipt,
 	} {
 		delete(metadata, key)
 	}

@@ -26,7 +26,7 @@ its persistence, materialization, or file-service contracts.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-UI-COMMENT-MARKDOWN-001` | [Trusted file roots](#trusted-file-roots), [Link resolution](#link-resolution), [Responsive behavior](#responsive-behavior), [Failure behavior](#failure-behavior) |
+| `REQ-UI-COMMENT-MARKDOWN-001` | [Trusted file roots](#trusted-file-roots), [Link resolution](#link-resolution), [Workspace-scoped task identifier links](#workspace-scoped-task-identifier-links), [Responsive behavior](#responsive-behavior), [Failure behavior](#failure-behavior) |
 | `REQ-UI-COMMENT-MARKDOWN-002` | [Prose separator normalization](#prose-separator-normalization) |
 
 ## Prose separator normalization
@@ -201,6 +201,38 @@ file-open target:        example/ui/bundle.js
 The mapping is based on `repository_id`, not a shared basename such as `example`. This prevents two
 same-named repositories or an unrelated sibling directory from becoming accidental authority.
 
+## Workspace-scoped task identifier links
+
+Task identifiers use the configured prefix and sequence of their workspace. The task record stores
+the identifier. The workspace record stores `task_prefix` and `task_sequence`. The link and route
+use these values. This feature adds no backend state.
+
+The flow is:
+
+1. `TaskChat` passes its `workspaceId` to each `CommentEntry`.
+2. `CommentEntry` selects that workspace and gives its `task_prefix` and ID to `MarkdownComment`.
+   It uses the active workspace only when the task has no workspace context.
+3. `remarkTaskLinks` matches identifiers for that prefix. It creates a link to
+   `/office/tasks/<identifier>?workspaceId=<workspace-id>`.
+4. The task route keeps UUIDs on the canonical task ID path. An identifier-shaped path mounts
+   `TaskIdentifierRedirect`. The redirect uses an explicit `workspaceId` query when present.
+   It accepts the old `workspace` query name for existing links. It uses the active workspace when
+   neither query is present.
+5. `resolveTaskIdentifier` sends a GET request to
+   `/api/v1/office/workspaces/<workspace-id>/tasks/by-identifier/<identifier>`. The backend
+   resolves the workspace ID and task identifier and returns the task ID.
+6. The redirect replaces the identifier URL with `/office/tasks/<task-id>`. It carries the
+   workspace as `workspaceId` and preserves other query parameters.
+
+The UI link matcher uses the exact workspace prefix. The route accepts an identifier with a numeric
+suffix. This lets every generated identifier reach the resolver. It includes identifiers that use
+a prefix that starts with a digit. UUIDs continue to use the existing task route.
+
+The redirect component holds the resolver status. A successful response changes the URL. A 404
+shows the task-not-found state. Other API errors show a retry action. If the link and active
+workspace have no workspace ID, the route shows the workspace-unavailable state. These states do
+not change task or workspace storage.
+
 ## Failure behavior
 
 - An unmatched host absolute path invokes the existing file-open action with that absolute
@@ -218,6 +250,10 @@ same-named repositories or an unrelated sibling directory from becoming accident
 - Backend path containment and symlink checks remain the final authorization boundary even after a
   frontend alias has produced a workspace-relative target.
 
+Task identifier lookup has its own failure states. An unknown identifier shows the localized
+not-found state. Other lookup errors show a retry action. If the link and active workspace have no
+workspace ID, the route shows its workspace-unavailable state.
+
 ## Responsive behavior
 
 This change does not alter chat composition, link styling, scroll ownership, navigation, or touch
@@ -233,6 +269,9 @@ proves the native file viewer rather than a compressed desktop editor.
 Because the repair changes target normalization rather than layout or controls, no new mobile
 surface is introduced. Desktop and phone end-to-end scenarios use the same repository identity
 mapping and prove the same file content is opened from the active workspace.
+
+Task identifier links use the same workspace-scoped route on desktop and phone. They add no
+viewport-specific lookup state or navigation controls.
 
 ## Testing
 
@@ -250,6 +289,10 @@ mapping and prove the same file content is opened from the active workspace.
 - The existing phone scenario taps the same form of source-path link and asserts the native viewer,
   expected active-worktree path/content, close control, and absence of document horizontal
   overflow.
+
+Task identifier tests verify that comment rendering uses its task workspace, that custom workspace
+prefixes resolve to canonical task IDs, and that not-found and retryable failures show their
+separate states.
 
 ## Observability
 

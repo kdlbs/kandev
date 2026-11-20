@@ -252,7 +252,7 @@ func agentDeliveryRecoveryMayAdvance(current, incoming models.AgentDeliveryRecov
 }
 
 func recoveryPhaseRank(phase string) int {
-	if phase == models.AgentDeliveryRecoverySettled {
+	if phase == models.AgentDeliveryRecoverySettled || phase == models.AgentDeliveryRecoveryContinued || phase == models.AgentDeliveryRecoveryRestored {
 		return 4
 	}
 	if phase == models.AgentDeliveryRecoveryRecovered {

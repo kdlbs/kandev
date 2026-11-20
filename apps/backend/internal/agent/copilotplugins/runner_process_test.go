@@ -4,6 +4,7 @@ package copilotplugins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +16,41 @@ import (
 	"testing"
 	"time"
 )
+
+func TestRunCommandCancellationKillsDescendantHoldingOutputPipes(t *testing.T) {
+	workDir := t.TempDir()
+	pidFile := filepath.Join(workDir, "descendant.pid")
+	script := "sleep 30 & echo $! > \"$1\"; wait"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sh", "-c", script, "sh", pidFile)
+	cmd.Dir = workDir
+	cmd.Env = os.Environ()
+	cmd.WaitDelay = runnerWaitDelay
+	stdout := &limitedBuffer{limit: inventoryStdoutLimit}
+	stderr := &limitedBuffer{limit: inventoryStderrLimit}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	started := time.Now()
+	if _, err := runCommand(ctx, cmd, stdout, stderr); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("cancelled command error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("cancellation took %s; a descendant retained the output pipes", elapsed)
+	}
+
+	pid := readDescendantPID(t, pidFile)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if processTerminated(pid) {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("descendant pid %d survived cancellation cleanup", pid)
+}
 
 func TestExecRunnerCleansDescendantAfterParentExit(t *testing.T) {
 	for _, exitCode := range []string{"0", "1"} {

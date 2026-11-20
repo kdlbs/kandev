@@ -235,6 +235,30 @@ surfaces as a failure rather than a hung session, satisfying `AC-…-001.13`.
 The [recoverable resume package](../../../plans/remote-docker-recoverable-resume/plan.md)
 records implementation and regression evidence for these failure paths.
 
+### Retained multi-repository verification
+
+The resume guarantee in `AC-EXECUTORS-REMOTE-DOCKER-001.12` includes unpublished
+commits already in the retained checkout. For remote-Docker instances carrying
+`ExecutorInstance.ReusedWorkspace`, launch verifies every projected repository
+instead of materializing it. Require a valid HEAD, the expected origin and the
+expected checkout branch (or base branch when no checkout branch is supplied).
+Do not require equality with a remote-tracking commit or clone, fetch, checkout,
+reset or remove an existing repository. A missing or mismatched repository
+aborts launch while preserving existing files and runtime.
+
+Only executor-recorded attachment provenance selects verification. Fresh
+instances and other providers retain their existing materialization behavior;
+ordinary materialization's exact-commit collision checks are unchanged.
+The lifecycle manager uses the retained authenticated agentctl client and a
+bounded read-only command with existing shell quoting. It reads an explicit
+unique completion marker before stopping only its owned probe process, so
+immediate helper process expiry cannot hide the result. Cancellation and
+unobservable results fail closed without fallback materialization. Existing
+rollback and exact-cleanup ownership remain unchanged.
+
+No database schema, public API, profile setting or UI changes. See the
+[verification package](../../../plans/retained-repository-verification/plan.md).
+
 ## Failure taxonomy
 
 Each cause in `AC-…-001.14` maps to a distinct typed error surfaced both by the

@@ -15,6 +15,18 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+const copilotPluginTestRuntimeVersion = "1.0.104"
+
+type supportedCopilotSelection struct{}
+
+func (supportedCopilotSelection) Get(context.Context, string, string) (managedruntime.Selection, bool, error) {
+	return managedruntime.Selection{Package: "@github/copilot", Version: copilotPluginTestRuntimeVersion}, true, nil
+}
+
+func (supportedCopilotSelection) Save(context.Context, string, string, string) error { return nil }
+
+func (supportedCopilotSelection) Delete(context.Context, string, string) error { return nil }
+
 type recordingCopilotRunner struct {
 	stdout    []byte
 	calls     [][]string
@@ -61,6 +73,7 @@ func newCopilotDiscoveryController(t *testing.T) (*Controller, *fakeStore, strin
 		t.Fatal(err)
 	}
 	ctrl := NewController(st, nil, reg, nil, log)
+	ctrl.SetManagedRuntimeSelectionStore(supportedCopilotSelection{})
 	return ctrl, st, profile.ID
 }
 
@@ -120,8 +133,8 @@ func TestCopilotPluginDiscoveryMountPermission(t *testing.T) {
 	if got.Status != "ready" || !got.MountPermitted {
 		t.Fatalf("supported inventory must permit native mounts: %#v", got)
 	}
-	if got.RuntimeVersion != agents.MustDefaultManagedNPMRuntimeVersion("@github/copilot") {
-		t.Fatalf("discovery runtime = %q, want the selected default", got.RuntimeVersion)
+	if got.RuntimeVersion != copilotPluginTestRuntimeVersion {
+		t.Fatalf("discovery runtime = %q, want the explicitly selected runtime", got.RuntimeVersion)
 	}
 	if len(runner.calls) != 1 || len(runner.helpCalls) != 1 {
 		t.Fatalf("discovery ran %d inventory and %d help commands, want one each", len(runner.calls), len(runner.helpCalls))

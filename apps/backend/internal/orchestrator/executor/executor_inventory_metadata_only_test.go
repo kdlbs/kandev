@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"os"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -21,6 +22,9 @@ type localMetadataRepairState struct {
 
 func newLocalMetadataRepairState(t *testing.T) *localMetadataRepairState {
 	t.Helper()
+	// The fixture owns its Git configuration, including content-filter absence.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	db, _ := remoteSelectionSQLiteTemplate.Open(t)
 	repo := tasksqlite.NewWithInitializedDB(db, db, nil)
 	ctx := t.Context()

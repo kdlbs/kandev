@@ -93,6 +93,11 @@ half-transferred state.
   subsequent read observes the destination placement without a duplicate or
   missing event.
 
+- **AC-TASKS-CROSS-WORKSPACE-TRANSFER-001.6:** If a transfer cannot reserve
+  its required relations without waiting on an existing mutation, it shall
+  return the existing stable conflict outcome without changing either
+  workspace. The caller may retry the same idempotent command.
+
 ### REQ-TASKS-CROSS-WORKSPACE-TRANSFER-002: Server-attested authorization
 
 **Intent:** Only an authorized human or server-attested coordinator can transfer

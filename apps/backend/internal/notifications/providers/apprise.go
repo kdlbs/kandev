@@ -37,12 +37,15 @@ func (p *AppriseProvider) Send(ctx context.Context, message Message) error {
 	}
 	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	args := []string{"-t", message.Title, "-b", message.Body}
+	args := []string{"--title=" + message.Title, "--body=" + message.Body, "--"}
 	args = append(args, urls...)
 	cmd := exec.CommandContext(timeoutCtx, "apprise", args...)
-	output, err := cmd.CombinedOutput()
+	err = cmd.Run()
 	if err != nil {
-		return fmt.Errorf("apprise failed: %w (%s)", err, strings.TrimSpace(string(output)))
+		if timeoutCtx.Err() != nil {
+			return timeoutCtx.Err()
+		}
+		return fmt.Errorf("apprise delivery failed: %w", err)
 	}
 	return nil
 }

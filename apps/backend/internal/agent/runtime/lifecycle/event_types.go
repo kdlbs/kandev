@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -249,6 +250,9 @@ type AgentStreamEventData struct {
 	CanonicalProjection         bool                             `json:"canonical_projection,omitempty"`
 	ShellOutputHasContent       bool                             `json:"shell_output_has_content,omitempty"`
 
+	// ConversationReceipt covers only committed host source mutations.
+	ConversationReceipt *models.ConversationMutationReceipt `json:"conversation_receipt,omitempty"`
+
 	// ParentToolCallID identifies the parent Task tool call when this event
 	// comes from a subagent. Used for visual nesting in the UI.
 	ParentToolCallID string `json:"parent_tool_call_id,omitempty"`
@@ -438,6 +442,13 @@ type GitEventPayload struct {
 func (p GitEventPayload) GetSessionID() string {
 	return p.SessionID
 }
+
+// WorktreeInventoryData aliases the neutral event payload so lifecycle
+// subscribers and producers share one wire shape.
+type WorktreeInventoryData = events.WorktreeInventoryData
+
+// WorktreeInventoryEntryData aliases the neutral event payload entry.
+type WorktreeInventoryEntryData = events.WorktreeInventoryEntryData
 
 type GitStatusData struct {
 	StatusState         string   `json:"status_state,omitempty"`

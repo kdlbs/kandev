@@ -3,6 +3,8 @@ package lifecycle
 import (
 	"errors"
 	"fmt"
+
+	"github.com/kandev/kandev/internal/agentruntime"
 )
 
 // AgentStartupDisposition records whether startup created a process or
@@ -46,11 +48,34 @@ func (e *AgentReattachmentFailure) Is(target error) bool {
 	return target == ErrAgentReattachment
 }
 
+// startupDispositionFromMetadata freezes process ownership from runtime
+// metadata before an execution exists.
 func startupDispositionFromMetadata(metadata map[string]interface{}) AgentStartupDisposition {
 	if reuse, _ := metadata[MetadataKeyReuseExistingProcess].(bool); reuse {
 		return AgentStartupReattachedExisting
 	}
 	return AgentStartupCreatedByAttempt
+}
+
+// instanceReusesExistingProcess reports whether the executor selected a peer
+// process that this attempt did not create.
+func instanceReusesExistingProcess(instance *ExecutorInstance) bool {
+	if instance == nil {
+		return false
+	}
+	reuse, _ := instance.Metadata[MetadataKeyReuseExistingProcess].(bool)
+	return reuse
+}
+
+// adoptionPreservesPeer reports whether a post-selection failure must leave the
+// selected standalone process, journal, and MCP claims with their peer instead
+// of applying fresh-allocation cleanup.
+func adoptionPreservesPeer(instance *ExecutorInstance, execution *AgentExecution) bool {
+	if instance != nil && instance.RuntimeName == agentruntime.RuntimeStandalone && instanceReusesExistingProcess(instance) {
+		return true
+	}
+	return execution != nil && execution.RuntimeName == agentruntime.RuntimeStandalone &&
+		execution.startupDispositionSnapshot() == AgentStartupReattachedExisting
 }
 
 func (e *AgentExecution) startupDispositionSnapshot() AgentStartupDisposition {

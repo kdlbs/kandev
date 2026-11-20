@@ -7,6 +7,9 @@ vi.mock("@/app/actions/workspaces", () => ({
 }));
 
 import {
+  automationDraftRevision,
+  reconcileSavedMCPSelection,
+  mcpSelectionForUpdate,
   buildCreatePayload,
   buildUpdatePayload,
   canonicalPluginTools,
@@ -351,4 +354,96 @@ describe("retryPolicyAfterModeChange", () => {
       max_retries: "1",
     });
   });
+});
+
+describe("automation MCP selection", () => {
+  const selection: import("@/lib/types/automation").AutomationMCPSelection = {
+    builtin_packages: ["core", "configuration"],
+    definition_ids: ["reports"],
+  };
+  it("includes an explicit selection in native creation", () => {
+    const form = Object.assign(baseForm(), { mcpSelection: selection, mcpSelectionRevision: 0 });
+    expect(buildCreatePayload("workspace", form, [], [])).toHaveProperty(
+      "mcp_selection",
+      selection,
+    );
+  });
+  it("preserves omission on unrelated updates and conditions changed selections", () => {
+    const form = Object.assign(baseForm(), { mcpSelection: selection, mcpSelectionRevision: 3 });
+    expect(buildUpdatePayload(form, [])).not.toHaveProperty("mcp_selection");
+    expect(buildUpdatePayload(form, [], undefined, selection)).toMatchObject({
+      mcp_selection: selection,
+      expected_mcp_selection_revision: 3,
+    });
+  });
+});
+
+describe("automation draft revision", () => {
+  it("ignores the server selection token but tracks package edits", async () => {
+    const { automationDraftRevision } = await import("./automation-payload");
+    const form = Object.assign(baseForm(), { mcpSelectionRevision: 0 });
+    expect(automationDraftRevision(form)).toBe(
+      automationDraftRevision({ ...form, mcpSelectionRevision: 1 }),
+    );
+    expect(automationDraftRevision(form)).not.toBe(
+      automationDraftRevision({
+        ...form,
+        mcpSelection: { builtin_packages: ["core", "configuration"], definition_ids: [] },
+      }),
+    );
+  });
+});
+
+it("treats an absent MCP draft like the saved null selection", () => {
+  const form = { ...baseForm(), mcpSelection: undefined };
+  expect(automationDraftRevision(form)).toEqual(
+    automationDraftRevision({ ...form, mcpSelection: null }),
+  );
+});
+
+it("applies canonical MCP save values without losing in-flight edits", () => {
+  const submitted = baseForm({
+    mcpSelection: { builtin_packages: ["core"], definition_ids: [] },
+    mcpSelectionRevision: 1,
+  });
+  const saved = {
+    mcp_selection: null,
+    mcp_selection_revision: 2,
+  } as import("@/lib/types/automation").Automation;
+  expect(reconcileSavedMCPSelection(submitted, submitted, saved).mcpSelection).toBeNull();
+  const edited = {
+    ...submitted,
+    mcpSelection: { builtin_packages: ["core", "configuration"], definition_ids: [] },
+  } as FormState;
+  expect(reconcileSavedMCPSelection(edited, submitted, saved)).toMatchObject({
+    mcpSelection: edited.mcpSelection,
+    mcpSelectionRevision: 2,
+  });
+});
+it("omits MCP grants from managed conversation payloads", () => {
+  const form = baseForm({
+    taskMode: "managed_conversation",
+    mcpSelection: { builtin_packages: ["core"], definition_ids: [] },
+  });
+  for (const payload of [
+    buildCreatePayload("workspace", form, [], []),
+    buildUpdatePayload(form, [], undefined, form.mcpSelection!),
+  ]) {
+    expect(payload).not.toHaveProperty("mcp_selection");
+    expect(payload).not.toHaveProperty("expected_mcp_selection_revision");
+  }
+});
+
+it("resubmits the displayed selection when changing task mode", () => {
+  const saved = baseForm({ mcpSelection: { builtin_packages: ["core"], definition_ids: [] } });
+  expect(mcpSelectionForUpdate({ ...saved, taskMode: "normal_task" }, saved)).toEqual(
+    saved.mcpSelection,
+  );
+});
+
+it("carries the editor revision when switching to a managed conversation", () => {
+  const form = baseForm({ taskMode: "managed_conversation", mcpSelectionRevision: 3 });
+  const payload = buildUpdatePayload(form, [], undefined, undefined, true);
+  expect(payload).not.toHaveProperty("mcp_selection");
+  expect(payload.expected_mcp_selection_revision).toBe(3);
 });

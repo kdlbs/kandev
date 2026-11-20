@@ -31,10 +31,24 @@ presets, and watcher settings are read and written for an explicit
 
 For GitHub, each workspace has a `github_workspace_settings` row containing:
 
-- repository scope mode: all repositories, selected organizations, or selected
-  repositories;
+- repository scope mode: all repositories or the union of selected owners and
+  exact repositories;
 - selected org/repo scope values;
 - workspace-owned GitHub query presets.
+
+### Amendment: combined GitHub repository scope (2026-11-17)
+
+The canonical scope mode is `all` or `selected`. `selected` permits a repository
+when its owner is selected or its exact `owner/name` entry is selected. Both
+lists can be active together. Legacy `orgs` and `repos` writes keep their
+exclusive meaning and return canonical `selected` settings.
+
+Startup migration clears each list that the old mode ignored before it enables
+the shared rule. Existing workspace access therefore stays unchanged. The
+requirements and migration contract are in
+[GitHub repository scope](../specs/integrations/requirements/github-repository-scope.md).
+GitHub authentication and workspace identity keep the ownership boundaries in
+[ADR 0047](0047-github-authentication-ownership.md).
 
 The settings UI exposes a topbar workspace switcher on integration settings
 routes. GitHub settings render for the active workspace, and review/issue watch

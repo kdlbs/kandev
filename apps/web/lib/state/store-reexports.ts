@@ -87,8 +87,4 @@ export type {
   LinearSliceState,
   LinearSliceActions,
   LinearIssueWatchesState,
-  AzureDevOpsSlice,
-  AzureDevOpsSliceState,
-  AzureDevOpsSliceActions,
-  AzureDevOpsTaskPullRequestsState,
 } from "./slices";

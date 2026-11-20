@@ -151,11 +151,12 @@ func (r *Repository) SettleCeilingDeferredRun(
 		    earliest_retry_at = NULL,
 		    scheduled_retry_at = NULL,
 		    claimed_at = ?,
-		    finished_at = NULL
+		    finished_at = NULL,` + deferredRouteAssignments + `
 		WHERE id = ?
 		  AND status = 'queued'
 		  AND routing_blocked_status = ?`
-	args := []interface{}{sessionID, sessionID, now, runID, runsmodels.RoutingBlockedActionRequired}
+	deferred := string(models.RouteAttemptOutcomeDeferredCapacity)
+	args := []interface{}{sessionID, sessionID, now, deferred, deferred, deferred, runID, runsmodels.RoutingBlockedActionRequired}
 	if taskID != "" {
 		query += " AND " + dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id") + " = ?"
 		args = append(args, taskID)
@@ -174,6 +175,17 @@ func (r *Repository) SettleCeilingDeferredRun(
 	}
 	return n > 0, nil
 }
+
+const deferredRouteAttempt = `FROM office_run_route_attempts a
+	WHERE a.run_id = runs.id AND a.outcome = ? AND a.provider_id <> ''
+	ORDER BY a.seq DESC LIMIT 1`
+
+// deferredRouteAssignments records the route in the same update that settles
+// or finishes a replayed run. Each column takes the deferral outcome.
+const deferredRouteAssignments = `
+	resolved_execution_profile_id = COALESCE((SELECT a.execution_profile_id ` + deferredRouteAttempt + `), resolved_execution_profile_id),
+	resolved_provider_id = COALESCE((SELECT a.provider_id ` + deferredRouteAttempt + `), resolved_provider_id),
+	resolved_model = COALESCE((SELECT a.model ` + deferredRouteAttempt + `), resolved_model)`
 
 // FailCeilingDeferredRun terminally fails the Office run whose ceiling deferral
 // was dropped. Only the exact row the deferral parked is accepted, so a stale
@@ -224,6 +236,7 @@ func (r *Repository) FinishCeilingDeferredRunOnCompletion(
 		return nil, nil
 	}
 	now := time.Now().UTC()
+	deferred := string(models.RouteAttemptOutcomeDeferredCapacity)
 	var run runsmodels.Run
 	err := r.db.QueryRowxContext(ctx, r.db.Rebind(fmt.Sprintf(`
 		UPDATE runs
@@ -234,7 +247,7 @@ func (r *Repository) FinishCeilingDeferredRunOnCompletion(
 		    earliest_retry_at = NULL,
 		    scheduled_retry_at = NULL,
 		    claimed_at = COALESCE(claimed_at, ?),
-		    finished_at = ?
+		    finished_at = ?,`+deferredRouteAssignments+`
 		WHERE id = ?
 		  AND status = 'queued'
 		  AND routing_blocked_status = ?
@@ -243,7 +256,7 @@ func (r *Repository) FinishCeilingDeferredRunOnCompletion(
 		  AND %s = ?
 		RETURNING *
 	`, dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id"))),
-		outcome, sessionID, sessionID, now, now, runID,
+		outcome, sessionID, sessionID, now, now, deferred, deferred, deferred, runID,
 		runsmodels.RoutingBlockedActionRequired, agentProfileID, taskID).StructScan(&run)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

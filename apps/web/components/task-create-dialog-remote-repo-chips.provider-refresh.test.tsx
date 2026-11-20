@@ -17,10 +17,6 @@ vi.mock("@/lib/api/domains/gitlab-api", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   fetchGitLabStatus: vi.fn(async () => null),
 }));
-vi.mock("@/lib/api/domains/azure-devops-api", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  getAzureDevOpsConfig: vi.fn(async () => ({ hasSecret: false, lastOk: false })),
-}));
 
 const PLUGIN = "native-chips-refresh-test";
 const HOST = "https://code.example.test";

@@ -74,6 +74,11 @@ The summary is per delivery channel, not an exactly-once guarantee across browse
 
 ## Payload and presentation
 
+The current [manager design](runtime-update-manager.md) owns the Settings
+destination presentation.
+Its target action opens the overview within one responsive update surface.
+Notification payloads, URLs, grouping, and delivery claims retain this design.
+
 Keep `system.update_available` and its existing subscription preferences.
 Add an optional typed `runtime_updates` list to the notification message and local WebSocket payload.
 Each member carries `occurrence_id`, `agent_name`, `runtime_id`, `display_name`, `previous_version`, and `version`.

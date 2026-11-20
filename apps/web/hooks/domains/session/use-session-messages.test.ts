@@ -464,6 +464,43 @@ describe("cached session entry history readiness", () => {
   });
 });
 
+describe("cached refresh connection recovery", () => {
+  it("clears cached-entry history pending when the connection changes", async () => {
+    const readiness = deferred<void>();
+    const response = deferred<{ messages: Message[]; has_more: boolean }>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness.promise,
+      unsubscribe: vi.fn(),
+    });
+    mockWebSocketClient.request.mockReturnValue(response.promise);
+    mockState.messages.bySession["sess-1"] = [makeMessage({ id: "cached" })];
+
+    const { result, rerender, unmount } = renderHook(() => useSessionMessages("sess-1"));
+
+    await act(async () => {
+      readiness.resolve();
+      await readiness.promise;
+    });
+    await waitFor(() => expect(mockWebSocketClient.request).toHaveBeenCalled());
+    expect(result.current.historyRefreshPending).toBe(true);
+
+    // A connection change invalidates the in-flight cached refresh; the
+    // pending placement must settle instead of waiting for a request whose
+    // generation can no longer commit.
+    mockState.connection.status = "disconnected";
+    rerender();
+    await waitFor(() => expect(result.current.historyRefreshPending).toBe(false));
+
+    await act(async () => {
+      response.resolve({ messages: [], has_more: false });
+      await response.promise;
+    });
+    expect(result.current.historyRefreshPending).toBe(false);
+    unmount();
+  });
+});
+
 describe("session entry loading state", () => {
   it("clears local loading after a live row rerenders the entry effect", async () => {
     const response = deferred<{ messages: Message[]; has_more: boolean }>();

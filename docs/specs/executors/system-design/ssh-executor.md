@@ -18,6 +18,11 @@ The proposed [SSH passthrough design](ssh-passthrough.md) extends this controlle
 lifecycle with remote CLI terminal execution. Its
 [requirements](../requirements/ssh-passthrough.md) own that mode's behavior.
 
+The [directory-loss reconciliation design](ssh-agentctl-reconciliation.md)
+extends persisted SSH cleanup for AC-001.18 through AC-001.24. It owns that
+extension's launch proof and signalling contract. Existing pidfile guards stay
+in force for records without the new proof.
+
 ## Requirement mapping
 
 | Requirement                                                               | Design section                                                      |

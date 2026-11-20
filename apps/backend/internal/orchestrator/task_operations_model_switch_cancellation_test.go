@@ -45,7 +45,7 @@ func TestTrySwitchModelRejectsInPlaceMutationAfterCompletedPause(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoTurnService{repo: repo}
 	if _, err := svc.turnService.StartTurn(ctx, sessionID); err != nil {
 		t.Fatalf("start active turn: %v", err)
@@ -127,7 +127,7 @@ func newQueuedModelSwitchPauseFixture(
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.turnService = &repoTurnService{repo: repo}
 	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
 	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
@@ -205,7 +205,7 @@ func TestResumeAttempt_ModelSwitchFallbackCancellationBeforeInitialPromptAccepta
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	attempt, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
 	if err != nil || !owner {
 		t.Fatalf("begin model-switch attempt: attempt=%v owner=%v err=%v", attempt, owner, err)

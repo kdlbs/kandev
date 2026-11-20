@@ -687,6 +687,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"shellOptions":                    response.ShellOptions,
 		"defaultEditorId":                 nullString(settings.DefaultEditorID),
 		"enablePreviewOnClick":            settings.EnablePreviewOnClick,
+		"escapeCancelsAgent":              settings.EscapeCancelsAgent,
 		"chatSubmitKey":                   defaultString(settings.ChatSubmitKey, "cmd_enter"),
 		"reviewAutoMarkOnScroll":          settings.ReviewAutoMarkOnScroll,
 		"confirmTaskArchive":              settings.ConfirmTaskArchive,
@@ -712,6 +713,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"lspAutoStartLanguages":             stringSlice(settings.LspAutoStartLanguages),
 		"lspAutoInstallLanguages":           stringSlice(settings.LspAutoInstallLanguages),
 		"lspServerConfigs":                  mapStringMap(settings.LspServerConfigs),
+		"markdownPreviewByDefault":          settings.MarkdownPreviewByDefault,
 		"lspStatusLocation":                 usermodels.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"savedLayouts":                      settings.SavedLayouts,
 		"sidebarViews":                      mapSidebarViews(settings.SidebarViews),
@@ -736,7 +738,6 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"lastSeenDisplay":                   lastSeenDisplay(settings.LastSeenDisplay),
 		"messageTimeDisplay":                usermodels.NormalizeMessageTimeDisplay(settings.MessageTimeDisplay),
 		"agentTabCloseBehavior":             usermodels.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
-		"azureDevOpsBrowsePreferences":      settings.AzureDevOpsBrowsePreferences,
 		"systemMetricsDisplay": map[string]any{
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
@@ -892,6 +893,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"blockedReason":      nullString(task.BlockedReason),
 		"dependsOn":          dependencyRefStates(task.DependsOn),
 		"blocks":             dependencyRefStates(task.Blocks),
+		"related":            dependencyRefStates(task.Related),
 		"startWhenUnblocked": task.StartWhenUnblocked,
 		// Parked-on-background-work projection, stamped by
 		// EnrichTaskParkedProjection before this mapper runs — omitting it here

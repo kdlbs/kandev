@@ -54,10 +54,9 @@ func runRetentionStorageSteadyRate(t *testing.T, engine string, batchRows int) {
 	timers := make(chan workerTimer, 2)
 	snapshots := make(chan deliveryretention.Snapshot, 1)
 	worker := deliveryretention.New(retentionStorageRateRepository{Repository: repo, t: t}, db.NewPool(repo.db, repo.db), deliveryretention.Options{
-		// A failed batch retries on the next virtual minute, so the age assertion
-		// reports capacity even when the production jitter would retry sooner.
+		// Keep retry timers distinct from the virtual arrival interval.
 		BatchRows:  batchRows,
-		RetryDelay: func(int) time.Duration { return time.Minute },
+		RetryDelay: func(int) time.Duration { return time.Second },
 		After: func(delay time.Duration) <-chan time.Time {
 			timer := workerTimer{delay: delay, fire: make(chan time.Time, 1)}
 			timers <- timer
@@ -124,6 +123,7 @@ func (r retentionStorageRateRepository) RunAgentDeliveryRetirementBatch(ctx cont
 
 func finishRetentionStorageWorkerPass(t *testing.T, timers chan workerTimer, snapshots <-chan deliveryretention.Snapshot) deliveryretention.Snapshot {
 	t.Helper()
+	deadlineRetries := 0
 	for {
 		snapshot := receiveWorkerSnapshot(t, snapshots)
 		if snapshot.ContinuationPending {
@@ -131,6 +131,14 @@ func finishRetentionStorageWorkerPass(t *testing.T, timers chan workerTimer, sna
 		}
 		select {
 		case timer := <-timers:
+			if timer.delay == time.Second && snapshot.FailureReason == "deadline" {
+				deadlineRetries++
+				if deadlineRetries > 3 {
+					t.Fatal("worker did not recover after three deadline retries")
+				}
+				timer.fire <- time.Now()
+				continue
+			}
 			if timer.delay != time.Minute {
 				t.Fatalf("unexpected idle timer: %s", timer.delay)
 			}

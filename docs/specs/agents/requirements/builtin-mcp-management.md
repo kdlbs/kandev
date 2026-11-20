@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: agents
 created: 2026-10-22
 owners:
@@ -15,14 +15,20 @@ the same management experience as other MCP servers. Configuration chats receive
 Configuration automatically. An authorized user can also give Configuration to a
 regular task without converting that task into a configuration chat.
 
-This draft implements the user's 2026-10-24 scope revision and
+This contract implements the user's 2026-10-24 scope revision and
 [issue #3808](https://github.com/kdlbs/kandev/issues/3808). It supersedes this
 package's earlier workspace-only, three-group pruning proposal. It extends
 [workspace MCP configuration](workspace-mcp-configuration.md) and the default
 availability of [agent rich output](agent-rich-output.md). Agents owns package
 selection and delivery. Platform retains ownership of session observations.
-Names, package boundaries, and defaults below are recommendations for review,
-not previously approved behavior. Implementation needs a later explicit request.
+The completed built-in management plan records the original implementation.
+The switch controls follow-up preserves package boundaries and defaults.
+
+## Automation extension
+
+[Automation MCP selection](../../office/requirements/automation-mcp-selection.md) owns the extension to the Automation surface.
+It permits every optional package after an explicit native save. Core remains required.
+Other restricted surfaces retain this document's existing boundaries. The extension has separate implementation work orders.
 
 ## Terms
 
@@ -155,6 +161,18 @@ not previously approved behavior. Implementation needs a later explicit request.
   pending changes, conflict, and denial shall work at 320px, 393px, and 767px
   phone widths, the 768px boundary, and on a 900px touch tablet. Copy shall use
   all shipped locales and support keyboard navigation and focus return.
+
+### REQ-AGENTS-BUILTIN-MCP-005: Switches and visible inheritance
+
+**Intent:** Show effective package choices and make overrides reversible.
+The user approved this extension on 2026-11-11. Implementation is recorded in
+[the switch plan](../../../plans/builtin-mcp-switches/plan.md).
+
+- **AC-AGENTS-BUILTIN-MCP-005.1:** New Task and task Customize shall show binary switches directly in the package list. Toggling shall not open package details. Package names shall open details separately. Each switch shall show the effective desired value, not current execution evidence.
+- **AC-AGENTS-BUILTIN-MCP-005.2:** An inherited choice shall show its source and value. Changing its switch shall create an explicit task override. An override shall show the workspace default and a visible Use inherited value action in its list row. Restoring inheritance shall remove the override even when the effective value stays unchanged. Later workspace changes shall affect inherited choices only.
+- **AC-AGENTS-BUILTIN-MCP-005.3:** Workspace list controls shall distinguish permission from default inclusion without dropdowns or required detail navigation. Blocking shall disable default inclusion. Allowing a blocked package shall leave it off by default. Configuration shall remain explicit-only for regular tasks.
+- **AC-AGENTS-BUILTIN-MCP-005.4:** Required packages shall show a reason instead of an editable switch. Blocked or ineligible packages shall not allow enabling. A retained task override shall remain identifiable and removable when workspace policy blocks it.
+- **AC-AGENTS-BUILTIN-MCP-005.5:** Switches and inheritance actions shall preserve save, discard, dirty, conflict, permission, and next-process timing behavior. Loading or failed reads shall not appear as confirmed Off. Existing phone navigation, keyboard access, localized copy, and touch-target requirements apply.
 
 ## Exclusions and delivery
 

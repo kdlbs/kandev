@@ -40,6 +40,10 @@ Kandev limits concurrent Git subprocesses, but every caller currently competes i
 - **AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.4:** Cancellation, helper failure, and inherited output pipes shall have bounded cleanup. Each terminal path shall release its admission slot and operation-owned locks.
 - **AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.5:** Required operations shall return credential-free failures through existing error surfaces and clear pending state. Optional comparison work shall preserve the outcomes in `AC-PLATFORM-WORKSPACE-GIT-STATUS-001.17`.
 - **AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.6:** A later operation shall work after authentication or service recovery without restarting Kandev. Failure shall not cause credential replacement, account fallback, transport fallback, remote rewriting, or a new retry loop.
+
+  Exception: the [worktree lock recovery amendment](../../workspaces/requirements/worktree-base-refresh.md#lock-contention-recovery)
+  permits bounded retries for recognized lock contention during backend base
+  refresh. This exception grants no authentication or transport retries.
 - **AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.7:** While the process `PATH` and `PATHEXT` are unchanged and the previously resolved Git target remains executable, constructing another application-owned Git command shall reuse that executable without searching `PATH` again. A changed lookup environment or unusable target shall resolve Git again before the next command starts, and an unresolvable Git shall keep the existing not-found failure.
 
 These criteria apply the accepted noninteractive transport decision across application-owned Git.

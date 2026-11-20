@@ -81,7 +81,7 @@ func newPlanCommentDeliveryService(t *testing.T, durable bool) (*Service, *reten
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	database := sqlx.NewDb(repo.DB(), "sqlite3")
 	queueRepo, err := messagequeue.NewSQLiteRepository(database, database)
 	require.NoError(t, err)

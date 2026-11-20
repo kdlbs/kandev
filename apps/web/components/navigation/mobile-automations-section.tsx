@@ -6,9 +6,10 @@ import Link from "@/components/routing/app-link";
 import { useWorkspaceAutomations } from "@/components/runs/use-workspace-automations";
 import { useAutomationSummaries } from "@/components/runs/use-automation-summaries";
 import { useLiveRefresh } from "@/components/runs/use-live-refresh";
-import { buildAutomationRows, STATE_LABEL_KEY } from "@/components/runs/automation-rows";
+import { buildAutomationRows } from "@/components/runs/automation-rows";
 import { AUTOMATIONS_HREF } from "@/components/runs/runs-view";
 import { workspaceSettingsHref } from "@/lib/settings/workspace-settings-tabs";
+import { MobileAutomationRow } from "./mobile-automation-row";
 
 export function MobileAutomationsSection({
   workspaceId,
@@ -113,20 +114,23 @@ function MobileAutomationRows({
       )}
       {!list.loading &&
         !list.error &&
-        rows.map(({ automation, state }) => (
-          <Button
-            asChild
-            variant="outline"
-            className="cursor-pointer min-h-11 h-auto justify-start gap-3 px-3 py-2"
+        rows.map(({ automation, state, lastRun }) => (
+          <MobileAutomationRow
             key={automation.id}
-          >
-            <Link href={`${AUTOMATIONS_HREF}/${automation.id}`} onClick={onNavigate}>
-              <span className="min-w-0 flex-1 truncate text-left">{automation.name}</span>
-              {!activity.loading && !activity.error && (
-                <span className="text-xs text-muted-foreground">{t(STATE_LABEL_KEY[state])}</span>
-              )}
-            </Link>
-          </Button>
+            shortcut={{
+              id: automation.id,
+              label: automation.name,
+              href: `${AUTOMATIONS_HREF}/${automation.id}`,
+              available: true,
+            }}
+            activity={{
+              state: pending || error ? "unknown" : state,
+              loading: pending,
+              error: Boolean(error),
+              lastRun: lastRun ?? undefined,
+            }}
+            onNavigate={onNavigate}
+          />
         ))}
       <Button asChild variant="outline" className="cursor-pointer h-11 justify-start px-3">
         <Link href={workspaceSettingsHref(workspaceId, "automations")} onClick={onNavigate}>

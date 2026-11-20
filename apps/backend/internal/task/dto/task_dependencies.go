@@ -25,6 +25,7 @@ type TaskDependencyProjection struct {
 	BlockedReason string
 	DependsOn     []TaskDependencyRefDTO
 	Blocks        []TaskDependencyRefDTO
+	Related       []TaskDependencyRefDTO
 }
 
 // EnrichTaskDependencies stamps the derived dependency projection onto a task
@@ -42,6 +43,7 @@ func EnrichTaskDependencies(dto *TaskDTO, projection TaskDependencyProjection, t
 	dto.BlockedReason = projection.BlockedReason
 	dto.DependsOn = projection.DependsOn
 	dto.Blocks = projection.Blocks
+	dto.Related = projection.Related
 	dto.StartWhenUnblocked = HasStartWhenUnblockedIntent(task)
 }
 

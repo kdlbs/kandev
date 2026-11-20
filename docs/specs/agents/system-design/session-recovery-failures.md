@@ -57,8 +57,8 @@ sandbox. No autonomous Git or prompt operation runs as part of restoration.
 Extend the existing task/session launch-error ownership boundary instead of
 creating a second error store. The
 [task launch projection](../../tasks/system-design/task-launch-failure-recovery.md)
-owns durable bootstrap failures. Recovery request state contributes pending
-actions and the separately labeled resume/restore results.
+owns durable bootstrap failures. [Request guidance](session-recovery-guidance.md)
+defines cross-entry-point hints; resume/restore results remain separate.
 
 Correlate by task, session, execution/attempt identity, and durable error stamp.
 Carry an optional error stamp in recovery error details so the client can match

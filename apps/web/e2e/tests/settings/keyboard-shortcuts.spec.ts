@@ -255,7 +255,6 @@ test.describe("Integration navigation hotkeys", () => {
   });
 
   const destinations = [
-    ["azure-devops", "/azure-devops"],
     ["github", "/github"],
     ["gitlab", "/gitlab"],
     ["jira", "/jira"],
