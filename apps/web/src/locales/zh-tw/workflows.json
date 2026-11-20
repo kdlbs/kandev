@@ -330,5 +330,13 @@
   "workflowSyncCompleted": "工作流程同步完成",
   "workflows": "工作流程",
   "workflowsReadOnlyImprove": "此工作區中的工作流程由 Improve Kandev 管理，無法更改。",
-  "workflowsSectionDescription": "建立帶自動流轉的自主流水線，或由你手動移動任務的手動工作流程"
+  "workflowsSectionDescription": "建立帶自動流轉的自主流水線，或由你手動移動任務的手動工作流程",
+  "compactReadOnly": "只讀",
+  "compactStepCount_one": "{{count}} 個步驟",
+  "compactStepCount_other": "{{count}} 個步驟",
+  "compactUnsaved": "未儲存",
+  "listViewCompact": "緊湊",
+  "listViewDetailed": "詳細",
+  "listViewLabel": "工作流程清單檢視",
+  "toggleWorkflowDetails": "顯示或隱藏 {{name}} 的詳細資訊"
 }

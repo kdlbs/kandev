@@ -330,5 +330,13 @@
   "workflowSyncCompleted": "Ŵōŕķƒĺōŵ śŷńć ćōḿƥĺēţēď",
   "loadingSteps": "Ĺōàďĩńĝ śţēƥś…",
   "noStepsInThisWorkflow": "Ńō śţēƥś ĩń ţĥĩś ŵōŕķƒĺōŵ",
-  "selectAWorkflowFirst": "Śēĺēćţ à ŵōŕķƒĺōŵ ƒĩŕśţ"
+  "selectAWorkflowFirst": "Śēĺēćţ à ŵōŕķƒĺōŵ ƒĩŕśţ",
+  "compactReadOnly": "Ŕēàď-ōńĺŷ",
+  "compactStepCount_one": "{{count}} śţēƥ",
+  "compactStepCount_other": "{{count}} śţēƥś",
+  "compactUnsaved": "Ũńśàvēď",
+  "listViewCompact": "Ćōḿƥàćţ",
+  "listViewDetailed": "Ďēţàĩĺēď",
+  "listViewLabel": "Ŵōŕķƒĺōŵ ĺĩśţ vĩēŵ",
+  "toggleWorkflowDetails": "Śĥōŵ ōŕ ĥĩďē ďēţàĩĺś ƒōŕ {{name}}"
 }

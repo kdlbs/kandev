@@ -330,5 +330,13 @@
   "noStepsInThisWorkflow": "Este fluxo de trabalho não tem passos",
   "saveBeforeDuplicating": "Guarde o fluxo de trabalho antes de o duplicar.",
   "selectAWorkflowFirst": "Selecione primeiro um fluxo de trabalho",
-  "workflowMutationInProgress": "Aguarde que a alteração atual do fluxo de trabalho termine."
+  "workflowMutationInProgress": "Aguarde que a alteração atual do fluxo de trabalho termine.",
+  "compactReadOnly": "Só de leitura",
+  "compactStepCount_one": "{{count}} passo",
+  "compactStepCount_other": "{{count}} passos",
+  "compactUnsaved": "Não guardado",
+  "listViewCompact": "Compacta",
+  "listViewDetailed": "Detalhada",
+  "listViewLabel": "Vista da lista de fluxos de trabalho",
+  "toggleWorkflowDetails": "Mostrar ou ocultar detalhes de {{name}}"
 }

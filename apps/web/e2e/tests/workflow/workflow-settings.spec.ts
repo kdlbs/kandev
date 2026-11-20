@@ -2,7 +2,7 @@ import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { promptEditorText } from "../../helpers/settings-prompt-editor";
 import { KanbanPage } from "../../pages/kanban-page";
-import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+import { WorkflowSettingsPage, seedWorkflowListView } from "../../pages/workflow-settings-page";
 import { dwell } from "../../helpers/causal-waits";
 
 async function maxRingSpread(locator: Locator): Promise<number> {
@@ -646,6 +646,9 @@ test.describe("Workflow settings", () => {
     const { steps } = await apiClient.listWorkflowSteps(workflow.id);
     const firstStep = steps.sort((a, b) => a.position - b.position)[0];
 
+    // The settings route is reached in-app, so seed the Detailed list view
+    // that exposes the card's prompt editor without expanding a row.
+    await seedWorkflowListView(testPage, "detailed");
     const kanban = new KanbanPage(testPage);
     await kanban.goto(workflow.id);
     const sidebar = testPage.getByTestId("app-sidebar");
