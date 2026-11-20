@@ -413,8 +413,8 @@ func (s *Server) runAgentStreamWriterWithReplay(ctx context.Context, conn *webso
 }
 
 func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.Conn, streamID string, after uint64, deliveryStreamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, stages ...*streamStageWriter) {
-	stage, heartbeat, eventWrite := streamStageInputs(writeMessage, stages)
 	s.markStreamWriterReady(streamID)
+	stage, heartbeat, eventWrite := streamStageInputs(writeMessage, stages)
 	for {
 		select {
 		case <-ctx.Done():

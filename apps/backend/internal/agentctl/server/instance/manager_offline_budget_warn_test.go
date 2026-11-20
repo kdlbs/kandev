@@ -24,7 +24,7 @@ func budgetWarnings(t *testing.T, cfg *config.Config, budget time.Duration) []ob
 }
 
 func TestWarnBudgetExceedsReapersNamesBudgetAndPeriod(t *testing.T) {
-	cfg := &config.Config{UnownedPeriod: 10 * time.Minute, IdleTimeout: 0}
+	cfg := &config.Config{UnownedPeriod: 10 * time.Minute, IdleTimeout: 0, AgentSurvivalEnabled: true}
 
 	entries := budgetWarnings(t, cfg, 15*time.Minute)
 	require.Len(t, entries, 1)
@@ -33,4 +33,12 @@ func TestWarnBudgetExceedsReapersNamesBudgetAndPeriod(t *testing.T) {
 	require.Contains(t, fields, "unowned_period")
 
 	require.Empty(t, budgetWarnings(t, cfg, 5*time.Minute))
+}
+
+// Without agent survival the unowned reaper never runs, so a budget longer
+// than the unowned period cannot be reaped by it and must not warn.
+func TestWarnBudgetExceedsReapersIgnoresUnownedPeriodWithoutSurvival(t *testing.T) {
+	cfg := &config.Config{UnownedPeriod: 10 * time.Minute, IdleTimeout: 0, AgentSurvivalEnabled: false}
+
+	require.Empty(t, budgetWarnings(t, cfg, 15*time.Minute))
 }

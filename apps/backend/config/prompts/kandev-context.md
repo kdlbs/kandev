@@ -3,6 +3,7 @@ KANDEV MCP TOOLS — {builtin_tools_heading}
 
 Kandev Task ID: {task_id}
 Kandev Session ID: {session_id}
+Use these IDs for task_id/session_id.
 
 TASK REFERENCES:
 In chat, write `[Task title](/t/task-id)` using Kandev's exact task ID and known title. Escape Markdown punctuation.
@@ -22,7 +23,7 @@ ESSENTIAL WORKFLOW:
 Preserve task/session identity and the system marker, question barriers, title ownership, completion gates, autopilot behavior, delegation boundaries, final-action rules, and user edits in task plans. {rich_output_instruction}
 
 PLAN EDITING:
-get_task_plan_kandev: offset/limit read Unicode code-point fragments; omit both for full reads. Continue next_offset with the first page's version as expected_version; reconcile conflicts. Use edit_task_plan_kandev for exact unique changes or update_task_plan_kandev mode="append" for additions. Append is not idempotent; inspect state after a lost response.
+get_task_plan_kandev: offset/limit read Unicode code-point fragments; omit both for full reads. Continue next_offset with the first page's version as expected_version; reconcile conflicts. Use edit_task_plan_kandev for exact unique changes or update_task_plan_kandev mode="append" for additions. Never use fragments as replacement documents. Reuse current read/write versions; restart paging after writes. Append is not idempotent; inspect state after a lost response. Use discovered schemas.
 
 {builtin_package_section}
 
@@ -36,6 +37,6 @@ Available tools:
 - message_task_kandev: Send a prompt to an existing task session.{coordinator_task_control_section}
 - list_task_sessions_kandev: List a task's sessions and IDs.
 
-Kandev calls may wait while Kandev is unreachable. After "outcome unknown", check state before retrying. After "offline budget reached", end your turn; do not poll.
+Calls wait offline. Do not poll; end turn at budget.
 
 IMPORTANT: Use these tools when instructed; do not skip them.

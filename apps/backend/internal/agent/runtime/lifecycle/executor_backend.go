@@ -355,14 +355,14 @@ const (
 	// task-supplied metadata can never enable it, because that would let a
 	// task arm a destructive remote operation its profile never approved.
 	MetadataKeySSHReclaimTaskDir = "ssh_reclaim_task_dir"
+	// MetadataKeyOfflineBudgetMinutes carries the profile's offline budget.
+	// It is an authoritative profile key: task-supplied metadata cannot set it.
+	MetadataKeyOfflineBudgetMinutes = offlinebudget.Key
 	// MetadataKeySSHLaunchReceipt carries the immutable launch proof a managed
 	// SSH controller self-reported during its authenticated handshake. It is
 	// the only durable evidence that survives session-directory loss, so it
 	// must be cleared by every replacement/reset path rather than merged.
 	MetadataKeySSHLaunchReceipt = sshlaunch.MetadataKey
-	// MetadataKeyOfflineBudgetMinutes carries the profile's offline budget.
-	// It is an authoritative profile key: task-supplied metadata cannot set it.
-	MetadataKeyOfflineBudgetMinutes = offlinebudget.Key
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -402,11 +402,11 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHIdentityFile:         true,
 	MetadataKeySSHShell:                true,
 	MetadataKeySSHReclaimTaskDir:       true,
+	MetadataKeyOfflineBudgetMinutes:    true,
 	MetadataKeySSHLaunchReceipt:        true,
 
 	// Remote Docker adopted agentctl identity.
 	MetadataKeyRemoteDockerAgentctlInstanceID: true,
-	MetadataKeyOfflineBudgetMinutes:           true,
 
 	// Kubernetes connection and exact resource inventory.
 	MetadataKeyKubernetesAuthMode:               true,

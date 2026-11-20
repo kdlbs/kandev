@@ -85,7 +85,14 @@ func TestKandevContext_RenderedSizesDeliverRecordedCompaction(t *testing.T) {
 func TestKandevContext_TellsAgentsCallsMayWaitAndNotToPoll(t *testing.T) {
 	context := FormatKandevContext("task", "session", false)
 
-	assert.Contains(t, context, "Kandev calls may wait while Kandev is unreachable.")
-	assert.Contains(t, context, `After "outcome unknown", check state before retrying.`)
-	assert.Contains(t, context, "do not poll")
+	assert.Contains(t, context, "Calls wait offline.")
+	assert.Contains(t, context, "Do not poll; end turn at budget.")
+}
+
+func TestKandevContext_KeepsIdentityAndPlanEditingGuidance(t *testing.T) {
+	context := FormatKandevContext("task", "session", false)
+
+	assert.Contains(t, context, "Use these IDs for task_id/session_id.")
+	assert.Contains(t, context, "Never use fragments as replacement documents.")
+	assert.Contains(t, context, "Use discovered schemas.")
 }

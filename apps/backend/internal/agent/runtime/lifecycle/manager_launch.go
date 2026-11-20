@@ -1499,14 +1499,14 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		env[providerKeyEnvVar] = providerKey
 	}
 
-	pluginRuntimeOptions, pluginRuntimeErr := m.resolveManagedRuntimeCommandOptions(ctx, rt.Name(), agentConfig)
-	if pluginRuntimeErr != nil {
-		pluginRuntimeOptions = agents.CommandOptions{}
-	}
 	if err := validateOfflineBudgetMetadata(metadata); err != nil {
 		return nil, nil, nil, err
 	}
 
+	pluginRuntimeOptions, pluginRuntimeErr := m.resolveManagedRuntimeCommandOptions(ctx, rt.Name(), agentConfig)
+	if pluginRuntimeErr != nil {
+		pluginRuntimeOptions = agents.CommandOptions{}
+	}
 	execReq := &ExecutorCreateRequest{
 		InstanceID:                       executionID,
 		IsPassthrough:                    reqWithWorktree.IsPassthrough,

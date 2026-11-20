@@ -845,12 +845,15 @@ func (m *Manager) stopReaperOnce() {
 }
 
 // warnBudgetExceedsReapers logs when the offline budget cannot elapse before
-// the unowned or idle reaper ends the instance.
+// the unowned or idle reaper ends the instance. The unowned reaper runs only
+// when agent survival is enabled, so the unowned check is gated on it.
 func (m *Manager) warnBudgetExceedsReapers(id string, budget time.Duration) {
-	unowned, _ := ownershipperiod.Resolve(m.config.UnownedPeriod, m.config.IdleTimeout)
-	if budget >= unowned {
-		m.logger.Warn("offline budget is not shorter than the unowned period; the instance may be reaped first",
-			zap.String("instance_id", id), zap.Duration("offline_budget", budget), zap.Duration("unowned_period", unowned))
+	if m.config.AgentSurvivalEnabled {
+		unowned, _ := ownershipperiod.Resolve(m.config.UnownedPeriod, m.config.IdleTimeout)
+		if budget >= unowned {
+			m.logger.Warn("offline budget is not shorter than the unowned period; the instance may be reaped first",
+				zap.String("instance_id", id), zap.Duration("offline_budget", budget), zap.Duration("unowned_period", unowned))
+		}
 	}
 	if m.config.IdleTimeout > 0 && budget >= m.config.IdleTimeout {
 		m.logger.Warn("offline budget is not shorter than the idle timeout; the instance may be reaped first",
