@@ -51,6 +51,7 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 			event.Text,
 			event.CanonicalMessageAppend,
 			false,
+			decodeCanonicalConversationReceipt(event.CanonicalConversationReceipt),
 		)
 		return
 	}
@@ -96,6 +97,7 @@ func (m *Manager) publishStreamEvidence(execution *AgentExecution, event agentct
 		event.Text = event.ReasoningText
 	}
 	event.CanonicalProjection = false
+	event.CanonicalConversationReceipt = nil
 	event.CanonicalMessageID = ""
 	event.CanonicalMessageAppend = false
 	m.eventPublisher.PublishAgentStreamEvent(execution, event)
@@ -119,6 +121,7 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 			event.ReasoningText,
 			event.CanonicalMessageAppend,
 			false,
+			decodeCanonicalConversationReceipt(event.CanonicalConversationReceipt),
 		)
 		return
 	}

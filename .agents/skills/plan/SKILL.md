@@ -70,6 +70,10 @@ Identify:
 - Existing tests and end-to-end patterns.
 - The dependency order for implementation.
 
+For scheduling, background delivery, or task/session lifecycle changes, use the
+[lifecycle evidence checklist](../tdd/references/lifecycle-evidence.md). Keep
+its scenario mapping in the current work order's results.
+
 Use `python3 scripts/list-docs.py decisions --text <capability-term> --format paths`
 to locate relevant decisions. Stop when the requirements, system design, ADRs,
 and code disagree on a material boundary.

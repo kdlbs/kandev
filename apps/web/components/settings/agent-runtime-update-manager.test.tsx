@@ -379,3 +379,100 @@ describe("AgentRuntimeUpdateManager individual entry review", () => {
     expect(updateAgentMock).not.toHaveBeenCalled();
   });
 });
+
+const OMP_AGENT = "omp-acp";
+const OMP_SOURCE = "@oh-my-pi/pi-coding-agent";
+const OMP_ROW = `runtime-manager-row-${OMP_AGENT}`;
+const NATIVE_REASONS = [
+  "check_failed",
+  "unsupported",
+  "unrecognized_output",
+  "timeout",
+  "output_limit",
+  "not_installed",
+  "runtime_mismatch",
+  "cancelled",
+  "unavailable",
+] as const;
+
+function nativeStatus(overrides: Partial<AgentUpdateStatus> = {}): AgentUpdateStatus {
+  return status({
+    agent_name: OMP_AGENT,
+    display_name: "omp",
+    runtime_id: OMP_AGENT,
+    owner: "external",
+    mechanism: "native",
+    management: "manual",
+    update_mode: "self_update",
+    package: OMP_SOURCE,
+    source: OMP_SOURCE,
+    auto_update_supported: false,
+    effective_version: "18.13.3",
+    current_version: "18.13.3",
+    check_source: "native",
+    ...overrides,
+  });
+}
+
+function renderNativeRow(row: AgentUpdateStatus): string {
+  render(<Harness statuses={[row]} onPreview={() => Promise.reject(new Error("unused"))} />);
+  const text = screen.getByTestId(OMP_ROW).textContent ?? "";
+  cleanup();
+  return text;
+}
+
+// @covers AC-AGENTS-RUNTIME-NATIVE-CHECK-002.4, AC-AGENTS-RUNTIME-NATIVE-CHECK-001.6
+describe("AgentRuntimeUpdateManager native update check rows", () => {
+  it("shows the native latest version and the reported channel", () => {
+    render(
+      <Harness
+        statuses={[
+          nativeStatus({
+            check_state: "update_available",
+            latest_version: "18.22.0-canary.3",
+            update_channel: "canary",
+          }),
+        ]}
+        onPreview={() => Promise.reject(new Error("unused"))}
+      />,
+    );
+    expect(screen.getByTestId(OMP_ROW).textContent).toContain("18.13.3 → 18.22.0-canary.3");
+    expect(screen.getByTestId("runtime-update-channel-omp-acp").textContent).toContain("canary");
+  });
+
+  it("shows the check-reported installed version when the runtime has not reported one", () => {
+    const text = renderNativeRow(
+      nativeStatus({
+        effective_version: "",
+        current_version: "18.13.3",
+        check_state: "update_available",
+        latest_version: "18.22.0-canary.3",
+      }),
+    );
+    expect(text).toContain("18.13.3 → 18.22.0-canary.3");
+  });
+
+  it("omits the channel when the check does not report one", () => {
+    render(
+      <Harness
+        statuses={[nativeStatus({ check_state: "up_to_date", latest_version: undefined })]}
+        onPreview={() => Promise.reject(new Error("unused"))}
+      />,
+    );
+    expect(screen.queryByTestId("runtime-update-channel-omp-acp")).toBeNull();
+    expect(screen.getByTestId(OMP_ROW).textContent).toContain("Up to date.");
+  });
+
+  it("gives every check reason its own description and falls back for an unknown reason", () => {
+    const unknown = { check_state: "unknown" as const, latest_version: undefined };
+    const fallback = renderNativeRow(
+      nativeStatus({ ...unknown, check_reason: "future_reason" as never }),
+    );
+    expect(fallback).toContain("Latest version could not be checked.");
+    const descriptions = NATIVE_REASONS.map((reason) =>
+      renderNativeRow(nativeStatus({ ...unknown, check_reason: reason })),
+    );
+    expect(new Set(descriptions).size).toBe(NATIVE_REASONS.length);
+    for (const description of descriptions) expect(description).not.toBe(fallback);
+  });
+});

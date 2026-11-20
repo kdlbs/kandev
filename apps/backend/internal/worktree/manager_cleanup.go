@@ -405,6 +405,12 @@ func (m *Manager) finalizeRemovedWorktree(ctx context.Context, wt *Worktree) err
 		if err := m.ReleaseWorktreeReference(ctx, wt); err != nil {
 			return fmt.Errorf("release worktree reference %s: %w", wt.ID, err)
 		}
+	} else if m.store != nil && wt.ID != "" {
+		// A retained environment can lose its last bound session to a
+		// replacement. Its inventory row is still keyed by worktree ID.
+		if err := m.markWorktreeInventoryDeleted(ctx, wt); err != nil {
+			return fmt.Errorf("mark removed worktree %s deleted: %w", wt.ID, err)
+		}
 	}
 
 	// Every session alias of the removed physical worktree becomes unavailable.
@@ -450,6 +456,18 @@ func (m *Manager) ReleaseWorktreeReference(ctx context.Context, wt *Worktree) er
 	if wt == nil || wt.SessionID == "" {
 		return fmt.Errorf("session ID is required to release worktree reference")
 	}
+	if err := m.markWorktreeInventoryDeleted(ctx, wt); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
+	m.mu.Unlock()
+	return nil
+}
+
+// markWorktreeInventoryDeleted changes only the inventory row's status, keyed
+// by worktree ID, and keeps the latest branch policy and recovery state.
+func (m *Manager) markWorktreeInventoryDeleted(ctx context.Context, wt *Worktree) error {
 	if m.store != nil && wt.ID != "" {
 		current, err := m.store.GetWorktreeByID(ctx, wt.ID)
 		if err != nil && !errors.Is(err, ErrWorktreeNotFound) {
@@ -473,9 +491,6 @@ func (m *Manager) ReleaseWorktreeReference(ctx context.Context, wt *Worktree) er
 			return err
 		}
 	}
-	m.mu.Lock()
-	delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
-	m.mu.Unlock()
 	return nil
 }
 

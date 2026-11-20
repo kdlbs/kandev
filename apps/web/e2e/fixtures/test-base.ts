@@ -456,7 +456,10 @@ export const test = backendFixture.extend<
       });
     });
     const context = await browser.newContext({
-      ...(testInfo.project.name === "mobile-chrome" ? devices["Pixel 5"] : {}),
+      ...(testInfo.project.name === "mobile-chrome" ||
+      testInfo.project.name === "mobile-first-profile-capability"
+        ? devices["Pixel 5"]
+        : {}),
       baseURL: backend.frontendUrl,
     });
     const page = await context.newPage();

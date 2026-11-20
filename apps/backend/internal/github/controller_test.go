@@ -2477,6 +2477,34 @@ func TestHandleListAccessibleRepos_OK(t *testing.T) {
 	}
 }
 
+func TestHandleListScopeEditorRepos_OK(t *testing.T) {
+	sc := &listAccessibleReposClient{repos: []GitHubRepo{
+		{FullName: "acme/addable", Owner: "acme", Name: "addable", DefaultBranch: "main"},
+	}}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/github/workspace-settings/repositories?workspace_id=ws-1&q=acme&limit=10&refresh=true",
+		nil,
+	)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Repos []GitHubRepo `json:"repos"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Repos) != 1 || body.Repos[0].FullName != "acme/addable" {
+		t.Fatalf("scope-editor repositories = %+v, want acme/addable", body.Repos)
+	}
+}
+
 func TestHandleListAccessibleRepos_503_WhenUnavailable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log := newControllerTestLogger()

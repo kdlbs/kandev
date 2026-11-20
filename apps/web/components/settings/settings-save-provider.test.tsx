@@ -374,6 +374,7 @@ describe("SettingsSaveProvider", () => {
 
 describe("SettingsSaveProvider save state", () => {
   it("keeps a cancelled save pending without reporting an error", async () => {
+    const laterSave = vi.fn();
     render(
       <SettingsSaveProvider>
         <DraftContributor
@@ -382,6 +383,7 @@ describe("SettingsSaveProvider save state", () => {
             throw new SettingsSaveCancelledError();
           }}
         />
+        <DraftContributor id="later" onSave={laterSave} />
       </SettingsSaveProvider>,
     );
 
@@ -389,6 +391,7 @@ describe("SettingsSaveProvider save state", () => {
 
     expect(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL })).toBeTruthy();
     expect(screen.queryByText("Couldn't save")).toBeNull();
+    expect(laterSave).not.toHaveBeenCalled();
   });
 
   it("keeps a toggle dirty when it returns to the old baseline during an in-flight save", async () => {

@@ -13,6 +13,7 @@ import type { RepoFilter } from "@/lib/types/github";
 
 type GitHubPRConfigProps = {
   config: Record<string, unknown>;
+  workspaceId: string;
   onUpdate: (config: Record<string, unknown>) => void;
 };
 
@@ -26,7 +27,7 @@ const PR_EVENTS = [
   },
 ] as const;
 
-export function GitHubPRConfig({ config, onUpdate }: GitHubPRConfigProps) {
+export function GitHubPRConfig({ config, workspaceId, onUpdate }: GitHubPRConfigProps) {
   const { t } = useTranslation();
   const events = (config.events as string[]) ?? [];
   const repos = (config.repos as RepoFilter[]) ?? [];
@@ -70,6 +71,7 @@ export function GitHubPRConfig({ config, onUpdate }: GitHubPRConfigProps) {
       <RepoFilterSelector
         allRepos={allRepos}
         selectedRepos={repos}
+        workspaceId={workspaceId}
         onAllReposChange={(checked) => {
           onUpdate({ ...config, all_repos: checked, repos: checked ? [] : repos });
         }}

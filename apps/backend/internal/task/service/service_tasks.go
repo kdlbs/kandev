@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/steptelemetry"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/completion"
@@ -104,7 +105,7 @@ type pendingTaskTitleSetter interface {
 
 func isPriorityOnlyTaskUpdate(req *UpdateTaskRequest) bool {
 	return req != nil &&
-		req.Priority != nil &&
+		req.Priority != nil && req.ExecutionGrade == nil &&
 		req.Title == nil &&
 		req.Description == nil &&
 		req.State == nil &&
@@ -128,6 +129,7 @@ type taskStopTarget struct {
 
 type taskEnvironmentCleanup struct {
 	deferEnvironment                bool
+	deferInUseWorktrees             bool
 	retentionInventoryCaptured      bool
 	allowUnverifiedWorkspaceChanges bool
 	workspaceCleanup                models.WorkspaceCleanupMode
@@ -365,6 +367,11 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	// MCP create_task path so UI- and agent-created subtasks behave identically.
 	if err := s.inheritParentRepositories(ctx, req); err != nil {
 		return nil, err
+	}
+	if req.ValidateInheritedWorkspaceRepositorySelection {
+		if err := s.ValidateInheritedWorkspaceRepositorySelection(ctx, req.ParentID, req.Repositories); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.prepareProjectRepositorySources(ctx, req); err != nil {
 		return nil, err
@@ -920,6 +927,9 @@ func (s *Service) inheritParentProject(ctx context.Context, req *CreateTaskReque
 
 // validateCreateTaskRequest validates constraints for task creation.
 func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
+	if err := sessioncapacity.ValidateGrade(req.ExecutionGrade); err != nil {
+		return err
+	}
 	if err := validateTaskTitle(req.Title); err != nil {
 		return err
 	}
@@ -1125,6 +1135,7 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		Description:            req.Description,
 		State:                  state,
 		Priority:               priority,
+		ExecutionGrade:         req.ExecutionGrade,
 		Position:               req.Position,
 		Metadata:               metadata,
 		IsEphemeral:            req.IsEphemeral,
@@ -1284,11 +1295,12 @@ func buildResolvedTaskRepositoryRow(repositoryID, baseBranch string, index int, 
 		return nil, err
 	}
 	row := &models.TaskRepository{
-		RepositoryID:   repositoryID,
-		BaseBranch:     baseBranch,
-		CheckoutBranch: repoInput.CheckoutBranch,
-		Position:       index,
-		Metadata:       metadata,
+		RepositoryID:          repositoryID,
+		WorkspaceRelativePath: repoInput.WorkspaceRelativePath,
+		BaseBranch:            baseBranch,
+		CheckoutBranch:        repoInput.CheckoutBranch,
+		Position:              index,
+		Metadata:              metadata,
 	}
 	if policy != nil {
 		row.BranchPolicyID = policy.ID
@@ -1380,6 +1392,9 @@ func applyBranchPolicyBaseBranch(
 // buildTaskRepositoryMetadata assembles the row's metadata blob.
 func buildTaskRepositoryMetadata(repoInput TaskRepositoryInput) (map[string]interface{}, error) {
 	metadata := make(map[string]interface{})
+	if repoInput.ReuseOnlyCheckoutBranch {
+		metadata[models.TaskRepositoryInheritedCheckoutReuseOnlyMetadataKey] = true
+	}
 	if err := models.PutRepositoryCheckoutOptions(metadata, repoInput.CheckoutOptions); err != nil {
 		return nil, err
 	}
@@ -2221,6 +2236,11 @@ func (s *Service) validateTaskUpdateInput(ctx context.Context, id string, req *U
 	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return err
 	}
+	if req.ExecutionGrade != nil {
+		if err := sessioncapacity.ValidateGrade(*req.ExecutionGrade); err != nil {
+			return err
+		}
+	}
 	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
 		return err
 	}
@@ -2274,7 +2294,7 @@ func (s *Service) writeTaskUpdateFields(
 	admission *completion.Admission,
 ) (*models.TaskFieldUpdateResult, error) {
 	update := models.TaskFieldUpdate{
-		Title: req.Title, Description: req.Description, Priority: req.Priority,
+		Title: req.Title, Description: req.Description, Priority: req.Priority, ExecutionGrade: req.ExecutionGrade,
 		State: req.State, WorkflowStepID: req.WorkflowStepID, Position: req.Position,
 		ParentID: req.ParentID, Metadata: req.Metadata,
 	}
@@ -3218,16 +3238,6 @@ func (s *Service) validateTaskDeleteWorktreeInventoryWithOptions(ctx context.Con
 	return newTaskDeleteDirtyWorktreeError(dirty)
 }
 
-func (s *Service) deleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
-	deleted, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, "", models.TaskResourceCleanupTriggerQuickChatExpire, DeleteTaskOptions{}, func(ctx context.Context, id string) (bool, error) {
-		return s.tasks.DeleteExpiredQuickChatTask(ctx, id, cutoff)
-	})
-	if errors.Is(err, taskrepo.ErrTaskNotFound) {
-		return false, nil
-	}
-	return deleted, err
-}
-
 func (s *Service) deleteTaskWithReasonAndDBDelete(
 	ctx context.Context,
 	id string,
@@ -4102,6 +4112,21 @@ func (s *Service) performTaskCleanup(
 	}
 
 	sessionIDs := cleanupSessionIDs(sessions, stopTargets)
+	errs = append(errs, s.cleanupExecutorRuntimeRows(ctx, taskID, sessionIDs, preserveExecutorRows)...)
+
+	// Cleanup quick-chat workspace directories for all tasks (not just ephemeral).
+	// Non-ephemeral office tasks also get quick-chat dirs allocated by manager_launch.go;
+	// both cases must be cleaned up to avoid a disk leak.
+	if cause := context.Cause(ctx); cause != nil {
+		return append(errs, cause)
+	}
+	errs = append(errs, s.cleanupQuickChatDirs(ctx, taskID, sessionIDs, preserveExecutorRows)...)
+
+	return errs
+}
+
+func (s *Service) cleanupExecutorRuntimeRows(ctx context.Context, taskID string, sessionIDs []string, preserveExecutorRows map[string]struct{}) []error {
+	var errs []error
 	for _, sessionID := range sessionIDs {
 		if _, preserve := preserveExecutorRows[sessionID]; preserve {
 			s.logger.Warn("preserving executor runtime row after failed stop",
@@ -4123,14 +4148,6 @@ func (s *Service) performTaskCleanup(
 			errs = append(errs, fmt.Errorf("delete executor runtime for session %s: %w", sessionID, err))
 		}
 	}
-
-	// Cleanup quick-chat workspace directories for all tasks (not just ephemeral).
-	// Non-ephemeral office tasks also get quick-chat dirs allocated by manager_launch.go;
-	// both cases must be cleaned up to avoid a disk leak.
-	if cause := context.Cause(ctx); cause != nil {
-		return append(errs, cause)
-	}
-	errs = append(errs, s.cleanupQuickChatDirs(ctx, taskID, sessionIDs, preserveExecutorRows)...)
 
 	return errs
 }
@@ -4250,7 +4267,7 @@ func (s *Service) cleanupDestructiveTaskResources(
 			zap.String("env_id", taskEnvironmentID(envCleanup.env)))
 	}
 	if !currentOwnership {
-		if envCleanup.allowUnverifiedWorkspaceChanges {
+		if envCleanup.allowUnverifiedWorkspaceChanges || envCleanup.deferInUseWorktrees {
 			errs = append(errs, errors.New("workspace ownership changed; cleanup deferred"))
 		}
 		return errs
@@ -4274,7 +4291,7 @@ func (s *Service) cleanupDestructiveTaskResources(
 	var referenceErrs []error
 	worktrees, referenceErrs = s.filterSharedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees)
 	errs = append(errs, referenceErrs...)
-	if envCleanup.allowUnverifiedWorkspaceChanges && len(worktrees) != originalWorktreeCount {
+	if (envCleanup.allowUnverifiedWorkspaceChanges || envCleanup.deferInUseWorktrees) && len(worktrees) != originalWorktreeCount {
 		errs = append(errs, errors.New("workspace remains in use; cleanup deferred"))
 	}
 	if len(worktrees) == 0 {
@@ -4482,11 +4499,29 @@ func (s *Service) filterOwnedWorktreesForTaskCleanup(
 			continue
 		}
 		sess, sessionLoaded := bySession[wt.SessionID]
-		if s.taskOwnsSessionWorktree(ctx, taskID, wt.SessionID, sess, sessionLoaded, ownedEnv, skipOwnedEnvironment, envCache) {
+		if retainedEnvironmentWorktreeOwnedByTask(taskID, wt, sess, ownedEnv) ||
+			s.taskOwnsSessionWorktree(ctx, taskID, wt.SessionID, sess, sessionLoaded, ownedEnv, skipOwnedEnvironment, envCache) {
 			filtered = append(filtered, wt)
 		}
 	}
 	return filtered
+}
+
+// retainedEnvironmentWorktreeOwnedByTask uses the ownership captured with the
+// cleanup inventory. That inventory lists only checkouts whose environment
+// belonged to taskID, and the active owner is captured separately as
+// ownedEnv, so any other captured environment is one of the task's retired
+// environments. Retired environments are never transferred or inherited, and
+// their rows cascade with the task, so a post-delete lookup cannot prove what
+// the capture already did.
+func retainedEnvironmentWorktreeOwnedByTask(
+	taskID string, wt *worktree.Worktree, session *models.TaskSession, ownedEnv *models.TaskEnvironment,
+) bool {
+	if session == nil || wt.TaskID != taskID || wt.TaskEnvironmentID == "" ||
+		session.TaskEnvironmentID != wt.TaskEnvironmentID {
+		return false
+	}
+	return ownedEnv == nil || wt.TaskEnvironmentID != ownedEnv.ID
 }
 
 func (s *Service) taskOwnsSessionWorktree(

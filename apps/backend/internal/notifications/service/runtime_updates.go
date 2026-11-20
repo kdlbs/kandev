@@ -25,6 +25,8 @@ func (s *Service) HandleAgentRuntimeUpdate(ctx context.Context, notice agents.Ru
 // HandleAgentRuntimeUpdates delivers available versions as one occurrence per
 // recipient and provider while retaining each runtime's durable delivery claim.
 func (s *Service) HandleAgentRuntimeUpdates(ctx context.Context, notices []agents.RuntimeUpdateNotice) {
+	ctx, finishFormatting := withFormatterBudget(ctx)
+	defer finishFormatting()
 	valid := uniqueAvailableRuntimeNotices(notices)
 	if len(valid) == 0 {
 		return
@@ -66,6 +68,8 @@ func uniqueAvailableRuntimeNotices(notices []agents.RuntimeUpdateNotice) []agent
 }
 
 func (s *Service) deliverRuntimeUpdateBatch(ctx context.Context, userID string, notices []agents.RuntimeUpdateNotice) {
+	ctx, finishFormatting := withFormatterBudget(ctx)
+	defer finishFormatting()
 	providerList, subscriptions, err := s.ListProviders(ctx, userID)
 	if err != nil {
 		s.logger.Error("failed to load notification providers", zap.Error(err))
@@ -75,6 +79,7 @@ func (s *Service) deliverRuntimeUpdateBatch(ctx context.Context, userID string, 
 		if !provider.Enabled || !containsEvent(subscriptions[provider.ID], EventSystemUpdateAvailable) {
 			continue
 		}
+		formatter := s.captureFormatter(ctx, userID, provider)
 		claimed := make([]agents.RuntimeUpdateNotice, 0, len(notices))
 		for _, notice := range notices {
 			inserted, err := s.repo.InsertDelivery(ctx, &models.Delivery{
@@ -93,6 +98,7 @@ func (s *Service) deliverRuntimeUpdateBatch(ctx context.Context, userID string, 
 			continue
 		}
 		message := runtimeUpdateBatchMessage(claimed)
+		message.formatter = formatter
 		if err := s.dispatchProvider(ctx, userID, provider, message); err != nil {
 			s.logger.Warn("runtime update notification delivery failed", zap.String("provider_id", provider.ID), zap.Error(err))
 			rollbackCtx := context.WithoutCancel(ctx)

@@ -37,3 +37,7 @@ func (e *WIPLimitError) Unwrap() error {
 func NewWIPLimitError(stepID string, limit, occupied int) error {
 	return &WIPLimitError{StepID: stepID, Limit: limit, Occupied: occupied}
 }
+
+// ErrWorkflowStepChanged reports that a step changed after the caller read it,
+// so a version-guarded write applied nothing.
+var ErrWorkflowStepChanged = errors.New("workflow step changed since it was read")

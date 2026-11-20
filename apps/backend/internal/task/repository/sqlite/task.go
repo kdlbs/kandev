@@ -74,6 +74,7 @@ var taskScanColumns = []taskScanColumn{
 	{name: "description"},
 	{name: "state"},
 	{name: "priority"},
+	{name: "execution_grade"},
 	{name: "position"},
 	{name: "wip_admitted"},
 	{name: "queued_for_step_id"},
@@ -445,9 +446,9 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		workflowAgentOverridesValue = workflowAgentOverrides
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO tasks (executor_actor_user_id, id, workspace_id, initial_workspace_layout, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workflowCreator(ctx), task.ID, task.WorkspaceID, task.InitialWorkspaceLayout, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
+		INSERT INTO tasks (executor_actor_user_id, id, workspace_id, initial_workspace_layout, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, state, priority, execution_grade, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workflowCreator(ctx), task.ID, task.WorkspaceID, task.InitialWorkspaceLayout, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.State, task.Priority, task.ExecutionGrade, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
 	if err != nil {
 		if isExternalIDUniqueViolation(err) {
 			return "", fmt.Errorf("%w: %w", ErrExternalIDConflict, err)
@@ -1351,7 +1352,7 @@ func (r *Repository) buildTaskUpdateQuery(
 		}
 	}
 	updateQuery := fmt.Sprintf(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, execution_grade = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
 		WHERE id = ?
 	`, metadataExpr)
 	if models.IsAgentTitlePending(task.Metadata) {
@@ -1365,7 +1366,7 @@ func (r *Repository) buildTaskUpdateQuery(
 		updateQuery = fmt.Sprintf(`
 			UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?,
 				title = CASE WHEN %s THEN ? ELSE title END,
-				description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?,
+				description = ?, state = ?, priority = ?, execution_grade = ?, position = ?, wip_admitted = ?,
 				queued_for_step_id = ?, queued_at = ?,
 				metadata = %s,
 				parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
@@ -1416,15 +1417,19 @@ func (r *Repository) updateTaskTx(
 		return "", 0, err
 	}
 	var currentState v1.TaskState
-	stateQuery := taskStateSelectQuery
+	var storedExecutionGrade string
+	stateQuery := `SELECT state, execution_grade FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		stateQuery += forUpdateClause
 	}
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(stateQuery), task.ID).Scan(&currentState); err != nil {
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(stateQuery), task.ID).Scan(&currentState, &storedExecutionGrade); err != nil {
 		return "", 0, err
 	}
 	if err := r.admitCompletionTx(ctx, tx, admission, task); err != nil {
 		return "", 0, err
+	}
+	if supplied, _ := ctx.Value(taskFieldExecutionGradeSuppliedKey{}).(bool); !supplied {
+		task.ExecutionGrade = storedExecutionGrade
 	}
 	if err := r.guardTaskCompletionTransitionTx(ctx, tx, task.ID, currentState, task.State,
 		fromWorkflowID, fromStepID, task.WorkflowID, task.WorkflowStepID); err != nil {
@@ -1453,7 +1458,7 @@ func (r *Repository) updateTaskTx(
 	if err != nil {
 		return "", 0, err
 	}
-	args := []interface{}{task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID}
+	args := []interface{}{task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.ExecutionGrade, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID}
 	if workflowChangeSource != nil {
 		updateQuery += ` AND workflow_id = ? AND workflow_step_id = ? AND updated_at = ?`
 		args = append(args, workflowChangeSource.WorkflowID, workflowChangeSource.StepID, workflowChangeSource.UpdatedAt)
@@ -3488,6 +3493,9 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	if err := r.lockTaskUpdateSteps(ctx, tx, task); err != nil {
 		return err
 	}
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT execution_grade FROM tasks WHERE id = ?`), task.ID).Scan(&task.ExecutionGrade); err != nil {
+		return err
+	}
 
 	// Always an arrival into targetStepID (the fallback promotion path used
 	// when the atomic PromoteQueuedTaskIfWorkflowStepHasCapacity is
@@ -3664,11 +3672,11 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 		return false, err
 	}
 	var currentState v1.TaskState
-	stateQuery := taskStateSelectQuery
+	stateQuery := `SELECT state, execution_grade FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		stateQuery += forUpdateClause
 	}
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(stateQuery), task.ID).Scan(&currentState); err != nil {
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(stateQuery), task.ID).Scan(&currentState, &task.ExecutionGrade); err != nil {
 		return false, err
 	}
 	if err := r.guardTaskCompletionTransitionTx(ctx, tx, task.ID, currentState, task.State,
@@ -4896,7 +4904,7 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	var externalIDSettledAt sql.NullTime
 	err := row.Scan(
 		&task.ID, &task.WorkspaceID, &task.InitialWorkspaceLayout, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
-		&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
+		&task.Title, &task.Description, &task.State, &task.Priority, &task.ExecutionGrade, &task.Position,
 		&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 		&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 		&task.CreatedAt, &task.UpdatedAt,
@@ -4949,7 +4957,7 @@ func (r *Repository) scanTaskRows(rows *sql.Rows, includeEntryIdentity bool) ([]
 		var externalIDSettledAt sql.NullTime
 		destinations := []interface{}{
 			&task.ID, &task.WorkspaceID, &task.InitialWorkspaceLayout, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
-			&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
+			&task.Title, &task.Description, &task.State, &task.Priority, &task.ExecutionGrade, &task.Position,
 			&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 			&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 			&task.CreatedAt, &task.UpdatedAt,
@@ -5663,157 +5671,6 @@ func (r *Repository) ListArchivedTasksWithActiveSessions(ctx context.Context) ([
 		return nil, err
 	}
 	return ids, nil
-}
-
-// ListExpiredQuickChatTasks returns quick-chat tasks whose last task/session
-// activity is older than cutoff. Active sessions are excluded so in-use chats
-// are never deleted by the idle sweeper.
-func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
-	drv := r.ro.DriverName()
-	sessionActivity := "COALESCE(MAX(ts.updated_at), t.updated_at)"
-	lastActivity := dialect.GreatestTimestamp(drv, "t.updated_at", sessionActivity)
-	query := fmt.Sprintf(`
-		WITH candidates AS (
-			SELECT t.id, %s AS last_activity
-			FROM tasks t
-			LEFT JOIN task_sessions ts ON ts.task_id = t.id
-			WHERE t.is_ephemeral = 1
-				AND COALESCE(t.workflow_id, '') = ''
-				AND COALESCE(t.origin, '') NOT IN (?, ?)
-				AND %s
-				AND t.archived_at IS NULL
-				AND NOT EXISTS (
-					SELECT 1 FROM task_sessions active
-					WHERE active.task_id = t.id
-						AND active.state IN (?, ?)
-				)
-			GROUP BY t.id, t.updated_at
-			HAVING %s < ?
-		)
-		SELECT %s
-		FROM tasks t
-		JOIN candidates c ON c.id = t.id
-		ORDER BY c.last_activity ASC
-	`,
-		lastActivity,
-		excludeConfigModePredicate(drv, "t.metadata"),
-		lastActivity,
-		taskSelectColumns("t"),
-	)
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
-		models.TaskOriginAutomationRun,
-		models.TaskOriginCoordinator,
-		models.TaskSessionStateRunning,
-		models.TaskSessionStateIdle,
-		cutoff,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	return r.scanTasks(rows)
-}
-
-// DeleteExpiredQuickChatTask deletes id only when it still matches the expired
-// quick-chat predicate at delete time.
-func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := r.managedDeletionBarrierTx(ctx, tx, id); err != nil {
-		return false, err
-	}
-	if err := r.lockTaskRowInTx(ctx, tx, id); err != nil {
-		if errors.Is(err, ErrTaskNotFound) {
-			return false, nil
-		}
-		return false, err
-	}
-
-	drv := r.db.DriverName()
-	sessionActivity := "COALESCE(MAX(ts.updated_at), t.updated_at)"
-	lastActivity := dialect.GreatestTimestamp(drv, "t.updated_at", sessionActivity)
-	candidate := fmt.Sprintf(`
-		SELECT t.id, %s AS last_activity
-		FROM tasks t
-		LEFT JOIN task_sessions ts ON ts.task_id = t.id
-		WHERE t.id = ?
-			AND t.is_ephemeral = 1
-			AND COALESCE(t.workflow_id, '') = ''
-			AND COALESCE(t.origin, '') NOT IN (?, ?)
-			AND %s
-			AND t.archived_at IS NULL
-			AND NOT EXISTS (
-				SELECT 1 FROM task_sessions active
-				WHERE active.task_id = t.id
-					AND active.state IN (?, ?)
-			)
-		GROUP BY t.id, t.updated_at
-		HAVING %s < ?
-	`,
-		lastActivity,
-		excludeConfigModePredicate(drv, "t.metadata"),
-		lastActivity,
-	)
-	candidateArgs := []any{
-		id,
-		models.TaskOriginAutomationRun,
-		models.TaskOriginCoordinator,
-		models.TaskSessionStateRunning,
-		models.TaskSessionStateIdle,
-		cutoff,
-	}
-	var eligible bool
-	if err := tx.GetContext(ctx, &eligible, r.db.Rebind(
-		"WITH candidate AS ("+candidate+") SELECT EXISTS (SELECT 1 FROM candidate)",
-	), candidateArgs...); err != nil {
-		return false, err
-	}
-	if !eligible {
-		if err := tx.Commit(); err != nil {
-			return false, err
-		}
-		return false, nil
-	}
-
-	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
-	if err != nil {
-		return false, err
-	}
-	identities, err := r.agentDeliverySessionIdentitiesInTx(ctx, tx, id)
-	if err != nil {
-		return false, err
-	}
-	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessions...); err != nil {
-		return false, err
-	}
-	if err := r.lockAgentDeliverySessionIdentitiesTx(ctx, tx, identities); err != nil {
-		return false, err
-	}
-	query := "WITH candidate AS (" + candidate + ") DELETE FROM tasks WHERE id = ? AND EXISTS (SELECT 1 FROM candidate)"
-	candidateArgs = append(candidateArgs, id)
-	result, err := tx.ExecContext(ctx, r.db.Rebind(query), candidateArgs...)
-	if err != nil {
-		return false, err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if rows > 0 {
-		if err := r.insertAgentDeliveryRetirementJobsTx(ctx, tx, identities); err != nil {
-			return false, err
-		}
-		if err := r.purgePromptSequencesForSessionsTx(ctx, tx, sessions); err != nil {
-			return false, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return rows > 0, nil
 }
 
 // ListCoordinatorOriginTasks returns every task with origin "coordinator"

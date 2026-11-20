@@ -46,6 +46,14 @@ const (
 // String implements fmt.Stringer.
 func (l RunEventLevel) String() string { return string(l) }
 
+// QueuedWorkflowStepPayloadKey records, in a run payload, the task's step at
+// queue time for a task-scoped run queued without workflow_step_id. It is
+// deliberately not workflow_step_id: that key opts a run into step-change
+// staleness cancellation, which runs without it are exempt from. Office's
+// exclude_author_provider reads it to recognize work-stage runs whatever path
+// queued them.
+const QueuedWorkflowStepPayloadKey = "queued_workflow_step_id"
+
 // RunEventType is the kind of a RunEvent. Open set (init, step,
 // adapter.invoke, complete, error, runtime.denied, runtime.action, …).
 // Typed for documentation, not for exhaustiveness.

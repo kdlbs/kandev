@@ -1,8 +1,8 @@
 ---
-status: draft
+status: active
 system: platform
 created: 2026-10-27
-updated: 2026-11-09
+updated: 2026-11-16
 owners:
   - kandev
 ---
@@ -48,7 +48,7 @@ It does not change cleanup policy or infer why disk usage grew.
 
 #### Acceptance criteria
 
-- **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002.1:** When owner-verified status reports a storage warning or storage pressure, connected chat shall show that observation without another journal event or prompt.
+- **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002.1:** When owner-verified status reports a storage warning or storage pressure, connected chat shall show that observation without another journal event or prompt, unless the user dismissed the composer notice under requirement 004.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002.2:** Current pressure, recovered capacity, and unavailable observations shall remain distinct. After 90 seconds without a fresh observation, the UI shall label measurements as last reported.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002.3:** A pressure observation shall not establish process termination, prompt failure, turn completion, or permission to repeat an instruction.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002.4:** Fresh recovery shall clear only the corresponding live condition, subject to its clearance threshold. It shall not resolve historical failures, delivery uncertainty, or other recovery restrictions.
@@ -83,6 +83,16 @@ It does not change cleanup policy or infer why disk usage grew.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003.9:** The 90% advisory shall show usage and available capacity when known. It shall not claim that work paused or offer Resume without a separate recovery cause.
 - **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003.10:** Each visible chat composer shall show at most one advisory row with vertical padding. Extra guidance and measurements shall remain available through explicit disclosure.
 
+### REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004: Composer notice dismissal
+
+Users shall be able to dismiss the Storage row like the merged PR notice.
+
+- **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004.1:** Each visible composer Storage notice shall expose a labelled Dismiss control. Activating it shall hide the row and its expanded details immediately.
+- **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004.2:** Dismissal shall apply to the current task within the browser tab session. It shall survive reload, task switching, and later observations, including pressure changes. Other tasks shall remain independent. A fresh tab session shall start without that dismissal.
+- **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004.3:** Dismissal shall change presentation only. Monitoring, stored health, historical failure cards, recovery restrictions, and composer drafts shall remain unchanged.
+- **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004.4:** Desktop and phone shall expose the same dismissal action. Keyboard users shall be able to activate it. Phone and coarse-pointer hit targets shall measure at least 44px in both dimensions, without clipping or document overflow.
+- **AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004.5:** If browser storage is unavailable, dismissal shall still hide the mounted notice without an error. Persistence across remount or reload is then not guaranteed.
+
 ## Out of scope
 
 - Changes to journal quotas, disk reserves, acknowledgment, retention, or cancellation policy.
@@ -95,3 +105,5 @@ It does not change cleanup policy or infer why disk usage grew.
 - [System design](../system-design/delivery-storage-diagnostics.md).
 - [Implementation package](../../../plans/delivery-storage-diagnostics/plan.md).
 - [Post-turn recovery fix package](../../../plans/delivery-storage-recovery/plan.md).
+
+- [Composer notice dismissal package](../../../plans/storage-notice-dismissal/plan.md).

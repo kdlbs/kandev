@@ -232,6 +232,7 @@ export type UserSettings = {
   lsp_auto_start_languages?: string[];
   lsp_auto_install_languages?: string[];
   lsp_server_configs?: Record<string, Record<string, unknown>>;
+  markdown_preview_by_default?: boolean;
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
   sidebar_views_by_workspace?: Record<string, SidebarWorkspaceStateApi>;
@@ -321,6 +322,7 @@ export type UserSettingsUpdatePayload = {
   lsp_auto_start_languages?: string[];
   lsp_auto_install_languages?: string[];
   lsp_server_configs?: Record<string, Record<string, unknown>>;
+  markdown_preview_by_default?: boolean;
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
   sidebar_layout_state?: {

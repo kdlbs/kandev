@@ -452,6 +452,9 @@ func classifyGitFallbackReason(cmdErr error, cmdOutput string, ctxErr error) str
 	if errors.Is(ctxErr, context.DeadlineExceeded) || errors.Is(cmdErr, context.DeadlineExceeded) {
 		return "timeout"
 	}
+	if errors.Is(ctxErr, context.Canceled) || errors.Is(cmdErr, context.Canceled) {
+		return "canceled"
+	}
 
 	if containsAuthFailure(strings.ToLower(cmdOutput)) {
 		return "non_interactive_auth_failed"
@@ -514,7 +517,13 @@ func (m *Manager) pullBaseBranchWithPolicy(
 	// got one (70s-lock-held trace under contention).
 	fetchArgs := []string{"fetch", gitNoTags, "origin"}
 	if localBranch != "" {
-		fetchArgs = append(fetchArgs, localBranch)
+		if isRemoteRef {
+			// Update the exact tracking ref even when remote.origin.fetch is narrow.
+			refspec := "+refs/heads/" + localBranch + ":refs/remotes/origin/" + localBranch
+			fetchArgs = append(fetchArgs, refspec)
+		} else {
+			fetchArgs = append(fetchArgs, localBranch)
+		}
 	}
 	fetchResult := m.runRefreshGitWithLockRetry(
 		ctx, "fetch", repoPath, baseBranch, m.fetchTimeout, fetchArgs...,
@@ -553,6 +562,9 @@ func (m *Manager) handleBaseFetchFailure(
 	onProgress SyncProgressCallback,
 ) (string, string, error) {
 	reason := classifyGitFallbackReason(result.runErr, string(result.output), result.execCtxErr)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		reason = syncContextFailureReason(ctxErr)
+	}
 	m.logRefreshDiagnostic(
 		"fetch", repoPath, baseBranch, reason, result.output,
 		result.runErr, result.execCtxErr, result.attempts,
@@ -570,6 +582,8 @@ func (m *Manager) handleBaseFetchFailure(
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			reason = syncContextFailureReason(ctxErr)
 			failureCause = ctxErr
+		} else if reason == gitFallbackReasonMissingRemoteRef && result.execCtxErr == nil {
+			failureCause = fmt.Errorf("%w: %w", failureCause, ErrRemoteRefMissing)
 		}
 		return "", "", m.failRequiredSync(
 			stepName, baseBranch, onProgress, reason,
@@ -587,6 +601,8 @@ func (m *Manager) handleBaseFetchFailure(
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		reason = syncContextFailureReason(ctxErr)
 		failureCause = ctxErr
+	} else if reason == gitFallbackReasonMissingRemoteRef && result.execCtxErr == nil {
+		failureCause = fmt.Errorf("%w: %w", failureCause, ErrRemoteRefMissing)
 	}
 	return "", "", m.failRequiredSync(
 		stepName, baseBranch, onProgress, reason,

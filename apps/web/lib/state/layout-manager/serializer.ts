@@ -8,7 +8,7 @@ import type {
   LayoutNode,
   LayoutOrientation,
 } from "./types";
-import { computeColumnWidths, computeGroupHeights } from "./sizing";
+import { computeGroupHeights, computeRootAxisSizes } from "./sizing";
 import {
   SIDEBAR_LOCK,
   DEV_SERVER_PANEL_ID,
@@ -113,31 +113,35 @@ function serializeTreeNode(
   return { type: "branch", data: children, size: nodeSize };
 }
 
-/** Serialize a column, using tree if available, otherwise flat groups. */
+/**
+ * Serialize a root child, using tree if available, otherwise flat groups.
+ * @param axisSize       - the child's extent along the root split axis
+ * @param orthogonalSize - the extent across it, shared by the child's contents
+ */
 function serializeColumn(
   column: LayoutColumn,
-  width: number,
-  totalHeight: number,
+  axisSize: number,
+  orthogonalSize: number,
   ctx: SerializationCtx,
 ): SerializedGridNode {
   // Tree-based serialization (preserves nested splits)
   if (column.tree) {
     if (column.tree.type === "leaf") {
-      const leaf = serializeGroup(column.tree.group, column.id, totalHeight, ctx);
-      return { ...leaf, size: width };
+      const leaf = serializeGroup(column.tree.group, column.id, orthogonalSize, ctx);
+      return { ...leaf, size: axisSize };
     }
-    return serializeTreeNode(column.tree, width, totalHeight, column.id, ctx);
+    return serializeTreeNode(column.tree, axisSize, orthogonalSize, column.id, ctx);
   }
 
   // Flat groups fallback (presets, backward compat)
   const groups = column.groups;
   if (groups.length === 1) {
-    const leaf = serializeGroup(groups[0], column.id, totalHeight, ctx);
-    return { ...leaf, size: width };
+    const leaf = serializeGroup(groups[0], column.id, orthogonalSize, ctx);
+    return { ...leaf, size: axisSize };
   }
-  const heights = computeGroupHeights(groups, totalHeight);
-  const children = groups.map((g, i) => serializeGroup(g, column.id, heights[i], ctx));
-  return { type: "branch", data: children, size: width };
+  const extents = computeGroupHeights(groups, orthogonalSize);
+  const children = groups.map((g, i) => serializeGroup(g, column.id, extents[i], ctx));
+  return { type: "branch", data: children, size: axisSize };
 }
 
 function serializePanels(state: LayoutState): Record<
@@ -200,12 +204,18 @@ export function toSerializedDockview(
     ),
   };
   const rootOrientation = state.rootOrientation ?? "HORIZONTAL";
-  const widths = computeColumnWidths(state.columns, totalWidth, pinnedWidths);
+  const { sizes, orthogonal } = computeRootAxisSizes(
+    state.columns,
+    rootOrientation,
+    totalWidth,
+    totalHeight,
+    pinnedWidths,
+  );
 
   const root: SerializedBranchNode = {
     type: "branch",
-    data: state.columns.map((col, i) => serializeColumn(col, widths[i], totalHeight, ctx)),
-    size: totalHeight,
+    data: state.columns.map((col, i) => serializeColumn(col, sizes[i], orthogonal, ctx)),
+    size: orthogonal,
   };
 
   return {
@@ -346,7 +356,21 @@ function inferColumnMeta(
   return { columnId: `col-${index}`, isPinned: false };
 }
 
-function readRootOrientation(
+/** One environment has one manual/right target; other tool roots retain independent flexible weights. */
+export function normalizeRightColumnOwnership(columns: LayoutColumn[]): LayoutColumn[] {
+  const candidates = columns.filter((column) => column.id === "right");
+  if (candidates.length < 2) return columns;
+  // Retain the existing first-root width owner; extra tool roots are independently flexible.
+  const owner = candidates[0];
+  return columns.map((column) => {
+    if (column.id !== "right" || column === owner) return column;
+    const flexible = { ...column, id: column.groups[0].panels[0].id };
+    delete flexible.pinned;
+    return flexible;
+  });
+}
+
+export function readRootOrientation(
   root: { orientation?: unknown } | null | undefined,
   splitview: { orientation?: unknown } | null | undefined,
 ): LayoutOrientation {
@@ -369,6 +393,7 @@ export function fromDockviewApi(api: DockviewApi): LayoutState {
     return { columns: [] };
   }
 
+  const rootOrientation = readRootOrientation(root, sv);
   const columns: LayoutColumn[] = [];
   for (let i = 0; i < rootChildren.length; i++) {
     const child = rootChildren[i];
@@ -379,7 +404,8 @@ export function fromDockviewApi(api: DockviewApi): LayoutState {
 
     columns.push({
       id: columnId,
-      ...(isPinned ? { pinned: true } : {}),
+      // Pinning is a horizontal width policy; a vertical row's extent is a height.
+      ...(isPinned && rootOrientation === "HORIZONTAL" ? { pinned: true } : {}),
       width,
       groups: flatGroups,
       // Only store tree for columns with nested structure (branches)
@@ -387,7 +413,7 @@ export function fromDockviewApi(api: DockviewApi): LayoutState {
     });
   }
 
-  return { columns, rootOrientation: readRootOrientation(root, sv) };
+  return { columns: normalizeRightColumnOwnership(columns), rootOrientation };
 }
 
 // ─── Ephemeral Filtering ───────────────────────────────────────────────────
@@ -520,5 +546,5 @@ export function filterEphemeral(state: LayoutState): LayoutState {
     }
   }
 
-  return { columns };
+  return { ...state, columns };
 }

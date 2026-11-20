@@ -166,7 +166,7 @@ func (s *Service) startAutomaticPendingSession(ctx context.Context, task *models
 		TaskID: task.ID, SessionID: session.ID, Intent: IntentStartCreated,
 		AgentProfileID: session.AgentProfileID, Prompt: submission.Content,
 		PlanMode: submission.PlanMode, Attachments: submission.Attachments,
-		AutoStart: true, Automatic: true,
+		AutoStart: true, Origin: string(launchOriginAutomatic),
 	})
 	return err
 }
