@@ -57,8 +57,8 @@ function membershipContains(body: unknown, sessionId: string): boolean {
   });
 }
 
-/** Hold authentic post-delete membership, never fabricate its rows or primary. */
-export async function holdRemovalMembership(page: Page, taskId: string, removedId: string) {
+/** Hold authentic task membership, never fabricate its rows or primary. */
+async function holdMembership(page: Page, taskId: string, shouldHold: (body: unknown) => boolean) {
   let armed = false;
   let released = false;
   const gate = Promise.withResolvers<void>();
@@ -68,7 +68,7 @@ export async function holdRemovalMembership(page: Page, taskId: string, removedI
   const handle = async (route: import("@playwright/test").Route) => {
     const response = await route.fetch();
     const body: unknown = await response.json();
-    if (armed && !released && !membershipContains(body, removedId)) {
+    if (armed && !released && shouldHold(body)) {
       queued.resolve();
       await gate.promise;
     }
@@ -98,6 +98,16 @@ export async function holdRemovalMembership(page: Page, taskId: string, removedI
   };
 }
 
+export function holdRemovalMembership(page: Page, taskId: string, removedId: string) {
+  return holdMembership(page, taskId, (body) => !membershipContains(body, removedId));
+}
+
+export async function holdInitialMembership(page: Page, taskId: string) {
+  const gate = await holdMembership(page, taskId, () => true);
+  gate.arm();
+  return gate;
+}
+
 type SelectionSample = { sessionId: string | null; pinnedSessionId: string | null };
 type RemovalWindow = Window & {
   __KANDEV_E2E_STORE__?: StoreApi<AppState>;
@@ -125,6 +135,16 @@ export async function observeRemovalSelection(page: Page) {
       page.evaluate(() => {
         const bridge = window as RemovalWindow;
         return bridge.__KANDEV_E2E_REMOVAL_SELECTION__?.samples ?? [];
+      }),
+    snapshot: () =>
+      page.evaluate(() => {
+        const store = (window as RemovalWindow).__KANDEV_E2E_STORE__;
+        if (!store) throw new Error("E2E store bridge missing");
+        const state = store.getState();
+        return {
+          navigationRevision: state.taskRemoval.navigationRevision,
+          workflowRequest: state.workflowSessionFocus.request,
+        };
       }),
     stop: () =>
       page.evaluate(() => {

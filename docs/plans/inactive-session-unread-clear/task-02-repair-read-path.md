@@ -1757,3 +1757,144 @@ VITEST_MAX_WORKERS=2 pnpm exec vitest run \
   --workers=1 --retries=0 --grep 'whose resume fails' \
   --output "$SNAPSHOT/r11-hook-phone"
 ```
+
+### Production-fix review round 12 remediation
+
+Five source-derived schedules retain the existing .6/.9/.11/.12/.17 contract:
+direct remote removal and hidden-primary resolution must not expose or acknowledge
+an unowned neighbor; initial explicit Preview discovery and committed workflow
+focus must survive pending membership; authoritative ended predecessor reads must
+also constrain recipients when lifecycle notification is late or absent.
+
+```text
+Remote A removed: G1[A,B] -> G1[blank B], G2[proven C visible]
+Hidden proven C:  G1[A,B] -> G1[blank B] -> explicit B -> B visible/read
+Preview URL B:    list held + passive A -> validate -> B (or reject stale ID)
+Preview move C:   list held -> committed C -> list ready -> C, never C -> null
+Ended A GET:     B already FAILED -> retain view -> healthy C, never select B
+```
+
+Use existing surface leases and selection ownership, not new cursor predicates,
+backend fields, timers or retries. Shared handler changes retain the shipped
+phone task route/Sessions sheet; Dockview split/hidden cases and board Preview
+remain desktop-only. No layout, breakpoint, touch target or new copy is added.
+Controlled real-handler/store and real Preview-consumer regressions precede
+production changes. Final disposable browser proof must use a fresh frontend.
+
+Controlled verification:
+
+- `r12-red.log`: 9 behavioral failures / 60 passing controls across the surface,
+  real Preview consumer and lifecycle files. Both direct-removal split variants
+  exposed the unowned neighbor; hidden-primary resolution chose it; passive
+  adoption replaced the valid URL; committed workflow focus became null; all
+  four late/omitted terminal-notification cases activated the failed recipient.
+- `r12-green.log`: 67 passed / 2 failed. The remaining failures showed that
+  reordering an existing recipient briefly activates Files. That programmatic
+  fallback must not be mistaken for independent user focus. The existing
+  pointer/key-observed cancellation flag now distinguishes it.
+- `r12-surface-green.log`: the complete 11-case surface file passed after that
+  correction. Direct removal keeps the recipient visible in either initial
+  split-focus arrangement; hidden-primary proof retains the unavailable group;
+  explicit neighbor selection and independent panel ownership remain controls.
+- `r12-related-unit.log`: a fresh 17-file run passed all 373 cases, including
+  newer explicit Preview pins, workflow focus with an initial non-primary URL,
+  both omitted/late terminal orders and the neighboring selection/removal owners.
+- `r12-strict-lint.log`: the first deny-warnings check found five repeated DOM
+  attribute literals in the real Preview tests. A named attribute constant
+  preserves the assertions; `r12-strict-lint-final.log` passed all ten changed
+  web files. `r12-typecheck.log` passed before that test-only constant change.
+- An accidentally unscoped Vitest invocation was cancelled. No results from it
+  are used; the explicit 17-file run above is the scoped unit receipt.
+
+The authoritative ended read sets the existing recipient eligibility flag only
+after predecessor freshness and ownership checks. Direct remote removal acquires
+the existing group lease through its proven predecessor receipt, and hidden
+recipient handling cannot replace that owner through a cached visible fallback.
+Preview validates initial discovery ahead of passive adoption, while preserving
+newer explicit pins and adopting committed workflow focus before acknowledging it.
+No new store flag, timer, backend field, cursor rule or API is introduced.
+
+`r12-code-static.log` passed all ten code files' Prettier checks, the E2E sleep
+ratchet and the i18n ratchet. The snapshot's older Git baseline produced
+rename-detection warnings and a larger ratchet scope; no Git configuration was
+changed. Normal commit hooks still check the actual staged source changes.
+`r12-frontend-build.log` passed; `r12-frontend.sha256` records the fresh asset
+tree. The browser commands below reuse the retained R02 backend/plugin binaries,
+not an older frontend. A fresh verification checkout must first build those
+artifacts through the cache-safe setup above.
+
+Executed R12 scope, from `$VERIFY/apps/web` in the retained cache-backed checkout:
+
+```bash
+pnpm run pretypecheck
+VITEST_MAX_WORKERS=2 pnpm exec vitest run \
+  components/task/dockview-session-removal-focus.test.ts \
+  components/task/dockview-session-tabs.test.ts \
+  components/task/dockview-session-tab-activation.test.ts \
+  components/task/dockview-session-tab-sync.test.ts \
+  components/task/dockview-session-tabs.hook.test.tsx \
+  components/kanban-with-preview.session-ownership.test.tsx \
+  components/kanban-with-preview.rendered.test.tsx \
+  components/kanban-with-preview.copilot.test.tsx \
+  components/kanban-with-preview.test.ts \
+  lib/ws/handlers/task-primary-lifecycle.test.ts \
+  lib/ws/handlers/task-primary-continuation.test.ts \
+  lib/ws/handlers/task-primary-focus.test.ts \
+  lib/ws/handlers/task-primary-removal-admission.test.ts \
+  lib/ws/handlers/agent-session.test.ts \
+  lib/ws/handlers/tasks.test.ts \
+  lib/state/workflow-session-focus.test.ts \
+  hooks/domains/session/use-session-actions.removal-proof.test.ts
+pnpm run build:e2e
+export KANDEV_RUN_QUIET_DIR="$SNAPSHOT/r12-quiet"
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/kanban/preview-session-removal.spec.ts -- \
+  --workers=1 --retries=0 --output "$SNAPSHOT/r12-desktop"
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project chromium \
+  e2e/tests/task/task-unread-dot.spec.ts -- \
+  --workers=1 --retries=0 --output "$SNAPSHOT/r12-desktop-unread"
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- \
+  --workers=1 --retries=0 --output "$SNAPSHOT/r12-phone"
+```
+
+`r12-desktop-summary.log` / `r12-quiet/kandev-run.e2e.62HcnHrl.log`:
+both complete owning desktop specs passed, 18/18, one worker and no retries.
+The split uses a native tab drag and another browser client's real Delete action;
+the unrelated neighbor's persisted cursor and new-tail mark-read traffic stay
+unchanged while the proven primary is visible in the other split. Hiding that
+primary instead retains the unavailable group and both cursor values until an
+explicit neighbor activation acknowledges its exact new tail.
+
+The two new Preview cases use authentic held membership responses, a real
+mock-agent launch and a real committed step move. The initial non-primary URL,
+destination transcript, URL sync and navigation/selection continuity all passed.
+Inspected `remote-split-neighbor-unread.png`, `hidden-primary-owned-empty.png`,
+`preview-initial-explicit-over-passive.png` and
+`preview-workflow-before-membership.png`: they show the protected split and
+hidden-primary surfaces plus the requested and committed Preview transcripts.
+No user browser or live database was used.
+
+`r12-desktop-unread-summary.log` /
+`r12-quiet/kandev-run.e2e.omXGwYaI.log`: all three original desktop unread cases
+passed. `r12-phone-summary.log` / `r12-quiet/kandev-run.e2e.Mi1ejiQj.log`:
+all six phone cases passed. Each run used one worker, no retries and the same
+fresh R12 frontend; the total is 21 desktop and 6 phone cases across sequential
+owning-file runs, not a new broad-suite result.
+
+R12 corrections are implemented and scoped runtime verification is complete.
+Normal-hook commit, exact fork push and the next independent review remain
+parent-owned. Completed production reviews: 12; consecutive clean: 0.
+No broad-suite, live-NATS, historical-trigger or isolated cursor-event
+certification is implied. The unread predicate, cursor writers and backend
+promotion policy remain unchanged.
+
+`r12-docs-static.log` passed the documentation catalog and full specification
+lint. Inspected the final phone failed-resume and last-session-removal captures:
+the failed transcript/recovery controls remain visible, and the retired route
+has no deleted conversation. These are disposable Chromium observations, not
+historical incident or live-NATS verification.

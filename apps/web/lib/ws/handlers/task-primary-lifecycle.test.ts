@@ -39,6 +39,8 @@ const OTHER_TASK_ID = "other-task";
 const STARTING_TIME = "2026-11-19T12:00:01Z";
 const TERMINAL_FIRST = "terminal-first";
 const PROMOTION_FIRST = "promotion-first";
+const TERMINAL_LATE = "terminal-late";
+const TERMINAL_OMITTED = "terminal-omitted";
 function removeDisplayed(store: ReturnType<typeof withSiblings>, taskId?: string) {
   registerTaskSessionHandlers(store)[REMOVED]?.({
     id: "removed",
@@ -222,6 +224,14 @@ describe("lifecycle recipient after promotion", () => {
     ["CANCELLED", "WAITING_FOR_INPUT", PROMOTION_FIRST],
     ["COMPLETED", "FAILED", PROMOTION_FIRST],
     ["COMPLETED", "WAITING_FOR_INPUT", PROMOTION_FIRST],
+    ["CANCELLED", "FAILED", TERMINAL_LATE],
+    ["CANCELLED", "WAITING_FOR_INPUT", TERMINAL_LATE],
+    ["COMPLETED", "FAILED", TERMINAL_LATE],
+    ["COMPLETED", "WAITING_FOR_INPUT", TERMINAL_LATE],
+    ["CANCELLED", "FAILED", TERMINAL_OMITTED],
+    ["CANCELLED", "WAITING_FOR_INPUT", TERMINAL_OMITTED],
+    ["COMPLETED", "FAILED", TERMINAL_OMITTED],
+    ["COMPLETED", "WAITING_FOR_INPUT", TERMINAL_OMITTED],
   ] as const)(
     "retains recipient eligibility after %s retargets to a now %s primary (%s)",
     async (endedState, recipientState, order) => {
@@ -240,9 +250,9 @@ describe("lifecycle recipient after promotion", () => {
       const selected: Array<string | null> = [];
       const release = store.subscribe((value) => selected.push(value.tasks.activeSessionId));
       try {
-        if (order === PROMOTION_FIRST) {
+        if (order !== TERMINAL_FIRST) {
           promote(store);
-          notifyState(store, endedState, SNAPSHOT_TIME);
+          if (order === PROMOTION_FIRST) notifyState(store, endedState, SNAPSHOT_TIME);
         } else {
           notifyState(store, endedState, SNAPSHOT_TIME);
           promote(store);
@@ -264,6 +274,7 @@ describe("lifecycle recipient after promotion", () => {
         await flushFocusWork();
         if (recipientState === "FAILED") {
           expect(selected).not.toContain("next");
+          if (order === TERMINAL_LATE) notifyState(store, endedState, SNAPSHOT_TIME);
           promote(store, "latest");
           await flushFocusWork();
           expect(store.getState().tasks.activeSessionId).toBe("latest");

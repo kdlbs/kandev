@@ -30,10 +30,11 @@ function captureVisiblePredecessor(
   const taskId = previous.tasks.activeTaskId;
   const sessionId = previous.tasks.activeSessionId;
   const scopeIdentity = stateReadScopeIdentity(current);
+  const target = current.tasks.activeSessionId;
   if (
     !taskId ||
     !sessionId ||
-    current.tasks.activeSessionId !== null ||
+    (target !== null && getProvenRemovalPredecessor(store, taskId, target) !== sessionId) ||
     current.tasks.activeTaskId !== taskId ||
     scopeIdentity !== stateReadScopeIdentity(previous)
   )
@@ -146,7 +147,7 @@ export function getRemovalSurfaceFocus(
       cancelled:
         owner.cancelled && !!independentPanel && !independentPanel.id.startsWith("session:"),
       restorePanelId:
-        globalPanel && globalPanel.group.id !== owner.groupId
+        owner.cancelled && globalPanel && globalPanel.group.id !== owner.groupId
           ? globalPanel.id
           : owner.restorePanelId,
     };

@@ -223,8 +223,8 @@ new-sibling adoption also permits IDLE. Initial adoption without a predecessor
 remains immediate, subject to explicit workflow ownership.
 
 Navigation, pin, restart, workflow intent/request and selected identity own focus.
-Unchanged primary preserves lifecycle predicates. Accepted predecessor endings
-retain recipient eligibility in either delivery order, including primary retargets.
+Unchanged primary preserves lifecycle predicates. Durable ended predecessors
+constrain recipients without a lifecycle notice or after primary retargets.
 Creation only retargets an existing check. Explicit workflow focus stays separate;
 denied/uncertain reads never use timers.
 
@@ -250,10 +250,10 @@ cancelling only a request targeting that ID. An owned empty slot can re-prove af
 a changed primary; newer user/workflow selection wins. Surviving pins/cursors stay
 untouched. Proof initializes missing recipient identity/lifecycle only.
 
-Preview validates discovery membership, then adopts shared selected/empty state.
-Dockview blanks the removed view's unowned group until explicit/proven focus;
-other visible splits stay readable. Scoped receipts carry pre-paint retargets
-without stealing independent non-agent/workflow focus.
+Preview validates explicit discovery before passive adoption; committed workflow
+focus survives pending membership. Shared selected/empty state then owns it.
+Removed-group leases cover direct/empty handoffs; hidden targets never select
+an unproven fallback. Other splits and independent non-agent focus stay intact.
 
 `invalidateTaskSessionMembership` fences foreground/removal-dialog pending,
 admitted and queued publications. New reads/unrelated keys remain usable.

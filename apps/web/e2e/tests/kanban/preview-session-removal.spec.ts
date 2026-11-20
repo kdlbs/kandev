@@ -4,6 +4,7 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { watchWs } from "../../helpers/causal-waits";
 import {
   holdDeletionTraffic,
+  holdInitialMembership,
   holdRemovalMembership,
   observeRemovalSelection,
   REMOVAL_OTHER_TEXT,
@@ -307,4 +308,126 @@ test.describe("Preview owned deletion", () => {
       }
     });
   }
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+  test("retains a valid initial Preview URL through a passive live-session event", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { task, old, primary, other } = await seedRemovalChoiceTask(apiClient, seedData);
+    const proof = await holdInitialMembership(testPage, task.task_id);
+    const watcher = watchWs(testPage);
+    let history: Awaited<ReturnType<typeof observeRemovalSelection>> | undefined;
+    try {
+      await testPage.goto(`/?taskId=${task.task_id}&sessionId=${other.session_id}`);
+      await proof.queued;
+      const preview = testPage.getByTestId("task-preview-panel");
+      await expect(preview).toBeVisible();
+      history = await observeRemovalSelection(testPage);
+      const known = new Set([old.session_id, primary.session_id, other.session_id]);
+      const observed = watcher.waitForEvent("session.state_changed", {
+        where: (payload) =>
+          payload.task_id === task.task_id &&
+          typeof payload.session_id === "string" &&
+          !known.has(payload.session_id),
+      });
+      const launched = await apiClient.launchSession({
+        task_id: task.task_id,
+        agent_profile_id: seedData.agentProfileId,
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+        workflow_step_id: seedData.startStepId,
+        prompt: 'e2e:message("passive-initial-preview")',
+      });
+      expect((await observed).payload.session_id).toBe(launched.session_id);
+      await waitForActiveTaskSession(testPage, task.task_id, launched.session_id);
+      proof.release();
+      await waitForTaskSessionsSettled(testPage, task.task_id);
+      const chat = preview.locator('[data-testid="session-chat"]:visible');
+      await expect(chat).toHaveAttribute("data-session-id", other.session_id);
+      await expect(chat.getByText(REMOVAL_OTHER_TEXT, { exact: true })).toBeVisible();
+      await expect
+        .poll(() => new URL(testPage.url()).searchParams.get("sessionId"))
+        .toBe(other.session_id);
+      expect((await history.read()).map((sample) => sample.pinnedSessionId)).not.toContain(
+        launched.session_id,
+      );
+      await testPage.screenshot({
+        path: test.info().outputPath("preview-initial-explicit-over-passive.png"),
+      });
+    } finally {
+      await proof.dispose();
+      await history?.stop();
+    }
+  });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+  test("keeps committed Preview workflow focus while initial membership is held", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const scenario = await createWorkflowSessionFocusScenario(apiClient, seedData, "new");
+    const { settings } = await apiClient.getUserSettings();
+    const oldFilter = settings.workflow_filter_id ?? null;
+    const proof = await holdInitialMembership(testPage, scenario.task.id);
+    let history: Awaited<ReturnType<typeof observeRemovalSelection>> | undefined;
+    try {
+      await apiClient.saveUserSettings({ workflow_filter_id: scenario.workflow.id });
+      await testPage.goto(`/?taskId=${scenario.task.id}&sessionId=${scenario.secondarySessionId}`);
+      await proof.queued;
+      const preview = testPage.getByTestId("task-preview-panel");
+      await expect(preview).toBeVisible();
+      const selection = await observeRemovalSelection(testPage);
+      history = selection;
+      const navigation = (await selection.snapshot()).navigationRevision;
+      const moved = testPage.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === `/api/v1/tasks/${scenario.task.id}/move`,
+      );
+      await preview.getByTestId("workflow-stepper-minimal").hover();
+      await testPage
+        .getByTestId(`workflow-step-disclosure-move-${scenario.destination.id}`)
+        .click();
+      expect((await moved).ok()).toBe(true);
+      await expect
+        .poll(
+          async () =>
+            (await apiClient.getTask(scenario.task.id)).metadata?.workflow_session_route?.phase,
+        )
+        .toBe("committed");
+      const route = (await apiClient.getTask(scenario.task.id)).metadata?.workflow_session_route;
+      const destination = route?.destination_session_id;
+      expect(typeof destination).toBe("string");
+      expect([scenario.sourceSessionId, scenario.secondarySessionId]).not.toContain(destination);
+      await waitForActiveTaskSession(testPage, scenario.task.id, destination);
+      await expect.poll(async () => (await selection.snapshot()).workflowRequest).toBeNull();
+      const accepted = await history.read();
+      const first = accepted.findIndex((sample) => sample.sessionId === destination);
+      expect(first).toBeGreaterThanOrEqual(0);
+      expect(accepted.slice(first).map((sample) => sample.sessionId)).not.toContain(null);
+      proof.release();
+      await waitForTaskSessionsSettled(testPage, scenario.task.id);
+      await expect(preview.locator('[data-testid="session-chat"]:visible')).toHaveAttribute(
+        "data-session-id",
+        destination,
+      );
+      await expect
+        .poll(() => new URL(testPage.url()).searchParams.get("sessionId"))
+        .toBe(destination);
+      expect((await selection.snapshot()).navigationRevision).toBe(navigation);
+      expect((await history.read()).slice(first).map((sample) => sample.sessionId)).not.toContain(
+        null,
+      );
+      await testPage.screenshot({
+        path: test.info().outputPath("preview-workflow-before-membership.png"),
+      });
+    } finally {
+      await proof.dispose();
+      await history?.stop();
+      await apiClient.saveUserSettings({ workflow_filter_id: oldFilter });
+    }
+  });
 });

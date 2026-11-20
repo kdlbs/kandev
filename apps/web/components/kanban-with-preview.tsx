@@ -22,6 +22,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { Task } from "./kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
+import type { AppState } from "@/lib/state/store";
 import { linkToTask } from "@/lib/links";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { taskRemovalCoversTask } from "@/lib/state/task-removal";
@@ -332,19 +333,46 @@ function useSyncSelectedTaskActivity(params: {
   ]);
 }
 
+function ownsExplicitPreviewSelection(
+  state: AppState,
+  taskId: string | null | undefined,
+  adoption: { taskId: string | null | undefined; navigationRevision: number },
+): boolean {
+  const request = state.workflowSessionFocus.request;
+  if (request && request.taskId === taskId && request.sessionId === state.tasks.activeSessionId)
+    return true;
+  return (
+    adoption.taskId === taskId &&
+    state.taskRemoval.navigationRevision !== adoption.navigationRevision &&
+    state.tasks.pinnedSessionId !== null &&
+    state.tasks.pinnedSessionId === state.tasks.activeSessionId
+  );
+}
+
 function useAdoptedPreviewSession(
   previewTaskId: string | null | undefined,
   isMember: (sessionId: string) => boolean,
+  preferredSessionId: string | null,
 ) {
   const sharedTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const sharedSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const [adoption, setAdoption] = useState({ taskId: previewTaskId, adopted: false });
+  const navigationRevision = useAppStore((state) => state.taskRemoval.navigationRevision);
+  const [adoption, setAdoption] = useState({
+    taskId: previewTaskId,
+    adopted: false,
+    navigationRevision,
+  });
+  const explicit = useAppStore((state) =>
+    ownsExplicitPreviewSelection(state, previewTaskId, adoption),
+  );
   const adopted = adoption.taskId === previewTaskId && adoption.adopted;
-  const canAdopt = !!sharedSessionId && isMember(sharedSessionId);
+  const preferredOwned =
+    !preferredSessionId || !isMember(preferredSessionId) || preferredSessionId === sharedSessionId;
+  const canAdopt = !!sharedSessionId && (explicit || (isMember(sharedSessionId) && preferredOwned));
   if (adoption.taskId !== previewTaskId) {
-    setAdoption({ taskId: previewTaskId, adopted: false });
+    setAdoption({ taskId: previewTaskId, adopted: false, navigationRevision });
   } else if (previewTaskId && sharedTaskId === previewTaskId && canAdopt && !adopted) {
-    setAdoption({ taskId: previewTaskId, adopted: true });
+    setAdoption({ taskId: previewTaskId, adopted: true, navigationRevision });
   }
   return sharedTaskId === previewTaskId && (adopted || canAdopt) ? sharedSessionId : undefined;
 }
@@ -361,7 +389,7 @@ function usePreviewSessionDiscovery(
     isLoaded &&
     !isConfirmedSessionRemoved(sessionState, sessionId) &&
     sessions.some((session) => session.id === sessionId && session.task_id === taskId);
-  const adopted = useAdoptedPreviewSession(taskId, isMember);
+  const adopted = useAdoptedPreviewSession(taskId, isMember, userSelectedSessionId);
   if (adopted !== undefined) return adopted;
   const candidates = [
     userSelectedSessionId,
@@ -418,7 +446,12 @@ function usePreviewSessionFocus({
   );
 
   useEffect(() => {
-    if (!previewIsOpen || !previewTaskId || workflowFocusRequest?.taskId !== previewTaskId) {
+    if (
+      !previewIsOpen ||
+      !previewTaskId ||
+      workflowFocusRequest?.taskId !== previewTaskId ||
+      discoveredSessionId !== workflowFocusRequest.sessionId
+    ) {
       return;
     }
     setUserSelectedSessionId(null);
@@ -426,6 +459,7 @@ function usePreviewSessionFocus({
     acknowledgeWorkflowSessionFocus(workflowFocusRequest.requestId);
   }, [
     acknowledgeWorkflowSessionFocus,
+    discoveredSessionId,
     previewIsOpen,
     previewTaskId,
     setActiveSessionAuto,

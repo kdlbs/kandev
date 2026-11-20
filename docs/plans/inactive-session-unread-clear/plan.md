@@ -585,5 +585,17 @@ fix. It is separate from the five design-only rounds above.
   affected cases and final-bundle desktop/phone failed-resume smokes passed.
   Task 02 distinguishes these from the earlier full 14/6 run and records
   intermediate fixture/hook failures. No unread contract changed.
-- Completed rounds: 11. Consecutive clean: 0. The stop condition is three
+- Round 12: Sol child `8a1943f9-ca64-4a60-87de-ab8d4c32ec48` reviewed
+  `4a519db51b`. Five source-derived P2s accepted for controlled reproduction:
+  direct remote removal misses the group lease; a hidden proven primary admits
+  an unproven fallback; passive events replace a valid initial Preview URL;
+  Preview acknowledges then loses workflow focus before membership; authoritative
+  terminal reads lack recipient eligibility without a separate terminal notice.
+  R12 remediation is implemented and verified: 373 targeted unit cases,
+  18 removal/Preview desktop cases plus the three original desktop unread cases,
+  and all six phone cases passed on the fresh frontend. Strict changed-file lint,
+  typecheck, formatting and ratchets passed. Task 02 records RED, intermediate
+  surface correction, exact commands, captures and retained-backend limits.
+  Independent production review remains open; round 13 is next.
+- Completed rounds: 12. Consecutive clean: 0. The stop condition is three
   consecutive clean rounds or 50 rounds. No earlier loop counts toward it.

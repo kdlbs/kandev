@@ -22,6 +22,7 @@ import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-sessi
 import { hiddenSessionIdsFor, pruneHiddenSessionIds } from "./dockview-hidden-session-panels";
 import { t } from "@/lib/i18n";
 import { resolveVisibleSessionId } from "@/lib/env-hidden-sessions";
+import { getProvenRemovalPredecessor } from "@/lib/state/session-removal-handoff";
 import {
   consumeRemovalSurfaceFocus,
   getRemovalSurfaceFocus,
@@ -609,7 +610,8 @@ export function runAutoSessionTabEffect(
       currentSessionIds,
       hiddenSessionIdsFor(api),
     );
-    if (tid && visibleSessionId) appStore.getState().setActiveSessionAuto(tid, visibleSessionId);
+    if (tid && visibleSessionId && !getProvenRemovalPredecessor(appStore, tid, effectiveSessionId))
+      appStore.getState().setActiveSessionAuto(tid, visibleSessionId);
     updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
     return;
   }

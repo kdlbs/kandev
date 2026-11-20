@@ -13,12 +13,18 @@ import { WebSocketClient } from "@/lib/ws/client";
 import { setWebSocketClient } from "@/lib/ws/connection";
 import { defaultSettingsState, defaultKanbanState } from "@/lib/state/slices";
 import { KanbanWithPreview } from "./kanban-with-preview";
+import { registerTaskSessionHandlers } from "@/lib/ws/handlers/agent-session";
+import { registerTasksHandlers } from "@/lib/ws/handlers/tasks";
+import { SESSION_STATE_CHANGED } from "@/lib/ws/handlers/task-primary-focus.test-helpers";
+import { makeMessage, makeTask } from "@/lib/ws/handlers/tasks.test-helpers";
 
 const BETA_PRIMARY = "beta-primary";
 const ALPHA_SESSION = "alpha-session";
 const SESSION_LIST_ACTION = "task.session.list";
 const SESSION_CHAT_TEST_ID = "session-chat";
 const BETA_SESSION = "beta-session";
+const ALPHA_SECONDARY = "alpha-secondary";
+const SESSION_ID_ATTRIBUTE = "data-session-id";
 
 const transport = vi.hoisted(() => ({ request: vi.fn() }));
 let client: WebSocketClient;
@@ -78,7 +84,10 @@ function mountPreview(
   const initialState: HydrationState = {
     kanban: {
       workflowId: "workflow",
-      steps: [{ id: "step", title: "Ready", color: "blue", position: 0 }],
+      steps: [
+        { id: "step", title: "Ready", color: "blue", position: 0 },
+        { id: "next-step", title: "Review", color: "green", position: 1 },
+      ],
       tasks: ["alpha", "beta"].map((id) => ({
         id,
         title: id,
@@ -251,7 +260,7 @@ describe("Kanban preview task session fallback ownership", () => {
 it.each([false, true])(
   "validates initial Preview membership (valid link: %s)",
   async (valid) => {
-    const secondary = "alpha-secondary";
+    const secondary = ALPHA_SECONDARY;
     const missing = "deleted-alpha";
     const membership = Promise.withResolvers<TaskSessionsResponse>();
     vi.mocked(listTaskSessions).mockReturnValue(membership.promise);
@@ -277,7 +286,7 @@ it.each([false, true])(
 
 // @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.8
 it("restores the actual non-primary Preview transcript after task removal fails", async () => {
-  const secondary = "alpha-secondary";
+  const secondary = ALPHA_SECONDARY;
   vi.mocked(listTaskSessions).mockImplementation((taskId) =>
     Promise.resolve(
       previewMembership(taskId, taskId === "alpha" ? [ALPHA_SESSION, secondary] : []),
@@ -288,7 +297,7 @@ it("restores the actual non-primary Preview transcript after task removal fails"
   );
   const getStore = mountPreview();
   await waitFor(() =>
-    expect(screen.getByTestId(SESSION_CHAT_TEST_ID).getAttribute("data-session-id")).toBe(
+    expect(screen.getByTestId(SESSION_CHAT_TEST_ID).getAttribute(SESSION_ID_ATTRIBUTE)).toBe(
       ALPHA_SESSION,
     ),
   );
@@ -297,7 +306,7 @@ it("restores the actual non-primary Preview transcript after task removal fails"
   fireEvent.mouseUp(secondaryTab, { button: 0 });
   fireEvent.click(secondaryTab);
   await waitFor(() =>
-    expect(screen.getByTestId(SESSION_CHAT_TEST_ID).getAttribute("data-session-id")).toBe(
+    expect(screen.getByTestId(SESSION_CHAT_TEST_ID).getAttribute(SESSION_ID_ATTRIBUTE)).toBe(
       secondary,
     ),
   );
@@ -318,10 +327,150 @@ it("restores the actual non-primary Preview transcript after task removal fails"
     getStore().getState().releaseTaskRemoval(token!);
   });
   await waitFor(() =>
-    expect(screen.getByTestId(SESSION_CHAT_TEST_ID).getAttribute("data-session-id")).toBe(
+    expect(screen.getByTestId(SESSION_CHAT_TEST_ID).getAttribute(SESSION_ID_ATTRIBUTE)).toBe(
       secondary,
     ),
   );
   expect(getStore().getState().tasks.activeSessionId).toBe(secondary);
   expect(new URL(window.location.href).searchParams.get("sessionId")).toBe(secondary);
 }, 15_000);
+
+function observePreviewSession(store: ReturnType<typeof useAppStoreApi>, sessionId: string) {
+  registerTaskSessionHandlers(store)[SESSION_STATE_CHANGED]!({
+    id: `observed-${sessionId}`,
+    type: "notification",
+    action: SESSION_STATE_CHANGED,
+    payload: {
+      task_id: "alpha",
+      session_id: sessionId,
+      old_state: "STARTING",
+      new_state: "WAITING_FOR_INPUT",
+      updated_at: "2026-11-20T00:00:01Z",
+    },
+  });
+}
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+it.each(["valid", "stale", "newer-pin"] as const)(
+  "validates initial URL ownership despite passive session adoption (%s)",
+  async (choice) => {
+    const secondary = ALPHA_SECONDARY;
+    const membership = Promise.withResolvers<TaskSessionsResponse>();
+    const requested = Promise.withResolvers<void>();
+    vi.mocked(listTaskSessions).mockImplementation(() => {
+      requested.resolve();
+      return membership.promise;
+    });
+    transport.request.mockResolvedValue({ sessions: [{ id: ALPHA_SESSION }] });
+    const getStore = mountPreview(undefined, choice === "stale" ? "deleted-alpha" : secondary);
+    try {
+      await act(async () => {
+        await requested.promise;
+      });
+      act(() => {
+        observePreviewSession(getStore(), ALPHA_SESSION);
+      });
+      await waitFor(() => expect(getStore().getState().tasks.activeSessionId).toBe(ALPHA_SESSION));
+      if (choice === "newer-pin")
+        act(() => {
+          getStore().getState().setActiveSession("alpha", ALPHA_SESSION);
+        });
+      await act(async () =>
+        membership.resolve(previewMembership("alpha", [ALPHA_SESSION, secondary])),
+      );
+      const expected = choice === "valid" ? secondary : ALPHA_SESSION;
+      await waitFor(() =>
+        expect(screen.getByTestId(SESSION_CHAT_TEST_ID).getAttribute(SESSION_ID_ATTRIBUTE)).toBe(
+          expected,
+        ),
+      );
+      expect(getStore().getState().tasks.activeSessionId).toBe(expected);
+      expect(new URL(window.location.href).searchParams.get("sessionId")).toBe(expected);
+    } finally {
+      membership.resolve(previewMembership("alpha", []));
+    }
+  },
+  15_000,
+);
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+it.each([false, true])(
+  "retains committed workflow focus before Preview membership (initial URL: %s)",
+  async (initialUrl) => {
+    const destination = "alpha-workflow";
+    const membership = Promise.withResolvers<TaskSessionsResponse>();
+    const requested = Promise.withResolvers<void>();
+    vi.mocked(listTaskSessions).mockImplementation(() => {
+      requested.resolve();
+      return membership.promise;
+    });
+    transport.request.mockResolvedValue({ sessions: [{ id: ALPHA_SESSION }] });
+    const observations: AppState["tasks"][] = [];
+    const getStore = mountPreview(
+      undefined,
+      initialUrl ? ALPHA_SECONDARY : undefined,
+      observations,
+    );
+    try {
+      await act(async () => {
+        await requested.promise;
+      });
+      const navigation = getStore().getState().taskRemoval.navigationRevision;
+      act(() => {
+        const state = getStore().getState();
+        const requestId = state.beginWorkflowSessionFocus({
+          taskId: "alpha",
+          workflowId: "workflow",
+          destinationStepId: "next-step",
+          presentationToken: 77,
+          navigationRevision: navigation,
+        });
+        expect(requestId).not.toBeNull();
+        state.bindWorkflowSessionFocus({
+          requestId: requestId!,
+          presentationToken: 77,
+          entryIdentity: "entry:r12",
+        });
+        observePreviewSession(getStore(), destination);
+        registerTasksHandlers(getStore())["task.updated"]!(
+          makeMessage({
+            ...makeTask("alpha", destination, "workflow"),
+            workflow_step_id: "next-step",
+            updated_at: "2026-11-20T00:00:02Z",
+            metadata: {
+              workflow_session_route: {
+                operation_id: "move-r12",
+                destination_step_id: "next-step",
+                entry_identity: "entry:r12",
+                destination_session_id: destination,
+                phase: "committed",
+              },
+            },
+          }),
+        );
+        expect(getStore().getState().workflowSessionFocus.request?.sessionId).toBe(destination);
+      });
+      expect(getStore().getState().tasks.activeSessionId).toBe(destination);
+      expect(getStore().getState().taskRemoval.navigationRevision).toBe(navigation);
+      await act(async () =>
+        membership.resolve(
+          previewMembership("alpha", [ALPHA_SESSION, destination, ALPHA_SECONDARY]),
+        ),
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId(SESSION_CHAT_TEST_ID).getAttribute(SESSION_ID_ATTRIBUTE)).toBe(
+          destination,
+        ),
+      );
+      const committed = observations.findIndex((state) => state.activeSessionId === destination);
+      expect(committed).toBeGreaterThanOrEqual(0);
+      expect(observations.slice(committed).map((state) => state.activeSessionId)).not.toContain(
+        null,
+      );
+      expect(new URL(window.location.href).searchParams.get("sessionId")).toBe(destination);
+    } finally {
+      membership.resolve(previewMembership("alpha", []));
+    }
+  },
+  15_000,
+);

@@ -15,6 +15,8 @@ import {
 import { makeReorderingAutoSessionApi } from "./dockview-session-tabs.test-utils";
 import { runAutoSessionTabEffect } from "./dockview-session-tabs";
 import { isRemovalChatBlocked, setupRemovalSurfaceFocus } from "./dockview-session-removal-focus";
+import { registerTaskSessionHandlers } from "@/lib/ws/handlers/agent-session";
+import { hiddenSessionIdsFor, hideSessionPanel } from "./dockview-hidden-session-panels";
 
 vi.mock("@/lib/api/domains/session-api", async (original) => ({
   ...(await original<typeof SessionApi>()),
@@ -25,6 +27,8 @@ vi.mock("@/lib/api/domains/session-api", async (original) => ({
 const LATER = "later" as SessionId;
 const OLD_PANEL_ID = "session:old";
 const NEXT_PANEL_ID = "session:next";
+const LATEST_PANEL_ID = "session:latest";
+const REMOVED_ACTION = "session.removed";
 
 function scene() {
   const store = withSiblings("FAILED");
@@ -152,3 +156,89 @@ it.each([false, true])(
     }
   },
 );
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.11
+it.each([false, true])(
+  "fences a direct remote removal across split groups (recipient focused: %s)",
+  async (recipientFocused) => {
+    vi.mocked(fetchTaskSession).mockReset();
+    vi.mocked(listTaskSessions).mockReset();
+    const { store, view, refs } = scene();
+    view.api.removePanel(view.api.getPanel(LATEST_PANEL_ID)!);
+    view.api.addPanel({
+      id: LATEST_PANEL_ID,
+      component: "chat",
+      position: { referenceGroup: RIGHT_TOP_GROUP },
+    });
+    if (!recipientFocused) view.api.getPanel(OLD_PANEL_ID)!.api.setActive();
+    const originalDockview = useDockviewStore.getState();
+    useDockviewStore.setState({
+      api: view.api,
+      currentLayoutEnvId: null,
+      isRestoringLayout: false,
+      preMaximizeLayout: null,
+    });
+    const stop = setupRemovalSurfaceFocus(view.api, store);
+    const proof = Promise.withResolvers<TaskSessionsResponse>();
+    vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
+    try {
+      registerTaskSessionHandlers(store)[REMOVED_ACTION]!({
+        id: "remote-split-removal",
+        type: "notification",
+        action: REMOVED_ACTION,
+        payload: { task_id: "t1", session_id: "old" },
+      });
+      expect(store.getState().tasks.activeSessionId).toBe("old");
+      proof.resolve(membership("latest", "next", LATER));
+      await flushFocusWork();
+      expect(store.getState().tasks.activeSessionId).toBe("latest");
+      runAutoSessionTabEffect("latest", store, refs);
+      expect(view.api.getPanel(OLD_PANEL_ID)).toBeNull();
+      expect(view.centerActivePanelId()).toBe(NEXT_PANEL_ID);
+      expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(true);
+      expect(view.api.getPanel(LATEST_PANEL_ID)!.group.activePanel?.id).toBe(LATEST_PANEL_ID);
+      expect(isRemovalChatBlocked(view.api, store, LATEST_PANEL_ID, store.getState())).toBe(false);
+      store.getState().setActiveSession("t1", "next");
+      expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(false);
+    } finally {
+      stop();
+      useDockviewStore.setState(originalDockview);
+    }
+  },
+);
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
+it("keeps an owned group empty when its proven primary is hidden", async () => {
+  vi.mocked(fetchTaskSession).mockReset();
+  vi.mocked(listTaskSessions).mockReset();
+  const { store, view, refs } = scene();
+  const originalDockview = useDockviewStore.getState();
+  useDockviewStore.setState({
+    api: view.api,
+    currentLayoutEnvId: null,
+    isRestoringLayout: false,
+    preMaximizeLayout: null,
+  });
+  hideSessionPanel(view.api, "latest", "t1");
+  const stop = setupRemovalSurfaceFocus(view.api, store);
+  const proof = Promise.withResolvers<TaskSessionsResponse>();
+  vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
+  try {
+    prepareSessionRemoval(store, "old", "t1")();
+    runAutoSessionTabEffect(null, store, refs);
+    expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(true);
+    proof.resolve(membership("latest", "next", LATER));
+    await flushFocusWork();
+    runAutoSessionTabEffect("latest", store, refs);
+    expect(store.getState().tasks.activeSessionId).toBe("latest");
+    expect(hiddenSessionIdsFor(view.api).has("latest")).toBe(true);
+    expect(view.api.getPanel(LATEST_PANEL_ID)).toBeNull();
+    expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(true);
+    store.getState().setActiveSession("t1", "next");
+    runAutoSessionTabEffect("next", store, refs);
+    expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(false);
+  } finally {
+    stop();
+    useDockviewStore.setState(originalDockview);
+  }
+});

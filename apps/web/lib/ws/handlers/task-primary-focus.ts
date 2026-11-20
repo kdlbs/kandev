@@ -430,6 +430,7 @@ function verifyPreviousSession(store: StoreApi<AppState>, owner: FollowOwner): v
               (cached && !allowsFollowState(pending.source, cached))
             )
               return;
+            pending.lifecycleRecipient ||= allowsFollowState("terminal", session.state);
             pending.authorized = true;
             reconcileAuthorizedFollow(store, pending);
           })
