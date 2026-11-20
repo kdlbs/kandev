@@ -319,3 +319,112 @@ for (const draft of [false, true]) {
     await expect(header(testPage, "keep")).toHaveAttribute("aria-expanded", "false");
   });
 }
+
+for (const disclosure of [false, true]) {
+  test(`Save waits for the edited draft to persist: disclosure=${disclosure}`, async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const source = (await preferences(apiClient, seedData.workspaceId)).views.find(
+      (view) => view.id === VIEW,
+    )!;
+    await apiClient.saveUserSettings({
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views_upsert: [{ ...source, group: "state", collapsed_groups: [] }],
+        draft: {
+          base_view_id: VIEW,
+          group: SIDEBAR_GROUPING,
+          filters: source.filters,
+          sort: source.sort,
+          group_indent: true,
+          collapsed_groups: [],
+        },
+      },
+    });
+    await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
+    await expect(header(testPage, "keep")).toBeVisible();
+    const editor = new SidebarFilterPopoverPage(testPage);
+    const barrier = await holdSidebarSettingsWrite(testPage, { responseStatus: 503 });
+    try {
+      if (disclosure) await header(testPage, "keep").click();
+      else {
+        await editor.open();
+        await editor.setSort("Title", source.sort.direction === "desc" ? "asc" : "desc");
+      }
+      await barrier.arrived;
+      await editor.open();
+      await expect(testPage.getByTestId("view-save-button")).toBeDisabled();
+      await expect(testPage.getByTestId("view-save-as-button")).toBeDisabled();
+      const rejected = settingsResponse(testPage);
+      barrier.release();
+      expect((await rejected).status()).toBe(503);
+      await expect(testPage.getByTestId("view-save-button")).toBeEnabled();
+      const state = await preferences(apiClient, seedData.workspaceId);
+      expect(state.draft).not.toBeNull();
+      expect(state.views.find((view) => view.id === VIEW)?.group).toBe("state");
+      expect(state.views.some((view) => view.name === COPY)).toBe(false);
+    } finally {
+      await barrier.dispose();
+    }
+  });
+}
+
+test("a dispatched draft prune cannot recreate the draft after another client saves it", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const source = (await preferences(apiClient, seedData.workspaceId)).views.find(
+    (view) => view.id === VIEW,
+  )!;
+  const keys = Array.from({ length: 1002 }, () => groupingValueKey("keep"));
+  await apiClient.saveUserSettings({
+    sidebar_view_state: {
+      workspace_id: seedData.workspaceId,
+      views_upsert: [{ ...source, group: "state", collapsed_groups: [] }],
+      draft: {
+        base_view_id: VIEW,
+        group: SIDEBAR_GROUPING,
+        filters: source.filters,
+        sort: source.sort,
+        collapsed_groups: keys,
+      },
+    },
+  });
+  const barrier = await holdSidebarSettingsWrite(testPage);
+  try {
+    await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
+    await barrier.arrived;
+    await apiClient.saveUserSettings({
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        save_draft: { base_view_id: VIEW, expected_group: SIDEBAR_GROUPING, target_view_id: VIEW },
+      },
+    });
+    const oldResponse = settingsResponse(testPage);
+    barrier.release();
+    const acknowledged = (await (await oldResponse).json()).settings.sidebar_views_by_workspace[
+      seedData.workspaceId
+    ];
+    expect(acknowledged.draft).toBeNull();
+    expect(
+      acknowledged.views.find((view: { id: string }) => view.id === VIEW).collapsed_groups,
+    ).toEqual(keys);
+    await expect
+      .poll(async () => {
+        const state = await preferences(apiClient, seedData.workspaceId);
+        return {
+          draft: state.draft,
+          keys: state.views.find((view) => view.id === VIEW)?.collapsed_groups,
+        };
+      })
+      .toEqual({ draft: null, keys: [groupingValueKey("keep")] });
+    await expect(header(testPage, "keep")).toHaveAttribute("aria-expanded", "false");
+    await testPage.reload();
+    await expect(header(testPage, "keep")).toHaveAttribute("aria-expanded", "false");
+  } finally {
+    await barrier.dispose();
+  }
+});

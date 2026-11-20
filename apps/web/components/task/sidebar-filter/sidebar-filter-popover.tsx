@@ -91,10 +91,9 @@ export function SidebarFilterPopover({
 }: Props) {
   const guard = useSidebarWorkspaceGuard();
   const { t } = useTranslation();
-  const views = useAppStore((s) => selectSidebarViews(s).views);
-  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
+  const sidebarViews = useAppStore(selectSidebarViews);
+  const { views, activeViewId, draft: storedDraft, syncPending: savePending } = sidebarViews;
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const storedDraft = useAppStore((s) => selectSidebarViews(s).draft);
   const { pending } = useSidebarViewTransition();
   const updateDraft = guard(useAppStore((s) => s.updateSidebarDraft));
   const saveAs = guard(useAppStore((s) => s.saveSidebarDraftAs));
@@ -118,6 +117,7 @@ export function SidebarFilterPopover({
     onConfirm: deleteView,
   });
   const headerProps: ComponentProps<typeof ViewHeaderRow> = {
+    savePending,
     activeView,
     hasDraft,
     canDelete: views.length > 1,

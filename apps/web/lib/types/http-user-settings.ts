@@ -52,6 +52,7 @@ export type SidebarDraftUpdateApi = Omit<
   base_view_id: string;
   expected_group: string;
   clear?: boolean;
+  require_existing?: boolean;
 };
 
 export type SidebarDraftSaveApi = {

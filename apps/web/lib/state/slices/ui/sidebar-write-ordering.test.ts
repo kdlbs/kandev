@@ -21,14 +21,16 @@ beforeEach(() => {
 const USER = "default-user";
 const GROUP = "plugin:tags:tags";
 
-function fixture() {
+function fixture(extraIds: string[] = []) {
   const base = {
     ...createDefaultSidebarView("base", "A"),
     group: GROUP as `plugin:${string}:${string}`,
   };
   const other = createDefaultSidebarView("other", "Other");
   let state: SidebarWorkspaceStateApi = {
-    views: [base, other].map(toApiSidebarView),
+    views: [base, other, ...extraIds.map((id) => createDefaultSidebarView(id, id))].map(
+      toApiSidebarView,
+    ),
     active_view_id: base.id,
     draft: null,
   };
@@ -70,6 +72,10 @@ function fixture() {
     apply,
     acknowledge,
     current: () => state,
+    reorder: (ids: string[]) => {
+      state = { ...state, views: ids.map((id) => state.views.find((view) => view.id === id)!) };
+      revision++;
+    },
     append: () => {
       const remote = toApiSidebarView(createDefaultSidebarView("remote", "Remote"));
       state = { ...state, views: [...state.views, remote] };
@@ -177,4 +183,46 @@ it("pending provider selection rejects dependent actions until the authoritative
     await pending;
     await f.store.getState().waitForSidebarViewSync("ws");
   }
+});
+
+it("a queued drag preserves an acknowledged disjoint remote drag", async () => {
+  const f = fixture(["c", "d"]);
+  const first = Promise.withResolvers<UserSettingsResponse>();
+  let predecessor: UserSettingsUpdatePayload | undefined;
+  vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
+    if (!predecessor) {
+      predecessor = payload;
+      return first.promise;
+    }
+    return f.apply(payload);
+  });
+  f.store.getState().renameSidebarView(f.base.id, "Renamed");
+  f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
+  f.reorder([f.base.id, f.other.id, "d", "c"]);
+  first.resolve(f.apply(predecessor!));
+  await f.store.getState().waitForSidebarViewSync("ws");
+  const persisted = mapSidebarWorkspaces({ ws: f.current() }).ws;
+  expect(persisted.views.map((view) => view.id)).toEqual([f.other.id, f.base.id, "d", "c"]);
+  expect(persisted.views.find((view) => view.id === f.base.id)?.name).toBe("Renamed");
+});
+
+it("a queued drag reports a removed destination without restoring it", async () => {
+  const f = fixture(["c", "d"]);
+  const first = Promise.withResolvers<UserSettingsResponse>();
+  let predecessor: UserSettingsUpdatePayload | undefined;
+  vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
+    if (!predecessor) {
+      predecessor = payload;
+      return first.promise;
+    }
+    return f.apply(payload);
+  });
+  f.store.getState().renameSidebarView(f.base.id, "Renamed");
+  f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
+  f.reorder([f.base.id, "c", "d"]);
+  first.resolve(f.apply(predecessor!));
+  await f.store.getState().waitForSidebarViewSync("ws");
+  expect(f.store.getState().sidebarViewsByWorkspace.ws.syncError).not.toBeNull();
+  expect(f.current().views.map((view) => view.id)).toEqual([f.base.id, "c", "d"]);
+  expect(f.current().views[0].name).toBe("Renamed");
 });

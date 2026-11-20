@@ -1,3 +1,4 @@
+import { moveSidebarView, type SidebarViewMove } from "./sidebar-view-move";
 import { createSidebarWorkspaceState, mapSidebarWorkspaces } from "./sidebar-workspace-state";
 import { produce } from "immer";
 import type { WorkspaceSliceState } from "../workspace/types";
@@ -54,26 +55,12 @@ type SidebarWriteOptions = {
   admit?: (snapshot: SidebarSnapshot) => boolean;
   selection?: SidebarViewApi;
   saveDraft?: SidebarDraftSaveApi;
+  move?: SidebarViewMove;
 };
 const workspaceBySetter = new WeakMap<ImmerSet, string>();
 
 function makeId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function reorderViewsById(
-  views: SidebarView[],
-  activeViewId: string,
-  overViewId: string,
-): SidebarView[] | null {
-  if (activeViewId === overViewId) return null;
-  const oldIndex = views.findIndex((v) => v.id === activeViewId);
-  const newIndex = views.findIndex((v) => v.id === overViewId);
-  if (oldIndex === -1 || newIndex === -1) return null;
-  const next = [...views];
-  const [moved] = next.splice(oldIndex, 1);
-  next.splice(newIndex, 0, moved);
-  return next;
 }
 
 function nextNewViewName(views: SidebarView[]): string {
@@ -151,7 +138,7 @@ function syncSidebarWrite(
   get: () => SidebarActionState,
   before: SidebarSnapshot,
   after: SidebarSnapshot,
-  { kind, admit, selection, saveDraft }: SidebarWriteOptions,
+  { kind, admit, selection, saveDraft, move }: SidebarWriteOptions,
 ) {
   const journal = getSidebarWriteJournal(set);
   if (journal.pending === 0) journal.confirmed = before;
@@ -169,18 +156,17 @@ function syncSidebarWrite(
     let rebased = journal.confirmed!;
     if (kind !== "local")
       for (const failed of journal.failedViewMutations ?? [])
-        rebased = rebaseSidebarMutation(rebased, failed.before, failed.after);
-    desired = rebaseSidebarMutation(rebased, before, after);
+        rebased = rebaseSidebarMutation(rebased, failed.before, failed.after, failed.move);
+    desired = rebaseSidebarMutation(rebased, before, after, move);
     if (saveDraft) return { save_draft: saveDraft };
-    return {
-      ...sidebarWriteDelta(
-        before,
-        after,
-        kind !== "local" ? journal.failedViewMutations : undefined,
-        desired,
-      ),
-      ...(selection ? { select_plugin_grouping: selection } : {}),
-    };
+    const patch = sidebarWriteDelta(
+      before,
+      after,
+      kind !== "local" ? journal.failedViewMutations : undefined,
+      desired,
+    );
+    if (kind === "compaction" && patch.draft_update) patch.draft_update.require_existing = true;
+    return { ...patch, ...(selection ? { select_plugin_grouping: selection } : {}) };
   };
   const completed = enqueueSidebarSettingsSync(set, get, writePayload, () => desired, kind).then(
     (persisted) => {
@@ -215,7 +201,7 @@ function syncSidebarWrite(
     },
     (err) => {
       journal.pending--;
-      if (kind === "views") (journal.failedViewMutations ??= []).push({ before, after });
+      if (kind === "views") (journal.failedViewMutations ??= []).push({ before, after, move });
       const rollback = journal.failedRollback ?? before;
       journal.failedRollback = rollback;
       journal.failedWriteKind ??= kind;
@@ -271,6 +257,7 @@ function mutateViews(
 
 function saveSidebarDraft(set: ImmerSet, get: () => SidebarActionState, name?: string) {
   const state = get().sidebarViews;
+  if (state.syncPending) return Promise.resolve(false);
   const target = name === undefined ? state.draft?.baseViewId : makeId("view");
   if (!target) return Promise.resolve(false);
   const prepared = prepareSidebarDraftSave(
@@ -432,6 +419,7 @@ function buildSidebarDisclosureReconciler(set: ImmerSet, get: () => SidebarActio
     if (!view) return Promise.resolve(true);
     const draft = state.draft?.baseViewId === viewId ? state.draft : null;
     const keys = sidebarViewDisclosure(view, draft);
+    const draftOwned = Boolean(draft && draft.group !== view.group);
     if (
       (draft?.group ?? view.group) !== reference ||
       keys.length !== expected.length ||
@@ -448,6 +436,7 @@ function buildSidebarDisclosureReconciler(set: ImmerSet, get: () => SidebarActio
       const preview = current.draft?.baseViewId === viewId ? current.draft : null;
       const disclosure = sidebarViewDisclosure(saved, preview);
       return (
+        Boolean(preview && preview.group !== saved.group) === draftOwned &&
         (preview?.group ?? saved.group) === reference &&
         disclosure.length === expected.length &&
         disclosure.every((key, position) => key === expected[position])
@@ -522,12 +511,25 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState
         if (!next || next === view.name) return false;
         view.name = next;
       }),
-    reorderSidebarViews: (activeViewId: string, overViewId: string) =>
-      mv((s) => {
-        const reordered = reorderViewsById(s.views, activeViewId, overViewId);
-        if (!reordered) return false;
-        s.views = reordered;
-      }),
+    reorderSidebarViews: (id: string, overId: string) => {
+      const views = get().sidebarViews.views;
+      const move = {
+        id,
+        overId,
+        after:
+          views.findIndex((view) => view.id === id) < views.findIndex((view) => view.id === overId),
+      };
+      return mutateViews(
+        set,
+        get,
+        (state) => {
+          const reordered = moveSidebarView(state.views, move);
+          if (!reordered) return false;
+          state.views = reordered;
+        },
+        { move },
+      );
+    },
   };
 }
 

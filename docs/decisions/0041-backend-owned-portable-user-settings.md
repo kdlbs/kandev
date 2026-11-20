@@ -63,16 +63,23 @@ Task actions remain available. `save_draft` transfers the latest matching
 base/group-owned draft inside CAS, including committed disclosure from other
 tabs, into the saved base or an independently allocated copy. A changed owner
 is a conflict, not permission to recreate a stale after-image.
+Save and Save as are unavailable while a preceding workspace preference write
+is unacknowledged. A failed prerequisite cannot be followed by a successful
+transfer of older draft data; its failure remains actionable.
 
 Client queues preserve captured operation intent across newer HTTP/WebSocket
 snapshots. A skipped metadata-compaction item is not a persistence ACK and
 cannot discard failed predecessor intent needed by a queued successor.
 Disclosure-only compaction has no automatic transport retry: its provider
 admission fence cannot be carried across an unobserved retry interval.
+Compaction captures whether disclosure belongs to a saved row or a draft for a
+different grouping. A draft-owned prune requires that draft to still exist
+inside CAS; it cannot acquire a saved row's owner after another client transfers the draft.
 Explicit final field assignments and disclosure removals survive uncertain
 acknowledgements even when they reverse an earlier edit. An explicit queued
-reorder is rebased over collection changes already admitted before dispatch;
-later collection conflicts remain explicit. Disclosure canonicalization
+reorder captures only its moved ID, destination and before/after placement, then
+reapplies that move over the latest admitted order. Disjoint remote moves remain
+intact; missing endpoints and later collection conflicts remain explicit. Disclosure canonicalization
 deduplicates the current committed keys without replacing concurrent additions.
 
 ## Consequences

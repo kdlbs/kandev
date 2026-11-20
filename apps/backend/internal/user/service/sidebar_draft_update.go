@@ -39,7 +39,7 @@ func sidebarDraftIntentView(state *models.SidebarWorkspaceState, update *models.
 			CollapsedGroups: draft.CollapsedGroups, TaskRow: draft.TaskRow,
 		}, true
 	}
-	if update.Clear {
+	if update.Clear || update.RequireExisting {
 		return models.SidebarView{}, false
 	}
 	for _, view := range state.Views {

@@ -202,6 +202,7 @@ describe("copied sidebar view disclosure", () => {
       });
       if (operation === "save as") {
         store.getState().updateSidebarDraft({ groupIndent: false });
+        await store.getState().waitForSidebarViewSync("ws");
         store.getState().saveSidebarDraftAs("Copy");
       } else {
         store.getState().duplicateSidebarView(source.id, "Copy");
@@ -228,19 +229,6 @@ describe("copied sidebar view disclosure", () => {
       ).toEqual([collapsed]);
     },
   );
-
-  it("does not carry disclosure keys into a different draft grouping", () => {
-    const store = makeStore();
-    const source = makeView("tag-source", "Tag");
-    source.group = "plugin:acme:labels";
-    source.collapsedGroups = ["plugin:acme:labels:value:ready"];
-    seedSidebar(store, [source]);
-    store.getState().updateSidebarDraft({ group: "state" });
-    store.getState().saveSidebarDraftAs("State copy");
-    const state = store.getState().sidebarViewsByWorkspace.ws;
-    expect(state.views.find((view) => view.id === state.activeViewId)?.collapsedGroups).toEqual([]);
-    expect(state.views[0].collapsedGroups).toEqual(["plugin:acme:labels:value:ready"]);
-  });
 });
 
 describe("sidebar group indentation preference", () => {
@@ -265,6 +253,7 @@ describe("sidebar group indentation preference", () => {
         active_view_id: active,
         draft: applyDraftMutationForTest(views, active, server.draft, patch),
       };
+      server = applyDraftSaveForTest(server, patch);
       return {
         settings: {
           user_id: "default-user",
@@ -432,38 +421,6 @@ describe("sidebar draft write failure isolation", () => {
 });
 
 describe("sidebar write ordering", () => {
-  it("keeps a queued successful save after an earlier draft failure", async () => {
-    const store = makeStore();
-    seedSidebar(store, [makeView("all", "All tasks")]);
-    const draftResponse = deferred<SettingsResponse>();
-    const saveResponse = deferred<SettingsResponse>();
-    vi.mocked(updateUserSettings)
-      .mockImplementationOnce(() => draftResponse.promise)
-      .mockImplementationOnce(() => saveResponse.promise);
-
-    store.getState().updateSidebarDraft({
-      taskRow: {
-        detailsEnabled: false,
-        detailOrder: ["relative_time", "repository", "pull_request_number"],
-        visibleDetails: [],
-        trailing: "none",
-      },
-    });
-    store.getState().saveSidebarDraftOverwrite();
-
-    expect(updateUserSettings).toHaveBeenCalledTimes(1);
-    draftResponse.reject(new ApiError(DRAFT_WRITE_FAILED, 500, {}));
-    await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(2));
-
-    saveResponse.resolve({ settings: {} } as SettingsResponse);
-    await waitFor(() => {
-      expect(store.getState().sidebarViewsByWorkspace.ws.draft).toBeNull();
-      expect(store.getState().sidebarViewsByWorkspace.ws.views[0]?.taskRow?.detailsEnabled).toBe(
-        false,
-      );
-    });
-  });
-
   it("does not resurrect a failed create when its queued draft also fails", async () => {
     const store = makeStore();
     const original = makeView("all", "All tasks");

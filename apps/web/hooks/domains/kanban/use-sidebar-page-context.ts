@@ -13,6 +13,7 @@ import { sidebarSortToWire } from "@/lib/sidebar/sidebar-sort-chain";
 
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import { isSidebarPluginGrouping } from "@/lib/sidebar/sidebar-plugin-grouping";
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
 const PAGE_SIZE = 100;
 function buildSidebarQuery(
   view: ReturnType<typeof useEffectiveSidebarView>,
@@ -39,6 +40,7 @@ function useSidebarViewKey(
     workspaceGeneration: number;
     contextScope: string;
     groupingIdentity: string;
+    disclosureOwner: "saved" | "draft";
   },
   queryView: SidebarTaskQuery,
   prefs: Pick<
@@ -46,7 +48,8 @@ function useSidebarViewKey(
     "pinnedTaskIds" | "orderedTaskIds" | "subtaskOrderByParentId"
   >,
 ) {
-  const { workspaceId, workspaceGeneration, contextScope, groupingIdentity } = context;
+  const { workspaceId, workspaceGeneration, contextScope, groupingIdentity, disclosureOwner } =
+    context;
   const { pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId } = prefs;
   return useMemo(
     () =>
@@ -56,6 +59,7 @@ function useSidebarViewKey(
         contextScope,
         ...queryView,
         groupingIdentity,
+        disclosureOwner,
         pinnedTaskIds,
         orderedTaskIds,
         subtaskOrderByParentId,
@@ -69,6 +73,7 @@ function useSidebarViewKey(
       workspaceGeneration,
       contextScope,
       groupingIdentity,
+      disclosureOwner,
     ],
   );
 }
@@ -90,6 +95,13 @@ export function useSidebarPageContext(workspaceId: string | null) {
   const contextScope = useAppStore(sidebarTaskPageScope);
   const collapsedTaskIDs = useAppStore((state) => state.collapsedSubtaskParents);
   const workspaceGeneration = useAppStore((state) => state.workspaceContextGeneration);
+  const disclosureOwner = useAppStore((state) => {
+    const sidebar = selectSidebarViews(state, workspaceId);
+    const saved = sidebar.views.find((candidate) => candidate.id === sidebar.activeViewId);
+    return saved && sidebar.draft?.baseViewId === saved.id && sidebar.draft.group !== saved.group
+      ? "draft"
+      : "saved";
+  });
   const queryRevision = useAppStore(
     (state) => state.sidebarArchivedTasks?.revisionByWorkspaceId?.[workspaceId ?? ""] ?? 0,
   );
@@ -108,7 +120,7 @@ export function useSidebarPageContext(workspaceId: string | null) {
     [view, locale, collapsedTaskIDs],
   );
   const viewKey = useSidebarViewKey(
-    { workspaceId, workspaceGeneration, contextScope, groupingIdentity },
+    { workspaceId, workspaceGeneration, contextScope, groupingIdentity, disclosureOwner },
     queryView,
     prefs,
   );

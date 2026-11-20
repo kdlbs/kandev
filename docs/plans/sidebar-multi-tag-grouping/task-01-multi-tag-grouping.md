@@ -648,3 +648,90 @@ Tags source did not change in this correction round. Demo 52121, its mirror,
 1800-second stall, expanded E2E fixture errors, PostgreSQL/no-DSN, physical-phone
 and remote-CI limits remain unwaived. No release or deployment is authorized;
 the post-rebase source clean streak remains 0/3.
+
+### Post-rebase round 8 corrections
+
+Four additional schedules were reproduced: a Save queued after a rejected
+prerequisite, a draft-owned prune acquiring a remotely saved owner, a queued
+drag overwriting a disjoint acknowledged drag, and case-folded JSON fields
+bypassing the raw Tags application preflight.
+
+Save and Save as now wait until preceding workspace preference writes settle.
+Store admission and accessible disabled/busy controls, including Save-as
+confirmation, prevent acknowledgement of older data after a prerequisite fails.
+The former empty-ACK optimistic-only Save test was removed; persisted-draft
+failure tests cover both Save modes and field/disclosure prerequisites.
+
+Compaction captures saved-versus-draft ownership at queue admission. A
+draft-owned update additionally requires an existing matching draft inside CAS,
+so a post-dispatch owner transfer cannot recreate it. Reorder journals its
+moved ID, destination and original before/after placement, replaying only that
+move against the latest admitted order. Missing endpoints fail explicitly;
+the stale-permutation fallback was removed.
+
+Both Tags modes reject case-fold aliases in the document, definitions and
+application classification fields before the independent permissive board
+decoder. This preserves exact preflight/count coverage, zero read-side writes
+and the existing response bounds.
+
+RED receipts include five store failures, saved-versus-draft admission and
+real service failures, eight v1/v2 real-action alias failures, native Save/prune
+failures and the owning disjoint touch reorder failure on round-7 artifacts.
+The initial native sort setup chose an unchanged value and timed out; selecting
+the opposite direction produced the expected disabled-Save failure. The first
+long-label touch drag landed past its intended neighbor; a short rename made
+the intended A/B drag deterministic and then reproduced the C/D overwrite.
+Neither script issue is represented as a product failure.
+
+Initial GREEN includes the focused ownership/move/prerequisite regressions,
+scoped production/unit types, affected ESLint without warnings, affected Go
+lint and user Sidebar race checks. Full Tags test/vet/race passes, including
+204 UI cases and nine setup cases. Native final and fresh-package receipts are
+recorded separately below.
+
+The combined formatting/build/native command expired at its 1,800-second
+deadline before Playwright started. Formatting and backend/frontend builds
+completed; fixture archive/identity timestamps remained from round 7. This
+timeout is a failed verification command, not a sidebar runtime failure.
+The remaining fixture package prerequisite completed separately in 27.8
+seconds. Verification then resumed through the supported `--no-build`
+desktop/phone runner, without repeating the completed backend/frontend builds.
+Receipts: `r8-make-fmt.log`, `r8-native-quiet/kandev-run.e2e.oPPK5n2q.log`
+and `r8-fixture-prerequisite.log` in the retained cache evidence directory.
+
+The resumed desktop run completed 16 cases and exposed two failures. The
+disabled-button case tried to press Enter on a control that cannot receive
+focus; that unreliable extra interaction was removed while retaining both
+native disabled-control assertions and the store-level admission regressions.
+The dispatched-prune case established a real missing successor: a remote Save
+moved disclosure from draft to saved ownership without changing its effective
+group or keys. The query context now includes that concrete ownership, so a
+stale draft probe cannot strand the new saved owner on the same request key.
+The permanent native case requires the independently compacted saved owner,
+collapsed heading and reload to succeed. Its failed screenshots/context and
+raw output remain under `r8-desktop-followthrough-failures` and
+`r8-native-quiet/kandev-run.e2e.SSXXPazB.log`.
+
+Final owning desktop follow-through passed 3/3 (43.8 seconds), and the
+current-source touch-emulated phone set passed 11/11 (4.1 minutes). The first
+desktop run's 16 passing cases and two failures are retained separately, not
+presented as an all-green final 18-case invocation. Related hook/journal tests
+passed 64/64; scoped production/unit types and affected ESLint passed again.
+
+The fresh real 0.20.0 archive has SHA-256
+`4de7a671be43236b79b99771e62b93229d9dd2ee97dd1611c01038be3c502c1d`.
+Native install and the full isolated desktop/320/393 touch driver completed
+with exit 0 in 224.82 seconds: 88 mixed assertion, screenshot and narrative
+records, not 88 independent tests. It observed 103 unique tasks and 119
+occurrences, saved-view reuse/copy/reload and workspace isolation, mutation,
+overflow/Tag independence, settled recovery and touch pagination. Inspected
+PNG evidence shows repeated trees, settled recovery, the 320px chooser,
+393px Page 2 and distinct escaped headings.
+
+The owned mock-only runtime was stopped; its OWNER, launcher/driver sources,
+results, screenshot digests and backend log were retained before cleanup.
+`r8-final-tested-identity.json` matches all 18 affected host source/test files
+and four plugin files to their tested build mirrors. Protected demo 52121,
+59390 and primary instances were untouched. Historical broad backend/web/
+SQLite gates, PostgreSQL without DSN, physical phone and remote CI remain
+non-green or unproven; no release, publication or deployment is authorized.

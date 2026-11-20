@@ -1,3 +1,4 @@
+import type { SidebarViewMove } from "./sidebar-view-move";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { cloneDraft, cloneView } from "./sidebar-view-clone";
 import type { SidebarSnapshot } from "./sidebar-view-delta";
@@ -10,7 +11,11 @@ export type SidebarWriteJournal = {
   confirmed?: SidebarSnapshot;
   failedRollback?: SidebarSnapshot;
   failedWriteKind?: SidebarWriteKind;
-  failedViewMutations?: { before: SidebarSnapshot; after: SidebarSnapshot }[];
+  failedViewMutations?: {
+    before: SidebarSnapshot;
+    after: SidebarSnapshot;
+    move?: SidebarViewMove;
+  }[];
 };
 
 const journals = new WeakMap<object, SidebarWriteJournal>();

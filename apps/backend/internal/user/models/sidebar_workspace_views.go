@@ -43,9 +43,10 @@ type SidebarPresentationUpdate struct {
 }
 
 type SidebarDraftUpdate struct {
-	BaseViewID    string `json:"base_view_id"`
-	ExpectedGroup string `json:"expected_group"`
-	Clear         bool   `json:"clear,omitempty"`
+	BaseViewID      string `json:"base_view_id"`
+	ExpectedGroup   string `json:"expected_group"`
+	Clear           bool   `json:"clear,omitempty"`
+	RequireExisting bool   `json:"require_existing,omitempty"`
 	SidebarPresentationUpdate
 }
 

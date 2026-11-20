@@ -48,6 +48,16 @@ export function applyViewMutationsForTest(
     if (views.has(view.id)) views.set(view.id, applyViewUpdateForTest(views.get(view.id)!, view));
 }
 
+function changedDraftOwner(
+  current: SidebarWorkspaceStateApi["draft"],
+  update: NonNullable<SidebarPatch["draft_update"]>,
+) {
+  return (
+    current &&
+    (current.base_view_id !== update.base_view_id || current.group !== update.expected_group)
+  );
+}
+
 export function applyDraftMutationForTest(
   views: Map<string, SidebarViewApi>,
   active: string,
@@ -55,10 +65,10 @@ export function applyDraftMutationForTest(
   patch: SidebarPatch,
 ): SidebarWorkspaceStateApi["draft"] {
   if (!patch.draft_update) return "draft" in patch ? (patch.draft ?? null) : current;
-  const { base_view_id, expected_group, clear, ...fields } = patch.draft_update;
-  if (current && (current.base_view_id !== base_view_id || current.group !== expected_group))
-    return current;
+  const { base_view_id, expected_group, clear, require_existing, ...fields } = patch.draft_update;
+  if (changedDraftOwner(current, patch.draft_update)) return current;
   if (clear) return null;
+  if (require_existing && !current) return current;
   const base = views.get(base_view_id);
   if (!base || active !== base_view_id || (!current && base.group !== expected_group))
     return current;

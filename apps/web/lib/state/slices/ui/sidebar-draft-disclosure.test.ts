@@ -6,6 +6,7 @@ import {
 import { beforeEach, expect, it, vi } from "vitest";
 import { createAppStore } from "@/lib/state/store";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
+import { ApiError } from "@/lib/api/client";
 import type {
   SidebarWorkspaceStateApi,
   UserSettingsResponse,
@@ -105,5 +106,36 @@ it.each(["discard", "save as", "overwrite"])(
     expect(selected.collapsedGroups).toEqual(finish === "discard" ? [TAG_KEY] : [MULTI_KEY]);
     if (finish === "save as")
       expect(current.views.find((view) => view.id === base.id)?.collapsedGroups).toEqual([TAG_KEY]);
+  },
+);
+
+it.each([
+  { copy: false, disclosure: false },
+  { copy: true, disclosure: false },
+  { copy: false, disclosure: true },
+  { copy: true, disclosure: true },
+])(
+  "does not admit Save behind an unacknowledged edit: $copy/$disclosure",
+  async ({ copy, disclosure }) => {
+    const { reload, base } = draftWorkspace();
+    const store = reload();
+    store.getState().updateSidebarDraft({ group: MULTI });
+    await store.getState().waitForSidebarViewSync("ws");
+    const failed = Promise.withResolvers<Awaited<ReturnType<typeof updateUserSettings>>>();
+    vi.mocked(updateUserSettings).mockImplementationOnce(() => failed.promise);
+    if (disclosure) store.getState().toggleSidebarGroupCollapsed(base.id, MULTI_KEY);
+    else store.getState().updateSidebarDraft({ sort: { key: "title", direction: "asc" } });
+    try {
+      if (copy) store.getState().saveSidebarDraftAs("Copy");
+      else store.getState().saveSidebarDraftOverwrite();
+      expect(store.getState().sidebarViewsByWorkspace.ws.draft).not.toBeNull();
+    } finally {
+      failed.reject(new ApiError("Edit rejected before commit", 503, {}));
+      await store.getState().waitForSidebarViewSync("ws");
+    }
+    const persisted = reload().getState().sidebarViewsByWorkspace.ws;
+    expect(persisted.draft).not.toBeNull();
+    expect(persisted.views.find((view) => view.id === persisted.activeViewId)?.group).toBe(TAG);
+    expect(store.getState().sidebarViewsByWorkspace.ws.syncError).not.toBeNull();
   },
 );

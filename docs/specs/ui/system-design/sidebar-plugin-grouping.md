@@ -110,9 +110,10 @@ independent. `draft_update` uses its captured base-view/group owner, including
 discard, rather than adopting a newer unrelated draft's owner. Explicit full
 replacement/upsert remains separate from normal edits.
 Failed-response replay preserves touched final assignments rather than cancelling
-an inverse edit against an uncertain preimage. Explicit reorder uses the latest
-acknowledged collection while retaining sparse field intent. Actual collection
-changes after dispatch still report a conflict.
+an inverse edit against an uncertain preimage. Reorder journals the moved ID,
+destination and original before/after placement, applying only that move to the
+latest admitted collection. Disjoint acknowledged remote moves remain intact;
+missing endpoints and collection changes after dispatch report a conflict.
 
 No Tags-specific constant is added to the host. Plugin group captions use their
 localized metadata at render time; saved names follow normal user view-name
@@ -133,8 +134,13 @@ not the current page, and returns `grouping_keys`.
 The client waits for its captured workspace journal before that recovery read.
 It admits only the complete keys, not that read's task page: current
 store/workspace/provider/view/expected-disclosure fences guard reconciliation
-through the ordinary settings journal. Compaction publishes its bounded keys
-only after persistence succeeds. A rejected write keeps saved intent and exposes
+through the ordinary settings journal.
+The fence includes saved-versus-different-group-draft ownership. Draft-owned
+pruning sets `require_existing` inside CAS and never creates a replacement draft
+after another tab has transferred that owner into its saved base.
+Query identity includes that concrete disclosure owner, so a remote Save starts
+an independent saved-owner read even when the effective group and keys match.
+Compaction publishes its bounded keys only after persistence succeeds. A rejected write keeps saved intent and exposes
 manual Retry, without rollback-driven automatic writes or probe-page admission.
 The bounded successor read again carries exact client keys inline. Valid surviving
 keys remain collapsed; retired and duplicate keys are removed. Neither the
@@ -147,6 +153,9 @@ Copies retain independent arrays; changed owners conflict rather than replaying
 stale view images. Selection and Save expose a workspace-local busy state that
 blocks dependent view edits until authoritative settlement without blocking
 task actions. Discard leaves its base unchanged. A same-group draft inherits saved disclosure.
+Save and Save as are unavailable until preceding workspace preference writes
+settle. Rejection of a prerequisite cannot silently acknowledge a transfer of
+older fields or disclosure.
 Duplicate clones source disclosure so expanding a copy never expands its source.
 
 ## Repository projection and pagination

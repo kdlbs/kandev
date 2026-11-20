@@ -1,3 +1,5 @@
+import { t } from "@/lib/i18n";
+import { moveSidebarView, type SidebarViewMove } from "./sidebar-view-move";
 import { composeSidebarViewPatches } from "./sidebar-view-patch-compose";
 import type { SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 import { toApiSidebarView } from "./sidebar-view-wire";
@@ -47,7 +49,12 @@ function mergeViewEdit(current: SidebarView, before: SidebarView, after: Sidebar
   return next;
 }
 
-function rebaseViews(current: SidebarView[], before: SidebarView[], after: SidebarView[]) {
+function rebaseViews(
+  current: SidebarView[],
+  before: SidebarView[],
+  after: SidebarView[],
+  move?: SidebarViewMove,
+) {
   const previous = new Map(before.map((view) => [view.id, view]));
   const wanted = new Map(after.map((view) => [view.id, view]));
   const views = new Map(
@@ -61,15 +68,12 @@ function rebaseViews(current: SidebarView[], before: SidebarView[], after: Sideb
     if (!old && !existing) views.set(view.id, cloneView(view));
     else if (old && existing) views.set(view.id, mergeViewEdit(existing, old, view));
   }
-  const beforeOrder = before.filter((view) => wanted.has(view.id)).map((view) => view.id);
-  const afterOrder = after.filter((view) => previous.has(view.id)).map((view) => view.id);
-  if (beforeOrder.every((id, index) => afterOrder[index] === id)) return [...views.values()];
-  const reordered = afterOrder.filter((id) => views.has(id));
-  const slots = new Set(reordered);
-  let position = 0;
-  return [...views.values()].map((view) =>
-    slots.has(view.id) ? views.get(reordered[position++])! : view,
-  );
+  if (move) {
+    const reordered = moveSidebarView([...views.values()], move);
+    if (!reordered) throw new Error(t("sidebar:failedToSyncSidebarViews"));
+    return reordered;
+  }
+  return [...views.values()];
 }
 
 function sameDraftOwner(left: SidebarViewDraft, right: SidebarViewDraft): boolean {
@@ -111,8 +115,9 @@ export function rebaseSidebarMutation(
   current: SidebarSnapshot,
   before: SidebarSnapshot,
   after: SidebarSnapshot,
+  move?: SidebarViewMove,
 ): SidebarSnapshot {
-  const views = rebaseViews(current.views, before.views, after.views);
+  const views = rebaseViews(current.views, before.views, after.views, move);
   let activeViewId =
     before.activeViewId !== after.activeViewId ? after.activeViewId : current.activeViewId;
   if (!views.some((view) => view.id === activeViewId)) activeViewId = views[0]?.id ?? "";

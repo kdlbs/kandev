@@ -21,6 +21,7 @@ type HeaderProps = {
   activeView: SidebarView | undefined;
   hasDraft: boolean;
   canDelete: boolean;
+  savePending?: boolean;
   onSaveOverwrite: () => void;
   onSaveAs: (name: string) => void;
   onRename: (id: string, name: string) => void;
@@ -59,6 +60,7 @@ export function ViewHeaderRow(props: HeaderProps) {
     setEditingViewId(null);
   }
   function submit() {
+    if (mode === "saveAs" && props.savePending) return;
     const trimmed = nameDraft.trim();
     if (!trimmed) return;
     if (mode === "rename" && props.activeView) props.onRename(props.activeView.id, trimmed);
@@ -110,7 +112,7 @@ export function ViewHeaderRow(props: HeaderProps) {
           {isEditing ? (
             <EditingActions
               mode={mode}
-              canSubmit={!!nameDraft.trim()}
+              canSubmit={!!nameDraft.trim() && !(mode === "saveAs" && props.savePending)}
               onSubmit={submit}
               onCancel={exit}
             />
@@ -237,6 +239,7 @@ function ViewActions({
   activeView,
   hasDraft,
   canDelete,
+  savePending = false,
   onSaveOverwrite,
   onSaveAs,
   onRename,
@@ -248,6 +251,7 @@ function ViewActions({
   activeView: SidebarView | undefined;
   hasDraft: boolean;
   canDelete: boolean;
+  savePending?: boolean;
   onSaveOverwrite: () => void;
   onSaveAs: () => void;
   onRename: () => void;
@@ -268,6 +272,8 @@ function ViewActions({
           className="h-6 cursor-pointer text-xs"
           onClick={onSaveOverwrite}
           data-testid="view-save-button"
+          disabled={savePending}
+          aria-busy={savePending || undefined}
         >
           {t("common:save")}
         </Button>
@@ -280,6 +286,8 @@ function ViewActions({
           className="h-6 cursor-pointer text-xs"
           onClick={onSaveAs}
           data-testid="view-save-as-button"
+          disabled={savePending}
+          aria-busy={savePending || undefined}
         >
           {t("task:saveAs2")}
         </Button>

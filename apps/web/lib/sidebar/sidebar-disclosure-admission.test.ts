@@ -253,3 +253,50 @@ it.each([false, true])(
     }
   },
 );
+
+it("a queued draft prune cannot acquire its remotely saved owner's disclosure", async () => {
+  const f = disclosureFixture();
+  f.store.setState((state) => ({
+    sidebarViewsByWorkspace: {
+      ...state.sidebarViewsByWorkspace,
+      ws: {
+        ...state.sidebarViewsByWorkspace.ws,
+        views: [{ ...f.view, group: "state", collapsedGroups: [] }],
+        draft: {
+          baseViewId: f.view.id,
+          group: f.reference,
+          filters: [],
+          sort: f.view.sort,
+          collapsedGroups: f.keys,
+        },
+      },
+    },
+  }));
+  const predecessor = Promise.withResolvers<UserSettingsResponse>();
+  const saved = { ...toApiSidebarView(f.view), name: "Renamed" };
+  const response: UserSettingsResponse = {
+    settings: {
+      user_id: "default-user",
+      workspace_id: workspaceId("ws"),
+      repository_ids: [],
+      updated_at: "",
+      revision: 2,
+      sidebar_views_by_workspace: {
+        ws: { views: [saved], active_view_id: saved.id, draft: null },
+      },
+    },
+  };
+  vi.mocked(updateUserSettings)
+    .mockReturnValueOnce(predecessor.promise)
+    .mockResolvedValue(response);
+  f.store.getState().renameSidebarView(f.view.id, "Renamed");
+  const prune = f.store
+    .getState()
+    .reconcileSidebarGroupDisclosure(f.view.id, f.reference, f.keys, [f.keep]);
+  predecessor.resolve(response);
+  await prune;
+  await f.store.getState().waitForSidebarViewSync("ws");
+  expect(updateUserSettings).toHaveBeenCalledTimes(1);
+  expect(f.store.getState().sidebarViewsByWorkspace.ws.draft).toBeNull();
+  expect(f.store.getState().sidebarViewsByWorkspace.ws.views[0].collapsedGroups).toEqual(f.keys);
+});
