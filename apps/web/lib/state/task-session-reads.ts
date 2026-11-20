@@ -36,7 +36,7 @@ export function invalidateTaskSessionMembership(store: StoreApi<AppState>, taskI
   owners.get(store)?.reads.invalidate(taskId);
 }
 
-export async function readCurrentMembership(
+export async function readTaskNavigationMembership(
   reads: TaskSessionReads,
   taskId: string,
   signal: AbortSignal,
@@ -45,21 +45,29 @@ export async function readCurrentMembership(
   while (!signal.aborted && scopeIsCurrent()) {
     const generation = reads.generation(taskId);
     try {
-      return await raceAbort(
+      const allSessionsResponse = await raceAbort(
         reads.read(taskId, (readSignal) =>
           listTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
         ),
         signal,
       );
+      if (reads.isCurrent(taskId, generation))
+        return {
+          allSessionsResponse,
+          membershipGeneration: generation,
+          sessionListUnavailable: false,
+        };
     } catch (error) {
-      if (
-        signal.aborted ||
-        !scopeIsCurrent() ||
-        !(error instanceof Error && error.name === "AbortError") ||
-        !reads.isCurrent(taskId) ||
-        reads.generation(taskId) === generation
-      )
-        throw error;
+      if (signal.aborted || !scopeIsCurrent() || !reads.isCurrent(taskId)) throw abortError();
+      if (error instanceof Error && error.name === "AbortError") {
+        if (reads.generation(taskId) === generation) throw error;
+        continue;
+      }
+      return {
+        allSessionsResponse: { sessions: [], total: 0 } as TaskSessionsResponse,
+        membershipGeneration: generation,
+        sessionListUnavailable: true,
+      };
     }
   }
   throw abortError();

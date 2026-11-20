@@ -10,7 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 import { StateHydrator } from "@/components/state-hydrator";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { TaskRouteSessionHydrationProvider } from "@/components/task/task-route-session-hydration";
 import { KanbanTaskShell } from "@/app/tasks/[id]/kanban-task-shell";
 import {
@@ -162,14 +162,25 @@ function TaskDetailRouteBody({
   routeDataReady: boolean;
   onRouteHydrated?: () => void;
 }) {
+  const activeSessionId = useAppStore((state) => {
+    const owner = route.navigationContext?.selectionAtStart;
+    if (
+      owner &&
+      state.taskRemoval.navigationRevision !== owner.navigationRevision &&
+      state.tasks.activeTaskId === route.shellTaskId
+    )
+      return getOwnedTaskSessionId(state, route.shellTaskId, state.tasks.activeSessionId);
+    return route.activeSessionId;
+  });
   return (
     <div className="relative h-full min-h-0 w-full" aria-busy={route.isLoadingOverPreviousRoute}>
       {route.initialState ? (
         <StateHydrator
           initialState={route.initialState}
-          sessionId={route.forceMergeSession ? (route.activeSessionId ?? undefined) : undefined}
+          sessionId={route.forceMergeSession ? (activeSessionId ?? undefined) : undefined}
           taskSessionHydrationEpochsAtRequestStart={route.hydrationEpochsAtRequestStart}
           turnWindowObservationsAtRequestStart={route.turnWindowObservationsAtRequestStart}
+          taskSelectionAtRequestStart={route.navigationContext?.selectionAtStart}
           onHydrated={onRouteHydrated}
         />
       ) : null}
@@ -179,13 +190,13 @@ function TaskDetailRouteBody({
             {route.task && isDetachedManagedConversation(route.task) ? (
               <RetainedManagedConversationTranscript
                 task={route.task}
-                sessionId={route.activeSessionId}
+                sessionId={activeSessionId}
               />
             ) : (
               <KanbanTaskShell
                 task={route.task}
                 taskId={route.shellTaskId}
-                sessionId={route.activeSessionId}
+                sessionId={activeSessionId}
                 initialRepositories={extractInitialRepositories(route.initialState, route.task)}
                 initialScripts={extractInitialScripts(route.initialState, route.task)}
                 initialTerminals={route.data?.initialTerminals ?? []}

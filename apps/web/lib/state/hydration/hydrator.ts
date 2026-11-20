@@ -65,6 +65,11 @@ export type HydrationOptions = {
   turnWindowObservationsAtRequestStart?: Readonly<Record<string, ActiveTurnWindowObservation>>;
   /** Session generations captured when the hydration request started. */
   taskSessionHydrationEpochsAtRequestStart?: Readonly<Record<string, TaskSessionHydrationEpoch>>;
+  /** Route identity may hydrate data, but not replace a newer selection owner. */
+  taskSelectionAtRequestStart?: {
+    navigationRevision: number;
+  };
+  preserveTaskSelection?: boolean;
 };
 
 /** Deep-merge a field with optional loading state preservation. */
@@ -161,14 +166,31 @@ function seedOrderRevisionsFromSteps(
   );
 }
 
-function hydrateTaskSelection(draft: Draft<AppState>, incoming: HydrationState["tasks"]): void {
-  if (incoming && !isConfirmedSessionRemoved(draft.taskSessions, incoming.activeSessionId ?? "")) {
-    deepMerge(draft.tasks, incoming);
-  }
+function hydrateTaskSelection(
+  draft: Draft<AppState>,
+  incoming: HydrationState["tasks"],
+  options: HydrationOptions,
+): void {
+  if (!incoming || isConfirmedSessionRemoved(draft.taskSessions, incoming.activeSessionId ?? ""))
+    return;
+  if (options.preserveTaskSelection) return;
+  const owner = options.taskSelectionAtRequestStart;
+  if (
+    owner &&
+    (draft.taskRemoval.navigationRevision !== owner.navigationRevision ||
+      draft.workflowSessionFocus.intent?.taskId === incoming.activeTaskId ||
+      draft.workflowSessionFocus.request?.taskId === incoming.activeTaskId)
+  )
+    return;
+  deepMerge(draft.tasks, incoming);
 }
 
 /** Hydrate kanban and workspace slices. */
-function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState): void {
+function hydrateKanbanAndWorkspace(
+  draft: Draft<AppState>,
+  state: HydrationState,
+  options: HydrationOptions,
+): void {
   if (state.kanban) {
     // Merge tasks by ID with timestamp comparison to avoid overwriting fresher WS data
     const { tasks, ...kanbanRest } = state.kanban;
@@ -184,7 +206,7 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState
   }
   if (state.workflows) deepMerge(draft.workflows, state.workflows);
   if (state.workspaceContextRead) deepMerge(draft.workspaceContextRead, state.workspaceContextRead);
-  hydrateTaskSelection(draft, state.tasks);
+  hydrateTaskSelection(draft, state.tasks, options);
   if (state.workspaces) deepMerge(draft.workspaces, state.workspaces);
   if (state.repositories) deepMerge(draft.repositories, state.repositories);
   if (state.repositoryBranchPolicies)
@@ -1106,7 +1128,7 @@ export function hydrateState(
     turnWindowObservationsAtRequestStart,
   } = options;
 
-  hydrateKanbanAndWorkspace(draft, state);
+  hydrateKanbanAndWorkspace(draft, state, options);
   hydrateSettings(draft, state);
   hydrateSession(draft, state, activeSessionId, forceMergeSessionId, {
     taskSessionHydrationEpochsAtRequestStart,

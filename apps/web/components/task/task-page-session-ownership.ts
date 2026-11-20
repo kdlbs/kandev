@@ -2,6 +2,23 @@
 
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getProvenRemovalPredecessor } from "@/lib/state/session-removal-handoff";
+import type { AppState } from "@/lib/state/store";
+import type { StoreApi } from "zustand";
+
+/** Passive route synchronization cannot consume an independent selection owner. */
+export function hasOwnedTaskPageSelection(store: StoreApi<AppState>, taskId: string): boolean {
+  const state = store.getState();
+  if (state.tasks.activeTaskId !== taskId) return false;
+  const sid = state.tasks.activeSessionId;
+  return (
+    (sid !== null &&
+      state.tasks.pinnedSessionId === sid &&
+      state.taskSessions.items[sid]?.task_id === taskId) ||
+    state.workflowSessionFocus.intent?.taskId === taskId ||
+    state.workflowSessionFocus.request?.taskId === taskId ||
+    getProvenRemovalPredecessor(store, taskId, sid) !== null
+  );
+}
 
 export type RenderedTaskSession = {
   /** The owned session the page may render, or null while ownership is unknown. */

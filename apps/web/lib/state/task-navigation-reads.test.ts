@@ -14,7 +14,7 @@ import {
   deferred,
   identity,
 } from "./task-navigation-reads.test-helpers";
-import { invalidateTaskSessionMembership } from "./task-session-reads";
+import { getTaskSessionReads, invalidateTaskSessionMembership } from "./task-session-reads";
 
 const apiMocks = vi.hoisted(() => ({
   fetchTask: vi.fn(),
@@ -63,19 +63,37 @@ describe("task navigation canonical overview refresh", () => {
     apiMocks.listTaskSessions.mockReset();
   });
 
-  it("replaces retired membership without cancelling the current route identity", async () => {
-    const store = makeStore();
-    const first = deferred<{ sessions: never[]; total: number }>();
-    const fresh = { sessions: [{ id: "survivor", task_id: ACTIVE_TASK_ID }], total: 1 };
-    apiMocks.fetchTask.mockResolvedValue(refreshedTask());
-    apiMocks.listTaskSessions.mockReturnValueOnce(first.promise).mockResolvedValue(fresh);
-    const read = readTaskNavigationIdentity(store, ACTIVE_TASK_ID);
-    await Promise.resolve();
-    invalidateTaskSessionMembership(store, ACTIVE_TASK_ID);
-    first.resolve({ sessions: [], total: 0 });
-    await expect(read).resolves.toMatchObject({ allSessionsResponse: fresh });
-    expect(apiMocks.listTaskSessions).toHaveBeenCalledTimes(2);
-  });
+  it.each(["pending", "fulfilled"] as const)(
+    "replaces %s retired membership while the task DTO is still pending",
+    async (membershipPhase) => {
+      const store = makeStore();
+      const task = deferred<TaskNavigationIdentity["task"]>();
+      const first = deferred<TaskNavigationIdentity["allSessionsResponse"]>();
+      const stale = { sessions: [{ id: "removed", task_id: ACTIVE_TASK_ID }], total: 1 };
+      const fresh = {
+        sessions: [
+          { id: "completed", task_id: ACTIVE_TASK_ID, state: "COMPLETED" },
+          { id: "survivor", task_id: ACTIVE_TASK_ID, is_primary: true },
+        ],
+        total: 2,
+      };
+      apiMocks.fetchTask.mockReturnValue(task.promise);
+      apiMocks.listTaskSessions.mockReturnValueOnce(first.promise).mockResolvedValue(fresh);
+      const read = readTaskNavigationIdentity(store, ACTIVE_TASK_ID);
+      await vi.waitFor(() => expect(apiMocks.listTaskSessions).toHaveBeenCalledTimes(1));
+      if (membershipPhase === "fulfilled") {
+        first.resolve(stale as never);
+        await vi.waitFor(() =>
+          expect(getTaskSessionReads(store).isReading(ACTIVE_TASK_ID)).toBe(false),
+        );
+      }
+      invalidateTaskSessionMembership(store, ACTIVE_TASK_ID);
+      first.resolve(stale as never);
+      task.resolve({ ...refreshedTask(), primary_session_id: "removed" } as never);
+      await expect(read).resolves.toMatchObject({ allSessionsResponse: fresh });
+      expect(apiMocks.listTaskSessions).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("repairs shared placement after a move missed before websocket connection", async () => {
     const store = makeStore();

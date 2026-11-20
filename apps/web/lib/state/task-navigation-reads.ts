@@ -16,11 +16,12 @@ import {
 } from "@/lib/state/task-navigation-attempt";
 import {
   getTaskSessionReads,
-  readCurrentMembership,
+  readTaskNavigationMembership,
   type TaskSessionReads,
 } from "@/lib/state/task-session-reads";
 import type { Task, TaskSessionsResponse } from "@/lib/types/http";
 import type { AppState } from "./store";
+import type { HydrationOptions } from "./hydration/hydrator";
 
 export type TaskNavigationIdentity = {
   task: Task;
@@ -32,6 +33,7 @@ export type TaskNavigationContext = {
   readonly ownerToken: object;
   readonly identity: string;
   readonly generation: number;
+  readonly selectionAtStart?: HydrationOptions["taskSelectionAtRequestStart"];
 };
 
 export type TaskNavigationReadSnapshot = {
@@ -452,28 +454,29 @@ async function fetchTaskNavigationIdentity(
 ): Promise<TaskNavigationIdentity> {
   // The HTTP attempt owns reconciliation; joined and cached callers do not publish again.
   const overviewReadId = store.getState().beginTaskOverviewRead();
+  const release = sessionReads.retain(taskId);
   try {
     const taskRequest = fetchTask(taskId, { cache: "no-store", init: { signal } });
-    const release = sessionReads.retain(taskId);
-    const sessionList = readCurrentMembership(sessionReads, taskId, signal, scopeIsCurrent).finally(
-      release,
-    );
-    const [task, sessionResponse] = await Promise.all([
+    const [task, firstMembership] = await Promise.all([
       taskRequest,
-      sessionList.then(
-        (allSessionsResponse) => ({ allSessionsResponse, sessionListUnavailable: false }),
-        (error) => {
-          if (isTaskNavigationAbort(error) || signal.aborted) throw abortError();
-          return { allSessionsResponse: { sessions: [], total: 0 }, sessionListUnavailable: true };
-        },
-      ),
+      readTaskNavigationMembership(sessionReads, taskId, signal, scopeIsCurrent),
     ]);
+    let membership = firstMembership;
+    while (!sessionReads.isCurrent(taskId, membership.membershipGeneration)) {
+      if (signal.aborted || !scopeIsCurrent()) throw abortError();
+      membership = await readTaskNavigationMembership(sessionReads, taskId, signal, scopeIsCurrent);
+    }
     if (signal.aborted || !scopeIsCurrent()) throw abortError();
     if (isCurrentTaskDetailRead(store, taskId)) {
       store.getState().retainTaskOverviews("detail", [toKanbanTask(task)], overviewReadId);
     }
-    return { task, ...sessionResponse };
+    return {
+      task,
+      allSessionsResponse: membership.allSessionsResponse,
+      sessionListUnavailable: membership.sessionListUnavailable,
+    };
   } finally {
+    release();
     store.getState().finishTaskOverviewRead(overviewReadId);
   }
 }
@@ -547,10 +550,14 @@ export function beginTaskNavigation(
   ) {
     return previous.context;
   }
+  const state = store.getState();
   const context = Object.freeze({
     ownerToken: readOwner.token,
     identity: readOwner.identity,
     generation,
+    selectionAtStart: {
+      navigationRevision: state.taskRemoval.navigationRevision,
+    },
   });
   readOwner.navigationContext = { navigationOwner: owner, routeKey, context };
   return context;

@@ -675,5 +675,18 @@ fix. It is separate from the five design-only rounds above.
   deletion and reaches the surviving transcript/read cursor without reload.
   Strict checks and fixture corrections are recorded in Task 02. Independent
   review remains open; round 20 is next.
-- Completed rounds: 19. Consecutive clean: 0. Stop after three consecutive
+- Round 20: Sol child `58c572af-0f9e-49e9-b69c-86c375356f06` reviewed
+  `fabcfa652f`. One P2: replacement membership can pair with a captured task
+  DTO and transiently select/read a newer completed sibling instead of the
+  proven successor. Reproduced stale shell selection and fulfilled membership
+  reuse; the real held-HTTP browser flow advanced the unrelated sibling's cursor
+  on the R19 bundle.
+  Corrections preserve membership generation through identity
+  admission, use the membership primary, and keep newer selection ownership
+  through hydration and ordinary task-page synchronization. The final 28
+  affected unit files passed 349 cases; all 23 desktop and eight phone cases
+  passed on the fresh R20 frontend. C is displayed/read, B retains its null
+  cursor and receives no mark-read. Strict checks and causal receipts are in
+  Task 02. Independent review remains open; round 21 is next.
+- Completed rounds: 20. Consecutive clean: 0. Stop after three consecutive
   clean rounds or 50 rounds. Earlier loops do not count.

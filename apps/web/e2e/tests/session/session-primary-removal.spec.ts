@@ -12,6 +12,7 @@ import {
   observeRemovalSelection,
   holdParkedLayoutFrames,
   holdInitialMembership,
+  holdInitialTaskIdentity,
   REMOVAL_PRIMARY_TEXT,
   seedRemovalChoiceTask,
 } from "../../helpers/session-removal";
@@ -26,6 +27,7 @@ import {
   waitForFailedResume,
   taskUnreadSessionIds,
   TASK_UNREAD_DOT_LABEL,
+  newestStoredMessageId,
 } from "../../helpers/unread-divider";
 import type { DockviewApi } from "dockview-react";
 
@@ -358,13 +360,16 @@ test.describe("owned removal transcript visibility", () => {
       ).toHaveAttribute("data-session-id", old.session_id);
     }
     const gate = await holdInitialMembership(testPage, task.task_id, old.session_id);
+    const taskGate = await holdInitialTaskIdentity(testPage, task.task_id, old.session_id);
+    const reads = observeReadTraffic(testPage);
+    const primaryTail = await newestStoredMessageId(apiClient, primary.session_id);
     try {
       const started = await testPage.evaluate(() => performance.timeOrigin);
       await testPage
         .getByTestId("task-preview-panel")
         .getByRole("button", { name: "Open full page" })
         .click();
-      await gate.queued;
+      await Promise.all([gate.queued, taskGate.queued]);
       await dwell(
         testPage,
         1500,
@@ -377,7 +382,14 @@ test.describe("owned removal transcript visibility", () => {
       await desktopTestPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
       await desktopTestPage.getByTestId("session-delete-confirm").click();
       await waitForActiveTaskSession(testPage, task.task_id, primary.session_id);
+      const membership = await apiClient.listTaskSessions(task.task_id);
+      expect(membership.sessions.map((row) => row.id)).toEqual([
+        other.session_id,
+        primary.session_id,
+      ]);
+      expect(membership.sessions.find((row) => row.is_primary)?.id).toBe(primary.session_id);
       gate.release();
+      taskGate.release();
       const session = new SessionPage(testPage);
       await expect(session.activeChat()).toHaveAttribute("data-session-id", primary.session_id);
       await expect(
@@ -385,13 +397,22 @@ test.describe("owned removal transcript visibility", () => {
       ).toBeVisible();
       await expect
         .poll(async () => (await sessionReadState(apiClient, primary.session_id)).cursor)
-        .not.toBeNull();
+        .toBe(primaryTail);
       expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(started);
+      await dwell(
+        testPage,
+        1500,
+        "negative-assertion",
+        "The newer completed sibling was not selected",
+      );
+      expect((await sessionReadState(apiClient, other.session_id)).cursor).toBeNull();
+      expect(reads.markReads.filter((read) => read.sessionId === other.session_id)).toEqual([]);
       await testPage.screenshot({
         path: test.info().outputPath("initial-membership-recovered.png"),
       });
     } finally {
       await gate.dispose();
+      await taskGate.dispose();
     }
   });
 

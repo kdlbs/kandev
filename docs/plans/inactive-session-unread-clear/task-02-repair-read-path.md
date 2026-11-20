@@ -2823,3 +2823,138 @@ list convergence is not isolated cursor-event delivery evidence; seeded
 RUNNING rows are not live executions. Historical incident attribution
 remains qualified. Round 19 corrections are ready for selective delivery
 and independent Sol round 20; the review loop is not complete.
+
+### Production-fix review round 20 remediation
+
+Sol child `58c572af-0f9e-49e9-b69c-86c375356f06` reviewed `fabcfa652f`
+and reported a stale DTO/fresh membership pairing. A task-only route captures
+view A; its task GET can still name A after removal. Fresh membership is
+ordered `[B COMPLETED, C WAITING_FOR_INPUT primary]`. The old resolver ignored
+membership primary and selected B. A later update can restore C, masking the
+intermediate, irreversible acknowledgement of B.
+
+Before/after (desktop task-only Preview-to-workbench transition):
+
+```text
+Before: task=A held + retired initial membership
+        -> C proven by removal -> fresh [B,C] -> shell selects/reads B
+After:  same independent HTTP gates
+        -> C proven -> current membership primary C -> C transcript/read
+        B remains unread; newer pin/workflow and an owned null slot survive.
+```
+
+Phone keeps its existing Sessions sheet/direct route composition; this changes
+shared identity/selection admission, not touch targets, layout or scroll owners.
+The existing eight phone unread/removal scenarios remain the rendered parity
+gate.
+
+RED, cache-backed snapshot `~/.cache/tmp/unread-verification.zWhGjx`:
+
+- `r20-red.log`: five behavioral failures / 44 controls passed. Fulfilled
+  membership survived retirement while the task DTO was pending; the shell
+  chose B over membership primary C; real mounted route hydration/task-page
+  sync displaced a newer pin and an owned empty slot.
+- `r20-ui-red-summary.log` /
+  `r20-quiet/kandev-run.e2e.4gxowx2D.log`: intentionally reused the freshly
+  retained R19 production frontend before building R20. The real Preview
+  button/second-client Delete flow independently held task GET and initial
+  membership. Despite eventually displaying C, B acquired a persisted cursor.
+  This is product RED, not a selector or fixture failure.
+
+Correction boundaries:
+
+- Keep a retained membership owner until both HTTP legs settle. Validate the
+  accepted membership generation at identity publication; only invalidated
+  generations are replaced, not generic errors or cancelled navigation.
+- Prefer the unique same-task membership primary to a stale DTO's primary;
+  an existing explicit requested session retains precedence.
+- Route hydration carries the navigation revision captured at entry, and
+  checks the current scoped removal receipt at final store admission.
+  Hydrate entity data without consuming a newer pin, workflow intent/request,
+  or proven removal target/empty slot.
+- Ordinary task-page synchronization also respects those current owners,
+  instead of undoing the hydration guard with its first fallback effect.
+
+The mounted recovery tests now use the real StateHydrator rather than a
+duplicated mock. Adjacent instrumented route mocks accept the owner option.
+The new workflow control initially omitted response `entryIdentity`, so its
+real reconciliation correctly refused the fixture. That single failure in
+`r20-units-final.log` (297 controls passed) is not another product RED; the
+corrected correlated response asserts its committed selection before releasing
+the route read. Earlier partial correction results are in `r20-green.log`.
+
+An additional ownership control releases identity only after the committed
+workflow request has already been acknowledged. `r20-ack-red.log` reproduced
+the loss of that recipient (one failure / ten controls). Successful workflow
+focus now advances the existing navigation revision once at commit, so
+acknowledgement does not erase its selection authority. The route renders
+the current owned selection after a newer revision, rather than feeding its
+captured fallback back into task-page synchronization. Failed/cancelled moves
+do not advance that revision.
+
+`r20-units-delivery.log`: 24 affected files / 298 cases passed before the
+acknowledged-workflow extension and final budget cleanup. The strict lint gate
+then required moving the membership selection regression into the existing
+membership test owner, extracting the route fixtures into a test-only helper,
+and using a const task DTO. Typecheck also required a complete task-selection
+fixture. These were tooling/fixture corrections, not extra product REDs.
+
+Final source checks after the acknowledged-workflow correction:
+
+- `r20-units-final2.log`: 28 affected files / 349 cases passed, including the
+  real route/StateHydrator, membership generations, explicit session admission,
+  null/pin/workflow owners before and after acknowledgement, hydration,
+  workflow slice/actions, step-move hook and Dockview workflow delivery.
+- `r20-lint-delivery.log`: strict changed-code Oxlint passed without warnings.
+- `r20-typecheck-delivery.log`: full web typecheck passed.
+- `r20-build-delivery.log`: fresh R20 Vite build passed (existing chunk-size
+  and dynamic-import warnings are not a clean-warning claim).
+- `r20-ratchets.log`: changed-code Prettier, sleep and i18n ratchets passed.
+
+Focused command from the documented prepared cache checkout:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm run pretypecheck
+pnpm exec vitest run \
+  lib/state/task-navigation-reads{,-retry,-budget}.test.ts \
+  lib/state/task-session-reads.test.ts lib/state/hydration \
+  lib/ssr/session-page-state.test.ts \
+  lib/ssr/session-page-enrichment-membership.test.ts \
+  lib/ssr/session-page-navigation-bounded.test.ts \
+  lib/ssr/session-page-model-hydration.test.ts \
+  src/task-detail-route{,-recovery,-session-selection}.test.tsx \
+  components/task/task-page-session-ownership.test.tsx \
+  components/task/task-page-content \
+  lib/state/workflow-session-focus.test.ts \
+  lib/state/slices/kanban/kanban-slice.test.ts \
+  hooks/domains/kanban/use-workflow-step-move.test.ts \
+  components/task/dockview-session-tabs.hook.test.tsx
+```
+
+Final rendered verification on the fresh R20 frontend, retained R02
+backend/plugin, one worker and no retries:
+
+```bash
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/task/task-unread-dot.spec.ts -- --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+- `r20-desktop-final-summary.log` /
+  `r20-quiet/kandev-run.e2e.oCDFUbuH.log`: all 23 cases passed.
+- `r20-phone-final-summary.log` /
+  `r20-quiet/kandev-run.e2e.ch032EG2.log`: all eight cases passed.
+- The independently gated task/membership scenario now displays C, persists
+  exactly C's seeded tail, leaves B's cursor null and records no B mark-read,
+  without reloading. Inspected its capture: C's stored conversation/composer
+  is visible and the task dot remains for the unread sibling.
+
+All temporary/dependency/build/artifact destinations stay on the cache drive.
+No live-user browser/data mutation. This is not a broad-suite/live-NATS
+certificate or proof of the deleted historical incident's exact trigger.
+Authoritative list convergence is not isolated cursor-event delivery evidence;
+seeded RUNNING rows are not live executions. Round 20 corrections are ready
+for selective delivery and independent Sol round 21; the loop remains open.

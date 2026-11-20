@@ -9,6 +9,7 @@ import type { Task, TaskSession } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types";
 import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
+import type { HydrationOptions } from "@/lib/state/hydration/hydrator";
 
 const mocks = vi.hoisted(() => ({
   beginTaskNavigation: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("@/components/state-hydrator", async () => {
       initialState,
       sessionId,
       taskSessionHydrationEpochsAtRequestStart,
+      taskSelectionAtRequestStart,
       onHydrated,
     }: {
       initialState: Partial<AppState>;
@@ -48,6 +50,7 @@ vi.mock("@/components/state-hydrator", async () => {
       taskSessionHydrationEpochsAtRequestStart?: Readonly<
         Record<string, TaskSessionHydrationEpoch>
       >;
+      taskSelectionAtRequestStart?: HydrationOptions["taskSelectionAtRequestStart"];
       onHydrated?: () => void;
     }) => {
       const store = useAppStoreApi();
@@ -58,12 +61,19 @@ vi.mock("@/components/state-hydrator", async () => {
           store.getState().hydrate(initialState, {
             forceMergeSessionId: sessionId,
             taskSessionHydrationEpochsAtRequestStart,
+            taskSelectionAtRequestStart,
           });
         }
         const markHydrated = () => onHydratedRef.current?.();
         mocks.onHydrated = markHydrated;
         if (!mocks.deferRouteHydration) markHydrated();
-      }, [initialState, sessionId, store, taskSessionHydrationEpochsAtRequestStart]);
+      }, [
+        initialState,
+        sessionId,
+        store,
+        taskSessionHydrationEpochsAtRequestStart,
+        taskSelectionAtRequestStart,
+      ]);
       return <div data-testid={STATE_HYDRATOR_TEST_ID} data-force-session-id={sessionId ?? ""} />;
     },
   };

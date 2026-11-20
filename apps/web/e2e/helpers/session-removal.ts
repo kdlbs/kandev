@@ -72,13 +72,16 @@ function membershipContains(body: unknown, sessionId: string): boolean {
   });
 }
 
-/** Hold authentic task membership, never fabricate its rows or primary. */
-async function holdMembership(page: Page, taskId: string, shouldHold: (body: unknown) => boolean) {
+/** Hold authentic task responses without fabricating identity or membership. */
+async function holdTaskResponse(
+  page: Page,
+  pattern: string,
+  shouldHold: (body: unknown) => boolean,
+) {
   let armed = false;
   let released = false;
   const gate = Promise.withResolvers<void>();
   const queued = Promise.withResolvers<void>();
-  const pattern = `**/api/v1/tasks/${taskId}/sessions*`;
   const running = new Set<Promise<void>>();
   const handle = async (route: import("@playwright/test").Route) => {
     const response = await route.fetch();
@@ -114,15 +117,29 @@ async function holdMembership(page: Page, taskId: string, shouldHold: (body: unk
 }
 
 export function holdRemovalMembership(page: Page, taskId: string, removedId: string) {
-  return holdMembership(page, taskId, (body) => !membershipContains(body, removedId));
+  return holdTaskResponse(
+    page,
+    `**/api/v1/tasks/${taskId}/sessions*`,
+    (body) => !membershipContains(body, removedId),
+  );
 }
 
 export async function holdInitialMembership(page: Page, taskId: string, staleSessionId?: string) {
-  const gate = await holdMembership(
+  const gate = await holdTaskResponse(
     page,
-    taskId,
+    `**/api/v1/tasks/${taskId}/sessions*`,
     (body) => !staleSessionId || membershipContains(body, staleSessionId),
   );
+  gate.arm();
+  return gate;
+}
+
+export async function holdInitialTaskIdentity(page: Page, taskId: string, previousPrimary: string) {
+  const gate = await holdTaskResponse(page, `**/api/v1/tasks/${taskId}`, (body) => {
+    if (!body || typeof body !== "object" || !("primary_session_id" in body))
+      throw new Error("Expected a stored task identity");
+    return body.primary_session_id === previousPrimary;
+  });
   gate.arm();
   return gate;
 }
