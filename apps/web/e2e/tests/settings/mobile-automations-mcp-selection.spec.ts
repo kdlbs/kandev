@@ -55,11 +55,15 @@ test("selects and saves every optional package on a phone with reachable control
   await prCapture.screenshot("automation-mcp-phone", {
     caption: "Automation MCP selection on a phone",
   });
+  await section.screenshot({ path: "../../artifacts/mcp-switches/list-automation-phone.png" });
   await section.getByTestId("automation-mcp-package-configuration").tap();
   const detail = section.getByTestId("automation-mcp-package-detail");
-  expect((await detail.getByRole("combobox").boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect(
+    (await detail.getByTestId("automation-mcp-choice-configuration").boundingBox())!.height,
+  ).toBeGreaterThanOrEqual(44);
   await detail.evaluate((element) => element.scrollIntoView({ block: "start" }));
   if (prCapture.capturing) await waitForFiniteAnimations(testPage.locator("body"));
+  await detail.screenshot({ path: "../../artifacts/mcp-switches/automation-phone.png" });
   await prCapture.screenshot("automation-mcp-package-detail-phone", {
     caption: "Automation package detail with touch-sized controls",
   });
@@ -68,12 +72,14 @@ test("selects and saves every optional package on a phone with reachable control
   await testPage.reload();
   for (const id of OPTIONAL_AUTOMATION_PACKAGES)
     await expect(
-      section.getByTestId(`automation-mcp-package-${id}`).locator('[data-slot="badge"]'),
-    ).toHaveText("On");
-  const diagnostics = section.getByTestId("automation-mcp-package-diagnostics");
+      section.getByTestId(`automation-mcp-choice-${id}`).getByRole("switch"),
+    ).toBeChecked();
+  const diagnostics = section.getByTestId("automation-mcp-choice-diagnostics").getByRole("switch");
   await chooseAutomationPackage(testPage, "diagnostics", false, true);
   for (const width of [320, 393, 767, 768]) {
-    await expect(diagnostics.locator('[data-slot="badge"]')).toHaveText("Off");
+    await expect(
+      section.getByTestId("automation-mcp-choice-diagnostics").getByRole("switch"),
+    ).not.toBeChecked();
     await testPage.setViewportSize({ width, height: 851 });
     await expect(diagnostics).toBeFocused();
     await assertNoDocumentHorizontalOverflow(testPage, `automation MCP at ${width}px`);
@@ -85,7 +91,9 @@ test("selects and saves every optional package on a phone with reachable control
     .getByTestId("settings-floating-save")
     .getByRole("button", { name: "Reset", exact: true })
     .tap();
-  await expect(diagnostics.locator('[data-slot="badge"]')).toHaveText("On");
+  await expect(
+    section.getByTestId("automation-mcp-choice-diagnostics").getByRole("switch"),
+  ).toBeChecked();
 });
 
 test.describe("Narrow fine pointer", () => {
@@ -115,17 +123,21 @@ test.describe("Narrow fine pointer", () => {
     await expect(back).toBeFocused();
     expect((await back.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await testPage.keyboard.press("Tab");
-    const choice = detail.getByRole("combobox");
+    const choice = detail.getByRole("switch");
     await expect(choice).toBeFocused();
     await expect(choice).toHaveAccessibleName("Configuration MCP access");
-    expect((await choice.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(
+      (await detail.getByTestId("automation-mcp-choice-configuration").boundingBox())!.height,
+    ).toBeGreaterThanOrEqual(44);
     await testPage.keyboard.press("Enter");
-    await testPage.getByRole("option", { name: "On", exact: true }).click();
+    await expect(choice).toBeChecked();
     await detail.getByRole("button", { name: /registered tools/ }).click();
     await expect(detail.getByText("list_shared_prompts_kandev", { exact: true })).toBeVisible();
     await back.click();
     await expect(row).toBeFocused();
-    await expect(row.locator('[data-slot="badge"]')).toHaveText("On");
+    await expect(
+      testPage.getByTestId("automation-mcp-choice-configuration").getByRole("switch"),
+    ).toBeChecked();
     await saveAutomationMCP(testPage, watcher);
     await assertNoDocumentHorizontalOverflow(testPage, "automation MCP with a narrow fine pointer");
   });

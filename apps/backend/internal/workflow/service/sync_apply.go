@@ -75,6 +75,7 @@ func (s *Service) ApplySyncedWorkflows(ctx context.Context, workspaceID string, 
 	}
 
 	result := &SyncApplyResult{}
+	var applied []models.WorkflowPortable
 	desired := make(map[string]bool)
 	frozenPaths := make(map[string]bool)
 	for _, f := range files {
@@ -99,9 +100,11 @@ func (s *Service) ApplySyncedWorkflows(ctx context.Context, workspaceID string, 
 			} else {
 				s.createSyncedWorkflow(ctx, workspaceID, pw, f.Path, result, bindings)
 			}
+			applied = append(applied, pw)
 		}
 	}
 	s.deleteVanishedWorkflows(ctx, synced, desired, frozenPaths, result)
+	result.Warnings = append(result.Warnings, syncWarningTexts(s.exclusionWarnings(ctx, workspaceID, applied))...)
 
 	sort.Strings(result.Created)
 	sort.Strings(result.Updated)

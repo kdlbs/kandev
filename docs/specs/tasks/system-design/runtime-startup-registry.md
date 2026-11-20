@@ -83,7 +83,6 @@ the registry artifact, Task 04 verifier, and all work-order file lists.
 | P25b post_gate | `startApplicationProducersAndPublishRoutes` -> `startCronScheduler` | shared cron loop | `cronLoop.Stop` | false |
 | P26 post_gate | `startApplicationProducersAndPublishRoutes` -> `task.Service.StartAutoArchiveLoop` | auto-archive loop | `task.Service.StopAutoArchiveLoop` | false |
 | P27 post_gate | `startApplicationProducersAndPublishRoutes` -> `task.Service.StartArchivedSessionReconciliationLoop` | archived-session loop | `task.Service.StopArchivedSessionReconciliationLoop` | false |
-| P28 post_gate | `startApplicationProducersAndPublishRoutes` -> `task.Service.StartQuickChatExpirationLoop` | quick-chat loop | `task.Service.StopQuickChatExpirationLoop` | false |
 | P29a post_gate | `startApplicationProducersAndPublishRoutes` -> `provideStorageComposition` | artifact/quarantine reconciliation | `storageComposition.Close` | false |
 | P29b post_gate | `startApplicationProducersAndPublishRoutes` -> `system.Service.StartBackground` | storage/update/metrics workers | `system.Service.StopBackground` | false |
 | P30a post_gate | `startApplicationProducersAndPublishRoutes` -> `review.Runner.Start` | review worker | `review.Runner.Stop` | false |

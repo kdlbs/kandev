@@ -12,6 +12,9 @@ export type LaunchQueueViewModel = {
     inUse: number;
     limit: number;
     observedAt: string;
+    policy?: "all";
+    grades?: { grade: string; inUse: number | null; limit: number | null }[] | null;
+    needsConfiguration?: boolean;
   } | null;
 };
 
@@ -22,6 +25,27 @@ const LAUNCH_QUEUE_REASONS = new Set<TaskStatusSummaryLaunchQueue["reason"]>([
 ]);
 
 export const LAUNCH_QUEUE_CAPACITY_STALE_AFTER_MS = 40_000;
+
+function gradeRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function observedCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function capacityGradeRows(capacity: NonNullable<TaskStatusSummaryLaunchQueue["capacity"]>) {
+  const counts = gradeRecord(capacity.grade_in_use);
+  const limits = gradeRecord(capacity.grade_limits);
+  if (!counts || !limits) return null;
+  return [...new Set([...Object.keys(limits), ...Object.keys(counts)])].map((grade) => ({
+    grade,
+    inUse: observedCount(counts[grade]),
+    limit: observedCount(limits[grade]),
+  }));
+}
 
 function validCapacity(
   capacity: TaskStatusSummaryLaunchQueue["capacity"],
@@ -40,6 +64,13 @@ function validCapacity(
     inUse: capacity.in_use,
     limit: capacity.limit,
     observedAt: capacity.observed_at,
+    ...(capacity.policy === "all"
+      ? {
+          policy: capacity.policy,
+          grades: capacityGradeRows(capacity),
+          needsConfiguration: capacity.needs_configuration === true,
+        }
+      : {}),
   };
 }
 

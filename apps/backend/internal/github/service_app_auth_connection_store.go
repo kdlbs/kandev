@@ -150,7 +150,7 @@ func (u *installationRepositorySettingsUpdater) ApplyInstallationRepositories(ct
 		return true, nil
 	}
 	settings, err := u.service.store.GetWorkspaceSettings(ctx, change.WorkspaceID)
-	if err != nil || settings == nil || settings.RepoScopeMode != RepoScopeModeRepos {
+	if err != nil || settings == nil || settings.RepoScopeMode != RepoScopeModeSelected {
 		return err == nil, err
 	}
 	removed := make(map[string]struct{}, len(change.Removed))

@@ -11,6 +11,9 @@ var ErrWIPLimitExceeded = errors.New("workflow step WIP limit exceeded")
 // ErrWorkflowStepNotFound reports that no workflow step row matched the supplied id.
 var ErrWorkflowStepNotFound = errors.New("workflow step not found")
 
+// ErrWorkflowTemplateNotFound reports that no workflow template row matched the supplied id.
+var ErrWorkflowTemplateNotFound = errors.New("workflow template not found")
+
 // ErrInvalidWorkflowStepOrder identifies an incomplete or duplicate step order.
 var ErrInvalidWorkflowStepOrder = errors.New("invalid workflow step order")
 
@@ -34,3 +37,7 @@ func (e *WIPLimitError) Unwrap() error {
 func NewWIPLimitError(stepID string, limit, occupied int) error {
 	return &WIPLimitError{StepID: stepID, Limit: limit, Occupied: occupied}
 }
+
+// ErrWorkflowStepChanged reports that a step changed after the caller read it,
+// so a version-guarded write applied nothing.
+var ErrWorkflowStepChanged = errors.New("workflow step changed since it was read")

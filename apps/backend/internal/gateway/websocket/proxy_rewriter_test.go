@@ -179,16 +179,43 @@ func TestRewriteHTMLURLs_InjectsRuntimeShim(t *testing.T) {
 }
 
 func TestRewriteHTMLURLs_NoHeadStillRewritesURLs(t *testing.T) {
-	// Documents without a <head> are rare but possible. We don't bother
-	// injecting the shim in that case (no good anchor point), but URL
-	// rewriting must still work.
+	// A fragment has no document head or body, but URL rewriting must still work.
 	in := `<a href="/foo">x</a>`
 	got := string(rewriteHTMLURLs([]byte(in), proxyPrefix, "", ""))
 	if !strings.Contains(got, `href="/port-proxy/abc/3001/foo"`) {
 		t.Fatalf("URL not rewritten: %q", got)
 	}
 	if strings.Contains(got, "window.fetch=") {
-		t.Fatalf("unexpected shim in headless document: %q", got)
+		t.Fatalf("unexpected shim in fragment: %q", got)
+	}
+}
+
+func TestRewriteHTMLURLs_OmittedHeadInjectsShimBeforeBodyScripts(t *testing.T) {
+	const marker = `<script src="/port-proxy/abc/3001/__kandev_runtime_shim.js"></script>`
+	inputs := []struct {
+		name string
+		html string
+	}{
+		{
+			name: "doctype and html with omitted head",
+			html: `<!doctype html><html><meta charset="utf-8"><title>x</title><body><script>const gl = canvas.getContext('webgl')</script></body></html>`,
+		},
+		{
+			name: "document tags omitted",
+			html: `<meta charset="utf-8"><script>const gl = canvas.getContext('webgl')</script>`,
+		},
+	}
+	for _, input := range inputs {
+		t.Run(input.name, func(t *testing.T) {
+			got := string(rewriteHTMLURLs([]byte(input.html), proxyPrefix, "", ""))
+			shimIdx := strings.Index(got, marker)
+			metaIdx := strings.Index(got, `<meta charset="utf-8">`)
+			inlineScriptIdx := strings.Index(got, `<script>const gl`)
+			if shimIdx < 0 || shimIdx >= metaIdx || shimIdx >= inlineScriptIdx {
+				t.Fatalf("shim must load before omitted-head content and body scripts: shim=%d meta=%d script=%d\n%s",
+					shimIdx, metaIdx, inlineScriptIdx, got)
+			}
+		})
 	}
 }
 
@@ -1573,6 +1600,12 @@ func TestRewriteHTMLURLs_ExternalBaseSuppressesCapability(t *testing.T) {
 	mustContain(t, got, `style="background:url(bg.png)"`)
 	mustContain(t, got, `<base href="https://evil.example/">`)
 
+	document := `<!doctype html><html><base href="https://evil.example/"><body><img src="/logo.png"></body></html>`
+	gotDocument := string(rewriteHTMLURLs([]byte(document), proxyPrefix, "cap-document", ""))
+	if strings.Contains(gotDocument, "kandev_cap") || strings.Contains(gotDocument, "__kandev_runtime_shim.js") {
+		t.Fatalf("shim capability leaked under an external base:\n%s", gotDocument)
+	}
+
 	// Network-relative base is external too.
 	netRel := `<base href="//cdn.example/">` + `<img src="/logo.png">`
 	gotNet := string(rewriteHTMLURLs([]byte(netRel), proxyPrefix, "cap-base2", ""))
@@ -1639,7 +1672,7 @@ func TestRewriteHTMLURLs_ExternalBaseSrcdocOwnBase(t *testing.T) {
 	in := `<base href="https://evil.example/"><iframe srcdoc="&lt;base href=&quot;/cdn/&quot;&gt;&lt;img src=&quot;a.png&quot;&gt;&lt;img src=&quot;/logo.png&quot;&gt;"></iframe>`
 	got := string(rewriteHTMLURLs([]byte(in), proxyPrefix, "cap-sd", ""))
 
-	mustContain(t, got, `srcdoc="&lt;base href=&#34;/port-proxy/abc/3001/cdn/&#34;&gt;&lt;img src=&#34;a.png?kandev_cap=cap-sd&#34;&gt;&lt;img src=&#34;/port-proxy/abc/3001/logo.png?kandev_cap=cap-sd&#34;&gt;"`)
+	mustContain(t, got, `srcdoc="&lt;script src=&#34;/port-proxy/abc/3001/__kandev_runtime_shim.js?kandev_cap=cap-sd&#34;&gt;&lt;/script&gt;&lt;base href=&#34;/port-proxy/abc/3001/cdn/&#34;&gt;&lt;img src=&#34;a.png?kandev_cap=cap-sd&#34;&gt;&lt;img src=&#34;/port-proxy/abc/3001/logo.png?kandev_cap=cap-sd&#34;&gt;"`)
 }
 
 // imagesrcset is observed at runtime: it is in the MutationObserver attribute

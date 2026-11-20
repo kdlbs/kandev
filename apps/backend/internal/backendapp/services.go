@@ -27,8 +27,8 @@ import (
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/githubhost"
@@ -110,7 +110,7 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		enabled: cfg.Features.WorkspaceCollaboration, store: repos.Task,
 	}, repos.Task)
 
-	wireTaskWorkflowCrossReferences(taskSvc, workflowSvc, userSecretStore, repos, log)
+	wireTaskWorkflowCrossReferences(taskSvc, workflowSvc, core.editorSvc, userSecretStore, repos, log)
 
 	providers, err := initThirdPartyProviders(ctx, cfg, dbPool, eventBus, repos, storeTracker, taskSvc, promptSvc, workflowSvc, log)
 	if err != nil {
@@ -178,7 +178,6 @@ func assembleServices(
 		GitHub:                   providers.github,
 		GitLab:                   providers.gitlab,
 		GitLabCleanup:            providers.gitlabCleanup,
-		AzureDevOps:              providers.azureDevOps,
 		Jira:                     providers.jira,
 		Linear:                   providers.linear,
 		Sentry:                   providers.sentry,
@@ -509,12 +508,12 @@ func initIntegrationWiring(
 	return wiring, nil
 }
 
-// wireTaskWorkflowCrossReferences wires the task and workflow services'
-// mutual dependencies: each owns a slice of behavior the other needs to call
-// through an adapter, since neither package may import the other directly.
+// wireTaskWorkflowCrossReferences wires the task, workflow, and editor
+// services at their shared authorization and lifecycle boundaries.
 func wireTaskWorkflowCrossReferences(
 	taskSvc *taskservice.Service,
 	workflowSvc *workflowservice.Service,
+	editorSvc *editorservice.Service,
 	userSecretStore secrets.SecretStore,
 	repos *Repositories,
 	log *logger.Logger,
@@ -539,6 +538,23 @@ func wireTaskWorkflowCrossReferences(
 	// Session history is owned by workflow service, but access is owned by the
 	// task service. Keep the authorization check at the service boundary.
 	workflowSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)
+	editorSvc.SetSessionAccessChecker(func(ctx context.Context, sessionID string) error {
+		session, err := repos.Task.GetTaskSession(ctx, sessionID)
+		if err != nil || session == nil {
+			return editorservice.ErrWorkspaceNotFound
+		}
+		// Editor launches run on the backend host, not through the session's
+		// executor. Check task reach and session.exec without executor admission:
+		// historical sessions can outlive their executor configuration.
+		err = taskSvc.AuthorizeTaskScope(ctx, session.TaskID, authz.ScopeSessionExec)
+		if taskservice.IsForbidden(err) {
+			return editorservice.ErrSessionForbidden
+		}
+		if err != nil {
+			return editorservice.ErrWorkspaceNotFound
+		}
+		return nil
+	})
 	// Same split for the rest of the workflow-step surface: the workflow
 	// package owns steps, templates and export/import, but a workflow's owner
 	// is its workspace's owner, which only the task service can resolve.
@@ -578,7 +594,6 @@ type thirdPartyProviders struct {
 	github        *github.Service
 	gitlab        *gitlab.Service
 	gitlabCleanup func() error
-	azureDevOps   *azuredevops.Service
 	jira          *jira.Service
 	linear        *linear.Service
 	sentry        *sentry.Service
@@ -620,14 +635,6 @@ func initThirdPartyProviders(
 		gitlabSvc.SetPromptResolver(promptSvc)
 		gitlabSvc.SetComparisonTargetObserver(taskSvc)
 	}
-	azureDevOpsSvc, _, azureDevOpsErr := initAzureDevOpsServiceRequired(dbPool, eventBus, repos.Secrets, log)
-	if recordErr := recordRequiredStore(ctx, storeTracker, "azure-devops", azureDevOpsErr); recordErr != nil {
-		return nil, fmt.Errorf("initialize azure devops: %w", recordErr)
-	}
-	if azureDevOpsSvc != nil {
-		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})
-		azureDevOpsSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
-	}
 	jiraSvc, _, jiraErr := initJiraServiceRequired(dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordRequiredStore(ctx, storeTracker, "jira", jiraErr); recordErr != nil {
 		return nil, fmt.Errorf("initialize jira: %w", recordErr)
@@ -646,7 +653,7 @@ func initThirdPartyProviders(
 	}
 	return &thirdPartyProviders{
 		github: githubSvc, gitlab: gitlabSvc, gitlabCleanup: gitlabCleanup,
-		azureDevOps: azureDevOpsSvc, jira: jiraSvc, linear: linearSvc,
+		jira: jiraSvc, linear: linearSvc,
 		sentry: sentrySvc, workflowSync: workflowSyncSvc,
 	}, nil
 }
@@ -813,7 +820,7 @@ func initGitCredentialAndRemoteWiring(
 	version string,
 	log *logger.Logger,
 ) (*gitcredentials.Broker, *share.HTTPHandlers, error) {
-	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
+	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, repos.gitCredentialReissueSigner)
 	if pluginsSvc != nil {
 		pluginsSvc.SetGitCredentialLeaseRevoker(gitCredentialBroker.RevokeProvider)
 	}
@@ -1249,6 +1256,9 @@ func (a *githubBrokerScopeAuthorizer) authorizeTaskSession(
 	if task == nil || task.WorkspaceID != workspaceID {
 		return fmt.Errorf("task does not belong to workspace")
 	}
+	if task.ArchivedAt != nil {
+		return fmt.Errorf("task is archived")
+	}
 	session, err := a.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return err
@@ -1604,37 +1614,6 @@ func initJiraServiceRequired(dbPool *db.Pool, eventBus bus.EventBus, secretsStor
 	svc, cleanup, err := jira.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jira store: %w", err)
-	}
-	return svc, cleanup, nil
-}
-
-// initAzureDevOpsService wires the workspace-scoped Azure integration.
-// Failures are non-fatal so unrelated providers and the backend keep working.
-func initAzureDevOpsService(
-	dbPool *db.Pool,
-	eventBus bus.EventBus,
-	secretsStore secrets.SecretStore,
-	log *logger.Logger,
-) *azuredevops.Service {
-	svc, _, err := initAzureDevOpsServiceRequired(dbPool, eventBus, secretsStore, log)
-	if err != nil {
-		log.Warn("Azure DevOps service initialization failed (non-fatal)", zap.Error(err))
-		return nil
-	}
-	return svc
-}
-
-func initAzureDevOpsServiceRequired(
-	dbPool *db.Pool,
-	eventBus bus.EventBus,
-	secretsStore secrets.SecretStore,
-	log *logger.Logger,
-) (*azuredevops.Service, func() error, error) {
-	svc, cleanup, err := azuredevops.Provide(
-		dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log,
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("azure-devops store: %w", err)
 	}
 	return svc, cleanup, nil
 }

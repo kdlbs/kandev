@@ -54,7 +54,6 @@ async function openMarkdownPreview(
   });
   const previewToggle = testPage.getByTestId("markdown-preview-toggle").first();
   await expect(previewToggle).toBeVisible({ timeout: 10_000 });
-  await previewToggle.click();
   await expect(testPage.getByTestId("markdown-preview")).toBeVisible({ timeout: 10_000 });
 }
 

@@ -11,6 +11,7 @@ import type {
 import type { NativeMCPDiagnostic } from "@/lib/prepare/native-mcp-diagnostic";
 import type { ModelCatalog } from "@kandev/types/model-catalog";
 import type { UserShellScope } from "@/lib/state/user-shell-scope";
+import type { WorkspaceRootFilesResponse } from "@/lib/types/workspace-files";
 
 export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
@@ -203,6 +204,10 @@ export type GitStatusRefreshState = {
   tracker_epoch?: number;
   snapshot_revision?: number;
   timestamp?: string;
+};
+
+export type WorkspaceRootFilesState = {
+  byEnvironmentId: Record<string, WorkspaceRootFilesResponse>;
 };
 
 // Git Snapshot types for historical tracking
@@ -646,6 +651,7 @@ export type SessionRuntimeSliceState = {
   sessionPollMode: SessionPollModeState;
   embeddedVscodeSupport: EmbeddedVscodeSupportState;
   workspaceFilesRefresh: { bySessionId: Record<string, number> };
+  workspaceRootFiles: WorkspaceRootFilesState;
   workspaceRestoration: WorkspaceRestorationState;
   backgroundWork: BackgroundWorkState;
 };
@@ -678,6 +684,7 @@ export type SessionRuntimeSliceActions = {
     repositoryName: string,
   ) => void;
   bumpWorkspaceFilesRefresh: (sessionId: string) => void;
+  setWorkspaceRootFiles: (environmentId: string, files: WorkspaceRootFilesResponse) => void;
   /** Drops the pre-multi-repo (empty-repo-name) git-status entries so a
    *  freshly-multi-branch session doesn't surface a stale snapshot from the
    *  workspace tracker that was replaced on the backend during rescan. */

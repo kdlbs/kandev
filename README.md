@@ -81,7 +81,7 @@ See [docs/features.md](docs/features.md) for the full feature inventory, includi
   <a href="https://slack.com/"><img src="https://img.shields.io/badge/Slack-4A154B?style=for-the-badge&logo=slack&logoColor=white" alt="Slack"></a>
 </p>
 
-Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull issues into the kanban, link tasks to PRs, and surface review activity inline. Bitbucket support is available through the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket).
+Connect Kandev to GitHub, GitLab, Jira, Linear, and Sentry to pull issues into the kanban, link tasks to PRs, and surface review activity inline. Bitbucket and Azure DevOps support is available through the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket) and the [Azure DevOps plugin](https://github.com/JnManso/kandev-plugin-azure-devops).
 
 ## Supported Agent CLIs
 

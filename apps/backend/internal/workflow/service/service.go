@@ -39,6 +39,7 @@ type Service struct {
 	workflowAuthorizationRequired  func(context.Context) bool
 	repo                           *repository.Repository
 	logger                         *logger.Logger
+	exclusionAdvisor               ImportExclusionAdvisor
 	workflowProvider               WorkflowProvider
 	workspaceProvider              WorkspaceProvider
 	resolveProfile                 models.AgentProfileResolver
@@ -380,8 +381,13 @@ func (s *Service) GetPreviousStepByPosition(ctx context.Context, workflowID stri
 
 // CreateStepsFromTemplate creates workflow steps for a workflow from a template.
 func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templateID string) error {
-	if err := s.authorizeExecutorMutation(ctx, workflowID); err != nil {
+	if err := s.AuthorizeWorkflow(ctx, workflowID); err != nil {
 		return err
+	}
+	if s.executorMutationChecker != nil {
+		if err := s.executorMutationChecker(ctx, workflowID); err != nil {
+			return err
+		}
 	}
 	template, err := s.repo.GetTemplate(ctx, templateID)
 	if err != nil {
@@ -784,8 +790,9 @@ func (s *Service) ListHistoryBySession(ctx context.Context, sessionID string) ([
 
 // ImportResult holds the outcome of an import operation.
 type ImportResult struct {
-	Created []string `json:"created"`
-	Skipped []string `json:"skipped"`
+	Created  []string        `json:"created"`
+	Skipped  []string        `json:"skipped"`
+	Warnings []ImportWarning `json:"warnings,omitempty"`
 }
 
 // ExportWorkflow exports a single workflow with its steps as portable JSON.
@@ -888,6 +895,7 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 		}
 		result.Created = append(result.Created, pw.Name)
 	}
+	result.Warnings = s.exclusionWarnings(ctx, workspaceID, selectedWorkflows(export, selection.indexes))
 
 	s.logger.Info("imported workflows",
 		zap.String("workspace_id", workspaceID),

@@ -288,6 +288,13 @@ const (
 	RouteAttemptOutcomeSkippedMissingMapping RouteAttemptOutcome = "skipped_missing_mapping"
 	RouteAttemptOutcomeMaxAttempts           RouteAttemptOutcome = "skipped_max_attempts"
 	RouteAttemptOutcomeDeferredCircuit       RouteAttemptOutcome = "deferred_circuit"
+	// RouteAttemptOutcomeDeferredCapacity: the session ceiling deferred the
+	// launch and its replay owns retrying it.
+	RouteAttemptOutcomeDeferredCapacity RouteAttemptOutcome = "deferred_capacity"
+	// RouteAttemptOutcomeSkippedAuthorProvider: the provider that did the
+	// task's work, skipped for a seat run at a step declaring
+	// exclude_author_provider.
+	RouteAttemptOutcomeSkippedAuthorProvider RouteAttemptOutcome = "skipped_author_provider"
 )
 
 // String implements fmt.Stringer.

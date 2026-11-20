@@ -723,6 +723,7 @@
   "routeOutcomeRetryScheduled": "已安排重试",
   "routeOutcomeSkippedDegraded": "已跳过（降级）",
   "routeOutcomeSkippedMaxAttempts": "已跳过（达最大尝试次数）",
+  "routeOutcomeSkippedAuthorProvider": "已跳过：编写了此任务",
   "routeOutcomeSkippedMissingMapping": "已跳过（缺少映射）",
   "routeOutcomeSkippedUserAction": "已跳过（用户操作）",
   "routineActivated": "例行程序已激活",
@@ -745,6 +746,7 @@
   "routineStatusPaused": "已暂停",
   "routingOverridesSaved": "路由覆盖已保存",
   "routingSettingsSaved": "路由设置已保存",
+  "routingSavedWithExclusionWarnings": "设置已保存，但按当前设置，“在其他提供商上审阅”无法生效。请查看页面顶部的警告。",
   "run": "运行",
   "runActivity": "运行活动",
   "runCancelAssigneeChanged": "负责人已更改",
@@ -1024,5 +1026,10 @@
   "failedToLoadRouteAttempts": "加载路由尝试记录失败",
   "failedToLoadRoutingConfig": "加载路由配置失败",
   "failedToLoadRoutingPreview": "加载路由预览失败",
-  "failedToLoadTaskQuorum": "加载任务法定人数失败"
+  "failedToLoadTaskQuorum": "加载任务法定人数失败",
+  "authorExclusionStepsTitle": "在其他提供商上审阅",
+  "authorExclusionStepsDescription": "让步骤的审阅人或审批人避开完成任务工作的提供商，使审阅成为独立检查。如果没有其他可用的提供商，审阅会一直等待，直到你采取操作。需要开启提供商自动回退，并至少配置两个提供商。拥有自己执行配置的智能体不受此设置约束。",
+  "authorExclusionStepsEmpty": "此工作区中没有工作流包含审阅人或审批人步骤。",
+  "authorExclusionStepLabel": "{{workflow}} 工作流，{{step}} 步骤",
+  "authorExclusionStepSwitchLabel": "为 {{workflow}} 工作流的 {{step}} 步骤（{{role}}）在其他提供商上审阅"
 }

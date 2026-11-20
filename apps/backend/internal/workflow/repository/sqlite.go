@@ -27,6 +27,7 @@ type Repository struct {
 	db      *sqlx.DB // writer
 	ro      *sqlx.DB // reader
 	migrate *db.MigrateLogger
+	log     *logger.Logger
 }
 
 // NewWithDB creates a new SQLite repository with existing database connections.
@@ -35,11 +36,17 @@ func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error)
 		db:      writer,
 		ro:      reader,
 		migrate: db.NewRequiredMigrateLogger(writer, log),
+		log:     log,
 	}
 	if err := repo.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize workflow schema: %w", err)
 	}
 	return repo, nil
+}
+
+// Rebind converts question-mark parameters to the repository driver's syntax.
+func (r *Repository) Rebind(query string) string {
+	return r.db.Rebind(query)
 }
 
 // initSchema creates the database tables if they don't exist.
@@ -174,6 +181,9 @@ func (r *Repository) initSchema() error {
 	// Seed system templates
 	if err := r.seedSystemTemplates(); err != nil {
 		return fmt.Errorf("failed to seed system templates: %w", err)
+	}
+	if err := r.upgradeImproveKandevPrompts(); err != nil {
+		return fmt.Errorf("failed to upgrade Improve Kandev prompts: %w", err)
 	}
 
 	// Seed default workflow steps for workflows that don't have any
@@ -524,7 +534,7 @@ func (r *Repository) GetTemplate(ctx context.Context, id string) (*models.Workfl
 	`), id).Scan(&template.ID, &template.Name, &template.Description, &isSystem, &stepsJSON, &template.CreatedAt, &template.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("workflow template not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", models.ErrWorkflowTemplateNotFound, id)
 	}
 	if err != nil {
 		return nil, err
@@ -955,7 +965,7 @@ func (r *Repository) writeStepUpdate(
 		if expectedWorkflow != nil && expectedStep != nil {
 			return false, repoerrors.ErrTaskVersionConflict
 		}
-		return false, fmt.Errorf("workflow step not found: %s", step.ID)
+		return false, fmt.Errorf("%w: %s", models.ErrWorkflowStepNotFound, step.ID)
 	}
 	var savedFlag int
 	if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT is_start_step FROM workflow_steps WHERE id = ? AND workflow_id = ?`), step.ID, step.WorkflowID).Scan(&savedFlag); err != nil {
@@ -1260,7 +1270,7 @@ func (r *Repository) DeleteStep(ctx context.Context, id string) error {
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("workflow step not found: %s", id)
+		return fmt.Errorf("%w: %s", models.ErrWorkflowStepNotFound, id)
 	}
 	return tx.Commit()
 }

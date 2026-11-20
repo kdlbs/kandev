@@ -37,11 +37,64 @@ type eventSelectionTransport struct {
 func (r *eventSelectionTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	require.Equal(r.t, "api.github.com", req.URL.Host)
 	require.Equal(r.t, "/search/issues", req.URL.Path)
-	require.Equal(r.t, "is:pr is:open repo:acme/widget", req.URL.Query().Get("q"))
+	query := req.URL.Query().Get("q")
+	require.True(r.t, strings.HasPrefix(query, "is:pr is:open repo:"), "query = %q", query)
+	repo := strings.TrimPrefix(query, "is:pr is:open repo:")
+	owner, name, found := strings.Cut(repo, "/")
+	require.True(r.t, found, "query repo = %q", repo)
 	require.Contains(r.t, req.Header.Get("Authorization"), "event-fixture-token")
 	r.searches++
-	body := fmt.Sprintf(`{"items":[{"id":17,"number":17,"title":"Selection fixture","state":"open","draft":%t,"html_url":"https://github.com/acme/widget/pull/17","repository_url":"https://api.github.com/repos/acme/widget","user":{"login":"alice"}}]}`, r.draft)
+	body := fmt.Sprintf(`{"items":[{"id":17,"number":17,"title":"Selection fixture","state":"open","draft":%t,"html_url":"https://github.com/%s/%s/pull/17","repository_url":"https://api.github.com/repos/%s/%s","user":{"login":"alice"}}]}`, r.draft, owner, name, owner, name)
 	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-REPOSITORY-SCOPE-001.5
+func TestGitHubPRScopeUnion(t *testing.T) {
+	f := newEventSelectionFixture(t)
+	require.NoError(t, f.githubStore.UpsertWorkspaceSettings(context.Background(), &github.WorkspaceSettings{
+		WorkspaceID: "ws-1", RepoScopeMode: github.RepoScopeModeSelected,
+		RepoScopeOrgs: []string{"acme"}, RepoScopeRepos: []github.RepoFilter{{Owner: "outside", Name: "tool"}},
+	}))
+	trigger := f.add(t, `{"events":["opened"],"repos":[{"owner":"acme","name":"widget"},{"owner":"outside","name":"tool"},{"owner":"other","name":"private"}]}`)
+	prs, err := f.evaluator.githubService.ListAutomationPRs(context.Background(), "ws-1", "outside", "tool", "is:pr is:open repo:outside/tool")
+	require.NoError(t, err)
+	require.Len(t, prs, 1)
+	require.Equal(t, "outside/tool", prs[0].RepoOwner+"/"+prs[0].RepoName)
+	_, err = f.evaluator.githubService.ListAutomationPRs(context.Background(), "ws-1", "other", "private", "is:pr is:open repo:other/private")
+	require.Error(t, err, "unselected repository escaped the workspace scope")
+	require.Equal(t, 1, f.transport.searches, "denied repository reached GitHub")
+	f.transport.searches = 0
+
+	f.evaluator.evaluatePRTriggers(context.Background())
+	require.Equal(t, 2, f.transport.searches, "provider searches")
+	require.Len(t, f.fired, 1, "only the first run is admitted while the automation is active")
+	runs, err := f.svc.Store().ListRuns(context.Background(), f.automation.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, runs, 2, "both allowed repositories are evaluated")
+	gotRepos := make(map[string]RunStatus, len(runs))
+	for _, run := range runs {
+		var data map[string]any
+		require.NoError(t, json.Unmarshal(run.TriggerData, &data))
+		repo, ok := data["repo"].(string)
+		require.True(t, ok, "run trigger data repo = %#v", data["repo"])
+		gotRepos[repo] = run.Status
+		reserved, err := f.svc.Store().HasRunWithDedupKey(context.Background(), f.automation.ID, run.DedupKey)
+		require.NoError(t, err)
+		require.True(t, reserved, "run for %s must retain its PR dedup reservation", repo)
+	}
+	require.Contains(t, gotRepos, "acme/widget")
+	require.Contains(t, gotRepos, "outside/tool")
+	current, err := f.svc.GetAutomation(context.Background(), f.automation.ID)
+	require.NoError(t, err)
+	require.NotNil(t, current.LastTriggeredAt)
+	saved, err := f.svc.GetTrigger(context.Background(), trigger.ID)
+	require.NoError(t, err)
+	require.NotNil(t, saved.LastEvaluatedAt)
+	require.JSONEq(t, string(trigger.Config), string(saved.Config))
+	event := <-f.fired
+	var eventData map[string]any
+	require.NoError(t, json.Unmarshal(event.TriggerData, &eventData))
+	require.Equal(t, "acme/widget", eventData["repo"])
 }
 
 type eventSelectionFixture struct {
