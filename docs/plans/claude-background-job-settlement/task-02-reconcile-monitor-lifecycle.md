@@ -93,6 +93,11 @@ source qualification separately from deterministic replay.
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator -run 'TestClaudeMonitorWorkloadProjection|TestForegroundBusySignal_MonitorViaUpdate' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/task/service -run 'Test.*BackgroundWork' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./cmd/mock-agent -run '^TestClaudeMonitorLifecycleFixture' -count=1)
+(cd apps/backend && go test -race -trimpath -tags fts5 ./internal/agentctl/server/adapter/transport/acp ./internal/orchestrator ./cmd/mock-agent -count=1)
+make -C apps/backend build
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
 bash scripts/lint-go-changed \
   apps/backend/cmd/mock-agent/claude_background_terminal_fixture.go \
   apps/backend/cmd/mock-agent/claude_background_terminal_fixture_test.go \
@@ -112,6 +117,8 @@ bash scripts/lint-go-changed \
   apps/backend/internal/agentctl/server/adapter/transport/acp/claude_monitor_completion.go \
   apps/backend/internal/agentctl/server/adapter/transport/acp/claude_monitor_completion_reader.go \
   apps/backend/internal/agentctl/server/adapter/transport/acp/claude_monitor_completion_test.go \
+  apps/backend/internal/agentctl/server/adapter/transport/acp/claude_monitor_completion_reader_lifecycle_test.go \
+  apps/backend/internal/agentctl/server/adapter/transport/acp/claude_monitor_completion_linux_test.go \
   apps/backend/internal/agentctl/server/adapter/transport/acp/claude_monitor_completion_unix_test.go \
   apps/backend/internal/agentctl/server/adapter/transport/acp/claude_monitor_lifecycle_test.go \
   apps/backend/internal/agentctl/server/adapter/transport/acp/claude_monitor_open_unix.go \
@@ -119,6 +126,10 @@ bash scripts/lint-go-changed \
   apps/backend/internal/agentctl/server/adapter/transport/shared/config.go \
   apps/backend/internal/agentctl/server/process/manager.go \
   apps/backend/internal/agentctl/server/process/claude_monitor_evidence_test.go \
+  apps/backend/internal/agentctl/server/process/claude_monitor_evidence_windows_test.go \
+  apps/backend/internal/orchestrator/event_handlers_background_work.go \
+  apps/backend/internal/orchestrator/event_handlers_streaming.go \
+  apps/backend/internal/orchestrator/claude_monitor_terminal_dispatch_test.go \
   apps/backend/internal/orchestrator/claude_background_terminal_projection_test.go \
   apps/backend/internal/orchestrator/claude_monitor_lifecycle_projection_test.go
 (cd apps/web && pnpm e2e:run --project chromium tests/task/claude-monitor-lifecycle.spec.ts)
@@ -188,21 +199,21 @@ passed. Coverage includes ordinary prompt completion, foreground-idle handoff,
 exact per-Monitor settlement, late progress, reset, verified owner exit, and
 an open Monitor sibling. Feature-gate tests prove disabled Background Work
 does not admit a reader and enabled prompts without a Monitor do not poll
-transcript bodies. A Unix FIFO replacement test proves adapter shutdown drains
-the reader, and the opened descriptor retains nonblocking mode. Native
-settlement dispatches `EventTypeBackgroundWorkUpdated`; production event
-dispatch during successor handoff settles the original Monitor once while
-preserving the successor foreground and live sibling.
+transcript bodies. Oversized records are discarded across read windows;
+regular-file replacement, same-inode truncation, and FIFO replacement recover
+without another prompt. A Unix FIFO replacement test proves adapter shutdown
+drains the reader, and the opened descriptor retains nonblocking mode. Reader
+shutdown cancels its context. Native settlement dispatches
+`EventTypeBackgroundWorkUpdated`; production event dispatch during successor
+handoff settles the original Monitor once while preserving its provider state,
+finish time, origin turn, the successor foreground, and a live sibling.
 
-`make -C apps/backend build`, changed-Go lint, the docs catalog, and
-specification lint passed. The focused ACP, process, orchestrator, task-service,
-and mock-agent commands passed, as did the focused race run for ACP,
-orchestrator, and mock-agent. The Chromium and mobile-chrome lifecycle
-scenarios passed. Both kept two Monitors visible through reload and a successor
-prompt, settled one at a time, preserved the draft, and showed both completed
-rows in History before and after reload.
-
-The Chromium and mobile-chrome lifecycle scenarios passed. Both kept two
-Monitors visible through reload and a successor prompt, settled one at a time,
-preserved the draft, and showed both completed rows in History before and
-after reload.
+`make -C apps/backend build`, changed-Go lint, the docs catalog, specification
+lint, and `git diff --check` passed. Focused ACP, process, orchestrator,
+task-service, and mock-agent commands passed. The race-enabled ACP, orchestrator,
+and mock-agent suites passed. The Chromium and mobile-chrome lifecycle scenarios
+each passed (one test each). Both kept two Monitors visible through reload and a
+successor prompt, settled one at a time, preserved the draft, and showed both
+completed rows in History before and after reload. The Windows test binary could
+not be cross-compiled locally because no MinGW toolchain is installed; the
+CGO-disabled attempt stopped in the unrelated SQLite cgo package.

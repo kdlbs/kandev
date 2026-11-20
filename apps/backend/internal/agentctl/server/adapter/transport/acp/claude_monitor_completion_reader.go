@@ -266,6 +266,8 @@ func (r *claudeMonitorCompletionReader) verifyProjectDirectory(project *os.Root)
 		return err
 	}
 	if r.projectInfo != nil && !os.SameFile(r.projectInfo, projectInfo) {
+		r.resetSessionFile()
+		r.projectInfo = projectInfo
 		return errors.New("claude Monitor project directory changed")
 	}
 	r.projectInfo = projectInfo
@@ -289,13 +291,18 @@ func (r *claudeMonitorCompletionReader) ensureSessionFile(project *os.Root) (boo
 func (r *claudeMonitorCompletionReader) readAppendedChunk(project *os.Root) ([]byte, error) {
 	pathInfo, err := project.Lstat(r.sessionFile)
 	if err != nil || !pathInfo.Mode().IsRegular() || !os.SameFile(r.fileInfo, pathInfo) {
+		r.resetSessionFile()
 		return nil, errors.Join(err, errors.New("claude Monitor session file changed"))
 	}
 	fileInfo, err := r.file.Stat()
 	if err != nil || !os.SameFile(r.fileInfo, fileInfo) {
+		r.resetSessionFile()
 		return nil, errors.Join(err, errors.New("claude Monitor session file identity changed"))
 	}
 	if fileInfo.Size() < r.offset {
+		r.offset = 0
+		r.pendingBytes = nil
+		r.discardingOversizedRecord = false
 		return nil, errors.New("claude Monitor session file was truncated")
 	}
 	toRead := fileInfo.Size() - r.offset
@@ -315,6 +322,17 @@ func (r *claudeMonitorCompletionReader) readAppendedChunk(project *os.Root) ([]b
 	}
 	r.offset += int64(n)
 	return chunk, nil
+}
+
+func (r *claudeMonitorCompletionReader) resetSessionFile() {
+	if r.file != nil {
+		_ = r.file.Close()
+		r.file = nil
+	}
+	r.fileInfo = nil
+	r.offset = 0
+	r.pendingBytes = nil
+	r.discardingOversizedRecord = false
 }
 
 func (r *claudeMonitorCompletionReader) parsePendingRecords() ([]claudeMonitorCompletion, error) {
@@ -400,7 +418,7 @@ func openClaudeMonitorDirectory(parent *os.Root, name string) (*os.Root, error) 
 	if err != nil || !before.IsDir() {
 		return nil, errors.Join(err, errors.New("claude Monitor path is not a directory"))
 	}
-	child, err := parent.OpenRoot(name)
+	child, err := openClaudeMonitorContainedDirectory(parent, name)
 	if err != nil {
 		return nil, err
 	}

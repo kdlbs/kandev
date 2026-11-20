@@ -107,7 +107,9 @@ func TestClaudeMonitorAttachmentAndUserCompletionDeduplicate(t *testing.T) {
 	if err := json.Unmarshal([]byte(attachmentLine), &attachment); err != nil {
 		t.Fatal(err)
 	}
-	userLine := claudeMonitorUserRecordLine(t, attachmentLine, "monitor-task-1", "toolu_monitor_1", time.Now().UTC())
+	userLine := claudeMonitorUserRecordLine(
+		t, attachmentLine, "monitor-task-1", "toolu_monitor_1", time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC),
+	)
 	attachmentCompletion, ok := parseClaudeMonitorCompletionRecord(
 		attachmentLine, "native-session-1", claudeNativeVersion,
 	)
@@ -143,15 +145,20 @@ func TestClaudeMonitorCompletionReaderDiscardsOversizedRecordAndContinues(t *tes
 	fixture, err := os.ReadFile(filepath.Join("testdata", "claude-0.107.0-2.1.323-monitor-completion.jsonl"))
 	require.NoError(t, err)
 	attachmentLine := strings.TrimSpace(string(fixture))
-	firstLine := claudeMonitorUserRecordLine(t, attachmentLine, "monitor-task-first", "toolu_monitor_first", time.Now().UTC())
-	secondLine := claudeMonitorUserRecordLine(t, attachmentLine, "monitor-task-second", "toolu_monitor_second", time.Now().UTC())
+	admittedAt := time.Date(2026, 11, 20, 11, 59, 0, 0, time.UTC)
+	firstLine := claudeMonitorUserRecordLine(
+		t, attachmentLine, "monitor-task-first", "toolu_monitor_first", admittedAt.Add(time.Minute),
+	)
+	secondLine := claudeMonitorUserRecordLine(
+		t, attachmentLine, "monitor-task-second", "toolu_monitor_second", admittedAt.Add(2*time.Minute),
+	)
 
 	configDir, workDir := t.TempDir(), t.TempDir()
 	project := filepath.Join(configDir, claudeMonitorSessionPath(workDir, "native-session-1"))
 	require.NoError(t, os.MkdirAll(filepath.Dir(project), 0o700))
 	require.NoError(t, os.WriteFile(project, nil, 0o600))
 	reader, err := newClaudeMonitorCompletionReader(
-		configDir, workDir, "native-session-1", time.Date(2026, 11, 20, 11, 59, 0, 0, time.UTC),
+		configDir, workDir, "native-session-1", admittedAt,
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = reader.Close() })
@@ -189,7 +196,12 @@ func TestClaudeMonitorReaderAdmissionHonorsFeatureFlagAndWaitsForMonitorLaunch(t
 	a := newClaudeMonitorCompletionTestAdapter(t, configDir, workDir, sessionID, true)
 	state := a.beginClaudeMonitorPrompt(sessionID)
 	require.NotNil(t, state, "enabled Background Work keeps the prompt-start cursor")
-	line := claudeMonitorUserRecordLine(t, claudeMonitorFixtureLine(t), "monitor-task-early", "toolu_monitor_early", time.Now().UTC())
+	admittedAt := time.Date(2099, 1, 2, 3, 4, 5, 0, time.UTC)
+	state.admittedAt = admittedAt
+	state.reader.admittedAt = admittedAt
+	line := claudeMonitorUserRecordLine(
+		t, claudeMonitorFixtureLine(t), "monitor-task-early", "toolu_monitor_early", admittedAt.Add(time.Second),
+	)
 	appendFile, err := os.OpenFile(project, os.O_APPEND|os.O_WRONLY, 0)
 	require.NoError(t, err)
 	_, writeErr := appendFile.WriteString(line + "\n")
@@ -436,12 +448,14 @@ func TestClaudeMonitorReaderRebindsOnSameSessionResume(t *testing.T) {
 	readerState := &claudeMonitorReaderState{cancel: func() {}, started: true}
 	readerState.generation.Store(1)
 	a.claudeMonitorReaders[sessionID] = readerState
+	parsedGeneration := readerState.generation.Load()
 
 	a.mu.Lock()
 	a.advanceNativeGenerationLocked()
 	a.rebindClaudeMonitorReaderGenerationLocked(sessionID, a.nativeGeneration)
 	a.mu.Unlock()
-	a.registerClaudeMonitorCompletionForGeneration(sessionID, readerState.generation.Load(), claudeMonitorCompletion{
+	require.Equal(t, uint64(1), parsedGeneration)
+	a.registerClaudeMonitorCompletionFromReader(sessionID, readerState, claudeMonitorCompletion{
 		SessionID:  sessionID,
 		TaskID:     taskID,
 		ToolUseID:  toolCallID,
@@ -464,11 +478,12 @@ func TestClaudeMonitorCompletionReaderUsesAppendWindowAndStableFileIdentity(t *t
 	if err := os.WriteFile(project, []byte("old history\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	admittedAt := time.Date(2026, 11, 20, 11, 59, 0, 0, time.UTC)
 	reader, err := newClaudeMonitorCompletionReader(
 		configDir,
 		workDir,
 		"native-session-1",
-		time.Date(2026, 11, 20, 11, 59, 0, 0, time.UTC),
+		admittedAt,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -516,10 +531,53 @@ func TestClaudeMonitorCompletionReaderUsesAppendWindowAndStableFileIdentity(t *t
 	if err := os.Rename(project, backup); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(project, []byte(line+"\n"), 0o600); err != nil {
+	replacementLine := claudeMonitorUserRecordLine(
+		t, line, "monitor-task-replacement", "toolu_monitor_replacement", admittedAt.Add(time.Minute),
+	)
+	if err := os.WriteFile(project, []byte(replacementLine+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := reader.ReadAvailable(); err == nil {
-		t.Fatal("reader accepted replacement of the pinned session file")
+		t.Fatal("reader did not report the replacement boundary")
 	}
+	completions, err = reader.ReadAvailable()
+	if err != nil || len(completions) != 1 || completions[0].TaskID != "monitor-task-replacement" {
+		t.Fatalf("reader did not resume after a regular file replacement: completions=%+v err=%v", completions, err)
+	}
+}
+
+func TestClaudeMonitorCompletionReaderRecoversAfterTranscriptTruncation(t *testing.T) {
+	configDir, workDir := t.TempDir(), t.TempDir()
+	project := filepath.Join(configDir, claudeMonitorSessionPath(workDir, "native-session-1"))
+	require.NoError(t, os.MkdirAll(filepath.Dir(project), 0o700))
+	require.NoError(t, os.WriteFile(project, []byte("old history\n"), 0o600))
+	admittedAt := time.Date(2099, 1, 2, 3, 4, 5, 0, time.UTC)
+	reader, err := newClaudeMonitorCompletionReader(configDir, workDir, "native-session-1", admittedAt)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reader.Close() })
+	fixture := claudeMonitorFixtureLine(t)
+	firstLine := claudeMonitorUserRecordLine(
+		t, fixture, "monitor-task-before-truncation", "toolu_monitor_before_truncation", admittedAt.Add(time.Second),
+	)
+	secondLine := claudeMonitorUserRecordLine(
+		t, fixture, "monitor-task-after-truncation", "toolu_monitor_after_truncation", admittedAt.Add(2*time.Second),
+	)
+	appendFile, err := os.OpenFile(project, os.O_APPEND|os.O_WRONLY, 0)
+	require.NoError(t, err)
+	_, err = appendFile.WriteString(firstLine + "\n")
+	require.NoError(t, err)
+	require.NoError(t, appendFile.Close())
+	first, err := reader.ReadAvailable()
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	require.Equal(t, "monitor-task-before-truncation", first[0].TaskID)
+	require.Less(t, len(secondLine), len(firstLine)+1, "the rewrite must reduce the file below the retained offset")
+	require.NoError(t, os.WriteFile(project, []byte(secondLine+"\n"), 0o600))
+	if _, err := reader.ReadAvailable(); err == nil {
+		t.Fatal("reader did not report the truncation boundary")
+	}
+	second, err := reader.ReadAvailable()
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	require.Equal(t, "monitor-task-after-truncation", second[0].TaskID)
 }

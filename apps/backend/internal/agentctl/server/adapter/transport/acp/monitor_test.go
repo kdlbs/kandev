@@ -538,7 +538,8 @@ func TestConvertToolCallResultUpdate_MonitorRegistrationRequiresCompletedStatus(
 // MonitorMessage matcher (which checks for `output.monitor`) would no
 // longer fire. Frontend would fall back to the generic tool_call card.
 func TestConvertToolCallResultUpdate_AgentEmittedMonitorEndPreservesView(t *testing.T) {
-	a := newTestAdapter()
+	a := newTestAdapterForAgent(claudeAgentID)
+	t.Cleanup(func() { _ = a.Close() })
 
 	// Initial pending tool_call so activeToolCalls has a Generic payload.
 	tc := &acp.SessionUpdateToolCall{
@@ -598,7 +599,8 @@ func TestConvertToolCallResultUpdate_AgentEmittedMonitorEndPreservesView(t *test
 }
 
 func TestPromptEndCleanupPreservesLiveMonitor(t *testing.T) {
-	a := newTestAdapter()
+	a := newTestAdapterForAgent(claudeAgentID)
+	t.Cleanup(func() { _ = a.Close() })
 
 	// Land an initial Monitor tool_call so it sits in activeToolCalls.
 	tc := &acp.SessionUpdateToolCall{
@@ -611,7 +613,16 @@ func TestPromptEndCleanupPreservesLiveMonitor(t *testing.T) {
 	if ev := a.convertToolCallUpdate("s1", tc); ev == nil {
 		t.Fatalf("seed tool_call returned nil")
 	}
-	a.trackMonitor("s1", "task-X", "tc-monitor")
+	completed := acp.ToolCallStatus("completed")
+	registration := &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-monitor",
+		Status:     &completed,
+		Meta:       monitorMeta(),
+		RawOutput:  "Monitor started (task task-X, timeout 60000ms).",
+	}
+	if ev := a.convertToolCallResultUpdate("s1", registration); ev == nil || ev.ToolStatus != toolStatusInProgress {
+		t.Fatalf("Monitor registration event = %+v, want in-progress registration", ev)
+	}
 	drainEvents(a) // ignore the initial events
 
 	a.cancelPromptEndToolCalls("s1")

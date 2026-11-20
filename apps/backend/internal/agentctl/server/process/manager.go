@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -2708,12 +2709,16 @@ func claudeConfigDirFromLaunch(agentType string, env, stripEnv []string) string 
 		}
 		return filepath.Clean(configDir)
 	}
+	homeVariable := "HOME"
+	if runtime.GOOS == checkpointWindowsOS && acpcompat.EnvValue(env, "USERPROFILE") != "" {
+		homeVariable = "USERPROFILE"
+	}
 	for _, key := range stripEnv {
-		if key == "HOME" {
+		if key == homeVariable {
 			return ""
 		}
 	}
-	home := acpcompat.EnvValue(env, "HOME")
+	home := acpcompat.EnvValue(env, homeVariable)
 	if !filepath.IsAbs(home) {
 		return ""
 	}

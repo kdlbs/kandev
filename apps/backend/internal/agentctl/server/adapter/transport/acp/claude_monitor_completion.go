@@ -160,26 +160,36 @@ func (a *Adapter) endClaudeMonitorPrompt(sessionID string, completedPrompt *clau
 
 func (a *Adapter) runClaudeMonitorCompletionReader(ctx context.Context, sessionID string, state *claudeMonitorReaderState) {
 	defer a.claudeMonitorReaderWg.Done()
+	defer state.cancel()
 	defer func() { _ = state.reader.Close() }()
 	ticker := time.NewTicker(claudeMonitorPollInterval)
 	defer ticker.Stop()
 	for {
 		completions, err := state.reader.ReadAvailable()
 		if err != nil {
-			a.retireClaudeMonitorReader(sessionID, state)
-			return
+			if !a.claudeMonitorReaderNeeded(sessionID, state) || !waitForClaudeMonitorReaderRetry(ctx, ticker.C) {
+				return
+			}
+			continue
 		}
 		for _, completion := range completions {
-			a.registerClaudeMonitorCompletionForGeneration(sessionID, state.generation.Load(), completion)
+			a.registerClaudeMonitorCompletionFromReader(sessionID, state, completion)
 		}
 		if !a.claudeMonitorReaderNeeded(sessionID, state) {
 			return
 		}
-		select {
-		case <-ctx.Done():
+		if !waitForClaudeMonitorReaderRetry(ctx, ticker.C) {
 			return
-		case <-ticker.C:
 		}
+	}
+}
+
+func waitForClaudeMonitorReaderRetry(ctx context.Context, retry <-chan time.Time) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-retry:
+		return true
 	}
 }
 
@@ -195,15 +205,6 @@ func (a *Adapter) claudeMonitorReaderNeeded(sessionID string, state *claudeMonit
 	delete(a.claudeMonitorReaders, sessionID)
 	delete(a.pendingClaudeMonitorCompletions, sessionID)
 	return false
-}
-
-func (a *Adapter) retireClaudeMonitorReader(sessionID string, state *claudeMonitorReaderState) {
-	a.mu.Lock()
-	if a.claudeMonitorReaders[sessionID] == state {
-		delete(a.claudeMonitorReaders, sessionID)
-		delete(a.pendingClaudeMonitorCompletions, sessionID)
-	}
-	a.mu.Unlock()
 }
 
 func (a *Adapter) cancelClaudeMonitorReadersLocked(sessionID string) []*claudeMonitorCompletionReader {
@@ -282,6 +283,27 @@ func (a *Adapter) registerClaudeMonitorCompletionForGeneration(
 	}
 	a.mu.Lock()
 	if a.closed || a.sessionID != sessionID || a.nativeGeneration != generation {
+		a.mu.Unlock()
+		return
+	}
+	event := a.applyClaudeMonitorCompletionLocked(sessionID, completion)
+	a.mu.Unlock()
+	if event != nil {
+		a.sendUpdate(*event)
+	}
+}
+
+func (a *Adapter) registerClaudeMonitorCompletionFromReader(
+	sessionID string,
+	state *claudeMonitorReaderState,
+	completion claudeMonitorCompletion,
+) {
+	if state == nil || !a.validClaudeMonitorCompletion(sessionID, completion) {
+		return
+	}
+	a.mu.Lock()
+	if a.closed || a.sessionID != sessionID || a.claudeMonitorReaders[sessionID] != state ||
+		a.nativeGeneration != state.generation.Load() {
 		a.mu.Unlock()
 		return
 	}

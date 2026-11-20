@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -20,6 +21,22 @@ func TestClaudeMonitorLifecycleFixture(t *testing.T) {
 	t.Setenv(mockClaudeBridgeVersionEnv, mockClaudeBridgeVersion)
 
 	e, updater := newTestEmitter()
+	var cancel context.CancelFunc
+	workerDone := make(chan struct{})
+	e.registerDetachedWork = func(_ acp.SessionId, stop context.CancelFunc) func() {
+		cancel = stop
+		return func() { close(workerDone) }
+	}
+	t.Cleanup(func() {
+		if cancel != nil {
+			cancel()
+		}
+		select {
+		case <-workerDone:
+		case <-time.After(time.Second):
+			t.Error("Monitor fixture worker did not stop after test cleanup")
+		}
+	})
 	emitClaudeMonitorLifecycleFixture(e)
 	updates := updater.getUpdates()
 	var calls []acp.SessionUpdateToolCall

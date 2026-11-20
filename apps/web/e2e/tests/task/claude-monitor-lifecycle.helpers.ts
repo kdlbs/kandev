@@ -78,13 +78,22 @@ async function closeMonitorSummary(page: Page): Promise<void> {
   await expect(page.getByTestId("background-work-summary-list")).toBeHidden();
 }
 
-async function openHistory(page: Page): Promise<void> {
+function agentSessionAddPanelButton(page: Page, sessionID: string) {
+  return page
+    .locator(".dv-tabs-and-actions-container")
+    .filter({ has: page.getByTestId(`session-tab-${sessionID}`) })
+    .getByTestId("dockview-add-panel-btn");
+}
+
+async function openHistory(page: Page, sessionID: string): Promise<void> {
   if ((page.viewportSize()?.width ?? 0) < 768) {
     await page.getByTestId("mobile-session-nav-panels").tap();
     await page.getByTestId("mobile-background-work-open").tap();
     await expect(page.getByTestId("background-work-mobile-panel")).toBeVisible();
   } else {
-    await page.getByTestId("dockview-add-panel-btn").first().click();
+    const addPanelButton = agentSessionAddPanelButton(page, sessionID);
+    await expect(addPanelButton).toHaveCount(1);
+    await addPanelButton.click();
     await page.getByTestId("add-panel-background-work").click();
     await expect(page.getByTestId("background-work-overview")).toBeVisible();
   }
@@ -199,7 +208,7 @@ export async function expectClaudeMonitorLifecycle(
   await expect(chip).toHaveCount(0);
   await expect(editor).toHaveText(DRAFT);
 
-  await openHistory(page);
+  await openHistory(page, sessionId);
   for (const workId of MONITOR_IDS) {
     await expect(page.getByTestId(`background-workload-card-${workId}`)).toBeVisible();
     await expect(page.getByTestId(`background-work-state-${workId}`)).toHaveText("Completed");
@@ -209,11 +218,11 @@ export async function expectClaudeMonitorLifecycle(
   if ((page.viewportSize()?.width ?? 0) < 768) {
     await expect(page.getByTestId("mobile-session-nav-panels")).toBeVisible({ timeout: 30_000 });
   } else {
-    await expect(page.getByTestId("dockview-add-panel-btn").first()).toBeVisible({
-      timeout: 30_000,
-    });
+    const addPanelButton = agentSessionAddPanelButton(page, sessionId);
+    await expect(addPanelButton).toHaveCount(1, { timeout: 30_000 });
+    await expect(addPanelButton).toBeVisible();
   }
-  await openHistory(page);
+  await openHistory(page, sessionId);
   for (const workId of MONITOR_IDS) {
     await expect(page.getByTestId(`background-workload-card-${workId}`)).toBeVisible();
     await expect(page.getByTestId(`background-work-state-${workId}`)).toHaveText("Completed");
