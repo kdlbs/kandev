@@ -365,7 +365,9 @@ func executeCodexUtilityTurn(ctx context.Context, client *protocol.Client, threa
 	if model != "" {
 		params.Model = &model
 	}
-	markInferenceDispatch(ctx)
+	if err := markInferenceDispatch(ctx); err != nil {
+		return "", fmt.Errorf("persist Codex prompt dispatch: %w", err)
+	}
 	var startResponse protocol.TurnStartResponse
 	startErr := make(chan error, 1)
 	go func() { startErr <- client.Call(ctx, protocol.MethodTurnStart, params, &startResponse) }()

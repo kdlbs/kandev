@@ -514,6 +514,7 @@
       "lsp_auto_start_languages",
       "lsp_server_configs",
       "lsp_status_location",
+      "markdown_preview_by_default",
       "mcp_task_agent_profile_default",
       "message_time_display",
       "preferred_shell",

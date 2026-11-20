@@ -165,9 +165,8 @@ func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admis
 	if queued, ok := c.consumeQueuedOfficeCapacityLocked(req, p); ok {
 		return queued
 	}
-	d.reasonCode = c.allCapacityLimitReason(p, maximum)
-	if d.reasonCode == "" {
-		d.admitted = true
+	d = c.gradeCapacityDecisionLocked(req, p, d.populationKnown)
+	if d.admitted {
 		d.reservationKey = c.reserveGradeLocked(req)
 	}
 	c.logDecision(req, req.origin, d)
@@ -235,4 +234,29 @@ func (c *sessionCeilingController) logGradedAdmissionFlow(ctx context.Context, r
 		e.Population, e.GradePopulation, e.GradeLimit = &p.total, &p.grade, &maximum
 	}
 	logger.EmitExecutionFlow(c.logger, ctx, e)
+}
+
+func (c *sessionCeilingController) gradeCapacityDecisionLocked(req admissionRequest, p gradedPopulation, populationKnown bool) admissionDecision {
+	d := admissionDecision{ceiling: c.ceiling, population: p.total, populationKnown: populationKnown}
+	maximum, configured := c.requestedGradeLimitLocked(req)
+	if !configured || (req.gradeKnown && p.missing) {
+		d.reasonCode = ceilingReasonNeedsConfiguration
+		return d
+	}
+	if !req.gradeKnown || !d.populationKnown {
+		d.reasonCode = ceilingReasonUnknownPopulation
+		return d
+	}
+	totalFull, gradeFull := p.total >= c.ceiling, p.grade >= maximum
+	switch {
+	case totalFull && gradeFull:
+		d.reasonCode = ceilingReasonBothLimits
+	case totalFull:
+		d.reasonCode = ceilingReasonTotalLimit
+	case gradeFull:
+		d.reasonCode = ceilingReasonGradeLimit
+	default:
+		d.admitted = true
+	}
+	return d
 }

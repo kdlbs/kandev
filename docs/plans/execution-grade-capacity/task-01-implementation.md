@@ -21,12 +21,11 @@ system_design:
 
 ## Main integration: message-turn tickets
 
-The newer shared ceiling also counts in-flight message-turn tickets in its
-total. A ticket already represented by an admitted row or launch reservation
-uses the existing grade once. A separate ticket has no grade snapshot, so the
-all-policy grade population is unknown until it is represented by an admitted
-row or launch reservation. Existing session ownership and automatic-policy
-message-turn behavior remain unchanged.
+All-policy message-turn admission checks total and grade capacity before warm
+dispatch or cold resume. Tickets retain their admitted grade through nested
+launches and later profile/task edits. Count each session once across tickets,
+launch reservations, and active rows. Legacy ungraded tickets remain unknown
+until an admitted row supplies their grade. Automatic-policy overrides remain.
 
 ## Outcome and scope
 
@@ -42,12 +41,13 @@ Out of scope: Changing disabled defaults, assigning grades from profile names, o
 
 ## Files and dependencies
 
-The source files are the existing PR #4715 diff. This work order adds its delivery record and links existing requirements and system design; it introduces no runtime gate or permanent test.
+This work order tracks the original PR #4715 slice and the maintainer review
+fixes below. It introduces no runtime gate.
 
 - [System design](../../specs/agents/system-design/session-concurrency-ceiling.md)
 - [Plan](plan.md)
 
-## Verification and results
+## Original implementation verification
 
 Validation:
 - Existing related backend and frontend checks passed; 22 existing frontend tests and full TypeScript/changed-file lint passed.
@@ -58,7 +58,7 @@ Validation:
 
 Documentation-only correction: git diff --check and the existing .github/scripts/pr-docs.cjs validateCoverage entrypoint with the candidate changed paths and the linked candidate documents supplied on stdin. No GitHub status is synthesized locally.
 
-The already prepared review follow-up is still in progress. Its remaining narrow checks and normal commit hooks must pass before that follow-up is published. The earlier published implementation checks do not establish the pending result.
+The maintainer consolidation below supersedes the earlier pending follow-up.
 
 ## ASCII UI preview
 
@@ -101,3 +101,48 @@ Final command and results are recorded after execution; normal hooks must pass
 before publication.
 
 Final follow-up result: the temporary cases and selected existing admission/latest-observation controls passed with -race (orchestrator 1.135s; statussummary 1.052s). Command: go test -race -tags fts5 -trimpath -p 2 with the explicit temporary overlay, both affected packages, and the TestOneOffGradeReview/TestLaunchQueueSummaryFromTaskWithCapacityUsesLatestObservation/TestAdmitAtCeiling/TestUnknownPopulation/TestHandOff selection, -count=1. git diff --check passed.
+
+## Maintainer consolidation
+
+The contributor included reservation deduplication before consolidation.
+Recovered permanent admission, grade-map validation, and draft Save/Reset tests
+from `9dcd1edf347`. The backend and browser draft reject more than 64 grade
+limits. Both regressions failed before the bound and passed afterward.
+
+Ported task-grade validation into main's extracted task-update helper.
+Permanent tests cover combined priority/grade changes, omitted grades, explicit
+clearing, and invalid input. SQLite and PostgreSQL tests also preserve the
+admitted grade through ordinary session writes and keep legacy grades unknown.
+
+Reproduced both historical CI failures from the contributor head. The legacy
+task rebuild now supplies an empty grade when its source lacks the column and
+preserves an existing value. The sidebar HTTP test decodes JSON instead of
+requiring one property order.
+
+Focused race tests passed in session capacity, orchestrator, task repository,
+task handlers, and task service. The snapshot regression passed on SQLite and
+PostgreSQL 18. All 27 focused frontend tests passed.
+All three phone settings scenarios passed without retries, including the new
+grade-limit Save/Reset/disable/reload flow and 44px input/action targets.
+Test cleanup restores the policy and grade map with the total limit.
+
+## Consolidated PR review: message-turn admission
+
+PR #5321 exposed a cold-resume bypass through a total-only turn ticket.
+Permanent regressions reproduced paused/full grade admission before the fix.
+The public prompt path also reached cold-resume work while its grade was paused.
+
+All-policy turns now use both limits before dispatch and persist their grade.
+The ticket carries that snapshot through nested resume and later profile edits.
+Population counts tickets, launch reservations, and active rows once per session.
+Existing ownership remains admitted; automatic-policy override behavior remains.
+
+Race-enabled checks passed for zero/full grades, explicit intents, simultaneous
+last-slot contenders, retained snapshots, and public cold-resume refusal. Existing
+message-turn, recovery, executor, repository, and worktree regressions also passed.
+The final browser recheck passed all 10 desktop and 9 phone scenarios, including
+the three phone capacity settings cases. Normal changed-file hooks also passed.
+
+Contributor sidebar test follow-ups are retained. The assertions decode the
+payload, require a task object, and check its ID and title together without
+depending on field order. The focused race-enabled sidebar handler test passed.

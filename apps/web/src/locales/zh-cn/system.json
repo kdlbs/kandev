@@ -845,7 +845,7 @@
   "sessionCapacityGradeName": "执行等级",
   "sessionCapacityGradeNew": "新等级",
   "sessionCapacityGradeRemove": "移除 {{grade}}",
-  "sessionCapacityGradeValidation": "请输入不重复且不超过 64 个字符的等级名称，上限为 0 到 2147483647 的整数。全执行范围至少需要一个等级。切换到自动范围前请明确移除等级上限。",
+  "sessionCapacityGradeValidation": "请输入不重复且不超过 64 个字符的等级名称，上限为 0 到 2147483647 的整数。最多可配置 64 个执行等级。全执行范围至少需要一个等级。切换到自动范围前请明确移除等级上限。",
   "sessionCapacityGradesUnavailable": "此后端不提供等级上限。",
   "sessionCapacityTotalHelp": "总上限独立于各等级上限之和。在此范围内，手动启动也适用两类上限。",
   "sessionCapacityTotalLabel": "最大并发执行数",
@@ -856,5 +856,8 @@
   "toolPayload.historyRefsDeleted_one": "已删除 {{count}} 个检查点引用",
   "toolPayload.historyRefsDeleted_other": "已删除 {{count}} 个检查点引用",
   "toolPayload.historyRetry_one": "{{count}} 个检查点清理等待重试",
-  "toolPayload.historyRetry_other": "{{count}} 个检查点清理等待重试"
+  "toolPayload.historyRetry_other": "{{count}} 个检查点清理等待重试",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.label": "移交已结束主会话的队列",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.description": "任务的主会话失败、取消或完成时，将其排队消息移交给新的主会话。",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.riskDescription": "排队消息可能会被投递到与最初目标不同的会话。若要让每条排队消息保留在原会话中，请保持关闭。"
 }

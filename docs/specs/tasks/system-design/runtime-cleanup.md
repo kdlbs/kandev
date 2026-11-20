@@ -62,7 +62,7 @@ the evidence needed for safe retry and workspace recovery.
 - [Session deletion](session-delete-resource-cleanup.md) removes conversation
   references only. The task retains its workspace, Git registration, branches,
   and files even with zero sessions. Archive, delete, cascade, workspace delete,
-  quick-chat expiry, or explicit task-environment reset owns physical cleanup.
+  Quick Chat deletion, or explicit task-environment reset owns physical cleanup.
 - Agent shutdown escalates to the whole process group when its timeout expires
   and waits for descendants; neither agentctl nor backend shutdown reports
   completion while an owned process remains under PID 1.
@@ -76,8 +76,8 @@ the evidence needed for safe retry and workspace recovery.
 - Cleanup is idempotent only for classifiable absence. Persisted stop handles and
   runtime-aware liveness may complete confirmed-dead local rows; alive, unknown,
   remote, and lookup failures remain retryable.
-- Archive/delete/cascade/workspace-delete/quick-chat expiry persist cleanup intent
-  and snapshot before task mutation; a durable worker, never a detached goroutine,
+- Archive/delete/cascade/workspace-delete/Quick Chat deletion persist cleanup
+  intent and snapshot before task mutation; a durable worker, never a detached goroutine,
   owns execution. A contended advisory stop guard does not block requested stop.
 - `bounded_terminal` retries eight times with 1m, 5m, 15m, 1h, 3h, 6h, and 12h
   delays. Cascade-critical archive/unarchive retains attempt-eight diagnostics and

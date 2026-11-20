@@ -56,7 +56,7 @@ The existing criteria remain active.
 - [Repository context](quick-chat-repository-context.md): branches, isolation, and rollback.
 - [Prompt attachments](prompt-attachments.md): upload ownership, limits, and draft descriptors.
 - [Saved prompt delivery](saved-prompt-delivery.md): expansion for supported structured providers.
-- [Quick Chat expiration](quick-chat-expiration.md): conversation lifetime and cleanup.
+- [Quick Chat manual lifetime](quick-chat-expiration-policy.md): conversation lifetime and cleanup.
 - [Conversation viewport](../../ui/requirements/quick-chat-viewport-layout.md): transcript layout after creation.
 
 ## Out of scope

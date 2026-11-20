@@ -59,6 +59,9 @@ type Service struct {
 	// post-construction via SetWorkspaceAuthorizer. Nil (unit tests, auth
 	// disabled) means unscoped — every workspace is visible, as before auth.
 	workspaceAuthorizer func(context.Context, string) error
+	// workspaceWriteAuthorizer protects state changes exposed to users. Plugin
+	// writeback uses its existing broker policy and does not call this boundary.
+	workspaceWriteAuthorizer func(context.Context, string) error
 }
 
 // SetWorkspaceAuthorizer installs the per-user workspace access boundary applied
@@ -68,6 +71,14 @@ type Service struct {
 func (s *Service) SetWorkspaceAuthorizer(authorizer func(context.Context, string) error) {
 	if s != nil {
 		s.workspaceAuthorizer = authorizer
+	}
+}
+
+// SetWorkspaceWriteAuthorizer installs the per-user write boundary for
+// user-facing Linear issue state changes.
+func (s *Service) SetWorkspaceWriteAuthorizer(authorizer func(context.Context, string) error) {
+	if s != nil {
+		s.workspaceWriteAuthorizer = authorizer
 	}
 }
 
@@ -178,7 +189,12 @@ func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string)
 }
 
 // ErrInvalidConfig is returned by SetConfig when the request fails validation.
-var ErrInvalidConfig = errors.New("linear: invalid configuration")
+var (
+	ErrInvalidConfig = errors.New("linear: invalid configuration")
+	// ErrWorkspaceWriteForbidden reports that a user can read the workspace but
+	// cannot change an issue state in it.
+	ErrWorkspaceWriteForbidden = errors.New("linear: workspace write access denied")
+)
 
 // SetConfig is upsert. An empty Secret on update keeps the existing token.
 func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*LinearConfig, error) {
@@ -401,6 +417,22 @@ func (s *Service) SetIssueState(ctx context.Context, issueID, stateID string) er
 		return err
 	}
 	return client.SetIssueState(ctx, issueID, stateID)
+}
+
+// SetIssueStateForWorkspaceAsUser applies the user write scope before changing
+// an issue. Resolve an omitted workspace once so authorization and client
+// selection use the same workspace.
+func (s *Service) SetIssueStateForWorkspaceAsUser(ctx context.Context, workspaceID, issueID, stateID string) error {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return err
+	}
+	if s.workspaceWriteAuthorizer != nil {
+		if err := s.workspaceWriteAuthorizer(ctx, workspaceID); err != nil {
+			return err
+		}
+	}
+	return s.SetIssueStateForWorkspace(ctx, workspaceID, issueID, stateID)
 }
 
 // ListTeams populates the team selector on the settings page.

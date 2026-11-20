@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -128,6 +129,44 @@ func TestValidateSavedSettingsRequiresPortablePositiveMaximum(t *testing.T) {
 				t.Fatalf("Validate() error = %v, want ErrValidation", err)
 			}
 		})
+	}
+}
+
+const gradeLimitCountContract = 64
+
+func TestValidateBoundsGradeLimitCount(t *testing.T) {
+	for _, count := range []int{gradeLimitCountContract, gradeLimitCountContract + 1} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
+			limits := make(map[string]int, count)
+			for i := 0; i < count; i++ {
+				limits["grade-"+strconv.Itoa(i)] = 1
+			}
+			settings := Settings{
+				Enabled: true, MaxSessions: 5, Policy: PolicyAll, GradeLimits: limits,
+			}
+			err := Validate(settings)
+			if count <= gradeLimitCountContract {
+				if err != nil {
+					t.Fatalf("Validate() error = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrValidation) {
+				t.Fatalf("Validate() error = %v, want ErrValidation", err)
+			}
+		})
+	}
+}
+
+func TestResolveRejectsSavedGradeLimitCountAboveBound(t *testing.T) {
+	limits := make(map[string]int, gradeLimitCountContract+1)
+	for i := 0; i <= gradeLimitCountContract; i++ {
+		limits["grade-"+strconv.Itoa(i)] = 1
+	}
+	saved := Settings{Enabled: true, MaxSessions: 5, Policy: PolicyAll, GradeLimits: limits}
+
+	if _, err := Resolve(&saved, Environment{}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("Resolve() error = %v, want ErrValidation", err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -20,6 +21,42 @@ import (
 	"github.com/kandev/kandev/internal/utility/profilebinding"
 	"github.com/kandev/kandev/internal/utility/service"
 )
+
+// statusClientClosedRequest is nginx's HTTP 499 client-closed-request code.
+const statusClientClosedRequest = 499
+
+// callSettlementTimeout bounds each detached write to a utility call record.
+const callSettlementTimeout = 5 * time.Second
+
+// settleFailedCall records a terminal state for an unsuccessful call. Its write
+// ignores request cancellation and has a five-second deadline. It reports
+// whether the caller cancelled the request.
+func (h *Handlers) settleFailedCall(ctx context.Context, callID string, cause error, durationMs int) bool {
+	writeCtx, cancel := callSettlementContext(ctx)
+	defer cancel()
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(cause, context.Canceled) {
+		if err := h.controller.CancelCall(writeCtx, callID, durationMs); err != nil {
+			h.logger.Warn("failed to mark cancelled call", zap.Error(err), zap.String("call_id", callID))
+		}
+		return true
+	}
+	if err := h.controller.FailCall(writeCtx, callID, cause.Error(), durationMs); err != nil {
+		h.logger.Warn("failed to mark failed call", zap.Error(err), zap.String("call_id", callID))
+	}
+	return false
+}
+
+func callSettlementContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), callSettlementTimeout)
+}
+
+func (h *Handlers) recordCompletedCall(ctx context.Context, callID string, response string, promptTokens, responseTokens, durationMs int) {
+	writeCtx, cancel := callSettlementContext(ctx)
+	defer cancel()
+	if err := h.controller.CompleteCall(writeCtx, callID, response, promptTokens, responseTokens, durationMs); err != nil {
+		h.logger.Warn("failed to update call record", zap.Error(err), zap.String("call_id", callID))
+	}
+}
 
 // InferenceExecutor executes inference prompts via agentctl.
 type InferenceExecutor interface {
@@ -188,10 +225,59 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, dto.ExecutePromptResponse{Error: "invalid payload"})
 		return
 	}
-
 	ctx := c.Request.Context()
+	ctx = h.withCandidateUsage(ctx, req.SessionID)
+	prepared, ok := h.preparePromptRequest(c, ctx, req)
+	if !ok {
+		return
+	}
+	defer h.controller.ReleasePromptCapacity(prepared)
+	callID := prepared.CallID
+	var err error
+	if callID == "" {
+		callID, err = h.controller.CreateCall(ctx, req.UtilityAgentID, req.SessionID, prepared.ResolvedPrompt, prepared.Model, prepared.AgentProfileID, prepared.ExecutionProfileID)
+	}
+	if err != nil {
+		h.logger.Error("failed to create call record", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{Error: "failed to create call record"})
+		return
+	}
+	ctx, err = h.controller.CallInferenceContext(ctx, callID)
+	if err != nil {
+		h.settleFailedCall(ctx, callID, err, 0)
+		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: "failed to verify utility call"})
+		return
+	}
+	if req.SessionID == "" {
+		h.executeSessionless(c, ctx, prepared, callID)
+		return
+	}
+	response, err, handled := h.executeSessionPrompt(c, ctx, req.SessionID, prepared, callID)
+	if handled {
+		return
+	}
+	h.respondPromptExecution(c, ctx, callID, response, err, "prompt", "failed to execute prompt", "utility executor returned no response")
+}
 
-	// Get default utility settings from user settings
+func (h *Handlers) preparePromptRequest(c *gin.Context, ctx context.Context, req dto.ExecutePromptRequest) (*service.PromptRequest, bool) {
+	prepared, err := h.controller.PreparePromptRequest(ctx, req, h.defaultUtilitySettings(ctx), req.SessionID == "")
+	if err != nil {
+		h.writePromptPreparationError(c, err)
+		return nil, false
+	}
+	if prepared.AgentCLI == "" {
+		h.controller.ReleasePromptCapacity(prepared)
+		if prepared.CallID != "" {
+			h.settleFailedCall(ctx, prepared.CallID, lifecycle.ErrInferenceAgentIDRequired, 0)
+		}
+		h.logger.Warn("execute prompt: missing agent_id")
+		c.JSON(http.StatusBadRequest, dto.ExecutePromptResponse{Error: lifecycle.ErrInferenceAgentIDRequired.Error()})
+		return nil, false
+	}
+	return prepared, true
+}
+
+func (h *Handlers) defaultUtilitySettings(ctx context.Context) *service.DefaultUtilitySettings {
 	var defaults *service.DefaultUtilitySettings
 	if h.userSettings != nil {
 		agentID, model, err := h.userSettings.GetDefaultUtilitySettings(ctx)
@@ -207,119 +293,71 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 			}
 		}
 	}
+	return defaults
+}
 
-	sessionless := req.SessionID == ""
-	ctx = h.withCandidateUsage(ctx, req.SessionID)
+func (h *Handlers) writePromptPreparationError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrAgentDisabled) {
+		c.JSON(http.StatusBadRequest, dto.ExecutePromptResponse{Error: service.ErrAgentDisabled.Error()})
+		return
+	}
+	status := http.StatusInternalServerError
+	if errors.Is(err, service.ErrAgentNotFound) {
+		status = http.StatusNotFound
+	}
+	h.logger.Error("failed to prepare prompt", zap.Error(err))
+	c.JSON(status, dto.ExecutePromptResponse{Error: "failed to prepare prompt"})
+}
 
-	// Prepare the prompt request (resolve template, get agent/model info)
-	prepared, err := h.controller.PreparePromptRequest(ctx, req, defaults, sessionless)
+func (h *Handlers) executeSessionPrompt(c *gin.Context, ctx context.Context, sessionID string, prepared *service.PromptRequest, callID string) (*agentctlutil.PromptResponse, error, bool) {
+	if prepared.AgentProfileID == "" {
+		response, err := h.executor.ExecuteInferencePrompt(ctx, sessionID, prepared.AgentCLI, prepared.Model, prepared.ResolvedPrompt)
+		return response, err, false
+	}
+	profileExecutor, ok := h.executor.(profileInferenceExecutor)
+	if !ok {
+		h.writeExecutorUnavailable(c, ctx, callID, "profile-aware inference executor is unavailable", "profile-aware inference executor is unavailable")
+		return nil, nil, true
+	}
+	response, err := h.executeSessionProfilePrompt(ctx, profileExecutor, sessionID, prepared, callID)
+	return response, err, false
+}
+
+func (h *Handlers) writeExecutorUnavailable(c *gin.Context, ctx context.Context, callID, failure, message string) {
+	if h.settleFailedCall(ctx, callID, errors.New(failure), 0) {
+		c.JSON(statusClientClosedRequest, dto.ExecutePromptResponse{CallID: callID, Error: "utility execution cancelled"})
+		return
+	}
+	c.JSON(http.StatusServiceUnavailable, dto.ExecutePromptResponse{CallID: callID, Error: message})
+}
+
+func (h *Handlers) respondPromptExecution(c *gin.Context, ctx context.Context, callID string, response *agentctlutil.PromptResponse, err error, operation, errorPrefix, emptyResponse string) {
 	if err != nil {
-		if errors.Is(err, service.ErrAgentDisabled) {
-			c.JSON(http.StatusBadRequest, dto.ExecutePromptResponse{Error: service.ErrAgentDisabled.Error()})
+		h.logger.Error("failed to execute "+operation, zap.Error(err), zap.String("call_id", callID))
+		if h.settleFailedCall(ctx, callID, err, 0) {
+			c.JSON(statusClientClosedRequest, dto.ExecutePromptResponse{CallID: callID, Error: "utility execution cancelled"})
 			return
 		}
-		status := http.StatusInternalServerError
-		if errors.Is(err, service.ErrAgentNotFound) {
-			status = http.StatusNotFound
+		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: errorPrefix + ": " + err.Error()})
+		return
+	}
+	if response == nil {
+		h.settleFailedCall(ctx, callID, errors.New(emptyResponse), 0)
+		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: emptyResponse})
+		return
+	}
+	if !response.Success {
+		status := http.StatusOK
+		if h.settleFailedCall(ctx, callID, errors.New(response.Error), response.DurationMs) {
+			status = statusClientClosedRequest
 		}
-		h.logger.Error("failed to prepare prompt", zap.Error(err))
-		c.JSON(status, dto.ExecutePromptResponse{Error: "failed to prepare prompt"})
+		c.JSON(status, dto.ExecutePromptResponse{CallID: callID, Error: response.Error, DurationMs: response.DurationMs})
 		return
 	}
-
-	// Drop only the unused early reservation for this exact owner.
-	defer h.controller.ReleasePromptCapacity(prepared)
-
-	// Validate inference agent is resolved before persisting a call record —
-	// missing agent_id is a client error, not an execution failure.
-	if prepared.AgentCLI == "" {
-		if prepared.CallID != "" {
-			_ = h.controller.FailCall(ctx, prepared.CallID, lifecycle.ErrInferenceAgentIDRequired.Error(), 0)
-		}
-		h.logger.Warn("execute prompt: missing agent_id")
-		c.JSON(http.StatusBadRequest, dto.ExecutePromptResponse{
-			Error: lifecycle.ErrInferenceAgentIDRequired.Error(),
-		})
-		return
-	}
-
-	// Create call record for tracking unless the native owner already did.
-	callID := prepared.CallID
-	if callID == "" {
-		callID, err = h.controller.CreateCall(ctx, req.UtilityAgentID, req.SessionID, prepared.ResolvedPrompt, prepared.Model, prepared.AgentProfileID, prepared.ExecutionProfileID)
-	}
-	if err != nil {
-		h.logger.Error("failed to create call record", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{Error: "failed to create call record"})
-		return
-	}
-
-	// Derive the inference identity from the durable pending call, not from the
-	// request body; the call records the actual session and attribution.
-	ctx, err = h.controller.CallInferenceContext(ctx, callID)
-	if err != nil {
-		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
-		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: "failed to verify utility call"})
-		return
-	}
-
-	if sessionless {
-		h.executeSessionless(c, ctx, prepared, callID)
-		return
-	}
-
-	// Execute via agentctl using an existing task session's agentctl
-	var resp *agentctlutil.PromptResponse
-	if prepared.AgentProfileID != "" {
-		profileExecutor, ok := h.executor.(profileInferenceExecutor)
-		if !ok {
-			_ = h.controller.FailCall(ctx, callID, "profile-aware inference executor is unavailable", 0)
-			c.JSON(http.StatusServiceUnavailable, dto.ExecutePromptResponse{CallID: callID, Error: "profile-aware inference executor is unavailable"})
-			return
-		}
-		resp, err = h.executeSessionProfilePrompt(ctx, profileExecutor, req.SessionID, prepared, callID)
-	} else {
-		resp, err = h.executor.ExecuteInferencePrompt(ctx, req.SessionID, prepared.AgentCLI, prepared.Model, prepared.ResolvedPrompt)
-	}
-	if err != nil {
-		h.logger.Error("failed to execute prompt", zap.Error(err), zap.String("call_id", callID))
-		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
-		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{
-			CallID: callID,
-			Error:  "failed to execute prompt: " + err.Error(),
-		})
-		return
-	}
-	if resp == nil {
-		const message = "utility executor returned no response"
-		_ = h.controller.FailCall(ctx, callID, message, 0)
-		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: message})
-		return
-	}
-
-	if !resp.Success {
-		_ = h.controller.FailCall(ctx, callID, resp.Error, resp.DurationMs)
-		c.JSON(http.StatusOK, dto.ExecutePromptResponse{
-			CallID:     callID,
-			Error:      resp.Error,
-			DurationMs: resp.DurationMs,
-		})
-		return
-	}
-
-	// Mark call as completed
-	if err := h.controller.CompleteCall(ctx, callID, resp.Response, resp.PromptTokens, resp.ResponseTokens, resp.DurationMs); err != nil {
-		h.logger.Warn("failed to update call record", zap.Error(err), zap.String("call_id", callID))
-	}
-
+	h.recordCompletedCall(ctx, callID, response.Response, response.PromptTokens, response.ResponseTokens, response.DurationMs)
 	c.JSON(http.StatusOK, dto.ExecutePromptResponse{
-		Success:        true,
-		CallID:         callID,
-		Response:       resp.Response,
-		Model:          resp.Model,
-		PromptTokens:   resp.PromptTokens,
-		ResponseTokens: resp.ResponseTokens,
-		DurationMs:     resp.DurationMs,
+		Success: true, CallID: callID, Response: response.Response, Model: response.Model,
+		PromptTokens: response.PromptTokens, ResponseTokens: response.ResponseTokens, DurationMs: response.DurationMs,
 	})
 }
 
@@ -327,11 +365,7 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 // (no task session). Used for flows like "enhance prompt" in the new-task modal.
 func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepared *service.PromptRequest, callID string) {
 	if h.hostExecutor == nil {
-		_ = h.controller.FailCall(ctx, callID, "host utility not configured", 0)
-		c.JSON(http.StatusServiceUnavailable, dto.ExecutePromptResponse{
-			CallID: callID,
-			Error:  "host utility not configured; session_id is required",
-		})
+		h.writeExecutorUnavailable(c, ctx, callID, "host utility not configured", "host utility not configured; session_id is required")
 		return
 	}
 	var result *hostutility.PromptResult
@@ -339,41 +373,24 @@ func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepa
 	if prepared.AgentProfileID != "" {
 		profileExecutor, ok := h.hostExecutor.(profileHostUtilityExecutor)
 		if !ok {
-			_ = h.controller.FailCall(ctx, callID, "profile-aware host utility executor is unavailable", 0)
-			c.JSON(http.StatusServiceUnavailable, dto.ExecutePromptResponse{CallID: callID, Error: "profile-aware host utility executor is unavailable"})
+			h.writeExecutorUnavailable(c, ctx, callID, "profile-aware host utility executor is unavailable", "profile-aware host utility executor is unavailable")
 			return
 		}
 		result, err = h.executeSessionlessProfilePrompt(ctx, profileExecutor, prepared, callID)
 	} else {
 		result, err = h.hostExecutor.ExecutePrompt(ctx, prepared.AgentCLI, prepared.Model, "", prepared.ResolvedPrompt)
 	}
-	if err != nil {
-		h.logger.Error("failed to execute sessionless prompt", zap.Error(err), zap.String("call_id", callID))
-		_ = h.controller.FailCall(ctx, callID, err.Error(), 0)
-		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{
-			CallID: callID,
-			Error:  "failed to execute prompt: " + err.Error(),
-		})
-		return
-	}
+	h.respondPromptExecution(c, ctx, callID, hostPromptResponse(result), err, "sessionless prompt", "failed to execute prompt", "host utility returned no response")
+}
+
+func hostPromptResponse(result *hostutility.PromptResult) *agentctlutil.PromptResponse {
 	if result == nil {
-		const message = "host utility returned no response"
-		_ = h.controller.FailCall(ctx, callID, message, 0)
-		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: message})
-		return
+		return nil
 	}
-	if err := h.controller.CompleteCall(ctx, callID, result.Response, result.PromptTokens, result.ResponseTokens, result.DurationMs); err != nil {
-		h.logger.Warn("failed to update call record", zap.Error(err), zap.String("call_id", callID))
+	return &agentctlutil.PromptResponse{
+		Success: true, Response: result.Response, Model: result.Model, PromptTokens: result.PromptTokens,
+		ResponseTokens: result.ResponseTokens, DurationMs: result.DurationMs,
 	}
-	c.JSON(http.StatusOK, dto.ExecutePromptResponse{
-		Success:        true,
-		CallID:         callID,
-		Response:       result.Response,
-		Model:          result.Model,
-		PromptTokens:   result.PromptTokens,
-		ResponseTokens: result.ResponseTokens,
-		DurationMs:     result.DurationMs,
-	})
 }
 
 // Both physical paths use the same bounded route, deadline proof and success
@@ -391,7 +408,9 @@ func (h *Handlers) executeSessionProfilePrompt(ctx context.Context, executor pro
 		return executor.ExecuteInferenceProfilePrompt(attempt, sessionID, id, prepared.ResolvedPrompt)
 	})
 	if !nativeOwner && err == nil && response != nil && response.Success && prepared.ExecutionProfileID != initial {
-		if saveErr := h.controller.SetCallExecutionProfile(ctx, callID, prepared.ExecutionProfileID); saveErr != nil {
+		writeCtx, cancel := callSettlementContext(ctx)
+		defer cancel()
+		if saveErr := h.controller.SetCallExecutionProfile(writeCtx, callID, prepared.ExecutionProfileID); saveErr != nil {
 			h.logger.Warn("failed to update utility route attribution", zap.Error(saveErr), zap.String("call_id", callID))
 		}
 	}
@@ -417,7 +436,9 @@ func (h *Handlers) executeSessionlessProfilePrompt(ctx context.Context, executor
 		return nil, err
 	}
 	if !nativeOwner && err == nil && response.Success && prepared.ExecutionProfileID != initial {
-		if saveErr := h.controller.SetCallExecutionProfile(ctx, callID, prepared.ExecutionProfileID); saveErr != nil {
+		writeCtx, cancel := callSettlementContext(ctx)
+		defer cancel()
+		if saveErr := h.controller.SetCallExecutionProfile(writeCtx, callID, prepared.ExecutionProfileID); saveErr != nil {
 			h.logger.Warn("failed to update sessionless utility route attribution", zap.Error(saveErr), zap.String("call_id", callID))
 		}
 	}

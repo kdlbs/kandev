@@ -178,7 +178,7 @@ func (s *Service) checkClosedInferenceSource(ctx context.Context, binding sessio
 	if json.Unmarshal(raw, &saved) != nil || !saved.Valid() {
 		return models.ErrInferenceClosureBlocked
 	}
-	if saved.SourceExecutionID == binding.InstanceID {
+	if saved.SourceExecutionID == binding.InstanceID || saved.SourceExecutionID == binding.ParentExecutionID {
 		return models.ErrInferenceClosureBlocked
 	}
 	return nil
@@ -224,8 +224,19 @@ func (s *Service) checkOtherRecoveryBlocksForClosure(ctx context.Context, sid, i
 			found = true
 			continue
 		}
-		if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); !resolved {
-			return &sessionRecoveryRequiredError{Block: block}
+		resolved, finishErr := s.finishLoadedNativeDeliveryBlock(ctx, block)
+		if !resolved {
+			required := &sessionRecoveryRequiredError{Block: block}
+			if finishErr != nil {
+				required.DeliveryRefusalReason = deliveryRecoveryRefusalReason(finishErr)
+				required.internalCause = finishErr
+			}
+			if isBootDeliveryReadinessContext(ctx) {
+				s.logBootDeliveryRecoveryRefusal(ctx, sid, required, block)
+			} else {
+				s.logDeliveryRecoveryRefusal(ctx, sid, required, block)
+			}
+			return required
 		}
 	}
 	if !found {

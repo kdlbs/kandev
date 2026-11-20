@@ -997,7 +997,8 @@ func (h *TaskHandlers) httpBulkMoveTasks(c *gin.Context) {
 			return
 		}
 		var approvals *service.ApprovalsPendingMoveError
-		if errors.As(err, &approvals) || errors.Is(err, service.ErrWorkflowChangeConflict) {
+		if errors.As(err, &approvals) || errors.Is(err, service.ErrWorkflowChangeConflict) ||
+			errors.Is(err, workflowmove.ErrDestinationExecutorUnavailable) {
 			handleSelectedMoveError(c, h.logger, err)
 			return
 		}

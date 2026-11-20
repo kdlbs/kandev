@@ -311,3 +311,32 @@ func resolveSessionHostnamesFromSettings(t *testing.T, settings *models.UserSett
 	}
 	return field.Bool()
 }
+
+func TestUpdateUserSettingsMapsMarkdownPreview(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &settingsRepository{settings: &models.UserSettings{
+		MarkdownPreviewByDefault: true,
+	}}
+	controller := NewController(service.NewService(repo, nil, log))
+	want := false
+
+	response, err := controller.UpdateUserSettings(context.Background(), dto.UpdateUserSettingsRequest{
+		MarkdownPreviewByDefault: &want,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	if response.Settings.MarkdownPreviewByDefault != want {
+		t.Fatalf("MarkdownPreviewByDefault = %v, want %v", response.Settings.MarkdownPreviewByDefault, want)
+	}
+	response, err = controller.UpdateUserSettings(context.Background(), dto.UpdateUserSettingsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Settings.MarkdownPreviewByDefault {
+		t.Fatal("omitted patch reset explicit false")
+	}
+}

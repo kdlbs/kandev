@@ -269,7 +269,7 @@ func TestService_MoveTaskPreflightsWorkflowLifecycleBeforeCommit(t *testing.T) {
 	seedMoveSteps(svc)
 	createMoveTask(t, ctx, repo, "task-preflight", "wf-source", "step-source", nil)
 	createMoveSession(t, ctx, repo, "session-preflight", "task-preflight", models.TaskSessionStateRunning, models.ReviewStatusNone)
-	preflightErr := errors.New("managed credentials are invalid")
+	preflightErr := workflowmove.ErrDestinationExecutorUnavailable
 	preflight := &fakeWorkflowMovePreflight{err: preflightErr}
 	svc.SetWorkflowMovePreflight(preflight)
 
@@ -294,6 +294,13 @@ func TestService_MoveTaskPreflightsWorkflowLifecycleBeforeCommit(t *testing.T) {
 	}
 	if task.WorkflowStepID != "step-source" {
 		t.Fatalf("task step = %q, want source step after preflight failure", task.WorkflowStepID)
+	}
+	sessions, err := repo.ListTaskSessions(ctx, "task-preflight")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("session count after preflight refusal = %d, want only the existing session", len(sessions))
 	}
 	for _, event := range eventBus.GetPublishedEvents() {
 		if event.Type == events.TaskMoved {

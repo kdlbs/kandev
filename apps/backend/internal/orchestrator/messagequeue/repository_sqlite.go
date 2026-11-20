@@ -53,6 +53,12 @@ func NewSQLiteRepository(writer, reader *sqlx.DB) (Repository, error) {
 	if err := r.ensureEditLeaseSchema(context.Background()); err != nil {
 		return nil, fmt.Errorf("messagequeue: init edit lease schema: %w", err)
 	}
+	if err := r.ensureQueueDispatchRecoverySchema(context.Background()); err != nil {
+		return nil, fmt.Errorf("messagequeue: init dispatch recovery schema: %w", err)
+	}
+	if err := r.ensureSendNowClaimRecoverySchema(context.Background()); err != nil {
+		return nil, fmt.Errorf("messagequeue: init Send Now recovery schema: %w", err)
+	}
 	var present bool
 	var err error
 	if writer.DriverName() == "pgx" {

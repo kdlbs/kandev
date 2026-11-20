@@ -351,6 +351,7 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
 		return
 	}
+	extendUpdateStatusWriteDeadline(c)
 	var preview *dto.AgentUpdatePreviewDTO
 	var err error
 	switch {
@@ -378,6 +379,7 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 }
 
 func (h *Handlers) httpListAgentUpdateStatuses(c *gin.Context) {
+	extendUpdateStatusWriteDeadline(c)
 	resp, err := h.controller.ListAgentUpdateStatuses(c.Request.Context())
 	if err != nil {
 		h.logger.Error("failed to list agent runtime update statuses", zap.Error(err))

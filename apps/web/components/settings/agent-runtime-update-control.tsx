@@ -156,6 +156,8 @@ function AgentRuntimeUpdateDialogView({
   const body = (
     <AgentRuntimeUpdateBody
       agentName={agentName}
+      status={runtimeUpdateStatus}
+      canManage={control.canManage}
       preview={preview}
       loading={loading}
       previewError={previewError}

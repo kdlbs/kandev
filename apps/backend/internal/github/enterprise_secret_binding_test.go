@@ -274,7 +274,7 @@ func TestEnterpriseCrossHostConnectionCleanupFailureKeepsCommittedAuthority(t *t
 				t.Fatalf("committed authority rolled back: %+v, error %v", current, err)
 			}
 			settings, err := service.GetWorkspaceSettings(ctx, "ws-1")
-			if err != nil || settings.GitHubHost != current.GitHubHost || settings.RepoScopeMode != RepoScopeModeRepos || settings.TaskGitCredentialsMode != TaskGitCredentialsModeExecutor {
+			if err != nil || settings.GitHubHost != current.GitHubHost || settings.RepoScopeMode != RepoScopeModeSelected || settings.TaskGitCredentialsMode != TaskGitCredentialsModeExecutor {
 				t.Fatalf("connection/settings mixed authorities: %+v, error %v", settings, err)
 			}
 		})

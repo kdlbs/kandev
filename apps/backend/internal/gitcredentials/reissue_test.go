@@ -40,6 +40,45 @@ func TestBrokerReissueRestoresLeaseAfterBrokerRestart(t *testing.T) {
 	}
 }
 
+func TestBrokerReissueRecoversPrunedIdleLease(t *testing.T) {
+	provider := &rotatingProvider{binding: "generation-1", username: "user", secret: "secret"}
+	authorizer := &recordingAuthorizer{}
+	signer, err := NewReissueCapabilitySigner("stable-test-key")
+	if err != nil {
+		t.Fatalf("NewReissueCapabilitySigner() error = %v", err)
+	}
+	now := time.Date(2026, time.January, 15, 10, 0, 0, 0, time.UTC)
+	broker := NewBroker(provider, authorizer)
+	broker.SetReissueCapabilitySigner(signer)
+	broker.now = func() time.Time { return now }
+	lease, capability, err := broker.IssueWithReissueCapability(t.Context(), testScope())
+	if err != nil {
+		t.Fatalf("IssueWithReissueCapability() error = %v", err)
+	}
+	if _, err := broker.Redeem(t.Context(), testRedemption(lease.Token)); err != nil {
+		t.Fatalf("Redeem() before idle expiry error = %v", err)
+	}
+
+	now = now.Add(defaultLeaseTTL + time.Hour)
+	if got := broker.ActiveLeaseCount(); got != 0 {
+		t.Fatalf("lease count after idle prune = %d, want 0", got)
+	}
+	if _, err := broker.Redeem(t.Context(), testRedemption(lease.Token)); !errors.Is(err, ErrLeaseInvalid) {
+		t.Fatalf("Redeem() after prune error = %v, want invalid lease", err)
+	}
+
+	reissued, err := broker.Reissue(t.Context(), ReissueRequest{
+		Capability: capability.Token, TaskID: "task-1", SessionID: "session-1", RepositoryID: "repository-1",
+		Host: "bitbucket.example", Path: "/scm/ENG/widgets.git",
+	})
+	if err != nil {
+		t.Fatalf("Reissue() after idle prune error = %v", err)
+	}
+	if _, err := broker.Redeem(t.Context(), testRedemption(reissued.Token)); err != nil {
+		t.Fatalf("Redeem() replacement lease error = %v", err)
+	}
+}
+
 func TestBrokerReissueRecoversRotatedBinding(t *testing.T) {
 	provider := &rotatingProvider{binding: "generation-1", username: "user", secret: "secret"}
 	broker := NewBroker(provider, &recordingAuthorizer{})

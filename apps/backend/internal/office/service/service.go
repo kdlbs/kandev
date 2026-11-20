@@ -126,6 +126,23 @@ type SessionRecoveryBlockLookup interface {
 	GetSessionRecoveryBlock(context.Context, string) (*taskmodels.SessionRecoveryBlock, error)
 }
 
+// RunClaimSessionEvidence describes a task session that may belong to the
+// current run claim. A turn started after the claim is durable launch evidence.
+type RunClaimSessionEvidence struct {
+	SessionID             string
+	TurnStartedAfterClaim bool
+}
+
+// RunClaimSessionProbe finds task sessions relevant to a claimed run and checks
+// runtime liveness without hiding probe errors. Recovery treats errors as
+// uncertain and leaves the claim alone.
+type RunClaimSessionProbe interface {
+	FindTaskSessionsForClaim(
+		ctx context.Context, taskID, agentProfileID, persistedSessionID string, claimedAt time.Time,
+	) ([]RunClaimSessionEvidence, error)
+	ProbeAgentRunningForSession(ctx context.Context, sessionID string) (bool, error)
+}
+
 // LaunchContext mirrors scheduler.LaunchContext so the office.service
 // package can carry the Office-built launch context (prompt, env,
 // workflow step, attachments, plan-mode, profile) into the routing
@@ -423,6 +440,7 @@ type Service struct {
 	projectSkillDirResolver ProjectSkillDirResolver
 	taskStarter             TaskStarter
 	runSessionLauncher      RunSessionLauncher
+	runClaimSessionProbe    RunClaimSessionProbe
 	runStopper              RunExecutionStopper
 	runPermissions          RunPermissionResolver
 	permissionRetryDelays   []time.Duration
@@ -434,6 +452,8 @@ type Service struct {
 	configSyncCleaner       ConfigSyncCleaner
 	taskCreator             TaskCreator
 	taskStateWriter         shared.TaskStateWriter
+	taskStateBatchWriter    shared.TaskStateBatchWriter
+	taskStateChangeEvents   shared.TaskStateChangePublisher
 	workspaceCreator        WorkspaceCreator
 	taskPRs                 TaskPRLister
 	agentTokenMinter        AgentTokenMinter
@@ -474,6 +494,7 @@ type Service struct {
 	// gate is not wired (older tests, transitional deployments).
 	pauseGate               shared.PauseGate
 	deferredAssignmentQueue DeferredAssignmentQueue
+	wakeupRequestDispatcher WakeupRequestDispatcher
 
 	// workflowStepGetter resolves a task's current workflow step so
 	// task_assigned wakes (queueTaskAssignedRun, the unstarted-task
@@ -489,6 +510,19 @@ type Service struct {
 // package. terminalStatus is "done" or "cancelled".
 type RoutineRunSyncer interface {
 	SyncRunStatus(ctx context.Context, taskID, terminalStatus string) error
+}
+
+// WakeupRequestDispatcher is the claim-time merge and delivery owner for
+// durable agent wakeup requests. The office service keeps only this narrow
+// seam so it can replay queued blocker alerts without owning run dispatch.
+type WakeupRequestDispatcher interface {
+	Dispatch(ctx context.Context, requestID string) error
+}
+
+// SetWakeupRequestDispatcher wires the shared wakeup dispatcher used for
+// durable blocker failure alerts and their resume/recovery replay.
+func (s *Service) SetWakeupRequestDispatcher(d WakeupRequestDispatcher) {
+	s.wakeupRequestDispatcher = d
 }
 
 // RoutineRunTaskStateReader reads the task's current state before a terminal
@@ -565,6 +599,12 @@ func (s *Service) SetAgentTokenMinter(minter AgentTokenMinter) {
 // scheduler fail-closed when startup composition is incomplete.
 func (s *Service) SetRunSessionLauncher(launcher RunSessionLauncher) {
 	s.runSessionLauncher = launcher
+}
+
+// SetRunClaimSessionProbe wires the task-session/runtime check used by stale
+// claim recovery. Leaving it nil fails closed for task-bound claims.
+func (s *Service) SetRunClaimSessionProbe(probe RunClaimSessionProbe) {
+	s.runClaimSessionProbe = probe
 }
 
 // RunSessionLauncherHandle returns the shared-runtime taskless launch seam so
@@ -678,6 +718,18 @@ func (s *Service) SetTaskTreeDeleter(deleter TaskTreeDeleter) {
 // changes and completion guards.
 func (s *Service) SetTaskStateWriter(writer shared.TaskStateWriter) {
 	s.taskStateWriter = writer
+}
+
+// SetTaskStateBatchWriter wires the task repository batch used by tree
+// cancellation.
+func (s *Service) SetTaskStateBatchWriter(writer shared.TaskStateBatchWriter) {
+	s.taskStateBatchWriter = writer
+}
+
+// SetTaskStateChangePublisher wires canonical publication for Office tree
+// state transitions.
+func (s *Service) SetTaskStateChangePublisher(publisher shared.TaskStateChangePublisher) {
+	s.taskStateChangeEvents = publisher
 }
 
 // SetConfigSyncCleaner wires the config sync service after startup

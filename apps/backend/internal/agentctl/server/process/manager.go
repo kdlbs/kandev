@@ -312,8 +312,9 @@ type Manager struct {
 	// editor-buffer HTML previews. It is closed with the agentctl instance.
 	workspacePreview *WorkspacePreviewManager
 
-	// Embedded shell session (auto-created when agent starts)
-	shell *shell.Session
+	// Embedded shell session (auto-created when agent starts). Keep reads
+	// independent of the teardown mutex and comparison-target admission.
+	shell atomic.Pointer[shell.Session]
 
 	// Per-terminal shell sessions for remote executor support
 	shellMgr *shell.Manager
@@ -485,6 +486,45 @@ func (m *Manager) CloseAdmission() {
 	}
 	if m.shellMgr != nil {
 		m.shellMgr.BeginStop()
+	}
+}
+
+// CloseAdmissionIfIdle closes starts only when no workspace process owns the instance.
+func (m *Manager) CloseAdmissionIfIdle() bool {
+	m.admissionMu.Lock()
+	defer m.admissionMu.Unlock()
+	if m.stopping || m.admissionCount != 0 || m.passthrough.Live() ||
+		(m.shellMgr != nil && m.shellMgr.HasRunningTerminals()) {
+		return false
+	}
+	if shell := m.Shell(); shell != nil && shell.HasUserWork() {
+		return false
+	}
+	if m.hasWorkspaceEditor() || m.workspacePreview.hasOpenRoots() {
+		return false
+	}
+	for _, process := range m.ListProcesses("") {
+		switch process.Status {
+		case types.ProcessStatusExited, types.ProcessStatusFailed, types.ProcessStatusStopped:
+		default:
+			return false
+		}
+	}
+	m.stopping = true
+	return true
+}
+
+func (m *Manager) hasWorkspaceEditor() bool {
+	m.vscodeMu.Lock()
+	defer m.vscodeMu.Unlock()
+	if m.vscode == nil {
+		return false
+	}
+	switch m.vscode.Info().Status {
+	case VscodeStatusRunning, VscodeStatusStarting, VscodeStatusInstalling:
+		return true
+	default:
+		return m.vscode.HasUnreapedOwnership()
 	}
 }
 
@@ -732,6 +772,76 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 	descriptor.ProcessManagerID = m.ProcessManagerID()
 	descriptor.AgentProcess = m.AgentProcessIdentity()
 	return descriptor, nil
+}
+
+// SuccessorDeliveryStreams lists streams in this session lifetime that belong
+// to generations newer than the process owner's configured generation.
+func (m *Manager) SuccessorDeliveryStreams(ctx context.Context) ([]journal.Stream, error) {
+	if m == nil || m.cfg == nil {
+		return nil, journal.ErrOwnerMismatch
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return nil, err
+	}
+	return deliveryJournal.ListSuccessorStreams(
+		ctx, m.cfg.SessionID, m.DeliveryIncarnationID(), m.DeliveryHarnessGeneration(),
+	)
+}
+
+// AbandonSuccessorDeliveryStream removes an uncommitted successor stream while
+// the configured generation owner is idle. This process owns the journal and
+// emits only to its configured stream, so a newer-generation stream has no
+// live writer through this owner.
+func (m *Manager) AbandonSuccessorDeliveryStream(ctx context.Context, expected journal.Stream) error {
+	if m == nil || m.cfg == nil {
+		return journal.ErrOwnerMismatch
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+	if expected.SessionID != sessionID || expected.IncarnationID != incarnationID ||
+		expected.HarnessGeneration <= generation || m.activeDeliverySubmissionID() != "" {
+		return journal.ErrOwnerMismatch
+	}
+	return deliveryJournal.AbandonStream(ctx, expected)
+}
+
+// AbandonFailedBootstrapDeliveryStream removes this owner's stream after its
+// agent process has stopped and the lifecycle has confirmed that SQL never
+// committed the successor generation or its cursor.
+func (m *Manager) AbandonFailedBootstrapDeliveryStream(ctx context.Context, streamID string, generation uint64) error {
+	if m == nil || m.cfg == nil || m.Status() != StatusStopped {
+		return journal.ErrSubmissionState
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	sessionID, incarnationID, configuredGeneration := m.DeliverySubmissionIdentity()
+	if streamID != m.DeliveryStreamID() || generation != configuredGeneration ||
+		m.activeDeliverySubmissionID() != "" {
+		return journal.ErrOwnerMismatch
+	}
+	stream, err := deliveryJournal.GetStream(ctx, streamID)
+	if err != nil {
+		return err
+	}
+	if stream.SessionID != sessionID || stream.IncarnationID != incarnationID ||
+		stream.HarnessGeneration != generation {
+		return journal.ErrOwnerMismatch
+	}
+	return deliveryJournal.AbandonStream(ctx, stream)
 }
 
 // DeliveryStreamID returns the stable transport stream identity. Agentctl
@@ -2065,6 +2175,11 @@ func (m *Manager) PublishWorkspacePreview(req WorkspacePreviewRequest) (Workspac
 	if m.workspacePreview == nil {
 		return WorkspacePreviewResponse{}, ErrWorkspacePreviewUnavailable
 	}
+	release, err := m.admitStart()
+	if err != nil {
+		return WorkspacePreviewResponse{}, ErrWorkspacePreviewUnavailable
+	}
+	defer release()
 	root, err := m.resolveWorkspacePreviewRoot(req.Repo)
 	if err != nil {
 		return WorkspacePreviewResponse{}, err
@@ -2876,7 +2991,7 @@ func (m *Manager) startAgentShell() {
 		m.logger.Warn("failed to create shell session", zap.Error(err))
 		return
 	}
-	m.shell = shellSession
+	m.shell.Store(shellSession)
 	m.logger.Info("shell session auto-created")
 }
 
@@ -3628,10 +3743,14 @@ func (m *Manager) stopForTeardown(ctx context.Context, retainJournal bool) error
 	passthroughErr = errors.Join(passthroughErr, m.cleanupPassthroughFiles(ctx))
 	previewErr := m.CloseWorkspacePreview(ctx)
 	if err := m.WaitForAdmission(ctx); err != nil {
+		drainErr := fmt.Errorf("wait for process admission to drain: %w", err)
+		if retainJournal {
+			return errors.Join(passthroughErr, previewErr, drainErr)
+		}
 		// Close durable storage even when an owner misses the drain deadline.
 		// Late readers then fail with a typed closed-journal error, and cannot
 		// mistake shutdown for an empty successful replay.
-		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err), m.closeDeliveryJournal())
+		return errors.Join(previewErr, drainErr, m.closeDeliveryJournal())
 	}
 	stopErr := m.stop(ctx)
 	if passthroughErr == nil && previewErr == nil && stopErr == nil {
@@ -3639,10 +3758,11 @@ func (m *Manager) stopForTeardown(ctx context.Context, retainJournal bool) error
 	}
 	preparedErr := m.closePreparedRuntimeOwnersAfterTeardown()
 	instanceCleanupErr := m.closeInstanceCleanupHooks()
-	if retainJournal && errors.Join(passthroughErr, previewErr, stopErr, preparedErr, instanceCleanupErr) == nil {
-		return nil
+	stopResult := errors.Join(passthroughErr, previewErr, stopErr, preparedErr, instanceCleanupErr)
+	if retainJournal {
+		return stopResult
 	}
-	return errors.Join(passthroughErr, previewErr, stopErr, preparedErr, instanceCleanupErr, m.closeDeliveryJournal())
+	return errors.Join(stopResult, m.closeDeliveryJournal())
 }
 
 // RegisterInstanceCleanupHook attaches resources whose lifetime is bounded by
@@ -3853,12 +3973,12 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) error {
 	m.logger.Debug("vscode server stopped")
 
 	m.logger.Debug("stopping shell session")
-	if m.shell != nil {
-		if err := m.shell.Stop(); err != nil {
+	if session := m.shell.Load(); session != nil {
+		if err := session.Stop(); err != nil {
 			m.logger.Debug("failed to stop shell session", zap.Error(err))
 			errs = append(errs, err)
 		} else {
-			m.shell = nil
+			m.shell.CompareAndSwap(session, nil)
 		}
 	}
 	m.logger.Debug("shell session stopped")
@@ -5083,9 +5203,21 @@ func (m *Manager) CancelPendingPermissions() {
 
 // Shell returns the embedded shell session, or nil if not available
 func (m *Manager) Shell() *shell.Session {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.shell
+	return m.shell.Load()
+}
+
+// WriteWorkspaceShellInput serializes user input with idle instance reclaim.
+func (m *Manager) WriteWorkspaceShellInput(data []byte) (int, error) {
+	release, err := m.admitStart()
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+	session := m.Shell()
+	if session == nil {
+		return 0, errors.New("shell not available")
+	}
+	return session.Write(data)
 }
 
 // ShellManager returns the per-terminal shell session manager.
@@ -5109,7 +5241,7 @@ func (m *Manager) StartShell() error {
 	defer m.mu.Unlock()
 
 	// Already running
-	if m.shell != nil {
+	if m.shell.Load() != nil {
 		return nil
 	}
 
@@ -5126,7 +5258,7 @@ func (m *Manager) StartShell() error {
 		return fmt.Errorf("failed to create shell session: %w", err)
 	}
 
-	m.shell = shellSession
+	m.shell.Store(shellSession)
 	m.logger.Info("shell session started independently")
 	return nil
 }

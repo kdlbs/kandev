@@ -67,7 +67,7 @@ type AgentUpdateJobStore struct {
 	onRefresh               func()
 	onFinished              func(dto.AgentUpdateJobDTO)
 	selectionStore          managedruntime.SelectionStore
-	onStatusInvalidated     func(string)
+	onStatusInvalidated     func(RuntimeStatusInvalidation)
 	openCodeSelectionReader managedruntime.OpenCodeSelectionReader
 	openCodeSelections      managedruntime.OpenCodeSelectionWriter
 	migrationGuard          OpenCodeMigrationGuard
@@ -240,12 +240,37 @@ func (s *AgentUpdateJobStore) enqueueConfigured(
 	return job, nil
 }
 
+// RuntimeStatusInvalidation identifies the cached status a terminal job made
+// stale: the job's package for registry results and its agent for native
+// check results.
+type RuntimeStatusInvalidation struct {
+	AgentName  string
+	Package    string
+	UpdateMode dto.AgentUpdateMode
+}
+
 // SetStatusInvalidator wires the process-local status cache invalidation used
-// after a successful runtime activation. It is optional for isolated stores.
-func (s *AgentUpdateJobStore) SetStatusInvalidator(invalidator func(string)) {
+// after terminal update jobs. It is optional for isolated stores and is
+// always called without a job-store lock held.
+func (s *AgentUpdateJobStore) SetStatusInvalidator(invalidator func(RuntimeStatusInvalidation)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onStatusInvalidated = invalidator
+}
+
+// invalidateHarnessStatus runs before a self_update job's terminal state or
+// released claim becomes observable, so no later request can reuse or join a
+// pre-job native check. Pinned jobs keep their post-publication invalidation.
+func (s *AgentUpdateJobStore) invalidateHarnessStatus(job *AgentUpdateJob) {
+	if job.UpdateMode != dto.AgentUpdateModeSelfUpdate {
+		return
+	}
+	s.mu.Lock()
+	invalidator := s.onStatusInvalidated
+	s.mu.Unlock()
+	if invalidator != nil {
+		invalidator(RuntimeStatusInvalidation{AgentName: job.AgentName, Package: job.Package, UpdateMode: job.UpdateMode})
+	}
 }
 
 func (s *AgentUpdateJobStore) SetOpenCodeSelections(writer managedruntime.OpenCodeSelectionWriter) {
@@ -940,6 +965,8 @@ func (s *AgentUpdateJobStore) finishFailed(
 	err error,
 	ref MaintenanceJobRef,
 ) {
+	// A failed harness updater can still have changed the installation.
+	s.invalidateHarnessStatus(job)
 	s.mu.Lock()
 	job.Status = dto.AgentUpdateJobStatusFailed
 	job.Error = formatUpdateJobError(ctx, err)
@@ -999,11 +1026,11 @@ func (s *AgentUpdateJobStore) finishActivatedWithRefreshError(
 	s.finishLocked(job)
 	snapshot := job.snapshot()
 	statusInvalidator := s.onStatusInvalidated
-	packageName := job.Package
+	invalidation := RuntimeStatusInvalidation{AgentName: job.AgentName, Package: job.Package, UpdateMode: job.UpdateMode}
 	s.mu.Unlock()
 	s.complete(snapshot)
-	if statusInvalidator != nil && packageName != "" {
-		statusInvalidator(packageName)
+	if statusInvalidator != nil && invalidation.Package != "" {
+		statusInvalidator(invalidation)
 	}
 	if s.onRefresh != nil {
 		s.onRefresh()
@@ -1020,6 +1047,7 @@ func (s *AgentUpdateJobStore) finishRefresh(
 	ref MaintenanceJobRef,
 ) {
 	refreshed := false
+	s.invalidateHarnessStatus(job)
 	s.mu.Lock()
 	switch {
 	case err != nil:
@@ -1045,11 +1073,11 @@ func (s *AgentUpdateJobStore) finishRefresh(
 	s.finishLocked(job)
 	snapshot := job.snapshot()
 	statusInvalidator := s.onStatusInvalidated
-	packageName := job.Package
+	invalidation := RuntimeStatusInvalidation{AgentName: job.AgentName, Package: job.Package, UpdateMode: job.UpdateMode}
 	s.mu.Unlock()
 	s.complete(snapshot)
-	if refreshed && statusInvalidator != nil && packageName != "" {
-		statusInvalidator(packageName)
+	if refreshed && job.UpdateMode != dto.AgentUpdateModeSelfUpdate && statusInvalidator != nil && invalidation.Package != "" {
+		statusInvalidator(invalidation)
 	}
 	if refreshed && s.onRefresh != nil {
 		s.onRefresh()

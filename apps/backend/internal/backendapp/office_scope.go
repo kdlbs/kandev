@@ -216,16 +216,20 @@ func officeWorkspaceScopeMiddleware(
 	}
 }
 
-// requiresOfficeWorkspaceManage identifies the two workspace-pause mutation
-// routes. Their ordinary Office scope check grants reach with workspace.read;
-// the state-changing operation also needs the canonical workspace.manage
-// permission. Other Office mutations use their own action scopes.
+// requiresOfficeWorkspaceManage identifies the workspace-pause mutation routes
+// and the Review on a different provider switches, which edit the workspace's
+// workflow steps. Their ordinary Office scope check grants reach with
+// workspace.read; the state-changing operation also needs the canonical
+// workspace.manage permission. Other Office mutations use their own action
+// scopes.
 func requiresOfficeWorkspaceManage(c *gin.Context) bool {
-	if c.Request.Method != http.MethodPost || c.Param("wsId") == "" {
+	if c.Param("wsId") == "" {
 		return false
 	}
-	switch c.FullPath() {
-	case officeRoutePrefix + "/workspaces/:wsId/pause", officeRoutePrefix + "/workspaces/:wsId/resume":
+	switch c.Request.Method + " " + c.FullPath() {
+	case http.MethodPost + " " + officeRoutePrefix + "/workspaces/:wsId/pause",
+		http.MethodPost + " " + officeRoutePrefix + "/workspaces/:wsId/resume",
+		http.MethodPut + " " + officeRoutePrefix + "/workspaces/:wsId/routing/author-exclusion":
 		return true
 	default:
 		return false

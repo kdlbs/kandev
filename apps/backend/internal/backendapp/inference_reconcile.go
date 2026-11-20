@@ -29,6 +29,8 @@ func (b *sharedInferenceConsumer) Refresh(ctx context.Context) { b.refresh(ctx) 
 func (b *sharedInferenceConsumer) refresh(ctx context.Context, extra ...agentruntime.InferenceClientRef) {
 	b.refreshMu.Lock()
 	defer b.refreshMu.Unlock()
+	revision := b.capacity.InferenceCapacityRevision()
+	all, finite := b.capacity.InferenceCapacityPolicy()
 	refs, known := b.inferenceRefs(ctx, extra)
 	defer releaseInferenceRefs(refs)
 	observations, observedKnown := b.observeInferenceRefs(ctx, refs)
@@ -36,7 +38,13 @@ func (b *sharedInferenceConsumer) refresh(ctx context.Context, extra ...agentrun
 	bindings, err := b.capacity.InferenceCapacityBindings(ctx)
 	if err != nil {
 		b.logPopulationUnknown("inference_bindings", inferencePopulationReadFailure(err), sessioncapacity.InferenceBinding{})
-		_ = b.capacity.SyncInferenceCapacity(ctx, false, func(map[string]sessioncapacity.InferenceBinding) error { return nil })
+		_ = b.capacity.SyncInferenceCapacityAtRevision(ctx, revision, false, func(map[string]sessioncapacity.InferenceBinding) error { return nil })
+		return
+	}
+	if (!all || !finite) && len(bindings) == 0 {
+		// The live helper gates were refreshed above. An optional policy with
+		// no retained bindings still has an empty, known admission population.
+		_ = b.capacity.SyncInferenceCapacityAtRevision(ctx, revision, true, func(map[string]sessioncapacity.InferenceBinding) error { return nil })
 		return
 	}
 	if !observedKnown {
@@ -45,7 +53,7 @@ func (b *sharedInferenceConsumer) refresh(ctx context.Context, extra ...agentrun
 	original := maps.Clone(bindings)
 	known = b.reconcileHeldInference(ctx, bindings, observations) && known
 	known = b.importUnboundInference(ctx, bindings, observations) && known
-	err = b.capacity.SyncInferenceCapacity(ctx, known, func(active map[string]sessioncapacity.InferenceBinding) error {
+	err = b.capacity.SyncInferenceCapacityAtRevision(ctx, revision, known, func(active map[string]sessioncapacity.InferenceBinding) error {
 		return mergeObservedInference(active, original, bindings)
 	})
 	if err == nil {

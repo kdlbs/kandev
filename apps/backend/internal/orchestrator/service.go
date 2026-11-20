@@ -26,6 +26,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	runtimekind "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -71,6 +72,10 @@ type ServiceConfig struct {
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
 	CodexAppServerEnabled bool
+
+	// TerminalPrimaryQueueHandoff moves a terminal primary session's queue to
+	// the session that takes over the primary role.
+	TerminalPrimaryQueueHandoff bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int
@@ -933,6 +938,19 @@ type Service struct {
 	parkedLoopStopped bool
 	parkedLoopWorkers sync.WaitGroup
 
+	// terminalQueueHandOffMu serializes terminal primary queue hand-offs so
+	// each one resolves the current primary after earlier hand-offs finish.
+	terminalQueueHandOffMu sync.Mutex
+	// primarySwitchMu orders SetPrimarySession's role change against a
+	// terminal queue hand-off's commit. The hand-off holds the read side from
+	// its in-admission receiver check until the transfer returns, so the role
+	// cannot move between that check and the commit. Only the repository write
+	// runs under the write side, so no admission is ever awaited while it is held.
+	primarySwitchMu sync.RWMutex
+	// beforeTerminalQueueTransfer is a test hook that runs after a hand-off
+	// resolves its receiver and before it transfers the queue. Nil in production.
+	beforeTerminalQueueTransfer func(toSessionID string)
+
 	// silentRestore workers are bounded to the startup inventory and joined
 	// during shutdown before the repositories and runtime are torn down.
 	silentRestoreMu           sync.Mutex
@@ -1477,6 +1495,23 @@ type Service struct {
 	// duplicate-delivery optimization; the durable consumed tombstone lives in
 	// session metadata.
 	parkedProfileSwitchStops sync.Map
+	// transientLaunchRetries records the timestamp of the last automatic retry
+	// per session. Entries live for transientLaunchRetryTTL, so a retried
+	// launch is never retried twice, and expired entries are swept, so the map
+	// neither grows without bound nor blocks self-healing forever.
+	transientLaunchRetries sync.Map
+	// launchRetryMu guards the automatic retry workers' lifecycle:
+	// launchRetryCtx is cancelled by Stop, after which no retry is scheduled,
+	// and launchRetries tracks the workers so Stop and tests can wait for
+	// them. launchRetryDelay and launchRetry are test seams; production leaves
+	// both zero-valued.
+	launchRetryMu      sync.Mutex
+	launchRetryCtx     context.Context
+	launchRetryCancel  context.CancelFunc
+	launchRetryStopped bool
+	launchRetries      *sync.WaitGroup
+	launchRetryDelay   time.Duration
+	launchRetry        func(context.Context, string, string) error
 
 	// steerInFlight tracks sessions with an unacknowledged mid-turn steer.
 	// The spec allows at most one in-flight steer per session; a second attempt
@@ -2039,6 +2074,7 @@ func NewService(
 		)
 	})
 	exec.SetOnLaunchFailed(s.handleLaunchFailed)
+	exec.SetOnLaunchFailureRecorded(s.handleRecordedLaunchFailure)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
 	exec.SetOnStaleExecutionCleanup(func(ctx context.Context, sessionID string) {
 		s.settleBackgroundWorkLocked(ctx, sessionID, "")
@@ -3442,6 +3478,7 @@ func (s *Service) Start(ctx context.Context) (startErr error) {
 	// sweep while the service is active.
 	s.resetLifecycleSweepWorkers()
 	s.resetSilentRestoreRecovery()
+	s.resetTransientLaunchRetries()
 	s.running = true
 	s.startedAt = time.Now()
 	recoveryLifecycleCtx, recoveryLifecycleCancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -3677,6 +3714,7 @@ func (s *Service) Stop() error {
 		return ErrServiceNotRunning
 	}
 	s.running = false
+	cancelLaunchRetries, launchRetryWorkers := s.closeTransientLaunchRetries()
 	recoveryLifecycleCancel := s.recoveryLifecycleCancel
 	stopRecoveryParent := s.stopRecoveryParent
 	s.recoveryLifecycleCtx = nil
@@ -3691,6 +3729,7 @@ func (s *Service) Stop() error {
 	}
 
 	s.logger.Info("stopping orchestrator service")
+	s.awaitTransientLaunchRetries(cancelLaunchRetries, launchRetryWorkers)
 	// Stop owns every in-flight resume attempt. Its detached request context
 	// must not let startup callbacks outlive the service generation.
 	s.cancelResumeAttempts()
@@ -4202,6 +4241,13 @@ func isTaskSessionNotFound(err error) bool {
 // Returns true if the session should be skipped (no further processing needed).
 func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState, report *startupCleanupReport, scope interface{}) bool {
 	sessionID := session.ID
+	if running.Runtime == runtimekind.RuntimeStandalone && previousState == models.TaskSessionStateCancelled {
+		// Keep the inventory visible to startup correlation and its recovery
+		// guards. The reaper will check this owner, pending work and recovery
+		// evidence before stopping it after startup.
+		s.reconcileAbsentTerminalRuntime(ctx, running, scope)
+		return true
+	}
 	switch previousState {
 	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
 		s.logger.Info("session in terminal state; stopping runtime before cleaning up executor record",
@@ -4228,7 +4274,9 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 // handleFailedSessionOnStartup handles a failed session during startup recovery.
 func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, report *startupCleanupReport, scope interface{}) {
 	sessionID := session.ID
-	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
+	if running.Runtime != runtimekind.RuntimeStandalone {
+		s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
+	}
 	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
 	if session.TaskID != "" {
 		task, taskErr := s.repo.GetTask(ctx, session.TaskID)
@@ -4245,6 +4293,10 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 					zap.Error(updateErr))
 			}
 		}
+	}
+	if running.Runtime == runtimekind.RuntimeStandalone {
+		s.reconcileAbsentTerminalRuntime(ctx, running, scope)
+		return
 	}
 	if canResumeRunning(running) {
 		s.logger.Info("preserving executor record for resumable failed session",

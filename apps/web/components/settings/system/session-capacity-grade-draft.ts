@@ -3,6 +3,8 @@ import type {
   SessionCapacitySettingsPatch,
 } from "@/lib/types/system";
 
+const maxGradeLimits = 64;
+
 export type GradeLimitDraft = { id: string; grade: string; maximum: string };
 
 export function gradeLimitDrafts(limits: Record<string, number> = {}): GradeLimitDraft[] {
@@ -59,6 +61,7 @@ export function capacityGradePatch(
   // Disabling preserves the saved grade book. Legacy backends receive total-only patches.
   if (!enabled || saved.policy === undefined) return {};
   if (policy !== "automatic" && policy !== "all") return null;
+  if (rows.length > maxGradeLimits) return null;
   const grades = parseGradeLimits(rows);
   if (
     grades === null ||

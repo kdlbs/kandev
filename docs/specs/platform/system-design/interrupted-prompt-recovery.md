@@ -25,6 +25,7 @@ existing controls, recovery actions, and persistence.
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .8, .9, .11 and .12 | Manual resume |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .1 through .6 | Existing delivery and continuity designs |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .25 and .26 | Bounded projection wait |
+| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .12 and .24 (earlier incidents) | Earlier settled incidents |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criterion .12 (identity-less blocks) | Identity-less incident blocks |
 
 ## Workspace-only access
@@ -191,6 +192,44 @@ Regression evidence covers real silent-restore commits, repeated interruptions, 
 Negative cases include changed native identity, forged resolution action, mismatched timestamps, live work, projection lag, pending restore and transactional rollback.
 Desktop and phone use the existing Resume action and recovery feedback.
 There is no new rendered control, localization key, recovery action or dispatch authority.
+
+## Earlier settled incidents
+
+A session can carry records from an earlier incident whose prompt already
+settled: a `silent_restart_restore` attempt left `pending` (installs from before
+settlement-time retirement) and a recovery notice in phase `settled`. Both name
+the earlier submission. The native-evidence resolver checks them through
+`preparedHistoricalTerminalAttemptMatchesTx` and `historicalTerminalNoticeMatchesTx`.
+
+The lifecycle proof lists only unresolved SQL rows, so it never contains that
+earlier submission. When the proof omits it, these checks must accept the SQL
+settlement alone: `loadHistoricalTerminalSettlementTx` already requires the
+terminal effect, cursor, generation, source block and `fully_settled_at`. When
+the proof includes the submission, it must still match. Resolution then completes
+the stale attempt as superseded through the existing transaction. An unsettled
+earlier submission, a missing terminal effect, or a different native session
+keeps the block open.
+
+When native-evidence resolution returns false, the repository logs one WARN with
+the session, block ID and the first refusing step from a closed set
+(`snapshot`, `incident_blocks`, `prepared_attempt`, `notice`, `block_update`).
+The orchestrator classifies that refusal as `sql_resolution_refused` instead of
+`unclassified`.
+
+A failed successor start (fresh start or context continuation) can leave its
+journal stream with unacknowledged events and no committed SQL generation or
+cursor. That stream is orphaned: no generation row ever granted it authority.
+The failed bootstrap path removes it through the process owner after the agent
+process stops and before teardown. At the start of explicit
+`AcknowledgeNativeResumeDelivery`, native Resume removes any such stream before
+evaluating unresolved work. Status, proof, and automatic boot-ready reads do not
+inventory or abandon successor streams. Removal deletes the retained event
+payloads, their event-identity receipts, and the stream metadata in one journal
+transaction. The deterministic stream ID can then be reused from sequence 1.
+This is safe because the journal has one process owner, and that owner only
+appends to its configured stream; the failed-bootstrap path also requires the
+agent process to stop. A stream with a committed generation or any SQL cursor
+is never abandoned.
 
 ## Bounded projection wait
 

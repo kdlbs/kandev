@@ -13,11 +13,13 @@ import (
 
 type nativeProjectionRepository struct {
 	*adoptionDeliveryRepository
-	reads       int
-	advance     bool
-	cancel      context.CancelFunc
-	changeOwner bool
-	advanceAck  bool
+	reads          int
+	advance        bool
+	cancel         context.CancelFunc
+	changeOwner    bool
+	advanceAck     bool
+	successorReads atomic.Int32
+	abandonWrites  atomic.Int32
 }
 
 func (r *nativeProjectionRepository) GetAgentDeliveryCursor(ctx context.Context, streamID string) (*models.AgentDeliveryCursor, error) {
@@ -37,6 +39,11 @@ func nativeProjectionManager(t *testing.T, repository *nativeProjectionRepositor
 	status := durableAdoptionStatus()
 	var statusReads atomic.Int32
 	client := processTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/delivery/stream/abandon" {
+			repository.abandonWrites.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.Method != http.MethodGet {
 			t.Errorf("native proof attempted a mutation: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "unexpected mutation", http.StatusMethodNotAllowed)
@@ -63,6 +70,12 @@ func nativeProjectionManager(t *testing.T, repository *nativeProjectionRepositor
 			if err != nil {
 				t.Error(err)
 			}
+		case "/api/v1/agent/delivery/successors":
+			repository.successorReads.Add(1)
+			_, err := w.Write([]byte("[]"))
+			if err != nil {
+				t.Error(err)
+			}
 		default:
 			t.Errorf("unexpected native proof request: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "unexpected request", http.StatusBadRequest)
@@ -76,6 +89,45 @@ func nativeProjectionManager(t *testing.T, repository *nativeProjectionRepositor
 	execution.setSessionInitialized(true)
 	require.NoError(t, manager.executionStore.Add(execution))
 	return manager
+}
+
+func TestNativeResumeStatusAndProofDoNotInspectSuccessorStreams(t *testing.T) {
+	repository := &nativeProjectionRepository{adoptionDeliveryRepository: durableAdoptionRepository(), advance: true}
+	repository.cursor.ReceivedSequence = 2
+	repository.cursor.ProjectedSequence = 2
+	manager := nativeProjectionManager(t, repository)
+	execution, exists := manager.GetExecutionBySessionID("session-1")
+	require.True(t, exists)
+
+	status, err := manager.nativeResumeDeliveryStatus(t.Context(), execution, execution.agentctl)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	proof, err := manager.GetNativeResumeDeliveryEvidence(t.Context(), "session-1")
+	require.NoError(t, err)
+	require.NotNil(t, proof)
+	require.Zero(t, repository.successorReads.Load())
+	require.Zero(t, repository.abandonWrites.Load())
+}
+
+func TestOrphanCleanupSkipsChangedSQLGenerationOrNativeIdentity(t *testing.T) {
+	for _, scenario := range []string{"generation", "native identity"} {
+		t.Run(scenario, func(t *testing.T) {
+			durable := durableAdoptionRepository()
+			if scenario == "generation" {
+				durable.generation.Generation++
+			} else {
+				durable.generation.NativeSessionID = "other-native"
+			}
+			repository := &nativeProjectionRepository{adoptionDeliveryRepository: durable}
+			manager := nativeProjectionManager(t, repository)
+			execution, exists := manager.GetExecutionBySessionID("session-1")
+			require.True(t, exists)
+
+			err := manager.abandonOrphanSuccessorStreams(t.Context(), execution, execution.agentctl, repository)
+			require.NoError(t, err)
+			require.Zero(t, repository.successorReads.Load())
+		})
+	}
 }
 
 func TestNativeResumeProofWaitsForCapturedStreamProjection(t *testing.T) {

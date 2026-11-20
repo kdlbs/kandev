@@ -112,6 +112,7 @@ export type RouteAttemptOutcome =
   | "skipped_user_action"
   | "skipped_missing_mapping"
   | "skipped_max_attempts"
+  | "skipped_author_provider"
   | "deferred_circuit";
 
 export type RouteAttempt = {

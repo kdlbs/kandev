@@ -471,9 +471,12 @@ uses a named reader interface.
 ## Completion effects
 
 Completion effects key on the committed state transition, never on step name,
-position, or assignee (`AC-TASKS-COMPLETION-001.9`). The Office scheduler's
-`handleCommittedTaskCompletion` handles `COMPLETED`, `FAILED`, and `CANCELLED`
-and resolves blockers. The orchestrator
+position, or assignee (`AC-TASKS-COMPLETION-001.9`). For Office dependencies,
+the scheduler wakes dependents only when every blocker is `COMPLETED`, as
+defined by `REQ-OFFICE-BLOCKER-POLICY-001`. `FAILED` and `CANCELLED` blockers
+remain unsatisfied; the scheduler's blocker-failure subscriber sends the
+durable `task_blocker_failed` alert defined by
+`REQ-OFFICE-BLOCKER-POLICY-002`. The orchestrator
 `processParentChildrenCompletedForTaskState` wakes the parent. Reconciliation
 must not duplicate that wake; its test covers run and receipt visibility.
 Routine-run sync moves from the `task.moved` name check to a

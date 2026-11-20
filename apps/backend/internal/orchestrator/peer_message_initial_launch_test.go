@@ -375,3 +375,23 @@ func (r *newServiceRunningConflictRepository) UpdateTaskSessionIfCurrentStateWit
 	}
 	return r.Repository.UpdateTaskSessionIfCurrentStateWithStartAttempt(ctx, session, expected, attemptID)
 }
+
+func (r *newServiceRunningConflictRepository) UpdateTaskSessionIfCurrentStateForLaunch(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, error) {
+	if r.conflicted.CompareAndSwap(false, true) {
+		current, err := r.GetTaskSession(ctx, session.ID)
+		if err != nil {
+			return false, err
+		}
+		current.State = models.TaskSessionStateRunning
+		if err := r.UpdateTaskSession(ctx, current); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	return r.Repository.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
+}

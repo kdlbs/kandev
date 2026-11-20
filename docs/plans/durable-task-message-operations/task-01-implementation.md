@@ -47,14 +47,16 @@ Out of scope: New delivery paths, metadata authorization, unknown-outcome replay
 
 ## Files and dependencies
 
-The source files are the existing PR #4720 diff. This work order adds its delivery record and links existing requirements and system design; it introduces no runtime gate or permanent test.
+The source files are the existing PR #4720 diff. This work order records its
+delivery and links the requirements and system design. The consolidated
+maintainer PR also adds permanent handler, SQLite, and PostgreSQL regressions.
 
 - [System design](../../specs/platform/system-design/task-message-operation-identity.md)
 - [Plan](plan.md)
 
 ## Verification and results
 
-Validation: existing message/parent-question/tool-catalog tests and backend wiring build passed. Disposable race-enabled checks exercised actual registered MCP → native scope resolver → dispatcher → real SQLite, lost response after queue acceptance, readback/replay without duplicate delivery, conflicts/forged scope, once-only settlement, reopen and retention. Existing SQLite store/previous-stable upgrade checks passed; live PostgreSQL and provider/process E2E were not run. SQL guard, docs and all normal commit hooks passed. Existing catalog/upgrade expectations were adapted; no standing tests or CI were added.
+Initial contribution validation: existing message/parent-question/tool-catalog tests and backend wiring build passed. Disposable race-enabled checks exercised actual registered MCP → native scope resolver → dispatcher → real SQLite, lost response after queue acceptance, readback/replay without duplicate delivery, conflicts/forged scope, once-only settlement, reopen and retention. Existing SQLite store/previous-stable upgrade checks passed; live PostgreSQL and provider/process E2E were not run at that stage. SQL guard, docs and all normal commit hooks passed. Existing catalog/upgrade expectations were adapted; no standing tests or CI were added in that phase.
 
 Documentation-only correction: git diff --check and the existing .github/scripts/pr-docs.cjs validateCoverage entrypoint with the candidate changed paths and the linked candidate documents supplied on stdin. No GitHub status is synthesized locally.
 
@@ -92,3 +94,35 @@ fast-drain and initial-brief ownership controls passed with race detection
 No passing check is repeated without a relevant change. Temporary cases remain
 outside collection and are removed after delivery; no standing test, operating
 setting, model/limit change, fingerprint or new schema is introduced.
+
+## Consolidated maintainer delivery
+
+The latest contributor head already includes the outer pending-state guard
+requested in review. The maintainer PR retains that fix and adds the permanent
+handler and repository tests prepared during the original review task.
+
+Race-enabled checks passed for selected MCP handlers, server catalogs, and task
+repository tests. Coverage includes retained replay, conflicting retries, sender/session isolation,
+safe retry readback, and SQLite schema replay and retention. Two PostgreSQL 18
+concurrency cases cover duplicate claim election and stale cleanup waiting on
+a concurrent successful settlement. Both database
+cases executed with `KANDEV_TEST_POSTGRES_DSN` configured. Provider/process E2E
+remains outside this change's validation scope.
+
+Shared harness and specification test suites, repository-wide harness and
+specification lint, and the targeted harness pre-commit hook passed. The root
+engineering guide remains within its 300-line limit.
+
+## Consolidated PR review: retention lifetime
+
+The review reproduced 32 simultaneous detached retention batches. The handler
+now permits one batch at a time under the backend lifetime. Shutdown cancels
+and drains the batch before closing storage. New claims skip a busy or stopped
+worker. Existing shared maintenance admission and batch limits remain in place.
+
+Deterministic race-enabled tests passed for concurrent claims, cancellation,
+shutdown drain, and rejection of work after shutdown. Backend wiring and the
+existing message-operation regressions passed. The unused row-key argument was
+removed without changing identity or replay behavior.
+The final combined branch passed 10 desktop and 9 phone browser scenarios.
+Normal changed-file hooks passed before the remediation commit.

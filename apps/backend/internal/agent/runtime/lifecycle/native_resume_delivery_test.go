@@ -38,6 +38,24 @@ func nativeResumeJournalPeer(t *testing.T, store *journal.Journal, rejectRetirem
 				return
 			}
 			_ = json.NewEncoder(w).Encode(status)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent/delivery/successors":
+			streams, err := store.ListSuccessorStreams(r.Context(), "session", "incarnation", 2)
+			if err != nil {
+				http.Error(w, "successor stream inventory unavailable", http.StatusConflict)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(streams)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/delivery/stream/abandon":
+			var stream journal.Stream
+			if err := json.NewDecoder(r.Body).Decode(&stream); err != nil {
+				http.Error(w, "invalid stream", http.StatusBadRequest)
+				return
+			}
+			if err := store.AbandonStream(r.Context(), stream); err != nil {
+				http.Error(w, "stream abandonment rejected", http.StatusConflict)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent/submissions":
 			submissions, err := store.ListSubmissions(r.Context(), "session")
 			if err != nil {

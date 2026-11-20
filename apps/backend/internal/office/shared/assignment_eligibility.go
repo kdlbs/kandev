@@ -28,11 +28,12 @@ type AssignmentStepIDLookup interface {
 type AssignmentTaskLookup interface {
 	AssignmentStepIDLookup
 	ListTaskBlockers(ctx context.Context, taskID string) ([]*models.TaskBlocker, error)
-	IsTaskInTerminalState(ctx context.Context, taskID string) (bool, error)
+	GetBlockerStatus(ctx context.Context, taskID string) (models.BlockerStatus, error)
 }
 
 // IsAssignmentWakeEligible permits assignment wakes only on eligible steps
-// without a known pending blocker. Step uncertainty never bypasses blockers.
+// without a known unsatisfied (pending or failed) blocker. Step uncertainty
+// never bypasses blockers.
 // Previous-assignee interruption remains outside this wake-only decision.
 func IsAssignmentWakeEligible(
 	ctx context.Context,
@@ -52,7 +53,7 @@ func IsAssignmentWakeEligible(
 		return true
 	}
 	for _, blocker := range blockers {
-		terminal, err := tasks.IsTaskInTerminalState(ctx, blocker.BlockerTaskID)
+		status, err := tasks.GetBlockerStatus(ctx, blocker.BlockerTaskID)
 		if err != nil {
 			log.Warn("office.assignment_wake.blocker_lookup_failed",
 				zap.String("task_id", taskID), zap.String("blocker_task_id", blocker.BlockerTaskID),
@@ -60,9 +61,10 @@ func IsAssignmentWakeEligible(
 			// Unknown evidence preserves admission, but cannot hide a later pending blocker.
 			continue
 		}
-		if !terminal {
+		if status != models.BlockerSatisfied {
 			log.Info("office.assignment_wake.blocker_pending",
-				zap.String("task_id", taskID), zap.String("blocker_task_id", blocker.BlockerTaskID), zap.String("source", source))
+				zap.String("task_id", taskID), zap.String("blocker_task_id", blocker.BlockerTaskID),
+				zap.Stringer("blocker_status", status), zap.String("source", source))
 			return false
 		}
 	}

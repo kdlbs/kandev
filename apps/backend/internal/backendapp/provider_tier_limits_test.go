@@ -488,3 +488,28 @@ func TestProvenAccountLimitUsesOnlyAccountWideEvidence(t *testing.T) {
 		t.Fatalf("account-wide daily evidence must still block: %+v", got)
 	}
 }
+
+// A provider percentage budget is bounded by the shared account window and the
+// selected model's windows together; exhausted windows report the latest reset.
+func TestReadPercentBudgetCombinesApplicableProviderWindows(t *testing.T) {
+	now := tierTestNow()
+	sharedReset, familyReset := now.Add(2*time.Hour), now.Add(5*time.Hour)
+	c := tierLimitContext{
+		profile: &settingsmodels.AgentProfile{Model: "claude-opus-4-1"},
+		observed: &agentusage.ProviderUsage{Windows: []agentusage.UtilizationWindow{
+			{Label: "5-hour", UtilizationPct: 100, LimitReached: true, ResetAt: sharedReset},
+			{Label: "5-hour", Model: "opus", UtilizationPct: 96, ResetAt: familyReset},
+			{Label: "5-hour", Model: "sonnet", UtilizationPct: 100, LimitReached: true, ResetAt: now.Add(9 * time.Hour)},
+			{Label: "5-hour", ModelID: "other-model", UtilizationPct: 100, ResetAt: now.Add(9 * time.Hour)},
+		}},
+	}
+	budget := agentusage.LimitBudget{Window: "5h", Unit: "percent", Value: tierF(100), Learned: true}
+	var svc providerTierLimitService
+	amount, reset, known, err := svc.readPercentBudget(c, budget, now)
+	if err != nil || !known || amount != 100 {
+		t.Fatalf("readPercentBudget = %v, %v, %v, want the exhausted shared window", amount, known, err)
+	}
+	if !reset.Equal(familyReset) {
+		t.Fatalf("reset = %v, want the later reset of the learned-exhausted family window %v", reset, familyReset)
+	}
+}

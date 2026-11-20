@@ -4,6 +4,11 @@ Kandev Task ID: {task_id}
 Kandev Session ID: {session_id}
 Use these IDs when a tool requires task_id or session_id.
 
+TASK REFERENCES:
+In chat, write `[Task title](/t/task-id)` using Kandev's exact task ID and known title. Escape Markdown punctuation.
+If the ID is unknown, use plain text. Do not guess an ID.
+A task reference does not authorize creating or changing a task.
+
 {builtin_package_section}
 
 Available tools:

@@ -31,7 +31,7 @@ func TestCompletedRelocationExecutorContinuity(t *testing.T) {
 	session, err := fixture.taskRepo.GetTaskSession(ctx, fixture.sessionID)
 	require.NoError(t, err)
 
-	initial, err := executor.PreflightSessionWorktreeRecovery(ctx, fixture.taskID, session, false)
+	initial, _, err := executor.PreflightSessionWorktreeRecovery(ctx, fixture.taskID, session, false)
 	require.NoError(t, err)
 	require.NotNil(t, initial, "the initial source-clone transfer should publish a replacement")
 	require.NoError(t, initial.Release(ctx))
@@ -66,7 +66,7 @@ func TestCompletedRelocationExecutorContinuity(t *testing.T) {
 	executor.SetSelectedWorktreeRecoveryAdmission(manager.AdmitRecovery)
 	session, err = fixture.taskRepo.GetTaskSession(ctx, fixture.sessionID)
 	require.NoError(t, err)
-	preflight, err := executor.PreflightSessionWorktreeRecovery(ctx, fixture.taskID, session, false)
+	preflight, _, err := executor.PreflightSessionWorktreeRecovery(ctx, fixture.taskID, session, false)
 	require.NoError(t, err)
 	require.Nil(t, preflight, "a valid completed replacement should not start another recovery operation")
 
@@ -102,7 +102,7 @@ func TestEditedMaterializedRelocationRefusesExecutorStartup(t *testing.T) {
 	executor.SetSelectedWorktreeRecoveryAdmission(fixture.manager.AdmitRecovery)
 	session, err := fixture.taskRepo.GetTaskSession(ctx, fixture.sessionID)
 	require.NoError(t, err)
-	initial, err := executor.PreflightSessionWorktreeRecovery(ctx, fixture.taskID, session, false)
+	initial, _, err := executor.PreflightSessionWorktreeRecovery(ctx, fixture.taskID, session, false)
 	require.NoError(t, err)
 	require.NotNil(t, initial)
 	require.NoError(t, initial.Release(ctx))

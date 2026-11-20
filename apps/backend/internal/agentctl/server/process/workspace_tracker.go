@@ -82,6 +82,10 @@ type WorkspaceTracker struct {
 	// worktreeObserver holds the cheap stat gate and the last published list.
 	// Only the git poll goroutine reads or writes it.
 	worktreeObserver worktreeObserverState
+	// workspaceRootFileObserver is owned by the monitor goroutine.
+	workspaceRootFileObserver workspaceRootFileObserverState
+	// checkoutRoots are canonical repository roots excluded from root-file scans.
+	checkoutRoots []string
 	// worktreeInventoryMu guards the latest snapshot replayed to a subscriber
 	// that connects after the change-only publication.
 	worktreeInventoryMu     sync.RWMutex

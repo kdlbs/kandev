@@ -149,6 +149,15 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	resp, err := h.service.LaunchSession(ctx, &req)
 	if err != nil {
+		if orchestrator.IsWorkflowSwitchLaunchSuperseded(err) {
+			return ws.NewResponse(msg.ID, msg.Action, &orchestrator.LaunchSessionResponse{
+				Success:               true,
+				TaskID:                req.TaskID,
+				SessionID:             req.SessionID,
+				ActivationDisposition: "suppressed",
+				ActivationReason:      "workflow_session_switched",
+			})
+		}
 		if response, responseErr := materializedRouteProfileChangeResponse(msg, err); response != nil || responseErr != nil {
 			return response, responseErr
 		}

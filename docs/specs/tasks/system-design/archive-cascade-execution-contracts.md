@@ -121,7 +121,7 @@ restarts at workspace tier 1 and no later step acquires an earlier tier.
 | DetachTask | workspace 1; barriers 4; tasks 5; revision, parent-result, and detach-result ledgers 6; effects/claims 7-10; environment/repository 11; group/member 12; cleanup/markers 13-14; outbox 16; registry-verified single tx |
 | MutateTaskSession | workspace 1; affected archive/creation/cleanup barriers 4; task keys 5; session rows 9; no physical guard |
 | MutateTaskRuntime | workspace 1; affected archive/creation/cleanup barriers 4; task keys 5; session rows 9; `executors_running` rows 10; no physical guard |
-| DeleteExpiredTask / DeleteEphemeralTasksByAgentProfile | trusted selector; workspace 1; maintenance operation 4; sorted tasks 5; revisions 6; cleanup/resource rows 8-14; outbox 16 |
+| DeleteEphemeralTasksByAgentProfile | trusted selector; workspace 1; maintenance operation 4; sorted tasks 5; revisions 6; cleanup/resource rows 8-14; outbox 16 |
 | MutateTaskEnvironment | workspace 1; barriers 4; tasks 5; sessions 9; environment/repository/worktree 11; group/member 12; markers 14; physical guard after commit |
 | Claim/CompleteTaskResourceCleanup | workspace 1; cleanup/snapshot/launch rows 8; environment/repository 11; evidence/markers 14; physical guard after SQL |
 | Claim/Complete/Fail/ResolveTaskCreationStep | workspace 1; creation operation 4; task 5; retained identity 6; step rows 7; no outbox |

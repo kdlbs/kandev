@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sync"
+
 	"github.com/google/uuid"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
@@ -27,7 +29,7 @@ func (s *Service) StopForRestart(ctx context.Context, sid, reason string) (*mode
 		return nil, true, err
 	}
 	all, finite := s.InferenceCapacityPolicy()
-	retained, err := s.restartHasInferenceClaims(ctx, sid)
+	retained, err := s.restartHasInferenceClaims(ctx, sid, "", false)
 	if err != nil {
 		return nil, true, err
 	}
@@ -59,64 +61,119 @@ func (s *Service) hasInferenceClosureComposition() bool {
 // stopLegacyRestartWithFence serializes the final claim check with admission.
 // The exact teardown owner remains visible until the awaited stop completes.
 func (s *Service) stopLegacyRestartWithFence(ctx context.Context, sid, reason string) (*models.InferenceClosureCheckpoint, bool, error) {
-	releaseLifecycle, locked := s.acquireSessionLifecycleLockWithContext(ctx, sid)
-	if !locked {
-		return nil, true, ctx.Err()
-	}
-	defer func() {
-		if releaseLifecycle != nil {
-			releaseLifecycle()
-		}
-	}()
-	guard, err := s.lockCancelInFlightGuardWithContext(ctx, sid)
+	release, err := s.acquireInferenceRestartAdmission(ctx, sid)
 	if err != nil {
 		return nil, true, err
 	}
-	retained, err := s.restartHasInferenceClaims(ctx, sid)
+	defer release()
+	if s.agentManager == nil {
+		return nil, true, models.ErrInferenceClosureBlocked
+	}
+	execution, lookupErr := s.agentManager.GetExecutionIDForSession(ctx, sid)
+	absent := errors.Is(lookupErr, agentruntime.ErrNoExecutionForSession)
+	if !absent && (lookupErr != nil || execution == "") {
+		return nil, true, models.ErrInferenceClosureBlocked
+	}
+	retained, err := s.restartHasInferenceClaims(ctx, sid, execution, absent)
 	if err == nil && !retained {
 		err = s.checkInferenceClosureAdmission(ctx, sid, false)
 	}
 	if err != nil || retained {
-		guard.release()
 		if err == nil {
 			err = errRestartInferenceClaimsChanged
 		}
 		return nil, true, err
 	}
-	if s.agentManager == nil {
-		guard.release()
-		return nil, true, models.ErrInferenceClosureBlocked
-	}
-	execution, err := s.agentManager.GetExecutionIDForSession(ctx, sid)
-	if errors.Is(err, agentruntime.ErrNoExecutionForSession) {
-		guard.release()
-		releaseLifecycle()
-		releaseLifecycle = nil
-		return nil, true, s.StopSession(ctx, sid, reason, false)
-	}
-	if err != nil || execution == "" {
-		guard.release()
-		return nil, true, models.ErrInferenceClosureBlocked
+	if absent {
+		return nil, true, s.settleExecutionLessRestart(ctx, sid, lookupErr)
 	}
 	claim, owned := s.claimExecutionTeardownWithToken(sid, execution, executionTeardownIntentGraceful)
-	guard.release()
-	releaseLifecycle()
-	releaseLifecycle = nil
-	return nil, true, s.awaitLegacyRestartStop(ctx, sid, execution, reason, claim, owned)
+	if !owned {
+		return nil, true, models.ErrInferenceClosureConflict
+	}
+	release()
+	return nil, true, s.awaitLegacyRestartStop(ctx, sid, execution, reason, claim)
 }
 
-func (s *Service) awaitLegacyRestartStop(ctx context.Context, sid, execution, reason string, claim executionTeardownClaim, owned bool) error {
+func (s *Service) settleExecutionLessRestart(ctx context.Context, sid string, lookupErr error) error {
+	_, resuming := s.resumeAttemptStore().current(sid)
+	if resuming || s.isCancelInFlight(sid) {
+		return models.ErrInferenceClosureConflict
+	}
+	s.resetTransientRetryWithContext(ctx, sid, true)
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForSession(sid)
+	}
+	if settled, err := s.settleExecutionLessSessionTurn(ctx, sid); settled || err != nil {
+		return err
+	}
+	return lookupErr
+}
+
+// A launch can already hold the cancellation guard while acquiring the
+// lifecycle lock. Yield to that launch instead of waiting with both in play.
+func (s *Service) acquireInferenceRestartAdmission(ctx context.Context, sid string) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	releaseLifecycle, locked := s.tryAcquireSessionLifecycleLock(sid)
+	if !locked {
+		return nil, models.ErrInferenceClosureConflict
+	}
+	guard, releaseGuard := s.acquireCancelInFlightGuard(sid)
+	if !guard.TryLock() {
+		releaseGuard()
+		releaseLifecycle()
+		return nil, models.ErrInferenceClosureConflict
+	}
+	release := sync.OnceFunc(func() {
+		guard.Unlock()
+		releaseGuard()
+		releaseLifecycle()
+	})
+	if err := ctx.Err(); err != nil {
+		release()
+		return nil, err
+	}
+	return release, nil
+}
+
+func (s *Service) awaitLegacyRestartStop(ctx context.Context, sid, execution, reason string, claim executionTeardownClaim) error {
 	stop, err := s.StopSessionAwaited(ctx, sid, execution, reason)
-	if err != nil && owned && (stop == nil || !stop.Accepted) {
-		if cleanup, lockErr := s.lockCancelInFlightGuardWithContext(context.WithoutCancel(ctx), sid); lockErr == nil {
-			s.executionTeardownClaims.CompareAndDelete(terminalExecutionKey(sid, execution), claim)
-			cleanup.release()
+	if err == nil {
+		if observation := stop.Observation; observation != nil && observation.Settlement != nil && observation.Settlement.Unresolved != 0 {
+			return models.ErrInferenceClosureBlocked
 		}
+		return s.verifyLegacyRestartClaims(ctx, sid, execution)
+	}
+	if stop == nil || !stop.Accepted {
+		s.executionTeardownClaims.CompareAndDelete(terminalExecutionKey(sid, execution), claim)
 	}
 	return err
 }
 
-func (s *Service) restartHasInferenceClaims(ctx context.Context, sid string) (bool, error) {
+// Stop may discover or settle claims synchronously. Verify the stopped
+// execution, even after it is no longer registered, before allowing a restart.
+func (s *Service) verifyLegacyRestartClaims(ctx context.Context, sid, execution string) error {
+	if runtime, ok := s.agentManager.(interface {
+		VerifyInferenceClosureClaims(context.Context, string, string) error
+	}); ok && s.hasInferenceClosureComposition() {
+		if err := runtime.VerifyInferenceClosureClaims(ctx, sid, execution); err != nil {
+			return errors.Join(models.ErrInferenceClosureBlocked, err)
+		}
+		return nil
+	}
+	retained, err := s.restartHasInferenceClaims(ctx, sid, execution, false)
+	if err != nil {
+		return err
+	}
+	if retained {
+		return models.ErrInferenceClosureBlocked
+	}
+	return nil
+}
+
+func (s *Service) restartHasInferenceClaims(ctx context.Context, sid, execution string, executionAbsent bool) (bool, error) {
 	if s == nil || s.sessionCeiling == nil {
 		return false, nil
 	}
@@ -135,18 +192,14 @@ func (s *Service) restartHasInferenceClaims(ctx context.Context, sid string) (bo
 			return true, nil
 		}
 	}
-	if len(bindings) == 0 {
+	if len(bindings) == 0 || executionAbsent {
 		return false, nil
 	}
-	if s.agentManager == nil {
-		return false, models.ErrInferenceClosureBlocked
-	}
-	execution, err := s.agentManager.GetExecutionIDForSession(ctx, sid)
-	if errors.Is(err, agentruntime.ErrNoExecutionForSession) {
-		return false, nil
-	}
-	if err != nil || execution == "" {
-		return false, models.ErrInferenceClosureBlocked
+	if execution == "" {
+		execution, err = s.restartExecutionForClaimLookup(ctx, sid)
+		if err != nil || execution == "" {
+			return false, err
+		}
 	}
 	for _, binding := range bindings {
 		if binding.InstanceID == execution {
@@ -154,6 +207,20 @@ func (s *Service) restartHasInferenceClaims(ctx context.Context, sid string) (bo
 		}
 	}
 	return false, nil
+}
+
+func (s *Service) restartExecutionForClaimLookup(ctx context.Context, sid string) (string, error) {
+	if s.agentManager == nil {
+		return "", models.ErrInferenceClosureBlocked
+	}
+	execution, err := s.agentManager.GetExecutionIDForSession(ctx, sid)
+	if errors.Is(err, agentruntime.ErrNoExecutionForSession) {
+		return "", nil
+	}
+	if err != nil || execution == "" {
+		return "", models.ErrInferenceClosureBlocked
+	}
+	return execution, nil
 }
 
 func (s *Service) stopInferenceClosureForRestart(ctx context.Context, sid string, enabled bool) (*models.InferenceClosureCheckpoint, bool, error) {
@@ -185,12 +252,6 @@ func (s *Service) stopInferenceClosureForRestart(ctx context.Context, sid string
 }
 
 func (s *Service) startInferenceClosureForRestart(ctx context.Context, sid string) (*models.InferenceClosureCheckpoint, bool, error) {
-	prober, ok := s.agentManager.(interface {
-		ProbeInferenceClosure(context.Context, string, string) error
-	})
-	if !ok {
-		return s.legacyInferenceRestart(ctx, sid)
-	}
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sid)
 	if errors.Is(err, agentruntime.ErrNoExecutionForSession) {
 		return s.legacyInferenceRestart(ctx, sid)
@@ -198,18 +259,26 @@ func (s *Service) startInferenceClosureForRestart(ctx context.Context, sid strin
 	if err != nil || executionID == "" {
 		return nil, true, models.ErrInferenceClosureBlocked
 	}
-	if err = prober.ProbeInferenceClosure(ctx, sid, executionID); err != nil {
-		if errors.Is(err, agentruntime.ErrInferenceOwnershipUnsupported) {
-			return s.legacyInferenceRestart(ctx, sid)
-		}
+	session, err := s.inferenceClosureSourceSession(ctx, sid)
+	if err != nil {
 		return nil, true, err
 	}
+	office, err := s.lookupOfficeTask(ctx, session.TaskID)
+	if err != nil {
+		return nil, true, err
+	}
+	if office {
+		return s.legacyInferenceRestart(ctx, sid)
+	}
 	result, err := s.StopSessionForInferenceClosure(ctx, sid, executionID, uuid.NewString())
+	if result == nil && errors.Is(err, agentruntime.ErrInferenceOwnershipUnsupported) {
+		return s.legacyInferenceRestart(ctx, sid)
+	}
 	return result, true, err
 }
 
 func (s *Service) legacyInferenceRestart(ctx context.Context, sid string) (*models.InferenceClosureCheckpoint, bool, error) {
-	retained, err := s.restartHasInferenceClaims(ctx, sid)
+	retained, err := s.restartHasInferenceClaims(ctx, sid, "", false)
 	if err != nil {
 		return nil, true, err
 	}
@@ -232,6 +301,9 @@ func (s *Service) StopSessionForInferenceClosure(ctx context.Context, sid, execu
 	runtime, ok := s.agentManager.(inferenceClosureRuntime)
 	if !ok {
 		return nil, models.ErrInferenceClosureBlocked
+	}
+	if err := s.probeNewInferenceClosure(ctx, store, sid, executionID, operation); err != nil {
+		return nil, err
 	}
 	raw, err := s.beginInferenceClosure(ctx, store, sid, executionID, operation)
 	if err != nil {
@@ -262,30 +334,91 @@ func (s *Service) StopSessionForInferenceClosure(ctx context.Context, sid, execu
 	return &checkpoint, err
 }
 
-func (s *Service) beginInferenceClosure(ctx context.Context, store inferenceClosureStore, sid, executionID, operation string) (json.RawMessage, error) {
-	// Session start/resume owns this lock through runtime admission. Take it
-	// before the cancellation guard, matching the existing lifecycle order.
-	releaseLifecycle, locked := s.acquireSessionLifecycleLockWithContext(ctx, sid)
-	if !locked {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+func (s *Service) probeNewInferenceClosure(ctx context.Context, store inferenceClosureStore, sid, executionID, operation string) error {
+	raw, err := store.ReadInferenceClosure(ctx, sid)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		var prior models.InferenceClosureCheckpoint
+		if json.Unmarshal(raw, &prior) != nil || !prior.Valid() || prior.SessionID != sid {
+			return models.ErrInferenceClosureBlocked
 		}
-		return nil, models.ErrInferenceClosureConflict
+		if prior.OperationID == operation && prior.SourceExecutionID == executionID {
+			return nil
+		}
 	}
-	defer releaseLifecycle()
-	guard, err := s.lockCancelInFlightGuardWithContext(ctx, sid)
+	prober, ok := s.agentManager.(interface {
+		ProbeInferenceClosure(context.Context, string, string) error
+	})
+	if !ok {
+		return agentruntime.ErrInferenceOwnershipUnsupported
+	}
+	return prober.ProbeInferenceClosure(ctx, sid, executionID)
+}
+
+func (s *Service) beginInferenceClosure(ctx context.Context, store inferenceClosureStore, sid, executionID, operation string) (json.RawMessage, error) {
+	if s.messageQueue == nil {
+		return s.beginInferenceClosureUnderAdmission(ctx, store, sid, executionID, operation)
+	}
+	// Queue hand-off takes admission before reading either session's recovery
+	// state. Use the same order so its transfer cannot cross a new fence.
+	var raw json.RawMessage
+	err := s.messageQueue.WithSessionAdmission(ctx, sid, func(admittedCtx context.Context) error {
+		var beginErr error
+		raw, beginErr = s.beginInferenceClosureUnderAdmission(admittedCtx, store, sid, executionID, operation)
+		return beginErr
+	})
+	return raw, err
+}
+
+func (s *Service) beginInferenceClosureUnderAdmission(ctx context.Context, store inferenceClosureStore, sid, executionID, operation string) (json.RawMessage, error) {
+	release, err := s.acquireInferenceRestartAdmission(ctx, sid)
 	if err != nil {
 		return nil, err
 	}
-	defer guard.release()
-	session, err := s.repo.GetTaskSession(ctx, sid)
+	defer release()
+	session, err := s.inferenceClosureSourceSession(ctx, sid)
 	if err != nil {
 		return nil, err
 	}
-	if session == nil {
+	if err := s.authorizeInferenceClosureResume(ctx, session.TaskID, sid, recoveryActionResume); err != nil {
+		return nil, err
+	}
+	raw, err := store.ReadInferenceClosure(ctx, sid)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if replay, err := inferenceClosureBeginReplay(raw, sid, operation, executionID, session.QueueIncarnationID); err != nil || replay {
+		return raw, err
+	}
+	current, lookupErr := s.agentManager.GetExecutionIDForSession(ctx, sid)
+	if lookupErr != nil || current != executionID || s.isCancelInFlight(sid) || s.hasExecutionTeardownOwner(sid, executionID) {
 		return nil, models.ErrInferenceClosureConflict
 	}
 	return store.BeginInferenceClosure(ctx, sid, operation, session.QueueIncarnationID, executionID)
+}
+
+func inferenceClosureBeginReplay(raw json.RawMessage, sid, operation, executionID, incarnation string) (bool, error) {
+	if len(raw) == 0 {
+		return false, nil
+	}
+	var prior models.InferenceClosureCheckpoint
+	if json.Unmarshal(raw, &prior) != nil || !prior.Valid() || prior.SessionID != sid {
+		return false, models.ErrInferenceClosureBlocked
+	}
+	return prior.OperationID == operation && prior.SourceExecutionID == executionID && prior.IncarnationID == incarnation, nil
+}
+
+func (s *Service) inferenceClosureSourceSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil || session.TaskID == "" {
+		return nil, models.ErrInferenceClosureConflict
+	}
+	return session, nil
 }
 
 func (s *Service) observeInferenceClosure(ctx context.Context, store inferenceClosureStore, runtime inferenceClosureRuntime, c *models.InferenceClosureCheckpoint) error {

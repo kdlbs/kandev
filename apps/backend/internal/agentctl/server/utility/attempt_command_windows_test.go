@@ -48,7 +48,9 @@ func TestAttemptActualWindowsChildNeedsJobTerminationProof(t *testing.T) {
 			cleanupACPCommand(ctx, cmd, lifecycle, zap.NewNop())
 		}
 	})
-	markInferenceDispatch(ctx)
+	if err := markInferenceDispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
 	cancel()
 	observed, ok := owner.get(prepared.AttemptID)
 	if !ok || observed.Settled || observed.State != AttemptRunning || observed.PromptDispatch != PromptPossiblySent {

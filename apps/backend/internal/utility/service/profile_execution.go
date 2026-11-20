@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kandev/kandev/internal/agent/usage"
 	"strings"
 	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agent/usage"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 )
 
@@ -37,7 +37,7 @@ func ExecuteProfilePrompt(ctx context.Context, resolver ExecutionFailureResolver
 		identity := agentruntime.InferenceIdentityFromContext(ctx)
 		identity.ExecutionProfileID = route.ExecutionProfileID
 		response, executeErr = execute(agentruntime.WithInferenceIdentity(usage.WithSelectedUsagePolicy(ctx, route.UsagePolicy), identity), route.ExecutionProfileID)
-		if err := ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil && (response == nil || !response.Success || executeErr != nil) {
 			return response, err
 		}
 		if agentruntime.IsInferenceCapacityError(executeErr) {

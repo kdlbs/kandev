@@ -117,11 +117,17 @@ func TestDeliveryRetentionDeletionRetirement(t *testing.T) {
 				assertDeliveryRetirementEvidencePurged(t, repo, session.ID)
 			})
 
-			t.Run("ephemeral_profile_bulk_delete", func(t *testing.T) {
+			t.Run("configuration_chat_profile_bulk_delete", func(t *testing.T) {
 				repo := newDeliveryRetentionDeletionRepo(t, engine)
 				ctx := context.Background()
 				const taskID, sessionID, agentProfileID = "retention-delete-ephemeral", "retention-delete-ephemeral-session", "retention-delete-profile"
-				session := createRetentionSession(t, repo, ctx, taskID, sessionID, true, agentProfileID)
+				if err := repo.CreateTask(ctx, &models.Task{
+					ID: taskID, Title: "Configuration chat", IsEphemeral: true,
+					Metadata: map[string]interface{}{"config_mode": true},
+				}); err != nil {
+					t.Fatalf("create configuration chat: %v", err)
+				}
+				session := createRetentionSessionForExistingTask(t, repo, ctx, taskID, sessionID, true, agentProfileID)
 				seedRetentionDeliveryEvidence(t, repo, ctx, session)
 
 				deleted, err := repo.DeleteEphemeralTasksByAgentProfile(ctx, agentProfileID)
@@ -134,24 +140,18 @@ func TestDeliveryRetentionDeletionRetirement(t *testing.T) {
 				assertDeliveryRetirementEvidencePurged(t, repo, session.ID)
 			})
 
-			t.Run("expired_quick_chat", func(t *testing.T) {
+			t.Run("quick_chat_manual_delete", func(t *testing.T) {
 				repo := newDeliveryRetentionDeletionRepo(t, engine)
 				ctx := context.Background()
 				const taskID, sessionID = "retention-delete-quick-chat", "retention-delete-quick-chat-session"
-				old := time.Now().UTC().Add(-48 * time.Hour)
-				if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Quick chat", IsEphemeral: true, CreatedAt: old, UpdatedAt: old}); err != nil {
+				if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Quick chat", IsEphemeral: true}); err != nil {
 					t.Fatalf("create quick chat: %v", err)
 				}
 				session := createRetentionSessionForExistingTask(t, repo, ctx, taskID, sessionID, false, "")
-				session.UpdatedAt = old
-				if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE task_sessions SET updated_at = ? WHERE id = ?`), old, sessionID); err != nil {
-					t.Fatalf("age quick-chat session: %v", err)
-				}
 				seedRetentionDeliveryEvidence(t, repo, ctx, session)
 
-				deleted, err := repo.DeleteExpiredQuickChatTask(ctx, taskID, time.Now().UTC())
-				if err != nil || !deleted {
-					t.Fatalf("delete expired quick chat = %v, err %v; want true", deleted, err)
+				if err := repo.DeleteTask(ctx, taskID); err != nil {
+					t.Fatalf("delete Quick Chat: %v", err)
 				}
 				assertDeliveryRetirementJob(t, repo, session.ID, session.QueueIncarnationID)
 				assertRetentionDeliveryEvidence(t, repo, session.ID)
@@ -234,6 +234,71 @@ func TestDeliveryRetentionDeletionRetirement(t *testing.T) {
 			t.Run("managed_release_preserves_delivery", func(t *testing.T) {
 				testManagedReleasePreservesDelivery(t, engine)
 			})
+		})
+	}
+}
+
+func TestDeleteEphemeralTasksByAgentProfilePreservesQuickChats(t *testing.T) {
+	for _, engine := range []string{"SQLite", "Postgres"} {
+		t.Run(engine, func(t *testing.T) {
+			repo := newRetentionTestRepo(t, engine)
+			ctx := context.Background()
+			const profileID = "profile-cleanup-retention"
+			const quickChatID, quickChatSessionID = "profile-cleanup-quick-chat", "profile-cleanup-quick-chat-session"
+			const configChatID, configChatSessionID = "profile-cleanup-config-chat", "profile-cleanup-config-chat-session"
+
+			for _, task := range []*models.Task{
+				{ID: quickChatID, Title: "Quick Chat", IsEphemeral: true},
+				{ID: configChatID, Title: "Configuration Chat", IsEphemeral: true, Metadata: map[string]interface{}{"config_mode": true}},
+			} {
+				if err := repo.CreateTask(ctx, task); err != nil {
+					t.Fatalf("create task %s: %v", task.ID, err)
+				}
+			}
+			for _, session := range []*models.TaskSession{
+				{ID: quickChatSessionID, TaskID: quickChatID, AgentProfileID: profileID},
+				{ID: configChatSessionID, TaskID: configChatID, AgentProfileID: profileID},
+			} {
+				if err := repo.CreateTaskSession(ctx, session); err != nil {
+					t.Fatalf("create session %s: %v", session.ID, err)
+				}
+			}
+			if err := repo.CreateTurn(ctx, &models.Turn{
+				ID: "profile-cleanup-quick-chat-turn", TaskID: quickChatID, TaskSessionID: quickChatSessionID,
+			}); err != nil {
+				t.Fatalf("create Quick Chat turn: %v", err)
+			}
+			if err := repo.CreateMessage(ctx, &models.Message{
+				ID: "profile-cleanup-quick-chat-message", TaskID: quickChatID,
+				TaskSessionID: quickChatSessionID, TurnID: "profile-cleanup-quick-chat-turn",
+				AuthorType: models.MessageAuthorUser, Content: "retained conversation",
+			}); err != nil {
+				t.Fatalf("create Quick Chat message: %v", err)
+			}
+
+			deleted, err := repo.DeleteEphemeralTasksByAgentProfile(ctx, profileID)
+			if err != nil {
+				t.Fatalf("delete ephemeral tasks for profile: %v", err)
+			}
+			if deleted != 1 {
+				t.Fatalf("deleted task count = %d, want only the configuration chat", deleted)
+			}
+			if _, err := repo.GetTask(ctx, quickChatID); err != nil {
+				t.Fatalf("ordinary Quick Chat was deleted with its agent profile: %v", err)
+			}
+			if _, err := repo.GetTaskSession(ctx, quickChatSessionID); err != nil {
+				t.Fatalf("ordinary Quick Chat session was deleted with its agent profile: %v", err)
+			}
+			messages, err := repo.ListMessages(ctx, quickChatSessionID)
+			if err != nil || len(messages) != 1 || messages[0].Content != "retained conversation" {
+				t.Fatalf("ordinary Quick Chat messages after profile cleanup = %+v, %v", messages, err)
+			}
+			if _, err := repo.GetTask(ctx, configChatID); err == nil {
+				t.Fatal("configuration chat remains after agent profile cleanup")
+			}
+			if _, err := repo.GetTaskSession(ctx, configChatSessionID); err == nil {
+				t.Fatal("configuration chat session remains after agent profile cleanup")
+			}
 		})
 	}
 }

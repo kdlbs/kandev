@@ -16,6 +16,7 @@ const (
 	EnvironmentVariable = "KANDEV_MAX_CONCURRENT_SESSIONS"
 	DefaultMaxSessions  = 5
 	maxSessionsLimit    = 2147483647
+	maxGradeLimits      = 64
 	PolicyAutomatic     = "automatic"
 	PolicyAll           = "all"
 )
@@ -167,6 +168,9 @@ func Validate(settings Settings) error {
 	}
 	if settings.Policy != "" && settings.Policy != PolicyAutomatic && settings.Policy != PolicyAll {
 		return fmt.Errorf("%w: unknown execution capacity policy", ErrValidation)
+	}
+	if len(settings.GradeLimits) > maxGradeLimits {
+		return fmt.Errorf("%w: at most %d grade limits are allowed", ErrValidation, maxGradeLimits)
 	}
 	if len(settings.GradeLimits) > 0 && settings.Policy != PolicyAll {
 		return fmt.Errorf("%w: grade limits require all-execution policy", ErrValidation)

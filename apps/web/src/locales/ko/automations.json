@@ -85,6 +85,7 @@
   "instructionsLabel": "지침",
   "interpretedAsUtcSetTimezone": "UTC로 해석됨, 시간대를 설정하세요",
   "lastRan": "마지막 실행 {{when}}",
+  "runStatusWithAge": "{{status}} ({{age}})",
   "listDescription": "에이전트 작업을 자동으로 트리거하는 규칙을 만듭니다.",
   "loading": "불러오는 중...",
   "loadingActivity": "활동 불러오는 중...",

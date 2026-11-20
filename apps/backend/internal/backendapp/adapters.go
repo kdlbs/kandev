@@ -1146,6 +1146,10 @@ func (a *lifecycleAdapter) CleanupStaleExecutionBySessionIDIfCurrent(
 	)
 }
 
+func (a *lifecycleAdapter) CleanupLiveExecutionIfCurrent(ctx context.Context, sessionID, executionID string, updatedAt time.Time) (bool, error) {
+	return a.mgr.CleanupLiveExecutionIfCurrent(ctx, sessionID, executionID, updatedAt)
+}
+
 func (a *lifecycleAdapter) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
 	_, err := a.mgr.EnsureWorkspaceExecutionForSession(ctx, taskID, sessionID)
 	return err
@@ -2174,8 +2178,8 @@ func (a *messageCreatorAdapter) AppendAgentMessage(ctx context.Context, messageI
 // PublishMessageEvent announces a message that was already persisted by a
 // canonical projector. It is used by the orchestrator's durable streaming
 // path to notify connected clients without repeating the message write.
-func (a *messageCreatorAdapter) PublishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
-	return a.svc.PublishMessageEvent(ctx, eventType, message)
+func (a *messageCreatorAdapter) PublishMessageEvent(ctx context.Context, eventType string, message *models.Message, receipts ...*models.ConversationMutationReceipt) error {
+	return a.svc.PublishMessageEvent(ctx, eventType, message, receipts...)
 }
 
 // CreateThinkingMessageStreaming creates a new thinking message with a pre-generated ID.

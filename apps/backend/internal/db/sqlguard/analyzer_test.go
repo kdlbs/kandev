@@ -172,6 +172,33 @@ func unsafe(db interface{ Exec(string, ...any) }) {
 	}
 }
 
+func TestAnalyzeSourceFindsRawPlaceholdersInContextExecutors(t *testing.T) {
+	source := `package fixture
+func unsafe(db interface {
+	GetContext(context.Context, *string, string, ...any) error
+	SelectContext(context.Context, *[]string, string, ...any) error
+}, ctx context.Context) {
+	var value string
+	var values []string
+	db.GetContext(ctx, &value, "SELECT value FROM settings WHERE id = ?", "id")
+	db.SelectContext(ctx, &values, "SELECT value FROM settings WHERE id = ?", "id")
+}
+`
+	findings, err := AnalyzeSource("fixture.go", []byte(source), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeSource() error = %v", err)
+	}
+	count := 0
+	for _, finding := range findings {
+		if finding.Rule == RuleRawPlaceholder {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Fatalf("AnalyzeSource() raw-placeholder findings = %d, want 2; all findings: %#v", count, findings)
+	}
+}
+
 func TestAnalyzeSourceRequiresRebindAfterSQLxIn(t *testing.T) {
 	unsafeSource := `package fixture
 func unsafe(db interface{ Exec(string, ...any) }) {
