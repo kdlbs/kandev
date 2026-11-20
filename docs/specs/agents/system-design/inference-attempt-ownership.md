@@ -25,6 +25,9 @@ metadata value in its existing meta bucket, using the journal's lock, disk
 reservation and close lifecycle. There is no additional database or ledger.
 Write spawn intent before Start and PID immediately afterward. Storage failure
 marks continuity unknown while preserving native execution and cleanup.
+Commit preparation retention before acknowledging its token. A durable prompt
+dispatch marker must commit before the protocol send; a failed write returns an
+error through the existing cleanup path.
 
 Windows already starts suspended, attaches a kill-on-close Job and resumes.
 Settlement uses the existing Job's TerminateAndWait, not tasklist or HTTP status.

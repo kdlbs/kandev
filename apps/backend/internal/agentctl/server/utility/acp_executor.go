@@ -283,7 +283,9 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	}
 
 	// Send prompt and wait for completion
-	markInferenceDispatch(ctx)
+	if err := markInferenceDispatch(ctx); err != nil {
+		return "", fmt.Errorf("persist ACP prompt dispatch: %w", err)
+	}
 	_, err = conn.Prompt(ctx, acp.PromptRequest{
 		SessionId: sessionID,
 		Prompt:    []acp.ContentBlock{acp.TextBlock(prompt)},
