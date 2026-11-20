@@ -219,3 +219,24 @@ passed. `scripts/pr-await 4980 --mode all-terminal --deadline-min 60` reported
 `7182b90b5291fa22b36d244795471787a7c7ebd5`. `scripts/pr-state --compact 4980`
 confirmed `MERGEABLE` / `CLEAN`, complete exact-head evidence, and 0 unresolved
 review threads; `scripts/pr-resolve list 4980` was empty.
+
+### Current-base merge fixup (2026-11-20, `8fbba47c`)
+
+Merged live `main` at `8fbba47c5e0dec54a520e34fb25164a468f914d8` in commit
+`9f7be96abdaaea7cbeaf0c75823913a1a38f0172`. Resolved the conflict in
+`apps/backend/internal/orchestrator/messagequeue/types.go` by preserving both
+the async-question notification marker and `queueOrderLess` FIFO tie-breaker.
+Resolved `docs/public/coverage.json` by retaining the async-question and
+message-queue automation source and test entries.
+
+Passed on the merged tree:
+
+- `(cd apps/backend && go test -trimpath -race ./internal/orchestrator/messagequeue ./internal/task/questions -count=1)`; messagequeue passed in 9.639 seconds and task/questions in 16.075 seconds.
+- `node scripts/validate-public-docs.mjs`: 55 published pages validated.
+- `python3 scripts/list-docs.py validate`: 459 decisions and 2072 specifications validated.
+- `bash scripts/lint-go-changed apps/backend/internal/orchestrator/messagequeue/types.go`: 0 issues.
+- Commit hooks passed on retry, including changed-package Go lint. The first commit attempt reached the lint hook's 5-minute timeout after printing `0 issues`; a concurrent lint in another worktree also briefly held the shared lint lock.
+
+The merge tree passed `git merge-tree --write-tree origin/main HEAD`; the
+resolved paths contain both sides' intended changes in the PR-relative diff.
+Exact-head PR CI and reviews are pending the push of this merge commit.
