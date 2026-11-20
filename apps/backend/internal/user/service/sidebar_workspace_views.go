@@ -256,6 +256,11 @@ func applySidebarWorkspacePatch(settings *models.UserSettings, req *UpdateUserSe
 			return fmt.Errorf("%w: %s", ErrValidation, err)
 		}
 	}
+	if patch.SaveDraft != nil {
+		if err := saveSidebarDraft(&state, patch.SaveDraft); err != nil {
+			return fmt.Errorf("%w: %s", ErrValidation, err)
+		}
+	}
 	state = normalizeSidebarWorkspace(state)
 	if reflect.DeepEqual(settings.SidebarViewsByWorkspace[patch.WorkspaceID], state) {
 		return nil

@@ -18,6 +18,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useSidebarGroupings, type SidebarGroupingChoices } from "@/hooks/use-sidebar-groupings";
 import { SidebarPluginGroupingMenu } from "./sidebar-plugin-grouping-menu";
+import { useSidebarViewTransition } from "@/hooks/domains/sidebar/use-sidebar-view-transition";
 
 type Surface = "inline" | "sheet" | "drawer";
 
@@ -31,6 +32,7 @@ export function SidebarPluginGroupingPicker({
   const coarse = useTouchDrawer();
   const touch = isMobile || coarse;
   const choices = useSidebarGroupings();
+  const { interactionProps } = useSidebarViewTransition();
   const [menuOpen, setMenuOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -42,6 +44,7 @@ export function SidebarPluginGroupingPicker({
   if (!choices.groupings.length && !drawerOpen) return null;
   const trigger = (
     <Button
+      {...interactionProps}
       type="button"
       variant="ghost"
       size="icon"

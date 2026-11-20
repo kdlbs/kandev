@@ -1,4 +1,8 @@
-import { applyDraftMutationForTest, applyViewMutationsForTest } from "./sidebar-view-test-helpers";
+import {
+  applyDraftMutationForTest,
+  applyDraftSaveForTest,
+  applyViewMutationsForTest,
+} from "./sidebar-view-test-helpers";
 import { beforeEach, expect, it, vi } from "vitest";
 import { createAppStore } from "@/lib/state/store";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
@@ -47,6 +51,7 @@ function draftWorkspace() {
         patch,
       ),
     };
+    server = applyDraftSaveForTest(server, patch);
     return {
       settings: {
         user_id: "default-user",

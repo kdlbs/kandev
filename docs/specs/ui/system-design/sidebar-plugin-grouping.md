@@ -30,12 +30,12 @@ and the existing pagination contract.
 
 ## Requirement mapping
 
-| Criteria | Owning design boundary |
-| --- | --- |
-| 001.1, 001.2 | Saved identity and selectors |
-| 001.3 | Verified snapshot and repository projection |
-| 001.4, 001.5 | Lifecycle, freshness and failure |
-| 001.6 | Shared desktop/phone composition |
+| Criteria     | Owning design boundary                      |
+| ------------ | ------------------------------------------- |
+| 001.1, 001.2 | Saved identity and selectors                |
+| 001.3        | Verified snapshot and repository projection |
+| 001.4, 001.5 | Lifecycle, freshness and failure            |
+| 001.6        | Shared desktop/phone composition            |
 
 All criterion suffixes refer to AC-UI-SIDEBAR-PLUGIN-GROUPING-001.
 
@@ -109,6 +109,10 @@ a replayed creation cannot replace an intervening rename, and later edits stay
 independent. `draft_update` uses its captured base-view/group owner, including
 discard, rather than adopting a newer unrelated draft's owner. Explicit full
 replacement/upsert remains separate from normal edits.
+Failed-response replay preserves touched final assignments rather than cancelling
+an inverse edit against an uncertain preimage. Explicit reorder uses the latest
+acknowledged collection while retaining sparse field intent. Actual collection
+changes after dispatch still report a conflict.
 
 No Tags-specific constant is added to the host. Plugin group captions use their
 localized metadata at render time; saved names follow normal user view-name
@@ -135,8 +139,14 @@ manual Retry, without rollback-driven automatic writes or probe-page admission.
 The bounded successor read again carries exact client keys inline. Valid surviving
 keys remain collapsed; retired and duplicate keys are removed. Neither the
 256 KiB query limit nor the 2 MiB settings request limit is raised.
-Save and Save as retain the effective draft's disclosure in independent arrays;
-Discard leaves its base unchanged. A same-group draft inherits saved disclosure.
+Duplicate-only compaction carries an explicit canonicalization intent, so it
+deduplicates current committed keys without replacing concurrently added keys.
+Save and Save as use a base/group-owned `save_draft` CAS operation to transfer
+the latest matching draft, including disclosure accepted from another tab.
+Copies retain independent arrays; changed owners conflict rather than replaying
+stale view images. Selection and Save expose a workspace-local busy state that
+blocks dependent view edits until authoritative settlement without blocking
+task actions. Discard leaves its base unchanged. A same-group draft inherits saved disclosure.
 Duplicate clones source disclosure so expanding a copy never expands its source.
 
 ## Repository projection and pagination

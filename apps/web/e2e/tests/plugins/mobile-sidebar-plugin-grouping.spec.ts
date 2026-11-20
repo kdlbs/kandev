@@ -12,6 +12,7 @@ import {
   writeGroupingState,
 } from "./sidebar-plugin-grouping-helpers";
 import { exerciseChangedGroupingDraft } from "./sidebar-grouping-draft-helpers";
+import { holdSidebarSettingsWrite } from "../../helpers/user-settings-barrier";
 
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.1
 // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.6
@@ -67,9 +68,28 @@ test("phone task views create and restore an ordinary plugin grouping with reach
   await testPage.keyboard.press("Escape");
   await expect(chooser).toBeHidden();
   await expect(trigger).toBeFocused();
-  await trigger.tap();
-  await chooser.getByRole("button", { name: "Fixture grouping", exact: true }).tap();
-  await expect(chooser).toBeHidden();
+  const selection = await holdSidebarSettingsWrite(testPage);
+  try {
+    await trigger.tap();
+    await chooser.getByRole("button", { name: "Fixture grouping", exact: true }).tap();
+    await selection.arrived;
+    await expect(chooser).toBeHidden();
+    await expect(trigger).toHaveAttribute("aria-busy", "true");
+    await expect(trigger).toHaveAttribute("aria-disabled", "true");
+    const all = tasks.getByTestId("sidebar-view-chip").filter({ hasText: "All tasks" });
+    await expect(all).toBeDisabled();
+    const allBox = await all.boundingBox();
+    await testPage.touchscreen.tap(allBox!.x + allBox!.width / 2, allBox!.y + allBox!.height / 2);
+    await expect(tasks.getByTestId("sidebar-filter-gear")).toHaveAttribute("aria-disabled", "true");
+    expect(selection.writes).toBe(1);
+    await testPage.screenshot({
+      path: testInfo.outputPath("phone-pending-grouping.png"),
+      animations: "disabled",
+    });
+  } finally {
+    selection.release();
+    await selection.dispose();
+  }
   await expect(
     tasks.getByTestId("sidebar-view-chip").filter({ hasText: "Fixture grouping" }),
   ).toHaveAttribute("data-active", "true");

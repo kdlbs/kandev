@@ -22,6 +22,7 @@ type SidebarWorkspacePatch struct {
 	Draft                json.RawMessage     `json:"draft,omitempty"`
 	DraftUpdate          *SidebarDraftUpdate `json:"draft_update,omitempty"`
 	SelectPluginGrouping *SidebarView        `json:"select_plugin_grouping,omitempty"`
+	SaveDraft            *SidebarDraftSave   `json:"save_draft,omitempty"`
 }
 
 // SidebarViewUpdate carries only the fields edited by one user operation.
@@ -49,8 +50,16 @@ type SidebarDraftUpdate struct {
 }
 
 type SidebarDisclosureUpdate struct {
-	Group   string    `json:"group"`
-	Add     []string  `json:"add,omitempty"`
-	Remove  []string  `json:"remove,omitempty"`
-	Replace *[]string `json:"replace,omitempty"`
+	Group        string    `json:"group"`
+	Add          []string  `json:"add,omitempty"`
+	Remove       []string  `json:"remove,omitempty"`
+	Replace      *[]string `json:"replace,omitempty"`
+	Canonicalize bool      `json:"canonicalize,omitempty"`
+}
+
+type SidebarDraftSave struct {
+	BaseViewID    string `json:"base_view_id"`
+	ExpectedGroup string `json:"expected_group"`
+	TargetViewID  string `json:"target_view_id"`
+	Name          string `json:"name,omitempty"`
 }

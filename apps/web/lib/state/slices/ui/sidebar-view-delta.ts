@@ -1,3 +1,4 @@
+import { composeSidebarViewPatches } from "./sidebar-view-patch-compose";
 import type { SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 import { toApiSidebarView } from "./sidebar-view-wire";
 import { cloneDraft, cloneView } from "./sidebar-view-clone";
@@ -164,29 +165,14 @@ export function sidebarWriteDelta(
   before: SidebarSnapshot,
   after: SidebarSnapshot,
   failed: ReadonlyArray<{ before: SidebarSnapshot; after: SidebarSnapshot }> = [],
+  desired: SidebarSnapshot = after,
 ): Omit<NonNullable<UserSettingsUpdatePayload["sidebar_view_state"]>, "workspace_id"> {
-  if (!failed.length) return sidebarSettingsDelta(before, after);
-  const start = failed[0].before;
-  let desired = start;
-  const creates = new Map<string, SidebarView>();
-  const merge = (mutation: { before: SidebarSnapshot; after: SidebarSnapshot }) => {
-    const existing = new Set(mutation.before.views.map((view) => view.id));
-    for (const view of mutation.after.views)
-      if (!existing.has(view.id) && !creates.has(view.id)) creates.set(view.id, view);
-    desired = rebaseSidebarMutation(desired, mutation.before, mutation.after);
-  };
-  for (const mutation of failed) merge(mutation);
-  merge({ before, after });
-  const patch = sidebarSettingsDelta(start, desired);
-  // A replayed creation is insert-only; later edits keep their independent intent.
-  for (const view of desired.views) {
-    const original = creates.get(view.id);
-    if (!original) continue;
-    const index = patch.views_create?.findIndex((candidate) => candidate.id === view.id) ?? -1;
-    if (index < 0) continue;
-    patch.views_create![index] = toApiSidebarView(original);
-    const update = toSidebarViewUpdate(original, view);
-    if (update) (patch.views_update ??= []).push(update);
-  }
+  const patch = failed.length
+    ? composeSidebarViewPatches([
+        ...failed.map((mutation) => sidebarSettingsDelta(mutation.before, mutation.after)),
+        sidebarSettingsDelta(before, after),
+      ])
+    : sidebarSettingsDelta(before, after);
+  if (patch.view_order) patch.view_order = desired.views.map((view) => view.id);
   return patch;
 }

@@ -11,7 +11,11 @@ import type { UISlice } from "./types";
 import { workspaceId } from "@/lib/types/ids";
 import { toApiSidebarView } from "./sidebar-view-wire";
 import { mapSidebarWorkspaces } from "./sidebar-workspace-state";
-import { applyDraftMutationForTest, applyViewMutationsForTest } from "./sidebar-view-test-helpers";
+import {
+  applyDraftMutationForTest,
+  applyDraftSaveForTest,
+  applyViewMutationsForTest,
+} from "./sidebar-view-test-helpers";
 import type { SidebarWorkspaceStateApi } from "@/lib/types/http-user-settings";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
@@ -166,6 +170,36 @@ describe("copied sidebar view disclosure", () => {
       source.group = group;
       source.collapsedGroups = [collapsed];
       seedSidebar(store, [source]);
+      let persisted: SidebarWorkspaceStateApi = {
+        views: [toApiSidebarView(source)],
+        active_view_id: source.id,
+        draft: null,
+      };
+      let revision = 0;
+      vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
+        const patch = payload.sidebar_view_state!;
+        const views = new Map(persisted.views.map((view) => [view.id, view]));
+        applyViewMutationsForTest(views, patch);
+        const active = patch.active_view_id ?? persisted.active_view_id;
+        persisted = applyDraftSaveForTest(
+          {
+            views: [...views.values()],
+            active_view_id: active,
+            draft: applyDraftMutationForTest(views, active, persisted.draft, patch),
+          },
+          patch,
+        );
+        return {
+          settings: {
+            user_id: "default-user",
+            workspace_id: workspaceId("ws"),
+            repository_ids: [],
+            updated_at: "",
+            revision: ++revision,
+            sidebar_views_by_workspace: { ws: persisted },
+          },
+        };
+      });
       if (operation === "save as") {
         store.getState().updateSidebarDraft({ groupIndent: false });
         store.getState().saveSidebarDraftAs("Copy");
@@ -177,25 +211,21 @@ describe("copied sidebar view disclosure", () => {
       expect(copied.group).toBe(group);
       expect(copied.collapsedGroups).toEqual([collapsed]);
       expect(copied.collapsedGroups).not.toBe(state.views[0].collapsedGroups);
-      await waitFor(() =>
-        expect(updateUserSettings).toHaveBeenCalledWith(
-          expect.objectContaining({
-            sidebar_view_state: expect.objectContaining({
-              workspace_id: "ws",
-              active_view_id: copied.id,
-              views_create: expect.arrayContaining([
-                expect.objectContaining({ id: copied.id, group, collapsed_groups: [collapsed] }),
-              ]),
-            }),
-          }),
-        ),
-      );
+      await store.getState().waitForSidebarViewSync("ws");
+      expect(
+        mapSidebarWorkspaces({ ws: persisted }).ws.views.find((view) => view.id === copied.id),
+      ).toMatchObject({ group, collapsedGroups: [collapsed] });
       store.getState().toggleSidebarGroupCollapsed(copied.id, collapsed);
       const expanded = store.getState().sidebarViewsByWorkspace.ws;
       expect(expanded.views.find((view) => view.id === copied.id)?.collapsedGroups).toEqual([]);
       expect(expanded.views.find((view) => view.id === source.id)?.collapsedGroups).toEqual([
         collapsed,
       ]);
+      await store.getState().waitForSidebarViewSync("ws");
+      expect(
+        mapSidebarWorkspaces({ ws: persisted }).ws.views.find((view) => view.id === source.id)
+          ?.collapsedGroups,
+      ).toEqual([collapsed]);
     },
   );
 

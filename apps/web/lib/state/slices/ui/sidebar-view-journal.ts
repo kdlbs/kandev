@@ -3,7 +3,7 @@ import { cloneDraft, cloneView } from "./sidebar-view-clone";
 import type { SidebarSnapshot } from "./sidebar-view-delta";
 import type { SidebarSliceState } from "./sidebar-view-types";
 
-export type SidebarWriteKind = "views" | "local" | "compaction" | "selection";
+export type SidebarWriteKind = "views" | "local" | "compaction" | "selection" | "draft_save";
 export type SidebarWriteJournal = {
   latestRequestId: number;
   pending: number;

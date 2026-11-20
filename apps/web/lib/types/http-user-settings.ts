@@ -36,7 +36,13 @@ export type SidebarViewUpdateApi = Partial<
 > & {
   id: string;
   generated_plugin_grouping?: SidebarViewApi["generated_plugin_grouping"] | null;
-  disclosure?: { group: string; add?: string[]; remove?: string[]; replace?: string[] };
+  disclosure?: {
+    group: string;
+    add?: string[];
+    remove?: string[];
+    replace?: string[];
+    canonicalize?: boolean;
+  };
 };
 
 export type SidebarDraftUpdateApi = Omit<
@@ -46,6 +52,13 @@ export type SidebarDraftUpdateApi = Omit<
   base_view_id: string;
   expected_group: string;
   clear?: boolean;
+};
+
+export type SidebarDraftSaveApi = {
+  base_view_id: string;
+  expected_group: string;
+  target_view_id: string;
+  name?: string;
 };
 
 export type SidebarViewDraftApi = {
@@ -361,6 +374,7 @@ export type UserSettingsUpdatePayload = {
     draft?: SidebarViewDraftApi | null;
     draft_update?: SidebarDraftUpdateApi;
     select_plugin_grouping?: SidebarViewApi;
+    save_draft?: SidebarDraftSaveApi;
   };
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;

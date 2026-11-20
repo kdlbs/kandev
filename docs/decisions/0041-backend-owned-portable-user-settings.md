@@ -57,11 +57,23 @@ display name and create the candidate within the view limit. Renamed/custom
 views and pending drafts remain protected. The browser waits for the
 authoritative selected ID rather than installing a provisional saved view.
 
+While a provider selection or draft save awaits its authoritative result, the
+workspace exposes a transient busy state and blocks dependent view edits.
+Task actions remain available. `save_draft` transfers the latest matching
+base/group-owned draft inside CAS, including committed disclosure from other
+tabs, into the saved base or an independently allocated copy. A changed owner
+is a conflict, not permission to recreate a stale after-image.
+
 Client queues preserve captured operation intent across newer HTTP/WebSocket
 snapshots. A skipped metadata-compaction item is not a persistence ACK and
 cannot discard failed predecessor intent needed by a queued successor.
 Disclosure-only compaction has no automatic transport retry: its provider
 admission fence cannot be carried across an unobserved retry interval.
+Explicit final field assignments and disclosure removals survive uncertain
+acknowledgements even when they reverse an earlier edit. An explicit queued
+reorder is rebased over collection changes already admitted before dispatch;
+later collection conflicts remain explicit. Disclosure canonicalization
+deduplicates the current committed keys without replacing concurrent additions.
 
 ## Consequences
 

@@ -3,7 +3,8 @@ import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { installFixturePlugin, uninstallFixturePlugin } from "../../helpers/plugin-fixture";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
-import type { Page, Route } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { holdSidebarSettingsWrite } from "../../helpers/user-settings-barrier";
 import {
   SIDEBAR_GROUPING,
   groupingValueKey,
@@ -25,51 +26,6 @@ function header(page: Page, id: string) {
   return page
     .getByTestId("task-sidebar")
     .locator(`[data-testid="sidebar-group-header"][data-group-key="${groupingValueKey(id)}"]`);
-}
-
-async function holdFirstSave(page: Page, afterCommit = false) {
-  const arrived = Promise.withResolvers<void>();
-  const released = Promise.withResolvers<void>();
-  const finished = Promise.withResolvers<void>();
-  let held = false;
-  let writes = 0;
-  let body:
-    | { views_create?: { id: string }[]; select_plugin_grouping?: { id: string } }
-    | undefined;
-  const handler = async (route: Route) => {
-    const request = route.request();
-    const mutation = request.method() === "PATCH" && request.postDataJSON()?.sidebar_view_state;
-    if (!mutation) return route.continue();
-    writes++;
-    if (held) return route.continue();
-    held = true;
-    body = mutation;
-    try {
-      const committed = afterCommit ? await route.fetch() : undefined;
-      arrived.resolve();
-      await released.promise;
-      if (committed) await route.fulfill({ response: committed });
-      else await route.continue();
-    } finally {
-      finished.resolve();
-    }
-  };
-  await page.route("**/api/v1/user/settings", handler);
-  return {
-    arrived: arrived.promise,
-    release: () => released.resolve(),
-    get body() {
-      return body;
-    },
-    get writes() {
-      return writes;
-    },
-    dispose: async () => {
-      released.resolve();
-      if (held) await finished.promise;
-      await page.unroute("**/api/v1/user/settings", handler);
-    },
-  };
 }
 
 test.beforeEach(async ({ testPage, apiClient, seedData }) => {
@@ -121,7 +77,7 @@ test("a delayed settings ACK and queued collapse cannot resurrect another tab's 
 }, info) => {
   await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
   await expect(header(testPage, "keep")).toHaveAttribute("aria-expanded", "true");
-  const save = await holdFirstSave(testPage, true);
+  const save = await holdSidebarSettingsWrite(testPage, { commit: true });
   try {
     await header(testPage, "keep").click();
     await save.arrived;
@@ -167,7 +123,7 @@ for (const operation of ["append", "delete"] as const) {
     const source = (await preferences(apiClient, seedData.workspaceId)).views.find(
       (view) => view.id === "complete-plugin-view",
     )!;
-    const save = await holdFirstSave(testPage);
+    const save = await holdSidebarSettingsWrite(testPage);
     try {
       const editor = new SidebarFilterPopoverPage(testPage);
       if (operation === "append") await editor.beginNewView();
@@ -250,7 +206,7 @@ test("presentation edits queued behind draft compaction preserve bounded disclos
       },
     },
   });
-  const save = await holdFirstSave(testPage);
+  const save = await holdSidebarSettingsWrite(testPage);
   try {
     await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
     await save.arrived;
@@ -301,7 +257,7 @@ for (const remoteChange of ["rename", "group"] as const) {
       createHash("sha256")
         .update(group + "\0other")
         .digest("hex");
-    const save = await holdFirstSave(testPage);
+    const save = await holdSidebarSettingsWrite(testPage);
     try {
       await header(testPage, "keep").click();
       await save.arrived;
@@ -384,7 +340,7 @@ test("two tabs selecting one provider reuse one generated view without replacing
   await other.goto(`/?workspaceId=${seedData.workspaceId}`);
   await expect(header(testPage, "keep")).toBeVisible();
   await expect(header(other, "keep")).toBeVisible();
-  const save = await holdFirstSave(testPage);
+  const save = await holdSidebarSettingsWrite(testPage);
   try {
     await choose(testPage);
     await save.arrived;

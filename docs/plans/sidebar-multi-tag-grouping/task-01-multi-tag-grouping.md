@@ -584,3 +584,67 @@ Broad historical gates, the expanded E2E fixture type errors and the older
 release or deployment claim is added. The post-rebase source review remains
 open at clean streak 0/3.
 
+
+### Post-rebase round 7 corrections
+
+Five review schedules were reproduced: stale Save/Save as disclosure transfer,
+dependent actions during provider selection, inverse intent after a committed
+response failure, duplicate-only oversized disclosure, and queued reorder
+omitting an already acknowledged remote append.
+
+`save_draft` now transfers the latest matching base/group-owned draft inside
+CAS. Copies retain independent disclosure; a changed owner conflicts without
+mutating the newer draft. Selection and Save expose workspace-local busy
+admission across desktop and phone controls while canonical task actions remain
+available.
+
+Failed-response replay composes sparse touched assignments and explicit
+disclosure removals, rather than cancelling inverse edits against an uncertain
+preimage. Creation remains insert-only and updates cannot recreate deleted
+views. Explicit reorder uses the latest admitted collection without widening
+sparse field intent. Duplicate-only recovery carries canonicalization into CAS,
+preserving concurrently added keys.
+
+RED includes five draft-save service outcomes, two canonicalization cases,
+six focused store cases and seven native desktop failures on the unchanged
+round-6 artifacts. All failed at the expected consumer assertions, not setup.
+Focused GREEN includes 105 frontend cases in 16 files, production/unit scoped
+TypeScript, affected ESLint without warnings, Sidebar race checks across
+models/service/handlers and a final owner-helper race recheck. Initial lint
+warnings were resolved by helper extraction without suppressions.
+
+Full `make fmt` passes in the owned cache mirror. Spec/catalog validation
+reports 456 decisions and 2049 specifications. An initial documentation command
+used the wrong working directory and validated no documents; the corrected
+repo-root commands passed. Historical broad gates and the source-review
+clean-streak limit remain unwaived.
+
+Round-7 final native and real-package proof:
+
+- A fresh guarded rebuild passed 15/15 owning desktop cases. The sequential
+  phone project passed 10/10 with touch emulation, including pending-selection
+  admission and an actual touch reorder queued behind a rename while another
+  client appended a view. Both used one worker and zero retries.
+- Native upload of the unchanged exact Tags-head 0.20.0 archive returned HTTP
+  201 and Active in a fresh owned mock-only runtime on loopback 34415. Archive
+  SHA-256 remains
+  `5a1a1d747785352fc279e4160fa87e5abc028b0e269a4f39439e6c437f1a6d44`.
+  The driver exited zero in 213.70 seconds with 88 mixed assertion, screenshot
+  and narrative records, not 88 independent tests.
+- Real-package proof includes 103 canonical tasks/119 occurrences, repeated
+  trees and selection, saved reuse/copy/reload/workspace separation, live
+  mutations, explicit overflow with independent Tag availability, settled
+  recovery, disable/enable and 320/393-pixel touch pagination. Desktop grouped
+  rows, settled recovery, distinct escaped headings, the phone chooser and
+  visible Page 2 PNGs were inspected.
+- Every owned production/test source byte matches the tested cache mirror;
+  identities are retained in `evidence/r7-build-identity.json`. Runtime OWNER,
+  driver/launcher sources, results and inspected screenshot names are retained
+  in `~/.cache/sidebar-multi-tag-build/evidence/r7-smoke-evidence.json`.
+  The owned service was stopped and no runtime files remained open.
+
+Tags source did not change in this correction round. Demo 52121, its mirror,
+59390 and primary instances were untouched. Historical broad gates, the older
+1800-second stall, expanded E2E fixture errors, PostgreSQL/no-DSN, physical-phone
+and remote-CI limits remain unwaived. No release or deployment is authorized;
+the post-rebase source clean streak remains 0/3.

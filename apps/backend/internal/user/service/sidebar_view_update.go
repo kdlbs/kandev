@@ -53,7 +53,7 @@ func applySidebarDisclosure(current []string, update *models.SidebarDisclosureUp
 	if update.Replace != nil {
 		return *update.Replace
 	}
-	if len(update.Add) == 0 && len(update.Remove) == 0 {
+	if len(update.Add) == 0 && len(update.Remove) == 0 && !update.Canonicalize {
 		return current
 	}
 	seen := make(map[string]bool, len(current)+len(update.Add)+len(update.Remove))

@@ -24,13 +24,17 @@ export function useSidebarGroupings(): SidebarGroupingChoices {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const store = useAppStoreApi();
   const scope = useAppStore(sidebarTaskPageScope);
-  const { views, draft } = useAppStore(selectSidebarViews);
+  const { views, draft, transitionPending } = useAppStore(selectSidebarViews);
   const selectView = useAppStore((state) => state.selectSidebarPluginGrouping);
   const guard = useSidebarWorkspaceGuard();
   const selectGrouping = useMemo(
     () =>
       guard((choice: SidebarPluginGroupingChoice) => {
-        if (sidebarTaskPageScope(store.getState()) !== scope) return;
+        if (
+          sidebarTaskPageScope(store.getState()) !== scope ||
+          selectSidebarViews(store.getState()).transitionPending
+        )
+          return;
         return selectView(choice);
       }),
     [guard, selectView, store, scope],
@@ -45,11 +49,12 @@ export function useSidebarGroupings(): SidebarGroupingChoices {
         const full =
           views.length >= MAX_SIDEBAR_VIEWS && !findGeneratedSidebarPluginView(views, choice);
         let disabledReason: string | null = null;
-        if (draft) disabledReason = t("sidebar:saveDiscardFirst");
+        if (transitionPending) disabledReason = t("common:loadingIndicatorLabel");
+        else if (draft) disabledReason = t("sidebar:saveDiscardFirst");
         else if (full) disabledReason = t("sidebar:maxViews", { count: MAX_SIDEBAR_VIEWS });
         return { ...choice, disabledReason };
       }),
-    [providers, views, draft, t],
+    [providers, views, draft, transitionPending, t],
   );
   return { groupings, selectGrouping, workspaceId };
 }

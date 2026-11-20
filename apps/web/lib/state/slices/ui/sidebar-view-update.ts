@@ -14,13 +14,15 @@ function disclosureUpdate(
     return;
   const previous = new Set(before.collapsedGroups);
   const wanted = new Set(after.collapsedGroups);
-  const add = after.collapsedGroups.filter((key) => !previous.has(key));
-  const remove = before.collapsedGroups.filter((key) => !wanted.has(key));
-  if (add.length || remove.length)
+  const add = [...wanted].filter((key) => !previous.has(key));
+  const remove = [...previous].filter((key) => !wanted.has(key));
+  const canonicalize = previous.size !== before.collapsedGroups.length;
+  if (add.length || remove.length || canonicalize)
     return {
       group: before.group,
       ...(add.length ? { add } : {}),
       ...(remove.length ? { remove } : {}),
+      ...(canonicalize ? { canonicalize: true } : {}),
     };
 }
 

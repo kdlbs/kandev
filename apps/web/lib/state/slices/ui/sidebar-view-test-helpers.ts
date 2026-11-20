@@ -113,3 +113,39 @@ export function applyPluginSelectionForTest(
   };
   return { ...state, views: [...state.views, view], active_view_id: view.id };
 }
+
+export function applyDraftSaveForTest(
+  state: SidebarWorkspaceStateApi,
+  patch: SidebarPatch,
+): SidebarWorkspaceStateApi {
+  const save = patch.save_draft;
+  if (!save) return state;
+  const draft = state.draft;
+  const base = state.views.find((view) => view.id === save.base_view_id);
+  if (
+    !base ||
+    !draft ||
+    state.active_view_id !== base.id ||
+    draft.base_view_id !== base.id ||
+    draft.group !== save.expected_group
+  )
+    throw new Error("Draft owner changed");
+  const copy = save.target_view_id !== base.id;
+  const view = {
+    ...base,
+    ...draft,
+    id: save.target_view_id,
+    name: copy ? save.name! : base.name,
+    collapsed_groups: [
+      ...(draft.group === base.group ? base.collapsed_groups : (draft.collapsed_groups ?? [])),
+    ],
+    generated_plugin_grouping: copy ? undefined : base.generated_plugin_grouping,
+  };
+  return {
+    views: copy
+      ? [...state.views, view]
+      : state.views.map((row) => (row.id === base.id ? view : row)),
+    active_view_id: view.id,
+    draft: null,
+  };
+}

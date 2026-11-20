@@ -1,6 +1,7 @@
 import { IconChevronDown } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { useSidebarViewTransition } from "@/hooks/domains/sidebar/use-sidebar-view-transition";
 
 export function TaskSwitcherSkeleton() {
   return (
@@ -35,8 +36,10 @@ export function GroupHeader({
   onToggle: () => void;
 }) {
   const { t } = useTranslation();
+  const { interactionProps } = useSidebarViewTransition();
   return (
     <button
+      {...interactionProps}
       id={id}
       type="button"
       onClick={onToggle}

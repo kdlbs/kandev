@@ -84,6 +84,7 @@ export type SidebarView = {
 
 export type SidebarSliceState = {
   syncPending?: boolean;
+  transitionPending?: boolean;
   serverRevision?: number | null;
   deferredServerState?: SidebarSliceState | null;
   views: SidebarView[];
