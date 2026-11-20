@@ -955,3 +955,27 @@ Receipts: `~/.cache/sidebar-multi-tag-build/evidence/r15-*`. No backend, SDK,
 Tags, API, transport-policy or copy changes. No fresh package reinstall,
 physical-phone, PostgreSQL, broad-suite or remote-CI certification. Protected
 instances untouched; no release/deploy authorization. Next review uses Opus.
+
+### Opus post-rebase round 16 correction
+
+Confirmed the remaining deferred-error overwrite: a newer WS snapshot captured
+before a transition failure retains a null error. When queued compaction is
+then retired by its admission fence, terminal restoration previously replaced
+the current failure with that stale null.
+
+Expanded the existing selection/save 400/500 matrix to cover both persisted and
+skipped compaction, with the latter dispatching a real store WS handler before
+failure. Four new cases failed at the retained-error assertion before the fix.
+Snapshot restoration now preserves the current unreplayed error while adopting
+authoritative settings. Normal settlement and replay/healing policies remain.
+
+Final 64 focused frontend tests, scoped types/ESLint/Prettier passed. Fresh
+frontend build plus existing desktop save/selection checks 4/4 and separate
+true-touch controls 5/5 completed in 142.82s. The exact race is proved at the
+store/WS/transport boundary, not claimed as a new browser interleaving. A helper
+name was shortened to meet the existing file limit, without suppressions.
+
+Receipts: `~/.cache/sidebar-multi-tag-build/evidence/r16-*`. No backend, SDK,
+Tags, API, retry-policy, copy, release or deploy changes. No new real-package,
+full-suite, PostgreSQL, physical-phone or remote-CI certification. Protected
+instances untouched. Streak remains 0/3; next review is Opus round 17.

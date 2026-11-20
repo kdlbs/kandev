@@ -101,6 +101,9 @@ latest confirmed snapshot and preserves their failure indication instead of
 keeping phantom state or silently discarding a transition failure. This marker
 survives intermediate queued acknowledgements; replayed view mutations and
 self-healing compaction keep their separate recovery policies.
+Deferred snapshots carry an error value captured at receipt time. Restoring
+their authoritative settings must preserve a newer unreplayed failure rather
+than overwrite it with that stale error value, including skipped compaction.
 A definitive HTTP rejection retires dispatched move intent even when both
 endpoints survive. An independent successor must not give that rejected move a
 fresh order baseline. Transport-uncertain failures retain the existing guarded

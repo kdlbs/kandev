@@ -217,14 +217,18 @@ it.each([
   },
 );
 
-it.each([
-  ["selection", 400],
-  ["selection", 500],
-  ["save", 400],
-  ["save", 500],
-] as const)(
-  "retains failed %s status %s behind successful disclosure compaction",
-  async (transition, status) => {
+it.each(
+  (
+    [
+      ["selection", 400],
+      ["selection", 500],
+      ["save", 400],
+      ["save", 500],
+    ] as const
+  ).flatMap(([transition, status]) => [false, true].map((skip) => ({ transition, status, skip }))),
+)(
+  "retains failed $transition status $status through compaction skipped=$skip",
+  async ({ transition, status, skip }) => {
     const base = {
       ...createDefaultSidebarView("base", "Tag"),
       group: "plugin:tags:tags" as const,
@@ -270,15 +274,34 @@ it.each([
     if (transition === "selection")
       store.getState().selectSidebarPluginGrouping({ reference: MULTI, label: "Multi-tag" });
     else store.getState().saveSidebarDraftOverwrite();
+    let current = true;
     const compacted = store
       .getState()
-      .reconcileSidebarGroupDisclosure(base.id, base.group, base.collapsedGroups, ["kept"]);
+      .reconcileSidebarGroupDisclosure(base.id, base.group, base.collapsedGroups, ["kept"], {
+        workspaceId: "ws",
+        isCurrent: () => current,
+      });
+    if (skip) {
+      registerUsersHandlers(store)["user.settings.updated"]!({
+        type: "notification",
+        action: "user.settings.updated",
+        payload: {
+          user_id: USER_ID,
+          workspace_id: workspaceId("ws"),
+          repository_ids: [],
+          updated_at: "",
+          revision: 2,
+          sidebar_views_by_workspace: { ws: structuredClone(server) },
+        },
+      });
+      current = false;
+    }
     first.reject(new ApiError("Transition refused", status, {}));
     await compacted;
     await store.getState().waitForSidebarViewSync("ws");
     const state = store.getState().sidebarViewsByWorkspace.ws;
     expect(state.activeViewId).toBe(base.id);
-    expect(state.views[0].collapsedGroups).toEqual(["kept"]);
+    expect(state.views[0].collapsedGroups).toEqual(skip ? base.collapsedGroups : ["kept"]);
     expect(state.draft).toEqual(mapSidebarWorkspaces({ ws: server }).ws.draft);
     expect(state.transitionPending).toBe(false);
     expect(state.syncError).toBeTruthy();

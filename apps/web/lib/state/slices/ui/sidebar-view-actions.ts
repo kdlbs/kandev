@@ -36,6 +36,7 @@ import {
   getSidebarWriteJournal,
   replayableSidebarMove,
   recordSidebarWriteFailure,
+  restoreSidebarSnapshot,
   snapshotSidebar,
   type SidebarWriteJournal,
   type SidebarWriteKind,
@@ -195,7 +196,7 @@ function syncSidebarWrite(
       if (thisRequestId === journal.latestRequestId)
         set((state) => {
           const server = state.sidebarViews.deferredServerState;
-          if (server) Object.assign(state.sidebarViews, server);
+          if (server) restoreSidebarSnapshot(state.sidebarViews, server, failedUnreplayedWrite);
           else if (kind === "compaction" || failedUnreplayedWrite)
             Object.assign(state.sidebarViews, journal.confirmed!);
           state.sidebarViews.syncPending = false;

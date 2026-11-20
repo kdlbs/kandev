@@ -92,3 +92,13 @@ export function recordSidebarWriteFailure(
   journal.failedWriteKind ??= kind;
   return rollback;
 }
+
+export function restoreSidebarSnapshot(
+  state: SidebarSliceState,
+  snapshot: SidebarSnapshot,
+  preserveError: boolean | undefined,
+) {
+  const error = state.syncError;
+  Object.assign(state, snapshot);
+  if (preserveError) state.syncError = error;
+}
