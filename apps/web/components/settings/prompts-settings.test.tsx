@@ -326,6 +326,16 @@ describe("PromptsSettings coordinated creation", () => {
 const searchLabel = "Search...";
 const builtinNeedleName = "BuiltIn Needle";
 
+// @covers AC-INTEGRATIONS-PROMPT-SYNC-004.3
+describe("PromptsSettings layout", () => {
+  it("draws no group card around the custom prompts, only the search bar and rows", () => {
+    renderPromptSettings();
+    const section = screen.getByTestId("prompts-custom-section");
+    expect(section.querySelector("[data-settings-group-card]")).toBeNull();
+    expect(within(section).getByTestId(promptRowTestId)).toBeTruthy();
+  });
+});
+
 describe("PromptsSettings search", () => {
   it("filters the mounted list by saved content beyond its preview", () => {
     mocks.prompts = [

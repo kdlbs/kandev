@@ -34,6 +34,9 @@ Test-phase feedback on Task 14:
 5. A synced row had a read-only view of its local version. Now the eye
    shows and hides the read-only repository version, and **Edit** shows and
    hides the editable local version, matching manual prompts.
+6. Follow-up test round: the Custom prompts group drew a card outline
+   around the search bar and rows, which carry their own outlines. It now
+   uses `frame="none"`.
 
 ## In scope
 
@@ -46,7 +49,7 @@ Test-phase feedback on Task 14:
   `SyncedPromptListItem`, `PromptVersionPreview`, and
   `use-prompt-editor-effects.ts` removed.
 - Read-only editor: lighter dark surface, hidden cursor, dashed frame.
-- `PromptSyncSection` always `frame="none"`.
+- `PromptSyncSection` and the Custom prompts group always `frame="none"`.
 - Locale copy in seven languages; specs, design, public guide; unit and E2E
   tests on desktop and phone.
 
@@ -88,3 +91,5 @@ Test-phase feedback on Task 14:
   (`TestManagedNPMRuntimeLaunchIgnoresWorkspaceNpmrc`,
   `TestCreateWorktree_RefreshLockPolicy`, `seed-repository-origin.test.ts`,
   and two scripts tests).
+- Follow-up: prompts settings and Prompt Sync E2E 9/9 desktop, phone prompts
+  settings 2/2, with the same verification results.

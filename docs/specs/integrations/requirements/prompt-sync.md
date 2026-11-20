@@ -194,7 +194,8 @@ that every change goes through review.
   surface distinct from an editable one) while keeping its text at a WCAG AA
   contrast of at least 4.5:1. The Prompt Sync section shall show no empty
   content area while Prompt Sync is not set up, and a single outline around
-  its status once configured. Manual and built-in prompts shall keep their
+  its status once configured; the custom prompt list likewise draws no group
+  outline around its search bar and rows. Manual and built-in prompts shall keep their
   controls, with **Edit** showing and hiding the editor.
 - **AC-INTEGRATIONS-PROMPT-SYNC-004.4:** Creating a prompt manually (through
   Settings, HTTP, or MCP) with a name that a synced prompt already uses shall

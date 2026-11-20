@@ -187,7 +187,9 @@ export function PromptsSettings() {
         <PromptSyncSection />
         <SettingsGroup
           title={t("settings:promptsCustomHeading")}
-          contentClassName="space-y-6 divide-y-0"
+          frame="none"
+          contentClassName="space-y-6"
+          data-testid="prompts-custom-section"
           action={
             <PromptCreateButton
               onClick={actions.startCreate}
