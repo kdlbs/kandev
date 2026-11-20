@@ -27,6 +27,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	api := router.Group("/api/v1/prompt-sync")
 	manageConfig := authz.RequireOrgScope(authz.ScopeOrgConfigManage)
 	api.GET("/config", ctrl.httpGetConfig)
+	api.GET("/kept-versions", ctrl.httpKeptVersions)
 	api.POST("/config", manageConfig, ctrl.httpSetConfig)
 	api.DELETE("/config", manageConfig, ctrl.httpDeleteConfig)
 	api.POST("/check", manageConfig, ctrl.httpCheck)
@@ -144,8 +145,31 @@ func runResponse(cfg *Config, result *SyncResult, syncErr error) gin.H {
 	return response
 }
 
+// httpKeptVersions lists synced prompts that keep a local version.
+func (c *controller) httpKeptVersions(ctx *gin.Context) {
+	kept, err := c.service.KeptVersions(ctx.Request.Context())
+	if err != nil {
+		c.internalError(ctx, "failed to list kept prompt versions", err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"prompts": kept})
+}
+
+// deleteRequest names the synced prompts whose kept local version replaces
+// the repository version when Prompt Sync is removed.
+type deleteRequest struct {
+	RestoreLocal []string `json:"restore_local"`
+}
+
 func (c *controller) httpDeleteConfig(ctx *gin.Context) {
-	err := c.service.DeleteConfig(ctx.Request.Context())
+	var req deleteRequest
+	if ctx.Request.ContentLength != 0 {
+		if err := ctx.ShouldBindJSON(&req); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+			return
+		}
+	}
+	err := c.service.DeleteConfig(ctx.Request.Context(), req.RestoreLocal...)
 	switch {
 	case workspaceDenied(err):
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})

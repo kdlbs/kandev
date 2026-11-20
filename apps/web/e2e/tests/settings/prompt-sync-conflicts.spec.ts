@@ -16,7 +16,7 @@ test.describe("Prompt Sync name conflicts", () => {
     await cleanUpPromptSync(apiClient);
   });
 
-  // @covers AC-INTEGRATIONS-PROMPT-SYNC-008.1 AC-INTEGRATIONS-PROMPT-SYNC-008.2 AC-INTEGRATIONS-PROMPT-SYNC-008.3 AC-INTEGRATIONS-PROMPT-SYNC-009.1 AC-INTEGRATIONS-PROMPT-SYNC-009.2
+  // @covers AC-INTEGRATIONS-PROMPT-SYNC-008.1 AC-INTEGRATIONS-PROMPT-SYNC-008.2 AC-INTEGRATIONS-PROMPT-SYNC-008.3 AC-INTEGRATIONS-PROMPT-SYNC-009.1 AC-INTEGRATIONS-PROMPT-SYNC-009.2 AC-INTEGRATIONS-PROMPT-SYNC-009.5
   test("reviews conflicts before saving and switches between versions without losing either", async ({
     testPage,
     apiClient,
@@ -68,8 +68,24 @@ test.describe("Prompt Sync name conflicts", () => {
     await houseRules.getByTestId("prompt-revert-confirm").click();
     await expect(houseRules.getByTestId("prompt-synced-badge")).toBeVisible();
     await expect(houseRules).toContainText("Repository house rules");
-    await toggle.click();
+
+    // Removing Prompt Sync asks which version a prompt with a kept local
+    // version keeps.
+    await testPage.getByTestId("prompt-sync-open").click();
+    dialog = testPage.getByTestId("prompt-sync-dialog");
+    await dialog.getByTestId("prompt-sync-remove").click();
+    await expect(dialog.getByTestId("prompt-conflict-item")).toHaveAttribute(
+      "data-prompt-name",
+      "house-rules",
+    );
+    await dialog.getByTestId("prompt-conflict-choice-local").click();
+    const removed = waitForHttp(testPage, "DELETE", CONFIG_PATH);
+    await dialog.getByTestId("prompt-sync-removal-confirm").click();
+    expect((await removed).ok()).toBe(true);
+    await expect(dialog).toHaveCount(0);
+    await expect(houseRules.getByTestId("prompt-edit-button")).toBeVisible();
     await expect(houseRules).toContainText("My house rules");
+    await expect(promptRow(testPage, "fresh-rule")).toContainText("Fresh rule");
   });
 
   // @covers AC-INTEGRATIONS-PROMPT-SYNC-008.4 AC-INTEGRATIONS-PROMPT-SYNC-008.5 AC-INTEGRATIONS-PROMPT-SYNC-008.6

@@ -37,4 +37,10 @@ describe("usePromptConflictReview", () => {
     act(() => result.current.open([conflict("a"), conflict("c")]));
     expect(result.current.choices).toEqual({ a: "repository", c: "local" });
   });
+
+  it("can default every conflict to the repository version", () => {
+    const { result } = renderHook(() => usePromptConflictReview());
+    act(() => result.current.open([conflict("a")], "repository"));
+    expect(result.current.choices).toEqual({ a: "repository" });
+  });
 });

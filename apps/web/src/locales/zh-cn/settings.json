@@ -1290,5 +1290,13 @@
   "promptConflictResolved": "提示词冲突已解决",
   "promptConflictLoadFailed": "无法检查提示词仓库：{{error}}",
   "promptConflictIndicator": "有提示词冲突需要查看",
-  "promptSyncSavedSyncFailed": "Prompt Sync 已保存，但首次同步失败：{{error}}"
+  "promptSyncSavedSyncFailed": "Prompt Sync 已保存，但首次同步失败：{{error}}",
+  "promptRemovalReviewTitle": "选择要保留的版本",
+  "promptRemovalReviewDescription": "移除 Prompt Sync 会将已同步的提示词转为普通提示词。这些提示词还有您自己的版本，只会保留您选择的版本。",
+  "promptRemovalReviewIntro_one": "{{count}} 个提示词需要选择。",
+  "promptRemovalReviewIntro_other": "{{count}} 个提示词需要选择。",
+  "promptRemovalKeepRepository": "保留仓库版本",
+  "promptRemovalKeepRepositoryHint": "提示词保留当前使用的文本。您的版本将被丢弃。",
+  "promptRemovalRestoreLocal": "恢复我的版本",
+  "promptRemovalRestoreLocalHint": "提示词恢复为您的文本。仓库版本将被丢弃。"
 }

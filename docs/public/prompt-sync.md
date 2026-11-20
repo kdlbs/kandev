@@ -106,7 +106,9 @@ Error messages never include tokens or provider response bodies.
 
 ## Stop syncing
 
-Select **Configure → Remove sync**. Kandev first turns every synced prompt and override into a normal, editable prompt, keeping its name and current content, and then removes the configuration. Kept local versions and conflict flags are dropped. If that fails, the configuration stays so you can retry.
+Select **Configure → Remove sync**. Kandev first turns every synced prompt and override into a normal, editable prompt, keeping its name and current content, and then removes the configuration. If that fails, the configuration stays so you can retry.
+
+If some synced prompts still keep your own version (because you chose the repository version for them), **Remove sync** first lists those prompts. Choose **Keep repository version** (the default) or **Restore my version** for each; **Compare versions** shows both, and **Back** cancels. Only the version you choose is kept. Without such prompts, Remove sync asks for a single confirmation.
 
 Changing the provider, credential workspace, repository, branch, or directory keeps existing synced prompts. The next sync reconciles them against the new source.
 
@@ -122,7 +124,8 @@ Reading the configuration and status follows saved-prompt read access. Saving, r
 | `GET` | `/api/v1/prompt-sync/config` | `200` with the configuration and status, or `204` when not configured. |
 | `POST` | `/api/v1/prompt-sync/check` | List the name conflicts a source would cause, without saving anything. Send the configuration as the body, or no body to check the saved one. `422` with `error` if the repository cannot be read. |
 | `POST` | `/api/v1/prompt-sync/config` | Validate, save, and run one sync. Optional `resolutions` maps prompt names to `local` or `repository`. Returns `config` plus `result` or `error`. |
-| `DELETE` | `/api/v1/prompt-sync/config` | Release synced prompts, then delete. Returns `{"deleted":true}`. |
+| `GET` | `/api/v1/prompt-sync/kept-versions` | Synced prompts that keep your own version, with both texts. |
+| `DELETE` | `/api/v1/prompt-sync/config` | Release synced prompts, then delete. Optional `{"restore_local": ["name"]}` restores your version of those prompts. Returns `{"deleted":true}`. |
 | `POST` | `/api/v1/prompt-sync/sync` | Run now, with optional `{"resolutions": {...}}`. Returns `config` plus `result` or `error`; `404` when not configured. |
 | `POST` | `/api/v1/prompt-sync/prompts/{id}/override` | Turn a synced prompt into a local override. `409` if the prompt is not synced. |
 | `POST` | `/api/v1/prompt-sync/prompts/{id}/revert` | Return an override to sync, keeping its text as the local version, and run a sync. `409` if the prompt is not an override. |

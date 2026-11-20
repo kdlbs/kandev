@@ -28,6 +28,7 @@ acceptance_criteria:
   - AC-INTEGRATIONS-PROMPT-SYNC-009.2
   - AC-INTEGRATIONS-PROMPT-SYNC-009.3
   - AC-INTEGRATIONS-PROMPT-SYNC-009.4
+  - AC-INTEGRATIONS-PROMPT-SYNC-009.5
   - AC-INTEGRATIONS-PROMPT-SYNC-010.1
   - AC-INTEGRATIONS-PROMPT-SYNC-010.2
   - AC-INTEGRATIONS-PROMPT-SYNC-010.3
@@ -55,9 +56,11 @@ Test-phase feedback on Task 10:
   `Check`, `SaveAndSync`, and `SyncWithResolutions` in `promptsync`;
   `POST /api/v1/prompt-sync/check`; `POST /config` saves then syncs; agent
   guidance error and MCP `conflict` and `edit_guidance`; E2E reset keeps
-  built-in prompts.
+  built-in prompts; `GET /kept-versions` and `DELETE /config` with
+  `restore_local`.
 - Web: switch-first trailing controls with the confirmation below the
-  header; check-then-review save flow; conflict banner and review dialog;
+  header; check-then-review save flow; removal review for kept local
+  versions; conflict banner and review dialog;
   Conflict badge; app-wide conflict indicator; copy in seven locales.
 
 ## Out of scope
@@ -91,3 +94,7 @@ pnpm e2e:run --host --no-build --project mobile-chrome -- e2e/tests/settings/mob
   clean.
 - Web unit: the settings, sidebar, navigation, and prompt hook suites pass.
 - E2E: desktop 4 passed (including the two conflict specs); phone 4 passed.
+- Removal review (AC-INTEGRATIONS-PROMPT-SYNC-009.5), added after a test-round
+  question: the store, promptsync, hook, and dialog tests failed first; the
+  PostgreSQL release test passes; the desktop and phone conflict specs now end
+  by removing Prompt Sync with Restore my version, and pass (4 and 4).

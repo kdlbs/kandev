@@ -178,3 +178,27 @@ func TestReleaseClearsConflictAndKeptContent(t *testing.T) {
 	}
 	assert.Equal(t, "Repo", mustGet(t, repo, second.ID).Content, "release keeps the current content")
 }
+
+func TestReleaseRestoresChosenKeptVersions(t *testing.T) {
+	repo, cleanup := createTestRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+	ids := map[string]string{}
+	for _, name := range []string{"restore-me", "keep-repo"} {
+		prompt := &models.Prompt{Name: name, Content: "Local " + name}
+		require.NoError(t, repo.CreatePrompt(ctx, prompt))
+		_, err := repo.AdoptPromptAsSynced(ctx, prompt.ID, "Repo "+name, "p/"+name+".md")
+		require.NoError(t, err)
+		ids[name] = prompt.ID
+	}
+
+	released, err := repo.ReleaseSyncedPrompts(ctx, "restore-me", "missing")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), released)
+	restored := mustGet(t, repo, ids["restore-me"])
+	assert.Equal(t, "Local restore-me", restored.Content, "a chosen prompt gets its kept version back")
+	assert.Equal(t, models.PromptSourceManual, restored.Source)
+	kept := mustGet(t, repo, ids["keep-repo"])
+	assert.Equal(t, "Repo keep-repo", kept.Content)
+	assert.Empty(t, kept.LocalContent)
+}

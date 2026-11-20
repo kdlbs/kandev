@@ -1290,5 +1290,13 @@
   "promptConflictResolved": "Prompt conflicts resolved",
   "promptConflictLoadFailed": "Could not check the prompt repository: {{error}}",
   "promptConflictIndicator": "Prompt conflicts need review",
-  "promptSyncSavedSyncFailed": "Prompt Sync was saved, but the first sync failed: {{error}}"
+  "promptSyncSavedSyncFailed": "Prompt Sync was saved, but the first sync failed: {{error}}",
+  "promptRemovalReviewTitle": "Choose which versions to keep",
+  "promptRemovalReviewDescription": "Removing Prompt Sync turns synced prompts into normal prompts. These prompts also have your own version, and only the version you choose is kept.",
+  "promptRemovalReviewIntro_one": "{{count}} prompt needs a choice.",
+  "promptRemovalReviewIntro_other": "{{count}} prompts need a choice.",
+  "promptRemovalKeepRepository": "Keep repository version",
+  "promptRemovalKeepRepositoryHint": "The prompt keeps the text it uses now. Your version is discarded.",
+  "promptRemovalRestoreLocal": "Restore my version",
+  "promptRemovalRestoreLocalHint": "The prompt goes back to your text. The repository version is discarded."
 }

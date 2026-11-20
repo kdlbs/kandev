@@ -81,6 +81,8 @@ function makeController(overrides: Partial<PromptSyncController> = {}): PromptSy
     handleDelete: vi.fn().mockResolvedValue(true),
     handleSyncNow: vi.fn().mockResolvedValue(undefined),
     review: makeReview(),
+    removal: makeReview(),
+    startRemoval: vi.fn().mockResolvedValue("confirm"),
     backToFields: vi.fn(),
     acceptConfig: vi.fn(),
     ...overrides,
@@ -225,5 +227,34 @@ describe("PromptSyncSection unresolved conflicts", () => {
     mocks.controller = makeController({ config });
     renderSection();
     expect(screen.queryByTestId("prompt-conflict-banner")).toBeNull();
+  });
+});
+
+// @covers AC-INTEGRATIONS-PROMPT-SYNC-009.5
+describe("PromptSyncSection removal with kept local versions", () => {
+  it("asks for the plain confirmation when no prompt keeps a local version", async () => {
+    mocks.controller = makeController({ config });
+    renderSection();
+    fireEvent.click(screen.getByTestId(OPEN_TEST_ID));
+    fireEvent.click(screen.getByTestId("prompt-sync-remove"));
+    await waitFor(() => expect(screen.getByTestId("prompt-sync-remove-confirmation")).toBeTruthy());
+    expect(mocks.controller.startRemoval).toHaveBeenCalled();
+  });
+
+  it("shows the version choices, repository first, and removes from that step", async () => {
+    mocks.controller = makeController({
+      config,
+      removal: { ...makeReview([conflict]), choices: { principles: "repository" } },
+    });
+    renderSection();
+    fireEvent.click(screen.getByTestId(OPEN_TEST_ID));
+    expect(screen.queryByTestId("prompt-sync-workspace-select")).toBeNull();
+    const choices = screen.getAllByTestId(/^prompt-conflict-choice-/);
+    expect(choices[0]!.getAttribute("data-testid")).toBe("prompt-conflict-choice-repository");
+    expect(choices[1]!.textContent).toContain("Restore my version");
+    fireEvent.click(screen.getByTestId("prompt-sync-removal-back"));
+    expect(mocks.controller.removal.close).toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("prompt-sync-removal-confirm"));
+    await waitFor(() => expect(mocks.controller.handleDelete).toHaveBeenCalled());
   });
 });

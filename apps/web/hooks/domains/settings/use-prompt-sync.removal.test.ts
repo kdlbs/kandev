@@ -1,0 +1,108 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { renderHook, waitFor, act } from "@testing-library/react";
+import type { PromptSyncConfig, PromptSyncConflict } from "@/lib/types/prompt-sync";
+
+const mocks = vi.hoisted(() => ({
+  get: vi.fn<() => Promise<PromptSyncConfig | null>>(),
+  kept: vi.fn<() => Promise<unknown>>(),
+  del: vi.fn<(restore?: string[]) => Promise<unknown>>(),
+  toast: vi.fn(),
+}));
+
+vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: mocks.toast }) }));
+vi.mock("@/hooks/domains/github/use-github-status", () => ({
+  useGitHubStatus: () => ({ status: null }),
+}));
+vi.mock("@/lib/api/domains/prompt-sync-api", () => ({
+  getPromptSyncConfig: () => mocks.get(),
+  getPromptSyncKeptVersions: () => mocks.kept(),
+  deletePromptSyncConfig: (restore?: string[]) => mocks.del(restore),
+  setPromptSyncConfig: vi.fn(),
+  checkPromptSync: vi.fn(),
+  runPromptSync: vi.fn(),
+}));
+
+import { usePromptSync } from "./use-prompt-sync";
+
+const config = {
+  workspace_id: "ws-1",
+  provider: "gitlab",
+  project_path: "acme/prompts",
+  branch: "main",
+  path: ".kandev/prompts",
+  interval_seconds: 300,
+  poll_enabled: true,
+  last_ok: true,
+} as PromptSyncConfig;
+
+const kept = (name: string): PromptSyncConflict => ({
+  name,
+  path: `.kandev/prompts/${name}.md`,
+  local_content: "Mine",
+  repository_content: "Repo",
+});
+
+async function renderConfigured() {
+  const hook = renderHook(() => usePromptSync("ws-1"));
+  await waitFor(() => expect(hook.result.current.config).not.toBeNull());
+  return hook;
+}
+
+describe("usePromptSync removal review", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.get.mockResolvedValue(config);
+    mocks.del.mockResolvedValue({ deleted: true });
+  });
+
+  it("opens a review defaulting to the repository version when prompts keep local versions", async () => {
+    mocks.kept.mockResolvedValue({ prompts: [kept("house-rules"), kept("notes")] });
+    const { result } = await renderConfigured();
+    let opened = "";
+    await act(async () => {
+      opened = await result.current.startRemoval();
+    });
+    expect(opened).toBe("review");
+    expect(result.current.removal.choices).toEqual({
+      "house-rules": "repository",
+      notes: "repository",
+    });
+
+    act(() => result.current.removal.setChoice("notes", "local"));
+    let removed = false;
+    await act(async () => {
+      removed = await result.current.handleDelete();
+    });
+    expect(removed).toBe(true);
+    expect(mocks.del).toHaveBeenCalledWith(["notes"]);
+    expect(result.current.removal.active).toBe(false);
+    expect(result.current.config).toBeNull();
+  });
+
+  it("asks for the plain confirmation when no prompt keeps a local version", async () => {
+    mocks.kept.mockResolvedValue({ prompts: [] });
+    const { result } = await renderConfigured();
+    let opened = "";
+    await act(async () => {
+      opened = await result.current.startRemoval();
+    });
+    expect(opened).toBe("confirm");
+    expect(result.current.removal.active).toBe(false);
+    await act(async () => {
+      await result.current.handleDelete();
+    });
+    expect(mocks.del).toHaveBeenCalledWith([]);
+  });
+
+  it("removes nothing when the kept versions cannot be read", async () => {
+    mocks.kept.mockRejectedValue(new Error("boom"));
+    const { result } = await renderConfigured();
+    let opened = "";
+    await act(async () => {
+      opened = await result.current.startRemoval();
+    });
+    expect(opened).toBe("failed");
+    expect(mocks.del).not.toHaveBeenCalled();
+    expect(mocks.toast).toHaveBeenLastCalledWith(expect.objectContaining({ variant: "error" }));
+  });
+});

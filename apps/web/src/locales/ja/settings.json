@@ -1290,5 +1290,13 @@
   "promptConflictResolved": "プロンプトの競合を解決しました",
   "promptConflictLoadFailed": "プロンプトリポジトリを確認できませんでした: {{error}}",
   "promptConflictIndicator": "確認が必要なプロンプトの競合があります",
-  "promptSyncSavedSyncFailed": "Prompt Sync は保存されましたが、最初の同期に失敗しました: {{error}}"
+  "promptSyncSavedSyncFailed": "Prompt Sync は保存されましたが、最初の同期に失敗しました: {{error}}",
+  "promptRemovalReviewTitle": "保持するバージョンを選択",
+  "promptRemovalReviewDescription": "Prompt Sync を削除すると、同期済みのプロンプトは通常のプロンプトになります。これらのプロンプトにはあなた自身のバージョンもあり、選択したバージョンだけが保持されます。",
+  "promptRemovalReviewIntro_one": "{{count}} 件のプロンプトで選択が必要です。",
+  "promptRemovalReviewIntro_other": "{{count}} 件のプロンプトで選択が必要です。",
+  "promptRemovalKeepRepository": "リポジトリ版を保持",
+  "promptRemovalKeepRepositoryHint": "プロンプトは現在使用中のテキストを保持します。あなたのバージョンは破棄されます。",
+  "promptRemovalRestoreLocal": "自分のバージョンに戻す",
+  "promptRemovalRestoreLocalHint": "プロンプトはあなたのテキストに戻ります。リポジトリ版は破棄されます。"
 }

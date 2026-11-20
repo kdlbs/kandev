@@ -26,7 +26,10 @@ import {
   resolvedTarget,
 } from "@/components/settings/repo-sync-fields";
 import { RepoSyncRemovalActions } from "@/components/settings/repo-sync-removal-actions";
-import { PromptConflictReviewList } from "@/components/settings/prompt-conflict-review";
+import {
+  PromptConflictReviewList,
+  useRemovalReviewCopy,
+} from "@/components/settings/prompt-conflict-review";
 import { useAppStore } from "@/components/state-provider";
 import type {
   PromptSyncController,
@@ -126,6 +129,53 @@ type FooterProps = {
   onRemove: () => Promise<void>;
 };
 
+// RemovalReviewFooter goes back to the fields or removes Prompt Sync with the
+// version chosen for each listed prompt.
+function RemovalReviewFooter({ sync, onRemove }: Pick<FooterProps, "sync" | "onRemove">) {
+  const { t } = useTranslation();
+  const [removing, setRemoving] = useState(false);
+  const remove = async () => {
+    setRemoving(true);
+    try {
+      await onRemove();
+    } catch {
+      // The controller already reported the failure; the step stays open.
+    } finally {
+      setRemoving(false);
+    }
+  };
+  return (
+    <DialogFooter>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={sync.removal.close}
+        disabled={removing}
+        className="cursor-pointer"
+        data-testid="prompt-sync-removal-back"
+      >
+        {t("common:back")}
+      </Button>
+      <Button
+        type="button"
+        variant="destructive"
+        onClick={remove}
+        disabled={removing}
+        className="cursor-pointer"
+        data-testid="prompt-sync-removal-confirm"
+        data-dialog-default-action
+      >
+        {t("workflows:remove")}
+      </Button>
+    </DialogFooter>
+  );
+}
+
+function RemovalReviewList({ sync }: { sync: PromptSyncController }) {
+  const copy = useRemovalReviewCopy(sync.removal.conflicts.length);
+  return <PromptConflictReviewList review={sync.removal} copy={copy} />;
+}
+
 // PromptSyncDialogFooter shows Remove and Save on the fields step, and Back
 // and Save on the conflict review step.
 function PromptSyncDialogFooter({
@@ -136,6 +186,10 @@ function PromptSyncDialogFooter({
   onRemove,
 }: FooterProps) {
   const { t } = useTranslation();
+  if (sync.removal.active) return <RemovalReviewFooter sync={sync} onRemove={onRemove} />;
+  const requestRemoval = async () => {
+    if ((await sync.startRemoval()) === "confirm") setRemoveConfirming(true);
+  };
   return (
     <DialogFooter>
       {sync.review.active ? (
@@ -158,7 +212,7 @@ function PromptSyncDialogFooter({
           hasConfig={!!sync.config}
           confirming={removeConfirming}
           saving={sync.saving}
-          onRequest={() => setRemoveConfirming(true)}
+          onRequest={() => void requestRemoval()}
           onCancel={() => setRemoveConfirming(false)}
           onConfirm={onRemove}
         />
@@ -177,6 +231,26 @@ function PromptSyncDialogFooter({
   );
 }
 
+type DialogStep = "fields" | "conflicts" | "removal";
+
+// Catalog keys, not t() calls, because this is module scope.
+const STEP_COPY: Record<DialogStep, { title: string; description: string }> = {
+  fields: { title: "settings:promptSyncTitle", description: "settings:promptSyncDescription" },
+  conflicts: {
+    title: "settings:promptConflictReviewTitle",
+    description: "settings:promptConflictReviewDescription",
+  },
+  removal: {
+    title: "settings:promptRemovalReviewTitle",
+    description: "settings:promptRemovalReviewDescription",
+  },
+};
+
+function dialogStep(sync: PromptSyncController): DialogStep {
+  if (sync.removal.active) return "removal";
+  return sync.review.active ? "conflicts" : "fields";
+}
+
 type PromptSyncDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -192,6 +266,7 @@ export function PromptSyncDialog({ open, onOpenChange, sync }: PromptSyncDialogP
     if (!next) {
       setRemoveConfirming(false);
       sync.backToFields();
+      sync.removal.close();
     }
     onOpenChange(next);
   };
@@ -206,7 +281,7 @@ export function PromptSyncDialog({ open, onOpenChange, sync }: PromptSyncDialogP
     // The confirmation owns retry state; the controller owns failure feedback.
     return Promise.reject();
   };
-  const reviewing = sync.review.active;
+  const step = dialogStep(sync);
 
   return (
     <MobileConfirmationHost open={open}>
@@ -222,22 +297,12 @@ export function PromptSyncDialog({ open, onOpenChange, sync }: PromptSyncDialogP
             <MobileConfirmationHostBody>
               <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle>
-                    {reviewing
-                      ? t("settings:promptConflictReviewTitle")
-                      : t("settings:promptSyncTitle")}
-                  </DialogTitle>
-                  <DialogDescription>
-                    {reviewing
-                      ? t("settings:promptConflictReviewDescription")
-                      : t("settings:promptSyncDescription")}
-                  </DialogDescription>
+                  <DialogTitle>{t(STEP_COPY[step].title)}</DialogTitle>
+                  <DialogDescription>{t(STEP_COPY[step].description)}</DialogDescription>
                 </DialogHeader>
-                {reviewing ? (
-                  <PromptConflictReviewList review={sync.review} />
-                ) : (
-                  <PromptSyncFields sync={sync} />
-                )}
+                {step === "fields" && <PromptSyncFields sync={sync} />}
+                {step === "conflicts" && <PromptConflictReviewList review={sync.review} />}
+                {step === "removal" && <RemovalReviewList sync={sync} />}
                 <PromptSyncDialogFooter
                   sync={sync}
                   removeConfirming={removeConfirming}

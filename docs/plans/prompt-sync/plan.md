@@ -146,6 +146,10 @@ Settings > Prompts, after a later sync found a conflict:
   navigation Settings row show an amber dot until it is resolved. Review
   opens the same list with [Cancel] [Apply choices]. On phones the two
   choices stack and each is at least 44px tall.
+
+Remove sync, when synced prompts keep a local version:
+  "Choose which versions to keep" lists them with ( ) Keep repository
+  version (default) and ( ) Restore my version, then [Back] [Remove].
 ```
 
 ### UI-02: Settings > Prompts, not configured (desktop)

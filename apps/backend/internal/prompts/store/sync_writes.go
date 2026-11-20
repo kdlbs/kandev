@@ -142,14 +142,33 @@ func (r *sqliteRepository) DeleteSyncedPrompt(ctx context.Context, id string) (b
 
 // ReleaseSyncedPrompts converts every synced prompt and override to a manual
 // prompt, keeping identity and current content, drops kept copies and
-// conflicts, and returns the number released.
-func (r *sqliteRepository) ReleaseSyncedPrompts(ctx context.Context) (int64, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+// conflicts, and returns the number released. A synced prompt named in
+// restoreLocal gets its kept local version back as its content. Both steps
+// run in one transaction.
+func (r *sqliteRepository) ReleaseSyncedPrompts(ctx context.Context, restoreLocal ...string) (int64, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, name := range restoreLocal {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE custom_prompts SET content = local_content
+			WHERE name = ? AND source = ? AND local_content <> ''
+		`), name, models.PromptSourceSync); err != nil {
+			return 0, err
+		}
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE custom_prompts SET source = ?, source_path = '', local_content = '', conflict = 0
 		WHERE source IN (?, ?)
 	`), models.PromptSourceManual, models.PromptSourceSync, models.PromptSourceOverride)
 	if err != nil {
 		return 0, err
 	}
-	return result.RowsAffected()
+	released, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return released, tx.Commit()
 }

@@ -3,6 +3,7 @@ import type {
   PromptConflictResolutions,
   PromptSyncCheckResponse,
   PromptSyncConfig,
+  PromptSyncConflict,
   PromptSyncRunResponse,
   PromptSyncSetConfigRequest,
 } from "@/lib/types/prompt-sync";
@@ -31,11 +32,23 @@ export async function setPromptSyncConfig(
   });
 }
 
-export async function deletePromptSyncConfig(options?: ApiRequestOptions) {
+// deletePromptSyncConfig removes Prompt Sync; synced prompts named in
+// restoreLocal get their kept local version back.
+export async function deletePromptSyncConfig(restoreLocal?: string[], options?: ApiRequestOptions) {
   return fetchJson<{ deleted: boolean }>(CONFIG_PATH, {
     ...options,
-    init: { ...(options?.init ?? {}), method: "DELETE" },
+    init: {
+      ...(options?.init ?? {}),
+      method: "DELETE",
+      ...(restoreLocal ? { body: JSON.stringify({ restore_local: restoreLocal }) } : {}),
+    },
   });
+}
+
+// getPromptSyncKeptVersions lists synced prompts that keep a local version
+// beside the repository version.
+export async function getPromptSyncKeptVersions(options?: ApiRequestOptions) {
+  return fetchJson<{ prompts: PromptSyncConflict[] }>("/api/v1/prompt-sync/kept-versions", options);
 }
 
 // checkPromptSync lists the conflicts a source would cause without saving or

@@ -325,10 +325,11 @@ func promptReferenceText(prompt *models.Prompt) PromptReferenceText {
 	return PromptReferenceText{Owner: "prompt:" + prompt.Name, Text: prompt.Content}
 }
 
-// ReleaseSyncedPrompts converts every synced prompt into a manual, editable
-// prompt and returns how many were released.
-func (s *Service) ReleaseSyncedPrompts(ctx context.Context) (int64, error) {
-	released, err := s.repo.ReleaseSyncedPrompts(ctx)
+// ReleaseSyncedPrompts converts every synced prompt and override into a
+// manual, editable prompt and returns how many were released. Synced prompts
+// named in restoreLocal get their kept local version back.
+func (s *Service) ReleaseSyncedPrompts(ctx context.Context, restoreLocal ...string) (int64, error) {
+	released, err := s.repo.ReleaseSyncedPrompts(ctx, restoreLocal...)
 	if err != nil {
 		return 0, err
 	}

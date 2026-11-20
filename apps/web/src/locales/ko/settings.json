@@ -1290,5 +1290,13 @@
   "promptConflictResolved": "프롬프트 충돌을 해결했습니다",
   "promptConflictLoadFailed": "프롬프트 저장소를 확인할 수 없습니다: {{error}}",
   "promptConflictIndicator": "검토가 필요한 프롬프트 충돌이 있습니다",
-  "promptSyncSavedSyncFailed": "Prompt Sync가 저장되었지만 첫 동기화에 실패했습니다: {{error}}"
+  "promptSyncSavedSyncFailed": "Prompt Sync가 저장되었지만 첫 동기화에 실패했습니다: {{error}}",
+  "promptRemovalReviewTitle": "유지할 버전 선택",
+  "promptRemovalReviewDescription": "Prompt Sync를 제거하면 동기화된 프롬프트가 일반 프롬프트가 됩니다. 이 프롬프트에는 내 버전도 있으며, 선택한 버전만 유지됩니다.",
+  "promptRemovalReviewIntro_one": "프롬프트 {{count}}개에 선택이 필요합니다.",
+  "promptRemovalReviewIntro_other": "프롬프트 {{count}}개에 선택이 필요합니다.",
+  "promptRemovalKeepRepository": "저장소 버전 유지",
+  "promptRemovalKeepRepositoryHint": "프롬프트는 지금 사용 중인 텍스트를 유지합니다. 내 버전은 삭제됩니다.",
+  "promptRemovalRestoreLocal": "내 버전 복원",
+  "promptRemovalRestoreLocalHint": "프롬프트가 내 텍스트로 돌아갑니다. 저장소 버전은 삭제됩니다."
 }

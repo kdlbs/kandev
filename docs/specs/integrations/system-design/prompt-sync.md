@@ -186,6 +186,14 @@ after trimming, so the empty string is unambiguous.
   restored) instead of the reference check and `DeleteSyncedPrompt`. It is
   reported in `Restored`. `DeleteSyncedPrompt` also guards `builtin = ?` with
   `0`.
+- Removal (AC-INTEGRATIONS-PROMPT-SYNC-009.5): `GET
+  /api/v1/prompt-sync/kept-versions` returns `{prompts: [Conflict]}` for
+  synced prompts with a kept copy (repository content is the current
+  content). `DELETE /config` accepts `{"restore_local": [names]}`, passed
+  through `DeleteConfig(ctx, restoreLocal...)` to
+  `ReleaseSyncedPrompts(ctx, restoreLocal...)`, which sets `content =
+  local_content` for those synced rows and releases everything in one
+  transaction.
 
 ### Agent access
 
@@ -249,7 +257,8 @@ caller.
 | `GET` | `/api/v1/prompt-sync/config` | `200` config + status, or `204` |
 | `POST` | `/api/v1/prompt-sync/check` | Read a candidate source (request body) or the stored one (empty body) and return `{conflicts, warnings}`. Writes nothing. `422` with a sanitized `error` when the source cannot be read. |
 | `POST` | `/api/v1/prompt-sync/config` | Validate, upsert, then run one sync with the body's `resolutions`. Returns `{config, result}` or `{config, error}`. |
-| `DELETE` | `/api/v1/prompt-sync/config` | Release synced prompts, then delete. Returns `{"deleted":true}`. |
+| `GET` | `/api/v1/prompt-sync/kept-versions` | Synced prompts that keep a local version: `{prompts: [{name, path, local_content, repository_content}]}`. |
+| `DELETE` | `/api/v1/prompt-sync/config` | Release synced prompts (optional `{"restore_local": [names]}` restores those kept versions), then delete. Returns `{"deleted":true}`. |
 | `POST` | `/api/v1/prompt-sync/sync` | Run now, with optional `{"resolutions": {...}}`. Returns `{config, result}` or `{config, error}`. `404` when not configured; `400` for an unknown choice. |
 
 `result` uses the Workflow Sync shape: `created`, `updated`, `deleted`,
@@ -441,6 +450,12 @@ list, the `unchanged` flag, and the stored status match the current output
   choices as `resolutions`. When the save's sync reports conflicts the check
   did not list, the hook checks the stored configuration and reopens the
   review instead of closing.
+- **Remove sync** first calls `usePromptSync.startRemoval`, which reads the
+  kept versions. With any, the dialog shows a removal step: the same review
+  list with removal copy (Keep repository version first and default, Restore
+  my version), **Back**, and a destructive **Remove**; `handleDelete` sends
+  the prompts set to Restore as `restore_local`. With none, the existing
+  inline or mobile confirmation opens.
 - `PromptSyncSection` shows `PromptConflictBanner` while any override is
   conflicted; **Review** uses `usePromptConflictResolver` (check the stored
   configuration, then Sync now with the choices) in

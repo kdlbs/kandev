@@ -2,6 +2,7 @@ package promptsync
 
 import (
 	"context"
+	"sort"
 
 	promptmodels "github.com/kandev/kandev/internal/prompts/models"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
@@ -114,4 +115,25 @@ func (s *Service) SaveAndSync(ctx context.Context, req *SetConfigRequest) (*Save
 		cfg = refreshed
 	}
 	return &SaveOutcome{Config: cfg, Result: result, SyncErr: syncErr}, nil
+}
+
+// KeptVersions lists synced prompts that keep a local version beside the
+// repository version, sorted by name, so removing the configuration can offer
+// to restore them.
+func (s *Service) KeptVersions(ctx context.Context) ([]Conflict, error) {
+	prompts, err := s.prompts.ListPrompts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	kept := []Conflict{}
+	for _, prompt := range prompts {
+		if !prompt.IsSynced() || prompt.LocalContent == "" {
+			continue
+		}
+		kept = append(kept, Conflict{
+			Name: prompt.Name, Path: prompt.SourcePath, LocalContent: prompt.LocalContent, RepositoryContent: prompt.Content,
+		})
+	}
+	sort.Slice(kept, func(i, j int) bool { return kept[i].Name < kept[j].Name })
+	return kept, nil
 }

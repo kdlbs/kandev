@@ -1290,5 +1290,13 @@
   "promptConflictResolved": "Ƥŕōḿƥţ ćōńƒĺĩćţś ŕēśōĺvēď",
   "promptConflictLoadFailed": "Ćōũĺď ńōţ ćĥēćķ ţĥē ƥŕōḿƥţ ŕēƥōśĩţōŕŷ: {{error}}",
   "promptConflictIndicator": "Ƥŕōḿƥţ ćōńƒĺĩćţś ńēēď ŕēvĩēŵ",
-  "promptSyncSavedSyncFailed": "Ƥŕōḿƥţ Śŷńć ŵàś śàvēď, ƀũţ ţĥē ƒĩŕśţ śŷńć ƒàĩĺēď: {{error}}"
+  "promptSyncSavedSyncFailed": "Ƥŕōḿƥţ Śŷńć ŵàś śàvēď, ƀũţ ţĥē ƒĩŕśţ śŷńć ƒàĩĺēď: {{error}}",
+  "promptRemovalReviewTitle": "Ćĥōōśē ŵĥĩćĥ vēŕśĩōńś ţō ķēēƥ",
+  "promptRemovalReviewDescription": "Ŕēḿōvĩńĝ Ƥŕōḿƥţ Śŷńć ţũŕńś śŷńćēď ƥŕōḿƥţś ĩńţō ńōŕḿàĺ ƥŕōḿƥţś. Ţĥēśē ƥŕōḿƥţś àĺśō ĥàvē ŷōũŕ ōŵń vēŕśĩōń, àńď ōńĺŷ ţĥē vēŕśĩōń ŷōũ ćĥōōśē ĩś ķēƥţ.",
+  "promptRemovalReviewIntro_one": "{{count}} ƥŕōḿƥţ ńēēďś à ćĥōĩćē.",
+  "promptRemovalReviewIntro_other": "{{count}} ƥŕōḿƥţś ńēēď à ćĥōĩćē.",
+  "promptRemovalKeepRepository": "Ķēēƥ ŕēƥōśĩţōŕŷ vēŕśĩōń",
+  "promptRemovalKeepRepositoryHint": "Ţĥē ƥŕōḿƥţ ķēēƥś ţĥē ţēxţ ĩţ ũśēś ńōŵ. Ŷōũŕ vēŕśĩōń ĩś ďĩśćàŕďēď.",
+  "promptRemovalRestoreLocal": "Ŕēśţōŕē ḿŷ vēŕśĩōń",
+  "promptRemovalRestoreLocalHint": "Ţĥē ƥŕōḿƥţ ĝōēś ƀàćķ ţō ŷōũŕ ţēxţ. Ţĥē ŕēƥōśĩţōŕŷ vēŕśĩōń ĩś ďĩśćàŕďēď."
 }

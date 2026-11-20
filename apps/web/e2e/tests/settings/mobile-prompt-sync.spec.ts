@@ -56,7 +56,7 @@ test.describe("Prompt Sync on a phone", () => {
     await expect(row.getByTestId("prompt-synced-badge")).toBeVisible();
   });
 
-  // @covers AC-INTEGRATIONS-PROMPT-SYNC-008.2 AC-INTEGRATIONS-PROMPT-SYNC-008.3
+  // @covers AC-INTEGRATIONS-PROMPT-SYNC-008.2 AC-INTEGRATIONS-PROMPT-SYNC-008.3 AC-INTEGRATIONS-PROMPT-SYNC-009.5
   test("reviews name conflicts with touch-sized choices on a phone", async ({
     testPage,
     apiClient,
@@ -86,7 +86,15 @@ test.describe("Prompt Sync on a phone", () => {
     await expect(dialog).toHaveCount(0);
     const row = promptRow(testPage, "phone-house");
     await expect(row.getByTestId("prompt-synced-badge")).toBeVisible();
-    await row.getByTestId("prompt-override-switch-label").tap();
+
+    await testPage.getByTestId("prompt-sync-open").tap();
+    await dialog.getByTestId("prompt-sync-remove").tap();
+    const restore = dialog.getByTestId("prompt-conflict-choice-local");
+    expect((await restore.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await restore.tap();
+    const removed = waitForHttp(testPage, "DELETE", CONFIG_PATH);
+    await dialog.getByTestId("prompt-sync-removal-confirm").tap();
+    expect((await removed).ok()).toBe(true);
     await expect(row).toContainText("My phone rules");
   });
 });

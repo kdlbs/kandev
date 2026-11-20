@@ -1290,5 +1290,13 @@
   "promptConflictResolved": "Conflitos de prompts resolvidos",
   "promptConflictLoadFailed": "Não foi possível verificar o repositório de prompts: {{error}}",
   "promptConflictIndicator": "Há conflitos de prompts para rever",
-  "promptSyncSavedSyncFailed": "O Prompt Sync foi guardado, mas a primeira sincronização falhou: {{error}}"
+  "promptSyncSavedSyncFailed": "O Prompt Sync foi guardado, mas a primeira sincronização falhou: {{error}}",
+  "promptRemovalReviewTitle": "Escolha as versões a manter",
+  "promptRemovalReviewDescription": "Remover o Prompt Sync transforma os prompts sincronizados em prompts normais. Estes prompts também têm a sua própria versão, e só é mantida a versão que escolher.",
+  "promptRemovalReviewIntro_one": "{{count}} prompt precisa de uma escolha.",
+  "promptRemovalReviewIntro_other": "{{count}} prompts precisam de uma escolha.",
+  "promptRemovalKeepRepository": "Manter a versão do repositório",
+  "promptRemovalKeepRepositoryHint": "O prompt mantém o texto que usa agora. A sua versão é descartada.",
+  "promptRemovalRestoreLocal": "Restaurar a minha versão",
+  "promptRemovalRestoreLocalHint": "O prompt volta ao seu texto. A versão do repositório é descartada."
 }

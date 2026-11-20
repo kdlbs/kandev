@@ -151,6 +151,16 @@ version after trying the repository version, without retyping it.
   the kept local content instead of deleting it. A sync shall never delete a
   built-in prompt; a built-in prompt that leaves the source shall become
   manual again with its kept or current content.
+- **AC-INTEGRATIONS-PROMPT-SYNC-009.5:** Removing the configuration while any
+  synced prompt keeps a local version shall first show a review step listing
+  those prompts, on desktop and phone. Each shall offer **Keep repository
+  version** (the default, the content in use) and **Restore my version**,
+  with both versions viewable and touch-sized choices on phones and coarse
+  pointers. **Back** shall return without removing anything. Confirming shall
+  release every prompt under AC-INTEGRATIONS-PROMPT-SYNC-004.5 with the chosen
+  content in the same step. When no synced prompt keeps a local version,
+  removal shall keep its single confirmation. A failure to list the kept
+  versions shall remove nothing and report the error.
 
 ### REQ-INTEGRATIONS-PROMPT-SYNC-010: Agent access to synced prompts
 

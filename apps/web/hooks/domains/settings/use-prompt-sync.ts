@@ -9,6 +9,7 @@ import {
   checkPromptSync,
   deletePromptSyncConfig,
   getPromptSyncConfig,
+  getPromptSyncKeptVersions,
   runPromptSync,
   setPromptSyncConfig,
 } from "@/lib/api/domains/prompt-sync-api";
@@ -316,6 +317,58 @@ function useSaveHandler(
   }, [draft, latest, reset, setConfig, toast, fence, review, setSaving]);
 }
 
+// useRemoval owns Remove sync. startRemoval lists synced prompts that keep a
+// local version: with any, it opens a review defaulting to the repository
+// version ("review"); with none, the plain confirmation applies ("confirm");
+// a failed read removes nothing ("failed"). handleDelete restores the local
+// version of every prompt the user chose it for.
+function useRemoval(
+  reset: (cfg: PromptSyncConfig | null) => void,
+  setConfig: (cfg: PromptSyncConfig | null) => void,
+  toast: ReturnType<typeof useToast>["toast"],
+  fence: Fence,
+) {
+  const removal = usePromptConflictReview();
+  const { open, close } = removal;
+  const startRemoval = useCallback(async (): Promise<"review" | "confirm" | "failed"> => {
+    try {
+      const { prompts } = await getPromptSyncKeptVersions();
+      if (prompts.length === 0) return "confirm";
+      open(prompts, "repository");
+      return "review";
+    } catch (err) {
+      toast({
+        description: t("settings:promptSyncRemoveFailed", { error: String(err) }),
+        variant: "error",
+      });
+      return "failed";
+    }
+  }, [open, toast]);
+  const handleDelete = useCallback(async () => {
+    fence.begin();
+    try {
+      const restore = Object.entries(removal.choices)
+        .filter(([, choice]) => choice === "local")
+        .map(([name]) => name);
+      await deletePromptSyncConfig(restore);
+      close();
+      setConfig(null);
+      reset(null);
+      toast({ description: t("settings:promptSyncRemoved") });
+      return true;
+    } catch (err) {
+      toast({
+        description: t("settings:promptSyncRemoveFailed", { error: String(err) }),
+        variant: "error",
+      });
+      return false;
+    } finally {
+      fence.end();
+    }
+  }, [removal.choices, close, setConfig, reset, toast, fence]);
+  return { removal, startRemoval, handleDelete };
+}
+
 // usePromptSync owns the install-wide Prompt Sync configuration, its editable
 // draft, and the save, remove, and Sync now actions. Prompt list changes
 // arrive through the existing prompts.changed WebSocket refresh.
@@ -355,24 +408,7 @@ export function usePromptSync(defaultWorkspaceId: string) {
     review,
   });
 
-  const handleDelete = useCallback(async () => {
-    fence.begin();
-    try {
-      await deletePromptSyncConfig();
-      setConfig(null);
-      reset(null);
-      toast({ description: t("settings:promptSyncRemoved") });
-      return true;
-    } catch (err) {
-      toast({
-        description: t("settings:promptSyncRemoveFailed", { error: String(err) }),
-        variant: "error",
-      });
-      return false;
-    } finally {
-      fence.end();
-    }
-  }, [reset, toast, fence]);
+  const { removal, startRemoval, handleDelete } = useRemoval(reset, setConfig, toast, fence);
 
   const handleSyncNow = useCallback(async () => {
     setSyncing(true);
@@ -406,6 +442,8 @@ export function usePromptSync(defaultWorkspaceId: string) {
     reset,
     review,
     backToFields: closeReview,
+    removal,
+    startRemoval,
     acceptConfig: setConfig,
     handleSave,
     handleDelete,

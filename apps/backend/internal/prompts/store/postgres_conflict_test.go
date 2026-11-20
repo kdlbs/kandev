@@ -56,3 +56,26 @@ func TestPostgresRepository_OwnershipTransitionsKeepLocalContent(t *testing.T) {
 		t.Fatalf("restored manual = %+v, %v", restored, err)
 	}
 }
+
+func TestPostgresRepository_ReleaseRestoresChosenKeptVersions(t *testing.T) {
+	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := newSQLiteRepositoryWithDB(database, database)
+	if err != nil {
+		t.Fatalf("initialize prompts repository: %v", err)
+	}
+	ctx := context.Background()
+	prompt := &models.Prompt{Name: "pg-restore", Content: "Local"}
+	if err := repo.CreatePrompt(ctx, prompt); err != nil {
+		t.Fatalf("create prompt: %v", err)
+	}
+	if changed, err := repo.AdoptPromptAsSynced(ctx, prompt.ID, "Repo", "p/pg-restore.md"); err != nil || !changed {
+		t.Fatalf("adopt as synced = %v, %v", changed, err)
+	}
+	if released, err := repo.ReleaseSyncedPrompts(ctx, "pg-restore"); err != nil || released != 1 {
+		t.Fatalf("release = %d, %v", released, err)
+	}
+	read, err := repo.GetPromptByID(ctx, prompt.ID)
+	if err != nil || read.Source != models.PromptSourceManual || read.Content != "Local" || read.LocalContent != "" {
+		t.Fatalf("released prompt = %+v, %v", read, err)
+	}
+}

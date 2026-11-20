@@ -24,7 +24,7 @@ type Repository interface {
 	CreateSyncedPrompt(ctx context.Context, name, content, sourcePath string) (*models.Prompt, error)
 	UpdateSyncedPrompt(ctx context.Context, id, content, sourcePath string) (bool, error)
 	DeleteSyncedPrompt(ctx context.Context, id string) (bool, error)
-	ReleaseSyncedPrompts(ctx context.Context) (int64, error)
+	ReleaseSyncedPrompts(ctx context.Context, restoreLocal ...string) (int64, error)
 
 	// Ownership transitions, each guarded by the expected current source.
 	OverrideSyncedPrompt(ctx context.Context, id string) (bool, error)

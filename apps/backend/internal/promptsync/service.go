@@ -22,7 +22,7 @@ const genericFailureMessage = "Prompt sync failed"
 // PromptApplier is the prompt-service surface Prompt Sync writes through.
 type PromptApplier interface {
 	ApplySyncedPrompts(ctx context.Context, input promptservice.SyncApplyInput) (*promptservice.SyncApplyResult, error)
-	ReleaseSyncedPrompts(ctx context.Context) (int64, error)
+	ReleaseSyncedPrompts(ctx context.Context, restoreLocal ...string) (int64, error)
 	UnresolvedPromptReferences(ctx context.Context, texts []string) ([][]string, error)
 	ListPrompts(ctx context.Context) ([]*promptmodels.Prompt, error)
 	OverrideSyncedPrompt(ctx context.Context, id string) (*promptmodels.Prompt, error)
@@ -153,8 +153,9 @@ func (s *Service) saveLocked(ctx context.Context, req *SetConfigRequest) (*Confi
 }
 
 // DeleteConfig releases every synced prompt to manual ownership, then removes
-// the configuration. A failed release keeps the configuration for a retry.
-func (s *Service) DeleteConfig(ctx context.Context) error {
+// the configuration. Synced prompts named in restoreLocal get their kept local
+// version back. A failed release keeps the configuration for a retry.
+func (s *Service) DeleteConfig(ctx context.Context, restoreLocal ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cfg, err := s.store.Get(ctx)
@@ -166,7 +167,7 @@ func (s *Service) DeleteConfig(ctx context.Context) error {
 			return err
 		}
 	}
-	released, err := s.prompts.ReleaseSyncedPrompts(ctx)
+	released, err := s.prompts.ReleaseSyncedPrompts(ctx, restoreLocal...)
 	if err != nil {
 		return fmt.Errorf("failed to release synced prompts: %w", err)
 	}
