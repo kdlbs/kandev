@@ -14,7 +14,7 @@ import (
 
 func (r *sqliteRepository) readAutoFoldTargetTx(ctx context.Context, tx *sqlx.Tx, source *QueuedMessage, policy *AdmissionPolicy) (*QueuedMessage, *autoMergedValues, error) {
 	blocked := func(row *QueuedMessage) (bool, error) {
-		return r.editLeaseBlocksEntryTx(ctx, tx, source.SessionID, row.ID)
+		return r.foldTargetBlockedTx(ctx, tx, source.SessionID, row)
 	}
 	sender := ""
 	if policy.sortedEnabled() {
@@ -168,7 +168,7 @@ func (r *sqliteRepository) readCandidateFoldTx(ctx context.Context, tx *sqlx.Tx,
 			return nil, err
 		}
 		values, err := autoFoldValues(target, candidate, policy, func(row *QueuedMessage) (bool, error) {
-			return r.editLeaseBlocksEntryTx(ctx, tx, candidate.SessionID, row.ID)
+			return r.foldTargetBlockedTx(ctx, tx, candidate.SessionID, row)
 		})
 		if err != nil || values == nil {
 			return nil, err
@@ -191,4 +191,22 @@ func (r *sqliteRepository) readCandidateFoldTx(ctx context.Context, tx *sqlx.Tx,
 		return nil, ErrQueueChanged
 	}
 	return &candidateFold{target: target, values: values, rawContent: content, rawAttachments: attachments, rawMetadata: metadata}, nil
+}
+
+// foldTargetBlockedTx reports whether an automatic fold must leave target
+// alone. A live edit lease holds the entry, and a task-management fence binds
+// its content to a claim, so folding a new message into it would change what
+// the claim delivers. Compaction applies the same rule.
+func (r *sqliteRepository) foldTargetBlockedTx(ctx context.Context, tx *sqlx.Tx, sessionID string, target *QueuedMessage) (bool, error) {
+	leased, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, target.ID)
+	if err != nil || leased {
+		return leased, err
+	}
+	var fenced bool
+	if err := tx.GetContext(ctx, &fenced, tx.Rebind(`
+		SELECT EXISTS (SELECT 1 FROM queue_task_management_fences WHERE queue_id = ?)
+	`), target.ID); err != nil {
+		return false, fmt.Errorf("read fold target task-management fence: %w", err)
+	}
+	return fenced, nil
 }
