@@ -6,7 +6,7 @@ vi.mock("@/hooks/use-compact-task-chrome", () => ({
   useTouchDrawer: () => touch.enabled,
 }));
 
-import { PlanSelectionPopover } from "./plan-selection-popover";
+import { SelectionCommentSurface } from "./selection-comment-surface";
 
 const SAVED_FEEDBACK = "Keep this feedback";
 const COMMENT_PLACEHOLDER = "Add your comment or instruction...";
@@ -17,11 +17,11 @@ afterEach(() => {
 });
 
 // eslint-disable-next-line max-lines-per-function -- Desktop and touch popover contracts share one render harness.
-describe("PlanSelectionPopover", () => {
+describe("SelectionCommentSurface", () => {
   it("keeps entered feedback open when the submitter rejects the save", () => {
     const onClose = vi.fn();
     render(
-      <PlanSelectionPopover
+      <SelectionCommentSurface
         selectedText="settled answer"
         position={{ x: 100, y: 100 }}
         onAdd={() => false}
@@ -41,7 +41,7 @@ describe("PlanSelectionPopover", () => {
     const onClose = vi.fn();
     const onAdd = vi.fn().mockResolvedValue(false);
     render(
-      <PlanSelectionPopover
+      <SelectionCommentSurface
         selectedText="plan step"
         position={{ x: 100, y: 100 }}
         onAdd={onAdd}
@@ -62,7 +62,7 @@ describe("PlanSelectionPopover", () => {
 
   it("disables Run and exposes the primary-session reason", () => {
     render(
-      <PlanSelectionPopover
+      <SelectionCommentSurface
         selectedText="plan step"
         position={{ x: 100, y: 100 }}
         onAdd={() => true}
@@ -80,7 +80,7 @@ describe("PlanSelectionPopover", () => {
     const onClose = vi.fn();
     const onDelete = vi.fn().mockResolvedValue(false);
     render(
-      <PlanSelectionPopover
+      <SelectionCommentSurface
         selectedText="plan step"
         position={{ x: 100, y: 100 }}
         editingComment="Keep this"
@@ -99,7 +99,7 @@ describe("PlanSelectionPopover", () => {
   it("uses a scroll-contained drawer with touch-sized actions on coarse pointers", () => {
     touch.enabled = true;
     render(
-      <PlanSelectionPopover
+      <SelectionCommentSurface
         selectedText="plan step"
         position={{ x: 100, y: 100 }}
         onAdd={() => true}
@@ -116,7 +116,7 @@ describe("PlanSelectionPopover", () => {
   it("ignores repeated keyboard submission events", () => {
     const onAdd = vi.fn();
     render(
-      <PlanSelectionPopover
+      <SelectionCommentSurface
         selectedText="plan step"
         position={{ x: 100, y: 100 }}
         onAdd={onAdd}
@@ -135,7 +135,7 @@ describe("PlanSelectionPopover", () => {
     let finish!: () => void;
     const onAdd = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
     render(
-      <PlanSelectionPopover
+      <SelectionCommentSurface
         selectedText="plan step"
         position={{ x: 100, y: 100 }}
         editingComment={SAVED_FEEDBACK}
@@ -160,7 +160,7 @@ describe("PlanSelectionPopover", () => {
     const onClose = vi.fn();
     const onAdd = vi.fn(() => new Promise<boolean>((resolve) => (finish = resolve)));
     render(
-      <PlanSelectionPopover
+      <SelectionCommentSurface
         selectedText="plan step"
         position={{ x: 100, y: 100 }}
         onAdd={onAdd}
@@ -185,7 +185,7 @@ describe("PlanSelectionPopover", () => {
     const onClose = vi.fn();
     const onAdd = vi.fn(() => new Promise<boolean>((resolve) => (finish = resolve)));
     render(
-      <PlanSelectionPopover
+      <SelectionCommentSurface
         selectedText="plan step"
         position={{ x: 100, y: 100 }}
         onAdd={onAdd}
@@ -208,7 +208,7 @@ describe("PlanSelectionPopover", () => {
     const onClose = vi.fn();
     const onDelete = vi.fn(() => new Promise<boolean>((resolve) => (finish = resolve)));
     render(
-      <PlanSelectionPopover
+      <SelectionCommentSurface
         selectedText="plan step"
         position={{ x: 100, y: 100 }}
         editingComment={SAVED_FEEDBACK}
@@ -225,5 +225,146 @@ describe("PlanSelectionPopover", () => {
 
     expect(onClose).not.toHaveBeenCalled();
     await act(async () => finish(false));
+  });
+});
+
+// @covers AC-UI-SELECTION-COMMENT-SURFACE-001.4
+// @covers AC-UI-SELECTION-COMMENT-SURFACE-001.7
+// @covers AC-UI-SELECTION-COMMENT-SURFACE-001.8
+describe("SelectionCommentSurface shared extensions", () => {
+  it("shows a context label and custom evidence instead of the quoted text", () => {
+    render(
+      <SelectionCommentSurface
+        selectedText="plain evidence"
+        contextLabel="Lines 3-5"
+        evidence={<img alt="Screenshot preview" src="blob:shot" />}
+        position={{ x: 10, y: 10 }}
+        onAdd={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("selection-comment-context-label").textContent).toBe("Lines 3-5");
+    expect(screen.getByRole("img", { name: "Screenshot preview" })).toBeTruthy();
+    expect(screen.queryByText(/plain evidence/)).toBeNull();
+  });
+
+  it("shows the context label and evidence in the touch drawer", () => {
+    touch.enabled = true;
+    render(
+      <SelectionCommentSurface
+        selectedText="plain evidence"
+        contextLabel="/pricing"
+        evidence={<span>thumbnail</span>}
+        position={{ x: 10, y: 10 }}
+        onAdd={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("selection-comment-context-label").textContent).toBe("/pricing");
+    expect(screen.getByText("thumbnail")).toBeTruthy();
+  });
+
+  it("uses a controlled draft that survives closing and reopening", () => {
+    let draft = "";
+    const onDraftChange = vi.fn((value: string) => {
+      draft = value;
+    });
+    const props = {
+      selectedText: "x",
+      position: { x: 10, y: 10 },
+      onAdd: () => {},
+      onClose: () => {},
+      onDraftChange,
+    };
+    const { unmount } = render(<SelectionCommentSurface {...props} draftComment={draft} />);
+    fireEvent.change(screen.getByPlaceholderText(COMMENT_PLACEHOLDER), {
+      target: { value: "kept text" },
+    });
+    expect(onDraftChange).toHaveBeenCalledWith("kept text");
+    unmount();
+
+    render(<SelectionCommentSurface {...props} draftComment={draft} />);
+    expect((screen.getByPlaceholderText(COMMENT_PLACEHOLDER) as HTMLTextAreaElement).value).toBe(
+      "kept text",
+    );
+  });
+
+  it("stays inside the viewport after the window shrinks", () => {
+    const previous = Object.getOwnPropertyDescriptor(window, "innerHeight");
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 667 });
+    try {
+      render(
+        <SelectionCommentSurface
+          selectedText="x"
+          position={{ x: 40, y: 600 }}
+          onAdd={() => {}}
+          onClose={() => {}}
+          testId="surface"
+        />,
+      );
+      fireEvent.change(screen.getByPlaceholderText(COMMENT_PLACEHOLDER), {
+        target: { value: "keep this note" },
+      });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 375 });
+      act(() => {
+        window.dispatchEvent(new Event("resize"));
+      });
+      const top = Number.parseFloat(screen.getByTestId("surface").style.top);
+      expect(top + 180).toBeLessThanOrEqual(375);
+      expect((screen.getByPlaceholderText(COMMENT_PLACEHOLDER) as HTMLTextAreaElement).value).toBe(
+        "keep this note",
+      );
+    } finally {
+      if (previous) Object.defineProperty(window, "innerHeight", previous);
+    }
+  });
+});
+
+describe("SelectionCommentSurface placement", () => {
+  it("keeps a tall surface, such as one with a thumbnail, inside the viewport", () => {
+    const previous = Object.getOwnPropertyDescriptor(window, "innerHeight");
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
+    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      const rect = original.call(this);
+      if (this.dataset.testid !== "tall-surface") return rect;
+      return { ...rect.toJSON(), height: 420, width: 340, bottom: rect.top + 420 } as DOMRect;
+    };
+    try {
+      render(
+        <SelectionCommentSurface
+          selectedText="x"
+          evidence={<div style={{ height: 400 }}>thumbnail</div>}
+          position={{ x: 40, y: 500 }}
+          onAdd={() => {}}
+          onClose={() => {}}
+          testId="tall-surface"
+        />,
+      );
+      const top = Number.parseFloat(screen.getByTestId("tall-surface").style.top);
+      expect(top + 420).toBeLessThanOrEqual(800);
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = original;
+      if (previous) Object.defineProperty(window, "innerHeight", previous);
+    }
+  });
+
+  it("animates in by default and can appear in place without animation", () => {
+    const surface = (animated?: boolean) =>
+      render(
+        <SelectionCommentSurface
+          selectedText="target"
+          position={{ x: 10, y: 10 }}
+          onAdd={() => {}}
+          onClose={() => {}}
+          testId="surface"
+          animated={animated}
+        />,
+      );
+    surface();
+    expect(screen.getByTestId("surface").className).toContain("animate-in");
+    cleanup();
+    surface(false);
+    expect(screen.getByTestId("surface").className).not.toContain("animate-in");
   });
 });

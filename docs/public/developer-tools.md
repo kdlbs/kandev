@@ -389,11 +389,42 @@ Closing the preview, file tab, focused viewer, or optional Browser panel removes
 
 ### Comment on a rendered preview
 
-Select **Annotate** in a Browser panel or rendered HTML-file preview. Choose **Select text**, **Select element**, or **Select screenshot region**, make the selection in the page, enter a comment, and select **Save feedback**. Element mode outlines and labels the candidate under the pointer, keyboard focus, or active touch before selection. Text feedback keeps the exact selected text together with its containing element, DOM range endpoints, rendered rectangles, scroll position, viewport size, and device pixel ratio. This position data lets the agent identify text that JavaScript generated or that the live page no longer contains.
+Select text in a Browser panel or rendered HTML-file preview to comment on it directly: a **Comment** button appears beside the selection, or in the bottom selection bar on touch devices. The same comment form used for plan, chat, and file comments opens next to the selection (a bottom sheet on touch devices). Enter a comment and select **Add**, or press Ctrl+Enter (⌘+Enter on macOS).
 
-Screenshot mode rasterizes the selected part of the rendered document and shows the PNG before saving. A screenshot is limited to 16 megapixels and 10 MiB, and one pending collection can contain up to 10 screenshots. Browser rendering features that cannot be read or reproduced by the rasterizer, including some canvas, video, font, and cross-origin resources, can look different or cause capture to fail. A failed capture or upload keeps a retryable draft; discarding it removes its staged image.
+For more than one comment, select **Annotate** to enter annotation mode. The preview gets an outline and a toolbar. On desktop the toolbar floats at the top; drag its handle to move it off the content you want to capture, and double-click the handle to put it back. Kandev remembers its position on each device. On touch devices the toolbar is docked at the bottom:
 
-Saved feedback belongs to the task. It remains pending while you navigate between routes, close or reopen previews, switch task sessions, reload the browser, or restart Kandev. The active task composer shows the shared pending count. Review, edit, or delete items from **Annotate**. None of the captured content reaches an agent until you use the ordinary chat **Send** action.
+- **Interact** uses the page normally, including commenting on a text selection.
+- **Text** captures each text selection.
+- **Element** outlines the candidate under the pointer and captures the element you click.
+- **Region** captures each rectangle you drag. Drag an outline to move it, or drag a corner to resize it; the image is recaptured and the comment kept.
+
+The selected tool stays active after each capture, so you can mark several places in a row. While you write a comment on a text or element capture, the tool pauses and keeps the captured target highlighted. Choosing another tool closes an open comment, as **Close** does, so the new tool works at once. Leave the mode with **Exit**, or press Escape: it first closes an open comment form, then switches to **Interact**, then exits. Escape works whether focus is in Kandev or inside the page. After you leave the mode, numbered markers stay on text and elements you commented on, as comments stay highlighted in chat and plans. Click a marker to edit or delete its comment without entering the mode. Hover a marker to highlight the text or element its comment is about; the highlight stays while that comment is open. Region outlines appear only in annotation mode.
+
+Comments are always written in a comment box next to the capture. On desktop, a comments panel also opens beside the preview the first time you enter the mode. It lists saved comments and unsaved drafts, numbered like their markers on the page. The highlighted count on the toolbar shows and hides the panel; hiding it gives the page the full width. Kandev remembers on each device whether the panel was open. On touch devices the list is a bottom sheet that starts hidden.
+
+Select a number on the page, or **Edit** in the list, to edit or delete that comment in its comment box; picking an entry in the list scrolls the page to it. Closing a new capture's comment with **Close**, Escape, or a click elsewhere removes the capture if you typed nothing, and keeps it as an unsaved draft (shown dashed) if you did. **Annotate** shows a dot while drafts exist; use **Resume** or **Discard** under **Unsaved**. Drafts last until you add or discard them, or close the preview.
+
+Element mode outlines and labels the candidate under the pointer, keyboard focus, or active touch before selection. Text feedback keeps the exact selected text together with its containing element, DOM range endpoints, rendered rectangles, scroll position, viewport size, and device pixel ratio. This position data lets the agent identify text that JavaScript generated or that the live page no longer contains.
+
+The Region tool rasterizes the selected part of the rendered document and shows the PNG before saving. While it captures, the region keeps an animated outline, and the image shows what was under the rectangle when you released it, even if you scroll meanwhile. A capture that does not finish within 15 seconds is removed with an error. A screenshot is limited to 16 megapixels and 10 MiB. Saved and unsaved screenshots together are limited to 10 per task; at the limit the Region tool is disabled with a message until you send or delete some. A failed capture or upload keeps a retryable draft; discarding it removes its staged image. If a moved or resized region cannot be recaptured, the previous outline and image stay.
+
+Region outlines follow the page and any inner panel they were drawn in as you scroll. They also follow the content they were drawn over when the page's layout moves it, such as when the comments panel opens or the window resizes. When that content is removed, hidden, or changes size, the outline turns into a dashed amber warning: the saved screenshot still shows the original area, and moving or resizing the region captures it again from its new position. Kandev never captures again on its own; a capture always takes what is visible inside the outline. Hover a region (or tap its eye button on touch devices) and select **Show capture** to compare the saved screenshot with the live page. Content that scrolls inside a canvas, such as a Flutter app, does not move the outline; the captured image is unaffected.
+
+Previewed pages keep their WebGL drawing buffers, so screenshots of WebGL content drawn on the page's main thread contain the rendered pixels. This includes Flutter web builds made with `flutter build web` and with `--wasm`. Content the rasterizer cannot read still comes out blank or different:
+
+- Canvases rendered inside a worker, which browsers allow only on cross-origin-isolated pages. Kandev previews are not cross-origin isolated, so Flutter renders on the page's main thread there.
+- Some video, font, and cross-origin resources.
+
+When a capture over a canvas comes out as a single solid color, the comment form shows a warning under the thumbnail. Check the image before adding it: a genuinely solid area is fine to keep.
+
+<details>
+<summary>Flutter element feedback</summary>
+
+Flutter draws its UI on a canvas, so the **Element** tool only finds the whole `flutter-view` by default. Call `SemanticsBinding.instance.ensureSemantics()` in your app's `main()` to expose Flutter's semantics tree; element feedback then anchors to the individual `flt-semantics` nodes.
+
+</details>
+
+Saved feedback belongs to the task. It remains pending while you navigate between routes, close or reopen previews, switch task sessions, reload the browser, or restart Kandev. The active task composer shows the shared pending count. Review, edit, or delete items from the toolbar's count, or select a saved region's outline to edit its comment; editing opens the same comment form. None of the captured content reaches an agent until you use the ordinary chat **Send** action.
 
 Send addresses the selected task session. An idle session receives the feedback directly; a busy session receives the same text, element metadata, and PNG attachments through its durable queue. Kandev removes only the exact saved versions accepted with that message. A validation, capacity, attachment, or version conflict leaves the feedback and composer draft available for correction and retry. The preview server and navigated page state remain ephemeral even though the saved feedback is durable.
 
