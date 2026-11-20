@@ -505,7 +505,7 @@ export function WorkflowCard(props: WorkflowCardProps) {
   return (
     <SettingsCard
       isDirty={s.hasUnsavedChanges || props.isOrderDirty}
-      discoveryTargetId={`workflow-card-${workflow.id}`}
+      discoveryTargetId={disclosure.discoveryTargetId}
       data-testid={`workflow-card-${workflow.id}`}
       data-expanded={disclosure.open}
       className={compact ? "gap-0 py-0" : undefined}

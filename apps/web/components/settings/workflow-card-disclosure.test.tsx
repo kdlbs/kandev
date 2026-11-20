@@ -2,10 +2,11 @@ import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-li
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emitSettingsTargetRequest } from "@/lib/settings-discovery/target";
+import { SettingsCard } from "./settings-card";
+import { SettingsTargetProvider } from "./settings-target-provider";
 import {
   WorkflowCardDisclosureBody,
   useExpandOnSettingsTarget,
-  useIdsAddedAfterMount,
   useWorkflowCardDisclosure,
 } from "./workflow-card-disclosure";
 
@@ -118,6 +119,50 @@ describe("useExpandOnSettingsTarget", () => {
   });
 });
 
+function TargetedWorkflowCardContent() {
+  const disclosure = useWorkflowCardDisclosure({
+    compact: true,
+    initiallyExpanded: false,
+    targetId: TARGET,
+  });
+  return (
+    <SettingsCard
+      discoveryTargetId={disclosure.discoveryTargetId}
+      data-expanded={disclosure.open}
+    />
+  );
+}
+
+function TargetedWorkflowSettings({
+  reveal,
+  showCard,
+}: {
+  reveal: (element: HTMLElement) => void;
+  showCard: boolean;
+}) {
+  return (
+    <SettingsTargetProvider revealTarget={reveal}>
+      {showCard ? <TargetedWorkflowCardContent /> : null}
+    </SettingsTargetProvider>
+  );
+}
+
+describe("workflow discovery target reveal", () => {
+  it("reveals the workflow after it expands for a pending route target", () => {
+    window.history.replaceState({}, "", `/settings#${TARGET}`);
+    const expandedStatesAtReveal: string[] = [];
+    const reveal = vi.fn((element: HTMLElement) => {
+      expandedStatesAtReveal.push(element.getAttribute("data-expanded") ?? "");
+    });
+    const view = render(<TargetedWorkflowSettings reveal={reveal} showCard={false} />);
+    act(() => emitSettingsTargetRequest(TARGET));
+    view.rerender(<TargetedWorkflowSettings reveal={reveal} showCard />);
+
+    expect(reveal).toHaveBeenCalledTimes(1);
+    expect(expandedStatesAtReveal).toEqual(["true"]);
+  });
+});
+
 describe("useWorkflowCardDisclosure expand", () => {
   it("opens and mounts a collapsed card", () => {
     const { result } = renderHook(() =>
@@ -139,17 +184,5 @@ describe("useWorkflowCardDisclosure across view changes", () => {
     rerender({ compact: true });
     expect(result.current.open).toBe(false);
     expect(result.current.mounted).toBe(true);
-  });
-});
-
-describe("useIdsAddedAfterMount", () => {
-  it("reports only ids that appear after the first render", () => {
-    const { result, rerender } = renderHook(({ ids }) => useIdsAddedAfterMount(ids), {
-      initialProps: { ids: ["a", "b"] },
-    });
-    expect(result.current.has("a")).toBe(false);
-    rerender({ ids: ["a", "b", "saved-c"] });
-    expect(result.current.has("saved-c")).toBe(true);
-    expect(result.current.has("b")).toBe(false);
   });
 });

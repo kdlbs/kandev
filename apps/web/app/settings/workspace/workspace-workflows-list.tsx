@@ -21,7 +21,6 @@ import { CSS } from "@dnd-kit/utilities";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { WorkflowCard } from "@/components/settings/workflow-card";
 import { WorkflowListViewToggle } from "@/components/settings/workflow-list-view-toggle";
-import { useIdsAddedAfterMount } from "@/components/settings/workflow-card-disclosure";
 import { useWorkflowListView } from "@/hooks/domains/settings/use-workflow-list-view";
 import { cn } from "@/lib/utils";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
@@ -40,6 +39,7 @@ type WorkflowListProps = {
   savedWorkflowItems: Workflow[];
   orderDirtyIds: ReadonlySet<string>;
   initialStepsByWorkflowId: Map<string, WorkflowStep[]>;
+  locallyFinalizedWorkflowIds: ReadonlySet<string>;
   isWorkflowDirty: (wf: Workflow) => boolean;
   /** The dedicated Improve Kandev workspace renders workflows read-only. */
   isImproveWorkspace?: boolean;
@@ -133,6 +133,7 @@ export function WorkflowList({
   savedWorkflowItems,
   orderDirtyIds,
   initialStepsByWorkflowId,
+  locallyFinalizedWorkflowIds,
   isWorkflowDirty,
   isImproveWorkspace,
   onUpdate,
@@ -145,7 +146,6 @@ export function WorkflowList({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const { view, setView } = useWorkflowListView();
   const compact = view === "compact";
-  const addedIds = useIdsAddedAfterMount(workflowItems.map((wf) => wf.id));
   const savedWorkflowsById = useMemo(
     () => new Map(savedWorkflowItems.map((workflow) => [workflow.id, workflow])),
     [savedWorkflowItems],
@@ -194,7 +194,7 @@ export function WorkflowList({
                   otherWorkflows={workflowItems.filter((w) => w.id !== workflow.id)}
                   isImproveWorkspace={isImproveWorkspace}
                   compact={compact}
-                  initiallyExpanded={addedIds.has(workflow.id)}
+                  initiallyExpanded={locallyFinalizedWorkflowIds.has(workflow.id)}
                   onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
                   onDeleteWorkflow={async () => {
                     await onDelete(workflow.id);

@@ -90,4 +90,46 @@ test.describe("Workflow settings compact list on mobile", () => {
       await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
     ).toBe(false);
   });
+
+  test("keeps step names visible beside a long profile label on a narrow screen", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    const { agents } = await apiClient.listAgents();
+    const owner = agents.find((agent) =>
+      agent.profiles?.some((profile) => profile.id === seedData.agentProfileId),
+    );
+    const seedProfile = owner?.profiles?.find((profile) => profile.id === seedData.agentProfileId);
+    expect(owner).toBeTruthy();
+    expect(seedProfile).toBeTruthy();
+
+    const longProfileLabel = "A very long agent profile label that must not hide workflow steps";
+    const profile = await apiClient.createAgentProfile(owner!.id, longProfileLabel, {
+      model: seedProfile!.model,
+    });
+    await apiClient.updateWorkflow(seedData.workflowId, { agent_profile_id: profile.id });
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId, { listView: null });
+
+    const row = page.compactRow(seedData.workflowId);
+    const stepStrip = row.getByTestId("workflow-compact-steps");
+    const firstStep = row.getByTestId("workflow-compact-step").first();
+    const profileBadge = row.getByTestId("workflow-compact-profile");
+    await expect(profileBadge).toContainText(longProfileLabel);
+
+    const [stripBox, stepBox, profileBox] = await Promise.all([
+      stepStrip.boundingBox(),
+      firstStep.boundingBox(),
+      profileBadge.boundingBox(),
+    ]);
+    expect(profileBox!.width).toBeLessThanOrEqual(80);
+    expect(stepBox!.x).toBeGreaterThanOrEqual(stripBox!.x);
+    expect(stepBox!.x + stepBox!.width).toBeLessThanOrEqual(stripBox!.x + stripBox!.width + 1);
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
+  });
 });

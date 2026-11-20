@@ -94,6 +94,17 @@ describe("WorkflowCompactRow", () => {
     expect(button.getAttribute("aria-controls")).toBe("workflow-body-wf-1");
   });
 
+  it("describes the ordered steps, count, profile, and status", () => {
+    renderRow({ agentProfileLabel: "Claude", readOnlyReason: "synced", isDirty: true });
+
+    expect(
+      screen.getByRole("button", {
+        name: "Show or hide details for Development",
+        description: /Backlog.*In Progress.*Review.*3 steps.*Claude.*Synced.*Unsaved/,
+      }),
+    ).toBeTruthy();
+  });
+
   it("calls onToggle when activated", () => {
     const props = renderRow();
     fireEvent.click(screen.getByTestId(ROW_TEST_ID));

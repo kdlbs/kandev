@@ -195,6 +195,7 @@ function useWorkflowActions({
 
   return {
     ...creation,
+    locallyFinalizedWorkflowIds: new Set(finalizedWorkflowIdsRef.current.values()),
     handleUpdateWorkflow,
     handleDeleteWorkflow,
     handleWorkflowSaved,
@@ -271,6 +272,7 @@ export function WorkspaceWorkflowsClient({
             savedWorkflowItems={page.savedWorkflowItems}
             orderDirtyIds={page.workflowOrderDirtyIds}
             initialStepsByWorkflowId={page.initialStepsByWorkflowId}
+            locallyFinalizedWorkflowIds={page.locallyFinalizedWorkflowIds}
             isWorkflowDirty={page.isWorkflowDirty}
             isImproveWorkspace={isImproveWorkspace}
             onUpdate={page.handleUpdateWorkflow}

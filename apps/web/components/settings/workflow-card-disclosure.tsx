@@ -43,17 +43,14 @@ export function useWorkflowCardDisclosure({
 
   useExpandOnSettingsTarget(targetId, expand);
 
-  return { expanded, open, mounted: open || hasOpened, toggle, expand };
-}
-
-/**
- * Ids present in `ids` now but not on the first render. A workflow saved from a
- * draft gets a new id (and a new React key), so this lets its remounted card
- * start expanded instead of collapsing on Save.
- */
-export function useIdsAddedAfterMount(ids: readonly string[]): ReadonlySet<string> {
-  const [initialIds] = useState(() => new Set(ids));
-  return new Set(ids.filter((id) => !initialIds.has(id)));
+  return {
+    expanded,
+    open,
+    mounted: open || hasOpened,
+    toggle,
+    expand,
+    discoveryTargetId: open ? targetId : undefined,
+  };
 }
 
 export function WorkflowCardDisclosureBody({

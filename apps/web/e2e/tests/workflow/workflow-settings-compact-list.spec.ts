@@ -183,6 +183,20 @@ test.describe("Workflow settings compact list", () => {
     await expect(page.workflowCard(saved.id).locator("input").first()).toBeVisible();
   });
 
+  test("keeps a workflow created outside this page collapsed", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId, { listView: null });
+
+    const remoteWorkflow = await apiClient.createWorkflow(seedData.workspaceId, "Remote Workflow");
+    await expect(page.compactRow(remoteWorkflow.id)).toBeVisible();
+    await expect(page.workflowCard(remoteWorkflow.id)).toHaveAttribute("data-expanded", "false");
+    await expect(page.workflowCard(remoteWorkflow.id).locator("input").first()).toBeHidden();
+  });
+
   test("keeps 44px targets in a narrow fine-pointer window", async ({ testPage, seedData }) => {
     await testPage.setViewportSize({ width: 390, height: 844 });
     const page = new WorkflowSettingsPage(testPage);
