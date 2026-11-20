@@ -16,7 +16,7 @@
 #   id         required  MUST equal the plugin manifest `id`; unique in this file.
 #   repo       required  owner/name of the public GitHub repo that publishes releases.
 #   featured   optional  maintainer may pin an entry above star order (default false).
-#   categories optional  category tags used for filtering in the catalog.
+#   categories optional  extra category tags to add to the release manifest.
 
 # The catalog starts empty — there are no first-party plugin repos at launch.
 # Entries are added by PR as plugins are published (see the template below).
@@ -38,6 +38,9 @@ plugins:
   - id: kandev-plugin-slack
     repo: kdlbs/kandev-plugin-slack
     categories: [integrations, automation]
+  - id: kandev-plugin-azure-devops
+    repo: JnManso/kandev-plugin-azure-devops
+    categories: [integrations]
   - id: kandev-plugin-bitbucket
     repo: kdlbs/kandev-plugin-bitbucket
     categories: [integrations]

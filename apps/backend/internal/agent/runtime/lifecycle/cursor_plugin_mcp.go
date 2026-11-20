@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -89,6 +90,20 @@ func (m *Manager) reconcileAndMaterializeCursorProjectMCPWithPreparation(
 	progress *prepareProgressRecorder,
 	operations ...*preparedMCPOperation,
 ) error {
+	return m.reconcileAndMaterializeCursorProjectMCPWithClient(ctx, execution, agentConfig, profileInfo, executorType, strategy, nil, progress, operations...)
+}
+
+func (m *Manager) reconcileAndMaterializeCursorProjectMCPWithClient(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	profileInfo *AgentProfileInfo,
+	executorType string,
+	strategy mcpconfig.PassthroughMCPStrategy,
+	client *agentctl.Client,
+	progress *prepareProgressRecorder,
+	operations ...*preparedMCPOperation,
+) error {
 	if execution == nil || execution.WorkspacePath == "" || !isCursorMCPAuthStrategy(strategy) {
 		return nil
 	}
@@ -97,6 +112,14 @@ func (m *Manager) reconcileAndMaterializeCursorProjectMCPWithPreparation(
 	}
 	prepCtx, cancel := context.WithTimeout(ctx, cursorMCPPreparationTimeout)
 	defer cancel()
+	releaseClient := func() {}
+	if client == nil {
+		client, releaseClient = execution.AcquireAgentCtlClient()
+	}
+	defer releaseClient()
+	if client == nil {
+		return fmt.Errorf("agent helper is unavailable for Cursor MCP delivery")
+	}
 
 	workspaceDir := execution.WorkspacePath
 	workspaceKey := cursorProjectMCPWorkspaceKey(workspaceDir)
@@ -121,7 +144,7 @@ func (m *Manager) reconcileAndMaterializeCursorProjectMCPWithPreparation(
 		return err
 	}
 	defer release()
-	targets, err := m.reconcileCursorProjectMCPFiles(prepCtx, workspaceDir, workspaceKey, generation, execution,
+	targets, err := m.reconcileCursorProjectMCPFiles(prepCtx, workspaceDir, workspaceKey, generation, execution, client,
 		allowedProfileServers, allowedImportCandidates)
 	if err != nil {
 		return err
@@ -135,6 +158,7 @@ func (m *Manager) reconcileCursorProjectMCPFiles(
 	workspaceDir, workspaceKey string,
 	generation uint64,
 	execution *AgentExecution,
+	client *agentctl.Client,
 	allowedProfileServers []agentctltypes.McpServer,
 	allowedImportCandidates map[string]agentctltypes.McpServer,
 ) ([]cursorNativeMCPApprovalTarget, error) {
@@ -166,6 +190,7 @@ func (m *Manager) reconcileCursorProjectMCPFiles(
 	// 4. Compose effective mcpServers and ownership mapping
 	newMCPServers, newOwnership, err := composeEffectiveMCPServers(
 		execution,
+		client,
 		allowedProfileServers,
 		userOwnedProjectServers,
 		allowedImportCandidates,

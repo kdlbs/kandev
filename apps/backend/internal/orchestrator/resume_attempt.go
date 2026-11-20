@@ -157,7 +157,7 @@ func (r *resumeAttemptRegistry) begin(parent context.Context, taskID, sessionID 
 		parent = context.Background()
 	}
 	parent, _ = worktree.WithRecoveryInspectionWait(parent, worktree.RecoveryInspectionWaitBudget)
-	if owned, _ := parent.Value(continuationOwnedContextKey{}).(bool); !owned {
+	if owned, _ := parent.Value(continuationOwnedContextKey{}).(bool); !owned && !isTransientLaunchRetryContext(parent) {
 		parent = context.WithoutCancel(parent)
 	}
 

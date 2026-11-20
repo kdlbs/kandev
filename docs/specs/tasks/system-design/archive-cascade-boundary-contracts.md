@@ -325,7 +325,6 @@ noncanonical JSON/base64/UUID, prefix/source mismatch, and empty IDs.
 |---|---|---|
 | Task HTTP -> `DeleteTask[Tree]` | `user_requested` / `user` | `http`, `{"request_id","user_id"}` |
 | MCP delete -> `DeleteTask[Tree]` | `mcp_requested` / `task_session` | `mcp`, `{"message_id","session_id"}` |
-| quick-chat expiry -> `DeleteExpiredTask` | `quick_chat_expired` / `task_maintenance` | `quick-chat`, `{"sweep_id"}` |
 | profile cleanup -> `DeleteEphemeralTasksByAgentProfile` | `agent_profile_deleted` / `task_maintenance` | `profile-cleanup`, `{"operation_id","profile_id"}` |
 | GitHub/GitLab PR terminal -> `DeleteTask[Tree]` | `pr_merged_or_closed` / `github|gitlab` | `provider`, `{"event_id","provider","watch_id"}` |
 | GitHub/GitLab approval -> `DeleteTask[Tree]` | `pr_approved_by_user` / `github|gitlab` | `provider`, `{"event_id","provider","watch_id"}` |
@@ -341,6 +340,9 @@ noncanonical JSON/base64/UUID, prefix/source mismatch, and empty IDs.
 | plugin host -> `DeleteTask[Tree]` | `plugin_requested` / `plugin` | `plugin`, `{"invocation_id","plugin_id"}` |
 | e2e reset -> `DeleteTask[Tree]` | `e2e_reset` / `system_test` | `e2e`, `{"reset_id"}` |
 | workspace aggregate child -> internal task delete | `workspace_deleted` / `workspace_delete` | `workspace-delete`, `{"operation_id","workspace_id"}` |
+
+Legacy `quick_chat_expire` cleanup jobs remain supported after deletion commits. No Quick Chat
+expiry producer remains.
 
 The shared `watchreset` adapter accepts only a sealed
 `WatchResetProvenance{Provider,WatchKind,WatchID,OperationID}`. Closed pairs are
@@ -414,11 +416,12 @@ context or persisted claim rows, never request-body authority:
 - `OutboxWorkerActor{OutboxKind, EventID, TaskOrWorkspaceID, WorkspaceID,
   LeaseOwner string, Revision, ClaimGeneration int64}` matches row, minimum
   revision/dependencies, owner, generation, and lease.
-- `TaskMaintenanceActor{Kind quick_chat_expiry|profile_cleanup, TaskID,
+- `TaskMaintenanceActor{Kind profile_cleanup, TaskID,
   WorkspaceID, ProfileID string, Cutoff, SelectedActivityAt time.Time,
-  OriginatingUser UserActor}` is built by the trusted selector. Expiry rechecks
-  activity/cutoff; profile cleanup also reloads the user binding, locks every
-  workspace, and rechecks profile, ephemeral state, and session binding.
+  OriginatingUser UserActor}` is built by the trusted selector. Profile cleanup
+  reloads the user binding, locks every workspace, and rechecks profile,
+  ephemeral state, `config_mode`, and session binding; only configuration chats
+  are selected.
 - `LegacyOperatorActor{UserID, CredentialID, AuthMode, Scope string,
   WorkspaceID string}` derives only after raw-peer/PAT checks and reloads current
   instance-admin role, auth mode, diagnostic scope, and workspace ownership.

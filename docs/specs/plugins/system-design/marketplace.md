@@ -187,15 +187,15 @@ not a user-facing API; their normative shape is the `schema.json` and the
 ### `plugins.yaml` (registry list — the curated, human-edited source of truth)
 
 Lives at `plugin-registry/plugins.yaml` in the main kandev repo. A list of entries,
-each pointing at one plugin repository. Deliberately minimal — descriptive metadata
-is read from the plugin's own release manifest at build time so it can never drift
-from what actually ships.
+each pointing at one plugin repository. Display metadata comes from the tagged
+release manifest. Maintainers can add free-form category labels in the registry.
+The index combines manifest and registry categories and removes duplicate values.
 
 ```yaml
 plugins:
   - id: agent-stats            # MUST equal the plugin manifest `id`
     repo: kdlbs/kandev-plugin-agent-stats   # owner/name; the release source
-    # optional overrides / curation-only fields:
+    categories: [productivity]  # optional tags added to manifest categories
     featured: false            # maintainer may pin an entry above star order
 ```
 
@@ -224,7 +224,7 @@ This is the fetch contract between a marketplace source and kandev. Additional
       "name": "Agent Stats",              // from manifest display_name
       "description": "Per-session token & LOC dashboard",
       "author": "kdlbs",                  // curated repository owner (native plugin)
-      "categories": ["analytics"],
+      "categories": ["analytics", "productivity"], // manifest, then registry tags
       "icon_url": "https://raw.githubusercontent.com/kdlbs/kandev-plugin-agent-stats/v1.4.0/icon.svg",
       "repo_url": "https://github.com/kdlbs/kandev-plugin-agent-stats",
       "version": "1.4.0",                 // latest release

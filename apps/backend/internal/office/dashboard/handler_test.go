@@ -26,6 +26,7 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -33,6 +34,43 @@ import (
 
 type directTaskStateWriter struct {
 	db *sqlx.DB
+}
+
+func (w directTaskStateWriter) CommitTaskState(
+	ctx context.Context, taskID string, write taskmodels.TaskStateWrite,
+) (taskmodels.TaskStateChange, error) {
+	tx, err := w.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return taskmodels.TaskStateChange{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var current v1.TaskState
+	var workflowID, stepID string
+	if err := tx.QueryRowxContext(ctx, `SELECT state, workflow_id, workflow_step_id FROM tasks WHERE id = ?`, taskID).
+		Scan(&current, &workflowID, &stepID); err != nil {
+		return taskmodels.TaskStateChange{}, err
+	}
+	if (write.ExpectedState != nil && current != *write.ExpectedState) ||
+		(write.ExpectedWorkflowStepID != nil && stepID != *write.ExpectedWorkflowStepID) {
+		return taskmodels.TaskStateChange{}, nil
+	}
+	changed := current != write.State
+	if changed {
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, write.State, taskID); err != nil {
+			return taskmodels.TaskStateChange{}, err
+		}
+	}
+	task := &taskmodels.Task{}
+	if err := tx.QueryRowxContext(ctx, `SELECT id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, parent_id, created_at, updated_at FROM tasks WHERE id = ?`, taskID).
+		Scan(&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &task.Title, &task.Description,
+			&task.State, &task.Priority, &task.ParentID, &task.CreatedAt, &task.UpdatedAt); err != nil {
+		return taskmodels.TaskStateChange{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return taskmodels.TaskStateChange{}, err
+	}
+	return taskmodels.TaskStateChange{Matched: true, Changed: changed, OldState: current, Task: task}, nil
 }
 
 func (w directTaskStateWriter) UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
@@ -327,6 +365,7 @@ func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
 	costSvc := &stubCostChecker{}
 	svc := dashboard.NewDashboardService(repo, log, activity, agentSvc, costSvc)
 	svc.SetTaskStateWriter(directTaskStateWriter{db: db})
+	svc.SetTaskStateChangePublisher(statusStateChangePublisher{})
 	svc.SetDecisionStore(wfRepo)
 	svc.SetWorkflowEngineDispatcher(newTestEngineDispatcher(wfRepo, log))
 

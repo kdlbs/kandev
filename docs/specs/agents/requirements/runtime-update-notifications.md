@@ -53,4 +53,6 @@ Background checks, ownership, notifications, and automatic consent retain this c
 
 The [availability summary requirements](runtime-update-summary.md) extend startup and reconnect delivery under REQ-AGENTS-RUNTIME-NOTIFY-003.
 
+[Native agent update checks](runtime-native-update-checks.md) extend background checks and availability notices to agents that declare their own update checker.
+
 See [runtime update notifications design](../system-design/runtime-update-notifications.md), [original delivery plan](../../../plans/agent-runtime-notifications/plan.md), and [compact settings follow-up plan](../../../plans/agent-runtime-settings-compact/plan.md), [floating indicator removal plan](../../../plans/remove-agent-runtime-update-indicator/plan.md), and [managed fallback current version fix plan](../../../plans/managed-fallback-current-version/plan.md).

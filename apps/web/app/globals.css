@@ -2350,3 +2350,46 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
     transform: none !important;
   }
 }
+
+/* Region outline while its screenshot is captured: a rotating gradient border. */
+@property --kandev-region-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.kandev-region-busy {
+  border-radius: 2px;
+  background: conic-gradient(
+    from var(--kandev-region-angle),
+    var(--primary),
+    transparent 30%,
+    var(--primary) 50%,
+    transparent 80%,
+    var(--primary)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  animation: kandev-region-busy-spin 1.2s linear infinite;
+}
+
+@keyframes kandev-region-busy-spin {
+  to {
+    --kandev-region-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kandev-region-busy {
+    animation: none;
+    background: none;
+    -webkit-mask: none;
+    mask: none;
+    border: 2px dashed var(--primary);
+  }
+}

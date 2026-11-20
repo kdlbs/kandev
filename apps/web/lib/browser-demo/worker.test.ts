@@ -360,12 +360,21 @@ describe("browser demo worker WebSocket runtime", () => {
       session_id: AUDIT_SESSION_ID,
       path: "README.md",
     });
+    const rootFiles = requestSocket("workspace.root_files.list", {
+      session_id: AUDIT_SESSION_ID,
+    });
 
     expect(tree.payload.root.children).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "src", is_dir: true })]),
     );
     expect(file.payload).toMatchObject({ path: "README.md", is_binary: false });
     expect(file.payload.content).toContain("Acme Web");
+    expect(rootFiles.payload).toEqual({
+      supported: false,
+      files: [],
+      truncated: false,
+      destinations: [],
+    });
   });
 
   it("serves both worktrees, repository roots, and their own files", async () => {

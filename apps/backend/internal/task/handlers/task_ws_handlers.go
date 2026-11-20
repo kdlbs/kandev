@@ -98,12 +98,12 @@ type wsCreateTaskRequest struct {
 	Description            string                                `json:"description,omitempty"`
 	Autopilot              bool                                  `json:"autopilot,omitempty"`
 	Priority               string                                `json:"priority,omitempty"`
+	ExecutionGrade         string                                `json:"execution_grade,omitempty"`
 	State                  *v1.TaskState                         `json:"state,omitempty"`
 	Repositories           []httpTaskRepositoryInput             `json:"repositories,omitempty"`
 	Position               int                                   `json:"position,omitempty"`
 	Metadata               map[string]interface{}                `json:"metadata,omitempty"`
 	MCPServerIDs           []string                              `json:"mcp_server_ids,omitempty"`
-	BuiltinMCPPreferences  *mcpconfig.BuiltinCreationPreferences `json:"builtin_mcp_preferences,omitempty"`
 	StartAgent             bool                                  `json:"start_agent,omitempty"`
 	AgentProfileID         string                                `json:"agent_profile_id,omitempty"`
 	ExecutorID             string                                `json:"executor_id,omitempty"`
@@ -113,6 +113,7 @@ type wsCreateTaskRequest struct {
 	ParentID               string                                `json:"parent_id,omitempty"`
 	RelatedTaskIDs         []string                              `json:"related_task_ids,omitempty"`
 	InitialWorkspaceLayout string                                `json:"initial_workspace_layout,omitempty"`
+	BuiltinMCPPreferences  *mcpconfig.BuiltinCreationPreferences `json:"builtin_mcp_preferences,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -200,6 +201,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Description:                 description,
 		Autopilot:                   req.Autopilot,
 		Priority:                    req.Priority,
+		ExecutionGrade:              req.ExecutionGrade,
 		State:                       req.State,
 		Repositories:                convertTaskRepositories(req.Repositories != nil, repos),
 		Position:                    req.Position,
@@ -312,14 +314,15 @@ func (h *TaskHandlers) wsGetTask(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsUpdateTaskRequest struct {
-	ID           string                    `json:"id"`
-	Title        *string                   `json:"title,omitempty"`
-	Description  *string                   `json:"description,omitempty"`
-	Priority     *string                   `json:"priority,omitempty"`
-	State        *v1.TaskState             `json:"state,omitempty"`
-	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position     *int                      `json:"position,omitempty"`
-	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
+	ID             string                    `json:"id"`
+	Title          *string                   `json:"title,omitempty"`
+	Description    *string                   `json:"description,omitempty"`
+	Priority       *string                   `json:"priority,omitempty"`
+	ExecutionGrade *string                   `json:"execution_grade,omitempty"`
+	State          *v1.TaskState             `json:"state,omitempty"`
+	Repositories   []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	Position       *int                      `json:"position,omitempty"`
+	Metadata       map[string]interface{}    `json:"metadata,omitempty"`
 	// ParentID nests the task under another task. "" clears the parent.
 	ParentID *string `json:"parent_id,omitempty"`
 	// AssigneeUserID sets the human assignee. "" unassigns.
@@ -377,6 +380,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Title:          title,
 		Description:    description,
 		Priority:       req.Priority,
+		ExecutionGrade: req.ExecutionGrade,
 		State:          req.State,
 		Repositories:   convertTaskRepositories(req.Repositories != nil, repos),
 		Position:       req.Position,

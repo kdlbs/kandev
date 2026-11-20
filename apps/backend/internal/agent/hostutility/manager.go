@@ -737,7 +737,12 @@ func (m *Manager) hostControl(
 		if err != nil {
 			return nil, ctx, nil, func() {}, err
 		}
-		return lease.NewControlClient(m.log), lease.Context(), lease, lease.Close, nil
+		control := lease.NewControlClient(m.log)
+		if control == nil {
+			lease.Close()
+			return nil, ctx, nil, func() {}, agentctlclient.ErrRuntimeLeaseRetired
+		}
+		return control, lease.Context(), lease, lease.Close, nil
 	}
 	if m.controlClient == nil {
 		return nil, ctx, nil, func() {}, errors.New("host utility control client unavailable")
