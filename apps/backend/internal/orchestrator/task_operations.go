@@ -4211,8 +4211,8 @@ func (s *Service) waitForSessionAndAgentReady(ctx context.Context, sessionID, wa
 	return session, nil
 }
 
-func (s *Service) waitForStartingSessionPromptable(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
-	s.logger.Debug("waiting for starting session to become promptable",
+func (s *Service) waitForSessionPromptable(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
+	s.logger.Debug("waiting for session to become promptable",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
 	session, err := s.waitForSessionAndAgentReady(ctx, sessionID, "for prompt")
@@ -4223,6 +4223,13 @@ func (s *Service) waitForStartingSessionPromptable(ctx context.Context, taskID, 
 		return nil, err
 	}
 	return session, nil
+}
+
+// WaitForSessionPromptable waits until a task session and its agent can accept
+// a prompt. It also covers launches deferred while session capacity is full.
+func (s *Service) WaitForSessionPromptable(ctx context.Context, taskID, sessionID string) error {
+	_, err := s.waitForSessionPromptable(ctx, taskID, sessionID)
+	return err
 }
 
 // StartSessionForWorkflowStep starts an existing session with a workflow step's prompt configuration.
@@ -8186,7 +8193,7 @@ func (s *Service) loadPromptableSession(ctx context.Context, taskID, sessionID s
 		if !errors.Is(promptErr, ErrSessionNotPromptable) || session.State != models.TaskSessionStateStarting {
 			return nil, promptErr
 		}
-		return s.waitForStartingSessionPromptable(ctx, taskID, sessionID)
+		return s.waitForSessionPromptable(ctx, taskID, sessionID)
 	}
 	return session, nil
 }

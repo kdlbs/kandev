@@ -60,9 +60,11 @@ const (
 	LaunchActivationSourceUserAction   LaunchActivationSource = "user_action"
 	LaunchActivationSourceSessionOpen  LaunchActivationSource = "session_open"
 	LaunchActivationSourceSessionFocus LaunchActivationSource = "session_focus"
+	// LaunchActivationDispositionQueued reports that launch admission was deferred.
+	LaunchActivationDispositionQueued = "queued"
 
 	activationDispositionSuppressed = "suppressed"
-	activationDispositionQueued     = "queued"
+	activationDispositionQueued     = LaunchActivationDispositionQueued
 )
 
 type sessionOpenRecoveryContextKey struct{}
