@@ -5,7 +5,6 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-issue: "https://github.com/kdlbs/kandev/issues/5400"
 requirements:
   - REQ-PLATFORM-DELIVERY-RETENTION-005
 acceptance_criteria:
@@ -69,7 +68,12 @@ From the repository root:
 (cd apps/backend && go test -trimpath ./internal/task/repository/sqlite -run 'AgentDelivery|Orphan|UnboundWorkflow' -count=1)
 (cd apps/backend && go run -trimpath ./cmd/sqlguard ./internal)
 (cd apps/backend && go test -trimpath -race ./internal/persistence/storeconformance -count=1)
-bash scripts/lint-go-changed <changed Go files>
+bash scripts/lint-go-changed \
+  apps/backend/internal/task/deliveryretention/worker.go \
+  apps/backend/internal/task/deliveryretention/worker_batches.go \
+  apps/backend/internal/task/deliveryretention/worker_ceiling_recovery_test.go \
+  apps/backend/internal/task/repository/sqlite/agent_delivery_retirement_worker.go \
+  apps/backend/internal/task/repository/sqlite/agent_delivery_unbound_count_plan_test.go
 ```
 
 If `KANDEV_TEST_POSTGRES_DSN` is configured, run the repository count test
@@ -117,8 +121,22 @@ Verification from the repository root:
 (cd apps/backend && go test -trimpath ./internal/task/repository/sqlite -run 'AgentDelivery|Orphan|UnboundWorkflow' -count=1)
 (cd apps/backend && go run -trimpath ./cmd/sqlguard ./internal)
 (cd apps/backend && go test -trimpath -race ./internal/persistence/storeconformance -count=1)
-bash scripts/lint-go-changed <changed Go files>
+bash scripts/lint-go-changed \
+  apps/backend/internal/agentctl/server/process/workspace_git_status.go \
+  apps/backend/internal/agentctl/server/process/workspace_git_status_bare_root_test.go \
+  apps/backend/internal/agentctl/server/api/git_status_bare_root_test.go \
+  apps/backend/internal/task/changes/coordinator.go \
+  apps/backend/internal/task/changes/coordinator_fakes_test.go \
+  apps/backend/internal/task/changes/coordinator_start_budget_test.go \
+  apps/backend/internal/task/changes/coordinator_start_capture.go \
+  apps/backend/internal/task/changes/start_capture_limiter.go \
+  apps/backend/internal/task/deliveryretention/worker.go \
+  apps/backend/internal/task/deliveryretention/worker_batches.go \
+  apps/backend/internal/task/deliveryretention/worker_ceiling_recovery_test.go \
+  apps/backend/internal/task/repository/sqlite/agent_delivery_retirement_worker.go \
+  apps/backend/internal/task/repository/sqlite/agent_delivery_unbound_count_plan_test.go
 ```
 
 All listed checks passed. The SQLite query-plan test confirmed use of the sparse
-partial index without a temporary sort.
+partial index without a temporary sort. Changed-Go lint passed across all PR Go
+files; the exact invocation is included above.

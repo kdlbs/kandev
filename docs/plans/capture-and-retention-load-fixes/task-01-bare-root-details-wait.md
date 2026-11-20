@@ -5,7 +5,6 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-issue: "https://github.com/kdlbs/kandev/issues/5398"
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
 acceptance_criteria:
@@ -61,7 +60,10 @@ Write both regressions first and record the expected failure
 (cd apps/backend && go test -trimpath ./internal/agentctl/server/process -run 'GitStatusDetails|BareRoot' -count=1)
 (cd apps/backend && go test -trimpath ./internal/agentctl/server/api -run 'GitStatus|DetailsWait|MultiRepo' -count=1)
 (cd apps/backend && go test -trimpath -race ./internal/agentctl/server/process ./internal/agentctl/server/api -count=1)
-bash scripts/lint-go-changed <changed Go files>
+bash scripts/lint-go-changed \
+  apps/backend/internal/agentctl/server/process/workspace_git_status.go \
+  apps/backend/internal/agentctl/server/process/workspace_git_status_bare_root_test.go \
+  apps/backend/internal/agentctl/server/api/git_status_bare_root_test.go
 ```
 
 ## Files likely touched

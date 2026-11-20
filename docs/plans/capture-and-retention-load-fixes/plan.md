@@ -102,7 +102,7 @@ superseded when this PR merges.
 | Issue | Classification | Criteria | Design change |
 | --- | --- | --- | --- |
 | #5398 | 1: implementation violates an active criterion | AC-PLATFORM-WORKSPACE-GIT-STATUS-001.26 (non-Git parent folders are not failed repositories), .001.21 | [Workspace Git status](../../specs/platform/system-design/workspace-git-status.md): `details=wait` on a repository-less tracker returns the settled `repository_unavailable` result without an error-level log |
-| #5399 | 1: implementation violates an active criterion and the current design | AC-TASKS-TURN-CHANGES-003.1, .003.6 | [Turn changed files](../../specs/tasks/system-design/turn-changed-files.md): concurrent capture within the existing bound, 2-second persistence reserve, joined failure reporting |
+| #5399 | 1: implementation violates an active criterion and the current design | AC-TASKS-TURN-CHANGES-003.1, .003.6 | [Turn changed files](../../specs/tasks/system-design/turn-changed-files.md): per-execution concurrent capture within the existing bound, 6-second persistence reserve, joined failure reporting |
 | #5400 | 4: design incomplete | AC-PLATFORM-DELIVERY-RETENTION-005.1, .005.5, .005.6 | [Retention throughput](../../specs/platform/system-design/backend-agent-delivery-retention-throughput.md): ceiling recovers on committed batches; literal-predicate orphan count |
 
 No requirement text changes. No new requirement, ADR, schema, runtime flag,
@@ -147,10 +147,11 @@ Out of scope, with reasons:
 2. **Task 02 (#5399).** Split `captureStart` into a concurrent capture step and
    an acceptance step.
    - Derive a capture context whose deadline is the admission deadline minus
-     `turnChangeStartPersistenceReserve` (2 s). If the parent has no deadline,
+     `turnChangeStartPersistenceReserve` (6 s). If the parent has no deadline,
      use the parent unchanged.
    - Capture checkouts with at most `turnChangeStartCaptureConcurrency` (2)
-     concurrent `CaptureTurnCheckpoint` calls, which matches the design bound.
+     concurrent `CaptureTurnCheckpoint` calls per execution, shared across
+     overlapping admissions, which matches the design bound.
      Write each row into its checkout's index so row order is unchanged. Checkouts
      absent from scopes skip capture as they do today.
    - Call `AcceptTurnChangeSetStart` with the admission context, which still has
@@ -199,7 +200,20 @@ Each work order lists its exact commands. Package-wide, from the repository root
 (cd apps/backend && go test -trimpath ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/task/changes ./internal/task/deliveryretention ./internal/task/repository/sqlite)
 (cd apps/backend && go run -trimpath ./cmd/sqlguard ./internal)
 (cd apps/backend && go test -trimpath -race ./internal/persistence/storeconformance -count=1)
-bash scripts/lint-go-changed <changed Go files>
+bash scripts/lint-go-changed \
+  apps/backend/internal/agentctl/server/process/workspace_git_status.go \
+  apps/backend/internal/agentctl/server/process/workspace_git_status_bare_root_test.go \
+  apps/backend/internal/agentctl/server/api/git_status_bare_root_test.go \
+  apps/backend/internal/task/changes/coordinator.go \
+  apps/backend/internal/task/changes/coordinator_fakes_test.go \
+  apps/backend/internal/task/changes/coordinator_start_budget_test.go \
+  apps/backend/internal/task/changes/coordinator_start_capture.go \
+  apps/backend/internal/task/changes/start_capture_limiter.go \
+  apps/backend/internal/task/deliveryretention/worker.go \
+  apps/backend/internal/task/deliveryretention/worker_batches.go \
+  apps/backend/internal/task/deliveryretention/worker_ceiling_recovery_test.go \
+  apps/backend/internal/task/repository/sqlite/agent_delivery_retirement_worker.go \
+  apps/backend/internal/task/repository/sqlite/agent_delivery_unbound_count_plan_test.go
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -208,13 +222,14 @@ git diff --check
 ## Risks
 
 - **Concurrent capture load (Task 02).** Two concurrent captures add Git
-  pressure on an already loaded host. The design already bounds capture at 2
-  per executor, and the per-git-dir lock still serializes checkouts that share a
-  common Git directory.
-- **Reduced capture window (Task 02).** Capture now ends at 8 s instead of 10 s.
-  Concurrency more than offsets this for 2 or more checkouts. A single slow
-  checkout that needed 8-10 s now becomes unavailable instead of being captured,
-  but before this fix it always lost the whole set.
+  pressure on an already loaded host. The shared per-execution limiter bounds
+  capture at 2 across overlapping admissions, and the per-git-dir lock still
+  serializes checkouts that share a common Git directory.
+- **Reduced capture window (Task 02).** Capture now ends at 4 s instead of 10 s
+  to leave a 6-second persistence reserve. Two captures can improve throughput
+  for multiple checkouts, but a single checkout needing more than 4 s now
+  becomes unavailable instead of being captured. Before this fix, writer
+  contention could cause a late capture to lose the whole set.
 - **Ceiling oscillation (Task 03).** Under sustained writer contention, the
   ceiling can alternate between halving and doubling. Each failure is still
   bounded by the 250 ms batch budget and existing backoff, which is strictly
@@ -238,6 +253,9 @@ Additional passing checks:
 - SQLite delivery query and query-plan tests, plus the SQL guard.
 - Changed-Go lint, spec validation, documentation validation, and
   `git diff --check`.
+- PR-fixup regression checks for the shared per-execution start-capture bound,
+  SQLite persistence reserve, and the CI-discovered concurrent fake race; the
+  local PR documentation coverage evaluator also passed.
 
 The PostgreSQL-gated repository count test was not run because
 `KANDEV_TEST_POSTGRES_DSN` is not configured.

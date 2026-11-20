@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -46,6 +47,7 @@ func (r coordinatorTurnReaderMap) GetTurn(_ context.Context, turnID string) (*mo
 }
 
 type coordinatorPolicy struct {
+	mu     sync.Mutex
 	result turnchanges.CapturePolicy
 	err    error
 	userID string
@@ -53,6 +55,8 @@ type coordinatorPolicy struct {
 }
 
 func (p *coordinatorPolicy) ResolveTurnChangedFilesCapturePolicy(ctx context.Context) (turnchanges.CapturePolicy, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.calls++
 	identity, _ := authn.IdentityFromContext(ctx)
 	p.userID = identity.UserID
@@ -60,6 +64,7 @@ func (p *coordinatorPolicy) ResolveTurnChangedFilesCapturePolicy(ctx context.Con
 }
 
 type coordinatorCheckpointClient struct {
+	mu                  sync.Mutex
 	scopes              []string
 	scopeCalls          int
 	startCalls          int
@@ -84,34 +89,45 @@ type coordinatorCheckpointClient struct {
 }
 
 func (c *coordinatorCheckpointClient) TurnCheckpointRepositoryScopes(context.Context) ([]string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.scopeCalls++
 	if c.scopes == nil {
 		return []string{"frontend"}, nil
 	}
-	return c.scopes, nil
+	return append([]string(nil), c.scopes...), nil
 }
 
 func (c *coordinatorCheckpointClient) CaptureTurnCheckpoint(ctx context.Context, request turnchanges.CheckpointRequest) (*turnchanges.CheckpointResult, error) {
+	c.mu.Lock()
 	c.checkpointRequests = append(c.checkpointRequests, request)
 	if request.Boundary == turnchanges.CheckpointStart {
 		c.startCalls++
 	} else {
 		c.endCalls++
 	}
-	if request.Boundary == c.waitCaptureBoundary {
+	waitForCapture := request.Boundary == c.waitCaptureBoundary
+	provenance := c.provenance
+	var capturedAtValue time.Time
+	hasCapturedAt := c.capturedAt != nil
+	if hasCapturedAt {
+		capturedAtValue = *c.capturedAt
+	}
+	c.mu.Unlock()
+	if waitForCapture {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
 	capturedAt := time.Now().UTC()
-	if c.capturedAt != nil {
-		capturedAt = c.capturedAt.UTC()
+	if hasCapturedAt {
+		capturedAt = capturedAtValue.UTC()
 	}
 	result := &turnchanges.CheckpointResult{
 		ChangeSetID: request.ChangeSetID, CheckoutID: request.CheckoutID, Boundary: request.Boundary,
 		CommitOID: "commit-" + string(request.Boundary), TreeOID: "tree-" + string(request.Boundary),
 		HashAlgorithm: "sha1", ReachabilityRef: "refs/kandev/turn-changes/test", CapturedAt: capturedAt,
 	}
-	if c.provenance {
+	if provenance {
 		result.Provenance = &turnchanges.Provenance{
 			Version: turnchanges.ProvenanceVersion2, ChangeSetID: request.ChangeSetID,
 			CheckoutID: request.CheckoutID, Boundary: request.Boundary, HashAlgorithm: "sha1",

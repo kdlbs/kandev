@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	turnChangeStartPersistenceReserve = 2 * time.Second
+	turnChangeStartPersistenceReserve = 6 * time.Second
 	turnChangeStartCaptureConcurrency = 2
 )
 
@@ -83,7 +83,13 @@ func (c *Coordinator) captureStartRepositories(
 			defer workers.Done()
 			for index := range jobs {
 				checkout := admission.Checkouts[index]
+				release, acquired := c.startCaptureLimiter.acquire(captureCtx, admission.ExecutionID)
+				if !acquired {
+					repositories[index], captureFailures[index] = unavailableStartCapture(repositories[index], checkout.ID, captureCtx.Err())
+					continue
+				}
 				row, captureErr := c.captureStartCheckout(captureCtx, client, changeSet, checkout, repositories[index])
+				release()
 				repositories[index] = row
 				captureFailures[index] = captureErr
 			}

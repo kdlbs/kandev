@@ -71,6 +71,7 @@ type Coordinator struct {
 	logger                  *zap.Logger
 	boundaryGuard           TurnChangeOperationGuard
 	exportLimiter           *ExportLimiter
+	startCaptureLimiter     *startCaptureLimiter
 	summaryPublisher        TurnChangeExportSummaryPublisher
 	admissionTimeout        time.Duration
 	startPersistenceReserve time.Duration
@@ -130,7 +131,10 @@ func NewCoordinator(repo repository.TurnChangesRepository, turns TurnReader, pol
 	if now == nil {
 		now = time.Now
 	}
-	return &Coordinator{repository: repo, turns: turns, policies: policies, content: content, now: now, logger: zap.NewNop()}
+	return &Coordinator{
+		repository: repo, turns: turns, policies: policies, content: content, now: now,
+		logger: zap.NewNop(), startCaptureLimiter: newStartCaptureLimiter(),
+	}
 }
 
 // SetLogger configures structured logging for coordinator diagnostics.

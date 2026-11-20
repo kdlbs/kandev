@@ -13,7 +13,6 @@ import (
 	"github.com/kandev/kandev/internal/common/turnchanges"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
 )
@@ -91,6 +90,71 @@ waitForTwo:
 	require.Equal(t, []string{"checkout-1", "checkout-2", "checkout-3", "checkout-4"}, gotOrder)
 }
 
+// @covers AC-TASKS-TURN-CHANGES-003.1
+func TestCoordinatorStartCaptureConcurrencyIsSharedPerExecution(t *testing.T) {
+	firstAdmission := admissionWithStartCaptureCheckouts(2)
+	coordinator, repo := newSQLiteStartBudgetCoordinator(t, firstAdmission)
+	coordinator.admissionTimeout = 15 * time.Second
+	coordinator.startPersistenceReserve = 100 * time.Millisecond
+
+	secondAdmission := firstAdmission
+	secondAdmission.TurnID = "turn-2"
+	secondAdmission.StartupAttemptID = "startup-2"
+	require.NoError(t, repo.CreateTurn(context.Background(), &models.Turn{
+		ID: secondAdmission.TurnID, TaskID: secondAdmission.TaskID,
+		TaskSessionID: secondAdmission.SessionID, StartedAt: time.Now().UTC(),
+	}))
+	coordinator.turns = coordinatorTurnReaderMap{
+		firstAdmission.TurnID:  {ID: firstAdmission.TurnID, TaskID: firstAdmission.TaskID, TaskSessionID: firstAdmission.SessionID},
+		secondAdmission.TurnID: {ID: secondAdmission.TurnID, TaskID: secondAdmission.TaskID, TaskSessionID: secondAdmission.SessionID},
+	}
+
+	release := make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	client := newCoordinatorStartCaptureClient(firstAdmission)
+	client.started = make(chan string, 8)
+	client.release = release
+	firstResult := make(chan error, 1)
+	go func() { firstResult <- coordinator.Admit(context.Background(), firstAdmission, client) }()
+
+	for range 2 {
+		select {
+		case <-client.started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("first admission did not start both captures")
+		}
+	}
+
+	client.scopesStarted = make(chan struct{}, 1)
+	secondCtx, cancelSecond := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelSecond()
+	secondResult := make(chan error, 1)
+	go func() { secondResult <- coordinator.Admit(secondCtx, secondAdmission, client) }()
+	select {
+	case <-client.scopesStarted:
+	case err := <-secondResult:
+		t.Fatalf("second admission ended before registering repository scopes: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("second admission did not reach repository scope lookup")
+	}
+	require.ErrorIs(t, <-secondResult, context.DeadlineExceeded)
+	require.Equal(t, 2, client.maximumInFlight(), "overlapping admissions must share the execution capture bound")
+
+	close(release)
+	require.NoError(t, <-firstResult)
+}
+
+// @covers AC-TASKS-TURN-CHANGES-003.1, AC-TASKS-TURN-CHANGES-003.6
+func TestCoordinatorStartCapturePersistenceReserveExceedsSQLiteBusyTimeout(t *testing.T) {
+	require.Greater(t, turnChangeStartPersistenceReserve, 5*time.Second)
+}
+
 // @covers AC-TASKS-TURN-CHANGES-003.1, AC-TASKS-TURN-CHANGES-003.6
 func TestCoordinatorStartPersistFailureReportsCaptureFailures(t *testing.T) {
 	admission := admissionWithStartCaptureCheckouts(2)
@@ -121,6 +185,7 @@ type coordinatorStartCaptureClient struct {
 	blockedCheckout string
 	captureErrors   map[string]error
 	started         chan string
+	scopesStarted   chan struct{}
 	release         <-chan struct{}
 }
 
@@ -130,6 +195,17 @@ func newCoordinatorStartCaptureClient(admission Admission) *coordinatorStartCapt
 		scopes = append(scopes, checkout.RepositorySubpath)
 	}
 	return &coordinatorStartCaptureClient{coordinatorCheckpointClient: &coordinatorCheckpointClient{scopes: scopes}}
+}
+
+func (c *coordinatorStartCaptureClient) TurnCheckpointRepositoryScopes(ctx context.Context) ([]string, error) {
+	if c.scopesStarted != nil {
+		select {
+		case c.scopesStarted <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return c.coordinatorCheckpointClient.TurnCheckpointRepositoryScopes(ctx)
 }
 
 func (c *coordinatorStartCaptureClient) CaptureTurnCheckpoint(ctx context.Context, request turnchanges.CheckpointRequest) (*turnchanges.CheckpointResult, error) {
@@ -197,7 +273,7 @@ func admissionWithStartCaptureCheckouts(count int) Admission {
 	return admission
 }
 
-func newSQLiteStartBudgetCoordinator(t *testing.T, admission Admission) (*Coordinator, repository.TurnChangesRepository) {
+func newSQLiteStartBudgetCoordinator(t *testing.T, admission Admission) (*Coordinator, *sqlite.Repository) {
 	t.Helper()
 	ctx := context.Background()
 	conn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "start-budget.db"))
