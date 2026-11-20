@@ -98,8 +98,8 @@ func (r *sqliteRepository) refreshUneditedBuiltinPrompt(refresh builtinPromptRef
 	if _, err := r.db.Exec(r.db.Rebind(`
 		UPDATE utility_agents
 		SET prompt = ?
-		WHERE id = ? AND builtin = 1 AND prompt = ?
-	`), utilcfg.Get(refresh.promptFile), refresh.id, storedPrompt); err != nil {
+		WHERE id = ? AND builtin = ? AND prompt = ?
+	`), utilcfg.Get(refresh.promptFile), refresh.id, true, storedPrompt); err != nil {
 		return fmt.Errorf("refresh stored built-in prompt %s: %w", refresh.id, err)
 	}
 	return nil
