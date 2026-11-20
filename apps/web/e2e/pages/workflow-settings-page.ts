@@ -281,6 +281,36 @@ export class WorkflowSettingsPage {
     return this.page.getByTestId(`workflow-list-view-${view}`);
   }
 
+  /** Rendered edges of the sync status card, its separator, and the workflow list. */
+  async syncSectionAndListEdges(): Promise<{
+    card: { left: number; right: number; top: number };
+    separator: { left: number; right: number; bottom: number };
+    list: { left: number; right: number };
+    dividerTop: number;
+    toggleTop: number;
+  }> {
+    return this.page.getByTestId("workflow-sync-section").evaluate((sync) => {
+      const card = sync.firstElementChild;
+      const separator = sync.lastElementChild;
+      const list = document.querySelector('[data-testid="workflow-order-list"]');
+      const toggle = document.querySelector('[data-testid="workflow-list-view-toggle"]');
+      const content = sync.closest('[data-settings-group-content="true"]');
+      if (!card || !separator || !list || !toggle || !content) {
+        throw new Error("workflows section layout not found");
+      }
+      const c = card.getBoundingClientRect();
+      const sep = separator.getBoundingClientRect();
+      const l = list.getBoundingClientRect();
+      return {
+        card: { left: c.left, right: c.right, top: c.top },
+        separator: { left: sep.left, right: sep.right, bottom: sep.bottom },
+        list: { left: l.left, right: l.right },
+        dividerTop: content.getBoundingClientRect().top,
+        toggleTop: toggle.getBoundingClientRect().top,
+      };
+    });
+  }
+
   /** Vertical gap between the Workflows section divider and the list view control. */
   async listViewToggleGapBelowDivider(): Promise<number> {
     return this.page.getByTestId("workflow-list-view-toggle").evaluate((toggle) => {

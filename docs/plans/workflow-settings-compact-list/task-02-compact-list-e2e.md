@@ -104,3 +104,10 @@ the card and require visibility.
   RED at 1 px. The section children now have `pt-4`. The chromium compact, workflow settings, and
   sorting specs (24) and the mobile compact and workflow settings specs (8) pass. Screenshots with and
   without a sync config show 16 px spacing.
+- Test-phase feedback said the sync status card and separator were indented 32 px (`pl-8`, left over
+  from a removed drag-handle gutter) while still reaching the right edge. New desktop and mobile tests
+  require the card and separator edges to match the workflow list within 1 px. A first version passed
+  because it measured the padded wrapper; after switching to the rendered card and separator it was
+  RED at 32 px. Removing `pl-8` fixed it. Chromium compact, workflow settings, and GitLab sync specs
+  (26) pass, mobile compact and workflow settings specs (9) pass, and the sync-section unit tests (34)
+  pass.

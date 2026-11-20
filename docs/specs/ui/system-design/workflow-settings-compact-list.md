@@ -66,7 +66,9 @@ them.
 section content is unframed and starts at its divider, so
 `WorkspaceWorkflowsClient` wraps the section children in `pt-4`. The first
 block, either the sync status or this control, keeps 16 px of space below the
-divider. It is outside
+divider. The sync status card and its separator span the full list width, so
+they align with the workflow rows; drag handles sit inside the cards and need
+no left gutter. It is outside
 `WorkflowSectionActions`, so it also appears in the Improve Kandev workspace.
 It is a single-selection `ToggleGroup` with two items. Each has an icon and a
 visible localized label (`workflows:listViewCompact`,

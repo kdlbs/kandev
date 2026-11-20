@@ -51,4 +51,43 @@ test.describe("Workflow settings compact list on mobile", () => {
     await expect(page.listViewOption("detailed")).toHaveAttribute("data-state", "on");
     await expect(page.compactRow(seedData.workflowId)).toHaveCount(0);
   });
+
+  test("aligns the sync status block with the workflow list on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.configureGitLab(seedData.workspaceId);
+    const configResponse = await apiClient.rawRequest(
+      "POST",
+      `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+      {
+        provider: "gitlab",
+        project_path: "platform/kandev",
+        branch: "main",
+        path: ".kandev/workflows",
+        interval_seconds: 300,
+        poll_enabled: true,
+      },
+    );
+    expect(configResponse.ok).toBe(true);
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId, { listView: null });
+    await expect(testPage.getByTestId("workflow-sync-section")).toBeVisible();
+    await expect(page.compactRow(seedData.workflowId)).toBeVisible();
+
+    const edges = await page.syncSectionAndListEdges();
+    // The sync status card and its separator span the same width as the workflow rows.
+    for (const block of [edges.card, edges.separator]) {
+      expect(Math.abs(block.left - edges.list.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(block.right - edges.list.right)).toBeLessThanOrEqual(1);
+    }
+    // The card clears the section divider, and the view control clears the separator.
+    expect(edges.card.top - edges.dividerTop).toBeGreaterThanOrEqual(12);
+    expect(edges.toggleTop - edges.separator.bottom).toBeGreaterThanOrEqual(12);
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
+  });
 });
