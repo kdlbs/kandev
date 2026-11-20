@@ -1600,6 +1600,12 @@ func TestRewriteHTMLURLs_ExternalBaseSuppressesCapability(t *testing.T) {
 	mustContain(t, got, `style="background:url(bg.png)"`)
 	mustContain(t, got, `<base href="https://evil.example/">`)
 
+	document := `<!doctype html><html><base href="https://evil.example/"><body><img src="/logo.png"></body></html>`
+	gotDocument := string(rewriteHTMLURLs([]byte(document), proxyPrefix, "cap-document", ""))
+	if strings.Contains(gotDocument, "kandev_cap") || strings.Contains(gotDocument, "__kandev_runtime_shim.js") {
+		t.Fatalf("shim capability leaked under an external base:\n%s", gotDocument)
+	}
+
 	// Network-relative base is external too.
 	netRel := `<base href="//cdn.example/">` + `<img src="/logo.png">`
 	gotNet := string(rewriteHTMLURLs([]byte(netRel), proxyPrefix, "cap-base2", ""))
@@ -1666,7 +1672,7 @@ func TestRewriteHTMLURLs_ExternalBaseSrcdocOwnBase(t *testing.T) {
 	in := `<base href="https://evil.example/"><iframe srcdoc="&lt;base href=&quot;/cdn/&quot;&gt;&lt;img src=&quot;a.png&quot;&gt;&lt;img src=&quot;/logo.png&quot;&gt;"></iframe>`
 	got := string(rewriteHTMLURLs([]byte(in), proxyPrefix, "cap-sd", ""))
 
-	mustContain(t, got, `srcdoc="&lt;base href=&#34;/port-proxy/abc/3001/cdn/&#34;&gt;&lt;img src=&#34;a.png?kandev_cap=cap-sd&#34;&gt;&lt;img src=&#34;/port-proxy/abc/3001/logo.png?kandev_cap=cap-sd&#34;&gt;"`)
+	mustContain(t, got, `srcdoc="&lt;script src=&#34;/port-proxy/abc/3001/__kandev_runtime_shim.js?kandev_cap=cap-sd&#34;&gt;&lt;/script&gt;&lt;base href=&#34;/port-proxy/abc/3001/cdn/&#34;&gt;&lt;img src=&#34;a.png?kandev_cap=cap-sd&#34;&gt;&lt;img src=&#34;/port-proxy/abc/3001/logo.png?kandev_cap=cap-sd&#34;&gt;"`)
 }
 
 // imagesrcset is observed at runtime: it is in the MutationObserver attribute

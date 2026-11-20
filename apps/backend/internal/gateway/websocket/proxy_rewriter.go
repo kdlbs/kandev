@@ -672,6 +672,29 @@ func (s *htmlRewriteState) applyBase(token *html.Token) {
 	}
 }
 
+// discoverBase records the effective base before an early shim can emit a
+// capability-bearing script URL into a document with an external base.
+func (s *htmlRewriteState) discoverBase(body []byte) {
+	tok := html.NewTokenizer(bytes.NewReader(body))
+	for {
+		tokenType := tok.Next()
+		if tokenType == html.ErrorToken {
+			return
+		}
+		if tokenType != html.StartTagToken && tokenType != html.SelfClosingTagToken {
+			continue
+		}
+		token := tok.Token()
+		if token.Data != "base" {
+			continue
+		}
+		s.applyBase(&token)
+		if s.baseSet {
+			return
+		}
+	}
+}
+
 // onStartTag emits the (URL-rewritten) start tag and updates raw-text
 // element tracking. It injects the runtime shim after `<head>`, or before
 // document content when the browser must infer the head.
@@ -713,7 +736,7 @@ func isImpliedHeadContent(tagName string) bool {
 }
 
 func (s *htmlRewriteState) injectShim() {
-	if s.shimInjected {
+	if s.shimInjected || (s.baseSet && s.basePath == "") {
 		return
 	}
 	s.out.WriteString(s.shim)
@@ -778,6 +801,7 @@ func rewriteHTMLURLsAtDepthWithBase(body []byte, prefix, capability, nonce strin
 	var out bytes.Buffer
 	out.Grow(len(body) + 256 + len(runtimeShimTemplate))
 	s := &htmlRewriteState{out: &out, prefix: prefix, capability: capability, shim: runtimeShimTag(prefix, capability, nonce), nonce: nonce, depth: depth, basePath: basePath}
+	s.discoverBase(body)
 	for {
 		tt := tok.Next()
 		if tt == html.ErrorToken {
