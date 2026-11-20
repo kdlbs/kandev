@@ -25,6 +25,9 @@ func pressureTestManager(t *testing.T) (*Manager, *journal.Journal) {
 		t.Fatal(err)
 	}
 	m.deliveryJournal = j
+	// The inference owner still holds the closed original journal; these
+	// delivery-pressure tests do not exercise inference ownership.
+	m.inferenceOwner = nil
 	m.status.Store(StatusRunning)
 	t.Cleanup(func() {
 		m.CloseAdmission()

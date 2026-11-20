@@ -238,8 +238,12 @@ func TestManager_StartShellInheritsAgentEnvironment(t *testing.T) {
 	if err := mgr.StartShell(); err != nil {
 		t.Fatalf("StartShell() error = %v", err)
 	}
-	t.Cleanup(func() { _ = mgr.shell.Stop() })
-	cfg := mgr.shell.Config()
+	session := mgr.Shell()
+	if session == nil {
+		t.Fatal("shell was not started")
+	}
+	t.Cleanup(func() { _ = session.Stop() })
+	cfg := session.Config()
 	if got := cfg.Env["KANDEV_GITHUB_CREDENTIAL_BROKER_URL"]; got != "http://127.0.0.1:9876" {
 		t.Fatalf("shell broker env = %q, want managed broker URL", got)
 	}

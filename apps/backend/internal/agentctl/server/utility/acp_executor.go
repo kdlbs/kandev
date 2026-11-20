@@ -123,7 +123,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		return &PromptResponse{Success: false, Error: fmt.Sprintf("stdout pipe: %v", err)}, nil
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startInferenceCommand(ctx, cmd); err != nil {
 		return &PromptResponse{Success: false, Error: utilityStartError(cfg, err)}, nil
 	}
 	lifecycle, err := installACPCommandLifecycle(cmd)
@@ -307,6 +307,9 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	}
 
 	// Send prompt and wait for completion
+	if err := markInferenceDispatch(ctx); err != nil {
+		return "", fmt.Errorf("persist ACP prompt dispatch: %w", err)
+	}
 	_, err = conn.Prompt(ctx, acp.PromptRequest{
 		SessionId: sessionID,
 		Prompt:    []acp.ContentBlock{acp.TextBlock(prompt)},

@@ -6,13 +6,13 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/hostutility"
-	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -230,15 +230,23 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 	if !ok {
 		return
 	}
-	callID, err := h.controller.CreateCall(ctx, req.UtilityAgentID, req.SessionID, prepared.ResolvedPrompt, prepared.Model, prepared.AgentProfileID, prepared.ExecutionProfileID)
+	defer h.controller.ReleasePromptCapacity(prepared)
+	callID := prepared.CallID
+	var err error
+	if callID == "" {
+		callID, err = h.controller.CreateCall(ctx, req.UtilityAgentID, req.SessionID, prepared.ResolvedPrompt, prepared.Model, prepared.AgentProfileID, prepared.ExecutionProfileID)
+	}
 	if err != nil {
 		h.logger.Error("failed to create call record", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{Error: "failed to create call record"})
 		return
 	}
-	ctx = agentruntime.WithInferenceIdentity(ctx, agentruntime.InferenceIdentity{
-		SessionID: req.SessionID, LogicalProfileID: prepared.AgentProfileID, CallID: callID, OwnerKind: "utility",
-	})
+	ctx, err = h.controller.CallInferenceContext(ctx, callID)
+	if err != nil {
+		h.settleFailedCall(ctx, callID, err, 0)
+		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{CallID: callID, Error: "failed to verify utility call"})
+		return
+	}
 	if req.SessionID == "" {
 		h.executeSessionless(c, ctx, prepared, callID)
 		return
@@ -257,6 +265,10 @@ func (h *Handlers) preparePromptRequest(c *gin.Context, ctx context.Context, req
 		return nil, false
 	}
 	if prepared.AgentCLI == "" {
+		h.controller.ReleasePromptCapacity(prepared)
+		if prepared.CallID != "" {
+			h.settleFailedCall(ctx, prepared.CallID, lifecycle.ErrInferenceAgentIDRequired, 0)
+		}
 		h.logger.Warn("execute prompt: missing agent_id")
 		c.JSON(http.StatusBadRequest, dto.ExecutePromptResponse{Error: lifecycle.ErrInferenceAgentIDRequired.Error()})
 		return nil, false
@@ -380,12 +392,21 @@ func hostPromptResponse(result *hostutility.PromptResult) *agentctlutil.PromptRe
 	}
 }
 
+// Both physical paths use the same bounded route, deadline proof and success
+// semantics. A native-owned call persists a changed candidate before it runs;
+// the legacy path keeps its historical post-success attribution timing.
 func (h *Handlers) executeSessionProfilePrompt(ctx context.Context, executor profileInferenceExecutor, sessionID string, prepared *service.PromptRequest, callID string) (*agentctlutil.PromptResponse, error) {
 	initial := prepared.ExecutionProfileID
-	response, err := service.ExecuteProfilePrompt(ctx, h.controller, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
+	nativeOwner := strings.HasPrefix(prepared.RouteSessionID, "native:utility-call:")
+	response, err := h.controller.ExecuteProfilePrompt(ctx, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
+		if nativeOwner && id != initial {
+			if err := h.controller.SetCallExecutionAttribution(attempt, callID, id, prepared.Model); err != nil {
+				return nil, err
+			}
+		}
 		return executor.ExecuteInferenceProfilePrompt(attempt, sessionID, id, prepared.ResolvedPrompt)
 	})
-	if err == nil && response != nil && response.Success && prepared.ExecutionProfileID != initial {
+	if !nativeOwner && err == nil && response != nil && response.Success && prepared.ExecutionProfileID != initial {
 		writeCtx, cancel := callSettlementContext(ctx)
 		defer cancel()
 		if saveErr := h.controller.SetCallExecutionProfile(writeCtx, callID, prepared.ExecutionProfileID); saveErr != nil {
@@ -397,7 +418,13 @@ func (h *Handlers) executeSessionProfilePrompt(ctx context.Context, executor pro
 
 func (h *Handlers) executeSessionlessProfilePrompt(ctx context.Context, executor profileHostUtilityExecutor, prepared *service.PromptRequest, callID string) (*hostutility.PromptResult, error) {
 	initial := prepared.ExecutionProfileID
-	response, err := service.ExecuteProfilePrompt(ctx, h.controller, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
+	nativeOwner := strings.HasPrefix(prepared.RouteSessionID, "native:utility-call:")
+	response, err := h.controller.ExecuteProfilePrompt(ctx, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
+		if nativeOwner && id != initial {
+			if err := h.controller.SetCallExecutionAttribution(attempt, callID, id, prepared.Model); err != nil {
+				return nil, err
+			}
+		}
 		result, callErr := executor.ExecuteProfilePrompt(attempt, id, prepared.ResolvedPrompt)
 		if result == nil {
 			return nil, callErr
@@ -407,7 +434,7 @@ func (h *Handlers) executeSessionlessProfilePrompt(ctx context.Context, executor
 	if response == nil {
 		return nil, err
 	}
-	if err == nil && response.Success && prepared.ExecutionProfileID != initial {
+	if !nativeOwner && err == nil && response.Success && prepared.ExecutionProfileID != initial {
 		writeCtx, cancel := callSettlementContext(ctx)
 		defer cancel()
 		if saveErr := h.controller.SetCallExecutionProfile(writeCtx, callID, prepared.ExecutionProfileID); saveErr != nil {
