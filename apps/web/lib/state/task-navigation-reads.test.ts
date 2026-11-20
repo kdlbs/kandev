@@ -15,6 +15,7 @@ import {
   identity,
 } from "./task-navigation-reads.test-helpers";
 import { getTaskSessionReads, invalidateTaskSessionMembership } from "./task-session-reads";
+import { buildTaskNavigationShellData } from "@/lib/ssr/session-page-state";
 
 const apiMocks = vi.hoisted(() => ({
   fetchTask: vi.fn(),
@@ -57,6 +58,48 @@ function refreshedTask() {
     title: "Refreshed task",
   } as TaskNavigationIdentity["task"];
 }
+async function expectReconciledPrimary(scenario: "changed" | "unchanged" | "retired" | "explicit") {
+  const store = makeStore();
+  const task = deferred<TaskNavigationIdentity["task"]>();
+  const previousPrimary = scenario !== "retired";
+  const old = {
+    sessions: [
+      { id: "previous", task_id: ACTIVE_TASK_ID, is_primary: previousPrimary },
+      { id: "survivor", task_id: ACTIVE_TASK_ID, is_primary: !previousPrimary },
+    ],
+    total: 2,
+  };
+  const fresh = {
+    sessions: [
+      { id: "previous", task_id: ACTIVE_TASK_ID, is_primary: false },
+      { id: "survivor", task_id: ACTIVE_TASK_ID, is_primary: true },
+    ],
+    total: 2,
+  };
+  apiMocks.fetchTask.mockReturnValue(task.promise);
+  apiMocks.listTaskSessions.mockResolvedValueOnce(old).mockResolvedValue(fresh);
+  const read = readTaskNavigationIdentity(store, ACTIVE_TASK_ID);
+  await vi.waitFor(() => expect(apiMocks.listTaskSessions).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(getTaskSessionReads(store).isReading(ACTIVE_TASK_ID)).toBe(false));
+  const dtoPrimaries = {
+    retired: "removed",
+    unchanged: "previous",
+    changed: "survivor",
+    explicit: "survivor",
+  };
+  const primary = dtoPrimaries[scenario];
+  task.resolve({ ...refreshedTask(), primary_session_id: primary } as never);
+  const accepted = await read;
+  const requested = scenario === "explicit" ? "previous" : undefined;
+  const shell = buildTaskNavigationShellData(accepted, requested);
+  expect(shell.sessionId).toBe(
+    scenario === "explicit" || scenario === "unchanged" ? "previous" : "survivor",
+  );
+  expect(accepted.allSessionsResponse).toEqual(
+    scenario === "changed" || scenario === "explicit" ? fresh : old,
+  );
+}
+
 describe("task navigation canonical overview refresh", () => {
   afterEach(() => {
     apiMocks.fetchTask.mockReset();
@@ -93,6 +136,11 @@ describe("task navigation canonical overview refresh", () => {
       await expect(read).resolves.toMatchObject({ allSessionsResponse: fresh });
       expect(apiMocks.listTaskSessions).toHaveBeenCalledTimes(2);
     },
+  );
+
+  it.each(["changed", "unchanged", "retired", "explicit"] as const)(
+    "reconciles %s primary observations before choosing the first readable session",
+    expectReconciledPrimary,
   );
 
   it("repairs shared placement after a move missed before websocket connection", async () => {

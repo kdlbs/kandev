@@ -17,10 +17,12 @@ import {
 import {
   getTaskSessionReads,
   readTaskNavigationMembership,
+  reconcileTaskNavigationMembership,
   type TaskSessionReads,
 } from "@/lib/state/task-session-reads";
 import type { Task, TaskSessionsResponse } from "@/lib/types/http";
 import type { AppState } from "./store";
+import { captureTaskNavigationSelection } from "./task-navigation-selection";
 import type { HydrationOptions } from "./hydration/hydrator";
 
 export type TaskNavigationIdentity = {
@@ -461,11 +463,13 @@ async function fetchTaskNavigationIdentity(
       taskRequest,
       readTaskNavigationMembership(sessionReads, taskId, signal, scopeIsCurrent),
     ]);
-    let membership = firstMembership;
-    while (!sessionReads.isCurrent(taskId, membership.membershipGeneration)) {
-      if (signal.aborted || !scopeIsCurrent()) throw abortError();
-      membership = await readTaskNavigationMembership(sessionReads, taskId, signal, scopeIsCurrent);
-    }
+    const membership = await reconcileTaskNavigationMembership(
+      task,
+      firstMembership,
+      sessionReads,
+      signal,
+      scopeIsCurrent,
+    );
     if (signal.aborted || !scopeIsCurrent()) throw abortError();
     if (isCurrentTaskDetailRead(store, taskId)) {
       store.getState().retainTaskOverviews("detail", [toKanbanTask(task)], overviewReadId);
@@ -550,14 +554,11 @@ export function beginTaskNavigation(
   ) {
     return previous.context;
   }
-  const state = store.getState();
   const context = Object.freeze({
     ownerToken: readOwner.token,
     identity: readOwner.identity,
     generation,
-    selectionAtStart: {
-      navigationRevision: state.taskRemoval.navigationRevision,
-    },
+    selectionAtStart: captureTaskNavigationSelection(store),
   });
   readOwner.navigationContext = { navigationOwner: owner, routeKey, context };
   return context;

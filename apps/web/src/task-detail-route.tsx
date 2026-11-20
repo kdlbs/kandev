@@ -134,6 +134,7 @@ export function TaskDetailRoute({
   return (
     <TaskDetailRouteBody
       route={route}
+      requestedSessionId={sessionId}
       layout={layout}
       simple={simple}
       mode={mode}
@@ -154,6 +155,7 @@ function TaskDetailRouteBody({
   mode,
   routeDataReady,
   onRouteHydrated,
+  requestedSessionId,
 }: {
   route: TaskDetailRouteView;
   layout?: string | null;
@@ -161,6 +163,7 @@ function TaskDetailRouteBody({
   mode?: string;
   routeDataReady: boolean;
   onRouteHydrated?: () => void;
+  requestedSessionId?: string;
 }) {
   const activeSessionId = useAppStore((state) => {
     const owner = route.navigationContext?.selectionAtStart;
@@ -181,6 +184,11 @@ function TaskDetailRouteBody({
           taskSessionHydrationEpochsAtRequestStart={route.hydrationEpochsAtRequestStart}
           turnWindowObservationsAtRequestStart={route.turnWindowObservationsAtRequestStart}
           taskSelectionAtRequestStart={route.navigationContext?.selectionAtStart}
+          requestedSessionId={
+            route.currentRouteStatus === "loaded" && route.displayedRouteKey === route.routeKey
+              ? requestedSessionId
+              : undefined
+          }
           onHydrated={onRouteHydrated}
         />
       ) : null}

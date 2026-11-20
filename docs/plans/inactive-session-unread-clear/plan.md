@@ -688,5 +688,14 @@ fix. It is separate from the five design-only rounds above.
   passed on the fresh R20 frontend. C is displayed/read, B retains its null
   cursor and receives no mark-read. Strict checks and causal receipts are in
   Task 02. Independent review remains open; round 21 is next.
-- Completed rounds: 20. Consecutive clean: 0. Stop after three consecutive
+- Round 21: Sol child `a011e8ad-0f88-467b-84b2-b92c4b87748b` reviewed
+  `e7a64f2f3d`. Two P2s: an old removal receipt vetoed a later explicit
+  conversation link; independently fetched DTO/membership primaries could
+  disagree and read the former primary. Both were reproduced through real
+  route consumers and authentic gated browser requests. Corrections admit
+  validated explicit links against entry-time ownership and reconcile surviving
+  primary conflicts before shell selection. Newer pins, workflow recipients
+  and removal owners retain precedence. Execution receipts and exact replay
+  commands are in Task 02. Independent review remains open; round 22 is next.
+- Completed rounds: 21. Consecutive clean: 0. Stop after three consecutive
   clean rounds or 50 rounds. Earlier loops do not count.

@@ -3,6 +3,7 @@ import { mapSidebarWorkspaces } from "../slices/ui/sidebar-workspace-state";
 import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
 import type { KanbanState } from "../slices/kanban/types";
+import type { TaskNavigationSelectionOwner } from "../task-navigation-selection";
 import type {
   ActiveTurnWindowObservation,
   TaskSessionHydrationEpoch,
@@ -66,9 +67,7 @@ export type HydrationOptions = {
   /** Session generations captured when the hydration request started. */
   taskSessionHydrationEpochsAtRequestStart?: Readonly<Record<string, TaskSessionHydrationEpoch>>;
   /** Route identity may hydrate data, but not replace a newer selection owner. */
-  taskSelectionAtRequestStart?: {
-    navigationRevision: number;
-  };
+  taskSelectionAtRequestStart?: TaskNavigationSelectionOwner;
   preserveTaskSelection?: boolean;
 };
 

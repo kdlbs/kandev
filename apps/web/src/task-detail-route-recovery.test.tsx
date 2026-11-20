@@ -20,6 +20,7 @@ import { listTaskSessions } from "@/lib/api/domains/session-api";
 import type * as SessionApi from "@/lib/api/domains/session-api";
 import { registerTaskSessionHandlers } from "@/lib/ws/handlers/agent-session";
 import { commitWorkflowRecipient, taskRouteSelectionState } from "./task-detail-route.test-helpers";
+import { captureTaskNavigationSelection } from "@/lib/state/task-navigation-selection";
 
 const TASK_ID = taskId("task-recovery");
 const SHELL_TEST_ID = "kanban-task-shell";
@@ -186,14 +187,11 @@ function createNavigationHarness(loader: (taskId: string) => Promise<TaskNavigat
       }
       currentOwner = owner;
       currentRouteKey = routeKey;
-      const state = store.getState();
       currentContext = {
         ownerToken: {},
         identity: "test-scope",
         generation,
-        selectionAtStart: {
-          navigationRevision: state.taskRemoval.navigationRevision,
-        },
+        selectionAtStart: captureTaskNavigationSelection(store),
       };
       return currentContext;
     },

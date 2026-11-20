@@ -9,6 +9,7 @@ import type {
 import { useAppStoreApi } from "@/components/state-provider";
 import type { HydrationOptions } from "@/lib/state/hydration/hydrator";
 import { getProvenRemovalPredecessor } from "@/lib/state/session-removal-handoff";
+import { admitExplicitTaskNavigationSelection } from "@/lib/state/task-navigation-selection";
 
 type StateHydratorProps = {
   initialState: Partial<AppState>;
@@ -18,6 +19,7 @@ type StateHydratorProps = {
   taskSessionHydrationEpochsAtRequestStart?: Readonly<Record<string, TaskSessionHydrationEpoch>>;
   turnWindowObservationsAtRequestStart?: Readonly<Record<string, ActiveTurnWindowObservation>>;
   taskSelectionAtRequestStart?: HydrationOptions["taskSelectionAtRequestStart"];
+  requestedSessionId?: string;
   onHydrated?: () => void;
 };
 
@@ -27,6 +29,7 @@ export function StateHydrator({
   taskSessionHydrationEpochsAtRequestStart,
   turnWindowObservationsAtRequestStart,
   taskSelectionAtRequestStart,
+  requestedSessionId,
   onHydrated,
 }: StateHydratorProps) {
   const store = useAppStoreApi();
@@ -38,6 +41,12 @@ export function StateHydrator({
   // decide whether to fetch data.
   useLayoutEffect(() => {
     if (Object.keys(initialState).length) {
+      admitExplicitTaskNavigationSelection(
+        store,
+        initialState,
+        requestedSessionId,
+        taskSelectionAtRequestStart,
+      );
       const taskId = initialState.tasks?.activeTaskId;
       const preserveTaskSelection =
         !!taskSelectionAtRequestStart &&
@@ -59,6 +68,7 @@ export function StateHydrator({
     taskSessionHydrationEpochsAtRequestStart,
     turnWindowObservationsAtRequestStart,
     taskSelectionAtRequestStart,
+    requestedSessionId,
   ]);
 
   return null;

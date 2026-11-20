@@ -30,6 +30,7 @@ import {
   waitForTaskUnreadSummary,
 } from "../../helpers/unread-divider";
 import { waitForActiveTaskSession, waitForTaskSessionsSettled } from "../../helpers/session-store";
+import { expectConversationRouteAfterRemoval } from "../../helpers/session-route-admission";
 
 /** Opens the phone task switcher and returns the row for `title`. */
 async function openTaskSwitcherRow(page: Page, title: string): Promise<Locator> {
@@ -58,6 +59,28 @@ test.describe("Mobile task unread dot", () => {
 
   test.afterEach(async ({ apiClient }) => {
     await apiClient.saveUserSettings(baselineSettings);
+  });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.17
+  test("opens an explicit conversation after another client removes the selected session", async ({
+    testPage,
+    desktopTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { settings } = await apiClient.getUserSettings();
+    await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
+    try {
+      await expectConversationRouteAfterRemoval(testPage, desktopTestPage, apiClient, seedData);
+      await testPage.screenshot({
+        path: test.info().outputPath("phone-explicit-route-after-removal.png"),
+      });
+    } finally {
+      await apiClient.saveUserSettings({
+        prevent_auto_start_agent_on_open: settings.prevent_auto_start_agent_on_open === true,
+        enable_preview_on_click: settings.enable_preview_on_click === true,
+      });
+    }
   });
 
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.1

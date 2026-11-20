@@ -1,5 +1,5 @@
 import type { AppState } from "@/lib/state/store";
-import type { TaskSessionsResponse } from "@/lib/types/http";
+import type { Task, TaskSessionsResponse } from "@/lib/types/http";
 import type { StoreApi } from "zustand";
 import { SharedResourceReads, storeReadScopeIdentity } from "./shared-resource-reads";
 import { listTaskSessions } from "@/lib/api";
@@ -71,4 +71,38 @@ export async function readTaskNavigationMembership(
     }
   }
   throw abortError();
+}
+
+/** A surviving DTO primary that disagrees with membership needs a later observation. */
+export async function reconcileTaskNavigationMembership(
+  task: Task,
+  initial: Awaited<ReturnType<typeof readTaskNavigationMembership>>,
+  reads: TaskSessionReads,
+  signal: AbortSignal,
+  scopeIsCurrent: () => boolean,
+) {
+  if (signal.aborted || !scopeIsCurrent()) throw abortError();
+  let membership = initial;
+  const sessions = membership.allSessionsResponse.sessions;
+  const dtoPrimary = sessions.find(
+    (session) => session.task_id === task.id && session.id === task.primary_session_id,
+  );
+  if (
+    dtoPrimary &&
+    (dtoPrimary.is_primary === false ||
+      sessions.some(
+        (session) =>
+          session.task_id === task.id &&
+          session.is_primary === true &&
+          session.id !== dtoPrimary.id,
+      ))
+  ) {
+    reads.invalidate(task.id);
+    membership = await readTaskNavigationMembership(reads, task.id, signal, scopeIsCurrent);
+  }
+  while (!reads.isCurrent(task.id, membership.membershipGeneration)) {
+    if (signal.aborted || !scopeIsCurrent()) throw abortError();
+    membership = await readTaskNavigationMembership(reads, task.id, signal, scopeIsCurrent);
+  }
+  return membership;
 }

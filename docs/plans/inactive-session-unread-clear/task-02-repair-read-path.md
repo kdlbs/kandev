@@ -2958,3 +2958,130 @@ certificate or proof of the deleted historical incident's exact trigger.
 Authoritative list convergence is not isolated cursor-event delivery evidence;
 seeded RUNNING rows are not live executions. Round 20 corrections are ready
 for selective delivery and independent Sol round 21; the loop remains open.
+
+### Production-fix review round 21 remediation
+
+Sol child `a011e8ad-0f88-467b-84b2-b92c4b87748b` reviewed
+`e7a64f2f3d`. Two P2s concern initial route admission, not unread predicates:
+
+1. A settled removal receipt for C or an empty slot vetoed a later valid
+   same-task Command Panel conversation link to B.
+2. Independently fetched membership could still name A primary after a later
+   task DTO named C, selecting and reading the former primary on a task-only route.
+
+Corrections:
+
+- Capture route-entry navigation, task-scoped workflow and removal ownership.
+  A validated explicit session link supersedes only entry-time ownership, not
+  a later pin, workflow recipient or removal. Missing/foreign/deleted recipients
+  do not gain admission. A background task's workflow does not own this route.
+- On contradictory surviving primary identities, obtain a later scoped
+  membership observation before readable shell selection. Keep generation
+  validation through admission, including membership fulfilled before the
+  task leg; do not add generic retries or reinterpret timestamps as ordering.
+- Exercise the real route hydrator/page synchronizer and real removal handlers.
+  Existing route tests delegate to the real hydrator rather than duplicating it.
+  Browser cases use the shipped Command Panel and second-client Preview actions,
+  with authentic HTTP dispatch/response gates, not fabricated response data.
+
+Causal evidence in `~/.cache/tmp/unread-verification.zWhGjx`:
+
+- `r21-red.log`: four behavioral failures and 16 passing controls. Explicit
+  links remained blocked after both proven-C and empty-slot removal; the
+  conflicting snapshot cases retained old membership/selection.
+- `r21-owner-red.log`: a background workflow incorrectly vetoed the explicit
+  route (one failure, six passing controls). Ownership was then scoped to
+  the matching task instead of an unrelated global request counter.
+- `r21-ui-red-summary.log`, raw
+  `r21-quiet/kandev-run.e2e.WmLaPgnb.log`: on the retained R20 bundle,
+  the real conversation-result URL changed to B but active selection stayed C.
+  The second case did not execute because worker reinitialization hit the
+  existing profile-cleanup DELETE 404; that is infrastructure, not product RED.
+- Isolated previously unexecuted primary-skew case:
+  `r21-primary-red-summary.log`, raw
+  `r21-quiet/kandev-run.e2e.tXBSZJ2l.log`. Authentic old membership and
+  later primary-C task read produced an unwanted persisted A cursor, even
+  though C eventually appeared. The null-A-cursor assertion caught this.
+
+Unit evidence and cache-snapshot replay:
+
+- `r21-units-final.log`: 29 affected files, 360 passing cases, before the
+  lint-budget extraction. `r21-owner-final.log`: the two extracted owner files,
+  23 passing cases afterward. The route fixture now uses branded ID constructors
+  instead of an unchecked task-object assertion.
+- Positive explicit links cover proven-C and null receipts. Negative controls
+  cover a newer pin, committed workflow, later removal and unavailable session;
+  an unrelated task workflow does not veto a valid link.
+- Primary-pair controls cover conflicting, unchanged, retired DTO-primary and
+  explicit non-primary requests; fulfilled old membership is not ordering proof.
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run \
+  lib/state/task-navigation-reads.test.ts \
+  lib/state/task-navigation-reads-retry.test.ts \
+  lib/state/task-navigation-reads-budget.test.ts \
+  lib/state/task-session-reads.test.ts \
+  lib/state/hydration \
+  lib/ssr/session-page-state.test.ts \
+  lib/ssr/session-page-enrichment-membership.test.ts \
+  lib/ssr/session-page-navigation-bounded.test.ts \
+  lib/ssr/session-page-model-hydration.test.ts \
+  src/task-detail-route-recovery.test.tsx \
+  src/task-detail-route.test.tsx \
+  src/task-detail-route-session-selection.test.tsx \
+  components/task/task-page-session-ownership.test.tsx \
+  components/task/task-page-content \
+  lib/state/workflow-session-focus.test.ts \
+  lib/state/slices/kanban/kanban-slice.test.ts \
+  hooks/domains/kanban/use-workflow-step-move.test.ts \
+  components/task/dockview-session-tabs.hook.test.tsx \
+  src/task-detail-route-explicit-selection.test.tsx
+```
+
+Rendered verification uses the fresh R21 frontend (`r21-build.log`, exit 0)
+and retained R02 backend/plugin, one worker and no retries. The frontend did
+not change after this build; the later adjustment is E2E setup only.
+
+- Initial full Chromium run: `r21-desktop-final-summary.log`, raw
+  `r21-quiet/kandev-run.e2e.jLCgZQ5c.log`: 24 passed, one failed before
+  explicit-route admission. The Command Panel screenshot reported conversation
+  indexing in progress, so its result was not available. The independently
+  gated primary-swap case passed and left A's cursor null.
+- Follow the existing `mobile-conversation-search.spec.ts` setup pattern:
+  wait for the real conversation API to report ready and return the exact
+  seeded session/message, then exercise the palette once. This is fixture
+  readiness, not a production retry, a fabricated search result or weaker
+  route/cursor assertions. Only the affected desktop case needs rerunning;
+  the previously unexecuted phone file runs in full.
+
+```bash
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts -- --workers=1 --retries=0 \
+  --grep "opens a Command Panel conversation after a settled same-task removal"
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+Observed results:
+
+- `r21-command-final-summary.log`, raw
+  `r21-quiet/kandev-run.e2e.NiDf9WxF.log`: corrected desktop owner case
+  passed (24.3s). Together with the earlier 24 this covers the selected 25
+  desktop cases, not one fresh 25-green run.
+- `r21-phone-final-summary.log`, raw
+  `r21-quiet/kandev-run.e2e.MoRfDGj8.log`: all nine phone cases passed
+  (2.3m).
+- Inspected the saved desktop conversation, primary-snapshot and phone
+  conversation captures. The explicit B transcript is shown on both surfaces;
+  the independent primary-swap surface shows C. Exact persisted cursor and
+  no-unintended-sibling-read assertions passed without reloading.
+- `r21-lint-final.log`, `r21-format-final-check.log` and
+  `r21-typecheck-final.log`: exit 0 after the test-only indexing precondition.
+  `r21-build.log`: fresh production frontend build, exit 0.
+
+All setup/build/dependency/output paths remain on the cache drive. No live-user
+browser or data writes, broad-suite/live-NATS certification, historical-trigger
+proof, isolated cursor-event claim from list convergence, or live-execution
+claim from seeded RUNNING rows. This execution checkpoint precedes selective
+delivery and independent Sol round 22; parent owns that handoff.

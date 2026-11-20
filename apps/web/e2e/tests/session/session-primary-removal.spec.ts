@@ -30,6 +30,10 @@ import {
   newestStoredMessageId,
 } from "../../helpers/unread-divider";
 import type { DockviewApi } from "dockview-react";
+import {
+  expectConversationRouteAfterRemoval,
+  expectPrimarySwapDuringRouteAdmission,
+} from "../../helpers/session-route-admission";
 
 // Following confirmed removal must not require a full document reload.
 test("follows a stopped primary deleted from another client without reloading", async ({
@@ -188,6 +192,28 @@ test.describe("owned removal transcript visibility", () => {
       prevent_auto_start_agent_on_open: preventAutoStart,
       enable_preview_on_click: previewEnabled,
     });
+  });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.17
+  test("opens a Command Panel conversation after a settled same-task removal", async ({
+    testPage,
+    desktopTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    await expectConversationRouteAfterRemoval(testPage, desktopTestPage, apiClient, seedData);
+    await testPage.screenshot({ path: test.info().outputPath("explicit-route-after-removal.png") });
+  });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.17
+  test("uses the post-swap primary across independent initial HTTP legs", async ({
+    testPage,
+    desktopTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    await expectPrimarySwapDuringRouteAdmission(testPage, desktopTestPage, apiClient, seedData);
+    await testPage.screenshot({ path: test.info().outputPath("primary-snapshot-reconciled.png") });
   });
 
   for (const winner of [
