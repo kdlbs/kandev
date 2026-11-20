@@ -190,3 +190,32 @@ On exact PR head `e183efc8b5f23d9b94823b77e58c9fcd31467ec3`, CI run `44078107332
 - Web typecheck, lint, i18n check, and i18n ratchet passed. Changed-file Go lint over all 111 PR Go files passed with 0 issues. The question race suite, clarification/sysprompt/MCP/backendapp suites, and named SQLite/PostgreSQL async and pending-action cases passed.
 - `python3 scripts/list-docs.py validate` validated 456 decisions and 2032 specifications; `python3 scripts/lint-spec-files.py --all` passed.
 - Replied to and resolved all 11 review threads on the pushed head.
+
+### Current-base merge fixup (2026-11-20)
+
+Merged live `origin/main` at `5e4c1d3a551d18c9aa25599e42dc676a7db8b2e7` in commit
+`7182b90b5291fa22b36d244795471787a7c7ebd5`. Resolved the conflict in
+`apps/backend/internal/improvekandev/prompt_upgrade_test.go` by retaining the
+service-backed workflow-step getter from `main` alongside the lifecycle getter.
+`TestImproveBootstrapUsesUpgradedInstructions` and the full `internal/improvekandev`
+package passed.
+
+Passed on the merged tree:
+
+- `(cd apps/backend && go test -trimpath -race ./internal/task/questions -count=1)`.
+- `(cd apps/backend && go test -trimpath ./internal/clarification ./internal/sysprompt ./internal/mcp/server ./internal/mcp/handlers -count=1)`.
+- `(cd apps/backend && go test -trimpath ./internal/backendapp ./internal/orchestrator/executor ./internal/task/models ./internal/task/service ./pkg/websocket -count=1)`.
+- `(cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check && pnpm run i18n:ratchet)`.
+- `(cd apps/web && pnpm e2e:run --project chromium tests/chat/async-agent-questions.spec.ts)`: 8 passed.
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-async-agent-questions.spec.ts)`: 2 passed.
+- `bash scripts/lint-go-changed apps/backend/internal/improvekandev/prompt_upgrade_test.go`: 0 issues.
+
+The first exact-head CI attempt had 85 passed, 16 skipped, and 5 failed. The
+`Backend Static Checks` job reached its 15-minute timeout without a lint
+diagnostic. E2E shard 27 failed to find a restarted managed agentctl process;
+shard 5 timed out waiting for a delivery-journal lock. Rerunning failed jobs
+passed. `scripts/pr-await 4980 --mode all-terminal --deadline-min 60` reported
+90 passed, 16 skipped, 0 neutral, 0 failed, and 0 pending on exact head
+`7182b90b5291fa22b36d244795471787a7c7ebd5`. `scripts/pr-state --compact 4980`
+confirmed `MERGEABLE` / `CLEAN`, complete exact-head evidence, and 0 unresolved
+review threads; `scripts/pr-resolve list 4980` was empty.
