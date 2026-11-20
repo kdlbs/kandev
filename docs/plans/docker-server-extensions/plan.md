@@ -29,18 +29,19 @@ record the boundary and evidence standard.
 
 ## Validation and open gates
 
-The pinned example built on linux/amd64 with PostgreSQL 15.19. A fresh
-task-owned server and entrypoint shell showed UID 1000, `HOME=/data/home`,
+The preceding example, which pinned PostgreSQL 15.19, built on linux/amd64. A
+fresh task-owned server and entrypoint shell showed UID 1000, `HOME=/data/home`,
 `/usr/bin/psql`, writable cache ownership, and a marker retained across server
 recreation. An invalid package version failed visibly during build. Independent
 QA also observed a task-private synthetic Local ACP agent execute real child
 commands before and after recreation and read the marker through its output.
 This does not verify a real provider CLI or Worktree-specific launch. The
 disposable servers and volumes were removed. The public-doc validator and its
-tests passed on the preceding documentation commit; rerun relevant checks for
-this package.
+tests passed on the preceding documentation commit. The current example pins
+PostgreSQL 15.20 and requires a fresh image build and relevant documentation
+checks.
 
-The draft PR remains open while its required documentation-coverage and Claude
-review checks are resolved. A new package commit needs exact-head Review and
+The PR remains open while its required documentation-coverage and Claude review
+checks are resolved. A new package commit needs current-head Review and
 distinct QA before a readiness claim. No PR merge or deployment is part of
 this work order.

@@ -82,13 +82,13 @@ The release workflow builds amd64 and arm64 images separately, then joins their 
 
 ## Extend the server image
 
-For extra OS tools used by Local or Worktree agents inside the server container, derive from a published image so the release bundle and entrypoint stay intact. This example pins Kandev 0.98.0 to its multi-architecture digest and adds a PostgreSQL 15 client from Debian Bookworm:
+For extra OS tools used by Local or Worktree agents inside the server container, derive from a published image so the release bundle and entrypoint stay intact. This example pins Kandev 0.98.0 to its multi-architecture digest and adds PostgreSQL client 15.20 from Debian Bookworm:
 
 ```dockerfile
 FROM ghcr.io/kdlbs/kandev:0.98.0@sha256:f9aab231d3b3d3c09b0cfd247c8aa007bac2bc0788d1ae776af79c5307bbf628
 USER root
 RUN apt-get update \
- && apt-get install -y --no-install-recommends postgresql-client-15=15.19-0+deb12u1 \
+ && apt-get install -y --no-install-recommends postgresql-client-15=15.20-0+deb12u1 \
  && psql --version \
  && rm -rf /var/lib/apt/lists/*
 ```
@@ -102,7 +102,7 @@ docker build -f examples/docker-server-extension/Dockerfile \
   -t kandev-postgresql-client:0.98.0 examples/docker-server-extension
 ```
 
-The image digest fixes the Kandev release bytes for the published `linux/amd64` and `linux/arm64` architectures. This recipe depends on Debian Bookworm and its glibc packages; it does not make a host SDK or musl binary portable. The Debian package version fixes the requested client version; signed Debian repository metadata and transitive packages can still change, and that version can become unavailable. Record the build log and resulting image digest for a deployment. Rebuild deliberately with a newer Kandev digest and package version to receive security updates. The example does not assume that `psql` on the host, a task Docker container, or a login shell proves availability to a Local or Worktree agent.
+The image digest fixes the Kandev release bytes for the published `linux/amd64` and `linux/arm64` architectures. This recipe depends on Debian Bookworm and its glibc packages; it does not make a host SDK or musl binary portable. The Debian package version fixes the requested client version; signed Debian repository metadata and transitive packages can still change. The pinned package must remain in the active Debian indexes for the build to succeed. Record the build log and resulting image digest for a deployment. Rebuild deliberately with a newer Kandev digest and package version to receive security updates. The example does not assume that `psql` on the host, a task Docker container, or a login shell proves availability to a Local or Worktree agent.
 
 ### Check an extension in a disposable deployment
 
@@ -133,7 +133,7 @@ stat -c '%u:%g %n' "$HOME" "$HOME/.cache/kandev-extension-check"
 printf 'created on first start\n' > "$HOME/.cache/kandev-extension-check/probe"
 ```
 
-Expect user `kandev` (UID 1000), `HOME=/data/home`, a `PATH` containing `/usr/bin`, PostgreSQL 15.19, and writable cache paths owned by the service user. The agent's command result is the decisive check; Kandev's task terminal and an interactive container shell are separate processes and can have different environments. Recreate only this disposable container with the **same** volume and image:
+Expect user `kandev` (UID 1000), `HOME=/data/home`, a `PATH` containing `/usr/bin`, PostgreSQL 15.20, and writable cache paths owned by the service user. The agent's command result is the decisive check; Kandev's task terminal and an interactive container shell are separate processes and can have different environments. Recreate only this disposable container with the **same** volume and image:
 
 ```bash
 test "$(docker container inspect --format '{{ index .Config.Labels "kandev.extension-check" }}' "$check_container")" = true &&
@@ -147,7 +147,13 @@ docker run -d --name "$check_container" --label kandev.extension-check=true \
 docker logs "$check_container"
 ```
 
-In a new Local or Worktree agent session, ask the agent to rerun the user, path, version, and ownership checks through its command tool, then execute `cat "$HOME/.cache/kandev-extension-check/probe"`. It should print `created on first start`. A missing package version fails `docker build`; a runtime ownership or PATH failure appears in the agent command output and server logs. After validation, confirm both labels before removing the exact disposable resources:
+In a new Local or Worktree agent session, ask the agent to run this read-only marker check through its command tool:
+
+```sh
+cat "$HOME/.cache/kandev-extension-check/probe"
+```
+
+The command must print `created on first start`. A missing package version fails `docker build`; a runtime ownership or PATH failure appears in the agent command output and server logs. After validation, confirm both labels before removing the exact disposable resources:
 
 ```bash
 test "$(docker container inspect --format '{{ index .Config.Labels "kandev.extension-check" }}' "$check_container")" = true &&

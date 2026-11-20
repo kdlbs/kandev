@@ -4,7 +4,7 @@ FROM ghcr.io/kdlbs/kandev:0.98.0@sha256:f9aab231d3b3d3c09b0cfd247c8aa007bac2bc07
 
 USER root
 RUN apt-get update \
- && apt-get install -y --no-install-recommends postgresql-client-15=15.19-0+deb12u1 \
+ && apt-get install -y --no-install-recommends postgresql-client-15=15.20-0+deb12u1 \
  && psql --version \
  && rm -rf /var/lib/apt/lists/*
 

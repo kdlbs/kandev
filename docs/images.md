@@ -45,7 +45,11 @@ For an optional native client in the server image, use the [pinned PostgreSQL-cl
 
 At the same release version, both flavors use the same database schema and `/data` layout. Before switching to universal, ensure the mounted data is writable by `kandev` (UID 1000). Universal does not repair volume ownership at startup. See [image runtime behavior](public/docker.md#image-runtime-behavior) for ownership requirements. For a version upgrade, also follow the [upgrade procedure](public/docker.md#upgrade-and-remove).
 
-**Docker:** Follow the [Docker upgrade procedure](public/docker.md#upgrade-and-remove) for an existing deployment. Preserve its `/data` volume, and test an extension separately on the guide's loopback-bound disposable instance instead of stopping the existing container.
+**Docker run:** Pull the derived image, then recreate the server container with the same `/data` volume, port mapping, environment, and runtime options. Preserve the existing volume. Use the [Docker upgrade procedure](public/docker.md#upgrade-and-remove) for backup and rollback steps.
+
+**Docker Compose:** Set the service to use the derived image, then run `docker compose pull <service>` and `docker compose up -d <service>`. Preserve its `/data` volume and configuration.
+
+Test the extension separately on the guide's loopback-bound disposable instance.
 
 **Kubernetes:**
 ```bash

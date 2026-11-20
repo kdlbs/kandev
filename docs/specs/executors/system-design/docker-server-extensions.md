@@ -36,7 +36,7 @@ maintaining a competing source-build or `USER` recipe. The root Dockerfile and
 ## Derived image
 
 `examples/docker-server-extension/Dockerfile` pins the Kandev 0.98.0 manifest
-digest and requests Debian Bookworm's `postgresql-client-15=15.19-0+deb12u1`.
+digest and requests Debian Bookworm's `postgresql-client-15=15.20-0+deb12u1`.
 It retains the inherited entrypoint. The base digest fixes Kandev image bytes;
 the signed Debian repository and transitive packages can still vary or stop
 offering that version. One amd64 build does not prove an arm64 build, and these
