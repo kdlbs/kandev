@@ -133,13 +133,27 @@ func (r *sqliteRepository) DeleteSyncedPrompt(ctx context.Context, id string) (b
 	return rows > 0, err
 }
 
-// ReleaseSyncedPrompts converts every synced prompt to a manual prompt,
-// keeping identity and content, and returns the number released.
+// SetPromptSource moves a prompt from one ownership to another, guarded by
+// its current source, and reports whether the row changed.
+func (r *sqliteRepository) SetPromptSource(ctx context.Context, id, from, to string) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE custom_prompts SET source = ?, updated_at = ?
+		WHERE id = ? AND source = ?
+	`), to, time.Now().UTC(), id, from)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
+// ReleaseSyncedPrompts converts every synced prompt and override to a manual
+// prompt, keeping identity and content, and returns the number released.
 func (r *sqliteRepository) ReleaseSyncedPrompts(ctx context.Context) (int64, error) {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE custom_prompts SET source = ?, source_path = ''
-		WHERE source = ?
-	`), models.PromptSourceManual, models.PromptSourceSync)
+		WHERE source IN (?, ?)
+	`), models.PromptSourceManual, models.PromptSourceSync, models.PromptSourceOverride)
 	if err != nil {
 		return 0, err
 	}

@@ -25,6 +25,9 @@ type PromptApplier interface {
 	ReleaseSyncedPrompts(ctx context.Context) (int64, error)
 	UnresolvedPromptReferences(ctx context.Context, texts []string) ([][]string, error)
 	ListPrompts(ctx context.Context) ([]*promptmodels.Prompt, error)
+	OverrideSyncedPrompt(ctx context.Context, id string) (*promptmodels.Prompt, error)
+	RevertOverride(ctx context.Context, id string) (*promptmodels.Prompt, error)
+	GetPromptByID(ctx context.Context, id string) (*promptmodels.Prompt, error)
 }
 
 // ReferenceSource lists the workflow and step prompts that can reference a
@@ -175,14 +178,8 @@ func (s *Service) DeleteConfig(ctx context.Context) error {
 func (s *Service) Sync(ctx context.Context) (*SyncResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cfg, err := s.store.Get(ctx)
+	cfg, err := s.lockedAuthorizedConfig(ctx)
 	if err != nil {
-		return nil, err
-	}
-	if cfg == nil {
-		return nil, ErrNotConfigured
-	}
-	if err := s.authorize(ctx, cfg.WorkspaceID); err != nil {
 		return nil, err
 	}
 	return s.syncLocked(ctx, syncManual, cfg)
@@ -353,7 +350,8 @@ func (s *Service) apply(ctx context.Context, files []fetchedFile) (*SyncResult, 
 	}
 	warnings = append(warnings, unresolved...)
 	return &SyncResult{
-		Created: applied.Created, Updated: applied.Updated, Deleted: applied.Deleted, Warnings: warnings,
+		Created: applied.Created, Updated: applied.Updated, Deleted: applied.Deleted,
+		Overridden: applied.Overridden, Warnings: warnings,
 		Unchanged: len(applied.Created)+len(applied.Updated)+len(applied.Deleted) == 0 && len(warnings) == 0,
 	}, nil
 }

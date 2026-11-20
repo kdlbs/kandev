@@ -4,6 +4,7 @@ import type {
   PromptSyncRunResponse,
   PromptSyncSetConfigRequest,
 } from "@/lib/types/prompt-sync";
+import type { CustomPrompt } from "@/lib/types/http";
 
 const CONFIG_PATH = "/api/v1/prompt-sync/config";
 
@@ -37,6 +38,26 @@ export async function deletePromptSyncConfig(options?: ApiRequestOptions) {
 // configuration exists; a failed attempt resolves with `error` set.
 export async function runPromptSync(options?: ApiRequestOptions) {
   return fetchJson<PromptSyncRunResponse>("/api/v1/prompt-sync/sync", {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "POST" },
+  });
+}
+
+function promptActionPath(promptId: string, action: "override" | "revert") {
+  return `/api/v1/prompt-sync/prompts/${encodeURIComponent(promptId)}/${action}`;
+}
+
+// overridePrompt turns a synced prompt into a local, editable override.
+export async function overridePrompt(promptId: string, options?: ApiRequestOptions) {
+  return fetchJson<CustomPrompt>(promptActionPath(promptId, "override"), {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "POST" },
+  });
+}
+
+// revertPromptOverride returns an override to sync and re-syncs it.
+export async function revertPromptOverride(promptId: string, options?: ApiRequestOptions) {
+  return fetchJson<CustomPrompt>(promptActionPath(promptId, "revert"), {
     ...options,
     init: { ...(options?.init ?? {}), method: "POST" },
   });

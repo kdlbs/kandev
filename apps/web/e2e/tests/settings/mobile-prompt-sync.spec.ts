@@ -37,5 +37,12 @@ test.describe("Prompt Sync on a phone", () => {
     await testPage.reload();
     await expect(row.getByTestId("prompt-synced-badge")).toBeVisible();
     await expect(row.getByTestId("prompt-delete-button")).toHaveCount(0);
+
+    await row.getByTestId("prompt-override-button").tap();
+    await expect(row.getByTestId("prompt-override-badge")).toBeVisible();
+    const revert = row.getByTestId("prompt-revert-button");
+    expect((await revert.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await revert.tap();
+    await expect(row.getByTestId("prompt-synced-badge")).toBeVisible();
   });
 });

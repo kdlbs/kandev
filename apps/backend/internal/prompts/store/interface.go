@@ -25,4 +25,5 @@ type Repository interface {
 	UpdateSyncedPrompt(ctx context.Context, id, content, sourcePath string) (bool, error)
 	DeleteSyncedPrompt(ctx context.Context, id string) (bool, error)
 	ReleaseSyncedPrompts(ctx context.Context) (int64, error)
+	SetPromptSource(ctx context.Context, id, from, to string) (bool, error)
 }

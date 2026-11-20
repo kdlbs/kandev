@@ -19,6 +19,8 @@ export function PromptSyncSection() {
   const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId) ?? "";
   const sync = usePromptSync(activeWorkspaceId);
+  const prompts = useAppStore((state) => state.prompts.items);
+  const overridden = prompts.filter((prompt) => prompt.source === "override");
   const [open, setOpen] = useState(false);
   const openDialog = () => {
     sync.reset(sync.config);
@@ -46,6 +48,13 @@ export function PromptSyncSection() {
       action={sync.config ? undefined : configureButton}
       data-testid="prompt-sync-section"
     >
+      {sync.config && overridden.length > 0 && (
+        <p className="text-xs text-muted-foreground" data-testid="prompt-sync-overridden">
+          {t("settings:promptSyncOverriddenList", {
+            names: overridden.map((prompt) => `@${prompt.name}`).join(", "),
+          })}
+        </p>
+      )}
       {sync.config && (
         <WorkflowSyncStatusCard
           config={sync.config}

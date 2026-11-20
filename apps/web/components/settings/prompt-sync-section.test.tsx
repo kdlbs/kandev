@@ -9,9 +9,15 @@ const mocks = vi.hoisted(() => ({ controller: null as unknown as PromptSyncContr
 vi.mock("@/hooks/domains/settings/use-prompt-sync", () => ({
   usePromptSync: () => mocks.controller,
 }));
+const storeState = vi.hoisted(() => ({
+  prompts: [] as Array<{ id: string; name: string; source?: string }>,
+}));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({ workspaces: { activeId: "ws-1", items: [{ id: "ws-1", name: "Core" }] } }),
+    selector({
+      workspaces: { activeId: "ws-1", items: [{ id: "ws-1", name: "Core" }] },
+      prompts: { items: storeState.prompts },
+    }),
 }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: false, isFinePointer: true }),
@@ -118,5 +124,21 @@ describe("PromptSyncSection", () => {
     expect(mocks.controller.handleSyncNow).toHaveBeenCalled();
     fireEvent.click(screen.getByTestId(OPEN_TEST_ID));
     expect(screen.getByTestId("prompt-sync-remove")).toBeTruthy();
+  });
+});
+
+// @covers AC-INTEGRATIONS-PROMPT-SYNC-007.5
+describe("PromptSyncSection overrides", () => {
+  it("lists prompts overridden locally apart from warnings", () => {
+    storeState.prompts = [
+      { id: "1", name: "hook", source: "override" },
+      { id: "2", name: "rule", source: "sync" },
+    ];
+    mocks.controller = makeController({ config });
+    renderSection();
+    const list = screen.getByTestId("prompt-sync-overridden");
+    expect(list.textContent).toContain("@hook");
+    expect(list.textContent).not.toContain("@rule");
+    storeState.prompts = [];
   });
 });

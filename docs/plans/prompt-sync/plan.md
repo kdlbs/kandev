@@ -8,6 +8,7 @@ requirements:
   - REQ-INTEGRATIONS-PROMPT-SYNC-004
   - REQ-INTEGRATIONS-PROMPT-SYNC-005
   - REQ-INTEGRATIONS-PROMPT-SYNC-006
+  - REQ-INTEGRATIONS-PROMPT-SYNC-007
 system_design:
   - ../../specs/integrations/system-design/prompt-sync.md
 ---
@@ -51,6 +52,7 @@ Each layer is shippable on its own:
 | 4 | [Task 06: E2E coverage and public docs](task-06-e2e-and-docs.md) | 03, 04, 05 |
 | 5 | [Task 07: View synced prompt content](task-07-view-synced-prompts.md) | 05, 06 |
 | 6 | [Task 08: Review remediation](task-08-review-remediation.md) | 03, 05 |
+| 7 | [Task 09: Local overrides](task-09-local-overrides.md) | 07, 08 |
 
 Tasks 01 and 02 touch separate packages and can run in parallel, as can 03
 and 04. Waves mark parallel-safe candidates only; they do not authorize
@@ -92,6 +94,21 @@ are illustrative; use the existing shadcn primitives and localized copy.
   Hovering or focusing [Synced] shows "Synced from prompts/principles.md".
   [view] toggles the full content read-only below the name, with a note
   naming the source file (Task 07).
+```
+
+### UI-05: Local overrides (desktop)
+
+```text
+| +------------------------------------------------------------------+ |
+| | @post-pr-review  [Synced]                      [override] [view]  | |
+| | Run the default reviewer after the PR opens.                      | |
+| +------------------------------------------------------------------+ |
+| | @principles  [Overridden]                [revert] [edit] [del]    | |
+| | My local principles ...                                           | |
+| +------------------------------------------------------------------+ |
+  Status card adds: "Overridden locally: @principles" below warnings.
+  [Overridden] tooltip names the repository file it replaces. Phones use the
+  same row with touch-sized controls.
 ```
 
 ### UI-02: Settings > Prompts, not configured (desktop)

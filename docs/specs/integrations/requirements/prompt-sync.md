@@ -42,8 +42,10 @@ added rule that synced prompts are read-only.
   extension is `.md`, compared case-insensitively.
 - **Synced prompt:** A saved prompt created by Prompt Sync and still owned by
   it.
-- **Manual prompt:** Any saved prompt that is not a synced prompt, including
-  built-in prompts.
+- **Manual prompt:** Any saved prompt that is neither synced nor an override,
+  including built-in prompts.
+- **Override:** A local, editable prompt that an operator created from a
+  synced prompt to replace the repository version on this installation.
 - **Prompt reference:** An `@name` in prompt text, matched with the same rules
   as saved-prompt expansion.
 
@@ -144,7 +146,8 @@ installation automatically, so that agents act on the reviewed text.
 - **AC-INTEGRATIONS-PROMPT-SYNC-003.3:** When a prompt file's name matches an
   existing manual or built-in prompt, the sync shall skip that file and report
   a warning. The existing prompt shall keep its content, ownership, and
-  identity. Sync shall never adopt a manual prompt.
+  identity. Sync shall never adopt a manual prompt. A file whose name matches
+  an override follows AC-INTEGRATIONS-PROMPT-SYNC-007.3 instead.
 - **AC-INTEGRATIONS-PROMPT-SYNC-003.4:** A successful listing with no prompt
   files shall be treated as an empty source. It shall remove unreferenced
   synced prompts under REQ-INTEGRATIONS-PROMPT-SYNC-003.2.
@@ -190,8 +193,8 @@ that every change goes through review.
   Settings, HTTP, or MCP) with a name that a synced prompt already uses shall
   fail with the existing duplicate-name error.
 - **AC-INTEGRATIONS-PROMPT-SYNC-004.5:** Removing the configuration shall
-  first release every synced prompt to a manual, editable prompt, keeping its
-  identity and content, and then delete the configuration. If any release
+  first release every synced prompt and every override to a manual, editable
+  prompt, keeping its identity and content, and then delete the configuration. If any release
   fails, the configuration shall be kept so the user can retry.
 - **AC-INTEGRATIONS-PROMPT-SYNC-004.6:** Changing the provider, credential
   workspace, repository, branch, or directory shall keep existing synced
@@ -250,10 +253,44 @@ run.
   all resolve, or that has none, shall return the same result and status as
   before this change.
 
+### REQ-INTEGRATIONS-PROMPT-SYNC-007: Local overrides
+
+**Intent:** A shared repository can ship a default prompt at a chosen point
+(for example `@post-pr-review`) that one installation replaces with its own
+version, and can return to the shared default later.
+
+**User story:** As an operator syncing a shared prompt repository, I want to
+override one synced prompt locally, so that a shared workflow step uses my
+version without forking the repository.
+
+#### Acceptance criteria
+
+- **AC-INTEGRATIONS-PROMPT-SYNC-007.1:** Settings > Prompts shall offer an
+  Override action on each synced prompt, on desktop and phone. Overriding shall
+  turn that prompt into an override with the same name, identity, and current
+  content, editable and deletable like a manual prompt by operators and agents.
+- **AC-INTEGRATIONS-PROMPT-SYNC-007.2:** An override shall show an
+  "Overridden" badge naming the repository file it replaces, and a Revert
+  action. Reverting shall return the prompt to sync ownership and run a sync,
+  so the repository version replaces the local content.
+- **AC-INTEGRATIONS-PROMPT-SYNC-007.3:** A sync shall leave an override's
+  content and ownership unchanged when its file is present, report its name as
+  overridden rather than as a warning, and leave it in place when its file is
+  removed.
+- **AC-INTEGRATIONS-PROMPT-SYNC-007.4:** Deleting an override shall let the
+  next sync recreate the synced prompt from its file.
+- **AC-INTEGRATIONS-PROMPT-SYNC-007.5:** The Prompt Sync status card shall
+  list prompts that are overridden locally, separately from warnings.
+- **AC-INTEGRATIONS-PROMPT-SYNC-007.6:** Override and Revert shall require
+  configuration-management authority, reject prompts that are not synced or
+  not overrides respectively, and never change a manual or built-in prompt.
+
 ## Out of scope
 
 - Prompts scoped to a workspace, or more than one prompt source per
   installation.
+- Turning an existing manual prompt that clashes with a file into an override;
+  overrides are created only from synced prompts.
 - Running prompt sync as part of a Workflow Sync run, or reading prompts from
   the Workflow Sync directory.
 - Recursive directories, YAML or JSON prompt envelopes, and front-matter

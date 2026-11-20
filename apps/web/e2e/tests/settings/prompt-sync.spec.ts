@@ -77,4 +77,46 @@ test.describe("Prompt Sync", () => {
     await expect(testPage.getByTestId("prompt-sync-status")).toHaveCount(0);
     await apiClient.deleteWorkflow(workflow.id);
   });
+
+  // @covers AC-INTEGRATIONS-PROMPT-SYNC-007.1 AC-INTEGRATIONS-PROMPT-SYNC-007.2 AC-INTEGRATIONS-PROMPT-SYNC-007.3 AC-INTEGRATIONS-PROMPT-SYNC-007.5
+  test("overrides a synced prompt locally and reverts to the repository version", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedPromptFiles(
+      apiClient,
+      seedData.workspaceId,
+      { "post-pr-review.md": "Shared reviewer rev 1" },
+      { first: true },
+    );
+    await testPage.goto("/settings/prompts");
+    await configureThroughDialog(testPage, false);
+    await syncNow(testPage);
+
+    const hook = promptRow(testPage, "post-pr-review");
+    await hook.getByTestId("prompt-override-button").click();
+    await expect(hook.getByTestId("prompt-override-badge")).toBeVisible();
+    await expect(hook.getByTestId("prompt-edit-button")).toBeVisible();
+    await expect(hook.getByTestId("prompt-synced-badge")).toHaveCount(0);
+
+    await seedPromptFiles(apiClient, seedData.workspaceId, {
+      "post-pr-review.md": "Shared reviewer rev 2",
+    });
+    await syncNow(testPage);
+    await expect(hook).toContainText("rev 1");
+    await expect(testPage.getByTestId("prompt-sync-overridden")).toContainText("@post-pr-review");
+    await expect(testPage.getByTestId("prompt-sync-warnings")).toHaveCount(0);
+
+    const reverted = waitForHttp(
+      testPage,
+      "POST",
+      /^\/api\/v1\/prompt-sync\/prompts\/[^/]+\/revert$/,
+    );
+    await hook.getByTestId("prompt-revert-button").click();
+    expect((await reverted).ok()).toBe(true);
+    await expect(hook.getByTestId("prompt-synced-badge")).toBeVisible();
+    await expect(hook).toContainText("rev 2");
+    await expect(testPage.getByTestId("prompt-sync-overridden")).toHaveCount(0);
+  });
 });

@@ -31,12 +31,14 @@ type SyncApplyInput struct {
 	ReferenceTexts []PromptReferenceText
 }
 
-// SyncApplyResult reports what one sync run changed.
+// SyncApplyResult reports what one sync run changed. Overridden lists files
+// skipped because an operator overrides that prompt locally.
 type SyncApplyResult struct {
-	Created  []string
-	Updated  []string
-	Deleted  []string
-	Warnings []string
+	Created    []string
+	Updated    []string
+	Deleted    []string
+	Overridden []string
+	Warnings   []string
 }
 
 func (r *SyncApplyResult) changed() bool {
@@ -78,6 +80,7 @@ func (s *Service) ApplySyncedPrompts(ctx context.Context, input SyncApplyInput) 
 	sort.Strings(result.Created)
 	sort.Strings(result.Updated)
 	sort.Strings(result.Deleted)
+	sort.Strings(result.Overridden)
 	return result, nil
 }
 
@@ -98,6 +101,9 @@ func (s *Service) applySyncedFile(ctx context.Context, file SyncedPromptFile, cu
 			return nil
 		}
 		return err
+	case current.IsOverride():
+		result.Overridden = append(result.Overridden, file.Name)
+		return nil
 	case !current.IsSynced():
 		result.Warnings = append(result.Warnings, clashWarning(file))
 		return nil

@@ -122,9 +122,10 @@ func (r *SetConfigRequest) Normalize() error {
 
 // SyncResult reports the outcome of one prompt sync run.
 type SyncResult struct {
-	Created   []string `json:"created"`
-	Updated   []string `json:"updated"`
-	Deleted   []string `json:"deleted"`
-	Warnings  []string `json:"warnings"`
-	Unchanged bool     `json:"unchanged"`
+	Created    []string `json:"created"`
+	Updated    []string `json:"updated"`
+	Deleted    []string `json:"deleted"`
+	Overridden []string `json:"overridden"`
+	Warnings   []string `json:"warnings"`
+	Unchanged  bool     `json:"unchanged"`
 }

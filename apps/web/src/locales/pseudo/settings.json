@@ -1255,5 +1255,14 @@
   "promptSynced": "Śŷńćēď",
   "promptSyncedTooltip": "Śŷńćēď ƒŕōḿ {{path}}. Ēďĩţ ţĥē ƒĩĺē ĩń ţĥē ŕēƥōśĩţōŕŷ ţō ćĥàńĝē ĩţ.",
   "promptViewContent": "Vĩēŵ ćōńţēńţ",
-  "promptSyncedReadOnlyNote": "Ŕēàď-ōńĺŷ. Śŷńćēď ƒŕōḿ {{path}}; ēďĩţ ţĥē ƒĩĺē ĩń ţĥē ŕēƥōśĩţōŕŷ ţō ćĥàńĝē ĩţ."
+  "promptSyncedReadOnlyNote": "Ŕēàď-ōńĺŷ. Śŷńćēď ƒŕōḿ {{path}}; ēďĩţ ţĥē ƒĩĺē ĩń ţĥē ŕēƥōśĩţōŕŷ ţō ćĥàńĝē ĩţ.",
+  "promptOverride": "Ōvēŕŕĩďē ĺōćàĺĺŷ",
+  "promptOverridden": "Ōvēŕŕĩďďēń",
+  "promptOverriddenTooltip": "Ōvēŕŕĩďēś {{path}} ƒŕōḿ ţĥē śŷńćēď ŕēƥōśĩţōŕŷ. Ŕēvēŕţ ţō ũśē ţĥē ŕēƥōśĩţōŕŷ vēŕśĩōń àĝàĩń.",
+  "promptRevertOverride": "Ŕēvēŕţ ţō śŷńćēď vēŕśĩōń",
+  "promptOverrideDone": "Ƥŕōḿƥţ ōvēŕŕĩďďēń ĺōćàĺĺŷ. Ēďĩţ ĩţ ĺĩķē àńŷ ƥŕōḿƥţ.",
+  "promptOverrideFailed": "Ćōũĺď ńōţ ōvēŕŕĩďē ţĥē ƥŕōḿƥţ: {{error}}",
+  "promptRevertDone": "Ŕēvēŕţēď ţō ţĥē śŷńćēď vēŕśĩōń",
+  "promptRevertFailed": "Ćōũĺď ńōţ ŕēvēŕţ ţĥē ƥŕōḿƥţ: {{error}}",
+  "promptSyncOverriddenList": "Ōvēŕŕĩďďēń ĺōćàĺĺŷ: {{names}}"
 }

@@ -8,6 +8,7 @@ requirements:
   - REQ-INTEGRATIONS-PROMPT-SYNC-004
   - REQ-INTEGRATIONS-PROMPT-SYNC-005
   - REQ-INTEGRATIONS-PROMPT-SYNC-006
+  - REQ-INTEGRATIONS-PROMPT-SYNC-007
 ---
 
 # Prompt Sync System Design
@@ -52,6 +53,7 @@ contracts are used but not owned here:
 | `REQ-INTEGRATIONS-PROMPT-SYNC-004` | [Prompt ownership](#prompt-ownership), [Frontend](#frontend) |
 | `REQ-INTEGRATIONS-PROMPT-SYNC-005` | [Failure and recovery](#failure-and-recovery) |
 | `REQ-INTEGRATIONS-PROMPT-SYNC-006` | [Workflow Sync reference warnings](#workflow-sync-reference-warnings) |
+| `REQ-INTEGRATIONS-PROMPT-SYNC-007` | [Local overrides](#local-overrides) |
 
 ## Components and responsibilities
 
@@ -95,6 +97,33 @@ Guards (AC-INTEGRATIONS-PROMPT-SYNC-004.1):
 The sync-only methods are `ApplySyncedPrompts(ctx, SyncApplyInput{Desired,
 FrozenNames, ReferenceTexts})` and `ReleaseSyncedPrompts(ctx)`. They are not reachable from
 HTTP, WS, or MCP.
+
+### Local overrides
+
+`Source` gains a third value, `"override"`: a local copy of a synced prompt
+that keeps its row ID, name, content, and `source_path`. Overrides follow the
+manual rules for operator and agent writes; the store's operator, agent, and
+delete guards check `source <> 'sync'` instead of `source = 'manual'`.
+
+- `Repository.SetPromptSource(ctx, id, from, to)` changes ownership with a
+  `WHERE id = ? AND source = ?` guard and reports whether a row changed.
+- `Service.OverrideSyncedPrompt(ctx, id)` moves `sync -> override`;
+  `Service.RevertOverride(ctx, id)` moves `override -> sync`. Each returns
+  `ErrPromptSyncManaged`-style typed errors (`ErrPromptNotSynced`,
+  `ErrPromptNotOverride`) for any other source and publishes the change event.
+- `promptsync.Service.Override` and `Revert` run under the service lock and
+  require configuration-management authority via their routes
+  (`POST /api/v1/prompt-sync/prompts/:id/override` and `.../revert`). Revert
+  then runs a manual sync with the locked configuration so the repository
+  version replaces the local content; a failed sync leaves the prompt synced
+  and records the failure like any other run.
+- In `ApplySyncedPrompts`, a desired file whose name matches an override is
+  skipped and added to `SyncApplyResult.Overridden` (not to warnings). A
+  vanished file never deletes an override because only synced rows are
+  candidates. Overrides count as survivors for the reference closure.
+- `ReleaseSyncedPrompts` releases `sync` and `override` rows to `manual`.
+- Prompt DTOs and MCP reads report `source: "override"`;
+  `allow_agent_edits` is true for overrides.
 
 ### Reference helpers
 
@@ -307,6 +336,10 @@ list, the `unchanged` flag, and the stored status match the current output
   **Configure** and **Sync now**. `prompt-sync-dialog.tsx`
   holds a workspace select (credential workspace) plus the shared fields, and
   **Save** and **Remove sync** with inline or mobile confirmation.
+- Overrides render as the normal editable row plus a `PromptOverrideBadge`
+  (tooltip: source file) and a Revert action. Synced rows gain an Override
+  action beside View. The status card lists overridden prompt names, derived
+  from the prompt list, separately from warnings.
 - Prompt rows: `prompt.source === "sync"` renders `SyncedPromptListItem`
   (`prompt-synced-view.tsx`) instead of the editable row: a
   `PromptSyncedBadge` (tooltip: source path) and a View toggle

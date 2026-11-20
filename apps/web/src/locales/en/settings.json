@@ -1255,5 +1255,14 @@
   "promptSynced": "Synced",
   "promptSyncedTooltip": "Synced from {{path}}. Edit the file in the repository to change it.",
   "promptViewContent": "View content",
-  "promptSyncedReadOnlyNote": "Read-only. Synced from {{path}}; edit the file in the repository to change it."
+  "promptSyncedReadOnlyNote": "Read-only. Synced from {{path}}; edit the file in the repository to change it.",
+  "promptOverride": "Override locally",
+  "promptOverridden": "Overridden",
+  "promptOverriddenTooltip": "Overrides {{path}} from the synced repository. Revert to use the repository version again.",
+  "promptRevertOverride": "Revert to synced version",
+  "promptOverrideDone": "Prompt overridden locally. Edit it like any prompt.",
+  "promptOverrideFailed": "Could not override the prompt: {{error}}",
+  "promptRevertDone": "Reverted to the synced version",
+  "promptRevertFailed": "Could not revert the prompt: {{error}}",
+  "promptSyncOverriddenList": "Overridden locally: {{names}}"
 }

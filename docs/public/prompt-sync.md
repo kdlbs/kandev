@@ -59,6 +59,16 @@ Synced prompts are owned by the repository:
 
 To change a synced prompt, edit its file and sync again.
 
+## Local overrides
+
+A shared repository can ship a default prompt at a chosen point, for example a `@post-pr-review` step that runs an extra reviewer. Each installation can keep that default or replace it locally:
+
+1. On the synced prompt in **Settings → Prompts**, select **Override locally** (pencil-plus icon). The prompt keeps its name and content but becomes an editable, deletable local copy with an **Overridden** badge.
+2. Edit it like any prompt. Syncs leave it alone and list it under **Overridden locally** on the status card instead of warning.
+3. To go back to the shared default, select **Revert to synced version** (back-arrow icon). Kandev returns the prompt to sync and runs a sync, so the repository text replaces your local version. Deleting the override has the same effect on the next sync.
+
+Overrides are created from synced prompts only. A prompt you created yourself with the same name as a file still produces a name-clash warning. Removing Prompt Sync turns overrides into normal prompts.
+
 ## Workflow Sync reference warnings
 
 [Workflow Sync](workflow-sync.md) warns when a synced workflow prompt or step prompt references an `@name` that is not a saved prompt. The warning names the file, the workflow, the steps, and the missing name. It does not block the sync. Add the prompt (for example through Prompt Sync) and sync again.
@@ -78,7 +88,7 @@ Error messages never include tokens or provider response bodies.
 
 ## Stop syncing
 
-Select **Configure → Remove sync**. Kandev first turns every synced prompt into a normal, editable prompt, keeping its name and content, and then removes the configuration. If that fails, the configuration stays so you can retry.
+Select **Configure → Remove sync**. Kandev first turns every synced prompt and override into a normal, editable prompt, keeping its name and content, and then removes the configuration. If that fails, the configuration stays so you can retry.
 
 Changing the provider, credential workspace, repository, branch, or directory keeps existing synced prompts. The next sync reconciles them against the new source.
 
@@ -95,6 +105,8 @@ Reading the configuration and status follows saved-prompt read access. Saving, r
 | `POST` | `/api/v1/prompt-sync/config` | Validate and save. Does not sync. |
 | `DELETE` | `/api/v1/prompt-sync/config` | Release synced prompts, then delete. Returns `{"deleted":true}`. |
 | `POST` | `/api/v1/prompt-sync/sync` | Run now. Returns `config` plus `result` or `error`; `404` when not configured. |
+| `POST` | `/api/v1/prompt-sync/prompts/{id}/override` | Turn a synced prompt into a local override. `409` if the prompt is not synced. |
+| `POST` | `/api/v1/prompt-sync/prompts/{id}/revert` | Return an override to sync and run a sync. `409` if the prompt is not an override. |
 
 ```bash
 curl -fsS -X POST -H 'Content-Type: application/json' \

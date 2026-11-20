@@ -250,8 +250,8 @@ func (r *sqliteRepository) UpdatePrompt(ctx context.Context, prompt *models.Prom
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE custom_prompts
 		SET name = ?, content = ?, updated_at = ?
-		WHERE id = ? AND updated_at = ? AND source = ?
-	`), prompt.Name, prompt.Content, updatedAt, prompt.ID, prompt.UpdatedAt, models.PromptSourceManual)
+		WHERE id = ? AND updated_at = ? AND source <> ?
+	`), prompt.Name, prompt.Content, updatedAt, prompt.ID, prompt.UpdatedAt, models.PromptSourceSync)
 	if err != nil {
 		return err
 	}
@@ -267,7 +267,7 @@ func (r *sqliteRepository) UpdatePrompt(ctx context.Context, prompt *models.Prom
 }
 
 func (r *sqliteRepository) DeletePrompt(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM custom_prompts WHERE id = ? AND source = ?`), id, models.PromptSourceManual)
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM custom_prompts WHERE id = ? AND source <> ?`), id, models.PromptSourceSync)
 	return err
 }
 

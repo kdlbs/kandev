@@ -57,8 +57,12 @@ func AgentEditable(prompt *models.Prompt) bool {
 
 // Source returns the prompt's ownership, defaulting to manual.
 func Source(prompt *models.Prompt) string {
-	if prompt.IsSynced() {
+	switch {
+	case prompt.IsSynced():
 		return models.PromptSourceSync
+	case prompt.IsOverride():
+		return models.PromptSourceOverride
+	default:
+		return models.PromptSourceManual
 	}
-	return models.PromptSourceManual
 }

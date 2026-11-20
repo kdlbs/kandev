@@ -9,6 +9,9 @@ import (
 
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
+	promptdto "github.com/kandev/kandev/internal/prompts/dto"
+	promptmodels "github.com/kandev/kandev/internal/prompts/models"
+	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
@@ -27,6 +30,33 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	api.POST("/config", manageConfig, ctrl.httpSetConfig)
 	api.DELETE("/config", manageConfig, ctrl.httpDeleteConfig)
 	api.POST("/sync", manageConfig, ctrl.httpSync)
+	api.POST("/prompts/:id/override", manageConfig, ctrl.httpOverride)
+	api.POST("/prompts/:id/revert", manageConfig, ctrl.httpRevert)
+}
+
+func (c *controller) httpOverride(ctx *gin.Context) {
+	prompt, err := c.service.Override(ctx.Request.Context(), ctx.Param("id"))
+	c.respondPrompt(ctx, prompt, err)
+}
+
+func (c *controller) httpRevert(ctx *gin.Context) {
+	prompt, err := c.service.Revert(ctx.Request.Context(), ctx.Param("id"))
+	c.respondPrompt(ctx, prompt, err)
+}
+
+func (c *controller) respondPrompt(ctx *gin.Context, prompt *promptmodels.Prompt, err error) {
+	switch {
+	case err == nil:
+		ctx.JSON(http.StatusOK, promptdto.FromPrompt(prompt))
+	case workspaceDenied(err), errors.Is(err, promptservice.ErrPromptNotFound):
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "prompt not found"})
+	case errors.Is(err, ErrNotConfigured):
+		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	case errors.Is(err, promptservice.ErrPromptNotSynced), errors.Is(err, promptservice.ErrPromptNotOverride):
+		ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	default:
+		c.internalError(ctx, "failed to change prompt override", err)
+	}
 }
 
 func workspaceDenied(err error) bool {

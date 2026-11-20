@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deletePromptSyncConfig,
   getPromptSyncConfig,
+  overridePrompt,
+  revertPromptOverride,
   runPromptSync,
   setPromptSyncConfig,
 } from "./prompt-sync-api";
@@ -71,5 +73,29 @@ describe("prompt-sync-api", () => {
     expect(calls[1]![1].method).toBe("DELETE");
     expect(calls[2]![0]).toContain("/api/v1/prompt-sync/sync");
     expect(run.result?.created).toEqual(["a"]);
+  });
+});
+
+describe("prompt override api", () => {
+  const original = global.fetch;
+  afterEach(() => {
+    global.fetch = original;
+  });
+
+  it("posts override and revert for a prompt", async () => {
+    const spy = vi.fn().mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ id: "p 1", source: "override" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    global.fetch = spy as unknown as typeof fetch;
+    await overridePrompt("p 1");
+    await revertPromptOverride("p 1");
+    const calls = spy.mock.calls as [string, RequestInit][];
+    expect(calls[0]![0]).toContain("/api/v1/prompt-sync/prompts/p%201/override");
+    expect(calls[0]![1].method).toBe("POST");
+    expect(calls[1]![0]).toContain("/api/v1/prompt-sync/prompts/p%201/revert");
   });
 });

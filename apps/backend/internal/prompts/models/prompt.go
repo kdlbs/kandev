@@ -3,10 +3,12 @@ package models
 import "time"
 
 // Prompt sources. A synced prompt is owned by Prompt Sync and read-only
-// everywhere else; every other prompt, including built-ins, is manual.
+// everywhere else. An override is a local, editable copy of a synced prompt
+// that sync leaves alone. Every other prompt, including built-ins, is manual.
 const (
-	PromptSourceManual = "manual"
-	PromptSourceSync   = "sync"
+	PromptSourceManual   = "manual"
+	PromptSourceSync     = "sync"
+	PromptSourceOverride = "override"
 )
 
 type Prompt struct {
@@ -14,12 +16,17 @@ type Prompt struct {
 	Name    string
 	Content string
 	Builtin bool
-	// Source is PromptSourceManual or PromptSourceSync.
+	// Source is PromptSourceManual, PromptSourceSync, or PromptSourceOverride.
 	Source string
 	// SourcePath is the repository file a synced prompt was applied from.
 	SourcePath string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+}
+
+// IsOverride reports whether the prompt locally overrides a synced prompt.
+func (p *Prompt) IsOverride() bool {
+	return p != nil && p.Source == PromptSourceOverride
 }
 
 // IsSynced reports whether Prompt Sync owns the prompt.

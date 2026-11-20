@@ -1255,5 +1255,14 @@
   "promptSynced": "已同步",
   "promptSyncedTooltip": "同步自 {{path}}。请在仓库中编辑该文件以进行修改。",
   "promptViewContent": "查看内容",
-  "promptSyncedReadOnlyNote": "只读。同步自 {{path}}；请在仓库中编辑该文件以进行修改。"
+  "promptSyncedReadOnlyNote": "只读。同步自 {{path}}；请在仓库中编辑该文件以进行修改。",
+  "promptOverride": "在本地覆盖",
+  "promptOverridden": "已覆盖",
+  "promptOverriddenTooltip": "覆盖同步仓库中的 {{path}}。恢复后将重新使用仓库版本。",
+  "promptRevertOverride": "恢复为同步版本",
+  "promptOverrideDone": "已在本地覆盖提示词。可像其他提示词一样编辑。",
+  "promptOverrideFailed": "无法覆盖提示词：{{error}}",
+  "promptRevertDone": "已恢复为同步版本",
+  "promptRevertFailed": "无法恢复提示词：{{error}}",
+  "promptSyncOverriddenList": "本地已覆盖：{{names}}"
 }

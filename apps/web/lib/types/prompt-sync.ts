@@ -18,7 +18,7 @@ export type PromptSyncSetConfigRequest = WorkflowSyncSetConfigRequest & {
   workspace_id: string;
 };
 
-export type PromptSyncResult = WorkflowSyncResult;
+export type PromptSyncResult = WorkflowSyncResult & { overridden?: string[] };
 
 /** A completed sync returns 200 even when it carries a sanitized `error`. */
 export interface PromptSyncRunResponse {

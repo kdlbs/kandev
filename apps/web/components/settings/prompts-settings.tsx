@@ -9,6 +9,7 @@ import { Input } from "@kandev/ui/input";
 import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
 import { PromptRowActions } from "@/components/settings/prompt-row-actions";
 import { SyncedPromptListItem } from "@/components/settings/prompt-synced-view";
+import { PromptOverrideControls } from "@/components/settings/prompt-override-controls";
 import { PromptSyncSection } from "@/components/settings/prompt-sync-section";
 import {
   filterSavedPrompts,
@@ -205,6 +206,7 @@ function PromptListItem({
               {t("settings:builtIn")}
             </Badge>
           )}
+          {prompt.source === "override" && <PromptOverrideControls prompt={prompt} />}
         </div>
         <PromptRowActions
           prompt={prompt}
