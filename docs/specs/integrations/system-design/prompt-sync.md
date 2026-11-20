@@ -117,7 +117,7 @@ delete guards check `source <> 'sync'` instead of `source = 'manual'`.
   user chose the repository version), `AdoptPromptAsOverride` and
   `AdoptPromptAsSynced` (`manual -> override|sync`), `ClearOverrideConflict`,
   and `RestoreSyncedPrompt` (`sync -> manual`).
-- The operator's Local override switch is saved by
+- The operator's Local | Repository choice is saved by
   `SavePromptVersions(ctx, id, from, to PromptVersions)`: one `UPDATE` that
   writes `source`, `content`, `alternate_content`, and `conflict = 0`, guarded
   by the full pre-image (`source`, `content`, `alternate_content`) and by
@@ -232,15 +232,16 @@ so the empty string is unambiguous.
 
 - `updateAgentPrompt` checks synced ownership before the built-in check and
   returns `ErrPromptSyncManagedForAgent`. Its message says sync owns the
-  prompt, that a local change has no effect, that the user can turn on Local
-  override in Settings > Prompts, and that agents cannot change that setting.
+  prompt, that a local change has no effect, that the user can switch it to
+  Local in Settings > Prompts and save, and that agents cannot change that
+  setting.
   The error also matches `ErrPromptSyncManaged`. MCP maps it to forbidden.
 - MCP list and read results add `conflict` and `edit_guidance` (from
   `promptdto.EditGuidance`) for synced prompts and overrides. Agent writes to
   overrides use the agent write guard, which leaves `conflict` unchanged.
 - No MCP tool overrides, reverts, or resolves. The `update_shared_prompt`
-  and `list_shared_prompts` tool descriptions say that only the user changes
-  Local override. A server test asserts that no tool name on any surface
+  and `list_shared_prompts` tool descriptions say that only the user switches
+  a prompt to Local. A server test asserts that no tool name on any surface
   mentions override, revert, or prompt sync.
 - The HTTP routes cannot tell an agent holding the user's own credential from
   the user; they keep the configuration-management requirement.
@@ -464,25 +465,31 @@ list, the `unchanged` flag, and the stored status match the current output
   **Configure** and **Sync now**. `prompt-sync-dialog.tsx`
   holds a workspace select (credential workspace) plus the shared fields, and
   **Save** and **Remove sync** with inline or mobile confirmation.
-- `PromptOverrideSwitch` (`prompt-override-controls.tsx`) is the labelled
-  switch, with a 44px label hit area on phones and coarse pointers. Both synced and override rows render the
-  switch as the first child of a `prompt-row-trailing` group, before View or
-  edit and delete, so it never moves. It is controlled by the page draft:
-  toggling it is a pending edit like changing text. On a row not open for
-  editing it calls `startEditing(prompt, useLocal)`, which opens the row in
-  `PromptListItem` (`prompt-list-item.tsx`; a synced row switches from
-  `SyncedPromptListItem` while it is the editing target). The draft
-  (`PromptFormState` in `lib/settings/prompt-versions.ts`) holds the local
-  version as `content` and the switch as `useLocal` (absent for manual
-  prompts, so their draft revisions are unchanged). With the switch on the
-  editor edits the local version; off, it shows `repositoryVersion(prompt)`
-  read-only with the file note. The name is read-only for linked prompts.
-  The shared save bar's **Save** sends `versionsSavePayload` (switch, edited
-  local version only when changed, and the draft's starting revision) to
-  `savePromptVersions`; **Reset** discards; the unsaved-changes guard covers
-  it. Overrides render as the normal editable row plus `PromptOverrideBadge`
-  and, while conflicted, `PromptConflictBadge`. The status card lists overridden
-  prompt names, derived from the prompt list, separately from warnings.
+- `PromptVersionControl` (`prompt-override-controls.tsx`) wraps the review
+  step's exported `VersionSwitch`, so rows and review steps share one
+  `Local | switch | Repository` control (on is the repository version; 44px
+  hit area on coarse pointers). It is the first child of each linked row's
+  `prompt-row-trailing` group. Changes go to the page's `PendingVersions` map
+  (`lib/settings/prompt-versions.ts`; `withChoice` keeps only choices that
+  differ from the saved one), so several rows can be switched. A switched row
+  shows `PromptVersionPreview`: the version it will use, read-only, with the
+  file note or a pointer to **Edit**. A row on Local offers **Edit**, which
+  opens the single draft (`PromptFormState`; the name is read-only for linked
+  prompts and `content` is the local version) in `PromptListItem`. The draft
+  revision includes the pending map, so the save bar and unsaved-changes
+  guard cover switches. **Save** runs `planPromptSaves`: one
+  `savePromptVersions` per switched or edited linked prompt (the open draft's
+  edit and starting revision ride along) and `updatePrompt` for an edited
+  manual prompt, in order; each written prompt leaves the map, so a failure
+  keeps only what is unsaved. **Reset** clears the draft and the map. Overrides render as the normal editable row
+  plus `PromptOverrideBadge` and, while conflicted, `PromptConflictBadge`.
+  The status card lists overridden prompt names, derived from the prompt
+  list, separately from warnings.
+- Read-only prompt editors (`SettingsPromptEditor` with `readOnly`) set
+  `data-read-only`, and `app/globals.css` gives their Monaco surface the
+  muted background, so a preview or the synced View never looks editable.
+- `PromptSyncSection` renders its group with `frame="none"` while
+  unconfigured, so only the heading and **Set up** show, with no empty box.
 - `PromptConflictReviewList` (`prompt-conflict-review.tsx`) explains the
   local and repository versions once in a legend, then renders one compact
   row per prompt: name and path, a `Local | switch | Repository` control

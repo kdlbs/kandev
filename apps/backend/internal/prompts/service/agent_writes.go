@@ -19,8 +19,8 @@ type agentSyncManagedError struct{}
 
 func (agentSyncManagedError) Error() string {
 	return "this prompt is managed by Prompt Sync, so a change made here would have no effect: " +
-		"sync owns its content. To change it locally, ask the user to turn on Local override for this prompt " +
-		"in Settings > Prompts. Agents cannot change that setting. Otherwise the change belongs in the prompt's file in the synced repository"
+		"sync owns its content. To change it locally, ask the user to switch it to Local " +
+		"in Settings > Prompts and save. Agents cannot change that setting. Otherwise the change belongs in the prompt's file in the synced repository"
 }
 
 func (agentSyncManagedError) Is(target error) bool { return target == ErrPromptSyncManaged }

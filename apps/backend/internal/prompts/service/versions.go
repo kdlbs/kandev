@@ -22,7 +22,7 @@ type VersionSave struct {
 	ExpectedUpdatedAt *time.Time
 }
 
-// SavePromptVersions applies the Local override switch and any edit to the
+// SavePromptVersions applies the Local | Repository choice and any edit to the
 // local version in one write. With UseLocal the prompt becomes an override
 // using its local version (or the repository version when it has none);
 // otherwise it is synced, using the repository version and keeping the local

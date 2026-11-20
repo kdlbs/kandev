@@ -29,7 +29,7 @@ func TestSyncedPromptWriteTellsAgentHowTheUserCanOverride(t *testing.T) {
 		Message string `json:"message"`
 	}
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
-	for _, part := range []string{"Prompt Sync", "no effect", "Local override", "Settings > Prompts", "Agents cannot"} {
+	for _, part := range []string{"Prompt Sync", "no effect", "switch it to Local", "Settings > Prompts", "Agents cannot"} {
 		assert.Contains(t, payload.Message, part)
 	}
 }

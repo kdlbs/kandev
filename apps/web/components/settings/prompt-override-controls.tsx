@@ -3,46 +3,38 @@
 import { useTranslation } from "react-i18next";
 import { IconLock } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
-import { Label } from "@kandev/ui/label";
-import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { VersionSwitch } from "@/components/settings/prompt-conflict-review";
 import { isConflictedPrompt } from "@/hooks/domains/settings/use-prompt-conflict-count";
+import type { PromptConflictChoice } from "@/lib/types/prompt-sync";
 import type { CustomPrompt } from "@/lib/types/http";
 
-type PromptOverrideSwitchProps = {
+type PromptVersionControlProps = {
   prompt: CustomPrompt;
-  checked: boolean;
+  choice: PromptConflictChoice;
   disabled?: boolean;
-  onCheckedChange: (checked: boolean) => void;
+  onChoose: (choice: PromptConflictChoice) => void;
 };
 
-// PromptOverrideSwitch is the labelled "Local override" switch, the first of
-// a synced or overridden row's trailing controls. Toggling it is a pending
-// edit that the page's save bar applies or discards.
-export function PromptOverrideSwitch({
+// PromptVersionControl is a synced or overridden row's Local | Repository
+// switch, the first of its trailing controls. Changing it is a pending edit
+// that the page's save bar applies or resets.
+export function PromptVersionControl({
   prompt,
-  checked,
+  choice,
   disabled,
-  onCheckedChange,
-}: PromptOverrideSwitchProps) {
-  const { t } = useTranslation();
-  const switchId = `prompt-override-${prompt.id}`;
+  onChoose,
+}: PromptVersionControlProps) {
   return (
-    <Label
-      htmlFor={switchId}
-      className="flex shrink-0 cursor-pointer items-center gap-2 px-1 text-xs font-normal text-muted-foreground max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-      data-testid="prompt-override-switch-label"
-    >
-      <Switch
-        id={switchId}
-        checked={checked}
-        onCheckedChange={onCheckedChange}
-        disabled={disabled}
-        className="cursor-pointer"
-        data-testid="prompt-override-switch"
-      />
-      {t("settings:promptLocalOverride")}
-    </Label>
+    <VersionSwitch
+      name={prompt.name}
+      choice={choice}
+      onChoose={onChoose}
+      disabled={disabled}
+      idPrefix={`prompt-version-${prompt.id}`}
+      switchTestId="prompt-override-switch"
+      labelTestId="prompt-override-switch-label"
+    />
   );
 }
 

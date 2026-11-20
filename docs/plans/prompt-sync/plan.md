@@ -60,6 +60,7 @@ Each layer is shippable on its own:
 | 9 | [Task 11: Name conflicts, lossless switching, and agent guidance](task-11-conflicts-and-agents.md) | 10 |
 | 10 | [Task 12: Instant switch, compact review, and two-version removal](task-12-compact-review.md) | 11 |
 | 11 | [Task 13: Override switch as a pending edit, and repository-only cleanup on removal](task-13-pending-switch-and-cleanup.md) | 12 |
+| 12 | [Task 14: Shared Local \| Repository control, several pending switches, and read-only styling](task-14-shared-version-control.md) | 13 |
 
 Tasks 01 and 02 touch separate packages and can run in parallel, as can 03
 and 04. Waves mark parallel-safe candidates only; they do not authorize

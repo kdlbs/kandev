@@ -66,7 +66,7 @@ func AgentEditable(prompt *models.Prompt) bool {
 func EditGuidance(prompt *models.Prompt) string {
 	switch {
 	case prompt.IsSynced():
-		return "Synced from the prompt repository and read-only. Only the user can make it editable, by turning on Local override for it in Settings > Prompts and saving; agents cannot change that setting."
+		return "Synced from the prompt repository and read-only. Only the user can make it editable: switch it to Local in Settings > Prompts and save. Agents cannot change that setting."
 	case prompt.IsOverride() && prompt.Conflict:
 		return "A local version that conflicts with the repository file of the same name. Edits change the local version, which is in use. Only the user can resolve the conflict, in Settings > Prompts."
 	case prompt.IsOverride():

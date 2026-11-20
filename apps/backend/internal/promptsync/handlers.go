@@ -36,7 +36,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	api.PUT("/prompts/:id/versions", manageConfig, ctrl.httpSaveVersions)
 }
 
-// versionsRequest is the operator's saved Local override switch and edited
+// versionsRequest is the operator's saved Local | Repository choice and edited
 // local version for a synced prompt or an override.
 type versionsRequest struct {
 	UseLocal          bool       `json:"use_local"`

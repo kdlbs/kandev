@@ -74,6 +74,7 @@ export function SettingsPromptEditor({
   return (
     <div
       className="settings-prompt-editor space-y-1.5"
+      data-read-only={readOnly || undefined}
       data-settings-dirty={isDirty}
       data-settings-dirty-level={dirtyLevel}
     >

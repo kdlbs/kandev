@@ -23,11 +23,16 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { createPrompt, deletePrompt, updatePrompt } from "@/lib/api";
 import { savePromptVersions } from "@/lib/api/domains/prompt-sync-api";
 import {
+  choiceFor,
   formFromPrompt,
   isLinkedPrompt,
-  versionsSavePayload,
+  planPromptSaves,
+  withChoice,
+  type PendingVersions,
   type PromptFormState,
+  type PromptSave,
 } from "@/lib/settings/prompt-versions";
+import type { PromptConflictChoice } from "@/lib/types/prompt-sync";
 import { useRequest } from "@/lib/http/use-request";
 import { t } from "@/lib/i18n";
 import type { CustomPrompt } from "@/lib/types/http";
@@ -112,7 +117,7 @@ type PromptListContentProps = {
   editingRef: React.RefObject<HTMLDivElement | null>;
   formState: PromptFormState;
   onFormChange: (patch: Partial<PromptFormState>) => void;
-  onStartEditing: (prompt: CustomPrompt, useLocal?: boolean) => void;
+  onStartEditing: (prompt: CustomPrompt) => void;
   onOpenDelete: (prompt: CustomPrompt) => void;
   onDeleteCancel: () => void;
   onDeleteConfirm: () => void;
@@ -121,6 +126,8 @@ type PromptListContentProps = {
   showCreate: boolean;
   isFinePointer: boolean;
   deleteTargetId: string | null;
+  pending: PendingVersions;
+  onChoose: (prompt: CustomPrompt, choice: PromptConflictChoice) => void;
 };
 
 function PromptListContent({
@@ -140,6 +147,8 @@ function PromptListContent({
   showCreate,
   isFinePointer,
   deleteTargetId,
+  pending,
+  onChoose,
 }: PromptListContentProps) {
   const { t } = useTranslation();
   if (!promptsLoaded) {
@@ -165,18 +174,27 @@ function PromptListContent({
   }
   return (
     <>
-      {prompts.map((prompt: CustomPrompt) =>
-        prompt.source === "sync" && editingId !== prompt.id ? (
+      {prompts.map((prompt: CustomPrompt) => {
+        const version = isLinkedPrompt(prompt)
+          ? {
+              choice: choiceFor(prompt, pending),
+              pending: pending[prompt.id] !== undefined,
+              onChoose: (choice: PromptConflictChoice) => onChoose(prompt, choice),
+            }
+          : undefined;
+        return prompt.source === "sync" && version && editingId !== prompt.id ? (
           <SyncedPromptListItem
             key={prompt.id}
             prompt={prompt}
-            onOverride={(synced) => onStartEditing(synced, true)}
+            version={version}
+            onEdit={onStartEditing}
             disabled={isBusy || showCreate}
           />
         ) : (
           <PromptListItem
             key={prompt.id}
             prompt={prompt}
+            version={version}
             isEditing={editingId === prompt.id}
             editingRef={editingRef}
             formState={formState}
@@ -191,8 +209,8 @@ function PromptListContent({
             isFinePointer={isFinePointer}
             isDeleteTarget={deleteTargetId === prompt.id}
           />
-        ),
-      )}
+        );
+      })}
     </>
   );
 }
@@ -207,7 +225,10 @@ function usePromptsState() {
   const [formState, setFormState] = useState(defaultFormState);
   const editingRef = useRef<HTMLDivElement | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CustomPrompt | null>(null);
+  const [pending, setPending] = useState<PendingVersions>({});
   return {
+    pending,
+    setPending,
     promptsLoaded,
     prompts,
     setPrompts,
@@ -225,11 +246,12 @@ function usePromptsState() {
   };
 }
 
-/** The three prompt mutations, sharing the post-write list refresh and reset. */
+/** The prompt mutations, sharing the post-write list refresh and reset. */
 function usePromptRequests(
   setPrompts: (next: CustomPrompt[]) => void,
   editingId: string | null,
   resetForm: () => void,
+  setPending: React.Dispatch<React.SetStateAction<PendingVersions>>,
 ) {
   const store = useAppStoreApi();
   const applyPrompts = useCallback(
@@ -250,33 +272,30 @@ function usePromptRequests(
     resetForm();
   });
 
-  const updateRequest = useRequest(
-    async (id: string, s: typeof defaultFormState, expectedUpdatedAt: string) => {
-      const updated = await updatePrompt(
-        id,
-        {
-          name: s.name.trim(),
-          content: s.content.trim(),
-          expected_updated_at: expectedUpdatedAt,
-        },
-        { cache: "no-store" },
-      );
-      applyPrompts((current) => current.map((p) => (p.id === id ? updated : p)));
-      resetForm();
-    },
-  );
-
-  const versionsRequest = useRequest(
-    async (prompt: CustomPrompt, s: PromptFormState, expectedUpdatedAt: string) => {
-      const updated = await savePromptVersions(
-        prompt.id,
-        versionsSavePayload(prompt, s, expectedUpdatedAt),
-        { cache: "no-store" },
-      );
-      applyPrompts((current) => current.map((p) => (p.id === prompt.id ? updated : p)));
-      resetForm();
-    },
-  );
+  // saveRequest makes one Save's writes in order. Each written prompt leaves
+  // the pending switches at once, so a failure keeps only what is unsaved.
+  const saveRequest = useRequest(async (plan: PromptSave[]) => {
+    for (const save of plan) {
+      const updated =
+        save.kind === "versions"
+          ? await savePromptVersions(save.prompt.id, save.payload, { cache: "no-store" })
+          : await updatePrompt(
+              save.prompt.id,
+              {
+                name: save.form.name.trim(),
+                content: save.form.content.trim(),
+                expected_updated_at: save.expectedUpdatedAt,
+              },
+              { cache: "no-store" },
+            );
+      applyPrompts((current) => current.map((p) => (p.id === updated.id ? updated : p)));
+      setPending((current) => {
+        const { [updated.id]: _saved, ...rest } = current;
+        return rest;
+      });
+    }
+    resetForm();
+  });
 
   const deleteRequest = useRequest(async (id: string) => {
     await deletePrompt(id, { cache: "no-store" });
@@ -284,7 +303,7 @@ function usePromptRequests(
     if (editingId === id) resetForm();
   });
 
-  return { createRequest, updateRequest, versionsRequest, deleteRequest };
+  return { createRequest, saveRequest, deleteRequest };
 }
 
 function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
@@ -299,6 +318,9 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     setDeleteTarget,
     deleteTarget,
     formState,
+    showCreate,
+    pending,
+    setPending,
   } = state;
   const { toast } = useToast();
 
@@ -309,20 +331,20 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     setEditBaseline(null);
   }, [setEditingId, setShowCreate, setFormState, setEditBaseline]);
 
+  // Only an open draft has fields to validate; pending switches alone are valid.
   const isValid = useMemo(
-    () => Boolean(formState.name.trim() && formState.content.trim()),
-    [formState],
+    () => (!editingId && !showCreate) || Boolean(formState.name.trim() && formState.content.trim()),
+    [editingId, showCreate, formState],
   );
 
-  const { createRequest, updateRequest, versionsRequest, deleteRequest } = usePromptRequests(
+  const { createRequest, saveRequest, deleteRequest } = usePromptRequests(
     setPrompts,
     editingId,
     resetForm,
+    setPending,
   );
 
-  const isBusy = [createRequest, updateRequest, versionsRequest, deleteRequest].some(
-    (request) => request.isLoading,
-  );
+  const isBusy = [createRequest, saveRequest, deleteRequest].some((request) => request.isLoading);
   const toastError = (title: string) => (err: unknown) =>
     toast({ title, description: errorMessage(err), variant: "error" });
   const handleCreate = () => {
@@ -332,25 +354,30 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
       toastError(t("settings:promptCreateFailed")),
     );
   };
+  // handleUpdate saves every pending version switch and the open draft.
   const handleUpdate = () => {
-    if (!isValid || isBusy || !editingId || !editBaseline) return;
+    if (!isValid || isBusy) return;
     const editingPrompt = state.prompts.find((prompt) => prompt.id === editingId);
-    const save =
-      editingPrompt && isLinkedPrompt(editingPrompt)
-        ? () => versionsRequest.run(editingPrompt, formState, editBaseline.updated_at)
-        : () => updateRequest.run(editingId, formState, editBaseline.updated_at);
-    return runPromptSave(save, toastError(t("settings:promptSaveFailed")));
+    const editing =
+      editingPrompt && editBaseline
+        ? { prompt: editingPrompt, form: formState, updatedAt: editBaseline.updated_at }
+        : undefined;
+    const plan = planPromptSaves({ prompts: state.prompts, pending, editing });
+    return runPromptSave(() => saveRequest.run(plan), toastError(t("settings:promptSaveFailed")));
   };
-  // startEditing opens a prompt's draft; useLocal also toggles the Local
-  // override switch of a synced prompt or override as a pending edit.
-  const startEditing = (prompt: CustomPrompt, useLocal?: boolean) => {
+  const startEditing = (prompt: CustomPrompt) => {
     const saved = formFromPrompt(prompt);
     setEditingId(prompt.id);
     setShowCreate(false);
     setEditBaseline({ ...saved, updated_at: prompt.updated_at });
-    setFormState(
-      useLocal === undefined || !isLinkedPrompt(prompt) ? saved : { ...saved, useLocal },
-    );
+    setFormState(saved);
+  };
+  const choose = (prompt: CustomPrompt, choice: PromptConflictChoice) =>
+    setPending((current) => withChoice(current, prompt, choice));
+  // discard resets the open draft and every pending switch.
+  const discard = () => {
+    resetForm();
+    setPending({});
   };
   const startCreate = () => {
     setEditingId(null);
@@ -371,6 +398,8 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
 
   return {
     resetForm,
+    discard,
+    choose,
     isValid,
     isBusy,
     handleCreate,
@@ -399,14 +428,19 @@ export function getPromptDraftMeta(
   editingId: string | null,
   showCreate: boolean,
   formState: PromptFormState,
-  editBaseline?: PromptEditBaseline | null,
+  {
+    editBaseline,
+    pending = {},
+  }: { editBaseline?: PromptEditBaseline | null; pending?: PendingVersions } = {},
 ) {
   const editingPrompt = prompts.find((prompt) => prompt.id === editingId);
   const revision = JSON.stringify(formState);
   const savedRevision = JSON.stringify(savedForm(editBaseline, editingPrompt));
+  const switched = Object.keys(pending).length > 0;
+  const editingDirty = Boolean(editingId) && revision !== savedRevision;
   return {
-    isDirty: showCreate || (Boolean(editingId) && revision !== savedRevision),
-    revision: `${showCreate ? "new" : (editingId ?? "none")}:${revision}`,
+    isDirty: showCreate || editingDirty || switched,
+    revision: `${showCreate ? "new" : (editingId ?? "none")}:${revision}${switched ? `:${JSON.stringify(pending)}` : ""}`,
   };
 }
 
@@ -421,6 +455,25 @@ function PromptMentionHelp() {
   );
 }
 
+// usePromptsView derives the page's draft state and the visible prompt list,
+// and keeps a pristine open draft in step with newer saved revisions.
+function usePromptsView(state: ReturnType<typeof usePromptsState>, query: string, isBusy: boolean) {
+  const { prompts, editingId, showCreate, formState, editBaseline, pending, deleteTarget } = state;
+  const draft = getPromptDraftMeta(prompts, editingId, showCreate, formState, {
+    editBaseline,
+    pending,
+  });
+  const editingPrompt = prompts.find((prompt) => prompt.id === editingId);
+  const deleteTargetId = deleteTarget?.id ?? null;
+  usePromptEditorEffects({ ...state, editingPrompt });
+  return {
+    draft,
+    deleteTargetId,
+    visiblePrompts: filterSavedPrompts(prompts, query, editingId, deleteTargetId),
+    searchDisabled: Boolean(editingId || showCreate || deleteTarget || isBusy),
+  };
+}
+
 export function PromptsSettings() {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -430,12 +483,11 @@ export function PromptsSettings() {
     editingId,
     showCreate,
     formState,
-    editBaseline,
     setFormState,
     editingRef,
-    deleteTarget,
     promptsLoaded,
     prompts,
+    pending,
   } = state;
   const {
     isValid,
@@ -448,13 +500,14 @@ export function PromptsSettings() {
     closeDeleteDialog,
     confirmDelete,
     resetForm,
+    discard,
+    choose,
   } = usePromptsActions(state);
-  const draft = getPromptDraftMeta(prompts, editingId, showCreate, formState, editBaseline);
-  const editingPrompt = prompts.find((prompt) => prompt.id === editingId);
-  const deleteTargetId = deleteTarget?.id ?? null;
-  const visiblePrompts = filterSavedPrompts(prompts, query, editingId, deleteTargetId);
-  const searchDisabled = Boolean(editingId || showCreate || deleteTarget || isBusy);
-  usePromptEditorEffects({ ...state, editingPrompt });
+  const { draft, deleteTargetId, visiblePrompts, searchDisabled } = usePromptsView(
+    state,
+    query,
+    isBusy,
+  );
 
   return (
     <SettingsPageTemplate
@@ -467,7 +520,7 @@ export function PromptsSettings() {
       canSave={!draft.isDirty || isValid}
       invalidReason={draft.isDirty && !isValid ? t("settings:promptsInvalidReason") : undefined}
       onSave={showCreate ? handleCreate : handleUpdate}
-      onDiscard={resetForm}
+      onDiscard={discard}
     >
       <div className="space-y-6">
         <PromptConflictNotice />
@@ -511,6 +564,8 @@ export function PromptsSettings() {
               showCreate={showCreate}
               isFinePointer={isFinePointer}
               deleteTargetId={deleteTargetId}
+              pending={pending}
+              onChoose={choose}
             />
           </div>
         </SettingsGroup>

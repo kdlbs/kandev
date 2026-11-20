@@ -1,3 +1,4 @@
+import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { replacePromptEditor } from "../../helpers/settings-prompt-editor";
@@ -9,6 +10,19 @@ import {
   seedPromptFiles,
   syncNow,
 } from "../../helpers/prompt-sync";
+
+function repositorySwitch(row: Locator, name: string) {
+  return row.getByRole("switch", { name: `Use the repository version of @${name}` });
+}
+
+// editorBackground reads the painted background of a prompt editor.
+async function editorBackground(editor: Locator) {
+  return editor.evaluate((element) => {
+    const surface =
+      element.querySelector(".monaco-editor-background") ?? element.querySelector(".monaco-editor");
+    return surface ? getComputedStyle(surface).backgroundColor : "";
+  });
+}
 
 test.describe("Prompt Sync", () => {
   test.afterEach(async ({ apiClient }) => {
@@ -89,8 +103,8 @@ test.describe("Prompt Sync", () => {
     await apiClient.deleteWorkflow(workflow.id);
   });
 
-  // @covers AC-INTEGRATIONS-PROMPT-SYNC-007.1 AC-INTEGRATIONS-PROMPT-SYNC-007.2 AC-INTEGRATIONS-PROMPT-SYNC-007.3 AC-INTEGRATIONS-PROMPT-SYNC-007.5 AC-INTEGRATIONS-PROMPT-SYNC-009.2
-  test("toggles the Local override switch as a pending edit saved from the save bar", async ({
+  // @covers AC-INTEGRATIONS-PROMPT-SYNC-004.3 AC-INTEGRATIONS-PROMPT-SYNC-007.1 AC-INTEGRATIONS-PROMPT-SYNC-007.2 AC-INTEGRATIONS-PROMPT-SYNC-007.3 AC-INTEGRATIONS-PROMPT-SYNC-007.5 AC-INTEGRATIONS-PROMPT-SYNC-009.2
+  test("switches several prompts between versions as pending edits saved together", async ({
     testPage,
     apiClient,
     seedData,
@@ -98,7 +112,7 @@ test.describe("Prompt Sync", () => {
     await seedPromptFiles(
       apiClient,
       seedData.workspaceId,
-      { "post-pr-review.md": "Shared reviewer rev 1" },
+      { "post-pr-review.md": "Shared reviewer rev 1", "principles.md": "Shared principles" },
       { first: true },
     );
     await testPage.goto("/settings/prompts");
@@ -106,40 +120,57 @@ test.describe("Prompt Sync", () => {
     await syncNow(testPage);
 
     const hook = promptRow(testPage, "post-pr-review");
-    const toggle = hook.getByRole("switch", { name: "Local override" });
-    const saveBar = testPage.getByTestId("settings-floating-save");
-    await expect(toggle).toHaveAttribute("aria-checked", "false");
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    const principles = promptRow(testPage, "principles");
+    const hookSwitch = repositorySwitch(hook, "post-pr-review");
+    const principlesSwitch = repositorySwitch(principles, "principles");
+    await expect(hookSwitch).toHaveAttribute("aria-checked", "true");
+    await hookSwitch.click();
+    await principlesSwitch.click();
+    await expect(hookSwitch).toHaveAttribute("aria-checked", "false");
     await expect(hook.getByTestId("prompt-synced-badge")).toBeVisible();
-    await replacePromptEditor(testPage, hook.getByTestId("prompt-content-input"), "My reviewer");
-    await saveVersions(testPage);
+    await expect(principles.getByTestId("prompt-version-preview")).toContainText(
+      "Shared principles",
+    );
+
+    // The preview is read-only on a muted background; the local editor is not.
+    await hook.getByTestId("prompt-edit-button").click();
+    const editor = hook.getByTestId("prompt-content-input");
+    expect(await editorBackground(principles.getByTestId("prompt-version-preview"))).not.toBe(
+      await editorBackground(editor),
+    );
+    await replacePromptEditor(testPage, editor, "My reviewer");
+    await saveVersions(testPage, { count: 2 });
     await expect(hook.getByTestId("prompt-override-badge")).toBeVisible();
-    await expect(hook.getByTestId("prompt-synced-badge")).toHaveCount(0);
+    await expect(principles.getByTestId("prompt-override-badge")).toBeVisible();
     await expect(hook).toContainText("My reviewer");
 
     await seedPromptFiles(apiClient, seedData.workspaceId, {
       "post-pr-review.md": "Shared reviewer rev 2",
+      "principles.md": "Shared principles",
     });
     await syncNow(testPage);
     await expect(hook).toContainText("My reviewer");
     await expect(testPage.getByTestId("prompt-sync-overridden")).toContainText("@post-pr-review");
     await expect(testPage.getByTestId("prompt-sync-warnings")).toHaveCount(0);
 
-    await toggle.click();
-    await expect(hook.getByTestId("prompt-content-input")).toContainText("rev 2");
+    await hookSwitch.click();
+    await expect(hook.getByTestId("prompt-version-preview")).toContainText("rev 2");
     await saveVersions(testPage);
     await expect(hook.getByTestId("prompt-synced-badge")).toBeVisible();
     await expect(hook).toContainText("rev 2");
-    await expect(testPage.getByTestId("prompt-sync-overridden")).toHaveCount(0);
 
-    await hook.getByRole("switch", { name: "Local override" }).click();
-    await expect(hook.getByTestId("prompt-content-input")).toContainText("My reviewer");
-    await saveBar.getByRole("button", { name: "Reset" }).click();
-    await expect(hook.getByRole("switch", { name: "Local override" })).toHaveAttribute(
+    await hookSwitch.click();
+    await expect(hook.getByTestId("prompt-version-preview")).toContainText("My reviewer");
+    await repositorySwitch(principles, "principles").click();
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Reset" })
+      .click();
+    await expect(hookSwitch).toHaveAttribute("aria-checked", "true");
+    await expect(repositorySwitch(principles, "principles")).toHaveAttribute(
       "aria-checked",
       "false",
     );
-    await expect(hook.getByTestId("prompt-synced-badge")).toBeVisible();
+    await expect(testPage.getByTestId("prompt-version-preview")).toHaveCount(0);
   });
 });

@@ -25,7 +25,7 @@ func TestNoMCPToolChangesPromptSyncOwnership(t *testing.T) {
 					require.NotContains(t, lower, forbidden, name)
 				}
 				if name == "update_shared_prompt_kandev" {
-					require.Contains(t, tool.Tool.Description, "Local override")
+					require.Contains(t, tool.Tool.Description, "switch it to Local")
 					require.Contains(t, tool.Tool.Description, "only the user")
 				}
 			}

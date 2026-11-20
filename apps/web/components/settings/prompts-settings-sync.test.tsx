@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
@@ -153,98 +153,6 @@ function renderPrompts() {
     </TooltipProvider>,
   );
 }
-
-const switchTestId = "prompt-override-switch";
-
-// @covers AC-INTEGRATIONS-PROMPT-SYNC-007.1 AC-INTEGRATIONS-PROMPT-SYNC-007.2 AC-INTEGRATIONS-PROMPT-SYNC-009.2
-describe("pending Local override switch", () => {
-  const contentInputTestId = "prompt-content-input";
-  const syncedHook: CustomPrompt = {
-    ...existingPrompt,
-    id: "s1",
-    name: "hook",
-    content: "Repository text",
-    alternate_content: "My text",
-    source: "sync",
-    source_path: "p/hook.md",
-  };
-
-  it("opens a synced prompt for editing when its switch is turned on, applying nothing yet", () => {
-    mocks.prompts = [syncedHook];
-    renderPrompts();
-    const toggle = screen.getByRole("switch", { name: "Local override" });
-    expect(toggle.getAttribute("data-testid")).toBe(switchTestId);
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
-    fireEvent.click(toggle);
-
-    const row = screen.getByTestId(promptRowTestId);
-    expect(within(row).getByTestId(switchTestId).getAttribute("aria-checked")).toBe("true");
-    const editor = within(row).getByTestId(contentInputTestId) as HTMLTextAreaElement;
-    expect(editor.value).toBe("My text");
-    expect(editor.readOnly).toBe(false);
-    expect((within(row).getByTestId("prompt-name-input") as HTMLInputElement).disabled).toBe(true);
-    expect(within(row).queryByTestId(promptDeleteButtonTestId)).toBeNull();
-    expect(screen.getByRole("button", { name: saveChangesLabel })).toBeTruthy();
-    expect(mocks.saveVersions).not.toHaveBeenCalled();
-  });
-
-  it("saves the switch and the edited local version in one write", async () => {
-    mocks.prompts = [syncedHook];
-    mocks.saveVersions.mockResolvedValue({ ...syncedHook, source: "override" });
-    renderPrompts();
-    fireEvent.click(screen.getByRole("switch", { name: "Local override" }));
-    fireEvent.change(screen.getByTestId(contentInputTestId), { target: { value: "Edited" } });
-    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
-    await waitFor(() => expect(mocks.saveVersions).toHaveBeenCalledOnce());
-    expect(mocks.saveVersions.mock.calls[0]![0]).toBe("s1");
-    expect(mocks.saveVersions.mock.calls[0]![1]).toEqual({
-      use_local: true,
-      local_content: "Edited",
-      expected_updated_at: syncedHook.updated_at,
-    });
-  });
-
-  it("shows the repository version read-only when an override's switch is turned off", async () => {
-    mocks.prompts = [
-      {
-        ...syncedHook,
-        id: "o1",
-        content: "My text",
-        alternate_content: "Repository text",
-        source: "override",
-      },
-    ];
-    mocks.saveVersions.mockResolvedValue(syncedHook);
-    renderPrompts();
-    const row = screen.getByTestId(promptRowTestId);
-    expect(within(row).getByTestId("prompt-override-badge")).toBeTruthy();
-    expect(within(row).getByTestId(promptEditButtonTestId)).toBeTruthy();
-    expect(within(row).getByTestId(promptDeleteButtonTestId)).toBeTruthy();
-    fireEvent.click(within(row).getByTestId(switchTestId));
-
-    const editor = within(row).getByTestId(contentInputTestId) as HTMLTextAreaElement;
-    expect(editor.value).toBe("Repository text");
-    expect(editor.readOnly).toBe(true);
-    expect(within(row).getByTestId("prompt-view-source-note").textContent).toContain("p/hook.md");
-    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
-    await waitFor(() => expect(mocks.saveVersions).toHaveBeenCalledOnce());
-    expect(mocks.saveVersions.mock.calls[0]![1]).toEqual({
-      use_local: false,
-      expected_updated_at: syncedHook.updated_at,
-    });
-  });
-
-  it("restores the saved state on Reset", () => {
-    mocks.prompts = [syncedHook];
-    renderPrompts();
-    fireEvent.click(screen.getByRole("switch", { name: "Local override" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
-    const row = screen.getByTestId(promptRowTestId);
-    expect(within(row).getByTestId(switchTestId).getAttribute("aria-checked")).toBe("false");
-    expect(within(row).queryByTestId(contentInputTestId)).toBeNull();
-    expect(mocks.saveVersions).not.toHaveBeenCalled();
-  });
-});
 
 describe("prompt overrides", () => {
   // @covers AC-INTEGRATIONS-PROMPT-SYNC-007.1

@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, Response } from "@playwright/test";
 import { expect } from "../fixtures/test-base";
 import { waitForHttp } from "./causal-waits";
 import type { ApiClient } from "./api-client";
@@ -10,14 +10,31 @@ export const CONFIG_PATH = /^\/api\/v1\/prompt-sync\/config$/;
 export const CHECK_PATH = /^\/api\/v1\/prompt-sync\/check$/;
 export const VERSIONS_PATH = /^\/api\/v1\/prompt-sync\/prompts\/[^/]+\/versions$/;
 
-/** Saves a pending Local override switch from the page's save bar. */
-export async function saveVersions(page: Page, tap = false) {
-  const saved = waitForHttp(page, "PUT", VERSIONS_PATH);
+/**
+ * Saves pending version switches from the page's save bar and waits for one
+ * versions write per switched prompt.
+ */
+export async function saveVersions(page: Page, { tap = false, count = 1 } = {}) {
+  const statuses: number[] = [];
+  const written = new Promise<void>((resolve) => {
+    const onResponse = (response: Response) => {
+      const request = response.request();
+      if (request.method() !== "PUT" || !VERSIONS_PATH.test(new URL(response.url()).pathname)) {
+        return;
+      }
+      statuses.push(response.status());
+      if (statuses.length < count) return;
+      page.off("response", onResponse);
+      resolve();
+    };
+    page.on("response", onResponse);
+  });
   const button = page.getByTestId("settings-floating-save").getByRole("button", {
     name: "Save changes",
   });
   await (tap ? button.tap() : button.click());
-  expect((await saved).ok()).toBe(true);
+  await written;
+  expect(statuses.every((status) => status < 300)).toBe(true);
 }
 
 export function promptRow(page: Page, name: string) {

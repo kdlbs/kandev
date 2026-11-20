@@ -117,4 +117,19 @@ describe("SettingsPromptEditor", () => {
 
     expect(document.body.textContent).toContain("settings:promptEditorPromptReferenceHint");
   });
+
+  // @covers AC-INTEGRATIONS-PROMPT-SYNC-004.3
+  it("marks a read-only editor so it renders on a muted background", () => {
+    const { container } = render(
+      <SettingsPromptEditor value="Repo" onChange={() => undefined} readOnly />,
+    );
+    expect(container.querySelector(".settings-prompt-editor")?.getAttribute("data-read-only")).toBe(
+      "true",
+    );
+    cleanup();
+    const editable = render(<SettingsPromptEditor value="Mine" onChange={() => undefined} />);
+    expect(
+      editable.container.querySelector(".settings-prompt-editor")?.hasAttribute("data-read-only"),
+    ).toBe(false);
+  });
 });

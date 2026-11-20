@@ -52,29 +52,46 @@ type VersionSwitchProps = {
   name: string;
   choice: PromptConflictChoice;
   onChoose: (choice: PromptConflictChoice) => void;
+  disabled?: boolean;
+  /** Distinguishes the element IDs and test IDs of one surface from another. */
+  idPrefix?: string;
+  switchTestId?: string;
+  labelTestId?: string;
 };
 
 // VersionSwitch picks a prompt's version: off is the local version, on is the
 // repository version. Both sides stay labelled; the chosen one is emphasized.
-function VersionSwitch({ name, choice, onChoose }: VersionSwitchProps) {
+// The review steps and the Prompts page rows share it, so the direction and
+// the words are the same everywhere.
+export function VersionSwitch({
+  name,
+  choice,
+  onChoose,
+  disabled,
+  idPrefix = "prompt-conflict-switch",
+  switchTestId = "prompt-conflict-switch",
+  labelTestId,
+}: VersionSwitchProps) {
   const { t } = useTranslation();
   const repository = choice === "repository";
-  const id = `prompt-conflict-switch-${name}`;
+  const id = `${idPrefix}-${name}`;
   const side = (active: boolean) =>
     cn("text-xs", active ? "font-medium text-foreground" : "text-muted-foreground");
   return (
     <Label
       htmlFor={id}
       className="flex shrink-0 cursor-pointer items-center gap-2 font-normal max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+      data-testid={labelTestId}
     >
       <span className={side(!repository)}>{t("settings:promptVersionLocal")}</span>
       <Switch
         id={id}
         checked={repository}
         onCheckedChange={(checked) => onChoose(checked ? "repository" : "local")}
+        disabled={disabled}
         aria-label={t("settings:promptConflictChoiceLabel", { name })}
         className="cursor-pointer"
-        data-testid="prompt-conflict-switch"
+        data-testid={switchTestId}
       />
       <span className={side(repository)}>{t("settings:promptVersionRepository")}</span>
     </Label>

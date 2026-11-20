@@ -2027,6 +2027,13 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   border-left: 3px solid color-mix(in oklab, var(--primary) 72%, transparent) !important;
 }
 
+/* A read-only prompt editor sits on a muted background, so it reads as
+   read-only next to an editable one. */
+.settings-prompt-editor[data-read-only="true"] .monaco-editor {
+  --vscode-editor-background: var(--muted) !important;
+  --vscode-editorGutter-background: var(--muted) !important;
+}
+
 /* Monaco Editor - Peek view / references widget overrides */
 .settings-prompt-editor .monaco-editor .suggest-widget {
   /* Keep completion rows above the mobile settings save bar. */

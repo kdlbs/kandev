@@ -189,7 +189,10 @@ that every change goes through review.
   naming its source file. Edit and delete controls shall not be offered for
   synced prompts. Instead, a View control shall open the prompt's full content
   read-only, with a note naming the source file where it is edited; on phones
-  and coarse pointers the control shall be touch-sized. Manual and built-in
+  and coarse pointers the control shall be touch-sized. Every read-only
+  prompt editor shall look read-only, with a muted background distinct from
+  an editable one. The Prompt Sync section shall show no empty content area
+  while Prompt Sync is not set up. Manual and built-in
   prompts shall keep their current controls.
 - **AC-INTEGRATIONS-PROMPT-SYNC-004.4:** Creating a prompt manually (through
   Settings, HTTP, or MCP) with a name that a synced prompt already uses shall

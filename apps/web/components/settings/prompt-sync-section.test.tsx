@@ -144,6 +144,22 @@ describe("PromptSyncSection", () => {
     expect(screen.queryByTestId("prompt-sync-remove")).toBeNull();
   });
 
+  // @covers AC-INTEGRATIONS-PROMPT-SYNC-004.3
+  it("shows no empty content box until Prompt Sync is set up", () => {
+    const view = renderSection();
+    const section = screen.getByTestId("prompt-sync-section");
+    expect(section.querySelector("[data-settings-group-card]")).toBeNull();
+    mocks.controller = makeController({ config });
+    view.rerender(
+      <TooltipProvider>
+        <PromptSyncSection />
+      </TooltipProvider>,
+    );
+    expect(
+      screen.getByTestId("prompt-sync-section").querySelector("[data-settings-group-card]"),
+    ).not.toBeNull();
+  });
+
   it("saves a complete form and closes the dialog", async () => {
     mocks.controller = makeController({
       form: { ...makeController().form, repo_owner: "acme", repo_name: "eng" },

@@ -46,29 +46,33 @@ version without forking the repository.
 
 #### Acceptance criteria
 
-- **AC-INTEGRATIONS-PROMPT-SYNC-007.1:** Settings > Prompts shall show a
-  labelled "Local override" switch on each synced prompt and each override, on
-  desktop and phone, visually distinct from the edit and delete controls; on
-  phones and coarse pointers its hit area shall be touch-sized. The switch
-  shall stay in the same place in every row state: it is the first of the
-  row's trailing controls. Toggling it shall be a pending edit like changing
-  a prompt's text: it shall open the prompt for editing, show the version
-  that will be in use (the local version editable, the repository version
-  read-only), and show the page's save bar. **Save** shall apply the switch
-  and any edit to the local version together, in one atomic write;
-  **Discard** shall restore the saved state; leaving the page shall warn
-  about the unsaved change like any other unsaved edit. The prompt's name is
-  owned by its repository file and shall not be editable while the prompt is
-  synced or overridden. Saving with the switch on shall turn the prompt into
-  an override with the same name and identity, starting from its kept local
-  content (AC-INTEGRATIONS-PROMPT-SYNC-009.2) or else its current content,
-  editable and deletable like a manual prompt by operators and agents.
+- **AC-INTEGRATIONS-PROMPT-SYNC-007.1:** Settings > Prompts shall show, on
+  each synced prompt and each override, the same version control as the
+  review step (AC-INTEGRATIONS-PROMPT-SYNC-008.2): "Local" and "Repository"
+  labels on either side of one switch, on for the repository version, with
+  the accessible name "Use the repository version of @name". It shall be the
+  first of the row's trailing controls in every row state, visually distinct
+  from edit and delete, with a touch-sized hit area on phones and coarse
+  pointers. Changing it shall be a pending edit like changing a prompt's
+  text: the row shows the version that will be in use, read-only (with a
+  note that **Edit** changes the local version), and the page's save bar
+  appears. Several prompts may be switched before one **Save**, which writes
+  each prompt's choice, together with any edit to the local version of the
+  prompt open for editing, as one atomic write per prompt; **Reset** shall
+  restore every pending switch and edit, and leaving the page shall warn
+  about them like any other unsaved edit. A prompt switched to Local, or an
+  override, offers **Edit** for its local version; the prompt's name is owned
+  by its repository file and shall not be editable. Saving Local shall turn
+  the prompt into an override with the same name and identity, starting from
+  its kept local content (AC-INTEGRATIONS-PROMPT-SYNC-009.2) or else its
+  current content, editable and deletable like a manual prompt by operators
+  and agents.
 - **AC-INTEGRATIONS-PROMPT-SYNC-007.2:** An override shall show an
-  "Overridden" badge naming the repository file it replaces, with the switch
-  on. Saving with the switch off shall return the prompt to sync ownership,
-  keep its local content (including unsaved edits made with the switch on)
-  under AC-INTEGRATIONS-PROMPT-SYNC-009.1, use the repository version, and
-  run a sync. Saving either way shall resolve a conflict on the prompt.
+  "Overridden" badge naming the repository file it replaces, with the control
+  on Local. Saving Repository shall return the prompt to sync ownership, keep
+  its local content (including unsaved edits to it) under
+  AC-INTEGRATIONS-PROMPT-SYNC-009.1, use the repository version, and run a
+  sync. Saving either way shall resolve a conflict on the prompt.
 - **AC-INTEGRATIONS-PROMPT-SYNC-007.3:** A sync shall leave an override's
   content and ownership unchanged when its file is present, report its name as
   overridden rather than as a warning, and leave it in place when its file is
@@ -134,8 +138,8 @@ knowing.
   entry of the app sidebar, on desktop and in phone navigation.
 - **AC-INTEGRATIONS-PROMPT-SYNC-008.6:** Resolving a conflict with **Keep
   local** shall clear the conflict and keep the override. **Use repository
-  version**, or turning the row's Local override switch off and confirming,
-  shall resolve it like AC-INTEGRATIONS-PROMPT-SYNC-007.2. Resolution shall
+  version**, or saving the row with its control on either version, shall
+  resolve it like AC-INTEGRATIONS-PROMPT-SYNC-007.2. Resolution shall
   require configuration-management authority.
 - **AC-INTEGRATIONS-PROMPT-SYNC-008.7:** When the file of an override leaves
   the source, its conflict and stored repository version shall be cleared and
@@ -160,7 +164,7 @@ version after trying the repository version, without retyping it.
   ownership (turning the switch off, or choosing the repository version)
   shall keep its local content with the prompt, and use the stored repository
   version at once when there is one.
-- **AC-INTEGRATIONS-PROMPT-SYNC-009.2:** Turning the Local override switch on
+- **AC-INTEGRATIONS-PROMPT-SYNC-009.2:** Switching a synced prompt to Local
   shall show and, when saved, use the kept local content, keeping the
   repository version as the other version. With no kept copy, the override
   shall start from the current synced content.
@@ -216,7 +220,8 @@ that has no effect.
   user about editing it.
 - **AC-INTEGRATIONS-PROMPT-SYNC-010.3:** No MCP tool shall override a synced
   prompt, revert an override, or resolve a conflict. The MCP tool
-  descriptions shall say that only the user can change Local override.
+  descriptions shall say that only the user can switch a prompt between its
+  local and repository versions.
 - **AC-INTEGRATIONS-PROMPT-SYNC-010.4:** An agent write to an override,
   including one with an unresolved conflict, shall change the local version
   and leave the conflict state unchanged.

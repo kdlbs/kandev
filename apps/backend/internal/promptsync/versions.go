@@ -25,7 +25,7 @@ func (s *Service) lockedAuthorizedConfig(ctx context.Context) (*Config, error) {
 	return cfg, nil
 }
 
-// SaveVersions applies the operator's Local override switch and any edit to
+// SaveVersions applies the operator's Local | Repository choice and any edit to
 // the local version in one write. Choosing the repository version runs a sync
 // so the latest repository version is in use; a failed sync leaves the
 // prompt synced and is recorded on the configuration like any other run.

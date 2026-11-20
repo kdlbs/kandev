@@ -72,7 +72,9 @@ test.describe("Prompt Sync name conflicts", () => {
     ).toBeVisible();
     await expect(promptRow(testPage, "same-rule").getByTestId("prompt-synced-badge")).toBeVisible();
 
-    const toggle = houseRules.getByRole("switch", { name: "Local override" });
+    const toggle = houseRules.getByRole("switch", {
+      name: "Use the repository version of @house-rules",
+    });
     await toggle.click();
     await saveVersions(testPage);
     await expect(houseRules.getByTestId("prompt-override-badge")).toBeVisible();
@@ -84,7 +86,9 @@ test.describe("Prompt Sync name conflicts", () => {
 
     // A synced prompt overridden and then edited also has two versions.
     const freshRule = promptRow(testPage, "fresh-rule");
-    await freshRule.getByRole("switch", { name: "Local override" }).click();
+    await freshRule
+      .getByRole("switch", { name: "Use the repository version of @fresh-rule" })
+      .click();
     await saveVersions(testPage);
     await expect(freshRule.getByTestId("prompt-override-badge")).toBeVisible();
     const fresh = (await apiClient.listPrompts()).prompts.find((p) => p.name === "fresh-rule")!;

@@ -7,30 +7,37 @@ import { Input } from "@kandev/ui/input";
 import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
 import { PromptRowActions } from "@/components/settings/prompt-row-actions";
 import {
-  PromptOverrideSwitch,
   PromptRowBadges,
+  PromptVersionControl,
 } from "@/components/settings/prompt-override-controls";
 import { PromptSyncedBadge } from "@/components/settings/prompt-synced-badge";
+import { PromptVersionPreview } from "@/components/settings/prompt-version-preview";
 import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
-import {
-  formFromPrompt,
-  isLinkedPrompt,
-  repositoryVersion,
-  type PromptFormState,
-} from "@/lib/settings/prompt-versions";
+import { formFromPrompt, type PromptFormState } from "@/lib/settings/prompt-versions";
 import type { CustomPrompt } from "@/lib/types/http";
+import type { PromptConflictChoice } from "@/lib/types/prompt-sync";
 
 export function getPromptPreview(content: string) {
   return content.split(/\r?\n/)[0] ?? "";
 }
 
+/** The version control state of a synced prompt or an override. */
+export type PromptRowVersion = {
+  choice: PromptConflictChoice;
+  /** The choice differs from the saved one and waits for Save. */
+  pending: boolean;
+  onChoose: (choice: PromptConflictChoice) => void;
+};
+
 export type PromptListItemProps = {
   prompt: CustomPrompt;
+  /** Present for synced prompts and overrides. */
+  version?: PromptRowVersion;
   isEditing: boolean;
   editingRef: React.RefObject<HTMLDivElement | null>;
   formState: PromptFormState;
   onFormChange: (patch: Partial<PromptFormState>) => void;
-  onStartEditing: (prompt: CustomPrompt, useLocal?: boolean) => void;
+  onStartEditing: (prompt: CustomPrompt) => void;
   onOpenDelete: (prompt: CustomPrompt) => void;
   onDeleteCancel: () => void;
   onDeleteConfirm: () => void;
@@ -43,33 +50,16 @@ export type PromptListItemProps = {
 
 type PromptEditFormProps = Pick<
   PromptListItemProps,
-  "prompt" | "formState" | "onFormChange" | "onCancel" | "isBusy"
+  "prompt" | "version" | "formState" | "onFormChange" | "onCancel" | "isBusy"
 >;
 
-// RepositoryVersionView shows the repository version read-only while the
-// Local override switch is off, with the file where it is edited.
-function RepositoryVersionView({ prompt }: { prompt: CustomPrompt }) {
-  const { t } = useTranslation();
-  return (
-    <div className="space-y-2">
-      <SettingsPromptEditor
-        value={repositoryVersion(prompt)}
-        onChange={() => undefined}
-        readOnly
-        testId="prompt-content-input"
-      />
-      <p className="text-xs text-muted-foreground" data-testid="prompt-view-source-note">
-        {t("settings:promptSyncedReadOnlyNote", { path: prompt.source_path ?? "" })}
-      </p>
-    </div>
-  );
-}
-
 // PromptEditForm edits a prompt. For a synced prompt or an override the name
-// belongs to its repository file, and the editor shows the version the switch
-// selects: the local version editable, or the repository version read-only.
+// belongs to its repository file, and the editor shows the version the
+// control selects: the local version editable, or the repository version
+// read-only.
 function PromptEditForm({
   prompt,
+  version,
   formState,
   onFormChange,
   onCancel,
@@ -77,7 +67,6 @@ function PromptEditForm({
 }: PromptEditFormProps) {
   const { t } = useTranslation();
   const saved = formFromPrompt(prompt);
-  const linked = isLinkedPrompt(prompt);
   return (
     <div className="space-y-3">
       <Input
@@ -85,11 +74,11 @@ function PromptEditForm({
         onChange={(event) => onFormChange({ name: event.target.value })}
         placeholder={t("settings:promptNamePlaceholder")}
         data-testid="prompt-name-input"
-        disabled={isBusy || linked}
+        disabled={isBusy || Boolean(version)}
         data-settings-dirty={formState.name !== saved.name}
       />
-      {linked && !formState.useLocal ? (
-        <RepositoryVersionView prompt={prompt} />
+      {version?.choice === "repository" ? (
+        <PromptVersionPreview prompt={prompt} choice="repository" testId="prompt-content-input" />
       ) : (
         <SettingsPromptEditor
           value={formState.content}
@@ -111,36 +100,47 @@ function PromptEditForm({
   );
 }
 
-// PromptListItem renders an editable prompt row, and any prompt open for
-// editing. Toggling the Local override switch is a pending edit: on a row not
-// open for editing it opens the row with the switch changed.
-export function PromptListItem({
-  prompt,
-  isEditing,
-  editingRef,
-  formState,
-  onFormChange,
-  onStartEditing,
-  onOpenDelete,
-  onDeleteCancel,
-  onDeleteConfirm,
-  onCancel,
-  isBusy,
-  showCreate,
-  isFinePointer,
-  isDeleteTarget,
-}: PromptListItemProps) {
+function PromptRowBody(props: PromptListItemProps) {
+  const { prompt, version, isEditing } = props;
+  if (isEditing) return <PromptEditForm {...props} />;
+  if (version?.pending) return <PromptVersionPreview prompt={prompt} choice={version.choice} />;
+  return (
+    <div className="text-xs text-muted-foreground whitespace-pre-wrap">
+      <div className="truncate">{getPromptPreview(prompt.content)}</div>
+    </div>
+  );
+}
+
+// PromptListItem renders an editable prompt row, an override, and any prompt
+// open for editing. A switched row previews the version it will use.
+export function PromptListItem(props: PromptListItemProps) {
+  const {
+    prompt,
+    version,
+    isEditing,
+    editingRef,
+    formState,
+    onStartEditing,
+    onOpenDelete,
+    onDeleteCancel,
+    onDeleteConfirm,
+    isBusy,
+    showCreate,
+    isFinePointer,
+    isDeleteTarget,
+  } = props;
   const deleteAnchorRef = useRef<HTMLButtonElement | null>(null);
   const synced = prompt.source === "sync";
+  const saved = formFromPrompt(prompt);
   const draftDirty =
-    isEditing && JSON.stringify(formState) !== JSON.stringify(formFromPrompt(prompt));
+    isEditing && (formState.name !== saved.name || formState.content !== saved.content);
   return (
     <div
       className="rounded-lg border border-border/70 bg-background p-4 flex flex-col gap-3"
       ref={isEditing ? editingRef : null}
       data-testid="prompt-list-item"
       data-prompt-name={prompt.name}
-      data-settings-dirty={draftDirty}
+      data-settings-dirty={draftDirty || Boolean(version?.pending)}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -149,14 +149,12 @@ export function PromptListItem({
           <PromptRowBadges prompt={prompt} />
         </div>
         <div className="flex shrink-0 items-center gap-1" data-testid="prompt-row-trailing">
-          {isLinkedPrompt(prompt) && (
-            <PromptOverrideSwitch
+          {version && (
+            <PromptVersionControl
               prompt={prompt}
-              checked={isEditing ? formState.useLocal === true : prompt.source === "override"}
+              choice={version.choice}
               disabled={isBusy || showCreate}
-              onCheckedChange={(checked) =>
-                isEditing ? onFormChange({ useLocal: checked }) : onStartEditing(prompt, checked)
-              }
+              onChoose={version.onChoose}
             />
           )}
           {!synced && (
@@ -184,19 +182,7 @@ export function PromptListItem({
         onCancel={onDeleteCancel}
         onConfirm={onDeleteConfirm}
       />
-      {isEditing ? (
-        <PromptEditForm
-          prompt={prompt}
-          formState={formState}
-          onFormChange={onFormChange}
-          onCancel={onCancel}
-          isBusy={isBusy}
-        />
-      ) : (
-        <div className="text-xs text-muted-foreground whitespace-pre-wrap">
-          <div className="truncate">{getPromptPreview(prompt.content)}</div>
-        </div>
-      )}
+      <PromptRowBody {...props} />
     </div>
   );
 }
