@@ -4,10 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconEye, IconEyeOff } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import {
-  PromptOverrideSwitch,
-  usePromptOverrideSwitch,
-} from "@/components/settings/prompt-override-controls";
+import { PromptOverrideSwitch } from "@/components/settings/prompt-override-controls";
 import { PromptSyncedBadge } from "@/components/settings/prompt-synced-badge";
 import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import type { CustomPrompt } from "@/lib/types/http";
@@ -62,7 +59,6 @@ function PromptSyncedContent({ prompt }: { prompt: CustomPrompt }) {
 // and a View toggle in place of edit and delete, which the repository owns.
 export function SyncedPromptListItem({ prompt }: { prompt: CustomPrompt }) {
   const [viewing, setViewing] = useState(false);
-  const overrideSwitch = usePromptOverrideSwitch(prompt);
   return (
     <div
       className="rounded-lg border border-border/70 bg-background p-4 flex flex-col gap-3"
@@ -75,7 +71,7 @@ export function SyncedPromptListItem({ prompt }: { prompt: CustomPrompt }) {
           <PromptSyncedBadge sourcePath={prompt.source_path} />
         </div>
         <div className="flex shrink-0 items-center gap-1" data-testid="prompt-row-trailing">
-          <PromptOverrideSwitch state={overrideSwitch} />
+          <PromptOverrideSwitch prompt={prompt} />
           <PromptViewButton
             promptId={prompt.id}
             expanded={viewing}

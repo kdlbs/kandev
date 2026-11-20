@@ -43,8 +43,7 @@ func hasPromptExtension(fileName string) bool {
 // promptName derives a prompt name from a file name, or "" when the file is
 // not a Markdown file. A bare ".md" yields "" as well.
 func promptName(fileName string) string {
-	if len(fileName) <= len(promptFileExtension) ||
-		!strings.EqualFold(fileName[len(fileName)-len(promptFileExtension):], promptFileExtension) {
+	if len(fileName) <= len(promptFileExtension) || !hasPromptExtension(fileName) {
 		return ""
 	}
 	return fileName[:len(fileName)-len(promptFileExtension)]

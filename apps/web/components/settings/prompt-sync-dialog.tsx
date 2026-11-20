@@ -26,23 +26,20 @@ import {
   resolvedTarget,
 } from "@/components/settings/repo-sync-fields";
 import { RepoSyncRemovalActions } from "@/components/settings/repo-sync-removal-actions";
-import {
-  PromptConflictReviewList,
-  useRemovalReviewCopy,
-} from "@/components/settings/prompt-conflict-review";
+import { PromptConflictReviewList } from "@/components/settings/prompt-conflict-review";
 import { useAppStore } from "@/components/state-provider";
 import type {
   PromptSyncController,
   PromptSyncFormState,
 } from "@/hooks/domains/settings/use-prompt-sync";
 import {
+  DEFAULT_PROMPTS_PATH,
   intervalInvalid,
   repoTargetMissing,
   type RepoSyncFormState,
 } from "@/lib/settings/repo-sync-form";
 
 const ID_PREFIX = "prompt-sync";
-const DIRECTORY_PLACEHOLDER = ".kandev/prompts";
 
 function WorkspaceField({ sync }: { sync: PromptSyncController }) {
   const { t } = useTranslation();
@@ -96,7 +93,7 @@ function PromptSyncFields({ sync }: { sync: PromptSyncController }) {
         idPrefix={ID_PREFIX}
         form={sync.form}
         update={updateRepo}
-        directoryPlaceholder={DIRECTORY_PLACEHOLDER}
+        directoryPlaceholder={DEFAULT_PROMPTS_PATH}
       />
       <PollFields idPrefix={ID_PREFIX} form={sync.form} update={updateRepo} />
       <p className="text-xs text-muted-foreground">{t("settings:promptSyncDirectoryHelp")}</p>
@@ -169,11 +166,6 @@ function RemovalReviewFooter({ sync, onRemove }: Pick<FooterProps, "sync" | "onR
       </Button>
     </DialogFooter>
   );
-}
-
-function RemovalReviewList({ sync }: { sync: PromptSyncController }) {
-  const copy = useRemovalReviewCopy(sync.removal.conflicts.length);
-  return <PromptConflictReviewList review={sync.removal} copy={copy} />;
 }
 
 // PromptSyncDialogFooter shows Remove and Save on the fields step, and Back
@@ -290,7 +282,7 @@ export function PromptSyncDialog({ open, onOpenChange, sync }: PromptSyncDialogP
           <DialogContent
             className="sm:max-w-lg max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden"
             data-testid="prompt-sync-dialog"
-            enterConfirms={!removeConfirming}
+            enterConfirms={!removeConfirming && step !== "removal"}
             showCloseButton={!active}
             {...contentProps}
           >
@@ -302,7 +294,9 @@ export function PromptSyncDialog({ open, onOpenChange, sync }: PromptSyncDialogP
                 </DialogHeader>
                 {step === "fields" && <PromptSyncFields sync={sync} />}
                 {step === "conflicts" && <PromptConflictReviewList review={sync.review} />}
-                {step === "removal" && <RemovalReviewList sync={sync} />}
+                {step === "removal" && (
+                  <PromptConflictReviewList review={sync.removal} kind="removal" />
+                )}
                 <PromptSyncDialogFooter
                   sync={sync}
                   removeConfirming={removeConfirming}

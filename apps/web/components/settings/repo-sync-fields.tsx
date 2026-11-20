@@ -17,10 +17,8 @@ export type ProviderFieldProps = {
   onChange: (provider: WorkflowSyncProvider) => void;
 };
 
-// ProviderField lets the user pick which host workflow sync reads from.
-// Only one source syncs per workspace — picking a different provider than
-// the currently-saved config replaces it on the next save (see the warning
-// surfaced in WorkflowSyncDialog).
+// ProviderField picks the repository host a sync source reads from; saving a
+// different provider replaces the saved source.
 export function ProviderField({ provider, onChange }: ProviderFieldProps) {
   const { t } = useTranslation();
   return (

@@ -100,9 +100,6 @@ func (s *Service) RunExclusive(fn func() error) error {
 	return fn()
 }
 
-// Store exposes the config store (E2E reset).
-func (s *Service) Store() *Store { return s.store }
-
 func (s *Service) authorize(ctx context.Context, workspaceID string) error {
 	if s.workspaceAuthorizer == nil {
 		return nil
@@ -379,8 +376,7 @@ func (s *Service) apply(
 	return &SyncResult{
 		Created: applied.Created, Updated: applied.Updated, Deleted: applied.Deleted, Restored: applied.Restored,
 		Overridden: applied.Overridden, Conflicts: applied.Conflicts, Warnings: warnings,
-		Unchanged: len(applied.Created)+len(applied.Updated)+len(applied.Deleted)+len(applied.Restored) == 0 &&
-			len(applied.Conflicts) == 0 && len(warnings) == 0,
+		Unchanged: !applied.Changed() && len(applied.Conflicts) == 0 && len(warnings) == 0,
 	}, nil
 }
 

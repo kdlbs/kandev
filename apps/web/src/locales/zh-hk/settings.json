@@ -1293,7 +1293,5 @@
   "promptRemovalLocalHint": "提示詞保留您的版本；儲存庫版本將被丟棄。",
   "promptRemovalRepositoryHint": "提示詞保留儲存庫版本；您的版本將被丟棄。",
   "promptRemovalReviewTitle": "選擇要保留的版本",
-  "promptRemovalReviewDescription": "移除 Prompt Sync 會將已同步的提示詞轉為普通提示詞。這些提示詞同時有您的版本和儲存庫版本，只會保留您選擇的版本。",
-  "promptRemovalReviewIntro_one": "{{count}} 個提示詞需要選擇。",
-  "promptRemovalReviewIntro_other": "{{count}} 個提示詞需要選擇。"
+  "promptRemovalReviewDescription": "移除 Prompt Sync 會將已同步的提示詞轉為普通提示詞。這些提示詞同時有您的版本和儲存庫版本，只會保留您選擇的版本。"
 }

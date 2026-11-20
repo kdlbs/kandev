@@ -7,29 +7,16 @@ import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { usePromptOverride } from "@/hooks/domains/settings/use-prompt-override";
+import { isConflictedPrompt } from "@/hooks/domains/settings/use-prompt-conflict-count";
 import type { CustomPrompt } from "@/lib/types/http";
 
-// usePromptOverrideSwitch owns one row's "Local override" switch. Both
-// directions apply at once: neither version is lost, and a toast names the
-// version now in use.
-export function usePromptOverrideSwitch(prompt: CustomPrompt) {
-  const { pendingId, override, revert } = usePromptOverride();
-  return {
-    prompt,
-    pending: pendingId === prompt.id,
-    onCheckedChange: (checked: boolean) => {
-      void (checked ? override(prompt.id, prompt.name) : revert(prompt.id, prompt.name));
-    },
-  };
-}
-
-export type PromptOverrideSwitchState = ReturnType<typeof usePromptOverrideSwitch>;
-
 // PromptOverrideSwitch is the labelled "Local override" switch, the first of
-// a synced or overridden row's trailing controls.
-export function PromptOverrideSwitch({ state }: { state: PromptOverrideSwitchState }) {
+// a synced or overridden row's trailing controls. Both directions apply at
+// once: neither version is lost, and a toast names the version now in use.
+export function PromptOverrideSwitch({ prompt }: { prompt: CustomPrompt }) {
   const { t } = useTranslation();
-  const switchId = `prompt-override-${state.prompt.id}`;
+  const { pendingId, override, revert } = usePromptOverride();
+  const switchId = `prompt-override-${prompt.id}`;
   return (
     <Label
       htmlFor={switchId}
@@ -38,9 +25,11 @@ export function PromptOverrideSwitch({ state }: { state: PromptOverrideSwitchSta
     >
       <Switch
         id={switchId}
-        checked={state.prompt.source === "override"}
-        onCheckedChange={state.onCheckedChange}
-        disabled={state.pending}
+        checked={prompt.source === "override"}
+        onCheckedChange={(checked) => {
+          void (checked ? override(prompt.id, prompt.name) : revert(prompt.id, prompt.name));
+        }}
+        disabled={pendingId === prompt.id}
         className="cursor-pointer"
         data-testid="prompt-override-switch"
       />
@@ -79,7 +68,7 @@ function SourceBadge({
 
 // PromptOverrideBadge marks a local override and names the repository file
 // it replaces.
-export function PromptOverrideBadge({ prompt }: { prompt: CustomPrompt }) {
+function PromptOverrideBadge({ prompt }: { prompt: CustomPrompt }) {
   const { t } = useTranslation();
   return (
     <SourceBadge
@@ -92,7 +81,7 @@ export function PromptOverrideBadge({ prompt }: { prompt: CustomPrompt }) {
 
 // PromptConflictBadge marks an override whose name a repository file also
 // uses until the user chooses a version.
-export function PromptConflictBadge({ prompt }: { prompt: CustomPrompt }) {
+function PromptConflictBadge({ prompt }: { prompt: CustomPrompt }) {
   const { t } = useTranslation();
   return (
     <SourceBadge
@@ -118,7 +107,7 @@ export function PromptRowBadges({ prompt }: { prompt: CustomPrompt }) {
         </Badge>
       )}
       {overridden && <PromptOverrideBadge prompt={prompt} />}
-      {overridden && prompt.conflict && <PromptConflictBadge prompt={prompt} />}
+      {isConflictedPrompt(prompt) && <PromptConflictBadge prompt={prompt} />}
     </>
   );
 }

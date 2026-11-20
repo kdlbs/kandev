@@ -1293,7 +1293,5 @@
   "promptRemovalLocalHint": "プロンプトはあなたのバージョンを保持し、リポジトリ版は破棄されます。",
   "promptRemovalRepositoryHint": "プロンプトはリポジトリ版を保持し、あなたのバージョンは破棄されます。",
   "promptRemovalReviewTitle": "保持するバージョンを選択",
-  "promptRemovalReviewDescription": "Prompt Sync を削除すると、同期済みのプロンプトは通常のプロンプトになります。これらのプロンプトにはあなたのバージョンとリポジトリ版の両方があり、選択したバージョンだけが保持されます。",
-  "promptRemovalReviewIntro_one": "{{count}} 件のプロンプトで選択が必要です。",
-  "promptRemovalReviewIntro_other": "{{count}} 件のプロンプトで選択が必要です。"
+  "promptRemovalReviewDescription": "Prompt Sync を削除すると、同期済みのプロンプトは通常のプロンプトになります。これらのプロンプトにはあなたのバージョンとリポジトリ版の両方があり、選択したバージョンだけが保持されます。"
 }

@@ -25,6 +25,7 @@ import {
 import type { WorkflowSyncProvider } from "@/lib/types/workflow-sync";
 import { PUBLIC_GITHUB_HOST } from "@/lib/github/host";
 import {
+  DEFAULT_PROMPTS_PATH,
   displayUrl,
   formForProvider,
   formFromUrl,
@@ -37,9 +38,6 @@ import {
 export type PromptSyncFormState = RepoSyncFormState & { workspace_id: string };
 
 type Draft = { form: PromptSyncFormState; url: string };
-
-// The default directory is a repository path, not copy.
-const DEFAULT_PATH = ".kandev/prompts"; // i18n-exempt: repository path
 
 function draftFromConfig(cfg: PromptSyncConfig | null, workspaceId: string): Draft {
   const form: PromptSyncFormState = cfg
@@ -63,7 +61,7 @@ function draftFromConfig(cfg: PromptSyncConfig | null, workspaceId: string): Dra
         repo_name: "",
         project_path: "",
         branch: "main",
-        path: DEFAULT_PATH,
+        path: DEFAULT_PROMPTS_PATH,
         interval_seconds: 300,
         poll_enabled: true,
       };
@@ -303,7 +301,7 @@ function useSaveHandler(
         }
       }
       const saveDeps = { latest, reset, setConfig, toast, review };
-      return await persistDraft(submitted, review.active ? review.choices : {}, saveDeps);
+      return await persistDraft(submitted, review.choices, saveDeps);
     } catch (err) {
       toast({
         description: t("settings:promptSyncSaveFailed", { error: String(err) }),

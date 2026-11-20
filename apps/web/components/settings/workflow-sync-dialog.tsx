@@ -32,7 +32,10 @@ import {
   MobileConfirmationHost,
   MobileConfirmationHostBody,
 } from "@/components/confirmation/mobile-confirmation-host";
-import { repoTargetMissing } from "@/lib/settings/repo-sync-form";
+import {
+  intervalInvalid as repoIntervalInvalid,
+  repoTargetMissing,
+} from "@/lib/settings/repo-sync-form";
 import {
   BranchDirectoryFields,
   PollFields,
@@ -143,9 +146,7 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
   const { t } = useTranslation();
   const [removeConfirming, setRemoveConfirming] = useState(false);
   const hasConfig = !!sync.config;
-  const intervalInvalid =
-    sync.form.poll_enabled &&
-    (!Number.isInteger(sync.form.interval_seconds) || sync.form.interval_seconds < 60);
+  const intervalInvalid = repoIntervalInvalid(sync.form);
   const disableSave = isSaveDisabled(sync, intervalInvalid);
   const targetKey = workflowSyncConfirmationTarget(sync);
   const completion = useWorkflowSyncLifetime(sync.lifetime, open);

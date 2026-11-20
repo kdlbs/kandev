@@ -1293,7 +1293,5 @@
   "promptRemovalLocalHint": "프롬프트가 내 버전을 유지하며, 저장소 버전은 삭제됩니다.",
   "promptRemovalRepositoryHint": "프롬프트가 저장소 버전을 유지하며, 내 버전은 삭제됩니다.",
   "promptRemovalReviewTitle": "유지할 버전 선택",
-  "promptRemovalReviewDescription": "Prompt Sync를 제거하면 동기화된 프롬프트가 일반 프롬프트가 됩니다. 이 프롬프트에는 내 버전과 저장소 버전이 모두 있으며, 선택한 버전만 유지됩니다.",
-  "promptRemovalReviewIntro_one": "프롬프트 {{count}}개에 선택이 필요합니다.",
-  "promptRemovalReviewIntro_other": "프롬프트 {{count}}개에 선택이 필요합니다."
+  "promptRemovalReviewDescription": "Prompt Sync를 제거하면 동기화된 프롬프트가 일반 프롬프트가 됩니다. 이 프롬프트에는 내 버전과 저장소 버전이 모두 있으며, 선택한 버전만 유지됩니다."
 }

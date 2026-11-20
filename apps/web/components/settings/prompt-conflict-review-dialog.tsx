@@ -14,6 +14,7 @@ import {
 } from "@kandev/ui/dialog";
 import { PromptConflictReviewList } from "@/components/settings/prompt-conflict-review";
 import { useAppStore } from "@/components/state-provider";
+import { isConflictedPrompt } from "@/hooks/domains/settings/use-prompt-conflict-count";
 import {
   usePromptConflictResolver,
   type PromptConflictResolver,
@@ -23,7 +24,7 @@ type BannerProps = { names: string[]; busy: boolean; onReview: () => void };
 
 // PromptConflictBanner keeps unresolved conflicts in view at the top of
 // Settings > Prompts until the user chooses a version for each.
-export function PromptConflictBanner({ names, busy, onReview }: BannerProps) {
+function PromptConflictBanner({ names, busy, onReview }: BannerProps) {
   const { t } = useTranslation();
   const count = names.length;
   return (
@@ -66,7 +67,7 @@ type DialogProps = {
 
 // PromptConflictReviewDialog resolves conflicts left by earlier syncs with the
 // same review list the Prompt Sync dialog shows before saving.
-export function PromptConflictReviewDialog({ open, onOpenChange, resolver }: DialogProps) {
+function PromptConflictReviewDialog({ open, onOpenChange, resolver }: DialogProps) {
   const { t } = useTranslation();
   const changeOpen = (next: boolean) => {
     if (!next) resolver.review.close();
@@ -119,9 +120,7 @@ export function PromptConflictReviewDialog({ open, onOpenChange, resolver }: Dia
 // review dialog. The Prompt Sync card refreshes its own status.
 export function PromptConflictNotice() {
   const prompts = useAppStore((state) => state.prompts.items);
-  const names = prompts
-    .filter((prompt) => prompt.source === "override" && prompt.conflict)
-    .map((prompt) => prompt.name);
+  const names = prompts.filter(isConflictedPrompt).map((prompt) => prompt.name);
   const resolver = usePromptConflictResolver();
   const [open, setOpen] = useState(false);
   const startReview = async () => {

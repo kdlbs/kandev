@@ -1,16 +1,11 @@
 package workflowsync
 
 import (
-	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/reposync"
 )
 
 const genericSyncFailureMessage = "Workflow sync failed"
 const githubConnectionFailureMessage = reposync.GitHubConnectionFailureMessage
-
-func classifySyncErr(err error) authcircuit.FailureClass {
-	return reposync.ClassifyError(err)
-}
 
 // safeSyncErrorMessage removes provider response bodies before a sync failure
 // is persisted or returned.

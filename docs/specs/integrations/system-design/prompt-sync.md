@@ -445,9 +445,8 @@ list, the `unchanged` flag, and the stored status match the current output
   **Configure** and **Sync now**. `prompt-sync-dialog.tsx`
   holds a workspace select (credential workspace) plus the shared fields, and
   **Save** and **Remove sync** with inline or mobile confirmation.
-- `prompt-override-controls.tsx` provides `usePromptOverrideSwitch` (state)
-  and `PromptOverrideSwitch` (the labelled switch, 44px label hit area on
-  phones and coarse pointers). Both synced and override rows render the
+- `PromptOverrideSwitch` (`prompt-override-controls.tsx`) is the labelled
+  switch, with a 44px label hit area on phones and coarse pointers. Both synced and override rows render the
   switch as the first child of a `prompt-row-trailing` group, before View or
   edit and delete, so it never moves. Both directions call Override or Revert
   at once; `usePromptOverride` toasts which version of `@name` is now in use.
@@ -459,7 +458,7 @@ list, the `unchanged` flag, and the stored status match the current output
   row per prompt: name and path, a `Local | switch | Repository` control
   (switch on is the repository version, accessible name "Use the repository
   version of @name"), and an icon button that shows both versions below the
-  row. The copy differs for conflicts and removal.
+  row. A `kind` prop (`conflict` or `removal`) picks the legend copy.
 - Save in `prompt-sync-dialog.tsx` runs `usePromptSync.handleSave`: a
   `checkPromptSync(payload)` first; conflicts open `usePromptConflictReview`
   (each row starting on local) and the dialog swaps its fields for the review

@@ -68,7 +68,8 @@ type SyncApplyResult struct {
 	wrote bool
 }
 
-func (r *SyncApplyResult) changed() bool {
+// Changed reports whether the run wrote anything, ownership changes included.
+func (r *SyncApplyResult) Changed() bool {
 	return r.wrote || len(r.Created)+len(r.Updated)+len(r.Deleted)+len(r.Restored) > 0
 }
 
@@ -90,7 +91,7 @@ func (s *Service) ApplySyncedPrompts(ctx context.Context, input SyncApplyInput) 
 	// Writes are individual statements, so a later failure can leave earlier
 	// ones saved; publish whenever anything was written, including on error.
 	defer func() {
-		if result.changed() {
+		if result.Changed() {
 			s.publishChanged(ctx)
 		}
 	}()
@@ -333,10 +334,11 @@ func promptReferenceText(prompt *models.Prompt) PromptReferenceText {
 }
 
 // ReleaseSyncedPrompts converts every synced prompt and override into a
-// manual, editable prompt and returns how many were released. Synced prompts
-// named in restoreLocal get their kept local version back.
-func (s *Service) ReleaseSyncedPrompts(ctx context.Context, restoreLocal ...string) (int64, error) {
-	released, err := s.repo.ReleaseSyncedPrompts(ctx, restoreLocal...)
+// manual, editable prompt and returns how many were released. A prompt named
+// in useOther takes its other version (kept local version or repository
+// version) as its content.
+func (s *Service) ReleaseSyncedPrompts(ctx context.Context, useOther ...string) (int64, error) {
+	released, err := s.repo.ReleaseSyncedPrompts(ctx, useOther...)
 	if err != nil {
 		return 0, err
 	}

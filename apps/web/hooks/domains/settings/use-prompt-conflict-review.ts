@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type {
   PromptConflictChoice,
   PromptConflictResolutions,
@@ -36,14 +36,17 @@ export function usePromptConflictReview() {
     [],
   );
   const close = useCallback(() => setState(EMPTY), []);
-  return {
-    active: state.conflicts.length > 0,
-    conflicts: state.conflicts,
-    choices: state.choices,
-    open,
-    setChoice,
-    close,
-  };
+  return useMemo(
+    () => ({
+      active: state.conflicts.length > 0,
+      conflicts: state.conflicts,
+      choices: state.choices,
+      open,
+      setChoice,
+      close,
+    }),
+    [state, open, setChoice, close],
+  );
 }
 
 export type PromptConflictReview = ReturnType<typeof usePromptConflictReview>;

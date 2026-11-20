@@ -137,3 +137,16 @@ func TestCheckSkipsPromptsIdenticalToTheirFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, result.Conflicts)
 }
+
+func TestOwnershipOnlySyncIsNotUnchanged(t *testing.T) {
+	f := newSyncFixture(t)
+	ctx := context.Background()
+	_, err := f.prompts.CreatePrompt(ctx, "principles", "Mine")
+	require.NoError(t, err)
+	f.gitlab.files["principles.md"] = "Repo"
+	result, err := f.svc.SyncWithResolutions(ctx, map[string]promptservice.ConflictChoice{"principles": promptservice.ChoiceLocal})
+	require.NoError(t, err)
+	assert.Empty(t, result.Created)
+	assert.Empty(t, result.Updated)
+	assert.False(t, result.Unchanged, "adopting a prompt as an override is a change")
+}

@@ -80,3 +80,16 @@ pnpm e2e:run --host --no-build --project mobile-chrome -- e2e/tests/settings/mob
   its label locator).
 - `make fmt`, `make typecheck`, `make lint`, and `pnpm run i18n:check`: pass.
   `make test`: only the known host-environment failures.
+- Simplification pass over the whole PR (requested in review): removed dead
+  helpers and duplicate types (`classifySyncErr`, `defaultJitter`,
+  `Service.Store`, `Reader.ListPath`, workflowsync `dirEntry`/`fileGetter`),
+  reused `execChanged` and `hasPromptExtension`, merged the switch hook into
+  `PromptOverrideSwitch`, replaced the review copy hooks with a `kind` key
+  table and dropped the duplicate removal intro keys, shared the default
+  prompt directory and interval check, and memoized the review hook. Fixed
+  three issues it surfaced: an ownership-only sync reported `unchanged`; a
+  stale conflict flag left the banner's Review doing nothing (it now
+  refreshes the prompt list); and Enter could confirm the destructive removal
+  step. Verification afterwards: fmt, typecheck, lint, and i18n pass; desktop
+  (4), phone (4), and Workflow Sync GitLab (6) E2E pass; `make test` shows
+  only the known host-environment failures.

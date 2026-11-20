@@ -6,9 +6,15 @@ const mocks = vi.hoisted(() => ({
   check: vi.fn<(payload?: unknown) => Promise<unknown>>(),
   run: vi.fn<(resolutions?: unknown) => Promise<unknown>>(),
   toast: vi.fn(),
+  refresh: vi.fn(),
+  store: { id: "store" },
 }));
 
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: mocks.toast }) }));
+vi.mock("@/components/state-provider", () => ({ useAppStoreApi: () => mocks.store }));
+vi.mock("@/lib/state/prompts-loader", () => ({
+  refreshPrompts: (store: unknown) => mocks.refresh(store),
+}));
 vi.mock("@/lib/api/domains/prompt-sync-api", () => ({
   checkPromptSync: (payload?: unknown) => mocks.check(payload),
   runPromptSync: (resolutions?: unknown) => mocks.run(resolutions),
@@ -75,5 +81,16 @@ describe("usePromptConflictResolver", () => {
     expect(opened).toBe(false);
     expect(result.current.review.active).toBe(false);
     expect(mocks.toast).toHaveBeenLastCalledWith(expect.objectContaining({ variant: "error" }));
+  });
+
+  it("refreshes stale conflict flags when the repository reports none", async () => {
+    mocks.check.mockResolvedValue({ conflicts: [] });
+    const { result } = renderHook(() => usePromptConflictResolver());
+    let opened = true;
+    await act(async () => {
+      opened = await result.current.load();
+    });
+    expect(opened).toBe(false);
+    expect(mocks.refresh).toHaveBeenCalledWith(mocks.store);
   });
 });

@@ -68,17 +68,12 @@ type Reader struct {
 	GitLab GitLabClientProvider
 }
 
-// List lists the immediate entries of src.Path.
+// List lists the immediate entries of src.Path in src's repository and ref.
 func (r Reader) List(ctx context.Context, src Source) ([]Entry, error) {
-	return r.ListPath(ctx, src, src.Path)
-}
-
-// ListPath lists the immediate entries of path in src's repository and ref.
-func (r Reader) ListPath(ctx context.Context, src Source, path string) ([]Entry, error) {
 	if src.Provider == ProviderGitLab {
-		return r.listGitLab(ctx, src, path)
+		return r.listGitLab(ctx, src, src.Path)
 	}
-	return r.listGitHub(ctx, src, path)
+	return r.listGitHub(ctx, src, src.Path)
 }
 
 func (r Reader) listGitHub(ctx context.Context, src Source, path string) ([]Entry, error) {

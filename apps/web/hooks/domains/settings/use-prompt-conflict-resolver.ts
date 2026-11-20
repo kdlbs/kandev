@@ -2,6 +2,8 @@
 
 import { useCallback, useState } from "react";
 import { useToast } from "@/components/toast-provider";
+import { useAppStoreApi } from "@/components/state-provider";
+import { refreshPrompts } from "@/lib/state/prompts-loader";
 import { t } from "@/lib/i18n";
 import { checkPromptSync, runPromptSync } from "@/lib/api/domains/prompt-sync-api";
 import { usePromptConflictReview } from "@/hooks/domains/settings/use-prompt-conflict-review";
@@ -11,6 +13,7 @@ import { usePromptConflictReview } from "@/hooks/domains/settings/use-prompt-con
 // the user's choices. A failure keeps the review open with toast feedback.
 export function usePromptConflictResolver() {
   const { toast } = useToast();
+  const store = useAppStoreApi();
   const review = usePromptConflictReview();
   const [busy, setBusy] = useState(false);
   const { open, close } = review;
@@ -20,6 +23,8 @@ export function usePromptConflictResolver() {
     try {
       const res = await checkPromptSync();
       open(res.conflicts);
+      // No conflict left means the list's conflict flags are stale.
+      if (res.conflicts.length === 0) void refreshPrompts(store);
       return res.conflicts.length > 0;
     } catch (err) {
       toast({
@@ -30,7 +35,7 @@ export function usePromptConflictResolver() {
     } finally {
       setBusy(false);
     }
-  }, [open, toast]);
+  }, [open, toast, store]);
 
   const apply = useCallback(async () => {
     setBusy(true);

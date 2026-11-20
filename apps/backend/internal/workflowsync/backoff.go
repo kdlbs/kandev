@@ -8,10 +8,6 @@ import (
 
 type failureDirective = reposync.FailureDirective
 
-func defaultJitter(max time.Duration) time.Duration {
-	return reposync.DefaultJitter(max)
-}
-
 func buildFailureDirective(
 	cfg *Config,
 	syncErr error,

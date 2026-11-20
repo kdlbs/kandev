@@ -1293,7 +1293,5 @@
   "promptRemovalLocalHint": "the prompt keeps your version; the repository version is discarded.",
   "promptRemovalRepositoryHint": "the prompt keeps the repository version; your version is discarded.",
   "promptRemovalReviewTitle": "Choose which versions to keep",
-  "promptRemovalReviewDescription": "Removing Prompt Sync turns synced prompts into normal prompts. These prompts have both your version and the repository version, and only the version you choose is kept.",
-  "promptRemovalReviewIntro_one": "{{count}} prompt needs a choice.",
-  "promptRemovalReviewIntro_other": "{{count}} prompts need a choice."
+  "promptRemovalReviewDescription": "Removing Prompt Sync turns synced prompts into normal prompts. These prompts have both your version and the repository version, and only the version you choose is kept."
 }

@@ -3,6 +3,9 @@ import { PUBLIC_GITHUB_HOST } from "@/lib/github/host";
 import { buildGitHubRepoUrl, parseGitHubRepoUrl } from "@/lib/utils/github-repo-url";
 import { parseGitLabProjectUrl } from "@/lib/utils/gitlab-repo-url";
 
+// The default Prompt Sync directory.
+export const DEFAULT_PROMPTS_PATH = ".kandev/prompts"; // i18n-exempt: repository path
+
 /** Editable repository source shared by Workflow Sync and Prompt Sync. */
 export type RepoSyncFormState = {
   github_host: string;

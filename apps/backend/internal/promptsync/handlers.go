@@ -148,12 +148,12 @@ func runResponse(cfg *Config, result *SyncResult, syncErr error) gin.H {
 // httpTwoVersionPrompts lists prompts that have a local and a repository
 // version.
 func (c *controller) httpTwoVersionPrompts(ctx *gin.Context) {
-	kept, err := c.service.TwoVersionPrompts(ctx.Request.Context())
+	prompts, err := c.service.TwoVersionPrompts(ctx.Request.Context())
 	if err != nil {
-		c.internalError(ctx, "failed to list kept prompt versions", err)
+		c.internalError(ctx, "failed to list prompts with two versions", err)
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"prompts": kept})
+	ctx.JSON(http.StatusOK, gin.H{"prompts": prompts})
 }
 
 // deleteRequest picks, by prompt name, which version a prompt with both a

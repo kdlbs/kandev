@@ -42,31 +42,29 @@ export function PromptSyncSection() {
   );
 
   return (
-    <>
-      <SettingsGroup
-        title={t("settings:promptSyncTitle")}
-        description={t("settings:promptSyncDescription")}
-        action={sync.config ? undefined : configureButton}
-        data-testid="prompt-sync-section"
-      >
-        {sync.config && overridden.length > 0 && (
-          <p className="text-xs text-muted-foreground" data-testid="prompt-sync-overridden">
-            {t("settings:promptSyncOverriddenList", {
-              names: overridden.map((prompt) => `@${prompt.name}`).join(", "),
-            })}
-          </p>
-        )}
-        {sync.config && (
-          <WorkflowSyncStatusCard
-            config={sync.config}
-            syncing={sync.syncing}
-            onSyncNow={sync.handleSyncNow}
-            testIdPrefix={TEST_ID_PREFIX}
-            actions={configureButton}
-          />
-        )}
-        <PromptSyncDialog open={open} onOpenChange={setOpen} sync={sync} />
-      </SettingsGroup>
-    </>
+    <SettingsGroup
+      title={t("settings:promptSyncTitle")}
+      description={t("settings:promptSyncDescription")}
+      action={sync.config ? undefined : configureButton}
+      data-testid="prompt-sync-section"
+    >
+      {sync.config && overridden.length > 0 && (
+        <p className="text-xs text-muted-foreground" data-testid="prompt-sync-overridden">
+          {t("settings:promptSyncOverriddenList", {
+            names: overridden.map((prompt) => `@${prompt.name}`).join(", "),
+          })}
+        </p>
+      )}
+      {sync.config && (
+        <WorkflowSyncStatusCard
+          config={sync.config}
+          syncing={sync.syncing}
+          onSyncNow={sync.handleSyncNow}
+          testIdPrefix={TEST_ID_PREFIX}
+          actions={configureButton}
+        />
+      )}
+      <PromptSyncDialog open={open} onOpenChange={setOpen} sync={sync} />
+    </SettingsGroup>
   );
 }

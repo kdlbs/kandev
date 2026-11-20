@@ -10,31 +10,21 @@ import type { PromptConflictReview } from "@/hooks/domains/settings/use-prompt-c
 import type { PromptConflictChoice, PromptSyncConflict } from "@/lib/types/prompt-sync";
 import { cn } from "@/lib/utils";
 
-// ReviewCopy is what a review list says once, above its rows: an intro and
-// what each version means.
-export type ReviewCopy = { intro: string; localHint: string; repositoryHint: string };
+// ReviewKind selects the legend: choosing a version for a conflict, or the
+// version a prompt keeps when Prompt Sync is removed.
+export type ReviewKind = "conflict" | "removal";
 
-// useConflictReviewCopy is the copy for choosing between a conflicting local
-// prompt and a repository file.
-export function useConflictReviewCopy(count: number): ReviewCopy {
-  const { t } = useTranslation();
-  return {
-    intro: t("settings:promptConflictReviewIntro", { count }),
-    localHint: t("settings:promptConflictKeepLocalHint"),
-    repositoryHint: t("settings:promptConflictUseRepositoryHint"),
-  };
-}
-
-// useRemovalReviewCopy is the copy for choosing which version a prompt keeps
-// when Prompt Sync is removed.
-export function useRemovalReviewCopy(count: number): ReviewCopy {
-  const { t } = useTranslation();
-  return {
-    intro: t("settings:promptRemovalReviewIntro", { count }),
-    localHint: t("settings:promptRemovalLocalHint"),
-    repositoryHint: t("settings:promptRemovalRepositoryHint"),
-  };
-}
+// Catalog keys, not t() calls, because this is module scope.
+const LEGEND_KEYS: Record<ReviewKind, { local: string; repository: string }> = {
+  conflict: {
+    local: "settings:promptConflictKeepLocalHint",
+    repository: "settings:promptConflictUseRepositoryHint",
+  },
+  removal: {
+    local: "settings:promptRemovalLocalHint",
+    repository: "settings:promptRemovalRepositoryHint",
+  },
+};
 
 function VersionBlock({
   title,
@@ -146,31 +136,32 @@ function PromptConflictRow({ conflict, choice, onChoose }: ConflictRowProps) {
 }
 
 // PromptConflictReviewList explains the two versions once, then lists every
-// prompt under review as a short row. Without copy it uses the conflict copy.
+// prompt under review as a short row.
 export function PromptConflictReviewList({
   review,
-  copy,
+  kind = "conflict",
 }: {
   review: PromptConflictReview;
-  copy?: ReviewCopy;
+  kind?: ReviewKind;
 }) {
   const { t } = useTranslation();
-  const conflictCopy = useConflictReviewCopy(review.conflicts.length);
-  const { intro, localHint, repositoryHint } = copy ?? conflictCopy;
+  const legend = LEGEND_KEYS[kind];
   return (
     <div className="space-y-3" data-testid="prompt-conflict-review">
-      <p className="text-sm text-muted-foreground">{intro}</p>
+      <p className="text-sm text-muted-foreground">
+        {t("settings:promptConflictReviewIntro", { count: review.conflicts.length })}
+      </p>
       <dl
         className="grid gap-1 rounded-md bg-muted/40 p-3 text-xs"
         data-testid="prompt-conflict-legend"
       >
         <div>
           <dt className="inline font-medium">{t("settings:promptVersionLocal")}: </dt>
-          <dd className="inline text-muted-foreground">{localHint}</dd>
+          <dd className="inline text-muted-foreground">{t(legend.local)}</dd>
         </div>
         <div>
           <dt className="inline font-medium">{t("settings:promptVersionRepository")}: </dt>
-          <dd className="inline text-muted-foreground">{repositoryHint}</dd>
+          <dd className="inline text-muted-foreground">{t(legend.repository)}</dd>
         </div>
       </dl>
       <ul className="divide-y rounded-lg border border-border/70">
@@ -178,7 +169,7 @@ export function PromptConflictReviewList({
           <PromptConflictRow
             key={conflict.name}
             conflict={conflict}
-            choice={review.choices[conflict.name] ?? "local"}
+            choice={review.choices[conflict.name]!}
             onChoose={(choice) => review.setChoice(conflict.name, choice)}
           />
         ))}

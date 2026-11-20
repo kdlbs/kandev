@@ -10,7 +10,6 @@ import { SyncedPromptListItem } from "@/components/settings/prompt-synced-view";
 import {
   PromptOverrideSwitch,
   PromptRowBadges,
-  usePromptOverrideSwitch,
 } from "@/components/settings/prompt-override-controls";
 import { PromptSyncSection } from "@/components/settings/prompt-sync-section";
 import { PromptConflictNotice } from "@/components/settings/prompt-conflict-review-dialog";
@@ -190,7 +189,6 @@ function PromptListItem({
 }: PromptListItemProps) {
   const deleteAnchorRef = useRef<HTMLButtonElement | null>(null);
   const overridden = prompt.source === "override";
-  const overrideSwitch = usePromptOverrideSwitch(prompt);
   const nameIsDirty = isEditing && formState.name !== prompt.name;
   const contentIsDirty = isEditing && formState.content !== prompt.content;
   return (
@@ -207,7 +205,7 @@ function PromptListItem({
           <PromptRowBadges prompt={prompt} />
         </div>
         <div className="flex shrink-0 items-center gap-1" data-testid="prompt-row-trailing">
-          {overridden && <PromptOverrideSwitch state={overrideSwitch} />}
+          {overridden && <PromptOverrideSwitch prompt={prompt} />}
           <PromptRowActions
             prompt={prompt}
             deleteAnchorRef={deleteAnchorRef}

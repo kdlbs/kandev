@@ -117,27 +117,17 @@ func (r *sqliteRepository) CreateSyncedPrompt(ctx context.Context, name, content
 // UpdateSyncedPrompt replaces a synced prompt's content and source path. It
 // reports false, without writing, when the row is not owned by sync.
 func (r *sqliteRepository) UpdateSyncedPrompt(ctx context.Context, id, content, sourcePath string) (bool, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	return r.execChanged(ctx, `
 		UPDATE custom_prompts SET content = ?, source_path = ?, updated_at = ?
 		WHERE id = ? AND source = ?
-	`), content, sourcePath, time.Now().UTC(), id, models.PromptSourceSync)
-	if err != nil {
-		return false, err
-	}
-	rows, err := result.RowsAffected()
-	return rows > 0, err
+	`, content, sourcePath, time.Now().UTC(), id, models.PromptSourceSync)
 }
 
 // DeleteSyncedPrompt deletes a synced prompt. It reports false, without
 // deleting, when the row is not owned by sync or is a built-in prompt.
 func (r *sqliteRepository) DeleteSyncedPrompt(ctx context.Context, id string) (bool, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(
-		`DELETE FROM custom_prompts WHERE id = ? AND source = ? AND builtin = ?`), id, models.PromptSourceSync, 0)
-	if err != nil {
-		return false, err
-	}
-	rows, err := result.RowsAffected()
-	return rows > 0, err
+	return r.execChanged(ctx,
+		`DELETE FROM custom_prompts WHERE id = ? AND source = ? AND builtin = ?`, id, models.PromptSourceSync, 0)
 }
 
 // ReleaseSyncedPrompts converts every synced prompt and override to a manual

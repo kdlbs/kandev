@@ -1293,7 +1293,5 @@
   "promptRemovalLocalHint": "提示词保留您的版本；仓库版本将被丢弃。",
   "promptRemovalRepositoryHint": "提示词保留仓库版本；您的版本将被丢弃。",
   "promptRemovalReviewTitle": "选择要保留的版本",
-  "promptRemovalReviewDescription": "移除 Prompt Sync 会将已同步的提示词转为普通提示词。这些提示词同时有您的版本和仓库版本，只会保留您选择的版本。",
-  "promptRemovalReviewIntro_one": "{{count}} 个提示词需要选择。",
-  "promptRemovalReviewIntro_other": "{{count}} 个提示词需要选择。"
+  "promptRemovalReviewDescription": "移除 Prompt Sync 会将已同步的提示词转为普通提示词。这些提示词同时有您的版本和仓库版本，只会保留您选择的版本。"
 }

@@ -61,15 +61,6 @@ var (
 	errAutomaticCredentialChanged = errors.New("automatic workflow sync credential changed")
 )
 
-// dirEntry is a provider-neutral directory listing entry. It exists only to
-// share the file-selection and content-fetch loop in fetchFiles between the
-// two providers' native listing shapes.
-type dirEntry struct {
-	name   string
-	path   string
-	isFile bool
-}
-
 // Service owns workflow sync configuration and sync execution.
 type Service struct {
 	store         *Store
@@ -149,7 +140,7 @@ func NewService(
 		applier:           applier,
 		logger:            log.WithFields(zap.String("component", "workflowsync-service")),
 		now:               time.Now,
-		jitter:            defaultJitter,
+		jitter:            reposync.DefaultJitter,
 		automaticInFlight: make(map[string]*automaticJobState),
 		automaticWorkers:  automaticSyncWorkerLimit,
 	}
@@ -430,14 +421,14 @@ func (s *Service) fetchFiles(ctx context.Context, cfg *Config) ([]fetchedFile, e
 	}
 	var files []fetchedFile
 	for _, entry := range entries {
-		if !entry.isFile || !isSyncableFile(entry.name) {
+		if !entry.IsFile || !isSyncableFile(entry.Name) {
 			continue
 		}
-		content, err := get(ctx, entry.path)
+		content, err := get(ctx, entry.Path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch %s: %w", entry.path, err)
+			return nil, fmt.Errorf("failed to fetch %s: %w", entry.Path, err)
 		}
-		files = append(files, fetchedFile{path: entry.path, content: content})
+		files = append(files, fetchedFile{path: entry.Path, content: content})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
 	return files, nil
@@ -447,7 +438,7 @@ type fetchContinuation struct {
 	configFingerprint     string
 	credentialFingerprint string
 	generation            uint64
-	entries               []dirEntry
+	entries               []reposync.Entry
 	files                 []fetchedFile
 	nextEntry             int
 	directoryLoaded       bool
@@ -572,18 +563,18 @@ func (s *Service) fetchAutomaticContinuationEntries(
 			return err
 		}
 		entry := continuation.entries[continuation.nextEntry]
-		if !entry.isFile || !isSyncableFile(entry.name) {
+		if !entry.IsFile || !isSyncableFile(entry.Name) {
 			continuation.nextEntry++
 			continue
 		}
-		content, err := get(ctx, entry.path)
+		content, err := get(ctx, entry.Path)
 		if err != nil {
 			if validationErr := s.validateAutomaticContinuation(ctx, cfg, state); validationErr != nil {
 				return validationErr
 			}
-			return fmt.Errorf("failed to fetch %s: %w", entry.path, err)
+			return fmt.Errorf("failed to fetch %s: %w", entry.Path, err)
 		}
-		continuation.files = append(continuation.files, fetchedFile{path: entry.path, content: content})
+		continuation.files = append(continuation.files, fetchedFile{path: entry.Path, content: content})
 		continuation.nextEntry++
 	}
 	return nil
@@ -630,10 +621,6 @@ func (s *Service) currentCredentialFingerprint(ctx context.Context, cfg *Config)
 	return fingerprint, nil
 }
 
-// fileGetter fetches one file's content once the provider and workspace are
-// already fixed, so fetchFiles can share its loop across providers.
-type fileGetter func(ctx context.Context, path string) ([]byte, error)
-
 func (s *Service) reader() reposync.Reader {
 	return reposync.Reader{GitHub: s.githubClients, GitLab: s.gitlabClients}
 }
@@ -646,15 +633,11 @@ func sourceForConfig(cfg *Config) reposync.Source {
 }
 
 // listProviderEntries lists the configured directory for cfg.Provider and
-// returns a fileGetter closed over the same provider and workspace.
-func (s *Service) listProviderEntries(ctx context.Context, cfg *Config) ([]dirEntry, fileGetter, error) {
-	raw, err := s.reader().List(ctx, sourceForConfig(cfg))
+// returns a getter closed over the same provider and workspace.
+func (s *Service) listProviderEntries(ctx context.Context, cfg *Config) ([]reposync.Entry, reposync.FileGetter, error) {
+	entries, err := s.reader().List(ctx, sourceForConfig(cfg))
 	if err != nil {
 		return nil, nil, err
-	}
-	entries := make([]dirEntry, len(raw))
-	for i, e := range raw {
-		entries[i] = dirEntry{name: e.Name, path: e.Path, isFile: e.IsFile}
 	}
 	get, err := s.fileGetterForConfig(cfg)
 	if err != nil {
@@ -663,12 +646,8 @@ func (s *Service) listProviderEntries(ctx context.Context, cfg *Config) ([]dirEn
 	return entries, get, nil
 }
 
-func (s *Service) fileGetterForConfig(cfg *Config) (fileGetter, error) {
-	get, err := s.reader().Getter(sourceForConfig(cfg))
-	if err != nil {
-		return nil, err
-	}
-	return fileGetter(get), nil
+func (s *Service) fileGetterForConfig(cfg *Config) (reposync.FileGetter, error) {
+	return s.reader().Getter(sourceForConfig(cfg))
 }
 
 // contentHash is a stable digest of the fetched file set. It is recorded on
