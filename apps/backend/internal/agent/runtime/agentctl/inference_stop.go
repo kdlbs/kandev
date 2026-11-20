@@ -3,10 +3,15 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 )
+
+// ErrInferenceStopSettlement identifies a stopped instance whose inference
+// ownership could not be settled. Repeating deletion cannot resolve that error.
+var ErrInferenceStopSettlement = errors.New("settle stopped instance inference")
 
 type inferenceStopObserver interface {
 	ObserveInferenceStop(context.Context, *utility.AttemptSnapshot) error

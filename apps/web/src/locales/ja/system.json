@@ -845,7 +845,7 @@
   "sessionCapacityGradeName": "実行等級",
   "sessionCapacityGradeNew": "新しい等級",
   "sessionCapacityGradeRemove": "{{grade}} を削除",
-  "sessionCapacityGradeValidation": "等級名は重複のない64文字以内、上限は0から2147483647の整数にしてください。全実行範囲には1つ以上の等級が必要です。自動範囲に切り替える前に等級別上限を明示的に削除してください。",
+  "sessionCapacityGradeValidation": "等級名は重複のない64文字以内、上限は0から2147483647の整数にしてください。実行等級は最大64個まで設定できます。全実行範囲には1つ以上の等級が必要です。自動範囲に切り替える前に等級別上限を明示的に削除してください。",
   "sessionCapacityGradesUnavailable": "このバックエンドでは等級別上限を利用できません。",
   "sessionCapacityTotalHelp": "全体上限は等級別上限の合計とは独立しています。この範囲では手動開始にも両方の上限が適用されます。",
   "sessionCapacityTotalLabel": "最大同時実行数",
@@ -856,5 +856,8 @@
   "toolPayload.historyRefsDeleted_one": "{{count}} 件のチェックポイント参照を削除しました",
   "toolPayload.historyRefsDeleted_other": "{{count}} 件のチェックポイント参照を削除しました",
   "toolPayload.historyRetry_one": "{{count}} 件のチェックポイントクリーンアップが再試行待ちです",
-  "toolPayload.historyRetry_other": "{{count}} 件のチェックポイントクリーンアップが再試行待ちです"
+  "toolPayload.historyRetry_other": "{{count}} 件のチェックポイントクリーンアップが再試行待ちです",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.label": "終了したプライマリセッションのキューを引き継ぐ",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.description": "タスクのプライマリセッションが失敗、キャンセル、または完了したとき、待機中のメッセージを新しいプライマリセッションへ移します。",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.riskDescription": "キュー内のメッセージが、登録先とは異なるセッションへ配信される場合があります。各メッセージを元のセッションに残すには、無効のままにしてください。"
 }

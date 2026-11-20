@@ -90,11 +90,18 @@ immediately before the cancel hold was created.
 - Restore is available only when the tree has an active `mode = "cancel"` hold (not
   after individual manual cancellations, which have no snapshot).
 - Restore reads `task_status` from `office_task_tree_hold_members` and writes each
-  member back to that status.
+  member still in `CANCELLED` back to that status. If a member already has its
+  saved status, restore leaves it unchanged and emits no transition. If another
+  writer changed a member to a different status after cancellation, restore
+  preserves that status, logs the skipped member, and continues with the rest of
+  the tree.
 - Tasks that were already `CANCELLED` before the hold was created (pre-existing
   cancellations captured with `skip_reason = "already_cancelled"`) are not restored —
   they remain cancelled.
-- The cancel hold is released (marked `released_at`) on successful restore.
+- The cancel hold is released (marked `released_at`) after every eligible member
+  has been restored or safely skipped. A storage error keeps the hold active so
+  the operator can retry; members already restored are recognized without
+  emitting duplicate transitions.
 
 **UI:** "Restore tree" button visible only on the root task when an active cancel hold
 exists. Replaces the "Cancel tree" button in that state.
@@ -221,7 +228,7 @@ Index: `idx_tree_hold_members_task` on `(task_id)` — supports "is this task ga
 
 **GIVEN** a tree of 5 tasks with 2 having active wakeups, **WHEN** the operator clicks "Cancel tree", **THEN** all 5 tasks are set to `CANCELLED`, the 2 active wakeups are cancelled, task statuses are snapshotted for each member, and a `mode="cancel"` hold is created.
 
-**GIVEN** an active cancel hold exists, **WHEN** the operator clicks "Restore tree", **THEN** each task is restored to its pre-cancel status (excluding tasks that had `skip_reason="already_cancelled"`), and the hold is released.
+**GIVEN** an active cancel hold exists, **WHEN** the operator clicks "Restore tree", **THEN** each unchanged cancelled task is restored to its pre-cancel status, previously cancelled members remain cancelled, drifted members keep their current state, and the hold is released after the remaining restores succeed.
 
 **GIVEN** a task tree has spent across 5 tasks, **WHEN** the operator opens the root task detail, **THEN** the tree cost card shows the aggregated total from `GET /tasks/:rootId/tree/cost-summary`, including token breakdown.
 

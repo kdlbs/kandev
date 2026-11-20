@@ -50,10 +50,7 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	c.mu.RUnlock()
 
 	if conn == nil {
-		if action == agentPromptAction {
-			return nil, &promptUnsentError{ErrAgentStreamNotConnected}
-		}
-		return nil, ErrAgentStreamNotConnected
+		return nil, &RequestNotSentError{Err: ErrAgentStreamNotConnected}
 	}
 
 	reqID := uuid.New().String()
@@ -65,7 +62,7 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	msg, err := ws.NewRequest(reqID, action, payload)
 	if err != nil {
 		tracing.TraceWSResponse(span, "", err)
-		return nil, fmt.Errorf("failed to create request message: %w", err)
+		return nil, &RequestNotSentError{Err: fmt.Errorf("failed to create request message: %w", err)}
 	}
 
 	// Inject trace context (traceparent) into WS message metadata for cross-process propagation
@@ -75,7 +72,7 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	respCh := make(chan *ws.Message, 1)
 	if !c.registerPendingRequest(reqID, respCh, conn) {
 		tracing.TraceWSResponse(span, "", ErrAgentStreamNotConnected)
-		return nil, ErrAgentStreamNotConnected
+		return nil, &RequestNotSentError{Err: ErrAgentStreamNotConnected}
 	}
 
 	// Clean up on exit
@@ -90,7 +87,7 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	data, err := json.Marshal(msg)
 	if err != nil {
 		tracing.TraceWSResponse(span, "", err)
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, &RequestNotSentError{Err: fmt.Errorf("failed to marshal request: %w", err)}
 	}
 
 	c.streamWriteMu.Lock()

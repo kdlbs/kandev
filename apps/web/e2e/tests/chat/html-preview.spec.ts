@@ -196,7 +196,7 @@ test.describe("HTML preview", () => {
     expect(refreshed.version).toBe(2);
     await expect(previewIframe).toHaveAttribute(
       "src",
-      new RegExp(`[?&]v=${refreshed.version}(?:&|$)`),
+      new RegExp(`[?&]kandev_preview_version=${refreshed.version}(?:&|$)`),
       { timeout: 15_000 },
     );
     await expect(frame.locator("#native-status")).toHaveText(
@@ -205,7 +205,7 @@ test.describe("HTML preview", () => {
     );
     const refreshedSrc = await previewIframe.getAttribute("src");
     expect(refreshedSrc).not.toBe(firstSrc);
-    expect(refreshedSrc).toContain(`v=${refreshed.version}`);
+    expect(refreshedSrc).toContain(`kandev_preview_version=${refreshed.version}`);
 
     const secondHtml = nativePreviewHtml(assetDirectory, fileName, "Republished native preview");
     await preview.getByRole("button", { name: "Show code" }).click();
@@ -218,7 +218,7 @@ test.describe("HTML preview", () => {
 
     await expect(session.browserPanel).toHaveCount(0);
     await expect(frame.locator("h1")).toHaveText("Republished native preview", { timeout: 15_000 });
-    await expect(previewIframe).toHaveAttribute("src", /[?&]v=3(?:&|$)/);
+    await expect(previewIframe).toHaveAttribute("src", /[?&]kandev_preview_version=3(?:&|$)/);
 
     await prCapture.screenshot("html-preview-desktop", {
       caption: "Unsaved HTML rendered in place of the desktop editor",
@@ -260,7 +260,50 @@ test.describe("HTML preview", () => {
     await session.activeChat().getByRole("button", { name: "1 preview feedback item" }).click();
 
     await expect(session.browserPanel).toHaveCount(0);
-    await expect(testPage.getByText("Keep this HTML preview action visible")).toBeVisible();
+    await expect(
+      testPage
+        .getByTestId("preview-feedback-collection-popover")
+        .getByText("Keep this HTML preview action visible"),
+    ).toBeVisible();
+  });
+
+  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-002.5
+  test("restores markers and continues numbering after the preview reopens", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    await setupDesktopHtmlPreviewTest({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      title: "HTML Preview Reopen Markers",
+    });
+
+    await testPage.getByTestId("html-preview-toggle").first().click();
+    const preview = testPage.getByTestId("html-preview").first();
+    const frame = preview.frameLocator("iframe");
+    await expect(frame.locator("#increment")).toBeVisible({ timeout: 15_000 });
+    const firstSrc = await preview.locator("iframe").getAttribute("src");
+    const markers = frame.locator("[data-kandev-inspector-marker]");
+
+    await chooseCapture(testPage, "Select element", frame);
+    await frame.locator("#increment").click();
+    await saveDraft(testPage, "Label the counter button");
+    await expect(markers).toHaveText(["1"]);
+
+    await preview.getByRole("button", { name: "Show code" }).click();
+    await testPage.getByTestId("html-preview-toggle").first().click();
+    await expect(frame.locator("#increment")).toBeVisible({ timeout: 15_000 });
+    await expect(preview.locator("iframe")).not.toHaveAttribute("src", firstSrc ?? "");
+    await expect(markers).toHaveText(["1"], { timeout: 15_000 });
+
+    await chooseCapture(testPage, "Select element", frame);
+    await frame.locator("#value").click();
+    await saveDraft(testPage, "Show the count larger");
+    await expect(markers).toHaveText(["1", "2"]);
   });
 
   test("shows a retryable error when the session publish endpoint fails", async ({

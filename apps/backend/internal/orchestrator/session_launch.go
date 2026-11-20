@@ -60,9 +60,11 @@ const (
 	LaunchActivationSourceUserAction   LaunchActivationSource = "user_action"
 	LaunchActivationSourceSessionOpen  LaunchActivationSource = "session_open"
 	LaunchActivationSourceSessionFocus LaunchActivationSource = "session_focus"
+	// LaunchActivationDispositionQueued reports that launch admission was deferred.
+	LaunchActivationDispositionQueued = "queued"
 
 	activationDispositionSuppressed = "suppressed"
-	activationDispositionQueued     = "queued"
+	activationDispositionQueued     = LaunchActivationDispositionQueued
 )
 
 type sessionOpenRecoveryContextKey struct{}
@@ -122,7 +124,9 @@ type recoveryRequiredSignal interface {
 var ErrSessionRecoveryRequired = errors.New("session recovery required")
 
 type sessionRecoveryRequiredError struct {
-	Block *models.SessionRecoveryBlock
+	Block                 *models.SessionRecoveryBlock
+	DeliveryRefusalReason string
+	internalCause         error
 }
 
 func (e *sessionRecoveryRequiredError) Error() string {
@@ -197,12 +201,13 @@ type continuationCheckpoint struct {
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
 	// reusePreparedPrimary is reserved for the recorded dependency launch consumer.
-	reusePreparedPrimary  bool
-	TaskID                string                        `json:"task_id"`
-	Intent                SessionIntent                 `json:"intent,omitempty"`
-	SessionID             string                        `json:"session_id,omitempty"`
-	SessionSettingsPolicy executor.ResumeSettingsPolicy `json:"-"`
-	AgentProfileID        string                        `json:"agent_profile_id,omitempty"`
+	reusePreparedPrimary   bool
+	transientLaunchFailure *transientLaunchFailureIdentity
+	TaskID                 string                        `json:"task_id"`
+	Intent                 SessionIntent                 `json:"intent,omitempty"`
+	SessionID              string                        `json:"session_id,omitempty"`
+	SessionSettingsPolicy  executor.ResumeSettingsPolicy `json:"-"`
+	AgentProfileID         string                        `json:"agent_profile_id,omitempty"`
 	// Explicit MCP spawn intent also sets ProfileExplicit, even for an empty
 	// profile. Workflow session-target routing is bypassed; normal empty-profile
 	// defaults still apply.
@@ -211,17 +216,20 @@ type LaunchSessionRequest struct {
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// IntentStart only; IntentStartCreated keeps its existing profile resolution
 	// behavior.
-	ProfileExplicit   bool     `json:"profile_explicit,omitempty"`
-	ExecutorID        string   `json:"executor_id,omitempty"`
-	ExecutorProfileID string   `json:"executor_profile_id,omitempty"`
-	Prompt            string   `json:"prompt,omitempty"`
-	PlanMode          bool     `json:"plan_mode,omitempty"`
-	WorkflowStepID    string   `json:"workflow_step_id,omitempty"`
-	Priority          string   `json:"priority,omitempty"`
-	LaunchWorkspace   bool     `json:"launch_workspace,omitempty"`
-	SkipMessageRecord bool     `json:"skip_message_record,omitempty"`
-	AutoStart         bool     `json:"auto_start,omitempty"`
-	MCPServerIDs      []string `json:"mcp_server_ids,omitempty"`
+	ProfileExplicit   bool   `json:"profile_explicit,omitempty"`
+	ExecutorID        string `json:"executor_id,omitempty"`
+	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
+	Prompt            string `json:"prompt,omitempty"`
+	PlanMode          bool   `json:"plan_mode,omitempty"`
+	WorkflowStepID    string `json:"workflow_step_id,omitempty"`
+	Priority          string `json:"priority,omitempty"`
+	LaunchWorkspace   bool   `json:"launch_workspace,omitempty"`
+	SkipMessageRecord bool   `json:"skip_message_record,omitempty"`
+	AutoStart         bool   `json:"auto_start,omitempty"`
+	// Origin is server-owned launch provenance. It is excluded from the wire
+	// request so clients cannot request an automatic capacity policy.
+	Origin       string   `json:"-"`
+	MCPServerIDs []string `json:"mcp_server_ids,omitempty"`
 	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
 	// agent launch, even for passthrough profiles (whose prepare would normally
 	// be eagerly upgraded so the PTY exists). It backs the session.ensure
@@ -424,9 +432,21 @@ func IsBenignLaunchTeardownErr(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return true
 	}
+	// A launch that lost its session to a concurrent workflow switch is an
+	// expected handover, not a fault.
+	if executor.IsSessionStateSwitched(err) {
+		return true
+	}
 	msg := err.Error()
 	return strings.Contains(msg, context.Canceled.Error()) ||
 		strings.Contains(msg, sessionTerminalErrText)
+}
+
+// IsWorkflowSwitchLaunchSuperseded reports whether a launch yielded ownership
+// to a workflow profile switch. Launch consumers should treat this as a
+// neutral handoff, not as a failed task start.
+func IsWorkflowSwitchLaunchSuperseded(err error) bool {
+	return executor.IsSessionStateSwitched(err)
 }
 
 func (s *Service) prepareLaunchRequest(
@@ -464,6 +484,9 @@ func (s *Service) prepareLaunchRequest(
 
 // LaunchSession is the unified entry point for all session operations.
 func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) (launchResponse *LaunchSessionResponse, launchErr error) {
+	if req != nil && req.transientLaunchFailure != nil {
+		ctx = withTransientLaunchRetryContext(ctx, *req.transientLaunchFailure)
+	}
 	preparedCtx, intent, err := s.prepareLaunchRequest(ctx, req)
 	if err != nil {
 		return nil, err
@@ -596,10 +619,21 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	if permit != nil && block != nil && block.ConsumerReference == models.InferenceClosureConsumer && block.ID == permit.OperationID {
 		return s.checkOtherRecoveryBlocksForClosure(ctx, sessionID, incarnationID, generation, permit)
 	}
-	if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); resolved {
+	resolved, finishErr := s.finishLoadedNativeDeliveryBlock(ctx, block)
+	if resolved {
 		return nil
 	}
-	return &sessionRecoveryRequiredError{Block: block}
+	required := &sessionRecoveryRequiredError{Block: block}
+	if finishErr != nil {
+		required.DeliveryRefusalReason = deliveryRecoveryRefusalReason(finishErr)
+		required.internalCause = finishErr
+	}
+	if isBootDeliveryReadinessContext(ctx) {
+		s.logBootDeliveryRecoveryRefusal(ctx, sessionID, required, block)
+	} else {
+		s.logDeliveryRecoveryRefusal(ctx, sessionID, required, block)
+	}
+	return required
 }
 
 // GetOpenSessionRecoveryBlock returns the canonical block for an autonomous
@@ -682,7 +716,7 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 	}
 	if !resolved {
 		if action == recoveryActionResume {
-			return sessionRecoveryBlockResolutionGuidance(ctx, store, sessionID, incarnationID, generation, block)
+			return sessionRecoveryBlockResolutionGuidance(ctx, store, sessionID, incarnationID, generation, block, handled)
 		}
 		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
@@ -1194,8 +1228,13 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		DeferInitialPrompt:               req.DeferRecoveryResolution,
 		RecoveryAction:                   req.RecoveryAction,
 		InitialPromptOverride:            req.InitialPromptOverride,
-		StartAgentSynchronously: req.DeferRecoveryResolution &&
-			(req.ForceContextContinuation || req.RecoveryAction == recoveryActionResume),
+		StartAgentSynchronously: req.transientLaunchFailure != nil ||
+			(req.DeferRecoveryResolution && (req.ForceContextContinuation || req.RecoveryAction == recoveryActionResume)),
+	}
+	if req.transientLaunchFailure != nil {
+		resumeOptions.TransientRetryAttemptID = req.transientLaunchFailure.attemptID
+		resumeOptions.TransientRetryErrorStamp = req.transientLaunchFailure.errorStamp
+		resumeOptions.TransientRetryUpdatedAt = req.transientLaunchFailure.updatedAt
 	}
 	if resumeOptions.InitialPromptOverride != nil {
 		s.installLegacyRecoveryPromptGuard(ctx, req.TaskID, &resumeOptions)
@@ -1297,7 +1336,10 @@ func (s *Service) sessionOpenRecoveryWaitingResponse(
 }
 
 func launchOriginForActivation(req *LaunchSessionRequest) launchOrigin {
-	if req != nil && (req.Automatic || req.ActivationSource == LaunchActivationSourceSessionOpen) {
+	if req != nil && (req.Automatic || req.Origin == string(launchOriginAutomatic)) {
+		return launchOriginAutomatic
+	}
+	if req != nil && req.ActivationSource == LaunchActivationSourceSessionOpen {
 		return launchOriginAutomatic
 	}
 	return originFromAutoStart(req != nil && req.AutoStart)
@@ -1596,6 +1638,8 @@ type RecoverSessionOptions struct {
 	IdempotencyKey              string
 	SettingsPolicy              executor.ResumeSettingsPolicy
 	ErrorStamp                  string
+	Origin                      string
+	transientLaunchFailure      *transientLaunchFailureIdentity
 }
 
 // RecoverSession handles user-initiated recovery after an agent CLI failure.
@@ -1636,6 +1680,12 @@ func (s *Service) RecoverSessionWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	if options.transientLaunchFailure != nil {
+		ctx = withTransientLaunchRetryContext(ctx, *options.transientLaunchFailure)
+		if err := s.validateTransientLaunchFailure(ctx, taskID, sessionID, *options.transientLaunchFailure); err != nil {
+			return nil, err
+		}
+	}
 	if s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
@@ -1645,9 +1695,13 @@ func (s *Service) RecoverSessionWithOptions(
 	}
 	if action == recoveryActionResume {
 		if response, handled, err := s.resumePrunedDelivery(ctx, session); handled || err != nil {
+			if err != nil {
+				s.logDeliveryRecoveryRefusal(ctx, sessionID, err, nil)
+			}
 			return response, err
 		}
 		if err := s.checkNativeResumeDeliveryBlock(ctx, taskID, sessionID); err != nil {
+			s.logDeliveryRecoveryRefusal(ctx, sessionID, err, nil)
 			return nil, err
 		}
 	}
@@ -1679,6 +1733,12 @@ func (s *Service) RecoverSessionWithOptions(
 		}
 	}
 	resumeOptions := executor.ResumeOptions{}
+	resumeOptions.Origin = options.Origin
+	if options.transientLaunchFailure != nil {
+		resumeOptions.TransientRetryAttemptID = options.transientLaunchFailure.attemptID
+		resumeOptions.TransientRetryErrorStamp = options.transientLaunchFailure.errorStamp
+		resumeOptions.TransientRetryUpdatedAt = options.transientLaunchFailure.updatedAt
+	}
 	var checkpoint *continuationCheckpoint
 	var continuation executor.ContextContinuation
 	if action == recoveryActionContinueHistory {
@@ -1699,7 +1759,10 @@ func (s *Service) RecoverSessionWithOptions(
 		}
 	}
 
-	recoveryAdmission, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
+	recoveryAdmission, releaseReplacement, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
+	if releaseReplacement != nil {
+		defer s.releaseRecoveryReplacement(context.WithoutCancel(ctx), releaseReplacement, taskID, sessionID)
+	}
 	if err != nil {
 		if checkpoint != nil {
 			if settleErr := s.finishContinuationCheckpoint(context.WithoutCancel(ctx), checkpoint, models.ContinuitySnapshotUncertain); settleErr != nil {
@@ -1748,7 +1811,7 @@ func (s *Service) RecoverSessionWithOptions(
 		}
 	}
 
-	if err := s.applyRecoveryActionWithSettlement(launchCtx, recoveryAdmission, sessionID, action); err != nil {
+	if err := s.applyRecoveryActionWithSettlement(launchCtx, recoveryAdmission, taskID, sessionID, action); err != nil {
 		if checkpoint != nil {
 			if settleErr := s.finishContinuationCheckpoint(context.WithoutCancel(ctx), checkpoint, models.ContinuitySnapshotUncertain); settleErr != nil {
 				err = errors.Join(err, settleErr)
@@ -1778,6 +1841,8 @@ func (s *Service) RecoverSessionWithOptions(
 		RepairWorkspaceInventory:         action == recoveryActionRepairWorkspaceInventory,
 		WorkspaceInventoryIdempotencyKey: strings.TrimSpace(options.IdempotencyKey),
 		SessionSettingsPolicy:            options.SettingsPolicy,
+		Origin:                           options.Origin,
+		transientLaunchFailure:           options.transientLaunchFailure,
 		ForceContextContinuation:         resumeOptions.ForceContextContinuation,
 		ContinuationPrompt:               resumeOptions.ContinuationPrompt,
 		RecoveryAction:                   action,
@@ -1790,6 +1855,9 @@ func (s *Service) RecoverSessionWithOptions(
 		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
 	}
 	if err != nil {
+		if action == recoveryActionResume {
+			s.logDeliveryRecoveryRefusal(launchCtx, sessionID, err, nil)
+		}
 		if recoveryAdmission != nil {
 			if persistErr := recoveryAdmission.CompleteRecoveryResume(launchCtx, false, "resume_failed"); persistErr != nil {
 				err = errors.Join(err, persistErr)
@@ -1798,11 +1866,15 @@ func (s *Service) RecoverSessionWithOptions(
 		return s.handleContinuationLaunchError(ctx, checkpoint, err)
 	}
 	if err := completeRecoveryResumeAfterLaunch(launchCtx, recoveryAdmission, resp); err != nil {
+		if action == recoveryActionResume {
+			s.logDeliveryRecoveryRefusal(launchCtx, sessionID, err, nil)
+		}
 		return nil, err
 	}
 	if checkpoint == nil {
 		if action == recoveryActionResume {
 			if err := s.completeResumeRecoveryBlock(ctx, sessionID); err != nil {
+				s.logDeliveryRecoveryRefusal(ctx, sessionID, err, nil)
 				return nil, normalizeRecoverSessionError(err)
 			}
 		}
@@ -1900,8 +1972,15 @@ func completeRecoveryResumeAfterLaunch(
 func (s *Service) applyRecoveryActionWithSettlement(
 	ctx context.Context,
 	admission *worktree.RecoveryAdmission,
-	sessionID, action string,
+	taskID, sessionID, action string,
 ) error {
+	if identity, ok := transientLaunchFailureFromContext(ctx); ok {
+		release := s.acquireSessionLifecycleLock(sessionID)
+		defer release()
+		if err := s.validateTransientLaunchFailure(ctx, taskID, sessionID, identity); err != nil {
+			return err
+		}
+	}
 	if err := s.applySessionRecoveryAction(ctx, sessionID, action); err != nil {
 		if admission != nil {
 			if persistErr := admission.CompleteRecoveryResume(ctx, false, "resume_action_failed"); persistErr != nil {
@@ -1929,19 +2008,22 @@ func (s *Service) preflightSessionRecovery(
 	taskID string,
 	session *models.TaskSession,
 	action string,
-) (*worktree.RecoveryAdmission, error) {
+) (*worktree.RecoveryAdmission, func(context.Context) error, error) {
 	// Inventory repair must attest the original checkout before any filesystem
 	// recovery can modify it. Its executor path validates inventory first.
 	if action == recoveryActionRepairWorkspaceInventory {
-		return nil, nil
+		return nil, nil, nil
 	}
-	admission, err := s.executor.PreflightSessionWorktreeRecovery(
+	return s.executor.PreflightSessionWorktreeRecovery(
 		ctx, taskID, session, action == recoveryActionResumeNewBranch,
 	)
-	if err != nil {
-		return nil, err
+}
+
+func (s *Service) releaseRecoveryReplacement(ctx context.Context, release func(context.Context) error, taskID, sessionID string) {
+	if err := release(ctx); err != nil {
+		s.logger.Warn("failed to release unused recovery replacement",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
 	}
-	return admission, nil
 }
 
 func (s *Service) loadSessionForRecovery(

@@ -66,6 +66,23 @@ describe("preview feedback API", () => {
       expected_version: 1,
     });
 
+    await previewApi.replaceTaskPreviewFeedbackScreenshot({
+      taskId: TASK_ID,
+      id: FEEDBACK_ID,
+      expectedVersion: 2,
+      captureRect: { x: 1, y: 2, width: 30, height: 40 },
+      screenshotAttachmentId: "staged-1",
+    });
+    expect(request).toHaveBeenLastCalledWith("task.preview_feedback.update", {
+      task_id: TASK_ID,
+      id: FEEDBACK_ID,
+      expected_version: 2,
+      capture: {
+        capture_rect: { x: 1, y: 2, width: 30, height: 40 },
+        screenshot_attachment_id: "staged-1",
+      },
+    });
+
     await previewApi.deleteTaskPreviewFeedback({
       taskId: TASK_ID,
       id: FEEDBACK_ID,

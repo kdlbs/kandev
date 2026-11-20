@@ -808,6 +808,10 @@ func childJSONLogFields(decoder *json.Decoder, context *childLogContext) ([5]jso
 		}
 		mask := uint8(1 << field)
 		if seen&mask != 0 {
+			if field == childJSONFlowField {
+				values[field] = nil
+				continue
+			}
 			return values, false
 		}
 		seen |= mask

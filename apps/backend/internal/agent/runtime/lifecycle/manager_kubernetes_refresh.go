@@ -205,10 +205,9 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 			return
 		}
 		currentClient, currentGeneration := execution.projectMCPRemotePrepared()
-		if currentGeneration == priorGeneration && currentClient == priorClient {
-			return
+		if currentGeneration != priorGeneration || currentClient != priorClient {
+			_ = m.cleanupProjectMCPFiles(context.Background(), execution, client)
 		}
-		_ = m.cleanupProjectMCPFiles(context.Background(), execution, client)
 		execution.setProjectMCPDelivery(priorDelivery)
 		execution.setProjectMCPRemotePrepared(priorClient, priorGeneration)
 	}()

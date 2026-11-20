@@ -97,6 +97,7 @@ type UpdateUserSettingsRequest struct {
 	LspAutoStartLanguages             *[]string
 	LspAutoInstallLanguages           *[]string
 	LspServerConfigs                  *map[string]map[string]interface{}
+	MarkdownPreviewByDefault          *bool
 	LspStatusLocation                 *string
 	SavedLayouts                      *[]models.SavedLayout
 	SidebarViews                      *[]models.SidebarView
@@ -452,6 +453,9 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.MarkdownPreviewByDefault != nil {
+		settings.MarkdownPreviewByDefault = *req.MarkdownPreviewByDefault
+	}
 	if req.ShowTurnChangedFiles != nil {
 		settings.ShowTurnChangedFiles = *req.ShowTurnChangedFiles
 	}
@@ -1279,6 +1283,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"lsp_auto_start_languages":                 settings.LspAutoStartLanguages,
 		"lsp_auto_install_languages":               settings.LspAutoInstallLanguages,
 		"lsp_server_configs":                       settings.LspServerConfigs,
+		"markdown_preview_by_default":              settings.MarkdownPreviewByDefault,
 		"lsp_status_location":                      models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"saved_layouts":                            settings.SavedLayouts,
 		"sidebar_views":                            settings.SidebarViews,

@@ -85,6 +85,7 @@
   "instructionsLabel": "Instruções",
   "interpretedAsUtcSetTimezone": "interpretado como UTC, defina um fuso horário",
   "lastRan": "Última execução {{when}}",
+  "runStatusWithAge": "{{status}}: {{age}}",
   "listDescription": "Crie regras que acionam tarefas de agente automaticamente.",
   "loading": "A carregar...",
   "loadingActivity": "A carregar a atividade…",

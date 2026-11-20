@@ -39,6 +39,9 @@ type Instance struct {
 	// ID is the unique identifier for this instance
 	ID string
 
+	// ScopedMCPRoutes records the effective native MCP route mode.
+	ScopedMCPRoutes bool
+
 	// Port is the HTTP port this instance is listening on
 	Port int
 
@@ -152,6 +155,9 @@ type CreateRequest struct {
 	InferenceClosureOperationID string `json:"inference_closure_operation_id,omitempty"`
 	// ID is an optional identifier for the instance. If empty, one will be generated.
 	ID string `json:"id,omitempty"`
+
+	// ScopedMCPRoutes opts this helper into instance-scoped built-in MCP routes.
+	ScopedMCPRoutes bool `json:"scoped_mcp_routes,omitempty"`
 
 	// WorkspacePath is the required absolute path to the workspace directory.
 	WorkspacePath string `json:"workspace_path"`
@@ -273,6 +279,9 @@ type CreateResponse struct {
 
 	// Port is the HTTP port the instance is listening on
 	Port int `json:"port"`
+
+	// ScopedMCPRoutes is the effective mode accepted by this helper.
+	ScopedMCPRoutes bool `json:"scoped_mcp_routes"`
 }
 
 // InstanceInfo contains serializable information about an instance for API responses.
@@ -280,6 +289,9 @@ type CreateResponse struct {
 type InstanceInfo struct {
 	// ID is the unique identifier for this instance
 	ID string `json:"id"`
+
+	// ScopedMCPRoutes is the retained helper's effective route mode.
+	ScopedMCPRoutes bool `json:"scoped_mcp_routes"`
 
 	// Port is the HTTP port this instance is listening on
 	Port int `json:"port"`
@@ -359,6 +371,7 @@ func (i *Instance) Info() *InstanceInfo {
 
 	return &InstanceInfo{
 		ID:                         i.ID,
+		ScopedMCPRoutes:            i.ScopedMCPRoutes,
 		Port:                       i.Port,
 		LeaseGeneration:            i.lease.Generation,
 		ListenerActive:             i.listenerActive.Load(),

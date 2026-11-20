@@ -151,10 +151,10 @@ func (c *journalReconnectControl) CreateInstance(_ context.Context, req *agentct
 	c.held[req.ID] = opened
 	port := c.nextPort
 	c.nextPort++
-	c.instances[req.ID] = &agentctl.InstanceInfo{ID: req.ID, TaskID: req.TaskID, SessionID: req.SessionID, Port: port}
+	c.instances[req.ID] = &agentctl.InstanceInfo{ID: req.ID, ScopedMCPRoutes: req.ScopedMCPRoutes, TaskID: req.TaskID, SessionID: req.SessionID, Port: port}
 	c.running[req.ID] = false
 	c.deliverySession[req.ID] = req.SessionID
-	return &agentctl.CreateInstanceResponse{ID: req.ID, Port: port}, nil
+	return &agentctl.CreateInstanceResponse{ID: req.ID, Port: port, ScopedMCPRoutes: req.ScopedMCPRoutes}, nil
 }
 
 func newReconnectStatusServer(t *testing.T, control *journalReconnectControl) *httptest.Server {
@@ -221,13 +221,14 @@ func TestDockerReconnectReconcilesPreviousJournalOwner(t *testing.T) {
 	server := newReconnectStatusServer(t, control)
 	exec, req, docker := reconnectRequest(t, server, "exec-new", "exec-old", "session-1")
 
-	port, reusing, instanceID, err := exec.findExistingInstance(
+	port, reusing, instanceID, scopedMCPRoutes, err := exec.findExistingInstance(
 		context.Background(), docker, control, req, "container-1", "172.17.0.2", "exec-new", "token",
 	)
 	require.NoError(t, err)
 	require.False(t, reusing, "a stopped owner must be disposed before a replacement is created")
 	require.Equal(t, 42001, port)
 	require.Equal(t, "exec-new", instanceID)
+	require.True(t, scopedMCPRoutes, "replacement response must carry the accepted route mode")
 	require.Equal(t, []string{
 		"GET exec-new",
 		"LIST",
@@ -251,13 +252,14 @@ func TestDockerReconnectAdoptsLivePreviousJournalOwner(t *testing.T) {
 	server := newReconnectStatusServer(t, control)
 	exec, req, docker := reconnectRequest(t, server, "exec-new", "exec-old", "session-1")
 
-	port, reusing, instanceID, err := exec.findExistingInstance(
+	port, reusing, instanceID, scopedMCPRoutes, err := exec.findExistingInstance(
 		context.Background(), docker, control, req, "container-1", "172.17.0.2", "exec-new", "token",
 	)
 	require.NoError(t, err)
 	require.True(t, reusing, "a live initialized owner must be adopted without a second journal open")
 	require.Equal(t, 41001, port)
 	require.Equal(t, "exec-old", instanceID, "adoption must keep the agentctl instance identity")
+	require.False(t, scopedMCPRoutes, "old helper InstanceInfo defaults to legacy routes")
 	require.Equal(t, []string{"GET exec-new", "LIST"}, control.recordedMethods())
 	control.mu.Lock()
 	defer control.mu.Unlock()
@@ -276,7 +278,7 @@ func TestDockerReconnectKeepsDistinctSessionJournalOwner(t *testing.T) {
 	server := newReconnectStatusServer(t, control)
 	exec, req, docker := reconnectRequest(t, server, "exec-new", "exec-old", "session-1")
 
-	port, reusing, instanceID, err := exec.findExistingInstance(
+	port, reusing, instanceID, _, err := exec.findExistingInstance(
 		context.Background(), docker, control, req, "container-1", "172.17.0.2", "exec-new", "token",
 	)
 	require.NoError(t, err)
@@ -303,7 +305,7 @@ func TestDockerReconnectBlocksOnUnresolvedOwner(t *testing.T) {
 	server := newReconnectStatusServer(t, control)
 	exec, req, docker := reconnectRequest(t, server, "exec-new", "stopped-exec", "session-1")
 
-	_, _, _, err := exec.findExistingInstance(
+	_, _, _, _, err := exec.findExistingInstance(
 		context.Background(), docker, control, req, "container-1", "172.17.0.2", "exec-new", "token",
 	)
 	require.Error(t, err)
@@ -323,7 +325,7 @@ func TestDockerReconnectFailedDisposalBlocksReplacement(t *testing.T) {
 	server := newReconnectStatusServer(t, control)
 	exec, req, docker := reconnectRequest(t, server, "exec-new", "exec-old", "session-1")
 
-	_, _, _, err := exec.findExistingInstance(
+	_, _, _, _, err := exec.findExistingInstance(
 		context.Background(), docker, control, req, "container-1", "172.17.0.2", "exec-new", "token",
 	)
 	require.Error(t, err)
@@ -343,7 +345,7 @@ func TestJournalFailureCannotSelectLegacyReconnect(t *testing.T) {
 	server := newReconnectStatusServer(t, control)
 	exec, req, docker := reconnectRequest(t, server, "exec-new", "", "session-1")
 
-	_, _, _, err = exec.findExistingInstance(
+	_, _, _, _, err = exec.findExistingInstance(
 		context.Background(), docker, control, req, "container-1", "172.17.0.2", "exec-new", "token",
 	)
 	require.Error(t, err, "a journal acquisition failure must not downgrade to legacy delivery")

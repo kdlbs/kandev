@@ -723,6 +723,7 @@
   "routeOutcomeRetryScheduled": "retry scheduled",
   "routeOutcomeSkippedDegraded": "skipped degraded",
   "routeOutcomeSkippedMaxAttempts": "skipped max attempts",
+  "routeOutcomeSkippedAuthorProvider": "skipped: wrote this task",
   "routeOutcomeSkippedMissingMapping": "skipped missing mapping",
   "routeOutcomeSkippedUserAction": "skipped user action",
   "routineActivated": "Routine activated",
@@ -745,6 +746,7 @@
   "routineStatusPaused": "Paused",
   "routingOverridesSaved": "Routing overrides saved",
   "routingSettingsSaved": "Routing settings saved",
+  "routingSavedWithExclusionWarnings": "Settings saved, but Review on a different provider can't work as set up. See the warning at the top of the page.",
   "run": "Run",
   "runActivity": "Run Activity",
   "runCancelAssigneeChanged": "Assignee changed",
@@ -1024,5 +1026,10 @@
   "failedToLoadRouteAttempts": "Failed to load route attempts",
   "failedToLoadRoutingConfig": "Failed to load routing config",
   "failedToLoadRoutingPreview": "Failed to load routing preview",
-  "failedToLoadTaskQuorum": "Failed to load task quorum"
+  "failedToLoadTaskQuorum": "Failed to load task quorum",
+  "authorExclusionStepsTitle": "Review on a different provider",
+  "authorExclusionStepsDescription": "Keep a step's reviewer or approver off the provider that did the task's work, so the review is an independent check. If no other provider is available, the review waits until you act. Needs Automatic provider fallback and at least two providers. Agents with their own execution profile are not covered.",
+  "authorExclusionStepsEmpty": "No workflow in this workspace has a reviewer or approver step.",
+  "authorExclusionStepLabel": "{{workflow}} workflow, {{step}} step",
+  "authorExclusionStepSwitchLabel": "Review on a different provider for {{workflow}} workflow, {{step}} step ({{role}})"
 }

@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import Editor from "@monaco-editor/react";
 import { useTheme } from "@/components/theme/app-theme";
-import { Button } from "@kandev/ui/button";
-import { IconMessagePlus } from "@tabler/icons-react";
+import { EditorSelectionCommentTrigger } from "@/components/editors/editor-selection-comment-trigger";
 import { getMonacoLanguage } from "@/lib/editor/language-map";
 import { EDITOR_FONT_FAMILY, EDITOR_FONT_SIZE } from "@/lib/theme/editor-theme";
 import { CommentForm } from "@/components/diff/comment-form";
@@ -34,6 +33,9 @@ type MonacoCodeEditorProps = {
   worktreePath?: string;
   isSymlink?: boolean;
   repo?: string;
+  readOnly?: boolean;
+  enableLsp?: boolean;
+  showToolbar?: boolean;
   enableComments?: boolean;
   previewKind?: FilePreviewKind;
   onTogglePreview?: () => void;
@@ -128,6 +130,7 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
     sessionId,
     worktreePath,
     repo,
+    enableLsp,
     enableComments = false,
     onChange,
     onSave,
@@ -157,6 +160,7 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
     contentRef,
     editorRef: state.editorRef,
     editorReady: state.editorInstance !== null,
+    enableLsp,
   });
   useMonacoCursorNavigation({
     editor: state.editorInstance,
@@ -196,21 +200,29 @@ function EditorLoading() {
   );
 }
 
-function MonacoFloatingCommentButton({ state }: { state: EditorState }) {
-  const { t } = useTranslation();
-  if (!state.floatingButtonPos || state.formZoneRange) return null;
+function MonacoCommentTrigger({
+  state,
+  hostRef,
+  onDockClearanceChange,
+}: {
+  state: EditorState;
+  hostRef: RefObject<HTMLElement | null>;
+  onDockClearanceChange: (clearance: number) => void;
+}) {
+  if (state.formZoneRange) return null;
+  const visible = state.touch ? state.hasSelection : Boolean(state.floatingButtonPos);
+  if (!visible) return null;
+  const point = state.floatingButtonPos ?? { x: 0, y: 0 };
   return (
-    <Button
-      size="sm"
-      variant="secondary"
-      className="floating-comment-btn absolute z-50 gap-1.5 shadow-lg animate-in fade-in-0 zoom-in-95 duration-100 cursor-pointer"
-      style={{ left: state.floatingButtonPos.x + 4, top: state.floatingButtonPos.y + 2 }}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={state.handleFloatingButtonClick}
-    >
-      <IconMessagePlus className="h-3.5 w-3.5" />
-      {t("editors:comment")}
-    </Button>
+    <EditorSelectionCommentTrigger
+      touch={state.touch}
+      position={{ left: point.x + 4, top: point.y + 2 }}
+      positioning="absolute"
+      hostRef={hostRef}
+      reserveRef={null}
+      onDockClearanceChange={onDockClearanceChange}
+      onOpen={() => state.handleFloatingButtonClick()}
+    />
   );
 }
 
@@ -222,11 +234,63 @@ type MonacoEditorViewProps = {
   state: EditorState;
   lsp: ReturnType<typeof useMonacoEditorLsp>;
   diffStats: { additions: number; deletions: number } | null;
-  options: typeof EDITOR_OPTIONS & { wordWrap: "on" | "off" };
+  options: typeof EDITOR_OPTIONS & {
+    wordWrap: "on" | "off";
+    padding: { top: number; bottom?: number };
+  };
   resolvedTheme: string | undefined;
   showLspStatus: boolean;
   walkthroughRange: ReturnType<typeof useMonacoWalkthroughRange>;
 };
+
+function MonacoEditorToolbarView({
+  props,
+  state,
+  lsp,
+  diffStats,
+  showLspStatus,
+}: {
+  props: MonacoCodeEditorProps;
+  state: EditorState;
+  lsp: ReturnType<typeof useMonacoEditorLsp>;
+  diffStats: { additions: number; deletions: number } | null;
+  showLspStatus: boolean;
+}) {
+  if (props.showToolbar === false) return null;
+  return (
+    <MonacoEditorToolbar
+      isSymlink={props.isSymlink}
+      path={props.path}
+      repositoryName={props.repo}
+      worktreePath={props.worktreePath}
+      isDirty={props.isDirty}
+      isSaving={props.isSaving}
+      diffStats={diffStats}
+      wrapEnabled={state.wrapEnabled}
+      showDiffIndicators={state.showDiffIndicators}
+      enableComments={props.enableComments ?? false}
+      sessionId={props.sessionId}
+      commentCount={state.comments.length}
+      hasRemoteUpdate={props.hasRemoteUpdate ?? false}
+      hasVcsDiff={Boolean(props.vcsDiff)}
+      lspStatus={lsp.lspStatus}
+      lspProgress={lsp.lspProgress}
+      lspLanguage={lsp.lspLanguage}
+      showLspStatus={showLspStatus}
+      onToggleLsp={lsp.toggleLsp}
+      onToggleWrap={() => state.setWrapEnabled(!state.wrapEnabled)}
+      onToggleDiffIndicators={() => state.setShowDiffIndicators(!state.showDiffIndicators)}
+      onSave={props.onSave}
+      onReloadFromAgent={props.onReloadFromAgent}
+      onDelete={props.onDelete}
+      onDownload={props.onDownload}
+      previewKind={props.previewKind}
+      onTogglePreview={props.onTogglePreview}
+      onPreviewHtml={props.onPreviewHtml}
+      isPublishingHtmlPreview={props.isPublishingHtmlPreview}
+    />
+  );
+}
 
 function MonacoEditorView({
   props,
@@ -241,53 +305,31 @@ function MonacoEditorView({
   showLspStatus,
   walkthroughRange,
 }: MonacoEditorViewProps) {
-  const {
-    path,
-    content,
-    isDirty,
-    hasRemoteUpdate = false,
-    vcsDiff,
-    isSaving,
-    sessionId,
-    worktreePath,
-    repo,
-    enableComments = false,
-  } = props;
+  const [dockClearance, setDockClearance] = useState(0);
+  const editorOptions = {
+    ...options,
+    readOnly: props.readOnly ?? false,
+    padding: {
+      ...options.padding,
+      bottom: Math.max(options.padding.bottom ?? 0, dockClearance),
+    },
+  };
+  const { content } = props;
 
   return (
     <div ref={wrapperRef} className="flex h-full flex-col rounded-lg">
-      <MonacoEditorToolbar
-        isSymlink={props.isSymlink}
-        path={path}
-        repositoryName={repo}
-        worktreePath={worktreePath}
-        isDirty={isDirty}
-        isSaving={isSaving}
+      <MonacoEditorToolbarView
+        props={props}
+        state={state}
+        lsp={lsp}
         diffStats={diffStats}
-        wrapEnabled={state.wrapEnabled}
-        showDiffIndicators={state.showDiffIndicators}
-        enableComments={enableComments}
-        sessionId={sessionId}
-        commentCount={state.comments.length}
-        hasRemoteUpdate={hasRemoteUpdate}
-        hasVcsDiff={Boolean(vcsDiff)}
-        lspStatus={lsp.lspStatus}
-        lspProgress={lsp.lspProgress}
-        lspLanguage={lsp.lspLanguage}
         showLspStatus={showLspStatus}
-        onToggleLsp={lsp.toggleLsp}
-        onToggleWrap={() => state.setWrapEnabled(!state.wrapEnabled)}
-        onToggleDiffIndicators={() => state.setShowDiffIndicators(!state.showDiffIndicators)}
-        onSave={props.onSave}
-        onReloadFromAgent={props.onReloadFromAgent}
-        onDelete={props.onDelete}
-        onDownload={props.onDownload}
-        previewKind={props.previewKind}
-        onTogglePreview={props.onTogglePreview}
-        onPreviewHtml={props.onPreviewHtml}
-        isPublishingHtmlPreview={props.isPublishingHtmlPreview}
       />
-      <div className="flex-1 overflow-hidden relative" ref={editorAreaRef}>
+      <div
+        className="flex-1 overflow-hidden relative"
+        ref={editorAreaRef}
+        data-testid="monaco-editor-area"
+      >
         <Editor
           height="100%"
           language={language}
@@ -297,7 +339,7 @@ function MonacoEditorView({
           onChange={state.handleChange}
           onMount={state.handleEditorDidMount}
           keepCurrentModel
-          options={options}
+          options={editorOptions}
           loading={<EditorLoading />}
         />
         {walkthroughRange ? (
@@ -315,7 +357,11 @@ function MonacoEditorView({
             }}
           />
         ) : null}
-        <MonacoFloatingCommentButton state={state} />
+        <MonacoCommentTrigger
+          state={state}
+          hostRef={editorAreaRef}
+          onDockClearanceChange={setDockClearance}
+        />
       </div>
     </div>
   );

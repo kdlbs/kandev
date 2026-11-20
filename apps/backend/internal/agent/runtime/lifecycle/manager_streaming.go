@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"errors"
+	"github.com/kandev/kandev/internal/task/models"
 	"strings"
 	"time"
 
@@ -104,6 +105,7 @@ func (m *Manager) streamCoalescer(execution *AgentExecution) *streamCoalescer {
 					true,
 					chunk.diagnostic,
 					chunk.promptGeneration,
+					chunk.conversationReceipt,
 				)
 				return
 			}
@@ -400,7 +402,7 @@ func (m *Manager) publishStreamingContentNow(
 		attemptID = execution.currentStartupAttemptID()
 	}
 	m.publishStreamingContentNowWithProjection(
-		execution, eventType, messageID, content, isAppend, attemptID, false, false, promptGeneration,
+		execution, eventType, messageID, content, isAppend, attemptID, false, false, promptGeneration, nil,
 	)
 }
 
@@ -411,6 +413,7 @@ func (m *Manager) publishCanonicalStreamingContent(
 	content string,
 	isAppend bool,
 	diagnostic bool,
+	receipt *models.ConversationMutationReceipt,
 ) {
 	if content == "" {
 		return
@@ -422,6 +425,7 @@ func (m *Manager) publishCanonicalStreamingContent(
 		isAppend:            isAppend,
 		attemptID:           execution.currentStartupAttemptID(),
 		canonicalProjection: true,
+		conversationReceipt: receipt,
 		diagnostic:          diagnostic,
 		promptGeneration:    execution.promptGenerationSnapshot(),
 	})
@@ -437,6 +441,7 @@ func (m *Manager) publishStreamingContentNowWithProjection(
 	canonicalProjection bool,
 	diagnostic bool,
 	promptGeneration uint64,
+	receipt *models.ConversationMutationReceipt,
 ) {
 	if attemptID == "" {
 		attemptID = execution.currentStartupAttemptID()
@@ -452,6 +457,7 @@ func (m *Manager) publishStreamingContentNowWithProjection(
 		ProviderDiagnosticCandidate: diagnostic,
 		PromptGeneration:            promptGeneration,
 		CanonicalProjection:         canonicalProjection,
+		ConversationReceipt:         receipt,
 	}
 	if eventType == thinkingStreamingEventType {
 		event.MessageType = "thinking"

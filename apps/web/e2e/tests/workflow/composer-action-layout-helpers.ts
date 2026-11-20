@@ -55,6 +55,7 @@ export async function prepareComposerCapture(chat: Locator): Promise<void> {
 /**
  * Checks rendered line placement, containment, touch targets, and page overflow.
  * @covers AC-UI-COMPOSER-ACTION-WRAP-001.1, .2, .3, .5
+ * On phones, `wrapped: false` asserts the action shares one row with the utilities.
  */
 export async function expectComposerActionLayout(
   chat: Locator,
@@ -92,7 +93,21 @@ export async function expectComposerActionLayout(
 
   const phone = (await chat.page().evaluate(() => window.innerWidth)) < 768;
   if (phone) {
-    expect(proceedBox.y + proceedBox.height).toBeLessThanOrEqual(controlsBox.y);
+    // Progression leads the shared phone row; crowded controls wrap without overlapping it.
+    for (const box of controlBoxes) {
+      const overlaps =
+        proceedBox.x < box.x + box.width - 1 &&
+        box.x < proceedBox.x + proceedBox.width - 1 &&
+        proceedBox.y < box.y + box.height - 1 &&
+        box.y < proceedBox.y + proceedBox.height - 1;
+      expect(overlaps).toBe(false);
+    }
+    if (wrapped === false) {
+      expect(
+        Math.abs(proceedBox.y + proceedBox.height / 2 - (controlsBox.y + controlsBox.bottom) / 2),
+      ).toBeLessThanOrEqual(2);
+      expect(proceedBox.x + proceedBox.width).toBeLessThanOrEqual(controlsBox.x + 1);
+    }
   } else if (wrapped) {
     expect(proceedBox.y).toBeGreaterThanOrEqual(controlsBox.bottom);
   } else if (wrapped === false) {
@@ -105,10 +120,15 @@ export async function expectComposerActionLayout(
     const style = getComputedStyle(element);
     return { left: parseFloat(style.paddingLeft), right: parseFloat(style.paddingRight) };
   });
-  expect(
-    Math.abs(proceedBox.x + proceedBox.width - (rowBox.x + rowBox.width - padding.right)),
-  ).toBeLessThanOrEqual(1);
+  if (!phone) {
+    expect(
+      Math.abs(proceedBox.x + proceedBox.width - (rowBox.x + rowBox.width - padding.right)),
+    ).toBeLessThanOrEqual(1);
+  }
   expect(proceedBox.x).toBeGreaterThanOrEqual(rowBox.x + padding.left);
+  expect(proceedBox.x + proceedBox.width).toBeLessThanOrEqual(
+    rowBox.x + rowBox.width - padding.right + 1,
+  );
   expect(proceedBox.y + proceedBox.height).toBeLessThanOrEqual(rowBox.y + rowBox.height + 1);
   if (touch) {
     expect(proceedBox.width).toBeGreaterThanOrEqual(44);

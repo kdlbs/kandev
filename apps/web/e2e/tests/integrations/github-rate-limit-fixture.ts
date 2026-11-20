@@ -43,7 +43,11 @@ const DISCOVERY_RECOVERED = {
   credential_generation: 1,
 };
 
-export async function stubGitHubRateLimits(page: Page, workspaceId: string) {
+export async function stubGitHubRateLimits(
+  page: Page,
+  workspaceId: string,
+  options: { retryAt?: string } = {},
+) {
   let recovered = false;
   await page.route("**/api/v1/github/status?*", async (route) => {
     const url = new URL(route.request().url());
@@ -54,7 +58,9 @@ export async function stubGitHubRateLimits(page: Page, workspaceId: string) {
     const response = await route.fetch();
     const body = (await response.json()) as Record<string, unknown>;
     const refreshed = url.searchParams.get("refresh_rate_limit") === "true";
-    body.pr_discovery_health = recovered ? DISCOVERY_RECOVERED : DISCOVERY_FAILURE;
+    body.pr_discovery_health = recovered
+      ? DISCOVERY_RECOVERED
+      : { ...DISCOVERY_FAILURE, retry_at: options.retryAt ?? DISCOVERY_FAILURE.retry_at };
     if (refreshed) {
       body.rate_limit = REFRESHED_RATE_LIMIT;
     } else {

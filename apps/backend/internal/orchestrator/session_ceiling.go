@@ -139,12 +139,13 @@ type SessionCeilingObservation struct {
 // the reservation set happens under its one mutex, together with the population
 // read it is compared against.
 type sessionCeilingController struct {
-	runSessions      RunSessionCapacitySource
-	inferenceStore   *sessioncapacity.Store
-	inferenceRefresh func(context.Context)
-	inferenceKnown   bool
-	inferenceWakeMu  sync.Mutex
-	inferenceWake    chan struct{}
+	runSessions       RunSessionCapacitySource
+	inferenceStore    *sessioncapacity.Store
+	inferenceRefresh  func(context.Context)
+	inferenceKnown    bool
+	inferenceRevision uint64
+	inferenceWakeMu   sync.Mutex
+	inferenceWake     chan struct{}
 
 	policy       string
 	gradeLimits  map[string]int
@@ -195,7 +196,12 @@ func (c *sessionCeilingController) setCeiling(ceiling int) bool {
 	}
 	c.mu.Lock()
 	previous := c.ceiling
+	wasRequired := c.policy == sessioncapacity.PolicyAll && (c.ceiling != unlimitedSessionCeiling || len(c.gradeLimits) > 0)
 	c.ceiling = ceiling
+	if required := c.policy == sessioncapacity.PolicyAll && (c.ceiling != unlimitedSessionCeiling || len(c.gradeLimits) > 0); required != wasRequired {
+		c.inferenceRevision++
+		c.inferenceKnown = false
+	}
 	c.mu.Unlock()
 	return previous != ceiling
 }

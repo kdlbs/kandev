@@ -136,6 +136,7 @@ import (
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/workflow/stepevents"
 
 	// Repository cloning
 	"github.com/kandev/kandev/internal/repoclone"
@@ -386,6 +387,12 @@ func initializeApplication(ctx context.Context, cfg *config.Config, log *logger.
 	eventBus := eventBusProvider.Bus
 
 	return startServices(ctx, cfg, log, addCleanup, eventBus, runCleanups, workerCancelFromContext(ctx))
+}
+
+func startTaskBackgroundWorkers(ctx context.Context, taskSvc *taskservice.Service, stallDetectionThreshold time.Duration) {
+	startup.AfterReady(ctx, func() { taskSvc.StartAutoArchiveLoop(ctx) })
+	taskSvc.SetStallDetectionThreshold(stallDetectionThreshold)
+	startup.AfterReady(ctx, func() { taskSvc.StartSessionReconciliationLoop(ctx) })
 }
 
 // applyStartupRuntimeFlags resolves persisted runtime-flag overrides and
@@ -1200,6 +1207,11 @@ func startGatewayAndServe(
 		log.Error("Failed to initialize WebSocket gateway", zap.Error(err))
 		return false
 	}
+	if services.Plugins != nil {
+		services.Plugins.SetNotificationProviderAccess(notificationSvc)
+		notificationSvc.SetFormatterRuntime(services.Plugins)
+	}
+	addCleanup(func() error { notificationSvc.CloseFormatterCaptures(); return nil })
 
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
 	if cfg.Features.Canvases {
@@ -1437,12 +1449,17 @@ func startGatewayAndServe(
 	if e2eRuntimeUpdateHooks != nil {
 		agentSettingsController.SetRuntimeUpdateStatusResolver(e2eRuntimeUpdateHooks.resolveLatestVersion)
 	}
+	if e2eDisablesNativeUpdateChecks() {
+		// E2E backends never run a host agent CLI or reach a real release feed.
+		agentSettingsController.DisableNativeUpdateCheckExecution()
+	}
 	// Build the real router and register all handlers, which wires the real
 	// dispatcher into lifecycleMgr.SetMCPHandler and installs MCP scope handlers
 	// BEFORE lifecycleMgr.Start recovers sessions.
 	builtServer, err := buildHTTPServer(ctx, cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, notificationSvc, msgCreator, agentRegistry, hostUtilityMgr,
-		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
+		addCleanup, restoreWorkerCleanupRegistrar(addCleanup, &restoreCleanups),
+		repoCloner, systemSvc, storageComposition.workspaceRestorer,
 		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, e2eRuntimeUpdateHooks, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
@@ -1591,10 +1608,15 @@ func startGatewayAndServe(
 		return restoreQuiesceErr
 	}
 
-	startup.AfterReady(ctx, func() { services.Task.StartAutoArchiveLoop(ctx) })
-	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)
-	startup.AfterReady(ctx, func() { services.Task.StartSessionReconciliationLoop(ctx) })
-	startup.AfterReady(ctx, func() { services.Task.StartQuickChatExpirationLoop(ctx) })
+	// Wire subscription usage provider into the office agents service so the
+	// /agents/:id/utilization endpoint can fetch live utilization data.
+	// Skipped when the Office feature flag is off (services.OfficeSvcs is nil).
+	if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
+		usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
+	}
+
+	startTaskBackgroundWorkers(ctx, services.Task, cfg.Tasks.StallDetectionThreshold)
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
 	hostUtilityReady := make(chan struct{})
 	var hostUtilityWG sync.WaitGroup
@@ -1669,9 +1691,7 @@ func startGatewayAndServe(
 	addCleanup(stopRuntimeUpdatesCleanup)
 	restoreCleanups = append(restoreCleanups, stopRuntimeUpdatesCleanup)
 	gateway.Hub.AddUserSubscriptionListener(func(string) {
-		if err := agentSettingsController.ReplayRuntimeUpdateNotices(ctx); err != nil && ctx.Err() == nil {
-			log.Debug("runtime update replay unavailable")
-		}
+		agentSettingsController.RequestRuntimeUpdateReplay()
 	})
 	startup.AfterReady(ctx, func() { systemSvc.StartBackground(ctx) })
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
@@ -1916,6 +1936,11 @@ func activateOfficeServices(
 		return false
 	}
 
+	if err := services.OfficeSvcs.Scheduler.RegisterBlockerFailureSubscriber(eventBus); err != nil {
+		log.Error("Failed to register office blocker failure subscriber", zap.Error(err))
+		return false
+	}
+
 	return true
 }
 
@@ -1930,7 +1955,7 @@ func newRunProcessorService(
 	agentctlBinaryPath string,
 	cfgLoader *configloader.ConfigLoader,
 	cfgWriter *configloader.FileWriter,
-	lifecycleMgr *lifecycle.Manager,
+	runtimeBackend officeRunProcessorRuntime,
 	log *logger.Logger,
 ) *officeservice.Service {
 	apiPort := cfg.Server.Port
@@ -1952,9 +1977,10 @@ func newRunProcessorService(
 		AgentctlBinaryPath: agentctlBinaryPath,
 		EventBus:           eventBus,
 	})
-	runLauncher := newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, services.DynamicProfileResolver, log)
+	runLauncher := newOfficeRunSessionLauncher(repos.Office, runtimeBackend, services.DynamicProfileResolver, log)
 	runLauncher.SetExecutionCapacityOwner(orchestratorSvc)
 	svc.SetRunSessionLauncher(runLauncher)
+	wireOfficeRunClaimSessionProbe(svc, repos.Task, runtimeBackend)
 	return svc
 }
 
@@ -1971,8 +1997,15 @@ func wireOfficeSvcsDependencies(
 	// Wire the workflow-domain decisions store so approve/request-changes
 	// route to workflow_step_decisions (ADR 0005 Wave E).
 	services.OfficeSvcs.Dashboard.SetDecisionStore(repos.Workflow)
-	configureOfficeHumanCompletionGuard(repos.Task, repos.Office, repos.Workflow)
-	if !repos.Task.OfficeHumanCompletionGuardConfigured() {
+	registerOfficeCompletionPolicy(repos.Task, repos.Office, repos.Workflow)
+	if orchestratorSvc != nil && repos.Office != nil {
+		orchestratorSvc.SetParentChildrenCompletionWakeRecorder(func(
+			ctx context.Context, parentID, childSetKey, generation, operationID string,
+		) error {
+			return repos.Office.RecordWorkflowChildrenCompletedWake(ctx, parentID, childSetKey, generation, operationID)
+		})
+	}
+	if !repos.Task.CompletionPoliciesConfigured() {
 		panic("Office completion gate not configured")
 	}
 	services.OfficeSvcs.Dashboard.SetTaskHumanDoneCompleter(officeHumanDoneCompleterAdapter{tasks: services.Task})
@@ -2001,7 +2034,7 @@ func wireOfficeSvcsDependencies(
 	orchestratorSvc.SetOfficeTaskStatusUpdater(services.OfficeSvcs.Dashboard)
 	// A human move that would complete an Office task is refused while its
 	// approvers are pending.
-	services.Task.SetOfficeApprovalGuard(officeApprovalGuardAdapter{reader: services.OfficeSvcs.Dashboard})
+	services.Task.SetApproverNameResolver(officeApproverNameResolverAdapter{reader: services.OfficeSvcs.Dashboard})
 	// Wire the office service as the retry canceller for task reassignment.
 	services.OfficeSvcs.Dashboard.SetRetryCanceller(services.Office)
 	// Wire the office service as the terminal-shape recorder so a
@@ -2022,6 +2055,7 @@ func wireOfficeSvcsDependencies(
 	// the Office board (All-Workflows kanban, task views, task/statussummary)
 	// sees the mutation instead of rendering stale state until a refetch.
 	services.OfficeSvcs.Dashboard.SetTaskLifecyclePublisher(services.Task)
+	services.OfficeSvcs.Dashboard.SetTaskStateChangePublisher(services.Task)
 	// Human assignee writes from the office PATCH surface go through the task
 	// service, which authorizes the caller and validates the assignee. That
 	// route carries no :wsId, so it is not covered by the office
@@ -2084,6 +2118,13 @@ func wireOfficeProviderRouting(
 	provider.SetExecutionProfileStore(repos.AgentSettings)
 	services.OfficeSvcs.Dashboard.SetRoutingProvider(provider)
 	services.OfficeSvcs.Dashboard.SetRouteAttemptLister(repos.Office)
+	if services.Workflow != nil {
+		services.Workflow.SetImportExclusionAdvisor(&importExclusionAdvisorAdapter{setup: provider})
+		services.OfficeSvcs.Dashboard.SetSeatAuthorExclusionWriter(&seatExclusionWriterAdapter{
+			workflow:  services.Workflow,
+			publisher: stepevents.NewPublisher(eventBus, "office-routing", logger.Default()),
+		})
+	}
 	services.OfficeSvcs.Agents.SetKnownProvidersFn(func() []routing.ProviderID {
 		return routing.KnownProviders(agentRegistry)
 	})
@@ -2258,6 +2299,7 @@ func startSchedulingRuntime(
 		runsRepo, eventBus, log, nil,
 	)
 	runsSvc.SetLaunchSafetyLimits(safetyLimits.maxCausationDepth, safetyLimits.selfTriggerAllowance, safetyLimits.selfTriggerTotalAllowance)
+	runsSvc.SetTaskStepResolver(repos.Office.GetTaskWorkflowStepID)
 	runProcessorSvc.SetRunsService(runsSvc)
 	// office/scheduler.SchedulerService.QueueRun/QueueRunCtx (approval-resolved
 	// and reactivity wakes) also delegate through the same seam, gaining
@@ -2922,6 +2964,8 @@ func buildOfficeFeatureServices(
 	activity := officeshared.NewActivityLogger(repo, log)
 	if services.Office != nil {
 		services.Office.SetTaskStateWriter(taskRepo)
+		services.Office.SetTaskStateBatchWriter(taskRepo)
+		services.Office.SetTaskStateChangePublisher(services.Task)
 	}
 
 	agentSvc := officeagents.NewAgentService(repo, log, activity)
@@ -2952,6 +2996,9 @@ func buildOfficeFeatureServices(
 	// that field when Dispatch is actually called, well after startup
 	// completes (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.2).
 	routineWakeupDispatcher.SetRunQueuer(services.Office)
+	if services.Office != nil {
+		services.Office.SetWakeupRequestDispatcher(routineWakeupDispatcher)
+	}
 	routineSvc.SetWakeupEnqueuer(&routineWakeupAdapter{
 		repo:       repo,
 		dispatcher: routineWakeupDispatcher,
@@ -2963,6 +3010,7 @@ func buildOfficeFeatureServices(
 	// isn't gated by a task that already finished.
 	if services.Office != nil {
 		services.Office.SetRoutineRunSyncer(routineSvc)
+		services.Office.SetRoutineRunTaskStateReader(taskRepo)
 	}
 	approvalSvc := officeapprovals.NewApprovalService(repo, log, activity, services.Office)
 	approvalSvc.SetAgentWriter(agentSvc)
@@ -3131,6 +3179,7 @@ func buildHTTPServer(
 	agentRegistry *registry.Registry,
 	hostUtilityMgr *hostutility.Manager,
 	addCleanup func(func() error),
+	addRestoreCleanup func(func() error),
 	repoCloner *repoclone.Cloner,
 	systemSvc *systemsvc.Service,
 	workspaceRestorer taskhandlers.WorkspaceQuarantineRestorer,
@@ -3262,6 +3311,7 @@ func buildHTTPServer(
 		authSvc:                       services.Auth,
 		agentRuntimeAvailability:      agentRuntimeAvailability,
 		addCleanup:                    addCleanup,
+		addRestoreCleanup:             addRestoreCleanup,
 		repoCloner:                    repoCloner,
 		version:                       Version,
 		commit:                        Commit,

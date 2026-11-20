@@ -142,6 +142,46 @@ func TestGitHubProviderAuthorizesOnlyWorkspaceScopedCanonicalDestination(t *test
 	}
 }
 
+func TestGitHubMentionScopeUnion(t *testing.T) {
+	service := &fakeGitHubMentionService{settings: &github.WorkspaceSettings{
+		WorkspaceID:    "workspace-1",
+		RepoScopeMode:  github.RepoScopeModeSelected,
+		RepoScopeOrgs:  []string{"Acme"},
+		RepoScopeRepos: []github.RepoFilter{{Owner: "outside", Name: "tool"}},
+	}}
+	provider := NewGitHubIssueProvider(service)
+	authorizer := provider.(ReferenceAuthorizer)
+	for _, tc := range []struct {
+		name string
+		ref  apiv1.EntityReference
+		want bool
+	}{
+		{
+			name: "selected owner",
+			ref:  apiv1.EntityReference{Version: apiv1.EntityReferenceVersion, Ref: canonicalRef("github", "issue", "github.com/acme/service", "I_owner"), Provider: "github", Kind: "issue", ID: "I_owner", Key: "acme/service#1", URL: "https://github.com/acme/service/issues/1", Scope: "github.com/acme/service"},
+			want: true,
+		},
+		{
+			name: "exact repository",
+			ref:  apiv1.EntityReference{Version: apiv1.EntityReferenceVersion, Ref: canonicalRef("github", "issue", "github.com/outside/tool", "I_exact"), Provider: "github", Kind: "issue", ID: "I_exact", Key: "outside/tool#2", URL: "https://github.com/outside/tool/issues/2", Scope: "github.com/outside/tool"},
+			want: true,
+		},
+		{
+			name: "other repository of exact-only owner",
+			ref:  apiv1.EntityReference{Version: apiv1.EntityReferenceVersion, Ref: canonicalRef("github", "issue", "github.com/outside/private", "I_denied"), Provider: "github", Kind: "issue", ID: "I_denied", Key: "outside/private#3", URL: "https://github.com/outside/private/issues/3", Scope: "github.com/outside/private"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := authorizer.AuthorizeReference(context.Background(), ReferenceAuthorizationRequest{
+				WorkspaceID: "workspace-1", Purpose: ReferencePurposeSubmission, Reference: tc.ref,
+			})
+			if (err == nil) != tc.want {
+				t.Fatalf("AuthorizeReference() error = %v, want allowed=%v", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestGitHubProviderClassifiesUnavailableClient(t *testing.T) {
 	provider := NewGitHubIssueProvider(&fakeGitHubMentionService{err: github.ErrNoClient})
 	_, err := provider.Search(context.Background(), SearchRequest{WorkspaceID: "workspace-1", Query: "auth", Limit: 5})

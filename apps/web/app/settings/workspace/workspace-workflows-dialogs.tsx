@@ -41,6 +41,17 @@ type ImportWorkflowsDialogProps = {
   retryPreview: () => void | Promise<void>;
 };
 
+// A preview with no profile steps, warnings, or conflicts has nothing to
+// review, so its auto-submit keeps the YAML dialog in its importing state.
+function hasReviewContent(
+  preview: WorkflowImportPreview,
+  profileConflicts: WorkflowImportProfileConflict[],
+): boolean {
+  return (
+    preview.steps.length > 0 || (preview.warnings?.length ?? 0) > 0 || profileConflicts.length > 0
+  );
+}
+
 export function ImportWorkflowsDialog({
   open,
   onOpenChange,
@@ -61,7 +72,7 @@ export function ImportWorkflowsDialog({
   retryPreview,
 }: ImportWorkflowsDialogProps) {
   const { t } = useTranslation();
-  if (preview && importPhase !== "editing") {
+  if (preview && importPhase !== "editing" && hasReviewContent(preview, profileConflicts)) {
     return (
       <WorkflowImportProfileSelection
         open={open}

@@ -35,7 +35,7 @@ func SplitShellCommand(cmd string) ([]string, error) {
 		current: &strings.Builder{},
 	}
 
-	for i, r := range cmd {
+	for _, r := range cmd {
 		if state.escape {
 			state.current.WriteRune(r)
 			state.escape = false
@@ -46,10 +46,10 @@ func SplitShellCommand(cmd string) ([]string, error) {
 			state.current.WriteRune(r)
 		}
 
-		// Check for unclosed quotes at end
-		if i == len(cmd)-1 && (state.inSingleQuote || state.inDoubleQuote) {
-			return nil, fmt.Errorf("unclosed quote in command")
-		}
+	}
+
+	if state.inSingleQuote || state.inDoubleQuote {
+		return nil, fmt.Errorf("unclosed quote in command")
 	}
 
 	if state.current.Len() > 0 {

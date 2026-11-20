@@ -44,6 +44,13 @@ The executor system owns this representation at the script boundary. The task sy
   Preparation shall not substitute the base branch or a generated branch.
 - **AC-EXECUTORS-REPOSITORY-BRANCH-002.5:** Tasks without an explicit selection shall retain generated-branch behavior.
   Resuming an existing workspace shall preserve its commits, uncommitted changes, and branch without a forced reset.
+- **AC-EXECUTORS-REPOSITORY-BRANCH-002.6:** When remote materialization takes more than 60 seconds, preparation shall accept success before the five-minute request limit and any earlier caller deadline.
+  This applies to every primary or additional repository that uses remote workspace materialization.
+- **AC-EXECUTORS-REPOSITORY-BRANCH-002.7:** When the caller cancels materialization or its earlier deadline expires, preparation shall return the corresponding error before agent startup.
+- **AC-EXECUTORS-REPOSITORY-BRANCH-002.8:** When no earlier deadline applies, a remote materialization request shall stop after five minutes and return a timeout error.
+
+These timing criteria apply to remote workspace materialization requests.
+Script-based preparation retains its existing [setup and launch budgets](../../platform/requirements/setup-launch-timeout.md).
 
 ## Exclusions
 

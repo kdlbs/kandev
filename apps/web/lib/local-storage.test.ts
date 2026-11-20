@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanupTaskStorage,
+  wasStorageNoticeDismissed,
+  markStorageNoticeDismissed,
   clearGlobalSidebarWidth,
   getEnvLayout,
   getEnvLayoutProfile,
@@ -447,5 +449,25 @@ describe("transcript auto-scroll storage", () => {
     expect(getStoredAutoScrollTop("session-a")).toBeNull();
     expect(getStoredAutoScrollEnabled("session-b")).toBe(false);
     expect(getStoredAutoScrollTop("session-b")).toBe(200);
+  });
+});
+
+// @covers AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004.2
+describe("Storage notice dismissal storage", () => {
+  beforeEach(() => window.sessionStorage.clear());
+
+  it("isolates tasks and PR flags, removes deleted tasks, and resets with tab storage", () => {
+    expect(wasStorageNoticeDismissed("task-a")).toBe(false);
+    markStorageNoticeDismissed("task-a");
+    expect(wasStorageNoticeDismissed("task-a")).toBe(true);
+    expect(wasStorageNoticeDismissed("task-b")).toBe(false);
+    expect(wasPRMergedBannerDismissed("task-a")).toBe(false);
+    expect(wasPRClosedBannerDismissed("task-a")).toBe(false);
+    markStorageNoticeDismissed("task-b");
+    cleanupTaskStorage("task-a", []);
+    expect(wasStorageNoticeDismissed("task-a")).toBe(false);
+    expect(wasStorageNoticeDismissed("task-b")).toBe(true);
+    window.sessionStorage.clear();
+    expect(wasStorageNoticeDismissed("task-b")).toBe(false);
   });
 });
