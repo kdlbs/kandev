@@ -749,8 +749,10 @@ func newCopilotRestartFixture(t *testing.T, version string) (*Manager, *AgentExe
 }
 
 func TestCopilotPluginResetPreflightPreservesProcess(t *testing.T) {
-	t.Run("unsupported runtime leaves current process untouched", func(t *testing.T) {
+	t.Run("missing plugin loading capability leaves current process untouched", func(t *testing.T) {
 		manager, execution, mock, runner, _, _ := newCopilotRestartFixture(t, "1.0.200")
+		runner.helpOutputSet = true
+		runner.helpOutput = []byte("Usage: copilot [options]\n")
 		oldID := execution.ACPSessionID
 		oldCommand := execution.AgentCommand
 		oldArgs := append([]string(nil), execution.AgentArgs...)
@@ -758,8 +760,8 @@ func TestCopilotPluginResetPreflightPreservesProcess(t *testing.T) {
 
 		err := manager.RestartAgentProcess(context.Background(), execution.ID)
 		var pluginErr *copilotplugins.Error
-		if !errors.As(err, &pluginErr) || pluginErr.Reason != copilotplugins.ReasonRuntimeUnsupported {
-			t.Fatalf("reset error = %#v, want typed runtime-unsupported error", err)
+		if !errors.As(err, &pluginErr) || pluginErr.Reason != copilotplugins.ReasonPluginLoadingUnsupported {
+			t.Fatalf("reset error = %#v, want typed plugin-loading-unsupported error", err)
 		}
 		if actions := mock.getHTTPActions(); len(actions) != 0 {
 			t.Fatalf("preflight rejection reached agentctl actions: %#v", actions)

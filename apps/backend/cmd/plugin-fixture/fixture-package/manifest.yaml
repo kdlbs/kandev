@@ -14,6 +14,12 @@ author: "kandev"
 categories: ["tools"]
 repo_url: "https://github.com/kdlbs/kandev-plugin-template"
 
+notification_formatters:
+  - key: fixture-text
+    contract_version: 1
+    provider_types: [apprise]
+    management_actions: [notification.prepare]
+
 runtime:
   type: binary
   executables:
@@ -92,6 +98,9 @@ executor_providers:
       maximum_lifetime_seconds: 28800
 
 actions:
+  - key: notification.prepare
+    scope: notification_provider
+    max_body_bytes: 131072
   - key: "connection-status"
     scope: "workspace"
     max_body_bytes: 4096
@@ -184,6 +193,57 @@ agent_tools:
       read_only_hint: true
       destructive_hint: false
       idempotent_hint: true
+  - name: list_findings
+    description: Lists findings in the workspace for private automations
+    surfaces: [automation]
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        scope:
+          type: string
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [findings, task_id, surface]
+      properties:
+        findings:
+          type: array
+          items:
+            type: object
+        task_id:
+          type: string
+        surface:
+          type: string
+    annotations:
+      read_only_hint: true
+      destructive_hint: false
+      idempotent_hint: true
+  - name: complete_report
+    description: Records a completed report from a private automation
+    surfaces: [automation]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [report]
+      properties:
+        report:
+          type: string
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [accepted, report, task_id]
+      properties:
+        accepted:
+          type: boolean
+        report:
+          type: string
+        task_id:
+          type: string
+    annotations:
+      read_only_hint: false
+      destructive_hint: false
+      idempotent_hint: false
 
 webhooks:
   - key: "test-hook"

@@ -45,6 +45,7 @@ const profilePatchFieldMap: Array<[keyof ProfileFormData, keyof AgentProfile]> =
   ["mcp_selected_servers", "mcpSelectedServers"],
   ["copilot_selected_plugins", "copilotSelectedPlugins"],
   ["cli_flags", "cliFlags"],
+  ["env_vars", "envVars"],
   ["command_prefix", "commandPrefix"],
   ["provider_kind", "providerKind"],
 ];
@@ -56,12 +57,15 @@ const profilePatchFieldMap: Array<[keyof ProfileFormData, keyof AgentProfile]> =
  * patches like { cli_passthrough: true } would land as a new snake_case
  * key and the camelCase reader would never see them.
  */
-export function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<AgentProfile> {
-  const next: Partial<AgentProfile> = {};
+export function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<DraftProfile> {
+  const next: Partial<DraftProfile> = {};
   for (const [formKey, profileKey] of profilePatchFieldMap) {
     if (patch[formKey] !== undefined) {
       (next as Record<string, unknown>)[profileKey] = patch[formKey];
     }
+  }
+  if (patch.devin_sandbox_inherited !== undefined) {
+    next.devinSandboxInherited = patch.devin_sandbox_inherited;
   }
   return next;
 }
@@ -110,6 +114,7 @@ type DraftMcpConfig = {
  * draft unchanged.
  */
 export type DraftProfile = AgentProfile & {
+  devinSandboxInherited?: boolean;
   allow_indexing?: boolean;
   auto_approve?: boolean;
   isNew?: boolean;
@@ -267,6 +272,7 @@ function buildCreateProfilePayload(profile: DraftProfile) {
     command_prefix: profile.commandPrefix ?? "",
     ...providerPayloadFields(profile),
     env_vars: profile.envVars ?? [],
+    devin_sandbox_inherited: profile.devinSandboxInherited ?? false,
     dynamic: dynamicProfilePayload(profile),
   };
 }
@@ -320,6 +326,7 @@ function buildUpdateProfilePayload(profile: DraftProfile, savedProfile: AgentPro
     command_prefix: profile.commandPrefix ?? "",
     ...providerPayloadFields(profile),
     env_vars: profile.envVars ?? [],
+    devin_sandbox_inherited: profile.devinSandboxInherited ?? false,
     dynamic: dynamicProfilePayload(profile),
   };
 }

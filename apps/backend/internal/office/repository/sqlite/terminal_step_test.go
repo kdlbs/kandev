@@ -8,7 +8,7 @@ import (
 )
 
 // seedStep inserts a workflow_steps row with the given workflow, position,
-// and name — the three columns IsTaskWorkflowStepTerminal reads.
+// and name — the three columns IsTaskOnFinalStep reads.
 func seedStep(t *testing.T, repo *sqlite.Repository, ctx context.Context, id, workflowID string, position int, name string) {
 	t.Helper()
 	if _, err := repo.ExecRaw(ctx, `
@@ -19,7 +19,7 @@ func seedStep(t *testing.T, repo *sqlite.Repository, ctx context.Context, id, wo
 	}
 }
 
-func TestIsTaskWorkflowStepTerminal(t *testing.T) {
+func TestIsTaskOnFinalStep(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()
 
@@ -37,6 +37,8 @@ func TestIsTaskWorkflowStepTerminal(t *testing.T) {
 	// real last step) to prove the name is no longer consulted at all.
 	seedStep(t, repo, ctx, "step-early-done", "wf-mixed", 0, "Done")
 	seedStep(t, repo, ctx, "step-mixed-last", "wf-mixed", 1, "PR")
+	seedStep(t, repo, ctx, "step-tied-first", "wf-tied", 4, "First final")
+	seedStep(t, repo, ctx, "step-tied-second", "wf-tied", 4, "Second final")
 
 	seedParticipantTask(t, repo, "task-backlog", "step-backlog")
 	seedParticipantTask(t, repo, "task-work", "step-work")
@@ -45,6 +47,8 @@ func TestIsTaskWorkflowStepTerminal(t *testing.T) {
 	seedParticipantTask(t, repo, "task-done", "step-done")
 	seedParticipantTask(t, repo, "task-early-done", "step-early-done")
 	seedParticipantTask(t, repo, "task-mixed-last", "step-mixed-last")
+	seedParticipantTask(t, repo, "task-tied-first", "step-tied-first")
+	seedParticipantTask(t, repo, "task-tied-second", "step-tied-second")
 	seedParticipantTask(t, repo, "task-no-step", "")
 	// step-deleted-xyz is never seeded into workflow_steps: this reproduces a
 	// task left behind by DeleteStep, which clears queued_for_step_id but not
@@ -64,14 +68,16 @@ func TestIsTaskWorkflowStepTerminal(t *testing.T) {
 		{"done: last position and terminal name", "task-done", true, true},
 		{"named Done but not last position", "task-early-done", false, true},
 		{"last position with non-terminal name is still terminal", "task-mixed-last", true, true},
+		{"first step tied at maximum position is final", "task-tied-first", true, true},
+		{"second step tied at maximum position is final", "task-tied-second", true, true},
 		{"no workflow_step_id", "task-no-step", false, false},
 		{"missing task", "task-missing", false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, hasStep, err := repo.IsTaskWorkflowStepTerminal(ctx, tc.taskID)
+			got, hasStep, err := repo.IsTaskOnFinalStep(ctx, tc.taskID)
 			if err != nil {
-				t.Fatalf("IsTaskWorkflowStepTerminal: %v", err)
+				t.Fatalf("IsTaskOnFinalStep: %v", err)
 			}
 			if got != tc.want {
 				t.Errorf("terminal = %v, want %v", got, tc.want)
@@ -83,9 +89,9 @@ func TestIsTaskWorkflowStepTerminal(t *testing.T) {
 	}
 
 	t.Run("dangling workflow_step_id fails closed with an error, not hasStep=false", func(t *testing.T) {
-		_, _, err := repo.IsTaskWorkflowStepTerminal(ctx, "task-dangling-step")
+		_, _, err := repo.IsTaskOnFinalStep(ctx, "task-dangling-step")
 		if err == nil {
-			t.Fatal("IsTaskWorkflowStepTerminal: want error for a dangling workflow_step_id, got nil")
+			t.Fatal("IsTaskOnFinalStep: want error for a dangling workflow_step_id, got nil")
 		}
 	})
 }

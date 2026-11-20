@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kandev/kandev/internal/events/bus"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/runs/dedupkeys"
 )
@@ -113,5 +114,51 @@ func TestCascadeBlockersResolved_StillBlocked_DoesNotQueue(t *testing.T) {
 
 	if got := runsCountForReason(t, ss, RunReasonTaskBlockersResolved); got != 0 {
 		t.Fatalf("persisted runs = %d, want 0 (blocker-c is still unresolved)", got)
+	}
+}
+
+func TestCommittedTaskCompletionDoesNotResolveFailedOrCancelledBlockers(t *testing.T) {
+	for _, state := range []string{"FAILED", "CANCELLED"} {
+		t.Run(state, func(t *testing.T) {
+			repo := newReactivityTestRepo(t)
+			ss := newChildrenCompletedTestScheduler(t, repo)
+			createChildrenCompletedAgent(t, repo, "agent-1")
+			ctx := context.Background()
+			if _, err := repo.ExecRaw(ctx, `CREATE TABLE IF NOT EXISTS workflow_steps (id TEXT PRIMARY KEY, agent_profile_id TEXT DEFAULT '')`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.ExecRaw(ctx, `CREATE TABLE IF NOT EXISTS workspaces (id TEXT PRIMARY KEY, office_workflow_id TEXT DEFAULT '')`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.ExecRaw(ctx, `CREATE TABLE IF NOT EXISTS workflows (id TEXT PRIMARY KEY, workspace_id TEXT DEFAULT '', is_system INTEGER DEFAULT 0, workflow_template_id TEXT DEFAULT '')`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.ExecRaw(ctx, `INSERT INTO workspaces (id, office_workflow_id) VALUES ('ws-1', 'wf-office')`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.ExecRaw(ctx, `INSERT INTO workflows (id, workspace_id) VALUES ('wf-office', 'ws-1')`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.ExecRaw(ctx, `INSERT INTO tasks (id, workspace_id, workflow_id, state) VALUES ('blocker', 'ws-1', 'wf-office', ?), ('blocked', 'ws-1', 'wf-office', 'TODO')`, state); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.ExecRaw(ctx, `INSERT INTO task_blockers (task_id, blocker_task_id, created_at) VALUES ('blocked', 'blocker', CURRENT_TIMESTAMP)`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.ExecRaw(ctx, `INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id, decision_required, position) VALUES ('p-runner', 'step-x', 'blocked', 'runner', 'agent-1', 0, 0)`); err != nil {
+				t.Fatal(err)
+			}
+			event := &bus.Event{Data: map[string]any{
+				"task_id": "blocker", "old_state": "IN_PROGRESS", "new_state": state,
+			}}
+			for i := 0; i < 2; i++ {
+				if err := ss.handleCommittedTaskCompletion(ctx, event); err != nil {
+					t.Fatalf("delivery %d: %v", i+1, err)
+				}
+			}
+			if got := runsCountForReason(t, ss, RunReasonTaskBlockersResolved); got != 0 {
+				t.Fatalf("blocker runs = %d, want none for %s", got, state)
+			}
+		})
 	}
 }

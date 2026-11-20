@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   getTaskPreviewFeedback: vi.fn(),
   createTaskPreviewFeedback: vi.fn(),
   updateTaskPreviewFeedback: vi.fn(),
+  replaceTaskPreviewFeedbackScreenshot: vi.fn(),
   deleteTaskPreviewFeedback: vi.fn(),
   clearTaskPreviewFeedback: vi.fn(),
 }));
@@ -132,5 +133,24 @@ describe("usePreviewFeedback", () => {
       requests[2].resolve(snapshot(3));
       await retry;
     });
+  });
+
+  it("replaces a saved screenshot and applies the returned snapshot", async () => {
+    api.replaceTaskPreviewFeedbackScreenshot.mockResolvedValue(snapshot(4));
+    const { result } = renderHook(() => usePreviewFeedback("task-1"), { wrapper });
+    const rect = { x: 1, y: 2, width: 30, height: 40 };
+
+    await act(async () => {
+      await result.current.replaceScreenshot("feedback-1", 3, rect, "staged-1");
+    });
+
+    expect(api.replaceTaskPreviewFeedbackScreenshot).toHaveBeenCalledWith({
+      taskId: "task-1",
+      id: "feedback-1",
+      expectedVersion: 3,
+      captureRect: rect,
+      screenshotAttachmentId: "staged-1",
+    });
+    expect(result.current.snapshot?.revision).toBe(4);
   });
 });

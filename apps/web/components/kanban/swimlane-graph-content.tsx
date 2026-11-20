@@ -16,6 +16,7 @@ import {
 import { cn } from "@kandev/ui/lib/utils";
 import { Badge } from "@kandev/ui/badge";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
 import { needsAction } from "@/lib/utils/needs-action";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -89,6 +90,15 @@ function DraggableTaskChip({
     foregroundActivity: task.foregroundActivity,
     hasPendingPermission: pendingInput.permission,
     interrupted: task.interrupted,
+    waitReason: resolveWaitReason({
+      primarySessionState: task.primarySessionState,
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: task.statusSummary?.launch_queue,
+      quotaWait: task.statusSummary?.quota_wait,
+    }),
+    launchQueue: task.statusSummary?.launch_queue,
+    quotaWait: task.statusSummary?.quota_wait,
   });
 
   return (
@@ -127,6 +137,15 @@ function TaskChipPreview({ task }: { task: Task }) {
     foregroundActivity: task.foregroundActivity,
     hasPendingPermission: pendingInput.permission,
     interrupted: task.interrupted,
+    waitReason: resolveWaitReason({
+      primarySessionState: task.primarySessionState,
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: task.statusSummary?.launch_queue,
+      quotaWait: task.statusSummary?.quota_wait,
+    }),
+    launchQueue: task.statusSummary?.launch_queue,
+    quotaWait: task.statusSummary?.quota_wait,
   });
   return (
     <div

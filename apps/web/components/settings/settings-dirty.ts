@@ -19,6 +19,8 @@ export function isDraftEntryDirty(
 }
 
 type EditorsDirtyState = {
+  markdownPreviewByDefault: boolean;
+  baselineMarkdownPreviewByDefault: boolean;
   defaultEditorId: string;
   baselineDefaultId: string;
   lspAutoStartLanguages: readonly string[];
@@ -33,6 +35,7 @@ type EditorsDirtyState = {
 
 export function isEditorsSettingsDirty(state: EditorsDirtyState): boolean {
   return (
+    state.markdownPreviewByDefault !== state.baselineMarkdownPreviewByDefault ||
     state.defaultEditorId !== state.baselineDefaultId ||
     isSetMembershipDirty(state.lspAutoStartLanguages, state.baselineLspAutoStart) ||
     isSetMembershipDirty(state.lspAutoInstallLanguages, state.baselineLspAutoInstall) ||

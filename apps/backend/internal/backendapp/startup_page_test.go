@@ -49,6 +49,10 @@ func TestBuildStartupPageViewOpaqueStep(t *testing.T) {
 	}
 }
 
+// TestBuildStartupPageViewCountingStep covers AC-PLATFORM-STARTUP-PROGRESS-
+// 003.14 for a byte step: the count renders through the readable-size policy
+// instead of the singular unit noun. Plural unit coverage lives in
+// TestBuildStartupPageViewCountedStepSingularTotal (turns).
 func TestBuildStartupPageViewCountingStep(t *testing.T) {
 	snap := startup.Snapshot{
 		Phase: startup.BackingUpDatabase,
@@ -60,8 +64,8 @@ func TestBuildStartupPageViewCountingStep(t *testing.T) {
 		},
 	}
 	view := buildStartupPageView("en", snap)
-	if view.Step.Progress != "1 byte" {
-		t.Fatalf("counting progress = %q, want singular unit", view.Step.Progress)
+	if view.Step.Progress != "1 B" {
+		t.Fatalf("counting progress = %q, want a readable byte size", view.Step.Progress)
 	}
 	if view.Step.HasBar {
 		t.Fatal("counting step (no total) must render no bar")

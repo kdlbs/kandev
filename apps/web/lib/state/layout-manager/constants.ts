@@ -52,6 +52,7 @@ export const KNOWN_PANEL_IDS = new Set([
   "mr-detail",
   "todos",
   "background-work",
+  "task-graph",
   DEV_SERVER_PANEL_ID,
 ]);
 
@@ -148,6 +149,7 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id"> & { titleKey
     title: "Background Work",
     titleKey: "task:panelBackgroundWork",
   },
+  "task-graph": { component: "task-graph", title: "Task graph", titleKey: "task:panelTaskGraph" },
 };
 
 /**

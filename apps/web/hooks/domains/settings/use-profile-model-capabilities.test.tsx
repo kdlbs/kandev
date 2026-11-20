@@ -126,6 +126,7 @@ function optionResponse(model: string, contextRevision: string): AgentModelConfi
 }
 
 const savedLaunchSettings = {
+  mode: "",
   env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: "saved" }],
   cli_flags: [],
   command_prefix: "",
@@ -405,6 +406,7 @@ describe("profile discovery after runtime activation", () => {
     expect(probeAgentProfileMock).toHaveBeenLastCalledWith(MOCK_AGENT_NAME, {
       profile_id: PROFILE_ID_A,
       launch_settings: {
+        mode: "",
         env_vars: [
           {
             key: "MOCK_AGENT_PROFILE_CATALOG",
@@ -532,47 +534,67 @@ describe("activation refresh failure", () => {
   });
 });
 
+function draftProfile(catalogValue: string) {
+  return {
+    ...initialProfile,
+    env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: catalogValue }],
+    cli_flags: [{ flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION }],
+    command_prefix: "npx --",
+  };
+}
+
+function expectedDraftLaunchSettings(catalogValue: string): ProfileCapabilityRequest {
+  return {
+    launch_settings: {
+      mode: "",
+      env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: catalogValue, secret_id: undefined }],
+      cli_flags: [{ flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION }],
+      command_prefix: "npx --",
+    },
+    refresh: true,
+  };
+}
+
+function renderDraftDiscovery() {
+  const onChange = vi.fn();
+  const draft = draftProfile(DRAFT_A);
+  const hook = renderHook(
+    ({ profile }) => useProfileModelCapabilities(MOCK_AGENT_NAME, profile, modelConfig, onChange),
+    { initialProps: { profile: draft } },
+  );
+  return { ...hook, draft, onChange };
+}
+
 describe("draft profile capability discovery", () => {
-  it("does not probe a draft until refresh and rejects the result after launch settings change", async () => {
+  it("does not probe a draft until refresh", async () => {
+    const { result } = renderDraftDiscovery();
+    expect(probeAgentProfileMock).not.toHaveBeenCalled();
+    expect(result.current.discoveryState).toBe("stale");
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(probeAgentProfileMock).toHaveBeenCalledTimes(1);
+    expect(probeAgentProfileMock).toHaveBeenLastCalledWith(
+      MOCK_AGENT_NAME,
+      expectedDraftLaunchSettings(DRAFT_A),
+    );
+  });
+
+  it("rejects a stale result and resolves the new draft options", async () => {
     let resolveOldProbe: ((response: DynamicModelsResponse) => void) | undefined;
     probeAgentProfileMock.mockImplementationOnce(
       () => new Promise<DynamicModelsResponse>((resolve) => (resolveOldProbe = resolve)),
     );
-
-    const onChange = vi.fn();
-    const draft = {
-      ...initialProfile,
-      env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_A }],
-      cli_flags: [{ flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION }],
-      command_prefix: "npx --",
-    };
-    const { result, rerender } = renderHook(
-      ({ profile }) => useProfileModelCapabilities(MOCK_AGENT_NAME, profile, modelConfig, onChange),
-      { initialProps: { profile: draft } },
-    );
-
-    expect(probeAgentProfileMock).not.toHaveBeenCalled();
-    expect(result.current.discoveryState).toBe("stale");
+    const { result, rerender, draft, onChange } = renderDraftDiscovery();
 
     let oldRefresh: Promise<void> | undefined;
     act(() => {
       oldRefresh = result.current.refresh();
     });
     await waitFor(() => expect(probeAgentProfileMock).toHaveBeenCalledTimes(1));
-    expect(probeAgentProfileMock).toHaveBeenLastCalledWith(MOCK_AGENT_NAME, {
-      launch_settings: {
-        env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_A, secret_id: undefined }],
-        cli_flags: [
-          { flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION },
-        ],
-        command_prefix: "npx --",
-      },
-      refresh: true,
-    } satisfies ProfileCapabilityRequest);
 
-    rerender({
-      profile: { ...draft, env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_B }] },
-    });
+    rerender({ profile: draftProfile(DRAFT_B) });
     expect(result.current.discoveryState).toBe("stale");
     await act(async () => {
       resolveOldProbe?.(capabilityResponse([{ id: "old-model", name: "Old model" }], "old"));
@@ -592,47 +614,25 @@ describe("draft profile capability discovery", () => {
     });
 
     await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1));
-    expect(probeAgentProfileMock).toHaveBeenLastCalledWith(MOCK_AGENT_NAME, {
-      launch_settings: {
-        env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_B, secret_id: undefined }],
-        cli_flags: [
-          { flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION },
-        ],
-        command_prefix: "npx --",
-      },
-      refresh: true,
-    });
+    expect(probeAgentProfileMock).toHaveBeenLastCalledWith(
+      MOCK_AGENT_NAME,
+      expectedDraftLaunchSettings(DRAFT_B),
+    );
     expect(resolveAgentModelConfigMock).toHaveBeenCalledWith(MOCK_AGENT_NAME, {
       model: SAVED_MODEL_ID,
-      launch_settings: {
-        env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_B, secret_id: undefined }],
-        cli_flags: [
-          { flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION },
-        ],
-        command_prefix: "npx --",
-      },
+      launch_settings: expectedDraftLaunchSettings(DRAFT_B).launch_settings,
     });
     expect(result.current.capabilities.models).toEqual([
       { id: DRAFT_B_MODEL_ID, name: DRAFT_B_MODEL_NAME },
     ]);
 
     rerender({
-      profile: {
-        ...draft,
-        model: DRAFT_B_MODEL_ID,
-        env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_B }],
-      },
+      profile: { ...draft, model: DRAFT_B_MODEL_ID, env_vars: draftProfile(DRAFT_B).env_vars },
     });
     await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(2));
     expect(resolveAgentModelConfigMock).toHaveBeenLastCalledWith(MOCK_AGENT_NAME, {
       model: DRAFT_B_MODEL_ID,
-      launch_settings: {
-        env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: DRAFT_B, secret_id: undefined }],
-        cli_flags: [
-          { flag: "--catalog", enabled: true, description: CATALOG_SELECTOR_DESCRIPTION },
-        ],
-        command_prefix: "npx --",
-      },
+      launch_settings: expectedDraftLaunchSettings(DRAFT_B).launch_settings,
     });
     expect(onChange).not.toHaveBeenCalled();
   });

@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-19
-updated: 2026-10-12
+updated: 2026-11-08
 owners:
   - cfl12
 ---
@@ -98,7 +98,7 @@ Session action presentation remains owned by the
 Draft amendment, 2026-10-02. Delivery: [Setup recovery UX](../../../plans/setup-recovery-ux/plan.md).
 
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003.1:** Once a Quick Chat session exists, a synchronous or asynchronous setup failure shall retain its task, session, tab, preparation details, and safe error. Reload and reconnect shall restore the failed conversation without placing it on the task board.
-- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003.2:** Navigating tabs, opening another chat, or dismissing the Quick Chat surface during creation shall not delete a created conversation. A late creation result shall reconcile its identity without stealing the user's newer selection or reopening a dismissed surface. Explicit deletion and existing expiration policy remain available.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003.2:** Navigating tabs, opening another chat, or dismissing the Quick Chat surface during creation shall not delete a created conversation. A late creation result shall reconcile its identity without stealing the user's newer selection or reopening a dismissed surface. Explicit deletion remains available.
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003.3:** A failed chat shall expose the existing valid recovery actions and allow explicit deletion. Opening or restoring it shall not automatically retry away the error. Retrying shall reuse its task/conversation and preserve prior failure history.
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003.4:** A failure before a session exists shall retain the setup form, selected agent, repositories, and an inline safe error with a retry action. A toast alone shall not be the error surface. No nonexistent conversation shall be advertised as restorable.
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003.5:** Desktop and phone shall expose the same failure and recovery outcomes. Phone users shall retain the full-height Quick Chat surface, scroll to error details, and reach actions with at least 44px touch targets without horizontal page overflow.
@@ -145,10 +145,16 @@ Terms used below:
   environment of the same task or shared workspace group with no owner and no
   physical evidence, the system shall elect that session as the new owner and run
   full workspace preparation.
-- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.5:** When a `failed` environment has
-  physical evidence, or belongs to a parent task through `inherit_parent`, a
-  start shall keep failing with `workspace_reuse_unsafe` and shall not change the
-  environment. The existing environment reset action remains its recovery.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.5:** A `failed` environment with
+  physical evidence, or one inherited from another task through `inherit_parent`
+  or `shared_group`, shall not be re-elected or overwritten. A task-local binding
+  or terminal worktree resume may retain it and reserve a replacement under
+  AC-004.11 below. A new launch that satisfies
+  `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5` may instead claim a
+  separate child-owned environment for its different non-Kubernetes executor.
+  An inherited owner, live consumer, active materializer, or recovery claim, and
+  all other starts, shall keep failing with `workspace_reuse_unsafe` and the
+  existing reset guidance.
 - **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.6:** When several starts re-elect the
   same environment at the same time, exactly one shall become the owner. A launch
   that loses the race shall wait for the new owner like any `creating` sibling or
@@ -170,6 +176,19 @@ Terms used below:
   guidance shall name the task environment reset action, instead of asking the
   caller to retry after the initial launch or to restore the workspace.
 
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.11:** A selected failed task-local
+  worktree environment may be retired only when the requested executor is also
+  `worktree`, its task and ownership generation still match, and no materializer,
+  live bound session/runtime, or active recovery consumer remains. Other executor
+  types shall keep the reset-required refusal.
+  Retirement, a fresh creating canonical reservation, and the requesting session
+  binding shall commit in one transaction before physical materialization. The old
+  identity, inventory, files, and historical bindings shall remain. Root selection
+  shall exclude every recorded active or retained root. An already-retired retry
+  shall join the current reservation or elect one when none exists. Failed
+  materialization shall retain its failed reservation; ready publication shall
+  continue requiring the existing complete repository inventory.
+
 ## Out of scope
 
 - A background poller for all repository defaults.
@@ -177,10 +196,8 @@ Terms used below:
 - Changes to ACP resume semantics or bulk repository-default repair.
 - A periodic sweep for abandoned `creating` environments. Abandonment is
   decided when a start needs the environment.
-- Automatic replacement of a `failed` environment that has physical evidence,
-  for example a worktree created before the launch failed. It needs a way to
-  retain the old environment while a new one becomes canonical, which is a
-  separate schema decision.
+- Destructive replacement, automatic background retirement, or retirement of an
+  inherited or consumer-owned environment.
 
 ## System design
 

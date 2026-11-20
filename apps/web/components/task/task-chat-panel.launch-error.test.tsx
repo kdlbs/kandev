@@ -75,6 +75,7 @@ const panelState = {
   historyRefreshPending: false,
   isInitialMessagesLoading: false,
   groupedItems: [] as RenderItem[],
+  messages: [priorTranscriptMessage],
   allMessages: [priorTranscriptMessage],
   footerActionMessages: [],
   permissionsByToolCallId: new Map(),
@@ -94,6 +95,9 @@ vi.mock("@/components/state-provider", () => ({
   useOptionalAppStore: (selector: (state: typeof appStoreState) => unknown, fallback: unknown) =>
     selector(appStoreState) ?? fallback,
   useAppStoreApi: () => ({
+    getState: () => appStoreState,
+  }),
+  useOptionalAppStoreApi: () => ({
     getState: () => appStoreState,
   }),
 }));

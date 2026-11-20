@@ -47,6 +47,21 @@ export function runGlobalSetup(options: GlobalSetupOptions = {}): void {
           BACKEND_DIR,
           "internal/agent/runtime/lifecycle/e2e_delivery_record_fixture_test.go",
         ),
+        path.join(
+          BACKEND_DIR,
+          "internal/agent/runtime/lifecycle/e2e_repeated_native_resume_fixture_test.go",
+        ),
+      ],
+    },
+    {
+      path: path.join(
+        BACKEND_DIR,
+        "bin",
+        `e2e-send-now-fixture${process.platform === "win32" ? ".exe" : ""}`,
+      ),
+      rebuildTarget: "build-e2e-send-now-fixture",
+      sourceFiles: [
+        path.join(BACKEND_DIR, "internal/orchestrator/e2e_send_now_not_delivered_fixture_test.go"),
       ],
     },
     {

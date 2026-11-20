@@ -17,6 +17,7 @@ func TestConfigurationCatalogIsComplete(t *testing.T) {
 	}
 	for _, key := range []string{
 		"server.trustedProxies",
+		"notifications.webhookAllowPrivateNetworks",
 		"tasks.preparationTimeout",
 		"credentials.file",
 		"limits.ghMaxConcurrent",
@@ -91,6 +92,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_WEB_INTERNAL_URL", class: "catalog"},
 		{envVar: "KANDEV_WEB_TITLE_PREFIX", class: "catalog"},
 		{envVar: "KANDEV_TRUSTED_PROXIES", class: "catalog"},
+		{envVar: "KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_DRIVER", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_PATH", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_HOST", class: "catalog"},
@@ -120,6 +122,8 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_AUTH_TOKENDURATION", class: "catalog"},
 		{envVar: "KANDEV_AUTH_SESSIONTTLHOURS", class: "catalog"},
 		{envVar: "KANDEV_AUTH_COOKIE_NAME", class: "catalog"},
+		{envVar: "KANDEV_WEBPUSH_SUBJECT", class: "catalog"},
+		{envVar: "KANDEV_WEBPUSH_ALLOWED_HOSTS", class: "catalog"},
 		{envVar: "KANDEV_LOG_LEVEL", class: "catalog"},
 		{envVar: "KANDEV_LOGGING_FORMAT", class: "catalog"},
 		{envVar: "KANDEV_REPOSITORYDISCOVERY_ROOTS", class: "catalog"},
@@ -144,6 +148,8 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_OFFICE_SELF_TRIGGER_TOTAL_ALLOWANCE", class: "catalog"},
 		{envVar: "KANDEV_OFFICE_GATE_FAILURE_THRESHOLD", class: "catalog"},
 		{envVar: "KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL", class: "catalog"},
+		{envVar: "KANDEV_GITHUB_CREDENTIAL_BROKER_DISABLE_REISSUE", class: "catalog"},
+		{envVar: "KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY", class: "catalog"},
 		{envVar: "KANDEV_TASK_PREPARATION_TIMEOUT", class: "catalog"},
 		{envVar: "KANDEV_TASK_STALL_DETECTION_THRESHOLD", class: "catalog"},
 		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_PAYLOAD_GRACE", class: "catalog"},

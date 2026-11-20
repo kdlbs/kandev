@@ -72,7 +72,7 @@ func TestAntigravityACP_IDAndDisplay(t *testing.T) {
 // or build stamp.
 func TestAntigravityACP_Description(t *testing.T) {
 	desc := NewAntigravityACP().Description()
-	for _, want := range []string{"antigravity-acp", "PATH", "agy_acp_server.par", "agy_acp_server.exe"} {
+	for _, want := range []string{"antigravity-acp", "PATH", "agy_acp_server.par", "agy_acp_server.exe", "Settings"} {
 		if !strings.Contains(desc, want) {
 			t.Errorf("Description() = %q, want it to contain %q", desc, want)
 		}
@@ -135,7 +135,7 @@ func TestAntigravityACP_RuntimeConfig(t *testing.T) {
 		t.Errorf("Env = %#v, want empty (inherit execution environment unmodified)", rt.Env)
 	}
 	if len(rt.StripEnv) != 0 {
-		t.Errorf("StripEnv = %#v, want empty", rt.StripEnv)
+		t.Errorf("StripEnv = %#v, want empty for remote/nil-policy launches", rt.StripEnv)
 	}
 	if rt.ResourceLimits.MemoryMB != 4096 || rt.ResourceLimits.CPUCores != 2.0 || rt.ResourceLimits.Timeout != time.Hour {
 		t.Errorf("ResourceLimits = %+v, want {4096, 2.0, 1h}", rt.ResourceLimits)
@@ -251,8 +251,8 @@ func TestAntigravityACP_PermissionAndBillingDefaults(t *testing.T) {
 	if len(a.PermissionSettings()) != 0 {
 		t.Errorf("PermissionSettings() = %#v, want empty", a.PermissionSettings())
 	}
-	if got := a.BillingType(); got != usage.BillingTypeAPIKey {
-		t.Errorf("BillingType() = %q, want %q", got, usage.BillingTypeAPIKey)
+	if got := a.BillingType(); got != usage.BillingTypeSubscription {
+		t.Errorf("BillingType() = %q, want %q", got, usage.BillingTypeSubscription)
 	}
 	catalog := CatalogPermissionSettings(a)
 	auto, ok := catalog[PermissionKeyAutoApprove]
@@ -284,7 +284,35 @@ func writeFakeHarness(t *testing.T, dir, name string) {
 	}
 }
 
+func TestAntigravityACP_LocalRuntimeEnvironment(t *testing.T) {
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	t.Setenv("ANTIGRAVITY_HARNESS_PATH", "")
+	binDir := t.TempDir()
+	server := writeFakeAntigravityBinary(t, binDir)
+	writeFakeHarness(t, binDir, wantAntigravityHarnessNames()[0])
+	t.Setenv("PATH", binDir)
+	command, env, err := NewAntigravityACP().ResolveLocalRuntime(context.Background())
+	if err != nil {
+		t.Fatalf("ResolveLocalRuntime: %v", err)
+	}
+	if command.Args()[0] != server {
+		t.Fatalf("command = %v, want %s", command.Args(), server)
+	}
+	harness := filepath.Join(binDir, wantAntigravityHarnessNames()[0])
+	if env["ANTIGRAVITY_HARNESS_PATH"] != harness {
+		t.Fatalf("env = %#v, want harness %s", env, harness)
+	}
+}
+
+func TestAntigravityACP_RemoteStripEnvPreservesAPIKeys(t *testing.T) {
+	rt := NewAntigravityACP().Runtime()
+	if len(rt.StripEnv) != 0 {
+		t.Fatalf("remote runtime StripEnv = %#v, want empty", rt.StripEnv)
+	}
+}
+
 func TestAntigravityACP_DiscoveryRequiresGlobalBinary(t *testing.T) {
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	binDir := t.TempDir()
 	t.Setenv("PATH", binDir)
 
@@ -301,6 +329,7 @@ func TestAntigravityACP_DiscoveryRequiresGlobalBinary(t *testing.T) {
 }
 
 func TestAntigravityACP_DiscoveryFailsClosedWithoutHarness(t *testing.T) {
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	binDir := t.TempDir()
 	path := writeFakeAntigravityBinary(t, binDir)
 	t.Setenv("PATH", binDir)
@@ -319,6 +348,7 @@ func TestAntigravityACP_DiscoveryFailsClosedWithoutHarness(t *testing.T) {
 }
 
 func TestAntigravityACP_DiscoveryAvailableWithHarnessSibling(t *testing.T) {
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	for _, harnessName := range wantAntigravityHarnessNames() {
 		t.Run(harnessName, func(t *testing.T) {
 			binDir := t.TempDir()
@@ -355,6 +385,7 @@ func TestAntigravityACP_DiscoveryAvailableWithHarnessSibling(t *testing.T) {
 }
 
 func TestAntigravityACP_DiscoveryHarnessMustBeRegularFile(t *testing.T) {
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	binDir := t.TempDir()
 	writeFakeAntigravityBinary(t, binDir)
 	// A directory named like the harness must not count as a match.
@@ -374,6 +405,7 @@ func TestAntigravityACP_DiscoveryHarnessMustBeRegularFile(t *testing.T) {
 }
 
 func TestAntigravityACP_DiscoveryRejectsNonExecutableHarness(t *testing.T) {
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	if runtime.GOOS == "windows" {
 		t.Skip("unix execute bits do not control windows executability")
 	}
@@ -400,6 +432,7 @@ func TestAntigravityACP_DiscoveryRejectsNonExecutableHarness(t *testing.T) {
 }
 
 func TestAntigravityACP_DiscoveryHarnessDanglingSymlinkDoesNotMatch(t *testing.T) {
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation needs elevated privileges on windows")
 	}
@@ -421,18 +454,23 @@ func TestAntigravityACP_DiscoveryHarnessDanglingSymlinkDoesNotMatch(t *testing.T
 	}
 }
 
-func TestAntigravityACP_DiscoveryHarnessPathEnvBypassesCheck(t *testing.T) {
+func TestAntigravityACP_DiscoveryHarnessPathEnvValidated(t *testing.T) {
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	binDir := t.TempDir()
 	writeFakeAntigravityBinary(t, binDir)
+	harness := filepath.Join(t.TempDir(), "harness-elsewhere")
+	if err := os.WriteFile(harness, []byte("harness"), 0o755); err != nil {
+		t.Fatalf("write override harness: %v", err)
+	}
 	t.Setenv("PATH", binDir)
-	t.Setenv("ANTIGRAVITY_HARNESS_PATH", filepath.Join(t.TempDir(), "harness-elsewhere"))
+	t.Setenv("ANTIGRAVITY_HARNESS_PATH", harness)
 
 	result, err := NewAntigravityACP().IsInstalled(context.Background())
 	if err != nil {
 		t.Fatalf("IsInstalled error: %v", err)
 	}
 	if !result.Available {
-		t.Error("Available=false even though ANTIGRAVITY_HARNESS_PATH satisfies the harness check")
+		t.Error("Available=false even though ANTIGRAVITY_HARNESS_PATH names a valid harness")
 	}
 }
 
@@ -453,6 +491,7 @@ func TestAntigravityACP_DiscoveryContextCancellation(t *testing.T) {
 }
 
 func TestAntigravityACP_DiscoveryDeterministic(t *testing.T) {
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	binDir := t.TempDir()
 	writeFakeAntigravityBinary(t, binDir)
 	writeFakeHarness(t, binDir, wantAntigravityHarnessNames()[0])

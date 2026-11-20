@@ -27,10 +27,16 @@ type MergeMRRequest struct {
 func (c *PATClient) MergeMR(ctx context.Context, projectPath string, iid int, squash bool, squashCommitMessage string) (*MR, error) {
 	mrEndpoint := fmt.Sprintf("/projects/%s/merge_requests/%d", projectRef(projectPath), iid)
 	var head struct {
-		SHA string `json:"sha"`
+		SHA                 string `json:"sha"`
+		Draft               bool   `json:"draft"`
+		WorkInProgress      bool   `json:"work_in_progress"`
+		DetailedMergeStatus string `json:"detailed_merge_status"`
 	}
 	if err := c.get(ctx, mrEndpoint, &head); err != nil {
 		return nil, fmt.Errorf("get merge head for MR !%d: %w", iid, err)
+	}
+	if isDraftMR(head.Draft || head.WorkInProgress, head.DetailedMergeStatus) {
+		return nil, ErrMRIsDraft
 	}
 	if strings.TrimSpace(head.SHA) == "" {
 		return nil, fmt.Errorf("get merge head for MR !%d: source SHA is empty", iid)
@@ -47,7 +53,7 @@ func (c *PATClient) MergeMR(ctx context.Context, projectPath string, iid int, sq
 	}
 	var raw rawMR
 	if err := c.doWrite(ctx, "PUT", endpoint, body, &raw); err != nil {
-		return nil, fmt.Errorf("merge MR !%d: %w", iid, err)
+		return nil, fmt.Errorf("merge MR !%d: %w", iid, wrapMergeRefusal(err))
 	}
 	return convertRawMR(&raw), nil
 }

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -14,10 +15,12 @@ import (
 	"github.com/kandev/kandev/internal/automation"
 	editormodels "github.com/kandev/kandev/internal/editors/models"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
+	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 	"github.com/kandev/kandev/internal/notifications/dto"
 	"github.com/kandev/kandev/internal/settingscatalog"
 	storage "github.com/kandev/kandev/internal/system/storage"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	utilitymodels "github.com/kandev/kandev/internal/utility/models"
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
@@ -127,7 +130,28 @@ func (s *settingsOperations) updateDomainSettings(ctx context.Context, target se
 		if err := decodePatch(normalized, &request); err != nil {
 			return nil, err
 		}
+		validateOnly, err := repositoryValidateOnlyOption(options)
+		if err != nil {
+			return nil, err
+		}
+		if validateOnly {
+			if request.RemoteURL == nil || len(normalized) != 1 {
+				return nil, mcphandlers.NewSettingsRequestError("validate_only_requires_remote_url",
+					fmt.Errorf("validate_only requires exactly one remote_url change"))
+			}
+			preview, previewErr := s.deps.task.ValidateRepositoryRemoteURLUpdate(ctx, *target.ResourceID, *request.RemoteURL)
+			if previewErr != nil {
+				return nil, repositorySettingsDomainError(previewErr)
+			}
+			return map[string]any{
+				"target": target, "accepted_fields": changePaths(changes), "validation": preview,
+				"source": target.ResourceType, "validated": true,
+			}, nil
+		}
 		updated, err = s.deps.task.UpdateRepository(ctx, *target.ResourceID, &request)
+		if err != nil {
+			return nil, repositorySettingsDomainError(err)
+		}
 	case "repository_script":
 		var request taskservice.UpdateRepositoryScriptRequest
 		if err := decodePatch(normalized, &request); err != nil {
@@ -193,6 +217,42 @@ func (s *settingsOperations) updateDomainSettings(ctx context.Context, target se
 	return map[string]any{"target": target, "accepted_fields": changePaths(changes), "settings": s.sanitizeSettingsValue(target.ResourceType, updated), "source": target.ResourceType}, nil
 }
 
+func repositoryValidateOnlyOption(options map[string]json.RawMessage) (bool, error) {
+	for key := range options {
+		if key != "validate_only" {
+			return false, mcphandlers.NewSettingsRequestError("unknown_option", fmt.Errorf("unknown repository option %q", key))
+		}
+	}
+	raw, ok := options["validate_only"]
+	if !ok {
+		return false, nil
+	}
+	var validateOnly *bool
+	if err := json.Unmarshal(raw, &validateOnly); err != nil || validateOnly == nil {
+		return false, mcphandlers.NewSettingsRequestError("invalid_option", fmt.Errorf("validate_only must be a JSON boolean"))
+	}
+	return *validateOnly, nil
+}
+
+func repositorySettingsDomainError(err error) error {
+	var selectionErr *taskservice.RepositorySelectionError
+	if errors.As(err, &selectionErr) {
+		return mcphandlers.NewSettingsRequestError(string(selectionErr.Code), err)
+	}
+	switch {
+	case errors.Is(err, taskservice.ErrRepositoryReadOnly):
+		return mcphandlers.NewSettingsRequestError("repository_read_only", err)
+	case errors.Is(err, repoerrors.ErrTaskVersionConflict):
+		return mcphandlers.NewSettingsRequestError("repository_version_conflict", err)
+	case errors.Is(err, repoerrors.ErrRepositoryNotFound):
+		return mcphandlers.NewSettingsRequestError("repository_not_found", err)
+	case errors.Is(err, taskservice.ErrInvalidRepositorySettings):
+		return mcphandlers.NewSettingsRequestError("repository_selection_invalid", err)
+	default:
+		return err
+	}
+}
+
 func decodePatch(changes map[string]json.RawMessage, target any) error {
 	payload, err := json.Marshal(changes)
 	if err != nil {
@@ -235,7 +295,7 @@ func (s *settingsOperations) readPrompt(ctx context.Context, id string) (map[str
 			return map[string]any{
 				"id": prompt.ID, "name": prompt.Name, "content": prompt.Content, "builtin": prompt.Builtin,
 				"created_at": prompt.CreatedAt, "updated_at": prompt.UpdatedAt,
-				"allow_agent_edits": prompt.AllowAgentEdits && !prompt.Builtin,
+				"allow_agent_edits": !prompt.Builtin,
 			}, nil
 		}
 	}
@@ -243,6 +303,9 @@ func (s *settingsOperations) readPrompt(ctx context.Context, id string) (map[str
 }
 
 func (s *settingsOperations) updatePrompt(ctx context.Context, id string, changes map[string]json.RawMessage) (any, error) {
+	if _, exists := changes["allow_agent_edits"]; exists {
+		return nil, fmt.Errorf("allow_agent_edits is not a writable prompt field")
+	}
 	var name, content *string
 	if err := decodeOptionalChange(changes, "name", &name); err != nil {
 		return nil, err

@@ -45,7 +45,8 @@ and existing documentation. Coordinator and canonical publisher APIs stay unchan
 
 ## Acceptance
 
-1. Capture and summary each end within three logical attempts, counting inline work, with
+1. Capture and settlement-capable runtime summary handlers each end within
+   three logical attempts, counting inline work, with
    250/500 ms cancellable waits. Typed permanent loss stops immediately; joined
    storage failures remain visible and bounded.
 2. Terminal processing validates the exact turn, execution, environment, startup
@@ -185,6 +186,20 @@ Root verification for the correction:
 - Formatting completed. Normal hooks, updated-head hosted CI and readback are
   recorded by the integrator after publication; the original CI result is not
   reinterpreted as a new pass.
+
+## Upstream reconciliation at 30a3e06372d4
+
+The merge keeps upstream summary-stop logging and its existing handler contract.
+A handler that provides durable abandonment retains this repair's three-attempt
+budget and original-owner settlement. Existing handlers without that optional
+method retain upstream transient-publication retries and missing-set/ownership
+stop classification. Both upstream summary retry cases and this repair's durable
+settlement case are preserved unchanged. The required handler interface and
+configuration remain unchanged.
+
+The focused existing lifecycle, coordinator and runtime-adapter selections passed
+with the race detector on this merged source. Test cases and expectations were
+not changed for the reconciliation.
 
 ## Risks
 

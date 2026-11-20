@@ -5,10 +5,11 @@ requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001
 created: 2026-08-13
-updated: 2026-10-29
+updated: 2026-11-08
 owners:
   - cfl
 ---
+
 # Dynamic Agent Routing System Design Part 2
 
 ## Purpose and boundaries
@@ -17,10 +18,42 @@ This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
-| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` | [Migrated source detail](#migrated-source-detail) |
-| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001` | [Failure modes](#failure-modes) |
+| Requirement                                                                       | Design section                                                                            |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`                                            | [Migrated source detail](#migrated-source-detail)                                         |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001`                           | [Failure modes](#failure-modes)                                                           |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` (`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.32`) | [Candidate references from dynamic profiles](#candidate-references-from-dynamic-profiles) |
+
+## Candidate references from dynamic profiles
+
+`ListDynamicProfileReferencesByExecutionProfile` (`internal/agent/settings/store`)
+joins `dynamic_agent_routes` to `agent_profiles` and returns only parents with
+`deleted_at IS NULL`. A soft-deleted dynamic profile keeps its route rows, but
+the router never selects a deleted profile, so those rows are not a dependency
+of the candidate. Before this rule, a candidate referenced only by a deleted
+dynamic profile could not be deleted or disabled without force, and the web
+dialog did not render the `dynamic_profiles` list, so the user saw a conflict
+with nothing to resolve.
+
+`Controller.prepareProfileDeletion` collects live dynamic profiles, routing
+tiers, utility agents, active sessions, watchers, and enabled automations
+before deciding, and returns one `ErrProfileInUseDetail`. Routing tiers block
+even with `force`; every other reference is a soft blocker that `force`
+skips. After the profile row is deleted, `removeStaleDynamicRoutes` calls
+`DeleteDynamicAgentRoutesForDeletedProfiles`, which attempts to remove only the
+routes that point at the deleted candidate from soft-deleted parents. Cleanup
+is best-effort and logged, because the row is already gone. A failure may leave
+inert route rows in a soft-deleted parent. Routes of live dynamic profiles stay,
+so the user can repair them.
+
+The disable path reads live dynamic profiles and utility agents before returning
+one unforced 409. The web reads both `dynamic_profiles` and `utility_agents` from
+the response before it offers the force action.
+`AgentProfileDeleteConflictDialog` adds a dynamic profile section next to the
+existing ones, and `AgentProfileDisableConflictDialog` lists dynamic profiles
+with their own warning. The disable warning says that routing stops when a
+disabled profile is the dynamic profile's only candidate. Both dialogs use one
+scrollable phone body and keep the footer actions visible.
 
 ## Migrated source detail
 
@@ -57,31 +90,31 @@ This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-
 
 ## State machine
 
-| State | Trigger | Next state |
-| --- | --- | --- |
-| `selecting` | route generation and candidate committed | `starting` |
-| `selecting` | no eligible candidate, circuit recovery exists | `waiting` |
-| `selecting` | no candidate and user action required | `action_required` |
-| `starting` | downstream ACP initialized and capabilities captured | `active` |
-| `starting` | safe classified failure with reset wait | `waiting_for_reset` |
-| `starting` | safe classified failure with retry budget | `retry_wait` |
-| `starting` | recovery exhausted | `switching` or `action_required` |
-| `active` | safe classified failure with reset wait | `waiting_for_reset` |
-| `active` | safe classified failure with retry budget | `retry_wait` |
-| `active` | recovery exhausted | `switching` or `action_required` |
-| `active` | active candidate disabled or removed | `reroute_pending` |
-| `active` | concrete-profile process restart | `starting` with same route |
-| `reroute_pending` | active turn settles | `switching` |
-| `switching` | successor decision committed | `starting` with generation + 1 |
-| `switching` | no successor is eligible | `waiting` or `action_required` |
-| `retry_wait` or `waiting_for_reset` | deadline due and generation current | `retrying` |
-| `retrying` | candidate succeeds | `active` |
-| `retrying` | safe classified failure | class policy evaluates again |
-| `retry_wait` or `waiting_for_reset` | Skip now | `switching` |
-| `retry_wait` or `waiting_for_reset` | Cancel wait or Stop | `action_required` or `stopped` |
-| `waiting` | reset, probe success, or Retry now | `selecting` |
-| `action_required` | settings or credentials change, or explicit retry | `selecting` |
-| any nonterminal state | user stops session | `stopped` |
+| State                               | Trigger                                              | Next state                       |
+| ----------------------------------- | ---------------------------------------------------- | -------------------------------- |
+| `selecting`                         | route generation and candidate committed             | `starting`                       |
+| `selecting`                         | no eligible candidate, circuit recovery exists       | `waiting`                        |
+| `selecting`                         | no candidate and user action required                | `action_required`                |
+| `starting`                          | downstream ACP initialized and capabilities captured | `active`                         |
+| `starting`                          | safe classified failure with reset wait              | `waiting_for_reset`              |
+| `starting`                          | safe classified failure with retry budget            | `retry_wait`                     |
+| `starting`                          | recovery exhausted                                   | `switching` or `action_required` |
+| `active`                            | safe classified failure with reset wait              | `waiting_for_reset`              |
+| `active`                            | safe classified failure with retry budget            | `retry_wait`                     |
+| `active`                            | recovery exhausted                                   | `switching` or `action_required` |
+| `active`                            | active candidate disabled or removed                 | `reroute_pending`                |
+| `active`                            | concrete-profile process restart                     | `starting` with same route       |
+| `reroute_pending`                   | active turn settles                                  | `switching`                      |
+| `switching`                         | successor decision committed                         | `starting` with generation + 1   |
+| `switching`                         | no successor is eligible                             | `waiting` or `action_required`   |
+| `retry_wait` or `waiting_for_reset` | deadline due and generation current                  | `retrying`                       |
+| `retrying`                          | candidate succeeds                                   | `active`                         |
+| `retrying`                          | safe classified failure                              | class policy evaluates again     |
+| `retry_wait` or `waiting_for_reset` | Skip now                                             | `switching`                      |
+| `retry_wait` or `waiting_for_reset` | Cancel wait or Stop                                  | `action_required` or `stopped`   |
+| `waiting`                           | reset, probe success, or Retry now                   | `selecting`                      |
+| `action_required`                   | settings or credentials change, or explicit retry    | `selecting`                      |
+| any nonterminal state               | user stops session                                   | `stopped`                        |
 
 Only one transition owner can commit a new route generation. Candidate
 selection is not an exclusive lease across sessions. Late ACP frames and user
@@ -141,6 +174,17 @@ require the current exclusive probe lease.
   it holds or loads with a stale-generation error before it opens any circuit.
   Such a failure neither opens the current candidate's circuit nor advances the
   route. A session without known route state keeps the existing behavior.
+- A qualifying classified failure that the orchestrator may not route, because
+  the attempt already observed output or effects, still charges the candidate's
+  shared circuit. The orchestrator's ineligible branch calls
+  `ProfileExecutionResolver.RecordFailureCircuit`, which loads the logical
+  profile and calls `Engine.RecordFailureCircuit`. The engine applies the same
+  generation and candidate fence as `ApplyFailureContext`, ignores codes that
+  do not qualify and owner-release codes (the account-block hold already
+  applies), and opens the circuit with the standard backoff and reset hint. It
+  does not select, claim a generation, launch a successor, or change route
+  status, so the failed turn keeps its existing recovery surface and only later
+  selections skip the candidate.
 - Lifecycle stream events capture the execution's concrete profile separately
   from its logical profile or Office identity. The stream-error handler passes
   that concrete profile to the same failure guard as terminal lifecycle events.
@@ -231,6 +275,13 @@ require the current exclusive probe lease.
   start fail, while a profile change first makes preparation resolve the new
   profile. A different dynamic profile is reached through a new session (the
   workflow profile-switch path), not by relabelling this one.
+- A workspace-only execution can exist before a concrete candidate is
+  selected. When `promoteWorkspaceExecution` prepares the agent launch, it binds
+  the execution's profile ID to the resolved concrete profile and persists the
+  executor-running row whenever that profile or the acting Office profile
+  changes. The Office profile stays in its separate field, so command
+  construction, startup, persistence, and restart read the same concrete
+  profile (`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.31`).
 
 ## Scenarios
 
@@ -253,6 +304,10 @@ require the current exclusive probe lease.
 - **GIVEN** two tasks use profiles with the same proven Fable credential
   binding, **WHEN** one opens its quota circuit, **THEN** the second skips Fable
   without making a failing launch.
+- **GIVEN** a candidate reports a provider-unavailable error after the turn
+  already produced output, **WHEN** the failure is handled, **THEN** the turn
+  keeps its manual recovery surface on the same route generation and the next
+  selection by any session skips that candidate until its circuit recovers.
 - **GIVEN** another profile uses a different or unknown Fable credential
   binding, **WHEN** its resource key is evaluated, **THEN** the first binding's
   quota circuit does not disable it.

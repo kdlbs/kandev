@@ -7,6 +7,38 @@ import { McpDefinitionDetails } from "@/components/mcp/mcp-definition-details";
 import { McpPendingRowAnnotation } from "./mcp-selection-changes-view";
 import type { MCPSetupChange, MCPServerDefinition } from "@/lib/types/http-mcp";
 
+export function McpSessionExclusionHelp({
+  inheritedCount,
+  definitions,
+  excludedIds,
+  onChange,
+  disabled,
+}: {
+  inheritedCount: number;
+  definitions: MCPServerDefinition[];
+  excludedIds: string[];
+  onChange?: (ids: string[]) => void;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  if (!onChange || (inheritedCount === 0 && excludedIds.length === 0)) return null;
+  return (
+    <>
+      <div className="space-y-1.5 text-pretty text-xs text-muted-foreground">
+        <p>{t("settings:mcpSessionExclusionsDescription")}</p>
+        <p>{t("settings:mcpRequiredToolsSeparate")}</p>
+        <p role="status">{t("settings:mcpExclusionCount", { total: excludedIds.length })}</p>
+      </div>
+      <McpDormantExclusions
+        definitions={definitions}
+        excludedIds={excludedIds}
+        onChange={onChange}
+        disabled={disabled}
+      />
+    </>
+  );
+}
+
 export function McpSessionExclusionAction({
   excluded,
   definition,

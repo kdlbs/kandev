@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -15,6 +15,7 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@kandev/ui/drawer";
+import { cn } from "@/lib/utils";
 import { SettingsInfo } from "@/components/settings/settings-info";
 import { MCPSelectionContent } from "@/components/mcp/mcp-selection-picker";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
@@ -22,6 +23,7 @@ import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dia
 import type { MCPInheritedSelection, MCPServerDefinition } from "@/lib/types/http-mcp";
 
 type Props = {
+  builtinPackages?: ReactNode;
   definitions: MCPServerDefinition[];
   loading: boolean;
   selectedIds: string[];
@@ -30,7 +32,77 @@ type Props = {
   disabled?: boolean;
 };
 
-export function TaskCreateMCPSettingRow({ loading, ...selection }: Props) {
+function TaskCreateAdditionalServers({
+  loading,
+  ...selection
+}: Omit<Props, "builtinPackages"> & {
+  query: string;
+  onQueryChange: (query: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (loading)
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground">
+          {t("settings:mcpAdditionalServers")}
+        </p>
+        <p role="status" className="text-xs text-muted-foreground">
+          {t("common:loading")}
+        </p>
+      </div>
+    );
+  return <MCPSelectionContent {...selection} sectionLabel={t("settings:mcpAdditionalServers")} />;
+}
+
+function TaskCreateMCPDrawer({
+  open,
+  onOpenChange,
+  title,
+  description,
+  trigger,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description: string;
+  trigger: ReactNode;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+      <DrawerContent
+        data-testid="task-create-mcp-options"
+        className="h-[min(80dvh,42rem)] !max-h-[80dvh] overflow-hidden pb-[env(safe-area-inset-bottom)]"
+      >
+        <DrawerHeader className="shrink-0 text-left">
+          <div className="flex items-center justify-between gap-3">
+            <DrawerTitle>{title}</DrawerTitle>
+            <DrawerClose asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={controlSizingClassName("icon")}
+                aria-label={t("common:close")}
+              >
+                <IconX className="size-4" aria-hidden="true" />
+              </Button>
+            </DrawerClose>
+          </div>
+          <DrawerDescription>{description}</DrawerDescription>
+        </DrawerHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
+          {children}
+        </div>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+export function TaskCreateMCPSettingRow({ loading, builtinPackages, ...selection }: Props) {
   const { t } = useTranslation();
   const id = useId();
   const touch = useTouchDrawer();
@@ -48,14 +120,14 @@ export function TaskCreateMCPSettingRow({ loading, ...selection }: Props) {
       aria-haspopup="dialog"
       aria-expanded={open}
       data-testid="task-create-mcp-select"
-      disabled={loading || selection.disabled}
+      disabled={selection.disabled || (loading && !builtinPackages)}
       className={controlSizingClassName(
         "standard",
         "w-32 justify-between border-border/60 bg-muted/30 hover:bg-muted/60",
       )}
     >
       <span className="min-w-0 truncate tabular-nums">
-        {loading
+        {loading && !builtinPackages
           ? t("common:loading")
           : t("settings:mcpSelectedCount", { count: selection.selectedIds.length })}
       </span>
@@ -63,12 +135,15 @@ export function TaskCreateMCPSettingRow({ loading, ...selection }: Props) {
     </Button>
   );
   const body = (
-    <MCPSelectionContent
-      {...selection}
-      query={query}
-      onQueryChange={setQuery}
-      sectionLabel={t("settings:mcpAdditionalServers")}
-    />
+    <div className="space-y-5">
+      {builtinPackages}
+      <TaskCreateAdditionalServers
+        {...selection}
+        loading={loading}
+        query={query}
+        onQueryChange={setQuery}
+      />
+    </div>
   );
   return (
     <div className="min-w-0" data-testid="task-create-mcp-setting-row">
@@ -80,34 +155,15 @@ export function TaskCreateMCPSettingRow({ loading, ...selection }: Props) {
           </SettingsInfo>
         </div>
         {touch ? (
-          <Drawer open={open} onOpenChange={setOpen}>
-            <DrawerTrigger asChild>{trigger}</DrawerTrigger>
-            <DrawerContent
-              data-testid="task-create-mcp-options"
-              className="h-[min(80dvh,42rem)] !max-h-[80dvh] overflow-hidden pb-[env(safe-area-inset-bottom)]"
-            >
-              <DrawerHeader className="shrink-0 text-left">
-                <div className="flex items-center justify-between gap-3">
-                  <DrawerTitle>{title}</DrawerTitle>
-                  <DrawerClose asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className={controlSizingClassName("icon")}
-                      aria-label={t("common:close")}
-                    >
-                      <IconX className="size-4" aria-hidden="true" />
-                    </Button>
-                  </DrawerClose>
-                </div>
-                <DrawerDescription>{description}</DrawerDescription>
-              </DrawerHeader>
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
-                {body}
-              </div>
-            </DrawerContent>
-          </Drawer>
+          <TaskCreateMCPDrawer
+            open={open}
+            onOpenChange={setOpen}
+            title={title}
+            description={description}
+            trigger={trigger}
+          >
+            {body}
+          </TaskCreateMCPDrawer>
         ) : (
           <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>{trigger}</PopoverTrigger>
@@ -116,7 +172,10 @@ export function TaskCreateMCPSettingRow({ loading, ...selection }: Props) {
               portalContainer={portalContainer}
               aria-label={title}
               data-testid="task-create-mcp-options"
-              className="max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[min(24rem,calc(100vw-2rem))] gap-3 overflow-hidden p-3"
+              className={cn(
+                "max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[min(24rem,calc(100vw-2rem))] gap-3 overflow-hidden p-3",
+                builtinPackages && "w-[min(32rem,calc(100vw-2rem))]",
+              )}
             >
               <p className="shrink-0 text-xs text-pretty text-muted-foreground">{description}</p>
               <div className="min-h-0 overflow-y-auto overscroll-contain">{body}</div>

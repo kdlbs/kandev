@@ -36,18 +36,29 @@ func (r *copilotSelectionReader) Get(context.Context, string, string) (managedru
 }
 
 type copilotPluginRunner struct {
-	stdout  []byte
-	err     error
-	calls   [][]string
-	envs    []map[string]string
-	dirs    []string
-	started chan struct{}
-	release chan struct{}
-	onRun   func()
-	once    sync.Once
+	stdout        []byte
+	err           error
+	calls         [][]string
+	helpCalls     [][]string
+	helpOutput    []byte
+	helpOutputSet bool
+	envs          []map[string]string
+	dirs          []string
+	started       chan struct{}
+	release       chan struct{}
+	onRun         func()
+	once          sync.Once
 }
 
 func (r *copilotPluginRunner) Run(_ context.Context, argv []string, env map[string]string, workDir string) (copilotplugins.CommandResult, error) {
+	if containsSequence(argv, "--help") {
+		r.helpCalls = append(r.helpCalls, append([]string{}, argv...))
+		output := []byte("Options:\n  --plugin-dir <path>  Load plugin directories\n")
+		if r.helpOutputSet {
+			output = r.helpOutput
+		}
+		return copilotplugins.CommandResult{Stdout: output}, nil
+	}
 	r.calls = append(r.calls, append([]string{}, argv...))
 	r.envs = append(r.envs, cloneStringMap(env))
 	r.dirs = append(r.dirs, workDir)
@@ -231,6 +242,28 @@ func TestCopilotPluginRuntimeSnapshotNotReread(t *testing.T) {
 	}
 	if selection.calls != 0 {
 		t.Fatalf("plugin preparation reread the active runtime %d times after argv construction", selection.calls)
+	}
+}
+
+func TestCopilotPluginRuntime105Preparation(t *testing.T) {
+	root, configDir, runner := copilotPluginFixture(t)
+	selection := &copilotSelectionReader{version: "1.0.105"}
+	mgr := newCopilotLifecycleManager(t, copilotLaunchProfile(), selection)
+	mgr.SetCopilotPluginRunner(runner)
+	args, err := mgr.prepareCopilotPluginArgs(
+		context.Background(), copilotExecution(t, "profile-1"),
+		map[string]string{"COPILOT_HOME": configDir, "PATH": os.Getenv("PATH")},
+		[]string{"npx", "--yes", "--prefer-offline", "@github/copilot@1.0.105", "--acp"},
+	)
+	if err != nil {
+		t.Fatalf("prepare 1.0.105 runtime: %v", err)
+	}
+	if !containsSequence(args, "--plugin-dir", canonicalCopilotPluginRootForTest(t, root)) {
+		t.Fatalf("prepared args = %#v, want selected plugin mount", args)
+	}
+	if len(runner.calls) != 1 ||
+		!containsSequence(runner.calls[0], "@github/copilot@1.0.105", "plugin", "list") {
+		t.Fatalf("inventory command = %#v, want the selected 1.0.105 runtime", runner.calls)
 	}
 }
 

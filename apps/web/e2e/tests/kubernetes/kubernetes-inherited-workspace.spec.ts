@@ -32,7 +32,7 @@ test("queued MCP Kubernetes children reject inherited admission and accept new_w
       executor_id: seedData.executorId,
       executor_profile_id: seedData.executorProfileId,
       description: [
-        create("Inherited Kubernetes child"),
+        create("Inherited Kubernetes child", "inherit_parent"),
         create("Independent Kubernetes child", "new_workspace"),
         'e2e:message("Children queued")',
       ].join("\n"),

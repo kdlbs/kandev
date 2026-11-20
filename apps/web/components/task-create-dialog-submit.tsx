@@ -399,7 +399,9 @@ export function useTaskSubmitHandlers({
   workflowAgentOverridesBlockedReason,
   initialWorkspaceLayout,
   blockedBy,
+  relatedTaskIds,
   mcpServerIds = [],
+  builtinMCPPreferences,
   saveTaskMCPSelections,
   mcpServerIdsDirty,
   editDependencies,
@@ -917,7 +919,9 @@ export function useTaskSubmitHandlers({
           workflowAgentOverrides,
           initialWorkspaceLayout,
           blockedBy,
+          relatedTaskIds,
           mcpServerIds,
+          builtinMCPPreferences,
         });
         submittedPayload = payload;
         return payload;
@@ -993,6 +997,7 @@ export function useTaskSubmitHandlers({
       createTask,
       nativeRecoveryActive,
       runNativeSubmission,
+      builtinMCPPreferences,
       isSessionMode,
       isEditMode,
       workflowAgentOverrides,
@@ -1266,13 +1271,16 @@ export function useTaskSubmitHandlers({
             executorProfileId,
             withAgent: false,
             attachments,
+            parentId: parentTaskId,
             workspacePath: resolveWorkspacePath(noRepository, workspacePath),
             autopilot,
             priority,
             workflowAgentOverrides,
             initialWorkspaceLayout,
             blockedBy,
+            relatedTaskIds,
             mcpServerIds,
+            builtinMCPPreferences,
           });
           submittedPayload = p;
           return p;
@@ -1323,9 +1331,12 @@ export function useTaskSubmitHandlers({
       clearDraft,
       toast,
       setIsCreatingTask,
+      parentTaskId,
       blockedBy,
+      relatedTaskIds,
       workflowAgentOverrides,
       mcpServerIds,
+      builtinMCPPreferences,
       initialWorkspaceLayout,
       nativeRecoveryActive,
     ],

@@ -66,6 +66,42 @@ func TestPublishPermissionRequest_RunOwnedReachesWildcardSubscriber(t *testing.T
 	}
 }
 
+// A provider-native human question must carry its classification to the
+// backend so automatic consumers leave it pending; an ordinary approval must
+// not gain that flag.
+func TestPublishPermissionRequest_CarriesHumanInputClassification(t *testing.T) {
+	for _, humanInput := range []bool{true, false} {
+		eventBus := bus.NewMemoryEventBus(newTestLogger())
+		publisher := NewEventPublisher(eventBus, newTestLogger())
+		received := make(chan *bus.Event, 1)
+		if _, err := eventBus.Subscribe(events.BuildPermissionRequestSubject("session-1"), func(_ context.Context, e *bus.Event) error {
+			received <- e
+			return nil
+		}); err != nil {
+			t.Fatalf("subscribe: %v", err)
+		}
+		execution := &AgentExecution{
+			ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+			Owner: ExecutionOwner{Kind: ExecutionOwnerTask, TaskID: "task-1", SessionID: "session-1"},
+		}
+		if err := publisher.PublishPermissionRequest(execution, agentctl.AgentEvent{
+			Type: "permission_request", RequestID: "req-1", PendingID: "pending-1",
+			PermissionHumanInput: humanInput,
+		}); err != nil {
+			t.Fatalf("publish: %v", err)
+		}
+		select {
+		case event := <-received:
+			payload := event.Data.(PermissionRequestEventPayload)
+			if payload.HumanInput != humanInput {
+				t.Fatalf("human_input = %v, want %v", payload.HumanInput, humanInput)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("permission request was not published")
+		}
+	}
+}
+
 func TestPublishPermissionRequest_TaskOwnedKeepsSessionSubject(t *testing.T) {
 	eventBus := bus.NewMemoryEventBus(newTestLogger())
 	publisher := NewEventPublisher(eventBus, newTestLogger())

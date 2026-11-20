@@ -279,22 +279,18 @@ func classifyLegacyTransientFailure(
 			providerID = id
 		}
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhaseStreaming,
-		ProviderID: providerID,
-		Stderr:     message,
-	})
+	classified := routingerr.Classify(providerError.RoutingInput(routingerr.PhaseStreaming, providerID, message))
 	if !classified.ShouldShortRetry() {
 		return nil, false
 	}
 	if !evidence.ProviderDiagnosticCandidate {
 		return classified, true
 	}
-	diagnostic := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhasePromptSend,
-		ProviderID: providerID,
-		Stderr:     evidence.ProviderDiagnosticText,
-	})
+	var matchingDiagnostic *streams.ProviderError
+	if providerError != nil && normalizeFailureText(providerError.Message) == normalizeFailureText(evidence.ProviderDiagnosticText) {
+		matchingDiagnostic = providerError
+	}
+	diagnostic := routingerr.Classify(matchingDiagnostic.RoutingInput(routingerr.PhasePromptSend, providerID, evidence.ProviderDiagnosticText))
 	diagnosticText := normalizeFailureText(evidence.ProviderDiagnosticText)
 	if diagnostic.Confidence != routingerr.ConfHigh || !diagnostic.ShouldShortRetry() ||
 		diagnostic.Code != classified.Code || diagnosticText == "" ||

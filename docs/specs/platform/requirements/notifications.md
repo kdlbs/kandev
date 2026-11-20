@@ -37,6 +37,8 @@ Kandev currently treats every transition to a session's generic `WAITING_FOR_INP
 - **AC-PLATFORM-NOTIFICATIONS-001.14:** The Linux System provider shall retain its configured timeout and icon behavior, report command failures to its caller, and honor cancellation of an in-flight command.
 - **AC-PLATFORM-NOTIFICATIONS-001.15:** In mock E2E mode, System delivery shall remain suppressed without invoking an operating-system notification command.
 - **AC-PLATFORM-NOTIFICATIONS-001.16:** A Local Kandev update notification with a known release version shall display its title and body in the selected application locale, including native delivery. The displayed copy shall identify the release version and shall not depend on English text supplied by the backend.
+- **AC-PLATFORM-NOTIFICATIONS-001.17:** When desktop notification permission is undecided or granted, the Notifications settings page shall display no empty warning card, warning padding, or reserved warning space. The permission, refresh, and test controls shall remain available under their existing enabled and disabled conditions.
+- **AC-PLATFORM-NOTIFICATIONS-001.18:** When notification permission is denied, unsupported, or unavailable after a failed check, the page shall display the corresponding localized warning. Denial shall distinguish browser settings from operating-system settings. Refreshing permission shall add or remove the warning surface to match the result. Desktop and phone layouts shall keep the warning readable without horizontal page scrolling.
 
 ## Migrated source detail
 
@@ -266,6 +268,7 @@ Notification bodies contain the task title but not the question text.
 
 ## Implementation Plan
 
+- [Notification permission layout](../../../plans/notification-permission-layout/plan.md), with the [permission feedback design](../system-design/notification-permission-feedback.md).
 - [Localized update notifications](../../../plans/localized-update-notifications/plan.md), with the [Local update notification design](../system-design/localized-update-notifications.md).
 - [Linux notification operand boundary](../../../plans/linux-notification-operands/plan.md), with the [System transport design](../system-design/linux-notification-operands.md).
 - [Notification window focus](../../../plans/notification-window-focus/plan.md), with the focused [Local notification attention design](../system-design/local-notification-attention.md).

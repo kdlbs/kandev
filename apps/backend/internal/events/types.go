@@ -134,6 +134,12 @@ const (
 	// capacity observation. It is independent of journal writes and transcript
 	// persistence.
 	TaskSessionRuntimeStorageChanged = "task_session.runtime_storage_changed"
+
+	// TaskSessionReadCursorChanged carries a session's persisted read cursor
+	// (last_read_message_id and its created_at) after a write. The task
+	// status projector derives the task unread aggregate from it. reset is
+	// true only when a test route force-set a possibly lower cursor.
+	TaskSessionReadCursorChanged = "task_session.read_cursor_changed"
 )
 
 // TaskStatusSummaryUpdated is a complete replacement projection for one
@@ -179,12 +185,6 @@ const (
 	RepositoryCreated = "repository.created"
 	RepositoryUpdated = "repository.updated"
 	RepositoryDeleted = "repository.deleted"
-)
-
-// Event types emitted by Azure DevOps watcher polling.
-const (
-	AzureDevOpsWorkItemWatchMatch    = "azure_devops.work_item_watch.match"
-	AzureDevOpsPullRequestWatchMatch = "azure_devops.pull_request_watch.match"
 )
 
 // Event types for repository sets
@@ -309,9 +309,11 @@ const (
 
 // Event types for workspace/git status
 const (
-	GitEvent           = "git.event"            // Internal git events (agentctl -> orchestrator)
-	GitWSEvent         = "git.ws"               // WebSocket git events (orchestrator -> frontend)
-	FileChangeNotified = "file.change.notified" // File changed in workspace
+	GitEvent                        = "git.event"                    // Internal git events (agentctl -> orchestrator)
+	WorkspaceWorktreesObserved      = "workspace.worktrees.observed" // Linked-worktree snapshots (agentctl -> task service)
+	WorkspaceWorktreesSubjectPrefix = "workspace.worktrees."
+	GitWSEvent                      = "git.ws"               // WebSocket git events (orchestrator -> frontend)
+	FileChangeNotified              = "file.change.notified" // File changed in workspace
 )
 
 // Event types for shell I/O
@@ -484,6 +486,16 @@ func BuildGitEventSubject(sessionID string) string {
 // BuildGitEventWildcardSubject creates a wildcard subscription for all internal git events
 func BuildGitEventWildcardSubject() string {
 	return GitEvent + ".*"
+}
+
+// BuildWorkspaceWorktreesSubject creates a worktree inventory subject for one session.
+func BuildWorkspaceWorktreesSubject(sessionID string) string {
+	return WorkspaceWorktreesSubjectPrefix + sessionID
+}
+
+// BuildWorkspaceWorktreesWildcardSubject subscribes to every worktree inventory.
+func BuildWorkspaceWorktreesWildcardSubject() string {
+	return WorkspaceWorktreesSubjectPrefix + "*"
 }
 
 // BuildGitWSEventSubject creates a git WebSocket event subject for a specific session

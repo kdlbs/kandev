@@ -51,7 +51,10 @@ var mcpServers map[string]mcpServerDef
 // mockAgent implements the acp.Agent interface for the mock agent.
 type mockAgent struct {
 	conn                           sessionUpdater
+	rawOut                         *serializedACPWriter
 	model                          string
+	copilotNativeSubscribed        bool
+	clientSupportsCompaction       bool
 	sessions                       map[acp.SessionId]bool
 	promptCancels                  map[acp.SessionId]context.CancelFunc
 	promptCancelHolds              map[acp.SessionId]chan struct{}
@@ -117,7 +120,9 @@ func main() {
 		commandsEmitted:                make(map[acp.SessionId]bool),
 		dynamicFallbackCounterSessions: make(map[acp.SessionId]acp.SessionId),
 	}
-	asc := acp.NewAgentSideConnection(ag, os.Stdout, os.Stdin)
+	rawOut := newSerializedACPWriter(os.Stdout)
+	ag.rawOut = rawOut
+	asc := acp.NewAgentSideConnection(ag, rawOut, os.Stdin)
 	ag.conn = asc
 
 	<-asc.Done()
@@ -132,13 +137,26 @@ func main() {
 // suggestions are gated on the explicit suggestion declaration, so the mock must
 // earn each independently the same way a real bridge does or E2E would prove
 // nothing about either gate.
-func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
+func (a *mockAgent) Initialize(_ context.Context, req acp.InitializeRequest) (acp.InitializeResponse, error) {
+	a.mu.Lock()
+	a.clientSupportsCompaction = req.ClientCapabilities.Session != nil &&
+		req.ClientCapabilities.Session.Compaction != nil
+	a.copilotNativeSubscribed = copilotNativeSubscriptionRequested(req.ClientCapabilities)
+	a.mu.Unlock()
 	traceACP("initialize", "", nil)
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("E2E_MOCK_AGENT_FAIL_INITIALIZE")), "true") {
 		return acp.InitializeResponse{}, errors.New("mock ACP initialization failed by E2E fixture")
 	}
+	agentInfo := mockClaudeBridgeAgentInfo()
+	var meta map[string]any
+	if copilotNativeFixtureEnabled() {
+		agentInfo = &acp.Implementation{Name: "GitHub Copilot CLI", Version: "1.0.103"}
+	} else {
+		meta = mockClaudeCodeMeta()
+	}
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
+		AgentInfo:       agentInfo,
 		AgentCapabilities: acp.AgentCapabilities{
 			LoadSession: true,
 			PromptCapabilities: acp.PromptCapabilities{
@@ -148,7 +166,7 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 			SessionCapabilities: acp.SessionCapabilities{
 				Close: &acp.SessionCloseCapabilities{},
 			},
-			Meta: mockClaudeCodeMeta(),
+			Meta: meta,
 		},
 	}, nil
 }
@@ -485,6 +503,9 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 		a.mu.Unlock()
 	}()
 
+	if resp, err, handled := a.handleCopilotNativeFixture(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	a.emitAvailableCommandsOnce(promptCtx, req.SessionId)
 	if cancelHold != nil {
 		if acceptanceMarker != "" {
@@ -542,10 +563,11 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	}
 	a.mu.Lock()
 	sessionMCPServers := cloneMCPServerDefs(a.sessionMCPServers[req.SessionId])
+	supportsCompaction := a.clientSupportsCompaction
 	a.mu.Unlock()
 	e := &emitter{
 		ctx: promptCtx, conn: a.conn, sid: req.SessionId, mcpServers: sessionMCPServers,
-		registerDetachedWork: a.registerDetachedWork,
+		registerDetachedWork: a.registerDetachedWork, supportsCompaction: supportsCompaction,
 	}
 	handlePrompt(e, prompt, a.sessionModel(req.SessionId))
 	if promptCtx.Err() != nil {
@@ -807,6 +829,7 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "parked-fixture", Description: "e2e-only: delayed shell-kind detached launch, for scripting the probe before settle", Input: hint("settleDelay (e.g. 3s)")},
 		{Name: "async-subagent-lifecycle", Description: "Replay an async Agent lifecycle (default 20s)", Input: hint("duration (e.g. 20s)")},
 		{Name: "async-subagent-teardown", Description: "Replay async Agent work with a missing completion"},
+		{Name: "async-followup", Description: "Agent-started follow-up with a status-less tool update"},
 		{Name: toolKeyError, Description: "Simulate an error"},
 		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
 		{Name: "transport-lost", Description: "Simulate an ACP transport disconnect (fails once, then recovers)"},

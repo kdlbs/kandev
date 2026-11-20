@@ -2,10 +2,12 @@ package backendapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/plugins"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
@@ -143,5 +145,42 @@ func TestPluginRepositorySelectionDiscoveryMapsOperationErrors(t *testing.T) {
 	var selectionErr *taskservice.RepositorySelectionError
 	if !errors.As(err, &selectionErr) || selectionErr.Code != taskservice.RepositorySelectionErrorUnavailable {
 		t.Fatalf("error = %v, want unavailable", err)
+	}
+}
+
+// TestBaseBranchSelection_RepositoryAdapters pins two boundaries: the trusted
+// plugin conversion retains server-authored selection intent, and public JSON
+// cannot grant permissive recovery.
+func TestBaseBranchSelection_RepositoryAdapters(t *testing.T) {
+	resolver := pluginRepositorySelectionResolver{inspector: &repositoryProviderInspectorStub{
+		inspection: &plugins.RepositoryProviderInspection{
+			ProviderID: "fixture-source-control", ProviderHost: "https://bitbucket.example.test",
+			ProviderScope: "workspace-a", ProviderRepositoryID: "repo-42", OwnerOrProject: "TEAM",
+			Name: "fixture", CloneURL: "https://bitbucket.example.test/scm/TEAM/fixture.git", DefaultBranch: "main",
+		},
+	}}
+	input := taskservice.TaskRepositoryInput{
+		RemoteURL:                 "https://bitbucket.example.test/projects/TEAM/fixture",
+		BaseBranch:                "release",
+		BaseBranchSelectionSource: taskmodels.BaseBranchSelectionSourceInherited,
+	}
+	resolved, err := resolver.ResolveRepositorySelection(context.Background(), "workspace-1", input)
+	if err != nil {
+		t.Fatalf("ResolveRepositorySelection: %v", err)
+	}
+	if resolved.BaseBranchSelectionSource != taskmodels.BaseBranchSelectionSourceInherited {
+		t.Fatalf("resolved source = %q, want inherited", resolved.BaseBranchSelectionSource)
+	}
+
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	var decoded taskservice.TaskRepositoryInput
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal input: %v", err)
+	}
+	if decoded.BaseBranchSelectionSource != "" {
+		t.Fatalf("public JSON granted selection source %q", decoded.BaseBranchSelectionSource)
 	}
 }

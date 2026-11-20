@@ -119,7 +119,8 @@ func TestMCPResumeEnforcesManagedConversationPolicy(t *testing.T) {
 
 func TestMCPRemovedByAgentctlPolicyRemainsVisible(t *testing.T) {
 	server := newTestServer(t)
-	server.startMCPAttachmentAttempt(context.Background(), nil, []streams.MCPResolutionEntry{{RuntimeName: "external", DefinitionID: "definition"}})
+	ctx := server.startMCPAttachmentAttempt(context.Background(), nil, []streams.MCPResolutionEntry{{RuntimeName: "external", DefinitionID: "definition"}})
+	server.publishMCPAttachmentStart(ctx)
 	history := drainResolutionHistory(server.procMgr)
 	if len(history.Current.Servers) != 1 || history.Current.Servers[0].Status != streams.MCPAttachmentStatusFiltered || history.Current.Servers[0].ReasonCode != "server_policy" {
 		t.Fatalf("silent helper policy exclusion: %+v", history.Current.Servers)

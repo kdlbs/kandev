@@ -84,7 +84,7 @@ export const CreateTaskRenderer: KandevRenderer = ({ args, result, status }) => 
       title={t("task:kandevCreateTask")}
       summary={
         <span className="inline-flex items-center gap-1.5">
-          {title && <span className="truncate max-w-[40ch]">&ldquo;{title}&rdquo;</span>}
+          {title && <span className="truncate max-w-[40ch]">“{title}”</span>}
           {createdId && (
             <>
               <SummaryDot />
@@ -227,7 +227,7 @@ export const MessageTaskRenderer: KandevRenderer = ({ args, result, status }) =>
           {promptShort && (
             <>
               <SummaryDot />
-              <span className="truncate max-w-[40ch]">&ldquo;{promptShort}&rdquo;</span>
+              <span className="truncate max-w-[40ch]">“{promptShort}”</span>
             </>
           )}
         </span>

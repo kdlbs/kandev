@@ -130,8 +130,9 @@ test.describe("Clarification flow", () => {
       expect(descriptionBox.y).toBeGreaterThanOrEqual(labelBox.y + labelBox.height - 1);
     });
 
-    // Single-question bundles still expose option click → instant resolve.
+    // A single-question option is a draft; explicit Send resolves it.
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText(/You answered|selected_option/);
@@ -170,6 +171,7 @@ test.describe("Clarification flow", () => {
 
     try {
       await session.clarificationOption("PostgreSQL").click();
+      await session.submitClarification();
       await expect(status).toBeVisible();
       await expect(status).toHaveAttribute("aria-label", "Submitting…");
       await expect(status).toHaveCount(1);
@@ -236,6 +238,7 @@ test.describe("Clarification flow", () => {
 
     // The user picks a different option locally; the response above must win.
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
 
     await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("SQLite, decided by another answerer");
@@ -295,6 +298,7 @@ test.describe("Clarification flow", () => {
     await expect(reviewGroup).toBeVisible();
 
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
 
     await expect(
       session.sidebar.locator('[data-testid="sidebar-group-header"][data-group-key="IN_PROGRESS"]'),
@@ -703,6 +707,7 @@ test.describe("Clarification flow", () => {
     await expect(card).toBeVisible();
 
     await firstOption.locator("code").click();
+    await session.submitClarification();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
     const resolved = session.activeChat().getByTestId("clarification-request-message");
@@ -745,6 +750,7 @@ test.describe("Clarification flow", () => {
     expect(pointerEvents).not.toBe("none");
 
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
     await expect(session.planModeInput()).toBeVisible({ timeout: 30_000 });
   });
 });
@@ -882,6 +888,7 @@ test.describe("Multi-question clarification carousel", () => {
     await expect(session.clarificationQuestionCardById("context-paragraphs")).toBeVisible();
 
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
@@ -1376,5 +1383,213 @@ test.describe("Multi-question clarification carousel", () => {
     await testPage.keyboard.press("ControlOrMeta+Enter");
     await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  });
+});
+
+test.describe("question draft navigation", () => {
+  test.describe.configure({ retries: 1, timeout: 180_000 });
+
+  async function createPendingClarificationTask(
+    apiClient: ApiClient,
+    seedData: SeedData,
+    title: string,
+  ) {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      title,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:clarification-multi",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("clarification task has no session");
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "clarification task should block on its questions",
+      timeout: 60_000,
+    });
+    return { ...task, sessionId: task.session_id };
+  }
+
+  async function clarificationQuestion(apiClient: ApiClient, sessionId: string, id: string) {
+    const { messages } = await apiClient.listSessionMessages(sessionId);
+    return messages.find(
+      (message) => message.type === "clarification_request" && message.metadata?.question_id === id,
+    );
+  }
+
+  async function clarificationOptionId(
+    apiClient: ApiClient,
+    sessionId: string,
+    questionId: string,
+    label: string,
+  ) {
+    const message = await clarificationQuestion(apiClient, sessionId, questionId);
+    const question = message?.metadata?.question as
+      | { options?: Array<{ option_id: string; label: string }> }
+      | undefined;
+    const option = question?.options?.find((candidate) => candidate.label === label);
+    if (!option) throw new Error(`clarification option ${label} is missing from ${questionId}`);
+    return option.option_id;
+  }
+
+  function countClarificationResponses(testPage: Page) {
+    const state = { count: 0 };
+    testPage.on("request", (request) => {
+      if (request.method() !== "POST") return;
+      if (/^\/api\/v1\/clarification\/[^/]+\/respond$/.test(new URL(request.url()).pathname)) {
+        state.count += 1;
+      }
+    });
+    return state;
+  }
+
+  async function enterDraft(session: SessionPage) {
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await session.clarificationOption("PostgreSQL").click();
+    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
+    await session.clarificationInput().fill("Use Go and TypeScript");
+    await expect(session.clarificationInput()).toHaveValue("Use Go and TypeScript");
+  }
+
+  async function expectRestoredDraft(session: SessionPage, activeQuestion = 1) {
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await expect(session.clarificationStep(activeQuestion)).toHaveAttribute("data-active", "true");
+    await session.clarificationStep(0).click();
+    await expect(session.clarificationOption("PostgreSQL")).toHaveAttribute(
+      "data-selected",
+      "true",
+    );
+    await session.clarificationStep(1).click();
+    await expect(session.clarificationInput()).toHaveValue("Use Go and TypeScript");
+  }
+
+  test("retains answers across task switching, history return, and responsive remounts", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const first = await createPendingClarificationTask(
+      apiClient,
+      seedData,
+      "Draft Navigation First",
+    );
+    const second = await createPendingClarificationTask(
+      apiClient,
+      seedData,
+      "Draft Navigation Second",
+    );
+
+    await testPage.goto(`/t/${first.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await enterDraft(session);
+    const responses = countClarificationResponses(testPage);
+
+    await session.sidebarTaskItem("Draft Navigation Second").click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${second.id}$`));
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await session.sidebarTaskItem("Draft Navigation First").click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${first.id}$`));
+    await expectRestoredDraft(session);
+    expect(responses.count).toBe(0);
+
+    await testPage.getByRole("link", { name: "Home", exact: true }).click();
+    await expect(testPage).not.toHaveURL(new RegExp(`/t/${first.id}$`));
+    await testPage.goBack();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${first.id}$`));
+    await expectRestoredDraft(session);
+
+    const viewport = testPage.viewportSize();
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await expect(testPage.getByTestId("mobile-task-picker-trigger")).toBeVisible();
+    await expectRestoredDraft(session);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+
+    if (viewport) await testPage.setViewportSize(viewport);
+    await expectRestoredDraft(session);
+    expect(responses.count).toBe(0);
+  });
+
+  test("submits the restored bundle once and retires its draft", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const first = await createPendingClarificationTask(apiClient, seedData, "Draft Submit First");
+    const second = await createPendingClarificationTask(apiClient, seedData, "Draft Submit Second");
+
+    await testPage.goto(`/t/${first.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await enterDraft(session);
+    await session.clarificationStep(2).click();
+    await session.clarificationOption("Docker").click();
+    await expect(session.clarificationSubmit()).toBeEnabled();
+
+    await session.sidebarTaskItem("Draft Submit Second").click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${second.id}$`));
+    const responses = countClarificationResponses(testPage);
+    await session.sidebarTaskItem("Draft Submit First").click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${first.id}$`));
+    await expectRestoredDraft(session, 2);
+    await session.clarificationStep(2).click();
+    await expect(session.clarificationOption("Docker")).toHaveAttribute("data-selected", "true");
+    await expect(session.clarificationSubmit()).toBeEnabled();
+    expect(responses.count).toBe(0);
+
+    const responded = waitForHttp(testPage, "POST", /^\/api\/v1\/clarification\/[^/]+\/respond$/);
+    await session.clarificationSubmit().click();
+    await responded;
+    await expect(session.idleInput()).toBeVisible();
+    expect(responses.count).toBe(1);
+
+    const databaseOption = await clarificationOptionId(
+      apiClient,
+      first.sessionId,
+      "db",
+      "PostgreSQL",
+    );
+    const deployOption = await clarificationOptionId(
+      apiClient,
+      first.sessionId,
+      "deploy",
+      "Docker",
+    );
+    await expect
+      .poll(
+        async () =>
+          (await clarificationQuestion(apiClient, first.sessionId, "db"))?.metadata?.response,
+      )
+      .toMatchObject({ selected_options: [databaseOption] });
+    await expect
+      .poll(
+        async () =>
+          (await clarificationQuestion(apiClient, first.sessionId, "language"))?.metadata?.response,
+      )
+      .toMatchObject({ custom_text: "Use Go and TypeScript" });
+    await expect
+      .poll(
+        async () =>
+          (await clarificationQuestion(apiClient, first.sessionId, "deploy"))?.metadata?.response,
+      )
+      .toMatchObject({ selected_options: [deployOption] });
+
+    await session.sidebarTaskItem("Draft Submit Second").click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${second.id}$`));
+    await session.sidebarTaskItem("Draft Submit First").click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${first.id}$`));
+    await expect(session.idleInput()).toBeVisible();
+    await expect(session.clarificationOverlay()).toHaveCount(0);
+    expect(responses.count).toBe(1);
   });
 });

@@ -53,8 +53,8 @@ or operating-data change is included. No new permanent test framework is added.
 
 ## Technical approach
 
-- Capture and summary each allow three logical attempts total, including any
-  inline attempt. Background continuations retain that budget and use
+- Capture and settlement-capable runtime summary handlers each allow three
+  logical attempts total, including any inline attempt. Background continuations retain that budget and use
   shutdown-cancellable 250 ms and 500 ms waits.
 - Typed missing-set and ownership-loss errors stop retry work immediately.
   A joined unrelated storage error retains bounded retries. A missing historical
@@ -65,6 +65,9 @@ or operating-data change is included. No new permanent test framework is added.
 - Release the original capture fence only after accepted capture or successful
   abandonment. Background release leases the captured startup attempt and
   respects the prompt-generation guard. Failed persistence remains fail-closed.
+- Existing handlers without durable abandonment keep upstream summary
+  publication retries and typed missing-set/ownership stop classification. The
+  optional abandonment method is not added to the required handler interface.
 - Existing versioned completion/failure owners settle session turns and managed
   inputs. The correction does not synthesize success or bypass route/queue guards.
 

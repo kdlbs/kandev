@@ -45,6 +45,11 @@ it("runs the Git helper in the node project", async () => {
   expect(matchingProjects("e2e/helpers/git-helper.test.ts")).toEqual([NODE_PROJECT]);
 });
 
+it("keeps the debug-start integration suite out of Vitest", async () => {
+  const { discoverTestFiles } = await loadSelection();
+  expect(discoverTestFiles(WEB_ROOT)).not.toContain("scripts/debug-start-production.test.mjs");
+});
+
 describe("Vitest project selection", () => {
   it("keeps every test file in exactly one project", async () => {
     const selection = await loadSelection();

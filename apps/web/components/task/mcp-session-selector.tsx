@@ -16,7 +16,7 @@ import { mcpSelectionChanges } from "./chat/mcp-explorer/mcp-selection-changes";
 import { McpPendingChanges } from "./chat/mcp-explorer/mcp-selection-changes-view";
 import {
   McpSessionRowAnnotation,
-  McpDormantExclusions,
+  McpSessionExclusionHelp,
 } from "./chat/mcp-explorer/mcp-session-exclusions";
 import { MobilePickerSheet } from "./mobile/mobile-picker-sheet";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -91,21 +91,13 @@ export function MCPSessionSelectionBody({
         </div>
       )}
       {reload && <MCPSelectionSaveFeedback error={props.error} reload={reload} />}
-      {onExcludedIdsChange && (
-        <>
-          <div className="space-y-1.5 text-pretty text-xs text-muted-foreground">
-            <p>{t("settings:mcpSessionExclusionsDescription")}</p>
-            <p>{t("settings:mcpRequiredToolsSeparate")}</p>
-            <p role="status">{t("settings:mcpExclusionCount", { total: excludedIds.length })}</p>
-          </div>
-          <McpDormantExclusions
-            definitions={dormant}
-            excludedIds={excludedIds}
-            onChange={onExcludedIdsChange}
-            disabled={props.disabled}
-          />
-        </>
-      )}
+      <McpSessionExclusionHelp
+        inheritedCount={inheritedIds.size}
+        definitions={dormant}
+        excludedIds={excludedIds}
+        onChange={onExcludedIdsChange}
+        disabled={props.disabled}
+      />
       {definitionsLoading ? (
         <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
           {t("settings:mcpLoading")}

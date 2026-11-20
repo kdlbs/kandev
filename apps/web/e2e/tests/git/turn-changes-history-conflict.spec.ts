@@ -1,5 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell, waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
+import { waitForAgentMessage } from "../../helpers/session";
 import {
   enableTurnChangedFiles,
   readTurnChangeHistory,
@@ -10,13 +12,14 @@ import {
 test.describe("turn change history conflict", () => {
   test.describe.configure({ timeout: 120_000 });
 
-  test("shows one unavailable status without whole-repository totals", async ({
+  test("hides the unavailable comparison and keeps the assistant reply", async ({
     testPage,
     apiClient,
     seedData,
     prCapture,
   }) => {
     const restorePreference = await enableTurnChangedFiles(apiClient);
+    const ws = watchWs(testPage);
     try {
       const { session, sessionId } = await seedTurnHistoryConflictTask(
         testPage,
@@ -24,12 +27,19 @@ test.describe("turn change history conflict", () => {
         seedData,
       );
       await waitForTurnChangeCount(apiClient, sessionId, 1);
+      const unavailableSummary = ws.waitForEvent("session.turn.changes.updated", {
+        where: (payload) => {
+          const changeSet = payload.change_set as { availability?: string } | undefined;
+          return payload.session_id === sessionId && changeSet?.availability === "unavailable";
+        },
+      });
       await session.sendMessage("/e2e:turn-history-conflict");
-      await expect(
-        session.chat.getByText("turn-history-conflict complete", { exact: false }),
-      ).toBeVisible();
+      await waitForAgentMessage(apiClient, sessionId, "turn-history-conflict complete");
+      const reply = session.chat.getByText("turn-history-conflict complete", { exact: false });
+      await expect(reply).toBeVisible();
       await session.waitForChatIdle();
       await waitForTurnChangeCount(apiClient, sessionId, 2);
+      await unavailableSummary;
 
       const history = await readTurnChangeHistory(apiClient, sessionId);
       const turn = [...(history.change_sets ?? [])].sort(
@@ -39,25 +49,34 @@ test.describe("turn change history conflict", () => {
       expect(turn?.reason).toBe("history_conflict");
       expect(turn?.file_count).toBe(0);
 
-      const card = session.activeChat().getByTestId("turn-changed-files-card").last();
-      await expect(card).toBeVisible();
-      await expect(card.getByText("This turn's change summary is unavailable.")).toHaveCount(1);
-      await expect(card).not.toContainText("0 changed files");
-      await expect(card).not.toContainText("Partial");
-      await expect(card.getByRole("button", { name: "Open diff" })).toBeDisabled();
+      const chat = session.activeChat();
+      await expect(chat.locator(`[data-change-set-id="${turn!.id}"]`)).toHaveCount(0);
+      await expect(chat.getByText("This turn's change summary is unavailable.")).toHaveCount(0);
+      await dwell(
+        testPage,
+        500,
+        "negative-assertion",
+        "an unavailable history summary must never render a transcript card",
+      );
+      await expect(chat.locator(`[data-change-set-id="${turn!.id}"]`)).toHaveCount(0);
       if (prCapture.capturing) {
-        await card.scrollIntoViewIfNeeded();
-        await waitForFiniteAnimations(card);
+        await reply.scrollIntoViewIfNeeded();
+        await waitForFiniteAnimations(reply);
         await prCapture.screenshot("turn-history-unavailable-desktop", {
-          caption: "Conflicting baseline reuses the existing unavailable status",
+          caption: "Unavailable history comparison omits the turn card",
         });
       }
 
+      const historyLoaded = waitForHttp(testPage, "GET", /\/turn-changes$/);
       await testPage.reload();
+      await historyLoaded;
       await session.waitForLoad();
       await session.waitForChatIdle();
-      const reloaded = session.activeChat().getByTestId("turn-changed-files-card").last();
-      await expect(reloaded.getByText("This turn's change summary is unavailable.")).toHaveCount(1);
+      const reloadedChat = session.activeChat();
+      await expect(
+        reloadedChat.getByText("turn-history-conflict complete", { exact: false }),
+      ).toBeVisible();
+      await expect(reloadedChat.locator(`[data-change-set-id="${turn!.id}"]`)).toHaveCount(0);
     } finally {
       await restorePreference();
     }

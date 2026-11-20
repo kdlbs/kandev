@@ -24,6 +24,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
+import { getRecentTasks } from "@/lib/recent-tasks";
 import type { TaskDependencyCandidate } from "@/lib/types/task-dependencies";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { TaskMR } from "@/lib/types/gitlab";
@@ -31,8 +32,8 @@ import type { TaskPR } from "@/lib/types/github";
 import { cn } from "@/lib/utils";
 import {
   changeRequestNumbers,
-  compareDependencyCandidates,
   dependencyOptionValue,
+  rankCreateDialogCandidates,
 } from "./task-create-dialog-dependency-search";
 
 // Keep stable empty fallbacks here. Creating a fresh array/object in a store
@@ -61,9 +62,10 @@ export type TaskCreateDependenciesProps = {
   onSearchValueChange?: (value: string) => void;
   /** The edited task is never a valid predecessor of itself. */
   excludeTaskId?: string;
+  contextStepId?: string | null;
 };
 
-function useBoardTasks(): KanbanState["tasks"] {
+export function useBoardTasks(): KanbanState["tasks"] {
   const boardTasks = useAppStore((state) => state.kanban?.tasks ?? NO_TASKS);
   const snapshots = useAppStore((state) => state.kanbanMulti?.snapshots ?? NO_SNAPSHOTS);
 
@@ -81,13 +83,13 @@ function useBoardTasks(): KanbanState["tasks"] {
   }, [boardTasks, snapshots]);
 }
 
-function useMRsByTaskId(): Record<string, TaskMR[]> {
+export function useMRsByTaskId(): Record<string, TaskMR[]> {
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   const byWorkspaceId = useAppStore((state) => state.taskMRs.byWorkspaceId);
   return (activeWorkspaceId && byWorkspaceId[activeWorkspaceId]) || NO_MRS_BY_TASK_ID;
 }
 
-function usePRsByTaskId(): Record<string, TaskPR[]> {
+export function usePRsByTaskId(): Record<string, TaskPR[]> {
   return useAppStore((state) => {
     const activeWorkspaceId = state.workspaces.activeId;
     if (
@@ -171,8 +173,10 @@ type DependencyPickerContentProps = {
   setOpen: (open: boolean) => void;
   portalContainer: HTMLElement | null;
   candidatesLoading: boolean;
-  searchValue?: string;
-  onSearchValueChange?: (value: string) => void;
+  searchValue: string;
+  onSearchValueChange: (value: string) => void;
+  /** True for the edit dialog's server-backed search, which has no #PR/MR number syntax. */
+  isServerBackedSearch: boolean;
 };
 
 function DependencyPickerContent({
@@ -185,12 +189,9 @@ function DependencyPickerContent({
   candidatesLoading,
   searchValue,
   onSearchValueChange,
+  isServerBackedSearch,
 }: DependencyPickerContentProps) {
   const { t } = useTranslation();
-  const commandInputProps =
-    searchValue === undefined
-      ? {}
-      : { value: searchValue, onValueChange: onSearchValueChange ?? (() => undefined) };
   return (
     <PopoverContent
       align="start"
@@ -203,9 +204,10 @@ function DependencyPickerContent({
         <div className="flex items-center gap-1">
           <div className="min-w-0 flex-1">
             <CommandInput
-              {...commandInputProps}
+              value={searchValue}
+              onValueChange={onSearchValueChange}
               placeholder={t(
-                searchValue === undefined ? "task:searchTasksOrChangeRequest" : "task:searchTasks",
+                isServerBackedSearch ? "task:searchTasks" : "task:searchTasksOrChangeRequest",
               )}
             />
           </div>
@@ -278,6 +280,9 @@ type DependencyPickerDataArgs = {
   selectedTitles?: Record<string, string>;
   value: string[];
   excludeTaskId?: string;
+  contextStepId?: string | null;
+  searchText?: string;
+  recentTaskIds?: ReadonlySet<string>;
   mrsByTaskId: Record<string, TaskMR[]>;
   prsByTaskId: Record<string, TaskPR[]>;
 };
@@ -295,6 +300,9 @@ function useDependencyPickerData({
   selectedTitles,
   value,
   excludeTaskId,
+  contextStepId,
+  searchText = "",
+  recentTaskIds,
   mrsByTaskId,
   prsByTaskId,
 }: DependencyPickerDataArgs): DependencyPickerData {
@@ -352,12 +360,38 @@ function useDependencyPickerData({
         .filter(
           (task) => task.id !== excludeTaskId && (!task.isArchived || value.includes(task.id)),
         )
+        .filter((task) => {
+          if (!searchText.trim()) return true;
+          const search = searchText.trim().toLocaleLowerCase().replace(/^#/, "");
+          const boardTask = boardTasksById.get(task.id) ?? task;
+          const numbers = numbersByTaskId.get(task.id) ?? [];
+          return (
+            task.title.toLocaleLowerCase().includes(search) ||
+            task.id.toLocaleLowerCase().includes(search) ||
+            numbers.some((number) => String(number).includes(search)) ||
+            String(boardTask.title).toLocaleLowerCase().includes(search)
+          );
+        })
         .sort((left, right) => {
           const leftTask = boardTasksById.get(left.id) ?? left;
           const rightTask = boardTasksById.get(right.id) ?? right;
-          return compareDependencyCandidates(leftTask, rightTask);
+          return rankCreateDialogCandidates(leftTask, rightTask, {
+            contextStepId: contextStepId ?? undefined,
+            recentTaskIds,
+            searchText,
+            titleMatchFirst: true,
+          });
         }),
-    [boardTasksById, excludeTaskId, tasks, value],
+    [
+      boardTasksById,
+      contextStepId,
+      excludeTaskId,
+      recentTaskIds,
+      searchText,
+      tasks,
+      value,
+      numbersByTaskId,
+    ],
   );
 
   return { candidates, numbersByTaskId, selectedTitle, selectedNumber };
@@ -373,9 +407,16 @@ export function TaskCreateDependencies({
   searchValue,
   onSearchValueChange,
   excludeTaskId,
+  contextStepId,
 }: TaskCreateDependenciesProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [localSearch, setLocalSearch] = useState("");
+  const effectiveSearch = searchValue ?? localSearch;
+  const recentTaskIds = useMemo(
+    () => new Set(getRecentTasks().map((entry) => entry.taskId)),
+    [open],
+  );
   const portalContainer = useTaskCreateDialogPopoverContainer();
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   // The global new-task dialog is available outside the Kanban and Tasks
@@ -391,6 +432,9 @@ export function TaskCreateDependencies({
     selectedTitles,
     value,
     excludeTaskId,
+    contextStepId,
+    searchText: effectiveSearch,
+    recentTaskIds,
     mrsByTaskId,
     prsByTaskId,
   });
@@ -442,8 +486,9 @@ export function TaskCreateDependencies({
           setOpen={setOpen}
           portalContainer={portalContainer}
           candidatesLoading={candidatesLoading}
-          searchValue={searchValue}
-          onSearchValueChange={onSearchValueChange}
+          searchValue={effectiveSearch}
+          onSearchValueChange={onSearchValueChange ?? setLocalSearch}
+          isServerBackedSearch={onSearchValueChange !== undefined}
         />
       </Popover>
     </div>

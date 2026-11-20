@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // TestCreateWorktree_BaseBranchFallback_RecoversWhenRequestedMissing covers
@@ -22,15 +24,16 @@ func TestCreateWorktree_BaseBranchFallback_RecoversWhenRequestedMissing(t *testi
 	repoPath := initGitRepoForWorktreeTest(t)
 
 	wt, err := mgr.Create(context.Background(), CreateRequest{
-		TaskID:             "task-1",
-		SessionID:          "session-1",
-		TaskTitle:          "Inherits stale branch",
-		RepositoryID:       "repo-1",
-		RepositoryPath:     repoPath,
-		BaseBranch:         "pr-metrics",
-		FallbackBaseBranch: "main",
-		TaskDirName:        "task-1",
-		RepoName:           "repo-1",
+		TaskID:                   "task-1",
+		SessionID:                "session-1",
+		TaskTitle:                "Inherits stale branch",
+		RepositoryID:             "repo-1",
+		RepositoryPath:           repoPath,
+		BaseBranch:               "pr-metrics",
+		FallbackBaseBranch:       "main",
+		BaseBranchFallbackPolicy: models.BaseBranchFallbackPolicyRepositoryDefault,
+		TaskDirName:              "task-1",
+		RepoName:                 "repo-1",
 	})
 	if err != nil {
 		t.Fatalf("Create() unexpected error: %v", err)
@@ -89,14 +92,15 @@ func TestCreateWorktree_BaseBranchFallback_FallbackAlsoMissing(t *testing.T) {
 	repoPath := initGitRepoForWorktreeTest(t)
 
 	_, err = mgr.Create(context.Background(), CreateRequest{
-		TaskID:             "task-1",
-		SessionID:          "session-1",
-		RepositoryID:       "repo-1",
-		RepositoryPath:     repoPath,
-		BaseBranch:         "pr-metrics",
-		FallbackBaseBranch: "release", // also missing in this repo
-		TaskDirName:        "task-1",
-		RepoName:           "repo-1",
+		TaskID:                   "task-1",
+		SessionID:                "session-1",
+		RepositoryID:             "repo-1",
+		RepositoryPath:           repoPath,
+		BaseBranch:               "pr-metrics",
+		FallbackBaseBranch:       "release", // also missing in this repo
+		BaseBranchFallbackPolicy: models.BaseBranchFallbackPolicyRepositoryDefault,
+		TaskDirName:              "task-1",
+		RepoName:                 "repo-1",
 	})
 	if !errors.Is(err, ErrInvalidBaseBranch) {
 		t.Fatalf("Create() err = %v, want ErrInvalidBaseBranch", err)

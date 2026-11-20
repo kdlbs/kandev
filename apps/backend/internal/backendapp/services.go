@@ -27,8 +27,8 @@ import (
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/githubhost"
@@ -106,8 +106,11 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		return nil, nil, err
 	}
 	taskSvc, workflowSvc, promptSvc := core.taskSvc, core.workflowSvc, core.promptSvc
+	taskSvc.SetWorkspaceCollaboration(&workspaceCollaborationBoundary{
+		enabled: cfg.Features.WorkspaceCollaboration, store: repos.Task,
+	}, repos.Task)
 
-	wireTaskWorkflowCrossReferences(taskSvc, workflowSvc, userSecretStore, repos, log)
+	wireTaskWorkflowCrossReferences(taskSvc, workflowSvc, core.editorSvc, userSecretStore, repos, log)
 
 	providers, err := initThirdPartyProviders(ctx, cfg, dbPool, eventBus, repos, storeTracker, taskSvc, promptSvc, workflowSvc, log)
 	if err != nil {
@@ -126,6 +129,10 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		return nil, nil, err
 	}
 	pluginsSvc := integrations.pluginsSvc
+	if pluginsSvc != nil {
+		boundary := &workspaceCollaborationBoundary{enabled: cfg.Features.WorkspaceCollaboration, store: repos.Task}
+		pluginsSvc.SetHostCallContextPolicy(boundary.enabled, boundary.validatePluginCall)
+	}
 
 	services := assembleServices(managedRuntimeSelections, core, providers, integrations)
 	if services.Plugins != nil {
@@ -171,7 +178,6 @@ func assembleServices(
 		GitHub:                   providers.github,
 		GitLab:                   providers.gitlab,
 		GitLabCleanup:            providers.gitlabCleanup,
-		AzureDevOps:              providers.azureDevOps,
 		Jira:                     providers.jira,
 		Linear:                   providers.linear,
 		Sentry:                   providers.sentry,
@@ -276,6 +282,7 @@ func initCoreTaskServices(
 				profiles:        repos.AgentSettings,
 				agentRegistry:   agentRegistry,
 				dynamicResolver: dynamicResolver,
+				secrets:         secrets.NewUserVisibleStore(repos.Secrets),
 			},
 		},
 		eventBus,
@@ -486,6 +493,9 @@ func initIntegrationWiring(
 	if err != nil {
 		return nil, err
 	}
+	if coordinatorSvc != nil && pluginsSvc != nil {
+		coordinatorSvc.SetPluginBindingSource(pluginsSvc)
+	}
 	wiring := &integrationWiring{
 		pluginsSvc: pluginsSvc, pluginsCleanup: pluginsCleanup, agentConversationsSvc: agentConversationsSvc,
 		canvasSvc: canvasSvc, canvasDistributionSvc: canvasDistributionSvc,
@@ -497,12 +507,12 @@ func initIntegrationWiring(
 	return wiring, nil
 }
 
-// wireTaskWorkflowCrossReferences wires the task and workflow services'
-// mutual dependencies: each owns a slice of behavior the other needs to call
-// through an adapter, since neither package may import the other directly.
+// wireTaskWorkflowCrossReferences wires the task, workflow, and editor
+// services at their shared authorization and lifecycle boundaries.
 func wireTaskWorkflowCrossReferences(
 	taskSvc *taskservice.Service,
 	workflowSvc *workflowservice.Service,
+	editorSvc *editorservice.Service,
 	userSecretStore secrets.SecretStore,
 	repos *Repositories,
 	log *logger.Logger,
@@ -527,10 +537,30 @@ func wireTaskWorkflowCrossReferences(
 	// Session history is owned by workflow service, but access is owned by the
 	// task service. Keep the authorization check at the service boundary.
 	workflowSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)
+	editorSvc.SetSessionAccessChecker(func(ctx context.Context, sessionID string) error {
+		session, err := repos.Task.GetTaskSession(ctx, sessionID)
+		if err != nil || session == nil {
+			return editorservice.ErrWorkspaceNotFound
+		}
+		// Editor launches run on the backend host, not through the session's
+		// executor. Check task reach and session.exec without executor admission:
+		// historical sessions can outlive their executor configuration.
+		err = taskSvc.AuthorizeTaskScope(ctx, session.TaskID, authz.ScopeSessionExec)
+		if taskservice.IsForbidden(err) {
+			return editorservice.ErrSessionForbidden
+		}
+		if err != nil {
+			return editorservice.ErrWorkspaceNotFound
+		}
+		return nil
+	})
 	// Same split for the rest of the workflow-step surface: the workflow
 	// package owns steps, templates and export/import, but a workflow's owner
 	// is its workspace's owner, which only the task service can resolve.
 	workflowSvc.SetWorkflowAccessChecker(taskSvc.AuthorizeWorkflowAccess)
+	workflowSvc.SetWorkflowAuthorizationRequiredChecker(taskSvc.WorkflowAuthorizationRequired)
+	workflowSvc.SetWorkflowMutationReadOnlyChecker(taskSvc.WorkflowMutationReadOnly)
+	workflowSvc.SetWorkspaceMutationReadOnlyChecker(taskSvc.WorkspaceWorkflowMutationReadOnly)
 	workflowSvc.SetExecutorMutationChecker(taskSvc.AuthorizeWorkflowExecutorMutation)
 	workflowSvc.SetWorkspaceAccessChecker(taskSvc.AuthorizeWorkspaceAccess)
 	// A step's queue_run action names the task it starts work on, so the
@@ -563,7 +593,6 @@ type thirdPartyProviders struct {
 	github        *github.Service
 	gitlab        *gitlab.Service
 	gitlabCleanup func() error
-	azureDevOps   *azuredevops.Service
 	jira          *jira.Service
 	linear        *linear.Service
 	sentry        *sentry.Service
@@ -605,14 +634,6 @@ func initThirdPartyProviders(
 		gitlabSvc.SetPromptResolver(promptSvc)
 		gitlabSvc.SetComparisonTargetObserver(taskSvc)
 	}
-	azureDevOpsSvc, _, azureDevOpsErr := initAzureDevOpsServiceRequired(dbPool, eventBus, repos.Secrets, log)
-	if recordErr := recordRequiredStore(ctx, storeTracker, "azure-devops", azureDevOpsErr); recordErr != nil {
-		return nil, fmt.Errorf("initialize azure devops: %w", recordErr)
-	}
-	if azureDevOpsSvc != nil {
-		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})
-		azureDevOpsSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
-	}
 	jiraSvc, _, jiraErr := initJiraServiceRequired(dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordRequiredStore(ctx, storeTracker, "jira", jiraErr); recordErr != nil {
 		return nil, fmt.Errorf("initialize jira: %w", recordErr)
@@ -631,7 +652,7 @@ func initThirdPartyProviders(
 	}
 	return &thirdPartyProviders{
 		github: githubSvc, gitlab: gitlabSvc, gitlabCleanup: gitlabCleanup,
-		azureDevOps: azureDevOpsSvc, jira: jiraSvc, linear: linearSvc,
+		jira: jiraSvc, linear: linearSvc,
 		sentry: sentrySvc, workflowSync: workflowSyncSvc,
 	}, nil
 }
@@ -798,7 +819,7 @@ func initGitCredentialAndRemoteWiring(
 	version string,
 	log *logger.Logger,
 ) (*gitcredentials.Broker, *share.HTTPHandlers, error) {
-	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
+	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, repos.gitCredentialReissueSigner)
 	if pluginsSvc != nil {
 		pluginsSvc.SetGitCredentialLeaseRevoker(gitCredentialBroker.RevokeProvider)
 	}
@@ -1234,6 +1255,9 @@ func (a *githubBrokerScopeAuthorizer) authorizeTaskSession(
 	if task == nil || task.WorkspaceID != workspaceID {
 		return fmt.Errorf("task does not belong to workspace")
 	}
+	if task.ArchivedAt != nil {
+		return fmt.Errorf("task is archived")
+	}
 	session, err := a.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return err
@@ -1589,37 +1613,6 @@ func initJiraServiceRequired(dbPool *db.Pool, eventBus bus.EventBus, secretsStor
 	svc, cleanup, err := jira.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
 	if err != nil {
 		return nil, nil, fmt.Errorf("jira store: %w", err)
-	}
-	return svc, cleanup, nil
-}
-
-// initAzureDevOpsService wires the workspace-scoped Azure integration.
-// Failures are non-fatal so unrelated providers and the backend keep working.
-func initAzureDevOpsService(
-	dbPool *db.Pool,
-	eventBus bus.EventBus,
-	secretsStore secrets.SecretStore,
-	log *logger.Logger,
-) *azuredevops.Service {
-	svc, _, err := initAzureDevOpsServiceRequired(dbPool, eventBus, secretsStore, log)
-	if err != nil {
-		log.Warn("Azure DevOps service initialization failed (non-fatal)", zap.Error(err))
-		return nil
-	}
-	return svc
-}
-
-func initAzureDevOpsServiceRequired(
-	dbPool *db.Pool,
-	eventBus bus.EventBus,
-	secretsStore secrets.SecretStore,
-	log *logger.Logger,
-) (*azuredevops.Service, func() error, error) {
-	svc, cleanup, err := azuredevops.Provide(
-		dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log,
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("azure-devops store: %w", err)
 	}
 	return svc, cleanup, nil
 }
@@ -2097,7 +2090,7 @@ func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.Tas
 		}
 		req.State = &state
 	}
-	task, err := a.svc.GetTask(ctx, in.ID)
+	identity, err := a.taskMutationIdentity(ctx, in.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -2110,7 +2103,7 @@ func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.Tas
 		return nil, status.Error(codes.InvalidArgument, "invalid task update")
 	}
 	updated, err := a.svc.UpdateTaskExact(ctx, in.ID, taskservice.ExactTaskUpdateRequest{
-		WorkspaceID: task.WorkspaceID, ExpectedResourceVersion: task.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		WorkspaceID: identity.WorkspaceID, ExpectedResourceVersion: identity.ResourceVersion,
 		OperationID: operationID, PayloadDigest: payloadDigest,
 		ClaimFence: claimFence,
 		Title:      req.Title, Description: req.Description, State: req.State, Priority: req.Priority,
@@ -2169,7 +2162,7 @@ func (a pluginsTaskWriterAdapter) MoveTask(ctx context.Context, in plugins.TaskM
 	if err != nil {
 		return nil, err
 	}
-	task, err := a.svc.GetTask(ctx, in.TaskID)
+	identity, err := a.taskMutationIdentity(ctx, in.TaskID)
 	if err != nil {
 		return nil, classifyPluginMoveError(err)
 	}
@@ -2186,16 +2179,16 @@ func (a pluginsTaskWriterAdapter) MoveTask(ctx context.Context, in plugins.TaskM
 		StepHistoryTrigger: wfmodels.StepTransitionTriggerPluginMove,
 		StepHistoryActor:   wfmodels.StepTransitionActorSystem,
 		ExactOperation: &taskservice.ExactTaskMoveOperation{
-			WorkspaceID: task.WorkspaceID, ExpectedResourceVersion: task.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			WorkspaceID: identity.WorkspaceID, ExpectedResourceVersion: identity.ResourceVersion,
 			OperationID: operationID, PayloadDigest: payloadDigest, ClaimFence: claimFence,
 		},
 	}
 	if in.WorkflowID == nil {
-		// workflowID above was inherited from a separate GetTask pre-read
+		// workflowID above was inherited from a separate mutation identity read
 		// (resolvePluginMoveWorkflowID), not named explicitly by the plugin.
 		// Guard against a concurrent reassignment landing between that read
 		// and the write below: MoveTaskWithOptions re-checks this against the
-		// task's WorkflowID from its own fresh GetTask and fails the move
+		// task's WorkflowID from its own fresh task read and fails the move
 		// instead of silently reverting the concurrent change.
 		opts.ExpectedWorkflowID = &workflowID
 	}
@@ -2228,7 +2221,13 @@ func (a pluginsTaskWriterAdapter) legacyTaskManagementFence(ctx context.Context,
 	if !ok {
 		return taskmodels.TaskManagementClaimFence{}, status.Error(codes.Unavailable, "task management claim state is unavailable")
 	}
-	claim, err := reader.GetTaskManagementClaim(ctx, taskID)
+	readClaim := reader.GetTaskManagementClaim
+	if mutationReader, ok := a.svc.(interface {
+		GetTaskManagementClaimForMutation(context.Context, string) (*taskmodels.TaskManagementClaim, error)
+	}); ok {
+		readClaim = mutationReader.GetTaskManagementClaimForMutation
+	}
+	claim, err := readClaim(ctx, taskID)
 	if err != nil {
 		return taskmodels.TaskManagementClaimFence{}, status.Error(codes.Unavailable, "task management claim state is unavailable")
 	}
@@ -2397,7 +2396,7 @@ func (a pluginsTaskWriterAdapter) resolvePluginMoveWorkflowID(ctx context.Contex
 	if in.WorkflowID != nil {
 		return *in.WorkflowID, nil
 	}
-	task, err := a.svc.GetTask(ctx, in.TaskID)
+	identity, err := a.taskMutationIdentity(ctx, in.TaskID)
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {
 			// classifyPluginMoveError's fixed "task not found" message, not a
@@ -2413,7 +2412,7 @@ func (a pluginsTaskWriterAdapter) resolvePluginMoveWorkflowID(ctx context.Contex
 		// other unexpected lookup failure to a fixed Internal status.
 		return "", classifyPluginMoveError(err)
 	}
-	return task.WorkflowID, nil
+	return identity.WorkflowID, nil
 }
 
 // classifyPluginMoveError maps MoveTaskWithOptions' bare validation errors to

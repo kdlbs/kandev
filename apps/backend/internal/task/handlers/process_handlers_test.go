@@ -154,12 +154,6 @@ func (m *mockRepository) ListUnarchivedTasksWithActiveSessions(ctx context.Conte
 func (m *mockRepository) GetLastMessageTimeBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]time.Time, error) {
 	return nil, nil
 }
-func (m *mockRepository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
-	return nil, nil
-}
-func (m *mockRepository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
-	return false, nil
-}
 func (m *mockRepository) ListCoordinatorOriginTasks(ctx context.Context, workspaceID string) ([]*models.Task, error) {
 	return nil, nil
 }
@@ -351,6 +345,16 @@ func (m *mockRepository) CompleteActiveClarificationBundle(
 	map[string]interface{},
 ) ([]*models.Message, bool, error) {
 	return nil, false, nil
+}
+func (m *mockRepository) CompleteActiveClarificationBundleWithAttachments(
+	context.Context,
+	string,
+	string,
+	map[string]interface{},
+	[]models.ClarificationAttachmentClaim,
+	models.ClarificationAttachmentScope,
+) ([]*models.Message, bool, []string, error) {
+	return nil, false, nil, nil
 }
 func (m *mockRepository) FinalizeClarificationResponseDelivery(
 	context.Context,

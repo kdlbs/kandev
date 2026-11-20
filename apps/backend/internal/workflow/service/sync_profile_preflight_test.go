@@ -13,7 +13,7 @@ func TestSyncAmbiguousProfilePreservesWorkflow(t *testing.T) {
 	svc, provider, _ := setupSyncService(t)
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
 	wf.Description = "before"
-	createStep(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, Color: "#aabbcc", AgentProfileID: "old"})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, Color: "#aabbcc", AgentProfileID: "old"})
 	pw := portableWorkflow("Dev Flow", "Todo")
 	pw.Description = "after"
 	pw.Steps[0].AgentProfile = &models.AgentProfilePortable{AgentName: "Codex", Model: "luna"}
@@ -36,7 +36,7 @@ func TestSyncProfileFailureSkipsOnlyAffectedWorkflowAndRecovers(t *testing.T) {
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Blocked", "flows/dev.yml")
 	wf.Description = "before"
-	createStep(t, svc, &models.WorkflowStep{ID: "old-step", WorkflowID: wf.ID, Name: "Todo", Position: 0, Color: "#aabbcc", AgentProfileID: "old"})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "old-step", WorkflowID: wf.ID, Name: "Todo", Position: 0, Color: "#aabbcc", AgentProfileID: "old"})
 	blocked := portableWorkflow("Blocked", "Todo")
 	blocked.Description = "after"
 	blocked.Steps[0].AgentProfile = &models.AgentProfilePortable{AgentName: "Codex", Model: "luna"}
@@ -71,7 +71,7 @@ func TestSyncUsesResolvedDefaultAndReviewProfiles(t *testing.T) {
 	svc, provider, _ := setupSyncService(t)
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Flow", "flows/dev.yml")
-	createStep(t, svc, &models.WorkflowStep{ID: "old-step", WorkflowID: wf.ID, Name: "Review", Position: 0, Color: "#aabbcc"})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "old-step", WorkflowID: wf.ID, Name: "Review", Position: 0, Color: "#aabbcc"})
 	pw := portableWorkflow("Flow", "Review")
 	low := map[string]string{"reasoning_effort": "low"}
 	high := map[string]string{"reasoning_effort": "high"}
@@ -101,7 +101,7 @@ func TestSyncReviewProfileReadFailurePreservesBinding(t *testing.T) {
 	ctx := context.Background()
 	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Flow", "flows/dev.yml")
 	wf.Description = "before"
-	createStep(t, svc, &models.WorkflowStep{ID: "old-step", WorkflowID: wf.ID, Name: "Review", Position: 0, Color: "#aabbcc", Events: models.StepEvents{OnEnter: []models.OnEnterAction{{Type: models.OnEnterRunCodeReview, Config: map[string]interface{}{models.ReviewAgentProfileConfigKey: "existing"}}}}})
+	createSyncedStepFixture(t, svc, &models.WorkflowStep{ID: "old-step", WorkflowID: wf.ID, Name: "Review", Position: 0, Color: "#aabbcc", Events: models.StepEvents{OnEnter: []models.OnEnterAction{{Type: models.OnEnterRunCodeReview, Config: map[string]interface{}{models.ReviewAgentProfileConfigKey: "existing"}}}}})
 	pw := portableWorkflow("Flow", "Review")
 	pw.Description = "after"
 	pw.Steps[0].Events = models.StepEvents{OnEnter: []models.OnEnterAction{{Type: models.OnEnterRunCodeReview, Config: map[string]interface{}{models.ReviewAgentProfilePortableKey: map[string]interface{}{"agent_name": "Codex"}}}}}

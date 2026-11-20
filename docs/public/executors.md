@@ -40,6 +40,33 @@ or updater is not available. Containers and npm Nightlies include all remote hel
 
 `mock_remote` also exists in backend models for tests. It is not a product executor.
 
+## Runtime selection is required
+
+A saved executor or executor profile is an execution boundary, not a preference. When a launch
+resolves to a concrete executor, Kandev requires that executor's runtime:
+
+- If the required runtime is disabled or not registered, the launch fails before credential
+  resolution, preparation scripts, workspace mutation, or worker allocation. Kandev does not run
+  the task on Local or Worktree instead. For example, a Local Docker profile fails while the global
+  Docker runtime is disabled.
+- A registered runtime that then fails to start (unreachable daemon, failed image build, or failed
+  container creation) reports the provider error. Kandev never retries the task on a different
+  runtime, and a retry keeps the same selection.
+- An empty selection keeps the existing default. Local, legacy `local_pc`, and Worktree all use the
+  standalone host runtime. An unknown or uninstalled plugin executor is refused.
+- A retained session is reused only when its recorded runtime satisfies the current selection.
+  A worker that actually runs standalone does not satisfy Local Docker, even if Docker later becomes
+  available. Refused reuse preserves the workspace, history, and runtime inventory, and an
+  authorized operator can still stop that exact worker.
+- Session detail and session summary responses include `execution_runtime`, the observed runtime
+  recorded for the same execution as `container_id`. `null` means unknown; the selected executor is
+  never used as a substitute. A successful Local Docker launch reports a separate container and its
+  daemon-verifiable container ID.
+
+Use **Stop** and start a new session on the intended runtime when a retained worker no longer matches
+the selection. Changing the saved selection is a deliberate operator action; Kandev never migrates a
+retained environment automatically.
+
 Only administrators can create, edit, or test a Remote Docker executor, and only administrators can build its image. A saved profile grants effective root on the remote host, and a build runs Dockerfile instructions with that daemon's authority.
 
 Remote Docker reaches its daemon over SSH, not over a daemon URL. The profile stores an SSH target, and Kandev rejects any value carrying a scheme, so `tcp://` is excluded by construction. An unsecured daemon port is remote root; `ssh://` needs no extra setup because Docker's SSH transport runs `docker system dial-stdio` over the connection you already have. The older stored fields `docker_host`, `docker_tls_verify`, and `docker_cert_path` are not used by this runtime.
@@ -53,6 +80,28 @@ If you ran Remote Docker before this change, the remote account may still hold a
 The connection test's **Docker daemon** step reports which of three different problems it hit, because each needs a different fix on the remote host. The SSH user cannot use the Docker socket: add that user to the `docker` group there, then test again over a new connection, since group membership applies from the next login. The host has no `docker` command: install the Docker CLI, which the SSH transport needs in addition to the daemon. The CLI ran but no daemon answered: start Docker on that host. Each failure shows the remote's own error alongside the fix.
 
 Choose Remote Docker over a single-node Kubernetes cluster when you want a container per task on one machine and do not otherwise run Kubernetes. Kubernetes covers the same ground and adds resource limits, admission control, and scheduling, but it asks for a storage provisioner, a namespace, RBAC, and a worker image built and pushed to a registry by digest. Remote Docker keeps the Docker executor's Dockerfile-and-build loop, with no registry in the basic case.
+
+## Docker log and temporary storage limits
+
+Storage values apply when Kandev creates a Docker container. Existing containers keep their original storage settings when Kandev reconnects.
+
+By default, Kandev does not set a logging driver or rotation options. Docker uses the driver and defaults configured for its daemon. Kandev does not add a `/tmp` mount, so the image keeps its own `/tmp` contents and settings.
+
+To set limits, open a Local Docker or Remote Docker profile. Enter values in **Storage limits**, then save the profile. Leave a field blank to use Docker or image defaults.
+
+| Profile field | Example | Effect |
+| --- | --- | --- |
+| Temporary storage (`/tmp`) | `2g` | Mounts an executable tmpfs at `/tmp` with mode `1777`, `nosuid`, and `nodev`. |
+| Maximum log file size | `100m` | Sends Docker the `max-size` log option. |
+| Maximum log files | `3` | Sends Docker the `max-file` log option. |
+
+Docker selects the logging driver from its daemon configuration. It can reject container creation when the driver does not support supplied rotation options. For example, the `journald` driver can reject them. A file count needs an effective maximum file size to rotate logs.
+
+The `/tmp` tmpfs hides content supplied by the image. It uses host memory and swap. Its use counts against the container's memory limit. The tmpfs size does not increase that limit. Temporary writes can cause an out-of-memory termination before the tmpfs is full.
+
+If a task mount targets `/tmp`, including `/tmp/`, Kandev does not add the configured tmpfs. The task mount keeps its own storage policy. Tmpfs content disappears when Docker stops the container. A session stop that leaves the container running does not clear it. Store required outputs in persistent task storage.
+
+These options do not limit the writable layer, workspace, other bind mounts, or evidence archives. Those need separate retention and cleanup.
 
 ## Plugin-managed remote executors
 
@@ -132,6 +181,15 @@ starting, resuming, prompting, and shell access check executor eligibility.
 If a selected profile becomes unavailable, choose an accessible replacement
 before starting. Ownership changes apply to subsequent operations and do not
 terminate work already admitted.
+
+A deleted executor or profile can remain in a task's saved selection. These
+unavailable selections do not prevent task or workflow edits. The edit does not
+restore the deleted resource or authorize a launch. A live private selection
+still requires access, and new selections must exist and be accessible. Task
+and workflow edits return 403 (`FORBIDDEN` over WebSocket) when a live private
+selection is not accessible. A workflow edit returns 409 (`CONFLICT` over
+WebSocket) with `workspace_default_executor_unavailable` when the configured
+workspace default no longer resolves.
 
 The HTTP and MCP profile APIs accept `owner_user_id`. Omit it on creation for a
 shared resource. On update, omission preserves ownership; `null` or an empty
@@ -254,11 +312,12 @@ Two current preparation exceptions are easy to miss:
 
 ## Managed GitHub credentials
 
-The workspace's GitHub connection and the task's Git transport policy are separate. **Managed
-workspace credentials** is the default and provides the broker behavior below. Select **Inherit
-executor Git credentials** in the workspace GitHub settings to leave Git and `gh` to the host or
-selected executor; Kandev then injects no GitHub broker helper or shim. Local and Worktree use
-host-visible Git/SSH credentials, while Docker, Kubernetes, SSH, and cloud require executor-configured
+The workspace's GitHub connection and the task's Git transport policy are separate. New workspaces
+default to **Inherit executor Git credentials**. Existing workspaces keep their saved policy, and a
+legacy compatibility fallback can still select **Managed workspace credentials**. Select the
+inheritance option in workspace GitHub settings to leave Git and `gh` to the host or selected
+executor; Kandev then injects no GitHub broker helper or shim. Local and Worktree use host-visible
+Git/SSH credentials, while Docker, Kubernetes, SSH, and cloud require executor-configured
 credentials. An explicit executor-profile `GH_TOKEN` or `GITHUB_TOKEN` overrides the managed
 workspace route.
 
@@ -286,6 +345,22 @@ lease matching prevents accidental cross-repository redemption, but the trusted 
 receives a bearer token with all scopes and repositories granted by GitHub. An explicit profile
 `GITHUB_TOKEN` or `GH_TOKEN` bypasses managed broker selection entirely and is the operator's
 unmanaged grant. Personal GitHub tokens and App registration private keys never enter executors.
+
+Managed Git leases expire after 12 hours without use. With reissue enabled, eligible launches also
+receive a 30-day bearer capability that lets the helper request a replacement lease after expiry or
+broker restart. The default signer is derived from the installation's `data/master.key`; the
+optional `githubCredentialBroker.reissueSigningKey` setting overrides it. Because the capability is
+a bearer, treat executor environments that use managed Git as trusted. Set
+`githubCredentialBroker.disableReissue` to suspend capability issuance and exchange while ordinary
+leases continue to work. For configuration, backup, and rotation details, see
+[Git credential reissue settings](configuration.md#authentication-office-plugins-and-feature-flags)
+and [Operations](operations.md#state-and-storage).
+
+If a retained process has only a lease and receives an invalid or expired lease response, use
+**Restart session** to stop it and launch a fresh process in the same session. If the session is
+already stopped, **Resume** starts a fresh process. A warm Resume can reconnect to an existing live
+process and keep its original environment. See [managed Git recovery](git-operations.md) for the
+helper's error guidance.
 
 For Kubernetes tasks using managed Git access, both preparation and the agent's
 commands use the session's current repository leases. Stop/Resume on a retained
@@ -332,7 +407,15 @@ equivalent GitHub SSH access, known-hosts entry, and agent or key on that execut
 
 Worktree creates a dedicated host Git worktree and runs the standalone `agentctl` service against it. It separates branches and files between tasks, but the process still has the Kandev user's host permissions, network access, and readable credentials.
 
-Repository settings control base branch, branch naming, pull-before-create, repository setup/cleanup scripts, and optional copies of ignored files. With **Always pull before creating a new worktree** enabled, a host Worktree refresh is best effort when the selected local base exists. An authentication, network, timeout, missing-ref, divergent-ref, or uncertain-ancestry error produces a credential-safe warning and the host worktree uses the verified local base. The warning states that remote changes may be missing. For a numbered GitHub PR, the current PR base is used when available. A proven deleted remote base can use a separately refreshed configured fallback branch, often the repository default, and produces a warning; authentication, network, timeout, and other unproven PR refresh failures remain fatal. If no usable local base exists, or if the executor must materialize the repository remotely, refresh and checkout remain required and a failure stops the launch. Disable this setting only for an intentional offline local workflow. Copy ignored files narrowly: `.env` and similar files often contain production secrets. Multi-repository tasks receive one materialized worktree per attachment; use the per-repository setup scripts because the profile-level prepare script is currently skipped for that path.
+Repository settings control the base branch, branch naming, pull-before-create, setup and cleanup scripts, and optional copies of ignored files.
+
+With **Always pull before creating a new worktree** enabled, a host Worktree refresh is best effort when the selected local base exists. Authentication, network, timeout, missing-ref, divergent-ref, and uncertain-ancestry errors produce a credential-safe warning. The host worktree then uses its verified local base. The warning states that remote changes can be absent from the worktree.
+
+For a numbered GitHub PR, Kandev uses the current PR base when it can verify that base. Git-confirmed deletion of that remote base permits a separately refreshed configured fallback. The fallback often names the repository default branch. Kandev warns about both branch names. Authentication, network, timeout, and other unproven PR refresh errors remain fatal.
+
+When no local ref exists, an inherited or automatic host base can use a fallback after Git confirms that the requested ref is absent. Kandev refreshes and verifies the configured fallback or live remote default before it creates the worktree. Explicit base selections and unproven refresh errors remain fatal. Remote executors require the requested branch to materialize successfully.
+
+Disable this setting only for an intentional offline local workflow. Copy ignored files narrowly because `.env` and similar files often contain production secrets. Multi-repository tasks get one materialized worktree per attachment. Use per-repository setup scripts because the profile-level prepare script is skipped for that path.
 
 Worktree tasks normally start inside their first repository. In **Advanced settings**, a task with one
 initial repository can opt into a parent workspace folder so later repositories are siblings and the
@@ -526,7 +609,7 @@ All sessions in a task share one credential trust boundary. Same-UID agents can 
 3. Select that secret for the required `SPRITES_API_TOKEN` profile environment variable.
 4. Review remote credential methods, Git identity, prepare/cleanup scripts, and network policy.
 
-Sprites profiles do not copy the host-active `gh` CLI token. Kandev may copy explicitly selected agent credential files, resolve selected Kandev secrets into agent environment variables, or run an agent auth setup script. A profile-selected GitHub token is an unmanaged override; otherwise an attached GitHub repository uses the workspace credential broker. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to an HTTPS Kandev URL reachable from remote executors. To recover managed Git credentials after a backend restart, configure the stable secret `githubCredentialBroker.reissueSigningKey` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY`); changing it invalidates outstanding execution capabilities. Drain or quiesce active agent sessions before key rotation. The broker uses `/api/v1/git/credentials/resolve` and `/api/v1/git/credentials/reissue`; the older GitHub paths remain compatibility aliases. These settings are independent of GitHub App registration. Credential upload is best-effort: provisioning can continue while later agent authentication fails. The remote sandbox receives highly sensitive data; use a scoped provider token and least-privilege repository credentials.
+Sprites profiles do not copy the host-active `gh` CLI token. Kandev may copy explicitly selected agent credential files, resolve selected Kandev secrets into agent environment variables, or run an agent auth setup script. A profile-selected GitHub token is an unmanaged override. With **Managed workspace credentials**, an attached GitHub repository uses the workspace credential broker. With **Inherit executor Git credentials**, configure Git credentials for the Sprite because Kandev injects no broker helper. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to an HTTPS Kandev URL reachable from remote executors. Managed launches receive automatic lease recovery by default. The signer uses the installation's `data/master.key`; the sensitive `githubCredentialBroker.reissueSigningKey` setting remains an optional override, and `githubCredentialBroker.disableReissue` suspends capability issuance and exchange. Preserve the matching `master.key` with the database to keep encrypted secrets and outstanding default capabilities usable. A 30-day execution capability is a bearer, so treat the remote sandbox as trusted. The broker uses `/api/v1/git/credentials/resolve` and `/api/v1/git/credentials/reissue`; the older GitHub paths remain compatibility aliases. These settings are independent of GitHub App registration. Credential upload is best-effort: provisioning can continue while later agent authentication fails. Use a scoped provider token and least-privilege repository credentials.
 
 Network rules are stored in `sprites_network_policy_rules` as JSON entries with `domain`, `action` (`allow` or `deny`), and optional `include`. Kandev applies them only on fresh sandbox creation, and currently does so after credential upload, prepare, controller startup, and agent-instance creation. Bootstrap traffic can therefore occur before the profile policy is installed. A parse/provider failure is reported as skipped and does not abort launch. Provider semantics remain authoritative; do not treat this late, best-effort step as a security boundary, and test the resulting policy.
 
@@ -541,6 +624,8 @@ Plain Stop preserves the sandbox and workspace for resume. Archive/delete termin
 </details>
 
 ## SSH
+
+Guarded workflow changes require a usable selected credential for the destination agent profile. The check uses the current user's Global secret visibility. An agent-profile `ANTHROPIC_API_KEY` binding satisfies the check without a duplicate executor binding. See [Agents and profiles](agents-and-profiles.md#environment-variables-and-secrets) for profile environment guidance.
 
 > **Trust boundary:** Verify the target host fingerprint before saving. Kandev pins the target key, but unknown ProxyJump bastion keys may be accepted on first use; remote credential transfers write sensitive material under the remote user's home.
 
@@ -577,7 +662,15 @@ The profile editor exposes remote shell and agent-readiness checks. Backend/API 
 
 The remote-auth card is built from the currently enabled agents. Depending on an agent's declared methods, it can copy selected local credential files, resolve a stored secret into that agent's authentication environment variable, or run an agent-specific setup script on the remote host. GitHub can use an explicitly selected `GITHUB_TOKEN` secret as an unmanaged profile override; Kandev does not copy the host-active `gh` token.
 
+For Claude, the card offers two independent stored-secret choices: `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`. Select the route that matches the account on the remote host. You can save both choices independently; clearing one does not convert or clear the other. The API-key route sets `ANTHROPIC_API_KEY` for the child process and does not create an OAuth credential file. The OAuth route keeps the existing remote credentials-file setup.
+
+Kandev checks the selected binding when it previews or applies a guarded workflow change, using the current user's Global secret visibility. A missing, deleted, workspace-scoped, unreadable, or empty binding blocks the change before the task moves. An agent-profile `ANTHROPIC_API_KEY` binding satisfies this check without a duplicate executor binding. This check validates configuration only. It does not contact Anthropic and does not prove that the provider accepts the credential.
+
 OpenCode credential copies merge top-level provider entries with the existing remote `auth.json`. Remote-only providers remain, and the selected host entry replaces the same provider on the remote. If either file is unreadable or is not a JSON object, Kandev leaves the remote file unchanged and reports the credential-copy error.
+
+Pi credential copies merge `~/.pi/agent/auth.json` the same way, by provider. Pi can also take an API key for Anthropic, OpenAI, Gemini or OpenRouter from a stored secret; a credential in the remote `auth.json` takes precedence over it. The **Copy Pi settings and models** bundle copies `settings.json` and `models.json` from `~/.pi/agent`; `models.json` can hold inline API keys, which the copy carries. Kandev reads the default agent directory and ignores `PI_CODING_AGENT_DIR`.
+
+Kandev copies selected bundle files during fresh provisioning or environment reset. A warm resume keeps remote edits to these files.
 
 These transfers write sensitive material under the remote user's home and are best-effort. Verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 
@@ -616,21 +709,75 @@ support, update Kandev and start a fresh session.
 
 ### Repository sources and cleanup
 
-> **Cleanup:** SSH task directories, session-runtime data, and cached helpers may remain after disconnect. Audit remote processes and paths before deleting anything.
+> **Cleanup:** SSH task directories stay by default. A profile can enable task-directory reclamation after terminal archive or delete. Reclamation removes ignored files, including secrets. Keep required ignored data elsewhere.
 
 <details>
 <summary>SSH repository source details</summary>
 
 SSH materializes the primary attached repository at the remote task-workspace root and additional repository sources in direct child directories. The default prepare script initializes or reuses the root checkout, verifies the configured origin, fetches the base branch, runs repository setup, and lets Kandev's managed postlude select the task branch. A stored profile script replaces that default and must leave the same verified primary checkout before `agentctl` starts. Existing matching checkouts retain local commits and untracked files; a different origin, missing checkout, failed script, timeout, or cancellation fails the launch before a controller is started. Ensure the remote host has the required Git credentials and can reach every selected remote; folders cannot be attached to SSH tasks.
 
-The runtime preflights the selected agent command and reports an installation hint when missing; it does not install the agent or its toolchain. Only these resolved credential environment names are forwarded to the remote agent: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GITHUB_TOKEN`, and `GH_TOKEN`. Arbitrary profile variables and control-plane process variables are not forwarded to that agent process. Agent-specific auth setup scripts can still consume a selected stored secret and materialize their own remote login state.
+The runtime preflights the selected agent command and reports an installation hint when missing; it does not install the agent or its toolchain. Only these resolved credential environment names are forwarded to the remote agent: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `OPENROUTER_API_KEY`, `CURSOR_API_KEY`, `AUGMENT_SESSION_AUTH`, `META_API_KEY`, `WINDSURF_API_KEY`, `XAI_API_KEY`, `GITHUB_TOKEN`, and `GH_TOKEN`. Arbitrary profile variables and control-plane process variables are not forwarded to that agent process. Agent-specific auth setup scripts can still consume a selected stored secret and materialize their own remote login state.
 
-Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Terminal archive/delete stops run the profile cleanup script first; cleanup is best-effort, so a failure does not block controller teardown. Plain Stop skips cleanup and preserves the task workspace for resume. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. An explicit resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller and re-runs preparation.
+Stop attempts to stop the session's remote `agentctl` and removes only the remote session-runtime directory. It then closes forwarding and SSH. Terminal archive/delete jobs run the profile cleanup script first. A cleanup-script error does not block controller teardown. Plain Stop skips the script and keeps the task workspace for resume.
+
+Task-directory reclamation stays off by default. When enabled, terminal archive/delete cleanup removes a task directory only after all Git safety probes pass. Reclamation removes Git-ignored files, including `.env` secrets. Move required ignored data outside the task directory before you enable the setting.
+
+Default SSH preparation creates or reuses a standalone checkout at the task root. Custom scripts or existing repositories can use linked worktrees. For a linked worktree, Git checks the task's `HEAD` and stashes whose recorded branch matches its current branch. Reclamation leaves the shared repository and other worktrees intact. For a standalone clone, Git checks every local branch and stash. Unknown layouts, nested repositories, unknown stash attribution, locked worktrees, and checkouts with submodules stay on disk. Reclamation requires Git 2.36 or later for its complete probe set; safe path detection alone requires 2.31. Older Git preserves the directory but does not affect SSH launch support. Kandev does not sweep old task directories.
+
+The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` remain for later sessions. Periodically audit remote processes, session directories, and `<workdir-root>/tasks/`. An explicit **Resume** reconnects to SSH and reuses a live recorded PID when possible. Otherwise Kandev starts a fresh remote controller and runs preparation again. Use **Restart session** when a retained live process needs fresh launch credentials; it stops the current process and launches a new one in the same session.
+
+When a receipt proves that the recorded controller is absent, Resume starts a
+new controller in the preserved task workspace. This also applies after a
+verified Linux host reboot. Resume uses the existing provider conversation and
+refreshes the managed credential broker lease. If process identity, boot
+evidence, or ownership is unknown or conflicting, Kandev blocks replacement
+until you resolve the host or credential problem. The old session-runtime
+directory can remain when the controller was already absent. Its receipt does
+not prove that a matching pidfile owns the directory.
+
+#### Controller recovery after session-directory loss
+
+A managed Linux SSH launch records the controller's own process identity during
+its authenticated handshake. Kandev stores that receipt with the session's
+runtime record, outside the remote session directory, so it survives a backend
+restart and the loss of that directory. Each launch attempt receives a new
+generation, and a replacement controller never inherits a predecessor's
+receipt. macOS launches keep the guarded pidfile stop because the race-safe
+pidfd operation is Linux-only.
+
+When a stop on a Linux host finds the recorded controller still alive but its
+session directory gone, Kandev runs a private `agentctl ssh-reconcile` helper on
+the host before any signal. The helper opens a Linux pidfd, verifies the recorded process birth
+identity, launch generation, user, command, and workdir, confirms the directory
+is still absent, and sends SIGTERM only through that handle. It never removes a
+path, escalates to SIGKILL, or falls back to a numeric PID signal. A replaced
+process, replaced directory, or unreadable evidence leaves the recorded runtime
+and its cleanup inventory intact.
+
+Outcomes of that recovery:
+
+- **Stopped, or already absent:** cleanup settles the recorded owner.
+- **Legacy launch with no recorded receipt, or a receipt that conflicts with
+  the runtime record:** unresolved. Start the session again to record proof, or
+  inspect the original host and stop that exact process under your own change
+  control, then retry the same cleanup.
+- **Unsupported pidfd kernel, permission failure, or unreadable process
+  evidence:** unresolved. Fix host policy or SSH permissions and retry the same
+  cleanup.
+- **Controller still alive after SIGTERM:** unresolved. Kandev does not
+  force-kill it. Confirm the process on the host before any manual action.
+
+Reconciliation never publishes a bare-PID kill instruction. A directory that
+reappears during recovery is preserved untouched, and one completed target
+never erases another target that is still unresolved.
 
 If a settled session’s remote controller dies while its SSH connection still answers, idle reclaim can release its runtime reservation after confirming the recorded process is absent. An unreachable SSH connection or inconclusive process check leaves the reservation unchanged; idle reclaim does not reconnect to establish absence.
 
 Backend shutdown closes forwarding and SSH without killing remote processes or running cleanup.
 Startup recovery reconnects to the recorded controller and verifies its authenticated session identity before replay.
+
+For an interrupted ACP prompt, **Retry connection** restores SSH forwarding to the same verified remote controller before checking its saved output. It preserves the conversation and does not resend the interrupted instruction. Missing authentication, conflicting ownership, or unavailable saved evidence keeps recovery blocked. A local Stop after transport loss may leave the remote controller running; verify remote processes before cleanup.
+
 An unavailable connection stays pending for retry; recovery does not start a replacement controller.
 
 </details>
@@ -665,7 +812,7 @@ The task environment reports `creating`, `ready`, `stopped`, or `failed`; indivi
 
 If an initial launch fails or its owner disappears before creating workspace resources, the next explicit start or new session can prepare that same task or shared workspace again. A live launch retains its claim, and Kandev does not retry in the background. A failed environment with a recorded worktree, container, sandbox, repository inventory, or Kubernetes workload metadata requires **Reset Environment**. A child task that inherits a failed parent environment cannot reset or re-materialize it through a child launch; recover the owning parent environment first.
 
-Use a task's **Reset Environment** action when you need a clean materialization. Kandev blocks reset while a task session is starting or running, can optionally push the current branch, and requests teardown of the recorded worktree, container, Pod/managed PVC, or sandbox. It normally keeps the environment record when teardown returns an error. Kubernetes keeps an existing claim and refuses deletion when recorded UID or ownership identity is ambiguous. The current Sprites credential-context limitation described above can instead report success while leaving the provider sandbox, so verify it separately. SSH task directories are intentionally retained; use the profile cleanup script for terminal hook work and remove the directory manually only after confirming no session needs it.
+Use a task's **Reset Environment** action when you need a clean materialization. Kandev blocks reset while a task session is starting or running, can optionally push the current branch, and requests teardown of the recorded worktree, container, Pod/managed PVC, or sandbox. It normally keeps the environment record when teardown returns an error. Kubernetes keeps an existing claim and refuses deletion when recorded UID or ownership identity is ambiguous. The current Sprites credential-context limitation described above can instead report success while leaving the provider sandbox, so check it separately. SSH reset leaves the remote task directory; reclamation runs only after terminal archive or delete when the profile option is enabled.
 
 Before deleting any environment, push or otherwise preserve uncommitted work. Profile deletion and provider/daemon-side deletion can bypass normal lifecycle safeguards.
 
@@ -681,6 +828,7 @@ Before deleting any environment, push or otherwise preserve uncommitted work. Pr
 - **Sprite cannot resume:** check provider token, quota, sandbox existence, expiration, and network policy; a missing sandbox triggers fresh provisioning.
 - **SSH handshake fails:** test ssh-agent/key access, host fingerprint, bastion trust, SFTP, TCP forwarding, and remote OS/architecture.
 - **SSH agent is missing:** run the reported `command -v` check through the configured login shell and install the agent on that host.
-- **Disk usage grows:** inspect **Settings > System > Disk usage**, Docker containers, provider sandboxes, host worktrees, and retained SSH task directories before removal.
+- **SSH cleanup is unresolved after the session directory disappeared:** inspect the recorded controller on the original host. Linux launches that recorded launch proof are reconciled automatically. Legacy controllers, unsupported pidfd kernels, permission failures, and controllers still alive after SIGTERM stay unresolved and keep the cleanup inventory. Do not kill by bare PID; confirm the controller's command, workdir, and launch generation first, then retry the same cleanup.
+- **Disk usage grows:** inspect **Settings > System > Disk usage**, Docker containers, provider sandboxes, host worktrees, and SSH task directories that remain after cleanup.
 
 Related guides: [Docker](docker.md), [Git Operations](git-operations.md), [Operations](operations.md), and [Windows Support](windows-support.md).

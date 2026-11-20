@@ -52,7 +52,16 @@ func (m *Manager) refreshDeliveryPressure(ctx context.Context, j *journal.Journa
 	state := m.deliveryHealth.State
 	m.deliveryActiveMu.Unlock()
 	if state != previous {
-		m.logger.Warn("durable delivery pressure changed", zap.String("state", state), zap.Int64("retained_bytes", capacity.StreamBytes), zap.Int64("limit_bytes", capacity.StreamLimit))
+		fields := []zap.Field{
+			zap.String("state", state),
+			zap.Int64("retained_bytes", capacity.StreamBytes),
+			zap.Int64("limit_bytes", capacity.StreamLimit),
+		}
+		if state == "healthy" {
+			m.logger.Info("durable delivery pressure changed", fields...)
+		} else {
+			m.logger.Warn("durable delivery pressure changed", fields...)
+		}
 	}
 	if cancelTurn {
 		m.cancelDeliveryPressureTurn(submissionID)

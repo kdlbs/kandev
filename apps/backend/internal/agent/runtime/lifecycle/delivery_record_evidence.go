@@ -263,14 +263,14 @@ func deliveryEvidenceReadError(lease *agentctl.RuntimeLease, err error) error {
 }
 
 func historicalProcessTermination(request DeliveryRecordEvidenceRequest, liveExecutionID string) *bool {
-	if request.ExecutionID != "" && request.ExecutionID == liveExecutionID {
-		terminated := false
-		return &terminated
-	}
 	if request.OriginalRuntime == nil || request.OriginalRuntime.Validate() != nil {
+		if request.ExecutionID != "" && request.ExecutionID == liveExecutionID {
+			terminated := false
+			return &terminated
+		}
 		return nil
 	}
-	terminated, err := processidentity.OwnedSessionTerminated(*request.OriginalRuntime)
+	terminated, err := processidentity.OriginalOwnerTerminated(*request.OriginalRuntime)
 	if err != nil {
 		return nil
 	}

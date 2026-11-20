@@ -95,6 +95,7 @@ export function modelConfigOptions(
           option.current_value,
       category: option.category,
       options: option.options,
+      catalog: option.catalog,
     };
     return { ...dynamicOption, options: option.options ?? [] };
   });

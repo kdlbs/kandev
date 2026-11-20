@@ -16,6 +16,7 @@ import (
 
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	settingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/authz"
@@ -30,13 +31,26 @@ const (
 	invalidRequestBody = "invalid request body"
 )
 
+// SessionModelConfigResolver resolves a candidate model's provider options
+// using the session's effective launch context without mutating the session.
+type SessionModelConfigResolver interface {
+	ResolveSessionModelConfig(context.Context, string, SessionModelConfigRequest) (*settingsdto.AgentModelConfigResponse, error)
+}
+
+type SessionModelConfigRequest struct {
+	Model         string
+	Mode          string
+	ConfigOptions map[string]string
+}
+
 type ProcessHandlers struct {
-	service             *service.Service
-	lifecycleMgr        *lifecycle.Manager
-	cursorMCPRecovery   cursorMCPRecoveryManager
-	terminalSvc         cursorMCPRecoveryTerminalService
-	cursorMCPRecoveryMu sync.Mutex
-	logger              *logger.Logger
+	service                    *service.Service
+	sessionModelConfigResolver SessionModelConfigResolver
+	lifecycleMgr               *lifecycle.Manager
+	cursorMCPRecovery          cursorMCPRecoveryManager
+	terminalSvc                cursorMCPRecoveryTerminalService
+	cursorMCPRecoveryMu        sync.Mutex
+	logger                     *logger.Logger
 }
 
 func RegisterProcessRoutes(
@@ -79,6 +93,7 @@ func RegisterProcessRoutes(
 	session.POST("/set-mode", handlers.httpSetSessionMode)
 	session.POST("/set-model", handlers.httpSetSessionModel)
 	session.POST("/set-config-option", handlers.httpSetSessionConfigOption)
+	session.POST("/resolve-model-config", handlers.httpResolveSessionModelConfig)
 	session.POST("/authenticate", handlers.httpAuthenticate)
 	session.POST("/mcp/authenticate", handlers.httpAuthenticateCursorMCP)
 	session.POST("/mcp/retry", handlers.httpRetryCursorMCP)
@@ -619,6 +634,44 @@ func (h *ProcessHandlers) httpSetSessionModel(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"ok": true})
+}
+
+// SetSessionModelConfigResolver wires the settings-owned candidate resolver.
+func (h *ProcessHandlers) SetSessionModelConfigResolver(resolver SessionModelConfigResolver) {
+	h.sessionModelConfigResolver = resolver
+}
+
+// httpResolveSessionModelConfig resolves provider options for a candidate model
+// with the session's launch context. It never mutates the live session.
+func (h *ProcessHandlers) httpResolveSessionModelConfig(c *gin.Context) {
+	sessionID := c.Param("id")
+	if h.denySessionAccess(c, sessionID) {
+		return
+	}
+	if h.sessionModelConfigResolver == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "model configuration resolution is unavailable"})
+		return
+	}
+	var req struct {
+		Model         string            `json:"model"`
+		Mode          string            `json:"mode,omitempty"`
+		ConfigOptions map[string]string `json:"config_options,omitempty"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Model) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model is required"})
+		return
+	}
+	response, err := h.sessionModelConfigResolver.ResolveSessionModelConfig(
+		c.Request.Context(), sessionID,
+		SessionModelConfigRequest{Model: req.Model, Mode: req.Mode, ConfigOptions: req.ConfigOptions},
+	)
+	if err != nil {
+		h.logger.Warn("failed to resolve session model configuration",
+			zap.String("session_id", sessionID), zap.Error(err))
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to resolve model configuration"})
+		return
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // httpSetSessionConfigOption applies an option now or records it for the next launch.

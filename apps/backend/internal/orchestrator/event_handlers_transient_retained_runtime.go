@@ -194,7 +194,8 @@ func (s *Service) retryRetainedRuntimePrompt(
 	}
 	_, err := s.promptTask(ctx, taskID, sessionID, prompt.text, prompt.model, prompt.planMode, prompt.attachments,
 		false, launchOriginAutomatic, promptTaskOptions{
-			onAccepted: onAccepted,
+			capacityIntent: turnCapacityOverride,
+			onAccepted:     onAccepted,
 			beforeProviderAdmission: func() error {
 				if current, ok := s.transientRetries.Load(sessionID); !ok || current != entry || entry.policy.expired(s.transientRetryNow()) {
 					return ErrResumeAttemptCancelled

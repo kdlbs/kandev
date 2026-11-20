@@ -18,7 +18,12 @@ import type {
   TaskSessionAgentctlPayload,
 } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
-import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
+import {
+  mergeCompactionCountValue,
+  mergeCompactionReportingValue,
+  reconcileContextWindowMetadata,
+  sameContextWindowEntry,
+} from "@/lib/state/slices/session-runtime/context-window";
 import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fields";
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
@@ -28,6 +33,7 @@ import {
   sessionStateConfirmsAgentctlExecutionReady,
 } from "@/lib/session-state";
 import { isSessionRestartPending } from "@/lib/session/session-restart-state";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import {
   sanitizeWorkspaceRestorationDetails,
   type WorkspaceRestorationAttempt,
@@ -243,6 +249,7 @@ const CARRIED_WHEN_DEFINED = [
   "cancellation_pending",
   "cancellation_revision",
   "runtime_storage_health",
+  "agent_workspace_path",
   "execution_profile_id",
   "route_generation",
   "route_state",
@@ -270,7 +277,10 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.agent_profile_snapshot)
     update.agent_profile_snapshot = payload.agent_profile_snapshot;
-  if (payload.session_metadata !== undefined) update.metadata = payload.session_metadata;
+  const metadataSources = [payload.session_metadata, payload.metadata].filter(
+    (candidate) => candidate && typeof candidate === "object",
+  ) as Array<Record<string, unknown>>;
+  if (metadataSources.length > 0) update.metadata = Object.assign({}, ...metadataSources);
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
   carryDefinedFields(update, payload);
@@ -331,17 +341,41 @@ function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payl
     (candidate) =>
       candidate &&
       typeof candidate === "object" &&
-      Object.prototype.hasOwnProperty.call(candidate, "context_window"),
+      (Object.prototype.hasOwnProperty.call(candidate, "context_window") ||
+        Object.prototype.hasOwnProperty.call(candidate, "context_compaction_count") ||
+        Object.prototype.hasOwnProperty.call(candidate, "context_compaction_reporting")),
   ) as Record<string, unknown> | undefined;
   if (!metadata) return;
-  const contextWindow = metadata.context_window;
-  const entry = parseContextWindowEntry(
-    contextWindow,
-    new Date().toISOString(),
+  const existing = store.getState().contextWindow?.bySessionId?.[sessionId];
+  const sessionMetadata = store.getState().taskSessions?.items?.[sessionId]?.metadata as
+    | Record<string, unknown>
+    | undefined;
+  const count = mergeCompactionCountValue(
     metadata.context_compaction_count,
+    sessionMetadata?.context_compaction_count,
   );
-  if (entry) store.getState().setContextWindow(sessionId, entry);
-  else store.getState().clearContextWindow(sessionId);
+  const reporting = mergeCompactionReportingValue(
+    metadata.context_compaction_reporting,
+    sessionMetadata?.context_compaction_reporting,
+  );
+  const hasGauge = Object.prototype.hasOwnProperty.call(metadata, "context_window");
+  const next = reconcileContextWindowMetadata({
+    current: existing,
+    gauge: metadata.context_window,
+    hasGauge,
+    count,
+    reporting,
+    timestamp: new Date().toISOString(),
+    allowExplicitClear: true,
+  });
+  if (next === undefined) return;
+  if (next === null) {
+    store.getState().clearContextWindow(sessionId);
+    return;
+  }
+  if (!sameContextWindowEntry(next, existing)) {
+    store.getState().setContextWindow(sessionId, next);
+  }
 }
 
 /** Copy agentctl "ready" status from one session to another (same-task switch). */
@@ -465,6 +499,9 @@ function syncEnvFromAgentctlPayload(
     task_environment_id: envId,
     ...getAgentctlWorktreeFields(payload, isSibling),
     workspace_path: payload.workspace_path ?? payload.task_workspace_path ?? payload.worktree_path,
+    ...(payload.agent_workspace_path !== undefined
+      ? { agent_workspace_path: payload.agent_workspace_path }
+      : {}),
   });
   store.getState().reconcileWorkflowSessionFocus?.(taskId);
 }
@@ -479,6 +516,11 @@ function buildAgentctlReadySessionUpdate(
   isSibling: boolean,
 ): Record<string, unknown> {
   const update: Record<string, unknown> = {};
+  if (payload.agent_workspace_path !== undefined) {
+    // The launched execution keeps running in its original checkout even when
+    // the ready event promotes the Files root to the task root.
+    update.agent_workspace_path = payload.agent_workspace_path;
+  }
   if (isSibling) {
     const workspacePath = payload.workspace_path ?? payload.task_workspace_path;
     if (workspacePath) update.workspace_path = workspacePath;
@@ -504,7 +546,10 @@ function recordAgentctlReadyWorktree(
   store.getState().setWorktree({
     id: payload.worktree_id,
     sessionId: payload.session_id,
-    repositoryId: existingSession.repository_id ?? undefined,
+    // The sibling's repository identity comes from the materializer. Falling
+    // back to the session's primary repository would attach both worktrees to
+    // one repository and erase the source-qualified link prefixes.
+    repositoryId: payload.worktree_repository_id ?? existingSession.repository_id ?? undefined,
     path: payload.worktree_path ?? existingSession.worktree_path ?? undefined,
     branch: payload.worktree_branch ?? existingSession.worktree_branch ?? undefined,
   });
@@ -530,11 +575,21 @@ function recordAgentctlReadyWorktree(
  *       (each commit then carries its repo/branch slug for grouping).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
+function handleAgentctlReady(
+  store: StoreApi<AppState>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  sessionBeforeSync?: TaskSession,
+): void {
   const existingSession = store.getState().taskSessions.items[payload.session_id];
   if (!existingSession) return;
 
   const isSibling = isSiblingWorktree(existingSession, payload);
+  const previousWorkspacePath = getSessionWorkspacePath(sessionBeforeSync);
+  const rootPromoted = !!(
+    payload.task_workspace_path &&
+    (!previousWorkspacePath || previousWorkspacePath !== payload.task_workspace_path)
+  );
 
   const sessionUpdate = buildAgentctlReadySessionUpdate(payload, isSibling);
   if (Object.keys(sessionUpdate).length > 0) {
@@ -544,12 +599,13 @@ function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
   recordAgentctlReadyWorktree(store, payload, existingSession);
 
   if (isSibling) {
-    // Drop the pre-multi-repo git-status snapshot — the backend just
-    // transitioned this session from single-repo to multi-repo and the legacy
-    // (empty-repo-name) tracker is gone. Without this the Changes panel keeps
-    // surfacing the frozen snapshot until the user reloads the tab, masking
-    // the per-repo updates streaming in for both the primary and the sibling.
-    store.getState().clearLegacyGitStatusEntry(payload.session_id);
+    // A promoted root retires the old empty-name Git scope, so drop its frozen
+    // snapshot instead of masking the per-repo updates. A root-preserving
+    // attachment keeps a valid unnamed root and only rebuilds the inventory.
+    if (rootPromoted) {
+      store.getState().clearLegacyGitStatusEntry(payload.session_id);
+    }
+    store.getState().invalidateGitStatusInventory(payload.session_id);
     store.getState().bumpSessionGitCheckoutGeneration(payload.session_id);
     store.getState().bumpSessionCommitsRefetch(payload.session_id);
   }
@@ -681,6 +737,11 @@ function handleWorkspaceSourcesUpdated(
     adopted_session_ids: adoptedSessionIds,
   } = payload;
   const existing = store.getState().taskSessions.items[sessionId];
+  const previousWorkspacePath = getSessionWorkspacePath(existing);
+  const rootPromoted = !!(
+    workspacePath &&
+    (!previousWorkspacePath || previousWorkspacePath !== workspacePath)
+  );
   if (existing && workspacePath) {
     store.getState().setTaskSession({ ...existing, workspace_path: workspacePath });
   }
@@ -692,7 +753,10 @@ function handleWorkspaceSourcesUpdated(
     .getState()
     .reconcileWorkspaceSourcesAdopted(adoptedSessionIds ?? [sessionId], boundaryTimestamp);
   store.getState().bumpWorkspaceFilesRefresh(sessionId);
-  store.getState().clearLegacyGitStatusEntry(sessionId);
+  if (rootPromoted) {
+    store.getState().clearLegacyGitStatusEntry(sessionId);
+  }
+  store.getState().invalidateGitStatusInventory(sessionId);
   store.getState().bumpSessionGitCheckoutGeneration(sessionId);
   store.getState().bumpSessionCommitsRefetch(sessionId);
 }
@@ -991,6 +1055,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
     "session.agentctl_ready": (message) => {
       const payload = message.payload;
       if (!payload?.session_id) return;
+      const sessionBeforeSync = store.getState().taskSessions.items[payload.session_id];
       store.getState().setSessionAgentctlStatus(payload.session_id, {
         status: "ready",
         agentExecutionId: payload.agent_execution_id,
@@ -998,7 +1063,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       });
       syncEnvFromAgentctlPayload(store, payload);
       settleWorkspaceRestorationFromAgentctl(store, payload, "ready");
-      handleAgentctlReady(store, payload);
+      handleAgentctlReady(store, payload, sessionBeforeSync);
     },
     "session.agentctl_error": (message) => {
       const payload = message.payload;

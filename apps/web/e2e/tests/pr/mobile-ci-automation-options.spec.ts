@@ -421,7 +421,7 @@ test.describe("mobile PR CI automation options", () => {
     await expect(drawer.getByRole("button", { name: "Refresh" })).toBeVisible();
     await expect(drawer.getByTestId("pr-workflow-row")).toHaveCount(30);
 
-    const scrollBody = drawer.locator("[data-vaul-no-drag]");
+    const scrollBody = drawer.getByTestId("pr-popover-scroll-body");
     await expect(scrollBody).toHaveCSS("overflow-y", "auto");
     const [drawerBox, scrollMetrics, documentMetrics] = await Promise.all([
       drawer.boundingBox(),
@@ -608,7 +608,7 @@ test.describe("mobile PR CI automation options", () => {
       "Repair requested. Waiting for a new commit before requeue",
     );
 
-    const scrollBody = drawer.locator("[data-vaul-no-drag]");
+    const scrollBody = drawer.getByTestId("pr-popover-scroll-body");
     const [drawerBox, scrollMetrics, documentMetrics] = await Promise.all([
       drawer.boundingBox(),
       scrollBody.evaluate((element) => ({

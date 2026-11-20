@@ -176,15 +176,22 @@ func TestPrepareSession_Success(t *testing.T) {
 		t.Fatalf("expected first session to carry immutable original marker, metadata = %#v", createdSession.Metadata)
 	}
 
-	// Verify SetSessionPrimary was called
+	// The mock store predates the atomic election contract, so the executor
+	// retains its explicit promotion fallback for legacy repositories.
 	if len(repo.setSessionPrimaryCalls) != 1 {
-		t.Errorf("Expected 1 SetSessionPrimary call, got %d", len(repo.setSessionPrimaryCalls))
+		t.Errorf("Expected 1 SetSessionPrimary fallback call, got %d", len(repo.setSessionPrimaryCalls))
 	}
 }
 
 func TestPrepareSessionRetriesTaskRunnerChangedAfterReload(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-runner-retry"
+	repo.executorProfiles["profile-old"] = &models.ExecutorProfile{
+		ID: "profile-old", ExecutorID: "executor-runner",
+	}
+	repo.executorProfiles["profile-new"] = &models.ExecutorProfile{
+		ID: "profile-new", ExecutorID: "executor-runner",
+	}
 	repo.tasks[taskID] = &models.Task{
 		ID:          taskID,
 		WorkspaceID: "workspace-runner-retry",
@@ -1894,41 +1901,6 @@ func TestLaunchPreparedSession_FullPath_CarriesResumeToken(t *testing.T) {
 	}
 }
 
-func TestLaunchPreparedSession_ProfileSwitchIgnoresMissingStaleExecution(t *testing.T) {
-	repo := newMockRepository()
-	session := &models.TaskSession{
-		ID: "session-123", TaskID: "task-123", AgentProfileID: "office-cto",
-		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
-	}
-	repo.sessions[session.ID] = session
-	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
-		ID: session.ID, SessionID: session.ID, TaskID: session.TaskID,
-		AgentExecutionID: "stale-codex-exec", ExecutionProfileID: "codex-profile",
-	}
-	launched := false
-	agentManager := &mockAgentManager{
-		stopAgentFunc: func(context.Context, string, bool) error {
-			return fmt.Errorf("stale execution: %w", lifecycle.ErrExecutionNotFound)
-		},
-		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
-			launched = true
-			return &LaunchAgentResponse{AgentExecutionID: "claude-exec"}, nil
-		},
-	}
-	exec := newTestExecutor(t, agentManager, repo)
-	task := &v1.Task{ID: session.TaskID, WorkspaceID: "workspace-123", Title: "Test Task"}
-
-	_, err := exec.LaunchPreparedSession(context.Background(), task, session.ID, LaunchOptions{
-		AgentProfileID: "claude-profile", OfficeAgentProfileID: "office-cto", StartAgent: true,
-	})
-	if err != nil {
-		t.Fatalf("LaunchPreparedSession: %v", err)
-	}
-	if !launched {
-		t.Fatal("expected profile switch to continue with a fresh launch")
-	}
-}
-
 // TestLaunchPreparedSession_FullPath_WorkspaceOnly_DoesNotResume verifies that
 // when startAgent is false (workspace-only prep) we do NOT carry the resume
 // token forward, mirroring the gating in ResumeSession.
@@ -3541,24 +3513,23 @@ func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedWithBasicAuth(
 func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
 	t.Parallel()
 	cloner := &recordingAuthenticatedCloner{}
-	exec := &Executor{
-		repoCloner: cloner,
-		secretStore: &mockSecretStore{secrets: map[string]string{
-			"azure_devops:workspace-1:pat": "workspace-pat",
-		}},
-	}
+	exec := &Executor{repoCloner: cloner}
 	azure := &models.Repository{
-		WorkspaceID: "workspace-1", Provider: "azure_devops", ProviderOwner: "Platform", ProviderName: "api",
+		ID: "repository-1", WorkspaceID: "workspace-1", Provider: "azure_devops",
+		ProviderHost: "https://dev.azure.com", ProviderOwner: "Platform", ProviderName: "api",
 	}
-	path, err := exec.ensureClonedWithWorkspaceAuth(
-		context.Background(), azure, "https://dev.azure.com/acme/Platform/_git/api",
-	)
-	if err != nil {
+	if _, err := exec.ensureClonedWithWorkspaceAuthForSession(
+		context.Background(), "task-1", "session-1", azure,
+		"https://dev.azure.com/acme/Platform/_git/api",
+	); err != nil {
 		t.Fatal(err)
 	}
-	if path != "/repos/azure" || cloner.authCalls != 1 || cloner.workspaceID != "workspace-1" ||
-		cloner.provider != "azure_devops" || cloner.password != "workspace-pat" {
-		t.Fatalf("authenticated clone was not used with workspace credential: %+v", cloner)
+	if cloner.authCalls != 0 || cloner.normalCalls != 1 {
+		t.Fatalf("azure_devops must use the plugin credential request path: %+v", cloner)
+	}
+	if cloner.request.Provider != "azure_devops" || cloner.request.TaskID != "task-1" ||
+		cloner.request.SessionID != "session-1" || cloner.request.RepositoryID != "repository-1" {
+		t.Fatalf("plugin clone scope = %+v", cloner.request)
 	}
 
 	github := &models.Repository{
@@ -3567,29 +3538,8 @@ func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
 	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), github, "https://github.com/acme/api.git"); err != nil {
 		t.Fatal(err)
 	}
-	bitbucket := &models.Repository{
-		ID: "repository-3", WorkspaceID: "workspace-3", Provider: "bitbucket",
-		ProviderHost: "https://bitbucket.org", ProviderOwner: "acme", ProviderName: "api",
-	}
-	if _, err := exec.ensureClonedWithWorkspaceAuthForSession(
-		context.Background(), "task-3", "session-3", bitbucket,
-		"https://bitbucket.org/acme/api.git",
-	); err != nil {
-		t.Fatal(err)
-	}
-	if cloner.request.TaskID != "task-3" || cloner.request.SessionID != "session-3" ||
-		cloner.request.RepositoryID != "repository-3" {
-		t.Fatalf("plugin clone scope = %+v", cloner.request)
-	}
-	azureSSH := "git@ssh.dev.azure.com:v3/acme/Platform/api"
-	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), azure, azureSSH); err != nil {
-		t.Fatal(err)
-	}
-	if cloner.normalCalls != 3 || cloner.authCalls != 1 {
-		t.Fatalf("non-Azure-HTTPS providers must use ordinary cloning: %+v", cloner)
-	}
-	if cloner.workspaceID != "workspace-1" || cloner.provider != "azure_devops" {
-		t.Fatalf("ordinary clone did not preserve workspace/provider isolation: %+v", cloner)
+	if cloner.normalCalls != 2 || cloner.authCalls != 0 {
+		t.Fatalf("built-in providers must use ordinary cloning: %+v", cloner)
 	}
 }
 

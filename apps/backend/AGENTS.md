@@ -65,7 +65,7 @@ apps/backend/
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway, including task-owned LSP lease lifecycle
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
-│   ├── githubauth/       # Shared GitHub credential-broker environment contract
+│   ├── githubauth/       # Shared GitHub credential-broker environment and request wire contract
 │   ├── common/           # Shared utilities, config, logger
 │   ├── integration/      # External integrations
 │   ├── integrations/     # Shared shapes for third-party integrations
@@ -78,7 +78,7 @@ apps/backend/
 │   ├── lsp/              # LSP server
 │   ├── mcp/              # MCP protocol support
 │   ├── health/           # Health check endpoints
-│   ├── notifications/    # Notification system
+│   ├── notifications/    # Notification system (providers: local WS, Apprise, system, webpush; webpush/ owns VAPID keys + device subscriptions)
 │   ├── persistence/      # Persistence layer
 │   ├── prompts/          # Prompt management
 │   ├── repoclone/        # Repository cloning for remote executors

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 const (
@@ -44,6 +46,11 @@ const (
 type DurabilityBarrier struct {
 	db     *sql.DB
 	window time.Duration
+	log    *logger.Logger
+
+	// slowRunThreshold is the fixed production threshold. Tests may lower it to
+	// exercise the slow-run record without waiting on wall-clock time.
+	slowRunThreshold time.Duration
 
 	// observe is a test seam that runs after the FULL pragma is applied and
 	// before the barrier commit. It never runs in production.
@@ -60,18 +67,22 @@ type DurabilityBarrier struct {
 }
 
 // NewDurabilityBarrier returns a barrier over the shared SQLite writer pool.
-func NewDurabilityBarrier(database *sql.DB) *DurabilityBarrier {
-	return newDurabilityBarrier(database, durabilityBarrierWindow)
+// log receives at most one warning for each failed or slow run; nil keeps the
+// barrier silent.
+func NewDurabilityBarrier(database *sql.DB, log *logger.Logger) *DurabilityBarrier {
+	return newDurabilityBarrier(database, durabilityBarrierWindow, log)
 }
 
-func newDurabilityBarrier(database *sql.DB, window time.Duration) *DurabilityBarrier {
+func newDurabilityBarrier(database *sql.DB, window time.Duration, log *logger.Logger) *DurabilityBarrier {
 	if window < 0 {
 		window = 0
 	}
 	return &DurabilityBarrier{
-		db:      database,
-		window:  window,
-		changed: make(chan struct{}),
+		db:               database,
+		window:           window,
+		log:              log,
+		slowRunThreshold: durabilityRunSlowThreshold,
+		changed:          make(chan struct{}),
 	}
 }
 
@@ -117,11 +128,15 @@ func (b *DurabilityBarrier) Await(ctx context.Context) error {
 
 // lead starts one coalesced run and lets this caller stop waiting when its own
 // context ends. The run keeps its independent lifetime so other callers that
-// depend on it are not canceled with this one.
+// depend on it are not canceled with this one. The run result reaches the
+// caller before the diagnostic is emitted, so a slow log sink cannot replace
+// the real outcome with a caller deadline.
 func (b *DurabilityBarrier) lead(ctx context.Context) error {
 	done := make(chan error, 1)
 	go func() {
-		done <- b.run()
+		record, err := b.run()
+		done <- err
+		record.logRun(b.slowRunThreshold)
 	}()
 	select {
 	case err := <-done:
@@ -132,8 +147,9 @@ func (b *DurabilityBarrier) lead(ctx context.Context) error {
 }
 
 // run waits the coalescing window and commits one FULL generation. It is
-// short-lived and owns no state beyond the barrier's fields.
-func (b *DurabilityBarrier) run() error {
+// short-lived and owns no state beyond the barrier's fields. The caller
+// publishes the returned result before emitting the record's diagnostic.
+func (b *DurabilityBarrier) run() (*durabilityRunDiagnostic, error) {
 	timer := time.NewTimer(b.window)
 	<-timer.C
 
@@ -141,9 +157,13 @@ func (b *DurabilityBarrier) run() error {
 	covered := b.arrivals
 	b.mu.Unlock()
 
+	// The record starts after the coalescing window: it describes this shared
+	// run, not the time a caller spent waiting for it.
+	record := newDurabilityRunDiagnostic(b.log)
 	ctx, cancel := context.WithTimeout(context.Background(), durabilityBarrierTimeout)
-	err := b.commit(ctx)
+	err := b.commit(ctx, record)
 	cancel()
+	record.finish(err)
 
 	b.mu.Lock()
 	if err == nil && covered > b.covered {
@@ -153,54 +173,94 @@ func (b *DurabilityBarrier) run() error {
 	close(b.changed)
 	b.changed = make(chan struct{})
 	b.mu.Unlock()
+
+	return record, err
+}
+
+func (b *DurabilityBarrier) commit(ctx context.Context, record *durabilityRunDiagnostic) error {
+	acquireStarted := time.Now()
+	conn, err := b.db.Conn(ctx)
+	record.recordAcquire(time.Since(acquireStarted))
+	if err != nil {
+		record.stage = durabilityRunStageWriterAcquire
+		return fmt.Errorf("acquire durability barrier writer: %w", err)
+	}
+	holdStarted := time.Now()
+	var discard bool
+	defer func() {
+		releaseDurabilityBarrierConnection(conn, discard)
+		holdDuration := time.Since(holdStarted)
+		record.hold = &holdDuration
+	}()
+	discard, err = b.commitAcquired(ctx, conn, record)
 	return err
 }
 
-func (b *DurabilityBarrier) commit(ctx context.Context) error {
-	conn, err := b.db.Conn(ctx)
-	if err != nil {
-		return fmt.Errorf("acquire durability barrier writer: %w", err)
-	}
-	discard := false
-	defer func() {
-		if discard {
-			// Return the connection to the pool as bad so it is reopened with
-			// the NORMAL writer DSN instead of a leftover FULL setting.
-			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-		}
-		_ = conn.Close()
-	}()
+// commitAcquired runs the FULL transaction phases on an acquired connection.
+// It reports whether the connection must be discarded instead of returning to
+// the pool.
+func (b *DurabilityBarrier) commitAcquired(
+	ctx context.Context,
+	conn *sql.Conn,
+	record *durabilityRunDiagnostic,
+) (discard bool, err error) {
+	record.stage = durabilityRunStageSetFull
 	if _, err := conn.ExecContext(ctx, "PRAGMA synchronous=FULL"); err != nil {
-		discard = true
-		return fmt.Errorf("set durability barrier synchronous level: %w", err)
+		return true, fmt.Errorf("set durability barrier synchronous level: %w", err)
 	}
 	if b.observe != nil {
 		if err := b.observe(ctx, conn); err != nil {
-			discard = true
-			return err
+			return true, err
 		}
 	}
-	if err := commitDurabilityBarrierGeneration(ctx, conn); err != nil {
-		discard = true
-		return err
+	if err := commitDurabilityBarrierGeneration(ctx, conn, record); err != nil {
+		return true, err
 	}
+	record.stage = durabilityRunStageRestoreNormal
 	if _, err := conn.ExecContext(ctx, "PRAGMA synchronous=NORMAL"); err != nil {
-		discard = true
-		return fmt.Errorf("restore writer synchronous level: %w", err)
+		return true, fmt.Errorf("restore writer synchronous level: %w", err)
 	}
-	return nil
+	record.stage = durabilityRunStageComplete
+	return false, nil
 }
 
-func commitDurabilityBarrierGeneration(ctx context.Context, conn *sql.Conn) error {
+func releaseDurabilityBarrierConnection(conn *sql.Conn, discard bool) {
+	if discard {
+		// Return the connection to the pool as bad so it is reopened with
+		// the NORMAL writer DSN instead of a leftover FULL setting.
+		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+	}
+	_ = conn.Close()
+}
+
+func commitDurabilityBarrierGeneration(
+	ctx context.Context,
+	conn *sql.Conn,
+	record *durabilityRunDiagnostic,
+) error {
+	beginStarted := time.Now()
 	tx, err := conn.BeginTx(ctx, nil)
+	beginDuration := time.Since(beginStarted)
+	record.begin = &beginDuration
 	if err != nil {
+		record.stage = durabilityRunStageBegin
 		return fmt.Errorf("begin durability barrier: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, durabilityBarrierGenerationSQL, durabilityBarrierMetaKey); err != nil {
+	writeStarted := time.Now()
+	_, err = tx.ExecContext(ctx, durabilityBarrierGenerationSQL, durabilityBarrierMetaKey)
+	writeDuration := time.Since(writeStarted)
+	record.write = &writeDuration
+	if err != nil {
+		record.stage = durabilityRunStageGenerationWrite
 		return fmt.Errorf("write durability barrier generation: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	commitStarted := time.Now()
+	err = tx.Commit()
+	commitDuration := time.Since(commitStarted)
+	record.commit = &commitDuration
+	if err != nil {
+		record.stage = durabilityRunStageCommit
 		return fmt.Errorf("commit durability barrier: %w", err)
 	}
 	return nil

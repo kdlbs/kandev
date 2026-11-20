@@ -50,6 +50,7 @@ type mcpDefinitionListItem struct {
 	SelectionImpact mcpconfig.SelectionImpact `json:"selection_impact"`
 }
 
+// httpListMCPCatalog includes selection impacts so deletion warnings cover every owner type.
 func (h *Handlers) httpListMCPCatalog(c *gin.Context) {
 	if !h.requireMCPCatalog(c) {
 		return
@@ -59,15 +60,25 @@ func (h *Handlers) httpListMCPCatalog(c *gin.Context) {
 		h.writeMCPCatalogError(c, err)
 		return
 	}
+	ids := make([]string, 0, len(servers))
+	for _, server := range servers {
+		if server != nil {
+			ids = append(ids, server.ID)
+		}
+	}
+	var impacts map[string]mcpconfig.SelectionImpact
+	if h.selections != nil {
+		impacts, err = h.selections.SelectionImpacts(c.Request.Context(), c.Param("id"), ids)
+		if err != nil {
+			h.writeMCPCatalogError(c, err)
+			return
+		}
+	}
 	items := make([]mcpDefinitionListItem, 0, len(servers))
 	for _, server := range servers {
 		item := mcpDefinitionListItem{MCPServerDefinition: server}
-		if h.selections != nil && server != nil {
-			item.SelectionImpact, err = h.selections.SelectionImpact(c.Request.Context(), c.Param("id"), server.ID)
-			if err != nil {
-				h.writeMCPCatalogError(c, err)
-				return
-			}
+		if server != nil {
+			item.SelectionImpact = impacts[server.ID]
 		}
 		items = append(items, item)
 	}

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// @covers AC-AGENTS-RUNTIME-NOTIFY-001.1, AC-AGENTS-RUNTIME-NOTIFY-002.2
+// @covers AC-AGENTS-RUNTIME-NOTIFY-001.1, AC-AGENTS-RUNTIME-NOTIFY-002.2, AC-AGENTS-RUNTIME-NATIVE-CHECK-001.8
 func TestEveryDefaultRegistrationHasAnExplicitRuntimeUpdateCapability(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	reg := NewRegistry(newTestLogger())
@@ -29,6 +29,13 @@ func TestEveryDefaultRegistrationHasAnExplicitRuntimeUpdateCapability(t *testing
 		}
 		if cap.Management != "managed" && cap.Managed != nil {
 			t.Errorf("external registration %s authorizes mutation", ag.ID())
+		}
+		_, native := ag.(agents.NativeUpdateCheckAgent)
+		if native && cap.Managed != nil {
+			t.Errorf("managed registration %s declares a native update check; pinned updates need the npm catalogue", ag.ID())
+		}
+		if native != (ag.ID() == "omp-acp") {
+			t.Errorf("%s native update check = %v; only omp-acp declares one", ag.ID(), native)
 		}
 	}
 }

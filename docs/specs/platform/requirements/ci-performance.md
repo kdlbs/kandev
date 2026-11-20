@@ -114,6 +114,42 @@ The existing external-runner contract retains ownership of fleet selection and t
 - **AC-PLATFORM-CI-PERFORMANCE-008.2:** Missing, incompatible, unavailable, or unreadable caches shall leave required build and verification commands operational. Cache results shall never replace their exits.
 - **AC-PLATFORM-CI-PERFORMANCE-008.3:** Cache publication shall retain branch access boundaries and have an explicit owner per shared snapshot. Evidence shall include publication and restoration costs.
 
+### REQ-PLATFORM-CI-PERFORMANCE-009: Native web lint coverage
+
+**Intent:** Reduce web lint execution while contributors retain the existing source checks.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-CI-PERFORMANCE-009.1:** Full web lint shall cover every previously eligible source file. Selected-file checks shall retain their requested scope.
+- **AC-PLATFORM-CI-PERFORMANCE-009.2:** Existing rule severities, exclusions, inline suppressions, and zero-warning behavior shall remain effective. Native and plugin rules shall detect their invalid fixtures.
+- **AC-PLATFORM-CI-PERFORMANCE-009.3:** Localization, task navigation, E2E wait, Query ownership, and query-key guards shall retain their supported syntax and scoped behavior.
+- **AC-PLATFORM-CI-PERFORMANCE-009.4:** Migration fixes shall preserve rendered text, callback assertions, helper requests, and effective page selectors. Broader exemptions and disabled rules shall not resolve compatibility findings.
+- **AC-PLATFORM-CI-PERFORMANCE-009.5:** Missing plugins, invalid configuration, parser errors, and unsuccessful required checks shall fail verification. A different linter shall not provide an automatic success fallback.
+
+### REQ-PLATFORM-CI-PERFORMANCE-010: Fast native type verification
+
+**Intent:** Reduce typecheck execution without concealing type errors or changing application behavior.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-CI-PERFORMANCE-010.1:** Native type verification shall cover the complete configured project and retain strictness, library-check policy, generation checks, and no-emission behavior.
+- **AC-PLATFORM-CI-PERFORMANCE-010.2:** The selected fast compiler shall match its pinned reference on the current project and the migration regression corpus. Missing diagnostics shall block adoption.
+- **AC-PLATFORM-CI-PERFORMANCE-010.3:** Compatibility fixes shall preserve terminal frame bytes and runtime behavior. Test doubles shall implement their required interfaces without weaker assertions or broad type escapes.
+- **AC-PLATFORM-CI-PERFORMANCE-010.4:** Existing consumers of the TypeScript JavaScript API shall remain operational. Other workspace packages shall retain their compiler contracts.
+- **AC-PLATFORM-CI-PERFORMANCE-010.5:** Compiler errors, crashes, unsupported required behavior, and unusable binaries shall fail verification. Tool replacement shall not disable the selected fast mode silently.
+
+### REQ-PLATFORM-CI-PERFORMANCE-011: Measured toolchain adoption
+
+**Intent:** Adopt reproducible tool changes that reduce occupied execution within existing capacity.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-CI-PERFORMANCE-011.1:** Tool versions and dependency resolution shall be reproducible. Local package commands, changed-file hooks, and hosted checks shall enforce the same required coverage.
+- **AC-PLATFORM-CI-PERFORMANCE-011.2:** Three comparable successful pairs shall show at least 50% lower median full-lint execution and 75% lower median typecheck execution.
+- **AC-PLATFORM-CI-PERFORMANCE-011.3:** Adoption evidence shall include complete command and setup costs, source identities, cache states, sample counts, memory, CPU, failures, and occupied runner time.
+- **AC-PLATFORM-CI-PERFORMANCE-011.4:** Existing job counts, matrices, runners, permissions, required gates, test isolation, assertions, retries, and worker budgets shall remain unchanged.
+- **AC-PLATFORM-CI-PERFORMANCE-011.5:** A failed compatibility or performance gate shall retain the previous required commands. Rollback shall restore the last accepted toolchain without concealing the failed measurement.
+
 ## Out of scope
 
 - Automatic approval, automatic reruns, or changes to contributor trust policy.
@@ -130,3 +166,4 @@ The existing external-runner contract retains ownership of fleet selection and t
 
 - [CI performance](../../../plans/ci-performance/plan.md)
 - [First-commit Unstage delivery dependency](../../../plans/unstage-all-before-first-commit/plan.md)
+- [Native web verification](../../../plans/native-web-verification/plan.md) owns requirements 009–011 and their paired [design](../system-design/web-native-verification.md).

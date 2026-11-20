@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // fakeParticipantSeatWriter records HasRoleSeatForTaskWorkflow/EnsureRoleSeat
@@ -195,4 +197,37 @@ func TestEnsureParticipantSeatCallback_NilCasterReportsNotYetWiredOnlyWhenSeatMi
 
 func TestEnsureParticipantSeatCallback_SatisfiesActionCallback(t *testing.T) {
 	var _ ActionCallback = EnsureParticipantSeatCallback{}
+}
+
+func TestCompileStep_EnsureParticipantSeatReadsExcludeAuthorProvider(t *testing.T) {
+	step := &wfmodels.WorkflowStep{
+		ID: "review",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{
+			{Type: wfmodels.OnEnterEnsureParticipantSeat, Config: map[string]interface{}{
+				"role": "reviewer", "exclude_author_provider": true,
+			}},
+			{Type: wfmodels.OnEnterEnsureParticipantSeat, Config: map[string]interface{}{
+				"role": "approver",
+			}},
+		}},
+	}
+	spec := CompileStep(step)
+	var got []EnsureParticipantSeatAction
+	for _, a := range spec.Events[TriggerOnEnter] {
+		if a.Kind == ActionEnsureParticipantSeat {
+			got = append(got, *a.EnsureParticipantSeat)
+		}
+	}
+	want := []EnsureParticipantSeatAction{
+		{Role: "reviewer", ExcludeAuthorProvider: true},
+		{Role: "approver"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("compiled seat actions = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("seat action %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
 }

@@ -152,6 +152,31 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     await expect(session.sidebarSection("Turn Finished")).toBeVisible({ timeout: 15_000 });
   });
 
+  test("TUI MCP context uses the active helper instance URL", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const profile = await createTUIProfile(apiClient, "TUI MCP Context");
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "TUI MCP Context Task",
+      profile.id,
+      {
+        description: "/e2e:mcp-context",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("task creation did not return the TUI session");
+
+    const session = await openTaskSession(testPage, task.id);
+    await session.expectPassthroughHasText("Remote MCP:", 30_000);
+    await session.expectPassthroughHasText(task.session_id, 30_000);
+    await session.expectPassthroughHasText('"is_current": true', 30_000);
+  });
+
   test("switches from a TUI session to the workflow step profile", async ({
     testPage,
     apiClient,

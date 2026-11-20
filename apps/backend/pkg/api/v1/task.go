@@ -160,6 +160,7 @@ type TaskWorkspaceFolder struct {
 
 // Task represents a Kanban task
 type Task struct {
+	ExecutionGrade         string                 `json:"execution_grade"`
 	ID                     string                 `json:"id"`
 	WorkspaceID            string                 `json:"workspace_id"`
 	InitialWorkspaceLayout string                 `json:"initial_workspace_layout,omitempty"`
@@ -254,6 +255,9 @@ type MessageAttachment struct {
 	Name         string `json:"name,omitempty"`          // Display name (e.g., filename)
 	SizeBytes    int64  `json:"size_bytes,omitempty"`    // Raw byte size for file-backed descriptors
 	DeliveryMode string `json:"delivery_mode,omitempty"` // "prompt" (native/default) or "path"
+	// Path is a trusted runtime-only executor path. It is never serialized into
+	// durable message or queue metadata.
+	Path string `json:"-"`
 }
 
 func (a MessageAttachment) HasValidDeliveryMode() bool {

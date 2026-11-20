@@ -109,6 +109,13 @@ SDKs available with verifiable provenance and recoverable publication.
   required maintainer action. SDK publication shall remain incomplete until
   that candidate passes public verification. A registry read or authentication
   failure shall not count as package absence.
+- **AC-PLUGINS-SDK-DISTRIBUTION-003.5:** When the originating host release is
+  immutable, SDK recovery shall preserve its original signed source and SDK
+  version. Recovery shall preserve the host release, its assets, and its tag.
+- **AC-PLUGINS-SDK-DISTRIBUTION-003.6:** Publishing or repairing SDK artifacts
+  shall preserve the host application's latest-release selection and updater
+  feed. SDK publication shall remain incomplete until both public consumers
+  pass verification.
 
 ### REQ-PLUGINS-SDK-DISTRIBUTION-004: Host continuity and author migration
 
@@ -137,3 +144,4 @@ bounded migration for existing authors.
 ## Implementation plans
 
 - [SDK publishing plan](../../../plans/plugin-sdk-publishing/plan.md).
+- [Immutable release recovery](../../../plans/immutable-release-sdk-recovery/plan.md).

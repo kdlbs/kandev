@@ -31,6 +31,7 @@ type Config struct {
 	// live under this root.
 	HomeDir                string                       `mapstructure:"homeDir"`
 	Server                 ServerConfig                 `mapstructure:"server"`
+	Notifications          NotificationsConfig          `mapstructure:"notifications"`
 	Tasks                  TasksConfig                  `mapstructure:"tasks"`
 	Credentials            CredentialsConfig            `mapstructure:"credentials"`
 	Limits                 LimitsConfig                 `mapstructure:"limits"`
@@ -55,6 +56,13 @@ type Config struct {
 	GitHubCredentialBroker GitHubCredentialBrokerConfig `mapstructure:"githubCredentialBroker"`
 	Executors              ExecutorsConfig              `mapstructure:"executors"`
 	Source                 ConfigSource                 `mapstructure:"-" json:"-"`
+}
+
+// NotificationsConfig contains process-wide notification delivery settings.
+type NotificationsConfig struct {
+	WebPushSubject              string `mapstructure:"webPushSubject"`
+	WebPushAllowedHosts         string `mapstructure:"webPushAllowedHosts"`
+	WebhookAllowPrivateNetworks bool   `mapstructure:"webhookAllowPrivateNetworks"`
 }
 
 // TasksConfig contains task lifecycle startup limits.
@@ -150,6 +158,7 @@ type LauncherConfig struct {
 type GitHubCredentialBrokerConfig struct {
 	PublicBaseURL     string `mapstructure:"publicBaseUrl" json:"-"`
 	ReissueSigningKey string `mapstructure:"reissueSigningKey" json:"-"`
+	DisableReissue    bool   `mapstructure:"disableReissue" json:"-"`
 }
 
 func (c GitHubCredentialBrokerConfig) validate() error {
@@ -508,6 +517,7 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
+	ProviderKeywordContext bool `mapstructure:"provider_keyword_context" json:"providerKeywordContext"`
 	// IntegratedControl gates the cross-workspace navigation and existing-conversation surface.
 	IntegratedControl bool `mapstructure:"integrated_control" json:"integratedControl"`
 
@@ -518,6 +528,9 @@ type FeaturesConfig struct {
 	// Office gates the autonomous-agent feature: backend service construction,
 	// HTTP/WS route registration, and frontend nav/route visibility.
 	Office bool `mapstructure:"office" json:"office"`
+
+	// WorkspaceCollaboration narrows conversation callers with explicit grants.
+	WorkspaceCollaboration bool `mapstructure:"workspace_collaboration" json:"workspaceCollaboration"`
 
 	// Auth is the on/off switch for opt-in authentication and per-user
 	// workspaces. When on, every visitor must sign in (the first becomes the
@@ -722,6 +735,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.writeTimeout", 30)
 	v.SetDefault("server.webInternalUrl", "")
 	v.SetDefault("server.webTitlePrefix", "")
+	v.SetDefault("notifications.webPushSubject", "mailto:admin@localhost.invalid")
+	v.SetDefault("notifications.webPushAllowedHosts", "")
+	v.SetDefault("notifications.webhookAllowPrivateNetworks", false)
 
 	// HomeDir default — empty means resolve from KANDEV_HOME_DIR env or ~/.kandev
 	v.SetDefault("homeDir", "")
@@ -891,14 +907,6 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 	// camelCase key, so AutomaticEnv would expose the undocumented
 	// KANDEV_AUTH_COOKIENAME; the canonical override is KANDEV_AUTH_COOKIE_NAME.
 	_ = v.BindEnv("auth.cookieName", "KANDEV_AUTH_COOKIE_NAME")
-	_ = v.BindEnv(
-		"githubCredentialBroker.publicBaseUrl",
-		"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL",
-	)
-	_ = v.BindEnv(
-		"githubCredentialBroker.reissueSigningKey",
-		"KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY",
-	)
 
 	selection, found, err := selectConfigFile(configPath, homeDir)
 	if err != nil {

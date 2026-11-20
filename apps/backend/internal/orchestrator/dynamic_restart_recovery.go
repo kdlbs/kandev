@@ -102,6 +102,14 @@ func isStartingRouteClaim(session *models.TaskSession) bool {
 		session.RouteGeneration > 0 && session.ExecutionProfileID != ""
 }
 
+// isPendingRecoveryRouteClaim covers both new selections and same-candidate
+// retries while their claimed generation awaits explicit session recovery.
+func isPendingRecoveryRouteClaim(session *models.TaskSession) bool {
+	return session != nil &&
+		(session.RouteState == dynamicRouteStatusStarting || session.RouteState == dynamicRouteStatusRetrying) &&
+		session.RouteGeneration > 0 && session.ExecutionProfileID != ""
+}
+
 // hasLivePromptReadyAgent reports whether the session already has a running
 // agent that can accept an immediate prompt, the ownership evidence a
 // reconciling completion needs before it retries the durable activation.
@@ -127,16 +135,14 @@ func routeActivationSessionState(state models.TaskSessionState) bool {
 
 // explicitRecoveryOwnsStrandedStartingRoute reports whether an explicit
 // recovery action may resume a dynamic session whose route claim is still
-// "starting" with no live runtime behind it. A live launch owner keeps the
+// "starting" or "retrying" with no live runtime behind it. A live launch owner keeps the
 // dynamic_route_pending guard; passive resumes are unchanged.
 func (s *Service) explicitRecoveryOwnsStrandedStartingRoute(
 	ctx context.Context,
 	session *models.TaskSession,
 	options executor.ResumeOptions,
 ) bool {
-	if session == nil || options.RecoveryAction == "" ||
-		session.RouteState != dynamicRouteStatusStarting ||
-		session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
+	if options.RecoveryAction == "" || !isPendingRecoveryRouteClaim(session) {
 		return false
 	}
 	return s.agentManager == nil || !s.agentManager.IsAgentRunningForSession(ctx, session.ID)

@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
@@ -13,6 +16,7 @@ import (
 
 func (p *Projector) applySourceEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
 	activityChanged := applyTaskActivityEventLocked(state, eventType, data)
+	unreadChanged := applyUnreadEventLocked(state, eventType, data)
 	var sourceChanged bool
 	switch eventType {
 	case events.TaskCreated, events.TaskStateChanged:
@@ -67,7 +71,7 @@ func (p *Projector) applySourceEventLocked(state *projectionState, eventType str
 	case events.GitHubTaskPRUpdated:
 		sourceChanged = p.applyPREventLocked(state, data)
 	}
-	return activityChanged || sourceChanged
+	return activityChanged || unreadChanged || sourceChanged
 }
 
 func applyTaskActivityEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
@@ -328,6 +332,9 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restoreCompletionGate(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreQuotaWait(ctx, taskID, state); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -337,6 +344,9 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.launchQueueObserved = summary.LaunchQueue != nil
 	state.completionGate = cloneCompletionGate(summary.CompletionGate)
 	state.completionGateObserved = summary.CompletionGate != nil
+	state.unreadBaseline = slices.Clone(summary.UnreadSessionIDs)
+	state.quotaWait = cloneQuotaWait(summary.QuotaWait)
+	state.quotaWaitObserved = summary.QuotaWait != nil
 	state.taskPending = summary.PendingAction
 	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -418,6 +428,7 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	state.prs = make(map[string]pullRequestObservation)
 	state.prBaseline = nil
 	state.prObserved = false
+	state.unreadObserved = false
 	applySummaryBaseline(state, current)
 	if err := p.restoreTaskActivity(ctx, taskID, state); err != nil {
 		return err
@@ -443,6 +454,23 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	if err := p.restoreCompletionGate(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreQuotaWait(ctx, taskID, state); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *Projector) restoreQuotaWait(ctx context.Context, taskID string, state *projectionState) error {
+	if p.loadQuotaWait == nil {
+		return nil
+	}
+	wait, err := p.loadQuotaWait(ctx, taskID)
+	if err != nil {
+		p.logger.Warn("failed to restore task quota wait", zap.String("task_id", taskID), zap.Error(err))
+		return nil
+	}
+	state.quotaWait = cloneQuotaWait(wait)
+	state.quotaWaitObserved = true
 	return nil
 }
 
@@ -478,6 +506,22 @@ func isLaunchQueueRefreshEvent(eventType string) bool {
 func isCompletionGateRefreshEvent(eventType string) bool {
 	switch eventType {
 	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged, events.GitHubTaskPRUpdated:
+		return true
+	default:
+		return false
+	}
+}
+
+// isQuotaWaitRefreshEvent names the sources that can install or clear a limit
+// wait. A routing decision is recorded while a session is dispatched or torn
+// down, so the session lifecycle events bracket it; the refresh reads the
+// durable route row rather than trusting the event to carry the new deadline.
+func isQuotaWaitRefreshEvent(eventType string) bool {
+	switch eventType {
+	// A removed session can no longer own the current quota wait, so its
+	// removal re-reads the wait like a session state change does.
+	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged,
+		events.TaskSessionStateChanged, events.SessionRemoved:
 		return true
 	default:
 		return false
@@ -522,6 +566,7 @@ func (p *Projector) restoreSessionObservations(
 			isPrimary:           input.IsPrimary,
 			foregroundActivity:  input.ForegroundActivity,
 			activeSubagentCount: maxInt(input.ActiveSubagentCount, 0),
+			unread:              unreadRanksFromState(input.Unread),
 		}
 		activeError := normalizeRebuildError(input.ActiveError, p.now().UTC())
 		if activeError == nil || state.clearedErrorStamps[sessionID] == activeError.Stamp {
@@ -533,6 +578,7 @@ func (p *Projector) restoreSessionObservations(
 	state.sessions = sessions
 	state.sessionsObserved = true
 	state.activityObserved = snapshot.ActivityObserved
+	state.unreadObserved = snapshot.UnreadObserved
 	if snapshot.ErrorsObserved {
 		state.errors = errorsBySession
 		state.errorsObserved = true

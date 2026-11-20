@@ -31,6 +31,9 @@ describe("TaskRow render isolation", () => {
       task: TASK,
       activeTaskId: null,
       selectedTaskId: null,
+      unreadMessagesEnabled: true,
+      unreadDotHideDelayMs: 0,
+      displayedSessionId: null,
       onSelectTask: vi.fn(),
     };
     const { rerender } = render(<TaskRow {...stableProps} />);

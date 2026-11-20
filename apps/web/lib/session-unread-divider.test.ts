@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
-import { findUnreadDividerItemId, lastRenderedMessageId } from "./session-unread-divider";
+import {
+  dividerCursorForRenderedItems,
+  findUnreadDividerItemId,
+  newestAcknowledgeableMessageId,
+} from "./session-unread-divider";
 
 function makeMessage(id: string, content = ""): Message {
   return {
@@ -93,49 +97,68 @@ describe("findUnreadDividerItemId", () => {
   });
 });
 
-describe("lastRenderedMessageId", () => {
-  it("returns null when there are no items", () => {
-    expect(lastRenderedMessageId([])).toBeNull();
+describe("newestAcknowledgeableMessageId", () => {
+  it("returns null when nothing is loaded", () => {
+    expect(newestAcknowledgeableMessageId([])).toBeNull();
   });
 
-  it("returns the last standalone message's id", () => {
-    const items = [messageItem(makeMessage("m1")), messageItem(makeMessage("m2"))];
-    expect(lastRenderedMessageId(items)).toBe("m2");
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+  it("acknowledges the newest loaded message even when the transcript hides it", () => {
+    expect(newestAcknowledgeableMessageId([makeMessage("m1"), makeMessage("m2-hidden")])).toBe(
+      "m2-hidden",
+    );
   });
 
-  it("skips trailing non-message items (prepare_progress) to find the last real message", () => {
-    const items = [messageItem(makeMessage("m1")), prepareProgress("prepare-1")];
-    expect(lastRenderedMessageId(items)).toBe("m1");
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+  it("never acknowledges a footer-action notice, which a retry can delete", () => {
+    const retryNotice = {
+      ...makeMessage("retry-notice"),
+      metadata: { retrying: true, actions: [{ type: "ws" }] },
+    } as Message;
+    expect(newestAcknowledgeableMessageId([makeMessage("m1"), retryNotice])).toBe("m1");
+    expect(newestAcknowledgeableMessageId([retryNotice])).toBeNull();
+    expect(newestAcknowledgeableMessageId([retryNotice, makeMessage("m2")])).toBe("m2");
   });
 
-  it("returns the last message inside a trailing turn_group", () => {
-    const items = [
-      messageItem(makeMessage("m1")),
-      turnGroup("turn-group-a1", [makeMessage("a1"), makeMessage("a2")]),
-    ];
-    expect(lastRenderedMessageId(items)).toBe("a2");
+  it("acknowledges a recovery card, which stays inline with its actions", () => {
+    const recoveryCard = {
+      ...makeMessage("recovery-card"),
+      metadata: { recovery_actions: true, actions: [{ type: "ws" }] },
+    } as Message;
+    expect(newestAcknowledgeableMessageId([makeMessage("m1"), recoveryCard])).toBe("recovery-card");
   });
 
-  it("is unaffected by a trailing item that never rendered (e.g. filtered from the backend list)", () => {
-    // Mirrors the bug findUnreadDividerItemId's caller must avoid: the raw
-    // backend list's newest row (a hidden clarification/status/setup-output
-    // message) never became a render item, so it must not be reported here.
-    const items = [messageItem(makeMessage("m1")), messageItem(makeMessage("m2"))];
-    expect(lastRenderedMessageId(items)).toBe("m2");
-    expect(lastRenderedMessageId(items)).not.toBe("m3-hidden-from-render");
+  it("never acknowledges the synthetic task-description placeholder", () => {
+    expect(newestAcknowledgeableMessageId([makeMessage("task-description")])).toBeNull();
+    expect(
+      newestAcknowledgeableMessageId([makeMessage("m1"), makeMessage("task-description")]),
+    ).toBe("m1");
+  });
+});
+
+describe("dividerCursorForRenderedItems", () => {
+  const raw = [makeMessage("m1"), makeMessage("h2"), makeMessage("m3"), makeMessage("h4")];
+  const items = [messageItem(raw[0]), messageItem(raw[2])];
+
+  it("keeps a cursor that is rendered", () => {
+    expect(dividerCursorForRenderedItems(raw, items, "m1")).toBe("m1");
   });
 
-  it("returns null for a CREATED session with only the synthetic task-description placeholder", () => {
-    // use-processed-messages.ts injects this placeholder only when there are
-    // zero real messages. It must never be reported as "the latest message"
-    // — doing so would make the mark-read call target a message id that
-    // doesn't exist in the backend on every visit to a brand-new session.
-    const items = [messageItem(makeMessage("task-description"))];
-    expect(lastRenderedMessageId(items)).toBeNull();
+  it("maps a hidden cursor to the newest rendered message before it", () => {
+    expect(dividerCursorForRenderedItems(raw, items, "h2")).toBe("m1");
+    expect(findUnreadDividerItemId(items, dividerCursorForRenderedItems(raw, items, "h4"))).toBe(
+      null,
+    );
   });
 
-  it("skips a trailing synthetic task-description placeholder to find the last real message", () => {
-    const items = [messageItem(makeMessage("m1")), messageItem(makeMessage("task-description"))];
-    expect(lastRenderedMessageId(items)).toBe("m1");
+  it("passes through a cursor outside the loaded window or with nothing rendered before it", () => {
+    expect(dividerCursorForRenderedItems(raw, items, "older")).toBe("older");
+    const hiddenFirst = [makeMessage("h0"), ...raw];
+    expect(dividerCursorForRenderedItems(hiddenFirst, items, "h0")).toBe("h0");
+    expect(findUnreadDividerItemId(items, "h0")).toBe("m1");
+  });
+
+  it("returns no cursor when there is none", () => {
+    expect(dividerCursorForRenderedItems(raw, items, null)).toBeNull();
   });
 });

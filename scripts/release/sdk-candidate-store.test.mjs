@@ -61,7 +61,12 @@ async function fixture(t) {
   };
   const retained = {};
   let builds = 0;
-  const assets = { download: async () => ({ ...retained }) };
+  const assets = {
+    download: async (actualSource) => {
+      assert.equal(actualSource, source);
+      return { ...retained };
+    },
+  };
   const store = new CandidateStore({
     directory: join(root, "candidate"),
     assets,
@@ -107,12 +112,22 @@ test("reuses retained bytes without repacking a later host checkout", async (t) 
   });
   assert.equal(first.integrity, f.packed.integrity);
   await f.retain(first);
+  f.retained.retention = {
+    kind: "sdk",
+    releaseId: 42,
+    tag: f.source.sdkTag,
+    draft: false,
+    urls: [
+      "https://github.com/kdlbs/kandev/releases/download/pluginsdk%2Fv0.1.0/plugin-sdk-0.1.0.tgz",
+    ],
+  };
   f.store.build = async () => {
     throw new Error("must not repack reused SDK");
   };
   const reused = await f.store.obtain(f.source, { allowCreate: false });
   assert.equal(reused.integrity, first.integrity);
   assert.equal(reused.receipt.run_id, "123");
+  assert.deepEqual(reused.retention, f.retained.retention);
 });
 test("rebuilds a lost archive only when original tools reproduce its authenticated integrity", async (t) => {
   const f = await fixture(t);

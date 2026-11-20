@@ -2,12 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "@/components/routing/app-link";
-import { IconAlertTriangle, IconChevronDown } from "@tabler/icons-react";
+import { IconAlertTriangle, IconChevronDown, IconX } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { markStorageNoticeDismissed, wasStorageNoticeDismissed } from "@/lib/local-storage";
 import type { RuntimeStorageHealth } from "@/lib/types/http";
 import {
   formatStorageUsage,
+  isRuntimeStoragePressureStale,
   isRuntimeStorageStale,
   runtimeStorageUsagePercent,
   storageAdvisoryVisible,
@@ -23,6 +25,7 @@ type NoticeView = {
   executor: string;
   pressure: boolean;
   observedAt: Date | null;
+  pressureObservedAt: Date | null;
 };
 
 const PRESSURE_REASON_KEYS: Record<string, string> = {
@@ -45,19 +48,25 @@ function buildNoticeView(health: RuntimeStorageHealth, t: StorageTranslate): Not
   const usageNumber = formatStorageUsage(runtimeStorageUsagePercent(health));
   const remote = health.location === "executor_runtime";
   const parsed = health.observed_at ? new Date(health.observed_at) : null;
+  const parsedPressure = health.pressure_observed_at ? new Date(health.pressure_observed_at) : null;
   return {
     usage: usageNumber,
     remote,
     executor: health.executor_label?.trim() || t("task:storageAdvisoryExecutorFallback"),
     pressure: health.write_pressure === true,
     observedAt: parsed && !Number.isNaN(parsed.getTime()) ? parsed : null,
+    pressureObservedAt:
+      parsedPressure && !Number.isNaN(parsedPressure.getTime()) ? parsedPressure : null,
   };
 }
 
 /** Local monotonic elapsed time since this revision entered the browser. */
-function useReceiptElapsed(key: string): number {
-  const receipt = useRef({ key, at: performance.now() });
-  if (receipt.current.key !== key) receipt.current = { key, at: performance.now() };
+function useReceiptElapsed(key: string, initialElapsedMs = 0): number {
+  const initial = Number.isFinite(initialElapsedMs) && initialElapsedMs > 0 ? initialElapsedMs : 0;
+  const receipt = useRef({ key, at: performance.now() - initial });
+  if (receipt.current.key !== key) {
+    receipt.current = { key, at: performance.now() - initial };
+  }
   const [, setTick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setTick((tick) => tick + 1), 10_000);
@@ -126,25 +135,61 @@ function NoticeDetails({ health, view }: { health: RuntimeStorageHealth; view: N
       )}
       {view.observedAt && (
         <p className="min-w-0 break-words">
-          {t("task:storageAdvisoryObserved", { time: formatDateTime(view.observedAt) })}
+          {t("task:storageAdvisoryCapacityObserved", { time: formatDateTime(view.observedAt) })}
+        </p>
+      )}
+      {view.pressureObservedAt && (
+        <p className="min-w-0 break-words">
+          {t("task:storageAdvisoryPressureObserved", {
+            time: formatDateTime(view.pressureObservedAt),
+          })}
         </p>
       )}
     </div>
   );
 }
 
+function cachedReceiptElapsed(health?: RuntimeStorageHealth | null): number {
+  if (health?.client_received_at_ms === undefined) return 0;
+  return Math.max(0, Date.now() - health.client_received_at_ms);
+}
+
 /** One compact advisory or blocked-output row. It never offers Resume. */
-export function SessionDeliveryStorageNotice({ health }: { health?: RuntimeStorageHealth | null }) {
+type StorageNoticeProps = { health?: RuntimeStorageHealth | null; taskId?: string | null };
+
+export function SessionDeliveryStorageNotice(props: StorageNoticeProps) {
+  return <TaskStorageNotice key={props.taskId ?? ""} {...props} />;
+}
+
+function TaskStorageNotice({ health, taskId }: StorageNoticeProps) {
   const { t } = useTranslation();
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [dismissed, setDismissed] = useState(() => !!taskId && wasStorageNoticeDismissed(taskId));
+  const dismiss = () => {
+    if (taskId) markStorageNoticeDismissed(taskId);
+    setDismissed(true);
+  };
   const visible = storageAdvisoryVisible(health);
-  const receiptKey = health
-    ? `${health.epoch}:${health.revision}:${health.write_pressure ? 1 : 0}`
+  const capacityReceiptKey = health
+    ? `${health.epoch}:${health.revision}:${health.observed_at ?? ""}`
     : "";
-  const elapsed = useReceiptElapsed(receiptKey);
-  if (!health || !visible) return null;
+  // Include the accepted age identity. A capacity refresh can carry a larger
+  // pressure age for the same observation timestamp; adding local elapsed time
+  // from the first snapshot would count that interval twice. A detail refresh
+  // at the same revision must also reset the local baseline when its age moves.
+  const pressureReceiptKey = health
+    ? `${health.epoch}:${health.revision}:${health.pressure_observed_at ?? "unknown"}:${
+        health.pressure_age_seconds ?? "unknown"
+      }`
+    : "";
+  const cachedElapsed = cachedReceiptElapsed(health);
+  const capacityElapsed = useReceiptElapsed(capacityReceiptKey, cachedElapsed);
+  const pressureElapsed = useReceiptElapsed(pressureReceiptKey, cachedElapsed);
+  if (!health || !visible || dismissed) return null;
   const view = buildNoticeView(health, t);
-  const stale = isRuntimeStorageStale(health.age_seconds, elapsed);
+  const stale = view.pressure
+    ? isRuntimeStoragePressureStale(health.pressure_age_seconds, pressureElapsed)
+    : isRuntimeStorageStale(health.age_seconds, capacityElapsed);
   const usageLabel = view.usage ? t("task:storageAdvisoryUsage", { usage: view.usage }) : null;
   const primaryLabel = view.pressure ? pressureReasonLabel(health, t) : usageLabel;
   if (!primaryLabel) return null;
@@ -163,6 +208,7 @@ export function SessionDeliveryStorageNotice({ health }: { health?: RuntimeStora
         stale={stale}
         detailsOpen={detailsOpen}
         onToggleDetails={() => setDetailsOpen((open) => !open)}
+        onDismiss={dismiss}
       />
     </div>
   );
@@ -175,6 +221,7 @@ function StorageNoticeRow({
   stale,
   detailsOpen,
   onToggleDetails,
+  onDismiss,
 }: {
   health: RuntimeStorageHealth;
   view: NoticeView;
@@ -182,6 +229,7 @@ function StorageNoticeRow({
   stale: boolean;
   detailsOpen: boolean;
   onToggleDetails: () => void;
+  onDismiss: () => void;
 }) {
   const { t } = useTranslation();
   const usageLabel = view.usage ? t("task:storageAdvisoryUsage", { usage: view.usage }) : null;
@@ -195,12 +243,12 @@ function StorageNoticeRow({
           )}
           {view.remote && health.executor_label && (
             <>
-              <span className="min-w-0 truncate" title={health.executor_label}>
+              <span className="max-w-[45%] shrink-0 truncate" title={health.executor_label}>
                 {t("task:storageAdvisoryRemotePrefix", { executor: health.executor_label })}
               </span>{" "}
             </>
           )}
-          <span className="shrink-0 truncate font-medium">{primaryLabel}</span>
+          <span className="min-w-0 font-medium break-words">{primaryLabel}</span>
           {view.pressure && usageLabel && (
             <span className="text-muted-foreground hidden shrink-0 tabular-nums md:inline">
               {usageLabel}
@@ -240,6 +288,18 @@ function StorageNoticeRow({
               className={`size-3 transition-transform ${detailsOpen ? "rotate-180" : ""}`}
               aria-hidden="true"
             />
+          </button>
+          <button
+            type="button"
+            aria-label={t("task:dismiss")}
+            data-testid="session-delivery-storage-dismiss"
+            onClick={onDismiss}
+            className={controlSizingClassName(
+              "icon",
+              "inline-flex shrink-0 cursor-pointer items-center justify-center rounded hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+          >
+            <IconX className="size-3" aria-hidden="true" />
           </button>
         </span>
       </div>

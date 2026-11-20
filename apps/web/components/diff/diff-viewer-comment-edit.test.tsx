@@ -222,9 +222,12 @@ describe("DiffViewer comment readiness", () => {
     const staleForm = latestNewCommentFormProps();
     expect(staleForm?.submitDisabled).toBe(true);
     fireEvent.click(screen.getByTestId("select-another-comment-line"));
+    const submit = staleForm?.onSubmit as ((content: string) => void) | undefined;
+    const submitAndRun = staleForm?.onSubmitAndRun as ((content: string) => void) | undefined;
+    if (!submit || !submitAndRun) throw new Error("Expected comment form callbacks");
     act(() => {
-      (staleForm?.onSubmit as (content: string) => void)(DRAFT_COMMENT_TEXT);
-      (staleForm?.onSubmitAndRun as (content: string) => void)(DRAFT_COMMENT_TEXT);
+      submit(DRAFT_COMMENT_TEXT);
+      submitAndRun(DRAFT_COMMENT_TEXT);
     });
     expect(onCommentAdd).not.toHaveBeenCalled();
     expect(onCommentRun).not.toHaveBeenCalled();

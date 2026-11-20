@@ -28,6 +28,10 @@ func (a *Adapter) promptSuggestionSessionMeta() map[string]any {
 func (a *Adapter) handleExtensionNotification(method string, params json.RawMessage) {
 	if method == claudeSDKMessageMethod {
 		a.handleClaudeSDKMessage(params)
+		return
+	}
+	if method == copilotSessionEventMethod {
+		a.enqueueCopilotNativeNotification(method, params)
 	}
 }
 

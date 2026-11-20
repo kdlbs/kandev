@@ -358,7 +358,7 @@ func TestFetchProfileDynamicModelsUsesSavedLaunchSettings(t *testing.T) {
 }
 
 func TestFetchProfileDynamicModelsUsesCompleteDraftSnapshot(t *testing.T) {
-	ctrl, _, ctx, agentID, _ := newProviderTestController(t)
+	ctrl, _, ctx, _, _ := newProviderTestController(t)
 	utility := &recordingProfileDiscoveryUtility{}
 	ctrl.hostUtility = utility
 	envVars := []dto.ProfileEnvVarDTO{{Key: "CODEX_PATH", Value: "/draft/codex"}}
@@ -377,7 +377,7 @@ func TestFetchProfileDynamicModelsUsesCompleteDraftSnapshot(t *testing.T) {
 		t.Fatalf("FetchProfileDynamicModels draft: %v", err)
 	}
 	want := hostutility.ProfileProbeContext{
-		Scope:         "user-2:draft:" + agentID,
+		Scope:         "user-2:draft:codex-acp",
 		Env:           map[string]string{"CODEX_PATH": "/draft/codex"},
 		CLIFlags:      []string{"--profile-catalog=draft"},
 		CommandPrefix: []string{"sandbox", "--"},

@@ -11,6 +11,10 @@ import (
 
 const turnChangeMaximumAttempts = 3
 
+type turnChangeAbandoner interface {
+	AbandonTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error
+}
+
 // Retries retain the captured terminal identity, including across the inline
 // completion attempt and its background continuation.
 func (m *Manager) retryTurnChangeOperation(
@@ -83,9 +87,7 @@ func (m *Manager) abandonTurnChange(execution *AgentExecution, terminal TurnChan
 		return false
 	default:
 	}
-	handler, ok := m.turnChangeCaptureHandler.(interface {
-		AbandonTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error
-	})
+	handler, ok := m.turnChangeCaptureHandler.(turnChangeAbandoner)
 	if !ok {
 		m.logger.Error("turn-change terminal failure has no settlement handler",
 			zap.String("execution_id", terminal.ExecutionID), zap.Error(cause))
@@ -108,9 +110,7 @@ func (m *Manager) abandonTurnChange(execution *AgentExecution, terminal TurnChan
 func (m *Manager) settleTurnChange(
 	execution *AgentExecution, terminal TurnChangeTerminal, cause error, stillOwned func() bool,
 ) bool {
-	if _, ok := m.turnChangeCaptureHandler.(interface {
-		AbandonTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error
-	}); !ok {
+	if _, ok := m.turnChangeCaptureHandler.(turnChangeAbandoner); !ok {
 		return m.abandonTurnChange(execution, terminal, cause)
 	}
 	delay := time.Duration(0)

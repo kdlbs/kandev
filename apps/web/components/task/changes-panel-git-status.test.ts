@@ -63,6 +63,30 @@ describe("deriveChangesPanelGitStatus", () => {
     expect(result.showEmpty).toBe(false);
   });
 
+  it("keeps an unnamed root failure generic instead of rendering a blank repository", () => {
+    const result = deriveChangesPanelGitStatus({
+      gitStatus: status({ status_state: "unavailable" }),
+      repositoryRefresh: {
+        "": { state: "unavailable", error_code: "repository_unavailable" },
+      },
+    });
+
+    expect(result.unavailable).toBe(true);
+    expect(result.failedRepositories).toEqual([]);
+  });
+
+  it("names only real failed repositories beside an unnamed root failure", () => {
+    const result = deriveChangesPanelGitStatus({
+      statusByRepo: [
+        { repository_name: "backend", status: status({ status_state: "unavailable" }) },
+      ],
+      repositoryRefresh: { "": { state: "unavailable", error_code: "repository_unavailable" } },
+    });
+
+    expect(result.unavailable).toBe(true);
+    expect(result.failedRepositories).toEqual(["backend"]);
+  });
+
   it("reports failed repositories without hiding complete sibling files", () => {
     const result = deriveChangesPanelGitStatus({
       statusByRepo: [{ repository_name: "frontend", status: status() }],

@@ -275,6 +275,16 @@ export async function setSessionModel(sessionId: string, modelId: string) {
   });
 }
 
+export async function resolveSessionModelConfig(
+  sessionId: string,
+  request: { model: string; mode?: string; config_options?: Record<string, string> },
+): Promise<import("@/lib/types/http").AgentModelConfigResponse> {
+  return fetchJson<import("@/lib/types/http").AgentModelConfigResponse>(
+    `/api/v1/task-sessions/${sessionId}/resolve-model-config`,
+    { init: { method: "POST", body: JSON.stringify(request) } },
+  );
+}
+
 export async function setSessionConfigOption(sessionId: string, configId: string, value: string) {
   return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-config-option`, {
     init: { method: "POST", body: JSON.stringify({ config_id: configId, value }) },

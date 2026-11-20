@@ -195,6 +195,46 @@ func TestDeliveryRetentionWorkflowOutcome(t *testing.T) {
 	}
 }
 
+func TestDeliveryRetentionTurnlessTerminalBindsWorkflowTurn(t *testing.T) {
+	ctx := context.Background()
+	repo, event, _ := seedRetentionPromptSubmission(t, "SQLite", "turnless-binding")
+	terminalKey := terminalRetentionEffectKey(event)
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		UPDATE agent_delivery_effects SET turn_id = '' WHERE effect_key = ? AND turn_id <> ''`), terminalKey); err != nil {
+		t.Fatalf("make persisted terminal turn-less: %v", err)
+	}
+
+	turnID := "turnless-binding-closing-turn"
+	effect := retentionWorkflowOutcome(event, turnID, "not_required", "", "", time.Time{})
+	effect.WorkflowPolicyUpdatedAt = nil
+	committed, err := repo.RecordAgentDeliveryWorkflowOutcome(ctx, retentionTaskIDForEvent(event), effect)
+	if err != nil || !committed {
+		t.Fatalf("record workflow outcome for turn-less terminal: committed=%v, err=%v", committed, err)
+	}
+
+	terminal, err := repo.GetAgentDeliveryEffect(ctx, terminalKey)
+	if err != nil || terminal.TurnID != turnID {
+		t.Fatalf("persisted terminal turn = %q, err=%v; want %q", terminal.TurnID, err, turnID)
+	}
+	workflow, err := repo.GetAgentDeliveryEffect(ctx, effect.EffectKey)
+	if err != nil || workflow.TurnID != turnID || workflow.Outcome != "not_required" {
+		t.Fatalf("workflow receipt = %+v, err=%v", workflow, err)
+	}
+
+	completed, err := repo.CompleteAgentDeliveryTerminalSettlement(ctx, terminalKey, time.Time{})
+	if err != nil || !completed {
+		t.Fatalf("complete bound terminal settlement: completed=%v, err=%v", completed, err)
+	}
+	terminal, err = repo.GetAgentDeliveryEffect(ctx, terminalKey)
+	if err != nil || terminal.State != models.DeliveryEffectCompleted {
+		t.Fatalf("settled terminal = %+v, err=%v; want completed", terminal, err)
+	}
+	submission, err := repo.GetAgentDeliverySubmissionMetadata(ctx, event.SubmissionID)
+	if err != nil || submission.FullySettledAt == nil || submission.TerminalTurnID != turnID {
+		t.Fatalf("settled submission = %+v, err=%v", submission, err)
+	}
+}
+
 func TestDeliveryRetentionWorkflowOutcomeWriteFailure(t *testing.T) {
 	repo, event, _ := seedRetentionPromptSubmission(t, "SQLite", "workflow-write-failure")
 	stepTime := time.Date(2025, 6, 7, 8, 10, 0, 0, time.UTC)

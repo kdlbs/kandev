@@ -34,6 +34,7 @@ The task carries the outcome through the workflow. The repository and session pr
 **Organize and review work**
 
 - [Task dependencies](#task-dependencies)
+- [See the dependency graph](#see-the-dependency-graph)
 - [Find and organize tasks](#find-and-organize-tasks)
 - [Use the task plan](#use-the-task-plan)
 - [Arrange task panels](#arrange-task-panels)
@@ -262,7 +263,7 @@ use a separate `Cmd/Ctrl+Enter` shortcut or the visible submit action.
    | Source     | Use it for                                        | Notes                                                                                                                                                                                                                                        |
    | ---------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
    | **Repo**   | A configured, discovered, or new local repository | Choose a branch or [branch policy](#branch-policies). Add more rows for a multi-repository task.                                                                                                                                             |
-   | **Remote** | A remote repository                               | Search GitHub, GitLab, or Azure DevOps, or paste a supported URL. Public GitHub reads and public `gitlab.com` branch discovery work without credentials. Private access and authenticated browse/write actions require provider credentials. |
+   | **Remote** | A remote repository                               | Search GitHub, GitLab, or a connected plugin provider, or paste a supported URL. Public GitHub reads and public `gitlab.com` branch discovery work without credentials. Private access and authenticated browse/write actions require provider credentials. |
    | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree and repository-aware Changes, branch, and pull-request features are unavailable.                                                                              |
 
    In-app directory browsers list directories on the Kandev host. By default,
@@ -434,6 +435,21 @@ shows the planned replacement model. A profile that becomes unavailable blocks
 creation until you choose another profile or reset the row.
 
 ### Open a task mentioned in chat
+
+Agents can also link to existing tasks in their replies. A recognized task link
+appears as a chip with a task icon and title. Click, tap, or press Enter to open
+the task directly. On desktop, hover or focus shows status and session-count
+badges, creation date, workflow, and parent when those details are loaded.
+Sidebar-loaded tasks provide these details without opening a board first.
+Chips follow the task's personal color. Changing or clearing that color updates
+visible references immediately. Tasks without a personal color use Kandev's
+accent color. On phones, long titles wrap inside the message.
+Use Back to return to the source task.
+
+The title written in the message stays unchanged after a task rename. The link
+still opens the same task. Missing or inaccessible tasks use the usual task
+error page. Raw view and copied Markdown retain the original link.
+
 
 Type `@` in the chat composer and select a task from the suggestions. After
 sending, its mention appears as a task chip with an icon. Click the chip, focus
@@ -635,7 +651,9 @@ For a new capture, Kandev compares the turn with its captured history. If the br
 
 Older captures keep their original files and counts with repository-change wording. Kandev does not reconstruct missing history from the current checkout.
 
-Some captures are partial or unavailable. Cards with captured files label that state and give the reason when available. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. An unavailable history comparison is the exception and uses the normal unavailable status. Kandev keeps the file counts and names after history compaction expires the diff. The card then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
+Some captures are partial or unavailable. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. A turn whose summary is unavailable or failed has no card, even when it retained file entries or a history comparison. Partial summaries with usable changes keep their card, label the state, and identify the affected repositories. The selected historical diff still explains why an unavailable comparison has no totals.
+
+Kandev keeps the file counts and names after history compaction expires the diff. The card then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
 
 Saved files stay available while the remaining content is preserved. A selected file whose content is still pending shows the usual loading state. If preservation stops, the missing files report an explicit unavailable reason.
 
@@ -650,23 +668,43 @@ foreground-generating Claude turns retain the coarse queueing behavior.
 
 ### Inspect background work
 
-When an agent reports a background shell command, subagent, or monitor, Kandev
-adds a content-width chip directly above the message box. The chip counts the
-jobs that are running, waiting, or of unknown activity. Select it to open a
-summary. Selecting a job opens its own tab in the central area on desktop, or a
-full-height detail view on a phone. **View all** opens the Background Work
+When an agent reports a background shell command, subagent, or monitor that is
+still running, Kandev adds a content-width chip directly above the message box.
+The chip counts only running jobs. Select it to open a running-only summary.
+Selecting a job opens its own tab in the central area on desktop, or a
+full-height detail view on a phone. **View all work** opens the Background Work
 overview. Closing a tab or view does not stop the job.
+
+The overview has two tabs. **Active** lists running and waiting jobs. **History**
+lists completed, failed, interrupted, ended, and unknown jobs. Each tab shows its
+count before you search, and search filters the selected tab. Long commands
+truncate in the list, while the detail view shows the complete command and wraps
+it inside the available width.
+
+Background Work stays reachable without the chip. On desktop, open it from the
+**+** panel menu. On a phone in a managed session, open it from **Panels**;
+passthrough terminal sessions do not expose it. A job with unknown activity
+appears in History with its actual **Unknown** status and never implies
+completion. Unknown work can return to Active when new evidence arrives.
 
 Background inspection is standard behavior in the shipped profiles. Operators
 can disable it with the `features.agentBackgroundWork` runtime toggle
-(`KANDEV_FEATURES_AGENT_BACKGROUND_WORK`); when it is off, the chip, reads, and
-job controls are unavailable, and existing chat behavior is unchanged. The
-toggle is separate from the Claude background prompt handoff experiment.
+(`KANDEV_FEATURES_AGENT_BACKGROUND_WORK`); when it is off, the chip, entries,
+reads, and job controls are unavailable, and existing chat behavior is
+unchanged. The toggle is separate from the Claude background prompt handoff
+experiment.
 
 The chip never changes how a prompt is admitted. A foreground that is still
 generating keeps its normal **Queue** behavior. An idle foreground accepts an
 ordinary new prompt while earlier jobs continue, and those jobs keep their
 identity and history across the new turn.
+
+Subagent launches also stay visible as cards in chat. Copilot cards show the
+reported type, name, and description, with the prompt, result, and child tool
+calls in the expanded card. Other providers keep their existing result and
+child-call presentation. When Claude sends another message to a child, the card
+shows how many times it has resumed. A final report appears when the runtime
+permits Kandev to read the child's matching output file.
 
 What a job row can show depends on the agent runtime:
 
@@ -678,6 +716,10 @@ What a job row can show depends on the agent runtime:
 - **Completed** and **Failed** rows stay reachable after the active count reaches
   zero. A failed row keeps its exit status and retained output when the runtime
   reports them.
+
+When Kandev verifies that the owning agent process has ended, its jobs stop
+contributing to the active count. Their history stays reachable when you
+restart the session.
 
 For OpenCode v2 2.2.0, the optional **OpenCode integration plugin** can settle a
 detached shell job from the native exit event. A job can therefore move from
@@ -697,9 +739,10 @@ output.
 ### Prevent auto-start on open
 
 Under **Settings → Preferences → Task Behavior**, the **Prevent auto-start on open**
-preference is off by default. When enabled, opening a task never launches or
-resumes its agent on its own; it shows the **Start agent** button instead. The
-preference applies in two situations:
+preference is off by default. When enabled in the web app, opening or refocusing
+a task never launches or resumes its agent on its own; it shows the **Start
+agent** button or the composer start hint instead. The preference applies in
+three situations:
 
 - **Opening a task in the final step of its workflow.** The task opens with a
   prepared session and the agent stays stopped until you select **Start agent**.
@@ -709,6 +752,12 @@ preference applies in two situations:
   preference is off, opening the task can resume its existing conversation.
   When it is on, the agent stays stopped until you select **Start agent** or
   send a message. The previous prompt is not replayed.
+- **Opening or refocusing a session paused by the workspace ACP idle policy.**
+  When this preference is on, the session stays suspended and the composer
+  shows the start hint. Sending a message resumes the same conversation once.
+  With the preference off, opening or refocusing the task resumes the session.
+  A completed session keeps its terminal recovery actions instead of the
+  composer hint.
 
 Separately, after a backend restart Kandev runs a bounded background pass over
 eligible interrupted sessions. It does not wait for you to open or focus each
@@ -717,6 +766,11 @@ session only after it verifies the saved owner and native conversation. If the
 owner, conversation, or delivery evidence is missing or changed, that session
 stays blocked with its available recovery controls. See [Manage session state](sessions-and-review.md#manage-session-state) for those controls and recovery details.
 
+After a verified restore, the same conversation shows one informational
+interruption message and the normal composer. Kandev does not resend the
+interrupted prompt. Existing failed sessions that meet the same identity and
+delivery checks are included in the first startup after an upgrade.
+
 Restart recovery also checks automatic workflow starts that were accepted but
 never delivered their step prompt. It resumes that entry through normal capacity
 and dependency admission. A hold step, deferred start, workflow queue, or Office
@@ -724,9 +778,10 @@ owner keeps its existing control of the task. An earlier visit to the same step
 does not consume a newly accepted entry, and a prompt already accepted for the
 current entry is not replayed.
 
-The preference only gates opening a task. Choosing **Start agent** (or a
-workflow step transition) always starts the agent as usual, and a failed or
-interrupted session still shows its recovery actions.
+The preference only gates passive opening and focus recovery in the web app.
+Choosing **Start agent** (or a workflow step transition) always starts the
+agent as usual, and a failed or interrupted session still shows its recovery
+actions. Other clients and direct API calls do not enforce this web preference.
 
 An interrupted task keeps a warning indicator until the agent confirms
 recovery. Opening the task or starting a recovery attempt does not clear the
@@ -779,9 +834,13 @@ conversation.
 Retention is not a retry. Kandev does not replay the failed prompt and does not
 start automatic recovery for an error class that has no existing policy. The
 task row keeps an error badge until you select **Dismiss turn error**, use the
-task menu dismissal, or send a new prompt after the error appears. A real
-process exit, transport loss, or recovery failure still uses the normal runtime
-recovery controls.
+task menu dismissal, send a new prompt after the error appears, or select
+**Dismiss and continue**. **Dismiss and continue** sends one visible `continue`
+message to the same conversation, then acknowledges the error after the message
+is accepted. It keeps your composer draft and attachments, and it is unavailable
+while another turn or automatic recovery owns the session.
+A real process exit, transport loss, or recovery failure still uses the normal
+runtime recovery controls.
 
 ### Model capacity
 
@@ -792,9 +851,12 @@ budget. When OpenCode ends those retries with a capacity refusal, Kandev keeps
 the same runtime and continues the unfinished turn there.
 
 Kandev retries a model-capacity error when the runtime supports live
-continuation and at least one tool has a confirmed result. Kandev keeps
-confirmed actions in the conversation. It asks the agent to continue without
-repeating those actions. This does not guarantee exactly-once effects.
+continuation and at least one tool has a confirmed result. On a supported Codex
+conversation, a command that ended with a confirmed nonzero terminal exit also
+counts: its real failed result stays in the conversation, but it no longer
+blocks recovery by itself. Kandev keeps confirmed actions in the conversation.
+It asks the agent to continue without repeating those actions. This does not
+guarantee exactly-once effects.
 
 Kandev makes up to 11 additional attempts within 30 minutes. Waits increase
 from 5 seconds to a maximum of 5 minutes. A short provider wait hint can raise
@@ -805,10 +867,12 @@ restart also stops automatic recovery. It does not restore the retry schedule.
 The deadline does not stop a turn that is already running.
 
 Kandev leaves a model-capacity error for you to handle when a tool or permission
-is pending, an outcome is uncertain, background work is unaccounted for, the
-provider does not support live continuation, or the runtime is unavailable.
-The composer stays available for a new message. These limits apply to capacity
-recovery. Connection-loss recovery uses the normal short retry policy.
+is pending, a tool outcome is uncertain, a non-command tool failed, a command
+failed without confirmed terminal evidence, background work is unaccounted for,
+the provider does not support live continuation, or the runtime is unavailable.
+Review those tool results before you choose a manual next step. The composer
+stays available for a new message. These limits apply to capacity recovery.
+Connection-loss recovery uses the normal short retry policy.
 
 ## Answer clarification questions
 
@@ -823,6 +887,13 @@ session sends or queues it according to its current input mode. If delivery
 fails, the form keeps your answer so you can retry. **Close question** removes
 the answer surface without sending anything, while the question stays in the
 conversation history.
+
+Unfinished answers stay with their question when you switch tasks or sessions
+and come back. This includes text you have typed but not sent, selected options,
+and your position in a multi-question bundle. Drafts last for the current
+browser page: a reload, logout, or different signed-in user clears them. Kandev
+keeps up to eight unfinished question bundles at a time and discards the least
+recently used one after that.
 
 ## Task dependencies
 
@@ -840,10 +911,9 @@ you can see which link to drop.
 ### Declare dependencies
 
 Dependencies are declared in the **New Task** dialog under **Depends on**, or
-by an agent over MCP. There is deliberately no editor in the open task: a
-dependency records how the work was planned, so the surfaces that display it
-stay read-only. To change one after the fact, use the MCP tools or delete and
-recreate the task.
+by an agent over MCP. To change them later, open the task's **Edit** dialog
+and update its dependencies, or use the MCP tools. The dependency chip and the
+task graph only display dependencies; they do not edit them.
 
 ### What blocked means
 
@@ -894,6 +964,60 @@ unfinished work stays pending. Archiving does not remove the link.
 that was waiting only on it becomes unblocked. That dependent is not started:
 deletion is not success.
 
+### See the dependency graph
+
+The task graph draws tasks as cards and dependencies as arrows, so you can see
+what runs first, what waits, and what can run in parallel. It is read-only:
+change links in the task's **Edit** dialog or over MCP.
+
+There are two graphs:
+
+- **Task graph tab.** Inside a task, select the hierarchy icon at the right of
+  the status row above the chat box, after token stats and Share, or
+  **View graph** in the dependency chip. The icon appears only when the task
+  has a parent, subtasks, dependency links, or related tasks. The tab opens
+  beside the chat and follows the task you are viewing.
+- **Board Graph view.** On Home, select **Graph** in the view switcher, next
+  to **Pipeline**. Each workflow lane shows the tasks the board currently
+  shows, after filters and search, with subtasks framed by their parent.
+
+To jump to one task in the graph, right-click it in the sidebar or on a Kanban
+card and choose **Show in graph**. The board Graph view opens with that task
+selected and in view.
+
+Reading the graph:
+
+- Each card shows a **step** number. Step 1 waits on nothing shown in the
+  graph; every other task sits one step after its last predecessor.
+- Arrows run from a predecessor to the task that waits for it. A solid grey
+  line is done, a dashed line is waiting, and a red line means the predecessor
+  failed.
+- Turn on **Parallel steps** to lay tasks out by step. Each step gets a band
+  that says how many of its tasks can run in parallel.
+- Hover or focus a card to highlight everything it waits on and everything
+  waiting on it.
+
+In the task graph tab, **Subtasks** shows the task's subtasks (or its parent's,
+when the task is itself a subtask), and **Chain** shows everything the task
+waits on and everything waiting on it, across workflows. Select a card to open
+that task. On the board, a click selects a card and **Open task** goes into
+it; double-click opens it directly.
+
+<details>
+<summary>Limits and phones</summary>
+
+- The task graph tab shows at most 200 tasks and says so when it is cut short.
+- On the board, each workflow lane is its own graph. A dependency on a task in
+  another workflow is not drawn there, so the step and parallel counts only
+  reflect links inside the lane. Use the task graph's **Chain** mode to see
+  links across workflows.
+- On a phone, the graph icon and **Show in graph** open a full-screen sheet.
+  Pan with one finger, pinch to zoom, tap a card to open it, and long-press
+  to highlight its chain. The board Graph view, like Pipeline, is shown as
+  Kanban on a phone.
+
+</details>
+
 ## Find and organize tasks
 
 To include tasks without a repository, open the sidebar filters and select
@@ -927,12 +1051,13 @@ workspace lookup fails, select **Retry**. If the workspace no longer exists or
 is unavailable, select **Home** to return to your task overview.
 
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**,
-**Threads**, and **List**. Kanban and Pipeline show the same workflow steps in
-different layouts. Threads shows agent conversations side by side. Kandev
+**Graph**, **Threads**, and **List**. Kanban and Pipeline show the same workflow
+steps in different layouts. Graph shows the board's tasks as a dependency graph;
+see [See the dependency graph](#see-the-dependency-graph). Threads shows agent conversations side by side. Kandev
 remembers the last selected view in that browser on the current device. Phones
 offer **Kanban**, **Threads**, and **List** under **View options**, with a native
-Threads deck showing one conversation at a time. A saved desktop Pipeline
-preference is kept but shown as Kanban on the phone.
+Threads deck showing one conversation at a time. A saved desktop Pipeline or
+Graph preference is kept but shown as Kanban on the phone.
 
 Kanban and List share a compact phone header showing the workspace and current
 mode. Tap the **Kanban**, **Threads**, or **List** title dropdown to open view options and change display settings, or tap the
@@ -1049,12 +1174,20 @@ A workflow sets task steps, prompts, agent profiles, session rules, and automati
 
 Workflow WIP limits and the instance-wide session limit control different things:
 
-| Limit             | Scope and effect                                                                                                                                                                         |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **WIP limit**     | Caps active, non-archived, non-ephemeral tasks in one step. Kandev keeps overflow visible and queued. See [Workflow Tips](workflow-tips.md#build-a-custom-workflow) for feeder behavior. |
-| **Session limit** | Caps automatic agent starts across the instance. When reached, Kandev keeps the selected destination and retries later.                                                                  |
+| Limit             | Scope and effect                                                                                                                                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **WIP limit**     | Caps active, non-archived, non-ephemeral tasks in one step. Kandev keeps overflow visible and queued. See [Workflow Tips](workflow-tips.md#build-a-custom-workflow) for feeder behavior.                          |
+| **Session limit** | Caps automatic agent starts and new message turns across the instance. When reached, Kandev keeps the selected destination or pending message and retries later.                                                  |
 
-The session limit is off by default. Manual **Start**, **Resume**, or sending a message can override it. Set a positive limit in **Settings → Preferences → Task Behavior → Runtime**. `KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the limit. Change the environment variable and restart Kandev.
+The session limit is off by default. Explicit **Start**, **Resume**, and
+**Send Now** can override it. Ordinary messages, including chat and
+`message_task_kandev`, wait when the limit is full: Kandev keeps the accepted
+input in the existing prompt queue and starts one new turn when capacity
+becomes available. After a backend restart, later authorized session activity
+re-registers the pending queue. Auto-run OFF keeps that input pending. Set a positive limit
+in **Settings → Preferences → Task Behavior → Runtime**.
+`KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the
+limit. Change the environment variable and restart Kandev.
 
 If session capacity blocks a start, Kandev keeps the selected destination and retries automatically. See [Agents and profiles](agents-and-profiles.md) for profile compatibility and recovery.
 
@@ -1212,6 +1345,13 @@ to review an action and return to your list.
 - Several archives can be pending at once. Each row keeps its own spinner and ignores repeated archive requests until its own request settles, and Kandev does not switch you to a task that is also being archived.
 - Runtime stop and cleanup run in the background with a 60-second timeout. Cleanup failure does not undo the archive. Kandev preserves a runtime or environment when it cannot stop a nonterminal session, or while another active task uses a shared environment or worktree.
 
+A damaged Git checkout or a timed-out workspace inspection does not block
+archiving the task or its selected subtasks. Kandev records the cleanup failure
+and preserves the affected workspace and enclosing task folder. Independently
+verified workspaces can still be cleaned up. Missing original identity evidence
+can require manual repair before cleanup is safe. Access checks and database
+writes must still succeed.
+
 For Git worktrees, archive deletes Kandev-owned checkouts and their local
 changes during background cleanup, including staged, unstaged, untracked, and
 ignored files. Commit and push work you need before archiving. Kandev does not
@@ -1233,7 +1373,7 @@ worktree keeps that task folder until reclamation can finish.
 | Kubernetes    | Deletes only the recorded Pod and Kandev-managed PVC after exact UID and ownership checks. An existing claim is retained.                                                                                             |
 | Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                                             |
 | Sprites       | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost.                                                                                                                               |
-| SSH           | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them.                                  |
+| SSH           | Attempts to stop the remote session runtime. The task directory stays by default; an enabled profile can reclaim it after terminal archive or delete. Reclamation can remove ignored files, including secrets. See [SSH cleanup](executors.md#repository-sources-and-cleanup). |
 
 The archive confirmation is on by default in **Settings → Preferences → Task Behavior → Tasks → Archiving**.
 
@@ -1275,10 +1415,10 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 - While deletion is pending, the task stays dimmed with a spinner in the sidebar and phone task picker. It disappears when deletion succeeds. If deletion fails and the task is still available, the row returns to its normal state.
 - Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants. If a new child arrives before deletion finishes, Kandev keeps the parent and reports a conflict. Refresh the deletion preview before retrying. Ephemeral and automation-created children may be excluded from the cascade preview, so refreshing alone may return the same conflict while one retains its parent relationship.
 - Executor cleanup follows the same asynchronous retry and restart-reconciliation rules as archive.
+- If normal verified deletion cannot confirm that the agent stopped, the task remains available and deletion reports an error. Retry after resolving the reported problem.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.
 
-Deleting or expiring an ordinary Quick Chat also attempts to remove its Claude Code or Codex
-session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
+Deleting an ordinary Quick Chat also attempts to remove its Claude Code or Codex session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
 leaves other conversations and the agent's shared indexes and history databases in place.
 It uses the host's home and config-directory settings; overrides set only in an agent or
 executor profile are outside this cleanup.
@@ -1330,7 +1470,7 @@ retained resources exist. Older cleanup code cannot enforce that protection.
 - **Completion signal appears ignored:** it is asynchronous; also check whether a user message canceled it or whether the task already left the step.
 - **Remote source cannot clone or fetch:** verify provider credentials and access to every repository and base branch.
 - **Attachment is rejected below the picker limit:** encoded size is subject to the backend's stricter 10 MB item/batch checks.
-- **Resources remain after archive or delete:** physical cleanup is asynchronous and retryable. Check for an active task sharing the environment, a failed runtime stop, and server cleanup logs before removing anything manually. Restarting Kandev lets queued cleanup work resume; do not manually remove a shared environment while another active task uses it.
+- **Resources remain after archive or delete:** physical cleanup is asynchronous and retryable. Check for an active task sharing the environment, a failed runtime stop, and server cleanup logs before removing anything manually. A cleanup identity conflict reports `cleanup_condition=reconciliation_required`; inspect it first using [Inspect cleanup identity conflicts](git-operations.md#inspect-cleanup-identity-conflicts). Restarting Kandev lets queued cleanup work resume; do not manually remove a shared environment while another active task uses it.
 - **An unarchived worktree starts fresh:** an external action or an older Kandev version removed the branch, and no matching branch exists on `origin`.
 - **A synchronized workflow is read-only:** edit the workflow file in its GitHub source and let sync apply the change.
 

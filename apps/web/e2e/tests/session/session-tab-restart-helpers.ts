@@ -6,7 +6,12 @@ import { watchWs } from "../../helpers/causal-waits";
 import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
 
 /** Creates an idle mock session and observes gateway traffic before navigation. */
-export async function createRestartScenario(page: Page, api: ApiClient, seed: SeedData) {
+export async function createRestartScenario(
+  page: Page,
+  api: ApiClient,
+  seed: SeedData,
+  beforeNavigate?: (sessionId: string) => Promise<void>,
+) {
   const wire = watchWs(page);
   const traffic = attachGatewayTrafficCapture(page);
   const task = await api.createTaskWithAgent(
@@ -31,11 +36,80 @@ export async function createRestartScenario(page: Page, api: ApiClient, seed: Se
       { message: "Waiting for the restart fixture's first turn", timeout: 30_000 },
     )
     .toBe("WAITING_FOR_INPUT");
+  await beforeNavigate?.(sessionId);
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
   await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible();
   return { task, sessionId, session, wire, traffic };
+}
+
+/** Returns typed Restart guidance and a failed explicit continuation over the gateway. */
+export async function routeRestartContinuationGuidance(page: Page, sessionId: string) {
+  const requests: { action: string; payload: Record<string, unknown> }[] = [];
+  await page.routeWebSocket(/\/ws$/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      if (typeof message !== "string") return server.send(message);
+      for (const part of message.split("\n").filter(Boolean)) {
+        const frame = JSON.parse(part) as {
+          id?: string;
+          type?: string;
+          action?: string;
+          payload?: Record<string, unknown>;
+        };
+        if (
+          frame.type !== "request" ||
+          !frame.id ||
+          !frame.action ||
+          frame.payload?.session_id !== sessionId
+        ) {
+          server.send(part);
+          continue;
+        }
+        requests.push({ action: frame.action, payload: frame.payload });
+        if (frame.action === "session.launch") {
+          socket.send(
+            JSON.stringify({
+              id: frame.id,
+              type: "error",
+              action: frame.action,
+              payload: {
+                code: "CONFLICT",
+                message: "Native recovery requires saved history.",
+                details: {
+                  kind: "session_restore_required",
+                  recovery_action: "continue_from_history",
+                  reason: "unresolved_durable_work",
+                  session_id: sessionId,
+                  generation: 2,
+                },
+              },
+            }),
+          );
+        } else if (
+          frame.action === "session.recover" &&
+          frame.payload.action === "continue_from_history"
+        ) {
+          socket.send(
+            JSON.stringify({
+              id: frame.id,
+              type: "error",
+              action: frame.action,
+              payload: {
+                code: "INTERNAL_ERROR",
+                message: "The continuation request failed.",
+              },
+            }),
+          );
+        } else {
+          server.send(part);
+        }
+      }
+    });
+    server.onMessage((message) => socket.send(message));
+  });
+  return { requests };
 }
 
 /** Checks editable-draft retention and rejects button and keyboard prompt admission. */

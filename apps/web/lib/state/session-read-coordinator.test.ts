@@ -187,3 +187,71 @@ describe("read scope retirement", () => {
     },
   );
 });
+
+// @covers AC-TASKS-TASK-TERMINALS-002.2
+describe("shell publication identity", () => {
+  it("keeps writers independent for different task scopes in one environment", async () => {
+    const { scope } = setup();
+    const responseA = deferred<{ data: string }>();
+    const responseB = deferred<{ data: string }>();
+    const readA = scope.get({
+      resource: "shells",
+      key: "scope-a",
+      environmentId: "environment",
+      publishKey: "scope-a",
+      isCurrent: () => true,
+      fetch: () => responseA.promise,
+    });
+    const readB = scope.get({
+      resource: "shells",
+      key: "scope-b",
+      environmentId: "environment",
+      publishKey: "scope-b",
+      isCurrent: () => true,
+      fetch: () => responseB.promise,
+    });
+    const releaseA = readA.subscribe(() => {});
+    const releaseB = readB.subscribe(() => {});
+    readA.ensure();
+    readB.ensure();
+
+    responseA.resolve({ data: "task-a" });
+    responseB.resolve({ data: "task-b" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(readA.getSnapshot().data).toBe("task-a");
+    expect(readB.getSnapshot().data).toBe("task-b");
+    releaseA();
+    releaseB();
+  });
+
+  it("replaces the writer only within the same publication tuple", async () => {
+    const { scope } = setup();
+    const first = scope.get({
+      resource: "shells",
+      key: "scope-a-first",
+      environmentId: "environment",
+      publishKey: "scope-a",
+      isCurrent: () => true,
+      fetch: async () => ({ data: "first" }),
+    });
+    const second = scope.get({
+      resource: "shells",
+      key: "scope-a-second",
+      environmentId: "environment",
+      publishKey: "scope-a",
+      isCurrent: () => true,
+      fetch: async () => ({ data: "second" }),
+    });
+    const releaseFirst = first.subscribe(() => {});
+    first.ensure();
+    const releaseSecond = second.subscribe(() => {});
+    second.ensure();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(scope.owns(second)).toBe(true);
+    expect(scope.owns(first)).toBe(false);
+    releaseFirst();
+    releaseSecond();
+  });
+});

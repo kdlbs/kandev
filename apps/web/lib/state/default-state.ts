@@ -8,7 +8,6 @@ import {
   defaultUIState,
   defaultGitHubState,
   defaultGitLabState,
-  defaultAzureDevOpsState,
   defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
@@ -25,6 +24,7 @@ import {
 } from "./slices";
 import { mergeHydratedQuickChatSessions } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
+import { mergeUserShellsState } from "@/lib/state/user-shell-scope";
 import type { HydrationState } from "./store";
 import { seedSettledSessionBoundaries } from "@/lib/state/slices/session/turn-actions";
 import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
@@ -138,8 +138,6 @@ export const defaultState = {
   prFeedbackCache: defaultGitHubState.prFeedbackCache,
   taskCIAutomation: defaultGitHubState.taskCIAutomation,
   taskMRs: defaultGitLabState.taskMRs,
-  azureDevOpsTaskPullRequests: defaultAzureDevOpsState.azureDevOpsTaskPullRequests,
-  azureDevOpsTaskWorkItems: defaultAzureDevOpsState.azureDevOpsTaskWorkItems,
   gitlabReviewWatches: defaultGitLabState.gitlabReviewWatches,
   gitlabIssueWatches: defaultGitLabState.gitlabIssueWatches,
   gitlabMRWatches: defaultGitLabState.gitlabMRWatches,
@@ -181,7 +179,7 @@ export const defaultState = {
 
 export type DefaultState = typeof defaultState;
 
-/** Merge the code-host slice fields (MRs, watches, presets, stats, status, Azure DevOps PRs/work items) from hydration state over defaults. */
+/** Merge the code-host slice fields (MRs, watches, presets, stats, status) from hydration state over defaults. */
 function mergeCodeHostFields(
   d: DefaultState,
   s: HydrationState,
@@ -193,8 +191,6 @@ function mergeCodeHostFields(
   | "gitlabMRWatches"
   | "gitlabActionPresets"
   | "gitlabStatus"
-  | "azureDevOpsTaskPullRequests"
-  | "azureDevOpsTaskWorkItems"
 > {
   return {
     taskMRs: { ...d.taskMRs, ...s.taskMRs },
@@ -203,14 +199,6 @@ function mergeCodeHostFields(
     gitlabMRWatches: { ...d.gitlabMRWatches, ...s.gitlabMRWatches },
     gitlabActionPresets: { ...d.gitlabActionPresets, ...s.gitlabActionPresets },
     gitlabStatus: { ...d.gitlabStatus, ...s.gitlabStatus },
-    azureDevOpsTaskPullRequests: {
-      ...d.azureDevOpsTaskPullRequests,
-      ...s.azureDevOpsTaskPullRequests,
-    },
-    azureDevOpsTaskWorkItems: {
-      ...d.azureDevOpsTaskWorkItems,
-      ...s.azureDevOpsTaskWorkItems,
-    },
   };
 }
 
@@ -540,7 +528,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     contextWindow: { ...defaultState.contextWindow, ...initialState.contextWindow },
     agents: { ...defaultState.agents, ...initialState.agents },
     sessionMode: { ...defaultState.sessionMode, ...initialState.sessionMode },
-    userShells: { ...defaultState.userShells, ...initialState.userShells },
+    userShells: mergeUserShellsState(defaultState.userShells, initialState.userShells),
     prepareProgress: { ...defaultState.prepareProgress, ...initialState.prepareProgress },
     launchWarning: { ...defaultState.launchWarning, ...initialState.launchWarning },
     sessionTodos: { ...defaultState.sessionTodos, ...initialState.sessionTodos },

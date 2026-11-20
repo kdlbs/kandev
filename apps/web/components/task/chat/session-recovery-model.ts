@@ -8,9 +8,8 @@ import type { TaskLaunchErrorContextValue } from "../task-launch-error-context";
 import {
   buildRecoveryCardModel,
   automaticRecoveryCauses,
-  causeLabel,
-  operationLabel,
 } from "./session-bootstrap-recovery-model";
+import { causeLabel, operationLabel } from "./session-bootstrap-cause-labels";
 import {
   isSessionRecoveryBusy,
   matchingAutomaticRecovery,
@@ -20,11 +19,14 @@ import {
   addHistoryContinuationChoice,
   sessionRecoveryAction,
 } from "./messages/action-message-recovery";
+import { isProcessExitCause } from "./session-process-exit-recovery";
 import { interruptionRecoveryKey } from "./messages/interruption-recovery-feedback";
 import { managedRuntimeStartupCopy } from "./managed-runtime-startup-copy";
 import { useOptionalAppStore } from "@/components/state-provider";
 import { storageCauseFromError } from "@/lib/session-delivery-storage";
 import { storageFailureCopy, storageRecoveryDetailFields } from "./session-storage-recovery";
+import { resolveAuthenticationRecovery } from "@/lib/session-authentication-recovery";
+import { createRecoveryChoice } from "./session-recovery-choice";
 
 type RecoveryCopy = { title: string; summary: string; showSummary: boolean };
 
@@ -87,8 +89,8 @@ export function recoveryCopy(
       }),
       showSummary: true,
     };
-  const managedRuntimeCopy = managedRuntimeFailureCopy(model, t);
-  if (managedRuntimeCopy) return managedRuntimeCopy;
+  const earlyCopy = requestLocalOrManagedRuntimeCopy(model, t);
+  if (earlyCopy) return earlyCopy;
   if (model.kind === "provider_quota_limited") return providerQuotaRecoveryCopy(model, t);
   if (model.kind === "managed_clone_relocation_required")
     return {
@@ -103,6 +105,20 @@ export function recoveryCopy(
     summary: safe ? summary : t("task:agentHasStopped"),
     showSummary: true,
   };
+}
+
+function requestLocalOrManagedRuntimeCopy(
+  model: ActiveSessionRecovery,
+  t: ReturnType<typeof useTranslation>["t"],
+): RecoveryCopy | null {
+  if (model.kind === "session_restore_required" && model.requestLocal) {
+    return {
+      title: t("task:sessionRecoveryFailed"),
+      summary: t("task:sessionRecoveryFailedDetail"),
+      showSummary: true,
+    };
+  }
+  return managedRuntimeFailureCopy(model, t);
 }
 
 function providerQuotaRecoveryCopy(
@@ -120,21 +136,6 @@ function providerQuotaRecoveryCopy(
         : t("chat:providerQuotaResetUnknown"),
     showSummary: true,
   };
-}
-
-function recoveryActionCopy(kind: string, t: ReturnType<typeof useTranslation>["t"]) {
-  if (kind === "runtime_retry")
-    return { label: t("chat:managedRuntimeRetry"), testId: "managed-runtime-npm-retry-button" };
-  if (kind === "fresh_start")
-    return { label: t("task:startFreshSession"), testId: "recovery-fresh-button" };
-  if (kind === "resume_new_branch")
-    return { label: t("task:continueOnNewBranch"), testId: "recovery-new-branch-button" };
-  if (kind === "relocate_and_resume")
-    return {
-      label: t("task:managedCloneRelocateResume"),
-      testId: "managed-clone-relocate-button",
-    };
-  return { label: t("task:resumeSession"), testId: "recovery-resume-button" };
 }
 
 type RecoveryChoiceOptions = {
@@ -155,23 +156,11 @@ export function useRecoveryChoices({
   onInspectionRetry,
 }: RecoveryChoiceOptions) {
   const { t } = useTranslation();
-  const inspectionBusy =
-    model.kind === "recovery_inspection_busy" || actions.recoveryNoticeKind === "inspection_busy";
-  if (inspectionBusy) {
-    return [
-      createRecoveryChoice({
-        kind: "resume",
-        model,
-        actions,
-        profileExists,
-        onNewSession,
-        onRelocateRequested,
-        onInspectionRetry,
-        inspectionBusy,
-        t,
-      }),
-    ];
-  }
+  const authenticationRequired = resolveAuthenticationRecovery(
+    model.error?.causes,
+    model.metadata,
+  ).required;
+  const nativeIdentity = useCurrentNativeIdentity(model.sessionId);
   const supplied = model.metadata?.actions
     ?.map(sessionRecoveryAction)
     .filter((kind) => kind !== null);
@@ -179,7 +168,35 @@ export function useRecoveryChoices({
     model.kind === "managed_clone_relocation_required" ||
     Boolean(actions.managedCloneRecoveryStamp) ||
     actions.workspaceRecovery?.kind === "managed_clone_relocation";
-  const kinds = recoveryActionKinds(model, supplied, managedCloneRelocation);
+  const kinds = recoveryChoiceKinds(
+    model,
+    supplied,
+    managedCloneRelocation,
+    authenticationRequired,
+    nativeIdentity,
+  );
+  const inspectionBusy =
+    model.kind === "recovery_inspection_busy" || actions.recoveryNoticeKind === "inspection_busy";
+  if (inspectionBusy) {
+    const kind = authenticationRequired
+      ? kinds.find((candidate) => candidate === "resume")
+      : "resume";
+    if (!kind) return [];
+    return [
+      createRecoveryChoice({
+        kind,
+        model,
+        actions,
+        profileExists,
+        onNewSession,
+        onRelocateRequested,
+        onInspectionRetry,
+        inspectionBusy,
+        authenticationRequired,
+        t,
+      }),
+    ];
+  }
   const choices: RecoveryChoice[] = kinds.map((kind) =>
     createRecoveryChoice({
       kind,
@@ -190,34 +207,130 @@ export function useRecoveryChoices({
       onRelocateRequested,
       onInspectionRetry,
       inspectionBusy,
+      authenticationRequired,
       t,
     }),
   );
-  if (
-    !managedCloneRelocation &&
-    !isManagedRuntimeFailure(model.kind) &&
-    (actions.recoveryError || isBootstrapRecovery(model))
-  )
-    choices.push({
-      kind: "restore",
-      label: t("task:restoreReadOnlyWorkspace"),
-      testId: "recovery-restore-workspace-button",
-      onClick: () => void actions.handleRestore(),
-    });
-  if (actions.branchDetails && !choices.some((action) => action.kind === "resume_new_branch"))
+  appendAdditionalRecoveryChoices(choices, model, actions, managedCloneRelocation, t);
+  return actions.guardDetails ? choices.filter((choice) => choice.kind !== "restore") : choices;
+}
+
+function recoveryChoiceKinds(
+  model: ActiveSessionRecovery,
+  supplied: NonNullable<ReturnType<typeof sessionRecoveryAction>>[] | undefined,
+  managedCloneRelocation: boolean,
+  authenticationRequired: boolean,
+  nativeIdentity: boolean | undefined,
+) {
+  if (managedCloneRelocation) return ["relocate_and_resume"] as const;
+  if (authenticationRequired)
+    return authenticationRecoveryActionKinds(model, supplied, nativeIdentity);
+  return recoveryActionKinds(model, supplied, managedCloneRelocation);
+}
+
+function appendAdditionalRecoveryChoices(
+  choices: RecoveryChoice[],
+  model: ActiveSessionRecovery,
+  actions: SessionRecoveryActions,
+  managedCloneRelocation: boolean,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  appendReadOnlyRestoreChoice(choices, model, actions, managedCloneRelocation, t);
+  if (actions.branchDetails && !choices.some((action) => action.kind === "resume_new_branch")) {
     choices.push({
       kind: "resume_new_branch",
       label: t("task:continueOnNewBranch"),
       testId: "recovery-new-branch-button",
       onClick: () => void actions.handleNewBranch(),
     });
+  }
   addHistoryContinuationChoice(
     choices,
     historyContinuationAvailable(actions, managedCloneRelocation),
     () => void actions.handleContinueFromHistory(),
     t("task:continueFromHistory"),
+    { disclosure: t("task:continueFromHistoryDisclosure") },
   );
-  return actions.guardDetails ? choices.filter((choice) => choice.kind !== "restore") : choices;
+}
+
+function appendReadOnlyRestoreChoice(
+  choices: RecoveryChoice[],
+  model: ActiveSessionRecovery,
+  actions: SessionRecoveryActions,
+  managedCloneRelocation: boolean,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  const restoreAllowed =
+    !managedCloneRelocation &&
+    !isManagedRuntimeFailure(model.kind) &&
+    (actions.recoveryError || isBootstrapRecovery(model));
+  if (!restoreAllowed) return;
+  choices.push({
+    kind: "restore",
+    label: t("task:restoreReadOnlyWorkspace"),
+    testId: "recovery-restore-workspace-button",
+    onClick: () => void actions.handleRestore(),
+  });
+}
+
+function authenticationRecoveryActionKinds(
+  model: ActiveSessionRecovery,
+  supplied: NonNullable<ReturnType<typeof sessionRecoveryAction>>[] | undefined,
+  nativeIdentity: boolean | undefined,
+) {
+  const resumeEligibility = authenticationResumeEligibility(model, nativeIdentity);
+  const eligible = supplied?.filter((kind) => {
+    if (kind === "resume") return resumeEligibility !== false;
+    if (kind === "fresh_start") return resumeEligibility === false;
+    return true;
+  });
+  if (eligible?.length) return eligible;
+  if (resumeEligibility === true) return ["resume"] as const;
+  if (resumeEligibility === false) return ["fresh_start"] as const;
+  return [] as const;
+}
+
+function authenticationResumeEligibility(
+  model: ActiveSessionRecovery,
+  nativeIdentity: boolean | undefined,
+) {
+  const tokenEvidence = model.metadata?.has_resume_token;
+  if (nativeIdentity === true || tokenEvidence === true) return true;
+  if (
+    tokenEvidence === false ||
+    (nativeIdentity === false && isInitialAuthenticationStart(model))
+  ) {
+    return false;
+  }
+  return undefined;
+}
+
+function isInitialAuthenticationStart(model: ActiveSessionRecovery) {
+  return (
+    model.error?.phase === "bootstrap" &&
+    model.error.causes?.some(
+      (cause) => cause.code === "authentication_required" && cause.operation === "start",
+    ) === true
+  );
+}
+
+function useCurrentNativeIdentity(sessionId: string) {
+  return useOptionalAppStore((state) => {
+    const session = state.taskSessions.items[sessionId];
+    if (!session || session.id !== sessionId) return undefined;
+    return Boolean(
+      session.downstream_acp_session_id?.trim() || hasNativeACPIdentity(session.metadata),
+    );
+  }, undefined);
+}
+
+function hasNativeACPIdentity(metadata: unknown) {
+  if (!isRecord(metadata) || !isRecord(metadata.acp)) return false;
+  return typeof metadata.acp.session_id === "string" && metadata.acp.session_id.trim().length > 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function historyContinuationAvailable(
@@ -237,57 +350,6 @@ function recoveryActionKinds(
   if (isManagedRuntimeFailure(model.kind)) return ["runtime_retry"] as const;
   if (model.kind === "missing_pr_branch" && !supplied) return [] as const;
   return supplied ?? (["resume", "fresh_start"] as const);
-}
-
-function createRecoveryChoice({
-  kind,
-  model,
-  actions,
-  profileExists,
-  onNewSession,
-  onRelocateRequested,
-  onInspectionRetry,
-  inspectionBusy,
-  t,
-}: {
-  kind: NonNullable<ReturnType<typeof sessionRecoveryAction>>;
-  model: ActiveSessionRecovery;
-  actions: SessionRecoveryActions;
-  profileExists: boolean;
-  onNewSession: () => void;
-  onRelocateRequested: () => void;
-  onInspectionRetry?: () => Promise<boolean> | undefined;
-  inspectionBusy: boolean;
-  t: ReturnType<typeof useTranslation>["t"];
-}): RecoveryChoice {
-  const copy = recoveryActionCopy(kind, t);
-  return {
-    kind,
-    label: copy.label,
-    testId: copy.testId,
-    disclosure:
-      kind === "resume" && actions.providerRestoredResumeEligible
-        ? t("task:providerRestoredResumeDisclosure")
-        : undefined,
-    disabled: kind === "resume" && !profileExists,
-    tooltip: model.metadata?.actions?.find((action) => sessionRecoveryAction(action) === kind)
-      ?.tooltip,
-    onClick: () => {
-      if (inspectionBusy && kind === "resume" && onInspectionRetry) {
-        void onInspectionRetry();
-        return;
-      }
-      if (kind === "fresh_start" && !profileExists) {
-        onNewSession();
-        return;
-      }
-      if (kind === "relocate_and_resume") {
-        onRelocateRequested();
-        return;
-      }
-      void actions.handleRecover(kind);
-    },
-  };
 }
 
 export function useRecoveryPresentation(
@@ -322,6 +384,7 @@ export function useRecoveryPresentation(
   const failure = recoveryFailureCopy(actions, t);
   return {
     copy: withAutomaticNotice(copy, automatic, actions),
+    agentDisplayName,
     busy,
     busyAction,
     details,
@@ -406,6 +469,7 @@ function withAutomaticNotice(
   return notice &&
     !actions.recoveryError &&
     !copy.hasTypedSelectionCause &&
+    (!copy.hasTypedProcessCause || noticeKind === "inspection_busy") &&
     (!copy.hasTypedCleanupCause || noticeKind === "inspection_busy")
     ? { ...copy, summary: notice }
     : copy;
@@ -452,10 +516,28 @@ function recoveryPresentationCopy(
       ...recoveryCopy({ ...model, kind: "managed_clone_relocation_required" }, t),
       hasTypedSelectionCause: false,
       hasTypedCleanupCause: false,
+      hasTypedProcessCause: false,
+      prerequisite: null,
       noPromptSent: false,
       freshStartWarning: false,
       workspaceStatus: null,
     };
+  const managedRuntimeProcess =
+    bootstrap?.primaryCause?.code === "process_exited" &&
+    isManagedRuntimeRecovery(model) &&
+    bootstrap.primaryCause.reason !== "mise_config_untrusted";
+  if (managedRuntimeProcess) {
+    return {
+      ...recoveryCopy(model, t),
+      hasTypedSelectionCause: false,
+      hasTypedCleanupCause: false,
+      hasTypedProcessCause: false,
+      prerequisite: null,
+      noPromptSent: false,
+      freshStartWarning: false,
+      workspaceStatus: null,
+    };
+  }
   if (bootstrap)
     return {
       title: t(bootstrap.titleKey),
@@ -463,6 +545,8 @@ function recoveryPresentationCopy(
       showSummary: bootstrap.showSummary,
       hasTypedSelectionCause: bootstrap.hasTypedSelectionCause,
       hasTypedCleanupCause: bootstrap.hasTypedCleanupCause,
+      hasTypedProcessCause: bootstrap.hasTypedProcessCause,
+      prerequisite: bootstrap.prerequisite,
       noPromptSent: bootstrap.noPromptSent,
       freshStartWarning: bootstrap.freshStartWarning,
       workspaceStatus: bootstrap.workspaceStatus,
@@ -471,6 +555,8 @@ function recoveryPresentationCopy(
     ...recoveryCopy(model, t),
     hasTypedSelectionCause: false,
     hasTypedCleanupCause: false,
+    hasTypedProcessCause: false,
+    prerequisite: null,
     noPromptSent: false,
     freshStartWarning: false,
     workspaceStatus: null,
@@ -484,7 +570,12 @@ function recoveryPresentationDetails(
   actions: SessionRecoveryActions,
   t: ReturnType<typeof useTranslation>["t"],
 ) {
-  if (bootstrap?.hasTypedSelectionCause || bootstrap?.hasTypedCleanupCause) return "";
+  if (
+    bootstrap?.hasTypedSelectionCause ||
+    bootstrap?.hasTypedCleanupCause ||
+    bootstrap?.hasTypedProcessCause
+  )
+    return "";
   const manualFailure = actions.manualRecoveryFailure;
   const ownsManualFailure =
     !manualFailure ||
@@ -519,9 +610,9 @@ function recoveryFailureCopy(
 function isBootstrapRecovery(model: ActiveSessionRecovery) {
   return (
     model.error?.phase === "bootstrap" &&
-    !isManagedRuntimeFailure(model.kind) &&
     model.kind !== "provider_quota_limited" &&
-    model.kind !== "managed_clone_relocation_required"
+    model.kind !== "managed_clone_relocation_required" &&
+    (!isManagedRuntimeFailure(model.kind) || Boolean(model.error?.causes?.some(isProcessExitCause)))
   );
 }
 
@@ -530,5 +621,12 @@ function isManagedRuntimeFailure(kind: string) {
     kind === "managed_runtime_npm_resolution" ||
     kind === "managed_runtime_npm_policy" ||
     kind === "managed_runtime_startup"
+  );
+}
+
+function isManagedRuntimeRecovery(model: ActiveSessionRecovery) {
+  if (isManagedRuntimeFailure(model.kind)) return true;
+  return Boolean(
+    model.metadata?.actions?.some((action) => sessionRecoveryAction(action) === "runtime_retry"),
   );
 }

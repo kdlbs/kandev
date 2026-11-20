@@ -10,7 +10,7 @@
   "localRepository": "로컬 리포지토리",
   "localRepositoryMenuDescription": "이 컴퓨터에 이미 있는 Git 체크아웃을 사용합니다.",
   "remoteRepositoryBranchHint": "선택한 브랜치가 리포지토리의 기본 베이스 브랜치가 됩니다. 저장 후 변경할 수 있습니다.",
-  "remoteRepositoryMenuDescription": "GitHub, GitLab, Azure DevOps 또는 연결된 플러그인 제공자에서 리포지토리를 등록합니다.",
+  "remoteRepositoryMenuDescription": "GitHub, GitLab 또는 연결된 플러그인 제공자에서 리포지토리를 등록합니다.",
   "addScanFolder": "폴더 추가",
   "addingScanFolder": "검사 폴더 추가 중...",
   "addScript": "스크립트 추가",

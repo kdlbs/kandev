@@ -50,12 +50,12 @@ type pluginStartupLifecycle interface {
 // how the Jira/Linear/Sentry pollers are started in
 // startAgentInfrastructure: construction happens in initPluginsService
 // (services.go), lifecycle start happens here once ctx/addCleanup exist.
-func startPluginsSubsystems(ctx context.Context, svc *plugins.Service, lifecycle pluginStartupLifecycle, eventBus bus.EventBus, log *logger.Logger, addCleanup func(func() error)) {
+func startPluginsSubsystems(ctx context.Context, svc *plugins.Service, lifecycle pluginStartupLifecycle, catalog pluginToolCatalogLifecycle, eventBus bus.EventBus, log *logger.Logger, addCleanup func(func() error)) {
 	transport := plugins.NewRuntimeTransport(svc.Runtime())
 	deliverer := delivery.New(eventBus, transport, pluginActivePluginsAdapter{svc: svc}, log)
 	svc.SetDeliverer(deliverer)
 	addCleanup(func() error { deliverer.Stop(); return nil })
-	toolRefresher := newPluginToolCatalogRefresher(ctx, svc, lifecycle, log)
+	toolRefresher := newPluginToolCatalogRefresher(ctx, svc, catalog, log)
 	svc.SetAgentToolCatalogListener(toolRefresher)
 	addCleanup(func() error { toolRefresher.Stop(); return nil })
 

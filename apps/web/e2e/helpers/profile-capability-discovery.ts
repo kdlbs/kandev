@@ -12,6 +12,7 @@ import type { DynamicModelsResponse } from "../../lib/types/http";
 import type { ProfileRuntimeComponent } from "../../lib/types/http-agents";
 import type { ApiClient } from "./api-client";
 import type { BackendContext } from "../fixtures/backend";
+import { closeModelConfigSheetIfOpen } from "./model-config-sheet";
 import {
   installRuntimeUpdateFixture,
   updateJob,
@@ -65,7 +66,7 @@ async function expectRuntimeUpdateOutcome(
 ) {
   const result = surface.getByTestId(`agent-update-result-${agentName}`);
   const expectedMessage =
-    outcome === "succeeded" ? "Runtime updated successfully" : "Candidate ACP probe failed.";
+    outcome === "succeeded" ? "Runtime updated to 0.63.0." : "Candidate ACP probe failed.";
   await expect(result).toContainText(expectedMessage);
   if (outcome === "failed") await expectFailedUpdateRetry(surface, agentName);
 }
@@ -390,10 +391,11 @@ export async function expectWrapperRetry(
   const input = page.getByTestId("command-prefix-input");
   const refresh = page.getByTestId("profile-refresh-capabilities");
   const status = page.getByTestId("profile-capability-status");
-  const selector = page.getByRole("button", { name: "Profile start model settings" });
+  const selector = page.getByTestId("model-config-trigger");
   const clickRefresh = () =>
     (page.viewportSize()?.width ?? 768) < 768 ? refresh.tap() : refresh.click();
   const receipts = readProfileProbeEvidence(evidencePath).length;
+  await closeModelConfigSheetIfOpen(page);
   await input.fill(JSON.stringify(path.join(path.dirname(evidencePath), "missing wrapper")));
   await clickRefresh();
   await expect(status).toHaveAttribute("data-status", "failed", { timeout: 20_000 });

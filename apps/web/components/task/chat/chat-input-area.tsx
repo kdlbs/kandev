@@ -622,6 +622,7 @@ export function ChatInputArea(props: ChatInputAreaProps) {
               lastPromptScrollDirection={lastPromptScrollDirection}
               showScrollToStart={showScrollToStart}
               onScrollToStart={onScrollToStart}
+              onFocusComposer={() => chatInputRef.current?.focusInput()}
             />
           )}
         >

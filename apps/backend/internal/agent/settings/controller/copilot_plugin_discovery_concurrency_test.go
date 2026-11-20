@@ -19,7 +19,10 @@ type gatedCopilotRunner struct {
 	calls    atomic.Int32
 }
 
-func (r *gatedCopilotRunner) Run(context.Context, []string, map[string]string, string) (copilotplugins.CommandResult, error) {
+func (r *gatedCopilotRunner) Run(_ context.Context, argv []string, _ map[string]string, _ string) (copilotplugins.CommandResult, error) {
+	if isCopilotPluginHelpCommand(argv) {
+		return copilotplugins.CommandResult{Stdout: []byte("Options:\n  --plugin-dir <path>\n")}, nil
+	}
 	call := int(r.calls.Add(1))
 	r.entered <- call
 	<-r.releases[call-1]

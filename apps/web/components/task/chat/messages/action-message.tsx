@@ -29,7 +29,7 @@ import {
   shouldShowRecoveryActions,
 } from "./action-message-recovery-model";
 import { GitPushErrorDismissAction } from "./git-push-error-dismiss-button";
-import { TaskTurnErrorDismissButton } from "./turn-error-dismiss-button";
+import { TurnErrorActions } from "./turn-error-actions";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import { statusSummaryTurnError } from "@/lib/task-status-summary";
 import {
@@ -256,9 +256,10 @@ function SettledFailureMessage({
             sessionId,
             extraContent: (
               <>
-                {dismissTurnErrorStamp && comment.task_id && (
-                  <TaskTurnErrorDismissButton
+                {dismissTurnErrorStamp && comment.task_id && comment.session_id && (
+                  <TurnErrorActions
                     taskId={comment.task_id}
+                    sessionId={comment.session_id}
                     stamp={dismissTurnErrorStamp}
                   />
                 )}

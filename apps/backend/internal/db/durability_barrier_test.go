@@ -28,7 +28,7 @@ func openBarrierTestDB(t *testing.T) *sql.DB {
 func TestDurabilityBarrierCommitsWithFull(t *testing.T) {
 	ctx := t.Context()
 	database := openBarrierTestDB(t)
-	barrier := newDurabilityBarrier(database, 0)
+	barrier := newDurabilityBarrier(database, 0, nil)
 	var observed int
 	barrier.observe = func(ctx context.Context, conn *sql.Conn) error {
 		return conn.QueryRowContext(ctx, "PRAGMA synchronous").Scan(&observed)
@@ -53,7 +53,7 @@ func TestDurabilityBarrierCommitsWithFull(t *testing.T) {
 func TestDurabilityBarrierCoalescesWaiters(t *testing.T) {
 	ctx := t.Context()
 	database := openBarrierTestDB(t)
-	barrier := newDurabilityBarrier(database, 40*time.Millisecond)
+	barrier := newDurabilityBarrier(database, 40*time.Millisecond, nil)
 
 	var mu sync.Mutex
 	runs := 0
@@ -126,7 +126,7 @@ func TestDurabilityBarrierFailureDiscardsConnection(t *testing.T) {
 	database := openBarrierTestDB(t)
 	_, err := database.Exec(`DROP TABLE kandev_meta`)
 	require.NoError(t, err)
-	barrier := newDurabilityBarrier(database, 0)
+	barrier := newDurabilityBarrier(database, 0, nil)
 	require.Error(t, barrier.Await(ctx))
 
 	var level int
@@ -147,7 +147,7 @@ func TestDurabilityBarrierFailureDiscardsConnection(t *testing.T) {
 func TestDurabilityBarrierCanceledCallerKeepsRun(t *testing.T) {
 	ctx := t.Context()
 	database := openBarrierTestDB(t)
-	barrier := newDurabilityBarrier(database, 40*time.Millisecond)
+	barrier := newDurabilityBarrier(database, 40*time.Millisecond, nil)
 
 	var mu sync.Mutex
 	runs := 0

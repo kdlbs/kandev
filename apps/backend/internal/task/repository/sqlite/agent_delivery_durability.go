@@ -23,7 +23,7 @@ func (r *Repository) AwaitAgentDeliveryDurability(ctx context.Context) error {
 		return nil
 	}
 	r.durabilityBarrierOnce.Do(func() {
-		r.durabilityBarrier = internaldb.NewDurabilityBarrier(r.db.DB)
+		r.durabilityBarrier = internaldb.NewDurabilityBarrier(r.db.DB, r.log)
 	})
 	started := time.Now()
 	err := r.durabilityBarrier.Await(ctx)
