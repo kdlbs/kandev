@@ -493,6 +493,39 @@ function workspaceDraftInvalidReason(
   return undefined;
 }
 
+function WorkspaceAccessSettings({ workspace }: WorkspaceEditFormProps) {
+  const signedIn = useAppStore(
+    (state) => state.auth.mode === "enabled" && state.auth.authenticated,
+  );
+  const { t } = useTranslation();
+  if (!signedIn) return null;
+
+  const title = t("workspaces:accessSettings.title");
+  return (
+    <>
+      <SettingsGroup
+        title={title}
+        aria-label={title}
+        description={t("workspaces:accessSettings.description")}
+        frame="none"
+        contentClassName="space-y-4"
+      >
+        <WorkspacePlacementCard
+          workspaceId={workspace.id}
+          unitId={workspace.unit_id}
+          scopes={workspace.scopes}
+        />
+        <WorkspaceTeamAccessCard
+          workspaceId={workspace.id}
+          ownerId={workspace.owner_id ?? ""}
+          scopes={workspace.scopes}
+        />
+      </SettingsGroup>
+      <Separator />
+    </>
+  );
+}
+
 function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
   const {
     currentWorkspace,
@@ -570,24 +603,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         onEnabledChange={setIdleSuspensionEnabled}
         onTimeoutChange={setIdleTimeoutMinutes}
       />
-      {/*
-        Reads the live store item rather than the form's captured snapshot:
-        scopes arrive with hydration, which can land after this
-        form mounts, and a snapshot would freeze the owner out of their own
-        workspace.
-      */}
-      <WorkspacePlacementCard
-        workspaceId={workspace.id}
-        unitId={workspace.unit_id}
-        scopes={workspace.scopes}
-      />
-      <Separator />
-      <WorkspaceTeamAccessCard
-        workspaceId={workspace.id}
-        ownerId={workspace.owner_id ?? ""}
-        scopes={workspace.scopes}
-      />
-      <Separator />
+      <WorkspaceAccessSettings workspace={workspace} />
       <DeleteWorkspaceCard
         canManage={canManage}
         workspaceName={currentWorkspace.name}
