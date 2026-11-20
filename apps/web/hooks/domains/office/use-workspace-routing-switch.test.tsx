@@ -61,12 +61,12 @@ function renderForWorkspace(initial: string) {
   });
 }
 
-describe("useWorkspaceRouting after switching workspace", () => {
-  beforeEach(() => {
-    mocks.getWorkspaceRouting.mockReset();
-    mocks.updateSeatAuthorExclusion.mockReset();
-  });
+beforeEach(() => {
+  mocks.getWorkspaceRouting.mockReset();
+  mocks.updateSeatAuthorExclusion.mockReset();
+});
 
+describe("useWorkspaceRouting after switching workspace", () => {
   it("hides the previous workspace's switches while the new one loads or fails", async () => {
     mocks.getWorkspaceRouting
       .mockResolvedValueOnce(loaded("a"))
@@ -110,7 +110,9 @@ describe("useWorkspaceRouting after switching workspace", () => {
     expect(result.current.authorExclusionSteps).toEqual([stepFor("b")]);
     expect(result.current.authorExclusionWarnings).toEqual([warningFor("b")]);
   });
+});
 
+describe("useWorkspaceRouting after saving switches", () => {
   it("reloads the steps when the save succeeded but the server could not read them back", async () => {
     const saved = { ...stepFor("a"), enabled: false };
     mocks.getWorkspaceRouting
@@ -133,5 +135,70 @@ describe("useWorkspaceRouting after switching workspace", () => {
     expect(warnings).toEqual([]);
     await waitFor(() => expect(result.current.authorExclusionSteps).toEqual([saved]));
     expect(mocks.getWorkspaceRouting).toHaveBeenCalledTimes(2);
+  });
+
+  // Covers AC-OFFICE-REVIEW-AUTHOR-EXCL-006.12 when the reload also fails.
+  it("keeps the saved switch values when the reload fails", async () => {
+    const reviewer = stepFor("a");
+    const approver = { ...reviewer, role: "approver" };
+    mocks.getWorkspaceRouting
+      .mockResolvedValueOnce({ ...loaded("a"), author_exclusion_steps: [reviewer, approver] })
+      .mockRejectedValueOnce(new Error("offline"));
+    mocks.updateSeatAuthorExclusion.mockResolvedValueOnce({
+      author_exclusion_steps: null,
+      author_exclusion_warnings: [],
+    });
+    const { result } = renderForWorkspace("ws-a");
+    await waitFor(() => expect(result.current.authorExclusionSteps).toEqual([reviewer, approver]));
+
+    await act(async () => {
+      await result.current.updateAuthorExclusion([
+        { step_id: reviewer.step_id, role: reviewer.role, enabled: false },
+      ]);
+    });
+
+    await waitFor(() => expect(result.current.error).toBe("offline"));
+    expect(result.current.authorExclusionSteps).toEqual([
+      { ...reviewer, enabled: false },
+      approver,
+    ]);
+  });
+
+  it("keeps a later save when an earlier reload finishes after it", async () => {
+    const reviewer = stepFor("a");
+    let finishReload!: (response: ReturnType<typeof loaded>) => void;
+    mocks.getWorkspaceRouting
+      .mockResolvedValueOnce(loaded("a"))
+      .mockReturnValueOnce(new Promise((resolve) => (finishReload = resolve)));
+    mocks.updateSeatAuthorExclusion
+      .mockResolvedValueOnce({ author_exclusion_steps: null, author_exclusion_warnings: [] })
+      .mockResolvedValueOnce({
+        author_exclusion_steps: [reviewer],
+        author_exclusion_warnings: [warningFor("a")],
+      });
+    const { result } = renderForWorkspace("ws-a");
+    await waitFor(() => expect(result.current.authorExclusionSteps).toEqual([reviewer]));
+
+    await act(async () => {
+      await result.current.updateAuthorExclusion([
+        { step_id: reviewer.step_id, role: reviewer.role, enabled: false },
+      ]);
+    });
+    await waitFor(() => expect(mocks.getWorkspaceRouting).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await result.current.updateAuthorExclusion([
+        { step_id: reviewer.step_id, role: reviewer.role, enabled: true },
+      ]);
+    });
+
+    await act(async () => {
+      finishReload({
+        ...loaded("a"),
+        author_exclusion_steps: [{ ...reviewer, enabled: false }],
+        author_exclusion_warnings: [],
+      });
+    });
+    expect(result.current.authorExclusionSteps).toEqual([reviewer]);
+    expect(result.current.authorExclusionWarnings).toEqual([warningFor("a")]);
   });
 });

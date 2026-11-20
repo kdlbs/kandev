@@ -36,10 +36,10 @@ Three existing paths meet here:
   fallback, park lift, and manual retry. A successful launch writes
   `runs.resolved_provider_id` through `SetRunResolvedRoute`. A launch the
   session ceiling deferred parks the run with a `deferred_capacity` route
-  attempt that carries the candidate; when the ceiling's replay launches it,
-  `SettleCeilingDeferredRun` copies that attempt's execution profile,
-  provider, and model onto the run in the same update, so a replayed
-  work-stage run records its author provider too
+  attempt that carries the candidate. `SettleCeilingDeferredRun` and
+  `FinishCeilingDeferredRunOnCompletion` both copy the attempt's execution
+  profile, provider, and model onto the run in the same update. A replayed
+  Work run records its author provider in either order
   (AC-OFFICE-REVIEW-AUTHOR-EXCL-002.6).
 - **Scope during the dynamic-routing migration.** An Office agent with an
   `execution_agent_profile_id` skips `DispatchWithRouting`
@@ -396,8 +396,10 @@ whatever follows. If the seat steps cannot be read back,
 `updateAuthorExclusion(changes)`. It returns steps, warnings, and execution
 profiles only once they were loaded for the current workspace, and ignores a
 save response that arrives after the operator switched workspace
-(AC-OFFICE-REVIEW-AUTHOR-EXCL-006.10). A save response with null steps
-triggers `refresh()` instead of replacing the list
+(AC-OFFICE-REVIEW-AUTHOR-EXCL-006.10). When a save response has null steps,
+the browser applies the saved switch values to the current list and calls
+`refresh()`. If the refresh fails, the saved values stay in the list. The
+response from a later save supersedes an earlier refresh
 (AC-OFFICE-REVIEW-AUTHOR-EXCL-006.12). The routing page keeps the switches in its
 existing draft, so one Save applies routing changes first and then the
 switch changes; the warnings come from the last response. The section is an

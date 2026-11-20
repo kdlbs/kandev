@@ -37,13 +37,19 @@ export type UseWorkspaceRoutingResult = {
 
 const EMPTY: never[] = [];
 
-export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceRoutingResult {
+function useWorkspaceRoutingStore(workspaceName: string | null) {
   const config = useAppStore((s) =>
     workspaceName ? s.office.routing.byWorkspace[workspaceName] : undefined,
   );
   const knownProviders = useAppStore((s) => s.office.routing.knownProviders);
   const setWorkspaceRouting = useAppStore((s) => s.setWorkspaceRouting);
   const setKnownProviders = useAppStore((s) => s.setKnownProviders);
+  return { config, knownProviders, setWorkspaceRouting, setKnownProviders };
+}
+
+export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceRoutingResult {
+  const { config, knownProviders, setWorkspaceRouting, setKnownProviders } =
+    useWorkspaceRoutingStore(workspaceName);
   const [isLoading, setIsLoading] = useState(false);
   const [executionProfiles, setExecutionProfiles] = useState<ExecutionProfileSummary[]>([]);
   const [authorExclusionWarnings, setAuthorExclusionWarnings] = useState<AuthorExclusionWarning[]>(
@@ -111,10 +117,15 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
       const warnings = res.author_exclusion_warnings ?? [];
       if (currentWorkspace.current !== workspaceName) return warnings;
       setAuthorExclusionWarnings(warnings);
-      // The switches are saved either way; null steps mean the server could
-      // not read them back, so reload instead of showing a stale list.
-      if (res.author_exclusion_steps) setAuthorExclusionSteps(res.author_exclusion_steps);
-      else void refresh();
+      const steps = res.author_exclusion_steps;
+      // Keep the acknowledged values even if the follow-up read fails.
+      setAuthorExclusionSteps((current) => steps ?? applySavedSeatChanges(current, changes));
+      if (steps) {
+        // This saved list supersedes any refresh that is still in flight.
+        requestVersion.current += 1;
+        setIsLoading(false);
+        setError(null);
+      } else void refresh();
       return warnings;
     },
     [workspaceName, refresh],
@@ -144,4 +155,13 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
     updateAuthorExclusion,
     retry,
   };
+}
+
+function applySavedSeatChanges(steps: AuthorExclusionStep[], changes: AuthorExclusionStepChange[]) {
+  return steps.map((step) => {
+    const saved = changes.findLast(
+      (change) => change.step_id === step.step_id && change.role === step.role,
+    );
+    return saved ? { ...step, enabled: saved.enabled } : step;
+  });
 }

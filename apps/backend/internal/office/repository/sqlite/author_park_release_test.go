@@ -140,30 +140,50 @@ func exerciseDeferredRouteSettlement(t *testing.T, repo *sqlite.Repository, db *
 	t.Helper()
 	ctx := context.Background()
 	seedRoutingAgent(t, db, "agent-a", "ws-a")
-	run := &runsmodels.Run{
-		AgentProfileID: "agent-a", Reason: "task_assigned", Status: "queued", CoalescedCount: 1,
-		Payload: `{"task_id":"t-1","workflow_step_id":"step-work"}`,
-	}
-	require.NoError(t, repo.CreateRun(ctx, run))
-	appendAttempt(t, repo, run.ID, models.RouteAttempt{
-		ExecutionProfileID: "prof-codex", ProviderID: "codex-acp", Model: "gpt",
-		Outcome: models.RouteAttemptOutcomeFailedProviderUnavail,
-	})
-	appendAttempt(t, repo, run.ID, models.RouteAttempt{
-		ExecutionProfileID: "prof-claude", ProviderID: "claude-acp", Model: "opus",
-		Outcome: models.RouteAttemptOutcomeDeferredCapacity,
-	})
-	require.NoError(t, repo.ParkRunForProviderCapacity(
-		ctx, run.ID, string(runsmodels.RoutingBlockedActionRequired), time.Time{}))
+	// Covers AC-OFFICE-REVIEW-AUTHOR-EXCL-002.6 in both event orders.
+	for _, tc := range []struct {
+		name                   string
+		completeBeforeSettling bool
+	}{
+		{name: "settle before completion"},
+		{name: "complete before settlement", completeBeforeSettling: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := &runsmodels.Run{
+				AgentProfileID: "agent-a", Reason: "task_assigned", Status: "queued", CoalescedCount: 1,
+				Payload: `{"task_id":"t-1","workflow_step_id":"step-work"}`,
+			}
+			require.NoError(t, repo.CreateRun(ctx, run))
+			appendAttempt(t, repo, run.ID, models.RouteAttempt{
+				ExecutionProfileID: "prof-codex", ProviderID: "codex-acp", Model: "gpt",
+				Outcome: models.RouteAttemptOutcomeFailedProviderUnavail,
+			})
+			appendAttempt(t, repo, run.ID, models.RouteAttempt{
+				ExecutionProfileID: "prof-claude", ProviderID: "claude-acp", Model: "opus",
+				Outcome: models.RouteAttemptOutcomeDeferredCapacity,
+			})
+			require.NoError(t, repo.ParkRunForProviderCapacity(
+				ctx, run.ID, string(runsmodels.RoutingBlockedActionRequired), time.Time{}))
 
-	wrote, err := repo.SettleCeilingDeferredRun(ctx, run.ID, "session-1", "t-1", "agent-a")
-	require.NoError(t, err)
-	require.True(t, wrote)
-	got, err := repo.GetRunByID(ctx, run.ID)
-	require.NoError(t, err)
-	require.Equal(t, "claude-acp", derefStr(got.ResolvedProviderID))
-	require.Equal(t, "opus", derefStr(got.ResolvedModel))
-	require.Equal(t, "prof-claude", derefStr(got.ResolvedExecutionProfileID))
+			if tc.completeBeforeSettling {
+				finished, err := repo.FinishCeilingDeferredRunOnCompletion(
+					ctx, run.ID, "session-1", "t-1", "agent-a", "processed",
+				)
+				require.NoError(t, err)
+				require.NotNil(t, finished)
+			} else {
+				wrote, err := repo.SettleCeilingDeferredRun(ctx, run.ID, "session-1", "t-1", "agent-a")
+				require.NoError(t, err)
+				require.True(t, wrote)
+			}
+
+			got, err := repo.GetRunByID(ctx, run.ID)
+			require.NoError(t, err)
+			require.Equal(t, "claude-acp", derefStr(got.ResolvedProviderID))
+			require.Equal(t, "opus", derefStr(got.ResolvedModel))
+			require.Equal(t, "prof-claude", derefStr(got.ResolvedExecutionProfileID))
+		})
+	}
 
 	// A run with no deferred attempt settles without inventing a route.
 	bare := &runsmodels.Run{
@@ -173,10 +193,10 @@ func exerciseDeferredRouteSettlement(t *testing.T, repo *sqlite.Repository, db *
 	require.NoError(t, repo.CreateRun(ctx, bare))
 	require.NoError(t, repo.ParkRunForProviderCapacity(
 		ctx, bare.ID, string(runsmodels.RoutingBlockedActionRequired), time.Time{}))
-	wrote, err = repo.SettleCeilingDeferredRun(ctx, bare.ID, "session-2", "t-2", "agent-a")
+	wrote, err := repo.SettleCeilingDeferredRun(ctx, bare.ID, "session-2", "t-2", "agent-a")
 	require.NoError(t, err)
 	require.True(t, wrote)
-	got, err = repo.GetRunByID(ctx, bare.ID)
+	got, err := repo.GetRunByID(ctx, bare.ID)
 	require.NoError(t, err)
 	require.Nil(t, got.ResolvedProviderID)
 }
