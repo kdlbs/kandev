@@ -44,12 +44,14 @@ steps, and how, through the HTTP API instead of the database.
   immutable row identity. Each item shall carry the row ID, source and
   destination workflow and step IDs, the current names of those steps, trigger,
   actor kind, actor ID, and occurrence time, with bounded cursor pagination.
-  A step that no longer exists shall keep its recorded ID with a null name.
+  A step that no longer exists, or whose workflow is outside the authorized
+  workspace, shall keep its recorded ID with a null name.
 - **AC-TASKS-STEP-TRANSITION-READ-001.2:** The read shall require
   `workspace.read` on the task's workspace, like other task reads. An unknown
   task, and a task in a workspace the caller cannot reach, shall return the
   same 404 response and no history. With authentication disabled, an unknown
-  task shall still return 404.
+  task shall still return 404. Name lookup shall use the same workspace ID as
+  authorization, even if the task transfers before the repository read.
 - **AC-TASKS-STEP-TRANSITION-READ-001.3:** A task with no recorded moves shall
   return an empty list. Moves shall not be reconstructed from messages,
   session history, or the current step.

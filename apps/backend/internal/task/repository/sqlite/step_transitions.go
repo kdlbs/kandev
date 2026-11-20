@@ -48,17 +48,20 @@ func (r *Repository) ListTaskStepTransitions(ctx context.Context, taskID string,
 
 // ListTaskStepTransitionRecords reads oldest-first ledger rows with their
 // attribution, resuming after afterID. Step names come from a left join so a
-// removed step keeps its recorded identifier with a null name.
-func (r *Repository) ListTaskStepTransitionRecords(ctx context.Context, taskID string, afterID int64, limit int) ([]models.StepTransitionRecord, error) {
+// removed or out-of-workspace step keeps its recorded identifier with a null
+// name. workspaceID is the workspace that authorized the read.
+func (r *Repository) ListTaskStepTransitionRecords(ctx context.Context, workspaceID, taskID string, afterID int64, limit int) ([]models.StepTransitionRecord, error) {
 	const query = `SELECT h.id, h.from_workflow_id, h.from_workflow_step_id, fs.name,
 			h.to_workflow_id, h.to_workflow_step_id, ts.name,
 			h.trigger, h.actor_kind, h.actor_id, h.occurred_at
 		FROM task_step_transitions h
-		LEFT JOIN workflow_steps fs ON fs.id = h.from_workflow_step_id
-		LEFT JOIN workflow_steps ts ON ts.id = h.to_workflow_step_id
+		LEFT JOIN workflows fw ON fw.id = h.from_workflow_id AND fw.workspace_id = ?
+		LEFT JOIN workflow_steps fs ON fs.id = h.from_workflow_step_id AND fs.workflow_id = h.from_workflow_id AND fw.id IS NOT NULL
+		LEFT JOIN workflows tw ON tw.id = h.to_workflow_id AND tw.workspace_id = ?
+		LEFT JOIN workflow_steps ts ON ts.id = h.to_workflow_step_id AND ts.workflow_id = h.to_workflow_id AND tw.id IS NOT NULL
 		WHERE h.task_id = ? AND h.id > ?
 		ORDER BY h.id ASC LIMIT ?`
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), taskID, afterID, limit)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), workspaceID, workspaceID, taskID, afterID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list task step transition records: %w", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/testutil"
 )
 
@@ -67,6 +68,13 @@ func TestPostgresTaskStepTransitionRecordsOldestFirstWithNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init postgres schema: %v", err)
 	}
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-records-pg", Name: "Records"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-pg", WorkspaceID: "ws-records-pg", Name: "Records"}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
 	now := time.Now().UTC()
 	if _, err := db.Exec(db.Rebind(`INSERT INTO tasks (id, workspace_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`),
 		"task-records-pg", "ws-records-pg", "Records", now, now); err != nil {
@@ -83,7 +91,7 @@ func TestPostgresTaskStepTransitionRecordsOldestFirstWithNames(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rows, err := repo.ListTaskStepTransitionRecords(context.Background(), "task-records-pg", 0, 10)
+	rows, err := repo.ListTaskStepTransitionRecords(context.Background(), "ws-records-pg", "task-records-pg", 0, 10)
 	if err != nil || len(rows) != 2 || rows[0].ID >= rows[1].ID {
 		t.Fatalf("postgres records = %+v, err=%v", rows, err)
 	}

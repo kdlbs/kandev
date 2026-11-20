@@ -26,22 +26,25 @@ action, or MCP tool changes.
 
 ## Repository read
 
-`Repository.ListTaskStepTransitionRecords(task_id, after_id, limit)` selects
+`Repository.ListTaskStepTransitionRecords(workspace_id, task_id, after_id, limit)` selects
 `WHERE task_id = ? AND id > ? ORDER BY id ASC LIMIT ?`, served by the existing
-`(task_id, id)` index. It left-joins `workflow_steps` twice to resolve the
-source and destination step names. The ledger has no foreign key to steps, so a
-removed step yields its recorded ID and a null name. The query is the same on
-SQLite and Postgres. A task with no rows returns an empty slice.
+`(task_id, id)` index. It resolves each step name through the recorded workflow
+and the authorized workspace. It matches both the workflow ID and step ID.
+The ledger has no foreign key to steps, so a removed step or a workflow outside
+the authorized workspace yields its recorded ID and a null name. The query is
+the same on SQLite and Postgres. A task with no rows returns an empty slice.
 
 ## Authorization
 
-`Service.ListTaskStepTransitionRecords` calls `authorizeTaskID`, the
-`workspace.read` check every task read uses: an unreachable workspace and a
-missing task both map to `ErrTaskNotFound`, and the handler's `handleNotFound`
-returns the fixed body `{"error":"task not found"}`. For an unscoped caller
-(no identity or the synthetic auth-disabled identity) `authorizeTaskID` does not
-load the task, so the service reads the task row once to return not-found for
-an unknown ID.
+`Service.ListTaskStepTransitionRecords` calls `authorizeTaskIDWorkspace`, the
+`workspace.read` check every task read uses. It returns the workspace ID from
+the same task snapshot used for authorization, and the service passes that ID
+to the repository. A transfer after authorization therefore cannot change the
+workspace used to resolve step names. An unreachable workspace and a missing
+task both map to `ErrTaskNotFound`, and the handler's `handleNotFound` returns
+the fixed body `{"error":"task not found"}`. An unscoped caller (no identity
+or the synthetic auth-disabled identity) loads the task to capture its
+workspace ID and to return not-found for an unknown ID.
 
 The plugin and canvas trail keeps omitting actor fields because a plugin grant
 is narrower than a workspace member's access. This endpoint is a separate
@@ -84,7 +87,8 @@ on a later page because the order is ascending by ID.
 follow the ledger: the genesis row has no source, and detachment has no
 destination. `trigger` and `actor_kind` carry the ledger's enum values
 unchanged; `actor_id` is the user, session, or watch identifier the ledger
-defines, or null.
+defines, or null. A recorded step ID can have a null name when the step was
+removed or its workflow is outside the authorized workspace.
 
 ## Compatibility
 

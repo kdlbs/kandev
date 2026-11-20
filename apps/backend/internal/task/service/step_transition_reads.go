@@ -19,7 +19,7 @@ type stepTransitionReader interface {
 }
 
 type stepTransitionRecordReader interface {
-	ListTaskStepTransitionRecords(context.Context, string, int64, int) ([]models.StepTransitionRecord, error)
+	ListTaskStepTransitionRecords(context.Context, string, string, int64, int) ([]models.StepTransitionRecord, error)
 }
 
 type transitionCursor struct {
@@ -97,15 +97,9 @@ func (s *Service) ListTaskStepTransitions(ctx context.Context, taskID string, li
 // actor kind and actor ID, so it requires the caller's workspace.read on the
 // task rather than a plugin grant.
 func (s *Service) ListTaskStepTransitionRecords(ctx context.Context, taskID string, limit int, encodedCursor string) ([]models.StepTransitionRecord, string, error) {
-	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+	workspaceID, err := s.authorizeTaskIDWorkspace(ctx, taskID)
+	if err != nil {
 		return nil, "", err
-	}
-	// authorizeTaskID loads the task only for a scoped caller; an unknown task
-	// must still be a not-found for internal and auth-disabled callers.
-	if _, scoped := callerScope(ctx); !scoped {
-		if _, err := s.tasks.GetTask(ctx, taskID); err != nil {
-			return nil, "", err
-		}
 	}
 	reader, ok := s.tasks.(stepTransitionRecordReader)
 	if !ok {
@@ -120,7 +114,7 @@ func (s *Service) ListTaskStepTransitionRecords(ctx context.Context, taskID stri
 	if err != nil || (encodedCursor != "" && (cursor.ID <= 0 || cursor.Key != "")) {
 		return nil, "", ErrInvalidTransitionCursor
 	}
-	items, err := reader.ListTaskStepTransitionRecords(ctx, taskID, cursor.ID, pageSize+1)
+	items, err := reader.ListTaskStepTransitionRecords(ctx, workspaceID, taskID, cursor.ID, pageSize+1)
 	if err != nil {
 		return nil, "", err
 	}

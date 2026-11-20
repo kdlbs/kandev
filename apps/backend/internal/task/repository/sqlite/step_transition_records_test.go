@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func insertStepTransitionRecordFixture(t *testing.T, repo *Repository, taskID, fromStep, toStep, trigger, actorKind string, actorID any, occurredAt time.Time) {
@@ -30,6 +31,12 @@ func insertStepTransitionNameFixture(t *testing.T, repo *Repository, stepID, nam
 func TestTaskStepTransitionRecordsAreOldestFirstWithAttribution(t *testing.T) {
 	repo := newStepTransitionsTestRepo(t)
 	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-1", Role: authn.RoleMember})
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Records"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "workflow-1", WorkspaceID: "ws-1", Name: "Records"}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
 	createStepTransitionsTestTaskWithCtx(t, repo, ctx, "records-task", "workflow-1", "draft")
 	insertStepTransitionNameFixture(t, repo, "draft", "Draft")
 	insertStepTransitionNameFixture(t, repo, "review", "Review")
@@ -38,7 +45,7 @@ func TestTaskStepTransitionRecordsAreOldestFirstWithAttribution(t *testing.T) {
 	insertStepTransitionRecordFixture(t, repo, "records-task", "draft", "review", "mcp_move", "agent", "session-1", at)
 	insertStepTransitionRecordFixture(t, repo, "records-task", "review", "removed-step", "engine_transition", "system", nil, at)
 
-	rows, err := repo.ListTaskStepTransitionRecords(context.Background(), "records-task", 0, 10)
+	rows, err := repo.ListTaskStepTransitionRecords(context.Background(), "ws-1", "records-task", 0, 10)
 	if err != nil {
 		t.Fatalf("list records: %v", err)
 	}
@@ -64,7 +71,7 @@ func TestTaskStepTransitionRecordsAreOldestFirstWithAttribution(t *testing.T) {
 		t.Fatalf("removed step row = %+v, want recorded id with null name and null actor", removed)
 	}
 
-	page, err := repo.ListTaskStepTransitionRecords(context.Background(), "records-task", rows[0].ID, 1)
+	page, err := repo.ListTaskStepTransitionRecords(context.Background(), "ws-1", "records-task", rows[0].ID, 1)
 	if err != nil || len(page) != 1 || page[0].ID != rows[1].ID {
 		t.Fatalf("page after genesis = %+v, err %v", page, err)
 	}
@@ -74,7 +81,7 @@ func TestTaskStepTransitionRecordsAreOldestFirstWithAttribution(t *testing.T) {
 func TestTaskStepTransitionRecordsEmptyForTaskWithoutMoves(t *testing.T) {
 	repo := newStepTransitionsTestRepo(t)
 	createStepTransitionsTestTask(t, repo, "no-workflow", "", "")
-	rows, err := repo.ListTaskStepTransitionRecords(context.Background(), "no-workflow", 0, 10)
+	rows, err := repo.ListTaskStepTransitionRecords(context.Background(), "ws-1", "no-workflow", 0, 10)
 	if err != nil || rows == nil || len(rows) != 0 {
 		t.Fatalf("rows = %#v, err %v, want empty non-nil slice", rows, err)
 	}
