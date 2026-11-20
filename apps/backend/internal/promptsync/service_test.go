@@ -177,7 +177,7 @@ func TestDeleteConfigReleasesSyncedPrompts(t *testing.T) {
 	_, err := f.svc.Sync(ctx)
 	require.NoError(t, err)
 
-	require.NoError(t, f.svc.DeleteConfig(ctx, nil))
+	require.NoError(t, f.svc.DeleteConfig(ctx, Removal{}))
 	cfg, err := f.svc.GetConfig(ctx)
 	require.NoError(t, err)
 	assert.Nil(t, cfg)
@@ -204,7 +204,7 @@ func TestManualEntryPointsAuthorizeCredentialWorkspace(t *testing.T) {
 	assert.ErrorIs(t, err, denied)
 	_, err = f.svc.Sync(ctx)
 	assert.NoError(t, err)
-	assert.NoError(t, f.svc.DeleteConfig(ctx, nil))
+	assert.NoError(t, f.svc.DeleteConfig(ctx, Removal{}))
 	assert.Equal(t, []string{"foreign", "ws-1", "ws-1"}, checked)
 }
 

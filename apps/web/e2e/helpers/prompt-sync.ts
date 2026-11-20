@@ -8,6 +8,17 @@ export const PROMPTS_DIR = ".kandev/prompts";
 export const SYNC_PATH = /^\/api\/v1\/prompt-sync\/sync$/;
 export const CONFIG_PATH = /^\/api\/v1\/prompt-sync\/config$/;
 export const CHECK_PATH = /^\/api\/v1\/prompt-sync\/check$/;
+export const VERSIONS_PATH = /^\/api\/v1\/prompt-sync\/prompts\/[^/]+\/versions$/;
+
+/** Saves a pending Local override switch from the page's save bar. */
+export async function saveVersions(page: Page, tap = false) {
+  const saved = waitForHttp(page, "PUT", VERSIONS_PATH);
+  const button = page.getByTestId("settings-floating-save").getByRole("button", {
+    name: "Save changes",
+  });
+  await (tap ? button.tap() : button.click());
+  expect((await saved).ok()).toBe(true);
+}
 
 export function promptRow(page: Page, name: string) {
   return page.locator(`[data-testid="prompt-list-item"][data-prompt-name="${name}"]`);

@@ -63,8 +63,9 @@ type SyncApplyResult struct {
 	Overridden []string
 	Conflicts  []string
 	Warnings   []string
-	// wrote records ownership changes that are not content changes, so the
-	// change event still reaches open prompt lists.
+	// wrote records writes that are not content changes (ownership, or an
+	// override's stored repository version), so the change event still
+	// reaches open prompt lists.
 	wrote bool
 }
 
@@ -185,9 +186,11 @@ func (s *Service) applyToOverride(
 	case current.Conflict:
 		result.Conflicts = append(result.Conflicts, file.Name)
 	}
-	if _, err := s.repo.SetOverrideRepositoryContent(ctx, current.ID, file.Content); err != nil {
+	recorded, err := s.repo.SetOverrideRepositoryContent(ctx, current.ID, file.Content)
+	if err != nil {
 		return err
 	}
+	result.wrote = result.wrote || recorded
 	result.Overridden = append(result.Overridden, file.Name)
 	return nil
 }
@@ -334,11 +337,10 @@ func promptReferenceText(prompt *models.Prompt) PromptReferenceText {
 }
 
 // ReleaseSyncedPrompts converts every synced prompt and override into a
-// manual, editable prompt and returns how many were released. A prompt named
-// in useOther takes its other version (kept local version or repository
-// version) as its content.
-func (s *Service) ReleaseSyncedPrompts(ctx context.Context, useOther ...string) (int64, error) {
-	released, err := s.repo.ReleaseSyncedPrompts(ctx, useOther...)
+// manual, editable prompt, applying the user's removal choices, and returns
+// how many prompts were released or deleted.
+func (s *Service) ReleaseSyncedPrompts(ctx context.Context, opts promptstore.ReleaseOptions) (int64, error) {
+	released, err := s.repo.ReleaseSyncedPrompts(ctx, opts)
 	if err != nil {
 		return 0, err
 	}

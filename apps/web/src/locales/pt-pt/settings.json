@@ -1258,10 +1258,6 @@
   "promptSyncedReadOnlyNote": "Só de leitura. Sincronizado a partir de {{path}}; edite o ficheiro no repositório para o alterar.",
   "promptOverridden": "Substituído",
   "promptOverriddenTooltip": "Substitui {{path}} do repositório sincronizado. Desative a substituição local para usar a versão do repositório; a sua versão é guardada.",
-  "promptOverrideDone": "A usar a sua versão local de @{{name}}. A versão do repositório é guardada.",
-  "promptOverrideFailed": "Não foi possível substituir o prompt: {{error}}",
-  "promptRevertDone": "A usar a versão do repositório de @{{name}}. A sua versão local é guardada.",
-  "promptRevertFailed": "Não foi possível reverter o prompt: {{error}}",
   "promptSyncOverriddenList": "Substituídos localmente: {{names}}",
   "promptLocalOverride": "Substituição local",
   "promptConflict": "Conflito",
@@ -1292,6 +1288,9 @@
   "promptConflictBannerTitle_other": "{{count}} conflitos de prompts",
   "promptRemovalLocalHint": "o prompt mantém a sua versão; a versão do repositório é descartada.",
   "promptRemovalRepositoryHint": "o prompt mantém a versão do repositório; a sua versão é descartada.",
-  "promptRemovalReviewTitle": "Escolha as versões a manter",
-  "promptRemovalReviewDescription": "Remover o Prompt Sync transforma os prompts sincronizados em prompts normais. Estes prompts têm a sua versão e a versão do repositório, e só é mantida a versão que escolher."
+  "promptRemovalReviewTitle": "Escolha o que manter",
+  "promptRemovalReviewDescription": "Remover o Prompt Sync transforma os prompts sincronizados em prompts normais. Nada muda até selecionar Remover.",
+  "promptRemovalDeleteRepositoryOnly_one": "Eliminar também {{count}} prompt que veio apenas do repositório",
+  "promptRemovalDeleteRepositoryOnly_other": "Eliminar também os {{count}} prompts que vieram apenas do repositório",
+  "promptRemovalDeleteRepositoryOnlyHint": "Se não marcar, ficam como prompts normais. As menções a um prompt eliminado deixam de ser expandidas no chat; configurar o Prompt Sync novamente recupera-o."
 }

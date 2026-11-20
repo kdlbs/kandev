@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	promptstore "github.com/kandev/kandev/internal/prompts/store"
 )
 
 func subscribePromptEvents(t *testing.T, svc *Service) *[]*bus.Event {
@@ -122,7 +123,7 @@ func TestSyncedPromptsAreReadOnlyToOperatorsAndAgents(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Repo", after.Content)
 
-	released, err := svc.ReleaseSyncedPrompts(ctx)
+	released, err := svc.ReleaseSyncedPrompts(ctx, promptstore.ReleaseOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), released)
 	_, err = svc.UpdatePrompt(ctx, prompt.ID, nil, &edit)

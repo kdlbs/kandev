@@ -1258,10 +1258,6 @@
   "promptSyncedReadOnlyNote": "読み取り専用です。{{path}} から同期されています。変更するにはリポジトリでファイルを編集してください。",
   "promptOverridden": "上書き済み",
   "promptOverriddenTooltip": "同期リポジトリの {{path}} を上書きしています。「ローカル上書き」をオフにするとリポジトリ版を使用します。あなたのバージョンは保持されます。",
-  "promptOverrideDone": "@{{name}} のローカル版を使用しています。リポジトリ版は保持されています。",
-  "promptOverrideFailed": "プロンプトを上書きできませんでした: {{error}}",
-  "promptRevertDone": "@{{name}} のリポジトリ版を使用しています。ローカル版は保持されています。",
-  "promptRevertFailed": "プロンプトを元に戻せませんでした: {{error}}",
   "promptSyncOverriddenList": "ローカルで上書き中: {{names}}",
   "promptLocalOverride": "ローカル上書き",
   "promptConflict": "競合",
@@ -1292,6 +1288,9 @@
   "promptConflictBannerTitle_other": "{{count}} 件のプロンプトの競合",
   "promptRemovalLocalHint": "プロンプトはあなたのバージョンを保持し、リポジトリ版は破棄されます。",
   "promptRemovalRepositoryHint": "プロンプトはリポジトリ版を保持し、あなたのバージョンは破棄されます。",
-  "promptRemovalReviewTitle": "保持するバージョンを選択",
-  "promptRemovalReviewDescription": "Prompt Sync を削除すると、同期済みのプロンプトは通常のプロンプトになります。これらのプロンプトにはあなたのバージョンとリポジトリ版の両方があり、選択したバージョンだけが保持されます。"
+  "promptRemovalReviewTitle": "保持する内容を選択",
+  "promptRemovalReviewDescription": "Prompt Sync を削除すると、同期済みのプロンプトは通常のプロンプトになります。「削除」を選択するまで何も変更されません。",
+  "promptRemovalDeleteRepositoryOnly_one": "リポジトリからのみ取得した {{count}} 件のプロンプトも削除する",
+  "promptRemovalDeleteRepositoryOnly_other": "リポジトリからのみ取得した {{count}} 件のプロンプトも削除する",
+  "promptRemovalDeleteRepositoryOnlyHint": "チェックしない場合は通常のプロンプトとして残ります。削除したプロンプトへのメンションはチャットで展開されなくなります。Prompt Sync を再度設定すると元に戻ります。"
 }

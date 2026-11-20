@@ -113,19 +113,33 @@ delete guards check `source <> 'sync'` instead of `source = 'manual'`.
 
 - Ownership transitions live in `store/ownership_writes.go`. Each is one
   `UPDATE ... WHERE id = ? AND source = ?` statement that reports whether a
-  row changed: `OverrideSyncedPrompt` (`sync -> override`), `RevertOverride`
-  (`override -> sync`), `AdoptPromptAsOverride` and `AdoptPromptAsSynced`
-  (`manual -> override|sync`), `ClearOverrideConflict`, and
-  `RestoreSyncedPrompt` (`sync -> manual`).
-- `Service.OverrideSyncedPrompt(ctx, id)` and `Service.RevertOverride(ctx, id)`
-  wrap the first two. Each returns a typed error (`ErrPromptNotSynced`,
-  `ErrPromptNotOverride`) for any other source and publishes the change event.
-- `promptsync.Service.Override` and `Revert` run under the service lock and
-  require configuration-management authority via their routes
-  (`POST /api/v1/prompt-sync/prompts/:id/override` and `.../revert`). Revert
-  then runs a manual sync with the locked configuration so the repository
-  version replaces the local content; a failed sync leaves the prompt synced
-  and records the failure like any other run.
+  row changed: `RevertOverride` (`override -> sync`, used by sync when the
+  user chose the repository version), `AdoptPromptAsOverride` and
+  `AdoptPromptAsSynced` (`manual -> override|sync`), `ClearOverrideConflict`,
+  and `RestoreSyncedPrompt` (`sync -> manual`).
+- The operator's Local override switch is saved by
+  `SavePromptVersions(ctx, id, from, to PromptVersions)`: one `UPDATE` that
+  writes `source`, `content`, `alternate_content`, and `conflict = 0`, guarded
+  by the full pre-image (`source`, `content`, `alternate_content`) and by
+  `source IN ('sync', 'override')`, so a concurrent sync or edit and a manual
+  prompt are never written.
+- `Service.SavePromptVersions(ctx, id, VersionSave{UseLocal, LocalContent,
+  ExpectedUpdatedAt})` reads the prompt, rejects one that is neither synced
+  nor an override (`ErrPromptNotLinked`), an obsolete `ExpectedUpdatedAt`
+  (`ErrPromptWriteRejected`), and an empty or oversized local version
+  (`ErrInvalidPrompt`). It splits the row into local and repository versions,
+  applies the edited local version, and writes the chosen one in use with the
+  other kept (`nextVersions`; a missing version falls back to the one that
+  exists). A guard miss is reported as `ErrPromptWriteRejected`.
+- `promptsync.Service.SaveVersions` runs it under the service lock and
+  requires configuration-management authority via
+  `PUT /api/v1/prompt-sync/prompts/:id/versions` (`{use_local, local_content?,
+  expected_updated_at?}`; 400 invalid, 404 missing, 409 not linked or stale).
+  When the repository version is chosen it then runs a manual sync with the
+  locked configuration so the latest repository version is in use; a failed
+  sync leaves the prompt synced and records the failure like any other run.
+- Prompt DTOs carry `alternate_content` so the editor can show the version
+  the switch selects before anything is saved.
 - In `ApplySyncedPrompts`, a desired file whose name matches an override is
   left alone and added to `SyncApplyResult.Overridden` (not to warnings),
   unless the user chose the repository version for it. A vanished file never
@@ -181,12 +195,13 @@ now: the kept local version of a synced prompt, or the repository version of
 an override. Empty means none; prompt content is never empty after trimming,
 so the empty string is unambiguous.
 
-- `OverrideSyncedPrompt` and `RevertOverride` swap the two versions in one
-  statement: `content = COALESCE(NULLIF(alternate_content, ''), content),
-  alternate_content = content` (SET reads the pre-update row on SQLite and
-  PostgreSQL). A first override starts from the synced content and keeps it
-  as the repository version; reverting an override uses its stored
-  repository version at once and keeps the local content.
+- `SavePromptVersions` writes both versions together. A first override
+  starts from the synced content and keeps it as the repository version;
+  choosing the repository version uses the stored one at once and keeps the
+  local content, including an edit made while the switch was on.
+  `RevertOverride` swaps the two versions in one statement: `content =
+  COALESCE(NULLIF(alternate_content, ''), content), alternate_content =
+  content` (SET reads the pre-update row on SQLite and PostgreSQL).
   `AdoptPromptAsSynced` keeps the old content; `AdoptPromptAsOverride`
   stores the file's content.
 - `UpdateSyncedPrompt` leaves `alternate_content` alone. For every override
@@ -198,16 +213,20 @@ so the empty string is unambiguous.
   restored) instead of the reference check and `DeleteSyncedPrompt`. It is
   reported in `Restored`. `DeleteSyncedPrompt` also guards `builtin = ?` with
   `0`.
-- Removal (AC-INTEGRATIONS-PROMPT-SYNC-009.5): `TwoVersionPrompts` lists every
-  synced prompt or override whose `alternate_content` is set and differs from
-  `content`, as `Conflict` entries with `in_use` (`repository` for synced,
-  `local` for overrides). `GET /api/v1/prompt-sync/kept-versions` returns
-  them as `{prompts}`. `DELETE /config` accepts `{"choices": {name:
-  local|repository}}`; `DeleteConfig` validates the choices, names the
-  prompts whose choice differs from the version in use, and passes them to
-  `ReleaseSyncedPrompts(ctx, useOther...)`, which sets `content =
-  alternate_content` for those rows and releases everything in one
-  transaction.
+- Removal (AC-INTEGRATIONS-PROMPT-SYNC-009.5, 009.6): `RemovalReview` lists
+  every synced prompt or override whose `alternate_content` is set and
+  differs from `content`, as `Conflict` entries with `in_use` (`repository`
+  for synced, `local` for overrides), and the names of synced, non-built-in
+  prompts with no `alternate_content` (`repository_only`).
+  `GET /api/v1/prompt-sync/kept-versions` returns `{prompts,
+  repository_only}`. `DELETE /config` accepts `{"choices": {name:
+  local|repository}, "delete_repository_only": bool}`; `DeleteConfig`
+  validates the choices, names the prompts whose choice differs from the
+  version in use, and passes a `ReleaseOptions{UseOther,
+  DeleteRepositoryOnly}` to `ReleaseSyncedPrompts`. In one transaction it
+  sets `content = alternate_content` for the `UseOther` rows, deletes
+  `source = 'sync' AND alternate_content = '' AND builtin = 0` rows when
+  asked, and releases everything else.
 
 ### Agent access
 
@@ -448,10 +467,21 @@ list, the `unchanged` flag, and the stored status match the current output
 - `PromptOverrideSwitch` (`prompt-override-controls.tsx`) is the labelled
   switch, with a 44px label hit area on phones and coarse pointers. Both synced and override rows render the
   switch as the first child of a `prompt-row-trailing` group, before View or
-  edit and delete, so it never moves. Both directions call Override or Revert
-  at once; `usePromptOverride` toasts which version of `@name` is now in use.
-  Overrides render as the normal editable row plus `PromptOverrideBadge` and,
-  while conflicted, `PromptConflictBadge`. The status card lists overridden
+  edit and delete, so it never moves. It is controlled by the page draft:
+  toggling it is a pending edit like changing text. On a row not open for
+  editing it calls `startEditing(prompt, useLocal)`, which opens the row in
+  `PromptListItem` (`prompt-list-item.tsx`; a synced row switches from
+  `SyncedPromptListItem` while it is the editing target). The draft
+  (`PromptFormState` in `lib/settings/prompt-versions.ts`) holds the local
+  version as `content` and the switch as `useLocal` (absent for manual
+  prompts, so their draft revisions are unchanged). With the switch on the
+  editor edits the local version; off, it shows `repositoryVersion(prompt)`
+  read-only with the file note. The name is read-only for linked prompts.
+  The shared save bar's **Save** sends `versionsSavePayload` (switch, edited
+  local version only when changed, and the draft's starting revision) to
+  `savePromptVersions`; **Reset** discards; the unsaved-changes guard covers
+  it. Overrides render as the normal editable row plus `PromptOverrideBadge`
+  and, while conflicted, `PromptConflictBadge`. The status card lists overridden
   prompt names, derived from the prompt list, separately from warnings.
 - `PromptConflictReviewList` (`prompt-conflict-review.tsx`) explains the
   local and repository versions once in a legend, then renders one compact
@@ -467,11 +497,14 @@ list, the `unchanged` flag, and the stored status match the current output
   list, the hook checks the stored configuration and reopens the review
   instead of closing.
 - **Remove sync** first calls `usePromptSync.startRemoval`, which reads the
-  prompts with two versions. With any, the dialog shows a removal step: the
-  review list with removal copy, each row starting on its `in_use` version,
-  **Back**, and a destructive **Remove**; `handleDelete` sends every row's
-  choice as `choices`. With none, the existing inline or mobile confirmation
-  opens.
+  removal review. With two-version or repository-only prompts, the dialog
+  shows a removal step (`PromptRemovalReview` in `prompt-removal-review.tsx`):
+  the review list with removal copy when there are two-version prompts, each
+  row starting on its `in_use` version; a checkbox, off by default, naming the
+  repository-only prompts; **Back**; and a destructive **Remove**.
+  `handleDelete` sends `{choices, delete_repository_only}`. The removal state
+  (`useRemovalReview`) resets the checkbox when the step closes. With neither,
+  the existing inline or mobile confirmation opens.
 - `PromptConflictNotice` renders first on Settings > Prompts, above the help
   text: an amber `role="alert"` banner with a count title, the conflicting
   prompt names, and a primary **Review conflicts** button, which opens

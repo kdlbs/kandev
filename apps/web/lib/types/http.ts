@@ -922,6 +922,11 @@ export type CustomPrompt = {
    * also uses, until the user chooses the local or repository version.
    */
   conflict?: boolean;
+  /**
+   * The version not in use: the kept local version of a synced prompt, or
+   * the repository version of an override.
+   */
+  alternate_content?: string;
   created_at: string;
   updated_at: string;
 };

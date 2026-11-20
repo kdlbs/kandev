@@ -15,8 +15,11 @@ type PromptDTO struct {
 	Source          string `json:"source"`
 	SourcePath      string `json:"source_path"`
 	Conflict        bool   `json:"conflict"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	// AlternateContent is the version not in use: the kept local version of a
+	// synced prompt, or the repository version of an override.
+	AlternateContent string `json:"alternate_content,omitempty"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 type PromptsResponse struct {
@@ -38,16 +41,17 @@ type UpdatePromptRequest struct {
 
 func FromPrompt(prompt *models.Prompt) PromptDTO {
 	return PromptDTO{
-		ID:              prompt.ID,
-		Name:            prompt.Name,
-		Content:         prompt.Content,
-		Builtin:         prompt.Builtin,
-		AllowAgentEdits: AgentEditable(prompt),
-		Source:          Source(prompt),
-		SourcePath:      prompt.SourcePath,
-		Conflict:        prompt.Conflict,
-		CreatedAt:       prompt.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:       prompt.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		ID:               prompt.ID,
+		Name:             prompt.Name,
+		Content:          prompt.Content,
+		Builtin:          prompt.Builtin,
+		AllowAgentEdits:  AgentEditable(prompt),
+		Source:           Source(prompt),
+		SourcePath:       prompt.SourcePath,
+		Conflict:         prompt.Conflict,
+		AlternateContent: prompt.AlternateContent,
+		CreatedAt:        prompt.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:        prompt.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
 
@@ -62,7 +66,7 @@ func AgentEditable(prompt *models.Prompt) bool {
 func EditGuidance(prompt *models.Prompt) string {
 	switch {
 	case prompt.IsSynced():
-		return "Synced from the prompt repository and read-only. Only the user can make it editable, by turning on Local override for it in Settings > Prompts; agents cannot change that setting."
+		return "Synced from the prompt repository and read-only. Only the user can make it editable, by turning on Local override for it in Settings > Prompts and saving; agents cannot change that setting."
 	case prompt.IsOverride() && prompt.Conflict:
 		return "A local version that conflicts with the repository file of the same name. Edits change the local version, which is in use. Only the user can resolve the conflict, in Settings > Prompts."
 	case prompt.IsOverride():

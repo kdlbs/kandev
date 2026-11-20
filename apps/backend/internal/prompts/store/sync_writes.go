@@ -130,22 +130,43 @@ func (r *sqliteRepository) DeleteSyncedPrompt(ctx context.Context, id string) (b
 		`DELETE FROM custom_prompts WHERE id = ? AND source = ? AND builtin = ?`, id, models.PromptSourceSync, 0)
 }
 
+// ReleaseOptions are the user's choices when Prompt Sync is removed.
+type ReleaseOptions struct {
+	// UseOther names the prompts that take their other version (kept local
+	// version or repository version) as their content.
+	UseOther []string
+	// DeleteRepositoryOnly deletes the synced prompts that only came from the
+	// repository: not built-in and without a kept local version.
+	DeleteRepositoryOnly bool
+}
+
 // ReleaseSyncedPrompts converts every synced prompt and override to a manual
 // prompt, keeping identity and current content, drops other versions and
-// conflicts, and returns the number released. A synced prompt or override
-// named in useOther takes its other version (kept local version or
-// repository version) as its content. Both steps run in one transaction.
-func (r *sqliteRepository) ReleaseSyncedPrompts(ctx context.Context, useOther ...string) (int64, error) {
+// conflicts, and returns the number of prompts released or deleted. All
+// steps run in one transaction.
+func (r *sqliteRepository) ReleaseSyncedPrompts(ctx context.Context, opts ReleaseOptions) (int64, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	for _, name := range useOther {
+	for _, name := range opts.UseOther {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`
 			UPDATE custom_prompts SET content = alternate_content
 			WHERE name = ? AND source IN (?, ?) AND alternate_content <> ''
 		`), name, models.PromptSourceSync, models.PromptSourceOverride); err != nil {
+			return 0, err
+		}
+	}
+	var deleted int64
+	if opts.DeleteRepositoryOnly {
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
+			DELETE FROM custom_prompts WHERE source = ? AND alternate_content = '' AND builtin = ?
+		`), models.PromptSourceSync, 0)
+		if err != nil {
+			return 0, err
+		}
+		if deleted, err = result.RowsAffected(); err != nil {
 			return 0, err
 		}
 	}
@@ -160,5 +181,5 @@ func (r *sqliteRepository) ReleaseSyncedPrompts(ctx context.Context, useOther ..
 	if err != nil {
 		return 0, err
 	}
-	return released, tx.Commit()
+	return deleted + released, tx.Commit()
 }

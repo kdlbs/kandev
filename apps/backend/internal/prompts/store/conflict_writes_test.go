@@ -24,15 +24,13 @@ func TestRevertKeepsAlternateContentAndOverrideRestoresIt(t *testing.T) {
 	synced, err := repo.CreateSyncedPrompt(ctx, "review", "Repo v1", "p/review.md")
 	require.NoError(t, err)
 
-	changed, err := repo.OverrideSyncedPrompt(ctx, synced.ID)
-	require.NoError(t, err)
-	require.True(t, changed)
+	require.True(t, overrideForTest(t, repo, synced.ID))
 	override := mustGet(t, repo, synced.ID)
 	assert.Equal(t, "Repo v1", override.Content, "a first override starts from the synced content")
 	override.Content = "Mine"
 	require.NoError(t, repo.UpdatePrompt(ctx, override))
 
-	changed, err = repo.RevertOverride(ctx, synced.ID)
+	changed, err := repo.RevertOverride(ctx, synced.ID)
 	require.NoError(t, err)
 	require.True(t, changed)
 	reverted := mustGet(t, repo, synced.ID)
@@ -44,9 +42,7 @@ func TestRevertKeepsAlternateContentAndOverrideRestoresIt(t *testing.T) {
 	require.True(t, updated)
 	assert.Equal(t, "Mine", mustGet(t, repo, synced.ID).AlternateContent, "sync updates preserve the kept copy")
 
-	changed, err = repo.OverrideSyncedPrompt(ctx, synced.ID)
-	require.NoError(t, err)
-	require.True(t, changed)
+	require.True(t, overrideForTest(t, repo, synced.ID))
 	restored := mustGet(t, repo, synced.ID)
 	assert.True(t, restored.IsOverride())
 	assert.Equal(t, "Mine", restored.Content, "turning the override on again restores the local version")
@@ -61,10 +57,9 @@ func TestOwnershipTransitionsAreGuarded(t *testing.T) {
 	require.NoError(t, repo.CreatePrompt(ctx, manual))
 
 	for name, transition := range map[string]func() (bool, error){
-		"override": func() (bool, error) { return repo.OverrideSyncedPrompt(ctx, manual.ID) },
-		"revert":   func() (bool, error) { return repo.RevertOverride(ctx, manual.ID) },
-		"clear":    func() (bool, error) { return repo.ClearOverrideConflict(ctx, manual.ID) },
-		"restore":  func() (bool, error) { return repo.RestoreSyncedPrompt(ctx, manual.ID) },
+		"revert":  func() (bool, error) { return repo.RevertOverride(ctx, manual.ID) },
+		"clear":   func() (bool, error) { return repo.ClearOverrideConflict(ctx, manual.ID) },
+		"restore": func() (bool, error) { return repo.RestoreSyncedPrompt(ctx, manual.ID) },
 	} {
 		changed, err := transition()
 		require.NoError(t, err, name)
@@ -167,7 +162,7 @@ func TestReleaseClearsConflictAndKeptContent(t *testing.T) {
 	_, err = repo.AdoptPromptAsSynced(ctx, second.ID, "Repo", "p/second.md")
 	require.NoError(t, err)
 
-	released, err := repo.ReleaseSyncedPrompts(ctx)
+	released, err := repo.ReleaseSyncedPrompts(ctx, ReleaseOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), released)
 	for _, id := range []string{first.ID, second.ID} {
@@ -192,7 +187,7 @@ func TestReleaseRestoresChosenKeptVersions(t *testing.T) {
 		ids[name] = prompt.ID
 	}
 
-	released, err := repo.ReleaseSyncedPrompts(ctx, "restore-me", "missing")
+	released, err := repo.ReleaseSyncedPrompts(ctx, ReleaseOptions{UseOther: []string{"restore-me", "missing"}})
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), released)
 	restored := mustGet(t, repo, ids["restore-me"])

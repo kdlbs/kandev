@@ -46,10 +46,11 @@ func TestApplyRecordsRepositoryVersionOnOverrides(t *testing.T) {
 	ctx := context.Background()
 	applySynced(t, svc, SyncApplyInput{Desired: []SyncedPromptFile{{Name: "hook", Content: "v1", Path: "p/hook.md"}}})
 	hook := promptNamed(t, svc, "hook")
-	_, err := svc.OverrideSyncedPrompt(ctx, hook.ID)
+	_, err := svc.SavePromptVersions(ctx, hook.ID, VersionSave{UseLocal: true})
 	require.NoError(t, err)
 
-	applySynced(t, svc, SyncApplyInput{Desired: []SyncedPromptFile{{Name: "hook", Content: "v2", Path: "p/hook.md"}}})
+	result := applySynced(t, svc, SyncApplyInput{Desired: []SyncedPromptFile{{Name: "hook", Content: "v2", Path: "p/hook.md"}}})
+	assert.True(t, result.Changed(), "a new repository version is a change the prompt list must see")
 	hook = promptNamed(t, svc, "hook")
 	assert.Equal(t, "v1", hook.Content, "the override keeps its content")
 	assert.Equal(t, "v2", hook.AlternateContent, "and records the latest repository version")

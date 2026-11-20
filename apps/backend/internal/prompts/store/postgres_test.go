@@ -52,7 +52,7 @@ func TestPostgresRepository_SyncedPromptOwnership(t *testing.T) {
 	if changed, err := repo.UpdateSyncedPrompt(ctx, created.ID, "Repo 2", "p/pg-synced.md"); err != nil || !changed {
 		t.Fatalf("update synced prompt = %v, %v", changed, err)
 	}
-	if released, err := repo.ReleaseSyncedPrompts(ctx); err != nil || released != 1 {
+	if released, err := repo.ReleaseSyncedPrompts(ctx, ReleaseOptions{}); err != nil || released != 1 {
 		t.Fatalf("release synced prompts = %d, %v", released, err)
 	}
 	if deleted, err := repo.DeleteSyncedPrompt(ctx, created.ID); err != nil || deleted {

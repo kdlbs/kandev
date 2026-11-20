@@ -6,16 +6,26 @@ import { Badge } from "@kandev/ui/badge";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { usePromptOverride } from "@/hooks/domains/settings/use-prompt-override";
 import { isConflictedPrompt } from "@/hooks/domains/settings/use-prompt-conflict-count";
 import type { CustomPrompt } from "@/lib/types/http";
 
+type PromptOverrideSwitchProps = {
+  prompt: CustomPrompt;
+  checked: boolean;
+  disabled?: boolean;
+  onCheckedChange: (checked: boolean) => void;
+};
+
 // PromptOverrideSwitch is the labelled "Local override" switch, the first of
-// a synced or overridden row's trailing controls. Both directions apply at
-// once: neither version is lost, and a toast names the version now in use.
-export function PromptOverrideSwitch({ prompt }: { prompt: CustomPrompt }) {
+// a synced or overridden row's trailing controls. Toggling it is a pending
+// edit that the page's save bar applies or discards.
+export function PromptOverrideSwitch({
+  prompt,
+  checked,
+  disabled,
+  onCheckedChange,
+}: PromptOverrideSwitchProps) {
   const { t } = useTranslation();
-  const { pendingId, override, revert } = usePromptOverride();
   const switchId = `prompt-override-${prompt.id}`;
   return (
     <Label
@@ -25,11 +35,9 @@ export function PromptOverrideSwitch({ prompt }: { prompt: CustomPrompt }) {
     >
       <Switch
         id={switchId}
-        checked={prompt.source === "override"}
-        onCheckedChange={(checked) => {
-          void (checked ? override(prompt.id, prompt.name) : revert(prompt.id, prompt.name));
-        }}
-        disabled={pendingId === prompt.id}
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        disabled={disabled}
         className="cursor-pointer"
         data-testid="prompt-override-switch"
       />

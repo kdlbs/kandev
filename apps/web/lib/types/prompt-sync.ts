@@ -51,3 +51,24 @@ export interface PromptSyncRunResponse {
   result?: PromptSyncResult;
   error?: string;
 }
+
+/** What removing Prompt Sync asks about. */
+export interface PromptSyncRemovalReview {
+  /** Prompts with both a local and a repository version. */
+  prompts: PromptSyncConflict[];
+  /** Names of synced prompts that only came from the repository. */
+  repository_only: string[];
+}
+
+/** The user's choices when Prompt Sync is removed. */
+export interface PromptSyncRemoval {
+  choices: PromptConflictResolutions;
+  delete_repository_only: boolean;
+}
+
+/** A saved Local override switch with an optional edited local version. */
+export interface PromptVersionsSave {
+  use_local: boolean;
+  local_content?: string;
+  expected_updated_at?: string;
+}

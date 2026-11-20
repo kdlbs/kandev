@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import type { PromptSyncController } from "@/hooks/domains/settings/use-prompt-sync";
+import type {
+  PromptRemovalReview,
+  PromptSyncController,
+} from "@/hooks/domains/settings/use-prompt-sync";
 import type { PromptSyncConfig, PromptSyncConflict } from "@/lib/types/prompt-sync";
 import type { PromptConflictReview } from "@/hooks/domains/settings/use-prompt-conflict-review";
 
@@ -76,7 +79,7 @@ function makeController(overrides: Partial<PromptSyncController> = {}): PromptSy
     handleDelete: vi.fn().mockResolvedValue(true),
     handleSyncNow: vi.fn().mockResolvedValue(undefined),
     review: makeReview(),
-    removal: makeReview(),
+    removal: makeRemoval(),
     startRemoval: vi.fn().mockResolvedValue("confirm"),
     backToFields: vi.fn(),
     ...overrides,
@@ -98,6 +101,20 @@ function makeReview(conflicts: PromptSyncConflict[] = []): PromptConflictReview 
     open: vi.fn(),
     setChoice: vi.fn(),
     close: vi.fn(),
+  };
+}
+
+function makeRemoval(
+  conflicts: PromptSyncConflict[] = [],
+  repositoryOnly: string[] = [],
+): PromptRemovalReview {
+  return {
+    ...makeReview(conflicts),
+    active: conflicts.length > 0 || repositoryOnly.length > 0,
+    repositoryOnly,
+    setRepositoryOnly: vi.fn(),
+    deleteRepositoryOnly: false,
+    setDeleteRepositoryOnly: vi.fn(),
   };
 }
 
@@ -218,7 +235,7 @@ describe("PromptSyncSection removal with kept local versions", () => {
   it("lists prompts with both versions as switch rows and removes from that step", async () => {
     mocks.controller = makeController({
       config,
-      removal: { ...makeReview([conflict]), choices: { principles: "repository" } },
+      removal: { ...makeRemoval([conflict]), choices: { principles: "repository" } },
     });
     renderSection();
     fireEvent.click(screen.getByTestId(OPEN_TEST_ID));
@@ -236,5 +253,25 @@ describe("PromptSyncSection removal with kept local versions", () => {
     expect(mocks.controller.removal.close).toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("prompt-sync-removal-confirm"));
     await waitFor(() => expect(mocks.controller.handleDelete).toHaveBeenCalled());
+  });
+
+  // @covers AC-INTEGRATIONS-PROMPT-SYNC-009.6
+  it("offers deleting the prompts that only came from the repository", async () => {
+    mocks.controller = makeController({
+      config,
+      removal: makeRemoval([], ["release-notes", "principles"]),
+    });
+    renderSection();
+    fireEvent.click(screen.getByTestId(OPEN_TEST_ID));
+    expect(screen.queryByTestId("prompt-conflict-legend")).toBeNull();
+    expect(screen.getByTestId("prompt-removal-repository-only-names").textContent).toBe(
+      "@release-notes, @principles",
+    );
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Also delete 2 prompts that only came from the repository",
+    });
+    expect(checkbox.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(checkbox);
+    expect(mocks.controller.removal.setDeleteRepositoryOnly).toHaveBeenCalledWith(true);
   });
 });

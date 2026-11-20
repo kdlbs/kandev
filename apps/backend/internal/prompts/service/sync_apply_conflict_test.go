@@ -74,7 +74,7 @@ func TestApplyResolvesClashesWithChoices(t *testing.T) {
 	assert.Equal(t, "Repo take", take.Content)
 	assert.Equal(t, "Local take", take.AlternateContent, "taking the repository version keeps the local one")
 
-	overridden, err := svc.OverrideSyncedPrompt(ctx, take.ID)
+	overridden, err := svc.SavePromptVersions(ctx, take.ID, VersionSave{UseLocal: true})
 	require.NoError(t, err)
 	assert.Equal(t, "Local take", overridden.Content, "switching back restores the local version")
 }

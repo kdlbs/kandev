@@ -12,20 +12,36 @@ import (
 // row changed, so a concurrent edit or transition is never overwritten.
 //
 // alternate_content holds the version not in use: the kept local version of a
-// synced prompt, or the repository version of an override. Switching between
-// sync and override swaps it with content (SET reads the pre-update row on
-// SQLite and PostgreSQL), so neither version is lost.
+// synced prompt, or the repository version of an override. Every switch
+// between sync and override keeps both versions: the operator's save writes
+// them together, and RevertOverride swaps them (SET reads the pre-update row
+// on SQLite and PostgreSQL).
 
-// OverrideSyncedPrompt turns a synced prompt into an override. A kept local
-// version becomes the content; otherwise the override starts from the synced
-// content. The repository version is kept as the other version.
-func (r *sqliteRepository) OverrideSyncedPrompt(ctx context.Context, id string) (bool, error) {
+// PromptVersions is the ownership and both versions of a synced prompt or an
+// override: the content in use and the other version.
+type PromptVersions struct {
+	Source           string
+	Content          string
+	AlternateContent string
+}
+
+// VersionsOf reads a prompt's ownership and versions.
+func VersionsOf(prompt *models.Prompt) PromptVersions {
+	return PromptVersions{Source: prompt.Source, Content: prompt.Content, AlternateContent: prompt.AlternateContent}
+}
+
+// SavePromptVersions writes the operator's choice of version for a synced
+// prompt or an override, with both versions, in one statement, and resolves
+// any conflict. It writes only when the row still matches from, so a
+// concurrent sync or edit is never overwritten, and never writes a prompt
+// that Prompt Sync does not manage.
+func (r *sqliteRepository) SavePromptVersions(ctx context.Context, id string, from, to PromptVersions) (bool, error) {
 	return r.execChanged(ctx, `
 		UPDATE custom_prompts
-		SET source = ?, content = COALESCE(NULLIF(alternate_content, ''), content),
-			alternate_content = content, updated_at = ?
-		WHERE id = ? AND source = ?
-	`, models.PromptSourceOverride, time.Now().UTC(), id, models.PromptSourceSync)
+		SET source = ?, content = ?, alternate_content = ?, conflict = 0, updated_at = ?
+		WHERE id = ? AND source = ? AND content = ? AND alternate_content = ? AND source IN (?, ?)
+	`, to.Source, to.Content, to.AlternateContent, time.Now().UTC(),
+		id, from.Source, from.Content, from.AlternateContent, models.PromptSourceSync, models.PromptSourceOverride)
 }
 
 // RevertOverride returns an override to sync ownership and resolves any

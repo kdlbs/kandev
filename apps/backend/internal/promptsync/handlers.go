@@ -3,6 +3,7 @@ package promptsync
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -10,8 +11,8 @@ import (
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	promptdto "github.com/kandev/kandev/internal/prompts/dto"
-	promptmodels "github.com/kandev/kandev/internal/prompts/models"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	promptstore "github.com/kandev/kandev/internal/prompts/store"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
@@ -27,26 +28,31 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	api := router.Group("/api/v1/prompt-sync")
 	manageConfig := authz.RequireOrgScope(authz.ScopeOrgConfigManage)
 	api.GET("/config", ctrl.httpGetConfig)
-	api.GET("/kept-versions", ctrl.httpTwoVersionPrompts)
+	api.GET("/kept-versions", ctrl.httpRemovalReview)
 	api.POST("/config", manageConfig, ctrl.httpSetConfig)
 	api.DELETE("/config", manageConfig, ctrl.httpDeleteConfig)
 	api.POST("/check", manageConfig, ctrl.httpCheck)
 	api.POST("/sync", manageConfig, ctrl.httpSync)
-	api.POST("/prompts/:id/override", manageConfig, ctrl.httpOverride)
-	api.POST("/prompts/:id/revert", manageConfig, ctrl.httpRevert)
+	api.PUT("/prompts/:id/versions", manageConfig, ctrl.httpSaveVersions)
 }
 
-func (c *controller) httpOverride(ctx *gin.Context) {
-	prompt, err := c.service.Override(ctx.Request.Context(), ctx.Param("id"))
-	c.respondPrompt(ctx, prompt, err)
+// versionsRequest is the operator's saved Local override switch and edited
+// local version for a synced prompt or an override.
+type versionsRequest struct {
+	UseLocal          bool       `json:"use_local"`
+	LocalContent      *string    `json:"local_content,omitempty"`
+	ExpectedUpdatedAt *time.Time `json:"expected_updated_at,omitempty"`
 }
 
-func (c *controller) httpRevert(ctx *gin.Context) {
-	prompt, err := c.service.Revert(ctx.Request.Context(), ctx.Param("id"))
-	c.respondPrompt(ctx, prompt, err)
-}
-
-func (c *controller) respondPrompt(ctx *gin.Context, prompt *promptmodels.Prompt, err error) {
+func (c *controller) httpSaveVersions(ctx *gin.Context) {
+	var req versionsRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	prompt, err := c.service.SaveVersions(ctx.Request.Context(), ctx.Param("id"), promptservice.VersionSave{
+		UseLocal: req.UseLocal, LocalContent: req.LocalContent, ExpectedUpdatedAt: req.ExpectedUpdatedAt,
+	})
 	switch {
 	case err == nil:
 		ctx.JSON(http.StatusOK, promptdto.FromPrompt(prompt))
@@ -54,10 +60,12 @@ func (c *controller) respondPrompt(ctx *gin.Context, prompt *promptmodels.Prompt
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "prompt not found"})
 	case errors.Is(err, ErrNotConfigured):
 		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-	case errors.Is(err, promptservice.ErrPromptNotSynced), errors.Is(err, promptservice.ErrPromptNotOverride):
+	case errors.Is(err, promptservice.ErrInvalidPrompt):
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case errors.Is(err, promptservice.ErrPromptNotLinked), errors.Is(err, promptstore.ErrPromptWriteRejected):
 		ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	default:
-		c.internalError(ctx, "failed to change prompt override", err)
+		c.internalError(ctx, "failed to save prompt versions", err)
 	}
 }
 
@@ -145,21 +153,22 @@ func runResponse(cfg *Config, result *SyncResult, syncErr error) gin.H {
 	return response
 }
 
-// httpTwoVersionPrompts lists prompts that have a local and a repository
-// version.
-func (c *controller) httpTwoVersionPrompts(ctx *gin.Context) {
-	prompts, err := c.service.TwoVersionPrompts(ctx.Request.Context())
+// httpRemovalReview lists what removing the configuration asks about.
+func (c *controller) httpRemovalReview(ctx *gin.Context) {
+	review, err := c.service.RemovalReview(ctx.Request.Context())
 	if err != nil {
 		c.internalError(ctx, "failed to list prompts with two versions", err)
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"prompts": prompts})
+	ctx.JSON(http.StatusOK, review)
 }
 
 // deleteRequest picks, by prompt name, which version a prompt with both a
-// local and a repository version keeps when Prompt Sync is removed.
+// local and a repository version keeps when Prompt Sync is removed, and
+// whether prompts that only came from the repository are deleted.
 type deleteRequest struct {
-	Choices map[string]promptservice.ConflictChoice `json:"choices"`
+	Choices              map[string]promptservice.ConflictChoice `json:"choices"`
+	DeleteRepositoryOnly bool                                    `json:"delete_repository_only"`
 }
 
 func (c *controller) httpDeleteConfig(ctx *gin.Context) {
@@ -170,7 +179,7 @@ func (c *controller) httpDeleteConfig(ctx *gin.Context) {
 			return
 		}
 	}
-	err := c.service.DeleteConfig(ctx.Request.Context(), req.Choices)
+	err := c.service.DeleteConfig(ctx.Request.Context(), Removal(req))
 	switch {
 	case errors.Is(err, ErrInvalidConfig):
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

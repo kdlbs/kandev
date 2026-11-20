@@ -1,10 +1,10 @@
 import { useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
+import { formFromPrompt, type PromptFormState } from "@/lib/settings/prompt-versions";
 import type { CustomPrompt } from "@/lib/types/http";
 
-export type PromptFormState = { name: string; content: string };
-export type PromptEditBaseline = Pick<CustomPrompt, "name" | "content" | "updated_at">;
+export type PromptEditBaseline = PromptFormState & Pick<CustomPrompt, "updated_at">;
 
 type PromptEditorEffectsOptions = {
   editingId: string | null;
@@ -30,26 +30,14 @@ export function usePromptEditorEffects({
     editingRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [editingId, editingRef]);
 
+  // A pristine draft follows a newer saved revision of the prompt it edits.
   useEffect(() => {
     if (!editingPrompt || !editBaseline) return;
-    const formIsPristine =
-      formState.name === editBaseline.name && formState.content === editBaseline.content;
-    if (!formIsPristine || editingPrompt.updated_at === editBaseline.updated_at) return;
-    const nextBaseline = {
-      name: editingPrompt.name,
-      content: editingPrompt.content,
-      updated_at: editingPrompt.updated_at,
-    };
-    setFormState({ name: nextBaseline.name, content: nextBaseline.content });
-    setEditBaseline(nextBaseline);
-  }, [
-    editingPrompt?.content,
-    editingPrompt?.name,
-    editingPrompt?.updated_at,
-    editBaseline,
-    formState.content,
-    formState.name,
-    setEditBaseline,
-    setFormState,
-  ]);
+    if (editingPrompt.updated_at === editBaseline.updated_at) return;
+    const { updated_at: _revision, ...baselineForm } = editBaseline;
+    if (JSON.stringify(formState) !== JSON.stringify(baselineForm)) return;
+    const next = formFromPrompt(editingPrompt);
+    setFormState(next);
+    setEditBaseline({ ...next, updated_at: editingPrompt.updated_at });
+  }, [editingPrompt, editBaseline, formState, setEditBaseline, setFormState]);
 }

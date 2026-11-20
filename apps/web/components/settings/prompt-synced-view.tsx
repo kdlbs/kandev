@@ -55,9 +55,17 @@ function PromptSyncedContent({ prompt }: { prompt: CustomPrompt }) {
   );
 }
 
+type SyncedPromptListItemProps = {
+  prompt: CustomPrompt;
+  /** Opens the prompt for editing with the Local override switch on. */
+  onOverride: (prompt: CustomPrompt) => void;
+  disabled: boolean;
+};
+
 // SyncedPromptListItem renders a Prompt Sync-owned prompt: name, synced badge,
-// and a View toggle in place of edit and delete, which the repository owns.
-export function SyncedPromptListItem({ prompt }: { prompt: CustomPrompt }) {
+// the Local override switch, and a View toggle in place of edit and delete,
+// which the repository owns.
+export function SyncedPromptListItem({ prompt, onOverride, disabled }: SyncedPromptListItemProps) {
   const [viewing, setViewing] = useState(false);
   return (
     <div
@@ -71,7 +79,12 @@ export function SyncedPromptListItem({ prompt }: { prompt: CustomPrompt }) {
           <PromptSyncedBadge sourcePath={prompt.source_path} />
         </div>
         <div className="flex shrink-0 items-center gap-1" data-testid="prompt-row-trailing">
-          <PromptOverrideSwitch prompt={prompt} />
+          <PromptOverrideSwitch
+            prompt={prompt}
+            checked={false}
+            disabled={disabled}
+            onCheckedChange={(checked) => checked && onOverride(prompt)}
+          />
           <PromptViewButton
             promptId={prompt.id}
             expanded={viewing}

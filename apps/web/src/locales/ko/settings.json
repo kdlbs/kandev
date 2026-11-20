@@ -1258,10 +1258,6 @@
   "promptSyncedReadOnlyNote": "읽기 전용입니다. {{path}}에서 동기화되었습니다. 변경하려면 저장소에서 파일을 편집하세요.",
   "promptOverridden": "재정의됨",
   "promptOverriddenTooltip": "동기화된 저장소의 {{path}}을(를) 재정의합니다. 로컬 재정의를 끄면 저장소 버전을 사용하며, 내 버전은 보관됩니다.",
-  "promptOverrideDone": "@{{name}}의 로컬 버전을 사용합니다. 저장소 버전은 보관되었습니다.",
-  "promptOverrideFailed": "프롬프트를 재정의할 수 없습니다: {{error}}",
-  "promptRevertDone": "@{{name}}의 저장소 버전을 사용합니다. 로컬 버전은 보관되었습니다.",
-  "promptRevertFailed": "프롬프트를 되돌릴 수 없습니다: {{error}}",
   "promptSyncOverriddenList": "로컬에서 재정의됨: {{names}}",
   "promptLocalOverride": "로컬 재정의",
   "promptConflict": "충돌",
@@ -1292,6 +1288,9 @@
   "promptConflictBannerTitle_other": "프롬프트 충돌 {{count}}개",
   "promptRemovalLocalHint": "프롬프트가 내 버전을 유지하며, 저장소 버전은 삭제됩니다.",
   "promptRemovalRepositoryHint": "프롬프트가 저장소 버전을 유지하며, 내 버전은 삭제됩니다.",
-  "promptRemovalReviewTitle": "유지할 버전 선택",
-  "promptRemovalReviewDescription": "Prompt Sync를 제거하면 동기화된 프롬프트가 일반 프롬프트가 됩니다. 이 프롬프트에는 내 버전과 저장소 버전이 모두 있으며, 선택한 버전만 유지됩니다."
+  "promptRemovalReviewTitle": "유지할 항목 선택",
+  "promptRemovalReviewDescription": "Prompt Sync를 제거하면 동기화된 프롬프트가 일반 프롬프트가 됩니다. 제거를 선택할 때까지 아무것도 변경되지 않습니다.",
+  "promptRemovalDeleteRepositoryOnly_one": "저장소에서만 가져온 프롬프트 {{count}}개도 삭제",
+  "promptRemovalDeleteRepositoryOnly_other": "저장소에서만 가져온 프롬프트 {{count}}개도 삭제",
+  "promptRemovalDeleteRepositoryOnlyHint": "선택하지 않으면 일반 프롬프트로 남습니다. 삭제된 프롬프트를 멘션하면 채팅에서 더 이상 펼쳐지지 않으며, Prompt Sync를 다시 설정하면 복원됩니다."
 }

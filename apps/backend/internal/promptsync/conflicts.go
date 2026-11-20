@@ -120,22 +120,32 @@ func (s *Service) SaveAndSync(ctx context.Context, req *SetConfigRequest) (*Save
 	return &SaveOutcome{Config: cfg, Result: result, SyncErr: syncErr}, nil
 }
 
-// TwoVersionPrompts lists synced prompts and overrides whose local and
-// repository versions differ, sorted by name, so removing the configuration
-// can ask which version each keeps.
-func (s *Service) TwoVersionPrompts(ctx context.Context) ([]Conflict, error) {
+// RemovalReview is what removing the configuration asks about: prompts whose
+// local and repository versions differ, and the names of synced prompts that
+// only came from the repository. Both are sorted by name.
+type RemovalReview struct {
+	Prompts        []Conflict `json:"prompts"`
+	RepositoryOnly []string   `json:"repository_only"`
+}
+
+// RemovalReview lists what removing the configuration asks about.
+func (s *Service) RemovalReview(ctx context.Context) (*RemovalReview, error) {
 	prompts, err := s.prompts.ListPrompts(ctx)
 	if err != nil {
 		return nil, err
 	}
-	listed := []Conflict{}
+	review := &RemovalReview{Prompts: []Conflict{}, RepositoryOnly: []string{}}
 	for _, prompt := range prompts {
 		if item, ok := twoVersionPrompt(prompt); ok {
-			listed = append(listed, item)
+			review.Prompts = append(review.Prompts, item)
+		}
+		if prompt.IsSynced() && prompt.AlternateContent == "" && !prompt.Builtin {
+			review.RepositoryOnly = append(review.RepositoryOnly, prompt.Name)
 		}
 	}
-	sort.Slice(listed, func(i, j int) bool { return listed[i].Name < listed[j].Name })
-	return listed, nil
+	sort.Slice(review.Prompts, func(i, j int) bool { return review.Prompts[i].Name < review.Prompts[j].Name })
+	sort.Strings(review.RepositoryOnly)
+	return review, nil
 }
 
 func twoVersionPrompt(prompt *promptmodels.Prompt) (Conflict, bool) {

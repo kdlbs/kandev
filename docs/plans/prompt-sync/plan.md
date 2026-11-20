@@ -59,6 +59,7 @@ Each layer is shippable on its own:
 | 8 | [Task 10: Override switch](task-10-override-switch.md) | 09 |
 | 9 | [Task 11: Name conflicts, lossless switching, and agent guidance](task-11-conflicts-and-agents.md) | 10 |
 | 10 | [Task 12: Instant switch, compact review, and two-version removal](task-12-compact-review.md) | 11 |
+| 11 | [Task 13: Override switch as a pending edit, and repository-only cleanup on removal](task-13-pending-switch-and-cleanup.md) | 12 |
 
 Tasks 01 and 02 touch separate packages and can run in parallel, as can 03
 and 04. Waves mark parallel-safe candidates only; they do not authorize

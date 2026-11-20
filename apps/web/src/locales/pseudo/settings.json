@@ -1258,10 +1258,6 @@
   "promptSyncedReadOnlyNote": "Ŕēàď-ōńĺŷ. Śŷńćēď ƒŕōḿ {{path}}; ēďĩţ ţĥē ƒĩĺē ĩń ţĥē ŕēƥōśĩţōŕŷ ţō ćĥàńĝē ĩţ.",
   "promptOverridden": "Ōvēŕŕĩďďēń",
   "promptOverriddenTooltip": "Ōvēŕŕĩďēś {{path}} ƒŕōḿ ţĥē śŷńćēď ŕēƥōśĩţōŕŷ. Ţũŕń ōƒƒ Ĺōćàĺ ōvēŕŕĩďē ţō ũśē ţĥē ŕēƥōśĩţōŕŷ vēŕśĩōń; ŷōũŕ vēŕśĩōń ĩś ķēƥţ.",
-  "promptOverrideDone": "Ũśĩńĝ ŷōũŕ ĺōćàĺ vēŕśĩōń ōƒ @{{name}}. Ţĥē ŕēƥōśĩţōŕŷ vēŕśĩōń ĩś ķēƥţ.",
-  "promptOverrideFailed": "Ćōũĺď ńōţ ōvēŕŕĩďē ţĥē ƥŕōḿƥţ: {{error}}",
-  "promptRevertDone": "Ũśĩńĝ ţĥē ŕēƥōśĩţōŕŷ vēŕśĩōń ōƒ @{{name}}. Ŷōũŕ ĺōćàĺ vēŕśĩōń ĩś ķēƥţ.",
-  "promptRevertFailed": "Ćōũĺď ńōţ ŕēvēŕţ ţĥē ƥŕōḿƥţ: {{error}}",
   "promptSyncOverriddenList": "Ōvēŕŕĩďďēń ĺōćàĺĺŷ: {{names}}",
   "promptLocalOverride": "Ĺōćàĺ ōvēŕŕĩďē",
   "promptConflict": "Ćōńƒĺĩćţ",
@@ -1292,6 +1288,9 @@
   "promptConflictBannerTitle_other": "{{count}} ƥŕōḿƥţ ćōńƒĺĩćţś",
   "promptRemovalLocalHint": "ţĥē ƥŕōḿƥţ ķēēƥś ŷōũŕ vēŕśĩōń; ţĥē ŕēƥōśĩţōŕŷ vēŕśĩōń ĩś ďĩśćàŕďēď.",
   "promptRemovalRepositoryHint": "ţĥē ƥŕōḿƥţ ķēēƥś ţĥē ŕēƥōśĩţōŕŷ vēŕśĩōń; ŷōũŕ vēŕśĩōń ĩś ďĩśćàŕďēď.",
-  "promptRemovalReviewTitle": "Ćĥōōśē ŵĥĩćĥ vēŕśĩōńś ţō ķēēƥ",
-  "promptRemovalReviewDescription": "Ŕēḿōvĩńĝ Ƥŕōḿƥţ Śŷńć ţũŕńś śŷńćēď ƥŕōḿƥţś ĩńţō ńōŕḿàĺ ƥŕōḿƥţś. Ţĥēśē ƥŕōḿƥţś ĥàvē ƀōţĥ ŷōũŕ vēŕśĩōń àńď ţĥē ŕēƥōśĩţōŕŷ vēŕśĩōń, àńď ōńĺŷ ţĥē vēŕśĩōń ŷōũ ćĥōōśē ĩś ķēƥţ."
+  "promptRemovalReviewTitle": "Ćĥōōśē ŵĥàţ ţō ķēēƥ",
+  "promptRemovalReviewDescription": "Ŕēḿōvĩńĝ Ƥŕōḿƥţ Śŷńć ţũŕńś śŷńćēď ƥŕōḿƥţś ĩńţō ńōŕḿàĺ ƥŕōḿƥţś. Ńōţĥĩńĝ ćĥàńĝēś ũńţĩĺ ŷōũ śēĺēćţ Ŕēḿōvē.",
+  "promptRemovalDeleteRepositoryOnly_one": "Àĺśō ďēĺēţē {{count}} ƥŕōḿƥţ ţĥàţ ōńĺŷ ćàḿē ƒŕōḿ ţĥē ŕēƥōśĩţōŕŷ",
+  "promptRemovalDeleteRepositoryOnly_other": "Àĺśō ďēĺēţē {{count}} ƥŕōḿƥţś ţĥàţ ōńĺŷ ćàḿē ƒŕōḿ ţĥē ŕēƥōśĩţōŕŷ",
+  "promptRemovalDeleteRepositoryOnlyHint": "Ũńćĥēćķēď, ţĥēŷ śţàŷ àś ńōŕḿàĺ ƥŕōḿƥţś. Ḿēńţĩōńś ōƒ à ďēĺēţēď ƥŕōḿƥţ śţōƥ ēxƥàńďĩńĝ ĩń ćĥàţ; śēţţĩńĝ ũƥ Ƥŕōḿƥţ Śŷńć àĝàĩń ƀŕĩńĝś ĩţ ƀàćķ."
 }

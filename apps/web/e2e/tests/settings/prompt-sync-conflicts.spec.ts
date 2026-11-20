@@ -7,6 +7,7 @@ import {
   fillSyncDialog,
   promptRow,
   saveToReview,
+  saveVersions,
   seedPromptFiles,
   syncNow,
 } from "../../helpers/prompt-sync";
@@ -16,7 +17,7 @@ test.describe("Prompt Sync name conflicts", () => {
     await cleanUpPromptSync(apiClient);
   });
 
-  // @covers AC-INTEGRATIONS-PROMPT-SYNC-008.1 AC-INTEGRATIONS-PROMPT-SYNC-008.2 AC-INTEGRATIONS-PROMPT-SYNC-008.3 AC-INTEGRATIONS-PROMPT-SYNC-009.1 AC-INTEGRATIONS-PROMPT-SYNC-009.2 AC-INTEGRATIONS-PROMPT-SYNC-009.5
+  // @covers AC-INTEGRATIONS-PROMPT-SYNC-008.1 AC-INTEGRATIONS-PROMPT-SYNC-008.2 AC-INTEGRATIONS-PROMPT-SYNC-008.3 AC-INTEGRATIONS-PROMPT-SYNC-009.1 AC-INTEGRATIONS-PROMPT-SYNC-009.2 AC-INTEGRATIONS-PROMPT-SYNC-009.5 AC-INTEGRATIONS-PROMPT-SYNC-009.6
   test("reviews conflicts before saving and switches between versions without losing either", async ({
     testPage,
     apiClient,
@@ -31,6 +32,7 @@ test.describe("Prompt Sync name conflicts", () => {
         "house-rules.md": "Repository house rules",
         "fresh-rule.md": "Fresh rule",
         "same-rule.md": "Same rule",
+        "repo-only.md": "Repository only",
       },
       { first: true },
     );
@@ -72,15 +74,18 @@ test.describe("Prompt Sync name conflicts", () => {
 
     const toggle = houseRules.getByRole("switch", { name: "Local override" });
     await toggle.click();
+    await saveVersions(testPage);
     await expect(houseRules.getByTestId("prompt-override-badge")).toBeVisible();
     await expect(houseRules).toContainText("My house rules");
     await toggle.click();
+    await saveVersions(testPage);
     await expect(houseRules.getByTestId("prompt-synced-badge")).toBeVisible();
     await expect(houseRules).toContainText("Repository house rules");
 
     // A synced prompt overridden and then edited also has two versions.
     const freshRule = promptRow(testPage, "fresh-rule");
     await freshRule.getByRole("switch", { name: "Local override" }).click();
+    await saveVersions(testPage);
     await expect(freshRule.getByTestId("prompt-override-badge")).toBeVisible();
     const fresh = (await apiClient.listPrompts()).prompts.find((p) => p.name === "fresh-rule")!;
     await apiClient.updatePrompt(fresh.id, { content: "My fresh rule" });
@@ -103,6 +108,11 @@ test.describe("Prompt Sync name conflicts", () => {
     await expect(freshSwitch).toHaveAttribute("aria-checked", "false");
     await houseSwitch.click();
     await freshSwitch.click();
+    // The prompt that only came from the repository can be deleted instead.
+    await expect(dialog.getByTestId("prompt-removal-repository-only-names")).toHaveText(
+      "@repo-only",
+    );
+    await dialog.getByTestId("prompt-removal-delete-repository-only").click();
     const removed = waitForHttp(testPage, "DELETE", CONFIG_PATH);
     await dialog.getByTestId("prompt-sync-removal-confirm").click();
     expect((await removed).ok()).toBe(true);
@@ -111,6 +121,8 @@ test.describe("Prompt Sync name conflicts", () => {
     await expect(houseRules).toContainText("My house rules");
     await expect(freshRule).toContainText("Fresh rule");
     await expect(freshRule).not.toContainText("My fresh rule");
+    await expect(promptRow(testPage, "repo-only")).toHaveCount(0);
+    await expect(promptRow(testPage, "same-rule").getByTestId("prompt-edit-button")).toBeVisible();
   });
 
   // @covers AC-INTEGRATIONS-PROMPT-SYNC-008.4 AC-INTEGRATIONS-PROMPT-SYNC-008.5 AC-INTEGRATIONS-PROMPT-SYNC-008.6

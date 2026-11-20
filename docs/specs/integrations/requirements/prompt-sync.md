@@ -198,8 +198,9 @@ that every change goes through review.
   first release every synced prompt and every override to a manual, editable
   prompt, keeping its identity and current content (or its kept local
   content where the user chose it under AC-INTEGRATIONS-PROMPT-SYNC-009.5)
-  and clearing any conflict and kept local content, and then delete the
-  configuration. If any release
+  and clearing any conflict and kept local content, except prompts the user
+  chose to delete under AC-INTEGRATIONS-PROMPT-SYNC-009.6, and then delete
+  the configuration. If any release
   fails, the configuration shall be kept so the user can retry.
 - **AC-INTEGRATIONS-PROMPT-SYNC-004.6:** Changing the provider, credential
   workspace, repository, branch, or directory shall keep existing synced

@@ -6,6 +6,7 @@ import {
   configureThroughDialog,
   fillSyncDialog,
   promptRow,
+  saveVersions,
   saveToReview,
   seedPromptFiles,
   SYNC_PATH,
@@ -44,15 +45,9 @@ test.describe("Prompt Sync on a phone", () => {
     const switchLabel = row.getByTestId("prompt-override-switch-label");
     expect((await switchLabel.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
     await switchLabel.tap();
+    await expect(row.getByTestId("prompt-content-input")).toBeVisible();
+    await saveVersions(testPage, true);
     await expect(row.getByTestId("prompt-override-badge")).toBeVisible();
-    const reverted = waitForHttp(
-      testPage,
-      "POST",
-      /^\/api\/v1\/prompt-sync\/prompts\/[^/]+\/revert$/,
-    );
-    await row.getByTestId("prompt-override-switch-label").tap();
-    expect((await reverted).ok()).toBe(true);
-    await expect(row.getByTestId("prompt-synced-badge")).toBeVisible();
   });
 
   // @covers AC-INTEGRATIONS-PROMPT-SYNC-008.2 AC-INTEGRATIONS-PROMPT-SYNC-008.3 AC-INTEGRATIONS-PROMPT-SYNC-009.5

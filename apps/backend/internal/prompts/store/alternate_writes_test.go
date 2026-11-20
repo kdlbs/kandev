@@ -17,8 +17,7 @@ func TestOverrideKeepsRepositoryVersionAndRevertUsesItAtOnce(t *testing.T) {
 	synced, err := repo.CreateSyncedPrompt(ctx, "review", "Repo", "p/review.md")
 	require.NoError(t, err)
 
-	_, err = repo.OverrideSyncedPrompt(ctx, synced.ID)
-	require.NoError(t, err)
+	require.True(t, overrideForTest(t, repo, synced.ID))
 	override := mustGet(t, repo, synced.ID)
 	assert.Equal(t, "Repo", override.AlternateContent, "an override keeps the repository version")
 	override.Content = "Mine"
@@ -39,8 +38,7 @@ func TestOverrideRepositoryVersionFollowsTheFile(t *testing.T) {
 	ctx := context.Background()
 	synced, err := repo.CreateSyncedPrompt(ctx, "review", "Repo v1", "p/review.md")
 	require.NoError(t, err)
-	_, err = repo.OverrideSyncedPrompt(ctx, synced.ID)
-	require.NoError(t, err)
+	require.True(t, overrideForTest(t, repo, synced.ID))
 
 	changed, err := repo.SetOverrideRepositoryContent(ctx, synced.ID, "Repo v2")
 	require.NoError(t, err)
@@ -85,7 +83,7 @@ func TestReleaseCanSwitchAnOverrideToItsRepositoryVersion(t *testing.T) {
 	_, err := repo.AdoptPromptAsOverride(ctx, manual.ID, "p/clash.md", "Repo", false)
 	require.NoError(t, err)
 
-	_, err = repo.ReleaseSyncedPrompts(ctx, "clash")
+	_, err = repo.ReleaseSyncedPrompts(ctx, ReleaseOptions{UseOther: []string{"clash"}})
 	require.NoError(t, err)
 	released := mustGet(t, repo, manual.ID)
 	assert.Equal(t, models.PromptSourceManual, released.Source)

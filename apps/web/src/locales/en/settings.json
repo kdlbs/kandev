@@ -1258,10 +1258,6 @@
   "promptSyncedReadOnlyNote": "Read-only. Synced from {{path}}; edit the file in the repository to change it.",
   "promptOverridden": "Overridden",
   "promptOverriddenTooltip": "Overrides {{path}} from the synced repository. Turn off Local override to use the repository version; your version is kept.",
-  "promptOverrideDone": "Using your local version of @{{name}}. The repository version is kept.",
-  "promptOverrideFailed": "Could not override the prompt: {{error}}",
-  "promptRevertDone": "Using the repository version of @{{name}}. Your local version is kept.",
-  "promptRevertFailed": "Could not revert the prompt: {{error}}",
   "promptSyncOverriddenList": "Overridden locally: {{names}}",
   "promptLocalOverride": "Local override",
   "promptConflict": "Conflict",
@@ -1292,6 +1288,9 @@
   "promptConflictBannerTitle_other": "{{count}} prompt conflicts",
   "promptRemovalLocalHint": "the prompt keeps your version; the repository version is discarded.",
   "promptRemovalRepositoryHint": "the prompt keeps the repository version; your version is discarded.",
-  "promptRemovalReviewTitle": "Choose which versions to keep",
-  "promptRemovalReviewDescription": "Removing Prompt Sync turns synced prompts into normal prompts. These prompts have both your version and the repository version, and only the version you choose is kept."
+  "promptRemovalReviewTitle": "Choose what to keep",
+  "promptRemovalReviewDescription": "Removing Prompt Sync turns synced prompts into normal prompts. Nothing changes until you select Remove.",
+  "promptRemovalDeleteRepositoryOnly_one": "Also delete {{count}} prompt that only came from the repository",
+  "promptRemovalDeleteRepositoryOnly_other": "Also delete {{count}} prompts that only came from the repository",
+  "promptRemovalDeleteRepositoryOnlyHint": "Unchecked, they stay as normal prompts. Mentions of a deleted prompt stop expanding in chat; setting up Prompt Sync again brings it back."
 }

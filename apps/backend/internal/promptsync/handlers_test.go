@@ -43,7 +43,7 @@ var admin = authn.Identity{UserID: "admin", Role: authn.RoleAdmin, Synthetic: tr
 func TestHandlersConfigLifecycleAndSync(t *testing.T) {
 	f := newSyncFixture(t)
 	router := newTestRouter(t, f.svc, admin)
-	require.NoError(t, f.svc.DeleteConfig(context.Background(), nil))
+	require.NoError(t, f.svc.DeleteConfig(context.Background(), Removal{}))
 
 	assert.Equal(t, http.StatusNoContent, doRequest(router, http.MethodGet, "/api/v1/prompt-sync/config", "").Code)
 	assert.Equal(t, http.StatusNotFound, doRequest(router, http.MethodPost, "/api/v1/prompt-sync/sync", "").Code)

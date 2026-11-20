@@ -30,7 +30,7 @@ func TestPostgresRepository_OwnershipTransitionsKeepAlternateContent(t *testing.
 		{"clear conflict", func() (bool, error) { return repo.ClearOverrideConflict(ctx, manual.ID) }},
 		{"revert", func() (bool, error) { return repo.RevertOverride(ctx, manual.ID) }},
 		{"sync update", func() (bool, error) { return repo.UpdateSyncedPrompt(ctx, manual.ID, "Repo", "p/pg.md") }},
-		{"override", func() (bool, error) { return repo.OverrideSyncedPrompt(ctx, manual.ID) }},
+		{"override", func() (bool, error) { return overrideForTest(t, repo, manual.ID), nil }},
 	}
 	for _, step := range steps {
 		if changed, err := step.run(); err != nil || !changed {
@@ -71,11 +71,19 @@ func TestPostgresRepository_ReleaseRestoresChosenKeptVersions(t *testing.T) {
 	if changed, err := repo.AdoptPromptAsSynced(ctx, prompt.ID, "Repo", "p/pg-restore.md"); err != nil || !changed {
 		t.Fatalf("adopt as synced = %v, %v", changed, err)
 	}
-	if released, err := repo.ReleaseSyncedPrompts(ctx, "pg-restore"); err != nil || released != 1 {
-		t.Fatalf("release = %d, %v", released, err)
+	repoOnly, err := repo.CreateSyncedPrompt(ctx, "pg-repo-only", "Repo only", "p/pg-repo-only.md")
+	if err != nil {
+		t.Fatalf("create synced prompt: %v", err)
+	}
+	opts := ReleaseOptions{UseOther: []string{"pg-restore"}, DeleteRepositoryOnly: true}
+	if changed, err := repo.ReleaseSyncedPrompts(ctx, opts); err != nil || changed != 2 {
+		t.Fatalf("release = %d, %v", changed, err)
 	}
 	read, err := repo.GetPromptByID(ctx, prompt.ID)
 	if err != nil || read.Source != models.PromptSourceManual || read.Content != "Local" || read.AlternateContent != "" {
 		t.Fatalf("released prompt = %+v, %v", read, err)
+	}
+	if _, err := repo.GetPromptByID(ctx, repoOnly.ID); err == nil {
+		t.Fatalf("repository-only prompt was not deleted")
 	}
 }

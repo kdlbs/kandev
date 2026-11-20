@@ -4,13 +4,8 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
-import { PromptDeleteConfirmation } from "@/components/settings/prompt-delete-confirmation";
-import { PromptRowActions } from "@/components/settings/prompt-row-actions";
+import { PromptListItem } from "@/components/settings/prompt-list-item";
 import { SyncedPromptListItem } from "@/components/settings/prompt-synced-view";
-import {
-  PromptOverrideSwitch,
-  PromptRowBadges,
-} from "@/components/settings/prompt-override-controls";
 import { PromptSyncSection } from "@/components/settings/prompt-sync-section";
 import { PromptConflictNotice } from "@/components/settings/prompt-conflict-review-dialog";
 import {
@@ -26,14 +21,17 @@ import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { createPrompt, deletePrompt, updatePrompt } from "@/lib/api";
+import { savePromptVersions } from "@/lib/api/domains/prompt-sync-api";
+import {
+  formFromPrompt,
+  isLinkedPrompt,
+  versionsSavePayload,
+  type PromptFormState,
+} from "@/lib/settings/prompt-versions";
 import { useRequest } from "@/lib/http/use-request";
 import { t } from "@/lib/i18n";
 import type { CustomPrompt } from "@/lib/types/http";
-import {
-  type PromptEditBaseline,
-  type PromptFormState,
-  usePromptEditorEffects,
-} from "./use-prompt-editor-effects";
+import { type PromptEditBaseline, usePromptEditorEffects } from "./use-prompt-editor-effects";
 
 const defaultFormState: PromptFormState = {
   name: "",
@@ -47,10 +45,6 @@ function errorMessage(error: unknown): string {
   // A thrown Error carries the backend's diagnostic, which stays English by
   // design; only the missing-payload fallback is copy.
   return error instanceof Error ? error.message : t("common:requestFailed");
-}
-
-function getPromptPreview(content: string) {
-  return content.split(/\r?\n/)[0] ?? "";
 }
 
 async function runPromptSave(
@@ -110,142 +104,6 @@ function PromptCreateForm({ formState, onFormChange, onCancel, isBusy }: PromptC
   );
 }
 
-type PromptListItemProps = {
-  prompt: CustomPrompt;
-  isEditing: boolean;
-  editingRef: React.RefObject<HTMLDivElement | null>;
-  formState: PromptFormState;
-  onFormChange: (patch: Partial<PromptFormState>) => void;
-  onStartEditing: (prompt: CustomPrompt) => void;
-  onOpenDelete: (prompt: CustomPrompt) => void;
-  onDeleteCancel: () => void;
-  onDeleteConfirm: () => void;
-  onCancel: () => void;
-  isBusy: boolean;
-  showCreate: boolean;
-  isFinePointer: boolean;
-  isDeleteTarget: boolean;
-};
-
-type PromptEditFormProps = Pick<
-  PromptListItemProps,
-  "prompt" | "formState" | "onFormChange" | "onCancel" | "isBusy"
->;
-
-function PromptEditForm({
-  prompt,
-  formState,
-  onFormChange,
-  onCancel,
-  isBusy,
-}: PromptEditFormProps) {
-  const { t } = useTranslation();
-  const nameIsDirty = formState.name !== prompt.name;
-  const contentIsDirty = formState.content !== prompt.content;
-  return (
-    <div className="space-y-3">
-      <Input
-        value={formState.name}
-        onChange={(event) => onFormChange({ name: event.target.value })}
-        placeholder={t("settings:promptNamePlaceholder")}
-        data-testid="prompt-name-input"
-        disabled={isBusy}
-        data-settings-dirty={nameIsDirty}
-      />
-      <SettingsPromptEditor
-        value={formState.content}
-        onChange={(value) => onFormChange({ content: value })}
-        promptReferences
-        excludedPromptIds={[prompt.id]}
-        readOnly={isBusy}
-        testId="prompt-content-input"
-        isDirty={contentIsDirty}
-        dirtyLevel="field"
-      />
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
-          {t("settings:cancel")}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function PromptListItem({
-  prompt,
-  isEditing,
-  editingRef,
-  formState,
-  onFormChange,
-  onStartEditing,
-  onOpenDelete,
-  onDeleteCancel,
-  onDeleteConfirm,
-  onCancel,
-  isBusy,
-  showCreate,
-  isFinePointer,
-  isDeleteTarget,
-}: PromptListItemProps) {
-  const deleteAnchorRef = useRef<HTMLButtonElement | null>(null);
-  const overridden = prompt.source === "override";
-  const nameIsDirty = isEditing && formState.name !== prompt.name;
-  const contentIsDirty = isEditing && formState.content !== prompt.content;
-  return (
-    <div
-      className="rounded-lg border border-border/70 bg-background p-4 flex flex-col gap-3"
-      ref={isEditing ? editingRef : null}
-      data-testid="prompt-list-item"
-      data-prompt-name={prompt.name}
-      data-settings-dirty={nameIsDirty || contentIsDirty}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <div className="text-sm font-medium text-foreground">@{prompt.name}</div>
-          <PromptRowBadges prompt={prompt} />
-        </div>
-        <div className="flex shrink-0 items-center gap-1" data-testid="prompt-row-trailing">
-          {overridden && <PromptOverrideSwitch prompt={prompt} />}
-          <PromptRowActions
-            prompt={prompt}
-            deleteAnchorRef={deleteAnchorRef}
-            onStartEditing={onStartEditing}
-            onOpenDelete={onOpenDelete}
-            isBusy={isBusy}
-            showCreate={showCreate}
-            isFinePointer={isFinePointer}
-            isDeleteTarget={isDeleteTarget}
-          />
-        </div>
-      </div>
-      <PromptDeleteConfirmation
-        promptId={prompt.id}
-        promptName={prompt.name}
-        open={isDeleteTarget}
-        isFinePointer={isFinePointer}
-        anchorRef={deleteAnchorRef}
-        isBusy={isBusy}
-        onClose={onDeleteCancel}
-        onCancel={onDeleteCancel}
-        onConfirm={onDeleteConfirm}
-      />
-      {isEditing ? (
-        <PromptEditForm
-          prompt={prompt}
-          formState={formState}
-          onFormChange={onFormChange}
-          onCancel={onCancel}
-          isBusy={isBusy}
-        />
-      ) : (
-        <div className="text-xs text-muted-foreground whitespace-pre-wrap">
-          <div className="truncate">{getPromptPreview(prompt.content)}</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 type PromptListContentProps = {
   promptsLoaded: boolean;
   prompts: CustomPrompt[];
@@ -254,7 +112,7 @@ type PromptListContentProps = {
   editingRef: React.RefObject<HTMLDivElement | null>;
   formState: PromptFormState;
   onFormChange: (patch: Partial<PromptFormState>) => void;
-  onStartEditing: (prompt: CustomPrompt) => void;
+  onStartEditing: (prompt: CustomPrompt, useLocal?: boolean) => void;
   onOpenDelete: (prompt: CustomPrompt) => void;
   onDeleteCancel: () => void;
   onDeleteConfirm: () => void;
@@ -308,8 +166,13 @@ function PromptListContent({
   return (
     <>
       {prompts.map((prompt: CustomPrompt) =>
-        prompt.source === "sync" ? (
-          <SyncedPromptListItem key={prompt.id} prompt={prompt} />
+        prompt.source === "sync" && editingId !== prompt.id ? (
+          <SyncedPromptListItem
+            key={prompt.id}
+            prompt={prompt}
+            onOverride={(synced) => onStartEditing(synced, true)}
+            disabled={isBusy || showCreate}
+          />
         ) : (
           <PromptListItem
             key={prompt.id}
@@ -403,13 +266,25 @@ function usePromptRequests(
     },
   );
 
+  const versionsRequest = useRequest(
+    async (prompt: CustomPrompt, s: PromptFormState, expectedUpdatedAt: string) => {
+      const updated = await savePromptVersions(
+        prompt.id,
+        versionsSavePayload(prompt, s, expectedUpdatedAt),
+        { cache: "no-store" },
+      );
+      applyPrompts((current) => current.map((p) => (p.id === prompt.id ? updated : p)));
+      resetForm();
+    },
+  );
+
   const deleteRequest = useRequest(async (id: string) => {
     await deletePrompt(id, { cache: "no-store" });
     applyPrompts((current) => current.filter((p) => p.id !== id));
     if (editingId === id) resetForm();
   });
 
-  return { createRequest, updateRequest, deleteRequest };
+  return { createRequest, updateRequest, versionsRequest, deleteRequest };
 }
 
 function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
@@ -439,13 +314,15 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     [formState],
   );
 
-  const { createRequest, updateRequest, deleteRequest } = usePromptRequests(
+  const { createRequest, updateRequest, versionsRequest, deleteRequest } = usePromptRequests(
     setPrompts,
     editingId,
     resetForm,
   );
 
-  const isBusy = createRequest.isLoading || updateRequest.isLoading || deleteRequest.isLoading;
+  const isBusy = [createRequest, updateRequest, versionsRequest, deleteRequest].some(
+    (request) => request.isLoading,
+  );
   const toastError = (title: string) => (err: unknown) =>
     toast({ title, description: errorMessage(err), variant: "error" });
   const handleCreate = () => {
@@ -457,19 +334,23 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
   };
   const handleUpdate = () => {
     if (!isValid || isBusy || !editingId || !editBaseline) return;
-    return runPromptSave(
-      () => updateRequest.run(editingId, formState, editBaseline.updated_at),
-      toastError(t("settings:promptSaveFailed")),
-    );
+    const editingPrompt = state.prompts.find((prompt) => prompt.id === editingId);
+    const save =
+      editingPrompt && isLinkedPrompt(editingPrompt)
+        ? () => versionsRequest.run(editingPrompt, formState, editBaseline.updated_at)
+        : () => updateRequest.run(editingId, formState, editBaseline.updated_at);
+    return runPromptSave(save, toastError(t("settings:promptSaveFailed")));
   };
-  const startEditing = (prompt: CustomPrompt) => {
+  // startEditing opens a prompt's draft; useLocal also toggles the Local
+  // override switch of a synced prompt or override as a pending edit.
+  const startEditing = (prompt: CustomPrompt, useLocal?: boolean) => {
+    const saved = formFromPrompt(prompt);
     setEditingId(prompt.id);
     setShowCreate(false);
-    setEditBaseline({ name: prompt.name, content: prompt.content, updated_at: prompt.updated_at });
-    setFormState({
-      name: prompt.name,
-      content: prompt.content,
-    });
+    setEditBaseline({ ...saved, updated_at: prompt.updated_at });
+    setFormState(
+      useLocal === undefined || !isLinkedPrompt(prompt) ? saved : { ...saved, useLocal },
+    );
   };
   const startCreate = () => {
     setEditingId(null);
@@ -502,6 +383,17 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
   };
 }
 
+function savedForm(
+  editBaseline: PromptEditBaseline | null | undefined,
+  editingPrompt: CustomPrompt | undefined,
+): PromptFormState {
+  if (editBaseline) {
+    const { updated_at: _revision, ...form } = editBaseline;
+    return form;
+  }
+  return editingPrompt ? formFromPrompt(editingPrompt) : defaultFormState;
+}
+
 export function getPromptDraftMeta(
   prompts: CustomPrompt[],
   editingId: string | null,
@@ -511,10 +403,7 @@ export function getPromptDraftMeta(
 ) {
   const editingPrompt = prompts.find((prompt) => prompt.id === editingId);
   const revision = JSON.stringify(formState);
-  const savedRevision = JSON.stringify({
-    name: editBaseline?.name ?? editingPrompt?.name ?? "",
-    content: editBaseline?.content ?? editingPrompt?.content ?? "",
-  });
+  const savedRevision = JSON.stringify(savedForm(editBaseline, editingPrompt));
   return {
     isDirty: showCreate || (Boolean(editingId) && revision !== savedRevision),
     revision: `${showCreate ? "new" : (editingId ?? "none")}:${revision}`,

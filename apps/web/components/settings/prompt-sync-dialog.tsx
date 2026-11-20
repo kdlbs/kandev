@@ -27,6 +27,7 @@ import {
 } from "@/components/settings/repo-sync-fields";
 import { RepoSyncRemovalActions } from "@/components/settings/repo-sync-removal-actions";
 import { PromptConflictReviewList } from "@/components/settings/prompt-conflict-review";
+import { PromptRemovalReview } from "@/components/settings/prompt-removal-review";
 import { useAppStore } from "@/components/state-provider";
 import type {
   PromptSyncController,
@@ -294,9 +295,7 @@ export function PromptSyncDialog({ open, onOpenChange, sync }: PromptSyncDialogP
                 </DialogHeader>
                 {step === "fields" && <PromptSyncFields sync={sync} />}
                 {step === "conflicts" && <PromptConflictReviewList review={sync.review} />}
-                {step === "removal" && (
-                  <PromptConflictReviewList review={sync.removal} kind="removal" />
-                )}
+                {step === "removal" && <PromptRemovalReview removal={sync.removal} />}
                 <PromptSyncDialogFooter
                   sync={sync}
                   removeConfirming={removeConfirming}

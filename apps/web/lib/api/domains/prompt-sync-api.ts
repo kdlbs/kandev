@@ -3,9 +3,11 @@ import type {
   PromptConflictResolutions,
   PromptSyncCheckResponse,
   PromptSyncConfig,
-  PromptSyncConflict,
+  PromptSyncRemoval,
+  PromptSyncRemovalReview,
   PromptSyncRunResponse,
   PromptSyncSetConfigRequest,
+  PromptVersionsSave,
 } from "@/lib/types/prompt-sync";
 import type { CustomPrompt } from "@/lib/types/http";
 
@@ -32,10 +34,11 @@ export async function setPromptSyncConfig(
   });
 }
 
-// deletePromptSyncConfig removes Prompt Sync. choices picks, by prompt name,
-// which version a prompt with both versions keeps; others keep the one in use.
+// deletePromptSyncConfig removes Prompt Sync with the user's removal choices:
+// which version each prompt with both versions keeps (others keep the one in
+// use), and whether prompts that only came from the repository are deleted.
 export async function deletePromptSyncConfig(
-  choices?: PromptConflictResolutions,
+  removal?: PromptSyncRemoval,
   options?: ApiRequestOptions,
 ) {
   return fetchJson<{ deleted: boolean }>(CONFIG_PATH, {
@@ -43,15 +46,16 @@ export async function deletePromptSyncConfig(
     init: {
       ...(options?.init ?? {}),
       method: "DELETE",
-      ...(choices ? { body: JSON.stringify({ choices }) } : {}),
+      ...(removal ? { body: JSON.stringify(removal) } : {}),
     },
   });
 }
 
-// getPromptSyncKeptVersions lists prompts that have both a local and a
-// repository version, each with the version it uses now.
+// getPromptSyncKeptVersions lists what removing Prompt Sync asks about:
+// prompts that have both a local and a repository version, each with the
+// version it uses now, and the prompts that only came from the repository.
 export async function getPromptSyncKeptVersions(options?: ApiRequestOptions) {
-  return fetchJson<{ prompts: PromptSyncConflict[] }>("/api/v1/prompt-sync/kept-versions", options);
+  return fetchJson<PromptSyncRemovalReview>("/api/v1/prompt-sync/kept-versions", options);
 }
 
 // checkPromptSync lists the conflicts a source would cause without saving or
@@ -88,22 +92,18 @@ export async function runPromptSync(
   });
 }
 
-function promptActionPath(promptId: string, action: "override" | "revert") {
-  return `/api/v1/prompt-sync/prompts/${encodeURIComponent(promptId)}/${action}`;
-}
-
-// overridePrompt turns a synced prompt into a local, editable override.
-export async function overridePrompt(promptId: string, options?: ApiRequestOptions) {
-  return fetchJson<CustomPrompt>(promptActionPath(promptId, "override"), {
-    ...options,
-    init: { ...(options?.init ?? {}), method: "POST" },
-  });
-}
-
-// revertPromptOverride returns an override to sync and re-syncs it.
-export async function revertPromptOverride(promptId: string, options?: ApiRequestOptions) {
-  return fetchJson<CustomPrompt>(promptActionPath(promptId, "revert"), {
-    ...options,
-    init: { ...(options?.init ?? {}), method: "POST" },
-  });
+// savePromptVersions saves a synced prompt's or override's Local override
+// switch together with any edit to its local version, in one write.
+export async function savePromptVersions(
+  promptId: string,
+  payload: PromptVersionsSave,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<CustomPrompt>(
+    `/api/v1/prompt-sync/prompts/${encodeURIComponent(promptId)}/versions`,
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(payload) },
+    },
+  );
 }

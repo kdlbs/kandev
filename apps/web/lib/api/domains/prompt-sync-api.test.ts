@@ -4,9 +4,8 @@ import {
   getPromptSyncKeptVersions,
   deletePromptSyncConfig,
   getPromptSyncConfig,
-  overridePrompt,
-  revertPromptOverride,
   runPromptSync,
+  savePromptVersions,
   setPromptSyncConfig,
 } from "./prompt-sync-api";
 
@@ -111,25 +110,29 @@ describe("prompt sync removal api", () => {
       .mockImplementation(async () => mockResponse({ prompts: [], deleted: true }));
     global.fetch = spy as unknown as typeof fetch;
     await getPromptSyncKeptVersions();
-    await deletePromptSyncConfig({ "house-rules": "local" });
+    await deletePromptSyncConfig({
+      choices: { "house-rules": "local" },
+      delete_repository_only: true,
+    });
     await deletePromptSyncConfig();
     const calls = spy.mock.calls as [string, RequestInit][];
     expect(calls[0]![0]).toContain("/api/v1/prompt-sync/kept-versions");
     expect(calls[1]![1].method).toBe("DELETE");
     expect(JSON.parse(calls[1]![1].body as string)).toEqual({
       choices: { "house-rules": "local" },
+      delete_repository_only: true,
     });
     expect(calls[2]![1].body).toBeUndefined();
   });
 });
 
-describe("prompt override api", () => {
+describe("prompt versions api", () => {
   const original = global.fetch;
   afterEach(() => {
     global.fetch = original;
   });
 
-  it("posts override and revert for a prompt", async () => {
+  it("puts the switch and the edited local version for a prompt", async () => {
     const spy = vi.fn().mockImplementation(
       async () =>
         new Response(JSON.stringify({ id: "p 1", source: "override" }), {
@@ -138,11 +141,18 @@ describe("prompt override api", () => {
         }),
     );
     global.fetch = spy as unknown as typeof fetch;
-    await overridePrompt("p 1");
-    await revertPromptOverride("p 1");
+    await savePromptVersions("p 1", {
+      use_local: true,
+      local_content: "Mine",
+      expected_updated_at: "2026-01-01T00:00:00Z",
+    });
     const calls = spy.mock.calls as [string, RequestInit][];
-    expect(calls[0]![0]).toContain("/api/v1/prompt-sync/prompts/p%201/override");
-    expect(calls[0]![1].method).toBe("POST");
-    expect(calls[1]![0]).toContain("/api/v1/prompt-sync/prompts/p%201/revert");
+    expect(calls[0]![0]).toContain("/api/v1/prompt-sync/prompts/p%201/versions");
+    expect(calls[0]![1].method).toBe("PUT");
+    expect(JSON.parse(calls[0]![1].body as string)).toEqual({
+      use_local: true,
+      local_content: "Mine",
+      expected_updated_at: "2026-01-01T00:00:00Z",
+    });
   });
 });

@@ -5,7 +5,7 @@ import type { PromptSyncConfig, PromptSyncConflict } from "@/lib/types/prompt-sy
 const mocks = vi.hoisted(() => ({
   get: vi.fn<() => Promise<PromptSyncConfig | null>>(),
   kept: vi.fn<() => Promise<unknown>>(),
-  del: vi.fn<(choices?: Record<string, string>) => Promise<unknown>>(),
+  del: vi.fn<(removal?: unknown) => Promise<unknown>>(),
   toast: vi.fn(),
 }));
 
@@ -16,7 +16,7 @@ vi.mock("@/hooks/domains/github/use-github-status", () => ({
 vi.mock("@/lib/api/domains/prompt-sync-api", () => ({
   getPromptSyncConfig: () => mocks.get(),
   getPromptSyncKeptVersions: () => mocks.kept(),
-  deletePromptSyncConfig: (choices?: Record<string, string>) => mocks.del(choices),
+  deletePromptSyncConfig: (removal?: unknown) => mocks.del(removal),
   setPromptSyncConfig: vi.fn(),
   checkPromptSync: vi.fn(),
   runPromptSync: vi.fn(),
@@ -57,7 +57,10 @@ describe("usePromptSync removal review", () => {
   });
 
   it("opens a review starting on the version each prompt uses now", async () => {
-    mocks.kept.mockResolvedValue({ prompts: [kept("house-rules"), kept("notes", "local")] });
+    mocks.kept.mockResolvedValue({
+      prompts: [kept("house-rules"), kept("notes", "local")],
+      repository_only: [],
+    });
     const { result } = await renderConfigured();
     let opened = "";
     await act(async () => {
@@ -75,13 +78,16 @@ describe("usePromptSync removal review", () => {
       removed = await result.current.handleDelete();
     });
     expect(removed).toBe(true);
-    expect(mocks.del).toHaveBeenCalledWith({ "house-rules": "local", notes: "local" });
+    expect(mocks.del).toHaveBeenCalledWith({
+      choices: { "house-rules": "local", notes: "local" },
+      delete_repository_only: false,
+    });
     expect(result.current.removal.active).toBe(false);
     expect(result.current.config).toBeNull();
   });
 
   it("asks for the plain confirmation when no prompt keeps a local version", async () => {
-    mocks.kept.mockResolvedValue({ prompts: [] });
+    mocks.kept.mockResolvedValue({ prompts: [], repository_only: [] });
     const { result } = await renderConfigured();
     let opened = "";
     await act(async () => {
@@ -92,7 +98,40 @@ describe("usePromptSync removal review", () => {
     await act(async () => {
       await result.current.handleDelete();
     });
-    expect(mocks.del).toHaveBeenCalledWith({});
+    expect(mocks.del).toHaveBeenCalledWith({ choices: {}, delete_repository_only: false });
+  });
+
+  it("offers deleting the prompts that only came from the repository, off by default", async () => {
+    mocks.kept.mockResolvedValue({ prompts: [], repository_only: ["principles", "release-notes"] });
+    const { result } = await renderConfigured();
+    let opened = "";
+    await act(async () => {
+      opened = await result.current.startRemoval();
+    });
+    expect(opened).toBe("review");
+    expect(result.current.removal.active).toBe(true);
+    expect(result.current.removal.repositoryOnly).toEqual(["principles", "release-notes"]);
+    expect(result.current.removal.deleteRepositoryOnly).toBe(false);
+
+    act(() => result.current.removal.setDeleteRepositoryOnly(true));
+    await act(async () => {
+      await result.current.handleDelete();
+    });
+    expect(mocks.del).toHaveBeenCalledWith({ choices: {}, delete_repository_only: true });
+    expect(result.current.removal.active).toBe(false);
+    expect(result.current.removal.deleteRepositoryOnly).toBe(false);
+  });
+
+  it("closing the removal step resets the checkbox", async () => {
+    mocks.kept.mockResolvedValue({ prompts: [], repository_only: ["principles"] });
+    const { result } = await renderConfigured();
+    await act(async () => {
+      await result.current.startRemoval();
+    });
+    act(() => result.current.removal.setDeleteRepositoryOnly(true));
+    act(() => result.current.removal.close());
+    expect(result.current.removal.active).toBe(false);
+    expect(result.current.removal.deleteRepositoryOnly).toBe(false);
   });
 
   it("removes nothing when the kept versions cannot be read", async () => {

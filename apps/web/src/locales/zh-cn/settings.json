@@ -1258,10 +1258,6 @@
   "promptSyncedReadOnlyNote": "只读。同步自 {{path}}；请在仓库中编辑该文件以进行修改。",
   "promptOverridden": "已覆盖",
   "promptOverriddenTooltip": "覆盖同步仓库中的 {{path}}。关闭“本地覆盖”即可使用仓库版本；您的版本会被保留。",
-  "promptOverrideDone": "正在使用 @{{name}} 的本地版本。仓库版本已保留。",
-  "promptOverrideFailed": "无法覆盖提示词：{{error}}",
-  "promptRevertDone": "正在使用 @{{name}} 的仓库版本。您的本地版本已保留。",
-  "promptRevertFailed": "无法恢复提示词：{{error}}",
   "promptSyncOverriddenList": "本地已覆盖：{{names}}",
   "promptLocalOverride": "本地覆盖",
   "promptConflict": "冲突",
@@ -1292,6 +1288,9 @@
   "promptConflictBannerTitle_other": "{{count}} 个提示词冲突",
   "promptRemovalLocalHint": "提示词保留您的版本；仓库版本将被丢弃。",
   "promptRemovalRepositoryHint": "提示词保留仓库版本；您的版本将被丢弃。",
-  "promptRemovalReviewTitle": "选择要保留的版本",
-  "promptRemovalReviewDescription": "移除 Prompt Sync 会将已同步的提示词转为普通提示词。这些提示词同时有您的版本和仓库版本，只会保留您选择的版本。"
+  "promptRemovalReviewTitle": "选择要保留的内容",
+  "promptRemovalReviewDescription": "移除 Prompt Sync 会将已同步的提示词转为普通提示词。在您选择“移除”之前不会有任何更改。",
+  "promptRemovalDeleteRepositoryOnly_one": "同时删除仅来自仓库的 {{count}} 个提示词",
+  "promptRemovalDeleteRepositoryOnly_other": "同时删除仅来自仓库的 {{count}} 个提示词",
+  "promptRemovalDeleteRepositoryOnlyHint": "如果不勾选，它们会保留为普通提示词。提及已删除的提示词将不再在聊天中展开；重新设置 Prompt Sync 即可恢复。"
 }

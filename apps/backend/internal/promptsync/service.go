@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/github"
 	promptmodels "github.com/kandev/kandev/internal/prompts/models"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	promptstore "github.com/kandev/kandev/internal/prompts/store"
 	"github.com/kandev/kandev/internal/reposync"
 )
 
@@ -22,11 +23,10 @@ const genericFailureMessage = "Prompt sync failed"
 // PromptApplier is the prompt-service surface Prompt Sync writes through.
 type PromptApplier interface {
 	ApplySyncedPrompts(ctx context.Context, input promptservice.SyncApplyInput) (*promptservice.SyncApplyResult, error)
-	ReleaseSyncedPrompts(ctx context.Context, useOther ...string) (int64, error)
+	ReleaseSyncedPrompts(ctx context.Context, opts promptstore.ReleaseOptions) (int64, error)
 	UnresolvedPromptReferences(ctx context.Context, texts []string) ([][]string, error)
 	ListPrompts(ctx context.Context) ([]*promptmodels.Prompt, error)
-	OverrideSyncedPrompt(ctx context.Context, id string) (*promptmodels.Prompt, error)
-	RevertOverride(ctx context.Context, id string) (*promptmodels.Prompt, error)
+	SavePromptVersions(ctx context.Context, id string, save promptservice.VersionSave) (*promptmodels.Prompt, error)
 	GetPromptByID(ctx context.Context, id string) (*promptmodels.Prompt, error)
 }
 
@@ -149,12 +149,20 @@ func (s *Service) saveLocked(ctx context.Context, req *SetConfigRequest) (*Confi
 	return cfg, err
 }
 
+// Removal is the user's choices when Prompt Sync is removed: Choices picks the
+// local or repository version for prompts that have both (others keep the
+// version in use), and DeleteRepositoryOnly deletes the synced prompts that
+// only came from the repository instead of keeping them.
+type Removal struct {
+	Choices              map[string]promptservice.ConflictChoice
+	DeleteRepositoryOnly bool
+}
+
 // DeleteConfig releases every synced prompt and override to manual
-// ownership, then removes the configuration. choices picks the local or
-// repository version for prompts that have both; others keep the version in
-// use. A failed release keeps the configuration for a retry.
-func (s *Service) DeleteConfig(ctx context.Context, choices map[string]promptservice.ConflictChoice) error {
-	if err := validateResolutions(choices); err != nil {
+// ownership, applying the removal choices, then removes the configuration. A
+// failed release keeps the configuration for a retry.
+func (s *Service) DeleteConfig(ctx context.Context, removal Removal) error {
+	if err := validateResolutions(removal.Choices); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -172,12 +180,15 @@ func (s *Service) DeleteConfig(ctx context.Context, choices map[string]promptser
 	if err != nil {
 		return err
 	}
-	released, err := s.prompts.ReleaseSyncedPrompts(ctx, switchingPrompts(prompts, choices)...)
+	released, err := s.prompts.ReleaseSyncedPrompts(ctx, promptstore.ReleaseOptions{
+		UseOther:             switchingPrompts(prompts, removal.Choices),
+		DeleteRepositoryOnly: removal.DeleteRepositoryOnly,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to release synced prompts: %w", err)
 	}
 	if released > 0 {
-		s.logger.Info("released synced prompts", zap.Int64("count", released))
+		s.logger.Info("released synced prompts", zap.Int64("count", released), zap.Bool("deleted_repository_only", removal.DeleteRepositoryOnly))
 	}
 	return s.store.Delete(ctx)
 }

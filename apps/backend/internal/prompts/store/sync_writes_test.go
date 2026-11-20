@@ -61,7 +61,7 @@ func TestSyncedPromptWritesAreOwnershipGuarded(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, changed)
 
-	released, err := repo.ReleaseSyncedPrompts(ctx)
+	released, err := repo.ReleaseSyncedPrompts(ctx, ReleaseOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), released)
 	manual, err := repo.GetPromptByID(ctx, read.ID)

@@ -315,24 +315,55 @@ function useSaveHandler(
   }, [draft, latest, reset, setConfig, toast, fence, review, setSaving]);
 }
 
+// useRemovalReview holds the removal step: the prompts with two versions
+// under review, the prompts that only came from the repository, and whether
+// to delete those. It is active while either list has entries.
+function useRemovalReview() {
+  const review = usePromptConflictReview();
+  const { close: closeReview } = review;
+  const [repositoryOnly, setRepositoryOnly] = useState<string[]>([]);
+  const [deleteRepositoryOnly, setDeleteRepositoryOnly] = useState(false);
+  const close = useCallback(() => {
+    closeReview();
+    setRepositoryOnly([]);
+    setDeleteRepositoryOnly(false);
+  }, [closeReview]);
+  return useMemo(
+    () => ({
+      ...review,
+      active: review.active || repositoryOnly.length > 0,
+      close,
+      repositoryOnly,
+      setRepositoryOnly,
+      deleteRepositoryOnly,
+      setDeleteRepositoryOnly,
+    }),
+    [review, close, repositoryOnly, deleteRepositoryOnly],
+  );
+}
+
+export type PromptRemovalReview = ReturnType<typeof useRemovalReview>;
+
 // useRemoval owns Remove sync. startRemoval lists prompts that have both a
-// local and a repository version: with any, it opens a review starting on the
-// version each uses now ("review"); with none, the plain confirmation applies
-// ("confirm"); a failed read removes nothing ("failed"). handleDelete sends
-// the chosen version for each listed prompt.
+// local and a repository version and prompts that only came from the
+// repository: with any, it opens the removal step, each two-version prompt
+// starting on the version it uses now ("review"); with none, the plain
+// confirmation applies ("confirm"); a failed read removes nothing ("failed").
+// handleDelete sends the chosen versions and the delete choice.
 function useRemoval(
   reset: (cfg: PromptSyncConfig | null) => void,
   setConfig: (cfg: PromptSyncConfig | null) => void,
   toast: ReturnType<typeof useToast>["toast"],
   fence: Fence,
 ) {
-  const removal = usePromptConflictReview();
-  const { open, close } = removal;
+  const removal = useRemovalReview();
+  const { open, close, setRepositoryOnly, choices, deleteRepositoryOnly } = removal;
   const startRemoval = useCallback(async (): Promise<"review" | "confirm" | "failed"> => {
     try {
-      const { prompts } = await getPromptSyncKeptVersions();
-      if (prompts.length === 0) return "confirm";
-      open(prompts, "repository");
+      const review = await getPromptSyncKeptVersions();
+      if (review.prompts.length === 0 && review.repository_only.length === 0) return "confirm";
+      open(review.prompts, "repository");
+      setRepositoryOnly(review.repository_only);
       return "review";
     } catch (err) {
       toast({
@@ -341,11 +372,11 @@ function useRemoval(
       });
       return "failed";
     }
-  }, [open, toast]);
+  }, [open, setRepositoryOnly, toast]);
   const handleDelete = useCallback(async () => {
     fence.begin();
     try {
-      await deletePromptSyncConfig(removal.choices);
+      await deletePromptSyncConfig({ choices, delete_repository_only: deleteRepositoryOnly });
       close();
       setConfig(null);
       reset(null);
@@ -360,7 +391,7 @@ function useRemoval(
     } finally {
       fence.end();
     }
-  }, [removal.choices, close, setConfig, reset, toast, fence]);
+  }, [choices, deleteRepositoryOnly, close, setConfig, reset, toast, fence]);
   return { removal, startRemoval, handleDelete };
 }
 
