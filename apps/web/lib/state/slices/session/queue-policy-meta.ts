@@ -1,46 +1,36 @@
 import type { QueueMeta, QueueStatus } from "./types";
 
-const POLICIES = [
-  {
-    available: "autoMergeAvailable",
-    enabled: "autoMergeEnabled",
-    source: "autoMergeSource",
-    revision: "autoMergeRevision",
-    wireAvailable: "auto_merge_available",
-    wireEnabled: "auto_merge_enabled",
-    wireSource: "auto_merge_source",
-    wireRevision: "auto_merge_revision",
-  },
-] as const;
-
-type PolicyFields = (typeof POLICIES)[number];
 type PolicyStatus = Partial<
-  Pick<QueueStatus, PolicyFields["wireAvailable" | "wireEnabled" | "wireSource" | "wireRevision"]>
+  Pick<
+    QueueStatus,
+    "auto_merge_available" | "auto_merge_enabled" | "auto_merge_source" | "auto_merge_revision"
+  >
 >;
 
 /** Omission is not an authoritative policy value, including on recovery reads. */
 export function queuePolicyStatusMeta(status: PolicyStatus): Partial<QueueMeta> {
   const result: Partial<QueueMeta> = {};
-  for (const keys of POLICIES) {
-    if (status[keys.wireAvailable] !== undefined)
-      result[keys.available] = status[keys.wireAvailable];
-    if (status[keys.wireEnabled] !== undefined) result[keys.enabled] = status[keys.wireEnabled];
-    if (status[keys.wireSource] !== undefined) result[keys.source] = status[keys.wireSource];
-    if (status[keys.wireRevision] !== undefined) result[keys.revision] = status[keys.wireRevision];
+  if (status.auto_merge_available !== undefined) {
+    result.autoMergeAvailable = status.auto_merge_available;
+  }
+  if (status.auto_merge_enabled !== undefined) {
+    result.autoMergeEnabled = status.auto_merge_enabled;
+  }
+  if (status.auto_merge_source !== undefined) {
+    result.autoMergeSource = status.auto_merge_source;
+  }
+  if (status.auto_merge_revision !== undefined) {
+    result.autoMergeRevision = status.auto_merge_revision;
   }
   return result;
 }
 
-function shouldPreserveQueuePolicy(
-  previous: QueueMeta,
-  incoming: Partial<QueueMeta>,
-  keys: PolicyFields,
-): boolean {
-  const previousSource = previous[keys.source];
-  const nextSource = incoming[keys.source];
+function shouldPreserveQueuePolicy(previous: QueueMeta, incoming: Partial<QueueMeta>): boolean {
+  const previousSource = previous.autoMergeSource;
+  const nextSource = incoming.autoMergeSource;
   if (previousSource === "session" && nextSource === "global") return true;
-  const previousRevision = previous[keys.revision];
-  const nextRevision = incoming[keys.revision];
+  const previousRevision = previous.autoMergeRevision;
+  const nextRevision = incoming.autoMergeRevision;
   return (
     previousSource === nextSource &&
     previousRevision !== undefined &&
@@ -54,21 +44,20 @@ export function mergeQueuePolicyMeta(
   previous: QueueMeta | undefined,
   incoming: Partial<QueueMeta>,
 ): Partial<QueueMeta> {
-  const result: Partial<QueueMeta> = {};
   const old =
     previous?.sessionIncarnationId === incoming.sessionIncarnationId ? previous : undefined;
-  for (const keys of POLICIES) {
-    if (old && shouldPreserveQueuePolicy(old, incoming, keys)) {
-      result[keys.available] = old[keys.available];
-      result[keys.enabled] = old[keys.enabled];
-      result[keys.source] = old[keys.source];
-      result[keys.revision] = old[keys.revision];
-      continue;
-    }
-    result[keys.available] = incoming[keys.available] ?? old?.[keys.available];
-    result[keys.enabled] = incoming[keys.enabled] ?? old?.[keys.enabled];
-    result[keys.source] = incoming[keys.source] ?? old?.[keys.source];
-    result[keys.revision] = incoming[keys.revision] ?? old?.[keys.revision];
+  if (old && shouldPreserveQueuePolicy(old, incoming)) {
+    return {
+      autoMergeAvailable: old.autoMergeAvailable,
+      autoMergeEnabled: old.autoMergeEnabled,
+      autoMergeSource: old.autoMergeSource,
+      autoMergeRevision: old.autoMergeRevision,
+    };
   }
-  return result;
+  return {
+    autoMergeAvailable: incoming.autoMergeAvailable ?? old?.autoMergeAvailable,
+    autoMergeEnabled: incoming.autoMergeEnabled ?? old?.autoMergeEnabled,
+    autoMergeSource: incoming.autoMergeSource ?? old?.autoMergeSource,
+    autoMergeRevision: incoming.autoMergeRevision ?? old?.autoMergeRevision,
+  };
 }

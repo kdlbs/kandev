@@ -1,7 +1,8 @@
 ---
 id: "01-persist-auto-sort-merge-policy"
 title: "Persist Auto-sort-merge policy"
-status: done
+status: superseded
+superseded_by: task-06-fold-into-auto-merge.md
 wave: 1
 depends_on: []
 plan: "plan.md"

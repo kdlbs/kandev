@@ -183,3 +183,33 @@ func (r *memoryRepository) rememberAdmissionLocked(
 	r.admissionReceipts[key] = queueAdmissionReceipt{Fingerprint: fingerprint, Message: snapshot}
 	return cloneQueuedMessage(message), false, nil
 }
+
+// The memory repository has no shared task transaction. Its identity-free
+// fallback still folds under the captured admission policy, so in-process edit
+// leases and sorted sender folds apply exactly as they do in SQLite.
+var _ legacyAutoMergePolicyRepository = (*memoryRepository)(nil)
+
+func (r *memoryRepository) autoMergeIntoAbove(_ context.Context, identity *QueueSessionIdentity, sessionID, sourceID string, policy *AdmissionPolicy) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if identity != nil {
+		if err := r.bindIdentityLocked(*identity); err != nil {
+			return nil, false, err
+		}
+	}
+	return r.autoMergeIntoAboveLocked(sessionID, sourceID, policy)
+}
+
+func (r *memoryRepository) autoMergeCandidateIntoAbove(_ context.Context, identity *QueueSessionIdentity, candidate *QueuedMessage, _ *QueueAttachmentClaim, policy *AdmissionPolicy, workflowEntry *WorkflowEntryIdentity) (*QueuedMessage, bool, error) {
+	if workflowEntry != nil {
+		return nil, false, ErrQueueAdmissionUnavailable
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if identity != nil {
+		if err := r.bindIdentityLocked(*identity); err != nil {
+			return nil, false, err
+		}
+	}
+	return r.autoMergeCandidateIntoAboveLocked(candidate, policy)
+}

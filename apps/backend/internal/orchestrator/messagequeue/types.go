@@ -270,11 +270,6 @@ type AutoMergeOverride struct {
 	Revision int64
 }
 
-// GlobalQueuePolicy publishes the committed global Auto-merge snapshot.
-type GlobalQueuePolicy struct {
-	AutoMerge AutoMergePolicy
-}
-
 type SessionPolicyResult struct {
 	AutoMerge      AutoMergePolicy
 	CompactedCount int

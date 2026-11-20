@@ -24,14 +24,14 @@ func TestAutoSortMergeAdmissionPreservesNonMergeableOrder(t *testing.T) {
 					seedQueueSessionIdentity(t, repo, identity)
 					rows := []*QueuedMessage{sortTestEntry("A1", "A"), sortTestEntry("A2", "A"), sortTestEntry("B1", "B")}
 					service := NewService(repo, 10, logger.Default())
-					global := GlobalQueuePolicy{AutoMerge: AutoMergePolicy{Enabled: true}}
+					global := AutoMergePolicy{Enabled: true}
 					switch scenario {
 					case "latest-incompatible":
 						rows[1].Model = "different"
 					case "barrier":
 						rows[1].Metadata[MetadataLifecycleReserved] = true
 					case "merge-off":
-						global.AutoMerge.Enabled = false
+						global.Enabled = false
 					}
 					for _, row := range rows {
 						require.NoError(t, repo.InsertForSession(ctx, identity, row, 0))
@@ -39,7 +39,7 @@ func TestAutoSortMergeAdmissionPreservesNonMergeableOrder(t *testing.T) {
 					if scenario == "local-lease" {
 						service.editLeases[service.editLeaseKey("session", rows[1].ID)] = &QueueEditLease{SessionID: "session", EntryID: rows[1].ID, ExpiresAt: time.Now().Add(time.Hour)}
 					}
-					service.SetGlobalQueuePolicy(global)
+					service.SetGlobalAutoMergePolicy(global)
 					var err error
 					if receipt {
 						_, _, err = service.QueueMessageWithMetadataForSessionWithClientQueueID(ctx, identity, "A3-id", "A3", "", QueuedByAgent, false, nil, map[string]any{MetadataSenderTaskID: "A"}, nil)

@@ -84,4 +84,13 @@ describe("seed origin ownership", () => {
       expect(existsSync(path.join(live, ".git"))).toBe(true);
     });
   });
+
+  it("preserves Git failure evidence when an explicit refresh fails", () => {
+    withSeedRepository((seed) => {
+      const lock = path.join(seed.repositoryPath, ".git", "refs", "remotes", "origin", "main.lock");
+      mkdirSync(path.dirname(lock), { recursive: true });
+      writeFileSync(lock, "owned concurrent fetch\n");
+      expect(() => restoreSeedRepositoryOrigin(seed)).toThrow(/cannot lock ref/);
+    });
+  });
 });

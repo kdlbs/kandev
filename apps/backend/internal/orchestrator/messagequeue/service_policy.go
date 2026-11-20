@@ -5,17 +5,17 @@ import "context"
 
 import "go.uber.org/zap"
 
-func (s *Service) loadGlobalQueuePolicy(ctx context.Context) (GlobalQueuePolicy, error) {
+func (s *Service) loadGlobalAutoMergePolicy(ctx context.Context) (AutoMergePolicy, error) {
 	if loader := s.globalLoader.Load(); loader != nil {
 		policy, err := loader.load(ctx)
 		if err != nil {
-			return GlobalQueuePolicy{}, err
+			return AutoMergePolicy{}, err
 		}
-		s.SetGlobalQueuePolicy(policy)
-		policy.AutoMerge.Source = AutoMergeSourceGlobal
+		s.SetGlobalAutoMergePolicy(policy)
+		policy.Source = AutoMergeSourceGlobal
 		return policy, nil
 	}
-	return s.globalQueuePolicy(), nil
+	return s.globalAutoMergePolicy(), nil
 }
 
 func resolveAutoMergeOverride(override *AutoMergeOverride, global AutoMergePolicy) AutoMergePolicy {
@@ -28,13 +28,11 @@ func resolveAutoMergeOverride(override *AutoMergeOverride, global AutoMergePolic
 func (s *Service) setSessionPolicy(ctx context.Context, identity QueueSessionIdentity, enabled bool) (SessionPolicyResult, error) {
 	var result SessionPolicyResult
 	err := s.WithSessionAdmission(ctx, identity.SessionID, func(ctx context.Context) error {
-		global, err := s.loadGlobalQueuePolicy(ctx)
-		if err != nil {
-			return err
-		}
+		global, globalErr := s.loadGlobalAutoMergePolicy(ctx)
+		var err error
 		result, err = s.repo.SetSessionPolicyAndCompact(ctx, identity, SessionPolicyChange{
 			Enabled: enabled, Leased: s.sessionEditLeases(identity.SessionID),
-		}, global)
+		}, global, globalErr)
 		if err == nil && result.compactionRan {
 			s.logger.Info("compacted session queue", zap.String("session_id", identity.SessionID), zap.Int("compacted_count", result.CompactedCount), zap.String("trigger", "auto_merge"))
 		}

@@ -291,6 +291,9 @@ func TestCreateWorktree_RefreshLockPolicy(t *testing.T) {
 		if !errors.Is(err, ErrGitCommandFailed) {
 			t.Fatalf("Create() error = %v, want ErrGitCommandFailed", err)
 		}
+		if !strings.Contains(err.Error(), "lock contention") || !strings.Contains(err.Error(), "4 attempts") {
+			t.Fatalf("Create() error = %v, want lock contention and attempt count", err)
+		}
 	})
 
 	t.Run("remote-only refresh stays strict", func(t *testing.T) {
@@ -306,6 +309,9 @@ func TestCreateWorktree_RefreshLockPolicy(t *testing.T) {
 		}
 		if !errors.Is(err, ErrGitCommandFailed) {
 			t.Fatalf("Create() error = %v, want ErrGitCommandFailed", err)
+		}
+		if !strings.Contains(err.Error(), "lock contention") {
+			t.Fatalf("Create() error = %v, want lock contention context", err)
 		}
 	})
 

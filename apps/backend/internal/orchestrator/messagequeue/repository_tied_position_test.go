@@ -48,9 +48,7 @@ func tiedRepos() map[string]func(*testing.T) Repository {
 }
 
 func enableSortedFolds(service *Service) {
-	service.SetGlobalQueuePolicy(GlobalQueuePolicy{
-		AutoMerge: AutoMergePolicy{Enabled: true},
-	})
+	service.SetGlobalAutoMergePolicy(AutoMergePolicy{Enabled: true})
 }
 
 // Folds follow the same total FIFO order that listing and draining use, so

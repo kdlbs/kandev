@@ -2,7 +2,7 @@ package messagequeue
 
 import "context"
 
-func (r *memoryRepository) SetSessionPolicyAndCompact(_ context.Context, identity QueueSessionIdentity, change SessionPolicyChange, global GlobalQueuePolicy) (SessionPolicyResult, error) {
+func (r *memoryRepository) SetSessionPolicyAndCompact(_ context.Context, identity QueueSessionIdentity, change SessionPolicyChange, global AutoMergePolicy, globalErr error) (SessionPolicyResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.bindIdentityLocked(identity); err != nil {
@@ -12,11 +12,13 @@ func (r *memoryRepository) SetSessionPolicyAndCompact(_ context.Context, identit
 	var mergeOverride *AutoMergeOverride
 	if _, ok := r.autoMergeOverrides[identity]; ok {
 		mergeOverride = &merge
+	} else if change.Enabled && globalErr != nil {
+		return SessionPolicyResult{}, globalErr
 	}
-	before := resolveAutoMergeOverride(mergeOverride, global.AutoMerge)
+	before := resolveAutoMergeOverride(mergeOverride, global)
 	merge.Enabled = change.Enabled
 	merge.Revision++
-	result := SessionPolicyResult{AutoMerge: resolveAutoMergeOverride(&merge, global.AutoMerge)}
+	result := SessionPolicyResult{AutoMerge: resolveAutoMergeOverride(&merge, global)}
 	if !before.Enabled && result.AutoMerge.Enabled {
 		result.CompactedCount = r.compactSessionQueueLocked(identity.SessionID, change.Leased)
 		result.compactionRan = true

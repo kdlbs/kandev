@@ -15,11 +15,11 @@ func TestAutoMergeLoaderKeepsOneSettingsEnvelope(t *testing.T) {
 	target := &policyLoaderTarget{}
 	reader := &pausedSortSettingsStore{compareAndSwapRawStore: raw, captured: make(chan struct{}), release: make(chan struct{})}
 	_ = NewService(NewStore(reader), target, func() Environment { return Environment{} }, testLogger(t))
-	done := make(chan messagequeue.GlobalQueuePolicy, 1)
+	done := make(chan messagequeue.AutoMergePolicy, 1)
 	go func() {
 		policy, err := target.load(context.Background())
 		if err != nil {
-			done <- messagequeue.GlobalQueuePolicy{}
+			done <- messagequeue.AutoMergePolicy{}
 			return
 		}
 		done <- policy
@@ -28,12 +28,12 @@ func TestAutoMergeLoaderKeepsOneSettingsEnvelope(t *testing.T) {
 	_, err := writer.Update(context.Background(), SettingsPatch{AutoMergeEnabled: new(false)})
 	close(reader.release)
 	old := <-done
-	require.True(t, old.AutoMerge.Enabled)
+	require.True(t, old.Enabled)
 	require.NoError(t, err)
 	policy, err := target.load(context.Background())
 	require.NoError(t, err)
-	require.False(t, policy.AutoMerge.Enabled)
-	require.Equal(t, int64(1), policy.AutoMerge.Revision)
+	require.False(t, policy.Enabled)
+	require.Equal(t, int64(1), policy.Revision)
 }
 
 type pausedSortSettingsStore struct {

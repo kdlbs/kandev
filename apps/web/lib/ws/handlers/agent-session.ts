@@ -1,11 +1,11 @@
-import {
-  mergeQueuePolicyMeta,
-  queuePolicyStatusMeta,
-} from "@/lib/state/slices/session/queue-policy-meta";
 /* eslint-disable max-lines -- session WebSocket handlers share one event registry. */
 import type { StoreApi } from "zustand";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
+import {
+  mergeQueuePolicyMeta,
+  queuePolicyStatusMeta,
+} from "@/lib/state/slices/session/queue-policy-meta";
 import type { QueueMeta } from "@/lib/state/slices/session/types";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import {

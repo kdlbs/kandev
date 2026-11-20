@@ -58,8 +58,8 @@ func TestAutoFoldInsideRepositoryDoesNotAcquireEditLeaseMutex(t *testing.T) {
 }
 
 func TestAdmissionUsesExplicitSessionPoliciesWhenGlobalLoaderFails(t *testing.T) {
-	failingLoader := func(context.Context) (GlobalQueuePolicy, error) {
-		return GlobalQueuePolicy{}, errGlobalSettingsUnavailable
+	failingLoader := func(context.Context) (AutoMergePolicy, error) {
+		return AutoMergePolicy{}, errGlobalSettingsUnavailable
 	}
 	for name, makeRepo := range resilienceRepos() {
 		t.Run(name+"/adjacent with explicit auto-merge", func(t *testing.T) {
@@ -72,7 +72,7 @@ func TestAdmissionUsesExplicitSessionPoliciesWhenGlobalLoaderFails(t *testing.T)
 			require.NoError(t, err)
 			first := &QueuedMessage{TaskID: "task", SessionID: "session", QueuedBy: QueuedByUser, Content: "first"}
 			require.NoError(t, repo.InsertForSession(ctx, identity, first, 0))
-			service.SetGlobalQueuePolicyLoader(failingLoader)
+			service.SetGlobalAutoMergePolicyLoader(failingLoader)
 
 			_, err = service.QueueMessageWithMetadataForSession(ctx, identity, "second", "", QueuedByUser, false, nil, nil)
 			require.NoError(t, err)
@@ -90,7 +90,7 @@ func TestAdmissionUsesExplicitSessionPoliciesWhenGlobalLoaderFails(t *testing.T)
 			require.NoError(t, err)
 			require.NoError(t, repo.InsertForSession(ctx, identity, sortTestEntry("A1", "A"), 0))
 			require.NoError(t, repo.InsertForSession(ctx, identity, sortTestEntry("B1", "B"), 0))
-			service.SetGlobalQueuePolicyLoader(failingLoader)
+			service.SetGlobalAutoMergePolicyLoader(failingLoader)
 
 			_, err = service.QueueMessageWithMetadataForSession(ctx, identity, "A2", "", QueuedByAgent, false, nil, map[string]any{MetadataSenderTaskID: "A"})
 			require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestAdmissionUsesExplicitSessionPoliciesWhenGlobalLoaderFails(t *testing.T)
 			service := NewService(repo, 1, logger.Default())
 			first := &QueuedMessage{TaskID: "task", SessionID: "session", QueuedBy: QueuedByUser, Content: "first"}
 			require.NoError(t, repo.InsertForSession(ctx, identity, first, 0))
-			service.SetGlobalQueuePolicyLoader(failingLoader)
+			service.SetGlobalAutoMergePolicyLoader(failingLoader)
 
 			_, err := service.QueueMessageWithMetadataForSession(ctx, identity, "second", "", QueuedByUser, false, nil, nil)
 			require.ErrorIs(t, err, ErrQueueFull)

@@ -25,8 +25,8 @@ import (
 	"go.uber.org/zap"
 )
 
-type globalQueuePolicyLoader struct {
-	load func(context.Context) (GlobalQueuePolicy, error)
+type globalAutoMergePolicyLoader struct {
+	load func(context.Context) (AutoMergePolicy, error)
 }
 
 // Service manages queued messages for sessions, backed by Repository.
@@ -34,8 +34,8 @@ type Service struct {
 	repo          Repository
 	maxPerSession atomic.Int64
 	mergeEnabled  atomic.Bool
-	globalPolicy  atomic.Pointer[GlobalQueuePolicy]
-	globalLoader  atomic.Pointer[globalQueuePolicyLoader]
+	globalPolicy  atomic.Pointer[AutoMergePolicy]
+	globalLoader  atomic.Pointer[globalAutoMergePolicyLoader]
 	statusEpoch   string
 	logger        *logger.Logger
 	// lifecycleMu fences task-wide purges against every session-scoped queue
@@ -143,7 +143,7 @@ func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service
 	}
 	service.SetMaxPerSession(maxPerSession)
 	service.mergeEnabled.Store(true)
-	service.SetGlobalQueuePolicy(GlobalQueuePolicy{AutoMerge: AutoMergePolicy{Enabled: true}})
+	service.SetGlobalAutoMergePolicy(AutoMergePolicy{Enabled: true})
 	if provider, ok := repo.(queueDepthCounter); ok {
 		registerQueueDepthProvider(provider)
 	}
@@ -239,40 +239,34 @@ func (s *Service) AutoMergeEnabled() bool {
 // SetAutoMergeEnabled updates the global policy while preserving the legacy
 // boolean target used by callers that do not own the persisted revision.
 func (s *Service) SetAutoMergeEnabled(enabled bool) {
-	current := s.globalQueuePolicy()
-	if current.AutoMerge.Enabled != enabled {
-		current.AutoMerge.Revision++
+	current := s.globalAutoMergePolicy()
+	if current.Enabled != enabled {
+		current.Revision++
 	}
-	current.AutoMerge.Enabled = enabled
-	s.SetGlobalQueuePolicy(current)
+	current.Enabled = enabled
+	s.SetGlobalAutoMergePolicy(current)
 }
 
-// SetGlobalQueuePolicy atomically publishes the global Auto-merge snapshot.
-func (s *Service) SetGlobalQueuePolicy(policy GlobalQueuePolicy) {
-	policy.AutoMerge.Source = AutoMergeSourceGlobal
+// SetGlobalAutoMergePolicy atomically publishes the global Auto-merge snapshot.
+func (s *Service) SetGlobalAutoMergePolicy(policy AutoMergePolicy) {
+	policy.Source = AutoMergeSourceGlobal
 	s.globalPolicy.Store(&policy)
 }
 
-// SetGlobalQueuePolicyLoader installs the shared persisted-settings reader.
-func (s *Service) SetGlobalQueuePolicyLoader(load func(context.Context) (GlobalQueuePolicy, error)) {
+// SetGlobalAutoMergePolicyLoader installs the shared persisted-settings reader.
+func (s *Service) SetGlobalAutoMergePolicyLoader(load func(context.Context) (AutoMergePolicy, error)) {
 	if load == nil {
 		s.globalLoader.Store(nil)
 		return
 	}
-	s.globalLoader.Store(&globalQueuePolicyLoader{load: load})
-}
-
-func (s *Service) globalQueuePolicy() GlobalQueuePolicy {
-	if policy := s.globalPolicy.Load(); policy != nil {
-		return *policy
-	}
-	return GlobalQueuePolicy{
-		AutoMerge: AutoMergePolicy{Enabled: true, Source: AutoMergeSourceGlobal},
-	}
+	s.globalLoader.Store(&globalAutoMergePolicyLoader{load: load})
 }
 
 func (s *Service) globalAutoMergePolicy() AutoMergePolicy {
-	return s.globalQueuePolicy().AutoMerge
+	if policy := s.globalPolicy.Load(); policy != nil {
+		return *policy
+	}
+	return AutoMergePolicy{Enabled: true, Source: AutoMergeSourceGlobal}
 }
 
 // ResolveAutoMergePolicy returns the session override when present, otherwise
@@ -293,11 +287,6 @@ func (s *Service) ResolveAutoMergePolicy(
 		Source:   AutoMergeSourceSession,
 		Revision: override.Revision,
 	}, nil
-}
-
-func (s *Service) loadGlobalAutoMergePolicy(ctx context.Context) (AutoMergePolicy, error) {
-	policy, err := s.loadGlobalQueuePolicy(ctx)
-	return policy.AutoMerge, err
 }
 
 // SetSessionAutoMerge persists and returns an explicit per-session policy.
@@ -1377,14 +1366,14 @@ func (s *Service) resolveAdmissionAutoMergePolicy(
 	identity *QueueSessionIdentity,
 	sessionID string,
 ) *AdmissionPolicy {
-	global, globalErr := s.loadGlobalQueuePolicy(ctx)
+	global, globalErr := s.loadGlobalAutoMergePolicy(ctx)
 	if identity == nil {
 		if globalErr != nil {
 			s.logger.Warn("queue policy unavailable; admitting separate message", zap.String("session_id", sessionID), zap.Error(globalErr))
 			return nil
 		}
 		return &AdmissionPolicy{
-			AutoMerge: global.AutoMerge,
+			AutoMerge: global,
 			leased:    s.sessionEditLeases(sessionID), log: s.logger,
 		}
 	}
@@ -1398,7 +1387,7 @@ func (s *Service) resolveAdmissionAutoMergePolicy(
 		return nil
 	}
 	return &AdmissionPolicy{
-		AutoMerge: resolveAutoMergeOverride(mergeOverride, global.AutoMerge),
+		AutoMerge: resolveAutoMergeOverride(mergeOverride, global),
 		leased:    s.sessionEditLeases(sessionID), log: s.logger,
 	}
 }
@@ -3527,9 +3516,9 @@ func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (
 		AutoRun:              snapshot.AutoRun,
 		MergeEnabled:         s.MergeEnabled(),
 	}
-	global, globalErr := s.loadGlobalQueuePolicy(ctx)
+	global, globalErr := s.loadGlobalAutoMergePolicy(ctx)
 	if snapshot.AutoMergeError == nil && (snapshot.AutoMergeOverride != nil || globalErr == nil) {
-		policy := resolveAutoMergeOverride(snapshot.AutoMergeOverride, global.AutoMerge)
+		policy := resolveAutoMergeOverride(snapshot.AutoMergeOverride, global)
 		status.AutoMergeAvailable = true
 		status.AutoMergeEnabled = &policy.Enabled
 		status.AutoMergeSource = policy.Source

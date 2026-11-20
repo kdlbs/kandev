@@ -2920,58 +2920,6 @@ func (r *sqliteRepository) GetAutoMergeOverride(
 	return &AutoMergeOverride{Enabled: enabled.Int64 != 0, Revision: revision}, nil
 }
 
-func (r *sqliteRepository) SetAutoMergeOverride(
-	ctx context.Context,
-	identity QueueSessionIdentity,
-	enabled bool,
-) (AutoMergeOverride, error) {
-	unlock := r.withSessionLock(identity.SessionID)
-	defer unlock()
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return AutoMergeOverride{}, fmt.Errorf("begin set Auto-merge override: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := r.guardActiveTaskTx(ctx, tx, identity.TaskID); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	if err := r.lockSessionTx(ctx, tx, identity.SessionID); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	if err := r.validateSessionIdentityTx(ctx, tx, identity); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO queue_session_state (
-			session_id, session_incarnation_id, auto_merge_override, auto_merge_revision
-		) VALUES (?, ?, ?, 1)
-		ON CONFLICT(session_id) DO UPDATE SET
-			session_incarnation_id = excluded.session_incarnation_id,
-			auto_merge_override = excluded.auto_merge_override,
-			auto_merge_revision = queue_session_state.auto_merge_revision + 1
-		WHERE queue_session_state.session_incarnation_id = ''
-		   OR queue_session_state.session_incarnation_id = excluded.session_incarnation_id
-	`), identity.SessionID, identity.SessionIncarnationID, boolToInt(enabled)); err != nil {
-		return AutoMergeOverride{}, fmt.Errorf("set queue Auto-merge override: %w", err)
-	}
-	var result AutoMergeOverride
-	var storedEnabled int
-	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT auto_merge_override, auto_merge_revision
-		  FROM queue_session_state
-		 WHERE session_id = ? AND session_incarnation_id = ?
-	`), identity.SessionID, identity.SessionIncarnationID).Scan(&storedEnabled, &result.Revision); errors.Is(err, sql.ErrNoRows) {
-		return AutoMergeOverride{}, ErrSessionIdentityMismatch
-	} else if err != nil {
-		return AutoMergeOverride{}, fmt.Errorf("read written queue Auto-merge override: %w", err)
-	}
-	result.Enabled = storedEnabled != 0
-	if err := tx.Commit(); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	return result, nil
-}
-
 // PauseAutoRunIfPending persists OFF only when a visible pending row exists.
 func (r *sqliteRepository) PauseAutoRunIfPending(ctx context.Context, sessionID string) (bool, error) {
 	return r.pauseAutoRunIfPending(ctx, nil, sessionID)

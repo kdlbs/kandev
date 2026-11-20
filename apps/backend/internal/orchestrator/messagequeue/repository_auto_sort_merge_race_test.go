@@ -58,10 +58,10 @@ func TestAutoMergePolicyAndCompactionRaceAcrossConnections(t *testing.T) {
 				release := sync.OnceFunc(func() { close(paused.release) })
 				defer release()
 				queue := NewService(paused, 10, logger.Default())
-				global := GlobalQueuePolicy{AutoMerge: AutoMergePolicy{Enabled: !enable}}
-				queue.SetGlobalQueuePolicy(global)
+				global := AutoMergePolicy{Enabled: !enable}
+				queue.SetGlobalAutoMergePolicy(global)
 				writer := NewService(second, 10, logger.Default())
-				writer.SetGlobalQueuePolicy(global)
+				writer.SetGlobalAutoMergePolicy(global)
 				done := make(chan error, 1)
 				go func() {
 					_, err := queue.QueueMessageWithMetadataForSession(ctx, identity, content, "", QueuedByAgent, false, nil, map[string]any{MetadataSenderTaskID: "A"})

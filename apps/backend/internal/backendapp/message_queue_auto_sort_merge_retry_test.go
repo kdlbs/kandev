@@ -29,7 +29,9 @@ func (r *changingSortPolicyRepository) GetAutoMergeOverride(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	r.once.Do(func() { _, err = r.SetAutoMergeOverride(ctx, identity, false) })
+	r.once.Do(func() {
+		_, err = r.SetSessionPolicyAndCompact(ctx, identity, messagequeue.SessionPolicyChange{Enabled: false}, messagequeue.AutoMergePolicy{Enabled: true, Source: messagequeue.AutoMergeSourceGlobal}, nil)
+	})
 	return value, err
 }
 

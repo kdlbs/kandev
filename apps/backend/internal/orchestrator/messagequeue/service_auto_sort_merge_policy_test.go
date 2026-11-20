@@ -18,13 +18,13 @@ func TestAutoMergeDelayedLoaderFailureKeepsEarlierGeneration(t *testing.T) {
 	service := NewService(repo, 10, logger.Default())
 	captured, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int64
-	service.SetGlobalQueuePolicyLoader(func(context.Context) (GlobalQueuePolicy, error) {
+	service.SetGlobalAutoMergePolicyLoader(func(context.Context) (AutoMergePolicy, error) {
 		if calls.Add(1) == 1 {
 			close(captured)
 			<-release
-			return GlobalQueuePolicy{}, errors.New("settings unavailable")
+			return AutoMergePolicy{}, errors.New("settings unavailable")
 		}
-		return GlobalQueuePolicy{AutoMerge: AutoMergePolicy{Enabled: true, Revision: 2}}, nil
+		return AutoMergePolicy{Enabled: true, Revision: 2}, nil
 	})
 	done := make(chan *QueueStatus, 1)
 	go func() {

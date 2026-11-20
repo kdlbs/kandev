@@ -38,7 +38,7 @@ func TestAutoMergeAdmissionRetriesChangedOverride(t *testing.T) {
 		done <- err
 	}()
 	<-repo.captured
-	_, err := base.SetAutoMergeOverride(ctx, identity, false)
+	_, err := setAutoMergeOverrideForTest(ctx, base, identity, false)
 	close(repo.release)
 	require.NoError(t, err)
 	require.NoError(t, <-done)

@@ -19,9 +19,9 @@ type Target interface {
 	AutoMergeEnabled() bool
 	SetAutoMergeEnabled(bool)
 }
-type globalQueuePolicyTarget interface {
-	SetGlobalQueuePolicy(messagequeue.GlobalQueuePolicy)
-	SetGlobalQueuePolicyLoader(func(context.Context) (messagequeue.GlobalQueuePolicy, error))
+type globalAutoMergePolicyTarget interface {
+	SetGlobalAutoMergePolicy(messagequeue.AutoMergePolicy)
+	SetGlobalAutoMergePolicyLoader(func(context.Context) (messagequeue.AutoMergePolicy, error))
 }
 
 type EnvironmentReader func() Environment
@@ -53,8 +53,8 @@ func NewService(
 		store: store, target: target, readEnvironment: readEnvironment,
 		configuration: configuration, logger: log,
 	}
-	if target, ok := target.(globalQueuePolicyTarget); ok {
-		target.SetGlobalQueuePolicyLoader(service.loadGlobalQueuePolicy)
+	if target, ok := target.(globalAutoMergePolicyTarget); ok {
+		target.SetGlobalAutoMergePolicyLoader(service.loadGlobalAutoMergePolicy)
 	}
 	return service
 }
@@ -123,24 +123,24 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
 	}
 	s.target.SetMaxPerSession(updated.Effective.MaxPerSession)
 	s.target.SetMergeEnabled(updated.Effective.MergeEnabled)
-	if target, ok := s.target.(globalQueuePolicyTarget); ok {
-		target.SetGlobalQueuePolicy(settings.GlobalQueuePolicy())
+	if target, ok := s.target.(globalAutoMergePolicyTarget); ok {
+		target.SetGlobalAutoMergePolicy(settings.GlobalAutoMergePolicy())
 	} else {
 		s.target.SetAutoMergeEnabled(updated.Effective.AutoMergeEnabled)
 	}
 	return updated.Response, nil
 }
 
-func (s *Service) loadGlobalQueuePolicy(ctx context.Context) (messagequeue.GlobalQueuePolicy, error) {
+func (s *Service) loadGlobalAutoMergePolicy(ctx context.Context) (messagequeue.AutoMergePolicy, error) {
 	configured, err := s.loadConfiguredConsistent(ctx)
 	if err != nil {
-		return messagequeue.GlobalQueuePolicy{}, err
+		return messagequeue.AutoMergePolicy{}, err
 	}
 	resolution, err := Resolve(configured, s.readEnvironment(), s.configuration)
 	if err != nil {
-		return messagequeue.GlobalQueuePolicy{}, err
+		return messagequeue.AutoMergePolicy{}, err
 	}
-	return resolution.Settings.GlobalQueuePolicy(), nil
+	return resolution.Settings.GlobalAutoMergePolicy(), nil
 }
 
 func (s *Service) loadConfigured(ctx context.Context) (*Settings, error) {

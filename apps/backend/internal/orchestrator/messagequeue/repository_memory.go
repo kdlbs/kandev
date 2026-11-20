@@ -419,23 +419,6 @@ func (r *memoryRepository) GetAutoMergeOverride(
 	return &override, nil
 }
 
-func (r *memoryRepository) SetAutoMergeOverride(
-	_ context.Context,
-	identity QueueSessionIdentity,
-	enabled bool,
-) (AutoMergeOverride, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if err := r.bindIdentityLocked(identity); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	override := r.autoMergeOverrides[identity]
-	override.Enabled = enabled
-	override.Revision++
-	r.autoMergeOverrides[identity] = override
-	return override, nil
-}
-
 func (r *memoryRepository) validateIdentityLocked(identity QueueSessionIdentity) error {
 	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
 		return ErrSessionIdentityMismatch

@@ -23,7 +23,6 @@ func isFoldBarrier(row *QueuedMessage) bool {
 		row.QueuedBy == QueuedByWorkflow || row.QueuedBy == QueuedByServer || row.QueuedBy == QueuedByMoveTask
 }
 
-// Both repository row representations are scanned without copying the backlog.
 // sortedFoldSender returns the sender task of a source that may move to its
 // latest same-sender entry, or "" when the source keeps FIFO adjacency only.
 func sortedFoldSender(source *QueuedMessage) string {

@@ -1,7 +1,8 @@
 ---
 id: "04-auto-sort-merge-controls"
 title: "Auto-sort-merge controls"
-status: done
+status: superseded
+superseded_by: task-06-fold-into-auto-merge.md
 wave: 2
 depends_on:
   - "01-persist-auto-sort-merge-policy"

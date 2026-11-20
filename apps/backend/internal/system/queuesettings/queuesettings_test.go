@@ -389,7 +389,7 @@ func TestServiceInstallsConsistentAutoMergePolicyLoader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load shared policy: %v", err)
 	}
-	if policy.AutoMerge.Enabled || policy.AutoMerge.Revision != 1 {
+	if policy.Enabled || policy.Revision != 1 {
 		t.Fatalf("shared policy = %+v, want automatic false/1", policy)
 	}
 }
@@ -711,14 +711,14 @@ type fakeTarget struct {
 
 type policyLoaderTarget struct {
 	fakeTarget
-	load func(context.Context) (messagequeue.GlobalQueuePolicy, error)
+	load func(context.Context) (messagequeue.AutoMergePolicy, error)
 }
 
-func (t *policyLoaderTarget) SetGlobalQueuePolicyLoader(load func(context.Context) (messagequeue.GlobalQueuePolicy, error)) {
+func (t *policyLoaderTarget) SetGlobalAutoMergePolicyLoader(load func(context.Context) (messagequeue.AutoMergePolicy, error)) {
 	t.load = load
 }
-func (t *policyLoaderTarget) SetGlobalQueuePolicy(policy messagequeue.GlobalQueuePolicy) {
-	t.autoMergeEnabled = policy.AutoMerge.Enabled
+func (t *policyLoaderTarget) SetGlobalAutoMergePolicy(policy messagequeue.AutoMergePolicy) {
+	t.autoMergeEnabled = policy.Enabled
 }
 func (f *fakeTarget) MaxPerSession() int         { return f.max }
 func (f *fakeTarget) SetMaxPerSession(n int)     { f.max = n }
