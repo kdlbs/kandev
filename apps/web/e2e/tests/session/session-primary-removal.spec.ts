@@ -11,6 +11,7 @@ import {
   holdRemovalMembership,
   observeRemovalSelection,
   holdParkedLayoutFrames,
+  holdInitialMembership,
   REMOVAL_PRIMARY_TEXT,
   seedRemovalChoiceTask,
 } from "../../helpers/session-removal";
@@ -323,6 +324,77 @@ test.describe("owned removal transcript visibility", () => {
   }
 
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.11
+  test("hydrates a Preview-to-workbench route when initial membership is retired", async ({
+    testPage,
+    desktopTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.saveUserSettings({ enable_preview_on_click: true });
+    const { task, old, primary, other } = await seedRemovalChoiceTask(apiClient, seedData);
+    await apiClient.seedTaskSession(task.task_id, {
+      sessionId: other.session_id,
+      agentProfileId: seedData.agentProfileId,
+      state: "COMPLETED",
+      completedAt: new Date().toISOString(),
+    });
+    await apiClient.seedTaskSession(task.task_id, {
+      sessionId: old.session_id,
+      agentProfileId: seedData.agentProfileId,
+      state: "WAITING_FOR_INPUT",
+    });
+    await apiClient.setPrimarySession(old.session_id);
+    await apiClient.seedTaskSession(task.task_id, {
+      sessionId: old.session_id,
+      agentProfileId: seedData.agentProfileId,
+      state: "FAILED",
+      completedAt: new Date().toISOString(),
+      errorMessage: "Removed conversation",
+    });
+    for (const page of [testPage, desktopTestPage]) {
+      await page.goto(`/?taskId=${task.task_id}&sessionId=${old.session_id}`);
+      await expect(
+        page.getByTestId("task-preview-panel").locator('[data-testid="session-chat"]:visible'),
+      ).toHaveAttribute("data-session-id", old.session_id);
+    }
+    const gate = await holdInitialMembership(testPage, task.task_id, old.session_id);
+    try {
+      const started = await testPage.evaluate(() => performance.timeOrigin);
+      await testPage
+        .getByTestId("task-preview-panel")
+        .getByRole("button", { name: "Open full page" })
+        .click();
+      await gate.queued;
+      await dwell(
+        testPage,
+        1500,
+        "negative-assertion",
+        "Initial route membership must settle before acknowledgement",
+      );
+      expect((await sessionReadState(apiClient, old.session_id)).cursor).toBeNull();
+      const preview = desktopTestPage.getByTestId("task-preview-panel");
+      await preview.getByTestId(`preview-session-tab-${old.session_id}`).click({ button: "right" });
+      await desktopTestPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
+      await desktopTestPage.getByTestId("session-delete-confirm").click();
+      await waitForActiveTaskSession(testPage, task.task_id, primary.session_id);
+      gate.release();
+      const session = new SessionPage(testPage);
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", primary.session_id);
+      await expect(
+        session.activeChat().getByText(REMOVAL_PRIMARY_TEXT, { exact: true }),
+      ).toBeVisible();
+      await expect
+        .poll(async () => (await sessionReadState(apiClient, primary.session_id)).cursor)
+        .not.toBeNull();
+      expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(started);
+      await testPage.screenshot({
+        path: test.info().outputPath("initial-membership-recovered.png"),
+      });
+    } finally {
+      await gate.dispose();
+    }
+  });
+
   for (const parked of [
     "live",
     "visible",

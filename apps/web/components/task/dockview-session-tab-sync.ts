@@ -71,6 +71,7 @@ function adoptRestoredSessionTabSelection(
   const currentEnvironmentId = useDockviewStore.getState().currentLayoutEnvId;
   if (!activeTaskId || !currentEnvironmentId) return;
   if (getProvenRemovalPredecessor(appStore, activeTaskId, state.tasks.activeSessionId)) return;
+  if (state.workflowSessionFocus.request?.taskId === activeTaskId) return;
 
   const currentSessionIds = new Set<string>(
     (state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? []).map((session) => session.id),

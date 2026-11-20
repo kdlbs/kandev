@@ -14,6 +14,7 @@ import {
   deferred,
   identity,
 } from "./task-navigation-reads.test-helpers";
+import { invalidateTaskSessionMembership } from "./task-session-reads";
 
 const apiMocks = vi.hoisted(() => ({
   fetchTask: vi.fn(),
@@ -26,42 +27,55 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function makeStore() {
+  return createAppStore({
+    workspaces: { activeId: "workspace", items: [] },
+    tasks: { activeTaskId: ACTIVE_TASK_ID },
+    kanban: {
+      workflowId: "workflow",
+      tasks: [
+        {
+          id: ACTIVE_TASK_ID,
+          workspaceId: "workspace",
+          workflowId: "workflow",
+          workflowStepId: "in-progress",
+          updatedAt: "2026-10-15T10:00:00Z",
+          title: "Original task",
+        },
+      ],
+    },
+  } as never);
+}
+
+function refreshedTask() {
+  return {
+    id: ACTIVE_TASK_ID,
+    workspace_id: "workspace",
+    workflow_id: "workflow",
+    workflow_step_id: "review",
+    updated_at: "2026-10-15T10:01:00Z",
+    title: "Refreshed task",
+  } as TaskNavigationIdentity["task"];
+}
 describe("task navigation canonical overview refresh", () => {
   afterEach(() => {
     apiMocks.fetchTask.mockReset();
     apiMocks.listTaskSessions.mockReset();
   });
 
-  function makeStore() {
-    return createAppStore({
-      workspaces: { activeId: "workspace", items: [] },
-      tasks: { activeTaskId: ACTIVE_TASK_ID },
-      kanban: {
-        workflowId: "workflow",
-        tasks: [
-          {
-            id: ACTIVE_TASK_ID,
-            workspaceId: "workspace",
-            workflowId: "workflow",
-            workflowStepId: "in-progress",
-            updatedAt: "2026-10-15T10:00:00Z",
-            title: "Original task",
-          },
-        ],
-      },
-    } as never);
-  }
-
-  function refreshedTask() {
-    return {
-      id: ACTIVE_TASK_ID,
-      workspace_id: "workspace",
-      workflow_id: "workflow",
-      workflow_step_id: "review",
-      updated_at: "2026-10-15T10:01:00Z",
-      title: "Refreshed task",
-    } as TaskNavigationIdentity["task"];
-  }
+  it("replaces retired membership without cancelling the current route identity", async () => {
+    const store = makeStore();
+    const first = deferred<{ sessions: never[]; total: number }>();
+    const fresh = { sessions: [{ id: "survivor", task_id: ACTIVE_TASK_ID }], total: 1 };
+    apiMocks.fetchTask.mockResolvedValue(refreshedTask());
+    apiMocks.listTaskSessions.mockReturnValueOnce(first.promise).mockResolvedValue(fresh);
+    const read = readTaskNavigationIdentity(store, ACTIVE_TASK_ID);
+    await Promise.resolve();
+    invalidateTaskSessionMembership(store, ACTIVE_TASK_ID);
+    first.resolve({ sessions: [], total: 0 });
+    await expect(read).resolves.toMatchObject({ allSessionsResponse: fresh });
+    expect(apiMocks.listTaskSessions).toHaveBeenCalledTimes(2);
+  });
 
   it("repairs shared placement after a move missed before websocket connection", async () => {
     const store = makeStore();

@@ -664,5 +664,16 @@ fix. It is separate from the five design-only rounds above.
   phone cases passed. Strict code lint/typecheck/build/formatting/ratchets and
   docs gates passed. Task 02 records fixture corrections and exact receipts.
   Independent review remains open; round 19 is next.
-- Completed rounds: 18. Consecutive clean: 0. Stop after three consecutive
+- Round 19: Sol child `410b1e62-83e5-493d-8022-11207a7e8c27` reviewed
+  `22cae38049`. Two P2s reproduced: passive restore adoption overwrites a
+  committed workflow recipient; membership invalidation aborts an otherwise
+  current initial route. Corrections preserve committed workflow requests and
+  replace only invalidated membership generations under the retained route.
+  Six owning/adjacent files passed 57 cases; all 23 desktop removal/unread
+  cases and eight phone cases passed on the fresh R19 frontend. The new
+  Preview-to-workbench case holds authentic initial membership across remote
+  deletion and reaches the surviving transcript/read cursor without reload.
+  Strict checks and fixture corrections are recorded in Task 02. Independent
+  review remains open; round 20 is next.
+- Completed rounds: 19. Consecutive clean: 0. Stop after three consecutive
   clean rounds or 50 rounds. Earlier loops do not count.

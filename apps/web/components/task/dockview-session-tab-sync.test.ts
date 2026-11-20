@@ -3,6 +3,7 @@ import type { DockviewReadyEvent } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { defaultState } from "@/lib/state/default-state";
 import { setEnvHiddenSessions } from "@/lib/env-hidden-sessions";
 import { hideSessionPanel } from "./dockview-hidden-session-panels";
 import {
@@ -35,6 +36,7 @@ type SessionTabSyncStore = {
   getState: () => {
     tasks: { activeTaskId: string; activeSessionId: string };
     taskRemoval: { navigationRevision: number };
+    workflowSessionFocus: AppState["workflowSessionFocus"];
     taskSessions: {
       items: Record<string, { id: string; task_id: string }>;
     };
@@ -104,6 +106,7 @@ function makeSessionTabSyncHarness(args: {
         activeSessionId: args.activeSessionId,
       },
       taskRemoval: { navigationRevision: 0 },
+      workflowSessionFocus: defaultState.workflowSessionFocus,
       taskSessions: {
         items: {
           [args.activeSessionId]: { id: args.activeSessionId, task_id: args.activeTaskId },

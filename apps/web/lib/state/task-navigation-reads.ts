@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import type { StoreApi } from "zustand";
 import { ApiError } from "@/lib/api/client";
 import { isTemporaryReadError } from "@/lib/api/temporary-read-error";
-import { fetchTask, listTaskSessions } from "@/lib/api";
+import { fetchTask } from "@/lib/api";
 import { getBackendConfig } from "@/lib/config";
 import { toKanbanTask } from "@/lib/kanban/map-task";
 import {
@@ -12,10 +12,13 @@ import {
 import {
   abortError,
   loadNavigationAttempt,
-  raceAbort,
   type LoadTaskNavigationIdentity,
 } from "@/lib/state/task-navigation-attempt";
-import { getTaskSessionReads, type TaskSessionReads } from "@/lib/state/task-session-reads";
+import {
+  getTaskSessionReads,
+  readCurrentMembership,
+  type TaskSessionReads,
+} from "@/lib/state/task-session-reads";
 import type { Task, TaskSessionsResponse } from "@/lib/types/http";
 import type { AppState } from "./store";
 
@@ -452,12 +455,9 @@ async function fetchTaskNavigationIdentity(
   try {
     const taskRequest = fetchTask(taskId, { cache: "no-store", init: { signal } });
     const release = sessionReads.retain(taskId);
-    const sessionList = raceAbort(
-      sessionReads.read(taskId, (readSignal) =>
-        listTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
-      ),
-      signal,
-    ).finally(release);
+    const sessionList = readCurrentMembership(sessionReads, taskId, signal, scopeIsCurrent).finally(
+      release,
+    );
     const [task, sessionResponse] = await Promise.all([
       taskRequest,
       sessionList.then(

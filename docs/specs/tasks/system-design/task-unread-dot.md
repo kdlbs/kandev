@@ -250,7 +250,7 @@ cancelling only a request targeting that ID. An owned empty slot can re-prove af
 a changed primary; newer user/workflow selection wins. Surviving pins/cursors stay
 untouched. Proof initializes missing recipient identity/lifecycle only.
 
-Preview validates discovery; workflow focus survives pending membership.
+Workflow focus survives restore; current-route membership invalidation re-reads.
 Removal gates cover parked/live groups; owned focus resumes after restore.
 Only changed primaries re-prove empty slots; hides gate restore.
 All transcript hosts inherit read gates; dots use group visibility.

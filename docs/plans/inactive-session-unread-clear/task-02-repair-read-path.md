@@ -2728,3 +2728,98 @@ verification are complete; normal selective commit/exact fork push and separate
 Sol R19 review follow. No repeated rebase, PR, hook bypass, broad-suite or
 live-NATS claim. Earlier historical-trigger, list-convergence and
 seeded-execution qualifications remain. Completed reviews: 18; clean streak: 0.
+
+### Production-fix review round 19 remediation
+
+R19 reproduces two consumer-visible failures under .6/.9/.11/.17 and the
+existing workflow/navigation ownership contract. No new layout, copy, schema,
+cursor or backend behavior. Desktop retains the committed stepper destination;
+phone shares current-route membership recovery with its existing direct task
+surface. Preview remains read-only and uses its real full-workbench button.
+
+```text
+Restore: visible A -> gate reconstruction -> commit workflow C -> settle
+         C stays selected, becomes visible, and its focus request is consumed
+Route:   Preview A -> open workbench -> hold initial [A,C] membership
+         remote Delete A -> prove C -> retire old list -> replace subread
+         hydrate C without reload; stale A never becomes current membership
+```
+
+`r19-red.log` reproduces the current-route AbortError (plus an initial incomplete
+Dockview event fake). `r19-workflow-red.log` reproduces the wrong group-active
+session B instead of the committed A, with three controls passing; the first
+cleanup used the wrong disposable shape and was corrected. Final assertions
+cover actual selection, visible panel and consumed workflow request rather
+than an incidental number of Dockview activation callbacks.
+
+Passive restore adoption now defers to a same-task committed workflow request.
+The retained membership reader captures its shared-key generation and replaces
+only an AbortError accompanied by a changed generation while route/scope
+remain current. Genuine cancellation, generic errors and unchanged generations
+still leave the loop; no timer, retry policy or stale list publication was added.
+The reader lives beside the existing membership owner to respect the navigation
+file's size budget. Test fixtures moved outside oversized test containers;
+limits were not raised. The old sync fake now includes the real workflow slice.
+
+`r19-unit-delivery.log`: six files / 57 cases passed, including route scope,
+retry-budget and existing route-recovery controls. Initial strict lint caught
+the size budgets and an obsolete import after extraction; those were corrected.
+The new browser case uses genuine stored sessions, real Preview-to-route
+navigation and second-client Delete, holding only authentic pre-deletion
+membership so the independent absence proof can complete.
+
+The first owning browser attempt (`r19-owning-summary.log`,
+`r19-quiet/kandev-run.e2e.S5vb608V.log`) selected the newer eligible third
+sibling, not the fixture's named C. That was legitimate backend promotion,
+not a failed recovery. The corrected fixture leaves C as the sole eligible
+successor by completing the unrelated sibling before navigation. It also
+asserts A's cursor remains null while initial membership is held, preventing
+an already-hydrated route from masquerading as this scenario.
+
+`r19-owning2-summary.log` /
+`r19-quiet/kandev-run.e2e.qrHQJmK6.log`: the corrected case passed. Inspected
+its saved capture: the real workbench displays C's stored transcript and
+composer. Its cursor advances after proof without a document reload.
+Strict changed-code lint, full typecheck and fresh build passed after removing
+the obsolete import (`r19-lint-final.log`, `r19-typecheck.log`, `r19-build.log`).
+Formatting, copy/sleep ratchets and catalog/full-spec lint passed in
+`r19-static.log` and `r19-docs.log`.
+
+Narrow unit command after cache-snapshot `refresh` and `pnpm run pretypecheck`:
+
+```bash
+pnpm exec vitest run \
+  components/task/dockview-session-tabs.hook.test.tsx \
+  components/task/dockview-session-tab-sync.test.ts \
+  lib/state/task-navigation-reads.test.ts \
+  lib/state/task-navigation-reads-retry.test.ts \
+  lib/state/task-navigation-reads-budget.test.ts \
+  src/task-detail-route-recovery.test.tsx
+```
+
+Runtime uses the freshly built R19 frontend and retained R02 backend/plugin
+artifacts, with one worker and no retries. No backend production, predicate,
+projector, cursor-writer, wire or schema change.
+
+Final rendered verification, serial managed Chromium, one worker/no retries:
+
+```bash
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/task/task-unread-dot.spec.ts -- --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+- `r19-desktop-final-summary.log` /
+  `r19-quiet/kandev-run.e2e.mm6AKNIE.log`: all 23 cases passed.
+- `r19-phone-final-summary.log` /
+  `r19-quiet/kandev-run.e2e.RvDWdDKP.log`: all eight cases passed.
+
+These commands used the documented cache-backed snapshot, explicit
+cache-backed output locations and the existing R19 build. No live-user
+browser/data mutation, broad-suite or live-NATS certification. Authoritative
+list convergence is not isolated cursor-event delivery evidence; seeded
+RUNNING rows are not live executions. Historical incident attribution
+remains qualified. Round 19 corrections are ready for selective delivery
+and independent Sol round 20; the review loop is not complete.

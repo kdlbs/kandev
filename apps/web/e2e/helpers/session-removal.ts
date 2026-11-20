@@ -117,8 +117,12 @@ export function holdRemovalMembership(page: Page, taskId: string, removedId: str
   return holdMembership(page, taskId, (body) => !membershipContains(body, removedId));
 }
 
-export async function holdInitialMembership(page: Page, taskId: string) {
-  const gate = await holdMembership(page, taskId, () => true);
+export async function holdInitialMembership(page: Page, taskId: string, staleSessionId?: string) {
+  const gate = await holdMembership(
+    page,
+    taskId,
+    (body) => !staleSessionId || membershipContains(body, staleSessionId),
+  );
   gate.arm();
   return gate;
 }
