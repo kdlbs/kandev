@@ -308,6 +308,7 @@ func (s *Service) runLegacySessionDeliveryRecovery(
 		if errors.Is(err, agentruntime.ErrDeliveryRecoveryBlocked) || errors.Is(err, agentruntime.ErrDeliveryOwnerMismatch) {
 			return sessionDeliveryRecoveryAttempt{
 				outcome: SessionDeliveryRecoveryBlocked, reason: deliveryIdentityMismatchReason,
+				ownerMismatch: isDetachedDeliveryOwnerMismatch(err),
 			}
 		}
 		if errors.Is(err, agentruntime.ErrUncertainPromptDelivery) {
@@ -335,6 +336,8 @@ func (s *Service) runSessionDeliveryRecovery(
 			outcome:           mapDeliveryRecoveryOutcome(result.Outcome),
 			reason:            publicDeliveryRecoveryReason(result.Reason),
 			processTerminated: result.ProcessTerminated,
+			ownerMismatch: isDetachedDeliveryOwnerMismatch(result.Err) ||
+				result.Outcome == agentruntime.DeliveryReconciliationOwnerMismatch,
 		}
 		if attempt.reason == "" && attempt.outcome == SessionDeliveryRecoveryUncertain {
 			attempt.reason = unknownPromptOutcome

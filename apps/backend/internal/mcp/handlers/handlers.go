@@ -3755,6 +3755,9 @@ func (h *Handlers) handleTaskMessagePreparationError(
 		releasePeerMessageStartAdmission(admission)
 		return h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata, interruptIfBusy)
 	}
+	if result, queued := h.queueAfterRecoveryGuardRefusal(ctx, taskID, session, prompt, metadata, interruptIfBusy, admission, prepErr); queued {
+		return result, nil
+	}
 	// Preparation can persist a workflow step before returning an error, so
 	// compensation must compare against the state left by that preparation.
 	if captureErr := reviewRollback.captureExpectedTaskState(ctx, h.taskSvc); captureErr != nil {
@@ -3805,6 +3808,9 @@ func (h *Handlers) dispatchPreparedTaskMessageWithReviewRollback(
 	if err != nil {
 		if isUnownedPeerMessageStartError(err) {
 			return taskMessageDispatchResult{}, err
+		}
+		if queuedResult, queued := h.queueAfterRecoveryGuardRefusal(ctx, taskID, session, prompt, metadata, interruptIfBusy, nil, err); queued {
+			return queuedResult, nil
 		}
 		h.restoreTaskReviewForTaskMessage(ctx, taskID, *reviewRollback)
 	}
@@ -3917,7 +3923,7 @@ func (h *Handlers) startPreparedPeerTaskMessage(
 		// The start admission owns cleanup for any turn it created. The handler
 		// removes only its message so it cannot abandon another launch's turn.
 		h.deleteRecordedUserMessageWithoutTurnRollback(ctx, recorded)
-		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
+		if errors.Is(err, executor.ErrExecutionAlreadyRunning) || executor.IsRecoveryGuardRefusal(err) {
 			releasePeerMessageStartAdmission(admission)
 			return h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata, interruptIfBusy)
 		}
@@ -4044,6 +4050,37 @@ func (h *Handlers) resolveTaskMessageQueueIdentity(
 		return messagequeue.QueueSessionIdentity{}, messagequeue.ErrSessionIdentityMismatch
 	}
 	return identity, nil
+}
+
+// queueAfterRecoveryGuardRefusal keeps a peer message queued on its target
+// session when the session cannot resume yet because the startup recovery
+// guard refused the launch. The session is untouched by the refusal, so the
+// message waits for the next successful resume instead of being rolled back.
+func (h *Handlers) queueAfterRecoveryGuardRefusal(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	interruptIfBusy bool,
+	admission orchestrator.PeerMessageStartAdmission,
+	cause error,
+) (taskMessageDispatchResult, bool) {
+	if !executor.IsRecoveryGuardRefusal(cause) {
+		return taskMessageDispatchResult{}, false
+	}
+	identity, err := h.resolveTaskMessageQueueIdentity(ctx, taskID, session)
+	if err != nil {
+		return taskMessageDispatchResult{}, false
+	}
+	if admission != nil {
+		releasePeerMessageStartAdmission(admission)
+	}
+	result, err := h.queueTaskMessageForIdentity(ctx, taskID, session, identity, prompt, metadata)
+	if err != nil {
+		return taskMessageDispatchResult{}, false
+	}
+	return result, true
 }
 
 func (h *Handlers) queueAfterUnownedPeerStart(

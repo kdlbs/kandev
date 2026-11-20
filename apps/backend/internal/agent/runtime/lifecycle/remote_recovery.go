@@ -190,6 +190,76 @@ func (m *Manager) retryPendingRemoteRecoveries(ctx context.Context) {
 	}
 }
 
+// ErrRemoteOwnerNotProvenGone is returned when the guard cannot be released
+// because the remote agent owner is alive or its absence is not proven.
+var ErrRemoteOwnerNotProvenGone = errors.New("remote agent owner is not proven gone")
+
+// ReleaseRemoteRecoveryGuard is the explicit operator release. It probes the
+// persisted remote owner and releases the session's retryable guard only when
+// the runtime proves the old agent is gone; the executor record is kept so a
+// resume starts a fresh agent. A live or unprovable owner keeps the guard,
+// because releasing it would allow a second agent for the same session. It
+// reports whether the guard was released.
+func (m *Manager) ReleaseRemoteRecoveryGuard(ctx context.Context, sessionID string) (bool, error) {
+	entry := m.pendingRemoteRecoveryForSession(sessionID)
+	if entry == nil {
+		return false, nil
+	}
+	if !m.beginRemoteRecovery(entry) {
+		return false, ErrRemoteOwnerNotProvenGone
+	}
+	defer m.finishRemoteRecoveryAttempt(entry)
+	attemptCtx, cancel := m.remoteAttemptContext(ctx)
+	defer cancel()
+	if m.executorRegistry == nil {
+		return false, ErrRemoteOwnerNotProvenGone
+	}
+	backend, err := m.executorRegistry.GetBackend(entry.record.Runtime)
+	if err != nil {
+		return false, fmt.Errorf("get remote runtime %s: %w", entry.record.Runtime, err)
+	}
+	ri, outcome, err := m.recoverPendingRemoteStopInstance(attemptCtx, backend, entry)
+	if err != nil {
+		return false, fmt.Errorf("probe remote owner: %w", err)
+	}
+	if ri != nil {
+		m.discardRemoteRecoveryInstance(ri)
+		return false, ErrRemoteOwnerNotProvenGone
+	}
+	if !m.releaseGuardIfOwnerProvenGone(attemptCtx, entry, outcome) {
+		return false, ErrRemoteOwnerNotProvenGone
+	}
+	return true, nil
+}
+
+// releaseGuardIfOwnerProvenGone releases the retryable guard only when the
+// runtime proved that no instance matches the persisted remote execution and
+// that proof is valid for the runtime. The executor record is kept. An entry
+// with a stop pending keeps its guard until the stop resolves.
+func (m *Manager) releaseGuardIfOwnerProvenGone(
+	ctx context.Context,
+	entry *remoteRecoveryRetry,
+	outcome RecoveryCandidateOutcome,
+) bool {
+	m.remoteRecoveryMu.Lock()
+	stopRequested := entry.stopRequested
+	m.remoteRecoveryMu.Unlock()
+	if stopRequested || outcome != RecoveryOutcomeNoMatchingInstance ||
+		!remoteRecoveryNoMatchProvesStopped(entry.record.Runtime) {
+		return false
+	}
+	if _, live := m.executionStore.GetBySessionID(entry.record.SessionID); live {
+		return false
+	}
+	if err := m.validatePendingRemoteStopOwner(ctx, entry); err != nil {
+		return false
+	}
+	m.logger.Info("remote agent owner proven gone; releasing recovery guard and preserving the executor record",
+		zap.String("session_id", entry.record.SessionID), zap.String("execution_id", entry.record.AgentExecutionID))
+	m.removeRemoteRecovery(entry, true)
+	return true
+}
+
 func (m *Manager) retryRemoteRecovery(parent context.Context, entry *remoteRecoveryRetry) {
 	if entry == nil || entry.record == nil {
 		m.finishRemoteRecoveryAttempt(entry)
@@ -281,8 +351,9 @@ func (m *Manager) attachRemoteRecovery(ctx context.Context, entry *remoteRecover
 	}
 	credentialed := m.revealRemoteRecoveryCredentials(ctx, attemptRecord)
 	var recovered []*ExecutorInstance
+	var outcomes map[string]RecoveryCandidateOutcome
 	if detailed, ok := backend.(DetailedRecoveryBackend); ok {
-		recovered, _, err = detailed.RecoverInstancesDetailed(ctx, []*models.ExecutorRunning{credentialed})
+		recovered, outcomes, err = detailed.RecoverInstancesDetailed(ctx, []*models.ExecutorRunning{credentialed})
 	} else {
 		recovered, err = backend.RecoverInstances(ctx, []*models.ExecutorRunning{credentialed})
 	}
@@ -298,6 +369,7 @@ func (m *Manager) attachRemoteRecovery(ctx context.Context, entry *remoteRecover
 		}
 	}
 	if ri == nil {
+		m.releaseGuardIfOwnerProvenGone(ctx, entry, outcomes[entry.record.SessionID])
 		return
 	}
 	if err := m.processRecoveredRemoteInstance(ctx, entry, ri); err != nil {

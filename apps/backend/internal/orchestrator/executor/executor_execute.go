@@ -2610,6 +2610,12 @@ func (e *Executor) transitionLaunchFailure(
 	taskID, sessionID, repositoryID, taskRepositoryID string,
 	launchErr error,
 ) (error, bool) {
+	if IsRetryableRecoveryGuardRefusal(launchErr) {
+		// A guard refusal launched nothing; the session keeps its state.
+		e.logger.Info("launch refused by the startup recovery guard; session state unchanged",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID))
+		return launchErr, false
+	}
 	safeErr := routingerr.SanitizeError(launchErr)
 	e.logger.Error("failed to launch agent",
 		zap.String("task_id", taskID),

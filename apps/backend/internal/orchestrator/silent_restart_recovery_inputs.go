@@ -363,6 +363,9 @@ func (s *Service) reconcileSilentRestoreSource(ctx context.Context, inputs *sile
 	}
 	result := s.runSessionDeliveryRecovery(ctx, identity)
 	if result.outcome != SessionDeliveryRecoveryUncertain || !result.processTerminated {
+		if result.ownerMismatch {
+			return fmt.Errorf("%w: outcome=%s reason=%s", errDetachedDeliveryOwnerMismatch, result.outcome, result.reason)
+		}
 		return fmt.Errorf("interrupted durable owner is not proven terminated: outcome=%s reason=%s terminated=%t", result.outcome, result.reason, result.processTerminated)
 	}
 	return s.reconcileRestartSubmissionStates(ctx, inputs)

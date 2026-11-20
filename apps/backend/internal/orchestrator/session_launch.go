@@ -332,6 +332,9 @@ type sessionDeliveryRecoveryAttempt struct {
 	outcome           SessionDeliveryRecoveryOutcome
 	reason            string
 	processTerminated bool
+	// ownerMismatch is set when the agentctl owner proved the delivery belongs
+	// to a different owner (OWNER_MISMATCH); retrying cannot succeed.
+	ownerMismatch bool
 }
 
 // ResolveIntent infers the session intent from request fields when Intent is empty.

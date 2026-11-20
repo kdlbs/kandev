@@ -59,7 +59,7 @@ func validateRemoteRecoverySnapshot(snapshot *RemoteRecoverySnapshot, record *mo
 	if err := validateRemoteRecoverySnapshotEligibility(snapshot); err != nil {
 		return err
 	}
-	return validateRemoteRecoverySnapshotSession(snapshot)
+	return validateRemoteRecoverySnapshotSession(snapshot, record)
 }
 
 func validateRemoteRecoverySnapshotIdentity(snapshot *RemoteRecoverySnapshot, record *models.ExecutorRunning) error {
@@ -106,13 +106,18 @@ func validateRemoteRecoverySnapshotEligibility(snapshot *RemoteRecoverySnapshot)
 	}
 }
 
-func validateRemoteRecoverySnapshotSession(snapshot *RemoteRecoverySnapshot) error {
+// validateRemoteRecoverySnapshotSession lets a FAILED session reattach its live
+// remote agent when either a pending delivery proof exists or the executor row
+// is resumable. A resumable FAILED session is a normal resume target; leaving
+// its remote agent behind the recovery guard would block that resume until
+// another restart.
+func validateRemoteRecoverySnapshotSession(snapshot *RemoteRecoverySnapshot, record *models.ExecutorRunning) error {
 	switch snapshot.SessionState {
 	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
 		return fmt.Errorf("remote recovery session is terminal: %s", snapshot.SessionState)
 	case models.TaskSessionStateFailed:
-		if !snapshot.RecoverySourcePresent {
-			return fmt.Errorf("failed remote recovery session has no pending delivery proof")
+		if !snapshot.RecoverySourcePresent && !remoteRecoveryRecordResumable(record) {
+			return fmt.Errorf("failed remote recovery session has no pending delivery proof and is not resumable")
 		}
 	}
 	return nil
@@ -190,4 +195,11 @@ func (m *Manager) pinRemoteRecoverySnapshot(entry *remoteRecoveryRetry, snapshot
 	copySnapshot := *snapshot
 	entry.snapshot = &copySnapshot
 	return true
+}
+
+func remoteRecoveryRecordResumable(record *models.ExecutorRunning) bool {
+	if record == nil || record.ResumeToken == "" {
+		return false
+	}
+	return record.Resumable || models.IsAlwaysResumableRuntime(record.Runtime)
 }

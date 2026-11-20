@@ -1223,6 +1223,10 @@ func (s *Service) handleSessionLaunchFailure(
 	launchErr error,
 	preloadedSession ...*models.TaskSession,
 ) error {
+	if isRetryableSessionRecoveryGuardError(launchErr) {
+		// A guard refusal launched nothing: leave state and recovery blocks as they were.
+		return launchErr
+	}
 	failureCtx := context.WithoutCancel(ctx)
 	if recordErr := s.recordSessionRecoveryBlock(failureCtx, sessionID, "interactive", launchErr); recordErr != nil {
 		s.logger.Warn("failed to persist session recovery block",
