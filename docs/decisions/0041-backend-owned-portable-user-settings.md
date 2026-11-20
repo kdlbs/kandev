@@ -86,8 +86,10 @@ reorder captures only its moved ID, destination and before/after placement, then
 reapplies that move over the latest admitted order. Disjoint remote moves remain
 intact. Retired moves are excluded from successor replay, so a missing endpoint
 cannot poison an unrelated queued edit. A dispatched full-order replacement
-carries `view_order_base`; CAS rejects it if the observed committed order
-changed, preserving a concurrent move rather than silently undoing it.
+carries `view_order_base`; CAS accepts the observed base or an already-applied
+requested order. An identical retry after a lost acknowledgement remains
+idempotent. A different committed order is rejected, preserving a concurrent
+move rather than silently undoing it.
 A definitive HTTP rejection retires dispatched move intent even when both
 endpoints survive. An independent successor must not give that rejected move a
 fresh order baseline. Transport-uncertain failures retain the existing guarded

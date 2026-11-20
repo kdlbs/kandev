@@ -69,7 +69,11 @@ for (const remoteChange of ["append", "disjoint reorder", "post-dispatch reorder
         )
         .toEqual(expected);
       if (remoteChange === "post-dispatch reorder") await barrier.arrived;
-      const remote = { ...initial.views[0], id: "remote-append", name: "Remote" };
+      const remote = {
+        ...initial.views[0],
+        id: "remote-append",
+        name: "Remote",
+      };
       const remoteTail = remoteChange === "append" ? [remote] : [...tail].reverse();
       await apiClient.saveUserSettings({
         sidebar_view_state:
@@ -165,7 +169,11 @@ test("a rejected dispatched drag cannot return through a queued rename", async (
   const [a, b, c, d] = views;
   const watcher = watchWs(testPage);
   await apiClient.saveUserSettings({
-    sidebar_view_state: { workspace_id: workspace, views_create: views, active_view_id: c.id },
+    sidebar_view_state: {
+      workspace_id: workspace,
+      views_create: views,
+      active_view_id: c.id,
+    },
   });
   await testPage.goto(`/?workspaceId=${workspace}`);
   await testPage.getByTestId("app-nav-trigger").tap();
@@ -239,6 +247,82 @@ test("a rejected dispatched drag cannot return through a queued rename", async (
     });
   } finally {
     await barrier.dispose();
+    await testPage.close();
+    await apiClient.saveUserSettings({
+      sidebar_view_state: { workspace_id: workspace, ...initial },
+    });
+  }
+});
+
+test("a committed touch reorder survives a lost response and identical retry", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const workspace = seedData.workspaceId;
+  const initial = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+    workspace
+  ];
+  const a = { ...initial.views[0], id: "retry-a", name: "A" };
+  const b = { ...initial.views[0], id: "retry-b", name: "B" };
+  await apiClient.saveUserSettings({
+    sidebar_view_state: {
+      workspace_id: workspace,
+      views_create: [a, b],
+      active_view_id: a.id,
+    },
+  });
+  let attempts = 0;
+  const retried = Promise.withResolvers<number>();
+  await testPage.route("**/api/v1/user/settings", async (route) => {
+    if (
+      route.request().method() !== "PATCH" ||
+      !route.request().postDataJSON()?.sidebar_view_state?.view_order_base
+    ) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    attempts++;
+    if (attempts === 1) {
+      expect(response.status()).toBe(200);
+      await route.abort("failed");
+    } else {
+      retried.resolve(response.status());
+      await route.fulfill({ response });
+    }
+  });
+  try {
+    await testPage.goto(`/?workspaceId=${workspace}`);
+    await testPage.getByTestId("app-nav-trigger").tap();
+    const sheet = testPage.getByTestId("app-nav-sheet");
+    const row = sheet.getByTestId("sidebar-view-chip-row");
+    const box = await settledBoundingBox(row.locator(`[data-view-id="${b.id}"]`));
+    await touchDragToPoint(testPage, row.locator(`[data-view-id="${a.id}"]`), {
+      x: box.x + box.width / 2,
+      y: box.y + box.height / 2,
+    });
+    expect(await retried.promise).toBe(200);
+    const expected = [...initial.views.map((view) => view.id), b.id, a.id];
+    await expect
+      .poll(async () =>
+        (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+          workspace
+        ].views.map((view) => view.id),
+      )
+      .toEqual(expected);
+    await testPage.reload();
+    await testPage.getByTestId("app-nav-trigger").tap();
+    await expect
+      .poll(() =>
+        sheet
+          .getByTestId("sidebar-view-chip-row")
+          .getByTestId("sidebar-view-chip")
+          .evaluateAll((chips) => chips.map((chip) => chip.getAttribute("data-view-id"))),
+      )
+      .toEqual(expected);
+    expect(attempts).toBe(2);
+  } finally {
     await testPage.close();
     await apiClient.saveUserSettings({
       sidebar_view_state: { workspace_id: workspace, ...initial },

@@ -222,4 +222,16 @@ func TestSidebarWorkspaceReorderRejectsChangedObservedOrder(t *testing.T) {
 	}
 	require.Equal(t, []string{"legacy", "b", "d", "c"}, ids)
 	require.NoError(t, apply(`{"SidebarViewState":{"workspace_id":"a","view_order_base":["legacy","b","d","c"],"view_order":["b","legacy","d","c"]}}`))
+	require.NoError(t, apply(`{"SidebarViewState":{"workspace_id":"a","view_order_base":["legacy","b","d","c"],"view_order":["b","legacy","d","c"]}}`))
+	reloaded, err = svc.GetUserSettings(ctx)
+	require.NoError(t, err)
+	ids = ids[:0]
+	for _, view := range reloaded.SidebarViewsByWorkspace["a"].Views {
+		ids = append(ids, view.ID)
+	}
+	require.Equal(t, []string{"b", "legacy", "d", "c"}, ids)
+	require.NoError(t, apply(`{"SidebarViewState":{"workspace_id":"a","view_order_base":["legacy","b","d","c"],"view_order":["b","legacy","d","c"],"views_update":[{"id":"b","name":"Independent successor"}]}}`))
+	reloaded, err = svc.GetUserSettings(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "Independent successor", reloaded.SidebarViewsByWorkspace["a"].Views[0].Name)
 }

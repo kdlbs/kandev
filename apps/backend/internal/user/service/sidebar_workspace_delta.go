@@ -135,13 +135,21 @@ func validateSidebarOrderBase(current []models.SidebarView, patch *models.Sideba
 	if patch.ViewOrderBase == nil {
 		return nil
 	}
-	if patch.ViewOrder == nil || len(*patch.ViewOrderBase) != len(current) {
+	if patch.ViewOrder == nil || (!sidebarOrderMatches(current, *patch.ViewOrderBase) &&
+		!sidebarOrderMatches(current, *patch.ViewOrder)) {
 		return errors.New("sidebar_views: order changed; refresh and retry")
 	}
-	for i, id := range *patch.ViewOrderBase {
+	return nil
+}
+
+func sidebarOrderMatches(current []models.SidebarView, ids []string) bool {
+	if len(current) != len(ids) {
+		return false
+	}
+	for i, id := range ids {
 		if current[i].ID != id {
-			return errors.New("sidebar_views: order changed; refresh and retry")
+			return false
 		}
 	}
-	return nil
+	return true
 }

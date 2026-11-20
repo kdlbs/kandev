@@ -855,3 +855,37 @@ remains `650581569554e471fca37477453d45572c9ac54d`; no SDK API/type or package
 publication change was needed. Historical broad backend/web/SQLite gates remain
 unresolved; PostgreSQL/no DSN, physical phone and remote CI remain unproven.
 The 0.103.0 host floor remains unreleased. Review gate stays 0/3 pending round 11.
+
+### Opus post-rebase round 11 correction
+
+Opus verified its actual Claude Opus 5.5 assistant-role runtime and reported
+one Host defect: an already-committed reorder's lost-response retry conflicted
+with its own observed base. Tags had no new finding. The review was centred on
+the R10 response and related boundaries, not a fresh line-by-line certification
+of the complete feature range. The gate remains 0/3.
+
+The settings CAS now accepts either the observed order or the requested order
+already being committed. It still rejects a different stale permutation.
+No frontend retry policy, API shape, provider behavior or transport cap changed.
+
+- RED: the real settings-service replay returned validation failure. A native
+  touch drag committed its first PATCH through `route.fetch`, lost that response
+  through `route.abort`, and received 400 on the automatic retry instead of 200.
+- GREEN: the settings-service regression covers identical replay, a stale
+  conflicting permutation and an independent successor rename without any WS
+  dependency. The affected `TestSidebarWorkspace` service group passed with
+  `-race`; affected Go lint, native ESLint and Prettier passed.
+- Fresh cache-only backend formatting/build and required helper/plugin-fixture
+  builds passed in 156.20 seconds. All three changed code/test files byte-match
+  the tested mirror; existing R10 web assets are unchanged.
+- Native true-touch suite passed 5/5 in one final run, including actual
+  committed/lost-response/200-retry/API/reload proof and the retained 400
+  conflicting-order and independent-successor controls.
+
+Receipts: `~/.cache/sidebar-multi-tag-build/evidence/r11-*`. The first native
+lint invocation pointed outside the cached ESLint base and was rejected;
+the corrected relative-path invocation passed. The formatter was reapplied
+with the repository configuration, preserving existing formatting.
+Real-package R10 evidence remains historical, not a new R11 installation claim.
+No physical-phone, PostgreSQL, remote-CI, release or broad-suite certification.
+Protected demo and primary instances were untouched. Next round uses Opus.
