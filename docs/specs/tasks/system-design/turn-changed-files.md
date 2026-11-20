@@ -40,14 +40,14 @@ The [inventory](../../../plans/turn-changed-files/plan.md#source-inventory) sepa
 
 Use `show_turn_changed_files` in storage and API; use `showTurnChangedFiles` in frontend state.
 The backend update request uses `*bool`. Serialization always includes the effective boolean, including false.
-New defaults start at false. JSON hydration overlays a supplied pointer only when present.
-Frontend defaults are false; partial hydration preserves current explicit values.
+New account seeds and unstored preferences start at true. JSON hydration overlays a supplied pointer only when present.
+The frontend uses the same default. Partial hydration preserves the current value when the payload omits the field.
 There is no release flag and no `profiles.yaml` change.
 
 Add the field to models, DTO conversion, service patch/serialization, and store JSON encoding/decoding.
 The existing upgrade backfill inserts true only where the key is absent; it is unchanged.
 It preserves explicit false and existing user-settings revisions through the normal migration convention.
-Unstored settings reads default false; saved true/false values retain their meaning.
+Unstored settings reads default to true. A saved value of true or false overrides that default.
 Cover SQLite JSON and PostgreSQL JSONB behavior, fresh databases, upgrades, and replay.
 
 Expose a narrow user-service method that returns effective settings user ID, enabled value, revision, and resolution kind.
