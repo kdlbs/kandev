@@ -51,11 +51,23 @@ superseded, and the switch completes on the step's profile.
 ```bash
 # from the repository root
 (cd apps/backend && go test -trimpath -tags fts5 -count=1 \
-  -run 'WorkflowPark|WorkflowSwitch|UnexpectedStateWithoutSwitch|ForeignParkingMarker' \
-  ./internal/orchestrator/ ./internal/orchestrator/executor/)
-(cd apps/backend && go test -trimpath -tags fts5 -count=1 ./internal/orchestrator/ \
-  ./internal/orchestrator/executor/)
-bash scripts/lint-go-changed $(git diff --name-only origin/main -- 'apps/backend/*.go')
+  -run 'TestWorkflowParkingSupersedesLaunch|TestTransitionTaskSessionState_(LateLaunchFailureYieldsToNewParkingStamp|StaleLaunchFailureCannotFailReplacementAttempt)|TestPersistSessionFullRowIfCurrentState_NewParkingStampSupersedesUnchangedWaitingState|TestLaunchPreparedSession_LateLaunchErrorAfterNewParkingStampIsSuperseded|TestLaunchSession_RealWorkflowMoveDuringLaunchCompletes|TestHandleSessionLaunchFailure_WorkflowSwitchSupersededKeepsTaskActive|TestLaunchAutoStartTask_SupersededWorkflowSwitchDoesNotRecordFailure|TestPostgresUpdateTaskSession.*' \
+  ./internal/task/models ./internal/task/repository/sqlite \
+  ./internal/orchestrator/executor ./internal/orchestrator \
+  ./internal/orchestrator/handlers ./internal/mcp/handlers)
+(cd apps/backend && go test -race -trimpath -tags fts5 -count=1 \
+  -run 'TestWorkflowParkingSupersedesLaunch|TestTransitionTaskSessionState_(LateLaunchFailureYieldsToNewParkingStamp|StaleLaunchFailureCannotFailReplacementAttempt)|TestPersistSessionFullRowIfCurrentState_NewParkingStampSupersedesUnchangedWaitingState|TestLaunchPreparedSession_LateLaunchErrorAfterNewParkingStampIsSuperseded|TestLaunchSession_RealWorkflowMoveDuringLaunchCompletes|TestHandleSessionLaunchFailure_WorkflowSwitchSupersededKeepsTaskActive|TestLaunchAutoStartTask_SupersededWorkflowSwitchDoesNotRecordFailure' \
+  ./internal/task/models ./internal/task/repository/sqlite \
+  ./internal/orchestrator/executor ./internal/orchestrator \
+  ./internal/orchestrator/handlers ./internal/mcp/handlers)
+bash scripts/lint-go-changed \
+  apps/backend/internal/orchestrator/event_handlers_streaming.go \
+  apps/backend/internal/orchestrator/workflow_switch_launch_race_test.go \
+  apps/backend/internal/task/models/workflow_parking.go \
+  apps/backend/internal/task/models/workflow_parking_test.go \
+  apps/backend/internal/task/repository/sqlite/session.go \
+  apps/backend/internal/task/repository/sqlite/session_launch_parking_stamp_postgres_test.go
+git diff --check
 ```
 
 ## Likely files
@@ -81,7 +93,14 @@ bash scripts/lint-go-changed $(git diff --name-only origin/main -- 'apps/backend
 - The launch ownership regressions pass on the Linux workspace, including the
   late `LaunchAgent` failure path, unchanged `WAITING_FOR_INPUT` parking stamp,
   MCP/WS handoff, and the real task move with replacement agent start.
-- `go test -trimpath -tags fts5 -count=1 ./internal/task/repository/sqlite`
-  passed. `python3 scripts/list-docs.py validate`,
-  `python3 scripts/lint-spec-files.py --all`, `git diff --check`, and changed
-  Go file lint passed.
+- The current focused command above passes across task models, SQLite
+  repository, orchestrator, WebSocket handlers, and MCP handlers. The new
+  PostgreSQL cases are environment-gated and skip when
+  `KANDEV_TEST_POSTGRES_DSN` is not set.
+- The same focused regressions pass with `-race`.
+- Changed Go package lint reported `0 issues`; `git diff --check` passed.
+- A broader `go test -trimpath -tags fts5 -count=1
+  ./internal/task/repository/sqlite` run was stopped after more than six
+  minutes without a result. The focused run and race run both passed.
+- `python3 scripts/list-docs.py validate` and
+  `python3 scripts/lint-spec-files.py --all` passed before this fixup.

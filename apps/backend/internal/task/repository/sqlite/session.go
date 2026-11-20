@@ -2683,10 +2683,13 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 		args = append(args, *expectedUpdatedAt)
 	}
 	if expectedWorkflowParkingStamp != nil {
-		query += ` AND NOT (
-			COALESCE(json_extract(metadata, '$.workflow_parking.source_session_id'), '') = ?
-			AND COALESCE(json_extract(metadata, '$.workflow_parking.stamp'), '') != ?
-		)`
+		sourceSessionID := "COALESCE(json_extract(" + sqliteMetadataObject + ", '$.workflow_parking.source_session_id'), '')"
+		parkingStamp := "COALESCE(json_extract(" + sqliteMetadataObject + ", '$.workflow_parking.stamp'), '')"
+		if dialect.IsPostgres(r.db.DriverName()) {
+			sourceSessionID = "COALESCE(jsonb_extract_path_text(" + postgresMetadataObject + ", 'workflow_parking', 'source_session_id'), '')"
+			parkingStamp = "COALESCE(jsonb_extract_path_text(" + postgresMetadataObject + ", 'workflow_parking', 'stamp'), '')"
+		}
+		query += " AND NOT (" + sourceSessionID + " = ? AND " + parkingStamp + " != ?)"
 		args = append(args, session.ID, *expectedWorkflowParkingStamp)
 	}
 	// Primary selection belongs to the task-scoped SetSessionPrimary transaction.
@@ -2849,6 +2852,49 @@ func (r *Repository) UpdateTaskSessionStateIfCurrent(
 		}
 	}
 	return rows > 0, now, nil
+}
+
+// UpdateTaskSessionStateIfCurrentStartAttempt changes session state only while
+// the captured agent start attempt still owns the row.
+func (r *Repository) UpdateTaskSessionStateIfCurrentStartAttempt(
+	ctx context.Context,
+	taskID, sessionID, attemptID string,
+	expected, status models.TaskSessionState,
+	errorMessage string,
+) (bool, time.Time, error) {
+	if taskID == "" || sessionID == "" || attemptID == "" {
+		return false, time.Time{}, nil
+	}
+	writer, runtimeTx, guardErr := r.managedSessionStateWriter(ctx, sessionID, status)
+	if guardErr != nil {
+		return false, time.Time{}, guardErr
+	}
+	if runtimeTx != nil {
+		defer func() { _ = runtimeTx.Rollback() }()
+	}
+	now := r.nowUTC()
+	completedAt := completedAtForTaskSessionState(status, now)
+	query := `
+		UPDATE task_sessions
+		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND task_id = ? AND state = ? AND ` + startAttemptIDPredicate(r.db.DriverName())
+	result, err := writer.ExecContext(ctx, r.db.Rebind(query),
+		string(status), errorMessage, completedAt, now,
+		sessionID, taskID, string(expected), attemptID,
+	)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	if runtimeTx != nil {
+		if err := runtimeTx.Commit(); err != nil {
+			return false, time.Time{}, err
+		}
+	}
+	return rows == 1, now, nil
 }
 
 func (r *Repository) UpdateTaskSessionStateIfCurrentIdentity(

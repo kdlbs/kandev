@@ -140,6 +140,35 @@ func TestTransitionTaskSessionState_LateLaunchFailureYieldsToNewParkingStamp(t *
 	require.Equal(t, models.TaskSessionStateWaitingForInput, current.State)
 }
 
+func TestTransitionTaskSessionState_StaleLaunchFailureCannotFailReplacementAttempt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	require.NoError(t, repo.SetSessionMetadataKey(
+		ctx, "session1", models.SessionMetaKeyAgentStartAttemptID, "attempt-old",
+	))
+	launchSnapshot, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	require.NoError(t, repo.SetSessionMetadataKey(
+		ctx, "session1", models.SessionMetaKeyAgentStartAttemptID, "attempt-new",
+	))
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	expected := models.TaskSessionStateStarting
+	failureCtx := executor.WithWorkflowLaunchFailureOwnership(ctx, launchSnapshot)
+
+	changed, finalState, err := svc.transitionTaskSessionState(
+		failureCtx, "task1", "session1", &expected, models.TaskSessionStateFailed, "old launch failed", nil,
+	)
+
+	require.NoError(t, err)
+	require.False(t, changed, "a replacement start attempt must own the unchanged session state")
+	require.Equal(t, models.TaskSessionStateStarting, finalState)
+	current, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateStarting, current.State)
+	require.Equal(t, "attempt-new", models.StringFromAny(current.Metadata[models.SessionMetaKeyAgentStartAttemptID]))
+}
+
 // gatedSessionPersistRepo holds the first launch-state write of one session
 // until released, modelling a launch whose workspace is already materialized
 // while its session row is not yet persisted (the incident window).

@@ -100,6 +100,14 @@ func TestWorkflowParkingSupersedesLaunch(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "the same stamp does not revoke a resumed launch that parks again",
+			launch: &TaskSession{ID: "session-1", State: TaskSessionStateStarting,
+				Metadata: marker("park-1", "session-1")},
+			current: &TaskSession{ID: "session-1", State: TaskSessionStateWaitingForInput,
+				Metadata: marker("park-1", "session-1")},
+			want: false,
+		},
+		{
 			name:   "another session's marker does not qualify",
 			launch: &TaskSession{ID: "session-1", State: TaskSessionStateCreated},
 			current: &TaskSession{ID: "session-1", State: TaskSessionStateWaitingForInput,

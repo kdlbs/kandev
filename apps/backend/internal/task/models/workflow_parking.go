@@ -63,10 +63,13 @@ func WorkflowParkingSupersedesLaunch(
 	if !ok || parking.SourceSessionID != launch.ID {
 		return false
 	}
+	observed, observedOK := LoadWorkflowParking(launch.Metadata)
+	if observedOK && observed.SourceSessionID == launch.ID && observed.Stamp == parking.Stamp {
+		return false
+	}
 	if current.State == TaskSessionStateWaitingForInput && current.State != expectedState {
 		return true
 	}
-	observed, observedOK := LoadWorkflowParking(launch.Metadata)
 	return !observedOK || observed.SourceSessionID != launch.ID || observed.Stamp != parking.Stamp
 }
 
