@@ -287,9 +287,16 @@ type Adapter struct {
 	// Claude-acp's Monitor tool runs a background script that streams events
 	// back to the LLM as `<task-notification>` envelopes. We hold this map so
 	// later agent_message_chunks carrying those envelopes can be routed back
-	// to the originating Monitor's tool_call card. Cleared on prompt completion
-	// and rebuilt during session/load replay.
+	// to the originating Monitor's tool_call card. Cleared by terminal evidence
+	// or rebuilt during session/load replay.
 	activeMonitors map[string]map[string]string
+	// claudeMonitorReaders consumes newly appended native completion records
+	// for an exact Claude session. It is retained across prompts while a Monitor
+	// is live and fenced by the session generation.
+	claudeMonitorReaders              map[string]*claudeMonitorReaderState
+	pendingClaudeMonitorCompletions   map[string]map[claudeMonitorCompletionKey]claudeMonitorCompletion
+	completedClaudeMonitorCompletions map[string]map[claudeMonitorCompletionKey]struct{}
+	claudeMonitorReaderWg             sync.WaitGroup
 
 	// ScheduleWakeup tracking. The Claude Agent SDK's ScheduleWakeup tool
 	// fires its timer inside the SDK's async-iterator, but the upstream
@@ -576,35 +583,38 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	l := log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID))
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Adapter{
-		cfg:                        cfg,
-		logger:                     l,
-		agentID:                    cfg.AgentID,
-		copilotNativeSessionEvents: cfg.CopilotNativeSessionEvents && cfg.AgentID == copilotAgentID,
-		backgroundWorkEnabled:      cfg.AgentBackgroundWorkEnabled,
-		normalizer:                 NewNormalizerWithBackgroundWork(cfg.AgentID, cfg.AgentBackgroundWorkEnabled),
-		dialect:                    newACPDialect(cfg.AgentID),
-		updatesCh:                  make(chan AgentEvent, 100),
-		notifQueue:                 make(chan notifWork, notifQueueCapacity),
-		activeToolCalls:            make(map[string]*streams.NormalizedPayload),
-		contextCompactions:         make(map[string]*streams.NormalizedPayload),
-		openCodePluginClaims:       make(map[string]opencodeplugin.Claim),
-		cursorTaskMetaBySession:    make(map[string]map[string]cursorTaskMeta),
-		toolCallParents:            make(map[string]string),
-		handoffProtectedToolCalls:  make(map[string]struct{}),
-		activeMonitors:             make(map[string]map[string]string),
-		pendingWakeups:             make(map[string]*pendingWakeup),
-		usageBySession:             make(map[string]*usageTracker),
-		contextSamples:             make(map[string]contextWindowSample),
-		nativeGaugeMaxSize:         make(map[string]int64),
-		attachMgr:                  shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
-		promptGate:                 make(chan struct{}, 1),
-		asyncTurnFinalizers:        make(map[string]*asyncTurnFinalizer),
-		cancelJoinTimeout:          cfg.PromptCancelJoinTimeout,
-		asyncTurnEpochs:            make(map[string]uint64),
-		turnStartedAt:              make(map[string]time.Time),
-		lifetimeCtx:                ctx,
-		lifetimeCancel:             cancel,
-		closedCh:                   make(chan struct{}),
+		cfg:                               cfg,
+		logger:                            l,
+		agentID:                           cfg.AgentID,
+		copilotNativeSessionEvents:        cfg.CopilotNativeSessionEvents && cfg.AgentID == copilotAgentID,
+		backgroundWorkEnabled:             cfg.AgentBackgroundWorkEnabled,
+		normalizer:                        NewNormalizerWithBackgroundWork(cfg.AgentID, cfg.AgentBackgroundWorkEnabled),
+		dialect:                           newACPDialect(cfg.AgentID),
+		updatesCh:                         make(chan AgentEvent, 100),
+		notifQueue:                        make(chan notifWork, notifQueueCapacity),
+		activeToolCalls:                   make(map[string]*streams.NormalizedPayload),
+		contextCompactions:                make(map[string]*streams.NormalizedPayload),
+		openCodePluginClaims:              make(map[string]opencodeplugin.Claim),
+		cursorTaskMetaBySession:           make(map[string]map[string]cursorTaskMeta),
+		toolCallParents:                   make(map[string]string),
+		handoffProtectedToolCalls:         make(map[string]struct{}),
+		activeMonitors:                    make(map[string]map[string]string),
+		claudeMonitorReaders:              make(map[string]*claudeMonitorReaderState),
+		pendingClaudeMonitorCompletions:   make(map[string]map[claudeMonitorCompletionKey]claudeMonitorCompletion),
+		completedClaudeMonitorCompletions: make(map[string]map[claudeMonitorCompletionKey]struct{}),
+		pendingWakeups:                    make(map[string]*pendingWakeup),
+		usageBySession:                    make(map[string]*usageTracker),
+		contextSamples:                    make(map[string]contextWindowSample),
+		nativeGaugeMaxSize:                make(map[string]int64),
+		attachMgr:                         shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
+		promptGate:                        make(chan struct{}, 1),
+		asyncTurnFinalizers:               make(map[string]*asyncTurnFinalizer),
+		cancelJoinTimeout:                 cfg.PromptCancelJoinTimeout,
+		asyncTurnEpochs:                   make(map[string]uint64),
+		turnStartedAt:                     make(map[string]time.Time),
+		lifetimeCtx:                       ctx,
+		lifetimeCancel:                    cancel,
+		closedCh:                          make(chan struct{}),
 	}
 	a.shellSnapshotTimer = time.NewTimer(shellSnapshotInterval)
 	a.shellSnapshotTimer.Stop()
@@ -971,7 +981,11 @@ func (a *Adapter) Close() error {
 	if a.closedCh != nil {
 		close(a.closedCh)
 	}
+	claudeReaders := a.cancelClaudeMonitorReadersLocked("")
 	a.mu.Unlock()
+	for _, reader := range claudeReaders {
+		_ = reader.Close()
+	}
 
 	a.logger.Info("closing ACP adapter")
 
@@ -993,6 +1007,7 @@ func (a *Adapter) Close() error {
 	// committing its cleanup has registered the wait-group entry.
 	a.waitForSessionCleanup()
 
+	a.claudeMonitorReaderWg.Wait()
 	// Wait for the update worker to exit before closing updatesCh.
 	// handleACPUpdate may call sendUpdate, so updatesCh must remain open
 	// until the worker is gone.

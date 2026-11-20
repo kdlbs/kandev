@@ -50,12 +50,13 @@ import (
 type Status string
 
 const (
-	StatusStopped  Status = "stopped"
-	StatusStarting Status = "starting"
-	StatusRunning  Status = "running"
-	StatusPaused   Status = "paused"
-	StatusStopping Status = "stopping"
-	StatusError    Status = "error"
+	StatusStopped      Status = "stopped"
+	StatusStarting     Status = "starting"
+	StatusRunning      Status = "running"
+	StatusPaused       Status = "paused"
+	StatusStopping     Status = "stopping"
+	StatusError        Status = "error"
+	claudeACPAgentType        = "claude-acp"
 )
 
 // defaultUpdatesChannelCapacity is the updates channel buffer size used when
@@ -2601,6 +2602,7 @@ func (m *Manager) buildAdapterConfig() error {
 	}
 	m.adapterCfg = &adapter.Config{
 		WorkDir:                    m.cfg.WorkDir,
+		ClaudeConfigDir:            claudeConfigDirFromLaunch(m.cfg.AgentType, m.cfg.AgentEnv, m.cfg.StripEnv),
 		AutoApprove:                m.adapterAutoApprove(),
 		McpServers:                 mcpServers,
 		ProjectMCPDelivery:         projectDelivery.Clone(),
@@ -2616,6 +2618,7 @@ func (m *Manager) buildAdapterConfig() error {
 		PromptSuggestions:          m.cfg.PromptSuggestions,
 		CopilotNativeSessionEvents: m.cfg.CopilotNativeSessionEvents,
 	}
+
 	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
 		harness := acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
 		if harness == "" {
@@ -2688,6 +2691,33 @@ func (m *Manager) buildAdapterConfig() error {
 	// must be configured with fresh evidence.
 	m.cfg.ProjectMCPDelivery = nil
 	return nil
+}
+
+func claudeConfigDirFromLaunch(agentType string, env, stripEnv []string) string {
+	if agentType != claudeACPAgentType {
+		return ""
+	}
+	for _, key := range stripEnv {
+		if key == "CLAUDE_CONFIG_DIR" {
+			return ""
+		}
+	}
+	if configDir := acpcompat.EnvValue(env, "CLAUDE_CONFIG_DIR"); configDir != "" {
+		if !filepath.IsAbs(configDir) {
+			return ""
+		}
+		return filepath.Clean(configDir)
+	}
+	for _, key := range stripEnv {
+		if key == "HOME" {
+			return ""
+		}
+	}
+	home := acpcompat.EnvValue(env, "HOME")
+	if !filepath.IsAbs(home) {
+		return ""
+	}
+	return filepath.Join(filepath.Clean(home), ".claude")
 }
 
 // buildFinalCommand assembles the full command args and creates the exec.Cmd.
