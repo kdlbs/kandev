@@ -61,6 +61,8 @@ func TestManagerReopensStoppedPluginExecutorByAttachingRetainedEnvironment(t *te
 	record.TaskID = taskID
 	record.AgentExecutionID = priorExecutionID
 	record.Status = models.ExecutorRunningStatusStopped
+	// SQLite-loaded execution rows do not retain this transient credential.
+	record.TransientAuthToken = ""
 	record.Metadata[MetadataKeyAuthTokenSecret] = authSecretID
 	inventory, err := decodePluginExecutorInventory(record.Metadata)
 	if err != nil {
@@ -124,14 +126,29 @@ func TestManagerReopensStoppedPluginExecutorByAttachingRetainedEnvironment(t *te
 	runtime.SetRecoveryDependencies(&pluginExecutorRecoveryProfileLoaderFake{profile: models.ExecutorProviderLaunchProfile{
 		Provider: testPluginExecutorLaunchProvider(), ProfileID: profileID,
 	}}, store)
-	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
+	runtime.recoveredAgentctlInfoReader = func(
+		_ context.Context,
+		_ agentctl.ConnectionLeaseResolver,
+		_ *logger.Logger,
+		executionID string,
+		token string,
+	) (*agentctl.InstanceInfo, error) {
+		if executionID != runtimeIdentity || token != "agentctl-secret" {
+			return nil, fmt.Errorf("instance reader identity=%q token=%q", executionID, token)
+		}
+		return &agentctl.InstanceInfo{
+			ID: runtimeIdentity, TaskID: taskID, SessionID: sessionID,
+			Port: testPluginExecutorInstancePort, WorkspacePath: pluginExecutorWorkspacePath,
+		}, nil
+	}
+	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string, scopedMCPRoutes bool) (*agentctl.Client, error) {
 		if executionID != runtimeIdentity || token != "agentctl-secret" {
 			return nil, fmt.Errorf("runtime identity=%q token=%q", executionID, token)
 		}
 		if _, err := resolver(ctx); err != nil {
 			return nil, err
 		}
-		return agentctl.NewClient(host, port, log, agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token)), nil
+		return agentctl.NewClient(host, port, log, agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token), agentctl.WithBuiltinMCPScopedRoutes(scopedMCPRoutes)), nil
 	}
 	runtime.ready = func(ctx context.Context, client *agentctl.Client) error { return client.Health(ctx) }
 
@@ -162,6 +179,7 @@ func TestManagerReopensStoppedPluginExecutorByAttachingRetainedEnvironment(t *te
 	if err := mgr.StopAgentWithReason(context.Background(), execution.ID, "user stop", false); err != nil {
 		t.Fatalf("StopAgentWithReason(): %v", err)
 	}
+	store.record.TransientAuthToken = ""
 	if operations.destroyRequest != nil {
 		t.Fatalf("ordinary stop destroyed retained provider resource: %#v", operations.destroyRequest)
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/office/completionpolicy"
 	officeenginedispatcher "github.com/kandev/kandev/internal/office/engine_dispatcher"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -702,19 +703,7 @@ func (s *DashboardService) resolveDeciderName(
 
 // PendingApproverIDs compares the canonical slate with active approvals.
 func PendingApproverIDs(approvers []sqlite.Participant, decisions []*workflowmodels.WorkflowStepDecision) []string {
-	approvedBy := make(map[string]struct{}, len(decisions))
-	for _, dec := range decisions {
-		if dec.Decision == models.DecisionApproved {
-			approvedBy[dec.DeciderID] = struct{}{}
-		}
-	}
-	pending := make([]string, 0, len(approvers))
-	for _, ap := range approvers {
-		if _, ok := approvedBy[ap.AgentProfileID]; !ok {
-			pending = append(pending, ap.AgentProfileID)
-		}
-	}
-	return pending
+	return completionpolicy.PendingApproverIDs(approvers, decisions)
 }
 
 // ResolvePendingApproverNames resolves only display data after admission rollback.

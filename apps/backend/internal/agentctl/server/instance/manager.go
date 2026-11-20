@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpurl"
 	"github.com/kandev/kandev/internal/common/netutil"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	"github.com/kandev/kandev/pkg/agent"
@@ -33,6 +34,9 @@ const instanceHTTPShutdownGrace = 250 * time.Millisecond
 // Callers get a clear refusal instead of an instance that the shutdown sequence
 // has already walked past and will never stop.
 var ErrManagerShuttingDown = errors.New("instance manager is shutting down")
+
+// ErrInstanceBusy means idle reclaim left the instance available.
+var ErrInstanceBusy = errors.New("instance has workspace work")
 
 // Manager manages multiple agent instances.
 // It handles creation, tracking, and removal of agent instances,
@@ -215,8 +219,9 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		zap.String("workspace", req.WorkspacePath))
 
 	return &CreateResponse{
-		ID:   inst.ID,
-		Port: inst.Port,
+		ID:              inst.ID,
+		Port:            inst.Port,
+		ScopedMCPRoutes: inst.ScopedMCPRoutes,
 	}, nil
 }
 
@@ -257,6 +262,11 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 	id := req.ID
 	if id == "" {
 		id = uuid.New().String()
+	}
+	if req.ScopedMCPRoutes {
+		if err := mcpurl.ValidateInstanceID(id); err != nil {
+			return nil, errors.New("scoped built-in MCP requires a valid instance ID")
+		}
 	}
 	if _, exists := m.instances[id]; exists {
 		return nil, fmt.Errorf("instance with ID %s already exists", id)
@@ -341,18 +351,19 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 
 	// Create instance up-front so the activity middleware can reference it.
 	inst := &Instance{
-		ID:            id,
-		Port:          port,
-		lease:         bundle.lease,
-		Status:        "running",
-		WorkspacePath: req.WorkspacePath,
-		AgentCommand:  agentCmd,
-		Env:           req.Env,
-		CreatedAt:     time.Now(),
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		manager:       procMgr,
-		listenerDone:  make(chan struct{}),
+		ID:              id,
+		ScopedMCPRoutes: instanceCfg.ScopedMCPRoutes,
+		Port:            port,
+		lease:           bundle.lease,
+		Status:          "running",
+		WorkspacePath:   req.WorkspacePath,
+		AgentCommand:    agentCmd,
+		Env:             req.Env,
+		CreatedAt:       time.Now(),
+		SessionID:       req.SessionID,
+		TaskID:          req.TaskID,
+		manager:         procMgr,
+		listenerDone:    make(chan struct{}),
 	}
 	inst.MarkActivity()
 
@@ -387,6 +398,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 	return &config.InstanceOverrides{
 		InferenceClosureOperationID:  req.InferenceClosureOperationID,
 		InstanceID:                   id,
+		ScopedMCPRoutes:              req.ScopedMCPRoutes,
 		Protocol:                     agent.Protocol(req.Protocol),
 		AgentCommand:                 agentCmd,
 		WorkDir:                      req.WorkspacePath,
@@ -701,6 +713,15 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 }
 
 func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) error {
+	return m.stopInstanceWithAdmission(ctx, id, inst, false)
+}
+
+// ReclaimIdleInstance stops only the observed instance after closing idle admission.
+func (m *Manager) ReclaimIdleInstance(ctx context.Context, inst *Instance) error {
+	return m.stopInstanceWithAdmission(ctx, inst.ID, inst, true)
+}
+
+func (m *Manager) stopInstanceWithAdmission(ctx context.Context, id string, inst *Instance, idleOnly bool) error {
 	inst.stopMu.Lock()
 	defer inst.stopMu.Unlock()
 
@@ -720,6 +741,16 @@ func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) e
 	if current != inst {
 		m.mu.Unlock()
 		return fmt.Errorf("instance %s not found", id)
+	}
+	inst.statusMu.RLock()
+	stopping := inst.Status == "stopping"
+	inst.statusMu.RUnlock()
+	if idleOnly && !stopping {
+		admission, ok := inst.manager.(interface{ CloseAdmissionIfIdle() bool })
+		if !ok || !admission.CloseAdmissionIfIdle() {
+			m.mu.Unlock()
+			return ErrInstanceBusy
+		}
 	}
 	inst.setStatus("stopping")
 	m.mu.Unlock()
@@ -746,8 +777,7 @@ func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) e
 		}
 	}
 
-	stopErr := errors.Join(httpStopErr, processStopErr)
-	if httpStopErr != nil || processStopErr != nil {
+	if stopErr := errors.Join(httpStopErr, processStopErr); stopErr != nil {
 		return stopErr
 	}
 
@@ -759,16 +789,14 @@ func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) e
 		m.portAlloc.Release(inst.lease)
 		inst.portReleased = true
 	}
-	if stopErr == nil {
-		delete(m.instances, id)
-	}
+	delete(m.instances, id)
 	m.mu.Unlock()
 
 	m.logger.Info("StopInstance completed",
 		zap.String("instance_id", id),
 		zap.Int("port", inst.Port))
 
-	return stopErr
+	return nil
 }
 
 type instanceHTTPServer interface {

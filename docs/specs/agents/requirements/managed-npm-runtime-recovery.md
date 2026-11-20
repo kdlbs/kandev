@@ -67,6 +67,7 @@ recovery with reuse across launches. It preserves the shared-tree protection rul
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-002.3:** Kandev shall preserve the configured npm registry, the global npm cache, and unrelated execution trees.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-002.4:** Cache repair shall reject broad roots, path-like package values, symbolic links, and paths outside the npm execution cache.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-002.5:** Cancellation and backend shutdown shall stop repair before a replacement process starts.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-002.6:** On Windows, cache repair and the execution-tree inventory shall open an ordinary npm cache directory below a drive letter or UNC share root, and shall still reject a symbolic link or junction at any component below the volume root.
 
 ### REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-003: Project-independent resolution and policy errors
 

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 )
@@ -10,7 +11,9 @@ import (
 // CallInferenceContext derives relationships from the actual pending call.
 // Runtime executors add the task and execution relationship they own later.
 func (s *Service) CallInferenceContext(ctx context.Context, callID string) (context.Context, error) {
-	call, err := s.repo.GetCallByID(ctx, callID)
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	call, err := s.repo.GetCallByID(readCtx, callID)
 	if err != nil {
 		return ctx, err
 	}

@@ -69,13 +69,27 @@ func (h *TaskHandlers) wsUpdateTaskPreviewFeedback(ctx context.Context, msg *ws.
 		ID              string `json:"id"`
 		Comment         string `json:"comment"`
 		ExpectedVersion int64  `json:"expected_version"`
+		Capture         *struct {
+			CaptureRect            json.RawMessage `json:"capture_rect"`
+			ScreenshotAttachmentID string          `json:"screenshot_attachment_id"`
+		} `json:"capture"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return invalidPreviewFeedbackPayload(msg)
 	}
-	snapshot, err := h.planService.UpdatePreviewFeedback(
-		ctx, req.TaskID, req.ID, req.Comment, req.ExpectedVersion,
-	)
+	var snapshot *models.TaskPreviewFeedbackSnapshot
+	var err error
+	if req.Capture != nil {
+		snapshot, err = h.planService.ReplacePreviewFeedbackScreenshot(ctx, &models.TaskPreviewFeedbackScreenshotReplacement{
+			TaskID: req.TaskID, ItemID: req.ID, ExpectedVersion: req.ExpectedVersion,
+			Comment: req.Comment, CaptureRect: req.Capture.CaptureRect,
+			ScreenshotAttachmentID: req.Capture.ScreenshotAttachmentID,
+		})
+	} else {
+		snapshot, err = h.planService.UpdatePreviewFeedback(
+			ctx, req.TaskID, req.ID, req.Comment, req.ExpectedVersion,
+		)
+	}
 	if err != nil {
 		return previewFeedbackError(msg, err, snapshot)
 	}

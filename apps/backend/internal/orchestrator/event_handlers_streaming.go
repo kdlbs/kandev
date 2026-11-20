@@ -896,7 +896,7 @@ func (s *Service) handleStreamingEventKind(
 }
 
 type canonicalMessageEventPublisher interface {
-	PublishMessageEvent(context.Context, string, *models.Message) error
+	PublishMessageEvent(context.Context, string, *models.Message, ...*models.ConversationMutationReceipt) error
 }
 
 type canonicalMessageReader interface {
@@ -925,7 +925,7 @@ func (s *Service) publishCanonicalMessageEvent(
 			zap.String("message_id", payload.Data.MessageID))
 		return
 	}
-	message, err := reader.GetMessage(ctx, payload.Data.MessageID)
+	message, receipt, err := canonicalMessageNotification(ctx, reader, payload)
 	if err != nil || message == nil {
 		s.logger.Warn("failed to load canonical message for notification",
 			zap.String("session_id", payload.SessionID),
@@ -937,7 +937,7 @@ func (s *Service) publishCanonicalMessageEvent(
 	if !payload.Data.IsAppend {
 		eventType = events.MessageAdded
 	}
-	if err := publisher.PublishMessageEvent(ctx, eventType, message); err != nil {
+	if err := publisher.PublishMessageEvent(ctx, eventType, message, receipt); err != nil {
 		s.logger.Warn("failed to publish canonical message notification",
 			zap.String("session_id", payload.SessionID),
 			zap.String("message_id", payload.Data.MessageID),
@@ -1595,12 +1595,25 @@ func (s *Service) transitionTaskSessionState(
 			return changed, finalState, err
 		}
 	}
+	launchFailureSession, hasLaunchFailureOwnership := executor.WorkflowLaunchFailureOwnershipFromContext(ctx)
+	launchFailureTransition := nextState == models.TaskSessionStateFailed && hasLaunchFailureOwnership &&
+		launchFailureSession.ID == sessionID
+	ctx, releaseLaunchFailureGuard, ownsLaunchFailureGuard := s.lockLaunchFailureTransition(
+		ctx, sessionID, launchFailureTransition,
+	)
+	defer releaseLaunchFailureGuard()
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return false, "", fmt.Errorf("get session before state transition: %w", err)
 	}
 	if session == nil {
 		return false, "", fmt.Errorf("get session before state transition: session %q is nil", sessionID)
+	}
+	if launchFailureTransition {
+		expectedState, err = launchFailureExpectedState(sessionID, launchFailureSession, session)
+		if err != nil {
+			return false, session.State, err
+		}
 	}
 	if expectedState != nil && session.State != *expectedState {
 		return false, session.State, nil
@@ -1610,9 +1623,22 @@ func (s *Service) transitionTaskSessionState(
 	}
 
 	oldState := session.State
-	changed, refreshed, authoritativeUpdatedAt, err := s.persistStrictTaskSessionState(
-		ctx, sessionID, session, nextState, errorMessage,
-	)
+	var changed bool
+	var refreshed *models.TaskSession
+	var authoritativeUpdatedAt *time.Time
+	if launchFailureTransition {
+		changed, refreshed, authoritativeUpdatedAt, err = s.persistLaunchFailureTaskSessionState(
+			ctx, taskID, sessionID, launchFailureSession, session, errorMessage,
+		)
+	} else {
+		changed, refreshed, authoritativeUpdatedAt, err = s.persistStrictTaskSessionState(
+			ctx, sessionID, session, nextState, errorMessage,
+		)
+	}
+	releaseLaunchFailureGuard()
+	if ownsLaunchFailureGuard {
+		ctx = withoutWorkflowProfileSwitchGuard(ctx)
+	}
 	if err != nil {
 		return false, oldState, err
 	}
@@ -1638,6 +1664,39 @@ func (s *Service) transitionTaskSessionState(
 		refreshed,
 	)
 	return true, nextState, nil
+}
+
+func (s *Service) lockLaunchFailureTransition(
+	ctx context.Context,
+	sessionID string,
+	ownsLaunchFailure bool,
+) (context.Context, func(), bool) {
+	if !ownsLaunchFailure || workflowProfileSwitchGuardIsHeld(ctx, sessionID) {
+		return ctx, func() {}, false
+	}
+	guard, release := s.acquireCancelInFlightGuard(sessionID)
+	guard.Lock()
+	locked := true
+	releaseGuard := func() {
+		if !locked {
+			return
+		}
+		locked = false
+		guard.Unlock()
+		release()
+	}
+	return withWorkflowProfileSwitchGuardHeld(ctx, sessionID, ""), releaseGuard, true
+}
+
+func launchFailureExpectedState(
+	sessionID string,
+	launchSession, currentSession *models.TaskSession,
+) (*models.TaskSessionState, error) {
+	if models.WorkflowParkingSupersedesLaunch(launchSession, currentSession, launchSession.State) {
+		return nil, &executor.SessionStateSwitchedError{SessionID: sessionID, State: currentSession.State}
+	}
+	expected := launchSession.State
+	return &expected, nil
 }
 
 type resumeStateAttemptUpdater interface {
@@ -1995,6 +2054,42 @@ func (s *Service) persistConditionalTaskSessionState(
 	return true, persisted, &t, nil
 }
 
+func (s *Service) persistLaunchFailureTaskSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	launchSession, session *models.TaskSession,
+	errorMessage string,
+) (bool, *models.TaskSession, *time.Time, error) {
+	attemptID := models.StringFromAny(launchSession.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+	if attemptID == "" {
+		return false, session, nil, nil
+	}
+	updater, ok := s.repo.(launchFailureAttemptStateUpdater)
+	if !ok {
+		return false, session, nil, fmt.Errorf("session repository does not support start-attempt-fenced failure writes")
+	}
+	changed, updatedAt, err := updater.UpdateTaskSessionStateIfCurrentStartAttempt(
+		ctx, taskID, sessionID, attemptID, launchSession.State, models.TaskSessionStateFailed, errorMessage,
+	)
+	if err != nil {
+		return false, session, nil, err
+	}
+	if !changed {
+		refreshed, readErr := s.repo.GetTaskSession(ctx, sessionID)
+		if readErr != nil {
+			return false, session, nil, fmt.Errorf("get session after rejected launch failure: %w", readErr)
+		}
+		if refreshed == nil {
+			return false, session, nil, fmt.Errorf("get session after rejected launch failure: session %q is nil", sessionID)
+		}
+		return false, refreshed, nil, nil
+	}
+	persisted := taskSessionAfterStateWrite(session, models.TaskSessionStateFailed, errorMessage, updatedAt)
+	persisted = s.refreshTaskSessionOr(ctx, sessionID, persisted)
+	t := updatedAt.UTC()
+	return true, persisted, &t, nil
+}
+
 func (s *Service) cancelActiveTaskSessionState(
 	ctx context.Context,
 	canceller activeTaskSessionCanceller,
@@ -2047,21 +2142,24 @@ type bootstrapFailureAttemptCommitter interface {
 	) (changed bool, updatedAt time.Time, err error)
 }
 
-type startAttemptSessionUpdater interface {
-	UpdateTaskSessionIfCurrentStateWithStartAttempt(
-		context.Context,
-		*models.TaskSession,
-		models.TaskSessionState,
-		string,
-	) (bool, error)
-}
-
 type conditionalTaskSessionStateUpdater interface {
 	UpdateTaskSessionStateIfCurrent(
 		ctx context.Context,
 		sessionID string,
 		expected, next models.TaskSessionState,
 		errorMessage string,
+	) (bool, time.Time, error)
+}
+
+type launchFailureAttemptStateUpdater interface {
+	UpdateTaskSessionStateIfCurrentStartAttempt(
+		context.Context,
+		string,
+		string,
+		string,
+		models.TaskSessionState,
+		models.TaskSessionState,
+		string,
 	) (bool, time.Time, error)
 }
 
@@ -2172,6 +2270,10 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 	if !isTerminalSessionState(newState) {
 		return
 	}
+	// A restart closure still owns this session while its successor is pending.
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, false); err != nil {
+		return
+	}
 	if newState == models.TaskSessionStateFailed && s.preservePrimaryForAutomaticHistory(ctx, taskID, sessionID) {
 		return
 	}
@@ -2209,6 +2311,175 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 				zap.String("new_primary", candidate))
 		}
 	}
+}
+
+// handOffTerminalSessionQueue moves messages still queued for a session that
+// reached a terminal state to the session that now holds the primary role.
+// A terminal session never becomes promptable again, so without the move the
+// messages stay queued forever. The receiver keeps its own Auto-run setting
+// and drains them only when that setting allows it.
+//
+// Promotion runs inside the stopping session's queue admission, and the
+// transfer needs admission on both sessions, so the hand-off runs after the
+// caller returns rather than inside it. The worker is detached from the
+// request but bound to the service lifetime, so Stop cancels and joins it.
+func (s *Service) scheduleTerminalSessionQueueHandOff(taskID, fromSessionID string) {
+	s.parkedLoopMu.Lock()
+	if s.parkedLoopStopped || s.parkedLoopCtx == nil {
+		s.parkedLoopMu.Unlock()
+		return
+	}
+	handOffCtx := messagequeue.WithoutSessionAdmission(s.parkedLoopCtx)
+	// Add while parkedLoopMu is held so Stop cannot finish waiting before
+	// this worker is registered.
+	s.parkedLoopWorkers.Add(1)
+	s.parkedLoopMu.Unlock()
+	go func() {
+		defer s.parkedLoopWorkers.Done()
+		s.handOffTerminalSessionQueue(handOffCtx, taskID, fromSessionID)
+	}()
+}
+
+// errTerminalQueueReceiverChanged aborts a hand-off transfer whose receiver
+// lost the primary role before the transfer was admitted.
+var errTerminalQueueReceiverChanged = errors.New("terminal queue hand-off receiver is no longer primary")
+
+var (
+	errTerminalQueueSourceNotRetired    = errors.New("terminal queue hand-off source is no longer retired")
+	errTerminalQueueReceiverUnavailable = errors.New("terminal queue hand-off receiver awaits recovery")
+)
+
+// terminalQueueHandOffAttempts bounds re-resolving the receiver when the
+// primary role keeps moving while a hand-off waits for admission.
+const terminalQueueHandOffAttempts = 5
+
+// handOffTerminalSessionQueue resolves the receiver when it runs instead of
+// when it was scheduled. Hand-offs are serialized, so when successive
+// promotions fail one primary after another, an earlier hand-off cannot move
+// its messages onto a primary that already handed its own queue on. The
+// transfer confirms the receiver is still primary inside its admission and
+// resolves it again when the role moved, so a promotion that lands while the
+// transfer waits cannot leave the messages on a session that lost the role.
+func (s *Service) handOffTerminalSessionQueue(ctx context.Context, taskID, fromSessionID string) {
+	if !s.config.TerminalPrimaryQueueHandoff || s.messageQueue == nil || fromSessionID == "" {
+		return
+	}
+	s.terminalQueueHandOffMu.Lock()
+	defer s.terminalQueueHandOffMu.Unlock()
+	for attempt := 0; attempt < terminalQueueHandOffAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return
+		}
+		toSessionID := s.currentPrimarySessionID(ctx, taskID)
+		if toSessionID == "" || toSessionID == fromSessionID {
+			return
+		}
+		pending, err := s.messageQueue.HasPendingForSession(ctx, fromSessionID)
+		if err != nil || !pending {
+			return
+		}
+		if s.beforeTerminalQueueTransfer != nil {
+			s.beforeTerminalQueueTransfer(toSessionID)
+		}
+		err = s.transferTerminalSessionQueue(ctx, taskID, fromSessionID, toSessionID)
+		if errors.Is(err, errTerminalQueueReceiverChanged) {
+			continue
+		}
+		if err != nil {
+			s.logger.Warn("failed to hand off queued messages from terminal session",
+				zap.String("task_id", taskID),
+				zap.String("from_session_id", fromSessionID),
+				zap.String("to_session_id", toSessionID),
+				zap.Error(err))
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if _, err := s.DrainQueuedMessageIfAutoRun(ctx, toSessionID); err != nil {
+			s.logger.Debug("queued hand-off left for the next drain",
+				zap.String("session_id", toSessionID), zap.Error(err))
+		}
+		return
+	}
+	s.logger.Warn("terminal queue hand-off gave up while the primary role kept moving",
+		zap.String("task_id", taskID),
+		zap.String("from_session_id", fromSessionID))
+}
+
+// transferTerminalSessionQueue moves a terminal session's queue to the
+// primary. The receiver keeps its own Auto-run: the retired source's setting
+// is not combined into it, and a change the user made before the transfer was
+// admitted is kept. Inside the admission it confirms toSessionID still holds
+// the primary role and keeps primary switches out until the transfer commits.
+func (s *Service) transferTerminalSessionQueue(ctx context.Context, taskID, fromSessionID, toSessionID string) error {
+	prepareAttachments, rollbackAttachments := s.queuedAttachmentTransferCallbacks(taskID, fromSessionID, toSessionID)
+	fenced := false
+	defer func() {
+		if fenced {
+			s.primarySwitchMu.RUnlock()
+		}
+	}()
+	attachmentsPrepared := false
+	transferErr := s.messageQueue.TransferRetiredSessionWithDurableAttachmentPreparation(
+		ctx,
+		taskID,
+		fromSessionID,
+		toSessionID,
+		func(admittedCtx context.Context, attachmentIDs []string) error {
+			if !fenced {
+				s.primarySwitchMu.RLock()
+				fenced = true
+			}
+			if s.currentPrimarySessionID(admittedCtx, taskID) != toSessionID {
+				return errTerminalQueueReceiverChanged
+			}
+			if !s.terminalQueueSourceRetired(admittedCtx, fromSessionID) {
+				return errTerminalQueueSourceNotRetired
+			}
+			if s.terminalQueueReceiverAwaitsRecovery(admittedCtx, toSessionID) {
+				return errTerminalQueueReceiverUnavailable
+			}
+			attachmentsPrepared = true
+			return prepareAttachments(admittedCtx, attachmentIDs)
+		},
+		func(rollbackCtx context.Context, attachmentIDs []string) error {
+			if !attachmentsPrepared {
+				return nil
+			}
+			return rollbackAttachments(rollbackCtx, attachmentIDs)
+		},
+	)
+	if transferErr != nil {
+		return fmt.Errorf("transfer queued state: %w", transferErr)
+	}
+	s.publishQueueStatusEvent(ctx, fromSessionID)
+	s.publishQueueStatusEvent(ctx, toSessionID)
+	return nil
+}
+
+func (s *Service) currentPrimarySessionID(ctx context.Context, taskID string) string {
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return ""
+	}
+	for _, session := range sessions {
+		if session.IsPrimary {
+			return session.ID
+		}
+	}
+	return ""
+}
+
+func (s *Service) terminalQueueSourceRetired(ctx context.Context, sessionID string) bool {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	return err == nil && session != nil && isTerminalSessionState(session.State) && !s.resumeAttemptInFlight(sessionID) &&
+		s.checkInferenceClosureAdmission(ctx, sessionID, false) == nil
+}
+
+func (s *Service) terminalQueueReceiverAwaitsRecovery(ctx context.Context, sessionID string) bool {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	return err != nil || session == nil || s.sessionAwaitsRecoveryAction(ctx, session)
 }
 
 func isTerminalSessionState(s models.TaskSessionState) bool {
@@ -2677,15 +2948,19 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 ) error {
 	var changed bool
 	var err error
-	if attemptID := models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]); attemptID != "" {
-		updater, ok := s.repo.(startAttemptSessionUpdater)
-		if !ok {
-			return fmt.Errorf("session start requires a startup-attempt-aware repository write")
-		}
-		changed, err = updater.UpdateTaskSessionIfCurrentStateWithStartAttempt(ctx, session, expected, attemptID)
-	} else {
-		changed, err = s.repo.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	updater, ok := s.repo.(interface {
+		UpdateTaskSessionIfCurrentStateForLaunch(
+			context.Context,
+			*models.TaskSession,
+			models.TaskSessionState,
+			string,
+		) (bool, error)
+	})
+	if !ok {
+		return fmt.Errorf("session start requires parking-aware repository writes")
 	}
+	attemptID := models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+	changed, err = updater.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
 	if err != nil {
 		return err
 	}
@@ -2701,6 +2976,9 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 	}
 	if isTerminalSessionState(latest.State) {
 		return &executor.SessionStateSupersededError{SessionID: session.ID, State: latest.State}
+	}
+	if models.WorkflowParkingSupersedesLaunch(session, latest, expected) {
+		return &executor.SessionStateSwitchedError{SessionID: session.ID, State: latest.State}
 	}
 	if latest.State == models.TaskSessionStateRunning {
 		return fmt.Errorf(

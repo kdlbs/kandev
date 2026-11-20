@@ -3,6 +3,7 @@ package utility
 import (
 	"context"
 	"os/exec"
+	"time"
 )
 
 type attemptContextKey struct{}
@@ -38,8 +39,25 @@ func settleNotStarted(a *ownedAttempt) {
 	a.Status.Known, a.Status.Settled, a.Status.State = true, true, AttemptNotStarted
 }
 
-func markInferenceDispatch(ctx context.Context) {
-	changeAttempt(ctx, func(a *ownedAttempt) { a.Status.PromptDispatch = PromptPossiblySent })
+func markInferenceDispatch(ctx context.Context) error {
+	carrier, ok := ctx.Value(attemptContextKey{}).(attemptContext)
+	if !ok {
+		return nil
+	}
+	o := carrier.owner
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	a := o.state.Attempts[carrier.id]
+	if a == nil {
+		return errAttemptUnavailable
+	}
+	a.Status.PromptDispatch = PromptPossiblySent
+	a.Status.UpdatedAt = time.Now().UTC()
+	o.persistLocked(a.Status.Settled, carrier.id)
+	if o.storageUnavailable || o.diagnostics.LastPersistResult == attemptPersistWriteFailed {
+		return errAttemptUnavailable
+	}
+	return nil
 }
 
 func finishInferenceCommand(ctx context.Context, terminated bool) {

@@ -30,6 +30,7 @@ export const defaultFeatureFlags = {
   autoStartPendingWork: false,
   autoContinueFromHistory: false,
   autoRetryUnsentRequests: false,
+  terminalPrimaryQueueHandoff: false,
   agentBackgroundWork: false,
   opencodePlugin: false,
 } as const;

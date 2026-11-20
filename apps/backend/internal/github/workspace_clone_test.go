@@ -22,7 +22,12 @@ func TestWorkspaceCloneGitHubSources(t *testing.T) {
 			ctx := t.Context()
 			seedConnectionWorkspaces(t, store, "source", "target")
 			seedStoreAppRegistration(t, store)
-			require.NoError(t, store.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{WorkspaceID: "source", TaskGitCredentialsMode: TaskGitCredentialsModeExecutor, RepoScopeMode: RepoScopeModeAll, SavedPresets: []byte(`[{"id":"mine","default":true}]`), DefaultQueryPresets: []byte(`{"pr":[],"issue":[]}`)}))
+			require.NoError(t, store.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
+				WorkspaceID: "source", TaskGitCredentialsMode: TaskGitCredentialsModeExecutor,
+				RepoScopeMode: RepoScopeModeSelected, RepoScopeOrgs: []string{"acme"},
+				RepoScopeRepos: []RepoFilter{{Owner: "outside", Name: "tool"}},
+				SavedPresets:   []byte(`[{"id":"mine","default":true}]`), DefaultQueryPresets: []byte(`{"pr":[],"issue":[]}`),
+			}))
 			if source != "" {
 				installation := int64(42)
 				connection := &WorkspaceConnection{WorkspaceID: "source", Source: source, GitHubHost: "github.com", Status: ConnectionStatusActive, CredentialGeneration: 9}
@@ -59,6 +64,9 @@ func TestWorkspaceCloneGitHubSources(t *testing.T) {
 			require.NoError(t, tx.Commit())
 			settings, err := store.GetWorkspaceSettings(ctx, "target")
 			require.NoError(t, err)
+			require.Equal(t, RepoScopeModeSelected, settings.RepoScopeMode)
+			require.Equal(t, []string{"acme"}, settings.RepoScopeOrgs)
+			require.Equal(t, []RepoFilter{{Owner: "outside", Name: "tool"}}, settings.RepoScopeRepos)
 			require.JSONEq(t, `[{"id":"mine","default":true}]`, string(settings.SavedPresets))
 			require.JSONEq(t, `{"pr":[],"issue":[]}`, string(settings.DefaultQueryPresets))
 			connection, err := store.GetWorkspaceConnection(ctx, "target")

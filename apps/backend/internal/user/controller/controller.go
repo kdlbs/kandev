@@ -121,6 +121,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		LspAutoStartLanguages:             req.LspAutoStartLanguages,
 		LspAutoInstallLanguages:           req.LspAutoInstallLanguages,
 		LspServerConfigs:                  req.LspServerConfigs,
+		MarkdownPreviewByDefault:          req.MarkdownPreviewByDefault,
 		LspStatusLocation:                 req.LspStatusLocation,
 		SavedLayouts:                      req.SavedLayouts,
 		SidebarViews:                      req.SidebarViews,

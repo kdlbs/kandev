@@ -109,6 +109,7 @@ func provideOrchestrator(
 	serviceCfg.AutoStartPendingWork = cfg != nil && cfg.Features.AutoStartPendingWork
 	serviceCfg.AutoContinueFromHistory = cfg != nil && cfg.Features.AutoContinueFromHistory
 	serviceCfg.AutoRetryUnsentRequests = cfg != nil && cfg.Features.AutoRetryUnsentRequests
+	serviceCfg.TerminalPrimaryQueueHandoff = cfg != nil && cfg.Features.TerminalPrimaryQueueHandoff
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)

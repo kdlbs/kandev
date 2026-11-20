@@ -751,14 +751,6 @@ func (r *phase4TaskRepo) ListUnarchivedTasksWithActiveSessions(context.Context) 
 	r.panicNotUsed("ListUnarchivedTasksWithActiveSessions")
 	return nil, nil
 }
-func (r *phase4TaskRepo) ListExpiredQuickChatTasks(context.Context, time.Time) ([]*models.Task, error) {
-	r.panicNotUsed("ListExpiredQuickChatTasks")
-	return nil, nil
-}
-func (r *phase4TaskRepo) DeleteExpiredQuickChatTask(context.Context, string, time.Time) (bool, error) {
-	r.panicNotUsed("DeleteExpiredQuickChatTask")
-	return false, nil
-}
 func (r *phase4TaskRepo) ListCoordinatorOriginTasks(context.Context, string) ([]*models.Task, error) {
 	r.panicNotUsed("ListCoordinatorOriginTasks")
 	return nil, nil

@@ -10,7 +10,7 @@ import (
 )
 
 func closureBindingRelated(held sessioncapacity.InferenceBinding, sid, instance string) bool {
-	return held.SessionID == "" || held.SessionID == sid || held.InstanceID == instance
+	return held.SessionID == "" || held.SessionID == sid || held.InstanceID == instance || held.ParentExecutionID == instance
 }
 
 // CaptureInferenceClosureClaims is persisted before any claim is removed.

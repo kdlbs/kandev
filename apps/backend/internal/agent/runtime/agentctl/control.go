@@ -59,6 +59,7 @@ type McpServerConfig struct {
 
 // CreateInstanceRequest contains the parameters for creating a new agent instance.
 type CreateInstanceRequest struct {
+	ScopedMCPRoutes             bool                `json:"scoped_mcp_routes,omitempty"`
 	InferenceClosureOperationID string              `json:"inference_closure_operation_id,omitempty"`
 	ID                          string              `json:"id,omitempty"`
 	WorkspacePath               string              `json:"workspace_path"`
@@ -144,13 +145,15 @@ type CreateInstanceRequest struct {
 
 // CreateInstanceResponse contains the result of creating a new agent instance.
 type CreateInstanceResponse struct {
-	ID   string `json:"id"`
-	Port int    `json:"port"`
+	ID              string `json:"id"`
+	Port            int    `json:"port"`
+	ScopedMCPRoutes bool   `json:"scoped_mcp_routes"`
 }
 
 // InstanceInfo contains information about an agent instance.
 type InstanceInfo struct {
 	ID              string            `json:"id"`
+	ScopedMCPRoutes bool              `json:"scoped_mcp_routes"`
 	Port            int               `json:"port"`
 	LeaseGeneration uint64            `json:"lease_generation"`
 	ListenerActive  bool              `json:"listener_active"`
@@ -388,7 +391,20 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 
 // DeleteInstance stops and removes an agent instance.
 func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) error {
-	req, err := http.NewRequestWithContext(ctx, "DELETE", c.baseURL+"/api/v1/instances/"+instanceID, nil)
+	return c.stopInstance(ctx, instanceID, false)
+}
+
+// ReclaimIdleInstance requires the peer to refuse when instance work is active.
+func (c *ControlClient) ReclaimIdleInstance(ctx context.Context, instanceID string) error {
+	return c.stopInstance(ctx, instanceID, true)
+}
+
+func (c *ControlClient) stopInstance(ctx context.Context, instanceID string, idleOnly bool) error {
+	method, path := http.MethodDelete, "/api/v1/instances/"+instanceID
+	if idleOnly {
+		method, path = http.MethodPost, path+"/reclaim"
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
 	if err != nil {
 		return err
 	}
@@ -405,7 +421,7 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 	// response was lost. The desired postcondition is already satisfied.
 	if resp.StatusCode != http.StatusOK &&
 		resp.StatusCode != http.StatusNoContent &&
-		resp.StatusCode != http.StatusNotFound {
+		(resp.StatusCode != http.StatusNotFound || idleOnly) {
 		var errResp struct {
 			Error string `json:"error"`
 		}
@@ -417,7 +433,7 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 
 	if resp.StatusCode == http.StatusOK {
 		if err := observeDeletedInference(ctx, instanceID, resp.Body); err != nil {
-			return fmt.Errorf("settle stopped instance inference: %w", err)
+			return fmt.Errorf("%w: %w", ErrInferenceStopSettlement, err)
 		}
 	}
 	c.logger.Info("deleted agent instance", zap.String("instance_id", instanceID))

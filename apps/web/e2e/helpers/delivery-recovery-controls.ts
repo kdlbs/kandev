@@ -4,6 +4,7 @@ import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
 export async function assertDeliveryRecoveryGeometry(
   page: Page,
   primaryTestId = "recovery-retry-connection-button",
+  options: { allowWrappedActions?: boolean } = {},
 ) {
   const retry = page.getByTestId(primaryTestId);
   const stop = page.getByTestId("recovery-stop-button");
@@ -25,7 +26,7 @@ export async function assertDeliveryRecoveryGeometry(
     expect(retryBox!.height).toBeGreaterThanOrEqual(44);
     expect(stopBox!.height).toBeGreaterThanOrEqual(44);
   }
-  if (!narrow) {
+  if (!narrow && !options.allowWrappedActions) {
     expect(Math.abs(retryBox!.y - stopBox!.y)).toBeLessThanOrEqual(1);
     expect(Math.abs(retryBox!.height - stopBox!.height)).toBeLessThanOrEqual(1);
   }

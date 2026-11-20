@@ -149,12 +149,21 @@ Provider setup probes and session initialization are not turns; only admitted pr
 Workspace preparation scripts before dispatch form baseline content and do not count as provider-turn changes.
 Steering within the same turn retains its endpoints; a separately admitted replacement turn requires its own fresh baseline.
 
+Checkpoint admission validates the task/session/turn relationship and the session's exact persisted environment binding.
+The environment row may belong to another task for inherited or shared-group workspaces.
+Row ownership is not a substitute for that binding.
+Unbound environments, including another environment owned by the same task, remain invalid.
+
 ### End
 
 The [preservation lifecycle](turn-change-preservation.md) owns terminal capture, content retries, restart recovery, and cleanup ordering.
 `CaptureTerminalEndpoints` freezes the exact turn and accepts immutable ends before successor writes.
 `ProcessTerminal` compares those accepted objects and verifies a retained Git source independently from the prompt fence.
 Transient content errors retain pending work until bounded retry succeeds or settles a final failure.
+Lifecycle summary processing stops immediately for missing change sets or invalid ownership, including wrapped errors.
+Transient summary and publication failures remain retryable until success or shutdown, with exponential backoff capped at five seconds.
+A permanent summary failure logs its reason and attempt count once. Background shutdown cancellation stops quietly.
+Stopping summary retries does not release an unresolved terminal-capture fence or manufacture historical endpoints.
 Runtime cleanup preserves content or explicitly settles outstanding work before destroying its executor source.
 Existing completion authority, final-message anchoring, and bounded Stop/Cancel behavior remain dependencies of that lifecycle.
 

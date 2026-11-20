@@ -61,7 +61,9 @@ func TestAutomaticRestartAfterHistoricalTerminalRecovery(t *testing.T) {
 		}
 		messages, err := repo.ListMessages(ctx, session.ID)
 		recovery, exists := models.LoadAgentDeliveryRecovery(updated.Metadata)
-		return err == nil && len(messages) == 2 && exists && recovery.Phase == models.AgentDeliveryRecoveryRestored
+		return err == nil && len(messages) == 2 && exists &&
+			recovery.Phase == models.AgentDeliveryRecoveryRestored &&
+			updated.Metadata[models.SessionMetaKeyRecoveryNoticePending] == nil
 	}, 5*time.Second, 20*time.Millisecond, "startup should restore the failed session and persist its notice without user focus")
 	storedSession, err := repo.GetTaskSession(ctx, session.ID)
 	require.NoError(t, err)

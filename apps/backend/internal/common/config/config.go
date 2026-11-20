@@ -158,6 +158,7 @@ type LauncherConfig struct {
 type GitHubCredentialBrokerConfig struct {
 	PublicBaseURL     string `mapstructure:"publicBaseUrl" json:"-"`
 	ReissueSigningKey string `mapstructure:"reissueSigningKey" json:"-"`
+	DisableReissue    bool   `mapstructure:"disableReissue" json:"-"`
 }
 
 func (c GitHubCredentialBrokerConfig) validate() error {
@@ -618,6 +619,12 @@ type FeaturesConfig struct {
 	// effect together with Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
 	CoordinatorPhase31 bool `mapstructure:"coordinator_phase31" json:"coordinatorPhase31"`
 
+	// TerminalPrimaryQueueHandoff moves messages still queued on a primary
+	// session that became terminal to the session that takes over the primary
+	// role. Off in every shipped profile; queued messages otherwise keep their
+	// explicit session target.
+	TerminalPrimaryQueueHandoff bool `mapstructure:"terminal_primary_queue_handoff" json:"terminalPrimaryQueueHandoff"`
+
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol
 	// adapter and profile catalogue are composed at startup.
@@ -916,14 +923,6 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 	// camelCase key, so AutomaticEnv would expose the undocumented
 	// KANDEV_AUTH_COOKIENAME; the canonical override is KANDEV_AUTH_COOKIE_NAME.
 	_ = v.BindEnv("auth.cookieName", "KANDEV_AUTH_COOKIE_NAME")
-	_ = v.BindEnv(
-		"githubCredentialBroker.publicBaseUrl",
-		"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL",
-	)
-	_ = v.BindEnv(
-		"githubCredentialBroker.reissueSigningKey",
-		"KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY",
-	)
 
 	selection, found, err := selectConfigFile(configPath, homeDir)
 	if err != nil {

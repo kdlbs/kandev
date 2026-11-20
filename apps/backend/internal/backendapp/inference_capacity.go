@@ -60,10 +60,7 @@ func (b *sharedInferenceConsumer) Execute(ctx context.Context, client *agentrunt
 	if !all || !finite {
 		// Optional capacity modes keep the native inference path; the shared
 		// binding store must not block a prompt when the policy is off.
-		if err := b.admitUnboundInferenceProvider(ctx, identity, request.CallID, &request); err != nil {
-			return nil, &agentruntime.InferenceCapacityError{Reason: "provider_allowance", Cause: err}
-		}
-		return client.InferencePrompt(ctx, &request)
+		return b.promptWithoutInferenceReservation(ctx, client, &request, identity)
 	}
 	b.refreshMu.Lock()
 	prepared, err := client.PrepareInferenceCapacityAttempt(ctx, request.CallID)
@@ -98,10 +95,7 @@ func (b *sharedInferenceConsumer) executeSharedInference(ctx context.Context, cl
 		// fresh token instead of validating a shared reservation.
 		b.cancelUnsentPrepared(client, binding)
 		request.AttemptID = ""
-		if err := b.admitUnboundInferenceProvider(ctx, identity, request.CallID, request); err != nil {
-			return nil, &agentruntime.InferenceCapacityError{Reason: "provider_allowance", Cause: err}
-		}
-		return client.InferencePrompt(ctx, request)
+		return b.promptWithoutInferenceReservation(ctx, client, request, identity)
 	}
 	if err := b.admitInferenceProvider(ctx, client, binding, request); err != nil {
 		b.cancelAndSettle(client, binding)
@@ -111,7 +105,7 @@ func (b *sharedInferenceConsumer) executeSharedInference(ctx context.Context, cl
 		b.cancelAndSettle(client, binding)
 		return nil, &agentruntime.InferenceCapacityError{Reason: "provider_allowance", Cause: err}
 	}
-	if err := client.AdmitInferenceCapacityAttempt(ctx, binding.AttemptID); err != nil && !errors.Is(err, agentruntime.ErrInferenceOwnershipUnsupported) {
+	if err := client.AdmitInferenceCapacityAttempt(ctx, binding.AttemptID); err != nil {
 		b.cancelAndSettle(client, binding)
 		return nil, &agentruntime.InferenceCapacityError{Reason: "reservation_unconfirmed", Cause: err}
 	}
@@ -296,12 +290,23 @@ func (b *sharedInferenceConsumer) executeLegacyInference(ctx context.Context, cl
 	}
 	// Optional capacity modes keep the native prompt path without a synthetic
 	// capacity binding, even on an older agentctl.
-	if err := b.admitUnboundInferenceProvider(ctx, identity, req.CallID, req); err != nil {
-		return nil, &agentruntime.InferenceCapacityError{Reason: "provider_allowance", Cause: err}
+	response, err := b.promptWithoutInferenceReservation(ctx, client, req, identity)
+	if agentruntime.IsInferenceCapacityError(err) {
+		return nil, err
 	}
-	response, err := client.InferencePrompt(ctx, req)
 	if inferenceFailureNeedsSettlement(response, err) {
 		return response, unconfirmedInferenceFailure(response, err)
 	}
 	return response, err
+}
+
+func (b *sharedInferenceConsumer) promptWithoutInferenceReservation(ctx context.Context, client *agentruntime.InferenceClient, req *utility.PromptRequest, identity agentruntime.InferenceIdentity) (*utility.PromptResponse, error) {
+	if err := b.capacity.CheckLegacyInferenceAdmission(ctx, identity.SessionID, identity.ParentExecutionID); err != nil {
+		return nil, &agentruntime.InferenceCapacityError{Reason: "inference_scope_closure", Cause: err}
+	}
+	if err := b.admitUnboundInferenceProvider(ctx, identity, req.CallID, req); err != nil {
+		return nil, &agentruntime.InferenceCapacityError{Reason: "provider_allowance", Cause: err}
+	}
+	b.refresh(ctx, agentruntime.InferenceClientRef{Client: client, Identity: identity, Release: func() {}})
+	return client.InferencePrompt(ctx, req)
 }

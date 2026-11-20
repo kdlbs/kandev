@@ -85,6 +85,7 @@
   "instructionsLabel": "指示",
   "interpretedAsUtcSetTimezone": "UTCとして解釈済み。タイムゾーン設定して",
   "lastRan": "最後の実行 {{when}}",
+  "runStatusWithAge": "{{status}}、{{age}}",
   "listDescription": "エージェントタスクを自動で起動するルール作成。",
   "loading": "読み込み中...",
   "loadingActivity": "アクティビティ読み込み中…",

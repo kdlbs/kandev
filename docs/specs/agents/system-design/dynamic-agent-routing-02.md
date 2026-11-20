@@ -14,14 +14,44 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` during migration.
+Design for `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`.
 
 ## Requirement mapping
 
-| Requirement                                             | Design section                                    |
-| ------------------------------------------------------- | ------------------------------------------------- |
-| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`                  | [Migrated source detail](#migrated-source-detail) |
-| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001` | [Failure modes](#failure-modes)                   |
+| Requirement                                                                       | Design section                                                                            |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`                                            | [Migrated source detail](#migrated-source-detail)                                         |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001`                           | [Failure modes](#failure-modes)                                                           |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` (`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.32`) | [Candidate references from dynamic profiles](#candidate-references-from-dynamic-profiles) |
+
+## Candidate references from dynamic profiles
+
+`ListDynamicProfileReferencesByExecutionProfile` (`internal/agent/settings/store`)
+joins `dynamic_agent_routes` to `agent_profiles` and returns only parents with
+`deleted_at IS NULL`. Deleted profiles retain route rows but are never selected, so those routes do
+not block candidates. Previously their candidates required force to delete or
+disable while the dialog omitted `dynamic_profiles`, leaving an unexplained
+conflict.
+
+`Controller.prepareProfileDeletion` collects live dynamic profiles, routing
+tiers, utility agents, active sessions, watchers, and enabled automations
+before deciding, and returns one `ErrProfileInUseDetail`. Routing tiers block
+even with `force`; every other reference is a soft blocker that `force`
+skips. After the profile row is deleted, `removeStaleDynamicRoutes` calls
+`DeleteDynamicAgentRoutesForDeletedProfiles`, which attempts to remove only the
+routes that point at the deleted candidate from soft-deleted parents. Cleanup
+is best-effort and logged, because the row is already gone. A failure may leave
+inert route rows in a soft-deleted parent. Routes of live dynamic profiles stay,
+so the user can repair them.
+
+The disable path reads live dynamic profiles and utility agents before returning
+one unforced 409. The web reads both `dynamic_profiles` and `utility_agents` from
+the response before it offers the force action.
+`AgentProfileDeleteConflictDialog` adds a dynamic profile section next to the
+existing ones, and `AgentProfileDisableConflictDialog` lists dynamic profiles
+with their own warning. The disable warning says that routing stops when a
+disabled profile is the dynamic profile's only candidate. Both dialogs use one
+scrollable phone body and keep the footer actions visible.
 
 ## Migrated source detail
 
@@ -251,20 +281,15 @@ require the current exclusive probe lease.
   cannot release the route while no runtime backs it, and no other pass
   recovers it. A live executor row, an unreadable row, a stale generation, and
   any other parked state keep the existing exclusion.
-- A launch that fails before `MarkActive` can leave a FAILED session whose
-  route is still `starting` with no owner, so a Retry would otherwise report
-  `dynamic_route_pending` indefinitely. An explicit Retry for the current
-  generation reconciles it under the session lifecycle lock: when no runtime is
-  live and the session's executor record is the stopped standalone local or
-  worktree history row of its own execution, it marks the generation
-  `action_required` and the ordinary retry proceeds. Normal cleanup keeps that
-  stopped row for conversation and workspace resume, so the check only observes
-  it and never deletes it. A live or unprobeable runtime, an absent row (the
-  manual relaunch cold-resumes from it and cannot start without it), and any
-  other executor row keep the guard. The manual relaunch may reopen the FAILED session to
-  WAITING_FOR_INPUT for the retried prompt, re-checking the generation first,
-  and the task scheduler admits a FAILED task for that new attempt; automatic
-  relaunches keep refusing terminal sessions.
+- A pre-`MarkActive` failure can leave a FAILED session and ownerless `starting`
+  route. Under the session lifecycle lock, explicit Retry reconciles the current
+  generation to `action_required` only if no runtime is live and its executor
+  record is that execution's stopped standalone local/worktree history row.
+  Preserve it: conversation/workspace and cold resume require it. Live or
+  unprobeable runtimes, absent history, or other executor rows retain
+  `dynamic_route_pending`. Recheck the generation before manually reopening
+  the session to WAITING_FOR_INPUT and admitting its FAILED task. Automatic
+  relaunches still refuse terminal sessions.
 - Queue delivery treats a route that awaits a user action as a delivery
   block, not a launch in progress (`REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`,
   AC 001.15 and 001.16). The automatic drain cores skip a session whose route

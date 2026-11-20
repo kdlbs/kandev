@@ -8,12 +8,91 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type promptGenerationOwnerTestManager struct {
+	*mockAgentManager
+	sessionID   string
+	executionID string
+	generation  uint64
+}
+
+func (m *promptGenerationOwnerTestManager) OwnsPromptGeneration(
+	sessionID, executionID string,
+	generation uint64,
+) bool {
+	return sessionID == m.sessionID && executionID == m.executionID && generation == m.generation
+}
+
+func TestAgentCompletedTurnlessDeliveryIgnoresSupersededPrompt(t *testing.T) {
+	fixture := newDeliveryWorkflowOutcomeFixture(t, "stale-owner", "stale-owner-step")
+	ctx, repo, session := fixture.ctx, fixture.repo, fixture.session
+	terminalKey := "agent_delivery.terminal:" + fixture.effect.StreamID + ":1"
+	if _, err := repo.DB().ExecContext(ctx, `UPDATE agent_delivery_effects SET turn_id = '' WHERE effect_key = ?`, terminalKey); err != nil {
+		t.Fatalf("make persisted terminal turn-less: %v", err)
+	}
+	stepTime := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	fixture.installStep(t, &wfmodels.WorkflowStep{
+		ID: "stale-owner-step", WorkflowID: "wf1", Position: 0, UpdatedAt: stepTime,
+	})
+	turn := &models.Turn{
+		ID: "turn-successor-b", TaskID: session.TaskID, TaskSessionID: session.ID,
+		StartedAt: time.Now().UTC(), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("create successor turn: %v", err)
+	}
+
+	baseManager := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+	}
+	manager := &promptGenerationOwnerTestManager{
+		mockAgentManager: baseManager,
+		sessionID:        session.ID,
+		executionID:      "execution-1",
+		generation:       2,
+	}
+	svc := createTestServiceWithScheduler(repo, fixture.step, newMockTaskRepo(), manager)
+	svc.SetWorkflowStepGetter(fixture.step)
+	svc.turnService = &repoTurnService{repo: repo}
+	setSessionExecID(t, repo, session.ID, manager.executionID)
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:                    session.TaskID,
+		SessionID:                 session.ID,
+		AgentExecutionID:          manager.executionID,
+		PromptGeneration:          1,
+		DeliveryStreamID:          fixture.effect.StreamID,
+		DeliveryIncarnationID:     fixture.effect.IncarnationID,
+		DeliveryHarnessGeneration: uint64(fixture.effect.HarnessGeneration),
+		DeliverySequence:          uint64(fixture.effect.Sequence),
+		DeliverySubmissionID:      fixture.effect.SubmissionID,
+		DeliveryOutcome:           string(models.DeliverySubmissionCompleted),
+	})
+
+	active, err := repo.GetActiveTurnBySessionID(ctx, session.ID)
+	if err != nil || active == nil || active.ID != turn.ID {
+		t.Fatalf("active successor turn = %+v, err=%v; want %q to remain active", active, err, turn.ID)
+	}
+	updatedSession, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil || updatedSession.State != models.TaskSessionStateRunning {
+		t.Fatalf("session after stale completion = %+v, err=%v", updatedSession, err)
+	}
+	terminal, err := repo.GetAgentDeliveryEffect(ctx, terminalKey)
+	if err != nil || terminal.TurnID != "" {
+		t.Fatalf("stale completion bound terminal to a turn: %+v, err=%v", terminal, err)
+	}
+	if _, err := repo.GetAgentDeliveryEffect(ctx, "workflow.on_turn_complete:"+turn.ID); !errors.Is(err, repoerrors.ErrAgentDeliveryEffectNotFound) {
+		t.Fatalf("stale completion wrote successor workflow receipt: %v", err)
+	}
+}
 
 func TestDeliveryRetentionWorkflowOutcome(t *testing.T) {
 	t.Run("successful workflow transition records the applied receipt", func(t *testing.T) {

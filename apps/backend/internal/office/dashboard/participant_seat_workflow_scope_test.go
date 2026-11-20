@@ -14,7 +14,7 @@ import (
 
 // seedTwoStepWorkflowTask creates a two-step workflow (stepAID at
 // position 0, non-terminal; stepBID at position 1, named "Done" so
-// IsTaskWorkflowStepTerminal reports it terminal) and a task row that
+// IsTaskOnFinalStep reports it terminal) and a task row that
 // carries an explicit tasks.workflow_id, pointing at stepAID. Unlike
 // insertTestTask/insertTestTaskAtNonTerminalStep, this sets
 // tasks.workflow_id so the workflow-scoped participant read (the fix

@@ -4,6 +4,7 @@ import { IconAlertTriangle } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { formatTimeDistance, useDateLocale } from "@/lib/i18n/date-locale";
 import type { GitHubPRDiscoveryHealth } from "@/lib/types/github";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import { useTranslation } from "react-i18next";
 
 const CATEGORY_LABEL_KEYS: Record<NonNullable<GitHubPRDiscoveryHealth["category"]>, string> = {
@@ -28,6 +29,9 @@ export function GitHubPRDiscoveryHealthWarning({ health }: { health?: GitHubPRDi
   const { t } = useTranslation();
   const locale = useDateLocale();
   if (!isDegraded(health)) return null;
+  const retryAt = parseStrictRfc3339Timestamp(health.retry_at);
+  const now = BigInt(Date.now()) * BigInt(1_000_000);
+  const showRetryAt = retryAt !== null && retryAt > now;
   const category = health.category
     ? t(CATEGORY_LABEL_KEYS[health.category])
     : t("github:prDiscoveryCategoryUnavailable");
@@ -45,7 +49,7 @@ export function GitHubPRDiscoveryHealthWarning({ health }: { health?: GitHubPRDi
             })}
           </p>
           <p>{t("github:prDiscoveryAffectedTargets", { count: health.failed_target_count })}</p>
-          {health.retry_at && (
+          {showRetryAt && health.retry_at && (
             <p>
               {t("github:prDiscoveryRetryAt", {
                 time: relativeTime(health.retry_at, locale, unknownTime),

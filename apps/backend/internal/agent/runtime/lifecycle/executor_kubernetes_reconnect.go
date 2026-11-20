@@ -16,6 +16,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+var errKubernetesInstanceModeRead = errors.New("kubernetes lifecycle: retained agentctl route mode could not be read")
+
 func (r *KubernetesExecutor) reconnect(
 	ctx context.Context,
 	runtime *kubernetesRuntimeClient,
@@ -68,17 +70,18 @@ func (r *KubernetesExecutor) reconnect(
 }
 
 type kubernetesRecordedState struct {
-	inventoryState     string
-	namespace          string
-	podName            string
-	podUID             types.UID
-	mainContainer      string
-	workspaceMode      kubeexecutor.WorkspaceMode
-	pvcName            string
-	pvcUID             types.UID
-	pvcCreated         bool
-	remotePort         int
-	agentctlInstanceID string
+	inventoryState            string
+	namespace                 string
+	podName                   string
+	podUID                    types.UID
+	mainContainer             string
+	mainContainerRestartCount int32
+	workspaceMode             kubeexecutor.WorkspaceMode
+	pvcName                   string
+	pvcUID                    types.UID
+	pvcCreated                bool
+	remotePort                int
+	agentctlInstanceID        string
 }
 
 func kubernetesRecordedInventory(
@@ -109,6 +112,13 @@ func kubernetesRecordedInventory(
 
 func decodeKubernetesRecordedState(metadata map[string]interface{}) (kubernetesRecordedState, error) {
 	recorded := decodeKubernetesRecordedStateBase(metadata)
+	if raw := getMetadataString(metadata, MetadataKeyKubernetesContainerRestartCount); raw != "" {
+		restartCount, err := strconv.ParseInt(raw, 10, 32)
+		if err != nil || restartCount < 0 {
+			return kubernetesRecordedState{}, errors.New("kubernetes lifecycle: recorded main-container restart count is invalid")
+		}
+		recorded.mainContainerRestartCount = int32(restartCount)
+	}
 	remotePort, err := strconv.Atoi(getMetadataString(metadata, MetadataKeyKubernetesAgentctlRemotePort))
 	if err != nil || remotePort < 1 || remotePort > 65535 {
 		return kubernetesRecordedState{}, errors.New("kubernetes lifecycle: recorded agentctl port is invalid")
@@ -268,6 +278,9 @@ func (r *KubernetesExecutor) reconnectKubernetesAgentctl(
 	if getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
 		return r.connectSharedKubernetesAgentctl(ctx, runtime, req, pod, recorded.agentctlInstanceID)
 	}
+	if kubernetesMainContainerRestartCount(pod, recorded.mainContainer) != recorded.mainContainerRestartCount {
+		return r.reconnectKubernetesAgentctlAfterRestart(ctx, runtime, req, pod, recorded.agentctlInstanceID)
+	}
 	if req.AuthToken == "" {
 		return nil, nil, "", 0, errors.New("kubernetes lifecycle: recorded agentctl auth token is unavailable")
 	}
@@ -275,10 +288,26 @@ func (r *KubernetesExecutor) reconnectKubernetesAgentctl(
 	if err == nil {
 		return client, forward, req.AuthToken, recorded.remotePort, nil
 	}
+	if errors.Is(err, errKubernetesInstanceModeRead) {
+		if errors.Is(err, agentctl.ErrInstanceNotFound) {
+			return r.reconnectKubernetesAgentctlAfterRestart(ctx, runtime, req, pod, recorded.agentctlInstanceID)
+		}
+		return nil, nil, "", 0, err
+	}
+	return r.reconnectKubernetesAgentctlAfterRestart(ctx, runtime, req, pod, recorded.agentctlInstanceID)
+}
+
+func (r *KubernetesExecutor) reconnectKubernetesAgentctlAfterRestart(
+	ctx context.Context,
+	runtime *kubernetesRuntimeClient,
+	req *ExecutorCreateRequest,
+	pod *corev1.Pod,
+	agentctlInstanceID string,
+) (*agentctl.Client, kubeexecutor.PortForwardSession, string, int, error) {
 	if req.BootstrapNonce == "" {
 		return nil, nil, "", 0, errors.New("kubernetes lifecycle: agentctl restart detected but bootstrap nonce is unavailable")
 	}
-	return r.connectRestartedKubernetesAgentctl(ctx, runtime, req, pod, recorded.agentctlInstanceID)
+	return r.connectRestartedKubernetesAgentctl(ctx, runtime, req, pod, agentctlInstanceID)
 }
 
 func (r *KubernetesExecutor) reattachKubernetesAgentctl(
@@ -288,11 +317,25 @@ func (r *KubernetesExecutor) reattachKubernetesAgentctl(
 	pod *corev1.Pod,
 	recorded kubernetesRecordedState,
 ) (*agentctl.Client, kubeexecutor.PortForwardSession, error) {
+	controlForward, control, err := r.connectHealthyKubernetesControl(ctx, runtime, pod)
+	if err != nil {
+		return nil, nil, fmt.Errorf("kubernetes lifecycle: retained route-mode control forward: %w", err)
+	}
+	defer func() { _ = controlForward.Close() }()
+	control.SetAuthToken(req.AuthToken)
+	info, err := control.GetInstance(ctx, recorded.agentctlInstanceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %w", errKubernetesInstanceModeRead, err)
+	}
+	if info == nil || info.ID != recorded.agentctlInstanceID || info.Port != recorded.remotePort ||
+		info.SessionID != req.SessionID || info.TaskID != req.TaskID || info.WorkspacePath != kubernetesWorkspacePath {
+		return nil, nil, fmt.Errorf("%w: authenticated instance metadata does not match the recorded helper", errKubernetesInstanceModeRead)
+	}
 	forward, err := startKubernetesForward(ctx, runtime.streams, pod, uint16(recorded.remotePort))
 	if err != nil {
 		return nil, nil, err
 	}
-	client := newKubernetesAgentctlClient(r.logger, req, recorded.agentctlInstanceID, req.AuthToken, forward.LocalPort())
+	client := newKubernetesAgentctlClient(r.logger, req, info.ID, req.AuthToken, forward.LocalPort(), info.ScopedMCPRoutes)
 	if healthErr := client.Health(ctx); healthErr != nil {
 		client.Close()
 		_ = forward.Close()
@@ -333,7 +376,7 @@ func (r *KubernetesExecutor) connectRestartedKubernetesAgentctl(
 	if err != nil {
 		return nil, nil, "", 0, err
 	}
-	client := newKubernetesAgentctlClient(r.logger, req, remoteInstanceID, token, forward.LocalPort())
+	client := newKubernetesAgentctlClient(r.logger, req, response.ID, token, forward.LocalPort(), response.ScopedMCPRoutes)
 	if err := client.Health(ctx); err != nil {
 		client.Close()
 		_ = forward.Close()
@@ -347,9 +390,11 @@ func newKubernetesAgentctlClient(
 	req *ExecutorCreateRequest,
 	remoteInstanceID, token string,
 	localPort uint16,
+	scopedMCPRoutes bool,
 ) *agentctl.Client {
 	return agentctl.NewClient(kubernetesControlHost, int(localPort), log,
-		agentctl.WithExecutionID(remoteInstanceID), agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(token))
+		agentctl.WithExecutionID(remoteInstanceID), agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(token),
+		agentctl.WithBuiltinMCPScopedRoutes(scopedMCPRoutes))
 }
 
 func cloneKubernetesMetadata(metadata map[string]interface{}) map[string]interface{} {
