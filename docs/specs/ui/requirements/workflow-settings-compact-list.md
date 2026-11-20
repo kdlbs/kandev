@@ -53,16 +53,18 @@ want to edit.
   shall not discard, save, or reset its draft. Unsaved edits shall remain in
   the shared settings save surface and shall reappear unchanged when the card
   is expanded again.
-- **AC-UI-WORKFLOW-SETTINGS-COMPACT-LIST-001.5:** A workflow added, duplicated,
-  or imported during the current page visit shall start expanded in the
-  compact view.
+- **AC-UI-WORKFLOW-SETTINGS-COMPACT-LIST-001.5:** A workflow added or
+  duplicated during the current page visit shall start expanded in the
+  compact view and shall stay expanded after it is saved. Import reloads the
+  page, so imported workflows follow the default for a new visit.
 - **AC-UI-WORKFLOW-SETTINGS-COMPACT-LIST-001.6:** Drag reordering shall remain
   available from collapsed rows and expanded cards, with the same order and
   save behavior as before.
 - **AC-UI-WORKFLOW-SETTINGS-COMPACT-LIST-001.7:** The row header shall expose
   its expanded state to assistive technology and have a localized accessible
-  name that includes the workflow name. On phones and coarse pointers, the row
-  header and drag handle shall each be at least 44 px tall. Below 768 px the
+  name that includes the workflow name. On phones (including narrow
+  fine-pointer windows) and coarse pointers, the row header, drag handle, and
+  view control options shall each be at least 44 px tall. Below 768 px the
   row shall use two lines (identity on the first, steps on the second) without
   document horizontal overflow.
 - **AC-UI-WORKFLOW-SETTINGS-COMPACT-LIST-001.8:** When settings navigation

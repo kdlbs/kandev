@@ -81,13 +81,14 @@ selected. Test IDs: `workflow-list-view-toggle`,
 
 `useWorkflowCardDisclosure` in
 `apps/web/components/settings/workflow-card-disclosure.tsx` holds the state
-(`expanded`, `open`, `mounted`, `toggle`, `expand`). `WorkflowCard` initializes
-`expanded` from `isDraft`, where
-`isDraft` is `workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)`. Added, duplicated,
-and imported workflows use temporary IDs, and the list keeps the client ID as
-the React key after save. As a result, their cards start expanded and stay
-mounted through identity finalization. The expansion state is component-local
-and session-only.
+(`expanded`, `open`, `mounted`, `toggle`, `expand`). A card starts expanded
+when its ID is a draft ID (`TEMP_WORKFLOW_PREFIX`) or when
+`useIdsAddedAfterMount` in `WorkflowList` reports that the ID was not present
+on the list's first render. Saving a draft replaces its ID, and with it the
+React key, so the remounted card is new to the list and starts expanded
+again. Import ends with `router.refresh()`, which reloads the page, so
+imported workflows start a new visit and default to collapsed. The expansion
+state is component-local and session-only.
 
 The rendered state is `open = !compact || expanded`. In Detailed view the card
 renders exactly as today, with no row header. In Compact view the card renders
@@ -98,8 +99,9 @@ All card-level state, including steps, the draft contributor, delete state,
 and dialogs, already lives in `useWorkflowCardState`. Collapsing does not
 unmount `WorkflowCard`, so drafts and the shared save surface are unaffected.
 The body subtree (`WorkflowCardBody` and `WorkflowCardHeaderActions`) mounts
-lazily the first time it opens. After that it stays mounted and is hidden with
-the `hidden` attribute when collapsed. This preserves local pipeline editor
+lazily the first time it is shown, in either view. After that it stays
+mounted and is hidden with the `hidden` attribute when collapsed, including
+after a switch from Detailed to Compact. This preserves local pipeline editor
 state such as the selected step and the session-config resolution flag. Use
 `Collapsible`/`CollapsibleContent` with `forceMount` only if it gives the same
 lazy, keep-mounted result. Otherwise use a plain wrapper.
@@ -155,9 +157,10 @@ rule with the matching Tailwind boundary (`md` = 768 px, `lg` = 1024 px):
 - Below 768 px: two lines, with the identity line (chevron, name, markers)
   first and the steps plus count second.
 
-Fine-pointer desktop rows use settings density (about 40 px). On phone or
-coarse-pointer viewports the header is at least 44 px (`min-h-11`), matching
-the drag handle's existing coarse sizing. The document has no horizontal
+Fine-pointer desktop rows use settings density (about 40 px). Below 768 px
+(any pointer) and on coarse pointers the header, the drag handle, and each view
+control option are at least 44 px (`max-md:` and `[@media(pointer:coarse)]:`
+sizing). The document has no horizontal
 overflow. The steps container truncates inside the card.
 
 ## Failure, persistence, and observability

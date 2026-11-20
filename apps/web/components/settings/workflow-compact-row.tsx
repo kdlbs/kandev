@@ -108,7 +108,7 @@ export function WorkflowCompactRow({
       aria-controls={bodyId}
       aria-label={t("workflows:toggleWorkflowDetails", { name: workflow.name })}
       data-testid={`workflow-compact-row-${workflow.id}`}
-      className="flex min-h-10 w-full min-w-0 cursor-pointer flex-col gap-1 rounded-xl py-2 pl-3 pr-14 text-left text-sm transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex-row md:items-center md:gap-3 [@media(pointer:coarse)]:min-h-11"
+      className="flex min-h-10 w-full min-w-0 cursor-pointer flex-col gap-1 rounded-xl py-2 pl-3 pr-14 text-left text-sm transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex-row md:items-center md:gap-3 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
     >
       <span className="flex min-w-0 items-center gap-2 md:max-w-[35%] md:shrink-0">
         <IconChevronRight

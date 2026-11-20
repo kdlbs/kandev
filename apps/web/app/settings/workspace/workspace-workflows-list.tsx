@@ -21,6 +21,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { WorkflowCard } from "@/components/settings/workflow-card";
 import { WorkflowListViewToggle } from "@/components/settings/workflow-list-view-toggle";
+import { useIdsAddedAfterMount } from "@/components/settings/workflow-card-disclosure";
 import { useWorkflowListView } from "@/hooks/domains/settings/use-workflow-list-view";
 import { cn } from "@/lib/utils";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
@@ -103,10 +104,10 @@ function SortableWorkflowItem({
                 ref={setActivatorNodeRef}
                 type="button"
                 className={cn(
-                  "absolute right-3 z-10 flex h-8 w-8 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground transition-[color,background-color,transform] hover:bg-muted hover:text-foreground active:scale-95 active:cursor-grabbing [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11",
+                  "absolute right-3 z-10 flex h-8 w-8 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground transition-[color,background-color,transform] hover:bg-muted hover:text-foreground active:scale-95 active:cursor-grabbing max-md:h-11 max-md:w-11 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11",
                   compact
-                    ? "top-1 [@media(pointer:coarse)]:top-0"
-                    : "top-4 [@media(pointer:coarse)]:top-3",
+                    ? "top-1 max-md:top-0 [@media(pointer:coarse)]:top-0"
+                    : "top-4 max-md:top-3 [@media(pointer:coarse)]:top-3",
                 )}
                 data-testid={`workflow-drag-handle-${workflow.id}`}
                 {...attributes}
@@ -144,6 +145,7 @@ export function WorkflowList({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const { view, setView } = useWorkflowListView();
   const compact = view === "compact";
+  const addedIds = useIdsAddedAfterMount(workflowItems.map((wf) => wf.id));
   const savedWorkflowsById = useMemo(
     () => new Map(savedWorkflowItems.map((workflow) => [workflow.id, workflow])),
     [savedWorkflowItems],
@@ -192,6 +194,7 @@ export function WorkflowList({
                   otherWorkflows={workflowItems.filter((w) => w.id !== workflow.id)}
                   isImproveWorkspace={isImproveWorkspace}
                   compact={compact}
+                  initiallyExpanded={addedIds.has(workflow.id)}
                   onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
                   onDeleteWorkflow={async () => {
                     await onDelete(workflow.id);

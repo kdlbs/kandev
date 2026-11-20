@@ -154,4 +154,56 @@ test.describe("Workflow settings compact list", () => {
       await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
     ).toBe(false);
   });
+
+  test("keeps a newly added workflow expanded after it is saved", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId, { listView: null });
+    await page.createWorkflow("Compact Save Target", "Custom");
+
+    const card = testPage
+      .locator('[data-testid^="workflow-card-"]')
+      .filter({ has: testPage.locator('input[value="Compact Save Target"]') });
+    await expect(card).toHaveAttribute("data-expanded", "true");
+
+    await page.saveChanges();
+    await expect
+      .poll(async () => {
+        const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
+        return workflows.some((wf) => wf.name === "Compact Save Target");
+      })
+      .toBe(true);
+    // Saving swaps the draft id for the saved id; the remounted card stays open.
+    const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
+    const saved = workflows.find((wf) => wf.name === "Compact Save Target")!;
+    await expect(page.workflowCard(saved.id)).toHaveAttribute("data-expanded", "true");
+    await expect(page.workflowCard(saved.id).locator("input").first()).toBeVisible();
+  });
+
+  test("keeps 44px targets in a narrow fine-pointer window", async ({ testPage, seedData }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId, { listView: null });
+    await expect(page.compactRow(seedData.workflowId)).toBeVisible();
+
+    const targets = [
+      page.compactRow(seedData.workflowId),
+      page.dragHandle(seedData.workflowId),
+      page.listViewOption("compact"),
+      page.listViewOption("detailed"),
+    ];
+    for (const target of targets) {
+      const box = await target.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
+    const handleBox = await page.dragHandle(seedData.workflowId).boundingBox();
+    expect(handleBox!.width).toBeGreaterThanOrEqual(44);
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
+  });
 });

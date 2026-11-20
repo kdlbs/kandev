@@ -6,7 +6,7 @@ import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import type { WorkflowListView } from "@/hooks/domains/settings/use-workflow-list-view";
 
 const ITEM_CLASS =
-  "cursor-pointer gap-1.5 px-2.5 data-[state=on]:bg-muted data-[state=on]:text-foreground [@media(pointer:coarse)]:min-h-11";
+  "cursor-pointer gap-1.5 px-2.5 data-[state=on]:bg-muted data-[state=on]:text-foreground max-md:min-h-11 [@media(pointer:coarse)]:min-h-11";
 
 export function WorkflowListViewToggle({
   view,

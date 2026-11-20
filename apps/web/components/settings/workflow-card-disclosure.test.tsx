@@ -5,6 +5,7 @@ import { emitSettingsTargetRequest } from "@/lib/settings-discovery/target";
 import {
   WorkflowCardDisclosureBody,
   useExpandOnSettingsTarget,
+  useIdsAddedAfterMount,
   useWorkflowCardDisclosure,
 } from "./workflow-card-disclosure";
 
@@ -125,5 +126,30 @@ describe("useWorkflowCardDisclosure expand", () => {
     act(() => result.current.expand());
     expect(result.current.open).toBe(true);
     expect(result.current.mounted).toBe(true);
+  });
+});
+
+describe("useWorkflowCardDisclosure across view changes", () => {
+  it("keeps a body opened in the detailed view mounted after switching to compact", () => {
+    const { result, rerender } = renderHook(
+      ({ compact }) => useWorkflowCardDisclosure({ compact, initiallyExpanded: false }),
+      { initialProps: { compact: false } },
+    );
+    expect(result.current.mounted).toBe(true);
+    rerender({ compact: true });
+    expect(result.current.open).toBe(false);
+    expect(result.current.mounted).toBe(true);
+  });
+});
+
+describe("useIdsAddedAfterMount", () => {
+  it("reports only ids that appear after the first render", () => {
+    const { result, rerender } = renderHook(({ ids }) => useIdsAddedAfterMount(ids), {
+      initialProps: { ids: ["a", "b"] },
+    });
+    expect(result.current.has("a")).toBe(false);
+    rerender({ ids: ["a", "b", "saved-c"] });
+    expect(result.current.has("saved-c")).toBe(true);
+    expect(result.current.has("b")).toBe(false);
   });
 });

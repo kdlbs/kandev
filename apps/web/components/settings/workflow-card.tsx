@@ -51,6 +51,8 @@ type WorkflowCardProps = {
   isImproveWorkspace?: boolean;
   /** Compact list view: render a collapsible summary row above the editor. */
   compact?: boolean;
+  /** Start expanded in the compact view (workflow appeared during this visit). */
+  initiallyExpanded?: boolean;
   onUpdateWorkflow: (updates: {
     name?: string;
     description?: string;
@@ -486,7 +488,7 @@ export function WorkflowCard(props: WorkflowCardProps) {
   const s = useWorkflowCardState(props);
   const disclosure = useWorkflowCardDisclosure({
     compact,
-    initiallyExpanded: workflow.id.startsWith(TEMP_WORKFLOW_PREFIX),
+    initiallyExpanded: props.initiallyExpanded || workflow.id.startsWith(TEMP_WORKFLOW_PREFIX),
     targetId: `workflow-card-${workflow.id}`,
   });
   const bodyId = `workflow-card-body-${workflow.id}`;

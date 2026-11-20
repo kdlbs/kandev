@@ -111,3 +111,15 @@ the card and require visibility.
   RED at 32 px. Removing `pl-8` fixed it. Chromium compact, workflow settings, and GitLab sync specs
   (26) pass, mobile compact and workflow settings specs (9) pass, and the sync-section unit tests (34)
   pass.
+- PR review (Greptile and CodeRabbit) found three gaps:
+  - A body shown in Detailed view now stays mounted after a switch to Compact. This was RED in the
+    disclosure unit test.
+  - A saved draft (new ID and React key) remounts expanded through `useIdsAddedAfterMount`. This was
+    RED in E2E with `data-expanded="false"` after save.
+  - Narrow fine-pointer windows now get 44 px row, drag-handle, and view-control targets (`max-md:`).
+    This was RED in E2E at 32 px.
+
+  AC 001.5 now excludes imported workflows, because import reloads the page. After the fixes, the
+  chromium compact, sorting, workflow settings, and WIP-queue specs (29) and the mobile compact,
+  workflow settings, and WIP-queue specs (10) pass, as do the focused Vitest suites (28 files, 258
+  tests), `pnpm run typecheck`, oxlint, `i18n:ratchet`, and the spec validators.
