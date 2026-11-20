@@ -1256,7 +1256,7 @@
   "promptSyncedTooltip": "{{path}}에서 동기화되었습니다. 변경하려면 저장소에서 파일을 편집하세요.",
   "promptViewContent": "내용 보기",
   "promptSyncedReadOnlyNote": "읽기 전용입니다. {{path}}에서 동기화되었습니다. 변경하려면 저장소에서 파일을 편집하세요.",
-  "promptVersionPreviewLocalNote": "저장하면 내 버전이 사용됩니다. 변경하려면 편집을 선택하세요.",
+  "promptUnsaved": "저장 안 됨",
   "promptOverridden": "재정의됨",
   "promptOverriddenTooltip": "동기화된 저장소의 {{path}}을(를) 재정의합니다. 저장소로 전환하고 저장하면 저장소 버전을 사용하며, 내 버전은 보관됩니다.",
   "promptSyncOverriddenList": "로컬에서 재정의됨: {{names}}",

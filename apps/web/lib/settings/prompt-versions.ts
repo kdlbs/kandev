@@ -2,8 +2,8 @@ import type { CustomPrompt } from "@/lib/types/http";
 import type { PromptConflictChoice, PromptVersionsSave } from "@/lib/types/prompt-sync";
 
 /**
- * The Prompts page editor draft for the prompt open for editing. For a synced
- * prompt or an override, `content` is its local version.
+ * A prompt's editable fields. For a synced prompt or an override, `content`
+ * is its local version.
  */
 export type PromptFormState = { name: string; content: string };
 
@@ -51,56 +51,99 @@ export function withChoice(
   return { ...rest, [prompt.id]: choice };
 }
 
-/** The prompt open for editing, its draft, and the revision the draft started from. */
-export type EditingDraft = { prompt: CustomPrompt; form: PromptFormState; updatedAt: string };
+/** An unsaved edit to a saved prompt and the revision it started from. */
+export type PromptDraft = { form: PromptFormState; updatedAt: string };
+
+/** Unsaved edits by prompt ID, only where they differ from the saved prompt. */
+export type PromptDrafts = Record<string, PromptDraft>;
+
+function sameForm(a: PromptFormState, b: PromptFormState): boolean {
+  return a.name === b.name && a.content === b.content;
+}
+
+/** What a prompt's editor shows: its unsaved edit, otherwise the saved prompt. */
+export function draftForm(prompt: CustomPrompt, drafts: PromptDrafts): PromptFormState {
+  return drafts[prompt.id]?.form ?? formFromPrompt(prompt);
+}
+
+/**
+ * Applies an edit. A draft keeps the revision of its first edit, so a save
+ * made against a newer revision is rejected instead of overwriting it; an
+ * edit back to the saved prompt is no longer a draft.
+ */
+export function withDraftEdit(
+  drafts: PromptDrafts,
+  prompt: CustomPrompt,
+  patch: Partial<PromptFormState>,
+): PromptDrafts {
+  const { [prompt.id]: previous, ...rest } = drafts;
+  const form = { ...(previous?.form ?? formFromPrompt(prompt)), ...patch };
+  if (sameForm(form, formFromPrompt(prompt))) return rest;
+  return { ...rest, [prompt.id]: { form, updatedAt: previous?.updatedAt ?? prompt.updated_at } };
+}
+
+/** Whether an open row edits text: a manual prompt, or a linked prompt on Local. */
+export function showsEditor(prompt: CustomPrompt, pending: PendingVersions): boolean {
+  return !isLinkedPrompt(prompt) || choiceFor(prompt, pending) === "local";
+}
+
+/** A manual prompt needs a name; every prompt needs content. */
+export function isDraftValid(prompt: CustomPrompt, form: PromptFormState): boolean {
+  if (!form.content.trim()) return false;
+  return isLinkedPrompt(prompt) || Boolean(form.name.trim());
+}
 
 export type PromptSave =
   | { kind: "versions"; prompt: CustomPrompt; payload: PromptVersionsSave }
   | { kind: "update"; prompt: CustomPrompt; form: PromptFormState; expectedUpdatedAt: string };
 
-function editedLocal(prompt: CustomPrompt, editing: EditingDraft | undefined): string | undefined {
-  if (!editing || editing.prompt.id !== prompt.id) return undefined;
-  const content = editing.form.content.trim();
+function editedLocal(prompt: CustomPrompt, draft: PromptDraft | undefined): string | undefined {
+  if (!draft) return undefined;
+  const content = draft.form.content.trim();
   return content === localVersion(prompt) ? undefined : content;
 }
 
+function linkedSave(
+  prompt: CustomPrompt,
+  pending: PendingVersions,
+  draft: PromptDraft | undefined,
+): PromptSave | undefined {
+  const local = editedLocal(prompt, draft);
+  if (pending[prompt.id] === undefined && local === undefined) return undefined;
+  return {
+    kind: "versions",
+    prompt,
+    payload: {
+      use_local: choiceFor(prompt, pending) === "local",
+      ...(local === undefined || !draft
+        ? {}
+        : { local_content: local, expected_updated_at: draft.updatedAt }),
+    },
+  };
+}
+
 /**
- * The writes one Save makes: a versions save for every switched linked
- * prompt and for an edited linked prompt (carrying the edit and the draft's
- * starting revision), and a plain update for an edited manual prompt.
+ * The writes one Save makes, in list order: a versions save for every
+ * switched or edited linked prompt (carrying the edit and its starting
+ * revision), and a plain update for every edited manual prompt.
  */
 export function planPromptSaves({
   prompts,
   pending,
-  editing,
+  drafts,
 }: {
   prompts: CustomPrompt[];
   pending: PendingVersions;
-  editing?: EditingDraft;
+  drafts: PromptDrafts;
 }): PromptSave[] {
   const plan: PromptSave[] = [];
   for (const prompt of prompts) {
+    const draft = drafts[prompt.id];
     if (isLinkedPrompt(prompt)) {
-      const local = editedLocal(prompt, editing);
-      if (pending[prompt.id] === undefined && local === undefined) continue;
-      plan.push({
-        kind: "versions",
-        prompt,
-        payload: {
-          use_local: choiceFor(prompt, pending) === "local",
-          ...(local === undefined ? {} : { local_content: local }),
-          ...(local === undefined || !editing ? {} : { expected_updated_at: editing.updatedAt }),
-        },
-      });
-    } else if (editing?.prompt.id === prompt.id) {
-      const saved = formFromPrompt(prompt);
-      if (editing.form.name === saved.name && editing.form.content === saved.content) continue;
-      plan.push({
-        kind: "update",
-        prompt,
-        form: editing.form,
-        expectedUpdatedAt: editing.updatedAt,
-      });
+      const save = linkedSave(prompt, pending, draft);
+      if (save) plan.push(save);
+    } else if (draft && !sameForm(draft.form, formFromPrompt(prompt))) {
+      plan.push({ kind: "update", prompt, form: draft.form, expectedUpdatedAt: draft.updatedAt });
     }
   }
   return plan;

@@ -1256,7 +1256,7 @@
   "promptSyncedTooltip": "同步自 {{path}}。請在儲存庫中編輯該檔案以進行修改。",
   "promptViewContent": "查看內容",
   "promptSyncedReadOnlyNote": "只讀。同步自 {{path}}；請在儲存庫中編輯該檔案以進行修改。",
-  "promptVersionPreviewLocalNote": "儲存後將使用您的版本。選擇「編輯」即可修改。",
+  "promptUnsaved": "未儲存",
   "promptOverridden": "已覆蓋",
   "promptOverriddenTooltip": "覆蓋同步儲存庫中的 {{path}}。切換到「儲存庫」並儲存即可使用儲存庫版本；您的版本會被保留。",
   "promptSyncOverriddenList": "本地已覆蓋：{{names}}",

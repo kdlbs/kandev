@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import type { CustomPrompt } from "@/lib/types/http";
 import {
   choiceFor,
+  draftForm,
   formFromPrompt,
+  isDraftValid,
   isLinkedPrompt,
   planPromptSaves,
   repositoryVersion,
+  showsEditor,
   withChoice,
+  withDraftEdit,
 } from "./prompt-versions";
 
 const base: CustomPrompt = {
@@ -53,14 +57,44 @@ describe("prompt versions", () => {
     expect(withChoice(pending, synced, "repository")).toEqual({});
   });
 
-  it("plans one save per switched prompt, with the open prompt's edit", () => {
+  it("tracks a draft only while it differs from the saved prompt", () => {
+    const edited = withDraftEdit({}, override, { content: "Edited" });
+    expect(edited).toEqual({
+      p2: { form: { name: "other", content: "Edited" }, updatedAt: override.updated_at },
+    });
+    expect(draftForm(override, edited)).toEqual({ name: "other", content: "Edited" });
+    expect(draftForm(synced, edited)).toEqual({ name: "hook", content: "Mine" });
+    expect(withDraftEdit(edited, override, { content: "Mine" })).toEqual({});
+  });
+
+  it("keeps the revision a draft started from through later edits", () => {
+    const first = withDraftEdit({}, manual, { content: "A" });
+    const newer = { ...manual, updated_at: "2026-02-01T00:00:00Z" };
+    expect(withDraftEdit(first, newer, { content: "AB" }).p3!.updatedAt).toBe(manual.updated_at);
+  });
+
+  it("edits a manual prompt, or a linked prompt switched to Local", () => {
+    expect(showsEditor(manual, {})).toBe(true);
+    expect(showsEditor(override, {})).toBe(true);
+    expect(showsEditor(synced, {})).toBe(false);
+    expect(showsEditor(synced, { p1: "local" })).toBe(true);
+    expect(showsEditor(override, { p2: "repository" })).toBe(false);
+  });
+
+  it("requires a name for a manual draft and content for every draft", () => {
+    expect(isDraftValid(manual, { name: " ", content: "x" })).toBe(false);
+    expect(isDraftValid(manual, { name: "n", content: " " })).toBe(false);
+    expect(isDraftValid(synced, { name: "hook", content: "x" })).toBe(true);
+    expect(isDraftValid(synced, { name: "hook", content: " " })).toBe(false);
+  });
+
+  it("plans one save per switched or edited prompt", () => {
     const plan = planPromptSaves({
       prompts: [synced, override, manual],
       pending: { p1: "local", p2: "repository" },
-      editing: {
-        prompt: override,
-        form: { name: "other", content: " Edited " },
-        updatedAt: "rev-2",
+      drafts: {
+        p2: { form: { name: "other", content: " Edited " }, updatedAt: "rev-2" },
+        p3: { form: { name: "notes", content: "Changed" }, updatedAt: "rev-3" },
       },
     });
     expect(plan).toEqual([
@@ -70,15 +104,21 @@ describe("prompt versions", () => {
         prompt: override,
         payload: { use_local: false, local_content: "Edited", expected_updated_at: "rev-2" },
       },
+      {
+        kind: "update",
+        prompt: manual,
+        form: { name: "notes", content: "Changed" },
+        expectedUpdatedAt: "rev-3",
+      },
     ]);
   });
 
-  it("saves an edit to an open prompt without a pending switch", () => {
+  it("saves an edited linked prompt without a pending switch", () => {
     expect(
       planPromptSaves({
-        prompts: [override, manual],
+        prompts: [override],
         pending: {},
-        editing: { prompt: override, form: { name: "other", content: "New" }, updatedAt: "rev" },
+        drafts: { p2: { form: { name: "other", content: "New" }, updatedAt: "rev" } },
       }),
     ).toEqual([
       {
@@ -87,22 +127,17 @@ describe("prompt versions", () => {
         payload: { use_local: true, local_content: "New", expected_updated_at: "rev" },
       },
     ]);
-    const form = { name: "notes", content: "Changed" };
-    expect(
-      planPromptSaves({
-        prompts: [manual],
-        pending: {},
-        editing: { prompt: manual, form, updatedAt: "r" },
-      }),
-    ).toEqual([{ kind: "update", prompt: manual, form, expectedUpdatedAt: "r" }]);
   });
 
-  it("plans nothing for an open prompt left unchanged", () => {
+  it("plans nothing for a draft equal to the saved prompt or for a removed prompt", () => {
     expect(
       planPromptSaves({
         prompts: [override],
         pending: {},
-        editing: { prompt: override, form: formFromPrompt(override), updatedAt: "rev" },
+        drafts: {
+          p2: { form: formFromPrompt(override), updatedAt: "rev" },
+          gone: { form: { name: "x", content: "y" }, updatedAt: "rev" },
+        },
       }),
     ).toEqual([]);
   });

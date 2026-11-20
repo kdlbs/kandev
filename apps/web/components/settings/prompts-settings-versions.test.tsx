@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   prompts: [] as CustomPrompt[],
   promptEditor: vi.fn(),
   saveVersions: vi.fn(),
+  updatePrompt: vi.fn(),
 }));
 
 vi.mock("@/lib/api/domains/prompt-sync-api", () => ({
@@ -44,13 +45,18 @@ vi.mock("@/components/settings/settings-prompt-editor", () => ({
 vi.mock("@/lib/api", () => ({
   createPrompt: vi.fn(),
   deletePrompt: vi.fn(),
-  updatePrompt: vi.fn(),
+  updatePrompt: (...args: unknown[]) => mocks.updatePrompt(...args),
 }));
 
 const rowTestId = "prompt-list-item";
 const saveChangesLabel = "Save changes";
-const previewTestId = "prompt-version-preview";
+const viewTestId = "prompt-view-content";
+const editorTestId = "prompt-content-input";
+const editButtonTestId = "prompt-edit-button";
+const viewButtonTestId = "prompt-view-button";
+const unsavedTestId = "prompt-unsaved-badge";
 const CHECKED = "aria-checked";
+const EXPANDED = "aria-expanded";
 
 const base: CustomPrompt = {
   id: "s1",
@@ -79,6 +85,9 @@ beforeEach(() => {
   mocks.saveVersions.mockImplementation(async (id: string) =>
     mocks.prompts.find((prompt) => prompt.id === id),
   );
+  mocks.updatePrompt.mockImplementation(async (id: string) =>
+    mocks.prompts.find((prompt) => prompt.id === id),
+  );
 });
 
 afterEach(cleanup);
@@ -103,6 +112,29 @@ function versionSwitch(name: string) {
   return screen.getByRole("switch", { name: `Use the repository version of @${name}` });
 }
 
+const manual: CustomPrompt = {
+  ...base,
+  id: "m1",
+  name: "notes",
+  content: "Notes text",
+  alternate_content: undefined,
+  source: "manual",
+  source_path: undefined,
+};
+const manual2: CustomPrompt = { ...manual, id: "m2", name: "plans", content: "Plans text" };
+
+function inRow(name: string) {
+  return within(row(name));
+}
+
+function editor(name: string) {
+  return inRow(name).getByTestId(editorTestId) as HTMLTextAreaElement;
+}
+
+function save() {
+  fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
+}
+
 // @covers AC-INTEGRATIONS-PROMPT-SYNC-007.1 AC-INTEGRATIONS-PROMPT-SYNC-007.2 AC-INTEGRATIONS-PROMPT-SYNC-009.2
 describe("pending version switches", () => {
   it("uses the review step's Local | Repository control, on for the repository", () => {
@@ -110,22 +142,55 @@ describe("pending version switches", () => {
     renderPrompts();
     expect(versionSwitch("hook").getAttribute(CHECKED)).toBe("true");
     expect(versionSwitch("other").getAttribute(CHECKED)).toBe("false");
-    expect(within(row("hook")).getByText("Local")).toBeTruthy();
-    expect(within(row("hook")).getByText("Repository")).toBeTruthy();
-    expect(within(row("hook")).queryByText("Local override")).toBeNull();
+    expect(inRow("hook").getByText("Local")).toBeTruthy();
+    expect(inRow("hook").getByText("Repository")).toBeTruthy();
   });
 
-  it("previews the version a switched prompt will use, applying nothing yet", () => {
+  it("opens Repository rows read-only with the eye and Local rows editable with Edit", () => {
+    mocks.prompts = [base, override];
+    renderPrompts();
+    expect(inRow("hook").queryByTestId(editButtonTestId)).toBeNull();
+    expect(inRow("other").queryByTestId(viewButtonTestId)).toBeNull();
+    fireEvent.click(inRow("hook").getByTestId(viewButtonTestId));
+    const view = inRow("hook").getByTestId(viewTestId) as HTMLTextAreaElement;
+    expect(view.value).toBe("Repository text");
+    expect(view.readOnly).toBe(true);
+    fireEvent.click(inRow("other").getByTestId(editButtonTestId));
+    expect(editor("other").value).toBe("My other text");
+    expect(editor("other").readOnly).toBe(false);
+    expect(inRow("other").queryByTestId("prompt-name-input")).toBeNull();
+    fireEvent.click(inRow("other").getByTestId(editButtonTestId));
+    expect(inRow("other").queryByTestId(editorTestId)).toBeNull();
+  });
+
+  it("keeps a collapsed row collapsed when switched, applying nothing yet", () => {
     mocks.prompts = [base];
     renderPrompts();
     fireEvent.click(versionSwitch("hook"));
     expect(versionSwitch("hook").getAttribute(CHECKED)).toBe("false");
-    const preview = within(row("hook")).getByTestId(previewTestId) as HTMLTextAreaElement;
-    expect(preview.value).toBe("My text");
-    expect(preview.readOnly).toBe(true);
-    expect(within(row("hook")).getByTestId("prompt-edit-button")).toBeTruthy();
+    expect(inRow("hook").queryByTestId(editorTestId)).toBeNull();
+    expect(inRow("hook").queryByTestId(viewTestId)).toBeNull();
+    expect(inRow("hook").getByTestId(editButtonTestId).getAttribute(EXPANDED)).toBe("false");
+    expect(inRow("hook").getByTestId(unsavedTestId)).toBeTruthy();
     expect(screen.getByRole("button", { name: saveChangesLabel })).toBeTruthy();
     expect(mocks.saveVersions).not.toHaveBeenCalled();
+  });
+
+  it("keeps an open row open when switched, editable at once on Local", () => {
+    mocks.prompts = [base];
+    renderPrompts();
+    fireEvent.click(inRow("hook").getByTestId(viewButtonTestId));
+    fireEvent.click(versionSwitch("hook"));
+    expect(editor("hook").value).toBe("My text");
+    expect(editor("hook").readOnly).toBe(false);
+    expect(inRow("hook").getByTestId(editButtonTestId).getAttribute(EXPANDED)).toBe("true");
+    fireEvent.change(editor("hook"), { target: { value: "Edited" } });
+    fireEvent.click(versionSwitch("hook"));
+    expect((inRow("hook").getByTestId(viewTestId) as HTMLTextAreaElement).value).toBe(
+      "Repository text",
+    );
+    fireEvent.click(versionSwitch("hook"));
+    expect(editor("hook").value).toBe("Edited");
   });
 
   it("saves several switched prompts with one Save", async () => {
@@ -133,9 +198,7 @@ describe("pending version switches", () => {
     renderPrompts();
     fireEvent.click(versionSwitch("hook"));
     fireEvent.click(versionSwitch("other"));
-    const preview = within(row("other")).getByTestId(previewTestId) as HTMLTextAreaElement;
-    expect(preview.value).toBe("Repository other text");
-    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
+    save();
     await waitFor(() => expect(mocks.saveVersions).toHaveBeenCalledTimes(2));
     expect(mocks.saveVersions.mock.calls.map((call) => [call[0], call[1]])).toEqual([
       ["s1", { use_local: true }],
@@ -143,36 +206,60 @@ describe("pending version switches", () => {
     ]);
   });
 
-  it("saves an edit to a switched prompt's local version with its switch", async () => {
-    mocks.prompts = [base];
-    renderPrompts();
-    fireEvent.click(versionSwitch("hook"));
-    fireEvent.click(within(row("hook")).getByTestId("prompt-edit-button"));
-    const editor = within(row("hook")).getByTestId("prompt-content-input") as HTMLTextAreaElement;
-    expect(editor.value).toBe("My text");
-    expect(editor.readOnly).toBe(false);
-    expect(
-      (within(row("hook")).getByTestId("prompt-name-input") as HTMLInputElement).disabled,
-    ).toBe(true);
-    fireEvent.change(editor, { target: { value: "Edited" } });
-    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
-    await waitFor(() => expect(mocks.saveVersions).toHaveBeenCalledOnce());
-    expect(mocks.saveVersions.mock.calls[0]![1]).toEqual({
-      use_local: true,
-      local_content: "Edited",
-      expected_updated_at: base.updated_at,
-    });
-  });
-
-  it("restores every pending switch on Reset", () => {
+  it("restores every pending switch and edit on Reset", () => {
     mocks.prompts = [base, override];
     renderPrompts();
     fireEvent.click(versionSwitch("hook"));
-    fireEvent.click(versionSwitch("other"));
+    fireEvent.click(inRow("other").getByTestId(editButtonTestId));
+    fireEvent.change(editor("other"), { target: { value: "Changed" } });
     fireEvent.click(screen.getByRole("button", { name: "Reset" }));
     expect(versionSwitch("hook").getAttribute(CHECKED)).toBe("true");
-    expect(versionSwitch("other").getAttribute(CHECKED)).toBe("false");
-    expect(screen.queryByTestId(previewTestId)).toBeNull();
+    expect(screen.queryByTestId(unsavedTestId)).toBeNull();
+    expect(screen.queryByTestId(editorTestId)).toBeNull();
     expect(mocks.saveVersions).not.toHaveBeenCalled();
+  });
+});
+
+// @covers AC-INTEGRATIONS-PROMPT-SYNC-009.2
+describe("editing several prompts before one Save", () => {
+  it("marks each edited prompt unsaved and saves every edit together", async () => {
+    mocks.prompts = [base, override, manual];
+    renderPrompts();
+    fireEvent.click(versionSwitch("hook"));
+    fireEvent.click(inRow("hook").getByTestId(editButtonTestId));
+    fireEvent.change(editor("hook"), { target: { value: "Hook edit" } });
+    fireEvent.click(inRow("other").getByTestId(editButtonTestId));
+    fireEvent.change(editor("other"), { target: { value: "Other edit" } });
+    fireEvent.click(inRow("notes").getByTestId(editButtonTestId));
+    fireEvent.change(editor("notes"), { target: { value: "Notes edit" } });
+    fireEvent.click(inRow("notes").getByTestId(editButtonTestId));
+    expect(inRow("notes").queryByTestId(editorTestId)).toBeNull();
+    for (const name of ["hook", "other", "notes"]) {
+      expect(inRow(name).getByTestId(unsavedTestId)).toBeTruthy();
+    }
+    save();
+    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledOnce());
+    expect(mocks.saveVersions.mock.calls.map((call) => [call[0], call[1]])).toEqual([
+      ["s1", { use_local: true, local_content: "Hook edit", expected_updated_at: base.updated_at }],
+      [
+        "o1",
+        { use_local: true, local_content: "Other edit", expected_updated_at: base.updated_at },
+      ],
+    ]);
+    expect(mocks.updatePrompt.mock.calls[0]![0]).toBe("m1");
+    expect(mocks.updatePrompt.mock.calls[0]![1]).toMatchObject({
+      name: "notes",
+      content: "Notes edit",
+    });
+  });
+
+  it("keeps two manual prompts open for editing at once", () => {
+    mocks.prompts = [manual, manual2];
+    renderPrompts();
+    fireEvent.click(inRow("notes").getByTestId(editButtonTestId));
+    fireEvent.click(inRow("plans").getByTestId(editButtonTestId));
+    expect(editor("notes").value).toBe("Notes text");
+    expect(editor("plans").value).toBe("Plans text");
+    expect(inRow("plans").queryByTestId(unsavedTestId)).toBeNull();
   });
 });

@@ -13,8 +13,9 @@ import { usePromptSync } from "@/hooks/domains/settings/use-prompt-sync";
 const TEST_ID_PREFIX = "prompt-sync";
 
 // PromptSyncSection is the Prompt Sync entry point on Settings > Prompts: a
-// Set up button in the heading when unconfigured (with no empty content box),
-// otherwise the shared sync status card with Configure and Sync now. Prompt list changes arrive over the WebSocket.
+// Set up button in the heading when unconfigured, otherwise the shared sync
+// status card with Configure and Sync now. The status card draws the only
+// outline. Prompt list changes arrive over the WebSocket.
 export function PromptSyncSection() {
   const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId) ?? "";
@@ -46,7 +47,8 @@ export function PromptSyncSection() {
       title={t("settings:promptSyncTitle")}
       description={t("settings:promptSyncDescription")}
       action={sync.config ? undefined : configureButton}
-      frame={sync.config ? "card" : "none"}
+      frame="none"
+      contentClassName="space-y-3"
       data-testid="prompt-sync-section"
     >
       {sync.config && overridden.length > 0 && (

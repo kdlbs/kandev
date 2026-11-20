@@ -469,27 +469,30 @@ list, the `unchanged` flag, and the stored status match the current output
   step's exported `VersionSwitch`, so rows and review steps share one
   `Local | switch | Repository` control (on is the repository version; 44px
   hit area on coarse pointers). It is the first child of each linked row's
-  `prompt-row-trailing` group. Changes go to the page's `PendingVersions` map
-  (`lib/settings/prompt-versions.ts`; `withChoice` keeps only choices that
-  differ from the saved one), so several rows can be switched. A switched row
-  shows `PromptVersionPreview`: the version it will use, read-only, with the
-  file note or a pointer to **Edit**. A row on Local offers **Edit**, which
-  opens the single draft (`PromptFormState`; the name is read-only for linked
-  prompts and `content` is the local version) in `PromptListItem`. The draft
-  revision includes the pending map, so the save bar and unsaved-changes
-  guard cover switches. **Save** runs `planPromptSaves`: one
-  `savePromptVersions` per switched or edited linked prompt (the open draft's
-  edit and starting revision ride along) and `updatePrompt` for an edited
-  manual prompt, in order; each written prompt leaves the map, so a failure
-  keeps only what is unsaved. **Reset** clears the draft and the map. Overrides render as the normal editable row
-  plus `PromptOverrideBadge` and, while conflicted, `PromptConflictBadge`.
-  The status card lists overridden prompt names, derived from the prompt
-  list, separately from warnings.
-- Read-only prompt editors (`SettingsPromptEditor` with `readOnly`) set
-  `data-read-only`, and `app/globals.css` gives their Monaco surface the
-  muted background, so a preview or the synced View never looks editable.
-- `PromptSyncSection` renders its group with `frame="none"` while
-  unconfigured, so only the heading and **Set up** show, with no empty box.
+  `prompt-row-trailing` group. Every row is a `PromptListItem`. Page state
+  (`use-prompts-page.ts`) holds open rows, `PromptDrafts` (only edits that
+  differ from the saved prompt, each with the revision of its first edit)
+  and `PendingVersions` (`withChoice` keeps only differing choices), all
+  keyed by prompt ID, so any number of rows can be open, switched and
+  edited. Switching never opens or closes a row. On Repository the eye
+  shows `PromptRepositoryView` read-only with the file note; on Local (and
+  for manual prompts) **Edit** shows the editable `PromptEditForm` (name
+  only for manual prompts). A row with an edit or switch shows an
+  "Unsaved" badge. **Save** runs `planPromptSaves`: one `savePromptVersions`
+  per switched or edited linked prompt (edit and starting revision ride
+  along) and `updatePrompt` per edited manual prompt, in list order; each
+  written prompt closes and leaves the maps, so a failure keeps only what is
+  unsaved. **Reset** clears both maps and closes the rows they touched.
+  Synced rows add `PromptSyncedBadge` and no delete; overrides add
+  `PromptOverrideBadge` and, while conflicted, `PromptConflictBadge`. The
+  status card lists overridden prompt names separately from warnings.
+- The prompt editor uses the dark Monaco theme in every app theme. Read-only
+  editors (`SettingsPromptEditor` with `readOnly`) set `data-read-only` and
+  a dashed frame; `app/globals.css` lifts their surface to a lighter dark
+  tone (text contrast above 4.5:1) and hides the cursor.
+- `PromptSyncSection` renders its group with `frame="none"`: only the
+  heading and **Set up** while unconfigured, then the status card as the
+  single outline.
 - `PromptConflictReviewList` (`prompt-conflict-review.tsx`) explains the
   local and repository versions once in a legend, then renders one compact
   row per prompt: name and path, a `Local | switch | Repository` control
@@ -521,12 +524,6 @@ list, the `unchanged` flag, and the stored status match the current output
 - `PromptConflictIndicator` (count from `usePromptConflictCount`, which loads
   the prompt list) marks the Prompts row of the settings menu, the sidebar
   Settings button, and the Settings row of phone navigation.
-- Prompt rows: `prompt.source === "sync"` renders `SyncedPromptListItem`
-  (`prompt-synced-view.tsx`) instead of the editable row: a
-  `PromptSyncedBadge` (tooltip: source path) and a View toggle
-  (`aria-expanded`, stable accessible name, 44px on phones and coarse
-  pointers) that shows the full content in `SettingsPromptEditor` with
-  `readOnly`, plus a note naming the source file. No edit or delete controls.
 - All copy goes through `t()` in the `settings` namespace, in seven locales.
 
 ## Observability

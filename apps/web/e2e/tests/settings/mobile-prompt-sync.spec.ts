@@ -45,7 +45,12 @@ test.describe("Prompt Sync on a phone", () => {
     const switchLabel = row.getByTestId("prompt-override-switch-label");
     expect((await switchLabel.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
     await switchLabel.tap();
-    await expect(row.getByTestId("prompt-version-preview")).toBeVisible();
+    await expect(row.getByTestId("prompt-unsaved-badge")).toBeVisible();
+    await expect(row.getByTestId("prompt-content-input")).toHaveCount(0);
+    const edit = row.getByTestId("prompt-edit-button");
+    expect((await edit.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await edit.tap();
+    await expect(row.getByTestId("prompt-content-input")).toBeVisible();
     await saveVersions(testPage, { tap: true });
     await expect(row.getByTestId("prompt-override-badge")).toBeVisible();
   });

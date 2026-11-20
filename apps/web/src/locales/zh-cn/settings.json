@@ -1256,7 +1256,7 @@
   "promptSyncedTooltip": "同步自 {{path}}。请在仓库中编辑该文件以进行修改。",
   "promptViewContent": "查看内容",
   "promptSyncedReadOnlyNote": "只读。同步自 {{path}}；请在仓库中编辑该文件以进行修改。",
-  "promptVersionPreviewLocalNote": "保存后将使用您的版本。选择“编辑”即可修改。",
+  "promptUnsaved": "未保存",
   "promptOverridden": "已覆盖",
   "promptOverriddenTooltip": "覆盖同步仓库中的 {{path}}。切换到“仓库”并保存即可使用仓库版本；您的版本会被保留。",
   "promptSyncOverriddenList": "本地已覆盖：{{names}}",

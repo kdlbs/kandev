@@ -1256,7 +1256,7 @@
   "promptSyncedTooltip": "Synced from {{path}}. Edit the file in the repository to change it.",
   "promptViewContent": "View content",
   "promptSyncedReadOnlyNote": "Read-only. Synced from {{path}}; edit the file in the repository to change it.",
-  "promptVersionPreviewLocalNote": "Your version is used after you save. Select Edit to change it.",
+  "promptUnsaved": "Unsaved",
   "promptOverridden": "Overridden",
   "promptOverriddenTooltip": "Overrides {{path}} from the synced repository. Switch it to Repository and save to use the repository version; your version is kept.",
   "promptSyncOverriddenList": "Overridden locally: {{names}}",

@@ -1256,7 +1256,7 @@
   "promptSyncedTooltip": "Śŷńćēď ƒŕōḿ {{path}}. Ēďĩţ ţĥē ƒĩĺē ĩń ţĥē ŕēƥōśĩţōŕŷ ţō ćĥàńĝē ĩţ.",
   "promptViewContent": "Vĩēŵ ćōńţēńţ",
   "promptSyncedReadOnlyNote": "Ŕēàď-ōńĺŷ. Śŷńćēď ƒŕōḿ {{path}}; ēďĩţ ţĥē ƒĩĺē ĩń ţĥē ŕēƥōśĩţōŕŷ ţō ćĥàńĝē ĩţ.",
-  "promptVersionPreviewLocalNote": "Ŷōũŕ vēŕśĩōń ĩś ũśēď àƒţēŕ ŷōũ śàvē. Śēĺēćţ Ēďĩţ ţō ćĥàńĝē ĩţ.",
+  "promptUnsaved": "Ũńśàvēď",
   "promptOverridden": "Ōvēŕŕĩďďēń",
   "promptOverriddenTooltip": "Ōvēŕŕĩďēś {{path}} ƒŕōḿ ţĥē śŷńćēď ŕēƥōśĩţōŕŷ. Śŵĩţćĥ ĩţ ţō Ŕēƥōśĩţōŕŷ àńď śàvē ţō ũśē ţĥē ŕēƥōśĩţōŕŷ vēŕśĩōń; ŷōũŕ vēŕśĩōń ĩś ķēƥţ.",
   "promptSyncOverriddenList": "Ōvēŕŕĩďďēń ĺōćàĺĺŷ: {{names}}",

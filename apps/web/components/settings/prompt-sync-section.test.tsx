@@ -145,7 +145,7 @@ describe("PromptSyncSection", () => {
   });
 
   // @covers AC-INTEGRATIONS-PROMPT-SYNC-004.3
-  it("shows no empty content box until Prompt Sync is set up", () => {
+  it("draws one outline: no group card around the empty or configured section", () => {
     const view = renderSection();
     const section = screen.getByTestId("prompt-sync-section");
     expect(section.querySelector("[data-settings-group-card]")).toBeNull();
@@ -155,9 +155,9 @@ describe("PromptSyncSection", () => {
         <PromptSyncSection />
       </TooltipProvider>,
     );
-    expect(
-      screen.getByTestId("prompt-sync-section").querySelector("[data-settings-group-card]"),
-    ).not.toBeNull();
+    const configured = screen.getByTestId("prompt-sync-section");
+    expect(configured.querySelector("[data-settings-group-card]")).toBeNull();
+    expect(configured.querySelector('[data-testid="prompt-sync-status"]')).not.toBeNull();
   });
 
   it("saves a complete form and closes the dialog", async () => {

@@ -1256,7 +1256,7 @@
   "promptSyncedTooltip": "{{path}} から同期されています。変更するにはリポジトリでファイルを編集してください。",
   "promptViewContent": "内容を表示",
   "promptSyncedReadOnlyNote": "読み取り専用です。{{path}} から同期されています。変更するにはリポジトリでファイルを編集してください。",
-  "promptVersionPreviewLocalNote": "保存後にあなたのバージョンが使用されます。変更するには「編集」を選択してください。",
+  "promptUnsaved": "未保存",
   "promptOverridden": "上書き済み",
   "promptOverriddenTooltip": "同期リポジトリの {{path}} を上書きしています。「リポジトリ」に切り替えて保存するとリポジトリ版を使用します。あなたのバージョンは保持されます。",
   "promptSyncOverriddenList": "ローカルで上書き中: {{names}}",

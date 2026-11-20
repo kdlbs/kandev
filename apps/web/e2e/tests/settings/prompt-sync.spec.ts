@@ -15,13 +15,32 @@ function repositorySwitch(row: Locator, name: string) {
   return row.getByRole("switch", { name: `Use the repository version of @${name}` });
 }
 
-// editorBackground reads the painted background of a prompt editor.
-async function editorBackground(editor: Locator) {
+// editorColors reads the painted background and text color of a prompt editor.
+async function editorColors(editor: Locator) {
   return editor.evaluate((element) => {
     const surface =
       element.querySelector(".monaco-editor-background") ?? element.querySelector(".monaco-editor");
-    return surface ? getComputedStyle(surface).backgroundColor : "";
+    const text =
+      element.querySelector(".view-line span span") ?? element.querySelector(".view-line");
+    return {
+      background: surface ? getComputedStyle(surface).backgroundColor : "",
+      text: text ? getComputedStyle(text).color : "",
+    };
   });
+}
+
+function luminance(color: string) {
+  const [r, g, b] = (color.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map((value) => {
+    const channel = Number(value) / 255;
+    return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
+}
+
+// contrastRatio is the WCAG contrast ratio of two rgb() colors.
+function contrastRatio(a: string, b: string) {
+  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (light! + 0.05) / (dark! + 0.05);
 }
 
 test.describe("Prompt Sync", () => {
@@ -104,7 +123,7 @@ test.describe("Prompt Sync", () => {
   });
 
   // @covers AC-INTEGRATIONS-PROMPT-SYNC-004.3 AC-INTEGRATIONS-PROMPT-SYNC-007.1 AC-INTEGRATIONS-PROMPT-SYNC-007.2 AC-INTEGRATIONS-PROMPT-SYNC-007.3 AC-INTEGRATIONS-PROMPT-SYNC-007.5 AC-INTEGRATIONS-PROMPT-SYNC-009.2
-  test("switches several prompts between versions as pending edits saved together", async ({
+  test("switches and edits several prompts before one Save, keeping each row open or closed", async ({
     testPage,
     apiClient,
     seedData,
@@ -124,25 +143,31 @@ test.describe("Prompt Sync", () => {
     const hookSwitch = repositorySwitch(hook, "post-pr-review");
     const principlesSwitch = repositorySwitch(principles, "principles");
     await expect(hookSwitch).toHaveAttribute("aria-checked", "true");
+
+    // Switching never opens a row; each switched row is marked unsaved.
     await hookSwitch.click();
     await principlesSwitch.click();
     await expect(hookSwitch).toHaveAttribute("aria-checked", "false");
     await expect(hook.getByTestId("prompt-synced-badge")).toBeVisible();
-    await expect(principles.getByTestId("prompt-version-preview")).toContainText(
-      "Shared principles",
-    );
+    await expect(hook.getByTestId("prompt-content-input")).toHaveCount(0);
+    await expect(hook.getByTestId("prompt-unsaved-badge")).toBeVisible();
+    await expect(principles.getByTestId("prompt-unsaved-badge")).toBeVisible();
 
-    // The preview is read-only on a muted background; the local editor is not.
+    // Edit opens each Local row editable at once; both edits save together.
     await hook.getByTestId("prompt-edit-button").click();
-    const editor = hook.getByTestId("prompt-content-input");
-    expect(await editorBackground(principles.getByTestId("prompt-version-preview"))).not.toBe(
-      await editorBackground(editor),
+    await replacePromptEditor(testPage, hook.getByTestId("prompt-content-input"), "My reviewer");
+    await principles.getByTestId("prompt-edit-button").click();
+    await replacePromptEditor(
+      testPage,
+      principles.getByTestId("prompt-content-input"),
+      "My principles",
     );
-    await replacePromptEditor(testPage, editor, "My reviewer");
     await saveVersions(testPage, { count: 2 });
     await expect(hook.getByTestId("prompt-override-badge")).toBeVisible();
     await expect(principles.getByTestId("prompt-override-badge")).toBeVisible();
     await expect(hook).toContainText("My reviewer");
+    await expect(principles).toContainText("My principles");
+    await expect(testPage.getByTestId("prompt-unsaved-badge")).toHaveCount(0);
 
     await seedPromptFiles(apiClient, seedData.workspaceId, {
       "post-pr-review.md": "Shared reviewer rev 2",
@@ -153,24 +178,34 @@ test.describe("Prompt Sync", () => {
     await expect(testPage.getByTestId("prompt-sync-overridden")).toContainText("@post-pr-review");
     await expect(testPage.getByTestId("prompt-sync-warnings")).toHaveCount(0);
 
+    // An open row stays open when switched, now showing the repository version read-only.
+    await hook.getByTestId("prompt-edit-button").click();
+    await expect(hook.getByTestId("prompt-content-input")).toContainText("My reviewer");
     await hookSwitch.click();
-    await expect(hook.getByTestId("prompt-version-preview")).toContainText("rev 2");
+    const view = hook.getByTestId("prompt-view-content");
+    await expect(view).toContainText("rev 2");
+    await expect(hook.getByTestId("prompt-view-button")).toHaveAttribute("aria-expanded", "true");
+
+    // Read-only text keeps a strong contrast on a surface unlike the editable one.
+    await principles.getByTestId("prompt-edit-button").click();
+    const readOnly = await editorColors(view);
+    const editable = await editorColors(principles.getByTestId("prompt-content-input"));
+    expect(readOnly.background).not.toBe(editable.background);
+    expect(contrastRatio(readOnly.text, readOnly.background)).toBeGreaterThan(4.5);
+
     await saveVersions(testPage);
     await expect(hook.getByTestId("prompt-synced-badge")).toBeVisible();
     await expect(hook).toContainText("rev 2");
 
     await hookSwitch.click();
-    await expect(hook.getByTestId("prompt-version-preview")).toContainText("My reviewer");
-    await repositorySwitch(principles, "principles").click();
+    await expect(hook.getByTestId("prompt-content-input")).toHaveCount(0);
+    await principlesSwitch.click();
     await testPage
       .getByTestId("settings-floating-save")
       .getByRole("button", { name: "Reset" })
       .click();
     await expect(hookSwitch).toHaveAttribute("aria-checked", "true");
-    await expect(repositorySwitch(principles, "principles")).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
-    await expect(testPage.getByTestId("prompt-version-preview")).toHaveCount(0);
+    await expect(principlesSwitch).toHaveAttribute("aria-checked", "false");
+    await expect(testPage.getByTestId("prompt-unsaved-badge")).toHaveCount(0);
   });
 });

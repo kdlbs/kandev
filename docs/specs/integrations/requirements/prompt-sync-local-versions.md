@@ -54,17 +54,23 @@ version without forking the repository.
   first of the row's trailing controls in every row state, visually distinct
   from edit and delete, with a touch-sized hit area on phones and coarse
   pointers. Changing it shall be a pending edit like changing a prompt's
-  text: the row shows the version that will be in use, read-only (with a
-  note that **Edit** changes the local version), and the page's save bar
-  appears. Several prompts may be switched before one **Save**, which writes
-  each prompt's choice, together with any edit to the local version of the
-  prompt open for editing, as one atomic write per prompt; **Reset** shall
-  restore every pending switch and edit, and leaving the page shall warn
-  about them like any other unsaved edit. A prompt switched to Local, or an
-  override, offers **Edit** for its local version; the prompt's name is owned
-  by its repository file and shall not be editable. Saving Local shall turn
-  the prompt into an override with the same name and identity, starting from
-  its kept local content (AC-INTEGRATIONS-PROMPT-SYNC-009.2) or else its
+  text, marked on the row as unsaved, and the page's save bar appears.
+  Changing it shall never open or close the row. A row on Repository shall
+  show and hide its repository version read-only, with the file where it is
+  edited, from a View (eye) control; a row on Local shall show and hide its
+  local version, editable at once, from **Edit**; there shall be no
+  read-only view of the local version. An open row switched to Local shall
+  therefore become editable without a save. Any number of prompts, synced,
+  overridden or manual, may be switched and edited before one **Save**,
+  which writes each prompt's choice together with any edit to it, as one
+  atomic write per prompt; every prompt with an unsaved switch or edit shall
+  be marked unsaved until saved or reset, including while its row is
+  closed. **Reset** shall restore every pending switch and edit, and leaving
+  the page shall warn about them like any other unsaved edit. The prompt's
+  name is owned by its repository file and shall not be editable. Saving
+  Local shall turn
+  the prompt into an override with the same name and identity, starting
+  from its kept local content (AC-INTEGRATIONS-PROMPT-SYNC-009.2) or else its
   current content, editable and deletable like a manual prompt by operators
   and agents.
 - **AC-INTEGRATIONS-PROMPT-SYNC-007.2:** An override shall show an
