@@ -70,6 +70,8 @@ scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --shards 1
 scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project mobile-chrome tests/settings/mobile-turn-changed-files-setting.spec.ts
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
 
@@ -114,5 +116,9 @@ None.
 - The desktop and phone Playwright runs passed one case each. Both verified the
   default and the saved off choice after reload. The phone case also verified
   Reset. The phone run reused the desktop build.
-- Public docs validation, the specification catalog and linter, the local PR
-  documentation coverage check, and `git diff --check` passed.
+- The review follow-up waits for user settings hydration before rendering turn
+  change cards. The regression tests passed as part of the 178-test focused
+  frontend run, and the desktop and phone setting specs each passed one case.
+- Public docs validation passed. `python3 scripts/list-docs.py validate`,
+  `python3 scripts/lint-spec-files.py --all`, the local PR documentation
+  coverage check, and `git diff --check` passed.

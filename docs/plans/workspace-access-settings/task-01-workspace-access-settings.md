@@ -151,3 +151,9 @@ None.
 - `pnpm run typecheck`, focused Oxlint, formatting, `pnpm run i18n:check`, and
   `pnpm run i18n:ratchet` passed. Both public docs validators, the specification
   catalog and linter, and `git diff --check` passed.
+- The review follow-up added a reload assertion for saved unit placement. The
+  desktop and phone specs each passed both cases. Splitting the access settings
+  into `workspace-access-settings.tsx` keeps the workspace editor at 584 lines;
+  focused Oxlint and typecheck passed.
+- The focused frontend run passed 178 tests across workspace access, save,
+  delete, placement, and transcript settings.

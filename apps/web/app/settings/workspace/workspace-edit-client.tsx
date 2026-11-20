@@ -37,8 +37,7 @@ import { useSettingsSaveContributor } from "@/components/settings/settings-save-
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { workspaceDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
-import { WorkspacePlacementCard } from "@/components/settings/workspaces/workspace-placement-card";
-import { WorkspaceTeamAccessCard } from "@/components/settings/workspaces/workspace-team-access-card";
+import { WorkspaceAccessSettings } from "./workspace-access-settings";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { WorkspaceIdlePolicyFormSection } from "./workspace-idle-policy-form-section";
 
@@ -491,39 +490,6 @@ function workspaceDraftInvalidReason(
   if (!hasWorkspaceName) return t("workspaces:workspaceNameIsRequired");
   if (!timeoutValid) return t("workspaces:idleTimeoutMustBePositive");
   return undefined;
-}
-
-function WorkspaceAccessSettings({ workspace }: WorkspaceEditFormProps) {
-  const signedIn = useAppStore(
-    (state) => state.auth.mode === "enabled" && state.auth.authenticated,
-  );
-  const { t } = useTranslation();
-  if (!signedIn) return null;
-
-  const title = t("workspaces:accessSettings.title");
-  return (
-    <>
-      <SettingsGroup
-        title={title}
-        aria-label={title}
-        description={t("workspaces:accessSettings.description")}
-        frame="none"
-        contentClassName="space-y-4"
-      >
-        <WorkspacePlacementCard
-          workspaceId={workspace.id}
-          unitId={workspace.unit_id}
-          scopes={workspace.scopes}
-        />
-        <WorkspaceTeamAccessCard
-          workspaceId={workspace.id}
-          ownerId={workspace.owner_id ?? ""}
-          scopes={workspace.scopes}
-        />
-      </SettingsGroup>
-      <Separator />
-    </>
-  );
 }
 
 function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {

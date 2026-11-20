@@ -114,5 +114,13 @@ export function registerWorkspaceAccessSettingsTests(mobile: boolean) {
     expect(response.ok(), await response.text()).toBeTruthy();
     expect((await response.json()).unit_id).toBe(unitId);
     await expect(picker).toHaveText("Runtime");
+
+    await page.reload();
+    const restoredPlacement = page
+      .getByRole("region", { name: AUTH_HEADING })
+      .getByTestId("workspace-placement-card");
+    await expect(restoredPlacement.getByRole("combobox", { name: "Organization unit" })).toHaveText(
+      "Runtime",
+    );
   });
 }
