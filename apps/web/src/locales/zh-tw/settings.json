@@ -1256,7 +1256,6 @@
   "promptSyncedTooltip": "同步自 {{path}}。請在儲存庫中編輯該檔案以進行修改。",
   "promptViewContent": "檢視內容",
   "promptSyncedReadOnlyNote": "只讀。同步自 {{path}}；請在儲存庫中編輯該檔案以進行修改。",
-  "promptOverride": "在本地覆蓋",
   "promptOverridden": "已覆蓋",
   "promptOverriddenTooltip": "覆蓋同步儲存庫中的 {{path}}。恢復後將重新使用儲存庫版本。",
   "promptRevertOverride": "恢復為同步版本",
@@ -1264,5 +1263,8 @@
   "promptOverrideFailed": "無法覆蓋提示詞：{{error}}",
   "promptRevertDone": "已恢復為同步版本",
   "promptRevertFailed": "無法恢復提示詞：{{error}}",
-  "promptSyncOverriddenList": "本地已覆蓋：{{names}}"
+  "promptSyncOverriddenList": "本地已覆蓋：{{names}}",
+  "promptLocalOverride": "本地覆蓋",
+  "promptRevertConfirm": "放棄本地版本並使用儲存庫版本？",
+  "promptRevertConfirmAction": "使用儲存庫版本"
 }

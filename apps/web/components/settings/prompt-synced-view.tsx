@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconEye, IconEyeOff } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { PromptOverrideButton } from "@/components/settings/prompt-override-controls";
+import { PromptOverrideToggle } from "@/components/settings/prompt-override-controls";
 import { PromptSyncedBadge } from "@/components/settings/prompt-synced-badge";
 import { SettingsPromptEditor } from "@/components/settings/settings-prompt-editor";
 import type { CustomPrompt } from "@/lib/types/http";
@@ -71,7 +71,7 @@ export function SyncedPromptListItem({ prompt }: { prompt: CustomPrompt }) {
           <PromptSyncedBadge sourcePath={prompt.source_path} />
         </div>
         <div className="flex items-center gap-1">
-          <PromptOverrideButton prompt={prompt} />
+          <PromptOverrideToggle prompt={prompt} />
           <PromptViewButton
             promptId={prompt.id}
             expanded={viewing}

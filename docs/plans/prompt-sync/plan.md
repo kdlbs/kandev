@@ -53,6 +53,7 @@ Each layer is shippable on its own:
 | 5 | [Task 07: View synced prompt content](task-07-view-synced-prompts.md) | 05, 06 |
 | 6 | [Task 08: Review remediation](task-08-review-remediation.md) | 03, 05 |
 | 7 | [Task 09: Local overrides](task-09-local-overrides.md) | 07, 08 |
+| 8 | [Task 10: Override switch](task-10-override-switch.md) | 09 |
 
 Tasks 01 and 02 touch separate packages and can run in parallel, as can 03
 and 04. Waves mark parallel-safe candidates only; they do not authorize
@@ -100,15 +101,17 @@ are illustrative; use the existing shadcn primitives and localized copy.
 
 ```text
 | +------------------------------------------------------------------+ |
-| | @post-pr-review  [Synced]                      [override] [view]  | |
+| | @post-pr-review [Synced]        (o ) Local override        [view] | |
 | | Run the default reviewer after the PR opens.                      | |
 | +------------------------------------------------------------------+ |
-| | @principles  [Overridden]                [revert] [edit] [del]    | |
+| | @principles [Overridden]  ( o) Local override       [edit] [del]  | |
 | | My local principles ...                                           | |
 | +------------------------------------------------------------------+ |
   Status card adds: "Overridden locally: @principles" below warnings.
-  [Overridden] tooltip names the repository file it replaces. Phones use the
-  same row with touch-sized controls.
+  [Overridden] tooltip names the repository file it replaces. Turning the
+  switch off asks "Discard your local version and use the repository
+  version?" (inline on desktop, confirmation sheet on phones). Phones use the
+  same row with a touch-sized switch label (Task 10).
 ```
 
 ### UI-02: Settings > Prompts, not configured (desktop)

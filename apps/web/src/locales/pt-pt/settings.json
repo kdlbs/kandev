@@ -1256,7 +1256,6 @@
   "promptSyncedTooltip": "Sincronizado a partir de {{path}}. Edite o ficheiro no repositório para o alterar.",
   "promptViewContent": "Ver conteúdo",
   "promptSyncedReadOnlyNote": "Só de leitura. Sincronizado a partir de {{path}}; edite o ficheiro no repositório para o alterar.",
-  "promptOverride": "Substituir localmente",
   "promptOverridden": "Substituído",
   "promptOverriddenTooltip": "Substitui {{path}} do repositório sincronizado. Reverta para voltar a usar a versão do repositório.",
   "promptRevertOverride": "Reverter para a versão sincronizada",
@@ -1264,5 +1263,8 @@
   "promptOverrideFailed": "Não foi possível substituir o prompt: {{error}}",
   "promptRevertDone": "Revertido para a versão sincronizada",
   "promptRevertFailed": "Não foi possível reverter o prompt: {{error}}",
-  "promptSyncOverriddenList": "Substituídos localmente: {{names}}"
+  "promptSyncOverriddenList": "Substituídos localmente: {{names}}",
+  "promptLocalOverride": "Substituição local",
+  "promptRevertConfirm": "Descartar a sua versão local e usar a versão do repositório?",
+  "promptRevertConfirmAction": "Usar versão do repositório"
 }

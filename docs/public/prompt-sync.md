@@ -63,9 +63,9 @@ To change a synced prompt, edit its file and sync again.
 
 A shared repository can ship a default prompt at a chosen point, for example a `@post-pr-review` step that runs an extra reviewer. Each installation can keep that default or replace it locally:
 
-1. On the synced prompt in **Settings → Prompts**, select **Override locally** (pencil-plus icon). The prompt keeps its name and content but becomes an editable, deletable local copy with an **Overridden** badge.
+1. On the synced prompt in **Settings → Prompts**, turn on the **Local override** switch. The prompt keeps its name and content but becomes an editable, deletable local copy with an **Overridden** badge.
 2. Edit it like any prompt. Syncs leave it alone and list it under **Overridden locally** on the status card instead of warning.
-3. To go back to the shared default, select **Revert to synced version** (back-arrow icon). Kandev returns the prompt to sync and runs a sync, so the repository text replaces your local version. Deleting the override has the same effect on the next sync.
+3. To go back to the shared default, turn the switch off and confirm **Use repository version**. Kandev returns the prompt to sync and runs a sync, so the repository text replaces your local version. Deleting the override has the same effect on the next sync.
 
 Overrides are created from synced prompts only. A prompt you created yourself with the same name as a file still produces a name-clash warning. Removing Prompt Sync turns overrides into normal prompts.
 

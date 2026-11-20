@@ -265,14 +265,19 @@ version without forking the repository.
 
 #### Acceptance criteria
 
-- **AC-INTEGRATIONS-PROMPT-SYNC-007.1:** Settings > Prompts shall offer an
-  Override action on each synced prompt, on desktop and phone. Overriding shall
-  turn that prompt into an override with the same name, identity, and current
-  content, editable and deletable like a manual prompt by operators and agents.
+- **AC-INTEGRATIONS-PROMPT-SYNC-007.1:** Settings > Prompts shall show a
+  labelled "Local override" switch on each synced prompt and each override, on
+  desktop and phone, visually distinct from the edit and delete controls; on
+  phones and coarse pointers its hit area shall be touch-sized. Turning it on
+  shall turn the prompt into an override with the same name, identity, and
+  current content, editable and deletable like a manual prompt by operators
+  and agents.
 - **AC-INTEGRATIONS-PROMPT-SYNC-007.2:** An override shall show an
-  "Overridden" badge naming the repository file it replaces, and a Revert
-  action. Reverting shall return the prompt to sync ownership and run a sync,
-  so the repository version replaces the local content.
+  "Overridden" badge naming the repository file it replaces, with the switch
+  on. Turning the switch off shall first ask the user to confirm discarding the
+  local version; cancelling shall keep the override unchanged. Confirming shall
+  return the prompt to sync ownership and run a sync, so the repository version
+  replaces the local content.
 - **AC-INTEGRATIONS-PROMPT-SYNC-007.3:** A sync shall leave an override's
   content and ownership unchanged when its file is present, report its name as
   overridden rather than as a warning, and leave it in place when its file is

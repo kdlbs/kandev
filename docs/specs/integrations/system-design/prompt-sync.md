@@ -336,9 +336,13 @@ list, the `unchanged` flag, and the stored status match the current output
   **Configure** and **Sync now**. `prompt-sync-dialog.tsx`
   holds a workspace select (credential workspace) plus the shared fields, and
   **Save** and **Remove sync** with inline or mobile confirmation.
-- Overrides render as the normal editable row plus a `PromptOverrideBadge`
-  (tooltip: source file) and a Revert action. Synced rows gain an Override
-  action beside View. The status card lists overridden prompt names, derived
+- `PromptOverrideToggle` (`prompt-override-controls.tsx`) is a labelled
+  "Local override" switch shown on synced rows (off) and override rows (on),
+  with a 44px label hit area on phones and coarse pointers. Turning it on calls
+  Override directly. Turning it off opens `MobileActionConfirmation` (inline
+  `InlineConfirmActions` fallback on desktop) and calls Revert only on
+  confirmation. Overrides render as the normal editable row plus a
+  `PromptOverrideBadge` (tooltip: source file) and the switch. The status card lists overridden prompt names, derived
   from the prompt list, separately from warnings.
 - Prompt rows: `prompt.source === "sync"` renders `SyncedPromptListItem`
   (`prompt-synced-view.tsx`) instead of the editable row: a

@@ -95,7 +95,10 @@ test.describe("Prompt Sync", () => {
     await syncNow(testPage);
 
     const hook = promptRow(testPage, "post-pr-review");
-    await hook.getByTestId("prompt-override-button").click();
+    const toggle = hook.getByRole("switch", { name: "Local override" });
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
     await expect(hook.getByTestId("prompt-override-badge")).toBeVisible();
     await expect(hook.getByTestId("prompt-edit-button")).toBeVisible();
     await expect(hook.getByTestId("prompt-synced-badge")).toHaveCount(0);
@@ -113,7 +116,12 @@ test.describe("Prompt Sync", () => {
       "POST",
       /^\/api\/v1\/prompt-sync\/prompts\/[^/]+\/revert$/,
     );
-    await hook.getByTestId("prompt-revert-button").click();
+    await toggle.click();
+    const confirmation = hook.getByTestId("prompt-revert-confirmation");
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
+    await expect(hook.getByTestId("prompt-override-badge")).toBeVisible();
+    await toggle.click();
+    await hook.getByTestId("prompt-revert-confirm").click();
     expect((await reverted).ok()).toBe(true);
     await expect(hook.getByTestId("prompt-synced-badge")).toBeVisible();
     await expect(hook).toContainText("rev 2");

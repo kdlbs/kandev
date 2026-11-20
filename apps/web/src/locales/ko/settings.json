@@ -1256,7 +1256,6 @@
   "promptSyncedTooltip": "{{path}}에서 동기화되었습니다. 변경하려면 저장소에서 파일을 편집하세요.",
   "promptViewContent": "내용 보기",
   "promptSyncedReadOnlyNote": "읽기 전용입니다. {{path}}에서 동기화되었습니다. 변경하려면 저장소에서 파일을 편집하세요.",
-  "promptOverride": "로컬에서 재정의",
   "promptOverridden": "재정의됨",
   "promptOverriddenTooltip": "동기화된 저장소의 {{path}}을(를) 재정의합니다. 되돌리면 저장소 버전을 다시 사용합니다.",
   "promptRevertOverride": "동기화된 버전으로 되돌리기",
@@ -1264,5 +1263,8 @@
   "promptOverrideFailed": "프롬프트를 재정의할 수 없습니다: {{error}}",
   "promptRevertDone": "동기화된 버전으로 되돌렸습니다",
   "promptRevertFailed": "프롬프트를 되돌릴 수 없습니다: {{error}}",
-  "promptSyncOverriddenList": "로컬에서 재정의됨: {{names}}"
+  "promptSyncOverriddenList": "로컬에서 재정의됨: {{names}}",
+  "promptLocalOverride": "로컬 재정의",
+  "promptRevertConfirm": "로컬 버전을 버리고 저장소 버전을 사용할까요?",
+  "promptRevertConfirmAction": "저장소 버전 사용"
 }

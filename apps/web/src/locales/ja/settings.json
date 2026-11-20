@@ -1256,7 +1256,6 @@
   "promptSyncedTooltip": "{{path}} から同期されています。変更するにはリポジトリでファイルを編集してください。",
   "promptViewContent": "内容を表示",
   "promptSyncedReadOnlyNote": "読み取り専用です。{{path}} から同期されています。変更するにはリポジトリでファイルを編集してください。",
-  "promptOverride": "ローカルで上書き",
   "promptOverridden": "上書き済み",
   "promptOverriddenTooltip": "同期リポジトリの {{path}} を上書きしています。元に戻すとリポジトリ版を再び使用します。",
   "promptRevertOverride": "同期版に戻す",
@@ -1264,5 +1263,8 @@
   "promptOverrideFailed": "プロンプトを上書きできませんでした: {{error}}",
   "promptRevertDone": "同期版に戻しました",
   "promptRevertFailed": "プロンプトを元に戻せませんでした: {{error}}",
-  "promptSyncOverriddenList": "ローカルで上書き中: {{names}}"
+  "promptSyncOverriddenList": "ローカルで上書き中: {{names}}",
+  "promptLocalOverride": "ローカル上書き",
+  "promptRevertConfirm": "ローカル版を破棄してリポジトリ版を使用しますか？",
+  "promptRevertConfirmAction": "リポジトリ版を使用"
 }

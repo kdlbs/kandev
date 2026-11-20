@@ -38,11 +38,18 @@ test.describe("Prompt Sync on a phone", () => {
     await expect(row.getByTestId("prompt-synced-badge")).toBeVisible();
     await expect(row.getByTestId("prompt-delete-button")).toHaveCount(0);
 
-    await row.getByTestId("prompt-override-button").tap();
+    const switchLabel = row.getByTestId("prompt-override-switch-label");
+    expect((await switchLabel.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await switchLabel.tap();
     await expect(row.getByTestId("prompt-override-badge")).toBeVisible();
-    const revert = row.getByTestId("prompt-revert-button");
-    expect((await revert.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
-    await revert.tap();
+    await row.getByTestId("prompt-override-switch-label").tap();
+    const reverted = waitForHttp(
+      testPage,
+      "POST",
+      /^\/api\/v1\/prompt-sync\/prompts\/[^/]+\/revert$/,
+    );
+    await testPage.getByTestId("prompt-revert-confirm").tap();
+    expect((await reverted).ok()).toBe(true);
     await expect(row.getByTestId("prompt-synced-badge")).toBeVisible();
   });
 });
