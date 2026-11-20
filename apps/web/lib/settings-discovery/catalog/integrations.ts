@@ -1,7 +1,6 @@
 import type { SettingsDiscoveryDefinition } from "../types";
 
 const INTEGRATIONS = [
-  ["azure-devops", "Azure DevOps"],
   ["github", "GitHub"],
   ["gitlab", "GitLab"],
   ["jira", "Jira"],
@@ -10,7 +9,6 @@ const INTEGRATIONS = [
 ] as const;
 
 export const INTEGRATION_SETTINGS_TARGETS = {
-  "azure-devops": "setting-integration-azure-devops-connection",
   github: "setting-integration-github-connection",
   gitlab: "setting-integration-gitlab-connection",
   jira: "setting-integration-jira-connection",

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -248,6 +249,24 @@ func TestWorkspaceFileEntryMutations_DestinationOccupied(t *testing.T) {
 			entryMutationAssertEvents(t, sub, types.FileOpRename)
 		})
 	}
+}
+
+func TestRenameWorkspaceRegularFileNoReplacePreservesOccupiedTarget(t *testing.T) {
+	dir := t.TempDir()
+	entryMutationWrite(t, filepath.Join(dir, "source.txt"), "source bytes\n")
+	entryMutationWrite(t, filepath.Join(dir, "target.txt"), "target bytes\n")
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	err = renameWorkspaceRegularFileNoReplace(root, "source.txt", "target.txt")
+	if err == nil || !strings.Contains(err.Error(), "target already exists") {
+		t.Fatalf("rename error = %v, want target already exists", err)
+	}
+	entryMutationAssertBytes(t, filepath.Join(dir, "source.txt"), "source bytes\n")
+	entryMutationAssertBytes(t, filepath.Join(dir, "target.txt"), "target bytes\n")
 }
 
 func prepareEntryMutationDestination(t *testing.T, dir, kind string) {

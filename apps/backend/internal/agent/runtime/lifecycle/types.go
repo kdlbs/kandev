@@ -34,6 +34,10 @@ const AgentCtlPort = ports.AgentCtl
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
 	builtinMCPMu sync.Mutex
+	// registrationSettled closes after this newly created execution is either
+	// persisted as the session's current runtime or rolled back.
+	registrationSettled     chan struct{}
+	registrationSettledOnce sync.Once
 	// projectMCP carries execution-bound evidence that the host materialized
 	// the selected built-in packages into a project configuration file. It is
 	// produced only after a successful write and never persisted.
@@ -491,6 +495,27 @@ type AgentExecution struct {
 	// callback cannot validate one generation and mutate another after the
 	// validation lock is released.
 	startupCallbackMu sync.RWMutex
+}
+
+func (e *AgentExecution) settleRegistration() {
+	if e == nil || e.registrationSettled == nil {
+		return
+	}
+	e.registrationSettledOnce.Do(func() {
+		close(e.registrationSettled)
+	})
+}
+
+func (e *AgentExecution) waitRegistrationSettled(ctx context.Context) error {
+	if e == nil || e.registrationSettled == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-e.registrationSettled:
+		return nil
+	}
 }
 
 // SessionSettingsPolicy controls whether startup restores the saved mode/model
@@ -1949,7 +1974,7 @@ type CredentialsManager interface {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
-	ResourceCircuitKey string
+	ExecutionGrade     string
 	ProfileID          string
 	ProfileName        string
 	AgentID            string
@@ -1957,6 +1982,7 @@ type AgentProfileInfo struct {
 	Model              string // applied through ACP model selection at session start
 	Mode               string // applied via ACP session/set_mode at session start (empty = use agent default)
 	ConfigOptions      map[string]string
+	ResourceCircuitKey string
 	// FallbackModel is the optional single ACP model ID to switch to when
 	// Model is unavailable. Ignored when AutoFallback is enabled.
 	FallbackModel string

@@ -46,6 +46,7 @@ type AgentUpdateJob struct {
 	ExpectedRevision uint64
 	UseDefault       bool
 	NativeRuntime    bool
+	GuardedManaged   bool
 	Output           *ringBuffer
 	StartedAt        time.Time
 	FinishedAt       *time.Time
@@ -66,7 +67,7 @@ type AgentUpdateJobStore struct {
 	onRefresh               func()
 	onFinished              func(dto.AgentUpdateJobDTO)
 	selectionStore          managedruntime.SelectionStore
-	onStatusInvalidated     func(string)
+	onStatusInvalidated     func(RuntimeStatusInvalidation)
 	openCodeSelectionReader managedruntime.OpenCodeSelectionReader
 	openCodeSelections      managedruntime.OpenCodeSelectionWriter
 	migrationGuard          OpenCodeMigrationGuard
@@ -121,6 +122,23 @@ func (s *AgentUpdateJobStore) enqueueAutomatic(ctx context.Context, name string,
 
 func (s *AgentUpdateJobStore) enqueueManual(name string, spec agents.ManagedNPMRuntimeSpec, useDefault bool, target string, fallback bool, beforeStart func() error) (*AgentUpdateJob, error) {
 	return s.enqueue(name, spec, useDefault, &AgentUpdateJob{ManagedFallback: fallback, beforeStart: beforeStart}, target)
+}
+
+// enqueueReviewed admits a guarded managed-only update. The captured candidate
+// can never switch to native preparation, and the guard rechecks the reviewed
+// runtime before preparation and around selection activation.
+func (s *AgentUpdateJobStore) enqueueReviewed(
+	name string,
+	spec agents.ManagedNPMRuntimeSpec,
+	target string,
+	beforeStart func() error,
+	guard runtimeActivationGuard,
+) (*AgentUpdateJob, error) {
+	return s.enqueue(name, spec, false, &AgentUpdateJob{
+		GuardedManaged:  true,
+		beforeStart:     beforeStart,
+		activationGuard: guard,
+	}, target)
 }
 
 func (s *AgentUpdateJobStore) enqueue(
@@ -180,6 +198,7 @@ func (s *AgentUpdateJobStore) enqueueConfigured(
 		job.Automatic, job.PreviousVersion = options.Automatic, options.PreviousVersion
 		job.ManagedFallback = options.ManagedFallback
 		job.RuntimeID = options.RuntimeID
+		job.GuardedManaged = options.GuardedManaged
 		job.context, job.activationGuard = options.context, options.activationGuard
 	}
 	requestedTarget := ""
@@ -221,12 +240,37 @@ func (s *AgentUpdateJobStore) enqueueConfigured(
 	return job, nil
 }
 
+// RuntimeStatusInvalidation identifies the cached status a terminal job made
+// stale: the job's package for registry results and its agent for native
+// check results.
+type RuntimeStatusInvalidation struct {
+	AgentName  string
+	Package    string
+	UpdateMode dto.AgentUpdateMode
+}
+
 // SetStatusInvalidator wires the process-local status cache invalidation used
-// after a successful runtime activation. It is optional for isolated stores.
-func (s *AgentUpdateJobStore) SetStatusInvalidator(invalidator func(string)) {
+// after terminal update jobs. It is optional for isolated stores and is
+// always called without a job-store lock held.
+func (s *AgentUpdateJobStore) SetStatusInvalidator(invalidator func(RuntimeStatusInvalidation)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onStatusInvalidated = invalidator
+}
+
+// invalidateHarnessStatus runs before a self_update job's terminal state or
+// released claim becomes observable, so no later request can reuse or join a
+// pre-job native check. Pinned jobs keep their post-publication invalidation.
+func (s *AgentUpdateJobStore) invalidateHarnessStatus(job *AgentUpdateJob) {
+	if job.UpdateMode != dto.AgentUpdateModeSelfUpdate {
+		return
+	}
+	s.mu.Lock()
+	invalidator := s.onStatusInvalidated
+	s.mu.Unlock()
+	if invalidator != nil {
+		invalidator(RuntimeStatusInvalidation{AgentName: job.AgentName, Package: job.Package, UpdateMode: job.UpdateMode})
+	}
 }
 
 func (s *AgentUpdateJobStore) SetOpenCodeSelections(writer managedruntime.OpenCodeSelectionWriter) {
@@ -378,7 +422,7 @@ func (s *AgentUpdateJobStore) run(
 
 	s.setStatus(job, dto.AgentUpdateJobStatusUpdating)
 	flusher := newUpdateOutputFlusher(s, job)
-	useNative, sourceErr := s.useNativeRuntime(ctx, spec)
+	useNative, sourceErr := s.useNativeRuntime(ctx, job, spec)
 	if sourceErr != nil {
 		s.finishFailed(job, ctx, fmt.Errorf("resolve OpenCode runtime source: %w", sourceErr), ref)
 		return
@@ -740,7 +784,7 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 ) {
 	s.setStatus(job, dto.AgentUpdateJobStatusUpdating)
 	flusher := newUpdateOutputFlusher(s, job)
-	useNative, sourceErr := s.useNativeRuntime(ctx, spec)
+	useNative, sourceErr := s.useNativeRuntime(ctx, job, spec)
 	if sourceErr != nil {
 		s.finishFailed(job, ctx, fmt.Errorf("resolve OpenCode runtime source: %w", sourceErr), ref)
 		return
@@ -844,8 +888,14 @@ func (s *AgentUpdateJobStore) recordValidatedFallback(ctx context.Context, agent
 
 func (s *AgentUpdateJobStore) useNativeRuntime(
 	ctx context.Context,
+	job *AgentUpdateJob,
 	spec agents.ManagedNPMRuntimeSpec,
 ) (bool, error) {
+	if job.GuardedManaged {
+		// A reviewed bulk candidate is always the captured managed package.
+		// A later native source switch cannot redirect preparation.
+		return false, nil
+	}
 	if s.openCodeSelectionReader == nil || (spec.Package != managedruntime.OpenCodeV1Package && spec.Package != managedruntime.OpenCodeV2Package) {
 		return spec.NativeBinaryOnPath(), nil
 	}
@@ -915,6 +965,8 @@ func (s *AgentUpdateJobStore) finishFailed(
 	err error,
 	ref MaintenanceJobRef,
 ) {
+	// A failed harness updater can still have changed the installation.
+	s.invalidateHarnessStatus(job)
 	s.mu.Lock()
 	job.Status = dto.AgentUpdateJobStatusFailed
 	job.Error = formatUpdateJobError(ctx, err)
@@ -974,11 +1026,11 @@ func (s *AgentUpdateJobStore) finishActivatedWithRefreshError(
 	s.finishLocked(job)
 	snapshot := job.snapshot()
 	statusInvalidator := s.onStatusInvalidated
-	packageName := job.Package
+	invalidation := RuntimeStatusInvalidation{AgentName: job.AgentName, Package: job.Package, UpdateMode: job.UpdateMode}
 	s.mu.Unlock()
 	s.complete(snapshot)
-	if statusInvalidator != nil && packageName != "" {
-		statusInvalidator(packageName)
+	if statusInvalidator != nil && invalidation.Package != "" {
+		statusInvalidator(invalidation)
 	}
 	if s.onRefresh != nil {
 		s.onRefresh()
@@ -995,6 +1047,7 @@ func (s *AgentUpdateJobStore) finishRefresh(
 	ref MaintenanceJobRef,
 ) {
 	refreshed := false
+	s.invalidateHarnessStatus(job)
 	s.mu.Lock()
 	switch {
 	case err != nil:
@@ -1020,11 +1073,11 @@ func (s *AgentUpdateJobStore) finishRefresh(
 	s.finishLocked(job)
 	snapshot := job.snapshot()
 	statusInvalidator := s.onStatusInvalidated
-	packageName := job.Package
+	invalidation := RuntimeStatusInvalidation{AgentName: job.AgentName, Package: job.Package, UpdateMode: job.UpdateMode}
 	s.mu.Unlock()
 	s.complete(snapshot)
-	if refreshed && statusInvalidator != nil && packageName != "" {
-		statusInvalidator(packageName)
+	if refreshed && job.UpdateMode != dto.AgentUpdateModeSelfUpdate && statusInvalidator != nil && invalidation.Package != "" {
+		statusInvalidator(invalidation)
 	}
 	if refreshed && s.onRefresh != nil {
 		s.onRefresh()

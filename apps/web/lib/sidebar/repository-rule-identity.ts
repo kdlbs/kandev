@@ -195,8 +195,6 @@ function defaultProviderHost(provider: string): string {
       return "github.com";
     case "gitlab":
       return "gitlab.com";
-    case "azure_devops":
-      return "dev.azure.com";
     default:
       return "";
   }

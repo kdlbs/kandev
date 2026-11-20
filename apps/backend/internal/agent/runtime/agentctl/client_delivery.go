@@ -184,6 +184,37 @@ func (c *Client) GetDeliveryStatus(ctx context.Context, streamID string) (*Deliv
 	return &result, nil
 }
 
+// ListSuccessorDeliveryStreams returns retained streams from later harness
+// generations owned by the same session lifetime.
+func (c *Client) ListSuccessorDeliveryStreams(ctx context.Context) ([]journal.Stream, error) {
+	var result []journal.Stream
+	if err := c.doDeliveryRequest(ctx, http.MethodGet, "/api/v1/agent/delivery/successors", nil, &result); err != nil {
+		var response *DeliveryHTTPError
+		if errors.As(err, &response) && response.StatusCode == http.StatusNotFound {
+			return []journal.Stream{}, nil
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
+// AbandonSuccessorDeliveryStream removes one exact stream snapshot returned by
+// ListSuccessorDeliveryStreams.
+func (c *Client) AbandonSuccessorDeliveryStream(ctx context.Context, stream journal.Stream) error {
+	return c.doDeliveryRequest(ctx, http.MethodPost, "/api/v1/agent/delivery/stream/abandon", stream, nil)
+}
+
+// AbandonFailedBootstrapDeliveryStream removes this owner's stream after its
+// agent process has stopped and lifecycle SQL checks proved no successor row
+// or cursor was committed.
+func (c *Client) AbandonFailedBootstrapDeliveryStream(ctx context.Context, streamID string, generation uint64) error {
+	request := struct {
+		StreamID          string `json:"stream_id"`
+		HarnessGeneration uint64 `json:"harness_generation"`
+	}{StreamID: streamID, HarnessGeneration: generation}
+	return c.doDeliveryRequest(ctx, http.MethodPost, "/api/v1/agent/delivery/stream/abandon-bootstrap", request, nil)
+}
+
 // SubmitDelivery records and accepts one immutable submission. The caller
 // must reconcile an accepted or dispatching record before retrying it.
 func (c *Client) SubmitDelivery(ctx context.Context, submission journal.Submission) (*journal.Submission, error) {
@@ -220,6 +251,26 @@ func (c *Client) ListDeliverySubmissions(ctx context.Context, sessionID string) 
 func (c *Client) RetireDeliverySubmission(ctx context.Context, id string) error {
 	path := "/api/v1/agent/submissions/" + url.PathEscape(id) + "/retire"
 	return c.doDeliveryRequest(ctx, http.MethodPost, path, nil, nil)
+}
+
+// RetireMissingUnknownDeliverySubmission records retirement evidence for an
+// interrupted SQL prompt whose peer journal record is absent.
+func (c *Client) RetireMissingUnknownDeliverySubmission(ctx context.Context, submission journal.Submission) error {
+	path := "/api/v1/agent/submissions/" + url.PathEscape(submission.ID) + "/retire"
+	request := struct {
+		SessionID         string `json:"session_id"`
+		IncarnationID     string `json:"incarnation_id"`
+		HarnessGeneration uint64 `json:"harness_generation"`
+		StreamID          string `json:"stream_id"`
+		Hash              string `json:"hash"`
+	}{
+		SessionID:         submission.SessionID,
+		IncarnationID:     submission.IncarnationID,
+		HarnessGeneration: submission.HarnessGeneration,
+		StreamID:          submission.StreamID,
+		Hash:              submission.Hash,
+	}
+	return c.doDeliveryRequest(ctx, http.MethodPost, path, request, nil)
 }
 
 // CancelDeliverySubmission settles a prompt after an explicit user cancel.

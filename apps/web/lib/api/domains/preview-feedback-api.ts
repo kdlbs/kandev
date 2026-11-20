@@ -79,6 +79,23 @@ export async function updateTaskPreviewFeedback(
   })) as TaskPreviewFeedbackSnapshot;
 }
 
+export async function replaceTaskPreviewFeedbackScreenshot(
+  input: ItemMutationInput & {
+    captureRect: PreviewCaptureRect;
+    screenshotAttachmentId: string;
+  },
+): Promise<TaskPreviewFeedbackSnapshot> {
+  return (await requireClient().request("task.preview_feedback.update", {
+    task_id: input.taskId,
+    id: input.id,
+    expected_version: input.expectedVersion,
+    capture: {
+      capture_rect: input.captureRect,
+      screenshot_attachment_id: input.screenshotAttachmentId,
+    },
+  })) as TaskPreviewFeedbackSnapshot;
+}
+
 export async function deleteTaskPreviewFeedback(
   input: ItemMutationInput,
 ): Promise<TaskPreviewFeedbackSnapshot> {

@@ -43,17 +43,15 @@ const (
 )
 
 // Provider names, used for the ordering tiebreak (spec "Ordering",
-// provider name ascending in the order azure_devops, github, gitlab).
+// provider name ascending in the order github, gitlab).
 const (
-	ProviderAzureDevOps = "azure_devops"
-	ProviderGitHub      = "github"
-	ProviderGitLab      = "gitlab"
+	ProviderGitHub = "github"
+	ProviderGitLab = "gitlab"
 )
 
 var providerOrder = map[string]int{
-	ProviderAzureDevOps: 0,
-	ProviderGitHub:      1,
-	ProviderGitLab:      2,
+	ProviderGitHub: 0,
+	ProviderGitLab: 1,
 }
 
 // evidenceRankTable keys a (Outcome, Basis) pair to its rank (2-8). Rank 0

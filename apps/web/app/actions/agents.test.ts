@@ -78,6 +78,31 @@ describe("deleteAgentProfileAction", () => {
     });
     expect(reloadMocks.signalBackendReloadRequired).not.toHaveBeenCalled();
   });
+
+  it("keeps a dynamic-profile-only 409 as a conflict result", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: "agent profile is used by 1 dynamic profile(s)",
+            dynamic_profiles: [{ id: "dynamic-1", name: "Live selector" }],
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(deleteAgentProfileAction("profile-1")).resolves.toEqual({
+      status: "conflict",
+      activeSessions: [],
+      watchers: [],
+      routingTiers: [],
+      automations: [],
+      utilityAgents: [],
+      dynamicProfiles: [{ id: "dynamic-1", name: "Live selector" }],
+    });
+  });
 });
 
 describe("reorderAgentProfilesAction", () => {

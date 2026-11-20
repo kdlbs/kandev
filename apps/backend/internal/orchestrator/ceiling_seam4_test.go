@@ -3,10 +3,74 @@ package orchestrator
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestTransientLaunchRetryUsesAutomaticCeilingOrigin(t *testing.T) {
+	svc, repo := newServiceWithCeiling(t, 1)
+	ctx := context.Background()
+	for _, id := range []string{"retry-ceiling-first", "retry-ceiling-second"} {
+		if err := repo.CreateTask(ctx, &models.Task{ID: id, Title: "T"}); err != nil {
+			t.Fatalf("CreateTask(%s): %v", id, err)
+		}
+	}
+	if _, deferred, err := svc.admitOrDeferSeam4(ctx, "retry-ceiling-first", "retry-ceiling-first-session", launchOriginAutomatic, map[string]interface{}{}); err != nil || deferred {
+		t.Fatalf("first automatic resume was not admitted: deferred=%v err=%v", deferred, err)
+	}
+
+	identity := transientLaunchFailureIdentity{
+		attemptID:  "retry-attempt",
+		errorStamp: "retry-error",
+		updatedAt:  time.Date(2026, 11, 19, 12, 30, 0, 0, time.UTC),
+	}
+	request := &LaunchSessionRequest{Origin: string(launchOriginAutomatic)}
+	origin := launchOriginForActivation(request)
+	options := executor.ResumeOptions{
+		Origin:                   string(origin),
+		TransientRetryAttemptID:  identity.attemptID,
+		TransientRetryErrorStamp: identity.errorStamp,
+		TransientRetryUpdatedAt:  identity.updatedAt,
+	}
+	_, deferred, err := svc.admitOrDeferSeam4(ctx, "retry-ceiling-second", "retry-ceiling-second-session", origin,
+		seam4ResumePayload("retry-ceiling-second-session", options))
+	if err != nil {
+		t.Fatalf("admitOrDeferSeam4: %v", err)
+	}
+	if !deferred {
+		t.Fatal("an automatic retry must defer when the session ceiling is full")
+	}
+	deferredRecord, err := models.ReadCeilingDeferral(deferredLaunchOf(t, svc, "retry-ceiling-second"))
+	if err != nil {
+		t.Fatalf("ReadCeilingDeferral: %v", err)
+	}
+	if deferredRecord.Origin != string(launchOriginAutomatic) {
+		t.Fatalf("deferred retry origin = %q, want automatic", deferredRecord.Origin)
+	}
+	got, found, err := transientLaunchIdentityFromPayload(deferredRecord.Payload)
+	if err != nil || !found || got != identity {
+		t.Fatalf("deferred retry identity = %+v, found=%v err=%v; want %+v", got, found, err, identity)
+	}
+}
+
+func TestSeam4ResumePayloadKeepsTransientRetryIdentity(t *testing.T) {
+	want := transientLaunchFailureIdentity{
+		attemptID:  "failed-start-attempt",
+		errorStamp: "failed-start-stamp",
+		updatedAt:  time.Date(2026, 11, 19, 12, 30, 0, 0, time.UTC),
+	}
+	payload := seam4ResumePayload("retry-session", executor.ResumeOptions{
+		TransientRetryAttemptID:  want.attemptID,
+		TransientRetryErrorStamp: want.errorStamp,
+		TransientRetryUpdatedAt:  want.updatedAt,
+	})
+	got, found, err := transientLaunchIdentityFromPayload(payload)
+	if err != nil || !found || got != want {
+		t.Fatalf("transient retry identity round trip = %+v, found=%v err=%v; want %+v", got, found, err, want)
+	}
+}
 
 // TestAdmitOrDeferSeam4AdmitsUnderCeiling covers the ordinary case: population
 // below the ceiling, admitted, no record written, reservation keyed by the

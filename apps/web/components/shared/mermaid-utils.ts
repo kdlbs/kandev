@@ -204,3 +204,53 @@ export function sanitizeMermaidCode(code: string): string {
 
   return result;
 }
+
+export type MermaidSourceSelection = {
+  diagramSource: string;
+  followingMarkdown?: string;
+};
+
+type MermaidSourceValidator = (source: string) => Promise<boolean>;
+
+function findMermaidFenceCandidates(
+  source: string,
+): Array<{ diagramSource: string; followingMarkdown: string }> {
+  return [...source.matchAll(/(^|[\r\n])([ ]{0,3})(`{3,})(?!`)(?=[^\s`])[^\r\n]*/g)].map(
+    (candidate) => {
+      const lineStart = candidate.index + candidate[1].length;
+      const markerEnd = lineStart + candidate[2].length + candidate[3].length;
+      return {
+        diagramSource: source.slice(0, lineStart),
+        followingMarkdown: source.slice(markerEnd),
+      };
+    },
+  );
+}
+
+/** Select a verified diagram/prose boundary from an explicitly tagged Mermaid block. */
+export async function selectMermaidSource(
+  source: string,
+  validate: MermaidSourceValidator,
+): Promise<MermaidSourceSelection> {
+  const candidates = findMermaidFenceCandidates(source);
+  if (candidates.length === 0) return { diagramSource: source };
+
+  let sourceIsValid: boolean;
+  try {
+    sourceIsValid = await validate(sanitizeMermaidCode(source));
+  } catch {
+    return { diagramSource: source };
+  }
+  if (sourceIsValid) return { diagramSource: source };
+
+  for (const candidate of candidates) {
+    try {
+      if (await validate(sanitizeMermaidCode(candidate.diagramSource))) {
+        return candidate;
+      }
+    } catch {
+      return { diagramSource: source };
+    }
+  }
+  return { diagramSource: source };
+}

@@ -69,7 +69,7 @@ func TestTransferWorkspaceFirstFullComposition(t *testing.T) {
 			t.Cleanup(func() { cancel(); _ = holder.Rollback(); <-finished })
 			owner := awaitOwnedTransferPause(t, scope, f.h.db, done)
 			var actual, expected []string
-			require.NoError(t, f.h.db.SelectContext(scope, &actual, `SELECT c.relname FROM pg_locks l JOIN pg_class c ON c.oid=l.relation WHERE l.pid=$1 AND l.mode='ExclusiveLock' AND l.granted AND c.relnamespace=current_schema()::regnamespace ORDER BY c.relname`, owner))
+			require.NoError(t, f.h.db.SelectContext(scope, &actual, `SELECT c.relname || ':' || l.mode FROM pg_locks l JOIN pg_class c ON c.oid=l.relation WHERE l.pid=$1 AND l.mode IN ('ExclusiveLock', 'ShareRowExclusiveLock') AND l.granted AND c.relnamespace=current_schema()::regnamespace ORDER BY c.relname`, owner))
 			require.NoError(t, f.h.db.SelectContext(scope, &expected, `SELECT DISTINCT table_name FROM information_schema.columns WHERE table_schema=current_schema() AND (column_name='task_id' OR (table_name='task_workspace_groups' AND column_name='owner_task_id'))`))
 			expected = append(expected, "tasks", "workspaces", "workflows", "workflow_steps", "task_transfer_operations", "task_transfer_audit", "task_transfer_serialization", "task_step_transitions", "office_labels", "office_task_tree_holds", "agent_profiles")
 			set := map[string]bool{}
@@ -78,7 +78,11 @@ func TestTransferWorkspaceFirstFullComposition(t *testing.T) {
 			}
 			expected = nil
 			for table := range set {
-				expected = append(expected, table)
+				mode := "ExclusiveLock"
+				if table == "workspaces" {
+					mode = "ShareRowExclusiveLock"
+				}
+				expected = append(expected, table+":"+mode)
 			}
 			sort.Strings(expected)
 			require.Equal(t, expected, actual, "full production schemas must be covered by actual transfer reservation")
@@ -98,7 +102,7 @@ func TestTransferWorkspaceFirstFullComposition(t *testing.T) {
 				var count int
 				require.NoError(t, f.h.db.QueryRowContext(scope, `SELECT count(*) FROM task_transfer_operations`).Scan(&count))
 				require.Zero(t, count)
-				require.NoError(t, f.h.db.QueryRowContext(scope, `SELECT count(*) FROM pg_locks WHERE pid=$1 AND mode='ExclusiveLock' AND locktype='relation'`, owner).Scan(&count))
+				require.NoError(t, f.h.db.QueryRowContext(scope, `SELECT count(*) FROM pg_locks WHERE pid=$1 AND mode IN ('ExclusiveLock', 'ShareRowExclusiveLock') AND locktype='relation'`, owner).Scan(&count))
 				require.Zero(t, count)
 				return
 			}

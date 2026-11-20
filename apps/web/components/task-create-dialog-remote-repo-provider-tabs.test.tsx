@@ -10,9 +10,6 @@ import { RemoteRepoChip } from "./task-create-dialog-remote-repo-chip";
 import { RemoteRepositoryProviderIcon } from "./task-create-dialog-remote-repo-provider-tabs";
 import { pluginRegistry } from "@/lib/plugins/registry";
 
-const AZURE_PROVIDER = "azure_devops" as const;
-const AZURE_PROVIDER_LABEL = "Azure DevOps";
-const AZURE_REPO_NAME = "Platform/api";
 const GITLAB_REPO_NAME = "acme/worker";
 
 const GITHUB_REPO: RemoteRepository = {
@@ -24,17 +21,6 @@ const GITHUB_REPO: RemoteRepository = {
   url: "https://github.com/acme/site",
   defaultBranch: "main",
   private: false,
-};
-
-const AZURE_REPO: RemoteRepository = {
-  provider: AZURE_PROVIDER,
-  id: "azure-api",
-  owner: "Platform",
-  name: "api",
-  fullName: AZURE_REPO_NAME,
-  url: "https://dev.azure.com/acme/Platform/_git/api",
-  defaultBranch: "main",
-  private: true,
 };
 
 const GITLAB_REPO: RemoteRepository = {
@@ -130,40 +116,41 @@ describe("RemoteRepoChip provider tabs", () => {
 
   it("shows bottom tabs and filters repositories when multiple providers are available", () => {
     renderPicker(
-      accessibleRepos([GITHUB_REPO, GITLAB_REPO, AZURE_REPO], ["github", "gitlab", AZURE_PROVIDER]),
+      accessibleRepos(
+        [GITHUB_REPO, GITLAB_REPO, BITBUCKET_REPO],
+        ["github", "gitlab", "bitbucket"],
+      ),
     );
 
     expect(screen.getAllByRole("tab")).toHaveLength(3);
     expect(screen.getByRole("tab", { name: "GitHub" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.queryByText("GitHub")).toBeNull();
     expect(screen.queryByText("GitLab")).toBeNull();
-    expect(screen.queryByText(AZURE_PROVIDER_LABEL)).toBeNull();
     expect(screen.getByTestId("remote-repo-provider-tabs").className).toContain("overflow-hidden");
     expect(screen.getByText("acme/site")).toBeTruthy();
     expect(screen.queryByText(GITLAB_REPO_NAME)).toBeNull();
-    expect(screen.queryByText(AZURE_REPO_NAME)).toBeNull();
 
     activateProvider("GitLab");
     expect(screen.getByText(GITLAB_REPO_NAME)).toBeTruthy();
 
-    activateProvider(AZURE_PROVIDER_LABEL);
+    activateProvider("Bitbucket");
     expect(screen.queryByText("acme/site")).toBeNull();
-    expect(screen.getByText(AZURE_REPO_NAME)).toBeTruthy();
+    expect(screen.getByText("PLATFORM/web")).toBeTruthy();
   });
 
   it("keeps a tab for an available provider that currently has no repositories", () => {
-    renderPicker(accessibleRepos([GITHUB_REPO], ["github", AZURE_PROVIDER]));
+    renderPicker(accessibleRepos([GITHUB_REPO], ["github", "gitlab"]));
 
     expect(screen.getByText("GitHub")).toBeTruthy();
-    expect(screen.getByText(AZURE_PROVIDER_LABEL)).toBeTruthy();
-    activateProvider(AZURE_PROVIDER_LABEL);
+    expect(screen.getByText("GitLab")).toBeTruthy();
+    activateProvider("GitLab");
     expect(screen.getByText("No repositories found.")).toBeTruthy();
   });
 
   it("does not show provider tabs when only one provider is available", () => {
-    renderPicker(accessibleRepos([AZURE_REPO], [AZURE_PROVIDER]));
+    renderPicker(accessibleRepos([GITLAB_REPO], ["gitlab"]));
 
     expect(screen.queryByRole("tab")).toBeNull();
-    expect(screen.getByText(AZURE_REPO_NAME)).toBeTruthy();
+    expect(screen.getByText(GITLAB_REPO_NAME)).toBeTruthy();
   });
 });

@@ -82,6 +82,9 @@ updated_at        timestamp
 completed_at      timestamp  nullable
 ```
 
+`quick_chat_expire` is retained only for compatibility with already committed cleanup jobs
+created by older versions. Current code does not create Quick Chat expiration jobs.
+
 Each lifecycle mutation supplies one stable `operation_id` to its cleanup job. Repeated delivery of
 the same mutation reuses that job; a later archive/delete cycle uses a new operation ID.
 

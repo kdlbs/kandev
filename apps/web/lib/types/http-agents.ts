@@ -508,6 +508,18 @@ export type PreviewCaptureRect = {
   viewport_width?: number;
   viewport_height?: number;
   device_pixel_ratio?: number;
+  /** Nearest scrollable ancestor when a region was drawn; absent for the document. */
+  scroll_container_selector?: string;
+  container_scroll_x?: number;
+  container_scroll_y?: number;
+  /** Smallest element containing a region, which its outline follows when the layout changes. */
+  anchor_selector?: string;
+  /** Region top-left minus the anchor's top-left, in CSS pixels. */
+  anchor_offset_x?: number;
+  anchor_offset_y?: number;
+  /** The anchor's size at capture; a different size means its content may have reflowed. */
+  anchor_width?: number;
+  anchor_height?: number;
 };
 
 export type PreviewElementSnapshot = {

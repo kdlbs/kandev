@@ -5,6 +5,7 @@ import { IconMinus, IconPlus, IconMaximize } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
+import { agentTaskReferenceComponents } from "./agent-task-reference-components";
 import type { Message } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
@@ -38,6 +39,7 @@ function PlanMarkdownBody({
       className={`markdown-body max-w-none text-sm [&>*]:my-2 [&>p]:my-2 [&>ul]:my-2 [&>ol]:my-2 ${className ?? ""}`}
     >
       <MemoizedMarkdown
+        components={agentTaskReferenceComponents}
         content={text}
         taskId={taskId}
         worktreePath={worktreePath}

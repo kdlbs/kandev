@@ -303,6 +303,16 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     order: 34,
   },
   {
+    id: "editors-markdown-preview",
+    kind: "control",
+    labelKey: "settings:markdownPreviewByDefault",
+    parentId: TERMINAL_EDITORS_ID,
+    groupId: "preferences",
+    href: TERMINAL_EDITORS_SETTINGS_HREF,
+    targetId: "setting-markdown-preview",
+    order: 35,
+  },
+  {
     id: "editors-file-editor",
     kind: "section",
     labelKey: "settings:fileEditor",

@@ -61,6 +61,7 @@ type ImportProfilePreview struct {
 	Skipped  []string                 `json:"skipped"`
 	Profiles []ImportProfileCandidate `json:"profiles"`
 	Steps    []ImportProfileStep      `json:"steps"`
+	Warnings []ImportWarning          `json:"warnings,omitempty"`
 }
 
 type ImportProfileBinding struct {
@@ -357,6 +358,7 @@ func (s *Service) importProfilePreviewData(
 		Skipped:  selection.skipped,
 		Profiles: make([]ImportProfileCandidate, 0),
 		Steps:    collectImportProfileSteps(export, selection.indexes),
+		Warnings: s.exclusionWarnings(ctx, workspaceID, selectedWorkflows(export, selection.indexes)),
 	}
 	if len(preview.Steps) == 0 {
 		return preview, nil
@@ -570,6 +572,7 @@ func (s *Service) ImportWorkflowsWithBindings(
 	if err := s.persistImportedWorkflows(ctx, workspaceID, prepared); err != nil {
 		return nil, err
 	}
+	result.Warnings = s.exclusionWarnings(ctx, workspaceID, selectedWorkflows(export, selection.indexes))
 	s.logger.Info("imported workflows",
 		zap.String("workspace_id", workspaceID),
 		zap.Int("created", len(result.Created)),
