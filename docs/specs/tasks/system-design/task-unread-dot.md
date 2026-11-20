@@ -243,19 +243,18 @@ admission; its ACK retains a newer view of that same removed ID, not a survivor
 or workflow intent. Retirement and proven successor selection stay separate.
 
 Retirement owns backend/auth/workspace and membership generation, not view intent.
-Trusted removals invalidate membership and exclude pending automatic candidates.
-Invalidation rechecks absence. Focus needs its original owner and a unique proven
-primary. Clearing the deleted selection/pin preserves independent workflow intent,
-cancelling only a request targeting that ID. An owned empty slot can re-prove after
-a changed primary; newer user/workflow selection wins. Surviving pins/cursors stay
-untouched. Proof initializes missing recipient identity/lifecycle only.
+Trusted removals fence membership/pending candidates; invalidation rechecks absence.
+Focus needs its original owner and a unique proven primary. Clear only the deleted
+selection/pin and workflow requests targeting it. Preserve independent intent,
+surviving pins/cursors and newer user/workflow selection. Owned empty slots can
+re-prove after changed primaries. Proof fills missing recipient identity/lifecycle.
 
-Restore keeps workflow focus. New valid explicit links beat entry receipts;
-primary conflicts re-read membership.
-Removal gates cover parked/live groups; owned focus resumes after restore.
-Only changed primaries re-prove empty slots; hides gate restore.
-All transcript hosts inherit read gates; dots use group visibility.
-Independent splits/non-agent focus survive; failed workflow is not selection.
+Valid explicit routes beat entry receipts and reopen only their target.
+Pending moves defer admission; cancellation revalidates membership/ownership.
+Primary conflicts re-read membership; committed focus wins restore.
+Removal leases gate parked/live groups; focus resumes after restore.
+Only changed primaries re-prove empty slots; hides gate passive restore.
+Transcript hosts/dots use group visibility; independent split/non-agent focus survives.
 
 `invalidateTaskSessionMembership` fences foreground/removal-dialog pending,
 admitted and queued publications. New reads/unrelated keys remain usable.

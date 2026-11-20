@@ -7,6 +7,7 @@ import type { AppState } from "@/lib/state/store";
 import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
 import type { Task, TaskSession } from "@/lib/types/http";
 import { sessionId, taskId, workflowId, workspaceId } from "@/lib/types/ids";
+import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import { registerTaskSessionHandlers } from "@/lib/ws/handlers/agent-session";
 import { listTaskSessions } from "@/lib/api/domains/session-api";
 import type * as SessionApi from "@/lib/api/domains/session-api";
@@ -101,6 +102,83 @@ afterEach(() => {
 });
 
 const LATER_REMOVAL = "later-removal";
+const CANCELLED_WORKFLOW = "cancelled-workflow";
+
+async function openRequestedRoute(
+  data: TaskNavigationIdentity,
+  removed: TaskSession,
+  empty: boolean,
+) {
+  const initial = Promise.withResolvers<TaskNavigationIdentity>();
+  const requested = Promise.withResolvers<TaskNavigationIdentity>();
+  let response = initial.promise;
+  mocks.load.mockImplementation(() => response);
+  vi.mocked(listTaskSessions).mockResolvedValue(data.allSessionsResponse);
+  const page = render(
+    <StateProvider
+      initialState={taskRouteSelectionState(TASK, OLD, [
+        removed,
+        ...data.allSessionsResponse.sessions,
+      ])}
+    >
+      <ToastProvider>
+        <CaptureStore />
+        <TaskDetailRoute taskId={TASK} />
+      </ToastProvider>
+    </StateProvider>,
+  );
+  await waitFor(() => expect(mocks.load).toHaveBeenCalled());
+  await act(async () => {
+    registerTaskSessionHandlers(store)["session.removed"]!({
+      id: "remove-before-explicit-route",
+      type: "notification",
+      action: "session.removed",
+      payload: { task_id: TASK, session_id: OLD },
+    });
+  });
+  const retained = empty ? null : SURVIVOR;
+  await waitFor(() => expect(store.getState().tasks.activeSessionId).toBe(retained));
+  data.task.primary_session_id = empty ? undefined : data.allSessionsResponse.sessions[1].id;
+  await act(async () => initial.resolve(data));
+  response = requested.promise;
+  const count = mocks.load.mock.calls.length;
+  page.rerender(
+    <StateProvider initialState={{}}>
+      <ToastProvider>
+        <CaptureStore />
+        <TaskDetailRoute taskId={TASK} sessionId={TARGET} />
+      </ToastProvider>
+    </StateProvider>,
+  );
+  await waitFor(() => expect(mocks.load.mock.calls.length).toBeGreaterThan(count));
+
+  return { requested, retained };
+}
+
+function applyEntryOwner(owner: string, pendingMove: boolean) {
+  if (owner === "pin") act(() => store.getState().setActiveSession(TASK, SURVIVOR));
+  if (owner === "workflow") act(() => commitWorkflowRecipient(store, TASK, SURVIVOR));
+  if (pendingMove)
+    act(() =>
+      store.getState().beginWorkflowSessionFocus({
+        taskId: TASK,
+        workflowId: "workflow-1",
+        destinationStepId: "review",
+        presentationToken: 1,
+        navigationRevision: store.getState().taskRemoval.navigationRevision,
+      }),
+    );
+  if (owner === "background-workflow")
+    act(() =>
+      store.getState().beginWorkflowSessionFocus({
+        taskId: "unrelated",
+        workflowId: "workflow-1",
+        destinationStepId: "review",
+        presentationToken: 1,
+        navigationRevision: store.getState().taskRemoval.navigationRevision,
+      }),
+    );
+}
 
 // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.17
 it.each([
@@ -111,9 +189,15 @@ it.each([
   [false, LATER_REMOVAL],
   [false, "unavailable"],
   [false, "background-workflow"],
+  [false, CANCELLED_WORKFLOW],
+  [true, CANCELLED_WORKFLOW],
+  [false, "pending-pin"],
+  [false, "pending-commit"],
+  [false, "pending-membership"],
 ] as const)(
   "admits a newer explicit route after removal (empty=%s, owner=%s)",
   async (empty, owner) => {
+    const pendingMove = owner === CANCELLED_WORKFLOW || owner.startsWith("pending-");
     const data = identity(empty);
     const later = {
       ...data.allSessionsResponse.sessions[1],
@@ -129,60 +213,8 @@ it.each([
       id: OLD,
       state: "FAILED",
     } as TaskSession;
-    const initial = Promise.withResolvers<TaskNavigationIdentity>();
-    const requested = Promise.withResolvers<TaskNavigationIdentity>();
-    let response = initial.promise;
-    mocks.load.mockImplementation(() => response);
-    vi.mocked(listTaskSessions).mockResolvedValue(data.allSessionsResponse);
-    const page = render(
-      <StateProvider
-        initialState={taskRouteSelectionState(TASK, OLD, [
-          removed,
-          ...data.allSessionsResponse.sessions,
-        ])}
-      >
-        <ToastProvider>
-          <CaptureStore />
-          <TaskDetailRoute taskId={TASK} />
-        </ToastProvider>
-      </StateProvider>,
-    );
-    await waitFor(() => expect(mocks.load).toHaveBeenCalled());
-    await act(async () => {
-      registerTaskSessionHandlers(store)["session.removed"]!({
-        id: "remove-before-explicit-route",
-        type: "notification",
-        action: "session.removed",
-        payload: { task_id: TASK, session_id: OLD },
-      });
-    });
-    const retained = empty ? null : SURVIVOR;
-    await waitFor(() => expect(store.getState().tasks.activeSessionId).toBe(retained));
-    data.task.primary_session_id = empty ? undefined : data.allSessionsResponse.sessions[1].id;
-    await act(async () => initial.resolve(data));
-    response = requested.promise;
-    const count = mocks.load.mock.calls.length;
-    page.rerender(
-      <StateProvider initialState={{}}>
-        <ToastProvider>
-          <CaptureStore />
-          <TaskDetailRoute taskId={TASK} sessionId={TARGET} />
-        </ToastProvider>
-      </StateProvider>,
-    );
-    await waitFor(() => expect(mocks.load.mock.calls.length).toBeGreaterThan(count));
-    if (owner === "pin") act(() => store.getState().setActiveSession(TASK, SURVIVOR));
-    if (owner === "workflow") act(() => commitWorkflowRecipient(store, TASK, SURVIVOR));
-    if (owner === "background-workflow")
-      act(() =>
-        store.getState().beginWorkflowSessionFocus({
-          taskId: "unrelated",
-          workflowId: "workflow-1",
-          destinationStepId: "review",
-          presentationToken: 1,
-          navigationRevision: store.getState().taskRemoval.navigationRevision,
-        }),
-      );
+    const { requested, retained } = await openRequestedRoute(data, removed, empty);
+    applyEntryOwner(owner, pendingMove);
     if (owner === LATER_REMOVAL) {
       vi.mocked(listTaskSessions).mockResolvedValue({
         sessions: [data.allSessionsResponse.sessions[0], { ...later, is_primary: true }],
@@ -203,9 +235,28 @@ it.each([
         (row) => row.id !== TARGET,
       );
     await act(async () => requested.resolve(data));
+    if (pendingMove) {
+      expect(store.getState().tasks.activeSessionId).toBe(retained);
+      if (owner === "pending-pin") act(() => store.getState().setActiveSession(TASK, SURVIVOR));
+      if (owner === "pending-commit") act(() => commitWorkflowRecipient(store, TASK, SURVIVOR));
+      if (owner === "pending-membership")
+        act(() =>
+          store.getState().setTaskSessionsForTask(
+            TASK,
+            store
+              .getState()
+              .taskSessionsByTask.itemsByTaskId[TASK].filter((row) => row.id !== TARGET),
+            captureTaskSessionHydrationEpochs(store.getState(), TASK),
+          ),
+        );
+      act(() => store.getState().cancelWorkflowSessionFocus({ taskId: TASK }));
+      if (owner === CANCELLED_WORKFLOW)
+        await waitFor(() => expect(store.getState().tasks.activeSessionId).toBe(TARGET));
+    }
     if (owner === "unavailable") await screen.findByTestId("task-session-unavailable");
     let expected = SURVIVOR;
-    if (owner === "route" || owner === "background-workflow") expected = TARGET;
+    if (owner === "route" || owner === "background-workflow" || owner === CANCELLED_WORKFLOW)
+      expected = TARGET;
     if (owner === LATER_REMOVAL) expected = later.id;
     expect(store.getState().tasks.activeSessionId).toBe(expected);
     expect(store.getState().taskSessions.items[OLD]).toBeUndefined();

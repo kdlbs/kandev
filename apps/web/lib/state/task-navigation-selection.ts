@@ -2,6 +2,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "./store";
 import { isConfirmedSessionRemoved } from "./session-removal";
 import { getProvenRemovalPredecessor } from "./session-removal-handoff";
+import { requestTaskRouteFocus } from "./task-navigation-focus";
 
 export type TaskNavigationSelectionOwner = {
   navigationRevision: number;
@@ -25,10 +26,9 @@ export function captureTaskNavigationSelection(
 
 function isTaskEntryCurrent(state: AppState, owner: TaskNavigationSelectionOwner, taskId: string) {
   const workflow = state.workflowSessionFocus;
-  const newerWorkflow =
-    workflow.nextRequestId !== owner.workflowRequestId &&
-    (workflow.intent?.taskId === taskId || workflow.request?.taskId === taskId);
-  return state.taskRemoval.navigationRevision === owner.navigationRevision && !newerWorkflow;
+  const newerRequest =
+    workflow.nextRequestId !== owner.workflowRequestId && workflow.request?.taskId === taskId;
+  return state.taskRemoval.navigationRevision === owner.navigationRevision && !newerRequest;
 }
 
 function hasRequestedMembership(incoming: Partial<AppState>, taskId: string, sessionId: string) {
@@ -41,13 +41,28 @@ function hasRequestedMembership(incoming: Partial<AppState>, taskId: string, ses
   );
 }
 
+function hasNewerRemoval(
+  store: StoreApi<AppState>,
+  owner: TaskNavigationSelectionOwner,
+  taskId: string,
+) {
+  const state = store.getState();
+  const predecessor = getProvenRemovalPredecessor(store, taskId, state.tasks.activeSessionId);
+  return (
+    !!predecessor &&
+    (owner.removal?.taskId !== taskId ||
+      owner.removal.predecessor !== predecessor ||
+      owner.removal.target !== state.tasks.activeSessionId)
+  );
+}
+
 /** Valid explicit routes supersede entry-time ownership, never a later owner. */
 export function admitExplicitTaskNavigationSelection(
   store: StoreApi<AppState>,
   incoming: Partial<AppState>,
   requestedSessionId: string | undefined,
   owner: TaskNavigationSelectionOwner | undefined,
-): void {
+): "deferred" | void {
   const taskId = incoming.tasks?.activeTaskId;
   if (
     !owner ||
@@ -63,13 +78,10 @@ export function admitExplicitTaskNavigationSelection(
     isConfirmedSessionRemoved(state.taskSessions, requestedSessionId)
   )
     return;
-  const predecessor = getProvenRemovalPredecessor(store, taskId, state.tasks.activeSessionId);
-  if (
-    predecessor &&
-    (owner.removal?.taskId !== taskId ||
-      owner.removal.predecessor !== predecessor ||
-      owner.removal.target !== state.tasks.activeSessionId)
-  )
-    return;
+  if (hasNewerRemoval(store, owner, taskId)) return;
+  const workflow = state.workflowSessionFocus;
+  if (workflow.nextRequestId !== owner.workflowRequestId && workflow.intent?.taskId === taskId)
+    return "deferred";
   state.setActiveSession(taskId, requestedSessionId);
+  requestTaskRouteFocus(store, taskId, requestedSessionId);
 }

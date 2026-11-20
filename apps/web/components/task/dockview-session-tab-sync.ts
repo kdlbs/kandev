@@ -11,6 +11,7 @@ import {
 } from "./dockview-hidden-session-panels";
 import { resolveSessionTabSyncTarget } from "./dockview-session-tabs";
 import { getProvenRemovalPredecessor } from "@/lib/state/session-removal-handoff";
+import { hasTaskRouteFocus } from "@/lib/state/task-navigation-focus";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -72,6 +73,7 @@ function adoptRestoredSessionTabSelection(
   if (!activeTaskId || !currentEnvironmentId) return;
   if (getProvenRemovalPredecessor(appStore, activeTaskId, state.tasks.activeSessionId)) return;
   if (state.workflowSessionFocus.request?.taskId === activeTaskId) return;
+  if (hasTaskRouteFocus(appStore, activeTaskId, state.tasks.activeSessionId)) return;
 
   const currentSessionIds = new Set<string>(
     (state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? []).map((session) => session.id),

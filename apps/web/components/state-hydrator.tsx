@@ -9,7 +9,7 @@ import type {
 import { useAppStoreApi } from "@/components/state-provider";
 import type { HydrationOptions } from "@/lib/state/hydration/hydrator";
 import { getProvenRemovalPredecessor } from "@/lib/state/session-removal-handoff";
-import { admitExplicitTaskNavigationSelection } from "@/lib/state/task-navigation-selection";
+import { useTaskRouteSelection } from "@/hooks/domains/session/use-task-route-selection";
 
 type StateHydratorProps = {
   initialState: Partial<AppState>;
@@ -33,6 +33,10 @@ export function StateHydrator({
   onHydrated,
 }: StateHydratorProps) {
   const store = useAppStoreApi();
+  const admitRouteSelection = useTaskRouteSelection(
+    requestedSessionId,
+    taskSelectionAtRequestStart,
+  );
   const onHydratedRef = useRef(onHydrated);
   onHydratedRef.current = onHydrated;
 
@@ -41,12 +45,7 @@ export function StateHydrator({
   // decide whether to fetch data.
   useLayoutEffect(() => {
     if (Object.keys(initialState).length) {
-      admitExplicitTaskNavigationSelection(
-        store,
-        initialState,
-        requestedSessionId,
-        taskSelectionAtRequestStart,
-      );
+      admitRouteSelection(initialState);
       const taskId = initialState.tasks?.activeTaskId;
       const preserveTaskSelection =
         !!taskSelectionAtRequestStart &&
@@ -68,7 +67,7 @@ export function StateHydrator({
     taskSessionHydrationEpochsAtRequestStart,
     turnWindowObservationsAtRequestStart,
     taskSelectionAtRequestStart,
-    requestedSessionId,
+    admitRouteSelection,
   ]);
 
   return null;

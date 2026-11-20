@@ -252,8 +252,10 @@ export function shouldPreserveUnrequestedPanel(
   removalFocus: ReturnType<typeof getRemovalSurfaceFocus>,
   sessionPanelExistedBefore: boolean,
   activePanelId: string | null,
+  routeFocusRequested: boolean,
 ): boolean {
   return (
+    !routeFocusRequested &&
     workflowFocusRequestId === null &&
     (!removalFocus || removalFocus.cancelled) &&
     (Boolean(removalFocus?.cancelled) ||

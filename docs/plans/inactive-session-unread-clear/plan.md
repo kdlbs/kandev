@@ -697,5 +697,11 @@ fix. It is separate from the five design-only rounds above.
   primary conflicts before shell selection. Newer pins, workflow recipients
   and removal owners retain precedence. Execution receipts and exact replay
   commands are in Task 02. Independent review remains open; round 22 is next.
-- Completed rounds: 21. Consecutive clean: 0. Stop after three consecutive
+- Round 22: Sol child `bc9daed1-188a-48fe-bbad-10b7281715f1` reviewed
+  `75906e0814`. Three P2s: a new primary missing from the first membership,
+  hidden explicit route targets, and route admission discarded by a pending
+  workflow that later fails. Parent reproduced all three at real reader,
+  hydrator/page and Dockview boundaries. Corrections and execution receipts
+  are in Task 02. Independent review remains open; round 23 is next.
+- Completed rounds: 22. Consecutive clean: 0. Stop after three consecutive
   clean rounds or 50 rounds. Earlier loops do not count.

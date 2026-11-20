@@ -3085,3 +3085,128 @@ browser or data writes, broad-suite/live-NATS certification, historical-trigger
 proof, isolated cursor-event claim from list convergence, or live-execution
 claim from seeded RUNNING rows. This execution checkpoint precedes selective
 delivery and independent Sol round 22; parent owns that handoff.
+
+### Production-fix review round 22 remediation
+
+Sol child `bc9daed1-188a-48fe-bbad-10b7281715f1` reviewed
+`75906e0814`. Three source-derived P2s reproduced at their consumer boundaries:
+
+1. A task DTO can name a newly created primary absent from already-fulfilled
+   membership. Absence is disagreement too: obtain a later scoped membership
+   observation, retaining explicit-session precedence and unavailable-read behavior.
+2. A validated explicit route must carry presentation authority, not just store
+   selection. A store-scoped, navigation/scope-owned focus request clears only
+   the target's hide before reconciliation, activates its panel, then is consumed
+   after group-local visibility. Passive restore and later independent panels
+   do not inherit that authority.
+3. A newer pending workflow intent defers explicit route admission rather than
+   discarding it. Cancellation/failure retries against current admitted membership,
+   route ownership and scope; a committed recipient, newer pin or removal still
+   wins. Identity admission survives optional enrichment omitting `tasks`.
+
+The shared state/selection logic remains viewport-independent. Desktop uses
+the shipped Command Panel, tab hide/reopen and workflow stepper. Phone retains
+its existing Command Palette/direct conversation route; no new composition,
+scroll owner, control size or desktop hide policy is introduced there.
+
+```text
+Before: DTO names new C, old list has A -> A may be read
+        link hidden B -> C remains visible
+        link B + pending move -> failed move leaves C/null
+After:  later membership proves C -> display/read only C
+        valid explicit link B -> unhide/show/read B only
+        pending move -> retain C/null -> failure admits B
+        later committed selection -> retain that newer selection
+Phone:  same route/ownership decisions; no desktop hidden-tab registry
+```
+
+Initial causal evidence in `~/.cache/tmp/unread-verification.zWhGjx`:
+
+- `r22-red.log`: four behavioral failures, 28 passing controls. Newly created
+  primary selected A instead of C, hidden B stayed hidden, and both C/null
+  variants failed to admit B after workflow cancellation.
+- Subsequent owner checks exposed an obsolete exact HTTP-call-count assertion
+  and two new fixture calls missing required hydration epochs. The incidental
+  count assertion was removed while retaining fresh accepted membership assertions;
+  fixture publications now use the real hydration-epoch capture helper.
+- `r22-units-final.log`: 33 affected files, 455 cases passed before the
+  lint-budget extraction. The imperative panel-focus helper and test setup
+  were extracted without changing their policies.
+- Readiness control: an environment-less restore control initially passed
+  without enabling restored-tab adoption. Once the real environment mapping
+  was admitted before the settle edge, `r22-restore-ready-red.log` failed
+  (one failure, six controls). Passive restored A displaced the pending explicit
+  B activation. Restored-tab adoption now honors that same scoped one-shot
+  route request; ordinary restore remains separate.
+
+Final code checks after the extraction and restore guard:
+
+- `r22-units-delivery.log`: 33 affected files, 456 passing cases.
+- `r22-lint-final.log`, `r22-typecheck-final.log`, `r22-build-final.log`:
+  strict changed-file lint, full web typecheck and fresh Vite build exit 0.
+- Controls preserve unavailable links, explicit non-primary requests, newer pins,
+  committed workflow recipients, current membership exclusions, ordinary hidden
+  restoration and one-shot focus (a later Plan selection is not stolen).
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run \
+  lib/state/task-navigation-reads.test.ts \
+  lib/state/task-navigation-reads-retry.test.ts \
+  lib/state/task-navigation-reads-budget.test.ts \
+  lib/state/task-session-reads.test.ts \
+  lib/state/hydration \
+  lib/ssr/session-page-state.test.ts \
+  lib/ssr/session-page-enrichment-membership.test.ts \
+  lib/ssr/session-page-navigation-bounded.test.ts \
+  lib/ssr/session-page-model-hydration.test.ts \
+  src/task-detail-route-recovery.test.tsx \
+  src/task-detail-route.test.tsx \
+  src/task-detail-route-session-selection.test.tsx \
+  components/task/task-page-session-ownership.test.tsx \
+  components/task/task-page-content \
+  lib/state/workflow-session-focus.test.ts \
+  lib/state/slices/kanban/kanban-slice.test.ts \
+  hooks/domains/kanban/use-workflow-step-move.test.ts \
+  components/task/dockview-session-tabs.hook.test.tsx \
+  src/task-detail-route-explicit-selection.test.tsx \
+  components/task/dockview-session-
+```
+
+Browser and final fixture evidence:
+
+- `r22-desktop-final-summary.log`: 27 passed, one fixture failure. Both new
+  created-primary and hidden-link cases passed. The failed-workflow case hit a
+  duplicate `aria-busy` selector before cancellation; cleanup also unregistered
+  its held route before fulfillment. Neither is a production behavioral RED.
+- Restricted readiness to the actual route root and awaited the owned response
+  work before unregistering. `r22-workflow-final-summary.log`: corrected owning
+  case passed (1/1). This is split evidence, not a fresh 28-case green run.
+- `r22-phone-final-summary.log`: full mobile unread-dot spec, 9/9 passed.
+- `r22-fixture-lint.log` and `r22-fixture-typecheck.log`: exit 0 after the final
+  test-only correction; formatter changed no lines. Production bundle unchanged.
+- Inspected `explicit-route-hidden.png`, `explicit-route-failed-workflow.png`,
+  `created-primary-reconciled.png` and `phone-explicit-route-after-removal.png`.
+  Requested transcripts are visible; the created primary has its primary star,
+  while the former primary remains unread. Failure capture shows the real move
+  error and requested conversation, not a simulated successful workflow.
+
+Owning browser commands (managed headless, one worker, no retries):
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/task/task-unread-dot.spec.ts -- --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts -- --workers=1 --retries=0 \
+  --grep 'opens an explicit conversation route across failed-workflow'
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+Fresh final R22 frontend; retained R02 backend/plugin artifacts. No live-user
+browser or database mutation, production Go/predicate/cursor/wire changes, broad
+suite or live-NATS certification. Original incident attribution remains qualified;
+list readback proves convergence, not isolated cursor-event delivery, and seeded
+RUNNING rows do not prove live execution. Review loop continues at R23.

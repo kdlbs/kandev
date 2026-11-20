@@ -58,7 +58,9 @@ function refreshedTask() {
     title: "Refreshed task",
   } as TaskNavigationIdentity["task"];
 }
-async function expectReconciledPrimary(scenario: "changed" | "unchanged" | "retired" | "explicit") {
+async function expectReconciledPrimary(
+  scenario: "changed" | "unchanged" | "retired" | "explicit" | "created",
+) {
   const store = makeStore();
   const task = deferred<TaskNavigationIdentity["task"]>();
   const previousPrimary = scenario !== "retired";
@@ -69,6 +71,9 @@ async function expectReconciledPrimary(scenario: "changed" | "unchanged" | "reti
     ],
     total: 2,
   };
+  if (scenario === "created")
+    old.sessions = old.sessions.filter((session) => session.id !== "survivor");
+  old.total = old.sessions.length;
   const fresh = {
     sessions: [
       { id: "previous", task_id: ACTIVE_TASK_ID, is_primary: false },
@@ -86,6 +91,7 @@ async function expectReconciledPrimary(scenario: "changed" | "unchanged" | "reti
     unchanged: "previous",
     changed: "survivor",
     explicit: "survivor",
+    created: "survivor",
   };
   const primary = dtoPrimaries[scenario];
   task.resolve({ ...refreshedTask(), primary_session_id: primary } as never);
@@ -96,7 +102,7 @@ async function expectReconciledPrimary(scenario: "changed" | "unchanged" | "reti
     scenario === "explicit" || scenario === "unchanged" ? "previous" : "survivor",
   );
   expect(accepted.allSessionsResponse).toEqual(
-    scenario === "changed" || scenario === "explicit" ? fresh : old,
+    scenario === "unchanged" || scenario === "retired" ? old : fresh,
   );
 }
 
@@ -134,11 +140,10 @@ describe("task navigation canonical overview refresh", () => {
       first.resolve(stale as never);
       task.resolve({ ...refreshedTask(), primary_session_id: "removed" } as never);
       await expect(read).resolves.toMatchObject({ allSessionsResponse: fresh });
-      expect(apiMocks.listTaskSessions).toHaveBeenCalledTimes(2);
     },
   );
 
-  it.each(["changed", "unchanged", "retired", "explicit"] as const)(
+  it.each(["changed", "unchanged", "retired", "explicit", "created"] as const)(
     "reconciles %s primary observations before choosing the first readable session",
     expectReconciledPrimary,
   );

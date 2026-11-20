@@ -205,6 +205,29 @@ test.describe("owned removal transcript visibility", () => {
     await testPage.screenshot({ path: test.info().outputPath("explicit-route-after-removal.png") });
   });
 
+  for (const mode of ["hidden", "failed-workflow"] as const) {
+    // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
+    test(`opens an explicit conversation route across ${mode}`, async ({
+      testPage,
+      desktopTestPage,
+      apiClient,
+      seedData,
+    }) => {
+      const closeBehavior = (await apiClient.getUserSettings()).agent_tab_close_behavior;
+      try {
+        if (mode === "hidden")
+          await apiClient.saveUserSettings({ agent_tab_close_behavior: "hide_panel" });
+        await expectConversationRouteAfterRemoval(testPage, desktopTestPage, apiClient, seedData, {
+          hideTarget: mode === "hidden",
+          failMove: mode === "failed-workflow",
+        });
+        await testPage.screenshot({ path: test.info().outputPath(`explicit-route-${mode}.png`) });
+      } finally {
+        await apiClient.saveUserSettings({ agent_tab_close_behavior: closeBehavior });
+      }
+    });
+  }
+
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.17
   test("uses the post-swap primary across independent initial HTTP legs", async ({
     testPage,
@@ -214,6 +237,23 @@ test.describe("owned removal transcript visibility", () => {
   }) => {
     await expectPrimarySwapDuringRouteAdmission(testPage, desktopTestPage, apiClient, seedData);
     await testPage.screenshot({ path: test.info().outputPath("primary-snapshot-reconciled.png") });
+  });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.17
+  test("uses a primary created after the initial membership snapshot", async ({
+    testPage,
+    desktopTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    await expectPrimarySwapDuringRouteAdmission(
+      testPage,
+      desktopTestPage,
+      apiClient,
+      seedData,
+      true,
+    );
+    await testPage.screenshot({ path: test.info().outputPath("created-primary-reconciled.png") });
   });
 
   for (const winner of [

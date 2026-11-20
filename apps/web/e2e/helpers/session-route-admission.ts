@@ -58,9 +58,10 @@ export async function expectConversationRouteAfterRemoval(
   actor: Page,
   api: ApiClient,
   seed: SeedData,
+  options: { hideTarget?: boolean; failMove?: boolean } = {},
 ) {
   await api.saveUserSettings({ enable_preview_on_click: true });
-  const { task, old, primary, other } = await seedRemovalChoiceTask(api, seed);
+  const { task, old, primary, other } = await seedRemovalChoiceTask(api, seed, options.hideTarget);
   const viewer = new SessionPage(page);
   await page.goto(`/t/${task.task_id}?sessionId=${old.session_id}`);
   await expect(viewer.activeChat()).toHaveAttribute("data-session-id", old.session_id);
@@ -79,6 +80,10 @@ export async function expectConversationRouteAfterRemoval(
   await expect
     .poll(async () => (await sessionReadState(api, primary.session_id)).cursor)
     .toBe(primaryTail);
+  if (options.hideTarget) {
+    await viewer.sessionTabCloseButton(other.session_id).click();
+    await expect(viewer.sessionTabBySessionId(other.session_id)).toHaveCount(0);
+  }
   const query = `surviving${randomUUID().replaceAll("-", "")}`;
   const tail = await api.seedSessionMessage(other.session_id, { type: "message", content: query });
   expect((await sessionReadState(api, other.session_id)).cursor).toBeNull();
@@ -88,7 +93,13 @@ export async function expectConversationRouteAfterRemoval(
   });
   const reads = observeReadTraffic(page);
   const started = await page.evaluate(() => performance.timeOrigin);
-  await selectCommandTask(page, query, true);
+  if (options.failMove)
+    await selectConversationAcrossFailedMove(page, api, seed, {
+      taskId: task.task_id,
+      retainedId: primary.session_id,
+      query,
+    });
+  else await selectCommandTask(page, query, true);
   await expect(page).toHaveURL(new RegExp(`/t/${task.task_id}\\?sessionId=${other.session_id}`));
   await waitForActiveTaskSession(page, task.task_id, other.session_id);
   await expect(viewer.activeChat()).toHaveAttribute("data-session-id", other.session_id);
@@ -136,11 +147,82 @@ async function holdTaskIdentityDispatch(page: Page, taskId: string) {
   };
 }
 
+async function seedRoutePrimary(api: ApiClient, seed: SeedData, taskId: string) {
+  const primary = await api.seedTaskSession(taskId, {
+    sessionId: randomUUID(),
+    agentProfileId: seed.agentProfileId,
+    state: "WAITING_FOR_INPUT",
+  });
+  const tail = await api.seedSessionMessage(primary.session_id, {
+    type: "message",
+    content: "New authoritative primary conversation",
+  });
+  return { primary, tail };
+}
+
+async function openPrimaryPreview(actor: Page, taskId: string, sessionId: string) {
+  await actor.goto(`/?taskId=${taskId}&sessionId=${sessionId}`);
+  await expect(
+    actor.getByTestId("task-preview-panel").locator('[data-testid="session-chat"]:visible'),
+  ).toHaveAttribute("data-session-id", sessionId);
+}
+
+async function selectConversationAcrossFailedMove(
+  page: Page,
+  api: ApiClient,
+  seed: SeedData,
+  entry: { taskId: string; retainedId: string; query: string },
+) {
+  const gate = await holdTaskIdentityDispatch(page, entry.taskId);
+  const releaseFailure = Promise.withResolvers<void>();
+  const moveQueued = Promise.withResolvers<void>();
+  let moveWork: Promise<void> | undefined;
+  const pattern = `**/api/v1/tasks/${entry.taskId}/move`;
+  await page.route(
+    pattern,
+    (route) => {
+      moveWork = (async () => {
+        moveQueued.resolve();
+        await releaseFailure.promise;
+        await route.fulfill({ status: 500, json: { error: "Injected workflow failure" } });
+      })();
+      return moveWork;
+    },
+    { times: 1 },
+  );
+  try {
+    await selectCommandTask(page, entry.query, true);
+    await gate.queued;
+    const stepId = (await api.getTask(entry.taskId)).workflow_step_id;
+    const destination = seed.steps.find((step) => step.id !== stepId);
+    if (!destination) throw new Error("Missing workflow destination");
+    await page.getByTestId(`workflow-step-${destination.name}`).hover();
+    await page.getByTestId("workflow-step-move-here").click();
+    await moveQueued.promise;
+    const loaded = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === `/api/v1/tasks/${entry.taskId}`,
+    );
+    gate.release();
+    expect((await loaded).ok()).toBe(true);
+    await expect(page.locator("main > [aria-busy]")).toHaveAttribute("aria-busy", "false");
+    await waitForActiveTaskSession(page, entry.taskId, entry.retainedId);
+    releaseFailure.resolve();
+    await moveWork;
+    await expect(page.getByText("Failed to move task", { exact: true })).toBeVisible();
+  } finally {
+    releaseFailure.resolve();
+    await moveWork;
+    await gate.dispose();
+    await page.unroute(pattern);
+  }
+}
+
 export async function expectPrimarySwapDuringRouteAdmission(
   page: Page,
   actor: Page,
   api: ApiClient,
   seed: SeedData,
+  createAfterMembership = false,
 ) {
   await api.saveUserSettings({ enable_preview_on_click: true });
   const title = `primaryswap${randomUUID().replaceAll("-", "")}`;
@@ -153,26 +235,13 @@ export async function expectPrimarySwapDuringRouteAdmission(
     agentProfileId: seed.agentProfileId,
     state: "WAITING_FOR_INPUT",
   });
-  const primary = await api.seedTaskSession(task.task_id, {
-    sessionId: randomUUID(),
-    agentProfileId: seed.agentProfileId,
-    state: "WAITING_FOR_INPUT",
-  });
+  let prepared = createAfterMembership ? null : await seedRoutePrimary(api, seed, task.task_id);
   await api.seedSessionMessage(previous.session_id, {
     type: "message",
     content: "Former primary conversation",
   });
-  const tail = await api.seedSessionMessage(primary.session_id, {
-    type: "message",
-    content: "New authoritative primary conversation",
-  });
   await api.setPrimarySession(previous.session_id);
-  await actor.goto(`/?taskId=${task.task_id}&sessionId=${primary.session_id}`);
-  const preview = actor.getByTestId("task-preview-panel");
-  await expect(preview.locator('[data-testid="session-chat"]:visible')).toHaveAttribute(
-    "data-session-id",
-    primary.session_id,
-  );
+  if (prepared) await openPrimaryPreview(actor, task.task_id, prepared.primary.session_id);
   await new KanbanPage(page).goto(seed.workspaceId);
   const reads = observeReadTraffic(page);
   const gate = await holdTaskIdentityDispatch(page, task.task_id);
@@ -187,6 +256,13 @@ export async function expectPrimarySwapDuringRouteAdmission(
       sessions: Array<{ id: string; is_primary: boolean }>;
     };
     expect(old.sessions.find((session) => session.is_primary)?.id).toBe(previous.session_id);
+    if (!prepared) {
+      expect(old.sessions.map((row) => row.id)).toEqual([previous.session_id]);
+      prepared = await seedRoutePrimary(api, seed, task.task_id);
+      await openPrimaryPreview(actor, task.task_id, prepared.primary.session_id);
+    }
+    const { primary, tail } = prepared;
+    const preview = actor.getByTestId("task-preview-panel");
     await preview
       .getByTestId(`preview-session-tab-${primary.session_id}`)
       .click({ button: "right" });

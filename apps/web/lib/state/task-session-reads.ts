@@ -73,7 +73,7 @@ export async function readTaskNavigationMembership(
   throw abortError();
 }
 
-/** A surviving DTO primary that disagrees with membership needs a later observation. */
+/** Conflicting DTO and membership observations require a later membership read. */
 export async function reconcileTaskNavigationMembership(
   task: Task,
   initial: Awaited<ReturnType<typeof readTaskNavigationMembership>>,
@@ -88,8 +88,10 @@ export async function reconcileTaskNavigationMembership(
     (session) => session.task_id === task.id && session.id === task.primary_session_id,
   );
   if (
-    dtoPrimary &&
-    (dtoPrimary.is_primary === false ||
+    !initial.sessionListUnavailable &&
+    task.primary_session_id &&
+    (!dtoPrimary ||
+      dtoPrimary.is_primary === false ||
       sessions.some(
         (session) =>
           session.task_id === task.id &&
