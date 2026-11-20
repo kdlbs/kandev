@@ -106,7 +106,7 @@ export function PreviewSavedRegionEditor({
   if (!item) return null;
   return (
     <PendingFeedbackEditor
-      key={item.id}
+      key={`${item.id}:${capture.editingItemGeneration ?? 0}`}
       item={item}
       collection={capture}
       position={capture.editingAnchor ?? fallbackAnchor(host)}

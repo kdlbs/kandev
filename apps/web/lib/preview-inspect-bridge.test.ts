@@ -11,6 +11,7 @@ import {
 
 const RUNTIME_SELECTOR = "#runtime-total";
 const RUNTIME_TOTAL = "$42.00";
+const PREVIEW_ORIGIN = "http://preview.example";
 
 const renderedElement = {
   tag: "span",
@@ -155,7 +156,10 @@ describe("preview inspector protocol validation", () => {
 describe("preview inspector commands", () => {
   function iframeWithPostMessage() {
     const postMessage = vi.fn();
-    const iframe = { contentWindow: { postMessage } } as unknown as HTMLIFrameElement;
+    const iframe = {
+      src: "http://preview.example/path",
+      contentWindow: { postMessage },
+    } as unknown as HTMLIFrameElement;
     return { iframe, postMessage };
   }
 
@@ -169,7 +173,7 @@ describe("preview inspector commands", () => {
         type: "set-capture-mode",
         payload: { mode: "element" },
       },
-      "*",
+      PREVIEW_ORIGIN,
     );
   });
 
@@ -195,8 +199,59 @@ describe("preview inspector commands", () => {
           reveal_id: null,
         },
       }),
-      "*",
+      PREVIEW_ORIGIN,
     );
+  });
+
+  it("pins marker evidence to the configured preview origin", () => {
+    const postMessage = vi.fn();
+    const iframe = {
+      src: "https://preview.example/path",
+      contentWindow: { postMessage },
+    } as unknown as HTMLIFrameElement;
+
+    sendProjectPreviewMarkers(iframe, [
+      { id: "feedback-1", kind: "text", page_route: "/checkout", selected_text: "total" },
+    ]);
+
+    expect(postMessage).toHaveBeenCalledWith(expect.any(Object), "https://preview.example");
+  });
+
+  it("pins inspector state commands to the configured preview origin", () => {
+    const { iframe, postMessage } = iframeWithPostMessage();
+    sendSetAnnotationActive(iframe, true);
+    sendCaptureSelection(iframe);
+    expect(postMessage.mock.calls.map(([, targetOrigin]) => targetOrigin)).toEqual([
+      PREVIEW_ORIGIN,
+      PREVIEW_ORIGIN,
+    ]);
+  });
+
+  it("sends annotation state, selection capture, and region anchors", () => {
+    const postMessage = vi.fn();
+    const iframe = {
+      src: "http://preview.example/path",
+      contentWindow: { postMessage },
+    } as unknown as HTMLIFrameElement;
+    const region = { x: 10, y: 20, width: 100, height: 40 };
+
+    sendSetAnnotationActive(iframe, true);
+    sendCaptureSelection(iframe);
+    sendProjectPreviewMarkers(iframe, [], [{ id: "r1", page_route: "/", capture_rect: region }]);
+
+    expect(postMessage.mock.calls.map(([sent]) => [sent.type, sent.payload])).toEqual([
+      ["set-annotation-active", { active: true, surface_open: false }],
+      ["capture-selection", {}],
+      [
+        "project-markers",
+        {
+          markers: [],
+          regions: [{ id: "r1", page_route: "/", capture_rect: region }],
+          highlighted_id: null,
+          reveal_id: null,
+        },
+      ],
+    ]);
   });
 });
 
@@ -260,29 +315,6 @@ describe("preview inspector protocol 3", () => {
     expect(isInspectorMessage(selected({ ...region, container_scroll_y: Number.NaN }))).toBe(false);
   });
 
-  it("sends annotation state, selection capture, and region anchors", () => {
-    const postMessage = vi.fn();
-    const iframe = { contentWindow: { postMessage } } as unknown as HTMLIFrameElement;
-
-    sendSetAnnotationActive(iframe, true);
-    sendCaptureSelection(iframe);
-    sendProjectPreviewMarkers(iframe, [], [{ id: "r1", page_route: "/", capture_rect: region }]);
-
-    expect(postMessage.mock.calls.map(([sent]) => [sent.type, sent.payload])).toEqual([
-      ["set-annotation-active", { active: true, surface_open: false }],
-      ["capture-selection", {}],
-      [
-        "project-markers",
-        {
-          markers: [],
-          regions: [{ id: "r1", page_route: "/", capture_rect: region }],
-          highlighted_id: null,
-          reveal_id: null,
-        },
-      ],
-    ]);
-  });
-
   it("accepts marker activation and page presses", () => {
     expect(isInspectorMessage(message(MARKER_ACTIVATED, { id: "item-1" }))).toBe(true);
     expect(isInspectorMessage(message(MARKER_ACTIVATED, { id: "" }))).toBe(false);
@@ -298,7 +330,10 @@ describe("preview inspector protocol 3", () => {
 
   it("sends an open comment and a highlighted marker", () => {
     const postMessage = vi.fn();
-    const iframe = { contentWindow: { postMessage } } as unknown as HTMLIFrameElement;
+    const iframe = {
+      src: "http://preview.example/path",
+      contentWindow: { postMessage },
+    } as unknown as HTMLIFrameElement;
 
     sendSetAnnotationActive(iframe, true, true);
     sendProjectPreviewMarkers(

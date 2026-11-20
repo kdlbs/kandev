@@ -5,20 +5,11 @@ import {
   isInspectorMessage,
   isPreviewConsoleMessage,
   isPreviewConsoleReadyMessage,
+  previewOrigin,
   sendConsoleBind,
 } from "@/lib/preview-inspect-bridge";
 
 const PREFIX = "[preview]";
-
-function previewOrigin(iframe: HTMLIFrameElement): string | null {
-  try {
-    const origin = new URL(iframe.src || window.location.href, window.location.href);
-    if (origin.protocol !== "http:" && origin.protocol !== "https:") return null;
-    return origin.origin;
-  } catch {
-    return null;
-  }
-}
 
 // Pipes iframe `console.log/warn/error/info/debug` calls — forwarded by the
 // runtime shim injected by the gateway port-proxy — into the parent window's

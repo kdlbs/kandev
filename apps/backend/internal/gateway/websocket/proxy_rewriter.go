@@ -49,6 +49,10 @@ const scriptTagName = "script"
 // user JS can run.
 const headTagName = "head"
 
+const htmlTagName = "html"
+
+const bodyTagName = "body"
+
 // runtimeShimTemplate is the JS bootstrap injected at the top of `<head>` for
 // every HTML response we proxy. It overrides the network-facing browser APIs
 // (fetch, XMLHttpRequest, WebSocket) plus the URL-mutating navigation APIs
@@ -624,6 +628,7 @@ type htmlRewriteState struct {
 	inStyle      bool
 	inScript     bool
 	shimInjected bool
+	htmlDocument bool
 	// basePath is the effective document base DIRECTORY (root-absolute,
 	// resolved against the subtree). "" means the effective base resolves
 	// OUTSIDE the proxy subtree (scheme-bearing, network-relative, or
@@ -668,14 +673,18 @@ func (s *htmlRewriteState) applyBase(token *html.Token) {
 }
 
 // onStartTag emits the (URL-rewritten) start tag and updates raw-text
-// element tracking. Also injects the runtime shim immediately after `<head>`.
+// element tracking. It injects the runtime shim after `<head>`, or before
+// document content when the browser must infer the head.
 func (s *htmlRewriteState) onStartTag(token html.Token) {
+	if token.Data == htmlTagName {
+		s.htmlDocument = true
+	}
 	s.applyBase(&token)
 	rewriteTokenURLs(&token, s.prefix, s.capability, s.nonce, s.depth, s.basePath)
+	s.injectShimBeforeDocumentContent(token.Data)
 	s.out.WriteString(token.String())
 	if !s.shimInjected && token.Data == headTagName {
-		s.out.WriteString(s.shim)
-		s.shimInjected = true
+		s.injectShim()
 	}
 	switch token.Data {
 	case styleTagName:
@@ -683,6 +692,32 @@ func (s *htmlRewriteState) onStartTag(token html.Token) {
 	case scriptTagName:
 		s.inScript = true
 	}
+}
+
+func (s *htmlRewriteState) injectShimBeforeDocumentContent(tagName string) {
+	if s.shimInjected || tagName == htmlTagName || tagName == headTagName {
+		return
+	}
+	if s.htmlDocument || tagName == bodyTagName || isImpliedHeadContent(tagName) {
+		s.injectShim()
+	}
+}
+
+func isImpliedHeadContent(tagName string) bool {
+	switch tagName {
+	case "base", "link", "meta", scriptTagName, styleTagName, "title":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *htmlRewriteState) injectShim() {
+	if s.shimInjected {
+		return
+	}
+	s.out.WriteString(s.shim)
+	s.shimInjected = true
 }
 
 // onEndTag clears raw-text element tracking, then writes the end tag.
@@ -756,14 +791,24 @@ func rewriteHTMLURLsAtDepthWithBase(body []byte, prefix, capability, nonce strin
 		case html.StartTagToken:
 			s.onStartTag(token)
 		case html.SelfClosingTagToken:
+			if token.Data == htmlTagName {
+				s.htmlDocument = true
+			}
 			s.applyBase(&token)
 			rewriteTokenURLs(&token, prefix, capability, nonce, depth, s.basePath)
+			s.injectShimBeforeDocumentContent(token.Data)
 			out.WriteString(token.String())
+			if !s.shimInjected && token.Data == headTagName {
+				s.injectShim()
+			}
 		case html.EndTagToken:
 			s.onEndTag(token)
 		case html.TextToken:
 			s.onTextToken(token)
 		default:
+			if tt == html.DoctypeToken {
+				s.htmlDocument = true
+			}
 			out.WriteString(token.String())
 		}
 	}

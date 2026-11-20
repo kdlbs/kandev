@@ -317,6 +317,7 @@ type CollectionSurfaceProps = {
   /** Renders the desktop popover in a portal, outside clipping or pointer-transparent hosts. */
   portal?: boolean;
   drafts?: PreviewUnsavedDraftsProps;
+  list?: PreviewCommentList;
 };
 
 function CollectionTrigger({
@@ -364,6 +365,7 @@ function TouchCollectionSurface({
   title,
   closeFocus,
   drafts,
+  list,
 }: {
   collection: PreviewFeedbackCollectionController;
   open: boolean;
@@ -371,6 +373,7 @@ function TouchCollectionSurface({
   title: string;
   closeFocus: (event: Event) => void;
   drafts?: PreviewUnsavedDraftsProps;
+  list?: PreviewCommentList;
 }) {
   const { t } = useTranslation();
   return (
@@ -394,7 +397,7 @@ function TouchCollectionSurface({
         </DrawerClose>
       }
     >
-      <PreviewFeedbackCollection collection={collection} touch drafts={drafts} />
+      <PreviewFeedbackCollection collection={collection} touch drafts={drafts} list={list} />
     </MobilePickerSheet>
   );
 }
@@ -409,6 +412,7 @@ function DesktopCollectionSurface({
   side,
   portal,
   drafts,
+  list,
 }: {
   collection: PreviewFeedbackCollectionController;
   open: boolean;
@@ -419,6 +423,7 @@ function DesktopCollectionSurface({
   side: "top" | "bottom";
   portal: boolean;
   drafts?: PreviewUnsavedDraftsProps;
+  list?: PreviewCommentList;
 }) {
   const { t } = useTranslation();
   return (
@@ -451,7 +456,12 @@ function DesktopCollectionSurface({
             </Button>
           </div>
           <div className="max-h-[min(36rem,calc(100dvh-1rem))] overflow-y-auto p-3">
-            <PreviewFeedbackCollection collection={collection} touch={false} drafts={drafts} />
+            <PreviewFeedbackCollection
+              collection={collection}
+              touch={false}
+              drafts={drafts}
+              list={list}
+            />
           </div>
         </PopoverContent>
       </div>
@@ -469,6 +479,7 @@ export function PreviewFeedbackCollectionSurface({
   side = "top",
   portal = false,
   drafts,
+  list,
 }: CollectionSurfaceProps) {
   const { t } = useTranslation();
   const touch = useTouchDrawer();
@@ -515,6 +526,7 @@ export function PreviewFeedbackCollectionSurface({
           title={title}
           closeFocus={closeFocus}
           drafts={drafts}
+          list={list}
         />
       </>
     );
@@ -532,6 +544,7 @@ export function PreviewFeedbackCollectionSurface({
         side={side}
         portal={portal}
         drafts={drafts}
+        list={list}
       />
     </>
   );

@@ -88,7 +88,9 @@ func (s *Service) revokeUndispatchedSendNow(
 	if len(receipts) == 0 {
 		return false
 	}
-	if err := s.messageQueue.ClearDeliveryAttemptForSession(ctx, claim.Identity, receipts); err != nil {
+	if err := s.retrySendNowClaimMutation(ctx, func(recoveryCtx context.Context) error {
+		return s.messageQueue.ClearDeliveryAttemptForSession(recoveryCtx, claim.Identity, receipts)
+	}); err != nil {
 		s.logUndispatchedRevokeFailure(&claim.Dispatch, dispatchErr, err)
 		return false
 	}

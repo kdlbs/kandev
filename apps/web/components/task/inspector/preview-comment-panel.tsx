@@ -8,26 +8,14 @@ import type { PreviewCaptureController } from "@/hooks/use-preview-capture";
 import { cn } from "@/lib/utils";
 import { PreviewAnnotationControls } from "./preview-annotation-controls";
 import { PreviewAnnotationLayer, useLayerEscape } from "./preview-annotation-layer";
-import { PreviewFeedbackCollection, type PreviewCommentList } from "./preview-feedback-collection";
+import { PreviewFeedbackCollection } from "./preview-feedback-collection";
+import { previewCommentList } from "./preview-comment-list-model";
 
 /**
  * Below this host width the panel overlays the page instead of narrowing it,
  * starting below the toolbar so every tool stays reachable.
  */
 export const PREVIEW_PANEL_DOCK_MIN_WIDTH = 720;
-
-function useCommentList(capture: PreviewCaptureController): PreviewCommentList {
-  return {
-    numbers: capture.captureNumbers,
-    activeId: capture.openDraft?.id ?? capture.editingItem?.id ?? null,
-    selectedId: capture.selectedId,
-    onOpen: (id) => {
-      capture.selectCapture(id);
-      capture.openCapture(id);
-    },
-    onSelect: capture.selectCapture,
-  };
-}
 
 /** Scrolls the entry whose comment is open into view. */
 function useScrollActiveIntoView(activeId: string | null, body: RefObject<HTMLElement | null>) {
@@ -64,7 +52,7 @@ export function PreviewCommentPanel({
 }) {
   const { t } = useTranslation();
   const bodyRef = useRef<HTMLDivElement>(null);
-  const list = useCommentList(capture);
+  const list = previewCommentList(capture);
   useScrollActiveIntoView(list.activeId, bodyRef);
   return (
     <aside

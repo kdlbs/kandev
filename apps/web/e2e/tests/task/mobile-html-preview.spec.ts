@@ -297,6 +297,34 @@ test.describe("Mobile HTML preview", () => {
     await expect(screenshotDraft).toBeHidden({ timeout: 15_000 });
     await expect(preview.getByTestId("preview-feedback-trigger")).toContainText("2");
     await expect(preview.getByTestId("preview-region")).toHaveCount(1);
+
+    await frame.locator("#capture-button").evaluate((element) => {
+      window.scrollTo(0, document.body.scrollHeight);
+      return element.getBoundingClientRect().top;
+    });
+    const annotationToggle = toolbar.getByTestId("preview-annotation-count");
+    await annotationToggle.tap();
+    const annotationSheet = testPage.getByTestId("preview-feedback-collection-body");
+    const annotationItems = annotationSheet.getByTestId("preview-feedback-item");
+    await expect(annotationItems).toHaveCount(2);
+    await expect(annotationItems.nth(0).getByTestId("preview-capture-number")).toHaveText("1");
+    await expect(annotationItems.nth(1).getByTestId("preview-capture-number")).toHaveText("2");
+    const buttonFeedback = annotationItems.filter({ hasText: "#capture-button" });
+    await expect(buttonFeedback).toHaveCount(1);
+    await buttonFeedback.tap();
+    await expect(buttonFeedback).toHaveAttribute("data-selected", "true");
+    await expect
+      .poll(() =>
+        frame.locator("#capture-button").evaluate((element) => element.getBoundingClientRect().top),
+      )
+      .toBeGreaterThanOrEqual(0);
+    await buttonFeedback.getByRole("button", { name: "Edit feedback" }).tap();
+    const annotationEditor = testPage.getByTestId("preview-feedback-edit");
+    await expect(annotationEditor).toBeVisible();
+    await expect(annotationSheet).toBeHidden();
+    await testPage.getByTestId("preview-feedback-edit-input").fill("Keep the mobile edit focused");
+    await testPage.getByTestId("preview-feedback-edit-save").tap();
+    await expect(annotationEditor).toBeHidden();
     await assertNoDocumentHorizontalOverflow(testPage, "mobile preview annotation toolbar");
 
     await toolbar.getByTestId("preview-annotation-exit").tap();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { usePreviewFeedback } from "@/hooks/domains/comments/use-preview-feedback";
 import {
@@ -230,7 +230,7 @@ function usePreviewSurfaces(
   editing: ReturnType<typeof useEditingItem>,
   commentPanel: ReturnType<typeof usePreviewCommentPanel>,
 ) {
-  const { editingItem, setEditingItemId } = editing;
+  const { editingItem, open: openEditingItem, close: closeEditingItem } = editing;
   const openDraft = drafts.openDraft;
   const surfaceOpen = openDraft !== null || editingItem !== null;
 
@@ -241,8 +241,8 @@ function usePreviewSurfaces(
     });
     if (step === "discard-draft" && openDraft) drafts.discard(openDraft.id);
     else if (step === "keep-draft") drafts.close();
-    else if (step === "close-editor") setEditingItemId(null);
-  }, [drafts, editingItem, openDraft, setEditingItemId]);
+    else if (step === "close-editor") closeEditingItem();
+  }, [closeEditingItem, drafts, editingItem, openDraft]);
 
   const handleEscape = useCallback(() => {
     const step = nextEscapeStep({ surfaceOpen, tool: annotation.tool });
@@ -261,14 +261,14 @@ function usePreviewSurfaces(
     (id: string) => {
       if (touch) setPanelOpen(false);
       if (drafts.find(id)) {
-        setEditingItemId(null);
+        closeEditingItem();
         drafts.open(id);
       } else {
         closeComment();
-        setEditingItemId(id);
+        openEditingItem(id);
       }
     },
-    [closeComment, drafts, setEditingItemId, setPanelOpen, touch],
+    [closeComment, closeEditingItem, drafts, openEditingItem, setPanelOpen, touch],
   );
 
   /** Choosing another tool closes the open comment, so the new tool works at once. */
@@ -284,7 +284,8 @@ function usePreviewSurfaces(
 
   return {
     editingItem,
-    closeItemEditor: () => setEditingItemId(null),
+    editingItemGeneration: editing.generation,
+    closeItemEditor: () => closeEditingItem(editing.generation ?? undefined),
     closeComment,
     handleEscape,
     openCapture,
@@ -293,9 +294,27 @@ function usePreviewSurfaces(
 }
 
 function useEditingItem(sourceItems: TaskPreviewFeedback[]) {
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  const editingItem = sourceItems.find((item) => item.id === editingItemId) ?? null;
-  return { editingItem, setEditingItemId };
+  const [session, setSession] = useState<{ id: string; generation: number } | null>(null);
+  const sessionRef = useRef(session);
+  const nextGeneration = useRef(0);
+  const open = useCallback((id: string) => {
+    const next = { id, generation: ++nextGeneration.current };
+    sessionRef.current = next;
+    setSession(next);
+  }, []);
+  const close = useCallback((expectedGeneration?: number) => {
+    const current = sessionRef.current;
+    if (
+      !current ||
+      (expectedGeneration !== undefined && current.generation !== expectedGeneration)
+    ) {
+      return;
+    }
+    sessionRef.current = null;
+    setSession(null);
+  }, []);
+  const editingItem = sourceItems.find((item) => item.id === session?.id) ?? null;
+  return { editingItem, generation: session?.generation ?? null, open, close };
 }
 
 /** A text or element comment pauses picking so the captured target stays highlighted. */
@@ -312,38 +331,43 @@ function useRegionProjection(
   collections: ReturnType<typeof useSourceCollections>,
   drafts: PreviewDraftEntry[],
   page: ReturnType<typeof usePreviewPageState>,
-  view: { active: boolean; highlightedId: string | null; revealId: string | null },
+  view: {
+    active: boolean;
+    feedbackEnabled: boolean;
+    highlightedId: string | null;
+    revealId: string | null;
+  },
 ) {
   const { markers, sources, sourceItems, numbers } = collections;
-  const { active, highlightedId, revealId } = view;
+  const { active, feedbackEnabled, highlightedId, revealId } = view;
   const anchors = useMemo<PreviewRegionAnchor[]>(
     () =>
-      active
+      active && feedbackEnabled
         ? sources.map((region) => ({
             id: region.id,
             page_route: region.route,
             capture_rect: region.rect,
           }))
         : [],
-    [active, sources],
+    [active, feedbackEnabled, sources],
   );
   // Region captures are drawn and edited only in annotation mode; text and
   // element markers stay on the page so their comments can be reopened.
-  const visibleMarkers = useMemo(
-    () => (active ? markers : markers.filter((marker) => marker.kind !== "screenshot")),
-    [active, markers],
-  );
+  const visibleMarkers = useMemo(() => {
+    if (!feedbackEnabled) return [];
+    return active ? markers : markers.filter((marker) => marker.kind !== "screenshot");
+  }, [active, feedbackEnabled, markers]);
   const projectMarkers = useCallback(() => {
     if (iframeRef.current) {
       sendProjectPreviewMarkers(
         iframeRef.current,
         visibleMarkers,
         anchors,
-        highlightedId,
-        revealId,
+        feedbackEnabled ? highlightedId : null,
+        feedbackEnabled ? revealId : null,
       );
     }
-  }, [anchors, highlightedId, iframeRef, revealId, visibleMarkers]);
+  }, [anchors, feedbackEnabled, highlightedId, iframeRef, revealId, visibleMarkers]);
   useEffect(projectMarkers, [projectMarkers]);
 
   const comments = useMemo(
@@ -473,6 +497,7 @@ export function usePreviewCapture({
   });
   const projection = useRegionProjection(iframeRef, collections, drafts.drafts, page, {
     active: annotation.active,
+    feedbackEnabled: enabled,
     highlightedId: drafts.openDraft?.id ?? editing.editingItem?.id ?? selectedId,
     revealId: selectedId,
   });

@@ -6,6 +6,7 @@ import type { PreviewCaptureController } from "@/hooks/use-preview-capture";
 import { usePreviewToolbarPosition } from "@/hooks/use-preview-toolbar-position";
 import { PreviewAnnotationToolbar } from "./preview-annotation-toolbar";
 import { PreviewFeedbackCollectionSurface } from "./preview-feedback-collection";
+import { previewCommentList } from "./preview-comment-list-model";
 
 /**
  * The annotation toolbar over the preview frame. On fine pointers the user can
@@ -45,6 +46,7 @@ export function PreviewAnnotationControls({
             open={capture.commentPanel.open}
             onOpenChange={capture.commentPanel.setOpen}
             trigger={button}
+            list={previewCommentList(capture)}
             drafts={{
               entries: capture.drafts,
               onResume: capture.openCapture,

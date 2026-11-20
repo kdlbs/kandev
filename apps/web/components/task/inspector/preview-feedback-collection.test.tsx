@@ -97,6 +97,7 @@ const EDIT_SURFACE = "preview-feedback-edit";
 import {
   PreviewFeedbackCollection,
   PreviewFeedbackCollectionSurface,
+  type PreviewCommentList,
   type PreviewFeedbackCollectionController,
 } from "./preview-feedback-collection";
 
@@ -283,5 +284,34 @@ describe("PreviewFeedbackCollectionSurface", () => {
     const trigger = screen.getByRole("button", { name: "1 preview feedback items" });
     expect(trigger.className).toContain("h-11");
     expect(screen.getByTestId("preview-feedback-collection-drawer")).toBeTruthy();
+  });
+
+  it("keeps annotation numbering, reveal, and editor actions in the touch drawer", () => {
+    touchState.enabled = true;
+    const collection = controller();
+    const list: PreviewCommentList = {
+      numbers: new Map([[ITEM_ID, 7]]),
+      activeId: null,
+      selectedId: ITEM_ID,
+      onOpen: vi.fn(),
+      onSelect: vi.fn(),
+    };
+    render(
+      <PreviewFeedbackCollectionSurface
+        taskId="task-1"
+        collection={collection}
+        open
+        onOpenChange={vi.fn()}
+        list={list}
+      />,
+    );
+
+    const entry = screen.getByTestId("preview-feedback-item");
+    expect(entry.getAttribute("data-selected")).toBe("true");
+    expect(entry.querySelector('[data-testid="preview-capture-number"]')?.textContent).toBe("7");
+    fireEvent.click(entry);
+    expect(list.onSelect).toHaveBeenCalledWith(ITEM_ID);
+    fireEvent.click(screen.getByRole("button", { name: EDIT_FEEDBACK }));
+    expect(list.onOpen).toHaveBeenCalledWith(ITEM_ID);
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { RegionHandle } from "@/components/shared/region-annotation/region-overlay";
 import type { PreviewRegionView } from "@/hooks/use-preview-capture";
 import {
@@ -13,7 +13,7 @@ import {
 const CLICK_SLOP_PX = 5;
 const MIN_REGION_PX = 8;
 
-type Override = { rect: RegionRect; settled: boolean };
+type Override = { rect: RegionRect; dragId: number };
 
 type Options = {
   regions: PreviewRegionView[];
@@ -21,15 +21,6 @@ type Options = {
   onOpen: (id: string) => void;
   onRecapture: (id: string, rect: RegionRect) => Promise<boolean>;
 };
-
-function sameRect(a: RegionRect, b: RegionRect) {
-  return (
-    Math.abs(a.x - b.x) < 1 &&
-    Math.abs(a.y - b.y) < 1 &&
-    Math.abs(a.width - b.width) < 1 &&
-    Math.abs(a.height - b.height) < 1
-  );
-}
 
 function draggedRect(
   start: RegionRect,
@@ -54,21 +45,7 @@ function withoutKey(current: Record<string, Override>, id: string) {
  */
 export function useRegionDrag({ regions, bounds, onOpen, onRecapture }: Options) {
   const [overrides, setOverrides] = useState<Record<string, Override>>({});
-
-  useEffect(() => {
-    setOverrides((current) => {
-      const next = { ...current };
-      let changed = false;
-      for (const [id, override] of Object.entries(current)) {
-        const region = regions.find((candidate) => candidate.id === id);
-        if (override.settled && (!region || sameRect(region.rect, override.rect))) {
-          delete next[id];
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
-  }, [regions]);
+  const nextDragId = useRef(0);
 
   const onHandlePointerDown = useCallback(
     (index: number, handle: RegionHandle, event: ReactPointerEvent<HTMLElement>) => {
@@ -78,6 +55,7 @@ export function useRegionDrag({ regions, bounds, onOpen, onRecapture }: Options)
       event.preventDefault();
       const target = event.currentTarget;
       const pointerId = event.pointerId;
+      const dragId = nextDragId.current++;
       const origin = { x: event.clientX, y: event.clientY };
       let latest = region.rect;
       let moved = false;
@@ -89,26 +67,28 @@ export function useRegionDrag({ regions, bounds, onOpen, onRecapture }: Options)
         if (!moved && Math.hypot(delta.x, delta.y) <= CLICK_SLOP_PX) return;
         moved = true;
         latest = draggedRect(region.rect, handle, delta, area);
-        setOverrides((current) => ({ ...current, [region.id]: { rect: latest, settled: false } }));
+        setOverrides((current) => ({ ...current, [region.id]: { rect: latest, dragId } }));
       };
+      const clearOverride = () =>
+        setOverrides((current) =>
+          current[region.id]?.dragId === dragId ? withoutKey(current, region.id) : current,
+        );
       const finish = (end: PointerEvent) => {
         if (end.pointerId !== pointerId) return;
         target.removeEventListener("pointermove", onMove);
         target.removeEventListener("pointerup", finish);
         target.removeEventListener("pointercancel", finish);
         if (end.type === "pointercancel" || !moved) {
-          setOverrides((current) => withoutKey(current, region.id));
+          clearOverride();
           if (end.type === "pointerup" && handle === "move") onOpen(region.id);
           return;
         }
         const rect = latest;
-        void onRecapture(region.id, rect).then((ok) =>
-          setOverrides((current) =>
-            ok
-              ? { ...current, [region.id]: { rect, settled: true } }
-              : withoutKey(current, region.id),
-          ),
-        );
+        try {
+          void onRecapture(region.id, rect).then(clearOverride, clearOverride);
+        } catch {
+          clearOverride();
+        }
       };
       target.addEventListener("pointermove", onMove);
       target.addEventListener("pointerup", finish);

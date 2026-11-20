@@ -65,18 +65,23 @@ const source = {
   label: SOURCE_LABEL,
 };
 
-function setup() {
+function setup(enabled = true) {
   const iframe = document.createElement("iframe");
+  iframe.src = SOURCE_LABEL;
   document.body.appendChild(iframe);
   const iframeRef = { current: iframe };
   const rendered = renderHook(() =>
-    usePreviewCapture({ taskId: "task-1", iframeRef, source, enabled: true }),
+    usePreviewCapture({ taskId: "task-1", iframeRef, source, enabled }),
   );
   return { iframe, iframeRef, ...rendered };
 }
 
-function dispatch(sourceWindow: MessageEventSource | null, data: unknown) {
-  window.dispatchEvent(new MessageEvent("message", { source: sourceWindow, data }));
+function dispatch(
+  sourceWindow: MessageEventSource | null,
+  data: unknown,
+  origin = new URL(SOURCE_LABEL).origin,
+) {
+  window.dispatchEvent(new MessageEvent("message", { source: sourceWindow, data, origin }));
 }
 
 function bridgeMessage(type: string, payload: unknown) {
@@ -314,6 +319,56 @@ describe("usePreviewCapture marker projection", () => {
         null,
       ),
     );
+  });
+
+  it("does not send marker evidence while preview feedback is disabled", () => {
+    feedback.items = [
+      {
+        id: "private-feedback",
+        task_id: "task-1",
+        kind: "text",
+        comment: "Private draft text",
+        selected_text: "Account balance",
+        source_kind: "browser",
+        source_session_id: "session-1",
+        source_label: SOURCE_LABEL,
+        page_route: "/account",
+        page_title: "Account",
+        version: 1,
+        created_at: CREATED_AT,
+        updated_at: CREATED_AT,
+      },
+    ];
+    const { iframe } = setup(false);
+
+    expect(bridge.sendProjectPreviewMarkers).toHaveBeenLastCalledWith(iframe, [], [], null, null);
+  });
+});
+
+describe("usePreviewCapture iframe origin boundary", () => {
+  it("ignores inspector messages after the iframe navigates away from its configured origin", () => {
+    const iframe = document.createElement("iframe");
+    iframe.src = SOURCE_LABEL;
+    iframe.src = "https://preview.example/page";
+    document.body.appendChild(iframe);
+    const rendered = renderHook(() =>
+      usePreviewCapture({
+        taskId: "task-1",
+        iframeRef: { current: iframe },
+        source,
+        enabled: true,
+      }),
+    );
+
+    act(() =>
+      dispatch(
+        iframe.contentWindow,
+        bridgeMessage("route-changed", { page_route: "/attacker", page_title: "Attacker" }),
+        "https://attacker.example",
+      ),
+    );
+
+    expect(rendered.result.current.pageRoute).toBe("");
   });
 });
 

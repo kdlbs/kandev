@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import {
   isInspectorMessage,
+  previewOrigin,
   type InspectorMessage,
   type PreviewCaptureDraft,
   type PreviewCaptureMode,
@@ -93,7 +94,10 @@ export function usePreviewInspectorEvents(handlers: PreviewInspectorHandlers) {
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
       const current = handlersRef.current;
-      if (event.source !== current.iframeRef.current?.contentWindow) return;
+      const iframe = current.iframeRef.current;
+      if (!iframe || event.source !== iframe.contentWindow) return;
+      const origin = previewOrigin(iframe);
+      if (!origin || event.origin !== origin) return;
       dispatchInspectorMessage(event.data, current);
     }
     window.addEventListener("message", handleMessage);

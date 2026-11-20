@@ -20,6 +20,20 @@ const MAX_NODE_PATH_LENGTH = 128;
 const MAX_REGION_ID_LENGTH = 128;
 export const MAX_PROJECTED_REGIONS = 32;
 
+/** Returns the configured HTTP(S) origin for this preview iframe. */
+export function previewOrigin(iframe: HTMLIFrameElement): string | null {
+  const base = typeof window === "undefined" ? undefined : window.location.href;
+  const source = iframe.src || base;
+  if (!source) return null;
+  try {
+    const origin = new URL(source, base);
+    if (origin.protocol !== "http:" && origin.protocol !== "https:") return null;
+    return origin.origin;
+  } catch {
+    return null;
+  }
+}
+
 export type PreviewCaptureMode = "text" | "element" | "screenshot";
 
 export type PreviewCaptureDraft = {
@@ -502,9 +516,11 @@ interface ProjectPreviewMarkersCommand {
 }
 
 function postCommand(iframe: HTMLIFrameElement, type: string, payload: Record<string, unknown>) {
+  const targetOrigin = previewOrigin(iframe);
+  if (!targetOrigin) return;
   iframe.contentWindow?.postMessage(
     { source: INSPECTOR_SOURCE, version: INSPECTOR_PROTOCOL_VERSION, type, payload },
-    "*",
+    targetOrigin,
   );
 }
 
@@ -529,6 +545,8 @@ export function sendSetPreviewCaptureMode(
   iframe: HTMLIFrameElement,
   mode: PreviewCaptureMode | null,
 ): void {
+  const targetOrigin = previewOrigin(iframe);
+  if (!targetOrigin) return;
   iframe.contentWindow?.postMessage(
     {
       source: INSPECTOR_SOURCE,
@@ -536,7 +554,7 @@ export function sendSetPreviewCaptureMode(
       type: "set-capture-mode",
       payload: { mode },
     } satisfies SetPreviewCaptureModeCommand,
-    "*",
+    targetOrigin,
   );
 }
 
@@ -547,6 +565,8 @@ export function sendProjectPreviewMarkers(
   highlightedId: string | null = null,
   revealId: string | null = null,
 ): void {
+  const targetOrigin = previewOrigin(iframe);
+  if (!targetOrigin) return;
   iframe.contentWindow?.postMessage(
     {
       source: INSPECTOR_SOURCE,
@@ -559,7 +579,7 @@ export function sendProjectPreviewMarkers(
         reveal_id: revealId,
       },
     } satisfies ProjectPreviewMarkersCommand,
-    "*",
+    targetOrigin,
   );
 }
 
@@ -572,7 +592,8 @@ export function requestRegionAnchor(
   rect: { x: number; y: number; width: number; height: number },
 ): Promise<PreviewRegionPlacement | null> {
   const target = iframe.contentWindow;
-  if (!target) return Promise.resolve(null);
+  const targetOrigin = previewOrigin(iframe);
+  if (!target || !targetOrigin) return Promise.resolve(null);
   const requestId = generateUUID();
   return new Promise((resolve) => {
     const finish = (placement: PreviewRegionPlacement | null) => {
@@ -581,7 +602,13 @@ export function requestRegionAnchor(
       resolve(placement);
     };
     const onMessage = (event: MessageEvent) => {
-      if (event.source !== target || !isInspectorMessage(event.data)) return;
+      if (
+        event.source !== target ||
+        event.origin !== targetOrigin ||
+        !isInspectorMessage(event.data)
+      ) {
+        return;
+      }
       const data = event.data;
       if (data.type === "region-anchored" && data.payload.request_id === requestId) {
         finish({ anchor: data.payload.anchor, container: data.payload.container ?? null });

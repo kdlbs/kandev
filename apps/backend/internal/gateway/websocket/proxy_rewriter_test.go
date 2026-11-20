@@ -179,16 +179,43 @@ func TestRewriteHTMLURLs_InjectsRuntimeShim(t *testing.T) {
 }
 
 func TestRewriteHTMLURLs_NoHeadStillRewritesURLs(t *testing.T) {
-	// Documents without a <head> are rare but possible. We don't bother
-	// injecting the shim in that case (no good anchor point), but URL
-	// rewriting must still work.
+	// A fragment has no document head or body, but URL rewriting must still work.
 	in := `<a href="/foo">x</a>`
 	got := string(rewriteHTMLURLs([]byte(in), proxyPrefix, "", ""))
 	if !strings.Contains(got, `href="/port-proxy/abc/3001/foo"`) {
 		t.Fatalf("URL not rewritten: %q", got)
 	}
 	if strings.Contains(got, "window.fetch=") {
-		t.Fatalf("unexpected shim in headless document: %q", got)
+		t.Fatalf("unexpected shim in fragment: %q", got)
+	}
+}
+
+func TestRewriteHTMLURLs_OmittedHeadInjectsShimBeforeBodyScripts(t *testing.T) {
+	const marker = `<script src="/port-proxy/abc/3001/__kandev_runtime_shim.js"></script>`
+	inputs := []struct {
+		name string
+		html string
+	}{
+		{
+			name: "doctype and html with omitted head",
+			html: `<!doctype html><html><meta charset="utf-8"><title>x</title><body><script>const gl = canvas.getContext('webgl')</script></body></html>`,
+		},
+		{
+			name: "document tags omitted",
+			html: `<meta charset="utf-8"><script>const gl = canvas.getContext('webgl')</script>`,
+		},
+	}
+	for _, input := range inputs {
+		t.Run(input.name, func(t *testing.T) {
+			got := string(rewriteHTMLURLs([]byte(input.html), proxyPrefix, "", ""))
+			shimIdx := strings.Index(got, marker)
+			metaIdx := strings.Index(got, `<meta charset="utf-8">`)
+			inlineScriptIdx := strings.Index(got, `<script>const gl`)
+			if shimIdx < 0 || shimIdx >= metaIdx || shimIdx >= inlineScriptIdx {
+				t.Fatalf("shim must load before omitted-head content and body scripts: shim=%d meta=%d script=%d\n%s",
+					shimIdx, metaIdx, inlineScriptIdx, got)
+			}
+		})
 	}
 }
 

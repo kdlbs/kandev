@@ -7,21 +7,19 @@ import { SessionPage } from "../../pages/session-page";
 
 const PREVIEW_HTML = `<!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8">
-    <title>Preview feedback fixture</title>
-    <style>
-      body { font-family: sans-serif; margin: 24px; min-height: 900px; }
-      #save {
-        margin-top: 32px;
-        padding: 14px 28px;
-        background: oklch(0.59 0.2 277);
-        color: oklch(0.96 0.02 272);
-      }
-      #runtime-total { display: block; margin-top: 360px; font-size: 24px; }
-      #route-content { padding-top: 24px; }
-    </style>
-  </head>
+  <meta charset="utf-8">
+  <title>Preview feedback fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 24px; min-height: 900px; }
+    #save {
+      margin-top: 32px;
+      padding: 14px 28px;
+      background: oklch(0.59 0.2 277);
+      color: oklch(0.96 0.02 272);
+    }
+    #runtime-total { display: block; margin-top: 360px; font-size: 24px; }
+    #route-content { padding-top: 24px; }
+  </style>
   <body>
     <nav><button id="details-route">Open details</button></nav>
     <main id="route-content">
