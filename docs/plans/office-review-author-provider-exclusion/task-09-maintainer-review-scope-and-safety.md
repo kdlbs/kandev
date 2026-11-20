@@ -47,8 +47,8 @@ the read-back fails.
    run.
 5. The PUT handler answers 200 after the write; null steps make the client
    reload.
-6. A note in dynamic-agent-routing task 10 to carry the exclusion into the
-   shared resolver.
+6. The [Office handoff design](../../specs/agents/system-design/dynamic-agent-routing-01.md#use-in-office)
+   carries the exclusion into the shared resolver.
 
 ## Exclusions
 
