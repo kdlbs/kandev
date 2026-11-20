@@ -164,9 +164,14 @@ prepared session cannot take a prompt. Inside the episode bound, the prompter
 first starts the agent on that prepared session through
 `LaunchSession{Intent: start_created, NoInitialPrompt: true,
 SkipMessageRecord: true, AutoStart: true}`. This start sends no prompt, records
-no message and opens no turn, so it adds no ledger row. The prompter then calls `PromptTask`, which waits for a `STARTING`
-session to become promptable and delivers the one prompt. A launch error
-fails the row with the reason `run_error`, and no prompt is sent.
+no message and opens no turn, so it adds no ledger row. An admitted start is
+followed by `PromptTask`, which waits for a `STARTING` session to become
+promptable and delivers the one prompt. If the launch reports `queued` because
+session capacity is full, the prompter waits on the same episode context until
+the session and agent become promptable, then calls `PromptTask`. The wait is
+bounded by the episode context and orchestrator launch timeout. A launch error
+or readiness-wait error fails the row with the reason `run_error`, and no
+evidence prompt is sent.
 
 **One turn, bounded.** One prompt, a 20-minute wall clock that covers the episode only (the gate and
 each replay have their own bound, [replay](replay.md#budget)); at expiry the system

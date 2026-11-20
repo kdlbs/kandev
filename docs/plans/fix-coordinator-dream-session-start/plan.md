@@ -58,12 +58,30 @@ The start happens inside `PromptDreamEpisode`, which runs inside `run.go`'s 20-m
 `promptCtx`, so the agent launch counts against the episode bound as the design requires. The
 `dream.Episode` interface, `run.go` and the dream scheduler do not change.
 
+**Queued-launch correction.** PR review confirmed that automatic admission can
+defer `IntentStartCreated` when session capacity is full. In that case
+`LaunchSession` returns a successful response with `ActivationDisposition:
+queued` while the persisted session is still `CREATED`; immediately calling
+`PromptTask` returns `ErrSessionNotPromptable`. `PromptDreamEpisode` now checks
+for that disposition and calls the orchestrator's `WaitForSessionPromptable`
+before sending evidence. The wait uses the episode context and the existing
+orchestrator launch timeout. A readiness failure returns before prompt
+dispatch, and the scheduler still records `run_error`.
+
 ## Scope
 
 ### In scope
 
 - `PromptDreamEpisode` starts the prepared session with no prompt, then prompts it.
+- When `LaunchSession` reports queued admission, `PromptDreamEpisode` waits until
+  the session and agent are promptable before prompting.
 - A launch error returns before any prompt is sent. The scheduler already maps it to `run_error`.
+- A queued-session readiness error also returns before any prompt is sent and maps to `run_error`.
+- `orchestrator.Service.WaitForSessionPromptable` exposes the existing bounded
+  session-and-agent readiness wait for the coordinator adapter.
+- A real orchestrator regression covers a persisted `CREATED` session returned
+  as queued, no initial message or turn, controlled readiness, and exactly one
+  evidence prompt after readiness.
 - Regression tests at the adapter boundary, using a fake that enforces the orchestrator's
   `CREATED`/`STARTING` promptability rule rather than a stub prompter.
 
@@ -77,17 +95,20 @@ The start happens inside `PromptDreamEpisode`, which runs inside `run.go`'s 20-m
 
 ## Technical approach
 
-1. Widen the interface parameter of `PromptDreamEpisode` to also require
-   `LaunchSession(ctx, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)`.
-   `*orchestrator.Service` already satisfies it, so the wiring in
+1. Widen the interface parameter of `PromptDreamEpisode` to require
+   `LaunchSession`, `WaitForSessionPromptable`, and `PromptTask`.
+   `*orchestrator.Service` satisfies the interface, so the wiring in
    `backendapp/coordinator_dream.go` compiles unchanged.
 2. In the returned prompter, before `PromptTask`, call `LaunchSession` with
    `TaskID`, `SessionID`, `Intent: orchestrator.IntentStartCreated`, `AutoStart: true`,
    `NoInitialPrompt: true` and `SkipMessageRecord: true`. Leave `ActivationSource` empty: this is a
    system launch, not `session_open`, which rejects prompts, and not a user action. Return an
-   error wrapped as `start dream episode session: %w`. Only the dream starts this fresh session,
-   so no other start can race it and no special case is needed.
-3. Leave the `PromptTask` call and the result handling as they are.
+   error wrapped as `start dream episode session: %w`. When the response disposition is `queued`,
+   call `WaitForSessionPromptable` with the same context before prompting; wrap a wait error as
+   `wait for queued dream episode session: %w`.
+3. `WaitForSessionPromptable` reuses the existing bounded session-state and
+   agent-readiness wait, then verifies the session is promptable. Keep the
+   `PromptTask` call and result handling unchanged after readiness.
 
 ## Tests
 
@@ -102,6 +123,13 @@ The start happens inside `PromptDreamEpisode`, which runs inside `run.go`'s 20-m
   `ErrSessionNotPromptable`, which is the behavior reported in the issue.
 - `TestPromptDreamEpisode_LaunchFailureSendsNoPrompt`: the launch returns an error. The
   prompter returns it, and `PromptTask` is never called.
+- `TestPromptDreamEpisode_WaitsForQueuedSessionBeforePrompt` and
+  `TestPromptDreamEpisode_QueuedSessionWaitFailureSendsNoPrompt` cover queued
+  admission ordering and the no-prompt failure path.
+- `orchestrator/coordinator_dream_queued_launch_test.go` uses the real service
+  and persisted SQLite sessions to verify a queued `CREATED` session remains
+  without an initial message or turn until session and agent readiness, then
+  dispatches the evidence prompt once and creates one turn.
 - The existing coverage `no initial prompt creates no prompt turn`
   (`orchestrator/session_launch_prompt_integrity_test.go`) already guarantees that the start
   records no message and opens no turn. It is unchanged and must still pass.
@@ -116,7 +144,7 @@ The start happens inside `PromptDreamEpisode`, which runs inside `run.go`'s 20-m
 
 ```bash
 (cd apps/backend && go test -trimpath ./internal/coordinator/ ./internal/coordinator/dream/... -count=1)
-(cd apps/backend && go test -trimpath ./internal/orchestrator/ -run 'TestLaunchSession|PromptIntegrity' -count=1)
+(cd apps/backend && go test -trimpath ./internal/orchestrator/ -run 'TestLaunchSession|PromptIntegrity|TestQueuedDreamLaunchWaitsForSessionAndExecutorReadinessBeforePrompt' -count=1)
 (cd apps/backend && go build -trimpath ./...)
 bash scripts/lint-go-changed apps/backend/internal/coordinator/dream_episode.go apps/backend/internal/coordinator/dream_episode_test.go
 python3 scripts/list-docs.py validate
@@ -130,8 +158,10 @@ Run from the repository root.
 - **Race with the prepare's asynchronous workspace launch.** The per-session lock in
   `LaunchPreparedSession` serializes it. The second caller sees the `executors_running` row and
   takes the fast path. This is the same race the UI first-message path already handles.
-- **Session left in `CREATED` after the start returns.** It cannot be: both executor launch paths
+- **Admitted session left in `CREATED` after the start returns.** Both executor launch paths
   persist `STARTING` before they return, and the agent process starts asynchronously afterwards.
+  A capacity-deferred launch is different: it intentionally remains `CREATED` until admission, so
+  the prompter waits on the episode context before prompting.
 - **Agent start fails asynchronously.** The session moves to `FAILED`, and `waitForSessionReady`
   returns `session failed`. The episode fails with `run_error`, the correct reason, after the
   agent was actually attempted.
@@ -140,12 +170,19 @@ Run from the repository root.
 
 ## Results
 
-Implementation complete. The regression failed before the change with
-`ErrSessionNotPromptable`; after the prompter starts the prepared session first,
-the regression and launch-failure coverage pass.
+Implementation and PR review fixup complete. The original regression failed
+before the first change with `ErrSessionNotPromptable`. Review then identified
+that a capacity-deferred launch also returns successfully while the session is
+still `CREATED`; the queued-response regression reproduced the same
+`ErrSessionNotPromptable` failure before the readiness wait was added. Both
+queued success and wait-failure tests now pass, along with a real SQLite-backed
+orchestrator regression that holds readiness until explicitly released.
 
 - Coordinator and dream tests passed: `go test -trimpath ./internal/coordinator/ ./internal/coordinator/dream/... -count=1`.
-- Orchestrator launch-integrity tests passed: `go test -trimpath ./internal/orchestrator/ -run 'TestLaunchSession|PromptIntegrity' -count=1`.
+- Orchestrator launch-integrity and queued-readiness tests passed: `go test -trimpath ./internal/orchestrator/ -run 'TestLaunchSession|PromptIntegrity|TestQueuedDreamLaunchWaitsForSessionAndExecutorReadinessBeforePrompt' -count=1`.
+- Race-instrumented coordinator and queued-readiness tests passed: `go test -race -trimpath ./internal/coordinator/ ./internal/orchestrator/ -run 'TestPromptDreamEpisode_|TestQueuedDreamLaunchWaitsForSessionAndExecutorReadinessBeforePrompt' -count=1`.
 - Backend build passed: `go build -trimpath ./...`.
-- Changed-file Go lint passed with `0 issues`.
-- Specification catalog validation and spec lint passed.
+- Changed-file Go lint passed with `0 issues`: `bash scripts/lint-go-changed apps/backend/internal/coordinator/dream_episode.go apps/backend/internal/coordinator/dream_episode_test.go apps/backend/internal/orchestrator/session_launch.go apps/backend/internal/orchestrator/task_operations.go apps/backend/internal/orchestrator/coordinator_dream_queued_launch_test.go`.
+- Specification catalog validation passed: `python3 scripts/list-docs.py validate` (456 decisions and 2047 specifications).
+- Spec lint passed: `python3 scripts/lint-spec-files.py --all`.
+- Whitespace check passed: `git diff --check`.

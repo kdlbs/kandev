@@ -26,11 +26,13 @@ func (f *fakeEpisodeSessions) EnsureSession(_ context.Context, _ string, opts ..
 }
 
 type recordingDreamOrchestrator struct {
-	sessionState  taskmodels.TaskSessionState
-	launchRequest *orchestrator.LaunchSessionRequest
-	launchErr     error
-	promptCalls   int
-	events        []string
+	sessionState   taskmodels.TaskSessionState
+	launchRequest  *orchestrator.LaunchSessionRequest
+	launchResponse *orchestrator.LaunchSessionResponse
+	launchErr      error
+	waitErr        error
+	promptCalls    int
+	events         []string
 }
 
 func (f *recordingDreamOrchestrator) LaunchSession(_ context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
@@ -40,8 +42,20 @@ func (f *recordingDreamOrchestrator) LaunchSession(_ context.Context, req *orche
 	if f.launchErr != nil {
 		return nil, f.launchErr
 	}
+	if f.launchResponse != nil {
+		return f.launchResponse, nil
+	}
 	f.sessionState = taskmodels.TaskSessionStateStarting
 	return &orchestrator.LaunchSessionResponse{TaskID: req.TaskID, SessionID: req.SessionID}, nil
+}
+
+func (f *recordingDreamOrchestrator) WaitForSessionPromptable(context.Context, string, string) error {
+	f.events = append(f.events, "wait")
+	if f.waitErr != nil {
+		return f.waitErr
+	}
+	f.sessionState = taskmodels.TaskSessionStateWaitingForInput
+	return nil
 }
 
 func (f *recordingDreamOrchestrator) PromptTask(_ context.Context, _, _, _, _ string, _ bool, _ []v1.MessageAttachment, _ bool) (*orchestrator.PromptResult, error) {
@@ -162,5 +176,49 @@ func TestPromptDreamEpisode_LaunchFailureSendsNoPrompt(t *testing.T) {
 	}
 	if fake.promptCalls != 0 || len(fake.events) != 1 || fake.events[0] != "launch" {
 		t.Fatalf("prompt calls = %d, events = %v; want no prompt after launch failure", fake.promptCalls, fake.events)
+	}
+}
+
+func TestPromptDreamEpisode_WaitsForQueuedSessionBeforePrompt(t *testing.T) {
+	fake := &recordingDreamOrchestrator{
+		sessionState: taskmodels.TaskSessionStateCreated,
+		launchResponse: &orchestrator.LaunchSessionResponse{
+			TaskID: "task-1", SessionID: "session-1",
+			State: string(taskmodels.TaskSessionStateCreated), ActivationDisposition: orchestrator.LaunchActivationDispositionQueued,
+		},
+	}
+
+	got, err := PromptDreamEpisode(fake)(context.Background(), "task-1", "session-1", "dream prompt")
+	if err != nil {
+		t.Fatalf("PromptDreamEpisode error = %v", err)
+	}
+	if got != "dream answer" {
+		t.Fatalf("answer = %q, want dream answer", got)
+	}
+	if len(fake.events) != 3 || fake.events[0] != "launch" || fake.events[1] != "wait" || fake.events[2] != "prompt" {
+		t.Fatalf("events = %v, want launch, wait, prompt", fake.events)
+	}
+	if fake.promptCalls != 1 {
+		t.Fatalf("prompt calls = %d, want exactly one", fake.promptCalls)
+	}
+}
+
+func TestPromptDreamEpisode_QueuedSessionWaitFailureSendsNoPrompt(t *testing.T) {
+	waitErr := errors.New("session readiness timed out")
+	fake := &recordingDreamOrchestrator{
+		sessionState: taskmodels.TaskSessionStateCreated,
+		launchResponse: &orchestrator.LaunchSessionResponse{
+			TaskID: "task-1", SessionID: "session-1",
+			State: string(taskmodels.TaskSessionStateCreated), ActivationDisposition: orchestrator.LaunchActivationDispositionQueued,
+		},
+		waitErr: waitErr,
+	}
+
+	_, err := PromptDreamEpisode(fake)(context.Background(), "task-1", "session-1", "dream prompt")
+	if !errors.Is(err, waitErr) || err.Error() != "wait for queued dream episode session: session readiness timed out" {
+		t.Fatalf("PromptDreamEpisode error = %v", err)
+	}
+	if fake.promptCalls != 0 || len(fake.events) != 2 || fake.events[0] != "launch" || fake.events[1] != "wait" {
+		t.Fatalf("prompt calls = %d, events = %v; want wait failure and no prompt", fake.promptCalls, fake.events)
 	}
 }
