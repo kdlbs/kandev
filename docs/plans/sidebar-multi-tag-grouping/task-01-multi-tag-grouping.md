@@ -793,3 +793,65 @@ empty, and only its state/profile and throwaway scripts/config/format copies
 were removed. Protected demo 52121, 59390 and primary instances were untouched.
 Historical broad backend/web/SQLite gates remain unresolved; PostgreSQL/no DSN,
 physical phone and remote CI remain unproven. No release or deployment.
+
+### Post-rebase round 10 corrections
+
+Round 10 reported two source-derived Host findings; Tags had no new finding.
+
+- Definitive 4xx rejection (excluding timeout and rate-limit responses) retires
+  dispatched and retained failed move intent. Independent sparse successors
+  remain eligible; uncertain transport/5xx failures keep guarded replay.
+- The generic SDK decoder consumes canonical classification fields once,
+  validates array bounds while reading, and rejects duplicate or case-folded
+  recognized fields before normalization. Nested group/membership identities
+  follow the same rule. Unrelated extension metadata remains non-classifying.
+- Regression coverage includes newer WebSocket order plus queued independent
+  rename, real touch drag/HTTP rejection/reload, SDK ambiguous and over-limit
+  raw arrays, supervised resolver unavailability, and native HTTP/unavailable
+  recovery rather than a successful Untagged page.
+
+Verification:
+
+- RED: SDK ambiguous-field cases failed before the decoder change. The journal
+  rejected-move cases failed for 400/409; the prior-bundle true-touch test
+  reproduced the independent-successor reorder loss.
+- GREEN: 51 focused frontend tests, scoped types/ESLint/Prettier, SDK grouping
+  race tests and SDK vet, real Service resolver malformed-wire plus healthy,
+  authorization and lifecycle controls, affected backend Go lint, public-doc
+  validation/tests and specification validation/lint.
+- The first resolver command exhausted its 180-second compilation deadline
+  without test output. A separate cache-only race compilation completed;
+  the compiled resolver regressions passed. This is not a deadlock claim.
+- Cache-only `make fmt`, backend/helper/plugin-fixture and SPA builds completed
+  in 958.30 seconds. Eleven changed code/test paths byte-match the build mirror.
+- Native malformed-wire desktop: 1/1 passed. All three duplicate/alias variants
+  return 503 with no entries, reach unavailable/Retry and recover with canonical
+  data. The initial five-second scaffold wait was corrected for the normal
+  thirty-second recovery budget.
+- Touch: three unchanged drag controls passed. The new test first exposed a
+  scaffold predicate treating the `watchWs` payload as a frame; after correcting
+  that argument, its owning case passed 1/1. Real 400 rejection, independent
+  rename, API/DOM order and reload assertions remain intact. The screenshot
+  shows the persisted rename, not the entire horizontally clipped order.
+- Fresh real Tags 0.20.0 installation on the corrected owned host returned
+  HTTP 201 Active. Its unchanged archive SHA-256 is
+  `4de7a671be43236b79b99771e62b93229d9dd2ee97dd1611c01038be3c502c1d`.
+  The final 214.44-second run produced 88 mixed evidence records and 23 PNGs,
+  not 88 independent tests: 103 unique tasks/119 occurrences, repeated trees,
+  saved-view mutations, explicit overflow/Tag independence/recovery, and true
+  touch emulation at 320/393 px. Inspected desktop grouping, unavailable,
+  settled recovery and actual phone Page 2 PNGs.
+- The first package-driver attempt stopped at an unpaced keyboard-focus loop
+  after a successful install/action proof. Semantic focus-transition waits
+  fixed the driver; the successful run used fresh owned state. No product
+  change or forced DOM/state mutation was used to make it pass.
+
+Receipts are under `~/.cache/sidebar-multi-tag-build/evidence/r10-*`, including
+retained driver/launcher source, owner, results, source and screenshot digests.
+Both owned runtimes were stopped; open-file checks were empty before removing
+only their state/profile and throwaway executables/config/format copies.
+Protected demo 52121, 59390 and primary instances were untouched. Tags source
+remains `650581569554e471fca37477453d45572c9ac54d`; no SDK API/type or package
+publication change was needed. Historical broad backend/web/SQLite gates remain
+unresolved; PostgreSQL/no DSN, physical phone and remote CI remain unproven.
+The 0.103.0 host floor remains unreleased. Review gate stays 0/3 pending round 11.

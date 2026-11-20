@@ -495,3 +495,66 @@ test("failed retired-disclosure cleanup offers Retry without an automatic write 
       });
   }
 });
+
+test("ambiguous complete provider JSON is unavailable instead of Untagged", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(180_000);
+  await installFixturePlugin(testPage);
+  const initial = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+    seedData.workspaceId
+  ];
+  const root = await apiClient.createTask(seedData.workspaceId, "Strict wire root", {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+  const pair = { task_id: root.id, group_id: "keep" };
+  const healthy = {
+    version: 1,
+    revision: "wire",
+    complete: true,
+    groups: [{ id: "keep", label: "Keep" }],
+    memberships: [pair, pair],
+  };
+  const header = testPage
+    .getByTestId("task-sidebar")
+    .locator(`[data-testid="sidebar-group-header"][data-group-key="${groupingValueKey("keep")}"]`);
+  try {
+    await writeGroupingState(apiClient, seedData.workspaceId, { snapshot: healthy });
+    await saveGroupingView(apiClient, seedData.workspaceId);
+    await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
+    await expect(header).toBeVisible();
+    for (const field of ["memberships", "MEMBERSHIPS", "groups"]) {
+      const replacement = field === "groups" ? healthy.groups : [];
+      const raw =
+        JSON.stringify(healthy).slice(0, -1) + `,"${field}":${JSON.stringify(replacement)}}`;
+      await writeGroupingState(apiClient, seedData.workspaceId, { snapshot_raw: raw });
+      const response = await apiClient.rawRequest(
+        "POST",
+        `/api/v1/workspaces/${seedData.workspaceId}/sidebar/query`,
+        { group: SIDEBAR_GROUPING, page: 1, page_size: 100 },
+      );
+      expect(response.status).toBe(503);
+      const body = await response.json();
+      expect(body.error_code).toBe("sidebar_grouping_unavailable");
+      expect(body).not.toHaveProperty("entries");
+      await testPage.reload();
+      await expect(
+        testPage.getByTestId("task-sidebar").getByRole("button", { name: "Retry", exact: true }),
+      ).toBeVisible({ timeout: 45_000 });
+      await expect(
+        testPage.getByTestId("task-sidebar").getByTestId("sidebar-group-header"),
+      ).toHaveCount(0);
+    }
+    await writeGroupingState(apiClient, seedData.workspaceId, { snapshot: healthy });
+    await testPage.reload();
+    await expect(header).toBeVisible();
+  } finally {
+    await testPage.close();
+    await apiClient.saveUserSettings({
+      sidebar_view_state: { workspace_id: seedData.workspaceId, ...initial },
+    });
+  }
+});

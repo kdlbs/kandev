@@ -14,6 +14,8 @@ import { mapSidebarWorkspaces } from "./sidebar-workspace-state";
 import { toApiSidebarView } from "./sidebar-view-wire";
 import { applyViewMutationsForTest } from "./sidebar-view-test-helpers";
 
+const SETTINGS_UPDATED = "user.settings.updated";
+
 vi.mock("@/lib/api/domains/settings-api", () => ({ updateUserSettings: vi.fn() }));
 beforeEach(() => {
   vi.mocked(updateUserSettings).mockReset();
@@ -108,9 +110,9 @@ it.each([
     if (field === "disclosure") f.store.getState().toggleSidebarGroupCollapsed(f.base.id, "kept");
     else f.store.getState().renameSidebarView(f.base.id, "A");
     if (delivered)
-      registerUsersHandlers(f.store)["user.settings.updated"]!({
+      registerUsersHandlers(f.store)[SETTINGS_UPDATED]!({
         type: "notification",
-        action: "user.settings.updated",
+        action: SETTINGS_UPDATED,
         payload: committed!.settings,
       });
     first.reject(new ApiError("Proxy lost committed ACK", 503, {}));
@@ -257,13 +259,72 @@ it("an uncertain drag with a now-deleted endpoint is not replayed by its success
   f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
   f.store.getState().renameSidebarView("c", "Independent");
   f.reorder([f.base.id, "c", "d"]);
-  registerUsersHandlers(f.store)["user.settings.updated"]!({
+  registerUsersHandlers(f.store)[SETTINGS_UPDATED]!({
     type: "notification",
-    action: "user.settings.updated",
+    action: SETTINGS_UPDATED,
     payload: f.acknowledge().settings,
   });
   failed.reject(new ApiError("Move response was lost", 503, {}));
   await f.store.getState().waitForSidebarViewSync("ws");
   expect(f.current().views.map((view) => view.id)).toEqual([f.base.id, "c", "d"]);
   expect(f.current().views.find((view) => view.id === "c")?.name).toBe("Independent");
+});
+
+it.each([400, 409, 408, 429, 503])(
+  "queued rename cannot revive a definitively rejected move: status=%s",
+  async (status) => {
+    const f = fixture(["c", "d"]);
+    const failed = Promise.withResolvers<UserSettingsResponse>();
+    vi.mocked(updateUserSettings).mockImplementation((payload) =>
+      Promise.resolve(f.apply(payload)),
+    );
+    vi.mocked(updateUserSettings).mockImplementationOnce(() => failed.promise);
+    f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
+    f.store.getState().renameSidebarView("c", "Independent");
+    const remoteOrder = [f.base.id, "c", "d", f.other.id];
+    f.reorder(remoteOrder);
+    registerUsersHandlers(f.store)[SETTINGS_UPDATED]!({
+      type: "notification",
+      action: SETTINGS_UPDATED,
+      payload: f.acknowledge().settings,
+    });
+    failed.reject(new ApiError("Order changed after dispatch", status, {}));
+    await f.store.getState().waitForSidebarViewSync("ws");
+    const persisted = mapSidebarWorkspaces({ ws: f.current() }).ws;
+    expect(persisted.views.map((view) => view.id)).toEqual(
+      status === 400 || status === 409 ? remoteOrder : ["c", "d", f.other.id, f.base.id],
+    );
+    expect(persisted.views.find((view) => view.id === "c")?.name).toBe("Independent");
+  },
+);
+
+it("a definite rejection retires an older uncertain move before the next sparse successor", async () => {
+  const f = fixture(["c", "d"]);
+  const first = Promise.withResolvers<UserSettingsResponse>();
+  const second = Promise.withResolvers<UserSettingsResponse>();
+  const arrived = Promise.withResolvers<void>();
+  vi.mocked(updateUserSettings)
+    .mockImplementation((payload) => Promise.resolve(f.apply(payload)))
+    .mockImplementationOnce(() => first.promise)
+    .mockImplementationOnce(() => {
+      arrived.resolve();
+      return second.promise;
+    });
+  f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
+  f.store.getState().renameSidebarView("c", "Independent C");
+  f.store.getState().renameSidebarView("d", "Independent D");
+  const remoteOrder = [f.base.id, "c", "d", f.other.id];
+  f.reorder(remoteOrder);
+  registerUsersHandlers(f.store)[SETTINGS_UPDATED]!({
+    type: "notification",
+    action: SETTINGS_UPDATED,
+    payload: f.acknowledge().settings,
+  });
+  first.reject(new ApiError("Move response was lost", 503, {}));
+  await arrived.promise;
+  second.reject(new ApiError("Replayed order was rejected", 400, {}));
+  await f.store.getState().waitForSidebarViewSync("ws");
+  expect(f.current().views.map((view) => view.id)).toEqual(remoteOrder);
+  expect(f.current().views.find((view) => view.id === "c")?.name).toBe("Independent C");
+  expect(f.current().views.find((view) => view.id === "d")?.name).toBe("Independent D");
 });

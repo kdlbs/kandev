@@ -62,7 +62,7 @@ export async function installUnrelatedGroupingControl(api: ApiClient, tempDir: s
 export async function writeGroupingState(
   api: ApiClient,
   workspaceId: string,
-  state: { snapshot?: unknown; delay_ms?: number; fail?: boolean },
+  state: { snapshot?: unknown; snapshot_raw?: string; delay_ms?: number; fail?: boolean },
 ) {
   const response = await api.rawRequest(
     "POST",

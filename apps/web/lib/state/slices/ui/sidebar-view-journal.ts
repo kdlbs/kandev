@@ -1,3 +1,4 @@
+import { ApiError } from "@/lib/api/client";
 import type { SidebarViewMove } from "./sidebar-view-move";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { cloneDraft, cloneView } from "./sidebar-view-clone";
@@ -5,17 +6,18 @@ import type { SidebarSnapshot } from "./sidebar-view-delta";
 import type { SidebarSliceState } from "./sidebar-view-types";
 
 export type SidebarWriteKind = "views" | "local" | "compaction" | "selection" | "draft_save";
+type SidebarViewMutation = {
+  before: SidebarSnapshot;
+  after: SidebarSnapshot;
+  move?: SidebarViewMove;
+};
 export type SidebarWriteJournal = {
   latestRequestId: number;
   pending: number;
   confirmed?: SidebarSnapshot;
   failedRollback?: SidebarSnapshot;
   failedWriteKind?: SidebarWriteKind;
-  failedViewMutations?: {
-    before: SidebarSnapshot;
-    after: SidebarSnapshot;
-    move?: SidebarViewMove;
-  }[];
+  failedViewMutations?: SidebarViewMutation[];
 };
 
 const journals = new WeakMap<object, SidebarWriteJournal>();
@@ -62,14 +64,22 @@ export function replayableSidebarMove(journal: SidebarWriteJournal, move?: Sideb
 
 export function recordSidebarWriteFailure(
   journal: SidebarWriteJournal,
-  before: SidebarSnapshot,
-  after: SidebarSnapshot,
+  mutation: SidebarViewMutation,
   kind: SidebarWriteKind,
-  move?: SidebarViewMove,
+  error: unknown,
 ) {
+  const { before, move } = mutation;
   journal.pending--;
-  if (kind === "views" && replayableSidebarMove(journal, move))
-    (journal.failedViewMutations ??= []).push({ before, after, move });
+  const rejected =
+    error instanceof ApiError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 408 &&
+    error.status !== 429;
+  if (rejected)
+    journal.failedViewMutations = journal.failedViewMutations?.filter((failed) => !failed.move);
+  if (kind === "views" && !(move && rejected) && replayableSidebarMove(journal, move))
+    (journal.failedViewMutations ??= []).push(mutation);
   const rollback = journal.failedRollback ?? before;
   journal.failedRollback = rollback;
   journal.failedWriteKind ??= kind;

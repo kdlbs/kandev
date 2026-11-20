@@ -422,6 +422,9 @@ A missing, disabled, failed, timed-out, malformed, oversized, or incomplete
 provider returns HTTP 503 with `error_code: "sidebar_grouping_unavailable"`.
 This is not a successful empty snapshot. Workspace authorization failures remain
 separate and clear previously retained results.
+The complete-snapshot wire format rejects duplicate recognized fields and
+case-folded aliases before interpreting classification or raw array limits.
+Such ambiguous replies cannot become successful **Untagged** pages.
 
 `GET /api/plugins/sidebar-groupings` returns active compatible provider metadata,
 also supplied as boot `sidebarGroupings`. The

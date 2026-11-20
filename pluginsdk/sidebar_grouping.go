@@ -1,7 +1,6 @@
 package pluginsdk
 
 import (
-	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
@@ -45,8 +44,8 @@ func DecodeSidebarGroupingSnapshot(body []byte) (*SidebarGroupingSnapshot, error
 	if len(body) > MaxSidebarGroupingResponseBytes || !utf8.Valid(body) {
 		return nil, invalid
 	}
-	var snapshot SidebarGroupingSnapshot
-	if err := json.Unmarshal(body, &snapshot); err != nil {
+	snapshot, err := decodeSidebarGroupingJSON(body)
+	if err != nil {
 		return nil, invalid
 	}
 	if snapshot.Version != 1 || !snapshot.Complete || !sidebarGroupingText(snapshot.Revision, 256) ||

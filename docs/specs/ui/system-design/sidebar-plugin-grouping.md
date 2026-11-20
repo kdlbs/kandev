@@ -66,6 +66,12 @@ The read-only action receives verified user/workspace identity and returns:
 - `groups`: unique opaque value IDs, labels and optional validated hex colors;
 - `memberships`: task-ID/value-ID pairs, with duplicate pairs normalized once.
 
+Decode canonical wire fields once in a bounded pass before normalization.
+Reject duplicate recognized fields and case-folded aliases at the snapshot,
+group and membership levels; a later empty array must never hide earlier raw
+memberships or an exceeded bound. Skip unrelated extension metadata without
+letting it alter classification.
+
 Task IDs with no membership have no value. Unknown group references, malformed
 colors/identities, duplicate conflicting definitions, incomplete results or
 oversized responses fail closed. Retain the existing plugin action response

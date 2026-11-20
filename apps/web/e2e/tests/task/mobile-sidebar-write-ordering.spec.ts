@@ -2,6 +2,8 @@ import { test, expect } from "../../fixtures/test-base";
 import { holdSidebarSettingsWrite } from "../../helpers/user-settings-barrier";
 import { touchDragToPoint } from "../../helpers/touch-drag";
 import { settledBoundingBox } from "../../helpers/settled-box";
+import { watchWs } from "../../helpers/causal-waits";
+import type { UserSettingsResponse } from "@/lib/types/http-user-settings";
 
 for (const remoteChange of ["append", "disjoint reorder", "post-dispatch reorder"] as const) {
   test(`touch reorder preserves ${remoteChange}`, async ({
@@ -145,3 +147,101 @@ for (const remoteChange of ["append", "disjoint reorder", "post-dispatch reorder
     }
   });
 }
+
+test("a rejected dispatched drag cannot return through a queued rename", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, info) => {
+  const workspace = seedData.workspaceId;
+  const initial = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+    workspace
+  ];
+  const views = ["a", "b", "c", "d"].map((id) => ({
+    ...initial.views[0],
+    id: `terminal-${id}`,
+    name: id.toUpperCase(),
+  }));
+  const [a, b, c, d] = views;
+  const watcher = watchWs(testPage);
+  await apiClient.saveUserSettings({
+    sidebar_view_state: { workspace_id: workspace, views_create: views, active_view_id: c.id },
+  });
+  await testPage.goto(`/?workspaceId=${workspace}`);
+  await testPage.getByTestId("app-nav-trigger").tap();
+  const tasks = testPage.getByTestId("app-nav-sheet");
+  const row = tasks.getByTestId("sidebar-view-chip-row");
+  const barrier = await holdSidebarSettingsWrite(testPage);
+  try {
+    const target = await settledBoundingBox(row.locator(`[data-view-id="${b.id}"]`));
+    await touchDragToPoint(testPage, row.locator(`[data-view-id="${a.id}"]`), {
+      x: target.x + target.width / 2,
+      y: target.y + target.height / 2,
+    });
+    await barrier.arrived;
+    await tasks.getByTestId("sidebar-filter-gear").tap();
+    const editor = testPage.getByTestId("sidebar-filter-popover");
+    await editor.getByTestId("view-rename-button").tap();
+    await editor.getByTestId("view-rename-input").fill("Independent");
+    await editor.getByTestId("view-rename-confirm").tap();
+    await testPage.keyboard.press("Escape");
+    await expect(editor).toBeHidden();
+    const remoteOrder = [...initial.views.map((view) => view.id), a.id, c.id, d.id, b.id];
+    const delivered = watcher.waitForEvent("user.settings.updated", {
+      where: (payload) => {
+        const settings = payload as unknown as UserSettingsResponse["settings"];
+        return (
+          JSON.stringify(
+            settings.sidebar_views_by_workspace?.[workspace]?.views.map((view) => view.id),
+          ) === JSON.stringify(remoteOrder)
+        );
+      },
+    });
+    await apiClient.saveUserSettings({
+      sidebar_view_state: { workspace_id: workspace, view_order: remoteOrder },
+    });
+    await delivered;
+    const rejected = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "PATCH" &&
+        Boolean(response.request().postDataJSON()?.sidebar_view_state?.view_order),
+    );
+    const renamed = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "PATCH" &&
+        response
+          .request()
+          .postDataJSON()
+          ?.sidebar_view_state?.views_update?.some((view: { id: string }) => view.id === c.id),
+    );
+    barrier.release();
+    expect((await rejected).status()).toBe(400);
+    expect((await renamed).status()).toBe(200);
+    const persisted = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+      workspace
+    ];
+    expect(persisted.views.map((view) => view.id)).toEqual(remoteOrder);
+    expect(persisted.views.find((view) => view.id === c.id)?.name).toBe("Independent");
+    await testPage.reload();
+    await testPage.getByTestId("app-nav-trigger").tap();
+    await expect
+      .poll(() =>
+        row
+          .getByTestId("sidebar-view-chip")
+          .evaluateAll((chips) => chips.map((chip) => chip.getAttribute("data-view-id"))),
+      )
+      .toEqual(remoteOrder);
+    await expect(row.locator(`[data-view-id="${c.id}"]`)).toContainText("Independent");
+    await row.scrollIntoViewIfNeeded();
+    await testPage.screenshot({
+      path: info.outputPath("rejected-move-successor.png"),
+      animations: "disabled",
+    });
+  } finally {
+    await barrier.dispose();
+    await testPage.close();
+    await apiClient.saveUserSettings({
+      sidebar_view_state: { workspace_id: workspace, ...initial },
+    });
+  }
+});

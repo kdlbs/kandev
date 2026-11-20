@@ -3980,6 +3980,10 @@ Return a complete classification of the plugin's shared workspace data:
 - Limits are 1 MiB for the existing action response, 1,000 group values, and
   10,000 membership pairs before deduplication. Exceeding a limit must fail,
   not return partial success.
+- Recognized JSON field names use the exact canonical spelling shown above
+  and occur once, including fields inside each group or membership object.
+  Duplicate fields or case-folded aliases make the snapshot unavailable.
+  Unrelated extension metadata does not change classification.
 - IDs, labels, revision, and task IDs are nonblank UTF-8 text without control
   characters, at most 256 bytes each. Group IDs are unique. Colors, when present,
   are `#RRGGBB`. Every membership names a declared group; duplicate pairs collapse.

@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -88,5 +89,24 @@ func TestSidebarPluginGroupingRejectsOldReplyAfterDisableEnable(t *testing.T) {
 	}
 	if _, err := svc.resolveSidebarGrouping(ctx, "ws", "plugin:"+record.ID+":labels", invoke); err == nil {
 		t.Fatal("an old process reply crossed a disable/enable generation with unchanged package metadata")
+	}
+}
+
+func TestSidebarGroupingResolverRejectsAmbiguousWire(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	svc.taskData = &fakeTaskDataSource{workspaces: []*taskmodels.Workspace{{ID: "ws"}}}
+	svc.registry.Add(&store.Record{Manifest: manifest.Manifest{ID: "acme", Version: "1.0.0", SidebarGroupings: []manifest.SidebarGrouping{{ID: "labels", Label: "Labels", Action: "labels.snapshot"}}, Actions: []manifest.Action{{Key: "labels.snapshot", ResourceScope: manifest.ActionScopeWorkspace, MaxBodyBytes: 16}}}, Status: store.StatusActive})
+	ctx := authn.WithIdentity(t.Context(), authn.Identity{UserID: "reader", Role: authn.RoleMember})
+	for _, body := range []string{
+		`{"version":1,"revision":"r","complete":true,"groups":[{"id":"g","label":"G"}],"memberships":[{"task_id":"t","group_id":"g"}],"memberships":[]}`,
+		`{"version":1,"revision":"r","complete":true,"groups":[],"GROUPS":[{"id":"g","label":"G"}],"memberships":[]}`,
+	} {
+		invoke := func(context.Context, string, pluginDispatchGeneration, *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+			return &pluginsdk.PluginActionResponse{Body: []byte(body)}, nil
+		}
+		got, err := svc.resolveSidebarGrouping(ctx, "ws", "plugin:acme:labels", invoke)
+		if got != nil || !errors.Is(err, taskmodels.ErrSidebarGroupingUnavailable) {
+			t.Fatalf("ambiguous wire admitted instead of unavailable: %v", err)
+		}
 	}
 }

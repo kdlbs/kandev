@@ -206,7 +206,7 @@ function syncSidebarWrite(
         });
     },
     (err) => {
-      const rollback = recordSidebarWriteFailure(journal, before, after, kind, move);
+      const rollback = recordSidebarWriteFailure(journal, { before, after, move }, kind, err);
       set((draft) => {
         draft.sidebarViews.syncError =
           err instanceof Error ? err.message : t("sidebar:failedToSyncSidebarViews");

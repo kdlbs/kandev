@@ -44,6 +44,13 @@ func (p *fixturePlugin) sidebarGroupingAction(ctx context.Context, req *pluginsd
 	if failed, _ := state["fail"].(bool); failed {
 		return nil, fmt.Errorf("plugin-fixture: grouping unavailable")
 	}
+	return sidebarGroupingSnapshotResponse(state)
+}
+
+func sidebarGroupingSnapshotResponse(state map[string]any) (*pluginsdk.PluginActionResponse, error) {
+	if raw, ok := state["snapshot_raw"].(string); ok {
+		return &pluginsdk.PluginActionResponse{Body: []byte(raw)}, nil
+	}
 	body, err := json.Marshal(state["snapshot"])
 	if err != nil {
 		return nil, err

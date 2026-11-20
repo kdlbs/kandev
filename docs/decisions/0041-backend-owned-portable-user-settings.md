@@ -88,6 +88,10 @@ intact. Retired moves are excluded from successor replay, so a missing endpoint
 cannot poison an unrelated queued edit. A dispatched full-order replacement
 carries `view_order_base`; CAS rejects it if the observed committed order
 changed, preserving a concurrent move rather than silently undoing it.
+A definitive HTTP rejection retires dispatched move intent even when both
+endpoints survive. An independent successor must not give that rejected move a
+fresh order baseline. Transport-uncertain failures retain the existing guarded
+replay behavior; timeout and rate-limit responses are not definitive rejection.
 Disclosure canonicalization deduplicates current committed keys without
 replacing concurrent additions.
 
