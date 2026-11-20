@@ -1017,6 +1017,7 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 }
 
 const stopReasonStaleExecutionCleanup = "stale execution cleanup"
+const stopReasonTerminalRuntimeReclaim = "terminal runtime reclaim"
 
 // CleanupStaleExecutionBySessionID cleans up a stale execution: stops the runtime
 // instance, closes the client connection, and removes it from tracking.
@@ -1080,12 +1081,105 @@ func (m *Manager) CleanupStaleExecutionBySessionIDIfCurrent(
 	return err
 }
 
+// CleanupLiveExecutionIfCurrent reports whether the exact tracked standalone
+// instance was actually passed through successful lifecycle cleanup.
+func (m *Manager) CleanupLiveExecutionIfCurrent(ctx context.Context, sessionID, executionID string, updatedAt time.Time) (bool, error) {
+	if sessionID == "" || executionID == "" || updatedAt.IsZero() {
+		return false, nil
+	}
+	reader, canRead := m.runningWriter.(executorRunningReader)
+	writer, canRepair := m.runningWriter.(executorRunningCASWriter)
+	if !canRead || !canRepair || m.executorRegistry == nil {
+		return false, nil
+	}
+	// Keep the caller's admission fence until any admitted stop finishes.
+	value, err := m.doSerializedExecution(context.WithoutCancel(ctx), sessionID, func(sharedCtx context.Context) (interface{}, error) {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		sharedCtx, cancel := context.WithTimeout(sharedCtx, 30*time.Second)
+		defer cancel()
+		confirmed, cleanupErr := m.cleanupLiveExecutionLocked(sharedCtx, reader, writer, sessionID, executionID, updatedAt)
+		return confirmed, cleanupErr
+	})
+	if err != nil {
+		return false, err
+	}
+	confirmed, ok := value.(bool)
+	return ok && confirmed, nil
+}
+
+func (m *Manager) cleanupLiveExecutionLocked(ctx context.Context, reader executorRunningReader, writer executorRunningCASWriter, sessionID, executionID string, updatedAt time.Time) (bool, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists || !m.canReclaimLiveExecution(execution, executionID) {
+		return false, nil
+	}
+	if m.recoveryGuard != nil && m.recoveryGuard.CheckLaunchAllowed(sessionID) != nil {
+		return false, nil
+	}
+	current, err := reader.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil || current == nil || current.AgentExecutionID != executionID || !current.UpdatedAt.Equal(updatedAt) {
+		return false, err
+	}
+	// Deleting the standalone instance also stops the workspace processes it
+	// hosts (dev servers, scripts and shell commands). Leave the owner live
+	// while any of them may still be running; a later reconcile retries.
+	if m.liveExecutionHasWorkspaceProcesses(ctx, execution) {
+		return false, nil
+	}
+	repair := func(ctx context.Context) error {
+		return writer.RepairExecutorRunningDeadIfCurrent(ctx, sessionID, executionID, updatedAt)
+	}
+	if err := m.cleanupTrackedExecution(ctx, execution, repair, stopReasonTerminalRuntimeReclaim); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (m *Manager) canReclaimLiveExecution(execution *AgentExecution, executionID string) bool {
+	// Passthrough stop is best effort. Keep the owner while a separate
+	// interactive process may still be running.
+	return execution != nil && execution.ID == executionID && execution.RuntimeName == executor.NameStandalone &&
+		execution.standaloneInstanceID != "" && execution.PassthroughProcessID == "" && !m.isRetiredLocalExecution(execution)
+}
+
+// liveExecutionHasWorkspaceProcesses reports whether the execution's agentctl
+// instance hosts a process that has not reached a terminal status. An
+// unavailable client or an unreadable process list counts as active work.
+func (m *Manager) liveExecutionHasWorkspaceProcesses(ctx context.Context, execution *AgentExecution) bool {
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return true
+	}
+	processes, err := client.ListProcesses(ctx, "")
+	if err != nil {
+		m.logger.Debug("cannot read workspace processes; keeping live terminal runtime",
+			zap.String("session_id", execution.SessionID),
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+		return true
+	}
+	for i := range processes {
+		if !isTerminalProcessStatus(processes[i].Status) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExecution) error {
 	return m.cleanupStaleExecutionWithCheckpoint(ctx, execution, nil)
 }
 
 func (m *Manager) cleanupStaleExecutionWithCheckpoint(
 	ctx context.Context, execution *AgentExecution, checkpoint func(context.Context) error,
+) error {
+	return m.cleanupTrackedExecution(ctx, execution, checkpoint, stopReasonStaleExecutionCleanup)
+}
+
+func (m *Manager) cleanupTrackedExecution(
+	ctx context.Context, execution *AgentExecution, checkpoint func(context.Context) error, reason string,
 ) error {
 	if execution == nil {
 		return nil
@@ -1116,7 +1210,7 @@ func (m *Manager) cleanupStaleExecutionWithCheckpoint(
 	// execution is created for the same session, causing git polling on deleted worktrees.
 	// This is idempotent — returns success if the instance is already gone.
 	if !retired {
-		if err := m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false); err != nil {
+		if err := m.stopAgentViaBackend(ctx, execution.ID, execution, reason, false, false); err != nil {
 			return fmt.Errorf("stop stale runtime %s: %w", execution.ID, err)
 		}
 	}
@@ -1130,13 +1224,7 @@ func (m *Manager) cleanupStaleExecutionWithCheckpoint(
 	// remains retryable and should keep the execution's lifecycle intact.
 	execution.EndSessionSpan()
 
-	// Close agentctl connection if it exists
-	execution.agentctlLifecycleMu.Lock()
-	if client := execution.currentAgentCtlClient(); client != nil { // protected by agentctlLifecycleMu
-		client.Close()
-	}
-	execution.detachAgentctlClient()
-	execution.agentctlLifecycleMu.Unlock()
+	m.closeStaleAgentctlClient(execution)
 
 	// Remove from execution store
 	m.RemoveExecution(execution.ID)
@@ -1144,11 +1232,20 @@ func (m *Manager) cleanupStaleExecutionWithCheckpoint(
 	// Delete the persistence row in lockstep with store removal so we never
 	// leave a phantom executors_running row pointing at a non-existent
 	// execution. Best-effort; "not found" is expected and silently swallowed.
-	if !retired {
+	if !retired && reason != stopReasonTerminalRuntimeReclaim {
 		m.deleteExecutorRunning(ctx, sessionID, execution.ID)
 	}
 
 	return nil
+}
+
+func (m *Manager) closeStaleAgentctlClient(execution *AgentExecution) {
+	execution.agentctlLifecycleMu.Lock()
+	defer execution.agentctlLifecycleMu.Unlock()
+	if client := execution.currentAgentCtlClient(); client != nil {
+		client.Close()
+	}
+	execution.detachAgentctlClient()
 }
 
 // RemoveExecution removes an execution from tracking.
