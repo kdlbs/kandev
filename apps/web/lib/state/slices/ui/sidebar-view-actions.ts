@@ -177,7 +177,7 @@ function syncSidebarWrite(
   const completed = enqueueSidebarSettingsSync(set, get, writePayload, () => desired, kind).then(
     (persisted) => {
       succeeded = true;
-      const failedLocalWrite = journal.failedLocalWrite;
+      const failedUnreplayedWrite = journal.failedUnreplayedWrite;
       journal.pending--;
       if (!persisted && thisRequestId !== journal.latestRequestId) return;
       if (kind !== "local" || thisRequestId === journal.latestRequestId)
@@ -190,17 +190,17 @@ function syncSidebarWrite(
       ) {
         restoreFailedViewMutation(set, journal.failedRollback);
       }
-      if (!failedLocalWrite || thisRequestId === journal.latestRequestId)
+      if (!failedUnreplayedWrite || thisRequestId === journal.latestRequestId)
         clearSidebarWriteRollback(journal);
       if (thisRequestId === journal.latestRequestId)
         set((state) => {
           const server = state.sidebarViews.deferredServerState;
           if (server) Object.assign(state.sidebarViews, server);
-          else if (kind === "compaction" || failedLocalWrite)
+          else if (kind === "compaction" || failedUnreplayedWrite)
             Object.assign(state.sidebarViews, journal.confirmed!);
           state.sidebarViews.syncPending = false;
           state.sidebarViews.transitionPending = false;
-          if (persisted && kind !== "local" && !failedLocalWrite)
+          if (persisted && kind !== "local" && !failedUnreplayedWrite)
             state.sidebarViews.syncError = null;
           state.sidebarViews.deferredServerState = null;
         });

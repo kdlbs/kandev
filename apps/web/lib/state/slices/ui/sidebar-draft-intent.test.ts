@@ -18,6 +18,7 @@ beforeEach(() => {
   vi.mocked(updateUserSettings).mockReset();
 });
 const MULTI = "plugin:tags:multi-tags";
+const USER_ID = "default-user";
 
 it.each(["field edit after compaction", "compaction after acknowledged field edit"])(
   "merges independent draft intent: %s",
@@ -39,7 +40,7 @@ it.each(["field edit after compaction", "compaction after acknowledged field edi
     let revision = 1;
     const acknowledge = (): UserSettingsResponse => ({
       settings: {
-        user_id: "default-user",
+        user_id: USER_ID,
         workspace_id: workspaceId("ws"),
         repository_ids: [],
         updated_at: "",
@@ -111,7 +112,7 @@ it("a queued discard cannot clear a newer different-group draft", async () => {
   };
   const acknowledge = (): UserSettingsResponse => ({
     settings: {
-      user_id: "default-user",
+      user_id: USER_ID,
       workspace_id: workspaceId("ws"),
       repository_ids: [],
       updated_at: "",
@@ -177,7 +178,7 @@ it.each([
     };
     const ack = (): UserSettingsResponse => ({
       settings: {
-        user_id: "default-user",
+        user_id: USER_ID,
         workspace_id: workspaceId("ws"),
         repository_ids: [],
         updated_at: "",
@@ -213,5 +214,73 @@ it.each([
       mapSidebarWorkspaces({ ws: server }).ws.draft,
     );
     expect(store.getState().sidebarViewsByWorkspace.ws.syncError).toBeTruthy();
+  },
+);
+
+it.each([
+  ["selection", 400],
+  ["selection", 500],
+  ["save", 400],
+  ["save", 500],
+] as const)(
+  "retains failed %s status %s behind successful disclosure compaction",
+  async (transition, status) => {
+    const base = {
+      ...createDefaultSidebarView("base", "Tag"),
+      group: "plugin:tags:tags" as const,
+      collapsedGroups: ["kept", "retired"],
+    };
+    let server: SidebarWorkspaceStateApi = {
+      views: [toApiSidebarView(base)],
+      active_view_id: base.id,
+      draft:
+        transition === "save"
+          ? toApiSidebarDraft({
+              baseViewId: base.id,
+              filters: [],
+              sort: { ...base.sort, direction: "desc" },
+              group: base.group,
+              groupIndent: true,
+              collapsedGroups: [],
+            })
+          : null,
+    };
+    const store = createAppStore({
+      workspaces: { items: [], activeId: "ws" },
+      sidebarViewsByWorkspace: mapSidebarWorkspaces({ ws: server }, {}, 1),
+    });
+    const first = Promise.withResolvers<UserSettingsResponse>();
+    vi.mocked(updateUserSettings)
+      .mockImplementation(async (payload) => {
+        const views = new Map(server.views.map((view) => [view.id, view]));
+        applyViewMutationsForTest(views, payload.sidebar_view_state!);
+        server = { ...server, views: [...views.values()] };
+        return {
+          settings: {
+            user_id: USER_ID,
+            workspace_id: workspaceId("ws"),
+            repository_ids: [],
+            updated_at: "",
+            revision: 2,
+            sidebar_views_by_workspace: { ws: structuredClone(server) },
+          },
+        };
+      })
+      .mockImplementationOnce(() => first.promise);
+    if (transition === "selection")
+      store.getState().selectSidebarPluginGrouping({ reference: MULTI, label: "Multi-tag" });
+    else store.getState().saveSidebarDraftOverwrite();
+    const compacted = store
+      .getState()
+      .reconcileSidebarGroupDisclosure(base.id, base.group, base.collapsedGroups, ["kept"]);
+    first.reject(new ApiError("Transition refused", status, {}));
+    await compacted;
+    await store.getState().waitForSidebarViewSync("ws");
+    const state = store.getState().sidebarViewsByWorkspace.ws;
+    expect(state.activeViewId).toBe(base.id);
+    expect(state.views[0].collapsedGroups).toEqual(["kept"]);
+    expect(state.draft).toEqual(mapSidebarWorkspaces({ ws: server }).ws.draft);
+    expect(state.transitionPending).toBe(false);
+    expect(state.syncError).toBeTruthy();
   },
 );

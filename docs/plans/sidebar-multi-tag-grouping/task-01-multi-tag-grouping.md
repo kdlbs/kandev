@@ -928,3 +928,30 @@ Receipts: `~/.cache/sidebar-multi-tag-build/evidence/r12-*`. No new real Tags
 package installation, physical-phone, PostgreSQL, remote-CI or broad-suite
 certification. Protected demo and primary instances remain untouched. No release
 or deployment. Subsequent full-source review uses Opus.
+
+### Opus post-rebase round 15 correction
+
+Round 15 reported one low-severity unreplayed-transition failure lost behind
+successful disclosure compaction. Rounds 13/14 were source-only CLEAN on the
+previous snapshot; this confirmed finding resets the streak to 0/3.
+
+Four failing-first store cases reproduce selection and overwrite-save failures
+at HTTP 400/500 followed by successful compaction: disclosure and authoritative
+state settle, but the failure indication disappears. The journal now tracks
+`failedUnreplayedWrite` for local, selection and draft-save writes. It survives
+intermediate acknowledgements and suppresses terminal error clearing; replayed
+view mutations and self-healing compaction remain separate.
+
+Final proof: 60 focused frontend tests, scoped types/ESLint, and fresh frontend
+build (51.07s). Three changed code/test paths byte-match the tested mirror.
+Existing native desktop save/selection boundaries passed 4/4; separate true-touch
+reorder/retry controls passed 5/5. The exact new race is proven at the store/
+transport boundary, not claimed as a new browser-interleaving test.
+Complexity and duplicate-fixture-literal warnings were fixed with a private
+write classification predicate and shared test actor constant; no lint limits
+or assertions were weakened.
+
+Receipts: `~/.cache/sidebar-multi-tag-build/evidence/r15-*`. No backend, SDK,
+Tags, API, transport-policy or copy changes. No fresh package reinstall,
+physical-phone, PostgreSQL, broad-suite or remote-CI certification. Protected
+instances untouched; no release/deploy authorization. Next review uses Opus.

@@ -95,10 +95,12 @@ the natural post-mutation order, while comparing the observed base with the
 pre-mutation order. A create/delete successor must not conflict with its own
 already-committed move.
 
-A failed local prerequisite may leave later owner-guarded patches as no-ops.
-At terminal acknowledgement the client adopts the latest confirmed snapshot
-and retains the failure indication instead of keeping a phantom active view
-or draft. This failure marker survives intermediate queued acknowledgements.
+Failed local prerequisites, provider selections and draft saves are not replayed
+by disclosure compaction. At terminal acknowledgement the client adopts the
+latest confirmed snapshot and preserves their failure indication instead of
+keeping phantom state or silently discarding a transition failure. This marker
+survives intermediate queued acknowledgements; replayed view mutations and
+self-healing compaction keep their separate recovery policies.
 A definitive HTTP rejection retires dispatched move intent even when both
 endpoints survive. An independent successor must not give that rejected move a
 fresh order baseline. Transport-uncertain failures retain the existing guarded
