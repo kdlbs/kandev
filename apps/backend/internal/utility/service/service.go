@@ -503,19 +503,24 @@ func (s *Service) CreateCall(ctx context.Context, utilityID, sessionID, resolved
 	if len(profileID) > 0 {
 		call.AgentProfileID = profileID[0]
 	}
-	if err := s.repo.CreateCall(ctx, call); err != nil {
-		return nil, err
-	}
-	return call, nil
+	return s.createCall(ctx, call)
 }
 
 func (s *Service) CreateCallWithExecutionProfile(ctx context.Context, utilityID, sessionID, resolvedPrompt, model, logicalProfileID, executionProfileID string) (*models.UtilityAgentCall, error) {
-	call, err := s.CreateCall(ctx, utilityID, sessionID, resolvedPrompt, model, logicalProfileID)
-	if err != nil {
-		return nil, err
-	}
-	call.ExecutionProfileID = executionProfileID
-	if err := s.repo.UpdateCall(ctx, call); err != nil {
+	return s.createCall(ctx, &models.UtilityAgentCall{
+		UtilityID:          utilityID,
+		SessionID:          sessionID,
+		ResolvedPrompt:     resolvedPrompt,
+		Model:              model,
+		AgentProfileID:     logicalProfileID,
+		ExecutionProfileID: executionProfileID,
+		Status:             "pending",
+		CreatedAt:          time.Now().UTC(),
+	})
+}
+
+func (s *Service) createCall(ctx context.Context, call *models.UtilityAgentCall) (*models.UtilityAgentCall, error) {
+	if err := s.repo.CreateCall(ctx, call); err != nil {
 		return nil, err
 	}
 	return call, nil
@@ -558,6 +563,20 @@ func (s *Service) FailCall(ctx context.Context, callID, errorMessage string, dur
 	call.ErrorMessage = errorMessage
 	call.DurationMs = durationMs
 	call.Status = "failed"
+	call.CompletedAt = &now
+	return s.repo.UpdateCall(ctx, call)
+}
+
+// CancelCall marks a call as cancelled by the client. The terminal fields match
+// FailCall so a cancelled invocation leaves no pending row behind.
+func (s *Service) CancelCall(ctx context.Context, callID string, durationMs int) error {
+	call, err := s.repo.GetCallByID(ctx, callID)
+	if err != nil {
+		return ErrCallNotFound
+	}
+	now := time.Now().UTC()
+	call.DurationMs = durationMs
+	call.Status = models.CallStatusCancelled
 	call.CompletedAt = &now
 	return s.repo.UpdateCall(ctx, call)
 }

@@ -41,9 +41,14 @@ afterEach(async () => {
   useEditorResolverStore.getState().setProvider(EDITOR_CONTEXT, previousEditor);
 });
 
-function mountPanel(active = false, strict = false, dirty = false) {
+function mountPanel(
+  active = false,
+  strict = false,
+  dirty = false,
+  { path = FILE, loaded = true } = {},
+) {
   let store!: ReturnType<typeof useAppStoreApi>;
-  const host = panelHost(FILE, REPO, active);
+  const host = panelHost(path, REPO, active);
   function Probe() {
     store = useAppStoreApi();
     useFileEditors();
@@ -54,9 +59,7 @@ function mountPanel(active = false, strict = false, dirty = false) {
       children: (
         <CommandRegistryProvider>
           <Probe />
-          {visible && (
-            <FileEditorPanel panelId={host.panel.id} params={{ path: FILE, repo: REPO }} />
-          )}
+          {visible && <FileEditorPanel panelId={host.panel.id} params={{ path, repo: REPO }} />}
         </CommandRegistryProvider>
       ),
     });
@@ -64,11 +67,12 @@ function mountPanel(active = false, strict = false, dirty = false) {
   };
   const root = render(tree(false));
   const session = selectSession(store);
-  seed(
-    dirty
-      ? { content: LOCAL_DRAFT, originalContent: "initial disk", isDirty: true }
-      : { isBinary: true },
-  );
+  if (loaded)
+    seed(
+      dirty
+        ? { content: LOCAL_DRAFT, originalContent: "initial disk", isDirty: true }
+        : { isBinary: true },
+    );
   panelPortalManager.acquire(host.panel.id, "file-editor", host.panel.params, host.api);
   registeredPanel = host.panel.id;
   root.rerender(tree(true));
@@ -213,4 +217,18 @@ describe("actual dirty panel affordance @covers AC-UI-FILE-EDITOR-MUTATION-001.9
       remoteContent: "new remote",
     });
   });
+});
+
+it("uses the latest Markdown default when an initial load completes without another read", async () => {
+  const panel = mountPanel(false, false, false, { path: "README.md", loaded: false });
+  expect(wire.requests).toHaveLength(1);
+  act(() =>
+    panel.store
+      .getState()
+      .setUserSettings({ ...panel.store.getState().userSettings, markdownPreviewByDefault: false }),
+  );
+  expect(wire.requests).toHaveLength(1);
+  await wire.reply(0, "# README");
+  await waitFor(() => expect(buffer("README.md").renderedPreview).toBe(false));
+  expect(wire.requests).toHaveLength(1);
 });

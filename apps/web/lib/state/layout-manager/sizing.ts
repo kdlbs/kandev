@@ -1,4 +1,4 @@
-import type { LayoutColumn, LayoutGroup } from "./types";
+import type { LayoutColumn, LayoutGroup, LayoutOrientation } from "./types";
 import { LAYOUT_RIGHT_RATIO, LAYOUT_SIDEBAR_RATIO } from "./constants";
 import { computePinnedMaxPxFor, computeSidebarMaxPx, LAYOUT_PINNED_MIN_PX } from "./caps";
 import { getGlobalSidebarWidth } from "@/lib/local-storage";
@@ -144,6 +144,44 @@ export function computeColumnWidths(
   const bucket = classifyColumns(columns, totalWidth, pinnedWidths);
   const remainingSpace = Math.max(0, totalWidth - bucket.pinnedTotal);
   return computeFlexWidths(columns, bucket, remainingSpace);
+}
+
+/**
+ * Sizes of the root split's children along the root axis, plus the orthogonal
+ * extent every child shares.
+ *
+ * A HORIZONTAL (or legacy, unspecified) root distributes the width and applies
+ * the pinned sidebar/right policy. A VERTICAL root distributes the height: its
+ * rows carry no horizontal pin, override, or width cap, even when an older
+ * snapshot flagged them `pinned`.
+ */
+export function computeRootAxisSizes(
+  columns: LayoutColumn[],
+  rootOrientation: LayoutOrientation | undefined,
+  totalWidth: number,
+  totalHeight: number,
+  pinnedWidths: Map<string, number>,
+): { sizes: number[]; orthogonal: number } {
+  if (rootOrientation === "VERTICAL") {
+    const rows = columns.map((column) => ({ ...column, pinned: false }));
+    const sizes = computeColumnWidths(rows, totalHeight, new Map());
+    const used = sizes.reduce((sum, size) => sum + size, 0);
+    if (used > totalHeight) {
+      let sourceEnd = 0;
+      let allocated = 0;
+      for (let index = 0; index < sizes.length; index++) {
+        sourceEnd += sizes[index];
+        const end = Math.round((sourceEnd / used) * totalHeight);
+        sizes[index] = end - allocated;
+        allocated = end;
+      }
+    }
+    return { sizes, orthogonal: totalWidth };
+  }
+  return {
+    sizes: computeColumnWidths(columns, totalWidth, pinnedWidths),
+    orthogonal: totalHeight,
+  };
 }
 
 /**

@@ -302,11 +302,11 @@ owning child lifecycle removes the relation. Refresh alone does not guarantee th
 can finish. This package does not broaden ordinary cascade ownership to delete those excluded
 children; no-cascade promotion retains its existing workspace-scoped structural update.
 
-Quick-chat expiry (`DeleteExpiredQuickChatTask`) and profile-owned ephemeral deletion
-(`DeleteEphemeralTasksByAgentProfile` in `session.go`) are legacy specialized deletion paths;
-they do not receive a broad cascade redesign in this package. Their ability to remove a task with
-unusual incoming parent references remains an explicit residual risk, outside the ordinary
-parent-deletion guarantee. Guarded exact retirement already excludes relation-bearing candidates;
+Explicit Quick Chat deletion continues through the existing task deletion lifecycle.
+Profile-owned ephemeral deletion (`DeleteEphemeralTasksByAgentProfile` in `session.go`) remains
+a specialized path and does not receive a broad cascade redesign in this package. Its ability to
+remove a task with unusual incoming parent references remains an explicit residual risk, outside
+the ordinary parent-deletion guarantee. Guarded exact retirement already excludes relation-bearing candidates;
 its separate association/F19 boundary stays unchanged. Workspace deletion covers same-workspace
 trees; historical Office cross-workspace links can become dangling on a workspace cascade and
 remain outside the canonical same-workspace contract. These exclusions must appear in delivery

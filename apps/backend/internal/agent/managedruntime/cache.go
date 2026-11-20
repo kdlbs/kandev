@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/winpath"
 )
 
 const npxExecutionKeyLength = 16
@@ -81,11 +83,11 @@ func RemoveNpxExecutionTree(cacheRoot, packageSpec string) error {
 
 func validateNpmCacheRoot(cacheRoot string) (string, error) {
 	cacheRoot = strings.TrimSpace(cacheRoot)
-	if cacheRoot == "" || !filepath.IsAbs(cacheRoot) {
+	if cacheRoot == "" || (!filepath.IsAbs(cacheRoot) && !winpath.IsVolumeRoot(cacheRoot)) {
 		return "", fmt.Errorf("npm cache root is not absolute: %q", cacheRoot)
 	}
 	root := filepath.Clean(cacheRoot)
-	if root == string(filepath.Separator) || filepath.Base(root) == "_npx" {
+	if isNpmCacheRootTooBroad(root) {
 		return "", errors.New("refusing to invalidate npm cache root")
 	}
 	if info, err := os.Lstat(root); err == nil {
@@ -99,4 +101,10 @@ func validateNpmCacheRoot(cacheRoot string) (string, error) {
 		return "", fmt.Errorf("inspect npm cache root: %w", err)
 	}
 	return root, nil
+}
+
+func isNpmCacheRootTooBroad(cacheRoot string) bool {
+	return cacheRoot == string(filepath.Separator) ||
+		filepath.Base(cacheRoot) == "_npx" ||
+		winpath.IsVolumeRoot(cacheRoot)
 }

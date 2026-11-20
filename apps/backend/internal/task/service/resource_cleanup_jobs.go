@@ -161,6 +161,7 @@ type taskResourceCleanupSnapshot struct {
 	OrphanReapSkips               []orphanReapSkipRecord  `json:"orphan_reap_skips,omitempty"`
 	ArchiveSourceManifest         []ArchiveSourceManifest `json:"archive_source_manifest,omitempty"`
 	ArchiveSourceManifestCaptured bool                    `json:"archive_source_manifest_captured,omitempty"`
+	ArchiveSourceManifestRequired bool                    `json:"archive_source_manifest_required,omitempty"`
 }
 
 // ArchiveSourceManifest is the task-scoped evidence retained before an archive
@@ -228,7 +229,7 @@ func (s *Service) persistTaskResourceCleanupWithManagedClaim(
 		operationID = newTaskResourceCleanupOperationID(trigger, taskID)
 	}
 	jobID := uuid.NewString()
-	worktreeHeadOIDs, preparationErrors, err := s.captureCleanupHeadOIDsForMode(ctx, worktrees, DeleteTaskOptions{WorkspaceCleanup: envCleanup.workspaceCleanup, AllowUnverifiedWorkspaceChanges: envCleanup.allowUnverifiedWorkspaceChanges, DiscardWorktreeChanges: envCleanup.discardWorktreeChanges})
+	worktreeHeadOIDs, preparationErrors, err := s.captureCleanupIdentities(ctx, worktrees, trigger, DeleteTaskOptions{WorkspaceCleanup: envCleanup.workspaceCleanup, AllowUnverifiedWorkspaceChanges: envCleanup.allowUnverifiedWorkspaceChanges, DiscardWorktreeChanges: envCleanup.discardWorktreeChanges})
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +244,7 @@ func (s *Service) persistTaskResourceCleanupWithManagedClaim(
 		return nil, err
 	}
 	snapshot := taskResourceCleanupSnapshot{
+		ArchiveSourceManifestRequired:   (&models.TaskResourceCleanupJob{Trigger: trigger}).IsArchive(),
 		CleanupPreparationErrors:        preparationErrors,
 		AllowUnverifiedWorkspaceChanges: envCleanup.allowUnverifiedWorkspaceChanges,
 		WorkspaceCleanup:                envCleanup.workspaceCleanup,
@@ -1038,6 +1040,9 @@ func (s *Service) prepareArchiveReclaimWorktree(
 		}
 		return nil, taskArchiveReclaimOutcomeStale, nil
 	}
+	if err := s.checkArchiveReclaimInspection(ctx, job.TaskID, snapshot.WorktreeID); err != nil {
+		return nil, "", err
+	}
 	wt, err := s.loadArchiveReclaimWorktree(ctx, job, snapshot)
 	if err != nil || wt == nil {
 		if err != nil {
@@ -1322,10 +1327,22 @@ func (s *Service) executeTaskResourceCleanupJob(
 			return err
 		}
 	}
+	// Capture paths before any resource removal and retain evidence on every exit.
+	reapRootCandidates := s.gatherOrphanReapRootCandidates(snapshot, cleanupSessionIDs(snapshot.Sessions, targets))
+	defer func() {
+		snapshot.OrphanReapRoots = mergeOrphanReapRoots(snapshot.OrphanReapRoots, confirmOrphanReapRootsRemoved(reapRootCandidates))
+	}()
 	cleanupWorktrees := snapshot.Worktrees
 	cleanupEnvironment := snapshot.TaskEnvironment
 	var errs []error
-	if snapshot.AllowUnverifiedWorkspaceChanges {
+	if job.IsArchive() {
+		if err := s.cleanupArchiveWorktrees(ctx, job, snapshot, stopOutcome); err != nil {
+			rowErrs := s.cleanupExecutorRuntimeRows(ctx, job.TaskID, cleanupSessionIDs(snapshot.Sessions, targets), taskCleanupPreserveRows(stopOutcome))
+			return errors.Join(append(rowErrs, err)...)
+		}
+		cleanupWorktrees = nil
+		cleanupEnvironment = taskEnvironmentWithoutSnapshotWorktrees(snapshot.TaskEnvironment, snapshot.Worktrees)
+	} else if snapshot.AllowUnverifiedWorkspaceChanges {
 		resourceErrs, err := s.cleanupUnverifiedWorktrees(ctx, job, snapshot, stopOutcome)
 		if err != nil {
 			return errors.Join(append(resourceErrs, err)...)
@@ -1360,11 +1377,6 @@ func (s *Service) executeTaskResourceCleanupJob(
 			errs = append(errs, fmt.Errorf("delete task attachments: %w", attachmentErr))
 		}
 	}
-	// Resolve every path this attempt might remove WHILE IT STILL EXISTS,
-	// before performTaskCleanup can remove it.
-	reapRootCandidates := s.gatherOrphanReapRootCandidates(
-		snapshot, cleanupSessionIDs(snapshot.Sessions, targets),
-	)
 	errs = append(errs, s.performTaskCleanup(ctx, job.TaskID, snapshot.Sessions, cleanupWorktrees, targets,
 		taskEnvironmentCleanup{
 			env: cleanupEnvironment, deleteRow: snapshot.DeleteEnvironmentRow,

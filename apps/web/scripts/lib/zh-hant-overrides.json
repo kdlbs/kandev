@@ -22,6 +22,7 @@
       },
       "task": {
         "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。您的訊息會保留。",
+        "taskMoveErrorExecutorUnavailable": "此任務的執行器設定檔已無法使用，因此此步驟的代理程式無法啟動。",
         "proxy": "代理伺服器",
         "pathBasedProxyWorksForApis": "路徑型代理伺服器。適用於 API，但可能導致預期由 / 提供服務的 Web 應用程式無法正常運作。",
         "checkoutOptions.providerUnsupported": "高階檢出選項目前適用於 GitHub 儲存庫。"
@@ -72,6 +73,7 @@
         "withManagedWorkspaceCredentialsKandevConfigures": "使用受管理的工作區認證資料時，Kandev 會在新啓動的任務程序中，將 agentctl 設為 Git 的認證輔助程式。當 Git 要求取得已附加 GitHub HTTPS 儲存庫的認證資料時，輔助程式會兌換只適用於該任務及儲存庫的 broker 租約。認證資料會在需要時傳回 Git，且不會寫入儲存庫或 Git 設定。gh 命令會使用 Kandev 支援 broker 的轉接程式。繼承執行器設定則會略過這兩者，改用所選執行器可見的認證資料。變更會套用至新啓動的任務及下次繼續執行，不會影響已在執行的程序。"
       },
       "task": {
+        "taskMoveErrorExecutorUnavailable": "此任務的執行器設定檔已無法使用，因此此步驟的代理程式無法啟動。",
         "proxy": "代理伺服器",
         "pathBasedProxyWorksForApis": "路徑型代理伺服器。適用於 API，但可能導致預期由 / 提供服務的 Web 應用程式無法正常運作。"
       },

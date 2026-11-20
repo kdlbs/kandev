@@ -186,11 +186,13 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	authArgs ...authSessionArgs,
 ) (string, error) {
 	authPolicy, consent, _ := authSessionOptions(authArgs)
+	updates := newACPProbeNotificationState(agentID)
 	// Collect response text from updates
 	var responseText strings.Builder
 	var mu sync.Mutex
 
 	updateHandler := func(n acp.SessionNotification) {
+		updates.handle(n)
 		if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil {
 			chunk := sanitizeInferenceChunk(n.Update.AgentMessageChunk.Content.Text.Text)
 			if chunk == "" {
@@ -258,27 +260,49 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	}
 
 	sessionID := sessionResp.SessionId
+	updates.setSessionID(sessionID)
 
 	// Optionally set the session model before prompting. ACP-first agents
 	// declare no CLI ModelFlag, so `--model` is not appended at spawn time.
 	// Model selection may be a model-shaped config option (Codex/Cursor) or
 	// the older unstable session/set_model method, depending on the agent.
 	if model != "" {
-		if _, err := applySessionModel(ctx, conn, sessionID, model, sessionResp.ConfigOptions); err != nil {
+		updated, err := applyUtilityModel(ctx, conn, sessionID, model, sessionResp.ConfigOptions, updates)
+		if err != nil {
 			return "", fmt.Errorf("ACP model selection failed: %w", err)
 		}
+		if updated != nil {
+			sessionResp.ConfigOptions = updated
+		}
 	}
-	if _, err := applySessionConfigOptions(ctx, conn, string(sessionID), modelConfigOptions); err != nil {
+	if err := validateRequestedConfigOptions(modelConfigOptions, sessionResp.ConfigOptions); err != nil {
 		return "", fmt.Errorf("ACP model config selection failed: %w", err)
+	}
+	if updated, err := applyProbeConfigOptions(
+		ctx, conn, sessionID, modelConfigOptions, sessionResp.ConfigOptions, updates,
+	); err != nil {
+		return "", fmt.Errorf("ACP model config selection failed: %w", err)
+	} else if updated != nil {
+		sessionResp.ConfigOptions = updated
 	}
 
 	// Optionally set the session mode before prompting.
 	if mode != "" {
-		if _, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
-			SessionId: sessionID,
-			ModeId:    acp.SessionModeId(mode),
-		}); err != nil {
-			return "", fmt.Errorf("ACP session/set_mode failed: %w", err)
+		updated, err := applySessionMode(
+			ctx,
+			conn,
+			sessionID,
+			mode,
+			sessionResp.ConfigOptions,
+			sessionResp.Modes,
+			updates,
+			true,
+		)
+		if err != nil {
+			return "", err
+		}
+		if updated != nil {
+			sessionResp.ConfigOptions = updated
 		}
 	}
 
@@ -420,6 +444,36 @@ func filterRequestedConfigOptions(
 		return nil
 	}
 	return filtered
+}
+
+func validateRequestedConfigOptions(
+	requested map[string]string,
+	available []acp.SessionConfigOption,
+) error {
+	availableValues := make(map[string]map[string]struct{}, len(available))
+	for _, option := range available {
+		if option.Select == nil {
+			continue
+		}
+		values := make(map[string]struct{})
+		for _, choice := range selectOptionsUngrouped(option.Select.Options) {
+			values[string(choice.Value)] = struct{}{}
+		}
+		availableValues[string(option.Select.Id)] = values
+	}
+	for id, value := range requested {
+		values, ok := availableValues[id]
+		if !ok {
+			return fmt.Errorf("requested model setting %q is not advertised", id)
+		}
+		if len(values) == 0 {
+			continue
+		}
+		if _, ok := values[value]; !ok {
+			return fmt.Errorf("requested model setting %q value %q is not advertised", id, value)
+		}
+	}
+	return nil
 }
 
 // toACPMcpServers converts the cross-process DTO list into the ACP SDK shape.
@@ -833,6 +887,7 @@ func isOpenCodeModelID(id string) bool {
 type acpProbeNotificationState struct {
 	agentID             string
 	mu                  sync.Mutex
+	sessionID           acp.SessionId
 	commands            []ProbeCommand
 	configOptions       []acp.SessionConfigOption
 	configUpdateVersion int
@@ -848,15 +903,26 @@ func newACPProbeNotificationState(agentID string) *acpProbeNotificationState {
 	}
 }
 
+func (s *acpProbeNotificationState) setSessionID(sessionID acp.SessionId) {
+	s.mu.Lock()
+	s.sessionID = sessionID
+	s.mu.Unlock()
+}
+
 func (s *acpProbeNotificationState) handle(n acp.SessionNotification) {
 	if update := n.Update.ConfigOptionUpdate; update != nil {
 		s.mu.Lock()
-		s.configOptions = append([]acp.SessionConfigOption(nil), update.ConfigOptions...)
-		s.configUpdateVersion++
+		activeSession := s.sessionID != "" && n.SessionId == s.sessionID
+		if activeSession {
+			s.configOptions = copySessionConfigOptions(update.ConfigOptions)
+			s.configUpdateVersion++
+		}
 		s.mu.Unlock()
-		select {
-		case s.gotConfigOptions <- struct{}{}:
-		default:
+		if activeSession {
+			select {
+			case s.gotConfigOptions <- struct{}{}:
+			default:
+			}
 		}
 	}
 	if update := n.Update.AvailableCommandsUpdate; update != nil {
@@ -876,6 +942,12 @@ func (s *acpProbeNotificationState) handle(n acp.SessionNotification) {
 	}
 }
 
+func copySessionConfigOptions(options []acp.SessionConfigOption) []acp.SessionConfigOption {
+	copyOfOptions := make([]acp.SessionConfigOption, len(options))
+	copy(copyOfOptions, options)
+	return copyOfOptions
+}
+
 func (s *acpProbeNotificationState) currentConfigUpdateVersion() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -893,7 +965,7 @@ func (s *acpProbeNotificationState) waitForConfigUpdate(
 		case <-s.gotConfigOptions:
 			s.mu.Lock()
 			if s.configUpdateVersion > previousVersion {
-				updated := append([]acp.SessionConfigOption(nil), s.configOptions...)
+				updated := copySessionConfigOptions(s.configOptions)
 				s.mu.Unlock()
 				return updated, true, nil
 			}
@@ -924,12 +996,80 @@ type acpSessionModeSetter interface {
 	SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error)
 }
 
-func applyProbeMode(
+type acpModeConn interface {
+	sessionmodel.SDKConn
+	acpSessionModeSetter
+}
+
+func applySessionMode(
+	ctx context.Context,
+	conn acpModeConn,
+	sessionID acp.SessionId,
+	mode string,
+	configOptions []acp.SessionConfigOption,
+	legacyModes *acp.SessionModeState,
+	state *acpProbeNotificationState,
+	requireConfirmation bool,
+) ([]acp.SessionConfigOption, error) {
+	modeOption := findSelectConfigOption(configOptions, acp.SessionConfigOptionCategoryMode)
+	if modeOption == nil {
+		return applyLegacySessionMode(ctx, conn, sessionID, mode, state, !requireConfirmation)
+	}
+	if !modeOptionAdvertisesValue(modeOption, mode) {
+		return nil, fmt.Errorf("ACP mode %q is not advertised by config option %q", mode, modeOption.Id)
+	}
+
+	previousVersion := state.currentConfigUpdateVersion()
+	response, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
+		ValueId: &acp.SetSessionConfigOptionValueId{
+			SessionId: sessionID,
+			ConfigId:  modeOption.Id,
+			Value:     acp.SessionConfigValueId(mode),
+		},
+	})
+	if err != nil {
+		if !sessionmodel.IsMethodNotFound(err) || !legacyModeStateAdvertises(legacyModes, mode) {
+			return nil, fmt.Errorf("ACP session/set_config_option mode failed: %w", err)
+		}
+		return applyLegacySessionMode(ctx, conn, sessionID, mode, state, !requireConfirmation)
+	}
+
+	if response.ConfigOptions != nil {
+		if effective, present := configModeValue(response.ConfigOptions, modeOption.Id); present {
+			if effective != mode {
+				return nil, fmt.Errorf("ACP mode %q was not confirmed; provider selected %q", mode, effective)
+			}
+			return response.ConfigOptions, nil
+		}
+		if requireConfirmation {
+			return nil, fmt.Errorf("ACP mode %q was not confirmed", mode)
+		}
+		return response.ConfigOptions, nil
+	}
+	updated, received, err := state.waitForConfigUpdate(ctx, previousVersion)
+	if err != nil {
+		return nil, err
+	}
+	if !received {
+		if requireConfirmation {
+			return nil, fmt.Errorf("ACP mode %q was not confirmed", mode)
+		}
+		return nil, nil
+	}
+	effective, present := configModeValue(updated, modeOption.Id)
+	if !present || effective != mode {
+		return nil, fmt.Errorf("ACP mode %q was not confirmed", mode)
+	}
+	return updated, nil
+}
+
+func applyLegacySessionMode(
 	ctx context.Context,
 	conn acpSessionModeSetter,
 	sessionID acp.SessionId,
 	mode string,
 	state *acpProbeNotificationState,
+	waitForConfigUpdate bool,
 ) ([]acp.SessionConfigOption, error) {
 	previousVersion := state.currentConfigUpdateVersion()
 	if _, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
@@ -937,6 +1077,9 @@ func applyProbeMode(
 		ModeId:    acp.SessionModeId(mode),
 	}); err != nil {
 		return nil, fmt.Errorf("ACP session/set_mode failed: %w", err)
+	}
+	if !waitForConfigUpdate {
+		return nil, nil
 	}
 	updated, received, err := state.waitForConfigUpdate(ctx, previousVersion)
 	if err != nil {
@@ -956,6 +1099,29 @@ func applyProbeModel(
 	configOptions []acp.SessionConfigOption,
 	state *acpProbeNotificationState,
 ) ([]acp.SessionConfigOption, error) {
+	return applyModelAndRefreshConfigOptions(ctx, conn, sessionID, model, configOptions, state, true)
+}
+
+func applyUtilityModel(
+	ctx context.Context,
+	conn sessionmodel.SDKConn,
+	sessionID acp.SessionId,
+	model string,
+	configOptions []acp.SessionConfigOption,
+	state *acpProbeNotificationState,
+) ([]acp.SessionConfigOption, error) {
+	return applyModelAndRefreshConfigOptions(ctx, conn, sessionID, model, configOptions, state, false)
+}
+
+func applyModelAndRefreshConfigOptions(
+	ctx context.Context,
+	conn sessionmodel.SDKConn,
+	sessionID acp.SessionId,
+	model string,
+	configOptions []acp.SessionConfigOption,
+	state *acpProbeNotificationState,
+	requireModelSupport bool,
+) ([]acp.SessionConfigOption, error) {
 	previousVersion := state.currentConfigUpdateVersion()
 	method, returnedConfigOptions, err := applySessionModelWithConfigOptions(
 		ctx, conn, sessionID, model, configOptions,
@@ -964,7 +1130,10 @@ func applyProbeModel(
 		return nil, fmt.Errorf("ACP model selection failed: %w", err)
 	}
 	if method == sessionmodel.MethodNone {
-		return nil, fmt.Errorf("ACP provider does not support model selection")
+		if requireModelSupport {
+			return nil, fmt.Errorf("ACP provider does not support model selection")
+		}
+		return nil, nil
 	}
 	if returnedConfigOptions != nil {
 		return returnedConfigOptions, nil
@@ -1093,6 +1262,7 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	if err != nil {
 		return nil, describeACPFailure(ctx, "session/new", err)
 	}
+	updates.setSessionID(sessionResp.SessionId)
 
 	// Mode can change the provider's available options. Apply it before the
 	// model and use the resulting notification, when present, as the next
@@ -1105,7 +1275,9 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	// and workflow rules for a mode the real session applies fine. Task
 	// sessions still apply the mode and fail loudly when it is invalid.
 	if mode != "" && sessionAllowsMode(sessionResp, mode) {
-		updated, err := applyProbeMode(ctx, conn, sessionResp.SessionId, mode, updates)
+		updated, err := applySessionMode(
+			ctx, conn, sessionResp.SessionId, mode, sessionResp.ConfigOptions, sessionResp.Modes, updates, false,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -1190,7 +1362,10 @@ func buildInitProbeFields(initResp acp.InitializeResponse) *ProbeResponse {
 // the SDK type and we keep populating from it for older agents.
 func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionResponse, agentID string) {
 	out.ConfigOptions = probeConfigOptions(sessionResp.ConfigOptions)
-	if sessionResp.Modes != nil {
+	modeOption := findSelectConfigOption(sessionResp.ConfigOptions, acp.SessionConfigOptionCategoryMode)
+	if modeOption != nil {
+		applyConfigOptionsAsModes(out, modeOption)
+	} else if sessionResp.Modes != nil {
 		out.CurrentModeID = string(sessionResp.Modes.CurrentModeId)
 		for _, m := range sessionResp.Modes.AvailableModes {
 			out.Modes = append(out.Modes, ProbeMode{
@@ -1204,9 +1379,6 @@ func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionRespo
 	applyConfigOptionsAsModels(out, sessionResp.ConfigOptions)
 	if len(out.Models) == 0 {
 		applyLegacyModelsFallback(out, sessionResp.LegacyModels)
-	}
-	if sessionResp.Modes == nil {
-		applyConfigOptionsAsModes(out, sessionResp.ConfigOptions)
 	}
 	applySessionCompatibility(out, agentID)
 }
@@ -1328,13 +1500,11 @@ func applyConfigOptionsAsModels(out *ProbeResponse, opts []acp.SessionConfigOpti
 }
 
 // applyConfigOptionsAsModes mirrors applyConfigOptionsAsModels for modes.
-func applyConfigOptionsAsModes(out *ProbeResponse, opts []acp.SessionConfigOption) {
-	sel := findSelectConfigOption(opts, acp.SessionConfigOptionCategoryMode)
-	if sel == nil {
-		return
-	}
-	out.CurrentModeID = string(sel.CurrentValue)
+func applyConfigOptionsAsModes(out *ProbeResponse, sel *acp.SessionConfigOptionSelect) {
 	for _, opt := range selectOptionsUngrouped(sel.Options) {
+		if string(opt.Value) == string(sel.CurrentValue) {
+			out.CurrentModeID = string(sel.CurrentValue)
+		}
 		out.Modes = append(out.Modes, ProbeMode{
 			ID:          string(opt.Value),
 			Name:        opt.Name,
@@ -1359,30 +1529,59 @@ func sessionAllowsMode(sessionResp acp.NewSessionResponse, mode string) bool {
 	return ok
 }
 
-// sessionAdvertisedModeIDs collects the mode ids a new session offers, from
-// both the legacy modes state and the configOptions[] mode select. The second
-// return reports whether the agent advertised mode state at all: a present
-// modes state or mode select with zero options is authoritative, while their
-// absence means the agent never described its modes.
+// sessionAdvertisedModeIDs returns the mode IDs from the preferred carrier.
+// A present config select is authoritative, including when it has no choices;
+// otherwise the legacy modes state is used.
 func sessionAdvertisedModeIDs(sessionResp acp.NewSessionResponse) (map[string]struct{}, bool) {
-	var count int
-	present := sessionResp.Modes != nil
-	if sessionResp.Modes != nil {
-		count = len(sessionResp.Modes.AvailableModes)
-	}
-	advertised := make(map[string]struct{}, count+len(sessionResp.ConfigOptions))
-	if sessionResp.Modes != nil {
-		for _, mode := range sessionResp.Modes.AvailableModes {
-			advertised[string(mode.Id)] = struct{}{}
-		}
-	}
 	if sel := findSelectConfigOption(sessionResp.ConfigOptions, acp.SessionConfigOptionCategoryMode); sel != nil {
-		present = true
+		advertised := make(map[string]struct{})
 		for _, opt := range selectOptionsUngrouped(sel.Options) {
 			advertised[string(opt.Value)] = struct{}{}
 		}
+		return advertised, true
 	}
-	return advertised, present
+	if sessionResp.Modes == nil {
+		return nil, false
+	}
+	advertised := make(map[string]struct{}, len(sessionResp.Modes.AvailableModes))
+	for _, mode := range sessionResp.Modes.AvailableModes {
+		advertised[string(mode.Id)] = struct{}{}
+	}
+	return advertised, true
+}
+
+func legacyModeStateAdvertises(modes *acp.SessionModeState, mode string) bool {
+	if modes == nil {
+		return false
+	}
+	for _, candidate := range modes.AvailableModes {
+		if string(candidate.Id) == mode {
+			return true
+		}
+	}
+	return false
+}
+
+func modeOptionAdvertisesValue(option *acp.SessionConfigOptionSelect, mode string) bool {
+	for _, candidate := range selectOptionsUngrouped(option.Options) {
+		if string(candidate.Value) == mode {
+			return true
+		}
+	}
+	return false
+}
+
+func configModeValue(options []acp.SessionConfigOption, configID acp.SessionConfigId) (string, bool) {
+	for _, option := range options {
+		selectOption := option.Select
+		if selectOption == nil {
+			continue
+		}
+		if selectOption.Id == configID {
+			return string(selectOption.CurrentValue), true
+		}
+	}
+	return "", false
 }
 
 // findSelectConfigOption returns the first Select-typed configOption whose

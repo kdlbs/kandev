@@ -60,6 +60,27 @@ describe("managed runtime update API", () => {
     expect(init?.body).toBe(JSON.stringify({ target_version: TARGET_VERSION }));
   });
 
+  it("echoes reviewed runtime evidence with the exact target", async () => {
+    const reviewed_runtime = {
+      runtime_id: "npm:opencode-ai",
+      package: "opencode-ai",
+      current_version: "1.18.4",
+      effective_version: "1.18.4",
+      active_version: "1.18.4",
+      family: "v1",
+      source: "managed",
+      runtime_revision: 4,
+    };
+    await updateAgent(AGENT_NAME, {
+      update_mode: "pinned",
+      target_version: TARGET_VERSION,
+      reviewed_runtime,
+    });
+
+    const [, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(init?.body).toBe(JSON.stringify({ target_version: TARGET_VERSION, reviewed_runtime }));
+  });
+
   it("previews an explicit OpenCode family target", async () => {
     await previewAgentUpdateToFamily(AGENT_NAME, "v2", "2.0.18", { cache: "no-store" });
 

@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import { renderToStaticMarkup } from "react-dom/server";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MarkdownPreviewRenderer } from "@/components/task/markdown-preview-content";
 
 const openFile = vi.hoisted(() => vi.fn());
 const appState = vi.hoisted(() => ({
@@ -223,6 +224,27 @@ $ 100$ and $100 $`);
     const { container } = render(<MemoizedMarkdown content="Energy: $E = mc^2$" />);
 
     expect(container.querySelector(".katex")).not.toBeNull();
+  });
+});
+
+describe("Markdown preview Mermaid routing", () => {
+  afterEach(resetMarkdownComponentTestState);
+
+  // @covers AC-UI-MERMAID-RENDERING-002.3
+  it("renders explicit Mermaid diagrams in the file preview", () => {
+    const { container } = render(
+      <MarkdownPreviewRenderer
+        content={"```mermaid\nflowchart LR\n  A --> B\n```"}
+        taskId="preview-task"
+      />,
+    );
+
+    expect(container.querySelector('[data-kind="mermaid"]')?.textContent).toBe(
+      "flowchart LR\n  A --> B",
+    );
+    expect(container.querySelector('[data-kind="mermaid"]')?.getAttribute("data-task-id")).toBe(
+      "preview-task",
+    );
   });
 });
 

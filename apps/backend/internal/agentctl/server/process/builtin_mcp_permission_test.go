@@ -51,3 +51,35 @@ func TestBuiltinPermissionRequiresRegisteredToolAndExactEndpoint(t *testing.T) {
 	m.SetBuiltinToolCatalog(nil)
 	check("mcp__kandev__step_complete_kandev", false)
 }
+
+func TestBuiltinMCPInstancePackageApprovalUsesScopedEndpoint(t *testing.T) {
+	ctx := profile.New(profile.SurfaceKanbanTask, nil, nil)
+	ctx.BuiltinPackages = &profile.BuiltinManifest{Version: 1, CatalogVersion: 1, WorkspaceID: "workspace", TaskID: "task", Surface: ctx.Surface,
+		Packages: []profile.PackageID{profile.PackageCore, profile.PackageConfiguration},
+		Origins:  map[profile.PackageID]string{profile.PackageCore: "required", profile.PackageConfiguration: "task"}}
+	cfg, err := (&config.Config{}).NewInstanceConfig(43210, &config.InstanceOverrides{
+		InstanceID: "exec-1", ScopedMCPRoutes: true, TaskID: "task", McpProfile: &ctx,
+	})
+	require.NoError(t, err)
+	log := newTestLogger(t)
+	server := mcpserver.NewWithProfile(nil, "session", "task", cfg.Port, log, "", true, ctx,
+		mcpserver.WithNativeRoutePrefix(cfg.NativeMCPRoutePrefix),
+	)
+	t.Cleanup(func() { require.NoError(t, server.Close(context.Background())) })
+	m := &Manager{cfg: cfg, logger: log}
+	m.SetBuiltinToolCatalog(server.BuiltinCatalog)
+	name := "mcp__kandev-configuration__create_workflow_kandev"
+	request := &adapter.PermissionRequest{ToolName: &name, Options: []adapter.PermissionOption{{OptionID: "allow", Kind: streams.PermissionOptionKindAllowOnce}}}
+	response, approved := m.autoApproveInjectedKandevPermission(request)
+	require.True(t, approved)
+	require.Equal(t, "allow", response.OptionID)
+
+	for i := range cfg.McpServers {
+		if cfg.McpServers[i].Name == "kandev-configuration" {
+			cfg.McpServers[i].URL = "http://127.0.0.1:43210/mcp/packages/configuration"
+		}
+	}
+	response, approved = m.autoApproveInjectedKandevPermission(request)
+	require.False(t, approved)
+	require.Nil(t, response)
+}

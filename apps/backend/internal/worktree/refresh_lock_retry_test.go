@@ -421,8 +421,11 @@ exit 128
 
 		mgr := newRecreateTestManager(t)
 		result := runRefreshLockHelper(t, mgr, context.Background(), "fetch", 300*time.Millisecond)
-		if !errors.Is(result.runErr, context.DeadlineExceeded) {
-			t.Fatalf("error = %v, want context.DeadlineExceeded", result.runErr)
+		// The shared deadline can expire during backoff or while an admitted
+		// retry runs; the second case reports the killed process in runErr and
+		// the deadline in execCtxErr, which is what callers classify.
+		if ctxErr := firstContextError(result.execCtxErr, result.runErr); !errors.Is(ctxErr, context.DeadlineExceeded) {
+			t.Fatalf("context error = %v (run error %v), want context.DeadlineExceeded", ctxErr, result.runErr)
 		}
 		if result.attempts >= maxRefreshLockAttempts {
 			t.Fatalf("attempts = %d, want the first admitted deadline to stop retries", result.attempts)

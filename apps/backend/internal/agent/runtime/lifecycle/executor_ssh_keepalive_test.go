@@ -779,17 +779,27 @@ func TestSSHExecutorBuildInstanceForLostRaceReusesAResumedWinnersProcess(t *test
 func TestSSHExecutorResumeRemoteInstanceInsertIfAbsentUnderRace(t *testing.T) {
 	withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" {
+		switch r.URL.Path {
+		case "/health":
 			_, _ = io.WriteString(w, "ok")
-			return
+		case "/api/v1/instances/instance-1":
+			if r.Header.Get("Authorization") != "Bearer persisted-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = io.WriteString(w, `{"id":"instance-1","port":41234,"status":"running"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
-		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(control.Close)
 
 	server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
 		if strings.Contains(command, "kill -0") {
 			return sshOK
+		}
+		if strings.Contains(command, "agentctl.log") {
+			return sshOut(`{"msg":"HTTP server bound successfully","address":"127.0.0.1:41235"}`)
 		}
 		return sshOut("/home/kandev")
 	})

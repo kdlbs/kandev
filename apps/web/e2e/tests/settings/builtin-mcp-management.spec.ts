@@ -5,6 +5,7 @@ import {
 } from "../../helpers/builtin-mcp-management";
 import { expect, test } from "../../fixtures/test-base";
 import {
+  checkBuiltinInheritance,
   checkBuiltinPendingAddition,
   checkBuiltinPackageDetail,
   checkBuiltinUnavailableAcceptance,
@@ -53,7 +54,7 @@ test("retains a denied draft and explains the failure", async ({ testPage, apiCl
     await expect(testPage.getByTestId("builtin-mcp-detail").getByRole("alert")).toContainText(
       "Your draft was not saved",
     );
-    await expect(testPage.getByTestId("builtin-mcp-choice-diagnostics")).toContainText("Blocked");
+    await expect(testPage.getByTestId("builtin-mcp-choice-diagnostics")).toContainText("Off");
     expect(
       (await builtinView(apiClient, "workspaces", workspace.id)).policy.packages.diagnostics,
     ).toBe("default");
@@ -118,4 +119,13 @@ test("keeps a saved package visible without current acceptance", async ({
   await testPage
     .getByTestId("mcp-server-explorer")
     .screenshot({ path: testInfo.outputPath("configuration-saved-unknown.png") });
+});
+
+// @covers AC-AGENTS-BUILTIN-MCP-005.2
+test("restores inheritance when the effective switch value stays on", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await checkBuiltinInheritance(testPage, apiClient, seedData, false);
 });

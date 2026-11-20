@@ -28,7 +28,9 @@ attachments, and direct or queued message admission remain adjacent contracts.
 - **Preview source:** The Browser-panel page or published HTML-file preview
   where a capture was made.
 - **Page identity:** Stable source metadata plus the navigated route at capture
-  time. It identifies context without making the ephemeral proxy URL durable.
+  time. It identifies context without making the ephemeral proxy URL durable,
+  and it excludes query parameters that Kandev adds to the preview URL, such as
+  an HTML preview's republish version.
 - **Capture draft:** A selection and comment that have not yet been accepted
   into the pending task collection.
 - **Pending collection:** The authoritative set of preview feedback that has
@@ -101,9 +103,11 @@ elements, or a page region, so that my feedback identifies what should change.
   non-blank user comment. Cancelling a capture or a failed save shall not add a
   pending item; a failed save shall preserve the capture draft for retry.
 - **AC-TASKS-WEB-PREVIEW-FEEDBACK-002.5:** After navigation, feedback from prior
-  pages shall remain in the pending collection. Returning to a matching page
-  shall restore resolvable text or element markers without changing or
-  deleting captures whose DOM anchors no longer resolve.
+  pages shall remain in the pending collection. Returning to a matching page,
+  including closing and reopening an HTML preview, shall restore resolvable
+  text or element markers, region outlines, and their numbers without changing
+  or deleting captures whose DOM anchors no longer resolve. A new capture on
+  that page shall continue the numbering.
 - **AC-TASKS-WEB-PREVIEW-FEEDBACK-002.6:** Captured page content shall be shown
   and delivered as quoted user context. Kandev shall not execute captured HTML
   in its own chrome or treat page text as system instructions.
@@ -112,6 +116,18 @@ elements, or a page region, so that my feedback identifies what should change.
   a concise element label such as tag, ID, or class. Pointer hover, keyboard
   focus, and an active touch press shall update the same candidate hint. The
   hint shall disappear on cancel, completion, navigation, or mode exit.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-002.8:** A screenshot-region capture over
+  WebGL content that the previewed page draws on the page's main thread,
+  including Flutter web's CanvasKit renderer and its single-threaded `skwasm`
+  renderer, shall contain the rendered pixels. This shall hold whether or not the page requested a preserved drawing
+  buffer, and while feedback controls are inactive the page shall otherwise
+  render and behave as before.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-002.9:** When a screenshot-region capture
+  overlaps canvas content and the produced image is a single uniform color,
+  Kandev shall still show the image for review, with a localized warning that
+  canvas content may not have been captured. The user shall be able to save
+  it, because a genuinely solid-colored region is valid, or discard it and
+  capture again. Kandev shall not drop the capture on its own.
 
 ### REQ-TASKS-WEB-PREVIEW-FEEDBACK-003: Deliver feedback through ordinary chat Send
 
@@ -181,6 +197,24 @@ workflow on either device.
   sessions, and native HTML-file previews shall retain their current navigation,
   script execution, and source-return behavior while feedback controls are
   inactive.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-004.6:** Writing a capture comment and editing
+  a pending item's comment shall use the same selection-comment surface as
+  other Kandev comments. On desktop it shall float next to the captured region
+  or the edited item, be draggable, focus the comment field, add with
+  Mod+Enter, and close with Escape or an outside click. On coarse pointers it
+  shall be a bottom Drawer. The surface shall show the capture evidence (the
+  selected text, element label, or screenshot thumbnail) and the page route,
+  and it shall not offer a Run action.
+- **AC-TASKS-WEB-PREVIEW-FEEDBACK-004.7:** Superseded by
+  `AC-TASKS-WEB-PREVIEW-FEEDBACK-005.4`. It kept one dismissed draft and
+  required discarding it before another capture.
+
+### Annotation mode
+
+`REQ-TASKS-WEB-PREVIEW-FEEDBACK-005` to `007` (the persistent annotation mode,
+its comment panel, and region alignment) are in
+[Web Preview Annotation Mode Requirements](web-preview-annotation-mode.md).
+They share this document's terminology and ID sequence.
 
 ## Out of scope
 
@@ -192,5 +226,10 @@ workflow on either device.
 - Sending feedback to multiple sessions, adding a per-item Run action, or
   exposing unsent feedback as ambient Agent context.
 - Pixel-identical capture of cross-origin media that the browser cannot read.
+- Reading pixels that a page renders in a worker through `OffscreenCanvas`,
+  such as Flutter's multi-threaded `skwasm` mode. Browsers only allow that
+  mode in cross-origin-isolated pages, and Kandev previews are not
+  cross-origin isolated.
+- Capturing through a browser screen-capture permission prompt.
 - Preserving ephemeral preview URLs or HTML preview execution state after the
   owning task runtime stops.

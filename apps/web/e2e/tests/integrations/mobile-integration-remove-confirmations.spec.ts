@@ -26,34 +26,6 @@ async function expectNoHorizontalOverflow(testPage: Page) {
 }
 
 test.describe("integration configuration removal confirmations on mobile", () => {
-  test("Azure DevOps uses a touch confirmation sheet", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const sawNativeDialog = guardAgainstNativeDialogs(testPage);
-    await apiClient.setAzureDevOpsConfig(seedData.workspaceId, {
-      organizationUrl: "https://dev.azure.com/acme",
-      pat: "azure-mobile-pat",
-    });
-    await testPage.goto(
-      `/settings/workspaces/${encodeURIComponent(seedData.workspaceId)}/integrations/azure-devops`,
-    );
-
-    const removeButton = testPage.getByTestId("azure-devops-delete-button");
-    await removeButton.tap();
-    const inline = testPage.getByRole("dialog");
-    await expect(inline).toBeVisible();
-    await expectTouchSized(inline.getByTestId("azure-devops-remove-confirm"));
-    await inline.getByRole("button", { name: "Cancel" }).tap();
-    await expect(removeButton).toBeVisible();
-    await removeButton.tap();
-    await inline.getByTestId("azure-devops-remove-confirm").tap();
-    await expect(removeButton).toHaveCount(0);
-    expect(sawNativeDialog()).toBe(false);
-    await expectNoHorizontalOverflow(testPage);
-  });
-
   test("Jira uses a touch confirmation sheet", async ({ testPage, apiClient, seedData }) => {
     const sawNativeDialog = guardAgainstNativeDialogs(testPage);
     await apiClient.setJiraConfig({

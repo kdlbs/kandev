@@ -123,7 +123,6 @@ export class UpgradeBackend {
       KANDEV_MOCK_JIRA: "true",
       KANDEV_MOCK_LINEAR: "true",
       KANDEV_MOCK_SENTRY: "true",
-      KANDEV_MOCK_AZURE_DEVOPS: "true",
       KANDEV_FEATURES_AGENT_SURVIVAL: "false",
       KANDEV_DOCKER_ENABLED: "false",
       KANDEV_WORKTREE_ENABLED: "true",
