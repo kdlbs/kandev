@@ -239,4 +239,10 @@ Passed on the merged tree:
 
 The merge tree passed `git merge-tree --write-tree origin/main HEAD`; the
 resolved paths contain both sides' intended changes in the PR-relative diff.
-Exact-head PR CI and reviews are pending the push of this merge commit.
+After pushing merge commit `9f7be96abdaaea7cbeaf0c75823913a1a38f0172` and
+documentation commit `9adb9c8791ba995786458fb32f09011bce0197dc`,
+`scripts/pr-await 4980 --mode all-terminal --deadline-min 60` reported 92
+passed, 14 skipped, 0 neutral, 0 failed, and 0 pending on exact head
+`9adb9c8791ba995786458fb32f09011bce0197dc`. `scripts/pr-state --summary 4980`
+confirmed `MERGEABLE` / `CLEAN`, no failed or pending checks, and 0 unresolved
+review threads; `scripts/pr-resolve list 4980` was empty.
