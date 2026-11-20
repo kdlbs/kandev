@@ -95,3 +95,24 @@ func TestRemoveNpxExecutionTreeRejectsCacheAndNpxRootSymlinks(t *testing.T) {
 		t.Fatal("symlinked _npx root should be rejected")
 	}
 }
+
+func TestValidateNpmCacheRootRejectsVolumeRoots(t *testing.T) {
+	for _, root := range []string{`C:\`, `\\server\share\`, `\\?\UNC\server\share\`} {
+		t.Run(root, func(t *testing.T) {
+			if _, err := validateNpmCacheRoot(root); err == nil || err.Error() != "refusing to invalidate npm cache root" {
+				t.Fatalf("validateNpmCacheRoot(%q) error = %v, want broad-root refusal", root, err)
+			}
+		})
+	}
+}
+
+func TestValidateNpmCacheRootAcceptsOrdinaryCacheDirectory(t *testing.T) {
+	cacheRoot := t.TempDir()
+	got, err := validateNpmCacheRoot(cacheRoot)
+	if err != nil {
+		t.Fatalf("validateNpmCacheRoot(%q): %v", cacheRoot, err)
+	}
+	if got != cacheRoot {
+		t.Fatalf("validateNpmCacheRoot(%q) = %q", cacheRoot, got)
+	}
+}

@@ -4,23 +4,38 @@ import { waitForHttp } from "../../helpers/causal-waits";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { installRuntimeUpdateFixture, updateJob } from "./agent-runtime-update-helpers";
 
+// @covers AC-AGENTS-RUNTIME-NATIVE-CHECK-002.4
 test.describe("OMP harness-owned updates on phones", () => {
-  test("uses a bounded touch drawer with a reachable targetless update action", async ({
+  test("shows the native check result in a bounded touch drawer with a full-width update action", async ({
     testPage,
     prCapture,
   }) => {
-    const runtime = await installRuntimeUpdateFixture(testPage, { mode: "self_update" });
+    const runtime = await installRuntimeUpdateFixture(testPage, {
+      mode: "self_update",
+      currentVersion: "18.13.3",
+      native: {
+        checkState: "update_available",
+        latestVersion: "18.22.0-canary.3",
+        channel: "canary",
+      },
+    });
     await testPage.goto("/settings/agents");
     const trigger = testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`);
     await trigger.scrollIntoViewIfNeeded();
     await expect(trigger).toBeVisible();
     await trigger.tap();
     const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
-    await expect(drawer).toContainText("Installed version: 18.3.1");
+    await expect(drawer).toContainText("Installed version: 18.13.3");
+    await expect(
+      drawer.getByTestId(`agent-update-native-check-${runtime.agentName}`),
+    ).toContainText("18.22.0-canary.3");
+    await expect(drawer.getByTestId(`agent-update-channel-${runtime.agentName}`)).toContainText(
+      "canary",
+    );
     await expect(
       drawer.getByTestId(`agent-update-stable-reference-${runtime.agentName}`),
-    ).toContainText("18.3.2");
-    await expect(drawer).toContainText("configured channel and may install a different version");
+    ).toHaveCount(0);
+    await expect(drawer).toContainText("own update check for its configured channel");
     await expect(
       drawer.getByTestId(`agent-update-version-picker-${runtime.agentName}`),
     ).toHaveCount(0);
@@ -31,10 +46,15 @@ test.describe("OMP harness-owned updates on phones", () => {
     const confirm = drawer.getByTestId(`agent-update-confirm-${runtime.agentName}`);
     const confirmBox = await settledBoundingBox(confirm);
     expect(confirmBox.height).toBeGreaterThanOrEqual(44);
+    expect(confirmBox.width).toBeGreaterThanOrEqual(drawerBox.width * 0.8);
     expect(confirmBox.y + confirmBox.height).toBeLessThanOrEqual(viewport!.height);
+    await expect(testPage.locator("html")).toHaveJSProperty(
+      "scrollWidth",
+      await testPage.locator("html").evaluate((element) => element.clientWidth),
+    );
     await expect(testPage.getByText("Kandev update available", { exact: true })).toBeHidden();
     await prCapture.screenshot("mobile-omp-update-preview", {
-      caption: "OMP reference-only update drawer",
+      caption: "OMP drawer shows its own canary update check result",
     });
     const approvalResponse = waitForHttp(testPage, "POST", /\/api\/v1\/agent-update\/omp-acp$/);
     await confirm.tap();

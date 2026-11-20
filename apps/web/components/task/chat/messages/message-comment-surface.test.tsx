@@ -18,8 +18,8 @@ vi.mock("@/hooks/use-compact-task-chrome", () => ({
 vi.mock("@/hooks/domains/comments/use-run-comment", () => ({
   useRunComment: () => ({ runComment: vi.fn() }),
 }));
-vi.mock("@/components/task/plan-selection-popover", () => ({
-  PlanSelectionPopover: ({
+vi.mock("@/components/shared/selection-comment/selection-comment-surface", () => ({
+  SelectionCommentSurface: ({
     selectedText,
     onAdd,
     onClose,

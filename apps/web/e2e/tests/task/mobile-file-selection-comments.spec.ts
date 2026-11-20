@@ -134,12 +134,12 @@ test.describe("File selection comments on mobile", () => {
         await action.tap();
         if (provider === "codemirror") {
           const textarea = testPage.getByPlaceholder("Add your comment or instruction...");
-          const popover = testPage.locator("div.fixed.z-50").filter({ has: textarea }).first();
-          await expect(popover).toBeVisible();
-          await expect(popover.locator("pre")).toContainText(CODE_SELECTION_QUOTE);
-          await expect(popover).toContainText(`${CODE_SELECTION_LINE}`);
+          const commentDialog = testPage.getByRole("dialog").filter({ has: textarea }).first();
+          await expect(commentDialog).toBeVisible();
+          await expect(commentDialog).toContainText(CODE_SELECTION_QUOTE);
+          await expect(commentDialog).toContainText(`${CODE_SELECTION_LINE}`);
           await textarea.fill(COMMENT_TEXT);
-          await popover.getByRole("button", { name: "Add", exact: true }).tap();
+          await commentDialog.getByRole("button", { name: "Add", exact: true }).tap();
         } else {
           const form = owner.locator("[data-comment-zone]").last();
           const textarea = form.locator("textarea");

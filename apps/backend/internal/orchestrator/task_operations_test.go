@@ -3803,8 +3803,14 @@ func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateTypedRecoveryError(
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
 
 	launchErr := errors.New("environment preparation failed: fatal: couldn't find remote ref feature/deleted-pr")
+	var observedStartAttemptID string
 	agentMgr := &mockAgentManager{
-		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		launchAgentFunc: func(launchCtx context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchSession, err := repo.GetTaskSession(launchCtx, "session1")
+			require.NoError(t, err)
+			require.Equal(t, models.TaskSessionStateCreated, launchSession.State)
+			observedStartAttemptID = models.StringFromAny(launchSession.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+			require.NotEmpty(t, observedStartAttemptID, "start attempt must be durable before LaunchAgent")
 			return nil, launchErr
 		},
 	}
@@ -3832,6 +3838,9 @@ func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateTypedRecoveryError(
 		t.Fatal("typed launch failure must not suppress the pointer toast")
 	}
 	requirePersistedSessionLaunchError(t, repo, "session1")
+	failedSession, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	require.Equal(t, observedStartAttemptID, models.StringFromAny(failedSession.Metadata[models.SessionMetaKeyAgentStartAttemptID]))
 }
 
 func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
@@ -3983,6 +3992,129 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 			t.Fatalf("typed launch failure created legacy guidance messages: %d", got)
 		}
 	})
+}
+
+func TestPrepareTaskSession_TransientWorkspaceFailureDoesNotRetryAgent(t *testing.T) {
+	const taskID = "task-workspace-only-retry"
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedTaskAndSession(t, baseRepo, taskID, "session-workspace-only-retry", models.TaskSessionStateCreated)
+	failureRepo := &taskEnvironmentFailureRepo{
+		Repository: baseRepo,
+		err:        errors.New("failed to launch workspace: context deadline exceeded"),
+		called:     make(chan struct{}),
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, WorkspaceID: "ws1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{}
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, failureRepo, testLogger(), executor.ExecutorConfig{}))
+	svc := &Service{
+		logger:             testLogger(),
+		repo:               failureRepo,
+		workflowStepGetter: newMockStepGetter(),
+		taskRepo:           taskRepo,
+		agentManager:       agentMgr,
+		executor:           exec,
+		messageQueue:       messagequeue.NewServiceMemory(testLogger()),
+		scheduler:          scheduler.NewScheduler(queue.NewTaskQueue(1), exec, taskRepo, testLogger(), scheduler.SchedulerConfig{}),
+	}
+	svc.launchRetryDelay = time.Millisecond
+	retried := atomic.Bool{}
+	svc.launchRetry = func(context.Context, string, string) error {
+		retried.Store(true)
+		return nil
+	}
+
+	sessionID, err := svc.PrepareTaskSession(ctx, taskID, "profile1", "", "", "", true)
+	if err != nil {
+		t.Fatalf("PrepareTaskSession: %v", err)
+	}
+	select {
+	case <-failureRepo.called:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for workspace preparation")
+	}
+	require.Eventually(t, func() bool {
+		session, err := baseRepo.GetTaskSession(ctx, sessionID)
+		return err == nil && session.State == models.TaskSessionStateFailed
+	}, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		taskRepo.mu.Lock()
+		defer taskRepo.mu.Unlock()
+		return taskRepo.updatedStates[taskID] == v1.TaskStateFailed
+	}, time.Second, 10*time.Millisecond)
+	require.Never(t, retried.Load, 100*time.Millisecond, 5*time.Millisecond,
+		"workspace-only preparation must not schedule an agent-start retry")
+}
+
+func TestPrepareTaskSession_LaunchAgentTransientFailureDoesNotRetryAgent(t *testing.T) {
+	const taskID = "task-workspace-agentctl-retry"
+	const sessionID = "session-workspace-agentctl-retry"
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateCreated)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, WorkspaceID: "ws1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
+	launchErr := errors.New("agentctl not ready: context deadline exceeded")
+	launchStartAgent := make(chan bool, 1)
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchStartAgent <- req.StartAgent
+			return nil, launchErr
+		},
+	}
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
+	svc := &Service{
+		logger:             testLogger(),
+		repo:               repo,
+		workflowStepGetter: newMockStepGetter(),
+		taskRepo:           taskRepo,
+		agentManager:       agentMgr,
+		executor:           exec,
+		messageQueue:       messagequeue.NewServiceMemory(testLogger()),
+		scheduler:          scheduler.NewScheduler(queue.NewTaskQueue(1), exec, taskRepo, testLogger(), scheduler.SchedulerConfig{}),
+	}
+	exec.SetOnSessionStateChange(func(callbackCtx context.Context, id, session string, state models.TaskSessionState, errorMessage string) error {
+		svc.updateTaskSessionState(callbackCtx, id, session, state, errorMessage, true)
+		return nil
+	})
+	exec.SetOnTaskStateChange(func(callbackCtx context.Context, id string, state v1.TaskState) error {
+		_, _, err := repo.UpdateTaskStateIfNotArchived(callbackCtx, id, state)
+		return err
+	})
+	exec.SetOnLaunchFailureRecorded(svc.handleRecordedLaunchFailure)
+	svc.launchRetryDelay = time.Millisecond
+	retryScheduled := make(chan struct{}, 1)
+	svc.launchRetry = func(context.Context, string, string) error {
+		retryScheduled <- struct{}{}
+		return nil
+	}
+
+	preparedSessionID, err := svc.PrepareTaskSession(ctx, taskID, "profile1", "", "", "", true)
+	require.NoError(t, err)
+	select {
+	case startAgent := <-launchStartAgent:
+		require.False(t, startAgent, "workspace preparation must not request an agent start")
+	case <-time.After(5 * time.Second):
+		t.Fatal("workspace preparation did not call LaunchAgent")
+	}
+	require.Eventually(t, func() bool {
+		session, getErr := repo.GetTaskSession(ctx, preparedSessionID)
+		return getErr == nil && session.State == models.TaskSessionStateFailed
+	}, time.Second, 10*time.Millisecond, "failure bookkeeping still records the workspace launch failure")
+	require.Eventually(t, func() bool {
+		task, getErr := repo.GetTask(ctx, taskID)
+		return getErr == nil && task.State == v1.TaskStateFailed
+	}, time.Second, 10*time.Millisecond, "failure bookkeeping still records the task failure")
+	require.Never(t, func() bool {
+		select {
+		case <-retryScheduled:
+			return true
+		default:
+			return false
+		}
+	}, 100*time.Millisecond, 5*time.Millisecond,
+		"a transient failure during workspace-only preparation must not start an agent")
 }
 
 // TestPrepareTaskSession_MarksRouteActionRequiredWhenWorkspaceLaunchFails is

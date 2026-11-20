@@ -32,6 +32,7 @@ const OUTCOME_LABEL: Record<RouteAttemptOutcome, string> = {
   skipped_user_action: "office:routeOutcomeSkippedUserAction",
   skipped_missing_mapping: "office:routeOutcomeSkippedMissingMapping",
   skipped_max_attempts: "office:routeOutcomeSkippedMaxAttempts",
+  skipped_author_provider: "office:routeOutcomeSkippedAuthorProvider",
   deferred_circuit: "office:routeBlocked",
 };
 
@@ -47,6 +48,7 @@ const OUTCOME_VARIANT: Record<
   skipped_user_action: "outline",
   skipped_missing_mapping: "outline",
   skipped_max_attempts: "destructive",
+  skipped_author_provider: "outline",
   deferred_circuit: "outline",
 };
 

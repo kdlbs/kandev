@@ -32,7 +32,7 @@ type queueAdmissionRepository interface {
 		*QueuedMessage,
 		*QueueAttachmentClaim,
 		int,
-		*AutoMergePolicy,
+		*AdmissionPolicy,
 		*WorkflowEntryIdentity,
 	) (*QueuedMessage, bool, error)
 }
