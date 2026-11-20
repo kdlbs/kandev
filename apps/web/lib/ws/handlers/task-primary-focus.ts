@@ -18,6 +18,7 @@ import {
 } from "@/lib/session/session-restart-state";
 import {
   clearPinnedSessionIfOverridden,
+  hasSameTaskPredecessor,
   isEligibleReplacementSession,
   pickReplacementSessionId,
   shouldPreservePinnedSessionForTask,
@@ -471,13 +472,15 @@ function captureOwner(
   };
 }
 
-function hasSameTaskPredecessor(
-  state: AppState,
-  taskId: string,
-  previous: string | null,
-): previous is string {
-  const row = previous ? state.taskSessions.items[previous] : undefined;
-  return !!previous && (!row || row.task_id === taskId);
+function reverifyLifecycleFollow(
+  store: StoreApi<AppState>,
+  pending: PendingFollow,
+  source: "terminal" | "new-session",
+): void {
+  if (pending.source === "removed") return;
+  pending.lifecycleRecipient ||= source === "terminal";
+  pending.cancel();
+  verifyPreviousSession(store, pending);
 }
 
 /** Only initial adoption without a same-task predecessor may bypass verification. */
@@ -492,9 +495,7 @@ export function followSessionTransition(
   if (hasExplicitWorkflowFocus(state, taskId)) return true;
   const existing = pendingByStore.get(store);
   if (existing?.taskId === taskId && ownsSelection(store, existing)) {
-    if (existing.source === "removed") return true;
-    existing.cancel();
-    verifyPreviousSession(store, existing);
+    reverifyLifecycleFollow(store, existing, source);
     return true;
   }
   const previous = state.tasks.activeSessionId;
@@ -537,10 +538,14 @@ export function prepareSessionRemoval(
   sessionId: string,
   taskId: string,
 ): () => void {
-  const owner = captureRemovalOwner(store, sessionId, taskId);
+  const captured = captureRemovalOwner(store, sessionId, taskId);
   return () => {
-    if (!owner || stateReadScopeIdentity(store.getState()) !== owner.scopeIdentity) return;
+    if (!captured || stateReadScopeIdentity(store.getState()) !== captured.scopeIdentity) return;
     if (isConfirmedSessionRemoved(store.getState().taskSessions, sessionId)) return;
+    const owner =
+      store.getState().tasks.activeSessionId === sessionId
+        ? (captureRemovalOwner(store, sessionId, taskId) ?? captured)
+        : captured;
     observeRemoval(store, owner.taskId, sessionId);
     const existing = pendingByStore.get(store);
     if (existing?.taskId === owner.taskId && existing.previousSessionId === sessionId)

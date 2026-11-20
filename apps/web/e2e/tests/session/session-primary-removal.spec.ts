@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import { watchWs } from "../../helpers/causal-waits";
+import { KanbanPage } from "../../pages/kanban-page";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 import {
   expectLastStoppedSessionRemoval,
   expectLatePromotionAfterRemoval,
@@ -9,12 +10,15 @@ import {
 import {
   holdRemovalMembership,
   observeRemovalSelection,
-  REMOVAL_OTHER_TEXT,
   REMOVAL_PRIMARY_TEXT,
   seedRemovalChoiceTask,
 } from "../../helpers/session-removal";
 import { waitForActiveTaskSession, waitForTaskSessionsSettled } from "../../helpers/session-store";
 import {
+  captureUnreadSettings,
+  observeReadTraffic,
+  sessionReadState,
+  type UnreadSettings,
   cleanupFailingResumeTask,
   seedFailingResumeTask,
   waitForFailedResume,
@@ -154,70 +158,131 @@ test("fills a retired session slot after the later primary promotion", async ({
   await expectLatePromotionAfterRemoval(testPage, desktopTestPage, apiClient, seedData);
 });
 
-for (const winner of ["proven-chat", "independent-changes"] as const) {
-  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
-  // @covers AC-TASKS-TASK-UNREAD-DOT-001.11
-  test(`local removal activates ${winner} across the owned empty slot`, async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(90_000);
-    const { task, old, primary, other } = await seedRemovalChoiceTask(apiClient, seedData);
-    await apiClient.setPrimarySession(old.session_id);
-    const proof = await holdRemovalMembership(testPage, task.task_id, old.session_id);
-    const watcher = watchWs(testPage);
-    const session = new SessionPage(testPage);
-    await testPage.goto(`/t/${task.task_id}`);
-    await expect(session.activeChat()).toHaveAttribute("data-session-id", old.session_id);
-    await expect(session.sessionTabBySessionId(other.session_id)).toBeVisible();
-    await session.sessionTabBySessionId(other.session_id).click();
-    await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
-    await session.sessionTabBySessionId(old.session_id).click();
-    await expect(session.activeChat()).toHaveAttribute("data-session-id", old.session_id);
-    const promoted = watcher.waitForEvent("task.updated", {
-      where: (payload) =>
-        payload.task_id === task.task_id && payload.primary_session_id === primary.session_id,
+test.describe("owned removal transcript visibility", () => {
+  let baseline: UnreadSettings = {};
+  let preventAutoStart = false;
+  test.beforeEach(async ({ testPage, apiClient }) => {
+    await new KanbanPage(testPage).goto();
+    baseline = await captureUnreadSettings(apiClient);
+    const { settings } = await apiClient.getUserSettings();
+    preventAutoStart = settings.prevent_auto_start_agent_on_open === true;
+    await apiClient.saveUserSettings({
+      unread_divider: false,
+      unread_task_dot: true,
+      unread_task_dot_hide_delay_seconds: 0,
+      prevent_auto_start_agent_on_open: true,
     });
-    await apiClient.setPrimarySession(primary.session_id);
-    await promoted;
-    await waitForTaskSessionsSettled(testPage, task.task_id);
-    const history = await observeRemovalSelection(testPage);
-    const documentStart = await testPage.evaluate(() => performance.timeOrigin);
-    try {
-      proof.arm();
-      await session.sessionTabBySessionId(old.session_id).click({ button: "right" });
-      await session.contextMenuItem("Delete").click();
-      const confirmation = testPage.getByTestId("session-delete-confirm-popover");
-      await expect(confirmation).toBeVisible();
-      const acknowledged = watcher.waitForResponse("session.delete");
-      await confirmation.getByTestId("session-delete-confirm").click();
-      await acknowledged;
-      await proof.queued;
-      await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
-      await expect(
-        session.activeChat().getByText(REMOVAL_OTHER_TEXT, { exact: true }),
-      ).toBeVisible();
-      if (winner === "independent-changes") await session.clickTab("Changes");
-      proof.release();
-      await waitForActiveTaskSession(testPage, task.task_id, primary.session_id);
-      await waitForTaskSessionsSettled(testPage, task.task_id);
-      if (winner === "proven-chat") {
-        await expect(session.activeChat()).toHaveAttribute("data-session-id", primary.session_id);
-        await expect(
-          session.activeChat().getByText(REMOVAL_PRIMARY_TEXT, { exact: true }),
-        ).toBeVisible();
-      } else {
-        await expect(session.changes).toBeVisible();
-      }
-      const samples = await history.read();
-      expect(samples.map((sample) => sample.sessionId)).not.toContain(other.session_id);
-      expect(samples.map((sample) => sample.pinnedSessionId)).not.toContain(other.session_id);
-      expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
-      await testPage.screenshot({ path: test.info().outputPath(`owned-removal-${winner}.png`) });
-    } finally {
-      await proof.dispose();
-      await history.stop();
-    }
   });
-}
+  test.afterEach(async ({ apiClient }) => {
+    await apiClient.saveUserSettings({
+      ...baseline,
+      prevent_auto_start_agent_on_open: preventAutoStart,
+    });
+  });
+
+  for (const winner of ["proven-chat", "explicit-sibling", "independent-changes"] as const) {
+    // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+    // @covers AC-TASKS-TASK-UNREAD-DOT-001.11
+    test(`local removal activates ${winner} across the owned empty slot`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(90_000);
+      const { task, old, primary, other } = await seedRemovalChoiceTask(apiClient, seedData);
+      await apiClient.setPrimarySession(old.session_id);
+      const proof = await holdRemovalMembership(testPage, task.task_id, old.session_id);
+      const watcher = watchWs(testPage);
+      const traffic = observeReadTraffic(testPage);
+      const session = new SessionPage(testPage);
+      await testPage.goto(`/t/${task.task_id}`);
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", old.session_id);
+      await expect(session.sessionTabBySessionId(other.session_id)).toBeVisible();
+      await session.sessionTabBySessionId(other.session_id).click();
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+      await session.sessionTabBySessionId(old.session_id).click();
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", old.session_id);
+      const promoted = watcher.waitForEvent("task.updated", {
+        where: (payload) =>
+          payload.task_id === task.task_id && payload.primary_session_id === primary.session_id,
+      });
+      await apiClient.setPrimarySession(primary.session_id);
+      await promoted;
+      await waitForTaskSessionsSettled(testPage, task.task_id);
+      await expect
+        .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
+        .not.toBeNull();
+      const beforeCursor = (await sessionReadState(apiClient, other.session_id)).cursor;
+      const tail = await apiClient.seedSessionMessage(other.session_id, {
+        type: "message",
+        content: "Unread neighboring output after returning to A",
+      });
+      const history = await observeRemovalSelection(testPage);
+      const documentStart = await testPage.evaluate(() => performance.timeOrigin);
+      try {
+        proof.arm();
+        await session.sessionTabBySessionId(old.session_id).click({ button: "right" });
+        await session.contextMenuItem("Delete").click();
+        const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+        await expect(confirmation).toBeVisible();
+        const acknowledged = watcher.waitForResponse("session.delete");
+        await confirmation.getByTestId("session-delete-confirm").click();
+        await acknowledged;
+        await proof.queued;
+        if (winner === "explicit-sibling") {
+          await session.sessionTabBySessionId(other.session_id).click();
+          await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+          await expect
+            .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
+            .toBe(tail.messageId);
+        } else {
+          if (winner === "independent-changes") await session.clickTab("Changes");
+          await dwell(
+            testPage,
+            1500,
+            "negative-assertion",
+            "An implicit fallback cannot acknowledge unread neighboring output while membership is held",
+          );
+          expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(beforeCursor);
+          expect(
+            traffic.markReads.filter(
+              (read) => read.sessionId === other.session_id && read.messageId === tail.messageId,
+            ),
+          ).toEqual([]);
+          await expect(session.activeChat()).toHaveCount(0);
+        }
+        await testPage.screenshot({
+          path: test.info().outputPath(`owned-removal-held-${winner}.png`),
+        });
+        proof.release();
+        const expectedSession =
+          winner === "explicit-sibling" ? other.session_id : primary.session_id;
+        await waitForActiveTaskSession(testPage, task.task_id, expectedSession);
+        await waitForTaskSessionsSettled(testPage, task.task_id);
+        if (winner !== "explicit-sibling") {
+          await expect(session.activeChat()).toHaveAttribute("data-session-id", primary.session_id);
+          await expect(
+            session.activeChat().getByText(REMOVAL_PRIMARY_TEXT, { exact: true }),
+          ).toBeVisible();
+          expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(beforeCursor);
+          expect(
+            traffic.markReads.filter(
+              (read) => read.sessionId === other.session_id && read.messageId === tail.messageId,
+            ),
+          ).toEqual([]);
+          if (winner === "independent-changes") await expect(session.changes).toBeVisible();
+          const samples = await history.read();
+          expect(samples.map((sample) => sample.sessionId)).not.toContain(other.session_id);
+          expect(samples.map((sample) => sample.pinnedSessionId)).not.toContain(other.session_id);
+        } else {
+          await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+        }
+        expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
+        await testPage.screenshot({ path: test.info().outputPath(`owned-removal-${winner}.png`) });
+      } finally {
+        await proof.dispose();
+        await history.stop();
+      }
+    });
+  }
+});

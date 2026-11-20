@@ -223,10 +223,10 @@ new-sibling adoption also permits IDLE. Initial adoption without a predecessor
 remains immediate, subject to explicit workflow ownership.
 
 Navigation, pin, restart, workflow intent/request and selected identity own focus.
-Unchanged primary preserves the lifecycle predicate. Changed primary retargets
-the original predecessor, retaining lifecycle recipient eligibility. Creation only
-retargets an existing check. Explicit workflow focus stays separate.
-Denied/uncertain reads never use timers.
+Unchanged primary preserves lifecycle predicates. Accepted predecessor endings
+retain recipient eligibility in either delivery order, including primary retargets.
+Creation only retargets an existing check. Explicit workflow focus stays separate;
+denied/uncertain reads never use timers.
 
 Terminal handoffs exclude observed/confirmed removals before choice/publication.
 Rank durable `started_at`, then session ID. When eligible partial rows can affect
@@ -238,9 +238,9 @@ agentctl readiness/execution; fallback readiness never borrows an execution ID.
 Core `session.removed` and session GET 404 derive task scope from known membership
 or active identity; reject conflicting scope. Complete unique same-task membership
 must exclude the deleted ID; malformed/incomplete/multiple-primary lists fail
-closed. Zero primaries prove retirement. Local deletion captures ownership before
-WS admission. A successful scoped acknowledgement retires that ID through the
-same boundary, never a raw-list guess; successor membership is verified separately.
+closed. Zero primaries prove retirement. Local deletion captures scope before WS
+admission; its ACK retains a newer view of that same removed ID, not a survivor
+or workflow intent. Retirement and proven successor selection stay separate.
 
 Retirement owns backend/auth/workspace and membership generation, not view intent.
 Trusted removals invalidate membership and exclude pending automatic candidates.
@@ -250,10 +250,10 @@ cancelling only a request targeting that ID. An owned empty slot can re-prove af
 a changed primary; newer user/workflow selection wins. Surviving pins/cursors stay
 untouched. Proof initializes missing recipient identity/lifecycle only.
 
-Preview adopts shared selected/empty state; deletion never pins a list guess.
-Dockview leases the visible predecessor across its blank interval, activating
-only a scoped proven successor, including pre-paint retargets. Later input/context
-cancels activation; independent non-agent/workflow focus stays separate.
+Preview validates discovery membership, then adopts shared selected/empty state.
+Dockview blanks the removed view's unowned group until explicit/proven focus;
+other visible splits stay readable. Scoped receipts carry pre-paint retargets
+without stealing independent non-agent/workflow focus.
 
 `invalidateTaskSessionMembership` fences foreground/removal-dialog pending,
 admitted and queued publications. New reads/unrelated keys remain usable.

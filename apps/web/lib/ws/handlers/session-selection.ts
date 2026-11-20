@@ -14,6 +14,15 @@ export function isTerminalSessionState(state: TaskSessionState | undefined): boo
   return !!state && TERMINAL_SESSION_STATES.has(state);
 }
 
+export function hasSameTaskPredecessor(
+  state: AppState,
+  taskId: string,
+  previous: string | null,
+): previous is string {
+  const row = previous ? state.taskSessions.items[previous] : undefined;
+  return !!previous && (!row || row.task_id === taskId);
+}
+
 export function isEligibleReplacementSession(
   row: TaskSession | undefined,
   taskId: string,

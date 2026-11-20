@@ -17,6 +17,9 @@ import {
 } from "@/lib/ws/handlers/task-primary-focus.test-helpers";
 import { useSessionActions } from "./use-session-actions";
 
+const REMOVED_ACTION = "session.removed";
+const SURVIVING_PIN = "surviving-pin";
+
 const harness = vi.hoisted(() => ({
   store: null as StoreApi<AppState> | null,
   request: vi.fn(),
@@ -64,10 +67,10 @@ it("never selects a background session deleted while another removal proof is pe
   vi.mocked(listTaskSessions)
     .mockReturnValueOnce(oldProof.promise)
     .mockReturnValue(freshProof.promise);
-  registerTaskSessionHandlers(store)["session.removed"]!({
+  registerTaskSessionHandlers(store)[REMOVED_ACTION]!({
     id: "removed-a",
     type: "notification",
-    action: "session.removed",
+    action: REMOVED_ACTION,
     payload: { session_id: "old", task_id: "t1" },
   });
   const selections: Array<string | null> = [];
@@ -144,10 +147,10 @@ it.each(["continue", "newer-pin", "newer-workflow", "existing-workflow"] as cons
       await act(async () => {
         deleting = result.current.remove({ feedback: "inline" });
       });
-      registerTaskSessionHandlers(store)["session.removed"]!({
+      registerTaskSessionHandlers(store)[REMOVED_ACTION]!({
         id: "background-removed",
         type: "notification",
-        action: "session.removed",
+        action: REMOVED_ACTION,
         payload: { session_id: "next", task_id: "t1" },
       });
       if (outcome === "newer-pin") store.getState().setActiveSession("t1", "latest");
@@ -304,10 +307,10 @@ it("retains an empty-slot continuation when the local ACK trails its removal eve
   await act(async () => {
     deleting = result.current.remove({ feedback: "inline" });
   });
-  registerTaskSessionHandlers(store)["session.removed"]!({
+  registerTaskSessionHandlers(store)[REMOVED_ACTION]!({
     id: "local-removal-before-ack",
     type: "notification",
-    action: "session.removed",
+    action: REMOVED_ACTION,
     payload: { session_id: "old", task_id: "t1" },
   });
   await flushFocusWork();
@@ -321,4 +324,47 @@ it("retains an empty-slot continuation when the local ACK trails its removal eve
   await flushFocusWork();
   expect(store.getState().tasks.activeSessionId).toBe("latest");
   expect(store.getState().taskSessions.items.old).toBeUndefined();
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.11
+it.each([
+  ["event-first", "follow"],
+  ["ack-first", "follow"],
+  ["event-first", SURVIVING_PIN],
+  ["ack-first", SURVIVING_PIN],
+] as const)("retains a deleted tab selected after dispatch (%s, %s)", async (order, winner) => {
+  const store = withSiblings("CANCELLED");
+  harness.store = store;
+  store.getState().setActiveTask("elsewhere");
+  promote(store, "latest");
+  store.getState().setActiveSessionAuto("t1", "next");
+  const acknowledgement = Promise.withResolvers<unknown>();
+  const proof = Promise.withResolvers<Awaited<ReturnType<typeof listTaskSessions>>>();
+  harness.request.mockReturnValue(acknowledgement.promise);
+  vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
+  const { result } = renderHook(() => useSessionActions({ taskId: "t1", sessionId: "old" }));
+  let deleting!: Promise<boolean>;
+  await act(async () => {
+    deleting = result.current.remove({ feedback: "inline" });
+  });
+  store.getState().setActiveSession("t1", "old");
+  const removed = () =>
+    registerTaskSessionHandlers(store)[REMOVED_ACTION]!({
+      id: "selected-during-local-delete",
+      type: "notification",
+      action: REMOVED_ACTION,
+      payload: { session_id: "old", task_id: "t1" },
+    });
+  if (order === "event-first") removed();
+  if (winner === SURVIVING_PIN) store.getState().setActiveSession("t1", "next");
+  await act(async () => {
+    acknowledgement.resolve(undefined);
+    expect(await deleting).toBe(true);
+  });
+  if (order === "ack-first") removed();
+  proof.resolve(membership("latest", "next"));
+  await flushFocusWork();
+  expect(store.getState().taskSessions.items.old).toBeUndefined();
+  expect(store.getState().tasks.activeSessionId).toBe(winner === "follow" ? "latest" : "next");
+  if (winner === SURVIVING_PIN) expect(store.getState().tasks.pinnedSessionId).toBe("next");
 });

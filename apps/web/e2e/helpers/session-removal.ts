@@ -311,3 +311,50 @@ export async function expectLatePromotionAfterRemoval(
     gate.release();
   }
 }
+
+/** Delay authentic delete dispatch/ACK while forwarding all unrelated frames. */
+export async function holdDeletionTraffic(page: Page, sessionId: string) {
+  const requestQueued = Promise.withResolvers<void>();
+  const acknowledgementQueued = Promise.withResolvers<void>();
+  const requests: Array<() => void> = [];
+  const acknowledgements: Array<() => void> = [];
+  let requestId: string | undefined;
+  let dispatchReleased = false;
+  let acknowledgementReleased = false;
+  await page.routeWebSocket(/\/ws(?:\?|$)/, (socket) => {
+    const upstream = socket.connectToServer();
+    socket.onMessage((data) => {
+      const frame = JSON.parse(data.toString());
+      if (frame.action === "session.delete" && frame.payload?.session_id === sessionId) {
+        requestId = frame.id;
+        if (!dispatchReleased) {
+          requests.push(() => upstream.send(data));
+          requestQueued.resolve();
+          return;
+        }
+      }
+      upstream.send(data);
+    });
+    upstream.onMessage((data) => {
+      const frame = JSON.parse(data.toString());
+      if (requestId && frame.id === requestId && !acknowledgementReleased) {
+        acknowledgements.push(() => socket.send(data));
+        acknowledgementQueued.resolve();
+        return;
+      }
+      socket.send(data);
+    });
+  });
+  return {
+    requestQueued: requestQueued.promise,
+    acknowledgementQueued: acknowledgementQueued.promise,
+    dispatch: () => {
+      dispatchReleased = true;
+      for (const send of requests.splice(0)) send();
+    },
+    acknowledge: () => {
+      acknowledgementReleased = true;
+      for (const send of acknowledgements.splice(0)) send();
+    },
+  };
+}

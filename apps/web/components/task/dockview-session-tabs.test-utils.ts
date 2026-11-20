@@ -193,9 +193,15 @@ export function makeReorderingAutoSessionApi(globalActivePanelId: "chat" | "file
       id: string;
       component: string;
       inactive?: boolean;
-      position?: { index?: number };
+      position?: { index?: number; referenceGroup?: string };
     }): ReorderingPanel => {
-      const panel = createPanel(options.id, options.component, group, options.position?.index);
+      const targetGroup = options.position?.referenceGroup === RIGHT_TOP_GROUP ? rightGroup : group;
+      const panel = createPanel(
+        options.id,
+        options.component,
+        targetGroup,
+        options.position?.index,
+      );
       if (!options.inactive) activate(panel);
       return panel;
     },

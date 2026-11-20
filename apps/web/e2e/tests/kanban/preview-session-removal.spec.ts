@@ -3,6 +3,7 @@ import type { APIResponse, Route } from "@playwright/test";
 import { KanbanPage } from "../../pages/kanban-page";
 import { watchWs } from "../../helpers/causal-waits";
 import {
+  holdDeletionTraffic,
   holdRemovalMembership,
   observeRemovalSelection,
   REMOVAL_OTHER_TEXT,
@@ -211,4 +212,99 @@ test.describe("Preview owned deletion", () => {
       await apiClient.saveUserSettings({ workflow_filter_id: oldFilter });
     }
   });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.11
+  test("keeps the removed Preview tab selected after dispatch under its current proof", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { task, old, primary, other } = await seedRemovalChoiceTask(apiClient, seedData);
+    const deletion = await holdDeletionTraffic(testPage, old.session_id);
+    const proof = await holdRemovalMembership(testPage, task.task_id, old.session_id);
+    await testPage.goto(`/?taskId=${task.task_id}&sessionId=${other.session_id}`);
+    const preview = testPage.getByTestId("task-preview-panel");
+    const chat = preview.locator('[data-testid="session-chat"]:visible');
+    await expect(chat).toHaveAttribute("data-session-id", other.session_id);
+    await waitForTaskSessionsSettled(testPage, task.task_id);
+    const history = await observeRemovalSelection(testPage);
+    const documentStart = await testPage.evaluate(() => performance.timeOrigin);
+    try {
+      proof.arm();
+      await preview.getByTestId(`preview-session-tab-${old.session_id}`).click({ button: "right" });
+      await testPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
+      await testPage.getByTestId("session-delete-confirm").click();
+      await deletion.requestQueued;
+      await preview.getByTestId(`preview-session-tab-${old.session_id}`).click();
+      await expect(chat).toHaveAttribute("data-session-id", old.session_id);
+      const beforeCommit = (await history.read()).length;
+      deletion.dispatch();
+      await deletion.acknowledgementQueued;
+      deletion.acknowledge();
+      await proof.queued;
+      await expect(chat).toHaveCount(0);
+      expect(
+        (await apiClient.listTaskSessions(task.task_id)).sessions.some(
+          (row) => row.id === old.session_id,
+        ),
+      ).toBe(false);
+      proof.release();
+      await expect(chat).toHaveAttribute("data-session-id", primary.session_id);
+      await expect(chat.getByText(REMOVAL_PRIMARY_TEXT, { exact: true })).toBeVisible();
+      await expect
+        .poll(() => new URL(testPage.url()).searchParams.get("sessionId"))
+        .toBe(primary.session_id);
+      expect(
+        (await history.read()).slice(beforeCommit).map((sample) => sample.sessionId),
+      ).not.toContain(other.session_id);
+      expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
+    } finally {
+      deletion.dispatch();
+      deletion.acknowledge();
+      await proof.dispose();
+      await history.stop();
+    }
+  });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+  for (const validLink of [false, true]) {
+    test(`resolves initial Preview membership (valid non-primary link: ${validLink})`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      const { task, old, primary, other } = await seedRemovalChoiceTask(apiClient, seedData);
+      await apiClient.wsRequest("session.delete", { session_id: old.session_id });
+      const members = (await apiClient.listTaskSessions(task.task_id)).sessions;
+      expect(members.some((row) => row.id === old.session_id)).toBe(false);
+      expect(members.filter((row) => row.is_primary).map((row) => row.id)).toEqual([
+        primary.session_id,
+      ]);
+      const requested = validLink ? other.session_id : old.session_id;
+      await testPage.goto(`/?taskId=${task.task_id}&sessionId=${requested}`);
+      const preview = testPage.getByTestId("task-preview-panel");
+      await expect(preview).toBeVisible();
+      await waitForTaskSessionsSettled(testPage, task.task_id);
+      const history = await observeRemovalSelection(testPage);
+      try {
+        const expected = validLink ? other.session_id : primary.session_id;
+        const chat = preview.locator('[data-testid="session-chat"]:visible');
+        await expect(chat).toHaveAttribute("data-session-id", expected);
+        await expect(
+          chat.getByText(validLink ? REMOVAL_OTHER_TEXT : REMOVAL_PRIMARY_TEXT, { exact: true }),
+        ).toBeVisible();
+        await expect
+          .poll(() => new URL(testPage.url()).searchParams.get("sessionId"))
+          .toBe(expected);
+        expect((await history.read()).map((sample) => sample.pinnedSessionId)).not.toContain(
+          old.session_id,
+        );
+        await testPage.screenshot({
+          path: test.info().outputPath(`preview-initial-membership-${validLink}.png`),
+        });
+      } finally {
+        await history.stop();
+      }
+    });
+  }
 });

@@ -4,7 +4,7 @@ import {
   consumeSessionTabUserActivationIntent,
   markSessionPanelUserActivationIntent,
   markSessionTabUserActivationIntent,
-  shouldMarkSessionTabUserActivationIntent,
+  shouldActivateSessionTabFromInput,
 } from "./session-tab-activation-intent";
 
 const INACTIVE_SESSION_ID = "s-inactive";
@@ -68,23 +68,21 @@ describe("session tab activation intent lifecycle", () => {
 });
 
 describe("session tab activation intent guard", () => {
-  it("does not mark intent for already-active tabs", () => {
+  it("claims an already-visible tab when data selection differs", () => {
     expect(
-      shouldMarkSessionTabUserActivationIntent({
+      shouldActivateSessionTabFromInput({
         sessionId: "s-active",
         activeSessionId: "s-other",
-        isActive: true,
         target: document.createElement("span"),
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("does not mark intent for the current active session when another panel is active", () => {
     expect(
-      shouldMarkSessionTabUserActivationIntent({
+      shouldActivateSessionTabFromInput({
         sessionId: "s-active",
         activeSessionId: "s-active",
-        isActive: false,
         target: document.createElement("span"),
       }),
     ).toBe(false);
@@ -92,10 +90,9 @@ describe("session tab activation intent guard", () => {
 
   it("does not mark intent without a session id", () => {
     expect(
-      shouldMarkSessionTabUserActivationIntent({
+      shouldActivateSessionTabFromInput({
         sessionId: null,
         activeSessionId: "s-active",
-        isActive: false,
         target: document.createElement("span"),
       }),
     ).toBe(false);
@@ -107,10 +104,9 @@ describe("session tab activation intent guard", () => {
     button.append(label);
 
     expect(
-      shouldMarkSessionTabUserActivationIntent({
+      shouldActivateSessionTabFromInput({
         sessionId: INACTIVE_SESSION_ID,
         activeSessionId: "s-active",
-        isActive: false,
         target: label,
       }),
     ).toBe(false);
@@ -123,10 +119,9 @@ describe("session tab activation intent guard", () => {
     button.append(label);
 
     expect(
-      shouldMarkSessionTabUserActivationIntent({
+      shouldActivateSessionTabFromInput({
         sessionId: INACTIVE_SESSION_ID,
         activeSessionId: "s-active",
-        isActive: false,
         target: label,
       }),
     ).toBe(false);
@@ -139,10 +134,9 @@ describe("session tab activation intent guard", () => {
     closeAction.append(label);
 
     expect(
-      shouldMarkSessionTabUserActivationIntent({
+      shouldActivateSessionTabFromInput({
         sessionId: INACTIVE_SESSION_ID,
         activeSessionId: "s-active",
-        isActive: false,
         target: label,
       }),
     ).toBe(false);
@@ -150,10 +144,9 @@ describe("session tab activation intent guard", () => {
 
   it("marks intent for non-element targets on inactive tabs", () => {
     expect(
-      shouldMarkSessionTabUserActivationIntent({
+      shouldActivateSessionTabFromInput({
         sessionId: INACTIVE_SESSION_ID,
         activeSessionId: "s-active",
-        isActive: false,
         target: null,
       }),
     ).toBe(true);
@@ -161,10 +154,9 @@ describe("session tab activation intent guard", () => {
 
   it("marks intent for inactive tab activation surfaces", () => {
     expect(
-      shouldMarkSessionTabUserActivationIntent({
+      shouldActivateSessionTabFromInput({
         sessionId: INACTIVE_SESSION_ID,
         activeSessionId: "s-active",
-        isActive: false,
         target: document.createElement("span"),
       }),
     ).toBe(true);

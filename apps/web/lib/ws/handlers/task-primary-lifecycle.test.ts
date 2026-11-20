@@ -37,6 +37,8 @@ const RECIPIENT_EXECUTION_ID = "recipient-execution";
 const FAILURE_TIME = "2026-11-19T12:00:02Z";
 const OTHER_TASK_ID = "other-task";
 const STARTING_TIME = "2026-11-19T12:00:01Z";
+const TERMINAL_FIRST = "terminal-first";
+const PROMOTION_FIRST = "promotion-first";
 function removeDisplayed(store: ReturnType<typeof withSiblings>, taskId?: string) {
   registerTaskSessionHandlers(store)[REMOVED]?.({
     id: "removed",
@@ -212,14 +214,18 @@ describe("lifecycle authority at publication", () => {
 // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
 describe("lifecycle recipient after promotion", () => {
   it.each([
-    ["CANCELLED", "FAILED"],
-    ["CANCELLED", "WAITING_FOR_INPUT"],
-    ["COMPLETED", "FAILED"],
-    ["COMPLETED", "WAITING_FOR_INPUT"],
+    ["CANCELLED", "FAILED", TERMINAL_FIRST],
+    ["CANCELLED", "WAITING_FOR_INPUT", TERMINAL_FIRST],
+    ["COMPLETED", "FAILED", TERMINAL_FIRST],
+    ["COMPLETED", "WAITING_FOR_INPUT", TERMINAL_FIRST],
+    ["CANCELLED", "FAILED", PROMOTION_FIRST],
+    ["CANCELLED", "WAITING_FOR_INPUT", PROMOTION_FIRST],
+    ["COMPLETED", "FAILED", PROMOTION_FIRST],
+    ["COMPLETED", "WAITING_FOR_INPUT", PROMOTION_FIRST],
   ] as const)(
-    "retains recipient eligibility after %s retargets to a now %s primary",
-    async (endedState, recipientState) => {
-      const store = withSiblings(endedState);
+    "retains recipient eligibility after %s retargets to a now %s primary (%s)",
+    async (endedState, recipientState, order) => {
+      const store = withSiblings("RUNNING");
       store.getState().upsertTaskSessionFromEvent("t1", {
         ...store.getState().taskSessions.items.next,
         state: "STARTING",
@@ -234,8 +240,13 @@ describe("lifecycle recipient after promotion", () => {
       const selected: Array<string | null> = [];
       const release = store.subscribe((value) => selected.push(value.tasks.activeSessionId));
       try {
-        notifyState(store, endedState, SNAPSHOT_TIME);
-        promote(store);
+        if (order === PROMOTION_FIRST) {
+          promote(store);
+          notifyState(store, endedState, SNAPSHOT_TIME);
+        } else {
+          notifyState(store, endedState, SNAPSHOT_TIME);
+          promote(store);
+        }
         registerTaskSessionHandlers(store)[SESSION_STATE_CHANGED]!({
           id: "recipient-retarget-settled",
           type: "notification",
@@ -363,24 +374,21 @@ describe("removing a retained non-primary failure", () => {
     ).toBe(false);
   });
 
-  it.each(["promotion-first", "proof-first"])(
-    "follows proven membership with %s",
-    async (order) => {
-      const store = withSiblings("FAILED");
-      vi.mocked(fetchTaskSession).mockRejectedValue(new ApiError("", 404, null));
-      const proof = Promise.withResolvers<Awaited<ReturnType<typeof listTaskSessions>>>();
-      vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
-      removeDisplayed(store);
-      if (order === "promotion-first") promote(store);
-      proof.resolve(membership("next", "latest"));
-      await flushFocusWork();
-      expect(store.getState().tasks.activeSessionId).toBe("next");
-      if (order === "proof-first") promote(store);
-      await flushFocusWork();
-      expect(store.getState().tasks.activeSessionId).toBe("next");
-      expect(store.getState().taskSessions.items.old).toBeUndefined();
-    },
-  );
+  it.each([PROMOTION_FIRST, "proof-first"])("follows proven membership with %s", async (order) => {
+    const store = withSiblings("FAILED");
+    vi.mocked(fetchTaskSession).mockRejectedValue(new ApiError("", 404, null));
+    const proof = Promise.withResolvers<Awaited<ReturnType<typeof listTaskSessions>>>();
+    vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
+    removeDisplayed(store);
+    if (order === PROMOTION_FIRST) promote(store);
+    proof.resolve(membership("next", "latest"));
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("next");
+    if (order === "proof-first") promote(store);
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("next");
+    expect(store.getState().taskSessions.items.old).toBeUndefined();
+  });
 
   it("admits a proven recipient before its lifecycle projection arrives", async () => {
     const store = withSiblings("FAILED");

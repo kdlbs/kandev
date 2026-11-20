@@ -2,6 +2,7 @@ import type { DockviewApi } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
+import { isConfirmedSessionRemoved } from "@/lib/state/session-removal";
 import { getProvenRemovalPredecessor } from "@/lib/state/session-removal-handoff";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { shouldPreserveActivePanel } from "./dockview-session-tab-activation";
@@ -10,22 +11,15 @@ type SurfaceOwner = {
   store: StoreApi<AppState>;
   taskId: string;
   previousSessionId: string;
+  groupId: string;
   navigationRevision: number;
   workflowFocus: AppState["workflowSessionFocus"];
   scopeIdentity: string;
   restorePanelId: string | null;
   cancelled: boolean;
+  focusDelivered: boolean;
 };
-const surfaces = new WeakMap<DockviewApi, SurfaceOwner>();
-
-function sameContext(current: AppState, previous: AppState): boolean {
-  return (
-    current.tasks.activeTaskId === previous.tasks.activeTaskId &&
-    current.taskRemoval.navigationRevision === previous.taskRemoval.navigationRevision &&
-    current.workflowSessionFocus === previous.workflowSessionFocus &&
-    stateReadScopeIdentity(current) === stateReadScopeIdentity(previous)
-  );
-}
+const surfaces = new WeakMap<DockviewApi, Map<string, SurfaceOwner>>();
 
 function captureVisiblePredecessor(
   api: DockviewApi,
@@ -35,15 +29,15 @@ function captureVisiblePredecessor(
 ): SurfaceOwner | undefined {
   const taskId = previous.tasks.activeTaskId;
   const sessionId = previous.tasks.activeSessionId;
+  const scopeIdentity = stateReadScopeIdentity(current);
   if (
     !taskId ||
     !sessionId ||
     current.tasks.activeSessionId !== null ||
-    !sameContext(current, previous)
+    current.tasks.activeTaskId !== taskId ||
+    scopeIdentity !== stateReadScopeIdentity(previous)
   )
     return;
-  const focus = current.workflowSessionFocus;
-  if (focus.intent?.taskId === taskId || focus.request?.taskId === taskId) return;
   const panel = api.getPanel(`session:${sessionId}`);
   if (!panel || panel.group.activePanel?.id !== panel.id) return;
   const globalPanel = api.activePanel?.id;
@@ -51,11 +45,13 @@ function captureVisiblePredecessor(
     store,
     taskId,
     previousSessionId: sessionId,
+    groupId: panel.group.id,
     navigationRevision: current.taskRemoval.navigationRevision,
-    workflowFocus: focus,
-    scopeIdentity: stateReadScopeIdentity(current),
+    workflowFocus: current.workflowSessionFocus,
+    scopeIdentity,
     restorePanelId: globalPanel && !globalPanel.startsWith("session:") ? globalPanel : null,
     cancelled: false,
+    focusDelivered: false,
   };
 }
 
@@ -68,29 +64,50 @@ function ownsSurface(state: AppState, owner: SurfaceOwner): boolean {
   );
 }
 
-/** A blank interval retains only the conversation that was actually visible. */
+function ownsRemovalContext(state: AppState, owner: SurfaceOwner): boolean {
+  return (
+    state.tasks.activeTaskId === owner.taskId &&
+    stateReadScopeIdentity(state) === owner.scopeIdentity
+  );
+}
+
+function pruneSurfaces(api: DockviewApi, state: AppState): void {
+  const owners = surfaces.get(api);
+  if (!owners) return;
+  for (const [groupId, owner] of owners) {
+    const group = api.groups.find((candidate) => candidate.id === groupId);
+    if (
+      !group ||
+      !ownsRemovalContext(state, owner) ||
+      (state.tasks.activeSessionId !== null &&
+        group.activePanel?.id === `session:${state.tasks.activeSessionId}`)
+    )
+      owners.delete(groupId);
+  }
+}
+
+/** Only explicit/proven ownership can expose a removed group's fallback transcript. */
 export function setupRemovalSurfaceFocus(api: DockviewApi, store: StoreApi<AppState>): () => void {
   const unsubscribe = store.subscribe((current, previous) => {
-    const owner = surfaces.get(api);
-    if (
-      owner &&
-      (!ownsSurface(current, owner) ||
-        (current.tasks.activeSessionId !== null &&
-          getProvenRemovalPredecessor(store, owner.taskId, current.tasks.activeSessionId) !==
-            owner.previousSessionId))
-    )
-      surfaces.delete(api);
+    pruneSurfaces(api, current);
     if (!useDockviewStore.getState().isRestoringLayout) {
       const captured = captureVisiblePredecessor(api, store, current, previous);
-      if (captured) surfaces.set(api, captured);
+      if (captured) {
+        let owners = surfaces.get(api);
+        if (!owners) {
+          owners = new Map();
+          surfaces.set(api, owners);
+        }
+        owners.set(captured.groupId, captured);
+      }
     }
   });
   const cancel = () => {
-    const owner = surfaces.get(api);
-    if (owner) owner.cancelled = true;
+    for (const owner of surfaces.get(api)?.values() ?? []) owner.cancelled = true;
   };
   const unsubscribeLayout = useDockviewStore.subscribe((current) => {
     if (current.isRestoringLayout || current.api !== api) surfaces.delete(api);
+    else pruneSurfaces(api, store.getState());
   });
   window.addEventListener("pointerdown", cancel, true);
   window.addEventListener("keydown", cancel, true);
@@ -108,22 +125,63 @@ export function getRemovalSurfaceFocus(
   store: StoreApi<AppState>,
   taskId: string,
   targetSessionId: string,
-): Readonly<Pick<SurfaceOwner, "cancelled" | "restorePanelId">> | undefined {
-  const owner = surfaces.get(api);
-  if (
-    !owner ||
-    owner.store !== store ||
-    owner.taskId !== taskId ||
-    !ownsSurface(store.getState(), owner)
-  )
-    return;
-  if (getProvenRemovalPredecessor(store, taskId, targetSessionId) !== owner.previousSessionId)
-    return;
-  return owner;
+): Readonly<Pick<SurfaceOwner, "cancelled" | "restorePanelId" | "groupId">> | undefined {
+  const owners = surfaces.get(api);
+  const previous = getProvenRemovalPredecessor(store, taskId, targetSessionId);
+  if (!owners || !previous) return;
+  for (const owner of owners.values()) {
+    if (
+      owner.store !== store ||
+      owner.taskId !== taskId ||
+      owner.focusDelivered ||
+      owner.previousSessionId !== previous ||
+      !ownsSurface(store.getState(), owner)
+    )
+      continue;
+    const group = api.groups.find((candidate) => candidate.id === owner.groupId);
+    const independentPanel = group?.activePanel;
+    const globalPanel = api.activePanel;
+    return {
+      groupId: owner.groupId,
+      cancelled:
+        owner.cancelled && !!independentPanel && !independentPanel.id.startsWith("session:"),
+      restorePanelId:
+        globalPanel && globalPanel.group.id !== owner.groupId
+          ? globalPanel.id
+          : owner.restorePanelId,
+    };
+  }
 }
 
-export function consumeRemovalSurfaceFocus(api: DockviewApi): void {
-  surfaces.delete(api);
+export function isRemovalChatBlocked(
+  api: DockviewApi | null,
+  store: StoreApi<AppState>,
+  panelId: string,
+  state: AppState,
+): boolean {
+  const panel = api?.getPanel(panelId);
+  const owner = panel && api ? surfaces.get(api)?.get(panel.group.id) : undefined;
+  return (
+    !!owner &&
+    owner.store === store &&
+    ownsRemovalContext(state, owner) &&
+    isConfirmedSessionRemoved(state.taskSessions, owner.previousSessionId) &&
+    panelId !== `session:${state.tasks.activeSessionId}`
+  );
+}
+
+export function consumeRemovalSurfaceFocus(api: DockviewApi, groupId: string): void {
+  const owners = surfaces.get(api);
+  const owner = owners?.get(groupId);
+  if (!owner) return;
+  owner.focusDelivered = true;
+  const panel = api.groups.find((group) => group.id === groupId)?.activePanel;
+  if (
+    !panel ||
+    !panel.id.startsWith("session:") ||
+    panel.id === `session:${owner.store.getState().tasks.activeSessionId}`
+  )
+    owners?.delete(groupId);
 }
 
 export function shouldPreserveUnrequestedPanel(

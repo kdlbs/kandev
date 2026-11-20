@@ -321,7 +321,7 @@ function applySessionPanelActivation({
       restorePreservedActivePanel(api, removalFocus.restorePanelId, true);
     }
   }
-  if (removalFocus) consumeRemovalSurfaceFocus(api);
+  if (removalFocus) consumeRemovalSurfaceFocus(api, removalFocus.groupId);
   useDockviewStore.setState({
     centerGroupId: isCenterCandidateGroupId(panel.group.id) ? panel.group.id : CENTER_GROUP,
   });

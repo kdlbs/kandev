@@ -574,5 +574,16 @@ fix. It is separate from the five design-only rounds above.
   ten new/owning Chromium cases, the wider desktop import repair, and six phone
   passes. Preview, lifecycle retarget and actual Dockview visibility each have
   consumer proof. The separate production review loop remains open.
-- Completed rounds: 10. Consecutive clean: 0. The stop condition is three
+- Round 11: Sol child `22791f6e-c198-4e89-a223-80669dc3b25e` reviewed
+  `e09985a2fc`. Four source-derived P2s accepted for reproduction: an implicit
+  Dockview fallback can acknowledge a sibling; promotion-first delivery omits
+  lifecycle recipient eligibility; a late local ACK cancels the newly selected
+  removed session's proof; stale Preview deep links can pin a missing session.
+  Remediation is implemented and verified: 14 desktop and 6 phone cases,
+  449 related cases plus 7 real Preview consumer/width controls, changed-file
+  lint, and typecheck. After the normal hook's strict lint correction, 160
+  affected cases and final-bundle desktop/phone failed-resume smokes passed.
+  Task 02 distinguishes these from the earlier full 14/6 run and records
+  intermediate fixture/hook failures. No unread contract changed.
+- Completed rounds: 11. Consecutive clean: 0. The stop condition is three
   consecutive clean rounds or 50 rounds. No earlier loop counts toward it.

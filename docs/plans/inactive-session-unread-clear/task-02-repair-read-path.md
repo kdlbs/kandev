@@ -1535,3 +1535,225 @@ promotion or persisted schema change was made. Backend/plugin artifacts remain
 the retained R02 build. Broad-suite and live-NATS certification, isolated
 cursor-event delivery and historical live-incident attribution remain limited
 as recorded above. No live database mutation was performed.
+
+### Production-fix review round 11 remediation
+
+Four source-derived P2 schedules are accepted for targeted reproduction under
+the existing .6/.9/.11/.17 contract:
+
+- Keep only the removed view's unowned Dockview group blank until explicit or
+  proven conversation ownership. Do not change acknowledgement eligibility or
+  disable independently visible split chats. A real unread row seeded after
+  returning to A, authentic held membership, persisted cursor and mark-read
+  traffic prove the boundary; explicit B and independent Changes are controls.
+- Merge an accepted predecessor ending into an already-owned primary check's
+  recipient eligibility in either delivery order. Retain its projected target
+  and durable predecessor predicate. Real-handler reversed FAILED/healthy cases
+  extend `task-primary-lifecycle.test.ts`.
+- The local delete ACK retains a current same-ID removal view in its captured
+  backend/auth/workspace, even if that view was selected after dispatch. It must
+  not replace a surviving selection or independent workflow. Deferred real
+  `useSessionActions` tests cover event/ACK order; Preview proves the consumer.
+- Validate initial Preview route/discovery IDs against authoritative same-task
+  membership before adoption or pinning. Missing IDs must fall back to a valid
+  primary/unavailable surface, not become a live owned-null interval. Fresh
+  deleted/valid non-primary links and the existing held-deletion cases prove
+  those distinct paths.
+
+```text
+Desktop group A: Delete -> [blank, no implicit B transcript/read] -> proven C
+Other split D:           [still visible and readable]
+Explicit B:              [select B -> visible and acknowledged]
+Preview stale A link:    [validate membership -> C, never pin A]
+Phone: Sessions sheet -> existing shared deletion/selection proof
+```
+
+The desktop group fence belongs to the existing surface owner, not the unread
+predicate. Preview remains desktop-only; phones retain direct task navigation
+and the shipped Sessions sheet. No new control, breakpoint, persisted setting,
+wire field, backend promotion rule, timer/retry or live-data mutation is planned.
+Reproduction receipts (cache-backed snapshot, no source-checkout build output):
+
+- `r11-gap-red-summary.log` / `r11-quiet/kandev-run.e2e.WyTVnqlS.log`:
+  both held-gap cursor cases advanced B's persisted cursor to its newly seeded
+  unread row. The explicit-B control also exposed that clicking Dockview's
+  already-active fallback did not claim data selection. The correction makes
+  only the affected group's implicit transcript hidden/detail-inactive while
+  preserving its mounted draft/history; real tab input can explicitly claim it.
+- `r11-authority-red.log`: promotion-first FAILED-recipient cases and both
+  late-ACK current-view orders failed. `r11-authority-green.log`: the minimal
+  controller correction passed five files / 145 tests, including healthy,
+  surviving-pin and both notification-order controls.
+- `r11-discovery-red-summary.log` / `r11-quiet/kandev-run.e2e.mQNj9njv.log`:
+  a fresh deleted-session URL failed to show C; a valid non-primary link passed.
+  The first unit attempt used an incomplete external WS mock and failed on
+  `subscribe`, not behavior. Replacing it with a real disconnected
+  `WebSocketClient` and mocking only its request boundary produced the behavioral
+  RED in `r11-discovery-unit-red-real-client.log`: one missing-ID failure,
+  four existing/valid-link controls passing. No connection was opened.
+
+UI RED used the retained R10 frontend, whose affected UI was unchanged before
+those reproductions. The GREEN browser receipts below use a fresh R11 frontend.
+
+The real Preview consumer fixture now uses a complete disconnected WS client,
+not an owned-store/router/hook replacement. Its ownership cases use a bounded
+15s whole-render budget; individual `waitFor` assertions keep the default
+deadline. Intermediate 5s-budget runs timed out in otherwise healthy full-chat
+renders (6.3s, then 5.6s/9.0s), not in the invalid-ID assertion. The budgeted
+four-file UI run passed 34 tests and the fresh R11 frontend build succeeded.
+The prior typecheck passed; final related-file, browser and lint receipts follow.
+
+Fresh-browser receipts:
+
+- `r11-desktop-summary.log` / `r11-quiet/kandev-run.e2e.25rslW9N.log`:
+  both complete owning Chromium files passed, 14 cases, one worker, no retries.
+  This includes the real deferred delete ACK after selecting A, stale/valid
+  initial links, all three held-gap owners, Plan and workflow precedence.
+- `r11-phone-summary.log` / `r11-quiet/kandev-run.e2e.A0REZnVa.log`:
+  the complete mobile unread-dot file passed, 6 cases, one worker, no retries.
+- `r11-oxlint.log`, `r11-e2e-sleeps.log`, `r11-final-typecheck.log`: exit 0.
+  Initial Oxlint covered 18 changed web files; the two-fixture lint also covers
+  `kanban-with-preview.rendered.test.tsx`. Typecheck uses the cache setup's
+  8GiB Node heap. The replaced prop-echo test is documented below.
+- Inspected the new held-independent-Changes capture: the removed group's
+  conversation is blank while Changes stays visible. The proven-C capture
+  displays its exact stored text; the fresh stale-link Preview displays C;
+  the phone failed-resume capture retains its failure and recovery controls.
+  Captures are under `r11-desktop/` and `r11-phone/`, not the source checkout.
+
+The fresh frontend's bundle hashes are retained in `r11-frontend.sha256`.
+R02 backend/plugin artifacts are reused intentionally; no backend production,
+wire, cursor writer, unread predicate, or primary promotion code changed.
+Broad web/backend suites and a live NATS deployment are not certified green.
+Historical incident attribution, seeded-RUNNING, and list-convergence limits
+from the earlier results still apply.
+
+Exact related-file gate, from the refreshed cache-backed `$VERIFY/apps/web`
+after the existing safe setup (not from committed HEAD alone):
+
+```bash
+pnpm run pretypecheck
+VITEST_MAX_WORKERS=2 pnpm exec vitest run \
+  lib/ws/handlers/task-primary-focus.test.ts \
+  lib/ws/handlers/task-primary-lifecycle.test.ts \
+  lib/ws/handlers/task-primary-continuation.test.ts \
+  lib/ws/handlers/task-primary-removal-admission.test.ts \
+  lib/ws/handlers/agent-session.test.ts \
+  lib/ws/handlers/tasks.test.ts \
+  lib/state/workflow-session-focus.test.ts \
+  hooks/domains/session/use-session-actions.removal-proof.test.ts \
+  components/task/dockview-session-removal-focus.test.ts \
+  components/task/dockview-session-tab-sync.test.ts \
+  components/task/dockview-session-tab-activation.test.ts \
+  components/task/dockview-session-tabs.test.ts \
+  components/task/dockview-session-tabs.hook.test.tsx \
+  components/task/dockview-panel-content.diff.test.tsx \
+  components/task/dockview-panel-content.todos.test.tsx \
+  components/task/dockview-desktop-layout.test.ts \
+  components/task/session-tab-activation-intent.test.ts \
+  components/task/use-session-tab-user-activation.test.tsx \
+  components/kanban-with-preview.session-ownership.test.tsx \
+  components/kanban-with-preview.rendered.test.tsx \
+  components/kanban-with-preview.copilot.test.tsx \
+  components/kanban-with-preview.test.ts \
+  components/task/preview-session-tabs.test.tsx \
+  components/task/chat/use-session-read-tracking.test.ts \
+  components/task/task-unread-dot-visibility.test.ts
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/kanban/preview-session-removal.spec.ts -- \
+  --workers=1 --retries=0 --output "$SNAPSHOT/r11-desktop"
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- \
+  --workers=1 --retries=0 --output "$SNAPSHOT/r11-phone"
+```
+
+`--no-build` requires the recorded fresh R11 build; it is not permission to use
+an older frontend after a production edit.
+
+Final related-check receipts:
+
+- `r11-related.log`: 25 files, 455/456 cases passed. The failure was an obsolete
+  fake Preview panel echoing the passed session prop, with no authoritative
+  membership fixture. Its unmocked list request hit the unit server's 404.
+  It was not treated as a green gate or re-pinned to an unavailable session.
+- The prop-echo test and its fake selector were removed. Its rollback behavior
+  moved into the existing real Preview consumer fixture: real tabs, shared
+  membership and store, visible session chat, task-removal release, and URL
+  assertions. The unrelated width test retains its contract with a bounded
+  external empty-membership response.
+- `r11-related-preview-final.log`: the first real-consumer attempt sent only
+  `click`, which does not activate Radix's mouse-down tab trigger. After sending
+  the actual mouse-down/up/click sequence, `r11-preview-consumer-final.log`
+  passed both owning files / 7 cases. The other 23 related files / 449 cases
+  already passed against this production code. This is combined scoped
+  evidence, not a fresh single 25-file green run.
+- `r11-related-preview-lint.log` and `r11-related-preview-typecheck.log`: exit 0.
+  The final mouse-input fixture edit changed no production code or browser
+  bundle; the 14 desktop / 6 phone receipts above remain applicable.
+- `r11-final-static.log`: final typecheck after the mouse-input fixture change,
+  all 19 changed web files' Prettier checks, i18n ratchet, docs catalog and
+  specification lint passed. The snapshot ratchet reported rename-detection
+  warnings over its older Git baseline; the normal source commit hooks retain
+  their own exact staged scope. No Git configuration was changed for this.
+
+R11 remediation is implemented and scoped verification is complete. Delivery
+and the next independent production review remain parent-owned. No broad-suite,
+live-NATS, historical-trigger, or isolated cursor-event certification is implied.
+
+Normal-hook delivery correction:
+
+- The first selective commit was rejected by `web-lint`, with no bypass.
+  Earlier direct Oxlint had exited 0 with warnings; the normal hook denies
+  warnings. It found duplicate test literals, one stale unused E2E import,
+  and `followSessionTransition` complexity 16 against the limit of 15.
+- Named test constants and the unused-import removal retain the assertions.
+  Extracting the existing synchronous pending-lifecycle recheck into a private
+  helper lowers complexity without changing the removed-owner early return,
+  recipient eligibility, cancellation, or authoritative read.
+- Earlier 14/6 browser results and related counts are pre-extraction evidence.
+  A fresh post-hook frontend and affected-owner revalidation follow; no older
+  bundle is silently described as the final one. Normal source hooks must
+  succeed before delivery.
+- `r11-hook-strict-lint.log` then exposed the controller's 606-line budget
+  against 600. Its unchanged pure task-scope predecessor predicate moved into
+  the existing `session-selection.ts`; the controller imports it, with no
+  alias, new state, or ownership-policy change.
+- `r11-hook-strict-lint-final.log`: all 20 changed web files passed with
+  `--deny-warnings`. `r11-hook-unit.log`: 8 affected files / 160 cases passed,
+  including both notification orders and real Preview rollback. The post-hook
+  typecheck and fresh frontend build passed; final hashes are retained in
+  `r11-hook-frontend.sha256`. That build differs from the first R11 bundle,
+  so the affected desktop/phone failed-resume flows are re-exercised below.
+- `r11-hook-desktop-summary.log` / `r11-quiet/kandev-run.e2e.ikG53R0P.log`:
+  the final-bundle desktop failed-resume case passed, 1/1.
+- `r11-hook-phone-summary.log` / `r11-quiet/kandev-run.e2e.ATIF3Ns6.log`:
+  the final-bundle phone failed-resume case passed, 1/1. Both use one worker,
+  no retries and the actual stored failure/promotion path. They do not imply
+  a second full 14/6 run.
+
+Post-extraction commands, using the same cache-safe setup:
+
+```bash
+VITEST_MAX_WORKERS=2 pnpm exec vitest run \
+  lib/ws/handlers/task-primary-focus.test.ts \
+  lib/ws/handlers/task-primary-lifecycle.test.ts \
+  lib/ws/handlers/task-primary-continuation.test.ts \
+  lib/ws/handlers/task-primary-removal-admission.test.ts \
+  hooks/domains/session/use-session-actions.removal-proof.test.ts \
+  components/task/dockview-session-removal-focus.test.ts \
+  components/kanban-with-preview.session-ownership.test.tsx \
+  components/kanban-with-preview.rendered.test.tsx
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project chromium \
+  e2e/tests/task/task-unread-dot.spec.ts -- \
+  --workers=1 --retries=0 --grep 'whose resume fails' \
+  --output "$SNAPSHOT/r11-hook-desktop"
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- \
+  --workers=1 --retries=0 --grep 'whose resume fails' \
+  --output "$SNAPSHOT/r11-hook-phone"
+```
