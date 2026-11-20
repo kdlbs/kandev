@@ -245,8 +245,10 @@ test.describe("GitHub workspace authentication", () => {
     await expect(automation.getByText("suspended", { exact: true })).toBeVisible();
     await expect(personal.getByText("revoked", { exact: true })).toBeVisible();
 
-    await testPage.getByTestId("github-scope-mode").click();
-    await testPage.getByRole("option", { name: "Organizations" }).click();
+    const allRepositories = testPage.getByRole("switch", { name: "All repositories" });
+    await expect(allRepositories).toBeChecked();
+    await allRepositories.click();
+    await expect(allRepositories).not.toBeChecked();
     const floatingSave = testPage.getByTestId("settings-floating-save");
     const floatingSaveSurface = floatingSave.getByTestId("settings-floating-save-surface");
     await expect(floatingSave).toBeVisible();

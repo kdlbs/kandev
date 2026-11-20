@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useShallow } from "zustand/react/shallow";
-import type { Options as MarkdownOptions } from "react-markdown";
+import ReactMarkdown, { type Options as MarkdownOptions } from "react-markdown";
 import { MarkdownImage } from "./markdown-image";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -34,12 +34,55 @@ import {
 /** Shared remark plugins used by all markdown renderers */
 type MarkdownPluginList = NonNullable<MarkdownOptions["remarkPlugins"]>;
 
+type MarkdownReferenceNode = {
+  type: string;
+  lang?: string | null;
+  position?: { start?: { offset?: number }; end?: { offset?: number } };
+  data?: Record<string, unknown>;
+  children?: MarkdownReferenceNode[];
+};
+
+type MarkdownReferenceRoot = MarkdownReferenceNode & {
+  type: "root";
+  children: MarkdownReferenceNode[];
+};
+
+const preserveReferenceDefinitions: MarkdownPluginList[number] =
+  () => (tree: MarkdownReferenceRoot, file: { value: string | Uint8Array }) => {
+    if (typeof file.value !== "string") return;
+
+    const definitions = tree.children.flatMap((node) => {
+      if (node.type !== "definition") return [];
+      const { start, end } = node.position ?? {};
+      if (start?.offset === undefined || end?.offset === undefined) return [];
+      return [file.value.slice(start.offset, end.offset)];
+    });
+    if (definitions.length === 0) return;
+
+    const serializedDefinitions = definitions.join("\n");
+    const visit = (nodes: MarkdownReferenceNode[]): void => {
+      for (const node of nodes) {
+        if (node.type === "code" && node.lang === "mermaid") {
+          const data = (node.data ??= {});
+          const properties = (data.hProperties as Record<string, string> | undefined) ?? {};
+          data.hProperties = {
+            ...properties,
+            "data-markdown-reference-definitions": serializedDefinitions,
+          };
+        }
+        if (node.children) visit(node.children);
+      }
+    };
+    visit(tree.children);
+  };
+
 export const remarkPlugins: MarkdownPluginList = [
   remarkGfm,
   remarkBreaks,
   remarkGemoji,
   remarkMath,
   remarkMathCompat,
+  preserveReferenceDefinitions,
 ];
 
 /** Shared rehype plugins used by non-raw Markdown renderers. */
@@ -79,6 +122,7 @@ export function getTextContent(children: ReactNode): string {
 type MarkdownCodeProps = {
   className?: string;
   children?: ReactNode;
+  "data-markdown-reference-definitions"?: string;
 };
 
 export type MarkdownFileLinkContextValue = {
@@ -259,6 +303,41 @@ function MarkdownCode({ className, children }: MarkdownCodeProps) {
   return <InlineCode>{content}</InlineCode>;
 }
 
+function renderFollowingMarkdown(source: string, referenceDefinitions?: string): ReactNode {
+  // i18n-exempt: internal Markdown separator, not UI copy.
+  const recoveredSource = referenceDefinitions ? `${referenceDefinitions}\n\n${source}` : source;
+  return (
+    <ReactMarkdown
+      remarkPlugins={remarkPlugins}
+      rehypePlugins={rehypePlugins}
+      components={markdownComponents}
+    >
+      {recoveredSource}
+    </ReactMarkdown>
+  );
+}
+
+function MarkdownPre({ className, children }: { className?: string; children?: ReactNode }) {
+  const taskId = useContext(MarkdownTaskContext);
+  if (isValidElement(children)) {
+    const codeProps = children.props as MarkdownCodeProps;
+    const isExplicitMermaid = codeProps.className?.split(/\s+/).includes("language-mermaid");
+    if (isExplicitMermaid) {
+      const referenceDefinitions = codeProps["data-markdown-reference-definitions"];
+      return (
+        <MermaidBlock
+          code={getTextContent(codeProps.children).replace(/\n$/, "")}
+          taskId={taskId}
+          renderFollowingMarkdown={(source) =>
+            renderFollowingMarkdown(source, referenceDefinitions)
+          }
+        />
+      );
+    }
+  }
+  return <pre className={className}>{children}</pre>;
+}
+
 /**
  * Shared markdown component overrides for ReactMarkdown.
  * Element styles (headings, lists, inline code, etc.) are handled by
@@ -266,6 +345,7 @@ function MarkdownCode({ className, children }: MarkdownCodeProps) {
  * (code routing, link target, table overflow wrapper) remain here.
  */
 export const markdownComponents = {
+  pre: MarkdownPre,
   code: MarkdownCode,
   a: MarkdownLink,
   img: MarkdownImage,

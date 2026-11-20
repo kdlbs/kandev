@@ -222,7 +222,7 @@ func TestMissingCheckoutRecoveryPreflightCarriesExplicitBranchReplacement(t *tes
 	if session == nil {
 		t.Fatal("selected recovery session is missing from the repository fixture")
 	}
-	admission, err := executor.PreflightSessionWorktreeRecovery(context.Background(), fixture.taskID, session, true)
+	admission, _, err := executor.PreflightSessionWorktreeRecovery(context.Background(), fixture.taskID, session, true)
 	if err != nil {
 		t.Fatalf("preflight explicit new-branch recovery: %v", err)
 	}

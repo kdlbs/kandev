@@ -572,11 +572,11 @@ jobs:
           name: e2e-shard-manifests
           path: e2e-manifests
 
-      # Pinned to chromium + mobile-chrome so the dedicated `e2e-containers`
-      # job below owns the real-Docker project (which covers both the Docker
-      # executor and the SSH executor's sshd target). Without --project the
-      # container-bound specs would run here too, fail seeding (Docker not
-      # enabled for these shards), and spam every shard.
+      # The planned manifest selects chromium, mobile-chrome, and any
+      # isolated browser projects for this shard. The dedicated
+      # `e2e-containers` job below owns the real-Docker project (which covers
+      # both the Docker executor and the SSH executor's sshd target). Without
+      # project selection, container tests would run here too and fail seeding.
       - name: Capture E2E resource budget
         continue-on-error: true
         run: bash .github/scripts/e2e-resource-snapshot.sh > "$RUNNER_TEMP/e2e-resource-before.txt"
@@ -1055,7 +1055,7 @@ jobs:
 
       # Named with the same `blob-report-*` prefix the merge job globs for
       # so the containers results land in the unified HTML report alongside
-      # the sharded chromium/mobile-chrome runs.
+      # the sharded normal-browser runs.
       - name: Upload containers blob report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

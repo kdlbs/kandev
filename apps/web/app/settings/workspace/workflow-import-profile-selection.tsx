@@ -28,7 +28,11 @@ import {
   workflowImportStepKey,
   type WorkflowImportSelections,
 } from "./use-workflow-import";
-import { MobileSelectionHeader } from "./workflow-import-profile-selection-mobile-header";
+import {
+  importSelectionCopyKeys,
+  MobileSelectionHeader,
+} from "./workflow-import-profile-selection-mobile-header";
+import { AuthorExclusionWarningList } from "@/components/author-exclusion-warning-list";
 
 type WorkflowImportProfileSelectionProps = {
   open: boolean;
@@ -440,6 +444,7 @@ function MobileSelectionBody({
   }
   return (
     <>
+      <AuthorExclusionWarningList warnings={preview.warnings ?? []} />
       {preview.profiles.length === 0 && missingSteps.length > 0 && (
         <EmptyProfileCallout onRetry={onRetryPreview} touch />
       )}
@@ -503,6 +508,7 @@ function MobileProfileSelection({
           <MobileSelectionHeader
             mobileView={mobileView}
             activeStep={activeStep}
+            reviewOnly={preview.steps.length === 0}
             onBack={() => openMobilePicker(null)}
           />
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-[env(safe-area-inset-bottom,0px)]">
@@ -556,6 +562,7 @@ function DesktopProfileSelection({
 }: WorkflowImportProfileSelectionProps) {
   const { t } = useTranslation();
   const canImport = missingSteps.length === 0;
+  const copy = importSelectionCopyKeys(preview.steps.length === 0);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -563,12 +570,11 @@ function DesktopProfileSelection({
         data-testid="workflow-import-profile-selection"
       >
         <DialogHeader>
-          <DialogTitle>{t("workflows:importResolveProfilesTitle")}</DialogTitle>
-          <p className="text-sm text-muted-foreground">
-            {t("workflows:importResolveProfilesDescription")}
-          </p>
+          <DialogTitle>{t(copy.title)}</DialogTitle>
+          <p className="text-sm text-muted-foreground">{t(copy.description)}</p>
         </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain">
+          <AuthorExclusionWarningList warnings={preview.warnings ?? []} />
           {preview.profiles.length === 0 && missingSteps.length > 0 && (
             <EmptyProfileCallout onRetry={onRetryPreview} touch={false} />
           )}

@@ -16,6 +16,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
@@ -31,9 +32,10 @@ func TestNoDirectJournalReleaseCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	forbidden := map[string]struct{}{
-		"AcknowledgeDelivery":                 {},
-		"RetireDeliverySubmission":            {},
-		"RetireInterruptedDeliverySubmission": {},
+		"AcknowledgeDelivery":                    {},
+		"RetireDeliverySubmission":               {},
+		"RetireMissingUnknownDeliverySubmission": {},
+		"RetireInterruptedDeliverySubmission":    {},
 	}
 	fset := token.NewFileSet()
 	for _, entry := range entries {
@@ -87,6 +89,10 @@ func (c *recordingJournalReleaseClient) RetireInterruptedDeliverySubmission(cont
 	return c.record("retire_interrupted")
 }
 
+func (c *recordingJournalReleaseClient) RetireMissingUnknownDeliverySubmission(context.Context, journal.Submission) error {
+	return c.record("retire_missing_unknown")
+}
+
 type journalReleaseCase struct {
 	name    string
 	release func(deliveryJournalReleaser, *recordingJournalReleaseClient) error
@@ -108,6 +114,9 @@ func journalReleaseCases() []journalReleaseCase {
 		}},
 		{"retire interrupted", func(r deliveryJournalReleaser, c *recordingJournalReleaseClient) error {
 			return r.retireInterrupted(context.Background(), c, "submission-1", "stream-1", 2)
+		}},
+		{"retire missing unknown", func(r deliveryJournalReleaser, c *recordingJournalReleaseClient) error {
+			return r.retireMissingUnknown(context.Background(), c, journal.Submission{ID: "submission-1"})
 		}},
 	}
 }

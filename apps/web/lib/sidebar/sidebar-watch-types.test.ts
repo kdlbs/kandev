@@ -14,8 +14,7 @@ const cases: [Record<string, unknown> | null, boolean, boolean][] = [
   [{ jira_issue_watch_id: "watch" }, true, false],
   [{ linear_issue_watch_id: "watch" }, true, false],
   [{ sentry_issue_watch_id: "watch" }, true, false],
-  [{ azure_devops_work_item_watch_id: "watch" }, true, false],
-  [{ azure_devops_pr_watch_id: "watch" }, false, true],
+  [{ azure_devops_work_item_watch_id: "watch", azure_devops_pr_watch_id: "watch" }, false, false],
   [null, false, false],
   [
     { issue_url: "https://example.test/issues/1", pr_url: "https://example.test/pulls/2" },
@@ -28,7 +27,7 @@ const cases: [Record<string, unknown> | null, boolean, boolean][] = [
       issue_watch_id: "",
       gitlab_issue_watch_id: "issue",
       review_watch_id: null,
-      azure_devops_pr_watch_id: "review",
+      gitlab_review_watch_id: "review",
     },
     true,
     true,

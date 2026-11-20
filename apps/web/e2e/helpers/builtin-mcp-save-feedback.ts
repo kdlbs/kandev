@@ -82,7 +82,9 @@ export async function checkBuiltinDirtyFeedback(
     );
   }
   await activate(reset, touch);
-  await expect(field).toContainText("Inherit workspace policy");
+  await expect(page.getByTestId("builtin-mcp-source-configuration")).toContainText(
+    "Inherited from workspace: Off",
+  );
   await expect(field).toHaveAttribute("data-settings-dirty", "false");
   await expect(bar).toHaveCount(0);
   await chooseBuiltin(page, "configuration", "On", touch);
@@ -90,7 +92,7 @@ export async function checkBuiltinDirtyFeedback(
   await expect(bar).toHaveCount(0);
   await expect(field).toHaveAttribute("data-settings-dirty", "false");
   await activate(page.getByRole("button", { name: "Back to packages", exact: true }), touch);
-  await expect(page.getByTestId("builtin-mcp-package-configuration")).toContainText("On");
+  await expect(page.getByTestId("builtin-mcp-package-configuration-row")).toContainText("On");
 }
 
 // @covers AC-AGENTS-BUILTIN-MCP-004.2, AC-AGENTS-BUILTIN-MCP-004.4
@@ -174,4 +176,53 @@ export async function checkBuiltinUnavailableAcceptance(
   } finally {
     await page.unroute(path);
   }
+}
+
+// @covers AC-AGENTS-BUILTIN-MCP-005.2, AC-AGENTS-BUILTIN-MCP-005.5
+export async function checkBuiltinInheritance(
+  page: Page,
+  api: ApiClient,
+  seed: SeedData,
+  touch: boolean,
+) {
+  if (!touch) await page.setViewportSize({ width: 1280, height: 1000 });
+  const task = await openPackages(page, api, seed, touch);
+  await expect(page.getByTestId("builtin-mcp-detail")).toHaveCount(0);
+  const source = page.getByTestId("builtin-mcp-source-diagnostics");
+  const control = page.getByTestId("builtin-mcp-choice-diagnostics");
+  const toggle = control.getByRole("switch");
+  await expect(source).toHaveText("Inherited from workspace: On");
+  await expect(toggle).toBeChecked();
+  if (touch) expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await toggle.focus();
+  await page.keyboard.press("Space");
+  await expect(toggle).not.toBeChecked();
+  await page.keyboard.press("Space");
+  await expect(source).toContainText("Task override: On");
+  await activate(page.getByTestId("builtin-mcp-save"), touch);
+  await expect(page.getByTestId("settings-floating-save")).toHaveCount(0);
+  const getChoice = async () => {
+    const response = await api.rawRequest("GET", `/api/v1/tasks/${task.id}/mcp-built-in`);
+    return (await response.json()).preferences.packages.diagnostics;
+  };
+  await expect.poll(getChoice).toBe("on");
+  await page.getByTestId(touch ? "mcp-server-explorer" : "builtin-mcp-packages").screenshot({
+    path: `../../artifacts/mcp-switches/list-task-override-${touch ? "phone" : "desktop"}.png`,
+  });
+  const inherit = page.getByTestId("builtin-mcp-inherit-diagnostics");
+  if (touch) await inherit.tap();
+  else {
+    await inherit.focus();
+    await page.keyboard.press("Enter");
+  }
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toBeChecked();
+  await expect(source).toHaveText("Inherited from workspace: On");
+  await expect(control).toHaveAttribute("data-settings-dirty", "true");
+  await activate(page.getByTestId("builtin-mcp-save"), touch);
+  await expect.poll(getChoice).toBeUndefined();
+  await expect(page.getByTestId("settings-floating-save")).toHaveCount(0);
+  await page.getByTestId(touch ? "mcp-server-explorer" : "builtin-mcp-packages").screenshot({
+    path: `../../artifacts/mcp-switches/list-task-inherited-${touch ? "phone" : "desktop"}.png`,
+  });
 }

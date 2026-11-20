@@ -473,7 +473,7 @@ authorization remain unchanged.
 - Task-workspace terminals, repository working-directory selection, or moving terminals between
   workspaces.
 - Terminal tab renaming, split panes, or a command-palette action.
-- Changing Quick Chat task persistence, configuration-chat uniqueness, or ordinary-chat expiration.
+- Changing Quick Chat task persistence, configuration-chat uniqueness, or manual lifetime policy.
 - Changing the Agents-page terminal geometry or its stop-on-close lifecycle.
 
 ## Implementation plan

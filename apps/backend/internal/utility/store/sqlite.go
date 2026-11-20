@@ -148,8 +148,9 @@ func (r *sqliteRepository) initSchema() error {
 	if err := r.migrateTemplatePlaceholders(); err != nil {
 		return fmt.Errorf("failed to migrate template placeholders: %w", err)
 	}
-
-	return nil
+	// Runs after the placeholder migration so a legacy row is compared in its
+	// normalized form.
+	return r.refreshUneditedBuiltinPrompts()
 }
 
 // migrateTemplatePlaceholders fixes old {{.Key}} format to {{Key}} format in builtin prompts.

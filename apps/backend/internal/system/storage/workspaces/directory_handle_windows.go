@@ -14,6 +14,8 @@ import (
 	"sync"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/kandev/kandev/internal/common/winpath"
 )
 
 type windowsDirectoryHandle struct {
@@ -35,11 +37,11 @@ func OpenDirectoryNoFollow(root, target string) (DirectoryHandle, error) {
 	if err != nil {
 		return nil, err
 	}
-	rootHandle, err := openWindowsDependencyDirectoryPath(root, windowsDependencyReadAccess)
+	rootHandle, err := winpath.OpenDirectoryPath(root, windowsDependencyReadAccess)
 	if err != nil {
 		return nil, fmt.Errorf("open task root: %w", err)
 	}
-	parentHandle, targetHandle, err := openWindowsDependencyTarget(rootHandle, relative, windowsDependencyReadAccess)
+	parentHandle, targetHandle, err := winpath.OpenTarget(rootHandle, relative, windowsDependencyReadAccess)
 	if err != nil {
 		_ = windows.CloseHandle(rootHandle)
 		return nil, fmt.Errorf("open worktree target: %w", err)
@@ -57,7 +59,7 @@ func CreateDirectoryNoFollow(root, target string, _ os.FileMode) (DirectoryHandl
 	if err != nil {
 		return nil, err
 	}
-	rootHandle, err := openOrCreateWindowsDependencyDirectoryPath(root)
+	rootHandle, err := winpath.OpenDirectoryPathWithDisposition(root, windowsDependencyWriteAccess, windows.FILE_OPEN_IF)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +104,7 @@ func (h *windowsDirectoryHandle) VerifyPath(path string) error {
 	if err != nil {
 		return err
 	}
-	dup, err := duplicateWindowsDependencyHandle(h.targetHandle)
+	dup, err := winpath.DuplicateHandle(h.targetHandle)
 	if err != nil {
 		return fmt.Errorf("duplicate directory handle: %w", err)
 	}
@@ -169,7 +171,7 @@ func (h *windowsDirectoryHandle) RemoveDirectory(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return markWindowsDependencyForDelete(deletable)
+	return winpath.MarkForDelete(deletable)
 }
 
 // openPinnedTargetForDelete reopens the target relative to its parent with
@@ -179,7 +181,7 @@ func (h *windowsDirectoryHandle) RemoveDirectory(ctx context.Context) error {
 // handle is confirmed to be the same file as the pinned target before it is
 // used for deletion, so a lexical replacement cannot redirect the cleanup.
 func (h *windowsDirectoryHandle) openPinnedTargetForDelete() (windows.Handle, bool, error) {
-	deletable, err := openWindowsDependencyDirectoryRelative(h.parentHandle, h.target, windowsDependencyDeleteAccess)
+	deletable, err := winpath.OpenDirectoryRelative(h.parentHandle, h.target, windowsDependencyDeleteAccess)
 	if err != nil {
 		return 0, false, err
 	}
@@ -228,11 +230,11 @@ func (h *windowsDirectoryHandle) OpenFile(name string) (io.ReadCloser, error) {
 	if err := validateDirectoryEntryName(name); err != nil {
 		return nil, err
 	}
-	handle, err := openWindowsDependencyEntryRelative(h.targetHandle, name, windowsDependencyReadAccess)
+	handle, err := winpath.OpenEntryRelative(h.targetHandle, name, windowsDependencyReadAccess)
 	if err != nil {
 		return nil, err
 	}
-	if reparse, checkErr := windowsDependencyHandleIsReparsePoint(handle); checkErr != nil {
+	if reparse, checkErr := winpath.HandleIsReparsePoint(handle); checkErr != nil {
 		_ = windows.CloseHandle(handle)
 		return nil, checkErr
 	} else if reparse {
@@ -263,23 +265,23 @@ func (h *windowsDirectoryHandle) OpenSubdirectory(name string) (DirectoryHandle,
 	if err := validateDirectoryEntryName(name); err != nil {
 		return nil, err
 	}
-	targetHandle, err := openWindowsDependencyDirectoryRelative(h.targetHandle, name, windowsDependencyReadAccess)
+	targetHandle, err := winpath.OpenDirectoryRelative(h.targetHandle, name, windowsDependencyReadAccess)
 	if err != nil {
 		return nil, err
 	}
-	if reparse, err := windowsDependencyHandleIsReparsePoint(targetHandle); err != nil {
+	if reparse, err := winpath.HandleIsReparsePoint(targetHandle); err != nil {
 		_ = windows.CloseHandle(targetHandle)
 		return nil, err
 	} else if reparse {
 		_ = windows.CloseHandle(targetHandle)
 		return nil, fmt.Errorf("directory entry is a reparse point: %s", name)
 	}
-	rootHandle, err := duplicateWindowsDependencyHandle(h.targetHandle)
+	rootHandle, err := winpath.DuplicateHandle(h.targetHandle)
 	if err != nil {
 		_ = windows.CloseHandle(targetHandle)
 		return nil, err
 	}
-	parentHandle, err := duplicateWindowsDependencyHandle(h.targetHandle)
+	parentHandle, err := winpath.DuplicateHandle(h.targetHandle)
 	if err != nil {
 		_ = windows.CloseHandle(targetHandle)
 		_ = windows.CloseHandle(rootHandle)
@@ -298,7 +300,7 @@ func (h *windowsDirectoryHandle) CreateSubdirectory(name string, _ os.FileMode) 
 	if err := validateDirectoryEntryName(name); err != nil {
 		return nil, err
 	}
-	guardHandle, err := openWindowsDependencyHandleWithSharing(
+	guardHandle, err := winpath.OpenHandleWithSharing(
 		h.parentHandle,
 		h.target,
 		windowsDependencyReadAccess,
@@ -317,7 +319,7 @@ func (h *windowsDirectoryHandle) CreateSubdirectory(name string, _ os.FileMode) 
 		}
 		return nil, errors.New("parent directory changed before child creation")
 	}
-	createdHandle, err := openWindowsDependencyHandleWithSharing(
+	createdHandle, err := winpath.OpenHandleWithSharing(
 		guardHandle,
 		name,
 		windowsDependencyWriteAccess,
@@ -329,7 +331,7 @@ func (h *windowsDirectoryHandle) CreateSubdirectory(name string, _ os.FileMode) 
 		_ = windows.CloseHandle(guardHandle)
 		return nil, err
 	}
-	if reparse, checkErr := windowsDependencyHandleIsReparsePoint(createdHandle); checkErr != nil || reparse {
+	if reparse, checkErr := winpath.HandleIsReparsePoint(createdHandle); checkErr != nil || reparse {
 		_ = windows.CloseHandle(createdHandle)
 		_ = windows.CloseHandle(guardHandle)
 		if checkErr != nil {
@@ -337,7 +339,7 @@ func (h *windowsDirectoryHandle) CreateSubdirectory(name string, _ os.FileMode) 
 		}
 		return nil, errors.New("created subdirectory is a reparse point")
 	}
-	rootHandle, err := duplicateWindowsDependencyHandle(guardHandle)
+	rootHandle, err := winpath.DuplicateHandle(guardHandle)
 	if err != nil {
 		_ = windows.CloseHandle(createdHandle)
 		_ = windows.CloseHandle(guardHandle)
@@ -368,11 +370,11 @@ func (h *windowsDirectoryHandle) LstatEntry(name string) (os.FileMode, error) {
 	if err := validateDirectoryEntryName(name); err != nil {
 		return 0, err
 	}
-	handle, err := openWindowsDependencyHandle(h.targetHandle, name, windowsDependencyReadAccess, 0)
+	handle, err := winpath.OpenHandle(h.targetHandle, name, windowsDependencyReadAccess, 0)
 	if err != nil {
 		return 0, err
 	}
-	if reparse, err := windowsDependencyHandleIsReparsePoint(handle); err != nil {
+	if reparse, err := winpath.HandleIsReparsePoint(handle); err != nil {
 		_ = windows.CloseHandle(handle)
 		return 0, err
 	} else if reparse {
@@ -399,7 +401,7 @@ func (h *windowsDirectoryHandle) ReadLink(name string) (string, error) {
 	if err := validateDirectoryEntryName(name); err != nil {
 		return "", err
 	}
-	handle, err := openWindowsDependencyHandle(h.targetHandle, name, windowsDependencyReadAccess, 0)
+	handle, err := winpath.OpenHandle(h.targetHandle, name, windowsDependencyReadAccess, 0)
 	if err != nil {
 		return "", err
 	}
@@ -434,7 +436,7 @@ func (h *windowsDirectoryHandle) ReadDir() ([]os.DirEntry, error) {
 	if h == nil || h.targetHandle == 0 {
 		return nil, errors.New("directory handle is closed")
 	}
-	handle, err := duplicateWindowsDependencyHandle(h.targetHandle)
+	handle, err := winpath.DuplicateHandle(h.targetHandle)
 	if err != nil {
 		return nil, err
 	}
@@ -458,7 +460,7 @@ func (h *windowsDirectoryHandle) WriteFile(name string, data []byte, _ os.FileMo
 	if err := validateDirectoryEntryName(name); err != nil {
 		return err
 	}
-	handle, err := openWindowsDependencyHandleWithDisposition(
+	handle, err := winpath.OpenHandleWithDisposition(
 		h.targetHandle, name, windowsDependencyWriteAccess, windows.FILE_OVERWRITE_IF, windows.FILE_NON_DIRECTORY_FILE,
 	)
 	if err != nil {
@@ -476,43 +478,11 @@ func (h *windowsDirectoryHandle) WriteFile(name string, data []byte, _ os.FileMo
 	return file.Close()
 }
 
-func openOrCreateWindowsDependencyDirectoryPath(path string) (windows.Handle, error) {
-	root, parts, err := windowsDependencyPathParts(path)
-	if err != nil {
-		return 0, err
-	}
-	rootHandle, err := openWindowsDependencyHandle(0, windowsDependencyNTPath(root), windowsDependencyWriteAccess, windows.FILE_DIRECTORY_FILE)
-	if err != nil {
-		return 0, err
-	}
-	for _, part := range parts {
-		next, openErr := openWindowsDependencyHandleWithDisposition(
-			rootHandle, part, windowsDependencyWriteAccess, windows.FILE_OPEN_IF, windows.FILE_DIRECTORY_FILE,
-		)
-		if openErr != nil {
-			_ = windows.CloseHandle(rootHandle)
-			return 0, openErr
-		}
-		if reparse, checkErr := windowsDependencyHandleIsReparsePoint(next); checkErr != nil {
-			_ = windows.CloseHandle(next)
-			_ = windows.CloseHandle(rootHandle)
-			return 0, checkErr
-		} else if reparse {
-			_ = windows.CloseHandle(next)
-			_ = windows.CloseHandle(rootHandle)
-			return 0, fmt.Errorf("dependency path is a reparse point")
-		}
-		_ = windows.CloseHandle(rootHandle)
-		rootHandle = next
-	}
-	return rootHandle, nil
-}
-
 func openOrCreateWindowsDependencyTarget(rootHandle windows.Handle, relative string) (parent, target windows.Handle, err error) {
 	parts := strings.FieldsFunc(filepath.Clean(relative), func(r rune) bool { return r == '\\' || r == '/' })
 	parent = rootHandle
 	for index, part := range parts {
-		next, openErr := openWindowsDependencyHandleWithDisposition(
+		next, openErr := winpath.OpenHandleWithDisposition(
 			parent, part, windowsDependencyWriteAccess, windows.FILE_OPEN_IF, windows.FILE_DIRECTORY_FILE,
 		)
 		if openErr != nil {
@@ -521,7 +491,7 @@ func openOrCreateWindowsDependencyTarget(rootHandle windows.Handle, relative str
 			}
 			return 0, 0, openErr
 		}
-		if reparse, checkErr := windowsDependencyHandleIsReparsePoint(next); checkErr != nil {
+		if reparse, checkErr := winpath.HandleIsReparsePoint(next); checkErr != nil {
 			_ = windows.CloseHandle(next)
 			if parent != rootHandle {
 				_ = windows.CloseHandle(parent)
@@ -543,22 +513,4 @@ func openOrCreateWindowsDependencyTarget(rootHandle windows.Handle, relative str
 		parent = next
 	}
 	return 0, 0, fmt.Errorf("dependency target is empty")
-}
-
-func windowsDependencyPathParts(path string) (string, []string, error) {
-	if !filepath.IsAbs(path) {
-		return "", nil, fmt.Errorf("dependency workspace root must be absolute")
-	}
-	clean := filepath.Clean(path)
-	volume := filepath.VolumeName(clean)
-	if volume == "" {
-		return "", nil, fmt.Errorf("dependency workspace root has no volume")
-	}
-	remainder := strings.TrimPrefix(clean, volume)
-	remainder = strings.TrimLeft(remainder, `\`+`/`)
-	root := volume + `\`
-	if remainder == "" {
-		return root, nil, nil
-	}
-	return root, strings.FieldsFunc(remainder, func(r rune) bool { return r == '\\' || r == '/' }), nil
 }
