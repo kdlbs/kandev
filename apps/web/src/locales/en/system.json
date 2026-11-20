@@ -179,7 +179,7 @@
   "messageQueueAutoMergeDescription": "Merges compatible adjacent messages and agent sub-task messages into their sender's latest queued message. Sessions inherit this default until Auto-merge is changed in their queue.",
   "messageQueueAutoMergeNotice": "Messages with incompatible sources, tasks, models, modes, metadata, or shared limits stay separate. Turning Auto-merge on in a session compacts its pending queue immediately. Global changes affect later messages only. Manual merge is unchanged.",
   "messageQueueAutoMergeToggleLabel": "Automatically merge queued messages",
-  "messageQueueAutoMergeSessionNotice": "Merges compatible adjacent messages and agent sub-task messages into their sender's latest queued message. Turning this on compacts the pending queue immediately. Global changes affect later messages only. Manual merge is unchanged.",
+  "messageQueueAutoMergeSessionNotice": "Merges compatible adjacent messages, and moves sub-task messages up to merge with their sender's latest one. Turning this on sorts and merges the current queue.",
   "messageQueueConfigured": "Configured:",
   "messageQueueDescription": "Control how many pending messages each session can hold before new work is rejected.",
   "messageQueueEffective": "Effective:",

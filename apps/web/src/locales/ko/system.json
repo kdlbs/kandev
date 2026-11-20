@@ -179,7 +179,7 @@
   "messageQueueAutoMergeDescription": "호환되는 인접 메시지를 병합하고 에이전트 하위 작업의 메시지를 해당 발신자의 가장 최근 대기 메시지에 병합합니다. 세션 대기열에서 자동 병합을 변경할 때까지 이 기본값을 상속합니다.",
   "messageQueueAutoMergeNotice": "소스, 작업, 모델, 모드, 메타데이터 또는 공유 한도가 호환되지 않는 메시지는 별도로 유지됩니다. 세션에서 자동 병합을 켜면 대기열이 즉시 정리됩니다. 전역 설정 변경은 이후 메시지에만 적용됩니다. 수동 병합은 변경되지 않습니다.",
   "messageQueueAutoMergeToggleLabel": "대기 메시지 자동 병합",
-  "messageQueueAutoMergeSessionNotice": "호환되는 인접 메시지를 병합하고 에이전트 하위 작업의 메시지를 해당 발신자의 가장 최근 대기 메시지에 병합합니다. 켜면 대기열이 즉시 정리됩니다. 전역 설정 변경은 이후 메시지에만 적용됩니다. 수동 병합은 변경되지 않습니다.",
+  "messageQueueAutoMergeSessionNotice": "호환되는 인접 메시지를 병합하고, 하위 작업 메시지는 같은 발신자의 최신 메시지 위치로 옮겨 병합합니다. 켜면 현재 대기열을 정렬하고 병합합니다.",
   "messageQueueConfigured": "구성됨:",
   "messageQueueDescription": "새 작업이 거부되기 전에 각 세션이 보유할 수 있는 대기 메시지 수를 제어합니다.",
   "messageQueueEffective": "적용 값:",
