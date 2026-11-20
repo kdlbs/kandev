@@ -56,17 +56,19 @@ superseded, and the switch completes on the step's profile.
   ./internal/orchestrator/executor ./internal/orchestrator \
   ./internal/orchestrator/handlers ./internal/mcp/handlers)
 (cd apps/backend && go test -race -trimpath -tags fts5 -count=1 \
-  -run 'TestWorkflowParkingSupersedesLaunch|TestTransitionTaskSessionState_(LateLaunchFailureYieldsToNewParkingStamp|StaleLaunchFailureCannotFailReplacementAttempt)|TestPersistSessionFullRowIfCurrentState_NewParkingStampSupersedesUnchangedWaitingState|TestLaunchPreparedSession_LateLaunchErrorAfterNewParkingStampIsSuperseded|TestLaunchSession_RealWorkflowMoveDuringLaunchCompletes|TestHandleSessionLaunchFailure_WorkflowSwitchSupersededKeepsTaskActive|TestLaunchAutoStartTask_SupersededWorkflowSwitchDoesNotRecordFailure' \
-  ./internal/task/models ./internal/task/repository/sqlite \
-  ./internal/orchestrator/executor ./internal/orchestrator \
-  ./internal/orchestrator/handlers ./internal/mcp/handlers)
+  -run '^(TestLaunchPreparedSession_InheritedSameExecutorRaceWaitsAndAttachesToOneSQLiteWorkspace|TestLaunchPreparedSession_InheritedExecutorRaceUsesOneSQLiteClaim|TestSessionStartingRaceWithRunningStateReturnsBusy|TestFallbackFreshLaunch_CoordinatorCancellationWinsBeforeResetWrite|TestSetSessionStarting_CoordinatorCancellationWinsAfterCurrentStateRead|TestNewServiceSessionStartingCallbackClassifiesRunningCASConflict|TestTransitionTaskSessionState_LateLaunchFailureYieldsToNewParkingStamp|TestTransitionTaskSessionState_StaleLaunchFailureCannotFailReplacementAttempt|TestLaunchSession_RealWorkflowMoveDuringLaunchCompletes|TestHandleSessionLaunchFailure_WorkflowSwitchSupersededKeepsTaskActive)$' \
+  ./internal/orchestrator/executor ./internal/orchestrator)
 bash scripts/lint-go-changed \
   apps/backend/internal/orchestrator/event_handlers_streaming.go \
   apps/backend/internal/orchestrator/workflow_switch_launch_race_test.go \
   apps/backend/internal/task/models/workflow_parking.go \
   apps/backend/internal/task/models/workflow_parking_test.go \
   apps/backend/internal/task/repository/sqlite/session.go \
-  apps/backend/internal/task/repository/sqlite/session_launch_parking_stamp_postgres_test.go
+  apps/backend/internal/task/repository/sqlite/session_launch_parking_stamp_postgres_test.go \
+  apps/backend/internal/orchestrator/executor/executor_start_ownership_test.go \
+  apps/backend/internal/orchestrator/executor/executor_inherited_env_transition_integration_test.go \
+  apps/backend/internal/orchestrator/coordinator_stop_test.go \
+  apps/backend/internal/orchestrator/peer_message_initial_launch_test.go
 git diff --check
 ```
 
@@ -98,6 +100,9 @@ git diff --check
   PostgreSQL cases are environment-gated and skip when
   `KANDEV_TEST_POSTGRES_DSN` is not set.
 - The same focused regressions pass with `-race`.
+- The six failed backend CI tests pass with the updated test repository adapters.
+  They failed on the PR merge snapshot and passed on base `12dea77`, which
+  confirmed that the adapters still intercepted the old state-write method.
 - Changed Go package lint reported `0 issues`; `git diff --check` passed.
 - A broader `go test -trimpath -tags fts5 -count=1
   ./internal/task/repository/sqlite` run was stopped after more than six
