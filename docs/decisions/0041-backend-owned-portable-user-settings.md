@@ -90,6 +90,15 @@ carries `view_order_base`; CAS accepts the observed base or an already-applied
 requested order. An identical retry after a lost acknowledgement remains
 idempotent. A different committed order is rejected, preserving a concurrent
 move rather than silently undoing it.
+For a retry combined with collection edits, compare the requested order with
+the natural post-mutation order, while comparing the observed base with the
+pre-mutation order. A create/delete successor must not conflict with its own
+already-committed move.
+
+A failed local prerequisite may leave later owner-guarded patches as no-ops.
+At terminal acknowledgement the client adopts the latest confirmed snapshot
+and retains the failure indication instead of keeping a phantom active view
+or draft. This failure marker survives intermediate queued acknowledgements.
 A definitive HTTP rejection retires dispatched move intent even when both
 endpoints survive. An independent successor must not give that rejected move a
 fresh order baseline. Transport-uncertain failures retain the existing guarded

@@ -17,6 +17,7 @@ export type SidebarWriteJournal = {
   confirmed?: SidebarSnapshot;
   failedRollback?: SidebarSnapshot;
   failedWriteKind?: SidebarWriteKind;
+  failedLocalWrite?: boolean;
   failedViewMutations?: SidebarViewMutation[];
 };
 
@@ -33,6 +34,7 @@ export function getSidebarWriteJournal(owner: object): SidebarWriteJournal {
 export function clearSidebarWriteRollback(journal: SidebarWriteJournal): void {
   journal.failedRollback = undefined;
   journal.failedWriteKind = undefined;
+  journal.failedLocalWrite = false;
 }
 
 export function snapshotSidebar(state: SidebarSliceState): SidebarSnapshot {
@@ -70,6 +72,7 @@ export function recordSidebarWriteFailure(
 ) {
   const { before, move } = mutation;
   journal.pending--;
+  if (kind === "local") journal.failedLocalWrite = true;
   const rejected =
     error instanceof ApiError &&
     error.status >= 400 &&

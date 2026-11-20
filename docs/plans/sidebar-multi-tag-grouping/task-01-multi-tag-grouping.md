@@ -889,3 +889,42 @@ with the repository configuration, preserving existing formatting.
 Real-package R10 evidence remains historical, not a new R11 installation claim.
 No physical-phone, PostgreSQL, remote-CI, release or broad-suite certification.
 Protected demo and primary instances were untouched. Next round uses Opus.
+
+### Opus post-rebase round 12 corrections
+
+Two Host findings reproduced; Tags had no new finding. Streak remains 0/3.
+
+- A committed move followed by create/delete was rejected before collection
+  mutations. The CAS now compares the base with pre-mutation current IDs, or
+  the target with natural post-mutation IDs. Real persistence tests cover both
+  successors and a different stale permutation rejected without revision/state
+  changes.
+- Failed local prerequisites followed by guarded no-op acknowledgements left
+  phantom drafts/active views. Terminal acknowledgement now adopts the latest
+  confirmed snapshot after a local failure, instead of pretending the dependent
+  intent persisted. The failure marker survives intermediate acknowledgements;
+  error reporting is retained. This is conservative settlement, not automatic
+  replay/healing of failed local intent.
+
+RED: both service collection cases failed; scoped store assertions exposed both
+phantom states; a native active-view 500 plus draft no-op 200 visibly retained
+the uncommitted view. The first store assertion read the unscoped alias and was
+corrected before accepting the behavioral RED.
+
+GREEN: 56 focused frontend tests, including one/two queued no-op successors,
+group/active-view failures and existing disclosure/replay controls; scoped
+types/ESLint; affected workspace service race tests and Go lint. An initial
+max-lines warning was resolved by adopting the confirmed snapshot through the
+existing snapshot-assignment convention, without raising limits.
+
+Current cache-only backend/helper/fixture and SPA builds passed in 229.61s;
+six code/test paths byte-match the tested mirror. Final native desktop case
+passed 1/1 (14.8s), proving UI/API/reload agreement after failure/no-op; the
+existing true-touch reorder/retry/conflict suite passed 5/5 separately.
+The desktop screenshot was not retained after the subsequent project reset;
+the proof is the observed browser assertions and API state, not an absent PNG.
+
+Receipts: `~/.cache/sidebar-multi-tag-build/evidence/r12-*`. No new real Tags
+package installation, physical-phone, PostgreSQL, remote-CI or broad-suite
+certification. Protected demo and primary instances remain untouched. No release
+or deployment. Subsequent full-source review uses Opus.

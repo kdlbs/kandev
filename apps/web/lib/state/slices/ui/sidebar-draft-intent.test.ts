@@ -1,5 +1,6 @@
 import { applyDraftMutationForTest, applyViewMutationsForTest } from "./sidebar-view-test-helpers";
 import { beforeEach, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api/client";
 import { workspaceId } from "@/lib/types/ids";
 import { registerUsersHandlers } from "@/lib/ws/handlers/users";
 import { createAppStore } from "@/lib/state/store";
@@ -158,3 +159,59 @@ it("a queued discard cannot clear a newer different-group draft", async () => {
   });
   expect(store.getState().sidebarViewsByWorkspace.ws.draft?.group).toBe("plugin:tags:other");
 });
+
+it.each([
+  ["group", 1],
+  ["group", 2],
+  ["active view", 1],
+  ["active view", 2],
+] as const)(
+  "settles a failed %s predecessor across %s no-op successors to server state",
+  async (change, successors) => {
+    const base = createDefaultSidebarView("base", "Base");
+    const other = createDefaultSidebarView("other", "Other");
+    const server: SidebarWorkspaceStateApi = {
+      views: [base, other].map(toApiSidebarView),
+      active_view_id: base.id,
+      draft: null,
+    };
+    const ack = (): UserSettingsResponse => ({
+      settings: {
+        user_id: "default-user",
+        workspace_id: workspaceId("ws"),
+        repository_ids: [],
+        updated_at: "",
+        revision: 1,
+        sidebar_views_by_workspace: { ws: structuredClone(server) },
+      },
+    });
+    const store = createAppStore({
+      workspaces: { items: [], activeId: "ws" },
+      sidebarViewsByWorkspace: mapSidebarWorkspaces({ ws: server }, {}, 1),
+    });
+    const failed = Promise.withResolvers<UserSettingsResponse>();
+    vi.mocked(updateUserSettings)
+      .mockImplementation(async (payload) => {
+        const views = new Map(server.views.map((view) => [view.id, view]));
+        server.draft = applyDraftMutationForTest(
+          views,
+          server.active_view_id,
+          server.draft,
+          payload.sidebar_view_state!,
+        );
+        return ack();
+      })
+      .mockImplementationOnce(() => failed.promise);
+    if (change === "group") store.getState().updateSidebarDraft({ group: MULTI });
+    else store.getState().setSidebarActiveView(other.id);
+    store.getState().updateSidebarDraft({ groupIndent: false });
+    if (successors === 2) store.getState().updateSidebarDraft({ groupIndent: true });
+    failed.reject(new ApiError("Predecessor was not committed", 500, {}));
+    await store.getState().waitForSidebarViewSync("ws");
+    expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe(server.active_view_id);
+    expect(store.getState().sidebarViewsByWorkspace.ws.draft).toEqual(
+      mapSidebarWorkspaces({ ws: server }).ws.draft,
+    );
+    expect(store.getState().sidebarViewsByWorkspace.ws.syncError).toBeTruthy();
+  },
+);

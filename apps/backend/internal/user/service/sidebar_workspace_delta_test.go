@@ -235,3 +235,41 @@ func TestSidebarWorkspaceReorderRejectsChangedObservedOrder(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Independent successor", reloaded.SidebarViewsByWorkspace["a"].Views[0].Name)
 }
+
+func TestSidebarWorkspaceCommittedMoveCollectionSuccessor(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		patch string
+		want  []string
+	}{
+		{"create", `{"view_order_base":["legacy","b","c","d"],"view_order":["b","legacy","c","d","e"],"views_create":[{"id":"e","name":"E"}]}`, []string{"b", "legacy", "c", "d", "e"}},
+		{"delete", `{"view_order_base":["legacy","b","c","d"],"view_order":["b","legacy","c"],"view_ids_delete":["d"]}`, []string{"b", "legacy", "c"}},
+		{"conflict", `{"view_order_base":["legacy","b","c","d"],"view_order":["legacy","c","b","d","e"],"views_create":[{"id":"e","name":"E"}]}`, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, _ := sidebarService(t)
+			ctx := context.Background()
+			_, err := svc.UpdateUserSettings(ctx, sidebarPatch(t, `{"SidebarViewState":{"workspace_id":"a","views_create":[{"id":"b","name":"B"},{"id":"c","name":"C"},{"id":"d","name":"D"}],"view_order":["b","legacy","c","d"]}}`))
+			require.NoError(t, err)
+			before, err := svc.GetUserSettings(ctx)
+			require.NoError(t, err)
+			raw := `{"SidebarViewState":{"workspace_id":"a",` + tc.patch[1:] + `}`
+			_, err = svc.UpdateUserSettings(ctx, sidebarPatch(t, raw))
+			if tc.want == nil {
+				require.ErrorIs(t, err, ErrValidation)
+				after, readErr := svc.GetUserSettings(ctx)
+				require.NoError(t, readErr)
+				require.Equal(t, before, after)
+				return
+			}
+			require.NoError(t, err)
+			after, err := svc.GetUserSettings(ctx)
+			require.NoError(t, err)
+			var ids []string
+			for _, view := range after.SidebarViewsByWorkspace["a"].Views {
+				ids = append(ids, view.ID)
+			}
+			require.Equal(t, tc.want, ids)
+		})
+	}
+}

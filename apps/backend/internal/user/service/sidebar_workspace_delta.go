@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/kandev/kandev/internal/user/models"
@@ -20,9 +21,6 @@ func mergeSidebarWorkspaceViews(current []models.SidebarView, patch *models.Side
 		return patch.Views, nil
 	}
 	if err := validateSidebarWorkspaceMutations(patch); err != nil {
-		return nil, err
-	}
-	if err := validateSidebarOrderBase(current, patch); err != nil {
 		return nil, err
 	}
 	deleted := make(map[string]bool, len(patch.ViewIDsDelete))
@@ -55,6 +53,9 @@ func mergeSidebarWorkspaceViews(current []models.SidebarView, patch *models.Side
 	}
 	if len(seen) > maxSidebarViews {
 		return nil, errors.New("sidebar_views: too many mutations")
+	}
+	if err := validateSidebarOrderBase(current, order, patch); err != nil {
+		return nil, err
 	}
 	if patch.ViewOrder != nil {
 		order = *patch.ViewOrder
@@ -131,12 +132,12 @@ func applySidebarViewUpserts(
 	return order, nil
 }
 
-func validateSidebarOrderBase(current []models.SidebarView, patch *models.SidebarWorkspacePatch) error {
+func validateSidebarOrderBase(current []models.SidebarView, naturalOrder []string, patch *models.SidebarWorkspacePatch) error {
 	if patch.ViewOrderBase == nil {
 		return nil
 	}
 	if patch.ViewOrder == nil || (!sidebarOrderMatches(current, *patch.ViewOrderBase) &&
-		!sidebarOrderMatches(current, *patch.ViewOrder)) {
+		!slices.Equal(naturalOrder, *patch.ViewOrder)) {
 		return errors.New("sidebar_views: order changed; refresh and retry")
 	}
 	return nil
