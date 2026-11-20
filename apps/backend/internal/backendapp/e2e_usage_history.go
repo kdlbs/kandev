@@ -144,10 +144,10 @@ func e2eUsageLegacySourceAdoption(pool *db.Pool, adopter e2eUsageSourceAdoptionR
 			SourceScopeStatus string `db:"source_scope_status"`
 			ExternalSessionID string `db:"external_session_id"`
 		}
-		if err := pool.Reader().GetContext(ctx, &adoption, `SELECT c.trusted, c.evidence, b.source_scope_status, b.external_session_id
+		if err := pool.Reader().GetContext(ctx, &adoption, pool.Reader().Rebind(`SELECT c.trusted, c.evidence, b.source_scope_status, b.external_session_id
 			FROM usage_collection_contexts c JOIN usage_collection_bindings b ON b.workspace_id = c.workspace_id
 			WHERE c.context_id = ? AND b.session_id = ? AND b.task_id = ? AND b.task_incarnation_id = ? AND b.session_incarnation_id = ?
-			ORDER BY b.sequence DESC LIMIT 1`, contextID, request.SessionID, binding.TaskID, binding.TaskIncarnationID, binding.SessionIncarnationID); err != nil ||
+			ORDER BY b.sequence DESC LIMIT 1`), contextID, request.SessionID, binding.TaskID, binding.TaskIncarnationID, binding.SessionIncarnationID); err != nil ||
 			adoption.Trusted != 1 || adoption.Evidence != "migration" {
 			c.JSON(http.StatusConflict, gin.H{errKey: "usage adoption fixture did not adopt the session"})
 			return
