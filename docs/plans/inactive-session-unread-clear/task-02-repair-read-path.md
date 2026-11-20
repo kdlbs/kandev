@@ -2510,3 +2510,125 @@ cleanup resolves both without suppressions. Final hook regression: eight
 cases passed (`r16-hook-unit.log`); all 14 changed code/test files passed
 zero-warning Oxlint (`r16-hook-lint.log`). These are test-only corrections;
 the final browser bundle and production code above are unchanged.
+
+### Production-fix review round 17 remediation
+
+R17 reports four P2 ownership gaps and one P3 design inconsistency. Preserve
+.6/.9/.11/.12/.17 with no new copy, geometry, cursor/predicate, backend, wire
+or schema change. Desktop reuses existing group-header maximize, tab hide and
+explicit reopen. Phone keeps the shipped picker, failed transcript and owned
+empty composition; creation-event continuation shares the same state policy.
+
+```text
+Desktop: begin rebuild -> retire A -> keep original group/read lease
+         restore -> unproven B stays unread; explicit B reads exact tail
+         maximize A's own group -> retire -> restore -> same lease
+         hide B after maximize (no environment) -> restore keeps B hidden
+Empty:   cancelled workflow -> delayed creation of cached C -> still empty
+         genuinely changed D -> membership proof -> D
+Dot:     selected but not displayed -> remains unread/visible under .17
+```
+
+`r17-red.log`: four behavioral failures / 54 controls. Reconstruction skipped
+the lease capture; serialized maximize used `group-1` instead of `group-center`;
+the restored layout contained visit-locally hidden B; creation issued a second
+membership GET for the cancelled empty slot. These are real store/handler and
+serializer/hide-boundary tests, not source-text or wiring assertions.
+
+Capture is now independent of the prune suspension during reconstruction.
+Maximize preserves its logical group ID. The live hide registry moved intact
+to the existing environment-hide module so restore and panel reconciliation
+consult the same API/environment-scoped set, including the null-environment
+visit. No second hide convention or storage identity was added. Task creation
+may retarget an existing controller but cannot start one from a receipt-only
+empty selection. The owning dot paragraph now distinguishes group-visible
+desktop chat from phone selection and selected-but-undisplayed unread output.
+
+`r17-green.log`: seven files / 172 cases passed, including pending-creation
+retarget and shared-hide adjacent consumers. New rendered cases cover removal
+during an authentically gated native layout frame, removal in the maximized
+chat group itself, and a hide made after an environment-less snapshot is saved.
+The frame helper delays native callbacks only after A leaves the live API,
+never writes application state or fabricates membership, and restores/flushes
+callbacks in `finally`. Each case checks exact persisted cursors/traffic and
+explicit-selection/reopen positive controls.
+
+Initial final-check attempt passed the seven owning files but strict lint
+rejected handler complexity and two 600-line budgets (`r17-lint.log`).
+The passive-projection predicate is now private, and the unchanged readiness
+inheritance helper moved to the existing session-selection module. Existing
+deferred recipient-ready/error/execution controls remain the behavioral owner.
+The new maximize identity regression lives in
+`lib/state/dockview-maximize-ownership.test.ts` because the existing maximize
+filter suite reached its file budget. No limits were raised or suppressed.
+
+Final narrow unit command from the mount-checked snapshot, after `refresh` and
+`pnpm run pretypecheck`:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run \
+  components/task/dockview-session-removal-focus.test.ts \
+  lib/state/dockview-env-switch-maximize-session-filter.test.ts \
+  lib/ws/handlers/task-primary-continuation.test.ts \
+  lib/ws/handlers/task-primary-focus.test.ts \
+  components/task/dockview-hidden-session-panels.test.ts \
+  lib/state/dockview-env-switch.test.ts \
+  lib/state/dockview-preset-persistence.test.ts \
+  lib/state/dockview-maximize-ownership.test.ts \
+  lib/ws/handlers/task-primary-lifecycle.test.ts
+pnpm run typecheck
+pnpm run build:vite
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts -- \
+  --grep 'parked: (overlay|rebuilding)|visit-local hide' --workers=1 --retries=0 \
+  --output "$SNAPSHOT/r17-owning-desktop"
+```
+
+Runtime verification uses a freshly built frontend and intentionally retained
+R02 backend/plugin artifacts; no backend production code changed. All
+browser runs remain headless/disposable, single-worker and retry-free.
+
+The moved test initially lacked `hasMaximizedGroup` in its API fake
+(`r17-unit-delivery.log`: 220 passes / one scaffold failure). Restoring the
+existing maximize fixture's capabilities produced nine files / 221 passes
+(`r17-unit-final2.log`). Typecheck then required narrowing serialized `data`
+with `Array.isArray`, not its non-discriminating `type` field. The final
+identity test passes (`r17-identity-unit.log`: one case); zero-warning lint,
+typecheck and the fresh build pass in `r17-{lint,typecheck,build}-final.log`.
+Only that test traversal changed after the nine-file run; production did not.
+
+`r17-owning-desktop-summary.log` /
+`r17-quiet/kandev-run.e2e.j75tTXB2.log`: all three new owning browser cases
+passed on that frontend. Inspected their captures: the restored unproven
+neighbor's chat stays empty with its unread dot; hidden C stays absent;
+visit-locally hidden B has no tab until explicit reopen. Persisted exact-tail
+and negative traffic assertions, not the images alone, prove read admission.
+Final changed-code formatting and copy/sleep ratchets passed
+(`r17-final-{format,i18n,sleeps}.log`).
+
+Final complete-file runtime checks on the same fresh frontend, run serially:
+
+```bash
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/task/task-unread-dot.spec.ts -- --workers=1 --retries=0 \
+  --output "$SNAPSHOT/r17-final-desktop"
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0 \
+  --output "$SNAPSHOT/r17-final-phone"
+```
+
+- `r17-final-desktop-summary.log` /
+  `r17-quiet/kandev-run.e2e.w7iFYFOh.log`: all 21 desktop cases passed.
+- `r17-final-phone-summary.log` /
+  `r17-quiet/kandev-run.e2e.Il1nDAeH.log`: all eight phone cases passed.
+- `r17-docs.log`: catalog validation and full specification lint passed.
+
+No production edits followed that build. The final nine-file unit receipt
+and later one-case type-only correction are separate receipts, not a new
+combined run. R17 corrections and scoped verification are complete; the parent
+proceeds to normal selective commit, exact fork push and separate Sol R18
+review. No repeated rebase, new PR, broad-suite/live-NATS certificate or change
+to historical incident/list-convergence/seeded-execution qualifications.
+Completed production reviews: 17; consecutive clean: 0.

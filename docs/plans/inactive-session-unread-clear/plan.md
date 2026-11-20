@@ -638,5 +638,19 @@ fix. It is separate from the five design-only rounds above.
   intermediate failures, exact commands, captures and backend-reuse limits.
   Strict lint/typecheck/changed-code formatting/ratchets passed. Independent review remains
   open; round 17 is next.
-- Completed rounds: 16. Consecutive clean: 0. Stop after three consecutive
+- Round 17: Sol child `a1431207-19d1-47a0-b123-dfeabed9c6db` reviewed
+  `7d12e0ef9b`. Four source-derived P2s reproduced: reconstruction loses the
+  retirement edge; maximize changes a removal group's identity; visit-local
+  hides bypass restore; delayed task creation fills an owned empty slot.
+  A P3 also corrects the displayed-session design description under .17.
+  Controlled RED: four failures / 54 controls. Corrections capture during
+  reconstruction without pruning, preserve group identity, share live hide
+  admission with restore, and restrict creation to retargeting an existing
+  controller. Post-production units passed nine files / 221 cases, followed
+  by the final type-narrowed identity test. Final-bundle verification passed
+  all 21 desktop removal/unread cases and eight phone cases. Zero-warning
+  code lint, typecheck, formatting/ratchets and docs gates passed. Task 02
+  retains scaffold/type corrections and exact receipts. Independent review
+  remains open; round 18 is next.
+- Completed rounds: 17. Consecutive clean: 0. Stop after three consecutive
   clean rounds or 50 rounds. Earlier loops do not count.

@@ -163,3 +163,31 @@ export function clearPinnedSessionIfOverridden(store: StoreApi<AppState>, sessio
     tasks: { ...state.tasks, pinnedSessionId: null },
   }));
 }
+
+export function inheritFallbackReadiness(
+  state: AppState,
+  predecessor: string,
+  target: string,
+): void {
+  const previous = state.sessionAgentctl.itemsBySessionId[predecessor];
+  const current = state.sessionAgentctl.itemsBySessionId[target];
+  const executionId = state.taskSessions.items[target]?.agent_execution_id;
+  if (
+    previous?.status !== "ready" ||
+    current ||
+    (executionId && executionId !== previous.agentExecutionId)
+  )
+    return;
+  const targetEnvironment =
+    state.environmentIdBySessionId?.[target] ??
+    state.taskSessions.items[target]?.task_environment_id;
+  const previousEnvironment =
+    state.environmentIdBySessionId?.[predecessor] ??
+    state.taskSessions.items[predecessor]?.task_environment_id;
+  if (targetEnvironment && targetEnvironment !== previousEnvironment) return;
+  state.setSessionAgentctlStatus(target, {
+    status: "ready",
+    agentExecutionId: executionId,
+    updatedAt: previous.updatedAt,
+  });
+}

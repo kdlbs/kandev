@@ -429,7 +429,7 @@ it.each(["pending", "hidden"] as const)(
 );
 
 // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
-it.each([false, true, "background"] as const)(
+it.each([false, true, "background", "restoring"] as const)(
   "owns a predecessor already parked before remote removal (mode: %s)",
   async (mode) => {
     const hidden = mode === true;
@@ -479,8 +479,10 @@ it.each([false, true, "background"] as const)(
         action: REMOVED_ACTION,
         payload: { task_id: "t1", session_id: "old" },
       });
+      if (mode === "restoring") useDockviewStore.setState({ isRestoringLayout: true });
       proof.resolve(membership("latest", "next", LATER));
       await flushFocusWork();
+      if (mode === "restoring") useDockviewStore.setState({ isRestoringLayout: false });
       runAutoSessionTabEffect("latest", store, refs);
       if (hidden) {
         const savedIds = useDockviewStore

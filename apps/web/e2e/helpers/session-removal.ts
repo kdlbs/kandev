@@ -123,6 +123,50 @@ export async function holdInitialMembership(page: Page, taskId: string) {
   return gate;
 }
 
+/** Hold native restore callbacks after the predecessor is parked, without changing app state. */
+export async function holdParkedLayoutFrames(page: Page, sessionId: string) {
+  await page.evaluate((id) => {
+    const bridge = window as Window & {
+      __dockviewApi__?: { getPanel: (id: string) => unknown };
+      __layoutFrameGate__?: { release: () => void; count: () => number };
+    };
+    const api = bridge.__dockviewApi__;
+    if (!api?.getPanel(`session:${id}`)) throw new Error("Visible predecessor missing");
+    const request = window.requestAnimationFrame.bind(window);
+    const pending: Array<() => void> = [];
+    window.requestAnimationFrame = (callback) =>
+      request((time) => {
+        if (!api.getPanel(`session:${id}`)) pending.push(() => callback(time));
+        else callback(time);
+      });
+    bridge.__layoutFrameGate__ = {
+      count: () => pending.length,
+      release: () => {
+        window.requestAnimationFrame = request;
+        bridge.__layoutFrameGate__ = undefined;
+        for (const callback of pending.splice(0)) callback();
+      },
+    };
+  }, sessionId);
+  const release = () =>
+    page.evaluate(() => {
+      (
+        window as Window & { __layoutFrameGate__?: { release: () => void } }
+      ).__layoutFrameGate__?.release();
+    });
+  return {
+    count: () =>
+      page.evaluate(
+        () =>
+          (
+            window as Window & { __layoutFrameGate__?: { count: () => number } }
+          ).__layoutFrameGate__?.count() ?? 0,
+      ),
+    release,
+    dispose: release,
+  };
+}
+
 type SelectionSample = { sessionId: string | null; pinnedSessionId: string | null };
 type RemovalWindow = Window & {
   __KANDEV_E2E_STORE__?: StoreApi<AppState>;

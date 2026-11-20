@@ -172,6 +172,10 @@ describe("owned empty-slot continuation", () => {
         title: "Rename without primary",
       }),
     );
+    registerTasksHandlers(store)["task.created"]!({
+      ...makeMessage(makeTask("t1", "next")),
+      action: "task.created",
+    });
     await flushFocusWork();
     expect(vi.mocked(listTaskSessions).mock.calls).toHaveLength(calls);
     expect(store.getState().tasks.activeSessionId).toBeNull();

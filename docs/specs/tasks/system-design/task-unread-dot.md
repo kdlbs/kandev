@@ -368,12 +368,11 @@ showDot = enabled                                     // AC .1, .3, .4
               || (isSelected && some id != displayedSessionId))  // AC .17
 ```
 
-`isSelected` is the row's existing `task.id === activeTaskId || task.id ===
-selectedTaskId`. The desktop sidebar passes its route-aware `highlightedTaskId`,
-and the mobile switcher passes the store's `activeTaskId`. `displayedSessionId`
-is the store's `tasks.activeSessionId`. A message for the open task's displayed
-session never produces a visible dot; an unread session of the open task that
-is not displayed keeps the dot.
+Rows keep their task selection rule: desktop uses route-aware
+`highlightedTaskId`; phone uses `activeTaskId`. Phone's `displayedSessionId`
+is `tasks.activeSessionId`. With Dockview, desktop excludes hidden, absent or
+group-inactive panels. A selected but undisplayed session keeps its unread dot
+under .17; displayed-session output has no dot, while unread siblings keep theirs.
 
 `lingering` comes from `useUnreadDotLinger` (`components/task/use-unread-dot-linger.ts`).
 It becomes true when the row turns selected while its dot is showing and the

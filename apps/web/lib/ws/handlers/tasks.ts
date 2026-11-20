@@ -376,7 +376,12 @@ function handleTaskUpsert(
   );
   logTaskMerge(action, beforeState, store.getState(), message.payload);
   store.getState().reconcileWorkflowSessionFocus?.(message.payload.task_id);
-  followUpdatedTaskPrimary(store, message.payload.task_id, previousPrimary);
+  followUpdatedTaskPrimary(
+    store,
+    message.payload.task_id,
+    previousPrimary,
+    action === "task.created",
+  );
 }
 
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {

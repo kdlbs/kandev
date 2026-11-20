@@ -29,6 +29,7 @@ import {
   shouldPreservePinnedSessionForTask,
   allowsFollowState,
   NEW_SESSION_SOURCE,
+  inheritFallbackReadiness,
   type FollowSource,
 } from "./session-selection";
 import type { KanbanTask } from "./task-archive-cache";
@@ -162,30 +163,6 @@ function prepareFollowTarget(
     });
   }
   return target;
-}
-
-function inheritFallbackReadiness(state: AppState, predecessor: string, target: string): void {
-  const previous = state.sessionAgentctl.itemsBySessionId[predecessor];
-  const current = state.sessionAgentctl.itemsBySessionId[target];
-  const executionId = state.taskSessions.items[target]?.agent_execution_id;
-  if (
-    previous?.status !== "ready" ||
-    current ||
-    (executionId && executionId !== previous.agentExecutionId)
-  )
-    return;
-  const targetEnvironment =
-    state.environmentIdBySessionId?.[target] ??
-    state.taskSessions.items[target]?.task_environment_id;
-  const previousEnvironment =
-    state.environmentIdBySessionId?.[predecessor] ??
-    state.taskSessions.items[predecessor]?.task_environment_id;
-  if (targetEnvironment && targetEnvironment !== previousEnvironment) return;
-  state.setSessionAgentctlStatus(target, {
-    status: "ready",
-    agentExecutionId: executionId,
-    updatedAt: previous.updatedAt,
-  });
 }
 
 function completePendingFollow(
@@ -606,25 +583,40 @@ function retargetFollow(
   if (ownsSelection(store, owner)) verifyPreviousSession(store, owner);
 }
 
+function isPassiveProjection(
+  pending: PendingFollow | undefined,
+  taskId: string,
+  retargetOnly: boolean,
+  empty: boolean,
+  unchanged: boolean,
+): boolean {
+  return (retargetOnly && pending?.taskId !== taskId) || (!pending && empty && unchanged);
+}
+
 /** Primary projection and visible conversation are separate ownership decisions. */
 export function followUpdatedTaskPrimary(
   store: StoreApi<AppState>,
   taskId: string,
   previousPrimary: string | null,
+  retargetOnly = false,
 ): void {
   const state = store.getState();
   if (state.tasks.activeTaskId !== taskId) return;
   const targetSessionId = findTaskInState(state, taskId)?.primarySessionId;
   const existing = pendingByStore.get(store);
+  const removed = getProvenRemovalPredecessor(store, taskId, null);
   if (
-    !existing &&
-    getProvenRemovalPredecessor(store, taskId, null) &&
-    targetSessionId === previousPrimary
+    isPassiveProjection(
+      existing,
+      taskId,
+      retargetOnly,
+      !!removed,
+      targetSessionId === previousPrimary,
+    )
   )
     return;
   const previousSessionId =
-    getProvenRemovalPredecessor(store, taskId, null) ??
-    (existing?.taskId === taskId ? existing.previousSessionId : previousPrimary);
+    removed ?? (existing?.taskId === taskId ? existing.previousSessionId : previousPrimary);
   if (!targetSessionId || !previousSessionId || targetSessionId === previousSessionId) {
     if (existing?.source === "primary") existing.cancel();
     return;

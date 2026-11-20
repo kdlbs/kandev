@@ -10,6 +10,7 @@ import {
 import {
   holdRemovalMembership,
   observeRemovalSelection,
+  holdParkedLayoutFrames,
   REMOVAL_PRIMARY_TEXT,
   seedRemovalChoiceTask,
 } from "../../helpers/session-removal";
@@ -322,13 +323,14 @@ test.describe("owned removal transcript visibility", () => {
   }
 
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.11
-  for (const parked of ["live", "visible", "hidden"] as const) {
+  for (const parked of ["live", "visible", "hidden", "overlay", "rebuilding"] as const) {
     test(`keeps a remote removal's unowned split neighbor unread (parked: ${parked})`, async ({
       testPage,
       desktopTestPage,
       apiClient,
       seedData,
     }) => {
+      const hidden = parked !== "live" && parked !== "visible";
       await apiClient.saveUserSettings({
         enable_preview_on_click: true,
         agent_tab_close_behavior: "hide_panel",
@@ -350,7 +352,7 @@ test.describe("owned removal transcript visibility", () => {
       await session.sessionTabBySessionId(old.session_id).click();
       await expect(chat(old.session_id)).toBeVisible();
       await session.clickTab("Files");
-      if (parked === "hidden") {
+      if (hidden) {
         await session.sessionTabCloseButton(primary.session_id).click();
         await expect(session.sessionTabBySessionId(primary.session_id)).toHaveCount(0);
       } else {
@@ -388,81 +390,149 @@ test.describe("owned removal transcript visibility", () => {
         .poll(async () => (await sessionReadState(apiClient, primary.session_id)).cursor)
         .not.toBeNull();
       const hiddenCursor = (await sessionReadState(apiClient, primary.session_id)).cursor;
-      const hiddenTail =
-        parked === "hidden"
-          ? await apiClient.seedSessionMessage(primary.session_id, {
-              type: "message",
-              content: "Hidden primary must survive parked reconciliation unread",
-            })
-          : null;
+      const hiddenTail = hidden
+        ? await apiClient.seedSessionMessage(primary.session_id, {
+            type: "message",
+            content: "Hidden primary must survive parked reconciliation unread",
+          })
+        : null;
       expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
-      if (parked !== "live") {
-        await session.clickMaximize("Files");
+      const frameGate =
+        parked === "rebuilding" ? await holdParkedLayoutFrames(testPage, old.session_id) : null;
+      const maximize = () =>
+        parked === "overlay"
+          ? testPage
+              .locator(".dv-tabs-and-actions-container")
+              .filter({ has: session.sessionTabBySessionId(other.session_id) })
+              .getByTestId("dockview-maximize-btn")
+              .click()
+          : session.clickMaximize("Files");
+      try {
+        if (parked !== "live") {
+          await maximize();
+          if (parked === "overlay") await expect(chat(old.session_id)).toBeVisible();
+          else await expect(session.sessionTabBySessionId(old.session_id)).toHaveCount(0);
+          if (frameGate) await expect.poll(frameGate.count).toBeGreaterThan(0);
+        }
+        expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
+        const documentStart = await testPage.evaluate(() => performance.timeOrigin);
+        await desktopTestPage.goto(`/?taskId=${task.task_id}&sessionId=${old.session_id}`);
+        const preview = desktopTestPage.getByTestId("task-preview-panel");
+        await expect(preview.locator('[data-testid="session-chat"]:visible')).toHaveAttribute(
+          "data-session-id",
+          old.session_id,
+        );
+        await preview
+          .getByTestId(`preview-session-tab-${old.session_id}`)
+          .click({ button: "right" });
+        await desktopTestPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
+        const removed = watcher.waitForEvent("session.removed", {
+          where: (payload) => payload.session_id === old.session_id,
+        });
+        await desktopTestPage.getByTestId("session-delete-confirm").click();
+        await removed;
+        await waitForActiveTaskSession(testPage, task.task_id, primary.session_id);
+        await frameGate?.release();
+        await waitForTaskSessionsSettled(testPage, task.task_id);
+        expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
+        if (parked !== "live") await maximize();
         await expect(session.sessionTabBySessionId(old.session_id)).toHaveCount(0);
-      }
-      expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
-      const documentStart = await testPage.evaluate(() => performance.timeOrigin);
-      await desktopTestPage.goto(`/?taskId=${task.task_id}&sessionId=${old.session_id}`);
-      const preview = desktopTestPage.getByTestId("task-preview-panel");
-      await expect(preview.locator('[data-testid="session-chat"]:visible')).toHaveAttribute(
-        "data-session-id",
-        old.session_id,
-      );
-      await preview.getByTestId(`preview-session-tab-${old.session_id}`).click({ button: "right" });
-      await desktopTestPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
-      const removed = watcher.waitForEvent("session.removed", {
-        where: (payload) => payload.session_id === old.session_id,
-      });
-      await desktopTestPage.getByTestId("session-delete-confirm").click();
-      await removed;
-      await waitForActiveTaskSession(testPage, task.task_id, primary.session_id);
-      await waitForTaskSessionsSettled(testPage, task.task_id);
-      expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
-      if (parked !== "live") await session.clickMaximize("Files");
-      await expect(session.sessionTabBySessionId(old.session_id)).toHaveCount(0);
-      if (parked !== "hidden") {
-        await expect(
-          chat(primary.session_id).getByText(REMOVAL_PRIMARY_TEXT, { exact: true }),
-        ).toBeVisible();
-      } else {
-        await expect(session.sessionTabBySessionId(primary.session_id)).toHaveCount(0);
-        expect((await sessionReadState(apiClient, primary.session_id)).cursor).toBe(hiddenCursor);
+        if (!hidden) {
+          await expect(
+            chat(primary.session_id).getByText(REMOVAL_PRIMARY_TEXT, { exact: true }),
+          ).toBeVisible();
+        } else {
+          await expect(session.sessionTabBySessionId(primary.session_id)).toHaveCount(0);
+          expect((await sessionReadState(apiClient, primary.session_id)).cursor).toBe(hiddenCursor);
+          await expect
+            .poll(() => taskUnreadSessionIds(apiClient, seedData.workspaceId, task.task_id))
+            .toContain(primary.session_id);
+        }
+        await dwell(
+          testPage,
+          1500,
+          "negative-assertion",
+          "A direct remote proof cannot make its unproven split neighbor readable",
+        );
+        await expect(chat(other.session_id)).toHaveCount(0);
+        expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
+        expect(
+          traffic.markReads.filter(
+            (read) => read.sessionId === other.session_id && read.messageId === tail.messageId,
+          ),
+        ).toEqual([]);
+        await testPage.screenshot({
+          path: test.info().outputPath("remote-split-neighbor-unread.png"),
+        });
+        if (hidden) {
+          await session.addPanelButton().click();
+          await session.sessionReopenItem(primary.session_id).click();
+          await expect
+            .poll(async () => (await sessionReadState(apiClient, primary.session_id)).cursor)
+            .toBe(hiddenTail!.messageId);
+        }
+        await session.sessionTabBySessionId(other.session_id).click();
+        await expect(chat(other.session_id)).toBeVisible();
         await expect
-          .poll(() => taskUnreadSessionIds(apiClient, seedData.workspaceId, task.task_id))
-          .toContain(primary.session_id);
+          .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
+          .toBe(tail.messageId);
+        if (!hidden) await expect(chat(primary.session_id)).toBeVisible();
+        expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
+      } finally {
+        await frameGate?.dispose();
       }
-      await dwell(
-        testPage,
-        1500,
-        "negative-assertion",
-        "A direct remote proof cannot make its unproven split neighbor readable",
-      );
-      await expect(chat(other.session_id)).toHaveCount(0);
-      expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
-      expect(
-        traffic.markReads.filter(
-          (read) => read.sessionId === other.session_id && read.messageId === tail.messageId,
-        ),
-      ).toEqual([]);
-      await testPage.screenshot({
-        path: test.info().outputPath("remote-split-neighbor-unread.png"),
-      });
-      if (parked === "hidden") {
-        await session.addPanelButton().click();
-        await session.sessionReopenItem(primary.session_id).click();
-        await expect
-          .poll(async () => (await sessionReadState(apiClient, primary.session_id)).cursor)
-          .toBe(hiddenTail!.messageId);
-      }
-      await session.sessionTabBySessionId(other.session_id).click();
-      await expect(chat(other.session_id)).toBeVisible();
-      await expect
-        .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
-        .toBe(tail.messageId);
-      if (parked !== "hidden") await expect(chat(primary.session_id)).toBeVisible();
-      expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
     });
   }
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
+  test("keeps a visit-local hide made while maximized until explicit reopen", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.saveUserSettings({ agent_tab_close_behavior: "hide_panel" });
+    const { task, old, other } = await seedRemovalChoiceTask(apiClient, seedData);
+    const session = new SessionPage(testPage);
+    const traffic = observeReadTraffic(testPage);
+    const header = () =>
+      testPage
+        .locator(".dv-tabs-and-actions-container")
+        .filter({ has: session.sessionTabBySessionId(old.session_id) });
+    await testPage.goto(`/t/${task.task_id}`);
+    await session.sessionTabBySessionId(other.session_id).click();
+    await expect
+      .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
+      .not.toBeNull();
+    await session.sessionTabBySessionId(old.session_id).click();
+    const before = (await sessionReadState(apiClient, other.session_id)).cursor;
+    const tail = await apiClient.seedSessionMessage(other.session_id, {
+      type: "message",
+      content: "Visit-local hidden output",
+    });
+    await header().getByTestId("dockview-maximize-btn").click();
+    await session.sessionTabCloseButton(other.session_id).click();
+    await expect(session.sessionTabBySessionId(other.session_id)).toHaveCount(0);
+    await header().getByTestId("dockview-maximize-btn").click();
+    await expect(session.sessionTabBySessionId(other.session_id)).toHaveCount(0);
+    await dwell(
+      testPage,
+      1500,
+      "negative-assertion",
+      "Restoring a layout must not reopen hidden output",
+    );
+    expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
+    expect(
+      traffic.markReads.filter(
+        (read) => read.sessionId === other.session_id && read.messageId === tail.messageId,
+      ),
+    ).toEqual([]);
+    await testPage.screenshot({ path: test.info().outputPath("visit-local-hidden-restore.png") });
+    await session.addPanelButton().click();
+    await session.sessionReopenItem(other.session_id).click();
+    await expect
+      .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
+      .toBe(tail.messageId);
+  });
 
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
   for (const restore of [false, true]) {

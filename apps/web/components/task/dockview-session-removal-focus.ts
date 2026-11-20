@@ -146,8 +146,7 @@ function captureRetiredSurfaces(
 /** Only explicit/proven ownership can expose a removed group's fallback transcript. */
 export function setupRemovalSurfaceFocus(api: DockviewApi, store: StoreApi<AppState>): () => void {
   const unsubscribe = store.subscribe((current, previous) => {
-    if (useDockviewStore.getState().isRestoringLayout) return;
-    pruneSurfaces(api, current);
+    if (!useDockviewStore.getState().isRestoringLayout) pruneSurfaces(api, current);
     const captured = captureVisiblePredecessor(api, store, current, previous);
     if (captured) {
       let owners = surfaces.get(api);

@@ -14,7 +14,11 @@ import {
   getManualRightWidth,
 } from "@/lib/local-storage";
 import { getLayoutProfileIdentity, type LayoutProfileIdentity } from "@/lib/layout/layout-profiles";
-import { getEnvHiddenSessions, resolveVisibleSessionId } from "@/lib/env-hidden-sessions";
+import {
+  getEnvHiddenSessions,
+  getLayoutHiddenSessions,
+  resolveVisibleSessionId,
+} from "@/lib/env-hidden-sessions";
 import { setPinnedTarget, clearPinnedTarget } from "./layout-manager";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
@@ -1651,7 +1655,7 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       if (sidebarCol) columns.push(sidebarCol);
       columns.push({
         id: "maximized",
-        groups: [{ panels: targetGroup.panels, activePanel: targetGroup.activePanel }],
+        groups: [{ id: groupId, panels: targetGroup.panels, activePanel: targetGroup.activePanel }],
       });
       const maximizedLayout: LayoutState = { columns };
       set({
@@ -1679,12 +1683,12 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
     exitMaximizedLayout: () => {
       const { api, preMaximizeLayout: savedLayout, currentLayoutEnvId } = get();
       if (!api || !savedLayout) return;
-      const hidden = currentLayoutEnvId ? getEnvHiddenSessions(currentLayoutEnvId) : [];
-      const preMaximizeLayout = hidden.length
+      const hidden = getLayoutHiddenSessions(api, currentLayoutEnvId);
+      const preMaximizeLayout = hidden.size
         ? filterPreMaximizeLayout(
             savedLayout,
             null,
-            [...collectSessionIdsFromLayout(savedLayout)].filter((id) => !hidden.includes(id)),
+            [...collectSessionIdsFromLayout(savedLayout)].filter((id) => !hidden.has(id)),
           )
         : savedLayout;
       preserveChatScrollDuringLayout();
