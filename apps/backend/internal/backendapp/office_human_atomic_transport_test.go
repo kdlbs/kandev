@@ -15,6 +15,7 @@ import (
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -57,8 +58,8 @@ func newOfficeAtomicFixture(t *testing.T, wrap func(*tasksqlite.Repository) task
 	dash.SetTaskFinalStepMover(officeFinalStepMoverAdapter{tasks: svc, steps: h.workflowSvc})
 	dash.SetTaskHumanDoneCompleter(officeHumanDoneCompleterAdapter{tasks: svc})
 	dash.SetEventBus(h.eventBus)
-	svc.SetOfficeApprovalGuard(officeApprovalGuardAdapter{reader: dash})
-	configureOfficeHumanCompletionGuard(h.repo, office, workflow)
+	svc.SetApproverNameResolver(officeApproverNameResolverAdapter{reader: dash})
+	registerOfficeCompletionPolicy(h.repo, office, workflow)
 	require.NoError(t, h.workflowSvc.CreateStep(context.Background(), &wfmodels.WorkflowStep{ID: "atomic-done", WorkflowID: "wf-home", Name: "Done", Position: 10, CompleteTaskOnEnter: true}))
 	h.createTask(t, "atomic-task", false)
 	_, err = h.db.Exec(`UPDATE workspaces SET office_workflow_id='wf-home' WHERE id='ws-1'`)
@@ -69,18 +70,18 @@ func newOfficeAtomicFixture(t *testing.T, wrap func(*tasksqlite.Repository) task
 // @covers AC-OFFICE-HUMAN-DONE-002.1 AC-OFFICE-HUMAN-DONE-002.2
 func TestOfficeHumanCompletionRegisteredRefusalAndSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, route := range []string{"HTTP state", "WS state", "WS direct state", "HTTP approve", "HTTP bulk selected", "HTTP bulk workflow", "Office current final", "Office final move"} {
+	for _, route := range []string{"HTTP state", "HTTP move", "WS state", "WS direct state", "HTTP approve", "HTTP bulk selected", "HTTP bulk workflow", "Office current final", "Office final move"} {
 		t.Run(route, func(t *testing.T) {
 			f := newOfficeAtomicFixture(t, nil)
 			ctx := context.Background()
-			if route == "Office current final" {
+			if route == "Office current final" || route == "HTTP state" || route == "WS state" || route == "WS direct state" {
 				task, err := f.h.repo.GetTask(ctx, "atomic-task")
 				require.NoError(t, err)
 				task.WorkflowStepID = "atomic-done"
 				require.NoError(t, f.h.repo.UpdateTask(ctx, task))
 			}
 			require.NoError(t, f.h.repo.CreateTaskSession(ctx, &models.TaskSession{ID: "atomic-session", TaskID: "atomic-task", State: models.TaskSessionStateWaitingForInput, IsPrimary: true, ReviewStatus: models.ReviewStatusPending}))
-			_, err := f.workflow.UpsertTaskParticipant(ctx, "step-home", "atomic-task", "approver", "pending-agent")
+			_, err := f.workflow.UpsertTaskParticipant(ctx, "atomic-done", "atomic-task", "approver", "pending-agent")
 			require.NoError(t, err)
 			router, dispatcher := gin.New(), ws.NewDispatcher()
 			taskhandlers.RegisterTaskRoutes(router, dispatcher, f.svc, nil, f.h.repo, nil, f.log)
@@ -106,6 +107,11 @@ func TestOfficeHumanCompletionRegisteredRefusalAndSuccess(t *testing.T) {
 					return http.StatusInternalServerError, body
 				}
 				method, path, payload := http.MethodPatch, "/api/v1/tasks/atomic-task", `{"state":"COMPLETED"}`
+				if route == "HTTP move" {
+					method = http.MethodPost
+					path = "/api/v1/tasks/atomic-task/move"
+					payload = `{"workflow_id":"wf-home","workflow_step_id":"atomic-done"}`
+				}
 				if strings.HasPrefix(route, "Office") {
 					path = "/api/v1/office/tasks/atomic-task"
 					payload = `{"status":"done"}`
@@ -153,12 +159,22 @@ func TestOfficeHumanCompletionRegisteredRefusalAndSuccess(t *testing.T) {
 			afterLedger, err := f.h.repo.GetLatestTaskStepTransitionID(ctx, "atomic-task")
 			require.NoError(t, err)
 			require.Equal(t, beforeLedger, afterLedger)
-			if strings.HasPrefix(route, "Office") {
+			switch {
+			case strings.HasPrefix(route, "Office"):
 				require.NotContains(t, body, "status")
-			} else if !strings.HasPrefix(route, "WS ") {
+			case strings.HasPrefix(route, "HTTP bulk"):
+				require.Equal(t, taskservice.BulkMoveRefusedCode, body["code"])
+				refusals, ok := body["refusals"].([]any)
+				require.True(t, ok)
+				require.Len(t, refusals, 1)
+				refusal, ok := refusals[0].(map[string]any)
+				require.True(t, ok)
+				require.Equal(t, "task_approvals_pending", refusal["code"])
+			case !strings.HasPrefix(route, "WS "):
 				require.Equal(t, "task_approvals_pending", body["code"])
 			}
-			require.NoError(t, f.workflow.DeleteTaskParticipant(ctx, "step-home", "atomic-task", "approver", "pending-agent"))
+			approverStep := "atomic-done"
+			require.NoError(t, f.workflow.DeleteTaskParticipant(ctx, approverStep, "atomic-task", "approver", "pending-agent"))
 			status, body = invoke()
 			require.Equal(t, http.StatusOK, status, "same-fixture control body=%v", body)
 			completed, err := f.h.repo.GetTask(ctx, "atomic-task")
@@ -178,6 +194,18 @@ func (r *officeFieldAdmissionWindow) UpdateTaskFieldsWithParentAdmission(ctx con
 	r.before()
 	return r.Repository.UpdateTaskFieldsWithParentAdmission(ctx, id, update, validate)
 }
+
+func (r *officeFieldAdmissionWindow) UpdateTaskFieldsWithParentAdmissionAndCompletionAdmission(
+	ctx context.Context,
+	id string,
+	update models.TaskFieldUpdate,
+	validate hierarchy.TaskParentValidator,
+	admission *completion.Admission,
+) (*models.TaskFieldUpdateResult, error) {
+	r.before()
+	return r.Repository.UpdateTaskFieldsWithParentAdmissionAndCompletionAdmission(ctx, id, update, validate, admission)
+}
+
 func TestOfficeHumanCompletionRegisteredScopeConflict(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, transport := range []string{"HTTP", "WS"} {

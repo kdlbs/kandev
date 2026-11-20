@@ -82,7 +82,10 @@ func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(agentctl.InstanceInfo{ID: id, Port: 41001, WorkspacePath: request.WorkspacePath})
+	_ = json.NewEncoder(w).Encode(agentctl.InstanceInfo{
+		ID: id, Port: 41001, Status: "running", WorkspacePath: request.WorkspacePath,
+		SessionID: request.SessionID, TaskID: request.TaskID,
+	})
 }
 
 func (c *taskPodControl) snapshot() ([]agentctl.CreateInstanceRequest, map[string]agentctl.CreateInstanceRequest, int) {

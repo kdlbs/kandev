@@ -22,20 +22,26 @@ func (c *Controller) previewHarnessUpdate(
 	if targetVersion != "" || useDefault {
 		return nil, ErrRuntimeUpdateTargetInvalid
 	}
-	latest, _ := c.resolveHarnessLatest(ctx, spec.Package)
 	current := ""
 	if caps, found := c.runtimeUpdater.CurrentCapabilities(ag.ID()); found {
 		current = caps.AgentVersion
 	}
 	command := spec.UpdateCommand.Args()
-	return &dto.AgentUpdatePreviewDTO{
+	preview := &dto.AgentUpdatePreviewDTO{
 		UpdateMode: dto.AgentUpdateModeSelfUpdate,
 		AgentName:  ag.ID(), Package: spec.Package, CurrentVersion: current,
-		EffectiveVersion: current, StableLatestVersion: latest,
+		EffectiveVersion:  current,
 		Operation:         harnessUpdateOperation(current),
 		AvailableVersions: []dto.AgentUpdateVersionDTO{},
 		Command:           command, CommandString: buildCommandString(command),
-	}, nil
+	}
+	// A native check replaces the stable reference; it never changes approval.
+	if check, native := nativeUpdateCheckSpec(ag); native {
+		c.previewNativeUpdateCheck(ctx, ag, check).applyPreview(preview)
+		return preview, nil
+	}
+	preview.StableLatestVersion, _ = c.resolveHarnessLatest(ctx, spec.Package)
+	return preview, nil
 }
 
 func harnessUpdateOperation(current string) string {

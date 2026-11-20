@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	p "github.com/kandev/kandev/internal/mcp/profile"
@@ -13,7 +14,8 @@ import (
 
 func TestBuiltinPassthroughUsesBoundPackagesAndRejectsCollisions(t *testing.T) {
 	mgr := newTestManager(t)
-	execution := &AgentExecution{ID: "execution", SessionID: "session", TaskID: "task-a", WorkspaceID: "workspace", standalonePort: 41234}
+	execution := &AgentExecution{ID: "execution", SessionID: "session", TaskID: "task-a", WorkspaceID: "workspace", standalonePort: 41234,
+		agentctl: agentctl.NewClient("127.0.0.1", 41234, newTestLogger(), agentctl.WithExecutionID("execution"), agentctl.WithBuiltinMCPScopedRoutes(false))}
 	profile := builtinDispatchProfile(p.PackageCore, p.PackageConfiguration)
 	encoded, err := p.MarshalBuiltinBinding(profile)
 	require.NoError(t, err)

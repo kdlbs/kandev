@@ -241,6 +241,7 @@ export async function duplicateAgentProfileAction(id: string): Promise<AgentProf
 import type {
   ActiveSessionInfo,
   AutomationReference,
+  DynamicProfileReference,
   RoutingTierReference,
   WatcherReference,
   UtilityAgentReference,
@@ -255,6 +256,7 @@ export type DeleteProfileResult =
       routingTiers: RoutingTierReference[];
       automations: AutomationReference[];
       utilityAgents: UtilityAgentReference[];
+      dynamicProfiles: DynamicProfileReference[];
     }
   | { status: "error"; message: string; handled?: boolean };
 
@@ -278,6 +280,7 @@ type DeleteProfileErrorBody = {
   routing_tiers?: RoutingTierReference[];
   automations?: AutomationReference[];
   utility_agents?: UtilityAgentReference[];
+  dynamic_profiles?: DynamicProfileReference[];
 };
 
 function readDeleteProfileErrorBody(value: unknown): DeleteProfileErrorBody {
@@ -290,7 +293,8 @@ function hasDeleteProfileConflict(body: DeleteProfileErrorBody): boolean {
     body.watchers ||
     body.routing_tiers ||
     body.automations ||
-    body.utility_agents,
+    body.utility_agents ||
+    body.dynamic_profiles,
   );
 }
 
@@ -308,6 +312,7 @@ function deleteAgentProfileError(error: unknown): DeleteProfileResult {
       routingTiers: body.routing_tiers ?? [],
       automations: body.automations ?? [],
       utilityAgents: body.utility_agents ?? [],
+      dynamicProfiles: body.dynamic_profiles ?? [],
     };
   }
   // i18n-exempt: server-provided error text, or an HTTP status diagnostic when

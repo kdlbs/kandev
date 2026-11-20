@@ -54,6 +54,7 @@ type UserSettingsDTO struct {
 	LspAutoStartLanguages             []string                                `json:"lsp_auto_start_languages"`
 	LspAutoInstallLanguages           []string                                `json:"lsp_auto_install_languages"`
 	LspServerConfigs                  map[string]map[string]interface{}       `json:"lsp_server_configs,omitempty"`
+	MarkdownPreviewByDefault          bool                                    `json:"markdown_preview_by_default"`
 	LspStatusLocation                 string                                  `json:"lsp_status_location"`
 	SavedLayouts                      []models.SavedLayout                    `json:"saved_layouts"`
 	SidebarViews                      []models.SidebarView                    `json:"sidebar_views"`
@@ -72,7 +73,6 @@ type UserSettingsDTO struct {
 	GitHubSavedPresets                json.RawMessage                         `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets         json.RawMessage                         `json:"github_default_query_presets,omitempty"`
 	GitLabSavedPresets                json.RawMessage                         `json:"gitlab_saved_presets,omitempty"`
-	AzureDevOpsBrowsePreferences      json.RawMessage                         `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID             string                                  `json:"default_utility_agent_id"`
 	DefaultUtilityModel               string                                  `json:"default_utility_model"`
 	DefaultUtilityAgentProfileID      string                                  `json:"default_utility_agent_profile_id"`
@@ -180,6 +180,7 @@ type UpdateUserSettingsRequest struct {
 	LspAutoStartLanguages             *[]string                          `json:"lsp_auto_start_languages,omitempty"`
 	LspAutoInstallLanguages           *[]string                          `json:"lsp_auto_install_languages,omitempty"`
 	LspServerConfigs                  *map[string]map[string]interface{} `json:"lsp_server_configs,omitempty"`
+	MarkdownPreviewByDefault          *bool                              `json:"markdown_preview_by_default,omitempty"`
 	LspStatusLocation                 *string                            `json:"lsp_status_location,omitempty"`
 	SavedLayouts                      *[]models.SavedLayout              `json:"saved_layouts,omitempty"`
 	SidebarViews                      *[]models.SidebarView              `json:"sidebar_views,omitempty"`
@@ -198,7 +199,6 @@ type UpdateUserSettingsRequest struct {
 	GitHubSavedPresets                NullableRawMessage                 `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets         NullableRawMessage                 `json:"github_default_query_presets,omitempty"`
 	GitLabSavedPresets                NullableRawMessage                 `json:"gitlab_saved_presets,omitempty"`
-	AzureDevOpsBrowsePreferences      NullableRawMessage                 `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID             *string                            `json:"default_utility_agent_id,omitempty"`
 	DefaultUtilityModel               *string                            `json:"default_utility_model,omitempty"`
 	DefaultUtilityAgentProfileID      *string                            `json:"default_utility_agent_profile_id,omitempty"`
@@ -389,6 +389,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		LspAutoStartLanguages:             settings.LspAutoStartLanguages,
 		LspAutoInstallLanguages:           settings.LspAutoInstallLanguages,
 		LspServerConfigs:                  settings.LspServerConfigs,
+		MarkdownPreviewByDefault:          settings.MarkdownPreviewByDefault,
 		LspStatusLocation:                 models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		SavedLayouts:                      settings.SavedLayouts,
 		SidebarViews:                      settings.SidebarViews,
@@ -408,7 +409,6 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		GitHubSavedPresets:                settings.GitHubSavedPresets,
 		GitHubDefaultQueryPresets:         settings.GitHubDefaultQueryPresets,
 		GitLabSavedPresets:                settings.GitLabSavedPresets,
-		AzureDevOpsBrowsePreferences:      settings.AzureDevOpsBrowsePreferences,
 		DefaultUtilityAgentID:             settings.DefaultUtilityAgentID,
 		DefaultUtilityModel:               settings.DefaultUtilityModel,
 		DefaultUtilityAgentProfileID:      settings.DefaultUtilityAgentProfileID,

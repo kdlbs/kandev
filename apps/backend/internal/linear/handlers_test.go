@@ -2,6 +2,7 @@ package linear
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -322,5 +323,138 @@ func TestHTTPListProjects_RoutesThroughService(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"projects":[{"id":"p1","name":"Checkout"}]`) {
 		t.Errorf("body = %s", w.Body.String())
+	}
+}
+
+func TestHTTPIssueDetailAndStateUseRequestedWorkspace(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	ctx := context.Background()
+	clients := map[string]*fakeClient{
+		"default-token":     {},
+		"workspace-a-token": {},
+		"workspace-b-token": {},
+	}
+	for workspaceID, token := range map[string]string{
+		"default":     "default-token",
+		"workspace-a": "workspace-a-token",
+		"workspace-b": "workspace-b-token",
+	} {
+		if err := ctrl.service.store.UpsertConfigForWorkspace(ctx, workspaceID, &LinearConfig{
+			AuthMethod: AuthMethodAPIKey,
+		}); err != nil {
+			t.Fatalf("upsert %s config: %v", workspaceID, err)
+		}
+		if err := ctrl.service.secrets.Set(ctx, SecretKeyForWorkspace(workspaceID), "Linear API key", token); err != nil {
+			t.Fatalf("set %s secret: %v", workspaceID, err)
+		}
+	}
+	clients["default-token"].getIssueFn = func(identifier string) (*LinearIssue, error) {
+		return &LinearIssue{Identifier: identifier, Title: "Default workspace"}, nil
+	}
+	clients["workspace-a-token"].getIssueFn = func(identifier string) (*LinearIssue, error) {
+		return &LinearIssue{Identifier: identifier, Title: "Workspace A"}, nil
+	}
+	clients["workspace-b-token"].getIssueFn = func(identifier string) (*LinearIssue, error) {
+		return &LinearIssue{Identifier: identifier, Title: "Workspace B"}, nil
+	}
+	ctrl.service.clientFn = func(_ *LinearConfig, secret string) Client {
+		return clients[secret]
+	}
+	allowWorkspaceBWrite := false
+	ctrl.service.SetWorkspaceWriteAuthorizer(func(_ context.Context, workspaceID string) error {
+		if workspaceID == "workspace-b" && !allowWorkspaceBWrite {
+			return ErrWorkspaceWriteForbidden
+		}
+		return nil
+	})
+
+	get := httptest.NewRequest(http.MethodGet, "/api/v1/linear/issues/REL-2173?workspace_id=workspace-b", nil)
+	getResponse := httptest.NewRecorder()
+	router.ServeHTTP(getResponse, get)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200; body=%s", getResponse.Code, getResponse.Body.String())
+	}
+	if !strings.Contains(getResponse.Body.String(), `"title":"Workspace B"`) {
+		t.Fatalf("GET body = %s, want issue from workspace B", getResponse.Body.String())
+	}
+
+	state := httptest.NewRequest(http.MethodPost, "/api/v1/linear/issues/issue-b/state?workspace_id=workspace-b", strings.NewReader(`{"stateId":"done"}`))
+	state.Header.Set("Content-Type", "application/json")
+	stateResponse := httptest.NewRecorder()
+	router.ServeHTTP(stateResponse, state)
+	if stateResponse.Code != http.StatusForbidden {
+		t.Fatalf("viewer POST status = %d, want 403; body=%s", stateResponse.Code, stateResponse.Body.String())
+	}
+	if len(clients["workspace-b-token"].transitionLog) != 0 {
+		t.Fatalf("viewer state change reached Linear client: %v", clients["workspace-b-token"].transitionLog)
+	}
+
+	allowWorkspaceBWrite = true
+	state = httptest.NewRequest(http.MethodPost, "/api/v1/linear/issues/issue-b/state?workspace_id=workspace-b", strings.NewReader(`{"stateId":"done"}`))
+	state.Header.Set("Content-Type", "application/json")
+	stateResponse = httptest.NewRecorder()
+	router.ServeHTTP(stateResponse, state)
+	if stateResponse.Code != http.StatusOK {
+		t.Fatalf("collaborator POST status = %d, want 200; body=%s", stateResponse.Code, stateResponse.Body.String())
+	}
+	if got := clients["workspace-b-token"].transitionLog; len(got) != 1 || got[0] != "issue-b:done" {
+		t.Fatalf("workspace B transitions = %v, want [issue-b:done]", got)
+	}
+	if len(clients["default-token"].transitionLog) != 0 {
+		t.Fatalf("default workspace received transitions: %v", clients["default-token"].transitionLog)
+	}
+
+	ctrl.service.SetWorkspaceAuthorizer(denyOnly("workspace-b"))
+	deniedGet := httptest.NewRecorder()
+	router.ServeHTTP(deniedGet, httptest.NewRequest(http.MethodGet, "/api/v1/linear/issues/REL-2173?workspace_id=workspace-b", nil))
+	if deniedGet.Code != http.StatusNotFound {
+		t.Fatalf("unauthorized GET status = %d, want 404", deniedGet.Code)
+	}
+	deniedState := httptest.NewRequest(http.MethodPost, "/api/v1/linear/issues/issue-b/state?workspace_id=workspace-b", strings.NewReader(`{"stateId":"blocked"}`))
+	deniedState.Header.Set("Content-Type", "application/json")
+	deniedStateResponse := httptest.NewRecorder()
+	router.ServeHTTP(deniedStateResponse, deniedState)
+	if deniedStateResponse.Code != http.StatusNotFound {
+		t.Fatalf("unauthorized POST status = %d, want 404", deniedStateResponse.Code)
+	}
+	if got := clients["workspace-b-token"].transitionLog; len(got) != 1 {
+		t.Fatalf("unauthorized state change reached Linear client: %v", got)
+	}
+}
+
+func TestWSIssueStateWriteRequiresWorkspaceWriteScope(t *testing.T) {
+	ctrl, _, client := newTestController(t)
+	var authorizedWorkspace string
+	ctrl.service.SetWorkspaceWriteAuthorizer(func(_ context.Context, workspaceID string) error {
+		authorizedWorkspace = workspaceID
+		return ErrWorkspaceWriteForbidden
+	})
+	request, err := ws.NewRequest("request-1", ws.ActionLinearIssueTransition, map[string]string{
+		"issueId": "issue-default",
+		"stateId": "done",
+	})
+	if err != nil {
+		t.Fatalf("create WebSocket request: %v", err)
+	}
+
+	response, err := wsSetIssueState(ctrl.service)(context.Background(), request)
+	if err != nil {
+		t.Fatalf("handle WebSocket request: %v", err)
+	}
+	if response.Type != ws.MessageTypeError {
+		t.Fatalf("response type = %q, want error", response.Type)
+	}
+	var payload ws.ErrorPayload
+	if err := json.Unmarshal(response.Payload, &payload); err != nil {
+		t.Fatalf("decode WebSocket error: %v", err)
+	}
+	if payload.Code != ws.ErrorCodeForbidden {
+		t.Fatalf("error code = %q, want %q", payload.Code, ws.ErrorCodeForbidden)
+	}
+	if authorizedWorkspace != "default" {
+		t.Fatalf("authorized workspace = %q, want default", authorizedWorkspace)
+	}
+	if len(client.transitionLog) != 0 {
+		t.Fatalf("denied WebSocket state change reached Linear client: %v", client.transitionLog)
 	}
 }

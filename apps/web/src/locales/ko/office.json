@@ -719,6 +719,7 @@
   "routeOutcomeRetryScheduled": "재시도 예약됨",
   "routeOutcomeSkippedDegraded": "성능 저하로 건너뜀",
   "routeOutcomeSkippedMaxAttempts": "최대 시도 도달로 건너뜀",
+  "routeOutcomeSkippedAuthorProvider": "건너뜀: 이 작업을 작성함",
   "routeOutcomeSkippedMissingMapping": "매핑 누락으로 건너뜀",
   "routeOutcomeSkippedUserAction": "사용자 조치로 건너뜀",
   "routineActivated": "루틴을 활성화했습니다",
@@ -741,6 +742,7 @@
   "routineStatusPaused": "일시 중지됨",
   "routingOverridesSaved": "라우팅 재정의를 저장했습니다",
   "routingSettingsSaved": "라우팅 설정을 저장했습니다",
+  "routingSavedWithExclusionWarnings": "설정을 저장했지만 현재 설정으로는 다른 공급자에서 리뷰가 작동하지 않습니다. 페이지 상단의 경고를 확인하세요.",
   "run": "실행",
   "runActivity": "실행 활동",
   "runCancelAssigneeChanged": "담당자 변경됨",
@@ -1024,5 +1026,10 @@
   "openSessionRecovery": "세션 복구 열기",
   "sessionRecoveryDescription": "세션이 복구될 때까지 이 실행은 대기합니다. Kandev는 프롬프트를 자동으로 다시 전송하지 않습니다.",
   "sessionRecoveryReason": "이유: {{reason}}",
-  "sessionRecoveryRequired": "세션 복구 필요"
+  "sessionRecoveryRequired": "세션 복구 필요",
+  "authorExclusionStepsTitle": "다른 공급자에서 리뷰",
+  "authorExclusionStepsDescription": "단계의 리뷰어나 승인자가 작업을 수행한 공급자를 사용하지 않도록 하여 리뷰를 독립적인 검토로 만듭니다. 사용할 수 있는 다른 공급자가 없으면 조치할 때까지 리뷰가 대기합니다. 자동 공급자 폴백과 두 개 이상의 공급자가 필요합니다. 자체 실행 프로필이 있는 에이전트는 적용되지 않습니다.",
+  "authorExclusionStepsEmpty": "이 워크스페이스에는 리뷰어 또는 승인자 단계가 있는 워크플로가 없습니다.",
+  "authorExclusionStepLabel": "{{workflow}} 워크플로, {{step}} 단계",
+  "authorExclusionStepSwitchLabel": "{{workflow}} 워크플로, {{step}} 단계({{role}})의 다른 공급자에서 리뷰"
 }

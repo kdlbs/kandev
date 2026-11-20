@@ -101,6 +101,89 @@ func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskSessionAgentStartAttemptPreservesEnvironmentBinding(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID, sessionID = "task-start-attempt", "session-start-attempt"
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Start attempt"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	launch := &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateCreated,
+		TaskEnvironmentID: "environment-not-yet-persisted",
+		Metadata:          map[string]interface{}{},
+	}
+	changed, err := repo.UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+		ctx, launch, models.TaskSessionStateCreated, "attempt-1",
+	)
+	if err != nil {
+		t.Fatalf("claim start attempt: %v", err)
+	}
+	if !changed {
+		t.Fatal("start attempt was not claimed")
+	}
+
+	stored, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if stored.TaskEnvironmentID != "" {
+		t.Fatalf("task environment binding = %q, want unchanged empty binding", stored.TaskEnvironmentID)
+	}
+	if got := models.StringFromAny(stored.Metadata[models.SessionMetaKeyAgentStartAttemptID]); got != "attempt-1" {
+		t.Fatalf("stored attempt = %q, want attempt-1", got)
+	}
+}
+
+func TestUpdateTaskSessionAgentStartAttemptRejectsNewParkingStamp(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID, sessionID = "task-start-attempt-park", "session-start-attempt-park"
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Start attempt"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	parkedAt := time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
+	launch := &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateWaitingForInput,
+		Metadata: map[string]interface{}{models.SessionMetaKeyWorkflowParking: models.WorkflowParking{
+			Stamp: "old", ParkedAt: parkedAt, SourceSessionID: sessionID,
+		}},
+	}
+	if err := repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyWorkflowParking, models.WorkflowParking{
+		Stamp: "new", ParkedAt: parkedAt.Add(time.Minute), SourceSessionID: sessionID,
+	}); err != nil {
+		t.Fatalf("write new parking stamp: %v", err)
+	}
+
+	changed, err := repo.UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+		ctx, launch, models.TaskSessionStateWaitingForInput, "attempt-stale",
+	)
+	if err != nil {
+		t.Fatalf("claim stale start attempt: %v", err)
+	}
+	if changed {
+		t.Fatal("stale start attempt was committed after a new parking stamp")
+	}
+	stored, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if _, exists := stored.Metadata[models.SessionMetaKeyAgentStartAttemptID]; exists {
+		t.Fatalf("stale attempt metadata was persisted: %#v", stored.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+	}
+}
+
 func TestHasTaskSessionsByAgentProfileIncludesCompletedSessions(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

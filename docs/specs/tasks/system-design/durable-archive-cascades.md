@@ -168,7 +168,7 @@ repository interfaces. Commands `BeginTaskCreation`, handle-bound
 `CompleteTaskCreation`/`AbortTaskCreation`, `ReleaseTaskExternalID`, `Reserve`,
 `CommitMembership`, `CommitArchiveMember`, `CommitUnarchiveMember`,
 `CreateOrAttachGroup`, `SetTaskParent`, `DetachTask`, typed-reason `DeleteTask`,
-`DeleteExpiredTask`, `DeleteEphemeralTasksByAgentProfile`, and `DeleteWorkspace`
+`DeleteEphemeralTasksByAgentProfile` and `DeleteWorkspace`
 own transactions and
 mutate required task/Office/integration rows in execution-contract lock order.
 Existing repository mutators become private dialect transaction helpers callable
@@ -217,7 +217,7 @@ The checked-in writer inventory is the implementation cutover checklist:
 | task runtime `UpsertExecutorRunning`, `DeleteExecutorRunningBySessionID`, `DeleteExecutorRunningIfCurrent` | `executors_running` resource identity creation/replacement/removal | `MutateTaskRuntime` |
 | Task HTTP/MCP, maintenance, exact provider/reset, automation, plugin, e2e deletes | task/revision/outbox plus canonical trusted provenance | typed commands/constructors; no fallback |
 | all creation compensation currently calling delete | creation step/effect state | ledger-eligible handle-bound Abort |
-| quick-chat expiry and profile bulk cleanup | selector plus canonical maintenance provenance | `DeleteExpiredTask`/`DeleteEphemeralTasksByAgentProfile` |
+| profile bulk cleanup | selector plus canonical maintenance provenance | `DeleteEphemeralTasksByAgentProfile` |
 | Task/Office workspace handlers, blockers/comments, exact table registry | locked confirm/actor, cascade/creation supersession, outboxes | `DeleteWorkspace` |
 | all loader/writer/Git/sync/default/settings/memory/path-event paths | resolver, unconstructable fence, state/access reload, VerifiedConfigRoot | exact workspaceconfig replacement API |
 

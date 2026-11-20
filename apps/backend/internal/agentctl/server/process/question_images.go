@@ -122,6 +122,14 @@ func (m *Manager) openQuestionImageRoot(repo string) (*os.Root, error) {
 		return nil, imagepreview.Unavailable
 	}
 	selected := filepath.Join(m.questionImageWorkDir, filepath.FromSlash(repo))
+	// The workspace-folder alias applies only when no literal child entry takes precedence.
+	configuredWorkDir, absErr := filepath.Abs(m.cfg.WorkDir)
+	if absErr == nil && repo == filepath.Base(configuredWorkDir) &&
+		workDirHasOwnGitEntry(m.questionImageWorkDir) {
+		if _, statErr := os.Lstat(selected); errors.Is(statErr, os.ErrNotExist) {
+			selected = m.questionImageWorkDir
+		}
+	}
 	resolved, err := filepath.EvalSymlinks(selected)
 	if err != nil {
 		return nil, err

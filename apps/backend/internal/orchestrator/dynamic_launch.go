@@ -1875,26 +1875,58 @@ func (s *Service) launchPreparedDynamicRelaunch(
 		seam5Res.consume()
 		return dynamicRelaunchSucceeded, nil
 	case dynamicRelaunchLaunchModePrepared:
-		officeAgentProfileID := data.AgentProfileID
-		if officeAgentProfileID == "" {
-			officeAgentProfileID = session.AgentProfileID
-		}
-		_, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, executor.LaunchOptions{
-			AgentProfileID:       executionProfileID,
-			OfficeAgentProfileID: officeAgentProfileID,
-			ExecutorID:           "",
-			Prompt:               prompt.text,
-			StartAgent:           true,
-			McpMode:              executor.McpModeOffice,
-		})
+		options, turnCreated, err := s.officeDynamicRelaunchOptions(ctx, data, session, prompt, executionProfileID)
 		if err != nil {
 			return dynamicRelaunchFailed, err
+		}
+		execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, options)
+		if err != nil {
+			if turnCreated {
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), promptFailureCleanupTimeout)
+				defer cancel()
+				s.completeTurnIfCurrent(cleanupCtx, data.SessionID, options.TurnID)
+			}
+			return dynamicRelaunchFailed, err
+		}
+		if execution != nil {
+			execution.TurnID = options.TurnID
 		}
 		seam5Res.consume()
 		return dynamicRelaunchSucceeded, nil
 	default:
 		return dynamicRelaunchFailed, nil
 	}
+}
+
+// officeDynamicRelaunchOptions requires a durable turn before successor
+// dispatch. Only a turn created by this call belongs to its failure cleanup.
+func (s *Service) officeDynamicRelaunchOptions(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	prompt capturedPrompt,
+	executionProfileID string,
+) (executor.LaunchOptions, bool, error) {
+	officeAgentProfileID := data.AgentProfileID
+	if officeAgentProfileID == "" {
+		officeAgentProfileID = session.AgentProfileID
+	}
+	turnID, turnCreated, _, err := s.startTurnForSessionWithOwnershipChecked(ctx, data.SessionID, false, nil)
+	if err != nil {
+		return executor.LaunchOptions{}, false, fmt.Errorf("start Office successor turn: %w", err)
+	}
+	if turnID == "" {
+		return executor.LaunchOptions{}, false, errors.New("office successor launch requires a durable turn")
+	}
+	return executor.LaunchOptions{
+		AgentProfileID:       executionProfileID,
+		OfficeAgentProfileID: officeAgentProfileID,
+		ExecutorID:           "",
+		TurnID:               turnID,
+		Prompt:               prompt.text,
+		StartAgent:           true,
+		McpMode:              executor.McpModeOffice,
+	}, turnCreated, nil
 }
 
 func (s *Service) startDynamicRelaunchCreatedSession(

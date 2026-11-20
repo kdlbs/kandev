@@ -8,9 +8,9 @@ import {
   IconFolder,
   IconRefresh,
   IconGitBranch,
-  IconLoader2,
 } from "@tabler/icons-react";
 import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
+import { GridSpinner } from "@/components/grid-spinner";
 import { cn } from "@kandev/ui/lib/utils";
 import { Button } from "@kandev/ui/button";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
@@ -125,6 +125,7 @@ export function RecoveryActions(props: RecoveryActionsProps) {
         onCheckStatus={props.onCheckWorkspaceRecoveryStatus}
       />
       <RecoveryDisclosures disclosures={view.disclosures} />
+      <RecoveryBusyStatus busy={props.busy ?? false} busyAction={props.busyAction} />
       <RecoveryChoiceButtons
         actions={view.ordered}
         primary={view.primary}
@@ -134,7 +135,6 @@ export function RecoveryActions(props: RecoveryActionsProps) {
         trailingActions={props.trailingActions}
       />
       <RecoveryWarnings id={warningId} warnings={view.warnings} />
-      <RecoveryBusyStatus busy={props.busy ?? false} busyAction={props.busyAction} />
     </div>
   );
 }
@@ -221,18 +221,21 @@ function RecoveryBusyStatus({
   return (
     <div
       role="status"
+      data-testid="recovery-progress-status"
+      aria-live="polite"
       className={cn(
-        "flex items-center gap-2 text-xs text-muted-foreground",
+        "flex items-center gap-2 text-sm font-medium text-foreground",
         busy && "mt-2 min-h-5",
       )}
     >
       {busy && (
         <>
-          <IconLoader2
-            aria-hidden="true"
-            className="size-3.5 animate-spin motion-reduce:animate-none"
-          />
-          {busyAction ? pendingLabel(busyAction, t) : t("task:workflowMovePreviewChecking")}
+          <span className="flex shrink-0" aria-hidden="true">
+            <GridSpinner className="text-primary" />
+          </span>
+          <span>
+            {busyAction ? pendingLabel(busyAction, t) : t("task:workflowMovePreviewChecking")}
+          </span>
         </>
       )}
     </div>
@@ -255,6 +258,7 @@ function RecoveryActionIcon({ kind }: { kind: RecoveryActionKind }) {
 }
 
 function pendingLabel(action: RecoveryActionKind, t: ReturnType<typeof useTranslation>["t"]) {
+  if (action === "resume") return t("task:resumingSession");
   if (action === "restore") return t("task:restoring");
   if (action === "fresh_start") return t("task:starting");
   if (action === "retry_connection") return t("task:retryingConnection");

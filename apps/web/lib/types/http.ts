@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- HTTP DTO definitions intentionally co-locate protocol shapes. */
 
 import type { ExecutorProvider, ExecutorType } from "./executor";
+import type { AuthorExclusionWarning } from "./author-exclusion";
 import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
 import type {
@@ -1291,7 +1292,11 @@ export type StepPortable = {
   pull_from_step_position?: number;
 };
 
-export type ImportWorkflowsResult = { created: string[]; skipped: string[] };
+export type ImportWorkflowsResult = {
+  created: string[];
+  skipped: string[];
+  warnings?: AuthorExclusionWarning[];
+};
 
 export type WorkflowImportProfileCandidate = {
   id: string;
@@ -1320,6 +1325,8 @@ export type WorkflowImportPreview = {
   skipped: string[];
   profiles: WorkflowImportProfileCandidate[];
   steps: WorkflowImportProfileStep[];
+  /** Non-blocking exclude_author_provider setup warnings for the imported steps. */
+  warnings?: AuthorExclusionWarning[];
 };
 
 export type WorkflowImportProfileBinding = {

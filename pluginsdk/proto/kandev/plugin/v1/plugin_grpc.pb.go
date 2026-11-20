@@ -19,23 +19,25 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Plugin_DeliverEvent_FullMethodName                 = "/kandev.plugin.v1.Plugin/DeliverEvent"
-	Plugin_HandleWebhook_FullMethodName                = "/kandev.plugin.v1.Plugin/HandleWebhook"
-	Plugin_DescribeAutomationCondition_FullMethodName  = "/kandev.plugin.v1.Plugin/DescribeAutomationCondition"
-	Plugin_VerifyAutomationWebhook_FullMethodName      = "/kandev.plugin.v1.Plugin/VerifyAutomationWebhook"
-	Plugin_HandleAction_FullMethodName                 = "/kandev.plugin.v1.Plugin/HandleAction"
-	Plugin_SearchEntityReferences_FullMethodName       = "/kandev.plugin.v1.Plugin/SearchEntityReferences"
-	Plugin_AuthorizeEntityReference_FullMethodName     = "/kandev.plugin.v1.Plugin/AuthorizeEntityReference"
-	Plugin_ResolveGitCredential_FullMethodName         = "/kandev.plugin.v1.Plugin/ResolveGitCredential"
-	Plugin_GetGitCredentialBinding_FullMethodName      = "/kandev.plugin.v1.Plugin/GetGitCredentialBinding"
-	Plugin_InvokeAgentTool_FullMethodName              = "/kandev.plugin.v1.Plugin/InvokeAgentTool"
-	Plugin_ValidateExecutorProfile_FullMethodName      = "/kandev.plugin.v1.Plugin/ValidateExecutorProfile"
-	Plugin_ProvisionExecutorEnvironment_FullMethodName = "/kandev.plugin.v1.Plugin/ProvisionExecutorEnvironment"
-	Plugin_RecoverExecutorOperation_FullMethodName     = "/kandev.plugin.v1.Plugin/RecoverExecutorOperation"
-	Plugin_AttachExecutorEnvironment_FullMethodName    = "/kandev.plugin.v1.Plugin/AttachExecutorEnvironment"
-	Plugin_InspectExecutorEnvironment_FullMethodName   = "/kandev.plugin.v1.Plugin/InspectExecutorEnvironment"
-	Plugin_ResolveExecutorConnection_FullMethodName    = "/kandev.plugin.v1.Plugin/ResolveExecutorConnection"
-	Plugin_DestroyExecutorEnvironment_FullMethodName   = "/kandev.plugin.v1.Plugin/DestroyExecutorEnvironment"
+	Plugin_FormatNotification_FullMethodName               = "/kandev.plugin.v1.Plugin/FormatNotification"
+	Plugin_InspectNotificationConfiguration_FullMethodName = "/kandev.plugin.v1.Plugin/InspectNotificationConfiguration"
+	Plugin_DeliverEvent_FullMethodName                     = "/kandev.plugin.v1.Plugin/DeliverEvent"
+	Plugin_HandleWebhook_FullMethodName                    = "/kandev.plugin.v1.Plugin/HandleWebhook"
+	Plugin_DescribeAutomationCondition_FullMethodName      = "/kandev.plugin.v1.Plugin/DescribeAutomationCondition"
+	Plugin_VerifyAutomationWebhook_FullMethodName          = "/kandev.plugin.v1.Plugin/VerifyAutomationWebhook"
+	Plugin_HandleAction_FullMethodName                     = "/kandev.plugin.v1.Plugin/HandleAction"
+	Plugin_SearchEntityReferences_FullMethodName           = "/kandev.plugin.v1.Plugin/SearchEntityReferences"
+	Plugin_AuthorizeEntityReference_FullMethodName         = "/kandev.plugin.v1.Plugin/AuthorizeEntityReference"
+	Plugin_ResolveGitCredential_FullMethodName             = "/kandev.plugin.v1.Plugin/ResolveGitCredential"
+	Plugin_GetGitCredentialBinding_FullMethodName          = "/kandev.plugin.v1.Plugin/GetGitCredentialBinding"
+	Plugin_InvokeAgentTool_FullMethodName                  = "/kandev.plugin.v1.Plugin/InvokeAgentTool"
+	Plugin_ValidateExecutorProfile_FullMethodName          = "/kandev.plugin.v1.Plugin/ValidateExecutorProfile"
+	Plugin_ProvisionExecutorEnvironment_FullMethodName     = "/kandev.plugin.v1.Plugin/ProvisionExecutorEnvironment"
+	Plugin_RecoverExecutorOperation_FullMethodName         = "/kandev.plugin.v1.Plugin/RecoverExecutorOperation"
+	Plugin_AttachExecutorEnvironment_FullMethodName        = "/kandev.plugin.v1.Plugin/AttachExecutorEnvironment"
+	Plugin_InspectExecutorEnvironment_FullMethodName       = "/kandev.plugin.v1.Plugin/InspectExecutorEnvironment"
+	Plugin_ResolveExecutorConnection_FullMethodName        = "/kandev.plugin.v1.Plugin/ResolveExecutorConnection"
+	Plugin_DestroyExecutorEnvironment_FullMethodName       = "/kandev.plugin.v1.Plugin/DestroyExecutorEnvironment"
 )
 
 // PluginClient is the client API for Plugin service.
@@ -44,6 +46,10 @@ const (
 //
 // Implemented by the PLUGIN. kandev is the client.
 type PluginClient interface {
+	// Optional, side-effect-free notification content extension. The host owns
+	// delivery admission, credentials, and transport; configuration is immutable.
+	FormatNotification(ctx context.Context, in *NotificationFormatRequest, opts ...grpc.CallOption) (*NotificationFormatResponse, error)
+	InspectNotificationConfiguration(ctx context.Context, in *NotificationConfigurationRequest, opts ...grpc.CallOption) (*NotificationConfigurationResponse, error)
 	DeliverEvent(ctx context.Context, in *Event, opts ...grpc.CallOption) (*EventAck, error)
 	HandleWebhook(ctx context.Context, in *WebhookRequest, opts ...grpc.CallOption) (*WebhookResponse, error)
 	// Optional automation adapter extension. Old plugins return Unimplemented.
@@ -83,6 +89,26 @@ type pluginClient struct {
 
 func NewPluginClient(cc grpc.ClientConnInterface) PluginClient {
 	return &pluginClient{cc}
+}
+
+func (c *pluginClient) FormatNotification(ctx context.Context, in *NotificationFormatRequest, opts ...grpc.CallOption) (*NotificationFormatResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NotificationFormatResponse)
+	err := c.cc.Invoke(ctx, Plugin_FormatNotification_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) InspectNotificationConfiguration(ctx context.Context, in *NotificationConfigurationRequest, opts ...grpc.CallOption) (*NotificationConfigurationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NotificationConfigurationResponse)
+	err := c.cc.Invoke(ctx, Plugin_InspectNotificationConfiguration_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *pluginClient) DeliverEvent(ctx context.Context, in *Event, opts ...grpc.CallOption) (*EventAck, error) {
@@ -261,6 +287,10 @@ func (c *pluginClient) DestroyExecutorEnvironment(ctx context.Context, in *Destr
 //
 // Implemented by the PLUGIN. kandev is the client.
 type PluginServer interface {
+	// Optional, side-effect-free notification content extension. The host owns
+	// delivery admission, credentials, and transport; configuration is immutable.
+	FormatNotification(context.Context, *NotificationFormatRequest) (*NotificationFormatResponse, error)
+	InspectNotificationConfiguration(context.Context, *NotificationConfigurationRequest) (*NotificationConfigurationResponse, error)
 	DeliverEvent(context.Context, *Event) (*EventAck, error)
 	HandleWebhook(context.Context, *WebhookRequest) (*WebhookResponse, error)
 	// Optional automation adapter extension. Old plugins return Unimplemented.
@@ -302,6 +332,12 @@ type PluginServer interface {
 // pointer dereference when methods are called.
 type UnimplementedPluginServer struct{}
 
+func (UnimplementedPluginServer) FormatNotification(context.Context, *NotificationFormatRequest) (*NotificationFormatResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FormatNotification not implemented")
+}
+func (UnimplementedPluginServer) InspectNotificationConfiguration(context.Context, *NotificationConfigurationRequest) (*NotificationConfigurationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InspectNotificationConfiguration not implemented")
+}
 func (UnimplementedPluginServer) DeliverEvent(context.Context, *Event) (*EventAck, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeliverEvent not implemented")
 }
@@ -372,6 +408,42 @@ func RegisterPluginServer(s grpc.ServiceRegistrar, srv PluginServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&Plugin_ServiceDesc, srv)
+}
+
+func _Plugin_FormatNotification_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NotificationFormatRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).FormatNotification(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_FormatNotification_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).FormatNotification(ctx, req.(*NotificationFormatRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_InspectNotificationConfiguration_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NotificationConfigurationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).InspectNotificationConfiguration(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_InspectNotificationConfiguration_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).InspectNotificationConfiguration(ctx, req.(*NotificationConfigurationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _Plugin_DeliverEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -687,6 +759,14 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "kandev.plugin.v1.Plugin",
 	HandlerType: (*PluginServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "FormatNotification",
+			Handler:    _Plugin_FormatNotification_Handler,
+		},
+		{
+			MethodName: "InspectNotificationConfiguration",
+			Handler:    _Plugin_InspectNotificationConfiguration_Handler,
+		},
 		{
 			MethodName: "DeliverEvent",
 			Handler:    _Plugin_DeliverEvent_Handler,

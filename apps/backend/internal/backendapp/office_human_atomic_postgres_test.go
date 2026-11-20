@@ -2,7 +2,6 @@ package backendapp
 
 import (
 	"context"
-	"database/sql"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"testing"
@@ -11,6 +10,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/dashboard"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/testutil"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -40,7 +41,7 @@ func TestOfficeHumanCompletionPostgresAdmissionBeforeWriter(t *testing.T) {
 			dash := dashboard.NewDashboardService(office, log, nil, nil, nil)
 			dash.SetDecisionStore(workflow)
 			svc := h.adapter.svc.(*taskservice.Service)
-			svc.SetOfficeApprovalGuard(officeApprovalGuardAdapter{reader: dash})
+			svc.SetApproverNameResolver(officeApproverNameResolverAdapter{reader: dash})
 			require.NoError(t, h.workflowSvc.CreateStep(ctx, &wfmodels.WorkflowStep{ID: "atomic-done", WorkflowID: "wf-home", Name: "Done", Position: 10, CompleteTaskOnEnter: true}))
 			h.createTask(t, "atomic-task", false)
 			_, err = h.db.Exec(`UPDATE workspaces SET office_workflow_id='wf-home' WHERE id='ws-1'`)
@@ -48,7 +49,6 @@ func TestOfficeHumanCompletionPostgresAdmissionBeforeWriter(t *testing.T) {
 			seatID, err := workflow.UpsertTaskParticipant(ctx, "step-home", "atomic-task", "approver", "approved-agent")
 			require.NoError(t, err)
 			require.NoError(t, workflow.RecordStepDecision(ctx, &wfmodels.WorkflowStepDecision{TaskID: "atomic-task", StepID: "step-home", ParticipantID: seatID, Decision: "approved", DeciderType: "agent", DeciderID: "approved-agent", Role: "approver"}))
-			reader := officeHumanCompletionPendingReader(office, workflow)
 			read := make(chan int, 1)
 			resume := make(chan struct{})
 			released := false
@@ -57,22 +57,18 @@ func TestOfficeHumanCompletionPostgresAdmissionBeforeWriter(t *testing.T) {
 					close(resume)
 				}
 			}()
-			h.repo.SetOfficeHumanCompletionPendingReader(func(ctx context.Context, tx *sql.Tx, taskID, stepID string) ([]string, error) {
-				pending, err := reader(ctx, tx, taskID, stepID)
-				if err != nil {
-					return nil, err
-				}
+			registerOfficeCompletionPolicyWithHook(h.repo, office, workflow, func(ctx context.Context, q completion.Querier, _, _ *models.Task, _ completion.Admission) error {
 				var pid int
-				if err := tx.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
-					return nil, err
+				if err := q.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+					return err
 				}
 				read <- pid
 				select {
 				case <-resume:
 				case <-ctx.Done():
-					return nil, ctx.Err()
+					return ctx.Err()
 				}
-				return pending, nil
+				return nil
 			})
 			completed := make(chan error, 1)
 			go func() {
