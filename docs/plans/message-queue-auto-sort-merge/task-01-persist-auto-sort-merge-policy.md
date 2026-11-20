@@ -1,8 +1,7 @@
 ---
 id: "01-persist-auto-sort-merge-policy"
 title: "Persist Auto-sort-merge policy"
-status: superseded
-superseded_by: task-06-fold-into-auto-merge.md
+status: cancelled
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -21,6 +20,9 @@ system_design:
 # Task 01: Persist Auto-sort-merge policy
 
 ## Summary
+
+Cancelled: superseded by [Task 06](task-06-fold-into-auto-merge.md), which folds
+the sorted behaviour into Auto-merge and removes the separate setting.
 
 Add the global setting (default OFF) and the per-session override with
 revisions. Resolve the preference the same way as Auto-merge, project it on

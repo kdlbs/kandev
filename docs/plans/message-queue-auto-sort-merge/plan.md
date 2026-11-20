@@ -241,10 +241,10 @@ dependency rendering, and wrap-not-scroll. Spacing is illustrative. Maps to
 
 ## Work orders
 
-- [x] [Task 01: Persist Auto-sort-merge policy](task-01-persist-auto-sort-merge-policy.md)
+- [x] [Task 01: Persist Auto-sort-merge policy](task-01-persist-auto-sort-merge-policy.md) (cancelled: superseded by Task 06)
 - [x] [Task 02: Sorted admission folds](task-02-sorted-admission-folds.md)
 - [x] [Task 03: Session compaction pass](task-03-session-compaction-pass.md)
-- [x] [Task 04: Auto-sort-merge controls](task-04-auto-sort-merge-controls.md)
+- [x] [Task 04: Auto-sort-merge controls](task-04-auto-sort-merge-controls.md) (cancelled: superseded by Task 06)
 - [x] [Task 05: E2E, docs, and spec reconciliation](task-05-e2e-docs-spec-reconciliation.md)
 
 Order: 01 → 02 → 03 → 04 → 05. Task 04 depends only on Task 01's contract and

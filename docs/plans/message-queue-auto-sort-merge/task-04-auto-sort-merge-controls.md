@@ -1,8 +1,7 @@
 ---
 id: "04-auto-sort-merge-controls"
 title: "Auto-sort-merge controls"
-status: superseded
-superseded_by: task-06-fold-into-auto-merge.md
+status: cancelled
 wave: 2
 depends_on:
   - "01-persist-auto-sort-merge-policy"
@@ -25,6 +24,9 @@ system_design:
 # Task 04: Auto-sort-merge controls
 
 ## Summary
+
+Cancelled: superseded by [Task 06](task-06-fold-into-auto-merge.md), which folds
+the sorted behaviour into Auto-merge and removes the separate setting.
 
 Add the dependent global settings switch and the third queue-header pill,
 backed by the Task 01 contract. The frontend orders the policy tuple on its
