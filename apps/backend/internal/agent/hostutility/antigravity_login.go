@@ -291,45 +291,13 @@ func (m *Manager) configureAntigravityLoginInstance(
 	if _, err := inst.client.Start(ctx); err != nil {
 		return fmt.Errorf("start antigravity login instance: %w", err)
 	}
-	streamErr := make(chan error, 1)
-	go func() {
-		streamErr <- inst.client.StreamUpdates(ctx, func(agentctlAgentEvent) {}, nil, nil)
-	}()
-	if err := waitForAntigravityStream(ctx, inst.client, streamErr); err != nil {
-		return err
+	if err := inst.client.StreamUpdates(ctx, func(agentctlAgentEvent) {}, nil, nil); err != nil {
+		return fmt.Errorf("open antigravity login stream: %w", err)
 	}
 	if _, err := inst.client.Initialize(ctx, "kandev", "1.0.0"); err != nil {
 		return fmt.Errorf("initialize antigravity login instance: %w", err)
 	}
 	return nil
-}
-
-func waitForAntigravityStream(
-	ctx context.Context,
-	client *agentctlClient,
-	streamErr <-chan error,
-) error {
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	timeout := time.NewTimer(5 * time.Second)
-	defer timeout.Stop()
-	for {
-		if client.HasAgentStream() {
-			return nil
-		}
-		select {
-		case err := <-streamErr:
-			if err != nil {
-				return fmt.Errorf("open antigravity login stream: %w", err)
-			}
-			return errors.New("antigravity login stream closed before it connected")
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timeout.C:
-			return errors.New("antigravity login stream did not connect")
-		case <-ticker.C:
-		}
-	}
 }
 
 func (m *Manager) authenticateAntigravityLogin(

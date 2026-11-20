@@ -43,22 +43,38 @@ export type ImproveKandevBootstrapResponse = {
   fork_reason_code?: ImproveKandevForkReasonCode;
 };
 
+export type ImproveKandevBootstrapJob = { job_id: string };
+export type ImproveKandevBootstrapResult =
+  | ImproveKandevBootstrapJob
+  | ImproveKandevBootstrapResponse;
+
 export async function bootstrapImproveKandev(
   workspaceId: string,
-  options?: ApiRequestOptions & { createWorkspace?: boolean },
-): Promise<ImproveKandevBootstrapResponse> {
-  const { createWorkspace, ...requestOptions } = options ?? {};
-  return fetchJson<ImproveKandevBootstrapResponse>("/api/v1/system/improve-kandev/bootstrap", {
+  options?: ApiRequestOptions & { createWorkspace?: boolean; async?: boolean },
+): Promise<ImproveKandevBootstrapResult> {
+  const { createWorkspace, async: asynchronous, ...requestOptions } = options ?? {};
+  return fetchJson<ImproveKandevBootstrapResult>("/api/v1/system/improve-kandev/bootstrap", {
     ...requestOptions,
     init: {
       method: "POST",
       body: JSON.stringify({
         workspace_id: workspaceId,
         ...(createWorkspace === undefined ? {} : { create_workspace: createWorkspace }),
+        ...(asynchronous === undefined ? {} : { async: asynchronous }),
       }),
       ...(requestOptions.init ?? {}),
     },
   });
+}
+
+export async function getImproveKandevBootstrapJob(
+  jobId: string,
+  options?: ApiRequestOptions,
+): Promise<ImproveKandevBootstrapResult> {
+  return fetchJson<ImproveKandevBootstrapResult>(
+    `/api/v1/system/improve-kandev/bootstrap/${encodeURIComponent(jobId)}`,
+    { ...options, cache: "no-store", init: { method: "GET", ...(options?.init ?? {}) } },
+  );
 }
 
 export async function leaseDiagnosticBundle(

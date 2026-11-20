@@ -31,6 +31,7 @@ func (m *Manager) stopPersistedKubernetesExecution(
 	executionID string,
 	reason string,
 	force bool,
+	stopWatch *stopWaitWatch,
 ) (bool, error) {
 	// Recoverable teardown only releases a tracked execution. Its retained
 	// inventory must not turn a duplicate stop into destructive remote cleanup.
@@ -51,7 +52,7 @@ func (m *Manager) stopPersistedKubernetesExecution(
 	if row == nil || row.Runtime != agentruntime.RuntimeKubernetes {
 		return false, nil
 	}
-	return m.stopPersistedKubernetesRecord(ctx, row, reason, force)
+	return m.stopPersistedKubernetesRecord(ctx, row, reason, force, stopWatch)
 }
 
 func (m *Manager) stopPersistedKubernetesRecord(
@@ -59,11 +60,13 @@ func (m *Manager) stopPersistedKubernetesRecord(
 	row *models.ExecutorRunning,
 	reason string,
 	force bool,
+	stopWatch *stopWaitWatch,
 ) (bool, error) {
 	store, ok := m.runningWriter.(persistedKubernetesCleanupStore)
 	if !ok {
 		return true, errors.New("persisted Kubernetes executor inventory is unavailable")
 	}
+	stopWatch.advance(stopWaitActivity)
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
 	if err != nil {
 		return true, err
@@ -81,9 +84,11 @@ func (m *Manager) stopPersistedKubernetesRecord(
 		Metadata:    metadata,
 		StopReason:  reason,
 	}
+	stopWatch.advance(stopWaitRuntime)
 	if err := m.stopPersistedKubernetesBackend(ctx, instance, force); err != nil {
 		return true, fmt.Errorf("stop persisted Kubernetes runtime: %w", err)
 	}
+	stopWatch.advance(stopWaitRuntimeCleanup)
 	if err := m.deleteKubernetesRuntimeSecrets(ctx, metadata); err != nil {
 		return true, fmt.Errorf("delete persisted Kubernetes runtime secrets: %w", err)
 	}

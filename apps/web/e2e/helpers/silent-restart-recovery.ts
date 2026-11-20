@@ -157,7 +157,24 @@ export async function expectRestartConversationIdentity({
       .filter((message) => message.author_type === "user")
       .map(({ id, content, turn_id }) => ({ id, content, turn_id })),
   ).toEqual(snapshot.userMessages);
-  expect(turns.turns.map((turn) => turn.id)).toEqual(snapshot.turnIds);
+  const recoveryNoticeTurnIds = new Set(
+    messages.messages
+      .filter((message) => message.metadata?.kind === "session_restored_after_interruption")
+      .map((message) => message.turn_id)
+      .filter((turnId): turnId is string => Boolean(turnId)),
+  );
+  const baselineTurnIds = new Set(snapshot.turnIds);
+  const preservedTurnIds = turns.turns
+    .filter((turn) => !recoveryNoticeTurnIds.has(turn.id) || baselineTurnIds.has(turn.id))
+    .map((turn) => turn.id);
+  expect(preservedTurnIds).toEqual(snapshot.turnIds);
+  for (const turnId of recoveryNoticeTurnIds) {
+    const turn = turns.turns.find((item) => item.id === turnId);
+    expect(turn).toMatchObject({
+      completed_at: expect.any(String),
+      metadata: { lifecycle_only: true },
+    });
+  }
   expect(queue.count).toBe(snapshot.queuedMessageCount);
 
   expect(

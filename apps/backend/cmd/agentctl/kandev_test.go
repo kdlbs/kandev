@@ -311,8 +311,6 @@ func TestTaskCreate_RejectsUnsupportedFieldsBeforeRequest(t *testing.T) {
 		args []string
 	}{
 		{name: "priority", args: []string{"--priority", "high"}},
-		{name: "blockers", args: []string{"--blocked-by", "task-1,task-2"}},
-		{name: "workspace mode", args: []string{"--workspace-mode", "new_workspace"}},
 		{name: "workspace group", args: []string{"--workspace-group-id", "group-1"}},
 		{name: "child workspace", args: []string{"--default-child-workspace", "inherit_parent"}},
 		{name: "child ordering", args: []string{"--default-child-ordering", "sequential"}},
@@ -360,48 +358,6 @@ func TestTaskCreate_NoExecutionPolicyOrBlockedBy_OmitsFields(t *testing.T) {
 		if _, exists := body[k]; exists {
 			t.Errorf("%s should not be present when flag is not set", k)
 		}
-	}
-}
-
-// TestTaskCreate_SharedGroupReportsUnsupported ensures legacy workspace policy
-// flags produce one actionable error instead of contradictory validation.
-func TestTaskCreate_SharedGroupReportsUnsupported(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-	}{
-		{
-			name: "missing",
-			args: []string{"task", "create", "--title", "Bad task", "--workspace-mode", "shared_group"},
-		},
-		{
-			name: "whitespace only",
-			args: []string{"task", "create", "--title", "Bad task", "--workspace-mode", "shared_group", "--workspace-group-id", "   "},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r, w, err := os.Pipe()
-			if err != nil {
-				t.Fatalf("pipe: %v", err)
-			}
-			oldStderr := os.Stderr
-			os.Stderr = w
-			code := runKandevCLI(tc.args)
-			_ = w.Close()
-			os.Stderr = oldStderr
-			output, readErr := io.ReadAll(r)
-			_ = r.Close()
-			if readErr != nil {
-				t.Fatalf("read stderr: %v", readErr)
-			}
-			if code == 0 {
-				t.Fatal("expected unsupported workspace mode to fail")
-			}
-			if !strings.Contains(string(output), "--workspace-mode is not supported by Office runtime task create") {
-				t.Fatalf("stderr = %q, want unsupported workspace mode", output)
-			}
-		})
 	}
 }
 

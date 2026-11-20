@@ -150,7 +150,10 @@ catalogs and refresh pseudo through repository scripts.
 ## Failure and recovery
 
 Stop rejection ends the sequence. Resume rejection ends the sequence and
-leaves ordinary Resume or existing recovery controls available as projected.
+exposes the existing recovery controls. Route typed continuation hints through
+the [Agents guidance owner](../../agents/system-design/session-recovery-guidance.md),
+including when the menu unmounts before the response. Preserve the captured target
+and navigation guards. A toast alone must not discard the suggested action.
 Stopping an in-flight durable prompt can require explicit recovery because its
 outcome is uncertain. Restart must preserve that safety boundary and must not
 replay the prompt to make Resume succeed.

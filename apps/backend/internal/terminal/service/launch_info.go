@@ -7,6 +7,7 @@ import "context"
 type ShellLaunchInfo struct {
 	Label              string
 	InitialCommand     string
+	WorkingDir         string
 	InitialCommandOnce bool
 }
 
@@ -48,7 +49,7 @@ func (s *Service) ShellLaunchInfo(ctx context.Context, taskID, environmentID, id
 	}
 	return ShellLaunchInfo{
 		Label: term.DisplayName(), InitialCommand: term.InitialCommand,
-		InitialCommandOnce: term.InitialCommandOnce,
+		WorkingDir: term.WorkingDir, InitialCommandOnce: term.InitialCommandOnce,
 	}, nil
 }
 
@@ -75,6 +76,6 @@ func (s *Service) ClaimShellLaunchInfo(ctx context.Context, taskID, environmentI
 	}
 	return ShellLaunchInfo{
 		Label: term.DisplayName(), InitialCommand: initialCommand,
-		InitialCommandOnce: term.InitialCommandOnce,
+		WorkingDir: term.WorkingDir, InitialCommandOnce: term.InitialCommandOnce,
 	}, nil
 }

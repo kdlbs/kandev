@@ -47,6 +47,9 @@ type MCPSelectionPickerProps = {
   renderServerAnnotation?: (id: string) => ReactNode;
 };
 
+/**
+ * Render inherited selections with owner labels and the session-specific origin sections.
+ */
 function InheritedServers({
   inherited,
   context,
@@ -60,6 +63,7 @@ function InheritedServers({
 }) {
   const { t } = useTranslation();
   const labels: Record<MCPSelectionOrigin["scope"], string> = {
+    automation: t("automations:automation"),
     profile: t("settings:mcpOriginProfile"),
     repository: t("settings:mcpOriginRepository"),
     task: t("settings:mcpOriginTask"),
@@ -189,6 +193,9 @@ function AdditionalServersHeading({
   );
 }
 
+/**
+ * Supply workspace owner data for selection provenance labels.
+ */
 function useMCPOriginContext(workspaceId?: string | null) {
   return useAppStore(
     useShallow((state) => ({
@@ -198,6 +205,9 @@ function useMCPOriginContext(workspaceId?: string | null) {
       tasks: state.kanban.tasks,
       workflows: state.workflows.items,
       sessions: state.taskSessions.items,
+      automations:
+        state.automations.byWorkspace?.[workspaceId ?? state.workspaces.activeId ?? ""]?.items ??
+        state.automations.items,
     })),
   );
 }

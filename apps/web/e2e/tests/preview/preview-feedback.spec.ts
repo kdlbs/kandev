@@ -5,11 +5,15 @@ import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-whil
 import { routeMainWebSocketWithPreviewFeedbackCreateFailure } from "../../helpers/ws-drop";
 import {
   chooseCapture,
+  chooseInteract,
   dragScreenshotRegion,
+  fillDraftComment,
   openBrowserPreview,
+  startWithCommentPanelHidden,
   saveDraft,
   selectGeneratedText,
   startPreviewServer,
+  submitDraft,
   waitForScreenshotCaptureMode,
 } from "./preview-feedback-helpers";
 
@@ -26,6 +30,7 @@ test.describe("Web preview feedback", () => {
     const busyTurn = mockTurnGate(backend.tmpDir, "Preview blocking turn completed");
     const createFailure = await routeMainWebSocketWithPreviewFeedbackCreateFailure(testPage);
     try {
+      await startWithCommentPanelHidden(testPage);
       const { session, frame } = await openBrowserPreview(
         testPage,
         apiClient,
@@ -39,18 +44,18 @@ test.describe("Web preview feedback", () => {
       expect(triggerBox?.height).toBeLessThanOrEqual(30);
       expect(triggerBox?.width).toBeLessThanOrEqual(48);
       await trigger.click();
-      const choices = [
-        { name: "Select text", label: "Text" },
-        { name: "Select element", label: "Element" },
-        { name: "Select screenshot region", label: "Screenshot" },
-      ];
-      const choiceBoxes = [];
-      for (const choice of choices) {
-        const button = testPage.getByRole("button", { name: choice.name, exact: true });
-        await expect(button).toHaveText(choice.label);
-        choiceBoxes.push(await button.boundingBox());
+      const toolbar = testPage.getByTestId("preview-annotation-toolbar");
+      await expect(toolbar).toBeVisible();
+      const tools = ["interact", "text", "element", "region"];
+      const toolBoxes = [];
+      for (const tool of tools) {
+        toolBoxes.push(await toolbar.getByTestId(`preview-tool-${tool}`).boundingBox());
       }
-      expect(new Set(choiceBoxes.map((box) => Math.round(box?.y ?? -1))).size).toBe(1);
+      expect(new Set(toolBoxes.map((box) => Math.round(box?.y ?? -1))).size).toBe(1);
+      await expect(toolbar.getByTestId("preview-tool-region")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
 
       await chooseCapture(testPage, "Select element", frame);
       await frame.locator("#save").hover();
@@ -60,6 +65,7 @@ test.describe("Web preview feedback", () => {
       await frame.locator("#save").click();
       await saveDraft(testPage, "Make the primary action more prominent");
 
+      await chooseInteract(testPage);
       await frame.locator("#details-route").click();
       await expect(frame.locator("h1")).toHaveText("Order details");
       await chooseCapture(testPage, "Select text", frame);
@@ -81,26 +87,23 @@ test.describe("Web preview feedback", () => {
       createFailure.failNextCreate();
       await chooseCapture(testPage, "Select screenshot region");
       await waitForScreenshotCaptureMode(frame);
-      await dragScreenshotRegion(testPage, frame, frame.locator("#save"));
+      // The first region's outline covers #save and takes the pointer to move it.
+      await dragScreenshotRegion(testPage, frame, frame.locator("h1"));
       const failedDraft = testPage.getByTestId("preview-feedback-draft");
       await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
         timeout: 15_000,
       });
-      await failedDraft
-        .getByRole("textbox", { name: "Comment on selection" })
-        .fill(failedScreenshotComment);
-      await failedDraft.getByRole("button", { name: "Save feedback" }).click();
+      await fillDraftComment(testPage, failedScreenshotComment);
+      await submitDraft(testPage);
       await expect.poll(() => createFailure.failedCount()).toBe(1);
       await expect(failedDraft).toBeVisible();
       await expect(failedDraft.getByRole("textbox", { name: "Comment on selection" })).toHaveValue(
         failedScreenshotComment,
       );
       await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
-      await expect(
-        testPage.getByTestId("preview-feedback-popover").getByRole("alert"),
-      ).toContainText("feedback could not be saved");
+      await expect(failedDraft.getByRole("alert")).toContainText("feedback could not be saved");
 
-      await failedDraft.getByRole("button", { name: "Save feedback" }).click();
+      await submitDraft(testPage);
       await expect(failedDraft).toBeHidden({ timeout: 15_000 });
       await expect(testPage.getByTestId("preview-feedback-trigger")).toContainText("4");
 
@@ -135,10 +138,9 @@ test.describe("Web preview feedback", () => {
 
       const firstItem = collectionItems.nth(0);
       await firstItem.getByRole("button", { name: "Edit feedback" }).click();
-      await firstItem
-        .getByRole("textbox", { name: "Edit comment" })
-        .fill("Make the action clearer");
-      await firstItem.getByRole("button", { name: "Save changes" }).click();
+      await testPage.getByTestId("preview-feedback-edit-input").fill("Make the action clearer");
+      await testPage.getByTestId("preview-feedback-edit-save").click();
+      await expect(testPage.getByTestId("preview-feedback-edit")).toBeHidden();
       await expect(firstItem).toContainText("Make the action clearer");
 
       await collectionItems.nth(1).getByRole("button", { name: "Delete feedback" }).click();

@@ -41,3 +41,4 @@ and automatic live physical compaction are excluded. Page-copy artifacts may inc
 
 - [Snapshot copy design](../system-design/sqlite-snapshot-copy.md)
 - [Implementation plan](../../../plans/database-maintenance-throughput/plan.md)
+- [Stored version compatibility repair](../../../plans/upgrade-backup-version-paths/plan.md)

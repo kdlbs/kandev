@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -156,6 +157,125 @@ func TestPRMonitorContinuation_ResumesAtAdmissionBoundary(t *testing.T) {
 		require.Equal(t, 1, numberedCalls, "resuming the deferred phase must not repeat the completed phase")
 		require.Empty(t, pendingWorkspaceIDs(poller), "completed work releases its pending entry")
 	})
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-POLLING-002.6
+func TestPRMonitorContinuation_ForkParentDeferralResumes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		poller, service, store, executor := newPRStatusProgressTest(t)
+		seedTask(t, store, "task-idle-fork-parent", false)
+		branch := "feature/idle-fork-parent"
+		lastCheckedAt := time.Now().UTC().Add(-31 * time.Minute)
+		watch := withTestWorkspace(&PRWatch{
+			SessionID: "session-idle-fork-parent", TaskID: "task-idle-fork-parent",
+			Owner: "fork", Repo: "repo", Branch: branch, LastCheckedAt: &lastCheckedAt,
+		})
+		require.NoError(t, store.CreatePRWatch(context.Background(), watch))
+		require.NoError(t, store.UpdatePRWatchTimestamps(context.Background(), watch.ID, lastCheckedAt, nil, "", ""))
+		poller.SetTaskActivityProvider(&scheduleActivityProvider{activities: map[string]PRWatchTaskActivity{
+			watch.TaskID: {LastActivityAt: time.Now().UTC().Add(-48 * time.Hour)},
+		}})
+
+		progressClient := service.client.(*progressGraphQLClient)
+		progressClient.SetRepositoryDetails(GitHubRepository{
+			FullName: "fork/repo", Owner: "fork", Name: "repo", Fork: true,
+			ParentFullName: "upstream/repo",
+		})
+		progressClient.AddPR(&PR{
+			Number: 99, RepoOwner: "upstream", RepoName: "repo",
+			HeadBranch: branch, HeadRepoOwner: "fork", HeadRepoName: "repo",
+			State: "open", Title: "fork parent PR", URL: "https://x/99",
+		})
+		client := &forkParentProbeClient{
+			Client: progressClient, graphQL: progressClient, deferredBranch: branch,
+			deferralsRemaining: 1,
+			deferredErr: fmt.Errorf("fork parent admission: %w", &AdmissionDeferredError{
+				Delay: time.Second, RetryAt: time.Now().UTC().Add(time.Second),
+				Reason: rateLimitBlockBackgroundPacing,
+			}),
+		}
+		configureTestWorkspaceAuth(t, service, client, testWorkspaceID)
+
+		startPRMonitorLoop(t, poller)
+		synctest.Wait()
+		if got := client.forkParentProbeCalls(); got != 1 {
+			t.Fatalf("initial fork-parent probes = %d, want one deferred probe", got)
+		}
+		_, branchCalls := executor.counts()
+		require.Equal(t, 1, branchCalls, "the initial searching batch ran once")
+		require.Equal(t, 1, pendingConsumerCount(poller), "the idle watch remains pending")
+		stored, err := store.GetPRWatchBySession(context.Background(), watch.SessionID)
+		require.NoError(t, err)
+		require.NotNil(t, stored.LastCheckedAt)
+		require.True(t, stored.LastCheckedAt.Equal(lastCheckedAt), "deferral preserves the prior idle timestamp")
+
+		// Continuation must wake at the one-second admission boundary, before an idle watch's next poll.
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		_, branchCalls = executor.counts()
+		require.Equal(t, 2, branchCalls, "continuation resumes before the idle polling interval")
+		require.Equal(t, 2, client.forkParentProbeCalls(), "the parent lookup succeeds on continuation")
+		require.Empty(t, pendingWorkspaceIDs(poller), "successful discovery clears pending work")
+		updated, err := store.GetPRWatchBySession(context.Background(), watch.SessionID)
+		require.NoError(t, err)
+		require.Equal(t, 99, updated.PRNumber, "continuation promotes the parent PR")
+	})
+}
+
+func TestPRMonitorContinuation_KeepsForkParentBoundariesPerTarget(t *testing.T) {
+	poller, service, baseClient, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	watches := []*PRWatch{
+		withTestWorkspace(&PRWatch{
+			SessionID: "session-fork-core", TaskID: "task-fork-core",
+			Owner: "fork-core", Repo: "repo", Branch: "feature/core",
+		}),
+		withTestWorkspace(&PRWatch{
+			SessionID: "session-fork-graphql", TaskID: "task-fork-graphql",
+			Owner: "fork-graphql", Repo: "repo", Branch: "feature/graphql",
+		}),
+	}
+	for _, watch := range watches {
+		seedTask(t, store, watch.TaskID, false)
+		require.NoError(t, store.CreatePRWatch(ctx, watch))
+	}
+	baseClient.SetRepositoryDetails(GitHubRepository{
+		FullName: "fork-core/repo", Owner: "fork-core", Name: "repo", Fork: true,
+		ParentFullName: "upstream-core/repo",
+	})
+	baseClient.SetRepositoryDetails(GitHubRepository{
+		FullName: "fork-graphql/repo", Owner: "fork-graphql", Name: "repo", Fork: true,
+		ParentFullName: "upstream-graphql/repo",
+	})
+	baseClient.branchResponses = []string{branchAliasResponse(t, len(watches), nil)}
+	coreRetryAt := now.Add(5 * time.Minute)
+	graphqlRetryAt := now.Add(20 * time.Minute)
+	client := &forkParentProbeClient{
+		Client: baseClient, graphQL: baseClient,
+		deferredBranches: map[string]*forkParentProbeDeferral{
+			"feature/core": {remaining: 1, err: &AdmissionDeferredError{
+				Resource: ResourceCore, RetryAt: coreRetryAt, Reason: rateLimitBlockBackgroundPacing,
+			}},
+			"feature/graphql": {remaining: 1, err: &AdmissionDeferredError{
+				Resource: ResourceGraphQL, RetryAt: graphqlRetryAt, Reason: rateLimitBlockBackgroundPacing,
+			}},
+		},
+	}
+	configureTestWorkspaceAuth(t, service, client, testWorkspaceID)
+
+	outcomes := poller.tryBatchedPRWatchCheck(pollerContext(ctx), watches)
+	require.Len(t, outcomes, 1)
+	poller.recordPRMonitorPending(ctx, outcomes, now)
+
+	poller.pendingMu.Lock()
+	defer poller.pendingMu.Unlock()
+	work := poller.pending[testWorkspaceID]
+	require.NotNil(t, work)
+	require.Equal(t, coreRetryAt, work.targets[prWatchDiscoveryTargetKey(watches[0])].retryAt)
+	require.Equal(t, graphqlRetryAt, work.targets[prWatchDiscoveryTargetKey(watches[1])].retryAt,
+		"each deferred fork lookup must retain its own admission boundary")
 }
 
 // @covers AC-INTEGRATIONS-GITHUB-PR-POLLING-002.5

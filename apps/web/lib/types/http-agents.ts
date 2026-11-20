@@ -385,6 +385,8 @@ export type QuestionImage = {
   path: string;
   repo?: string;
   alt: string;
+  /** Optional one-word name the agent chose for pickers, such as "before". */
+  label?: string;
 };
 
 export type ClarificationQuestion = {
@@ -426,11 +428,24 @@ export type ClarificationRequestMetadata = {
   agent_disconnected?: boolean;
 };
 
+/** A rectangle the operator marked on a question image, in that image's pixels. */
+export type ClarificationAnswerAnnotation = {
+  image_id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  image_width: number;
+  image_height: number;
+  comment: string;
+};
+
 export type ClarificationAnswer = {
   question_id: string;
   selected_options?: string[];
   custom_text?: string;
   attachments?: ClarificationAnswerAttachment[];
+  annotations?: ClarificationAnswerAnnotation[];
 };
 
 export type ClarificationResponse = {
@@ -493,6 +508,18 @@ export type PreviewCaptureRect = {
   viewport_width?: number;
   viewport_height?: number;
   device_pixel_ratio?: number;
+  /** Nearest scrollable ancestor when a region was drawn; absent for the document. */
+  scroll_container_selector?: string;
+  container_scroll_x?: number;
+  container_scroll_y?: number;
+  /** Smallest element containing a region, which its outline follows when the layout changes. */
+  anchor_selector?: string;
+  /** Region top-left minus the anchor's top-left, in CSS pixels. */
+  anchor_offset_x?: number;
+  anchor_offset_y?: number;
+  /** The anchor's size at capture; a different size means its content may have reflowed. */
+  anchor_width?: number;
+  anchor_height?: number;
 };
 
 export type PreviewElementSnapshot = {

@@ -60,6 +60,12 @@ func runMain() int {
 		return code
 	}
 
+	// The directory-loss reconciliation helper is a one-shot utility: it reads
+	// its request from stdin and exits without ever starting the HTTP server.
+	if len(os.Args) > 1 && os.Args[1] == "ssh-reconcile" {
+		return runSSHReconcile(context.Background(), os.Stdin, os.Stdout)
+	}
+
 	// Dispatch kandev CLI subcommands before flag parsing or server startup.
 	// When invoked as "agentctl kandev <cmd>", this runs the CLI and exits
 	// without starting the HTTP server.
@@ -228,12 +234,13 @@ func run(cfg *config.Config, log *logger.Logger) {
 		// Create MCP server using the channel-based backend client
 		var mcpSrv *mcpserver.Server
 		mcpNamePresentationOption := mcpserver.WithMCPToolNamespacingByServer(instCfg.NamespacesMCPToolsByServer)
-		mcpSSEBaseURLOption := mcpserver.WithSSEBaseURL(config.MCPServerURL(instCfg.MCPHost, instCfg.Port, ""))
+		mcpNativeRouteOption := mcpserver.WithNativeRoutePrefix(instCfg.NativeMCPRoutePrefix)
+		mcpSSEBaseURLOption := mcpserver.WithSSEBaseURL(config.MCPServerBaseURL(instCfg.MCPHost, instCfg.Port))
 		if instCfg.McpProfile != nil {
-			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, *instCfg.McpProfile, mcpNamePresentationOption, mcpSSEBaseURLOption)
+			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, *instCfg.McpProfile, mcpNamePresentationOption, mcpSSEBaseURLOption, mcpNativeRouteOption)
 		} else {
 			legacyProfile := mcpprofile.Legacy(instCfg.McpMode, instCfg.DisableAskQuestion, instCfg.McpProviders)
-			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, legacyProfile, mcpNamePresentationOption, mcpSSEBaseURLOption)
+			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, legacyProfile, mcpNamePresentationOption, mcpSSEBaseURLOption, mcpNativeRouteOption)
 		}
 		mcpSrv.SetAttachmentReporter(procMgr.PublishMCPAttachment)
 		instLog.Info("MCP server enabled (channel-based)",

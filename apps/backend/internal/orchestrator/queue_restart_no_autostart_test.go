@@ -66,7 +66,7 @@ func TestQueueRestartResumeReadinessDeliversEachEntryOnce(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	completed := make(chan struct{}, 2)
 	svc.onQueuedMessageExecutionComplete = func() { completed <- struct{}{} }
 

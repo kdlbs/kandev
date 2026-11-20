@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-21
-updated: 2026-10-18
+updated: 2026-11-15
 owners:
   - cfl
 ---
@@ -151,6 +151,33 @@ are intentionally lost; committed branch recovery retains its existing policy.
   borrowed workspace, or a path without proven ownership. Task deletion shall
   retain its separate dirty-worktree consent behavior.
 
+### REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-005: Archive with unavailable workspace evidence
+
+**Intent:** Physical inspection failures shall retain uncertain resources
+without preventing task archival. This supplements requirement 004's ownership
+and failure protections. It does not restore dirty-worktree preservation.
+
+#### Acceptance criteria
+
+- **AC-TASKS-DIRTY-WORKTREE-ARCHIVE-005.1:** A physical workspace inspection failure
+  shall not prevent an authorized task archive or its selected descendants
+  from leaving active views. This applies to direct, bulk, cascade, scheduled,
+  and programmatic archive. Cleanup obligations shall remain durable.
+- **AC-TASKS-DIRTY-WORKTREE-ARCHIVE-005.2:** When archive cannot establish a
+  worktree's original cleanup identity, it shall preserve that worktree,
+  branch, inventory record, and enclosing managed directory across restart.
+  A later observation alone shall not replace the missing original evidence.
+- **AC-TASKS-DIRTY-WORKTREE-ARCHIVE-005.3:** A failed physical inspection of one
+  worktree shall not block cleanup of independently verified worktrees.
+  At least one unresolved resource shall prevent removal of its enclosing
+  directory or shared file-bearing environment. Cleanup shall retain a
+  diagnostic and shall not report the unresolved resource as removed.
+- **AC-TASKS-DIRTY-WORKTREE-ARCHIVE-005.4:** Archive shall still reject authorization,
+  authoritative inventory, snapshot persistence, and request cancellation
+  failures. An inspection's internal timeout shall remain distinguishable from
+  expiry of the archive request. Unarchive and ownership changes shall fence
+  all delayed cleanup, including cleanup with incomplete physical evidence.
+
 ## Exclusions
 
 Task-delete discard consent, session deletion, ordinary local repository
@@ -167,3 +194,5 @@ unrelated orphan-directory removal are outside this change.
 - [Reclaim retained archived worktrees](../../../plans/archived-worktree-reclamation/plan.md)
 - [Remove archived task directories](../../../plans/archive-task-directory-cleanup/plan.md)
 - [Immediate archive removal](../../../plans/immediate-archive-worktree-removal/plan.md)
+
+- [Archive inspection recovery](../../../plans/archive-inspection-recovery/plan.md)

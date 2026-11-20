@@ -193,7 +193,7 @@ func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
 		repoForExecutionLookup: repo,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messageCreator := &mockMessageCreator{}
 	svc.messageCreator = messageCreator
 	svc.activeTurns.Store("session-1", "turn-1")
@@ -258,7 +258,7 @@ func TestExecuteSendNowClaimRejectsRecreatedSessionBeforePrompt(t *testing.T) {
 	}
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
 	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, session.TaskID, session.ID)
 	if err != nil {
@@ -332,7 +332,7 @@ func TestPromptSendNowClaimSkipsOnTurnStartWhenAlreadyProcessed(t *testing.T) {
 	}
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	claim := &messagequeue.SendNowClaim{
 		Dispatch: messagequeue.QueuedMessage{
@@ -584,7 +584,7 @@ func TestPromptSendNowClaimRejectsPlanCommentWhenTranscriptPersistenceFails(t *t
 	svc := createTestServiceWithAgent(
 		repo, newMockStepGetter(), newMockTaskRepo(), agentMgr,
 	)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{userMessageErr: errors.New("transcript unavailable")}
 	claim := &messagequeue.SendNowClaim{
 		Sources: []messagequeue.QueuedMessage{
@@ -734,7 +734,7 @@ func TestSendQueuedNowSupersedesPendingFIFOHandoff(t *testing.T) {
 		repoForExecutionLookup: repo,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 
 	reservationMetadata := map[string]interface{}{
@@ -928,7 +928,7 @@ func TestSendQueuedNowCancelsLiveFIFOTurn(t *testing.T) {
 			}
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 			svc.messageQueue.SetAutoMergeEnabled(false)
-			svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+			svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 			svc.messageCreator = &mockMessageCreator{}
 			t.Cleanup(func() {
 				releaseFirstPrompt.Do(func() { close(allowFirstPrompt) })
@@ -1038,7 +1038,7 @@ func TestSendQueuedNowCancelsActiveTurnWhenSessionProjectionIsPromptable(t *test
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.turnService = turns
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	svc.messageQueue.SetAutoMergeEnabled(false)
 	t.Cleanup(func() { svc.stopSendNowWorkers() })
@@ -1096,7 +1096,7 @@ func TestSendQueuedNowConflictsAfterFIFOHandoffAccepted(t *testing.T) {
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.messageQueue.SetAutoMergeEnabled(false)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	t.Cleanup(func() {
 		releasePreClaimOnce.Do(func() { close(releasePreClaim) })
@@ -1268,7 +1268,7 @@ func TestSendQueuedNowCancelsLiveReplacementTurn(t *testing.T) {
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.messageQueue.SetAutoMergeEnabled(false)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	stopSendNowWorkers = svc.stopSendNowWorkers
 
@@ -1340,7 +1340,7 @@ func TestSendQueuedNowConflictsBeforeReplacementClaimsPrompt(t *testing.T) {
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.messageQueue.SetAutoMergeEnabled(false)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	t.Cleanup(func() {
 		releasePreClaimOnce.Do(func() { close(releasePreClaim) })

@@ -90,6 +90,16 @@ func TestSplitShellCommand(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "unclosed double quote ending with a multibyte rune",
+			input:   `code "é`,
+			wantErr: true,
+		},
+		{
+			name:    "unclosed double quote after an escaped final quote",
+			input:   `code "escaped\"`,
+			wantErr: true,
+		},
+		{
 			name:  "escaped backslash",
 			input: `code "path\\file.txt"`,
 			want:  []string{"code", `path\file.txt`},

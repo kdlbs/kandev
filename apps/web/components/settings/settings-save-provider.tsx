@@ -31,6 +31,9 @@ export class SettingsSaveCancelledError extends Error {
   }
 }
 
+/** Keeps a draft pending without cancelling saves for independent contributors. */
+export class SettingsSaveDeferredError extends SettingsSaveCancelledError {}
+
 export type SettingsSaveContributor = {
   id: string;
   order?: number;
@@ -479,6 +482,7 @@ function useSaveCoordinator(
       } catch (error) {
         if (error instanceof SettingsSaveCancelledError) {
           hasNewerChanges = true;
+          if (error instanceof SettingsSaveDeferredError) continue;
           break;
         }
         failedIds.add(contributor.id);

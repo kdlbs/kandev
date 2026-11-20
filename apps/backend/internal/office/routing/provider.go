@@ -69,6 +69,12 @@ type ProviderRepo interface {
 	// workspace flips routing from enabled to disabled so the parked
 	// runs unstick on the next scheduler tick.
 	ClearAllParkedRoutingForWorkspace(ctx context.Context, workspaceID string) error
+	// ReleaseAuthorExclusionParkedRuns re-queues the workspace's runs at
+	// stepIDs that parked after skipping the author's provider, and returns
+	// how many it released.
+	ReleaseAuthorExclusionParkedRuns(ctx context.Context, workspaceID string, stepIDs []string) (int, error)
+	ListAuthorExclusionDeclarations(ctx context.Context, workspaceID string) ([]ExclusionDeclaration, error)
+	ListSeatSteps(ctx context.Context, workspaceID string) ([]SeatStep, error)
 }
 
 // RetryRunner runs a provider retry. Pulled out so the Provider depends

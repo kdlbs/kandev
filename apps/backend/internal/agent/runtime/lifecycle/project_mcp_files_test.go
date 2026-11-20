@@ -33,12 +33,14 @@ type remoteProjectMCPHelper struct {
 	workspace     string
 	instanceID    string
 	sessionID     string
+	scopedRoutes  bool
 	capable       bool
 	generation    uint64
 	files         map[string][]byte
 	requests      []types.ProjectMCPPrepareRequest
 	configureBody map[string]any
 	configureCode int
+	prepareCode   int
 	starts        int
 	cleanups      int
 }
@@ -95,8 +97,16 @@ func (h *remoteProjectMCPHelper) target() types.ProjectMCPTarget {
 	defer h.mu.Unlock()
 	return types.ProjectMCPTarget{
 		Version: types.ProjectMCPFilesVersion, InstanceID: h.instanceID, SessionID: h.sessionID,
-		WorkspacePath: h.workspace, MCPURL: remoteProjectMCPURL(), Generation: h.generation,
+		WorkspacePath: h.workspace, MCPURL: h.mcpURLLocked(), Generation: h.generation,
 	}
+}
+
+func (h *remoteProjectMCPHelper) mcpURLLocked() string {
+	path := "/mcp"
+	if h.scopedRoutes {
+		path = "/i/" + h.instanceID + path
+	}
+	return "http://127.0.0.1:" + strconv.Itoa(remoteProjectMCPPort) + path
 }
 
 func remoteProjectMCPURL() string {
@@ -111,6 +121,10 @@ func (h *remoteProjectMCPHelper) prepare(w http.ResponseWriter, r *http.Request)
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.prepareCode != 0 {
+		http.Error(w, "injected prepare failure", h.prepareCode)
+		return
+	}
 	if request.Version != types.ProjectMCPFilesVersion || request.Generation != h.generation+1 {
 		http.Error(w, "generation conflict", http.StatusConflict)
 		return
@@ -144,7 +158,7 @@ func (h *remoteProjectMCPHelper) prepare(w http.ResponseWriter, r *http.Request)
 	h.requests = append(h.requests, request)
 	_ = json.NewEncoder(w).Encode(types.ProjectMCPPrepareResponse{
 		Version: types.ProjectMCPFilesVersion, InstanceID: h.instanceID, SessionID: h.sessionID,
-		WorkspacePath: h.workspace, MCPURL: remoteProjectMCPURL(), Generation: h.generation, Files: evidence,
+		WorkspacePath: h.workspace, MCPURL: h.mcpURLLocked(), Generation: h.generation, Files: evidence,
 	})
 }
 
@@ -174,11 +188,20 @@ func (h *remoteProjectMCPHelper) cleanupCount() int {
 
 func (h *remoteProjectMCPHelper) client(t *testing.T) *agentctl.Client {
 	t.Helper()
+	h.mu.Lock()
+	instanceID, scopedRoutes := h.instanceID, h.scopedRoutes
+	h.mu.Unlock()
+	return h.clientFor(t, instanceID, scopedRoutes)
+}
+
+func (h *remoteProjectMCPHelper) clientFor(t *testing.T, instanceID string, scopedRoutes bool) *agentctl.Client {
+	t.Helper()
 	parsed, err := url.Parse(h.server.URL)
 	require.NoError(t, err)
 	port, err := strconv.Atoi(parsed.Port())
 	require.NoError(t, err)
-	return agentctl.NewClient(parsed.Hostname(), port, newTestLogger(), agentctl.WithExecutionID(h.instanceID))
+	return agentctl.NewClient(parsed.Hostname(), port, newTestLogger(),
+		agentctl.WithExecutionID(instanceID), agentctl.WithBuiltinMCPScopedRoutes(scopedRoutes))
 }
 
 func newRemoteProjectMCPExecution(t *testing.T, client *agentctl.Client) *AgentExecution {
@@ -211,6 +234,132 @@ func readRemoteProjectMCP(t *testing.T, helper *remoteProjectMCPHelper) map[stri
 	}
 	require.NoError(t, json.Unmarshal(data, &payload))
 	return payload.MCPServers
+}
+
+// @covers AC-AGENTS-MCP-INSTANCE-004.3
+func TestBuiltinMCPInstanceStagedDelivery(t *testing.T) {
+	cases := []struct {
+		name            string
+		publishedID     string
+		stagedID        string
+		publishedScoped bool
+		stagedScoped    bool
+	}{
+		{name: "legacy to scoped with same ID", publishedID: "helper-a", stagedID: "helper-a", stagedScoped: true},
+		{name: "legacy to scoped with new ID", publishedID: "published", stagedID: "staged", stagedScoped: true},
+		{name: "scoped to legacy with same ID", publishedID: "helper-a", stagedID: "helper-a", publishedScoped: true},
+		{name: "scoped to legacy with new ID", publishedID: "published", stagedID: "staged", publishedScoped: true},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			t.Run("local project file", func(t *testing.T) {
+				manager := newTestManager(t)
+				agentConfig, ok := manager.registry.Get("pi-acp")
+				require.True(t, ok)
+				execution := newProjectMCPDeliveryTestExecution(t)
+				execution.RuntimeName = agentruntime.RuntimeStandalone
+				execution.ExecutorType = "local"
+				execution.agentctl = agentctl.NewClient("127.0.0.1", 1, newTestLogger(),
+					agentctl.WithExecutionID(test.publishedID),
+					agentctl.WithBuiltinMCPScopedRoutes(test.publishedScoped))
+				staged := agentctl.NewClient("127.0.0.1", 2, newTestLogger(),
+					agentctl.WithExecutionID(test.stagedID),
+					agentctl.WithBuiltinMCPScopedRoutes(test.stagedScoped))
+				placement, ok, err := manager.resolveProjectMCPPlacement(context.Background(), execution, staged, "local")
+				require.NoError(t, err)
+				require.True(t, ok)
+				wantURL := "http://localhost:45678/mcp"
+				if test.stagedScoped {
+					wantURL = "http://localhost:45678/i/" + test.stagedID + "/mcp"
+				}
+				require.Equal(t, wantURL, placement.coreURL)
+				require.NoError(t, manager.materializeProjectMCPPlacement(
+					context.Background(), execution, agentConfig, agentConfig.Runtime().ProjectMCPStrategy, placement,
+					&preparedMCPOperation{servers: []types.McpServer{{Name: "third-party", Type: "http", URL: "https://example.test/mcp"}}},
+				))
+				data, err := os.ReadFile(filepath.Join(execution.WorkspacePath, ".pi", "mcp.json"))
+				require.NoError(t, err)
+				var payload struct {
+					MCPServers map[string]remoteMCPServer `json:"mcpServers"`
+				}
+				require.NoError(t, json.Unmarshal(data, &payload))
+				require.Equal(t, wantURL, payload.MCPServers["kandev"].URL)
+				require.Equal(t, wantURL+"/packages/diagnostics", payload.MCPServers["kandev-diagnostics"].URL)
+				require.Equal(t, "https://example.test/mcp", payload.MCPServers["third-party"].URL)
+				require.Equal(t, test.stagedID, execution.projectMCPDeliverySnapshot().InstanceID)
+			})
+
+			t.Run("remote project file", func(t *testing.T) {
+				helper := newRemoteProjectMCPHelper(t, true)
+				helper.mu.Lock()
+				helper.instanceID = test.stagedID
+				helper.scopedRoutes = test.stagedScoped
+				helper.mu.Unlock()
+				published := helper.clientFor(t, test.publishedID, test.publishedScoped)
+				staged := helper.client(t)
+				execution := newRemoteProjectMCPExecution(t, published)
+				manager := newTestManager(t)
+				agentConfig, ok := manager.registry.Get("pi-acp")
+				require.True(t, ok)
+				require.NoError(t, manager.materializeRuntimeProjectMCPWithClient(
+					context.Background(), execution, agentConfig, nil, "k8s", staged, nil,
+					&preparedMCPOperation{servers: []types.McpServer{{Name: "third-party", Type: "http", URL: "https://example.test/mcp"}}},
+				))
+				servers := readRemoteProjectMCP(t, helper)
+				wantURL := helper.target().MCPURL
+				require.Equal(t, wantURL, servers["kandev"].URL)
+				require.Equal(t, wantURL+"/packages/diagnostics", servers["kandev-diagnostics"].URL)
+				require.Equal(t, "https://example.test/mcp", servers["third-party"].URL)
+				delivery := execution.projectMCPDeliverySnapshot()
+				require.NotNil(t, delivery)
+				require.Equal(t, test.stagedID, delivery.InstanceID)
+				preparedClient, generation := execution.projectMCPRemotePrepared()
+				require.Same(t, staged, preparedClient)
+				require.Equal(t, uint64(1), generation)
+			})
+		})
+	}
+}
+
+// @covers AC-AGENTS-MCP-INSTANCE-004.3
+func TestBuiltinMCPInstanceStagedDeliveryFailureRestoresPublishedEvidence(t *testing.T) {
+	helper := newRemoteProjectMCPHelper(t, true)
+	helper.mu.Lock()
+	helper.instanceID = "staged-helper"
+	helper.scopedRoutes = true
+	helper.prepareCode = http.StatusInternalServerError
+	helper.mu.Unlock()
+	published := helper.clientFor(t, "published-helper", false)
+	staged := helper.client(t)
+	execution := newRemoteProjectMCPExecution(t, published)
+	execution.AgentCommand = "pi-acp"
+	execution.AgentArgs = []string{"pi-acp"}
+	priorDelivery := &types.ProjectMCPDelivery{
+		Version: types.ProjectMCPDeliveryVersion, Strategy: types.ProjectMCPDeliveryStrategyPi,
+		Workspace: "prior-workspace", TaskID: execution.TaskID, InstanceID: "published-helper",
+		BindingDigest: strings.Repeat("a", 64), Packages: []string{"core"},
+	}
+	execution.setProjectMCPDelivery(priorDelivery)
+	execution.setProjectMCPRemotePrepared(published, 7)
+	manager := newTestManager(t)
+	manager.sessionManager = nil
+	agentConfig, ok := manager.registry.Get("pi-acp")
+	require.True(t, ok)
+
+	_, err := manager.prepareRestartedKubernetesAgentctl(context.Background(), execution, &RemoteInstanceRefresh{
+		Instance:    &ExecutorInstance{InstanceID: execution.ID, Client: staged},
+		AgentConfig: agentConfig,
+	})
+
+	require.Error(t, err)
+	require.Equal(t, priorDelivery, execution.projectMCPDeliverySnapshot())
+	preparedClient, generation := execution.projectMCPRemotePrepared()
+	require.Same(t, published, preparedClient)
+	require.Equal(t, uint64(7), generation)
+	current, release := execution.AcquireAgentCtlClient()
+	require.Same(t, published, current)
+	release()
+	require.Equal(t, 1, helper.cleanupCount(), "uncertain staged files are reconciled through the staged helper")
 }
 
 // @covers AC-AGENTS-BUILTIN-MCP-003.6, AC-AGENTS-MCP-PREP-005.1

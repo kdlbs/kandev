@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, type ReactNode } from "react";
 import { useTheme } from "@/components/theme/app-theme";
 import { IconZoomIn, IconZoomOut, IconCode } from "@tabler/icons-react";
 import {
@@ -8,6 +8,8 @@ import {
   sanitizeMermaidCode,
   cleanupMermaidOrphans,
   reportMermaidRenderFailure,
+  selectMermaidSource,
+  type MermaidSourceSelection,
 } from "./mermaid-utils";
 import { useMermaidScale, useMermaidViewportWidth } from "./mermaid-block-hooks";
 import { useToast } from "@/components/toast-provider";
@@ -39,9 +41,17 @@ type MermaidBlockProps = {
   code: string;
   /** Owning task when this diagram belongs to a task-bound surface. */
   taskId?: string | null;
+  /** Render recovered trailing content through the owning Markdown context. */
+  renderFollowingMarkdown?: (source: string) => ReactNode;
+};
+
+type RenderedSource = MermaidSourceSelection & {
+  inputCode: string;
+  taskId: string | null;
 };
 
 type ToastFn = ReturnType<typeof useToast>["toast"];
+type MermaidRenderPolicy = { errorTitle: string; allowRecovery: boolean };
 
 function sameSvgSize(
   a: { w: number; h: number } | null,
@@ -61,10 +71,11 @@ function useMermaidRender(
   resolvedTheme: string | undefined,
   toast: ToastFn,
   taskId: string | null,
-  errorTitle: string,
+  { errorTitle, allowRecovery }: MermaidRenderPolicy,
 ) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [renderedSource, setRenderedSource] = useState<RenderedSource | null>(null);
   // Synchronous mirror of `svg` so the render closure can decide whether to
   // toast without re-running the debounce effect on every successful render.
   const svgRef = useRef<string | null>(null);
@@ -76,25 +87,39 @@ function useMermaidRender(
       svgRef.current = null;
       setSvg(null);
       setError(null);
+      setRenderedSource(null);
       return;
     }
 
     let cancelled = false;
     const theme = resolvedTheme === "dark" ? "dark" : "default";
-    const sanitizedCode = sanitizeMermaidCode(code);
+    let sanitizedCode = sanitizeMermaidCode(code);
 
     const timer = setTimeout(() => {
       const id = `mermaid-md-${++mermaidIdCounter}`;
       getMermaid()
-        .then((mermaid) => {
+        .then(async (mermaid) => {
+          const selection = allowRecovery
+            ? await selectMermaidSource(code, async (source) => {
+                return Boolean(await mermaid.parse(source, { suppressErrors: true }));
+              })
+            : { diagramSource: code };
+          if (cancelled) return null;
           mermaid.initialize({ startOnLoad: false, theme, securityLevel: "loose" });
-          return mermaid.render(id, sanitizedCode);
+          sanitizedCode = sanitizeMermaidCode(selection.diagramSource);
+          const rendered = await mermaid.render(id, sanitizedCode);
+          return { rendered, selection };
         })
-        .then(({ svg: rendered }) => {
+        .then((result) => {
           cleanupMermaidOrphans(id);
-          if (cancelled) return;
-          svgRef.current = rendered;
-          setSvg(rendered);
+          if (cancelled || !result) return;
+          svgRef.current = result.rendered.svg;
+          setSvg(result.rendered.svg);
+          setRenderedSource({
+            inputCode: code,
+            taskId,
+            ...result.selection,
+          });
           setError(null);
         })
         .catch((err: Error) => {
@@ -115,12 +140,19 @@ function useMermaidRender(
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [code, errorTitle, resolvedTheme, taskId, toast]);
+  }, [allowRecovery, code, errorTitle, resolvedTheme, taskId, toast]);
 
-  return { svg, error };
+  const currentSource =
+    renderedSource?.inputCode === code && renderedSource.taskId === taskId ? renderedSource : null;
+  return {
+    svg,
+    error,
+    diagramSource: currentSource?.diagramSource ?? code,
+    followingMarkdown: currentSource?.followingMarkdown,
+  };
 }
 
-export function MermaidBlock({ code, taskId }: MermaidBlockProps) {
+export function MermaidBlock({ code, taskId, renderFollowingMarkdown }: MermaidBlockProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const svgSizeRef = useRef<{ w: number; h: number } | null>(null);
@@ -129,12 +161,15 @@ export function MermaidBlock({ code, taskId }: MermaidBlockProps) {
   const [showCode, setShowCode] = useState(false);
   const { resolvedTheme } = useTheme();
   const { toast } = useToast();
-  const { svg, error } = useMermaidRender(
+  const { svg, error, diagramSource, followingMarkdown } = useMermaidRender(
     code,
     resolvedTheme,
     toast,
     taskId ?? null,
-    t("common:failedToRenderDiagram"),
+    {
+      errorTitle: t("common:failedToRenderDiagram"),
+      allowRecovery: renderFollowingMarkdown !== undefined,
+    },
   );
   const viewportWidth = useMermaidViewportWidth(scrollRegionElement);
   const { scale, zoomIn, zoomOut, zoomReset, resetAutoScale } = useMermaidScale(
@@ -190,34 +225,39 @@ export function MermaidBlock({ code, taskId }: MermaidBlockProps) {
   };
 
   return (
-    <div className="mermaid-block group/mermaid relative my-3 block w-full max-w-full min-w-0 rounded-md border border-border/50 bg-muted/20">
-      <div
-        ref={setScrollRegionElement}
-        className="mermaid-scroll-region w-full overflow-x-auto overflow-y-hidden p-3"
-        style={{ display: showCode ? "none" : undefined }}
-      >
-        <div style={wrapperStyle}>
-          <div
-            ref={containerRef}
-            style={containerStyle}
-            dangerouslySetInnerHTML={{ __html: svg ?? "" }}
-          />
+    <>
+      <div className="mermaid-block group/mermaid relative my-3 block w-full max-w-full min-w-0 rounded-md border border-border/50 bg-muted/20">
+        <div
+          ref={setScrollRegionElement}
+          className="mermaid-scroll-region w-full overflow-x-auto overflow-y-hidden p-3"
+          style={{ display: showCode ? "none" : undefined }}
+        >
+          <div style={wrapperStyle}>
+            <div
+              ref={containerRef}
+              style={containerStyle}
+              dangerouslySetInnerHTML={{ __html: svg ?? "" }}
+            />
+          </div>
         </div>
+        {showCode && (
+          <pre className="m-0 p-3 text-xs leading-relaxed whitespace-pre-wrap font-mono text-muted-foreground bg-transparent">
+            <code>{diagramSource}</code>
+          </pre>
+        )}
+        <MermaidToolbar
+          showCode={showCode}
+          scale={scale}
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          onReset={zoomReset}
+          onToggleCode={toggleCode}
+        />
       </div>
-      {showCode && (
-        <pre className="m-0 p-3 text-xs leading-relaxed whitespace-pre-wrap font-mono text-muted-foreground bg-transparent">
-          <code>{code}</code>
-        </pre>
-      )}
-      <MermaidToolbar
-        showCode={showCode}
-        scale={scale}
-        onZoomIn={zoomIn}
-        onZoomOut={zoomOut}
-        onReset={zoomReset}
-        onToggleCode={toggleCode}
-      />
-    </div>
+      {renderFollowingMarkdown && followingMarkdown !== undefined
+        ? renderFollowingMarkdown(followingMarkdown)
+        : null}
+    </>
   );
 }
 

@@ -36,11 +36,11 @@ export function getWorkspaceId({
   activeTerminalTabId,
   activeWorkspace,
 }: WorkspaceSelection): string | null {
-  if (!isOpen) return null;
   if (activeKind === "terminal") {
     const activeTerminal = terminalTabs.find((tab) => tab.tabId === activeTerminalTabId);
     if (activeTerminal) return activeTerminal.workspaceId;
   }
+  if (!isOpen) return null;
   return (
     sessions.find((session) => session.sessionId === activeSessionId)?.workspaceId ??
     terminalTabs.find((tab) => tab.tabId === activeTerminalTabId)?.workspaceId ??
@@ -63,6 +63,7 @@ export function QuickChatProvider({ children }: { children: React.ReactNode }) {
   const activeWorkspace = useAppStore((s) => s.workspaces.activeId);
   const mounted = useIsMounted();
   const wasOpen = useRef(false);
+  const lastWorkspaceId = useRef<string | null>(null);
 
   // Preload agent profiles so they're available when quick chat is opened
   useSettingsData(true);
@@ -86,7 +87,7 @@ export function QuickChatProvider({ children }: { children: React.ReactNode }) {
     };
   }, [connectionStatus, quickChatSessions]);
 
-  const workspaceId = getWorkspaceId({
+  const selectedWorkspaceId = getWorkspaceId({
     sessions: quickChatSessions,
     terminalTabs: quickTerminalTabs,
     isOpen,
@@ -95,6 +96,17 @@ export function QuickChatProvider({ children }: { children: React.ReactNode }) {
     activeTerminalTabId,
     activeWorkspace,
   });
+  if (selectedWorkspaceId) lastWorkspaceId.current = selectedWorkspaceId;
+  // Keep the lifecycle owner mounted while any terminal can still be recovered.
+  const lastWorkspaceHasTerminal = quickTerminalTabs.some(
+    (tab) => tab.workspaceId === lastWorkspaceId.current,
+  );
+  const retainedTerminalWorkspaceId =
+    (lastWorkspaceHasTerminal ? lastWorkspaceId.current : null) ??
+    quickTerminalTabs.find((tab) => tab.workspaceId === activeWorkspace)?.workspaceId ??
+    quickTerminalTabs[0]?.workspaceId ??
+    null;
+  const workspaceId = selectedWorkspaceId ?? retainedTerminalWorkspaceId;
 
   useEffect(() => {
     if (wasOpen.current && !isOpen) restoreQuickChatLauncherFocus();

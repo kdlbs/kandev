@@ -249,6 +249,7 @@ func TestStartCreatedSessionForPeerMessage_RejectsReplacedSessionIdentity(t *tes
 func TestNewServiceSessionStartingCallbackClassifiesRunningCASConflict(t *testing.T) {
 	ctx := context.Background()
 	repo := &newServiceRunningConflictRepository{Repository: setupTestRepo(t)}
+	seedExecutorRow(t, repo.Repository, "executor-production-cas", models.ExecutorTypeLocal)
 	seedSession(t, repo.Repository, "task-production-cas", "session-production-cas", "step-production-cas")
 	require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-production-cas", models.TaskSessionStateWaitingForInput, ""))
 	session, err := repo.GetTaskSession(ctx, "session-production-cas")
@@ -373,4 +374,24 @@ func (r *newServiceRunningConflictRepository) UpdateTaskSessionIfCurrentStateWit
 		return false, nil
 	}
 	return r.Repository.UpdateTaskSessionIfCurrentStateWithStartAttempt(ctx, session, expected, attemptID)
+}
+
+func (r *newServiceRunningConflictRepository) UpdateTaskSessionIfCurrentStateForLaunch(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, error) {
+	if r.conflicted.CompareAndSwap(false, true) {
+		current, err := r.GetTaskSession(ctx, session.ID)
+		if err != nil {
+			return false, err
+		}
+		current.State = models.TaskSessionStateRunning
+		if err := r.UpdateTaskSession(ctx, current); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	return r.Repository.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
 }

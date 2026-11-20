@@ -66,19 +66,9 @@ func (s *PlanService) CreatePreviewFeedback(
 	if err != nil {
 		return nil, err
 	}
-	ownerID, workspaceID, err := s.previewScreenshotScope(ctx, item)
+	ownerID, workspaceID, err := s.validatedPreviewScreenshot(ctx, item.TaskID, item.ScreenshotAttachmentID)
 	if err != nil {
 		return nil, err
-	}
-	if item.ScreenshotAttachmentID != "" {
-		if s.previewScreenshotValidator == nil {
-			return nil, errors.New("preview screenshot validation is unavailable")
-		}
-		if err := s.previewScreenshotValidator.ValidatePreviewScreenshot(
-			ctx, ownerID, workspaceID, item.TaskID, item.ScreenshotAttachmentID,
-		); err != nil {
-			return nil, err
-		}
 	}
 	snapshot, err := repo.CreateTaskPreviewFeedback(ctx, item, ownerID, workspaceID)
 	if err != nil {
@@ -111,6 +101,43 @@ func (s *PlanService) UpdatePreviewFeedback(
 		return snapshot, mapPreviewFeedbackError(err)
 	}
 	s.publishPreviewFeedbackSnapshot(ctx, "update", snapshot)
+	return snapshot, nil
+}
+
+// ReplacePreviewFeedbackScreenshot recaptures a saved screenshot item with a
+// new rectangle and staged image at an exact version.
+func (s *PlanService) ReplacePreviewFeedbackScreenshot(
+	ctx context.Context,
+	change *models.TaskPreviewFeedbackScreenshotReplacement,
+) (*models.TaskPreviewFeedbackSnapshot, error) {
+	if change == nil {
+		return nil, previewfeedback.ErrCaptureInvalid
+	}
+	if err := validatePreviewFeedbackMutation(change.TaskID, change.ItemID, change.ExpectedVersion); err != nil {
+		return nil, err
+	}
+	if err := previewfeedback.ValidateScreenshotReplacement(
+		change.CaptureRect, change.ScreenshotAttachmentID, change.Comment,
+	); err != nil {
+		return nil, err
+	}
+	if err := s.authorize(ctx, change.TaskID); err != nil {
+		return nil, err
+	}
+	repo, err := s.previewFeedbackRepo()
+	if err != nil {
+		return nil, err
+	}
+	ownerID, workspaceID, err := s.validatedPreviewScreenshot(ctx, change.TaskID, change.ScreenshotAttachmentID)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, released, err := repo.ReplaceTaskPreviewFeedbackScreenshot(ctx, change, ownerID, workspaceID)
+	if err != nil {
+		return snapshot, mapPreviewFeedbackError(err)
+	}
+	s.publishPreviewFeedbackSnapshot(ctx, "replace_screenshot", snapshot)
+	s.cleanupPreviewScreenshots(ctx, released)
 	return snapshot, nil
 }
 
@@ -194,19 +221,29 @@ func validatePreviewFeedbackMutation(taskID, itemID string, expectedVersion int6
 	return nil
 }
 
-func (s *PlanService) previewScreenshotScope(
+// validatedPreviewScreenshot resolves the caller's attachment scope and checks
+// the staged image bytes before any claim. An empty attachment ID is a no-op.
+func (s *PlanService) validatedPreviewScreenshot(
 	ctx context.Context,
-	item *models.TaskPreviewFeedback,
+	taskID, attachmentID string,
 ) (string, string, error) {
-	if item.ScreenshotAttachmentID == "" {
+	if attachmentID == "" {
 		return "", "", nil
 	}
 	identity, ok := authn.IdentityFromContext(ctx)
 	if !ok || strings.TrimSpace(identity.UserID) == "" {
 		return "", "", models.ErrAttachmentForbidden
 	}
-	task, err := s.repo.GetTask(ctx, item.TaskID)
+	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
+		return "", "", err
+	}
+	if s.previewScreenshotValidator == nil {
+		return "", "", errors.New("preview screenshot validation is unavailable")
+	}
+	if err := s.previewScreenshotValidator.ValidatePreviewScreenshot(
+		ctx, identity.UserID, task.WorkspaceID, taskID, attachmentID,
+	); err != nil {
 		return "", "", err
 	}
 	return identity.UserID, task.WorkspaceID, nil

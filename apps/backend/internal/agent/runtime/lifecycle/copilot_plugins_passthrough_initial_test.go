@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentruntime"
 )
 
 type recordingPassthroughRunner struct {
@@ -22,6 +23,8 @@ type recordingPassthroughRunner struct {
 	activeWebSocket bool
 	readyOrPending  bool
 }
+
+const initialPassthroughSelectedVersion = "1.0.104"
 
 func (r *recordingPassthroughRunner) Start(_ context.Context, req process.InteractiveStartRequest) (*process.InteractiveProcessInfo, error) {
 	r.startReq = req
@@ -69,6 +72,7 @@ func newCopilotPassthroughInitialManager(t *testing.T) (*Manager, *AgentExecutio
 	mgr.profileResolver = &mockPassthroughProfileResolver{
 		agentName: agents.CopilotACPAgentID, cliPassthrough: true, profile: profile,
 	}
+	mgr.managedRuntimeSelections = &copilotSelectionReader{version: initialPassthroughSelectedVersion}
 	mgr.SetCopilotPluginRunner(pluginRunner)
 	pty := &recordingPassthroughRunner{}
 	mgr.passthroughRunnerOverride = pty
@@ -88,7 +92,7 @@ func TestCopilotPluginInitialPassthroughStartsSupportedSelection(t *testing.T) {
 	))
 	version, ok := copilotplugins.RuntimeVersionFromCommand(pty.startReq.Command)
 	require.True(t, ok, "passthrough command must carry the selected managed runtime")
-	require.Equal(t, agents.MustDefaultManagedNPMRuntimeVersion("@github/copilot"), version,
+	require.Equal(t, initialPassthroughSelectedVersion, version,
 		"passthrough command must retain the selected managed runtime")
 }
 
@@ -103,6 +107,8 @@ func TestCopilotPluginInitialPassthroughEmptySelectionStarts(t *testing.T) {
 func TestCopilotPluginInitialPassthroughRejectsUnsupportedExecutor(t *testing.T) {
 	mgr, execution, profile, pty, _ := newCopilotPassthroughInitialManager(t)
 	execution.ExecutorType = "local_docker"
+	execution.RuntimeName = agentruntime.RuntimeDocker
+	execution.ContainerID = "container-unsupported-executor"
 	err := mgr.startPassthroughSession(context.Background(), execution, profile)
 	var pluginErr *copilotplugins.Error
 	require.ErrorAs(t, err, &pluginErr)

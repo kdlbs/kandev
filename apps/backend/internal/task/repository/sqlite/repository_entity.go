@@ -135,6 +135,20 @@ func (r *Repository) UpdateRepository(ctx context.Context, repository *models.Re
 	return tx.Commit()
 }
 
+// FillRepositoryRemoteURL records a clone URL on a repository that has none.
+// It writes only that column, and only while the stored value is still empty,
+// so a clone URL or settings saved after the caller's read are kept. It
+// reports whether it wrote.
+func (r *Repository) FillRepositoryRemoteURL(ctx context.Context, id, remoteURL string) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE repositories SET remote_url = ?, updated_at = ?
+		WHERE id = ? AND COALESCE(remote_url, '') = '' AND deleted_at IS NULL`), remoteURL, time.Now().UTC(), id)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	return affected > 0, err
+}
+
 // UpdateRepositoryIfUnchanged applies the update only while the repository
 // still has the version observed by the exact Host command.
 func (r *Repository) UpdateRepositoryIfUnchanged(ctx context.Context, repository *models.Repository, expected time.Time) error {
@@ -205,6 +219,7 @@ func (r *Repository) updateRepository(ctx context.Context, tx *sqlx.Tx, reposito
 	repository.UpdatedAt = nextRepositoryUpdatedAt(stored)
 
 	query, args := repositoryUpdateQuery(repository, models.RepositoryCheckoutIntent{
+		RemoteURL:     &repository.RemoteURL,
 		DefaultBranch: &repository.DefaultBranch, PullBeforeWorktree: &repository.PullBeforeWorktree,
 	})
 	if expected != nil {

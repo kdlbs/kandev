@@ -514,6 +514,8 @@ type CarouselNavProps = {
   activeIndex: number;
   total: number;
   isSubmitting: boolean;
+  /** Shows Next as the primary action, as after answering in the review view. */
+  emphasizeNext?: boolean;
   onPrev: () => void;
   onNext: () => void;
 };
@@ -527,6 +529,7 @@ export function ClarificationCarouselNav({
   isSubmitting,
   onPrev,
   onNext,
+  emphasizeNext = false,
 }: CarouselNavProps) {
   const { t } = useTranslation();
   const isFirst = activeIndex === 0;
@@ -567,11 +570,16 @@ export function ClarificationCarouselNav({
             onClick={onNext}
             disabled={isLast || isSubmitting}
             data-testid="clarification-next"
+            data-emphasized={emphasizeNext && !isLast ? "true" : undefined}
             className={cn(
               "inline-flex items-center gap-1 text-xs px-2 py-1 rounded border",
-              isLast
-                ? "border-transparent text-muted-foreground/40 cursor-not-allowed"
-                : "border-border text-foreground/80 hover:bg-muted/50 cursor-pointer",
+              isLast && "border-transparent text-muted-foreground/40 cursor-not-allowed",
+              !isLast &&
+                emphasizeNext &&
+                "border-primary bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer max-md:min-h-11 max-md:px-4",
+              !isLast &&
+                !emphasizeNext &&
+                "border-border text-foreground/80 hover:bg-muted/50 cursor-pointer",
             )}
           >
             {t("task:next")}

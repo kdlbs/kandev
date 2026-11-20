@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/settingscatalog"
 	storage "github.com/kandev/kandev/internal/system/storage"
@@ -28,6 +29,58 @@ func TestSettingsMutationRequiresCallerIdentity(t *testing.T) {
 	); err != nil {
 		t.Fatalf("synthetic identity was rejected: %v", err)
 	}
+}
+
+func TestGitHubSettingsOperationsScopeUnion(t *testing.T) {
+	registry, err := settingscatalog.DefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &recordingScopeUnionGitHubService{current: &github.WorkspaceSettings{
+		WorkspaceID: "ws-1", RepoScopeMode: github.RepoScopeModeAll,
+	}}
+	operations := &settingsOperations{registry: registry, deps: settingsDomainDependencies{github: service}}
+	workspaceID := "ws-1"
+	updated, err := operations.updateIntegrationSettings(context.Background(), settingscatalog.ResourceTarget{
+		ResourceType: "github_settings", WorkspaceID: &workspaceID,
+	}, map[string]json.RawMessage{
+		"repo_scope_mode":  json.RawMessage(`"selected"`),
+		"repo_scope_orgs":  json.RawMessage(`["Acme"]`),
+		"repo_scope_repos": json.RawMessage(`[{"owner":"outside","name":"tool"}]`),
+	}, nil)
+	if err != nil {
+		t.Fatalf("update GitHub settings through settings operations: %v", err)
+	}
+	response, ok := updated.(map[string]any)
+	if !ok || response["settings"] == nil {
+		t.Fatalf("settings operations response = %#v, want projected settings", updated)
+	}
+	if service.request == nil || service.request.RepoScopeMode == nil || *service.request.RepoScopeMode != github.RepoScopeModeSelected || service.request.RepoScopeOrgs == nil || len(*service.request.RepoScopeOrgs) != 1 || service.request.RepoScopeRepos == nil || len(*service.request.RepoScopeRepos) != 1 {
+		t.Fatalf("forwarded scope request = %+v, want a mixed selected patch", service.request)
+	}
+}
+
+type recordingScopeUnionGitHubService struct {
+	settingsGitHubService
+	current *github.WorkspaceSettings
+	request *github.UpdateWorkspaceSettingsRequest
+	updated *github.WorkspaceSettings
+}
+
+func (s *recordingScopeUnionGitHubService) GetWorkspaceSettings(context.Context, string) (*github.WorkspaceSettings, error) {
+	return s.current, nil
+}
+
+func (s *recordingScopeUnionGitHubService) UpdateWorkspaceSettings(_ context.Context, request *github.UpdateWorkspaceSettingsRequest) (*github.WorkspaceSettings, error) {
+	s.request = request
+	s.updated = &github.WorkspaceSettings{WorkspaceID: request.WorkspaceID, RepoScopeMode: github.RepoScopeModeSelected}
+	if request.RepoScopeOrgs != nil {
+		s.updated.RepoScopeOrgs = append([]string(nil), (*request.RepoScopeOrgs)...)
+	}
+	if request.RepoScopeRepos != nil {
+		s.updated.RepoScopeRepos = append([]github.RepoFilter(nil), (*request.RepoScopeRepos)...)
+	}
+	return s.updated, nil
 }
 
 func TestSettingsSensitiveValuesAreRedactedWithoutDroppingReferences(t *testing.T) {

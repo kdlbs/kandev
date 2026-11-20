@@ -15,6 +15,7 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/npmresolution"
+	"github.com/kandev/kandev/internal/common/startupdiag"
 	"github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -178,6 +179,7 @@ func (m *Manager) publishManagedRuntimeStartupFailure(
 
 type managedRuntimeStartupRetry struct {
 	retryArgs       []string
+	preparation     *agentctltypes.ManagedRuntimePreparationDirective
 	failureCode     routingerr.Code
 	failureReason   string
 	failureNPMCode  string
@@ -225,7 +227,40 @@ func managedRuntimeStartupRetryForEvidence(
 	evidence *agentctltypes.ManagedStartupEvidence,
 	classification *routingerr.Error,
 	preferOnlineArgs, originalArgs []string,
+	packageSpec string,
 ) *managedRuntimeStartupRetry {
+	if evidence == nil || !evidence.CollectionComplete || !evidence.NPMDiagnosticComplete ||
+		evidence.ExitDisposition != agentctltypes.ManagedStartupExitOrdinary {
+		return nil
+	}
+	if npmresolution.IsPermanentManagedStartupCode(evidence.NPMCode) {
+		return &managedRuntimeStartupRetry{
+			failureCode:     routingerr.CodeManagedRuntimeStartup,
+			failureReason:   "permanent_npm_error",
+			failureNPMCode:  strings.ToUpper(evidence.NPMCode),
+			failureEvidence: "npm_code=" + strings.ToUpper(evidence.NPMCode),
+			terminal:        true,
+		}
+	}
+	if evidence.CacheEvidence != nil {
+		cache := evidence.CacheEvidence
+		if !evidence.NPMDiagnosticPresent || evidence.NPMCode != "" ||
+			cache.Condition != agentctltypes.ManagedRuntimeCacheRootManifestMissing ||
+			cache.PackageSpec == "" || cache.PackageSpec != packageSpec ||
+			cache.ProcessGeneration == 0 || cache.ProcessGeneration != evidence.ProcessGeneration {
+			return nil
+		}
+		return &managedRuntimeStartupRetry{
+			retryArgs: append([]string(nil), originalArgs...),
+			preparation: &agentctltypes.ManagedRuntimePreparationDirective{
+				Condition:               cache.Condition,
+				PackageSpec:             cache.PackageSpec,
+				FailedProcessGeneration: evidence.ProcessGeneration,
+			},
+			failureCode:   routingerr.CodeManagedRuntimeStartup,
+			failureReason: "cache_incomplete",
+		}
+	}
 	if !managedStartupEvidenceAllowsClassification(evidence) {
 		return nil
 	}
@@ -267,6 +302,11 @@ func managedStartupEvidenceAllowsClassification(evidence *agentctltypes.ManagedS
 	if evidence == nil || !evidence.CollectionComplete || !evidence.NPMDiagnosticComplete || evidence.UnclassifiedNPMCode {
 		return false
 	}
+	if evidence.DiagnosticComplete && evidence.DiagnosticReason == startupdiag.ReasonMiseConfigUntrusted {
+		// A configuration prerequisite must remain visible and cannot authorize
+		// an automatic replacement, even when unrelated npm output is present.
+		return false
+	}
 	if evidence.NPMCode != "" && !evidence.NPMDiagnosticPresent {
 		return false
 	}
@@ -303,7 +343,8 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 	if errors.As(initErr, &initializeErr) && initializeErr.StartupEvidence != nil {
 		evidence := initializeErr.StartupEvidence
 		if evidence.ProcessGeneration == 0 || evidence.ProcessGeneration != client.ProcessGeneration() ||
-			!managedStartupEvidenceAllowsClassification(evidence) || evidence.ExitDisposition != agentctltypes.ManagedStartupExitOrdinary {
+			!evidence.CollectionComplete || !evidence.NPMDiagnosticComplete ||
+			evidence.ExitDisposition != agentctltypes.ManagedStartupExitOrdinary {
 			return nil, false
 		}
 		if npmresolution.IsPermanentManagedStartupCode(evidence.NPMCode) {
@@ -332,7 +373,7 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 		return managedRuntimeStartupRetryForLegacyClassification(classification, preferOnlineArgs)
 	}
 	retry := managedRuntimeStartupRetryForEvidence(
-		initializeErr.StartupEvidence, classification, preferOnlineArgs, execution.AgentArgs,
+		initializeErr.StartupEvidence, classification, preferOnlineArgs, execution.AgentArgs, packageSpec,
 	)
 	return retry, retry != nil
 }
@@ -385,9 +426,23 @@ func (m *Manager) startManagedRuntimeRetry(
 	attachments []MessageAttachment,
 	mcpServers []agentctltypes.McpServer,
 ) (managedRuntimeRetryFailurePhase, error) {
+	return m.startManagedRuntimeRetryWithPreparation(
+		ctx, execution, agentConfig, taskDescription, attachments, mcpServers, nil,
+	)
+}
+
+func (m *Manager) startManagedRuntimeRetryWithPreparation(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	taskDescription string,
+	attachments []MessageAttachment,
+	mcpServers []agentctltypes.McpServer,
+	preparation *agentctltypes.ManagedRuntimePreparationDirective,
+) (managedRuntimeRetryFailurePhase, error) {
 	setup, revision, captured := capturedMCPSetup(ctx)
 	operation := &preparedMCPOperation{servers: mcpServers, metadata: streams.MCPResolutionFromContext(ctx), setup: setup, revision: revision, captured: captured}
-	if _, err := m.configureAndStartAgentWithMCP(ctx, execution, agentConfig, operation); err != nil {
+	if _, err := m.configureAndStartAgentWithMCPPreparation(ctx, execution, agentConfig, operation, preparation); err != nil {
 		return managedRuntimeRetryFailureProcessSetup, err
 	}
 	if err := managedRuntimeRecoveryAborted(ctx, m); err != nil {
@@ -546,13 +601,14 @@ func (m *Manager) retryManagedRuntimeStartupWithProgress(
 
 	m.resetManagedRuntimeExecutionForRetry(execution, retry.retryArgs)
 
-	failurePhase, retryErr := m.startManagedRuntimeRetry(
+	failurePhase, retryErr := m.startManagedRuntimeRetryWithPreparation(
 		recoveryCtx,
 		execution,
 		agentConfig,
 		taskDescription,
 		attachments,
 		mcpServers,
+		retry.preparation,
 	)
 	if retryErr != nil {
 		return m.publishManagedRuntimeRetryFailure(recoveryCtx, execution, agentConfig, failurePhase, retryErr)

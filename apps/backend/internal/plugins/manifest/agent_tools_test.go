@@ -111,6 +111,141 @@ func TestAgentToolInvocationScope(t *testing.T) {
 	}
 }
 
+func TestAgentToolWorkspaceScopeValidation(t *testing.T) {
+	readOnly := true
+	workspaceSchema := func() map[string]any {
+		return map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"key": map[string]any{"type": "string"},
+			},
+		}
+	}
+	workspaceTool := func(surfaces ...string) AgentTool {
+		return AgentTool{
+			Name: "read_workspace_data", Description: "Read workspace data.",
+			InvocationScope: AgentToolInvocationScopeWorkspace,
+			Surfaces:        surfaces,
+			InputSchema:     workspaceSchema(),
+			Annotations:     AgentToolAnnotations{ReadOnlyHint: &readOnly},
+		}
+	}
+	tests := []struct {
+		name    string
+		tool    AgentTool
+		minimum string
+		wantErr string
+	}{
+		{
+			name:    "external workspace read accepted",
+			tool:    workspaceTool(AgentToolSurfaceKanban, AgentToolSurfaceExternal),
+			minimum: MinimumWorkspaceScopeVersion,
+		},
+		{
+			name:    "office workspace read accepted",
+			tool:    workspaceTool(AgentToolSurfaceOffice),
+			minimum: MinimumWorkspaceScopeVersion,
+		},
+		{
+			name: "kanban workspace tool does not require a read-only hint",
+			tool: AgentTool{
+				Name: "read_workspace_data", Description: "Read workspace data.",
+				InvocationScope: AgentToolInvocationScopeWorkspace,
+				Surfaces:        []string{AgentToolSurfaceKanban},
+				InputSchema:     workspaceSchema(),
+			},
+			minimum: MinimumWorkspaceScopeVersion,
+		},
+		{
+			name:    "workspace scope rejects automation",
+			tool:    workspaceTool(AgentToolSurfaceAutomation),
+			minimum: MinimumWorkspaceScopeVersion,
+			wantErr: `"automation", which is not supported`,
+		},
+		{
+			name:    "workspace scope rejects coordinator",
+			tool:    workspaceTool(AgentToolSurfaceCoordinator),
+			minimum: MinimumWorkspaceScopeVersion,
+			wantErr: `"coordinator", which is not supported`,
+		},
+		{
+			name:    "workspace scope rejects managed conversations",
+			tool:    workspaceTool(AgentToolSurfaceManaged),
+			minimum: MinimumWorkspaceScopeVersion,
+			wantErr: `"managed-conversation", which is not supported`,
+		},
+		{
+			name: "external workspace read requires the read-only hint",
+			tool: func() AgentTool {
+				tool := workspaceTool(AgentToolSurfaceExternal)
+				tool.Annotations = AgentToolAnnotations{}
+				return tool
+			}(),
+			minimum: MinimumWorkspaceScopeVersion,
+			wantErr: "read_only_hint: true",
+		},
+		{
+			name: "workspace input schema requires a top-level object",
+			tool: func() AgentTool {
+				tool := workspaceTool(AgentToolSurfaceKanban)
+				tool.InputSchema = map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
+				return tool
+			}(),
+			minimum: MinimumWorkspaceScopeVersion,
+			wantErr: "top-level type: object",
+		},
+		{
+			name: "workspace input schema rejects the reserved argument",
+			tool: func() AgentTool {
+				tool := workspaceTool(AgentToolSurfaceKanban)
+				tool.InputSchema = map[string]any{
+					"type":       "object",
+					"properties": map[string]any{AgentToolWorkspaceArgument: map[string]any{"type": "string"}},
+				}
+				return tool
+			}(),
+			minimum: MinimumWorkspaceScopeVersion,
+			wantErr: "reserved property",
+		},
+		{
+			name:    "workspace scope requires the compatibility floor",
+			tool:    workspaceTool(AgentToolSurfaceKanban),
+			minimum: "0.99.0",
+			wantErr: "min_kandev_version >= " + MinimumWorkspaceScopeVersion,
+		},
+		{
+			name: "task scope cannot claim the external surface",
+			tool: AgentTool{
+				Name: "read_workspace_data", Description: "Read workspace data.",
+				InvocationScope: AgentToolInvocationScopeTask,
+				Surfaces:        []string{AgentToolSurfaceExternal},
+				InputSchema:     workspaceSchema(),
+				Annotations:     AgentToolAnnotations{ReadOnlyHint: &readOnly},
+			},
+			minimum: MinimumWorkspaceScopeVersion,
+			wantErr: "invocation_scope: instance or workspace",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := managedManifest(t)
+			m.MinKandevVersion = tc.minimum
+			m.AgentTools = []AgentTool{tc.tool}
+			err := m.Validate()
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Validate() error = %v, want substring %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestAgentToolInvocationScopeIsNormalizedOnParse(t *testing.T) {
 	m, err := Parse([]byte(managedManifestYAML + `
 agent_tools:

@@ -85,6 +85,20 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
     {
+      // These tests require an Amp-free backend database before they create
+      // the first saved profile. Keep them in their own worker so provider
+      // state from another E2E file cannot seed that parent row first.
+      name: "first-profile-capability",
+      testMatch: /settings\/first-profile-capability-discovery\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // Phone coverage uses a separate backend worker for the same invariant.
+      name: "mobile-first-profile-capability",
+      testMatch: /settings\/mobile-first-profile-capability-discovery\.spec\.ts/,
+      use: { ...devices["Pixel 5"] },
+    },
+    {
       name: "chromium",
       testIgnore: [
         /upgrade\/.*\.spec\.ts/,
@@ -100,13 +114,18 @@ export default defineConfig({
         /office-routing-.*\.spec\.ts/,
         // Auth specs run in the dedicated `auth` project (see above).
         /auth\/.*\.spec\.ts/,
+        /settings\/first-profile-capability-discovery\.spec\.ts/,
       ],
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile-chrome",
       testMatch: /mobile-.*\.spec\.ts/,
-      testIgnore: [/ssh\/.*\.spec\.ts/, /upgrade\/.*\.spec\.ts/],
+      testIgnore: [
+        /ssh\/.*\.spec\.ts/,
+        /upgrade\/.*\.spec\.ts/,
+        /settings\/mobile-first-profile-capability-discovery\.spec\.ts/,
+      ],
       use: { ...devices["Pixel 5"] },
     },
     {

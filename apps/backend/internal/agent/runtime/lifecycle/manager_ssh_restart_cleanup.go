@@ -34,6 +34,7 @@ func (m *Manager) stopPersistedSSHExecution(
 	executionID string,
 	reason string,
 	force bool,
+	stopWatch *stopWaitWatch,
 ) (bool, error) {
 	store, ok := m.runningWriter.(persistedSSHCleanupStore)
 	if !ok {
@@ -46,7 +47,7 @@ func (m *Manager) stopPersistedSSHExecution(
 	if row == nil || row.Runtime != agentruntime.RuntimeSSH {
 		return false, nil
 	}
-	return m.stopPersistedSSHRecord(ctx, row, reason, force)
+	return m.stopPersistedSSHRecord(ctx, row, reason, force, stopWatch)
 }
 
 func (m *Manager) stopPersistedSSHRecord(
@@ -54,12 +55,21 @@ func (m *Manager) stopPersistedSSHRecord(
 	row *models.ExecutorRunning,
 	reason string,
 	force bool,
+	stopWatch *stopWaitWatch,
 ) (bool, error) {
+	stopWatch.advance(stopWaitActivity)
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
 	if err != nil {
 		return true, err
 	}
 	defer activityLease.Release()
+
+	// The recorded owner must still be the current owner before any external
+	// effect, and again before settlement. The receipt participates through the
+	// identity comparison that already fences a replaced execution.
+	if err := m.revalidatePersistedSSHStopOwner(ctx, row); err != nil {
+		return true, err
+	}
 
 	instance := &ExecutorInstance{
 		InstanceID:  row.AgentExecutionID,
@@ -69,10 +79,42 @@ func (m *Manager) stopPersistedSSHRecord(
 		Metadata:    row.Metadata,
 		StopReason:  reason,
 	}
+	stopWatch.advance(stopWaitRuntime)
 	if err := m.stopPersistedSSHBackend(ctx, instance, force); err != nil {
 		return true, fmt.Errorf("stop persisted SSH runtime: %w", err)
 	}
+	if err := m.revalidatePersistedSSHStopOwner(ctx, row); err != nil {
+		return true, err
+	}
 	return true, nil
+}
+
+// revalidatePersistedSSHStopOwner compares the row a stop was authorized
+// against the current inventory row for the same execution. A successor
+// invalidates settlement even when the predecessor process already exited.
+func (m *Manager) revalidatePersistedSSHStopOwner(ctx context.Context, row *models.ExecutorRunning) error {
+	if row == nil || row.AgentExecutionID == "" {
+		return errors.New("persisted SSH runtime identity is incomplete")
+	}
+	store, ok := m.runningWriter.(persistedSSHCleanupStore)
+	if !ok {
+		return errors.New("persisted runtime inventory is unavailable")
+	}
+	rows, err := store.ListExecutorsRunning(ctx)
+	if err != nil {
+		return fmt.Errorf("re-read persisted runtime inventory: %w", err)
+	}
+	current, err := uniquePersistedSSHExecution(rows, row.AgentExecutionID)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.Runtime != agentruntime.RuntimeSSH {
+		return fmt.Errorf("persisted SSH runtime row changed before settlement: %w", errRemoteRecoveryFenced)
+	}
+	if !samePersistedSSHStopOwner(row, current) {
+		return fmt.Errorf("persisted SSH runtime owner changed before settlement: %w", errRemoteRecoveryFenced)
+	}
+	return nil
 }
 
 func loadPersistedSSHExecution(

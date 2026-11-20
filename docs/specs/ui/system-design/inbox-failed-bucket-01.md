@@ -38,11 +38,11 @@ different change:
 
 ## Prior art
 
-**Our own prior reasoning (wiki).** Receipt: the vault resolved through
-`~/.obsidian-wiki/config` to `OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki`,
-collection `wiki`. It could not then be read: `qmd` is not on `PATH`, its MCP server
-is not exposed, `obsidian-wiki` is not installed, and the directory is unreadable
-from this sandbox (`Operation not permitted`), so no grep fallback was possible. This leg returned nothing because the vault was
+**Our own prior reasoning (wiki).** Receipt: the author's private notes vault
+(local path omitted), collection `wiki`. It could not then be read: `qmd` is not
+on `PATH`, its MCP server is not exposed, `obsidian-wiki` is not installed, and
+the directory is unreadable from this sandbox (`Operation not permitted`), so no
+grep fallback was possible. This leg returned nothing because the vault was
 unreachable, not because it held nothing.
 
 **What other products shipped (saas-kb).** Receipt: `search_saas_docs` with
@@ -84,9 +84,8 @@ failures by severity and do not treat this bucket as a queue.
 
 ## Input inventory
 
-Sampled from the live instance on 2026-09-14 against
-`/Users/henry/.kandev/data/kandev.db` opened read-only. Every number below is a
-measurement, not an estimate.
+Sampled from the live instance on 2026-09-14 against the local Kandev database,
+opened read-only. Every number below is a measurement, not an estimate.
 
 | Candidate predicate, archived excluded | Rows |
 | --- | --- |

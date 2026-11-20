@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const touchState = vi.hoisted(() => ({ enabled: true }));
@@ -72,7 +72,10 @@ beforeEach(() => {
   pointerState.isFinePointer = false;
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("ContextChip coarse-pointer actions", () => {
   it("opens the preview drawer and exposes the open action", () => {
@@ -120,6 +123,42 @@ describe("ContextChip coarse-pointer actions", () => {
 });
 
 describe("ContextChip fine-pointer previews", () => {
+  it("keeps the preview open while the pointer crosses the gap into its controls", async () => {
+    vi.useFakeTimers();
+    touchState.enabled = false;
+    pointerState.isFinePointer = true;
+    const onPreviewAction = vi.fn();
+    render(
+      <ContextChip
+        kind="image"
+        label="Screenshot"
+        preview={<button onClick={onPreviewAction}>Use as file</button>}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Screenshot" });
+    fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
+    await act(() => vi.advanceTimersByTimeAsync(300));
+    const action = screen.getByRole("button", { name: "Use as file" });
+    const preview = action.closest('[data-slot="hover-card-content"]');
+    expect(preview?.getAttribute("data-state")).toBe("open");
+
+    fireEvent.pointerLeave(trigger, { pointerType: "mouse" });
+    await act(() => vi.advanceTimersByTimeAsync(250));
+    expect(preview?.getAttribute("data-state")).toBe("open");
+    expect(action.isConnected).toBe(true);
+
+    fireEvent.pointerEnter(action, { pointerType: "mouse" });
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(preview?.getAttribute("data-state")).toBe("open");
+    fireEvent.click(action);
+    expect(onPreviewAction).toHaveBeenCalledOnce();
+
+    fireEvent.pointerLeave(action, { pointerType: "mouse" });
+    await act(() => vi.advanceTimersByTimeAsync(300));
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("button", { name: "Use as file" })).toBeNull();
+  });
+
   it("exposes the opener without a preview", () => {
     const triggerRef = React.createRef<HTMLButtonElement>();
     render(<ContextChip kind="file" label="app.ts" onClick={vi.fn()} triggerRef={triggerRef} />);

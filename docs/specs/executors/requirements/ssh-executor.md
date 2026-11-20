@@ -2,6 +2,7 @@
 status: active
 system: executors
 created: 2026-05-16
+updated: 2026-11-16
 owners:
   - tbd
 ---
@@ -27,7 +28,7 @@ Today the only ways to run an agent are: (1) locally on the user's own machine (
 - **AC-EXECUTORS-SSH-EXECUTOR-001.6:** **Connectivity: direct, ProxyJump, mesh-VPN.** Direct TCP to `host:port` (default 22). `ProxyJump` (single bastion in v1; chained jumps deferred) implemented natively via the Go SSH client. Tailscale / WireGuard / corporate VPN: "just works" when the kandev backend process is on the same network namespace.
 - **AC-EXECUTORS-SSH-EXECUTOR-001.7:** **Create flow: test-connection gate + explicit fingerprint trust.** The Sprites executor already gates creation behind a "Test Connection" step. The SSH executor adopts the same pattern and extends it with an explicit host-key trust step: 1. **User fills the form.** 2. **User clicks "Test connection".** Backend `POST /api/v1/ssh/test` dials with a permissive host-key callback that records (but does not pin) the observed fingerprint, then probes `uname -a`, arch, `git --version`, and the agentctl-cache-or-upload status. 3. **UI shows the result** with per-step badges and a prominent fingerprint block with a **"Trust this host"** checkbox that must be ticked before Save is enabled. 4. **On Save**, the trusted fingerprint is written to the executor's `Config` as `host_fingerprint`. On every subsequent connection (CreateInstance, RecoverInstances, status polling), a mismatch is a hard error — no silent re-pin.
 - **AC-EXECUTORS-SSH-EXECUTOR-001.8:** One SSH connection per `(host, user, identity-source)`, opened lazily and reused across all the executor's sessions on that host. Each session adds:
-- **AC-EXECUTORS-SSH-EXECUTOR-001.9:** When a resumable SSH session's prior remote controller is confirmed absent, the system shall start a fresh controller in the preserved task workspace and load the preserved provider conversation.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.9:** When a resumable SSH session's prior controller is confirmed absent, the system shall start a replacement in the preserved task workspace. The replacement shall load the preserved provider conversation. If a verified host reboot proves the recorded launch is gone, resume shall use that same replacement path. The system shall preserve any current process that reuses the recorded PID. Unreadable or invalid boot evidence shall not authorize replacement.
 - **AC-EXECUTORS-SSH-EXECUTOR-001.10:** When the system cannot determine whether a prior remote controller is alive because the SSH probe fails, resume shall fail without starting a replacement controller.
 - **AC-EXECUTORS-SSH-EXECUTOR-001.11:** When Kandev copies OpenCode `auth.json` to an SSH host, it shall preserve target-only providers and copy source providers. The source entry shall replace the target entry when both files contain the same provider.
 - **AC-EXECUTORS-SSH-EXECUTOR-001.12:** When the source or existing target is unreadable or is not a JSON object, Kandev shall leave the target unchanged. Kandev shall report the credential-copy error.
@@ -36,7 +37,24 @@ Today the only ways to run an agent are: (1) locally on the user's own machine (
 - **AC-EXECUTORS-SSH-EXECUTOR-001.15:** The sweep shall never stop an `agentctl` process that backs a non-terminal session, that belongs to a task unknown to Kandev, or whose ownership it cannot prove; an unreadable inventory or pidfile shall preserve the process.
 - **AC-EXECUTORS-SSH-EXECUTOR-001.16:** The sweep shall stop an orphan with SIGTERM, then SIGKILL after a bounded grace period, and shall also signal the process groups of that `agentctl`'s direct children when SIGKILL is needed. It shall report per-run counts (found, stopped, preserved, failed) without logging credentials or environment values.
 - **AC-EXECUTORS-SSH-EXECUTOR-001.17:** On a remote host whose `ps` supports `-p` but has no `/proc` (macOS), a stop of a persisted `agentctl` whose pid has exited shall treat the pid as absent rather than failing the stop.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.18:** After a supported SSH controller launch succeeds, its immutable launch identity shall survive backend restart and session-directory loss. A replacement launch shall receive a different identity.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.19:** When the original controller remains alive after session-directory loss, sufficient launch-time proof shall permit owner-bound reconciliation. A responsive controller shall stop within the existing cleanup deadline. Repeated reconciliation shall succeed after its exit.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.20:** When process, host, launch generation, or directory evidence conflicts with the recorded owner, reconciliation shall signal nothing and remove nothing. A replacement process or directory shall survive concurrent reconciliation.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.21:** When launch proof is missing, unsupported, or unreadable, reconciliation shall preserve the cleanup inventory and report an actionable operator-reconciliation outcome. Recovery-time observations shall not create launch authority.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.22:** When the recorded process is positively absent, no process from its recorded launch session remains, and directory evidence permits cleanup, reconciliation shall complete without signalling. A surviving child, a reused PID, or a conflicting directory shall remain protected. Existing confirmed-absence cleanup shall continue to work for legacy records.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.23:** When SSH, permission, process inspection, or termination remains uncertain, reconciliation shall retain the recorded owner and report the reason. One completed target shall not erase another unresolved target.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.24:** Automatic reconciliation shall use only launch evidence issued by Kandev for the selected task, session, and controller. A stale operation shall not stop or settle a successor launch.
+
+The directory-loss extension applies to Linux controllers with verified launch
+proof and race-safe signalling support. Other controllers retain the existing
+guarded stop and confirmed-absence paths.
+
+Automatic directory-loss reconciliation does not infer ownership from a PID,
+command, workdir, recreated pidfile, or process timestamp first read during
+recovery. It does not remove task workspaces or discover unrecorded processes.
 
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/ssh-executor.md).
+The [directory-loss reconciliation design](../system-design/ssh-agentctl-reconciliation.md)
+defines the extension for AC-001.18 through AC-001.24.

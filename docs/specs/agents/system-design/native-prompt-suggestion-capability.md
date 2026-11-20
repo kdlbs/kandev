@@ -71,16 +71,20 @@ The misleading field name must not cause a change in its existing meaning.
 
 ## Primary evidence
 
-All external evidence was inspected on 2026-10-28.
+All external evidence was inspected on 2026-10-28 and 2026-11-05.
 
 | Source | Observed contract |
 | --- | --- |
 | [ACP v1 initialization](https://agentclientprotocol.com/protocol/v1/initialization) and [extensibility](https://agentclientprotocol.com/protocol/v1/extensibility) | ACP provides capabilities and vendor metadata. Neither establishes a standard native-suggestion capability. |
 | [Pinned bridge source at 5dbb453c](https://github.com/agentclientprotocol/claude-agent-acp/blob/5dbb453c63a89746627799b2b06b31ba01a1b674/src/acp-agent.ts) | `initialize` at lines 2332-2367 reports package identity/version and `claudeCode.promptQueueing`. No suggestion-support advertisement exists. `NewSessionMeta` at lines 1344-1383 accepts SDK options and raw-message filters. Lines 4250-4258 forward matching raw messages. |
-| [Pinned bridge package](https://github.com/agentclientprotocol/claude-agent-acp/blob/5dbb453c63a89746627799b2b06b31ba01a1b674/package.json) | Bridge `0.81.2` depends on Claude Agent SDK `0.3.280`. Kandev pins this bridge in `managed_npm_runtime_versions.json`. |
+| [Verified bridge package](https://github.com/agentclientprotocol/claude-agent-acp/blob/5dbb453c63a89746627799b2b06b31ba01a1b674/package.json) | Bridge `0.81.2` depends on Claude Agent SDK `0.3.280`. |
+| [Bridge 0.100.0 package](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp/v/0.100.0) | Inspected package source still accepts `_meta.claudeCode.options.promptSuggestions`, filters raw messages through `emitRawSDKMessages`, emits `_claude/sdkMessage`, and reports `promptQueueing: true` without a `promptSuggestions` capability field. This is the same fallback contract as `0.81.2`. |
 | [Official SDK 0.3.280 artifact](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk/v/0.3.280) | Published `sdk.d.ts`, lines 1988-2004 and 5398-5406, declares `Options.promptSuggestions` and `SDKPromptSuggestionMessage`. The message contains text and session identity, without an originating turn reference. |
 | [Bridge 0.99.0 source at 106e3031](https://github.com/agentclientprotocol/claude-agent-acp/blob/106e3031e393daebc7170c3fe9ed46d0e0ee6c40/src/acp-agent.ts) and [its suggestion projection](https://github.com/agentclientprotocol/claude-agent-acp/blob/106e3031e393daebc7170c3fe9ed46d0e0ee6c40/src/prompt-suggestions.ts) | Still no feature advertisement. It additionally projects suggestions through session-info metadata and sets the SDK option on by default before client overrides. These changes do not establish a compatible version range. |
 | [ACP Go SDK PR #6](https://github.com/kdlbs/acp-go-sdk/pull/6) | Merged at `48a57e4292e88991b6e6e22342b4dd5c901c1258`. Current `go.mod` already uses the fork revision with extension-notification routing. No SDK change is required. |
+
+Kandev pins the official bridge through the trusted catalogue. The current
+catalogue selects `0.100.0`; `0.81.2` remains a verified legacy fallback.
 
 The pinned bridge includes `promptSuggestions` and raw filters in its session
 fingerprint. Changed options on load/resume rebuild the SDK query when required.
@@ -137,7 +141,7 @@ When the feature field is absent, a small Claude compatibility function returns
 support only when all these observed facts match:
 
 - `agentInfo.name == "@agentclientprotocol/claude-agent-acp"`;
-- `agentInfo.version == "0.81.2"`;
+- `agentInfo.version` is exactly `0.81.2` or `0.100.0`;
 - `agentCapabilities._meta.claudeCode` is a non-null object;
 - its `promptQueueing` value is literal `true`.
 
@@ -146,8 +150,8 @@ implementation. Queueing remains an independent feature. A queueing namespace
 on any other identity or version fails this rule.
 
 Require exact strings. Do not accept a version prefix, prerelease, build suffix,
-unknown version, alias, or `>= 0.81.2` range. The rule is local to the Claude
-integration, with no shared provider registry.
+unknown version, alias, or range such as `>= 0.100.0`. The rule is local to the
+Claude integration, with no shared provider registry.
 
 A custom Kandev definition that launches the pinned official bridge qualifies
 because the bridge still reports its own implementation identity. A fork that

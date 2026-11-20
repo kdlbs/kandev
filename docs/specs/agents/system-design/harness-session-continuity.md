@@ -159,9 +159,14 @@ The snapshot contains the current task objective, saved plan reference, workspac
 It includes recent user messages, assistant messages, and concise tool outcomes.
 It excludes debug protocol frames, credential material, sibling conversations, and private child-session history.
 It does not read arbitrary workspace files or private harness databases.
+The explicit continuation prompt labels that material as historical context and
+asks the agent not to retry an earlier action solely because its result is
+missing or uncertain. This guidance does not replace delivery authorization,
+queue fencing, or an operator's current explicit instructions.
 
 The serialized snapshot has a 64 KiB UTF-8 limit.
 The builder reserves 16 KiB for task, workspace, and reduced plan context.
+The historical-context guidance counts within that reservation.
 Included plan text uses `planinjection.Reduce` with `planinjection.HandoverBudget` (12,000 bytes).
 That plan text counts within the 16 KiB reservation and the 64 KiB total, not in addition to either.
 The remaining snapshot budget holds recent conversation.

@@ -281,6 +281,58 @@ func TestWorkspaceFileHandlersRegisterContentSearch(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRootFilesRequiresSessionID(t *testing.T) {
+	handler := NewWorkspaceFileHandlers(nil, newTestLogger())
+	dispatcher := ws.NewDispatcher()
+	handler.RegisterHandlers(dispatcher)
+	if !dispatcher.HasHandler(ws.ActionWorkspaceRootFilesList) {
+		t.Fatal("workspace root files handler was not registered")
+	}
+	msg, err := ws.NewRequest("request-1", ws.ActionWorkspaceRootFilesList, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := dispatcher.Dispatch(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	assertWorkspaceContentSearchErrorCode(t, response, ws.ErrorCodeValidation)
+}
+
+func TestWorkspaceRootFilesReturnsAgentctlListing(t *testing.T) {
+	handler := workspaceHandlerServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/workspace/root-files" {
+			t.Errorf("request = %s %s, want GET /api/v1/workspace/root-files", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"supported":true,"files":[{"path":"dashboard.json","size":2}],"truncated":false,"destinations":[{"repository_name":"frontend","path":"frontend"}]}`))
+	})
+	dispatcher := ws.NewDispatcher()
+	handler.RegisterHandlers(dispatcher)
+	msg, err := ws.NewRequest("request-1", ws.ActionWorkspaceRootFilesList, map[string]any{"session_id": "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := dispatcher.Dispatch(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	var listing struct {
+		Supported bool `json:"supported"`
+		Files     []struct {
+			Path string `json:"path"`
+		} `json:"files"`
+		Destinations []struct {
+			Path string `json:"path"`
+		} `json:"destinations"`
+	}
+	if err := response.ParsePayload(&listing); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if !listing.Supported || len(listing.Files) != 1 || listing.Files[0].Path != "dashboard.json" || len(listing.Destinations) != 1 || listing.Destinations[0].Path != "frontend" {
+		t.Fatalf("listing = %+v, want dashboard.json and frontend destination", listing)
+	}
+}
+
 func TestWorkspaceContentSearchRequiresSessionID(t *testing.T) {
 	handler := NewWorkspaceFileHandlers(nil, newTestLogger())
 	msg, err := ws.NewRequest("request-1", ws.ActionWorkspaceContentSearch, map[string]any{

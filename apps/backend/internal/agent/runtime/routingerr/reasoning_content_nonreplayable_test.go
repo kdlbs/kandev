@@ -16,6 +16,7 @@ func TestClassify_ReasoningContentNonReplayable(t *testing.T) {
 	e := Classify(Input{Phase: PhasePromptSend, ProviderID: "opencode-acp", Stderr: reasoningContentMessage})
 	if e == nil {
 		t.Fatal("expected non-nil Error")
+		return
 	}
 	if e.Code != CodeResumeCorrupted {
 		t.Fatalf("Code = %q, want %q", e.Code, CodeResumeCorrupted)

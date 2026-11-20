@@ -3,6 +3,8 @@ package worktree
 import (
 	"context"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // orderRecordingScriptHandler records when the per-repo setup script runs so a
@@ -62,6 +64,7 @@ func TestManagerCreate_OnWorktreeCreatedReceivesFallbackWarning(t *testing.T) {
 	req := createReqForCopyTest(repoPath, "fallback")
 	req.BaseBranch = "does-not-exist"
 	req.FallbackBaseBranch = "main"
+	req.BaseBranchFallbackPolicy = models.BaseBranchFallbackPolicyRepositoryDefault
 
 	var warningAtCallback string
 	req.OnWorktreeCreated = func(wt *Worktree) {

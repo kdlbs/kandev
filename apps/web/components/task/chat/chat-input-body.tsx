@@ -26,6 +26,8 @@ import {
 } from "@/lib/plugins/composer-capability";
 import type { PluginComposerCapability } from "@/lib/plugins/types";
 import { useComposerActivity, useComposerFocus } from "./composer-disclosure";
+import { shouldCancelAgentWithEscape } from "./chat-escape-cancel";
+import { wasEscapeClaimedByDialog } from "@/hooks/use-clarification-escape-guard";
 
 export type ChatInputEditorAreaProps = {
   inputRef: React.RefObject<import("./tiptap-input").TipTapInputHandle | null>;
@@ -62,7 +64,10 @@ export type ChatInputEditorAreaProps = {
   hideAgentControls?: boolean;
   hidePlanMode?: boolean;
   isAgentBusy: boolean;
+  onEscape?: (event: React.KeyboardEvent<HTMLElement>) => void;
   canCancelAgent?: boolean;
+  escapeCancelsAgent?: boolean;
+  hasPendingClarification?: boolean;
   onPlanModeChange: (enabled: boolean) => void;
   taskTitle?: string;
   taskDescription: string;
@@ -205,9 +210,11 @@ function composerPluginOptions(
 /** The editable composer surface: the TipTap editor and its suggestion accept affordance. */
 function ChatInputEditorField({
   p,
+  shouldHandleEscape,
   onSubmit,
 }: {
   p: ChatInputEditorAreaProps;
+  shouldHandleEscape: (event: KeyboardEvent) => boolean;
   onSubmit: () => void;
 }) {
   const { inputRef, value, isDisabled, setIsInputFocused, promptSuggestion } = p;
@@ -240,6 +247,8 @@ function ChatInputEditorField({
         onPlanModeChange={p.onPlanModeChange}
         promptSuggestion={promptSuggestion ?? null}
         onPromptSuggestionDismiss={p.onPromptSuggestionDismiss}
+        onEscape={p.onEscape}
+        shouldHandleEscape={shouldHandleEscape}
       />
       {promptSuggestion && !value.trim() && !isDisabled && (
         <ComposerPromptSuggestionHint
@@ -276,6 +285,28 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         else handleSubmitWithReset();
       }
     : wrappedSubmit;
+  const shouldHandleEscape = useCallback(
+    (event: KeyboardEvent) =>
+      shouldCancelAgentWithEscape(event, {
+        canCancelAgent: Boolean(p.canCancelAgent),
+        escapeCancelsAgent: Boolean(p.escapeCancelsAgent),
+        hasPendingClarification: Boolean(p.hasPendingClarification),
+      }),
+    [p.canCancelAgent, p.escapeCancelsAgent, p.hasPendingClarification],
+  );
+  const handleEscape = useCallback(
+    (event: React.KeyboardEvent<HTMLElement>) => {
+      if (
+        !shouldHandleEscape(event.nativeEvent) &&
+        !(event.defaultPrevented && wasEscapeClaimedByDialog(event.nativeEvent))
+      ) {
+        return;
+      }
+      event.preventDefault();
+      p.onCancel();
+    },
+    [p.onCancel, shouldHandleEscape],
+  );
 
   const composerCapability = useChatPluginComposer(composerPluginOptions(p, hasContent));
   const submitDisabledReason = p.hasPendingAttachmentUploads
@@ -285,7 +316,11 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-      <ChatInputEditorField p={p} onSubmit={wrappedSubmit} />
+      <ChatInputEditorField
+        p={{ ...p, onEscape: handleEscape }}
+        shouldHandleEscape={shouldHandleEscape}
+        onSubmit={wrappedSubmit}
+      />
       <FileInput fileInputRef={fileInputRef} addFiles={addFiles} />
       <ChatInputToolbar
         planModeEnabled={planModeEnabled}

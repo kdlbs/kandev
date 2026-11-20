@@ -59,7 +59,7 @@ func TestAutoStartStepPrompt_LeavesHandoffQueuedWhenAutoRunPaused(t *testing.T) 
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-paused-handoff")
 
 	queued, err := svc.messageQueue.QueueMessage(ctx, sessionID, taskID, handoff, "", "user", false, nil)

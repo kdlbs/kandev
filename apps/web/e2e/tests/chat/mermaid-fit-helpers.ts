@@ -21,12 +21,20 @@ const WIDE_MERMAID_MESSAGE = [
   "```",
 ].join("\n");
 
+export const GLUED_MERMAID_MESSAGE = [
+  "```mermaid",
+  "flowchart LR",
+  "  A --> B",
+  "```Following prose after the diagram.",
+].join("\n");
+
 export async function seedTaskWithWideMermaidMessage(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-): Promise<SessionPage> {
+  messageContent = WIDE_MERMAID_MESSAGE,
+): Promise<{ session: SessionPage; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -42,13 +50,13 @@ export async function seedTaskWithWideMermaidMessage(
 
   await apiClient.seedSessionMessage(task.session_id, {
     type: "message",
-    content: WIDE_MERMAID_MESSAGE,
+    content: messageContent,
   });
 
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  return session;
+  return { session, sessionId: task.session_id };
 }
 
 export async function expectMermaidDiagramFitsViewport(session: SessionPage): Promise<void> {
@@ -67,4 +75,36 @@ export async function expectMermaidDiagramFitsViewport(session: SessionPage): Pr
       { timeout: 10_000 },
     )
     .toBe(true);
+}
+
+export async function expectMermaidRecovery(session: SessionPage): Promise<void> {
+  const chat = session.activeChat();
+  const diagram = chat.locator(".mermaid-block").last();
+  await expect(diagram).toBeVisible();
+  await expect(diagram.locator(".mermaid-scroll-region svg")).toBeVisible();
+
+  const prose = chat.getByText("Following prose after the diagram.", { exact: true });
+  await expect(prose).toBeVisible();
+  expect(await prose.evaluate((element) => element.closest("pre, .mermaid-block"))).toBeNull();
+  const proseHandle = await prose.elementHandle();
+  expect(proseHandle).not.toBeNull();
+  expect(
+    await diagram.evaluate(
+      (element, following) =>
+        Boolean(
+          following &&
+          element.compareDocumentPosition(following) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      proseHandle,
+    ),
+  ).toBe(true);
+}
+
+export async function expectMermaidMessageUnchanged(
+  apiClient: ApiClient,
+  sessionId: string,
+  expectedContent: string,
+): Promise<void> {
+  const { messages } = await apiClient.listSessionMessages(sessionId);
+  expect(messages.some((message) => message.content === expectedContent)).toBe(true);
 }

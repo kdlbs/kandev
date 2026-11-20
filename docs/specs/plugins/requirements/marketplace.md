@@ -2,7 +2,7 @@
 status: active
 system: plugins
 created: 2026-07-18
-updated: 2026-10-30
+updated: 2026-11-19
 owners:
   - jcfs
 ---
@@ -43,6 +43,7 @@ marketplace — while keeping install-by-URL and sideloading as escape hatches.
 - **AC-PLUGINS-MARKETPLACE-001.8:** The catalog SHALL be assembled from **one or more marketplace sources**. kandev ships with the **official kandev source** enabled by default; operators MAY add **additional sources** (a team or corporate registry) and the catalog merges them.
 - **AC-PLUGINS-MARKETPLACE-001.9:** When the official catalog retains an earlier native-plugin listing after a release failure, attribution shall follow its current curated repository owner. The retained package version, URL, and digest shall remain unchanged. An all-failed rebuild shall preserve the published catalog.
 - **AC-PLUGINS-MARKETPLACE-001.10:** On desktop and phone, installed-plugin details shall identify the manifest author as `Declared author`. This value shall not imply verified publisher identity. Missing author data shall keep the existing unavailable marker.
+- **AC-PLUGINS-MARKETPLACE-001.11:** When a release manifest and its curated registry entry both declare categories, the official index SHALL include each category once, in manifest order followed by registry order. Registry categories SHALL add labels without removing manifest categories.
 
 These attribution rules cover native plugins. Canvas attribution, publisher
 verification, and package provenance remain separate contracts. Custom source

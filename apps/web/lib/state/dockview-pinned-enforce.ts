@@ -20,9 +20,24 @@ import type { RootSplitview } from "./dockview-internals";
  * `sv.resizeView`.
  */
 import type { DockviewApi } from "dockview-react";
-import { getRootSplitview, getPinnedTarget, computeSidebarMaxPx } from "./layout-manager";
+import {
+  getRootOrientation,
+  getRootSplitview,
+  getPinnedTarget,
+  computeSidebarMaxPx,
+} from "./layout-manager";
+import { getPinnedRightColumn } from "./layout-manager/pinned-right-column";
+import { refreshPinnedRightConstraints } from "./layout-manager/pinned-right-constraints";
+import { getRootSidebarWidth } from "./layout-manager/applier";
+import { getReusableRightWidth, setPinnedTarget } from "./layout-manager/pinned-targets";
+import {
+  restoreReusableRootGeometry,
+  validateLiveRootGeometry,
+} from "./layout-manager/reusable-root-geometry";
+import { computeRightMaxPx } from "./layout-manager/caps";
 import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
 import { getManualRightWidth } from "@/lib/local-storage";
+import type { HiddenRightPane } from "./dockview-right-pane";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { measureDockviewGridWidth } from "./dockview-measure";
 
@@ -70,17 +85,50 @@ export type EnforcePinnedTargetsCtx = {
    *  enforcement so we don't fight the 2-column maximize overlay. */
   maximized: boolean;
   envId?: string | null;
+  /** A hidden pane retains the complete root source until its full structure returns. */
+  hiddenRightPane?: HiddenRightPane | null;
+};
+
+type RightSplitview = {
+  length: number;
+  getViewSize: (index: number) => number;
+  resizeView: (index: number, size: number) => void;
 };
 
 function resolveRightTarget(
+  ctx: EnforcePinnedTargetsCtx,
+  sidebarWidth: number,
+  width: number | undefined,
+  manualWidth: number | null,
+): number {
+  const persistedTarget =
+    manualWidth ?? getReusableRightWidth(ctx.envId, width) ?? getPinnedTarget("right") ?? null;
+  return resolveResponsiveRightWidth(width, sidebarWidth, persistedTarget);
+}
+
+function enforceRightColumn(
   api: DockviewApi,
   ctx: EnforcePinnedTargetsCtx,
-  sv: RootSplitview,
-): number {
-  const sidebarWidth = ctx.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
-  const persistedTarget =
-    getManualRightWidth(ctx.envId ?? null) ?? getPinnedTarget("right") ?? null;
-  return resolveResponsiveRightWidth(measureDockviewGridWidth(api), sidebarWidth, persistedTarget);
+  sv: RightSplitview,
+): void {
+  const width = measureDockviewGridWidth(api);
+  const right = getPinnedRightColumn(api);
+  const sidebarWidth = getRootSidebarWidth(api);
+  const manualWidth = getManualRightWidth(ctx.envId ?? null);
+  const target = resolveRightTarget(ctx, sidebarWidth, width, manualWidth);
+  const maximumWidth = computeRightMaxPx(width, sidebarWidth);
+  refreshPinnedRightConstraints(api, right ? { groups: right.groups, maximumWidth } : null);
+  if (right) {
+    setPinnedTarget("right", target);
+    if (
+      restoreReusableRootGeometry(api, ctx.envId, width, target, {
+        manualWidth,
+        hiddenRightPane: ctx.hiddenRightPane,
+      })
+    )
+      return;
+  }
+  restoreColumnToTarget(sv, right?.index ?? sv.length - 1, target);
 }
 
 /**
@@ -108,6 +156,10 @@ function resolveRightTarget(
 export function enforcePinnedTargets(api: DockviewApi, ctx: EnforcePinnedTargetsCtx): void {
   if (enforcing || sashDragging) return;
   if (api.hasMaximizedGroup() || ctx.maximized) return;
+  // Pinned targets are horizontal widths; a vertical root's children are rows.
+  if (getRootOrientation(api) === "VERTICAL") return;
+  validateLiveRootGeometry(api, ctx.envId, ctx.hiddenRightPane);
+  if (!ctx.rightPanelsVisible) refreshPinnedRightConstraints(api, null);
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   enforcing = true;
@@ -124,10 +176,7 @@ export function enforcePinnedTargets(api: DockviewApi, ctx: EnforcePinnedTargets
       const clamped = raw === undefined ? undefined : Math.min(raw, computeSidebarMaxPx(safeWidth));
       restoreColumnToTarget(sv, 0, clamped);
     }
-    if (ctx.rightPanelsVisible) {
-      const target = resolveRightTarget(api, ctx, sv);
-      restoreColumnToTarget(sv, sv.length - 1, target);
-    }
+    if (ctx.rightPanelsVisible) enforceRightColumn(api, ctx, sv);
   } finally {
     enforcing = false;
   }

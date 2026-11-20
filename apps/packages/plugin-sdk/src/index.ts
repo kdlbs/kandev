@@ -269,11 +269,62 @@ export interface HostReact {
 }
 
 export interface ActionInput {
+  notificationProviderId?: string;
+  notificationFormatter?: NotificationFormatterActionContext;
   workspaceId?: string;
   taskId?: string;
   sessionId?: string;
   repositoryId?: string;
   body?: unknown;
+}
+
+export interface NotificationFormatterActionContext {
+  installationId: string;
+  formatterKey: string;
+  expectedBindingRevision: string;
+  mode: "candidate" | "active";
+}
+
+/** Content-extension declaration selected for an owned notification provider. */
+export interface NotificationFormatterChoice {
+  plugin_id: string;
+  installation_id: string;
+  key: string;
+  version: string;
+}
+
+export interface NotificationFormatterBinding {
+  provider_id: string;
+  provider_type: string;
+  plugin_id: string;
+  installation_id: string;
+  formatter_key: string;
+  configuration_revision: string;
+  digest: string;
+  revision: string;
+}
+
+/** Props for the owner-isolated notification-formatter slot. The backend
+ * reauthorizes provider and installation identity for every operation. */
+export interface NotificationFormatterSlotProps {
+  provider: { id: string; name: string; type: string; events: readonly string[] };
+  events: readonly string[];
+  formatter: NotificationFormatterChoice;
+  binding: NotificationFormatterBinding | null;
+  /** Register selection-only drafts with shared Save; first activation stays explicit. */
+  selectionChanged?: boolean;
+  activateConfiguration(
+    prepared: { revision: string; digest: string },
+    expectedBindingRevision: string,
+  ): Promise<NotificationFormatterBinding>;
+  reload(): Promise<void>;
+  readActiveBinding(): Promise<NotificationFormatterBinding | null>;
+  previewConfiguration(
+    draft: unknown,
+    event: string,
+    sample: string,
+    signal?: AbortSignal,
+  ): Promise<{ title: string; body: string; used_fallback: boolean }>;
 }
 
 export interface PluginHostRepository {

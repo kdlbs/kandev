@@ -139,8 +139,9 @@ same pending-signal population and never gain transition authority.
 
 There is no schema change, new response envelope, or new MCP argument.
 `workflow_step_id_at_start` remains an immutable historical fact.
-The conditional signal claim and duplicate handling retain their behavior and
-add the entry fence described below.
+The claim and duplicate paths retain this entry fence.
+Their source-turn extension is specified in the
+[completion outcomes design](workflow-completion-outcomes.md).
 RUNNING and WAITING_FOR_INPUT sessions both retain the mismatch guard.
 Idleness does not prove that work belongs to the new step.
 
@@ -241,8 +242,11 @@ uses the existing session JSON bag; no SQL column or new MCP argument is needed.
 The claim records the locked entry, including the legitimate zero-entry case.
 New writes preserve presence, so zero and legacy absence are distinguishable.
 The decoder retains typed/map parity. Duplicate claims compare entry as well as
-step: the first accepted payload for one entry wins; an old or unproven entry
-cannot mask a fresh eligible completion. Publish failures retry the same claim.
+step: an old or unproven entry cannot mask a fresh eligible completion.
+Publish failures retry the same claim. The
+[completion outcomes design](workflow-completion-outcomes.md) further scopes
+duplicate claims to one source turn and defines retained transition receipts.
+Its exact-signal commit guard supplements this entry guard.
 
 Both turn-end implementations and the waiting-session subscriber/watchdog must
 require matching entry evidence when consuming signals. Propagate the stored

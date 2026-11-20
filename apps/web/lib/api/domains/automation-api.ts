@@ -1,6 +1,7 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type {
   Automation,
+  AutomationMCPOptions,
   AutomationRun,
   AutomationRunsPage,
   AutomationSummary,
@@ -257,5 +258,17 @@ export function listPluginWebhookReceipts(automationId: string) {
   return requireClient().request<PluginWebhookReceipt[]>("automation.webhook_binding", {
     automation_id: automationId,
     operation: "receipts",
+  });
+}
+
+export async function getAutomationMCPOptions(
+  workspaceId: string,
+  profileId: string,
+  repositoryIds: string[],
+): Promise<AutomationMCPOptions> {
+  return requireClient().request<AutomationMCPOptions>("automation.mcp_options", {
+    workspace_id: workspaceId,
+    agent_profile_id: profileId,
+    repository_ids: repositoryIds,
   });
 }
