@@ -67,7 +67,7 @@ type queueAdmissionStore interface {
 		*messagequeue.QueuedMessage,
 		*messagequeue.QueueAttachmentClaim,
 		int,
-		*messagequeue.AutoMergePolicy,
+		*messagequeue.AdmissionPolicy,
 		*messagequeue.WorkflowEntryIdentity,
 	) (*messagequeue.QueuedMessage, bool, error)
 	LookupQueueAdmission(

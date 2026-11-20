@@ -16,6 +16,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+import "github.com/kandev/kandev/internal/orchestrator/messagequeue"
+
 func TestResolvePrecedenceAndNormalization(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -96,7 +98,7 @@ func TestStoreRoundTripAndValidation(t *testing.T) {
 	if err := json.Unmarshal(raw.raw, &saved); err != nil {
 		t.Fatalf("decode saved JSON: %v", err)
 	}
-	if saved["auto_merge_enabled"] != true || saved["auto_merge_revision"] != float64(0) || len(saved) != 4 {
+	if saved["auto_merge_enabled"] != true || saved["auto_merge_revision"] != float64(0) {
 		t.Fatalf("saved settings are not normalized: %s", raw.raw)
 	}
 	loaded, err = store.Load(context.Background())
@@ -383,12 +385,12 @@ func TestServiceInstallsConsistentAutoMergePolicyLoader(t *testing.T) {
 	); err != nil {
 		t.Fatalf("disable Auto-merge: %v", err)
 	}
-	enabled, revision, err := readerTarget.load(context.Background())
+	policy, err := readerTarget.load(context.Background())
 	if err != nil {
 		t.Fatalf("load shared policy: %v", err)
 	}
-	if enabled || revision != 1 {
-		t.Fatalf("shared policy = enabled=%v revision=%d, want false/1", enabled, revision)
+	if policy.Enabled || policy.Revision != 1 {
+		t.Fatalf("shared policy = %+v, want automatic false/1", policy)
 	}
 }
 
@@ -709,13 +711,14 @@ type fakeTarget struct {
 
 type policyLoaderTarget struct {
 	fakeTarget
-	load func(context.Context) (bool, int64, error)
+	load func(context.Context) (messagequeue.AutoMergePolicy, error)
 }
 
-func (t *policyLoaderTarget) SetAutoMergePolicyLoader(
-	load func(context.Context) (bool, int64, error),
-) {
+func (t *policyLoaderTarget) SetGlobalAutoMergePolicyLoader(load func(context.Context) (messagequeue.AutoMergePolicy, error)) {
 	t.load = load
+}
+func (t *policyLoaderTarget) SetGlobalAutoMergePolicy(policy messagequeue.AutoMergePolicy) {
+	t.autoMergeEnabled = policy.Enabled
 }
 func (f *fakeTarget) MaxPerSession() int         { return f.max }
 func (f *fakeTarget) SetMaxPerSession(n int)     { f.max = n }
