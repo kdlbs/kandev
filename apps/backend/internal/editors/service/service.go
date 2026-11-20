@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/editors/capabilities"
 	"github.com/kandev/kandev/internal/editors/models"
@@ -34,7 +35,10 @@ var (
 	ErrEditorUnavailable   = errors.New("editor not available")
 	ErrEditorConfigInvalid = errors.New("editor configuration invalid")
 	ErrWorkspaceNotFound   = errors.New("workspace path not found")
+	ErrSessionForbidden    = errors.New("session access forbidden")
 )
+
+var startProcess = func(cmd *exec.Cmd) error { return cmd.Start() }
 
 // Editor kind constants for custom editor types.
 const (
@@ -50,9 +54,10 @@ type UserSettingsProvider interface {
 }
 
 type Service struct {
-	repo         store.Repository
-	taskRepo     taskSessionReader
-	userSettings UserSettingsProvider
+	repo                 store.Repository
+	taskRepo             taskSessionReader
+	userSettings         UserSettingsProvider
+	sessionAccessChecker func(context.Context, string) error
 }
 
 func NewService(repo store.Repository, taskRepo taskSessionReader, userSettings UserSettingsProvider) *Service {
@@ -65,6 +70,22 @@ func NewService(repo store.Repository, taskRepo taskSessionReader, userSettings 
 
 func (s *Service) ListEditors(ctx context.Context) ([]*models.Editor, error) {
 	return s.repo.ListEditors(ctx)
+}
+
+// SetSessionAccessChecker wires the task-domain authorization check for editor launches.
+func (s *Service) SetSessionAccessChecker(checker func(context.Context, string) error) {
+	s.sessionAccessChecker = checker
+}
+
+func (s *Service) authorizeSession(ctx context.Context, sessionID string) error {
+	if s.sessionAccessChecker != nil {
+		return s.sessionAccessChecker(ctx, sessionID)
+	}
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic {
+		return nil
+	}
+	return ErrSessionForbidden
 }
 
 type OpenEditorInput struct {
@@ -80,6 +101,9 @@ type OpenEditorInput struct {
 func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string, error) {
 	if input.SessionID == "" {
 		return "", ErrEditorConfigInvalid
+	}
+	if err := s.authorizeSession(ctx, input.SessionID); err != nil {
+		return "", err
 	}
 	session, err := s.taskRepo.GetTaskSession(ctx, input.SessionID)
 	if err != nil {
@@ -203,7 +227,7 @@ func openBuiltinEditor(editor *models.Editor, absPath string, line, column int) 
 	}
 	args := buildLocalArgs(editor.Type, absPath, line, column)
 	cmd := exec.Command(editor.Command, args...)
-	if err := cmd.Start(); err != nil {
+	if err := startProcess(cmd); err != nil {
 		return "", fmt.Errorf("launch failed: %w", err)
 	}
 	return "", nil
@@ -212,6 +236,9 @@ func openBuiltinEditor(editor *models.Editor, absPath string, line, column int) 
 func (s *Service) OpenFolder(ctx context.Context, sessionID, worktreeID string) error {
 	if sessionID == "" {
 		return ErrEditorConfigInvalid
+	}
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return err
 	}
 	if !FolderOpeningAvailable() {
 		return ErrFolderUnavailable
@@ -228,7 +255,7 @@ func (s *Service) OpenFolder(ctx context.Context, sessionID, worktreeID string) 
 
 	cmd := exec.Command(folderOpenCommand(runtime.GOOS), worktreePath)
 
-	if err := cmd.Start(); err != nil {
+	if err := startProcess(cmd); err != nil {
 		return fmt.Errorf("failed to open folder: %w", err)
 	}
 	return nil
@@ -545,44 +572,47 @@ func parseHostedURLConfig(data json.RawMessage) (hostedURLConfig, error) {
 }
 
 func launchCommand(commandTemplate, worktreePath, absPath string, line, column int) (string, error) {
-	expanded := expandCommandPlaceholders(commandTemplate, worktreePath, absPath, line, column)
-	parts, err := securityutil.SplitShellCommand(expanded)
+	parts, err := buildCommandArgs(commandTemplate, worktreePath, absPath, line, column)
 	if err != nil {
-		return "", fmt.Errorf("invalid command template: %w", err)
-	}
-	if len(parts) == 0 {
-		return "", ErrEditorConfigInvalid
+		return "", err
 	}
 	cmd := exec.Command(parts[0], parts[1:]...)
 	if worktreePath != "" {
 		cmd.Dir = worktreePath
 	}
-	if err := cmd.Start(); err != nil {
+	if err := startProcess(cmd); err != nil {
 		return "", fmt.Errorf("launch failed: %w", err)
 	}
 	return "", nil
 }
 
-func expandCommandPlaceholders(template, worktreePath, absPath string, line, column int) string {
+func buildCommandArgs(template, worktreePath, absPath string, line, column int) ([]string, error) {
+	parts, err := securityutil.SplitShellCommand(template)
+	if err != nil {
+		wrapped := fmt.Errorf("invalid command template: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrEditorConfigInvalid, wrapped)
+	}
+	if len(parts) == 0 {
+		return nil, ErrEditorConfigInvalid
+	}
+
 	relPath := absPath
 	if worktreePath != "" && absPath != "" {
 		if relative, err := filepath.Rel(worktreePath, absPath); err == nil {
 			relPath = relative
 		}
 	}
-	// Shell-escape paths to handle spaces and special characters safely
-	replacements := map[string]string{
-		"{cwd}":    securityutil.ShellEscape(worktreePath),
-		"{file}":   securityutil.ShellEscape(absPath),
-		"{rel}":    securityutil.ShellEscape(relPath),
-		"{line}":   strconv.Itoa(line),
-		"{column}": strconv.Itoa(column),
+	replacer := strings.NewReplacer(
+		"{cwd}", worktreePath,
+		"{file}", absPath,
+		"{rel}", relPath,
+		"{line}", strconv.Itoa(line),
+		"{column}", strconv.Itoa(column),
+	)
+	for i := range parts {
+		parts[i] = replacer.Replace(parts[i])
 	}
-	result := template
-	for key, value := range replacements {
-		result = strings.ReplaceAll(result, key, value)
-	}
-	return result
+	return parts, nil
 }
 
 func isCustomKind(kind string) bool {

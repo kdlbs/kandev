@@ -358,3 +358,12 @@ func TestMapUserSettingsStateIncludesPromptSuggestions(t *testing.T) {
 		t.Fatalf("promptSuggestions = %#v, want true", state["promptSuggestions"])
 	}
 }
+
+func TestMarkdownPreviewBootProjection(t *testing.T) {
+	for _, value := range []bool{true, false} {
+		state := mapUserSettingsState(userdto.UserSettingsResponse{Settings: userdto.UserSettingsDTO{MarkdownPreviewByDefault: value}}, "workspace-1")
+		if state["markdownPreviewByDefault"] != value {
+			t.Fatalf("boot = %#v", state["markdownPreviewByDefault"])
+		}
+	}
+}

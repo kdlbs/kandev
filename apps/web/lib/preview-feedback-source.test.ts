@@ -17,4 +17,13 @@ describe("preview feedback source identity", () => {
       ),
     ).toBe("/checkout?step=shipping&redirect_uri=%2Faccount");
   });
+
+  it("drops parameters Kandev adds to the preview URL", () => {
+    expect(sanitizePreviewPageRoute("/site/index.html?kandev_preview_version=4&tab=pro")).toBe(
+      "/site/index.html?tab=pro",
+    );
+    expect(sanitizePreviewPageRoute("/site/index.html?kandev_preview_version=5")).toBe(
+      "/site/index.html",
+    );
+  });
 });

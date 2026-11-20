@@ -133,7 +133,7 @@ function rewriteReusableChatPanels(state: LayoutState, targets: LayoutPanel[]): 
   const columns = state.columns
     .map((column) => rewriteColumn(column, targets, inserted))
     .filter((column): column is LayoutColumn => column !== null);
-  return { columns };
+  return { ...state, columns };
 }
 
 export function normalizeReusableSessionPanels(state: LayoutState): LayoutState {

@@ -65,7 +65,10 @@ test.describe("Office execution profile routing on mobile", () => {
 
     await roleTier.click();
     await testPage.getByRole("option", { name: /Balanced/ }).click();
-    await testPage.getByRole("button", { name: "Save", exact: true }).click();
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
     await expect(testPage.getByText("Routing settings saved", { exact: true })).toBeVisible();
 
     const saved = await officeApi.getRouting(officeSeed.workspaceId);

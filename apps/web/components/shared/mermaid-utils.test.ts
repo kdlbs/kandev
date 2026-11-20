@@ -1,11 +1,115 @@
-import { describe, expect, it, vi } from "vitest";
+import mermaid from "mermaid";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_SCALE,
   calculateMermaidFitScale,
   getElementContentWidth,
   reportMermaidRenderFailure,
   sanitizeMermaidCode,
+  selectMermaidSource,
 } from "./mermaid-utils";
+
+const validateMermaidSource = async (source: string): Promise<boolean> =>
+  Boolean(await mermaid.parse(source, { suppressErrors: true }));
+
+beforeAll(() => {
+  mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose" });
+});
+
+describe("selectMermaidSource", () => {
+  // @covers AC-UI-MERMAID-RENDERING-002.1
+  it("recovers following prose only when the full source fails and its diagram prefix parses", async () => {
+    const source = "flowchart LR\n  A --> B\n```Following paragraph.";
+
+    await expect(selectMermaidSource(source, validateMermaidSource)).resolves.toEqual({
+      diagramSource: "flowchart LR\n  A --> B\n",
+      followingMarkdown: "Following paragraph.",
+    });
+  });
+
+  // @covers AC-UI-MERMAID-RENDERING-002.2
+  it("keeps valid Mermaid source containing a fence-shaped line in a multiline label", async () => {
+    const source = 'flowchart LR\n  A["first line\n```literal label text\nlast line"] --> B';
+
+    await expect(selectMermaidSource(source, validateMermaidSource)).resolves.toEqual({
+      diagramSource: source,
+    });
+  });
+
+  // @covers AC-UI-MERMAID-RENDERING-002.2
+  it("skips a fence-shaped line inside a label and recovers at the glued closing run", async () => {
+    const source = [
+      "flowchart LR",
+      '  A["first line',
+      "```literal label text",
+      'last line"] --> B',
+      "```Following paragraph.",
+    ].join("\n");
+
+    await expect(selectMermaidSource(source, validateMermaidSource)).resolves.toEqual({
+      diagramSource: `flowchart LR\n  A["first line\n\`\`\`literal label text\nlast line"] --> B\n`,
+      followingMarkdown: "Following paragraph.",
+    });
+  });
+
+  // @covers AC-UI-MERMAID-RENDERING-002.3
+  it("keeps the original source when the candidate prefix is not a valid diagram", async () => {
+    const source = "flowchart LR\n  A -->\n```Following paragraph.";
+
+    await expect(selectMermaidSource(source, validateMermaidSource)).resolves.toEqual({
+      diagramSource: source,
+    });
+  });
+
+  it.each([
+    "flowchart LR\n  A --> B",
+    "flowchart LR\n  A --> B\n``` spaced prose",
+    "flowchart LR\n  A --> B\n````",
+    "flowchart LR\n  A --> B\n`````",
+    "flowchart LR\n  A --> B\n```` spaced prose",
+    "flowchart LR\n  A --> B\n````` spaced prose",
+    "flowchart LR\n  A --> B\n````\tspaced prose",
+  ])("does not validate or split content without an eligible candidate: %s", async (source) => {
+    const validate = vi.fn(async () => true);
+
+    await expect(selectMermaidSource(source, validate)).resolves.toEqual({
+      diagramSource: source,
+    });
+    expect(validate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { lineEnding: "\n", expectedSuffix: "Next line\nSecond paragraph" },
+    { lineEnding: "\r\n", expectedSuffix: "Next line\r\nSecond paragraph" },
+    { lineEnding: "\r", expectedSuffix: "Next line\rSecond paragraph" },
+  ])(
+    "preserves following Markdown for $lineEnding line endings",
+    async ({ lineEnding, expectedSuffix }) => {
+      const source = ["flowchart LR", "  A --> B", "   ````Next line", "Second paragraph"].join(
+        lineEnding,
+      );
+      const validate = vi.fn(
+        async (candidate: string) => candidate.includes("A --> B") && !candidate.includes("````"),
+      );
+
+      await expect(selectMermaidSource(source, validate)).resolves.toEqual({
+        diagramSource: `flowchart LR${lineEnding}  A --> B${lineEnding}`,
+        followingMarkdown: expectedSuffix,
+      });
+      expect(validate).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("keeps the original source when syntax validation rejects unexpectedly", async () => {
+    const source = "flowchart LR\n  A --> B\n```Following paragraph.";
+    const validate = vi.fn(async () => {
+      throw new Error("Parser unavailable");
+    });
+
+    await expect(selectMermaidSource(source, validate)).resolves.toEqual({ diagramSource: source });
+    expect(validate).toHaveBeenCalledOnce();
+  });
+});
 
 describe("calculateMermaidFitScale", () => {
   it("keeps the default scale when the diagram already fits", () => {

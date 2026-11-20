@@ -68,9 +68,17 @@ explicitly requests task tracking.
    on another viewport, record that rationale instead of capturing an unrelated
    screen.
    Use synthetic or redacted data, validate the assets, and compress PNGs using
-   the recipe in step 7. If capture is impossible, report the concrete blocker
-   and stop before PR publication. For non-UI changes, record that screenshots
-   are not required and continue.
+   the recipe in step 7. If capture is impossible, document the concrete
+   blocker in the PR description and continue publication. The screenshot check
+   will fail until evidence is added or a maintainer applies
+   `no-screenshots-allow`. UI candidate PRs should include a fresh HTTPS
+   Markdown image with descriptive alt text in `## Screenshots` when capture is
+   possible.
+   The `UI screenshots` status applies to fork PRs too and checks presence;
+   reviewers assess freshness, visibility, relevance, and affected viewport
+   coverage. Only a maintainer can apply the exact `no-screenshots-allow` label
+   for a false positive or explained capture limitation. For non-UI changes,
+   record that screenshots are not required and continue.
 
 5. **Create the PR.** Before creating, check open PRs for the current branch and
    inspect task-linked PR metadata. Reuse an existing PR; create a duplicate only
@@ -103,7 +111,7 @@ explicitly requests task tracking.
    - Remove all HTML comments/placeholders from the final body.
    - Do NOT add tool attribution footers.
    - Before creating the PR, self-check that the final body has no `<!--`, no empty required sections, and no placeholder text.
-   - If the diff touches user-visible UI, append the already captured assets in a `## Screenshots` section after the PR is created (step 7) — don't add a placeholder for it here.
+   - If the diff touches user-visible UI, add the already captured assets under the template's `## Screenshots` heading after the PR is created (step 7).
    ```bash
    test -f .github/pull_request_template.md
    # Build /tmp/pr-body.md from the template, using comments as instructions

@@ -269,7 +269,7 @@ func TestService_MoveTaskPreflightsWorkflowLifecycleBeforeCommit(t *testing.T) {
 	seedMoveSteps(svc)
 	createMoveTask(t, ctx, repo, "task-preflight", "wf-source", "step-source", nil)
 	createMoveSession(t, ctx, repo, "session-preflight", "task-preflight", models.TaskSessionStateRunning, models.ReviewStatusNone)
-	preflightErr := errors.New("managed credentials are invalid")
+	preflightErr := workflowmove.ErrDestinationExecutorUnavailable
 	preflight := &fakeWorkflowMovePreflight{err: preflightErr}
 	svc.SetWorkflowMovePreflight(preflight)
 
@@ -294,6 +294,13 @@ func TestService_MoveTaskPreflightsWorkflowLifecycleBeforeCommit(t *testing.T) {
 	}
 	if task.WorkflowStepID != "step-source" {
 		t.Fatalf("task step = %q, want source step after preflight failure", task.WorkflowStepID)
+	}
+	sessions, err := repo.ListTaskSessions(ctx, "task-preflight")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("session count after preflight refusal = %d, want only the existing session", len(sessions))
 	}
 	for _, event := range eventBus.GetPublishedEvents() {
 		if event.Type == events.TaskMoved {
@@ -504,6 +511,12 @@ func TestService_ApproveSessionToTerminalStepCompletesTask(t *testing.T) {
 	getter.steps["step-done"] = &wfmodels.WorkflowStep{
 		ID: "step-done", WorkflowID: "wf-source", Name: "Approved", Position: 2, CompleteTaskOnEnter: true,
 	}
+	if _, err := repo.DB().ExecContext(ctx, `
+		INSERT INTO workflow_steps (id, workflow_id, name, position, complete_task_on_enter)
+		VALUES (?, ?, ?, ?, ?)
+	`, "step-done", "wf-source", "Approved", 2, true); err != nil {
+		t.Fatalf("seed completing workflow step: %v", err)
+	}
 	createMoveTask(t, ctx, repo, "task-approved", "wf-source", "step-review-target", nil)
 	createMoveSession(t, ctx, repo, "session-approved", "task-approved", models.TaskSessionStateWaitingForInput, models.ReviewStatusPending)
 	eventBus.ClearEvents()
@@ -651,6 +664,12 @@ func TestService_ApproveSessionQueuesFullWIPLimitedTarget(t *testing.T) {
 		"step-full":   {ID: "step-full", WorkflowID: "wf-source", Name: "Full", Position: 1, WIPLimit: 1},
 	}})
 	createMoveTask(t, ctx, repo, "task-approve", "wf-source", "step-source", nil)
+	if _, err := repo.DB().ExecContext(ctx, `
+		INSERT INTO workflow_steps (id, workflow_id, name, position, wip_limit)
+		VALUES (?, ?, ?, ?, ?)
+	`, "step-full", "wf-source", "Full", 1, 1); err != nil {
+		t.Fatalf("seed WIP-limited workflow step: %v", err)
+	}
 	createMoveTask(t, ctx, repo, "task-occupant", "wf-source", "step-full", nil)
 	createMoveSession(t, ctx, repo, "session-approve", "task-approve", models.TaskSessionStateWaitingForInput, models.ReviewStatusPending)
 

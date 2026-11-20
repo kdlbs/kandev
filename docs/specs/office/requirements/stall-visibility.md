@@ -78,6 +78,10 @@ therefore preserved for recovery and lifted only for detection.
   system shall preserve the existing reclaim behavior with no change in outcome.
 - **AC-OFFICE-STALL-VISIBILITY-001.5:** While a surfaced signal remains pending
   and unchanged, the system shall not re-surface it on subsequent scans.
+- **AC-OFFICE-STALL-VISIBILITY-001.6:** When `on_turn_complete` is deferred
+  because a turn's delivery identity is incomplete and the Office task's session
+  holds a stranded signal, the system shall surface it from that deferral, since
+  the session then parks `IDLE` outside both watchdog gates.
 
 ### REQ-OFFICE-STALL-VISIBILITY-002: Surface a decision-waiting Office task
 
@@ -125,6 +129,35 @@ remediate, so that an automated sweep cannot manufacture an approval.
   task, the system shall not queue a run, cancel an agent, or close a turn.
 - **AC-OFFICE-STALL-VISIBILITY-003.4:** When either detector surfaces an Office
   task, the system shall not change any session state.
+
+### REQ-OFFICE-STALL-VISIBILITY-004: Keep a dynamic successor's completion applicable
+
+**Intent:** When an Office task's first dynamic candidate fails, Kandev
+relaunches a successor on the same session. If that successor's prompt has no
+Kandev turn, its completion carries no turn ID, `on_turn_complete` is deferred,
+and the task stops with its completion signal unapplied.
+
+**User story:** As an operator, I want an Office task whose agent fell back to
+another candidate to advance when that candidate completes, so that a fallback
+does not strand the task.
+
+#### Acceptance criteria
+
+- **AC-OFFICE-STALL-VISIBILITY-004.1:** When Kandev relaunches a dynamic
+  successor on an Office task's prepared session, the system shall start a turn
+  for the successor prompt and launch the prompt bound to it.
+- **AC-OFFICE-STALL-VISIBILITY-004.2:** When a delivery terminal event carries
+  its delivery identity but no turn ID, the system shall bind its workflow
+  completion to the turn its handler closes only when the event's immutable
+  prompt generation still owns the session. The repository shall bind the
+  saved terminal to that turn in the same transaction as its exact workflow
+  receipt, after it verifies the full delivery identity and projected cursor.
+  A stale owner or conflicting saved turn shall leave the terminal pending and
+  shall not close a successor turn. Events without delivery identity shall
+  keep their existing behavior.
+- **AC-OFFICE-STALL-VISIBILITY-004.3:** When the closing turn cannot be
+  resolved or prompt ownership cannot be verified, the system shall keep
+  deferring the completion rather than guess.
 
 ## Out of scope
 

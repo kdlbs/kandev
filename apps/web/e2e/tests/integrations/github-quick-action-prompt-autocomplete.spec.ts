@@ -2,7 +2,6 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   acceptPromptCompletion,
   promptEditorText,
-  replacePromptEditor,
   waitForPromptInStore,
 } from "../../helpers/settings-prompt-editor";
 
@@ -32,7 +31,14 @@ test.describe("GitHub quick action prompt autocomplete", () => {
       await waitForPromptInStore(testPage, prompt.name);
 
       const editor = quickActions.locator('[data-testid^="github-action-prompt-editor-"]').first();
-      await replacePromptEditor(testPage, editor, "Review @");
+      const monaco = editor.locator(".monaco-editor");
+      await expect(monaco).toBeVisible();
+      const promptLine = monaco.locator(".view-lines .view-line span").first();
+      await expect(promptLine).toBeVisible();
+      await promptLine.click();
+      await testPage.keyboard.press("Control+A");
+      await testPage.keyboard.press("Backspace");
+      await testPage.keyboard.type("Review @");
       await acceptPromptCompletion(testPage, prompt.name);
       await testPage.keyboard.type(" {{");
       await acceptPromptCompletion(testPage, "{{title}}");

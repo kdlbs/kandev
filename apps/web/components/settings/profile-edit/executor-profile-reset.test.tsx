@@ -11,6 +11,7 @@ import {
   parseRemoteAuthSecrets,
   parseRemoteCredentials,
 } from "./executor-profile-baselines";
+import { buildSaveConfig } from "./serialize-executor-config";
 import { parseKubernetesProfileConfig } from "../kubernetes-config";
 
 vi.mock("@/lib/api/domains/settings-api", async (importOriginal) => {
@@ -27,6 +28,20 @@ vi.mock("@/lib/api/domains/settings-api", async (importOriginal) => {
 });
 
 const PERSISTED_AT = "2026-08-24T10:00:00Z";
+const REFRESHED_AT = "2026-08-24T11:00:00Z";
+const SAVED_DOCKER_TMP_SIZE = "4g";
+const SAVED_DOCKER_LOG_MAX_SIZE = "200m";
+const SAVED_DOCKER_LOG_MAX_FILES = "7";
+
+type DockerStorageFormState = ReturnType<typeof useProfileFormState> & {
+  dockerTmpSize: string;
+  dockerTmpSizeDirty: boolean;
+  setDockerTmpSize: (value: string) => void;
+  dockerLogMaxSize: string;
+  setDockerLogMaxSize: (value: string) => void;
+  dockerLogMaxFiles: string;
+  setDockerLogMaxFiles: (value: string) => void;
+};
 
 const profile: ExecutorProfile = {
   id: "profile-1",
@@ -42,6 +57,9 @@ const profile: ExecutorProfile = {
   config: {
     dockerfile: "FROM persisted",
     image_tag: "persisted:latest",
+    docker_tmp_size: "2g",
+    docker_log_max_size: "100m",
+    docker_log_max_files: "3",
     ssh_shell: "/bin/zsh",
     ssh_reclaim_task_dir: "true",
     platform: "linux/arm64",
@@ -98,6 +116,10 @@ function editEveryProfileField(form: ReturnType<typeof useProfileFormState>) {
   form.setGitIdentityMode("local");
   form.setGitUserName("Edited User");
   form.setGitUserEmail("edited@example.com");
+  const dockerStorage = form as DockerStorageFormState;
+  dockerStorage.setDockerTmpSize?.(SAVED_DOCKER_TMP_SIZE);
+  dockerStorage.setDockerLogMaxSize?.(SAVED_DOCKER_LOG_MAX_SIZE);
+  dockerStorage.setDockerLogMaxFiles?.(SAVED_DOCKER_LOG_MAX_FILES);
 }
 
 describe("executor profile reset", () => {
@@ -120,6 +142,9 @@ describe("executor profile reset", () => {
       cleanupScript: form.cleanupScript,
       dockerfile: form.dockerfile,
       imageTag: form.imageTag,
+      dockerTmpSize: (form as DockerStorageFormState).dockerTmpSize,
+      dockerLogMaxSize: (form as DockerStorageFormState).dockerLogMaxSize,
+      dockerLogMaxFiles: (form as DockerStorageFormState).dockerLogMaxFiles,
       sshShell: form.sshShell,
       sshReclaimTaskDir: form.sshReclaimTaskDir,
       kubernetesProfile: form.kubernetesProfile,
@@ -139,6 +164,9 @@ describe("executor profile reset", () => {
       cleanupScript: profile.cleanup_script,
       dockerfile: profile.config?.dockerfile,
       imageTag: profile.config?.image_tag,
+      dockerTmpSize: profile.config?.docker_tmp_size,
+      dockerLogMaxSize: profile.config?.docker_log_max_size,
+      dockerLogMaxFiles: profile.config?.docker_log_max_files,
       sshShell: profile.config?.ssh_shell,
       sshReclaimTaskDir: true,
       kubernetesProfile: parseKubernetesProfileConfig(profile.config),
@@ -153,15 +181,23 @@ describe("executor profile reset", () => {
       gitUserEmail: gitBaseline.userEmail,
     });
   });
+});
 
+describe("executor profile reset after refresh", () => {
   it("uses the current persisted profile after the baseline is refreshed", () => {
     const updatedProfile = {
       ...profile,
       name: "Server-updated profile",
       prepare_script: "server-updated prepare",
-      config: { ...profile.config, pod_template_yaml: "server-updated pod template" },
+      config: {
+        ...profile.config,
+        pod_template_yaml: "server-updated pod template",
+        docker_tmp_size: SAVED_DOCKER_TMP_SIZE,
+        docker_log_max_size: SAVED_DOCKER_LOG_MAX_SIZE,
+        docker_log_max_files: SAVED_DOCKER_LOG_MAX_FILES,
+      },
       env_vars: [{ key: "SERVER_ENV", value: "server value" }],
-      updated_at: "2026-08-24T11:00:00Z",
+      updated_at: REFRESHED_AT,
     };
     const view = renderHook(({ currentProfile }) => useProfileFormState(executor, currentProfile), {
       initialProps: { currentProfile: profile },
@@ -171,6 +207,10 @@ describe("executor profile reset", () => {
     act(() => {
       view.result.current.setName("Local edit");
       view.result.current.setPrepareScript("local prepare");
+      const dockerStorage = view.result.current as DockerStorageFormState;
+      dockerStorage.setDockerTmpSize?.("6g");
+      dockerStorage.setDockerLogMaxSize?.("300m");
+      dockerStorage.setDockerLogMaxFiles?.("9");
       view.result.current.setKubernetesProfile({
         ...view.result.current.kubernetesProfile,
         podTemplateYaml: "local pod template",
@@ -187,13 +227,152 @@ describe("executor profile reset", () => {
     expect({
       name: view.result.current.name,
       prepareScript: view.result.current.prepareScript,
+      dockerTmpSize: (view.result.current as DockerStorageFormState).dockerTmpSize,
+      dockerLogMaxSize: (view.result.current as DockerStorageFormState).dockerLogMaxSize,
+      dockerLogMaxFiles: (view.result.current as DockerStorageFormState).dockerLogMaxFiles,
       podTemplateYaml: view.result.current.kubernetesProfile.podTemplateYaml,
       envVarRows: view.result.current.envVarRows,
     }).toEqual({
       name: updatedProfile.name,
       prepareScript: updatedProfile.prepare_script,
+      dockerTmpSize: updatedProfile.config.docker_tmp_size,
+      dockerLogMaxSize: updatedProfile.config.docker_log_max_size,
+      dockerLogMaxFiles: updatedProfile.config.docker_log_max_files,
       podTemplateYaml: updatedProfile.config.pod_template_yaml,
       envVarRows: envVarsToRows(updatedProfile.env_vars),
+    });
+  });
+});
+
+describe("executor profile storage synchronization", () => {
+  it("keeps refreshed Docker storage settings on an unrelated profile save", async () => {
+    const dockerExecutor = { ...executor, type: "local_docker" as const };
+    const updatedProfile = {
+      ...profile,
+      config: {
+        ...profile.config,
+        docker_tmp_size: SAVED_DOCKER_TMP_SIZE,
+        docker_log_max_size: SAVED_DOCKER_LOG_MAX_SIZE,
+        docker_log_max_files: SAVED_DOCKER_LOG_MAX_FILES,
+      },
+      updated_at: REFRESHED_AT,
+    };
+    const view = renderHook(
+      ({ currentProfile }) => useProfileFormState(dockerExecutor, currentProfile),
+      { initialProps: { currentProfile: profile } },
+    );
+
+    view.rerender({ currentProfile: updatedProfile });
+    await waitFor(() => {
+      const form = view.result.current as DockerStorageFormState;
+      expect([form.dockerTmpSize, form.dockerLogMaxSize, form.dockerLogMaxFiles]).toEqual([
+        SAVED_DOCKER_TMP_SIZE,
+        SAVED_DOCKER_LOG_MAX_SIZE,
+        SAVED_DOCKER_LOG_MAX_FILES,
+      ]);
+    });
+
+    act(() => view.result.current.setName("Local profile edit"));
+    const payload = buildSaveConfig(view.result.current, updatedProfile.config);
+
+    expect(payload).toMatchObject({
+      docker_tmp_size: SAVED_DOCKER_TMP_SIZE,
+      docker_log_max_size: SAVED_DOCKER_LOG_MAX_SIZE,
+      docker_log_max_files: SAVED_DOCKER_LOG_MAX_FILES,
+    });
+  });
+
+  it("keeps an intentional storage clear while other refreshed fields follow config", async () => {
+    const dockerExecutor = { ...executor, type: "local_docker" as const };
+    const updatedProfile = {
+      ...profile,
+      config: {
+        ...profile.config,
+        docker_tmp_size: SAVED_DOCKER_TMP_SIZE,
+        docker_log_max_size: SAVED_DOCKER_LOG_MAX_SIZE,
+        docker_log_max_files: SAVED_DOCKER_LOG_MAX_FILES,
+      },
+      updated_at: REFRESHED_AT,
+    };
+    const view = renderHook(
+      ({ currentProfile }) => useProfileFormState(dockerExecutor, currentProfile),
+      { initialProps: { currentProfile: profile } },
+    );
+
+    act(() => (view.result.current as DockerStorageFormState).setDockerTmpSize(""));
+    view.rerender({ currentProfile: updatedProfile });
+    await waitFor(() => {
+      const form = view.result.current as DockerStorageFormState;
+      expect([form.dockerTmpSize, form.dockerLogMaxSize, form.dockerLogMaxFiles]).toEqual([
+        "",
+        SAVED_DOCKER_LOG_MAX_SIZE,
+        SAVED_DOCKER_LOG_MAX_FILES,
+      ]);
+    });
+
+    const payload = buildSaveConfig(view.result.current, updatedProfile.config);
+
+    expect(payload.docker_tmp_size).toBeUndefined();
+    expect(payload).toMatchObject({
+      docker_log_max_size: SAVED_DOCKER_LOG_MAX_SIZE,
+      docker_log_max_files: SAVED_DOCKER_LOG_MAX_FILES,
+    });
+  });
+});
+
+describe("executor profile storage save refresh", () => {
+  it("normalizes a saved storage draft before an unrelated save", async () => {
+    const dockerExecutor = { ...executor, type: "local_docker" as const };
+    const view = renderHook(
+      ({ currentProfile }) => useProfileFormState(dockerExecutor, currentProfile),
+      { initialProps: { currentProfile: profile } },
+    );
+
+    act(() => (view.result.current as DockerStorageFormState).setDockerTmpSize(" 4g "));
+    const submittedConfig = buildSaveConfig(view.result.current, profile.config);
+    expect(submittedConfig.docker_tmp_size).toBe(SAVED_DOCKER_TMP_SIZE);
+
+    const savedProfile = {
+      ...profile,
+      config: { ...profile.config, ...submittedConfig },
+      updated_at: REFRESHED_AT,
+    };
+    view.rerender({ currentProfile: savedProfile });
+
+    await waitFor(() => {
+      const form = view.result.current as DockerStorageFormState;
+      expect(form.dockerTmpSize).toBe(SAVED_DOCKER_TMP_SIZE);
+      expect(form.dockerTmpSizeDirty).toBe(false);
+    });
+
+    act(() => view.result.current.setName("Unrelated profile edit"));
+    const unrelatedPayload = buildSaveConfig(view.result.current, savedProfile.config);
+    expect(unrelatedPayload.docker_tmp_size).toBe(SAVED_DOCKER_TMP_SIZE);
+  });
+
+  it("preserves a newer storage edit while an earlier save refreshes the profile", async () => {
+    const dockerExecutor = { ...executor, type: "local_docker" as const };
+    const view = renderHook(
+      ({ currentProfile }) => useProfileFormState(dockerExecutor, currentProfile),
+      { initialProps: { currentProfile: profile } },
+    );
+
+    act(() => (view.result.current as DockerStorageFormState).setDockerTmpSize(" 4g "));
+    const submittedConfig = buildSaveConfig(view.result.current, profile.config);
+    act(() => (view.result.current as DockerStorageFormState).setDockerTmpSize("5g"));
+
+    view.rerender({
+      currentProfile: {
+        ...profile,
+        config: { ...profile.config, ...submittedConfig },
+        updated_at: REFRESHED_AT,
+      },
+    });
+
+    await waitFor(() => {
+      const form = view.result.current as DockerStorageFormState;
+      expect(form.dockerTmpSize).toBe("5g");
+      expect(form.dockerTmpSizeDirty).toBe(true);
     });
   });
 });

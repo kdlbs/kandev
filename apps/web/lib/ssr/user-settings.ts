@@ -71,6 +71,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},
+    markdownPreviewByDefault: true,
     lspStatusLocation: "toolbar",
     savedLayouts: [],
     sidebarViews: [],
@@ -97,7 +98,6 @@ export function createDefaultUserSettings(): UserSettingsState {
     githubSavedPresets: undefined,
     githubDefaultQueryPresets: undefined,
     gitlabSavedPresets: undefined,
-    azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
     defaultUtilityAgentProfileId: null,
     keyboardShortcuts: {},
@@ -409,11 +409,6 @@ export function buildCoreFields(
       current.gitlabSavedPresets,
       (value) => value,
     ),
-    azureDevOpsBrowsePreferences: mapDefined(
-      s.azure_devops_browse_preferences,
-      current.azureDevOpsBrowsePreferences,
-      (value) => value,
-    ),
     appStatusBarOrder: mapDefined(
       s.app_status_bar_order,
       current.appStatusBarOrder,
@@ -450,6 +445,8 @@ export function buildLspFields(
     lspAutoStartLanguages: s?.lsp_auto_start_languages ?? current.lspAutoStartLanguages,
     lspAutoInstallLanguages: s?.lsp_auto_install_languages ?? current.lspAutoInstallLanguages,
     lspServerConfigs: s?.lsp_server_configs ?? current.lspServerConfigs,
+    markdownPreviewByDefault:
+      s?.markdown_preview_by_default ?? current.markdownPreviewByDefault ?? true,
     lspStatusLocation:
       s?.lsp_status_location === undefined
         ? current.lspStatusLocation

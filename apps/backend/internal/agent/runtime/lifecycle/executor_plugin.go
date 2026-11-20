@@ -78,7 +78,7 @@ type PluginExecutorInventoryStore interface {
 }
 
 type pluginControlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string) (*agentctl.ControlClient, string, error)
-type pluginAgentctlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, error)
+type pluginAgentctlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string, bool) (*agentctl.Client, error)
 type pluginRecoveredAgentctlInstanceReader func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.InstanceInfo, error)
 type pluginAgentctlReadinessCheck func(context.Context, *agentctl.Client) error
 
@@ -132,9 +132,10 @@ func NewPluginRemoteExecutor(operations PluginExecutorProviderOperations, log *l
 	}
 	runtime := &PluginRemoteExecutor{operations: operations, logger: log.WithFields(zap.String("runtime", string(executor.NamePluginRemote)))}
 	runtime.newAgentctlControlClient = createPluginEndpointControlClient
-	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
+	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string, scopedMCPRoutes bool) (*agentctl.Client, error) {
 		return agentctl.NewEndpointClient(ctx, resolver, log,
-			agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token))
+			agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token),
+			agentctl.WithBuiltinMCPScopedRoutes(scopedMCPRoutes))
 	}
 	runtime.recoveredAgentctlInfoReader = func(
 		ctx context.Context,
@@ -302,14 +303,14 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 	if err != nil {
 		return fail("control_handshake", err)
 	}
-	instancePort, err := createPluginAgentctlInstance(ctx, control, launch.request)
+	created, err := createPluginAgentctlInstance(ctx, control, launch.request)
 	control.Close()
 	if err != nil {
 		return fail("instance_create", err)
 	}
-	launch.inventory.InstancePort = instancePort
-	client, err := r.newAgentctlClient(ctx, r.connectionResolver(launch.operationContext, resource, instancePort), r.logger,
-		launch.request.InstanceID, token)
+	launch.inventory.InstancePort = uint32(created.Port)
+	client, err := r.newAgentctlClient(ctx, r.connectionResolver(launch.operationContext, resource, uint32(created.Port)), r.logger,
+		created.ID, token, created.ScopedMCPRoutes)
 	if err != nil {
 		return fail("instance_connect", err)
 	}
@@ -320,16 +321,16 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 	return client, token, nil
 }
 
-func createPluginAgentctlInstance(ctx context.Context, control *agentctl.ControlClient, req *ExecutorCreateRequest) (uint32, error) {
+func createPluginAgentctlInstance(ctx context.Context, control *agentctl.ControlClient, req *ExecutorCreateRequest) (*agentctl.CreateInstanceResponse, error) {
 	instanceReq := agentctlInstanceRequest(req, pluginExecutorWorkspacePath)
 	created, err := control.CreateInstance(ctx, &instanceReq)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	if created.Port <= 0 || created.Port > 65535 {
-		return 0, errors.New("agentctl created an instance without a usable port")
+		return nil, errors.New("agentctl created an instance without a usable port")
 	}
-	return uint32(created.Port), nil
+	return created, nil
 }
 
 func (r *PluginRemoteExecutor) finishPluginExecutorLaunch(ctx context.Context, launch *pluginExecutorLaunchState, resource *pluginsdk.ExecutorResourceDescriptor, client *agentctl.Client, token string) (*ExecutorInstance, error) {

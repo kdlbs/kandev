@@ -4,16 +4,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
-	"github.com/kandev/kandev/internal/task/models"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	workflowadapters "github.com/kandev/kandev/internal/workflow/adapters"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/stepentry"
 	"github.com/stretchr/testify/require"
-	"sync"
 )
 
 type officeEntryRunSink struct{ requests []engine.QueueRunRequest }
@@ -66,39 +64,30 @@ func TestOfficeHumanMoveDispatchesEngineEntryAfterCommit(t *testing.T) {
 	require.Equal(t, "review-agent", sink.requests[0].AgentProfileID)
 }
 
-func TestOfficeHumanAdmissionIntentEndsBeforePublishedCallbacks(t *testing.T) {
-	for _, route := range []string{"move", "fields", "state"} {
-		t.Run(route, func(t *testing.T) {
-			f := newOfficeAtomicFixture(t, nil)
-			ctx := context.Background()
-			var mu sync.Mutex
-			var leaked []string
-			calls := 0
-			sub, err := f.h.eventBus.Subscribe(">", func(ctx context.Context, event *bus.Event) error {
-				mu.Lock()
-				defer mu.Unlock()
-				calls++
-				if _, human := models.OfficeHumanCompletionIntentFromContext(ctx); human {
-					leaked = append(leaked, event.Subject)
-				}
-				return nil
-			})
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, sub.Unsubscribe()) })
-			switch route {
-			case "move":
-				_, err = f.svc.MoveTaskWithOptions(ctx, "atomic-task", "wf-home", "atomic-done", 0, taskservice.MoveTaskOptions{StepHistoryActor: wfmodels.StepTransitionActorHuman})
-			case "fields":
-				title := "Renamed"
-				_, err = f.svc.UpdateTaskAsHuman(ctx, "atomic-task", &taskservice.UpdateTaskRequest{Title: &title})
-			case "state":
-				_, err = f.svc.UpdateTaskStateAsHuman(ctx, "atomic-task", "COMPLETED")
-			}
-			require.NoError(t, err)
-			mu.Lock()
-			defer mu.Unlock()
-			require.Positive(t, calls)
-			require.Empty(t, leaked, "postcommit consumers must not inherit a human admission fence")
-		})
+type taskWritingStepEntryDispatcher struct {
+	repo *tasksqlite.Repository
+	err  error
+}
+
+func (d *taskWritingStepEntryDispatcher) DispatchStepEntry(ctx context.Context, taskID, _, _, _ string, _ int64) {
+	task, err := d.repo.GetTask(ctx, taskID)
+	if err != nil {
+		d.err = err
+		return
 	}
+	task.Title = "Updated by step entry"
+	d.err = d.repo.UpdateTask(ctx, task)
+}
+
+func TestStepEntryWriteDoesNotInheritAdmission(t *testing.T) {
+	f := newOfficeAtomicFixture(t, nil)
+	ctx := context.Background()
+	dispatcher := &taskWritingStepEntryDispatcher{repo: f.h.repo}
+	f.h.repo.SetStepEntryDispatcher(dispatcher)
+	_, err := f.svc.MoveTaskWithOptions(ctx, "atomic-task", "wf-home", "atomic-done", 0, taskservice.MoveTaskOptions{StepHistoryActor: wfmodels.StepTransitionActorHuman})
+	require.NoError(t, err)
+	require.NoError(t, dispatcher.err)
+	task, err := f.h.repo.GetTask(ctx, "atomic-task")
+	require.NoError(t, err)
+	require.Equal(t, "Updated by step entry", task.Title)
 }

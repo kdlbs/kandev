@@ -20,6 +20,10 @@ This design defines the reset boundary between these systems. It covers never-st
 
 The design preserves runtime configuration through the existing reset contract. It does not change provider reset support or explicit user cancellation.
 
+The [ordinary task-start context design](workflow-task-start-context.md) covers
+requirement `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007` at the separate
+direct-start boundary.
+
 ## Requirement mapping
 
 | Requirement | Design sections |

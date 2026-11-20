@@ -52,10 +52,9 @@ to the parent gitlink. The focused contract tests are in
 |-------------|-----|-------|
 | `github.com`, `*.github.com` | `gh pr create` | Requires `gh` on `PATH` (included in the Kandev Docker image). |
 | `gitlab.com`, configured self-managed host | `glab mr create` or REST v4 | `KANDEV_GITLAB_HOST` binds detection/auth to the workspace origin. `GITLAB_TOKEN` is used only for that exact host; the REST fallback resolves the project default branch and reuses an existing open source/target MR on retry. |
-| `dev.azure.com`, `ssh.dev.azure.com`, `*.visualstudio.com` | `az repos pr create` | Requires `az` on `PATH`, `azure-devops` extension (both in the Kandev Docker image). Auth: `az login` or `AZURE_DEVOPS_EXT_PAT`. |
-| Other hosts | — | Returns an unsupported-remote error. |
+| Other hosts | — | Returns an unsupported-remote error. Plugin-owned providers, such as Azure Repos through `kandev-plugin-azure-devops`, create pull requests through the plugin's `createChangeRequest` callback or agent tools, not agentctl. |
 
-GitHub PR and GitLab MR URLs trigger backend association callbacks. Azure PR URLs are returned to the client but do not trigger TaskPR linkage. The web UI keeps a session-scoped pending URL so the changes panel hides the create action after any successful provider response.
+GitHub PR and GitLab MR URLs trigger backend association callbacks. The web UI keeps a session-scoped pending URL so the changes panel hides the create action after any successful provider response.
 
 ## Adapter Model
 
@@ -285,3 +284,11 @@ Both accept any value `time.ParseDuration` accepts (`30m`, `2h`, `500ms`, …). 
 
 See [MCP delivery](MCP_DELIVERY.md) for the configure record, helper capability,
 remote project-file endpoints, and per-process evidence rules.
+
+Native MCP route mode is immutable for one helper. A create response supplies
+the accepted `scoped_mcp_routes` value; retained helpers supply it through
+authenticated `InstanceInfo`. Missing fields mean legacy mode, while a failed
+mode read is an adoption error. Scoped Core and package routes use the helper's
+instance ID under `/i/<id>`; package routes keep their existing package suffixes.
+The helper ID scopes accidental routing only and does not replace authenticated
+task-owner checks.

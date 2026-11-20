@@ -1,4 +1,8 @@
 {
+  "notificationFormatterLabel": "通知の内容",
+  "notificationFormatterDefault": "元の通知内容を使用",
+  "notificationFormatterUnavailable": "フォーマッターを利用できません。元の内容で通知を送信します。",
+  "notificationFormatterDescription": "プロバイダーごとにフォーマッターを選択します。購読設定と送信先は変更されません。",
   "notificationEventPermissionRequested": "エージェントが許可を求めています",
   "notificationEventPermissionRequestedDescription": "エージェントが操作の承認を待っているときに通知します。",
   "notificationEventSessionFailed": "エージェントセッションが失敗",
@@ -382,7 +386,6 @@
   "inferenceAgentThisAgent": "このエージェント",
   "inferenceAgentUnavailable": "{{name}} はもう利用不可。",
   "installed": "インストール済み",
-  "integrationDescriptionAzureDevops": "Azure Boards の作業項目と Azure Repos の pull request。",
   "integrationDescriptionGithub": "PR レビューキュー、issue ウォッチャー、OAuth 認証情報。",
   "integrationDescriptionGitlab": "merge request 作成、会話返信、セルフ管理ホスト。",
   "integrationDescriptionJira": "Atlassian Cloud 認証情報と JQL issue ウォッチャー。",
@@ -1225,5 +1228,11 @@
   "builtinMcp.currentUnknown": "現在のエージェントのパッケージは不明です。次回のエージェント起動時に適用される保存済みの選択を表示しています。",
   "mcpFromAutomation": "自動化から",
   "mcpFromAutomationDescription": "このプロセスを開始した自動化が選択したサーバーです。",
-  "builtinMcp.surfaces.automation": "自動化"
+  "builtinMcp.surfaces.automation": "自動化",
+  "builtinMcp.inheritedValue": "ワークスペースから継承：{{value}}",
+  "builtinMcp.overrideValue": "タスクの設定：{{value}}。ワークスペースの既定値：{{default}}。",
+  "builtinMcp.useInherited": "継承した値を使用",
+  "builtinMcp.allowTasks": "タスクによるこのパッケージの使用を許可",
+  "markdownPreviewByDefault": "Markdown ファイルをプレビューで開く",
+  "markdownPreviewByDefaultDescription": "新しく開く Markdown ファイルの初期モードを選択します。モードはいつでも切り替えられます。"
 }

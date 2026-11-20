@@ -7,12 +7,12 @@ Enhance the following user prompt to be clearer and more actionable for a coding
 Title: {{TaskTitle}}
 Description: {{TaskDescription}}
 
-## Current Git Changes (if any):
-{{GitDiff}}
+## Changed Files (if any):
+{{ChangedFiles}}
 
 ## Instructions:
 1. Expand vague requests into specific, actionable instructions
-2. Add relevant context from the task and git changes
+2. Add relevant context from the task and the changed file names
 3. Clarify ambiguous terms or requirements
 4. Structure the prompt clearly with numbered steps if appropriate
 5. Keep the original intent - don't change what the user wants to do

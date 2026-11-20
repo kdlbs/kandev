@@ -1,12 +1,15 @@
 "use client";
 
 import { useRef, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
+import { AnnotationModeHint } from "@/components/shared/region-annotation/annotation-mode-hint";
+import { RegionOverlay } from "@/components/shared/region-annotation/region-overlay";
 import type { ReviewSegment } from "@/lib/question-review/segments";
 import type { ReviewView, Size } from "@/lib/question-review/viewport";
 import { RegionCommentPopover } from "./region-comment-popover";
 import { useReviewImageLabel } from "./review-image-picker";
 import { useReviewLayout } from "./review-layout";
-import { AnnotateButton, AnnotateHint, RegionOverlay } from "./review-regions";
+import { AnnotateButton } from "./review-regions";
 import type { ReviewAnnotationController } from "./use-review-annotations";
 import { useRegionDrawing } from "./use-region-drawing";
 
@@ -35,6 +38,7 @@ export function stageAnnotating(controller: ReviewAnnotationController, allowed:
 /** Region drawing, outlines, and the Annotate control for one stage. */
 export function useStageAnnotations(args: Args) {
   const { controller, segment } = args;
+  const { t } = useTranslation();
   const questionId = segment.questionId;
   const imageLabel = useReviewImageLabel();
   const { touch } = useReviewLayout();
@@ -80,7 +84,13 @@ export function useStageAnnotations(args: Args) {
     popover,
     marking,
     hint: marking ? (
-      <AnnotateHint touch={touch} onDone={() => controller.setAnnotating(false)} />
+      <AnnotationModeHint
+        hint={t(touch ? "task:questionReviewMarkHintTouch" : "task:questionReviewMarkHint")}
+        doneLabel={t("task:questionReviewMarkDone")}
+        onDone={() => controller.setAnnotating(false)}
+        testId="question-review-annotate-hint"
+        doneTestId="question-review-annotate-done"
+      />
     ) : null,
     pointerHandlers: useRegionClick(drawing.pointerHandlers, (index) =>
       controller.editComment(questionId, index),
@@ -88,8 +98,10 @@ export function useStageAnnotations(args: Args) {
     handleKey: drawing.handleKey,
     overlay: (
       <RegionOverlay
-        regions={regions}
-        imageId={args.imageId}
+        items={regions.flatMap((region, index) =>
+          region.image_id === args.imageId ? [{ index, rect: region, title: region.comment }] : [],
+        )}
+        testId="question-review-region"
         selectedIndex={selectedIndex}
         draft={drawing.draft}
         scale={args.view.scale}

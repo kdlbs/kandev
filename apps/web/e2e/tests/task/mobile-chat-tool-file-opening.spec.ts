@@ -24,9 +24,13 @@ test.describe("Mobile tool file references", () => {
         const viewer = testPage.getByTestId("mobile-file-viewer-panel");
         await expect(viewer).toBeVisible();
         await expect(viewer.getByText("Dockerfile")).toBeVisible();
-        await expect(viewer.locator(".cm-content")).toContainText("read fixture line 300");
+        await expect(viewer.locator(".cm-content, .monaco-editor .view-lines")).toContainText(
+          "read fixture line 300",
+        );
         await expect(
-          viewer.locator(".cm-lineNumbers .cm-gutterElement", { hasText: "300" }),
+          viewer
+            .locator(".cm-line, .monaco-editor .view-line")
+            .filter({ hasText: "read fixture line 300" }),
         ).toBeInViewport();
       },
     );
@@ -51,7 +55,9 @@ test.describe("Mobile tool file references", () => {
         const viewer = testPage.getByTestId("mobile-file-viewer-panel");
         await expect(viewer).toBeVisible();
         await expect(viewer.getByText("LICENSE")).toBeVisible();
-        await expect(viewer.locator(".cm-content")).toContainText("search fixture content");
+        await expect(viewer.locator(".cm-content, .monaco-editor .view-lines")).toContainText(
+          "search fixture content",
+        );
       },
     );
   });

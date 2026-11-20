@@ -59,6 +59,10 @@ type Service struct {
 	providers          map[models.ProviderType]providers.Provider
 	authEnforced       AuthEnforced
 	webPush            *webpush.Service
+	formatterMu        sync.RWMutex
+	formatterRuntime   FormatterRuntime
+	formatterConfig    formatterConfigurationGate
+	formatterLeases    formatterCaptureLeases
 }
 
 // NewService builds the notification service. authEnforced decides what
@@ -140,6 +144,11 @@ func (s *Service) ListProviders(ctx context.Context, userID string) ([]*models.P
 }
 
 func (s *Service) CreateProvider(ctx context.Context, userID, name string, providerType models.ProviderType, config map[string]interface{}, enabled bool, events []string) (*models.Provider, error) {
+	release, err := s.BeginFormatterManagement(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := s.validateProvider(providerType, config); err != nil {
 		return nil, err
 	}
@@ -162,6 +171,11 @@ func (s *Service) CreateProvider(ctx context.Context, userID, name string, provi
 // UpdateProvider mutates a provider the caller owns. A provider ID belonging
 // to another user resolves to ErrProviderNotFound before any write happens.
 func (s *Service) UpdateProvider(ctx context.Context, userID, providerID string, updates ProviderUpdate) (*models.Provider, error) {
+	release, err := s.BeginFormatterManagement(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	provider, err := s.ownedProvider(ctx, userID, providerID)
 	if err != nil {
 		return nil, err
@@ -194,6 +208,11 @@ func (s *Service) UpdateProvider(ctx context.Context, userID, providerID string,
 
 // DeleteProvider removes a provider the caller owns.
 func (s *Service) DeleteProvider(ctx context.Context, userID, providerID string) error {
+	release, err := s.BeginFormatterManagement(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	return s.repo.DeleteProvider(ctx, userID, providerID)
 }
 
@@ -305,6 +324,8 @@ func (s *Service) HandleUpdateAvailable(ctx context.Context, version, releaseURL
 }
 
 func (s *Service) handleSemanticOccurrence(ctx context.Context, taskID, sessionID, occurrenceID, eventType string, payload map[string]string) {
+	ctx, finishFormatting := withFormatterBudget(ctx)
+	defer finishFormatting()
 	if occurrenceID == "" {
 		return
 	}
@@ -331,6 +352,8 @@ func (s *Service) handleSemanticOccurrence(ctx context.Context, taskID, sessionI
 // providers. Every provider it can reach belongs to userID, so a webhook only
 // ever receives events from workspaces its owner can see.
 func (s *Service) deliverOccurrence(ctx context.Context, userID string, message notificationPayload) {
+	ctx, finishFormatting := withFormatterBudget(ctx)
+	defer finishFormatting()
 	providers, subscriptions, err := s.ListProviders(ctx, userID)
 	if err != nil {
 		s.logger.Error("failed to load notification providers", zap.Error(err))
@@ -340,6 +363,8 @@ func (s *Service) deliverOccurrence(ctx context.Context, userID string, message 
 		if !provider.Enabled || !containsEvent(subscriptions[provider.ID], message.EventType) {
 			continue
 		}
+		providerMessage := message
+		providerMessage.formatter = s.captureFormatter(ctx, userID, provider)
 		inserted, err := s.repo.InsertDelivery(ctx, &models.Delivery{
 			UserID:        userID,
 			ProviderID:    provider.ID,
@@ -354,7 +379,7 @@ func (s *Service) deliverOccurrence(ctx context.Context, userID string, message 
 		if !inserted {
 			continue
 		}
-		if err := s.dispatchProvider(ctx, userID, provider, message); err != nil {
+		if err := s.dispatchProvider(ctx, userID, provider, providerMessage); err != nil {
 			s.logger.Warn("notification delivery failed", zap.String("provider_id", provider.ID), zap.Error(err))
 			_ = s.repo.DeleteDelivery(ctx, provider.ID, message.EventType, message.OccurrenceID)
 		}
@@ -454,6 +479,8 @@ func (s *Service) providerOwners(ctx context.Context) ([]string, bool) {
 // resolvable owner, so under enforced authentication it is dropped rather than
 // delivered to whichever account the fallback would pick.
 func (s *Service) HandleInboxItem(ctx context.Context, workspaceID, itemType, title string) {
+	ctx, finishFormatting := withFormatterBudget(ctx)
+	defer finishFormatting()
 	userID, ok := s.workspaceOwner(ctx, workspaceID)
 	if !ok {
 		return
@@ -476,7 +503,10 @@ func (s *Service) HandleInboxItem(ctx context.Context, workspaceID, itemType, ti
 		if !containsEvent(events, EventOfficeInboxItem) {
 			continue
 		}
-		if err := s.dispatchGenericNotification(ctx, userID, provider, EventOfficeInboxItem, notifTitle, body); err != nil {
+		payload := notificationPayload{EventType: EventOfficeInboxItem, Title: notifTitle, Body: body,
+			Payload:   map[string]string{"workspace_id": workspaceID, "inbox_type": itemType, "inbox_title": title},
+			formatter: s.captureFormatter(ctx, userID, provider)}
+		if err := s.dispatchProvider(ctx, userID, provider, payload); err != nil {
 			s.logger.Warn("inbox item notification delivery failed",
 				zap.String("provider_id", provider.ID), zap.Error(err))
 		}
@@ -498,6 +528,7 @@ func (s *Service) dispatchGenericNotification(ctx context.Context, userID string
 }
 
 type notificationPayload struct {
+	formatter      *models.FormatterBinding
 	TaskID         string
 	TaskSessionID  string
 	OccurrenceID   string
@@ -512,6 +543,12 @@ type notificationPayload struct {
 // resolved recipient rather than a constant: the local provider broadcasts it
 // over that user's WebSocket connections.
 func (s *Service) dispatchProvider(ctx context.Context, userID string, provider *models.Provider, payload notificationPayload) error {
+	payload = s.formatNotification(ctx, userID, payload)
+	if payload.formatter != nil || formattedFanout(ctx) {
+		if err := s.revalidateFormattedDelivery(ctx, userID, provider, payload.EventType); err != nil {
+			return err
+		}
+	}
 	adapter := s.providers[provider.Type]
 	if adapter == nil {
 		return fmt.Errorf("unknown provider type: %s", provider.Type)

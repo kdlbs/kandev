@@ -1,3 +1,5 @@
+/** Parameters Kandev adds to a preview URL, which never identify a page. */
+const KANDEV_QUERY_PARAMETER = /^kandev_/;
 const SENSITIVE_QUERY_PARAMETER =
   /(?:^|[_-])(access[_-]?token|id[_-]?token|token|secret|password|passwd|auth(?:orization)?|credential|cookie|session|capability|signature|sig|nonce|code|state|key)(?:$|[_-])/i;
 
@@ -5,7 +7,7 @@ function safeSearch(search: string): string {
   const kept: string[] = [];
   const params = new URLSearchParams(search);
   params.forEach((value, name) => {
-    if (SENSITIVE_QUERY_PARAMETER.test(name)) return;
+    if (SENSITIVE_QUERY_PARAMETER.test(name) || KANDEV_QUERY_PARAMETER.test(name)) return;
     kept.push(`${encodeURIComponent(name)}=${encodeURIComponent(value)}`);
   });
   return kept.length ? `?${kept.join("&")}` : "";

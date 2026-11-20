@@ -1,4 +1,8 @@
 {
+  "notificationFormatterLabel": "Conteúdo das notificações",
+  "notificationFormatterDefault": "Usar o conteúdo original da notificação",
+  "notificationFormatterUnavailable": "O formatador está indisponível. As notificações usam o conteúdo original.",
+  "notificationFormatterDescription": "Escolha um formatador opcional para cada fornecedor. A formatação não altera as subscrições nem os destinos de envio.",
   "notificationEventPermissionRequested": "O agente precisa de permissão",
   "notificationEventPermissionRequestedDescription": "Notificar quando o agente estiver à espera que aprove uma ação.",
   "notificationEventSessionFailed": "A sessão do agente falhou",
@@ -378,7 +382,6 @@
   "inferenceAgentThisAgent": "este agente",
   "inferenceAgentUnavailable": "{{name}} já não está disponível.",
   "installed": "Instalado",
-  "integrationDescriptionAzureDevops": "Itens de trabalho do Azure Boards e pull requests do Azure Repos.",
   "integrationDescriptionGithub": "Filas de revisão de PRs, vigilâncias de issues e credenciais OAuth.",
   "integrationDescriptionGitlab": "Criação de merge requests, respostas em discussões e anfitriões autogeridos.",
   "integrationDescriptionJira": "Credenciais do Atlassian Cloud e vigilâncias de issues por JQL.",
@@ -1225,5 +1228,11 @@
   "builtinMcp.currentUnknown": "Os pacotes do agente atual são desconhecidos. Estas são as opções guardadas para o próximo arranque do agente.",
   "mcpFromAutomation": "Da automatização",
   "mcpFromAutomationDescription": "Servidores selecionados pela automatização que iniciou este processo.",
-  "builtinMcp.surfaces.automation": "Automatização"
+  "builtinMcp.surfaces.automation": "Automatização",
+  "builtinMcp.inheritedValue": "Herdado do espaço de trabalho: {{value}}",
+  "builtinMcp.overrideValue": "Definição da tarefa: {{value}}. Predefinição do espaço de trabalho: {{default}}.",
+  "builtinMcp.useInherited": "Usar valor herdado",
+  "builtinMcp.allowTasks": "Permitir que as tarefas usem este pacote",
+  "markdownPreviewByDefault": "Abrir ficheiros Markdown na Pré-visualização",
+  "markdownPreviewByDefaultDescription": "Escolha o modo inicial dos ficheiros Markdown que abrir. Pode mudar de modo a qualquer momento."
 }
