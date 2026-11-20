@@ -142,6 +142,7 @@ Do not add checkpoint logic to the mutable monitor or large existing orchestrato
 4. After prompt generation admission and before `triggerPrompt`, call a new synchronous runtime capture callback with immutable ownership evidence.
 5. Capture a fresh start for every eligible checkout. Persist exact accepted object IDs before external dispatch.
 6. If bounded capture fails, persist per-checkout unavailability and continue dispatch. Never manufacture replacement start content.
+   Capture checkouts concurrently within the executor capture bound, in a capture deadline that ends a fixed persistence reserve before the admission deadline. Endpoint acceptance uses that reserve, so checkouts captured in time are persisted when later checkouts miss the deadline. A failed acceptance reports the per-checkout capture failures with the persistence error.
 
 Reuse initial-launch dispatch callbacks, but add the generation-aware seam inside runtime's production send path.
 The existing pre-admission callback alone cannot provide the admitted generation.
@@ -388,7 +389,7 @@ Proposed bounds require measurement before completion:
 
 | Work | Initial bound | Limit behavior |
 | --- | --- | --- |
-| Start capture across attached checkouts | 10 seconds total, including admission and retries | Persist failed checkout reasons; dispatch proceeds |
+| Start capture across attached checkouts | 10 seconds total, including admission and retries; capture ends 2 seconds early to reserve endpoint persistence | Persist captured endpoints and failed checkout reasons; dispatch proceeds |
 | Normal terminal endpoint capture | 20 seconds total | Accept immutable ends or settle affected endpoints before releasing the successor fence |
 | Background comparison/object preservation | 90 seconds per attempt, capped by recovery deadline | Retry transient errors against the accepted Git interval |
 | Preservation recovery window | 3 minutes from the persisted terminal claim | Settle remaining content explicitly, then permit owned-ref cleanup |
@@ -433,3 +434,5 @@ No source-only latency claims are acceptable.
 - [Implementation plan](../../../plans/turn-changed-files/plan.md)
 
 [Presentation plan](../../../plans/turn-changed-files-presentation/plan.md).
+
+[Multi-repository status, start capture, and retention load fixes](../../../plans/capture-and-retention-load-fixes/plan.md).
