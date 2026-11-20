@@ -104,6 +104,9 @@ self-healing compaction keep their separate recovery policies.
 Deferred snapshots carry an error value captured at receipt time. Restoring
 their authoritative settings must preserve a newer unreplayed failure rather
 than overwrite it with that stale error value, including skipped compaction.
+Deferred settings never own the current error. Only an explicit successful
+healing path clears it. A failed view mutation discarded without replay, or a
+retired/rejected move, retains its notice even if an independent write succeeds.
 A definitive HTTP rejection retires dispatched move intent even when both
 endpoints survive. An independent successor must not give that rejected move a
 fresh order baseline. Transport-uncertain failures retain the existing guarded

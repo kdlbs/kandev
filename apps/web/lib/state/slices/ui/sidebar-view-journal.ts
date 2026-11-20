@@ -74,7 +74,7 @@ export function recordSidebarWriteFailure(
   kind: SidebarWriteKind,
   error: unknown,
 ) {
-  const { before, move } = mutation;
+  const { before } = mutation;
   journal.pending--;
   if (isUnreplayedSidebarWrite(kind)) journal.failedUnreplayedWrite = true;
   const rejected =
@@ -83,22 +83,54 @@ export function recordSidebarWriteFailure(
     error.status < 500 &&
     error.status !== 408 &&
     error.status !== 429;
-  if (rejected)
-    journal.failedViewMutations = journal.failedViewMutations?.filter((failed) => !failed.move);
-  if (kind === "views" && !(move && rejected) && replayableSidebarMove(journal, move))
-    (journal.failedViewMutations ??= []).push(mutation);
+  if (rejected) retireRejectedSidebarMoves(journal);
+  recordFailedViewIntent(journal, mutation, kind, rejected);
   const rollback = journal.failedRollback ?? before;
   journal.failedRollback = rollback;
   journal.failedWriteKind ??= kind;
   return rollback;
 }
 
-export function restoreSidebarSnapshot(
-  state: SidebarSliceState,
-  snapshot: SidebarSnapshot,
-  preserveError: boolean | undefined,
-) {
+export function restoreSidebarSnapshot(state: SidebarSliceState, snapshot: SidebarSnapshot) {
   const error = state.syncError;
   Object.assign(state, snapshot);
-  if (preserveError) state.syncError = error;
+  state.syncError = error;
+}
+
+function retireRejectedSidebarMoves(journal: SidebarWriteJournal) {
+  const failed = journal.failedViewMutations;
+  if (failed?.some((mutation) => mutation.move)) journal.failedUnreplayedWrite = true;
+  journal.failedViewMutations = failed?.filter((mutation) => !mutation.move);
+}
+
+function recordFailedViewIntent(
+  journal: SidebarWriteJournal,
+  mutation: SidebarViewMutation,
+  kind: SidebarWriteKind,
+  rejected: boolean,
+) {
+  if (kind !== "views") return;
+  if ((mutation.move && rejected) || !replayableSidebarMove(journal, mutation.move))
+    journal.failedUnreplayedWrite = true;
+  else (journal.failedViewMutations ??= []).push(mutation);
+}
+
+export function settleSidebarFailures(
+  journal: SidebarWriteJournal,
+  kind: SidebarWriteKind,
+  persisted: unknown,
+  requestId: number,
+) {
+  const latest = requestId === journal.latestRequestId;
+  if ((!persisted || (kind === "local" && latest)) && journal.failedViewMutations?.length)
+    journal.failedUnreplayedWrite = true;
+  if (kind !== "local" || latest) journal.failedViewMutations = undefined;
+  return journal.failedUnreplayedWrite;
+}
+
+export function pruneSidebarFailures(journal: SidebarWriteJournal) {
+  const failed = journal.failedViewMutations;
+  const retained = failed?.filter((mutation) => replayableSidebarMove(journal, mutation.move));
+  if (failed?.length !== retained?.length) journal.failedUnreplayedWrite = true;
+  journal.failedViewMutations = retained;
 }

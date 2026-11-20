@@ -979,3 +979,31 @@ Receipts: `~/.cache/sidebar-multi-tag-build/evidence/r16-*`. No backend, SDK,
 Tags, API, retry-policy, copy, release or deploy changes. No new real-package,
 full-suite, PostgreSQL, physical-phone or remote-CI certification. Protected
 instances untouched. Streak remains 0/3; next review is Opus round 17.
+
+### Opus post-rebase round 17 corrections
+
+Confirmed view failures could lose their notice when not actually replayed:
+rename intent discarded by skipped compaction, rejected moves followed by a
+successful independent write, and uncertain moves retired after endpoint
+deletion. Six new matrix cases and the retired-move control failed first.
+Deferred snapshots now always preserve the current local error. Journal
+settlement marks actually discarded/retired intent rather than only classifying
+write kinds; successful replay remains the explicit healing path.
+
+A further failing positive control caught overly eager retirement on an
+intermediate local acknowledgement. Only terminal local discard now marks the
+notice unreplayed, so a later view write can still heal retained intent.
+
+Final 73 focused tests, scoped types/ESLint and repository-config formatting
+passed. Four changed code/test paths byte-match the final build mirror. Final
+fresh frontend plus existing desktop checks 4/4 and separate touch controls 5/5
+completed in 139.67s. An intermediate artifact run had desktop 4/4 but was
+cancelled during touch after production inputs changed; it is not final proof.
+Exact new interleavings are store/WS/transport assertions, not a new browser
+background-workspace toast test.
+
+Tags README now names the actual desktop section **Plugin groupings**.
+Tags production source/package/SDK are unchanged. Receipts:
+`~/.cache/sidebar-multi-tag-build/evidence/r17-*`. No new real-package install,
+physical-phone, PostgreSQL, broad-suite, remote-CI, release or deployment claim.
+Protected instances untouched. Streak remains 0/3; next round is Opus 18.

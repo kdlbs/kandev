@@ -268,6 +268,7 @@ it("an uncertain drag with a now-deleted endpoint is not replayed by its success
   await f.store.getState().waitForSidebarViewSync("ws");
   expect(f.current().views.map((view) => view.id)).toEqual([f.base.id, "c", "d"]);
   expect(f.current().views.find((view) => view.id === "c")?.name).toBe("Independent");
+  expect(f.store.getState().sidebarViewsByWorkspace.ws.syncError).toBeTruthy();
 });
 
 it.each([400, 409, 408, 429, 503])(
@@ -327,4 +328,20 @@ it("a definite rejection retires an older uncertain move before the next sparse 
   expect(f.current().views.map((view) => view.id)).toEqual(remoteOrder);
   expect(f.current().views.find((view) => view.id === "c")?.name).toBe("Independent C");
   expect(f.current().views.find((view) => view.id === "d")?.name).toBe("Independent D");
+});
+
+it("an intermediate local ACK does not retire intent that a later view write heals", async () => {
+  const f = fixture(["c"]);
+  const first = Promise.withResolvers<UserSettingsResponse>();
+  vi.mocked(updateUserSettings)
+    .mockImplementation((payload) => Promise.resolve(f.apply(payload)))
+    .mockImplementationOnce(() => first.promise);
+  f.store.getState().renameSidebarView(f.base.id, "Recovered");
+  f.store.getState().setSidebarActiveView(f.other.id);
+  f.store.getState().renameSidebarView("c", "Independent");
+  first.reject(new ApiError("Rename was not committed", 500, {}));
+  await f.store.getState().waitForSidebarViewSync("ws");
+  expect(f.current().views.find((view) => view.id === f.base.id)?.name).toBe("Recovered");
+  expect(f.current().views.find((view) => view.id === "c")?.name).toBe("Independent");
+  expect(f.store.getState().sidebarViewsByWorkspace.ws.syncError).toBeNull();
 });

@@ -224,6 +224,10 @@ it.each(
       ["selection", 500],
       ["save", 400],
       ["save", 500],
+      ["rename", 400],
+      ["rename", 500],
+      ["move", 400],
+      ["move", 409],
     ] as const
   ).flatMap(([transition, status]) => [false, true].map((skip) => ({ transition, status, skip }))),
 )(
@@ -235,7 +239,7 @@ it.each(
       collapsedGroups: ["kept", "retired"],
     };
     let server: SidebarWorkspaceStateApi = {
-      views: [toApiSidebarView(base)],
+      views: [toApiSidebarView(base), toApiSidebarView(createDefaultSidebarView("other", "Other"))],
       active_view_id: base.id,
       draft:
         transition === "save"
@@ -273,7 +277,9 @@ it.each(
       .mockImplementationOnce(() => first.promise);
     if (transition === "selection")
       store.getState().selectSidebarPluginGrouping({ reference: MULTI, label: "Multi-tag" });
-    else store.getState().saveSidebarDraftOverwrite();
+    else if (transition === "save") store.getState().saveSidebarDraftOverwrite();
+    else if (transition === "rename") store.getState().renameSidebarView(base.id, "Renamed");
+    else store.getState().reorderSidebarViews(base.id, "other");
     let current = true;
     const compacted = store
       .getState()
@@ -304,6 +310,9 @@ it.each(
     expect(state.views[0].collapsedGroups).toEqual(skip ? base.collapsedGroups : ["kept"]);
     expect(state.draft).toEqual(mapSidebarWorkspaces({ ws: server }).ws.draft);
     expect(state.transitionPending).toBe(false);
-    expect(state.syncError).toBeTruthy();
+    if (transition === "rename" && !skip) {
+      expect(state.views[0].name).toBe("Renamed");
+      expect(state.syncError).toBeNull();
+    } else expect(state.syncError).toBeTruthy();
   },
 );

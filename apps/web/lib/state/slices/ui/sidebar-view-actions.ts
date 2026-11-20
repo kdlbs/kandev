@@ -34,8 +34,9 @@ import {
   admitSidebarServerSnapshot,
   clearSidebarWriteRollback,
   getSidebarWriteJournal,
-  replayableSidebarMove,
+  pruneSidebarFailures,
   recordSidebarWriteFailure,
+  settleSidebarFailures,
   restoreSidebarSnapshot,
   snapshotSidebar,
   type SidebarWriteJournal,
@@ -155,9 +156,7 @@ function syncSidebarWrite(
   let succeeded = false;
   const writePayload = () => {
     admitDeferredSidebarState(journal, get);
-    journal.failedViewMutations = journal.failedViewMutations?.filter((failed) =>
-      replayableSidebarMove(journal, failed.move),
-    );
+    pruneSidebarFailures(journal);
     if (admit && !admit(journal.confirmed!)) return null;
     let rebased = journal.confirmed!;
     if (kind !== "local")
@@ -178,11 +177,9 @@ function syncSidebarWrite(
   const completed = enqueueSidebarSettingsSync(set, get, writePayload, () => desired, kind).then(
     (persisted) => {
       succeeded = true;
-      const failedUnreplayedWrite = journal.failedUnreplayedWrite;
       journal.pending--;
       if (!persisted && thisRequestId !== journal.latestRequestId) return;
-      if (kind !== "local" || thisRequestId === journal.latestRequestId)
-        journal.failedViewMutations = undefined;
+      const failedUnreplayedWrite = settleSidebarFailures(journal, kind, persisted, thisRequestId);
       if (
         thisRequestId === journal.latestRequestId &&
         journal.failedWriteKind === "views" &&
@@ -196,7 +193,7 @@ function syncSidebarWrite(
       if (thisRequestId === journal.latestRequestId)
         set((state) => {
           const server = state.sidebarViews.deferredServerState;
-          if (server) restoreSidebarSnapshot(state.sidebarViews, server, failedUnreplayedWrite);
+          if (server) restoreSidebarSnapshot(state.sidebarViews, server);
           else if (kind === "compaction" || failedUnreplayedWrite)
             Object.assign(state.sidebarViews, journal.confirmed!);
           state.sidebarViews.syncPending = false;
