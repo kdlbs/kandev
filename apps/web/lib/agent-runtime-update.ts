@@ -1,4 +1,9 @@
-import type { AgentUpdateJob, AgentUpdateOperation, AgentUpdatePreview } from "@/lib/api";
+import type {
+  AgentUpdateCheckReason,
+  AgentUpdateJob,
+  AgentUpdateOperation,
+  AgentUpdatePreview,
+} from "@/lib/api";
 import { t } from "@/lib/i18n";
 
 export const ACTIVE_UPDATE_STATUSES = new Set<AgentUpdateJob["status"]>([
@@ -75,6 +80,26 @@ export function runtimeOperationLabelKey(operation: AgentUpdateOperation | undef
     default:
       return "agents:updateRuntime";
   }
+}
+
+const NATIVE_CHECK_REASON_KEYS: Record<AgentUpdateCheckReason, string> = {
+  check_failed: "agents:nativeCheckReasonCheckFailed",
+  unsupported: "agents:nativeCheckReasonUnsupported",
+  unrecognized_output: "agents:nativeCheckReasonUnrecognizedOutput",
+  timeout: "agents:nativeCheckReasonTimeout",
+  output_limit: "agents:nativeCheckReasonOutputLimit",
+  not_installed: "agents:nativeCheckReasonNotInstalled",
+  runtime_mismatch: "agents:nativeCheckReasonRuntimeMismatch",
+  cancelled: "agents:nativeCheckReasonCancelled",
+  unavailable: "agents:nativeCheckReasonUnavailable",
+};
+
+/** Locale key explaining an unknown native check; unknown codes use the generic copy. */
+export function nativeCheckReasonKey(reason: string | undefined): string {
+  if (reason && Object.hasOwn(NATIVE_CHECK_REASON_KEYS, reason)) {
+    return NATIVE_CHECK_REASON_KEYS[reason as AgentUpdateCheckReason];
+  }
+  return "agents:runtimeCheckUnknown";
 }
 
 export function canApproveAgentRuntimeUpdate({

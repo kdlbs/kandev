@@ -935,7 +935,9 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	expectedState := session.State
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
-		claimAgentStartAttempt(session)
+		if models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]) == "" {
+			claimAgentStartAttempt(session)
+		}
 	}
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
@@ -967,6 +969,13 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 				"prepare_result",
 				buildPrepareResultMetadata(resp.PrepareResult),
 			)
+		}
+		if IsSessionStateSwitched(updateErr) {
+			e.logger.Info("launch superseded by a concurrent workflow session switch",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(updateErr))
+			return updateErr
 		}
 		e.logger.Error("failed to update agent session after launch",
 			zap.String("task_id", taskID),
@@ -1060,6 +1069,11 @@ type ResumeOptions struct {
 	// automatic and logs the omission — it is never silently treated as a
 	// manual override.
 	Origin string
+	// TransientRetry* binds a capacity-deferred automatic retry to the failure
+	// that scheduled it. The orchestrator checks these values at replay admission.
+	TransientRetryAttemptID  string
+	TransientRetryErrorStamp string
+	TransientRetryUpdatedAt  time.Time
 	// ForceContextContinuation starts a new native conversation using the
 	// explicit, bounded continuation prompt rather than the persisted native
 	// session identity.

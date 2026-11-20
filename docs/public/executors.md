@@ -83,32 +83,25 @@ Choose Remote Docker over a single-node Kubernetes cluster when you want a conta
 
 ## Docker log and temporary storage limits
 
-New containers created by the Docker client use rotating `json-file` logs with
-`max-size=100m` and `max-file=3`. This applies to normal and interactive creation,
-including a remote Docker daemon. Existing containers keep their storage
-configuration when Kandev reconnects to them.
+Storage values apply when Kandev creates a Docker container. Existing containers keep their original storage settings when Kandev reconnects.
 
-This per-container choice overrides the daemon's default logging driver and
-rotation limits. Collectors that require another driver do not receive these
-containers' output through that driver.
+By default, Kandev does not set a logging driver or rotation options. Docker uses the driver and defaults configured for its daemon. Kandev does not add a `/tmp` mount, so the image keeps its own `/tmp` contents and settings.
 
-The default `/tmp` is a 2 GiB executable tmpfs with mode 1777, `nosuid`, and
-`nodev`. Agents and package managers can run temporary launchers from this
-directory. An explicit task mount at `/tmp`, including an equivalent path such
-as `/tmp/`, keeps its own storage policy. The tmpfs hides files that the image
-supplies under `/tmp`.
+To set limits, open a Local Docker or Remote Docker profile. Enter values in **Storage limits**, then save the profile. Leave a field blank to use Docker or image defaults.
 
-Tmpfs uses host memory and swap. Its use counts against the container's memory
-limit. The 2 GiB capacity does not increase that limit, so temporary writes can
-cause an out-of-memory termination before the tmpfs is full.
+| Profile field | Example | Effect |
+| --- | --- | --- |
+| Temporary storage (`/tmp`) | `2g` | Mounts an executable tmpfs at `/tmp` with mode `1777`, `nosuid`, and `nodev`. |
+| Maximum log file size | `100m` | Sends Docker the `max-size` log option. |
+| Maximum log files | `3` | Sends Docker the `max-file` log option. |
 
-Tmpfs contents disappear when the container stops, including before a restart
-of that same container. A session stop that leaves the container running does
-not clear its tmpfs. Write required outputs and evidence to persistent task
-storage.
+Docker selects the logging driver from its daemon configuration. It can reject container creation when the driver does not support supplied rotation options. For example, the `journald` driver can reject them. A file count needs an effective maximum file size to rotate logs.
 
-These limits do not bound the writable layer, workspaces, other bind mounts, or
-evidence archives; those still need their own retention and cleanup.
+The `/tmp` tmpfs hides content supplied by the image. It uses host memory and swap. Its use counts against the container's memory limit. The tmpfs size does not increase that limit. Temporary writes can cause an out-of-memory termination before the tmpfs is full.
+
+If a task mount targets `/tmp`, including `/tmp/`, Kandev does not add the configured tmpfs. The task mount keeps its own storage policy. Tmpfs content disappears when Docker stops the container. A session stop that leaves the container running does not clear it. Store required outputs in persistent task storage.
+
+These options do not limit the writable layer, workspace, other bind mounts, or evidence archives. Those need separate retention and cleanup.
 
 ## Plugin-managed remote executors
 

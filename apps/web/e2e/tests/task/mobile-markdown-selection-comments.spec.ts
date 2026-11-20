@@ -43,9 +43,11 @@ test.describe("Markdown selection comments on mobile", () => {
       const action = testPage.getByTestId("markdown-preview-comment-button");
       await expect(action).toBeVisible({ timeout: 5_000 });
       await action.tap();
-      const popover = testPage.locator("[data-markdown-comment-popover] .fixed.z-50");
-      await expect(popover).toBeVisible();
-      await expect(popover.locator("pre")).toContainText(selectedText.trim());
+      const commentDialog = testPage.getByRole("dialog").filter({
+        has: testPage.getByPlaceholder("Add your comment or instruction..."),
+      });
+      await expect(commentDialog).toBeVisible();
+      await expect(commentDialog).toContainText(selectedText.trim());
     } finally {
       fs.rmSync(diskPath, { force: true });
     }
@@ -143,21 +145,37 @@ test.describe("Markdown selection comments on mobile", () => {
     await restoreSelectionCommentVisualViewport(testPage);
     await action.tap();
 
-    const popover = testPage.locator("[data-markdown-comment-popover] .fixed.z-50");
-    await expect(popover).toBeVisible();
-    await expect(popover.locator("pre")).toContainText(SELECTED_TEXT);
-    const popoverBox = await popover.boundingBox();
+    const commentDialog = testPage.getByRole("dialog").filter({
+      has: testPage.getByPlaceholder("Add your comment or instruction..."),
+    });
+    await expect(commentDialog).toBeVisible();
+    await expect(commentDialog).toContainText(SELECTED_TEXT);
+    await expect
+      .poll(async () => {
+        const box = await commentDialog.boundingBox();
+        const size = testPage.viewportSize();
+        return Boolean(
+          box &&
+          size &&
+          box.x >= 0 &&
+          box.y >= 0 &&
+          box.x + box.width <= size.width + 1 &&
+          box.y + box.height <= size.height + 1,
+        );
+      })
+      .toBe(true);
+    const dialogBox = await commentDialog.boundingBox();
     const viewport = testPage.viewportSize();
-    expect(popoverBox).not.toBeNull();
+    expect(dialogBox).not.toBeNull();
     expect(viewport).not.toBeNull();
-    if (!popoverBox || !viewport) throw new Error("Expected mobile comment editor geometry");
-    expect(popoverBox.x).toBeGreaterThanOrEqual(0);
-    expect(popoverBox.y).toBeGreaterThanOrEqual(0);
-    expect(popoverBox.x + popoverBox.width).toBeLessThanOrEqual(viewport.width + 1);
-    expect(popoverBox.y + popoverBox.height).toBeLessThanOrEqual(viewport.height + 1);
+    if (!dialogBox || !viewport) throw new Error("Expected mobile comment editor geometry");
+    expect(dialogBox.x).toBeGreaterThanOrEqual(0);
+    expect(dialogBox.y).toBeGreaterThanOrEqual(0);
+    expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(viewport.width + 1);
+    expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(viewport.height + 1);
 
-    await popover.getByPlaceholder("Add your comment or instruction...").fill(COMMENT_TEXT);
-    await popover.getByRole("button", { name: "Add", exact: true }).tap();
+    await commentDialog.getByPlaceholder("Add your comment or instruction...").fill(COMMENT_TEXT);
+    await commentDialog.getByRole("button", { name: "Add", exact: true }).tap();
     await expect(preview.getByTestId("markdown-preview-commented-range")).toBeVisible();
     await expectStoredMarkdownComment({
       page: testPage,

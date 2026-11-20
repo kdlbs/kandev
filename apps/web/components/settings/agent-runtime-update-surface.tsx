@@ -124,7 +124,7 @@ export function AgentRuntimeUpdateSurface({
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
         <DrawerContent
-          className="flex max-h-[92dvh] flex-col overflow-hidden data-[vaul-drawer-direction=bottom]:max-h-[92dvh]"
+          className="flex max-h-[92dvh] flex-col overflow-clip data-[vaul-drawer-direction=bottom]:max-h-[92dvh]"
           data-testid={`agent-update-drawer-${agentName}`}
         >
           {header}

@@ -723,6 +723,7 @@
   "routeOutcomeRetryScheduled": "ŕēţŕŷ śćĥēďũĺēď",
   "routeOutcomeSkippedDegraded": "śķĩƥƥēď ďēĝŕàďēď",
   "routeOutcomeSkippedMaxAttempts": "śķĩƥƥēď ḿàx àţţēḿƥţś",
+  "routeOutcomeSkippedAuthorProvider": "śķĩƥƥēď: ŵŕōţē ţĥĩś ţàśķ",
   "routeOutcomeSkippedMissingMapping": "śķĩƥƥēď ḿĩśśĩńĝ ḿàƥƥĩńĝ",
   "routeOutcomeSkippedUserAction": "śķĩƥƥēď ũśēŕ àćţĩōń",
   "routineActivated": "Ŕōũţĩńē àćţĩvàţēď",
@@ -745,6 +746,7 @@
   "routineStatusPaused": "Ƥàũśēď",
   "routingOverridesSaved": "Ŕōũţĩńĝ ōvēŕŕĩďēś śàvēď",
   "routingSettingsSaved": "Ŕōũţĩńĝ śēţţĩńĝś śàvēď",
+  "routingSavedWithExclusionWarnings": "Śēţţĩńĝś śàvēď, ƀũţ Ŕēvĩēŵ ōń à ďĩƒƒēŕēńţ ƥŕōvĩďēŕ ćàń'ţ ŵōŕķ àś śēţ ũƥ. Śēē ţĥē ŵàŕńĩńĝ àţ ţĥē ţōƥ ōƒ ţĥē ƥàĝē.",
   "run": "Ŕũń",
   "runActivity": "Ŕũń Àćţĩvĩţŷ",
   "runCancelAssigneeChanged": "Àśśĩĝńēē ćĥàńĝēď",
@@ -1024,5 +1026,10 @@
   "failedToLoadRouteAttempts": "Ƒàĩĺēď ţō ĺōàď ŕōũţē àţţēḿƥţś",
   "failedToLoadRoutingConfig": "Ƒàĩĺēď ţō ĺōàď ŕōũţĩńĝ ćōńƒĩĝ",
   "failedToLoadRoutingPreview": "Ƒàĩĺēď ţō ĺōàď ŕōũţĩńĝ ƥŕēvĩēŵ",
-  "failedToLoadTaskQuorum": "Ƒàĩĺēď ţō ĺōàď ţàśķ qũōŕũḿ"
+  "failedToLoadTaskQuorum": "Ƒàĩĺēď ţō ĺōàď ţàśķ qũōŕũḿ",
+  "authorExclusionStepsTitle": "Ŕēvĩēŵ ōń à ďĩƒƒēŕēńţ ƥŕōvĩďēŕ",
+  "authorExclusionStepsDescription": "Ķēēƥ à śţēƥ'ś ŕēvĩēŵēŕ ōŕ àƥƥŕōvēŕ ōƒƒ ţĥē ƥŕōvĩďēŕ ţĥàţ ďĩď ţĥē ţàśķ'ś ŵōŕķ, śō ţĥē ŕēvĩēŵ ĩś àń ĩńďēƥēńďēńţ ćĥēćķ. Ĩƒ ńō ōţĥēŕ ƥŕōvĩďēŕ ĩś àvàĩĺàƀĺē, ţĥē ŕēvĩēŵ ŵàĩţś ũńţĩĺ ŷōũ àćţ. Ńēēďś Àũţōḿàţĩć ƥŕōvĩďēŕ ƒàĺĺƀàćķ àńď àţ ĺēàśţ ţŵō ƥŕōvĩďēŕś. Àĝēńţś ŵĩţĥ ţĥēĩŕ ōŵń ēxēćũţĩōń ƥŕōƒĩĺē àŕē ńōţ ćōvēŕēď.",
+  "authorExclusionStepsEmpty": "Ńō ŵōŕķƒĺōŵ ĩń ţĥĩś ŵōŕķśƥàćē ĥàś à ŕēvĩēŵēŕ ōŕ àƥƥŕōvēŕ śţēƥ.",
+  "authorExclusionStepLabel": "{{workflow}} ŵōŕķƒĺōŵ, {{step}} śţēƥ",
+  "authorExclusionStepSwitchLabel": "Ŕēvĩēŵ ōń à ďĩƒƒēŕēńţ ƥŕōvĩďēŕ ƒōŕ {{workflow}} ŵōŕķƒĺōŵ, {{step}} śţēƥ ({{role}})"
 }

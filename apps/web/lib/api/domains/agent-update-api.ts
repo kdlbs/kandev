@@ -21,6 +21,21 @@ export type AgentUpdateMode = "pinned" | "self_update";
 
 export type AgentUpdateCheckState = "update_available" | "up_to_date" | "unknown";
 
+/** Present when status comes from the agent's own update check. */
+export type AgentUpdateCheckSource = "native";
+
+/** Closed backend set explaining an unknown native check. */
+export type AgentUpdateCheckReason =
+  | "check_failed"
+  | "unsupported"
+  | "unrecognized_output"
+  | "timeout"
+  | "output_limit"
+  | "not_installed"
+  | "runtime_mismatch"
+  | "cancelled"
+  | "unavailable";
+
 export type AgentUpdateVersion = {
   version: string;
   latest: boolean;
@@ -77,6 +92,11 @@ export type AgentUpdatePreview = {
   runtime_revision?: number;
   migration_available?: boolean;
   stable_latest_version?: string;
+  check_source?: AgentUpdateCheckSource;
+  check_state?: AgentUpdateCheckState;
+  latest_version?: string;
+  update_channel?: string;
+  check_reason?: AgentUpdateCheckReason;
   operation?: AgentUpdateOperation;
   available_versions?: AgentUpdateVersion[];
   command: string[];
@@ -225,6 +245,9 @@ export type AgentUpdateStatus = {
   latest_version?: string;
   checked_at?: string;
   check_state: AgentUpdateCheckState;
+  check_source?: AgentUpdateCheckSource;
+  update_channel?: string;
+  check_reason?: AgentUpdateCheckReason;
   family?: "v1" | "v2";
   runtime_source?: "managed" | "native";
   runtime_revision?: number;

@@ -1626,7 +1626,7 @@
     "components/task/passthrough-chat-composer.test.ts",
     "components/task/passthrough-toolbar.test.tsx",
     "components/task/plan-comment-migration-notice.test.tsx",
-    "components/task/plan-selection-popover.test.tsx",
+    "components/shared/selection-comment/selection-comment-surface.test.tsx",
     "components/task/plan-tab.test.tsx",
     "components/task/plugin-task-panel.test.tsx",
     "components/task/port-forward-dialog.test.tsx",

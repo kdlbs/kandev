@@ -268,27 +268,49 @@ The status shown on this page is authoritative for the current host. A CLI that 
 ### Update Oh My Pi on the Kandev host
 
 On an installed `omp` card, select the update icon under **Settings > Agents**.
-Review the installed version, the **Stable latest (reference)** version, and
-the `omp update` command, then choose **Update runtime** or **Repair runtime**.
+Review the installed version, the result of OMP's own update check, and the
+`omp update` command, then choose **Update runtime** or **Repair runtime**.
 Kandev runs OMP's own updater as the Kandev service user on the host, streams
 its output, and refreshes ACP capabilities only after a successful probe.
 Active sessions are not restarted.
 
+Kandev decides whether an OMP update is available by running
+`omp update --check` on the host, with the same environment as the updater.
+The check reads OMP's configured stable or canary channel, so Settings and the
+update dialog show the latest version for that channel (for example
+`18.22.0-canary.3`), **Channel: canary** when OMP reports a canary channel, or
+**Up to date.** An available update produces the usual runtime update
+notification. Kandev does not query npm for OMP, does not choose a channel, and
+does not pass `--canary`, `--stable`, `--force`, or a version.
+
+When the check cannot give a result, Settings explains why: the check failed
+(for example, the release feed is unreachable), another installer manages this
+OMP installation, the output was not recognized, the check timed out or
+produced too much output, the `omp` executable was not found, the check
+describes a different installation than the running agent, or the agent is
+disabled or unavailable. These states never show **Up to date.**, and the
+update action stays available.
+
+Kandev reuses a successful check result for six hours and a failed one for
+fifteen minutes. It checks again sooner when the `omp` executable, the
+version reported by the running agent, or OMP's update configuration changes:
+the profile and directory environment variables, OMP configuration and
+project settings files, the installation's `manager.json`, `.npmrc` and
+`.bunfig.toml`, and OMP's `.env` files. An edit that keeps a file's size and
+modification time takes effect when the cached result expires. Finishing an
+update job, successful or not, also discards the cached result.
+
 OMP detects whether its installation is managed by Homebrew, mise, Bun, npm,
 or a standalone binary and updates through that method. A Nix-managed
-installation cannot be updated by this action. OMP follows its already
-configured stable or canary channel; Kandev does not choose a channel or pass
-a version to `omp update`. The stable latest shown in Settings is a
-comparison reference, **not a promised install target**: the installed
-version reported by OMP after updating may differ. There is no version
-picker, Kandev pin, or rollback for OMP.
+installation cannot be updated by this action. The installed version reported
+by OMP after updating is the version for its configured channel. There is no
+version picker, Kandev pin, or rollback for OMP, and automatic updates are not
+available for it.
 
-The update affects only the host installation, not task containers or remote
-executors. If OMP's updater or the follow-up ACP probe fails, Settings reports
-the error and retains the previous capability catalogue; Kandev cannot
-restore an executable that OMP already changed. When metadata is unavailable,
-the update icon remains available, but a preview must resolve the stable
-reference before the update can start.
+The check and the update affect only the host installation, not task
+containers or remote executors. If OMP's updater or the follow-up ACP probe
+fails, Settings reports the error and retains the previous capability
+catalogue; Kandev cannot restore an executable that OMP already changed.
 
 ### Update a managed agent runtime
 
@@ -1460,6 +1482,14 @@ Deleting a profile is irreversible. Kandev checks references before deletion:
 - enabled automations bound to the profile are disabled **before** it is deleted, and a failure to disable them aborts the deletion. Unlike watchers, an automation has no preflight that would notice a profile had vanished, so it would otherwise keep firing at a profile that no longer exists;
 - feature-flagged Office routing-tier references are hard conflicts and cannot be forced;
 - Kandev attempts to clean every ephemeral task with a session using the profile, including matching Quick Chat and Configuration Chat. A cleanup failure is logged and does not prevent profile deletion, so audit leftover resources afterward.
+
+You can also disable a profile that live dynamic profiles or utility agents use.
+The confirmation lists both kinds of references. A dynamic profile skips a
+disabled candidate. If that profile has no other eligible candidate, routing
+stops and needs action. New utility calls stop until you re-enable the profile
+or repair the binding. Soft-deleted dynamic profiles do not block their former
+candidates. When you delete a candidate, Kandev tries to remove its routes from
+soft-deleted dynamic profiles; a cleanup failure can leave inert routes there.
 
 Only custom TUI agents can be deleted from the agent list. Built-in definitions remain registered even when their CLI is not installed.
 

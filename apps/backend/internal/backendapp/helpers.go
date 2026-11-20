@@ -1174,6 +1174,7 @@ type routeParams struct {
 	authSvc                       *auth.Service
 	agentRuntimeAvailability      *client.Availability
 	addCleanup                    func(func() error)
+	addRestoreCleanup             func(func() error)
 	repoCloner                    *repoclone.Cloner
 	version                       string
 	commit                        string
@@ -2154,26 +2155,7 @@ func registerSecondaryRoutes(
 		runtimeflags.RegisterRoutes(p.router, p.runtimeFlagsSvc)
 	}
 
-	if p.repoCloner != nil {
-		var ghCopier improvekandev.GitHubWorkspaceCopier
-		var resolveDefaultWorkspace improvekandev.DefaultWorkspaceResolver
-		if p.services.GitHub != nil && p.dbPool != nil {
-			ghCopier = p.services.GitHub
-			resolveDefaultWorkspace = func(context.Context) (string, error) {
-				return workspacescope.ResolveMigrationTarget(p.dbPool.Reader())
-			}
-		}
-		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, ghCopier, resolveDefaultWorkspace, p.version, p.log)
-		if p.services.GitHub != nil {
-			ikHandler.SetManagedGitHubForkProber(p.services.GitHub)
-		}
-		ikHandler.SetTemporaryArtifactRegistry(p.temporaryArtifacts)
-		if p.systemSvc != nil {
-			ikHandler.SetLogBundles(p.systemSvc.LogBundles)
-		}
-		improvekandev.RegisterRoutes(p.router, ikHandler)
-		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
-	}
+	registerImproveKandevRoutes(p)
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 	if p.features.Coordinator {
@@ -2228,6 +2210,35 @@ func registerSecondaryRoutes(
 		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, handoffDeps, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
 	}
+}
+
+func registerImproveKandevRoutes(p routeParams) {
+	if p.repoCloner == nil {
+		return
+	}
+	var ghCopier improvekandev.GitHubWorkspaceCopier
+	var resolveDefaultWorkspace improvekandev.DefaultWorkspaceResolver
+	if p.services.GitHub != nil && p.dbPool != nil {
+		ghCopier = p.services.GitHub
+		resolveDefaultWorkspace = func(ctx context.Context) (string, error) {
+			return workspacescope.ResolveMigrationTargetContext(ctx, p.dbPool.Reader())
+		}
+	}
+	ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, ghCopier, resolveDefaultWorkspace, p.version, p.log)
+	if p.services.GitHub != nil {
+		ikHandler.SetManagedGitHubForkProber(p.services.GitHub)
+	}
+	ikHandler.SetTemporaryArtifactRegistry(p.temporaryArtifacts)
+	if p.systemSvc != nil {
+		ikHandler.SetLogBundles(p.systemSvc.LogBundles)
+	}
+	if p.addRestoreCleanup != nil {
+		p.addRestoreCleanup(ikHandler.Stop)
+	} else if p.addCleanup != nil {
+		p.addCleanup(ikHandler.Stop)
+	}
+	improvekandev.RegisterRoutes(p.router, ikHandler)
+	p.log.Debug("Registered Improve Kandev handlers (HTTP)")
 }
 
 func newSSHAgentctlResolver(p routeParams) *lifecycle.AgentctlResolver {
