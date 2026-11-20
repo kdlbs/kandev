@@ -20,16 +20,31 @@ function useSessionHiddenInDesktopLayout(sessionId: string | null): boolean {
     (notify: () => void) => {
       if (!api || isMobile) return () => {};
       const hide = onDidHideSessionPanel(api, notify);
-      const layout = api.onDidLayoutChange(notify);
+      let visibility: { dispose: () => void } | undefined;
+      const rebind = () => {
+        visibility?.dispose();
+        visibility = sessionId
+          ? api.getPanel(`session:${sessionId}`)?.api.onDidVisibilityChange(notify)
+          : undefined;
+        notify();
+      };
+      rebind();
+      const layout = api.onDidLayoutChange(rebind);
       return () => {
         hide.dispose();
         layout.dispose();
+        visibility?.dispose();
       };
     },
-    [api, isMobile],
+    [api, isMobile, sessionId],
   );
   const snapshot = useCallback(
-    () => !!api && !isMobile && !!sessionId && hiddenSessionIdsFor(api).has(sessionId),
+    () =>
+      !!api &&
+      !isMobile &&
+      !!sessionId &&
+      (hiddenSessionIdsFor(api).has(sessionId) ||
+        !api.getPanel(`session:${sessionId}`)?.api.isVisible),
     [api, isMobile, sessionId],
   );
   return useSyncExternalStore(subscribe, snapshot, serverHiddenSnapshot);

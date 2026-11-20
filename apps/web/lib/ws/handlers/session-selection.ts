@@ -18,6 +18,22 @@ export function allowsFollowState(source: FollowSource, state: TaskSession["stat
   );
 }
 
+export function hasExplicitWorkflowFocus(state: AppState, taskId: string): boolean {
+  const focus = state.workflowSessionFocus;
+  return focus?.intent?.taskId === taskId || focus?.request?.taskId === taskId;
+}
+
+export function isUnavailableSession(
+  state: AppState,
+  sessionId: string | null | undefined,
+  observed?: ReadonlySet<string>,
+): boolean {
+  return (
+    !!sessionId &&
+    (observed?.has(sessionId) || isConfirmedSessionRemoved(state.taskSessions, sessionId))
+  );
+}
+
 const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
   "COMPLETED",
   "CANCELLED",

@@ -458,6 +458,26 @@ test.describe("Mobile task unread dot", () => {
       await testPage.screenshot({
         path: test.info().outputPath("phone-workflow-cancelled-gap.png"),
       });
+      const successor = await apiClient.seedTaskSession(task.task_id, {
+        sessionId: randomUUID(),
+        agentProfileId: seedData.agentProfileId,
+        state: "WAITING_FOR_INPUT",
+      });
+      const successorTail = await apiClient.seedSessionMessage(successor.session_id, {
+        type: "message",
+        content: "Proven successor after failed independent move",
+      });
+      const changedPrimary = watcher.waitForEvent("task.updated", {
+        where: (payload) =>
+          payload.task_id === task.task_id && payload.primary_session_id === successor.session_id,
+      });
+      await apiClient.setPrimarySession(successor.session_id);
+      await changedPrimary;
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", successor.session_id);
+      await expect
+        .poll(async () => (await sessionReadState(apiClient, successor.session_id)).cursor)
+        .toBe(successorTail.messageId);
+      expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
       await tapSessionRow(testPage, other.session_id);
       await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
       await expect

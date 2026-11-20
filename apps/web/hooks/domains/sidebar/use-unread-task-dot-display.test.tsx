@@ -21,8 +21,20 @@ const SESSION_ID = "hidden-selected-session";
 it.each([false, true])("keeps desktop hiding separate from phone display (phone: %s)", (phone) => {
   viewport.isMobile = phone;
   const listeners = new Set<() => void>();
+  let visible = true;
   const api = {
-    getPanel: () => null,
+    getPanel: () => ({
+      api: {
+        get isVisible() {
+          return visible;
+        },
+        onDidVisibilityChange: (notify: () => void) => {
+          listeners.add(notify);
+          return { dispose: () => listeners.delete(notify) };
+        },
+      },
+    }),
+    removePanel: () => undefined,
     onDidLayoutChange: (notify: () => void) => {
       listeners.add(notify);
       return {
@@ -45,6 +57,18 @@ it.each([false, true])("keeps desktop hiding separate from phone display (phone:
   const { result, rerender, unmount } = renderHook(() => useUnreadTaskDotDisplay(), { wrapper });
   try {
     expect(result.current.displayedSessionId).toBe(SESSION_ID);
+    if (!phone) {
+      act(() => {
+        visible = false;
+        for (const notify of listeners) notify();
+      });
+      expect(result.current.displayedSessionId).toBeNull();
+      act(() => {
+        visible = true;
+        for (const notify of listeners) notify();
+      });
+      expect(result.current.displayedSessionId).toBe(SESSION_ID);
+    }
     act(() => {
       hideSessionPanel(api, SESSION_ID, "t1");
     });

@@ -10,7 +10,10 @@ import {
 } from "@/lib/state/task-session-reads";
 import { isConfirmedSessionRemoved } from "@/lib/state/session-removal";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
-import { recordRemovalHandoff } from "@/lib/state/session-removal-handoff";
+import {
+  getProvenRemovalPredecessor,
+  recordRemovalHandoff,
+} from "@/lib/state/session-removal-handoff";
 import { createDebugLogger } from "@/lib/debug/log";
 import {
   getSessionRestartStore,
@@ -20,6 +23,8 @@ import {
   clearPinnedSessionIfOverridden,
   hasSameTaskPredecessor,
   isEligibleReplacementSession,
+  hasExplicitWorkflowFocus,
+  isUnavailableSession,
   pickReplacementSessionId,
   shouldPreservePinnedSessionForTask,
   allowsFollowState,
@@ -77,11 +82,6 @@ export function findTaskInState(state: AppState, taskId: string): KanbanTask | u
   return undefined;
 }
 
-function hasExplicitWorkflowFocus(state: AppState, taskId: string): boolean {
-  const focus = state.workflowSessionFocus;
-  return focus?.intent?.taskId === taskId || focus?.request?.taskId === taskId;
-}
-
 function ownsSelection(store: StoreApi<AppState>, pending: FollowOwner): boolean {
   const state = store.getState();
   return (
@@ -102,17 +102,6 @@ function ownsSelection(store: StoreApi<AppState>, pending: FollowOwner): boolean
 
 function ownsPendingFollow(store: StoreApi<AppState>, pending: PendingFollow): boolean {
   return pendingByStore.get(store) === pending && ownsSelection(store, pending);
-}
-
-function isUnavailableSession(
-  state: AppState,
-  sessionId: string | null | undefined,
-  observed?: ReadonlySet<string>,
-): boolean {
-  return (
-    !!sessionId &&
-    (observed?.has(sessionId) || isConfirmedSessionRemoved(state.taskSessions, sessionId))
-  );
 }
 
 function lifecycleTarget(store: StoreApi<AppState>, pending: FollowOwner): string | null {
@@ -490,6 +479,7 @@ export function followSessionTransition(
   const state = store.getState();
   if (state.tasks.activeTaskId !== taskId) return true;
   if (hasExplicitWorkflowFocus(state, taskId)) return true;
+  if (getProvenRemovalPredecessor(store, taskId, null)) return true;
   const existing = pendingByStore.get(store);
   if (existing?.taskId === taskId && ownsSelection(store, existing)) {
     reverifyLifecycleFollow(store, existing, source);
@@ -603,9 +593,11 @@ function retargetFollow(
   previousSessionId: string,
   targetSessionId: string,
 ): void {
+  const empty = getProvenRemovalPredecessor(store, taskId, null);
   const source =
-    existing?.taskId === taskId && existing.source === "removed" ? "removed" : "primary";
+    empty || (existing?.taskId === taskId && existing.source === "removed") ? "removed" : "primary";
   const owner = captureOwner(store.getState(), taskId, previousSessionId, targetSessionId, source);
+  if (empty) owner.selectedSessionId = null;
   if (existing && ownsSelection(store, existing)) {
     owner.selectedSessionId = existing.selectedSessionId;
     owner.lifecycleRecipient = existing.lifecycleRecipient;
@@ -625,7 +617,8 @@ export function followUpdatedTaskPrimary(
   const targetSessionId = findTaskInState(state, taskId)?.primarySessionId;
   const existing = pendingByStore.get(store);
   const previousSessionId =
-    existing?.taskId === taskId ? existing.previousSessionId : previousPrimary;
+    getProvenRemovalPredecessor(store, taskId, null) ??
+    (existing?.taskId === taskId ? existing.previousSessionId : previousPrimary);
   if (!targetSessionId || !previousSessionId || targetSessionId === previousSessionId) {
     if (existing?.source === "primary") existing.cancel();
     return;

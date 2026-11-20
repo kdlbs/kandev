@@ -21,11 +21,10 @@ export function getProvenRemovalPredecessor(
   const proof = completedByStore.get(store);
   if (!proof || proof.taskId !== taskId || proof.targetSessionId !== targetSessionId) return null;
   const state = store.getState();
-  // Empty ownership ends at selection/navigation, not workflow cancellation.
+  // Passive display protection ends at selection/navigation, not workflow cancellation.
   return state.tasks.activeTaskId === taskId &&
     state.tasks.activeSessionId === targetSessionId &&
     state.taskRemoval.navigationRevision === proof.navigationRevision &&
-    (targetSessionId === null || state.workflowSessionFocus === proof.workflowFocus) &&
     stateReadScopeIdentity(state) === proof.scopeIdentity
     ? proof.previousSessionId
     : null;

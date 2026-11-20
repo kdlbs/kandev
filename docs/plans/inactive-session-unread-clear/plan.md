@@ -619,5 +619,13 @@ fix. It is separate from the five design-only rounds above.
   8 phone cases passed on the fresh frontend, with strict lint/typecheck/static
   gates. Task 02 records RED, fixture corrections, captures and retained-backend
   limits. Independent review remains open; round 15 is next.
-- Completed rounds: 14. Consecutive clean: 0. The stop condition is three
-  consecutive clean rounds or 50 rounds. No earlier loop counts toward it.
+- Round 15: Sol child `0c0b0561-6023-4ccc-9acd-639c2e9464cc` reviewed
+  `793af6672b`. Four source-derived P2s accepted: failed desktop workflow loses
+  passive hidden ownership; maximization parks the leased group; cancelled
+  empty slots lack WS continuation; inactive visible-tab recipients lose dots.
+  Corrections and scoped verification are complete: final 211 unit cases,
+  24 desktop cases and 8 phone cases passed. A real remount cursor leak was
+  reproduced and repaired after the fixture corrections. Task 02 records all
+  intermediate/final receipts. Independent review remains open; round 16 is next.
+- Completed rounds: 15. Consecutive clean: 0. Stop after three consecutive
+  clean rounds or 50 rounds. Earlier loops do not count.

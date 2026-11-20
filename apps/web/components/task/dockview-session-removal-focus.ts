@@ -17,6 +17,7 @@ type SurfaceOwner = {
   scopeIdentity: string;
   restorePanelId: string | null;
   cancelled: boolean;
+  panelIds: ReadonlySet<string>;
   focusDelivered: boolean;
 };
 const surfaces = new WeakMap<DockviewApi, Map<string, SurfaceOwner>>();
@@ -53,6 +54,7 @@ function captureVisiblePredecessor(
     restorePanelId: globalPanel && !globalPanel.startsWith("session:") ? globalPanel : null,
     cancelled: false,
     focusDelivered: false,
+    panelIds: new Set(panel.group.panels.map((member) => member.id)),
   };
 }
 
@@ -77,11 +79,16 @@ function pruneSurfaces(api: DockviewApi, state: AppState): void {
   if (!owners) return;
   for (const [groupId, owner] of owners) {
     const group = api.groups.find((candidate) => candidate.id === groupId);
+    const parked = useDockviewStore
+      .getState()
+      .preMaximizeLayout?.columns.some((column) =>
+        column.groups.some((candidate) => candidate.id === groupId),
+      );
     if (
-      !group ||
+      (!group && !parked) ||
       !ownsRemovalContext(state, owner) ||
       (state.tasks.activeSessionId !== null &&
-        group.activePanel?.id === `session:${state.tasks.activeSessionId}`)
+        group?.activePanel?.id === `session:${state.tasks.activeSessionId}`)
     )
       owners.delete(groupId);
   }
@@ -161,7 +168,13 @@ export function isRemovalChatBlocked(
   state: AppState,
 ): boolean {
   const panel = api?.getPanel(panelId);
-  const owner = panel && api ? surfaces.get(api)?.get(panel.group.id) : undefined;
+  const owner =
+    api &&
+    (panel
+      ? surfaces.get(api)?.get(panel.group.id)
+      : [...(surfaces.get(api)?.values() ?? [])].find((candidate) =>
+          candidate.panelIds.has(panelId),
+        ));
   return (
     !!owner &&
     owner.store === store &&

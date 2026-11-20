@@ -150,6 +150,31 @@ describe("owned empty-slot continuation", () => {
     await flushFocusWork();
     expect(store.getState().tasks.activeSessionId).toBe("latest");
   });
+
+  it("continues a workflow-cancelled empty slot without admitting an unseen sibling", async () => {
+    const store = withSiblings("FAILED");
+    const first = proofRead();
+    vi.mocked(listTaskSessions).mockReturnValue(first.promise);
+    const requestId = beginMove(store);
+    remove(store);
+    first.resolve(membership("next", "latest"));
+    await flushFocusWork();
+    store.getState().cancelWorkflowSessionFocus({ requestId });
+    expect(store.getState().tasks.activeSessionId).toBeNull();
+    store
+      .getState()
+      .setTaskSessionsForTask("t1", [response("WAITING_FOR_INPUT", "next").session], {});
+    store.getState().removeTaskSession("t1", "latest");
+    notifySibling(store);
+    expect(store.getState().tasks.activeSessionId).toBeNull();
+    const next = proofRead();
+    vi.mocked(listTaskSessions).mockReturnValue(next.promise);
+    promote(store, "latest");
+    expect(store.getState().tasks.activeSessionId).toBeNull();
+    next.resolve(membership("latest", "next"));
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("latest");
+  });
 });
 
 // @covers AC-TASKS-TASK-UNREAD-DOT-001.11

@@ -183,7 +183,12 @@ test.describe("owned removal transcript visibility", () => {
     });
   });
 
-  for (const winner of ["proven-chat", "explicit-sibling", "independent-changes"] as const) {
+  for (const winner of [
+    "proven-chat",
+    "explicit-sibling",
+    "independent-changes",
+    "independent-plan",
+  ] as const) {
     // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
     // @covers AC-TASKS-TASK-UNREAD-DOT-001.11
     test(`local removal activates ${winner} across the owned empty slot`, async ({
@@ -217,9 +222,16 @@ test.describe("owned removal transcript visibility", () => {
         .not.toBeNull();
       const beforeCursor = (await sessionReadState(apiClient, other.session_id)).cursor;
       const tail = await apiClient.seedSessionMessage(other.session_id, {
-        type: "message",
+        type: winner === "independent-plan" ? "user_message" : "message",
         content: "Unread neighboring output after returning to A",
       });
+      const primaryTail =
+        winner === "independent-plan"
+          ? await apiClient.seedSessionMessage(primary.session_id, {
+              type: "message",
+              content: "Unread recipient behind an independently selected Plan",
+            })
+          : null;
       const history = await observeRemovalSelection(testPage);
       const documentStart = await testPage.evaluate(() => performance.timeOrigin);
       try {
@@ -240,6 +252,10 @@ test.describe("owned removal transcript visibility", () => {
             .toBe(tail.messageId);
         } else {
           if (winner === "independent-changes") await session.clickTab("Changes");
+          if (winner === "independent-plan") {
+            await session.addPanelButton().click();
+            await testPage.getByRole("menuitem", { name: "Plan", exact: true }).click();
+          }
           await dwell(
             testPage,
             1500,
@@ -262,7 +278,20 @@ test.describe("owned removal transcript visibility", () => {
           winner === "explicit-sibling" ? other.session_id : primary.session_id;
         await waitForActiveTaskSession(testPage, task.task_id, expectedSession);
         await waitForTaskSessionsSettled(testPage, task.task_id);
-        if (winner !== "explicit-sibling") {
+        if (winner === "independent-plan") {
+          await expect(session.activeChat()).toHaveCount(0);
+          expect((await sessionReadState(apiClient, primary.session_id)).cursor).toBeNull();
+          await expect
+            .poll(() => taskUnreadSessionIds(apiClient, seedData.workspaceId, task.task_id))
+            .toEqual([primary.session_id]);
+          const taskRow = testPage.getByTestId("sidebar-task-item").filter({ hasText: task.title });
+          await expect(taskRow.getByRole("img", { name: TASK_UNREAD_DOT_LABEL })).toHaveCount(1);
+          await session.sessionTabBySessionId(primary.session_id).click();
+          await expect
+            .poll(async () => (await sessionReadState(apiClient, primary.session_id)).cursor)
+            .toBe(primaryTail!.messageId);
+          await expect(taskRow.getByRole("img", { name: TASK_UNREAD_DOT_LABEL })).toHaveCount(0);
+        } else if (winner !== "explicit-sibling") {
           await expect(session.activeChat()).toHaveAttribute("data-session-id", primary.session_id);
           await expect(
             session.activeChat().getByText(REMOVAL_PRIMARY_TEXT, { exact: true }),
@@ -448,6 +477,13 @@ test.describe("owned removal transcript visibility", () => {
           await waitForActiveTaskSession(testPage, task.task_id, null);
           expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
           await expect(session.activeChat()).toHaveCount(0);
+          await toggle.click();
+          await expect(toggle).toBeEnabled();
+          await session.clickMaximize("Files");
+          await expect(session.sessionTabBySessionId(other.session_id)).toHaveCount(0);
+          await session.clickMaximize("Files");
+          await expect(session.sessionTabBySessionId(other.session_id)).toBeVisible();
+          await expect(session.activeChat()).toHaveCount(0);
         }
         proof.release();
         await waitForActiveTaskSession(testPage, task.task_id, primary.session_id);
@@ -455,6 +491,24 @@ test.describe("owned removal transcript visibility", () => {
         await session.sessionTabCloseButton(different.session_id).click();
         await expect(session.sessionTabBySessionId(different.session_id)).toHaveCount(0);
         if (restore) {
+          const currentStep = (await apiClient.getTask(task.task_id)).workflow_step_id;
+          const targetStep = seedData.steps.find((step) => step.id !== currentStep);
+          if (!targetStep) throw new Error("Missing workflow destination");
+          const pattern = `**/api/v1/tasks/${task.task_id}/move`;
+          await testPage.route(
+            pattern,
+            (route) => route.fulfill({ status: 500, json: { error: "Injected workflow failure" } }),
+            { times: 1 },
+          );
+          const failed = testPage.waitForResponse(
+            (response) =>
+              response.request().method() === "POST" &&
+              new URL(response.url()).pathname === `/api/v1/tasks/${task.task_id}/move`,
+          );
+          await testPage.getByTestId(`workflow-step-${targetStep.name}`).hover();
+          await testPage.getByTestId("workflow-step-move-here").click();
+          expect((await failed).status()).toBe(500);
+          await expect(testPage.getByText("Failed to move task", { exact: true })).toBeVisible();
           const toggle = testPage.getByTestId("task-right-panels-toggle");
           await expect(toggle).toBeEnabled();
           await toggle.click();

@@ -250,11 +250,11 @@ cancelling only a request targeting that ID. An owned empty slot can re-prove af
 a changed primary; newer user/workflow selection wins. Surviving pins/cursors stay
 untouched. Proof initializes missing recipient identity/lifecycle only.
 
-Preview validates discovery before passive adoption; workflow focus survives
-pending membership. Owned empty slots block route/layout fallback until actual
-or proven selection, not workflow cancellation. Same-scope layout rebuilds keep
-removed-group leases; hide admission is session-owned. Independent splits and
-non-agent focus stay intact.
+Preview validates discovery; workflow focus survives pending membership.
+Removal receipts protect display until selection/navigation; empty slots re-prove
+changed primaries, blocking discovery. Rebuilds/maximize retain group leases.
+Hide admission is session-owned; dot exclusion uses readable group visibility.
+Independent splits and non-agent focus stay intact.
 
 `invalidateTaskSessionMembership` fences foreground/removal-dialog pending,
 admitted and queued publications. New reads/unrelated keys remain usable.

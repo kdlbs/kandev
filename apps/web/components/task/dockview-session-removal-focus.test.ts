@@ -382,6 +382,14 @@ it.each(["pending", "hidden"] as const)(
         proof.resolve(membership("latest", "next", LATER));
         await flushFocusWork();
         runAutoSessionTabEffect("latest", store, refs);
+        const requestId = store.getState().beginWorkflowSessionFocus({
+          taskId: "t1",
+          workflowId: "wf1",
+          destinationStepId: "review",
+          presentationToken: 1,
+          navigationRevision: store.getState().taskRemoval.navigationRevision,
+        });
+        store.getState().cancelWorkflowSessionFocus({ requestId: requestId! });
       }
       const selected = phase === "hidden" ? "latest" : null;
       expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(true);
@@ -389,6 +397,17 @@ it.each(["pending", "hidden"] as const)(
       useDockviewStore.setState({ isRestoringLayout: true });
       Object.assign(view.api, { groups: [] });
       store.setState({ tasks: { ...store.getState().tasks } });
+      useDockviewStore.setState({
+        preMaximizeLayout: {
+          columns: [{ id: "parked", groups: [{ id: groups[0].id, panels: [] }] }],
+        },
+        isRestoringLayout: false,
+      });
+      const getPanel = view.api.getPanel;
+      Object.assign(view.api, { getPanel: () => null });
+      expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(true);
+      Object.assign(view.api, { getPanel });
+      useDockviewStore.setState({ isRestoringLayout: true, preMaximizeLayout: null });
       Object.assign(view.api, { groups });
       expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(true);
       useDockviewStore.setState({ isRestoringLayout: false });

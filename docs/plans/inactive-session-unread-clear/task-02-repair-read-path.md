@@ -2221,3 +2221,144 @@ bypass; individual hook streams are not exposed by that API. Temporary source
 dependency aliases are cache-backed and removed before push. Original-incident
 attribution, list-convergence and seeded-execution limits remain unchanged.
 Completed production reviews: 14; consecutive clean: 0.
+
+### Production-fix review round 15 remediation
+
+Reuse .6/.9/.11/.12/.17 and existing desktop/phone composition. No predicate,
+cursor, backend promotion, wire or schema change.
+
+```text
+Desktop: owned blank -> maximize Files / restore -> still blank
+         hidden C -> workflow fails / restore -> still C hidden, B unread
+         independent Plan -> proven inactive C -> C dot stays until actual read
+Phone:   failed move leaves blank -> unseen sibling cannot adopt
+         changed primary -> scoped absence/unique-primary proof -> recipient
+```
+
+`r15-red.log` recorded five failures: four behavior failures (two parked-group
+phases, inactive-recipient dot, and unseen-sibling admission), plus one mock
+scaffold error because the new visible-panel fake lacked `removePanel`.
+The fake was completed rather than adding a production fallback.
+`r15-green.log` and initial typecheck passed after the scoped corrections.
+
+Passive receipts retain selection/navigation/scope ownership through workflow
+failure; strict workflow authority for automatic focus remains in the controller.
+Group retirement checks parked pre-maximize membership before removing a lease.
+Existing scoped null receipts seed changed-primary removal verification and block
+state-only discovery. Desktop dot exclusion observes the actual panel visibility,
+rebinding its visibility subscription on layout replacement, while phone ignores
+desktop layout. Explicit selection and committed workflow controls remain.
+
+Browser cases extend the real right-pane case with maximize/restore and an
+injected move failure, add independent Plan's exact cursor/dot assertions, and
+extend the real phone cancellation case with a newly proven primary. Existing
+negative cursor/traffic checks and explicit read controls are retained.
+
+`r15-unit.log` passed ten files / 211 cases. Strict lint then found the
+controller's 605-line budget. Two existing pure predicates moved unchanged
+into `session-selection.ts`; no full-module mocks needed migration. Final
+post-move unit/lint/typecheck/build and browser receipts follow.
+
+`r15-static.log` and `r15-docs.log` passed sleep/i18n ratchets, documentation
+catalog and full spec lint. Ratchet rename warnings remain attributable to the
+older verification checkout baseline, not a configuration change. All temporary
+outputs and dependency targets stay cache-backed. R02 backend/plugin artifacts
+are reused intentionally; runtime proof uses the fresh R15 frontend.
+
+Post-move `r15-unit-final.log` passed ten files / 211 cases; strict changed-file
+lint, typecheck and fresh frontend build passed. The first full three-file
+desktop run (`r15-desktop-summary.log`, raw `r15-quiet/kandev-run.e2e.JAfyvvuX.log`)
+had 22 passes and two scaffold failures: Plan was not an existing default tab,
+and the maximize control's Files group had just been hidden by the pane toggle.
+The tests now open Plan through the shipped + menu and restore the right pane
+before maximizing Files. No production change was made for these failures.
+The corrected owning cases and full phone file are checked separately below;
+do not describe the earlier complete run as 24 green.
+
+The corrected Plan case passed (`r15-desktop-corrected-summary.log`, raw
+`r15-quiet/kandev-run.e2e.GEgI1Zc0.log`). The remaining maximize case exposed
+another scaffold error: a Files body locator disappears with null task/session
+ownership even though its header remains. It now uses the existing
+`SessionPage.clickMaximize("Files")` header path for both maximize and restore.
+
+Final owning unit command (all changed regressions included):
+
+```bash
+VITEST_MAX_WORKERS=2 pnpm exec vitest run \
+  components/task/dockview-session-removal-focus.test.ts \
+  lib/ws/handlers/task-primary-continuation.test.ts \
+  hooks/domains/sidebar/use-unread-task-dot-display.test.tsx \
+  components/task/dockview-session-tab-sync.test.ts \
+  components/task/task-page-session-ownership.test.tsx \
+  lib/ws/handlers/task-primary-lifecycle.test.ts \
+  lib/ws/handlers/task-primary-focus.test.ts \
+  lib/state/workflow-session-focus.test.ts \
+  components/task/task-switcher-unread-dot.test.tsx \
+  components/task/task-switcher-render-stability.test.tsx
+```
+
+Desktop uses the same three owning files and cache-safe host/single-shard runner
+as R14, with output `$SNAPSHOT/r15-desktop`. After test-only corrections:
+
+```bash
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts -- \
+  --workers=1 --retries=0 --grep 'independent-plan|layout restore: true' \
+  --output "$SNAPSHOT/r15-desktop-corrected"
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts -- \
+  --workers=1 --retries=0 --grep 'layout restore: true' \
+  --output "$SNAPSHOT/r15-desktop-maximize"
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- \
+  --workers=1 --retries=0 --output "$SNAPSHOT/r15-phone"
+```
+
+The prepared maximize case required the real full-width stepper header (not
+Preview's minimal disclosure), and a destination different from the task's
+current prepared step. Once those scaffold assumptions were corrected,
+`r15-desktop-header-summary.log` / raw `r15-quiet/kandev-run.e2e.89ChH6KD.log`
+exposed a real persisted B-cursor advance. Group bookkeeping alone did not cover
+the render interval where the returning panel is absent from the live API.
+`r15-remount-red.log` reproduces that read-admission gap in both ownership phases.
+The existing group lease now retains its original panel identities so the
+remount remains blocked without suppressing unrelated groups or explicit input.
+
+`r15-phone-summary.log` / raw `r15-quiet/kandev-run.e2e.GJjMrVfL.log` passed all
+eight phone cases before this final desktop-remount correction. The failed
+workflow stays blank, a changed primary then re-proves membership and displays
+its exact new tail, while B remains unread until explicitly selected. Final
+fresh-bundle receipts are recorded separately.
+
+`r15-remount-unit.log` passed all ten owning/adjacent files after the final
+production edit. `r15-remount-typecheck.log`, `r15-remount-build.log`,
+`r15-format-check.log` and `r15-remount-lint.log` passed. The real combined
+maximize/failed-workflow case then passed:
+`r15-desktop-remount-summary.log` / `r15-quiet/kandev-run.e2e.r13NrXfl.log`.
+Inspected its capture: hidden C stays closed, B remains a tab but has no visible
+transcript, the failed move's real error is shown, and the task dot remains.
+The separate Plan capture shows the chosen Plan surface, not C's transcript.
+
+Final complete desktop and phone files run serially on that same final bundle,
+one worker/no retries, with outputs `$SNAPSHOT/r15-final-desktop` and
+`$SNAPSHOT/r15-final-phone`; these replace earlier bundle claims, not the
+retained RED/scaffold receipts.
+
+Final runtime receipts on the final remount-aware frontend:
+
+- `r15-final-desktop-summary.log` /
+  `r15-quiet/kandev-run.e2e.5WwNzhO3.log`: all 24 desktop cases passed.
+- `r15-final-phone-summary.log` /
+  `r15-quiet/kandev-run.e2e.41Vspas0.log`: all 8 phone cases passed.
+- `r15-remount-unit.log`: all ten files / 211 cases passed after the last
+  production edit. Final strict lint, typecheck, formatting and build passed.
+  Backend/plugin reuse and historical/list-convergence limits remain qualified.
+
+Implementation and targeted verification are complete. At this execution
+checkpoint the parent proceeds to normal selective commit and exact fork push,
+then independent Sol R16 review. No repeated rebase or PR. Individual hook
+streams are unavailable from the selective commit API; no bypass is used.
+Completed production reviews: 15; consecutive clean: 0.
