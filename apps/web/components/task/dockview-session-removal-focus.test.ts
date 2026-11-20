@@ -246,9 +246,9 @@ it("keeps an owned group empty when its proven primary is hidden", async () => {
 });
 
 // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
-it.each([false, true])(
-  "keeps a directly proven hidden recipient closed across internal fallback: %s",
-  async (implicit) => {
+it.each(["reconcile", "implicit", "hide-other"] as const)(
+  "keeps a directly proven hidden recipient closed across passive input: %s",
+  async (mode) => {
     const { store, view, refs } = scene();
     const original = useDockviewStore.getState();
     useDockviewStore.setState({
@@ -283,10 +283,13 @@ it.each([false, true])(
       proof.resolve(membership("latest", "next", LATER));
       await flushFocusWork();
       expect(store.getState().tasks.activeSessionId).toBe("latest");
-      if (implicit) view.api.removePanel(view.api.getPanel(OLD_PANEL_ID)!);
-      else runAutoSessionTabEffect("latest", store, refs);
+      if (mode === "reconcile") runAutoSessionTabEffect("latest", store, refs);
+      else view.api.removePanel(view.api.getPanel(OLD_PANEL_ID)!);
       expect(view.api.getPanel(LATEST_PANEL_ID)).toBeNull();
-      activated?.({ id: NEXT_PANEL_ID });
+      if (mode === "hide-other") {
+        hideSessionPanel(view.api, LATER, "t1");
+        await Promise.resolve();
+      } else activated?.({ id: NEXT_PANEL_ID });
       expect(store.getState().tasks.activeSessionId).toBe("latest");
       expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(true);
       markSessionTabUserActivationIntent("next");
@@ -342,6 +345,65 @@ it.each([false, true])(
     } finally {
       safety.dispose();
       vi.unstubAllGlobals();
+      useDockviewStore.setState(original);
+    }
+  },
+);
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
+it.each(["pending", "hidden"] as const)(
+  "retains the removed group's ownership across same-environment restore: %s",
+  async (phase) => {
+    const { store, view, refs } = scene();
+    const original = useDockviewStore.getState();
+    useDockviewStore.setState({
+      api: view.api,
+      currentLayoutEnvId: "removal-restore",
+      isRestoringLayout: false,
+      preMaximizeLayout: null,
+    });
+    store.setState({
+      environmentIdBySessionId: Object.fromEntries(
+        ["old", "next", "latest", LATER].map((id) => [id, "removal-restore"]),
+      ),
+    });
+    hideSessionPanel(view.api, "latest", "t1");
+    Object.assign(view.api, {
+      onDidActivePanelChange: () => ({ dispose: () => undefined }),
+    });
+    const stop = setupRemovalSurfaceFocus(view.api, store);
+    const sync = setupSessionTabSync(view.api, store);
+    const proof = Promise.withResolvers<TaskSessionsResponse>();
+    vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
+    try {
+      prepareSessionRemoval(store, "old", "t1")();
+      runAutoSessionTabEffect(null, store, refs);
+      if (phase === "hidden") {
+        proof.resolve(membership("latest", "next", LATER));
+        await flushFocusWork();
+        runAutoSessionTabEffect("latest", store, refs);
+      }
+      const selected = phase === "hidden" ? "latest" : null;
+      expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(true);
+      const groups = [...view.api.groups];
+      useDockviewStore.setState({ isRestoringLayout: true });
+      Object.assign(view.api, { groups: [] });
+      store.setState({ tasks: { ...store.getState().tasks } });
+      Object.assign(view.api, { groups });
+      expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(true);
+      useDockviewStore.setState({ isRestoringLayout: false });
+      expect(store.getState().tasks.activeSessionId).toBe(selected);
+      expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(true);
+      if (phase === "pending") {
+        proof.resolve(membership("latest", "next", LATER));
+        await flushFocusWork();
+        expect(store.getState().tasks.activeSessionId).toBe("latest");
+      }
+      store.getState().setActiveSession("t1", "next");
+      expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(false);
+    } finally {
+      sync.dispose();
+      stop();
       useDockviewStore.setState(original);
     }
   },

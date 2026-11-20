@@ -90,25 +90,25 @@ function pruneSurfaces(api: DockviewApi, state: AppState): void {
 /** Only explicit/proven ownership can expose a removed group's fallback transcript. */
 export function setupRemovalSurfaceFocus(api: DockviewApi, store: StoreApi<AppState>): () => void {
   const unsubscribe = store.subscribe((current, previous) => {
+    if (useDockviewStore.getState().isRestoringLayout) return;
     pruneSurfaces(api, current);
-    if (!useDockviewStore.getState().isRestoringLayout) {
-      const captured = captureVisiblePredecessor(api, store, current, previous);
-      if (captured) {
-        let owners = surfaces.get(api);
-        if (!owners) {
-          owners = new Map();
-          surfaces.set(api, owners);
-        }
-        owners.set(captured.groupId, captured);
+    const captured = captureVisiblePredecessor(api, store, current, previous);
+    if (captured) {
+      let owners = surfaces.get(api);
+      if (!owners) {
+        owners = new Map();
+        surfaces.set(api, owners);
       }
+      owners.set(captured.groupId, captured);
     }
   });
   const cancel = () => {
     for (const owner of surfaces.get(api)?.values() ?? []) owner.cancelled = true;
   };
-  const unsubscribeLayout = useDockviewStore.subscribe((current) => {
-    if (current.isRestoringLayout || current.api !== api) surfaces.delete(api);
-    else pruneSurfaces(api, store.getState());
+  const unsubscribeLayout = useDockviewStore.subscribe((current, previous) => {
+    if (current.api !== api || current.currentLayoutEnvId !== previous.currentLayoutEnvId)
+      surfaces.delete(api);
+    else if (!current.isRestoringLayout) pruneSurfaces(api, store.getState());
   });
   window.addEventListener("pointerdown", cancel, true);
   window.addEventListener("keydown", cancel, true);

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page } from "@playwright/test";
+import type { Route } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { dwell, watchWs } from "../../helpers/causal-waits";
@@ -350,6 +351,123 @@ test.describe("Mobile task unread dot", () => {
     } finally {
       await proof.dispose();
       await history?.stop();
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: preventAutoStart });
+    }
+  });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.11
+  test("keeps the phone route unread when a workflow move fails after remote retirement", async ({
+    testPage,
+    desktopTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { settings } = await apiClient.getUserSettings();
+    const preventAutoStart = settings.prevent_auto_start_agent_on_open === true;
+    await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
+    const { task, old, primary, other } = await seedRemovalChoiceTask(apiClient, seedData);
+    const targetStep = seedData.steps.find((step) => step.id !== seedData.startStepId);
+    if (!targetStep) throw new Error("Workflow cancellation requires a destination step");
+    await apiClient.setPrimarySession(other.session_id);
+    const proof = await holdRemovalMembership(testPage, task.task_id, old.session_id);
+    const movePattern = `**/api/v1/tasks/${task.task_id}/move`;
+    const moveStarted = Promise.withResolvers<void>();
+    const moveRelease = Promise.withResolvers<void>();
+    let moving: Promise<void> | undefined;
+    const failMove = (route: Route) => {
+      moving = (async () => {
+        moveStarted.resolve();
+        await moveRelease.promise;
+        await route.fulfill({ status: 500, json: { error: "Injected workflow move failure" } });
+      })();
+      return moving;
+    };
+    await testPage.route(movePattern, failMove);
+    const watcher = watchWs(testPage);
+    const traffic = observeReadTraffic(testPage);
+    const session = new SessionPage(testPage);
+    try {
+      await testPage.goto(`/t/${task.task_id}`);
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+      await expect
+        .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
+        .not.toBeNull();
+      await tapSessionRow(testPage, old.session_id);
+      const promoted = watcher.waitForEvent("task.updated", {
+        where: (payload) =>
+          payload.task_id === task.task_id && payload.primary_session_id === primary.session_id,
+      });
+      await apiClient.setPrimarySession(primary.session_id);
+      await promoted;
+      const before = (await sessionReadState(apiClient, other.session_id)).cursor;
+      const tail = await apiClient.seedSessionMessage(other.session_id, {
+        type: "message",
+        content: "Unread route sibling after independent workflow failure",
+      });
+      await testPage.getByTestId("mobile-task-picker-trigger").tap();
+      const picker = testPage.getByRole("dialog", { name: "Tasks", exact: true });
+      await picker
+        .getByTestId("sidebar-task-item")
+        .filter({ hasText: task.title })
+        .getByRole("button", { name: "Task actions", exact: true })
+        .tap();
+      await testPage.getByTestId("task-context-move-to").tap();
+      await testPage.getByTestId(`task-context-step-${targetStep.id}`).tap();
+      await moveStarted.promise;
+      proof.arm();
+      await desktopTestPage.goto(`/t/${task.task_id}`);
+      const deleting = new SessionPage(desktopTestPage);
+      await expect(deleting.activeChat()).toHaveAttribute("data-session-id", primary.session_id);
+      await deleting.sessionTabBySessionId(old.session_id).click({ button: "right" });
+      await deleting.contextMenuItem("Delete").click();
+      const removed = watcher.waitForEvent("session.removed", {
+        where: (payload) => payload.session_id === old.session_id,
+      });
+      await desktopTestPage.getByTestId("session-delete-confirm").click();
+      await removed;
+      await proof.queued;
+      proof.release();
+      await waitForActiveTaskSession(testPage, task.task_id, null);
+      await waitForTaskSessionsSettled(testPage, task.task_id);
+      const failed = testPage.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === `/api/v1/tasks/${task.task_id}/move`,
+      );
+      moveRelease.resolve();
+      expect((await failed).status()).toBe(500);
+      await expect(testPage.getByText("Failed to move task", { exact: true })).toBeVisible();
+      await testPage.keyboard.press("Escape");
+      await expect(picker).toBeHidden();
+      await dwell(
+        testPage,
+        1500,
+        "negative-assertion",
+        "A failed workflow intent is not permission to read a route sibling",
+      );
+      await waitForActiveTaskSession(testPage, task.task_id, null);
+      await expect(
+        testPage.locator('[data-testid="session-chat"][data-session-id]:visible'),
+      ).toHaveCount(0);
+      expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
+      expect(
+        traffic.markReads.filter(
+          (read) => read.sessionId === other.session_id && read.messageId === tail.messageId,
+        ),
+      ).toEqual([]);
+      await testPage.screenshot({
+        path: test.info().outputPath("phone-workflow-cancelled-gap.png"),
+      });
+      await tapSessionRow(testPage, other.session_id);
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+      await expect
+        .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
+        .toBe(tail.messageId);
+    } finally {
+      moveRelease.resolve();
+      await moving;
+      await testPage.unroute(movePattern, failMove);
+      await proof.dispose();
       await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: preventAutoStart });
     }
   });

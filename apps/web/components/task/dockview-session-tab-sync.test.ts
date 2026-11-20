@@ -34,6 +34,7 @@ type SessionTabSyncApi = {
 type SessionTabSyncStore = {
   getState: () => {
     tasks: { activeTaskId: string; activeSessionId: string };
+    taskRemoval: { navigationRevision: number };
     taskSessions: {
       items: Record<string, { id: string; task_id: string }>;
     };
@@ -102,6 +103,7 @@ function makeSessionTabSyncHarness(args: {
         activeTaskId: args.activeTaskId,
         activeSessionId: args.activeSessionId,
       },
+      taskRemoval: { navigationRevision: 0 },
       taskSessions: {
         items: {
           [args.activeSessionId]: { id: args.activeSessionId, task_id: args.activeTaskId },

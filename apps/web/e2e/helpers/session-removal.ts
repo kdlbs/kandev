@@ -10,27 +10,42 @@ import type { StoreApi } from "zustand";
 export const REMOVAL_PRIMARY_TEXT = "Proven primary conversation";
 export const REMOVAL_OTHER_TEXT = "Unproven neighboring conversation";
 
-export async function seedRemovalChoiceTask(api: ApiClient, seed: SeedData) {
-  const task = await api.seedTask(seed.workspaceId, "Owned removal choice", {
-    workflow_id: seed.workflowId,
-    workflow_step_id: seed.startStepId,
-  });
+export async function seedRemovalChoiceTask(
+  api: ApiClient,
+  seed: SeedData,
+  prepareEnvironment = false,
+) {
+  const task = prepareEnvironment
+    ? await api.createTask(seed.workspaceId, "Owned removal choice", {
+        prepare_session: true,
+        agent_profile_id: seed.agentProfileId,
+        workflow_id: seed.workflowId,
+        workflow_step_id: seed.startStepId,
+        repository_ids: [seed.repositoryId],
+      })
+    : await api.seedTask(seed.workspaceId, "Owned removal choice", {
+        workflow_id: seed.workflowId,
+        workflow_step_id: seed.startStepId,
+      });
+  const taskId = "task_id" in task ? task.task_id : task.id;
+  const preparedId = "session_id" in task ? task.session_id : undefined;
+  if (prepareEnvironment && !preparedId) throw new Error("Removal fixture has no prepared session");
   const now = Date.now();
-  const old = await api.seedTaskSession(task.task_id, {
-    sessionId: randomUUID(),
+  const old = await api.seedTaskSession(taskId, {
+    sessionId: preparedId ?? randomUUID(),
     agentProfileId: seed.agentProfileId,
     state: "FAILED",
     startedAt: new Date(now - 1000).toISOString(),
     completedAt: new Date(now - 500).toISOString(),
     errorMessage: "Removed conversation",
   });
-  const primary = await api.seedTaskSession(task.task_id, {
+  const primary = await api.seedTaskSession(taskId, {
     sessionId: randomUUID(),
     agentProfileId: seed.agentProfileId,
     state: "WAITING_FOR_INPUT",
     startedAt: new Date(now - 4000).toISOString(),
   });
-  const other = await api.seedTaskSession(task.task_id, {
+  const other = await api.seedTaskSession(taskId, {
     sessionId: randomUUID(),
     agentProfileId: seed.agentProfileId,
     state: "WAITING_FOR_INPUT",
@@ -43,7 +58,7 @@ export async function seedRemovalChoiceTask(api: ApiClient, seed: SeedData) {
   });
   await api.seedSessionMessage(other.session_id, { type: "message", content: REMOVAL_OTHER_TEXT });
   await api.setPrimarySession(primary.session_id);
-  return { task, old, primary, other };
+  return { task: { task_id: taskId, title: task.title }, old, primary, other };
 }
 
 function membershipContains(body: unknown, sessionId: string): boolean {

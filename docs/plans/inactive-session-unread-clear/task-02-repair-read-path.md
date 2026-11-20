@@ -2095,3 +2095,129 @@ exact fork delivery and the next independent production review are parent-owned.
 Completed reviews: 13; consecutive clean: 0. No broad-suite, live-NATS,
 historical-trigger, real seeded-execution or isolated cursor-event certification
 is implied. No user browser or live database was mutated.
+
+### Production-fix review round 14 remediation
+
+Preserve .6/.9/.11/.12/.17 through passive UI transitions. No new copy, layout
+geometry, touch control or persistent state; reuse the existing phone task
+picker/workflow move and the desktop right-pane toggle.
+
+```text
+Desktop: delete A -> owned blank -> toggle right pane -> still blank
+         proof names hidden C -> hide D/toggle -> C hidden, B still unread
+Phone:   route B, view A -> begin move -> remote delete A -> owned blank
+         move fails -> still blank -> explicit B -> read exactly B's tail
+```
+
+R14's three source schedules are reproduced at their real store/consumer owners:
+
+- `r14-red.log`: five failures / 27 controls. One successful-workflow control
+  omitted its response entry identity/freshness and was a test fixture failure,
+  not a product regression.
+- `r14-red-corrected.log`: four behavioral failures / 28 controls. Same-scope
+  restoration removes the group block in both null/hidden phases; hiding an
+  unrelated tab selects B; cancelling the independent workflow exposes route B.
+- Removal surface subscriptions retain leases while the same API/environment
+  rebuilds, ignoring transient group absence. Scope/API changes and disposal
+  still invalidate them. Restored selection cannot adopt a fallback over a
+  proven null or hidden removal owner.
+- Hide reconciliation captures the hidden session and navigation owner, checks
+  them again in the microtask, and preserves a proven hidden recipient. Ordinary
+  active hide and explicit tab input retain their existing controls.
+- A null removal receipt survives workflow intent failure/cancellation without
+  relaxing target-specific workflow authority. Actual session/navigation or
+  backend/auth/workspace change still supersedes it; successful workflow focus
+  selects its committed recipient.
+- `r14-green.log`: 48 controls passed; the old tab-sync fake omitted its
+  navigation revision and threw in the hide callback. The fixture now includes
+  the real state field. `r14-green-final.log`: three files / 49 cases passed;
+  `r14-typecheck.log` passed before the later E2E-only additions.
+
+Browser RED uses the retained final R13 frontend deliberately, before rebuilding
+R14. `r14-desktop-red-summary.log` /
+`r14-quiet/kandev-run.e2e.THHe7Ah2.log`: both variants failed. Unrelated hide
+exposed a chat; real right-pane toggle advanced B's cursor while proof was held.
+The prepared fixture uses a real task environment and no agent prompt.
+
+`r14-phone-red-summary.log` / `r14-quiet/kandev-run.e2e.HccaYhHV.log` then
+reproduced the workflow-cancellation case on the R13 bundle. The phone task
+picker starts the real move; its HTTP boundary returns a held 500 only after
+remote deletion membership settles. The failure toast appears, intent cancels,
+and the identified route conversation incorrectly reappears. No store writes
+or fabricated membership are used by this test.
+
+Final scoped commands, from the same cache-backed setup after `refresh` and
+`pnpm run pretypecheck` (all outputs remain on `/dev/sdd`):
+
+```bash
+VITEST_MAX_WORKERS=2 pnpm exec vitest run \
+  components/task/dockview-session-removal-focus.test.ts \
+  components/task/task-page-session-ownership.test.tsx \
+  components/task/dockview-session-tab-sync.test.ts \
+  components/task/dockview-session-tabs.test.ts \
+  components/task/dockview-session-tab-activation.test.ts \
+  components/task/dockview-session-tabs.hook.test.tsx \
+  lib/ws/handlers/task-primary-continuation.test.ts \
+  lib/ws/handlers/task-primary-lifecycle.test.ts \
+  lib/ws/handlers/task-primary-focus.test.ts \
+  lib/ws/handlers/task-primary-removal-admission.test.ts \
+  lib/state/workflow-session-focus.test.ts \
+  hooks/domains/session/use-session-actions.removal-proof.test.ts \
+  hooks/domains/sidebar/use-unread-task-dot-display.test.tsx \
+  hooks/use-session-layout-state.test.ts
+pnpm run build:vite
+export KANDEV_RUN_QUIET_DIR="$SNAPSHOT/r14-quiet"
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/kanban/preview-session-removal.spec.ts \
+  e2e/tests/task/task-unread-dot.spec.ts -- \
+  --workers=1 --retries=0 --output "$SNAPSHOT/r14-desktop"
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- \
+  --workers=1 --retries=0 --output "$SNAPSHOT/r14-phone"
+```
+
+`r14-strict-lint.log` passed all nine changed web files with deny-warnings.
+`r14-typecheck-final.log` passed after the phone failure-path test was added.
+Formatter changes are applied back through anchored edits, not by copying the
+verification tree. The later desktop addition checks authoritative unread IDs
+and the actual dot as well as the cursor/negative traffic.
+
+`r14-related-unit.log`: all fourteen files / 279 cases passed, including every
+new/changed regression, ordinary restored selection/active hide, independently
+visible splits, lifecycle/removal continuation, and workflow/pin/navigation
+controls. `r14-frontend-build.log` passed; `r14-frontend.sha256` records its
+fresh asset tree. Backend/plugin artifacts remain the retained R02 build.
+
+`r14-code-static.log` passed formatting, sleep and i18n ratchets. The snapshot's
+older Git baseline still broadens the ratchet scope and emits rename warnings;
+no configuration change suppresses them. `r14-docs-static.log` passed catalog
+validation and full spec lint. The owning design is 32,747 bytes.
+
+`r14-desktop-summary.log` / `r14-quiet/kandev-run.e2e.6LAbft9i.log`:
+all 23 desktop cases passed on the fresh R14 frontend, one worker/no retries.
+The same-environment case toggles the real right pane before and after proof;
+both variants hide unrelated D and retain B's exact cursor, negative mark-read
+traffic, authoritative unread contribution and actual dot. Explicit B selection
+then reads exactly its new tail. Inspected both final desktop captures: the
+removed group is blank with its unread neighbor still a tab, and the task dot
+remains visible. Files/Terminal placeholders are prepared fixture state, not
+evidence of a live agent.
+
+`r14-phone-summary.log` / `r14-quiet/kandev-run.e2e.505Ag26E.log`:
+all eight phone cases passed on the same fresh frontend, one worker/no retries.
+The real failed-move path leaves selection null, shows no identified route
+conversation, preserves B's exact cursor and sends no B-tail mark-read. Explicit
+B selection then advances exactly to that tail. Inspected the final cancelled
+workflow capture: neutral Session surface with the real failure toast, not B.
+
+R14 correction and scoped verification are complete. At this execution
+checkpoint the parent proceeds to normal selective commit, exact Fclem fork
+delivery and independent Sol R15 dispatch. No repeated rebase, PR, broad-suite
+or live-NATS certification. Namespace commit defaults run normal hooks without
+bypass; individual hook streams are not exposed by that API. Temporary source
+dependency aliases are cache-backed and removed before push. Original-incident
+attribution, list-convergence and seeded-execution limits remain unchanged.
+Completed production reviews: 14; consecutive clean: 0.

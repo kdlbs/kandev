@@ -378,78 +378,122 @@ test.describe("owned removal transcript visibility", () => {
   });
 
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
-  test("keeps a hidden proven primary from selecting an unread neighbor", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    await apiClient.saveUserSettings({ agent_tab_close_behavior: "hide_panel" });
-    const { task, old, primary, other } = await seedRemovalChoiceTask(apiClient, seedData);
-    await apiClient.setPrimarySession(old.session_id);
-    const proof = await holdRemovalMembership(testPage, task.task_id, old.session_id);
-    const watcher = watchWs(testPage);
-    const traffic = observeReadTraffic(testPage);
-    const session = new SessionPage(testPage);
-    await testPage.goto(`/t/${task.task_id}`);
-    await expect(session.activeChat()).toHaveAttribute("data-session-id", old.session_id);
-    await session.sessionTabBySessionId(other.session_id).click();
-    await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
-    await session.sessionTabBySessionId(old.session_id).click();
-    const promoted = watcher.waitForEvent("task.updated", {
-      where: (payload) =>
-        payload.task_id === task.task_id && payload.primary_session_id === primary.session_id,
-    });
-    await apiClient.setPrimarySession(primary.session_id);
-    await promoted;
-    await session.sessionTabCloseButton(primary.session_id).click();
-    await expect(session.sessionTabBySessionId(primary.session_id)).toHaveCount(0);
-    await expect(session.activeChat()).toHaveAttribute("data-session-id", old.session_id);
-    await expect
-      .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
-      .not.toBeNull();
-    const before = (await sessionReadState(apiClient, other.session_id)).cursor;
-    const hiddenCursor = (await sessionReadState(apiClient, primary.session_id)).cursor;
-    const tail = await apiClient.seedSessionMessage(other.session_id, {
-      type: "message",
-      content: "Unseen neighbor while the proven primary is hidden",
-    });
-    try {
-      proof.arm();
-      await session.sessionTabBySessionId(old.session_id).click({ button: "right" });
-      await session.contextMenuItem("Delete").click();
-      const acknowledged = watcher.waitForResponse("session.delete");
-      await testPage.getByTestId("session-delete-confirm").click();
-      await acknowledged;
-      await proof.queued;
-      proof.release();
-      await waitForActiveTaskSession(testPage, task.task_id, primary.session_id);
-      await waitForTaskSessionsSettled(testPage, task.task_id);
-      await dwell(
-        testPage,
-        1500,
-        "negative-assertion",
-        "A hidden proven primary cannot authorize a neighboring transcript or cursor",
+  for (const restore of [false, true]) {
+    test(`keeps a hidden primary owned through unrelated hide and layout restore: ${restore}`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      await apiClient.saveUserSettings({ agent_tab_close_behavior: "hide_panel" });
+      const { task, old, primary, other } = await seedRemovalChoiceTask(
+        apiClient,
+        seedData,
+        restore,
       );
-      await expect(session.activeChat()).toHaveCount(0);
-      await expect(session.sessionTabBySessionId(primary.session_id)).toHaveCount(0);
-      expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
-      expect((await sessionReadState(apiClient, primary.session_id)).cursor).toBe(hiddenCursor);
-      expect(
-        traffic.markReads.filter(
-          (read) => read.sessionId === other.session_id && read.messageId === tail.messageId,
-        ),
-      ).toEqual([]);
-      await testPage.screenshot({ path: test.info().outputPath("hidden-primary-owned-empty.png") });
+      const different = await apiClient.seedTaskSession(task.task_id, {
+        sessionId: randomUUID(),
+        agentProfileId: seedData.agentProfileId,
+        state: "WAITING_FOR_INPUT",
+      });
+      await apiClient.setPrimarySession(old.session_id);
+      const proof = await holdRemovalMembership(testPage, task.task_id, old.session_id);
+      const watcher = watchWs(testPage);
+      const traffic = observeReadTraffic(testPage);
+      const session = new SessionPage(testPage);
+      await testPage.goto(`/t/${task.task_id}`);
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", old.session_id);
       await session.sessionTabBySessionId(other.session_id).click();
       await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+      await session.sessionTabBySessionId(old.session_id).click();
+      const promoted = watcher.waitForEvent("task.updated", {
+        where: (payload) =>
+          payload.task_id === task.task_id && payload.primary_session_id === primary.session_id,
+      });
+      await apiClient.setPrimarySession(primary.session_id);
+      await promoted;
+      await session.sessionTabCloseButton(primary.session_id).click();
+      await expect(session.sessionTabBySessionId(primary.session_id)).toHaveCount(0);
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", old.session_id);
       await expect
         .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
-        .toBe(tail.messageId);
-      expect((await sessionReadState(apiClient, primary.session_id)).cursor).toBe(hiddenCursor);
-    } finally {
-      await proof.dispose();
-    }
-  });
+        .not.toBeNull();
+      const before = (await sessionReadState(apiClient, other.session_id)).cursor;
+      const hiddenCursor = (await sessionReadState(apiClient, primary.session_id)).cursor;
+      const tail = await apiClient.seedSessionMessage(other.session_id, {
+        type: "message",
+        content: "Unseen neighbor while the proven primary is hidden",
+      });
+      try {
+        proof.arm();
+        await session.sessionTabBySessionId(old.session_id).click({ button: "right" });
+        await session.contextMenuItem("Delete").click();
+        const acknowledged = watcher.waitForResponse("session.delete");
+        await testPage.getByTestId("session-delete-confirm").click();
+        await acknowledged;
+        await proof.queued;
+        await waitForActiveTaskSession(testPage, task.task_id, null);
+        if (restore) {
+          const toggle = testPage.getByTestId("task-right-panels-toggle");
+          await expect(toggle).toBeEnabled();
+          const expanded = await toggle.getAttribute("aria-expanded");
+          await toggle.click();
+          await expect(toggle).toBeEnabled();
+          await expect(toggle).toHaveAttribute("aria-expanded", String(expanded !== "true"));
+          await dwell(
+            testPage,
+            1500,
+            "negative-assertion",
+            "Right-pane rebuild retains the deletion gap",
+          );
+          await waitForActiveTaskSession(testPage, task.task_id, null);
+          expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
+          await expect(session.activeChat()).toHaveCount(0);
+        }
+        proof.release();
+        await waitForActiveTaskSession(testPage, task.task_id, primary.session_id);
+        await waitForTaskSessionsSettled(testPage, task.task_id);
+        await session.sessionTabCloseButton(different.session_id).click();
+        await expect(session.sessionTabBySessionId(different.session_id)).toHaveCount(0);
+        if (restore) {
+          const toggle = testPage.getByTestId("task-right-panels-toggle");
+          await expect(toggle).toBeEnabled();
+          await toggle.click();
+          await expect(toggle).toBeEnabled();
+        }
+        await dwell(
+          testPage,
+          1500,
+          "negative-assertion",
+          "A hidden proven primary cannot authorize a neighboring transcript or cursor",
+        );
+        await expect(session.activeChat()).toHaveCount(0);
+        await expect(session.sessionTabBySessionId(primary.session_id)).toHaveCount(0);
+        expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
+        expect((await sessionReadState(apiClient, primary.session_id)).cursor).toBe(hiddenCursor);
+        expect(
+          traffic.markReads.filter(
+            (read) => read.sessionId === other.session_id && read.messageId === tail.messageId,
+          ),
+        ).toEqual([]);
+        await expect
+          .poll(() => taskUnreadSessionIds(apiClient, seedData.workspaceId, task.task_id))
+          .toContain(other.session_id);
+        const taskRow = testPage.getByTestId("sidebar-task-item").filter({ hasText: task.title });
+        await expect(taskRow.getByRole("img", { name: TASK_UNREAD_DOT_LABEL })).toHaveCount(1);
+        await testPage.screenshot({
+          path: test.info().outputPath("hidden-primary-owned-empty.png"),
+        });
+        await session.sessionTabBySessionId(other.session_id).click();
+        await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+        await expect
+          .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
+          .toBe(tail.messageId);
+        expect((await sessionReadState(apiClient, primary.session_id)).cursor).toBe(hiddenCursor);
+      } finally {
+        await proof.dispose();
+      }
+    });
+  }
 
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
   test("does not reopen a hidden primary when another client deletes the last visible chat", async ({

@@ -17,6 +17,7 @@ import { useRenderedTaskSession } from "./task-page-session-ownership";
 import { prepareSessionRemoval } from "@/lib/ws/handlers/task-primary-focus";
 import { withSiblings, membership } from "@/lib/ws/handlers/task-primary-focus.test-helpers";
 import type { TaskSessionsResponse } from "@/lib/types/http";
+import { registerTaskSessionHandlers } from "@/lib/ws/handlers/agent-session";
 
 const PARENT_TASK_ID = "parent-task";
 const PARENT_SESSION_ID = "parent-session";
@@ -553,5 +554,86 @@ it.each(["proof", "explicit", "zero-primary", "navigation"] as const)(
       navigation: "next",
     }[settlement];
     await waitFor(() => expect(result.current.rendered.sessionId).toBe(expected));
+  },
+);
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.11
+it.each(["cancel", "commit", "explicit"] as const)(
+  "keeps a retired phone route empty until actual workflow selection: %s",
+  async (settlement) => {
+    const seed = withSiblings("FAILED").getState();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <StateProvider
+        initialState={{
+          kanban: seed.kanban,
+          tasks: seed.tasks,
+          taskSessions: seed.taskSessions,
+          taskSessionsByTask: seed.taskSessionsByTask,
+        }}
+      >
+        {children}
+      </StateProvider>
+    );
+    const { result } = renderHook(
+      () => ({
+        store: useAppStoreApi(),
+        rendered: useRenderedTaskSession("t1", "next", null),
+      }),
+      { wrapper },
+    );
+    const store = result.current.store;
+    const proof = Promise.withResolvers<TaskSessionsResponse>();
+    mocks.listTaskSessions.mockReturnValue(proof.promise);
+    let requestId: number | null = null;
+    act(() => {
+      requestId = store.getState().beginWorkflowSessionFocus({
+        taskId: "t1",
+        workflowId: "wf1",
+        destinationStepId: "review",
+        presentationToken: 1,
+        navigationRevision: store.getState().taskRemoval.navigationRevision,
+      });
+      registerTaskSessionHandlers(store)["session.removed"]!({
+        id: "remote-during-workflow",
+        type: "notification",
+        action: "session.removed",
+        payload: { task_id: "t1", session_id: "old" },
+      });
+    });
+    await act(async () => {
+      proof.resolve(membership("latest", "next"));
+      await proof.promise;
+    });
+    expect(store.getState().taskSessions.items.old).toBeUndefined();
+    expect(result.current.rendered.sessionId).toBeNull();
+    act(() => {
+      if (settlement === "commit") {
+        store.getState().bindWorkflowSessionFocus({
+          requestId: requestId!,
+          presentationToken: 1,
+          entryIdentity: "committed-entry",
+        });
+        store.getState().reconcileWorkflowSessionFocus("t1", {
+          metadata: {
+            workflow_session_route: {
+              operation_id: "move",
+              destination_step_id: "review",
+              entry_identity: "committed-entry",
+              destination_session_id: "latest",
+              phase: "committed",
+            },
+          },
+          workflowStepId: "review",
+          entryIdentity: "committed-entry",
+          updatedAt: "2026-11-20T00:00:00Z",
+        });
+      } else {
+        store.getState().cancelWorkflowSessionFocus({ requestId: requestId! });
+        if (settlement === "explicit") store.getState().setActiveSession("t1", "next");
+      }
+    });
+    expect(result.current.rendered.sessionId).toBe(
+      { cancel: null, commit: "latest", explicit: "next" }[settlement],
+    );
   },
 );

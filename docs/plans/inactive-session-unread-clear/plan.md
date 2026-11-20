@@ -608,5 +608,16 @@ fix. It is separate from the five design-only rounds above.
   formatting/ratchets and docs checks passed. Task 02 qualifies intermediate
   failures and bundle provenance. Independent production review remains open;
   round 14 is next.
-- Completed rounds: 13. Consecutive clean: 0. The stop condition is three
+- Round 14: Sol child `ba7d78c1-ba09-40af-8c35-f86e54051185` reviewed
+  `f8729c164b`. Three source-derived P2s reproduced: same-scope right-pane
+  rebuild drops deletion ownership; hiding another tab adopts the removed
+  group's fallback; workflow failure releases the phone's owned null slot.
+  Controlled RED is four failures / 28 controls. Corrections retain the group
+  lease through restoration, scope hide reconciliation to its original owner,
+  and end empty-slot ownership only at actual selection/navigation.
+  Scoped verification is complete: 279 unit cases, all 23 desktop cases and all
+  8 phone cases passed on the fresh frontend, with strict lint/typecheck/static
+  gates. Task 02 records RED, fixture corrections, captures and retained-backend
+  limits. Independent review remains open; round 15 is next.
+- Completed rounds: 14. Consecutive clean: 0. The stop condition is three
   consecutive clean rounds or 50 rounds. No earlier loop counts toward it.

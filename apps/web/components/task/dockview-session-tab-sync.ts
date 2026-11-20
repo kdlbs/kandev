@@ -30,11 +30,17 @@ function isDifferentSessionPanel(panelId: string, activeSessionId: string | null
 function adoptVisibleSuccessorForHiddenActiveSession(
   api: DockviewReadyEvent["api"],
   appStore: StoreApi<AppState>,
+  hiddenSessionId: string,
+  previous: AppState,
 ): void {
   const state = appStore.getState();
   const activeTaskId = state.tasks.activeTaskId;
   if (
     !activeTaskId ||
+    state.tasks.activeTaskId !== previous.tasks.activeTaskId ||
+    state.taskRemoval.navigationRevision !== previous.taskRemoval.navigationRevision ||
+    state.tasks.activeSessionId !== hiddenSessionId ||
+    getProvenRemovalPredecessor(appStore, activeTaskId, hiddenSessionId) !== null ||
     !state.tasks.activeSessionId ||
     !hiddenSessionIdsFor(api).has(state.tasks.activeSessionId)
   ) {
@@ -64,6 +70,7 @@ function adoptRestoredSessionTabSelection(
   const activeTaskId = state.tasks.activeTaskId;
   const currentEnvironmentId = useDockviewStore.getState().currentLayoutEnvId;
   if (!activeTaskId || !currentEnvironmentId) return;
+  if (getProvenRemovalPredecessor(appStore, activeTaskId, state.tasks.activeSessionId)) return;
 
   const currentSessionIds = new Set<string>(
     (state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? []).map((session) => session.id),
@@ -159,9 +166,11 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
     clearHiddenSessionPanel(api, target.sessionId);
     state.setActiveSession(target.taskId, target.sessionId);
   });
-  const hiddenPanelDisposable = onDidHideSessionPanel(api, () => {
+  const hiddenPanelDisposable = onDidHideSessionPanel(api, (sessionId) => {
+    const state = appStore.getState();
+    if (state.tasks.activeSessionId !== sessionId) return;
     queueMicrotask(() => {
-      adoptVisibleSuccessorForHiddenActiveSession(api, appStore);
+      adoptVisibleSuccessorForHiddenActiveSession(api, appStore, sessionId, state);
     });
   });
   return {
