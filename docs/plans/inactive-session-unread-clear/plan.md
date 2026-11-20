@@ -652,5 +652,17 @@ fix. It is separate from the five design-only rounds above.
   code lint, typecheck, formatting/ratchets and docs gates passed. Task 02
   retains scaffold/type corrections and exact receipts. Independent review
   remains open; round 18 is next.
-- Completed rounds: 17. Consecutive clean: 0. Stop after three consecutive
+- Round 18: Sol child `846ff3a2-fdf0-4bf6-8123-8d3a73ddd6cb` reviewed
+  `85c8e66142`. Two source-derived P2s accepted and reproduced: an undelivered
+  visible successor stays inactive after maximize exit; a canonical terminal
+  overlay is constrained as an ordinary right column on persisted restore.
+  The new browser RED has no proven C transcript after exit; the fixup RED
+  resizes the overlay as a right pane (14 controls passed). Corrections resume
+  owned focus after restoration and exempt only verified overlays from right
+  constraints while retaining logical group identity. Verified: 121 unit cases,
+  two persisted-geometry cases, all 22 desktop removal/unread cases and eight
+  phone cases passed. Strict code lint/typecheck/build/formatting/ratchets and
+  docs gates passed. Task 02 records fixture corrections and exact receipts.
+  Independent review remains open; round 19 is next.
+- Completed rounds: 18. Consecutive clean: 0. Stop after three consecutive
   clean rounds or 50 rounds. Earlier loops do not count.

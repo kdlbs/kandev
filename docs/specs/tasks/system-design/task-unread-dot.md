@@ -251,7 +251,7 @@ a changed primary; newer user/workflow selection wins. Surviving pins/cursors st
 untouched. Proof initializes missing recipient identity/lifecycle only.
 
 Preview validates discovery; workflow focus survives pending membership.
-Removal read gates cover parked/live groups and layout restoration.
+Removal gates cover parked/live groups; owned focus resumes after restore.
 Only changed primaries re-prove empty slots; hides gate restore.
 All transcript hosts inherit read gates; dots use group visibility.
 Independent splits/non-agent focus survive; failed workflow is not selection.

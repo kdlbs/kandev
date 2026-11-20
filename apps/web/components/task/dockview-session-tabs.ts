@@ -720,6 +720,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   const prevSessionIdRef = useRef<string | null>(null);
   const appStore = useAppStoreApi();
   const dockviewApi = useDockviewStore((state) => state.api);
+  const isRestoringLayout = useDockviewStore((state) => state.isRestoringLayout);
   useEffect(() => {
     if (dockviewApi) return setupRemovalSurfaceFocus(dockviewApi, appStore);
   }, [appStore, dockviewApi]);
@@ -746,6 +747,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   });
 
   useEffect(() => {
+    if (isRestoringLayout) return;
     runAutoSessionTabEffect(effectiveSessionId, appStore, {
       sessionTabCreatedRef,
       prevTaskIdRef,
@@ -754,6 +756,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   }, [
     appStore,
     dockviewApi,
+    isRestoringLayout,
     effectiveSessionId,
     sessionIdsKey,
     sessionListLoaded,

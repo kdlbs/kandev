@@ -1267,22 +1267,24 @@ function restoreMaximizeFromStorage(
     // wrong width on subsequent restores.
     const { width, height } = measureDockviewContainer(api);
     api.layout(width, height);
-    const ids = applyLayoutFixups(api, undefined, getManualRightWidth(envId));
+    const ids = applyLayoutFixups(
+      api,
+      undefined,
+      getManualRightWidth(envId),
+      undefined,
+      maximizedGroupId,
+    );
     const preMax = filterPreMaximizeLayout(
       saved.preMaximizeLayout as unknown as LayoutState,
       activeSessionId,
       sessionListRestoreState?.loaded === false ? null : currentSessionIds,
       sessionListRestoreState,
     );
-    // The maximized layout is `[sidebar?, maximized]` — the non-sidebar group
-    // is the one being maximized, which `resolveGroupIds` returns as
-    // `centerGroupId`. Tracking it keeps the store consistent with what
-    // `maximizeGroup` would have set (so toggle/exit logic doesn't operate on
-    // a half-restored maximize).
+    // The verified overlay retains its logical group identity across restoration.
     set({
       ...ids,
       preMaximizeLayout: preMax,
-      maximizedGroupId: ids.centerGroupId,
+      maximizedGroupId: maximizedGroupId ?? ids.centerGroupId,
       ...visibilityForLayout(preMax, readHiddenRightPane(getEnvLayout(envId))),
     });
   } catch {

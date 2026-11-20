@@ -323,14 +323,21 @@ test.describe("owned removal transcript visibility", () => {
   }
 
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.11
-  for (const parked of ["live", "visible", "hidden", "overlay", "rebuilding"] as const) {
+  for (const parked of [
+    "live",
+    "visible",
+    "hidden",
+    "overlay",
+    "rebuilding",
+    "inactive",
+  ] as const) {
     test(`keeps a remote removal's unowned split neighbor unread (parked: ${parked})`, async ({
       testPage,
       desktopTestPage,
       apiClient,
       seedData,
     }) => {
-      const hidden = parked !== "live" && parked !== "visible";
+      const hidden = ["hidden", "overlay", "rebuilding"].includes(parked);
       await apiClient.saveUserSettings({
         enable_preview_on_click: true,
         agent_tab_close_behavior: "hide_panel",
@@ -355,7 +362,7 @@ test.describe("owned removal transcript visibility", () => {
       if (hidden) {
         await session.sessionTabCloseButton(primary.session_id).click();
         await expect(session.sessionTabBySessionId(primary.session_id)).toHaveCount(0);
-      } else {
+      } else if (parked !== "inactive") {
         const files = testPage.locator(".dv-default-tab:visible").filter({ hasText: /^Files$/ });
         await expect(files).toHaveCount(1);
         await session.sessionTabBySessionId(primary.session_id).dragTo(files);
@@ -390,12 +397,13 @@ test.describe("owned removal transcript visibility", () => {
         .poll(async () => (await sessionReadState(apiClient, primary.session_id)).cursor)
         .not.toBeNull();
       const hiddenCursor = (await sessionReadState(apiClient, primary.session_id)).cursor;
-      const hiddenTail = hidden
-        ? await apiClient.seedSessionMessage(primary.session_id, {
-            type: "message",
-            content: "Hidden primary must survive parked reconciliation unread",
-          })
-        : null;
+      const hiddenTail =
+        hidden || parked === "inactive"
+          ? await apiClient.seedSessionMessage(primary.session_id, {
+              type: "message",
+              content: "Hidden primary must survive parked reconciliation unread",
+            })
+          : null;
       expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
       const frameGate =
         parked === "rebuilding" ? await holdParkedLayoutFrames(testPage, old.session_id) : null;
@@ -407,6 +415,16 @@ test.describe("owned removal transcript visibility", () => {
               .getByTestId("dockview-maximize-btn")
               .click()
           : session.clickMaximize("Files");
+      const expectVisiblePrimary = async (afterNeighbor = false) => {
+        if (afterNeighbor && parked === "inactive") return;
+        await expect(
+          chat(primary.session_id).getByText(REMOVAL_PRIMARY_TEXT, { exact: true }),
+        ).toBeVisible();
+        if (!afterNeighbor && parked === "inactive")
+          await expect
+            .poll(async () => (await sessionReadState(apiClient, primary.session_id)).cursor)
+            .toBe(hiddenTail!.messageId);
+      };
       try {
         if (parked !== "live") {
           await maximize();
@@ -438,9 +456,7 @@ test.describe("owned removal transcript visibility", () => {
         if (parked !== "live") await maximize();
         await expect(session.sessionTabBySessionId(old.session_id)).toHaveCount(0);
         if (!hidden) {
-          await expect(
-            chat(primary.session_id).getByText(REMOVAL_PRIMARY_TEXT, { exact: true }),
-          ).toBeVisible();
+          await expectVisiblePrimary();
         } else {
           await expect(session.sessionTabBySessionId(primary.session_id)).toHaveCount(0);
           expect((await sessionReadState(apiClient, primary.session_id)).cursor).toBe(hiddenCursor);
@@ -476,7 +492,7 @@ test.describe("owned removal transcript visibility", () => {
         await expect
           .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
           .toBe(tail.messageId);
-        if (!hidden) await expect(chat(primary.session_id)).toBeVisible();
+        if (!hidden) await expectVisiblePrimary(true);
         expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
       } finally {
         await frameGate?.dispose();

@@ -2632,3 +2632,99 @@ proceeds to normal selective commit, exact fork push and separate Sol R18
 review. No repeated rebase, new PR, broad-suite/live-NATS certificate or change
 to historical incident/list-convergence/seeded-execution qualifications.
 Completed production reviews: 17; consecutive clean: 0.
+
+### Production-fix review round 18 remediation
+
+R18 adds two source-derived schedules under the same .6/.11/.12/.17 and layout
+restoration contract. No new copy or phone composition: the existing phone
+picker/transcript path is unchanged; the changes concern desktop Dockview
+restoration and shared session ownership.
+
+```text
+Desktop: A displayed, B first, C inactive in the same group
+         maximize Files -> remote Delete A -> prove C -> restore
+         show/read C's exact tail; B remains unread until explicit selection
+Geometry: manual right width -> maximize terminal -> refresh/return
+          terminal fills available width; exit restores ordinary right width
+```
+
+`r18-unit-red.log`: the verified canonical-terminal overlay is resized as the
+ordinary right pane (one failure / 14 controls). `r18-red-ui-summary.log` /
+`r18-quiet/kandev-run.e2e.Sy7yvHRY.log`: the real parked inactive-C scenario
+has no C transcript after exit. Both are behavioral RED, not missing setup.
+
+The auto-session effect now waits for reconstruction to settle and re-runs at
+that boundary, retaining the undelivered removal receipt and explicit/non-agent
+focus rules. Both persisted-overlay readers pass their verified group identity
+into fixups; only a matching single non-sidebar overlay skips ordinary right
+constraints, while sidebar handling and normal right-width restoration remain.
+The restored maximize identity comes from the verified overlay, not a synthetic
+center fallback. Tests strengthen refresh/environment-return geometry with a
+pre-existing manual right width and preserve terminal input/scrollback controls.
+
+`r18-unit-green.log`: seven files / 121 cases passed after the production
+corrections. Initial strict lint rejected the expanded scenario's complexity;
+the same visible-primary assertions moved into a local test helper, with no
+suppression (`r18-lint-final.log`). Full typecheck and fresh frontend build
+passed (`r18-typecheck.log`, `r18-build.log`).
+
+The first three-case browser run (`r18-owning-summary.log`,
+`r18-quiet/kandev-run.e2e.uijuJHvH.log`) passed the formerly blank C transcript.
+Its two geometry failures were fixture errors: the actual default panel ID is
+`terminal-default`, not `terminal`. Corrected the read-only measurements and
+normal-width control; no production code changed. The environment-return case
+now uses real sidebar navigation and checks unchanged `performance.timeOrigin`,
+so it exercises the store's same-page restore rather than another full reload.
+
+Focused unit command in the mount-checked snapshot after `refresh` and
+`pnpm run pretypecheck`:
+
+```bash
+pnpm exec vitest run \
+  lib/state/dockview-layout-builders-fixups.test.ts \
+  components/task/dockview-session-tabs.hook.test.tsx \
+  components/task/dockview-session-tabs.test.ts \
+  components/task/dockview-session-removal-focus.test.ts \
+  components/task/dockview-layout-restore-maximize-session.test.ts \
+  components/task/dockview-layout-restore.test.ts \
+  lib/state/dockview-env-switch-maximize-session-filter.test.ts
+```
+
+All runtime checks use the fresh R18 frontend with the explicitly retained R02
+backend/plugin artifacts. No Go production change, live-user mutation,
+historical-trigger proof, broad-suite or live-NATS certification is implied.
+
+Final serial runtime commands (one worker, no retries, same fresh frontend):
+
+```bash
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-layout.spec.ts -- \
+  --grep 'maximize survives page refresh|task switching preserves maximize' \
+  --workers=1 --retries=0 --output "$SNAPSHOT/r18-geometry-final"
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/task/task-unread-dot.spec.ts -- --workers=1 --retries=0 \
+  --output "$SNAPSHOT/r18-desktop-final"
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0 \
+  --output "$SNAPSHOT/r18-phone-final"
+```
+
+- `r18-geometry-final-summary.log` /
+  `r18-quiet/kandev-run.e2e.TbFYBF1Q.log`: both geometry cases passed.
+- `r18-desktop-final-summary.log` /
+  `r18-quiet/kandev-run.e2e.M7zgnkxo.log`: all 22 desktop cases passed.
+- `r18-phone-final-summary.log` /
+  `r18-quiet/kandev-run.e2e.xnRQytO1.log`: all eight phone cases passed.
+- `r18-static-final.log`, `r18-docs-final.log`: changed-code formatting,
+  copy/sleep ratchets, documentation catalog and full spec lint passed.
+
+Inspected the same-bundle initial captures: C is actually displayed in the
+restored group while B keeps its unread contribution; the refreshed terminal
+fills the workbench. Final geometry assertions use the corrected real panel ID,
+prove both persisted readers, and retain normal-width/input controls.
+No production edits followed that build. R18 corrections and targeted
+verification are complete; normal selective commit/exact fork push and separate
+Sol R19 review follow. No repeated rebase, PR, hook bypass, broad-suite or
+live-NATS claim. Earlier historical-trigger, list-convergence and
+seeded-execution qualifications remain. Completed reviews: 18; clean streak: 0.
