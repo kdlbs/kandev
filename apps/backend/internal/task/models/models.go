@@ -2022,6 +2022,11 @@ type TaskRepository struct {
 	UpdatedAt                     time.Time              `json:"updated_at"`
 }
 
+// TaskRepositoryInheritedCheckoutReuseOnlyMetadataKey marks a copied
+// inherited checkout selector that identifies a shared workspace slot but
+// must not pin a fresh checkout after an executor transition.
+const TaskRepositoryInheritedCheckoutReuseOnlyMetadataKey = "inherited_checkout_reuse_only"
+
 // TaskWorkspaceFolder is a canonical host-folder attachment owned by a task.
 // It stays separate from TaskRepository because folders are not Git sources.
 type TaskWorkspaceFolder struct {
@@ -3230,8 +3235,15 @@ type TaskEnvironment struct {
 	// repository slot. Populated by repository getters.
 	Repos []*TaskEnvironmentRepo `json:"repos,omitempty"`
 
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	// RetiredAt retains an unusable environment without occupying the active owner slot.
+	RetiredAt *time.Time `json:"retired_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// IsRetired reports whether the environment is retained rather than canonical.
+func (te *TaskEnvironment) IsRetired() bool {
+	return te != nil && te.RetiredAt != nil
 }
 
 // EffectiveExecutorType returns the environment's persisted executor type. A
@@ -3544,6 +3556,17 @@ type TaskPreviewFeedbackSnapshot struct {
 	TaskID   string                 `json:"task_id" db:"task_id"`
 	Revision int64                  `json:"revision" db:"revision"`
 	Items    []*TaskPreviewFeedback `json:"items"`
+}
+
+// TaskPreviewFeedbackScreenshotReplacement replaces a saved screenshot item's
+// rectangle and image at an exact version. An empty Comment keeps the stored one.
+type TaskPreviewFeedbackScreenshotReplacement struct {
+	TaskID                 string
+	ItemID                 string
+	ExpectedVersion        int64
+	Comment                string
+	CaptureRect            json.RawMessage
+	ScreenshotAttachmentID string
 }
 
 // TaskPreviewFeedbackRef identifies the exact pending item version included in delivery.

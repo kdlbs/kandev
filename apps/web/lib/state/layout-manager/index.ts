@@ -43,6 +43,8 @@ export {
   getPinnedTarget,
   clearPinnedTarget,
   clearAllPinnedTargets,
+  setReusableRightTarget,
+  clearReusableRightTarget,
 } from "./pinned-targets";
 
 // Presets
@@ -77,6 +79,7 @@ export {
 // Applier
 export {
   applyLayout,
+  getRootOrientation,
   getRootSplitview,
   resolveGroupIds,
   isCenterCandidateGroupId,

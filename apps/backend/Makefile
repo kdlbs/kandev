@@ -404,7 +404,10 @@ test-windows:
 	@echo "Running Windows Git executable memo tests..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -v -timeout 10m ./internal/common/subproc -run "^TestNewGitCommand"
 	@echo "Running Windows Hermes ACP detection tests..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run "^Test(HermesACP|RunCommandCheck)"
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run "^Test(HermesACP|RunCommandCheck|NativeUpdateCheckResolverPlatformCase)"
+	@echo "Running Windows native update check containment tests..."
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 10m ./internal/agent/proctree/...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 10m ./internal/agent/settings/controller -run "^TestNativeCheckRunner"
 	@echo "Running Windows helper console-behavior tests..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg -run "^(TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow|TestWindowsDetachedParentKeepsConsoleHiddenForDescendants|TestPrepareNativeMCPProcessHidesConsoleWindow|TestWindowsACPCommandProcAttrHidesConsoleWindow|TestConfigureProcessTreeHidesConsoleWindow)$$"
 	@echo "Running Windows runtime observation command-shim tests..."

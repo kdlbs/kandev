@@ -4,7 +4,7 @@ import { waitForFiniteAnimations } from "../../helpers/animations";
 import { waitForHttp } from "../../helpers/causal-waits";
 import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { installRuntimeUpdateFixture } from "./agent-runtime-update-helpers";
-import { compactRuntimeSettings } from "./agent-runtime-settings-helpers";
+import { compactRuntimeSettings, expectRuntimeVersions } from "./agent-runtime-settings-helpers";
 
 export async function localizedReleaseNotice(
   page: Page,
@@ -104,8 +104,18 @@ async function runtimeAwarenessDetails(
   });
   await expect(detail).toBeVisible();
   await waitForFiniteAnimations(detail);
-  await expect(detail).toContainText("0.62.0 → 0.64.0");
-  await expect(detail).toContainText("claude-agent-acp@0.64.0");
+  await expectRuntimeVersions(detail, "0.62.0", "0.64.0");
+  const touch = mobile && (await page.evaluate(() => matchMedia("(pointer:coarse)").matches));
+  const runtimeDetails = detail.getByTestId("agent-update-runtime-details-claude-acp");
+  const runtimeDetailsSummary = runtimeDetails.locator(":scope > summary");
+  if (touch) await runtimeDetailsSummary.tap();
+  else await runtimeDetailsSummary.click();
+  const commandDetails = detail.getByTestId("agent-update-command-claude-acp");
+  if (touch) await commandDetails.locator(":scope > summary").tap();
+  else await commandDetails.locator("summary").click();
+  const command = commandDetails.locator("pre");
+  await expect(command).toBeVisible();
+  await expect(command).toContainText("claude-agent-acp@0.64.0");
   await capture?.screenshot("runtime-version-control", {
     caption: "Managed version selection retains the existing desktop dialog and phone drawer.",
   });

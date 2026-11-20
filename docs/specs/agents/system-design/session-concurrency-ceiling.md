@@ -44,6 +44,7 @@ The existing capacity setting also stores `policy` (`automatic` by default,
 or explicitly `all`) and `grade_limits`. Defaults remain disabled. The legacy
 environment override retains automatic-only behavior. Settings apply the total,
 policy and grade map together under the admission controller's existing lock.
+The 64-entry limit bounds task summaries and update events.
 
 The `execution_grade` profile and task field is an explicit, trimmed name of
 at most 64 Unicode characters without control characters. Empty is unconfigured.
@@ -59,12 +60,12 @@ maximum is valid. Unknown population and unconfigured grades have distinct
 refusal reasons; neither is treated as zero usage. Existing admitted work survives
 settings changes. Automatic-only policy preserves manual overrides.
 
-Message-turn tickets also contribute to the shared total while dispatch is in
-flight. A ticket already represented by an admitted row or launch reservation
-uses that session's existing grade once. A separate ticket has no grade snapshot,
-so all-policy grade population remains unknown until it is represented by an
-admitted row or launch reservation; existing session ownership is retained.
-Message-turn admission itself keeps its existing total-limit and override rules.
+All-policy message turns check both capacity dimensions before warm dispatch
+or cold resume. Their tickets retain and persist the admitted grade. A nested
+resume uses that snapshot despite later profile or task edits. Count tickets,
+launch reservations, and admitted rows once per session under the same lock.
+A legacy ungraded ticket remains unknown until a counted row supplies its grade.
+Existing ownership survives settings changes; automatic-only overrides remain.
 
 Explicit workflow starts capture their selected destination before grade
 admission. A lost promotion releases only that launch's reservation and readmits
@@ -79,8 +80,8 @@ retains stale/conflict feedback rather than claiming an unapplied change.
 | Component | Responsibility |
 | --- | --- |
 | `sessionCeilingController` | Counts persisted `STARTING`/`RUNNING` sessions and process-local reservations; admits, refuses, confirms and releases launches. |
-| Orchestrator launch seams | Pass the launch origin and full replay payload to the controller; consume a reservation only after launch success. |
-| `deferCeilingRefusal` | Merges ceiling-owned keys into task `deferred_launch` by compare-and-set. |
+| Orchestrator launch seams | Pass origin and replay payload to admission; consume reservations after launch succeeds. |
+| `deferCeilingRefusal` | Compare-and-set ceiling keys in task `deferred_launch`. |
 | Ceiling sweep | Lists tasks with ceiling records, validates eligibility, and dispatches the stored launch kind. |
 | Task repository and service | Store the shared deferred record. Prompt edits update legacy top-level data and the nested ceiling payload. |
 | Executor callbacks | Confirm or release only when the callback execution still owns the session row. |

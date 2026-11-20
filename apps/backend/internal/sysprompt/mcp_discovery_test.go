@@ -67,12 +67,14 @@ func TestKandevContext_RenderedSizesDeliverRecordedCompaction(t *testing.T) {
 	const (
 		recordedOrdinaryPromptBytesBeforeCompaction = 4804
 		minimumRenderedReductionBytes               = 400
+		taskReferenceGuidanceBudgetBytes            = 300
 	)
 	// This baseline is a recorded rendered prompt from before rich-output
 	// examples moved behind tool discovery. Keep the assertion on rendered
 	// bytes, not the reusable raw template, so interpolation cannot hide prompt
 	// growth or make a prompt-reduction claim from source-file size alone.
-	require.LessOrEqual(t, len([]byte(ordinary)), recordedOrdinaryPromptBytesBeforeCompaction-minimumRenderedReductionBytes)
+	// Task reference guidance adds a bounded 300-byte allowance to that baseline.
+	require.LessOrEqual(t, len([]byte(ordinary)), recordedOrdinaryPromptBytesBeforeCompaction-minimumRenderedReductionBytes+taskReferenceGuidanceBudgetBytes)
 	assert.True(t, utf8.ValidString(ordinary))
 	assert.True(t, utf8.ValidString(canvas))
 	t.Logf("rendered prompt sizes: ordinary=%d bytes, canvas=%d bytes, baseline=%d bytes, reduction=%d bytes",

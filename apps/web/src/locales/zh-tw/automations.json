@@ -85,6 +85,7 @@
   "instructionsLabel": "說明",
   "interpretedAsUtcSetTimezone": "按 UTC 解釋，請設定時區",
   "lastRan": "上次執行 {{when}}",
+  "runStatusWithAge": "{{status}}，{{age}}",
   "listDescription": "建立自動觸發代理程式任務的規則。",
   "loading": "正在載入…",
   "loadingActivity": "正在載入活動…",

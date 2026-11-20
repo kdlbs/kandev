@@ -59,6 +59,14 @@ type sessionAdmission struct {
 
 type sessionAdmissionContextKey struct{}
 
+// WithoutSessionAdmission returns ctx without a held session admission, for
+// work started from inside an admission callback that must run after the
+// callback returns. Such work then acquires admission like any other caller
+// instead of assuming the caller's lock is still held.
+func WithoutSessionAdmission(ctx context.Context) context.Context {
+	return context.WithValue(ctx, sessionAdmissionContextKey{}, nil)
+}
+
 type sessionAdmissionToken struct {
 	service              *Service
 	sessionID            string
@@ -3025,6 +3033,17 @@ func (s *Service) ListPendingQueueDispatches(ctx context.Context) ([]PendingQueu
 		return nil, errors.New("pending queue dispatch persistence unavailable")
 	}
 	return repo.ListPendingQueueDispatches(ctx)
+}
+
+// HasPendingDispatchForSession checks durable claims for the selected session.
+func (s *Service) HasPendingDispatchForSession(ctx context.Context, sessionID string) (bool, error) {
+	repo, ok := s.repo.(interface {
+		HasPendingDispatchForSession(context.Context, string) (bool, error)
+	})
+	if !ok {
+		return false, errors.New("pending queue dispatch persistence unavailable")
+	}
+	return repo.HasPendingDispatchForSession(ctx, sessionID)
 }
 
 func (s *Service) MarkPendingQueueDispatchAccepted(

@@ -15,23 +15,27 @@ import (
 
 // TaskRepositoryInput for creating/updating task repositories
 type TaskRepositoryInput struct {
-	CheckoutOptions *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
-	RepositoryID    string                            `json:"repository_id"`
-	BaseBranch      string                            `json:"base_branch"`
-	CheckoutBranch  string                            `json:"checkout_branch,omitempty"`
-	BranchPolicyID  string                            `json:"branch_policy_id,omitempty"`
-	PRNumber        int                               `json:"pr_number,omitempty"` // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
-	LocalPath       string                            `json:"local_path,omitempty"`
-	Name            string                            `json:"name,omitempty"`
-	DefaultBranch   string                            `json:"default_branch,omitempty"`
-	GitHubURL       string                            `json:"github_url,omitempty"`
-	RemoteURL       string                            `json:"remote_url,omitempty"`
-	Provider        string                            `json:"provider,omitempty"`
-	ProviderHost    string                            `json:"provider_host,omitempty"`
-	ProviderScope   string                            `json:"provider_scope,omitempty"`
-	ProviderRepoID  string                            `json:"provider_repo_id,omitempty"`
-	ProviderOwner   string                            `json:"provider_owner,omitempty"`
-	ProviderName    string                            `json:"provider_name,omitempty"`
+	CheckoutOptions         *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
+	RepositoryID            string                            `json:"repository_id"`
+	BaseBranch              string                            `json:"base_branch"`
+	CheckoutBranch          string                            `json:"checkout_branch,omitempty"`
+	WorkspaceRelativePath   string                            `json:"-"`
+	Position                int                               `json:"-"`
+	InheritedWorkspaceSlot  bool                              `json:"-"`
+	ReuseOnlyCheckoutBranch bool                              `json:"-"`
+	BranchPolicyID          string                            `json:"branch_policy_id,omitempty"`
+	PRNumber                int                               `json:"pr_number,omitempty"` // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
+	LocalPath               string                            `json:"local_path,omitempty"`
+	Name                    string                            `json:"name,omitempty"`
+	DefaultBranch           string                            `json:"default_branch,omitempty"`
+	GitHubURL               string                            `json:"github_url,omitempty"`
+	RemoteURL               string                            `json:"remote_url,omitempty"`
+	Provider                string                            `json:"provider,omitempty"`
+	ProviderHost            string                            `json:"provider_host,omitempty"`
+	ProviderScope           string                            `json:"provider_scope,omitempty"`
+	ProviderRepoID          string                            `json:"provider_repo_id,omitempty"`
+	ProviderOwner           string                            `json:"provider_owner,omitempty"`
+	ProviderName            string                            `json:"provider_name,omitempty"`
 
 	// PreserveBaseBranch keeps an effective branch produced after policy
 	// resolution (for example, the branch created by the local fresh-branch
@@ -152,6 +156,9 @@ type CreateTaskRequest struct {
 	// WorkspacePolicy carries the effective policy resolved by an API adapter.
 	// When omitted, CreateTask derives child defaults from the persisted parent.
 	WorkspacePolicy *WorkspacePolicy `json:"-"`
+	// ValidateInheritedWorkspaceRepositorySelection is MCP-owned. The service
+	// runs the read-only check after external-ID lookup and before task insert.
+	ValidateInheritedWorkspaceRepositorySelection bool `json:"-"`
 
 	// ExternalID is a caller-supplied identity used for create-idempotency
 	// (docs/specs/tasks/requirements/external-id-idempotency.md). Accepted on REST

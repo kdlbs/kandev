@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestPurgePromptSequencesForSessionsChunksLargeBatches(t *testing.T) {
@@ -55,8 +54,13 @@ func TestDeleteEphemeralTasksByAgentProfileDoesNotDeleteNewlyMatchingTask(t *tes
 	seedForMsgTest(t, repo, "selected-ephemeral-task", "selected-ephemeral-session", "selected-ephemeral-turn")
 	seedForMsgTest(t, repo, "new-ephemeral-task", "new-ephemeral-session", "new-ephemeral-turn")
 	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
-		UPDATE tasks SET is_ephemeral = 1 WHERE id = ?
-	`), "selected-ephemeral-task"); err != nil {
+		UPDATE tasks SET is_ephemeral = 1, metadata = ? WHERE id = ?
+	`), `{"config_mode":true}`, "selected-ephemeral-task"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		UPDATE tasks SET metadata = ? WHERE id = ?
+	`), `{"config_mode":true}`, "new-ephemeral-task"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
@@ -109,18 +113,13 @@ func TestDeleteEphemeralTasksByAgentProfileDoesNotDeleteNewlyMatchingTask(t *tes
 	}
 }
 
-func TestDeleteExpiredQuickChatRemovesPromptMarkerAfterDeletingTask(t *testing.T) {
+func TestDeleteTaskRemovesPromptMarkerAfterDeletingTask(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "quick-chat-marker-task", "quick-chat-marker-session", "quick-chat-marker-turn")
 	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
-		UPDATE tasks SET is_ephemeral = 1, updated_at = ? WHERE id = ?
-	`), time.Now().Add(-time.Hour), "quick-chat-marker-task"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
-		UPDATE task_sessions SET state = ?, updated_at = ? WHERE id = ?
-	`), "COMPLETED", time.Now().Add(-time.Hour), "quick-chat-marker-session"); err != nil {
+		UPDATE task_sessions SET state = ? WHERE id = ?
+	`), "COMPLETED", "quick-chat-marker-session"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
@@ -129,7 +128,7 @@ func TestDeleteExpiredQuickChatRemovesPromptMarkerAfterDeletingTask(t *testing.T
 		t.Fatal(err)
 	}
 	if _, err := repo.db.ExecContext(ctx, `
-		CREATE TRIGGER reactivate_quick_chat_session AFTER DELETE ON task_session_prompt_seq
+		CREATE TRIGGER reactivate_deleted_session AFTER DELETE ON task_session_prompt_seq
 		WHEN OLD.task_session_id = 'quick-chat-marker-session'
 		BEGIN
 			UPDATE task_sessions SET state = 'RUNNING' WHERE id = 'quick-chat-marker-session';
@@ -137,12 +136,8 @@ func TestDeleteExpiredQuickChatRemovesPromptMarkerAfterDeletingTask(t *testing.T
 	`); err != nil {
 		t.Fatal(err)
 	}
-	deleted, err := repo.DeleteExpiredQuickChatTask(ctx, "quick-chat-marker-task", time.Now())
-	if err != nil {
-		t.Fatalf("delete expired quick chat: %v", err)
-	}
-	if !deleted {
-		t.Fatal("eligible quick chat was not deleted")
+	if err := repo.DeleteTask(ctx, "quick-chat-marker-task"); err != nil {
+		t.Fatalf("delete Quick Chat: %v", err)
 	}
 	if _, err := repo.GetTask(ctx, "quick-chat-marker-task"); err == nil {
 		t.Fatal("task still exists after deletion")

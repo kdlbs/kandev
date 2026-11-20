@@ -867,3 +867,11 @@ describe("task creation auto-focus preference", () => {
     ).toHaveProperty("autoFocusNewTasks", false);
   });
 });
+
+it("defaults Markdown Preview on and preserves explicit false across partial updates", () => {
+  const fresh = createDefaultUserSettings();
+  expect(fresh.markdownPreviewByDefault).toBe(true);
+  const disabled = mapUserSettingsData({ markdown_preview_by_default: false }, fresh);
+  expect(disabled.markdownPreviewByDefault).toBe(false);
+  expect(mapUserSettingsData({}, disabled).markdownPreviewByDefault).toBe(false);
+});

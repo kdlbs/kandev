@@ -72,6 +72,15 @@ function mount() {
 }
 
 describe("TaskChat thread extracts", () => {
+  it("keeps the selection action slot in the comment composer footer", () => {
+    mount();
+
+    const slot = screen.getByTestId("selection-action-slot");
+    const footer = slot.parentElement;
+    expect(footer?.className).toContain("items-center");
+    expect(footer?.lastElementChild?.querySelector("button")).not.toBeNull();
+  });
+
   it("shows one chip per extract with the author and posts the formatted block", async () => {
     seedExtract("a", "CEO", "ship the brief", "Cut it down.");
     seedExtract("b", "Worker", "ten days", "Why ten?");

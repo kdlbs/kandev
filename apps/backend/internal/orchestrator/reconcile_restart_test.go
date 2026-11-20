@@ -477,7 +477,19 @@ func TestReconcileSessionsOnStartup_TerminalDeadRowPrunedOnNotFound(t *testing.T
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 			svc.reconcileSessionsOnStartup(ctx)
 
-			if _, err := repo.GetExecutorRunningBySessionID(ctx, "sT"); err == nil {
+			_, readErr := repo.GetExecutorRunningBySessionID(ctx, "sT")
+			if state == models.TaskSessionStateCancelled {
+				// A cancelled standalone runtime keeps its inventory row visible to
+				// startup correlation and the terminal reaper, which proves the owner,
+				// pending work, and recovery evidence absent before reclaiming it
+				// (reconcileAbsentTerminalRuntime). Startup reconciliation may repair
+				// the row but never prunes it.
+				if readErr != nil {
+					t.Errorf("cancelled terminal row must be retained for the reaper, got %v", readErr)
+				}
+				return
+			}
+			if readErr == nil {
 				t.Error("confirmed-dead terminal row with a not-found stop must be pruned, not preserved")
 			}
 		})

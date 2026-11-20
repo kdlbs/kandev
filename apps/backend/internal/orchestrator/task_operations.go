@@ -481,7 +481,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 						s.logger.Warn("failed to persist dynamic route for prepared session",
 							zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(routeErr))
 					}
-					_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, routeErr, launchSession)
+					_ = s.handleSessionPreparationFailure(bgCtx, taskID, sessionID, routeErr, launchSession)
 					return
 				}
 				launchProfileID = route.launchProfileID
@@ -489,10 +489,19 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 			}
 			prepExec, launchErr := s.executor.LaunchPreparedSession(bgCtx, task, sessionID, executor.LaunchOptions{AgentProfileID: launchProfileID, ExecutorID: executorID, WorkflowStepID: workflowStepID})
 			if launchErr != nil {
+				if executor.IsSessionStateSwitched(launchErr) {
+					// A concurrent workflow session switch owns this session now.
+					// This launch is not a failure of its own dynamic route.
+					launchOwned = true
+					s.logger.Info("prepared session launch superseded by a concurrent workflow session switch",
+						zap.String("task_id", taskID),
+						zap.String("session_id", sessionID))
+					return
+				}
 				// LaunchAgent failures persist FAILED in the executor. Earlier
 				// workspace failures return here and are recorded through the same
 				// session-level recovery claim.
-				launchErr = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, launchErr)
+				launchErr = s.handleSessionPreparationFailure(bgCtx, taskID, sessionID, launchErr)
 				s.logger.Warn("failed to launch workspace for prepared session (file browsing may be unavailable)",
 					zap.String("task_id", taskID),
 					zap.String("session_id", sessionID),
@@ -1290,9 +1299,37 @@ func (s *Service) handleSessionLaunchFailure(
 	launchErr error,
 	preloadedSession ...*models.TaskSession,
 ) error {
+	return s.handleSessionLaunchFailureWithRetry(ctx, taskID, sessionID, launchErr, true, preloadedSession...)
+}
+
+func (s *Service) handleSessionPreparationFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	launchErr error,
+	preloadedSession ...*models.TaskSession,
+) error {
+	return s.handleSessionLaunchFailureWithRetry(ctx, taskID, sessionID, launchErr, false, preloadedSession...)
+}
+
+func (s *Service) handleSessionLaunchFailureWithRetry(
+	ctx context.Context,
+	taskID, sessionID string,
+	launchErr error,
+	allowTransientRetry bool,
+	preloadedSession ...*models.TaskSession,
+) error {
 	failureCtx := context.WithoutCancel(ctx)
 	if isFixedProfileSuspendedError(launchErr) {
 		return launchErr
+	}
+	// A workflow profile switch parks its source session while a replacement
+	// session takes over. The losing launch must exit silently: failing the
+	// task here would abort the switch and surface a spurious toast.
+	if executor.IsSessionStateSwitched(launchErr) {
+		s.logger.Info("ignoring launch superseded by a concurrent workflow session switch",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return routingerr.SanitizeError(launchErr)
 	}
 	if recordErr := s.recordSessionRecoveryBlock(failureCtx, sessionID, "interactive", launchErr); recordErr != nil {
 		s.logger.Warn("failed to persist session recovery block",
@@ -1308,23 +1345,28 @@ func (s *Service) handleSessionLaunchFailure(
 	// replay payload here so an early admission or startup failure does not keep
 	// attachment data alive until a later session event.
 	s.clearTransientRetryState(sessionID)
-	_ = s.recordSessionLaunchFailure(
+	sessionFailed, taskFailed, failedSession := s.recordSessionLaunchFailure(
 		failureCtx, taskID, sessionID, safeErr, preloadedSession...,
 	)
+	if allowTransientRetry && sessionFailed && taskFailed {
+		s.scheduleTransientLaunchRetryForFailure(
+			failureCtx, taskID, sessionID, safeErr, transientLaunchIdentity(failedSession),
+		)
+	}
 	return safeErr
 }
 
 // recordSessionLaunchFailure transitions a still-active session to FAILED and
 // updates the task only while the same failed session still owns it. Typed
 // launch-error persistence belongs to the executor's session transition.
-// Returns whether the session itself was durably transitioned to FAILED.
-func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) bool {
-	_, changed := s.updateTaskSessionStateWithHook(
+// It reports whether the session and the task were durably transitioned.
+func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) (sessionFailed, taskFailed bool, failedSession *models.TaskSession) {
+	failedSession, changed := s.updateTaskSessionStateWithHook(
 		ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), false,
 		nil, preloadedSession...,
 	)
 	if !changed {
-		return false
+		return false, false, nil
 	}
 	updated, err := s.updateTaskStateForEarlyLaunchFailure(ctx, taskID, sessionID)
 	if err != nil {
@@ -1332,13 +1374,13 @@ func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessio
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return true
+		return true, false, failedSession
 	}
 	if !updated {
-		return true
+		return true, false, failedSession
 	}
 	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateFailed)
-	return true
+	return true, true, failedSession
 }
 
 func (s *Service) updateTaskStateForEarlyLaunchFailure(
@@ -2063,8 +2105,12 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	isPassthrough = launchSession.IsPassthrough
 
 	skipStepPrompt := opts.EntryOptions != nil && opts.EntryOptions.SkipStepPrompt
+	promptWorkflowStepID := workflowStepID
+	if promptWorkflowStepID == "" && !isOfficeTask && !opts.PreserveWorkflowSourceBinding {
+		promptWorkflowStepID = workflowSessionConfigStepID
+	}
 	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
-		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
+		ctx, effectivePrompt, task.ID, sessionID, promptWorkflowStepID,
 		planMode, task.IsEphemeral, isPassthrough, skipStepPrompt,
 	)
 
@@ -3631,6 +3677,9 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	continuation func(context.Context, *resumeAttempt, *executor.TaskExecution) error,
 	preReserved *sessionKeyedCeilingReservation,
 ) (*executor.TaskExecution, error) {
+	if identity, ok := transientLaunchIdentityFromResumeOptions(options); ok {
+		ctx = withTransientLaunchRetryContext(ctx, identity)
+	}
 	if err := s.checkInferenceClosureAdmission(ctx, sessionID, true); err != nil {
 		return nil, err
 	}
@@ -3653,6 +3702,11 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	defer releaseRouteOperationLock()
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
+	if identity, ok := transientLaunchFailureFromContext(ctx); ok {
+		if err := s.validateTransientLaunchFailure(ctx, taskID, sessionID, identity); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := s.checkInferenceClosureAdmission(ctx, sessionID, true); err != nil {
 		return nil, err
@@ -4235,8 +4289,8 @@ func (s *Service) waitForSessionAndAgentReady(ctx context.Context, sessionID, wa
 	return session, nil
 }
 
-func (s *Service) waitForStartingSessionPromptable(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
-	s.logger.Debug("waiting for starting session to become promptable",
+func (s *Service) waitForSessionPromptable(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
+	s.logger.Debug("waiting for session to become promptable",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
 	session, err := s.waitForSessionAndAgentReady(ctx, sessionID, "for prompt")
@@ -4247,6 +4301,13 @@ func (s *Service) waitForStartingSessionPromptable(ctx context.Context, taskID, 
 		return nil, err
 	}
 	return session, nil
+}
+
+// WaitForSessionPromptable waits until a task session and its agent can accept
+// a prompt. It also covers launches deferred while session capacity is full.
+func (s *Service) WaitForSessionPromptable(ctx context.Context, taskID, sessionID string) error {
+	_, err := s.waitForSessionPromptable(ctx, taskID, sessionID)
+	return err
 }
 
 // StartSessionForWorkflowStep starts an existing session with a workflow step's prompt configuration.
@@ -5175,6 +5236,14 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
 		resp.IsAgentRunning = true
 		resp.IsIdleSuspended = false
+		resp.NeedsResume = false
+		return resp, nil
+	}
+	if session.State == models.TaskSessionStateStarting && running != nil &&
+		running.Status == models.ExecutorRunningStatusPrepared &&
+		time.Since(session.UpdatedAt) < executor.AgentStartupGracePeriod {
+		// A prepared runtime is normally workspace-only. STARTING records that
+		// agent launch has claimed it, so passive recovery must wait for startup.
 		resp.NeedsResume = false
 		return resp, nil
 	}
@@ -6303,10 +6372,36 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 		return err
 	}
 
-	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+	previous := s.terminalPrimaryBeforeSwitch(ctx, sessionID)
+	s.primarySwitchMu.Lock()
+	err := s.repo.SetSessionPrimary(ctx, sessionID)
+	s.primarySwitchMu.Unlock()
+	if err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
 	s.publishPrimarySessionUpdate(ctx, "", sessionID)
+	if previous != nil {
+		s.scheduleTerminalSessionQueueHandOff(previous.TaskID, previous.ID)
+	}
+	return nil
+}
+
+// terminalPrimaryBeforeSwitch returns the current primary when the role is
+// about to move off a session that can no longer accept prompts.
+func (s *Service) terminalPrimaryBeforeSwitch(ctx context.Context, sessionID string) *models.TaskSession {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return nil
+	}
+	sessions, err := s.repo.ListTaskSessions(ctx, session.TaskID)
+	if err != nil {
+		return nil
+	}
+	for _, previous := range sessions {
+		if previous.IsPrimary && previous.ID != sessionID && isTerminalSessionState(previous.State) && !s.resumeAttemptInFlight(previous.ID) {
+			return previous
+		}
+	}
 	return nil
 }
 
@@ -7844,18 +7939,7 @@ func (s *Service) finishPromptExecutorDispatch(
 	}
 	if execErr != nil {
 		execErr = s.persistRuntimeReplacementRecoveryBlock(ctx, sessionID, delivery, execErr)
-		if delivery != nil {
-			unknownErr := delivery.markInterrupted(
-				context.WithoutCancel(ctx), "prompt_dispatch_failed",
-			)
-			recoveryErr := s.deliveryRecoveryError(
-				context.WithoutCancel(ctx), sessionID, "unknown_prompt_outcome", delivery,
-			)
-			if unknownErr != nil {
-				execErr = errors.Join(execErr, unknownErr)
-			}
-			execErr = errors.Join(execErr, recoveryErr)
-		}
+		execErr = s.settlePromptDispatchError(context.WithoutCancel(ctx), sessionID, delivery, dispatchAccepted, execErr)
 		// Missing-execution recovery reacquires the cancel guard while it resets
 		// the session. Release dispatch admission before entering that path.
 		if releaseDispatchGuard != nil {
@@ -7978,10 +8062,12 @@ func (s *Service) validateAndRunDispatchBoundary(
 	}
 	boundaryErr := runBeforeDispatch()
 	if boundaryErr == nil {
-		boundaryErr = s.admitCeilingDispatch(promptCtx, taskID)
+		// Failures after the delivery boundary but before the executor call
+		// provably sent nothing.
+		boundaryErr = lifecycle.MarkPromptNotDispatched(s.admitCeilingDispatch(promptCtx, taskID))
 	}
 	if boundaryErr == nil {
-		boundaryErr = runAfterDispatchAdmission()
+		boundaryErr = lifecycle.MarkPromptNotDispatched(runAfterDispatchAdmission())
 	}
 	if boundaryErr != nil {
 		if releaseDispatchGuard != nil {
@@ -8241,7 +8327,7 @@ func (s *Service) loadPromptableSession(ctx context.Context, taskID, sessionID s
 		if !errors.Is(promptErr, ErrSessionNotPromptable) || session.State != models.TaskSessionStateStarting {
 			return nil, promptErr
 		}
-		return s.waitForStartingSessionPromptable(ctx, taskID, sessionID)
+		return s.waitForSessionPromptable(ctx, taskID, sessionID)
 	}
 	return session, nil
 }
@@ -8574,10 +8660,10 @@ func (s *Service) attemptModelSwitchForPromptWithAdmission(
 		s.beginInitialPromptAttempt(ctx, sessionID, s.isDynamicPromptSession(session))
 		admissionErr := runBeforeDispatch()
 		if admissionErr == nil {
-			admissionErr = s.admitCeilingDispatch(ctx, taskID)
+			admissionErr = lifecycle.MarkPromptNotDispatched(s.admitCeilingDispatch(ctx, taskID))
 		}
 		if admissionErr == nil {
-			admissionErr = runAfterDispatchAdmission()
+			admissionErr = lifecycle.MarkPromptNotDispatched(runAfterDispatchAdmission())
 		}
 		if admissionErr != nil {
 			s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
@@ -11628,6 +11714,10 @@ func (s *Service) sessionHasCancellableWork(ctx context.Context, sessionID strin
 	if err != nil || turnID != "" {
 		return true
 	}
+	return s.sessionHasCancellableWorkBeyondTurn(ctx, sessionID)
+}
+
+func (s *Service) sessionHasCancellableWorkBeyondTurn(ctx context.Context, sessionID string) bool {
 	if _, active := s.activeTurns.Load(sessionID); active || s.reservedPromptTurnID(sessionID) != "" {
 		return true
 	}

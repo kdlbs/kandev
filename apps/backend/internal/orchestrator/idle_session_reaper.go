@@ -15,8 +15,8 @@ import (
 //
 // The reaper is a single owner of one background goroutine on Service. It
 // The reaper runs two separate policies over executors_running. The existing
-// disconnected-owner pass reclaims dead rows after a minimum age and never
-// stops a live process. The workspace ACP policy separately suspends settled,
+// disconnected-owner pass reclaims dead rows after a minimum age and releases
+// the runtime of settled failed or cancelled sessions. The workspace ACP policy separately suspends settled,
 // resumable sessions when their workspace opts in; it stops only the selected
 // ACP process and preserves task-owned resources.
 //
@@ -37,10 +37,9 @@ import (
 // edit and re-deploy; consumers do not.
 //
 // Disconnected-owner reclaim invariants:
-//   - Never call StopAgent / StopAgentWithReason / Kill. reclaimIdleSession
-//     routes through repairDeadRowLiveness (status=stopped, LocalPID=0,
-//     resume_token preserved); a live executor is short-circuited inside
-//     reclaimIdleSession before any side effect.
+//   - Never call StopAgent / StopAgentWithReason / Kill directly. The lifecycle
+//     cleanup handles settled failed or cancelled sessions; live resumable
+//     sessions are skipped and the resume token is preserved.
 //   - reclaimIdleSession is fail-closed: an uncertain guard is a skip,
 //     never a force. The reaper just calls the primitive in a loop,
 //     so the same invariant carries.
@@ -590,7 +589,11 @@ func buildWorkspaceIdleCandidate(
 }
 
 func (s *Service) sessionHasKnownIdleWork(ctx context.Context, sessionID string) bool {
-	if s == nil || s.agentManager == nil || sessionID == "" || s.sessionHasActiveTurn(ctx, sessionID) ||
+	return s == nil || s.sessionHasActiveTurn(ctx, sessionID) || s.sessionHasKnownIdleWorkBeyondTurn(ctx, sessionID)
+}
+
+func (s *Service) sessionHasKnownIdleWorkBeyondTurn(ctx context.Context, sessionID string) bool {
+	if s == nil || s.agentManager == nil || sessionID == "" ||
 		(s.lspLeases != nil && s.lspLeases.HasActiveLSPLease(sessionID)) || s.hasKnownBackgroundWork(sessionID) {
 		return true
 	}

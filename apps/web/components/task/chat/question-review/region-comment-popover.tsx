@@ -2,7 +2,8 @@
 
 import { useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { PlanSelectionPopover } from "@/components/task/plan-selection-popover";
+import { SelectionCommentSurface } from "@/components/shared/selection-comment/selection-comment-surface";
+import { anchorBelowRect } from "@/components/task/floating-selection-position";
 import type { ClarificationAnswerAnnotation } from "@/lib/types/http";
 import { MAX_REGION_COMMENT, regionCommentReady } from "@/lib/question-review/regions";
 import type { ReviewView } from "@/lib/question-review/viewport";
@@ -25,10 +26,15 @@ export function regionAnchor(
   view: ReviewView,
   stage: { left: number; top: number },
 ) {
-  return {
-    x: stage.left + (region.x - view.x) * view.scale,
-    y: stage.top + (region.y + region.height - view.y) * view.scale,
-  };
+  return anchorBelowRect(
+    {
+      x: (region.x - view.x) * view.scale,
+      y: (region.y - view.y) * view.scale,
+      width: region.width * view.scale,
+      height: region.height * view.scale,
+    },
+    stage,
+  );
 }
 
 /**
@@ -45,7 +51,7 @@ export function RegionCommentPopover(props: Props) {
     top: rect?.top ?? 0,
   });
   return (
-    <PlanSelectionPopover
+    <SelectionCommentSurface
       selectedText={t("task:questionReviewRegionPreview", {
         number: props.number,
         image: props.imageLabel,

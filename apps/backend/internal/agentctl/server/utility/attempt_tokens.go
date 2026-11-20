@@ -19,14 +19,7 @@ func (o *attemptOwner) prepare(preparationID, callID string, retain ...bool) (At
 			}
 		}
 	}
-	status, err := o.beginLocked(uuid.NewString(), callID, preparationID)
-	if err == nil && len(retain) > 0 && retain[0] {
-		a := o.state.Attempts[status.AttemptID]
-		a.Status.Retained = true
-		o.persistLocked(false, status.AttemptID)
-		status = a.Status
-	}
-	return status, err
+	return o.beginLocked(uuid.NewString(), callID, preparationID, len(retain) > 0 && retain[0])
 }
 
 func (o *attemptOwner) releaseRetained(id string) (AttemptStatus, error) {
@@ -61,7 +54,7 @@ func (o *attemptOwner) consume(id string) (AttemptStatus, error) {
 	a.Status.State = AttemptStarting
 	a.Status.UpdatedAt = time.Now().UTC()
 	o.persistLocked(false, id)
-	if o.storageUnavailable || o.diagnostics.LastPersistResult == "write_failed" {
+	if o.storageUnavailable || o.diagnostics.LastPersistResult == attemptPersistWriteFailed {
 		// Without durable consume evidence a successor cannot distinguish a
 		// started child from an unsent preparation, so refuse to start it. The
 		// refused child never starts, so settle the token now and save that
@@ -100,7 +93,7 @@ func (o *attemptOwner) cancelPrepared(id, preparationID string) (AttemptStatus, 
 	}
 	if preparationID != "" {
 		// A cancellation arriving before prepare must also fence that late RPC.
-		status, err := o.beginLocked(uuid.NewString(), "", preparationID)
+		status, err := o.beginLocked(uuid.NewString(), "", preparationID, false)
 		if err != nil {
 			return status, err
 		}

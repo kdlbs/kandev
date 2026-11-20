@@ -114,6 +114,7 @@ function focusKeepsEnter(target: EventTarget | null, action: HTMLElement): boole
   const interactive =
     target.tagName === "BUTTON" ||
     target.tagName === "A" ||
+    target.tagName === "SUMMARY" ||
     target.tagName === "SELECT" ||
     (role !== null && INTERACTIVE_ROLES.has(role));
   if (!interactive) return false;

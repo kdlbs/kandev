@@ -33,6 +33,7 @@ vi.mock("./layout-manager", () => {
     savedLayoutMatchesLive: vi.fn(() => false),
     layoutStructuresMatch: vi.fn(() => true),
     getRootSplitview: vi.fn(),
+    getRootOrientation: vi.fn(() => "HORIZONTAL"),
     // Distinct per-column defaults so we can prove the sidebar branch ignores
     // saved per-env sizes (it routes through getPinnedWidth, which honors the
     // global pref) while the right branch keeps using saved sizes.
@@ -40,6 +41,7 @@ vi.mock("./layout-manager", () => {
     // Used by applyPinnedColumnSizes and (indirectly) by the
     // formatWidthsSnapshot debug log it now emits.
     setPinnedTarget: vi.fn(),
+    setReusableRightTarget: vi.fn(),
     getPinnedTarget: vi.fn(() => undefined),
     RIGHT_TOP_GROUP: "group-right-top",
     RIGHT_BOTTOM_GROUP: "group-right-bottom",
@@ -201,7 +203,7 @@ describe("performEnvSwitch — pinned column resize after fast-path", () => {
     expect(resizeView).toHaveBeenCalledWith(2, 420);
     expect(resizeView).not.toHaveBeenCalledWith(1, expect.anything());
 
-    expect(applyLayoutFixups).toHaveBeenCalledWith(expect.anything(), 420, 420);
+    expect(applyLayoutFixups).toHaveBeenCalledWith(expect.anything(), 420, 420, undefined);
   });
 });
 

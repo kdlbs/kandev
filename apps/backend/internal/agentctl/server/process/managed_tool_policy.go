@@ -48,9 +48,9 @@ func (m *Manager) canonicalManagedMCPServers() []types.McpServer {
 		wantURL := ""
 		switch server.Type {
 		case managedMCPHTTPTransport:
-			wantURL = config.MCPServerURL(m.cfg.MCPHost, m.cfg.Port, "/mcp")
+			wantURL, _ = config.MCPServerURLForInstance(m.cfg.MCPHost, m.cfg.Port, m.cfg.InstanceID, m.cfg.ScopedMCPRoutes, "/mcp")
 		case "sse":
-			wantURL = config.MCPServerURL(m.cfg.MCPHost, m.cfg.Port, "/sse")
+			wantURL, _ = config.MCPServerURLForInstance(m.cfg.MCPHost, m.cfg.Port, m.cfg.InstanceID, m.cfg.ScopedMCPRoutes, "/sse")
 		default:
 			continue
 		}

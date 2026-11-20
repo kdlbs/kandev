@@ -15,7 +15,7 @@ import (
 
 // AC-AGENTS-RUNTIME-UPDATES-003.1, AC-AGENTS-RUNTIME-UPDATES-003.7.
 func TestHarnessUpdateStatusesCompareACPVersionAndIsolateFailures(t *testing.T) {
-	ctrl := newTestController(map[string]agents.Agent{"omp-acp": agents.NewOmpACP(), "claude-acp": agents.NewClaudeACP()})
+	ctrl := newTestController(map[string]agents.Agent{"omp-acp": newHarnessOnlyFixture(), "claude-acp": agents.NewClaudeACP()})
 	updater := &fakeRuntimeUpdater{current: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.0"}, currentFound: true}
 	ctrl.SetRuntimeUpdater(updater)
 	ctrl.SetRuntimeUpdateStatusResolver(func(_ context.Context, pkg string) (string, error) {
@@ -53,7 +53,7 @@ func TestHarnessUpdateStatusesCompareACPVersionAndIsolateFailures(t *testing.T) 
 }
 
 func TestHarnessUpdateStatusRegistryFailureKeepsOtherAgent(t *testing.T) {
-	ctrl := newTestController(map[string]agents.Agent{"omp-acp": agents.NewOmpACP(), "claude-acp": agents.NewClaudeACP()})
+	ctrl := newTestController(map[string]agents.Agent{"omp-acp": newHarnessOnlyFixture(), "claude-acp": agents.NewClaudeACP()})
 	ctrl.SetRuntimeUpdater(&fakeRuntimeUpdater{current: hostutility.AgentCapabilities{AgentVersion: "1.0.0"}, currentFound: true})
 	ctrl.SetRuntimeUpdateStatusResolver(func(_ context.Context, pkg string) (string, error) {
 		if pkg == "@oh-my-pi/pi-coding-agent" {
@@ -120,7 +120,7 @@ func TestHarnessUpdatePreviewReferenceAndRepair(t *testing.T) {
 			updater := &harnessTestUpdater{latest: "1.1.0"}
 			updater.current = hostutility.AgentCapabilities{AgentVersion: tc.current}
 			updater.currentFound = true
-			ctrl := newTestController(map[string]agents.Agent{"omp-acp": agents.NewOmpACP()})
+			ctrl := newTestController(map[string]agents.Agent{"omp-acp": newHarnessOnlyFixture()})
 			ctrl.SetRuntimeUpdater(updater)
 			preview, err := ctrl.PreviewAgentUpdate(context.Background(), "omp-acp")
 			if err != nil {
@@ -141,7 +141,7 @@ func TestHarnessUpdatePreviewReferenceAndRepair(t *testing.T) {
 
 func TestHarnessUpdatePreviewKeepsActionAvailableWhenRegistryFails(t *testing.T) {
 	updater := &harnessTestUpdater{latestErr: errors.New("registry unavailable")}
-	ctrl := newTestController(map[string]agents.Agent{"omp-acp": agents.NewOmpACP()})
+	ctrl := newTestController(map[string]agents.Agent{"omp-acp": newHarnessOnlyFixture()})
 	ctrl.SetRuntimeUpdater(updater)
 	preview, err := ctrl.PreviewAgentUpdate(context.Background(), "omp-acp")
 	if err != nil {
@@ -160,7 +160,7 @@ func TestHarnessUpdateStatusUsesDirectResolver(t *testing.T) {
 	updater := &harnessTestUpdater{latest: "1.1.0"}
 	updater.current = hostutility.AgentCapabilities{AgentVersion: "1.0.0"}
 	updater.currentFound = true
-	ctrl := newTestController(map[string]agents.Agent{"omp-acp": agents.NewOmpACP()})
+	ctrl := newTestController(map[string]agents.Agent{"omp-acp": newHarnessOnlyFixture()})
 	ctrl.SetRuntimeUpdater(updater)
 	result, err := ctrl.ListAgentUpdateStatuses(context.Background())
 	if err != nil {
@@ -363,7 +363,7 @@ func TestHarnessUpdatePreviewKeepsNewerCanaryActionable(t *testing.T) {
 	updater := &harnessTestUpdater{latest: "1.1.0"}
 	updater.current = hostutility.AgentCapabilities{AgentVersion: "1.2.0-canary.1"}
 	updater.currentFound = true
-	ctrl := newTestController(map[string]agents.Agent{"omp-acp": agents.NewOmpACP()})
+	ctrl := newTestController(map[string]agents.Agent{"omp-acp": newHarnessOnlyFixture()})
 	ctrl.SetRuntimeUpdater(updater)
 	preview, err := ctrl.PreviewAgentUpdate(context.Background(), "omp-acp")
 	if err != nil {
@@ -378,7 +378,7 @@ func TestHarnessUpdateStatusDoesNotCallNewerCanaryUpToDate(t *testing.T) {
 	updater := &harnessTestUpdater{latest: "1.1.0"}
 	updater.current = hostutility.AgentCapabilities{AgentVersion: "1.2.0-canary.1"}
 	updater.currentFound = true
-	ctrl := newTestController(map[string]agents.Agent{"omp-acp": agents.NewOmpACP()})
+	ctrl := newTestController(map[string]agents.Agent{"omp-acp": newHarnessOnlyFixture()})
 	ctrl.SetRuntimeUpdater(updater)
 	result, err := ctrl.ListAgentUpdateStatuses(context.Background())
 	if err != nil {

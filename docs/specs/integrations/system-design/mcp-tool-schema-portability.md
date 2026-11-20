@@ -30,6 +30,7 @@ rather than branching schemas on the negotiated protocol version.
 | --- | --- |
 | `REQ-INTEGRATIONS-MCP-TOOL-SCHEMA-PORTABILITY-001` (.1, .2) | [Portability rule and enforcement seam](#portability-rule-and-enforcement-seam) |
 | `REQ-INTEGRATIONS-MCP-TOOL-SCHEMA-PORTABILITY-001` (.3, .4) | [Change-request schema rewrite](#change-request-schema-rewrite) |
+| `REQ-INTEGRATIONS-MCP-TOOL-SCHEMA-PORTABILITY-001` (.5) | [Array item declarations](#array-item-declarations) |
 
 Paths in this design are relative to `apps/backend/`.
 
@@ -94,6 +95,28 @@ and already own the backend-agreement contract:
 
 Each rejection returns a tool error before any backend side effect and names the
 violated constraint without echoing argument values.
+
+## Array item declarations
+
+Some model provider validators (Gemini, for example) reject a whole request when
+any function parameter declares `type: array` without `items`. JSON Schema
+allows the omission, so Kandev's own compiler and argument validation accept it.
+Every built-in array parameter therefore declares its item schema at the
+registration site (`mcp.WithArray(..., mcp.Items(...))`).
+
+`TestRegisteredToolSchemasDeclareArrayItems` (`internal/mcp/server`) is the
+regression guard. It builds every Kandev-owned surface: each MCP mode, the
+external endpoint, the automation and coordinator profiles, the managed
+conversation surface, and profiles with every capability, provider, and
+coordinator tool binding enabled. It marshals each advertised `inputSchema` and
+walks `properties`, `items`, and every combinator, failing on any array node
+without `items`. A fixed list of capability-, provider-, and binding-gated tool
+names must appear in the union, so a surface that silently registers nothing
+cannot pass. `profile.CoordinatorToolUniverse` returns a copy of the
+coordinator tool universe for that binding.
+
+Plugin tool schemas are outside this rule: their item declarations are owned by
+the plugin manifest, and the guard does not change plugin admission.
 
 ## Failure and recovery
 

@@ -723,6 +723,7 @@
   "routeOutcomeRetryScheduled": "nova tentativa agendada",
   "routeOutcomeSkippedDegraded": "ignorado por estar degradado",
   "routeOutcomeSkippedMaxAttempts": "ignorado por máximo de tentativas",
+  "routeOutcomeSkippedAuthorProvider": "ignorado: escreveu esta tarefa",
   "routeOutcomeSkippedMissingMapping": "ignorado por falta de mapeamento",
   "routeOutcomeSkippedUserAction": "ignorado por ação do utilizador",
   "routineActivated": "Rotina ativada",
@@ -745,6 +746,7 @@
   "routineStatusPaused": "Pausada",
   "routingOverridesSaved": "Substituições de encaminhamento guardadas",
   "routingSettingsSaved": "Definições de encaminhamento guardadas",
+  "routingSavedWithExclusionWarnings": "Definições guardadas, mas a Revisão noutro fornecedor não pode funcionar com esta configuração. Veja o aviso no topo da página.",
   "run": "Execução",
   "runActivity": "Atividade das execuções",
   "runCancelAssigneeChanged": "O responsável mudou",
@@ -1024,5 +1026,10 @@
   "failedToLoadRouteAttempts": "Falha ao carregar as tentativas de rota",
   "failedToLoadRoutingConfig": "Falha ao carregar a configuração de encaminhamento",
   "failedToLoadRoutingPreview": "Falha ao carregar a pré-visualização do encaminhamento",
-  "failedToLoadTaskQuorum": "Falha ao carregar o quórum da tarefa"
+  "failedToLoadTaskQuorum": "Falha ao carregar o quórum da tarefa",
+  "authorExclusionStepsTitle": "Revisão noutro fornecedor",
+  "authorExclusionStepsDescription": "Mantenha o revisor ou aprovador de um passo fora do fornecedor que fez o trabalho da tarefa, para que a revisão seja uma verificação independente. Se não houver outro fornecedor disponível, a revisão fica à espera até agir. Requer o Recurso automático a outro fornecedor e pelo menos dois fornecedores. Os agentes com o seu próprio perfil de execução não são abrangidos.",
+  "authorExclusionStepsEmpty": "Nenhum fluxo de trabalho deste espaço de trabalho tem um passo de revisor ou aprovador.",
+  "authorExclusionStepLabel": "Fluxo de trabalho {{workflow}}, passo {{step}}",
+  "authorExclusionStepSwitchLabel": "Revisão noutro fornecedor para o fluxo de trabalho {{workflow}}, passo {{step}} ({{role}})"
 }
