@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/docker/go-units"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agentctl/journal"
@@ -92,6 +93,10 @@ func launchDockerContainer(
 // Docker runtime. The executor type selects the default prepare script, which
 // both Docker types share.
 func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string) (ContainerConfig, error) {
+	storage, err := resolveDockerStorageLimits(req.Metadata)
+	if err != nil {
+		return ContainerConfig{}, err
+	}
 	prepareScript, err := resolveDockerPrepareScript(req, executorType)
 	if err != nil {
 		return ContainerConfig{}, err
@@ -154,6 +159,9 @@ func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string)
 		Metadata:                       req.Metadata,
 		OnProgress:                     req.OnProgress,
 		Network:                        containerNet,
+		DockerTmpSizeBytes:             storage.tmpSizeBytes,
+		DockerLogMaxSize:               storage.logMaxSize,
+		DockerLogMaxFiles:              storage.logMaxFiles,
 		DurableJournalHostPath:         journalHostPath,
 		DurableJournalContainerPath:    journalContainerPath,
 		DeliveryStreamID:               req.DeliveryStreamID,
@@ -161,6 +169,29 @@ func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string)
 		DeliveryHarnessGeneration:      req.DeliveryHarnessGeneration,
 		OpenCodePluginRuntime:          req.OpenCodePluginRuntime,
 	}, nil
+}
+
+type dockerStorageLimits struct {
+	tmpSizeBytes int64
+	logMaxSize   string
+	logMaxFiles  string
+}
+
+func resolveDockerStorageLimits(metadata map[string]interface{}) (dockerStorageLimits, error) {
+	tmpSize := strings.TrimSpace(getMetadataString(metadata, MetadataKeyDockerTmpSize))
+	limits := dockerStorageLimits{
+		logMaxSize:  strings.TrimSpace(getMetadataString(metadata, MetadataKeyDockerLogMaxSize)),
+		logMaxFiles: strings.TrimSpace(getMetadataString(metadata, MetadataKeyDockerLogMaxFiles)),
+	}
+	if tmpSize == "" {
+		return limits, nil
+	}
+	tmpSizeBytes, err := units.RAMInBytes(tmpSize)
+	if err != nil || tmpSizeBytes <= 0 {
+		return dockerStorageLimits{}, fmt.Errorf("%s must be a positive byte size: %q", MetadataKeyDockerTmpSize, tmpSize)
+	}
+	limits.tmpSizeBytes = tmpSizeBytes
+	return limits, nil
 }
 
 // localCloneMountPathFor resolves the local-repository mount source, which

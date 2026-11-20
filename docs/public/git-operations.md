@@ -646,6 +646,10 @@ Most Git command failures are normal responses with `success:false`, `error`, an
 
 Dismiss on a Git push error card hides only that historical message and does not change Git state; later push failures remain visible.
 
+### Files outside repositories
+
+In a multi-repository task, files at the task workspace root appear under **Outside repositories** in **Changes**. Hidden directories, `node_modules`, nested Git repositories, and checkout contents are omitted. Kandev lists up to 500 files; when the list reaches that limit, the section shows a note that more files are hidden. Select a file to open it in the editor. To add it to a repository, choose **Move to repository**, select a checkout, and confirm. Kandev moves the file to the same relative path inside that checkout. The move does not stage, commit, or push the file.
+
 ### Multi-repository tasks
 
 In a multi-repository task, every wire request must identify one repository with its `repo` subpath. The workspace root is not itself a Git repository, so omitting `repo` normally fails. The UI handles this for you:

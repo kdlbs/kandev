@@ -174,6 +174,16 @@ func (s *Server) handleFileTree(c *gin.Context) {
 	c.JSON(200, types.FileTreeResponse{Root: tree})
 }
 
+func (s *Server) handleWorkspaceRootFiles(c *gin.Context) {
+	listing, err := s.procMgr.WorkspaceRootFiles(c.Request.Context())
+	if err != nil {
+		s.logger.Error("failed to list workspace root files", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workspace root files"})
+		return
+	}
+	c.JSON(http.StatusOK, listing)
+}
+
 // handleFileContent handles file content requests via HTTP GET.
 // Optional `repo` query param scopes the read to a per-repo subdirectory for
 // multi-repo task workspaces; `path` is treated as repo-relative when set.

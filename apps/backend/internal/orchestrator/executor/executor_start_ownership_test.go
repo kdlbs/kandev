@@ -288,8 +288,7 @@ func assertCancelledResumeCleanupOwnership(t *testing.T, f *cancelledResumeStart
 
 type runningStateRaceRepository struct{ *mockRepository }
 
-func (r *runningStateRaceRepository) UpdateTaskSessionIfCurrentState(
-	_ context.Context,
+func (r *runningStateRaceRepository) advanceToRunningAndReject(
 	session *models.TaskSession,
 	expected models.TaskSessionState,
 ) (bool, error) {
@@ -303,6 +302,32 @@ func (r *runningStateRaceRepository) UpdateTaskSessionIfCurrentState(
 	current.State = models.TaskSessionStateRunning
 	r.sessions[session.ID] = current
 	return false, nil
+}
+
+func (r *runningStateRaceRepository) UpdateTaskSessionIfCurrentState(
+	_ context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+) (bool, error) {
+	return r.advanceToRunningAndReject(session, expected)
+}
+
+func (r *runningStateRaceRepository) UpdateTaskSessionIfCurrentStateForLaunch(
+	_ context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	_ string,
+) (bool, error) {
+	return r.advanceToRunningAndReject(session, expected)
+}
+
+func (r *runningStateRaceRepository) UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+	_ context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	_ string,
+) (bool, error) {
+	return r.advanceToRunningAndReject(session, expected)
 }
 
 func TestSessionStartingRaceWithRunningStateReturnsBusy(t *testing.T) {

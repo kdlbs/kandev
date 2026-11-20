@@ -489,6 +489,15 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 			}
 			prepExec, launchErr := s.executor.LaunchPreparedSession(bgCtx, task, sessionID, executor.LaunchOptions{AgentProfileID: launchProfileID, ExecutorID: executorID, WorkflowStepID: workflowStepID})
 			if launchErr != nil {
+				if executor.IsSessionStateSwitched(launchErr) {
+					// A concurrent workflow session switch owns this session now.
+					// This launch is not a failure of its own dynamic route.
+					launchOwned = true
+					s.logger.Info("prepared session launch superseded by a concurrent workflow session switch",
+						zap.String("task_id", taskID),
+						zap.String("session_id", sessionID))
+					return
+				}
 				// LaunchAgent failures persist FAILED in the executor. Earlier
 				// workspace failures return here and are recorded through the same
 				// session-level recovery claim.
@@ -1281,6 +1290,15 @@ func (s *Service) handleSessionLaunchFailure(
 	failureCtx := context.WithoutCancel(ctx)
 	if isFixedProfileSuspendedError(launchErr) {
 		return launchErr
+	}
+	// A workflow profile switch parks its source session while a replacement
+	// session takes over. The losing launch must exit silently: failing the
+	// task here would abort the switch and surface a spurious toast.
+	if executor.IsSessionStateSwitched(launchErr) {
+		s.logger.Info("ignoring launch superseded by a concurrent workflow session switch",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return routingerr.SanitizeError(launchErr)
 	}
 	if recordErr := s.recordSessionRecoveryBlock(failureCtx, sessionID, "interactive", launchErr); recordErr != nil {
 		s.logger.Warn("failed to persist session recovery block",
@@ -4211,8 +4229,8 @@ func (s *Service) waitForSessionAndAgentReady(ctx context.Context, sessionID, wa
 	return session, nil
 }
 
-func (s *Service) waitForStartingSessionPromptable(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
-	s.logger.Debug("waiting for starting session to become promptable",
+func (s *Service) waitForSessionPromptable(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
+	s.logger.Debug("waiting for session to become promptable",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
 	session, err := s.waitForSessionAndAgentReady(ctx, sessionID, "for prompt")
@@ -4223,6 +4241,13 @@ func (s *Service) waitForStartingSessionPromptable(ctx context.Context, taskID, 
 		return nil, err
 	}
 	return session, nil
+}
+
+// WaitForSessionPromptable waits until a task session and its agent can accept
+// a prompt. It also covers launches deferred while session capacity is full.
+func (s *Service) WaitForSessionPromptable(ctx context.Context, taskID, sessionID string) error {
+	_, err := s.waitForSessionPromptable(ctx, taskID, sessionID)
+	return err
 }
 
 // StartSessionForWorkflowStep starts an existing session with a workflow step's prompt configuration.
@@ -8186,7 +8211,7 @@ func (s *Service) loadPromptableSession(ctx context.Context, taskID, sessionID s
 		if !errors.Is(promptErr, ErrSessionNotPromptable) || session.State != models.TaskSessionStateStarting {
 			return nil, promptErr
 		}
-		return s.waitForStartingSessionPromptable(ctx, taskID, sessionID)
+		return s.waitForSessionPromptable(ctx, taskID, sessionID)
 	}
 	return session, nil
 }

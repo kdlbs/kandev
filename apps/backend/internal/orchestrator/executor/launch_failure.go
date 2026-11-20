@@ -35,6 +35,25 @@ type quickChatStartFailureCommitter interface {
 	) (bool, time.Time, error)
 }
 
+type workflowLaunchFailureOwnershipKey struct{}
+
+// WithWorkflowLaunchFailureOwnership carries the launch's session snapshot
+// into failure bookkeeping so the orchestrator can serialize it with a profile
+// switch before it marks the session failed.
+func WithWorkflowLaunchFailureOwnership(ctx context.Context, session *models.TaskSession) context.Context {
+	if session == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, workflowLaunchFailureOwnershipKey{}, session)
+}
+
+// WorkflowLaunchFailureOwnershipFromContext returns the session snapshot set
+// by WithWorkflowLaunchFailureOwnership.
+func WorkflowLaunchFailureOwnershipFromContext(ctx context.Context) (*models.TaskSession, bool) {
+	session, ok := ctx.Value(workflowLaunchFailureOwnershipKey{}).(*models.TaskSession)
+	return session, ok && session != nil
+}
+
 func (e *Executor) RecordEarlyQuickChatStartFailure(
 	ctx context.Context,
 	taskID, sessionID, quickChatAttemptID, agentAttemptID string,

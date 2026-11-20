@@ -67,7 +67,6 @@ require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.5.1 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
-	github.com/docker/go-units v0.5.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -155,6 +154,7 @@ replace github.com/coder/acp-go-sdk => github.com/kdlbs/acp-go-sdk v0.13.6-0.202
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
+	github.com/docker/go-units v0.5.0
 	github.com/kdlbs/kandev/pluginsdk v0.1.0
 )
 

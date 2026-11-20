@@ -1093,10 +1093,10 @@ func (r *sqliteRepository) ListDynamicProfileReferencesByExecutionProfile(
 	profileID string,
 ) ([]models.DynamicProfileReference, error) {
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-		SELECT p.id, p.name, p.deleted_at
+		SELECT p.id, p.name
 		FROM dynamic_agent_routes r
 		JOIN agent_profiles p ON p.id = r.dynamic_profile_id
-		WHERE r.execution_profile_id = ?
+		WHERE r.execution_profile_id = ? AND p.deleted_at IS NULL
 		ORDER BY p.name, p.id
 	`), profileID)
 	if err != nil {
@@ -1107,7 +1107,7 @@ func (r *sqliteRepository) ListDynamicProfileReferencesByExecutionProfile(
 	seen := make(map[string]struct{})
 	for rows.Next() {
 		var ref models.DynamicProfileReference
-		if err := rows.Scan(&ref.ProfileID, &ref.Name, &ref.DeletedAt); err != nil {
+		if err := rows.Scan(&ref.ProfileID, &ref.Name); err != nil {
 			return nil, err
 		}
 		if _, ok := seen[ref.ProfileID]; ok {
@@ -1117,6 +1117,26 @@ func (r *sqliteRepository) ListDynamicProfileReferencesByExecutionProfile(
 		refs = append(refs, ref)
 	}
 	return refs, rows.Err()
+}
+
+// DeleteDynamicAgentRoutesForDeletedProfiles removes candidate rows that point
+// at executionProfileID from dynamic parents that are already soft-deleted.
+// Such routes can never execute and must not outlive the candidate profile.
+func (r *sqliteRepository) DeleteDynamicAgentRoutesForDeletedProfiles(
+	ctx context.Context,
+	executionProfileID string,
+) (int64, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM dynamic_agent_routes
+		WHERE execution_profile_id = ?
+			AND dynamic_profile_id IN (
+				SELECT id FROM agent_profiles WHERE deleted_at IS NOT NULL
+			)
+	`), executionProfileID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 // DuplicateAgentProfile creates an independent copy of a profile in a single
