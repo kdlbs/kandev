@@ -3,19 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { PromptSyncController } from "@/hooks/domains/settings/use-prompt-sync";
 import type { PromptSyncConfig, PromptSyncConflict } from "@/lib/types/prompt-sync";
-import type { PromptConflictResolver } from "@/hooks/domains/settings/use-prompt-conflict-resolver";
 import type { PromptConflictReview } from "@/hooks/domains/settings/use-prompt-conflict-review";
 
 const mocks = vi.hoisted(() => ({
   controller: null as unknown as PromptSyncController,
-  resolver: null as unknown as PromptConflictResolver,
 }));
 
 vi.mock("@/hooks/domains/settings/use-prompt-sync", () => ({
   usePromptSync: () => mocks.controller,
-}));
-vi.mock("@/hooks/domains/settings/use-prompt-conflict-resolver", () => ({
-  usePromptConflictResolver: () => mocks.resolver,
 }));
 const storeState = vi.hoisted(() => ({
   prompts: [] as Array<{ id: string; name: string; source?: string; conflict?: boolean }>,
@@ -84,7 +79,6 @@ function makeController(overrides: Partial<PromptSyncController> = {}): PromptSy
     removal: makeReview(),
     startRemoval: vi.fn().mockResolvedValue("confirm"),
     backToFields: vi.fn(),
-    acceptConfig: vi.fn(),
     ...overrides,
   };
 }
@@ -107,15 +101,6 @@ function makeReview(conflicts: PromptSyncConflict[] = []): PromptConflictReview 
   };
 }
 
-function makeResolver(conflicts: PromptSyncConflict[] = []): PromptConflictResolver {
-  return {
-    review: makeReview(conflicts),
-    busy: false,
-    load: vi.fn().mockResolvedValue(true),
-    apply: vi.fn().mockResolvedValue(true),
-  };
-}
-
 function renderSection() {
   return render(
     <TooltipProvider>
@@ -126,7 +111,6 @@ function renderSection() {
 
 beforeEach(() => {
   mocks.controller = makeController();
-  mocks.resolver = makeResolver();
 });
 afterEach(cleanup);
 
@@ -202,31 +186,21 @@ describe("PromptSyncSection conflict review before saving", () => {
   });
 });
 
-// @covers AC-INTEGRATIONS-PROMPT-SYNC-008.5 AC-INTEGRATIONS-PROMPT-SYNC-008.6
-describe("PromptSyncSection unresolved conflicts", () => {
-  afterEach(() => {
-    storeState.prompts = [];
-  });
-
-  it("shows a banner whose Review opens the review dialog and applies the choices", async () => {
-    storeState.prompts = [{ id: "1", name: "principles", source: "override", conflict: true }];
-    mocks.controller = makeController({ config });
-    mocks.resolver = makeResolver([conflict]);
+// @covers AC-INTEGRATIONS-PROMPT-SYNC-008.2
+describe("PromptConflictReviewList", () => {
+  it("explains the two versions once and gives each prompt one switch row", () => {
+    const second = { ...conflict, name: "notes", path: ".kandev/prompts/notes.md" };
+    mocks.controller = makeController({ review: makeReview([conflict, second]) });
     renderSection();
-    expect(screen.getByTestId("prompt-conflict-banner").textContent).toContain("1");
-    fireEvent.click(screen.getByTestId("prompt-conflict-banner-review"));
-    await waitFor(() => expect(screen.getByTestId("prompt-conflict-dialog")).toBeTruthy());
-    expect(mocks.resolver.load).toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId("prompt-conflict-apply"));
-    expect(mocks.resolver.apply).toHaveBeenCalled();
-    await waitFor(() => expect(screen.queryByTestId("prompt-conflict-dialog")).toBeNull());
-  });
-
-  it("shows no banner without conflicts", () => {
-    storeState.prompts = [{ id: "1", name: "hook", source: "override" }];
-    mocks.controller = makeController({ config });
-    renderSection();
-    expect(screen.queryByTestId("prompt-conflict-banner")).toBeNull();
+    fireEvent.click(screen.getByTestId(OPEN_TEST_ID));
+    expect(screen.getAllByTestId("prompt-conflict-legend")).toHaveLength(1);
+    expect(screen.getAllByText(/stays in use as a local override/)).toHaveLength(1);
+    const rows = screen.getAllByTestId("prompt-conflict-item");
+    expect(rows.map((row) => row.getAttribute("data-prompt-name"))).toEqual([
+      "principles",
+      "notes",
+    ]);
+    expect(screen.getAllByTestId("prompt-conflict-switch")).toHaveLength(2);
   });
 });
 
@@ -241,7 +215,7 @@ describe("PromptSyncSection removal with kept local versions", () => {
     expect(mocks.controller.startRemoval).toHaveBeenCalled();
   });
 
-  it("shows the version choices, repository first, and removes from that step", async () => {
+  it("lists prompts with both versions as switch rows and removes from that step", async () => {
     mocks.controller = makeController({
       config,
       removal: { ...makeReview([conflict]), choices: { principles: "repository" } },
@@ -249,9 +223,15 @@ describe("PromptSyncSection removal with kept local versions", () => {
     renderSection();
     fireEvent.click(screen.getByTestId(OPEN_TEST_ID));
     expect(screen.queryByTestId("prompt-sync-workspace-select")).toBeNull();
-    const choices = screen.getAllByTestId(/^prompt-conflict-choice-/);
-    expect(choices[0]!.getAttribute("data-testid")).toBe("prompt-conflict-choice-repository");
-    expect(choices[1]!.textContent).toContain("Restore my version");
+    expect(screen.getByTestId("prompt-conflict-legend").textContent).toContain(
+      "keeps the repository version",
+    );
+    const toggle = screen.getByRole("switch", {
+      name: "Use the repository version of @principles",
+    });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
+    expect(mocks.controller.removal.setChoice).toHaveBeenCalledWith("principles", "local");
     fireEvent.click(screen.getByTestId("prompt-sync-removal-back"));
     expect(mocks.controller.removal.close).toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("prompt-sync-removal-confirm"));

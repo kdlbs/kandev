@@ -72,7 +72,7 @@ func TestApplyResolvesClashesWithChoices(t *testing.T) {
 	take := promptNamed(t, svc, "take")
 	assert.True(t, take.IsSynced())
 	assert.Equal(t, "Repo take", take.Content)
-	assert.Equal(t, "Local take", take.LocalContent, "taking the repository version keeps the local one")
+	assert.Equal(t, "Local take", take.AlternateContent, "taking the repository version keeps the local one")
 
 	overridden, err := svc.OverrideSyncedPrompt(ctx, take.ID)
 	require.NoError(t, err)
@@ -104,7 +104,7 @@ func TestApplyResolvesExistingConflictedOverride(t *testing.T) {
 	take := promptNamed(t, svc, "take")
 	assert.True(t, take.IsSynced())
 	assert.Equal(t, "Repo take", take.Content)
-	assert.Equal(t, "Local take", take.LocalContent)
+	assert.Equal(t, "Local take", take.AlternateContent)
 }
 
 func TestApplyVanishedFilesClearConflictsAndRestoreKeptContent(t *testing.T) {

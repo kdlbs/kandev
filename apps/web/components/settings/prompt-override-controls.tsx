@@ -1,39 +1,25 @@
 "use client";
 
-import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconLock } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
-import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 import { usePromptOverride } from "@/hooks/domains/settings/use-prompt-override";
 import type { CustomPrompt } from "@/lib/types/http";
 
-// usePromptOverrideSwitch owns one row's "Local override" switch state.
-// Turning the switch on overrides immediately; turning it off waits for the
-// confirmation, which the row renders below its header so the switch stays
-// in place.
+// usePromptOverrideSwitch owns one row's "Local override" switch. Both
+// directions apply at once: neither version is lost, and a toast names the
+// version now in use.
 export function usePromptOverrideSwitch(prompt: CustomPrompt) {
   const { pendingId, override, revert } = usePromptOverride();
-  const [confirming, setConfirming] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement>(null);
   return {
     prompt,
-    anchorRef,
-    confirming,
     pending: pendingId === prompt.id,
     onCheckedChange: (checked: boolean) => {
-      if (checked) void override(prompt.id);
-      else setConfirming(true);
+      void (checked ? override(prompt.id, prompt.name) : revert(prompt.id, prompt.name));
     },
-    confirm: async () => {
-      setConfirming(false);
-      await revert(prompt.id);
-    },
-    cancel: () => setConfirming(false),
   };
 }
 
@@ -51,57 +37,15 @@ export function PromptOverrideSwitch({ state }: { state: PromptOverrideSwitchSta
       data-testid="prompt-override-switch-label"
     >
       <Switch
-        ref={state.anchorRef}
         id={switchId}
         checked={state.prompt.source === "override"}
         onCheckedChange={state.onCheckedChange}
-        disabled={state.pending || state.confirming}
+        disabled={state.pending}
         className="cursor-pointer"
         data-testid="prompt-override-switch"
       />
       {t("settings:promptLocalOverride")}
     </Label>
-  );
-}
-
-// PromptRevertConfirmation asks before the repository version replaces the
-// local one: inline below the row header on desktop, a sheet on phones.
-export function PromptRevertConfirmation({ state }: { state: PromptOverrideSwitchState }) {
-  const { t } = useTranslation();
-  const description = t("settings:promptRevertConfirm");
-  const confirmLabel = t("settings:promptRevertConfirmAction");
-  return (
-    <MobileActionConfirmation
-      open={state.confirming}
-      targetKey={state.prompt.id}
-      title={t("settings:promptRevertOverride")}
-      subject={`@${state.prompt.name}`}
-      description={description}
-      cancelLabel={t("common:cancel")}
-      confirmLabel={confirmLabel}
-      confirmAriaLabel={confirmLabel}
-      confirmTestId="prompt-revert-confirm"
-      testId="prompt-revert-confirmation"
-      onOpenChange={(open) => {
-        if (!open) state.cancel();
-      }}
-      onConfirm={state.confirm}
-      focusReturnRef={state.anchorRef}
-      fallback={
-        <InlineConfirmActions
-          density="touch"
-          testId="prompt-revert-confirmation"
-          ariaLabel={t("settings:promptRevertOverride")}
-          description={description}
-          cancelLabel={t("common:cancel")}
-          confirmLabel={confirmLabel}
-          confirmAriaLabel={confirmLabel}
-          confirmTestId="prompt-revert-confirm"
-          onCancel={state.cancel}
-          onConfirm={state.confirm}
-        />
-      }
-    />
   );
 }
 

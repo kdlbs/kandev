@@ -17,7 +17,7 @@ func mustGet(t *testing.T, repo *sqliteRepository, id string) *models.Prompt {
 	return prompt
 }
 
-func TestRevertKeepsLocalContentAndOverrideRestoresIt(t *testing.T) {
+func TestRevertKeepsAlternateContentAndOverrideRestoresIt(t *testing.T) {
 	repo, cleanup := createTestRepo(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -37,12 +37,12 @@ func TestRevertKeepsLocalContentAndOverrideRestoresIt(t *testing.T) {
 	require.True(t, changed)
 	reverted := mustGet(t, repo, synced.ID)
 	assert.True(t, reverted.IsSynced())
-	assert.Equal(t, "Mine", reverted.LocalContent, "reverting keeps the local version")
+	assert.Equal(t, "Mine", reverted.AlternateContent, "reverting keeps the local version")
 
 	updated, err := repo.UpdateSyncedPrompt(ctx, synced.ID, "Repo v2", "p/review.md")
 	require.NoError(t, err)
 	require.True(t, updated)
-	assert.Equal(t, "Mine", mustGet(t, repo, synced.ID).LocalContent, "sync updates preserve the kept copy")
+	assert.Equal(t, "Mine", mustGet(t, repo, synced.ID).AlternateContent, "sync updates preserve the kept copy")
 
 	changed, err = repo.OverrideSyncedPrompt(ctx, synced.ID)
 	require.NoError(t, err)
@@ -50,7 +50,7 @@ func TestRevertKeepsLocalContentAndOverrideRestoresIt(t *testing.T) {
 	restored := mustGet(t, repo, synced.ID)
 	assert.True(t, restored.IsOverride())
 	assert.Equal(t, "Mine", restored.Content, "turning the override on again restores the local version")
-	assert.Empty(t, restored.LocalContent, "the kept copy is consumed")
+	assert.Equal(t, "Repo v2", restored.AlternateContent, "the repository version becomes the other version")
 }
 
 func TestOwnershipTransitionsAreGuarded(t *testing.T) {
@@ -80,7 +80,7 @@ func TestAdoptManualPromptAsOverrideWithConflict(t *testing.T) {
 	manual := &models.Prompt{Name: "principles", Content: "Mine"}
 	require.NoError(t, repo.CreatePrompt(ctx, manual))
 
-	changed, err := repo.AdoptPromptAsOverride(ctx, manual.ID, "p/principles.md", true)
+	changed, err := repo.AdoptPromptAsOverride(ctx, manual.ID, "p/principles.md", "Repo", true)
 	require.NoError(t, err)
 	require.True(t, changed)
 	adopted := mustGet(t, repo, manual.ID)
@@ -89,7 +89,7 @@ func TestAdoptManualPromptAsOverrideWithConflict(t *testing.T) {
 	assert.Equal(t, "Mine", adopted.Content)
 	assert.Equal(t, "p/principles.md", adopted.SourcePath)
 
-	changed, err = repo.AdoptPromptAsOverride(ctx, manual.ID, "p/principles.md", false)
+	changed, err = repo.AdoptPromptAsOverride(ctx, manual.ID, "p/principles.md", "Repo", false)
 	require.NoError(t, err)
 	assert.False(t, changed, "only a manual prompt can be adopted")
 
@@ -102,17 +102,17 @@ func TestAdoptManualPromptAsOverrideWithConflict(t *testing.T) {
 	assert.True(t, changed)
 	assert.False(t, mustGet(t, repo, manual.ID).Conflict)
 
-	_, err = repo.AdoptPromptAsOverride(ctx, manual.ID, "p/principles.md", false)
+	_, err = repo.AdoptPromptAsOverride(ctx, manual.ID, "p/principles.md", "Repo", false)
 	require.NoError(t, err)
 	changed, err = repo.RevertOverride(ctx, manual.ID)
 	require.NoError(t, err)
 	require.True(t, changed)
 	reverted := mustGet(t, repo, manual.ID)
 	assert.False(t, reverted.Conflict, "reverting resolves the conflict")
-	assert.Equal(t, "Edited", reverted.LocalContent)
+	assert.Equal(t, "Edited", reverted.AlternateContent)
 }
 
-func TestAdoptManualPromptAsSyncedKeepsLocalContent(t *testing.T) {
+func TestAdoptManualPromptAsSyncedKeepsAlternateContent(t *testing.T) {
 	repo, cleanup := createTestRepo(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -125,7 +125,7 @@ func TestAdoptManualPromptAsSyncedKeepsLocalContent(t *testing.T) {
 	adopted := mustGet(t, repo, manual.ID)
 	assert.True(t, adopted.IsSynced())
 	assert.Equal(t, "Repo", adopted.Content)
-	assert.Equal(t, "Mine", adopted.LocalContent)
+	assert.Equal(t, "Mine", adopted.AlternateContent)
 	assert.False(t, adopted.Conflict)
 
 	changed, err = repo.RestoreSyncedPrompt(ctx, manual.ID)
@@ -134,7 +134,7 @@ func TestAdoptManualPromptAsSyncedKeepsLocalContent(t *testing.T) {
 	restored := mustGet(t, repo, manual.ID)
 	assert.Equal(t, models.PromptSourceManual, restored.Source)
 	assert.Equal(t, "Mine", restored.Content, "restoring returns the kept local version")
-	assert.Empty(t, restored.LocalContent)
+	assert.Empty(t, restored.AlternateContent)
 	assert.Empty(t, restored.SourcePath)
 }
 
@@ -162,7 +162,7 @@ func TestReleaseClearsConflictAndKeptContent(t *testing.T) {
 	require.NoError(t, repo.CreatePrompt(ctx, first))
 	second := &models.Prompt{Name: "second", Content: "Also mine"}
 	require.NoError(t, repo.CreatePrompt(ctx, second))
-	_, err := repo.AdoptPromptAsOverride(ctx, first.ID, "p/first.md", true)
+	_, err := repo.AdoptPromptAsOverride(ctx, first.ID, "p/first.md", "Repo first", true)
 	require.NoError(t, err)
 	_, err = repo.AdoptPromptAsSynced(ctx, second.ID, "Repo", "p/second.md")
 	require.NoError(t, err)
@@ -174,7 +174,7 @@ func TestReleaseClearsConflictAndKeptContent(t *testing.T) {
 		prompt := mustGet(t, repo, id)
 		assert.Equal(t, models.PromptSourceManual, prompt.Source)
 		assert.False(t, prompt.Conflict)
-		assert.Empty(t, prompt.LocalContent)
+		assert.Empty(t, prompt.AlternateContent)
 	}
 	assert.Equal(t, "Repo", mustGet(t, repo, second.ID).Content, "release keeps the current content")
 }
@@ -200,5 +200,5 @@ func TestReleaseRestoresChosenKeptVersions(t *testing.T) {
 	assert.Equal(t, models.PromptSourceManual, restored.Source)
 	kept := mustGet(t, repo, ids["keep-repo"])
 	assert.Equal(t, "Repo keep-repo", kept.Content)
-	assert.Empty(t, kept.LocalContent)
+	assert.Empty(t, kept.AlternateContent)
 }

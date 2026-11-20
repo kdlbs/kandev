@@ -8,7 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/testutil"
 )
 
-func TestPostgresRepository_OwnershipTransitionsKeepLocalContent(t *testing.T) {
+func TestPostgresRepository_OwnershipTransitionsKeepAlternateContent(t *testing.T) {
 	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := newSQLiteRepositoryWithDB(database, database)
 	if err != nil {
@@ -26,7 +26,7 @@ func TestPostgresRepository_OwnershipTransitionsKeepLocalContent(t *testing.T) {
 		name string
 		run  func() (bool, error)
 	}{
-		{"adopt as override", func() (bool, error) { return repo.AdoptPromptAsOverride(ctx, manual.ID, "p/pg.md", true) }},
+		{"adopt as override", func() (bool, error) { return repo.AdoptPromptAsOverride(ctx, manual.ID, "p/pg.md", "Repo", true) }},
 		{"clear conflict", func() (bool, error) { return repo.ClearOverrideConflict(ctx, manual.ID) }},
 		{"revert", func() (bool, error) { return repo.RevertOverride(ctx, manual.ID) }},
 		{"sync update", func() (bool, error) { return repo.UpdateSyncedPrompt(ctx, manual.ID, "Repo", "p/pg.md") }},
@@ -38,7 +38,7 @@ func TestPostgresRepository_OwnershipTransitionsKeepLocalContent(t *testing.T) {
 		}
 	}
 	read, err := repo.GetPromptByID(ctx, manual.ID)
-	if err != nil || !read.IsOverride() || read.Content != "Mine" || read.LocalContent != "" || read.Conflict {
+	if err != nil || !read.IsOverride() || read.Content != "Mine" || read.AlternateContent != "Repo" || read.Conflict {
 		t.Fatalf("restored override = %+v, %v", read, err)
 	}
 	other := &models.Prompt{Name: "pg-taken", Content: "Local"}
@@ -75,7 +75,7 @@ func TestPostgresRepository_ReleaseRestoresChosenKeptVersions(t *testing.T) {
 		t.Fatalf("release = %d, %v", released, err)
 	}
 	read, err := repo.GetPromptByID(ctx, prompt.ID)
-	if err != nil || read.Source != models.PromptSourceManual || read.Content != "Local" || read.LocalContent != "" {
+	if err != nil || read.Source != models.PromptSourceManual || read.Content != "Local" || read.AlternateContent != "" {
 		t.Fatalf("released prompt = %+v, %v", read, err)
 	}
 }

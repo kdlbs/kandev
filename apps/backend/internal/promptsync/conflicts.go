@@ -9,13 +9,16 @@ import (
 	"github.com/kandev/kandev/internal/reposync"
 )
 
-// Conflict is a repository prompt file whose name a manual, built-in, or
-// still-conflicted override prompt already uses.
+// Conflict is a prompt with a local and a repository version: a repository
+// file whose name a manual, built-in, or still-conflicted override prompt
+// already uses, or a synced prompt or override that keeps both versions.
+// InUse, when set, names the version the prompt uses now.
 type Conflict struct {
-	Name              string `json:"name"`
-	Path              string `json:"path"`
-	LocalContent      string `json:"local_content"`
-	RepositoryContent string `json:"repository_content"`
+	Name              string                       `json:"name"`
+	Path              string                       `json:"path"`
+	LocalContent      string                       `json:"local_content"`
+	RepositoryContent string                       `json:"repository_content"`
+	InUse             promptservice.ConflictChoice `json:"in_use,omitempty"`
 }
 
 // CheckResult lists the conflicts a source would cause, plus file warnings.
@@ -76,7 +79,7 @@ func (s *Service) checkTarget(ctx context.Context, req *SetConfigRequest) (*Conf
 
 // findConflicts pairs each desired file with an existing prompt of the same
 // name that sync does not own: a manual or built-in prompt, or an override
-// whose conflict the user has not resolved.
+// whose conflict the user has not resolved. Identical text is no conflict.
 func findConflicts(desired []promptservice.SyncedPromptFile, prompts []*promptmodels.Prompt) []Conflict {
 	byName := make(map[string]*promptmodels.Prompt, len(prompts))
 	for _, prompt := range prompts {
@@ -85,7 +88,7 @@ func findConflicts(desired []promptservice.SyncedPromptFile, prompts []*promptmo
 	conflicts := []Conflict{}
 	for _, file := range desired {
 		prompt := byName[file.Name]
-		if prompt == nil || prompt.IsSynced() || (prompt.IsOverride() && !prompt.Conflict) {
+		if prompt == nil || prompt.IsSynced() || (prompt.IsOverride() && !prompt.Conflict) || prompt.Content == file.Content {
 			continue
 		}
 		conflicts = append(conflicts, Conflict{
@@ -117,23 +120,52 @@ func (s *Service) SaveAndSync(ctx context.Context, req *SetConfigRequest) (*Save
 	return &SaveOutcome{Config: cfg, Result: result, SyncErr: syncErr}, nil
 }
 
-// KeptVersions lists synced prompts that keep a local version beside the
-// repository version, sorted by name, so removing the configuration can offer
-// to restore them.
-func (s *Service) KeptVersions(ctx context.Context) ([]Conflict, error) {
+// TwoVersionPrompts lists synced prompts and overrides whose local and
+// repository versions differ, sorted by name, so removing the configuration
+// can ask which version each keeps.
+func (s *Service) TwoVersionPrompts(ctx context.Context) ([]Conflict, error) {
 	prompts, err := s.prompts.ListPrompts(ctx)
 	if err != nil {
 		return nil, err
 	}
-	kept := []Conflict{}
+	listed := []Conflict{}
 	for _, prompt := range prompts {
-		if !prompt.IsSynced() || prompt.LocalContent == "" {
+		if item, ok := twoVersionPrompt(prompt); ok {
+			listed = append(listed, item)
+		}
+	}
+	sort.Slice(listed, func(i, j int) bool { return listed[i].Name < listed[j].Name })
+	return listed, nil
+}
+
+func twoVersionPrompt(prompt *promptmodels.Prompt) (Conflict, bool) {
+	if prompt.AlternateContent == "" || prompt.AlternateContent == prompt.Content {
+		return Conflict{}, false
+	}
+	item := Conflict{Name: prompt.Name, Path: prompt.SourcePath}
+	switch {
+	case prompt.IsSynced():
+		item.LocalContent, item.RepositoryContent, item.InUse = prompt.AlternateContent, prompt.Content, promptservice.ChoiceRepository
+	case prompt.IsOverride():
+		item.LocalContent, item.RepositoryContent, item.InUse = prompt.Content, prompt.AlternateContent, promptservice.ChoiceLocal
+	default:
+		return Conflict{}, false
+	}
+	return item, true
+}
+
+// switchingPrompts names the prompts whose choice differs from the version
+// they use now, so releasing them takes their other version.
+func switchingPrompts(prompts []*promptmodels.Prompt, choices map[string]promptservice.ConflictChoice) []string {
+	var names []string
+	for _, prompt := range prompts {
+		item, ok := twoVersionPrompt(prompt)
+		if !ok {
 			continue
 		}
-		kept = append(kept, Conflict{
-			Name: prompt.Name, Path: prompt.SourcePath, LocalContent: prompt.LocalContent, RepositoryContent: prompt.Content,
-		})
+		if choice, chosen := choices[prompt.Name]; chosen && choice != item.InUse {
+			names = append(names, prompt.Name)
+		}
 	}
-	sort.Slice(kept, func(i, j int) bool { return kept[i].Name < kept[j].Name })
-	return kept, nil
+	return names
 }

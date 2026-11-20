@@ -133,7 +133,7 @@ func (r *sqliteRepository) ListPromptsForReferenceExpansion(
 	nameLength := dialect.ByteLength(r.ro.DriverName(), "name")
 	contentLength := dialect.ByteLength(r.ro.DriverName(), "content")
 	query := fmt.Sprintf(`
-		SELECT id, name, content, builtin, source, source_path, '' AS local_content, 0 AS conflict, created_at, updated_at
+		SELECT id, name, content, builtin, source, source_path, '' AS alternate_content, 0 AS conflict, created_at, updated_at
 		FROM custom_prompts
 		WHERE %s > 0
 			AND %s <= ?

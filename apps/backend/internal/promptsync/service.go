@@ -22,7 +22,7 @@ const genericFailureMessage = "Prompt sync failed"
 // PromptApplier is the prompt-service surface Prompt Sync writes through.
 type PromptApplier interface {
 	ApplySyncedPrompts(ctx context.Context, input promptservice.SyncApplyInput) (*promptservice.SyncApplyResult, error)
-	ReleaseSyncedPrompts(ctx context.Context, restoreLocal ...string) (int64, error)
+	ReleaseSyncedPrompts(ctx context.Context, useOther ...string) (int64, error)
 	UnresolvedPromptReferences(ctx context.Context, texts []string) ([][]string, error)
 	ListPrompts(ctx context.Context) ([]*promptmodels.Prompt, error)
 	OverrideSyncedPrompt(ctx context.Context, id string) (*promptmodels.Prompt, error)
@@ -152,10 +152,14 @@ func (s *Service) saveLocked(ctx context.Context, req *SetConfigRequest) (*Confi
 	return cfg, err
 }
 
-// DeleteConfig releases every synced prompt to manual ownership, then removes
-// the configuration. Synced prompts named in restoreLocal get their kept local
-// version back. A failed release keeps the configuration for a retry.
-func (s *Service) DeleteConfig(ctx context.Context, restoreLocal ...string) error {
+// DeleteConfig releases every synced prompt and override to manual
+// ownership, then removes the configuration. choices picks the local or
+// repository version for prompts that have both; others keep the version in
+// use. A failed release keeps the configuration for a retry.
+func (s *Service) DeleteConfig(ctx context.Context, choices map[string]promptservice.ConflictChoice) error {
+	if err := validateResolutions(choices); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cfg, err := s.store.Get(ctx)
@@ -167,7 +171,11 @@ func (s *Service) DeleteConfig(ctx context.Context, restoreLocal ...string) erro
 			return err
 		}
 	}
-	released, err := s.prompts.ReleaseSyncedPrompts(ctx, restoreLocal...)
+	prompts, err := s.prompts.ListPrompts(ctx)
+	if err != nil {
+		return err
+	}
+	released, err := s.prompts.ReleaseSyncedPrompts(ctx, switchingPrompts(prompts, choices)...)
 	if err != nil {
 		return fmt.Errorf("failed to release synced prompts: %w", err)
 	}

@@ -19,7 +19,7 @@ func (r *sqliteRepository) addSourceColumns() error {
 	columns := []struct{ name, ddl string }{
 		{"source", `ALTER TABLE custom_prompts ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`},
 		{"source_path", `ALTER TABLE custom_prompts ADD COLUMN source_path TEXT NOT NULL DEFAULT ''`},
-		{"local_content", `ALTER TABLE custom_prompts ADD COLUMN local_content TEXT NOT NULL DEFAULT ''`},
+		{"alternate_content", `ALTER TABLE custom_prompts ADD COLUMN alternate_content TEXT NOT NULL DEFAULT ''`},
 		{"conflict", `ALTER TABLE custom_prompts ADD COLUMN conflict INTEGER NOT NULL DEFAULT 0`},
 	}
 	for _, column := range columns {
@@ -69,7 +69,7 @@ type promptScanner interface {
 }
 
 // promptColumns is the column list scanPrompt reads.
-const promptColumns = "id, name, content, builtin, source, source_path, local_content, conflict, created_at, updated_at"
+const promptColumns = "id, name, content, builtin, source, source_path, alternate_content, conflict, created_at, updated_at"
 
 // scanPrompt reads one row selected with promptColumns.
 func scanPrompt(row promptScanner) (*models.Prompt, error) {
@@ -77,7 +77,7 @@ func scanPrompt(row promptScanner) (*models.Prompt, error) {
 	var builtinInt, conflictInt int
 	if err := row.Scan(
 		&prompt.ID, &prompt.Name, &prompt.Content, &builtinInt,
-		&prompt.Source, &prompt.SourcePath, &prompt.LocalContent, &conflictInt,
+		&prompt.Source, &prompt.SourcePath, &prompt.AlternateContent, &conflictInt,
 		&prompt.CreatedAt, &prompt.UpdatedAt,
 	); err != nil {
 		return nil, err
@@ -141,26 +141,26 @@ func (r *sqliteRepository) DeleteSyncedPrompt(ctx context.Context, id string) (b
 }
 
 // ReleaseSyncedPrompts converts every synced prompt and override to a manual
-// prompt, keeping identity and current content, drops kept copies and
-// conflicts, and returns the number released. A synced prompt named in
-// restoreLocal gets its kept local version back as its content. Both steps
-// run in one transaction.
-func (r *sqliteRepository) ReleaseSyncedPrompts(ctx context.Context, restoreLocal ...string) (int64, error) {
+// prompt, keeping identity and current content, drops other versions and
+// conflicts, and returns the number released. A synced prompt or override
+// named in useOther takes its other version (kept local version or
+// repository version) as its content. Both steps run in one transaction.
+func (r *sqliteRepository) ReleaseSyncedPrompts(ctx context.Context, useOther ...string) (int64, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	for _, name := range restoreLocal {
+	for _, name := range useOther {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`
-			UPDATE custom_prompts SET content = local_content
-			WHERE name = ? AND source = ? AND local_content <> ''
-		`), name, models.PromptSourceSync); err != nil {
+			UPDATE custom_prompts SET content = alternate_content
+			WHERE name = ? AND source IN (?, ?) AND alternate_content <> ''
+		`), name, models.PromptSourceSync, models.PromptSourceOverride); err != nil {
 			return 0, err
 		}
 	}
 	result, err := tx.ExecContext(ctx, tx.Rebind(`
-		UPDATE custom_prompts SET source = ?, source_path = '', local_content = '', conflict = 0
+		UPDATE custom_prompts SET source = ?, source_path = '', alternate_content = '', conflict = 0
 		WHERE source IN (?, ?)
 	`), models.PromptSourceManual, models.PromptSourceSync, models.PromptSourceOverride)
 	if err != nil {

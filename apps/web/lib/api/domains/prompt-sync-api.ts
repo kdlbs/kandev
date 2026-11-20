@@ -32,21 +32,24 @@ export async function setPromptSyncConfig(
   });
 }
 
-// deletePromptSyncConfig removes Prompt Sync; synced prompts named in
-// restoreLocal get their kept local version back.
-export async function deletePromptSyncConfig(restoreLocal?: string[], options?: ApiRequestOptions) {
+// deletePromptSyncConfig removes Prompt Sync. choices picks, by prompt name,
+// which version a prompt with both versions keeps; others keep the one in use.
+export async function deletePromptSyncConfig(
+  choices?: PromptConflictResolutions,
+  options?: ApiRequestOptions,
+) {
   return fetchJson<{ deleted: boolean }>(CONFIG_PATH, {
     ...options,
     init: {
       ...(options?.init ?? {}),
       method: "DELETE",
-      ...(restoreLocal ? { body: JSON.stringify({ restore_local: restoreLocal }) } : {}),
+      ...(choices ? { body: JSON.stringify({ choices }) } : {}),
     },
   });
 }
 
-// getPromptSyncKeptVersions lists synced prompts that keep a local version
-// beside the repository version.
+// getPromptSyncKeptVersions lists prompts that have both a local and a
+// repository version, each with the version it uses now.
 export async function getPromptSyncKeptVersions(options?: ApiRequestOptions) {
   return fetchJson<{ prompts: PromptSyncConflict[] }>("/api/v1/prompt-sync/kept-versions", options);
 }

@@ -45,13 +45,12 @@ test.describe("Prompt Sync on a phone", () => {
     expect((await switchLabel.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
     await switchLabel.tap();
     await expect(row.getByTestId("prompt-override-badge")).toBeVisible();
-    await row.getByTestId("prompt-override-switch-label").tap();
     const reverted = waitForHttp(
       testPage,
       "POST",
       /^\/api\/v1\/prompt-sync\/prompts\/[^/]+\/revert$/,
     );
-    await testPage.getByTestId("prompt-revert-confirm").tap();
+    await row.getByTestId("prompt-override-switch-label").tap();
     expect((await reverted).ok()).toBe(true);
     await expect(row.getByTestId("prompt-synced-badge")).toBeVisible();
   });
@@ -77,9 +76,9 @@ test.describe("Prompt Sync on a phone", () => {
     await expect(dialog.getByTestId("prompt-sync-url-input")).toHaveValue("platform/prompts");
     await saveToReview(testPage, dialog, true);
 
-    const repository = dialog.getByTestId("prompt-conflict-choice-repository");
-    expect((await repository.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
-    await repository.tap();
+    const choice = dialog.locator("label", { has: testPage.getByTestId("prompt-conflict-switch") });
+    expect((await choice.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await choice.tap();
     const saved = waitForHttp(testPage, "POST", CONFIG_PATH);
     await dialog.getByTestId("prompt-sync-save").tap();
     expect((await saved).ok()).toBe(true);
@@ -89,9 +88,16 @@ test.describe("Prompt Sync on a phone", () => {
 
     await testPage.getByTestId("prompt-sync-open").tap();
     await dialog.getByTestId("prompt-sync-remove").tap();
-    const restore = dialog.getByTestId("prompt-conflict-choice-local");
-    expect((await restore.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
-    await restore.tap();
+    const keepMine = dialog.getByRole("switch", {
+      name: "Use the repository version of @phone-house",
+    });
+    await expect(keepMine).toHaveAttribute("aria-checked", "true");
+    await dialog
+      .locator("label", {
+        has: testPage.getByRole("switch", { name: "Use the repository version of @phone-house" }),
+      })
+      .tap();
+    await expect(keepMine).toHaveAttribute("aria-checked", "false");
     const removed = waitForHttp(testPage, "DELETE", CONFIG_PATH);
     await dialog.getByTestId("prompt-sync-removal-confirm").tap();
     expect((await removed).ok()).toBe(true);

@@ -58,6 +58,7 @@ Each layer is shippable on its own:
 | 7 | [Task 09: Local overrides](task-09-local-overrides.md) | 07, 08 |
 | 8 | [Task 10: Override switch](task-10-override-switch.md) | 09 |
 | 9 | [Task 11: Name conflicts, lossless switching, and agent guidance](task-11-conflicts-and-agents.md) | 10 |
+| 10 | [Task 12: Instant switch, compact review, and two-version removal](task-12-compact-review.md) | 11 |
 
 Tasks 01 and 02 touch separate packages and can run in parallel, as can 03
 and 04. Waves mark parallel-safe candidates only; they do not authorize
@@ -109,15 +110,12 @@ are illustrative; use the existing shadcn primitives and localized copy.
 | | Run the default reviewer after the PR opens.                      | |
 | +------------------------------------------------------------------+ |
 | | @principles [Overridden]          ( o) Local override  [edit][del]| |
-| |   Use the repository version? Your local version is kept and      | |
-| |   comes back if you turn Local override on again.                 | |
-| |                              [Cancel] [Use repository version]    | |
 | | My local principles ...                                           | |
 | +------------------------------------------------------------------+ |
 | | @house-rules [Overridden] [Conflict] ( o) Local override [edit][del]|
 | +------------------------------------------------------------------+ |
-  The switch is always the first trailing control, so it never moves; the
-  turn-off confirmation opens below the row header (a sheet on phones).
+  The switch is always the first trailing control, so it never moves. Both
+  directions apply at once; a toast names the version now in use.
   Status card adds: "Overridden locally: @principles" below warnings.
   [Overridden] and [Conflict] tooltips name the repository file.
 ```
@@ -128,28 +126,32 @@ are illustrative; use the existing shadcn primitives and localized copy.
 +---------------------------------------------------+
 | Review name conflicts                          [x]|
 | The repository has prompts with the same names... |
-| 1 prompt needs a choice.                          |
+| 2 prompts need a choice.                          |
+| Local: your version stays in use as an override.  |
+| Repository: the repository version is used; yours |
+|   is kept.                                        |
 | +-----------------------------------------------+ |
-| | @house-rules     .kandev/prompts/house-rules.md| |
-| | (o) Keep local          ( ) Use repository    | |
-| |     stays in use as an      version; yours is | |
-| |     override                kept               | |
-| | [v Compare versions]                          | |
+| | @house-rules       Local (o ) Repository  [v] | |
+| | .kandev/prompts/house-rules.md                | |
+| |-----------------------------------------------| |
+| | @late-rule         Local (o ) Repository  [v] | |
 | +-----------------------------------------------+ |
 | [Back]                          [Save and sync]   |
 +---------------------------------------------------+
 
-Settings > Prompts, after a later sync found a conflict:
-| [!] 1 prompt shares its name with a file in the prompt  [Review] |
-|     repository. The repository version is not used until ...     |
+Settings > Prompts, after a later sync found a conflict (first on the page,
+amber):
+| [!] 2 prompt conflicts                        [Review conflicts] |
+|     @house-rules, @late-rule share their names with files in the |
+|     prompt repository. The repository versions are not used ...  |
   The Prompts settings row, the sidebar Settings button, and the phone
   navigation Settings row show an amber dot until it is resolved. Review
   opens the same list with [Cancel] [Apply choices]. On phones the two
   choices stack and each is at least 44px tall.
 
-Remove sync, when synced prompts keep a local version:
-  "Choose which versions to keep" lists them with ( ) Keep repository
-  version (default) and ( ) Restore my version, then [Back] [Remove].
+Remove sync, when prompts have both versions (synced with a kept local
+version, or overrides): "Choose which versions to keep" uses the same compact
+rows, each starting on the version in use, then [Back] [Remove].
 ```
 
 ### UI-02: Settings > Prompts, not configured (desktop)

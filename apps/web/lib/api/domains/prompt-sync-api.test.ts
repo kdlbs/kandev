@@ -105,18 +105,20 @@ describe("prompt sync removal api", () => {
     global.fetch = originalFetch;
   });
 
-  it("lists kept local versions and sends the prompts to restore with removal", async () => {
+  it("lists prompts with two versions and sends the version choices with removal", async () => {
     const spy = vi
       .fn()
       .mockImplementation(async () => mockResponse({ prompts: [], deleted: true }));
     global.fetch = spy as unknown as typeof fetch;
     await getPromptSyncKeptVersions();
-    await deletePromptSyncConfig(["house-rules"]);
+    await deletePromptSyncConfig({ "house-rules": "local" });
     await deletePromptSyncConfig();
     const calls = spy.mock.calls as [string, RequestInit][];
     expect(calls[0]![0]).toContain("/api/v1/prompt-sync/kept-versions");
     expect(calls[1]![1].method).toBe("DELETE");
-    expect(JSON.parse(calls[1]![1].body as string)).toEqual({ restore_local: ["house-rules"] });
+    expect(JSON.parse(calls[1]![1].body as string)).toEqual({
+      choices: { "house-rules": "local" },
+    });
     expect(calls[2]![1].body).toBeUndefined();
   });
 });

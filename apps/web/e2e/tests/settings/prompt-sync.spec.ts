@@ -117,11 +117,6 @@ test.describe("Prompt Sync", () => {
       /^\/api\/v1\/prompt-sync\/prompts\/[^/]+\/revert$/,
     );
     await toggle.click();
-    const confirmation = hook.getByTestId("prompt-revert-confirmation");
-    await confirmation.getByRole("button", { name: "Cancel" }).click();
-    await expect(hook.getByTestId("prompt-override-badge")).toBeVisible();
-    await toggle.click();
-    await hook.getByTestId("prompt-revert-confirm").click();
     expect((await reverted).ok()).toBe(true);
     await expect(hook.getByTestId("prompt-synced-badge")).toBeVisible();
     await expect(hook).toContainText("rev 2");

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
@@ -163,10 +163,10 @@ describe("prompt overrides", () => {
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     expect(within(row).queryByTestId("prompt-override-button")).toBeNull();
     fireEvent.click(toggle);
-    expect(mocks.override).toHaveBeenCalledWith("s1");
+    expect(mocks.override).toHaveBeenCalledWith("s1", "hook");
   });
 
-  it("asks before turning an override off, and keeps it when cancelled", async () => {
+  it("turns an override off at once, without a confirmation", () => {
     mocks.prompts = [
       { ...existingPrompt, id: "o1", name: "hook", source: "override", source_path: "p/hook.md" },
     ];
@@ -175,21 +175,11 @@ describe("prompt overrides", () => {
     expect(within(row).getByTestId("prompt-override-badge")).toBeTruthy();
     expect(within(row).getByTestId(promptEditButtonTestId)).toBeTruthy();
     expect(within(row).getByTestId(promptDeleteButtonTestId)).toBeTruthy();
-    expect(within(row).queryByTestId("prompt-revert-button")).toBeNull();
     const toggle = within(row).getByTestId(switchTestId);
     expect(toggle.getAttribute("aria-checked")).toBe("true");
-
     fireEvent.click(toggle);
-    expect(mocks.revert).not.toHaveBeenCalled();
-    const confirmation = within(row).getByTestId("prompt-revert-confirmation");
-    expect(confirmation.textContent).toContain("repository version");
-    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
-    expect(mocks.revert).not.toHaveBeenCalled();
+    expect(mocks.revert).toHaveBeenCalledWith("o1", "hook");
     expect(within(row).queryByTestId("prompt-revert-confirmation")).toBeNull();
-
-    fireEvent.click(toggle);
-    fireEvent.click(within(row).getByTestId("prompt-revert-confirm"));
-    await waitFor(() => expect(mocks.revert).toHaveBeenCalledWith("o1"));
   });
 
   // @covers AC-INTEGRATIONS-PROMPT-SYNC-007.1
@@ -206,14 +196,6 @@ describe("prompt overrides", () => {
         "prompt-override-switch-label",
       );
     }
-    const overrideRow = rows.find((row) => row.getAttribute(promptNameAttribute) === "local")!;
-    fireEvent.click(within(overrideRow).getByTestId(switchTestId));
-    const trailing = within(overrideRow).getByTestId("prompt-row-trailing");
-    const confirmation = within(overrideRow).getByTestId("prompt-revert-confirmation");
-    expect(trailing.contains(confirmation)).toBe(false);
-    expect(trailing.firstElementChild?.getAttribute("data-testid")).toBe(
-      "prompt-override-switch-label",
-    );
   });
 
   // @covers AC-INTEGRATIONS-PROMPT-SYNC-008.5

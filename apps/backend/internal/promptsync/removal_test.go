@@ -13,49 +13,71 @@ import (
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 )
 
-// keptVersionFixture leaves two synced prompts with kept local versions and
-// one ordinary synced prompt.
-func keptVersionFixture(t *testing.T) *syncFixture {
+// twoVersionFixture leaves prompts that have both versions in each way they
+// can get there, plus an ordinary synced prompt and an unedited override:
+//   - taken: a manual prompt where the user chose the repository version;
+//   - kept: a manual prompt where the user kept the local version;
+//   - edited: a synced prompt the user overrode and then edited.
+func twoVersionFixture(t *testing.T) *syncFixture {
 	t.Helper()
 	f := newSyncFixture(t)
 	ctx := context.Background()
-	for _, name := range []string{"restore-me", "keep-repo"} {
+	for _, name := range []string{"taken", "kept"} {
 		_, err := f.prompts.CreatePrompt(ctx, name, "Local "+name)
 		require.NoError(t, err)
 		f.gitlab.files[name+".md"] = "Repo " + name
 	}
-	f.gitlab.files["plain.md"] = "Repo plain"
+	for _, name := range []string{"edited", "plain", "untouched"} {
+		f.gitlab.files[name+".md"] = "Repo " + name
+	}
 	_, err := f.svc.SyncWithResolutions(ctx, map[string]promptservice.ConflictChoice{
-		"restore-me": promptservice.ChoiceRepository, "keep-repo": promptservice.ChoiceRepository,
+		"taken": promptservice.ChoiceRepository, "kept": promptservice.ChoiceLocal,
 	})
+	require.NoError(t, err)
+	for _, name := range []string{"edited", "untouched"} {
+		_, err = f.prompts.OverrideSyncedPrompt(ctx, f.prompt(t, name).ID)
+		require.NoError(t, err)
+	}
+	local := "Local edited"
+	_, err = f.prompts.UpdatePrompt(ctx, f.prompt(t, "edited").ID, nil, &local)
 	require.NoError(t, err)
 	return f
 }
 
-func TestKeptVersionsListsSyncedPromptsWithLocalVersions(t *testing.T) {
-	f := keptVersionFixture(t)
-	kept, err := f.svc.KeptVersions(context.Background())
+func TestTwoVersionPromptsListsEveryPromptWithDifferentVersions(t *testing.T) {
+	f := twoVersionFixture(t)
+	listed, err := f.svc.TwoVersionPrompts(context.Background())
 	require.NoError(t, err)
-	require.Len(t, kept, 2)
+	byName := map[string]Conflict{}
+	for _, item := range listed {
+		byName[item.Name] = item
+	}
+	assert.Len(t, listed, 3, "plain and the unedited override have one version")
 	assert.Equal(t, Conflict{
-		Name: "keep-repo", Path: DefaultPath + "/keep-repo.md",
-		LocalContent: "Local keep-repo", RepositoryContent: "Repo keep-repo",
-	}, kept[0])
-	assert.Equal(t, "restore-me", kept[1].Name)
+		Name: "edited", Path: DefaultPath + "/edited.md", LocalContent: "Local edited",
+		RepositoryContent: "Repo edited", InUse: promptservice.ChoiceLocal,
+	}, byName["edited"])
+	assert.Equal(t, promptservice.ChoiceLocal, byName["kept"].InUse)
+	assert.Equal(t, "Local taken", byName["taken"].LocalContent)
+	assert.Equal(t, promptservice.ChoiceRepository, byName["taken"].InUse)
 }
 
-func TestDeleteConfigRestoresChosenLocalVersions(t *testing.T) {
-	f := keptVersionFixture(t)
-	require.NoError(t, f.svc.DeleteConfig(context.Background(), "restore-me"))
-	restored := f.prompt(t, "restore-me")
-	assert.Equal(t, promptmodels.PromptSourceManual, restored.Source)
-	assert.Equal(t, "Local restore-me", restored.Content)
-	assert.Equal(t, "Repo keep-repo", f.prompt(t, "keep-repo").Content)
-	assert.Equal(t, "Repo plain", f.prompt(t, "plain").Content)
+func TestDeleteConfigAppliesVersionChoices(t *testing.T) {
+	f := twoVersionFixture(t)
+	require.NoError(t, f.svc.DeleteConfig(context.Background(), map[string]promptservice.ConflictChoice{
+		"taken": promptservice.ChoiceLocal, "edited": promptservice.ChoiceRepository, "kept": promptservice.ChoiceLocal,
+	}))
+	for name, want := range map[string]string{
+		"taken": "Local taken", "edited": "Repo edited", "kept": "Local kept", "plain": "Repo plain",
+	} {
+		prompt := f.prompt(t, name)
+		assert.Equal(t, promptmodels.PromptSourceManual, prompt.Source, name)
+		assert.Equal(t, want, prompt.Content, name)
+	}
 }
 
-func TestHandlersListKeptVersionsAndRemoveWithRestore(t *testing.T) {
-	f := keptVersionFixture(t)
+func TestHandlersListTwoVersionPromptsAndRemoveWithChoices(t *testing.T) {
+	f := twoVersionFixture(t)
 	router := newTestRouter(t, f.svc, admin)
 
 	listed := doRequest(router, http.MethodGet, "/api/v1/prompt-sync/kept-versions", "")
@@ -64,10 +86,13 @@ func TestHandlersListKeptVersionsAndRemoveWithRestore(t *testing.T) {
 		Prompts []Conflict `json:"prompts"`
 	}
 	require.NoError(t, json.Unmarshal(listed.Body.Bytes(), &body))
-	assert.Len(t, body.Prompts, 2)
+	assert.Len(t, body.Prompts, 3)
 
-	removed := doRequest(router, http.MethodDelete, "/api/v1/prompt-sync/config", `{"restore_local":["restore-me"]}`)
+	invalid := doRequest(router, http.MethodDelete, "/api/v1/prompt-sync/config", `{"choices":{"taken":"both"}}`)
+	assert.Equal(t, http.StatusBadRequest, invalid.Code)
+
+	removed := doRequest(router, http.MethodDelete, "/api/v1/prompt-sync/config", `{"choices":{"edited":"repository"}}`)
 	require.Equal(t, http.StatusOK, removed.Code, removed.Body.String())
-	assert.Equal(t, "Local restore-me", f.prompt(t, "restore-me").Content)
-	assert.Equal(t, "Repo keep-repo", f.prompt(t, "keep-repo").Content)
+	assert.Equal(t, "Repo edited", f.prompt(t, "edited").Content)
+	assert.Equal(t, "Repo taken", f.prompt(t, "taken").Content, "without a choice the version in use stays")
 }

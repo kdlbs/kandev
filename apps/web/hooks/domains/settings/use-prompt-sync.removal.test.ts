@@ -5,7 +5,7 @@ import type { PromptSyncConfig, PromptSyncConflict } from "@/lib/types/prompt-sy
 const mocks = vi.hoisted(() => ({
   get: vi.fn<() => Promise<PromptSyncConfig | null>>(),
   kept: vi.fn<() => Promise<unknown>>(),
-  del: vi.fn<(restore?: string[]) => Promise<unknown>>(),
+  del: vi.fn<(choices?: Record<string, string>) => Promise<unknown>>(),
   toast: vi.fn(),
 }));
 
@@ -16,7 +16,7 @@ vi.mock("@/hooks/domains/github/use-github-status", () => ({
 vi.mock("@/lib/api/domains/prompt-sync-api", () => ({
   getPromptSyncConfig: () => mocks.get(),
   getPromptSyncKeptVersions: () => mocks.kept(),
-  deletePromptSyncConfig: (restore?: string[]) => mocks.del(restore),
+  deletePromptSyncConfig: (choices?: Record<string, string>) => mocks.del(choices),
   setPromptSyncConfig: vi.fn(),
   checkPromptSync: vi.fn(),
   runPromptSync: vi.fn(),
@@ -35,11 +35,12 @@ const config = {
   last_ok: true,
 } as PromptSyncConfig;
 
-const kept = (name: string): PromptSyncConflict => ({
+const kept = (name: string, inUse: "local" | "repository" = "repository"): PromptSyncConflict => ({
   name,
   path: `.kandev/prompts/${name}.md`,
   local_content: "Mine",
   repository_content: "Repo",
+  in_use: inUse,
 });
 
 async function renderConfigured() {
@@ -55,8 +56,8 @@ describe("usePromptSync removal review", () => {
     mocks.del.mockResolvedValue({ deleted: true });
   });
 
-  it("opens a review defaulting to the repository version when prompts keep local versions", async () => {
-    mocks.kept.mockResolvedValue({ prompts: [kept("house-rules"), kept("notes")] });
+  it("opens a review starting on the version each prompt uses now", async () => {
+    mocks.kept.mockResolvedValue({ prompts: [kept("house-rules"), kept("notes", "local")] });
     const { result } = await renderConfigured();
     let opened = "";
     await act(async () => {
@@ -65,16 +66,16 @@ describe("usePromptSync removal review", () => {
     expect(opened).toBe("review");
     expect(result.current.removal.choices).toEqual({
       "house-rules": "repository",
-      notes: "repository",
+      notes: "local",
     });
 
-    act(() => result.current.removal.setChoice("notes", "local"));
+    act(() => result.current.removal.setChoice("house-rules", "local"));
     let removed = false;
     await act(async () => {
       removed = await result.current.handleDelete();
     });
     expect(removed).toBe(true);
-    expect(mocks.del).toHaveBeenCalledWith(["notes"]);
+    expect(mocks.del).toHaveBeenCalledWith({ "house-rules": "local", notes: "local" });
     expect(result.current.removal.active).toBe(false);
     expect(result.current.config).toBeNull();
   });
@@ -91,7 +92,7 @@ describe("usePromptSync removal review", () => {
     await act(async () => {
       await result.current.handleDelete();
     });
-    expect(mocks.del).toHaveBeenCalledWith([]);
+    expect(mocks.del).toHaveBeenCalledWith({});
   });
 
   it("removes nothing when the kept versions cannot be read", async () => {

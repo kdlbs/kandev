@@ -1,8 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
-import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -13,32 +13,48 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { PromptConflictReviewList } from "@/components/settings/prompt-conflict-review";
-import type { PromptConflictResolver } from "@/hooks/domains/settings/use-prompt-conflict-resolver";
+import { useAppStore } from "@/components/state-provider";
+import {
+  usePromptConflictResolver,
+  type PromptConflictResolver,
+} from "@/hooks/domains/settings/use-prompt-conflict-resolver";
 
-type BannerProps = { count: number; busy: boolean; onReview: () => void };
+type BannerProps = { names: string[]; busy: boolean; onReview: () => void };
 
-// PromptConflictBanner keeps unresolved conflicts visible on Settings > Prompts
-// until the user chooses a version for each.
-export function PromptConflictBanner({ count, busy, onReview }: BannerProps) {
+// PromptConflictBanner keeps unresolved conflicts in view at the top of
+// Settings > Prompts until the user chooses a version for each.
+export function PromptConflictBanner({ names, busy, onReview }: BannerProps) {
   const { t } = useTranslation();
+  const count = names.length;
   return (
-    <Alert data-testid="prompt-conflict-banner" className="flex flex-wrap items-center gap-3">
-      <IconAlertTriangle className="h-4 w-4 text-amber-500" aria-hidden />
-      <AlertDescription className="min-w-0 flex-1">
-        {t("settings:promptConflictBanner", { count })}
-      </AlertDescription>
+    <div
+      role="alert"
+      className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/60 bg-amber-500/10 p-4"
+      data-testid="prompt-conflict-banner"
+    >
+      <IconAlertTriangle className="h-5 w-5 shrink-0 text-amber-500" aria-hidden />
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="text-sm font-semibold text-foreground">
+          {t("settings:promptConflictBannerTitle", { count })}
+        </div>
+        <div className="text-sm text-muted-foreground">
+          {t("settings:promptConflictBanner", {
+            count,
+            names: names.map((name) => `@${name}`).join(", "),
+          })}
+        </div>
+      </div>
       <Button
         type="button"
         size="sm"
-        variant="outline"
         onClick={onReview}
         disabled={busy}
-        className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        className="cursor-pointer max-md:min-h-11 max-md:w-full [@media(pointer:coarse)]:min-h-11"
         data-testid="prompt-conflict-banner-review"
       >
         {t("settings:promptConflictReview")}
       </Button>
-    </Alert>
+    </div>
   );
 }
 
@@ -95,5 +111,28 @@ export function PromptConflictReviewDialog({ open, onOpenChange, resolver }: Dia
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// PromptConflictNotice shows the conflict banner at the top of Settings >
+// Prompts while any override is conflicted, and resolves conflicts in the
+// review dialog. The Prompt Sync card refreshes its own status.
+export function PromptConflictNotice() {
+  const prompts = useAppStore((state) => state.prompts.items);
+  const names = prompts
+    .filter((prompt) => prompt.source === "override" && prompt.conflict)
+    .map((prompt) => prompt.name);
+  const resolver = usePromptConflictResolver();
+  const [open, setOpen] = useState(false);
+  const startReview = async () => {
+    if (await resolver.load()) setOpen(true);
+  };
+  return (
+    <>
+      {names.length > 0 && (
+        <PromptConflictBanner names={names} busy={resolver.busy} onReview={startReview} />
+      )}
+      <PromptConflictReviewDialog open={open} onOpenChange={setOpen} resolver={resolver} />
+    </>
   );
 }

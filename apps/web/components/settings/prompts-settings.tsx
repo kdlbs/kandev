@@ -10,10 +10,10 @@ import { SyncedPromptListItem } from "@/components/settings/prompt-synced-view";
 import {
   PromptOverrideSwitch,
   PromptRowBadges,
-  PromptRevertConfirmation,
   usePromptOverrideSwitch,
 } from "@/components/settings/prompt-override-controls";
 import { PromptSyncSection } from "@/components/settings/prompt-sync-section";
+import { PromptConflictNotice } from "@/components/settings/prompt-conflict-review-dialog";
 import {
   filterSavedPrompts,
   PromptCreateButton,
@@ -220,7 +220,6 @@ function PromptListItem({
           />
         </div>
       </div>
-      {overridden && <PromptRevertConfirmation state={overrideSwitch} />}
       <PromptDeleteConfirmation
         promptId={prompt.id}
         promptName={prompt.name}
@@ -524,6 +523,17 @@ export function getPromptDraftMeta(
   };
 }
 
+function PromptMentionHelp() {
+  return (
+    <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
+      <Trans i18nKey="settings:promptMentionHelp" values={{ token: PROMPT_MENTION_TOKEN }}>
+        Use <span className="font-medium text-foreground">{PROMPT_MENTION_TOKEN}</span> in the chat
+        input to insert a prompt’s content. Prompts are matched by name and expanded in place.
+      </Trans>
+    </div>
+  );
+}
+
 export function PromptsSettings() {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -573,13 +583,8 @@ export function PromptsSettings() {
       onDiscard={resetForm}
     >
       <div className="space-y-6">
-        <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
-          <Trans i18nKey="settings:promptMentionHelp" values={{ token: PROMPT_MENTION_TOKEN }}>
-            Use <span className="font-medium text-foreground">{PROMPT_MENTION_TOKEN}</span> in the
-            chat input to insert a prompt’s content. Prompts are matched by name and expanded in
-            place.
-          </Trans>
-        </div>
+        <PromptConflictNotice />
+        <PromptMentionHelp />
         <PromptSyncSection />
         <SettingsGroup
           title={t("settings:promptsCustomHeading")}

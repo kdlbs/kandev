@@ -28,10 +28,9 @@ describe("usePromptConflictResolver", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("loads the saved configuration's conflicts and applies the choices with a sync", async () => {
-    const onConfig = vi.fn();
     mocks.check.mockResolvedValue({ conflicts: [conflict("a"), conflict("b")] });
     mocks.run.mockResolvedValue({ config, result: { conflicts: [] } });
-    const { result } = renderHook(() => usePromptConflictResolver(onConfig));
+    const { result } = renderHook(() => usePromptConflictResolver());
 
     let opened = false;
     await act(async () => {
@@ -47,14 +46,13 @@ describe("usePromptConflictResolver", () => {
     });
     expect(done).toBe(true);
     expect(mocks.run).toHaveBeenCalledWith({ a: "local", b: "repository" });
-    expect(onConfig).toHaveBeenCalledWith(config);
     expect(result.current.review.active).toBe(false);
   });
 
   it("stays open with the error when the sync fails", async () => {
     mocks.check.mockResolvedValue({ conflicts: [conflict("a")] });
     mocks.run.mockResolvedValue({ config, error: "Prompt sync failed" });
-    const { result } = renderHook(() => usePromptConflictResolver(vi.fn()));
+    const { result } = renderHook(() => usePromptConflictResolver());
     await act(async () => {
       await result.current.load();
     });
@@ -69,7 +67,7 @@ describe("usePromptConflictResolver", () => {
 
   it("reports a failed check and opens nothing", async () => {
     mocks.check.mockRejectedValue(new Error("boom"));
-    const { result } = renderHook(() => usePromptConflictResolver(vi.fn()));
+    const { result } = renderHook(() => usePromptConflictResolver());
     let opened = true;
     await act(async () => {
       opened = await result.current.load();

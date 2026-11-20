@@ -115,6 +115,10 @@ func (s *Service) ApplySyncedPrompts(ctx context.Context, input SyncApplyInput) 
 func (s *Service) applySyncedFile(
 	ctx context.Context, file SyncedPromptFile, current *models.Prompt, choice ConflictChoice, result *SyncApplyResult,
 ) error {
+	if current != nil && current.Content == file.Content && (!current.IsOverride() || current.Conflict) {
+		// Identical text leaves nothing to choose between.
+		choice = ChoiceRepository
+	}
 	switch {
 	case current == nil:
 		return s.createSyncedFile(ctx, file, result)
@@ -180,6 +184,9 @@ func (s *Service) applyToOverride(
 	case current.Conflict:
 		result.Conflicts = append(result.Conflicts, file.Name)
 	}
+	if _, err := s.repo.SetOverrideRepositoryContent(ctx, current.ID, file.Content); err != nil {
+		return err
+	}
 	result.Overridden = append(result.Overridden, file.Name)
 	return nil
 }
@@ -201,7 +208,7 @@ func (s *Service) adoptClashingPrompt(
 		return nil
 	}
 	conflict := choice != ChoiceLocal
-	adopted, err := s.repo.AdoptPromptAsOverride(ctx, current.ID, file.Path, conflict)
+	adopted, err := s.repo.AdoptPromptAsOverride(ctx, current.ID, file.Path, file.Content, conflict)
 	if err != nil || !adopted {
 		return err
 	}
@@ -260,16 +267,16 @@ func (s *Service) removeVanishedSyncedPrompts(
 }
 
 // settleVanishedPrompt handles a prompt whose file left the source, and
-// reports whether it stays without the reference check: a conflicted
-// override loses its conflict, and a synced prompt with a kept local version
-// or a built-in prompt becomes manual instead of being deleted.
+// reports whether it stays without the reference check: an override loses
+// its conflict and repository version, and a synced prompt with a kept local
+// version or a built-in prompt becomes manual instead of being deleted.
 func (s *Service) settleVanishedPrompt(ctx context.Context, prompt *models.Prompt, result *SyncApplyResult) (bool, error) {
 	switch {
-	case prompt.IsOverride() && prompt.Conflict:
-		cleared, err := s.repo.ClearOverrideConflict(ctx, prompt.ID)
-		result.wrote = result.wrote || cleared
+	case prompt.IsOverride():
+		detached, err := s.repo.DetachOverride(ctx, prompt.ID)
+		result.wrote = result.wrote || detached
 		return true, err
-	case prompt.IsSynced() && (prompt.LocalContent != "" || prompt.Builtin):
+	case prompt.IsSynced() && (prompt.AlternateContent != "" || prompt.Builtin):
 		restored, err := s.repo.RestoreSyncedPrompt(ctx, prompt.ID)
 		if err == nil && restored {
 			result.Restored = append(result.Restored, prompt.Name)

@@ -65,18 +65,20 @@ A shared repository can ship a default prompt at a chosen point, for example a `
 
 1. On the synced prompt in **Settings → Prompts**, turn on the **Local override** switch. The prompt keeps its name and content but becomes an editable, deletable local copy with an **Overridden** badge.
 2. Edit it like any prompt. Syncs leave it alone and list it under **Overridden locally** on the status card instead of warning.
-3. To go back to the shared default, turn the switch off and confirm **Use repository version**. Kandev returns the prompt to sync and runs a sync, so the repository text is used. Your local version is kept: turning the switch on again brings it back. Deleting the override instead drops your version, and the next sync recreates the synced prompt.
+3. To go back to the shared default, turn the switch off. Kandev returns the prompt to sync and uses the repository text straight away. Your local version is kept: turning the switch on again brings it back. Deleting the override instead drops your version, and the next sync recreates the synced prompt.
 
-The switch is always the first control on the right of the row, so it stays in the same place whether the prompt is synced or overridden. Removing Prompt Sync turns overrides into normal prompts.
+The switch applies at once in both directions, because neither version is ever lost; a short message names the version now in use. It is always the first control on the right of the row, so it stays in the same place whether the prompt is synced or overridden. Kandev keeps the latest repository text for every override, so both versions are always available. Removing Prompt Sync turns overrides into normal prompts.
 
 ## Name conflicts
 
 A name conflict is a repository file whose name matches a prompt you created in Kandev or a built-in prompt. Built-in prompts are treated the same way as your own.
 
-- **When you save the configuration**, Kandev lists the conflicts before saving anything. For each prompt, choose **Keep local** (the default) or **Use repository version**; **Compare versions** shows both texts. **Back** returns to the fields; closing the dialog saves nothing. **Save and sync** applies your choices:
-  - **Keep local** makes your prompt a local override of the file. Your text stays in use.
-  - **Use repository version** makes it a synced prompt with the repository text. Your text is kept, and turning on **Local override** brings it back.
-- **When a later sync finds a new conflict** (for example, someone adds a matching file), your prompt becomes an override marked **Conflict** and keeps your text. It stays flagged until you choose: the row shows a **Conflict** badge, **Settings → Prompts** shows a banner with **Review**, and the Prompts settings entry, the sidebar **Settings** button, and the phone menu's **Settings** row show an amber dot. **Review** opens the same choices; **Apply choices** runs a sync with them. Turning the row's **Local override** switch off also resolves the conflict in favour of the repository version.
+A prompt whose text is identical to its file is not a conflict: Kandev adopts it as a synced prompt without asking.
+
+- **When you save the configuration**, Kandev lists the conflicts before saving anything. The list explains the two versions once, then shows one row per prompt with a **Local | Repository** switch (Local is the default) and a button that shows both texts. **Back** returns to the fields; closing the dialog saves nothing. **Save and sync** applies your choices:
+  - **Local** makes your prompt a local override of the file. Your text stays in use.
+  - **Repository** makes it a synced prompt with the repository text. Your text is kept, and turning on **Local override** brings it back.
+- **When a later sync finds a new conflict** (for example, someone adds a matching file), your prompt becomes an override marked **Conflict** and keeps your text. It stays flagged until you choose: the row shows a **Conflict** badge, an amber banner at the top of **Settings → Prompts** names the prompts and offers **Review conflicts**, and the Prompts settings entry, the sidebar **Settings** button, and the phone menu's **Settings** row show an amber dot. **Review conflicts** opens the same list; **Apply choices** runs a sync with them. Turning the row's **Local override** switch off also resolves the conflict in favour of the repository version.
 - If the conflicting file is removed from the repository, the conflict is cleared and your override stays.
 - If a synced prompt whose local version Kandev kept is removed from the repository, it becomes a normal prompt with your local text again. Sync never deletes a built-in prompt.
 
@@ -108,7 +110,7 @@ Error messages never include tokens or provider response bodies.
 
 Select **Configure → Remove sync**. Kandev first turns every synced prompt and override into a normal, editable prompt, keeping its name and current content, and then removes the configuration. If that fails, the configuration stays so you can retry.
 
-If some synced prompts still keep your own version (because you chose the repository version for them), **Remove sync** first lists those prompts. Choose **Keep repository version** (the default) or **Restore my version** for each; **Compare versions** shows both, and **Back** cancels. Only the version you choose is kept. Without such prompts, Remove sync asks for a single confirmation.
+If any prompt has both your version and a different repository version (a synced prompt where you chose the repository version, or an override, however it got there), **Remove sync** first lists those prompts in the same compact list. Each row starts on the version the prompt uses now; flip a switch to keep the other one. **Back** cancels. Only the version you choose is kept. Without such prompts, Remove sync asks for a single confirmation.
 
 Changing the provider, credential workspace, repository, branch, or directory keeps existing synced prompts. The next sync reconciles them against the new source.
 
@@ -124,8 +126,8 @@ Reading the configuration and status follows saved-prompt read access. Saving, r
 | `GET` | `/api/v1/prompt-sync/config` | `200` with the configuration and status, or `204` when not configured. |
 | `POST` | `/api/v1/prompt-sync/check` | List the name conflicts a source would cause, without saving anything. Send the configuration as the body, or no body to check the saved one. `422` with `error` if the repository cannot be read. |
 | `POST` | `/api/v1/prompt-sync/config` | Validate, save, and run one sync. Optional `resolutions` maps prompt names to `local` or `repository`. Returns `config` plus `result` or `error`. |
-| `GET` | `/api/v1/prompt-sync/kept-versions` | Synced prompts that keep your own version, with both texts. |
-| `DELETE` | `/api/v1/prompt-sync/config` | Release synced prompts, then delete. Optional `{"restore_local": ["name"]}` restores your version of those prompts. Returns `{"deleted":true}`. |
+| `GET` | `/api/v1/prompt-sync/kept-versions` | Prompts with both a local and a different repository version, with both texts and the version in use (`in_use`). |
+| `DELETE` | `/api/v1/prompt-sync/config` | Release synced prompts, then delete. Optional `{"choices": {"name": "local"}}` picks the version each listed prompt keeps; others keep the version in use. Returns `{"deleted":true}`. |
 | `POST` | `/api/v1/prompt-sync/sync` | Run now, with optional `{"resolutions": {...}}`. Returns `config` plus `result` or `error`; `404` when not configured. |
 | `POST` | `/api/v1/prompt-sync/prompts/{id}/override` | Turn a synced prompt into a local override. `409` if the prompt is not synced. |
 | `POST` | `/api/v1/prompt-sync/prompts/{id}/revert` | Return an override to sync, keeping its text as the local version, and run a sync. `409` if the prompt is not an override. |
@@ -143,7 +145,7 @@ A completed sync returns HTTP `200` even when the response contains `error`; ins
 
 ## Troubleshooting
 
-- **A prompt shows a Conflict badge:** a repository file has the same name. Select **Review** on the banner and choose a version.
+- **A prompt shows a Conflict badge:** a repository file has the same name. Select **Review conflicts** on the banner and choose a version.
 - **A removed prompt is still listed:** a workflow or another saved prompt still references it. The warning gives the number of referrers; remove the references and sync again.
 - **Suspended after deleting a workspace:** choose another credential workspace and save.
 - **Edits revert:** synced prompts are repository-owned. Change the file instead.

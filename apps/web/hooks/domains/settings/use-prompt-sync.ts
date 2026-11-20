@@ -317,11 +317,11 @@ function useSaveHandler(
   }, [draft, latest, reset, setConfig, toast, fence, review, setSaving]);
 }
 
-// useRemoval owns Remove sync. startRemoval lists synced prompts that keep a
-// local version: with any, it opens a review defaulting to the repository
-// version ("review"); with none, the plain confirmation applies ("confirm");
-// a failed read removes nothing ("failed"). handleDelete restores the local
-// version of every prompt the user chose it for.
+// useRemoval owns Remove sync. startRemoval lists prompts that have both a
+// local and a repository version: with any, it opens a review starting on the
+// version each uses now ("review"); with none, the plain confirmation applies
+// ("confirm"); a failed read removes nothing ("failed"). handleDelete sends
+// the chosen version for each listed prompt.
 function useRemoval(
   reset: (cfg: PromptSyncConfig | null) => void,
   setConfig: (cfg: PromptSyncConfig | null) => void,
@@ -347,10 +347,7 @@ function useRemoval(
   const handleDelete = useCallback(async () => {
     fence.begin();
     try {
-      const restore = Object.entries(removal.choices)
-        .filter(([, choice]) => choice === "local")
-        .map(([name]) => name);
-      await deletePromptSyncConfig(restore);
+      await deletePromptSyncConfig(removal.choices);
       close();
       setConfig(null);
       reset(null);
@@ -444,7 +441,6 @@ export function usePromptSync(defaultWorkspaceId: string) {
     backToFields: closeReview,
     removal,
     startRemoval,
-    acceptConfig: setConfig,
     handleSave,
     handleDelete,
     handleSyncNow,

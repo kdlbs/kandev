@@ -14,6 +14,7 @@ export function usePromptOverride() {
   const run = useCallback(
     async (
       promptId: string,
+      name: string,
       action: (id: string) => Promise<unknown>,
       doneKey: string,
       failedKey: string,
@@ -21,7 +22,7 @@ export function usePromptOverride() {
       setPendingId(promptId);
       try {
         await action(promptId);
-        toast({ description: t(doneKey), variant: "success" });
+        toast({ description: t(doneKey, { name }), variant: "success" });
         return true;
       } catch (err) {
         toast({ description: t(failedKey, { error: String(err) }), variant: "error" });
@@ -34,14 +35,21 @@ export function usePromptOverride() {
   );
 
   const override = useCallback(
-    (promptId: string) =>
-      run(promptId, overridePrompt, "settings:promptOverrideDone", "settings:promptOverrideFailed"),
+    (promptId: string, name: string) =>
+      run(
+        promptId,
+        name,
+        overridePrompt,
+        "settings:promptOverrideDone",
+        "settings:promptOverrideFailed",
+      ),
     [run],
   );
   const revert = useCallback(
-    (promptId: string) =>
+    (promptId: string, name: string) =>
       run(
         promptId,
+        name,
         revertPromptOverride,
         "settings:promptRevertDone",
         "settings:promptRevertFailed",

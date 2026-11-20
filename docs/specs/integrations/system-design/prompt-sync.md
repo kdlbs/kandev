@@ -132,7 +132,7 @@ delete guards check `source <> 'sync'` instead of `source = 'manual'`.
   deletes an override because only synced rows are candidates. Overrides
   count as survivors for the reference closure.
 - `ReleaseSyncedPrompts` releases `sync` and `override` rows to `manual`,
-  keeping current content and clearing `local_content` and `conflict`.
+  keeping current content and clearing `alternate_content` and `conflict`.
 
 ### Name conflicts
 
@@ -146,9 +146,9 @@ sync never deletes them.
 
   | Existing prompt | Choice | Result |
   | --- | --- | --- |
-  | manual or built-in | none | `AdoptPromptAsOverride(conflict=true)`; reported in `Conflicts` and `Overridden` |
-  | manual or built-in | local | `AdoptPromptAsOverride(conflict=false)` |
-  | manual or built-in | repository | `AdoptPromptAsSynced`: file content, old content kept in `local_content` |
+  | manual or built-in | none | `AdoptPromptAsOverride(conflict=true)` with the file as repository version; reported in `Conflicts` and `Overridden` |
+  | manual or built-in | local | `AdoptPromptAsOverride(conflict=false)` with the file as repository version |
+  | manual or built-in | repository | `AdoptPromptAsSynced`: file content, old content kept in `alternate_content` |
   | conflicted override | none | unchanged; reported in `Conflicts` |
   | conflicted override | local | `ClearOverrideConflict` |
   | conflicted override | repository | `RevertOverride`, then `UpdateSyncedPrompt` with the file |
@@ -164,35 +164,49 @@ sync never deletes them.
   with the saved configuration. `SyncWithResolutions` runs Sync now with
   choices; plain `Sync` passes none. Resolutions are validated
   (`local` or `repository`) and never stored.
-- When a conflicted override's file leaves the source, the vanished-file pass
-  clears its conflict and keeps it (AC-INTEGRATIONS-PROMPT-SYNC-008.7).
+- Identical text is no conflict (AC-INTEGRATIONS-PROMPT-SYNC-008.8): when a
+  manual, built-in, or conflicted override prompt has the file's content,
+  `applySyncedFile` treats the choice as `ChoiceRepository`, and
+  `findConflicts` skips it.
+- When an override's file leaves the source, the vanished-file pass calls
+  `DetachOverride`, which clears its conflict and repository version and
+  keeps it (AC-INTEGRATIONS-PROMPT-SYNC-008.7).
 - `SyncResult` adds `conflicts` and `restored`. A run that leaves a conflict
   is not `unchanged`.
 
 ### Lossless switching
 
-`custom_prompts.local_content` holds the local version while the repository
-version is in use. Empty means no kept copy; prompt content is never empty
-after trimming, so the empty string is unambiguous.
+`custom_prompts.alternate_content` holds the version a prompt does not use
+now: the kept local version of a synced prompt, or the repository version of
+an override. Empty means none; prompt content is never empty after trimming,
+so the empty string is unambiguous.
 
-- `RevertOverride` and `AdoptPromptAsSynced` copy `content` into
-  `local_content` in the same statement (`SET local_content = content,
-  content = ?` reads the pre-update row on SQLite and PostgreSQL).
-- `OverrideSyncedPrompt` sets `content` to `local_content` when it is not
-  empty, then clears it.
-- `UpdateSyncedPrompt` leaves `local_content` alone.
+- `OverrideSyncedPrompt` and `RevertOverride` swap the two versions in one
+  statement: `content = COALESCE(NULLIF(alternate_content, ''), content),
+  alternate_content = content` (SET reads the pre-update row on SQLite and
+  PostgreSQL). A first override starts from the synced content and keeps it
+  as the repository version; reverting an override uses its stored
+  repository version at once and keeps the local content.
+  `AdoptPromptAsSynced` keeps the old content; `AdoptPromptAsOverride`
+  stores the file's content.
+- `UpdateSyncedPrompt` leaves `alternate_content` alone. For every override
+  whose file is present, `ApplySyncedPrompts` calls
+  `SetOverrideRepositoryContent`, which writes only when the version changed
+  (AC-INTEGRATIONS-PROMPT-SYNC-009.3).
 - In the vanished-file pass, a synced prompt with a kept copy, or a built-in
   prompt, goes through `RestoreSyncedPrompt` (back to `manual`, kept copy
   restored) instead of the reference check and `DeleteSyncedPrompt`. It is
   reported in `Restored`. `DeleteSyncedPrompt` also guards `builtin = ?` with
   `0`.
-- Removal (AC-INTEGRATIONS-PROMPT-SYNC-009.5): `GET
-  /api/v1/prompt-sync/kept-versions` returns `{prompts: [Conflict]}` for
-  synced prompts with a kept copy (repository content is the current
-  content). `DELETE /config` accepts `{"restore_local": [names]}`, passed
-  through `DeleteConfig(ctx, restoreLocal...)` to
-  `ReleaseSyncedPrompts(ctx, restoreLocal...)`, which sets `content =
-  local_content` for those synced rows and releases everything in one
+- Removal (AC-INTEGRATIONS-PROMPT-SYNC-009.5): `TwoVersionPrompts` lists every
+  synced prompt or override whose `alternate_content` is set and differs from
+  `content`, as `Conflict` entries with `in_use` (`repository` for synced,
+  `local` for overrides). `GET /api/v1/prompt-sync/kept-versions` returns
+  them as `{prompts}`. `DELETE /config` accepts `{"choices": {name:
+  local|repository}}`; `DeleteConfig` validates the choices, names the
+  prompts whose choice differs from the version in use, and passes them to
+  `ReleaseSyncedPrompts(ctx, useOther...)`, which sets `content =
+  alternate_content` for those rows and releases everything in one
   transaction.
 
 ### Agent access
@@ -257,8 +271,8 @@ caller.
 | `GET` | `/api/v1/prompt-sync/config` | `200` config + status, or `204` |
 | `POST` | `/api/v1/prompt-sync/check` | Read a candidate source (request body) or the stored one (empty body) and return `{conflicts, warnings}`. Writes nothing. `422` with a sanitized `error` when the source cannot be read. |
 | `POST` | `/api/v1/prompt-sync/config` | Validate, upsert, then run one sync with the body's `resolutions`. Returns `{config, result}` or `{config, error}`. |
-| `GET` | `/api/v1/prompt-sync/kept-versions` | Synced prompts that keep a local version: `{prompts: [{name, path, local_content, repository_content}]}`. |
-| `DELETE` | `/api/v1/prompt-sync/config` | Release synced prompts (optional `{"restore_local": [names]}` restores those kept versions), then delete. Returns `{"deleted":true}`. |
+| `GET` | `/api/v1/prompt-sync/kept-versions` | Synced prompts and overrides with two different versions: `{prompts: [{name, path, local_content, repository_content, in_use}]}`. |
+| `DELETE` | `/api/v1/prompt-sync/config` | Release synced prompts (optional `{"choices": {name: "local"\|"repository"}}` picks the version each keeps), then delete. Returns `{"deleted":true}`; `400` for an unknown choice. |
 | `POST` | `/api/v1/prompt-sync/sync` | Run now, with optional `{"resolutions": {...}}`. Returns `{config, result}` or `{config, error}`. `404` when not configured; `400` for an unknown choice. |
 
 `result` uses the Workflow Sync shape: `created`, `updated`, `deleted`,
@@ -384,7 +398,7 @@ list, the `unchanged` flag, and the stored status match the current output
   creates cannot both pass the 2,000-prompt limit. SQLite's single writer
   already serializes the statement.
 - `custom_prompts` gains `source TEXT NOT NULL DEFAULT 'manual'`,
-  `source_path TEXT NOT NULL DEFAULT ''`, `local_content TEXT NOT NULL
+  `source_path TEXT NOT NULL DEFAULT ''`, `alternate_content TEXT NOT NULL
   DEFAULT ''`, and `conflict INTEGER NOT NULL DEFAULT 0`. These are idempotent `ADD COLUMN`
   migrations in the prompt store's `initSchema`, run after `CREATE TABLE`,
   on SQLite and PostgreSQL. Existing rows become `manual`, so upgrades keep
@@ -431,35 +445,40 @@ list, the `unchanged` flag, and the stored status match the current output
   **Configure** and **Sync now**. `prompt-sync-dialog.tsx`
   holds a workspace select (credential workspace) plus the shared fields, and
   **Save** and **Remove sync** with inline or mobile confirmation.
-- `prompt-override-controls.tsx` splits the "Local override" control into
-  `usePromptOverrideSwitch` (state), `PromptOverrideSwitch` (the labelled
-  switch, 44px label hit area on phones and coarse pointers), and
-  `PromptRevertConfirmation`. Both synced and override rows render the switch
-  as the first child of a `prompt-row-trailing` group, before View or edit and
-  delete, and render the confirmation below the row header, so the switch
-  never moves. Turning it on calls Override directly. Turning it off opens
-  `MobileActionConfirmation` (inline `InlineConfirmActions` fallback on
-  desktop) and calls Revert only on confirmation. Overrides render as the
-  normal editable row plus `PromptOverrideBadge` and, while conflicted,
-  `PromptConflictBadge`. The status card lists overridden prompt names,
-  derived from the prompt list, separately from warnings.
+- `prompt-override-controls.tsx` provides `usePromptOverrideSwitch` (state)
+  and `PromptOverrideSwitch` (the labelled switch, 44px label hit area on
+  phones and coarse pointers). Both synced and override rows render the
+  switch as the first child of a `prompt-row-trailing` group, before View or
+  edit and delete, so it never moves. Both directions call Override or Revert
+  at once; `usePromptOverride` toasts which version of `@name` is now in use.
+  Overrides render as the normal editable row plus `PromptOverrideBadge` and,
+  while conflicted, `PromptConflictBadge`. The status card lists overridden
+  prompt names, derived from the prompt list, separately from warnings.
+- `PromptConflictReviewList` (`prompt-conflict-review.tsx`) explains the
+  local and repository versions once in a legend, then renders one compact
+  row per prompt: name and path, a `Local | switch | Repository` control
+  (switch on is the repository version, accessible name "Use the repository
+  version of @name"), and an icon button that shows both versions below the
+  row. The copy differs for conflicts and removal.
 - Save in `prompt-sync-dialog.tsx` runs `usePromptSync.handleSave`: a
   `checkPromptSync(payload)` first; conflicts open `usePromptConflictReview`
-  and the dialog swaps its fields for `PromptConflictReviewList` (Keep local
-  by default, Compare versions, Back). Saving from the review step posts the
-  choices as `resolutions`. When the save's sync reports conflicts the check
-  did not list, the hook checks the stored configuration and reopens the
-  review instead of closing.
+  (each row starting on local) and the dialog swaps its fields for the review
+  list with **Back**. Saving from the review step posts the choices as
+  `resolutions`. When the save's sync reports conflicts the check did not
+  list, the hook checks the stored configuration and reopens the review
+  instead of closing.
 - **Remove sync** first calls `usePromptSync.startRemoval`, which reads the
-  kept versions. With any, the dialog shows a removal step: the same review
-  list with removal copy (Keep repository version first and default, Restore
-  my version), **Back**, and a destructive **Remove**; `handleDelete` sends
-  the prompts set to Restore as `restore_local`. With none, the existing
-  inline or mobile confirmation opens.
-- `PromptSyncSection` shows `PromptConflictBanner` while any override is
-  conflicted; **Review** uses `usePromptConflictResolver` (check the stored
-  configuration, then Sync now with the choices) in
-  `PromptConflictReviewDialog`.
+  prompts with two versions. With any, the dialog shows a removal step: the
+  review list with removal copy, each row starting on its `in_use` version,
+  **Back**, and a destructive **Remove**; `handleDelete` sends every row's
+  choice as `choices`. With none, the existing inline or mobile confirmation
+  opens.
+- `PromptConflictNotice` renders first on Settings > Prompts, above the help
+  text: an amber `role="alert"` banner with a count title, the conflicting
+  prompt names, and a primary **Review conflicts** button, which opens
+  `PromptConflictReviewDialog` through `usePromptConflictResolver` (check the
+  stored configuration, then Sync now with the choices). The Prompt Sync card
+  refreshes its own status.
 - `PromptConflictIndicator` (count from `usePromptConflictCount`, which loads
   the prompt list) marks the Prompts row of the settings menu, the sidebar
   Settings button, and the Settings row of phone navigation.

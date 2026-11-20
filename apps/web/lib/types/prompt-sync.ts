@@ -36,6 +36,8 @@ export interface PromptSyncConflict {
   path: string;
   local_content: string;
   repository_content: string;
+  /** The version the prompt uses now, for prompts that keep both. */
+  in_use?: PromptConflictChoice;
 }
 
 export interface PromptSyncCheckResponse {

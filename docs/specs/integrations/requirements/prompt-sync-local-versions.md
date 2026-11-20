@@ -28,8 +28,9 @@ prompt.
   same name; sync leaves its content alone.
 - **Conflict:** a valid prompt file whose name a manual prompt, a built-in
   prompt, or a still-conflicted override already uses.
-- **Kept local version:** the local content stored with a prompt while the
-  repository version is in use.
+- **Other version:** the version a prompt does not use now, stored with it:
+  the kept local version of a synced prompt, or the repository version of an
+  override.
 
 ## Requirements
 
@@ -50,18 +51,17 @@ version without forking the repository.
   desktop and phone, visually distinct from the edit and delete controls; on
   phones and coarse pointers its hit area shall be touch-sized. The switch
   shall stay in the same place in every row state: it is the first of the
-  row's trailing controls, and the turn-off confirmation appears below the row
-  header without moving it. Turning it on shall turn the prompt into an
-  override with the same name and identity, starting from its kept local
-  content (AC-INTEGRATIONS-PROMPT-SYNC-009.2) or else its current content,
-  editable and deletable like a manual prompt by operators and agents.
+  row's trailing controls. Both directions shall apply at once, without a
+  confirmation, and a short notice shall name the version now in use.
+  Turning it on shall turn the prompt into an override with the same name and
+  identity, starting from its kept local content
+  (AC-INTEGRATIONS-PROMPT-SYNC-009.2) or else its current content, editable
+  and deletable like a manual prompt by operators and agents.
 - **AC-INTEGRATIONS-PROMPT-SYNC-007.2:** An override shall show an
   "Overridden" badge naming the repository file it replaces, with the switch
-  on. Turning the switch off shall first ask the user to confirm using the
-  repository version, saying the local version is kept; cancelling shall keep
-  the override unchanged. Confirming shall return the prompt to sync ownership,
-  keep its local content under AC-INTEGRATIONS-PROMPT-SYNC-009.1, and run a
-  sync, so the repository version becomes the prompt's content.
+  on. Turning the switch off shall return the prompt to sync ownership, keep
+  its local content under AC-INTEGRATIONS-PROMPT-SYNC-009.1, use the
+  repository version, and run a sync.
 - **AC-INTEGRATIONS-PROMPT-SYNC-007.3:** A sync shall leave an override's
   content and ownership unchanged when its file is present, report its name as
   overridden rather than as a warning, and leave it in place when its file is
@@ -95,11 +95,13 @@ knowing.
   and repository content. A failed check shall keep the dialog open, save
   nothing, and show the sanitized error.
 - **AC-INTEGRATIONS-PROMPT-SYNC-008.2:** When the check finds conflicts, the
-  dialog shall show a review step before saving, on desktop and phone. Each
-  conflict shall offer **Keep local** (the default) and **Use repository
-  version**, and both versions shall be viewable; on phones and coarse
-  pointers the choices shall be touch-sized. **Back** shall return to the
-  fields with the draft intact. Closing the dialog shall save nothing.
+  dialog shall show a review step before saving, on desktop and phone. It
+  shall explain once what the local and repository versions mean, then list
+  one short row per prompt: its name and file path, a labelled switch between
+  the local version (the default) and the repository version, and a control
+  that shows both versions. On phones and coarse pointers the switch and
+  control shall be touch-sized. **Back** shall return to the fields with the
+  draft intact. Closing the dialog shall save nothing.
 - **AC-INTEGRATIONS-PROMPT-SYNC-008.3:** Saving from the review step shall
   store the configuration and run a sync that applies each choice. **Keep
   local** shall make the prompt an override of that file with no conflict.
@@ -115,18 +117,25 @@ knowing.
   content, and report the name as a conflict in the sync result, not as a
   warning. Built-in prompts shall be handled exactly like manual prompts.
 - **AC-INTEGRATIONS-PROMPT-SYNC-008.5:** An unresolved conflict shall stay
-  visible until it is resolved: a "Conflict" badge on its row; a banner on
-  Settings > Prompts whose **Review** action opens the same review step; an
-  indicator on the Prompts entry of the settings menu; and an indicator on the
-  Settings entry of the app sidebar, on desktop and in phone navigation.
+  visible until it is resolved: a "Conflict" badge on its row; a
+  warning-styled banner at the top of Settings > Prompts with a title giving
+  the number of conflicts, the conflicting prompt names, and a primary
+  **Review conflicts** action that opens the same review list; an indicator
+  on the Prompts entry of the settings menu; and an indicator on the Settings
+  entry of the app sidebar, on desktop and in phone navigation.
 - **AC-INTEGRATIONS-PROMPT-SYNC-008.6:** Resolving a conflict with **Keep
   local** shall clear the conflict and keep the override. **Use repository
   version**, or turning the row's Local override switch off and confirming,
   shall resolve it like AC-INTEGRATIONS-PROMPT-SYNC-007.2. Resolution shall
   require configuration-management authority.
-- **AC-INTEGRATIONS-PROMPT-SYNC-008.7:** When the file of an override with an
-  unresolved conflict leaves the source, the conflict shall be cleared and
+- **AC-INTEGRATIONS-PROMPT-SYNC-008.7:** When the file of an override leaves
+  the source, its conflict and stored repository version shall be cleared and
   the override kept.
+- **AC-INTEGRATIONS-PROMPT-SYNC-008.8:** A prompt file whose content equals
+  the existing prompt's content is not a conflict. The check shall not list
+  it, and the sync shall adopt a manual or built-in prompt as a synced prompt
+  without asking. A conflicted override whose file now matches its content
+  shall become a synced prompt.
 
 ### REQ-INTEGRATIONS-PROMPT-SYNC-009: Lossless switching
 
@@ -139,28 +148,32 @@ version after trying the repository version, without retyping it.
 #### Acceptance criteria
 
 - **AC-INTEGRATIONS-PROMPT-SYNC-009.1:** Returning an override to sync
-  ownership (turning the switch off, or **Use repository version**) shall
-  keep its local content with the prompt.
+  ownership (turning the switch off, or choosing the repository version)
+  shall keep its local content with the prompt, and use the stored repository
+  version at once when there is one.
 - **AC-INTEGRATIONS-PROMPT-SYNC-009.2:** Turning the Local override switch on
   shall restore the kept local content and then discard the kept copy. With
   no kept copy, the override shall start from the current synced content.
 - **AC-INTEGRATIONS-PROMPT-SYNC-009.3:** Syncs that update a synced prompt
-  shall preserve its kept local content.
+  shall preserve its kept local version. Every override whose file is present
+  shall keep the current repository version, so both versions are known
+  however the prompt became an override.
 - **AC-INTEGRATIONS-PROMPT-SYNC-009.4:** When a synced prompt with kept local
   content leaves the source, the sync shall turn it into a manual prompt with
   the kept local content instead of deleting it. A sync shall never delete a
   built-in prompt; a built-in prompt that leaves the source shall become
   manual again with its kept or current content.
 - **AC-INTEGRATIONS-PROMPT-SYNC-009.5:** Removing the configuration while any
-  synced prompt keeps a local version shall first show a review step listing
-  those prompts, on desktop and phone. Each shall offer **Keep repository
-  version** (the default, the content in use) and **Restore my version**,
-  with both versions viewable and touch-sized choices on phones and coarse
-  pointers. **Back** shall return without removing anything. Confirming shall
-  release every prompt under AC-INTEGRATIONS-PROMPT-SYNC-004.5 with the chosen
-  content in the same step. When no synced prompt keeps a local version,
-  removal shall keep its single confirmation. A failure to list the kept
-  versions shall remove nothing and report the error.
+  synced prompt or override has a local and a repository version that differ,
+  however it got there, shall first show a review step listing every such
+  prompt, on desktop and phone, in the same compact form as
+  AC-INTEGRATIONS-PROMPT-SYNC-008.2. Each row shall start on the version the
+  prompt uses now. **Back** shall return without removing anything.
+  Confirming shall release every prompt under
+  AC-INTEGRATIONS-PROMPT-SYNC-004.5 with the chosen version in the same step.
+  When no prompt has two versions, removal shall keep its single
+  confirmation. A failure to list the prompts shall remove nothing and report
+  the error.
 
 ### REQ-INTEGRATIONS-PROMPT-SYNC-010: Agent access to synced prompts
 

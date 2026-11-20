@@ -821,8 +821,8 @@ func deletePromptSyncForReset(ctx context.Context, database *sql.DB, workspaceID
 	}
 	_, err := database.ExecContext(ctx, `
 		UPDATE custom_prompts
-		SET source = 'manual', source_path = '', conflict = 0, local_content = '',
-			content = CASE WHEN source = 'sync' AND local_content <> '' THEN local_content ELSE content END
+		SET source = 'manual', source_path = '', conflict = 0, alternate_content = '',
+			content = CASE WHEN source = 'sync' AND alternate_content <> '' THEN alternate_content ELSE content END
 		WHERE builtin = ? AND source <> 'manual' AND NOT EXISTS (SELECT 1 FROM prompt_sync_config)`, 1)
 	return err
 }

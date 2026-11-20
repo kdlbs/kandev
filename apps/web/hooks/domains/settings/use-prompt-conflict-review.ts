@@ -12,9 +12,9 @@ type ReviewState = { conflicts: PromptSyncConflict[]; choices: PromptConflictRes
 const EMPTY: ReviewState = { conflicts: [], choices: {} };
 
 // usePromptConflictReview holds the prompts under review and the user's
-// choice for each. Every prompt starts on the given default (by default
-// "local", the choice that changes no content for a conflict); reopening
-// keeps choices already made for the same prompts.
+// choice for each. Every prompt starts on the version it uses now when known,
+// else on the given default ("local", the choice that changes no content for
+// a conflict); reopening keeps choices already made for the same prompts.
 export function usePromptConflictReview() {
   const [state, setState] = useState<ReviewState>(EMPTY);
   const open = useCallback(
@@ -24,7 +24,7 @@ export function usePromptConflictReview() {
         choices: Object.fromEntries(
           conflicts.map((conflict) => [
             conflict.name,
-            current.choices[conflict.name] ?? defaultChoice,
+            current.choices[conflict.name] ?? conflict.in_use ?? defaultChoice,
           ]),
         ),
       })),

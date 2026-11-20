@@ -95,7 +95,7 @@ func TestSaveAndSyncAppliesResolutions(t *testing.T) {
 	take := f.prompt(t, "take")
 	assert.True(t, take.IsSynced())
 	assert.Equal(t, "Repo take", take.Content)
-	assert.Equal(t, "Local take", take.LocalContent)
+	assert.Equal(t, "Local take", take.AlternateContent)
 }
 
 func TestSaveAndSyncKeepsConfigWhenSyncFails(t *testing.T) {
@@ -125,4 +125,15 @@ func TestSyncWithResolutionsResolvesExistingConflict(t *testing.T) {
 func TestNormalizeRejectsUnknownConflictChoice(t *testing.T) {
 	err := gitLabRequest(map[string]promptservice.ConflictChoice{"x": "both"}).Normalize()
 	assert.ErrorIs(t, err, ErrInvalidConfig)
+}
+
+func TestCheckSkipsPromptsIdenticalToTheirFile(t *testing.T) {
+	f := newSyncFixture(t)
+	ctx := context.Background()
+	_, err := f.prompts.CreatePrompt(ctx, "same", "Shared")
+	require.NoError(t, err)
+	f.gitlab.files["same.md"] = "Shared"
+	result, err := f.svc.Check(ctx, gitLabRequest(nil))
+	require.NoError(t, err)
+	assert.Empty(t, result.Conflicts)
 }

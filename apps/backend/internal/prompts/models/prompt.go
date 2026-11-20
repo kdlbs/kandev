@@ -20,9 +20,10 @@ type Prompt struct {
 	Source string
 	// SourcePath is the repository file a synced prompt was applied from.
 	SourcePath string
-	// LocalContent is the local version kept while the repository version is
-	// in use, restored when the prompt is overridden again. Empty means none.
-	LocalContent string
+	// AlternateContent is the version not in use: the kept local version of a
+	// synced prompt, or the repository version of an override. Empty means
+	// none.
+	AlternateContent string
 	// Conflict marks an override adopted from a manual or built-in prompt
 	// whose name a repository file also uses, until the user picks a side.
 	Conflict  bool

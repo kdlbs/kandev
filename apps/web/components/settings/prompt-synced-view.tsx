@@ -6,7 +6,6 @@ import { IconEye, IconEyeOff } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   PromptOverrideSwitch,
-  PromptRevertConfirmation,
   usePromptOverrideSwitch,
 } from "@/components/settings/prompt-override-controls";
 import { PromptSyncedBadge } from "@/components/settings/prompt-synced-badge";
@@ -84,7 +83,6 @@ export function SyncedPromptListItem({ prompt }: { prompt: CustomPrompt }) {
           />
         </div>
       </div>
-      <PromptRevertConfirmation state={overrideSwitch} />
       {viewing ? (
         <PromptSyncedContent prompt={prompt} />
       ) : (

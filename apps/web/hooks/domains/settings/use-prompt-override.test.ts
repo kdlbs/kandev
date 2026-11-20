@@ -24,13 +24,18 @@ describe("usePromptOverride", () => {
     const { result } = renderHook(() => usePromptOverride());
 
     await act(async () => {
-      await result.current.override("p1");
+      await result.current.override("p1", "house-rules");
     });
     expect(mocks.override).toHaveBeenCalledWith("p1");
-    expect(mocks.toast).toHaveBeenLastCalledWith(expect.objectContaining({ variant: "success" }));
+    expect(mocks.toast).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        variant: "success",
+        description: expect.stringContaining("@house-rules"),
+      }),
+    );
 
     await act(async () => {
-      await result.current.revert("p1");
+      await result.current.revert("p1", "house-rules");
     });
     expect(mocks.revert).toHaveBeenCalledWith("p1");
     expect(mocks.toast).toHaveBeenLastCalledWith(expect.objectContaining({ variant: "error" }));

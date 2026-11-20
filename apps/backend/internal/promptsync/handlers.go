@@ -27,7 +27,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	api := router.Group("/api/v1/prompt-sync")
 	manageConfig := authz.RequireOrgScope(authz.ScopeOrgConfigManage)
 	api.GET("/config", ctrl.httpGetConfig)
-	api.GET("/kept-versions", ctrl.httpKeptVersions)
+	api.GET("/kept-versions", ctrl.httpTwoVersionPrompts)
 	api.POST("/config", manageConfig, ctrl.httpSetConfig)
 	api.DELETE("/config", manageConfig, ctrl.httpDeleteConfig)
 	api.POST("/check", manageConfig, ctrl.httpCheck)
@@ -145,9 +145,10 @@ func runResponse(cfg *Config, result *SyncResult, syncErr error) gin.H {
 	return response
 }
 
-// httpKeptVersions lists synced prompts that keep a local version.
-func (c *controller) httpKeptVersions(ctx *gin.Context) {
-	kept, err := c.service.KeptVersions(ctx.Request.Context())
+// httpTwoVersionPrompts lists prompts that have a local and a repository
+// version.
+func (c *controller) httpTwoVersionPrompts(ctx *gin.Context) {
+	kept, err := c.service.TwoVersionPrompts(ctx.Request.Context())
 	if err != nil {
 		c.internalError(ctx, "failed to list kept prompt versions", err)
 		return
@@ -155,10 +156,10 @@ func (c *controller) httpKeptVersions(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"prompts": kept})
 }
 
-// deleteRequest names the synced prompts whose kept local version replaces
-// the repository version when Prompt Sync is removed.
+// deleteRequest picks, by prompt name, which version a prompt with both a
+// local and a repository version keeps when Prompt Sync is removed.
 type deleteRequest struct {
-	RestoreLocal []string `json:"restore_local"`
+	Choices map[string]promptservice.ConflictChoice `json:"choices"`
 }
 
 func (c *controller) httpDeleteConfig(ctx *gin.Context) {
@@ -169,8 +170,10 @@ func (c *controller) httpDeleteConfig(ctx *gin.Context) {
 			return
 		}
 	}
-	err := c.service.DeleteConfig(ctx.Request.Context(), req.RestoreLocal...)
+	err := c.service.DeleteConfig(ctx.Request.Context(), req.Choices)
 	switch {
+	case errors.Is(err, ErrInvalidConfig):
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case workspaceDenied(err):
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
 	case err != nil:
