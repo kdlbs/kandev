@@ -25,7 +25,8 @@ func TestKubernetesCreateInstanceReconnectsExistingPodWithoutParsingCurrentProfi
 	created, err := initial.CreateInstance(context.Background(), validKubernetesCreateRequest())
 	require.NoError(t, err)
 	restarted := newFakeKubernetesExecutor(t, resources, &recordingKubernetesExec{}, map[uint16]uint16{
-		41001: instancePort,
+		uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+		41001:                                    instancePort,
 	})
 	reconnectRequest := kubernetesReconnectRequest(created)
 	reconnectRequest.Metadata[MetadataKeyKubernetesProfilePlatform] = "not-a-platform"

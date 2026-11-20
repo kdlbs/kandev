@@ -1,7 +1,7 @@
 ---
 status: current
 system: agents
-updated: 2026-11-08
+updated: 2026-11-19
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
   - REQ-AGENTS-CODEX-RATE-SIGNATURE-001
@@ -26,7 +26,7 @@ existing exact consumer compatibility.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose), [OpenCode period reset](#opencode-period-reset) |
+| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose), [OpenCode period reset](#opencode-period-reset), [Devin free-model rate limit](#devin-free-model-rate-limit) |
 | `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002` | [Opt-in unmatched diagnostic prefilter](#opt-in-unmatched-diagnostic-prefilter) |
 | `AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7` | [Context-length producer and consumer](#context-length-producer-and-consumer) |
 | `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-003` | [Operator rule catalog](#operator-rule-catalog) |
@@ -342,3 +342,40 @@ admit a new code.
 For a structured HTTP status without a built-in mapping, a configured catalog
 may refine the unknown result only after known built-in signatures have been
 checked. With no matching catalog rule the original unknown result is retained.
+## Devin free-model rate limit
+
+`AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.13` adds
+`devin.stderr.free_model_rate_limit.v1` to the `devin-acp` entry of
+`providerRules` in `routingerr/rules.go`. Before it, `devin-acp` had no
+provider rule, so its free-plan notice fell through to the phase default
+(`agent_runtime_error`, low confidence, no fallback) and dynamic routing kept
+retrying the throttled candidate. The notice wording is:
+
+```text
+Reached free model rate limit. Upgrade to Max for higher limits, or switch to a different model. Your limit will reset in 8 minutes (at 12:01 UTC)
+```
+
+The rule uses `mustRuleOutsideMarkdownFences` with a line-anchored pattern
+and the established optional error labels, so fenced examples and quoted
+prose do not match. It maps to `CodeRateLimited` (`ClassTransient`,
+auto-retryable, fallback allowed) rather than `CodeQuotaLimited`: the window
+reopens within minutes or hours and names its own reset. The text does not
+match the shared `rate limit exceeded/reached` signature, so no other rule
+changes.
+
+`ruleUsesScopedTextReset` includes the rule, so only the matched line can
+supply a reset. When no explicit reset hint exists, `Classify` calls
+`parseResetAtClockHintAt` for this rule and marks `ResetHintInferred`. A
+structured HTTP 429 keeps its `http.429` classification, but the matched Devin
+line can supply an inferred reset when the response has no reset hint. An
+explicit reset hint always takes precedence.
+
+The clock has no date. With a valid relative duration, `resolveResetAtClock`
+estimates the reset time as observation time plus the duration, then compares
+the clock occurrence on that local date and the adjacent calendar dates in the
+stated zone. This handles clocks just before or after midnight and durations
+that reach beyond the next date. The duration is bounded to 24 hours and 59
+minutes. Without a usable duration, `nextDailyResetAt`, the existing
+clock-only rule extracted from the Claude parser, picks the first occurrence
+after observation time. A hint that has just elapsed only lets routing retry
+sooner; it never parks the candidate for a day.

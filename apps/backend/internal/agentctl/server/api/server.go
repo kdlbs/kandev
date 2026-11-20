@@ -35,15 +35,16 @@ import (
 
 // Server is the HTTP API server for a single agent instance.
 type Server struct {
-	cfg              *config.InstanceConfig
-	procMgr          *process.Manager
-	mcpServer        *mcp.Server
-	mcpBackendClient *mcp.ChannelBackendClient
-	logger           *logger.Logger
-	router           *gin.Engine
-	portProxies      *portProxyCache
-	metricsCollector *metrics.Collector
-	lspInstaller     lspInstallerRegistry
+	cfg                           *config.InstanceConfig
+	procMgr                       *process.Manager
+	mcpServer                     *mcp.Server
+	mcpBackendClient              *mcp.ChannelBackendClient
+	logger                        *logger.Logger
+	router                        *gin.Engine
+	portProxies                   *portProxyCache
+	metricsCollector              *metrics.Collector
+	lspInstaller                  lspInstallerRegistry
+	builtinMCPRejectionLogLimiter builtinMCPRejectionLogLimiter
 
 	// credentialSource, when set via SetCredentialSource, authenticates this
 	// instance's requests and streams against the control server's single
@@ -96,6 +97,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	}
 
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
+	s.router.Use(s.rejectUnboundBuiltinMCPRoutes())
 	// Exempt paths from auth:
 	// - /health: liveness probe
 	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
@@ -147,6 +149,9 @@ func (s *Server) setupRoutes() {
 		api.GET("/agent/stream", s.handleAgentStreamWS)
 		api.GET("/agent/session", s.handleAgentSessionAssociation)
 		api.GET("/agent/delivery", s.handleDeliveryStatus)
+		api.GET("/agent/delivery/successors", s.handleDeliverySuccessorStreams)
+		api.POST("/agent/delivery/stream/abandon", s.handleDeliverySuccessorAbandon)
+		api.POST("/agent/delivery/stream/abandon-bootstrap", s.handleFailedBootstrapDeliveryAbandon)
 		api.POST("/agent/submissions", s.handleDeliverySubmission)
 		api.GET("/agent/submissions", s.handleDeliverySubmissions)
 		api.GET("/agent/submissions/:id", s.handleDeliverySubmissionByID)
@@ -184,6 +189,7 @@ func (s *Server) setupRoutes() {
 
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
+		api.GET("/workspace/root-files", s.handleWorkspaceRootFiles)
 		api.GET("/workspace/image-preview", s.handleQuestionImage)
 		api.GET("/workspace/file/content", s.handleFileContent)
 		api.GET("/workspace/file/content-at-ref", s.handleFileContentAtRef)
@@ -284,7 +290,11 @@ func (s *Server) setupRoutes() {
 
 	// MCP routes (if MCP server is configured)
 	if s.mcpServer != nil {
-		s.mcpServer.RegisterRoutes(s.router)
+		nativeRoutes := gin.IRouter(s.router)
+		if s.cfg.NativeMCPRoutePrefix != "" {
+			nativeRoutes = s.router.Group(s.cfg.NativeMCPRoutePrefix)
+		}
+		s.mcpServer.RegisterRoutes(nativeRoutes)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
 		api.PUT("/mcp/builtin-binding", s.handlePrepareBuiltinMCP)
 		api.GET("/mcp/builtin-binding", func(c *gin.Context) { c.JSON(http.StatusOK, s.mcpServer.Profile()) })

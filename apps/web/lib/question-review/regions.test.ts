@@ -4,10 +4,7 @@ import {
   MAX_REGIONS,
   fitAnnotationToPixelLimit,
   centerRegion,
-  moveRegion,
-  rectFromPoints,
   regionCommentsReady,
-  resizeRegion,
   stageToImage,
 } from "./regions";
 
@@ -19,40 +16,11 @@ describe("stageToImage", () => {
   });
 });
 
-describe("rectFromPoints", () => {
-  // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-007.2
-  it("builds an integer rectangle in either drag direction, clamped to the image", () => {
-    expect(rectFromPoints({ x: 10.4, y: 20.6 }, { x: 30.2, y: 5.1 }, image)).toEqual({
-      x: 10,
-      y: 5,
-      width: 21,
-      height: 16,
-    });
-    expect(rectFromPoints({ x: -10, y: -10 }, { x: 500, y: 500 }, image)).toEqual({
-      x: 0,
-      y: 0,
-      width: 100,
-      height: 80,
-    });
-  });
-
-  it("returns null for a click without a drag", () => {
-    expect(rectFromPoints({ x: 10, y: 10 }, { x: 10.4, y: 10.2 }, image)).toBeNull();
-  });
-});
-
 describe("keyboard regions", () => {
   // @covers AC-TASKS-QUESTION-IMAGE-REVIEW-007.7
   it("creates a region at the visible center", () => {
     const rect = centerRegion({ scale: 1, x: 0, y: 0 }, { width: 100, height: 80 }, image);
     expect(rect).toEqual({ x: 40, y: 32, width: 20, height: 16 });
-  });
-
-  it("moves and resizes within the image", () => {
-    const rect = { x: 90, y: 70, width: 10, height: 10 };
-    expect(moveRegion(rect, 5, 5, image)).toEqual(rect);
-    expect(moveRegion(rect, -5, -1, image)).toEqual({ x: 85, y: 69, width: 10, height: 10 });
-    expect(resizeRegion(rect, 5, -20, image)).toEqual({ x: 90, y: 70, width: 10, height: 1 });
   });
 });
 

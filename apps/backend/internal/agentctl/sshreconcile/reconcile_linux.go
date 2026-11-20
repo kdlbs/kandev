@@ -36,6 +36,15 @@ func reconcileProcess(ctx context.Context, receipt sshlaunch.Receipt, mode sshla
 	if receipt.UID != os.Geteuid() {
 		return sshlaunch.Unresolved(sshlaunch.ReasonIdentityConflict, "receipt uid does not match the helper user")
 	}
+	if mode == sshlaunch.ReconcileModeVerify {
+		matches, err := processidentity.BirthBootMatches(receipt.Process)
+		if err != nil {
+			return bootIdentityFailure(err)
+		}
+		if !matches {
+			return sshlaunch.ReconcileResult{Outcome: sshlaunch.OutcomeAbsent}
+		}
+	}
 	handle, failure, ok := openProcessHandle(receipt.Process.PID)
 	if !ok {
 		if failure.Outcome == sshlaunch.OutcomeAbsent {
@@ -82,18 +91,22 @@ func absentOutcome(receipt sshlaunch.Receipt) sshlaunch.ReconcileResult {
 	// path may now belong to a replacement launched after the reboot.
 	matches, err := processidentity.BirthBootMatches(receipt.Process)
 	if err != nil {
-		if errors.Is(err, processidentity.ErrUnverifiableIdentity) {
-			return sshlaunch.Unresolved(sshlaunch.ReasonUnsupportedIdentity,
-				"recorded launch boot identity is unavailable")
-		}
-		return sshlaunch.Unresolved(sshlaunch.ReasonTerminationUnconfirmed,
-			"recorded launch boot identity could not be verified")
+		return bootIdentityFailure(err)
 	}
 	if !matches {
 		return sshlaunch.Unresolved(sshlaunch.ReasonIdentityConflict,
 			"recorded launch belongs to a previous boot")
 	}
 	return settledOutcome(receipt, sshlaunch.OutcomeAbsent)
+}
+
+func bootIdentityFailure(err error) sshlaunch.ReconcileResult {
+	if errors.Is(err, processidentity.ErrUnverifiableIdentity) {
+		return sshlaunch.Unresolved(sshlaunch.ReasonUnsupportedIdentity,
+			"recorded launch boot identity is unavailable")
+	}
+	return sshlaunch.Unresolved(sshlaunch.ReasonTerminationUnconfirmed,
+		"recorded launch boot identity could not be verified")
 }
 
 func settledOutcome(receipt sshlaunch.Receipt, outcome sshlaunch.ReconcileOutcome) sshlaunch.ReconcileResult {

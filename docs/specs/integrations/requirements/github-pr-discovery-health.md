@@ -2,7 +2,7 @@
 status: draft
 system: integrations
 created: 2026-09-11
-updated: 2026-10-28
+updated: 2026-11-16
 owners:
   - kandev
 ---
@@ -48,6 +48,15 @@ Idle discovery and explicit refresh do not override retirement.
   Provider errors shall include a credential-safe category and target identity.
   Successful empty searches shall not produce warnings. Cancellation shall not
   report provider failure. A later success shall not retain a failed final outcome.
+- **AC-INTEGRATIONS-GITHUB-PR-DISCOVERY-001.6:** When a watched repository is a
+  fork and the workspace credential cannot read the fork's parent repository,
+  discovery shall treat the parent as having no visible PR for that branch.
+  It shall not report a discovery failure for that target, and a later PR
+  opened in the fork shall still be discovered. Rate-limit, authentication,
+  and transient parent errors shall keep their existing failure categories.
+  After the cached unreadable-parent result expires, the next eligible
+  discovery attempt shall search a parent that has become readable to the
+  credential. Expiry does not schedule an extra attempt.
 
 ### REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001: Explain discovery failures
 
@@ -78,6 +87,10 @@ Idle discovery and explicit refresh do not override retirement.
   be identified separately from a quota failure. It shall not trigger an
   immediate fallback using the same invalid query or an automatic retry more
   often than once per minute for that discovery target.
+- **AC-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001.8:** Whenever the warning
+  renders, it shall show a retry time only for a valid deadline in the future.
+  Missing, invalid, or expired deadlines shall not remove an unresolved failure
+  or imply recovery. Desktop and phone shall apply the same rule.
 
 ### REQ-INTEGRATIONS-GITHUB-PR-POLLING-001: Adaptive background discovery
 
@@ -106,9 +119,10 @@ Idle discovery and explicit refresh do not override retirement.
   preserve pending work without immediate REST fallback or a provider-failure
   diagnosis. Completed updates shall not consume another fallback opportunity.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.6:** When local admission supplies a
-  retry boundary, automatic PR monitoring shall resume eligible pending work
-  at that boundary without an additional one-minute delay. Resumption shall
-  obey current admission and shall not block an independently eligible workspace.
+  retry boundary, automatic PR monitoring shall resume each pending target at
+  its own boundary without an additional one-minute delay. One target's
+  deferral shall not replace another target's boundary. Resumption shall obey
+  current admission and shall not block an independently eligible workspace.
 - **AC-INTEGRATIONS-GITHUB-PR-POLLING-002.7:** Resumed work shall use current
   workspace authorization and active watch lifetimes. Removed, retired,
   detached, or superseded targets shall not receive delayed writes or events.
@@ -116,7 +130,7 @@ Idle discovery and explicit refresh do not override retirement.
 
 ## Exclusions
 
-No new credentials, automatic PR creation, inferred PR links from chat, changed
+No new credentials, no discovery of parent-repository PRs the workspace credential cannot read, automatic PR creation, inferred PR links from chat, changed
 fork eligibility, unlink behavior, or task/workflow transitions. No promise
 that the quota endpoint explains all provider throttling. Failure history is
 runtime status, not a permanent incident archive.
@@ -128,6 +142,8 @@ runtime status, not a permanent incident archive.
 - [System design](../system-design/github-pr-discovery-health.md)
 - [Implementation package](../../../plans/github-pr-discovery-health/plan.md)
 - [Watch reconciliation repair](../../../plans/github-pr-watch-reconciliation/plan.md)
+- [Discovery deferral repair](../../../plans/github-pr-discovery-deferrals/plan.md)
+- [Unreadable fork parent repair](../../../plans/github-fork-parent-unreadable/plan.md)
 
 ## Polling efficiency package
 

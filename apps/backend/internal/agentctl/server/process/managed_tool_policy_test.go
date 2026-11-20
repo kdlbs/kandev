@@ -60,6 +60,27 @@ func TestManagedToolPolicyAdapter(t *testing.T) {
 	require.Equal(t, "terminal.exec", entries[0].ContextMap()["tool_name"])
 }
 
+func TestManagedToolPolicyUsesScopedNativeEndpoint(t *testing.T) {
+	policy := mcpprofile.ManagedToolPolicy{
+		PluginID: "coordinator.v1", InstallationID: "installation-1", WorkspaceID: "workspace-1",
+		InstanceKey: "lead", ConversationRevision: 3, ApprovalRevision: 2,
+		ManifestDigest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		AgentToolNames: []string{"read_task"},
+	}
+	profile := mcpprofile.New(mcpprofile.SurfaceManagedConversation, nil, nil).WithManagedToolPolicy(policy)
+	cfg, err := (&config.Config{}).NewInstanceConfig(43210, &config.InstanceOverrides{
+		InstanceID: "exec-1", ScopedMCPRoutes: true, McpProfile: &profile,
+	})
+	require.NoError(t, err)
+	m := &Manager{cfg: cfg, logger: newTestLogger(t)}
+	servers, err := m.MCPServersForSession(nil)
+	require.NoError(t, err)
+	require.Equal(t, []types.McpServer{
+		{Name: "kandev", Type: "http", URL: "http://127.0.0.1:43210/i/exec-1/mcp"},
+		{Name: "kandev", Type: "sse", URL: "http://127.0.0.1:43210/i/exec-1/sse"},
+	}, servers)
+}
+
 func TestAdapterMCPServersPreservesAttachmentEvidence(t *testing.T) {
 	origin := types.McpServerOrigin{Scope: "task", WorkspaceID: "workspace-1", OwnerID: "task-1"}
 	m := &Manager{cfg: &config.InstanceConfig{

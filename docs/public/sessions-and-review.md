@@ -245,6 +245,11 @@ the instance stopped, so Kandev keeps that owner protected. Missing native
 conversation or delivery evidence can still block Resume. Kandev does not resend
 an instruction whose outcome is uncertain.
 
+If Kandev can prove that a request failed before it was sent, it records a failed
+submission without creating an uncertain-delivery block. A lost reply does not
+prove non-delivery. Resolve any unknown-outcome recovery notice before sending
+new work; blocked messages do not create another delivery submission.
+
 If delivery is interrupted and the prompt outcome is uncertain, the recovery
 card shows **Retry connection** and **Stop**. Retry connection reconnects the
 original stream and replays committed output from its durable cursor. It does
@@ -367,6 +372,12 @@ appears above the chat composer at 90% disk usage and clears below 85%. Work
 continues while the warning is shown. Open **Details** for measurements, or
 **Storage** for a local session. A remote warning names the executor and does
 not link to local cleanup.
+
+Select **Dismiss** (the × button) to hide the Storage row for this task until
+the browser tab session ends. The dismissal survives reloads and task switching.
+Later storage observations do not show the row again in that tab session.
+Dismissal does not stop monitoring, clear a storage problem, or remove session
+recovery controls.
 
 Capacity and delivery pressure keep separate observation times. A fresh disk
 measurement does not make an old delivery failure current. If no delivery
@@ -606,6 +617,14 @@ and reset desktop tasks and scales them to the available workbench.
 **PR Details** is a reusable Layouts panel whose visibility follows the active task's review association. Without a linked GitHub pull request or GitLab merge request, the tab stays hidden, even when the selected layout includes it. Once a review is linked, Kandev adds PR Details as an inactive tab: beside **Agent** for the built-in Default, or in the group and tab position you configured in the Layouts editor. Closing that tab prevents it from reappearing automatically in the same session. Changing the default applies to task environments without a saved task-specific layout and **Reset Layout**, not a layout already saved for a task. Removing Terminal from the Default layout also prevents Kandev from creating its initial user shell.
 
 Each desktop split's **+** menu lists a linked review only while that exact review panel is missing from the live layout. Select a missing review there to open it in the split whose **+** you used. To move an open review to another split, drag its Dockview tab. Use **Layouts** only to change the default placement for new or reset task layouts.
+
+**Plugin panels in a layout.** **Add panel** in the Layouts editor also lists every task panel from your installed and enabled [plugins](plugins.md), such as Prompt History, by its plugin-provided name. Select a split first to add the panel there; otherwise Kandev uses the active split. A panel that is already in the layout is not listed again, and **Add panel** stays available when plugin panels are the only ones left to add.
+
+- **Preview:** the editor shows a labelled placeholder for a plugin panel and never runs the plugin, so you can arrange it without opening a task.
+- **Save and apply:** a built-in override or custom profile saves the panel's placement, tab order, selected tab, nested splits, and proportions. Fresh tasks and **Reset Layout** open the real plugin panel in that place when the plugin is available.
+- **Availability:** if the plugin is disabled, uninstalled, or still loading, the profile stays editable and keeps the saved placement with its saved title. Its row is absent from **Add panel** while unregistered. Already-open task panels are retained while registration is loading or has failed; definitive removal closes them without automatically reopening them later. Re-enable the plugin and reselect the profile or **Reset Layout** to restore the placement.
+
+Existing task-specific layouts keep their saved panels until you reselect a profile or use **Reset Layout**. Phone settings edit the same desktop profiles; choose a row with a separate tap after opening **Add panel**.
 
 All panels for a task point at the same task environment. In a multi-repository task, check the repository label before editing, committing, or reviewing. A preview also requires the application to listen on a reachable interface and expose a forwarded port.
 

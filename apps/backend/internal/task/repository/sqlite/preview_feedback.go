@@ -74,7 +74,9 @@ func (r *Repository) CreateTaskPreviewFeedback(
 	}
 
 	now := time.Now().UTC()
-	if err := r.claimPreviewScreenshot(ctx, tx, item, ownerID, workspaceID, now); err != nil {
+	if err := r.claimPreviewScreenshot(
+		ctx, tx, item.TaskID, item.ScreenshotAttachmentID, ownerID, workspaceID, now,
+	); err != nil {
 		return nil, err
 	}
 	item.Version = 1
@@ -282,11 +284,11 @@ func previewNullableJSON(value json.RawMessage) interface{} {
 func (r *Repository) claimPreviewScreenshot(
 	ctx context.Context,
 	tx *sqlx.Tx,
-	item *models.TaskPreviewFeedback,
+	taskID, attachmentID string,
 	ownerID, workspaceID string,
 	now time.Time,
 ) error {
-	if item.ScreenshotAttachmentID == "" {
+	if attachmentID == "" {
 		return nil
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -295,7 +297,7 @@ func (r *Repository) claimPreviewScreenshot(
 		WHERE id = ? AND owner_id = ? AND workspace_id = ? AND state = ?
 			AND mime_type = 'image/png' AND kind = 'image' AND delivery_mode = 'prompt'
 			AND size_bytes > 0 AND size_bytes <= ?
-	`), item.TaskID, models.AttachmentStateClaimed, now, item.ScreenshotAttachmentID,
+	`), taskID, models.AttachmentStateClaimed, now, attachmentID,
 		ownerID, workspaceID, models.AttachmentStateStaged, previewfeedback.MaxScreenshotBytes)
 	if err != nil {
 		return fmt.Errorf("claim preview screenshot: %w", err)

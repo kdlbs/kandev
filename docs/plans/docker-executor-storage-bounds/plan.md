@@ -10,6 +10,9 @@ legacy_specs: []
 
 # Docker executor storage bounds delivery plan
 
+This plan records the original delivery in PR #5147. Issue #5240 revises that
+policy in the [opt-in storage limits plan](../docker-executor-storage-opt-in/plan.md).
+
 Implement [REQ-EXECUTORS-STORAGE-001](../../specs/executors/requirements/docker-storage-bounds.md)
 through the shared Docker create boundary described in the
 [system design](../../specs/executors/system-design/docker-storage-bounds.md).

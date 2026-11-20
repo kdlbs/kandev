@@ -18,6 +18,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/ctxmutex"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/task/models"
@@ -45,6 +46,7 @@ var (
 	ErrWorkspaceCredentialUnavailable = errors.New("workspace Git credential is unavailable")
 	ErrRepositoryOwnershipMismatch    = errors.New("managed repository ownership mismatch")
 	ErrManagedCloneOriginMismatch     = errors.New("managed repository origin does not match requested clone URL")
+	errManagedCloneDestinationExists  = errors.New("managed repository path already exists")
 	gitURLUserInfoPattern             = regexp.MustCompile(`(?i)(https?://)[^/\s@]+@`)
 	gitCredentialPattern              = regexp.MustCompile(`(?i)\b(password|token|secret|authorization)(\s*[:=]\s*)[^\r\n]+`)
 )
@@ -127,9 +129,9 @@ func (c *Cloner) SetGitCredentialProvider(provider GitCredentialProvider) {
 	c.credentials = provider
 }
 
-func (c *Cloner) repoMu(path string) *sync.Mutex {
-	mu, _ := c.repoMus.LoadOrStore(path, &sync.Mutex{})
-	return mu.(*sync.Mutex) //nolint:forcetypeassert // LoadOrStore always stores *sync.Mutex
+func (c *Cloner) repoMu(path string) *ctxmutex.Mutex {
+	mu, _ := c.repoMus.LoadOrStore(path, &ctxmutex.Mutex{})
+	return mu.(*ctxmutex.Mutex) //nolint:forcetypeassert // LoadOrStore always stores *ctxmutex.Mutex
 }
 
 // ExpandedBasePath returns the base path with ~ expanded to the user's home directory.
@@ -560,7 +562,9 @@ func (c *Cloner) refreshWorkspaceRepository(
 	ctx context.Context, targetPath, cloneURL string, auth *cloneAuth, prNumber int,
 ) error {
 	mu := c.repoMu(targetPath)
-	mu.Lock()
+	if err := mu.LockContext(ctx); err != nil {
+		return err
+	}
 	defer mu.Unlock()
 	if !gitCheckoutExists(targetPath) {
 		return errors.New("scoped workspace checkout is not a Git repository")
@@ -610,7 +614,9 @@ func (c *Cloner) SetOriginURL(ctx context.Context, repositoryPath, originURL str
 		return errors.New("repository path and origin URL are required")
 	}
 	mu := c.repoMu(repositoryPath)
-	mu.Lock()
+	if err := mu.LockContext(ctx); err != nil {
+		return err
+	}
 	defer mu.Unlock()
 	return c.setOriginURLLocked(ctx, repositoryPath, originURL)
 }
@@ -772,11 +778,62 @@ func (c *Cloner) ensureClonedAtPath(
 	return c.ensureClonedAtPathWithOriginVerification(ctx, cloneURL, targetPath, auth, false)
 }
 
+func inspectCloneDestination(path string) (os.FileInfo, error) {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, errManagedCloneDestinationExists
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) != 0 {
+		return nil, errManagedCloneDestinationExists
+	}
+	current, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !os.SameFile(info, current) {
+		return nil, errManagedCloneDestinationExists
+	}
+	return info, nil
+}
+
+func prepareCloneDestinationForPublication(path string, emptyDestination os.FileInfo) error {
+	current, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if emptyDestination == nil || !os.SameFile(emptyDestination, current) || !current.IsDir() || current.Mode()&os.ModeSymlink != 0 {
+		return errManagedCloneDestinationExists
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	if len(entries) != 0 {
+		return errManagedCloneDestinationExists
+	}
+	return os.Remove(path)
+}
+
 func (c *Cloner) ensureClonedAtPathWithOriginVerification(
 	ctx context.Context, cloneURL, targetPath string, auth *cloneAuth, verifyExistingOrigin bool,
 ) (string, error) {
 	mu := c.repoMu(targetPath)
-	mu.Lock()
+	if err := mu.LockContext(ctx); err != nil {
+		return "", err
+	}
 	defer mu.Unlock()
 
 	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
@@ -792,10 +849,82 @@ func (c *Cloner) ensureClonedAtPathWithOriginVerification(
 		c.fetch(ctx, targetPath, auth)
 		return targetPath, nil
 	}
-	if err := c.clone(ctx, cloneURL, targetPath, auth); err != nil {
+	emptyDestination, err := inspectCloneDestination(targetPath)
+	if err != nil {
+		return "", err
+	}
+	parent := filepath.Dir(targetPath)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", fmt.Errorf("create parent directory: %w", err)
+	}
+	stagingRoot, err := os.MkdirTemp(parent, ".kandev-clone-")
+	if err != nil {
+		if emptyDestination != nil {
+			return c.cloneIntoExistingEmptyDestination(ctx, cloneURL, targetPath, auth, emptyDestination)
+		}
+		return "", fmt.Errorf("create clone staging directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(stagingRoot) }()
+	stagingPath := filepath.Join(stagingRoot, "checkout")
+	if err := c.clone(ctx, cloneURL, stagingPath, auth); err != nil {
 		return targetPath, err
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
+		return "", err
+	}
+	if emptyDestination != nil {
+		if err := os.Chmod(stagingPath, emptyDestination.Mode().Perm()); err != nil {
+			return "", fmt.Errorf("apply destination permissions: %w", err)
+		}
+	}
+	if err := prepareCloneDestinationForPublication(targetPath, emptyDestination); err != nil {
+		return "", err
+	}
+	if err := os.Rename(stagingPath, targetPath); err != nil {
+		return "", fmt.Errorf("publish cloned repository: %w", err)
+	}
 	return targetPath, c.validateManagedAttachmentMutation(ctx, targetPath)
+}
+
+func (c *Cloner) cloneIntoExistingEmptyDestination(
+	ctx context.Context,
+	cloneURL string,
+	targetPath string,
+	auth *cloneAuth,
+	emptyDestination os.FileInfo,
+) (string, error) {
+	current, err := inspectCloneDestination(targetPath)
+	if err != nil {
+		return "", err
+	}
+	if current == nil || !os.SameFile(emptyDestination, current) {
+		return "", errManagedCloneDestinationExists
+	}
+	if err := c.clone(ctx, cloneURL, targetPath, auth); err != nil {
+		return "", errors.Join(err, clearCloneDestination(targetPath))
+	}
+	if err := ctx.Err(); err != nil {
+		return "", errors.Join(err, clearCloneDestination(targetPath))
+	}
+	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
+		return "", err
+	}
+	return targetPath, nil
+}
+
+func clearCloneDestination(path string) error {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	var cleanupErr error
+	for _, entry := range entries {
+		cleanupErr = errors.Join(cleanupErr, os.RemoveAll(filepath.Join(path, entry.Name())))
+	}
+	return cleanupErr
 }
 
 // EnsureClonedWithBasicAuth retains the legacy basic-auth clone path.
@@ -827,7 +956,9 @@ func (c *Cloner) ensureClonedWithBasicAuth(
 	ctx context.Context, targetPath, cloneURL, username, password string,
 ) (string, error) {
 	mu := c.repoMu(targetPath)
-	mu.Lock()
+	if err := mu.LockContext(ctx); err != nil {
+		return "", err
+	}
 	defer mu.Unlock()
 	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
 		return "", err

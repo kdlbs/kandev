@@ -276,13 +276,14 @@ generation through the trusted launch metadata builder. A digest is
 an integrity comparison, not proof of caller authority. The backend must resolve
 it from authenticated execution state rather than trust an agent-supplied digest.
 
-Build package-specific MCP server views from the catalog. Core retains `/mcp`,
+Build package-specific MCP server views from the catalog. Core uses `/mcp`,
 `/sse`, and `/message`. Optional packages use `/mcp/packages/{id}`,
 `/sse/packages/{id}`, and `/message/packages/{id}`. SSE message routing/session IDs
-must stay within the same package; a Core transport session cannot call an
+must stay within the same package; a Core session cannot call an
 optional route. Disabled/unknown package routes have no handler and return a
 neutral unavailable result. Preserve the existing external endpoint unchanged.
-Do not leave an aggregate in-session route that exposes disabled tools.
+Never expose disabled tools through an aggregate route. Scoped routes use
+`/i/{helper-id}`; legacy routes stay bare.
 
 All server views share the execution backend client and lifecycle, but retain
 separate transport sessions and tool registries. A small package host owns atomic

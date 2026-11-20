@@ -442,11 +442,11 @@ func (r *SpritesExecutor) createAgentInstance(
 	ctx context.Context,
 	sprite *sprites.Sprite,
 	req *ExecutorCreateRequest,
-) (int, error) {
+) (*agentctl.CreateInstanceResponse, error) {
 	instanceReq := agentctlInstanceRequest(req, spritesWorkspacePath)
 	reqJSON, err := json.Marshal(instanceReq)
 	if err != nil {
-		return 0, fmt.Errorf("failed to marshal instance request: %w", err)
+		return nil, fmt.Errorf("failed to marshal instance request: %w", err)
 	}
 
 	stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -455,7 +455,7 @@ func (r *SpritesExecutor) createAgentInstance(
 	if err := requireBuiltinRemoteHelper(stepCtx, req, func(ctx context.Context) ([]byte, error) {
 		return sprite.CommandContext(ctx, "curl", "-sf", fmt.Sprintf("http://localhost:%d/identity", r.agentctlPort)).Output()
 	}); err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	cmd := sprite.CommandContext(stepCtx, "sh", "-c",
@@ -464,24 +464,28 @@ func (r *SpritesExecutor) createAgentInstance(
 	cmd.Stdin = bytes.NewReader(reqJSON)
 	out, err := cmd.Output()
 	if err != nil {
-		return 0, fmt.Errorf("failed to create agent instance: %w", err)
+		return nil, fmt.Errorf("failed to create agent instance: %w", err)
 	}
 
 	var resp agentctl.CreateInstanceResponse
 	if err := json.Unmarshal(out, &resp); err != nil {
-		return 0, fmt.Errorf("failed to parse instance response: %w (output: %s)", err, string(out))
+		return nil, fmt.Errorf("failed to parse instance response: %w (output: %s)", err, string(out))
+	}
+	if resp.Port < 1 || resp.Port > 65535 || resp.ID == "" {
+		return nil, fmt.Errorf("agentctl returned an invalid instance response")
 	}
 
 	r.logger.Debug("agent instance created inside sprite",
 		zap.String("instance_id", resp.ID),
 		zap.Int("port", resp.Port))
 
-	return resp.Port, nil
+	return &resp, nil
 }
 
 func agentctlInstanceRequest(req *ExecutorCreateRequest, workspacePath string) agentctl.CreateInstanceRequest {
 	return agentctl.CreateInstanceRequest{
 		ID:                    req.InstanceID,
+		ScopedMCPRoutes:       true,
 		WorkspacePath:         workspacePath,
 		SessionID:             req.SessionID,
 		TaskID:                req.TaskID,
@@ -516,7 +520,7 @@ func agentctlInstanceRequest(req *ExecutorCreateRequest, workspacePath string) a
 
 type spriteReconnectInstanceControl interface {
 	Delete(context.Context, string) error
-	Create(context.Context, *ExecutorCreateRequest) (int, error)
+	Create(context.Context, *ExecutorCreateRequest) (*agentctl.CreateInstanceResponse, error)
 }
 
 type liveSpriteReconnectInstanceControl struct {
@@ -528,7 +532,7 @@ func (c liveSpriteReconnectInstanceControl) Delete(ctx context.Context, instance
 	return c.executor.deleteAgentInstance(ctx, c.sprite, instanceID)
 }
 
-func (c liveSpriteReconnectInstanceControl) Create(ctx context.Context, req *ExecutorCreateRequest) (int, error) {
+func (c liveSpriteReconnectInstanceControl) Create(ctx context.Context, req *ExecutorCreateRequest) (*agentctl.CreateInstanceResponse, error) {
 	return c.executor.createAgentInstance(ctx, c.sprite, req)
 }
 
@@ -537,9 +541,9 @@ func replaceSpriteReconnectInstance(
 	control spriteReconnectInstanceControl,
 	req *ExecutorCreateRequest,
 	instanceID string,
-) (int, error) {
+) (*agentctl.CreateInstanceResponse, error) {
 	if err := control.Delete(ctx, instanceID); err != nil {
-		return 0, err
+		return nil, err
 	}
 	return control.Create(ctx, req)
 }

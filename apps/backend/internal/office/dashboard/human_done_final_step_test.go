@@ -127,6 +127,35 @@ func TestUpdateTaskStatusAsHuman_TerminalStep_KeepsDirectGate(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskStatusAsHuman_DoneAtTiedFinalStep_KeepsDirectGate(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "hd-tied-final", "ws-hd", "HD tied final", "in_progress", 2)
+	if _, err := deps.db.Exec(`
+		INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at)
+		VALUES ('step-hd-tied-peer', 'wf-step-hd-tied-final', 'Another final', 0, datetime('now'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("insert tied final step: %v", err)
+	}
+	mover := &fakeFinalStepMover{result: completedAtDone()}
+	deps.svc.SetTaskFinalStepMover(mover)
+
+	result, err := deps.svc.UpdateTaskStatusAsHuman(context.Background(), dashboard.TaskStatusUpdateRequest{
+		TaskID: "hd-tied-final", NewStatus: "done",
+	})
+	if err != nil {
+		t.Fatalf("UpdateTaskStatusAsHuman: %v", err)
+	}
+	if len(mover.calls) != 0 {
+		t.Fatalf("mover calls = %v, want none for a tied final step", mover.calls)
+	}
+	if result != nil {
+		t.Fatalf("result = %+v, want nil for the direct path", result)
+	}
+	if state := readTaskState(t, deps, "hd-tied-final"); state != "COMPLETED" {
+		t.Errorf("state = %q, want COMPLETED", state)
+	}
+}
+
 func TestUpdateTaskStatusAsHuman_NonDoneStatus_SkipsMover(t *testing.T) {
 	deps := newTestDeps(t)
 	insertTestTaskAtNonTerminalStep(t, deps.db, "hd5", "ws-hd", "HD", "todo", "Work")

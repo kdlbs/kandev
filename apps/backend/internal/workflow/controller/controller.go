@@ -87,6 +87,9 @@ func (c *Controller) ListStepsByWorkflow(ctx context.Context, req ListStepsReque
 	if err != nil {
 		return nil, err
 	}
+	if steps == nil {
+		steps = make([]*models.WorkflowStep, 0)
+	}
 	return &ListStepsResponse{Steps: steps}, nil
 }
 

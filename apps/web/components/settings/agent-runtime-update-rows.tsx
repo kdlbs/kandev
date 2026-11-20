@@ -11,6 +11,7 @@ import type {
   RuntimeUpdateBatchState,
 } from "@/lib/agents/runtime-update-batch";
 import type { RuntimeUpdateManagerRow } from "@/lib/agents/runtime-update-manager";
+import { nativeCheckReasonKey } from "@/lib/agent-runtime-update";
 import { RuntimeGuidanceAction } from "./agent-runtime-policies";
 
 export type RuntimeUpdateBulkProps = {
@@ -119,7 +120,7 @@ function RuntimeRowActions({
 function rowDescription(row: RuntimeUpdateManagerRow): string | null {
   if (row.busy) return "agents:runtimeMaintenanceInProgress";
   if (row.dirtyPolicy) return "agents:runtimePolicyDirtyBlocked";
-  if (row.status.check_state === "unknown") return "agents:runtimeCheckUnknown";
+  if (row.status.check_state === "unknown") return nativeCheckReasonKey(row.status.check_reason);
   if (row.status.check_state === "up_to_date") return "agents:runtimeUpToDate";
   return null;
 }
@@ -183,12 +184,16 @@ function RuntimeOverviewRow({
   const { t } = useTranslation();
   const { status } = row;
   const description = rowDescription(row);
+  // A native check can report the installed version before the runtime does;
+  // it is display-only and never changes effective_version.
+  const installed =
+    status.effective_version ||
+    (status.check_source === "native" ? status.current_version : "") ||
+    t("agents:runtimeUnknown");
   const versions =
     status.check_state === "update_available"
-      ? `${status.effective_version || t("agents:runtimeUnknown")} → ${status.latest_version || t("agents:runtimeUnknown")}`
-      : t("agents:runtimeEffectiveShort", {
-          version: status.effective_version || t("agents:runtimeUnknown"),
-        });
+      ? `${installed} → ${status.latest_version || t("agents:runtimeUnknown")}`
+      : t("agents:runtimeEffectiveShort", { version: installed });
   return (
     <li
       className="flex min-w-0 flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between"
@@ -215,7 +220,17 @@ function RuntimeOverviewRow({
             </span>
             <span className="text-xs text-muted-foreground">{versions}</span>
           </div>
-          {description && <p className="text-xs text-muted-foreground">{t(description)}</p>}
+          {status.update_channel && (
+            <p
+              className="break-words text-xs text-muted-foreground"
+              data-testid={`runtime-update-channel-${status.agent_name}`}
+            >
+              {t("agents:nativeUpdateChannel", { channel: status.update_channel })}
+            </p>
+          )}
+          {description && (
+            <p className="break-words text-xs text-muted-foreground">{t(description)}</p>
+          )}
           {bulkIssue && (
             <p className="break-words text-xs text-amber-600 dark:text-amber-400">{bulkIssue}</p>
           )}

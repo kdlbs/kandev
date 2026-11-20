@@ -18,23 +18,15 @@ vi.mock("@/components/state-provider", () => ({
 const capture = {
   items: [],
   snapshot: { task_id: "task-1", revision: 0, items: [] },
-  mode: null,
-  draft: null,
-  draftComment: "",
-  setDraftComment: vi.fn(),
+  drafts: [],
+  openDraft: null,
+  editingItem: null,
+  regions: [],
+  selectionRect: null,
   candidateLabel: null,
-  captureError: null,
-  isRasterizing: false,
-  isUploading: false,
-  isMutating: false,
-  mutationError: null,
-  startCapture: vi.fn(),
-  cancelCapture: vi.fn(),
-  discardDraft: vi.fn(),
-  saveDraft: vi.fn(),
-  update: vi.fn(),
-  remove: vi.fn(),
-  clear: vi.fn(),
+  acknowledgedMode: null,
+  annotation: { active: false, tool: "region", toggle: vi.fn(), setTool: vi.fn(), exit: vi.fn() },
+  handleEscape: vi.fn(),
   handleIframeLoad: vi.fn(),
 };
 
@@ -85,13 +77,11 @@ describe("BrowserPanel preview feedback", () => {
     expect(screen.getByRole("button", { name: "Annotate (0)" })).toBeTruthy();
   });
 
-  it("allows the annotation popover to extend beyond the panel header", () => {
+  it("toggles annotation mode from the header", () => {
     usePreviewCapture.mockReturnValue(capture);
     render(<BrowserPanel panelId="browser-1" params={{ url: "http://localhost:3000/products" }} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Annotate (0)" }));
-    const actionSlot = screen.getByTestId("preview-feedback-popover").parentElement?.parentElement;
-    expect(actionSlot?.className).toContain("overflow-visible");
-    expect(actionSlot?.className).not.toContain("overflow-hidden");
+    expect(capture.annotation.toggle).toHaveBeenCalled();
   });
 });
