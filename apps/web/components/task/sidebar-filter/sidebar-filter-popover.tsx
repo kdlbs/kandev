@@ -120,15 +120,14 @@ export function SidebarFilterPopover({
     savePending,
     activeView,
     hasDraft,
+    draftOwner: hasDraft ? storedDraft : null,
     canDelete: views.length > 1,
     onSaveOverwrite: saveOverwrite,
     onSaveAs: saveAs,
     onRename: renameView,
     onDiscard: discard,
-    onDelete: () => {
-      if (!activeView) return;
-      deletion.request({ id: activeView.id, label: sidebarViewName(activeView, t) });
-    },
+    onDelete: () =>
+      activeView && deletion.request({ id: activeView.id, label: sidebarViewName(activeView, t) }),
     deleteAnchorRef: deletion.anchorRef,
     deleteDensity: usesInlineDeleteConfirmation ? "touch" : "compact",
     deleteConfirmation: inlineDeleteConfirmation,

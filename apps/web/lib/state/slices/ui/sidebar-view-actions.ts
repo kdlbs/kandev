@@ -34,6 +34,8 @@ import {
   admitSidebarServerSnapshot,
   clearSidebarWriteRollback,
   getSidebarWriteJournal,
+  replayableSidebarMove,
+  recordSidebarWriteFailure,
   snapshotSidebar,
   type SidebarWriteJournal,
   type SidebarWriteKind,
@@ -94,7 +96,7 @@ function enqueueSidebarSettingsSync(
   const send = () => {
     const patch = payload();
     return patch
-      ? (kind === "compaction" || kind === "draft_save"
+      ? (kind === "compaction" || kind === "draft_save" || kind === "selection"
           ? updateUserSettings
           : requestUserSettingsUpdateWithRetry)({
           sidebar_view_state: { workspace_id: workspaceId, ...patch },
@@ -152,6 +154,9 @@ function syncSidebarWrite(
   let succeeded = false;
   const writePayload = () => {
     admitDeferredSidebarState(journal, get);
+    journal.failedViewMutations = journal.failedViewMutations?.filter((failed) =>
+      replayableSidebarMove(journal, failed.move),
+    );
     if (admit && !admit(journal.confirmed!)) return null;
     let rebased = journal.confirmed!;
     if (kind !== "local")
@@ -166,6 +171,7 @@ function syncSidebarWrite(
       desired,
     );
     if (kind === "compaction" && patch.draft_update) patch.draft_update.require_existing = true;
+    if (patch.view_order) patch.view_order_base = journal.confirmed!.views.map((view) => view.id);
     return { ...patch, ...(selection ? { select_plugin_grouping: selection } : {}) };
   };
   const completed = enqueueSidebarSettingsSync(set, get, writePayload, () => desired, kind).then(
@@ -200,11 +206,7 @@ function syncSidebarWrite(
         });
     },
     (err) => {
-      journal.pending--;
-      if (kind === "views") (journal.failedViewMutations ??= []).push({ before, after, move });
-      const rollback = journal.failedRollback ?? before;
-      journal.failedRollback = rollback;
-      journal.failedWriteKind ??= kind;
+      const rollback = recordSidebarWriteFailure(journal, before, after, kind, move);
       set((draft) => {
         draft.sidebarViews.syncError =
           err instanceof Error ? err.message : t("sidebar:failedToSyncSidebarViews");
@@ -255,9 +257,16 @@ function mutateViews(
   return syncSidebarWrite(set, get, snapshot, afterSnapshot, { kind, ...options });
 }
 
-function saveSidebarDraft(set: ImmerSet, get: () => SidebarActionState, name?: string) {
+function saveSidebarDraft(
+  set: ImmerSet,
+  get: () => SidebarActionState,
+  name?: string,
+  owner?: Pick<SidebarViewDraft, "baseViewId" | "group">,
+) {
   const state = get().sidebarViews;
   if (state.syncPending) return Promise.resolve(false);
+  if (owner && (state.draft?.baseViewId !== owner.baseViewId || state.draft.group !== owner.group))
+    return Promise.resolve(false);
   const target = name === undefined ? state.draft?.baseViewId : makeId("view");
   if (!target) return Promise.resolve(false);
   const prepared = prepareSidebarDraftSave(
@@ -474,7 +483,8 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState
         if (idx === -1) keys.push(groupKey);
         else keys.splice(idx, 1);
       }),
-    saveSidebarDraftAs: (name: string) => saveSidebarDraft(set, get, name),
+    saveSidebarDraftAs: (name: string, owner: Pick<SidebarViewDraft, "baseViewId" | "group">) =>
+      saveSidebarDraft(set, get, name, owner),
     saveSidebarDraftOverwrite: () => saveSidebarDraft(set, get),
     duplicateSidebarView: (viewId: string, name: string) =>
       mv((s) => {

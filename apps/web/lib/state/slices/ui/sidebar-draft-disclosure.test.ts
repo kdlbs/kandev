@@ -96,7 +96,8 @@ it.each(["discard", "save as", "overwrite"])(
       collapsedGroups: [MULTI_KEY],
     });
     if (finish === "discard") resumed.getState().discardSidebarDraft();
-    else if (finish === "save as") resumed.getState().saveSidebarDraftAs("Multi copy");
+    else if (finish === "save as")
+      resumed.getState().saveSidebarDraftAs("Multi copy", { baseViewId: base.id, group: MULTI });
     else resumed.getState().saveSidebarDraftOverwrite();
     await resumed.getState().waitForSidebarViewSync("ws");
     current = reload().getState().sidebarViewsByWorkspace.ws;
@@ -126,7 +127,7 @@ it.each([
     if (disclosure) store.getState().toggleSidebarGroupCollapsed(base.id, MULTI_KEY);
     else store.getState().updateSidebarDraft({ sort: { key: "title", direction: "asc" } });
     try {
-      if (copy) store.getState().saveSidebarDraftAs("Copy");
+      if (copy) store.getState().saveSidebarDraftAs("Copy", { baseViewId: base.id, group: MULTI });
       else store.getState().saveSidebarDraftOverwrite();
       expect(store.getState().sidebarViewsByWorkspace.ws.draft).not.toBeNull();
     } finally {
@@ -139,3 +140,25 @@ it.each([
     expect(store.getState().sidebarViewsByWorkspace.ws.syncError).not.toBeNull();
   },
 );
+
+it.each([false, true])("Save as rejects a replaced naming owner: replaced=%s", async (replaced) => {
+  const { reload } = draftWorkspace();
+  const store = reload();
+  store.getState().updateSidebarDraft({ group: MULTI });
+  await store.getState().waitForSidebarViewSync("ws");
+  const owner = { baseViewId: "base", group: MULTI } as const;
+  if (replaced) store.getState().updateSidebarDraft({ group: "state" });
+  else store.getState().toggleSidebarGroupCollapsed("base", MULTI_KEY);
+  await store.getState().waitForSidebarViewSync("ws");
+  await store.getState().saveSidebarDraftAs("Named copy", owner);
+  const persisted = reload().getState().sidebarViewsByWorkspace.ws;
+  if (replaced) {
+    expect(persisted.views.map((view) => view.name)).toEqual(["Tag"]);
+    expect(persisted.draft?.group).toBe("state");
+  } else {
+    expect(persisted.views.find((view) => view.name === "Named copy")?.collapsedGroups).toEqual([
+      MULTI_KEY,
+    ]);
+    expect(persisted.draft).toBeNull();
+  }
+});

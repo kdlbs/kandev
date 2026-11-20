@@ -202,3 +202,24 @@ func TestSidebarWorkspaceCreateReplayAndSuccessorAreIndependent(t *testing.T) {
 	require.Equal(t, "Remote rename", view.Name)
 	require.Equal(t, []string{"kept"}, view.CollapsedGroups)
 }
+
+func TestSidebarWorkspaceReorderRejectsChangedObservedOrder(t *testing.T) {
+	svc, _, _ := sidebarService(t)
+	ctx := context.Background()
+	apply := func(raw string) error {
+		_, err := svc.UpdateUserSettings(ctx, sidebarPatch(t, raw))
+		return err
+	}
+	require.NoError(t, apply(`{"SidebarViewState":{"workspace_id":"a","views_upsert":[{"id":"b","name":"B"},{"id":"c","name":"C"},{"id":"d","name":"D"}]}}`))
+	require.NoError(t, apply(`{"SidebarViewState":{"workspace_id":"a","view_order":["legacy","b","d","c"]}}`))
+	err := apply(`{"SidebarViewState":{"workspace_id":"a","view_order_base":["legacy","b","c","d"],"view_order":["b","legacy","c","d"]}}`)
+	require.ErrorIs(t, err, ErrValidation)
+	reloaded, err := svc.GetUserSettings(ctx)
+	require.NoError(t, err)
+	ids := make([]string, 0, 4)
+	for _, view := range reloaded.SidebarViewsByWorkspace["a"].Views {
+		ids = append(ids, view.ID)
+	}
+	require.Equal(t, []string{"legacy", "b", "d", "c"}, ids)
+	require.NoError(t, apply(`{"SidebarViewState":{"workspace_id":"a","view_order_base":["legacy","b","d","c"],"view_order":["b","legacy","d","c"]}}`))
+}

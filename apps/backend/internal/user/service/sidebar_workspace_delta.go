@@ -22,6 +22,9 @@ func mergeSidebarWorkspaceViews(current []models.SidebarView, patch *models.Side
 	if err := validateSidebarWorkspaceMutations(patch); err != nil {
 		return nil, err
 	}
+	if err := validateSidebarOrderBase(current, patch); err != nil {
+		return nil, err
+	}
 	deleted := make(map[string]bool, len(patch.ViewIDsDelete))
 	for _, id := range patch.ViewIDsDelete {
 		if id == "" || deleted[id] {
@@ -61,7 +64,7 @@ func mergeSidebarWorkspaceViews(current []models.SidebarView, patch *models.Side
 }
 
 func hasSidebarWorkspaceMutations(patch *models.SidebarWorkspacePatch) bool {
-	return patch.ViewsCreate != nil || patch.ViewsUpsert != nil || patch.ViewsUpdate != nil || patch.ViewIDsDelete != nil || patch.ViewOrder != nil
+	return patch.ViewsCreate != nil || patch.ViewsUpsert != nil || patch.ViewsUpdate != nil || patch.ViewIDsDelete != nil || patch.ViewOrder != nil || patch.ViewOrderBase != nil
 }
 
 func applySidebarViewUpdates(
@@ -126,4 +129,19 @@ func applySidebarViewUpserts(
 		byID[view.ID] = *view
 	}
 	return order, nil
+}
+
+func validateSidebarOrderBase(current []models.SidebarView, patch *models.SidebarWorkspacePatch) error {
+	if patch.ViewOrderBase == nil {
+		return nil
+	}
+	if patch.ViewOrder == nil || len(*patch.ViewOrderBase) != len(current) {
+		return errors.New("sidebar_views: order changed; refresh and retry")
+	}
+	for i, id := range *patch.ViewOrderBase {
+		if current[i].ID != id {
+			return errors.New("sidebar_views: order changed; refresh and retry")
+		}
+	}
+	return nil
 }

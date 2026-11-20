@@ -203,7 +203,7 @@ describe("copied sidebar view disclosure", () => {
       if (operation === "save as") {
         store.getState().updateSidebarDraft({ groupIndent: false });
         await store.getState().waitForSidebarViewSync("ws");
-        store.getState().saveSidebarDraftAs("Copy");
+        store.getState().saveSidebarDraftAs("Copy", { baseViewId: source.id, group });
       } else {
         store.getState().duplicateSidebarView(source.id, "Copy");
       }

@@ -66,12 +66,17 @@ is a conflict, not permission to recreate a stale after-image.
 Save and Save as are unavailable while a preceding workspace preference write
 is unacknowledged. A failed prerequisite cannot be followed by a successful
 transfer of older draft data; its failure remains actionable.
+Save as naming captures its base/group owner when the editor opens. Replacing
+that owner dismisses the editor and cannot transfer or clear the replacement
+draft. Same-owner fields and disclosure remain fresh at the CAS transfer.
 
 Client queues preserve captured operation intent across newer HTTP/WebSocket
 snapshots. A skipped metadata-compaction item is not a persistence ACK and
 cannot discard failed predecessor intent needed by a queued successor.
 Disclosure-only compaction has no automatic transport retry: its provider
 admission fence cannot be carried across an unobserved retry interval.
+Provider selection also sends at most one mutation after uncertain transport;
+an identical click is not safe to replay against newly renamed or selected views.
 Compaction captures whether disclosure belongs to a saved row or a draft for a
 different grouping. A draft-owned prune requires that draft to still exist
 inside CAS; it cannot acquire a saved row's owner after another client transfers the draft.
@@ -79,8 +84,12 @@ Explicit final field assignments and disclosure removals survive uncertain
 acknowledgements even when they reverse an earlier edit. An explicit queued
 reorder captures only its moved ID, destination and before/after placement, then
 reapplies that move over the latest admitted order. Disjoint remote moves remain
-intact; missing endpoints and later collection conflicts remain explicit. Disclosure canonicalization
-deduplicates the current committed keys without replacing concurrent additions.
+intact. Retired moves are excluded from successor replay, so a missing endpoint
+cannot poison an unrelated queued edit. A dispatched full-order replacement
+carries `view_order_base`; CAS rejects it if the observed committed order
+changed, preserving a concurrent move rather than silently undoing it.
+Disclosure canonicalization deduplicates current committed keys without
+replacing concurrent additions.
 
 ## Consequences
 

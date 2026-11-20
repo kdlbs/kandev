@@ -735,3 +735,61 @@ and four plugin files to their tested build mirrors. Protected demo 52121,
 59390 and primary instances were untouched. Historical broad backend/web/
 SQLite gates, PostgreSQL without DSN, physical phone and remote CI remain
 non-green or unproven; no release, publication or deployment is authorized.
+
+### Post-rebase round 9 corrections
+
+Round 9 reported four source-derived Host races: retired moves poisoning
+successors, post-dispatch order overwrite, Save as naming transferring a
+replacement owner, and blind retry of committed provider selection.
+The existing saved-view isolation contract owns these corrections.
+
+Failing-first store regressions reproduced lost independent rename, wrong-owner
+copy and repeated selection; the real service regression accepted a stale
+observed order before the correction. Retired move replay is now filtered by
+its current endpoints. Reorder dispatch carries `view_order_base`, checked
+against committed rows inside each settings CAS attempt. Save as captures and
+rechecks its naming owner; changed owners dismiss, same-owner disclosure stays
+fresh. Provider selection now uses one transport mutation, like draft transfer.
+
+Initial store/component GREEN passed 51 cases; a real user-service race
+regression passed. Native RED against the retained round-8 artifacts reproduced
+both stale name editors, repeated provider selection and post-dispatch touch
+overwrite. The same-owner positive native case failed in seed setup with
+workspace-not-found before its scenario ran; that is not a product RED or a
+passing control. Final rebuilt-source results are recorded below.
+
+Current-source owning desktop passed 15/15 (2.3 minutes); touch-emulated phone
+passed 7/7 (1.1 minutes). Both include changed-group/base naming invalidation
+and the same-owner positive control. Desktop covers a genuinely committed
+reused selection whose transport ACK is aborted; touch covers a dispatched
+move conflicting without overwriting the remote order, plus reload.
+The initial final-run preflight stopped before tests on a stale delivery
+fixture; the required delivery/send-now/package artifacts were rebuilt before
+these passing runs. That preflight is not a product failure or test result.
+
+Final focused store/component tests passed 51/51, scoped types and affected
+ESLint passed without warnings. Affected user Sidebar race checks, Go lint and
+specification/decision validation passed. Lint-driven extraction keeps naming
+state in its private hook and failed-intent ownership in the existing journal.
+`r9-tested-identity.json` matches all 19 affected source/test files to the build
+mirror. Tags source is unchanged at `650581569554e471fca37477453d45572c9ac54d`;
+the existing 0.20.0 archive is used for fresh current-host acceptance.
+
+Fresh current-host acceptance installed that unchanged archive with HTTP 201
+and Active status in owned mock-only runtime 49327. The full driver exited 0
+in 233.49 seconds, retaining 88 mixed evidence records and 23 PNGs, not 88
+independent tests. Public projection reported 103 unique tasks and 119
+occurrences across two pages. Repeated trees, saved views, mutation, overflow,
+independent Tag behavior, settled recovery and 320/393 touch paths passed.
+Inspected current grouped/recovered desktop and actual 393px Page 2 PNGs,
+plus the native replaced-owner phone editor; the touch reorder screenshot
+captures the menu top, not visible chip-order proof. Its order proof is the
+native DOM/persistence/reload assertion.
+
+Runtime OWNER, driver/launcher sources, results and screenshot digests are
+retained in `r9-smoke-evidence.json`; the backend log was copied before
+owner-checked cleanup. The owned service was stopped, open-file checks were
+empty, and only its state/profile and throwaway scripts/config/format copies
+were removed. Protected demo 52121, 59390 and primary instances were untouched.
+Historical broad backend/web/SQLite gates remain unresolved; PostgreSQL/no DSN,
+physical phone and remote CI remain unproven. No release or deployment.

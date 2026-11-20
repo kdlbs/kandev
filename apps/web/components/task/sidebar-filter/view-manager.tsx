@@ -10,7 +10,7 @@ import {
 } from "react";
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
-import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
+import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import { useTranslation } from "react-i18next";
 import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -20,10 +20,11 @@ type HeaderMode = "view" | "rename" | "saveAs";
 type HeaderProps = {
   activeView: SidebarView | undefined;
   hasDraft: boolean;
+  draftOwner: Pick<SidebarViewDraft, "baseViewId" | "group"> | null;
   canDelete: boolean;
   savePending?: boolean;
   onSaveOverwrite: () => void;
-  onSaveAs: (name: string) => void;
+  onSaveAs: (name: string, owner: Pick<SidebarViewDraft, "baseViewId" | "group">) => void;
   onRename: (id: string, name: string) => void;
   onDiscard: () => void;
   onDelete: () => void;
@@ -34,15 +35,13 @@ type HeaderProps = {
   onRenameRequestHandled?: (viewId: string) => void;
 };
 
-export function ViewHeaderRow(props: HeaderProps) {
-  const { isMobile } = useResponsiveBreakpoint();
-  const { t } = useTranslation();
+function useViewNaming(props: HeaderProps) {
   const [mode, setMode] = useState<HeaderMode>("view");
   const [nameDraft, setNameDraft] = useState("");
   const [editingViewId, setEditingViewId] = useState<string | null>(null);
+  const [editingGroup, setEditingGroup] = useState<SidebarViewDraft["group"] | null>(null);
   const activeViewId = props.activeView?.id;
   const activeViewName = props.activeView?.name;
-  const isEditing = mode !== "view";
 
   function enterRename() {
     if (!props.activeView) return;
@@ -51,6 +50,9 @@ export function ViewHeaderRow(props: HeaderProps) {
     setMode("rename");
   }
   function enterSaveAs() {
+    if (!props.draftOwner) return;
+    setEditingViewId(props.draftOwner.baseViewId);
+    setEditingGroup(props.draftOwner.group);
     setNameDraft("");
     setMode("saveAs");
   }
@@ -58,13 +60,21 @@ export function ViewHeaderRow(props: HeaderProps) {
     setMode("view");
     setNameDraft("");
     setEditingViewId(null);
+    setEditingGroup(null);
   }
   function submit() {
-    if (mode === "saveAs" && props.savePending) return;
+    if (
+      mode === "saveAs" &&
+      (props.savePending ||
+        !props.draftOwner ||
+        props.draftOwner.baseViewId !== editingViewId ||
+        props.draftOwner.group !== editingGroup)
+    )
+      return;
     const trimmed = nameDraft.trim();
     if (!trimmed) return;
     if (mode === "rename" && props.activeView) props.onRename(props.activeView.id, trimmed);
-    else if (mode === "saveAs") props.onSaveAs(trimmed);
+    else if (mode === "saveAs" && props.draftOwner) props.onSaveAs(trimmed, props.draftOwner);
     exit();
   }
 
@@ -79,11 +89,34 @@ export function ViewHeaderRow(props: HeaderProps) {
   }, [activeViewId, activeViewName, props.onRenameRequestHandled, props.renameRequestedViewId]);
 
   useLayoutEffect(() => {
-    if (mode !== "rename" || !editingViewId || activeViewId === editingViewId) return;
+    if (mode === "view" || !editingViewId) return;
+    const stale =
+      mode === "rename"
+        ? activeViewId !== editingViewId
+        : props.draftOwner?.baseViewId !== editingViewId ||
+          props.draftOwner?.group !== editingGroup;
+    if (!stale) return;
     setMode("view");
     setNameDraft("");
     setEditingViewId(null);
-  }, [activeViewId, editingViewId, mode]);
+    setEditingGroup(null);
+  }, [
+    activeViewId,
+    editingViewId,
+    editingGroup,
+    mode,
+    props.draftOwner?.baseViewId,
+    props.draftOwner?.group,
+  ]);
+  return { mode, nameDraft, setNameDraft, enterRename, enterSaveAs, exit, submit };
+}
+
+export function ViewHeaderRow(props: HeaderProps) {
+  const { isMobile } = useResponsiveBreakpoint();
+  const { t } = useTranslation();
+  const { mode, nameDraft, setNameDraft, enterRename, enterSaveAs, exit, submit } =
+    useViewNaming(props);
+  const isEditing = mode !== "view";
 
   if (props.deleteConfirmation && !isMobile) {
     return <div className="min-w-0 p-1">{props.deleteConfirmation}</div>;

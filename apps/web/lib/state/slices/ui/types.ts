@@ -502,7 +502,10 @@ export type UISliceActions = {
       taskRow: SidebarTaskRowPresentation;
     }>,
   ) => void;
-  saveSidebarDraftAs: (name: string) => void;
+  saveSidebarDraftAs: (
+    name: string,
+    owner: Pick<SidebarViewDraft, "baseViewId" | "group">,
+  ) => Promise<boolean>;
   saveSidebarDraftOverwrite: () => void;
   discardSidebarDraft: () => void;
   deleteSidebarView: (viewId: string) => void;

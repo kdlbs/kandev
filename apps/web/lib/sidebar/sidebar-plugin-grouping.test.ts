@@ -26,6 +26,7 @@ beforeEach(() => {
   vi.mocked(updateUserSettings).mockResolvedValue({ settings: {} } as UserSettingsResponse);
 });
 const grouping = { reference: "plugin:acme:labels" as const, label: "Tag" };
+const ALL_TASKS = "view-all-tasks";
 
 function mockSidebarSettings() {
   const workspaces: Record<string, SidebarWorkspaceStateApi> = {};
@@ -34,7 +35,7 @@ function mockSidebarSettings() {
     const patch = payload.sidebar_view_state!;
     const current = workspaces[patch.workspace_id] ?? {
       views: createSidebarWorkspaceState().views.map(toApiSidebarView),
-      active_view_id: "view-all-tasks",
+      active_view_id: ALL_TASKS,
       draft: null,
     };
     const views = new Map(current.views.map((view) => [view.id, view]));
@@ -144,4 +145,25 @@ it("keeps complete host declarations independent of browser facets and fences pr
   pluginRegistry.setSidebarGroupings([{ ...provider, generation: "install-2" }]);
   expect(pluginRegistry.sidebarGroupingIdentity(grouping.reference, "a")).not.toBe(a);
   pluginRegistry.setSidebarGroupings([]);
+});
+
+it("does not replay a committed provider selection after its transport ACK is lost", async () => {
+  const { reload, workspaces } = mockSidebarSettings();
+  let store = reload();
+  expect(await store.getState().selectSidebarPluginGrouping(grouping)).toBe(true);
+  const generatedId = workspaces.a.active_view_id;
+  store = reload();
+  const send = vi.mocked(updateUserSettings).getMockImplementation()!;
+  vi.mocked(updateUserSettings).mockImplementationOnce(async (payload) => {
+    await send(payload);
+    const current = workspaces.a;
+    current.views.find((view) => view.id === generatedId)!.name = "Renamed remotely";
+    current.active_view_id = ALL_TASKS;
+    throw new TypeError("Committed response was lost");
+  });
+  expect(await store.getState().selectSidebarPluginGrouping(grouping)).toBe(false);
+  const persisted = selectSidebarViews(reload().getState());
+  expect(persisted.activeViewId).toBe(ALL_TASKS);
+  expect(persisted.views.filter((view) => view.group === grouping.reference)).toHaveLength(1);
+  expect(persisted.views.find((view) => view.id === generatedId)?.name).toBe("Renamed remotely");
 });

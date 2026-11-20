@@ -3,8 +3,8 @@ import { holdSidebarSettingsWrite } from "../../helpers/user-settings-barrier";
 import { touchDragToPoint } from "../../helpers/touch-drag";
 import { settledBoundingBox } from "../../helpers/settled-box";
 
-for (const remoteChange of ["append", "disjoint reorder"] as const) {
-  test(`queued touch reorder preserves ${remoteChange} and local rename`, async ({
+for (const remoteChange of ["append", "disjoint reorder", "post-dispatch reorder"] as const) {
+  test(`touch reorder preserves ${remoteChange}`, async ({
     testPage,
     apiClient,
     seedData,
@@ -35,14 +35,16 @@ for (const remoteChange of ["append", "disjoint reorder"] as const) {
     const tasks = testPage.getByTestId("app-nav-sheet");
     const barrier = await holdSidebarSettingsWrite(testPage);
     try {
-      await tasks.getByTestId("sidebar-filter-gear").tap();
-      const editor = testPage.getByTestId("sidebar-filter-popover");
-      await editor.getByTestId("view-rename-button").tap();
-      await editor.getByTestId("view-rename-input").fill("R");
-      await editor.getByTestId("view-rename-confirm").tap();
-      await barrier.arrived;
-      await testPage.keyboard.press("Escape");
-      await expect(editor).toBeHidden();
+      if (remoteChange !== "post-dispatch reorder") {
+        await tasks.getByTestId("sidebar-filter-gear").tap();
+        const editor = testPage.getByTestId("sidebar-filter-popover");
+        await editor.getByTestId("view-rename-button").tap();
+        await editor.getByTestId("view-rename-input").fill("R");
+        await editor.getByTestId("view-rename-confirm").tap();
+        await barrier.arrived;
+        await testPage.keyboard.press("Escape");
+        await expect(editor).toBeHidden();
+      }
       const row = tasks.getByTestId("sidebar-view-chip-row");
       const source = row.locator(`[data-view-id="${first.id}"]`);
       const target = row.locator(`[data-view-id="${second.id}"]`);
@@ -64,6 +66,7 @@ for (const remoteChange of ["append", "disjoint reorder"] as const) {
             .evaluateAll((chips) => chips.map((chip) => chip.getAttribute("data-view-id"))),
         )
         .toEqual(expected);
+      if (remoteChange === "post-dispatch reorder") await barrier.arrived;
       const remote = { ...initial.views[0], id: "remote-append", name: "Remote" };
       const remoteTail = remoteChange === "append" ? [remote] : [...tail].reverse();
       await apiClient.saveUserSettings({
@@ -80,7 +83,26 @@ for (const remoteChange of ["append", "disjoint reorder"] as const) {
                 ],
               },
       });
+      const conflict =
+        remoteChange === "post-dispatch reorder"
+          ? testPage.waitForResponse(
+              (response) =>
+                response.request().method() === "PATCH" &&
+                Boolean(response.request().postDataJSON()?.sidebar_view_state?.view_order),
+            )
+          : null;
       barrier.release();
+      if (conflict) expect((await conflict).status()).toBe(400);
+      const middle =
+        remoteChange === "post-dispatch reorder"
+          ? [
+              [first.id, first.name],
+              [second.id, second.name],
+            ]
+          : [
+              [second.id, second.name],
+              [first.id, "R"],
+            ];
       await expect
         .poll(async () => {
           const state = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
@@ -90,8 +112,7 @@ for (const remoteChange of ["append", "disjoint reorder"] as const) {
         })
         .toEqual([
           ...initial.views.map((view) => [view.id, view.name]),
-          [second.id, second.name],
-          [first.id, "R"],
+          ...middle,
           ...remoteTail.map((view) => [view.id, view.name]),
         ]);
       await testPage.reload();
@@ -105,17 +126,22 @@ for (const remoteChange of ["append", "disjoint reorder"] as const) {
         )
         .toEqual([
           ...initial.views.map((view) => view.id),
-          second.id,
-          first.id,
+          ...middle.map(([id]) => id),
           ...remoteTail.map((view) => view.id),
         ]);
-      await expect(tasks.locator(`[data-view-id="${first.id}"]`)).toContainText("R");
+      await expect(tasks.locator(`[data-view-id="${first.id}"]`)).toContainText(
+        remoteChange === "post-dispatch reorder" ? first.name : "R",
+      );
       await testPage.screenshot({
         path: info.outputPath("phone-rebased-reorder.png"),
         animations: "disabled",
       });
     } finally {
       await barrier.dispose();
+      await testPage.close();
+      await apiClient.saveUserSettings({
+        sidebar_view_state: { workspace_id: workspace, ...initial },
+      });
     }
   });
 }

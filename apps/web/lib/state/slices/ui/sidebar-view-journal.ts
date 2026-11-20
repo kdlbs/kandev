@@ -52,3 +52,26 @@ export function admitSidebarServerSnapshot(
   );
   if (order === null || order >= 0) journal.confirmed = snapshot;
 }
+
+export function replayableSidebarMove(journal: SidebarWriteJournal, move?: SidebarViewMove) {
+  return (
+    !move ||
+    [move.id, move.overId].every((id) => journal.confirmed?.views.some((view) => view.id === id))
+  );
+}
+
+export function recordSidebarWriteFailure(
+  journal: SidebarWriteJournal,
+  before: SidebarSnapshot,
+  after: SidebarSnapshot,
+  kind: SidebarWriteKind,
+  move?: SidebarViewMove,
+) {
+  journal.pending--;
+  if (kind === "views" && replayableSidebarMove(journal, move))
+    (journal.failedViewMutations ??= []).push({ before, after, move });
+  const rollback = journal.failedRollback ?? before;
+  journal.failedRollback = rollback;
+  journal.failedWriteKind ??= kind;
+  return rollback;
+}

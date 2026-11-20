@@ -226,3 +226,44 @@ it("a queued drag reports a removed destination without restoring it", async () 
   expect(f.current().views.map((view) => view.id)).toEqual([f.base.id, "c", "d"]);
   expect(f.current().views[0].name).toBe("Renamed");
 });
+
+it("a retired queued drag does not abort the following independent rename", async () => {
+  const f = fixture(["c", "d"]);
+  const first = Promise.withResolvers<UserSettingsResponse>();
+  let predecessor: UserSettingsUpdatePayload | undefined;
+  vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
+    if (!predecessor) {
+      predecessor = payload;
+      return first.promise;
+    }
+    return f.apply(payload);
+  });
+  f.store.getState().renameSidebarView(f.base.id, "Renamed");
+  f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
+  f.store.getState().renameSidebarView("c", "Independent");
+  f.reorder([f.base.id, "c", "d"]);
+  first.resolve(f.apply(predecessor!));
+  await f.store.getState().waitForSidebarViewSync("ws");
+  expect(f.current().views.map((view) => view.id)).toEqual([f.base.id, "c", "d"]);
+  expect(f.current().views.find((view) => view.id === "c")?.name).toBe("Independent");
+  expect(mapSidebarWorkspaces({ ws: f.current() }).ws.views[0].name).toBe("Renamed");
+});
+
+it("an uncertain drag with a now-deleted endpoint is not replayed by its successor", async () => {
+  const f = fixture(["c", "d"]);
+  const failed = Promise.withResolvers<UserSettingsResponse>();
+  vi.mocked(updateUserSettings).mockImplementationOnce(() => failed.promise);
+  vi.mocked(updateUserSettings).mockImplementation((payload) => Promise.resolve(f.apply(payload)));
+  f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
+  f.store.getState().renameSidebarView("c", "Independent");
+  f.reorder([f.base.id, "c", "d"]);
+  registerUsersHandlers(f.store)["user.settings.updated"]!({
+    type: "notification",
+    action: "user.settings.updated",
+    payload: f.acknowledge().settings,
+  });
+  failed.reject(new ApiError("Move response was lost", 503, {}));
+  await f.store.getState().waitForSidebarViewSync("ws");
+  expect(f.current().views.map((view) => view.id)).toEqual([f.base.id, "c", "d"]);
+  expect(f.current().views.find((view) => view.id === "c")?.name).toBe("Independent");
+});

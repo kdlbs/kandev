@@ -428,3 +428,72 @@ test("a dispatched draft prune cannot recreate the draft after another client sa
     await barrier.dispose();
   }
 });
+
+test("a lost reused-provider ACK cannot override a newer remote selection", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const choose = async () => {
+    await testPage.getByTestId("tasks-view-picker").click();
+    await testPage
+      .getByRole("group", { name: "Plugin groupings", exact: true })
+      .getByRole("menuitem", { name: "Fixture grouping", exact: true })
+      .click();
+  };
+  await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
+  await choose();
+  await expect(testPage.getByTestId("tasks-view-picker")).toContainText("Fixture grouping");
+  const reused = (await preferences(apiClient, seedData.workspaceId)).active_view_id;
+  await apiClient.saveUserSettings({
+    sidebar_view_state: { workspace_id: seedData.workspaceId, active_view_id: "view-all-tasks" },
+  });
+  await testPage.reload();
+  const arrived = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  let held = false;
+  const routePattern = "**/api/v1/user/settings";
+  await testPage.route(routePattern, async (route) => {
+    if (
+      route.request().method() !== "PATCH" ||
+      !route.request().postDataJSON()?.sidebar_view_state?.select_plugin_grouping
+    )
+      return route.continue();
+    if (held) return route.continue();
+    held = true;
+    await route.fetch();
+    arrived.resolve();
+    await released.promise;
+    await route.abort("failed");
+  });
+  try {
+    await choose();
+    await arrived.promise;
+    expect((await preferences(apiClient, seedData.workspaceId)).active_view_id).toBe(reused);
+    await apiClient.saveUserSettings({
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views_update: [{ id: reused, name: "Remotely renamed" }],
+        active_view_id: "view-all-tasks",
+      },
+    });
+    released.resolve();
+    await expect(testPage.getByTestId("tasks-view-picker")).not.toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+    await expect(testPage.getByTestId("tasks-view-picker")).toContainText("All tasks");
+    await testPage.reload();
+    const current = await preferences(apiClient, seedData.workspaceId);
+    expect(current.active_view_id).toBe("view-all-tasks");
+    expect(
+      current.views.filter(
+        (view) => view.generated_plugin_grouping?.reference === SIDEBAR_GROUPING,
+      ),
+    ).toHaveLength(1);
+    await expect(testPage.getByTestId("tasks-view-picker")).toContainText("All tasks");
+  } finally {
+    released.resolve();
+    await testPage.unroute(routePattern);
+  }
+});

@@ -156,6 +156,14 @@ task actions. Discard leaves its base unchanged. A same-group draft inherits sav
 Save and Save as are unavailable until preceding workspace preference writes
 settle. Rejection of a prerequisite cannot silently acknowledge a transfer of
 older fields or disclosure.
+An open Save as name editor captures its base/group identity and dismisses on
+owner replacement. Store admission checks that identity again; a same-owner
+change still transfers the latest committed fields and disclosure.
+Selection does not blindly retry a transport-uncertain mutation, because a
+previously reused generated view can be renamed or superseded between sends.
+Explicit reorders carry their observed order as `view_order_base`. The settings
+CAS rejects a changed order without committing the stale permutation; retired
+move endpoints cannot abort independent queued edits.
 Duplicate clones source disclosure so expanding a copy never expands its source.
 
 ## Repository projection and pagination
