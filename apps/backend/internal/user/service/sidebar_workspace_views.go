@@ -24,7 +24,7 @@ func validateSidebarPluginGrouping(group string) error {
 	return nil
 }
 
-func validateSidebarPluginView(view models.SidebarView) error {
+func validateSidebarPluginView(view *models.SidebarView) error {
 	if err := validateSidebarPluginGrouping(view.Group); err != nil {
 		return err
 	}
@@ -241,6 +241,19 @@ func applySidebarWorkspacePatch(settings *models.UserSettings, req *UpdateUserSe
 		}
 		if state.Draft != nil && state.Draft.BaseViewID != state.ActiveViewID {
 			return fmt.Errorf("%w: draft does not match active workspace view", ErrValidation)
+		}
+	}
+	if patch.DraftUpdate != nil {
+		if len(patch.Draft) > 0 {
+			return fmt.Errorf("%w: cannot mix draft replacement and intent", ErrValidation)
+		}
+		if err := applySidebarDraftUpdate(&state, patch.DraftUpdate); err != nil {
+			return fmt.Errorf("%w: %s", ErrValidation, err)
+		}
+	}
+	if patch.SelectPluginGrouping != nil {
+		if err := selectSidebarPluginView(&state, patch.SelectPluginGrouping); err != nil {
+			return fmt.Errorf("%w: %s", ErrValidation, err)
 		}
 	}
 	state = normalizeSidebarWorkspace(state)

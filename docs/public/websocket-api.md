@@ -371,14 +371,24 @@ provider snapshot, not the current page. This supports recovery of retired
 disclosure without increasing the request cap. The web client reconciles those
 keys through its saved-view journal before admitting a bounded successor page.
 
-Saved-view edits use the scoped `sidebar_view_state` object on
-`PATCH /api/v1/user/settings`. `views_upsert` creates or intentionally replaces
-views; `views_update` edits existing IDs only and never recreates a deleted view.
-`view_ids_delete` removes IDs. Surviving views keep their order and new views
-append; send a complete `view_order` only for an explicit reorder. These mutate
-one `workspace_id` under the normal settings revision CAS. Do not mix delta
-fields with `views` replacement. Active view and draft remain scoped to the
-same collection. The 50-view and 2 MiB request limits remain.
+Saved-view edits use scoped `sidebar_view_state` on
+`PATCH /api/v1/user/settings`. `views_create` inserts absent IDs only.
+`views_update` carries sparse changed fields for existing IDs and never
+recreates a deleted view. Its optional `disclosure` has a `group` owner and
+`add`/`remove` key arrays; `replace` is reserved for an explicit grouping change.
+An insert-only creation and a later sparse update may share an ID in one request.
+`views_upsert` intentionally creates/replaces whole views for explicit imports.
+`view_ids_delete` removes IDs. Survivors retain order and new IDs append; send
+complete `view_order` only for explicit reorder. These mutate one `workspace_id`
+under the normal settings CAS. Do not mix view deltas with `views` replacement.
+The 50-view and 2 MiB request limits remain.
+
+`draft_update` carries sparse presentation fields under `base_view_id` and
+`expected_group`; `clear: true` discards only that matching draft.
+Do not mix it with full `draft` replacement. `select_plugin_grouping` supplies a
+generated-default view candidate: the CAS reuses a latest unchanged matching
+view or creates it with a unique name, protecting custom views, drafts and the
+view limit. Use the returned active ID, not the candidate ID, as authoritative.
 
 For a draft whose grouping differs from its base view, optional draft
 `collapsed_groups` stores that preview's disclosure independently. Omitting it
@@ -389,6 +399,8 @@ when queued compaction is admitted. Draft edits merge only changed fields and
 disclosure intent onto the latest acknowledged state. A failed cleanup write
 retains saved preferences and offers manual Retry; the metadata-read deadline
 does not retry an admitted settings write. The probe page is never task data.
+Compaction also disables automatic network retries. Skipped compaction does not
+acknowledge failed predecessor edits that still have an ordinary successor.
 
 
 Complete plugin groupings use `group: "plugin:<plugin-id>:<grouping-id>"`.

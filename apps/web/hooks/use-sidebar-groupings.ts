@@ -15,7 +15,7 @@ export type SidebarGroupingChoice = SidebarPluginGroupingChoice & { disabledReas
 export type SidebarGroupingChoices = {
   groupings: readonly SidebarGroupingChoice[];
   workspaceId: string | null;
-  selectGrouping: (choice: SidebarPluginGroupingChoice) => string | null | undefined;
+  selectGrouping: (choice: SidebarPluginGroupingChoice) => Promise<boolean> | undefined;
 };
 
 export function useSidebarGroupings(): SidebarGroupingChoices {
@@ -25,15 +25,15 @@ export function useSidebarGroupings(): SidebarGroupingChoices {
   const store = useAppStoreApi();
   const scope = useAppStore(sidebarTaskPageScope);
   const { views, draft } = useAppStore(selectSidebarViews);
-  const createView = useAppStore((state) => state.createSidebarView);
+  const selectView = useAppStore((state) => state.selectSidebarPluginGrouping);
   const guard = useSidebarWorkspaceGuard();
   const selectGrouping = useMemo(
     () =>
       guard((choice: SidebarPluginGroupingChoice) => {
         if (sidebarTaskPageScope(store.getState()) !== scope) return;
-        return createView(choice);
+        return selectView(choice);
       }),
-    [guard, createView, store, scope],
+    [guard, selectView, store, scope],
   );
   const groupings = useMemo(
     () =>

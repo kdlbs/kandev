@@ -126,7 +126,9 @@ function GroupingChoiceDrawer({
                   data-grouping-reference={choice.reference}
                   className="min-h-[44px] h-auto w-full flex-col items-start justify-center whitespace-normal px-3 py-2 text-left"
                   onClick={(event) => {
-                    if (!choices.selectGrouping(choice)) event.preventDefault();
+                    const request = choices.selectGrouping(choice);
+                    if (request === undefined) event.preventDefault();
+                    else void request;
                   }}
                 >
                   <span className="min-w-0 wrap-anywhere">{choice.label}</span>

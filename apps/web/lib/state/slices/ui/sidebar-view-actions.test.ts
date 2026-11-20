@@ -8,6 +8,11 @@ import { DEFAULT_VIEW } from "./sidebar-view-builtins";
 import { createUISlice } from "./ui-slice";
 import type { SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 import type { UISlice } from "./types";
+import { workspaceId } from "@/lib/types/ids";
+import { toApiSidebarView } from "./sidebar-view-wire";
+import { mapSidebarWorkspaces } from "./sidebar-workspace-state";
+import { applyDraftMutationForTest, applyViewMutationsForTest } from "./sidebar-view-test-helpers";
+import type { SidebarWorkspaceStateApi } from "@/lib/types/http-user-settings";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   updateUserSettings: vi.fn(() => Promise.resolve({ settings: {} })),
@@ -178,7 +183,7 @@ describe("copied sidebar view disclosure", () => {
             sidebar_view_state: expect.objectContaining({
               workspace_id: "ws",
               active_view_id: copied.id,
-              views_upsert: expect.arrayContaining([
+              views_create: expect.arrayContaining([
                 expect.objectContaining({ id: copied.id, group, collapsed_groups: [collapsed] }),
               ]),
             }),
@@ -214,22 +219,45 @@ describe("sidebar group indentation preference", () => {
     const source = makeView("all", "All tasks");
     source.groupIndent = false;
     seedSidebar(store, [source]);
-
+    let revision = 0;
+    let server: SidebarWorkspaceStateApi = {
+      views: [toApiSidebarView(source)],
+      active_view_id: source.id,
+      draft: null,
+    };
+    vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
+      const patch = payload.sidebar_view_state!;
+      const views = new Map(server.views.map((view) => [view.id, view]));
+      applyViewMutationsForTest(views, patch);
+      const active = patch.active_view_id ?? server.active_view_id;
+      server = {
+        views: [...views.values()],
+        active_view_id: active,
+        draft: applyDraftMutationForTest(views, active, server.draft, patch),
+      };
+      return {
+        settings: {
+          user_id: "default-user",
+          workspace_id: workspaceId("ws"),
+          repository_ids: [],
+          updated_at: "",
+          revision: ++revision,
+          sidebar_views_by_workspace: { ws: structuredClone(server) },
+        },
+      };
+    });
     store.getState().updateSidebarDraft({ groupIndent: false });
-    expect(store.getState().sidebarViewsByWorkspace.ws.draft?.groupIndent).toBe(false);
-    await waitFor(() => expect(updateUserSettings).toHaveBeenCalledOnce());
-    expect(updateUserSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sidebar_view_state: expect.objectContaining({
-          draft: expect.objectContaining({ group_indent: false }),
-        }),
-      }),
-    );
-
+    await store.getState().waitForSidebarViewSync("ws");
+    expect(mapSidebarWorkspaces({ ws: server }, {}, revision).ws.draft?.groupIndent).toBe(false);
     store.getState().saveSidebarDraftOverwrite();
-    expect(store.getState().sidebarViewsByWorkspace.ws.views[0].groupIndent).toBe(false);
+    await store.getState().waitForSidebarViewSync("ws");
     store.getState().duplicateSidebarView("all", "Copy");
-    expect(store.getState().sidebarViewsByWorkspace.ws.views[1].groupIndent).toBe(false);
+    await store.getState().waitForSidebarViewSync("ws");
+    const restored = mapSidebarWorkspaces({ ws: server }, {}, revision).ws;
+    expect(restored.views.map((view) => [view.name, view.groupIndent])).toEqual([
+      ["All tasks", false],
+      ["Copy", false],
+    ]);
   });
 });
 

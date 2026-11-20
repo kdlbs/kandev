@@ -2041,9 +2041,13 @@ and the unchanged 1 MiB action-response limit. Values are bounded at 1,000 and
 raw membership pairs at 10,000. Partial results are unavailable, never truncated.
 
 Saved view grouping, sorting, filters, presentation, and collapse stay in the
-ordinary workspace journal. The selector's optional generated-origin marker
-permits reuse only while the generated view remains unmodified. Missing providers
-retain saved references and expose recovery instead of reverting to a built-in.
+ordinary workspace journal. Generated-view selection resolves reuse/create
+atomically in the backend settings CAS; the browser adopts its returned active
+ID without inserting a provisional view. Reuse requires an unchanged
+generated-origin marker, preserving renamed/custom views. Sparse field and
+group-owned disclosure updates merge inside that CAS rather than replacing
+stale after-images. Missing providers retain saved references and expose
+recovery instead of reverting to a built-in.
 Source revision/generation and client catalog/workspace/account epochs fence
 query identity, retained pages, hydration, and late metadata responses.
 

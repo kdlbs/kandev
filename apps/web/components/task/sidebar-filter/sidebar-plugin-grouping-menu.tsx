@@ -25,8 +25,10 @@ export function SidebarPluginGroupingMenu({ separator = true }: { separator?: bo
             data-testid="sidebar-plugin-grouping"
             data-grouping-reference={choice.reference}
             title={choice.disabledReason ?? choice.label}
-            onSelect={() => {
-              selectGrouping(choice);
+            onSelect={(event) => {
+              const request = selectGrouping(choice);
+              if (request === undefined) event.preventDefault();
+              else void request;
             }}
             className="min-h-7 cursor-pointer text-xs [@media(any-pointer:coarse)]:min-h-[44px] max-md:min-h-[44px]"
           >

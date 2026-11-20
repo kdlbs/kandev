@@ -1,3 +1,4 @@
+import { applyDraftMutationForTest, applyViewMutationsForTest } from "./sidebar-view-test-helpers";
 import { beforeEach, expect, it, vi } from "vitest";
 import { createAppStore } from "@/lib/state/store";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
@@ -8,6 +9,7 @@ import type {
 import { createDefaultSidebarView } from "./sidebar-view-builtins";
 import { mapSidebarWorkspaces } from "./sidebar-workspace-state";
 import { toApiSidebarView } from "./sidebar-view-wire";
+import { workspaceId } from "@/lib/types/ids";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({ updateUserSettings: vi.fn() }));
 beforeEach(() => {
@@ -34,16 +36,26 @@ function draftWorkspace() {
   vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
     const patch = payload.sidebar_view_state!;
     const views = new Map(server.views.map((view) => [view.id, view]));
-    for (const id of patch.view_ids_delete ?? []) views.delete(id);
-    for (const view of patch.views_upsert ?? []) views.set(view.id, view);
-    for (const view of patch.views_update ?? []) if (views.has(view.id)) views.set(view.id, view);
+    applyViewMutationsForTest(views, patch);
     server = {
       views: (patch.view_order ?? [...views.keys()]).map((id) => views.get(id)!),
       active_view_id: patch.active_view_id ?? server.active_view_id,
-      draft: "draft" in patch ? patch.draft! : server.draft,
+      draft: applyDraftMutationForTest(
+        views,
+        patch.active_view_id ?? server.active_view_id,
+        server.draft,
+        patch,
+      ),
     };
     return {
-      settings: { revision: ++revision, sidebar_views_by_workspace: { ws: server } },
+      settings: {
+        user_id: "default-user",
+        workspace_id: workspaceId("ws"),
+        repository_ids: [],
+        updated_at: "",
+        revision: ++revision,
+        sidebar_views_by_workspace: { ws: server },
+      },
     } as UserSettingsResponse;
   });
   const reload = () =>

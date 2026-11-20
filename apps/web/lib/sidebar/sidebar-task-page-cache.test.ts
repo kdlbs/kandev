@@ -215,14 +215,6 @@ it("keeps the current page after a group-indent write and its full settings ackn
   store.getState().updateSidebarDraft({ groupIndent: false });
   const local = store.getState().sidebarViewsByWorkspace.ws;
   expect(local.draft?.groupIndent).toBe(false);
-  expect(updateUserSettings).toHaveBeenCalledWith(
-    expect.objectContaining({
-      sidebar_view_state: expect.objectContaining({
-        workspace_id: "ws",
-        draft: expect.objectContaining({ group_indent: false }),
-      }),
-    }),
-  );
 
   const userSettings = store.getState().userSettings;
   registerUsersHandlers(store)["user.settings.updated"]?.(

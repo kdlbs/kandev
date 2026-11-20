@@ -11,6 +11,7 @@ import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { SidebarTaskPageCache } from "./sidebar-task-page-cache";
 import { sidebarTaskQueryError } from "./sidebar-task-query-error";
+import { applyViewUpdateForTest } from "@/lib/state/slices/ui/sidebar-view-test-helpers";
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({ querySidebarTasks: vi.fn() }));
 vi.mock("@/lib/api/domains/settings-api", () => ({ updateUserSettings: vi.fn() }));
@@ -97,7 +98,8 @@ it.each([false, true])(
     const rename = Promise.withResolvers<UserSettingsResponse>();
     let renameAck: UserSettingsResponse | undefined;
     vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
-      for (const view of payload.sidebar_view_state?.views_update ?? []) persisted = view;
+      for (const view of payload.sidebar_view_state?.views_update ?? [])
+        persisted = applyViewUpdateForTest(persisted, view);
       if (!renameAck) {
         renameAck = acknowledge();
         return rename.promise;
@@ -172,3 +174,82 @@ it("a compaction rejected after the metadata deadline requires manual Retry", as
     f.cache.clear();
   }
 });
+
+it("a provider event during network backoff cannot resend a retired disclosure probe", async () => {
+  vi.useFakeTimers();
+  const f = disclosureFixture();
+  vi.mocked(querySidebarTasks).mockResolvedValue(f.metadata([]));
+  vi.mocked(updateUserSettings)
+    .mockRejectedValueOnce(new TypeError("Network disconnected"))
+    .mockResolvedValue({ settings: {} } as UserSettingsResponse);
+  const read = f.cache.request("ws", f.query, "network-retired-probe");
+  const outcome = read.promise.catch((error: unknown) => error);
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(updateUserSettings).toHaveBeenCalledTimes(1);
+    pluginRegistry.invalidateSidebarGroupings("acme", "ws");
+    await vi.advanceTimersByTimeAsync(1000);
+    await outcome;
+    expect(updateUserSettings).toHaveBeenCalledTimes(1);
+    expect(f.store.getState().sidebarViewsByWorkspace.ws.views[0].collapsedGroups).toEqual(f.keys);
+    expect(f.cache.get("network-retired-probe")).toBeNull();
+  } finally {
+    read.release();
+    f.cache.clear();
+  }
+});
+
+it.each([false, true])(
+  "skipped compaction preserves failed predecessor intent: successor=%s",
+  async (successor) => {
+    const f = disclosureFixture();
+    let persisted = toApiSidebarView(f.view);
+    const first = Promise.withResolvers<UserSettingsResponse>();
+    const metadata = Promise.withResolvers<SidebarTaskPageResponse>();
+    vi.mocked(querySidebarTasks).mockReturnValueOnce(metadata.promise);
+    let writes = 0;
+    vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
+      if (++writes === 1) return first.promise;
+      for (const update of payload.sidebar_view_state?.views_update ?? [])
+        persisted = applyViewUpdateForTest(persisted, update);
+      return {
+        settings: {
+          user_id: "default-user",
+          workspace_id: workspaceId("ws"),
+          repository_ids: [],
+          updated_at: "",
+          revision: writes,
+          sidebar_views_by_workspace: {
+            ws: { views: [structuredClone(persisted)], active_view_id: f.view.id, draft: null },
+          },
+        },
+      };
+    });
+    const reconcile = f.store.getState().reconcileSidebarGroupDisclosure;
+    const observed = vi.fn((...args: Parameters<typeof reconcile>) => reconcile(...args));
+    f.store.setState({ reconcileSidebarGroupDisclosure: observed });
+    const read = f.cache.request("ws", f.query, "skipped-between-writes");
+    const outcome = read.promise.catch((error: unknown) => error);
+    try {
+      await vi.waitFor(() => expect(querySidebarTasks).toHaveBeenCalledTimes(1));
+      f.store.getState().renameSidebarView(f.view.id, "First rename");
+      metadata.resolve(f.metadata([]));
+      await vi.waitFor(() => expect(observed).toHaveBeenCalledTimes(1));
+      if (successor) f.store.getState().toggleSidebarGroupCollapsed(f.view.id, "third");
+      pluginRegistry.invalidateSidebarGroupings("acme", "ws");
+      first.reject(new ApiError("Settings unavailable", 503, {}));
+      await outcome;
+      await f.store.getState().waitForSidebarViewSync("ws");
+      expect(persisted.name).toBe(successor ? "First rename" : "Saved");
+      expect(persisted.collapsed_groups).toEqual(successor ? [...f.keys, "third"] : f.keys);
+      const current = f.store.getState().sidebarViewsByWorkspace.ws;
+      expect(current.views[0].name).toBe(persisted.name);
+      expect(current.syncPending).toBe(false);
+      expect(f.cache.get("skipped-between-writes")).toBeNull();
+    } finally {
+      first.reject(new ApiError("Cleanup", 503, {}));
+      read.release();
+      f.cache.clear();
+    }
+  },
+);

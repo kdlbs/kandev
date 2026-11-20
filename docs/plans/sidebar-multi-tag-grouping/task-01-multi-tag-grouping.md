@@ -516,3 +516,71 @@ The expanded E2E typecheck and historical broad gates remain non-green or
 unproven. No PostgreSQL, physical-phone, remote-CI, release, deployment or
 user-demo upgrade certification is added. Independent source review remains
 open, with clean streak 0/3.
+
+### Post-rebase round 6 corrections
+
+The review reproduced five additional schedules: an already-dispatched full
+view overwriting a concurrent rename/group change, network replay of a retired
+prune, a skipped prune discarding failed predecessor intent, duplicate generated
+views selected from two stale tabs, and SDK setup validating an external module
+instead of its selected checkout.
+
+Ordinary view updates now merge sparse fields and grouping-owned disclosure
+inside the settings CAS. Creation is insert-only; replayed creation and later
+edits remain independent. Draft updates and discard retain the captured
+base/group owner rather than acquiring a newer unrelated draft's owner.
+Compaction sends no automatic transport retry, and a skipped queue item is not
+a persistence acknowledgement. Failed normal intent remains available to its
+queued successor; terminal skip settles against the authoritative state.
+
+Generated selection is an atomic CAS select-or-create. It preserves existing
+unchanged identity and disclosure, renamed/custom views, drafts, unique names
+and the view limit. The client waits for the returned active ID instead of
+inserting a provisional saved view. Desktop and phone consumers use that
+asynchronous admission path. SDK setup explicitly compiles the selected
+`KANDEV_ROOT/pluginsdk`, preserving separate overrides for ordinary consumers.
+
+RED receipts include service-level sparse-update/creation/draft failures,
+native same-view rename/group and two-tab duplicate failures, retired transport
+retry and skipped-predecessor failures, and four SDK-root selection failures.
+Focused GREEN includes 88 frontend cases in 12 files, scoped TypeScript,
+affected ESLint without warnings, backend Sidebar race checks across
+models/service/handlers, a final service race recheck, and zero Go lint issues.
+Rollback and predicate/upsert helpers were extracted to meet existing limits;
+no lint rule was suppressed. Full `make fmt` and spec/catalog validation pass.
+
+Fresh absent-destination setup fetched compatible SDK pin
+`1154f0ff1771aef71091b8f7457ada905e97af3b` and completed real compatibility
+compilation. Tags fmt/test/vet/race checks pass, including 204 UI and nine setup
+cases. The documentation-complete 0.20.0 archive is
+`5a1a1d747785352fc279e4160fa87e5abc028b0e269a4f39439e6c437f1a6d44`.
+The first guarded desktop run passed 27/27 before lint-only helper extraction.
+The final rebuilt native and actual-package receipts are recorded separately.
+
+Round-6 final native and package proof:
+
+- After the lint-only extractions, a fresh guarded artifact rebuild passed the
+  eight owning desktop journal/workspace cases. The sequential phone project
+  passed 9/9 with touch emulation. Both used one worker and no retries.
+- Native upload of the final archive returned HTTP 201 and Active in a fresh
+  owned mock-only cache-drive runtime on loopback 41515. The driver exited zero
+  in 208.04 seconds with 88 mixed assertion, screenshot and narrative records,
+  not 88 independent tests.
+- Real-package evidence includes 103 canonical tasks/119 occurrences, complete
+  repeated trees, saved reuse/copy/reload/workspace separation, live mutations,
+  explicit overflow with independent Tag availability, settled recovery,
+  disable/enable, single-page counts and 320/393-pixel touch pagination.
+  Desktop grouping/recovery, distinct escaped headings, phone chooser and
+  visible Page 2 PNGs were inspected. The phone summary logs pre-tap text;
+  its assertion and Page 2 PNG establish the resulting page.
+- The owned runtime was stopped. Exact OWNER and open-file checks preceded
+  state removal. Driver/launcher/compiler inputs remain as data in
+  `~/.cache/sidebar-multi-tag-build/evidence/r6-smoke-evidence.json` and
+  `r6-typecheck-configs.json`; throwaway executable scripts were removed.
+  Demo 52121, its mirror, 59390 and primary instances remained untouched.
+
+Broad historical gates, the expanded E2E fixture type errors and the older
+1800-second stall remain unwaived. No physical-phone, PostgreSQL, remote-CI,
+release or deployment claim is added. The post-rebase source review remains
+open at clean streak 0/3.
+

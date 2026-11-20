@@ -92,14 +92,23 @@ not destroy stored settings. Reuse backend-owned workspace view CAS/journals
 and boot/HTTP/WS projection; no localStorage or second preference store.
 
 Extend `TasksViewPicker` with a Plugin views section sourced from eligible boot
-metadata/registry lifecycle. Selecting Tag reuses an existing generated,
-unmodified matching view; otherwise create/select one ordinary view atomically
-through the existing workspace journal. Do not overwrite a renamed or modified
-view, collide with an unrelated user-created Tag name, or silently discard a
-draft. Use existing name allocation and 50-view guard. Once created it remains
-in the ordinary saved view list and supports normal edit/duplicate/delete.
+metadata/registry lifecycle. Selecting Tag sends `select_plugin_grouping` through
+the existing workspace journal. Inside the settings CAS, reuse the latest
+unchanged generated matching view or create the candidate with a unique name
+and the 50-view guard. The browser waits for the authoritative selected ID;
+two tabs cannot persist duplicate unchanged generated views. Do not overwrite
+renamed/custom views or silently discard a draft. Once created it remains in
+the ordinary saved view list and supports normal edit/duplicate/delete.
 `GroupPicker` also offers eligible plugin groupings for editing custom views.
 Keep a missing saved provider visible as unavailable rather than deleting it.
+
+Ordinary edits carry captured sparse field/disclosure intent into the CAS, not
+whole view after-images. `views_update` never recreates absent IDs and applies
+disclosure only to its declared grouping owner. `views_create` is insert-only;
+a replayed creation cannot replace an intervening rename, and later edits stay
+independent. `draft_update` uses its captured base-view/group owner, including
+discard, rather than adopting a newer unrelated draft's owner. Explicit full
+replacement/upsert remains separate from normal edits.
 
 No Tags-specific constant is added to the host. Plugin group captions use their
 localized metadata at render time; saved names follow normal user view-name
@@ -225,6 +234,11 @@ its rows. The metadata read has the ordinary bounded read deadline; an admitted
 compaction write is awaited outside automatic read retries. Its terminal
 failure preserves preferences and requires manual Retry, including when the
 write outlasts the metadata-read deadline.
+There is no automatic transport retry for compaction. A network failure requires
+manual Retry instead of resending a prune after its provider fence may have
+retired. A skipped compaction is not an ACK: failed normal-write intent remains
+available to queued successors; a terminal skipped item settles against the
+latest authoritative snapshot.
 
 ## Tags implementation and compatibility
 

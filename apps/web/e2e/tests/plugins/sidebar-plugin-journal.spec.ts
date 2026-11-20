@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { installFixturePlugin, uninstallFixturePlugin } from "../../helpers/plugin-fixture";
@@ -32,7 +33,9 @@ async function holdFirstSave(page: Page, afterCommit = false) {
   const finished = Promise.withResolvers<void>();
   let held = false;
   let writes = 0;
-  let body: { views_upsert?: { id: string }[] } | undefined;
+  let body:
+    | { views_create?: { id: string }[]; select_plugin_grouping?: { id: string } }
+    | undefined;
   const handler = async (route: Route) => {
     const request = route.request();
     const mutation = request.method() === "PATCH" && request.postDataJSON()?.sidebar_view_state;
@@ -174,7 +177,7 @@ for (const operation of ["append", "delete"] as const) {
         await editor.confirmDeleteActiveView("Complete view");
       }
       await save.arrived;
-      const createdId = save.body?.views_upsert?.[0]?.id;
+      const createdId = save.body?.views_create?.[0]?.id;
       if (operation === "append") expect(createdId).toBeTruthy();
       await apiClient.saveUserSettings({
         sidebar_view_state: {
@@ -276,5 +279,140 @@ test("presentation edits queued behind draft compaction preserve bounded disclos
     });
   } finally {
     await save.dispose();
+  }
+});
+
+for (const remoteChange of ["rename", "group"] as const) {
+  // @covers AC-UI-SIDEBAR-PLUGIN-GROUPING-001.2
+  test(`a dispatched collapse preserves another tab's committed ${remoteChange}`, async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, info) => {
+    await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
+    await expect(header(testPage, "keep")).toHaveAttribute("aria-expanded", "true");
+    const source = (await preferences(apiClient, seedData.workspaceId)).views.find(
+      (view) => view.id === "complete-plugin-view",
+    )!;
+    const group =
+      remoteChange === "group" ? "plugin:kandev-plugin-e2e:fixture-option-01" : SIDEBAR_GROUPING;
+    const remoteKey =
+      "plugin-group:" +
+      createHash("sha256")
+        .update(group + "\0other")
+        .digest("hex");
+    const save = await holdFirstSave(testPage);
+    try {
+      await header(testPage, "keep").click();
+      await save.arrived;
+      await apiClient.saveUserSettings({
+        sidebar_view_state: {
+          workspace_id: seedData.workspaceId,
+          views_upsert: [{ ...source, name: "Remote name", group, collapsed_groups: [remoteKey] }],
+        },
+      });
+      const acknowledged = testPage.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          response.url().endsWith("/api/v1/user/settings"),
+      );
+      save.release();
+      await acknowledged;
+      const expected =
+        remoteChange === "group" ? [remoteKey] : [remoteKey, groupingValueKey("keep")];
+      await expect
+        .poll(async () => {
+          const view = (await preferences(apiClient, seedData.workspaceId)).views.find(
+            (v) => v.id === source.id,
+          )!;
+          return { name: view.name, group: view.group, collapsed: view.collapsed_groups };
+        })
+        .toEqual({ name: "Remote name", group, collapsed: expected });
+      await testPage.reload();
+      await new SidebarFilterPopoverPage(testPage).expectActiveViewChip("Remote name");
+      expect(
+        (await preferences(apiClient, seedData.workspaceId)).views.find((v) => v.id === source.id)
+          ?.collapsed_groups,
+      ).toEqual(expected);
+      await testPage.screenshot({
+        path: info.outputPath(`dispatched-collapse-${remoteChange}.png`),
+        animations: "disabled",
+      });
+    } finally {
+      await save.dispose();
+    }
+  });
+}
+
+test("two tabs selecting one provider reuse one generated view without replacing a renamed view", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, info) => {
+  const source = (await preferences(apiClient, seedData.workspaceId)).views.find(
+    (view) => view.id === "complete-plugin-view",
+  )!;
+  await apiClient.saveUserSettings({
+    sidebar_view_state: {
+      workspace_id: seedData.workspaceId,
+      views_upsert: [
+        {
+          ...source,
+          generated_plugin_grouping: {
+            reference: SIDEBAR_GROUPING,
+            name: "Original generated name",
+          },
+        },
+      ],
+    },
+  });
+  const other = await testPage.context().newPage();
+  const choose = async (page: Page) => {
+    await page.getByTestId("tasks-view-picker").click();
+    await page
+      .getByRole("group", { name: "Plugin groupings", exact: true })
+      .getByRole("menuitem", { name: "Fixture grouping", exact: true })
+      .click();
+  };
+  const generated = (state: WorkspaceState) =>
+    state.views.filter(
+      (view) =>
+        view.generated_plugin_grouping?.reference === SIDEBAR_GROUPING &&
+        view.generated_plugin_grouping.name === view.name,
+    );
+  await testPage.goto(`/?workspaceId=${seedData.workspaceId}`);
+  await other.goto(`/?workspaceId=${seedData.workspaceId}`);
+  await expect(header(testPage, "keep")).toBeVisible();
+  await expect(header(other, "keep")).toBeVisible();
+  const save = await holdFirstSave(testPage);
+  try {
+    await choose(testPage);
+    await save.arrived;
+    await choose(other);
+    await expect
+      .poll(async () => generated(await preferences(apiClient, seedData.workspaceId)).length)
+      .toBe(1);
+    const selected = (await preferences(apiClient, seedData.workspaceId)).active_view_id;
+    const acknowledged = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "PATCH" && response.url().endsWith("/api/v1/user/settings"),
+    );
+    save.release();
+    await acknowledged;
+    const persisted = await preferences(apiClient, seedData.workspaceId);
+    expect(generated(persisted).map((view) => view.id)).toEqual([selected]);
+    expect(persisted.active_view_id).toBe(selected);
+    expect(persisted.views.find((view) => view.id === source.id)).toEqual({
+      ...source,
+      generated_plugin_grouping: { reference: SIDEBAR_GROUPING, name: "Original generated name" },
+    });
+    await testPage.reload();
+    await other.reload();
+    await expect(testPage.getByTestId("tasks-view-picker")).toContainText("Fixture grouping");
+    await expect(other.getByTestId("tasks-view-picker")).toContainText("Fixture grouping");
+    await testPage.screenshot({ path: info.outputPath("concurrent-generated-selection.png") });
+  } finally {
+    await save.dispose();
+    await other.close();
   }
 });

@@ -1573,12 +1573,15 @@ export class ApiClient {
     sidebar_view_state?: {
       workspace_id: string;
       views?: unknown[];
+      views_create?: unknown[];
       views_upsert?: unknown[];
       views_update?: unknown[];
       view_ids_delete?: string[];
       view_order?: string[];
       active_view_id?: string;
       draft?: unknown;
+      draft_update?: unknown;
+      select_plugin_grouping?: unknown;
     };
     sidebar_layout_state?: {
       workspace_id: string;

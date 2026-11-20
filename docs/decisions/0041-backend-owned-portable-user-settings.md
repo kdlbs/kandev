@@ -1,6 +1,6 @@
 # 0041: Backend-Owned Portable User Settings
 
-**Status:** accepted (amended 2026-09-03)
+**Status:** accepted (amended 2026-11-19)
 **Date:** 2026-07-15
 **Area:** frontend, backend
 
@@ -41,6 +41,27 @@ stored JSON before emitting a complete HTTP or WebSocket payload. The frontend
 uses one wire-to-store mapper for boot hydration, mutation responses, and live
 updates. An unloaded frontend state is only a rendering placeholder. It is not
 an independent source of product defaults.
+
+### Workspace sidebar mutation isolation
+
+Saved-view changes carry operation intent into the settings CAS. `views_create`
+inserts absent IDs only; `views_update` carries sparse fields and grouping-owned
+disclosure additions/removals against an existing ID. A replayed creation and
+its successor edit remain independent. `draft_update` carries sparse fields
+under a base-view/group owner, including guarded discard. Explicit replacement
+and upsert remain available for intentional imports, not ordinary edits.
+
+Generated plugin-view selection uses `select_plugin_grouping` inside that same
+CAS: reuse the latest unchanged matching view, otherwise allocate its unique
+display name and create the candidate within the view limit. Renamed/custom
+views and pending drafts remain protected. The browser waits for the
+authoritative selected ID rather than installing a provisional saved view.
+
+Client queues preserve captured operation intent across newer HTTP/WebSocket
+snapshots. A skipped metadata-compaction item is not a persistence ACK and
+cannot discard failed predecessor intent needed by a queued successor.
+Disclosure-only compaction has no automatic transport retry: its provider
+admission fence cannot be carried across an unobserved retry interval.
 
 ## Consequences
 

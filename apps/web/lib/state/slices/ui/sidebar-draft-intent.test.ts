@@ -1,5 +1,7 @@
+import { applyDraftMutationForTest, applyViewMutationsForTest } from "./sidebar-view-test-helpers";
 import { beforeEach, expect, it, vi } from "vitest";
 import { workspaceId } from "@/lib/types/ids";
+import { registerUsersHandlers } from "@/lib/ws/handlers/users";
 import { createAppStore } from "@/lib/state/store";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import type {
@@ -53,12 +55,11 @@ it.each(["field edit after compaction", "compaction after acknowledged field edi
     vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
       const patch = payload.sidebar_view_state!;
       const views = new Map(server.views.map((view) => [view.id, view]));
-      for (const view of patch.views_upsert ?? []) views.set(view.id, view);
-      for (const view of patch.views_update ?? []) if (views.has(view.id)) views.set(view.id, view);
+      applyViewMutationsForTest(views, patch);
       server = {
         ...server,
         views: [...views.values()],
-        ...("draft" in patch ? { draft: patch.draft! } : {}),
+        draft: applyDraftMutationForTest(views, server.active_view_id, server.draft, patch),
       };
       if (++writes === 1) return first.promise;
       return acknowledge();
@@ -91,3 +92,69 @@ it.each(["field edit after compaction", "compaction after acknowledged field edi
     });
   },
 );
+
+it("a queued discard cannot clear a newer different-group draft", async () => {
+  const base = createDefaultSidebarView("base", "Base");
+  let revision = 1;
+  let server: SidebarWorkspaceStateApi = {
+    views: [toApiSidebarView(base)],
+    active_view_id: base.id,
+    draft: toApiSidebarDraft({
+      baseViewId: base.id,
+      filters: [],
+      sort: base.sort,
+      group: MULTI,
+      groupIndent: true,
+      collapsedGroups: ["kept"],
+    }),
+  };
+  const acknowledge = (): UserSettingsResponse => ({
+    settings: {
+      user_id: "default-user",
+      workspace_id: workspaceId("ws"),
+      repository_ids: [],
+      updated_at: "",
+      revision,
+      sidebar_views_by_workspace: { ws: structuredClone(server) },
+    },
+  });
+  const store = createAppStore({
+    workspaces: { items: [], activeId: "ws" },
+    sidebarViewsByWorkspace: mapSidebarWorkspaces({ ws: server }, {}, revision),
+  });
+  store.setState((state) => ({ userSettings: { ...state.userSettings, revision } }));
+  const first = Promise.withResolvers<UserSettingsResponse>();
+  let initial: UserSettingsResponse | undefined;
+  vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
+    const patch = payload.sidebar_view_state!;
+    const views = new Map(server.views.map((view) => [view.id, view]));
+    applyViewMutationsForTest(views, patch);
+    server = {
+      ...server,
+      views: [...views.values()],
+      draft: applyDraftMutationForTest(views, server.active_view_id, server.draft, patch),
+    };
+    revision++;
+    if (!initial) {
+      initial = acknowledge();
+      return first.promise;
+    }
+    return acknowledge();
+  });
+  store.getState().renameSidebarView(base.id, "Local rename");
+  store.getState().discardSidebarDraft();
+  server.draft = { ...server.draft!, group: "plugin:tags:other", collapsed_groups: ["remote-key"] };
+  revision++;
+  registerUsersHandlers(store)["user.settings.updated"]!({
+    type: "notification",
+    action: "user.settings.updated",
+    payload: acknowledge().settings,
+  });
+  first.resolve(initial!);
+  await store.getState().waitForSidebarViewSync("ws");
+  expect(server.draft).toMatchObject({
+    group: "plugin:tags:other",
+    collapsed_groups: ["remote-key"],
+  });
+  expect(store.getState().sidebarViewsByWorkspace.ws.draft?.group).toBe("plugin:tags:other");
+});

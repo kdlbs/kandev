@@ -1110,7 +1110,7 @@ func applySidebarViews(settings *models.UserSettings, req *UpdateUserSettingsReq
 		if strings.TrimSpace(views[i].Name) == "" {
 			return errors.New("sidebar_views: view name must not be empty")
 		}
-		if err := validateSidebarPluginView(views[i]); err != nil {
+		if err := validateSidebarPluginView(&views[i]); err != nil {
 			return fmt.Errorf("sidebar_views: %w", err)
 		}
 		if _, dup := seen[views[i].ID]; dup {

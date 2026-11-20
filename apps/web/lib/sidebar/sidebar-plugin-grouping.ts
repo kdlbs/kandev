@@ -42,17 +42,12 @@ export function findGeneratedSidebarPluginView(
 }
 
 export function createSidebarPluginView(
-  views: SidebarView[],
   grouping: SidebarPluginGroupingChoice,
   id: string,
 ): SidebarView {
-  const names = new Set(views.map((view) => view.name));
-  let name = grouping.label;
-  let suffix = 2;
-  while (names.has(name)) name = `${grouping.label} ${suffix++}`;
   return {
-    ...createDefaultSidebarView(id, name),
+    ...createDefaultSidebarView(id, grouping.label),
     group: grouping.reference,
-    generatedPluginGrouping: { reference: grouping.reference, name },
+    generatedPluginGrouping: { reference: grouping.reference, name: grouping.label },
   };
 }

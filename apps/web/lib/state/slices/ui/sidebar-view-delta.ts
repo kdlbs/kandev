@@ -1,6 +1,13 @@
 import type { SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 import { toApiSidebarView } from "./sidebar-view-wire";
 import { cloneDraft, cloneView } from "./sidebar-view-clone";
+import { toSidebarViewUpdate } from "./sidebar-view-update";
+import type {
+  SidebarViewApi,
+  SidebarViewUpdateApi,
+  UserSettingsUpdatePayload,
+} from "@/lib/types/http-user-settings";
+import { sidebarDraftDelta } from "./sidebar-draft-update";
 
 export type SidebarSnapshot = {
   views: SidebarView[];
@@ -120,17 +127,16 @@ export function rebaseSidebarMutation(
 export function sidebarViewDelta(before: SidebarView[], after: SidebarView[]) {
   const previous = new Map(before.map((view) => [view.id, view]));
   const next = new Set(after.map((view) => view.id));
-  const changed = after
-    .filter((view) => {
-      const old = previous.get(view.id);
-      return (
-        old !== view &&
-        JSON.stringify(old && toApiSidebarView(old)) !== JSON.stringify(toApiSidebarView(view))
-      );
-    })
-    .map(toApiSidebarView);
-  const created = changed.filter((view) => !previous.has(view.id));
-  const updated = changed.filter((view) => previous.has(view.id));
+  const created: SidebarViewApi[] = [];
+  const updated: SidebarViewUpdateApi[] = [];
+  for (const view of after) {
+    const old = previous.get(view.id);
+    if (!old) created.push(toApiSidebarView(view));
+    else {
+      const update = toSidebarViewUpdate(old, view);
+      if (update) updated.push(update);
+    }
+  }
   const deleted = before.filter((view) => !next.has(view.id)).map((view) => view.id);
   const order = after.map((view) => view.id);
   const naturalOrder = [
@@ -139,9 +145,48 @@ export function sidebarViewDelta(before: SidebarView[], after: SidebarView[]) {
   ];
   const reordered = naturalOrder.some((id, index) => id !== order[index]);
   return {
-    ...(created.length ? { views_upsert: created } : {}),
+    ...(created.length ? { views_create: created } : {}),
     ...(updated.length ? { views_update: updated } : {}),
     ...(deleted.length ? { view_ids_delete: deleted } : {}),
     ...(reordered ? { view_order: order } : {}),
   };
+}
+
+function sidebarSettingsDelta(before: SidebarSnapshot, after: SidebarSnapshot) {
+  return {
+    ...sidebarViewDelta(before.views, after.views),
+    ...(before.activeViewId !== after.activeViewId ? { active_view_id: after.activeViewId } : {}),
+    ...sidebarDraftDelta(before, after),
+  };
+}
+
+export function sidebarWriteDelta(
+  before: SidebarSnapshot,
+  after: SidebarSnapshot,
+  failed: ReadonlyArray<{ before: SidebarSnapshot; after: SidebarSnapshot }> = [],
+): Omit<NonNullable<UserSettingsUpdatePayload["sidebar_view_state"]>, "workspace_id"> {
+  if (!failed.length) return sidebarSettingsDelta(before, after);
+  const start = failed[0].before;
+  let desired = start;
+  const creates = new Map<string, SidebarView>();
+  const merge = (mutation: { before: SidebarSnapshot; after: SidebarSnapshot }) => {
+    const existing = new Set(mutation.before.views.map((view) => view.id));
+    for (const view of mutation.after.views)
+      if (!existing.has(view.id) && !creates.has(view.id)) creates.set(view.id, view);
+    desired = rebaseSidebarMutation(desired, mutation.before, mutation.after);
+  };
+  for (const mutation of failed) merge(mutation);
+  merge({ before, after });
+  const patch = sidebarSettingsDelta(start, desired);
+  // A replayed creation is insert-only; later edits keep their independent intent.
+  for (const view of desired.views) {
+    const original = creates.get(view.id);
+    if (!original) continue;
+    const index = patch.views_create?.findIndex((candidate) => candidate.id === view.id) ?? -1;
+    if (index < 0) continue;
+    patch.views_create![index] = toApiSidebarView(original);
+    const update = toSidebarViewUpdate(original, view);
+    if (update) (patch.views_update ??= []).push(update);
+  }
+  return patch;
 }

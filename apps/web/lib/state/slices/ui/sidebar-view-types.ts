@@ -108,3 +108,8 @@ export type SidebarDisclosureContext = {
   workspaceId?: string;
   isCurrent?: () => boolean;
 };
+
+export type SidebarViewStateSetter = (
+  recipe: (draft: { sidebarViews: SidebarSliceState }) => void,
+  shouldReplace?: false | undefined,
+) => void;

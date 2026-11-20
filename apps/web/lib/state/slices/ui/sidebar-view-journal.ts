@@ -3,7 +3,7 @@ import { cloneDraft, cloneView } from "./sidebar-view-clone";
 import type { SidebarSnapshot } from "./sidebar-view-delta";
 import type { SidebarSliceState } from "./sidebar-view-types";
 
-export type SidebarWriteKind = "views" | "local" | "compaction";
+export type SidebarWriteKind = "views" | "local" | "compaction" | "selection";
 export type SidebarWriteJournal = {
   latestRequestId: number;
   pending: number;
@@ -21,6 +21,11 @@ export function getSidebarWriteJournal(owner: object): SidebarWriteJournal {
   const created: SidebarWriteJournal = { latestRequestId: 0, pending: 0 };
   journals.set(owner, created);
   return created;
+}
+
+export function clearSidebarWriteRollback(journal: SidebarWriteJournal): void {
+  journal.failedRollback = undefined;
+  journal.failedWriteKind = undefined;
 }
 
 export function snapshotSidebar(state: SidebarSliceState): SidebarSnapshot {

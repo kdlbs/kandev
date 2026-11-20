@@ -6,7 +6,8 @@ import { registerUsersHandlers } from "@/lib/ws/handlers/users";
 import { createDefaultSidebarView } from "./sidebar-view-builtins";
 import { mapSidebarWorkspaces } from "./sidebar-workspace-state";
 import { toApiSidebarView } from "./sidebar-view-wire";
-import type { SidebarViewApi, UserSettingsResponse } from "@/lib/types/http-user-settings";
+import type { UserSettingsResponse } from "@/lib/types/http-user-settings";
+import { applyViewMutationsForTest } from "./sidebar-view-test-helpers";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({ updateUserSettings: vi.fn() }));
 beforeEach(() => {
@@ -47,13 +48,8 @@ it.each(["newer rename event", "newer delete event", "deletion before update adm
     const first = Promise.withResolvers<UserSettingsResponse>();
     let initial: UserSettingsResponse | undefined;
     vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
-      const patch = payload.sidebar_view_state! as NonNullable<
-        typeof payload.sidebar_view_state
-      > & { views_update?: SidebarViewApi[] };
-      for (const id of patch.view_ids_delete ?? []) persisted.delete(id);
-      for (const item of patch.views_upsert ?? []) persisted.set(item.id, item);
-      for (const item of patch.views_update ?? [])
-        if (persisted.has(item.id)) persisted.set(item.id, item);
+      const patch = payload.sidebar_view_state!;
+      applyViewMutationsForTest(persisted, patch);
       if (patch.active_view_id) active = patch.active_view_id;
       revision++;
       if (!initial) {

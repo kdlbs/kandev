@@ -1,3 +1,4 @@
+import { applyViewMutationsForTest } from "./sidebar-view-test-helpers";
 import { beforeEach, expect, it, vi } from "vitest";
 import { workspaceId } from "@/lib/types/ids";
 import { createAppStore } from "@/lib/state/store";
@@ -35,10 +36,7 @@ it.each(["append", "delete"])(
       await admitted.promise;
       const patch = payload.sidebar_view_state!;
       const candidate = new Map(persisted);
-      for (const id of patch.view_ids_delete ?? []) candidate.delete(id);
-      for (const view of patch.views_upsert ?? []) candidate.set(view.id, view);
-      for (const view of patch.views_update ?? [])
-        if (candidate.has(view.id)) candidate.set(view.id, view);
+      applyViewMutationsForTest(candidate, patch);
       const order = patch.view_order ?? [...candidate.keys()];
       if (order.length !== candidate.size || order.some((id) => !candidate.has(id)))
         throw new ApiError("Invalid collection order", 400, {});
@@ -55,10 +53,7 @@ it.each(["append", "delete"])(
         },
       } satisfies UserSettingsResponse;
     });
-    const created =
-      operation === "append"
-        ? store.getState().createSidebarView({ reference: "plugin:tags:tags", label: "Tag" })
-        : null;
+    const created = operation === "append" ? store.getState().createSidebarView() : null;
     if (operation === "delete") store.getState().deleteSidebarView(old.id);
     persisted.set(remote.id, toApiSidebarView(remote));
     admitted.resolve();

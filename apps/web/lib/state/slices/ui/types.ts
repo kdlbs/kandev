@@ -488,10 +488,11 @@ export type UISliceActions = {
   openBottomTerminalWithCommand: (command: string) => void;
   clearBottomTerminalCommand: () => void;
   setSidebarActiveView: (viewId: string) => void;
-  createSidebarView: (grouping?: {
+  createSidebarView: () => string | null;
+  selectSidebarPluginGrouping: (grouping: {
     reference: `plugin:${string}:${string}`;
     label: string;
-  }) => string | null;
+  }) => Promise<boolean>;
   updateSidebarDraft: (
     patch: Partial<{
       filters: FilterClause[];
