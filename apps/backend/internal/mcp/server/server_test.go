@@ -140,6 +140,53 @@ func TestMCPAttachmentObserverKeepsConnectionAttemptAcrossRollover(t *testing.T)
 	}
 }
 
+func TestMCPAttachmentObserverBuffersSessionEvidenceUntilAttemptCommit(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	events := make(chan streams.MCPAttachmentEvidence, 4)
+	s.SetAttachmentReporter(func(evidence streams.MCPAttachmentEvidence) { events <- evidence })
+	attempt := streams.MCPAttachmentAttempt{AttemptID: "load-attempt"}
+	s.BeginAttachmentAttempt(attempt)
+
+	s.registerMCPConnection("connection-during-load")
+	s.observeMCPToolsList("connection-during-load", []mcplib.Tool{{Name: "create_task_kandev"}})
+	assert.Empty(t, events, "load observations must wait until the adapter publishes its attempt")
+
+	s.CompleteAttachmentAttempt(attempt.AttemptID, true)
+	var history streams.MCPAttachmentHistory
+	history.StartAttempt(attempt)
+	for range 2 {
+		select {
+		case evidence := <-events:
+			if !history.Apply(evidence) {
+				t.Fatalf("failed to apply buffered attachment evidence: %+v", evidence)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for buffered attachment evidence")
+		}
+	}
+	server, ok := history.CurrentServer("kandev")
+	require.True(t, ok)
+	require.Equal(t, 1, server.ToolCount)
+	require.Len(t, server.Tools, 1)
+}
+
+func TestMCPAttachmentObserverDiscardsEvidenceAfterAuthenticationFailure(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	events := make(chan streams.MCPAttachmentEvidence, 4)
+	s.SetAttachmentReporter(func(evidence streams.MCPAttachmentEvidence) { events <- evidence })
+	attempt := streams.MCPAttachmentAttempt{AttemptID: "auth-attempt"}
+	s.BeginAttachmentAttempt(attempt)
+	s.registerMCPConnection("connection-during-auth-failure")
+	s.CompleteAttachmentAttempt(attempt.AttemptID, false)
+	assert.Empty(t, events, "authentication failure must discard provisional attachment observations")
+}
+
 func newTestLogger(t *testing.T) *logger.Logger {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})

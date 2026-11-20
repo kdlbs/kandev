@@ -1,10 +1,11 @@
 ---
 status: current
 system: agents
-updated: 2026-11-08
+updated: 2026-11-19
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
   - REQ-AGENTS-CODEX-RATE-SIGNATURE-001
+  - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002
 ---
 
 # Provider Error Signature Classification System Design
@@ -22,7 +23,8 @@ the established higher-priority signals and sanitized excerpt contract.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose) |
+| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose), [Devin free-model rate limit](#devin-free-model-rate-limit) |
+| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002` | [Opt-in unmatched diagnostic prefilter](#opt-in-unmatched-diagnostic-prefilter) |
 
 ## Components and responsibilities
 
@@ -30,6 +32,11 @@ the established higher-priority signals and sanitized excerpt contract.
   `rules.go` and the classification flags applied to each code.
 - **`internal/agent/runtime/dynamic`** evaluates the classified code with the
   candidate's saved recovery policy and opens resource circuits.
+
+With the extension enabled, the terminal stream consumer selects known rules by
+`AgentType`, retaining the legacy `AgentID` fallback when type is absent. OFF
+preserves the current base attribution. Execution identity, generation,
+output and effect fences are preserved.
 
 ## Inputs that carry prose
 
@@ -125,6 +132,79 @@ Interactive policy belongs to Platform. Office and dynamic routing consume the
 new classification through their existing policies, without a new retry policy.
 [Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).
 
+## Opt-in unmatched diagnostic prefilter
+
+Requirement 002 adds `features.providerKeywordContext`, off in every profile
+and restart-required. Configuration/registry/profile/frontend feature bindings
+share that identity and `KANDEV_FEATURES_PROVIDER_KEYWORD_CONTEXT`.
+
+Existing injection, typed status, managed-runtime, provider-specific,
+provider-neutral and runtime-environment checks retain their order. Only an
+unmatched diagnostic reaches `prefilter.go`, before the phase default. Within
+the prefilter, structured status precedes keyword groups and context. Typed
+statuses already recognized by the existing classifier never get reclassified.
+The 400 request/context distinction authorizes no circuit or replay permission.
+
+`keyword_groups.go` owns the semantic vocabulary. Separator normalization and
+bounded stem matching count distinct terms, not occurrences. Single terms and
+ties retain low confidence. Unresolved ACCOUNT or GONE evidence also retains
+ambiguity when a different group wins by term count; one such term cannot
+authorize a stop, hold or automatic retry. Error envelopes, source completeness and current
+invocation evidence remain separate from semantic confidence. A keyword match
+cannot turn a quoted success into a terminal provider failure.
+
+`KeywordContext` is optional trusted input with unknown zero values.
+`KeywordDecision` carries group, suspension scope, backoff and default action.
+The orchestrator retains the existing diagnostic-correlation rules. New
+unmarked assistant text remains output; the new terminal classifier cannot
+clear that safety fence. Its existing prompt-attempt record
+holds at most sixteen observations. Attempt identities deduplicate results;
+successful output/effects clear continuity and the existing evidence lifecycle
+owns cleanup. No service, persistent log, fingerprint algorithm or periodic task
+is introduced.
+
+Account context comes from the current session's actual executor and runtime
+environment, not the profile family or backend login alone. Session-aware
+profile loading keeps that binding consistent in the conductor and classifier.
+The existing registered-agent billing detector is reused only when a local
+launch demonstrably uses the backend's unchanged default credential home.
+Different or unknown homes, remote executors, custom launch/provider overrides,
+and incomplete bindings stay unknown without consulting that detector. No new
+credential-file reader, account registry or identity algorithm is added.
+Known same-account profiles still share the existing credential binding.
+Candidate `KeywordAccountID`
+uses that same identity without changing the ordinary `BindingKey` used by
+known-rule failures. Missing bindings remain isolated. Dynamic circuits reuse
+the existing registry and probe leases. Path/model keys isolate unrelated
+models; a missing model stays candidate-scoped. Proven paid-account limits
+use a separate opt-in account key. Reset hints retain their
+deadline, and timed capacity/limit backoff progresses through 5, 15 and 30
+minutes. A model-qualified structured 404 holds only that model key; changing
+the configured model selects a different key. The registry's existing owner
+`ReleaseHold` operation can close a held key; no release API is added.
+Disabled candidates ignore keyword metadata when choosing defaults and circuit
+durations, retaining the legacy circuit behavior.
+
+Saved candidate policy overrides defaults. Unknown failures and empty
+completions retain their existing per-candidate unclassified policy and
+threshold. No confidence level bypasses replay, continuation, task ownership,
+cancellation, settlement or generation fences.
+
+The returned mid-turn action is a classification recommendation only. Existing
+continuation admission is unchanged; generic post-output retry or candidate
+continuation is not implemented by this extension.
+
+The minimal future catalog seam is the existing deterministic classifier:
+known rules stay before `classifyKeywordContext`; loading and export remain
+separate work. No loader or new rule DSL is implemented.
+
+Typed process-start and ACP-initialization failures may separate their own
+matching lifecycle wrapper after the original classification remains unknown.
+Both the complete wrapped diagnostic and the inner diagnostic remain bounded.
+The inner message still needs its error envelope and passes quote/negation
+guards. Untyped workspace/executor failures cannot use this path, and OFF and
+already classified failures keep their previous behavior.
+
 ## OpenCode admission refusal
 
 `AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.11` adds
@@ -156,3 +236,41 @@ This addition creates no new classification code, public field, or retry owner.
 
 The [implementation package](../../../plans/opencode-capacity-retry/plan.md)
 delivers the positive fixture, collision negatives, and reset-hint bounds.
+
+## Devin free-model rate limit
+
+`AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.13` adds
+`devin.stderr.free_model_rate_limit.v1` to the `devin-acp` entry of
+`providerRules` in `routingerr/rules.go`. Before it, `devin-acp` had no
+provider rule, so its free-plan notice fell through to the phase default
+(`agent_runtime_error`, low confidence, no fallback) and dynamic routing kept
+retrying the throttled candidate. The notice wording is:
+
+```text
+Reached free model rate limit. Upgrade to Max for higher limits, or switch to a different model. Your limit will reset in 8 minutes (at 12:01 UTC)
+```
+
+The rule uses `mustRuleOutsideMarkdownFences` with a line-anchored pattern
+and the established optional error labels, so fenced examples and quoted
+prose do not match. It maps to `CodeRateLimited` (`ClassTransient`,
+auto-retryable, fallback allowed) rather than `CodeQuotaLimited`: the window
+reopens within minutes or hours and names its own reset. The text does not
+match the shared `rate limit exceeded/reached` signature, so no other rule
+changes.
+
+`ruleUsesScopedTextReset` includes the rule, so only the matched line can
+supply a reset. When no explicit reset hint exists, `Classify` calls
+`parseResetAtClockHintAt` for this rule and marks `ResetHintInferred`. A
+structured HTTP 429 keeps its `http.429` classification, but the matched Devin
+line can supply an inferred reset when the response has no reset hint. An
+explicit reset hint always takes precedence.
+
+The clock has no date. With a valid relative duration, `resolveResetAtClock`
+estimates the reset time as observation time plus the duration, then compares
+the clock occurrence on that local date and the adjacent calendar dates in the
+stated zone. This handles clocks just before or after midnight and durations
+that reach beyond the next date. The duration is bounded to 24 hours and 59
+minutes. Without a usable duration, `nextDailyResetAt`, the existing
+clock-only rule extracted from the Claude parser, picks the first occurrence
+after observation time. A hint that has just elapsed only lets routing retry
+sooner; it never parks the candidate for a day.

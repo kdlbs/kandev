@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001
 created: 2026-08-08
-updated: 2026-08-30
+updated: 2026-11-10
 owners:
   - cfl
 ---
@@ -18,7 +18,28 @@ This design preserves the technical source detail for `REQ-TASKS-SESSION-DELETE-
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001` | [Migrated source detail](#migrated-source-detail), [Frontend environment-handle continuity](#frontend-environment-handle-continuity) |
+| `REQ-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001` | [Migrated source detail](#migrated-source-detail), [Runtime quiescence](#runtime-quiescence), [Frontend environment-handle continuity](#frontend-environment-handle-continuity) |
+
+## Runtime quiescence
+
+`orchestrator.Service.DeleteSession` calls `quiesceSessionExecutionBeforeDeletion` before removing the session row.
+Quiescence captures the session's execution ID and stops that exact execution with the `session deleted` reason and force enabled.
+A confirmed absent runtime permits deletion.
+A transport error or deadline retains the session and its activity for retry.
+The executor's compatibility error prefix alone does not prove runtime absence.
+
+A concurrent cancellation must release its client lease so queued teardown can proceed.
+The [cancellation design](workflow-cancelled-turn-completion.md#cancellation-client-lease-and-concurrent-stop) owns that lease rule.
+Stop still serializes runtime teardown and revalidates the captured execution before acting.
+
+Shared environment ownership does not make sibling agentctl clients interchangeable.
+`ensureWorkspaceExecutionLocked` creates or reuses the requesting session's own controller.
+`launchRestoreWorkspace` requires its execution ID, waits for readiness, and rechecks that binding before returning success.
+Environment-keyed Git state and session-owned transport identity retain their separate roles.
+An unrelated sibling readiness event does not complete a restore attempt.
+
+The [cancel/stop fix package](../../../plans/cancel-stop-client-deadlock/plan.md) covers concurrent teardown and workspace compatibility.
+It preserves the session-owned restoration repair in PR #5177.
 
 ## Migrated source detail
 
@@ -450,6 +471,42 @@ remain the authorization boundary for physical cleanup.
   reconciled, **WHEN** the new binary starts, **THEN** startup fails closed, the
   transaction rolls back, and the verified pre-upgrade backup remains the
   recovery source.
+
+## Duplicate active environment healing
+
+A newer active environment timestamp alone does not authorize deleting an older
+active environment's canonical repository inventory or Git snapshot history.
+Before duplicate environment deletion, the same transaction transfers
+repository rows only when the server-stored worktree executor/profile/generation
+and workspace identity agree with the ready winner. An empty legacy workspace
+path requires exactly one repository path matching the winner. Row IDs,
+worktree/branch/source fields and lifecycle timestamps survive. An incoming
+inventory is transferred only into an empty target. Any existing winner row,
+including one transferred from an earlier loser in the transaction, stops
+healing and rolls back all earlier changes. Slot conflicts also roll back; no
+conflict-ignore or filesystem/Git operation occurs.
+
+Environment-owned Git snapshots retain their IDs and payloads while their owner
+reference follows the canonical environment. Only sessions actually referencing
+deleted environment IDs are relinked, including borrowers of another task;
+unrelated references are not guessed from task membership. Empty duplicate rows
+keep the existing healing behavior. Active recovery claims, immutable receipts,
+recovery artifacts/operations, checkout adoptions, Kubernetes state, and
+resource handles that cannot be safely rebound stop startup without deleting
+those rows. PostgreSQL uses the existing ownership-cutover advisory lock and
+exclusive table locks. Retired environments are outside this healing.
+
+## Retired environment checkouts
+
+Task cleanup inventory lists only checkouts of environments the task owns, and
+the active owner is captured separately. A captured checkout of another
+environment of the same task therefore belongs to a retired environment. When
+its captured session is still bound to that environment, cleanup treats the
+capture as ownership proof. Retired rows are never transferred or inherited and
+cascade with the task, so the post-delete environment lookup is not consulted.
+The active owner keeps its existing transfer and shared-use checks. Removing a
+checkout whose environment has no bound session marks its inventory row
+deleted by worktree ID.
 
 ## Out of Scope
 

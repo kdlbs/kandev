@@ -4,6 +4,7 @@ import type { AvailableCommand } from "@/lib/state/slices/session-runtime/types"
 import type { TurnEventPayload } from "@/lib/types/backend";
 import type { Message } from "@/lib/types/http";
 import { sessionId, taskId } from "@/lib/types/http";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 import { t } from "@/lib/i18n";
 
 /**
@@ -50,6 +51,7 @@ export interface EmptyTurnNoticeInput {
   hadOutput: boolean | undefined;
   metadata?: Record<string, unknown>;
   isEphemeralSurface: boolean;
+  isPassthrough?: boolean;
   messages: Message[] | undefined;
   availableCommands: AvailableCommand[] | undefined;
   now: string;
@@ -96,6 +98,7 @@ export function computeEmptyTurnNotice(input: EmptyTurnNoticeInput): Message | n
   // output; `undefined` means an older backend that doesn't send the field —
   // both correctly fall through here and produce no notice.
   if (input.hadOutput !== false) return null;
+  if (input.isPassthrough === true) return null;
   if (input.metadata?.lifecycle_only === true) return null;
   if (input.metadata?.error_terminated === true) return null;
   if (input.isEphemeralSurface) return null;
@@ -144,6 +147,7 @@ export function maybeEmitEmptyTurnNotice(
     hadOutput: payload.had_output,
     metadata: payload.metadata,
     isEphemeralSurface,
+    isPassthrough: isPassthroughSession(state.taskSessions.items[sid]),
     messages: state.messages.bySession[sid],
     availableCommands: state.availableCommands.bySessionId[sid],
     now,

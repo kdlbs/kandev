@@ -25,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -834,6 +835,7 @@ func TestManager_PromptOnRunningCursorSessionKeepsLoadedAuthLink(t *testing.T) {
 		SessionID:          "session-cursor-existing",
 		AgentProfileID:     "cursor-profile",
 		ExecutorType:       "local",
+		RuntimeName:        agentruntime.RuntimeStandalone,
 		ACPSessionID:       "existing-session",
 		AgentCommand:       "cursor-acp",
 		AgentID:            "cursor-acp",

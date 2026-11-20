@@ -47,7 +47,7 @@ func testPassthroughGuardedPublication(t *testing.T, failWrite int) {
 	}
 	manager := &contextualPassthroughTestManager{reentrantPassthroughAgentManager: &reentrantPassthroughAgentManager{mockAgentManager: baseManager}}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
 	previous, owner, err := svc.beginResumeAttempt(ctx, "task1", "session1")

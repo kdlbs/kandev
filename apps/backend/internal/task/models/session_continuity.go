@@ -7,7 +7,11 @@ import (
 	"github.com/kandev/kandev/internal/common/processidentity"
 )
 
-const SessionMetaKeyAgentDeliveryRecovery = "agent_delivery_recovery"
+const (
+	SessionMetaKeyAgentDeliveryRecovery     = "agent_delivery_recovery"
+	SessionMetaKeyRecoveryNoticePending     = "session_recovery_notice_pending"
+	SessionMetaKeyDeliveryPromptTurnBinding = "delivery_prompt_turn_binding"
+)
 
 const (
 	AgentDeliveryRecoveryReconnecting = "reconnecting"
@@ -28,6 +32,7 @@ const (
 	SilentRestoreAction          = "silent_restart_restore"
 	SilentRestoreOutcomePending  = "pending"
 	SilentRestoreOutcomeRestored = "restored"
+	SilentRestoreOutcomeBlocked  = "blocked"
 )
 
 // AgentDeliveryRecovery is the persisted UI and admission snapshot for one
@@ -48,6 +53,46 @@ type AgentDeliveryRecovery struct {
 	Reconstruction    *AgentDeliveryReconstructionProvenance `json:"reconstruction,omitempty"`
 	HistoryGap        *AgentDeliveryHistoryGap               `json:"history_gap,omitempty"`
 	UpdatedAt         time.Time                              `json:"updated_at"`
+}
+
+// AgentDeliveryPromptTurnBinding pins one durable prompt to its original
+// process and transcript turn while an executor session is restored.
+type AgentDeliveryPromptTurnBinding struct {
+	OriginalRuntime   processidentity.Identity `json:"original_runtime"`
+	PromptGeneration  uint64                   `json:"prompt_generation"`
+	TaskID            string                   `json:"task_id"`
+	SessionID         string                   `json:"session_id"`
+	ExecutionID       string                   `json:"execution_id"`
+	IncarnationID     string                   `json:"incarnation_id"`
+	HarnessGeneration uint64                   `json:"harness_generation"`
+	StreamID          string                   `json:"stream_id"`
+	SubmissionID      string                   `json:"submission_id"`
+	TurnID            string                   `json:"turn_id"`
+}
+
+// RecoveryNoticeSourceIdentity returns the stable JSON tuple for an
+// interruption notice. It deliberately excludes mutable recovery state.
+func RecoveryNoticeSourceIdentity(recovery AgentDeliveryRecovery) string {
+	identity, _ := json.Marshal(struct {
+		SessionID         string `json:"session_id"`
+		IncarnationID     string `json:"incarnation_id"`
+		HarnessGeneration int64  `json:"harness_generation"`
+		SubmissionID      string `json:"submission_id"`
+	}{
+		SessionID: recovery.SessionID, IncarnationID: recovery.IncarnationID,
+		HarnessGeneration: recovery.HarnessGeneration, SubmissionID: recovery.SubmissionID,
+	})
+	return string(identity)
+}
+
+// ParseRecoveryNoticeSourceIdentity decodes a persisted interruption notice
+// identity and rejects non-canonical encodings.
+func ParseRecoveryNoticeSourceIdentity(identity string) (AgentDeliveryRecovery, bool) {
+	var source AgentDeliveryRecovery
+	if err := json.Unmarshal([]byte(identity), &source); err != nil || RecoveryNoticeSourceIdentity(source) != identity {
+		return AgentDeliveryRecovery{}, false
+	}
+	return source, true
 }
 
 // AgentDeliveryReconstructionProvenance records the retained journal evidence
@@ -85,6 +130,7 @@ type AgentDeliveryReconstructionRequest struct {
 	ExpectedWorkspacePath     string
 	NativeSessionID           string
 	MessageID                 string
+	PromptTurnBinding         *AgentDeliveryPromptTurnBinding
 	ExpectedBlock             SessionRecoveryBlock
 	SourceStreamHighWater     int64
 	SourceStreamAcknowledged  int64
@@ -122,6 +168,27 @@ func LoadAgentDeliveryRecovery(metadata map[string]interface{}) (AgentDeliveryRe
 		return AgentDeliveryRecovery{}, false
 	}
 	return recovery, true
+}
+
+// LoadAgentDeliveryPromptTurnBinding decodes the persisted prompt owner from
+// executor metadata.
+func LoadAgentDeliveryPromptTurnBinding(metadata map[string]interface{}) (AgentDeliveryPromptTurnBinding, bool) {
+	if metadata == nil {
+		return AgentDeliveryPromptTurnBinding{}, false
+	}
+	raw, ok := metadata[SessionMetaKeyDeliveryPromptTurnBinding]
+	if !ok || raw == nil {
+		return AgentDeliveryPromptTurnBinding{}, false
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return AgentDeliveryPromptTurnBinding{}, false
+	}
+	var binding AgentDeliveryPromptTurnBinding
+	if err := json.Unmarshal(encoded, &binding); err != nil {
+		return AgentDeliveryPromptTurnBinding{}, false
+	}
+	return binding, true
 }
 
 // HarnessSessionGeneration identifies one native conversation within a

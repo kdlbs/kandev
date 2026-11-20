@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentruntime"
 )
 
 type recordingPassthroughRunner struct {
@@ -106,6 +107,8 @@ func TestCopilotPluginInitialPassthroughEmptySelectionStarts(t *testing.T) {
 func TestCopilotPluginInitialPassthroughRejectsUnsupportedExecutor(t *testing.T) {
 	mgr, execution, profile, pty, _ := newCopilotPassthroughInitialManager(t)
 	execution.ExecutorType = "local_docker"
+	execution.RuntimeName = agentruntime.RuntimeDocker
+	execution.ContainerID = "container-unsupported-executor"
 	err := mgr.startPassthroughSession(context.Background(), execution, profile)
 	var pluginErr *copilotplugins.Error
 	require.ErrorAs(t, err, &pluginErr)

@@ -71,6 +71,15 @@ export type ContextContinuationDetails = WebSocketRequestErrorDetails & {
   reason?: string;
   session_id?: string;
   generation?: number;
+  block_id?: string;
+  incarnation_id?: string;
+};
+
+export type ContextContinuationIdentity = {
+  sessionId?: string;
+  generation?: number;
+  blockId?: string;
+  incarnationId?: string;
 };
 
 export type RecoveryInspectionBusyDetails = WebSocketRequestErrorDetails & {
@@ -316,15 +325,60 @@ export function resolveRequestErrorMessage(
 }
 
 /** Returns the structured native-state loss context that authorizes history continuation. */
-export function contextContinuationDetails(error: unknown): ContextContinuationDetails | null {
+export function contextContinuationDetails(
+  error: unknown,
+  expected?: ContextContinuationIdentity,
+): ContextContinuationDetails | null {
   if (!(error instanceof WebSocketRequestError) || !isRecord(error.details)) return null;
-  if (
-    error.details.kind !== "session_restore_required" ||
-    error.details.recovery_action !== "continue_from_history"
-  ) {
-    return null;
-  }
-  return error.details as ContextContinuationDetails;
+  const details = error.details;
+  if (!isContextContinuationRequest(details)) return null;
+  if (!hasValidContextContinuationIdentity(details)) return null;
+  if (!matchesExpectedContextContinuationIdentity(details, expected)) return null;
+  return details as ContextContinuationDetails;
+}
+
+function isContextContinuationRequest(details: Record<string, unknown>): boolean {
+  return (
+    details.kind === "session_restore_required" &&
+    details.recovery_action === "continue_from_history"
+  );
+}
+
+function hasValidContextContinuationIdentity(details: Record<string, unknown>): boolean {
+  return (
+    (details.session_id === undefined || isNonEmptyIdentity(details.session_id)) &&
+    (details.block_id === undefined || isNonEmptyIdentity(details.block_id)) &&
+    (details.incarnation_id === undefined || isNonEmptyIdentity(details.incarnation_id)) &&
+    (details.generation === undefined || isPositiveSafeInteger(details.generation))
+  );
+}
+
+function matchesExpectedContextContinuationIdentity(
+  details: Record<string, unknown>,
+  expected?: ContextContinuationIdentity,
+): boolean {
+  return (
+    matchesExpectedTextIdentity(details.session_id, expected?.sessionId) &&
+    matchesExpectedNumberIdentity(details.generation, expected?.generation) &&
+    matchesExpectedTextIdentity(details.block_id, expected?.blockId) &&
+    matchesExpectedTextIdentity(details.incarnation_id, expected?.incarnationId)
+  );
+}
+
+function matchesExpectedTextIdentity(actual: unknown, expected: string | undefined): boolean {
+  return actual === undefined || !expected || actual === expected;
+}
+
+function matchesExpectedNumberIdentity(actual: unknown, expected: number | undefined): boolean {
+  return actual === undefined || expected === undefined || actual === expected;
+}
+
+function isNonEmptyIdentity(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 /** Converts unknown request failures into an Error for an inline recovery alert. */

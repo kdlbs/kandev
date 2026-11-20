@@ -73,7 +73,7 @@ func TestOpenCodeAdmissionCapacityKeepsExistingPrecedence(t *testing.T) {
 	}
 
 	e = Classify(Input{Phase: PhasePromptSend, ProviderID: "opencode-acp", Stderr: "Go usage limit exceeded\n" + message})
-	if e.ClassifierRule != "opencode.acp.go_usage_limit.v1" {
+	if e.ClassifierRule != ruleOpenCodeGoUsageLimit {
 		t.Fatalf("account-limit rule lost precedence: %+v", e)
 	}
 }

@@ -159,6 +159,12 @@ time. The launcher prints phase changes and periodic status, so a long backup,
 migration, or recovery can be distinguished from an unreachable backend. These
 values describe elapsed work and do not estimate completion.
 
+A measured step also reports its own count. Byte counts use readable units with
+factors of 1024, and byte rates add a scaled unit and `/s`, for example
+`Database backup: 14.3 GB (1.0 MB/s)`. The startup page in the browser and the
+Kandev restart dialog show the same sizes. Values below 1 KB stay whole bytes,
+values from 1 KB upward keep one decimal digit, and the scale stops at TB.
+
 The launcher remains in the foreground. Press `Ctrl+C` or terminate it to stop the backend and its managed children cleanly. A force-kill can leave worktree processes or containers running; inspect them before deleting data.
 
 On macOS and Linux, Kandev includes the runtime user's `~/.local/bin` in its

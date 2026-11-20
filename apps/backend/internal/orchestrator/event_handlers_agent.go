@@ -14,6 +14,7 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
@@ -1143,7 +1144,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// Complete the current turn
 	s.reconcileCompletedCIAutoFixTurn(ctx, data.TaskID, data.SessionID, turnAtEventFire)
-	completionCtx := withWorkflowEffect(ctx, workflowEffectForEvent(data))
+	completionCtx := withWorkflowEffect(ctx, workflowEffectForCompletion(data, turnAtEventFire))
 	if turnAtEventFire != "" {
 		fixedResourceKey := s.fixedResourceForCleanCompletion(completionCtx, data, turnAtEventFire)
 		if err := s.completeTurnForTaskSessionCheckedOwned(
@@ -1192,7 +1193,12 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	if s.drainQueuedBeforeWorkflowTransition(completionCtx, data.TaskID, data.SessionID, session) {
 		return
 	}
-	if err := s.reconcileAgentDeliverySettlements(context.WithoutCancel(completionCtx), data.SessionID); err != nil {
+	settlementCtx := context.WithoutCancel(completionCtx)
+	if guardLocked {
+		settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
+	}
+	settlementCtx = withSettledDeliverySessionStateConvergenceSkipped(settlementCtx)
+	if err := s.reconcileAgentDeliverySettlements(settlementCtx, data.SessionID); err != nil {
 		s.logger.Warn("failed to prepare terminal delivery settlement before workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 	}
@@ -1217,7 +1223,11 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			cause = turnCompletionCauseUserCancellation
 		}
 		transitioned := s.processOnTurnCompleteViaEngineWithCause(transitionCtx, data.TaskID, session, cause)
-		if err := s.reconcileAgentDeliverySettlements(context.WithoutCancel(completionCtx), data.SessionID); err != nil {
+		settlementCtx := context.WithoutCancel(completionCtx)
+		if guardLocked {
+			settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
+		}
+		if err := s.reconcileAgentDeliverySettlements(settlementCtx, data.SessionID); err != nil {
 			s.logger.Warn("failed to reconcile terminal delivery after workflow evaluation",
 				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 		}
@@ -2124,6 +2134,12 @@ func (s *Service) executeQueuedMessageWithReservation(
 	if isBuiltinIntentError(err) {
 		allowFollowupDrain = false
 	}
+	if deliveryAttempted && err != nil &&
+		s.requeueUndispatchedDelivery(promptCtx, dispatchIdentity, queuedMsg, err) {
+		// A persistent failure waits for the next ready signal instead of spinning.
+		allowFollowupDrain = false
+		return
+	}
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
 		lifecyclePrompt, userMessageRecorded, deliveryAttempted, err,
@@ -2253,6 +2269,7 @@ func (s *Service) finishQueuedMessageExecution(
 ) {
 	exactReservation := reservation != nil && reservation.identity.SessionIncarnationID != ""
 	if deliveryAttempted && err != nil {
+		s.logPossiblyDeliveredAcknowledgement(queuedMsg, err)
 		if exactReservation {
 			s.acknowledgeLifecycleQueueEntryForSession(ctx, reservation.identity, queuedMsg)
 		} else {
@@ -2761,6 +2778,18 @@ func (s *Service) handleAgentCompletedAfterGuard(ctx context.Context, data watch
 	s.handleAgentCompletedLocked(ctx, data, guard)
 }
 
+func (s *Service) turnlessDeliveryCompletionOwnsPrompt(data watcher.AgentEventData) bool {
+	if data.SessionID == "" || data.AgentExecutionID == "" || data.PromptGeneration == 0 {
+		return false
+	}
+	generationOwner, ok := s.agentManager.(interface {
+		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	})
+	return ok && generationOwner.OwnsPromptGeneration(
+		data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+	)
+}
+
 // handleAgentCompletedLocked runs with the per-session cancel-in-flight guard
 // held, except around calls that themselves acquire the session lifecycle
 // lock (reclaimIdleSession, directly or via setSessionWaitingForInputIfRequested):
@@ -2775,6 +2804,15 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID))
+	if data.TurnID == "" && agentDeliveryEventIdentityPresent(data) && !s.turnlessDeliveryCompletionOwnsPrompt(data) {
+		s.logger.Debug("ignoring turn-less delivery completion without current prompt ownership",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.Uint64("event_prompt_generation", data.PromptGeneration),
+			zap.String("submission_id", data.DeliverySubmissionID))
+		return
+	}
 
 	s.markExecutionCompleted(data.SessionID, data.AgentExecutionID)
 	// agent.completed is terminal for this lifecycle execution. Retire its
@@ -2862,6 +2900,7 @@ func (s *Service) finishAgentCompleted(
 	session *models.TaskSession,
 	guard *lockedCancelInFlightGuard,
 ) {
+	s.clearKeywordFailureHistory(data.SessionID)
 	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
 	s.clearDynamicUnclassifiedStreakForCompletion(ctx, data)
 	s.resetDynamicCircuitFailuresForCompletion(ctx, data, session)
@@ -2880,7 +2919,8 @@ func (s *Service) finishAgentCompleted(
 	if !completionFollowUp {
 		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	}
-	completionCtx := withWorkflowEffect(context.WithoutCancel(ctx), workflowEffectForEvent(data))
+	closingTurnID := s.completedEventClosingTurn(ctx, data)
+	completionCtx := withWorkflowEffect(context.WithoutCancel(ctx), workflowEffectForCompletion(data, closingTurnID))
 	if data.TurnID != "" {
 		fixedResourceKey := s.fixedResourceForCleanCompletion(completionCtx, data, data.TurnID)
 		if err := s.completeTurnForTaskSessionCheckedOwned(
@@ -2895,6 +2935,20 @@ func (s *Service) finishAgentCompleted(
 			return
 		}
 		s.profileExecutionResolver.ResetFixedProfileCircuitFailures(completionCtx, fixedResourceKey)
+	} else if agentDeliveryEventIdentityPresent(data) {
+		if closingTurnID != "" {
+			if err := s.completeTurnForTaskSessionCheckedOwned(
+				completionCtx, data.TaskID, data.SessionID, closingTurnID,
+			); err != nil {
+				s.logger.Warn("ignoring turn-less delivery completion for superseded turn",
+					zap.String("task_id", data.TaskID),
+					zap.String("session_id", data.SessionID),
+					zap.String("turn_id", closingTurnID),
+					zap.Error(err))
+				go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+				return
+			}
+		}
 	} else {
 		s.completeTurnForSession(completionCtx, data.SessionID)
 	}
@@ -2912,7 +2966,12 @@ func (s *Service) finishAgentCompleted(
 	}
 
 	transitionCtx := agentCompletionTransitionAttribution(completionCtx, data)
-	if err := s.reconcileAgentDeliverySettlements(completionCtx, data.SessionID); err != nil {
+	settlementCtx := completionCtx
+	if guard != nil && guard.locked {
+		settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
+	}
+	settlementCtx = withSettledDeliverySessionStateConvergenceSkipped(settlementCtx)
+	if err := s.reconcileAgentDeliverySettlements(settlementCtx, data.SessionID); err != nil {
 		s.logger.Warn("failed to prepare terminal delivery settlement before completed workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 	}
@@ -2929,7 +2988,11 @@ func (s *Service) finishAgentCompleted(
 		}
 		transitioned = s.processOnTurnCompleteViaEngineWithCause(transitionCtx, data.TaskID, session, cause)
 	}
-	if err := s.reconcileAgentDeliverySettlements(completionCtx, data.SessionID); err != nil {
+	postSettlementCtx := completionCtx
+	if guard != nil && guard.locked {
+		postSettlementCtx = withSettledDeliverySessionStateGuardHeld(postSettlementCtx)
+	}
+	if err := s.reconcileAgentDeliverySettlements(postSettlementCtx, data.SessionID); err != nil {
 		s.logger.Warn("failed to reconcile terminal delivery after completed workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 	}
@@ -3100,6 +3163,9 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 		return nil
 	}
 	data = s.withPromptAttemptEvidence(data)
+	if data.OutputObserved || data.EffectObserved {
+		s.clearKeywordFailureHistory(data.SessionID)
+	}
 	defer s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
@@ -3134,7 +3200,7 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	s.retireInitialCreatePromptPassthroughForEvent(ctx, data)
 	if data.SessionID != "" {
 		routeResult := s.routeDynamicAgentFailureWithEvidence(
-			ctx, data, classifyKanbanFailure(data), nil, true,
+			ctx, data, s.classifyKanbanFailure(data), nil, true,
 		)
 		if routeResult.handled && !routeResult.manualRecovery {
 			return nil
@@ -4160,7 +4226,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	if s.messageCreator == nil {
 		return fmt.Errorf("recovery status message creator is unavailable")
 	}
-	authErr := isAuthError(data.ErrorMessage)
+	authErr := isAuthenticationRecoveryFailure(data)
 	resumeCorrupted := routingerr.IsResumeCorrupted(data.ErrorMessage)
 	displayMsg := agentFailureMessage(data)
 	if authErr {
@@ -4172,7 +4238,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	// Resume-corrupted failures (poisoned extended-thinking state after a
 	// session/load) can't be fixed by resuming — steer the user to a fresh
 	// session instead of dumping the raw 400.
-	classified := classifyKanbanFailure(data)
+	classified := s.classifyKanbanFailure(data)
 	statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
 	if data.Phase == models.LaunchErrorPhaseBootstrap {
 		statusMsg = fmt.Sprintf("Agent startup failed: %s", displayMsg)
@@ -4253,7 +4319,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 
 	// Include cached auth methods so the frontend can show login options.
 	if authErr {
-		if methods := s.agentManager.GetSessionAuthMethods(data.SessionID); len(methods) > 0 {
+		if methods := s.recoveryAuthMethods(ctx, data); len(methods) > 0 {
 			meta["auth_methods"] = methods
 		}
 	}
@@ -4275,6 +4341,20 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	}
 
 	return s.persistRecoveryStatusMessage(ctx, data, statusMsg, meta, turnID)
+}
+
+func (s *Service) recoveryAuthMethods(ctx context.Context, data watcher.AgentEventData) []streams.AuthMethodInfo {
+	if methods := normalizeRecoveryAuthMethods(data.SessionAuthMethods); len(methods) > 0 {
+		return methods
+	}
+	if s.agentManager == nil || data.SessionID == "" || data.AgentExecutionID == "" {
+		return nil
+	}
+	currentExecutionID, err := s.agentManager.GetExecutionIDForSession(ctx, data.SessionID)
+	if err != nil || currentExecutionID != data.AgentExecutionID {
+		return nil
+	}
+	return normalizeRecoveryAuthMethods(s.agentManager.GetSessionAuthMethods(data.SessionID))
 }
 
 func (s *Service) persistRecoveryStatusMessage(
@@ -4322,11 +4402,7 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 		!data.ProviderError.Valid() {
 		return false
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhaseStreaming,
-		ProviderID: data.AgentID,
-		Stderr:     data.ProviderError.Message,
-	})
+	classified := routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhaseStreaming, data.AgentID, data.ProviderError.Message))
 	if classified.Code != routingerr.CodeQuotaLimited || classified.Confidence != routingerr.ConfHigh {
 		return false
 	}
@@ -4412,6 +4488,11 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		if cause, ok := bootstrapFailure.SafeAgentErrorCause(operation); ok {
 			failureData.Causes = models.NormalizeAgentErrorCauses([]models.AgentErrorCause{cause})
 		}
+		if bootstrapFailure.SessionFailure != nil {
+			if safe := agentctltypes.NormalizeSessionOperationFailure(bootstrapFailure.SessionFailure); safe != nil {
+				failureData.SessionAuthMethods = safe.AuthMethods
+			}
+		}
 	}
 	var structuredStartupFailure *routingerr.ManagedRuntimeStartupError
 	if errors.As(err, &structuredStartupFailure) && structuredStartupFailure != nil {
@@ -4425,13 +4506,10 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		failureData.FailureCode = string(classified.Code)
 		failureData.FailureDetails = classified.RawExcerpt
 	}
-	authFailure := isAuthError(err.Error())
 	if structuredStartupFailure != nil && structuredStartupFailure.Cause != nil && isAuthError(structuredStartupFailure.Cause.Error()) {
-		authFailure = true
+		failureData.FailureCode = string(routingerr.CodeAuthRequired)
 	}
-	if bootstrapFailure != nil && bootstrapFailure.SafeCode() == models.AgentErrorCauseCodeAuthenticationRequired {
-		authFailure = true
-	}
+	authFailure := isAuthenticationRecoveryFailure(failureData)
 	if authFailure && structuredStartupFailure != nil {
 		failureData.FailureCode = string(routingerr.CodeAuthRequired)
 		if structuredStartupFailure.Cause != nil {

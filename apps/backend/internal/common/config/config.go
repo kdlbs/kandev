@@ -158,6 +158,7 @@ type LauncherConfig struct {
 type GitHubCredentialBrokerConfig struct {
 	PublicBaseURL     string `mapstructure:"publicBaseUrl" json:"-"`
 	ReissueSigningKey string `mapstructure:"reissueSigningKey" json:"-"`
+	DisableReissue    bool   `mapstructure:"disableReissue" json:"-"`
 }
 
 func (c GitHubCredentialBrokerConfig) validate() error {
@@ -516,6 +517,7 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
+	ProviderKeywordContext bool `mapstructure:"provider_keyword_context" json:"providerKeywordContext"`
 	// IntegratedControl gates the cross-workspace navigation and existing-conversation surface.
 	IntegratedControl bool `mapstructure:"integrated_control" json:"integratedControl"`
 
@@ -905,14 +907,6 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 	// camelCase key, so AutomaticEnv would expose the undocumented
 	// KANDEV_AUTH_COOKIENAME; the canonical override is KANDEV_AUTH_COOKIE_NAME.
 	_ = v.BindEnv("auth.cookieName", "KANDEV_AUTH_COOKIE_NAME")
-	_ = v.BindEnv(
-		"githubCredentialBroker.publicBaseUrl",
-		"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL",
-	)
-	_ = v.BindEnv(
-		"githubCredentialBroker.reissueSigningKey",
-		"KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY",
-	)
 
 	selection, found, err := selectConfigFile(configPath, homeDir)
 	if err != nil {

@@ -17,18 +17,16 @@ import (
 
 // maxWakeReconcilePerTick caps the number of stuck parents processed in one
 // tick, mirroring maxRecoveryPerTick (scheduler_recovery.go). ListStuckParents
-// filters out every sticky non-actionable candidate — stale-or-missing
-// receipt, active/terminal run, unresolved or paused/stopped/pending-approval
-// assignee — in SQL before this cap is applied, so it bounds real work, not
-// resting or permanently-blocked parents.
+// filters out sticky non-actionable candidates — incomplete counted wave
+// members, stale-or-missing receipt, active/terminal run, and unresolved or
+// paused/stopped/pending-approval assignee — in SQL before this cap is
+// applied, so it bounds real work, not permanently-blocked parents.
 const maxWakeReconcilePerTick = 5
 
 // ParentWakeReconciler is a level-triggered backstop for the
-// task_children_completed wake: queueChildrenCompletedRun
-// (event_subscribers.go) fires it edge-triggered off the child-completion
-// event, and that dispatch can be lost without re-delivery. This handler
-// re-derives "is this parent stuck" from current task state every tick, then
-// sends the trigger through the same workflow engine used by the edge path.
+// task_children_completed wake. The orchestrator reacts to committed child
+// state changes; this handler re-derives "is this parent stuck" from current
+// task state every tick and re-delivers any wake that was not recorded.
 type ParentWakeReconciler struct {
 	scheduler *SchedulerIntegration
 	logger    *logger.Logger
@@ -218,12 +216,8 @@ func (h *ParentWakeReconciler) recordReceipt(
 	svc.recordWakeEmitted(c.ParentTaskID, operationID)
 }
 
-// wakeOperationID identifies one task_children_completed dispatch. Two
-// independent producers can race for the same completion wave — the
-// edge-triggered path (queueChildrenCompletedRun, event_subscribers.go) and
-// this reconciler's own sweep — so both must derive the same id from the
-// same observed state for idx_run_idempotency to actually collapse the
-// race; a per-caller counter could never do that. A completion wave is
+// wakeOperationID identifies one reconciled task_children_completed dispatch.
+// A completion wave is
 // identified by the child IDs, not by the terminal state each child
 // reached: a terminal-to-terminal edit (for example, CANCELLED to
 // COMPLETED) must not mint a new wake, so only the state suffix is

@@ -30,11 +30,16 @@ func (l assignmentBlockerLookup) ListTaskBlockers(context.Context, string) ([]*m
 	}
 	return out, l.listErr
 }
-func (l assignmentBlockerLookup) IsTaskInTerminalStep(_ context.Context, id string) (bool, error) {
-	if id == "unknown" {
-		return false, errors.New("blocker unavailable")
+func (l assignmentBlockerLookup) GetBlockerStatus(_ context.Context, id string) (models.BlockerStatus, error) {
+	switch id {
+	case "unknown":
+		return models.BlockerPending, errors.New("blocker unavailable")
+	case "terminal":
+		return models.BlockerSatisfied, nil
+	case "failed":
+		return models.BlockerFailed, nil
 	}
-	return id == "terminal", nil
+	return models.BlockerPending, nil
 }
 
 type assignmentBlockerSteps struct {
@@ -47,6 +52,7 @@ func (s assignmentBlockerSteps) GetStep(context.Context, string) (*wfmodels.Work
 }
 
 // @covers AC-OFFICE-SCHEDULER-002.3 AC-OFFICE-SCHEDULER-002.4 AC-OFFICE-SCHEDULER-002.5 AC-OFFICE-SCHEDULER-002.8
+// @covers AC-OFFICE-BLOCKER-POLICY-001.1 AC-OFFICE-BLOCKER-POLICY-001.5
 func TestAssignmentBlockerEligibility(t *testing.T) {
 	work := &wfmodels.WorkflowStep{Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}}}
 	failure := errors.New("lookup unavailable")
@@ -61,6 +67,10 @@ func TestAssignmentBlockerEligibility(t *testing.T) {
 		{name: "terminal blockers", lookup: assignmentBlockerLookup{stepID: "work", ids: []string{"terminal", "terminal"}}, steps: assignmentBlockerSteps{step: work}, want: true},
 		{name: "pending", lookup: assignmentBlockerLookup{stepID: "work", ids: []string{"pending"}}, steps: assignmentBlockerSteps{step: work}},
 		{name: "mixed", lookup: assignmentBlockerLookup{stepID: "work", ids: []string{"terminal", "pending"}}, steps: assignmentBlockerSteps{step: work}},
+		{name: "failed", lookup: assignmentBlockerLookup{stepID: "work", ids: []string{"failed"}}, steps: assignmentBlockerSteps{step: work}},
+		{name: "satisfied and failed", lookup: assignmentBlockerLookup{stepID: "work", ids: []string{"terminal", "failed"}}, steps: assignmentBlockerSteps{step: work}},
+		{name: "unknown before failed", lookup: assignmentBlockerLookup{ids: []string{"unknown", "failed"}}, warn: "office.assignment_wake.blocker_lookup_failed"},
+		{name: "step lookup error failed", lookup: assignmentBlockerLookup{stepErr: failure, ids: []string{"failed"}}, warn: "office.assignment_wake.step_lookup_failed"},
 		{name: "unbound pending", lookup: assignmentBlockerLookup{ids: []string{"pending"}}},
 		{name: "step lookup error pending", lookup: assignmentBlockerLookup{stepErr: failure, ids: []string{"pending"}}, warn: "office.assignment_wake.step_lookup_failed"},
 		{name: "nil getter pending", lookup: assignmentBlockerLookup{stepID: "work", ids: []string{"pending"}}, warn: "office.assignment_wake.no_step_getter"},

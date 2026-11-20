@@ -32,6 +32,7 @@ import { MonitorMessage } from "@/components/task/chat/messages/monitor-message"
 import { ContextCompactionMessage } from "@/components/task/chat/messages/context-compaction-message";
 import { AgentPlanMessage } from "@/components/task/chat/messages/agent-plan-message";
 import { ActionMessage } from "@/components/task/chat/messages/action-message";
+import { SessionRecoveryNotice } from "@/components/task/chat/messages/session-recovery-notice";
 import {
   KandevToolMessage,
   hasKandevRenderer,
@@ -257,6 +258,13 @@ function ClarificationRequestMessageAdapter({
 }
 
 const adapters: MessageAdapter[] = [
+  {
+    matches: (comment) =>
+      comment.type === "status" &&
+      (comment.metadata as { kind?: unknown } | undefined)?.kind ===
+        "session_restored_after_interruption",
+    render: () => <SessionRecoveryNotice />,
+  },
   {
     matches: (comment) =>
       comment.type !== "tool_execute" && Boolean(payloadRetentionMarker(comment.metadata)),

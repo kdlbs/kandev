@@ -36,9 +36,9 @@ or agent-message comment stores.
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-TASKS-WEB-PREVIEW-FEEDBACK-001` | [Ownership decision](#ownership-decision), [Persistence model](#persistence-model), [Synchronization](#synchronization), [Lifecycle](#lifecycle) |
-| `REQ-TASKS-WEB-PREVIEW-FEEDBACK-002` | [Capture bridge](#capture-bridge), [Capture payloads](#capture-payloads), [Screenshot regions](#screenshot-regions), [Marker projection](#marker-projection) |
+| `REQ-TASKS-WEB-PREVIEW-FEEDBACK-002` | [Capture bridge](#capture-bridge), [Capture payloads](#capture-payloads), [Screenshot regions](#screenshot-regions), [Canvas pixel readability](#canvas-pixel-readability), [Marker projection](#marker-projection) |
 | `REQ-TASKS-WEB-PREVIEW-FEEDBACK-003` | [Composer projection](#composer-projection), [Canonical prompt](#canonical-prompt), [Atomic acceptance](#atomic-acceptance) |
-| `REQ-TASKS-WEB-PREVIEW-FEEDBACK-004` | [Responsive interaction](#responsive-interaction), [Accessibility](#accessibility), [Failure and recovery](#failure-and-recovery) |
+| `REQ-TASKS-WEB-PREVIEW-FEEDBACK-004` | [Responsive interaction](#responsive-interaction), [Comment surface](#comment-surface), [Accessibility](#accessibility), [Failure and recovery](#failure-and-recovery) |
 
 ## Ownership decision
 
@@ -270,6 +270,11 @@ than guaranteeing the active preview region. Its constraints remain documented
 by [MDN](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia)
 and the [W3C specification](https://www.w3.org/TR/screen-capture/).
 
+### Canvas pixel readability
+
+WebGL readability and blank-canvas detection are designed in
+[web preview feedback part 2](web-preview-feedback-02.md#canvas-pixel-readability).
+
 ## Marker projection
 
 Saved text and element items are immutable captures even when the live page
@@ -314,12 +319,10 @@ or preview URL does not grant access to another task's feedback.
 
 ### Desktop
 
-Browser and HTML-preview toolbars expose one **Annotate** control with the
-pending count. Its menu offers Text, Element, and Screenshot region modes and
-opens the pending panel. Choosing a mode closes the menu and puts the iframe in
-that single active mode. A completed capture opens an anchored Kandev Popover
-with capture summary, screenshot thumbnail when applicable, required comment,
-Cancel, and Add.
+Browser and HTML-preview toolbars expose one **Annotate** toggle with the
+pending count. It enters the persistent annotation mode designed in
+[part 3](web-preview-feedback-03.md#mode-and-tools). A completed capture opens
+the shared [selection comment surface](#comment-surface) next to the capture.
 
 The pending panel lists every page group in stable order and supports inspect,
 comment edit, and delete. **Clear all** uses a destructive confirmation and the
@@ -331,8 +334,9 @@ the normal task composer owns delivery.
 The focused preview header exposes one 44-pixel **Annotate** action with a count
 badge. It opens a bottom Drawer with mode choices and the pending list. Choosing
 a mode closes the Drawer so the preview retains the available viewport. A
-completed capture reopens the Drawer directly on the comment form. The Drawer
-has one internal vertical scroll owner, safe-area padding, focus return, and no
+completed capture opens the shared selection comment surface as its own bottom
+Drawer, and the feedback Drawer stays closed. The feedback Drawer has one
+internal vertical scroll owner, safe-area padding, focus return, and no
 horizontal page overflow.
 
 While text or element capture is active, ordinary page interaction remains
@@ -344,6 +348,12 @@ ordinary page scrolling.
 The shipped mobile HTML focused viewer supplies the page composition and the
 existing task Drawer patterns supply containment and focus behavior. Shared
 capture and mutation hooks own behavior; responsive wrappers own arrangement.
+
+## Comment surface
+
+Capture comments and pending-item edits use the shared selection comment
+surface. See [web preview feedback part 2](web-preview-feedback-02.md#comment-surface).
+Annotation mode, drafts, and region editing are in [part 3](web-preview-feedback-03.md).
 
 ## Accessibility
 
@@ -467,8 +477,8 @@ Ordinary and plan-only receipt formats remain compatible.
 
 `use-preview-capture.ts` owns a logical draft identity and its comment.
 Screenshot upload enriches that draft with an attachment ID without changing
-its identity. `DraftEditor` uses controlled comment state rather than an effect
-that resets input on object replacement.
+its identity. The shared comment surface receives that comment as controlled
+state, so replacing the draft object never resets the input.
 
 Successful create or explicit discard settles the matching draft. Failed
 creation retains the PNG, comment, and upload ID. Terminal callbacks compare
@@ -527,6 +537,12 @@ snapshot. Clear retains its revision check and confirmation.
   reviewed current version rather than silently omitting stale items.
 - If source navigation or DOM changes invalidate an anchor, the immutable
   capture stays in the pending list with an unavailable-marker state.
+- A canvas region that rasterizes to one uniform color keeps the draft and
+  shows a warning, and the user can still save it (see
+  [part 2](web-preview-feedback-02.md#canvas-pixel-readability)).
+- A queued feedback message whose dispatch fails before the Agent runtime
+  could receive it stays queued (see
+  [plan comments part 2](plan-comments-02.md)).
 
 ## Security
 
@@ -577,8 +593,6 @@ shows a need for rates such as capture failure or stale-send conflict.
   real screenshot attachment delivery.
 - Mobile Chrome E2E covers the HTML-file preview Drawer, touch region capture,
   44-pixel controls, one scroll owner, source return, and no horizontal overflow.
-- Container E2E covers a port published by a Docker task session through the
-  same Browser-panel annotation flow.
 
 ## Related decisions
 
@@ -591,3 +605,5 @@ shows a need for rates such as capture failure or stale-send conflict.
 
 - [Interactive web preview feedback](../../../plans/web-preview-feedback/plan.md)
 - [PR review fixes](../../../plans/web-preview-feedback-review-fixes/plan.md)
+- [Web preview feedback and comment surface](../../../plans/web-preview-feedback-comment-surface/plan.md)
+- [Web preview annotation mode](../../../plans/web-preview-annotation-mode/plan.md)

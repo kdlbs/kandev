@@ -271,7 +271,7 @@ func TestDispatchKanbanAgentErrorTrigger_TaskDescriptionReachesLaunchedPrompt(t 
 
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
 	svc, _ := newAgentErrorTransientTestService(t, repo, stepGetter, agentMgr, nil)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	svc.handleRecoverableFailureLocked(ctx, watcher.AgentEventData{
 		TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1", ErrorMessage: "boom",

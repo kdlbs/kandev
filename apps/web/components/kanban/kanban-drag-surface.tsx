@@ -4,6 +4,7 @@ import { useEffect, useRef, type ComponentProps, type ReactNode, type RefObject 
 import { DndContext, DragOverlay, pointerWithin } from "@dnd-kit/core";
 import { KanbanCardPreview } from "@/components/kanban-card-preview";
 import type { Task } from "@/components/kanban-card";
+import { KANBAN_BOUNDED_DRAG_SCROLL_ATTRIBUTE } from "@/hooks/domains/kanban/use-kanban-horizontal-drag-scroll";
 
 type KanbanDragSurfaceProps = Pick<
   ComponentProps<typeof DndContext>,
@@ -16,6 +17,7 @@ type KanbanDragSurfaceProps = Pick<
 
 export const KANBAN_AUTO_SCROLL_OPTIONS = {
   layoutShiftCompensation: { x: false, y: true },
+  canScroll: (element: Element) => !element.hasAttribute(KANBAN_BOUNDED_DRAG_SCROLL_ATTRIBUTE),
 } as const;
 
 // A drag's pointer release must not activate another workflow's card.

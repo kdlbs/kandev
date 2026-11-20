@@ -77,11 +77,14 @@ func (h *Handlers) SetSendOperationStore(store SendOperationStore) {
 	h.sendOperationStore = store
 }
 
-// SetSendOperationRetention wires the bounded retention pass. The wiring site
-// wraps the store's prune call in maintenance admission, so retention can never
-// block or fail a live send: a busy lease simply defers the batch.
-func (h *Handlers) SetSendOperationRetention(prune func(ctx context.Context)) {
-	h.sendOperationRetention = prune
+// SetSendOperationRetention wires one owned retention batch at a time. The
+// caller must run the returned stop function before closing the store.
+func (h *Handlers) SetSendOperationRetention(ctx context.Context, prune func(context.Context)) func() {
+	if h.sendOperationRetention != nil {
+		h.sendOperationRetention.stop()
+	}
+	h.sendOperationRetention = newSendOperationRetentionWorker(ctx, prune)
+	return h.sendOperationRetention.stop
 }
 
 // sendOperationClaimRequest is the delivery-determining part of a send, exactly
@@ -139,7 +142,7 @@ func (h *Handlers) claimSendOperation(
 	}
 
 	operation := &models.TaskMessageSendOperation{
-		ID:                    newSendOperationID(req),
+		ID:                    newSendOperationID(),
 		OperationID:           req.OperationID,
 		SenderTaskID:          req.SenderTaskID,
 		SenderSessionID:       req.SenderSessionID,
@@ -165,7 +168,7 @@ func (h *Handlers) claimSendOperation(
 		zap.String("sender_task_id", req.SenderTaskID),
 		zap.String("sender_session_id", req.SenderSessionID))
 	recordSendOperationMetric(sendOperationOutcomeClaimed, "")
-	h.pruneSendOperationsAsync(ctx)
+	h.pruneSendOperationsAsync()
 	return claimOutcome{operation: operation}, nil
 }
 
@@ -376,7 +379,7 @@ func messageIDOf(message *models.Message) string {
 }
 
 // newSendOperationID keeps the row key independent of the caller identity.
-func newSendOperationID(_ sendOperationClaimRequest) string {
+func newSendOperationID() string {
 	return "sendop-" + uuid.NewString()
 }
 
@@ -397,23 +400,12 @@ func sendOperationMetricKey(outcome, deliveryStatus string) string {
 	return "outcome=" + outcome + ";delivery_status=" + deliveryStatus
 }
 
-// pruneSendOperationsAsync runs one bounded retention batch off the send path.
-// It is detached, best-effort, and never reports failure to the caller: a full
-// retention queue delays a cleanup that no live send depends on.
-func (h *Handlers) pruneSendOperationsAsync(ctx context.Context) {
-	prune := h.sendOperationRetention
-	if prune == nil {
-		return
-	}
-	go func() {
-		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendOperationRetentionTimeout)
-		defer cancel()
-		prune(settleCtx)
-	}()
+// pruneSendOperationsAsync skips a busy or stopped worker without delaying sends.
+func (h *Handlers) pruneSendOperationsAsync() {
+	h.sendOperationRetention.tryRun()
 }
 
-// sendOperationRetentionTimeout bounds the detached retention batch so a wedged
-// prune cannot outlive the process's patience.
+// sendOperationRetentionTimeout bounds one owned retention batch.
 const sendOperationRetentionTimeout = 30 * time.Second
 
 // validateSendOperationIDParam reports whether an identity is acceptable

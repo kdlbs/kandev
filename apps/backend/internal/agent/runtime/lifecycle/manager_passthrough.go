@@ -535,7 +535,16 @@ func (m *Manager) passthroughMCPServers(
 			return nil, err
 		}
 	}
-	return builtinPassthroughMCPServers(execution, m.agentMCPURL(execution, port, builtinCoreMCPPath), operation.servers)
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return nil, fmt.Errorf("agent helper is unavailable for passthrough MCP delivery")
+	}
+	coreURL, err := m.agentMCPURL(execution, client, port, builtinCoreMCPPath)
+	if err != nil {
+		return nil, fmt.Errorf("build passthrough MCP endpoint: %w", err)
+	}
+	return builtinPassthroughMCPServers(execution, client, coreURL, operation.servers)
 }
 
 // passthroughMCPPaths computes the filesystem locations a strategy may use: a
@@ -986,6 +995,9 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	if m.passthroughRunnerForExecution(execution) == nil {
 		return fmt.Errorf("interactive runner not available for passthrough mode")
 	}
+	if err := m.requireExecutionSelectionCompatibility(ctx, execution); err != nil {
+		return err
+	}
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	current, exists := m.executionStore.Get(execution.ID)
@@ -1294,6 +1306,11 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 func (m *Manager) resumePassthroughExecution(ctx context.Context, execution *AgentExecution, expectedProcessID string) error {
 	sessionID := execution.SessionID
 	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
+		return err
+	}
+	// A retained passthrough worker must satisfy its selected runtime before a
+	// terminal process is reused or restarted.
+	if err := m.requireExecutionSelectionCompatibility(ctx, execution); err != nil {
 		return err
 	}
 

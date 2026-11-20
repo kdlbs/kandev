@@ -231,7 +231,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ChangesPanelBody environment session ownership", () => {
-  it("keeps inline commit details on the environment session across tab switches", async () => {
+  it("keeps cached details and uses the selected session for new requests", async () => {
     render(
       <TooltipProvider>
         <StateProvider>
@@ -255,6 +255,45 @@ describe("ChangesPanelBody environment session ownership", () => {
     expect(expandedCommit(FRONTEND_COMMIT).getAttribute(ARIA_EXPANDED)).toBe(EXPANDED);
     expect(screen.getByTestId(INLINE_FILE)).toBeTruthy();
     expect(mocks.requestCommitDetail).toHaveBeenCalledOnce();
+
+    act(() => {
+      appStore.setState((state) => ({
+        ...state,
+        sessionAgentctl: {
+          ...state.sessionAgentctl,
+          itemsBySessionId: {
+            ...state.sessionAgentctl.itemsBySessionId,
+            "session-a": { status: "error" },
+            "session-a-sibling": { status: "ready", agentExecutionId: "execution-sibling" },
+          },
+        },
+      }));
+    });
+
+    mocks.requestCommitDetail.mockResolvedValueOnce({
+      source: "local",
+      success: true,
+      files: {
+        "backend/file.ts": {
+          path: "backend/file.ts",
+          status: "modified",
+          staged: false,
+          additions: 1,
+          deletions: 0,
+        },
+      },
+    });
+    fireEvent.click(expandedCommit("backend-commit"));
+    expect(await screen.findByTestId("commit-file-backend-file.ts")).toBeTruthy();
+    expect(mocks.requestCommitDetail).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        local: {
+          sessionId: "session-a-sibling",
+          taskId: "task-a",
+          agentctlReady: true,
+        },
+      }),
+    );
   });
 });
 
@@ -406,6 +445,38 @@ describe("ChangesPanelBody Git status presentation", () => {
 
     renderPanel(true);
     expect(screen.getByText(EMPTY_MESSAGE)).toBeTruthy();
+  });
+
+  it("shows root files instead of the empty state and opens them without a repository", () => {
+    const onEditFile = vi.fn();
+    render(
+      <TooltipProvider>
+        <StateProvider>
+          <OwnedChangesPanelBody
+            {...panelProps()}
+            hasAnything={false}
+            hasCommits={false}
+            onEditFile={onEditFile}
+            gitStatus={{ ...panelProps().gitStatus, membershipReady: true, showEmpty: true }}
+          />
+          <StoreCapture />
+        </StateProvider>
+      </TooltipProvider>,
+    );
+    setContext(...TASK_A_CONTEXT);
+    act(() => {
+      appStore.getState().setWorkspaceRootFiles("environment-a", {
+        supported: true,
+        files: [{ path: "dashboard.json", size: 12, modified_at: "2026-11-19T10:00:00Z" }],
+        truncated: false,
+        destinations: [],
+      });
+    });
+
+    expect(screen.getByTestId("changes-workspace-root-files")).toBeTruthy();
+    expect(screen.queryByText(EMPTY_MESSAGE)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "dashboard.json" }));
+    expect(onEditFile).toHaveBeenCalledWith("dashboard.json", undefined);
   });
 });
 

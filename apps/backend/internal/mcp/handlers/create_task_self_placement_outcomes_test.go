@@ -100,6 +100,7 @@ func TestMCPCreateTaskSelfPlacementIdentityLost(t *testing.T) {
 			return err
 		}))
 		payload := selfPlacementCreatePayload(f, f.child.ID)
+		payload["workspace_mode"] = mcpWorkspaceModeInheritParent
 		payload["external_id"], payload["start_agent"], payload["description"] = " released-during-creation ", true, "Do this work"
 		result := selfPlacementResult(t, f.create(t, f.caller(), payload))
 		require.False(t, result.Deduplicated)
@@ -132,6 +133,7 @@ func TestMCPCreateTaskSelfPlacementFailures(t *testing.T) {
 				case "blocker":
 					payload["blocked_by"] = []string{unknownReferenceUUID}
 				case "workspace attachment":
+					payload["workspace_mode"] = mcpWorkspaceModeInheritParent
 					f.svc.SetWorkspacePolicyAttacher(selfPlacementPolicyAttacher(func(context.Context, string, string, service.WorkspacePolicy) error {
 						return errors.New("workspace attachment unavailable")
 					}))

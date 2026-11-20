@@ -74,3 +74,10 @@ regression proves that reuse is unchanged.
 - A structured reset hint must never be overwritten by text parsing.
 - No provider rule other than codex-acp changes, and candidate ordering and
   the shared credential binding circuit are untouched.
+
+## Follow-up scope
+
+The [Office mid-run quota package](../office-midrun-quota-classification/plan.md)
+owns issue #5222's workspace-credit notice and its regression coverage.
+It reuses the prompt-correlation implementation recorded here.
+This package's original usage-limit, parser, and manual-recovery scope and results remain unchanged.

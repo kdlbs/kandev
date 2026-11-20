@@ -156,16 +156,20 @@ func (r *sidebarCancellationBlockers) ListBlockersForTasks(context.Context, []st
 
 type sidebarStatusSummaryReader struct {
 	repository.TaskStatusSummaryRepository
-	loadCalls  int
-	writeCalls int
-	rows       map[string]*statussummary.TaskStatusSummary
+	loadCalls        int
+	loadsAfterCancel int
+	writeCalls       int
+	rows             map[string]*statussummary.TaskStatusSummary
 }
 
 func (r *sidebarStatusSummaryReader) LoadTaskStatusSummaries(
-	_ context.Context,
+	ctx context.Context,
 	taskIDs []string,
 ) (map[string]*statussummary.TaskStatusSummary, error) {
 	r.loadCalls++
+	if ctx.Err() != nil {
+		r.loadsAfterCancel++
+	}
 	rows := make(map[string]*statussummary.TaskStatusSummary, len(taskIDs))
 	for _, taskID := range taskIDs {
 		if summary := r.rows[taskID]; summary != nil {
@@ -422,7 +426,8 @@ func TestSidebarEnrichmentCancellationStopsOptionalReads(t *testing.T) {
 	require.Equal(t, 499, response.Code)
 	require.Empty(t, response.Body.String())
 	require.Equal(t, 1, repo.pendingActionCalls)
-	require.Zero(t, statusSummaries.loadCalls, "status summary read must not run after cancellation")
+	require.Equal(t, 1, statusSummaries.loadCalls, "the summary revision is read before the session projection it fences")
+	require.Zero(t, statusSummaries.loadsAfterCancel, "status summary read must not run after cancellation")
 	require.Zero(t, queuedCounter.calls, "queued-prompt count must not run after cancellation")
 	require.Empty(t, repo.updated, "read cancellation must not mutate task state")
 	require.Zero(t, observed.FilterLevelExact(zapcore.WarnLevel).Len())

@@ -73,6 +73,13 @@ func (c *Client) Probe(ctx context.Context, req *utility.ProbeRequest) (*utility
 			return nil, err
 		}
 	}
+	if req.InstallContext != nil {
+		if err := c.RequireCapability(ctx, types.ManagedRuntimeRepairReuseCapability); err != nil {
+			clone := *req
+			clone.InstallContext = nil
+			req = &clone
+		}
+	}
 	var result utility.ProbeResponse
 	if err := c.doLongRunningJSON(ctx, "/api/v1/inference/probe", "probe", req, &result); err != nil {
 		return nil, err

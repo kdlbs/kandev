@@ -2,7 +2,6 @@ import type { TFunction } from "i18next";
 import type { SessionRecoveryBlockProjection } from "@/lib/types/http";
 import type { AgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
 import { sessionDeliveryRecoveryReasonMessage } from "@/lib/services/session-recovery-service";
-
 export function deliveryRecoveryRequestIdentity(
   recovery: AgentDeliveryRecovery | null,
   block: SessionRecoveryBlockProjection | undefined,

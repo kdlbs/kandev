@@ -7,6 +7,10 @@ func BuiltinToolPackage(name string) PackageID {
 }
 
 var builtinToolPackages = map[string]PackageID{
+	"answer_question_kandev":                        PackageCore,
+	"list_pending_questions_kandev":                 PackageCore,
+	"list_pending_agent_permissions_kandev":         PackageCore,
+	"resolve_agent_permission_kandev":               PackageCore,
 	"list_canvases_kandev":                          PackageCore,
 	"list_workspaces_kandev":                        PackageCore,
 	"list_agents_kandev":                            PackageCore,

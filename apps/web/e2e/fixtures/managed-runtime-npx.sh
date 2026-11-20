@@ -11,6 +11,19 @@ failure_mode=${E2E_NPX_MODE:-stale-etarget}
 launch_id=${E2E_NPX_LAUNCH_ID:-default}
 runtime_prefix=
 
+capture_provider_pid() {
+	[ -n "${E2E_NPX_PID_CAPTURE:-}" ] || return 0
+	printf '%s\n' "$$" >> "$E2E_NPX_PID_CAPTURE"
+}
+
+capture_provider_argv() {
+	[ -n "${E2E_NPX_ARGV_CAPTURE:-}" ] || return 0
+	for capture_argument in "$@"; do
+		printf '%s\t' "$capture_argument" >> "$E2E_NPX_ARGV_CAPTURE"
+	done
+	printf '\n' >> "$E2E_NPX_ARGV_CAPTURE"
+}
+
 # Parse npm options before the exact package, keeping agent arguments intact.
 argument_index=0
 expect_value=
@@ -36,11 +49,22 @@ for argument in "$@"; do
 done
 
 case "$runtime_prefix" in
-	*/kandev-managed-runtime-*/project)
+	*/kandev-managed-runtime-*/project|*/managed-runtime-repairs/v1/generations/*/project)
 		# Execute the package installed by real npm from its isolated cache.
 		if [ -n "${E2E_PRIVATE_ROOT_MARKER:-}" ]; then
 			mkdir -p "$(dirname "$E2E_PRIVATE_ROOT_MARKER")"
 			printf '%s\n' "$runtime_prefix" >> "$E2E_PRIVATE_ROOT_MARKER"
+		fi
+		capture_provider_pid
+		if [ -n "${E2E_NPX_ARGV_CAPTURE:-}" ]; then
+			capture_index=0
+			for capture_argument in "$@"; do
+				capture_index=$((capture_index + 1))
+				if [ "$capture_index" -gt "$shift_count" ]; then
+					printf '%s\t' "$capture_argument" >> "$E2E_NPX_ARGV_CAPTURE"
+				fi
+			done
+			printf '\n' >> "$E2E_NPX_ARGV_CAPTURE"
 		fi
 		if [ -x "$real_npx" ]; then exec "$real_npx" "$@"; fi
 		if [ -x /usr/local/lib/node_modules/npm/bin/npx-cli.js ]; then
@@ -52,6 +76,8 @@ esac
 
 if [ "${KANDEV_E2E_NPX_BYPASS_FAILURE:-false}" = "true" ]; then
 	shift "$shift_count"
+	capture_provider_pid
+	capture_provider_argv "$@"
 	exec "$mock_agent" "$@"
 fi
 
@@ -133,10 +159,14 @@ if [ "$failure_mode" != "stale-etarget" ]; then
 				exit 1
 			fi
 			shift "$shift_count"
+			capture_provider_pid
+			capture_provider_argv "$@"
 			exec "$mock_agent" "$@"
 			;;
 		success)
 			shift "$shift_count"
+			capture_provider_pid
+			capture_provider_argv "$@"
 			exec "$mock_agent" "$@"
 			;;
 		transient)
@@ -175,6 +205,8 @@ if [ "$failure_mode" != "stale-etarget" ]; then
 		rm -f "$E2E_NPX_RETRY_RELEASE_FILE.waiting"
 	fi
 	shift "$shift_count"
+	capture_provider_pid
+	capture_provider_argv "$@"
 	exec "$mock_agent" "$@"
 fi
 

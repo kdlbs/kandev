@@ -135,7 +135,7 @@ func TestPromptTask_InitialTaskBriefAfterRecovery(t *testing.T) {
 	require.NoError(t, err)
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
 	svc.promptExpander = promptService
-	exec := executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	exec := withTestExecutorActor(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.executor = exec
 	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, testLogger(), scheduler.DefaultSchedulerConfig())
 

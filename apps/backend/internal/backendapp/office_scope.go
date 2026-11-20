@@ -113,12 +113,13 @@ func officeParamScopeResolvers(repo *officesqlite.Repository) map[string]officeW
 // unresolvable param on an Office route is denied at runtime and fails
 // TestOfficeRouteScopeCompleteness at build time.
 var officeScopedSubResourceParams = map[string]string{
-	"documents/:key":         "a task document, addressed under its task",
-	"revisions/:revId":       "a revision of a task document, addressed under its task",
-	"instructions/:filename": "an instruction file, addressed under its agent",
-	"memory/:entryId":        "a memory entry, addressed under its agent",
-	"blockers/:blockerId":    "a task blocker, addressed under its task",
-	"labels/:labelName":      "a label name, resolved under its task and workspace by the service",
+	"documents/:key":            "a task document, addressed under its task",
+	"revisions/:revId":          "a revision of a task document, addressed under its task",
+	"instructions/:filename":    "an instruction file, addressed under its agent",
+	"memory/:entryId":           "a memory entry, addressed under its agent",
+	"blockers/:blockerId":       "a task blocker, addressed under its task",
+	"labels/:labelName":         "a label name, resolved under its task and workspace by the service",
+	"by-identifier/:identifier": "a task identifier, looked up within the workspace named by `:wsId` on the same route",
 }
 
 // officeWorkspacelessRoutes are the Office routes that legitimately carry no
@@ -215,16 +216,20 @@ func officeWorkspaceScopeMiddleware(
 	}
 }
 
-// requiresOfficeWorkspaceManage identifies the two workspace-pause mutation
-// routes. Their ordinary Office scope check grants reach with workspace.read;
-// the state-changing operation also needs the canonical workspace.manage
-// permission. Other Office mutations use their own action scopes.
+// requiresOfficeWorkspaceManage identifies the workspace-pause mutation routes
+// and the Review on a different provider switches, which edit the workspace's
+// workflow steps. Their ordinary Office scope check grants reach with
+// workspace.read; the state-changing operation also needs the canonical
+// workspace.manage permission. Other Office mutations use their own action
+// scopes.
 func requiresOfficeWorkspaceManage(c *gin.Context) bool {
-	if c.Request.Method != http.MethodPost || c.Param("wsId") == "" {
+	if c.Param("wsId") == "" {
 		return false
 	}
-	switch c.FullPath() {
-	case officeRoutePrefix + "/workspaces/:wsId/pause", officeRoutePrefix + "/workspaces/:wsId/resume":
+	switch c.Request.Method + " " + c.FullPath() {
+	case http.MethodPost + " " + officeRoutePrefix + "/workspaces/:wsId/pause",
+		http.MethodPost + " " + officeRoutePrefix + "/workspaces/:wsId/resume",
+		http.MethodPut + " " + officeRoutePrefix + "/workspaces/:wsId/routing/author-exclusion":
 		return true
 	default:
 		return false

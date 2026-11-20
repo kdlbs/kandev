@@ -50,6 +50,10 @@ func dispatchWorkspaceGitMessages(msg types.WorkspaceStreamMessage, callbacks Wo
 		if callbacks.OnFileChange != nil && msg.FileChange != nil {
 			callbacks.OnFileChange(msg.FileChange)
 		}
+	case types.WorkspaceMessageTypeWorktreeInventory:
+		if callbacks.OnWorktreeInventory != nil && msg.WorktreeInventory != nil {
+			callbacks.OnWorktreeInventory(msg.WorktreeInventory)
+		}
 	default:
 		return false
 	}

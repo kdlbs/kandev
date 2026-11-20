@@ -10,12 +10,14 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/stretchr/testify/require"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentsettingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -24,13 +26,12 @@ import (
 // TestConcurrentDynamicPolicyRecoveryLaunchesExactlyOnce reproduces two
 // recovery-timer fires racing on the same due generation (e.g. a duplicate
 // schedule or a backend-restart reschedule overlapping a still-live timer)
-// within one Service. Both goroutines share svc.acquireCancelInFlightGuard,
-// so they are strictly serialized before either reaches the durable claim:
-// the loser's fresh loadDueDynamicPolicyState re-read then sees the winner's
-// "retrying" status and returns early, never reaching ResumePendingRoute at
-// all. The exact-status CAS in ClaimRouteStateFrom is never exercised here —
-// see TestConcurrentDynamicPolicyRecoveryClaimContendsOnSQLCAS for a test
-// that forces two independent Service instances to actually contend on it.
+// within one Service. Both goroutines share the session route-operation lock,
+// so the loser's fresh loadDueDynamicPolicyState re-read sees the winner's
+// "retrying" status and returns early. The exact-status CAS in
+// ClaimRouteStateFrom is never exercised here — see
+// TestConcurrentDynamicPolicyRecoveryClaimContendsOnSQLCAS for the independent
+// Service case.
 func TestConcurrentDynamicPolicyRecoveryLaunchesExactlyOnce(t *testing.T) {
 	ctx := context.Background()
 	const (
@@ -263,7 +264,7 @@ func (b *claimRendezvousBarrier) ClaimRouteStateFrom(
 
 // TestConcurrentDynamicPolicyRecoveryClaimContendsOnSQLCAS complements
 // TestConcurrentDynamicPolicyRecoveryLaunchesExactlyOnce: that test's two
-// goroutines share one Service, so svc.acquireCancelInFlightGuard serializes
+// goroutines share one Service, so the session route-operation lock serializes
 // them before either reaches the durable claim and the SQL CAS in
 // ClaimRouteStateFrom is never the discriminator. This test uses two
 // independent Service instances -- as two separate backend processes racing
@@ -330,5 +331,166 @@ func TestConcurrentDynamicPolicyRecoveryClaimContendsOnSQLCAS(t *testing.T) {
 	agentManager.mu.Unlock()
 	if stopCalls != 1 {
 		t.Fatalf("predecessor stop calls = %d, want exactly 1", stopCalls)
+	}
+}
+
+type dynamicPolicySessionWriteBarrier struct {
+	*sqliterepo.Repository
+	prepared chan struct{}
+	release  <-chan struct{}
+	once     sync.Once
+}
+
+func (r *dynamicPolicySessionWriteBarrier) UpdateTaskSession(ctx context.Context, session *models.TaskSession) error {
+	if err := r.Repository.UpdateTaskSession(ctx, session); err != nil {
+		return err
+	}
+	if session.RouteState == "retrying" && session.State == models.TaskSessionStateCreated {
+		r.once.Do(func() { close(r.prepared) })
+		<-r.release
+	}
+	return nil
+}
+
+func TestDynamicPolicyRecoveryWaitsForExplicitRouteOperation(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID            = "task-policy-lock-explicit-first"
+		sessionID         = "session-policy-lock-explicit-first"
+		dynamicProfileID  = "profile-policy-lock-explicit-first"
+		concreteProfileID = "concrete-policy-lock-explicit-first"
+	)
+	repo := setupTestRepo(t)
+	resolver := newDynamicPolicyRaceResolver(t, repo, dynamicProfileID, concreteProfileID)
+	seedDynamicPolicyRecoveryState(t, repo, taskID, sessionID, "execution-lock-first", dynamicProfileID, concreteProfileID)
+	warmDynamicPolicyRecoveryState(t, resolver, sessionID, "warm explicit-first route")
+	svc := newPolicyRecoveryLockTestService(t, repo, resolver, taskID, sessionID)
+
+	releaseExplicit := svc.acquireSessionRouteOperationLock(sessionID)
+	policyDone := make(chan struct{})
+	go func() {
+		defer close(policyDone)
+		svc.runDynamicPolicyRecovery(ctx, sessionID, 4)
+	}()
+	t.Cleanup(func() {
+		releaseExplicit()
+		<-policyDone
+	})
+	waitForRouteOperationLockRefs(t, svc, sessionID, 2)
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, "retry_wait", state.Status, "the timer must not claim or reset the route while explicit recovery owns the session")
+	releaseExplicit()
+	<-policyDone
+
+	state, err = repo.LoadRouteState(ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, dynamicRouteStatusActionRequired, state.Status, "the failed policy launch must leave one recoverable outcome")
+}
+
+func TestExplicitRecoveryWaitsForPolicyRouteOperation(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID            = "task-policy-lock-policy-first"
+		sessionID         = "session-policy-lock-policy-first"
+		dynamicProfileID  = "profile-policy-lock-policy-first"
+		concreteProfileID = "concrete-policy-lock-policy-first"
+	)
+	repo := setupTestRepo(t)
+	resolver := newDynamicPolicyRaceResolver(t, repo, dynamicProfileID, concreteProfileID)
+	seedDynamicPolicyRecoveryState(t, repo, taskID, sessionID, "execution-policy-first", dynamicProfileID, concreteProfileID)
+	warmDynamicPolicyRecoveryState(t, resolver, sessionID, "warm policy-first route")
+	svc := newPolicyRecoveryLockTestService(t, repo, resolver, taskID, sessionID)
+
+	releasePolicy := make(chan struct{})
+	var releaseOnce sync.Once
+	releasePolicyAndWait := func() { releaseOnce.Do(func() { close(releasePolicy) }) }
+	prepared := make(chan struct{})
+	svc.repo = &dynamicPolicySessionWriteBarrier{Repository: repo, prepared: prepared, release: releasePolicy}
+	policyDone := make(chan struct{})
+	go func() {
+		defer close(policyDone)
+		svc.runDynamicPolicyRecovery(ctx, sessionID, 4)
+	}()
+	t.Cleanup(func() {
+		releasePolicyAndWait()
+		<-policyDone
+	})
+	select {
+	case <-prepared:
+	case <-time.After(5 * time.Second):
+		t.Fatal("policy recovery did not reach its claimed session projection")
+	}
+
+	explicitDone := make(chan error, 1)
+	explicitSettled := make(chan struct{})
+	go func() {
+		defer close(explicitSettled)
+		_, err := svc.resumeTaskSessionWithContinuationAndReservation(ctx, taskID, sessionID,
+			executor.ResumeOptions{RecoveryAction: "continue_from_history"}, nil, nil)
+		explicitDone <- err
+	}()
+	t.Cleanup(func() {
+		releasePolicyAndWait()
+		<-policyDone
+		<-explicitSettled
+	})
+	waitForRouteOperationLockRefs(t, svc, sessionID, 2)
+	releasePolicyAndWait()
+	<-policyDone
+
+	explicitErr := <-explicitDone
+	require.Error(t, explicitErr, "explicit recovery must re-read the policy result after it acquires the shared route lock")
+	session, err := svc.repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+	require.Equal(t, dynamicRouteStatusActionRequired, session.RouteState)
+	state, err := svc.repo.(dynamicRouteStateLoader).LoadRouteState(ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, dynamicRouteStatusActionRequired, state.Status)
+}
+
+func newPolicyRecoveryLockTestService(
+	t *testing.T,
+	repo *sqliterepo.Repository,
+	resolver *dynamicPolicyRaceResolver,
+	taskID, sessionID string,
+) *Service {
+	t.Helper()
+	manager := &mockAgentManager{launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		return nil, errors.New("expected recovery launch failure")
+	}}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-race"] = &wfmodels.WorkflowStep{ID: "step-race", WorkflowID: "wf1", Name: "Work"}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, manager)
+	svc.SetProfileExecutionResolver(resolver.ProfileExecutionResolver)
+	svc.lastTurnPrompt.Store(sessionID, capturedPrompt{text: "retry the task"})
+	return svc
+}
+
+func waitForRouteOperationLockRefs(t *testing.T, svc *Service, sessionID string, expected int) {
+	t.Helper()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		svc.routeActionLocksMu.Lock()
+		lock := svc.routeActionLocks[sessionID]
+		refs := 0
+		if lock != nil {
+			refs = lock.refs
+		}
+		svc.routeActionLocksMu.Unlock()
+		if refs == expected {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			t.Fatalf("route operation lock refs = %d, want %d", refs, expected)
+		}
 	}
 }

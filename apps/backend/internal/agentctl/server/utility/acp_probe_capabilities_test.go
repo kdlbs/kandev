@@ -216,6 +216,7 @@ type probeAdvertisedModesAgent struct {
 	conn        *acp.AgentSideConnection
 	mu          sync.Mutex
 	modeCalls   []string
+	configCalls []string
 	failSetMode bool
 	emptyModes  bool
 	configOnly  bool
@@ -269,6 +270,31 @@ func (a *probeAdvertisedModesAgent) recordedModeCalls() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]string(nil), a.modeCalls...)
+}
+
+func (a *probeAdvertisedModesAgent) SetSessionConfigOption(
+	_ context.Context,
+	request acp.SetSessionConfigOptionRequest,
+) (acp.SetSessionConfigOptionResponse, error) {
+	if request.ValueId == nil {
+		return acp.SetSessionConfigOptionResponse{}, errors.New("missing config value")
+	}
+	a.mu.Lock()
+	a.configCalls = append(a.configCalls, string(request.ValueId.Value))
+	a.mu.Unlock()
+	options := append([]acp.SessionConfigOption(nil), a.configOpts...)
+	for i := range options {
+		if options[i].Select != nil && options[i].Select.Id == request.ValueId.ConfigId {
+			options[i].Select.CurrentValue = request.ValueId.Value
+		}
+	}
+	return acp.SetSessionConfigOptionResponse{ConfigOptions: options}, nil
+}
+
+func (a *probeAdvertisedModesAgent) recordedConfigCalls() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.configCalls...)
 }
 
 func probeModeConfigOptions(options acp.SessionConfigSelectOptions) []acp.SessionConfigOption {
@@ -393,12 +419,13 @@ func TestProbeACPSessionWithContextUsesConfigOptionsModeAdvertisement(t *testing
 	emptyModes := acp.SessionConfigSelectOptionsUngrouped{}
 
 	tests := []struct {
-		name          string
-		mode          string
-		configOptions []acp.SessionConfigOption
-		failSetMode   bool
-		wantCalls     []string
-		wantErr       bool
+		name            string
+		mode            string
+		configOptions   []acp.SessionConfigOption
+		failSetMode     bool
+		wantCalls       []string
+		wantConfigCalls []string
+		wantErr         bool
 	}{
 		{
 			name: "grouped mode option authorizes application",
@@ -406,7 +433,7 @@ func TestProbeACPSessionWithContextUsesConfigOptionsModeAdvertisement(t *testing
 			configOptions: probeModeConfigOptions(acp.SessionConfigSelectOptions{
 				Grouped: &groupedModes,
 			}),
-			wantCalls: []string{"plan"},
+			wantConfigCalls: []string{"plan"},
 		},
 		{
 			name: "grouped mode option skips an unadvertised mode",
@@ -470,6 +497,9 @@ func TestProbeACPSessionWithContextUsesConfigOptionsModeAdvertisement(t *testing
 
 			if got := fake.recordedModeCalls(); strings.Join(got, ",") != strings.Join(tt.wantCalls, ",") {
 				t.Fatalf("set_mode calls = %v, want %v", got, tt.wantCalls)
+			}
+			if got := fake.recordedConfigCalls(); strings.Join(got, ",") != strings.Join(tt.wantConfigCalls, ",") {
+				t.Fatalf("set_config_option mode values = %v, want %v", got, tt.wantConfigCalls)
 			}
 		})
 	}

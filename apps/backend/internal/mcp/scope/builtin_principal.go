@@ -9,5 +9,5 @@ import (
 // another workspace or a different session surface.
 func BuiltinPrincipalMatches(ctx context.Context, manifest *p.BuiltinManifest) bool {
 	principal, ok := PrincipalFromContext(ctx)
-	return ok && manifest != nil && principal.WorkspaceID == manifest.WorkspaceID && principal.CallerTaskID == manifest.TaskID && principal.Surface == manifest.Surface
+	return ok && manifest != nil && principal.WorkspaceID == manifest.WorkspaceID && principal.CallerTaskID == manifest.TaskID && principal.Surface == manifest.Surface && (manifest.AutomationID == "" || principal.AutomationID == manifest.AutomationID)
 }

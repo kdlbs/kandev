@@ -62,11 +62,12 @@ test.describe("Copilot runtime plugin compatibility", () => {
     await expect(testPage.getByTestId(`agent-update-confirm-${AGENT_NAME}`)).toBeEnabled();
     expect(runtime.postCount()).toBe(0);
 
-    await dialog.getByTestId(`agent-update-quick-default-${AGENT_NAME}`).click();
+    await chooseKandevRuntimeDefault(testPage, AGENT_NAME);
     await expect(notice).toHaveAttribute("data-state", "not_checked");
     await expect(notice).toContainText("Plugin compatibility for Copilot 1.0.88: unchecked.");
 
-    await dialog.getByTestId(`agent-update-quick-latest-${AGENT_NAME}`).click();
+    await dialog.getByTestId(`agent-update-version-${AGENT_NAME}`).click();
+    await testPage.getByTestId(`agent-update-version-option-${AGENT_NAME}-9.9.9`).click();
     await expect(notice).toHaveAttribute("data-state", "not_checked");
     await expect(notice).toContainText("2 saved profiles select plugins.");
     await testPage.getByTestId(`agent-update-confirm-${AGENT_NAME}`).click();
@@ -85,3 +86,4 @@ test.describe("Copilot runtime plugin compatibility", () => {
     await expect(notice).not.toContainText("No saved profiles select plugins.");
   });
 });
+import { chooseKandevRuntimeDefault } from "./agent-runtime-settings-helpers";

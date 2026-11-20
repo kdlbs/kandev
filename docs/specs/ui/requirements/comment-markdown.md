@@ -24,7 +24,7 @@ Task comments render as plain text with `whitespace-pre-wrap`. Agent responses r
 - **AC-UI-COMMENT-MARKDOWN-001.3:** Fenced code blocks display syntax highlighting and a one-click copy button.
 - **AC-UI-COMMENT-MARKDOWN-001.4:** Bare URLs in comment text are auto-linked (handled by `remark-gfm` linkify).
 - **AC-UI-COMMENT-MARKDOWN-001.5:** Markdown links to files in the active task workspace open the in-app file viewer; absolute workspace, worktree, and workspace-root-relative paths may include supported source-location suffixes without navigating the browser away from the task.
-- **AC-UI-COMMENT-MARKDOWN-001.6:** Patterns matching `[A-Z]+-\d+` (e.g., `KAN-42`, `QA-7`) are rendered as links to `/office/tasks/<identifier>`. The link uses the raw identifier as the URL segment; resolution to an internal task ID (if needed) is handled by the issue page.
+- **AC-UI-COMMENT-MARKDOWN-001.6:** A task identifier formed from a workspace task prefix and a numeric sequence is rendered as a link to /office/tasks/<identifier>. The route resolves it to the canonical task ID.
 - **AC-UI-COMMENT-MARKDOWN-001.7:** The comment list in `TaskChat` renders the available comments in transcript order.
 - **AC-UI-COMMENT-MARKDOWN-001.8:** Scroll position is preserved when new comments arrive if the user has scrolled away from the bottom.
 - **AC-UI-COMMENT-MARKDOWN-001.9:** When a task message links to an absolute file path beneath a repository checkout registered to that task, but the active session uses a different worktree path for the same repository, selecting the link opens the corresponding file from the active task workspace on desktop and phone. Kandev does not read or edit the registered source checkout.
@@ -37,6 +37,20 @@ Task comments render as plain text with `whitespace-pre-wrap`. Agent responses r
   show an unavailable state, and late responses shall not cross session changes. When no session
   context is available, preserve browser rendering. External image URLs retain browser handling.
   Desktop and phone use existing viewers.
+- **AC-UI-COMMENT-MARKDOWN-001.12:** Task identifier links in a comment use the prefix and
+  workspace ID of the task that owns the comment. A different active workspace shall not change
+  the generated link or its target workspace. If task workspace context is unavailable, use the
+  active workspace context when available.
+- **AC-UI-COMMENT-MARKDOWN-001.13:** When a task identifier URL includes `workspaceId`, the route
+  shall resolve the identifier in that workspace and redirect to the canonical task ID. The
+  redirect shall preserve other query parameters. It shall accept the legacy `workspace` query
+  name and carry its value forward as `workspaceId`.
+- **AC-UI-COMMENT-MARKDOWN-001.14:** The identifier route shall recognize identifiers generated
+  from the workspace task prefix, including prefixes that start with a digit. UUID task routes
+  shall continue to use the canonical task-ID path.
+- **AC-UI-COMMENT-MARKDOWN-001.15:** The identifier route shall show separate states for an
+  unavailable workspace, a task that does not exist in the workspace, and a retryable resolution
+  failure. A retryable failure shall offer a retry action.
 
 
 ### REQ-UI-COMMENT-MARKDOWN-002: Prose section separators
@@ -109,7 +123,7 @@ Task comments render as plain text with `whitespace-pre-wrap`. Agent responses r
 - Bare URLs in comment text are auto-linked (handled by `remark-gfm` linkify).
 - Markdown links to files in the active task workspace open the in-app file viewer; absolute workspace, worktree, and workspace-root-relative paths may include supported source-location suffixes without navigating the browser away from the task.
 - Absolute paths beneath a task-linked repository's registered source checkout map by repository identity to the corresponding active worktree. The registered checkout itself is never read or edited.
-- Patterns matching `[A-Z]+-\d+` (e.g., `KAN-42`, `QA-7`) are rendered as links to `/office/tasks/<identifier>`. The link uses the raw identifier as the URL segment; resolution to an internal task ID (if needed) is handled by the issue page.
+- Identifiers formed from a workspace task prefix and numeric sequence are rendered as links to /office/tasks/<identifier>. The link carries its workspace ID when task context is available, and the issue route resolves it to the canonical task ID.
 - The comment list in `TaskChat` renders the available comments in transcript order.
 - Scroll position is preserved when new comments arrive if the user has scrolled away from the bottom.
 - When the user is at (or near) the bottom, new comments auto-scroll into view.
@@ -118,7 +132,22 @@ Task comments render as plain text with `whitespace-pre-wrap`. Agent responses r
 
 - **GIVEN** a comment with `**bold** and \`code\``, **WHEN** rendered, **THEN** bold text and inline code appear styled, not as raw characters.
 - **GIVEN** a comment containing a fenced code block, **WHEN** rendered, **THEN** the block has syntax highlighting and a copy button that copies the block contents.
-- **GIVEN** a comment containing the text `see KAN-42 for context`, **WHEN** rendered, **THEN** `KAN-42` is a clickable link navigating to `/office/tasks/KAN-42`.
+- **GIVEN** a comment contains `KAN-42` in workspace `ws-a`,
+  **WHEN** another workspace is active,
+  **THEN** the link uses `workspaceId=ws-a`.
+- **GIVEN** a link has `workspaceId=ws-a` and `tab=comments`,
+  **WHEN** lookup succeeds,
+  **THEN** the route redirects to the canonical task ID and keeps both query values.
+- **GIVEN** a workspace prefix is `2FA`,
+  **WHEN** it creates identifier `2FA-1`,
+  **THEN** the route resolves it in that workspace and redirects to the canonical task ID.
+- **GIVEN** the workspace has no task with the identifier,
+  **WHEN** lookup returns 404,
+  **THEN** the route shows the not-found state.
+- **GIVEN** lookup returns another API error,
+  **THEN** the route shows a retry action.
+- **GIVEN** the link has no workspace and there is no active workspace,
+  **THEN** the route shows the workspace-unavailable state.
 - **GIVEN** a comment containing `https://example.com`, **WHEN** rendered, **THEN** the URL is a clickable hyperlink.
 - **GIVEN** a comment contains a markdown link to `/root/.kandev/tasks/example/kandev/.github/workflows/build.yml:12`, **WHEN** the user clicks it while the active worktree is `/root/.kandev/tasks/example/kandev`, **THEN** the in-app editor opens `.github/workflows/build.yml` instead of navigating to that absolute URL.
 - **GIVEN** a task uses a worktree for a repository registered at `/home/user/projects/example`, **WHEN** a message links to `/home/user/projects/example/ui/bundle.js:61`, **THEN** Kandev opens the active worktree's `ui/bundle.js` in the desktop file tab or phone file viewer without navigating to a same-origin `/home/user/projects/...` URL.
@@ -131,11 +160,10 @@ Task comments render as plain text with `whitespace-pre-wrap`. Agent responses r
 - Editing or previewing markdown in the comment input box (input remains plain text).
 - Server-side markdown storage or transformation — content is stored as raw text and rendered client-side only.
 - Reading or editing a registered repository's source checkout; source-path links always resolve to the active task workspace copy.
-- Resolving task identifier links to internal UUIDs before navigation (the issue page handles that).
+- Resolving task identifiers on the server when the comment is rendered; the issue route performs workspace-scoped lookup after navigation.
 - Emoji shortcode rendering (`:+1:` etc.) — `remark-gemoji` is present in dependencies but not required by this spec.
 - Notifications or unread indicators for new comments.
 
 ## Open questions
 
-- Should the task-identifier regex be configurable (project key prefixes), or is a general `[A-Z]+-\d+` pattern acceptable for all workspaces?
 - Which syntax highlighting library to use — `rehype-highlight` (highlight.js) or `rehype-pretty-code` (shiki)? Shiki gives better theming but adds bundle weight.

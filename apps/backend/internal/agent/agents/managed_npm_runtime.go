@@ -119,6 +119,18 @@ func (s ManagedNPMRuntimeSpec) runtimeCommandWithNpmPreference(version string, p
 	return NewCommand(args...)
 }
 
+// MatchRuntimeCommand recognizes the registered direct managed-npm launcher
+// and separates its required runtime arguments from authorized agent
+// arguments. Full-argv equality is not required because profiles may append
+// valid CLI flags.
+func (s ManagedNPMRuntimeSpec) MatchRuntimeCommand(command []string) (managedruntime.ManagedNPMInvocation, bool) {
+	invocation, err := managedruntime.ParseManagedNPMInvocation(command, s.Package, s.runtimeArgs())
+	if err != nil {
+		return managedruntime.ManagedNPMInvocation{}, false
+	}
+	return invocation, true
+}
+
 // CachedACPCommand returns the default exact-version launch command.
 func (s ManagedNPMRuntimeSpec) CachedACPCommand() Command {
 	return s.CachedCommand()
@@ -227,6 +239,36 @@ func BuiltinManagedNPMRuntime(agentID string) (ManagedNPMRuntimeSpec, bool) {
 	default:
 		return ManagedNPMRuntimeSpec{}, false
 	}
+}
+
+// MatchBuiltinManagedNPMRuntime recognizes a registered direct managed-npm
+// launcher, including both supported OpenCode families. Required runtime
+// arguments and authorized agent arguments are separated structurally.
+func MatchBuiltinManagedNPMRuntime(
+	agentID string,
+	command []string,
+) (ManagedNPMRuntimeSpec, managedruntime.ManagedNPMInvocation, bool) {
+	if agentID == OpenCodeACPAgentID {
+		for _, family := range []managedruntime.OpenCodeFamily{
+			managedruntime.OpenCodeFamilyV1,
+			managedruntime.OpenCodeFamilyV2,
+		} {
+			spec, err := NewOpenCodeACP().ManagedNPMRuntimeForFamily(family)
+			if err != nil {
+				continue
+			}
+			if invocation, ok := spec.MatchRuntimeCommand(command); ok {
+				return spec, invocation, true
+			}
+		}
+		return ManagedNPMRuntimeSpec{}, managedruntime.ManagedNPMInvocation{}, false
+	}
+	spec, ok := BuiltinManagedNPMRuntime(agentID)
+	if !ok {
+		return ManagedNPMRuntimeSpec{}, managedruntime.ManagedNPMInvocation{}, false
+	}
+	invocation, ok := spec.MatchRuntimeCommand(command)
+	return spec, invocation, ok
 }
 
 // BuiltinManagedNPMRuntimeForPackage resolves a registered distribution for an

@@ -109,6 +109,19 @@ errors does not take its own healthy account out of rotation.
   precedence. Do not infer a reset hint when the diagnostic gives no reset
   time. This criterion and criterion 001.6 are OpenCode-specific exceptions to
   the shared quota signature list in criterion 001.3.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.13:** For `devin-acp`, a diagnostic
+  line that opens with `Reached free model rate limit`, optionally after an
+  `AI_APICallError:`, `Error:`, `Internal error:`, or `API Error:` label, shall
+  classify as high-confidence `rate_limited` (transient, fallback allowed).
+  Matching is case-insensitive, accepts horizontal whitespace between words,
+  and ignores fenced code examples, mid-sentence prose, and other providers.
+  When that line carries an `(at HH:MM <zone>)` clock and a valid relative
+  duration, the reset hint is the occurrence of that clock on the estimated
+  reset date or either adjacent calendar date in the stated zone that is
+  closest to the observation time plus the duration. Without a usable duration,
+  use the first occurrence after the observation time. Only the matched line
+  may supply the clock, and a line without a clock classifies without a reset
+  hint.
 
 Criterion 001.11 was added by the October 28
 [OpenCode capacity package](../../../plans/opencode-capacity-retry/plan.md).
@@ -116,10 +129,14 @@ Criterion 001.11 was added by the October 28
 Criterion 001.12 is described in the
 [provider error signature plan](../../../plans/provider-error-signatures/plan.md).
 
+Criterion 001.13 is described in the
+[Devin free-model rate limit plan](../../../plans/devin-free-model-rate-limit/plan.md).
+
 ## Out of scope
 
 - Changing rule order, confidence levels, or classification flags beyond the
-  narrow additions in criteria 001.6, 001.8, 001.9, 001.10, 001.11, and 001.12.
+  narrow additions in criteria 001.6, 001.8, 001.9, 001.10, 001.11, 001.12,
+  and 001.13.
 - Changing unrelated provider-neutral rules or any runtime-environment rules.
 - Changing how classified failures suspend candidates or select a successor.
 
@@ -139,3 +156,47 @@ Criterion 001.12 is described in the
 
 [Design](../system-design/provider-error-signatures.md).
 [Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).
+
+### REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002: Unmatched diagnostic context
+
+**Intent:** Recognize new provider diagnostics without copying whole-message
+patterns, while preserving existing classification and recovery fences. The
+earlier out-of-scope list describes requirement 001; this extension owns its
+additional behavior.
+
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.1:** The extension shall be off in
+  every shipped profile. OFF shall preserve existing classification and routing.
+  Structured HTTP metadata and known signatures shall retain precedence. Only
+  an unmatched bounded provider diagnostic may enter the new prefilter.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.2:** The prefilter shall evaluate
+  structured status, keyword groups, then invocation context. It shall cover
+  account permission, qualified model/endpoint removal, timeout, limits,
+  overload, context-size rejection and request compatibility. Existing typed
+  mappings, including permission-denied HTTP 403, shall remain unchanged.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.3:** LIMIT, CAPACITY, GONE, ACCOUNT
+  and REQUEST shall normalize case, separators and stems. Two distinct terms
+  shall establish a group; a single term or conflicting groups shall retain
+  low confidence. Repeating a term shall not increase confidence. Quoted,
+  negated and successful assistant text shall not authorize recovery.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.4:** Context shall distinguish
+  startup, prompt-send and mid-turn, empty output, repeated current attempts,
+  reset hints, account/tier/model/path and matching diagnostics observed across
+  paths/models. Missing observations shall stay unknown. A proven free daily
+  limit without another reset shall use the next midnight UTC.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.5:** Account-wide limit scope shall
+  require a known paid-account binding. Other failures shall retain model/path
+  scope; corroborated model failures may span paths. Explicit reset hints shall
+  control suspension expiry. A structured model 404 shall remain unavailable
+  until model change or owner release; prose shall never permanently hold an account.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.6:** Defaults shall prefer next
+  candidate at startup/prompt-send, a same-session retry recommendation at
+  mid-turn before next candidate, and stop only for ACCOUNT. These are
+  classification defaults, not authorization to execute post-output continuation.
+  Generic post-output continuation is outside this extension. Explicit saved policies, existing
+  unclassified admission/thresholds, cancellation, ownership, generation,
+  output/effect and continuation guards shall take precedence over defaults.
+  Existing empty-turn handling shall be reused without changing thresholds.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.7:** Classification, diagnostic
+  correlation and routing shall consume consistent evidence, explain ON/OFF
+  differences and retain model order. No external catalog loader, inference
+  service or periodic learner is introduced.

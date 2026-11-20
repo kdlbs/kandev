@@ -62,10 +62,11 @@ const maxStartupTransferReconcileAttempts = 30
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	RetryClock RetryClock
-	Scheduler  scheduler.SchedulerConfig
-	QueueSize  int
-	QueueGroup string
+	ProviderKeywordContext bool
+	RetryClock             RetryClock
+	Scheduler              scheduler.SchedulerConfig
+	QueueSize              int
+	QueueGroup             string
 	// CodexAppServerEnabled controls native-only lifecycle actions such as
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
@@ -767,6 +768,9 @@ type Service struct {
 	repo                      sessionExecutorStore
 	promptTargets             taskPullRequestTargetStore
 	agentManager              executor.AgentManagerClient
+	// deliverySessionStateTestHook pauses the correction between its pre-guard
+	// proof and guarded recheck in deterministic race tests.
+	deliverySessionStateTestHook func()
 	// ACP mode and model reports mutate one selector snapshot per session.
 	sessionSettingsSnapshotLocks [64]sync.Mutex
 
@@ -1036,8 +1040,9 @@ type Service struct {
 	// doc comment).
 	agentErrorDeps atomic.Pointer[agentErrorDispatchDeps]
 	// childCompletionLocks serializes duplicate on_children_completed deliveries.
-	childCompletionLocksMu sync.Mutex
-	childCompletionLocks   map[string]*childCompletionOperationLock
+	childCompletionLocksMu               sync.Mutex
+	childCompletionLocks                 map[string]*childCompletionOperationLock
+	parentChildrenCompletionWakeRecorder func(context.Context, string, string, string, string) error
 	// officeTerminalCompletionLocks serializes concurrent
 	// markOfficeTaskCompletedForTerminalStep deliveries for the same task, so
 	// two deliveries racing past the taskRuntimeStateMu check above cannot
@@ -1228,13 +1233,6 @@ type Service struct {
 	gitlabService      GitLabWatchService
 	gitlabReviewSource *GitLabReviewWatcherSource
 	gitlabIssueSource  *GitLabIssueWatcherSource
-	// Azure DevOps watcher service + sources for work-item and pull-request
-	// polling events. The integration publishes provider-native matches; the
-	// shared watcher coordinator owns task creation and throttling.
-	azureDevOpsService     AzureDevOpsWatchService
-	azureWorkItemSource    *AzureDevOpsWorkItemWatcherSource
-	azurePullRequestSource *AzureDevOpsPullRequestWatcherSource
-
 	// gitlabMRLinkService auto-links merge requests opened outside Kandev's
 	// Create-PR action, mirroring what githubService does for PRs. Separate
 	// from gitlabService (the review/issue watch surface) — see
@@ -1463,6 +1461,23 @@ type Service struct {
 	// duplicate-delivery optimization; the durable consumed tombstone lives in
 	// session metadata.
 	parkedProfileSwitchStops sync.Map
+	// transientLaunchRetries records the timestamp of the last automatic retry
+	// per session. Entries live for transientLaunchRetryTTL, so a retried
+	// launch is never retried twice, and expired entries are swept, so the map
+	// neither grows without bound nor blocks self-healing forever.
+	transientLaunchRetries sync.Map
+	// launchRetryMu guards the automatic retry workers' lifecycle:
+	// launchRetryCtx is cancelled by Stop, after which no retry is scheduled,
+	// and launchRetries tracks the workers so Stop and tests can wait for
+	// them. launchRetryDelay and launchRetry are test seams; production leaves
+	// both zero-valued.
+	launchRetryMu      sync.Mutex
+	launchRetryCtx     context.Context
+	launchRetryCancel  context.CancelFunc
+	launchRetryStopped bool
+	launchRetries      *sync.WaitGroup
+	launchRetryDelay   time.Duration
+	launchRetry        func(context.Context, string, string) error
 
 	// steerInFlight tracks sessions with an unacknowledged mid-turn steer.
 	// The spec allows at most one in-flight steer per session; a second attempt
@@ -1608,6 +1623,10 @@ type Service struct {
 	// from a predecessor. Automatic recovery requires an explicit no-output,
 	// no-effect result from this map.
 	dynamicAttemptEvidence sync.Map
+	// keywordFailureHistory survives prompt-evidence retirement so a routed
+	// successor can use bounded failure context without reusing stale auth data.
+	keywordFailureHistoryMu sync.Mutex
+	keywordFailureHistory   map[string][]keywordObservation
 	// pendingDynamicStreakResets coalesces ordinary output/effect observations
 	// until a semantic boundary can persist the reset outside the raw stream
 	// callback. Each entry retains the prompt and route identity that authorized
@@ -1743,6 +1762,10 @@ func (s *Service) SetRouteActionHandler(handler func(context.Context, RouteActio
 // task and workflow launches.
 func (s *Service) SetProfileExecutionResolver(resolver *agentruntime.ProfileExecutionResolver) {
 	s.profileExecutionResolver = resolver
+	s.wireAdmissionGrade(resolver)
+	if resolver != nil {
+		resolver.SetKeywordContextEnabled(s.config.ProviderKeywordContext)
+	}
 }
 
 func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionRequest) (*RouteActionResult, error) {
@@ -2013,6 +2036,7 @@ func NewService(
 		)
 	})
 	exec.SetOnLaunchFailed(s.handleLaunchFailed)
+	exec.SetOnLaunchFailureRecorded(s.handleRecordedLaunchFailure)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
 	exec.SetOnStaleExecutionCleanup(func(ctx context.Context, sessionID string) {
 		s.settleBackgroundWorkLocked(ctx, sessionID, "")
@@ -2155,6 +2179,14 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 func (s *Service) SetCanvasesEnabled(enabled bool) {
 	if s.executor != nil {
 		s.executor.SetCanvasesEnabled(enabled)
+	}
+}
+
+// SetManagedRuntimeSingleUserOwner wires the live single-user repair-owner
+// fallback. The callback must report allowed only for disabled authentication.
+func (s *Service) SetManagedRuntimeSingleUserOwner(owner func() (string, bool)) {
+	if s.executor != nil {
+		s.executor.SetManagedRuntimeSingleUserOwner(owner)
 	}
 }
 
@@ -3408,6 +3440,7 @@ func (s *Service) Start(ctx context.Context) (startErr error) {
 	// sweep while the service is active.
 	s.resetLifecycleSweepWorkers()
 	s.resetSilentRestoreRecovery()
+	s.resetTransientLaunchRetries()
 	s.running = true
 	s.startedAt = time.Now()
 	recoveryLifecycleCtx, recoveryLifecycleCancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -3555,9 +3588,6 @@ func (s *Service) subscribeStartupEvents() {
 	// Subscribe to GitLab integration events
 	s.subscribeGitLabEvents()
 
-	// Subscribe to Azure DevOps watcher events
-	s.subscribeAzureDevOpsEvents()
-
 	// Subscribe to JIRA integration events
 	s.subscribeJiraEvents()
 
@@ -3646,6 +3676,7 @@ func (s *Service) Stop() error {
 		return ErrServiceNotRunning
 	}
 	s.running = false
+	cancelLaunchRetries, launchRetryWorkers := s.closeTransientLaunchRetries()
 	recoveryLifecycleCancel := s.recoveryLifecycleCancel
 	stopRecoveryParent := s.stopRecoveryParent
 	s.recoveryLifecycleCtx = nil
@@ -3660,6 +3691,7 @@ func (s *Service) Stop() error {
 	}
 
 	s.logger.Info("stopping orchestrator service")
+	s.awaitTransientLaunchRetries(cancelLaunchRetries, launchRetryWorkers)
 	// Stop owns every in-flight resume attempt. Its detached request context
 	// must not let startup callbacks outlive the service generation.
 	s.cancelResumeAttempts()
@@ -4070,6 +4102,16 @@ func (s *Service) reconcileActiveSessionOnStartup(
 			} else {
 				s.publishTaskUpdated(ctx, task)
 			}
+		}
+	}
+
+	// An adopted runtime can still belong to a turn whose terminal settled
+	// before a coarse state write failed. Correct only that exact evidence; a
+	// genuine in-flight turn is rejected by the idle runtime proof.
+	if retracked {
+		if err := s.convergeSettledDeliverySessionState(ctx, sessionID, nil); err != nil {
+			s.logger.Warn("failed to converge settled delivery session state on adoption",
+				zap.String("session_id", sessionID), zap.Error(err))
 		}
 	}
 

@@ -56,7 +56,7 @@ func TestExecuteQueuedMessage_RequeuesWhenResetInProgress(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{isAgentRunning: true, promptErr: ErrSessionResetInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q1",
@@ -92,7 +92,7 @@ func TestExecuteQueuedMessage_DoesNotPublishVisibleEffectsForReplacedIdentity(t 
 	}
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 	svc.repo = &sessionIdentityTransitionHookRepository{
@@ -152,7 +152,7 @@ func TestExecuteQueuedMessage_RequeuesCancelReleaseFailure(t *testing.T) {
 		promptErr:      fmt.Errorf("failed to trigger prompt: prompt abandoned after cancel: %w", lifecycle.ErrCancelEscalated),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q-cancel",
@@ -198,7 +198,7 @@ func TestExecuteQueuedMessage_SkipsUserMessageWhenAlreadyRecorded(t *testing.T) 
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
 
 	mc := &mockMessageCreator{}
@@ -265,7 +265,7 @@ func TestExecuteQueuedMessage_SkipsOnTurnStartWhenAlreadyProcessed(t *testing.T)
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
 
 	queuedMsg := &messagequeue.QueuedMessage{
@@ -312,7 +312,7 @@ func TestExecuteQueuedMessage_RecordsCIAutomationPromptOnDrain(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
 
 	mc := &mockMessageCreator{}
@@ -380,7 +380,7 @@ func TestExecuteQueuedMessage_StoresAttachmentsInUserMessageMetadata(t *testing.
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{isAgentRunning: true}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	mc := &mockMessageCreator{}
 	svc.messageCreator = mc
@@ -466,7 +466,7 @@ func TestExecuteQueuedMessageTransientRetryDoesNotDuplicateRecordedUserMessage(t
 		repoForExecutionLookup: repo,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	mc := &mockMessageCreator{}
 	svc.messageCreator = mc
 	queued := &messagequeue.QueuedMessage{

@@ -38,10 +38,11 @@ detail-panel banner was cut at the round-7 review (see
 ## Prior art
 
 Split from the requirements, at its byte cap. **Leg 1, our compiled wiki: DID NOT
-RUN** — `@henry` resolved the vault from `~/.obsidian-wiki/config.henry` but `ls`
-returned `Operation not permitted` (macOS TCC, which also blocks the grep fallback),
-and QMD could not substitute (`QMD_TRANSPORT` unset, no `mcp__qmd__*`, no `qmd` on
-`PATH`). A skipped step, not an empty one. **Leg 2, `saas-kb`: DID NOT RUN** — tool
+RUN** — the author's private notes configuration resolved to a local vault path
+(omitted), but `ls` returned `Operation not permitted` (macOS TCC, which also
+blocks the grep fallback), and QMD could not substitute (`QMD_TRANSPORT` unset,
+no `mcp__qmd__*`, no `qmd` on `PATH`). A skipped step, not an empty one.
+**Leg 2, `saas-kb`: DID NOT RUN** — tool
 absent; intended queries were unstartable-task affordance and blocked-card badge, no
 claim made. **Leg 3, this repository: RAN** — searched `docs/specs` and
 `docs/decisions` for `auto_start_failed|interrupted_at|orphan`, read producer commit
@@ -67,8 +68,8 @@ primitive's heaviest consumer. Read all three before changing any.
 ## Measurement receipts
 
 Queries behind the requirements' `## Measured population`. Run 2026-09-05 against
-`file:/Users/henry/.kandev/data/kandev.db?mode=ro`, reproduced at spec review. The
-table is `task_workspace_groups`, not `workspace_groups`.
+the local Kandev database in read-only mode, reproduced at spec review. The table
+is `task_workspace_groups`, not `workspace_groups`.
 
 ```sql
 -- (1) live children of an archived parent, by mode. inherit_parent 1, ws 55.

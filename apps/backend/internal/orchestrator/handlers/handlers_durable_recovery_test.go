@@ -34,6 +34,59 @@ func TestRestoreRequiredRecoveryResponseExposesUnresolvedDelivery(t *testing.T) 
 	require.Equal(t, "session-interrupted", payload.Details["session_id"])
 }
 
+type recoveryGuidanceTestError struct {
+	reason        string
+	generation    int64
+	blockID       string
+	incarnationID string
+}
+
+func (e recoveryGuidanceTestError) Error() string                 { return "session recovery required" }
+func (e recoveryGuidanceTestError) RecoveryReason() string        { return e.reason }
+func (e recoveryGuidanceTestError) RecoveryGeneration() int64     { return e.generation }
+func (e recoveryGuidanceTestError) RecoveryBlockID() string       { return e.blockID }
+func (e recoveryGuidanceTestError) RecoveryIncarnationID() string { return e.incarnationID }
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.2
+func TestRestoreRequiredRecoveryResponseRecoveryReasons(t *testing.T) {
+	for _, reason := range []string{
+		"native_state_missing", "native_resume_unsupported", "workspace_incompatible",
+		"unresolved_durable_work", "unknown_prompt_outcome",
+	} {
+		t.Run(reason, func(t *testing.T) {
+			msg := createTestMessage(t, ws.ActionSessionLaunch, map[string]interface{}{})
+			err := fmt.Errorf("resume refused: %w", recoveryGuidanceTestError{
+				reason: reason, generation: 3, blockID: "block-1", incarnationID: "incarnation-1",
+			})
+
+			response, responseErr := restoreRequiredRecoveryResponse(msg, err, "session-1")
+
+			require.NoError(t, responseErr)
+			require.NotNil(t, response)
+			payload := parseError(t, response)
+			require.Equal(t, map[string]interface{}{
+				"kind":            "session_restore_required",
+				"recovery_action": "continue_from_history",
+				"reason":          reason,
+				"session_id":      "session-1",
+				"generation":      float64(3),
+				"block_id":        "block-1",
+				"incarnation_id":  "incarnation-1",
+			}, payload.Details)
+		})
+	}
+
+	for _, err := range []error{
+		recoveryGuidanceTestError{reason: "provider_internal_failure"},
+		fmt.Errorf("generic failure"),
+	} {
+		msg := createTestMessage(t, ws.ActionSessionLaunch, map[string]interface{}{})
+		response, responseErr := restoreRequiredRecoveryResponse(msg, err, "session-1")
+		require.NoError(t, responseErr)
+		require.Nil(t, response)
+	}
+}
+
 // @covers AC-AGENTS-HARNESS-SESSION-CONTINUITY-006.2
 func TestWSLaunchSession_DurableRecovery(t *testing.T) {
 	ctx := context.Background()

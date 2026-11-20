@@ -22,7 +22,7 @@ The agent system owns this capability because it manages profile preferences, ru
 #### Acceptance criteria
 
 - **AC-AGENTS-CURSOR-PLUGIN-MCP-001.1:** When enabled for a local Cursor launch, Kandev shall discover only installed, enabled plugins applicable to the launch scope, using manifests under `~/.cursor/plugins/cache/`, `~/.cursor/plugins/local/`, and `~/.cursor/plugins/marketplaces/` for declared `mcpServers`. A cached version or marketplace catalog entry alone shall not establish eligibility.
-- **AC-AGENTS-CURSOR-PLUGIN-MCP-001.2:** Discovery shall inspect `mcp.json`, `.mcp.json`, `.cursor-plugin/plugin.json`, and `plugin.json` in each eligible plugin directory, including plugin-relative MCP file references from descriptors.
+- **AC-AGENTS-CURSOR-PLUGIN-MCP-001.2:** Discovery shall inspect `mcp.json`, `.mcp.json`, `.cursor-plugin/plugin.json`, and `plugin.json` in each eligible plugin directory, including plugin-relative MCP file references from descriptors. A plugin manifest that does not declare `mcpServers` is package metadata, not a server map: author, homepage, and repository URLs in that manifest shall not become endpoints or hide servers declared in `mcp.json`.
 - **AC-AGENTS-CURSOR-PLUGIN-MCP-001.3:** Discovery shall also read user-level `~/.cursor/mcp.json` when present.
 - **AC-AGENTS-CURSOR-PLUGIN-MCP-001.4:** Supported discovered server entries shall preserve server transport (`stdio`, `http`, `sse`, `streamable-http`), `command`, `args`, `env`, `url`, and `headers`.
 - **AC-AGENTS-CURSOR-PLUGIN-MCP-001.5:** Server name `kandev` is strictly reserved for Kandev internal tools and shall never be overwritten by a plugin definition.

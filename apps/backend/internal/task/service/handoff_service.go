@@ -103,11 +103,12 @@ type SessionWorktreeReader interface {
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error)
 	GetTask(ctx context.Context, id string) (*models.Task, error)
-	// HasExecutorRunningRow tells cleanup whether a session still has
-	// an executors_running row. Cleanup must refuse to delete a
-	// materialized workspace while any member session remains active,
-	// otherwise the agent's writes could be destroyed.
-	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
+	// HasActiveExecutorRunningRow tells cleanup whether an executor row still
+	// permits a session to own a live runtime. Failed rows remain active until
+	// the lifecycle owner confirms termination. Cleanup must refuse to delete a
+	// materialized workspace while any member session remains active, otherwise
+	// the agent's writes could be destroyed.
+	HasActiveExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 }
 
 // RunCanceller stops active sessions / runs for a task before a

@@ -1,11 +1,12 @@
 ---
-status: draft
+status: current
 system: platform
-updated: 2026-10-28
+updated: 2026-11-16
 requirements:
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002
   - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003
+  - REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004
 ---
 
 # Delivery storage diagnostics system design
@@ -29,6 +30,8 @@ Existing delivery and recovery documents remain authoritative for their outcomes
 | REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-001 | Source classification; Wire and persistence; Compatibility |
 | REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-002 | Live observations; Ownership and failure behavior |
 | REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-003 | Shared presentation; Mobile composition; Recovery actions |
+
+| REQ-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004 | Composer notice dismissal |
 
 ## Current behavior
 
@@ -224,6 +227,76 @@ After backend restart, resample current owners instead of treating an old observ
 Historical terminal diagnostics retain the ordinary persistence guarantee when storage permits their commit.
 Do not fabricate an acknowledgment when storage cannot commit that record.
 
+## Post-turn observation and freshness
+
+This extension implements criteria 002.15 through 002.17 and restores the existing independent observation contract.
+The [fix package](../../../plans/delivery-storage-recovery/plan.md) owns delivery and regression evidence.
+Session settlement remains with [durable failure recovery](durable-delivery-failure.md#settled-session-state-convergence).
+
+`Manager.handleCompleteEventLeased` clears the active delivery submission before the next health probe.
+`StreamManager.probeDeliveryHealth` currently returns when that identity is empty.
+Capacity sampling continues and preserves the previous pressure fields in `buildRuntimeStorageObservation`.
+It also refreshes their shared receipt age. This combination can keep an old pressure headline apparently current indefinitely.
+
+### Observer lifetime and authority
+
+Keep `monitorDeliveryHealth` attached to the existing `deliveryStreamAttachment`, including between prompts.
+Retain its two-second interval, two-second request deadline, one in-flight request, and owned shutdown context.
+Do not add an observer, source registry, native launch, or per-browser request loop.
+
+Capture the execution, client lease, attachment, harness generation, and active submission before each status request.
+Revalidate every captured identity before applying its result. An empty submission is a valid idle observation scope.
+An idle response that overlaps a new submission is obsolete and cannot clear that submission's pressure.
+Stop, reattachment, client replacement, native-generation replacement, and shutdown reject delayed results.
+No lifecycle or stream lock spans status I/O or event publication.
+
+A supported `delivery_health` state permits an owner-scoped pressure observation.
+A missing object, empty state, unknown state, or malformed status supplies no recovery evidence.
+Older peers with recognized health states retain supported observation behavior without a new capability requirement.
+Fresh `healthy` or nonblocking `pressure` reports clear the live blocking fields only when guard, pause, and failure evidence also permit it.
+An active sticky writer failure remains blocking until agentctl itself releases it through the existing commit rules.
+
+With an active submission, retain the existing correlated failure and reconciliation path.
+Without one, update live pressure only. Do not invoke submission reconciliation with an empty or remembered submission identity.
+Idle observation cannot settle a turn, resolve a recovery block, drain a queue, or dispatch an instruction.
+Preserve persisted failure snapshots and their original timestamps when live pressure clears.
+
+### Independent receipt ages
+
+Keep `ObservedAt`, `ReceivedAt`, and `age_seconds` for capacity evidence.
+Add a separate backend receipt time for accepted delivery-health reports.
+Expose optional `pressure_observed_at` and `pressure_age_seconds` in `RuntimeStorageHealthDTO` and `RuntimeStorageHealth`.
+The pressure timestamp identifies the backend's accepted status observation, not the original failure time.
+Use pointer or optional fields so unknown pressure age remains distinct from zero.
+Both ages use backend receipt time plus monotonic elapsed time after browser receipt.
+Source timestamps remain display-only. Historical `FailureStorage.ObservedAt` retains its original meaning.
+
+Every accepted status response refreshes the pressure receipt, including unchanged health values.
+An unchanged value does not require a new event every two seconds.
+Publish semantic changes immediately and refresh sustained nonhealthy evidence at most once per 30 seconds.
+Existing capacity events can carry the latest independently computed pressure age.
+A capacity success or failure never changes the pressure receipt.
+Failed status requests never change it either. Backend restart resamples current owners instead of persisting these clocks.
+
+Carry both ages through runtime copies, DTO enrichment, boot, detail reads, and `task_session.runtime_storage_changed`.
+Keep the existing backend epoch and monotonic revision ordering at the shared session merge boundary.
+An old HTTP or boot snapshot cannot replace a newer healthy live event.
+Rejected responses cannot renew either clock.
+
+### Presentation compatibility
+
+Use pressure age for a blocked-output headline and capacity age for disk measurements.
+Use the existing localized last-reported label after 90 seconds or when pressure age is unknown.
+An older backend's capacity age cannot substitute for missing pressure age.
+Keep undismissed pressure visible as last reported until a supported status proves recovery.
+Expanded Details distinguishes the pressure observation time from the capacity observation time.
+Preserve historical failure time separately in the existing recovery card.
+
+Reuse the current compact notice, disclosure, Storage link, and desktop/phone controls.
+No additional action, overlay, scroll owner, or automatic recovery request is required.
+New time labels require the seven real locale catalogs and generated Traditional Chinese catalogs.
+The fix package owns UI-01 and UI-02 and their rendered checks.
+
 ## Shared presentation
 
 Add a shared normalized storage view model below components.
@@ -338,3 +411,34 @@ Use provider/client fixtures for this matrix. No real cloud account is required 
 Exercise the actual advisory route to prove twenty concurrent shared-instance requests perform one capacity read.
 Verify that it never invokes per-journal pressure refresh, and that legacy-delivery Sprites still report workspace capacity.
 Verify that inactive remote environments cause no restore, launch, wake, or new proxy creation for capacity polling.
+
+## Composer notice dismissal
+
+This extension implements requirement 004. Platform retains ownership because dismissal controls presentation of its runtime diagnostics.
+The [dismissal package](../../../plans/storage-notice-dismissal/plan.md) owns implementation. Earlier packages retain their existing results.
+
+Pass the resolved task identity from `ComposerStatusNotices` to `SessionDeliveryStorageNotice`.
+Use `panelState.taskId`, with the session's task identity as a fallback when available.
+Never persist a shared empty task key. Without a task identity, allow only mounted local dismissal.
+
+Follow the PR banner's task-scoped `sessionStorage` pattern in `lib/local-storage.ts`.
+Add dedicated read/write helpers and a separate prefix. Include the prefix in existing storage cleanup ownership.
+Read failures mean undismissed. Write failures do not prevent the local state update.
+Key or reset the notice's dismissal state when task identity changes, including same-instance prop changes.
+Do not key dismissal by health revision, epoch, reason, or session. Later samples do not undo the user's dismissal.
+Do not mutate runtime health or issue a backend request. Independently mounted notices read the saved value on mount.
+No new shared registry, backend preference, or dependency is needed.
+
+Add an `IconX` button after Details, with `type="button"`, `aria-label={t("task:dismiss")}`, and a stable test ID.
+Reuse the existing warning colors, rounded control treatment, focus ring, and control-sizing utilities.
+Use a compact desktop target and a target of at least 44px on phones and coarse pointers.
+The PR archive notice is the dismissal exemplar. The shipped storage notice remains the layout exemplar.
+The inline row suits a single immediate action. It needs no dialog, animation, or new scroll owner.
+Keep Storage and Details reachable. Allow the primary label to wrap while controls stay within the row.
+Preserve the existing chat scroll region and safe-area handling. Do not remount the editor when hiding the notice.
+Reuse the existing translated Dismiss key. No locale additions are expected.
+
+Component tests cover hiding, task changes, remount, later pressure samples, and storage failures.
+Storage helper tests cover key isolation and tab-session lifetime. Existing recovery tests protect independent cards and controls.
+Desktop and mobile browser tests cover dismissal, reload, task switching, draft retention, keyboard activation, and phone geometry.
+A narrow fine-pointer viewport must also retain the phone target size.

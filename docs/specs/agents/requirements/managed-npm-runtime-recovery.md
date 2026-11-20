@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-08-24
-updated: 2026-11-07
+updated: 2026-11-08
 owners:
   - kandev
 ---
@@ -27,6 +27,9 @@ Requirements 001 through 004 retain the existing contract. Requirement 005
 adds recovery of a missing bundled Codex platform dependency. [Requirement 006](managed-npm-cache-recovery.md)
 adds recovery of incomplete npm execution trees after an upgrade or restart.
 Each delivery package records its own implementation status.
+
+[Requirement 007](managed-npm-repair-reuse.md) extends verified cache
+recovery with reuse across launches. It preserves the shared-tree protection rule.
 
 ## Terminology
 
@@ -64,6 +67,7 @@ Each delivery package records its own implementation status.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-002.3:** Kandev shall preserve the configured npm registry, the global npm cache, and unrelated execution trees.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-002.4:** Cache repair shall reject broad roots, path-like package values, symbolic links, and paths outside the npm execution cache.
 - **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-002.5:** Cancellation and backend shutdown shall stop repair before a replacement process starts.
+- **AC-AGENTS-MANAGED-RUNTIME-RECOVERY-002.6:** On Windows, cache repair and the execution-tree inventory shall open an ordinary npm cache directory below a drive letter or UNC share root, and shall still reject a symbolic link or junction at any component below the volume root.
 
 ### REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-003: Project-independent resolution and policy errors
 
@@ -121,7 +125,8 @@ pending bundled-dependency extension above.
 - Automatic version rollback or selection of another package version.
 - Registry replacement, dependency substitution, or global npm cache cleanup.
 - Direct native binaries, passthrough commands, unclassified npm errors without verified cache or eligible early-exit evidence, and a second automatic retry.
-- General-purpose dependency repair, installation of a package named only in stderr, persistent promotion of an isolated repaired runtime, and guarantees against npm or registry outages.
+- General-purpose dependency repair, installation of a package named only in stderr, and guarantees against npm or registry outages.
+- Persistent repair reuse outside the verified-cache extension defined by [requirement 007](managed-npm-repair-reuse.md).
 - Automatic cache repair and retry for Sprites, remote Docker, Kubernetes, and future executors without a validated executor-local launch and stop contract. Kandev still classifies a policy failure when bounded diagnostics are available for the exact trusted package.
 
 ## Implementation package
@@ -129,3 +134,4 @@ pending bundled-dependency extension above.
 - [Managed npm startup resilience](../../../plans/managed-npm-startup-resilience/plan.md)
 - [Missing Codex dependency recovery](../../../plans/managed-codex-dependency-recovery/plan.md)
 - [Incomplete npm cache recovery](../../../plans/managed-npm-cache-recovery/plan.md)
+- [Reusable managed npm repairs](../../../plans/managed-npm-repair-reuse/plan.md)

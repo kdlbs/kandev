@@ -19,6 +19,10 @@ type fakeProviderRepo struct {
 	byID             map[string]*models.AgentInstance
 	clearedParkedFor []string // workspace ids passed to ClearAllParked
 	clearedParkedErr error
+	// releasedAuthorSteps records the step ids passed to
+	// ReleaseAuthorExclusionParkedRuns, one entry per call.
+	releasedAuthorSteps [][]string
+	releasedAuthorErr   error
 
 	// cfgSeq, when non-nil, makes GetWorkspaceRouting return a different
 	// config on each successive call (advancing cfgSeqIdx), simulating a
@@ -27,6 +31,20 @@ type fakeProviderRepo struct {
 	// the sequence is exhausted.
 	cfgSeq    []*WorkspaceConfig
 	cfgSeqIdx int
+
+	decls     []ExclusionDeclaration
+	declsErr  error
+	declReads int
+	seatSteps []SeatStep
+}
+
+func (f *fakeProviderRepo) ListSeatSteps(_ context.Context, _ string) ([]SeatStep, error) {
+	return f.seatSteps, nil
+}
+
+func (f *fakeProviderRepo) ListAuthorExclusionDeclarations(_ context.Context, _ string) ([]ExclusionDeclaration, error) {
+	f.declReads++
+	return f.decls, f.declsErr
 }
 
 func (f *fakeProviderRepo) GetWorkspaceRouting(_ context.Context, _ string) (*WorkspaceConfig, error) {
@@ -59,6 +77,13 @@ func (f *fakeProviderRepo) GetAgentInstance(_ context.Context, id string) (*mode
 func (f *fakeProviderRepo) ClearAllParkedRoutingForWorkspace(_ context.Context, workspaceID string) error {
 	f.clearedParkedFor = append(f.clearedParkedFor, workspaceID)
 	return f.clearedParkedErr
+}
+
+func (f *fakeProviderRepo) ReleaseAuthorExclusionParkedRuns(
+	_ context.Context, _ string, stepIDs []string,
+) (int, error) {
+	f.releasedAuthorSteps = append(f.releasedAuthorSteps, stepIDs)
+	return len(stepIDs), f.releasedAuthorErr
 }
 
 // fakeRetry stubs the RetryRunner seam.

@@ -28,6 +28,7 @@ type PRWatchSyncResult struct {
 	// provider evidence rather than task persistence.
 	DiscoveryResolved  bool
 	DiscoveryTrackable bool
+	deferredErr        error
 }
 
 const prSyncExplicitRefreshKeySuffix = "|explicit-refresh"
@@ -41,6 +42,7 @@ type prWatchSyncPending struct {
 	// a completed status phase.
 	WorkflowOnly bool
 	Watches      []*PRWatch
+	Deferred     *AdmissionDeferredError
 }
 
 // prWatchSyncOutcome is the internal result of one batched sync pass.
@@ -291,12 +293,27 @@ func prWatchWorkflowPendingWatches(pending []prWatchSyncPending) []*PRWatch {
 	return watches
 }
 
-// appendPRWatchSyncPending merges one phase's unfinished watches, so an
-// outcome holds at most one entry per phase.
+// appendPRWatchSyncPending merges unfinished watches without target-specific
+// admission boundaries into their shared phase entry.
 func appendPRWatchSyncPending(
 	pending []prWatchSyncPending, numbered bool, watches []*PRWatch,
 ) []prWatchSyncPending {
 	return appendPRWatchSyncPendingForPhase(pending, numbered, false, watches)
+}
+
+func appendPRWatchSyncPendingWithDeferral(
+	pending []prWatchSyncPending, numbered bool, watches []*PRWatch,
+	deferred *AdmissionDeferredError,
+) []prWatchSyncPending {
+	if deferred == nil {
+		return appendPRWatchSyncPending(pending, numbered, watches)
+	}
+	if len(watches) == 0 {
+		return pending
+	}
+	return append(pending, prWatchSyncPending{
+		Numbered: numbered, Watches: watches, Deferred: deferred,
+	})
 }
 
 // appendPRWatchWorkflowPending records unfinished Actions-attention work
@@ -314,7 +331,8 @@ func appendPRWatchSyncPendingForPhase(
 		return pending
 	}
 	for i := range pending {
-		if pending[i].Numbered == numbered && pending[i].WorkflowOnly == workflowOnly {
+		if pending[i].Numbered == numbered && pending[i].WorkflowOnly == workflowOnly &&
+			pending[i].Deferred == nil {
 			pending[i].Watches = append(pending[i].Watches, watches...)
 			return pending
 		}
@@ -551,8 +569,7 @@ func (s *Service) runBatchedLeaderPhases(
 		pending, paused := s.failBatchedBatchGroups(req, searching, err)
 		return batchedPhaseFailureOutcome(pending, paused, err)
 	}
-	s.applySearchingBatchGroups(req, searching, searchingStatuses, now, resultsByWatch)
-	return prWatchSyncOutcome{}
+	return s.applySearchingBatchGroups(req, searching, searchingStatuses, now, resultsByWatch)
 }
 
 // batchedPhaseFailureOutcome reports unfinished work unless the shared health
@@ -697,18 +714,38 @@ func (s *Service) applySearchingBatchGroups(
 	req batchedPRWatchSync, groups []*prWatchBatchGroup,
 	statuses *batchedWatchStatuses, now time.Time,
 	resultsByWatch map[*PRWatch]PRWatchSyncResult,
-) {
+) prWatchSyncOutcome {
+	outcome := prWatchSyncOutcome{}
 	for _, group := range groups {
 		if group.attempt.result.invalidated() {
 			continue
 		}
 		representative := s.applySearchingBatchGroup(req, group, statuses, now, resultsByWatch)
+		if representative.deferredErr != nil {
+			s.releasePRDiscoveryWatch(req.workspaceID, req.cacheScope, req.credentialGeneration, group.attempt)
+			s.completePRDiscoveryWatchAttempt(
+				group.attempt, representative.Status, representative.DiscoveryResolved,
+				representative.SyncFailed, representative.deferredErr, false,
+			)
+			s.forgetPRDiscoveryWatchAttempt(
+				req.workspaceID, req.cacheScope, req.credentialGeneration, group.attempt,
+			)
+			outcome.Pending = appendPRWatchSyncPendingWithDeferral(
+				outcome.Pending, false, group.watches, admissionDeferralOf(representative.deferredErr),
+			)
+			outcome.Err = firstPRWatchSyncError(outcome.Err, representative.deferredErr)
+			if outcome.Deferred == nil {
+				outcome.Deferred = admissionDeferralOf(representative.deferredErr)
+			}
+			continue
+		}
 		s.completePRDiscoveryWatchAttempt(
 			group.attempt, representative.Status, representative.DiscoveryResolved,
 			representative.SyncFailed, nil, false,
 		)
 		s.finishSearchingBatchGroup(req, group, representative, resultsByWatch)
 	}
+	return outcome
 }
 
 func (s *Service) applySearchingBatchGroup(
@@ -716,17 +753,63 @@ func (s *Service) applySearchingBatchGroup(
 	statuses *batchedWatchStatuses, now time.Time,
 	resultsByWatch map[*PRWatch]PRWatchSyncResult,
 ) PRWatchSyncResult {
-	var representative PRWatchSyncResult
-	for index, watch := range group.watches {
-		result := s.applyBatchedSearchingWatch(
-			req.ctx, req.client, req.cacheScope, watch, statuses, now, false, false, false,
-		)
-		resultsByWatch[watch] = result
-		if index == 0 {
-			representative = result
+	if len(group.watches) == 0 {
+		return PRWatchSyncResult{}
+	}
+	sharedBranchKey := graphqlBranchKey(group.target.Owner, group.target.Repo, group.target.Branch)
+	lookupIndex := searchingBatchLookupIndex(group.watches)
+	lookupWatch := group.watches[lookupIndex]
+	representative := s.applyBatchedSearchingWatch(
+		req.ctx, req.client, req.cacheScope, lookupWatch, statuses, now, false, false, false,
+	)
+	resultsByWatch[lookupWatch] = representative
+	if representative.deferredErr != nil {
+		for index, watch := range group.watches {
+			if index == lookupIndex {
+				continue
+			}
+			resultsByWatch[watch] = PRWatchSyncResult{Watch: watch, deferredErr: representative.deferredErr}
 		}
+		return representative
+	}
+	if len(group.watches) == 1 {
+		return representative
+	}
+
+	sharedStatuses := &batchedWatchStatuses{
+		byKey:               make(map[string]*PRStatus, 1),
+		branchResolvedEmpty: statuses.branchResolvedEmpty,
+	}
+	if representative.Status != nil && representative.Status.PR != nil {
+		sharedStatuses.byKey[sharedBranchKey] = representative.Status
+	}
+	for index, watch := range group.watches {
+		if index == lookupIndex {
+			continue
+		}
+		resultsByWatch[watch] = s.applyBatchedSearchingWatch(
+			req.ctx, req.client, req.cacheScope, watch, sharedStatuses, now,
+			true, representative.DiscoveryResolved, representative.SyncFailed,
+		)
 	}
 	return representative
+}
+
+func searchingBatchLookupIndex(watches []*PRWatch) int {
+	selected := 0
+	for index, watch := range watches {
+		if watch == nil {
+			continue
+		}
+		if watch.LastCheckedAt == nil {
+			return index
+		}
+		if watches[selected] == nil || watches[selected].LastCheckedAt == nil ||
+			watch.LastCheckedAt.Before(*watches[selected].LastCheckedAt) {
+			selected = index
+		}
+	}
+	return selected
 }
 
 func (s *Service) finishSearchingBatchGroup(
@@ -801,7 +884,9 @@ func (s *Service) applyJoinedBatchGroups(
 				continue
 			}
 			sharedFailure = firstPRWatchSyncError(sharedFailure, sharedErr)
-			pending = appendPRWatchSyncPending(pending, group.numbered, group.watches)
+			pending = appendPRWatchSyncPendingWithDeferral(
+				pending, group.numbered, group.watches, admissionDeferralOf(sharedErr),
+			)
 			continue
 		}
 		if status == nil && !resolved && syncFailed {
@@ -1368,6 +1453,9 @@ func (s *Service) applyBatchedSearchingWatch(
 		}
 		pr, attempted, err := s.lookupSearchingWatchPR(ctx, client, cacheScope, w, branchKey, statuses, lastChecked)
 		if err != nil {
+			if admissionDeferralOf(err) != nil {
+				return PRWatchSyncResult{Watch: w, deferredErr: err}
+			}
 			applied, _, stampErr := s.applyPRWatchDiscoveryResult(ctx, w, nil, now)
 			if stampErr != nil {
 				s.logSyncError("failed to stamp failed PR discovery", stampErr, zap.String("id", w.ID))

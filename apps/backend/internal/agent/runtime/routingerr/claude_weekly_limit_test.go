@@ -66,7 +66,10 @@ func TestClassifyClaudeWeeklyLimitRejectsUnrelatedText(t *testing.T) {
 		ProviderID: "claude-acp", Phase: PhasePromptSend,
 		Stderr: "You've hit your weekly limit", HTTPStatus: http.StatusTooManyRequests,
 	})
-	if e.Code != CodeRateLimited {
-		t.Fatalf("structured HTTP status lost precedence: %+v", e)
+	if e.Code != CodeQuotaLimited || e.Class != ClassHard {
+		t.Fatalf("hard quota lost precedence over generic HTTP status: %+v", e)
+	}
+	if got := Decide(ContextKanban, e, time.Now()); got != DecisionManual {
+		t.Fatalf("hard quota decision = %q, want %q", got, DecisionManual)
 	}
 }

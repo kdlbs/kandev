@@ -24,6 +24,9 @@ on:
         default: false
         type: boolean
   workflow_call:
+    secrets:
+      DISCORD_GENERAL_WEBHOOK_URL:
+        required: false
     inputs:
       release_tag:
         description: "Exact published Stable release tag, for example v1.2.3"

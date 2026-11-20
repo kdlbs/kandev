@@ -11,7 +11,12 @@ import {
   withDatabase,
 } from "./interrupted-prompt-recovery";
 
-type NativeResumeScenario = boolean | "readiness" | "cancelled" | "unproven";
+import {
+  seedAbsentPromptsAndCheckAdmission,
+  expectAbsentPromptsRetired,
+} from "./undelivered-prompt-recovery";
+
+type NativeResumeScenario = boolean | "readiness" | "cancelled" | "unproven" | "absent";
 type NativeResumeOptions = { legacy: NativeResumeScenario; afterResumeClick: () => Promise<void> };
 
 function resumeScenario(options: NativeResumeScenario | NativeResumeOptions) {
@@ -23,7 +28,12 @@ function resumeScenario(options: NativeResumeScenario | NativeResumeOptions) {
 // The legacy mutations reuse an older fence shape. "unproven" keeps the real
 // journal history and only changes the SQL completion label.
 function changesLegacyFence(scenario: NativeResumeScenario) {
-  return scenario === true || scenario === "readiness" || scenario === "cancelled";
+  return (
+    scenario === true ||
+    scenario === "readiness" ||
+    scenario === "cancelled" ||
+    scenario === "absent"
+  );
 }
 
 function seedLegacyFence(
@@ -37,7 +47,7 @@ function seedLegacyFence(
     db.prepare(
       "UPDATE agent_delivery_submissions SET state = 'dispatching', outcome = 'dispatching' WHERE id = ?",
     ).run(seeded.submissionId);
-    if (scenario === "cancelled") {
+    if (scenario === "cancelled" || scenario === "absent") {
       db.prepare("UPDATE session_recovery_blocks SET delivery_stream_id = '' WHERE id = ?").run(
         recoveryBlockId,
       );
@@ -67,6 +77,37 @@ function seedUnprovenCompletion(tmpDir: string, submissionId: string) {
       "UPDATE agent_delivery_submissions SET state = 'completed', outcome = 'completed', terminal_stream_id = '', terminal_sequence = 0, terminal_turn_id = '', fully_settled_at = NULL, payload_pruned_at = NULL WHERE id = ?",
     ).run(submissionId);
   });
+}
+
+async function expectDeliveryProjectionSettled(tmpDir: string, streamId: string) {
+  await expect
+    .poll(
+      () =>
+        withDatabase(tmpDir, (db) => {
+          const cursor = db
+            .prepare(
+              "SELECT received_sequence, projected_sequence, remote_high_water FROM agent_delivery_cursors WHERE stream_id = ?",
+            )
+            .get(streamId) as
+            | {
+                received_sequence: number;
+                projected_sequence: number;
+                remote_high_water: number;
+              }
+            | undefined;
+          return (
+            !!cursor &&
+            cursor.received_sequence === cursor.projected_sequence &&
+            cursor.received_sequence >= cursor.remote_high_water
+          );
+        }),
+      {
+        timeout: 15_000,
+        message:
+          "delivery cursor must be fully projected before simulating an unproven SQL completion",
+      },
+    )
+    .toBe(true);
 }
 
 type NativeResumeTrigger = {
@@ -118,36 +159,31 @@ async function triggerNativeResume(input: NativeResumeTrigger) {
   }
 }
 
-async function prepareReadinessFence(
-  api: ApiClient,
-  taskId: string,
-  sessionId: string,
-  tmpDir: string,
-  recoveryBlockId: string,
-) {
-  withDatabase(tmpDir, (db) => {
-    db.prepare("DELETE FROM session_recovery_blocks WHERE id = ?").run(recoveryBlockId);
+function prepareReadinessFence(tmpDir: string, sessionId: string, recoveryBlockId: string) {
+  const message = "The previous agent attempt ended before session readiness was confirmed.";
+  const occurredAt = new Date().toISOString();
+  return withDatabase(tmpDir, (db) => {
+    const row = db.prepare("SELECT metadata FROM task_sessions WHERE id = ?").get(sessionId) as {
+      metadata: string;
+    };
+    const metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+    metadata.last_agent_error = {
+      message,
+      stamp: "native-resume-readiness",
+      scope: "session",
+      phase: "resume",
+      code: "generic_launch_failure",
+      occurred_at: occurredAt,
+    };
+    db.prepare(
+      "UPDATE task_sessions SET metadata = ?, state = 'FAILED', error_message = ? WHERE id = ?",
+    ).run(JSON.stringify(metadata), message, sessionId);
+    const block = db
+      .prepare("SELECT id FROM session_recovery_blocks WHERE id = ? AND state = 'open'")
+      .get(recoveryBlockId) as { id: string } | undefined;
+    if (!block) throw new Error(`readiness recovery block ${recoveryBlockId} is not open`);
+    return block.id;
   });
-  await api.launchSession({ task_id: taskId, session_id: sessionId, intent: "resume" });
-  await expect
-    .poll(() =>
-      withDatabase(tmpDir, (db) => {
-        const block = db
-          .prepare("SELECT id FROM session_recovery_blocks WHERE session_id = ? AND state = 'open'")
-          .get(sessionId) as { id: string } | undefined;
-        return block?.id;
-      }),
-    )
-    .toBeTruthy();
-  return withDatabase(
-    tmpDir,
-    (db) =>
-      (
-        db
-          .prepare("SELECT id FROM session_recovery_blocks WHERE session_id = ? AND state = 'open'")
-          .get(sessionId) as { id: string }
-      ).id,
-  );
 }
 
 async function sendRecoveryInstruction(
@@ -216,15 +252,29 @@ export async function verifyNativeResumeClearsRecoveryNotice(
     )
     .toBe(false);
   expect(active.agent_execution_id).toBeTruthy();
-  const originalMessages = (await api.listSessionMessages(active.id)).messages;
   const seeded = seedInterruptedPrompt(tmpDir, active.id, active.agent_execution_id);
   let recoveryBlockId: string = seeded.blockId;
   if (legacyFence) {
     seedLegacyFence(tmpDir, active.id, seeded, recoveryBlockId, legacy);
   }
-  if (unproven) seedUnprovenCompletion(tmpDir, seeded.submissionId);
+  const absentIds = await seedAbsentPromptsAndCheckAdmission(
+    api,
+    tmpDir,
+    {
+      taskId: task.id,
+      sessionId: active.id,
+      sourceId: seeded.submissionId,
+      blockId: recoveryBlockId,
+    },
+    legacy === "absent",
+  );
+  const originalMessages = (await api.listSessionMessages(active.id)).messages;
+  if (unproven) {
+    await expectDeliveryProjectionSettled(tmpDir, seeded.submission.stream_id);
+    seedUnprovenCompletion(tmpDir, seeded.submissionId);
+  }
   if (legacy === "readiness") {
-    recoveryBlockId = await prepareReadinessFence(api, task.id, active.id, tmpDir, recoveryBlockId);
+    recoveryBlockId = prepareReadinessFence(tmpDir, active.id, recoveryBlockId);
   }
   await page.reload();
   await session.waitForLoad();
@@ -276,6 +326,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
     submission: { state: unproven ? "completed" : "interrupted_unknown" },
   });
   await expectJournalRetirement(seeded.journalPath, seeded.submission);
+  await expectAbsentPromptsRetired(tmpDir, seeded.journalPath, seeded.submission, absentIds);
   expect(
     (await api.listSessionMessages(active.id)).messages
       .filter((item) => item.author_type === "user")

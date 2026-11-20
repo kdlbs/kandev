@@ -904,6 +904,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 
 	info := &lifecycle.WorkspaceInfo{
 		TaskID:                  taskID,
+		OwnerUserID:             s.workspaceOwnerUserIDForTask(ctx, taskID),
 		SessionID:               sessionID,
 		TaskEnvironmentID:       session.TaskEnvironmentID,
 		WorkspacePath:           workspacePath,
@@ -1174,6 +1175,7 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 	if err := s.populateWorkspaceTaskMetadata(ctx, taskID, info); err != nil {
 		return nil, err
 	}
+	info.DetachedWorkspaceRoots = detachedEnvironmentRepoPaths(sessionWorktrees)
 	worktreesByIdentity := indexWorkspaceWorktrees(sessionWorktrees)
 	worktreesByRepository := indexUniqueWorkspaceWorktreesByRepository(sessionWorktrees)
 	projections, err := s.workspaceRepositoryProjections(ctx, taskID)
@@ -1204,6 +1206,16 @@ func (s *Service) populateWorkspaceTaskMetadata(ctx context.Context, taskID stri
 		info.TaskArchived = task.ArchivedAt != nil
 	}
 	return nil
+}
+
+func detachedEnvironmentRepoPaths(rows []*models.TaskEnvironmentRepo) []string {
+	paths := make([]string, 0)
+	for _, row := range rows {
+		if row != nil && row.Status == models.TaskEnvironmentRepoStatusDetached && row.WorktreePath != "" {
+			paths = append(paths, row.WorktreePath)
+		}
+	}
+	return paths
 }
 
 func indexWorkspaceWorktrees(sessionWorktrees []*models.TaskEnvironmentRepo) map[workspaceWorktreeKey]*models.TaskEnvironmentRepo {

@@ -118,7 +118,9 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 		WorkspaceID: "ws-1", TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget",
 		PRNumber: 42, PRURL: "https://github.com/acme/widget/pull/42", PRTitle: "PostgreSQL parity",
 		HeadBranch: "feature/postgres", BaseBranch: "main", AuthorLogin: "octocat", State: "open",
-		CreatedAt: now,
+		HeadSHA:      "head-postgres",
+		CheckSummary: &CheckSummary{HeadSHA: "head-postgres", Observed: 2, Skipped: 2},
+		CreatedAt:    now,
 	}
 	if err := store.CreateTaskPR(ctx, taskPR); err != nil {
 		t.Fatalf("create task PR: %v", err)
@@ -126,6 +128,9 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	gotTaskPR, err := store.GetTaskPRByID(ctx, taskPR.ID)
 	if err != nil || gotTaskPR == nil || gotTaskPR.PRNumber != taskPR.PRNumber {
 		t.Fatalf("get task PR = %+v, err %v", gotTaskPR, err)
+	}
+	if gotTaskPR.CheckSummary == nil || gotTaskPR.CheckSummary.Skipped != 2 {
+		t.Fatalf("get task PR check summary = %+v", gotTaskPR.CheckSummary)
 	}
 
 	if err := store.EnsureWorkspaceExecutorDefaults(ctx, "ws-1"); err != nil {

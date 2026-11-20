@@ -34,5 +34,8 @@ func ValidateBuiltinHelper(profile *p.Context, taskID string, identity *Identity
 	if identity == nil || !slices.Contains(identity.Capabilities, p.BuiltinPackagesCapability) || identity.BuiltinMCPCatalogVersion != profile.BuiltinPackages.CatalogVersion {
 		return errors.New("agentctl does not support the selected built-in MCP packages; upgrade the helper before starting this session")
 	}
+	if profile.Surface == p.SurfaceAutomation && !slices.Contains(identity.Capabilities, p.AutomationMCPSelectionCapability) {
+		return errors.New("agentctl does not support automation MCP selection; upgrade the helper before starting this session")
+	}
 	return nil
 }

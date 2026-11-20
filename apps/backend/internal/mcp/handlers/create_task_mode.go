@@ -34,6 +34,7 @@ type mcpCreateTaskRequest struct {
 	Repositories           []mcpRepositoryInput `json:"repositories"`
 	BaseBranch             string               `json:"base_branch"`
 	BlockedBy              []string             `json:"blocked_by"`
+	RelatedTaskIDs         []string             `json:"related_task_ids"`
 	StartWhenUnblocked     *bool                `json:"start_when_unblocked"`
 	AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"`
 	ExternalID             string               `json:"external_id"`

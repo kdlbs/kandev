@@ -36,6 +36,16 @@ var ErrTaskReviewFindingNotFound = errors.New("task review finding not found")
 // surface from the same lookup.
 var ErrExecutorNotFound = errors.New("executor not found")
 
+// ErrExecutorMutationDenied marks an edit refused because the caller is not
+// eligible for executor compute that the edited source would launch on.
+var ErrExecutorMutationDenied = errors.New("executor mutation denied")
+
+// ErrWorkspaceDefaultExecutorUnavailable marks a workflow edit blocked by a
+// workspace default executor that no longer resolves.
+var ErrWorkspaceDefaultExecutorUnavailable = errors.New("workspace default executor is unavailable")
+
+const WorkspaceDefaultExecutorUnavailableErrorCode = "workspace_default_executor_unavailable"
+
 // ErrExecutionRotated is returned by CAS-style updates on executors_running when the
 // row's agent_execution_id has rotated since the caller observed it. Indicates the
 // caller's write target a now-defunct execution and should be discarded — typically
@@ -630,6 +640,11 @@ const (
 	// passthrough agent.running event. It prevents recovery from evaluating
 	// the same on_turn_start transition a second time after restart.
 	SessionMetaKeyInitialCreatePromptPassthrough = "initial_create_prompt_passthrough"
+	// SessionMetaKeyInitialPromptExplicitLaunch marks a matching pending
+	// initial-submission receipt whose launch came from explicit start_created
+	// input. Fresh-start recovery uses it to keep the same preserving
+	// composition; task-description receipts do not carry it.
+	SessionMetaKeyInitialPromptExplicitLaunch = "initial_prompt_explicit_launch"
 )
 
 // InterruptedRecoverySettlement is the durable recovery snapshot used when a
@@ -1380,6 +1395,12 @@ const (
 // that the orchestrator should consume to drive a workflow step transition.
 // See ADR 0015 for the lifecycle (set → read → clear).
 type PendingStepCompletionSignal struct {
+	// SignalID is minted only for an accepted claim. It fences transition
+	// commitment to this exact source without changing public tool arguments.
+	SignalID string `json:"signal_id,omitempty"`
+	// SourceTurnID is the persisted turn the backend resolved at admission.
+	// Empty means the legacy no-turn compatibility identity.
+	SourceTurnID             string    `json:"source_turn_id,omitempty"`
 	WorkflowStepTransitionID *int64    `json:"workflow_step_transition_id,omitempty"`
 	StepID                   string    `json:"step_id"`
 	Source                   string    `json:"source"`
@@ -1509,11 +1530,13 @@ func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompleti
 		return v, v.StepID != "" && (v.WorkflowStepTransitionID == nil || *v.WorkflowStepTransitionID >= 0)
 	case map[string]interface{}:
 		out := PendingStepCompletionSignal{
-			StepID:   StringFromAny(v["step_id"]),
-			Source:   StringFromAny(v["source"]),
-			Summary:  StringFromAny(v["summary"]),
-			Handoff:  StringFromAny(v["handoff"]),
-			Blockers: StringFromAny(v["blockers"]),
+			SignalID:     StringFromAny(v["signal_id"]),
+			SourceTurnID: StringFromAny(v["source_turn_id"]),
+			StepID:       StringFromAny(v["step_id"]),
+			Source:       StringFromAny(v["source"]),
+			Summary:      StringFromAny(v["summary"]),
+			Handoff:      StringFromAny(v["handoff"]),
+			Blockers:     StringFromAny(v["blockers"]),
 		}
 		if raw, present := v["workflow_step_transition_id"]; present {
 			entry, valid := WorkflowEntryIDFromAny(raw)
@@ -1567,6 +1590,7 @@ func IsAutomationTaskOrigin(origin string) bool {
 
 // Task represents a task in the database
 type Task struct {
+	ExecutionGrade         string `json:"execution_grade"`
 	ID                     string `json:"id"`
 	WorkspaceID            string `json:"workspace_id"`
 	InitialWorkspaceLayout string `json:"initial_workspace_layout,omitempty"`
@@ -1986,6 +2010,11 @@ type TaskRepository struct {
 	CreatedAt                     time.Time              `json:"created_at"`
 	UpdatedAt                     time.Time              `json:"updated_at"`
 }
+
+// TaskRepositoryInheritedCheckoutReuseOnlyMetadataKey marks a copied
+// inherited checkout selector that identifies a shared workspace slot but
+// must not pin a fresh checkout after an executor transition.
+const TaskRepositoryInheritedCheckoutReuseOnlyMetadataKey = "inherited_checkout_reuse_only"
 
 // TaskWorkspaceFolder is a canonical host-folder attachment owned by a task.
 // It stays separate from TaskRepository because folders are not Git sources.
@@ -2487,13 +2516,17 @@ type SessionBranchInfo struct {
 // TaskSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
 type TaskSession struct {
-	ExecutorActorUserID    string     `json:"-"`
-	ID                     string     `json:"id"`
-	TaskID                 string     `json:"task_id"`
-	QueueIncarnationID     string     `json:"queue_incarnation_id"`
-	Name                   string     `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
-	AgentExecutionID       string     `json:"agent_execution_id"`   // Docker container/agent execution
-	ContainerID            string     `json:"container_id"`         // Docker container ID for cleanup
+	ExecutorActorUserID string `json:"-"`
+	ID                  string `json:"id"`
+	TaskID              string `json:"task_id"`
+	QueueIncarnationID  string `json:"queue_incarnation_id"`
+	Name                string `json:"name,omitempty"`     // Optional user-supplied label shown on the session tab
+	AgentExecutionID    string `json:"agent_execution_id"` // Docker container/agent execution
+	ContainerID         string `json:"container_id"`       // Docker container ID for cleanup
+	// ExecutionRuntime is the observed runtime recorded by executors_running
+	// for this session's execution. Empty means unknown; it is never derived
+	// from the selected executor configuration.
+	ExecutionRuntime       string     `json:"execution_runtime,omitempty"`
 	AgentProfileID         string     `json:"agent_profile_id"`     // ID of the agent profile used
 	ExecutionProfileID     string     `json:"execution_profile_id"` // Concrete profile used for this execution
 	RouteGeneration        int64      `json:"route_generation,omitempty"`
@@ -2517,18 +2550,20 @@ type TaskSession struct {
 	// It can differ from WorkspacePath after a live attachment promotes the
 	// Files root without moving the running agent. Read-only projection of the
 	// current harness generation; empty means unknown.
-	AgentWorkspacePath   string                 `json:"agent_workspace_path,omitempty"`
-	Worktrees            []*TaskEnvironmentRepo `json:"-"` // Environment repository rows for this session's workspace
-	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
-	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
-	EnvironmentSnapshot  map[string]interface{} `json:"environment_snapshot,omitempty"`
-	RepositorySnapshot   map[string]interface{} `json:"repository_snapshot,omitempty"`
-	State                TaskSessionState       `json:"state"`
-	ErrorMessage         string                 `json:"error_message,omitempty"`
-	Metadata             map[string]interface{} `json:"metadata,omitempty"`
-	StartedAt            time.Time              `json:"started_at"`
-	CompletedAt          *time.Time             `json:"completed_at,omitempty"`
-	UpdatedAt            time.Time              `json:"updated_at"`
+	AgentWorkspacePath          string                 `json:"agent_workspace_path,omitempty"`
+	Worktrees                   []*TaskEnvironmentRepo `json:"-"` // Environment repository rows for this session's workspace
+	AgentProfileSnapshot        map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
+	ExecutorSnapshot            map[string]interface{} `json:"executor_snapshot,omitempty"`
+	EnvironmentSnapshot         map[string]interface{} `json:"environment_snapshot,omitempty"`
+	RepositorySnapshot          map[string]interface{} `json:"repository_snapshot,omitempty"`
+	State                       TaskSessionState       `json:"state"`
+	ErrorMessage                string                 `json:"error_message,omitempty"`
+	Metadata                    map[string]interface{} `json:"metadata,omitempty"`
+	StartedAt                   time.Time              `json:"started_at"`
+	CompletedAt                 *time.Time             `json:"completed_at,omitempty"`
+	UpdatedAt                   time.Time              `json:"updated_at"`
+	AdmittedExecutionGrade      string                 `json:"admitted_execution_grade"`
+	AdmittedExecutionGradeKnown bool                   `json:"admitted_execution_grade_known"`
 
 	// Environment reference
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"` // FK to task_environments for shared env
@@ -2611,26 +2646,38 @@ type ActiveSessionRecoveryCandidate struct {
 	ExpectedExecutorUpdatedAt        time.Time
 }
 
+// observedExecutionRuntime projects an empty observed runtime as nil so a
+// response distinguishes "unknown" from any configured selection.
+func observedExecutionRuntime(runtime string) interface{} {
+	if runtime == "" {
+		return nil
+	}
+	return runtime
+}
+
 // ToAPI converts internal TaskSession to API type
 // TODO: Add v1.TaskSession type to pkg/api/v1/
 func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
-		"id":                   s.ID,
-		"task_id":              s.TaskID,
-		"queue_incarnation_id": s.QueueIncarnationID,
-		"agent_execution_id":   s.AgentExecutionID,
-		"container_id":         s.ContainerID,
-		"agent_profile_id":     s.AgentProfileID,
-		"execution_profile_id": s.ExecutionProfileID,
-		"executor_id":          s.ExecutorID,
-		"executor_profile_id":  s.ExecutorProfileID,
-		"environment_id":       s.EnvironmentID,
-		"repository_id":        s.RepositoryID,
-		"base_branch":          s.BaseBranch,
-		"base_commit_sha":      s.BaseCommitSHA,
-		"state":                string(s.State),
-		"started_at":           s.StartedAt,
-		"updated_at":           s.UpdatedAt,
+		"id":                             s.ID,
+		"task_id":                        s.TaskID,
+		"queue_incarnation_id":           s.QueueIncarnationID,
+		"agent_execution_id":             s.AgentExecutionID,
+		"container_id":                   s.ContainerID,
+		"execution_runtime":              observedExecutionRuntime(s.ExecutionRuntime),
+		"agent_profile_id":               s.AgentProfileID,
+		"execution_profile_id":           s.ExecutionProfileID,
+		"executor_id":                    s.ExecutorID,
+		"executor_profile_id":            s.ExecutorProfileID,
+		"environment_id":                 s.EnvironmentID,
+		"repository_id":                  s.RepositoryID,
+		"base_branch":                    s.BaseBranch,
+		"base_commit_sha":                s.BaseCommitSHA,
+		"state":                          string(s.State),
+		"started_at":                     s.StartedAt,
+		"updated_at":                     s.UpdatedAt,
+		"admitted_execution_grade":       s.AdmittedExecutionGrade,
+		"admitted_execution_grade_known": s.AdmittedExecutionGradeKnown,
 	}
 	if s.RouteGeneration > 0 {
 		result["route_generation"] = s.RouteGeneration
@@ -2743,6 +2790,9 @@ func (s *TaskSession) WorktreesAPI() []map[string]interface{} {
 		}
 		if repo.WorktreeBranch != "" {
 			entry["worktree_branch"] = repo.WorktreeBranch
+		}
+		if repo.WorktreeOrigin != "" {
+			entry["worktree_origin"] = repo.WorktreeOrigin
 		}
 		out = append(out, entry)
 	}
@@ -3171,8 +3221,36 @@ type TaskEnvironment struct {
 	// repository slot. Populated by repository getters.
 	Repos []*TaskEnvironmentRepo `json:"repos,omitempty"`
 
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	// RetiredAt retains an unusable environment without occupying the active owner slot.
+	RetiredAt *time.Time `json:"retired_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// IsRetired reports whether the environment is retained rather than canonical.
+func (te *TaskEnvironment) IsRetired() bool {
+	return te != nil && te.RetiredAt != nil
+}
+
+// EffectiveExecutorType returns the environment's persisted executor type. A
+// legacy row with no executor identity or runtime handles represents the
+// implicit local executor used before executor profiles existed.
+func (te *TaskEnvironment) EffectiveExecutorType() (ExecutorType, bool) {
+	if te == nil {
+		return "", false
+	}
+	if te.ExecutorType != "" {
+		executorType := ExecutorType(te.ExecutorType)
+		if executorType.Runtime() == agentruntime.RuntimeUnknown {
+			return "", false
+		}
+		return executorType, true
+	}
+	if te.ExecutorID != "" || te.ExecutorProfileID != "" || te.ContainerID != "" || te.SandboxID != "" ||
+		te.ContainerBootstrapNonceSecretID != "" || te.ContainerControlAuthTokenSecretID != "" {
+		return "", false
+	}
+	return ExecutorTypeLocal, true
 }
 
 // RepoFor returns the per-repo environment row for repositoryID, or nil if not present.
@@ -3205,14 +3283,29 @@ type TaskEnvironmentRepo struct {
 	WorktreeSourceClonePath   string     `json:"-"`
 	WorktreeSourceCommonDir   string     `json:"-"`
 	WorktreeBranchCompactedAt *time.Time `json:"-"`
-	Position                  int        `json:"position"`
-	ErrorMessage              string     `json:"error_message,omitempty"`
-	Status                    string     `json:"status,omitempty"`
-	CreatedAt                 time.Time  `json:"created_at"`
-	UpdatedAt                 time.Time  `json:"updated_at"`
-	MergedAt                  *time.Time `json:"merged_at,omitempty"`
-	DeletedAt                 *time.Time `json:"deleted_at,omitempty"`
+	// WorktreeOrigin records who created the checkout: "kandev" for a
+	// Kandev-materialized worktree, "adopted" for a linked worktree an agent
+	// created and Kandev attached in place.
+	WorktreeOrigin string     `json:"-"`
+	Position       int        `json:"position"`
+	ErrorMessage   string     `json:"error_message,omitempty"`
+	Status         string     `json:"status,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	MergedAt       *time.Time `json:"merged_at,omitempty"`
+	DeletedAt      *time.Time `json:"deleted_at,omitempty"`
 }
+
+const (
+	// WorktreeOriginKandev identifies a checkout Kandev materialized.
+	WorktreeOriginKandev = "kandev"
+	// WorktreeOriginAdopted identifies an agent-created worktree attached in place.
+	WorktreeOriginAdopted = "adopted"
+	// TaskEnvironmentRepoStatusDetached keeps a removed root's physical
+	// inventory visible to task cleanup while excluding it from projections.
+	TaskEnvironmentRepoStatusActive   = "active"
+	TaskEnvironmentRepoStatusDetached = "detached"
+)
 
 // TaskEnvironmentRecoveryClaimRequest identifies the environment authority
 // required while an automatic host-worktree recovery is in progress.
@@ -3449,6 +3542,17 @@ type TaskPreviewFeedbackSnapshot struct {
 	TaskID   string                 `json:"task_id" db:"task_id"`
 	Revision int64                  `json:"revision" db:"revision"`
 	Items    []*TaskPreviewFeedback `json:"items"`
+}
+
+// TaskPreviewFeedbackScreenshotReplacement replaces a saved screenshot item's
+// rectangle and image at an exact version. An empty Comment keeps the stored one.
+type TaskPreviewFeedbackScreenshotReplacement struct {
+	TaskID                 string
+	ItemID                 string
+	ExpectedVersion        int64
+	Comment                string
+	CaptureRect            json.RawMessage
+	ScreenshotAttachmentID string
 }
 
 // TaskPreviewFeedbackRef identifies the exact pending item version included in delivery.
@@ -3762,6 +3866,7 @@ func (t *Task) ToAPI() *v1.Task {
 	}
 
 	result := &v1.Task{
+		ExecutionGrade:         t.ExecutionGrade,
 		ID:                     t.ID,
 		WorkspaceID:            t.WorkspaceID,
 		InitialWorkspaceLayout: t.InitialWorkspaceLayout,

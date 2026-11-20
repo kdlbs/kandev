@@ -8,6 +8,7 @@ import {
   captureRestartBaseline,
   assertRestartRetained,
   assertRestartSubmissionBlocked,
+  routeRestartContinuationGuidance,
 } from "./session-tab-restart-helpers";
 
 // @covers AC-TASKS-SESSION-TAB-RESTART-001.6
@@ -145,4 +146,65 @@ test("mobile: restarts from the session actions sheet and retains the conversati
   await expect(
     fixture.session.chat.getByText("simple mock response", { exact: false }),
   ).toBeVisible();
+});
+
+test("mobile: keeps typed continuation guidance after Restart closes its menus", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(120_000);
+  await testPage.setViewportSize({ width: 320, height: 900 });
+  let routed: Awaited<ReturnType<typeof routeRestartContinuationGuidance>> | undefined;
+  const fixture = await createRestartScenario(testPage, apiClient, seedData, async (sessionId) => {
+    routed = await routeRestartContinuationGuidance(testPage, sessionId);
+  });
+  const stop = fixture.wire.waitForResponse("session.stop", {
+    requestWhere: (payload) => payload.session_id === fixture.sessionId,
+  });
+  const launch = fixture.wire
+    .waitForResponse("session.launch", {
+      requestWhere: (payload) => payload.session_id === fixture.sessionId,
+      timeoutAfter: stop,
+    })
+    .catch((error: unknown) => error);
+  await testPage.getByTestId("mobile-sessions-pill").tap();
+  const sheet = testPage.getByRole("dialog", { name: "Sessions", exact: true });
+  const row = sheet.getByTestId(`mobile-session-row-${fixture.sessionId}`);
+  await row.getByRole("button", { name: "Session actions" }).tap();
+  const menu = testPage.getByRole("menu");
+  await testPage.getByRole("menuitem", { name: "Restart session", exact: true }).tap();
+  await stop;
+  expect(await launch).toBeInstanceOf(Error);
+  await expect(menu).not.toBeVisible();
+  await testPage.locator('[data-slot="drawer-overlay"][data-state="open"]').tap({
+    position: { x: 16, y: 16 },
+  });
+  await expect(sheet).not.toBeVisible();
+
+  const card = testPage.getByTestId("session-recovery-card");
+  const continuation = card.getByTestId("recovery-continue-from-history-button");
+  await expect(continuation).toBeVisible();
+  const buttonBox = await continuation.boundingBox();
+  expect(buttonBox?.height).toBeGreaterThanOrEqual(44);
+  expect(buttonBox?.x).toBeGreaterThanOrEqual(0);
+  expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(320);
+  await assertNoDocumentHorizontalOverflow(testPage, "mobile Restart recovery card");
+  expect(routed?.requests.filter((request) => request.action === "session.recover")).toEqual([]);
+
+  const retry = fixture.wire
+    .waitForResponse("session.recover", {
+      requestWhere: (payload) => payload.action === "continue_from_history",
+    })
+    .catch((error: unknown) => error);
+  await continuation.tap();
+  expect(await retry).toBeInstanceOf(Error);
+  await expect(continuation).toBeVisible();
+  await expect(continuation).toBeEnabled();
+  const failure = card.getByTestId("session-recovery-error");
+  await expect(failure).toBeVisible();
+  await expect(failure).toHaveText("Failed to resume session");
+  expect(routed?.requests.filter((request) => request.action === "session.recover")).toHaveLength(
+    1,
+  );
 });

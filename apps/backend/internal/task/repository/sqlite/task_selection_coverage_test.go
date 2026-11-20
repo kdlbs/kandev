@@ -181,7 +181,7 @@ func TestTaskAdmissionCapacityOverflowFeederAndPromotion(t *testing.T) {
 	}
 }
 
-func TestTaskMetadataWatcherFiltersDetachAndQuickChatExpiry(t *testing.T) {
+func TestTaskMetadataWatcherFiltersDetach(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
 	seedWorkspace(t, repo, "workspace-task-extra")
@@ -243,40 +243,6 @@ func TestTaskMetadataWatcherFiltersDetachAndQuickChatExpiry(t *testing.T) {
 	got, err := repo.GetTask(ctx, child.ID)
 	if err != nil || got.ParentID != "" {
 		t.Fatalf("detached persisted task = %+v, %v", got, err)
-	}
-
-	cutoff := time.Date(2026, time.June, 7, 8, 9, 10, 0, time.UTC)
-	for _, task := range []*models.Task{
-		{ID: "quick-expired", WorkspaceID: "workspace-task-extra", Title: "Expired", IsEphemeral: true},
-		{ID: "quick-fresh", WorkspaceID: "workspace-task-extra", Title: "Fresh", IsEphemeral: true},
-		{ID: "quick-config", WorkspaceID: "workspace-task-extra", Title: "Config", IsEphemeral: true, Metadata: map[string]any{"config_mode": true}},
-		{ID: "quick-coordinator", WorkspaceID: "workspace-task-extra", Title: "Coordinator", IsEphemeral: true, Origin: models.TaskOriginCoordinator},
-	} {
-		if err := repo.CreateTask(ctx, task); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := repo.db.Exec(`UPDATE tasks SET updated_at = ? WHERE id IN ('quick-expired', 'quick-config', 'quick-coordinator')`, cutoff.Add(-time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.db.Exec(`UPDATE tasks SET updated_at = ? WHERE id = 'quick-fresh'`, cutoff.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	expired, err := repo.ListExpiredQuickChatTasks(ctx, cutoff)
-	if err != nil || len(expired) != 1 || expired[0].ID != "quick-expired" {
-		t.Fatalf("ListExpiredQuickChatTasks = %v, %v", selectionTaskIDs(expired), err)
-	}
-	deleted, err := repo.DeleteExpiredQuickChatTask(ctx, "quick-fresh", cutoff)
-	if err != nil || deleted {
-		t.Fatalf("DeleteExpiredQuickChatTask(fresh) = %v, %v", deleted, err)
-	}
-	deleted, err = repo.DeleteExpiredQuickChatTask(ctx, "quick-coordinator", cutoff)
-	if err != nil || deleted {
-		t.Fatalf("DeleteExpiredQuickChatTask(coordinator) = %v, %v", deleted, err)
-	}
-	deleted, err = repo.DeleteExpiredQuickChatTask(ctx, "quick-expired", cutoff)
-	if err != nil || !deleted {
-		t.Fatalf("DeleteExpiredQuickChatTask(expired) = %v, %v", deleted, err)
 	}
 }
 

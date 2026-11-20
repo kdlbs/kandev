@@ -194,6 +194,40 @@ repair instead of automatic branch substitution.
 
 Delivery: [Explicit worktree base selection](../../../plans/explicit-worktree-base-selection/plan.md).
 
+#### Lock contention recovery
+
+Criteria .29 through .34 extend refresh failure recovery. Existing refresh and
+base-selection criteria remain active. Delivery belongs to the
+[lock recovery plan](../../../plans/git-refresh-lock-recovery/plan.md).
+
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.29:** When a backend base fetch or
+  fast-forward pull reports recognized lock contention, Kandev shall retry
+  within that refresh operation. Each command shall have at most four attempts.
+  A successful first attempt shall require no retry delay.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.30:** Retries shall share the
+  command's existing execution deadline, starting after its first admission.
+  Cancellation or deadline expiry shall stop further attempts and retain its
+  existing error identity. Cancellation shall create no fallback worktree.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.31:** When a lock failure leaves a
+  partial fast-forward, a successful retry shall complete that update through
+  Git without discarding independent local changes. A retry shall not require
+  an empty index. Changes that prevent a fast-forward shall retain the existing
+  failure policy.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.32:** Retries shall preserve the
+  selected repository, branch, credential route, and required-refresh policy.
+  Other failure categories shall retain their existing behavior. A lock failure
+  shall not authorize another base or make an unverified PR base usable.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.33:** When required refresh exhausts
+  its lock retries, preparation shall fail through the existing launch-error
+  surface. Its error shall identify lock contention, the operation, and the
+  attempt count. Diagnostics shall retain repository and branch context without
+  credentials, remote URLs, or raw Git output. The error shall permit an
+  ordinary launch retry after contention ends.
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.34:** Automatic lock recovery shall
+  preserve lock files and local content. It shall not remove an unknown lock,
+  reset the checkout, force-update a ref, or restart a task automatically.
+  Persistent or uncertain failures shall remain visible for deliberate recovery.
+
 ## Compatibility
 
 This requirement replaces the universal fail-closed refresh behavior from
@@ -212,3 +246,4 @@ Kandev v0.92.1. Remote-only executors and branches keep strict materialization.
 
 - [Worktree Base Refresh System Design](../system-design/worktree-base-refresh.md)
 - [Worktree base selection](../system-design/worktree-base-selection.md)
+- [Worktree refresh lock recovery](../system-design/worktree-base-refresh-recovery.md)

@@ -53,6 +53,9 @@ jobs:
       - name: Test Claude Code review workflow contract
         run: python3 .github/scripts/claude-code-review-workflow-contract_test.py
 
+      - name: Test Claude initial review admission
+        run: node --test .github/scripts/claude-initial-review.test.cjs
+
       - name: Test PR walkthrough workflow contract
         run: |
           python3 .github/scripts/pr-walkthrough-workflow-contract_test.py
@@ -142,6 +145,12 @@ jobs:
 
       - name: Test pull request documentation validator
         run: node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs
+
+      - name: Test UI screenshot evidence workflow contract
+        run: python3 .github/scripts/pr-ui-evidence-workflow-contract_test.py
+
+      - name: Test UI screenshot evidence validator
+        run: node --test .github/scripts/pr-ui-evidence.test.cjs
 
       - name: Test managed runtime pin update workflow contract
         run: python3 .github/scripts/update-agent-runtime-pins-workflow-contract_test.py

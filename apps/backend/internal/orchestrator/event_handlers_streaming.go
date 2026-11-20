@@ -341,6 +341,15 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	if sessionID != "" && (eventType == agentEventComplete || eventType == agentEventError) {
 		settlementCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if streamGuard != nil && streamGuard.locked {
+			settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
+		}
+		if eventType == agentEventComplete {
+			// The streaming completion path defers the running->waiting
+			// decision to agent.ready. Changing it here would make that ready
+			// event look stale and skip its workflow and queue work.
+			settlementCtx = withSettledDeliverySessionStateConvergenceSkipped(settlementCtx)
+		}
 		if err := s.reconcileAgentDeliverySettlements(settlementCtx, sessionID); err != nil {
 			s.logger.Warn("failed to finish durable delivery terminal settlement",
 				zap.String("task_id", taskID),
@@ -541,12 +550,17 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		executionID = payload.AgentID
 	}
 	if sessionID != "" {
+		// Opt-in diagnostics use the transport type; OFF retains legacy attribution.
+		agentType := payload.AgentID
+		if s.config.ProviderKeywordContext && payload.AgentType != "" {
+			agentType = payload.AgentType
+		}
 		failure := watcher.AgentEventData{
 			TaskID:             taskID,
 			SessionID:          sessionID,
 			OwnerKind:          string(payload.OwnerKind),
 			AgentExecutionID:   executionID,
-			AgentID:            payload.AgentID,
+			AgentID:            agentType,
 			AgentProfileID:     payload.AgentProfileID,
 			ExecutionProfileID: payload.ExecutionProfileID,
 			ResourceCircuitKey: payload.ResourceCircuitKey,
@@ -559,7 +573,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		}
 		failure = s.withPromptAttemptEvidence(failure)
 		result := s.routeDynamicAgentFailureWithEvidence(
-			ctx, failure, classifyKanbanFailure(failure), nil, true,
+			ctx, failure, s.classifyKanbanFailure(failure), nil, true,
 		)
 		if result.handled && !result.manualRecovery {
 			return
@@ -882,7 +896,7 @@ func (s *Service) handleStreamingEventKind(
 }
 
 type canonicalMessageEventPublisher interface {
-	PublishMessageEvent(context.Context, string, *models.Message) error
+	PublishMessageEvent(context.Context, string, *models.Message, ...*models.ConversationMutationReceipt) error
 }
 
 type canonicalMessageReader interface {
@@ -911,7 +925,7 @@ func (s *Service) publishCanonicalMessageEvent(
 			zap.String("message_id", payload.Data.MessageID))
 		return
 	}
-	message, err := reader.GetMessage(ctx, payload.Data.MessageID)
+	message, receipt, err := canonicalMessageNotification(ctx, reader, payload)
 	if err != nil || message == nil {
 		s.logger.Warn("failed to load canonical message for notification",
 			zap.String("session_id", payload.SessionID),
@@ -923,7 +937,7 @@ func (s *Service) publishCanonicalMessageEvent(
 	if !payload.Data.IsAppend {
 		eventType = events.MessageAdded
 	}
-	if err := publisher.PublishMessageEvent(ctx, eventType, message); err != nil {
+	if err := publisher.PublishMessageEvent(ctx, eventType, message, receipt); err != nil {
 		s.logger.Warn("failed to publish canonical message notification",
 			zap.String("session_id", payload.SessionID),
 			zap.String("message_id", payload.Data.MessageID),
@@ -1581,12 +1595,25 @@ func (s *Service) transitionTaskSessionState(
 			return changed, finalState, err
 		}
 	}
+	launchFailureSession, hasLaunchFailureOwnership := executor.WorkflowLaunchFailureOwnershipFromContext(ctx)
+	launchFailureTransition := nextState == models.TaskSessionStateFailed && hasLaunchFailureOwnership &&
+		launchFailureSession.ID == sessionID
+	ctx, releaseLaunchFailureGuard, ownsLaunchFailureGuard := s.lockLaunchFailureTransition(
+		ctx, sessionID, launchFailureTransition,
+	)
+	defer releaseLaunchFailureGuard()
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return false, "", fmt.Errorf("get session before state transition: %w", err)
 	}
 	if session == nil {
 		return false, "", fmt.Errorf("get session before state transition: session %q is nil", sessionID)
+	}
+	if launchFailureTransition {
+		expectedState, err = launchFailureExpectedState(sessionID, launchFailureSession, session)
+		if err != nil {
+			return false, session.State, err
+		}
 	}
 	if expectedState != nil && session.State != *expectedState {
 		return false, session.State, nil
@@ -1596,9 +1623,22 @@ func (s *Service) transitionTaskSessionState(
 	}
 
 	oldState := session.State
-	changed, refreshed, authoritativeUpdatedAt, err := s.persistStrictTaskSessionState(
-		ctx, sessionID, session, nextState, errorMessage,
-	)
+	var changed bool
+	var refreshed *models.TaskSession
+	var authoritativeUpdatedAt *time.Time
+	if launchFailureTransition {
+		changed, refreshed, authoritativeUpdatedAt, err = s.persistLaunchFailureTaskSessionState(
+			ctx, taskID, sessionID, launchFailureSession, session, errorMessage,
+		)
+	} else {
+		changed, refreshed, authoritativeUpdatedAt, err = s.persistStrictTaskSessionState(
+			ctx, sessionID, session, nextState, errorMessage,
+		)
+	}
+	releaseLaunchFailureGuard()
+	if ownsLaunchFailureGuard {
+		ctx = withoutWorkflowProfileSwitchGuard(ctx)
+	}
 	if err != nil {
 		return false, oldState, err
 	}
@@ -1624,6 +1664,39 @@ func (s *Service) transitionTaskSessionState(
 		refreshed,
 	)
 	return true, nextState, nil
+}
+
+func (s *Service) lockLaunchFailureTransition(
+	ctx context.Context,
+	sessionID string,
+	ownsLaunchFailure bool,
+) (context.Context, func(), bool) {
+	if !ownsLaunchFailure || workflowProfileSwitchGuardIsHeld(ctx, sessionID) {
+		return ctx, func() {}, false
+	}
+	guard, release := s.acquireCancelInFlightGuard(sessionID)
+	guard.Lock()
+	locked := true
+	releaseGuard := func() {
+		if !locked {
+			return
+		}
+		locked = false
+		guard.Unlock()
+		release()
+	}
+	return withWorkflowProfileSwitchGuardHeld(ctx, sessionID, ""), releaseGuard, true
+}
+
+func launchFailureExpectedState(
+	sessionID string,
+	launchSession, currentSession *models.TaskSession,
+) (*models.TaskSessionState, error) {
+	if models.WorkflowParkingSupersedesLaunch(launchSession, currentSession, launchSession.State) {
+		return nil, &executor.SessionStateSwitchedError{SessionID: sessionID, State: currentSession.State}
+	}
+	expected := launchSession.State
+	return &expected, nil
 }
 
 type resumeStateAttemptUpdater interface {
@@ -1981,6 +2054,42 @@ func (s *Service) persistConditionalTaskSessionState(
 	return true, persisted, &t, nil
 }
 
+func (s *Service) persistLaunchFailureTaskSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	launchSession, session *models.TaskSession,
+	errorMessage string,
+) (bool, *models.TaskSession, *time.Time, error) {
+	attemptID := models.StringFromAny(launchSession.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+	if attemptID == "" {
+		return false, session, nil, nil
+	}
+	updater, ok := s.repo.(launchFailureAttemptStateUpdater)
+	if !ok {
+		return false, session, nil, fmt.Errorf("session repository does not support start-attempt-fenced failure writes")
+	}
+	changed, updatedAt, err := updater.UpdateTaskSessionStateIfCurrentStartAttempt(
+		ctx, taskID, sessionID, attemptID, launchSession.State, models.TaskSessionStateFailed, errorMessage,
+	)
+	if err != nil {
+		return false, session, nil, err
+	}
+	if !changed {
+		refreshed, readErr := s.repo.GetTaskSession(ctx, sessionID)
+		if readErr != nil {
+			return false, session, nil, fmt.Errorf("get session after rejected launch failure: %w", readErr)
+		}
+		if refreshed == nil {
+			return false, session, nil, fmt.Errorf("get session after rejected launch failure: session %q is nil", sessionID)
+		}
+		return false, refreshed, nil, nil
+	}
+	persisted := taskSessionAfterStateWrite(session, models.TaskSessionStateFailed, errorMessage, updatedAt)
+	persisted = s.refreshTaskSessionOr(ctx, sessionID, persisted)
+	t := updatedAt.UTC()
+	return true, persisted, &t, nil
+}
+
 func (s *Service) cancelActiveTaskSessionState(
 	ctx context.Context,
 	canceller activeTaskSessionCanceller,
@@ -2033,21 +2142,24 @@ type bootstrapFailureAttemptCommitter interface {
 	) (changed bool, updatedAt time.Time, err error)
 }
 
-type startAttemptSessionUpdater interface {
-	UpdateTaskSessionIfCurrentStateWithStartAttempt(
-		context.Context,
-		*models.TaskSession,
-		models.TaskSessionState,
-		string,
-	) (bool, error)
-}
-
 type conditionalTaskSessionStateUpdater interface {
 	UpdateTaskSessionStateIfCurrent(
 		ctx context.Context,
 		sessionID string,
 		expected, next models.TaskSessionState,
 		errorMessage string,
+	) (bool, time.Time, error)
+}
+
+type launchFailureAttemptStateUpdater interface {
+	UpdateTaskSessionStateIfCurrentStartAttempt(
+		context.Context,
+		string,
+		string,
+		string,
+		models.TaskSessionState,
+		models.TaskSessionState,
+		string,
 	) (bool, time.Time, error)
 }
 
@@ -2660,15 +2772,19 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 ) error {
 	var changed bool
 	var err error
-	if attemptID := models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]); attemptID != "" {
-		updater, ok := s.repo.(startAttemptSessionUpdater)
-		if !ok {
-			return fmt.Errorf("session start requires a startup-attempt-aware repository write")
-		}
-		changed, err = updater.UpdateTaskSessionIfCurrentStateWithStartAttempt(ctx, session, expected, attemptID)
-	} else {
-		changed, err = s.repo.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	updater, ok := s.repo.(interface {
+		UpdateTaskSessionIfCurrentStateForLaunch(
+			context.Context,
+			*models.TaskSession,
+			models.TaskSessionState,
+			string,
+		) (bool, error)
+	})
+	if !ok {
+		return fmt.Errorf("session start requires parking-aware repository writes")
 	}
+	attemptID := models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+	changed, err = updater.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
 	if err != nil {
 		return err
 	}
@@ -2684,6 +2800,9 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 	}
 	if isTerminalSessionState(latest.State) {
 		return &executor.SessionStateSupersededError{SessionID: session.ID, State: latest.State}
+	}
+	if models.WorkflowParkingSupersedesLaunch(session, latest, expected) {
+		return &executor.SessionStateSwitchedError{SessionID: session.ID, State: latest.State}
 	}
 	if latest.State == models.TaskSessionStateRunning {
 		return fmt.Errorf(
@@ -4269,6 +4388,7 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	defer settingsLock.Unlock()
 	identity := sessionSettingsEventIdentity{
 		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		ExecutionProfileID: payload.ExecutionProfileID,
 		SourceGeneration:   payload.SessionSettingsSourceGeneration,
 		SettingsGeneration: payload.Data.SessionSettingsGeneration,
 	}
@@ -4381,6 +4501,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	defer settingsLock.Unlock()
 	identity := sessionSettingsEventIdentity{
 		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		ExecutionProfileID: payload.ExecutionProfileID,
 		SourceGeneration:   payload.SessionSettingsSourceGeneration,
 		SettingsGeneration: payload.Data.SessionSettingsGeneration,
 	}
@@ -4481,6 +4602,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 type sessionSettingsEventIdentity struct {
 	AttemptID          string
 	ExecutionID        string
+	ExecutionProfileID string
 	SourceGeneration   uint64
 	SettingsGeneration uint64
 }
@@ -4539,6 +4661,12 @@ func sessionSettingsEventIsStale(
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		return false
+	}
+	// A dynamic session that switched concrete candidates must not accept
+	// settings reported by the previous candidate's execution.
+	if identity.ExecutionProfileID != "" && session.ExecutionProfileID != "" &&
+		identity.ExecutionProfileID != session.ExecutionProfileID {
+		return true
 	}
 	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
 	if !ok {

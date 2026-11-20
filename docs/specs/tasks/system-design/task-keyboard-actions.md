@@ -5,6 +5,7 @@ requirements:
   - REQ-TASKS-KEYBOARD-ACTIONS-001
   - REQ-TASKS-KEYBOARD-ACTIONS-002
   - REQ-TASKS-KEYBOARD-ACTIONS-003
+  - REQ-TASKS-KEYBOARD-ACTIONS-004
 ---
 
 # Task keyboard actions system design
@@ -13,13 +14,14 @@ requirements:
 
 The task system owns action semantics. The command registry supplies presentation
 and navigation, using existing task handlers rather than new mutation transports.
-No schema, public SDK, endpoint, or persistence changes are needed.
+Existing user settings persist the Escape cancellation preference; no new endpoint is needed.
 
-| Requirement | Design |
-| --- | --- |
-| REQ-TASKS-KEYBOARD-ACTIONS-001 | Scoped move submission |
+| Requirement                    | Design                              |
+| ------------------------------ | ----------------------------------- |
+| REQ-TASKS-KEYBOARD-ACTIONS-001 | Scoped move submission              |
 | REQ-TASKS-KEYBOARD-ACTIONS-002 | Task commands and nested navigation |
-| REQ-TASKS-KEYBOARD-ACTIONS-003 | Sidebar row keyboard ownership |
+| REQ-TASKS-KEYBOARD-ACTIONS-003 | Sidebar row keyboard ownership      |
+| REQ-TASKS-KEYBOARD-ACTIONS-004 | Chat composer Escape cancellation   |
 
 ## Sidebar row keyboard ownership
 
@@ -82,6 +84,23 @@ On failure retain the draft and existing error feedback; always release the guar
 in finally. On success retain current close/reset behavior. Move payloads continue
 through `workflowMoveOptionsPayload`, `useTaskMoveOptions`, and existing move
 hooks. Supplemental instructions never change durable workflow prompts.
+
+## Chat composer Escape cancellation
+
+`useChatPanelHandlers` in `components/task/chat/chat-input-area.tsx` owns the
+existing `handleCancelTurn` action and resolves the current session before
+sending `agent.cancel`. Add Escape handling to the focused chat composer using
+the existing handler, guarded by cancellation eligibility and the user preference.
+The account preference defaults to false and is edited in keyboard shortcut settings. Keep the
+shortcut local to the composer: transcript focus, toolbar controls, dialogs,
+menus, and IME composition do not cancel. Consume only an accepted Escape
+keydown and leave unrelated Escape propagation and browser behavior unchanged.
+Do not add a global shortcut, new transport, or cancellation
+confirmation. Tests must cover the running and idle states, composer focus,
+composition, other chat controls, the resolved-session payload, and one request
+per keydown. Desktop and phone browser scenarios focus the composer and press
+Escape; the phone scenario uses the existing chat layout with an attached
+keyboard, without adding a touch control.
 
 ## Task commands and nested navigation
 
@@ -165,3 +184,4 @@ checks draft retry plus phone geometry. See the exact work-order commands.
 - [Archive confirmation](archive-confirmation.md)
 - [Move overrides](../../workflow-step-move-overrides/spec.md)
 - [Implementation plan](../../../plans/task-keyboard-actions/plan.md)
+- [Chat Escape cancellation plan](../../../plans/chat-escape-cancel/plan.md)
