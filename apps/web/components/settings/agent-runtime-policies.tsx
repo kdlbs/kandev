@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { IconExternalLink } from "@tabler/icons-react";
 import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
@@ -173,13 +174,26 @@ export function RuntimePolicyOutcome({ status }: { status: AgentUpdateStatus }) 
   );
 }
 
-export function RuntimeGuidanceAction({ status }: { status: AgentUpdateStatus }) {
+export function RuntimeGuidanceAction({
+  status,
+  inline = false,
+}: {
+  status: AgentUpdateStatus;
+  inline?: boolean;
+}) {
   const { t } = useTranslation();
   if (!status.guidance_url) return null;
   return (
-    <Button asChild variant="outline" className={settingsActionClassName("shrink-0")}>
+    <Button
+      asChild
+      variant={inline ? "ghost" : "outline"}
+      className={settingsActionClassName(
+        inline ? "w-full justify-between px-0 text-start" : "shrink-0",
+      )}
+    >
       <a href={status.guidance_url} target="_blank" rel="noopener noreferrer">
         {t("agents:runtimeManualGuidance")}
+        {inline && <IconExternalLink className="size-3.5 text-muted-foreground" aria-hidden />}
       </a>
     </Button>
   );
@@ -220,46 +234,49 @@ function RuntimePolicyIdentity({ status }: { status: AgentUpdateStatus }) {
 
 function RuntimeAutomaticPolicy({
   status,
-  draft,
-  isDirty,
   canManage,
-  onChange,
 }: {
   status: AgentUpdateStatus;
-  draft: boolean;
-  isDirty: boolean;
   canManage: boolean;
-  onChange?: (value: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const controller = useRuntimePolicyController(status.agent_name);
+  const draft = controller?.draft ?? status.auto_update;
   if (status.management !== "managed") return null;
   const controlId = `runtime-automatic-detail-${status.agent_name}`;
+  const labelId = `${controlId}-label`;
   const helpId = `${controlId}-help`;
   const showHelp = status.available && status.enabled;
   return (
     <>
       <div className="flex items-center justify-between gap-3">
         <label
-          className="flex min-h-8 flex-1 cursor-pointer items-center text-sm max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          className="flex min-h-8 flex-1 cursor-pointer flex-col items-start justify-center gap-0.5 text-sm font-medium max-md:min-h-[44px] [@media(any-pointer:coarse)]:min-h-[44px]"
           htmlFor={controlId}
           data-testid={`runtime-automatic-target-${status.agent_name}`}
         >
-          {t("agents:runtimeAutomatic")}
+          <span id={labelId}>{t("agents:runtimeAutomatic")}</span>
+          {showHelp && (
+            <span id={helpId} className="text-xs font-normal text-muted-foreground">
+              {t("agents:runtimeAutomaticNewSessions")}
+            </span>
+          )}
         </label>
         <Switch
           id={controlId}
+          aria-labelledby={labelId}
           aria-describedby={showHelp ? helpId : undefined}
           checked={draft}
-          onCheckedChange={onChange}
-          disabled={!canManage || !onChange || (!status.auto_update_supported && !draft)}
+          onCheckedChange={controller?.setDraft}
+          disabled={!canManage || !controller || (!status.auto_update_supported && !draft)}
         />
       </div>
-      {showHelp && (
-        <p id={helpId} className="text-xs text-muted-foreground">
-          {t("agents:runtimeAutomaticHelp")}
-        </p>
+      {showHelp && status.auto_update && (
+        <p className="text-xs text-muted-foreground">{t("agents:runtimeAutomaticManualNotice")}</p>
       )}
-      {isDirty && <span className="sr-only">{t("agents:runtimePolicyDirtyTitle")}</span>}
+      {controller?.isDirty && (
+        <span className="sr-only">{t("agents:runtimePolicyDirtyTitle")}</span>
+      )}
     </>
   );
 }
@@ -289,7 +306,6 @@ function RuntimePolicyNotes({ status }: { status: AgentUpdateStatus }) {
 export function RuntimePolicyDetail({ status }: { status: AgentUpdateStatus }) {
   const canManage = useIsAdmin();
   const controller = useRuntimePolicyController(status.agent_name);
-  const draft = controller?.draft ?? status.auto_update;
   const isDirty = controller?.isDirty ?? false;
   return (
     <div
@@ -298,16 +314,39 @@ export function RuntimePolicyDetail({ status }: { status: AgentUpdateStatus }) {
       data-settings-dirty={isDirty}
     >
       <RuntimePolicyIdentity status={status} />
-      <RuntimeAutomaticPolicy
-        status={status}
-        draft={draft}
-        isDirty={isDirty}
-        canManage={canManage}
-        onChange={controller?.setDraft}
-      />
+      <RuntimeAutomaticPolicy status={status} canManage={canManage} />
       <RuntimePolicyNotes status={status} />
       <RuntimePolicyOutcome status={status} />
       <RuntimeGuidanceAction status={status} />
+    </div>
+  );
+}
+
+export function RuntimeUpdatePolicySection({
+  status,
+  canManage,
+  managedFallback,
+}: {
+  status: AgentUpdateStatus;
+  canManage: boolean;
+  managedFallback?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="space-y-2 border-t py-2 empty:hidden"
+      data-testid={`runtime-policy-detail-${status.agent_name}`}
+    >
+      <RuntimeAutomaticPolicy status={status} canManage={canManage} />
+      <RuntimePolicyNotes status={status} />
+      {managedFallback && status.management !== "managed" && (
+        <p className="text-muted-foreground">
+          {t("agents:runtimeObserved", {
+            version: status.effective_version || t("agents:runtimeUnknown"),
+          })}
+        </p>
+      )}
+      <RuntimePolicyOutcome status={status} />
     </div>
   );
 }

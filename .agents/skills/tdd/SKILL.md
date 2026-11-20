@@ -29,6 +29,10 @@ Wrote code before a test? Delete it. Start over from a failing test.
 
 **Skip** for: pure UI components (we don't test React components), config files, generated code.
 
+For scheduling, background delivery, or task/session lifecycle changes, use the
+single [lifecycle evidence checklist](references/lifecycle-evidence.md) to map
+applicable scenarios to their acceptance criteria and focused proof.
+
 For UI rendering bugs, prefer extracting or using a pure helper and testing that helper. Add Playwright only when the behavior is truly visual or integration-level. Avoid adding React component tests just to assert DOM output; that does not match this project's testing convention.
 
 ## Test-value gate

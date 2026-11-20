@@ -11,7 +11,12 @@ import {
   withDatabase,
 } from "./interrupted-prompt-recovery";
 
-type NativeResumeScenario = boolean | "readiness" | "cancelled" | "unproven";
+import {
+  seedAbsentPromptsAndCheckAdmission,
+  expectAbsentPromptsRetired,
+} from "./undelivered-prompt-recovery";
+
+type NativeResumeScenario = boolean | "readiness" | "cancelled" | "unproven" | "absent";
 type NativeResumeOptions = { legacy: NativeResumeScenario; afterResumeClick: () => Promise<void> };
 
 function resumeScenario(options: NativeResumeScenario | NativeResumeOptions) {
@@ -23,7 +28,12 @@ function resumeScenario(options: NativeResumeScenario | NativeResumeOptions) {
 // The legacy mutations reuse an older fence shape. "unproven" keeps the real
 // journal history and only changes the SQL completion label.
 function changesLegacyFence(scenario: NativeResumeScenario) {
-  return scenario === true || scenario === "readiness" || scenario === "cancelled";
+  return (
+    scenario === true ||
+    scenario === "readiness" ||
+    scenario === "cancelled" ||
+    scenario === "absent"
+  );
 }
 
 function seedLegacyFence(
@@ -37,7 +47,7 @@ function seedLegacyFence(
     db.prepare(
       "UPDATE agent_delivery_submissions SET state = 'dispatching', outcome = 'dispatching' WHERE id = ?",
     ).run(seeded.submissionId);
-    if (scenario === "cancelled") {
+    if (scenario === "cancelled" || scenario === "absent") {
       db.prepare("UPDATE session_recovery_blocks SET delivery_stream_id = '' WHERE id = ?").run(
         recoveryBlockId,
       );
@@ -242,12 +252,23 @@ export async function verifyNativeResumeClearsRecoveryNotice(
     )
     .toBe(false);
   expect(active.agent_execution_id).toBeTruthy();
-  const originalMessages = (await api.listSessionMessages(active.id)).messages;
   const seeded = seedInterruptedPrompt(tmpDir, active.id, active.agent_execution_id);
   let recoveryBlockId: string = seeded.blockId;
   if (legacyFence) {
     seedLegacyFence(tmpDir, active.id, seeded, recoveryBlockId, legacy);
   }
+  const absentIds = await seedAbsentPromptsAndCheckAdmission(
+    api,
+    tmpDir,
+    {
+      taskId: task.id,
+      sessionId: active.id,
+      sourceId: seeded.submissionId,
+      blockId: recoveryBlockId,
+    },
+    legacy === "absent",
+  );
+  const originalMessages = (await api.listSessionMessages(active.id)).messages;
   if (unproven) {
     await expectDeliveryProjectionSettled(tmpDir, seeded.submission.stream_id);
     seedUnprovenCompletion(tmpDir, seeded.submissionId);
@@ -305,6 +326,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
     submission: { state: unproven ? "completed" : "interrupted_unknown" },
   });
   await expectJournalRetirement(seeded.journalPath, seeded.submission);
+  await expectAbsentPromptsRetired(tmpDir, seeded.journalPath, seeded.submission, absentIds);
   expect(
     (await api.listSessionMessages(active.id)).messages
       .filter((item) => item.author_type === "user")

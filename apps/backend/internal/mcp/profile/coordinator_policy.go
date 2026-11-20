@@ -37,6 +37,12 @@ var coordinatorToolUniverse = []string{
 	"list_coordinator_turns_kandev",
 }
 
+// CoordinatorToolUniverse returns every core tool name a coordinator binding
+// may list. Callers get a copy so a binding cannot mutate the registry.
+func CoordinatorToolUniverse() []string {
+	return slices.Clone(coordinatorToolUniverse)
+}
+
 // CoordinatorPluginTool is one exact instance-read plugin tool reference in a
 // version-2 binding. InstallationID and PolicyVersion pin the reference to the
 // installation that was eligible when the conversation opened.

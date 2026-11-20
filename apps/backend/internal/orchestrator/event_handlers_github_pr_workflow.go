@@ -363,7 +363,7 @@ func (s *Service) applyTaskPRWorkflowTransition(
 			casAttempted = true
 			commitResult, commitErr = s.commitTaskPRWorkflowTransition(commitCtx, task.ID, session.ID, result, trigger)
 			return commitResult, commitErr
-		})
+		}, nil)
 	switch {
 	case commitErr != nil:
 		return false, fmt.Errorf("commit %s transition: %w", trigger, commitErr)

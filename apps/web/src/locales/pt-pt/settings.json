@@ -1,4 +1,8 @@
 {
+  "notificationFormatterLabel": "Conteúdo das notificações",
+  "notificationFormatterDefault": "Usar o conteúdo original da notificação",
+  "notificationFormatterUnavailable": "O formatador está indisponível. As notificações usam o conteúdo original.",
+  "notificationFormatterDescription": "Escolha um formatador opcional para cada fornecedor. A formatação não altera as subscrições nem os destinos de envio.",
   "notificationEventPermissionRequested": "O agente precisa de permissão",
   "notificationEventPermissionRequestedDescription": "Notificar quando o agente estiver à espera que aprove uma ação.",
   "notificationEventSessionFailed": "A sessão do agente falhou",
@@ -1228,5 +1232,7 @@
   "builtinMcp.inheritedValue": "Herdado do espaço de trabalho: {{value}}",
   "builtinMcp.overrideValue": "Definição da tarefa: {{value}}. Predefinição do espaço de trabalho: {{default}}.",
   "builtinMcp.useInherited": "Usar valor herdado",
-  "builtinMcp.allowTasks": "Permitir que as tarefas usem este pacote"
+  "builtinMcp.allowTasks": "Permitir que as tarefas usem este pacote",
+  "markdownPreviewByDefault": "Abrir ficheiros Markdown na Pré-visualização",
+  "markdownPreviewByDefaultDescription": "Escolha o modo inicial dos ficheiros Markdown que abrir. Pode mudar de modo a qualquer momento."
 }

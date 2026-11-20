@@ -829,6 +829,7 @@ export class ApiClient {
   async createCustomTUIAgent(options: {
     display_name: string;
     command: string;
+    command_args?: string[];
     model?: string;
     description?: string;
     mcp_strategy?: string;

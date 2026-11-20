@@ -38,6 +38,24 @@ func nativeResumeJournalPeer(t *testing.T, store *journal.Journal, rejectRetirem
 				return
 			}
 			_ = json.NewEncoder(w).Encode(status)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent/delivery/successors":
+			streams, err := store.ListSuccessorStreams(r.Context(), "session", "incarnation", 2)
+			if err != nil {
+				http.Error(w, "successor stream inventory unavailable", http.StatusConflict)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(streams)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/delivery/stream/abandon":
+			var stream journal.Stream
+			if err := json.NewDecoder(r.Body).Decode(&stream); err != nil {
+				http.Error(w, "invalid stream", http.StatusBadRequest)
+				return
+			}
+			if err := store.AbandonStream(r.Context(), stream); err != nil {
+				http.Error(w, "stream abandonment rejected", http.StatusConflict)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent/submissions":
 			submissions, err := store.ListSubmissions(r.Context(), "session")
 			if err != nil {
@@ -50,7 +68,25 @@ func nativeResumeJournalPeer(t *testing.T, store *journal.Journal, rejectRetirem
 				http.Error(w, "retirement rejected", http.StatusConflict)
 				return
 			}
-			if _, err := store.RetireSubmission(r.Context(), strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/agent/submissions/"), "/retire"), 2); err != nil {
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/agent/submissions/"), "/retire")
+			var missingPeer struct {
+				SessionID         string `json:"session_id"`
+				IncarnationID     string `json:"incarnation_id"`
+				HarnessGeneration uint64 `json:"harness_generation"`
+				StreamID          string `json:"stream_id"`
+				Hash              string `json:"hash"`
+			}
+			var retirementErr error
+			if err := json.NewDecoder(r.Body).Decode(&missingPeer); err == nil && missingPeer.Hash != "" {
+				_, retirementErr = store.PutSubmission(r.Context(), journal.Submission{
+					ID: id, SessionID: missingPeer.SessionID, IncarnationID: missingPeer.IncarnationID,
+					HarnessGeneration: missingPeer.HarnessGeneration, StreamID: missingPeer.StreamID,
+					Hash: missingPeer.Hash, State: journal.SubmissionInterruptedUnknown, Retired: true,
+				})
+			} else {
+				_, retirementErr = store.RetireSubmission(r.Context(), id, 2)
+			}
+			if retirementErr != nil {
 				http.Error(w, "retirement rejected", http.StatusConflict)
 				return
 			}

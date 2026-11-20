@@ -179,6 +179,7 @@ type UserSettings struct {
 	LspAutoStartLanguages             []string                          `json:"lsp_auto_start_languages"`
 	LspAutoInstallLanguages           []string                          `json:"lsp_auto_install_languages"`
 	LspServerConfigs                  map[string]map[string]interface{} `json:"lsp_server_configs"`
+	MarkdownPreviewByDefault          bool                              `json:"markdown_preview_by_default"`
 	LspStatusLocation                 string                            `json:"lsp_status_location"`
 	SavedLayouts                      []SavedLayout                     `json:"saved_layouts"`
 	SidebarViewsByWorkspace           map[string]SidebarWorkspaceState  `json:"sidebar_views_by_workspace"`

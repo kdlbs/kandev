@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentruntime"
 )
 
@@ -40,6 +41,7 @@ func TestCursorProjectMCPUsesStandaloneListenHost(t *testing.T) {
 	execution := &AgentExecution{
 		ID: "exec-mcp-host", WorkspacePath: t.TempDir(), standalonePort: 45678,
 		RuntimeName: agentruntime.RuntimeStandalone,
+		agentctl:    agentctl.NewClient("127.0.0.1", 45678, newTestLogger(), agentctl.WithExecutionID("exec-mcp-host")),
 	}
 	agent := agents.NewCursorACP()
 

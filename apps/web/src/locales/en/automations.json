@@ -85,6 +85,7 @@
   "instructionsLabel": "Instructions",
   "interpretedAsUtcSetTimezone": "interpreted as UTC, set a timezone",
   "lastRan": "Last ran {{when}}",
+  "runStatusWithAge": "{{status}}, {{age}}",
   "listDescription": "Create rules that automatically trigger agent tasks.",
   "loading": "Loading...",
   "loadingActivity": "Loading activity…",

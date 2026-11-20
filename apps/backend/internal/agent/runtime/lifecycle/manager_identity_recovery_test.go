@@ -70,6 +70,7 @@ func TestPromoteWorkspaceExecutionRebindsAndPersistsSelectedProfile(t *testing.T
 				AgentProfileID: "previous-candidate", OfficeAgentProfileID: "assignee",
 				WorkspacePath: t.TempDir(), metadata: map[string]interface{}{}, standalonePort: 45678,
 			}
+			attachLegacyMCPRouteClient(execution)
 			require.NoError(t, mgr.executionStore.Add(execution))
 
 			err := mgr.promoteWorkspaceExecution(context.Background(), execution, &LaunchRequest{

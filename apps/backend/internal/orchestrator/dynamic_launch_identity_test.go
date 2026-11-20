@@ -8,16 +8,26 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
 
-func TestRelaunchDynamicTaskAfterFailurePreservesActingOfficeIdentity(t *testing.T) {
+const (
+	officeRelaunchTaskID      = "task1"
+	officeRelaunchSessionID   = "session-dynamic-identity"
+	officeRelaunchExecutionID = "execution-dynamic-identity"
+)
+
+// newOfficeRelaunchFixture seeds a running Office session whose execution
+// failed and returns a service whose launches record their request.
+func newOfficeRelaunchFixture(t *testing.T) (*Service, *sqliterepo.Repository, **executor.LaunchAgentRequest) {
+	t.Helper()
 	ctx := context.Background()
 	const (
-		taskID      = "task-dynamic-identity"
-		sessionID   = "session-dynamic-identity"
-		executionID = "execution-dynamic-identity"
+		taskID      = officeRelaunchTaskID
+		sessionID   = officeRelaunchSessionID
+		executionID = officeRelaunchExecutionID
 	)
 
 	repo := setupTestRepo(t)
@@ -71,16 +81,42 @@ func TestRelaunchDynamicTaskAfterFailurePreservesActingOfficeIdentity(t *testing
 		},
 	}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
+	svc.turnService = &repoTurnService{repo: repo}
 	svc.lastTurnPrompt.Store(sessionID, capturedPrompt{text: "retry the task"})
+	return svc, repo, &launchRequest
+}
 
-	require.True(t, svc.relaunchDynamicTaskAfterFailure(ctx, watcher.AgentEventData{
-		TaskID:           taskID,
-		SessionID:        sessionID,
-		AgentExecutionID: executionID,
+func relaunchOfficeAfterFailure(t *testing.T, svc *Service) {
+	t.Helper()
+	require.True(t, svc.relaunchDynamicTaskAfterFailure(context.Background(), watcher.AgentEventData{
+		TaskID:           officeRelaunchTaskID,
+		SessionID:        officeRelaunchSessionID,
+		AgentExecutionID: officeRelaunchExecutionID,
 		AgentProfileID:   "reviewer",
 	}, "fallback-profile", launchOriginAutomatic))
+}
+
+func TestRelaunchDynamicTaskAfterFailurePreservesActingOfficeIdentity(t *testing.T) {
+	svc, _, captured := newOfficeRelaunchFixture(t)
+	relaunchOfficeAfterFailure(t, svc)
+	launchRequest := *captured
 	require.NotNil(t, launchRequest)
 	require.Equal(t, "reviewer", launchRequest.OfficeAgentProfileID,
 		"dynamic successor must keep the acting Office identity from the failure event")
 	require.Equal(t, "fallback-profile", launchRequest.AgentProfileID)
+}
+
+// The Office successor prompt must own a durable turn, like the first Office
+// launch. Without one its completion has no turn ID, so the workflow effect
+// has no key and on_turn_complete is deferred with nothing to retry it.
+func TestRelaunchDynamicOfficeTaskBindsSuccessorTurn(t *testing.T) {
+	svc, repo, captured := newOfficeRelaunchFixture(t)
+	relaunchOfficeAfterFailure(t, svc)
+	launchRequest := *captured
+	require.NotNil(t, launchRequest)
+	require.NotEmpty(t, launchRequest.TurnID, "Office successor prompt must carry its turn")
+
+	active, err := repo.GetActiveTurnBySessionID(context.Background(), officeRelaunchSessionID)
+	require.NoError(t, err)
+	require.Equal(t, active.ID, launchRequest.TurnID, "the successor turn must stay open for its completion")
 }

@@ -92,7 +92,9 @@ test("shows natural order and opens the intended numbered file by touch", async 
   await session.fileTreeNode("folder2/step2.txt").tap();
   const viewer = testPage.getByTestId("mobile-file-viewer-panel");
   await expect(viewer).toBeVisible();
-  await expect(viewer.locator(".cm-content")).toContainText("nested two sentinel");
+  await expect(viewer.locator(".cm-content, .monaco-editor .view-lines")).toContainText(
+    "nested two sentinel",
+  );
   expect(
     await testPage.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,

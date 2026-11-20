@@ -2,13 +2,14 @@
 
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { bulkMoveSelectedTasks } from "@/lib/api";
+import { ApiError } from "@/lib/api/client";
+import { bulkMoveSelectedTasks, getBulkMoveApiError, type BulkMoveTaskRefusal } from "@/lib/api";
 import { useToast } from "@/components/toast-provider";
 import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-message";
 
 export function useTaskWorkflowMove() {
   const { toast } = useToast();
-  const { t } = useTranslation("task");
+  const { t, i18n } = useTranslation("task");
 
   return useCallback(
     async (
@@ -37,7 +38,48 @@ export function useTaskWorkflowMove() {
           ),
           variant: "success",
         });
+        return result;
       } catch (error) {
+        const bulkMoveError = getBulkMoveApiError(error);
+        if (bulkMoveError && bulkMoveError.result.refusals.length > 0) {
+          const { result } = bulkMoveError;
+          const firstRefusal = result.refusals[0];
+          if (result.code === "bulk_move_partial") {
+            toast({
+              title: t("task:bulkMovePartialTitle", {
+                moved: result.moved_task_ids.length,
+                total: ids.length,
+              }),
+              description: t("task:bulkMovePartialDescription", {
+                task: firstRefusal.task_title,
+                reason: bulkMoveRefusalReason(firstRefusal, t, i18n.language),
+              }),
+              variant: "error",
+            });
+          } else {
+            const lines = result.refusals.slice(0, 3).map((refusal) =>
+              t("task:bulkMoveRefusalLine", {
+                title: refusal.task_title,
+                reason: bulkMoveRefusalReason(refusal, t, i18n.language),
+              }),
+            );
+            if (result.refusals.length > lines.length) {
+              lines.push(
+                t("task:bulkMoveAndMore", { count: result.refusals.length - lines.length }),
+              );
+            }
+            const items = new Intl.ListFormat(i18n.language, {
+              style: "short",
+              type: "conjunction",
+            }).format(lines);
+            toast({
+              title: t("task:bulkMoveNoTasksMoved"),
+              description: t("task:bulkMoveRefusedDescription", { items }),
+              variant: "error",
+            });
+          }
+          throw error;
+        }
         const fallback = t("task:taskMoveErrorGeneric");
         toast({
           title: t("task:failedToMoveTask"),
@@ -47,6 +89,28 @@ export function useTaskWorkflowMove() {
         throw error;
       }
     },
-    [t, toast],
+    [i18n.language, t, toast],
+  );
+}
+
+function bulkMoveRefusalReason(
+  refusal: BulkMoveTaskRefusal,
+  translate: (key: string, options?: Record<string, unknown>) => string,
+  language: string,
+) {
+  if (refusal.code === "task_approvals_pending") {
+    const names = refusal.pending_approvers?.map((approver) => approver.name).filter(Boolean) ?? [];
+    if (names.length > 0) {
+      const approvers = new Intl.ListFormat(language, {
+        style: "short",
+        type: "conjunction",
+      }).format(names);
+      return translate("task:bulkMoveApprovalPending", { approvers });
+    }
+  }
+  return getTaskMoveErrorMessage(
+    new ApiError(refusal.message, 409, { code: refusal.code }),
+    translate("task:taskMoveErrorGeneric"),
+    (key) => translate(key),
   );
 }

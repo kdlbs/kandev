@@ -751,6 +751,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"lsp_auto_start_languages":                 lspAutoStart,
 		"lsp_auto_install_languages":               lspAutoInstall,
 		"lsp_server_configs":                       lspServerConfigs,
+		"markdown_preview_by_default":              settings.MarkdownPreviewByDefault,
 		"lsp_status_location":                      models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"saved_layouts":                            savedLayouts,
 		"sidebar_views":                            sidebarViews,
@@ -856,6 +857,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		LspAutoStartLanguages:             []string{},
 		LspAutoInstallLanguages:           []string{},
 		LspServerConfigs:                  map[string]map[string]interface{}{},
+		MarkdownPreviewByDefault:          true,
 		LspStatusLocation:                 models.LspStatusLocationToolbar,
 		SavedLayouts:                      []models.SavedLayout{},
 		SidebarLayoutsByWorkspace:         map[string]models.SidebarLayout{},
@@ -950,6 +952,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LspAutoStartLanguages             []string                                `json:"lsp_auto_start_languages"`
 		LspAutoInstallLanguages           []string                                `json:"lsp_auto_install_languages"`
 		LspServerConfigs                  map[string]map[string]interface{}       `json:"lsp_server_configs"`
+		MarkdownPreviewByDefault          *bool                                   `json:"markdown_preview_by_default"`
 		LspStatusLocation                 string                                  `json:"lsp_status_location"`
 		SavedLayouts                      []models.SavedLayout                    `json:"saved_layouts"`
 		SidebarViewsByWorkspace           map[string]models.SidebarWorkspaceState `json:"sidebar_views_by_workspace"`
@@ -1084,6 +1087,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.LspServerConfigs = payload.LspServerConfigs
 	if settings.LspServerConfigs == nil {
 		settings.LspServerConfigs = map[string]map[string]interface{}{}
+	}
+	if payload.MarkdownPreviewByDefault != nil {
+		settings.MarkdownPreviewByDefault = *payload.MarkdownPreviewByDefault
 	}
 	settings.LspStatusLocation = models.NormalizeLspStatusLocation(payload.LspStatusLocation)
 	settings.SavedLayouts = payload.SavedLayouts

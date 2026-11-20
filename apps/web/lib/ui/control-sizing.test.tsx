@@ -14,6 +14,8 @@ describe("shared control sizing", () => {
     expect(classes).toContain("h-7");
     expect(classes).toContain("max-md:h-11");
     expect(classes).toContain("[@media(pointer:coarse)]:h-11");
+    expect(classes).toContain("max-md:min-h-[44px]");
+    expect(classes).toContain("[@media(any-pointer:coarse)]:min-h-[44px]");
   });
 
   it("keeps the compact button variant at 24px on fine-pointer desktop", () => {
@@ -26,8 +28,17 @@ describe("shared control sizing", () => {
 
   it("shares the responsive standard classes with non-button controls", () => {
     expect(controlSizingClassName("standard")).toBe(
-      "h-7 max-md:h-11 [@media(pointer:coarse)]:h-11",
+      "h-7 max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:min-h-[44px] [@media(any-pointer:coarse)]:min-h-[44px]",
     );
+  });
+
+  it("keeps touch icon controls square at 44 CSS pixels", () => {
+    const classes = controlSizingClassName("icon");
+
+    expect(classes).toContain("max-md:min-h-[44px]");
+    expect(classes).toContain("max-md:min-w-[44px]");
+    expect(classes).toContain("[@media(any-pointer:coarse)]:min-h-[44px]");
+    expect(classes).toContain("[@media(any-pointer:coarse)]:min-w-[44px]");
   });
 
   it("allows fixed embedded inputs to opt out of adaptive sizing", () => {

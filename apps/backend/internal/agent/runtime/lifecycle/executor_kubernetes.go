@@ -426,7 +426,8 @@ func (r *KubernetesExecutor) connectNewAgentctl(
 		return nil, nil, "", 0, err
 	}
 	client := agentctl.NewClient(kubernetesControlHost, int(forward.LocalPort()), r.logger,
-		agentctl.WithExecutionID(req.InstanceID), agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(token))
+		agentctl.WithExecutionID(createResponse.ID), agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(token),
+		agentctl.WithBuiltinMCPScopedRoutes(createResponse.ScopedMCPRoutes))
 	if err := client.Health(ctx); err != nil {
 		client.Close()
 		_ = forward.Close()
@@ -486,7 +487,7 @@ func createOrReconcileKubernetesAgentctlInstance(
 	if reconcileErr != nil {
 		return nil, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", reconcileErr))
 	}
-	response = &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port}
+	response = &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port, ScopedMCPRoutes: info.ScopedMCPRoutes}
 	if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {
 		return nil, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", err))
 	}

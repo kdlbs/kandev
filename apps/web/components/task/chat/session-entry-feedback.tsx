@@ -36,7 +36,7 @@ export function SessionHistoryFeedback({
         role="status"
         aria-live="polite"
       >
-        <span aria-hidden="true">
+        <span className="flex" aria-hidden="true">
           <GridSpinner className="text-primary" />
         </span>
         <span>

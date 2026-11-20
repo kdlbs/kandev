@@ -893,6 +893,9 @@ func (s *Store) initSchemaData(legacyUpgrade bool) error {
 	if err := s.backfillGitHubWorkspaceOwnership(); err != nil {
 		return err
 	}
+	if err := s.migrateWorkspaceRepoScopes(); err != nil {
+		return fmt.Errorf("migrate GitHub workspace repository scopes: %w", err)
+	}
 	if legacyUpgrade {
 		if err := s.seedLegacyWorkspaceConnections(); err != nil {
 			return err
@@ -5776,12 +5779,10 @@ const maxWorkspaceSettingsJSONBytes = 64 * 1024
 
 func normalizeRepoScopeMode(mode string) string {
 	mode = strings.TrimSpace(strings.ToLower(mode))
-	switch mode {
-	case RepoScopeModeOrgs, RepoScopeModeRepos:
-		return mode
-	default:
+	if mode == "" {
 		return RepoScopeModeAll
 	}
+	return mode
 }
 
 func normalizeTaskGitCredentialsMode(mode string) string {
@@ -5799,11 +5800,16 @@ func normalizeWorkspaceSettings(settings *WorkspaceSettings) *WorkspaceSettings 
 	out.WorkspaceID = strings.TrimSpace(out.WorkspaceID)
 	out.TaskGitCredentialsMode = normalizeTaskGitCredentialsMode(out.TaskGitCredentialsMode)
 	out.RepoScopeMode = normalizeRepoScopeMode(out.RepoScopeMode)
-	if out.RepoScopeMode != RepoScopeModeOrgs {
+	switch out.RepoScopeMode {
+	case RepoScopeModeAll:
 		out.RepoScopeOrgs = nil
-	}
-	if out.RepoScopeMode != RepoScopeModeRepos {
 		out.RepoScopeRepos = nil
+	case RepoScopeModeOrgs:
+		out.RepoScopeMode = RepoScopeModeSelected
+		out.RepoScopeRepos = nil
+	case RepoScopeModeRepos:
+		out.RepoScopeMode = RepoScopeModeSelected
+		out.RepoScopeOrgs = nil
 	}
 	orgs := make([]string, 0, len(out.RepoScopeOrgs))
 	seenOrgs := make(map[string]struct{}, len(out.RepoScopeOrgs))
@@ -5988,13 +5994,25 @@ func (s *Store) PatchWorkspaceSettings(ctx context.Context, req *UpdateWorkspace
 	}
 	workspaceID := strings.TrimSpace(req.WorkspaceID)
 	now := time.Now().UTC()
-	if _, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO github_workspace_settings (
 			workspace_id, task_git_credentials_mode, repo_scope_mode, repo_scope_orgs, repo_scope_repos,
 			saved_presets, default_query_presets, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id) DO NOTHING`),
 		workspaceID, TaskGitCredentialsModeManaged, RepoScopeModeAll, "[]", "[]", "[]", nil, now, now); err != nil {
+		return nil, err
+	}
+	var currentMode string
+	if err := tx.GetContext(ctx, &currentMode, tx.Rebind(`SELECT repo_scope_mode FROM github_workspace_settings WHERE workspace_id = ?`), workspaceID); err != nil {
+		return nil, err
+	}
+	if err := validateWorkspaceScopePatch(req, currentMode); err != nil {
 		return nil, err
 	}
 
@@ -6015,9 +6033,12 @@ func (s *Store) PatchWorkspaceSettings(ctx context.Context, req *UpdateWorkspace
 		patch.add("updated_at = ?", now)
 		patch.args = append(patch.args, workspaceID)
 		query := "UPDATE github_workspace_settings SET " + strings.Join(patch.sets, ", ") + " WHERE workspace_id = ?"
-		if _, err := s.db.ExecContext(ctx, s.db.Rebind(query), patch.args...); err != nil {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(query), patch.args...); err != nil {
 			return nil, err
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return s.GetWorkspaceSettings(ctx, workspaceID)
 }
@@ -6033,23 +6054,49 @@ func (p *workspaceSettingsPatch) add(set string, arg any) {
 }
 
 func appendWorkspaceScopePatch(patch *workspaceSettingsPatch, req *UpdateWorkspaceSettingsRequest) error {
-	if err := validateWorkspaceScopePatch(req); err != nil {
-		return err
+	setOrgs := req.RepoScopeOrgs != nil
+	setRepos := req.RepoScopeRepos != nil
+	var orgs []string
+	var repos []RepoFilter
+	if setOrgs {
+		orgs = *req.RepoScopeOrgs
+	}
+	if setRepos {
+		repos = *req.RepoScopeRepos
 	}
 	if req.RepoScopeMode != nil {
-		if err := appendWorkspaceScopeModePatch(patch, *req.RepoScopeMode); err != nil {
-			return err
+		rawMode := strings.ToLower(strings.TrimSpace(*req.RepoScopeMode))
+		mode := rawMode
+		switch rawMode {
+		case RepoScopeModeOrgs:
+			mode = RepoScopeModeSelected
+			setRepos = true
+			repos = []RepoFilter{}
+		case RepoScopeModeRepos:
+			mode = RepoScopeModeSelected
+			setOrgs = true
+			orgs = []string{}
+		case RepoScopeModeAll:
+			setOrgs = true
+			setRepos = true
+			orgs = []string{}
+			repos = []RepoFilter{}
+		case RepoScopeModeSelected:
+			mode = RepoScopeModeSelected
+		default:
+			return fmt.Errorf("%w: invalid repo_scope_mode %q", ErrWorkspaceSettingsValidation, *req.RepoScopeMode)
 		}
+		patch.add("repo_scope_mode = ?", mode)
 	}
-	if req.RepoScopeOrgs != nil {
-		raw, err := marshalNormalizedRepoScopeOrgs(*req.RepoScopeOrgs)
+	if setOrgs {
+		raw, err := marshalNormalizedRepoScopeOrgs(orgs)
 		if err != nil {
 			return err
 		}
 		patch.add("repo_scope_orgs = ?", string(raw))
 	}
-	if req.RepoScopeRepos != nil {
-		raw, err := marshalNormalizedRepoScopeRepos(*req.RepoScopeRepos)
+	if setRepos {
+		raw, err := marshalNormalizedRepoScopeRepos(repos)
 		if err != nil {
 			return err
 		}
@@ -6058,11 +6105,14 @@ func appendWorkspaceScopePatch(patch *workspaceSettingsPatch, req *UpdateWorkspa
 	return nil
 }
 
-func validateWorkspaceScopePatch(req *UpdateWorkspaceSettingsRequest) error {
-	if req.RepoScopeMode == nil {
-		return nil
+func validateWorkspaceScopePatch(req *UpdateWorkspaceSettingsRequest, currentMode string) error {
+	mode := normalizeRepoScopeMode(currentMode)
+	if req.RepoScopeMode != nil {
+		mode = strings.ToLower(strings.TrimSpace(*req.RepoScopeMode))
+		if !isValidRepoScopeMode(mode) {
+			return fmt.Errorf("%w: invalid repo_scope_mode %q", ErrWorkspaceSettingsValidation, *req.RepoScopeMode)
+		}
 	}
-	mode := normalizeRepoScopeMode(*req.RepoScopeMode)
 	hasOrgs := req.RepoScopeOrgs != nil && len(*req.RepoScopeOrgs) > 0
 	hasRepos := req.RepoScopeRepos != nil && len(*req.RepoScopeRepos) > 0
 	if mode == RepoScopeModeAll && (hasOrgs || hasRepos) {
@@ -6073,24 +6123,6 @@ func validateWorkspaceScopePatch(req *UpdateWorkspaceSettingsRequest) error {
 	}
 	if mode == RepoScopeModeRepos && hasOrgs {
 		return fmt.Errorf("%w: repo_scope_mode repos cannot be patched with repo_scope_orgs", ErrWorkspaceSettingsValidation)
-	}
-	return nil
-}
-
-func appendWorkspaceScopeModePatch(patch *workspaceSettingsPatch, rawMode string) error {
-	if !isValidRepoScopeMode(rawMode) {
-		return fmt.Errorf("%w: invalid repo_scope_mode %q", ErrWorkspaceSettingsValidation, rawMode)
-	}
-	mode := normalizeRepoScopeMode(rawMode)
-	patch.add("repo_scope_mode = ?", mode)
-	switch mode {
-	case RepoScopeModeAll:
-		patch.add("repo_scope_orgs = ?", "[]")
-		patch.add("repo_scope_repos = ?", "[]")
-	case RepoScopeModeOrgs:
-		patch.add("repo_scope_repos = ?", "[]")
-	case RepoScopeModeRepos:
-		patch.add("repo_scope_orgs = ?", "[]")
 	}
 	return nil
 }
