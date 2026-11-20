@@ -60,9 +60,11 @@ const (
 	LaunchActivationSourceUserAction   LaunchActivationSource = "user_action"
 	LaunchActivationSourceSessionOpen  LaunchActivationSource = "session_open"
 	LaunchActivationSourceSessionFocus LaunchActivationSource = "session_focus"
+	// LaunchActivationDispositionQueued reports that launch admission was deferred.
+	LaunchActivationDispositionQueued = "queued"
 
 	activationDispositionSuppressed = "suppressed"
-	activationDispositionQueued     = "queued"
+	activationDispositionQueued     = LaunchActivationDispositionQueued
 )
 
 type sessionOpenRecoveryContextKey struct{}
@@ -425,9 +427,21 @@ func IsBenignLaunchTeardownErr(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return true
 	}
+	// A launch that lost its session to a concurrent workflow switch is an
+	// expected handover, not a fault.
+	if executor.IsSessionStateSwitched(err) {
+		return true
+	}
 	msg := err.Error()
 	return strings.Contains(msg, context.Canceled.Error()) ||
 		strings.Contains(msg, sessionTerminalErrText)
+}
+
+// IsWorkflowSwitchLaunchSuperseded reports whether a launch yielded ownership
+// to a workflow profile switch. Launch consumers should treat this as a
+// neutral handoff, not as a failed task start.
+func IsWorkflowSwitchLaunchSuperseded(err error) bool {
+	return executor.IsSessionStateSwitched(err)
 }
 
 func (s *Service) prepareLaunchRequest(

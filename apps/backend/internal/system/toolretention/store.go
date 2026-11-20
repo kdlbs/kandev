@@ -16,27 +16,44 @@ const settingsKey = "tool_payload_retention"
 // Version 1 tool-only approvals must not authorize the wider destructive scope.
 const recordVersion = 2
 
-func readRecord(ctx context.Context, q sqlx.QueryerContext) (record, error) {
+type queryerContextWithRebind interface {
+	sqlx.QueryerContext
+	Rebind(string) string
+}
+
+func readRecord(ctx context.Context, q queryerContextWithRebind) (record, error) {
 	var raw string
-	err := sqlx.GetContext(ctx, q, &raw, `SELECT value FROM settings WHERE key=?`, settingsKey)
+	err := sqlx.GetContext(ctx, q, &raw, q.Rebind(`SELECT value FROM settings WHERE key=?`), settingsKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return defaultRecord(), nil
 	}
 	if err != nil {
 		return record{}, err
 	}
+	r, err := decodeStoredRecord(raw)
+	if err != nil {
+		return record{}, err
+	}
+	r.Supported = true
+	if r.Operation != nil && r.Operation.Skipped == nil {
+		r.Operation.Skipped = map[string]int64{}
+	}
+	return r, nil
+}
+
+func decodeStoredRecord(raw string) (record, error) {
 	var r record
-	if json.Unmarshal([]byte(raw), &r) != nil || (r.Version != 1 && r.Version != recordVersion) ||
-		r.Policy.Age.Validate() != nil || r.Policy.Revision < 0 {
+	if err := json.Unmarshal([]byte(raw), &r); err != nil {
+		return record{}, errors.New("invalid_stored_policy")
+	}
+	if (r.Version != 1 && r.Version != recordVersion) || r.Policy.Age.Validate() != nil || r.Policy.Revision < 0 {
 		return record{}, errors.New("invalid_stored_policy")
 	}
 	legacyApproval := r.Version == 1
 	if legacyApproval && validateRecord(r) != nil {
 		return record{}, errors.New("invalid_stored_policy")
 	}
-	switch r.Preparation.State {
-	case stateNone, statePending, stateRunning, stateFailed, stateReady:
-	default:
+	if !validPreparationState(r.Preparation.State) {
 		return record{}, errors.New("invalid_preparation")
 	}
 	if err := validateRecord(r); err != nil {
@@ -45,11 +62,16 @@ func readRecord(ctx context.Context, q sqlx.QueryerContext) (record, error) {
 	if legacyApproval {
 		r = migrateToolOnlyRecord(r)
 	}
-	r.Supported = true
-	if r.Operation != nil && r.Operation.Skipped == nil {
-		r.Operation.Skipped = map[string]int64{}
-	}
 	return r, nil
+}
+
+func validPreparationState(state string) bool {
+	switch state {
+	case stateNone, statePending, stateRunning, stateFailed, stateReady:
+		return true
+	default:
+		return false
+	}
 }
 
 // migrateToolOnlyRecord preserves the selected period and revision but clears

@@ -66,31 +66,35 @@ func isTerminalSessionState(state models.TaskSessionState) bool {
 
 // repoInfo holds resolved repository details for agent launch.
 type repoInfo struct {
-	TaskRepositoryID           string
-	TaskRepositoryUpdatedAt    time.Time
-	RepositoryID               string
-	RepositoryPath             string
-	BaseBranch                 string
-	BaseBranchFallbackPolicy   models.BaseBranchFallbackPolicy
-	IntegrationRef             string
-	CheckoutBranch             string
-	PRNumber                   int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
-	RemoteContribution         *models.RemoteContribution
-	CheckoutOptions            *models.RepositoryCheckoutOptions
-	ContributionDestination    *models.ContributionDestination
-	ComparisonTarget           *models.ComparisonTarget
-	PRBase                     *models.PRBase
-	QualifiedPRBase            *models.PRBase
-	Position                   int
-	WorkspaceRelativePath      string
-	WorktreeBranchPrefix       string
-	WorktreeBranchTemplate     string
-	PullBeforeWorktree         bool
-	RemoteSyncHandled          bool
-	RefreshRepository          func(context.Context) error
-	RefreshRepositoryWithState func(context.Context) (repoclone.RemoteRefState, error)
-	RemoteRefState             repoclone.RemoteRefState
-	Repository                 *models.Repository
+	TaskRepositoryID                  string
+	TaskRepositoryUpdatedAt           time.Time
+	RepositoryID                      string
+	RepositoryPath                    string
+	BaseBranch                        string
+	BaseBranchFallbackPolicy          models.BaseBranchFallbackPolicy
+	IntegrationRef                    string
+	CheckoutBranch                    string
+	PRNumber                          int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
+	RemoteContribution                *models.RemoteContribution
+	CheckoutOptions                   *models.RepositoryCheckoutOptions
+	ContributionDestination           *models.ContributionDestination
+	ComparisonTarget                  *models.ComparisonTarget
+	PRBase                            *models.PRBase
+	QualifiedPRBase                   *models.PRBase
+	Position                          int
+	WorkspaceRelativePath             string
+	InheritedCheckoutReuseOnly        bool
+	MaterializationBranchPlanReady    bool
+	MaterializationBranchIdentitySlug string
+	MaterializationBranchPathSlug     string
+	WorktreeBranchPrefix              string
+	WorktreeBranchTemplate            string
+	PullBeforeWorktree                bool
+	RemoteSyncHandled                 bool
+	RefreshRepository                 func(context.Context) error
+	RefreshRepositoryWithState        func(context.Context) (repoclone.RemoteRefState, error)
+	RemoteRefState                    repoclone.RemoteRefState
+	Repository                        *models.Repository
 }
 
 // resumeCredentialSnapshotBackup holds the non-secret routing metadata that
@@ -180,17 +184,18 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		return nil, err
 	}
 	info := &repoInfo{
-		CheckoutOptions:          options,
-		TaskRepositoryID:         tr.ID,
-		TaskRepositoryUpdatedAt:  tr.UpdatedAt,
-		RepositoryID:             tr.RepositoryID,
-		BaseBranch:               tr.BaseBranch,
-		BaseBranchFallbackPolicy: models.ResolveAttachmentBaseBranchFallbackPolicy(tr.Metadata, tr.BaseBranch),
-		IntegrationRef:           tr.BranchPolicyPullRequestTarget,
-		CheckoutBranch:           tr.CheckoutBranch,
-		PRNumber:                 prNumberFromMetadata(tr.Metadata),
-		Position:                 tr.Position,
-		WorkspaceRelativePath:    tr.WorkspaceRelativePath,
+		CheckoutOptions:            options,
+		TaskRepositoryID:           tr.ID,
+		TaskRepositoryUpdatedAt:    tr.UpdatedAt,
+		RepositoryID:               tr.RepositoryID,
+		BaseBranch:                 tr.BaseBranch,
+		BaseBranchFallbackPolicy:   models.ResolveAttachmentBaseBranchFallbackPolicy(tr.Metadata, tr.BaseBranch),
+		IntegrationRef:             tr.BranchPolicyPullRequestTarget,
+		CheckoutBranch:             tr.CheckoutBranch,
+		PRNumber:                   prNumberFromMetadata(tr.Metadata),
+		Position:                   tr.Position,
+		WorkspaceRelativePath:      tr.WorkspaceRelativePath,
+		InheritedCheckoutReuseOnly: models.TaskRepositoryInheritedCheckoutReuseOnly(tr.Metadata),
 	}
 	if binding, found, err := models.LoadRemoteContribution(tr.Metadata); err != nil {
 		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
@@ -277,15 +282,14 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		if !refreshRequired {
 			return info, nil
 		}
-		prNumber, checkoutBranch := info.PRNumber, info.CheckoutBranch
 		info.RefreshRepository = func(refreshCtx context.Context) error {
 			return e.refreshManagedRepositoryForSession(
-				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch, options,
+				refreshCtx, tr.TaskID, sessionID, repo, info.PRNumber, info.CheckoutBranch, options,
 			)
 		}
 		info.RefreshRepositoryWithState = func(refreshCtx context.Context) (repoclone.RemoteRefState, error) {
 			return e.refreshManagedRepositoryForSessionWithState(
-				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch, options,
+				refreshCtx, tr.TaskID, sessionID, repo, info.PRNumber, info.CheckoutBranch, options,
 			)
 		}
 	}
@@ -931,7 +935,9 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	expectedState := session.State
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
-		claimAgentStartAttempt(session)
+		if models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]) == "" {
+			claimAgentStartAttempt(session)
+		}
 	}
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
@@ -963,6 +969,13 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 				"prepare_result",
 				buildPrepareResultMetadata(resp.PrepareResult),
 			)
+		}
+		if IsSessionStateSwitched(updateErr) {
+			e.logger.Info("launch superseded by a concurrent workflow session switch",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(updateErr))
+			return updateErr
 		}
 		e.logger.Error("failed to update agent session after launch",
 			zap.String("task_id", taskID),
@@ -2736,6 +2749,9 @@ func (e *Executor) applyResumeRepoConfig(
 	if err != nil {
 		return "", err
 	}
+	if !req.WorkspaceReuseRequired {
+		prepareFreshInheritedCheckoutMaterialization(allRepos)
+	}
 	repositoryID, baseBranch := resolveResumeRepoIDAndBranch(session, allRepos)
 	baseBranch = resolveResumeBaseBranch(repositoryID, baseBranch, allRepos)
 	if baseBranch != "" {
@@ -2796,6 +2812,7 @@ func (e *Executor) applyResumeRepoConfig(
 	}
 
 	applyResumeAttachmentFallbackPolicy(req, repositoryID, baseBranch, allRepos)
+	applyFreshInheritedCheckoutIdentity(req, repositoryID, allRepos)
 	repositoryPath := repository.LocalPath
 	applyResumeRepoBasics(req, repository, repositoryPath, shouldUseWorktree(req.ExecutorType))
 	for _, info := range allRepos {
@@ -2854,6 +2871,17 @@ func applyResumeAttachmentFallbackPolicy(
 	req.BaseBranchFallbackPolicy = match.BaseBranchFallbackPolicy
 	if match.Repository != nil && match.Repository.DefaultBranch != "" {
 		req.DefaultBranch = match.Repository.DefaultBranch
+	}
+}
+
+func applyFreshInheritedCheckoutIdentity(req *LaunchAgentRequest, repositoryID string, allRepos []*repoInfo) {
+	for _, info := range allRepos {
+		if info == nil || info.RepositoryID != repositoryID || !info.InheritedCheckoutReuseOnly ||
+			!info.MaterializationBranchPlanReady {
+			continue
+		}
+		req.BranchIdentitySlug = info.MaterializationBranchIdentitySlug
+		return
 	}
 }
 
@@ -3024,7 +3052,9 @@ func (e *Executor) applyResumeWorktreeConfig(
 		req.TaskRepositoryID = primaryTaskRepo.ID
 		req.WorkspaceRelativePath = primaryTaskRepo.WorkspaceRelativePath
 	}
-	if primaryTaskRepo != nil && primaryTaskRepo.CheckoutBranch != "" {
+	if primaryTaskRepo != nil &&
+		(!models.TaskRepositoryInheritedCheckoutReuseOnly(primaryTaskRepo.Metadata) || req.WorkspaceReuseRequired) &&
+		primaryTaskRepo.CheckoutBranch != "" {
 		req.CheckoutBranch = primaryTaskRepo.CheckoutBranch
 		req.PRNumber = prNumberFromMetadata(primaryTaskRepo.Metadata)
 	}

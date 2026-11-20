@@ -23,6 +23,73 @@ const NULL_BASELINE = "__KANDEV_E2E_NULL__";
 
 export type CodeEditorProvider = "codemirror" | "monaco";
 
+type CodeSelectionCoordinates = {
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+};
+
+async function readStableCodeSelectionCoordinates(
+  line: Element,
+  quote: string,
+): Promise<CodeSelectionCoordinates | null> {
+  const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const rectSnapshot = () => {
+    const rect = line.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  };
+  const sameRect = (
+    left: ReturnType<typeof rectSnapshot>,
+    right: ReturnType<typeof rectSnapshot>,
+  ) =>
+    Math.abs(left.x - right.x) < 0.5 &&
+    Math.abs(left.y - right.y) < 0.5 &&
+    Math.abs(left.width - right.width) < 0.5 &&
+    Math.abs(left.height - right.height) < 0.5;
+
+  if (!line.isConnected) return null;
+  const firstRect = rectSnapshot();
+  await nextFrame();
+  if (!line.isConnected) return null;
+  const secondRect = rectSnapshot();
+  await nextFrame();
+  if (!line.isConnected || !sameRect(firstRect, secondRect)) return null;
+  if (!sameRect(secondRect, rectSnapshot())) return null;
+
+  const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  let node = walker.nextNode();
+  while (node) {
+    textNodes.push(node as Text);
+    node = walker.nextNode();
+  }
+  const text = textNodes
+    .map((textNode) => textNode.nodeValue ?? "")
+    .join("")
+    .replace(/\u00a0/g, " ");
+  const startIndex = text.indexOf(quote);
+  if (startIndex < 0) return null;
+  const endIndex = startIndex + quote.length;
+  const locate = (index: number) => {
+    let offset = 0;
+    for (const textNode of textNodes) {
+      const nextOffset = offset + (textNode.nodeValue?.length ?? 0);
+      if (index <= nextOffset) return { node: textNode, offset: index - offset };
+      offset = nextOffset;
+    }
+    return null;
+  };
+  const startPosition = locate(startIndex);
+  const endPosition = locate(endIndex);
+  if (!startPosition || !endPosition) return null;
+  const range = document.createRange();
+  range.setStart(startPosition.node, startPosition.offset);
+  range.setEnd(endPosition.node, endPosition.offset);
+  const rect = range.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return null;
+  const y = rect.top + rect.height / 2;
+  return { start: { x: rect.left + 1, y }, end: { x: rect.right - 1, y } };
+}
+
 export async function setCodeEditorProvider(page: Page, provider: CodeEditorProvider) {
   await page.addInitScript(
     ({ provider, providerKey, baselineKey, nullBaseline }) => {
@@ -178,43 +245,21 @@ export async function selectFinalCodeLine({
     provider === "codemirror"
       ? owner.locator(".cm-line").filter({ hasText: CODE_SELECTION_QUOTE }).last()
       : owner.locator(".view-line").filter({ hasText: CODE_SELECTION_QUOTE }).last();
-  await finalLine.scrollIntoViewIfNeeded();
-  const { start, end } = await finalLine.evaluate((line, quote) => {
-    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
-    const textNodes: Text[] = [];
-    let node = walker.nextNode();
-    while (node) {
-      textNodes.push(node as Text);
-      node = walker.nextNode();
-    }
-    const text = textNodes
-      .map((textNode) => textNode.nodeValue ?? "")
-      .join("")
-      .replace(/\u00a0/g, " ");
-    const startIndex = text.indexOf(quote);
-    if (startIndex < 0) throw new Error(`Could not find final code line: ${quote}`);
-    const endIndex = startIndex + quote.length;
-    const locate = (index: number) => {
-      let offset = 0;
-      for (const textNode of textNodes) {
-        const nextOffset = offset + (textNode.nodeValue?.length ?? 0);
-        if (index <= nextOffset) return { node: textNode, offset: index - offset };
-        offset = nextOffset;
-      }
-      throw new Error(`Could not locate code selection offset: ${index}`);
-    };
-    const startPosition = locate(startIndex);
-    const endPosition = locate(endIndex);
-    const range = document.createRange();
-    range.setStart(startPosition.node, startPosition.offset);
-    range.setEnd(endPosition.node, endPosition.offset);
-    const rect = range.getBoundingClientRect();
-    const y = rect.top + rect.height / 2;
-    return {
-      start: { x: rect.left + 1, y },
-      end: { x: rect.right - 1, y },
-    };
-  }, CODE_SELECTION_QUOTE);
+  await expect(finalLine).toBeVisible();
+  let coordinates: CodeSelectionCoordinates | null = null;
+  await expect
+    .poll(
+      async () => {
+        coordinates = await finalLine
+          .evaluate(readStableCodeSelectionCoordinates, CODE_SELECTION_QUOTE)
+          .catch(() => null);
+        return coordinates !== null;
+      },
+      { message: "editor line geometry did not settle before code selection" },
+    )
+    .toBe(true);
+  if (!coordinates) throw new Error("Could not resolve stable code selection coordinates");
+  const { start, end } = coordinates;
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   await page.mouse.move(end.x, end.y, { steps: 8 });

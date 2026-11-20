@@ -368,6 +368,11 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.inheritParentRepositories(ctx, req); err != nil {
 		return nil, err
 	}
+	if req.ValidateInheritedWorkspaceRepositorySelection {
+		if err := s.ValidateInheritedWorkspaceRepositorySelection(ctx, req.ParentID, req.Repositories); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.prepareProjectRepositorySources(ctx, req); err != nil {
 		return nil, err
 	}
@@ -1290,11 +1295,12 @@ func buildResolvedTaskRepositoryRow(repositoryID, baseBranch string, index int, 
 		return nil, err
 	}
 	row := &models.TaskRepository{
-		RepositoryID:   repositoryID,
-		BaseBranch:     baseBranch,
-		CheckoutBranch: repoInput.CheckoutBranch,
-		Position:       index,
-		Metadata:       metadata,
+		RepositoryID:          repositoryID,
+		WorkspaceRelativePath: repoInput.WorkspaceRelativePath,
+		BaseBranch:            baseBranch,
+		CheckoutBranch:        repoInput.CheckoutBranch,
+		Position:              index,
+		Metadata:              metadata,
 	}
 	if policy != nil {
 		row.BranchPolicyID = policy.ID
@@ -1386,6 +1392,9 @@ func applyBranchPolicyBaseBranch(
 // buildTaskRepositoryMetadata assembles the row's metadata blob.
 func buildTaskRepositoryMetadata(repoInput TaskRepositoryInput) (map[string]interface{}, error) {
 	metadata := make(map[string]interface{})
+	if repoInput.ReuseOnlyCheckoutBranch {
+		metadata[models.TaskRepositoryInheritedCheckoutReuseOnlyMetadataKey] = true
+	}
 	if err := models.PutRepositoryCheckoutOptions(metadata, repoInput.CheckoutOptions); err != nil {
 		return nil, err
 	}

@@ -127,6 +127,10 @@ export async function compactRuntimeSettings(
   await expect(page.getByTestId("runtime-updates-count")).toHaveText("1");
 
   await expectCompactRuntimeDetail(page, detail, touch);
+  if (mobile)
+    await detail.evaluate((surface) => {
+      surface.scrollTop = surface.scrollHeight;
+    });
   const back = detail.getByTestId("agent-update-back-claude-acp");
   await expectBackBesideTitle(detail, back, mobile);
   if (touch) await back.tap();

@@ -6,6 +6,7 @@ import { StateProvider } from "@/components/state-provider";
 import {
   AgentProfileDeleteConfirmation,
   AgentProfileDeleteConflictDialog,
+  AgentProfileDisableConflictDialog,
 } from "./agent-profile-delete-dialog";
 import type { AgentProfileDeleteConflict } from "./agent-profile-delete-dialog";
 
@@ -95,11 +96,48 @@ describe("AgentProfileDeleteConfirmation", () => {
   });
 });
 
+const DYNAMIC_PROFILE_REFERENCE = { id: "dyn-1", name: "Balanced selector" };
+
+describe("AgentProfileDisableConflictDialog", () => {
+  it("lists dynamic profiles that block disabling and confirms", () => {
+    const onConfirm = vi.fn();
+    render(
+      <AgentProfileDisableConflictDialog
+        agents={[]}
+        dynamicProfiles={[DYNAMIC_PROFILE_REFERENCE]}
+        onCancel={() => {}}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    const section = screen.getByTestId("disable-conflict-dynamic-profiles");
+    expect(within(section).getByText(DYNAMIC_PROFILE_REFERENCE.name)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Disable profile" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("lists utility agents and dynamic profiles together before confirmation", () => {
+    render(
+      <AgentProfileDisableConflictDialog
+        agents={[{ id: "utility-1", name: "Commit message" }]}
+        dynamicProfiles={[DYNAMIC_PROFILE_REFERENCE]}
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText("Commit message")).toBeTruthy();
+    expect(within(dialog).getByText(DYNAMIC_PROFILE_REFERENCE.name)).toBeTruthy();
+  });
+});
+
 const FIXTURE_TIMESTAMP = "2026-01-01T00:00:00.000Z";
 
 function renderConflictDialog(
   conflict: AgentProfileDeleteConflict | null,
   extraWorkspaces: Array<{ id: string; name: string }> = [],
+  onConfirm: () => void = () => {},
 ) {
   return render(
     <StateProvider
@@ -140,7 +178,7 @@ function renderConflictDialog(
       <AgentProfileDeleteConflictDialog
         conflict={conflict}
         onOpenChange={() => {}}
-        onConfirm={() => {}}
+        onConfirm={onConfirm}
       />
     </StateProvider>,
   );
@@ -267,6 +305,28 @@ describe("AgentProfileDeleteConflictDialog", () => {
     renderConflictDialog(null);
 
     expect(screen.queryByText(/Delete agent profile/i)).toBeNull();
+  });
+});
+
+describe("AgentProfileDeleteConflictDialog dynamic profiles", () => {
+  it("names live dynamic profiles and offers Delete Anyway", () => {
+    const onConfirm = vi.fn();
+    renderConflictDialog(
+      {
+        activeSessions: [],
+        watchers: [],
+        routingTiers: [],
+        automations: [],
+        dynamicProfiles: [DYNAMIC_PROFILE_REFERENCE],
+      },
+      [],
+      onConfirm,
+    );
+
+    const section = screen.getByTestId("profile-conflict-dynamic-profiles");
+    expect(within(section).getByText(DYNAMIC_PROFILE_REFERENCE.name)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Anyway" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 });
 
