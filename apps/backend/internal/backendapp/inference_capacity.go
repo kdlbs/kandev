@@ -97,7 +97,7 @@ func (b *sharedInferenceConsumer) executeSharedInference(ctx context.Context, cl
 		b.cancelAndSettle(client, binding)
 		return nil, &agentruntime.InferenceCapacityError{Reason: "provider_allowance", Cause: err}
 	}
-	if err := client.AdmitInferenceCapacityAttempt(ctx, binding.AttemptID); err != nil && !errors.Is(err, agentruntime.ErrInferenceOwnershipUnsupported) {
+	if err := client.AdmitInferenceCapacityAttempt(ctx, binding.AttemptID); err != nil {
 		b.cancelAndSettle(client, binding)
 		return nil, &agentruntime.InferenceCapacityError{Reason: "reservation_unconfirmed", Cause: err}
 	}
@@ -296,5 +296,6 @@ func (b *sharedInferenceConsumer) promptWithoutInferenceReservation(ctx context.
 	if err := b.capacity.CheckLegacyInferenceAdmission(ctx, identity.SessionID, identity.ParentExecutionID); err != nil {
 		return nil, &agentruntime.InferenceCapacityError{Reason: "inference_scope_closure", Cause: err}
 	}
+	b.refresh(ctx, agentruntime.InferenceClientRef{Client: client, Identity: identity, Release: func() {}})
 	return client.InferencePrompt(ctx, req)
 }

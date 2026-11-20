@@ -62,7 +62,15 @@ func (m *Manager) materializeRuntimeProjectMCPWithClient(
 		if err := m.prepareCursorMCPAuthWithProgress(execution, profileInfo, executorType, rt.ProjectMCPStrategy, progress); err != nil {
 			return err
 		}
-		return m.reconcileAndMaterializeCursorProjectMCPWithPreparation(ctx, execution, agentConfig, profileInfo, executorType, rt.ProjectMCPStrategy, progress, operations...)
+		release := func() {}
+		if client == nil {
+			client, release = execution.AcquireAgentCtlClient()
+		}
+		defer release()
+		if client == nil {
+			return fmt.Errorf("agent helper is unavailable for Cursor MCP delivery")
+		}
+		return m.reconcileAndMaterializeCursorProjectMCPWithClient(ctx, execution, agentConfig, profileInfo, executorType, rt.ProjectMCPStrategy, client, progress, operations...)
 	}
 	if err := m.prepareCursorMCPAuth(execution, profileInfo, executorType, rt.ProjectMCPStrategy); err != nil {
 		execution.clearProjectMCPDelivery()
@@ -98,7 +106,7 @@ func (m *Manager) materializeProjectMCPPlacement(
 		execution.clearProjectMCPDelivery()
 		return err
 	}
-	servers, err := builtinPassthroughMCPServers(execution, placement.coreURL, operation.servers)
+	servers, err := builtinPassthroughMCPServers(execution, placement.client, placement.coreURL, operation.servers)
 	if err != nil {
 		execution.clearProjectMCPDelivery()
 		return fmt.Errorf("resolve project MCP servers: %w", err)

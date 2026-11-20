@@ -377,7 +377,6 @@ var mostRecentInputObservationQueries = []string{
 	`SELECT MAX(updated_at) FROM task_repositories WHERE task_id = ? AND repository_id = ?`,
 	`SELECT MAX(updated_at) FROM github_task_prs WHERE task_id = ? AND repository_id = ?`,
 	`SELECT MAX(updated_at) FROM gitlab_task_mrs WHERE task_id = ? AND repository_id = ?`,
-	`SELECT MAX(updated_at) FROM azure_devops_task_prs WHERE task_id = ? AND repository_id = ?`,
 }
 
 func mostRecentGitSnapshotObservationQuery(driver string) string {

@@ -18,7 +18,6 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
-	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
@@ -292,6 +291,31 @@ func (e *SessionStateSupersededError) Error() string {
 }
 
 func (e *SessionStateSupersededError) Unwrap() error { return ErrSessionStateSuperseded }
+
+// ErrSessionStateSwitched means a concurrent workflow session switch took
+// ownership of the session before this launch could persist its runtime data.
+// The session is still live under the new owner, so the losing launch exits
+// without failing the task.
+var ErrSessionStateSwitched = errors.New("session taken over by a concurrent workflow session switch")
+
+// SessionStateSwitchedError records the state a workflow session switch left
+// behind when it superseded a stale launch.
+type SessionStateSwitchedError struct {
+	SessionID string
+	State     models.TaskSessionState
+}
+
+func (e *SessionStateSwitchedError) Error() string {
+	return fmt.Sprintf("%s: session %s is %s", ErrSessionStateSwitched, e.SessionID, e.State)
+}
+
+func (e *SessionStateSwitchedError) Unwrap() error { return ErrSessionStateSwitched }
+
+// IsSessionStateSwitched reports whether err is a launch that lost its session
+// to a concurrent workflow session switch.
+func IsSessionStateSwitched(err error) bool {
+	return errors.Is(err, ErrSessionStateSwitched)
+}
 
 // PromptResult contains the result of a prompt operation
 type PromptResult struct {
@@ -1099,6 +1123,10 @@ type AgentProcessStartFailedFunc func(ctx context.Context, taskID, sessionID, ag
 // creating repository-scoped user-facing status messages tied to launch errors.
 type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID string, err error)
 
+// LaunchFailureRecordedFunc runs after a pre-agent launch failure and its task
+// state have been persisted. The stamp identifies the exact session failure.
+type LaunchFailureRecordedFunc func(ctx context.Context, taskID, sessionID string, err error, stamp string)
+
 // CeilingReservationReleaseFunc releases the orchestrator's session-ceiling
 // reservation for a session this package just moved out of the counted
 // population through a write that bypasses onSessionStateChange /
@@ -1258,7 +1286,8 @@ type Executor struct {
 
 	// Callback for session launch failures (pre-start). Allows orchestrator
 	// to emit user-friendly guidance for known failure patterns.
-	onLaunchFailed LaunchFailedFunc
+	onLaunchFailed          LaunchFailedFunc
+	onLaunchFailureRecorded LaunchFailureRecordedFunc
 
 	// Callback releasing the session-ceiling reservation for writes this
 	// package makes directly against the repository, bypassing
@@ -1334,20 +1363,6 @@ type RepoCloner interface {
 	BuildCloneURLWithHost(ctx context.Context, provider, host, owner, name string) (string, error)
 }
 
-type authenticatedRepoCloner interface {
-	EnsureWorkspaceClonedWithBasicAuth(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, username, password string,
-	) (string, error)
-}
-
-type strictAuthenticatedRepoCloner interface {
-	RefreshWorkspaceRepositoryWithBasicAuth(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, repositoryPath, username, password string,
-	) error
-}
-
 type remoteStateRepoCloner interface {
 	EnsureWorkspaceClonedWithCredentialRequestAndState(
 		ctx context.Context, request repoclone.GitCredentialRequest,
@@ -1359,24 +1374,11 @@ type remoteStateRepoCloner interface {
 	) (repoclone.RemoteRefState, error)
 }
 
-type remoteStateAuthenticatedRepoCloner interface {
-	EnsureWorkspaceClonedWithBasicAuthAndState(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, username, password string,
-	) (string, repoclone.RemoteRefState, error)
-	RefreshWorkspaceRepositoryWithBasicAuthAndState(
-		ctx context.Context, workspaceID, provider, providerHost,
-		cloneURL, owner, name, repositoryPath, username, password string,
-	) (repoclone.RemoteRefState, error)
-}
-
 type localRemoteStateRepoCloner interface {
 	InspectLocalRepositoryRemoteRefState(
 		ctx context.Context, repositoryPath string,
 	) (repoclone.RemoteRefState, error)
 }
-
-const providerAzureDevOps = "azure_devops"
 
 func (e *Executor) ensureClonedWithWorkspaceAuth(
 	ctx context.Context, repo *models.Repository, cloneURL string,
@@ -1399,36 +1401,14 @@ func (e *Executor) ensureClonedWithWorkspaceAuthForSessionAndState(
 	if strings.EqualFold(repo.Provider, "gitlab") && e.gitlabCredentials != nil {
 		credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
 	}
-	if repo.Provider != providerAzureDevOps || !strings.HasPrefix(cloneURL, "https://") {
-		request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
-		if stateCloner, ok := e.repoCloner.(remoteStateRepoCloner); ok {
-			return stateCloner.EnsureWorkspaceClonedWithCredentialRequestAndState(
-				ctx, request, credentialHost, token,
-			)
-		}
-		path, err := e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
+	request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
+	if stateCloner, ok := e.repoCloner.(remoteStateRepoCloner); ok {
+		return stateCloner.EnsureWorkspaceClonedWithCredentialRequestAndState(
 			ctx, request, credentialHost, token,
 		)
-		return path, repoclone.RemoteRefStateHasRefs, err
 	}
-	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
-	if !ok || e.secretStore == nil {
-		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("azure DevOps repository clone authentication is unavailable")
-	}
-	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
-	if err != nil {
-		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("read Azure DevOps clone credential: %w", err)
-	}
-	// Azure DevOps PAT authentication ignores the username; any non-empty value works.
-	if stateCloner, ok := e.repoCloner.(remoteStateAuthenticatedRepoCloner); ok {
-		return stateCloner.EnsureWorkspaceClonedWithBasicAuthAndState(
-			ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
-			cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
-		)
-	}
-	path, err := authCloner.EnsureWorkspaceClonedWithBasicAuth(
-		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
-		cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
+	path, err := e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
+		ctx, request, credentialHost, token,
 	)
 	return path, repoclone.RemoteRefStateHasRefs, err
 }
@@ -1735,6 +1715,12 @@ func (e *Executor) SetOnContextWindowReset(fn ContextWindowResetFunc) {
 // the agent process has started.
 func (e *Executor) SetOnLaunchFailed(fn LaunchFailedFunc) {
 	e.onLaunchFailed = fn
+}
+
+// SetOnLaunchFailureRecorded sets a callback for a launch failure after both
+// session and task failure bookkeeping has completed.
+func (e *Executor) SetOnLaunchFailureRecorded(fn LaunchFailureRecordedFunc) {
+	e.onLaunchFailureRecorded = fn
 }
 
 // SetLaunchFailureReviewEligibility wires the narrow review-completion

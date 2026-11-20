@@ -21,7 +21,6 @@ import {
 const loaderMocks = vi.hoisted(() => ({
   github: vi.fn(),
   gitlab: vi.fn(),
-  azure: vi.fn(),
 }));
 
 vi.mock("@/hooks/domains/github/use-task-pr", () => ({
@@ -29,10 +28,6 @@ vi.mock("@/hooks/domains/github/use-task-pr", () => ({
 }));
 vi.mock("@/hooks/domains/gitlab/use-task-mr", () => ({
   useWorkspaceMRs: (value: string | null) => loaderMocks.gitlab(value),
-}));
-vi.mock("@/hooks/domains/azure-devops/use-azure-devops-task-pull-requests", () => ({
-  useAzureDevOpsTaskPullRequests: (workspace: string | null, task: string | null) =>
-    loaderMocks.azure(workspace, task),
 }));
 
 import {
@@ -413,6 +408,5 @@ describe("useExternalVcsFileLinkHydration", () => {
 
     expect(loaderMocks.github).toHaveBeenLastCalledWith(TASK_ID);
     expect(loaderMocks.gitlab).toHaveBeenLastCalledWith(null);
-    expect(loaderMocks.azure).toHaveBeenLastCalledWith(WORKSPACE_ID, TASK_ID);
   });
 });

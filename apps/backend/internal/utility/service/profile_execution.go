@@ -36,7 +36,7 @@ func ExecuteProfilePrompt(ctx context.Context, resolver ExecutionFailureResolver
 		identity := agentruntime.InferenceIdentityFromContext(ctx)
 		identity.ExecutionProfileID = route.ExecutionProfileID
 		response, executeErr = execute(agentruntime.WithInferenceIdentity(ctx, identity), route.ExecutionProfileID)
-		if err := ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil && (response == nil || !response.Success || executeErr != nil) {
 			return response, err
 		}
 		if agentruntime.IsInferenceCapacityError(executeErr) {

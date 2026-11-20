@@ -169,6 +169,17 @@ func testNativeResumeAfterSilentRestore(t *testing.T, open func(*testing.T) *Rep
 			recovery, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
 			require.True(t, exists)
 			require.Equal(t, fixture.historicalNotice, recovery, "historical restore metadata remains unchanged")
+			if want && scenario != "generic fallback" {
+				require.Equal(t, models.RecoveryNoticeSourceIdentity(models.AgentDeliveryRecovery{
+					SessionID: fixture.base.session.ID, IncarnationID: fixture.base.session.QueueIncarnationID,
+					HarnessGeneration: fixture.currentSubmission.HarnessGeneration,
+					SubmissionID:      fixture.currentSubmission.ID,
+				}), session.Metadata[models.SessionMetaKeyRecoveryNoticePending],
+					"later incident must have its own notice marker after explicit Resume")
+			} else {
+				require.NotContains(t, session.Metadata, models.SessionMetaKeyRecoveryNoticePending,
+					"failed or non-native recovery must not create a notice marker")
+			}
 			oldSubmission, err := repo.GetAgentDeliverySubmission(ctx, fixture.base.recovery.SubmissionID)
 			require.NoError(t, err)
 			require.Equal(t, models.DeliverySubmissionInterruptedUnknown, oldSubmission.State)
@@ -197,6 +208,12 @@ func prepareRepeatedNativeResume(t *testing.T, repo *Repository, suffix string) 
 	require.NoError(t, err)
 	historicalNotice, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
 	require.True(t, exists)
+	pending, ok := session.Metadata[models.SessionMetaKeyRecoveryNoticePending].(string)
+	require.True(t, ok, "the initial restoration must leave its notice pending")
+	cleared, err := repo.ClearSessionMetadataKeyIfStringValue(ctx, session.ID,
+		models.SessionMetaKeyRecoveryNoticePending, pending)
+	require.NoError(t, err)
+	require.True(t, cleared, "the earlier notice has been published before the later incident")
 	currentGeneration, err := repo.GetCurrentHarnessSessionGeneration(ctx, base.session.ID, base.session.QueueIncarnationID)
 	require.NoError(t, err)
 	currentID := "current-submission-" + suffix

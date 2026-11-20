@@ -19,7 +19,13 @@ function validateCases(value: unknown): CatalogCase[] {
   for (const item of value as CatalogCase[]) {
     if (
       !item ||
-      !["chromium", "mobile-chrome", "containers"].includes(item.project) ||
+      ![
+        "chromium",
+        "mobile-chrome",
+        "first-profile-capability",
+        "mobile-first-profile-capability",
+        "containers",
+      ].includes(item.project) ||
       typeof item.file !== "string" ||
       !item.file.startsWith("tests/") ||
       item.file.includes("\\") ||
@@ -53,6 +59,8 @@ export function discoverNativeCases(webRoot: string): CatalogCase[] {
       path.join(root, "e2e/playwright.config.ts"),
       "--project=chromium",
       "--project=mobile-chrome",
+      "--project=first-profile-capability",
+      "--project=mobile-first-profile-capability",
       "--project=containers",
       "--list",
       `--reporter=${reporter}`,

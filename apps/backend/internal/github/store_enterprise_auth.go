@@ -80,7 +80,7 @@ func (s *Store) ReplaceWorkspaceHostConnection(ctx context.Context, existing, re
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, s.db.Rebind(`INSERT INTO github_workspace_settings (workspace_id, github_host, task_git_credentials_mode,repo_scope_mode,repo_scope_orgs,repo_scope_repos,saved_presets,default_query_presets,created_at,updated_at)
- VALUES (?, ?, 'managed','repos','[]','[]','[]',NULL,?,?) ON CONFLICT(workspace_id) DO UPDATE SET github_host=excluded.github_host,repo_scope_mode='repos',repo_scope_orgs='[]',repo_scope_repos='[]',saved_presets='[]',default_query_presets=NULL,updated_at=excluded.updated_at`), replacement.WorkspaceID, replacement.GitHubHost, now, now); err != nil {
+ VALUES (?, ?, 'managed','selected','[]','[]','[]',NULL,?,?) ON CONFLICT(workspace_id) DO UPDATE SET github_host=excluded.github_host,repo_scope_mode='selected',repo_scope_orgs='[]',repo_scope_repos='[]',saved_presets='[]',default_query_presets=NULL,updated_at=excluded.updated_at`), replacement.WorkspaceID, replacement.GitHubHost, now, now); err != nil {
 		return err
 	}
 	return tx.Commit()

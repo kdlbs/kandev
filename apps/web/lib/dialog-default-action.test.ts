@@ -304,6 +304,15 @@ describe("handleDialogDefaultActionKeyDown — focused-control handling", () => 
     expect(click).not.toHaveBeenCalled();
   });
 
+  it("lets a focused native disclosure summary keep Enter", () => {
+    const { el, click } = alertContent();
+    const summary = document.createElement("summary");
+    const { event, preventDefault } = keyEvent(el, { target: summary });
+    handleDialogDefaultActionKeyDown(event);
+    expect(click).not.toHaveBeenCalled();
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+
   it("lets a focused <select> keep its own Enter behavior", () => {
     const { el, click } = alertContent();
     const select = document.createElement("select");

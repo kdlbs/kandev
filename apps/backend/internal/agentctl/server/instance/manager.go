@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpurl"
 	"github.com/kandev/kandev/internal/common/netutil"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	"github.com/kandev/kandev/pkg/agent"
@@ -218,8 +219,9 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		zap.String("workspace", req.WorkspacePath))
 
 	return &CreateResponse{
-		ID:   inst.ID,
-		Port: inst.Port,
+		ID:              inst.ID,
+		Port:            inst.Port,
+		ScopedMCPRoutes: inst.ScopedMCPRoutes,
 	}, nil
 }
 
@@ -260,6 +262,11 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 	id := req.ID
 	if id == "" {
 		id = uuid.New().String()
+	}
+	if req.ScopedMCPRoutes {
+		if err := mcpurl.ValidateInstanceID(id); err != nil {
+			return nil, errors.New("scoped built-in MCP requires a valid instance ID")
+		}
 	}
 	if _, exists := m.instances[id]; exists {
 		return nil, fmt.Errorf("instance with ID %s already exists", id)
@@ -344,18 +351,19 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 
 	// Create instance up-front so the activity middleware can reference it.
 	inst := &Instance{
-		ID:            id,
-		Port:          port,
-		lease:         bundle.lease,
-		Status:        "running",
-		WorkspacePath: req.WorkspacePath,
-		AgentCommand:  agentCmd,
-		Env:           req.Env,
-		CreatedAt:     time.Now(),
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		manager:       procMgr,
-		listenerDone:  make(chan struct{}),
+		ID:              id,
+		ScopedMCPRoutes: instanceCfg.ScopedMCPRoutes,
+		Port:            port,
+		lease:           bundle.lease,
+		Status:          "running",
+		WorkspacePath:   req.WorkspacePath,
+		AgentCommand:    agentCmd,
+		Env:             req.Env,
+		CreatedAt:       time.Now(),
+		SessionID:       req.SessionID,
+		TaskID:          req.TaskID,
+		manager:         procMgr,
+		listenerDone:    make(chan struct{}),
 	}
 	inst.MarkActivity()
 
@@ -390,6 +398,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 	return &config.InstanceOverrides{
 		InferenceClosureOperationID:  req.InferenceClosureOperationID,
 		InstanceID:                   id,
+		ScopedMCPRoutes:              req.ScopedMCPRoutes,
 		Protocol:                     agent.Protocol(req.Protocol),
 		AgentCommand:                 agentCmd,
 		WorkDir:                      req.WorkspacePath,

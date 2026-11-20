@@ -168,8 +168,8 @@ func (r *StandaloneExecutor) stopWithRetryClient(ctx context.Context, control *a
 		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
 		lastErr = control.DeleteInstance(attemptCtx, instanceID)
 		cancel()
-		if lastErr == nil {
-			return nil
+		if lastErr == nil || errors.Is(lastErr, agentctl.ErrInferenceStopSettlement) {
+			return lastErr
 		}
 	}
 	return lastErr
@@ -279,6 +279,7 @@ func buildStandaloneCreateInstanceRequest(
 ) *agentctl.CreateInstanceRequest {
 	return &agentctl.CreateInstanceRequest{
 		ID:                    req.InstanceID,
+		ScopedMCPRoutes:       true,
 		WorkspacePath:         req.WorkspacePath,
 		AgentCommand:          "", // Agent command set via Configure endpoint
 		Protocol:              req.Protocol,
@@ -440,12 +441,14 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	var client *agentctl.Client
 	if lease != nil {
 		client = lease.NewBoundInstanceClient(resp.Port, r.logger,
-			agentctl.WithExecutionID(resp.ID), agentctl.WithSessionID(req.SessionID))
+			agentctl.WithExecutionID(resp.ID), agentctl.WithSessionID(req.SessionID),
+			agentctl.WithBuiltinMCPScopedRoutes(resp.ScopedMCPRoutes))
 	} else {
 		client = agentctl.NewClient(r.host, resp.Port, r.logger,
 			agentctl.WithExecutionID(resp.ID),
 			agentctl.WithSessionID(req.SessionID),
-			agentctl.WithAuthToken(r.authToken))
+			agentctl.WithAuthToken(r.authToken),
+			agentctl.WithBuiltinMCPScopedRoutes(resp.ScopedMCPRoutes))
 	}
 
 	// Build metadata
@@ -882,12 +885,14 @@ func (r *StandaloneExecutor) buildRecoveredInstancesWithLease(
 		var client *agentctl.Client
 		if lease != nil {
 			client = lease.NewBoundInstanceClient(inst.Port, r.logger,
-				agentctl.WithExecutionID(inst.ID), agentctl.WithSessionID(sessionID))
+				agentctl.WithExecutionID(inst.ID), agentctl.WithSessionID(sessionID),
+				agentctl.WithBuiltinMCPScopedRoutes(inst.ScopedMCPRoutes))
 		} else {
 			client = agentctl.NewClient(r.host, inst.Port, r.logger,
 				agentctl.WithExecutionID(inst.ID),
 				agentctl.WithSessionID(sessionID),
-				agentctl.WithAuthToken(r.authToken))
+				agentctl.WithAuthToken(r.authToken),
+				agentctl.WithBuiltinMCPScopedRoutes(inst.ScopedMCPRoutes))
 		}
 		deliveryStatus, legacyEvidence, deliveryErr := r.discoverDeliveryStatus(ctx, client)
 

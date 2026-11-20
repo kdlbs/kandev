@@ -267,6 +267,12 @@ its work through complete existing agent profiles.
   mappings.
 - Office run, dashboard, and inbox surfaces can show route status and recovery
   actions, but they do not edit routing policy.
+- Before removing workspace provider routing, carry the
+  [Office author-provider exclusion](../../office/requirements/review-author-provider-exclusion.md)
+  into the shared resolver. Preserve its run events and route attempt records.
+  Move **Review on a different provider** to the replacement settings surface.
+  Retire the `agent_bound_profile` warning once the shared resolver enforces
+  the rule for profile-bound agents.
 
 ### Route selection
 

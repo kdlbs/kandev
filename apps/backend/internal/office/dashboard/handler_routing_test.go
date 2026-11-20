@@ -33,6 +33,29 @@ type fakeRoutingProvider struct {
 	overridesErr         error
 	executionProfiles    []routing.ExecutionProfileSummary
 	executionProfilesErr error
+	setupWarnings        []routing.SetupWarning
+	setupErr             error
+	seatSteps            []routing.SeatStep
+	seatStepsErr         error
+	// releasedSteps records the step ids of each
+	// ReleaseAuthorExclusionParkedRuns call.
+	releasedSteps [][]string
+	releaseErr    error
+}
+
+func (f *fakeRoutingProvider) ReleaseAuthorExclusionParkedRuns(
+	_ context.Context, _ string, stepIDs []string,
+) error {
+	f.releasedSteps = append(f.releasedSteps, stepIDs)
+	return f.releaseErr
+}
+
+func (f *fakeRoutingProvider) SeatSteps(_ context.Context, _ string) ([]routing.SeatStep, error) {
+	return f.seatSteps, f.seatStepsErr
+}
+
+func (f *fakeRoutingProvider) StoredExclusionSetup(_ context.Context, _ string) ([]routing.SetupWarning, error) {
+	return f.setupWarnings, f.setupErr
 }
 
 func (f *fakeRoutingProvider) ListExecutionProfiles(

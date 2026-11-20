@@ -224,8 +224,19 @@ func (s *Service) checkOtherRecoveryBlocksForClosure(ctx context.Context, sid, i
 			found = true
 			continue
 		}
-		if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); !resolved {
-			return &sessionRecoveryRequiredError{Block: block}
+		resolved, finishErr := s.finishLoadedNativeDeliveryBlock(ctx, block)
+		if !resolved {
+			required := &sessionRecoveryRequiredError{Block: block}
+			if finishErr != nil {
+				required.DeliveryRefusalReason = deliveryRecoveryRefusalReason(finishErr)
+				required.internalCause = finishErr
+			}
+			if isBootDeliveryReadinessContext(ctx) {
+				s.logBootDeliveryRecoveryRefusal(ctx, sid, required, block)
+			} else {
+				s.logDeliveryRecoveryRefusal(ctx, sid, required, block)
+			}
+			return required
 		}
 	}
 	if !found {

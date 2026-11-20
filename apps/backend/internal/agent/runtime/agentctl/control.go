@@ -59,6 +59,7 @@ type McpServerConfig struct {
 
 // CreateInstanceRequest contains the parameters for creating a new agent instance.
 type CreateInstanceRequest struct {
+	ScopedMCPRoutes             bool                `json:"scoped_mcp_routes,omitempty"`
 	InferenceClosureOperationID string              `json:"inference_closure_operation_id,omitempty"`
 	ID                          string              `json:"id,omitempty"`
 	WorkspacePath               string              `json:"workspace_path"`
@@ -144,13 +145,15 @@ type CreateInstanceRequest struct {
 
 // CreateInstanceResponse contains the result of creating a new agent instance.
 type CreateInstanceResponse struct {
-	ID   string `json:"id"`
-	Port int    `json:"port"`
+	ID              string `json:"id"`
+	Port            int    `json:"port"`
+	ScopedMCPRoutes bool   `json:"scoped_mcp_routes"`
 }
 
 // InstanceInfo contains information about an agent instance.
 type InstanceInfo struct {
 	ID              string            `json:"id"`
+	ScopedMCPRoutes bool              `json:"scoped_mcp_routes"`
 	Port            int               `json:"port"`
 	LeaseGeneration uint64            `json:"lease_generation"`
 	ListenerActive  bool              `json:"listener_active"`
@@ -430,7 +433,7 @@ func (c *ControlClient) stopInstance(ctx context.Context, instanceID string, idl
 
 	if resp.StatusCode == http.StatusOK {
 		if err := observeDeletedInference(ctx, instanceID, resp.Body); err != nil {
-			return fmt.Errorf("settle stopped instance inference: %w", err)
+			return fmt.Errorf("%w: %w", ErrInferenceStopSettlement, err)
 		}
 	}
 	c.logger.Info("deleted agent instance", zap.String("instance_id", instanceID))

@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 )
 
@@ -17,6 +18,14 @@ type taskFieldExecutionGradeSuppliedKey struct{}
 // UpdateTaskFieldsWithParentAdmission applies only supplied fields to the
 // current row after workspace, step and task-row serialization.
 func (r *Repository) UpdateTaskFieldsWithParentAdmission(ctx context.Context, id string, update models.TaskFieldUpdate, validate hierarchy.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
+	return r.updateTaskFieldsWithParentAdmission(ctx, id, update, validate, nil)
+}
+
+func (r *Repository) UpdateTaskFieldsWithParentAdmissionAndCompletionAdmission(ctx context.Context, id string, update models.TaskFieldUpdate, validate hierarchy.TaskParentValidator, admission *completion.Admission) (*models.TaskFieldUpdateResult, error) {
+	return r.updateTaskFieldsWithParentAdmission(ctx, id, update, validate, admission)
+}
+
+func (r *Repository) updateTaskFieldsWithParentAdmission(ctx context.Context, id string, update models.TaskFieldUpdate, validate hierarchy.TaskParentValidator, admission *completion.Admission) (*models.TaskFieldUpdateResult, error) {
 	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return nil, err
@@ -48,7 +57,7 @@ func (r *Repository) UpdateTaskFieldsWithParentAdmission(ctx context.Context, id
 	updateCtx = context.WithValue(updateCtx, taskFieldMetadataOmittedKey{}, update.Metadata == nil)
 	updateCtx = context.WithValue(updateCtx, taskFieldExecutionGradeSuppliedKey{}, update.ExecutionGrade != nil)
 	preservePosition := update.Position == nil
-	entry, marker, err := r.updateTaskTx(updateCtx, tx, task, "", preservePosition, preservePosition, nil)
+	entry, marker, err := r.updateTaskTx(updateCtx, tx, task, "", preservePosition, preservePosition, nil, admission)
 	if err != nil {
 		return nil, err
 	}

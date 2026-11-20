@@ -16,7 +16,16 @@ import {
   toSerializedDockview,
   type LayoutState,
 } from "@/lib/state/layout-manager";
+import { resolveCustomLayoutPinnedWidths } from "@/lib/state/dockview-store";
 import { LayoutEditorActions, type LayoutEditorActionAnchor } from "./layout-editor-toolbar";
+import { useEditorGeometry } from "./layout-editor-geometry";
+import {
+  refreshCanonicalTitles,
+  restoreCanonicalTitles,
+  seedCanonicalTitles,
+  useDisplayTitleReconciliation,
+  type CanonicalTitles,
+} from "./layout-editor-titles";
 
 type LayoutEditorProps = {
   layout: LayoutState;
@@ -25,12 +34,20 @@ type LayoutEditorProps = {
 };
 
 function PlaceholderPanel({ api }: IDockviewPanelProps) {
+  const [title, setTitle] = useState(() => api.title ?? api.id);
+  useEffect(() => {
+    const syncTitle = () => setTitle(api.title ?? api.id);
+    const subscription = api.onDidTitleChange(syncTitle);
+    syncTitle();
+    return () => subscription.dispose();
+  }, [api]);
+
   return (
     <div
       className="flex h-full items-center justify-center bg-background/60 p-4 text-center text-sm text-muted-foreground"
       data-testid={`layout-placeholder-${api.id}`}
     >
-      {api.title ?? api.id}
+      {title}
     </div>
   );
 }
@@ -39,7 +56,7 @@ function EditorTab(props: IDockviewPanelHeaderProps) {
   return <DockviewDefaultTab {...props} hideClose />;
 }
 
-export const placeholderComponents: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
+const placeholderComponents: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   chat: PlaceholderPanel,
   files: PlaceholderPanel,
   changes: PlaceholderPanel,
@@ -109,15 +126,88 @@ function EditorDock({
   );
 }
 
+/** Guard that suppresses layout-change capture while the preview is mutated programmatically. */
+function useApplyingGuard() {
+  const applyingRef = useRef(false);
+  const releaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdApplying = useCallback(() => {
+    applyingRef.current = true;
+    if (releaseTimerRef.current) clearTimeout(releaseTimerRef.current);
+    releaseTimerRef.current = setTimeout(() => {
+      applyingRef.current = false;
+    }, 0);
+  }, []);
+  const cancelRelease = useCallback(() => {
+    if (releaseTimerRef.current) clearTimeout(releaseTimerRef.current);
+  }, []);
+  return { applyingRef, holdApplying, cancelRelease };
+}
+
+type ResizeSync = {
+  api: DockviewApi | null;
+  rootRef: RefObject<HTMLDivElement | null>;
+  apiRef: RefObject<DockviewApi | null>;
+  holdApplying: () => void;
+  cancelRelease: () => void;
+  onResized: (api: DockviewApi) => void;
+};
+
+/** Keep Dockview's grid in step with the preview host's size without capturing it as an edit. */
+function useResizeSync({
+  api,
+  rootRef,
+  apiRef,
+  holdApplying,
+  cancelRelease,
+  onResized,
+}: ResizeSync) {
+  useEffect(() => {
+    const element = rootRef.current;
+    if (!api || !element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      const width = Math.round(entry.contentRect.width);
+      const height = Math.round(entry.contentRect.height);
+      if (width <= 0 || height <= 0) return;
+      holdApplying();
+      api.layout(width, height, true);
+      onResized(api);
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      cancelRelease();
+      apiRef.current = null;
+    };
+  }, [api, rootRef, apiRef, holdApplying, cancelRelease, onResized]);
+}
+
+function serializePreview(layout: LayoutState, width: number, height: number) {
+  const pinnedWidths = resolveCustomLayoutPinnedWidths(
+    layout.columns,
+    width,
+    layout.rootOrientation,
+  );
+  return toSerializedDockview(layout, width, height, pinnedWidths);
+}
+
 export function LayoutEditor({ layout, editable, onChange }: LayoutEditorProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<DockviewApi | null>(null);
-  const applyingRef = useRef(false);
-  const releaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const canonicalTitlesRef = useRef<CanonicalTitles>(new Map());
+  const { applyingRef, holdApplying, cancelRelease } = useApplyingGuard();
+  const { seedGeometry, measurePreview, captureGeometry } = useEditorGeometry();
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [actionAnchor, setActionAnchor] = useState<LayoutEditorActionAnchor | null>(null);
+  const bumpRevision = useCallback(() => setRevision((value) => value + 1), []);
+  const onResized = useCallback(
+    (current: DockviewApi) => {
+      measurePreview(current);
+      bumpRevision();
+    },
+    [measurePreview, bumpRevision],
+  );
 
   const updateActionAnchor = useCallback(() => {
     const root = rootRef.current;
@@ -136,25 +226,31 @@ export function LayoutEditor({ layout, editable, onChange }: LayoutEditorProps) 
   const capture = useCallback(() => {
     const current = apiRef.current;
     if (!current || applyingRef.current || !editable) return;
-    const captured = fromDockviewApi(current);
+    refreshCanonicalTitles(current, canonicalTitlesRef.current);
+    const captured = restoreCanonicalTitles(
+      captureGeometry(fromDockviewApi(current)),
+      canonicalTitlesRef.current,
+    );
     if (captured.columns.length > 0) onChange(captured);
     setRevision((revision) => revision + 1);
-  }, [editable, onChange]);
+  }, [editable, onChange, captureGeometry]);
 
-  const apply = useCallback((current: DockviewApi, nextLayout: LayoutState) => {
-    const bounds = rootRef.current?.getBoundingClientRect();
-    const width = Math.max(320, Math.round(bounds?.width ?? current.width ?? 900));
-    const height = Math.max(320, Math.round(bounds?.height ?? current.height ?? 480));
-    applyingRef.current = true;
-    current.fromJSON(toSerializedDockview(nextLayout, width, height, new Map()));
-    current.layout(width, height, true);
-    setSelectedPanelId(current.activePanel?.id ?? current.panels[0]?.id ?? null);
-    setRevision((revision) => revision + 1);
-    if (releaseTimerRef.current) clearTimeout(releaseTimerRef.current);
-    releaseTimerRef.current = setTimeout(() => {
-      applyingRef.current = false;
-    }, 0);
-  }, []);
+  const apply = useCallback(
+    (current: DockviewApi, nextLayout: LayoutState) => {
+      const bounds = rootRef.current?.getBoundingClientRect();
+      const width = Math.max(320, Math.round(bounds?.width ?? current.width ?? 900));
+      const height = Math.max(320, Math.round(bounds?.height ?? current.height ?? 480));
+      applyingRef.current = true;
+      seedCanonicalTitles(nextLayout, canonicalTitlesRef.current);
+      current.fromJSON(serializePreview(nextLayout, width, height));
+      current.layout(width, height, true);
+      seedGeometry(current, nextLayout);
+      setSelectedPanelId(current.activePanel?.id ?? current.panels[0]?.id ?? null);
+      setRevision((revision) => revision + 1);
+      holdApplying();
+    },
+    [holdApplying, seedGeometry],
+  );
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -178,28 +274,15 @@ export function LayoutEditor({ layout, editable, onChange }: LayoutEditorProps) 
     };
   }, [api, capture]);
 
-  useEffect(() => {
-    const element = rootRef.current;
-    if (!api || !element || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(([entry]) => {
-      const width = Math.round(entry.contentRect.width);
-      const height = Math.round(entry.contentRect.height);
-      if (width <= 0 || height <= 0) return;
-      applyingRef.current = true;
-      api.layout(width, height, true);
-      setRevision((revision) => revision + 1);
-      if (releaseTimerRef.current) clearTimeout(releaseTimerRef.current);
-      releaseTimerRef.current = setTimeout(() => {
-        applyingRef.current = false;
-      }, 0);
-    });
-    observer.observe(element);
-    return () => {
-      observer.disconnect();
-      if (releaseTimerRef.current) clearTimeout(releaseTimerRef.current);
-      apiRef.current = null;
-    };
-  }, [api]);
+  useResizeSync({ api, rootRef, apiRef, holdApplying, cancelRelease, onResized });
+
+  useDisplayTitleReconciliation({
+    api,
+    titles: canonicalTitlesRef.current,
+    applyingRef,
+    holdApplying,
+    onChanged: bumpRevision,
+  });
 
   return (
     <div className="relative min-w-0 overflow-hidden rounded-md border" data-testid="layout-editor">

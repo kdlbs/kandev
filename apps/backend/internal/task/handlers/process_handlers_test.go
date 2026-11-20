@@ -154,12 +154,6 @@ func (m *mockRepository) ListUnarchivedTasksWithActiveSessions(ctx context.Conte
 func (m *mockRepository) GetLastMessageTimeBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]time.Time, error) {
 	return nil, nil
 }
-func (m *mockRepository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
-	return nil, nil
-}
-func (m *mockRepository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
-	return false, nil
-}
 func (m *mockRepository) ListCoordinatorOriginTasks(ctx context.Context, workspaceID string) ([]*models.Task, error) {
 	return nil, nil
 }

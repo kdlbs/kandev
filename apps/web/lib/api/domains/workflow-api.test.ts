@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { afterEach, beforeEach, vi } from "vitest";
-import { createWorkflowStep, normalizeWorkflowTemplate } from "./workflow-api";
+import { createWorkflowStep, listWorkflowSteps, normalizeWorkflowTemplate } from "./workflow-api";
 
 const fetchSpy = vi.fn<typeof fetch>();
+const apiBaseUrl = "http://api.test";
+const requestOptions = { baseUrl: apiBaseUrl };
+const workflowId = "workflow-1";
 
 beforeEach(() => {
   fetchSpy.mockReset();
@@ -58,7 +61,7 @@ describe("createWorkflowStep", () => {
     );
 
     const payload: Parameters<typeof createWorkflowStep>[0] = {
-      workflow_id: "workflow-1",
+      workflow_id: workflowId,
       name: "Working",
       position: 1,
       agent_profile_id: "profile-a",
@@ -67,11 +70,11 @@ describe("createWorkflowStep", () => {
       complete_task_on_enter: false,
       cancel_triggers_turn_complete: true,
     };
-    await createWorkflowStep(payload, { baseUrl: "http://api.test" });
+    await createWorkflowStep(payload, requestOptions);
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [url, init] = fetchSpy.mock.calls[0]!;
-    expect(url).toBe("http://api.test/api/v1/workflow/steps");
+    expect(url).toBe(`${apiBaseUrl}/api/v1/workflow/steps`);
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toMatchObject(payload);
   });
@@ -81,7 +84,7 @@ describe("createWorkflowStep", () => {
       new Response(
         JSON.stringify({
           id: "step-1",
-          workflow_id: "workflow-1",
+          workflow_id: workflowId,
           name: "Working",
           position: 1,
           color: "",
@@ -98,16 +101,106 @@ describe("createWorkflowStep", () => {
 
     const step = await createWorkflowStep(
       {
-        workflow_id: "workflow-1",
+        workflow_id: workflowId,
         name: "Working",
         position: 1,
         color: "",
       },
-      { baseUrl: "http://api.test" },
+      requestOptions,
     );
 
     expect(step.profile_session_start_policy).toBe("reuse");
     expect(step.profile_session_end_policy).toBe("park");
     expect(step.complete_task_on_enter).toBe(false);
+  });
+});
+
+describe("listWorkflowSteps", () => {
+  it("normalizes a historical null step list to an empty array", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ steps: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(listWorkflowSteps(workflowId, requestOptions)).resolves.toMatchObject({
+      steps: [],
+    });
+  });
+
+  it("normalizes a missing step list to an empty array", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(listWorkflowSteps(workflowId, requestOptions)).resolves.toMatchObject({
+      steps: [],
+    });
+  });
+
+  it("preserves an empty step array", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ steps: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(listWorkflowSteps(workflowId, requestOptions)).resolves.toMatchObject({
+      steps: [],
+    });
+  });
+
+  it("retains populated steps and normalizes lifecycle defaults", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          steps: [
+            {
+              id: "step-1",
+              workflow_id: workflowId,
+              name: "Working",
+              position: 0,
+              color: "blue",
+              profile_session_start_policy: "unsupported",
+              profile_session_end_policy: "unsupported",
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    await expect(listWorkflowSteps(workflowId, requestOptions)).resolves.toMatchObject({
+      steps: [
+        {
+          id: "step-1",
+          disable_unclassified_fallback: false,
+          profile_session_start_policy: "reuse",
+          profile_session_end_policy: "park",
+        },
+      ],
+    });
+  });
+
+  it("rejects failed requests instead of returning an empty list", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "Failed to list steps" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(listWorkflowSteps(workflowId, requestOptions)).rejects.toMatchObject({
+      status: 500,
+      message: "Failed to list steps",
+    });
   });
 });

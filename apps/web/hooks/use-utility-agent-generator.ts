@@ -9,6 +9,36 @@ import type { FileInfo } from "@/lib/state/slices";
 
 const ENHANCE_PROMPT = "enhance-prompt" as const;
 
+// A session diff can run to megabytes, which no provider will accept. The
+// backend caps the diff at the same UTF-8 byte ceiling; this one keeps the
+// payload off the wire. The cut leaves room for the truncation marker, so the
+// marked diff stays under the backend cap and keeps this marker's real count.
+const MAX_GIT_DIFF_BYTES = 100_000;
+const TRUNCATION_MARKER_RESERVE_BYTES = 64;
+const MAX_CHANGED_FILES = 200;
+const UTF8_CONTINUATION_MASK = 0xc0;
+const UTF8_CONTINUATION_BYTE = 0x80;
+
+// i18n-exempt: template context sent verbatim to the model, never rendered
+function truncateGitDiff(diff: string): string {
+  const bytes = new TextEncoder().encode(diff);
+  if (bytes.length <= MAX_GIT_DIFF_BYTES) return diff;
+  let cut = MAX_GIT_DIFF_BYTES - TRUNCATION_MARKER_RESERVE_BYTES;
+  // Back off to the start of a UTF-8 sequence so the kept text decodes whole.
+  while (cut > 0 && (bytes[cut] & UTF8_CONTINUATION_MASK) === UTF8_CONTINUATION_BYTE) cut -= 1;
+  const kept = new TextDecoder().decode(bytes.subarray(0, cut));
+  return `${kept}\n[... truncated ${bytes.length - cut} bytes ...]`;
+}
+
+// i18n-exempt: template context sent verbatim to the model, never rendered
+function limitChangedFiles(files: readonly string[]): string | undefined {
+  if (files.length === 0) return undefined;
+  const listed = files.slice(0, MAX_CHANGED_FILES);
+  const remaining = files.length - listed.length;
+  if (remaining > 0) listed.push(`... and ${remaining} more files`);
+  return listed.join("\n");
+}
+
 type GeneratorType =
   | "commit-message"
   | "commit-description"
@@ -59,16 +89,20 @@ export function useUtilityAgentGenerator({
   const { toast } = useToast();
   const gitStatus = useSessionGitStatus(sessionId, { detailActive });
 
-  const collectGitContext = useCallback(() => {
-    const changedFiles = gitStatus?.files ? Object.keys(gitStatus.files) : [];
-    const diffs = gitStatus?.files
-      ? Object.values(gitStatus.files as Record<string, FileInfo>)
-          .filter((f) => f.diff)
-          .map((f) => f.diff)
-          .join("\n\n")
-      : undefined;
-    return { changedFiles, diffs };
-  }, [gitStatus]);
+  const collectGitContext = useCallback(
+    (includeDiff: boolean) => {
+      const changedFiles = gitStatus?.files ? Object.keys(gitStatus.files) : [];
+      const diffs =
+        includeDiff && gitStatus?.files
+          ? Object.values(gitStatus.files as Record<string, FileInfo>)
+              .filter((f) => f.diff)
+              .map((f) => f.diff)
+              .join("\n\n")
+          : "";
+      return { changedFiles, diffs: diffs ? truncateGitDiff(diffs) : undefined };
+    },
+    [gitStatus],
+  );
 
   const clearType = useCallback(
     (type: GeneratorType) =>
@@ -83,16 +117,17 @@ export function useUtilityAgentGenerator({
   const buildRequest = useCallback(
     (type: GeneratorType, options?: GenerateOptions): ExecutePromptRequest => {
       const sessionless = type === ENHANCE_PROMPT && !sessionId;
+      const includeDiff = type !== ENHANCE_PROMPT;
       const { changedFiles, diffs } = sessionless
         ? { changedFiles: [] as string[], diffs: undefined }
-        : collectGitContext();
+        : collectGitContext(includeDiff);
       return {
         utility_agent_id: UTILITY_AGENT_IDS[type],
         session_id: sessionId ?? "",
         task_title: taskTitle,
         task_description: taskDescription,
-        git_diff: diffs || undefined,
-        changed_files: changedFiles.join("\n") || undefined,
+        git_diff: includeDiff ? diffs || undefined : undefined,
+        changed_files: limitChangedFiles(changedFiles),
         commit_log: options?.commitLog,
         diff_summary: options?.diffSummary,
         user_prompt: options?.userPrompt,

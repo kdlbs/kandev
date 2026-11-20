@@ -49,23 +49,23 @@ func (r *DockerExecutor) reconcilePreviousJournalOwner(
 	ctl reconnectControlClient,
 	req *ExecutorCreateRequest,
 	containerID, containerIP, requestedID, previousID, authToken string,
-) (port int, reusingProcess bool, instanceID string, handled bool, err error) {
+) (port int, reusingProcess bool, instanceID string, scopedMCPRoutes bool, handled bool, err error) {
 	inventory, ok := ctl.(reconnectInventory)
 	if !ok {
-		return 0, false, "", false, errors.New("agentctl instance inventory is unavailable; refusing to create a replacement journal owner")
+		return 0, false, "", false, false, errors.New("agentctl instance inventory is unavailable; refusing to create a replacement journal owner")
 	}
 	instances, err := inventory.ListInstances(ctx)
 	if err != nil {
-		return 0, false, "", false, fmt.Errorf("list agentctl instances before journal reopen: %w", err)
+		return 0, false, "", false, false, fmt.Errorf("list agentctl instances before journal reopen: %w", err)
 	}
 	candidates, err := r.classifyReconnectOwners(
 		ctx, dockerClient, req, containerID, containerIP, requestedID, previousID, authToken, instances,
 	)
 	if err != nil {
-		return 0, false, "", false, err
+		return 0, false, "", false, false, err
 	}
 	if len(candidates) == 0 {
-		return 0, false, "", false, nil
+		return 0, false, "", false, false, nil
 	}
 
 	live := make([]reconnectOwnerCandidate, 0, 1)
@@ -78,17 +78,17 @@ func (r *DockerExecutor) reconcilePreviousJournalOwner(
 		}
 	}
 	if len(live) > 1 {
-		return 0, false, "", false, fmt.Errorf("multiple live agent instances (%d) claim the same session journal", len(live))
+		return 0, false, "", false, false, fmt.Errorf("multiple live agent instances (%d) claim the same session journal", len(live))
 	}
 	for _, candidate := range stopped {
 		if disposeErr := ctl.DeleteInstance(ctx, candidate.info.ID); disposeErr != nil {
-			return 0, false, "", false, fmt.Errorf("dispose stopped agent instance %q before journal reopen: %w", candidate.info.ID, disposeErr)
+			return 0, false, "", false, false, fmt.Errorf("dispose stopped agent instance %q before journal reopen: %w", candidate.info.ID, disposeErr)
 		}
 	}
 	if len(live) == 1 {
-		return live[0].info.Port, true, live[0].info.ID, true, nil
+		return live[0].info.Port, true, live[0].info.ID, live[0].info.ScopedMCPRoutes, true, nil
 	}
-	return 0, false, "", false, nil
+	return 0, false, "", false, false, nil
 }
 
 func (r *DockerExecutor) classifyReconnectOwners(

@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
+import { useAppStore } from "@/components/state-provider";
+import { useWorkspaceRootFiles } from "@/hooks/domains/session/use-workspace-root-files";
 import { PanelBody } from "./panel-primitives";
 import { DiscardDialog, AmendDialog, ResetDialog } from "./changes-panel-dialogs";
 import { ReviewProgressBar } from "./changes-panel-timeline";
@@ -11,6 +13,7 @@ import { ChangesPanelTimelineContent } from "./changes-panel-timeline-content";
 import type { ChangesPanelTimelineContentProps } from "./changes-panel-timeline-types";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
 import { ROOT_FOCUS_EVENT } from "./root-context-menu";
+import { ChangesPanelRootFiles } from "./changes-panel-root-files";
 
 function ComparisonTargetNotice({
   comparisonTargets,
@@ -88,9 +91,12 @@ function EmptyChangesPanel({ loading = false }: { loading?: boolean }) {
 
 function ChangesPanelTimeline(
   props: ChangesPanelTimelineContentProps &
-    Pick<ChangesPanelBodyProps, "gitStatus" | "commitsInitialLoading">,
+    Pick<ChangesPanelBodyProps, "gitStatus" | "commitsInitialLoading"> & {
+      hasWorkspaceRootFiles: boolean;
+    },
 ) {
   if (!props.hasAnything) {
+    if (props.hasWorkspaceRootFiles) return null;
     // Only the first commits result controls loading; diff retries keep their prior data.
     if (props.commitsInitialLoading) return <EmptyChangesPanel loading />;
     return props.gitStatus.membershipReady ? <EmptyChangesPanel /> : null;
@@ -100,6 +106,10 @@ function ChangesPanelTimeline(
 
 export function ChangesPanelBody(props: ChangesPanelBodyProps) {
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const workspaceRootFiles = useWorkspaceRootFiles(activeSessionId);
+  const hasWorkspaceRootFiles =
+    Boolean(workspaceRootFiles?.supported) && (workspaceRootFiles?.files.length ?? 0) > 0;
   useEffect(() => {
     const handleRootFocus = (event: Event) => {
       const detail = (
@@ -157,10 +167,18 @@ export function ChangesPanelBody(props: ChangesPanelBodyProps) {
             )}
             <ChangesPanelTimeline
               {...props}
+              hasWorkspaceRootFiles={hasWorkspaceRootFiles}
               isLoading={workspaceBlocked ? false : props.isLoading}
               scrollElement={scrollElement}
               beforeLayoutKey={beforeLayoutKey}
             />
+            {!workspaceBlocked && (
+              <ChangesPanelRootFiles
+                listing={workspaceRootFiles}
+                sessionId={activeSessionId}
+                onEditFile={props.onEditFile}
+              />
+            )}
           </>
         )}
       </div>

@@ -22,6 +22,8 @@ Needs-you Inbox, and coordinator surfaces that already use that UI.
 The [requirements](../requirements/question-image-previews.md) own observable
 behavior. The [plan](../../../plans/question-image-previews/plan.md) contains
 source evidence, assumptions, work orders, and validation.
+The [repository scope fix plan](../../../plans/question-image-repository-scope/plan.md)
+adds the correction for [issue #5329](https://github.com/kdlbs/kandev/issues/5329).
 
 ## Requirement mapping
 
@@ -76,6 +78,16 @@ Add `images?: QuestionImage[]` to each operator question:
 `repo` is optional. Without it, `path` addresses the task workspace root.
 With it, `path` is relative to the named attached repository/source scope.
 These are executor workspace identities, not backend-host paths or repository URLs.
+
+In a single-repository layout, the session workspace already is the repository
+directory. Omit `repo` and make `path` relative to that directory. A parent
+`.kandev-workspace.json` does not change the image root. In a layout with child
+repositories, use the actual child path in `repo`.
+
+`buildQuestionImageSchema` supplies both question and choice descriptions.
+Its `path` and `repo` guidance must explain these layouts. Describe the guarded
+own-folder alias below as compatibility behavior. Keep omission as the normal
+single-repository example in `docs/public/agent-communication.md`.
 
 `QuestionImage` has exactly `id`, `path`, optional `repo`, and `alt`. Require a
 nonempty description of at most 300 Unicode code points. Require an image ID
@@ -245,6 +257,39 @@ rescan cannot authorize a replacement symlink. Image reads hold this lock only
 while selecting and opening the authorized root handle. Reads admitted before
 a workspace change finish through that confined handle; later reads use the
 updated policy. File I/O and decoding do not block workspace updates.
+
+### Repository scope selection
+
+`openQuestionImageRoot` selects a scope under `repoTrackersMu` before opening
+the existing confined directory handle. Selection starts with the literal
+child path beneath `questionImageWorkDir`. The own-folder alias applies only
+when all these conditions hold:
+
+- `workDirHasOwnGitEntry(questionImageWorkDir)` identifies a `.git` entry at
+  the pinned image root. This existing convention covers ordinary repositories
+  and worktrees without a Git subprocess or an index-file requirement.
+- `repo` exactly equals `filepath.Base(filepath.Clean(m.cfg.WorkDir))`.
+  The configured name is the name visible to the agent, even through a symlink.
+- `os.Lstat` of the selected child returns `os.ErrNotExist`. Inspect the entry
+  itself, so a dangling symlink does not count as an absent child.
+
+For that case, select the already authorized `questionImageWorkDir`. Then use
+the existing allowlist and root-handle opening path. All other cases retain
+literal child selection and its errors. Never retry at the workspace root
+after a file error, denied scope, permission error, or image decoder error.
+
+Keep this correction in the existing root-selection function. Reuse the own-`.git`
+helper rather than tracker inference or a new resolver. Existing workspace updates
+already maintain the image root. Existing root handles enforce confinement.
+
+Keep saved references unchanged. Question and choice images share this reader.
+A bare workspace containing repositories does not gain an own-folder alias.
+
+File availability remains a read-time outcome under AC-TASKS-QUESTION-IMAGES-002.4.
+Question creation keeps structural validation. No new preflight, route, persistence
+field, or provider branch is necessary.
+
+### Bounded reads
 
 The new reader must enforce all of these conditions:
 

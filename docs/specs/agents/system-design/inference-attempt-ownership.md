@@ -25,6 +25,9 @@ metadata value in its existing meta bucket, using the journal's lock, disk
 reservation and close lifecycle. There is no additional database or ledger.
 Write spawn intent before Start and PID immediately afterward. Storage failure
 marks continuity unknown while preserving native execution and cleanup.
+Commit preparation retention before acknowledging its token. A durable prompt
+dispatch marker must commit before the protocol send; a failed write returns an
+error through the existing cleanup path.
 
 Windows already starts suspended, attaches a kill-on-close Job and resumes.
 Settlement uses the existing Job's TerminateAndWait, not tasklist or HTTP status.
@@ -92,6 +95,11 @@ session-capacity store before sending the prompt. The reservation is admitted
 under the same controller mutex that reads the task and inference population, so
 existing ownership keeps its slot across settings changes and a missing or
 unknown population refuses new admission.
+
+Transitions into or out of finite `all` capacity invalidate the current live
+inventory under the admission lock. A refresh carries the policy revision from
+before its reads and publishes only while that revision is still current.
+Optional-mode prompts refresh the live helper gates before native dispatch.
 
 A binding enters the counted population with its stable key. The deferred
 settlement order is terminal observation, provider settlement, binding removal,

@@ -1,6 +1,7 @@
 package streams
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/modelcatalog"
@@ -267,6 +268,10 @@ type AgentEvent struct {
 	// CanonicalProjection marks an event whose canonical task message and inbox
 	// cursor were committed before the event was published to consumers.
 	CanonicalProjection bool `json:"canonical_projection,omitempty"`
+
+	// CanonicalConversationReceipt is attached by the host after SQL commit.
+	// It is never accepted from agent transport or persisted in the journal.
+	CanonicalConversationReceipt json.RawMessage `json:"-"`
 
 	// CanonicalMessageAppend tells lifecycle/UI consumers whether the stable
 	// canonical message already existed when this event was projected.

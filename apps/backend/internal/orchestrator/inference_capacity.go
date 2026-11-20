@@ -18,6 +18,19 @@ func (s *Service) SetInferenceCapacityOwner(store *sessioncapacity.Store, refres
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.inferenceStore, c.inferenceRefresh, c.inferenceKnown = store, refresh, false
+	c.inferenceRevision++
+}
+
+// InferenceCapacityRevision identifies the policy under which a live inventory
+// refresh starts. Its result is accepted only while that policy remains current.
+func (s *Service) InferenceCapacityRevision() uint64 {
+	if s == nil || s.sessionCeiling == nil {
+		return 0
+	}
+	c := s.sessionCeiling
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.inferenceRevision
 }
 
 func (s *Service) InferenceCapacityPolicy() (bool, bool) {
@@ -137,14 +150,12 @@ func (c *sessionCeilingController) inspectFreshInferenceCapacityLocked(ctx conte
 	if priorityErr != nil {
 		return ceilingReasonUnknownPopulation, priorityErr
 	}
-	decision, p, maximum := c.inspectAllAdmissionLocked(ctx, req)
+	decision, p, _ := c.inspectAllAdmissionLocked(ctx, req)
 	if decision.reasonCode != "" {
 		return decision.reasonCode, nil
 	}
-	if reason := c.allCapacityLimitReason(p, maximum); reason != "" {
-		return reason, nil
-	}
-	return "", nil
+	decision = c.gradeCapacityDecisionLocked(req, p, decision.populationKnown)
+	return decision.reasonCode, nil
 }
 
 func (c *sessionCeilingController) persistInferenceBindingLocked(ctx context.Context, binding sessioncapacity.InferenceBinding) (bool, string, error) {
@@ -181,19 +192,29 @@ func (s *Service) InferenceCapacityBindings(ctx context.Context) (map[string]ses
 }
 
 func (s *Service) SyncInferenceCapacity(ctx context.Context, known bool, update func(map[string]sessioncapacity.InferenceBinding) error) error {
-	return s.syncInferenceCapacity(ctx, &known, update)
+	return s.syncInferenceCapacity(ctx, &known, update, nil)
+}
+
+// SyncInferenceCapacityAtRevision publishes a refresh only for its captured
+// policy, preserving current bindings when settings changed during its reads.
+func (s *Service) SyncInferenceCapacityAtRevision(ctx context.Context, revision uint64, known bool, update func(map[string]sessioncapacity.InferenceBinding) error) error {
+	return s.syncInferenceCapacity(ctx, &known, update, &revision)
 }
 
 func (s *Service) UpdateInferenceCapacity(ctx context.Context, update func(map[string]sessioncapacity.InferenceBinding) error) error {
-	return s.syncInferenceCapacity(ctx, nil, update)
+	return s.syncInferenceCapacity(ctx, nil, update, nil)
 }
 
-func (s *Service) syncInferenceCapacity(ctx context.Context, known *bool, update func(map[string]sessioncapacity.InferenceBinding) error) error {
+func (s *Service) syncInferenceCapacity(ctx context.Context, known *bool, update func(map[string]sessioncapacity.InferenceBinding) error, revision *uint64) error {
 	if s == nil || s.sessionCeiling == nil || update == nil {
 		return fmt.Errorf("inference capacity update unavailable")
 	}
 	c := s.sessionCeiling
 	c.mu.Lock()
+	if revision != nil && c.inferenceRevision != *revision {
+		c.mu.Unlock()
+		return fmt.Errorf("inference capacity policy changed during inventory refresh")
+	}
 	changed := known != nil && c.inferenceKnown != *known
 	err := c.inferenceStore.UpdateInferenceBindings(ctx, func(active map[string]sessioncapacity.InferenceBinding) error {
 		before := maps.Clone(active)
@@ -264,23 +285,9 @@ func (s *Service) refreshInferenceCapacity(ctx context.Context) {
 	}
 	c.mu.Lock()
 	refresh := c.inferenceRefresh
-	all := c.policy == sessioncapacity.PolicyAll
 	c.mu.Unlock()
 	if refresh == nil {
 		return
-	}
-	if !all {
-		bindings, err := s.InferenceCapacityBindings(ctx)
-		if err == nil && len(bindings) == 0 {
-			// Nothing is held outside the all-mode gate, so the inference
-			// population is the empty set. Record that as known instead of
-			// returning early: the owner starts unknown on boot and a past
-			// unreadable snapshot also leaves it unknown, and skipping here
-			// would keep every queued message and automatic start refused
-			// with ceiling_unknown_population indefinitely.
-			_ = s.SyncInferenceCapacity(ctx, true, func(map[string]sessioncapacity.InferenceBinding) error { return nil })
-			return
-		}
 	}
 	refresh(ctx)
 	c.notifyInferenceWaiters()

@@ -198,6 +198,7 @@ type Manager struct {
 	stderrReader       io.ReadCloser
 	stderrWriter       io.WriteCloser
 	status             atomic.Value // Status
+	stopInProgress     atomic.Int32
 	exitCode           atomic.Int32
 	exitErr            atomic.Value // error
 
@@ -772,6 +773,76 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 	return descriptor, nil
 }
 
+// SuccessorDeliveryStreams lists streams in this session lifetime that belong
+// to generations newer than the process owner's configured generation.
+func (m *Manager) SuccessorDeliveryStreams(ctx context.Context) ([]journal.Stream, error) {
+	if m == nil || m.cfg == nil {
+		return nil, journal.ErrOwnerMismatch
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return nil, err
+	}
+	return deliveryJournal.ListSuccessorStreams(
+		ctx, m.cfg.SessionID, m.DeliveryIncarnationID(), m.DeliveryHarnessGeneration(),
+	)
+}
+
+// AbandonSuccessorDeliveryStream removes an uncommitted successor stream while
+// the configured generation owner is idle. This process owns the journal and
+// emits only to its configured stream, so a newer-generation stream has no
+// live writer through this owner.
+func (m *Manager) AbandonSuccessorDeliveryStream(ctx context.Context, expected journal.Stream) error {
+	if m == nil || m.cfg == nil {
+		return journal.ErrOwnerMismatch
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+	if expected.SessionID != sessionID || expected.IncarnationID != incarnationID ||
+		expected.HarnessGeneration <= generation || m.activeDeliverySubmissionID() != "" {
+		return journal.ErrOwnerMismatch
+	}
+	return deliveryJournal.AbandonStream(ctx, expected)
+}
+
+// AbandonFailedBootstrapDeliveryStream removes this owner's stream after its
+// agent process has stopped and the lifecycle has confirmed that SQL never
+// committed the successor generation or its cursor.
+func (m *Manager) AbandonFailedBootstrapDeliveryStream(ctx context.Context, streamID string, generation uint64) error {
+	if m == nil || m.cfg == nil || m.Status() != StatusStopped {
+		return journal.ErrSubmissionState
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	sessionID, incarnationID, configuredGeneration := m.DeliverySubmissionIdentity()
+	if streamID != m.DeliveryStreamID() || generation != configuredGeneration ||
+		m.activeDeliverySubmissionID() != "" {
+		return journal.ErrOwnerMismatch
+	}
+	stream, err := deliveryJournal.GetStream(ctx, streamID)
+	if err != nil {
+		return err
+	}
+	if stream.SessionID != sessionID || stream.IncarnationID != incarnationID ||
+		stream.HarnessGeneration != generation {
+		return journal.ErrOwnerMismatch
+	}
+	return deliveryJournal.AbandonStream(ctx, stream)
+}
+
 // DeliveryStreamID returns the stable transport stream identity. Agentctl
 // instance IDs identify a process incarnation and may change during executor
 // replacement; the Kandev session owns the retained event stream.
@@ -1000,6 +1071,78 @@ func (m *Manager) RetireDeliverySubmission(ctx context.Context, id string, recov
 	}
 	_, err = deliveryJournal.RetireSubmission(ctx, id, recoveryGeneration)
 	return err
+}
+
+// RetireMissingUnknownDeliverySubmission writes a non-replayable journal record
+// for a SQL-confirmed interrupted prompt while the process dispatcher is idle.
+func (m *Manager) RetireMissingUnknownDeliverySubmission(ctx context.Context, submission journal.Submission) error {
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	if !validMissingUnknownSubmissionShape(submission) || !m.missingUnknownSubmissionOwned(submission) {
+		return journal.ErrOwnerMismatch
+	}
+	existing, err := deliveryJournal.GetSubmission(ctx, submission.ID)
+	if errors.Is(err, journal.ErrSubmissionNotFound) {
+		return m.createMissingUnknownSubmission(ctx, deliveryJournal, submission)
+	}
+	if err != nil {
+		return err
+	}
+	return m.retireExistingMissingUnknown(ctx, deliveryJournal, existing, submission)
+}
+
+func validMissingUnknownSubmissionShape(submission journal.Submission) bool {
+	return submission.ID != "" && submission.Hash != "" && len(submission.Payload) == 0 &&
+		submission.State == journal.SubmissionInterruptedUnknown && !submission.Retired &&
+		submission.HarnessGeneration > 0 && submission.StreamID != ""
+}
+
+func (m *Manager) missingUnknownSubmissionOwned(submission journal.Submission) bool {
+	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+	return submission.SessionID == sessionID && submission.IncarnationID == incarnationID &&
+		submission.HarnessGeneration <= generation && submission.StreamID == m.DeliveryStreamID()
+}
+
+func (m *Manager) createMissingUnknownSubmission(ctx context.Context, deliveryJournal *journal.Journal, submission journal.Submission) error {
+	submission.Retired = true
+	created, err := deliveryJournal.PutSubmission(ctx, submission)
+	if err != nil {
+		return err
+	}
+	if !created.Retired || created.State != journal.SubmissionInterruptedUnknown || !sameMissingUnknownSubmissionIdentity(created, submission) {
+		return journal.ErrSubmissionState
+	}
+	return nil
+}
+
+func (m *Manager) retireExistingMissingUnknown(ctx context.Context, deliveryJournal *journal.Journal, existing, requested journal.Submission) error {
+	if !sameMissingUnknownSubmissionIdentity(existing, requested) {
+		return journal.ErrOwnerMismatch
+	}
+	if existing.State != journal.SubmissionInterruptedUnknown {
+		if existing.State == journal.SubmissionPrepared || existing.State == journal.SubmissionDispatching || existing.State == journal.SubmissionAccepted {
+			return journal.ErrSubmissionState
+		}
+		return journal.ErrOwnerMismatch
+	}
+	if existing.Retired {
+		return nil
+	}
+	_, err := deliveryJournal.RetireSubmission(ctx, requested.ID, m.DeliveryHarnessGeneration())
+	return err
+}
+
+func sameMissingUnknownSubmissionIdentity(existing, requested journal.Submission) bool {
+	return existing.ID == requested.ID && existing.SessionID == requested.SessionID &&
+		existing.IncarnationID == requested.IncarnationID &&
+		existing.HarnessGeneration == requested.HarnessGeneration &&
+		existing.StreamID == requested.StreamID && existing.Hash == requested.Hash
 }
 
 // CancelDeliverySubmission settles one prompt after an explicit user cancel.
@@ -3119,6 +3262,9 @@ func (m *Manager) createAdapter() error {
 		return fmt.Errorf("failed to create adapter: %w", err)
 	}
 	m.adapter = adpt
+	if setter, ok := m.adapter.(adapter.MCPAttachmentEventPersisterSetter); ok {
+		setter.SetMCPAttachmentEventPersister(m.persistDeliveryEvent)
+	}
 
 	// Set stderr provider if the adapter implements the optional StderrProviderSetter interface
 	if setter, ok := m.adapter.(adapter.StderrProviderSetter); ok {
@@ -3180,7 +3326,11 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 				continue
 			}
 		}
-		persisted, err := m.persistDeliveryEvent(update)
+		persisted := update
+		var err error
+		if !isCommittedMCPAttachmentEvent(update) {
+			persisted, err = m.persistDeliveryEvent(update)
+		}
 		if err != nil {
 			m.logger.Error("failed to commit durable delivery event", zap.Error(err))
 			// Capture the failure before cancellation, then keep the sole
@@ -3263,6 +3413,9 @@ func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.Agent
 // ingress. A cancelled caller receives an error and no acknowledgement even if
 // the writer later commits the queued observation.
 func (m *Manager) persistDeliveryEventContext(ctx context.Context, update adapter.AgentEvent) (adapter.AgentEvent, error) {
+	if connectionScopedStartupControlEvent(update) {
+		return update, nil
+	}
 	deliveryJournal, eventLimit, configured, writer := m.deliveryWriteState()
 	if eventLimit <= 0 {
 		eventLimit = deliverylimits.MaxEventBytes
@@ -3381,6 +3534,23 @@ func (m *Manager) persistDeliveryBatchRaw(ctx context.Context, updates []adapter
 	return updates, nil
 }
 
+func connectionScopedStartupControlEvent(event adapter.AgentEvent) bool {
+	if event.SessionID != "" || event.DeliveryStreamID != "" || event.DeliveryIncarnationID != "" ||
+		event.DeliveryHarnessGeneration != 0 || event.DeliverySequence != 0 {
+		return false
+	}
+	switch event.Type {
+	case streams.EventTypeAgentCapabilities, streams.EventTypeAuthRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+func isCommittedMCPAttachmentEvent(event adapter.AgentEvent) bool {
+	return event.Type == streams.EventTypeMCPAttachment && event.DeliveryStreamID != "" && event.DeliverySequence > 0
+}
+
 // GetUpdates returns the channel for agent event notifications
 func (m *Manager) GetUpdates() <-chan adapter.AgentEvent {
 	return m.updatesCh
@@ -3427,12 +3597,37 @@ func (m *Manager) SendErrorEventWithProviderError(
 // existing agent update stream. Diagnostics are best effort: an overloaded
 // consumer must never delay the agent process or create a second stream.
 func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
-	event := adapter.AgentEvent{
+	m.publishMCPAttachmentEvent(adapter.AgentEvent{
 		Type:          streams.EventTypeMCPAttachment,
 		MCPAttachment: &evidence,
+	},
+		"failed to commit durable MCP attachment event",
+		"adapter updates channel full, dropping MCP attachment evidence",
+		"updates channel full, dropping MCP attachment evidence",
+		zap.String("attempt_id", evidence.AttemptID),
+		zap.String("server_name", evidence.ServerName),
+		zap.String("kind", string(evidence.Kind)),
+	)
+}
+
+func (m *Manager) publishMCPAttachmentEvent(
+	event adapter.AgentEvent,
+	commitFailureMessage string,
+	adapterDropMessage string,
+	fallbackDropMessage string,
+	fields ...zap.Field,
+) {
+	if publisher := m.mcpAttachmentEventPublisher(); publisher != nil {
+		queued, err := publisher.TryPublishMCPAttachmentEvent(event, m.persistDeliveryEvent)
+		if err != nil {
+			m.logMCPAttachmentCommitError(commitFailureMessage, err)
+		} else if !queued {
+			m.logger.Warn(adapterDropMessage, fields...)
+		}
+		return
 	}
 	if persisted, err := m.persistDeliveryEvent(event); err != nil {
-		m.logMCPAttachmentCommitError("failed to commit durable MCP attachment event", err)
+		m.logMCPAttachmentCommitError(commitFailureMessage, err)
 		return
 	} else {
 		event = persisted
@@ -3440,32 +3635,33 @@ func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
 	if m.sendUpdateNonBlockingRecorded(event) {
 		return
 	} else {
-		m.logger.Warn("updates channel full, dropping MCP attachment evidence",
-			zap.String("attempt_id", evidence.AttemptID),
-			zap.String("server_name", evidence.ServerName),
-			zap.String("kind", string(evidence.Kind)))
+		m.logger.Warn(fallbackDropMessage, fields...)
 	}
 }
 
 // PublishMCPAttachmentAttempt starts an attachment-evidence timeline through
 // the existing non-blocking agent update stream.
 func (m *Manager) PublishMCPAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
-	event := adapter.AgentEvent{
+	m.publishMCPAttachmentEvent(adapter.AgentEvent{
 		Type:                 streams.EventTypeMCPAttachment,
 		MCPAttachmentAttempt: &attempt,
+	},
+		"failed to commit durable MCP attachment attempt",
+		"adapter updates channel full, dropping MCP attachment attempt",
+		"updates channel full, dropping MCP attachment attempt",
+		zap.String("attempt_id", attempt.AttemptID),
+	)
+}
+
+func (m *Manager) mcpAttachmentEventPublisher() adapter.MCPAttachmentEventPublisher {
+	if m.stopInProgress.Load() > 0 {
+		return nil
 	}
-	if persisted, err := m.persistDeliveryEvent(event); err != nil {
-		m.logMCPAttachmentCommitError("failed to commit durable MCP attachment attempt", err)
-		return
-	} else {
-		event = persisted
+	if status, ok := m.status.Load().(Status); ok && (status == StatusStopping || status == StatusStopped) {
+		return nil
 	}
-	if m.sendUpdateNonBlockingRecorded(event) {
-		return
-	} else {
-		m.logger.Warn("updates channel full, dropping MCP attachment attempt",
-			zap.String("attempt_id", attempt.AttemptID))
-	}
+	publisher, _ := m.GetAdapter().(adapter.MCPAttachmentEventPublisher)
+	return publisher
 }
 
 // GetAdapter returns the protocol adapter
@@ -3648,6 +3844,8 @@ func (m *Manager) closeDeliveryJournal() error {
 
 func (m *Manager) stop(ctx context.Context) error {
 	m.retireManagedRuntimeRepair()
+	m.stopInProgress.Add(1)
+	defer m.stopInProgress.Add(-1)
 	if err := m.passthrough.StopAll(ctx); err != nil {
 		return err
 	}

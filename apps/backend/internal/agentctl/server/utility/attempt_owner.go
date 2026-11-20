@@ -13,7 +13,10 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 )
 
-const attemptDiagnosticNone = "none"
+const (
+	attemptDiagnosticNone     = "none"
+	attemptPersistWriteFailed = "write_failed"
+)
 
 var errAttemptExists = errors.New("inference attempt already exists")
 var errAttemptUnavailable = errors.New("inference attempt token is unavailable")
@@ -88,7 +91,7 @@ func (o *attemptOwner) loadRetainedOwner() {
 	}
 }
 
-func (o *attemptOwner) beginLocked(id, callID, preparationID string) (AttemptStatus, error) {
+func (o *attemptOwner) beginLocked(id, callID, preparationID string, retained bool) (AttemptStatus, error) {
 	if o.activateLocked() != nil {
 		return AttemptStatus{AttemptID: id, State: AttemptUnknown, PromptDispatch: PromptPossiblySent}, errAttemptUnavailable
 	}
@@ -96,11 +99,18 @@ func (o *attemptOwner) beginLocked(id, callID, preparationID string) (AttemptSta
 		return existing.Status, errAttemptExists
 	}
 	o.pruneLocked()
+	if len(o.state.Attempts) >= journal.MaxStreamSubmissions {
+		return AttemptStatus{AttemptID: id, State: AttemptUnknown, PromptDispatch: PromptPossiblySent}, errAttemptUnavailable
+	}
 	status := AttemptStatus{AttemptID: id, CallID: callID, PreparationID: preparationID, OwnerID: o.id,
 		InstanceID: o.cfg.InstanceID, TaskID: o.cfg.TaskID, SessionID: o.cfg.SessionID,
-		State: AttemptPrepared, PromptDispatch: PromptNotSent, Known: true, UpdatedAt: time.Now().UTC()}
+		State: AttemptPrepared, PromptDispatch: PromptNotSent, Known: true, Retained: retained, UpdatedAt: time.Now().UTC()}
 	o.state.Attempts[id] = &ownedAttempt{Status: status}
 	o.persistLocked(false, id)
+	if o.storageUnavailable || o.diagnostics.LastPersistResult == attemptPersistWriteFailed {
+		delete(o.state.Attempts, id)
+		return AttemptStatus{AttemptID: id, State: AttemptUnknown, PromptDispatch: PromptPossiblySent}, errAttemptUnavailable
+	}
 	return status, nil
 }
 
@@ -167,7 +177,7 @@ func (o *attemptOwner) persistLocked(terminal bool, currentID string) {
 			o.storageUnavailable = true
 		}
 		o.state.ContinuityKnown = false
-		o.diagnostics.LastPersistResult = "write_failed"
+		o.diagnostics.LastPersistResult = attemptPersistWriteFailed
 		if o.diagnostics.FirstPersistFailure == attemptDiagnosticNone {
 			o.diagnostics.FirstPersistFailure = attemptJournalErrorClass(err)
 		}

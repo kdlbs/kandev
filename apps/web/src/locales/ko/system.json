@@ -216,7 +216,7 @@
   "sessionCapacityGradeNew": "새 등급",
   "sessionCapacityGradeRemove": "{{grade}} 삭제",
   "sessionCapacityGradeAdd": "실행 등급 추가",
-  "sessionCapacityGradeValidation": "중복 없는 등급명(64자 이하)과 0~2147483647의 정수 상한을 입력하세요. 모든 실행 범위에는 등급이 하나 이상 필요합니다. 자동 시작 범위로 바꾸려면 등급 상한을 직접 삭제하세요.",
+  "sessionCapacityGradeValidation": "중복 없는 등급명(64자 이하)과 0~2147483647의 정수 상한을 입력하세요. 실행 등급은 최대 64개까지 설정할 수 있습니다. 모든 실행 범위에는 등급이 하나 이상 필요합니다. 자동 시작 범위로 바꾸려면 등급 상한을 직접 삭제하세요.",
   "sessionCapacityAdminOnly": "관리자만 이 설정을 변경할 수 있습니다.",
   "sessionCapacityBehaviorHelp": "모든 워크스페이스의 자동 시작과 새 메시지 턴에 적용됩니다. 시작, 재개, 지금 보내기는 이 한도를 초과할 수 있습니다. 워크플로 WIP는 별도의 한도입니다.",
   "sessionCapacityCurrent": "현재:",

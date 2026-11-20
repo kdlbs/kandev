@@ -51,7 +51,10 @@ type ContainerConfig struct {
 	// "<key>=<value>" string accepted by the Docker daemon, such as
 	// "seccomp=<profile>" or "apparmor=<profile>". A nil or empty slice
 	// leaves SecurityOpt unset (nil), preserving Docker defaults.
-	SecurityOpt []string
+	SecurityOpt    []string
+	TmpfsSizeBytes int64
+	LogMaxSize     string
+	LogMaxFiles    string
 	// NetworkEndpoint configures the endpoint the container is created on.
 	// Nil means the container is created with no EndpointsConfig at all,
 	// which is the only way to leave Docker's own endpoint defaults alone.
@@ -366,7 +369,7 @@ func buildHostConfig(cfg ContainerConfig, mounts []mount.Mount, portBindings net
 	if len(cfg.SecurityOpt) > 0 {
 		hc.SecurityOpt = cfg.SecurityOpt
 	}
-	applyContainerStorageBounds(hc, mounts)
+	applyContainerStorageOverrides(hc, mounts, cfg.TmpfsSizeBytes, cfg.LogMaxSize, cfg.LogMaxFiles)
 	return hc
 }
 

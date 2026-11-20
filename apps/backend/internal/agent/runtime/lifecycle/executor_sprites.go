@@ -238,11 +238,12 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 	}
 
 	// Step 5: Create or reuse agent instance
-	instancePort, reusingExisting, err := r.stepEnsureAgentInstance(launchCtx, sprite, req, reconnect, report)
+	instanceResponse, reusingExisting, err := r.stepEnsureAgentInstance(launchCtx, sprite, req, reconnect, report)
 	if err != nil {
 		r.cleanupOnFailure(baseCtx, sprite, req.InstanceID, destroyOnFailure)
 		return nil, err
 	}
+	instancePort := instanceResponse.Port
 
 	// Step 6: Network policy
 	if progressPlan.has(spriteStepApplyNetworkPolicy) {
@@ -262,7 +263,7 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 		zap.Int(MetadataKeyLocalPort, localPort),
 		zap.Int("instance_port", instancePort))
 
-	return r.buildInstanceResult(req, spriteName, sprite, localPort, instancePort, reusingExisting), nil
+	return r.buildInstanceResult(req, spriteName, sprite, localPort, instanceResponse, reusingExisting), nil
 }
 
 func (r *SpritesExecutor) preflightGitHubCredentialBroker(
@@ -498,51 +499,51 @@ func (r *SpritesExecutor) stepEnsureAgentInstance(
 	req *ExecutorCreateRequest,
 	reconnect bool,
 	report func(spritesStepKey, PrepareStep),
-) (int, bool, error) {
+) (*agentctl.CreateInstanceResponse, bool, error) {
 	step := beginStep("Starting agent session")
 	report(spriteStepAgentInstance, step)
 
-	var instancePort int
+	var instanceResponse *agentctl.CreateInstanceResponse
 	var reusingExisting bool
 	if reconnect {
 		instanceID := spritesAgentInstanceID(req)
-		port, portErr := r.getExistingInstancePort(ctx, sprite, instanceID)
-		if portErr == nil && port > 0 {
+		info, infoErr := r.getExistingInstanceInfo(ctx, sprite, instanceID)
+		if infoErr == nil && info.Port > 0 {
 			switch {
 			case hasManagedGitHubBrokerEnv(req.Env):
-				replacementPort, err := replaceSpriteReconnectInstance(ctx,
+				replacement, replaceErr := replaceSpriteReconnectInstance(ctx,
 					liveSpriteReconnectInstanceControl{executor: r, sprite: sprite}, req, instanceID)
-				if err != nil {
-					completeStepError(&step, err.Error())
+				if replaceErr != nil {
+					completeStepError(&step, replaceErr.Error())
 					report(spriteStepAgentInstance, step)
-					return 0, false, err
+					return nil, false, replaceErr
 				}
-				instancePort = replacementPort
+				instanceResponse = replacement
 				r.logger.Info("deleted existing agent instance to refresh managed GitHub credentials",
 					zap.String("instance_id", instanceID))
-			case r.isAgentSubprocessRunning(ctx, sprite, port):
-				instancePort = port
+			case r.isAgentSubprocessRunning(ctx, sprite, info.Port):
+				instanceResponse = &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port, ScopedMCPRoutes: info.ScopedMCPRoutes}
 				reusingExisting = true
 			default:
-				instancePort = port
+				instanceResponse = &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port, ScopedMCPRoutes: info.ScopedMCPRoutes}
 				r.logger.Info("existing instance found but agent subprocess not running",
 					zap.String("instance_id", instanceID),
-					zap.Int("port", port))
+					zap.Int("port", info.Port))
 			}
 		}
 	}
-	if instancePort == 0 {
-		port, err := r.createAgentInstance(ctx, sprite, req)
+	if instanceResponse == nil {
+		response, err := r.createAgentInstance(ctx, sprite, req)
 		if err != nil {
 			completeStepError(&step, err.Error())
 			report(spriteStepAgentInstance, step)
-			return 0, false, err
+			return nil, false, err
 		}
-		instancePort = port
+		instanceResponse = response
 	}
 	completeStepSuccess(&step)
 	report(spriteStepAgentInstance, step)
-	return instancePort, reusingExisting, nil
+	return instanceResponse, reusingExisting, nil
 }
 
 // stepApplyNetworkPolicy handles step 6: apply network policy from the executor profile.
@@ -571,17 +572,23 @@ func (r *SpritesExecutor) buildInstanceResult(
 	req *ExecutorCreateRequest,
 	spriteName string,
 	sprite *sprites.Sprite,
-	localPort, instancePort int,
+	localPort int,
+	response *agentctl.CreateInstanceResponse,
 	reusingExisting bool,
 ) *ExecutorInstance {
+	helperID := req.InstanceID
+	if response != nil && response.ID != "" {
+		helperID = response.ID
+	}
 	return &ExecutorInstance{
 		InstanceID:  req.InstanceID,
 		TaskID:      req.TaskID,
 		SessionID:   req.SessionID,
 		RuntimeName: r.Name(),
 		Client: agentctl.NewClient("127.0.0.1", localPort, r.logger,
-			agentctl.WithExecutionID(req.InstanceID),
-			agentctl.WithSessionID(req.SessionID)),
+			agentctl.WithExecutionID(helperID),
+			agentctl.WithSessionID(req.SessionID),
+			agentctl.WithBuiltinMCPScopedRoutes(response != nil && response.ScopedMCPRoutes)),
 		WorkspacePath: spritesWorkspacePath,
 		Metadata: map[string]interface{}{
 			MetadataKeySpriteName:           spriteName,

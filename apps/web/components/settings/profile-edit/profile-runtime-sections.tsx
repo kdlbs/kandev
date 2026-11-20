@@ -14,6 +14,7 @@ import {
   UserNamespacesCard,
 } from "@/components/settings/profile-edit/docker-sections";
 import { DockerNetworkCard } from "@/components/settings/profile-edit/docker-network-card";
+import { DockerStorageLimitsCard } from "@/components/settings/profile-edit/docker-storage-limits-card";
 import type { AdditionalNetworkRow } from "@/components/settings/profile-edit/use-docker-networks-form-state";
 import { NetworkPoliciesCard } from "@/components/settings/profile-edit/sprites-sections";
 import { SpritesInstancesCard } from "@/components/settings/sprites-settings";
@@ -30,6 +31,7 @@ type DockerSectionsProps = {
   allowUserNamespaces: boolean;
   onAllowUserNamespacesChange: (v: boolean) => void;
   networks: DockerNetworksFormSlice;
+  storage: DockerStorageFormSlice;
 };
 
 /** The network form slice the card needs, as the profile form exposes it. */
@@ -47,6 +49,18 @@ type DockerNetworksFormSlice = {
   baselineAdditionalNetworks: AdditionalNetworkRow[];
 };
 
+type DockerStorageFormSlice = {
+  dockerTmpSize: string;
+  setDockerTmpSize: (value: string) => void;
+  baselineDockerTmpSize: string;
+  dockerLogMaxSize: string;
+  setDockerLogMaxSize: (value: string) => void;
+  baselineDockerLogMaxSize: string;
+  dockerLogMaxFiles: string;
+  setDockerLogMaxFiles: (value: string) => void;
+  baselineDockerLogMaxFiles: string;
+};
+
 export function DockerSections({
   profile,
   dockerfile,
@@ -58,6 +72,7 @@ export function DockerSections({
   onAllowUserNamespacesChange,
   remoteExecutorId,
   networks,
+  storage,
 }: DockerSectionsProps) {
   return (
     <>
@@ -83,6 +98,7 @@ export function DockerSections({
         baselinePrimaryGwPriority={networks.baselinePrimaryGwPriority}
         baselineAdditionalNetworks={networks.baselineAdditionalNetworks}
       />
+      <DockerStorageLimitsCard {...storage} />
       {allowsUserNamespaces && (
         <UserNamespacesCard
           enabled={allowUserNamespaces}
