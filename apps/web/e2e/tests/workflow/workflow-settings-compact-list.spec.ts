@@ -23,6 +23,8 @@ test.describe("Workflow settings compact list", () => {
     await page.goto(seedData.workspaceId, { listView: null });
 
     await expect(page.listViewOption("compact")).toHaveAttribute("data-state", "on");
+    // The view control keeps clear space below the section divider.
+    expect(await page.listViewToggleGapBelowDivider()).toBeGreaterThanOrEqual(12);
     const card = page.workflowCard(target.id);
     const row = page.compactRow(target.id);
     await expect(row).toBeVisible();

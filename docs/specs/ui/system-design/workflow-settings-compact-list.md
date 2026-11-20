@@ -62,7 +62,11 @@ program data and carry an `// i18n-exempt` marker if the copy scanner flags
 them.
 
 `WorkflowListViewToggle` sits in a header row directly above
-`workflow-order-list`, right-aligned, inside `WorkflowList`. It is outside
+`workflow-order-list`, right-aligned, inside `WorkflowList`. The Workflows
+section content is unframed and starts at its divider, so
+`WorkspaceWorkflowsClient` wraps the section children in `pt-4`. The first
+block, either the sync status or this control, keeps 16 px of space below the
+divider. It is outside
 `WorkflowSectionActions`, so it also appears in the Improve Kandev workspace.
 It is a single-selection `ToggleGroup` with two items. Each has an icon and a
 visible localized label (`workflows:listViewCompact`,

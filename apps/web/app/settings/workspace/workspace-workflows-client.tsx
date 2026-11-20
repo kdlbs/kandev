@@ -256,27 +256,31 @@ export function WorkspaceWorkflowsClient({
           )
         }
       >
-        {!isImproveWorkspace && (
-          <WorkflowSyncSection
-            workspaceId={workspace.id}
-            dialogOpen={syncDialogOpen}
-            onDialogOpenChange={setSyncDialogOpen}
+        {/* The unframed section content starts at its divider; pt-4 keeps the
+            first block (sync status or the list view control) off the line. */}
+        <div className="pt-4">
+          {!isImproveWorkspace && (
+            <WorkflowSyncSection
+              workspaceId={workspace.id}
+              dialogOpen={syncDialogOpen}
+              onDialogOpenChange={setSyncDialogOpen}
+            />
+          )}
+          <WorkflowList
+            workflowItems={page.workflowItems}
+            savedWorkflowItems={page.savedWorkflowItems}
+            orderDirtyIds={page.workflowOrderDirtyIds}
+            initialStepsByWorkflowId={page.initialStepsByWorkflowId}
+            isWorkflowDirty={page.isWorkflowDirty}
+            isImproveWorkspace={isImproveWorkspace}
+            onUpdate={page.handleUpdateWorkflow}
+            onDelete={page.handleDeleteWorkflow}
+            onDuplicate={page.handleDuplicateWorkflow}
+            onWorkflowSaved={page.handleWorkflowSaved}
+            onDiscard={page.handleDiscardWorkflow}
+            onReorder={page.handleReorderWorkflows}
           />
-        )}
-        <WorkflowList
-          workflowItems={page.workflowItems}
-          savedWorkflowItems={page.savedWorkflowItems}
-          orderDirtyIds={page.workflowOrderDirtyIds}
-          initialStepsByWorkflowId={page.initialStepsByWorkflowId}
-          isWorkflowDirty={page.isWorkflowDirty}
-          isImproveWorkspace={isImproveWorkspace}
-          onUpdate={page.handleUpdateWorkflow}
-          onDelete={page.handleDeleteWorkflow}
-          onDuplicate={page.handleDuplicateWorkflow}
-          onWorkflowSaved={page.handleWorkflowSaved}
-          onDiscard={page.handleDiscardWorkflow}
-          onReorder={page.handleReorderWorkflows}
-        />
+        </div>
       </SettingsSection>
       <WorkflowDialogs page={page} />
     </div>

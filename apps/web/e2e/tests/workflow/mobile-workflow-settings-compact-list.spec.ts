@@ -14,6 +14,7 @@ test.describe("Workflow settings compact list on mobile", () => {
     const handle = page.dragHandle(seedData.workflowId);
     await expect(row).toBeVisible();
     await expect(handle).toBeVisible();
+    expect(await page.listViewToggleGapBelowDivider()).toBeGreaterThanOrEqual(12);
 
     const [rowBox, handleBox, cardBox] = await Promise.all([
       row.boundingBox(),

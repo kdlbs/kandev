@@ -99,3 +99,8 @@ the card and require visibility.
   had 149 passed and 2 failed before the fixes. After the fixes, the affected specs passed (22 of 22 in
   one worker). mobile-chrome compact, workflow settings, WIP queue navigation, and workspace clone
   passed (12 of 12). Screenshots at desktop and phone widths matched the plan's UI previews.
+- Test-phase feedback said the view control sat flush against the section divider (1 px gap). Both
+  compact specs now assert a gap of at least 12 px through `listViewToggleGapBelowDivider`; this was
+  RED at 1 px. The section children now have `pt-4`. The chromium compact, workflow settings, and
+  sorting specs (24) and the mobile compact and workflow settings specs (8) pass. Screenshots with and
+  without a sync config show 16 px spacing.

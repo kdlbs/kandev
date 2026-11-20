@@ -281,6 +281,15 @@ export class WorkflowSettingsPage {
     return this.page.getByTestId(`workflow-list-view-${view}`);
   }
 
+  /** Vertical gap between the Workflows section divider and the list view control. */
+  async listViewToggleGapBelowDivider(): Promise<number> {
+    return this.page.getByTestId("workflow-list-view-toggle").evaluate((toggle) => {
+      const content = toggle.closest('[data-settings-group-content="true"]');
+      if (!content) throw new Error("workflows section content not found");
+      return toggle.getBoundingClientRect().top - content.getBoundingClientRect().top;
+    });
+  }
+
   /** The drag handle for a specific workflow card. */
   dragHandle(workflowId: string): Locator {
     return this.page.getByTestId(`workflow-drag-handle-${workflowId}`);
