@@ -56,6 +56,7 @@ func (b *sharedInferenceConsumer) Execute(ctx context.Context, client *agentrunt
 	if !all || !finite {
 		// Optional capacity modes keep the native inference path; the shared
 		// binding store must not block a prompt when the policy is off.
+		b.refresh(ctx, agentruntime.InferenceClientRef{Client: client, Identity: identity, Release: func() {}})
 		return client.InferencePrompt(ctx, &request)
 	}
 	b.refreshMu.Lock()
@@ -91,6 +92,7 @@ func (b *sharedInferenceConsumer) executeSharedInference(ctx context.Context, cl
 		// fresh token instead of validating a shared reservation.
 		b.cancelUnsentPrepared(client, binding)
 		request.AttemptID = ""
+		b.refresh(ctx, agentruntime.InferenceClientRef{Client: client, Identity: identity, Release: func() {}})
 		return client.InferencePrompt(ctx, request)
 	}
 	if err := b.validateInferenceSettlement(ctx, binding); err != nil {

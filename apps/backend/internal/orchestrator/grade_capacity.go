@@ -29,8 +29,13 @@ func (s *Service) SetExecutionCapacity(effective sessioncapacity.Effective) {
 	}
 	c := s.sessionCeiling
 	c.mu.Lock()
+	wasRequired := c.policy == sessioncapacity.PolicyAll && (c.ceiling != unlimitedSessionCeiling || len(c.gradeLimits) > 0)
 	c.ceiling, c.policy = effective.MaxSessions, effective.Policy
 	c.gradeLimits = maps.Clone(effective.GradeLimits)
+	if required := c.policy == sessioncapacity.PolicyAll && (c.ceiling != unlimitedSessionCeiling || len(c.gradeLimits) > 0); required != wasRequired {
+		c.inferenceRevision++
+		c.inferenceKnown = false
+	}
 	c.mu.Unlock()
 	s.signalCeilingSweep()
 }

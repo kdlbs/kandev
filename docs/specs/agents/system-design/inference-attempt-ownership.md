@@ -96,6 +96,11 @@ under the same controller mutex that reads the task and inference population, so
 existing ownership keeps its slot across settings changes and a missing or
 unknown population refuses new admission.
 
+Transitions into or out of finite `all` capacity invalidate the current live
+inventory under the admission lock. A refresh carries the policy revision from
+before its reads and publishes only while that revision is still current.
+Optional-mode prompts refresh the live helper gates before native dispatch.
+
 A binding enters the counted population with its stable key. The deferred
 settlement order is terminal observation, provider settlement, binding removal,
 then retained-token acknowledgement. Worker leases keep a settled-but-not-yet
