@@ -64,6 +64,8 @@ describe("duration-aware shard planning", () => {
         "  projects: [",
         '    { name: "chromium", testIgnore: [/mobile-.*\\.spec\\.ts$/, /tests\\/(docker|ssh)\\//] },',
         '    { name: "mobile-chrome", testMatch: /mobile-.*\\.spec\\.ts$/ },',
+        '    { name: "first-profile-capability", testMatch: /first-profile-capability/ },',
+        '    { name: "mobile-first-profile-capability", testMatch: /mobile-first-profile-capability/ },',
         '    { name: "containers", testMatch: /tests\\/(docker|ssh)\\/.*\\.spec\\.ts$/ },',
         "  ],",
         "});",

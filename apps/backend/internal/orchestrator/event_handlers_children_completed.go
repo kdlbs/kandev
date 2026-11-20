@@ -34,6 +34,15 @@ func (s *Service) handleTaskStateChanged(ctx context.Context, data watcher.TaskE
 	s.handleTaskDependenciesForTerminalState(ctx, data.TaskID, *data.NewState)
 }
 
+// SetParentChildrenCompletionWakeRecorder records a child wave handled by a
+// committed parent workflow transition, so the Office reconciler does not
+// dispatch the same wake again.
+func (s *Service) SetParentChildrenCompletionWakeRecorder(
+	recorder func(context.Context, string, string, string, string) error,
+) {
+	s.parentChildrenCompletionWakeRecorder = recorder
+}
+
 func (s *Service) processParentChildrenCompletedForTaskState(ctx context.Context, taskID string, state v1.TaskState) {
 	if !models.IsTerminalTaskState(state) {
 		return
@@ -100,39 +109,9 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 }
 
 // markOfficeTaskCompletedForTerminalStep routes an Office task's terminal
-// step completion through Office's own status pipeline (UpdateTaskStatus)
-// instead of a raw state write, so the approval gate runs (tasks-01.md:76).
-// UpdateTaskStatus persists a redirect to in_review and then returns a
-// typed *dashboard.ApprovalsPendingError when the gate fires — the write
-// has already succeeded, so that return is not a failure and is not
-// logged as one, and no completion side-effects fire below: the redirect
-// is not a completion.
-//
-// A nil error means the gate did not redirect, so the seam persisted
-// "done" (state = COMPLETED). That path must still carry the same
-// side-effects the raw completion write does — publishing task.updated /
-// task.state_changed and driving the parent's on_children_completed
-// trigger — or dependency resolution, the parent workflow transition, and
-// every task.updated subscriber silently stop seeing Office completions.
-//
-// The caller's taskRuntimeStateMu check-then-act is not atomic across this
-// call (the seam runs Office's reactivity pipeline and publishes, so
-// holding that global lock across it risks lock inversion). Two
-// deliveries for the same task can therefore both pass the caller's check
-// before either has written. lockOfficeTerminalCompletion serializes by
-// task ID instead, and the task is re-read and re-checked once inside
-// that lock: whichever delivery gets there first does the write and fires
-// the side effects below; a second, now-redundant delivery finds the task
-// already terminal and returns without calling the seam a second time.
-//
-// The lock is released as soon as the write (or redirect) is durable and
-// before any of the side effects below run, for the same reason the caller
-// releases taskRuntimeStateMu early: processParentChildrenCompletedForTaskState
-// walks up into the parent's own on_children_completed handling, which can
-// itself reach this same lock family (for an Office parent) or
-// lockChildCompletionOperation. Holding this task's lock across that call
-// would invert lock order against a concurrent completion elsewhere in the
-// same ancestry and risk deadlock.
+// step completion through Office's status pipeline so the approval gate and
+// guarded state write run. The committed task.state_changed event owns
+// completion notifications and parent/dependency handling.
 func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, taskID, terminalStepID string) {
 	if s.officeTaskStatusUpdater == nil {
 		// No seam wired (partial wiring, or a test): skip the write rather
@@ -140,76 +119,34 @@ func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, ta
 		return
 	}
 
-	unlock := s.lockOfficeTerminalCompletion(taskID)
-
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
-		unlock()
 		s.logger.Warn("terminal step completion: failed to reload office task",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return
 	}
 	if models.IsTerminalTaskState(task.State) || task.State == v1.TaskStateBlocked {
-		unlock()
 		return
 	}
 	if terminalStepID != "" && task.WorkflowStepID != terminalStepID {
-		unlock()
 		return
 	}
-	oldState := task.State
 
 	err = s.officeTaskStatusUpdater.UpdateTaskStatus(ctx, dashboard.TaskStatusUpdateRequest{
 		TaskID:                 task.ID,
 		NewStatus:              "done",
-		SuppressStatusActivity: true,
-		ExpectedCurrentState:   string(oldState),
+		ExpectedCurrentState:   string(task.State),
 		ExpectedWorkflowStepID: task.WorkflowStepID,
 	})
 	var pending *dashboard.ApprovalsPendingError
 	if err != nil {
-		unlock()
 		if !errors.As(err, &pending) && !errors.Is(err, dashboard.ErrAutomaticCompletionStale) {
 			s.logger.Warn("terminal step completion: office status update failed",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
 		}
 		return
-	}
-	unlock()
-
-	task.State = v1.TaskStateCompleted
-	task.UpdatedAt = time.Now().UTC()
-	s.publishTaskUpdated(ctx, task)
-	s.publishTaskStateChanged(ctx, task, oldState)
-	s.processParentChildrenCompletedForTaskState(ctx, task.ID, v1.TaskStateCompleted)
-}
-
-// lockOfficeTerminalCompletion serializes markOfficeTaskCompletedForTerminalStep
-// calls for the same task ID, mirroring lockChildCompletionOperation.
-func (s *Service) lockOfficeTerminalCompletion(taskID string) func() {
-	s.officeTerminalCompletionLocksMu.Lock()
-	if s.officeTerminalCompletionLocks == nil {
-		s.officeTerminalCompletionLocks = make(map[string]*childCompletionOperationLock)
-	}
-	entry := s.officeTerminalCompletionLocks[taskID]
-	if entry == nil {
-		entry = &childCompletionOperationLock{}
-		s.officeTerminalCompletionLocks[taskID] = entry
-	}
-	entry.refs++
-	s.officeTerminalCompletionLocksMu.Unlock()
-
-	entry.mu.Lock()
-	return func() {
-		s.officeTerminalCompletionLocksMu.Lock()
-		entry.refs--
-		if entry.refs == 0 {
-			delete(s.officeTerminalCompletionLocks, taskID)
-		}
-		s.officeTerminalCompletionLocksMu.Unlock()
-		entry.mu.Unlock()
 	}
 }
 
@@ -234,7 +171,15 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 	unlock := s.lockChildCompletionOperation(operationID)
 	defer unlock()
 
-	if s.childCompletionAlreadyApplied(ctx, parentID, operationID) {
+	alreadyApplied, err := s.childCompletionAlreadyApplied(ctx, operationID)
+	if err != nil {
+		s.logger.Warn("on_children_completed: failed to check operation idempotency",
+			zap.String("parent_task_id", parentID),
+			zap.String("operation_id", operationID),
+			zap.Error(err))
+		return false
+	}
+	if alreadyApplied {
 		return false
 	}
 
@@ -248,7 +193,15 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 		return false
 	}
 
-	appliedTransition := s.applyEngineTransitionWithMode(
+	var onEnterComplete func(bool)
+	if s.parentChildrenCompletionWakeRecorder != nil {
+		onEnterComplete = func(delivered bool) {
+			if delivered {
+				s.recordParentChildrenCompletionWake(context.WithoutCancel(ctx), parentID, rows, operationID)
+			}
+		}
+	}
+	appliedTransition := s.applyEngineTransitionWithModeAndOnEnterCompletion(
 		ctx,
 		parentID,
 		session,
@@ -256,12 +209,52 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 		engine.TriggerOnChildrenCompleted,
 		parent.Description,
 		transitionLifecycleWithOnEnter,
+		onEnterComplete,
 	)
 	if !appliedTransition {
 		return false
 	}
 	s.markChildCompletionApplied(ctx, parentID, operationID, "transition")
 	return true
+}
+
+func (s *Service) recordParentChildrenCompletionWake(
+	ctx context.Context,
+	parentID string,
+	rows []models.ChildCompletionRow,
+	operationID string,
+) {
+	if s.parentChildrenCompletionWakeRecorder == nil {
+		return
+	}
+	childSetKey, generation := childCompletionReceiptIdentity(rows)
+	if err := s.parentChildrenCompletionWakeRecorder(ctx, parentID, childSetKey, generation, operationID); err != nil {
+		s.logger.Warn("on_children_completed: failed to record parent wake receipt",
+			zap.String("parent_task_id", parentID), zap.String("operation_id", operationID), zap.Error(err))
+	}
+}
+
+func childCompletionReceiptIdentity(rows []models.ChildCompletionRow) (string, string) {
+	ordered := append([]models.ChildCompletionRow(nil), rows...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+	var key strings.Builder
+	var newest time.Time
+	for i, row := range ordered {
+		if i > 0 {
+			key.WriteByte(',')
+		}
+		key.WriteString(row.ID)
+		key.WriteByte(':')
+		key.WriteString(string(row.State))
+		if row.UpdatedAt.After(newest) {
+			newest = row.UpdatedAt
+		}
+	}
+	generation := ""
+	if !newest.IsZero() {
+		generation = newest.UTC().Format("2006-01-02 15:04:05")
+	}
+	return key.String(), generation
 }
 
 func (s *Service) readyChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, bool) {
@@ -300,16 +293,8 @@ func (s *Service) parentCompletionContext(ctx context.Context, parentID string) 
 	return parent, session, true
 }
 
-func (s *Service) childCompletionAlreadyApplied(ctx context.Context, parentID, operationID string) bool {
-	applied, err := s.workflowStore.IsOperationApplied(ctx, operationID)
-	if err != nil {
-		s.logger.Warn("on_children_completed: failed to check operation idempotency",
-			zap.String("parent_task_id", parentID),
-			zap.String("operation_id", operationID),
-			zap.Error(err))
-		return true
-	}
-	return applied
+func (s *Service) childCompletionAlreadyApplied(ctx context.Context, operationID string) (bool, error) {
+	return s.workflowStore.IsOperationApplied(ctx, operationID)
 }
 
 type childCompletionOperationLock struct {
@@ -391,6 +376,8 @@ func allChildrenCompleted(rows []models.ChildCompletionRow) bool {
 	return true
 }
 
+// workflowStepIsTerminal answers the completing-step question used for task
+// lifecycle decisions, not whether the step has the greatest position.
 func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID string) bool {
 	if s.workflowStepGetter == nil || workflowStepID == "" {
 		return false
@@ -406,7 +393,8 @@ func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID str
 			zap.Error(err))
 		return false
 	}
-	return wfmodels.IsTerminalStep(step, nextStep)
+	// Child completion can advance a parent only from a completing step.
+	return wfmodels.CompletesTaskOnEnter(step, nextStep)
 }
 
 // childCompletionPayload builds the engine payload for an

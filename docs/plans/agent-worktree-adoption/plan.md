@@ -180,6 +180,7 @@ Maps to AC-004.1, AC-004.2, AC-004.5, AC-004.6, AC-004.7, AC-005.1, AC-005.2.
 - [x] [Task 02: Automatic worktree detection](task-02-automatic-detection.md)
 - [x] [Task 03: Root menu, detach, and Files root markers](task-03-detach-and-files-roots.md)
 - [x] [Task 04: Prove adoption end to end](task-04-prove-end-to-end.md)
+- [x] [Task 05: Resume tasks with nested adopted worktrees](task-05-resume-nested-roots.md)
 
 ## Verification results
 

@@ -35,7 +35,8 @@ provider API keys. The mobile project uses Chromium with Pixel-5 emulation,
 so the same browser installation serves both commands.
 
 Select the project before the spec path. The default `chromium` project excludes
-`mobile-*.spec.ts`, auth, routing, and container suites. If a file reports
+mobile specs, auth and routing suites, container tests, and the isolated
+first-profile tests. If a file reports
 `No tests found`, check its owning project before changing the file or filters.
 Pass runner options such as `--project` before any `--` separator; options after
 the separator are forwarded to Playwright and do not select the managed runner's
@@ -94,7 +95,8 @@ journal to the shipped 256 MiB limit and checks pruning after Retry.
 
 ## Playwright projects
 
-The suite is split into six projects. Pick one with `--project=<name>`.
+The suite uses separate projects for browser targets and tests that need an
+isolated backend worker. Pick one with `--project=<name>`.
 
 ### `routing`
 
@@ -130,6 +132,12 @@ pnpm e2e:raw
 ### `mobile-chrome`
 
 Same as `chromium` but on Playwright's Pixel-5 viewport, gated on `tests/**/mobile-*.spec.ts`. Runs in the same CI shard matrix as `chromium`.
+
+### `first-profile-capability` and `mobile-first-profile-capability`
+
+Run the desktop and phone first-profile capability tests in dedicated backend
+workers. These tests require a clean agent registry and database before they
+create the first saved profile. The projects run in the normal CI shard matrix.
 
 ### `containers` — **Docker required**
 
@@ -257,8 +265,9 @@ Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (fl
 ### Duration-aware CI sharding
 
 CI creates an ephemeral manifest for each cohort from the current test catalog.
-The normal cohort has 28 shards and runs `chromium` plus `mobile-chrome`; the
-container cohort has 6 shards and runs `containers`. The independent
+The normal cohort has 28 shards and runs desktop, phone, and isolated
+first-profile projects. The container cohort has 6 shards and runs
+`containers`. The independent
 `kubernetes-compat` matrix is deliberately excluded from both catalogs. The manifest assigns
 project/file units with a deterministic longest-processing-time planner. Matrix
 jobs pass the assigned files to `run-planned-shard.sh`; they do not use ordinal

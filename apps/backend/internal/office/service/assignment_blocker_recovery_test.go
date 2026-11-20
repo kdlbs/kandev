@@ -9,13 +9,14 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// @covers AC-OFFICE-SCHEDULER-002.5 AC-OFFICE-SCHEDULER-002.8
+// @covers AC-OFFICE-SCHEDULER-002.5 AC-OFFICE-SCHEDULER-002.8 AC-OFFICE-BLOCKER-POLICY-001.1
 func TestOfficeAssignmentBlockerRecovery(t *testing.T) {
 	f := newAssignmentBlockerFixture(t)
 	for i := 0; i < 5; i++ {
 		id := fmt.Sprintf("held-%d", i)
 		f.task(t, id, "assignment-work", v1.TaskStateTODO, "assignment-worker")
-		f.blockers(t, id, v1.TaskStateCompleted, v1.TaskStateInProgress)
+		unsatisfied := []v1.TaskState{v1.TaskStateInProgress, v1.TaskStateFailed, v1.TaskStateCancelled}[i%3]
+		f.blockers(t, id, v1.TaskStateCompleted, unsatisfied)
 	}
 	f.task(t, "eligible", "assignment-work", v1.TaskStateTODO, "assignment-worker")
 	handler := service.NewOfficeRecoveryHandler(service.NewSchedulerIntegration(f.svc, 0))

@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { useSyncExternalStore, type ComponentProps } from "react";
+import { SelectionActionSlotProvider } from "@/components/shared/selection-action-slot";
 import { ChatStatusBar, shouldRenderChatStatusBar } from "./chat-status-bar";
 
 const USAGE_TRIGGER_TEST_ID = "conversation-usage-trigger";
 const GRAPH_BUTTON_TEST_ID = "task-graph-button";
 const RIGHT_CONTROLS_TEST_ID = "chat-status-bar-right-controls";
 const SHARE_BUTTON_TEST_ID = "share-task-button";
+const PROCEED_TEST_ID = "proceed-next-step";
 
 const statusStore = vi.hoisted(() => {
   const state = {
@@ -232,13 +234,13 @@ describe("conversation usage status control", () => {
       isMoving: false,
     };
     const { rerender } = render(<ChatStatusBar {...props} />);
-    const proceed = screen.getByTestId("proceed-next-step");
+    const proceed = screen.getByTestId(PROCEED_TEST_ID);
     const usage = screen.getByTestId(USAGE_TRIGGER_TEST_ID);
     const review = screen.getByTestId("registered-review-status");
     for (const isMobile of [true, false, true]) {
       viewport.isMobile = isMobile;
       rerender(<ChatStatusBar {...props} />);
-      expect(screen.getByTestId("proceed-next-step")).toBe(proceed);
+      expect(screen.getByTestId(PROCEED_TEST_ID)).toBe(proceed);
       expect(screen.getByTestId(USAGE_TRIGGER_TEST_ID)).toBe(usage);
       expect(screen.getByTestId("registered-review-status")).toBe(review);
       const order = proceed.compareDocumentPosition(usage);
@@ -277,10 +279,41 @@ describe("conversation usage status control", () => {
     });
 
     const actions = screen.getByTestId("chat-status-bar-actions");
-    const proceed = screen.getByTestId("proceed-next-step");
+    const proceed = screen.getByTestId(PROCEED_TEST_ID);
     expect(actions.className).toContain("ml-auto");
     expect(actions.contains(proceed)).toBe(true);
     expect(proceed.className).toContain("h-6");
+  });
+
+  // @covers AC-UI-COMPOSER-ACTION-WRAP-001.2
+  it("keeps the phone next-step action inline with the utility controls", () => {
+    viewport.isMobile = true;
+    renderStatus({ taskId: "task-1", sessionId: "session-1", nextStepName: "Done" });
+
+    const proceed = screen.getByTestId(PROCEED_TEST_ID);
+    expect(proceed.parentElement?.className).not.toContain("w-full");
+    expect(proceed.className).not.toContain("max-md:ml-auto");
+  });
+
+  it("ends the utility controls with the selection action slot", () => {
+    render(
+      <SelectionActionSlotProvider>
+        <ChatStatusBar
+          todoItems={[]}
+          taskId="task-1"
+          sessionId="session-1"
+          sessionState="IDLE"
+          nextStepName={null}
+          onProceed={vi.fn()}
+          isAgentBusy={false}
+          hasPendingClarification={false}
+          isMoving={false}
+        />
+      </SelectionActionSlotProvider>,
+    );
+
+    const controls = screen.getByTestId(RIGHT_CONTROLS_TEST_ID);
+    expect(controls.lastElementChild).toBe(screen.getByTestId("selection-action-slot"));
   });
 
   it("marks Antigravity subscription sessions for the cost disclosure", () => {

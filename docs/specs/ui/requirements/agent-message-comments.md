@@ -21,7 +21,7 @@ Users need to point an agent at one exact part of an ordinary settled reply with
 
 - **AC-UI-AGENT-MESSAGE-COMMENTS-001.1:** In Task Chat and Quick Chat, users can select text from the ordinary prose portion of a settled agent reply (`message` or `content`). Rich blocks rendered beside that prose remain outside the selectable surface.
 - **AC-UI-AGENT-MESSAGE-COMMENTS-001.2:** Current streaming replies, user messages, raw views, thinking, tools, status/progress, `agent_plan`, and rich-block content do not expose inline-comment controls.
-- **AC-UI-AGENT-MESSAGE-COMMENTS-001.3:** Selection first reveals the same accent comment affordance used by plan selection. Activating it opens the shared plan-comment popover on desktop or the equivalent coarse-pointer/mobile bottom Drawer. The keyboard shortcut and Add/Run action hierarchy match plan comments.
+- **AC-UI-AGENT-MESSAGE-COMMENTS-001.3:** Selection first reveals the same accent comment affordance used by plan selection. With a fine pointer it floats beside the selection; with a coarse pointer it is presented in the docked selection action toolbar defined by [`REQ-UI-TOUCH-SELECTION-ACTIONS-001`](touch-selection-actions.md). Activating it opens the shared plan-comment popover on desktop or the equivalent coarse-pointer/mobile bottom Drawer. The keyboard shortcut and Add/Run action hierarchy match plan comments.
 - **AC-UI-AGENT-MESSAGE-COMMENTS-001.4:** **Add** stores a pending agent-message comment in browser `sessionStorage`, renders the same accent highlight and comment badge used in plans when its message is mounted, and adds a removable context chip to the composer.
 - **AC-UI-AGENT-MESSAGE-COMMENTS-001.5:** Activating a pending comment's highlight or badge reopens the editor so the feedback can be updated or deleted.
 - **AC-UI-AGENT-MESSAGE-COMMENTS-001.6:** **Run** sends the single comment immediately when the session is idle or appends it to the existing queue when the agent is busy. Successful delivery removes the pending comment.
@@ -57,7 +57,7 @@ Agent-message comments format as a Markdown section containing the selected resp
 ## Mobile contract
 
 - Desktop entry point: select settled agent prose, activate the plan-style comment affordance, then act from the shared anchored plan popover.
-- Mobile entry point: select settled agent prose, activate a touch-sized version of the same affordance, then act from an inset bottom Drawer following existing phone context surfaces.
+- Mobile entry point: select settled agent prose, activate the Comment action in the docked selection action toolbar (`REQ-UI-TOUCH-SELECTION-ACTIONS-001`), then act from an inset bottom Drawer following existing phone context surfaces.
 - Drawer hierarchy and language mirror the desktop popover: selected text preview, feedback input, attached Add/Run actions, and edit/delete controls. One internal scroll owner; controls have touch-sized hitboxes and safe-area bottom padding.
 - Shared state and delivery handlers are reused. Only overlay presentation differs by pointer/viewport.
 - Mobile E2E proves selection, Drawer presentation, Add, composer context, and Run delivery outcome without document horizontal overflow.

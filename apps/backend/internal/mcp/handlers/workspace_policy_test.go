@@ -14,9 +14,9 @@ func TestResolveMCPWorkspacePolicyCompatibility(t *testing.T) {
 		name, parent, mode, want, wantError string
 	}{
 		{name: "root omission"},
-		{name: "parent omission", parent: "parent", want: "inherit_parent"},
+		{name: "parent omission", parent: "parent", want: "new_workspace"},
 		{name: "root blank", mode: " \t"},
-		{name: "parent blank", parent: "parent", mode: " \t", want: "inherit_parent"},
+		{name: "parent blank", parent: "parent", mode: " \t", want: "new_workspace"},
 		{name: "inherit", parent: "parent", mode: "inherit_parent", want: "inherit_parent"},
 		{name: "inherit needs parent", mode: "inherit_parent", wantError: "requires parent_id"},
 		{name: "new root", mode: "new_workspace", want: "new_workspace"},

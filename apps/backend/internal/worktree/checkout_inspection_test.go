@@ -7,12 +7,30 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
+
+// writeFakeGitForInspection installs a Git shim that the production resolver
+// actually selects. On Windows exec.LookPath only accepts names carrying a
+// PATHEXT extension, so an extensionless "git" shell script is invisible and
+// the real Git would run instead; the Windows branch therefore writes git.cmd.
+func writeFakeGitForInspection(t *testing.T, posixBody, windowsBody string) string {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return writeFakeGitScript(t, posixBody)
+	}
+	scriptDir := t.TempDir()
+	script := "@echo off\r\n" + windowsBody + "\r\n"
+	if err := os.WriteFile(filepath.Join(scriptDir, "git.cmd"), []byte(script), 0o700); err != nil {
+		t.Fatalf("failed to write fake git command: %v", err)
+	}
+	return scriptDir
+}
 
 func TestMainCheckoutAdmissionAndReuse(t *testing.T) {
 	for _, unborn := range []bool{false, true} {
@@ -159,7 +177,9 @@ func TestMainCheckoutInspectionPreservesOperationalErrors(t *testing.T) {
 				markerPath := filepath.Join(t.TempDir(), "git-started")
 				t.Setenv("KD_GIT_INSPECTION_MARKER", markerPath)
 				scriptBody := `: > "${KD_GIT_INSPECTION_MARKER:?}"; exec sleep 30`
-				scriptDir := writeFakeGitScript(t, scriptBody)
+				windowsScriptBody := `type nul > "%KD_GIT_INSPECTION_MARKER%"` + "\r\n" +
+					`ping -n 60 127.0.0.1 >nul`
+				scriptDir := writeFakeGitForInspection(t, scriptBody, windowsScriptBody)
 				t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+originalPath)
 
 				var err error
@@ -206,9 +226,11 @@ func TestMainCheckoutInspectionPreservesOperationalErrors(t *testing.T) {
 }
 
 func TestMainCheckoutRejectsInvalidMetadata(t *testing.T) {
+	gitInspectionMarker := filepath.Join(t.TempDir(), "git-inspection-ran")
 	tests := []struct {
 		name   string
 		mutate func(*testing.T, *Manager, *Worktree)
+		verify func(*testing.T, error)
 	}{
 		{name: "missing metadata", mutate: func(t *testing.T, _ *Manager, wt *Worktree) {
 			if err := os.RemoveAll(filepath.Join(wt.Path, ".git")); err != nil {
@@ -277,10 +299,25 @@ func TestMainCheckoutRejectsInvalidMetadata(t *testing.T) {
 				t.Fatalf("write remote-tracking HEAD: %v", err)
 			}
 		}},
-		{name: "Git inspection denied", mutate: func(t *testing.T, _ *Manager, _ *Worktree) {
-			scriptDir := writeFakeGitScript(t, `echo "fatal: permission denied reading Git metadata" >&2; exit 128`)
-			t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-		}},
+		{
+			name: "Git inspection denied",
+			mutate: func(t *testing.T, _ *Manager, _ *Worktree) {
+				t.Setenv("KD_GIT_INSPECTION_MARKER", gitInspectionMarker)
+				scriptDir := writeFakeGitForInspection(t,
+					`: > "${KD_GIT_INSPECTION_MARKER:?}"; echo "fatal: permission denied reading Git metadata" >&2; exit 128`,
+					`type nul > "%KD_GIT_INSPECTION_MARKER%"`+"\r\n"+
+						`echo fatal: permission denied reading Git metadata 1>&2`+"\r\n"+`exit /b 128`)
+				t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			},
+			verify: func(t *testing.T, _ error) {
+				// A refusal before Git ran would still be a WorktreeRecoveryError;
+				// the shim's marker is the proof that this case exercised the
+				// inspection failure it names.
+				if _, statErr := os.Stat(gitInspectionMarker); statErr != nil {
+					t.Fatalf("fake Git did not run: %v", statErr)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -295,6 +332,9 @@ func TestMainCheckoutRejectsInvalidMetadata(t *testing.T) {
 			var recoveryErr *WorktreeRecoveryError
 			if !errors.As(err, &recoveryErr) {
 				t.Fatalf("AdmitTaskRecovery error = %T %v, want WorktreeRecoveryError", err, err)
+			}
+			if tt.verify != nil {
+				tt.verify(t, err)
 			}
 			if _, err := os.Stat(wt.Path); err != nil {
 				t.Fatalf("checkout was removed after refusal: %v", err)

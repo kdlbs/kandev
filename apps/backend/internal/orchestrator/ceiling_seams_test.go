@@ -137,7 +137,9 @@ func TestSeam1ReservationReleasesAfterRebindIfNeverConsumed(t *testing.T) {
 		t.Fatal("expected admission")
 	}
 	reservation := &seam1Reservation{controller: controller, key: decision.reservationKey}
-	reservation.rebindToSession("session-1")
+	if err := reservation.rebindToSession("session-1"); err != nil {
+		t.Fatal(err)
+	}
 	// Simulate a launch failure between rebind and STARTING: the reservation
 	// was never consumed, so the deferred cleanup must still release it.
 	reservation.releaseIfNotConsumed()
@@ -162,7 +164,9 @@ func TestSeam1ReservationConsumeSurvivesRebind(t *testing.T) {
 		t.Fatal("expected admission")
 	}
 	reservation := &seam1Reservation{controller: controller, key: decision.reservationKey}
-	reservation.rebindToSession("session-1")
+	if err := reservation.rebindToSession("session-1"); err != nil {
+		t.Fatal(err)
+	}
 	reservation.consume()
 	reservation.releaseIfNotConsumed()
 
@@ -195,8 +199,12 @@ func TestSeam1ReservationRebindCollisionReleasesTheLoserNotTheWinner(t *testing.
 
 	// Both launches converge on the same session, exactly as two concurrent
 	// startTask calls do via EnsureSessionForAgentWithCreation.
-	winner.rebindToSession("session-shared")
-	loser.rebindToSession("session-shared")
+	if err := winner.rebindToSession("session-shared"); err != nil {
+		t.Fatal(err)
+	}
+	if err := loser.rebindToSession("session-shared"); err != nil {
+		t.Fatal(err)
+	}
 
 	// The loser's launch fails before the winner's ever resolves.
 	loser.releaseIfNotConsumed()

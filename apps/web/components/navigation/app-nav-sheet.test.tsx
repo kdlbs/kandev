@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JSX } from "react";
+import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { defaultState } from "@/lib/state/default-state";
 import { AppNavSheet } from "./app-nav-sheet";
 import { AppNavSections, useAppNavDialogs } from "./app-nav-sections";
@@ -11,6 +12,12 @@ const mocks = vi.hoisted(() => ({
   openHealthDialog: vi.fn(),
   setTheme: vi.fn(),
 }));
+
+const automationApi = vi.hoisted(() => ({
+  listAutomations: vi.fn().mockResolvedValue([]),
+  listAutomationSummaries: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("@/lib/api/domains/automation-api", () => automationApi);
 
 let pathname = "/settings";
 let inOffice = false;
@@ -600,5 +607,70 @@ describe("integration plugin grouping", () => {
     } else {
       expect(links[0].closest('[data-testid="mobile-integrations-section"]')).not.toBeNull();
     }
+  });
+});
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.22
+describe("saved-layout automation outcomes", () => {
+  afterEach(() => {
+    cleanup();
+    automationApi.listAutomations.mockReset().mockResolvedValue([]);
+    automationApi.listAutomationSummaries.mockReset().mockResolvedValue([]);
+  });
+  it("saved-layout automation row exposes latest failure through the real activity projection", async () => {
+    automationApi.listAutomations.mockResolvedValue([
+      {
+        id: "failed-automation",
+        workspace_id: "ws-1",
+        name: "Nightly audit",
+        enabled: true,
+        max_concurrent_runs: 1,
+        triggers: [],
+        description: "",
+        workflow_id: "",
+        workflow_step_id: "",
+        agent_profile_id: "",
+        executor_profile_id: "",
+        repository_ids: [],
+        prompt: "",
+        task_title_template: "",
+        last_triggered_at: null,
+        created_at: "2026-11-05T10:00:00Z",
+        updated_at: "2026-11-05T10:00:00Z",
+      } satisfies Automation,
+    ]);
+    automationApi.listAutomationSummaries.mockResolvedValue([
+      {
+        automation_id: "failed-automation",
+        open_runs: 0,
+        last_run: {
+          id: "failed-run",
+          automation_id: "failed-automation",
+          trigger_id: "",
+          trigger_type: "manual",
+          task_id: "",
+          status: "failed",
+          dedup_key: "",
+          trigger_data: {},
+          error_message: "",
+          created_at: "2026-11-05T10:00:00Z",
+        } satisfies AutomationRun,
+      },
+    ]);
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+    fireEvent.click(screen.getByRole("button", { name: "Automations" }));
+    const row = await screen.findByRole("link", { name: "Nightly audit" });
+    await waitFor(() => expect(row.textContent).toContain("Failed"));
+    expect(row.querySelector(".bg-red-500")).not.toBeNull();
+    const description = document.getElementById(row.getAttribute("aria-describedby")!);
+    expect(description?.textContent).toContain("Failed");
+    expect(description?.textContent).not.toContain("Idle");
+    expect(row.closest('[data-testid="mobile-sidebar-layout-navigation"]')).not.toBeNull();
+    expect(row.getAttribute("href")).toBe("/automations/failed-automation");
+    fireEvent.click(row);
+    await waitFor(() =>
+      expect(screen.getByTestId(NAV_TRIGGER).getAttribute("aria-expanded")).toBe("false"),
+    );
   });
 });

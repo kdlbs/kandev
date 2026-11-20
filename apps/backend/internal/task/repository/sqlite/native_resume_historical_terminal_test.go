@@ -26,24 +26,24 @@ func TestPostgresHistoricalTerminalRecovery(t *testing.T) {
 func testHistoricalTerminalRecovery(t *testing.T, open func(*testing.T) *Repository) {
 	t.Helper()
 	cases := []struct {
-		name                 string
-		staleNotice          bool
-		staleAttempt         bool
-		completeTerminal     bool
-		allocatedAttempt     bool
-		changeAttemptNative  bool
-		omitTerminalEvidence bool
-		changeTerminalHash   bool
-		independentWork      bool
-		rollback             bool
-		want                 bool
+		name                string
+		staleNotice         bool
+		staleAttempt        bool
+		completeTerminal    bool
+		allocatedAttempt    bool
+		changeAttemptNative bool
+		omitTerminalEffect  bool
+		changeTerminalHash  bool
+		independentWork     bool
+		rollback            bool
+		want                bool
 	}{
 		{name: "clean control", want: true},
 		{name: "stale terminal notice", staleNotice: true, completeTerminal: true, want: true},
 		{name: "stale prepared attempt", staleAttempt: true, completeTerminal: true, want: true},
 		{name: "stale notice and attempt", staleNotice: true, staleAttempt: true, completeTerminal: true, want: true},
 		{name: "terminal completion races resume", staleNotice: true, completeTerminal: false, want: true},
-		{name: "missing terminal evidence", staleNotice: true, completeTerminal: true, omitTerminalEvidence: true},
+		{name: "missing terminal effect", staleNotice: true, completeTerminal: true, omitTerminalEffect: true},
 		{name: "changed terminal payload", staleNotice: true, completeTerminal: true, changeTerminalHash: true},
 		{name: "allocated candidate remains a guard", staleAttempt: true, completeTerminal: true, allocatedAttempt: true},
 		{name: "changed attempt native identity remains a guard", staleAttempt: true, completeTerminal: true, changeAttemptNative: true},
@@ -95,8 +95,9 @@ func testHistoricalTerminalRecovery(t *testing.T, open func(*testing.T) *Reposit
 			}
 
 			proof := nativeResumeProofForHistoricalSource(t, repo, fixture, terminal, current, "current-execution-"+current.ID)
-			if test.omitTerminalEvidence {
-				proof.Submissions = proof.Submissions[1:]
+			if test.omitTerminalEffect {
+				_, err := repo.DB().ExecContext(ctx, repo.db.Rebind(`DELETE FROM agent_delivery_effects WHERE effect_key = ?`), terminalRetentionEffectKey(terminal))
+				require.NoError(t, err)
 			}
 			if test.changeTerminalHash {
 				proof.Submissions[0].PayloadHash = "changed-terminal-payload"

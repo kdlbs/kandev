@@ -340,6 +340,16 @@ func TestFindKandevRepoByLocalRemote_NilResolver(t *testing.T) {
 	}
 }
 
+func TestRepositoryCheckoutExistsSupportsGitFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: ../.git/worktrees/repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !repositoryCheckoutExists(root) {
+		t.Fatal("repository checkout with a .git file was not recognized")
+	}
+}
+
 func TestIsGHNotFound(t *testing.T) {
 	cases := []struct {
 		name string

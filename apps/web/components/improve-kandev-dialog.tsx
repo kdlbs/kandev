@@ -7,15 +7,15 @@ import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { IconAlertTriangle, IconStethoscope, IconCheck } from "@tabler/icons-react";
 
-import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
-import { bootstrapImproveKandev } from "@/lib/api/domains/improve-kandev-api";
-import { listRepositories } from "@/lib/api/domains/workspace-api";
-import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { fetchSystemHealth } from "@/lib/api/domains/health-api";
 import type { Task } from "@/lib/types/http";
+import {
+  useBootstrapKandev,
+  type BootstrapState,
+} from "@/hooks/domains/system/use-improve-kandev-bootstrap";
 import { buildImproveKandevDescription } from "./improve-kandev-dialog-helpers";
-import { CreateModeView, type BootstrapState } from "./improve-kandev-dialog-create";
+import { CreateModeView } from "./improve-kandev-dialog-create";
 import {
   IMPROVE_KANDEV_WORKSPACE_NAME,
   initialImproveKandevMode,
@@ -24,12 +24,9 @@ import {
   writeImproveKandevSkipIntro,
 } from "./improve-kandev-dialog-model";
 import { Trans, useTranslation } from "react-i18next";
-// The module-level `t` — resolved when called, not at import — for the
-// error-only strings below. The hook-provided `t` changes identity on a locale
-// switch, and putting it in these effects' dependency arrays would re-POST
-// `bootstrapImproveKandev` (which forks a repository) and reset auth state
-// whenever the user changes language. Render-time copy still uses the reactive
-// `t` from `useTranslation()`.
+
+// Resolve the static fallback when the request completes so locale changes do
+// not restart the GitHub authentication check.
 import { t as tStatic } from "@/lib/i18n";
 
 type ImproveKandevDialogProps = {
@@ -53,6 +50,7 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
   const [skipIntro, setSkipIntro] = useState(() => readSkipIntro());
   const [auth, setAuth] = useState<AuthState>({ kind: "checking" });
   const [bootstrap, setBootstrap] = useState<BootstrapState>({ kind: "idle" });
+  const [bootstrapRetry, setBootstrapRetry] = useState(0);
   const [captureLogs, setCaptureLogs] = useState(true);
   const [createWorkspace, setCreateWorkspace] = useState(true);
   const [workspaceChoiceConfirmed, setWorkspaceChoiceConfirmed] = useState(false);
@@ -82,19 +80,21 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
     setSkipIntro,
     setAuth,
     setBootstrap,
+    setBootstrapRetry,
     setCaptureLogs,
     setCreateWorkspace,
     setWorkspaceChoiceConfirmed,
   });
 
   useGitHubAuthCheck(open, workspaceId, setAuth);
-  useBootstrapKandev(
+  useBootstrapKandev({
     open,
     mode,
     workspaceId,
-    { workspaceChoiceConfirmed, createWorkspace },
+    gate: { workspaceChoiceConfirmed, createWorkspace },
     setBootstrap,
-  );
+    retry: bootstrapRetry,
+  });
   useEffect(() => {
     if (!open || mode !== "create" || auth.kind !== "missing") return;
     // A saved intro preference must not bypass the GitHub-auth recovery UI.
@@ -109,6 +109,7 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
         onOpenChange={onOpenChange}
         workspaceId={workspaceId}
         bootstrap={bootstrap}
+        onRetry={() => setBootstrapRetry((attempt) => attempt + 1)}
         captureLogs={captureLogs}
         setCaptureLogs={setCaptureLogs}
         onSuccess={onSuccess}
@@ -195,68 +196,6 @@ function useGitHubAuthCheck(
       cancelled = true;
     };
   }, [open, workspaceId, setAuth]);
-}
-
-function useBootstrapKandev(
-  open: boolean,
-  mode: Mode,
-  workspaceId: string | null,
-  gate: { workspaceChoiceConfirmed: boolean; createWorkspace: boolean },
-  setBootstrap: (s: BootstrapState) => void,
-) {
-  const { toast } = useToast();
-  const setRepositories = useAppStore((state) => state.setRepositories);
-  const { workspaceChoiceConfirmed, createWorkspace } = gate;
-  useEffect(() => {
-    if (!open || mode !== "create" || !workspaceId || !workspaceChoiceConfirmed) return;
-    let cancelled = false;
-    setBootstrap({ kind: "loading" });
-    (async () => {
-      try {
-        const data = await bootstrapImproveKandev(workspaceId, {
-          createWorkspace,
-        });
-        // Refresh the dedicated workspace's repository list so the newly-created
-        // kandev repo is in the store; otherwise the locked repo dropdown can't
-        // resolve a label for the bootstrapped repository_id. All improve work
-        // is scoped to the workspace the bootstrap returns, not the active one.
-        const [stepsRes, issueStepsRes, reposRes] = await Promise.all([
-          listWorkflowSteps(data.workflow_id),
-          listWorkflowSteps(data.issue_workflow_id),
-          listRepositories(data.workspace_id, undefined, { cache: "no-store" }),
-        ]);
-        if (cancelled) return;
-        setRepositories(data.workspace_id, reposRes.repositories);
-        setBootstrap({
-          kind: "ready",
-          data,
-          steps: stepsRes.steps,
-          issueSteps: issueStepsRes.steps,
-        });
-      } catch (err) {
-        if (cancelled) return;
-        const message = err instanceof Error ? err.message : tStatic("common:bootstrapFailed");
-        setBootstrap({ kind: "error", message });
-        toast({
-          title: tStatic("common:couldNotPrepareImproveKandev"),
-          description: message,
-          variant: "error",
-        });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    open,
-    mode,
-    workspaceId,
-    workspaceChoiceConfirmed,
-    createWorkspace,
-    setBootstrap,
-    setRepositories,
-    toast,
-  ]);
 }
 
 function IntroBody({
@@ -535,6 +474,7 @@ function useResetOnClose(
     setSkipIntro: (skip: boolean) => void;
     setAuth: (auth: AuthState) => void;
     setBootstrap: (bootstrap: BootstrapState) => void;
+    setBootstrapRetry: (retry: number) => void;
     setCaptureLogs: (capture: boolean) => void;
     setCreateWorkspace: (create: boolean) => void;
     setWorkspaceChoiceConfirmed: (confirmed: boolean) => void;
@@ -550,6 +490,7 @@ function useResetOnClose(
     s.setSkipIntro(readSkipIntro());
     s.setAuth({ kind: "checking" });
     s.setBootstrap({ kind: "idle" });
+    s.setBootstrapRetry(0);
     s.setCaptureLogs(true);
     s.setCreateWorkspace(true);
     s.setWorkspaceChoiceConfirmed(false);
@@ -564,6 +505,7 @@ function ImproveKandevCreateStage({
   onOpenChange,
   workspaceId,
   bootstrap,
+  onRetry,
   captureLogs,
   setCaptureLogs,
   onSuccess,
@@ -579,6 +521,7 @@ function ImproveKandevCreateStage({
   onOpenChange: (open: boolean) => void;
   workspaceId: string | null;
   bootstrap: BootstrapState;
+  onRetry: () => void;
   captureLogs: boolean;
   setCaptureLogs: (capture: boolean) => void;
   onSuccess?: (task: Task, meta?: { autoFocus?: boolean }) => void;
@@ -624,6 +567,7 @@ function ImproveKandevCreateStage({
       onOpenChange={onOpenChange}
       workspaceId={workspaceId}
       bootstrap={bootstrap}
+      onRetry={onRetry}
       captureLogs={captureLogs}
       setCaptureLogs={setCaptureLogs}
       transformDescription={transformDescription}

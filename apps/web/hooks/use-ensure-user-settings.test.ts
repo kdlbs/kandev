@@ -126,6 +126,7 @@ function makeUnloadedSettings(): UserSettingsState {
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},
+    markdownPreviewByDefault: true,
     lspStatusLocation: "toolbar",
     hiddenWorkflowStepIds: {},
     workflowIdsWithAutoHideEmptySteps: [],

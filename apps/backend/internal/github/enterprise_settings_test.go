@@ -28,7 +28,7 @@ func TestEnterpriseStaleSettingsDraftCannotWidenScope(t *testing.T) {
 		t.Fatalf("stale settings draft accepted: %v", err)
 	}
 	settings, err := service.GetWorkspaceSettings(ctx, "ws-1")
-	if err != nil || settings.RepoScopeMode != RepoScopeModeRepos {
+	if err != nil || settings.RepoScopeMode != RepoScopeModeSelected {
 		t.Fatalf("replacement scope widened %+v, error %v", settings, err)
 	}
 }

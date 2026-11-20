@@ -412,6 +412,24 @@ func (s *inheritedTransitionIntegrationStore) UpdateTaskSessionIfCurrentState(
 	return s.database.UpdateTaskSessionIfCurrentState(ctx, session, expected)
 }
 
+func (s *inheritedTransitionIntegrationStore) UpdateTaskSessionIfCurrentStateForLaunch(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, error) {
+	return s.database.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
+}
+
+func (s *inheritedTransitionIntegrationStore) UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, error) {
+	return s.database.UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(ctx, session, expected, attemptID)
+}
+
 // @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.8
 func TestLaunchPreparedSession_InheritedExecutorRaceUsesOneSQLiteClaim(t *testing.T) {
 	ctx := context.Background()

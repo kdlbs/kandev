@@ -63,6 +63,27 @@ afterEach(() => {
 });
 
 describe("useMonacoCursorNavigation", () => {
+  it("lays out the editor before revealing a non-flashed pending cursor", () => {
+    const fake = createModelSwitchingEditor();
+    const { rerender } = renderHook(
+      ({ path }) =>
+        useMonacoCursorNavigation({
+          editor: fake.editor,
+          path,
+          worktreePath: WORKTREE_PATH,
+        }),
+      { initialProps: { path: OTHER_PATH } },
+    );
+    setPendingCursorPosition(TARGET_PATH, 180, 7);
+
+    rerender({ path: TARGET_PATH });
+    act(() => fake.switchToTarget());
+
+    expect(fake.editor.layout).toHaveBeenCalledTimes(1);
+    expect(fake.editor.setPosition).toHaveBeenCalledWith({ lineNumber: 180, column: 7 });
+    expect(fake.editor.revealLineInCenter).toHaveBeenCalledWith(180);
+  });
+
   it("reveals a flashed pending cursor after a cached Monaco model swap", () => {
     vi.useFakeTimers();
     const fake = createModelSwitchingEditor();

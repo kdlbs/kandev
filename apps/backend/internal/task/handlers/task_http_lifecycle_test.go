@@ -396,7 +396,19 @@ func TestHTTPQuerySidebarTasksUsesDefaultsAndAuthenticatedPreferences(t *testing
 	require.Equal(t, "none", repo.sidebarQuery.Group)
 	require.Equal(t, []string{"task-b"}, repo.sidebarPrefs.PinnedTaskIDs)
 	require.Contains(t, rec.Body.String(), `"query_key":"key"`)
-	require.Contains(t, rec.Body.String(), `"task":{"id":"task-b"`)
+	var payload struct {
+		Entries []struct {
+			Task *struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"task"`
+		} `json:"entries"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	require.Len(t, payload.Entries, 1)
+	require.NotNil(t, payload.Entries[0].Task)
+	require.Equal(t, "task-b", payload.Entries[0].Task.ID)
+	require.Equal(t, "Mine", payload.Entries[0].Task.Title)
 	require.Contains(t, rec.Body.String(), `"wip_queue_position":3`)
 	require.Contains(t, rec.Body.String(), `"wip_queue_total":7`)
 	require.Contains(t, rec.Body.String(), `"subtask_count":4`)
@@ -645,7 +657,7 @@ func TestHTTPBulkMoveSelectedTasksWithEmptySelectionIsANoOp(t *testing.T) {
 	})
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.JSONEq(t, `{"moved_count":0}`, rec.Body.String())
+	require.JSONEq(t, `{"moved_count":0,"moved_task_ids":[]}`, rec.Body.String())
 }
 
 // @covers REQ-PLUGINS-TASKLIST-FACETS-002

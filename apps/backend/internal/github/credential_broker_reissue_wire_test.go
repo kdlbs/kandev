@@ -198,6 +198,28 @@ func TestCredentialBrokerReissueRejectsLegacyCapabilityField(t *testing.T) {
 	}
 }
 
+func TestCredentialBrokerReissueRejectsCapabilityWhenDisabledOverHTTP(t *testing.T) {
+	for _, route := range brokerReissueRoutes {
+		t.Run(route.reissue, func(t *testing.T) {
+			broker, _ := newReissueCapabilityBroker(t, "test-signing-key")
+			_, capability := issueBrokerLeaseWithCapability(t, broker)
+			broker.broker.SetReissueCapabilitySigner(nil)
+			router := newBrokerHTTPTestRouter(t, broker)
+
+			requireBrokerLeaseFailure(t,
+				postBrokerBody(t, router, route.reissue, brokerReissueRequest(capability.Token)), route.code)
+			lease, err := broker.broker.Issue(t.Context(), gitcredentials.Scope{
+				ProviderID: "github", WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1",
+				RepositoryID: "repository-1", Host: "github.com", Path: "/kdlbs/kandev.git",
+			})
+			if err != nil {
+				t.Fatalf("lease-only Issue() while disabled: %v", err)
+			}
+			requireBrokerCredential(t, postBrokerBody(t, router, route.resolve, brokerResolveRequest(lease.Token)))
+		})
+	}
+}
+
 // TestCredentialBrokerReissueRecoversRotatedLeaseOverHTTP covers
 // AC-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001.7 through the real router: the
 // old lease is revoked by the rotation, one reissue binds a lease to the new
