@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,6 +65,7 @@ func insertWorkflow(t *testing.T, db *sqlx.DB, id, name string) {
 
 // mockWorkflowProvider implements WorkflowProvider with in-memory state for tests.
 type mockWorkflowProvider struct {
+	mu               sync.Mutex
 	workflows        []*taskmodels.Workflow
 	getWorkflowCalls int
 	deleted          []string
@@ -91,6 +93,9 @@ func (m *mockWorkflowProvider) ListWorkflows(_ context.Context, workspaceID stri
 }
 
 func (m *mockWorkflowProvider) GetWorkflow(_ context.Context, id string) (*taskmodels.Workflow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.getWorkflowCalls++
 	for _, wf := range m.workflows {
 		if wf.ID == id {
