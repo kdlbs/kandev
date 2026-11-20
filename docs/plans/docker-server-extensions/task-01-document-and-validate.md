@@ -76,12 +76,19 @@ publication; the local validator unit tests alone do not establish that status.
 
 - The preceding documentation candidate passed 63 public-doc tests and the
   54-page validator; its 15.19 package pin built on linux/amd64. An invalid
-  package version failed with apt exit 100. The current example pins 15.20 and
-  needs a fresh build and documentation checks.
+  package version failed with apt exit 100.
+- Follow-up commit `c7a7cc69d61774764f227b59eaad3a3a1e5f3edd` pins package
+  version 15.20. Its linux/amd64 image build passed and `psql --version`
+  reported 15.20. Public-doc tests passed 63/63, the validator checked 55
+  pages, specification lint passed, and PR-doc tests passed 101/101.
 - Independent QA observed a synthetic Local ACP agent's actual child command
-  output before and after same-volume server recreation: UID 1000, persistent
-  home and cache ownership, `/usr/bin/psql`, and the retained marker. The
-  synthetic fixture did not authenticate a real provider or exercise Worktree.
+  output on the preceding 15.19 image, before and after same-volume server
+  recreation: UID 1000, persistent home and cache ownership, `/usr/bin/psql`,
+  and the retained marker. The synthetic fixture did not authenticate a real
+  provider or exercise Worktree. The updated 15.20 image has not received this
+  agent-session or container-recreation check, nor an arm64 build.
+- The earlier documentation-coverage correction left the example and guide
+  unchanged. The follow-up refreshes the package pin and upgrade guidance.
 - The source Dockerfile and user guide are unchanged by this documentation
   coverage correction. Fresh exact-head checks and independent Review/QA are
   pending for the added work-order package.

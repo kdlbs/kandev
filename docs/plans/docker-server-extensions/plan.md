@@ -37,9 +37,13 @@ QA also observed a task-private synthetic Local ACP agent execute real child
 commands before and after recreation and read the marker through its output.
 This does not verify a real provider CLI or Worktree-specific launch. The
 disposable servers and volumes were removed. The public-doc validator and its
-tests passed on the preceding documentation commit. The current example pins
-PostgreSQL 15.20 and requires a fresh image build and relevant documentation
-checks.
+tests passed on the preceding documentation commit. Follow-up commit
+`c7a7cc69d61774764f227b59eaad3a3a1e5f3edd` pins PostgreSQL 15.20. Its
+linux/amd64 image build passed and `psql --version` reported 15.20. The public-
+doc tests passed 63/63, the validator checked 55 pages, specification lint
+passed, and the PR-doc tests passed 101/101. The 15.20 image has not been
+checked through a Local or Worktree agent session or after container
+recreation. The prior synthetic Local agent results used the 15.19 image.
 
 The PR remains open while its required documentation-coverage and Claude review
 checks are resolved. A new package commit needs current-head Review and
