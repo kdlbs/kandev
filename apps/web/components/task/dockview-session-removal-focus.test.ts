@@ -427,3 +427,79 @@ it.each(["pending", "hidden"] as const)(
     }
   },
 );
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
+it.each([false, true, "background"] as const)(
+  "owns a predecessor already parked before remote removal (mode: %s)",
+  async (mode) => {
+    const hidden = mode === true;
+    const { store, view, refs } = scene();
+    const original = useDockviewStore.getState();
+    useDockviewStore.setState({
+      api: view.api,
+      currentLayoutEnvId: null,
+      isRestoringLayout: false,
+      preMaximizeLayout: null,
+    });
+    if (hidden) hideSessionPanel(view.api, "latest", "t1");
+    const groups = [...view.api.groups];
+    const parked = {
+      columns: [
+        {
+          id: "center",
+          groups: [
+            {
+              id: groups[0].id,
+              activePanel: OLD_PANEL_ID,
+              panels: groups[0].panels.map((panel) => ({
+                id: panel.id,
+                component: panel.id.startsWith("session:") ? "chat" : "plan",
+                title: "Panel",
+              })),
+            },
+          ],
+        },
+      ],
+    };
+    useDockviewStore.setState({ preMaximizeLayout: parked });
+    const getPanel = view.api.getPanel;
+    Object.assign(view.api, {
+      groups: groups.slice(1),
+      getPanel: (id: string) =>
+        groups[0].panels.some((panel) => panel.id === id) ? null : getPanel(id),
+    });
+    if (mode === "background") store.getState().setActiveSessionAuto("t1", "latest");
+    const stop = setupRemovalSurfaceFocus(view.api, store);
+    const proof = Promise.withResolvers<TaskSessionsResponse>();
+    vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
+    try {
+      registerTaskSessionHandlers(store)[REMOVED_ACTION]!({
+        id: "parked-remote-removal",
+        type: "notification",
+        action: REMOVED_ACTION,
+        payload: { task_id: "t1", session_id: "old" },
+      });
+      proof.resolve(membership("latest", "next", LATER));
+      await flushFocusWork();
+      runAutoSessionTabEffect("latest", store, refs);
+      if (hidden) {
+        const savedIds = useDockviewStore
+          .getState()
+          .preMaximizeLayout?.columns.flatMap((column) =>
+            column.groups.flatMap((group) => group.panels.map((panel) => panel.id)),
+          );
+        expect(savedIds).not.toContain(LATEST_PANEL_ID);
+      }
+      expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(true);
+      Object.assign(view.api, { groups, getPanel });
+      expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(true);
+      expect(isRemovalChatBlocked(view.api, store, LATEST_PANEL_ID, store.getState())).toBe(false);
+      store.getState().setActiveSession("t1", "next");
+      expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(false);
+    } finally {
+      stop();
+      Object.assign(view.api, { groups, getPanel });
+      useDockviewStore.setState(original);
+    }
+  },
+);

@@ -153,6 +153,9 @@ describe("owned empty-slot continuation", () => {
 
   it("continues a workflow-cancelled empty slot without admitting an unseen sibling", async () => {
     const store = withSiblings("FAILED");
+    store.getState().setActiveTask(OTHER_TASK);
+    promote(store, "next");
+    store.getState().setActiveSessionAuto("t1", "old");
     const first = proofRead();
     vi.mocked(listTaskSessions).mockReturnValue(first.promise);
     const requestId = beginMove(store);
@@ -160,6 +163,17 @@ describe("owned empty-slot continuation", () => {
     first.resolve(membership("next", "latest"));
     await flushFocusWork();
     store.getState().cancelWorkflowSessionFocus({ requestId });
+    expect(store.getState().tasks.activeSessionId).toBeNull();
+    const calls = vi.mocked(listTaskSessions).mock.calls.length;
+    promote(store, "next");
+    registerTasksHandlers(store)["task.updated"]!(
+      makeMessage({
+        id: "t1",
+        title: "Rename without primary",
+      }),
+    );
+    await flushFocusWork();
+    expect(vi.mocked(listTaskSessions).mock.calls).toHaveLength(calls);
     expect(store.getState().tasks.activeSessionId).toBeNull();
     store
       .getState()

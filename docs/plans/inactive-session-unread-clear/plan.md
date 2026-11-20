@@ -1,6 +1,6 @@
 ---
 created: 2026-11-16
-status: done
+status: in_progress
 requirements:
   - REQ-TASKS-TASK-UNREAD-DOT-001
 system_design:
@@ -627,5 +627,16 @@ fix. It is separate from the five design-only rounds above.
   24 desktop cases and 8 phone cases passed. A real remount cursor leak was
   reproduced and repaired after the fixture corrections. Task 02 records all
   intermediate/final receipts. Independent review remains open; round 16 is next.
-- Completed rounds: 15. Consecutive clean: 0. Stop after three consecutive
+- Round 16: Sol child `f69c0cc0-fed3-4ce0-8a3a-1c6a61e94fec` reviewed
+  `f67355c127`. Four P2s reproduced: parked-first removal misses its group lease;
+  maximize restoration can insert hidden C; unchanged primary updates fill a
+  workflow-cancelled slot; terminal passthrough fallback bypasses read admission.
+  Corrections and scoped verification are complete: 176 unit cases, all 18
+  desktop removal/unread cases and eight phone cases passed on the fresh
+  frontend. Real browser follow-through additionally repaired transient and
+  disposed-portal visibility during maximization; Task 02 retains RED and
+  intermediate failures, exact commands, captures and backend-reuse limits.
+  Strict lint/typecheck/changed-code formatting/ratchets passed. Independent review remains
+  open; round 17 is next.
+- Completed rounds: 16. Consecutive clean: 0. Stop after three consecutive
   clean rounds or 50 rounds. Earlier loops do not count.

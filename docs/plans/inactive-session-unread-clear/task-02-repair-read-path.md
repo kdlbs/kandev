@@ -1,7 +1,7 @@
 ---
 id: "02-repair-read-path"
 title: "Repair the demonstrated inactive-session read path"
-status: done
+status: in_progress
 wave: 2
 depends_on:
   - 01-establish-failure-boundary
@@ -2362,3 +2362,151 @@ checkpoint the parent proceeds to normal selective commit and exact fork push,
 then independent Sol R16 review. No repeated rebase or PR. Individual hook
 streams are unavailable from the selective commit API; no bypass is used.
 Completed production reviews: 15; consecutive clean: 0.
+
+### Production-fix review round 16 remediation
+
+Preserve .6/.9/.11/.12/.17 across maximize-before-removal, hide admission, empty
+continuation, and terminal passthrough. Reuse existing desktop controls, phone
+visibility, and Preview's no-mark-read policy. No new copy, geometry, cursor,
+predicate, backend promotion, wire or schema contract.
+
+```text
+Desktop: maximize independent group -> remote delete A -> capture parked A
+         prove C -> restore -> unproven B remains unread; hidden C stays hidden
+Empty:   workflow fails -> unchanged/omitted C update -> still null, no new read
+         genuinely changed D -> authoritative membership proof -> D
+Terminal passthrough: blocked B receives tail -> cursor unchanged
+         explicit B -> exact tail; Preview's later tail remains unread
+```
+
+`r16-red.log`: three behavioral failures / 44 controls: no parked predecessor
+lease, hidden C inserted into the saved group, and a repeated C projection
+starting another membership read. `r16-passthrough-red-summary.log` /
+`r16-quiet/kandev-run.e2e.0W9BdRtp.log`: a real terminal passthrough B advanced
+its cursor on a new stored tail while replacement membership was held. This
+uses the retained R15 bundle deliberately for RED, not a source-text assertion.
+
+The group owner can capture its active predecessor and members from the parked
+snapshot before reconciliation trims it. Session hiding filters reconciliation
+and the final saved-layout restore. Receipt-only continuation now requires an
+actual accepted primary identity change; existing pending owners keep their
+own projection rules. Passthrough recovery forwards host visibility/detail/
+panel identity into TaskChatPanel, and Preview explicitly keeps `isVisible=false`.
+Ordinary desktop, shared Dockview and phone callers propagate their own admission.
+
+The owning unit/toolbar suites and initial typecheck passed in `r16-green.log`
+and `r16-typecheck.log`. Browser coverage reverses the real split-removal order,
+keeps visible and hidden recipient variants, and checks terminal passthrough
+negative traffic/persisted cursors plus normal explicit-view and Preview controls.
+
+The first fresh R16 browser run (`r16-owning-desktop-summary.log`,
+`r16-quiet/kandev-run.e2e.eNlaTEjQ.log`) passed the live remote split and
+terminal-passthrough/Preview cases, but was not green: the parked visible case
+advanced B's cursor; the hidden fixture could not reach C's clipped close button.
+Maximization had legitimately adopted the other split's C globally before
+background A was removed. Group-local A still needed a lease. The new
+background-parked real-store control reproduced that gap (one failure /
+20 controls in `r16-background-red.log`). Confirmed retirement now captures
+the active live/parked group independently of global session selection.
+`r16-background-green.log` passes that control. The hidden fixture keeps C in
+the wide center group, hides it through its real close control, then maximizes
+the independent Files group before deletion. Its no-rematerialization, exact
+cursor/traffic, dot and explicit-reopen assertions remain unchanged.
+
+Final R16 commands from the mount-checked cache snapshot, after `refresh` and
+`pnpm run pretypecheck` (`TMPDIR`/`GOTMPDIR` remain cache-backed):
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run \
+  hooks/use-panel-active.test.ts \
+  components/task/dockview-session-removal-focus.test.ts \
+  lib/ws/handlers/task-primary-continuation.test.ts \
+  components/task/passthrough-toolbar.test.tsx \
+  lib/state/dockview-env-switch-maximize-session-filter.test.ts \
+  components/task/dockview-session-tabs.test.ts \
+  components/task/dockview-session-tabs.hook.test.tsx \
+  components/task/dockview-shared.test.tsx \
+  components/task/preview-session-tabs.test.tsx
+pnpm run typecheck
+pnpm run build:vite
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/task/task-unread-dot.spec.ts -- --workers=1 --retries=0 \
+  --output "$SNAPSHOT/r16-final-desktop"
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0 \
+  --output "$SNAPSHOT/r16-final-phone"
+```
+
+Browser output is retained through `scripts/run-quiet`, serially and without
+retries. This run rebuilds the frontend; the existing R02 backend/plugin
+artifacts are retained. It is not a broad-suite or live-NATS certification.
+
+Phase-local cursor assertions in `r16-parked-phases-summary.log` /
+`r16-quiet/kandev-run.e2e.sqxCLwGS.log` isolated an additional boundary:
+both parked variants had already read B during maximization, before deletion.
+The background lease correction alone therefore did not make the browser cases
+green. `r16-restore-admission-red.log` reproduces transient visible admission
+in the shared panel hook (one failure / six controls). `usePanelActive` now
+withholds read/detail visibility during layout reconstruction, then resumes the
+actual selected tab's visibility. Ordinary stable independent splits remain
+visible. The parked tests retain checks before deletion, before restoration,
+and after restoration so these phases cannot mask one another.
+
+The reconstruction-only gate passed 175 unit controls and strict checks but
+did not fix the browser read (`r16-restore-parked-summary.log`). Read-only
+traffic in `r16-parked-stimulus-summary.log` /
+`r16-quiet/kandev-run.e2e.KfRFdDB2.log` confirms B's newly seeded tail, not
+another delayed old acknowledgement, was read before deletion. Parked portals
+can retain disposed panel APIs that still report visibility after restoration
+ends. `r16-parked-portal-red.log` reproduces that stale visibility after the
+restore flag clears; the shared hook now also requires the portal API to be
+the current Dockview panel's API. `r16-parked-portal-green.log` covers parked
+denial and later legitimate remount admission. Temporary diagnostic logging
+was removed; the phase-specific cursor assertions remain.
+
+Final receipts on the current portal-identity-aware frontend:
+
+- `r16-portal-unit.log`: nine files / 176 cases passed.
+- `r16-portal-lint.log`, `r16-portal-typecheck.log` and
+  `r16-portal-build.log`: strict changed-file lint, full web typecheck and
+  fresh frontend build passed. Final formatting and sleep/copy ratchets passed
+  (`r16-final-{format,sleeps,i18n}.log`).
+- `r16-portal-parked-summary.log` /
+  `r16-quiet/kandev-run.e2e.6OPFq5bX.log`: both previously leaking parked
+  variants passed, including each pre-deletion cursor assertion.
+- `r16-final-desktop-summary.log` /
+  `r16-quiet/kandev-run.e2e.TZ3Ky5hX.log`: all 18 cases in the complete
+  desktop removal and unread-dot files passed.
+- `r16-final-phone-summary.log` /
+  `r16-quiet/kandev-run.e2e.IDdCLrE5.log`: all eight phone cases passed,
+  after the desktop run, on the same frontend. Both runs used one worker and
+  no retries. No production edits followed this build.
+
+Inspected saved desktop parked-visible/hidden captures: B's group stays empty,
+the independent visible C split remains available, hidden C has no tab, and
+the unread task dot remains. Inspected final phone failed-resume and owned-gap
+captures: recovery actions remain visible for the failed session; the owned
+empty interval does not expose the route sibling. These are disposable managed
+browser receipts, not user-browser or live-database mutations.
+
+R16 corrections and targeted verification are complete. The parent proceeds
+to normal selective commit and exact fork push, then separate Sol R17 review.
+No repeated rebase, PR, hook bypass, broad-suite or live-NATS claim. Original
+incident attribution, retained backend/plugin and authoritative-list convergence
+limits above remain unchanged. Completed production reviews: 16; consecutive
+clean: 0.
+
+Final catalog validation and full specification lint passed
+(`r16-final-docs.log`). An additional full-file Markdown Prettier check reports
+style warnings in the three touched documents (`r16-final-doc-format.log`);
+no broad prose/table reflow was applied. Changed-code formatting above passed.
+
+The first normal commit attempt rejected a duplicate literal in the new hook
+test. Extracting its local panel ID then exposed the test container's existing
+100-line budget. Grouping restoration/remount cases separately and sharing
+cleanup resolves both without suppressions. Final hook regression: eight
+cases passed (`r16-hook-unit.log`); all 14 changed code/test files passed
+zero-warning Oxlint (`r16-hook-lint.log`). These are test-only corrections;
+the final browser bundle and production code above are unchanged.

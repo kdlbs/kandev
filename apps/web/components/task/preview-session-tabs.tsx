@@ -566,7 +566,9 @@ export function PreviewSessionBody({
   resumption?: SessionRecoveryOwner;
 }) {
   if (session.is_passthrough) {
-    return <PassthroughToolbar sessionId={session.id} taskId={taskId} />;
+    return (
+      <PassthroughToolbar sessionId={session.id} taskId={taskId} isVisible={false} detailActive />
+    );
   }
 
   return (

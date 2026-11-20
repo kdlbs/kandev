@@ -616,6 +616,12 @@ export function followUpdatedTaskPrimary(
   if (state.tasks.activeTaskId !== taskId) return;
   const targetSessionId = findTaskInState(state, taskId)?.primarySessionId;
   const existing = pendingByStore.get(store);
+  if (
+    !existing &&
+    getProvenRemovalPredecessor(store, taskId, null) &&
+    targetSessionId === previousPrimary
+  )
+    return;
   const previousSessionId =
     getProvenRemovalPredecessor(store, taskId, null) ??
     (existing?.taskId === taskId ? existing.previousSessionId : previousPrimary);

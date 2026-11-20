@@ -251,10 +251,10 @@ a changed primary; newer user/workflow selection wins. Surviving pins/cursors st
 untouched. Proof initializes missing recipient identity/lifecycle only.
 
 Preview validates discovery; workflow focus survives pending membership.
-Removal receipts protect display until selection/navigation; empty slots re-prove
-changed primaries, blocking discovery. Rebuilds/maximize retain group leases.
-Hide admission is session-owned; dot exclusion uses readable group visibility.
-Independent splits and non-agent focus stay intact.
+Removal read gates cover parked/live groups and layout restoration.
+Only changed primaries re-prove empty slots; hides gate restore.
+All transcript hosts inherit read gates; dots use group visibility.
+Independent splits/non-agent focus survive; failed workflow is not selection.
 
 `invalidateTaskSessionMembership` fences foreground/removal-dialog pending,
 admitted and queued publications. New reads/unrelated keys remain usable.

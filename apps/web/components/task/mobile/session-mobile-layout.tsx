@@ -199,6 +199,8 @@ function MobileChatPanelContent({
             key={effectiveSessionId}
             sessionId={effectiveSessionId}
             taskId={activeTaskId}
+            isVisible={isVisible}
+            detailActive={isVisible}
           />
         </div>
       ) : (

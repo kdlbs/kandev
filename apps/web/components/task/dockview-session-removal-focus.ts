@@ -22,6 +22,15 @@ type SurfaceOwner = {
 };
 const surfaces = new WeakMap<DockviewApi, Map<string, SurfaceOwner>>();
 
+function predecessorGroup(api: DockviewApi, sessionId: string) {
+  const panel = api.getPanel(`session:${sessionId}`);
+  if (panel) return panel.group.activePanel?.id === panel.id ? panel.group : undefined;
+  return useDockviewStore
+    .getState()
+    .preMaximizeLayout?.columns.flatMap((column) => column.groups)
+    .find((group) => group.activePanel === `session:${sessionId}`);
+}
+
 function captureVisiblePredecessor(
   api: DockviewApi,
   store: StoreApi<AppState>,
@@ -40,21 +49,32 @@ function captureVisiblePredecessor(
     scopeIdentity !== stateReadScopeIdentity(previous)
   )
     return;
-  const panel = api.getPanel(`session:${sessionId}`);
-  if (!panel || panel.group.activePanel?.id !== panel.id) return;
+  return captureSessionSurface(api, store, current, sessionId);
+}
+
+function captureSessionSurface(
+  api: DockviewApi,
+  store: StoreApi<AppState>,
+  current: AppState,
+  sessionId: string,
+): SurfaceOwner | undefined {
+  const taskId = current.tasks.activeTaskId;
+  const group = predecessorGroup(api, sessionId);
+  if (!taskId || !group?.id) return;
+  const scopeIdentity = stateReadScopeIdentity(current);
   const globalPanel = api.activePanel?.id;
   return {
     store,
     taskId,
     previousSessionId: sessionId,
-    groupId: panel.group.id,
+    groupId: group.id,
     navigationRevision: current.taskRemoval.navigationRevision,
     workflowFocus: current.workflowSessionFocus,
     scopeIdentity,
     restorePanelId: globalPanel && !globalPanel.startsWith("session:") ? globalPanel : null,
     cancelled: false,
     focusDelivered: false,
-    panelIds: new Set(panel.group.panels.map((member) => member.id)),
+    panelIds: new Set(group.panels.map((member) => member.id)),
   };
 }
 
@@ -94,6 +114,35 @@ function pruneSurfaces(api: DockviewApi, state: AppState): void {
   }
 }
 
+function captureRetiredSurfaces(
+  api: DockviewApi,
+  store: StoreApi<AppState>,
+  current: AppState,
+  previous: AppState,
+): void {
+  if (
+    current.taskSessions.confirmedRemovals === previous.taskSessions.confirmedRemovals ||
+    stateReadScopeIdentity(current) !== stateReadScopeIdentity(previous)
+  )
+    return;
+  for (const id in previous.taskSessions.items) {
+    if (
+      previous.taskSessions.items[id]?.task_id !== current.tasks.activeTaskId ||
+      isConfirmedSessionRemoved(previous.taskSessions, id) ||
+      !isConfirmedSessionRemoved(current.taskSessions, id)
+    )
+      continue;
+    const captured = captureSessionSurface(api, store, current, id);
+    if (!captured) continue;
+    let owners = surfaces.get(api);
+    if (!owners) {
+      owners = new Map();
+      surfaces.set(api, owners);
+    }
+    if (!owners.has(captured.groupId)) owners.set(captured.groupId, captured);
+  }
+}
+
 /** Only explicit/proven ownership can expose a removed group's fallback transcript. */
 export function setupRemovalSurfaceFocus(api: DockviewApi, store: StoreApi<AppState>): () => void {
   const unsubscribe = store.subscribe((current, previous) => {
@@ -108,6 +157,7 @@ export function setupRemovalSurfaceFocus(api: DockviewApi, store: StoreApi<AppSt
       }
       owners.set(captured.groupId, captured);
     }
+    captureRetiredSurfaces(api, store, current, previous);
   });
   const cancel = () => {
     for (const owner of surfaces.get(api)?.values() ?? []) owner.cancelled = true;

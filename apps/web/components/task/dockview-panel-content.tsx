@@ -114,7 +114,13 @@ function ChatContent({
       {isPassthrough ? (
         <PanelRoot>
           <PanelBody padding={false} scroll={false}>
-            <PassthroughToolbar sessionId={sessionId} taskId={taskId} />
+            <PassthroughToolbar
+              sessionId={sessionId}
+              taskId={taskId}
+              isVisible={detailVisible}
+              detailActive={detailVisible}
+              panelId={panelId}
+            />
           </PanelBody>
         </PanelRoot>
       ) : (

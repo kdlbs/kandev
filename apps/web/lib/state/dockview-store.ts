@@ -1677,8 +1677,16 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       });
     },
     exitMaximizedLayout: () => {
-      const { api, preMaximizeLayout, currentLayoutEnvId } = get();
-      if (!api || !preMaximizeLayout) return;
+      const { api, preMaximizeLayout: savedLayout, currentLayoutEnvId } = get();
+      if (!api || !savedLayout) return;
+      const hidden = currentLayoutEnvId ? getEnvHiddenSessions(currentLayoutEnvId) : [];
+      const preMaximizeLayout = hidden.length
+        ? filterPreMaximizeLayout(
+            savedLayout,
+            null,
+            [...collectSessionIdsFromLayout(savedLayout)].filter((id) => !hidden.includes(id)),
+          )
+        : savedLayout;
       preserveChatScrollDuringLayout();
       const measured = measureDockviewContainer(api);
       const safeWidth = measured.width;

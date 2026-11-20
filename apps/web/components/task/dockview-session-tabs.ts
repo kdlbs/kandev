@@ -555,13 +555,12 @@ function reconcileLoadedSessionPanels(
   sessionListLoaded: boolean,
 ): void {
   if (!sessionListLoaded) return;
-  reconcileRemovedSessionPanels(
-    api,
-    refs.sessionTabCreatedRef.current,
-    currentSessionIds,
-    effectiveSessionId ?? "",
-  );
-  useDockviewStore.getState().reconcileMaximizeSessionList(effectiveSessionId, currentSessionIds);
+  const hidden = hiddenSessionIdsFor(api);
+  const ids = hidden.size ? currentSessionIds.filter((id) => !hidden.has(id)) : currentSessionIds;
+  const selected =
+    effectiveSessionId && !hidden.has(effectiveSessionId) ? effectiveSessionId : null;
+  reconcileRemovedSessionPanels(api, refs.sessionTabCreatedRef.current, ids, selected ?? "");
+  useDockviewStore.getState().reconcileMaximizeSessionList(selected, ids);
 }
 
 function workflowFocusRequestIdForSession(
