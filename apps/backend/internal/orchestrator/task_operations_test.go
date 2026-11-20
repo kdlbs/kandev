@@ -3803,8 +3803,14 @@ func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateTypedRecoveryError(
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
 
 	launchErr := errors.New("environment preparation failed: fatal: couldn't find remote ref feature/deleted-pr")
+	var observedStartAttemptID string
 	agentMgr := &mockAgentManager{
-		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		launchAgentFunc: func(launchCtx context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchSession, err := repo.GetTaskSession(launchCtx, "session1")
+			require.NoError(t, err)
+			require.Equal(t, models.TaskSessionStateCreated, launchSession.State)
+			observedStartAttemptID = models.StringFromAny(launchSession.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+			require.NotEmpty(t, observedStartAttemptID, "start attempt must be durable before LaunchAgent")
 			return nil, launchErr
 		},
 	}
@@ -3832,6 +3838,9 @@ func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateTypedRecoveryError(
 		t.Fatal("typed launch failure must not suppress the pointer toast")
 	}
 	requirePersistedSessionLaunchError(t, repo, "session1")
+	failedSession, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	require.Equal(t, observedStartAttemptID, models.StringFromAny(failedSession.Metadata[models.SessionMetaKeyAgentStartAttemptID]))
 }
 
 func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
