@@ -267,38 +267,130 @@ func recoveryPhaseRank(phase string) int {
 	return 0
 }
 
-// ClearAgentDeliveryRecovery marks the notice settled only if its immutable
-// prompt identity still matches. A delayed terminal for an older submission
+// ClearAgentDeliveryRecovery settles the notice only while its prompt
+// identity still matches. A delayed terminal for an older submission
 // cannot overwrite a newer recovery state.
 func (r *Repository) ClearAgentDeliveryRecovery(
 	ctx context.Context,
 	sessionID, incarnationID, submissionID string,
 	harnessGeneration int64,
 ) (bool, error) {
-	session, err := r.GetTaskSession(ctx, sessionID)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		if errors.Is(err, models.ErrTaskSessionNotFound) {
-			return false, nil
-		}
 		return false, err
 	}
-	if session.QueueIncarnationID != incarnationID {
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
+		return false, err
+	}
+	sessionQuery := `SELECT queue_incarnation_id, metadata FROM task_sessions WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		sessionQuery += forUpdateClause
+	}
+	var storedIncarnation sql.NullString
+	var metadataValue sql.NullString
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(sessionQuery), sessionID).Scan(
+		&storedIncarnation, &metadataValue,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
-	recovery, ok := models.LoadAgentDeliveryRecovery(session.Metadata)
-	if !ok || recovery.SessionID != sessionID || recovery.IncarnationID != incarnationID || recovery.SubmissionID != submissionID ||
-		recovery.HarnessGeneration != harnessGeneration {
+	if err != nil {
+		return false, err
+	}
+	if !storedIncarnation.Valid || storedIncarnation.String != incarnationID {
 		return false, nil
 	}
-	if recovery.Phase == models.AgentDeliveryRecoverySettled {
+	metadata, err := decodeAgentDeliveryMetadata(metadataValue)
+	if err != nil {
+		return false, err
+	}
+	recovery, exists, err := agentDeliveryRecoveryFromMetadata(metadata)
+	if err != nil {
+		return false, err
+	}
+	if !exists || recovery.SessionID != sessionID || recovery.IncarnationID != incarnationID ||
+		recovery.SubmissionID != submissionID || recovery.HarnessGeneration != harnessGeneration ||
+		recovery.Phase == models.AgentDeliveryRecoverySettled {
 		return false, nil
 	}
-	settled := recovery
-	settled.Phase = models.AgentDeliveryRecoverySettled
-	settled.Revision++
-	settled.UpdatedAt = r.nowUTC()
-	return r.SetSessionMetadataKeyIfJSONValue(ctx, sessionID,
-		models.SessionMetaKeyAgentDeliveryRecovery, recovery, settled)
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, []string{recovery.StreamID}); err != nil {
+		return false, err
+	}
+	effect, err := r.latestTerminalRecoveryEffectTx(ctx, tx, recovery)
+	if err != nil {
+		return false, err
+	}
+	settledRecovery := recovery
+	settledRecovery.Phase = models.AgentDeliveryRecoverySettled
+	if effect != nil {
+		settledRecovery.StreamID = effect.StreamID
+	}
+	settledRecovery.Revision++
+	settledRecovery.UpdatedAt = r.nowUTC()
+	expectedJSON, err := json.Marshal(recovery)
+	if err != nil {
+		return false, fmt.Errorf("serialize expected delivery recovery: %w", err)
+	}
+	settledJSON, err := json.Marshal(settledRecovery)
+	if err != nil {
+		return false, fmt.Errorf("serialize settled delivery recovery: %w", err)
+	}
+	updated, err := r.setSessionMetadataKeyIfJSONValueTx(
+		ctx, tx, sessionID, models.SessionMetaKeyAgentDeliveryRecovery,
+		expectedJSON, settledJSON, settledRecovery.UpdatedAt,
+	)
+	if err != nil || !updated {
+		return false, err
+	}
+	if effect != nil {
+		if _, err := r.bindOpenDeliveryBlocksToTerminalTx(ctx, tx, effect, settledRecovery.UpdatedAt, true); err != nil {
+			return false, err
+		}
+	}
+	if err := r.advanceRecoverySessionRevisionTx(ctx, tx, sessionID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Repository) latestTerminalRecoveryEffectTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	recovery models.AgentDeliveryRecovery,
+) (*models.AgentDeliveryEffect, error) {
+	var streamID string
+	var sequence int64
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT stream_id, sequence FROM agent_delivery_effects
+		WHERE effect_type = ? AND state IN (?, ?) AND session_id = ? AND incarnation_id = ?
+		  AND harness_generation = ? AND submission_id = ?
+		ORDER BY sequence DESC LIMIT 1`),
+		models.DeliveryTerminalEffectType, models.DeliveryEffectBlockResolved, models.DeliveryEffectCompleted,
+		recovery.SessionID, recovery.IncarnationID, recovery.HarnessGeneration, recovery.SubmissionID,
+	).Scan(&streamID, &sequence)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	effect, err := r.loadTerminalDeliveryEffectTx(ctx, tx, streamID, sequence)
+	if err != nil {
+		return nil, err
+	}
+	if effect == nil || (effect.State != models.DeliveryEffectBlockResolved && effect.State != models.DeliveryEffectCompleted) ||
+		effect.SessionID != recovery.SessionID || effect.IncarnationID != recovery.IncarnationID ||
+		effect.HarnessGeneration != recovery.HarnessGeneration || effect.SubmissionID != recovery.SubmissionID {
+		return nil, fmt.Errorf("terminal delivery effect identity conflict")
+	}
+	return effect, nil
 }
 
 // ResolveAgentDeliveryRecovery moves one live prompt notice to recovered and
