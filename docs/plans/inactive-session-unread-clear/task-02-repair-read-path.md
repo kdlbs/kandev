@@ -1898,3 +1898,200 @@ lint. Inspected the final phone failed-resume and last-session-removal captures:
 the failed transcript/recovery controls remain visible, and the retired route
 has no deleted conversation. These are disposable Chromium observations, not
 historical incident or live-NATS verification.
+
+### Production-fix review round 13 remediation
+
+Retain .6/.9/.11/.12/.17 across hidden panel admission and the phone's owned
+empty removal slot. Reuse existing hide state and scoped removal receipts;
+do not change cursors, unread eligibility, primary promotion or initial discovery.
+
+```text
+Desktop remote delete: A -> hidden proven C -> no C panel/read -> explicit reopen C
+Phone local delete:    route B, selected A -> ACK [owned blank] -> proven C
+                       B stays unread until an explicit picker selection
+```
+
+The phone reuses the shipped Sessions pill, picker and Delete confirmation;
+the conversation remains the sole scroll owner. No geometry, copy, breakpoint
+or touch control changes. Tests hold authentic membership after ACK and dismiss
+the picker without selecting a row. Independent splits and explicit choices
+remain eligible. Controlled regressions precede production changes.
+
+Reproduction and correction:
+
+- `r13-red.log`: four behavioral failures / 19 passing controls. Direct proof
+  rematerialized hidden C, double-rAF recovery recreated C hidden between frames,
+  and both owned-null route cases rendered unrelated B.
+- `r13-activation-red.log`: both direct hidden-recipient variants failed.
+  Isolating the internal activation path showed it selected B even without
+  running panel reconciliation; this is separate from C rematerialization.
+- `r13-desktop-red-summary.log` /
+  `r13-quiet/kandev-run.e2e.4OpQREno.log`: the real second-client Delete recreated
+  the hidden C tab. The deleting client uses cursor-read-only Preview so it
+  cannot accidentally acknowledge the target while performing the deletion.
+- The first phone attempt (`r13-phone-red-summary.log`) stopped at an overlay
+  dismissal assertion and is not behavioral RED. Using the supported Escape
+  dismissal, `r13-phone-red-escape-summary.log` /
+  `r13-quiet/kandev-run.e2e.731yNn9a.log` failed on the persisted B cursor:
+  it advanced to B's newly seeded tail after A's ACK while membership was held.
+  Picker/delete actions use actual touch input; no row selection dismissed it.
+- Panel creation now consults the existing hide state at `ensureSessionPanel`
+  and delayed recovery. Implicit activation cannot replace a hidden recipient
+  owned by a scoped removal proof; explicit tab input and reopen remain eligible.
+- The existing removal receipt can represent a null recipient. Local ACK and
+  successor-less retirement record the current scope/navigation/workflow owner
+  before publishing that empty slot. Route projection treats it as unresolved,
+  not discovery; proven C or newer explicit selection/navigation releases it.
+  No new persistent store field, unread filter or cursor suppression is added.
+- `r13-green.log`: all four initial owning files / 80 cases passed.
+  `r13-strict-lint.log` then found the controller's 606-line budget. Its existing
+  pure follow-state classifier and discriminant moved unchanged into
+  `session-selection.ts`; no lifecycle policy changed. Final revalidation also
+  covers complete zero-primary membership and newer navigation.
+
+Post-extraction scoped checks:
+
+- `r13-related-unit.log`: all 20 files / 403 cases passed, including real route
+  recovery, layout selection, initial discovery, zero-primary membership,
+  newer navigation and explicit-selection controls.
+- `r13-strict-lint-final.log`: all eleven changed web files passed with
+  `--deny-warnings`. `r13-typecheck.log` passed. No full-module
+  `session-selection` mocks required migration.
+
+Executed from the retained cache-backed `$VERIFY/apps/web` after refresh and
+`pnpm run pretypecheck`:
+
+```bash
+VITEST_MAX_WORKERS=2 pnpm exec vitest run \
+  components/task/dockview-session-removal-focus.test.ts \
+  components/task/dockview-session-tabs.test.ts \
+  components/task/dockview-session-tab-activation.test.ts \
+  components/task/dockview-session-tab-sync.test.ts \
+  components/task/dockview-session-tabs.hook.test.tsx \
+  components/task/task-page-session-ownership.test.tsx \
+  components/kanban-with-preview.session-ownership.test.tsx \
+  components/kanban-with-preview.rendered.test.tsx \
+  components/kanban-with-preview.copilot.test.tsx \
+  components/kanban-with-preview.test.ts \
+  lib/ws/handlers/task-primary-lifecycle.test.ts \
+  lib/ws/handlers/task-primary-continuation.test.ts \
+  lib/ws/handlers/task-primary-focus.test.ts \
+  lib/ws/handlers/task-primary-removal-admission.test.ts \
+  lib/ws/handlers/agent-session.test.ts \
+  lib/ws/handlers/tasks.test.ts \
+  lib/state/workflow-session-focus.test.ts \
+  hooks/domains/session/use-session-actions.removal-proof.test.ts \
+  hooks/use-session-layout-state.test.ts \
+  src/task-detail-route-recovery.test.tsx
+```
+
+`r13-code-static.log` passed Prettier, the E2E sleep ratchet and the i18n ratchet.
+As in R12, the snapshot's older Git baseline produces a wider ratchet scope and
+rename warnings; no configuration was changed to hide them.
+`r13-frontend-build.log` passed, with the fresh asset tree recorded in
+`r13-frontend.sha256`. Backend/plugin binaries remain the retained R02 artifacts.
+
+Full owning browser commands on that fresh frontend, one worker and no retries:
+
+```bash
+export KANDEV_RUN_QUIET_DIR="$SNAPSHOT/r13-quiet"
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/kanban/preview-session-removal.spec.ts \
+  e2e/tests/task/task-unread-dot.spec.ts -- \
+  --workers=1 --retries=0 --output "$SNAPSHOT/r13-desktop"
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- \
+  --workers=1 --retries=0 --output "$SNAPSHOT/r13-phone"
+```
+
+Intermediate browser and visual evidence:
+
+- `r13-desktop-summary.log` / `r13-quiet/kandev-run.e2e.inJTO6N3.log`:
+  all 22 desktop cases passed on the first fresh R13 bundle.
+- `r13-phone-summary.log` / `r13-quiet/kandev-run.e2e.ZG2M5Tl0.log`:
+  6 passed / 1 failed. The persisted B cursor and negative traffic assertions
+  passed; the test incorrectly rejected even the neutral no-session chat wrapper.
+  It now requires a null store selection and zero visible identified
+  conversations, not absence of the shared wrapper.
+- `r13-phone-final-summary.log` / `r13-quiet/kandev-run.e2e.9jOA7qfr.log`:
+  the complete seven-case phone file passed after that test-only correction.
+  `phone-owned-removal-gap.png` shows the neutral Session surface, not B or C;
+  releasing authentic membership then shows C, and explicit B reads its new tail.
+- Visual inspection of the hidden desktop case exposed another part of .12:
+  the sidebar excluded auto-selected hidden C as though it were displayed.
+  `r13-hidden-dot-summary.log` / `r13-quiet/kandev-run.e2e.PagX24DK.log`
+  proves authoritative unread IDs contain C while its dot is absent. This is
+  display ownership, not a missing cursor write or an unread-predicate change.
+- The shared dot-display hook now excludes a desktop-hidden session from its
+  displayed identity. It observes hide/layout changes and the environment-scoped
+  hide set, preserving mobile display and explicit reopen. The reactivity test
+  (`r13-dot-reactivity.log`) caught a reused API's environment change before that
+  scope subscription was added. Desktop/phone transitions and disposal are controls.
+
+The 22/7 browser receipts above precede this final dot-display correction.
+Final fresh-bundle and owning-consumer revalidation follows; delivery is pending.
+
+Final dot-display checks:
+
+- `r13-dot-final-unit.log`: six files / 47 cases passed after the last production
+  edit, including every new/changed regression and neighboring dot visibility/
+  render-stability contracts. This is separate from the earlier 20-file / 403
+  run, not a fresh combined full-suite result.
+- `r13-dot-strict-lint.log`: all thirteen changed web files passed deny-warnings
+  lint. `r13-dot-typecheck.log` passed.
+- The desktop case now also requires C's authoritative unread contribution and
+  visible task dot while C is hidden, then an empty contribution and no dot
+  after explicit reopen reads C's exact new tail. The pure unread predicate
+  and all cursor writers remain unchanged.
+
+`r13-dot-code-static.log` passed final formatting and sleep/i18n ratchets;
+the same older-snapshot rename warnings remain qualified.
+`r13-dot-frontend-build.log` and `r13-dot-frontend.sha256` identify the second,
+final frontend, including displayed-session ownership. Earlier bundle results
+are not promoted to final-bundle certification.
+
+Final changed-regression and adjacent-consumer command:
+
+```bash
+VITEST_MAX_WORKERS=2 pnpm exec vitest run \
+  components/task/dockview-session-removal-focus.test.ts \
+  components/task/task-page-session-ownership.test.tsx \
+  hooks/domains/sidebar/use-unread-task-dot-display.test.tsx \
+  components/task/task-switcher-unread-dot.test.tsx \
+  components/task/task-switcher-render-stability.test.tsx \
+  components/task/task-unread-dot-visibility.test.ts
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/kanban/preview-session-removal.spec.ts \
+  e2e/tests/task/task-unread-dot.spec.ts -- \
+  --workers=1 --retries=0 --output "$SNAPSHOT/r13-final-desktop"
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- \
+  --workers=1 --retries=0 --output "$SNAPSHOT/r13-final-phone"
+```
+
+Final runtime receipts:
+
+- `r13-final-desktop-summary.log` /
+  `r13-quiet/kandev-run.e2e.VRyu7kxk.log`: all 22 cases passed.
+- `r13-final-phone-summary.log` /
+  `r13-quiet/kandev-run.e2e.PMUXO2RX.log`: all 7 cases passed.
+- Both runs used the final dot-display frontend, one worker, no retries and
+  retained R02 backend/plugin binaries. Inspected the final hidden-primary
+  screenshot: no session panel, and the purple unread dot remains visible.
+  The final phone held-gap capture shows the neutral Session surface, with
+  no identified B/C conversation; cursor/traffic assertions and explicit
+  selection controls passed.
+- `r13-docs-static.log`: source documentation catalog and specification lint
+  passed. The owning design is 32,749 bytes, within its 32 KiB limit.
+
+R13 corrections and scoped verification are complete. Normal selective commit,
+exact fork delivery and the next independent production review are parent-owned.
+Completed reviews: 13; consecutive clean: 0. No broad-suite, live-NATS,
+historical-trigger, real seeded-execution or isolated cursor-event certification
+is implied. No user browser or live database was mutated.

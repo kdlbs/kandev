@@ -597,5 +597,16 @@ fix. It is separate from the five design-only rounds above.
   typecheck, formatting and ratchets passed. Task 02 records RED, intermediate
   surface correction, exact commands, captures and retained-backend limits.
   Independent production review remains open; round 13 is next.
-- Completed rounds: 12. Consecutive clean: 0. The stop condition is three
+- Round 13: Sol child `a9fd7b4f-62fb-4826-9c58-67881212d9de` reviewed
+  `c39bca5e2e`. Two source-derived P2s accepted for controlled reproduction:
+  hidden proven recipients bypass reconciliation/recovery/input admission;
+  phone route fallback can read a sibling during the owned empty removal slot.
+  Remediation is implemented and verified, including the visual follow-through
+  that hidden C must retain its task dot. Final-bundle desktop 22/22 and phone
+  7/7 passed; all changed regressions plus adjacent dot consumers passed 47/47,
+  following the earlier 20-file / 403-case core run. Strict lint, typecheck,
+  formatting/ratchets and docs checks passed. Task 02 qualifies intermediate
+  failures and bundle provenance. Independent production review remains open;
+  round 14 is next.
+- Completed rounds: 13. Consecutive clean: 0. The stop condition is three
   consecutive clean rounds or 50 rounds. No earlier loop counts toward it.

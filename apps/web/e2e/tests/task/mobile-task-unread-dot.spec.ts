@@ -7,6 +7,9 @@ import {
   expectLastStoppedSessionRemoval,
   expectLatePromotionAfterRemoval,
   seedStoppedRemovalTask,
+  holdRemovalMembership,
+  observeRemovalSelection,
+  seedRemovalChoiceTask,
 } from "../../helpers/session-removal";
 import {
   FAILED_SESSION_ERROR,
@@ -25,6 +28,7 @@ import {
   taskUnreadSessionIds,
   waitForTaskUnreadSummary,
 } from "../../helpers/unread-divider";
+import { waitForActiveTaskSession, waitForTaskSessionsSettled } from "../../helpers/session-store";
 
 /** Opens the phone task switcher and returns the row for `title`. */
 async function openTaskSwitcherRow(page: Page, title: string): Promise<Locator> {
@@ -257,6 +261,96 @@ test.describe("Mobile task unread dot", () => {
       expect((await failingState()).cursor).toBe(failureTail);
     } finally {
       await cleanupFailingResumeTask(apiClient, seeded);
+    }
+  });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.11
+  test("keeps the phone route sibling unread during an owned deletion gap", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { settings } = await apiClient.getUserSettings();
+    const preventAutoStart = settings.prevent_auto_start_agent_on_open === true;
+    await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
+    const { task, old, primary, other } = await seedRemovalChoiceTask(apiClient, seedData);
+    await apiClient.setPrimarySession(other.session_id);
+    const watcher = watchWs(testPage);
+    const traffic = observeReadTraffic(testPage);
+    const proof = await holdRemovalMembership(testPage, task.task_id, old.session_id);
+    const session = new SessionPage(testPage);
+    let history: Awaited<ReturnType<typeof observeRemovalSelection>> | undefined;
+    try {
+      await testPage.goto(`/t/${task.task_id}`);
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+      await expect
+        .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
+        .not.toBeNull();
+      await tapSessionRow(testPage, old.session_id);
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", old.session_id);
+      const promoted = watcher.waitForEvent("task.updated", {
+        where: (payload) =>
+          payload.task_id === task.task_id && payload.primary_session_id === primary.session_id,
+      });
+      await apiClient.setPrimarySession(primary.session_id);
+      await promoted;
+      const before = (await sessionReadState(apiClient, other.session_id)).cursor;
+      const tail = await apiClient.seedSessionMessage(other.session_id, {
+        type: "message",
+        content: "Unread route sibling while replacement membership is pending",
+      });
+      history = await observeRemovalSelection(testPage);
+      const documentStart = await testPage.evaluate(() => performance.timeOrigin);
+      proof.arm();
+      await testPage.getByTestId("mobile-sessions-pill").tap();
+      const picker = testPage.getByRole("dialog", { name: "Sessions", exact: true });
+      await picker
+        .getByTestId(`mobile-session-row-${old.session_id}`)
+        .getByRole("button", { name: "Session actions", exact: true })
+        .tap();
+      await testPage.getByRole("menuitem", { name: "Delete", exact: true }).tap();
+      const acknowledged = watcher.waitForResponse("session.delete");
+      await testPage.getByTestId("mobile-session-delete-confirm").tap();
+      await acknowledged;
+      await proof.queued;
+      await waitForActiveTaskSession(testPage, task.task_id, null);
+      await testPage.keyboard.press("Escape");
+      await expect(picker).toBeHidden();
+      await dwell(
+        testPage,
+        1500,
+        "negative-assertion",
+        "The route sibling cannot become readable before deletion membership proves its recipient",
+      );
+      expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
+      expect(
+        traffic.markReads.filter(
+          (read) => read.sessionId === other.session_id && read.messageId === tail.messageId,
+        ),
+      ).toEqual([]);
+      await testPage.screenshot({ path: test.info().outputPath("phone-owned-removal-gap.png") });
+      expect((await history.read()).at(-1)?.sessionId).toBeNull();
+      await expect(
+        testPage.locator('[data-testid="session-chat"][data-session-id]:visible'),
+      ).toHaveCount(0);
+      expect((await history.read()).map((sample) => sample.sessionId)).not.toContain(
+        other.session_id,
+      );
+      proof.release();
+      await waitForActiveTaskSession(testPage, task.task_id, primary.session_id);
+      await waitForTaskSessionsSettled(testPage, task.task_id);
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", primary.session_id);
+      expect((await sessionReadState(apiClient, other.session_id)).cursor).toBe(before);
+      await tapSessionRow(testPage, other.session_id);
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+      await expect
+        .poll(async () => (await sessionReadState(apiClient, other.session_id)).cursor)
+        .toBe(tail.messageId);
+      expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
+    } finally {
+      await proof.dispose();
+      await history?.stop();
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: preventAutoStart });
     }
   });
 });

@@ -22,6 +22,8 @@ import {
   cleanupFailingResumeTask,
   seedFailingResumeTask,
   waitForFailedResume,
+  taskUnreadSessionIds,
+  TASK_UNREAD_DOT_LABEL,
 } from "../../helpers/unread-divider";
 import type { DockviewApi } from "dockview-react";
 
@@ -446,6 +448,102 @@ test.describe("owned removal transcript visibility", () => {
       expect((await sessionReadState(apiClient, primary.session_id)).cursor).toBe(hiddenCursor);
     } finally {
       await proof.dispose();
+    }
+  });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
+  test("does not reopen a hidden primary when another client deletes the last visible chat", async ({
+    testPage,
+    desktopTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { settings } = await apiClient.getUserSettings();
+    const previewEnabled = settings.enable_preview_on_click === true;
+    await apiClient.saveUserSettings({
+      agent_tab_close_behavior: "hide_panel",
+      enable_preview_on_click: true,
+    });
+    const { task, old, primary, other } = await seedRemovalChoiceTask(apiClient, seedData);
+    await apiClient.setPrimarySession(old.session_id);
+    const watcher = watchWs(testPage);
+    const traffic = observeReadTraffic(testPage);
+    const session = new SessionPage(testPage);
+    try {
+      await testPage.goto(`/t/${task.task_id}`);
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", old.session_id);
+      await session.sessionTabBySessionId(other.session_id).click();
+      await session.sessionTabBySessionId(old.session_id).click();
+      const promoted = watcher.waitForEvent("task.updated", {
+        where: (payload) =>
+          payload.task_id === task.task_id && payload.primary_session_id === primary.session_id,
+      });
+      await apiClient.setPrimarySession(primary.session_id);
+      await promoted;
+      await session.sessionTabCloseButton(other.session_id).click();
+      await session.sessionTabCloseButton(primary.session_id).click();
+      await expect(session.sessionTabBySessionId(primary.session_id)).toHaveCount(0);
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", old.session_id);
+      const before = (await sessionReadState(apiClient, primary.session_id)).cursor;
+      const tail = await apiClient.seedSessionMessage(primary.session_id, {
+        type: "message",
+        content: "Hidden recipient remains unread after direct removal",
+      });
+      const documentStart = await testPage.evaluate(() => performance.timeOrigin);
+      // Preview is read-only for cursors; the deleting client must not read C itself.
+      await desktopTestPage.goto(`/?taskId=${task.task_id}&sessionId=${old.session_id}`);
+      const preview = desktopTestPage.getByTestId("task-preview-panel");
+      await expect(preview.locator('[data-testid="session-chat"]:visible')).toHaveAttribute(
+        "data-session-id",
+        old.session_id,
+      );
+      await preview.getByTestId(`preview-session-tab-${old.session_id}`).click({ button: "right" });
+      await desktopTestPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
+      const removed = watcher.waitForEvent("session.removed", {
+        where: (payload) => payload.session_id === old.session_id,
+      });
+      await desktopTestPage
+        .getByTestId("session-delete-confirm-popover")
+        .getByTestId("session-delete-confirm")
+        .click();
+      await removed;
+      await waitForActiveTaskSession(testPage, task.task_id, primary.session_id);
+      await waitForTaskSessionsSettled(testPage, task.task_id);
+      await dwell(
+        testPage,
+        1500,
+        "negative-assertion",
+        "A hidden proven recipient requires explicit reopen even after direct remote deletion",
+      );
+      await expect(session.sessionTabBySessionId(primary.session_id)).toHaveCount(0);
+      await expect(session.activeChat()).toHaveCount(0);
+      expect((await sessionReadState(apiClient, primary.session_id)).cursor).toBe(before);
+      expect(
+        traffic.markReads.filter(
+          (read) => read.sessionId === primary.session_id && read.messageId === tail.messageId,
+        ),
+      ).toEqual([]);
+      await expect
+        .poll(() => taskUnreadSessionIds(apiClient, seedData.workspaceId, task.task_id))
+        .toContain(primary.session_id);
+      const taskRow = testPage.getByTestId("sidebar-task-item").filter({ hasText: task.title });
+      await expect(taskRow.getByRole("img", { name: TASK_UNREAD_DOT_LABEL })).toHaveCount(1);
+      await testPage.screenshot({
+        path: test.info().outputPath("remote-hidden-primary-unread.png"),
+      });
+      await session.addPanelButton().click();
+      await session.sessionReopenItem(primary.session_id).click();
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", primary.session_id);
+      await expect
+        .poll(async () => (await sessionReadState(apiClient, primary.session_id)).cursor)
+        .toBe(tail.messageId);
+      await expect
+        .poll(() => taskUnreadSessionIds(apiClient, seedData.workspaceId, task.task_id))
+        .toEqual([]);
+      await expect(taskRow.getByRole("img", { name: TASK_UNREAD_DOT_LABEL })).toHaveCount(0);
+      expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
+    } finally {
+      await apiClient.saveUserSettings({ enable_preview_on_click: previewEnabled });
     }
   });
 });

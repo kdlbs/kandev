@@ -9,14 +9,14 @@ type HandoffOwner = {
   navigationRevision: number | undefined;
   workflowFocus: AppState["workflowSessionFocus"];
 };
-type RemovalHandoff = HandoffOwner & { targetSessionId: string };
+type RemovalHandoff = HandoffOwner & { targetSessionId: string | null };
 const completedByStore = new WeakMap<StoreApi<AppState>, RemovalHandoff>();
 
-/** Surface activation requires the same scoped proof that selected its recipient. */
+/** Selection and empty-slot rendering share one scoped removal receipt. */
 export function getProvenRemovalPredecessor(
   store: StoreApi<AppState>,
   taskId: string,
-  targetSessionId: string,
+  targetSessionId: string | null,
 ): string | null {
   const proof = completedByStore.get(store);
   if (!proof || proof.taskId !== taskId || proof.targetSessionId !== targetSessionId) return null;
@@ -33,7 +33,7 @@ export function getProvenRemovalPredecessor(
 export function recordRemovalHandoff(
   store: StoreApi<AppState>,
   pending: HandoffOwner,
-  target: string,
+  target: string | null,
   removed: boolean,
 ): void {
   const previous = completedByStore.get(store);

@@ -4,6 +4,20 @@ import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import { isConfirmedSessionRemoved } from "@/lib/state/session-removal";
 
+// i18n-exempt: Internal follow-source discriminant, never rendered.
+export const NEW_SESSION_SOURCE = "new-session";
+export type FollowSource = "primary" | "terminal" | "new-session" | "removed";
+
+export function allowsFollowState(source: FollowSource, state: TaskSession["state"]): boolean {
+  if (!state || state === "FAILED" || state === "STARTING") return false;
+  return (
+    source === "primary" ||
+    state === "COMPLETED" ||
+    state === "CANCELLED" ||
+    (source === NEW_SESSION_SOURCE && state === "IDLE")
+  );
+}
+
 const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
   "COMPLETED",
   "CANCELLED",

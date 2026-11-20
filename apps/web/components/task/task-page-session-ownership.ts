@@ -1,6 +1,7 @@
 "use client";
 
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { getProvenRemovalPredecessor } from "@/lib/state/session-removal-handoff";
 
 export type RenderedTaskSession = {
   /** The owned session the page may render, or null while ownership is unknown. */
@@ -31,6 +32,14 @@ export function useRenderedTaskSession(
   routeSessionId: string | null,
   agentSessionId: string | null,
 ): RenderedTaskSession {
+  const appStore = useAppStoreApi();
+  const ownsEmptyRemoval = useAppStore(
+    (state) =>
+      !!renderedTaskId &&
+      state.tasks.activeTaskId === renderedTaskId &&
+      state.tasks.activeSessionId === null &&
+      getProvenRemovalPredecessor(appStore, renderedTaskId, null) !== null,
+  );
   const validatedActiveSessionId = useAppStore((state) => {
     const sid = state.tasks.activeSessionId;
     if (!sid || !renderedTaskId) return null;
@@ -47,6 +56,7 @@ export function useRenderedTaskSession(
   });
 
   if (!renderedTaskId) return { sessionId: null, routeSessionUnresolved: false };
+  if (ownsEmptyRemoval) return { sessionId: null, routeSessionUnresolved: true };
   if (validatedActiveSessionId) {
     return {
       sessionId: validatedActiveSessionId,

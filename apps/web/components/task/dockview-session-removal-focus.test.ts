@@ -13,10 +13,12 @@ import {
   withSiblings,
 } from "@/lib/ws/handlers/task-primary-focus.test-helpers";
 import { makeReorderingAutoSessionApi } from "./dockview-session-tabs.test-utils";
-import { runAutoSessionTabEffect } from "./dockview-session-tabs";
+import { runAutoSessionTabEffect, setupChatPanelSafetyNet } from "./dockview-session-tabs";
 import { isRemovalChatBlocked, setupRemovalSurfaceFocus } from "./dockview-session-removal-focus";
 import { registerTaskSessionHandlers } from "@/lib/ws/handlers/agent-session";
 import { hiddenSessionIdsFor, hideSessionPanel } from "./dockview-hidden-session-panels";
+import { setupSessionTabSync } from "./dockview-session-tab-sync";
+import { markSessionTabUserActivationIntent } from "./session-tab-activation-intent";
 
 vi.mock("@/lib/api/domains/session-api", async (original) => ({
   ...(await original<typeof SessionApi>()),
@@ -242,3 +244,105 @@ it("keeps an owned group empty when its proven primary is hidden", async () => {
     useDockviewStore.setState(originalDockview);
   }
 });
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
+it.each([false, true])(
+  "keeps a directly proven hidden recipient closed across internal fallback: %s",
+  async (implicit) => {
+    const { store, view, refs } = scene();
+    const original = useDockviewStore.getState();
+    useDockviewStore.setState({
+      api: view.api,
+      currentLayoutEnvId: null,
+      isRestoringLayout: false,
+      preMaximizeLayout: null,
+    });
+    hideSessionPanel(view.api, "latest", "t1");
+    let activated: ((panel: { id: string }) => void) | undefined;
+    Object.assign(view.api, {
+      onDidActivePanelChange: (callback: typeof activated) => {
+        activated = callback;
+        return {
+          dispose: () => {
+            activated = undefined;
+          },
+        };
+      },
+    });
+    const stop = setupRemovalSurfaceFocus(view.api, store);
+    const sync = setupSessionTabSync(view.api, store);
+    const proof = Promise.withResolvers<TaskSessionsResponse>();
+    vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
+    try {
+      registerTaskSessionHandlers(store)[REMOVED_ACTION]!({
+        id: "direct-hidden-removal",
+        type: "notification",
+        action: REMOVED_ACTION,
+        payload: { task_id: "t1", session_id: "old" },
+      });
+      proof.resolve(membership("latest", "next", LATER));
+      await flushFocusWork();
+      expect(store.getState().tasks.activeSessionId).toBe("latest");
+      if (implicit) view.api.removePanel(view.api.getPanel(OLD_PANEL_ID)!);
+      else runAutoSessionTabEffect("latest", store, refs);
+      expect(view.api.getPanel(LATEST_PANEL_ID)).toBeNull();
+      activated?.({ id: NEXT_PANEL_ID });
+      expect(store.getState().tasks.activeSessionId).toBe("latest");
+      expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(true);
+      markSessionTabUserActivationIntent("next");
+      activated?.({ id: NEXT_PANEL_ID });
+      expect(store.getState().tasks.activeSessionId).toBe("next");
+      expect(isRemovalChatBlocked(view.api, store, NEXT_PANEL_ID, store.getState())).toBe(false);
+    } finally {
+      sync.dispose();
+      stop();
+      useDockviewStore.setState(original);
+    }
+  },
+);
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.12
+it.each([false, true])(
+  "last-chat recovery respects a recipient hidden between frames: %s",
+  (hidden) => {
+    const { store, view } = scene();
+    const original = useDockviewStore.getState();
+    useDockviewStore.setState({
+      api: view.api,
+      currentLayoutEnvId: null,
+      isRestoringLayout: false,
+      preMaximizeLayout: null,
+    });
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
+      frames.push(callback),
+    );
+    let removed: ((panel: { id: string }) => void) | undefined;
+    Object.assign(view.api, {
+      onDidRemovePanel: (callback: typeof removed) => {
+        removed = callback;
+        return {
+          dispose: () => {
+            removed = undefined;
+          },
+        };
+      },
+    });
+    const safety = setupChatPanelSafetyNet(view.api, store);
+    try {
+      for (const panel of [...view.api.panels]) {
+        if (panel.id.startsWith("session:")) view.api.removePanel(panel);
+      }
+      removed?.({ id: OLD_PANEL_ID });
+      frames.shift()!(0);
+      store.getState().setActiveSessionAuto("t1", "latest");
+      if (hidden) hideSessionPanel(view.api, "latest", "t1");
+      frames.shift()!(16);
+      expect(view.api.getPanel(LATEST_PANEL_ID) !== null).toBe(!hidden);
+    } finally {
+      safety.dispose();
+      vi.unstubAllGlobals();
+      useDockviewStore.setState(original);
+    }
+  },
+);

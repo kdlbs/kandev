@@ -22,13 +22,13 @@ import {
   isEligibleReplacementSession,
   pickReplacementSessionId,
   shouldPreservePinnedSessionForTask,
+  allowsFollowState,
+  NEW_SESSION_SOURCE,
+  type FollowSource,
 } from "./session-selection";
 import type { KanbanTask } from "./task-archive-cache";
 
 const debug = createDebugLogger("task-lifecycle:ws");
-// i18n-exempt: Internal follow-source discriminant, never rendered.
-const NEW_SESSION_SOURCE = "new-session";
-type FollowSource = "primary" | "terminal" | "new-session" | "removed";
 type FollowOwner = {
   taskId: string;
   previousSessionId: string;
@@ -244,16 +244,6 @@ function provenRemoval(
   return { primary };
 }
 
-function allowsFollowState(source: FollowSource, state: TaskSession["state"]): boolean {
-  if (!state || state === "FAILED" || state === "STARTING") return false;
-  return (
-    source === "primary" ||
-    state === "COMPLETED" ||
-    state === "CANCELLED" ||
-    (source === NEW_SESSION_SOURCE && state === "IDLE")
-  );
-}
-
 function retainEmptySelection(
   store: StoreApi<AppState>,
   removal: RemovalOwner,
@@ -271,6 +261,12 @@ function retainEmptySelection(
     view.selectedSessionId = null;
     view.pinnedSessionId = pin;
   }
+  recordRemovalHandoff(
+    store,
+    captureOwner(state, removal.taskId, removal.previousSessionId, null, "removed"),
+    null,
+    true,
+  );
   store.setState((current) => ({
     ...current,
     tasks: { ...current.tasks, activeSessionId: null, pinnedSessionId: pin },

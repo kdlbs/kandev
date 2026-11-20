@@ -10,6 +10,7 @@ import {
   onDidHideSessionPanel,
 } from "./dockview-hidden-session-panels";
 import { resolveSessionTabSyncTarget } from "./dockview-session-tabs";
+import { getProvenRemovalPredecessor } from "@/lib/state/session-removal-handoff";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -131,7 +132,11 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
       if (shouldRestoreActiveSession) restoreActiveSessionPanel(api, state.tasks.activeSessionId);
       return;
     }
-    if (state.tasks.activeSessionId && hiddenSessionIdsFor(api).has(state.tasks.activeSessionId)) {
+    if (
+      state.tasks.activeSessionId &&
+      hiddenSessionIdsFor(api).has(state.tasks.activeSessionId) &&
+      !getProvenRemovalPredecessor(appStore, target.taskId, state.tasks.activeSessionId)
+    ) {
       state.setActiveSessionAuto(target.taskId, target.sessionId);
       return;
     }

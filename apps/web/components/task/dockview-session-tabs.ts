@@ -107,6 +107,7 @@ export function setupChatPanelSafetyNet(
           if (isDebug()) debug("setupChatPanelSafetyNet: skip recreate (no active session)");
           return;
         }
+        if (hiddenSessionIdsFor(api).has(activeSessionId)) return;
         // Don't recreate a panel for a session that no longer exists in the
         // store — this guards against handleDelete racing with the safety net.
         const activeTaskId = appStore.getState().tasks.activeTaskId;

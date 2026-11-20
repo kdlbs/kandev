@@ -250,10 +250,11 @@ cancelling only a request targeting that ID. An owned empty slot can re-prove af
 a changed primary; newer user/workflow selection wins. Surviving pins/cursors stay
 untouched. Proof initializes missing recipient identity/lifecycle only.
 
-Preview validates explicit discovery before passive adoption; committed workflow
-focus survives pending membership. Shared selected/empty state then owns it.
-Removed-group leases cover direct/empty handoffs; hidden targets never select
-an unproven fallback. Other splits and independent non-agent focus stay intact.
+Preview validates explicit discovery before passive adoption; workflow focus
+survives pending membership. Owned empty slots block route/layout fallback
+until proven or explicit. Removed-group leases cover direct/empty handoffs;
+hide state gates creation, recovery and display admission. Other splits and
+independent non-agent focus stay intact.
 
 `invalidateTaskSessionMembership` fences foreground/removal-dialog pending,
 admitted and queued publications. New reads/unrelated keys remain usable.
