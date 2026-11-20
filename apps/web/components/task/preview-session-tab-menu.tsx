@@ -20,7 +20,6 @@ export function PreviewSessionTabMenu({
   isPrimary,
   onRename,
   onRequestDelete,
-  onSessionRemoved,
   onShareRequested,
   onHandoff,
 }: {
@@ -29,14 +28,12 @@ export function PreviewSessionTabMenu({
   isPrimary: boolean;
   onRename: (sessionId: string) => void;
   onRequestDelete: (sessionId: string, event: Event, confirmDelete: () => Promise<boolean>) => void;
-  onSessionRemoved: (sessionId: string) => void;
   onShareRequested: (sessionId: string) => void;
   onHandoff: (sessionId: string, profileId: string) => void;
 }) {
   const { setPrimary, stop, resume, remove, restart, isRestarting } = useSessionActions({
     sessionId: session.id,
     taskId,
-    onDeleted: () => onSessionRemoved(session.id),
   });
 
   return (

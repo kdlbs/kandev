@@ -4,6 +4,136 @@ import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
 import { SessionPage } from "../pages/session-page";
 import { watchWs } from "./causal-waits";
+import type { AppState } from "@/lib/state/store";
+import type { StoreApi } from "zustand";
+
+export const REMOVAL_PRIMARY_TEXT = "Proven primary conversation";
+export const REMOVAL_OTHER_TEXT = "Unproven neighboring conversation";
+
+export async function seedRemovalChoiceTask(api: ApiClient, seed: SeedData) {
+  const task = await api.seedTask(seed.workspaceId, "Owned removal choice", {
+    workflow_id: seed.workflowId,
+    workflow_step_id: seed.startStepId,
+  });
+  const now = Date.now();
+  const old = await api.seedTaskSession(task.task_id, {
+    sessionId: randomUUID(),
+    agentProfileId: seed.agentProfileId,
+    state: "FAILED",
+    startedAt: new Date(now - 1000).toISOString(),
+    completedAt: new Date(now - 500).toISOString(),
+    errorMessage: "Removed conversation",
+  });
+  const primary = await api.seedTaskSession(task.task_id, {
+    sessionId: randomUUID(),
+    agentProfileId: seed.agentProfileId,
+    state: "WAITING_FOR_INPUT",
+    startedAt: new Date(now - 4000).toISOString(),
+  });
+  const other = await api.seedTaskSession(task.task_id, {
+    sessionId: randomUUID(),
+    agentProfileId: seed.agentProfileId,
+    state: "WAITING_FOR_INPUT",
+    startedAt: new Date(now - 2000).toISOString(),
+  });
+  await api.seedSessionMessage(old.session_id, { type: "error", content: "Removed conversation" });
+  await api.seedSessionMessage(primary.session_id, {
+    type: "message",
+    content: REMOVAL_PRIMARY_TEXT,
+  });
+  await api.seedSessionMessage(other.session_id, { type: "message", content: REMOVAL_OTHER_TEXT });
+  await api.setPrimarySession(primary.session_id);
+  return { task, old, primary, other };
+}
+
+function membershipContains(body: unknown, sessionId: string): boolean {
+  if (!body || typeof body !== "object" || !("sessions" in body) || !Array.isArray(body.sessions))
+    throw new Error("Expected a complete session membership response");
+  const rows: unknown[] = body.sessions;
+  return rows.some((row) => {
+    if (!row || typeof row !== "object" || !("id" in row) || typeof row.id !== "string")
+      throw new Error("Expected a stored session identity");
+    return row.id === sessionId;
+  });
+}
+
+/** Hold authentic post-delete membership, never fabricate its rows or primary. */
+export async function holdRemovalMembership(page: Page, taskId: string, removedId: string) {
+  let armed = false;
+  let released = false;
+  const gate = Promise.withResolvers<void>();
+  const queued = Promise.withResolvers<void>();
+  const pattern = `**/api/v1/tasks/${taskId}/sessions*`;
+  const running = new Set<Promise<void>>();
+  const handle = async (route: import("@playwright/test").Route) => {
+    const response = await route.fetch();
+    const body: unknown = await response.json();
+    if (armed && !released && !membershipContains(body, removedId)) {
+      queued.resolve();
+      await gate.promise;
+    }
+    await route.fulfill({ response });
+  };
+  const handler = (route: import("@playwright/test").Route) => {
+    const work = handle(route).finally(() => running.delete(work));
+    running.add(work);
+    return work;
+  };
+  await page.route(pattern, handler);
+  return {
+    arm: () => {
+      armed = true;
+    },
+    queued: queued.promise,
+    release: () => {
+      released = true;
+      gate.resolve();
+    },
+    dispose: async () => {
+      released = true;
+      gate.resolve();
+      while (running.size) await Promise.all([...running]);
+      await page.unroute(pattern, handler);
+    },
+  };
+}
+
+type SelectionSample = { sessionId: string | null; pinnedSessionId: string | null };
+type RemovalWindow = Window & {
+  __KANDEV_E2E_STORE__?: StoreApi<AppState>;
+  __KANDEV_E2E_REMOVAL_SELECTION__?: { samples: SelectionSample[]; stop: () => void };
+};
+
+/** Observe real selection publications, including a wrong transient pin. */
+export async function observeRemovalSelection(page: Page) {
+  await page.evaluate(() => {
+    const bridge = window as RemovalWindow;
+    const store = bridge.__KANDEV_E2E_STORE__;
+    if (!store) throw new Error("E2E store bridge missing");
+    const sample = (state: AppState): SelectionSample => ({
+      sessionId: state.tasks.activeSessionId,
+      pinnedSessionId: state.tasks.pinnedSessionId,
+    });
+    const samples = [sample(store.getState())];
+    const stop = store.subscribe((state, previous) => {
+      if (state.tasks !== previous.tasks) samples.push(sample(state));
+    });
+    bridge.__KANDEV_E2E_REMOVAL_SELECTION__ = { samples, stop };
+  });
+  return {
+    read: () =>
+      page.evaluate(() => {
+        const bridge = window as RemovalWindow;
+        return bridge.__KANDEV_E2E_REMOVAL_SELECTION__?.samples ?? [];
+      }),
+    stop: () =>
+      page.evaluate(() => {
+        const bridge = window as RemovalWindow;
+        bridge.__KANDEV_E2E_REMOVAL_SELECTION__?.stop();
+        delete bridge.__KANDEV_E2E_REMOVAL_SELECTION__;
+      }),
+  };
+}
 
 export async function seedStoppedRemovalTask(api: ApiClient, seed: SeedData) {
   const task = await api.seedTask(seed.workspaceId, "Stored session removal", {

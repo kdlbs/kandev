@@ -210,6 +210,63 @@ describe("lifecycle authority at publication", () => {
 });
 
 // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+describe("lifecycle recipient after promotion", () => {
+  it.each([
+    ["CANCELLED", "FAILED"],
+    ["CANCELLED", "WAITING_FOR_INPUT"],
+    ["COMPLETED", "FAILED"],
+    ["COMPLETED", "WAITING_FOR_INPUT"],
+  ] as const)(
+    "retains recipient eligibility after %s retargets to a now %s primary",
+    async (endedState, recipientState) => {
+      const store = withSiblings(endedState);
+      store.getState().upsertTaskSessionFromEvent("t1", {
+        ...store.getState().taskSessions.items.next,
+        state: "STARTING",
+        updated_at: SNAPSHOT_TIME,
+      });
+      const original = deferred();
+      const retargeted = deferred();
+      vi.mocked(fetchTaskSession)
+        .mockReturnValueOnce(original.promise)
+        .mockReturnValueOnce(retargeted.promise)
+        .mockResolvedValue(response(endedState));
+      const selected: Array<string | null> = [];
+      const release = store.subscribe((value) => selected.push(value.tasks.activeSessionId));
+      try {
+        notifyState(store, endedState, SNAPSHOT_TIME);
+        promote(store);
+        registerTaskSessionHandlers(store)[SESSION_STATE_CHANGED]!({
+          id: "recipient-retarget-settled",
+          type: "notification",
+          action: SESSION_STATE_CHANGED,
+          payload: {
+            task_id: "t1",
+            session_id: "next",
+            old_state: "STARTING",
+            new_state: recipientState,
+            updated_at: STARTING_TIME,
+          },
+        });
+        original.resolve(response(endedState));
+        retargeted.resolve(response(endedState));
+        await flushFocusWork();
+        if (recipientState === "FAILED") {
+          expect(selected).not.toContain("next");
+          promote(store, "latest");
+          await flushFocusWork();
+          expect(store.getState().tasks.activeSessionId).toBe("latest");
+        } else {
+          expect(store.getState().tasks.activeSessionId).toBe("next");
+        }
+      } finally {
+        release();
+      }
+    },
+  );
+});
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6
 describe("handoff execution ownership", () => {
   it("does not inherit a foreign session execution during initial adoption", () => {
     const store = withSiblings("RUNNING");

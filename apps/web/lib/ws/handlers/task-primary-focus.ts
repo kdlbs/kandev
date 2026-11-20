@@ -10,6 +10,7 @@ import {
 } from "@/lib/state/task-session-reads";
 import { isConfirmedSessionRemoved } from "@/lib/state/session-removal";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
+import { recordRemovalHandoff } from "@/lib/state/session-removal-handoff";
 import { createDebugLogger } from "@/lib/debug/log";
 import {
   getSessionRestartStore,
@@ -34,6 +35,7 @@ type FollowOwner = {
   targetSessionId: string | null;
   projectedPrimaryId: string | null | undefined;
   source: FollowSource;
+  lifecycleRecipient: boolean;
   scopeIdentity: string;
   navigationRevision: number | undefined;
   pinnedSessionId: string | null;
@@ -154,6 +156,12 @@ function prepareFollowTarget(
     isUnavailableSession(state, target, excluded)
   )
     return null;
+  if (
+    !removedTarget &&
+    pending.lifecycleRecipient &&
+    !isEligibleReplacementSession(state.taskSessions.items[target], pending.taskId, excluded)
+  )
+    return null;
   if (removedTarget && !state.taskSessions.items[target]) {
     state.upsertTaskSessionFromEvent(pending.taskId, {
       id: removedTarget.id,
@@ -201,6 +209,7 @@ function completePendingFollow(
     return false;
   const target = prepareFollowTarget(store, pending, removedTarget);
   if (!target) return false;
+  recordRemovalHandoff(store, pending, target, removedTarget !== undefined);
   pending.cancel();
   if (!removedTarget && (pending.source === "terminal" || pending.source === NEW_SESSION_SOURCE)) {
     inheritFallbackReadiness(state, pending.previousSessionId, target);
@@ -452,6 +461,7 @@ function captureOwner(
     selectedSessionId: previousSessionId,
     targetSessionId,
     source,
+    lifecycleRecipient: source === "terminal" || source === NEW_SESSION_SOURCE,
     scopeIdentity: stateReadScopeIdentity(state),
     projectedPrimaryId:
       source === "primary" ? targetSessionId : findTaskInState(state, taskId)?.primarySessionId,
@@ -594,8 +604,10 @@ function retargetFollow(
   const source =
     existing?.taskId === taskId && existing.source === "removed" ? "removed" : "primary";
   const owner = captureOwner(store.getState(), taskId, previousSessionId, targetSessionId, source);
-  if (existing && ownsSelection(store, existing))
+  if (existing && ownsSelection(store, existing)) {
     owner.selectedSessionId = existing.selectedSessionId;
+    owner.lifecycleRecipient = existing.lifecycleRecipient;
+  }
   existing?.cancel();
   if (ownsSelection(store, owner)) verifyPreviousSession(store, owner);
 }

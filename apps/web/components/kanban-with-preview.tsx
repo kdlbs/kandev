@@ -18,7 +18,7 @@ import { useKanbanPreview } from "@/hooks/use-kanban-preview";
 import { useRightPanelBridge } from "@/hooks/domains/coordinator/workspace-copilot-context";
 import { useTaskSession } from "@/hooks/use-task-session";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { Task } from "./kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
 import { linkToTask } from "@/lib/links";
@@ -293,9 +293,22 @@ function useSyncSelectedTaskActivity(params: {
     workflowFocusRequestActive,
     setActiveTask,
   } = params;
+  const appStore = useAppStoreApi();
 
   useEffect(() => {
     if (!isOpen || !selectedTaskId) return;
+    const current = appStore.getState();
+    if (
+      current.tasks.activeTaskId === selectedTaskId &&
+      current.tasks.activeSessionId === activeSessionId
+    )
+      return;
+    const focus = current.workflowSessionFocus;
+    if (
+      (focus.intent?.taskId === selectedTaskId || focus.request?.taskId === selectedTaskId) &&
+      !workflowFocusRequestActive
+    )
+      return;
     if (activeSessionId) {
       if (workflowFocusRequestActive) {
         setActiveSessionAuto(selectedTaskId, activeSessionId);
@@ -307,6 +320,7 @@ function useSyncSelectedTaskActivity(params: {
     }
   }, [
     activeSessionId,
+    appStore,
     isOpen,
     selectedTaskId,
     setActiveSession,
@@ -314,6 +328,21 @@ function useSyncSelectedTaskActivity(params: {
     workflowFocusRequestActive,
     setActiveTask,
   ]);
+}
+
+function useAdoptedPreviewSession(previewTaskId: string | null | undefined) {
+  const sharedTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const sharedSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const [adoption, setAdoption] = useState({ taskId: previewTaskId, adopted: false });
+  const adopted = adoption.taskId === previewTaskId && adoption.adopted;
+  if (adoption.taskId !== previewTaskId) {
+    setAdoption({ taskId: previewTaskId, adopted: false });
+  } else if (previewTaskId && sharedTaskId === previewTaskId && sharedSessionId && !adopted) {
+    setAdoption({ taskId: previewTaskId, adopted: true });
+  }
+  return sharedTaskId === previewTaskId && (adopted || sharedSessionId !== null)
+    ? sharedSessionId
+    : undefined;
 }
 
 function usePreviewSessionFocus({
@@ -338,13 +367,16 @@ function usePreviewSessionFocus({
   const acknowledgeWorkflowSessionFocus = useAppStore(
     (state) => state.acknowledgeWorkflowSessionFocus,
   );
+  const sharedSessionId = useAdoptedPreviewSession(previewTaskId);
   let activeSessionId: string | null = null;
   if (previewTaskId) {
     if (workflowFocusRequest?.taskId === previewTaskId) {
       activeSessionId = workflowFocusRequest.sessionId;
     } else {
       activeSessionId =
-        userSelectedSessionId ?? selectedTask?.primarySessionId ?? selectedTaskSessionId;
+        sharedSessionId !== undefined
+          ? sharedSessionId
+          : (userSelectedSessionId ?? selectedTask?.primarySessionId ?? selectedTaskSessionId);
     }
   }
 

@@ -1370,3 +1370,168 @@ tracing; historical attribution stays qualified. Task-list readback proves
 convergence, not isolated cursor-event delivery; seeded RUNNING is not live
 execution continuity. No unread predicate, cursor, backend promotion, wire,
 persistence or Go change was introduced in R09.
+
+### Production-fix review round 10 remediation
+
+Three accepted source-derived schedules refine existing .6/.9/.11 and the
+failed-session focus design. They do not change unread eligibility or cursors:
+
+- Preview must render the shared selected/empty state and let the scoped
+  deletion owner choose a successor. Delete completion is not a user tab click.
+- A genuine primary retarget may change predecessor validation, but must retain
+  lifecycle recipient eligibility from the original terminal handoff.
+- Dockview must carry the previously visible conversation's owned removal
+  continuation across its null interval. A proven recipient must replace an
+  internal sibling fallback, without overriding independent tab/Plan focus.
+
+```text
+Preview:   A -> Delete -> [owned empty, no guessed B] -> proven C
+Dockview:  A -> Delete -> [internal B while proof held] -> visible proven C
+User:                    [explicit Changes/Plan] ------> stays Changes/Plan
+Phone: existing Sessions sheet -> Delete -> shared proof -> selected survivor
+```
+
+No new composition, control, touch branch or public contract is planned.
+Phone board clicks keep direct task navigation rather than mounting Preview;
+the existing six-case phone unread/removal spec covers the shared state path.
+Desktop Preview/tab proof needs its own real rendered entry, not a callback
+mock. Lifecycle retargeting uses deferred real handler/store observations.
+Keep restart, navigation, explicit workflow and non-agent-panel controls.
+
+R10 retarget evidence:
+
+- `r10-retarget-red.log`: two behavioral failures / 35 controls. Both durable
+  CANCELLED and COMPLETED predecessors published the now-FAILED recipient after
+  its genuine promotion. Both healthy-recipient controls passed.
+- `r10-retarget-green.log`: four authority files / 128 tests passed after
+  preserving lifecycle recipient eligibility independently of the retarget's
+  predecessor predicate. Independent direct-primary following is unchanged;
+  authoritative removal membership remains its own admission boundary.
+- The first pre-browser typecheck rejected new test-only unbranded row IDs and
+  a task-updated message factory used for a session-state frame. The fixture now
+  spreads the real stored recipient and emits the real session-state envelope.
+  This compile failure is not product RED. Later typed/browser receipts follow.
+
+Preview retains its initial primary/URL discovery only until its first
+shared session adoption. Thereafter the store's selected ID or owned null slot
+is authoritative; neither render nor delete completion may guess from a list
+or feed automatic state back through the user pin/navigation action.
+
+Dockview surface ownership is distinct from the data proof: capture the
+visible predecessor before its blank transition, require the matching scoped
+removal handoff (including a healthy retarget before paint), and cancel surface
+activation on later input/context change. An arbitrary null-to-session update
+is not activation authority. Explicit Plan/Changes and committed workflow focus
+remain independent.
+
+R10 consumer evidence and controls:
+
+- `r10-consumer-red-summary.log` / `r10-quiet/kandev-run.e2e.lXvYw6YT.log`:
+  Preview published the unproven sibling/pin, and the Plan control never reached
+  the proven selection. The initial Dockview fixtures booted the recipient
+  instead of the deleted conversation; those precondition failures are not RED.
+- `r10-consumer-third-summary.log` /
+  `r10-quiet/kandev-run.e2e.nx5SQX8d.log`: all three Preview controls and the
+  independent Changes control passed. Correctly booting/pinning A before
+  promoting C reproduced the remaining surface bug: AppState selected C but
+  B stayed visible. This is the Dockview behavioral RED.
+- `r10-surface-units-red.log`: a second healthy primary change before paint
+  lost the removal surface lease (one failure / eight controls). The proof
+  receipt now carries that continuation only through the same scoped
+  navigation/workflow owner. Pointer/keyboard input, disposal and unproven
+  null-to-session transitions cannot authorize activation.
+- `r10-final-typecheck.log`: the new Dockview test's index-only position lacked
+  its required reference group. The fixture now uses the real center-group
+  position; this compile failure is not product RED.
+
+The Preview consumer cases now live in
+`e2e/tests/kanban/preview-session-removal.spec.ts`, rather than the original
+`preview-session-tabs.spec.ts` placement used by the retained RED logs.
+The newer-workflow control holds authentic deletion membership and a real
+workflow-move response; it never creates a synthetic committed recipient.
+
+Current focused commands, from the cache snapshot prepared above:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm run typecheck
+pnpm exec vitest run \
+  lib/ws/handlers/task-primary-*.test.ts \
+  lib/ws/handlers/agent-session.test.ts lib/ws/handlers/tasks.test.ts \
+  components/task/dockview-session-tab*.test.ts* \
+  components/task/dockview-session-removal-focus.test.ts \
+  components/task/preview-session-tabs.test.tsx components/task/session-sort.test.ts \
+  components/kanban-with-preview*.test.tsx
+pnpm run build:e2e
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project chromium \
+  e2e/tests/kanban/preview-session-removal.spec.ts \
+  e2e/tests/session/session-primary-removal.spec.ts -- --workers=1 --retries=0
+```
+
+The first configured lint pass (`r10-lint-changed.log`) required splitting the
+expanded functions/test group and removing nested test ternaries. The remaining
+four-line file-budget excess is recorded in `r10-remaining-lint.log`.
+The completed handoff receipt is now owned by
+`lib/state/session-removal-handoff.ts`, not a component-to-transport import.
+Preview adoption, panel activation and preservation are separated at their
+existing responsibility boundaries. No new lint waiver is introduced.
+
+The first consumer GREEN, before these lint-only extractions, was 16 files /
+353 tests plus ten Chromium cases (`r10-focused-final.log`,
+`r10-consumers-green-summary.log`). The final delivery receipts below supersede
+that bundle; overlapping test runs must not be summed.
+
+Final R10 delivery evidence (same prepared cache snapshot):
+
+- `r10-delivery-units.log`: 16 files / 353 tests passed after the extractions.
+- `r10-delivery-desktop-summary.log` /
+  `r10-quiet/kandev-run.e2e.S6iLS5zf.log`: 32 passed / one failed. All ten
+  deletion/Preview consumer cases passed. Moving those cases had also removed
+  the original menu spec's still-used `watchWs` import; that is a test setup
+  regression, not product RED. Restoring the import is the only later test edit.
+- `r10-delivery-rename-summary.log` /
+  `r10-quiet/kandev-run.e2e.PVb8r3ux.log`: the repaired original menu case
+  passed (one worker, zero retries). Do not describe these separate receipts as
+  one fresh 33-case GREEN run.
+- `r10-delivery-phone-summary.log` /
+  `r10-quiet/kandev-run.e2e.IFBt1b2a.log`: six phone cases passed, one worker,
+  zero retries, against the same fresh frontend.
+- `r10-delivery-typecheck.log`, `r10-delivery-build.log` and
+  `r10-delivery-bundle.txt`: typed 8-GiB check, fresh frontend and artifact hashes.
+  Configured changed-file lint, causal-wait lint, i18n ratchet, architecture,
+  docs catalog and specification checks passed. The ratchet printed Git rename
+  detection warnings but exited zero; no Git rename-limit setting was changed.
+- Inspected the retained desktop proven-conversation and Plan captures under
+  `r10-delivery-desktop-artifacts`; earlier owned-Changes/workflow captures are
+  under `r10-consumer-artifacts`. Seeded conversation fixtures allocate no
+  execution. Their workspace-loading placeholders are not runtime-readiness
+  evidence.
+
+Related desktop and phone commands, in addition to the focused recipe above:
+
+```bash
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project chromium \
+  e2e/tests/kanban/preview-session-removal.spec.ts \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/kanban/preview-session-tabs.spec.ts \
+  e2e/tests/workflow/workflow-session-focus.spec.ts \
+  e2e/tests/session/session-tab-management.spec.ts \
+  e2e/tests/session/session-handoff.spec.ts \
+  e2e/tests/task/task-unread-dot.spec.ts -- --workers=1 --retries=0
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project chromium \
+  e2e/tests/kanban/preview-session-tabs.spec.ts -- --workers=1 --retries=0 \
+  --grep 'opens the lifecycle menu on right-click and renames through it'
+"$VERIFY/scripts/run-quiet" e2e --summary -- pnpm e2e:run \
+  --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+R10 implementation is complete; adversarial production review remains open.
+No rebase was repeated. No R10 production Go, wire, cursor, unread predicate,
+promotion or persisted schema change was made. Backend/plugin artifacts remain
+the retained R02 build. Broad-suite and live-NATS certification, isolated
+cursor-event delivery and historical live-incident attribution remain limited
+as recorded above. No live database mutation was performed.

@@ -7,6 +7,14 @@ import {
   expectLatePromotionAfterRemoval,
 } from "../../helpers/session-removal";
 import {
+  holdRemovalMembership,
+  observeRemovalSelection,
+  REMOVAL_OTHER_TEXT,
+  REMOVAL_PRIMARY_TEXT,
+  seedRemovalChoiceTask,
+} from "../../helpers/session-removal";
+import { waitForActiveTaskSession, waitForTaskSessionsSettled } from "../../helpers/session-store";
+import {
   cleanupFailingResumeTask,
   seedFailingResumeTask,
   waitForFailedResume,
@@ -145,3 +153,71 @@ test("fills a retired session slot after the later primary promotion", async ({
 }) => {
   await expectLatePromotionAfterRemoval(testPage, desktopTestPage, apiClient, seedData);
 });
+
+for (const winner of ["proven-chat", "independent-changes"] as const) {
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.11
+  test(`local removal activates ${winner} across the owned empty slot`, async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const { task, old, primary, other } = await seedRemovalChoiceTask(apiClient, seedData);
+    await apiClient.setPrimarySession(old.session_id);
+    const proof = await holdRemovalMembership(testPage, task.task_id, old.session_id);
+    const watcher = watchWs(testPage);
+    const session = new SessionPage(testPage);
+    await testPage.goto(`/t/${task.task_id}`);
+    await expect(session.activeChat()).toHaveAttribute("data-session-id", old.session_id);
+    await expect(session.sessionTabBySessionId(other.session_id)).toBeVisible();
+    await session.sessionTabBySessionId(other.session_id).click();
+    await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+    await session.sessionTabBySessionId(old.session_id).click();
+    await expect(session.activeChat()).toHaveAttribute("data-session-id", old.session_id);
+    const promoted = watcher.waitForEvent("task.updated", {
+      where: (payload) =>
+        payload.task_id === task.task_id && payload.primary_session_id === primary.session_id,
+    });
+    await apiClient.setPrimarySession(primary.session_id);
+    await promoted;
+    await waitForTaskSessionsSettled(testPage, task.task_id);
+    const history = await observeRemovalSelection(testPage);
+    const documentStart = await testPage.evaluate(() => performance.timeOrigin);
+    try {
+      proof.arm();
+      await session.sessionTabBySessionId(old.session_id).click({ button: "right" });
+      await session.contextMenuItem("Delete").click();
+      const confirmation = testPage.getByTestId("session-delete-confirm-popover");
+      await expect(confirmation).toBeVisible();
+      const acknowledged = watcher.waitForResponse("session.delete");
+      await confirmation.getByTestId("session-delete-confirm").click();
+      await acknowledged;
+      await proof.queued;
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+      await expect(
+        session.activeChat().getByText(REMOVAL_OTHER_TEXT, { exact: true }),
+      ).toBeVisible();
+      if (winner === "independent-changes") await session.clickTab("Changes");
+      proof.release();
+      await waitForActiveTaskSession(testPage, task.task_id, primary.session_id);
+      await waitForTaskSessionsSettled(testPage, task.task_id);
+      if (winner === "proven-chat") {
+        await expect(session.activeChat()).toHaveAttribute("data-session-id", primary.session_id);
+        await expect(
+          session.activeChat().getByText(REMOVAL_PRIMARY_TEXT, { exact: true }),
+        ).toBeVisible();
+      } else {
+        await expect(session.changes).toBeVisible();
+      }
+      const samples = await history.read();
+      expect(samples.map((sample) => sample.sessionId)).not.toContain(other.session_id);
+      expect(samples.map((sample) => sample.pinnedSessionId)).not.toContain(other.session_id);
+      expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
+      await testPage.screenshot({ path: test.info().outputPath(`owned-removal-${winner}.png`) });
+    } finally {
+      await proof.dispose();
+      await history.stop();
+    }
+  });
+}

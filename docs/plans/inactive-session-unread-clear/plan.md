@@ -566,5 +566,13 @@ fix. It is separate from the five design-only rounds above.
   owning-file tests, typecheck and a fresh frontend. Task 02 distinguishes the
   intermediate fixture/browser failures from final targeted GREEN. The separate
   production review loop remains open.
-- Completed rounds: 9. Consecutive clean: 0. The stop condition is three
+- Round 10: Sol child `d8023e99-d6a5-4e41-bb03-83a68ac7dc1f` reviewed
+  `32f12496a0`. Three P2s accepted: Preview deletion/display bypasses the shared
+  selection owner; genuine retarget drops lifecycle recipient eligibility;
+  an owned empty-slot handoff can leave a different Dockview sibling visible.
+  Remediation is implemented and verified. Task 02 records 353 focused tests,
+  ten new/owning Chromium cases, the wider desktop import repair, and six phone
+  passes. Preview, lifecycle retarget and actual Dockview visibility each have
+  consumer proof. The separate production review loop remains open.
+- Completed rounds: 10. Consecutive clean: 0. The stop condition is three
   consecutive clean rounds or 50 rounds. No earlier loop counts toward it.

@@ -17,12 +17,17 @@ import {
   isChatPlaceholderSelected,
   restorePreservedActivePanel,
   shouldActivateSessionPanel,
-  shouldPreserveActivePanel,
 } from "./dockview-session-tab-activation";
 import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-session-handoff";
 import { hiddenSessionIdsFor, pruneHiddenSessionIds } from "./dockview-hidden-session-panels";
 import { t } from "@/lib/i18n";
 import { resolveVisibleSessionId } from "@/lib/env-hidden-sessions";
+import {
+  consumeRemovalSurfaceFocus,
+  getRemovalSurfaceFocus,
+  setupRemovalSurfaceFocus,
+  shouldPreserveUnrequestedPanel,
+} from "./dockview-session-removal-focus";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -292,6 +297,36 @@ type AutoSessionTabRefs = {
   prevSessionIdRef: MutableRefObject<string | null>;
 };
 
+function applySessionPanelActivation({
+  api,
+  appStore,
+  panel,
+  workflowFocusRequestId,
+  removalFocus,
+  activate,
+}: {
+  api: DockviewApi;
+  appStore: ReturnType<typeof useAppStoreApi>;
+  panel: NonNullable<ReturnType<DockviewApi["getPanel"]>>;
+  workflowFocusRequestId: number | null;
+  removalFocus: ReturnType<typeof getRemovalSurfaceFocus>;
+  activate: boolean;
+}): void {
+  if (activate) {
+    panel.api.setActive();
+    if (workflowFocusRequestId !== null) {
+      appStore.getState().acknowledgeWorkflowSessionFocus(workflowFocusRequestId);
+    }
+    if (removalFocus && !removalFocus.cancelled) {
+      restorePreservedActivePanel(api, removalFocus.restorePanelId, true);
+    }
+  }
+  if (removalFocus) consumeRemovalSurfaceFocus(api);
+  useDockviewStore.setState({
+    centerGroupId: isCenterCandidateGroupId(panel.group.id) ? panel.group.id : CENTER_GROUP,
+  });
+}
+
 /**
  * Activate the newly-ensured session panel and update the center-group store
  * entry. Returns the resolved active panel for sibling anchoring.
@@ -318,17 +353,23 @@ function activateSessionPanel({
 }): ReturnType<DockviewApi["getPanel"]> {
   const activePanel = api.getPanel(`session:${effectiveSessionId}`);
   if (!activePanel) return activePanel;
+  const removalFocus = tid
+    ? getRemovalSurfaceFocus(api, appStore, tid, effectiveSessionId)
+    : undefined;
+  const removalRequested = Boolean(removalFocus && !removalFocus.cancelled);
 
   const activePanelIdAfterReorder = api.activePanel?.id ?? null;
-  const shouldActivate = shouldActivateSessionPanel({
-    sessionPanelExistedBefore: activation.sessionPanelExistedBefore,
-    prevTaskId: refs.prevTaskIdRef.current,
-    prevSessionId: refs.prevSessionIdRef.current,
-    currentTaskId: tid,
-    currentSessionId: effectiveSessionId,
-    currentActivePanelId: activation.activePanelIdBeforeEnsure,
-    workflowFocusRequested: workflowFocusRequestId !== null,
-  });
+  const shouldActivate =
+    (!removalFocus?.cancelled || workflowFocusRequestId !== null) &&
+    shouldActivateSessionPanel({
+      sessionPanelExistedBefore: activation.sessionPanelExistedBefore,
+      prevTaskId: refs.prevTaskIdRef.current,
+      prevSessionId: refs.prevSessionIdRef.current,
+      currentTaskId: tid,
+      currentSessionId: effectiveSessionId,
+      currentActivePanelId: activation.activePanelIdBeforeEnsure,
+      workflowFocusRequested: workflowFocusRequestId !== null || removalRequested,
+    });
   if (isDebug()) {
     debug("useAutoSessionTab: activation decision", {
       effectiveSessionId,
@@ -345,16 +386,13 @@ function activateSessionPanel({
   const restoreSelectedSession =
     activation.activePanelIdBeforeEnsure === activePanel.id &&
     activePanelIdAfterReorder !== activePanel.id;
-  if (shouldActivate || restoreSelectedSession) {
-    activePanel.api.setActive();
-    if (workflowFocusRequestId !== null) {
-      appStore.getState().acknowledgeWorkflowSessionFocus(workflowFocusRequestId);
-    }
-  }
-  useDockviewStore.setState({
-    centerGroupId: isCenterCandidateGroupId(activePanel.group.id)
-      ? activePanel.group.id
-      : CENTER_GROUP,
+  applySessionPanelActivation({
+    api,
+    appStore,
+    panel: activePanel,
+    workflowFocusRequestId,
+    removalFocus,
+    activate: shouldActivate || restoreSelectedSession,
   });
   return activePanel;
 }
@@ -600,9 +638,15 @@ export function runAutoSessionTabEffect(
   // session tab. Dockview's same-group move briefly activates a sibling even
   // with skipSetActive, so reading api.activePanel afterward loses this intent.
   const activePanelIdBeforeEnsure = api.activePanel?.id ?? null;
-  const preserveActivePanel =
-    workflowFocusRequestId === null &&
-    shouldPreserveActivePanel(sessionPanelExistedBefore, activePanelIdBeforeEnsure);
+  const removalFocus = tid
+    ? getRemovalSurfaceFocus(api, appStore, tid, effectiveSessionId)
+    : undefined;
+  const preserveActivePanel = shouldPreserveUnrequestedPanel(
+    workflowFocusRequestId,
+    removalFocus,
+    sessionPanelExistedBefore,
+    activePanelIdBeforeEnsure,
+  );
 
   logSessionPanelEnsure(effectiveSessionId, sessionPanelExistedBefore, initialPosition);
 
@@ -674,6 +718,9 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   const prevSessionIdRef = useRef<string | null>(null);
   const appStore = useAppStoreApi();
   const dockviewApi = useDockviewStore((state) => state.api);
+  useEffect(() => {
+    if (dockviewApi) return setupRemovalSurfaceFocus(dockviewApi, appStore);
+  }, [appStore, dockviewApi]);
 
   // Key-based dependency so the effect re-runs when the task's session list
   // changes (add/remove). Inside the effect we re-read the real array from
