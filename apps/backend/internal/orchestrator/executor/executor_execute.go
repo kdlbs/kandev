@@ -2387,6 +2387,21 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 				return result, existingErr
 			}
 		}
+		var startAttemptID string
+		if startAgent {
+			// Claim the attempt before LaunchAgent. Workspace materialization can
+			// fail before persistLaunchState runs, and the failure transition must
+			// still be fenced against a replacement start attempt.
+			expectedState := session.State
+			startAttemptID = claimAgentStartAttempt(session)
+			session.UpdatedAt = time.Now().UTC()
+			if err := e.persistSessionFullRowIfCurrentState(launchCtx, session, expectedState); err != nil {
+				return nil, err
+			}
+			if opts.OnStartAttemptClaimed != nil {
+				opts.OnStartAttemptClaimed(startAttemptID)
+			}
+		}
 
 		// Call the AgentManager to launch the container
 		resp, err := e.agentManager.LaunchAgent(launchCtx, req)
@@ -2411,7 +2426,8 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
 			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
 			repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
-			return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+			failureCtx := WithWorkflowLaunchFailureOwnership(launchCtx, session)
+			return nil, e.handleLaunchFailure(failureCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 		}
 		if startAgent && req.BeforeAgentStart != nil {
 			if err := req.BeforeAgentStart(launchCtx, resp.AgentExecutionID, req.TaskDescription); err != nil {

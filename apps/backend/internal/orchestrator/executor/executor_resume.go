@@ -931,7 +931,9 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 	expectedState := session.State
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
-		claimAgentStartAttempt(session)
+		if models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]) == "" {
+			claimAgentStartAttempt(session)
+		}
 	}
 	session.ErrorMessage = ""
 	session.UpdatedAt = now

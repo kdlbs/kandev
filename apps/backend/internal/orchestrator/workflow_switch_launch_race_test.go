@@ -175,6 +175,7 @@ func TestTransitionTaskSessionState_StaleLaunchFailureCannotFailReplacementAttem
 type gatedSessionPersistRepo struct {
 	*sqliterepo.Repository
 	sessionID   atomic.Value
+	calls       atomic.Int32
 	once        sync.Once
 	releaseOnce sync.Once
 	reached     chan struct{}
@@ -186,10 +187,12 @@ func (r *gatedSessionPersistRepo) UpdateTaskSessionIfCurrentStateForLaunch(
 	attemptID string,
 ) (bool, error) {
 	if id, _ := r.sessionID.Load().(string); id != "" && session.ID == id {
-		r.once.Do(func() {
-			close(r.reached)
-			<-r.release
-		})
+		if r.calls.Add(1) == 2 {
+			r.once.Do(func() {
+				close(r.reached)
+				<-r.release
+			})
+		}
 	}
 	return r.Repository.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
 }
