@@ -13,8 +13,6 @@ export type AgentRuntimeUpdateDetailProps = {
   isMobile: boolean;
   onBack?: () => void;
   backLabel?: string;
-  /** Runtime policy or ownership content rendered above the update body. */
-  beforeBody?: ReactNode;
   /** Fixed-footer content rendered above the update action row. */
   footerBefore?: ReactNode;
   approveDisabledReason?: string;
@@ -31,7 +29,6 @@ export function AgentRuntimeUpdateDetail({
   isMobile,
   onBack,
   backLabel,
-  beforeBody,
   footerBefore,
   approveDisabledReason,
 }: AgentRuntimeUpdateDetailProps) {
@@ -57,7 +54,8 @@ export function AgentRuntimeUpdateDetail({
       backLabel={backLabel}
       body={
         <AgentRuntimeUpdateBody
-          before={beforeBody}
+          status={control.runtimeUpdateStatus}
+          canManage={control.canManage}
           agentName={agentName}
           preview={state.preview}
           loading={state.loading}

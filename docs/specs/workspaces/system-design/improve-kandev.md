@@ -4,7 +4,7 @@ system: workspaces
 requirements:
   - REQ-WORKSPACES-IMPROVE-KANDEV-001
 created: 2026-04-29
-updated: 2026-11-16
+updated: 2026-11-19
 owners:
   - Carlos Florencio
 ---
@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-WORKSPACES-IMPROVE-KA
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-WORKSPACES-IMPROVE-KANDEV-001` | [Migrated source detail](#migrated-source-detail), [Template initialization and recovery](#template-initialization-and-recovery) |
+| `REQ-WORKSPACES-IMPROVE-KANDEV-001` | [Migrated source detail](#migrated-source-detail), [Template initialization and recovery](#template-initialization-and-recovery), [Bootstrap lifecycle](improve-kandev-bootstrap.md) |
 
 ## Migrated source detail
 
@@ -155,6 +155,9 @@ the user's own agent picks up immediately — turning every report into a contri
   render backend error text.
 - Both workflow IDs refer to hidden, workspace-scoped workflow instances in
   the returned workspace and are safe to request repeatedly.
+- The bundled dialog requests asynchronous preparation with `async: true`.
+  The [bootstrap lifecycle](improve-kandev-bootstrap.md) defines admission,
+  status reads, and the use of this same response shape for a ready result.
 
 ## Persistence guarantees
 

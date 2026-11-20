@@ -614,16 +614,16 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		if err != nil {
 			return nil, err
 		}
-		if !*req.Enabled && !req.Force && len(dynamicRefs) > 0 {
-			return nil, &ErrProfileInUseDetail{DynamicProfiles: dynamicRefs}
-		}
-		if !*req.Enabled && !req.Force && c.utilityDeps != nil {
-			refs, err := c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, req.ID)
-			if err != nil {
-				return nil, fmt.Errorf("check utility agents using this profile: %w", err)
+		if !*req.Enabled && !req.Force {
+			detail := &ErrProfileInUseDetail{DynamicProfiles: dynamicRefs}
+			if c.utilityDeps != nil {
+				detail.UtilityAgents, err = c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, req.ID)
+				if err != nil {
+					return nil, fmt.Errorf("check utility agents using this profile: %w", err)
+				}
 			}
-			if len(refs) > 0 {
-				return nil, &ErrProfileInUseDetail{UtilityAgents: refs}
+			if len(detail.DynamicProfiles) > 0 || len(detail.UtilityAgents) > 0 {
+				return nil, detail
 			}
 		}
 		profile.Enabled = *req.Enabled
@@ -1177,6 +1177,7 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 		}
 		return nil, err
 	}
+	c.removeStaleDynamicRoutes(ctx, id)
 	// Watchers, by contrast, are disabled only AFTER the row is gone, so a
 	// failed delete never strands watchers disabled against a still-live
 	// profile. They can afford that ordering because they have a genuine second
@@ -1197,89 +1198,117 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 	return &result, nil
 }
 
-// prepareProfileDeletion blocks every routing-tier reference, then checks for
-// active sessions and referencing watchers before cleaning up ephemeral tasks.
+// prepareProfileDeletion collects every reference to the profile and returns a
+// single *ErrProfileInUseDetail so the UI shows all blockers at once. A
+// soft-deleted dynamic profile holds no live route, so it never blocks.
 // Routing-tier references are hard blockers even when force=true because a
-// deleted profile would orphan workspace tier mappings. When force is false,
-// active sessions and watchers return *ErrProfileInUseDetail so the UI can
-// render a confirmation dialog. force=true skips only those soft blockers.
-// Neither branch disables anything: DeleteProfile disables referencing
-// automations before the row goes away and referencing watchers after it does.
+// deleted profile would orphan workspace tier mappings; they are reported
+// together with the soft blockers so the dialog can list both. force=true
+// skips only the soft blockers, which DeleteProfile then clears: it disables
+// referencing automations before the row goes away and referencing watchers
+// after it does.
 func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID string, force bool) error {
-	dynamicRefs, err := c.listDynamicProfileReferences(ctx, profileID)
+	detail, err := c.collectProfileReferences(ctx, profileID, force)
 	if err != nil {
 		return err
 	}
-	if !force && len(dynamicRefs) > 0 {
-		return &ErrProfileInUseDetail{DynamicProfiles: dynamicRefs}
-	}
-	routingTierRefs, err := c.listRoutingTierReferences(ctx, profileID)
-	if err != nil {
-		return err
-	}
-	if len(routingTierRefs) > 0 {
-		return &ErrProfileInUseDetail{RoutingTiers: routingTierRefs}
-	}
-	var utilityRefs []UtilityAgentReference
-	if c.utilityDeps != nil {
-		refs, err := c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, profileID)
-		if err != nil {
-			return fmt.Errorf("check utility agents using this profile: %w", err)
-		}
-		utilityRefs = refs
-	}
-	if c.sessionChecker == nil {
-		if !force && len(utilityRefs) > 0 {
-			return &ErrProfileInUseDetail{UtilityAgents: utilityRefs, DynamicProfiles: dynamicRefs}
-		}
-		return nil
-	}
-	if !force {
-		activeTasks, err := c.sessionChecker.GetActiveTaskInfoByAgentProfile(ctx, profileID)
-		if err != nil {
-			return err
-		}
-		var watcherRefs []WatcherReference
-		if c.watcherDeps != nil {
-			refs, err := c.watcherDeps.ListWatchersByAgentProfile(ctx, profileID)
-			if err != nil {
-				c.logger.Warn("watcher deps lookup failed; proceeding without watcher info",
-					zap.String("profile_id", profileID), zap.Error(err))
-			} else {
-				watcherRefs = refs
-			}
-		}
-		var automationRefs []AutomationReference
-		if c.automationDeps != nil {
-			refs, err := c.automationDeps.ListEnabledAutomationsByAgentProfile(ctx, profileID)
-			if err != nil {
-				// Fails closed, unlike the watcher lookup above. A watcher this
-				// path misses is disabled anyway by the force pass afterwards;
-				// an automation is not, so a lookup that silently returned
-				// nothing would orphan exactly the references this check was
-				// added to catch. Refusing is recoverable — the user retries.
-				return fmt.Errorf("check automations using this profile: %w", err)
-			}
-			automationRefs = refs
-		}
-		// An enabled automation is a standing instruction to launch against this
-		// profile. Nothing is running, so it never appears in the active-session
-		// list, but its next firing would go looking for a profile that is gone —
-		// and a schedule fails quietly, hours later, with nobody watching.
-		if len(activeTasks) > 0 || len(watcherRefs) > 0 || len(automationRefs) > 0 || len(utilityRefs) > 0 {
-			return &ErrProfileInUseDetail{
-				ActiveSessions:  activeTasks,
-				Watchers:        watcherRefs,
-				Automations:     automationRefs,
-				UtilityAgents:   utilityRefs,
-				DynamicProfiles: dynamicRefs,
-			}
-		}
+	if len(detail.RoutingTiers) > 0 || (!force && hasSoftProfileReferences(detail)) {
+		return detail
 	}
 	// Clean up ephemeral tasks (quick chat, config chat) using this profile.
 	// Done after the force check since these don't need user confirmation.
 	c.cleanupEphemeralTasks(ctx, profileID)
 	return nil
+}
+
+// collectProfileReferences gathers every reference a delete must report.
+// Session, watcher, and automation lookups only matter when force is false,
+// because force skips those blockers.
+func (c *Controller) collectProfileReferences(ctx context.Context, profileID string, force bool) (*ErrProfileInUseDetail, error) {
+	detail := &ErrProfileInUseDetail{}
+	var err error
+	if detail.DynamicProfiles, err = c.listDynamicProfileReferences(ctx, profileID); err != nil {
+		return nil, err
+	}
+	if detail.RoutingTiers, err = c.listRoutingTierReferences(ctx, profileID); err != nil {
+		return nil, err
+	}
+	if c.utilityDeps != nil {
+		if detail.UtilityAgents, err = c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, profileID); err != nil {
+			return nil, fmt.Errorf("check utility agents using this profile: %w", err)
+		}
+	}
+	if force || c.sessionChecker == nil {
+		return detail, nil
+	}
+	if detail.ActiveSessions, err = c.sessionChecker.GetActiveTaskInfoByAgentProfile(ctx, profileID); err != nil {
+		return nil, err
+	}
+	detail.Watchers = c.listWatcherReferences(ctx, profileID)
+	if detail.Automations, err = c.listAutomationReferences(ctx, profileID); err != nil {
+		return nil, err
+	}
+	return detail, nil
+}
+
+// hasSoftProfileReferences reports blockers that force may skip. An enabled
+// automation is one: nothing is running, so it never appears in the
+// active-session list, but its next firing would go looking for a profile that
+// is gone, and a schedule fails quietly, hours later, with nobody watching.
+func hasSoftProfileReferences(detail *ErrProfileInUseDetail) bool {
+	return len(detail.DynamicProfiles) > 0 || len(detail.UtilityAgents) > 0 ||
+		len(detail.ActiveSessions) > 0 || len(detail.Watchers) > 0 || len(detail.Automations) > 0
+}
+
+func (c *Controller) listWatcherReferences(ctx context.Context, profileID string) []WatcherReference {
+	if c.watcherDeps == nil {
+		return nil
+	}
+	refs, err := c.watcherDeps.ListWatchersByAgentProfile(ctx, profileID)
+	if err != nil {
+		c.logger.Warn("watcher deps lookup failed; proceeding without watcher info",
+			zap.String("profile_id", profileID), zap.Error(err))
+		return nil
+	}
+	return refs
+}
+
+func (c *Controller) listAutomationReferences(ctx context.Context, profileID string) ([]AutomationReference, error) {
+	if c.automationDeps == nil {
+		return nil, nil
+	}
+	refs, err := c.automationDeps.ListEnabledAutomationsByAgentProfile(ctx, profileID)
+	if err != nil {
+		// Fails closed, unlike the watcher lookup above. A watcher this
+		// path misses is disabled anyway by the force pass afterwards;
+		// an automation is not, so a lookup that silently returned
+		// nothing would orphan exactly the references this check was
+		// added to catch. Refusing is recoverable — the user retries.
+		return nil, fmt.Errorf("check automations using this profile: %w", err)
+	}
+	return refs, nil
+}
+
+// removeStaleDynamicRoutes drops candidate rows that point at the deleted
+// profile from dynamic parents that were already soft-deleted. Those routes
+// can never run, and leaving them behind would keep reporting a dependency on
+// a profile that no longer exists. Best-effort: the profile row is already
+// gone, so a failure is logged rather than turned into a delete error.
+func (c *Controller) removeStaleDynamicRoutes(ctx context.Context, profileID string) {
+	dynamicRepo, ok := c.repo.(store.DynamicProfileRepository)
+	if !ok {
+		return
+	}
+	removed, err := dynamicRepo.DeleteDynamicAgentRoutesForDeletedProfiles(ctx, profileID)
+	if err != nil {
+		c.logger.Warn("failed to remove stale dynamic profile routes",
+			zap.String("profile_id", profileID), zap.Error(err))
+		return
+	}
+	if removed > 0 {
+		c.logger.Info("removed stale dynamic profile routes on profile delete",
+			zap.String("profile_id", profileID), zap.Int64("count", removed))
+	}
 }
 
 func (c *Controller) listRoutingTierReferences(ctx context.Context, profileID string) ([]RoutingTierReference, error) {
@@ -1304,11 +1333,7 @@ func (c *Controller) listDynamicProfileReferences(ctx context.Context, profileID
 	}
 	out := make([]DynamicProfileReference, 0, len(refs))
 	for _, ref := range refs {
-		out = append(out, DynamicProfileReference{
-			ID:      ref.ProfileID,
-			Name:    ref.Name,
-			Deleted: ref.DeletedAt != nil,
-		})
+		out = append(out, DynamicProfileReference{ID: ref.ProfileID, Name: ref.Name})
 	}
 	return out, nil
 }

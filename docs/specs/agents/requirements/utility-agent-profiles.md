@@ -29,6 +29,17 @@ Utility agents run unattended one-shot jobs, but choosing only an agent family a
 - **AC-AGENTS-UTILITY-AGENT-PROFILES-001.8:** A dynamic selection resolves through the shared dynamic conductor. The caller submits the same profile ID as for a concrete selection. The call record retains that logical profile ID and the concrete execution profile that produced the final result.
 - **AC-AGENTS-UTILITY-AGENT-PROFILES-001.9:** A disabled custom utility rejects new session-bound and sessionless invocations with a clear client error, without creating a call or launching a provider. An enabled or re-enabled custom utility remains subject to the existing profile eligibility checks. Disabling it does not cancel an already admitted call; built-in utility behavior is unchanged. The same outcome applies to callers on desktop and mobile.
 
+### REQ-AGENTS-UTILITY-AGENT-PROFILES-002: Bounded utility requests and settled calls
+
+**Intent:** A utility call must fit the context window of the profile that runs it, and its call record must reach a terminal state even when the caller leaves. A session diff can be megabytes long; sending it whole makes the provider reject the request, and a call whose caller disconnected must not stay pending forever.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-UTILITY-AGENT-PROFILES-002.1:** The built-in Enhance prompt action sends the user prompt, task title and description, and the names of the changed files; it never sends the session diff. The file list carries at most 200 names and then states how many more files changed.
+- **AC-AGENTS-UTILITY-AGENT-PROFILES-002.2:** Every utility invocation bounds its template context before rendering, in UTF-8 bytes: git diff 100,000, changed files 20,000, commit log 20,000, task description 20,000, and conversation history 200,000. Truncated values keep valid UTF-8 and include a marker with the omitted byte count. Other fields keep their leading text and place the marker at the end. Conversation history keeps the newest text in chronological order and places its marker before the retained text. The client cuts an oversized diff so the diff and marker stay within the 100,000-byte cap, and the marker that reaches the model counts the bytes actually dropped. Actions that describe the change itself still receive the bounded diff.
+- **AC-AGENTS-UTILITY-AGENT-PROFILES-002.3:** On startup, a stored built-in Enhance prompt whose text exactly matches a shipped revision is replaced with the current template. Custom prompt text is preserved. The refresh leaves profile bindings and other agent fields unchanged.
+- **AC-AGENTS-UTILITY-AGENT-PROFILES-002.4:** When the caller cancels or disconnects before a result, the call record becomes `cancelled` with a completion time and the response status is 499. Any other failure records `failed`. A successful call records `completed`, including when the client disconnects after the result. The call record retains the logical and concrete profile IDs used for the call.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/utility-agent-profiles.md).

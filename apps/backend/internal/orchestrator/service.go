@@ -1461,6 +1461,23 @@ type Service struct {
 	// duplicate-delivery optimization; the durable consumed tombstone lives in
 	// session metadata.
 	parkedProfileSwitchStops sync.Map
+	// transientLaunchRetries records the timestamp of the last automatic retry
+	// per session. Entries live for transientLaunchRetryTTL, so a retried
+	// launch is never retried twice, and expired entries are swept, so the map
+	// neither grows without bound nor blocks self-healing forever.
+	transientLaunchRetries sync.Map
+	// launchRetryMu guards the automatic retry workers' lifecycle:
+	// launchRetryCtx is cancelled by Stop, after which no retry is scheduled,
+	// and launchRetries tracks the workers so Stop and tests can wait for
+	// them. launchRetryDelay and launchRetry are test seams; production leaves
+	// both zero-valued.
+	launchRetryMu      sync.Mutex
+	launchRetryCtx     context.Context
+	launchRetryCancel  context.CancelFunc
+	launchRetryStopped bool
+	launchRetries      *sync.WaitGroup
+	launchRetryDelay   time.Duration
+	launchRetry        func(context.Context, string, string) error
 
 	// steerInFlight tracks sessions with an unacknowledged mid-turn steer.
 	// The spec allows at most one in-flight steer per session; a second attempt
@@ -2019,6 +2036,7 @@ func NewService(
 		)
 	})
 	exec.SetOnLaunchFailed(s.handleLaunchFailed)
+	exec.SetOnLaunchFailureRecorded(s.handleRecordedLaunchFailure)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
 	exec.SetOnStaleExecutionCleanup(func(ctx context.Context, sessionID string) {
 		s.settleBackgroundWorkLocked(ctx, sessionID, "")
@@ -3422,6 +3440,7 @@ func (s *Service) Start(ctx context.Context) (startErr error) {
 	// sweep while the service is active.
 	s.resetLifecycleSweepWorkers()
 	s.resetSilentRestoreRecovery()
+	s.resetTransientLaunchRetries()
 	s.running = true
 	s.startedAt = time.Now()
 	recoveryLifecycleCtx, recoveryLifecycleCancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -3657,6 +3676,7 @@ func (s *Service) Stop() error {
 		return ErrServiceNotRunning
 	}
 	s.running = false
+	cancelLaunchRetries, launchRetryWorkers := s.closeTransientLaunchRetries()
 	recoveryLifecycleCancel := s.recoveryLifecycleCancel
 	stopRecoveryParent := s.stopRecoveryParent
 	s.recoveryLifecycleCtx = nil
@@ -3671,6 +3691,7 @@ func (s *Service) Stop() error {
 	}
 
 	s.logger.Info("stopping orchestrator service")
+	s.awaitTransientLaunchRetries(cancelLaunchRetries, launchRetryWorkers)
 	// Stop owns every in-flight resume attempt. Its detached request context
 	// must not let startup callbacks outlive the service generation.
 	s.cancelResumeAttempts()

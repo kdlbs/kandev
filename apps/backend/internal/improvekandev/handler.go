@@ -107,6 +107,7 @@ type Handler struct {
 	resolveRemote remoteResolver
 	managedGitHub ManagedGitHubForkProber
 	tempArtifacts *tempartifacts.Registry
+	bootstrapJobs *bootstrapJobManager
 }
 
 type diagnosticBundleService interface {
@@ -131,6 +132,7 @@ func NewHandler(
 		defaultWorkspaceResolver: defaultWorkspaceResolver,
 		gh:                       newDefaultGitHubInfo(),
 		resolveRemote:            taskservice.ResolveGitRemoteProvider,
+		bootstrapJobs:            newBootstrapJobManager(),
 	}
 }
 
@@ -153,6 +155,7 @@ func RegisterRoutes(router *gin.Engine, h *Handler) {
 	}
 	api := router.Group("/api/v1/system/improve-kandev")
 	api.POST("/bootstrap", h.httpBootstrap)
+	api.GET("/bootstrap/:id", h.httpBootstrapStatus)
 	api.POST("/bundle/lease", h.httpLeaseBundle)
 }
 
@@ -168,6 +171,8 @@ type BootstrapRequest struct {
 	// the dialog). When false and the workspace is missing, bootstrap falls
 	// back to WorkspaceID (legacy behavior).
 	CreateWorkspace bool `json:"create_workspace,omitempty"`
+	// Async returns a job ID before repository probes or cloning begin.
+	Async bool `json:"async,omitempty"`
 }
 
 // ForkStatus reports the result of the bootstrap fork-capability probe. The
@@ -227,13 +232,69 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{errorKey: "invalid payload"})
 		return
 	}
+	if req.Async {
+		c.Header("Cache-Control", "no-store")
+		jobID, err := h.bootstrapJobs.start(identity, func(ctx context.Context) (*BootstrapResponse, string) {
+			return h.prepareBootstrap(ctx, identity, req)
+		})
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{errorKey: err.Error()})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{"job_id": jobID})
+		return
+	}
 
-	ctx := c.Request.Context()
+	response, publicError := h.prepareBootstrap(c.Request.Context(), identity, req)
+	if publicError != "" {
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: publicError})
+		return
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *Handler) httpBootstrapStatus(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	identity, ok := authn.FromGin(c)
+	if !ok || identity.UserID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{errorKey: "authentication required"})
+		return
+	}
+	snapshot, ok := h.bootstrapJobs.get(c.Param("id"), ownerForIdentity(identity))
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{errorKey: "not found"})
+		return
+	}
+	if snapshot.pending {
+		c.JSON(http.StatusAccepted, gin.H{"job_id": c.Param("id")})
+		return
+	}
+	if snapshot.publicError != "" {
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: snapshot.publicError})
+		return
+	}
+	if snapshot.response == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "bootstrap preparation failed"})
+		return
+	}
+	if err := h.taskSvc.AuthorizeWorkspaceAccess(c.Request.Context(), snapshot.response.WorkspaceID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{errorKey: "not found"})
+		return
+	}
+	c.JSON(http.StatusOK, snapshot.response)
+}
+
+// prepareBootstrap contains the original synchronous setup so both HTTP
+// contracts return the same artifacts and safe failure messages.
+func (h *Handler) prepareBootstrap(
+	ctx context.Context,
+	identity authn.Identity,
+	req BootstrapRequest,
+) (*BootstrapResponse, string) {
 	workspace, err := h.ensureImproveWorkspace(ctx, req.CreateWorkspace, req.WorkspaceID)
 	if err != nil {
 		h.log.Error("improve-kandev: dedicated workspace resolution failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to resolve the Improve Kandev workspace"})
-		return
+		return nil, "failed to resolve the Improve Kandev workspace"
 	}
 	workspaceID := workspace.ID
 
@@ -241,24 +302,21 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 	repo, err := h.resolveOrCloneRepo(ctx, workspaceID, access.providerRepoID)
 	if err != nil {
 		h.log.Error("improve-kandev: repository upsert failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to register kandev repository"})
-		return
+		return nil, "failed to register kandev repository"
 	}
 
 	workflow, issueWorkflow, err := h.ensureWorkflows(ctx, workspaceID)
 	if err != nil {
 		h.log.Error("improve-kandev: workflow provisioning failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to ensure improve-kandev workflows"})
-		return
+		return nil, "failed to ensure improve-kandev workflows"
 	}
 
 	dir, err := h.createBundleDir(ctx, identity.UserID)
 	if err != nil {
 		h.log.Error("improve-kandev: bundle dir creation failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to create bundle dir"})
-		return
+		return nil, "failed to create bundle dir"
 	}
-	c.JSON(http.StatusOK, BootstrapResponse{
+	return &BootstrapResponse{
 		WorkspaceID:     workspaceID,
 		RepositoryID:    repo.ID,
 		WorkflowID:      workflow.ID,
@@ -270,7 +328,14 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		HasWriteAccess:  access.hasWrite,
 		ForkStatus:      access.forkStatus,
 		ForkReasonCode:  access.forkReasonCode,
-	})
+	}, ""
+}
+
+func (h *Handler) Stop() error {
+	if h.bootstrapJobs != nil {
+		h.bootstrapJobs.stop()
+	}
+	return nil
 }
 
 func (h *Handler) ensureWorkflows(
@@ -409,6 +474,21 @@ func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID, providerR
 		if err := h.ensureKandevProviderRepoID(ctx, existing, providerRepoID); err != nil {
 			return nil, err
 		}
+		if !repositoryCheckoutExists(existing.LocalPath) {
+			if h.cloner == nil {
+				return nil, errors.New("kandev repository checkout is missing and no cloner is available")
+			}
+			localPath, err := h.cloner.EnsureWorkspaceCloned(
+				ctx, workspaceID, repoProvider, repoCloneURL, repoOwner, repoName,
+			)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := h.taskSvc.UpdateRepository(ctx, existing.ID, &taskservice.UpdateRepositoryRequest{LocalPath: &localPath}); err != nil {
+				return nil, err
+			}
+			existing.LocalPath = localPath
+		}
 		return existing, nil
 	}
 
@@ -441,6 +521,14 @@ func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID, providerR
 		LocalPath:      localPath,
 	})
 	return repo, err
+}
+
+func repositoryCheckoutExists(localPath string) bool {
+	if localPath == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(localPath, ".git"))
+	return err == nil && (info.IsDir() || info.Mode().IsRegular())
 }
 
 // findKandevRepoByLocalRemote returns the first repo with a local path whose

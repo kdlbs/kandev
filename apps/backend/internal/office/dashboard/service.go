@@ -384,6 +384,15 @@ type RoutingProvider interface {
 	// to "inherit". Returns the zero blob when the agent has no
 	// overrides recorded; an error only on lookup / parse failures.
 	AgentOverrides(ctx context.Context, agentID string) (routing.AgentOverrides, error)
+	// StoredExclusionSetup predicts problems with the workspace's
+	// exclude_author_provider steps under the current routing setup.
+	StoredExclusionSetup(ctx context.Context, workspaceID string) ([]routing.SetupWarning, error)
+	// SeatSteps lists the workspace's ensure_participant_seat actions with
+	// their exclude_author_provider setting.
+	SeatSteps(ctx context.Context, workspaceID string) ([]routing.SeatStep, error)
+	// ReleaseAuthorExclusionParkedRuns re-queues runs at stepIDs that parked
+	// after skipping the author's provider.
+	ReleaseAuthorExclusionParkedRuns(ctx context.Context, workspaceID string, stepIDs []string) error
 }
 
 // RouteAttemptLister is the narrow read-side seam used by the run-detail
@@ -444,6 +453,7 @@ type DashboardService struct {
 	markFixed             MarkFixedHandler                // optional; nil disables the dismiss endpoint
 	decisions             DecisionStore                   // workflow-domain decisions store (ADR 0005 Wave E); nil disables decision endpoints
 	routingProvider       RoutingProvider                 // optional; nil disables /routing endpoints (503)
+	seatExclusionWriter   SeatAuthorExclusionWriter       // optional; nil answers 503 on the seat exclusion write
 	attemptLister         RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
 	runResolver           RunResolver                     // optional; nil means status-change activity rows have no run_id
 	runEvents             RunEventAppender                // optional; nil means a refused agent comment read is not recorded on its run

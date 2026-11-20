@@ -723,6 +723,7 @@
   "routeOutcomeRetryScheduled": "已安排重試",
   "routeOutcomeSkippedDegraded": "已跳過（降級）",
   "routeOutcomeSkippedMaxAttempts": "已跳過（達最大嘗試次數）",
+  "routeOutcomeSkippedAuthorProvider": "已跳過：編寫了此任務",
   "routeOutcomeSkippedMissingMapping": "已跳過（缺少映射）",
   "routeOutcomeSkippedUserAction": "已跳過（用戶操作）",
   "routineActivated": "例行程序已激活",
@@ -745,6 +746,7 @@
   "routineStatusPaused": "已暫停",
   "routingOverridesSaved": "路由覆蓋已儲存",
   "routingSettingsSaved": "路由設定已儲存",
+  "routingSavedWithExclusionWarnings": "設定已儲存，但按目前設定，「在其他提供者上審閱」無法生效。請查看頁面頂部的警告。",
   "run": "執行",
   "runActivity": "執行活動",
   "runCancelAssigneeChanged": "負責人已更改",
@@ -1024,5 +1026,10 @@
   "failedToLoadRouteAttempts": "載入路由嘗試記錄失敗",
   "failedToLoadRoutingConfig": "載入路由設定失敗",
   "failedToLoadRoutingPreview": "載入路由預覽失敗",
-  "failedToLoadTaskQuorum": "載入任務法定人數失敗"
+  "failedToLoadTaskQuorum": "載入任務法定人數失敗",
+  "authorExclusionStepsTitle": "在其他提供者上審閱",
+  "authorExclusionStepsDescription": "讓步驟的審閱人或審批人避開完成任務工作的提供者，使審閱成為獨立檢查。如果沒有其他可用的提供者，審閱會一直等待，直到你採取操作。需要開啓提供者自動後備，並至少設定兩個提供者。擁有自己執行設定的代理程式不受此設定約束。",
+  "authorExclusionStepsEmpty": "此工作區中沒有工作流程包含審閱人或審批人步驟。",
+  "authorExclusionStepLabel": "{{workflow}} 工作流程，{{step}} 步驟",
+  "authorExclusionStepSwitchLabel": "為 {{workflow}} 工作流程的 {{step}} 步驟（{{role}}）在其他提供者上審閱"
 }
