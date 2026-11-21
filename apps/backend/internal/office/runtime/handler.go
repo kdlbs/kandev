@@ -23,13 +23,14 @@ const runtimeInternalErrorMessage = "internal runtime error"
 
 // Handler exposes run-scoped runtime actions to agent processes.
 type Handler struct {
-	agentSvc    *agents.AgentService
-	actions     *Actions
-	skillLister SkillLister
-	runEvents   RunEventAppender
-	decisions   DecisionRecorder
-	logger      *commonlogger.Logger
-	taskLister  TaskFilteredLister
+	agentSvc       *agents.AgentService
+	actions        *Actions
+	skillLister    SkillLister
+	runEvents      RunEventAppender
+	decisions      DecisionRecorder
+	logger         *commonlogger.Logger
+	taskLister     TaskFilteredLister
+	crossWorkspace CrossWorkspaceGateway
 }
 
 // RunEventAppender records runtime behavior against a run.
@@ -80,6 +81,7 @@ func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.GET("/runtime/skills", h.listSkills)
 	group.DELETE("/runtime/skills/:id", h.deleteSkill)
 	group.POST("/runtime/handoffs", h.handoffTask)
+	registerCrossWorkspaceRoutes(group, h)
 }
 
 type recordAgentDecisionRequest struct {

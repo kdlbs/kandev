@@ -169,6 +169,11 @@ func (r *sessionStateSequenceRepo) GetTaskSession(ctx context.Context, sessionID
 	if err != nil || session == nil {
 		return session, err
 	}
+	// Inference closure presence checks read the session for closure
+	// metadata only; they are not one of the lifecycle reads being sequenced.
+	if models.InferenceClosurePresenceCheckRequested(ctx) {
+		return session, nil
+	}
 	if r.reads < len(r.states) {
 		session.State = r.states[r.reads]
 	}

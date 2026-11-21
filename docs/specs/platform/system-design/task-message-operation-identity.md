@@ -107,6 +107,17 @@ question comparison. The trusted principal must match the sender pair.
    unchanged.
 5. Settle the record from the dispatch result.
 
+`delivery_mode="report"` rejects `operation_id` before writing, because a
+report is neither claimed nor replayed. A parent-question reply that finds the
+question already answered echoes the identity without claiming it: repeating
+that request delivers nothing and returns `already_answered` again.
+
+The Office signed runtime runs the replay read first, under the live-run and
+source-session checks only, and re-checks the target's prompt grant only when
+no retained record exists (`operation_not_retained`). A lost Office response
+therefore stays recoverable after the target is deleted or its grant is
+revoked.
+
 The claim is a single-row insert committed before step 4. That ordering is the
 whole mechanism: once the row exists, an interrupted or timed-out caller has
 something to read, and the pre-existing `queuedEntryID` and
@@ -148,7 +159,8 @@ On a unique violation the handler reads the existing row:
   stable code `operation_id_conflict`, delivering nothing and echoing no stored
   content (AC-003.3, AC-004.3).
 - State `pending`: return the in-flight outcome and say the send must not be
-  retried (AC-002.2).
+  retried (AC-002.2). Every replay receipt carries readback's `retry_safe` and
+  `instruction`.
 
 `reply_to_question_id` composes: its existing claim still runs and still
 short-circuits, so a reply that carries an operation identity is claimed in

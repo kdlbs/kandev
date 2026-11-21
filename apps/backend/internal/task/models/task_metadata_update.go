@@ -14,6 +14,18 @@ const ReservedMetadataKeyPrefixCoordinator = "kandev.coordinator_"
 // child assignments. It is a creation requirement, not a child-content verdict.
 const MetaKeyRequiredSubtaskCount = "kandev.office_required_subtask_count"
 
+const MetaKeyReviewSource = "review_source"
+
+// ReviewSourceApproval records an operator's selection for this task only.
+type ReviewSourceApproval struct {
+	UserID       string `json:"user_id"`
+	Path         string `json:"path"`
+	CommonDir    string `json:"common_dir"`
+	WorktreeRoot string `json:"worktree_root"`
+	BaseRef      string `json:"base_ref"`
+	HeadRef      string `json:"head_ref"`
+}
+
 // ProtectedTaskMetadataUpdate replaces caller-owned metadata while retaining
 // the current server-owned lifecycle, handoff, causation and coordinator
 // reserved records.
@@ -27,6 +39,7 @@ func ProtectedTaskMetadataUpdate(existing, requested map[string]interface{}) map
 	for _, key := range []string{
 		MetaKeyDeferredLaunch, MetaKeyStepHandoffCarry, MetaKeyHandoffSource, MetaKeyHandoffs,
 		MetaKeyAutomationStartOwned, MetaKeyRequiredSubtaskCount, MetaKeyLastTurnError,
+		MetaKeyReviewSource,
 	} {
 		if value, ok := existing[key]; ok {
 			updated[key] = value

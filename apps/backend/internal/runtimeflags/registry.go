@@ -38,6 +38,8 @@ type runtimeFlagIdentity struct {
 
 const (
 	keyCodexAppServer                             = "features.codexAppServer"
+	keyTerminalPrimaryQueueHandoff                = "features.terminalPrimaryQueueHandoff"
+	envTerminalPrimaryQueueHandoff                = "KANDEV_FEATURES_TERMINAL_PRIMARY_QUEUE_HANDOFF"
 	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
 	retiredAppStatusBarKey                        = "features.appStatusBar"
 	retiredAppStatusBarEnvVar                     = "KANDEV_FEATURES_APP_STATUS_BAR"
@@ -95,6 +97,22 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.providerUsageLimits",
+			EnvVar:          "KANDEV_FEATURES_PROVIDER_USAGE_LIMITS",
+			Kind:            KindFeature,
+			Label:           "Provider usage and limits",
+			Description:     "Shows account-aware provider usage and applies configured provider allowances and classified limit observations to task and Office prompts.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "Unknown applicable account bindings stop configured admission. Utility/review inference and provider HTTP-request/token/USD budgets are not covered. Configured limits can defer a candidate at a new turn without changing its order. Disabling retains settings, observations, and claims.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderUsageLimits },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderUsageLimits = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             "features.workspaceCollaboration",
 			EnvVar:          "KANDEV_FEATURES_WORKSPACE_COLLABORATION",
 			Kind:            KindFeature,
@@ -108,6 +126,18 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.WorkspaceCollaboration },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.WorkspaceCollaboration = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key: "features.dynamicProfileTiers", EnvVar: "KANDEV_FEATURES_DYNAMIC_PROFILE_TIERS",
+			Kind: KindFeature, Label: "Dynamic profile tiers",
+			Description: "Enables adjacent order, cost, random, round-robin and provider-usage candidate tiers, read-only selection preview and durable no-revisit fallback chains.",
+			Stability:   StabilityExperimental, RiskLevel: RiskMedium,
+			RiskDescription: "Requires Dynamic agent routing. Changes candidate traversal when enabled. Round-robin uses committed task/session selections within one backend engine; native utility and taskless Office callers advance the same history. Usage-paced modes require Provider usage and limits and use only the last observed snapshot; while that feature is off, saved usage modes are not executed as order.",
+			RestartRequired: true, Mutable: true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicProfileTiers },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicProfileTiers = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
@@ -248,6 +278,22 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.CodexAppServer },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.CodexAppServer = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             keyTerminalPrimaryQueueHandoff,
+			EnvVar:          envTerminalPrimaryQueueHandoff,
+			Kind:            KindFeature,
+			Label:           "Hand off queues of finished primary sessions",
+			Description:     "When a task's primary session fails, is cancelled or completes, moves its queued messages to the session that becomes primary.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskLow,
+			RiskDescription: "Queued messages can be delivered to a different session than the one they were queued for. Leave it off to keep every queued message on its original session.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.TerminalPrimaryQueueHandoff },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.TerminalPrimaryQueueHandoff = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

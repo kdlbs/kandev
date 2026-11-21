@@ -1976,15 +1976,26 @@ type Workspace struct {
 	// UnitID places the workspace in the organization unit tree. Reach is
 	// resolved from this placement, so a workspace without one is reachable by
 	// nobody.
-	UnitID                      string    `json:"unit_id,omitempty"`
-	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
-	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
-	ACPIdleSuspensionEnabled    bool      `json:"acp_idle_suspension_enabled"`
-	ACPIdleTimeoutMinutes       int       `json:"acp_idle_timeout_minutes"`
-	CreatedAt                   time.Time `json:"created_at"`
-	UpdatedAt                   time.Time `json:"updated_at"`
+	UnitID                      string  `json:"unit_id,omitempty"`
+	DefaultExecutorID           *string `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled    bool    `json:"acp_idle_suspension_enabled"`
+	ACPIdleTimeoutMinutes       int     `json:"acp_idle_timeout_minutes"`
+	// DynamicMidTurnFailoverEnabled lets a dynamic task route try the next
+	// candidate once after a classified provider-capacity failure that happens
+	// after output or effects. Off by default; see dynamic_midturn_failover.go.
+	DynamicMidTurnFailoverEnabled bool `json:"dynamic_midturn_failover_enabled"`
+	// DynamicFailedRouteAutoRetryEnabled lets a dynamic task route that a
+	// classified provider-capacity failure left in recovery retry itself
+	// after its candidates' circuits recover. Off by default; see
+	// dynamic_failed_route_retry.go. DynamicFailedRouteAutoRetryMax caps the
+	// automatic retries between successful turns (1-3, default 1).
+	DynamicFailedRouteAutoRetryEnabled bool      `json:"dynamic_failed_route_auto_retry_enabled"`
+	DynamicFailedRouteAutoRetryMax     int       `json:"dynamic_failed_route_auto_retry_max"`
+	CreatedAt                          time.Time `json:"created_at"`
+	UpdatedAt                          time.Time `json:"updated_at"`
 
 	// Office extensions
 	TaskPrefix       string `json:"task_prefix,omitempty"`        // e.g. "KAN"
@@ -2516,13 +2527,16 @@ type SessionBranchInfo struct {
 // TaskSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
 type TaskSession struct {
-	ExecutorActorUserID string `json:"-"`
-	ID                  string `json:"id"`
-	TaskID              string `json:"task_id"`
-	QueueIncarnationID  string `json:"queue_incarnation_id"`
-	Name                string `json:"name,omitempty"`     // Optional user-supplied label shown on the session tab
-	AgentExecutionID    string `json:"agent_execution_id"` // Docker container/agent execution
-	ContainerID         string `json:"container_id"`       // Docker container ID for cleanup
+	// Set only by a session read that also checked the independent closure
+	// block on the writer. It is never stored or exposed in API payloads.
+	InferenceClosureAbsenceConfirmed bool   `json:"-" db:"-"`
+	ExecutorActorUserID              string `json:"-"`
+	ID                               string `json:"id"`
+	TaskID                           string `json:"task_id"`
+	QueueIncarnationID               string `json:"queue_incarnation_id"`
+	Name                             string `json:"name,omitempty"`     // Optional user-supplied label shown on the session tab
+	AgentExecutionID                 string `json:"agent_execution_id"` // Docker container/agent execution
+	ContainerID                      string `json:"container_id"`       // Docker container ID for cleanup
 	// ExecutionRuntime is the observed runtime recorded by executors_running
 	// for this session's execution. Empty means unknown; it is never derived
 	// from the selected executor configuration.
@@ -2725,7 +2739,7 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		result["completed_at"] = s.CompletedAt
 	}
 	if s.Metadata != nil {
-		result["metadata"] = s.Metadata
+		result["metadata"] = PublicSessionMetadata(s.Metadata)
 	}
 	if s.AgentProfileSnapshot != nil {
 		result["agent_profile_snapshot"] = s.AgentProfileSnapshot

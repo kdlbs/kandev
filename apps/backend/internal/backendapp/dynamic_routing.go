@@ -74,15 +74,12 @@ func applyDynamicRouteAction(
 	if err != nil {
 		return handleDynamicRouteActionError(ctx, repo, session, expectedState, err)
 	}
-	candidateSwitch := orchestrator.DynamicCandidateRuntimeResetRequired(
-		session.ExecutionProfileID, decision.ExecutionProfileID,
-	)
-	changed, err := persistDynamicRouteSelection(ctx, repo, session, expectedState, decision, persistCandidateSwitch)
+	changed, runtimeReset, err := persistDynamicRouteSelection(ctx, repo, session, expectedState, decision, persistCandidateSwitch)
 	if err != nil {
 		return nil, err
 	}
 	if !changed {
-		if candidateSwitch {
+		if runtimeReset {
 			// The route claim is already durable, so a failed projection must
 			// return that generation to manual recovery before reporting conflict.
 			if _, err := resolver.MarkRouteActionRequired(
@@ -141,8 +138,24 @@ func resolveDynamicRouteAction(
 		session.AgentProfileID,
 		session.ExecutionProfileID,
 		request.ExpectedGeneration,
-		string(request.Action),
+		resolverRouteAction(request),
 	)
+}
+
+// resolverRouteAction names the resolver action for a request. The
+// orchestrator's unattended Try next and Retry select like try_next and retry
+// but record their own route reasons; every client request keeps its
+// submitted action.
+func resolverRouteAction(request orchestrator.RouteActionRequest) string {
+	if request.Automatic {
+		switch request.Action {
+		case orchestrator.RouteActionTryNext:
+			return agentruntime.RouteActionAutoTryNext
+		case orchestrator.RouteActionRetry:
+			return agentruntime.RouteActionAutoRetry
+		}
+	}
+	return string(request.Action)
 }
 
 func handleDynamicRouteActionError(
@@ -177,7 +190,7 @@ func persistDynamicRouteSelection(
 	expectedState models.TaskSessionState,
 	decision agentruntime.ProfileExecution,
 	persistCandidateSwitch dynamicCandidateSwitchPersister,
-) (bool, error) {
+) (changed, runtimeReset bool, err error) {
 	previousExecutionProfileID, expectedUpdatedAt := session.ExecutionProfileID, session.UpdatedAt
 	session.ExecutionProfileID = decision.ExecutionProfileID
 	session.RouteGeneration = decision.Generation
@@ -195,21 +208,20 @@ func persistDynamicRouteSelection(
 	// A candidate change never carries a provider-native ACP identity across
 	// profiles. The conductor will populate this after a fresh launch.
 	session.DownstreamACPSessionID = ""
-	var changed bool
-	var err error
-	if orchestrator.DynamicCandidateRuntimeResetRequired(previousExecutionProfileID, session.ExecutionProfileID) {
+	runtimeReset = orchestrator.DynamicCandidateSelectionResetRequired(session, previousExecutionProfileID)
+	if runtimeReset {
 		// The previous provider's model and mode must not reach the new candidate.
 		if persistCandidateSwitch == nil {
-			return false, errors.New("dynamic candidate switch persister unavailable")
+			return false, runtimeReset, errors.New("dynamic candidate switch persister unavailable")
 		}
 		changed, err = persistCandidateSwitch(ctx, session, expectedState, expectedUpdatedAt)
 	} else {
 		changed, err = repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
 	}
 	if err != nil {
-		return false, routeActionPersistenceError(ctx, repo, session, err)
+		return false, runtimeReset, routeActionPersistenceError(ctx, repo, session, err)
 	}
-	return changed, nil
+	return changed, runtimeReset, nil
 }
 
 func finishDynamicRouteAction(

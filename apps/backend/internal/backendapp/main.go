@@ -562,6 +562,7 @@ func startServices( //nolint:cyclop
 	// AGENTCTL LAUNCHER (for standalone mode)
 	// ============================================
 	agentRuntimeAvailability := agentctlclient.NewRuntimeOwner(eventBus, log, systeminfo.NewBootID())
+	logger.SetExecutionBootID(agentRuntimeAvailability.BootID())
 	addCleanup(func() error {
 		agentRuntimeAvailability.Stop()
 		return nil
@@ -717,6 +718,7 @@ func startAgentInfrastructure(
 		return false
 	}
 	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
+	lifecycleMgr.SetProviderTurnSettlement(repos.Task)
 	if services.DynamicProfileResolver != nil {
 		lifecycleMgr.SetResourceCircuitKeyResolver(services.DynamicProfileResolver.ResourceCircuitKeyForProfile)
 	}
@@ -895,6 +897,9 @@ func startAgentInfrastructure(
 	if services.DynamicProfileResolver != nil {
 		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
 		agentSettingsController.SetRoutingCircuitReader(newRoutingCircuitReader(services.DynamicProfileResolver))
+		if cfg.Features.DynamicProfileTiers {
+			agentSettingsController.SetDynamicTierPreviewer(services.DynamicProfileResolver)
+		}
 	}
 	// An enabled automation is a standing instruction to launch against a
 	// profile. Nothing is running, so it never reaches the active-session list,
@@ -1243,6 +1248,21 @@ func startGatewayAndServe(
 	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	hostUtilityMgr.SetManagedRuntimeSingleUserOwner(singleUserManagedRuntimeOwner(services.Auth))
+	lifecycleMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
+	if cfg.Features.ProviderUsageLimits {
+		agentSettingsController.SetNativeUsageReader(lifecycleMgr.ReadProfileExecutionUsage)
+		services.DynamicProfileResolver.SetCandidateExecutionUsageReader(lifecycleMgr.PeekCandidateExecutionUsage)
+	}
+	hostUtilityMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
+	lifecycleMgr.SetPreparedExecutionUsageReader(hostUtilityMgr.PreviewPreparedExecutionUsage)
+	sharedInferenceOwner := wireSharedInferenceCapacity(orchestratorSvc, repos.SystemSettings, log.Zap(), lifecycleMgr, hostUtilityMgr)
+	sharedInferenceOwner.settler = repos.Task
+	nativeUsageOwner := wireNativeRouteCapacity(services.DynamicProfileResolver, orchestratorSvc, sharedInferenceOwner, repos.Task, repos.Utility)
+	if cfg.Features.ProviderUsageLimits && nativeUsageOwner != nil {
+		nativeUsageOwner.sessionUsage = lifecycleMgr.PreviewInferenceProfileUsage
+		nativeUsageOwner.hostUsage = hostUtilityMgr.PreviewProfileUsage
+		services.DynamicProfileResolver.SetNativeCandidateExecutionUsageReader(nativeUsageOwner.candidateUsage)
+	}
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
@@ -1251,7 +1271,7 @@ func startGatewayAndServe(
 		if err != nil {
 			return nil, nil, err
 		}
-		releaseUtility, err := hostUtilityMgr.AcquireRuntimeMaintenance(activationCtx, "opencode-acp")
+		releaseUtility, err := hostUtilityMgr.AcquireRuntimeMaintenance(activationCtx, openCodeAgentID)
 		if err != nil {
 			releaseLifecycle()
 			return nil, nil, err
@@ -1357,6 +1377,40 @@ func startGatewayAndServe(
 	if !ok {
 		closeBoundListeners(server, listeners, log)
 		return false
+	}
+
+	// Wire subscription usage provider into the office agents service so the
+	// /agents/:id/utilization endpoint can fetch live utilization data.
+	// The added settings read surface shares this cache but is independently gated.
+	var usageAdapter *usageProviderAdapter
+	if cfg.Features.ProviderUsageLimits || (services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil) {
+		usageAdapter = newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+	}
+	if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
+		services.OfficeSvcs.Agents.SetUsageProvider(officeUsageProvider(cfg.Features.ProviderUsageLimits, lifecycleMgr.ReadOfficeProfileExecutionUsage, usageAdapter))
+	}
+	if cfg.Features.ProviderUsageLimits {
+		tierUsage := newTierUsageSnapshot()
+		allowances := &providerTurnAllowances{profileUsageSnapshot: newProfileUsageSnapshot(usageAdapter), claims: repos.Task}
+		allowances.inferencePopulation = sharedInferenceOwner.inferenceProviderPopulation
+		sharedInferenceOwner.provider = allowances
+		sharedInferenceOwner.providerPopulation = lifecycleMgr.InferenceProviderPopulation
+		agentSettingsController.SetProfileUsageProvider(&tierUsageRecordingProvider{next: allowances, sink: tierUsage})
+		lifecycleMgr.SetProviderTurnAdmission(allowances)
+		providerLimits := newProviderLimitService(repos.Task, repos.AgentSettings, newDynamicLimitCalendar(usageAdapter, repos.Task))
+		tierLimits := newProviderTierLimitService(usageAdapter, repos.Task)
+		usageAdapter.tierLimits = tierLimits
+		providerLimits.tiers = tierLimits
+		if cfg.Features.DynamicProfileTiers && services.DynamicProfileResolver != nil {
+			services.DynamicProfileResolver.SetCandidateUsageLookup(tierUsage.Lookup)
+		}
+		installTierLimitAdapter(services.DynamicProfileResolver, usageAdapter, providerLimits.calendar, repos.Task)
+		if subscription, err := tierLimits.Subscribe(eventBus); err != nil {
+			log.Warn("provider limit request observation unavailable", zap.Error(err))
+		} else {
+			addCleanup(func() error { return subscription.Unsubscribe() })
+		}
+		agentSettingsController.SetProviderLimitService(providerLimits)
 	}
 
 	if err := repos.RequiredStores.ValidateComplete(); err != nil {
@@ -1921,7 +1975,9 @@ func newRunProcessorService(
 		AgentctlBinaryPath: agentctlBinaryPath,
 		EventBus:           eventBus,
 	})
-	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, runtimeBackend, services.DynamicProfileResolver, log))
+	runLauncher := newOfficeRunSessionLauncher(repos.Office, runtimeBackend, services.DynamicProfileResolver, log)
+	runLauncher.SetExecutionCapacityOwner(orchestratorSvc)
+	svc.SetRunSessionLauncher(runLauncher)
 	wireOfficeRunClaimSessionProbe(svc, repos.Task, runtimeBackend)
 	return svc
 }
@@ -2156,7 +2212,7 @@ func (a *schedulerTaskStarterAdapter) startTaskWithRoute(
 	launch officescheduler.LaunchContext,
 	route officescheduler.RouteOverride,
 ) (*orchexecutor.TaskExecution, error) {
-	return a.orch.StartTaskWithRoute(ctx, taskID, agentProfileID,
+	return officeTaskCapacityResult(a.orch.StartTaskWithRoute(ctx, taskID, agentProfileID,
 		orchestratorLaunchContext(launch),
 		orchexecutor.RouteOverride{
 			ExecutionProfileID: route.ExecutionProfileID,
@@ -2166,7 +2222,7 @@ func (a *schedulerTaskStarterAdapter) startTaskWithRoute(
 			Mode:               route.Mode,
 			Flags:              route.Flags,
 			Env:                route.Env,
-		})
+		}))
 }
 
 // launchSafetyLimits bundles the boot-time-resolved
@@ -2858,9 +2914,9 @@ func (a *officeOrchestratorTaskStarter) startTaskWithEnvAndSkills(
 	executorProfileID string, priority string, prompt, workflowStepID string,
 	planMode bool, attachments []v1.MessageAttachment, env map[string]string, additionalSkillSlugs []string,
 ) (*orchexecutor.TaskExecution, error) {
-	return a.orch.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
+	return officeTaskCapacityResult(a.orch.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
 		executorID, executorProfileID, priority, prompt,
-		workflowStepID, planMode, false, attachments, env, additionalSkillSlugs)
+		workflowStepID, planMode, false, attachments, env, additionalSkillSlugs))
 }
 
 func (a *officeOrchestratorTaskStarter) GetOpenSessionRecoveryBlock(

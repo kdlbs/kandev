@@ -13,7 +13,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
-	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/acpprovider"
@@ -24,6 +23,14 @@ import (
 // and executes it through the host utility instance. A missing or ineligible
 // profile fails before dispatch; no agent/model fallback is used.
 func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (*PromptResult, error) {
+	return m.ExecuteProfileModelPrompt(ctx, profileID, "", prompt)
+}
+
+// ExecuteProfileModelPrompt is ExecuteProfilePrompt with an explicit model.
+// A non-empty model replaces the profile's model, so a caller that already
+// checked a concrete model runs exactly that model rather than the profile's
+// empty model or the agent's probed default.
+func (m *Manager) ExecuteProfileModelPrompt(ctx context.Context, profileID, model, prompt string) (*PromptResult, error) {
 	if m.profileResolver == nil {
 		return nil, errors.New("utility profile resolver is not configured")
 	}
@@ -31,19 +38,9 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 	if err != nil {
 		return nil, err
 	}
-	cliFlags, err := cliflags.Resolve(profile.CLIFlags)
+	cliFlags, prefix, _, err := agentctlutil.ProfileInferenceEnvironment(profile.CLIFlags, profile.CommandPrefix, profile.EnvVars)
 	if err != nil {
-		return nil, fmt.Errorf("resolve profile cli flags: %w", err)
-	}
-	var prefix []string
-	if profile.CommandPrefix != "" {
-		if err := cliflags.ValidateCommandPrefix(profile.CommandPrefix); err != nil {
-			return nil, err
-		}
-		prefix, err = cliflags.Tokenise(profile.CommandPrefix)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	env, err := m.resolveProfileEnvironment(ctx, profile.AgentID, profile.EnvVars)
 	if err != nil {
@@ -53,19 +50,9 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 		Env: env, CLIFlags: cliFlags, CommandPrefix: prefix,
 		CopilotSelectedPlugins: append([]string{}, profile.CopilotSelectedPlugins...),
 	}
-	var gatewayAuth *acpprovider.GatewayAuth
-	var providerKeyEnvVar, providerKey string
-	if profile.ProviderKind == settingsmodels.ProviderKindOpenAICompatible {
-		if m.providerGatewayAuthResolver == nil {
-			return nil, errors.New("utility provider gateway resolver is not configured")
-		}
-		gatewayAuth, providerKeyEnvVar, providerKey, err = m.providerGatewayAuthResolver(ctx, profileID, profile.AgentID)
-		if err != nil {
-			return nil, err
-		}
-		if providerKey != "" && providerKeyEnvVar != "" {
-			env[providerKeyEnvVar] = providerKey
-		}
+	gatewayAuth, err := m.profileGatewayAuth(ctx, profileID, profile, env)
+	if err != nil {
+		return nil, err
 	}
 	inst, ia, err := m.getInstance(ctx, profile.AgentID)
 	if err != nil {
@@ -84,7 +71,10 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 		cliFlags = pluginFlags
 	}
 	cfg := inferenceConfigForHostUtility(ia)
-	resolved := m.resolveModel(profile.AgentID, profile.Model, ia)
+	if model == "" {
+		model = profile.Model
+	}
+	resolved := m.resolveModel(profile.AgentID, model, ia)
 	autoApprove := profile.AutoApprove
 	env = mergeInferenceEnv(env, localEnv)
 	req := &agentctlutil.PromptRequest{
@@ -100,7 +90,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			ProviderGatewayAuth: gatewayAuth, AuthPolicy: hostUtilityAuthPolicy(ia), OperatorDefined: cfg.OperatorDefined,
 		},
 	}
-	resp, err := inst.client.InferencePrompt(ctx, req)
+	resp, err := m.executeOwnedInference(ctx, inst, req, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +98,25 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 		return nil, errors.New(resp.Error)
 	}
 	return &PromptResult{Response: resp.Response, Model: resp.Model, PromptTokens: resp.PromptTokens, ResponseTokens: resp.ResponseTokens, DurationMs: resp.DurationMs}, nil
+}
+
+// profileGatewayAuth resolves an OpenAI-compatible profile's gateway and adds
+// its provider key to env. Other profiles use no gateway.
+func (m *Manager) profileGatewayAuth(ctx context.Context, profileID string, profile *settingsmodels.AgentProfile, env map[string]string) (*acpprovider.GatewayAuth, error) {
+	if profile.ProviderKind != settingsmodels.ProviderKindOpenAICompatible {
+		return nil, nil
+	}
+	if m.providerGatewayAuthResolver == nil {
+		return nil, errors.New("utility provider gateway resolver is not configured")
+	}
+	gatewayAuth, providerKeyEnvVar, providerKey, err := m.providerGatewayAuthResolver(ctx, profileID, profile.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	if providerKey != "" && providerKeyEnvVar != "" {
+		env[providerKeyEnvVar] = providerKey
+	}
+	return gatewayAuth, nil
 }
 
 // GetAll returns a snapshot of every probed agent type's capabilities.
@@ -459,7 +468,7 @@ func (m *Manager) ExecutePromptWithMCP(
 		},
 		MCPServers: mcpServers,
 	}
-	resp, err := inst.client.InferencePrompt(ctx, req)
+	resp, err := m.executeOwnedInference(ctx, inst, req, "")
 	if err != nil {
 		return nil, err
 	}

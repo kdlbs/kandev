@@ -452,6 +452,28 @@ func TestManagerExecuteInferenceProfilePromptUsesTheRegistryAgentName(t *testing
 	}
 }
 
+func TestManagerExecuteInferenceProfileModelPromptRunsTheGivenModel(t *testing.T) {
+	for _, tc := range []struct{ name, profileModel, model, want string }{
+		{name: "explicit model replaces an empty profile model", model: "checked-model", want: "checked-model"},
+		{name: "explicit model replaces the profile model", profileModel: "profile-model", model: "checked-model", want: "checked-model"},
+		{name: "empty model keeps the profile model", profileModel: "profile-model", want: "profile-model"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			harness := newInferenceHarness(t, &stubProfileResolver{profile: &AgentProfileInfo{
+				ProfileID: "profile-1", AgentID: "inference-ok", Model: tc.profileModel,
+			}}, newInferenceAgent("inference-ok", true, true))
+
+			if _, err := harness.manager.ExecuteInferenceProfileModelPrompt(t.Context(), "session-1", "profile-1", tc.model, "hello"); err != nil {
+				t.Fatalf("ExecuteInferenceProfileModelPrompt: %v", err)
+			}
+			recorded := harness.recorded()
+			if len(recorded) != 1 || recorded[0].Model != tc.want {
+				t.Fatalf("requests = %+v, want model %q", recorded, tc.want)
+			}
+		})
+	}
+}
+
 func TestManagerExecuteInferenceProfilePromptFallsBackToAgentIDWithoutAName(t *testing.T) {
 	harness := newInferenceHarness(t, &stubProfileResolver{profile: &AgentProfileInfo{
 		ProfileID: "profile-1",

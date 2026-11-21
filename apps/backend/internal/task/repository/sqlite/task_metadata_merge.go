@@ -20,6 +20,10 @@ func (r *Repository) MergeTaskMetadata(ctx context.Context, id string, requested
 	if err != nil {
 		return err
 	}
+	return r.mergeTaskMetadata(ctx, id, overlay, nil)
+}
+
+func (r *Repository) mergeTaskMetadata(ctx context.Context, id string, overlay map[string]json.RawMessage, reviewApproval json.RawMessage) error {
 	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
@@ -56,6 +60,11 @@ func (r *Repository) MergeTaskMetadata(ctx context.Context, id string, requested
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
+	if reviewApproval != nil {
+		if err := r.writeReviewSourceApproval(ctx, tx, id, reviewApproval); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
@@ -75,6 +84,7 @@ func (r *Repository) lockTaskMetadataMutation(ctx context.Context, tx *sql.Tx, i
 
 func ordinaryMetadataMergeOverlay(requested map[string]interface{}) (map[string]json.RawMessage, error) {
 	copied := maps.Clone(requested)
+	delete(copied, models.MetaKeyReviewSource)
 	models.StripOfficeCarrierMetadata(copied)
 	for _, key := range []string{models.MetaKeyDeferredLaunch, models.MetaKeyStepHandoffCarry, models.MetaKeyHandoffSource, models.MetaKeyHandoffs, models.MetaKeyAgentTitlePending, models.MetaKeyAgentTitleOwnerSessionID, models.MetaKeyAutomationStartOwned, models.MetaKeyRequiredSubtaskCount, models.MetaKeyLastTurnError} {
 		delete(copied, key)

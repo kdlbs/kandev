@@ -159,7 +159,13 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrate.Apply("dynamic_resource_circuits.failure_count", `ALTER TABLE dynamic_resource_circuits ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := r.ensureRouteSelectionOrdinal(ctx); err != nil {
+		return err
+	}
 	if err := r.backfillLegacyActiveDynamicRoutes(); err != nil {
+		return err
+	}
+	if err := r.ensureNativeRouteOwners(ctx); err != nil {
 		return err
 	}
 	r.migrate.Apply("executors_running.execution_profile_id", `ALTER TABLE executors_running ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
@@ -395,6 +401,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	r.migrate.Apply("workspaces.office_workflow_id", `ALTER TABLE workspaces ADD COLUMN office_workflow_id TEXT DEFAULT ''`)
 	_ = r.migrate.Apply("workspaces.acp_idle_suspension_enabled", `ALTER TABLE workspaces ADD COLUMN acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE`)
 	_ = r.migrate.Apply("workspaces.acp_idle_timeout_minutes", `ALTER TABLE workspaces ADD COLUMN acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0)`)
+	_ = r.migrate.Apply("workspaces.dynamic_midturn_failover_enabled", `ALTER TABLE workspaces ADD COLUMN dynamic_midturn_failover_enabled BOOLEAN NOT NULL DEFAULT FALSE`)
+	_ = r.migrate.Apply("workspaces.dynamic_failed_route_auto_retry_enabled", `ALTER TABLE workspaces ADD COLUMN dynamic_failed_route_auto_retry_enabled BOOLEAN NOT NULL DEFAULT FALSE`)
+	_ = r.migrate.Apply("workspaces.dynamic_failed_route_auto_retry_max", `ALTER TABLE workspaces ADD COLUMN dynamic_failed_route_auto_retry_max INTEGER NOT NULL DEFAULT 1 CHECK (dynamic_failed_route_auto_retry_max BETWEEN 1 AND 3)`)
 	_ = r.migrate.Apply("executors_running.idle_suspension_state", `ALTER TABLE executors_running ADD COLUMN idle_suspension_state TEXT NOT NULL DEFAULT ''`)
 	_ = r.migrate.Apply("executors_running.idle_suspension_policy_updated_at", `ALTER TABLE executors_running ADD COLUMN idle_suspension_policy_updated_at TIMESTAMP`)
 
@@ -782,6 +791,11 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	_ = r.migrate.Apply("task_message_send_operations.retention", `
 		CREATE INDEX IF NOT EXISTS idx_task_message_send_operations_retention
 			ON task_message_send_operations(created_at)`)
+	// The stale-pending sweep looks only at pending rows; leading with state
+	// keeps it from walking the retained settled history on the shared writer.
+	_ = r.migrate.Apply("task_message_send_operations.stale_pending", `
+		CREATE INDEX IF NOT EXISTS idx_task_message_send_operations_state_created
+			ON task_message_send_operations(state, created_at)`)
 
 	// Delivery refresh resolves snapshots through their environment owner or a
 	// task/session binding. Both keys are needed by that correlated lookup, and

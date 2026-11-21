@@ -496,3 +496,43 @@ func TestCircuitFailureCountSurvivesRealStoreRestore(t *testing.T) {
 		t.Fatalf("next closed failure did not continue restored ladder: %+v", got)
 	}
 }
+
+func TestNativeRouteDecisionAndAttemptUseRouteOwnerColumn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedReviewTask(t, ctx, repo, "task-native-route")
+	run := newReviewRun(t, ctx, repo, "task-native-route")
+	routeID := "native:review-run:" + run.ID
+	now := time.Now().UTC()
+	state := dynamicruntime.RouteState{
+		SessionID: routeID, LogicalProfileID: "dynamic-1", ExecutionProfileID: "concrete-1",
+		Generation: 1, ProfileVersion: 1, Status: "active", UpdatedAt: now,
+	}
+	decision := dynamicruntime.RouteDecision{
+		SessionID: routeID, LogicalProfileID: "dynamic-1", ExecutionProfileID: "concrete-1",
+		Generation: 1, ProfileVersion: 1, Reason: "candidate_order",
+	}
+	if err := repo.RecordRouteDecision(ctx, decision, state); err != nil {
+		t.Fatalf("RecordRouteDecision: %v", err)
+	}
+	if err := repo.AppendRouteAttempt(ctx, dynamicruntime.RouteAttempt{
+		SessionID: routeID, LogicalProfileID: "dynamic-1", ExecutionProfileID: "concrete-2",
+		Generation: 2, ProfileVersion: 1, Reason: "failover", CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("AppendRouteAttempt: %v", err)
+	}
+	attempts, err := repo.ListRouteAttempts(ctx, routeID)
+	if err != nil {
+		t.Fatalf("ListRouteAttempts: %v", err)
+	}
+	if len(attempts) != 2 || attempts[0].SessionID != routeID || attempts[1].ExecutionProfileID != "concrete-2" {
+		t.Fatalf("native attempts = %#v", attempts)
+	}
+	var taskSessionRows int
+	if err := repo.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dynamic_route_attempts WHERE session_id IS NOT NULL`).Scan(&taskSessionRows); err != nil {
+		t.Fatal(err)
+	}
+	if taskSessionRows != 0 {
+		t.Fatalf("native attempts used the task-session column: %d rows", taskSessionRows)
+	}
+}
