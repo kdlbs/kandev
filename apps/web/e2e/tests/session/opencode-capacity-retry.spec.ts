@@ -9,9 +9,10 @@ import {
   expectOpenCodeRetainedRefusal,
   readOpenCodeCapacityTrace,
 } from "../../helpers/opencode-capacity-retry";
-import { advanceCapacityRetries, waitForCapacityRetry } from "../../helpers/capacity-retry-clock";
-import { SessionPage } from "../../pages/session-page";
 import { watchWs } from "../../helpers/causal-waits";
+import { advanceCapacityRetries, waitForCapacityRetry } from "../../helpers/capacity-retry-clock";
+import { pollUntil } from "../../helpers/poll-until";
+import { SessionPage } from "../../pages/session-page";
 
 test.setTimeout(480_000);
 
@@ -93,19 +94,43 @@ test("desktop preserves the episode when the OpenCode continuation fails without
       await expect(session.transientRetryCard()).toContainText(`Attempt ${attempt} of 11`);
       await advanceCapacityRetries(backend, Number(notice!.metadata!.retry_in_seconds) + 1);
     }
-    const notice = await waitForCapacityRetry(apiClient, fixture.sessionId, 11);
+    const finalRetryNotice = await waitForCapacityRetry(apiClient, fixture.sessionId, 11);
     await expect(session.transientRetryCard()).toContainText("Attempt 11 of 11");
-    // API settlement precedes delivery of the notice deletion to this viewer.
-    const noticeRemoved = ws.waitForEvent("session.message.deleted", {
+    const retryNoticeRemoved = ws.waitForEvent("session.conversation.changed", {
       where: (payload) =>
-        payload.session_id === fixture.sessionId && payload.message_id === notice!.id,
+        payload.session_id === fixture.sessionId &&
+        Array.isArray(payload.operations) &&
+        payload.operations.some((operation) => {
+          if (!operation || typeof operation !== "object") return false;
+          const change = operation as Record<string, unknown>;
+          return (
+            change.kind === "remove" &&
+            change.entity === "message" &&
+            change.id === finalRetryNotice!.id
+          );
+        }),
     });
     await Promise.all([
-      noticeRemoved,
-      advanceCapacityRetries(backend, Number(notice!.metadata!.retry_in_seconds) + 1),
+      retryNoticeRemoved,
+      advanceCapacityRetries(backend, Number(finalRetryNotice!.metadata!.retry_in_seconds) + 1),
     ]);
     const failure = await expectOpenCodeRetainedRefusal(apiClient, fixture.sessionId, "exhausted");
     expect(failure.metadata?.attempts_started).toBe(11);
+    await pollUntil(
+      async () => {
+        const [{ sessions }, { messages }] = await Promise.all([
+          apiClient.listTaskSessions(fixture.taskId),
+          apiClient.listSessionMessages(fixture.sessionId),
+        ]);
+        return {
+          state: sessions.find((candidate) => candidate.id === fixture.sessionId)?.state,
+          hasRetryNotice: messages.some((message) => message.metadata?.retrying === true),
+        };
+      },
+      ({ state, hasRetryNotice }) => state === "WAITING_FOR_INPUT" && !hasRetryNotice,
+      30_000,
+      "waiting for the exhausted OpenCode continuation and retry notice to settle",
+    );
     await expect(session.transientRetryCard()).toHaveCount(0);
     await expect(session.activeChat().getByTestId("retained-turn-recovery-feedback")).toContainText(
       "11",

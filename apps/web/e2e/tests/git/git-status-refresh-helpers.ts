@@ -461,6 +461,20 @@ export async function routeGitStatusRefresh(
         .toBeGreaterThan(afterCount);
       return state.pendingNotifications.at(-1)!;
     },
+    async waitForPendingNotificationWithFile(filePath: string, sessionId: string) {
+      await expect
+        .poll(
+          () =>
+            state.pendingNotifications.some(
+              (event) =>
+                event.payload?.session_id === sessionId && snapshotContainsPath(event, filePath),
+            ),
+          {
+            message: `the tracker should publish a pending Git status containing ${filePath}`,
+          },
+        )
+        .toBe(true);
+    },
     async waitForReadyNotification() {
       await expect
         .poll(() => state.readyNotifications.length, {

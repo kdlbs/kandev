@@ -52,6 +52,7 @@ func createTestDBAt(t testing.TB, dbPath string) *sqlx.DB {
 	CREATE TABLE IF NOT EXISTS workspaces (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
+		org_id TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -110,6 +111,8 @@ func createTestDBAt(t testing.TB, dbPath string) *sqlx.DB {
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
+		queue_incarnation_id TEXT NOT NULL DEFAULT '',
+        metadata TEXT NOT NULL DEFAULT '{}',
 		agent_profile_id TEXT NOT NULL,
 		agent_profile_snapshot TEXT DEFAULT '{}',
 		repository_id TEXT DEFAULT '',
@@ -117,6 +120,16 @@ func createTestDBAt(t testing.TB, dbPath string) *sqlx.DB {
 		started_at TIMESTAMP NOT NULL,
 		completed_at TIMESTAMP,
 		updated_at TIMESTAMP NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS task_usage_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		usage_event_id TEXT NOT NULL,
+		usage_binding_id TEXT NOT NULL DEFAULT '',
+		task_id TEXT NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS executors_running (
+		session_id TEXT PRIMARY KEY,
+		resume_token TEXT NOT NULL DEFAULT ''
 	);
 	CREATE TABLE IF NOT EXISTS task_session_turns (
 		id TEXT PRIMARY KEY,

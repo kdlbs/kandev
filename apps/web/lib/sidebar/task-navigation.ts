@@ -173,6 +173,7 @@ function updateTaskRowVisibility(
     state.portalScrollRestoreReleased = true;
   }
   if (!isInsideViewport(match.row, match.viewport)) {
+    const correctingScroll = state.scrollRequested;
     const viewportRect = match.viewport.getBoundingClientRect();
     const scrollGeometry: [number, number, number] = [
       viewportRect.width,
@@ -187,8 +188,10 @@ function updateTaskRowVisibility(
     state.visibleFrames = 0;
     state.previousGeometry = null;
     if (!state.scrollRequested) {
+      const requestedBehavior = prefersReducedMotion() ? "auto" : "smooth";
       match.row.scrollIntoView({
-        behavior: prefersReducedMotion() ? "auto" : "smooth",
+        // Layout corrections must not restart an unfinished smooth scroll.
+        behavior: correctingScroll ? "instant" : requestedBehavior,
         block: "nearest",
         inline: "nearest",
       });

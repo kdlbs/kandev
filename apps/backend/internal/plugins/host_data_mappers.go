@@ -32,6 +32,7 @@ func (h *pluginHost) sessionToDTO(ctx context.Context, s *taskmodels.TaskSession
 		State:            string(s.State),
 		StartedAt:        s.StartedAt.UTC().Format(time.RFC3339),
 		EndedAt:          timePtrToRFC3339(s.CompletedAt),
+		UpdatedAt:        s.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
 

@@ -10,6 +10,13 @@ import { sdkModule, goEnvironment, startProxy } from "./go-consumer.mjs";
 const run = promisify(execFile);
 const repository = fileURLToPath(new URL("../../", import.meta.url));
 
+export async function localSDKVersion(sourceRoot) {
+  const record = JSON.parse(
+    await readFile(join(sourceRoot, "pluginsdk/sdk-release.json"), "utf8"),
+  );
+  return `v${record.sdk_version}`;
+}
+
 export async function archiveModule(source, proxyRoot, version) {
   if (!/^v\d+\.\d+\.\d+$/.test(version))
     throw new Error("expected an exact SDK version");
@@ -143,7 +150,7 @@ async function checkConsumers(go, cwd, version, record, frontend) {
 
 export async function smokeGo({
   mode = "local",
-  version = "",
+  version,
   skipCompatibilityCheck = false,
   frontend = false,
   sourceRoot = repository,
@@ -151,12 +158,6 @@ export async function smokeGo({
   expectedRecordDigest,
   packConfig,
 } = {}) {
-  if (!version) {
-    const record = JSON.parse(
-      await readFile(join(sourceRoot, "pluginsdk/sdk-release.json"), "utf8"),
-    );
-    version = `v${record.sdk_version}`;
-  }
   if (mode === "public") {
     if (!suppliedCandidate || !expectedRecordDigest || skipCompatibilityCheck)
       throw new Error(
@@ -165,6 +166,7 @@ export async function smokeGo({
     const { validatePublicTrust } = await import("./public-trust.mjs");
     await validatePublicTrust();
   }
+  if (!version) version = await localSDKVersion(sourceRoot);
   const root = await mkdtemp(join(tmpdir(), "kandev-sdk-consumer-"));
   let proxy;
   try {
@@ -252,7 +254,7 @@ if (
   const { values } = parseArgs({
     options: {
       mode: { type: "string", default: "local" },
-      version: { type: "string", default: "" },
+      version: { type: "string" },
       "host-tag": { type: "string" },
       "backend-only": { type: "boolean" },
       "skip-compatibility-check": { type: "boolean" },

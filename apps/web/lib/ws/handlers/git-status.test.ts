@@ -31,6 +31,19 @@ const MISSING_HANDLER_MESSAGE = "session.git.event handler is missing";
 const ACCEPTED_DIFF = "accepted diff";
 const invalidateCumulativeDiffCacheMock = vi.mocked(invalidateCumulativeDiffCache);
 
+describe("git-status foreground refresh ownership", () => {
+  it("retains a pending foreground request when a ready notification arrives", () => {
+    const store = freshStore();
+    const pending = { state: "pending" as const, request_id: "foreground-refresh" };
+    store.getState().setGitStatusRefresh(SESSION, undefined, pending);
+
+    gitStatusHandler(store)(gitEvent(statusUpdateEvent(STATUS_TIME_1)));
+
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION]?.files).toHaveProperty("a.ts");
+    expect(store.getState().gitStatus.refreshByEnvironmentId?.[SESSION]).toEqual(pending);
+  });
+});
+
 function makeStore() {
   // The handler only touches session-runtime state and environmentIdBySessionId.
   // We don't need the full AppState — cast through unknown so the handler

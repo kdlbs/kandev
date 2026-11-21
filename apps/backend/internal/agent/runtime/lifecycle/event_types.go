@@ -943,6 +943,7 @@ type SessionPromptUsageEventPayload struct {
 	UsageObservation *streams.NativeUsageObservation `json:"usage_observation,omitempty"`
 	Timestamp        string                          `json:"timestamp"`
 	TurnID           string                          `json:"turn_id,omitempty"`
+	UsageBindingID   string                          `json:"usage_binding_id,omitempty"`
 	UsageEventID     string                          `json:"usage_event_id,omitempty"`
 }
 

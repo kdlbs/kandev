@@ -19,6 +19,7 @@ func TestDecodePayload_ValidEvent_PopulatesAllFields(t *testing.T) {
 			"agent_type":       "claude-acp",
 			"model":            "claude-sonnet-5",
 			"turn_id":          "turn-1",
+			"usage_binding_id": "binding-turn-1",
 			"usage_event_id":   "evt-1",
 			"timestamp":        "2026-08-23T12:00:00Z",
 			"usage": map[string]any{
@@ -43,7 +44,7 @@ func TestDecodePayload_ValidEvent_PopulatesAllFields(t *testing.T) {
 	if payload.TaskID != "task-1" || payload.SessionID != "session-1" ||
 		payload.AgentID != "claude-acp" || payload.AgentProfileID != "profile-1" ||
 		payload.AgentType != "claude-acp" || payload.Model != "claude-sonnet-5" ||
-		payload.TurnID != "turn-1" || payload.UsageEventID != "evt-1" {
+		payload.TurnID != "turn-1" || payload.UsageBindingID != "binding-turn-1" || payload.UsageEventID != "evt-1" {
 		t.Fatalf("payload = %+v, fields did not round-trip", payload)
 	}
 

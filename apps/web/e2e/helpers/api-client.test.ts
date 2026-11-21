@@ -3,6 +3,46 @@ import { ApiClient, removeRoutingProfileReferences } from "./api-client";
 import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
 import type { Agent } from "../../lib/types/http-agents";
 
+describe("ApiClient.createTaskWithAgent prepare_session", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([true, false, undefined])(
+    "forwards prepare_session=%s without starting the agent",
+    async (prepareSession) => {
+      let requestBody: Record<string, unknown> | undefined;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input).endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+            return Response.json({ interimSettingsInterlockToken: "test-token" });
+          }
+          expect(String(input)).toBe("http://backend.test/api/v1/tasks");
+          requestBody = JSON.parse(String(init?.body));
+          return Response.json({ id: "task" });
+        }),
+      );
+      const options = { start_agent: false, prepare_session: prepareSession };
+      await new ApiClient("http://backend.test").createTaskWithAgent(
+        "workspace",
+        "Retained usage",
+        "profile",
+        options,
+      );
+
+      expect(requestBody).toEqual({
+        workspace_id: "workspace",
+        title: "Retained usage",
+        description: "",
+        agent_profile_id: "profile",
+        start_agent: false,
+        ...(prepareSession === undefined ? {} : { prepare_session: prepareSession }),
+      });
+    },
+  );
+});
+
 describe("ApiClient.cleanupTestProfiles", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

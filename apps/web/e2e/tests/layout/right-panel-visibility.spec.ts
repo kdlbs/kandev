@@ -255,10 +255,14 @@ test.describe("right-panel visibility", () => {
       { viewport: { width: 1600, height: 900 } },
     );
     const toggle = testPage.getByTestId("task-right-panels-toggle");
+    const filesTab = testPage.locator(".dv-tab:visible").filter({
+      has: testPage.locator(".dv-default-tab").filter({ hasText: /^Files$/ }),
+    });
     await expect(toggle).toBeEnabled();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
 
     await session.clickTab("Files");
+    await expect(filesTab).toHaveClass(/dv-active-tab/, { timeout: 15_000 });
     // Reload must restore a selection that has reached the debounced layout save.
     await expect
       .poll(() => snapshotPersistedLayouts(testPage), {
@@ -283,6 +287,7 @@ test.describe("right-panel visibility", () => {
     await expect(toggle).toBeEnabled();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await session.clickTab("Files");
+    await expect(filesTab).toHaveClass(/dv-active-tab/, { timeout: 15_000 });
     await expect(session.files).toBeVisible();
 
     await testPage.reload();
@@ -291,6 +296,7 @@ test.describe("right-panel visibility", () => {
     await expect(toggle).toBeEnabled();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await session.clickTab("Files");
+    await expect(filesTab).toHaveClass(/dv-active-tab/, { timeout: 15_000 });
     await expect(session.files).toBeVisible();
     await session.expectLayoutHealthy();
   });

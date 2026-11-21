@@ -58,11 +58,13 @@ import (
 )
 
 type Repositories struct {
-	RequiredStores                   *requiredstores.Tracker
 	gitCredentialReissueSigner       *gitcredentials.ReissueCapabilitySigner
 	gitCredentialReissueSignerSource string
+	RequiredStores                   *requiredstores.Tracker
 	Task                             *sqliterepo.Repository
 	Analytics                        analyticsrepository.Repository
+	UsageHistoryStop                 func() error
+	usageHistoryControl              *usageHistoryProjectionControl
 	AgentSettings                    settingsstore.Repository
 	User                             userstore.Repository
 	// UserAccounts is the account-management view of the same user store

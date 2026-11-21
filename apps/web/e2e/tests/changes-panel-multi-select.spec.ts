@@ -1,4 +1,4 @@
-import { test, expect } from "../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../fixtures/test-base";
 import path from "node:path";
 import {
   GitHelper,
@@ -10,6 +10,10 @@ import {
 const MOD = process.platform === "darwin" ? ("Meta" as const) : ("Control" as const);
 
 test.describe("Git Panel Multi-Select", () => {
+  test.beforeEach(async ({ seedData, backend }) => {
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+  });
+
   test("ctrl-click selects multiple unstaged files and shows bulk actions", async ({
     testPage,
     apiClient,

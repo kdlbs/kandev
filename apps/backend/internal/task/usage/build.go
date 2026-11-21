@@ -49,6 +49,7 @@ func (w *Writer) buildRow(ctx context.Context, p *usageEventPayload, occurredAt 
 		TaskID:          p.TaskID,
 		SessionID:       p.SessionID,
 		TurnID:          p.TurnID,
+		UsageBindingID:  p.UsageBindingID,
 		AgentProfileID:  p.AgentProfileID,
 		AgentType:       p.AgentType,
 		Model:           p.Model,
