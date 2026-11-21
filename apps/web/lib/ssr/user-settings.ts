@@ -65,12 +65,13 @@ export function createDefaultUserSettings(): UserSettingsState {
     showTranscriptAutoScrollControl: false,
     showTodoListPanel: false,
     showTodoListPanelOnlyWhenNotEmpty: false,
-    showTurnChangedFiles: false,
+    showTurnChangedFiles: true,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},
+    markdownPreviewByDefault: true,
     lspStatusLocation: "toolbar",
     savedLayouts: [],
     sidebarViews: [],
@@ -444,6 +445,8 @@ export function buildLspFields(
     lspAutoStartLanguages: s?.lsp_auto_start_languages ?? current.lspAutoStartLanguages,
     lspAutoInstallLanguages: s?.lsp_auto_install_languages ?? current.lspAutoInstallLanguages,
     lspServerConfigs: s?.lsp_server_configs ?? current.lspServerConfigs,
+    markdownPreviewByDefault:
+      s?.markdown_preview_by_default ?? current.markdownPreviewByDefault ?? true,
     lspStatusLocation:
       s?.lsp_status_location === undefined
         ? current.lspStatusLocation

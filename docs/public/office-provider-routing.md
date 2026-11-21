@@ -35,6 +35,36 @@ When the refusal comes from the install-wide automatic session ceiling rather th
 
 A launch rejected because its built agent or continue command is invalid fails the run immediately and reports the error, without consuming the retry budget. Correct the profile command before retrying. Temporary provider and workspace failures retain their existing recovery behavior.
 
+## Keep Reviewers Off The Author's Provider
+
+A review is an independent check only when the reviewer runs on a different provider from the one that did the work. Fallback can otherwise land the reviewer on that same provider. **Review on a different provider** prevents this for reviewer and approver runs that use legacy workspace provider routing with automatic fallback.
+
+Turn it on under **Office > Routing > Review on a different provider**. The section lists every workflow step that seats a reviewer or approver, including the built-in Office workflow. Flip a step's switch, then select **Save changes** in the save bar at the bottom of the page. **Reset** discards unsaved changes. The setting is off by default.
+
+In workflow YAML, the same setting is `exclude_author_provider` on the step's seat action, so export, import, and sync carry it:
+
+```yaml
+- type: ensure_participant_seat
+  config:
+    role: reviewer
+    exclude_author_provider: true
+```
+
+For eligible runs, workspace routing skips the provider recorded for the task's latest Work-stage launch. This applies to the first attempt, fallback, and retries. A provider is the agent CLI, such as `claude-acp` or `codex-acp`, so two models run through the same CLI count as the same author.
+
+- **No other provider available:** the run waits instead of reviewing its own work. Its route attempts show **skipped: wrote this task** for the author's provider. If another provider is only temporarily degraded, the run resumes when that provider recovers. If the author's provider is the only one in the order, the run waits for you to act.
+- **No recorded author:** if no Work-stage run launched for the task, for example because a person did the work, the run launches normally.
+- **Automatic provider fallback off:** the setting is not enforced.
+
+Workspace routing records a `routing.author_exclusion` event for seat runs with the switch on. The event shows whether the rule excluded a provider or why the rule had no effect.
+
+Kandev warns, without blocking, when the current setup cannot keep the promise. The warning appears at the top of **Office > Routing**, in the workflow import review, and in workflow sync results. Each warning says what will happen, lists the affected workflow steps, and says how to fix it. Steps with the same problem share one warning:
+
+- **Automatic provider fallback is off:** reviews may run on the provider that did the work. Turn on **Automatic provider fallback**, or turn off **Review on a different provider** for the step.
+- **Only one provider is configured:** reviews can never run on a different provider, so they wait until you act. Add a second provider, or turn the setting off.
+- **A reviewer agent can only use one provider:** its reviews wait whenever the work ran on that provider. Give the agent another provider in its routing settings, or turn the setting off.
+- **An agent has a bound execution profile.** Its runs follow that profile's routing policy and can use the author's provider. Configure the agent to use workspace provider routing to apply the seat's exclusion rule.
+
 ## What A Provider Switch Preserves
 
 Kandev preserves the Office agent ID, task, run, task environment, worktree, instructions, and skills. The new execution profile supplies the provider CLI, account, model, mode, flags, environment, permission behavior, passthrough setting, and MCP configuration.

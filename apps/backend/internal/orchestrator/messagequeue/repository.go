@@ -124,8 +124,7 @@ type Repository interface {
 	// GetAutoMergeOverride returns nil while the exact session inherits globally.
 	GetAutoMergeOverride(ctx context.Context, identity QueueSessionIdentity) (*AutoMergeOverride, error)
 
-	// SetAutoMergeOverride writes an explicit value and advances its session revision.
-	SetAutoMergeOverride(ctx context.Context, identity QueueSessionIdentity, enabled bool) (AutoMergeOverride, error)
+	SetSessionPolicyAndCompact(ctx context.Context, identity QueueSessionIdentity, change SessionPolicyChange, global AutoMergePolicy, globalErr error) (SessionPolicyResult, error)
 
 	// PauseAutoRunIfPending atomically persists OFF only when at least one
 	// visible pending entry remains. Reserved lifecycle rows do not count.
@@ -158,6 +157,14 @@ type Repository interface {
 		ctx context.Context,
 		identity QueueSessionIdentity,
 		messages []QueuedMessage,
+	) error
+	// ClearDeliveryAttemptForSession atomically revokes the at-most-once marker
+	// of still-reserved durable receipts whose prompt provably never reached
+	// transport. Reservations and transcript markers are kept.
+	ClearDeliveryAttemptForSession(
+		ctx context.Context,
+		identity QueueSessionIdentity,
+		reserved []QueuedMessage,
 	) error
 	// ReleaseDeliveryReservationForSession makes an unaccepted retained entry
 	// visible again without changing its FIFO position.

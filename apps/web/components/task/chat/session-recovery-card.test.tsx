@@ -143,7 +143,7 @@ describe("composer recovery ownership", () => {
 
     expect(container.querySelectorAll('[aria-busy="true"]')).toHaveLength(1);
     expect(screen.getAllByRole("status")).toHaveLength(1);
-    expect(screen.getByRole("status").textContent).toBe("Resuming...");
+    expect(screen.getByRole("status").textContent).toBe("Resuming session");
     expect(screen.getByTestId(RESUME_BUTTON)).toHaveProperty("disabled", true);
     expect(screen.getByTestId(FRESH_BUTTON)).toHaveProperty("disabled", true);
   });

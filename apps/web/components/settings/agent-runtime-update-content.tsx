@@ -12,19 +12,13 @@ import {
   resolveRuntimeOperation,
   runtimeOperationLabelKey,
 } from "@/lib/agent-runtime-update";
-import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
+import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateStatus } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { RuntimeUpdatePolicySection } from "./agent-runtime-policies";
+import { RuntimeUpdateTechnicalDetails } from "./agent-runtime-update-technical-details";
 import { CopilotRuntimeCompatibilityNotice } from "./copilot-runtime-compatibility";
 import { RuntimeVersionPicker } from "./runtime-version-picker";
 import { RuntimeVersionSummary } from "./runtime-version-summary";
-
-export const ACTIVE_UPDATE_STATUSES = new Set<AgentUpdateJob["status"]>([
-  "queued",
-  "resolving",
-  "updating",
-  "probing",
-  "saving",
-  "refreshing",
-]);
 
 // The job `status` values are the wire enum; only the phase labels are copy, so
 // they travel as catalog keys and resolve at render.
@@ -59,15 +53,19 @@ function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdate
   }
   if (job.status === "succeeded") {
     let successMessage = "agents:runtimeUpdatedSuccess";
+    const version = job.effective_version || job.target_version;
     if (isUpToDate) successMessage = "agents:runtimeAlreadyUpToDate";
     else if (job.operation === "migrate") successMessage = "agents:openCodeMigrationSuccess";
+    else if (version && job.update_mode !== "self_update") {
+      successMessage = "agents:runtimeUpdatedToVersion";
+    }
     return (
       <p
         className="break-words text-green-600 dark:text-green-400"
         role="status"
         data-testid={`agent-update-result-${agentName}`}
       >
-        {t(successMessage)}
+        {t(successMessage, { version })}
       </p>
     );
   }
@@ -86,7 +84,8 @@ function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdate
 }
 
 export type AgentRuntimeUpdateBodyProps = {
-  before?: ReactNode;
+  status?: AgentUpdateStatus;
+  canManage?: boolean;
   agentName: string;
   preview: AgentUpdatePreview | null;
   loading: boolean;
@@ -135,9 +134,27 @@ function RuntimeUpdatePreviewDetails({
   isMobile: boolean;
 }) {
   const { t } = useTranslation();
+  const changeVersion = preview.update_mode !== "self_update" && selectedFamily !== "v2" && (
+    <RuntimeVersionPicker
+      agentName={agentName}
+      preview={preview}
+      selectedTarget={selectedTarget}
+      selectedUseDefault={selectedUseDefault}
+      loading={loading}
+      starting={starting}
+      job={job}
+      onSelectTarget={onSelectTarget}
+      onSelectDefault={onSelectDefault}
+    />
+  );
   return (
     <>
-      <RuntimeVersionSummary agentName={agentName} preview={preview} job={job} />
+      <RuntimeVersionSummary
+        agentName={agentName}
+        preview={preview}
+        job={job}
+        changeVersion={changeVersion}
+      />
       <CopilotRuntimeCompatibilityNotice
         agentName={agentName}
         compatibility={preview.copilot_plugin_compatibility}
@@ -172,67 +189,32 @@ function RuntimeUpdatePreviewDetails({
           </Button>
         </div>
       )}
-      {selectedFamily === "v2" ? (
+      {selectedFamily === "v2" && (
         <div
           className="space-y-1 text-xs text-muted-foreground"
           data-testid={`agent-update-migration-scope-${agentName}`}
         >
           <p>{t("agents:openCodeMigrationExternalProcesses")}</p>
         </div>
-      ) : (
-        preview.update_mode !== "self_update" && (
-          <RuntimeVersionPicker
-            agentName={agentName}
-            preview={preview}
-            selectedTarget={selectedTarget}
-            selectedUseDefault={selectedUseDefault}
-            loading={loading}
-            starting={starting}
-            job={job}
-            onSelectTarget={onSelectTarget}
-            onSelectDefault={onSelectDefault}
-          />
-        )
       )}
-      <details className="group" data-testid={`agent-update-command-${agentName}`}>
-        <summary className="cursor-pointer py-1 font-medium text-muted-foreground focus-visible:outline-ring max-md:min-h-11 max-md:py-3 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-3">
-          {t("agents:commandThatWillRun")}
-        </summary>
-        <pre className="mt-1 whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs text-muted-foreground">
-          {preview.command_string}
-        </pre>
-      </details>
     </>
   );
 }
 
-export function AgentRuntimeUpdateBody({
-  before,
+function RuntimeUpdateMessages({
   agentName,
   preview,
   loading,
   previewError,
   approveError,
-  job,
   onRetryPreview,
-  selectedTarget,
-  onSelectTarget,
-  selectedUseDefault,
-  selectedFamily,
-  onSelectDefault,
-  onSelectMigration,
-  onSelectCurrentRuntime,
-  starting,
-  isMobile,
-}: AgentRuntimeUpdateBodyProps) {
+}: Pick<
+  AgentRuntimeUpdateBodyProps,
+  "agentName" | "preview" | "loading" | "previewError" | "approveError" | "onRetryPreview"
+>) {
   const { t } = useTranslation();
-  const phase = updatePhase(t, job?.status);
   return (
-    <div
-      className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-4 py-2 text-xs/normal"
-      data-testid={`agent-update-dialog-body-${agentName}`}
-    >
-      {before}
+    <>
       {loading && !preview && (
         <p className="flex items-center gap-2 text-muted-foreground" role="status">
           <IconLoader2 className="size-4 animate-spin" />
@@ -265,6 +247,72 @@ export function AgentRuntimeUpdateBody({
           </p>
         </div>
       )}
+    </>
+  );
+}
+
+function RuntimeUpdateProgress({ agentName, job }: { agentName: string; job?: AgentUpdateJob }) {
+  const { t } = useTranslation();
+  if (!job || job.status === "succeeded") return null;
+  const phase = updatePhase(t, job.status);
+  return (
+    <>
+      {phase && (
+        <p
+          className="flex items-center gap-1.5 text-muted-foreground"
+          role="status"
+          data-testid={`agent-update-phase-${agentName}`}
+        >
+          <IconLoader2 className="size-3.5 shrink-0 animate-spin" />
+          {phase}
+        </p>
+      )}
+      {job.output && (
+        <pre
+          data-testid={`agent-update-log-${agentName}`}
+          className="wrap-anywhere whitespace-pre-wrap rounded-md bg-muted p-2 font-mono text-xs text-muted-foreground"
+        >
+          {job.output}
+        </pre>
+      )}
+    </>
+  );
+}
+
+export function AgentRuntimeUpdateBody({
+  status,
+  canManage = true,
+  agentName,
+  preview,
+  loading,
+  previewError,
+  approveError,
+  job,
+  onRetryPreview,
+  selectedTarget,
+  onSelectTarget,
+  selectedUseDefault,
+  selectedFamily,
+  onSelectDefault,
+  onSelectMigration,
+  onSelectCurrentRuntime,
+  starting,
+  isMobile,
+}: AgentRuntimeUpdateBodyProps) {
+  const completed = job?.status === "succeeded";
+  return (
+    <div
+      className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4 text-xs/normal md:px-5"
+      data-testid={`agent-update-dialog-body-${agentName}`}
+    >
+      <RuntimeUpdateMessages
+        agentName={agentName}
+        preview={preview}
+        loading={loading}
+        previewError={previewError}
+        approveError={approveError}
+        onRetryPreview={onRetryPreview}
+      />
       {preview && (
         <RuntimeUpdatePreviewDetails
           agentName={agentName}
@@ -282,25 +330,21 @@ export function AgentRuntimeUpdateBody({
           isMobile={isMobile}
         />
       )}
-      {phase && (
-        <p
-          className="flex items-center gap-1.5 text-muted-foreground"
-          role="status"
-          data-testid={`agent-update-phase-${agentName}`}
-        >
-          <IconLoader2 className="size-3.5 shrink-0 animate-spin" />
-          {phase}
-        </p>
+      {!completed && status && (
+        <RuntimeUpdatePolicySection
+          status={status}
+          canManage={canManage}
+          managedFallback={preview?.managed_fallback}
+        />
       )}
-      {job?.output && (
-        <pre
-          data-testid={`agent-update-log-${agentName}`}
-          className="whitespace-pre-wrap break-words rounded-md bg-muted p-2 font-mono text-xs text-muted-foreground"
-        >
-          {job.output}
-        </pre>
-      )}
+      <RuntimeUpdateProgress agentName={agentName} job={job} />
       <UpdateResult agentName={agentName} job={job} />
+      <RuntimeUpdateTechnicalDetails
+        agentName={agentName}
+        status={status}
+        preview={preview}
+        job={job}
+      />
     </div>
   );
 }
@@ -324,7 +368,7 @@ export type AgentRuntimeUpdateFooterProps = {
   beforeActions?: ReactNode;
 };
 
-export function AgentRuntimeUpdateFooter({
+function RuntimeUpdateFooterAction({
   agentName,
   preview,
   previewError,
@@ -334,57 +378,80 @@ export function AgentRuntimeUpdateFooter({
   installInFlight,
   onApprove,
   onClose,
-  mobile,
   canManage = true,
   blockedReason,
-  beforeActions,
-}: AgentRuntimeUpdateFooterProps) {
+}: Omit<AgentRuntimeUpdateFooterProps, "mobile" | "beforeActions">) {
   const { t } = useTranslation();
-  const updateInFlight = Boolean(job && ACTIVE_UPDATE_STATUSES.has(job.status));
-  const canRetry = job?.status === "failed";
+  const operation = resolveRuntimeOperation(preview, job);
+  if (job?.status === "succeeded" || (!job && operation === "up_to_date" && !loading)) {
+    return (
+      <div className="flex justify-end">
+        <Button type="button" className="max-md:w-full" onClick={onClose}>
+          {t("agents:done")}
+        </Button>
+      </div>
+    );
+  }
+  if (job && job.status !== "failed") return null;
   const canApprove = canApproveAgentRuntimeUpdate({
     preview,
     job,
     previewError,
     loading,
-    updateInFlight,
+    updateInFlight: false,
     starting,
     installInFlight,
   });
-  const showApprove = !job || canRetry;
-  const content = (
-    <>
-      <Button type="button" variant="outline" onClick={onClose}>
-        {job?.status === "succeeded" ? t("agents:done") : t("common:cancel")}
-      </Button>
-      {showApprove && (
-        <Button
-          type="button"
-          disabled={!canApprove || !canManage || Boolean(blockedReason)}
-          title={blockedReason}
-          onClick={onApprove}
-          data-testid={`agent-update-confirm-${agentName}`}
-        >
-          {starting && <IconLoader2 className="mr-2 size-4 animate-spin" />}
-          {canRetry
-            ? t("agents:retryUpdate")
-            : t(runtimeOperationLabelKey(resolveRuntimeOperation(preview, job)))}
-        </Button>
-      )}
-    </>
-  );
-  if (mobile) {
-    return (
-      <DrawerFooter className="shrink-0 border-t px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        {beforeActions}
-        {content}
-      </DrawerFooter>
-    );
-  }
+  const approveLabel = runtimeApprovalLabel(t, preview, operation, job?.status === "failed");
   return (
-    <DialogFooter className="shrink-0 border-t px-4 py-2">
-      {beforeActions}
-      {content}
-    </DialogFooter>
+    <div className="flex justify-end">
+      <Button
+        type="button"
+        className="max-md:w-full"
+        disabled={!canApprove || !canManage || Boolean(blockedReason)}
+        title={blockedReason}
+        onClick={onApprove}
+        data-testid={`agent-update-confirm-${agentName}`}
+      >
+        {starting && <IconLoader2 className="size-4 animate-spin" />}
+        {approveLabel}
+      </Button>
+    </div>
   );
+}
+
+export function AgentRuntimeUpdateFooter({
+  mobile,
+  beforeActions,
+  ...action
+}: AgentRuntimeUpdateFooterProps) {
+  const Footer = mobile ? DrawerFooter : DialogFooter;
+  return (
+    <Footer
+      className={cn(
+        "shrink-0 border-t px-4 empty:hidden md:px-5",
+        mobile ? "pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]" : "py-3 sm:flex-col",
+      )}
+    >
+      {beforeActions}
+      <RuntimeUpdateFooterAction {...action} />
+    </Footer>
+  );
+}
+
+function runtimeApprovalLabel(
+  t: TFunction,
+  preview: AgentUpdatePreview | null,
+  operation: ReturnType<typeof resolveRuntimeOperation>,
+  canRetry: boolean,
+) {
+  if (canRetry) return t("agents:retryUpdate");
+  if (
+    (!operation || operation === "update") &&
+    preview?.update_mode !== "self_update" &&
+    preview?.target_version
+  ) {
+    return t("agents:runtimeUpdateToVersion", { version: preview.target_version });
+  }
+  return t(runtimeOperationLabelKey(operation));
 }

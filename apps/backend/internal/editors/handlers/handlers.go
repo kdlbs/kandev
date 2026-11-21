@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/editors/controller"
 	"github.com/kandev/kandev/internal/editors/dto"
@@ -20,6 +21,8 @@ func serviceErrorStatus(err error) int {
 	switch {
 	case errors.Is(err, service.ErrEditorNotFound), errors.Is(err, service.ErrWorkspaceNotFound):
 		return http.StatusNotFound
+	case errors.Is(err, service.ErrSessionForbidden):
+		return http.StatusForbidden
 	case errors.Is(err, service.ErrEditorConfigInvalid):
 		return http.StatusBadRequest
 	case errors.Is(err, service.ErrEditorUnavailable), errors.Is(err, service.ErrFolderUnavailable):
@@ -45,9 +48,10 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, log *logger
 	handlers := NewHandlers(ctrl, log)
 	api := router.Group("/api/v1")
 	api.GET("/editors", handlers.httpListEditors)
-	api.POST("/editors", handlers.httpCreateEditor)
-	api.PATCH("/editors/:id", handlers.httpUpdateEditor)
-	api.DELETE("/editors/:id", handlers.httpDeleteEditor)
+	manageConfig := authz.RequireOrgScope(authz.ScopeOrgConfigManage)
+	api.POST("/editors", manageConfig, handlers.httpCreateEditor)
+	api.PATCH("/editors/:id", manageConfig, handlers.httpUpdateEditor)
+	api.DELETE("/editors/:id", manageConfig, handlers.httpDeleteEditor)
 	api.POST("/task-sessions/:id/open-editor", handlers.httpOpenSessionEditor)
 	api.POST("/task-sessions/:id/open-folder", handlers.httpOpenFolder)
 }

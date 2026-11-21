@@ -130,7 +130,7 @@ func taskSessionSummarySelectCols(driver string) string {
 		repositoryPath,
 		"ts.state", "ts.error_message", lastAgentErrorJSON, modelID, modelName,
 		"ts.started_at", "ts.completed_at", "ts.updated_at", "ts.is_primary", "ts.review_status",
-		"ts.is_passthrough", "ts.task_environment_id", "ts.name", "ts.last_read_message_id",
+		"ts.is_passthrough", "ts.task_environment_id", "ts.name", "ts.last_read_message_id", "ts.admitted_execution_grade, ts.admitted_execution_grade_known",
 	}, ", ")
 }
 
@@ -187,6 +187,7 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		&state, &errorMessage, &lastAgentErrorJSON, &modelID, &modelName,
 		&observation.StartedAt, &completedAt, &observation.UpdatedAt, &isPrimary,
 		&reviewStatus, &isPassthrough, &taskEnvironmentID, &name, &lastReadMessageID,
+		&observation.AdmittedExecutionGrade, &observation.AdmittedExecutionGradeKnown,
 	); err != nil {
 		return nil, err
 	}

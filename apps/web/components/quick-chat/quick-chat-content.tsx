@@ -1,5 +1,6 @@
 "use client";
 
+import { SelectionActionSlotProvider } from "@/components/shared/selection-action-slot";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import {
@@ -263,50 +264,52 @@ export const QuickChatContent = memo(function QuickChatContent({
 
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
   return (
-    <div
-      ref={shortcutScopeRef}
-      data-testid="quick-chat-content"
-      tabIndex={-1}
-      onMouseDown={handleShortcutScopeMouseDown}
-      onClick={(event) => routePanelClick(event, shortcutScopeRef)}
-      className="flex flex-col flex-1 min-h-0 outline-none"
-    >
-      <div ref={cancelCommandsRef} className="shrink-0">
-        <QuickChatCancelCommands
-          sessionId={sessionId}
-          isWorking={panelState.isWorking}
-          pendingClarification={pendingClarification}
-          onCancel={handleCancelTurn}
+    <SelectionActionSlotProvider>
+      <div
+        ref={shortcutScopeRef}
+        data-testid="quick-chat-content"
+        tabIndex={-1}
+        onMouseDown={handleShortcutScopeMouseDown}
+        onClick={(event) => routePanelClick(event, shortcutScopeRef)}
+        className="flex flex-col flex-1 min-h-0 outline-none"
+      >
+        <div ref={cancelCommandsRef} className="shrink-0">
+          <QuickChatCancelCommands
+            sessionId={sessionId}
+            isWorking={panelState.isWorking}
+            pendingClarification={pendingClarification}
+            onCancel={handleCancelTurn}
+          />
+        </div>
+        <QuickChatMessageSurface items={items} panelState={panelState} taskId={taskId} />
+        <ClarificationPanelSection
+          key={sessionId}
+          pending={Boolean(pendingClarification)}
+          messages={pendingClarificationGroup}
+          agentDisconnected={panelState.session?.pending_action === null}
+          onResolved={handleClarificationResolved}
+          onLateAnswer={lateAnswer.send}
+          lateAnswerState={lateAnswer.state}
+          shortcutScopeRef={shortcutScopeRef}
+          initialMaxHeightVh={35}
+          allocationRef={shortcutScopeRef}
+          anchorRef={shortcutScopeRef}
+          reservedSiblingRefs={clarificationReservations}
+          reservedHeightPx={80}
         />
+        <div ref={activityStatusRef} className="shrink-0">
+          <ActivityStatusSlot line={activity.statusLine} />
+        </div>
+        <div ref={chatInputAreaRef} className="shrink-0">
+          <QuickChatInputArea
+            state={state}
+            clarificationKey={clarificationKey}
+            onClarificationResolved={handleClarificationResolved}
+            minimalToolbar={minimalToolbar}
+            placeholderOverride={placeholderOverride}
+          />
+        </div>
       </div>
-      <QuickChatMessageSurface items={items} panelState={panelState} taskId={taskId} />
-      <ClarificationPanelSection
-        key={sessionId}
-        pending={Boolean(pendingClarification)}
-        messages={pendingClarificationGroup}
-        agentDisconnected={panelState.session?.pending_action === null}
-        onResolved={handleClarificationResolved}
-        onLateAnswer={lateAnswer.send}
-        lateAnswerState={lateAnswer.state}
-        shortcutScopeRef={shortcutScopeRef}
-        initialMaxHeightVh={35}
-        allocationRef={shortcutScopeRef}
-        anchorRef={shortcutScopeRef}
-        reservedSiblingRefs={clarificationReservations}
-        reservedHeightPx={80}
-      />
-      <div ref={activityStatusRef} className="shrink-0">
-        <ActivityStatusSlot line={activity.statusLine} />
-      </div>
-      <div ref={chatInputAreaRef} className="shrink-0">
-        <QuickChatInputArea
-          state={state}
-          clarificationKey={clarificationKey}
-          onClarificationResolved={handleClarificationResolved}
-          minimalToolbar={minimalToolbar}
-          placeholderOverride={placeholderOverride}
-        />
-      </div>
-    </div>
+    </SelectionActionSlotProvider>
   );
 });

@@ -603,6 +603,56 @@ func TestInstallationRepositoryUpdateIgnoresReplacedAppBinding(t *testing.T) {
 	}
 }
 
+func TestInstallationRepositoryRemovalPrunesSelectedScope(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		orgs []string
+	}{
+		{name: "preserve owner grant", orgs: []string{"acme"}},
+		{name: "last exact grant leaves empty selected scope"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, _ := newWorkspaceConnectionService(t, "octocat")
+			const installationID = int64(42)
+			connection := activeAppWorkspace("ws-1", installationID)
+			connection.CredentialGeneration = 2
+			if err := service.store.UpsertWorkspaceConnection(context.Background(), connection); err != nil {
+				t.Fatal(err)
+			}
+			if err := service.store.UpsertWorkspaceSettings(context.Background(), &WorkspaceSettings{
+				WorkspaceID: "ws-1", RepoScopeMode: RepoScopeModeSelected,
+				RepoScopeOrgs: tc.orgs, RepoScopeRepos: []RepoFilter{{Owner: "outside", Name: "tool"}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			updated, err := (&installationRepositorySettingsUpdater{service: service}).ApplyInstallationRepositories(
+				context.Background(), InstallationRepositoriesChange{
+					WorkspaceID: "ws-1", InstallationID: installationID,
+					ConnectionSource: ConnectionSourceGitHubAppInstallation, AppRegistrationID: "registration-test",
+					CredentialGeneration: 2, Action: "removed",
+					Removed: []InstallationRepository{{ID: 7, FullName: "outside/tool"}},
+				},
+			)
+			if err != nil || !updated {
+				t.Fatalf("ApplyInstallationRepositories() updated=%v, err=%v", updated, err)
+			}
+			settings, err := service.store.GetWorkspaceSettings(context.Background(), "ws-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if settings.RepoScopeMode != RepoScopeModeSelected || len(settings.RepoScopeRepos) != 0 || len(settings.RepoScopeOrgs) != len(tc.orgs) {
+				t.Fatalf("scope after repository removal = %+v", settings)
+			}
+			if repositoryInWorkspaceScope(settings, "outside", "tool") {
+				t.Fatal("removed exact repository remains authorized")
+			}
+			if repositoryInWorkspaceScope(settings, "acme", "another") != (len(tc.orgs) > 0) {
+				t.Fatal("owner grant changed during exact repository removal")
+			}
+		})
+	}
+}
+
 func TestGitHubWebhookAuthorizationRevocationRemovesExactUsers(t *testing.T) {
 	store := &githubWebhookMemoryStore{users: map[int64][]*UserConnection{11: {
 		{WorkspaceID: "workspace-1", UserID: "user-1", GitHubUserID: 11},

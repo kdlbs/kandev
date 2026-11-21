@@ -116,6 +116,7 @@ For each file, identify which requirement or intent it serves. Flag any changes 
 
 Before reviewing implementation details:
 - Read changed tests and nearby existing tests.
+- For scheduling, background delivery, or task/session lifecycle changes, use the [lifecycle evidence checklist](../tdd/references/lifecycle-evidence.md). Require each applicable scenario to name its acceptance criterion, observable invariant, regression test, exact command, and result.
 - Check whether tests assert behavior, not implementation details.
 - Check whether the selected test level is appropriate: unit for pure logic, integration for boundaries, E2E for critical browser flows.
 - Identify missing coverage for happy path, key error paths, edge cases, auth/workspace boundaries, and concurrency/order-sensitive behavior.

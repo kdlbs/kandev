@@ -57,3 +57,22 @@ func TestQuestionImagesSchemaOffersLabels(t *testing.T) {
 	require.Equal(t, protocol.ImageLabelPattern, label["pattern"])
 	require.Contains(t, label[descriptionArg], "before")
 }
+
+// @covers AC-TASKS-QUESTION-IMAGES-004.5
+func TestQuestionImagesSchemaExplainsRepositoryScopes(t *testing.T) {
+	operatorSchema := buildOperatorQuestionSchemaItem()
+	questionImages := operatorSchema[propsKey].(map[string]any)["images"].(map[string]any)
+	choiceImages := operatorSchema[propsKey].(map[string]any)[optionsArg].(map[string]any)["items"].(map[string]any)[propsKey].(map[string]any)["images"].(map[string]any)
+
+	for _, schema := range []map[string]any{questionImages, choiceImages} {
+		description := schema[descriptionArg].(string)
+		require.Contains(t, description, "source session workspace")
+		require.Contains(t, description, "When that workspace is the repository, omit repo")
+
+		items := schema["items"].(map[string]any)[propsKey].(map[string]any)
+		require.Contains(t, items["path"].(map[string]any)[descriptionArg], "source session workspace")
+		require.Contains(t, items["repo"].(map[string]any)[descriptionArg], "child repository path relative to the workspace")
+		require.Contains(t, items["repo"].(map[string]any)[descriptionArg], "compatibility")
+		require.Contains(t, items["repo"].(map[string]any)[descriptionArg], "no child has that name")
+	}
+}

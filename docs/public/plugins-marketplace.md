@@ -253,8 +253,11 @@ a PR that lists it.
    Keep `id` equal to your manifest `id` and unique in the file, and name your
    release package `<id>-<version>.tar.gz` to match, so the index resolves the
    right asset. `categories` here are free-form curation tags for catalog
-   filtering (not the manifest's category enum). `featured` is a maintainer-only
-   pin; leave it out of submissions. The pointer-list shape is defined by
+   filtering (not the manifest's category enum). The catalog combines them with
+   the categories from the release manifest and removes duplicates. This lets
+   maintainers add labels without changing the released package. `featured` is
+   a maintainer-only pin; leave it out of submissions. The pointer-list shape
+   is defined by
    [`plugin-registry/schema.json`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json).
    The catalog attributes the listing to the owner in `repo`. Your manifest
    `author` stays your own declaration and appears on the installed plugin's

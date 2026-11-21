@@ -227,28 +227,6 @@ func (r *Repository) CancelRunsForTasks(
 	return r.CancelRunsWhere(ctx, reason, selector, args...)
 }
 
-func (r *Repository) BulkUpdateTaskState(ctx context.Context, taskIDs []string, state string) error {
-	if len(taskIDs) == 0 {
-		return nil
-	}
-	query, args := taskIDInQuery(`UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (%s)`, taskIDs)
-	args = append([]interface{}{state}, args...)
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
-	return err
-}
-
-func (r *Repository) BulkReleaseTaskCheckout(ctx context.Context, taskIDs []string) error {
-	if len(taskIDs) == 0 {
-		return nil
-	}
-	query, args := taskIDInQuery(`
-		UPDATE tasks SET checkout_agent_id = '', checkout_at = NULL, checkout_run_id = NULL, updated_at = CURRENT_TIMESTAMP
-		WHERE id IN (%s)
-	`, taskIDs)
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
-	return err
-}
-
 func (r *Repository) GetSubtreeCostSummary(
 	ctx context.Context,
 	rootTaskID string,

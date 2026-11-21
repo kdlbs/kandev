@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "sdk_version": "0.2.1",
-  "host_release": "0.101.0",
-  "min_kandev_version": "0.101.0",
+  "sdk_version": "0.3.0",
+  "host_release": "0.102.0",
+  "min_kandev_version": "0.102.0",
   "api_versions": [
     1,
     2
   ],
-  "change_kind": "patch"
+  "change_kind": "additive"
 }

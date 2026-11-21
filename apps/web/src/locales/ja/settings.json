@@ -1,4 +1,8 @@
 {
+  "notificationFormatterLabel": "通知の内容",
+  "notificationFormatterDefault": "元の通知内容を使用",
+  "notificationFormatterUnavailable": "フォーマッターを利用できません。元の内容で通知を送信します。",
+  "notificationFormatterDescription": "プロバイダーごとにフォーマッターを選択します。購読設定と送信先は変更されません。",
   "notificationEventPermissionRequested": "エージェントが許可を求めています",
   "notificationEventPermissionRequestedDescription": "エージェントが操作の承認を待っているときに通知します。",
   "notificationEventSessionFailed": "エージェントセッションが失敗",
@@ -926,7 +930,7 @@
   "sessionMaximumShort": "開始、再開、今すぐ送信はこの上限を超えられます。",
   "queueMaximumShort": "セッションごとの保留メッセージ数を制限します。0 は無制限です。",
   "queueMergeShort": "エージェントが読む前に、関連する保留メッセージをまとめます。",
-  "queueAutoMergeShort": "互換性のある連続メッセージを自動的にまとめます。",
+  "queueAutoMergeShort": "互換性のある隣接メッセージをマージし、サブタスクのメッセージは同じ送信元の最新メッセージの位置へ移動してマージします。",
   "sleepShort": "タスクの実行中、Kandev が動作するコンピューターのスリープを防ぎます。",
   "sidebarPresentation": "サイドバーの外観",
   "sidebarFastActions": "クイックアクションアイコンを表示",
@@ -1228,5 +1232,7 @@
   "builtinMcp.inheritedValue": "ワークスペースから継承：{{value}}",
   "builtinMcp.overrideValue": "タスクの設定：{{value}}。ワークスペースの既定値：{{default}}。",
   "builtinMcp.useInherited": "継承した値を使用",
-  "builtinMcp.allowTasks": "タスクによるこのパッケージの使用を許可"
+  "builtinMcp.allowTasks": "タスクによるこのパッケージの使用を許可",
+  "markdownPreviewByDefault": "Markdown ファイルをプレビューで開く",
+  "markdownPreviewByDefaultDescription": "新しく開く Markdown ファイルの初期モードを選択します。モードはいつでも切り替えられます。"
 }

@@ -42,6 +42,8 @@ import (
 
 const legacyExecutorTypeLocalPC = "local_pc"
 
+const runtimeEnvOverlayMetadataKey = "runtime_env"
+
 const registeredLaunchRollbackRetries = 3
 
 var registeredLaunchRollbackRetryDelays = [...]time.Duration{
@@ -2075,6 +2077,10 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if execution.AgentCommand != "" {
 			return nil, nil
 		}
+		promotedEnv, err := m.managedGitEnvironmentForPromotion(sharedCtx, execution, req.Env)
+		if err != nil {
+			return nil, err
+		}
 		if err := m.prepareBuiltinWorkspaceExecution(sharedCtx, execution, req); err != nil {
 			return nil, err
 		}
@@ -2185,6 +2191,14 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			}
 		} else {
 			execution.prepareProgressRecorder = progressRecorder
+		}
+		if promotedEnv != nil {
+			// The admitted launch owns the credentials for the new subprocess.
+			// Consume the overlay so startup cannot select a previous lease.
+			execution.setRuntimeEnvironment(promotedEnv)
+			execution.deleteMetadataValues(runtimeEnvOverlayMetadataKey)
+			// The workspace installer digest predates the promoted environment.
+			execution.ManagedRuntimeInstallerEnvDigest = ""
 		}
 		// Workspace-only executions can be created from a session row that stores
 		// the task assignee. The launch request carries the acting Office identity,
@@ -3109,7 +3123,7 @@ func (m *Manager) SetExecutionEnv(_ context.Context, executionID string, env map
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
-	execution.setMetadataValue("runtime_env", cloneStringMap(env))
+	execution.setMetadataValue(runtimeEnvOverlayMetadataKey, cloneStringMap(env))
 	return nil
 }
 
@@ -3451,7 +3465,7 @@ func (m *Manager) environmentForPreparedLaunch(ctx context.Context, execution *A
 // hasRuntimeEnvOverlay reports whether SetExecutionEnv delivered a per-run
 // environment for the next start.
 func hasRuntimeEnvOverlay(metadata map[string]interface{}) bool {
-	_, ok := metadata["runtime_env"]
+	_, ok := metadata[runtimeEnvOverlayMetadataKey]
 	return ok
 }
 
@@ -3460,12 +3474,12 @@ func runtimeEnvFromMetadata(metadata map[string]interface{}) map[string]string {
 	if metadata == nil {
 		return env
 	}
-	if typed, ok := metadata["runtime_env"].(map[string]string); ok {
+	if typed, ok := metadata[runtimeEnvOverlayMetadataKey].(map[string]string); ok {
 		for k, v := range typed {
 			env[k] = v
 		}
 	}
-	if raw, ok := metadata["runtime_env"].(map[string]interface{}); ok {
+	if raw, ok := metadata[runtimeEnvOverlayMetadataKey].(map[string]interface{}); ok {
 		for k, v := range raw {
 			if str, strOK := v.(string); strOK {
 				env[k] = str

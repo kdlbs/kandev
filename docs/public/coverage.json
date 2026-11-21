@@ -232,7 +232,9 @@
         "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/adapter.go",
         "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/activity.go",
         "apps/backend/internal/orchestrator/conversation_fork.go",
-        "apps/web/components/task/chat/messages/message-actions.tsx"
+        "apps/web/components/task/chat/messages/message-actions.tsx",
+        "apps/backend/internal/orchestrator/messagequeue/service_policy.go",
+        "apps/web/components/task/chat/queue-automation-pills.tsx"
       ],
       "tests": [
         "apps/backend/internal/mcp/handlers/spawn_session_test.go",
@@ -246,13 +248,16 @@
         "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/adapter_test.go",
         "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/fork_test.go",
         "apps/backend/internal/orchestrator/conversation_fork_test.go",
-        "apps/web/components/task/chat/messages/message-actions.test.tsx"
+        "apps/web/components/task/chat/messages/message-actions.test.tsx",
+        "apps/web/e2e/tests/chat/message-queue-auto-sort-merge.spec.ts",
+        "apps/web/e2e/tests/chat/mobile-message-queue-auto-sort-merge.spec.ts"
       ],
       "mcpTools": [
         "answer_question_kandev",
         "ask_parent_question_kandev",
         "ask_user_question_kandev",
         "get_task_conversation_kandev",
+        "get_task_message_operation_kandev",
         "get_task_document_kandev",
         "list_related_tasks_kandev",
         "list_pending_agent_permissions_kandev",
@@ -327,6 +332,8 @@
         "apps/web/components/task/editors-menu.tsx",
         "apps/backend/internal/agentctl/server/process/workspace_git_status.go",
         "apps/backend/internal/task/service/workspace_recovery_projection.go",
+        "apps/backend/internal/worktree/manager_git.go",
+        "apps/backend/internal/worktree/manager_lifecycle.go",
         "apps/backend/internal/worktree/managed_clone_relocation_archive.go",
         "apps/backend/internal/worktree/recovery_admission.go",
         "apps/backend/internal/orchestrator/executor/executor_resume.go",
@@ -344,6 +351,7 @@
         "apps/backend/internal/task/repository/sqlite/workspace_recovery_error_cas_test.go",
         "apps/backend/internal/task/service/workspace_recovery_projection_test.go",
         "apps/backend/internal/orchestrator/handlers/workspace_recovery_projection_test.go",
+        "apps/backend/internal/worktree/manager_automatic_base_recovery_test.go",
         "apps/backend/internal/worktree/managed_clone_completed_reuse_test.go",
         "apps/backend/internal/worktree/managed_clone_completed_bookkeeping_test.go",
         "apps/backend/internal/orchestrator/executor/executor_completed_relocation_integration_test.go",
@@ -489,6 +497,7 @@
         "apps/backend/internal/agent/executor/executor.go",
         "apps/backend/internal/agent/kubernetes/config.go",
         "apps/backend/internal/agent/runtime/lifecycle/executor_backend.go",
+        "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim.go",
         "apps/backend/internal/agent/runtime/lifecycle/persistence.go",
         "apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes.go",
         "apps/backend/internal/kubernetes/handlers.go",
@@ -510,6 +519,9 @@
         "k8s/executor-rbac.yaml"
       ],
       "tests": [
+        "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_test.go",
+        "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_git_test.go",
+        "apps/backend/internal/agent/runtime/lifecycle/executor_ssh_reclaim_optin_test.go",
         "apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes_test.go",
         "apps/backend/internal/agent/runtime/lifecycle/persistence_test.go",
         "apps/backend/internal/kubernetes/handlers_test.go",
@@ -525,6 +537,8 @@
         "apps/backend/internal/mcp/handlers/handlers_test.go",
         "apps/backend/internal/mcp/handlers/create_task_self_placement_inheritance_test.go",
         "apps/backend/internal/task/service/service_resources_kubernetes_test.go",
+        "apps/backend/internal/task/service/resource_cleanup_ssh_test.go",
+        "apps/backend/internal/agent/runtime/ssh_reclaim_test.go",
         "apps/backend/internal/task/repository/sqlite/task_environment_inherited_transition_test.go",
         "apps/backend/internal/task/repository/sqlite/task_environment_inherited_transition_postgres_test.go",
         "apps/backend/internal/task/repository/sqlite/task_environment_test.go",

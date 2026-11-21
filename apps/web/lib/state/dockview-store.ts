@@ -35,12 +35,15 @@ import {
   toSerializedDockview,
   normalizeReusableSessionPanels,
   materializeReusableChatPanel,
+  setReusableRightTarget,
+  clearReusableRightTarget,
 } from "./layout-manager";
 import type {
   BuiltInPreset,
   LayoutGroup,
   LayoutGroupIds,
   LayoutNode,
+  LayoutOrientation,
   LayoutPanel,
   LayoutState,
 } from "./layout-manager";
@@ -94,6 +97,9 @@ import {
   formatJsonRootSizes,
 } from "./dockview-widths-debug";
 
+import { normalizeRightColumnOwnership } from "./layout-manager/serializer";
+import { getReusableRightWidth } from "./layout-manager/pinned-targets";
+import { resolveEnvRightWidth } from "./layout-manager/right-width";
 const debugSwitch = createDebugLogger("dockview:store-switch");
 const debugSave = createDebugLogger("dockview:save");
 const debugWidths = createDebugLogger("dockview:widths");
@@ -446,9 +452,11 @@ function applyDeferredPanelActions(api: DockviewApi, actions: DeferredPanelActio
 export function collectPinnedWidthUpdates(
   columns: { id: string }[],
   getSize: (index: number) => number,
-  visibility: { rightPanelsVisible: boolean },
+  visibility: { rightPanelsVisible: boolean; rootOrientation?: LayoutOrientation },
 ): Map<string, number> {
   const updates = new Map<string, number>();
+  // A vertical root's child extents are heights, never a right width.
+  if (visibility.rootOrientation === "VERTICAL") return updates;
   columns.forEach((col, i) => {
     if (col.id !== "right" || !visibility.rightPanelsVisible) return;
     const w = getSize(i);
@@ -470,6 +478,7 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
     if (getManualRightWidth(currentLayoutEnvId) === null) return;
     const updates = collectPinnedWidthUpdates(state.columns, (i) => sv.getViewSize(i), {
       rightPanelsVisible,
+      rootOrientation: state.rootOrientation,
     });
     if (updates.size > 0) {
       if (isDebug()) {
@@ -542,8 +551,11 @@ export function resolvePresetPinnedWidths(
 export function resolveCustomLayoutPinnedWidths(
   columns: LayoutState["columns"],
   totalWidth: number,
+  rootOrientation?: LayoutOrientation,
 ): Map<string, number> {
   const widths = new Map<string, number>();
+  // Pinned widths are a horizontal policy; vertical row extents are heights.
+  if (rootOrientation === "VERTICAL") return widths;
   /** True when the column carries a finite, positive saved width. */
   const hasValidWidth = (column: LayoutState["columns"][number]): boolean =>
     typeof column.width === "number" && Number.isFinite(column.width) && column.width > 0;
@@ -592,6 +604,23 @@ function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number>
   return useDockviewStore.getState().pinnedWidths;
 }
 
+/** Revealing retained panes resolves owned source geometry at the current container, not old pixels. */
+function resolveRestoredPinnedWidths(
+  state: LayoutState,
+  totalWidth: number,
+  widths: Map<string, number>,
+  envId: string | null,
+): Map<string, number> {
+  if (state.rootOrientation === "VERTICAL" || getReusableRightWidth(envId, totalWidth) === null)
+    return widths;
+  const sidebar = state.columns.find((column) => column.id === "sidebar" && column.pinned);
+  const sidebarWidth = sidebar ? getPinnedWidth(sidebar, totalWidth, widths.get("sidebar")) : 0;
+  return new Map(widths).set(
+    "right",
+    resolveEnvRightWidth(totalWidth, sidebarWidth, getManualRightWidth(envId), envId),
+  );
+}
+
 /**
  * Snap pinned columns to their targets using the current store state.
  *
@@ -610,6 +639,7 @@ function enforceFromStore(api: DockviewApi, get: StoreGet): void {
     rightPanelsVisible: s.rightPanelsVisible,
     maximized: s.preMaximizeLayout !== null,
     envId: s.currentLayoutEnvId,
+    hiddenRightPane: s.hiddenRightPane,
   });
 }
 
@@ -738,7 +768,13 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       });
 
       try {
-        applyLayoutAndSet(api, nextLayout, liveWidths, set);
+        const restoredWidths = resolveRestoredPinnedWidths(
+          nextLayout,
+          safeWidth,
+          liveWidths,
+          targetEnvId,
+        );
+        applyLayoutAndSet(api, nextLayout, restoredWidths, set);
       } catch {
         set({
           isRestoringLayout: false,
@@ -791,6 +827,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       const { api } = get();
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
+      clearReusableRightTarget();
       preserveChatScrollDuringLayout();
       // Capture before layout change; api.width can become stale in rAF.
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
@@ -844,47 +881,60 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         }
       });
     },
-    applyCustomLayout: (layout: SavedLayoutConfig, opts?: ApplyCustomLayoutOptions) => {
-      const { api } = get();
-      if (!api) return;
-      captureLiveWidths(api, set);
-      preserveChatScrollDuringLayout();
-      const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
-      set({
-        isRestoringLayout: true,
-        hiddenRightPane: null,
-        activeLayoutProfile: profileForCustomLayout(layout),
-      });
-      const { appliedState, oldFormatRestoreFailed } = restoreCustomLayout({
-        api,
-        layout,
-        opts,
-        safeWidth,
-        safeHeight,
-        set,
-      });
-      const hasSidebar = !!api.getPanel("sidebar");
-      const restoredLayout = fromDockviewApi(api);
-      const effectiveLayout = restoredLayout.columns.length > 0 ? restoredLayout : appliedState;
-      set({
-        sidebarVisible: hasSidebar,
-        ...visibilityForLayout(effectiveLayout, null),
-      });
-      const targetEnvId = get().currentLayoutEnvId;
-      requestAnimationFrame(() => {
-        api.layout(safeWidth, safeHeight);
-        enforceFromStore(api, get);
-        syncPinnedWidthsFromApi(api, set);
-        set({ isRestoringLayout: false });
-        const { currentLayoutEnvId, preMaximizeLayout } = get();
-        // Don't persist when the legacy fromJSON restore threw: the API may be in a partial state and snapshotting it would propagate corruption to the next load.
-        if (currentLayoutEnvId === targetEnvId && !oldFormatRestoreFailed) {
-          persistEnvLayoutNow(api, targetEnvId, preMaximizeLayout);
-        }
-      });
-    },
+    applyCustomLayout: (layout: SavedLayoutConfig, opts?: ApplyCustomLayoutOptions) =>
+      performApplyCustomLayout(set, get, layout, opts),
     captureCurrentLayout: () => captureReusableLayout(get),
   };
+}
+
+function performApplyCustomLayout(
+  set: StoreSet,
+  get: StoreGet,
+  layout: SavedLayoutConfig,
+  opts?: ApplyCustomLayoutOptions,
+): void {
+  const { api } = get();
+  if (!api) return;
+  captureLiveWidths(api, set);
+  preserveChatScrollDuringLayout();
+  const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
+  set({
+    isRestoringLayout: true,
+    hiddenRightPane: null,
+    activeLayoutProfile: profileForCustomLayout(layout),
+  });
+  const { appliedState, oldFormatRestoreFailed } = restoreCustomLayout({
+    api,
+    layout,
+    opts,
+    safeWidth,
+    safeHeight,
+    set,
+  });
+  syncReusableRightTarget(
+    get().currentLayoutEnvId,
+    appliedState?.columns ? appliedState : null,
+    get().pinnedWidths,
+  );
+  const hasSidebar = !!api.getPanel("sidebar");
+  const restoredLayout = fromDockviewApi(api);
+  const effectiveLayout = restoredLayout.columns.length > 0 ? restoredLayout : appliedState;
+  set({
+    sidebarVisible: hasSidebar,
+    ...visibilityForLayout(effectiveLayout, null),
+  });
+  const targetEnvId = get().currentLayoutEnvId;
+  requestAnimationFrame(() => {
+    api.layout(safeWidth, safeHeight);
+    enforceFromStore(api, get);
+    syncPinnedWidthsFromApi(api, set);
+    set({ isRestoringLayout: false });
+    const { currentLayoutEnvId, preMaximizeLayout } = get();
+    // Don't persist when the legacy fromJSON restore threw: the API may be in a partial state and snapshotting it would propagate corruption to the next load.
+    if (currentLayoutEnvId === targetEnvId && !oldFormatRestoreFailed) {
+      persistEnvLayoutNow(api, targetEnvId, preMaximizeLayout);
+    }
+  });
 }
 
 type RestoreCustomLayoutParams = {
@@ -935,12 +985,19 @@ function restoreCustomLayout({
     // as during profile validation, because this explicit apply path does not
     // go through the settings normalizer.
     const visibleSessions = visibleCustomLayoutSessions(opts);
-    const activeState = materializeReusableChatPanel(
+    const materializedState = materializeReusableChatPanel(
       normalizeReusableSessionPanels(filterLayoutStateByComponents(state)),
       visibleSessions.activeSessionId,
       visibleSessions.sessionIds,
     );
-    const savedWidths = resolveCustomLayoutPinnedWidths(activeState.columns, safeWidth);
+    const columns = normalizeRightColumnOwnership(materializedState.columns);
+    const activeState =
+      columns === materializedState.columns ? materializedState : { ...materializedState, columns };
+    const savedWidths = resolveCustomLayoutPinnedWidths(
+      activeState.columns,
+      safeWidth,
+      activeState.rootOrientation,
+    );
     const ids = applyLayoutAndSet(api, activeState, savedWidths, set, {
       width: safeWidth,
       height: safeHeight,
@@ -1287,7 +1344,29 @@ export function persistEnvLayoutNow(
 
 function resolveEnvDefaultPinnedWidths(get: StoreGet, width: number): Map<string, number> {
   const defaultLayout = get().userDefaultLayout;
-  return defaultLayout ? resolveCustomLayoutPinnedWidths(defaultLayout.columns, width) : new Map();
+  return defaultLayout
+    ? resolveCustomLayoutPinnedWidths(defaultLayout.columns, width, defaultLayout.rootOrientation)
+    : new Map();
+}
+
+/**
+ * Enter the incoming environment. A reusable right width belongs to one
+ * environment's build, so switching releases it before the incoming build may
+ * claim its own.
+ */
+function beginEnvSwitchState(
+  set: StoreSet,
+  newEnvId: string,
+  hiddenRightPane: HiddenRightPane | null,
+  manualRightWidth: number | null,
+): void {
+  clearReusableRightTarget();
+  set({
+    isRestoringLayout: true,
+    currentLayoutEnvId: newEnvId,
+    hiddenRightPane,
+    pinnedWidths: manualRightWidth === null ? new Map() : new Map([["right", manualRightWidth]]),
+  });
 }
 
 /** Save the outgoing env's layout & maximize state, then release its portals. */
@@ -1427,12 +1506,7 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
     const savedEnvLayout = getEnvLayout(newEnvId);
     const hiddenRightPane = readHiddenRightPane(savedEnvLayout);
     const savedLayoutProfile = getEnvLayoutProfile(newEnvId);
-    set({
-      isRestoringLayout: true,
-      currentLayoutEnvId: newEnvId,
-      hiddenRightPane,
-      pinnedWidths: manualRightWidth === null ? new Map() : new Map([["right", manualRightWidth]]),
-    });
+    beginEnvSwitchState(set, newEnvId, hiddenRightPane, manualRightWidth);
     try {
       const hasFirstAdoptionRouteLayout =
         oldEnvId === null && currentLayoutEnvId === null && Boolean(initialLayout);
@@ -1609,7 +1683,12 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       const measured = measureDockviewContainer(api);
       const safeWidth = measured.width;
       const safeHeight = measured.height;
-      const liveWidths = get().pinnedWidths;
+      const liveWidths = resolveRestoredPinnedWidths(
+        preMaximizeLayout,
+        safeWidth,
+        get().pinnedWidths,
+        currentLayoutEnvId,
+      );
       set({
         isRestoringLayout: true,
         preMaximizeLayout: null,
@@ -1633,6 +1712,25 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
   };
 }
 
+/**
+ * Retain the reusable source geometry for `envId`, so fixups and automatic
+ * refresh resolve its original share at each workbench size. Never retain
+ * the safety-clamped pixel result as the source. Horizontal roots only;
+ * an actual manual width still wins at every consumer.
+ */
+function syncReusableRightTarget(
+  envId: string | null,
+  state: LayoutState | null,
+  pinnedWidths: ReadonlyMap<string, number>,
+): void {
+  const right = pinnedWidths.get("right");
+  if (!state || right === undefined || state.rootOrientation === "VERTICAL") {
+    clearReusableRightTarget();
+    return;
+  }
+  setReusableRightTarget(envId, state);
+}
+
 function resolveBuildDefaultPinnedWidths(
   state: LayoutState,
   userDefaultLayout: LayoutState | null,
@@ -1642,7 +1740,7 @@ function resolveBuildDefaultPinnedWidths(
   if (!userDefaultLayout || basePreset) return new Map();
   // Intent panel injection preserves column widths, so the effective state
   // still carries the saved custom-default geometry used for scaling.
-  return resolveCustomLayoutPinnedWidths(state.columns, availableWidth);
+  return resolveCustomLayoutPinnedWidths(state.columns, availableWidth, state.rootOrientation);
 }
 
 /**
@@ -1694,6 +1792,7 @@ function performBuildDefault(
     basePreset,
     safeWidth,
   );
+  syncReusableRightTarget(get().currentLayoutEnvId, state, pinnedWidths);
   set({
     isRestoringLayout: true,
     pinnedWidths,
@@ -1802,8 +1901,12 @@ function resolveActiveFile(api: DockviewApi, panelId: string | undefined): Activ
   return activeFileState(null, null, activePanelComponent);
 }
 
-function buildSetApiAction(set: StoreSet): DockviewStore["setApi"] {
+function buildSetApiAction(set: StoreSet, get: StoreGet): DockviewStore["setApi"] {
   return (api) => {
+    // Reusable geometry belongs to the Dockview instance that claimed it.
+    // A later mount must restore from its saved layout instead of inheriting
+    // the previous instance's transient source.
+    if (api === null || get().api !== api) clearReusableRightTarget();
     set({
       api,
       activeFilePath: null,
@@ -1860,7 +1963,7 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   activeFilePath: null,
   activeFileRepo: null,
   activePanelComponent: null,
-  setApi: buildSetApiAction(set),
+  setApi: buildSetApiAction(set, get),
   activeGroupId: null,
   selectedDiff: null,
   setSelectedDiff: (diff) => set({ selectedDiff: diff }),

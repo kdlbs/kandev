@@ -829,6 +829,7 @@ export class ApiClient {
   async createCustomTUIAgent(options: {
     display_name: string;
     command: string;
+    command_args?: string[];
     model?: string;
     description?: string;
     mcp_strategy?: string;
@@ -3509,6 +3510,8 @@ export class ApiClient {
   async getQueueStatus(identity: QueueSessionIdentityInput): Promise<{
     count: number;
     entries: Array<{
+      id: string;
+      position: number;
       content: string;
       queued_by: string;
       metadata?: Record<string, unknown>;

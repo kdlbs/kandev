@@ -425,7 +425,7 @@ export type RepoFilter = {
   name: string;
 };
 
-export type GitHubRepoScopeMode = "all" | "orgs" | "repos";
+export type GitHubRepoScopeMode = "all" | "selected";
 export type TaskGitCredentialsMode = "managed" | "executor";
 
 export type GitHubWorkspaceSettings = {

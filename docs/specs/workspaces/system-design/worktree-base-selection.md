@@ -15,8 +15,8 @@ eligibility. The task system supplies selection intent and retains launch-error
 ownership. Provider credentials and remote-executor scripts keep their current
 contracts.
 
-This amendment is implemented. It preserves the same-ref local refresh behavior
-from the existing design.
+This design preserves the same-ref local refresh behavior from the existing
+design.
 
 ## Requirement mapping
 
@@ -24,7 +24,7 @@ from the existing design.
 | --- | --- |
 | AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.6, .25 | Selection contract and resolution gate |
 | AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.26 | Failure and retry |
-| AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.27 | Producers, persistence, and compatibility |
+| AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.27 | Producers, persistence, host refresh recovery, and compatibility |
 | AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.8, .28 | Runtime propagation and validation |
 | AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.1, .3, .10, .13, .19 | Compatibility |
 
@@ -148,6 +148,38 @@ Clearing `FallbackBaseBranch` alone is insufficient: the current resolver can
 still query and select the live remote default. The policy must guard that path
 as well as early refreshed-ref and PR fallback helpers.
 
+### Host refresh recovery
+
+For an ordinary non-PR host refresh, a confirmed missing remote base must reach
+the inherited/default recovery gate before preparation rejects the request.
+Only `BaseBranchFallbackPolicyRepositoryDefault` permits this route.
+The requested base must have no usable local ref, and its fetch must establish
+`missing_remote_ref` without cancellation or deadline expiry.
+
+Expose the existing `ErrRemoteRefMissing` sentinel from `handleBaseFetchFailure`
+while retaining the safe Git-command cause. Do not introduce a new error type
+or infer absence from returned error text. A failed verification after a
+successful fetch does not establish remote absence.
+
+In `resolveBaseRefWithFallback`, let this eligible error reach the existing
+configured-candidate and `ResolveRemoteDefaultBranch` sequence.
+Keep that sequence's current ordering and failure behavior.
+For this recovery, discover the remote default from the origin-advertised HEAD
+instead of trusting cached `origin/HEAD`. Refresh the fallback through its
+explicit `refs/heads/<branch>:refs/remotes/origin/<branch>` refspec so a narrow
+`remote.origin.fetch` mapping cannot leave a stale tracking ref in place.
+Use the existing `resolveFallbackRef` helper to require successful refresh and
+verification for a replacement after this required-fetch failure. A cached
+replacement alone cannot satisfy that refresh.
+Then use the existing base update and warning finishers.
+A successful recovery ends sync progress with completion.
+
+Authentication, network, timeout, cancellation, lock, and uncertain verification
+failures cannot enter or complete this recovery. Strict selections keep their
+existing errors. Qualified PR targets, numbered-PR fallback, provider-handled
+refresh, valid worktree reuse, empty-remote bootstrap, and refresh-disabled
+selection retain their existing routes.
+
 ## Failure and retry
 
 For an unresolved strict selection, return a bounded error naming the requested
@@ -213,3 +245,4 @@ attached twice. Preserve existing local-refresh and qualified-PR controls.
 ## Implementation plans
 
 - [Explicit worktree base selection](../../../plans/explicit-worktree-base-selection/plan.md)
+- [Stale automatic worktree default](../../../plans/stale-automatic-worktree-default/plan.md)

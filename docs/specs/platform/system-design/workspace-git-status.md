@@ -373,7 +373,7 @@ Existing Git-status routes remain in place. Their result and stream payloads add
 - `GET /api/v1/git/status?repo=<subpath>&fresh=<bool>` returns the existing `GitStatusResult` shape.
 - `GET /api/v1/git/status/multi?fresh=<bool>` returns the existing `MultiRepoGitStatusResult` shape containing `PerRepoGitStatus` entries. `mode=replay` reads only accepted cache state; it never starts observation or enrichment.
 - The `fresh` query parameter continues to select a live observation rather than a cached tracker snapshot.
-- `details=wait` on either status route joins the current snapshot's bounded enrichment and returns an explicit unavailable result if that detail job is superseded or fails.
+- `details=wait` on either status route joins the current snapshot's bounded enrichment and returns an explicit unavailable result if that detail job is superseded or fails. A repo-less root settles as `repository_unavailable` without error logs.
 - A repository status MAY include `comparison_target` with its credential-free display identity and `comparison_error_code` when the explicit target is unavailable.
 - A mixed-path `FileInfo` MAY include `staged_change` and `unstaged_change`. Each facet uses the same bounded status, line-total, rename, diff, and skip-reason vocabulary as the flattened file fields. Their absence preserves the legacy single-layer shape.
 - Commit and cumulative-diff requests use agentctl's configured repository-qualified ref when present. A caller-supplied branch name cannot override it.
