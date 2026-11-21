@@ -38,7 +38,10 @@ const (
 	CapabilityTaskTitle      Capability = "task-title"
 	CapabilityGitHubPR       Capability = "github-pr"
 	CapabilityGitLabMR       Capability = "gitlab-mr"
-	CapabilityCanvas         Capability = "canvas-authoring"
+	// CapabilityTaskVisibilityRead exposes only the compact lifecycle lookup
+	// for one backend-granted manual task session.
+	CapabilityTaskVisibilityRead Capability = "task-visibility-read"
+	CapabilityCanvas             Capability = "canvas-authoring"
 	// CapabilityWorkspaceCollaborationReport exposes the report-only delivery
 	// mode on the task message tool while collaboration enforcement is enabled.
 	CapabilityWorkspaceCollaborationReport Capability = "workspace-collaboration-report"

@@ -74,6 +74,9 @@ func (s *Server) registerCoreTaskCapabilities() {
 	if s.profile.HasCapability(mcpprofile.CapabilityCanvas) {
 		s.registerCanvasTools()
 	}
+	if s.profile.HasCapability(mcpprofile.CapabilityTaskVisibilityRead) {
+		s.registerTaskVisibilityTool()
+	}
 }
 
 func (s *Server) registerCoreDiscoveryTools() {
