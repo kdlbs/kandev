@@ -582,6 +582,7 @@ const (
 	ActionMCPUpdateTaskState             = "mcp.update_task_state"
 	ActionMCPMessageTask                 = "mcp.message_task"
 	ActionMCPStopTask                    = "mcp.stop_task"
+	ActionMCPReorderChildTasks           = "mcp.reorder_child_tasks"
 	ActionMCPSpawnSession                = "mcp.spawn_session"
 	ActionMCPGetTaskConversation         = "mcp.get_task_conversation"
 	ActionMCPGetTaskMessageOperation     = "mcp.get_task_message_operation"
