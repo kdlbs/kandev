@@ -1,3 +1,4 @@
+import type { BuiltinMCPCreateDraft } from "@/lib/types/builtin-mcp";
 import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import type React from "react";
 import type { RefObject } from "react";
@@ -416,9 +417,15 @@ export type TaskFormInputsHandle = {
 };
 
 export type DialogFormState = {
+  builtinMCPPreferences?: BuiltinMCPCreateDraft;
+  setBuiltinMCPPreferences?: (value: BuiltinMCPCreateDraft | undefined) => void;
   /** Predecessor task IDs chosen in the dialog's "Depends on" selector. */
   blockedBy: string[];
   setBlockedBy: (v: string[]) => void;
+  selectedParentTaskId?: string;
+  setSelectedParentTaskId?: (v: string | undefined) => void;
+  relatedTaskIds?: string[];
+  setRelatedTaskIds?: (v: string[]) => void;
   /** Task-level MCP additions. Empty means no additions at this scope. */
   mcpServerIds: string[];
   setMcpServerIds: (v: string[]) => void;
@@ -552,6 +559,7 @@ export type DialogFormState = {
 };
 
 export type SubmitHandlersDeps = {
+  builtinMCPPreferences?: BuiltinMCPCreateDraft;
   isSessionMode: boolean;
   isEditMode: boolean;
   /** Create-mode opt-in: derive a provisional title from the prompt. */
@@ -635,6 +643,7 @@ export type SubmitHandlersDeps = {
   noRepository: boolean;
   /** Predecessor task IDs to link at creation time. */
   blockedBy?: string[];
+  relatedTaskIds?: string[];
   /** Edit-mode dependency draft and persistence state. */
   editDependencies?: Pick<TaskEditDialogDependenciesState, "isDirty" | "ready" | "save">;
   /** Task-level MCP additions selected in the Advanced section. */
@@ -680,6 +689,9 @@ export type DialogFormBodyProps = {
   isTaskStarted: boolean;
   initialDescription: string;
   workspaceId: string | null;
+  taskId?: string | null;
+  parentTaskId?: string;
+  defaultStepId?: string | null;
   onJiraImport?: (ticket: JiraTicket) => void;
   onLinearImport?: (issue: LinearIssue) => void;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;

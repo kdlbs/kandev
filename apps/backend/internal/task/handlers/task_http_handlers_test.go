@@ -26,6 +26,8 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/completion"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
@@ -233,7 +235,24 @@ func (r *quickChatHandlerRepo) ListTaskRepositories(_ context.Context, _ string)
 func newQuickChatHandlerForTest(t *testing.T) (*TaskHandlers, *captureOrchestrator, *quickChatHandlerRepo) {
 	t.Helper()
 	log := newTestLogger(t)
-	repo := &quickChatHandlerRepo{}
+	repo := &quickChatHandlerRepo{mockRepository: mockRepository{
+		executors: map[string]*models.Executor{
+			models.ExecutorIDLocal: {
+				ID:       models.ExecutorIDLocal,
+				Name:     "Local",
+				Type:     models.ExecutorTypeLocal,
+				Status:   models.ExecutorStatusActive,
+				IsSystem: true,
+			},
+			models.ExecutorIDWorktree: {
+				ID:       models.ExecutorIDWorktree,
+				Name:     "Worktree",
+				Type:     models.ExecutorTypeWorktree,
+				Status:   models.ExecutorStatusActive,
+				IsSystem: true,
+			},
+		},
+	}}
 	svc := service.NewService(service.Repos{
 		Workspaces: repo, Tasks: repo, TaskRepos: repo,
 		Workflows: repo, Messages: repo, Turns: repo,
@@ -1443,7 +1462,7 @@ func TestHandleSelectedMoveError(t *testing.T) {
 		},
 		{
 			name:     "move conflict",
-			err:      errors.New("task task-1 cannot be moved: task has an active session (running)"),
+			err:      fmt.Errorf("task task-1 cannot be moved: %w (running)", service.ErrTaskMoveActiveSession),
 			want:     http.StatusConflict,
 			wantCode: moveConflictCodeActiveSession,
 		},
@@ -1511,6 +1530,26 @@ func (m *moveTaskConflictRepo) UpdateTask(ctx context.Context, task *models.Task
 }
 
 func (m *moveTaskConflictRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return m.UpdateTask(ctx, task)
+}
+
+func (m *moveTaskConflictRepo) UpdateTaskIfWorkflowMatchesWithCompletionAdmission(
+	ctx context.Context,
+	task *models.Task,
+	expectedWorkflowID string,
+	_ *completion.Admission,
+) error {
+	if m.task.WorkflowID != expectedWorkflowID {
+		return repoerrors.ErrWorkflowResolutionConflict
+	}
+	return m.UpdateTask(ctx, task)
+}
+
+func (m *moveTaskConflictRepo) UpdateTaskPreservingDeferredLaunchWithCompletionAdmission(
+	ctx context.Context,
+	task *models.Task,
+	_ *completion.Admission,
+) error {
 	return m.UpdateTask(ctx, task)
 }
 

@@ -22,6 +22,8 @@ Needs-you Inbox, and coordinator surfaces that already use that UI.
 The [requirements](../requirements/question-image-previews.md) own observable
 behavior. The [plan](../../../plans/question-image-previews/plan.md) contains
 source evidence, assumptions, work orders, and validation.
+The [repository scope fix plan](../../../plans/question-image-repository-scope/plan.md)
+adds the correction for [issue #5329](https://github.com/kdlbs/kandev/issues/5329).
 
 ## Requirement mapping
 
@@ -77,6 +79,16 @@ Add `images?: QuestionImage[]` to each operator question:
 With it, `path` is relative to the named attached repository/source scope.
 These are executor workspace identities, not backend-host paths or repository URLs.
 
+In a single-repository layout, the session workspace already is the repository
+directory. Omit `repo` and make `path` relative to that directory. A parent
+`.kandev-workspace.json` does not change the image root. In a layout with child
+repositories, use the actual child path in `repo`.
+
+`buildQuestionImageSchema` supplies both question and choice descriptions.
+Its `path` and `repo` guidance must explain these layouts. Describe the guarded
+own-folder alias below as compatibility behavior. Keep omission as the normal
+single-repository example in `docs/public/agent-communication.md`.
+
 `QuestionImage` has exactly `id`, `path`, optional `repo`, and `alt`. Require a
 nonempty description of at most 300 Unicode code points. Require an image ID
 matching `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`. Limit path and repo values to 4096 UTF-8
@@ -91,8 +103,8 @@ Allow literal filenames only. Require a case-insensitive `.png`, `.jpg`, or
 
 An absent or empty image list means no images. Normalize empty lists to omitted
 storage. Reject null, non-array values, malformed entries, and duplicate image
-IDs within one question. Allow at most four images per question and four distinct
-IDs per bundle. A repeated bundle-wide image ID must carry identical path, repo,
+IDs within one question. Allow at most four images per question and 16 distinct
+IDs per bundle (`protocol.MaxBundleImages`). A repeated bundle-wide image ID must carry identical path, repo,
 and alt values. Repeating a reference in two questions associates both questions
 with that image. Do not merge those questions or alter their navigation order.
 
@@ -107,7 +119,7 @@ Choices can carry the optional field defined in the choice image extension below
 The list accepts zero or one item. This reuses strict image decoding and avoids
 a second reference shape. Question-level `images` remains shared visual context.
 Each question has at most four references across its own list and its options.
-The bundle still has at most four distinct image IDs. Identical references may
+The bundle has at most 16 distinct image IDs. Identical references may
 appear in different placements. Duplicate IDs within one list remain invalid.
 Counting placements bounds simultaneous reads even when an ID repeats.
 
@@ -246,6 +258,39 @@ while selecting and opening the authorized root handle. Reads admitted before
 a workspace change finish through that confined handle; later reads use the
 updated policy. File I/O and decoding do not block workspace updates.
 
+### Repository scope selection
+
+`openQuestionImageRoot` selects a scope under `repoTrackersMu` before opening
+the existing confined directory handle. Selection starts with the literal
+child path beneath `questionImageWorkDir`. The own-folder alias applies only
+when all these conditions hold:
+
+- `workDirHasOwnGitEntry(questionImageWorkDir)` identifies a `.git` entry at
+  the pinned image root. This existing convention covers ordinary repositories
+  and worktrees without a Git subprocess or an index-file requirement.
+- `repo` exactly equals `filepath.Base(filepath.Clean(m.cfg.WorkDir))`.
+  The configured name is the name visible to the agent, even through a symlink.
+- `os.Lstat` of the selected child returns `os.ErrNotExist`. Inspect the entry
+  itself, so a dangling symlink does not count as an absent child.
+
+For that case, select the already authorized `questionImageWorkDir`. Then use
+the existing allowlist and root-handle opening path. All other cases retain
+literal child selection and its errors. Never retry at the workspace root
+after a file error, denied scope, permission error, or image decoder error.
+
+Keep this correction in the existing root-selection function. Reuse the own-`.git`
+helper rather than tracker inference or a new resolver. Existing workspace updates
+already maintain the image root. Existing root handles enforce confinement.
+
+Keep saved references unchanged. Question and choice images share this reader.
+A bare workspace containing repositories does not gain an own-folder alias.
+
+File availability remains a read-time outcome under AC-TASKS-QUESTION-IMAGES-002.4.
+Question creation keeps structural validation. No new preflight, route, persistence
+field, or provider branch is necessary.
+
+### Bounded reads
+
 The new reader must enforce all of these conditions:
 
 - Select only the source execution's task root or a currently attached source.
@@ -289,8 +334,11 @@ The active question card mounts one image group. A repeated image stays visible
 for each associated question. The UI does not change option selection or automatic
 single-question completion behavior.
 
-Desktop keeps the current clarification panel and question carousel. Each image
-has a visible description, an uncropped thumbnail bounded to 128px high on desktop
+Desktop keeps the current clarification panel and question carousel. A question's
+thumbnails flow in a wrapping row (`question-images-row`); each caption takes its
+thumbnail's width instead of widening the row. `QuestionImageGallery` collects the
+loaded thumbnails of one question in review order, and the inspector steps
+through them with Previous and Next, arrow keys, and a swipe at Fit. Each image has a visible description, an uncropped thumbnail bounded to 128px high on desktop
 and 96px high below 768px, and an explicit inspection button. Express these bounds
 in rem units so root-font scaling remains available. The image and Inspect label
 form one button. The label does not need a separate control-height row. Keep the
@@ -342,16 +390,17 @@ status region per image group. Use a stable accessible name on Retry and Inspect
 
 ### Drafts across responsive layouts
 
-The task page keeps a bounded, memory-only draft context above its responsive
-layout. Image-bearing active bundles use a key composed of source session, pending
-ID, and form mode. The context restores the text, keyed choices, and current
-question when the desktop/phone layout remounts. It holds at most eight bundles
-and removes locally settled bundles. A task change replaces only the draft cache;
-the provider preserves the mounted task layout and its pending panel-focus state.
-A page reload discards the context.
-It contains no image bytes and does not persist unsent answers. Image-free forms
-and late-answer forms keep their existing local state behavior. The answer hook
-and server claim remain authoritative; restoring a draft never submits it.
+The [clarification reliability design](clarification-response-reliability.md#unsubmitted-drafts-across-navigation)
+owns answer retention for active forms with or without images. Its browser-memory
+cache survives task navigation and responsive remounts. Exact task, source-session,
+pending-bundle, and form-mode identity prevents answer reuse by another form.
+The cache contains no image bytes. Reload and auth changes discard it.
+
+The task page retains a local context for panel sizes across responsive remounts.
+A task change replaces that resize cache without remounting the task layout or
+resetting pending panel-focus state. Historical late-answer forms keep their
+existing admission behavior. The answer hook and server claim remain
+authoritative. Restoring a draft never submits it.
 
 ## Loading and memory
 

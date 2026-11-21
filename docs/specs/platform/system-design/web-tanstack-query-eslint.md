@@ -14,9 +14,11 @@ owners:
 ## Purpose and boundaries
 
 The Platform system owns shared repository quality checks. This design adds
-selected official TanStack Query ESLint rules to the web application's flat
-configuration. It changes contributor feedback only; query runtime behavior,
-cache ownership, and network traffic remain unchanged.
+selected official TanStack Query rules to the web application's required lint
+configuration. The rules run as an Oxlint JS plugin; the ESLint configuration
+remains the compatibility host for the focused adapter test. It changes
+contributor feedback only; query runtime behavior, cache ownership, and network
+traffic remain unchanged.
 
 ## Requirement mapping
 
@@ -26,9 +28,9 @@ cache ownership, and network traffic remain unchanged.
 
 ## Rule selection
 
-The web ESLint configuration registers the official
-@tanstack/eslint-plugin-query package for TypeScript and TSX files. It enables
-four rules from the [official plugin guide](https://github.com/TanStack/query/blob/main/docs/eslint/eslint-plugin-query.md):
+The web Oxlint configuration registers the official
+`@tanstack/eslint-plugin-query` package as a JS plugin for TypeScript and TSX
+files. It enables four rules from the [official plugin guide](https://github.com/TanStack/query/blob/main/docs/eslint/eslint-plugin-query.md):
 
 | Rule                  | Severity | Contract                                                                                                                                                                                   |
 | --------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -42,18 +44,20 @@ resolves through the shared pnpm lockfile. The complete recommended preset is
 not enabled; the configuration lists only rules selected for the current code.
 
 The no-void-query-fn rule remains disabled. It requires TypeScript parser
-services and a program, which the current ESLint configuration does not
-provide. Enable it only after that type-aware configuration is introduced and
+services and a program, which neither the required lint host nor the retained
+ESLint adapter configuration provides. Enable it only after that type-aware configuration is introduced and
 verified.
 
 ## Verification
 
 The focused test at
-apps/web/scripts/lib/tanstack-query-eslint-config.test.ts runs ESLint against
-the repository configuration. It checks each selected rule with an invalid
-fixture, checks that valid stable patterns pass, and verifies that the existing
-SystemInfo query hook and provider remain free of plugin diagnostics.
+`apps/web/scripts/lib/tanstack-query-eslint-config.test.ts` runs ESLint against
+the retained adapter configuration. It checks each selected rule with an
+invalid fixture, checks that valid stable patterns pass, and verifies that the
+existing SystemInfo query hook and provider remain free of plugin diagnostics.
+`apps/web/scripts/lib/native-lint-wiring.test.ts` proves the same four rules
+through the required Oxlint CLI.
 
-The full web lint command runs ESLint with a zero-warning budget. Therefore the
-warning-level no-rest-destructuring rule also fails that command when it finds
-a violation.
+The full web lint command runs the native configuration with a zero-warning
+budget. Therefore the warning-level no-rest-destructuring rule also fails that
+command when it finds a violation.

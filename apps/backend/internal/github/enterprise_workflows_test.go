@@ -158,7 +158,7 @@ func TestEnterpriseHostComparisonIdentity(t *testing.T) {
 }
 func TestEnterpriseHostAccessibleRepositoryIdentity(t *testing.T) {
 	svc := personalBoundaryTestService(t, map[string]GitHubRepo{"acme/allowed": testGitHubRepo("acme", "allowed")}, map[string]GitHubRepo{"acme/allowed": testGitHubRepo("acme", "allowed")})
-	repos, err := svc.ListAccessibleReposForWorkspace(context.Background(), "workspace-1", "user-1", "", 10)
+	repos, err := svc.ListAccessibleReposForWorkspace(context.Background(), "workspace-1", "user-1", "", 10, false)
 	if err != nil {
 		t.Fatal(err)
 	}

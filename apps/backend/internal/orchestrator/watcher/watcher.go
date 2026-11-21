@@ -66,14 +66,18 @@ type AgentEventData struct {
 	AttemptID                 string                                `json:"attempt_id,omitempty"`
 	ErrorStamp                string                                `json:"error_stamp,omitempty"`
 	Causes                    []models.AgentErrorCause              `json:"causes,omitempty"`
-	ProviderError             *streams.ProviderError                `json:"provider_error,omitempty"`
-	PromptFailureDisposition  streams.PromptFailureDisposition      `json:"prompt_failure_disposition,omitempty"`
-	SessionSettingsPolicy     streams.SessionSettingsPolicy         `json:"session_settings_policy,omitempty"`
-	PromptGeneration          uint64                                `json:"prompt_generation,omitempty"`
-	RecoveredAvailabilityOnly bool                                  `json:"recovered_availability_only,omitempty"`
-	RunID                     string                                `json:"run_id,omitempty"`
-	CausingRunID              string                                `json:"causing_run_id,omitempty"`
-	TerminalCausingRunID      string                                `json:"terminal_causing_run_id,omitempty"`
+	// SessionAuthMethods is the validated, connection-scoped snapshot returned
+	// with a failed startup operation. It is projected into recovery metadata,
+	// not serialized as an agent event or stored on the durable error record.
+	SessionAuthMethods        []streams.AuthMethodInfo         `json:"-"`
+	ProviderError             *streams.ProviderError           `json:"provider_error,omitempty"`
+	PromptFailureDisposition  streams.PromptFailureDisposition `json:"prompt_failure_disposition,omitempty"`
+	SessionSettingsPolicy     streams.SessionSettingsPolicy    `json:"session_settings_policy,omitempty"`
+	PromptGeneration          uint64                           `json:"prompt_generation,omitempty"`
+	RecoveredAvailabilityOnly bool                             `json:"recovered_availability_only,omitempty"`
+	RunID                     string                           `json:"run_id,omitempty"`
+	CausingRunID              string                           `json:"causing_run_id,omitempty"`
+	TerminalCausingRunID      string                           `json:"terminal_causing_run_id,omitempty"`
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.
@@ -157,14 +161,16 @@ type TaskMovedEventData struct {
 
 // ContextWindowData contains data from context window events
 type ContextWindowData struct {
-	TaskID                 string  `json:"task_id"`
-	TaskSessionID          string  `json:"session_id"`
-	AgentID                string  `json:"agent_id"`
-	ContextWindowSize      int64   `json:"context_window_size"`
-	ContextWindowUsed      int64   `json:"context_window_used"`
-	ContextWindowRemaining int64   `json:"context_window_remaining"`
-	ContextEfficiency      float64 `json:"context_efficiency"`
-	Timestamp              string  `json:"timestamp"`
+	TaskID                      string  `json:"task_id"`
+	TaskSessionID               string  `json:"session_id"`
+	AgentID                     string  `json:"agent_id"`
+	ContextWindowSize           int64   `json:"context_window_size"`
+	ContextWindowUsed           int64   `json:"context_window_used"`
+	ContextWindowRemaining      int64   `json:"context_window_remaining"`
+	ContextEfficiency           float64 `json:"context_efficiency"`
+	CompactionInferenceDisabled bool    `json:"compaction_inference_disabled,omitempty"`
+	CopilotNativeSessionEvents  bool    `json:"copilot_native_session_events,omitempty"`
+	Timestamp                   string  `json:"timestamp"`
 }
 
 // EventHandlers contains callbacks for different event types

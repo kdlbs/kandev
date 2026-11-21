@@ -74,7 +74,7 @@ func TestMaterializePassthroughFileOverwritesKandevOwnedTempFile(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	require.NoError(t, os.WriteFile(path, []byte(`{"stale":true}`), 0o600))
 
-	owned, err := mgr.materializePassthroughFile(context.Background(), &AgentExecution{ID: "exec-1"}, mcpconfig.PassthroughConfigFile{
+	owned, _, err := mgr.materializePassthroughFile(context.Background(), &AgentExecution{ID: "exec-1"}, mcpconfig.PassthroughConfigFile{
 		Path:    path,
 		Content: []byte(`{"mcpServers":{"kandev":{}}}`),
 	})
@@ -102,7 +102,7 @@ func TestMaterializePassthroughFileSkipsPathEscapingWorkspace(t *testing.T) {
 	require.NoError(t, os.Symlink(outside, filepath.Join(workspace, ".cursor")))
 
 	target := filepath.Join(workspace, ".cursor", "mcp.json")
-	owned, err := mgr.materializePassthroughFile(
+	owned, _, err := mgr.materializePassthroughFile(
 		context.Background(),
 		&AgentExecution{ID: "exec-1", WorkspacePath: workspace},
 		mcpconfig.PassthroughConfigFile{Path: target, Content: []byte(`{"mcpServers":{}}`), MergeKey: "mcpServers"},
@@ -123,7 +123,7 @@ func TestMaterializePassthroughFileSurfacesUnreadableParent(t *testing.T) {
 	blocker := filepath.Join(dir, "blocker")
 	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
 
-	_, err := mgr.materializePassthroughFile(context.Background(), &AgentExecution{ID: "exec-1"}, mcpconfig.PassthroughConfigFile{
+	_, _, err := mgr.materializePassthroughFile(context.Background(), &AgentExecution{ID: "exec-1"}, mcpconfig.PassthroughConfigFile{
 		Path:    filepath.Join(blocker, "config.json"),
 		Content: []byte(`{}`),
 	})
@@ -135,9 +135,10 @@ func TestWritePassthroughMCPFilesSkipsEmptyPaths(t *testing.T) {
 	mgr := newTestManager(t)
 	execution := &AgentExecution{ID: "exec-1"}
 
-	require.NoError(t, mgr.writePassthroughMCPFiles(context.Background(), execution, []mcpconfig.PassthroughConfigFile{
+	_, err := mgr.writePassthroughMCPFiles(context.Background(), execution, []mcpconfig.PassthroughConfigFile{
 		{Path: "", Content: []byte(`{}`)},
-	}))
+	})
+	require.NoError(t, err)
 
 	require.Empty(t, getPassthroughMCPFiles(execution),
 		"a strategy entry with no path is skipped and never tracked")
@@ -167,6 +168,8 @@ func TestPiProjectMCPNewExecutionSurvivesPreviousCleanup(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41007,
 	}
+	attachLegacyMCPRouteClient(oldExecution)
+	attachLegacyMCPRouteClient(newExecution)
 
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), oldExecution, agentConfig, nil, ""))
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), newExecution, agentConfig, nil, ""))
@@ -213,6 +216,7 @@ func TestPiProjectMCPUserFileSurvivesTeardown(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41007,
 	}
+	attachLegacyMCPRouteClient(execution)
 
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig, nil, ""))
 	mgr.cleanupPassthroughMCPConfig(execution)
@@ -262,10 +266,10 @@ func TestPiProjectMCPClaimsShareSymlinkedWorkspaceIdentity(t *testing.T) {
 		Content: []byte(`{"mcpServers":{"kandev":{"url":"http://localhost:41007/mcp"}}}`),
 	}
 
-	owned, err := manager.materializePassthroughFile(context.Background(), previous, previousFile)
+	owned, _, err := manager.materializePassthroughFile(context.Background(), previous, previousFile)
 	require.NoError(t, err)
 	require.True(t, owned)
-	owned, err = manager.materializePassthroughFile(context.Background(), current, currentFile)
+	owned, _, err = manager.materializePassthroughFile(context.Background(), current, currentFile)
 	require.NoError(t, err)
 	require.True(t, owned, "a symlink alias must inherit the known generated file claim")
 
@@ -285,7 +289,7 @@ func TestMaterializePassthroughFileExistingMergeKeyDoesNotOwnUserFile(t *testing
 	require.NoError(t, os.WriteFile(path, []byte(`{"mcpServers":{"user-server":{"command":"user-tool"}}}`), 0o600))
 	execution := &AgentExecution{ID: "user-file-execution", metadata: map[string]interface{}{}}
 
-	owned, err := mgr.materializePassthroughFile(context.Background(), execution, mcpconfig.PassthroughConfigFile{
+	owned, _, err := mgr.materializePassthroughFile(context.Background(), execution, mcpconfig.PassthroughConfigFile{
 		Path:     path,
 		Content:  []byte(`{"mcpServers":{"kandev":{"url":"http://localhost:41007/mcp"}}}`),
 		MergeKey: "mcpServers",
@@ -309,6 +313,7 @@ func TestPiProjectMCPUserEditDisablesOwnedCleanup(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41007,
 	}
+	attachLegacyMCPRouteClient(execution)
 
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), execution, agentConfig, nil, ""))
 	require.NoError(t, os.WriteFile(path, []byte(`{"settings":{"owner":"user"}}`), 0o600))
@@ -338,6 +343,8 @@ func TestPiProjectMCPMaterializeAndCleanupAreSerialized(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41007,
 	}
+	attachLegacyMCPRouteClient(oldExecution)
+	attachLegacyMCPRouteClient(newExecution)
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), oldExecution, agentConfig, nil, ""))
 
 	start := make(chan struct{})
@@ -381,6 +388,7 @@ func TestPiProjectMCPRecoveredOwnershipProtectsSuccessor(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41006,
 	}
+	attachLegacyMCPRouteClient(firstExecution)
 	require.NoError(t, firstManager.materializeRuntimeProjectMCP(context.Background(), firstExecution, firstAgent, nil, ""))
 
 	// Reconstruct the old execution from the persisted metadata that survives
@@ -407,6 +415,7 @@ func TestPiProjectMCPRecoveredOwnershipProtectsSuccessor(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41007,
 	}
+	attachLegacyMCPRouteClient(newExecution)
 	require.NoError(t, secondManager.materializeRuntimeProjectMCP(context.Background(), newExecution, secondAgent, nil, ""))
 
 	secondManager.cleanupPassthroughMCPConfig(recovered)
@@ -436,6 +445,8 @@ func TestPiProjectMCPSuccessorCleanupCanFinishBeforePredecessor(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 41007,
 	}
+	attachLegacyMCPRouteClient(oldExecution)
+	attachLegacyMCPRouteClient(newExecution)
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), oldExecution, agentConfig, nil, ""))
 	require.NoError(t, mgr.materializeRuntimeProjectMCP(context.Background(), newExecution, agentConfig, nil, ""))
 
@@ -484,11 +495,12 @@ func TestMergePassthroughConfigLeavesUnreadableFileUntouched(t *testing.T) {
 	// must degrade to a warning rather than clobbering anything.
 	dir := t.TempDir()
 
-	require.NoError(t, mgr.mergePassthroughConfig(mcpconfig.PassthroughConfigFile{
+	_, err := mgr.mergePassthroughConfig(mcpconfig.PassthroughConfigFile{
 		Path:     dir,
 		Content:  []byte(`{"mcpServers":{"kandev":{}}}`),
 		MergeKey: "mcpServers",
-	}))
+	})
+	require.NoError(t, err)
 }
 
 func TestMergePassthroughConfigLeavesMalformedFileUntouched(t *testing.T) {
@@ -496,11 +508,13 @@ func TestMergePassthroughConfigLeavesMalformedFileUntouched(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp.json")
 	require.NoError(t, os.WriteFile(path, []byte("not json at all"), 0o600))
 
-	require.NoError(t, mgr.mergePassthroughConfig(mcpconfig.PassthroughConfigFile{
+	wrote, err := mgr.mergePassthroughConfig(mcpconfig.PassthroughConfigFile{
 		Path:     path,
 		Content:  []byte(`{"mcpServers":{"kandev":{}}}`),
 		MergeKey: "mcpServers",
-	}), "a malformed user config is a warning, not a launch failure")
+	})
+	require.NoError(t, err, "a malformed user config is a warning, not a launch failure")
+	require.False(t, wrote, "an unparseable file was not written")
 
 	content, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -514,11 +528,13 @@ func TestMergePassthroughConfigPreservesUserEntries(t *testing.T) {
 	require.NoError(t, os.WriteFile(path,
 		[]byte(`{"otherKey":"keep me","mcpServers":{"user-server":{"url":"http://user"}}}`), 0o600))
 
-	require.NoError(t, mgr.mergePassthroughConfig(mcpconfig.PassthroughConfigFile{
+	wrote, err := mgr.mergePassthroughConfig(mcpconfig.PassthroughConfigFile{
 		Path:     path,
 		Content:  []byte(`{"mcpServers":{"kandev":{"url":"http://localhost:1/mcp"}}}`),
 		MergeKey: "mcpServers",
-	}))
+	})
+	require.NoError(t, err)
+	require.True(t, wrote)
 
 	content, err := os.ReadFile(path)
 	require.NoError(t, err)

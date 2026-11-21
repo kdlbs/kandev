@@ -101,7 +101,7 @@ func TestSilentRestoreDeliveryCancellationKeepsSuccessorUnreceived(t *testing.T)
 	ctx, cancel := context.WithCancel(t.Context())
 	result := make(chan error, 1)
 	go func() {
-		_, err := deliveryHarnessGeneration(ctx, e, repo, e.SessionID, e.DeliveryIncarnationID)
+		_, err := deliveryHarnessGeneration(ctx, e, nil, repo, e.SessionID, e.DeliveryIncarnationID)
 		result <- err
 	}()
 	<-repo.firstRead

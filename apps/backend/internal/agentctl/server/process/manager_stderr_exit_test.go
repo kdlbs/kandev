@@ -380,5 +380,7 @@ func TestReadStderrPreservesSafeManagedNpmResolutionLines(t *testing.T) {
 	require.Equal(t, []string{
 		"npm error code ETARGET",
 		"npm error notarget No matching version found for opencode-ai@1.18.18",
+		"npm error path <redacted>",
 	}, m.GetRecentStderr())
+	require.NotContains(t, strings.Join(m.GetRecentStderr(), "\n"), "/tmp/private-path")
 }

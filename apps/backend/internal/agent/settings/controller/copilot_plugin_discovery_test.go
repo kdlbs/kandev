@@ -8,22 +8,49 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+const copilotPluginTestRuntimeVersion = "1.0.104"
+
+type supportedCopilotSelection struct{}
+
+func (supportedCopilotSelection) Get(context.Context, string, string) (managedruntime.Selection, bool, error) {
+	return managedruntime.Selection{Package: "@github/copilot", Version: copilotPluginTestRuntimeVersion}, true, nil
+}
+
+func (supportedCopilotSelection) Save(context.Context, string, string, string) error { return nil }
+
+func (supportedCopilotSelection) Delete(context.Context, string, string) error { return nil }
+
 type recordingCopilotRunner struct {
-	stdout []byte
-	calls  [][]string
-	envs   []map[string]string
+	stdout    []byte
+	calls     [][]string
+	helpCalls [][]string
+	envs      []map[string]string
 }
 
 func (r *recordingCopilotRunner) Run(_ context.Context, argv []string, env map[string]string, _ string) (copilotplugins.CommandResult, error) {
+	if isCopilotPluginHelpCommand(argv) {
+		r.helpCalls = append(r.helpCalls, append([]string{}, argv...))
+		return copilotplugins.CommandResult{Stdout: []byte("Options:\n  --plugin-dir <path>  Load plugin directories\n")}, nil
+	}
 	r.calls = append(r.calls, append([]string{}, argv...))
 	r.envs = append(r.envs, env)
 	return copilotplugins.CommandResult{Stdout: r.stdout}, nil
+}
+
+func isCopilotPluginHelpCommand(argv []string) bool {
+	for _, arg := range argv {
+		if arg == "--help" {
+			return true
+		}
+	}
+	return false
 }
 
 func newCopilotDiscoveryController(t *testing.T) (*Controller, *fakeStore, string) {
@@ -46,6 +73,7 @@ func newCopilotDiscoveryController(t *testing.T) (*Controller, *fakeStore, strin
 		t.Fatal(err)
 	}
 	ctrl := NewController(st, nil, reg, nil, log)
+	ctrl.SetManagedRuntimeSelectionStore(supportedCopilotSelection{})
 	return ctrl, st, profile.ID
 }
 
@@ -105,11 +133,39 @@ func TestCopilotPluginDiscoveryMountPermission(t *testing.T) {
 	if got.Status != "ready" || !got.MountPermitted {
 		t.Fatalf("supported inventory must permit native mounts: %#v", got)
 	}
-	if got.RuntimeVersion != "1.0.88" || !copilotplugins.RuntimeSupported(got.RuntimeVersion) {
-		t.Fatalf("discovery runtime = %q, want the supported default", got.RuntimeVersion)
+	if got.RuntimeVersion != copilotPluginTestRuntimeVersion {
+		t.Fatalf("discovery runtime = %q, want the explicitly selected runtime", got.RuntimeVersion)
 	}
-	if len(runner.calls) != 1 {
-		t.Fatalf("discovery ran %d inventory commands, want one", len(runner.calls))
+	if len(runner.calls) != 1 || len(runner.helpCalls) != 1 {
+		t.Fatalf("discovery ran %d inventory and %d help commands, want one each", len(runner.calls), len(runner.helpCalls))
+	}
+}
+
+func TestCopilotPluginDiscoveryUsesObservedCapabilityForUnknownRuntime(t *testing.T) {
+	ctrl, _, profileID := newCopilotDiscoveryController(t)
+	runner := &recordingCopilotRunner{stdout: []byte(`[]`)}
+	ctrl.copilotPluginRunnerImpl = runner
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values[agents.CopilotACPAgentID+"\x00@github/copilot"] = managedruntime.Selection{
+		Package: "@github/copilot",
+		Version: "9.9.9",
+	}
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+
+	got, err := ctrl.DiscoverCopilotPlugins(context.Background(), "agent-row-1", dto.CopilotPluginDiscoveryRequest{
+		ProfileID: profileID, AuthorizationScope: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("DiscoverCopilotPlugins: %v", err)
+	}
+	if got.Status != "ready" || got.Reason != "" {
+		t.Fatalf("response = %#v", got)
+	}
+	if got.RuntimeVersion != "9.9.9" || !got.MountPermitted {
+		t.Fatalf("runtime = %q mount permitted = %t", got.RuntimeVersion, got.MountPermitted)
+	}
+	if len(runner.calls) != 1 || len(runner.helpCalls) != 1 {
+		t.Fatalf("unknown runtime ran %d inventory and %d help commands, want one each", len(runner.calls), len(runner.helpCalls))
 	}
 }
 

@@ -114,7 +114,7 @@ func TestPreparedSessionRecoveryBindsSelectedEnvironmentBeforeAdmission(t *testi
 
 	_, err := exec.prepareSessionAttempt(context.Background(), &v1.Task{
 		ID: taskID, WorkspaceID: "workspace-recovery", Title: "Prepared recovery binding",
-	}, "profile-recovery", models.ExecutorIDWorktree, "", "", true, "", nil)
+	}, "profile-recovery", models.ExecutorIDWorktree, "", "", true, "", nil, nil)
 	if err != nil {
 		t.Fatalf("prepareSessionAttempt: %v", err)
 	}

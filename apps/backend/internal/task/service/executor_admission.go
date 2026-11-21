@@ -10,7 +10,10 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
-const legacyLocalExecutorID = "local_pc"
+const (
+	legacyLocalExecutorID        = "local_pc"
+	legacyLocalRuntimeExecutorID = "local"
+)
 
 type executorUseAdmitter interface {
 	AdmitExecutorUse(ctx context.Context, executorID, profileID, parentOwner, profileOwner, sessionID, actorID string) error
@@ -208,10 +211,10 @@ func (s *Service) executorAdmissionProfile(ctx context.Context, executorID, prof
 	return executorID, profileOwner, nil
 }
 
-// Legacy Office selections name a runtime kind, while ownership belongs to
+// Legacy selections can name a runtime kind, while ownership belongs to
 // the built-in row. A real row with that ID remains authoritative.
 func (s *Service) executorAdmissionID(ctx context.Context, id string) (string, error) {
-	if id != legacyLocalExecutorID {
+	if id != legacyLocalExecutorID && id != legacyLocalRuntimeExecutorID {
 		return id, nil
 	}
 	_, readErr := s.executors.GetExecutor(ctx, id)

@@ -54,7 +54,7 @@ import type {
   PassthroughConfig,
 } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
-import type { UtilityAgentReference } from "@/lib/types/agent-profile-errors";
+import type { ProfileConflictReferences } from "@/components/settings/agent-profile-page-state";
 import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
@@ -71,7 +71,7 @@ export {
 export { preserveNewerProfileDraft } from "@/components/settings/agent-profile-page-state";
 
 function toProfileFormData(
-  profile: AgentProfile,
+  profile: AgentProfile & { devinSandboxInherited?: boolean },
   permissionSettings: Record<string, PermissionSetting>,
 ): ProfileFormData {
   const pv = profilePermissionValues(profile, permissionSettings);
@@ -93,6 +93,7 @@ function toProfileFormData(
     copilot_selected_plugins: profile.copilotSelectedPlugins ?? [],
     cli_flags: profile.cliFlags ?? [],
     env_vars: profile.envVars ?? [],
+    devin_sandbox_inherited: profile.devinSandboxInherited,
     command_prefix: profile.commandPrefix ?? "",
     provider_kind: profile.providerKind ?? "",
   };
@@ -360,7 +361,10 @@ function ProfileEditor({
     acceptProfileSaveResponse,
     discardProfileDraft,
   } = useProfileEditorState(profile, permissionSettings);
-  const [utilityConflict, setUtilityConflict] = useState<UtilityAgentReference[]>([]);
+  const [profileConflict, setProfileConflict] = useState<ProfileConflictReferences>({
+    utilityAgents: [],
+    dynamicProfiles: [],
+  });
   const updateDraft = useCallback(
     (patch: Partial<AgentProfile>) => {
       setDraft((current) => {
@@ -383,7 +387,7 @@ function ProfileEditor({
     markProfileSubmitted,
     acceptProfileSaveResponse,
     toast,
-    onUtilityConflict: setUtilityConflict,
+    onProfileConflict: setProfileConflict,
   });
   const providerInvalidKey = providerConfigInvalidReasonKey({
     providerKind: draft.providerKind,
@@ -494,10 +498,11 @@ function ProfileEditor({
         onConfirm={deleteState.handleDeleteProfile}
       />
       <AgentProfileDisableConflictDialog
-        agents={utilityConflict}
-        onCancel={() => setUtilityConflict([])}
+        agents={profileConflict.utilityAgents}
+        dynamicProfiles={profileConflict.dynamicProfiles}
+        onCancel={() => setProfileConflict({ utilityAgents: [], dynamicProfiles: [] })}
         onConfirm={async () => {
-          setUtilityConflict([]);
+          setProfileConflict({ utilityAgents: [], dynamicProfiles: [] });
           await handleSave(true);
         }}
       />

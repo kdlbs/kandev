@@ -1,121 +1,34 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCheck, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
+import { defaultFilter } from "cmdk";
 
 import { cn } from "@/lib/utils";
 import * as selectorOptions from "@/lib/utils/selector-options";
-import type { ModelSelectorOption, SelectConfigOption } from "@/components/model-config-selector";
-import { Button } from "@kandev/ui/button";
+import type {
+  ModelCatalogNavigation,
+  ModelSelectorOption,
+  SelectConfigOption,
+} from "@/components/model-config-selector";
+import { buildCatalogTree } from "@/lib/model-catalog-selection";
+import type { ModelCatalog } from "@kandev/types/model-catalog";
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@kandev/ui/command";
+  CompositionDimensionChoices,
+  CompositionDimensionList,
+} from "@/components/model-catalog-composition";
+import { CatalogCommandGroups } from "@/components/model-catalog-groups";
+import { CustomModelRow, ModelRow } from "@/components/model-config-selector-rows";
+import { Button } from "@kandev/ui/button";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandList } from "@kandev/ui/command";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import { Separator } from "@kandev/ui/separator";
 import { Spinner } from "@kandev/ui/spinner";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
 function currentOptionName(option: SelectConfigOption): string {
   return (
     option.options.find((item) => item.value === option.currentValue)?.name ?? option.currentValue
-  );
-}
-
-function ModelRow({
-  model,
-  selected,
-  loading,
-  onSelect,
-}: {
-  model: ModelSelectorOption;
-  selected: boolean;
-  loading: boolean;
-  onSelect: (value: string) => void;
-}) {
-  const { t } = useTranslation();
-  const item = (
-    <CommandItem
-      value={model.id}
-      keywords={[model.name, model.description ?? "", model.id]}
-      onSelect={() => !model.disabled && onSelect(model.id)}
-      disabled={model.disabled}
-      aria-label={model.name}
-      data-testid={selected ? "model-config-selected-row" : undefined}
-      className={selectorOptions.selectorOptionClassName(selected, model.disabled)}
-    >
-      <div className="flex min-w-0 flex-1 items-center">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate">{model.name}</span>
-            {(model.source === "cli" || model.source === "acp") && (
-              <span className="shrink-0 text-xs text-muted-foreground">
-                {t(model.source === "cli" ? "agents:modelSourceCli" : "agents:modelSourceAcp")}
-              </span>
-            )}
-          </div>
-          {model.description && (
-            <div className="truncate text-xs text-muted-foreground" title={model.description}>
-              {model.description}
-            </div>
-          )}
-        </div>
-        {model.usageMultiplier && (
-          <span className="shrink-0 text-xs text-muted-foreground">{model.usageMultiplier}</span>
-        )}
-      </div>
-      {selected && loading ? (
-        <Spinner aria-hidden="true" className="absolute right-2" />
-      ) : (
-        <IconCheck
-          className={cn("absolute right-2 h-4 w-4", selected ? "opacity-100" : "opacity-0")}
-        />
-      )}
-    </CommandItem>
-  );
-  // cmdk's CommandItem swallows pointer events with no native tooltip slot;
-  // keep disabled items in a focusable wrapper so their unavailable reason is reachable.
-  if (model.disabled && model.disabledReason) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div
-            tabIndex={0}
-            aria-label={`${model.name}: ${model.disabledReason}`}
-            className="rounded outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
-          >
-            {item}
-          </div>
-        </TooltipTrigger>
-        <TooltipContent side="right">{model.disabledReason}</TooltipContent>
-      </Tooltip>
-    );
-  }
-  return item;
-}
-
-/**
- * The last row of the model list while `allowCustomModel` is set and the
- * typed filter text has no exact match: selects the typed text verbatim.
- */
-function CustomModelRow({ value, onSelect }: { value: string; onSelect: (value: string) => void }) {
-  const { t } = useTranslation();
-  return (
-    <CommandItem
-      value={value}
-      data-testid="model-config-custom-row"
-      onSelect={() => onSelect(value)}
-      className={selectorOptions.selectorOptionClassName(false, false)}
-    >
-      <div className="min-w-0 flex-1 truncate">
-        {t("agents:useCustomModelId", { model: value })}
-      </div>
-    </CommandItem>
   );
 }
 
@@ -252,7 +165,22 @@ export type ModelConfigSelectorContentProps = {
   /** Shows the filter input regardless of model count and offers a
    *  "use this as a model ID" row for text with no exact match. */
   allowCustomModel?: boolean;
+  /** Optional provider catalog; its absence keeps the flat list unchanged. */
+  catalog?: ModelCatalog;
+  /** Navigation and draft state owned by the selector so viewport changes keep it. */
+  catalogNavigation?: ModelCatalogNavigation;
+  /** Uses the host sheet's single scroll region instead of internal scrollers. */
+  embedded?: boolean;
 };
+
+/**
+ * cmdk also scores an item's `value`, which catalog rows use as an opaque
+ * occurrence identity. Score only the declared keywords so prefixes such as
+ * `row:`/`composition:` and the counted suffix never match unrelated models.
+ */
+function catalogCommandFilter(value: string, search: string, keywords?: string[]): number {
+  return defaultFilter(keywords && keywords.length > 0 ? keywords.join(" ") : value, search, []);
+}
 
 /** Adds provider branding while preserving the model group label. */
 function ModelFilterInput({
@@ -301,6 +229,148 @@ function ModelGroupHeading({ providerIcon }: { providerIcon?: ReactNode }) {
   );
 }
 
+function renderActiveSubView({
+  activeConfig,
+  catalogNavigation,
+  onConfigBack,
+  onConfigChange,
+}: {
+  activeConfig: SelectConfigOption | undefined;
+  catalogNavigation: ModelCatalogNavigation | undefined;
+  onConfigBack: () => void;
+  onConfigChange?: (configId: string, value: string) => void;
+}) {
+  if (activeConfig) {
+    return (
+      <ConfigOptionSubSelector
+        option={activeConfig}
+        onBack={onConfigBack}
+        onChange={onConfigChange}
+      />
+    );
+  }
+  const activeComposition = catalogNavigation?.activeComposition;
+  if (activeComposition && catalogNavigation?.activeDimensionId) {
+    return (
+      <CompositionDimensionChoices
+        composition={activeComposition}
+        dimensionId={catalogNavigation.activeDimensionId}
+        draft={catalogNavigation.draft}
+        onChange={(value) =>
+          catalogNavigation.setDimension(catalogNavigation.activeDimensionId ?? "", value)
+        }
+        onBack={catalogNavigation.closeDimension}
+      />
+    );
+  }
+  if (activeComposition && catalogNavigation) {
+    return (
+      <CompositionDimensionList
+        composition={activeComposition}
+        draft={catalogNavigation.draft}
+        onSelectDimension={catalogNavigation.openDimension}
+        onBack={catalogNavigation.closeComposition}
+        onApply={catalogNavigation.apply}
+        applyEnabled={catalogNavigation.applyEnabled}
+        candidateOptions={catalogNavigation.candidateOptions}
+        candidateOptionValues={catalogNavigation.candidateOptionValues}
+        onCandidateOptionChange={catalogNavigation.setCandidateOption}
+        onRetryCandidateOptions={catalogNavigation.retryCandidateOptions}
+      />
+    );
+  }
+  return null;
+}
+
+type ModelListBodyProps = {
+  providerIcon?: ReactNode;
+  catalog?: ModelCatalog;
+  catalogNavigation?: ModelCatalogNavigation;
+  catalogTree: ReturnType<typeof buildCatalogTree> | undefined;
+  orderedModelOptions: ModelSelectorOption[];
+  currentModelValue: string;
+  configOptionsLoading: boolean;
+  embedded: boolean;
+  allowCustomModel: boolean;
+  showCustomRow: boolean;
+  trimmedFilter: string;
+  filterText: string;
+  onFilterChange: (value: string) => void;
+  onModelSelect: (value: string) => void;
+};
+
+function ModelListBody({
+  providerIcon,
+  catalog,
+  catalogNavigation,
+  catalogTree,
+  orderedModelOptions,
+  currentModelValue,
+  configOptionsLoading,
+  embedded,
+  allowCustomModel,
+  showCustomRow,
+  trimmedFilter,
+  filterText,
+  onFilterChange,
+  onModelSelect,
+}: ModelListBodyProps) {
+  const { t } = useTranslation();
+  return (
+    <Command filter={catalogCommandFilter}>
+      {(allowCustomModel || orderedModelOptions.length > 5 || catalogTree) && (
+        <ModelFilterInput value={filterText} onValueChange={onFilterChange} />
+      )}
+      <CommandList className={cn(catalogTree && "max-h-none", !embedded && "max-h-60")}>
+        <CommandEmpty>{t("agents:noModelsFound")}</CommandEmpty>
+        {catalogTree && catalogNavigation ? (
+          <>
+            <CatalogCommandGroups
+              tree={catalogTree}
+              heading={<ModelGroupHeading providerIcon={providerIcon} />}
+              compositions={catalog?.compositions}
+              currentModel={currentModelValue}
+              loading={configOptionsLoading}
+              onSelectModel={onModelSelect}
+              onOpenComposition={(group) => catalogNavigation.openComposition(group)}
+            />
+            {showCustomRow && (
+              <CommandGroup>
+                <CustomModelRow value={trimmedFilter} onSelect={onModelSelect} />
+              </CommandGroup>
+            )}
+            {orderedModelOptions
+              .filter((model) => model.disabled && model.id === currentModelValue)
+              .map((model) => (
+                <CommandGroup key={model.id}>
+                  <ModelRow
+                    model={model}
+                    selected
+                    loading={configOptionsLoading}
+                    onSelect={onModelSelect}
+                  />
+                </CommandGroup>
+              ))}
+          </>
+        ) : (
+          <CommandGroup heading={<ModelGroupHeading providerIcon={providerIcon} />}>
+            {orderedModelOptions.map((model) => (
+              <ModelRow
+                key={model.id}
+                model={model}
+                selected={model.id === currentModelValue}
+                loading={configOptionsLoading}
+                onSelect={onModelSelect}
+              />
+            ))}
+            {showCustomRow && <CustomModelRow value={trimmedFilter} onSelect={onModelSelect} />}
+          </CommandGroup>
+        )}
+      </CommandList>
+    </Command>
+  );
+}
+
 export function ModelConfigSelectorContent({
   providerIcon,
   activeConfig,
@@ -313,8 +383,14 @@ export function ModelConfigSelectorContent({
   onConfigChange,
   configOptionsLoading,
   allowCustomModel = false,
+  catalog,
+  catalogNavigation,
+  embedded = false,
 }: ModelConfigSelectorContentProps) {
-  const { t } = useTranslation();
+  const catalogTree = useMemo(
+    () => (catalog ? buildCatalogTree(catalog.nodes) : undefined),
+    [catalog],
+  );
   const pendingFocusConfigId = useRef<string | null>(null);
   const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const orderedModelOptions = selectorOptions.prioritizeIdOption(modelOptions, currentModelValue);
@@ -322,7 +398,6 @@ export function ModelConfigSelectorContent({
     orderedModelOptions,
     allowCustomModel,
   );
-  const showModelFilter = modelOptions.length > 5 || allowCustomModel;
 
   useEffect(() => {
     if (activeConfig) return;
@@ -339,43 +414,39 @@ export function ModelConfigSelectorContent({
     onConfigBack();
   };
 
-  if (activeConfig) {
-    return (
-      <ConfigOptionSubSelector
-        option={activeConfig}
-        onBack={returnToConfigTrigger}
-        onChange={onConfigChange}
-      />
-    );
-  }
+  const activeView = renderActiveSubView({
+    activeConfig,
+    catalogNavigation,
+    onConfigBack: returnToConfigTrigger,
+    onConfigChange,
+  });
+  if (activeView) return activeView;
 
   return (
     <>
-      <Command>
-        {showModelFilter && <ModelFilterInput value={filterText} onValueChange={setFilterText} />}
-        <CommandList className="max-h-60">
-          <CommandEmpty>{t("agents:noModelsFound")}</CommandEmpty>
-          <CommandGroup heading={<ModelGroupHeading providerIcon={providerIcon} />}>
-            {orderedModelOptions.map((model) => (
-              <ModelRow
-                key={model.id}
-                model={model}
-                selected={model.id === currentModelValue}
-                loading={configOptionsLoading}
-                onSelect={onModelSelect}
-              />
-            ))}
-            {showCustomRow && <CustomModelRow value={trimmedFilter} onSelect={onModelSelect} />}
-          </CommandGroup>
-        </CommandList>
-      </Command>
+      <ModelListBody
+        providerIcon={providerIcon}
+        catalog={catalog}
+        catalogNavigation={catalogNavigation}
+        catalogTree={catalogTree}
+        orderedModelOptions={orderedModelOptions}
+        currentModelValue={currentModelValue}
+        configOptionsLoading={configOptionsLoading}
+        embedded={embedded}
+        allowCustomModel={allowCustomModel}
+        showCustomRow={showCustomRow}
+        trimmedFilter={trimmedFilter}
+        filterText={filterText}
+        onFilterChange={setFilterText}
+        onModelSelect={onModelSelect}
+      />
       {configOptionsLoading ? (
         <ModelOptionsLoadingRow />
       ) : (
         extraConfigOptions.length > 0 && (
           <>
             <Separator />
-            <ScrollArea className="max-h-40 pr-2">
+            <ScrollArea className={embedded ? "pr-2" : "max-h-40 pr-2"}>
               <div className="space-y-1">
                 {extraConfigOptions.map((option) => (
                   <ConfigOptionTrigger

@@ -266,7 +266,7 @@ func TestSessionOpenRecoveryAfterRestart(t *testing.T) {
 	taskRepo.tasks["task-reused"] = &v1.Task{ID: "task-reused", State: v1.TaskStateInProgress}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: restartedRepo}
 	svc := createTestServiceWithAgent(restartedRepo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, restartedRepo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, restartedRepo, testLogger(), executor.ExecutorConfig{}))
 	svc.reconcileExecutorSessionsOnStartup(ctx)
 
 	session, err := restartedRepo.GetTaskSession(ctx, "session-reused")

@@ -29,7 +29,7 @@ const (
 // "started" activity are creation signals.
 func newCodexACPDialect() acpDialect {
 	return acpDialect{
-		capacityContinuationSupport: streams.CapacityContinuationCodexLiveSessionV1,
+		capacityContinuationSupport: streams.CapacityContinuationCodexLiveSessionV2,
 		subagentFrame:               parseCodexSubagentFrame,
 		subagentControl:             codexSubagentControl,
 		normalizePromptUsage:        normalizeCodexPromptUsage,

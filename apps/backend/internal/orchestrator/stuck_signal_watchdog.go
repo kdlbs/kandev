@@ -507,6 +507,10 @@ type stuckSignalGate string
 const (
 	stuckSignalGateWaiting   stuckSignalGate = "waiting_reconcile"
 	stuckSignalGateCandidate stuckSignalGate = "candidate"
+	// stuckSignalGateDeferredCompletion: on_turn_complete was deferred because
+	// the turn's delivery identity was incomplete. An Office session then parks
+	// IDLE, which neither watchdog gate scans, so the signal is reported here.
+	stuckSignalGateDeferredCompletion stuckSignalGate = "deferred_completion"
 )
 
 // officeStalledSignalKey identifies one stranded signal for dedupe purposes.
@@ -541,6 +545,27 @@ func (s *Service) surfaceOfficeStalledSignal(
 		zap.String("step_id", signal.StepID),
 		zap.Duration("signal_age", now.Sub(signal.SignaledAt)),
 		zap.String("gate", string(gate)))
+}
+
+// surfaceDeferredOfficeCompletion reports an Office task whose completion
+// signal was left unapplied because on_turn_complete was deferred. The deferred
+// Office session parks IDLE, outside both watchdog gates, so without this
+// report the task would stop silently. Like the watchdog, it only reports:
+// advancing an Office step here would bypass the step's quorum gate.
+func (s *Service) surfaceDeferredOfficeCompletion(ctx context.Context, taskID, sessionID string) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return
+	}
+	signal, ok := models.LoadPendingStepSignal(session.Metadata)
+	if !ok {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || stuckSignalDispositionFor(task, session, signal) != stuckSignalSurfaceOnly {
+		return
+	}
+	s.surfaceOfficeStalledSignal(task, session, signal, stuckSignalGateDeferredCompletion, time.Now().UTC())
 }
 
 // pruneOfficeStalledSignals drops dedupe entries for signals that are no

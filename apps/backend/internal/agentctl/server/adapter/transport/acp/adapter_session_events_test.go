@@ -199,7 +199,7 @@ func TestCapturedClaudeAndCodexCompactionsNormalizeOncePerIdentity(t *testing.T)
 }
 
 func TestClientCapabilitiesForAgentAdvertisesCompactionOnly(t *testing.T) {
-	caps := clientCapabilitiesForAgent("claude-acp", false)
+	caps := clientCapabilitiesForAgent("claude-acp", false, false)
 	if caps.Session == nil || caps.Session.Compaction == nil || caps.Session.Notices != nil {
 		t.Fatalf("session capabilities = %+v, want compaction true and notices false", caps.Session)
 	}

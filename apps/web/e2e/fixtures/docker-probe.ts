@@ -17,6 +17,7 @@ export const E2E_ALPINE_IMAGE_TAG = "kandev-agent:e2e-alpine";
 export const E2E_DOCKER_SCOPE = `e2e-${process.pid}-${randomUUID().slice(0, 8)}`;
 const FAKE_LSP_SERVER = path.resolve(__dirname, "fake-lsp-server.mjs");
 const MANAGED_RUNTIME_NPX_WRAPPER = path.resolve(__dirname, "managed-runtime-npx.sh");
+const MANAGED_RUNTIME_NPM_WRAPPER = path.resolve(__dirname, "managed-runtime-npm.sh");
 const SCOPED_CONTAINER_CLEANUP_TIMEOUT_MS = 30_000;
 const SCOPED_CONTAINER_CLEANUP_POLL_MS = 250;
 const SCOPED_CONTAINER_CLEANUP_EMPTY_POLLS = 8;
@@ -28,6 +29,8 @@ RUN apt-get update \\
 COPY --chmod=0755 fake-lsp-server.mjs /usr/local/bin/kotlin-lsp
 RUN rm -f /usr/local/bin/npx
 COPY --chmod=0755 managed-runtime-npx.sh /usr/local/bin/npx
+RUN mv /usr/local/bin/npm /usr/local/bin/npm-real
+COPY --chmod=0755 managed-runtime-npm.sh /usr/local/bin/npm
 WORKDIR /workspace
 `;
 
@@ -36,6 +39,7 @@ RUN apk add --no-cache bash ca-certificates curl git nodejs npm
 COPY --chmod=0755 fake-lsp-server.mjs /usr/local/bin/kotlin-lsp
 RUN rm -f /usr/local/bin/npx
 COPY --chmod=0755 managed-runtime-npx.sh /usr/local/bin/npx
+COPY --chmod=0755 managed-runtime-npm.sh /usr/local/bin/npm
 WORKDIR /workspace
 `;
 
@@ -71,6 +75,7 @@ function buildImage(tag: string, dockerfile: string): void {
     fs.writeFileSync(path.join(tmpDir, "Dockerfile"), dockerfile);
     fs.copyFileSync(FAKE_LSP_SERVER, path.join(tmpDir, "fake-lsp-server.mjs"));
     fs.copyFileSync(MANAGED_RUNTIME_NPX_WRAPPER, path.join(tmpDir, "managed-runtime-npx.sh"));
+    fs.copyFileSync(MANAGED_RUNTIME_NPM_WRAPPER, path.join(tmpDir, "managed-runtime-npm.sh"));
     runFixtureCommand("docker", ["build", "-t", tag, tmpDir]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

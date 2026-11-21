@@ -25,6 +25,7 @@ export const RENDERABLE_COMPONENT_NAMES = [
   "plan",
   "todos",
   "background-work",
+  "task-graph",
   "pr-detail",
   "mr-detail",
   "review-detail",

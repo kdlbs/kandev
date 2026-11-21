@@ -331,12 +331,23 @@ Run desktop and mobile separately with their owning projects. The managed runner
 The graph is `01 -> 02 -> 03`, with 04/05/06 depending on 02, and 07 depending on all preceding work.
 Execution remains sequential in the primary session unless the user later authorizes delegation.
 Waves describe prerequisites; they do not authorize subagents or persistent Kandev tasks.
-Tasks 03-06 have complete production and deterministic test coverage but remain `in_progress`
+Tasks 03-06 have production implementations and deterministic test coverage but remain `in_progress`
 until their planned browser E2E specs are added and run.
+Task 03 also requires the linked sign-in launch repair described below.
 
 ## Verification results
 
 Product implementation: Tasks 01-02 complete; Tasks 03-06 implementation complete with browser E2E still open; Task 07 remains blocked on live native qualification.
+The November 4 Settings failure exposed a sign-in configure regression despite the earlier deterministic checks.
+The [sign-in launch repair](../antigravity-sign-in-launch/plan.md) owns the full-argv correction and a real configure-boundary regression.
+That repair is implemented and the permanent regression passes. Task 03 remains `in_progress`; Task 07 remains `blocked`.
+The November 8 failure in [issue #5193](https://github.com/kdlbs/kandev/issues/5193)
+occurs after successful configure and start: the sign-in caller mistakes stream
+setup success for termination. The [stream-startup repair](../antigravity-login-stream/plan.md)
+owns that correction and a real WebSocket caller regression. It is implemented;
+startup/failure regressions and the full hostutility race suite pass. The
+existing browser and native qualification gates remain open.
+Installer completeness was checked again without changing its contract or establishing native readiness.
 Research handshakes and current-code tests do not establish live subscription inference.
 After implementation, record every required command and result in its work order and reconcile the final plan status.
 Do not mark Task 07 passed while platform or authenticated native evidence is missing.

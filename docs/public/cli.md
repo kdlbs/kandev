@@ -159,6 +159,12 @@ time. The launcher prints phase changes and periodic status, so a long backup,
 migration, or recovery can be distinguished from an unreachable backend. These
 values describe elapsed work and do not estimate completion.
 
+A measured step also reports its own count. Byte counts use readable units with
+factors of 1024, and byte rates add a scaled unit and `/s`, for example
+`Database backup: 14.3 GB (1.0 MB/s)`. The startup page in the browser and the
+Kandev restart dialog show the same sizes. Values below 1 KB stay whole bytes,
+values from 1 KB upward keep one decimal digit, and the scale stops at TB.
+
 The launcher remains in the foreground. Press `Ctrl+C` or terminate it to stop the backend and its managed children cleanly. A force-kill can leave worktree processes or containers running; inspect them before deleting data.
 
 On macOS and Linux, Kandev includes the runtime user's `~/.local/bin` in its
@@ -250,6 +256,14 @@ make dev
 ```
 
 `make dev` builds the launcher plus the host `agentctl` and, on hosts other than Linux/amd64, one Linux/amd64 helper. It then invokes the repository's native Go launcher. The `kandev dev` syntax above belongs to that source launcher; installing the npm or Homebrew release does not install it as a second runtime mode.
+
+Source builds compile the frontend with `NODE_ENV=production`, even when the
+invoking shell sets `NODE_ENV=development`. This serves production React, which
+omits React development warnings and default performance-track
+instrumentation. Kandev runtime diagnostics are independent of that choice:
+`make start-debug` still enables backend debug file logging, pprof, and ACP
+frame logging. Use `make dev` with `NODE_ENV` unset or set to `development` when
+you need development React and hot reload.
 
 ### OS service commands
 

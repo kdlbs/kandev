@@ -2,7 +2,7 @@ import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { promptEditorText } from "../../helpers/settings-prompt-editor";
 import { KanbanPage } from "../../pages/kanban-page";
-import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+import { WorkflowSettingsPage, seedWorkflowListView } from "../../pages/workflow-settings-page";
 import { dwell } from "../../helpers/causal-waits";
 
 async function maxRingSpread(locator: Locator): Promise<number> {
@@ -319,9 +319,19 @@ test.describe("Workflow settings", () => {
     await page.stepNodeByName(card, "Waiting for Children").click();
 
     await card.getByTestId(`${waitStep.id}-children-completed-help`).hover();
-    await expect(
-      testPage.getByText("When every active direct child task is COMPLETED, FAILED, or CANCELLED"),
-    ).toBeVisible();
+    const childrenCompletedTooltip = testPage.getByRole("tooltip");
+    await expect(childrenCompletedTooltip).toContainText(
+      "Runs after every active direct child succeeds.",
+    );
+    await expect(childrenCompletedTooltip).toContainText(
+      "At least one counted active direct child is required.",
+    );
+    await expect(childrenCompletedTooltip).toContainText(
+      "Archived, ephemeral, and automation-run children are ignored; grandchildren do not count.",
+    );
+    await expect(childrenCompletedTooltip).toContainText(
+      "Failed or cancelled children keep the parent waiting.",
+    );
 
     await card.getByTestId(`${waitStep.id}-children-completed-transition-select`).click();
     await testPage.getByRole("option", { name: "Move to specific step" }).click();
@@ -636,6 +646,9 @@ test.describe("Workflow settings", () => {
     const { steps } = await apiClient.listWorkflowSteps(workflow.id);
     const firstStep = steps.sort((a, b) => a.position - b.position)[0];
 
+    // The settings route is reached in-app, so seed the Detailed list view
+    // that exposes the card's prompt editor without expanding a row.
+    await seedWorkflowListView(testPage, "detailed");
     const kanban = new KanbanPage(testPage);
     await kanban.goto(workflow.id);
     const sidebar = testPage.getByTestId("app-sidebar");

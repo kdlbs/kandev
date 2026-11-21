@@ -56,11 +56,26 @@ jobs:
 
       - name: Update trusted catalogue
         id: update
-        run: node scripts/update-agent-runtime-pins.mjs --github-output "$GITHUB_OUTPUT"
+        env:
+          CATALOGUE: apps/backend/internal/agent/agents/managed_npm_runtime_versions.json
+        run: |
+          set -euo pipefail
+          cp "$CATALOGUE" "$RUNNER_TEMP/managed-runtime-pins.before.json"
+          node scripts/update-agent-runtime-pins.mjs --github-output "$GITHUB_OUTPUT"
 
       - name: Test managed runtime catalogue and commands
         working-directory: apps/backend
-        run: go test ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers
+        run: go test -trimpath -tags fts5 ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers
+
+      - name: Generate delivery record
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          node .github/scripts/record-agent-runtime-pin-refresh.mjs \
+            --before "$RUNNER_TEMP/managed-runtime-pins.before.json" \
+            --after apps/backend/internal/agent/agents/managed_npm_runtime_versions.json \
+            --output-dir docs/plans/managed-runtime-pin-automation \
+            --validation-passed
 
       - name: Commit and push one grouped change
         if: steps.update.outputs.changed == 'true'
@@ -71,6 +86,8 @@ jobs:
           git config user.name "kandev-runtime-updater[bot]"
           git config user.email "kandev-runtime-updater[bot]@users.noreply.github.com"
           git add apps/backend/internal/agent/agents/managed_npm_runtime_versions.json
+          git add docs/plans/managed-runtime-pin-automation/plan.md
+          git add docs/plans/managed-runtime-pin-automation/task-01-refresh-pins.md
           git diff --cached --check
           git commit -m "chore: update managed runtime pins"
           git push --force-with-lease origin "${BOT_BRANCH}"
@@ -78,40 +95,69 @@ jobs:
       # The stable branch and head filter keep this workflow to at most one
       # open grouped PR, even when the scheduler and manual trigger overlap.
       - name: Create or refresh the single grouped PR
+        id: pr
         if: steps.update.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           cat > /tmp/managed-runtime-pin-pr-body.md <<'EOF'
-          ## Summary
-
           Refresh the reviewed managed npm runtime defaults from stable `latest` metadata.
 
-          The catalogue is validated before this PR is created. This workflow does not install or activate a runtime.
+          The catalogue is validated before this PR is created. The grouped change includes the generated delivery record at [task-01-refresh-pins.md](docs/plans/managed-runtime-pin-automation/task-01-refresh-pins.md). This workflow does not install or activate a runtime.
+
+          ## Important Changes
+
+          - Updated the trusted managed runtime catalogue from stable npm releases.
+          - Added the generated plan and work order required by documentation coverage.
+
+          ## Validation
+
+          - `node --test scripts/update-agent-runtime-pins.test.mjs`
+          - `go test -trimpath -tags fts5 ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers`
+
+          ## Checklist
+
+          - [ ] If I do not have repository write access and this is a large architectural change, I discussed the direction in a linked issue before opening this PR.
+          - [ ] This PR contains one logical change; unrelated work is split into separate PRs.
+          - [ ] I have performed a self-review of my code.
+          - [ ] I have manually tested my changes and they work as expected.
+          - [ ] My changes have tests that cover the new functionality and edge cases.
+          - [ ] If my change touches UI files (`apps/web/`), I have added or updated Playwright e2e tests in `apps/web/e2e/` and verified them with `make test-e2e`.
+          - [ ] I checked whether this affects public docs in `docs/public/**` and updated them or noted why no docs change is needed.
           EOF
           open_pr_number="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BOT_BRANCH" --base main --state open --json number --jq '.[0].number // ""')"
           if [[ -z "$open_pr_number" ]]; then
-            gh pr create \
+            created_url="$(gh pr create \
               --repo "$GITHUB_REPOSITORY" \
               --base main \
               --head "$BOT_BRANCH" \
               --title "chore: update managed runtime pins" \
-              --body-file /tmp/managed-runtime-pin-pr-body.md
+              --body-file /tmp/managed-runtime-pin-pr-body.md)"
+            pr_number="${created_url##*/}"
           else
             gh pr edit "$open_pr_number" \
               --repo "$GITHUB_REPOSITORY" \
               --title "chore: update managed runtime pins" \
               --body-file /tmp/managed-runtime-pin-pr-body.md
+            pr_number="$open_pr_number"
           fi
+          if ! [[ "$pr_number" =~ ^[0-9]+$ ]]; then
+            echo "::error::The grouped managed runtime pin PR number could not be resolved."
+            exit 1
+          fi
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
 
       # GITHUB_TOKEN-created push and pull-request events do not recursively
       # start validation workflows. Dispatch the six required checks explicitly
-      # against the exact bot-branch commit after the PR exists.
+      # against the exact bot-branch commit after the PR exists. The
+      # documentation evaluator is dispatched separately from trusted main: it
+      # rejects any other dispatch ref, and it reads the generated PR number.
       - name: Dispatch required checks for generated PR
         if: steps.update.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
         run: |
           set -euo pipefail
           for workflow in \
@@ -126,3 +172,7 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --ref "$BOT_BRANCH"
           done
+          gh workflow run pr-docs.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f pr_number="$PR_NUMBER"

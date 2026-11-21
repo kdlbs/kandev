@@ -20,6 +20,9 @@
 
 ## Context
 
+The accepted [source-specific completion decision](2026-11-10-source-specific-step-completion.md)
+narrows step-wide deduplication to a source turn and adds durable outcome proof.
+
 Today, a workflow step's `on_turn_complete` actions (most commonly `move_to_next`, i.e. "auto-advance") fire whenever the agent's turn ends. The orchestrator's only signal that work is "done" is that the agent has stopped streaming and the ACP turn is complete. That signal is unreliable as a proxy for "user requirements satisfied":
 
 - **Halts are overloaded.** An agent stops emitting for many reasons: it actually finished the requested work; it called `ask_user_question_kandev` (or any clarification mechanism) and is waiting on the user; it hit a provider rate limit or transient error and bailed; it terminated mid-thought due to a context budget; it shelled out and exited; a future agent CLI added a new halt class we don't know about yet. From the orchestrator's vantage point these are indistinguishable — all of them look like "turn complete."

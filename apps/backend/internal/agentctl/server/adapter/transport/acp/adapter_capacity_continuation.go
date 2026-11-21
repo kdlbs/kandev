@@ -1,6 +1,8 @@
 package acp
 
 import (
+	"strings"
+
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
@@ -11,6 +13,13 @@ type capacityToolEvidence struct {
 	status acpsdk.ToolCallStatus
 	kind   acpsdk.ToolKind
 	failed bool
+	// mcp marks an MCP-over-ACP call. Codex reports these as execute-kind
+	// tools, but they are not shell commands and never qualify for the
+	// known-command-failure exception.
+	mcp bool
+	// terminal carries the V2 command-outcome evidence captured before any
+	// synthetic prompt cleanup can make an unresolved tool look terminal.
+	terminal capacityTerminalEvidence
 	// detached marks an execute call that asked for a detached job. The
 	// workload stays unresolved until its own terminal evidence arrives,
 	// independent of the background-inspection presentation feature.
@@ -20,6 +29,17 @@ type capacityToolEvidence struct {
 	// detachedResolved is set only by terminal workload evidence that does not
 	// contradict that identity.
 	detachedResolved bool
+}
+
+// capacityTerminalEvidence is the bounded terminal proof for one V2 command.
+// invalid permanently blocks this tool's evidence once any partial,
+// contradictory, signalled, or cancelled frame is observed.
+type capacityTerminalEvidence struct {
+	seen        bool
+	exitCode    int
+	rawSeen     bool
+	rawExitCode int
+	invalid     bool
 }
 
 func (a *Adapter) capacityContinuationSnapshot(
@@ -61,14 +81,23 @@ func isUnresolvedBackgroundPayload(payload *streams.NormalizedPayload) bool {
 }
 
 func addCapacityToolOutcomes(snapshot *streams.CapacityContinuationSnapshot, tools map[string]capacityToolEvidence) {
+	knownCommandSupport := snapshot.SupportsKnownFailedShellTools()
 	for _, tool := range tools {
-		if tool.failed {
-			snapshot.FailedTools = true
-			continue
-		}
 		if tool.detached && !tool.detachedResolved {
 			// A completed launch tool is not completed workload evidence.
 			snapshot.UnaccountedBackground = true
+		}
+		if tool.terminal.invalid {
+			snapshot.UnknownOutcomes = true
+			continue
+		}
+		if knownCommandSupport && tool.knownFailedCommand() {
+			snapshot.KnownFailedShellTools++
+			continue
+		}
+		if tool.failed || tool.status == acpsdk.ToolCallStatusFailed {
+			snapshot.FailedTools = true
+			continue
 		}
 		switch tool.status {
 		case acpsdk.ToolCallStatusPending, acpsdk.ToolCallStatusInProgress:
@@ -83,6 +112,14 @@ func addCapacityToolOutcomes(snapshot *streams.CapacityContinuationSnapshot, too
 	}
 }
 
+// knownFailedCommand reports V2 evidence for a command that ended at a known
+// nonzero terminal exit. The real failed status stays in tool history.
+func (t capacityToolEvidence) knownFailedCommand() bool {
+	return t.kind == acpsdk.ToolKindExecute && !t.mcp && !t.terminal.invalid &&
+		t.terminal.seen && t.terminal.exitCode != 0 &&
+		(t.status == acpsdk.ToolCallStatusCompleted || t.status == acpsdk.ToolCallStatusFailed)
+}
+
 func (a *Adapter) observeCapacityContinuation(n acpsdk.SessionNotification, generation uint64) {
 	a.mu.RLock()
 	enabled := a.dialect.capacityContinuationSupport != "" && string(n.SessionId) == a.sessionID && !a.isLoadingSession
@@ -93,17 +130,28 @@ func (a *Adapter) observeCapacityContinuation(n acpsdk.SessionNotification, gene
 	}
 	turn.evidenceMu.Lock()
 	defer turn.evidenceMu.Unlock()
-	detachedShapes := a.dialect.capacityContinuationSupport == streams.CapacityContinuationOpenCodeLiveSessionV1
+	support := a.dialect.capacityContinuationSupport
+	detachedShapes := support == streams.CapacityContinuationOpenCodeLiveSessionV1
+	knownCommandShapes := capacitySupportAcceptsKnownCommands(support)
 	update := n.Update
 	if update.ToolCall != nil {
-		turn.observeCapacityToolCall(update.ToolCall, detachedShapes)
+		turn.observeCapacityToolCall(update.ToolCall, detachedShapes, knownCommandShapes)
 	}
 	if update.ToolCallUpdate != nil {
-		turn.observeCapacityToolUpdate(update.ToolCallUpdate, detachedShapes)
+		turn.observeCapacityToolUpdate(update.ToolCallUpdate, detachedShapes, knownCommandShapes)
 	}
 }
 
-func (t *promptTurnState) observeCapacityToolCall(call *acpsdk.SessionUpdateToolCall, detachedShapes bool) {
+func capacitySupportAcceptsKnownCommands(support streams.CapacityContinuationSupport) bool {
+	return support == streams.CapacityContinuationCodexLiveSessionV2 ||
+		support == streams.CapacityContinuationMockLiveSessionV2
+}
+
+func (t *promptTurnState) observeCapacityToolCall(
+	call *acpsdk.SessionUpdateToolCall,
+	detachedShapes bool,
+	knownCommandShapes bool,
+) {
 	if t.capacityTools == nil {
 		t.capacityTools = make(map[string]capacityToolEvidence)
 	}
@@ -126,12 +174,28 @@ func (t *promptTurnState) observeCapacityToolCall(call *acpsdk.SessionUpdateTool
 	if !validCapacityToolStatus(call.Status) {
 		t.capacityUnknown = true
 	}
-	evidence := capacityToolEvidence{status: call.Status, kind: call.Kind}
+	evidence := capacityToolEvidence{
+		status: call.Status, kind: call.Kind,
+		mcp: capacityMCPToolCall(call.Meta, call.RawInput),
+	}
+	if knownCommandShapes {
+		t.observeCapacityTerminalIdentity(&evidence.terminal, id, call.Meta)
+	}
 	if detachedShapes {
 		t.observeCapacityDetachedLaunch(&evidence, call.Kind, call.RawInput)
 	}
 	// Keep the ID so duplicate calls and later updates cannot become fresh evidence.
 	t.capacityTools[id] = evidence
+}
+
+// capacityMCPToolCall recognizes Codex's MCP-over-ACP envelope in either the
+// explicit marker or the complete structured request.
+func capacityMCPToolCall(meta map[string]any, rawInput any) bool {
+	if marker, ok := meta["is_mcp_tool_call"].(bool); ok && marker {
+		return true
+	}
+	_, ok := parseCodexMCPToolCall(meta, rawInput)
+	return ok
 }
 
 // observeCapacityDetachedLaunch records a detached-job request from either
@@ -153,7 +217,11 @@ func (t *promptTurnState) observeCapacityDetachedLaunch(
 	evidence.detached = true
 }
 
-func (t *promptTurnState) observeCapacityToolUpdate(update *acpsdk.SessionToolCallUpdate, detachedShapes bool) {
+func (t *promptTurnState) observeCapacityToolUpdate(
+	update *acpsdk.SessionToolCallUpdate,
+	detachedShapes bool,
+	knownCommandShapes bool,
+) {
 	id := string(update.ToolCallId)
 	tool, exists := t.capacityTools[id]
 	if id == "" || !exists {
@@ -167,7 +235,13 @@ func (t *promptTurnState) observeCapacityToolUpdate(update *acpsdk.SessionToolCa
 	if codexSubagentSignalFromFrame(update.Meta, title, update.RawInput) != codexSubagentSignalNone || parentToolUseID(update.Meta) != "" {
 		t.capacityBackground = true
 	}
+	if capacityMCPToolCall(update.Meta, update.RawInput) {
+		tool.mcp = true
+	}
 	t.applyCapacityToolKind(&tool, update.Kind)
+	if knownCommandShapes {
+		t.observeCapacityTerminalEvidence(&tool, id, update)
+	}
 	if detachedShapes {
 		t.observeCapacityDetachment(&tool, update)
 	}
@@ -176,6 +250,195 @@ func (t *promptTurnState) observeCapacityToolUpdate(update *acpsdk.SessionToolCa
 		tool.failed = true
 	}
 	t.capacityTools[id] = tool
+}
+
+// observeCapacityTerminalEvidence captures the V2 proof from the same ordered
+// notification that carries the tool update. Any partial, malformed,
+// signalled, cancelled, or conflicting evidence permanently blocks the tool.
+func (t *promptTurnState) observeCapacityTerminalEvidence(
+	tool *capacityToolEvidence,
+	toolID string,
+	update *acpsdk.SessionToolCallUpdate,
+) {
+	if update.Meta != nil {
+		t.observeCapacityTerminalIdentity(&tool.terminal, toolID, update.Meta)
+		if exit, ok := update.Meta["terminal_exit"]; ok {
+			t.observeCapacityTerminalExit(&tool.terminal, toolID, exit)
+		}
+	}
+	if code, present, valid := capacityRawExitEvidence(update.RawOutput); present {
+		switch {
+		case !valid:
+			tool.terminal.invalid = true
+		case tool.terminal.rawSeen && tool.terminal.rawExitCode != code:
+			tool.terminal.invalid = true
+		case !tool.terminal.rawSeen:
+			tool.terminal.rawSeen = true
+			tool.terminal.rawExitCode = code
+		}
+	}
+	// Terminal and raw exit evidence may arrive on the same frame or on
+	// separate updates in either order. Once both are present they must
+	// agree or the tool stays permanently blocked.
+	if tool.terminal.seen && tool.terminal.rawSeen &&
+		tool.terminal.exitCode != tool.terminal.rawExitCode {
+		tool.terminal.invalid = true
+	}
+}
+
+func (t *promptTurnState) observeCapacityTerminalIdentity(
+	terminal *capacityTerminalEvidence,
+	toolID string,
+	meta map[string]any,
+) {
+	for _, key := range []string{"terminal_info", "terminal_output", "terminal_exit"} {
+		value, present := meta[key]
+		if !present {
+			continue
+		}
+		fields, ok := value.(map[string]any)
+		if !ok {
+			terminal.invalid = true
+			continue
+		}
+		terminalID, present := fields["terminal_id"]
+		if !present {
+			continue
+		}
+		id, ok := terminalID.(string)
+		if !ok || id == "" || id != toolID {
+			terminal.invalid = true
+		}
+	}
+}
+
+func (t *promptTurnState) observeCapacityTerminalExit(
+	terminal *capacityTerminalEvidence,
+	toolID string,
+	value any,
+) {
+	fields, ok := value.(map[string]any)
+	if !ok {
+		terminal.invalid = true
+		return
+	}
+	terminalID, ok := fields["terminal_id"].(string)
+	if !ok || terminalID == "" || terminalID != toolID {
+		terminal.invalid = true
+		return
+	}
+	if capacityTerminalSignal(fields) || capacityTerminalCancelled(fields) {
+		terminal.invalid = true
+		return
+	}
+	code, ok := capacityTerminalExitCode(fields)
+	if !ok {
+		terminal.invalid = true
+		return
+	}
+	if terminal.seen && terminal.exitCode != code {
+		terminal.invalid = true
+		return
+	}
+	terminal.seen = true
+	terminal.exitCode = code
+}
+
+func capacityTerminalSignal(fields map[string]any) bool {
+	signal, present := fields["signal"]
+	return present && signal != nil
+}
+
+func capacityTerminalCancelled(fields map[string]any) bool {
+	for _, key := range []string{"cancelled", "canceled"} {
+		value, present := fields[key]
+		if !present || value == nil {
+			continue
+		}
+		if cancelled, ok := value.(bool); !ok || cancelled {
+			return true
+		}
+	}
+	return false
+}
+
+func capacityTerminalExitCode(fields map[string]any) (int, bool) {
+	code := 0
+	found := false
+	for _, key := range []string{"exit_code", "code"} {
+		value, present := fields[key]
+		if !present {
+			continue
+		}
+		parsed, ok := authoritativeTerminalExitCode(value)
+		if !ok || (found && parsed != code) {
+			return 0, false
+		}
+		code, found = parsed, true
+	}
+	return code, found
+}
+
+// authoritativeTerminalExitCode rejects string-shaped exit values: V2 requires
+// an integer terminal exit from the provider's terminal extension.
+func authoritativeTerminalExitCode(value any) (int, bool) {
+	if _, isString := value.(string); isString {
+		return 0, false
+	}
+	return parseExitCode(value)
+}
+
+// capacityRawExitEvidence reports a raw exit value separately from whether the
+// field was present and whether it parsed. A present malformed value must block
+// the tool instead of being treated as absent evidence.
+func capacityRawExitEvidence(rawOutput any) (int, bool, bool) {
+	value := unwrapShellRawOutput(rawOutput)
+	switch result := value.(type) {
+	case map[string]any:
+		return capacityRawMapExitEvidence(result)
+	case string:
+		return capacityRawTextExitEvidence(result)
+	default:
+		return 0, false, true
+	}
+}
+
+func capacityRawMapExitEvidence(result map[string]any) (int, bool, bool) {
+	if raw, present := result["exit_code"]; present {
+		code, ok := parseExitCode(raw)
+		return code, true, ok
+	}
+	if metadata, ok := result["metadata"].(map[string]any); ok {
+		if raw, present := metadata["exit"]; present {
+			code, ok := parseExitCode(raw)
+			return code, true, ok
+		}
+	}
+	if _, explicit := result["stdout"]; explicit {
+		return 0, false, true
+	}
+	if _, explicit := result["stderr"]; explicit {
+		return 0, false, true
+	}
+	if formatted, ok := result["formatted_output"].(string); ok {
+		return capacityRawTextExitEvidence(formatted)
+	}
+	if output, ok := result["output"].(string); ok {
+		return capacityRawTextExitEvidence(output)
+	}
+	return 0, false, true
+}
+
+func capacityRawTextExitEvidence(text string) (int, bool, bool) {
+	if !strings.Contains(text, "<return-code>") {
+		return 0, false, true
+	}
+	codeText, present := embeddedShellField(text, "return-code")
+	if !present {
+		return 0, false, true
+	}
+	code, ok := parseExitCode(codeText)
+	return code, true, ok
 }
 
 func (t *promptTurnState) applyCapacityToolKind(tool *capacityToolEvidence, kind *acpsdk.ToolKind) {

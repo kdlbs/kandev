@@ -14,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/auth/hostnames"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/coordinator"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
@@ -59,11 +58,13 @@ import (
 )
 
 type Repositories struct {
-	RequiredStores *requiredstores.Tracker
-	Task           *sqliterepo.Repository
-	Analytics      analyticsrepository.Repository
-	AgentSettings  settingsstore.Repository
-	User           userstore.Repository
+	RequiredStores                   *requiredstores.Tracker
+	gitCredentialReissueSigner       *gitcredentials.ReissueCapabilitySigner
+	gitCredentialReissueSignerSource string
+	Task                             *sqliterepo.Repository
+	Analytics                        analyticsrepository.Repository
+	AgentSettings                    settingsstore.Repository
+	User                             userstore.Repository
 	// UserAccounts is the account-management view of the same user store
 	// (list/create/role/status), consumed by the auth service.
 	UserAccounts  userstore.AccountRepository
@@ -105,7 +106,6 @@ type Services struct {
 	GitHub        *github.Service
 	GitLab        *gitlab.Service
 	GitLabCleanup func() error
-	AzureDevOps   *azuredevops.Service
 	Jira          *jira.Service
 	Linear        *linear.Service
 	Sentry        *sentry.Service
@@ -141,6 +141,9 @@ type Services struct {
 	// registry, event delivery, health monitoring). Always constructed
 	// (non-nil) when initialization succeeds.
 	Plugins *plugins.Service
+	// PluginToolCatalog fans lifecycle catalog changes out to agentctl
+	// executions and in-process MCP servers. Nil until main starts plugins.
+	PluginToolCatalog *pluginToolCatalogFanout
 	// AgentConversations is the managed workspace agent conversation
 	// service behind the agent_conversation Host capability. Nil when the
 	// plugins service itself is unavailable.

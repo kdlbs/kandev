@@ -42,6 +42,7 @@ import {
   getWalkthroughLastSeen,
   setWalkthroughLastSeen,
 } from "@/lib/walkthrough-notification-storage";
+import { mergeQueuePolicyMeta } from "./queue-policy-meta";
 
 /** Ensure message metadata exists for a session, initializing with defaults if needed. */
 function ensureMessageMeta(
@@ -1193,31 +1194,6 @@ function isStaleQueueSnapshot(
   );
 }
 
-function shouldPreserveSessionPolicy(previous: QueueMeta | undefined, meta: QueueMetaInput) {
-  return (
-    previous?.sessionIncarnationId === meta.sessionIncarnationId &&
-    previous?.autoMergeSource === "session" &&
-    meta.autoMergeSource === "global"
-  );
-}
-
-function shouldPreservePolicyRevision(previous: QueueMeta | undefined, meta: QueueMetaInput) {
-  return (
-    previous?.sessionIncarnationId === meta.sessionIncarnationId &&
-    previous?.autoMergeSource === meta.autoMergeSource &&
-    previous?.autoMergeRevision !== undefined &&
-    meta.autoMergeRevision !== undefined &&
-    meta.autoMergeRevision < previous.autoMergeRevision
-  );
-}
-
-function copyAutoMergePolicy(target: QueueMetaInput, source: QueueMeta) {
-  target.autoMergeAvailable = source.autoMergeAvailable;
-  target.autoMergeEnabled = source.autoMergeEnabled;
-  target.autoMergeSource = source.autoMergeSource;
-  target.autoMergeRevision = source.autoMergeRevision;
-}
-
 function resolveQueueMeta(
   currentIncarnationId: string | undefined,
   previous: QueueMeta | undefined,
@@ -1230,12 +1206,13 @@ function resolveQueueMeta(
     Object.assign(nextMeta, previous, meta);
   }
   if (isStaleQueueSnapshot(previous, meta, establishStatusEpoch)) return null;
-  if (
-    previous &&
-    (shouldPreserveSessionPolicy(previous, meta) || shouldPreservePolicyRevision(previous, meta))
-  ) {
-    copyAutoMergePolicy(nextMeta, previous);
-  }
+  Object.assign(
+    nextMeta,
+    mergeQueuePolicyMeta(previous, {
+      ...meta,
+      sessionIncarnationId: nextMeta.sessionIncarnationId,
+    }),
+  );
   return nextMeta;
 }
 

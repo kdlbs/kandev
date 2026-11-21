@@ -109,7 +109,23 @@ session, that boundary clears `activeTools` and arms the normal idle timer. The
 timer stays because trailing frames can follow the boundary. Silence alone still
 does not end a turn with an active foreground tool.
 
+### Backend turn start
+
+The lifecycle manager's `recordActivity` (`manager_events.go`) flips a Ready
+execution back to Running when an agent-started turn begins. It must use the
+same evidence as the finalizer: a `tool_update` with an empty `ToolStatus`
+does not flip the execution. Otherwise the backend marks the session busy for a
+turn the finalizer will never close, because the finalizer ignores that update.
+
+The adapter already synthesizes `in_progress` for a status-less update that
+carries a title, input, content, or locations, so an empty status on the wire
+event means metadata only. `ToolStatusMissing` is not serialized and is not
+needed at this boundary. A status-less update still refreshes activity
+timestamps; it only loses the power to start a turn. Prompt-owned turns are
+unaffected, because the flip applies only to a Ready execution.
+
 ## Implementation plans
 
 - [Completion callback lease repair](../../../plans/completion-callback-lease/plan.md).
 - [Stuck turn and queue delivery repair](../../../plans/stuck-turn-queue-delivery/plan.md).
+- [Send Now claim loss repair](../../../plans/send-now-claim-loss/plan.md).

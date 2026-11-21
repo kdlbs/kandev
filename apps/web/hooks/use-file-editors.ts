@@ -259,8 +259,11 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
         getFilePreviewKind(savedTab.path) === "markdown" ? savedTab.renderedPreview : undefined,
     });
   }
-  for (const savedTab of savedTabs) {
-    if (!(await loadRestoredTab(savedTab, params, client))) {
+  for (let offset = 0; offset < savedTabs.length; offset += 4) {
+    const current = await Promise.all(
+      savedTabs.slice(offset, offset + 4).map((tab) => loadRestoredTab(tab, params, client)),
+    );
+    if (current.includes(false)) {
       if (_restoredSessionId === activeSessionId) _restorationInProgress = false;
       return;
     }

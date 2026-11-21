@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	runsmodels "github.com/kandev/kandev/internal/runs/models"
@@ -104,6 +103,8 @@ func (s *Service) dispatchEngineTriggerForRecovery(
 type TaskMovedData struct {
 	TaskID                 string `json:"task_id"`
 	WorkspaceID            string `json:"workspace_id"`
+	OldState               string `json:"old_state"`
+	NewState               string `json:"new_state"`
 	FromStepID             string `json:"from_step_id"`
 	ToStepID               string `json:"to_step_id"`
 	ToStepName             string `json:"to_step_name"`
@@ -321,6 +322,8 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		{events.TaskCreated, s.handleTaskCreated},
 		{events.TaskUpdated, s.handleTaskUpdated},
 		{events.TaskMoved, s.handleTaskMoved},
+		{events.TaskStateChanged, s.handleHandoffTaskStateChanged},
+		{events.TaskStateChanged, s.handleRoutineRunTaskStateChanged},
 		{events.OfficeApprovalResolved, s.handleApprovalResolved},
 		{events.OfficeCommentCreated, s.handleCommentCreated},
 		{events.AgentCompleted, maybeAsync(s.handleAgentCompleted)},
@@ -1377,16 +1380,11 @@ func (s *Service) queueTaskAssignedRun(
 	return err
 }
 
-// handleTaskMoved keeps the legacy named-step activity fallback and queues
-// downstream blocker / children-completed runs when a task enters a terminal
-// step. Canonical task-state activity is written by the task service
-// before task.state_changed is published, so the workflow move path is durable
-// before any WebSocket refetch can run. Stage progression itself is owned by
-// the workflow engine (the orchestrator subscribes to TaskMoved and fires
-// on_exit / on_enter).
+// handleTaskMoved writes the Office activity fallback for an assigned task.
+// Completion effects are driven by the committed task-state transition.
 func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[TaskMovedData](event)
-	if err != nil || data.AssigneeAgentProfileID == "" {
+	if err != nil {
 		return nil
 	}
 
@@ -1394,7 +1392,7 @@ func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 	// resolved from the currently-claimed run for this task so the
 	// activity row joins back to it on the run detail page's Tasks
 	// Touched surface.
-	if data.WorkspaceID != "" && data.FromStepName != data.ToStepName {
+	if data.AssigneeAgentProfileID != "" && data.WorkspaceID != "" && data.FromStepName != data.ToStepName {
 		runID := s.ResolveRunForTask(ctx, data.TaskID)
 		s.LogActivityWithRun(ctx, data.WorkspaceID, "system", "orchestrator",
 			"task_status_changed", "task", data.TaskID,
@@ -1402,84 +1400,7 @@ func (s *Service) handleTaskMoved(ctx context.Context, event *bus.Event) error {
 			runID, data.SessionID)
 	}
 
-	if categorizeStep(data.ToStepName) == stepCategoryDone &&
-		categorizeStep(data.FromStepName) != stepCategoryDone {
-		return s.finalizeDone(ctx, data)
-	}
 	return nil
-}
-
-// finalizeDone resolves blockers, notifies parents, and closes out a
-// linked routine run when a task enters a terminal step. The blocker
-// and parent side-effects route through the engine via
-// dispatchEngineTrigger (on_blocker_resolved / on_children_completed);
-// the routine sync is a direct call since it's a simple status write,
-// not an engine trigger.
-func (s *Service) finalizeDone(ctx context.Context, data *TaskMovedData) error {
-	if s.routineRunSyncer != nil {
-		terminal := "done"
-		if strings.EqualFold(data.ToStepName, "cancelled") {
-			terminal = "cancelled"
-		}
-		if err := s.routineRunSyncer.SyncRunStatus(ctx, data.TaskID, terminal); err != nil {
-			s.logger.Warn("sync routine run status", zap.Error(err))
-		}
-	}
-	if err := s.queueBlockersResolvedRuns(ctx, data.TaskID); err != nil {
-		s.logger.Error("blocker resolution runs failed", zap.Error(err))
-	}
-	if data.ParentID != "" {
-		if err := s.queueChildrenCompletedRun(ctx, data.ParentID); err != nil {
-			// Warn, not Error: ParentWakeReconciler is the documented
-			// recovery path for a parent whose wake didn't get queued
-			// here (including a transient GetChildSetKey failure), so
-			// this is expected to self-heal rather than page anyone.
-			s.logger.Warn("children completed run failed", zap.Error(err))
-		}
-	}
-	return nil
-}
-
-// queueBlockersResolvedRuns checks tasks blocked by the completed task and
-// queues runs for those whose blockers are all resolved.
-func (s *Service) queueBlockersResolvedRuns(ctx context.Context, completedTaskID string) error {
-	blockedTaskIDs, err := s.repo.ListTasksBlockedBy(ctx, completedTaskID)
-	if err != nil {
-		return fmt.Errorf("list blocked tasks: %w", err)
-	}
-	for _, blockedID := range blockedTaskIDs {
-		if err := s.resolveAndWakeIfUnblocked(ctx, blockedID, completedTaskID); err != nil {
-			s.logger.Error("resolve blocker run failed",
-				zap.String("blocked_task", blockedID), zap.Error(err))
-		}
-	}
-	return nil
-}
-
-func (s *Service) resolveAndWakeIfUnblocked(ctx context.Context, blockedTaskID, resolvedBlockerID string) error {
-	blockers, err := s.repo.ListTaskBlockers(ctx, blockedTaskID)
-	if err != nil {
-		return err
-	}
-	blockerIDs := make([]string, 0, len(blockers))
-	for _, b := range blockers {
-		blockerIDs = append(blockerIDs, b.BlockerTaskID)
-		if b.BlockerTaskID == resolvedBlockerID {
-			continue
-		}
-		done, err := s.repo.IsTaskInTerminalStep(ctx, b.BlockerTaskID)
-		if err != nil || !done {
-			return err // still blocked
-		}
-	}
-	if len(blockerIDs) == 0 {
-		return nil
-	}
-	key := fmt.Sprintf("blockers_resolved:%s:%s", blockedTaskID, dedupkeys.BlockerDigest(blockerIDs))
-	return s.dispatchEngineTrigger(ctx, blockedTaskID, engine.TriggerOnBlockerResolved,
-		engine.OnBlockerResolvedPayload{
-			ResolvedBlockerIDs: []string{resolvedBlockerID},
-		}, key)
 }
 
 // lookupChildPRLinks resolves the PR URLs (one or more, multi-repo capable)
@@ -1522,42 +1443,6 @@ func (s *Service) lookupChildPRLinks(
 	return out
 }
 
-// queueChildrenCompletedRun checks if all children of a parent are terminal
-// and, if so, dispatches an on_children_completed trigger to the engine.
-func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string) error {
-	allDone, err := s.repo.AreAllChildrenTerminal(ctx, parentID)
-	if err != nil || !allDone {
-		return err
-	}
-
-	waveKey, waveString, ok := resolveWaveIdentity(ctx, s.repo, parentID, s.logger)
-	if !ok {
-		return nil
-	}
-
-	// Derived the same way as ParentWakeReconciler's recovery dispatch
-	// (wakeOperationID) so both producers land on the identical operation
-	// id for the same parent + child set + generation. That shared id is
-	// what lets idx_run_idempotency actually dedupe the pair when the
-	// reconciler races this edge-triggered path for the same completion
-	// wave.
-	childSetKey, generation, err := s.repo.GetChildSetKeyAndGeneration(ctx, parentID)
-	if err != nil {
-		return fmt.Errorf("get child set key: %w", err)
-	}
-
-	// No child summaries are assembled here. The prompt path derives the
-	// child list at assembly time from the parent's current children, so a
-	// summary read at this point would pay for data that is discarded and
-	// would make the wake's content depend on which producer won the race.
-	key := wakeOperationID(parentID, childSetKey, generation)
-	return s.dispatchEngineTrigger(ctx, parentID, engine.TriggerOnChildrenCompleted,
-		engine.OnChildrenCompletedPayload{
-			WaveKey:    waveKey,
-			WaveString: waveString,
-		}, key)
-}
-
 // handleCommentCreated loads the comment and relays it to external channels.
 func (s *Service) handleCommentCreated(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[CommentPostedData](event)
@@ -1574,6 +1459,9 @@ func (s *Service) handleCommentCreated(ctx context.Context, event *bus.Event) er
 	if err != nil {
 		s.logger.Error("load comment for relay failed",
 			zap.String("comment_id", data.CommentID), zap.Error(err))
+		return nil
+	}
+	if comment.Source == handoffCompletionCommentSource {
 		return nil
 	}
 	if err := s.relay.RelayComment(ctx, comment); err != nil {
@@ -1593,7 +1481,10 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 	}
 	// A session-bridged comment mirrors a turn that already ran; it must
 	// never itself queue a new run, whichever agent it's attributed to.
-	if data.Source == "session" {
+	// A handoff completion report carries its own handoff_completed wake,
+	// queued directly by handleHandoffTaskStateChanged, so the generic
+	// comment path must not wake the assignee a second time.
+	if data.Source == "session" || data.Source == handoffCompletionCommentSource {
 		return nil
 	}
 	// Self-comment short-circuit: if the agent that wrote the comment is
@@ -1671,30 +1562,6 @@ func (s *Service) resolveApprovalTaskID(ctx context.Context, approvalID string) 
 		return id
 	}
 	return ""
-}
-
-// Step categories for task.moved events.
-type stepCategory int
-
-const (
-	stepCategoryUnknown stepCategory = iota
-	stepCategoryInProgress
-	stepCategoryDone
-	stepCategoryInReview
-)
-
-// categorizeStep maps step names to categories.
-func categorizeStep(name string) stepCategory {
-	switch name {
-	case "In Progress", "in_progress":
-		return stepCategoryInProgress
-	case "Done", "done", "Cancelled", "cancelled":
-		return stepCategoryDone
-	case "In Review", "in_review":
-		return stepCategoryInReview
-	default:
-		return stepCategoryUnknown
-	}
 }
 
 // decodeEventData extracts typed data from an event.

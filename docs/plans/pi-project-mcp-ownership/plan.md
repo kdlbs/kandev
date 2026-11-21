@@ -10,6 +10,14 @@ legacy_specs: []
 
 # Implementation Plan: Pi project MCP ownership
 
+## Related delivery repair (2026-11-05)
+
+The [issue #5090 package](../pi-builtin-mcp-delivery/plan.md) repairs ACP admission
+after project materialization. It preserves this package's ownership fence,
+merge rules, cleanup, and recovery contract. Its work order owns the new
+delivery checks and results, which are
+[implemented](../pi-builtin-mcp-delivery/task-01-recognize-project-delivery.md#results).
+
 ## Overview
 
 Repair the shared project MCP lifecycle so a successor Pi execution can publish

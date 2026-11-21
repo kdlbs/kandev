@@ -423,7 +423,8 @@ func waitForReady(ctx context.Context, baseURL string, proc childState) error {
 // line: phase, elapsed time, and — when a step is active — its name plus
 // whichever of done, total, rate, and estimate the snapshot carries, rather
 // than only for a `counted` step, since a `counting` step (for example
-// database.backup) carries a done count and a rate with no total. An opaque
+// database.backup) carries a done count and a rate with no total. Byte counts
+// and byte rates render through the shared readable-unit helpers. An opaque
 // step states plainly that it cannot report progress
 // (AC-PLATFORM-STARTUP-PROGRESS-001.5) instead of a bar at any position, and
 // a stalled step states how long it has gone without progress
@@ -452,12 +453,12 @@ func formatStartupLine(snapshot startup.Snapshot) string {
 	detail := name
 	switch {
 	case step.Done != nil && step.Total != nil:
-		detail += fmt.Sprintf(": %d/%d", *step.Done, *step.Total)
+		detail += fmt.Sprintf(": %s/%s", stepCountText(step, *step.Done), stepCountText(step, *step.Total))
 	case step.Done != nil:
-		detail += fmt.Sprintf(": %d", *step.Done)
+		detail += fmt.Sprintf(": %s", stepCountText(step, *step.Done))
 	}
 	if step.RatePerSecond != nil {
-		detail += fmt.Sprintf(" (%.1f/s)", *step.RatePerSecond)
+		detail += fmt.Sprintf(" (%s)", stepRateText(step, *step.RatePerSecond))
 	}
 	if step.ETAMS != nil {
 		detail += fmt.Sprintf(", ~%s remaining", formatDurationEstimate(*step.ETAMS))
@@ -466,6 +467,25 @@ func formatStartupLine(snapshot startup.Snapshot) string {
 		detail += fmt.Sprintf(", stalled for %s", formatDurationEstimate(*step.SinceAdvanceMS))
 	}
 	return fmt.Sprintf("%s: %s", line, detail)
+}
+
+// stepCountText renders one count in the terminal line. Byte steps use the
+// shared readable-size policy; every other unit keeps its raw integer, since
+// its noun is not implied by a symbol.
+func stepCountText(step *startup.StepSnapshot, count int64) string {
+	if step.Unit == startup.UnitBytes {
+		return startup.FormatBytes(count)
+	}
+	return strconv.FormatInt(count, 10)
+}
+
+// stepRateText renders the rate that follows a step's count. Only byte rates
+// gain a scaled unit; other units keep the launcher's bare "<rate>/s" form.
+func stepRateText(step *startup.StepSnapshot, rate float64) string {
+	if step.Unit == startup.UnitBytes {
+		return startup.FormatByteRate(rate)
+	}
+	return fmt.Sprintf("%.1f/s", rate)
 }
 
 // formatDurationEstimate renders a millisecond duration per

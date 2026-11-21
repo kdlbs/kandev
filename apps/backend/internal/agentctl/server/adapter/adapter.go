@@ -25,15 +25,16 @@ import (
 // This allows users of the adapter package to access these types without
 // importing the types package directly.
 type (
-	PermissionRequest  = types.PermissionRequest
-	PermissionResponse = types.PermissionResponse
-	PermissionOption   = streams.PermissionOption
-	PermissionHandler  = types.PermissionHandler
-	UserInputOption    = types.UserInputOption
-	UserInputQuestion  = types.UserInputQuestion
-	UserInputRequest   = types.UserInputRequest
-	UserInputAnswer    = types.UserInputAnswer
-	UserInputResponse  = types.UserInputResponse
+	PermissionRequest   = types.PermissionRequest
+	PermissionResponse  = types.PermissionResponse
+	PermissionOption    = streams.PermissionOption
+	PermissionHandler   = types.PermissionHandler
+	UserInputOption     = types.UserInputOption
+	UserInputQuestion   = types.UserInputQuestion
+	UserInputRequest    = types.UserInputRequest
+	UserInputAnswer     = types.UserInputAnswer
+	UserInputAttachment = types.UserInputAttachment
+	UserInputResponse   = types.UserInputResponse
 )
 
 // UserInputRequestHandler creates a clarification request and waits for its
@@ -129,6 +130,12 @@ type StderrLineSanitizer interface {
 type SessionCapabilityProvider interface {
 	SupportsSessionResume() bool
 	SupportsSessionLoad() bool
+}
+
+// SessionOperationAuthMethodsProvider exposes the initialize method snapshot
+// for a typed session-operation failure response.
+type SessionOperationAuthMethodsProvider interface {
+	GetSessionOperationAuthMethods() []streams.AuthMethodInfo
 }
 
 // StderrProviderSetter is an optional interface implemented by adapters that can use
@@ -302,6 +309,18 @@ type AgentAdapter interface {
 	RequiresProcessKill() bool
 }
 
+// MCPAttachmentEventPublisher routes best-effort attachment diagnostics through
+// the adapter's ordered event queue when one is available.
+type MCPAttachmentEventPublisher interface {
+	TryPublishMCPAttachmentEvent(AgentEvent, func(AgentEvent) (AgentEvent, error)) (bool, error)
+}
+
+// MCPAttachmentEventPersisterSetter lets an adapter commit its own attachment
+// events through the same ordered journal path used for observations.
+type MCPAttachmentEventPersisterSetter interface {
+	SetMCPAttachmentEventPersister(func(AgentEvent) (AgentEvent, error))
+}
+
 // McpServerConfig holds configuration for an MCP server.
 type McpServerConfig struct {
 	// Name is the human-readable name of the MCP server
@@ -335,6 +354,11 @@ type Config struct {
 
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
+
+	// ProjectMCPDelivery is execution-bound evidence that the host materialized
+	// the bound built-in packages into a project configuration file. It is
+	// accepted only from the authenticated configure request.
+	ProjectMCPDelivery *types.ProjectMCPDelivery
 
 	// AgentID is the agent identifier from the registry (e.g., "auggie", "amp", "claude-code").
 	// Used for logging and debug capture. Adapters should use this instead of hardcoded names.
@@ -393,6 +417,10 @@ type Config struct {
 
 	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
 	PromptSuggestions bool
+
+	// CopilotNativeSessionEvents enables Copilot's opt-in native compaction and
+	// attributed usage notifications for this launch.
+	CopilotNativeSessionEvents bool
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -415,6 +443,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		WorkDir:                    c.WorkDir,
 		AutoApprove:                c.AutoApprove,
 		McpServers:                 mcpServers,
+		ProjectMCPDelivery:         c.ProjectMCPDelivery.Clone(),
 		AgentID:                    c.AgentID,
 		AgentName:                  c.AgentName,
 		BaseURL:                    c.BaseURL,
@@ -431,6 +460,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		ProviderGatewayAuth:        c.ProviderGatewayAuth,
 		AuthPolicy:                 c.AuthPolicy,
 		PromptSuggestions:          c.PromptSuggestions,
+		CopilotNativeSessionEvents: c.CopilotNativeSessionEvents,
 	}
 }
 

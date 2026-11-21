@@ -1221,30 +1221,62 @@ func (e *Executor) persistSessionFullRowIfCurrentState(
 	session *models.TaskSession,
 	expected models.TaskSessionState,
 ) error {
-	var changed bool
-	var err error
-	if attemptID := models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]); attemptID != "" {
-		updater, ok := e.repo.(interface {
-			UpdateTaskSessionIfCurrentStateWithStartAttempt(
-				context.Context,
-				*models.TaskSession,
-				models.TaskSessionState,
-				string,
-			) (bool, error)
-		})
-		if !ok {
-			return fmt.Errorf("session start requires a startup-attempt-aware repository write")
-		}
-		changed, err = updater.UpdateTaskSessionIfCurrentStateWithStartAttempt(ctx, session, expected, attemptID)
-	} else {
-		changed, err = e.repo.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	updater, ok := e.repo.(interface {
+		UpdateTaskSessionIfCurrentStateForLaunch(
+			context.Context,
+			*models.TaskSession,
+			models.TaskSessionState,
+			string,
+		) (bool, error)
+	})
+	if !ok {
+		return fmt.Errorf("session launch requires parking-aware repository writes")
 	}
+	attemptID := models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+	changed, err := updater.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
 	if err != nil {
 		return err
 	}
 	if changed {
 		return nil
 	}
+	return e.classifyFailedSessionLaunchWrite(ctx, session, expected)
+}
+
+func (e *Executor) persistAgentStartAttemptIfCurrentState(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) error {
+	updater, ok := e.repo.(interface {
+		UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+			context.Context,
+			*models.TaskSession,
+			models.TaskSessionState,
+			string,
+		) (bool, error)
+	})
+	if !ok {
+		return fmt.Errorf("session launch requires parking-aware start-attempt writes")
+	}
+	changed, err := updater.UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+		ctx, session, expected, attemptID,
+	)
+	if err != nil {
+		return err
+	}
+	if changed {
+		return nil
+	}
+	return e.classifyFailedSessionLaunchWrite(ctx, session, expected)
+}
+
+func (e *Executor) classifyFailedSessionLaunchWrite(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+) error {
 	current, err := e.repo.GetTaskSession(ctx, session.ID)
 	if err != nil {
 		return err
@@ -1254,6 +1286,11 @@ func (e *Executor) persistSessionFullRowIfCurrentState(
 	}
 	if isStopTerminalSessionState(current.State) {
 		return &SessionStateSupersededError{SessionID: session.ID, State: current.State}
+	}
+	// The current parking stamp is the durable ownership fence. It also catches
+	// a park that has not changed WAITING_FOR_INPUT yet.
+	if models.WorkflowParkingSupersedesLaunch(session, current, expected) {
+		return &SessionStateSwitchedError{SessionID: session.ID, State: current.State}
 	}
 	if current.State == models.TaskSessionStateStarting || current.State == models.TaskSessionStateRunning {
 		if current.State == models.TaskSessionStateRunning {
@@ -1427,7 +1464,18 @@ func (e *Executor) ExecuteWithFullProfile(ctx context.Context, task *v1.Task, ag
 // This allows the caller to get the session ID immediately and launch the agent later.
 // Returns the session ID.
 func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string) (string, error) {
-	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", nil)
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", nil, nil)
+}
+
+// PrepareSessionWithSeed creates a session and commits its initial prompt
+// state in the same insert transaction. A reused session ignores the seed.
+func (e *Executor) PrepareSessionWithSeed(
+	ctx context.Context,
+	task *v1.Task,
+	agentProfileID, executorID, executorProfileID, workflowStepID string,
+	seed *models.PreparedSessionSeed,
+) (string, error) {
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", nil, seed)
 }
 
 // PrepareSessionWithWorkflowRoute creates a fresh session and records the
@@ -1438,7 +1486,19 @@ func (e *Executor) PrepareSessionWithWorkflowRoute(
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
 	route *models.WorkflowSessionRoute,
 ) (string, error) {
-	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", route)
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", route, nil)
+}
+
+// PrepareSessionWithWorkflowRouteAndSeed is the seed-bearing variant used by
+// task creation with an explicit workflow start.
+func (e *Executor) PrepareSessionWithWorkflowRouteAndSeed(
+	ctx context.Context,
+	task *v1.Task,
+	agentProfileID, executorID, executorProfileID, workflowStepID string,
+	route *models.WorkflowSessionRoute,
+	seed *models.PreparedSessionSeed,
+) (string, error) {
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", route, seed)
 }
 
 // PrepareSessionForExistingEnvironment creates a workflow replacement session
@@ -1451,7 +1511,7 @@ func (e *Executor) PrepareSessionForExistingEnvironment(ctx context.Context, tas
 	if err := e.preflightWorkflowWorkspaceReuse(ctx, task, taskEnvironmentID); err != nil {
 		return "", err
 	}
-	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false, taskEnvironmentID, nil)
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false, taskEnvironmentID, nil, nil)
 }
 
 // PrepareSessionForExistingEnvironmentWithWorkflowRoute is the route-aware
@@ -1469,7 +1529,7 @@ func (e *Executor) PrepareSessionForExistingEnvironmentWithWorkflowRoute(
 	if err := e.preflightWorkflowWorkspaceReuse(ctx, task, taskEnvironmentID); err != nil {
 		return "", err
 	}
-	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false, taskEnvironmentID, route)
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false, taskEnvironmentID, route, nil)
 }
 
 // preflightWorkflowWorkspaceReuse rejects an invalid retained environment
@@ -1524,7 +1584,7 @@ func workflowEnvironmentHasRepository(rows []*models.TaskEnvironmentRepo, reposi
 // transaction observes that a concurrent runner switch committed after the
 // caller loaded the task. Explicit runner selections keep their existing
 // caller-owned semantics and are not replaced by the task metadata.
-func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute) (string, error) {
+func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute, seed *models.PreparedSessionSeed) (string, error) {
 	runnerProfileExplicit := taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
 	currentTask := task
 	currentExecutorProfileID := executorProfileID
@@ -1539,6 +1599,7 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 			bindWorkspace,
 			taskEnvironmentID,
 			workflowRoute,
+			seed,
 		)
 		if err == nil || !errors.Is(err, models.ErrTaskRunnerChanged) || runnerProfileExplicit || attempt == 1 {
 			return sessionID, err
@@ -1558,7 +1619,7 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 }
 
 //nolint:cyclop,funlen,gocognit // Session construction keeps its existing validation sequence in one transaction boundary.
-func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute) (string, error) {
+func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute, seed *models.PreparedSessionSeed) (string, error) {
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return "", err
 	}
@@ -1566,8 +1627,12 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
 		return "", ErrNoAgentProfileID
 	}
+	if err := seed.Validate(); err != nil {
+		return "", fmt.Errorf("validate prepared session seed: %w", err)
+	}
 
 	metadata := cloneMetadata(task.Metadata)
+	metadata = seed.ApplyToMetadata(metadata)
 	runnerResolvedFromTask, taskRunnerProfileID := taskRunnerResolution(
 		task, executorProfileID, taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != ""),
 	)
@@ -1675,6 +1740,12 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if err != nil {
 		return "", err
 	}
+	// Required-runtime admission runs after the actor authorization above and
+	// before any credential resolution, session persistence, script, or
+	// workspace work.
+	if err := e.admitConcreteExecutorRuntime(execConfig); err != nil {
+		return "", err
+	}
 
 	if execConfig.ExecutorID != "" {
 		session.ExecutorID = execConfig.ExecutorID
@@ -1698,7 +1769,14 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		if bindWorkspace && selectedEnv != nil && selectedEnv.ID != "" && session.TaskEnvironmentID == "" {
 			session.TaskEnvironmentID = selectedEnv.ID
 		}
-		recoveryAdmission, envErr = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, execConfig.ExecutorType, false, 0, false)
+		// A failed owner is replaced by the binding transaction without touching
+		// its retained checkout. Recovery inspection must not claim that old
+		// owner before the transaction can establish consumer-free retirement.
+		replaceFailed := bindWorkspace && selectedEnv != nil && selectedEnv.TaskID == task.ID &&
+			selectedEnv.Status == models.TaskEnvironmentStatusFailed && !taskUsesInheritedWorkspace(task)
+		if !replaceFailed {
+			recoveryAdmission, envErr = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, execConfig.ExecutorType, false, 0, false)
+		}
 		if envErr != nil {
 			return "", envErr
 		}
@@ -1708,11 +1786,9 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if recoveryAdmission != nil {
 		createCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
-	retriedWorkspaceBinding := false
 	createErr := e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
 	if errors.Is(createErr, models.ErrWorkspacePreparing) {
 		createErr = e.retryPreparedSessionAfterWorkspaceReady(createCtx, session.ID, createErr, func() error {
-			retriedWorkspaceBinding = true
 			primary, err := e.refreshRetriedSessionOrder(createCtx, session, isPrimarySession, appliedInitialRuntimeConfig)
 			if err != nil {
 				return err
@@ -1735,11 +1811,11 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		return "", createErr
 	}
 
-	// Set primary flag only for the first session (no existing primary).
-	// Subsequent sessions do not override the established primary.
+	// Session creation elected primary under the owning task lock and
+	// recorded the committed ownership on session. Legacy stores without that
+	// atomic contract retain the explicit promotion fallback.
 	if session.IsPrimary {
-		// A retry has already committed its primary election with the insert.
-		if !retriedWorkspaceBinding {
+		if !repositoryElectsPrimaryOnCreate(e.repo) {
 			if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
 				e.logger.Warn("failed to update primary session flag",
 					zap.String("task_id", task.ID),
@@ -1838,10 +1914,21 @@ func taskUsesInheritedWorkspace(task *v1.Task) bool {
 	return mode == "inherit_parent" || mode == "shared_group"
 }
 
+// rejectInheritedEnvironmentExecutorMismatch guards cross-task environment
+// reuse. Kubernetes environments are task-owned, so a different task can never
+// attach to one; that refusal keeps its own error category.
+//
+// A non-Kubernetes executor mismatch on an inherited workspace is a supported
+// transition when the caller can detach and re-materialize (launch, handoff
+// admission, propagation): the launch elects a fresh environment on the
+// selected executor and leaves the inherited one untouched. A caller that
+// cannot detach (resume of an already-bound session) passes
+// allowExecutorTransition=false and keeps the strict refusal.
 func rejectInheritedEnvironmentExecutorMismatch(
 	task *v1.Task,
 	env *models.TaskEnvironment,
 	requestedExecutorType string,
+	allowExecutorTransition bool,
 ) error {
 	if task == nil || env == nil {
 		return nil
@@ -1849,15 +1936,37 @@ func rejectInheritedEnvironmentExecutorMismatch(
 	if env.TaskID == "" && requestedExecutorType == string(models.ExecutorTypeKubernetes) {
 		return fmt.Errorf("%w: Kubernetes environment owner could not be verified", models.ErrWorkspaceReuseUnsafe)
 	}
+	if taskUsesInheritedWorkspace(task) && env.TaskID == "" {
+		return fmt.Errorf("%w: inherited environment owner could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	if taskUsesInheritedWorkspace(task) && env.TaskID == task.ID {
+		environmentType, known := env.EffectiveExecutorType()
+		if !known {
+			return fmt.Errorf("%w: canonical task environment executor could not be verified", models.ErrWorkspaceReuseUnsafe)
+		}
+		if !allowExecutorTransition && string(environmentType) != requestedExecutorType {
+			return fmt.Errorf("%w: canonical task environment uses executor %q; selected executor is %q",
+				models.ErrWorkspaceExecutorMismatch, environmentType, requestedExecutorType)
+		}
+	}
 	if env.TaskID == "" || env.TaskID == task.ID {
 		return nil
 	}
-	if taskUsesInheritedWorkspace(task) && env.ExecutorType != "" && env.ExecutorType != requestedExecutorType {
+	kubernetes := requestedExecutorType == string(models.ExecutorTypeKubernetes)
+	environmentType, known := env.EffectiveExecutorType()
+	if taskUsesInheritedWorkspace(task) && !known {
+		return fmt.Errorf("%w: inherited environment executor could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	if taskUsesInheritedWorkspace(task) && kubernetes && env.ExecutorType == "" {
+		return fmt.Errorf("%w: Kubernetes environments are task-owned; create a task with workspace_mode=\"new_workspace\"", models.ErrWorkspaceReuseUnsupported)
+	}
+	if taskUsesInheritedWorkspace(task) && string(environmentType) != requestedExecutorType &&
+		(!allowExecutorTransition || kubernetes) {
 		return fmt.Errorf("%w: inherited task environment belongs to executor %q, launch selected %q",
-			models.ErrWorkspaceReuseUnsafe, env.ExecutorType, requestedExecutorType)
+			models.ErrWorkspaceReuseUnsafe, environmentType, requestedExecutorType)
 	}
 	// Foreign Kubernetes ownership is invalid even for legacy tasks without an inherited-workspace policy.
-	if requestedExecutorType == string(models.ExecutorTypeKubernetes) && (env.ExecutorType == "" || env.ExecutorType == requestedExecutorType) {
+	if kubernetes && (!known || string(environmentType) == requestedExecutorType) {
 		return fmt.Errorf("%w: Kubernetes environments are task-owned; create a task with workspace_mode=\"new_workspace\"", models.ErrWorkspaceReuseUnsupported)
 	}
 	return nil
@@ -1896,6 +2005,9 @@ func (e *Executor) validateInheritedEnvironmentOwner(
 	task *v1.Task,
 	env *models.TaskEnvironment,
 ) error {
+	if env.IsRetired() {
+		return fmt.Errorf("%w: task environment is retained as inactive history", models.ErrWorkspaceReuseUnsafe)
+	}
 	if env == nil || env.TaskID == "" || (task != nil && env.TaskID == task.ID) {
 		return nil
 	}
@@ -1944,6 +2056,7 @@ func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfile
 	}
 	return map[string]interface{}{
 		"id":                           profileInfo.ProfileID,
+		"execution_grade":              profileInfo.ExecutionGrade,
 		"name":                         profileInfo.ProfileName,
 		"agent_id":                     profileInfo.AgentID,
 		"agent_name":                   profileInfo.AgentName,
@@ -2037,20 +2150,12 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			// workspace default (or an empty config).
 			executorID = strings.TrimSpace(session.ExecutorID)
 		}
-		if opts.McpMode == "" {
-			opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, opts.StartAgent)
-			if err != nil {
-				return nil, err
-			}
+		// Request-scoped retained-runtime admission must precede profile
+		// replacement cleanup, environment recovery, credential resolution, the
+		// existing-workspace success path, and agent/MCP/env updates.
+		if err := e.admitPreparedLaunchRuntime(ctx, task, session, executorID); err != nil {
+			return nil, err
 		}
-		if opts.McpProfile == nil {
-			profileContext, profileErr := e.resolveTaskSessionMCPProfile(ctx, task.ID, session, opts.StartAgent)
-			if profileErr != nil {
-				return nil, profileErr
-			}
-			opts.McpProfile = &profileContext
-		}
-
 		running, runningErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 		if runningErr != nil && !errors.Is(runningErr, models.ErrExecutorRunningNotFound) {
 			return nil, fmt.Errorf("load runtime inventory for session %q: %w", sessionID, runningErr)
@@ -2062,16 +2167,45 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if startAgent && opts.RefuseIfAgentRunning && e.executorHasActiveAgent(ctx, session, running) {
 			return nil, ErrExecutionAlreadyRunning
 		}
+		claimedTransition, err := e.claimInheritedEnvironmentTransition(ctx, task, session, executorID, running)
+		if err != nil {
+			return nil, err
+		}
+		if claimedTransition {
+			ctx = withInheritedTransitionClaimed(ctx)
+		}
+		if opts.McpMode == "" {
+			opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, opts.StartAgent)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if opts.McpProfile == nil {
+			profileContext, profileErr := e.launchMCPProfile(ctx, task.ID, session, opts.StartAgent)
+			if profileErr != nil {
+				return nil, profileErr
+			}
+			opts.McpProfile = &profileContext
+		}
+
 		if running != nil && running.ExecutionProfileID != "" &&
 			running.ExecutionProfileID != agentProfileID {
 			if running.AgentExecutionID != "" {
+				// Do not stop the old runtime unless the replacement owns the
+				// exact teardown and can preserve the incoming turn.
+				if !e.registerReplacementStopOwner(ctx, sessionID, running.AgentExecutionID) {
+					return nil, fmt.Errorf("%w: replacement stop ownership is unavailable", ErrExecutionAlreadyRunning)
+				}
 				if err := e.agentManager.StopAgentWithReason(
 					ctx, running.AgentExecutionID, "execution profile changed", true,
 				); err != nil && !errors.Is(err, lifecycle.ErrExecutionNotFound) {
 					return nil, fmt.Errorf("stop previous execution profile: %w", err)
 				}
 			}
-			if err := e.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+			// Stopping the agent can already have removed the row; the profile
+			// binding is cleared either way.
+			if err := e.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil &&
+				!errors.Is(err, models.ErrExecutorRunningNotFound) {
 				return nil, fmt.Errorf("clear previous execution profile: %w", err)
 			}
 			running = nil
@@ -2135,9 +2269,13 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			return nil, err
 		}
 		// An inherited policy keeps the child bound to its canonical environment and
-		// group membership. Do not detach across executor types without an explicit
-		// policy transition that updates both records.
-		if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType); err != nil {
+		// group membership. A non-Kubernetes executor mismatch is a supported
+		// transition: the detach below elects a fresh environment on the selected
+		// executor. Kubernetes keeps its unsupported-reuse refusal.
+		if err := rejectInheritedEnvironmentExecutorMismatch(task, existingEnv, req.ExecutorType, true); err != nil {
+			return nil, err
+		}
+		if err := e.retireInheritedRuntimeForTransition(ctx, task, session, existingEnv, req.ExecutorType, running); err != nil {
 			return nil, err
 		}
 		// A non-policy session can still carry a foreign environment reference from
@@ -2286,6 +2424,21 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 				return result, existingErr
 			}
 		}
+		var startAttemptID string
+		if startAgent {
+			// Claim the attempt before LaunchAgent. Workspace materialization can
+			// fail before persistLaunchState runs, and the failure transition must
+			// still be fenced against a replacement start attempt.
+			expectedState := session.State
+			startAttemptID = claimAgentStartAttempt(session)
+			session.UpdatedAt = time.Now().UTC()
+			if err := e.persistAgentStartAttemptIfCurrentState(launchCtx, session, expectedState, startAttemptID); err != nil {
+				return nil, err
+			}
+			if opts.OnStartAttemptClaimed != nil {
+				opts.OnStartAttemptClaimed(startAttemptID)
+			}
+		}
 
 		// Call the AgentManager to launch the container
 		resp, err := e.agentManager.LaunchAgent(launchCtx, req)
@@ -2293,9 +2446,16 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			if err == nil {
 				err = errors.New("agent launch returned no response")
 			}
-			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
+			if switchedErr := e.workflowParkingSuperseded(launchCtx, session, session.State); switchedErr != nil {
+				return nil, switchedErr
+			}
 			repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
-			return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+			failureCtx := WithWorkflowLaunchFailureOwnership(launchCtx, session)
+			failureErr := e.handleLaunchFailure(failureCtx, task.ID, sessionID, repositoryID, taskRepositoryID, startAgent, err)
+			if !IsSessionStateSwitched(failureErr) {
+				e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
+			}
+			return nil, failureErr
 		}
 
 		// Create or update the task environment with launch results
@@ -2303,7 +2463,8 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
 			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
 			repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
-			return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+			failureCtx := WithWorkflowLaunchFailureOwnership(launchCtx, session)
+			return nil, e.handleLaunchFailure(failureCtx, task.ID, sessionID, repositoryID, taskRepositoryID, startAgent, err)
 		}
 		if startAgent && req.BeforeAgentStart != nil {
 			if err := req.BeforeAgentStart(launchCtx, resp.AgentExecutionID, req.TaskDescription); err != nil {
@@ -2345,6 +2506,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return execution, finalizeErr
 	}()
 	if err != nil && sessionOwned && task != nil && !errors.Is(err, ErrExecutionAlreadyRunning) &&
+		!IsSessionStateSwitched(err) &&
 		(!isCancellableResumeContext(ctx) || ctx.Err() == nil) {
 		// Release while the session lock is still held so a losing launch
 		// cannot fail a claim a later same-session launch already elected.
@@ -2357,6 +2519,15 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 // before a binding retry. The election winner may have created the task's first
 // session while this start waited, so the retry must neither claim the
 // first-session origin nor take the primary flag from the winner.
+
+// repositoryElectsPrimaryOnCreate reports whether the store commits initial
+// primary selection with the session insert. Stores that predate that contract
+// keep the executor's explicit promotion fallback.
+func repositoryElectsPrimaryOnCreate(repo executorStore) bool {
+	elector, ok := repo.(interface{ ElectsPrimaryOnCreate() bool })
+	return ok && elector.ElectsPrimaryOnCreate()
+}
+
 func (e *Executor) refreshRetriedSessionOrder(
 	ctx context.Context,
 	session *models.TaskSession,
@@ -2541,12 +2712,13 @@ func resumeTokenForExecutionProfile(running *models.ExecutorRunning, profileID s
 func (e *Executor) handleLaunchFailure(
 	ctx context.Context,
 	taskID, sessionID, repositoryID, taskRepositoryID string,
+	startAgent bool,
 	launchErr error,
 ) error {
 	// Detach from caller context so failure bookkeeping completes even if the
 	// original request context was cancelled.
 	failCtx := context.WithoutCancel(ctx)
-	safeErr, changed := e.transitionLaunchFailure(
+	changed, failureStamp, safeErr := e.transitionLaunchFailure(
 		failCtx, taskID, sessionID, repositoryID, taskRepositoryID, launchErr, nil,
 	)
 	if changed {
@@ -2554,9 +2726,37 @@ func (e *Executor) handleLaunchFailure(
 			e.logger.Warn("failed to mark task as failed after launch error",
 				zap.String("task_id", taskID),
 				zap.Error(updateErr))
+		} else if startAgent && e.onLaunchFailureRecorded != nil {
+			e.onLaunchFailureRecorded(failCtx, taskID, sessionID, safeErr, failureStamp)
 		}
 	}
 	return safeErr
+}
+
+func (e *Executor) workflowParkingSuperseded(
+	ctx context.Context,
+	launchSession *models.TaskSession,
+	expectedState models.TaskSessionState,
+) *SessionStateSwitchedError {
+	if launchSession == nil || launchSession.ID == "" {
+		return nil
+	}
+	lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	current, err := e.repo.GetTaskSession(lookupCtx, launchSession.ID)
+	if err != nil {
+		e.logger.Warn("failed to inspect session ownership after agent launch failure",
+			zap.String("session_id", launchSession.ID),
+			zap.Error(err))
+		return nil
+	}
+	if !models.WorkflowParkingSupersedesLaunch(launchSession, current, expectedState) {
+		return nil
+	}
+	e.logger.Info("agent launch failure was superseded by a workflow session switch",
+		zap.String("task_id", launchSession.TaskID),
+		zap.String("session_id", launchSession.ID))
+	return &SessionStateSwitchedError{SessionID: launchSession.ID, State: current.State}
 }
 
 func (e *Executor) handleEarlyLaunchFailure(
@@ -2564,6 +2764,12 @@ func (e *Executor) handleEarlyLaunchFailure(
 	taskID, sessionID, repositoryID string,
 	launchErr error,
 ) error {
+	if IsSessionStateSwitched(launchErr) {
+		e.logger.Info("launch superseded by a concurrent workflow session switch",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return routingerr.SanitizeError(launchErr)
+	}
 	failCtx := context.WithoutCancel(ctx)
 	session, loadErr := e.repo.GetTaskSession(failCtx, sessionID)
 	if loadErr != nil || session == nil || session.TaskID != taskID {
@@ -2581,7 +2787,7 @@ func (e *Executor) handleEarlyLaunchFailure(
 		return routingerr.SanitizeError(launchErr)
 	}
 	expectedState := session.State
-	safeErr, changed := e.transitionLaunchFailure(
+	changed, _, safeErr := e.transitionLaunchFailure(
 		failCtx, taskID, sessionID, repositoryID, "", launchErr, &expectedState,
 	)
 	if !changed {
@@ -2633,17 +2839,21 @@ func (e *Executor) transitionLaunchFailure(
 	taskID, sessionID, repositoryID, taskRepositoryID string,
 	launchErr error,
 	expectedState *models.TaskSessionState,
-) (error, bool) {
+) (bool, string, error) {
+	if launchSession, ok := WorkflowLaunchFailureOwnershipFromContext(failCtx); ok && launchSession.ID == sessionID {
+		expected := launchSession.State
+		expectedState = &expected
+	}
 	safeErr := routingerr.SanitizeError(launchErr)
-	e.logger.Error("failed to launch agent",
-		zap.String("task_id", taskID),
-		zap.Error(safeErr))
+	var failureStamp string
 	var onChanged func()
 	onChanged = func() {
+		lastError := e.buildLastAgentError(failCtx, taskID, taskRepositoryID, launchErr)
+		failureStamp = lastError.Stamp()
 		e.persistLastAgentError(
 			failCtx,
 			sessionID,
-			e.buildLastAgentError(failCtx, taskID, taskRepositoryID, launchErr),
+			lastError,
 		)
 		if e.onLaunchFailed != nil {
 			e.onLaunchFailed(failCtx, taskID, sessionID, repositoryID, safeErr)
@@ -2653,11 +2863,23 @@ func (e *Executor) transitionLaunchFailure(
 		failCtx, taskID, sessionID, expectedState, models.TaskSessionStateFailed, safeErr.Error(), onChanged,
 	)
 	if updateErr != nil {
+		var switchedErr *SessionStateSwitchedError
+		if errors.As(updateErr, &switchedErr) {
+			e.logger.Info("launch failure was superseded by a workflow session switch",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+			return false, "", switchedErr
+		}
+	}
+	e.logger.Error("failed to launch agent",
+		zap.String("task_id", taskID),
+		zap.Error(safeErr))
+	if updateErr != nil {
 		e.logger.Warn("failed to mark session as failed after launch error",
 			zap.String("session_id", sessionID),
 			zap.Error(updateErr))
 	}
-	return safeErr, changed
+	return changed, failureStamp, safeErr
 }
 
 // finalizeLaunch persists launch state and returns the resulting TaskExecution.
@@ -2741,7 +2963,8 @@ func (e *Executor) preparedWorkspaceInventoryRequest(
 	reuseRequired := env != nil
 	reuseRequired = workspaceReuseAllowed(env, execConfig.ExecutorType, reuseRequired, e.taskIsRepoBacked(ctx, task.ID))
 	return &LaunchAgentRequest{
-		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
+		TaskID: task.ID, OwnerUserID: e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID),
+		WorkspaceID: task.WorkspaceID, SessionID: session.ID,
 		TaskEnvironmentID: session.TaskEnvironmentID, ExecutorType: execConfig.ExecutorType,
 		UseWorktree: shouldUseWorktree(execConfig.ExecutorType), WorkspaceReuseRequired: reuseRequired,
 		Repositories: buildRepoSpecs(repositories),
@@ -2798,6 +3021,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	sessionID := session.ID
 	req := &LaunchAgentRequest{
 		TaskID:                 task.ID,
+		OwnerUserID:            e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID),
 		WorkspaceID:            task.WorkspaceID,
 		TaskTitle:              task.Title,
 		AgentProfileID:         agentProfileID,
@@ -2820,9 +3044,30 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	if taskUsesInheritedWorkspace(task) {
+		var resolveErr error
+		execConfig, resolveErr = e.resolveImplicitExecutorForEnvironment(ctx, existingEnv, execConfig)
+		if resolveErr != nil {
+			return nil, executorConfig{}, resolveErr
+		}
+	}
+	// Required-runtime admission precedes credential resolution, remote secret
+	// resolution, environment transitions, and workspace mutation. The
+	// retained check repeats at this boundary for callers that did not use
+	// launchPreparedSession.
+	if err := e.admitConcreteExecutorRuntime(execConfig); err != nil {
+		return nil, executorConfig{}, err
+	}
+	retainedType := strings.TrimSpace(execConfig.ExecutorType)
+	if retainedType == "" && existingEnv != nil {
+		retainedType = strings.TrimSpace(existingEnv.ExecutorType)
+	}
+	if err := e.admitRetainedPreparedSelection(ctx, task, session, retainedType); err != nil {
+		return nil, executorConfig{}, err
+	}
+	req.ExecutorType = execConfig.ExecutorType
 	if execConfig.ExecutorID != "" {
 		metadata = execConfig.Metadata
-		req.ExecutorType = execConfig.ExecutorType
 		req.ExecutorConfig = execConfig.ExecutorCfg
 		req.SetupScript = execConfig.SetupScript
 	}
@@ -2835,6 +3080,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	repoBacked := e.taskIsRepoBacked(ctx, task.ID)
 	workspaceReuseRequired = workspaceReuseAllowed(existingEnv, req.ExecutorType, workspaceReuseRequired, repoBacked)
 	req.WorkspaceReuseRequired = workspaceReuseRequired
+	if !workspaceReuseRequired {
+		prepareFreshInheritedCheckoutMaterialization(allRepos)
+	}
 
 	// For remote executors (containerized *and* SSH), resolve only explicitly
 	// selected profile auth secrets. Workspace GitHub automation is configured
@@ -2852,6 +3100,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	metadata, err := e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
 	if err != nil {
 		return nil, execConfig, err
+	}
+	if req.UseWorktree && !req.WorkspaceReuseRequired {
+		applyFreshInheritedCheckoutIdentity(req, repoInfo.RepositoryID, allRepos)
 	}
 	// Multi-repo: when more than one repository is associated with the task,
 	// populate req.Repositories so the lifecycle preparer creates one worktree
@@ -2886,6 +3137,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.Metadata = metadata
 	}
 
+	if req.UseWorktree && existingEnv != nil && existingEnv.TaskDirName != "" {
+		req.TaskDirName = existingEnv.TaskDirName
+	}
 	return req, execConfig, nil
 }
 
@@ -2956,6 +3210,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			RepositoryID:               info.RepositoryID,
 			RepositoryPath:             info.RepositoryPath,
 			BaseBranch:                 info.BaseBranch,
+			BaseBranchFallbackPolicy:   info.BaseBranchFallbackPolicy,
 			IntegrationRef:             info.IntegrationRef,
 			CheckoutBranch:             info.CheckoutBranch,
 			PRNumber:                   info.PRNumber,
@@ -3009,6 +3264,13 @@ func buildRepoBranchPlans(allRepos []*repoInfo) map[*repoInfo]repoBranchPlan {
 		if info == nil || info.RepositoryID == "" {
 			continue
 		}
+		if info.MaterializationBranchPlanReady {
+			plans[info] = repoBranchPlan{
+				identitySlug: info.MaterializationBranchIdentitySlug,
+				pathSlug:     info.MaterializationBranchPathSlug,
+			}
+			continue
+		}
 		defaultBranch := ""
 		if info.Repository != nil {
 			defaultBranch = info.Repository.DefaultBranch
@@ -3025,6 +3287,26 @@ func buildRepoBranchPlans(allRepos []*repoInfo) map[*repoInfo]repoBranchPlan {
 	return plans
 }
 
+func prepareFreshInheritedCheckoutMaterialization(allRepos []*repoInfo) {
+	plans := buildRepoBranchPlans(allRepos)
+	for _, info := range allRepos {
+		if info == nil {
+			continue
+		}
+		plan, ok := plans[info]
+		if !ok {
+			continue
+		}
+		info.MaterializationBranchPlanReady = true
+		info.MaterializationBranchIdentitySlug = plan.identitySlug
+		info.MaterializationBranchPathSlug = plan.pathSlug
+		if info.InheritedCheckoutReuseOnly {
+			info.CheckoutBranch = ""
+			info.PRNumber = 0
+		}
+	}
+}
+
 // applyRepositoryConfig sets repository-related fields on the request and resolves clone URLs.
 func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task, repoInfo *repoInfo, execConfig executorConfig, metadata map[string]interface{}) (map[string]interface{}, error) {
 	if repoInfo.RepositoryPath != "" {
@@ -3034,6 +3316,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.RepositoryPath = repoInfo.RepositoryPath
 		req.WorkspaceRelativePath = repoInfo.WorkspaceRelativePath
 		req.BaseBranch = repoInfo.BaseBranch
+		req.BaseBranchFallbackPolicy = repoInfo.BaseBranchFallbackPolicy
 		req.IntegrationRef = repoInfo.IntegrationRef
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.PRNumber = repoInfo.PRNumber
@@ -3134,6 +3417,7 @@ func dockerLocalCloneSource(repositoryPath string) string {
 func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string, env map[string]string, turnIDs ...string) (*TaskExecution, error) {
 	request := &LaunchAgentRequest{
 		TaskID:      task.ID,
+		OwnerUserID: e.managedRuntimeOwnerUserID(ctx, task.WorkspaceID),
 		WorkspaceID: task.WorkspaceID,
 		SessionID:   session.ID,
 		Env:         cloneStringMap(env),
@@ -3340,6 +3624,9 @@ func (e *Executor) configureExistingWorkspace(
 ) error {
 	if request == nil {
 		return errors.New("existing workspace launch request is required")
+	}
+	if err := e.prepareExistingWorkspaceBuiltin(ctx, executionID, request.McpProfile); err != nil {
+		return err
 	}
 	credentialReq := &LaunchAgentRequest{
 		TaskID:            task.ID,

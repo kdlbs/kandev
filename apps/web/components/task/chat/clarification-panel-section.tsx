@@ -98,10 +98,9 @@ export function ClarificationPanelSection({
     maxHostHeight,
     minHeight,
     canExpand,
-    canReset,
+    expanded,
     containerRef,
-    expandHeight,
-    resetHeight,
+    toggleHeight,
     resetAllHeights,
     resizeHandleProps,
   } = useResizableClarificationOverlay({
@@ -140,9 +139,8 @@ export function ClarificationPanelSection({
       maxHostHeight={maxHostHeight}
       minHeight={minHeight}
       canExpand={canExpand}
-      canReset={canReset}
-      onExpand={expandHeight}
-      onReset={resetHeight}
+      sizeExpanded={expanded}
+      onToggleSize={toggleHeight}
       messages={messages}
       onCollapse={() => setCollapsed(true)}
       onOutcome={onOutcome}
@@ -169,7 +167,7 @@ type ClarificationPanelContentProps = {
   maxHostHeight: number | null;
   minHeight: number;
   canExpand: boolean;
-  canReset: boolean;
+  sizeExpanded: boolean;
   messages: readonly Message[] | null | undefined;
   onCollapse: () => void;
   onOutcome?: (outcome: ClarificationOutcome) => void;
@@ -177,8 +175,7 @@ type ClarificationPanelContentProps = {
   lateAnswerState?: LateClarificationState;
   onResolved: () => void;
   onToggleCollapse: () => void;
-  onExpand: () => void;
-  onReset: () => void;
+  onToggleSize: () => void;
   questionCount: number;
   resizeHandleProps: Parameters<typeof ResizeHandle>[0];
   shortcutScopeRef: RefObject<HTMLElement | null>;
@@ -258,7 +255,7 @@ function ClarificationPanelContent({
   maxHostHeight,
   minHeight,
   canExpand,
-  canReset,
+  sizeExpanded,
   messages,
   onCollapse,
   onOutcome,
@@ -266,8 +263,7 @@ function ClarificationPanelContent({
   lateAnswerState,
   onResolved,
   onToggleCollapse,
-  onExpand,
-  onReset,
+  onToggleSize,
   questionCount,
   resizeHandleProps,
   shortcutScopeRef,
@@ -322,10 +318,9 @@ function ClarificationPanelContent({
             agentDisconnected={agentDisconnected}
             onDismiss={onCollapse}
             onCollapse={onCollapse}
-            onExpandPanel={onExpand}
-            onResetPanel={onReset}
+            onToggleSize={onToggleSize}
+            sizeExpanded={sizeExpanded}
             canExpandPanel={canExpand}
-            canResetPanel={canReset}
             collapseContentId={contentId}
           />
         </div>

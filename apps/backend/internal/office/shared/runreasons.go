@@ -51,8 +51,10 @@ const (
 	// on a new raw-literal declaration outside this package.
 	RunReasonTaskAssigned             = "task_assigned"
 	RunReasonTaskComment              = "task_comment"
+	RunReasonHandoffCompleted         = "handoff_completed"
 	RunReasonTaskBlockersResolved     = "task_blockers_resolved"
 	RunReasonTaskChildrenCompleted    = "task_children_completed"
+	RunReasonTaskBlockerFailed        = "task_blocker_failed"
 	RunReasonApprovalResolved         = "approval_resolved"
 	RunReasonTaskReviewRequested      = "task_review_requested"
 	RunReasonTaskChangesRequested     = "task_changes_requested"

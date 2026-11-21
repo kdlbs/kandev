@@ -19,10 +19,11 @@ var ompACPLogoDark []byte
 const ompACPBin = "omp"
 
 var (
-	_ Agent              = (*OmpACP)(nil)
-	_ PassthroughAgent   = (*OmpACP)(nil)
-	_ InferenceAgent     = (*OmpACP)(nil)
-	_ HarnessUpdateAgent = (*OmpACP)(nil)
+	_ Agent                  = (*OmpACP)(nil)
+	_ PassthroughAgent       = (*OmpACP)(nil)
+	_ InferenceAgent         = (*OmpACP)(nil)
+	_ HarnessUpdateAgent     = (*OmpACP)(nil)
+	_ NativeUpdateCheckAgent = (*OmpACP)(nil)
 )
 
 // OmpACP implements Agent for the Oh My Pi (omp) coding agent via its native
@@ -88,6 +89,14 @@ func (a *OmpACP) HarnessUpdate() HarnessUpdateSpec {
 	return HarnessUpdateSpec{
 		Package:       "@oh-my-pi/pi-coding-agent",
 		UpdateCommand: NewCommand(ompACPBin, "update"),
+	}
+}
+
+func (a *OmpACP) NativeUpdateCheck() NativeUpdateCheckSpec {
+	return NativeUpdateCheckSpec{
+		Command: NewCommand(ompACPBin, "update", "--check"),
+		Parse:   ParseOmpUpdateCheck,
+		Context: ompUpdateCheckContext(),
 	}
 }
 

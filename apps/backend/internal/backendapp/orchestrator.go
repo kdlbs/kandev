@@ -51,6 +51,7 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	userstore "github.com/kandev/kandev/internal/user/store"
 	utilitymodels "github.com/kandev/kandev/internal/utility/models"
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -104,6 +105,7 @@ func provideOrchestrator(
 	serviceCfg.ClaudeMidTurnSteering =
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
 	serviceCfg.CodexAppServerEnabled = cfg != nil && cfg.Features.CodexAppServer
+	serviceCfg.ProviderKeywordContext = cfg != nil && cfg.Features.ProviderKeywordContext
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)
@@ -143,7 +145,7 @@ func provideOrchestrator(
 	autoMergeEnabled := queueSettings.AutoMergeEnabled
 	msgQueue := messagequeue.NewService(queueRepo, maxPerSession, log)
 	msgQueue.SetMergeEnabled(mergeEnabled)
-	msgQueue.SetAutoMergePolicy(autoMergeEnabled, queueResolution.Settings.AutoMergeRevision)
+	msgQueue.SetGlobalAutoMergePolicy(queueResolution.Settings.GlobalAutoMergePolicy())
 	log.Info("Message queue initialized",
 		zap.Int("max_per_session", maxPerSession),
 		zap.Bool("merge_enabled", mergeEnabled),
@@ -162,6 +164,8 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	orchestratorSvc.SetManagedRuntimeSingleUserOwner(singleUserManagedRuntimeOwner(authSvc))
+	orchestratorSvc.SetExecutionCapacity(sessionCapacityResolution.Effective)
 	orchestratorSvc.SetStartupRecoveryOwnerContextResolver(func(ctx context.Context, ownerID, orgID string) (context.Context, error) {
 		return startupRecoveryOwnerContext(ctx, authSvc, ownerID, orgID)
 	})
@@ -296,10 +300,14 @@ func provideOrchestrator(
 	taskSvc.SetTaskStatusSummaryLaunchQueueReader(func(ctx context.Context, tasks []*taskmodels.Task) map[string]*statussummary.LaunchQueueSummary {
 		observation, observationErr := orchestratorSvc.CurrentSessionCeilingObservation(ctx)
 		capacity := &statussummary.LaunchQueueCapacityObservation{
-			InUse:      observation.InUse,
-			Limit:      observation.Limit,
-			ObservedAt: observation.ObservedAt,
-			Known:      observationErr == nil && observation.Known,
+			Policy:             observation.Policy,
+			GradeInUse:         observation.GradeInUse,
+			GradeLimits:        observation.GradeLimits,
+			NeedsConfiguration: observation.NeedsConfiguration,
+			InUse:              observation.InUse,
+			Limit:              observation.Limit,
+			ObservedAt:         observation.ObservedAt,
+			Known:              observationErr == nil && observation.Known,
 		}
 		queues := make(map[string]*statussummary.LaunchQueueSummary, len(tasks))
 		for _, task := range tasks {
@@ -405,6 +413,17 @@ func provideOrchestrator(
 	orchestratorSvc.SetTaskRepositoryBaseBranchUpdater(&repoLocalPathUpdater{svc: taskSvc})
 
 	return orchestratorSvc, msgCreator, nil
+}
+
+// singleUserManagedRuntimeOwner permits the established single-user repair
+// owner only while the live auth service explicitly reports disabled mode.
+func singleUserManagedRuntimeOwner(authSvc *auth.Service) func() (string, bool) {
+	return func() (string, bool) {
+		if authSvc == nil || authSvc.Mode() != auth.ModeDisabled {
+			return "", false
+		}
+		return userstore.DefaultUserID, true
+	}
 }
 
 func startupRecoveryOwnerContext(
@@ -871,6 +890,7 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		})
 	}
 	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		BuiltinMCPPreferences: req.BuiltinMCPPreferences, MCPServerIDs: req.MCPServerIDs,
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,

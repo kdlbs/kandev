@@ -517,6 +517,10 @@ export async function mergeMR(
   });
 }
 
+export async function markMRReady(identity: GitLabMRIdentity) {
+  return reviewMutation<MR>("/api/v1/gitlab/mrs/ready", "PUT", identity);
+}
+
 export async function approveMR(identity: GitLabMRIdentity) {
   return reviewMutation<{ approved: boolean }>("/api/v1/gitlab/mrs/approve", "POST", identity);
 }

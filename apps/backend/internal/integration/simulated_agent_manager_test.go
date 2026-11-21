@@ -46,6 +46,14 @@ type SimulatedAgentManagerClient struct {
 	stopCh              chan struct{}
 }
 
+func (*SimulatedAgentManagerClient) RequiresCloneURL(string) bool          { return false }
+func (*SimulatedAgentManagerClient) ShouldApplyPreferredShell(string) bool { return false }
+func (*SimulatedAgentManagerClient) ValidateExecutorRuntime(string) error  { return nil }
+
+func (*SimulatedAgentManagerClient) ValidateExecutionRuntime(context.Context, string, string, string) error {
+	return nil
+}
+
 // simulatedInstance tracks a simulated agent instance
 type simulatedInstance struct {
 	id             string

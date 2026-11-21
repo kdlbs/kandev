@@ -23,6 +23,7 @@ import { WebhookProvidersSection } from "@/components/settings/notifications-set
 import { webhookHeadersError } from "@/components/settings/notifications-settings-webhook-helpers";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
+import { NotificationFormatters } from "@/components/settings/notification-formatters";
 
 function useTableData(state: NotificationsState) {
   const { providers, notificationEvents } = state;
@@ -200,14 +201,16 @@ export function NotificationsSettings() {
       contentFrame="none"
     >
       <div className="space-y-6">
-        <DesktopNotificationsSection
-          notificationPermission={notificationPermission}
-          onRequestPermission={actions.handleRequestPermission}
-          onRefreshPermission={actions.handleRefreshPermission}
-          onTestNotification={actions.handleTestNotification}
-        />
+        <div className="space-y-3">
+          <DesktopNotificationsSection
+            notificationPermission={notificationPermission}
+            onRequestPermission={actions.handleRequestPermission}
+            onRefreshPermission={actions.handleRefreshPermission}
+            onTestNotification={actions.handleTestNotification}
+          />
+          <NotificationSoundSection onDirtyChange={setSoundIsDirty} />
+        </div>
         <WebPushSection />
-        <NotificationSoundSection onDirtyChange={setSoundIsDirty} />
         <ExternalProvidersSection
           appriseAvailable={appriseAvailable}
           appriseProviders={appriseProviders}
@@ -250,6 +253,7 @@ export function NotificationsSettings() {
             />
           )}
         </SettingsGroup>
+        <NotificationFormatters providers={baselineProviders} />
       </div>
     </SettingsPageTemplate>
   );

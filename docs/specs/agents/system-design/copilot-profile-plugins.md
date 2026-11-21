@@ -36,7 +36,7 @@ Related contracts:
 - [Portable configuration](../requirements/portable-agent-configuration.md): no implied plugin or credential portability.
 - [Context reset decision](../../../decisions/2026-08-18-context-reset-preserves-runtime-configuration.md): retained sessions and replacement processes differ.
 - [Native MCP preparation decision](../../../decisions/2026-09-28-profile-authorized-mcp-preparation.md): native policy remains authoritative, without adopting Cursor preparation here.
-- [Native authority](copilot-profile-plugins-native-qualification.md): version-bounded preparation, diagnostic evidence, and failure recovery.
+- [Native authority](copilot-profile-plugins-native-qualification.md): native policy, diagnostic evidence, and failure recovery.
 
 The linked native-authority ADR records the policy-ownership trade-off.
 
@@ -63,7 +63,7 @@ ACP startup with disposable fixtures, without authentication.
 Confirmed in this checkout:
 
 - `CopilotACP.ID()` is `copilot-acp`. `BuildCommand` uses the selected managed npm package.
-- `managed_npm_runtime_versions.json` pins `@github/copilot` to `1.0.88`.
+- `managed_npm_runtime_versions.json` pins `@github/copilot` to `1.0.106`.
 - `ManagedNPMRuntimeSpec.InteractiveCommand(version)` provides the same package without `--acp`.
 - `resolveProfileProbeContext` resolves authorized profile settings and secrets.
 - `requireProfileDiscoveryScope` requires `org.config.manage`.
@@ -80,8 +80,10 @@ Supplied observations: Copilot `1.0.103/1.0.104` loaded `harness` through an exp
 Its read-only Atlassian call succeeded with existing native authentication.
 Both ordinary CLI and ACP logs fetched managed policy. The automatic activation
 difference remains unexplained. WO-00 reproduced inventory and ACP startup for
-`1.0.88` and `1.0.104`; authenticated calls and managed-veto observation remain
-unverified.
+the historical `1.0.88` and `1.0.104` fixtures; authenticated calls and
+managed-veto observation remain unverified. The current inventory adapter also
+supports `1.0.105` with inventory, installation-metadata, manifest, and
+repeated-mount evidence only.
 
 Official references, checked 2026-10-27:
 
@@ -93,7 +95,7 @@ Official references, checked 2026-10-27:
 - The [ACP reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/acp-server) describes `--acp`, stdio, and process-owned session options.
   ACP remains a changing upstream interface.
 
-These references do not establish the private installation schema or explicit-mount policy enforcement for Kandev's `1.0.88` pin.
+These references do not establish the private installation schema or explicit-mount policy enforcement for Kandev's current `1.0.106` pin.
 
 ## Design choices and alternatives
 
@@ -201,7 +203,7 @@ Reject lexical traversal, control characters, device namespaces, and unsupported
 Canonicalize an explicitly recorded symlink target once. Accept external targets only as explicit metadata evidence.
 Never discover another directory through a symlink or a search.
 Bound manifests to 256 KiB and native state to 2 MiB, including file-growth checks.
-Use the exact manifest locations and precedence qualified for the runtime, then match the manifest name and compatible version.
+Use supported manifest locations and precedence, then match the manifest name and compatible plugin version.
 Reject ambiguous manifests and symlinked manifest files. Do not parse executable components to reproduce them.
 Recheck canonical identity immediately before process configuration. A changed root fails that start.
 
@@ -459,7 +461,7 @@ They do not expose filesystem paths or raw provider errors.
 ## Compatibility qualification
 
 The [admission contract](copilot-profile-plugins-native-qualification.md#qualification-and-admission)
-keeps inventory/metadata versions bounded while delegating policy to Copilot.
+uses [observed contracts](copilot-plugin-contract-compatibility.md) while delegating policy to Copilot.
 Remove the separate policy-only allowlist; do not replace it with an
 OS/architecture certification gate. Diagnostic evidence records its actual
 platform without claiming unobserved enterprise enforcement.
@@ -468,3 +470,4 @@ platform without claiming unobserved enterprise enforcement.
 
 - [Copilot profile plugins](../../../plans/copilot-profile-plugins/plan.md).
 - [Copilot profile plugin completion](../../../plans/copilot-profile-plugin-completion/plan.md).
+- [Copilot runtime plugin compatibility](../../../plans/copilot-runtime-plugin-compatibility/plan.md): issue #5064; qualification and runtime/profile recovery.

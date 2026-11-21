@@ -101,3 +101,96 @@ describe("useMRFeedback identity isolation", () => {
     expect(result.current.error).toContain("files unavailable");
   });
 });
+
+describe("useMRFeedback reload", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  async function mounted() {
+    api.getMRFeedback.mockResolvedValue(feedback("first"));
+    api.getMRFiles.mockResolvedValue({ files: [] });
+    api.getMRCommits.mockResolvedValue({ commits: [] });
+    const hook = renderHook(() => useMRFeedback(WORKSPACE_ID, "group/a", 1, GITLAB_HOST));
+    await waitFor(() => expect(hook.result.current.feedback?.mr.title).toBe("first"));
+    return hook;
+  }
+
+  it("resolves ok with the reloaded MR and applies it", async () => {
+    const { result } = await mounted();
+    api.getMRFeedback.mockResolvedValue(feedback("second"));
+    let outcome: Awaited<ReturnType<typeof result.current.reload>> | undefined;
+    await act(async () => {
+      outcome = await result.current.reload();
+    });
+    expect(outcome).toEqual({ outcome: "ok", mr: { title: "second" } });
+    expect(result.current.feedback?.mr.title).toBe("second");
+  });
+
+  it("is failed when the feedback request fails and keeps the previous feedback", async () => {
+    const { result } = await mounted();
+    api.getMRFeedback.mockImplementation(() => rejected("feedback down"));
+    let outcome: Awaited<ReturnType<typeof result.current.reload>> | undefined;
+    await act(async () => {
+      outcome = await result.current.reload();
+    });
+    expect(outcome).toEqual({ outcome: "failed" });
+    expect(result.current.feedback?.mr.title).toBe("first");
+    expect(result.current.error).toContain("feedback down");
+  });
+
+  it("is still ok when only files or commits fail", async () => {
+    const { result } = await mounted();
+    api.getMRFeedback.mockResolvedValue(feedback("second"));
+    api.getMRFiles.mockImplementation(() => rejected("files down"));
+    let outcome: Awaited<ReturnType<typeof result.current.reload>> | undefined;
+    await act(async () => {
+      outcome = await result.current.reload();
+    });
+    expect(outcome?.outcome).toBe("ok");
+    expect(result.current.error).toContain("files down");
+  });
+
+  it("is superseded by a newer reload and dispatches nothing for the older one", async () => {
+    const { result } = await mounted();
+    const older = deferred<GitLabMRFeedback>();
+    api.getMRFeedback.mockReturnValueOnce(older.promise);
+    let olderOutcome: Promise<Awaited<ReturnType<typeof result.current.reload>>> | undefined;
+    act(() => {
+      olderOutcome = result.current.reload();
+    });
+    api.getMRFeedback.mockResolvedValue(feedback("newer"));
+    await act(async () => {
+      await result.current.reload();
+    });
+    await act(async () => {
+      older.resolve(feedback("older"));
+      expect(await olderOutcome).toEqual({ outcome: "superseded" });
+    });
+    expect(result.current.feedback?.mr.title).toBe("newer");
+  });
+
+  it("is superseded by refresh() and by unmount", async () => {
+    const { result, unmount } = await mounted();
+    const slow = deferred<GitLabMRFeedback>();
+    api.getMRFeedback.mockReturnValueOnce(slow.promise);
+    let pending: Promise<Awaited<ReturnType<typeof result.current.reload>>> | undefined;
+    act(() => {
+      pending = result.current.reload();
+    });
+    api.getMRFeedback.mockResolvedValue(feedback("refreshed"));
+    act(() => result.current.refresh());
+    await act(async () => {
+      slow.resolve(feedback("late"));
+      expect(await pending).toEqual({ outcome: "superseded" });
+    });
+    await waitFor(() => expect(result.current.feedback?.mr.title).toBe("refreshed"));
+
+    const last = deferred<GitLabMRFeedback>();
+    api.getMRFeedback.mockReturnValueOnce(last.promise);
+    act(() => {
+      pending = result.current.reload();
+    });
+    unmount();
+    last.resolve(feedback("after unmount"));
+    expect(await pending).toEqual({ outcome: "superseded" });
+  });
+});

@@ -121,11 +121,11 @@ export const AskUserQuestionRenderer: KandevRenderer = ({ args, result, status }
               <>
                 <SummaryDot />
                 <span className="truncate max-w-[50ch]">
-                  &ldquo;
+                  “
                   <ClarificationMarkdown variant="inline" linkBehavior="passive" className="inline">
                     {promptShort}
                   </ClarificationMarkdown>
-                  &rdquo;
+                  ”
                 </span>
               </>
             )}

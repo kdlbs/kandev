@@ -5,6 +5,14 @@ import type { SessionRecoveryOwner } from "@/lib/session-recovery-presentation";
 import type { SessionErrorDetailsField } from "@/lib/session-error-details";
 import { normalizeAgentErrorCauses } from "@/lib/session-last-agent-error";
 import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
+import {
+  appendProcessExitDetail,
+  isProcessExitCause,
+  processExitPrerequisite,
+  processExitSummary,
+  processExitTitleKey,
+} from "./session-process-exit-recovery";
+import { causeLabel, operationLabel } from "./session-bootstrap-cause-labels";
 import type {
   AgentErrorCause,
   TaskStatusSummaryActiveError,
@@ -17,48 +25,31 @@ const selectionCauseCodes = new Set([
   "permission_mode_unconfirmed",
   "permission_mode_mismatch",
 ]);
-
-export function causeLabel(code: string | undefined, translate: TFunction): string {
-  switch (code) {
-    case "authentication_required":
-      return translate("task:sessionBootstrapCauseAuthenticationRequired");
-    case "permission_denied":
-      return translate("task:sessionBootstrapCausePermissionDenied");
-    case "destination_invalid":
-      return translate("task:sessionBootstrapCauseDestinationInvalid");
-    case "source_branch_missing":
-      return translate("task:sessionBootstrapCauseSourceBranchMissing");
-    case "runtime_cleanup_failed":
-      return translate("task:sessionRuntimeCleanupFailedBody");
-    case "transport_unavailable":
-      return translate("task:sessionBootstrapCauseTransportUnavailable");
-    case "timeout":
-      return translate("task:sessionBootstrapCauseTimeout");
-    case "model_unavailable":
-      return translate("task:sessionBootstrapCauseModelUnavailable");
-    case "model_selection_failed":
-      return translate("task:sessionBootstrapCauseModelSelectionFailed");
-    case "permission_mode_failed":
-      return translate("task:sessionBootstrapCausePermissionModeFailed");
-    case "permission_mode_unconfirmed":
-      return translate("task:sessionBootstrapCausePermissionModeUnconfirmed");
-    case "permission_mode_mismatch":
-      return translate("task:sessionBootstrapCausePermissionModeMismatch");
-    case "delivery_storage":
-      return translate("task:sessionBootstrapCauseDeliveryStorage");
-    default:
-      return translate("task:sessionBootstrapCauseUnknown");
-  }
-}
-
-export function operationLabel(operation: string | undefined, translate: TFunction): string {
-  if (operation === "start") return translate("task:sessionRecoveryStartAttempt");
-  if (operation === "restore_workspace") {
-    return translate("task:sessionRecoveryRestoreAttempt");
-  }
-  if (operation === "delivery") return translate("task:sessionRecoveryDeliveryAttempt");
-  return translate("task:sessionRecoveryResumeAttempt");
-}
+const pluginRuntimeReasonKey = "task:sessionBootstrapPluginReasonRuntime";
+const pluginInventoryReasonKey = "task:sessionBootstrapPluginReasonInventory";
+const pluginInstallationReasonKey = "task:sessionBootstrapPluginReasonInstallation";
+const pluginSelectionReasonKey = "task:sessionBootstrapPluginReasonSelection";
+const pluginFailureReasonKeys: Record<string, string> = {
+  cli_unavailable: pluginRuntimeReasonKey,
+  timeout: pluginRuntimeReasonKey,
+  cancelled: pluginRuntimeReasonKey,
+  output_limit: pluginInventoryReasonKey,
+  invalid_inventory: pluginInventoryReasonKey,
+  legacy_errors: pluginInventoryReasonKey,
+  runtime_unsupported: pluginRuntimeReasonKey,
+  plugin_loading_unsupported: pluginRuntimeReasonKey,
+  unsupported_launch_context: pluginRuntimeReasonKey,
+  metadata_unavailable: pluginInstallationReasonKey,
+  ambiguous_identity: pluginInstallationReasonKey,
+  missing_root: pluginInstallationReasonKey,
+  manifest_mismatch: pluginInstallationReasonKey,
+  unsafe_root: pluginInstallationReasonKey,
+  builtin_not_mountable: pluginSelectionReasonKey,
+  external_not_mountable: pluginSelectionReasonKey,
+  unsupported_source: pluginSelectionReasonKey,
+  manual_mount_conflict: pluginSelectionReasonKey,
+  policy_unverified: pluginSelectionReasonKey,
+};
 
 export function automaticRecoveryCauses(
   recovery: SessionRecoveryOwner | null | undefined,
@@ -149,7 +140,10 @@ export type RecoveryCardModel = {
   freshStartWarning: boolean;
   detailFields: SessionErrorDetailsField[];
   hasTypedSelectionCause: boolean;
+  hasTypedPluginCause: boolean;
   hasTypedCleanupCause: boolean;
+  hasTypedProcessCause: boolean;
+  prerequisite: string | null;
   titleKey: string;
   summary: string;
 };
@@ -273,6 +267,21 @@ function causeSummary(
   translate: TFunction,
 ): string {
   if (!cause) return translate("task:sessionBootstrapRecoverySummary");
+  if (isProcessExitCause(cause)) {
+    return processExitSummary(cause, translate);
+  }
+  if (cause.code === "plugin_preparation_failed") {
+    const reason = translate(
+      pluginFailureReasonKeys[cause.reason ?? ""] ?? "task:sessionBootstrapPluginReasonUnknown",
+    );
+    if (cause.runtime_version) {
+      return translate("task:sessionBootstrapPluginFailureSummaryWithRuntime", {
+        reason,
+        runtime: cause.runtime_version,
+      });
+    }
+    return translate("task:sessionBootstrapPluginFailureSummary", { reason });
+  }
   const key = isStartupSelectionCause(cause) ? selectionSummaryKey(cause) : null;
   if (key) return translate(key, selectorSummaryOptions(cause, agentDisplayName, translate));
   return causeLabel(cause.code, translate);
@@ -288,6 +297,8 @@ function isStartupSelectionCause(cause: AgentErrorCause): boolean {
 function selectPrimaryCause(causes: AgentErrorCause[]): AgentErrorCause | null {
   return (
     causes.find((cause) => cause.code === "runtime_cleanup_failed") ??
+    causes.find((cause) => cause.code === "plugin_preparation_failed") ??
+    causes.find((cause) => cause.code === "process_exited") ??
     causes.find(isStartupSelectionCause) ??
     causes.find((cause) => cause.operation !== "restore_workspace") ??
     causes[0] ??
@@ -310,10 +321,20 @@ function recoveryDetailFields(
       translate("task:sessionErrorDetailOperation"),
       operationLabel(cause.operation, translate),
     );
+    if (cause.code === "plugin_preparation_failed") {
+      appendSelectorDetail(
+        fields,
+        "task:sessionErrorDetailRuntime",
+        cause.runtime_version,
+        translate,
+      );
+      continue;
+    }
     if (cause.code)
       appendDetailField(fields, translate("task:sessionErrorDetailCause"), cause.code);
     if (cause.reason)
       appendDetailField(fields, translate("task:sessionErrorDetailReason"), cause.reason);
+    appendProcessExitDetail(fields, cause, translate);
     appendSelectorDetail(
       fields,
       "task:sessionErrorDetailRequestedModel",
@@ -419,8 +440,13 @@ function readOnlyWorkspaceOutcome(
 function anyRecoveryFailure(
   automaticRecovery: SessionRecoveryOwner | null | undefined,
   manualFailureExists: boolean,
+  manualReadOnlyRecovery: boolean,
 ): boolean {
-  return automaticRecovery?.recoveryFailure?.outcome === "recovery_failed" || manualFailureExists;
+  return (
+    (!manualReadOnlyRecovery &&
+      automaticRecovery?.recoveryFailure?.outcome === "recovery_failed") ||
+    manualFailureExists
+  );
 }
 
 function displayReadOnlyWorkspace(
@@ -457,6 +483,7 @@ function recoveryCardStatus({
   const hasRecoveryFailure = anyRecoveryFailure(
     automaticRecovery,
     currentManualRecoveryFailure(error, manualFailure),
+    recoveryNoticeKind === "workspace_read_only",
   );
   const isReadOnly = displayReadOnlyWorkspace(
     automaticRecovery,
@@ -508,12 +535,15 @@ export function buildRecoveryCardModel({
     translate,
   });
   const hasTypedSelectionCause = causes.some(isStartupSelectionCause);
-  const causeTitleKey =
-    primaryCause && isStartupSelectionCause(primaryCause) ? selectionTitleKey(primaryCause) : null;
+  const hasTypedPluginCause = causes.some((cause) => cause.code === "plugin_preparation_failed");
+  const hasTypedProcessCause = causes.some(isProcessExitCause);
   const hasTypedCleanupCause = primaryCause?.code === "runtime_cleanup_failed";
-  const titleKey = hasTypedCleanupCause
-    ? "task:sessionRuntimeCleanupFailedTitle"
-    : (causeTitleKey ?? recoveryTitleKey(status.isReadOnly, status.hasRecoveryFailure));
+  const titleKey = recoveryCardTitleKey(
+    primaryCause,
+    status,
+    hasTypedPluginCause,
+    hasTypedCleanupCause,
+  );
 
   return {
     causes,
@@ -529,8 +559,31 @@ export function buildRecoveryCardModel({
     freshStartWarning: Boolean(primaryCause && isStartupSelectionCause(primaryCause)),
     detailFields: recoveryDetailFields(error, causes, translate),
     hasTypedSelectionCause,
+    hasTypedPluginCause,
     hasTypedCleanupCause,
+    hasTypedProcessCause,
+    prerequisite: processExitPrerequisite(primaryCause, translate),
     titleKey,
     summary: causeSummary(primaryCause, agentDisplayName, translate),
   };
+}
+
+function recoveryCardTitleKey(
+  primaryCause: AgentErrorCause | null,
+  status: RecoveryCardStatus,
+  hasTypedPluginCause: boolean,
+  hasTypedCleanupCause: boolean,
+): string {
+  if (hasTypedCleanupCause) return "task:sessionRuntimeCleanupFailedTitle";
+  if (hasTypedPluginCause && primaryCause?.code === "plugin_preparation_failed") {
+    return "task:sessionBootstrapPluginFailureTitle";
+  }
+  if (primaryCause && isStartupSelectionCause(primaryCause)) {
+    return (
+      selectionTitleKey(primaryCause) ??
+      recoveryTitleKey(status.isReadOnly, status.hasRecoveryFailure)
+    );
+  }
+  if (primaryCause?.code === "process_exited") return processExitTitleKey(primaryCause);
+  return recoveryTitleKey(status.isReadOnly, status.hasRecoveryFailure);
 }

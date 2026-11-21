@@ -13,6 +13,7 @@ import {
 } from "@/components/settings/settings-save-provider";
 import { clearNavigationBlockerForTests } from "@/lib/routing/navigation-guard";
 import type { WorkspaceState } from "@/lib/state/store";
+import type { AuthSliceState } from "@/lib/state/slices/auth/types";
 import type { WorkspacePayload } from "@/lib/types/backend";
 import { registerWorkspacesHandlers } from "@/lib/ws/handlers/workspaces";
 import WorkspaceEditPage from "./[id]/page";
@@ -115,6 +116,21 @@ function transport(current: Fixture, input: RequestInfo | URL, init?: RequestIni
     current.tickets.push(ticket);
     return promise;
   }
+  if (method === "GET" && path === `/api/v1/workspaces/${TARGET_ID}/runtime-footprint`) {
+    return Promise.resolve(
+      json({
+        live_runtimes: 0,
+        workspace_runtimes: 0,
+        processes: 0,
+        committed_bytes: 0,
+        resident_bytes: 0,
+        unreadable_runtimes: 0,
+        complete: false,
+        observed_at: "2026-10-02T00:00:00Z",
+        runtimes: [],
+      }),
+    );
+  }
   const readValues: Record<string, unknown> = {
     "/api/v1/units": { units: [], total: 0 },
     [`/api/v1/workspaces/${TARGET_ID}/members`]: { members: [] },
@@ -131,7 +147,10 @@ function transport(current: Fixture, input: RequestInfo | URL, init?: RequestIni
   throw new Error(`Unexpected external transport: ${method} ${path}`);
 }
 
-export async function mountWorkspace(overrides: Partial<Workspace> = {}): Promise<Fixture> {
+export async function mountWorkspace(
+  overrides: Partial<Workspace> = {},
+  auth?: AuthSliceState["auth"],
+): Promise<Fixture> {
   const current = {
     tickets: [],
     saves: [],
@@ -148,6 +167,7 @@ export async function mountWorkspace(overrides: Partial<Workspace> = {}): Promis
   render(
     <StateProvider
       initialState={{
+        ...(auth ? { auth } : {}),
         workspaces: {
           items: [workspace(TARGET_ID, overrides), workspace(OTHER_ID)],
           activeId: TARGET_ID,
@@ -192,7 +212,6 @@ export async function mountWorkspace(overrides: Partial<Workspace> = {}): Promis
       </ToastProvider>
     </StateProvider>,
   );
-  await waitFor(() => expect(current.reads).toHaveLength(3));
   await act(async () => {});
   expect(current.unexpected).toEqual([]);
   return current;

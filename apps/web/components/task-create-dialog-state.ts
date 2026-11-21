@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- task-create form state owns one complete reset and hydration contract. */
 
 "use client";
+import type { BuiltinMCPCreateDraft } from "@/lib/types/builtin-mcp";
 
 /* eslint-disable max-lines -- the state module owns the task creation form lifecycle and projections. */
 
@@ -92,13 +93,30 @@ function useWorkflowAgentProfileState() {
  */
 function useTaskDependencyState() {
   const [blockedBy, setBlockedBy] = useState<string[]>([]);
-  return { blockedBy, setBlockedBy };
+  const [selectedParentTaskId, setSelectedParentTaskId] = useState<string | undefined>();
+  const [relatedTaskIds, setRelatedTaskIds] = useState<string[]>([]);
+  return {
+    blockedBy,
+    setBlockedBy,
+    selectedParentTaskId,
+    setSelectedParentTaskId,
+    relatedTaskIds,
+    setRelatedTaskIds,
+  };
 }
 
 function useTaskMCPSelectionState() {
+  const [builtinMCPPreferences, setBuiltinMCPPreferences] = useState<BuiltinMCPCreateDraft>();
   const [mcpServerIds, setMcpServerIds] = useState<string[]>([]);
   const [mcpServerIdsDirty, setMcpServerIdsDirty] = useState(false);
-  return { mcpServerIds, setMcpServerIds, mcpServerIdsDirty, setMcpServerIdsDirty };
+  return {
+    mcpServerIds,
+    setMcpServerIds,
+    mcpServerIdsDirty,
+    setMcpServerIdsDirty,
+    builtinMCPPreferences,
+    setBuiltinMCPPreferences,
+  };
 }
 
 function useFreshBranchState() {
@@ -267,6 +285,9 @@ export function useDialogFormState(
     lockedWorkflow,
     resetters: {
       setBlockedBy: dependencies.setBlockedBy,
+      setSelectedParentTaskId: dependencies.setSelectedParentTaskId,
+      setRelatedTaskIds: dependencies.setRelatedTaskIds,
+      setBuiltinMCPPreferences: mcpSelections.setBuiltinMCPPreferences,
       setMcpServerIds: mcpSelections.setMcpServerIds,
       setMcpServerIdsDirty: mcpSelections.setMcpServerIdsDirty,
       setTaskName: form.setTaskName,

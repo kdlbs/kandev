@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -26,6 +27,13 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	if client == nil {
 		return fmt.Errorf("native resume agentctl is unavailable")
 	}
+	if m.streamManager != nil {
+		if repository := m.streamManager.deliveryRepository(); repository != nil {
+			if err := m.abandonOrphanSuccessorStreams(ctx, execution, client, repository); err != nil {
+				return err
+			}
+		}
+	}
 	status, err := m.nativeResumeDeliveryStatus(ctx, execution, client)
 	if err != nil || status == nil {
 		return err
@@ -37,27 +45,47 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	if m.streamManager == nil || m.streamManager.deliveryRepository() == nil {
 		return fmt.Errorf("%w: %w: SQL submission repository is unavailable", ErrDurableAdoptionBlocked, ErrDurableAdoptionEvidenceUnavailable)
 	}
-	if err := m.reconcileNativeResumeSQLDispatch(ctx, execution, status, submissions); err != nil {
+	missingPeerRows, err := m.reconcileNativeResumeSQLDispatch(ctx, execution, status, submissions)
+	if err != nil {
 		return err
 	}
 	if _, err := authenticatedDeliveryReplayCursor(ctx, execution, m.streamManager.deliveryRepository(), status); err != nil {
 		return err
 	}
+	missingPeerByID := make(map[string]journal.Submission, len(missingPeerRows))
+	for _, row := range missingPeerRows {
+		missingPeer := journal.Submission{
+			ID: row.ID, StreamID: status.StreamID, SessionID: row.SessionID,
+			IncarnationID: row.IncarnationID, HarnessGeneration: uint64(row.HarnessGeneration),
+			Hash: row.PayloadHash, State: journal.SubmissionInterruptedUnknown,
+		}
+		missingPeerByID[row.ID] = missingPeer
+		submissions = append(submissions, missingPeer)
+	}
 	// Dispatch reconciliation can change SQL state; pin one fresh inventory for validation and retirement selection.
-	rows, err := nativeResumeSQLRows(ctx, execution, status, submissions, m.streamManager.deliveryRepository())
+	rows, unproven, err := nativeResumeSQLRows(ctx, execution, status, submissions, m.streamManager.deliveryRepository())
 	if err != nil {
 		return err
 	}
-	if err := validateNativeResumeSQLRows(execution, status, submissions, rows, false); err != nil {
+	if err := validateNativeResumeSQLRows(execution, status, submissions, rows, unproven, false); err != nil {
 		return err
 	}
-	ids, err := nativeResumeRetirementIDs(execution, status, submissions, rows)
+	ids, err := nativeResumeRetirementIDs(execution, status, submissions, rows, unproven)
 	if err != nil {
 		return err
 	}
 	for _, id := range ids {
-		if err := m.deliveryJournalReleaser().retire(ctx, client, id); err != nil {
-			return fmt.Errorf("acknowledge native resume delivery: %w", err)
+		if missingPeer, missing := missingPeerByID[id]; missing {
+			err = m.deliveryJournalReleaser().retireMissingUnknown(ctx, client, missingPeer)
+			if err != nil {
+				return withDeliveryRecoveryRefusal(nativeResumeMissingPeerRefusalReason(err),
+					fmt.Errorf("write native resume missing-peer retirement: %w", err))
+			}
+		} else {
+			err = m.deliveryJournalReleaser().retire(ctx, client, id)
+			if err != nil {
+				return fmt.Errorf("acknowledge native resume delivery: %w", err)
+			}
 		}
 	}
 	status, err = client.GetDeliveryStatus(ctx, execution.DeliveryStreamID)
@@ -77,6 +105,34 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	return m.validateNativeResumeSQLHistory(ctx, execution, status, submissions, true)
 }
 
+func nativeResumeMissingPeerRefusalReason(err error) string {
+	switch {
+	case errors.Is(err, journal.ErrOwnerMismatch):
+		return DeliveryRecoveryRefusalNativeIdentityMismatch
+	case errors.Is(err, journal.ErrSubmissionState):
+		return DeliveryRecoveryRefusalLiveWork
+	case errors.Is(err, journal.ErrSubmissionConflict):
+		return DeliveryRecoveryRefusalPeerRecordMismatch
+	}
+	var response *agentctl.DeliveryHTTPError
+	if errors.As(err, &response) {
+		var body struct {
+			Code string `json:"code"`
+		}
+		if json.Unmarshal([]byte(response.Body), &body) == nil {
+			switch body.Code {
+			case "OWNER_MISMATCH":
+				return DeliveryRecoveryRefusalNativeIdentityMismatch
+			case "SUBMISSION_STATE":
+				return DeliveryRecoveryRefusalLiveWork
+			case "SUBMISSION_CONFLICT":
+				return DeliveryRecoveryRefusalPeerRecordMismatch
+			}
+		}
+	}
+	return DeliveryRecoveryRefusalPeerRecordMissing
+}
+
 func validateNativeResumeDeliveryOwner(execution *AgentExecution, status *agentctl.DeliveryStatus) error {
 	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
 		return fmt.Errorf("native conversation has not resumed")
@@ -91,7 +147,7 @@ func validateNativeResumeDeliveryOwner(execution *AgentExecution, status *agentc
 	return nil
 }
 
-func nativeResumeRetirementIDs(execution *AgentExecution, status *agentctl.DeliveryStatus, submissions []journal.Submission, rows []*models.AgentDeliverySubmission) ([]string, error) {
+func nativeResumeRetirementIDs(execution *AgentExecution, status *agentctl.DeliveryStatus, submissions []journal.Submission, rows []*models.AgentDeliverySubmission, unproven map[string]*models.AgentDeliveryCursor) ([]string, error) {
 	var ids []string
 	backend := make(map[string]*models.AgentDeliverySubmission, len(rows))
 	for _, row := range rows {
@@ -101,29 +157,51 @@ func nativeResumeRetirementIDs(execution *AgentExecution, status *agentctl.Deliv
 		if submission.Retired {
 			continue
 		}
-		switch submission.State {
-		case journal.SubmissionPrepared, journal.SubmissionAccepted, journal.SubmissionDispatching:
-			return nil, fmt.Errorf("native resume cannot acknowledge live delivery work")
-		case journal.SubmissionInterruptedUnknown, journal.SubmissionCompleted, journal.SubmissionFailed, journal.SubmissionCancelled:
-			if !journal.HasUnprovenOutcome(submission) {
-				continue
-			}
-			sqlSubmission, found := backend[submission.ID]
-			if !found || (sqlSubmission.State != models.DeliverySubmissionInterruptedUnknown && !peerMatchesTerminalHistory(execution, status, submission, sqlSubmission)) {
-				if submission.State == journal.SubmissionFailed || submission.State == journal.SubmissionCancelled {
-					continue
-				}
-				return nil, fmt.Errorf("%w: native resume requires uncertain SQL history", ErrDurableAdoptionBlocked)
-			}
-			if !peerMatchesUnknownHistory(execution, status, submission, sqlSubmission) && !peerMatchesTerminalHistory(execution, status, submission, sqlSubmission) {
-				return nil, fmt.Errorf("%w: native resume submission identity changed", ErrDurableAdoptionBlocked)
-			}
+		retire, err := nativeResumeRetirementCandidate(execution, status, submission, backend, unproven)
+		if err != nil {
+			return nil, err
+		}
+		if retire {
 			ids = append(ids, submission.ID)
-		default:
-			return nil, fmt.Errorf("%w: unsupported native resume submission state", ErrDurableAdoptionBlocked)
 		}
 	}
 	return ids, nil
+}
+
+func nativeResumeRetirementCandidate(
+	execution *AgentExecution,
+	status *agentctl.DeliveryStatus,
+	submission journal.Submission,
+	backend map[string]*models.AgentDeliverySubmission,
+	unproven map[string]*models.AgentDeliveryCursor,
+) (bool, error) {
+	switch submission.State {
+	case journal.SubmissionPrepared, journal.SubmissionAccepted, journal.SubmissionDispatching:
+		return false, fmt.Errorf("native resume cannot acknowledge live delivery work")
+	case journal.SubmissionInterruptedUnknown, journal.SubmissionCompleted, journal.SubmissionFailed, journal.SubmissionCancelled:
+	default:
+		return false, fmt.Errorf("%w: unsupported native resume submission state", ErrDurableAdoptionBlocked)
+	}
+	if !journal.HasUnprovenOutcome(submission) {
+		return false, nil
+	}
+	sqlSubmission, found := backend[submission.ID]
+	terminalMatch := found && peerMatchesTerminalHistory(execution, status, submission, sqlSubmission)
+	unprovenMatch := found && unproven[submission.ID] != nil && peerMatchesUnprovenCompletion(execution, status, submission, sqlSubmission)
+	if !found || (sqlSubmission.State != models.DeliverySubmissionInterruptedUnknown && !terminalMatch && !unprovenMatch) {
+		return nativeResumeUncertainLabelAllowed(submission.State)
+	}
+	if !peerMatchesUnknownHistory(execution, status, submission, sqlSubmission) && !terminalMatch && !unprovenMatch {
+		return false, fmt.Errorf("%w: native resume submission identity changed", ErrDurableAdoptionBlocked)
+	}
+	return true, nil
+}
+
+func nativeResumeUncertainLabelAllowed(state journal.SubmissionState) (bool, error) {
+	if state == journal.SubmissionFailed || state == journal.SubmissionCancelled {
+		return false, nil
+	}
+	return false, fmt.Errorf("%w: native resume requires uncertain SQL history", ErrDurableAdoptionBlocked)
 }
 
 func (m *Manager) checkNativeResumeLegacyHistory(ctx context.Context, sessionID string) error {

@@ -1,11 +1,13 @@
 "use client";
 
+import { useId } from "react";
 import { IconGitMerge } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useTaskWorkspaceId } from "@/components/task/task-workspace-context";
 import { useMRActions } from "@/hooks/domains/gitlab/use-mr-actions";
 import { mergeMR } from "@/lib/api/domains/gitlab-api";
 import type { TaskMR } from "@/lib/types/gitlab";
+import { isMRDraft } from "@/lib/gitlab-merge-state";
 import { isMRReadyToMerge } from "./mr-task-icon";
 
 /**
@@ -18,32 +20,46 @@ export function MRMergeButton({ mr }: { mr: TaskMR }) {
   const { t } = useTranslation();
   const workspaceId = useTaskWorkspaceId(mr.task_id);
   const { pendingAction, run } = useMRActions(() => {});
+  const hintId = useId();
+  const draft = mr.state === "open" && isMRDraft(mr);
 
-  if (!isMRReadyToMerge(mr)) return null;
+  if (!draft && !isMRReadyToMerge(mr)) return null;
   const merging = pendingAction === "merge";
 
   return (
-    <button
-      type="button"
-      data-testid="mr-merge-button"
-      disabled={merging || !workspaceId}
-      onClick={(e) => {
-        e.stopPropagation();
-        if (!workspaceId) return;
-        void run("merge", () =>
-          mergeMR({
-            workspaceId,
-            project: mr.project_path,
-            iid: mr.mr_iid,
-            host: mr.host,
-            squash: false,
-          }),
-        );
-      }}
-      className="inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-green-600 px-2 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-green-700 disabled:cursor-default disabled:opacity-60"
-    >
-      <IconGitMerge className="h-3.5 w-3.5" />
-      {merging ? t("gitlab:merging") : t("gitlab:merge")}
-    </button>
+    <>
+      <button
+        type="button"
+        data-testid="mr-merge-button"
+        aria-describedby={draft ? hintId : undefined}
+        disabled={merging || !workspaceId || draft}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!workspaceId) return;
+          void run("merge", () =>
+            mergeMR({
+              workspaceId,
+              project: mr.project_path,
+              iid: mr.mr_iid,
+              host: mr.host,
+              squash: false,
+            }),
+          );
+        }}
+        className="inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-green-600 px-2 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-green-700 disabled:cursor-default disabled:opacity-60"
+      >
+        <IconGitMerge className="h-3.5 w-3.5" />
+        {merging ? t("gitlab:merging") : t("gitlab:merge")}
+      </button>
+      {draft ? (
+        <p
+          id={hintId}
+          data-testid="mr-merge-draft-hint"
+          className="mt-1 text-xs text-muted-foreground"
+        >
+          {t("gitlab:draftMergeHint")}
+        </p>
+      ) : null}
+    </>
   );
 }

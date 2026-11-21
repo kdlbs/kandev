@@ -7,6 +7,10 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import {
+  readSessionMessageIdsContaining,
+  waitForNewSessionMessage,
+} from "../../helpers/session-resume-prompt-queue";
+import {
   assertPlainSendDuringRecovery,
   assertLegacyRecoveryPreservesDraft,
 } from "./plan-comment-recovery-helpers";
@@ -131,6 +135,7 @@ test.describe("task-owned plan comments", () => {
     await session.waitForLoad();
     await waitForStableActiveSession(testPage, secondary.id);
     await expect(session.activeChat().getByText("1 plan comment", { exact: true })).toBeVisible();
+    const beforeSend = await readSessionMessageIdsContaining(apiClient, secondary.id, sendComment);
     await session.sendMessage("Apply the selected feedback here");
 
     await expect
@@ -153,6 +158,8 @@ test.describe("task-owned plan comments", () => {
     await expect(session.planPanel.locator(".comment-badge[data-comment-id]")).toHaveCount(0, {
       timeout: 15_000,
     });
+    await waitForNewSessionMessage(apiClient, secondary.id, beforeSend, sendComment);
+    await waitForSessions(apiClient, task.id, 2);
     await session.waitForChatIdle({ timeout: 45_000 });
     // A completed seed turn can auto-promote the secondary. Pin the intended
     // primary so this flow isolates selected-session Send from primary Run.
@@ -171,6 +178,7 @@ test.describe("task-owned plan comments", () => {
     await runTextarea.fill(runComment);
     const run = testPage.getByRole("button", { name: "Run", exact: true });
     await expect(run).toBeEnabled();
+    const beforeRun = await readSessionMessageIdsContaining(apiClient, primary.id, runComment);
     await run.click();
 
     await expect
@@ -190,6 +198,19 @@ test.describe("task-owned plan comments", () => {
     await expect(session.planPanel.locator(".comment-badge[data-comment-id]")).toHaveCount(0, {
       timeout: 15_000,
     });
+    await waitForNewSessionMessage(apiClient, primary.id, beforeRun, runComment);
+    await waitForSessions(apiClient, task.id, 2);
+    for (const [target, comment] of [
+      [secondary.id, sendComment],
+      [primary.id, runComment],
+    ]) {
+      const { messages } = await apiClient.listSessionMessages(target);
+      expect(
+        messages.filter(
+          (message) => message.author_type === "user" && message.content.includes(comment),
+        ),
+      ).toHaveLength(1);
+    }
   });
 });
 

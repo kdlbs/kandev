@@ -54,6 +54,11 @@ export function useVcsDialogs() {
   return ctx;
 }
 
+/** Optional access for menus rendered outside the provider (tests, bare panels). */
+export function useOptionalVcsDialogs() {
+  return useContext(VcsDialogsContext);
+}
+
 type VcsDialogsProviderProps = {
   sessionId: string | null;
   taskId?: string | null;

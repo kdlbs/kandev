@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
 	"github.com/kandev/kandev/internal/task/models"
 
 	"go.uber.org/zap"
@@ -17,11 +19,43 @@ import (
 type serviceTaskStarter struct{ svc *Service }
 
 func (s serviceTaskStarter) Start(ctx context.Context, taskID, workflowStepID, prompt string, p AutoStartParams) error {
+	agentProfileID := p.AgentProfileID
+	if agentProfileID == "" {
+		task, err := s.svc.repo.GetTask(ctx, taskID)
+		if err != nil {
+			err = fmt.Errorf("load task %q while resolving watcher agent profile: %w", taskID, err)
+			s.markAutoStartFailure(ctx, taskID, err)
+			return err
+		}
+		if task == nil {
+			err = fmt.Errorf("load task %q while resolving watcher agent profile: task not found", taskID)
+			s.markAutoStartFailure(ctx, taskID, err)
+			return err
+		}
+
+		fallbackProfileID, step := s.svc.resolveTaskAgentProfile(ctx, task)
+		agentProfileID = fallbackProfileID
+		if step != nil && step.SessionTarget != nil {
+			// The target owns profile selection, so let StartTask resolve it before validation.
+			agentProfileID = ""
+		}
+	}
+
 	_, err := s.svc.StartTask(
-		ctx, taskID, p.AgentProfileID, "", p.ExecutorProfileID,
+		ctx, taskID, agentProfileID, "", p.ExecutorProfileID,
 		"", prompt, workflowStepID, false, true, nil,
 	)
+	if err != nil {
+		s.markAutoStartFailure(ctx, taskID, err)
+	}
 	return err
+}
+
+func (s serviceTaskStarter) markAutoStartFailure(ctx context.Context, taskID string, err error) {
+	if errors.Is(err, ErrCeilingLaunchDeferred) {
+		return
+	}
+	s.svc.setTaskAutoStartFailedMarker(ctx, taskID, "watcher.auto_start")
 }
 
 // initWatcherCoordinatorLocked builds the coordinator (once) and (always)
@@ -224,6 +258,9 @@ func (s *Service) dispatchWatcherEvent(ctx context.Context, src WatcherSource, e
 	// tick — acceptable for v1.
 	release, ok := s.acquireWatcherSlot(ctx, integration, src.WatchMetadataKey(), src.WatchID(evt), src.MaxInflightTasks(evt))
 	if !ok {
+		if claimed, supported := src.(interface{ ReservationClaimed(any) bool }); supported && claimed.ReservationClaimed(evt) {
+			src.Release(context.WithoutCancel(ctx), evt)
+		}
 		return
 	}
 

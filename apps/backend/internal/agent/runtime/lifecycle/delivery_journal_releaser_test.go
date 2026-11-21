@@ -16,6 +16,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
@@ -31,9 +32,10 @@ func TestNoDirectJournalReleaseCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	forbidden := map[string]struct{}{
-		"AcknowledgeDelivery":                 {},
-		"RetireDeliverySubmission":            {},
-		"RetireInterruptedDeliverySubmission": {},
+		"AcknowledgeDelivery":                    {},
+		"RetireDeliverySubmission":               {},
+		"RetireMissingUnknownDeliverySubmission": {},
+		"RetireInterruptedDeliverySubmission":    {},
 	}
 	fset := token.NewFileSet()
 	for _, entry := range entries {
@@ -87,6 +89,10 @@ func (c *recordingJournalReleaseClient) RetireInterruptedDeliverySubmission(cont
 	return c.record("retire_interrupted")
 }
 
+func (c *recordingJournalReleaseClient) RetireMissingUnknownDeliverySubmission(context.Context, journal.Submission) error {
+	return c.record("retire_missing_unknown")
+}
+
 type journalReleaseCase struct {
 	name    string
 	release func(deliveryJournalReleaser, *recordingJournalReleaseClient) error
@@ -108,6 +114,9 @@ func journalReleaseCases() []journalReleaseCase {
 		}},
 		{"retire interrupted", func(r deliveryJournalReleaser, c *recordingJournalReleaseClient) error {
 			return r.retireInterrupted(context.Background(), c, "submission-1", "stream-1", 2)
+		}},
+		{"retire missing unknown", func(r deliveryJournalReleaser, c *recordingJournalReleaseClient) error {
+			return r.retireMissingUnknown(context.Background(), c, journal.Submission{ID: "submission-1"})
 		}},
 	}
 }
@@ -289,7 +298,7 @@ func TestStreamProcessorBatchUsesOneWriterCommit(t *testing.T) {
 
 	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
 	defer sm.Wait()
-	processor := newStreamEventProcessor(sm, context.Background(), execution, client, repository, 0)
+	processor := newStreamEventProcessor(sm, context.Background(), execution, client, repository, 0, nil)
 	for _, event := range events {
 		if !processor.enqueue(event) {
 			t.Fatal("processor rejected an event")
@@ -343,7 +352,7 @@ func TestCombinedBatchDuplicateDoesNotNotify(t *testing.T) {
 	sm := NewStreamManager(newTestLogger(), StreamCallbacks{
 		OnAgentEvent: func(*AgentExecution, agentctl.AgentEvent) { notifications++ },
 	}, nil, nil)
-	if err := sm.commitPreparedAgentEvents(context.Background(), execution, prepared, repository, nil, 0); err != nil {
+	if err := sm.commitPreparedAgentEvents(context.Background(), execution, prepared, repository, nil, 0, nil); err != nil {
 		t.Fatalf("commit duplicate combined batch: %v", err)
 	}
 	if repository.combinedCalls != 1 {
@@ -385,7 +394,7 @@ func TestCombinedBatchAdmissionFailureFallsBack(t *testing.T) {
 					receiptDeferred: true,
 				}
 			}
-			err := sm.commitPreparedAgentEvents(context.Background(), execution, prepared, repository, client, 0)
+			err := sm.commitPreparedAgentEvents(context.Background(), execution, prepared, repository, client, 0, nil)
 			if tc.err == repoerrors.ErrAgentDeliveryReplayExpired {
 				if !errors.Is(err, errDeliveryReplayReconciled) {
 					t.Fatalf("error = %v, want the existing reconciliation outcome", err)
@@ -464,7 +473,7 @@ func TestStreamProcessorCombinedBatchWithSQLiteRepository(t *testing.T) {
 	}
 	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
 	defer sm.Wait()
-	processor := newStreamEventProcessor(sm, ctx, execution, nil, repository, 0)
+	processor := newStreamEventProcessor(sm, ctx, execution, nil, repository, 0, nil)
 	for _, event := range events {
 		if !processor.enqueue(event) {
 			t.Fatal("processor rejected an event")

@@ -42,6 +42,8 @@ const (
 
 // ContainerConfig holds configuration for launching a Docker container
 type ContainerConfig struct {
+	// CopilotNativeSessionEvents is the manager-resolved native-event opt-in.
+	CopilotNativeSessionEvents bool
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth            *acpprovider.GatewayAuth
@@ -93,7 +95,10 @@ type ContainerConfig struct {
 	// Network is the resolved primary network for this launch. It is resolved
 	// on the launch path rather than held on the manager, because one manager
 	// serves every profile that reaches its daemon.
-	Network containerNetwork
+	Network            containerNetwork
+	DockerTmpSizeBytes int64
+	DockerLogMaxSize   string
+	DockerLogMaxFiles  string
 }
 
 func boolPtr(v bool) *bool {
@@ -129,6 +134,7 @@ func buildContainerCreateInstanceRequest(
 ) *agentctl.CreateInstanceRequest {
 	return &agentctl.CreateInstanceRequest{
 		ID:                    config.InstanceID,
+		ScopedMCPRoutes:       true,
 		WorkspacePath:         "/workspace",
 		AgentCommand:          "",
 		AgentType:             agentType,
@@ -148,6 +154,7 @@ func buildContainerCreateInstanceRequest(
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    config.McpMode,
 		PromptSuggestions:          config.PromptSuggestions,
+		CopilotNativeSessionEvents: config.CopilotNativeSessionEvents,
 		McpProviders:               config.McpProviders,
 		McpProfile:                 config.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),
@@ -392,7 +399,8 @@ func (cm *ContainerManager) createInstanceAndClient(
 	client := agentctl.NewClient(instanceHost, instancePort, cm.logger,
 		agentctl.WithExecutionID(config.InstanceID),
 		agentctl.WithSessionID(config.SessionID),
-		agentctl.WithAuthToken(ctl.AuthToken()))
+		agentctl.WithAuthToken(ctl.AuthToken()),
+		agentctl.WithBuiltinMCPScopedRoutes(resp.ScopedMCPRoutes))
 
 	return client, nil
 }
@@ -630,11 +638,14 @@ func (cm *ContainerManager) buildContainerConfigWithContext(ctx context.Context,
 		// whose OpenAI-compatible provider is a service on the developer's host
 		// (loopback URLs are rewritten to this hostname) resolves on Linux too,
 		// matching Docker Desktop. Requires Docker Engine 20.10+.
-		ExtraHosts: []string{acpprovider.DockerHostGatewayHost + ":host-gateway"},
-		Memory:     memoryBytes,
-		CPUQuota:   cpuQuota,
-		Labels:     buildContainerLabels(imageName, config),
-		AutoRemove: false, // We manage cleanup ourselves
+		ExtraHosts:     []string{acpprovider.DockerHostGatewayHost + ":host-gateway"},
+		Memory:         memoryBytes,
+		CPUQuota:       cpuQuota,
+		Labels:         buildContainerLabels(imageName, config),
+		AutoRemove:     false, // We manage cleanup ourselves
+		TmpfsSizeBytes: config.DockerTmpSizeBytes,
+		LogMaxSize:     config.DockerLogMaxSize,
+		LogMaxFiles:    config.DockerLogMaxFiles,
 	}
 	if config.AllowUserNamespaces {
 		securityOpt, err := securityOptsForUserNamespaces()

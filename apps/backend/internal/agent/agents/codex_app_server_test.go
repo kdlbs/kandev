@@ -32,7 +32,8 @@ func TestCodexAppServerRuntimeIdentity(t *testing.T) {
 	if !runtime.SessionConfig.NativeSessionResume {
 		t.Fatal("native session resume is not enabled")
 	}
-	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@openai/codex@0.154.0", "app-server"}
+	codexVersion := MustDefaultManagedNPMRuntimeVersion("@openai/codex")
+	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@openai/codex@" + codexVersion, "app-server"}
 	if got := runtime.Cmd.Args(); !slices.Equal(got, want) {
 		t.Fatalf("runtime command = %#v, want %#v", got, want)
 	}

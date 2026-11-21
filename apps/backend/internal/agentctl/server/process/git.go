@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -68,7 +69,7 @@ type GitOperationResult struct {
 type GitOperator struct {
 	workDir                            string
 	logger                             *logger.Logger
-	workspaceTracker                   *WorkspaceTracker
+	workspaceTracker                   atomic.Pointer[WorkspaceTracker]
 	environment                        func() []string
 	contributionHistoryCommandOverride func(context.Context, ...string) (string, error)
 	// repoName is the multi-repo subpath this operator runs in (e.g. "kandev").
@@ -101,14 +102,26 @@ type GitOperator struct {
 
 // NewGitOperator creates a new GitOperator for the given workspace directory.
 func NewGitOperator(workDir string, log *logger.Logger, workspaceTracker *WorkspaceTracker) *GitOperator {
-	return &GitOperator{
+	operator := &GitOperator{
 		workDir:                workDir,
 		logger:                 log.WithFields(zap.String("component", "git-operator")),
-		workspaceTracker:       workspaceTracker,
 		environment:            os.Environ,
 		prCreateRetryAttempts:  3,
 		prCreateRetryBaseDelay: 2 * time.Second,
 	}
+	operator.setWorkspaceTracker(workspaceTracker)
+	return operator
+}
+
+// currentWorkspaceTracker returns the tracker this operator publishes through.
+// Graph renewal swaps it atomically so an already-created operator keeps its
+// operation lock while following the replacement tracker.
+func (g *GitOperator) currentWorkspaceTracker() *WorkspaceTracker {
+	return g.workspaceTracker.Load()
+}
+
+func (g *GitOperator) setWorkspaceTracker(tracker *WorkspaceTracker) {
+	g.workspaceTracker.Store(tracker)
 }
 
 // NewGitOperatorForRepo creates a GitOperator scoped to a multi-repo subpath
@@ -384,8 +397,8 @@ func filterGitEnv(env []string) []string {
 // Called after git operations like commit, push, pull, etc. to refresh the UI
 // without waiting for the next poll cycle.
 func (g *GitOperator) triggerRefresh() {
-	if g.workspaceTracker != nil {
-		g.workspaceTracker.RefreshGitStatus(context.Background())
+	if tracker := g.currentWorkspaceTracker(); tracker != nil {
+		tracker.RefreshGitStatus(context.Background())
 	}
 }
 
@@ -982,7 +995,7 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool,
 	g.logger.Info("commit completed", zap.String("message", message), zap.Bool("amend", amend))
 
 	// Publish commit notification if we have a workspace tracker
-	if g.workspaceTracker != nil {
+	if tracker := g.currentWorkspaceTracker(); tracker != nil {
 		// Get commit details
 		commitSHA, _ := g.runGitCommand(ctx, "rev-parse", "HEAD")
 		parentSHA, parentErr := g.runGitCommand(ctx, "show", "-s", "--format=%P", "HEAD")
@@ -1016,7 +1029,7 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool,
 			CommittedAt:    time.Now().UTC(),
 		}
 
-		g.workspaceTracker.NotifyGitCommit(commit)
+		tracker.NotifyGitCommit(commit)
 		// Refresh git status so the UI's "unstaged" list clears immediately.
 		// NotifyGitCommit only updates cachedHeadSHA — without an explicit
 		// refresh, currentStatus keeps the pre-commit "modified" entries until
@@ -1073,8 +1086,8 @@ func (g *GitOperator) Stage(ctx context.Context, paths []string) (*GitOperationR
 	g.logger.Info("stage completed", zap.Int("files", len(paths)))
 
 	// Refresh git status so the UI reflects the staged state
-	if g.workspaceTracker != nil {
-		g.workspaceTracker.RefreshGitStatus(ctx)
+	if tracker := g.currentWorkspaceTracker(); tracker != nil {
+		tracker.RefreshGitStatus(ctx)
 	}
 
 	return result, nil
@@ -1118,8 +1131,8 @@ func (g *GitOperator) Unstage(ctx context.Context, paths []string) (*GitOperatio
 	g.logger.Info("unstage completed", zap.Int("files", len(paths)))
 
 	// Refresh git status so the UI reflects the unstaged state
-	if g.workspaceTracker != nil {
-		g.workspaceTracker.RefreshGitStatus(ctx)
+	if tracker := g.currentWorkspaceTracker(); tracker != nil {
+		tracker.RefreshGitStatus(ctx)
 	}
 
 	return result, nil
@@ -1273,8 +1286,8 @@ func (g *GitOperator) RenameBranch(ctx context.Context, newName string) (*GitOpe
 		zap.String("to", newName))
 
 	// Refresh git status so the UI reflects the new branch name
-	if g.workspaceTracker != nil {
-		g.workspaceTracker.RefreshGitStatus(ctx)
+	if tracker := g.currentWorkspaceTracker(); tracker != nil {
+		tracker.RefreshGitStatus(ctx)
 	}
 
 	return result, nil
@@ -1334,7 +1347,7 @@ func (g *GitOperator) Reset(ctx context.Context, commitSHA string, mode string) 
 		zap.String("commit", commitSHA))
 
 	// Send reset notification and refresh git status
-	if g.workspaceTracker != nil {
+	if tracker := g.currentWorkspaceTracker(); tracker != nil {
 		// Notify about the reset
 		newHead, headErr := g.runGitCommand(ctx, "rev-parse", "HEAD")
 		if headErr != nil {
@@ -1346,11 +1359,11 @@ func (g *GitOperator) Reset(ctx context.Context, commitSHA string, mode string) 
 				PreviousHead:   previousHead,
 				CurrentHead:    strings.TrimSpace(newHead),
 			}
-			g.workspaceTracker.NotifyGitReset(reset)
+			tracker.NotifyGitReset(reset)
 		}
 
 		// Refresh git status
-		g.workspaceTracker.RefreshGitStatus(ctx)
+		tracker.RefreshGitStatus(ctx)
 	}
 
 	return result, nil
@@ -1527,12 +1540,6 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	provider := g.detectPRProvider(remoteURL)
 	var gitLabInfo *gitLabRepoInfo
 	switch provider {
-	case prProviderAzureRepos:
-		result.Provider = string(prProviderAzureRepos)
-		if _, parseErr := parseAzureRepoInfo(remoteURL); parseErr != nil {
-			result.Error = parseErr.Error()
-			return result, nil
-		}
 	case prProviderGitHub:
 		result.Provider = string(prProviderGitHub)
 	case prProviderGitLab:
@@ -1544,7 +1551,7 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 		}
 	default:
 		result.Error = fmt.Sprintf(
-			"unsupported git remote for PR creation: %s (GitHub, GitLab, and Azure Repos are supported)",
+			"unsupported git remote for PR creation: %s (GitHub and GitLab are supported)",
 			redactRemoteURL(remoteURL),
 		)
 		return result, nil
@@ -1573,11 +1580,6 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	g.logger.Debug("pushed branch to remote", zap.String("output", g.sanitizeGitPushOutput(pushOutput)))
 
 	switch provider {
-	case prProviderAzureRepos:
-		return g.createPRWithRetryAfterPush(ctx, result, title, body,
-			func() (*PRCreateResult, error) {
-				return g.createAzureReposPR(ctx, result, remoteURL, branch, title, body, baseBranch, draft)
-			})
 	case prProviderGitHub:
 		return g.createPRWithRetryAfterPush(ctx, result, title, body,
 			func() (*PRCreateResult, error) {
@@ -1714,7 +1716,7 @@ func isRetryablePRCreationFailure(err error, result *PRCreateResult) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(result.Provider)) {
-	case string(prProviderGitHub), string(prProviderGitLab), string(prProviderAzureRepos):
+	case string(prProviderGitHub), string(prProviderGitLab):
 		return true
 	default:
 		return false

@@ -184,16 +184,18 @@ also includes open runs under terminal parents, so older partial settlements
 remain repairable. Delayed non-terminal observations cannot reopen terminal
 parents or runs, including runs first observed after their parent ended. Late
 terminal provider observations may still supply the actual outcome and exit code.
-A provider that does not report completion, such as Claude's detached shells
-without lifecycle support, therefore cannot leave rows running past verified
-process termination. Browser
+A provider without attributed completion evidence cannot leave rows running past
+verified process termination. Claude's separate, tool-scoped terminal evidence
+follows the [shell termination design](claude-background-shell-terminal-evidence.md),
+without enabling the rejected async-task capability. Browser
 disconnection alone does not imply provider disconnection. Session reset/deletion fences its
 incarnation before clearing client state; late events cannot recreate it.
 
-Every path that ends the owning agent process attempts this settlement. That
-includes an owned teardown that replaces an execution, which passes the stopped
-execution ID before the successor launches, and `reclaimIdleSession`, which
-settles after its cleanup succeeds.
+Every process-ending path attempts settlement before a successor launches.
+Owned teardown passes the stopped execution ID. After successful stale-runtime
+cleanup, resume calls the orchestrator while holding the lifecycle fence.
+Idle reclaim settles after cleanup. All paths retain the liveness and
+retained-owner guards above.
 
 Startup settlement follows lifecycle recovery and session reconciliation.
 Reconciliation may clear a recovered row's PID, making `RowProcessLiveness`
@@ -217,6 +219,13 @@ are paginated; per-work revisions and request-start epochs prevent delayed HTTP
 snapshots overwriting newer events or dropping rows introduced during a fetch.
 Use the existing session activity-epoch approach as a pattern. Keep completed
 history pageable; do not clear the list when active count becomes zero.
+
+The shared client captures the session list before starting each HTTP read.
+If its snapshot omits a row added or updated during that read, preserve the
+accepted live row. Unchanged omitted rows follow the complete snapshot.
+A store-owned read generation admits only the latest read per session across
+consumers. Clearing or purging a session invalidates its outstanding reads;
+their responses cannot recreate rows or settle a replacement read's loading state.
 
 ## Control routing
 
@@ -369,93 +378,108 @@ If a capability remains unproven, keep it unavailable and record the limitation.
 
 ## Shared client and responsive UI
 
-Main-conversation Send now / Queue for later follows the separate
-[explicit steering design](../../platform/system-design/explicit-turn-steering.md)
-in this implementation package. Workload visibility and detail tabs do not grant
-that capability. Child-agent prompting remains out of scope.
+REQ-AGENTS-BACKGROUND-WORK-005 and the
+[UX package](../../../plans/background-work-running-history/plan.md)
+replace the all-state summary and composer history chip.
 
-Add normalized Go/TS DTOs and additive session events; proposed
-`useBackgroundWork(sessionId)` selects a store slice and uses a domain API client.
-Do not assume `useTaskBackgroundWorkState()` exists. Stores are session/incarnation
-scoped, merge by revision, clear on deletion, and share state across Task chat,
-Quick Chat where its composer is shared, and desktop/phone presentation. Render
-capabilities, never `agentId === ...` or native RPC names. Integration must not
-mount a new background feature in passthrough-only terminal mode.
+### Shared workload selection
 
-Render a small content-width pill directly above the chat input, aligned with
-the input's leading edge: `( 2 Background Jobs )`. It is not a full-width banner
-or an additional toolbar. The pluralized count includes unique running, waiting,
-and unknown current runs; completed runs are excluded. Keep status breakdowns
-in the opened summary instead of expanding the pill. Its accessible name can
-include unknown/waiting counts. A compact visual pill retains a 44px touch hit
-area on phone/coarse pointers. The history action remains reachable when it hides.
+`useBackgroundWork(sessionId)` reads the accepted session workload list from
+Zustand. Keep the raw list intact. Add pure selectors under
+`lib/background-work/` for these three distinct views:
 
-Click/Enter/Space opens a desktop Popover listing jobs and agents with status,
-elapsed time, and available quick controls. Row selection opens details directly;
-View all opens the separate Background Work overview panel. Do not require hover or an intermediate
-list selection to inspect a job. Close the popover after selection.
+| View | Eligible states |
+| --- | --- |
+| Composer chip and summary | `running` only |
+| Overview Active tab | `running`, `waiting` |
+| Overview History tab | `completed`, `failed`, `interrupted`, `ended`, `unknown` |
 
-Desktop uses two first-class Dockview panel kinds, initially in `centerGroupId`
-beside the existing chat/session tabs:
+Share selectors across viewports. Audit `totalCount` and `hasActiveWork`
+consumers before changing their meaning. Chip counts never control accounting,
+parked activity, prompt admission, or action eligibility.
 
-- `background-work`: one overview per owning session/incarnation, titled
-  Background Work, containing Commands, Agents, Other jobs and History filters.
-- `background-work-detail`: one dedicated detail tab per
-  `(session_id, incarnation, work_id)`, titled with that workload's display name,
-  such as Build Watcher or Review Auth. Selecting a row opens or activates this
-  tab directly; it does not require opening the overview first. Distinct jobs
-  and agents stay open simultaneously, with independent scroll, search, local
-  clear, input draft, and inspected-run selection. A successor run does not create
-  another tab or silently retarget a control for an explicitly inspected old run.
+History placement never settles unknown records or changes their badge.
+Fresh evidence can return them to Active. No provider or persistence change is
+needed.
 
-Use canonical panel-ID helpers with encoded opaque identity components, not the
-workload title or an ambiguous string concatenation. Duplicate names do not
-merge tabs. Repeated selection focuses the same workload's existing tab without
-resetting its view state or moving it from a user's manually chosen location.
-New detail tabs do not overwrite another workload's panel. The overview and
-detail tabs can be closed independently; closing either only disposes its view
-subscription and does not stop work, send input, or close another tab. Opening a
-tab never creates a Kandev task, session, execution, or user shell. Returning to
-Chat preserves its draft. Completed jobs remain inspectable in open tabs and
-can be reopened from History. All work inside a detail tab opens/activates the
-separate overview without closing the detail.
+### Composer and independent entry
 
-Follow `dockview-extra-panel-actions.ts` and `addPromptHistoryPanel` as patterns
-for explicit center-targeted open/activate actions. Register both panel renderers in
-`dockview-shared.tsx` and `dockview-panel-content.tsx`, and extend panel type/title,
-serialization and environment reconciliation consistently. Store only opaque
-session/incarnation/work identity and optional inspected-run selection in panel params; after restoration revalidate
-ownership and show unknown/loading until refreshed. Remove inaccessible, deleted,
-or disabled-feature panels without dispatching controls. Do not fall back to an
-unrelated active session. Quick Chat details navigate to the owning task workbench
-and open the same workload-specific detail tab (or overview for View all); preserve its draft and do not invent a
-second desktop sheet for this entry point.
+`BackgroundWorkChip` renders only while the running list is nonempty. Its
+localized count, accessible name, summary rows, and header describe that same
+list. Remove waiting/unknown count badges and the history-chip variant.
+History never appears in this summary. View all opens the full overview.
 
-Stop/Interrupt appear only when supported; disconnected supported actions are
-disabled with a localized reason. Only show stdin when write_input is advertised.
-No Restart, Re-run, or Steer controls. Parent/child rows share transcript identity;
-these panels are views of shared data, not additional message writers. Existing inline tool cards remain.
+Add a feature-gated Background Work item to `dockview-add-panel-items.tsx`.
+Use `addBackgroundWorkPanel({sessionId, inCenter: true})` for the selected managed
+session, including empty lists. Preserve the session ID through card-to-detail
+navigation and reuse existing panel identity/activation.
 
-Phone: chip tap opens an inset summary Drawer using `useTouchDrawer`; View work
-transitions to one full-height work surface (close the summary first). Tapping
-a specific summary row opens that workload detail directly; View all opens the
-list. List and
-detail are successive views with Back, not stacked overlays or split panes.
-Preserve per-workload view state when moving between phone details. Do not render
-a desktop tab strip on phone or overwrite the saved desktop tab layout.
-Use `useResponsiveBreakpoint`, `h-dvh`, safe-area padding, and a fixed header
-with one `min-h-0 flex-1` scrolling content body. Keyboard-visible stdin remains
-reachable. Reuse `mobile-picker-sheet.tsx` for summary anatomy and
-`conversation-usage-display.tsx` for responsive disclosure; inspect live APIs.
-28px ordinary desktop controls, at least 44px phone/coarse-pointer targets,
-including narrow fine-pointer phones. Focus returns to the invoker on Close;
-Back returns to the selected list row. Typing/draft and existing send/queue/steer
-logic are unaffected by chip updates.
+Extend the built-in-tools branch of `PluginPanelPicker` and
+`SessionMobileBottomNav` with Background Work, available without plugins,
+canvases, or ports. Close the picker before opening inspection. Preserve
+feature-disabled and passthrough behavior.
 
-Localize all copy and accessibility names in six languages plus pseudo; generate
-Traditional Chinese via the existing conversion command. Empty/loading/error,
-retained history, unsupported stream/input, reconnect unknown, uncertain action,
-and usage unavailable are explicit rendered states. See the [plan previews](../../../plans/agent-background-work/plan.md#ascii-ui-preview).
+### Overview tabs and details
+
+Share the overview from `background-work-panel.tsx` across viewports.
+Use `@kandev/ui/tabs` for Active and History with localized counts before search.
+Relabel the title/kind search as job search. Preserve it across tab changes.
+
+After the first fetch settles, initially select Active if running/waiting
+work exists, History otherwise. Preserve selection even if its list empties.
+Reactivation retains state; a new session resets selection and search.
+
+Localize loading, empty-tab, and no-match states. Preserve existing fetch/error
+semantics. Accepted observations update membership/counts together without
+closing details. Preserve actual status, capabilities, output search, local
+clear, and dispatch ownership.
+
+Desktop retains central overview/detail tabs and activates existing details
+on repeat selection. Closing tabs never stops work or changes the conversation.
+
+### Width containment
+
+The current overview card puts a truncated title and status in one flex row.
+`PanelBody` defaults to `overflow-auto`. A long command can therefore reveal
+horizontal overflow instead of staying inside the card. Constrain every
+intermediate flex/grid text track with `min-w-0` and available-width bounds.
+Keep status and Open controls in nonshrinking tracks. Compact titles truncate
+with an ellipsis, while the full original string remains the accessible name.
+A hover title can supplement desktop inspection, but is not the phone path.
+
+Show the complete command in the detail surface using wrapped plain text with
+`overflow-wrap:anywhere` or an equivalent rule for unbroken tokens. Give that
+region the available width and let metadata/actions wrap or stack separately.
+Keep dock-tab titles compact. Lists and details have one vertical scroller
+without horizontal scrolling or clipped controls. Retain the original command.
+
+### Phone composition and focus
+
+The running chip opens an inset summary Drawer. Its running rows truncate,
+with visible status and an explicit Open action. View all switches that same
+surface to a full-height overview. The independent Panels entry opens the
+full-height overview directly. Reuse shared selectors, overview tabs, search,
+and card data with callbacks for navigation instead of mounting Dockview.
+
+Within the work surface, overview and detail are successive screens. Detail
+Back restores the originating list, tab, search, and scroll position. A detail
+opened from the summary returns to it if running work remains; otherwise Back
+opens the overview's History tab. This explicit navigation can select History
+without changing a tab during background updates. Do not stack drawers.
+
+Use `useResponsiveBreakpoint` and the `mobile-picker-sheet.tsx` precedent.
+The shipped background detail drawer supplies focused inspection. Content depth
+requires `100dvh`, fixed header/tabs/search, one `min-h-0` scroller, and safe-area
+clearance. Actions are 44px on phones/coarse pointers and 28px on desktop.
+Include narrow fine-pointer phones in rendered verification.
+
+If the last running job leaves an open summary, dismiss only that summary.
+Do not close an overview or detail already opened from it. Restore focus to the
+chip while it exists, otherwise to the stable composer control. Dismissal from
+the independent entry returns to its menu trigger. Background updates preserve
+the composer draft, send/queue/steering semantics, and saved desktop layout.
+All labels, plurals, empty states, and accessible names use every supported
+locale catalog. Generate Traditional Chinese with the existing conversion tool.
 
 ## Observability and validation boundaries
 

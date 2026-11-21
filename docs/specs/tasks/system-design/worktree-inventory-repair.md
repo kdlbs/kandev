@@ -273,6 +273,59 @@ source evidence immutable and retain normal branch/commit safety refusals.
 No rendered UI change is planned. This backend lifecycle evidence covers both
 desktop and phone task actions through their existing APIs.
 
+## Cleanup conflict diagnostics
+
+This section implements AC-TASKS-WORKTREE-INVENTORY-REPAIR-002.4 through .6.
+The [runtime cleanup design](runtime-cleanup.md) retains lifecycle, retry, and destructive authority.
+
+Extend `worktree.CleanupInspectionError` with optional bounded worktree identity and comparison metadata.
+Populate metadata at the audit branch that proves the refusal, while preserving `Unwrap` and existing stage/reason values.
+The batch boundary supplies the exact input worktree ID before joining resource errors.
+Do not parse paths or worktree IDs from human-readable errors.
+
+| Reason | Comparison | Inspection action |
+| --- | --- | --- |
+| `competing_registration` | `recorded_registration_vs_current_registration` | `inspect_registration_ownership` |
+| `commit_mismatch` with a saved OID | `recorded_commit_vs_current_ref` | `compare_recorded_commit` |
+| `commit_mismatch` without usable saved evidence | `recorded_commit_unavailable` | `inspect_missing_recorded_evidence` |
+
+`retryTaskResourceCleanupJob` retains the existing claimed-attempt transition and next-attempt calculation.
+After that transition succeeds, emit bounded structured context for every classified resource error in the joined result.
+Use `cleanup_condition=reconciliation_required` only for the proven conflict reasons above.
+Include existing job/task identity, worktree ID, stage, reason, comparison, action, attempt, retry policy, and next-attempt time.
+Boolean fields can describe whether recorded and observed evidence exist.
+Never include raw commit IDs, paths, branch names, Git output, or underlying error text in the new fields.
+Deduplicate repeated references to the same typed resource error within one attempt.
+Inspect at most 256 nodes of the service-owned error tree and emit at most 32 resource diagnostics per attempt.
+Emit a content-free overflow indication when either limit is reached.
+Bound each formatted resource context to 256 bytes through fixed enums and validated identifiers.
+Keep warning visibility and the aggregate failure record.
+Other reasons retain their transient or unknown classification.
+
+`LastError` retains worktree identity, stage/reason, comparison, and action through bounded per-resource error context.
+The original joined evidence remains available even when emitted diagnostics reach their limit.
+The existing snapshot and source manifest remain byte-for-byte unchanged.
+No SQL column, cleanup-state enum, browser status, retry control, or migration is required.
+This diagnostic condition is distinct from the job's execution state, which remains `retry_wait` for cascade-critical obligations.
+Current attempt fencing remains authoritative. A stale attempt cannot publish a completed transition or an attributed reconciliation result.
+
+The capped 12-hour retry inspects original immutable evidence against current Git state again.
+It never refreshes the expected commit to a moved branch tip or caches permission to delete.
+Independent resources continue through the existing batch cleanup path.
+An operator can preserve current work and inspect the selected recorded/current comparison before an explicit repair.
+Existing repair preview, offline application limits, backup, linked supersession, and validation still apply.
+An unsupported or ambiguous repair remains unresolved and retryable.
+This design does not claim that every conflict has an automatic repair.
+
+Update `docs/public/git-operations.md` with reason-specific read-only inspection and the existing explicit maintenance boundary.
+Update the retained-resource troubleshooting text in `docs/public/tasks-and-workflows.md` to describe capped retries and reconciliation-required diagnostics.
+Do not prescribe force deletion, a live database update, broad `git worktree prune`, or automatic branch reset.
+
+Integration tests use temporary Git repositories and real persisted cleanup jobs.
+Cover two conflicting resources plus one safe sibling, restart, stale claims, transient errors, and explicit safe reconciliation.
+Before/after snapshots and manifests prove historical evidence remains unchanged.
+Read-only diagnostic inspection alone must never remove the fixture checkout.
+
 ## Journaled application
 
 Take and validate a SQLite backup in a private `0700` directory with a `0600`

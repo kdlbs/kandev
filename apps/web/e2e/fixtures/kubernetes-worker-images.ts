@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { KubernetesCluster } from "./kubernetes-tools";
+import { runFixtureCommand } from "./fixture-command";
 
 const REPOSITORY_ROOT = path.resolve(__dirname, "../../../..");
 const IMAGE_DIR = path.join(REPOSITORY_ROOT, "k8s", "worker-images");
@@ -173,9 +174,8 @@ USER 1000
 }
 
 function loadImages(cluster: KubernetesCluster, tags: string[]): void {
-  execFileSync(cluster.kindBin, ["load", "docker-image", ...tags, "--name", cluster.name], {
+  runFixtureCommand(cluster.kindBin, ["load", "docker-image", ...tags, "--name", cluster.name], {
     timeout: 300_000,
-    stdio: process.env.E2E_DEBUG ? "inherit" : ["ignore", "ignore", "inherit"],
   });
 }
 

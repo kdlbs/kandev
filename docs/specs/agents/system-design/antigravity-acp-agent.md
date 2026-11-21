@@ -231,8 +231,22 @@ Only the explicitly interactive setup operation may retain a consent URL.
 Add a small in-memory attempt owner to `hostutility.Manager`.
 It creates a dedicated temporary native agentctl instance, using existing runtime ownership and authenticated clients.
 Reuse configure/start/initialize/`Client.Authenticate`; do not implement another JSON-RPC transport.
+`Client.ConfigureAgent` takes the complete argv in `agentArgs`, including the executable at index zero.
+The sign-in owner passes `command.Args()` unchanged in that field; it must not pass `args[1:]`.
+The separate `command` string does not supply a missing executable when structured arguments are present.
+The receiver validates structured arguments before start. Keep that validation intact.
+Test the sign-in caller through the real configure HTTP handler, including Linux flags, paths with spaces, and executable-only commands.
+The [sign-in launch repair](../../../plans/antigravity-sign-in-launch/plan.md) records the regression and its delivery checks.
 The dedicated instance has no task, injected task MCP, or inference prompt.
 It is separate from task instances and from concurrent capability probes.
+
+Call `Client.StreamUpdates` before ACP initialization. It opens the WebSocket
+synchronously and starts its reader; `nil` means setup succeeded, not that the
+reader ended. Setup errors use existing cleanup. Registration holds the stream
+read lock, so disconnect cleanup drains registered requests and late requests are
+rejected. Do not poll stream state.
+The [stream-startup repair](../../../plans/antigravity-login-stream/plan.md)
+records the regression and its connection-boundary verification.
 
 Proposed operator endpoints beside the existing capabilities handler:
 

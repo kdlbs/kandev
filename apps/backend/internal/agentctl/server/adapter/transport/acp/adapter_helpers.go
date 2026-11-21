@@ -15,13 +15,27 @@ import (
 // picker mode (see acpcompat.ClientCapabilityMeta); every other agent sees the
 // capabilities kandev has always sent.
 //
+// copilotNative adds the opt-in native session-event subscription. It is only
+// set for a Copilot launch whose durable consumer and agentctl peer support the
+// native transport; every other provider keeps the standard capability set.
+//
 // gateway advertises clientCapabilities.auth._meta.gateway=true, which is what
 // makes a gateway-capable agent (codex-acp >= 1.7) offer its OpenAI-compatible
 // gateway auth method. Only advertised when this launch actually carries a
 // provider gateway to authenticate against.
-func clientCapabilitiesForAgent(agentID string, gateway bool) acp.ClientCapabilities {
+func clientCapabilitiesForAgent(agentID string, gateway bool, copilotNative bool) acp.ClientCapabilities {
+	meta := acpcompat.ClientCapabilityMeta(agentID, map[string]any{"terminal_output": true})
+	if copilotNative && agentID == copilotAgentID {
+		meta[copilotCapabilityMetaKey] = map[string]any{
+			"events": []string{
+				copilotNativeTypeCompactionStart,
+				copilotNativeTypeCompactionComplete,
+				copilotNativeTypeUsage,
+			},
+		}
+	}
 	caps := acp.ClientCapabilities{
-		Meta: acpcompat.ClientCapabilityMeta(agentID, map[string]any{"terminal_output": true}),
+		Meta: meta,
 		Session: &acp.ClientSessionCapabilities{
 			Compaction: &acp.CompactionCapabilities{},
 		},

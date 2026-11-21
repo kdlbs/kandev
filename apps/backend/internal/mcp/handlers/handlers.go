@@ -199,6 +199,7 @@ type SessionLauncher interface {
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error)
 	QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error
+	QueueUserPromptWithReceipt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) (string, error)
 	GetMessageQueue() *messagequeue.Service
 	// CheckQueueAdmissionReadiness rechecks automatic dispatch for the exact
 	// session incarnation admitted by a queue operation.
@@ -312,6 +313,7 @@ type AgentProfileVerifier interface {
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
 	automationCreator      AutomationCreator
+	automationPluginTools  AutomationPluginTools
 	taskSvc                *service.Service
 	workflowCtrl           *workflowctrl.Controller
 	clarificationSvc       ClarificationService
@@ -363,6 +365,10 @@ type Handlers struct {
 	reviewRunner       ReviewRunner
 	pluginSvc          *plugins.Service
 	canvasAuthoringSvc CanvasAuthoringService
+	// pluginToolAuthEnabled reports whether endpoint authentication is
+	// enforced; external workspace scope fails closed when it cannot resolve a
+	// real caller identity.
+	pluginToolAuthEnabled func() bool
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation            TaskPRAutomationService
@@ -382,6 +388,9 @@ type Handlers struct {
 	clarificationResolver *clarification.Resolver
 	clarificationBundles  ClarificationBundleLister
 
+	sendOperationStore     SendOperationStore
+	sendOperationRetention *sendOperationRetentionWorker
+
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc AgentPermissionService
@@ -393,6 +402,12 @@ type Handlers struct {
 	// registered and a coordinator principal's propose call 404s via the
 	// guard's nil-service check.
 	coordinatorSvc *coordinator.Service
+	// coordinatorPhase2ForTest overrides the phase-2 gate in focused handler
+	// tests that do not construct the full coordinator service.
+	coordinatorPhase2ForTest func() bool
+	// coordinatorConversationForTest overrides the live conversation lookup in
+	// focused handler tests that do not construct the full coordinator service.
+	coordinatorConversationForTest func(context.Context, string) (string, bool, error)
 	// coordinatorTurns reads the turn ledger; nil while phase 3.1 is off.
 	coordinatorTurns CoordinatorTurnReader
 }
@@ -552,6 +567,13 @@ func (h *Handlers) SetCoordinatorService(svc *coordinator.Service) {
 	h.coordinatorSvc = svc
 }
 
+func (h *Handlers) coordinatorPhase2Enabled() bool {
+	if h.coordinatorPhase2ForTest != nil {
+		return h.coordinatorPhase2ForTest()
+	}
+	return h.coordinatorSvc != nil && h.coordinatorSvc.Phase2()
+}
+
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(dispatcher *ws.Dispatcher) {
 	d := &guardedMCPDispatcher{Dispatcher: dispatcher, handlers: h}
@@ -591,6 +613,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
+	d.RegisterFunc(ws.ActionMCPGetTaskMessageOperation, h.handleGetTaskMessageOperation)
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
@@ -927,9 +950,15 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		h.logMCPCreateAdmissionRejection(ctx, code, message)
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
+	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 
 	// Resolve repositories and default workspace/workflow from parent if needed.
-	resolved, err := h.resolveTaskRepositories(ctx, req.ParentID, req.SourceTaskID, req.Repositories)
+	resolved, err := h.resolveTaskRepositoriesForWorkspaceMode(
+		ctx, req.ParentID, req.SourceTaskID, req.Repositories, workspacePolicy.Mode, req.BaseBranch,
+	)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
@@ -990,23 +1019,11 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
 
-	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
-	}
-
 	identity, _ := authn.IdentityFromContext(ctx)
 	contributions, err := h.resolveMCPRemoteContributions(ctx, req.WorkspaceID, identity.UserID, repos)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
-	if workspacePolicy.Mode == mcpWorkspaceModeInheritParent &&
-		(len(req.Repositories) > 0 || req.BaseBranch != "") {
-		if err := h.taskSvc.ValidateInheritedWorkspaceRepositorySelection(ctx, req.ParentID, repos); err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
-		}
-	}
-
 	// Resolve the destination step before launch metadata. The profile lookup
 	// below reads it off pendingTask, and CreateTask sends an agent start to
 	// the first auto_start_agent step rather than to the start step — leaving
@@ -1076,6 +1093,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Autopilot:                 req.Autopilot,
 		Repositories:              repos,
 		BlockedBy:                 req.BlockedBy,
+		RelatedTaskIDs:            req.RelatedTaskIDs,
 		StartWhenUnblocked:        req.StartWhenUnblocked,
 		AssigneeAgentProfileID:    req.AssigneeAgentProfileID,
 		Metadata:                  metadata,
@@ -1086,7 +1104,8 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		ExecutorProfileIDExplicit: req.ExecutorProfileID != "",
 		ExternalID:                req.ExternalID,
 		WorkspacePolicy:           &workspacePolicy,
-		MCPServerIDs:              req.MCPServerIDs,
+		ValidateInheritedWorkspaceRepositorySelection: workspacePolicy.Mode == mcpWorkspaceModeInheritParent,
+		MCPServerIDs: req.MCPServerIDs,
 	}
 	result, err := h.taskSvc.CreateTask(createCtx, createReq)
 	if err != nil {
@@ -1215,6 +1234,8 @@ type mcpCreateTaskResult struct {
 
 func classifyCreateTaskError(err error) string {
 	switch {
+	case errors.Is(err, models.ErrWorkspaceReuseUnsafe):
+		return ws.ErrorCodeValidation
 	case errors.Is(err, service.ErrWIPLimitExceeded):
 		return ws.ErrorCodeConflict
 	case errors.Is(err, service.ErrTaskTitleTooLong):
@@ -1317,28 +1338,23 @@ func (h *Handlers) resolveTaskRepositories(
 	parentID, sourceTaskID string,
 	explicit []mcpRepositoryInput,
 ) (taskRepoResult, error) {
+	return h.resolveTaskRepositoriesForWorkspaceMode(
+		ctx, parentID, sourceTaskID, explicit, "", "",
+	)
+}
+
+func (h *Handlers) resolveTaskRepositoriesForWorkspaceMode(
+	ctx context.Context,
+	parentID, sourceTaskID string,
+	explicit []mcpRepositoryInput,
+	workspaceMode, baseBranchOverride string,
+) (taskRepoResult, error) {
 	explicitRepos := h.explicitRepoInputsWithDefaults(ctx, explicit)
 
 	if parentID != "" {
-		parent, err := h.taskSvc.GetTask(ctx, parentID)
-		if err != nil {
-			return taskRepoResult{}, fmt.Errorf("invalid parent_id: %w", err)
-		}
-		if parent.IsEphemeral {
-			return taskRepoResult{}, fmt.Errorf("cannot create subtasks of an ephemeral task (quick chat); omit parent_id to create a top-level task")
-		}
-		if parent.ParentID != "" && !parent.IsFromOffice {
-			return taskRepoResult{}, service.ErrSubtaskDepthExceeded
-		}
-		repos := explicitRepos
-		if repos == nil {
-			repos = inheritedRepoInputs(parent.Repositories)
-		}
-		return taskRepoResult{
-			Repos:       repos,
-			WorkspaceID: parent.WorkspaceID,
-			WorkflowID:  parent.WorkflowID,
-		}, nil
+		return h.resolveParentTaskRepositoriesForWorkspaceMode(
+			ctx, parentID, explicitRepos, workspaceMode, baseBranchOverride,
+		)
 	}
 
 	if explicitRepos != nil {
@@ -1374,6 +1390,49 @@ func (h *Handlers) resolveTaskRepositories(
 	return taskRepoResult{}, nil
 }
 
+func (h *Handlers) resolveParentTaskRepositoriesForWorkspaceMode(
+	ctx context.Context,
+	parentID string,
+	explicitRepos []service.TaskRepositoryInput,
+	workspaceMode, baseBranchOverride string,
+) (taskRepoResult, error) {
+	parent, err := h.taskSvc.GetTask(ctx, parentID)
+	if err != nil {
+		return taskRepoResult{}, fmt.Errorf("invalid parent_id: %w", err)
+	}
+	if parent.IsEphemeral {
+		return taskRepoResult{}, fmt.Errorf("cannot create subtasks of an ephemeral task (quick chat); omit parent_id to create a top-level task")
+	}
+	if parent.ParentID != "" && !parent.IsFromOffice {
+		return taskRepoResult{}, service.ErrSubtaskDepthExceeded
+	}
+
+	return taskRepoResult{
+		Repos:       h.parentRepositoryInputs(ctx, explicitRepos, parent.Repositories, workspaceMode, baseBranchOverride),
+		WorkspaceID: parent.WorkspaceID,
+		WorkflowID:  parent.WorkflowID,
+	}, nil
+}
+
+func (h *Handlers) parentRepositoryInputs(
+	ctx context.Context,
+	explicitRepos []service.TaskRepositoryInput,
+	parentRepos []*models.TaskRepository,
+	workspaceMode, baseBranchOverride string,
+) []service.TaskRepositoryInput {
+	if explicitRepos != nil {
+		return explicitRepos
+	}
+	switch {
+	case workspaceMode == mcpWorkspaceModeNewWorkspace:
+		return h.freshInheritedRepoInputs(ctx, parentRepos, baseBranchOverride)
+	case workspaceMode == mcpWorkspaceModeInheritParent && baseBranchOverride == "":
+		return inheritedWorkspaceRepoInputs(parentRepos)
+	default:
+		return inheritedRepoInputs(parentRepos)
+	}
+}
+
 const (
 	mcpWorkspaceModeInheritParent = "inherit_parent"
 	mcpWorkspaceModeNewWorkspace  = "new_workspace"
@@ -1382,7 +1441,7 @@ const (
 func (h *Handlers) resolveMCPWorkspacePolicy(parentID, workspaceMode string) (service.WorkspacePolicy, error) {
 	mode := strings.TrimSpace(workspaceMode)
 	if mode == "" && parentID != "" {
-		mode = mcpWorkspaceModeInheritParent
+		mode = mcpWorkspaceModeNewWorkspace
 	}
 	if mode == "" {
 		return service.WorkspacePolicy{}, nil
@@ -1399,6 +1458,56 @@ func (h *Handlers) resolveMCPWorkspacePolicy(parentID, workspaceMode string) (se
 	}
 
 	return service.WorkspacePolicy{Mode: mode}, nil
+}
+
+func (h *Handlers) freshInheritedRepoInputs(
+	ctx context.Context,
+	src []*models.TaskRepository,
+	baseBranchOverride string,
+) []service.TaskRepositoryInput {
+	if len(src) == 0 {
+		return nil
+	}
+
+	repositories := make([]service.TaskRepositoryInput, 0, len(src))
+	seen := make(map[string]struct{}, len(src))
+	defaultBranches := make(map[string]string)
+	for _, repository := range src {
+		if repository == nil {
+			continue
+		}
+		baseBranch := repository.BaseBranch
+		if baseBranchOverride != "" {
+			baseBranch = baseBranchOverride
+		}
+		effectiveBaseBranch := baseBranch
+		if effectiveBaseBranch == "" && repository.RepositoryID != "" && h.taskSvc != nil {
+			defaultBranch, known := defaultBranches[repository.RepositoryID]
+			if !known {
+				if stored, err := h.taskSvc.GetRepository(ctx, repository.RepositoryID); err == nil && stored != nil {
+					defaultBranch = stored.DefaultBranch
+				}
+				defaultBranches[repository.RepositoryID] = defaultBranch
+			}
+			effectiveBaseBranch = defaultBranch
+		}
+
+		key := repository.RepositoryID + "\x00" + effectiveBaseBranch
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		selectionSource := models.BaseBranchSelectionSourceInherited
+		if baseBranchOverride != "" {
+			selectionSource = models.BaseBranchSelectionSourceExplicit
+		}
+		repositories = append(repositories, service.TaskRepositoryInput{
+			RepositoryID:              repository.RepositoryID,
+			BaseBranch:                baseBranch,
+			BaseBranchSelectionSource: selectionSource,
+		})
+	}
+	return repositories
 }
 
 func applyMCPTaskScopeDefaults(parentID, workspaceID, workflowID, workflowStepID string, explicitWorkspaceID, explicitWorkflowID bool, resolved taskRepoResult) (string, string, string) {
@@ -1465,16 +1574,23 @@ func (h *Handlers) explicitRepoInputsWithDefaults(ctx context.Context, explicit 
 	repos := make([]service.TaskRepositoryInput, 0, len(explicit))
 	for _, r := range explicit {
 		baseBranch := r.BaseBranch
-		if baseBranch == "" && r.RepositoryID != "" && h.taskSvc != nil {
-			if repo, err := h.taskSvc.GetRepository(ctx, r.RepositoryID); err == nil && repo != nil {
-				baseBranch = repo.DefaultBranch
+		source := models.BaseBranchSelectionSourceExplicit
+		if baseBranch == "" {
+			// Record the omission before filling the repository default so the
+			// automatic selection remains distinguishable from an explicit one.
+			source = models.BaseBranchSelectionSourceRepositoryDefault
+			if r.RepositoryID != "" && h.taskSvc != nil {
+				if repo, err := h.taskSvc.GetRepository(ctx, r.RepositoryID); err == nil && repo != nil {
+					baseBranch = repo.DefaultBranch
+				}
 			}
 		}
 		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			LocalPath:    r.LocalPath,
-			GitHubURL:    r.GitHubURL,
-			BaseBranch:   baseBranch,
+			RepositoryID:              r.RepositoryID,
+			LocalPath:                 r.LocalPath,
+			GitHubURL:                 r.GitHubURL,
+			BaseBranch:                baseBranch,
+			BaseBranchSelectionSource: source,
 		})
 	}
 	return repos
@@ -1500,11 +1616,35 @@ func inheritedRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryI
 			continue
 		}
 		repos = append(repos, service.TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			BaseBranch:   r.BaseBranch,
+			RepositoryID:              r.RepositoryID,
+			BaseBranch:                r.BaseBranch,
+			BaseBranchSelectionSource: models.BaseBranchSelectionSourceInherited,
 		})
 	}
 	return repos
+}
+
+func inheritedWorkspaceRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryInput {
+	if len(src) == 0 {
+		return nil
+	}
+	repositories := make([]service.TaskRepositoryInput, 0, len(src))
+	for _, repository := range src {
+		if repository == nil {
+			continue
+		}
+		repositories = append(repositories, service.TaskRepositoryInput{
+			RepositoryID:              repository.RepositoryID,
+			BaseBranch:                repository.BaseBranch,
+			CheckoutBranch:            repository.CheckoutBranch,
+			WorkspaceRelativePath:     repository.WorkspaceRelativePath,
+			Position:                  repository.Position,
+			InheritedWorkspaceSlot:    true,
+			ReuseOnlyCheckoutBranch:   repository.CheckoutBranch != "",
+			BaseBranchSelectionSource: models.BaseBranchSelectionSourceInherited,
+		})
+	}
+	return repositories
 }
 
 type mcpAutoStartConfig struct {
@@ -1955,20 +2095,26 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 				return
 			}
 			launchReq = &orchestrator.LaunchSessionRequest{
-				TaskID:              task.ID,
-				Intent:              orchestrator.IntentStartCreated,
-				SessionID:           prepResp.SessionID,
-				AgentProfileID:      config.AgentProfileID,
-				ExecutorID:          config.ExecutorID,
-				ExecutorProfileID:   config.ExecutorProfileID,
-				WorkflowStepID:      task.WorkflowStepID,
-				Prompt:              task.Description,
-				InitialCreatePrompt: true,
+				TaskID:                  task.ID,
+				Intent:                  orchestrator.IntentStartCreated,
+				SessionID:               prepResp.SessionID,
+				AgentProfileID:          config.AgentProfileID,
+				ExecutorID:              config.ExecutorID,
+				ExecutorProfileID:       config.ExecutorProfileID,
+				WorkflowStepID:          task.WorkflowStepID,
+				Prompt:                  task.Description,
+				PromptIsTaskDescription: true,
+				InitialCreatePrompt:     true,
 			}
 		}
 
 		resp, err := h.sessionLauncher.LaunchSession(ctx, launchReq)
 		if err != nil {
+			if orchestrator.IsWorkflowSwitchLaunchSuperseded(err) {
+				h.logger.Info("MCP task auto-start yielded to a workflow session switch",
+					zap.String("task_id", task.ID), zap.Error(err))
+				return
+			}
 			h.logger.Error("failed to auto-start task",
 				zap.String("task_id", task.ID), zap.Error(err))
 			h.recordAutoStartFailure(ctx, task.ID, err.Error())
@@ -2257,6 +2403,7 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 		GitHubURL      string `json:"github_url"`
 		BaseBranch     string `json:"base_branch"`
 		CheckoutBranch string `json:"checkout_branch"`
+		WorktreePath   string `json:"worktree_path"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -2264,14 +2411,22 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	if req.WorktreePath != "" {
+		return h.handleReportedWorktreeAdoption(ctx, msg, req.TaskID, req.WorktreePath, req.BaseBranch, req.CheckoutBranch)
+	}
 	// Mutual exclusion across the three repo identifiers. resolveRepoInput
 	// applies a silent precedence (repository_id > github_url > local_path),
 	// so an agent that accidentally passes two of them gets a behaviour
 	// change with no signal. Reject early instead so the agent sees the
 	// mistake.
-	if locatorCount := boolCount(req.RepositoryID != "", req.LocalPath != "", req.GitHubURL != ""); locatorCount > 1 {
+	locatorCount := boolCount(req.RepositoryID != "", req.LocalPath != "", req.GitHubURL != "")
+	if locatorCount > 1 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
 			"pass at most one of repository_id, github_url, local_path", nil)
+	}
+	if req.WorktreePath != "" && locatorCount > 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"worktree_path cannot be combined with repository_id, github_url, or local_path", nil)
 	}
 	// repository_id / local_path / github_url are all optional: the service
 	// defaults to the task's only repository (or its primary row) when none
@@ -2307,6 +2462,42 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 	}
 	if taskRepo.TaskWorkspacePath != "" {
 		response["task_workspace_path"] = taskRepo.TaskWorkspacePath
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// handleReportedWorktreeAdoption attaches an existing linked worktree the
+// agent already created inside the task workspace. The backend validates the
+// path, repository, and branch; this handler only shapes the response.
+func (h *Handlers) handleReportedWorktreeAdoption(ctx context.Context, msg *ws.Message, taskID, worktreePath, baseBranch, checkoutBranch string) (*ws.Message, error) {
+	result, err := h.taskSvc.AdoptWorktree(ctx, service.AdoptWorktreeRequest{
+		TaskID:         taskID,
+		Path:           worktreePath,
+		BaseBranch:     baseBranch,
+		CheckoutBranch: checkoutBranch,
+		Source:         service.WorktreeAdoptionSourceReported,
+	})
+	if err != nil {
+		h.logger.Error("failed to adopt worktree", zap.Error(err))
+		code := classifyAddBranchError(err)
+		return ws.NewError(msg.ID, msg.Action, code, "Failed to add branch: "+err.Error(), nil)
+	}
+	response := map[string]interface{}{
+		"id":                result.ID,
+		keyTaskID:           result.TaskID,
+		keyRepositoryID:     result.RepositoryID,
+		keyBaseBranch:       result.BaseBranch,
+		keyCheckoutBranch:   result.WorktreeBranch,
+		keyPosition:         result.Position,
+		"agent_cwd_changed": false,
+		"adopted":           result.Adopted,
+		"already_attached":  result.AlreadyAttached,
+	}
+	if result.WorktreePath != "" {
+		response["worktree_path"] = result.WorktreePath
+	}
+	if result.TaskWorkspacePath != "" {
+		response["task_workspace_path"] = result.TaskWorkspacePath
 	}
 	return ws.NewResponse(msg.ID, msg.Action, response)
 }
@@ -2567,7 +2758,11 @@ func classifyAddBranchError(err error) string {
 	case strings.Contains(msg, "repository_id is required"),
 		strings.Contains(msg, "only supported on the worktree executor"),
 		strings.Contains(msg, "task_id is required"),
-		strings.Contains(msg, "cannot resolve base_branch"):
+		strings.Contains(msg, "cannot resolve base_branch"),
+		strings.Contains(msg, "is not adoptable"),
+		strings.Contains(msg, "does not support worktree adoption"),
+		strings.Contains(msg, "only supported on host Worktree and Local executors"),
+		strings.Contains(msg, "checkout_branch"):
 		return ws.ErrorCodeValidation
 	case strings.Contains(msg, "GitHub URL"),
 		strings.Contains(msg, "github.com/owner/repo"),
@@ -2625,13 +2820,31 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
-	launchStepID, launchEntryID, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
+	launch, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
 	if err != nil {
+		if isTerminalStepCompleteSession(session.State) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+				"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
+		}
 		h.logger.Error("failed to resolve step-completion turn",
 			zap.String("task_id", req.TaskID),
 			zap.String("session_id", req.SessionID),
 			zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to resolve calling turn", nil)
+	}
+	launchStepID := launch.StepID
+	// An exact retained receipt is a read-only duplicate. Check it before the
+	// stale-step and terminal-session rejections so a retry after the source
+	// entry was consumed, the destination began entry, or the backend restarted
+	// still receives the outcome instead of a new transition or a dead end.
+	if receipt, ok := h.exactStepCompletionReceipt(ctx, task, session, launch); ok {
+		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session, models.SignalFromReceipt(*receipt))
+	}
+	// A terminal session cannot accept a new signal; no future turn-end can
+	// consume it. An exact retained receipt was already returned above.
+	if isTerminalStepCompleteSession(session.State) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
 	}
 	if launchStepID != task.WorkflowStepID {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fmt.Sprintf(
@@ -2646,7 +2859,8 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	boundedHandoff, handoffTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Handoff))
 	boundedBlockers, blockersTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Blockers))
 	signal := models.PendingStepCompletionSignal{
-		WorkflowStepTransitionID: launchEntryID,
+		SourceTurnID:             launch.TurnID,
+		WorkflowStepTransitionID: launch.Entry,
 		StepID:                   launchStepID,
 		Source:                   models.StepCompletionSourceAgent,
 		Summary:                  strings.TrimSpace(req.Summary),
@@ -2686,12 +2900,24 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
+	advances, note, outcomeReason, advancesKnown := h.resolveStepCompletionAdvances(ctx, task.WorkflowStepID)
+	outcomeStatus := models.StepCompletionOutcomePending
+	if advancesKnown && !advances {
+		outcomeStatus = models.StepCompletionOutcomeNotConfigured
+		h.persistStepCompletionReceiptOutcome(ctx, req.SessionID, signal.SignalID, outcomeStatus, outcomeReason)
+	}
 	response := map[string]interface{}{
 		"accepted":    true,
 		"step_id":     task.WorkflowStepID,
 		"signaled_at": signal.SignaledAt,
+		"signal_id":   signal.SignalID,
+		"source":      stepCompletionSignalSource(req.SessionID, signal),
+		"outcome":     stepCompletionOutcome(outcomeStatus, outcomeReason),
 	}
-	if advances, note, ok := h.resolveStepCompletionAdvances(ctx, task.WorkflowStepID); ok {
+	if current := h.stepCompletionCurrent(ctx, req.TaskID, task); current != nil {
+		response["current"] = current
+	}
+	if advancesKnown {
 		response["advances"] = advances
 		if note != "" {
 			response["note"] = note
@@ -2717,25 +2943,37 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 // durably recorded — a step whose AutoAdvanceRequiresSignal is false never
 // reads it, and a signal-gated step whose on_turn_complete has no move that
 // runs automatically reads it without transitioning, so the caller can accept
-// a signal that changes nothing. ok is false (both other return values
-// ignored) when the current step cannot be resolved: the caller must never
-// guess this field into existence.
-func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowStepID string) (advances bool, note string, ok bool) {
+// a signal that changes nothing. ok is false (reason and note ignored) when the
+// current step cannot be resolved: the caller must never guess this field into
+// existence.
+func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowStepID string) (advances bool, note, reason string, ok bool) {
 	if h.workflowCtrl == nil || workflowStepID == "" {
-		return false, "", false
+		return false, "", "", false
 	}
 	resp, err := h.workflowCtrl.GetStep(ctx, workflowStepID)
 	if err != nil || resp == nil || resp.Step == nil {
-		return false, "", false
+		return false, "", "", false
 	}
 	if !resp.Step.AutoAdvanceRequiresSignal {
-		return false, "this step does not advance on a completion signal", true
+		return false, "this step does not advance on a completion signal", models.StepCompletionReasonStepNotSignalGated, true
 	}
 	if !resp.Step.AdvancesOnTurnComplete() {
 		return false, "this step has no on_turn_complete move that runs automatically, " +
-			"so the signal will not move the task", true
+			"so the signal will not move the task", models.StepCompletionReasonNoAutomaticMove, true
 	}
-	return true, "", true
+	return true, "", "", true
+}
+
+// isTerminalStepCompleteSession reports states that can never consume a fresh
+// completion signal. An exact retained receipt is still readable.
+func isTerminalStepCompleteSession(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled:
+		return true
+	}
+	return false
 }
 
 // resolveStepCompleteTarget loads the session + task the signal applies to
@@ -2762,19 +3000,6 @@ func (h *Handlers) resolveStepCompleteTarget(
 	}
 	if session.TaskID != taskID {
 		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session does not belong to task", nil)
-		return nil, nil, errMsg, mErr
-	}
-	// Terminal sessions cannot consume a signal: the orchestrator's
-	// out-of-band subscriber short-circuits on every state other than
-	// WAITING_FOR_INPUT, and no future turn-end will fire on a closed
-	// session. Reject up front so the agent gets a clear error instead of
-	// `accepted: true` followed by silent no-op.
-	switch session.State {
-	case models.TaskSessionStateCompleted,
-		models.TaskSessionStateFailed,
-		models.TaskSessionStateCancelled:
-		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-			"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
 		return nil, nil, errMsg, mErr
 	}
 
@@ -2815,12 +3040,14 @@ func (h *Handlers) publishStepCompletionEvent(
 	if err := h.eventBus.Publish(ctx, events.WorkflowStepCompletionSignaled, bus.NewEvent(
 		events.WorkflowStepCompletionSignaled, "mcp-handlers",
 		map[string]interface{}{
-			"task_id":     taskID,
-			"session_id":  sessionID,
-			"step_id":     stepID,
-			"source":      signal.Source,
-			"summary":     signal.Summary,
-			"signaled_at": signal.SignaledAt,
+			"task_id":        taskID,
+			"session_id":     sessionID,
+			"step_id":        stepID,
+			"signal_id":      signal.SignalID,
+			"source_turn_id": signal.SourceTurnID,
+			"source":         signal.Source,
+			"summary":        signal.Summary,
+			"signaled_at":    signal.SignaledAt,
 		},
 	)); err != nil {
 		h.logger.Error("failed to publish step-completion signal",
@@ -2857,6 +3084,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		SenderSessionID   string `json:"sender_session_id"`
 		DeliveryMode      string `json:"delivery_mode"`
 		ReplyToQuestionID string `json:"reply_to_question_id"`
+		OperationID       string `json:"operation_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -2868,6 +3096,11 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required", nil)
 	}
 	if req.DeliveryMode == "report" {
+		// A status report appends without a send operation; accepting an
+		// identity here would imply a replay guarantee the report path lacks.
+		if req.OperationID != "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "operation_id applies to queued or interrupt sends, not status reports", nil)
+		}
 		if req.ReplyToQuestionID != "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "report cannot answer a pending question", nil)
 		}
@@ -2901,6 +3134,15 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "sender task not found", nil)
 	}
 
+	operationRequest := sendOperationClaimRequest{
+		SenderTaskID: req.SenderTaskID, SenderSessionID: req.SenderSessionID,
+		TargetTaskID: req.TaskID, RequestedSession: req.SessionID,
+		RequestedQuestion: req.ReplyToQuestionID, Prompt: req.Prompt,
+		DeliveryMode: req.DeliveryMode, OperationID: req.OperationID,
+	}
+	if response := h.readExistingSendOperation(ctx, msg, operationRequest); response != nil {
+		return response, nil
+	}
 	// Verify the target task exists before looking up its session, so a bad
 	// task_id (e.g. a truncated UUID prefix) reports "task not found" instead
 	// of the misleading "no primary session" error from the session lookup.
@@ -2966,10 +3208,22 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			`delivery_mode="interrupt" is only allowed when the sender is the target task's direct parent`, nil)
 	}
+	claim, operationErr := h.claimSendOperation(ctx, msg, operationRequest)
+	if operationErr != nil {
+		return operationErr, nil
+	}
+	if claim.response != nil {
+		return claim.response, nil
+	}
+	if claim.operation != nil {
+		claim.operation.TargetSessionID = session.ID
+		senderMeta[models.MetaKeySendOperationID] = claim.operation.OperationID
+	}
 	if parentReply != nil {
 		// Claim the durable question before dispatch. A failed status update after
 		// delivery would make a retry send the same answer a second time.
 		if err := h.markParentQuestionAnswered(ctx, parentReply.message, req.Prompt); err != nil {
+			h.rejectSendOperationBeforeDispatch(ctx, claim.operation)
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "parent question could not be claimed: "+err.Error(), nil)
 		}
 	}
@@ -2999,6 +3253,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 					zap.String(parentQuestionIDKey, parentReply.message.ID), zap.Error(restoreErr))
 			}
 		}
+		h.settleSendOperation(ctx, claim.operation, result, err)
 		var qfErr *queueFullDispatchError
 		if errors.As(err, &qfErr) {
 			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode,
@@ -3007,11 +3262,10 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"task_id":         req.TaskID,
-		"session_id":      result.sessionID,
-		stopTaskStatusKey: result.status,
-	})
+	h.settleSendOperation(ctx, claim.operation, result, nil)
+	payload := map[string]interface{}{"task_id": req.TaskID, "session_id": result.sessionID, stopTaskStatusKey: result.status}
+	decorateSendOperationReceipt(payload, claim.operation, result)
+	return ws.NewResponse(msg.ID, msg.Action, payload)
 }
 
 // lookupSenderSessionName resolves the sender session's user-supplied name for
@@ -3308,6 +3562,7 @@ type taskMessageDispatchResult struct {
 	status        string
 	sessionID     string
 	queuedEntryID string
+	messageID     string
 }
 
 type taskMessageReviewRollback struct {
@@ -3841,11 +4096,12 @@ func (h *Handlers) queueTaskMessageUntilWorkflowPromotion(
 	admission orchestrator.PeerMessageStartAdmission,
 ) (taskMessageDispatchResult, error) {
 	releasePeerMessageStartAdmission(admission)
-	if err := h.sessionLauncher.QueueUserPrompt(ctx, taskID, session.ID, prompt, "", false, nil, metadata, false); err != nil {
+	queuedEntryID, err := h.sessionLauncher.QueueUserPromptWithReceipt(ctx, taskID, session.ID, prompt, "", false, nil, metadata, false)
+	if err != nil {
 		h.restoreTaskReviewForTaskMessage(ctx, taskID, *reviewRollback)
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue prompt until workflow promotion: %w", err)
 	}
-	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID}, nil
+	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queuedEntryID}, nil
 }
 
 func (h *Handlers) dispatchPreparedTaskMessageWithReviewRollback(
@@ -4002,7 +4258,7 @@ func (h *Handlers) startPreparedPeerTaskMessage(
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to start session: %w", err)
 	}
 	releasePeerMessageStartAdmission(admission)
-	return taskMessageDispatchResult{status: "started", sessionID: session.ID}, nil
+	return taskMessageDispatchResult{status: "started", sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
 }
 
 func (h *Handlers) admitPreparedPeerTaskMessage(
@@ -4072,7 +4328,7 @@ func (h *Handlers) promptPreparedTaskMessage(
 		h.deleteRecordedUserMessage(ctx, recorded)
 		return taskMessageDispatchResult{}, err
 	}
-	return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil
+	return taskMessageDispatchResult{status: status, sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
 }
 
 // queueRecordedTaskMessageForCapacity keeps an already-recorded agent message

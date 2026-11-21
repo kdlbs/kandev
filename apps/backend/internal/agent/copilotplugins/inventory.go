@@ -31,24 +31,25 @@ const (
 type ReasonCode string
 
 const (
-	ReasonCLIUnavailable       ReasonCode = "cli_unavailable"
-	ReasonTimeout              ReasonCode = "timeout"
-	ReasonCancelled            ReasonCode = "cancelled"
-	ReasonOutputLimit          ReasonCode = "output_limit"
-	ReasonInvalidInventory     ReasonCode = "invalid_inventory"
-	ReasonLegacyErrors         ReasonCode = "legacy_errors"
-	ReasonRuntimeUnsupported   ReasonCode = "runtime_unsupported"
-	ReasonUnsupportedLaunch    ReasonCode = "unsupported_launch_context"
-	ReasonMetadataUnavailable  ReasonCode = "metadata_unavailable"
-	ReasonAmbiguousIdentity    ReasonCode = "ambiguous_identity"
-	ReasonMissingRoot          ReasonCode = "missing_root"
-	ReasonManifestMismatch     ReasonCode = "manifest_mismatch"
-	ReasonUnsafeRoot           ReasonCode = "unsafe_root"
-	ReasonBuiltinNotMountable  ReasonCode = "builtin_not_mountable"
-	ReasonExternalNotMountable ReasonCode = "external_not_mountable"
-	ReasonUnsupportedSource    ReasonCode = "unsupported_source"
-	ReasonPluginMountConflict  ReasonCode = "manual_mount_conflict"
-	ReasonPolicyUnverified     ReasonCode = "policy_unverified"
+	ReasonCLIUnavailable           ReasonCode = "cli_unavailable"
+	ReasonTimeout                  ReasonCode = "timeout"
+	ReasonCancelled                ReasonCode = "cancelled"
+	ReasonOutputLimit              ReasonCode = "output_limit"
+	ReasonInvalidInventory         ReasonCode = "invalid_inventory"
+	ReasonLegacyErrors             ReasonCode = "legacy_errors"
+	ReasonRuntimeUnsupported       ReasonCode = "runtime_unsupported"
+	ReasonPluginLoadingUnsupported ReasonCode = "plugin_loading_unsupported"
+	ReasonUnsupportedLaunch        ReasonCode = "unsupported_launch_context"
+	ReasonMetadataUnavailable      ReasonCode = "metadata_unavailable"
+	ReasonAmbiguousIdentity        ReasonCode = "ambiguous_identity"
+	ReasonMissingRoot              ReasonCode = "missing_root"
+	ReasonManifestMismatch         ReasonCode = "manifest_mismatch"
+	ReasonUnsafeRoot               ReasonCode = "unsafe_root"
+	ReasonBuiltinNotMountable      ReasonCode = "builtin_not_mountable"
+	ReasonExternalNotMountable     ReasonCode = "external_not_mountable"
+	ReasonUnsupportedSource        ReasonCode = "unsupported_source"
+	ReasonPluginMountConflict      ReasonCode = "manual_mount_conflict"
+	ReasonPolicyUnverified         ReasonCode = "policy_unverified"
 )
 
 // Availability is the per-row selectability state.
@@ -83,12 +84,13 @@ type InventoryRow struct {
 
 // Snapshot is the parsed inventory plus its safe runtime identity.
 type Snapshot struct {
-	Status         Status
-	Reason         ReasonCode
-	Rows           []InventoryRow
-	RuntimeVersion string
-	Platform       string
-	Format         string
+	Status                 Status
+	Reason                 ReasonCode
+	Rows                   []InventoryRow
+	RuntimeVersion         string
+	Platform               string
+	Format                 string
+	PluginLoadingSupported bool
 }
 
 // LaunchContext is the authorized final process context used to resolve
@@ -102,9 +104,9 @@ type LaunchContext struct {
 	CommandPrefix  []string
 	RuntimeVersion string
 	RuntimeCommand []string
-	// InventoryTimeout optionally bounds the native inventory command. Zero
-	// uses the production deadline.
-	InventoryTimeout time.Duration
+	// ProbeTimeout optionally shortens the shared capability and inventory
+	// deadline in tests. Zero uses the production deadline.
+	ProbeTimeout time.Duration
 }
 
 // Discover runs `copilot plugin list --json` under the selected runtime and
@@ -122,12 +124,31 @@ func Discover(ctx context.Context, runner Runner, launch LaunchContext) Snapshot
 		snapshot.Reason = reasonForContextError(err)
 		return snapshot
 	}
-	if !RuntimeSupported(launch.RuntimeVersion) {
-		snapshot.Status = StatusUnsupported
-		snapshot.Reason = ReasonRuntimeUnsupported
+	timeout := pluginProbeTimeout
+	if launch.ProbeTimeout > 0 && launch.ProbeTimeout < timeout {
+		timeout = launch.ProbeTimeout
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if launch.WorkDir == "" {
+		workDir, err := os.MkdirTemp("", "kandev-copilot-inventory-")
+		if err != nil {
+			snapshot.Reason = ReasonCLIUnavailable
+			return snapshot
+		}
+		defer func() { _ = os.RemoveAll(workDir) }()
+		launch.WorkDir = workDir
+	}
+	pluginLoadingSupported, reason := observePluginLoading(probeCtx, runner, launch)
+	snapshot.PluginLoadingSupported = pluginLoadingSupported
+	if reason != "" {
+		if reason == ReasonPluginLoadingUnsupported {
+			snapshot.Status = StatusUnsupported
+		}
+		snapshot.Reason = reason
 		return snapshot
 	}
-	result, reason := executeInventory(ctx, runner, launch)
+	result, reason := executeInventory(probeCtx, runner, launch)
 	if reason != "" {
 		snapshot.Reason = reason
 		return snapshot
@@ -155,35 +176,9 @@ func executeInventory(ctx context.Context, runner Runner, launch LaunchContext) 
 	if err := managednpm.PrepareNPMProjectPrefix(command); err != nil {
 		return CommandResult{}, ReasonCLIUnavailable
 	}
-	workDir := launch.WorkDir
-	cleanup := func() {}
-	if workDir == "" {
-		workDir, err = os.MkdirTemp("", "kandev-copilot-inventory-")
-		if err != nil {
-			return CommandResult{}, ReasonCLIUnavailable
-		}
-		cleanup = func() { _ = os.RemoveAll(workDir) }
-	}
-	defer cleanup()
-
-	timeout := inventoryTimeout
-	if launch.InventoryTimeout > 0 {
-		timeout = launch.InventoryTimeout
-	}
-	commandCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	result, runErr := runner.Run(commandCtx, command, launch.Env, workDir)
-	if ctxErr := commandCtx.Err(); ctxErr != nil {
-		if errors.Is(ctxErr, context.DeadlineExceeded) {
-			return result, ReasonTimeout
-		}
-		return result, ReasonCancelled
-	}
-	if runErr != nil || result.Truncated || result.ExitCode != 0 {
-		if result.Truncated {
-			return result, ReasonOutputLimit
-		}
-		return result, ReasonCLIUnavailable
+	result, runErr := runner.Run(ctx, command, launch.Env, launch.WorkDir)
+	if reason := commandResultReason(ctx, result, runErr); reason != "" {
+		return result, reason
 	}
 	return result, ""
 }

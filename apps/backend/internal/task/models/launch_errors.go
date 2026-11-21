@@ -4,11 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"math"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
 // MetaKeyLastLaunchError stores the task-owned launch failure. Unlike the
@@ -78,6 +81,8 @@ const (
 	AgentErrorCauseCodePermissionModeUnconfirmed = "permission_mode_unconfirmed"
 	AgentErrorCauseCodePermissionModeMismatch    = "permission_mode_mismatch"
 	AgentErrorCauseCodeDeliveryStorage           = "delivery_storage"
+	AgentErrorCauseCodePluginPreparationFailed   = "plugin_preparation_failed"
+	AgentErrorCauseCodeProcessExited             = "process_exited"
 
 	AgentErrorCauseReasonRequestedNotAdvertised = "requested_not_advertised"
 	AgentErrorCauseReasonCatalogEmpty           = "catalog_empty"
@@ -87,7 +92,15 @@ const (
 	AgentErrorCauseReasonClientUnavailable      = "client_unavailable"
 	AgentErrorCauseReasonConfirmationMissing    = "confirmation_missing"
 	AgentErrorCauseReasonEffectiveMismatch      = "effective_mismatch"
+	AgentErrorCauseReasonMiseConfigUntrusted    = "mise_config_untrusted"
+	AgentErrorCauseReasonUnclassified           = "unclassified"
 )
+
+const AgentErrorCausePluginPreparationDetail = "The selected Copilot plugins could not be prepared."
+
+// AgentErrorCauseProcessExitedDetail is the fixed safe explanation for a
+// confirmed ordinary process exit before initialization completed.
+const AgentErrorCauseProcessExitedDetail = "The agent exited before startup completed."
 
 // AgentErrorCause keeps the bounded, operation-specific explanation for one
 // recovery attempt. It is intentionally smaller than LastAgentError so a
@@ -104,7 +117,9 @@ type AgentErrorCause struct {
 	AttemptedModel string             `json:"attempted_model,omitempty"`
 	RequestedMode  string             `json:"requested_mode,omitempty"`
 	EffectiveMode  string             `json:"effective_mode,omitempty"`
+	RuntimeVersion string             `json:"runtime_version,omitempty"`
 	PromptNotSent  *bool              `json:"prompt_not_sent,omitempty"`
+	ExitCode       *int               `json:"exit_code,omitempty"`
 }
 
 // AgentErrorStorage is the bounded, validated storage evidence attached to a
@@ -149,7 +164,8 @@ func NormalizeAgentErrorCauses(causes []AgentErrorCause) []AgentErrorCause {
 		identity := cause.Operation + "\x00" + cause.Code + "\x00" + cause.Detail +
 			"\x00" + cause.Reason + "\x00" + cause.RequestedModel + "\x00" + cause.EffectiveModel +
 			"\x00" + cause.AttemptedModel + "\x00" + cause.RequestedMode + "\x00" + cause.EffectiveMode +
-			"\x00" + agentErrorStorageIdentity(cause.Storage)
+			"\x00" + cause.RuntimeVersion + "\x00" + agentErrorStorageIdentity(cause.Storage) +
+			"\x00" + agentErrorExitCodeIdentity(cause.ExitCode)
 		switch {
 		case cause.PromptNotSent == nil:
 			identity += "\x00unknown"
@@ -182,7 +198,13 @@ func AgentErrorCausesEqual(left, right []AgentErrorCause) bool {
 			a.Reason != b.Reason || a.RequestedModel != b.RequestedModel ||
 			a.EffectiveModel != b.EffectiveModel || a.AttemptedModel != b.AttemptedModel ||
 			a.RequestedMode != b.RequestedMode ||
-			a.EffectiveMode != b.EffectiveMode {
+			a.EffectiveMode != b.EffectiveMode || a.RuntimeVersion != b.RuntimeVersion {
+			return false
+		}
+		if (a.ExitCode == nil) != (b.ExitCode == nil) {
+			return false
+		}
+		if a.ExitCode != nil && *a.ExitCode != *b.ExitCode {
 			return false
 		}
 		if (a.PromptNotSent == nil) != (b.PromptNotSent == nil) {
@@ -221,6 +243,13 @@ func agentErrorMeasurement(value *int64) string {
 	return strconv.FormatInt(*value, 10)
 }
 
+func agentErrorExitCodeIdentity(value *int) string {
+	if value == nil {
+		return "unknown"
+	}
+	return strconv.Itoa(*value)
+}
+
 func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 	if cause == nil {
 		return
@@ -237,6 +266,8 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		cause.AttemptedModel = safeAgentErrorSelector(cause.AttemptedModel)
 		cause.RequestedMode = ""
 		cause.EffectiveMode = ""
+		cause.RuntimeVersion = ""
+		cause.ExitCode = nil
 	case AgentErrorCauseCodePermissionModeFailed,
 		AgentErrorCauseCodePermissionModeUnconfirmed,
 		AgentErrorCauseCodePermissionModeMismatch:
@@ -249,10 +280,40 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		cause.RequestedModel = ""
 		cause.EffectiveModel = ""
 		cause.AttemptedModel = ""
+		cause.RuntimeVersion = ""
+		cause.ExitCode = nil
 	case AgentErrorCauseCodeRuntimeCleanupFailed:
 		promptNotSent := cause.PromptNotSent
 		clearAgentErrorCauseEvidence(cause)
 		cause.PromptNotSent = promptNotSent
+	case AgentErrorCauseCodePluginPreparationFailed:
+		cause.Storage = nil
+		cause.RequestedModel = ""
+		cause.EffectiveModel = ""
+		cause.AttemptedModel = ""
+		cause.RequestedMode = ""
+		cause.EffectiveMode = ""
+		cause.PromptNotSent = nil
+		cause.ExitCode = nil
+		cause.Detail = AgentErrorCausePluginPreparationDetail
+		if !isKnownAgentErrorCauseReason(cause.Code, cause.Reason) {
+			cause.Reason = ""
+			cause.RuntimeVersion = ""
+			return
+		}
+		cause.RuntimeVersion = safeAgentErrorRuntimeVersion(cause.RuntimeVersion)
+	case AgentErrorCauseCodeProcessExited:
+		reason := cause.Reason
+		exitCode := cause.ExitCode
+		clearAgentErrorCauseEvidence(cause)
+		if reason != AgentErrorCauseReasonMiseConfigUntrusted {
+			reason = AgentErrorCauseReasonUnclassified
+		}
+		cause.Reason = reason
+		if exitCode != nil && (*exitCode >= 0 && *exitCode <= math.MaxUint32) {
+			cause.ExitCode = exitCode
+		}
+		cause.Detail = AgentErrorCauseProcessExitedDetail
 	case AgentErrorCauseCodeDeliveryStorage:
 		storage := normalizeAgentErrorStorage(cause.Storage)
 		clearAgentErrorCauseEvidence(cause)
@@ -277,7 +338,19 @@ func clearAgentErrorCauseEvidence(cause *AgentErrorCause) {
 	cause.AttemptedModel = ""
 	cause.RequestedMode = ""
 	cause.EffectiveMode = ""
+	cause.RuntimeVersion = ""
 	cause.PromptNotSent = nil
+	cause.ExitCode = nil
+}
+
+func safeAgentErrorRuntimeVersion(value string) string {
+	if len(value) == 0 || len(value) > 256 || !utf8.ValidString(value) {
+		return ""
+	}
+	if _, err := managedruntime.ParseStableVersion(value); err != nil {
+		return ""
+	}
+	return value
 }
 
 func isKnownAgentErrorCauseReason(code, reason string) bool {
@@ -296,6 +369,19 @@ func isKnownAgentErrorCauseReason(code, reason string) bool {
 		return reason == AgentErrorCauseReasonConfirmationMissing
 	case AgentErrorCauseCodePermissionModeMismatch:
 		return reason == AgentErrorCauseReasonEffectiveMismatch
+	case AgentErrorCauseCodePluginPreparationFailed:
+		switch reason {
+		case "cli_unavailable", "timeout", "cancelled", "output_limit", "invalid_inventory", "legacy_errors",
+			"runtime_unsupported", "plugin_loading_unsupported", "unsupported_launch_context", "metadata_unavailable",
+			"ambiguous_identity", "missing_root", "manifest_mismatch", "unsafe_root", "builtin_not_mountable",
+			"external_not_mountable", "unsupported_source", "manual_mount_conflict", "policy_unverified":
+			return true
+		default:
+			return false
+		}
+	case AgentErrorCauseCodeProcessExited:
+		return reason == AgentErrorCauseReasonMiseConfigUntrusted ||
+			reason == AgentErrorCauseReasonUnclassified
 	default:
 		return false
 	}
@@ -385,9 +471,12 @@ func NormalizeAgentErrorDetails(details string, causes []AgentErrorCause) string
 func agentErrorCauseEvidenceBytes(cause AgentErrorCause) int {
 	total := len(cause.Operation) + len(cause.Code) + len(cause.Detail) + len(cause.Reason) +
 		len(cause.RequestedModel) + len(cause.EffectiveModel) + len(cause.AttemptedModel) +
-		len(cause.RequestedMode) + len(cause.EffectiveMode)
+		len(cause.RequestedMode) + len(cause.EffectiveMode) + len(cause.RuntimeVersion)
 	if cause.PromptNotSent != nil {
 		total++
+	}
+	if cause.ExitCode != nil {
+		total += len(strconv.Itoa(*cause.ExitCode))
 	}
 	return total
 }
@@ -415,6 +504,8 @@ func isKnownAgentErrorCauseCode(code string) bool {
 		AgentErrorCauseCodePermissionModeUnconfirmed,
 		AgentErrorCauseCodePermissionModeMismatch,
 		AgentErrorCauseCodeDeliveryStorage,
+		AgentErrorCauseCodePluginPreparationFailed,
+		AgentErrorCauseCodeProcessExited,
 		LaunchErrorCategoryBaseBranchMissing,
 		LaunchErrorCategoryDefaultBranchUnresolved,
 		LaunchErrorCategoryWorkspaceCheckoutFailed,

@@ -10,7 +10,7 @@ func TestCatalog(t *testing.T) {
 
 	wantIDs := map[string]struct{}{
 		"agent-settings": {}, "analytics": {}, "auth": {}, "auth-hostnames": {}, "automation": {},
-		"azure-devops": {}, "canvas": {}, "coordinator": {}, "delivery": {}, "editor": {},
+		"canvas": {}, "coordinator": {}, "delivery": {}, "editor": {},
 		"github": {}, "gitlab": {}, "jira": {}, "linear": {}, "message-queue": {},
 		"notification": {}, "office": {}, "office-config-sync": {}, "organization-units": {},
 		"organizations": {}, "plugin-instance-state": {}, "plugin-instances": {},
@@ -195,4 +195,23 @@ func TestCatalogCoordinatorListsPhase3Tables(t *testing.T) {
 		return
 	}
 	t.Fatal("coordinator entry not found in the catalog")
+}
+
+func TestBuiltinMCPPolicyTablesAreRequired(t *testing.T) {
+	expected := map[string]string{"task": "task_builtin_mcp_preferences", "agent-settings": "workspace_builtin_mcp_policies"}
+	for _, descriptor := range Catalog() {
+		table, applicable := expected[descriptor.ID]
+		if !applicable {
+			continue
+		}
+		found := false
+		for _, actual := range descriptor.RequiredTables {
+			if actual == table {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s does not probe required policy table %s", descriptor.ID, table)
+		}
+	}
 }

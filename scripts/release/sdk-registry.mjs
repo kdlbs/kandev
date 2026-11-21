@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 
 export const packageName = "@kdlbs/plugin-sdk";
 export const registryURL = "https://registry.npmjs.org";
+function registryFailure(message, cause) {
+  const error = new Error(message, cause ? { cause } : undefined);
+  error.code = "REGISTRY_READ_FAILURE";
+  return error;
+}
 export function publicRegistryURL(raw) {
   const url = new URL(raw);
   if (url.origin !== registryURL || url.username || url.password)
@@ -10,26 +15,36 @@ export function publicRegistryURL(raw) {
   return url;
 }
 export async function readPackage(version, fetchImpl = fetch) {
-  const response = await fetchImpl(`${registryURL}/@kdlbs%2fplugin-sdk`, {
-    headers: { accept: "application/json", "cache-control": "no-cache" },
-    signal: AbortSignal.timeout(20_000),
-  });
+  let response;
+  try {
+    response = await fetchImpl(`${registryURL}/@kdlbs%2fplugin-sdk`, {
+      headers: { accept: "application/json", "cache-control": "no-cache" },
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (error) {
+    throw registryFailure(`registry read failed: ${error.message}`, error);
+  }
   publicRegistryURL(response.url);
   if (!response.headers.get("content-type")?.includes("application/json"))
-    throw new Error("registry returned a non-JSON response");
-  const text = await response.text();
+    throw registryFailure("registry returned a non-JSON response");
+  let text;
+  try {
+    text = await response.text();
+  } catch (error) {
+    throw registryFailure("registry response body could not be read", error);
+  }
   if (text.length > 5 * 1024 * 1024)
-    throw new Error("registry metadata exceeds size limit");
+    throw registryFailure("registry metadata exceeds size limit");
   let document;
   try {
     document = JSON.parse(text);
   } catch {
-    throw new Error("registry returned malformed JSON");
+    throw registryFailure("registry returned malformed JSON");
   }
   if (response.status === 404 && document?.error === "Not found")
     return { packageExists: false, version: null, latest: null };
   if (!response.ok)
-    throw new Error(`registry read failed with HTTP ${response.status}`);
+    throw registryFailure(`registry read failed with HTTP ${response.status}`);
   if (
     document?.name !== packageName ||
     !document.versions ||
@@ -38,7 +53,7 @@ export async function readPackage(version, fetchImpl = fetch) {
     !document["dist-tags"] ||
     typeof document["dist-tags"] !== "object"
   )
-    throw new Error("registry returned invalid package metadata");
+    throw registryFailure("registry returned invalid package metadata");
   const selected = document.versions[version] ?? null;
   if (selected) {
     if (
@@ -51,7 +66,7 @@ export async function readPackage(version, fetchImpl = fetch) {
   }
   const latest = document["dist-tags"].latest ?? null;
   if (latest !== null && typeof latest !== "string")
-    throw new Error("registry latest dist-tag is malformed");
+    throw registryFailure("registry latest dist-tag is malformed");
   return { packageExists: true, version: selected, latest };
 }
 export async function downloadArchive(
@@ -61,18 +76,31 @@ export async function downloadArchive(
   fetchImpl = fetch,
 ) {
   publicRegistryURL(url);
-  const response = await fetchImpl(url, {
-    signal: AbortSignal.timeout(30_000),
-  });
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    throw registryFailure(
+      `registry archive download failed: ${error.message}`,
+      error,
+    );
+  }
   publicRegistryURL(response.url);
   if (
     !response.ok ||
     /(?:html|json)/i.test(response.headers.get("content-type") ?? "")
   )
-    throw new Error(
+    throw registryFailure(
       `registry archive download failed: HTTP ${response.status}`,
     );
-  const bytes = Buffer.from(await response.arrayBuffer());
+  let bytes;
+  try {
+    bytes = Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    throw registryFailure("registry archive body could not be read", error);
+  }
   if (
     bytes.length === 0 ||
     bytes.length > 25 * 1024 * 1024 ||

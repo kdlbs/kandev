@@ -431,7 +431,9 @@ func TestRemoteRecoveryAbsencePreservesTrackedSuccessor(t *testing.T) {
 	require.NoError(t, manager.executionStore.Add(successor))
 	attemptRecord, err := repo.GetExecutorRunningBySessionID(ctx, row.SessionID)
 	require.NoError(t, err)
-	require.NoError(t, manager.settleRemoteRecoveryAbsence(ctx, entry, attemptRecord, true, RecoveryOutcomeNoMatchingInstance))
+	settled, err := manager.settleRemoteRecoveryAbsence(ctx, entry, attemptRecord, true, RecoveryOutcomeNoMatchingInstance)
+	require.False(t, settled, "a tracked successor must preserve the guarded absence")
+	require.NoError(t, err)
 	manager.finishRemoteRecoveryAttempt(entry)
 
 	require.ErrorIs(t, manager.recoveryGuard.CheckLaunchAllowed(row.SessionID), ErrSessionRecoveryGuarded)

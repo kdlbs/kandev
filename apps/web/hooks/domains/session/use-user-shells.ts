@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type {
@@ -7,18 +7,46 @@ import type {
   UserShellState,
   UserShellPTYStatus,
 } from "@/lib/state/slices";
+import {
+  makeUserShellScope,
+  userShellScopeKey,
+  type UserShellScope,
+} from "@/lib/state/user-shell-scope";
 import { t } from "@/lib/i18n";
 import { useSessionRead } from "./use-session-read";
 
 interface UseUserShellsReturn {
   shells: UserShellInfo[];
   isLoading: boolean;
+  /** True once a read settled; a failed read also settles. */
   isLoaded: boolean;
+  /** True only after a successful list for this scope. */
+  hasSuccessfulList: boolean;
+  scope: UserShellScope | null;
   addShell: (shell: UserShellInfo) => void;
   removeShell: (terminalId: string) => void;
 }
 
 const EMPTY_SHELLS: UserShellInfo[] = [];
+const SHELL_LIST_RETRY_MS = 5_000;
+
+/**
+ * Per-store request generation for the environment-shared rows. Each list
+ * request allocates its generation before awaiting, so a delayed older
+ * response cannot replace newer fixed/script terminals from a sibling task.
+ */
+const sharedReadGenerations = new WeakMap<object, Map<string, number>>();
+
+function nextSharedReadGeneration(store: object, environmentId: string): number {
+  let generations = sharedReadGenerations.get(store);
+  if (!generations) {
+    generations = new Map();
+    sharedReadGenerations.set(store, generations);
+  }
+  const next = (generations.get(environmentId) ?? 0) + 1;
+  generations.set(environmentId, next);
+  return next;
+}
 
 /**
  * Wire shape of an item in the `user_shell.list` response. Backend returns
@@ -42,87 +70,121 @@ type ListResponseItem = {
 };
 
 /**
- * Hook to fetch and manage user shell terminals for a task environment.
+ * Fetches and manages user shell terminals for one task/environment scope.
  *
- * `taskId` is required for the backend's DB-backed ordinary-terminal path
- * to fire. Without it, only the legacy passthrough shells (bottom-panel,
- * scripts) come back — first-class persistent terminals would never reach
- * the panel strip, and the parked-terminals submenu would always be
- * empty.
+ * Ordinary terminals are task-owned: two tasks sharing an environment keep
+ * independent result sets, while sessions of the same task and environment
+ * share one. Fixed and script terminals remain environment-shared and are
+ * merged into the returned list from their own namespace.
  *
- * Follows the data fetching pattern:
- * 1. Read from store first
- * 2. Fetch from backend if not loaded
- * 3. Track loading/loaded state
+ * `taskId` is required for the backend's DB-backed ordinary-terminal path to
+ * fire. Without it only legacy passthrough shells (bottom-panel, scripts)
+ * come back and ordinary rows are never adopted into an owned scope.
  */
 export function useUserShells(
   environmentId: string | null,
   taskId?: string | null,
 ): UseUserShellsReturn {
   const store = useAppStoreApi();
+  const scope = makeUserShellScope(environmentId, taskId);
+  const scopeKey = scope ? userShellScopeKey(scope) : "";
 
-  const shells = useAppStore((state) => {
+  const ordinary = useAppStore((state) => {
+    if (!scopeKey) return EMPTY_SHELLS;
+    return state.userShells.byScope[scopeKey] ?? EMPTY_SHELLS;
+  });
+  const unmanaged = useAppStore((state) => {
     if (!environmentId) return EMPTY_SHELLS;
     return state.userShells.byEnvironmentId[environmentId] ?? EMPTY_SHELLS;
   });
+  // Ordinary rows and environment-shared rows are separate namespaces; merge
+  // them into one stable value so consumers do not re-render on every read.
+  const shells = useMemo(() => {
+    if (ordinary.length === 0) return unmanaged;
+    if (unmanaged.length === 0) return ordinary;
+    return [...ordinary, ...unmanaged];
+  }, [ordinary, unmanaged]);
+
   const isLoading = useAppStore((state) => {
-    if (!environmentId) return false;
-    return state.userShells.loading[environmentId] ?? false;
+    if (!scopeKey) return false;
+    return state.userShells.loading[scopeKey] ?? false;
   });
   const isLoaded = useAppStore((state) => {
-    if (!environmentId) return false;
-    return state.userShells.loaded[environmentId] ?? false;
+    if (!scopeKey) return false;
+    return state.userShells.loaded[scopeKey] ?? false;
   });
-  const { read, scope } = useSessionRead<UserShellInfo[]>(
-    environmentId
+  const isListed = useAppStore((state) => {
+    if (!scopeKey) return false;
+    return state.userShells.listed[scopeKey] ?? false;
+  });
+
+  const { read, snapshot } = useSessionRead<UserShellInfo[]>(
+    scope
       ? {
           resource: "shells",
-          key: JSON.stringify([environmentId, taskId ?? null]),
-          environmentId,
-          onLoading: (loading) => store.getState().setUserShellsLoading(environmentId, loading),
+          key: scopeKey,
+          environmentId: scope.environmentId,
+          publishKey: scopeKey,
+          onLoading: (loading) => store.getState().setUserShellsLoading(scope, loading),
           fetch: async (isCurrent) => {
+            const sharedGeneration = nextSharedReadGeneration(store, scope.environmentId);
             const payload: Record<string, unknown> = {
-              task_environment_id: environmentId,
+              task_environment_id: scope.environmentId,
               include_parked: true,
             };
-            if (taskId) payload.task_id = taskId;
-            let mapped: UserShellInfo[];
+            if (scope.taskId) payload.task_id = scope.taskId;
             try {
               const response = await getWebSocketClient()!.request<{ shells?: ListResponseItem[] }>(
                 "user_shell.list",
                 payload,
                 10000,
               );
-              mapped = (response.shells ?? []).map(mapListItemToShell);
+              const mapped = (response.shells ?? []).map(mapListItemToShell);
+              if (!isCurrent()) return {};
+              store.getState().setUserShells(scope, mapped, sharedGeneration);
+              return { data: mapped };
             } catch {
-              // Failed reads settle terminal initialization without discarding known shells.
-              mapped = store.getState().userShells.byEnvironmentId[environmentId] ?? EMPTY_SHELLS;
+              if (!isCurrent()) return {};
+              // Failed reads settle initialization without discarding known
+              // shells, and they do not become successful-list evidence.
+              store.getState().setUserShellsFailed(scope);
+              return {};
             }
-            if (!isCurrent()) return {};
-            store.getState().setUserShells(environmentId, mapped);
-            return { data: mapped };
           },
         }
       : null,
   );
-  useEffect(() => read?.ensure(undefined, !isLoaded), [read, scope, isLoaded]);
+  // Selection and creation authority belong to the successful read for the
+  // current scope generation. A store flag from an older successful read is
+  // not enough: reconnect, restoration, and refetch all start a new read that
+  // may change the result.
+  const hasSuccessfulList =
+    !!scopeKey && isListed && !isLoading && snapshot.data !== undefined && !snapshot.loading;
+  useEffect(() => read?.ensure(undefined, !isLoaded), [read, scopeKey, isLoaded]);
+
+  // A failed list keeps display continuity but no authority. Retry while the
+  // consumer remains mounted so a transient WS/API failure can recover.
+  useEffect(() => {
+    if (!read || !isLoaded || isLoading || hasSuccessfulList) return;
+    const timer = setTimeout(() => read.invalidate(), SHELL_LIST_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [read, isLoaded, isLoading, hasSuccessfulList]);
 
   const addShell = (shell: UserShellInfo) => {
-    if (environmentId) {
-      store.getState().addUserShell(environmentId, shell);
-    }
+    if (scope) store.getState().addUserShell(scope, shell);
   };
 
   const removeShell = (terminalId: string) => {
-    if (environmentId) {
-      store.getState().removeUserShell(environmentId, terminalId);
-    }
+    if (!scope) return;
+    store.getState().removeUserShell(scope, terminalId);
   };
 
   return {
     shells,
     isLoading,
     isLoaded,
+    hasSuccessfulList,
+    scope,
     addShell,
     removeShell,
   };

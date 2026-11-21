@@ -228,7 +228,7 @@ function useSubmitHandlersWiring({
     refreshBranchPolicies,
     preserveTaskCreateLastUsedOnClose: preserveQueuedLastUsedOnClose,
     taskId,
-    parentTaskId,
+    parentTaskId: parentTaskId ?? fs.selectedParentTaskId,
     descriptionInputRef: fs.descriptionInputRef,
     setIsCreatingSession: fs.setIsCreatingSession,
     setIsCreatingTask: fs.setIsCreatingTask,
@@ -255,8 +255,10 @@ function useSubmitHandlersWiring({
     workflowAgentOverridesBlockedReason,
     initialWorkspaceLayout,
     blockedBy: fs.blockedBy,
+    relatedTaskIds: fs.relatedTaskIds,
     editDependencies,
     mcpServerIds: fs.mcpServerIds,
+    builtinMCPPreferences: fs.builtinMCPPreferences,
     mcpServerIdsDirty: fs.mcpServerIdsDirty,
     saveTaskMCPSelections:
       !isSessionMode && taskId && workspaceId

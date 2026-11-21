@@ -79,7 +79,7 @@ export async function checkMCPStatusClarity({
     const session = new SessionPage(page);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
-    await session.sendMessageViaButton("e2e:mcp:kandev:list_workspaces_kandev({})");
+    await session.sendMessageViaButton("e2e:mcp:kandev:list_agents_kandev({})");
     await session.waitForChatIdle({ timeout: 30_000 });
     const trigger = page.getByTestId("mcp-status-trigger");
     if (!mobile) {

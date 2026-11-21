@@ -20,7 +20,8 @@ import { toRelativePath } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { usePreviewCapture } from "@/hooks/use-preview-capture";
 import { PreviewFeedbackControls } from "./inspector/preview-feedback-controls";
-import type { PreviewFeedbackController } from "./inspector/preview-feedback-controls";
+import { PreviewAnnotationHost } from "./inspector/preview-comment-panel";
+import type { PreviewCaptureController } from "@/hooks/use-preview-capture";
 
 type HtmlPreviewContentProps = {
   path: string;
@@ -39,6 +40,10 @@ type HtmlPreviewContentProps = {
   onOpenInBrowser?: () => void;
   onRetry?: () => void;
   onTogglePreview: () => void;
+  /** Localized label for the return-to-source action; defaults to `Show code`. */
+  toggleLabel?: string;
+  /** Localized copy for a source read failure that has no publish error code. */
+  errorMessage?: string;
 };
 
 function HtmlPreviewContentToolbar({
@@ -55,13 +60,15 @@ function HtmlPreviewContentToolbar({
   onRefresh,
   onOpenInBrowser,
   onTogglePreview,
+  toggleLabel,
   capture,
-}: Omit<HtmlPreviewContentProps, "previewUrl" | "error" | "onRetry"> & {
-  capture: PreviewFeedbackController;
+}: Omit<HtmlPreviewContentProps, "previewUrl" | "error" | "onRetry" | "errorMessage"> & {
+  capture: PreviewCaptureController;
 }) {
   const { t } = useTranslation();
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
   const trustWarning = t("task:htmlPreviewTrustedCode");
+  const returnLabel = toggleLabel ?? t("task:showCode");
 
   return (
     <PanelHeaderBarSplit
@@ -118,7 +125,7 @@ function HtmlPreviewContentToolbar({
                 size="sm"
                 variant="ghost"
                 onClick={onTogglePreview}
-                aria-label={t("task:showCode")}
+                aria-label={returnLabel}
                 title={trustWarning}
                 className="h-6 w-6 cursor-pointer p-0 text-foreground max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
                 data-testid="html-preview-code-toggle"
@@ -127,7 +134,7 @@ function HtmlPreviewContentToolbar({
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              <p>{t("task:showCode")}</p>
+              <p>{returnLabel}</p>
               <p className="mt-1 max-w-xs text-muted-foreground">{trustWarning}</p>
             </TooltipContent>
           </Tooltip>
@@ -136,6 +143,40 @@ function HtmlPreviewContentToolbar({
       rightClassName="overflow-visible"
     />
   );
+}
+
+function HtmlPreviewError({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      data-testid="html-preview-error"
+      role="alert"
+      className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground"
+    >
+      <p>{message}</p>
+      {onRetry && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onRetry}
+          className="max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        >
+          {t("task:retryHtmlPreview")}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+type Translate = ReturnType<typeof useTranslation>["t"];
+
+function getHtmlPreviewErrorText(
+  error: HtmlPreviewPublishErrorCode | null,
+  errorMessage: string | undefined,
+  t: Translate,
+): string | null {
+  if (errorMessage) return errorMessage;
+  return error ? t(getHtmlPreviewPublishErrorKey(error)) : null;
 }
 
 export const HtmlPreviewContent = memo(function HtmlPreviewContent({
@@ -155,10 +196,12 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
   onOpenInBrowser,
   onRetry,
   onTogglePreview,
+  toggleLabel,
+  errorMessage,
 }: HtmlPreviewContentProps) {
   const { t } = useTranslation();
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const errorKey = error ? getHtmlPreviewPublishErrorKey(error) : null;
+  const errorText = getHtmlPreviewErrorText(error, errorMessage, t);
   const sourcePath = toRelativePath(path, worktreePath);
   const capture = usePreviewCapture({
     taskId,
@@ -188,6 +231,7 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
         onRefresh={onRefresh}
         onOpenInBrowser={onOpenInBrowser}
         onTogglePreview={onTogglePreview}
+        toggleLabel={toggleLabel}
         capture={capture}
       />
       <p
@@ -196,7 +240,7 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
       >
         {t("task:htmlPreviewTrustedCode")}
       </p>
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         {isLoading && (
           <div
             data-testid="html-preview-loading"
@@ -205,31 +249,20 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
             {t("task:htmlPreviewLoading")}
           </div>
         )}
-        {!isLoading && errorKey && (
-          <div
-            data-testid="html-preview-error"
-            role="alert"
-            className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground"
-          >
-            <p>{t(errorKey)}</p>
-            {onRetry && (
-              <Button type="button" variant="outline" onClick={onRetry}>
-                {t("task:retryHtmlPreview")}
-              </Button>
-            )}
-          </div>
-        )}
-        {!isLoading && !errorKey && previewUrl && (
-          <iframe
-            ref={iframeRef}
-            data-testid="html-preview-frame"
-            src={previewUrl}
-            title={t("task:browserPreview")}
-            className="h-full w-full border-0"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-            referrerPolicy="no-referrer"
-            onLoad={capture.handleIframeLoad}
-          />
+        {!isLoading && errorText && <HtmlPreviewError message={errorText} onRetry={onRetry} />}
+        {!isLoading && !errorText && previewUrl && (
+          <PreviewAnnotationHost capture={capture} showLayer taskId={taskId}>
+            <iframe
+              ref={iframeRef}
+              data-testid="html-preview-frame"
+              src={previewUrl}
+              title={t("task:browserPreview")}
+              className="h-full w-full border-0"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+              referrerPolicy="no-referrer"
+              onLoad={capture.handleIframeLoad}
+            />
+          </PreviewAnnotationHost>
         )}
       </div>
     </div>

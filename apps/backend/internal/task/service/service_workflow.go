@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
@@ -184,10 +185,38 @@ func (s *Service) resolveApprovalNextStep(ctx context.Context, step *wfmodels.Wo
 // UpdateTaskState updates the state of a task, moves it to the matching column,
 // and publishes a task.state_changed event
 func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) (*models.Task, error) {
-	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
-		return nil, err
+	return s.updateTaskState(ctx, id, state, false)
+}
+
+func (s *Service) UpdateTaskStateAsHuman(ctx context.Context, id string, state v1.TaskState) (*models.Task, error) {
+	return s.updateTaskState(ctx, id, state, true)
+}
+
+func humanCompletionAdmission(task *models.Task, kind completion.AdmissionKind) *completion.Admission {
+	return &completion.Admission{
+		TaskID: task.ID,
+		Actor:  wfmodels.StepTransitionActorHuman,
+		Kind:   kind,
+		Expected: completion.Scope{
+			WorkspaceID: task.WorkspaceID,
+			WorkflowID:  task.WorkflowID,
+			StepID:      task.WorkflowStepID,
+			TaskState:   string(task.State),
+		},
 	}
-	task, err := s.tasks.GetTask(ctx, id)
+}
+
+func (s *Service) updateTaskState(ctx context.Context, id string, state v1.TaskState, human bool) (*models.Task, error) {
+	var task *models.Task
+	var err error
+	if human {
+		task, err = s.officeHumanCompletionTaskSnapshot(ctx, id)
+	} else {
+		if err = s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+			return nil, err
+		}
+		task, err = s.tasks.GetTask(ctx, id)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -199,9 +228,21 @@ func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskS
 		return task, nil
 	}
 
-	if err := s.tasks.UpdateTaskState(ctx, id, state); err != nil {
+	if human {
+		admission := humanCompletionAdmission(task, completion.SetState)
+		writer, ok := s.tasks.(interface {
+			UpdateTaskStateWithCompletionAdmission(context.Context, string, v1.TaskState, *completion.Admission) error
+		})
+		if !ok {
+			return nil, fmt.Errorf("human task completion admission repository unavailable")
+		}
+		err = writer.UpdateTaskStateWithCompletionAdmission(ctx, id, state, admission)
+	} else {
+		err = s.tasks.UpdateTaskState(ctx, id, state)
+	}
+	if err != nil {
 		s.logger.Error("failed to update task state", zap.String("task_id", id), zap.Error(err))
-		return nil, err
+		return nil, s.translateCompletionError(ctx, err)
 	}
 
 	// Reload task to get updated state
@@ -401,6 +442,8 @@ type MoveTaskResult struct {
 	Task           *models.Task
 	WorkflowStep   *wfmodels.WorkflowStep
 	AlreadyApplied bool
+	// Committed remains true when a post-commit response refresh fails.
+	Committed bool
 	// FromStepID and Transitioned are read off Task's own write-transaction
 	// result (Task.FromStepID / Task.WorkflowStepTransitionID != 0), not from
 	// this call's earlier pre-move snapshot — see Task.FromStepID's doc.
@@ -528,6 +571,7 @@ type workflowChangeAdmissionRepository interface {
 		*v1.TaskState,
 		bool,
 		*models.WorkflowChangeSource,
+		*completion.Admission,
 	) (bool, error)
 }
 
@@ -540,6 +584,16 @@ type workflowChangeAdmissionRepository interface {
 // narrower method so the atomic in-transaction recheck still applies.
 type workflowMoveConflictRepository interface {
 	UpdateTaskIfWorkflowMatches(ctx context.Context, task *models.Task, expectedWorkflowID string) error
+}
+
+type workflowMoveConflictWithCompletionAdmissionRepository interface {
+	UpdateTaskIfWorkflowMatchesWithCompletionAdmission(ctx context.Context, task *models.Task, expectedWorkflowID string, admission *completion.Admission) error
+}
+
+type workflowMoveAdmissionWithCompletionAdmissionRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionAndStateWithCompletionAdmission(
+		context.Context, *models.Task, string, string, int, *v1.TaskState, bool, string, *completion.Admission,
+	) (bool, error)
 }
 
 // metadataKeyRemoverRepository clears a single task metadata key in its own
@@ -584,10 +638,20 @@ func (s *Service) MoveTaskWithOptions(
 	if opts.ExactOperation != nil && opts.AlreadyApplied == nil {
 		opts.AlreadyApplied = new(bool)
 	}
-	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
-		return nil, err
+	var task *models.Task
+	var err error
+	var admission *completion.Admission
+	if opts.StepHistoryActor == wfmodels.StepTransitionActorHuman {
+		task, err = s.officeHumanCompletionTaskSnapshot(ctx, id)
+		if err == nil {
+			admission = humanCompletionAdmission(task, completion.Move)
+		}
+	} else {
+		if err = s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+			return nil, err
+		}
+		task, err = s.tasks.GetTask(ctx, id)
 	}
-	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -684,7 +748,6 @@ func (s *Service) MoveTaskWithOptions(
 			return nil, fmt.Errorf("failed to sync task state for workflow move: %w", err)
 		}
 	}
-
 	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
 	if opts.WorkflowChange != nil {
@@ -786,7 +849,7 @@ func (s *Service) MoveTaskWithOptions(
 		})
 	}
 
-	_, err = s.updateMovedTask(moveCtx, task, oldStepID, targetStep, admittedState, opts)
+	_, err = s.updateMovedTask(moveCtx, task, oldStepID, targetStep, admittedState, opts, admission)
 	if err != nil {
 		s.logger.Error("failed to move task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
@@ -810,6 +873,17 @@ func (s *Service) MoveTaskWithOptions(
 		// external test or adapter implementation that does not.
 		resultFromWorkflowID = oldWorkflowID
 	}
+	alreadyApplied := opts.AlreadyApplied != nil && *opts.AlreadyApplied
+	result := &MoveTaskResult{
+		Task:                  task,
+		Committed:             true,
+		AlreadyApplied:        alreadyApplied,
+		FromStepID:            resultFromStepID,
+		Transitioned:          resultTransitioned,
+		WorkflowEntryIdentity: workflowEntryIdentity,
+		MoveID:                moveID,
+		EntryOptions:          entryOptions,
+	}
 
 	// An optioned move (moveID != "") always changed step at read time —
 	// ValidateEntryOptions rejects a position-only optioned move — so a
@@ -824,7 +898,6 @@ func (s *Service) MoveTaskWithOptions(
 		return s.rejectStrandedOptionedMove(ctx, task, resultFromWorkflowID)
 	}
 
-	alreadyApplied := opts.AlreadyApplied != nil && *opts.AlreadyApplied
 	if !alreadyApplied {
 		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, resultFromWorkflowID)
 		if oldState != task.State {
@@ -846,7 +919,7 @@ func (s *Service) MoveTaskWithOptions(
 	// are always the source step and workflow the task actually left on this
 	// commit.
 	if resultTransitioned {
-		s.publishTaskMovedEvent(ctx, task, resultFromWorkflowID, resultFromStepID, workflowStepID, sessionID, moveID)
+		s.publishTaskMovedEvent(ctx, task, resultFromWorkflowID, resultFromStepID, workflowStepID, sessionID, moveID, oldState)
 		historySessionID := opts.StepHistorySessionID
 		if historySessionID == "" {
 			historySessionID = sessionID
@@ -856,13 +929,15 @@ func (s *Service) MoveTaskWithOptions(
 		s.pullTasksFromNewFeederWork(ctx, workflowID, workflowStepID)
 		refreshed, err := s.tasks.GetTask(ctx, task.ID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to refresh task after feeder pull: %w", err)
+			s.logger.Warn("failed to refresh task after feeder pull; returning committed task",
+				zap.String("task_id", task.ID), zap.Error(err))
+		} else if refreshed == nil {
+			return result, errors.New("failed to refresh task after feeder pull: repository returned nil task")
+		} else {
+			refreshed.Repositories = task.Repositories
+			task = refreshed
+			result.Task = task
 		}
-		if refreshed == nil {
-			return nil, errors.New("failed to refresh task after feeder pull: repository returned nil task")
-		}
-		refreshed.Repositories = task.Repositories
-		task = refreshed
 	}
 
 	s.logger.Info("task moved",
@@ -871,15 +946,7 @@ func (s *Service) MoveTaskWithOptions(
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Int("position", position))
 
-	result := &MoveTaskResult{
-		Task:                  task,
-		AlreadyApplied:        opts.AlreadyApplied != nil && *opts.AlreadyApplied,
-		FromStepID:            resultFromStepID,
-		Transitioned:          resultTransitioned,
-		WorkflowEntryIdentity: workflowEntryIdentity,
-		MoveID:                moveID,
-		EntryOptions:          entryOptions,
-	}
+	result.Task = task
 
 	// Fetch the workflow step info if getter is available
 	if s.workflowStepGetter != nil {
@@ -931,6 +998,7 @@ func prepareWorkflowMoveMarker(entryOptions *workflowmove.EntryOptions) (string,
 	return uuid.NewString(), optionsJSON, nil
 }
 
+// terminalWorkflowStep asks whether entering this step completes its task.
 func (s *Service) terminalWorkflowStep(ctx context.Context, workflowStepID string) (bool, error) {
 	if s.workflowStepGetter == nil || workflowStepID == "" {
 		return false, nil
@@ -946,7 +1014,8 @@ func (s *Service) terminalWorkflowStep(ctx context.Context, workflowStepID strin
 	if err != nil {
 		return false, fmt.Errorf("failed to get next workflow step after %s: %w", workflowStepID, err)
 	}
-	return wfmodels.IsTerminalStep(step, nextStep), nil
+	// Human and engine moves use this predicate to derive task state.
+	return wfmodels.CompletesTaskOnEnter(step, nextStep), nil
 }
 
 func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models.Task, oldStepID, newStepID string, opts MoveTaskOptions) error {
@@ -1201,7 +1270,7 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
 		}
 		s.recordQueuedPromotion(ctx, candidate.ID, fromStepID, targetStep.ID)
-		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID, "")
+		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID, "", oldState)
 		return true
 	} else if admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository); ok {
 		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
@@ -1219,7 +1288,7 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
 		}
 		s.recordQueuedPromotion(ctx, candidate.ID, fromStepID, targetStep.ID)
-		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID, "")
+		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, sessionID, "", oldState)
 		return true
 	}
 	// ctx here still carries the identity of whoever triggered the move that
@@ -1377,11 +1446,14 @@ func (s *Service) updateMovedTask(
 	targetStep *wfmodels.WorkflowStep,
 	admittedState *v1.TaskState,
 	opts MoveTaskOptions,
+	completionAdmission *completion.Admission,
 ) (bool, error) {
 	if targetStep == nil || oldStepID == targetStep.ID {
-		return s.updateMovedTaskSameStep(ctx, task, opts)
+		admitted, err := s.updateMovedTaskSameStep(ctx, task, opts, completionAdmission)
+		return admitted, s.translateCompletionError(ctx, err)
 	}
-	return s.updateMovedTaskCrossStep(ctx, task, oldStepID, targetStep, admittedState, opts)
+	admitted, err := s.updateMovedTaskCrossStep(ctx, task, oldStepID, targetStep, admittedState, opts, completionAdmission)
+	return admitted, s.translateCompletionError(ctx, err)
 }
 
 // updateMovedTaskSameStep handles the no-step-change branch of updateMovedTask
@@ -1389,39 +1461,70 @@ func (s *Service) updateMovedTask(
 // through the plain repository UpdateTask, not one of the WIP-admission call
 // sites, since there is no admission decision to make when the step is
 // unchanged.
-func (s *Service) updateMovedTaskSameStep(ctx context.Context, task *models.Task, opts MoveTaskOptions) (bool, error) {
+func (s *Service) updateMovedTaskSameStep(ctx context.Context, task *models.Task, opts MoveTaskOptions, completionAdmission *completion.Admission) (bool, error) {
 	if opts.ExactOperation != nil {
-		operationRepo, ok := s.tasks.(taskrepo.ExactTaskOperationRepository)
-		if !ok {
-			return false, errExactTaskUpdatesUnavailable
-		}
-		operation := opts.ExactOperation
-		alreadyApplied, err := operationRepo.UpdateTaskExactOperation(
-			ctx, task, operation.WorkspaceID, operation.ExpectedResourceVersion,
-			operation.OperationID, operation.PayloadDigest, operation.ClaimFence,
-		)
-		if err == nil && opts.AlreadyApplied != nil {
-			*opts.AlreadyApplied = alreadyApplied
-		}
-		return task.WIPAdmitted, err
+		return s.updateMovedTaskExactSameStep(ctx, task, opts, completionAdmission)
 	}
 	if opts.ExpectedWorkflowID != nil {
-		// Same-step writes go through plain UpdateTask, which has no
-		// expected-workflow parameter (it is the general-purpose writer
-		// used by many unrelated call sites). A caller carrying a CAS
-		// guard must route through the narrower method instead, or the
-		// guard would silently stop applying for the same-step case —
-		// see workflowMoveConflictRepository's doc.
-		conflictRepo, ok := s.tasks.(workflowMoveConflictRepository)
+		return s.updateMovedTaskExpectedSameStep(ctx, task, opts, completionAdmission)
+	}
+	if completionAdmission != nil {
+		return s.updateMovedTaskAdmittedSameStep(ctx, task, completionAdmission)
+	}
+	if err := s.tasks.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
+		return false, err
+	}
+	return task.WIPAdmitted, nil
+}
+
+func (s *Service) updateMovedTaskExactSameStep(ctx context.Context, task *models.Task, opts MoveTaskOptions, admission *completion.Admission) (bool, error) {
+	if admission != nil {
+		return false, fmt.Errorf("exact same-step move does not support human completion admission")
+	}
+	operationRepo, ok := s.tasks.(taskrepo.ExactTaskOperationRepository)
+	if !ok {
+		return false, errExactTaskUpdatesUnavailable
+	}
+	operation := opts.ExactOperation
+	alreadyApplied, err := operationRepo.UpdateTaskExactOperation(
+		ctx, task, operation.WorkspaceID, operation.ExpectedResourceVersion,
+		operation.OperationID, operation.PayloadDigest, operation.ClaimFence,
+	)
+	if err == nil && opts.AlreadyApplied != nil {
+		*opts.AlreadyApplied = alreadyApplied
+	}
+	return task.WIPAdmitted, err
+}
+
+func (s *Service) updateMovedTaskExpectedSameStep(ctx context.Context, task *models.Task, opts MoveTaskOptions, admission *completion.Admission) (bool, error) {
+	conflictRepo, ok := s.tasks.(workflowMoveConflictRepository)
+	if !ok {
+		return false, fmt.Errorf("workflow conflict guard repository unavailable for task %s", task.ID)
+	}
+	if admission != nil {
+		admissionRepo, ok := s.tasks.(workflowMoveConflictWithCompletionAdmissionRepository)
 		if !ok {
-			return false, fmt.Errorf("workflow conflict guard repository unavailable for task %s", task.ID)
+			return false, fmt.Errorf("human completion admission repository unavailable for same-step move")
 		}
-		if err := conflictRepo.UpdateTaskIfWorkflowMatches(ctx, task, *opts.ExpectedWorkflowID); err != nil {
+		if err := admissionRepo.UpdateTaskIfWorkflowMatchesWithCompletionAdmission(ctx, task, *opts.ExpectedWorkflowID, admission); err != nil {
 			return false, err
 		}
 		return task.WIPAdmitted, nil
 	}
-	if err := s.tasks.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
+	if err := conflictRepo.UpdateTaskIfWorkflowMatches(ctx, task, *opts.ExpectedWorkflowID); err != nil {
+		return false, err
+	}
+	return task.WIPAdmitted, nil
+}
+
+func (s *Service) updateMovedTaskAdmittedSameStep(ctx context.Context, task *models.Task, admission *completion.Admission) (bool, error) {
+	admissionRepo, ok := s.tasks.(interface {
+		UpdateTaskPreservingDeferredLaunchWithCompletionAdmission(context.Context, *models.Task, *completion.Admission) error
+	})
+	if !ok {
+		return false, fmt.Errorf("human completion admission repository unavailable for same-step move")
+	}
+	if err := admissionRepo.UpdateTaskPreservingDeferredLaunchWithCompletionAdmission(ctx, task, admission); err != nil {
 		return false, err
 	}
 	return task.WIPAdmitted, nil
@@ -1438,8 +1541,12 @@ func (s *Service) updateMovedTaskCrossStep(
 	targetStep *wfmodels.WorkflowStep,
 	admittedState *v1.TaskState,
 	opts MoveTaskOptions,
+	completionAdmission *completion.Admission,
 ) (bool, error) {
 	if opts.ExactOperation != nil {
+		if completionAdmission != nil {
+			return false, fmt.Errorf("exact cross-step move does not support human completion admission")
+		}
 		operationRepo, ok := s.tasks.(taskrepo.ExactTaskMoveOperationRepository)
 		if !ok {
 			return false, errExactTaskUpdatesUnavailable
@@ -1467,7 +1574,7 @@ func (s *Service) updateMovedTaskCrossStep(
 		}
 		return changeRepo.UpdateTaskWithWorkflowChangeAdmissionAndState(
 			ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit,
-			admittedState, true, workflowChangeGuard(opts.WorkflowChange),
+			admittedState, true, workflowChangeGuard(opts.WorkflowChange), completionAdmission,
 		)
 	}
 	admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository)
@@ -1479,6 +1586,15 @@ func (s *Service) updateMovedTaskCrossStep(
 		expectedWorkflowID = *opts.ExpectedWorkflowID
 	}
 	if admissionWithState, ok := s.tasks.(workflowMoveAdmissionWithStateRepository); ok {
+		if completionAdmission != nil {
+			if admissionWithCompletion, ok := s.tasks.(workflowMoveAdmissionWithCompletionAdmissionRepository); ok {
+				return admissionWithCompletion.UpdateTaskWithWorkflowStepAdmissionAndStateWithCompletionAdmission(
+					ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit,
+					admittedState, true, expectedWorkflowID, completionAdmission,
+				)
+			}
+			return false, fmt.Errorf("human completion admission repository unavailable for cross-step move")
+		}
 		return admissionWithState.UpdateTaskWithWorkflowStepAdmissionAndState(
 			ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit, admittedState, true, expectedWorkflowID,
 		)
@@ -1495,6 +1611,9 @@ func (s *Service) updateMovedTaskCrossStep(
 	// Keep compatibility with narrow test/dry-run repositories that expose
 	// only the original admission method. Production repositories implement the
 	// atomic variant above, so this fallback is never used for real moves.
+	if completionAdmission != nil {
+		return false, fmt.Errorf("human completion admission repository unavailable for cross-step move")
+	}
 	admitted, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit)
 	if err != nil {
 		return false, err
@@ -1536,7 +1655,7 @@ func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *mode
 
 func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workflowID, workflowStepID string, opts MoveTaskOptions) (*wfmodels.WorkflowStep, error) {
 	if task.ArchivedAt != nil {
-		return nil, fmt.Errorf("archived tasks cannot be moved")
+		return nil, ErrTaskMoveArchived
 	}
 	if err := s.validateMoveSessions(ctx, task.ID, opts); err != nil {
 		return nil, err
@@ -1546,7 +1665,7 @@ func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workf
 		return nil, fmt.Errorf("failed to get target workflow: %w", err)
 	}
 	if targetWorkflow.WorkspaceID != task.WorkspaceID {
-		return nil, fmt.Errorf("target workflow is in a different workspace")
+		return nil, ErrTaskMoveDifferentWorkspace
 	}
 	if s.workflowStepGetter == nil {
 		return nil, nil
@@ -1556,7 +1675,7 @@ func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workf
 		return nil, fmt.Errorf("failed to get target workflow step: %w", err)
 	}
 	if targetStep.WorkflowID != workflowID {
-		return nil, fmt.Errorf("target workflow step does not belong to target workflow")
+		return nil, ErrTaskMoveWorkflowStep
 	}
 	return targetStep, nil
 }
@@ -1571,7 +1690,7 @@ func (s *Service) validateMoveSessions(ctx context.Context, taskID string, opts 
 			if opts.AllowActivePrimarySession && session.IsPrimary {
 				continue
 			}
-			return fmt.Errorf("task has an active session (%s)", session.State)
+			return fmt.Errorf("%w (%s)", ErrTaskMoveActiveSession, session.State)
 		}
 	}
 	return nil
@@ -1687,89 +1806,35 @@ func (s *Service) CountTasksByWorkflowStep(ctx context.Context, stepID string) (
 
 // BulkMoveTasksResult contains the result of a BulkMoveTasks operation.
 type BulkMoveTasksResult struct {
-	MovedCount int
+	MovedCount   int
+	MovedTaskIDs []string
 }
 
 // BulkMoveSelectedTasks moves an explicit task list to a target workflow step.
 // The list order is treated as the visible UI order; tasks already in the
-// target step are skipped. Validation reads tasks one at a time because the UI
-// sends small selected batches; the move is not transactional if task state
-// changes between pre-validation and an individual MoveTask call.
-func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, targetWorkflowID, targetStepID string) (*BulkMoveTasksResult, error) {
+// target step are skipped. It preflights the full batch before writing, but a
+// concurrent change during the write loop can still produce a partial result.
+func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, targetWorkflowID, targetStepID string, actors ...wfmodels.StepTransitionActor) (*BulkMoveTasksResult, error) {
 	ids := uniqueTaskIDs(taskIDs)
 	if len(ids) == 0 {
-		return &BulkMoveTasksResult{MovedCount: 0}, nil
+		return &BulkMoveTasksResult{MovedCount: 0, MovedTaskIDs: []string{}}, nil
 	}
 	bulkActorKind, bulkActorID := steptelemetry.HumanOrSystemActor(ctx)
 	ctx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
 		Trigger: steptelemetry.TriggerBulkMove, ActorKind: bulkActorKind, ActorID: bulkActorID,
 	})
 
-	tasks, err := s.validateSelectedMoveBatch(ctx, ids, targetWorkflowID, targetStepID)
+	tasks, err := s.loadSelectedMoveBatch(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	// The server now computes each arriving task's position from the target
-	// step's current max (REQ-TASKS-KANBAN-TASK-REORDERING-001.28), so the
-	// literal passed to MoveTask below is ignored and no longer needs
-	// precomputing. What still matters is dispatch order: MoveTask is called
-	// once per task, sequentially, so the final order is simply the call
-	// order (REQ-TASKS-KANBAN-TASK-REORDERING-001.29) — source step ordinal
-	// ascending, then within one source step that step's admitted band in
-	// step order followed by its queued band in step order.
-	orderedTasks, err := s.orderTasksForBulkMove(ctx, tasks)
+	actor := bulkMoveActor(actors)
+	lockedCtx, orderedTasks, unlock, err := s.prepareBulkMoveBatch(ctx, tasks, targetWorkflowID, targetStepID, actor)
 	if err != nil {
 		return nil, err
 	}
-
-	// Hold every step this batch will touch — the target plus each task's
-	// own source step, known now that orderedTasks is resolved — as one
-	// ascending-ordered lock set across the whole dispatch loop below, not
-	// just within each individual MoveTask call's own transaction. A
-	// per-call-only lock leaves a window between two of this batch's own
-	// calls where an unrelated arrival (another create, move, WIP promotion,
-	// or automatic transition) into targetStepID can land in the middle of
-	// the batch's sequence, breaking the batch-scoped consecutiveness
-	// REQ-TASKS-KANBAN-TASK-REORDERING-001.29 requires. Locking only the
-	// target here and letting each per-task MoveTask acquire its own source
-	// step deadlocks against an ordinary single move running the opposite
-	// direction between the same two steps.
-	lockedCtx, lockedTasks, unlock, err := s.acquireBulkMoveStepLocks(ctx, orderedTasks, targetStepID)
-	if err != nil {
-		return nil, err
-	}
-	ctx = lockedCtx
 	defer unlock()
-	// The lock acquisition above may have re-read a task's step after a
-	// concurrent drift, so re-derive dispatch order from that corrected
-	// membership rather than the pre-lock orderedTasks — otherwise a task
-	// whose stale record still shows it at targetStepID is silently skipped
-	// below even though it has since left, and any task whose real source
-	// step changed keeps the wrong REQ-TASKS-KANBAN-TASK-REORDERING-001.29
-	// submission position.
-	orderedTasks, err = s.orderTasksForBulkMove(ctx, lockedTasks)
-	if err != nil {
-		return nil, err
-	}
-	if s.bulkMoveAfterLockForTest != nil {
-		s.bulkMoveAfterLockForTest()
-	}
-
-	movedCount := 0
-	for _, task := range orderedTasks {
-		if task.WorkflowID == targetWorkflowID && task.WorkflowStepID == targetStepID {
-			continue
-		}
-		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, 0); err != nil {
-			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
-		}
-		movedCount++
-		if s.bulkMoveAfterTaskForTest != nil {
-			s.bulkMoveAfterTaskForTest()
-		}
-	}
-
-	return &BulkMoveTasksResult{MovedCount: movedCount}, nil
+	return s.writeBulkMoveBatch(lockedCtx, orderedTasks, targetWorkflowID, targetStepID, actor)
 }
 
 // stepArrivalBatchLocker is the narrow capability BulkMoveSelectedTasks and
@@ -1972,26 +2037,117 @@ func uniqueTaskIDs(taskIDs []string) []string {
 	return result
 }
 
-func (s *Service) validateSelectedMoveBatch(ctx context.Context, taskIDs []string, targetWorkflowID, targetStepID string) ([]*models.Task, error) {
+func (s *Service) loadSelectedMoveBatch(ctx context.Context, taskIDs []string) ([]*models.Task, error) {
 	tasks := make([]*models.Task, 0, len(taskIDs))
 	for _, id := range taskIDs {
+		if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+			return nil, err
+		}
 		task, err := s.tasks.GetTask(ctx, id)
 		if err != nil {
 			return nil, err
-		}
-		if task.WorkflowID != targetWorkflowID || task.WorkflowStepID != targetStepID {
-			if _, err := s.validateTaskMove(ctx, task, targetWorkflowID, targetStepID, MoveTaskOptions{}); err != nil {
-				return nil, fmt.Errorf("task %s cannot be moved: %w", id, err)
-			}
 		}
 		tasks = append(tasks, task)
 	}
 	return tasks, nil
 }
 
+func bulkMoveActor(actors []wfmodels.StepTransitionActor) wfmodels.StepTransitionActor {
+	if len(actors) > 0 {
+		return actors[0]
+	}
+	return ""
+}
+
+// prepareBulkMoveBatch orders the batch, acquires its step locks, and checks
+// every completion admission before the first write.
+func (s *Service) prepareBulkMoveBatch(
+	ctx context.Context,
+	tasks []*models.Task,
+	targetWorkflowID, targetStepID string,
+	actor wfmodels.StepTransitionActor,
+) (context.Context, []*models.Task, func(), error) {
+	for _, task := range tasks {
+		if task == nil {
+			return nil, nil, nil, repoerrors.ErrTaskNotFound
+		}
+		if err := s.authorizeTaskScope(ctx, task.ID, authz.ScopeTaskWrite); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	orderedTasks, err := s.orderTasksForBulkMove(ctx, tasks)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	lockedCtx, lockedTasks, unlock, err := s.acquireBulkMoveStepLocks(ctx, orderedTasks, targetStepID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	orderedTasks, err = s.orderTasksForBulkMove(lockedCtx, lockedTasks)
+	if err == nil {
+		err = s.preflightBulkMove(lockedCtx, orderedTasks, targetWorkflowID, targetStepID, actor)
+	}
+	if err != nil {
+		unlock()
+		return nil, nil, nil, err
+	}
+	if s.bulkMoveAfterLockForTest != nil {
+		s.bulkMoveAfterLockForTest()
+	}
+	return lockedCtx, orderedTasks, unlock, nil
+}
+
+func (s *Service) writeBulkMoveBatch(
+	ctx context.Context,
+	orderedTasks []*models.Task,
+	targetWorkflowID, targetStepID string,
+	actor wfmodels.StepTransitionActor,
+) (*BulkMoveTasksResult, error) {
+	movedCount := 0
+	movedTaskIDs := make([]string, 0, len(orderedTasks))
+	for _, task := range orderedTasks {
+		if task.WorkflowID == targetWorkflowID && task.WorkflowStepID == targetStepID {
+			continue
+		}
+		moveResult, err := s.MoveTaskWithOptions(ctx, task.ID, targetWorkflowID, targetStepID, 0, MoveTaskOptions{StepHistoryActor: actor})
+		if err != nil {
+			movedCount, movedTaskIDs = recordBulkMoveProgress(
+				task, moveResult, targetWorkflowID, targetStepID, movedCount, movedTaskIDs, false,
+			)
+			return nil, s.bulkMoveWriteError(ctx, task, movedTaskIDs, movedCount > 0, err)
+		}
+		movedCount, movedTaskIDs = recordBulkMoveProgress(
+			task, moveResult, targetWorkflowID, targetStepID, movedCount, movedTaskIDs, true,
+		)
+		if s.bulkMoveAfterTaskForTest != nil {
+			s.bulkMoveAfterTaskForTest()
+		}
+	}
+	return &BulkMoveTasksResult{MovedCount: movedCount, MovedTaskIDs: movedTaskIDs}, nil
+}
+
+func recordBulkMoveProgress(
+	task *models.Task,
+	result *MoveTaskResult,
+	targetWorkflowID, targetStepID string,
+	movedCount int,
+	movedTaskIDs []string,
+	succeeded bool,
+) (int, []string) {
+	if !succeeded && (result == nil || !result.Committed) {
+		return movedCount, movedTaskIDs
+	}
+	movedCount++
+	if result != nil && result.Transitioned && result.Task != nil &&
+		result.Task.WorkflowID == targetWorkflowID && result.Task.WorkflowStepID == targetStepID {
+		movedTaskIDs = append(movedTaskIDs, task.ID)
+	}
+	return movedCount, movedTaskIDs
+}
+
 // BulkMoveTasks moves all tasks from a source workflow/step to a target workflow/step.
 // If sourceStepID is empty, all tasks in the source workflow are moved.
-func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceStepID, targetWorkflowID, targetStepID string) (*BulkMoveTasksResult, error) {
+func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceStepID, targetWorkflowID, targetStepID string, actors ...wfmodels.StepTransitionActor) (*BulkMoveTasksResult, error) {
 	bulkActorKind, bulkActorID := steptelemetry.HumanOrSystemActor(ctx)
 	ctx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
 		Trigger: steptelemetry.TriggerBulkMove, ActorKind: bulkActorKind, ActorID: bulkActorID,
@@ -2010,54 +2166,24 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 	}
 
 	if len(tasks) == 0 {
-		return &BulkMoveTasksResult{MovedCount: 0}, nil
+		return &BulkMoveTasksResult{MovedCount: 0, MovedTaskIDs: []string{}}, nil
 	}
 
-	// Re-derive the REQ-TASKS-KANBAN-TASK-REORDERING-001.29 submission order
-	// from each task's source step, the same as BulkMoveSelectedTasks: the
-	// server now computes each arriving task's position from the target
-	// step's current max, so dispatch order alone decides the final order.
-	orderedTasks, err := s.orderTasksForBulkMove(ctx, tasks)
+	actor := bulkMoveActor(actors)
+	lockedCtx, orderedTasks, unlock, err := s.prepareBulkMoveBatch(ctx, tasks, targetWorkflowID, targetStepID, actor)
 	if err != nil {
 		return nil, err
 	}
-
-	// Hold every step this batch will touch, for the same reason and in the
-	// same ascending-ordered way as BulkMoveSelectedTasks — see its lock
-	// call for the deadlock this avoids.
-	lockedCtx, lockedTasks, unlock, err := s.acquireBulkMoveStepLocks(ctx, orderedTasks, targetStepID)
-	if err != nil {
-		return nil, err
-	}
-	ctx = lockedCtx
 	defer unlock()
-	// See BulkMoveSelectedTasks's identical re-derivation: the lock
-	// acquisition above may have corrected a task's step after a concurrent
-	// drift, so dispatch order must be re-derived from that membership
-	// rather than the pre-lock orderedTasks.
-	orderedTasks, err = s.orderTasksForBulkMove(ctx, lockedTasks)
+	result, err := s.writeBulkMoveBatch(lockedCtx, orderedTasks, targetWorkflowID, targetStepID, actor)
 	if err != nil {
 		return nil, err
 	}
-	if s.bulkMoveAfterLockForTest != nil {
-		s.bulkMoveAfterLockForTest()
-	}
-
-	for _, task := range orderedTasks {
-		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, 0); err != nil {
-			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)
-		}
-		if s.bulkMoveAfterTaskForTest != nil {
-			s.bulkMoveAfterTaskForTest()
-		}
-	}
-
 	s.logger.Info("bulk moved tasks",
 		zap.String("source_workflow_id", sourceWorkflowID),
 		zap.String("source_step_id", sourceStepID),
 		zap.String("target_workflow_id", targetWorkflowID),
 		zap.String("target_step_id", targetStepID),
-		zap.Int("moved_count", len(tasks)))
-
-	return &BulkMoveTasksResult{MovedCount: len(tasks)}, nil
+		zap.Int("moved_count", result.MovedCount))
+	return result, nil
 }

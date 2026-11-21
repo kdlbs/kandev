@@ -9,6 +9,9 @@ import {
 import { isContextWindowReliable, TokenUsageDisplay } from "./token-usage-display";
 
 const TOOLTIP_ROOT_TESTID = "tooltip-root";
+const COPILOT_NATIVE = "copilot_native" as const;
+const COMPACTIONS_LABEL = "Compactions";
+const COMPACTIONS_ROW_TESTID = "context-window-compactions-row";
 
 vi.mock("@/hooks/domains/session/use-session-context-window", () => ({
   useSessionContextWindow: vi.fn(),
@@ -125,8 +128,8 @@ describe("TokenUsageDisplay", () => {
     fireEvent.click(getByRole("button", { name: "Context window: 28% used" }));
 
     expect(getByTestId(TOOLTIP_ROOT_TESTID).getAttribute("data-open")).toBe("true");
-    const compactionRow = getByTestId("context-window-compactions-row");
-    expect(compactionRow.textContent).toContain("Compactions");
+    const compactionRow = getByTestId(COMPACTIONS_ROW_TESTID);
+    expect(compactionRow.textContent).toContain(COMPACTIONS_LABEL);
     expect(compactionRow.textContent).toContain("0");
   });
 
@@ -153,7 +156,7 @@ describe("TokenUsageDisplay", () => {
     expect(usage.textContent).not.toContain("0%");
     expect(usage.textContent).not.toContain("0 of");
     expect(usage.textContent).toContain("ACP");
-    expect(usage.textContent).toContain("Compactions");
+    expect(usage.textContent).toContain(COMPACTIONS_LABEL);
   });
 
   it("closes a tapped tooltip when Escape is pressed", () => {
@@ -219,40 +222,6 @@ describe("TokenUsageDisplay context source", () => {
     expect(getByText(/ACP is the active session's effective window/i)).toBeDefined();
   });
 
-  it("shows the inferred compaction count and its accuracy disclosure", () => {
-    vi.mocked(useSessionContextWindow).mockReturnValue({
-      size: 200_000,
-      used: 56_047,
-      remaining: 143_953,
-      efficiency: 28,
-      compactionCount: 2,
-      source: "acp",
-    });
-
-    const { container, getByLabelText, getByText } = render(
-      <TokenUsageDisplay sessionId="sess-1" />,
-    );
-
-    expect(getByText("Compactions")).toBeDefined();
-    expect(getByText("2", { selector: "span" })).toBeDefined();
-    expect(getByLabelText("About inferred compaction count")).toBeDefined();
-    expect(container.textContent).toContain(
-      "Kandev infers this count from observed context usage drops",
-    );
-
-    const helpButton = getByLabelText("About inferred compaction count");
-    const helpId = helpButton.getAttribute("aria-describedby");
-    if (!helpId) throw new Error("Expected compaction help to be described");
-    const help = document.getElementById(helpId);
-    if (!help) throw new Error("Expected compaction help element");
-    expect(help.className).toContain("opacity-0");
-
-    fireEvent.click(helpButton);
-    expect(help.className).toContain("opacity-100");
-    fireEvent.click(helpButton);
-    expect(help.className).toContain("opacity-0");
-  });
-
   it("labels model API fallback data", () => {
     vi.mocked(useSessionContextWindow).mockReturnValue({
       size: 128_000,
@@ -277,5 +246,143 @@ describe("TokenUsageDisplay context source", () => {
     fireEvent.click(helpButton);
     expect(help.className).toContain("opacity-0");
     expect(getByText(/model's advertised maximum from the catalogue/i)).toBeDefined();
+  });
+});
+
+function readCompactionHelp(getByLabelText: (text: string) => HTMLElement): HTMLElement {
+  const helpButton = getByLabelText("About inferred compaction count");
+  const helpId = helpButton.getAttribute("aria-describedby");
+  if (!helpId) throw new Error("Expected compaction help to be described");
+  const help = document.getElementById(helpId);
+  if (!help) throw new Error("Expected compaction help element");
+  return help;
+}
+
+function expectProviderNeutralHelp(help: HTMLElement) {
+  expect(help.textContent).toContain("Kandev infers this count from context usage drops");
+  expect(help.textContent).toContain("Missing samples or provider resets can affect accuracy");
+  expect(help.textContent).not.toContain("Copilot");
+}
+
+describe("TokenUsageDisplay compaction count", () => {
+  it.each([
+    { name: "missing reporting metadata", compactionReporting: undefined },
+    {
+      name: "explicit usage drop reporting",
+      compactionReporting: {
+        source: "usage_drop" as const,
+        availability: "available" as const,
+        coverage: "observed" as const,
+        revision: 1,
+      },
+    },
+  ])(
+    "shows the inferred compaction count and its accuracy disclosure for $name",
+    ({ compactionReporting }) => {
+      vi.mocked(useSessionContextWindow).mockReturnValue({
+        size: 200_000,
+        used: 56_047,
+        remaining: 143_953,
+        efficiency: 28,
+        compactionCount: 2,
+        compactionReporting,
+        source: "acp",
+      });
+
+      const { getByLabelText, getByText } = render(<TokenUsageDisplay sessionId="sess-1" />);
+
+      expect(getByText("Compactions")).toBeDefined();
+      expect(getByText("2", { selector: "span" })).toBeDefined();
+      expect(getByLabelText("About inferred compaction count")).toBeDefined();
+      const help = readCompactionHelp(getByLabelText);
+      expectProviderNeutralHelp(help);
+      expect(help.className).toContain("opacity-0");
+
+      const helpButton = getByLabelText("About inferred compaction count");
+      fireEvent.click(helpButton);
+      expect(help.className).toContain("opacity-100");
+      fireEvent.click(helpButton);
+      expect(help.className).toContain("opacity-0");
+    },
+  );
+
+  it("shows zero compactions for a fresh mixed-context session", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 2_877,
+      remaining: 197_123,
+      efficiency: 2,
+      compactionCount: 0,
+      source: "acp",
+    });
+
+    const { getByLabelText, getByTestId, getByText } = render(
+      <TokenUsageDisplay sessionId="sess-1" />,
+    );
+
+    const compactionRow = getByTestId(COMPACTIONS_ROW_TESTID);
+    expect(compactionRow.textContent).toContain(COMPACTIONS_LABEL);
+    expect(compactionRow.textContent).toContain("0");
+    expect(getByText("0", { selector: "span" })).toBeDefined();
+
+    expectProviderNeutralHelp(readCompactionHelp(getByLabelText));
+  });
+});
+
+describe("TokenUsageDisplay compaction coverage", () => {
+  function renderWithReporting(reporting: {
+    source: typeof COPILOT_NATIVE;
+    availability: "available" | "unavailable";
+    coverage: "observed" | "partial";
+    revision: number;
+  }) {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 272_000,
+      used: 12_171,
+      remaining: 259_829,
+      efficiency: 4,
+      compactionCount: 3,
+      compactionReporting: reporting,
+    });
+    const view = render(<TokenUsageDisplay sessionId="sess-1" />);
+    fireEvent.click(view.getByRole("button", { name: "Context window: 4% used" }));
+    return view;
+  }
+
+  it("explains available native counting without a status badge", () => {
+    const { getByTestId, queryByTestId } = renderWithReporting({
+      source: COPILOT_NATIVE,
+      availability: "available",
+      coverage: "observed",
+      revision: 2,
+    });
+    expect(queryByTestId("context-window-compactions-status")).toBeNull();
+    const row = getByTestId(COMPACTIONS_ROW_TESTID);
+    expect(row.textContent).toContain("successful parent compaction events");
+    expect(row.textContent).toContain("Historical estimates");
+  });
+
+  it("shows partial coverage as sticky missing evidence", () => {
+    const { getByTestId } = renderWithReporting({
+      source: COPILOT_NATIVE,
+      availability: "available",
+      coverage: "partial",
+      revision: 3,
+    });
+    expect(getByTestId("context-window-compactions-status").textContent).toBe("Partial");
+    expect(getByTestId(COMPACTIONS_ROW_TESTID).textContent).toContain(
+      "Some compaction evidence is missing",
+    );
+  });
+
+  it("shows unavailable collection without claiming zero compactions", () => {
+    const { getByTestId } = renderWithReporting({
+      source: COPILOT_NATIVE,
+      availability: "unavailable",
+      coverage: "partial",
+      revision: 4,
+    });
+    expect(getByTestId("context-window-compactions-status").textContent).toBe("Unavailable");
+    expect(getByTestId(COMPACTIONS_ROW_TESTID).textContent).toContain("zero does not prove");
   });
 });

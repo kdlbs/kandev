@@ -36,6 +36,7 @@ type Terminal struct {
 	CustomName             *string       `db:"custom_name"`
 	State                  TerminalState `db:"state"`
 	InitialCommand         string        `db:"initial_command"`
+	WorkingDir             string        `db:"working_dir"`
 	InitialCommandOnce     bool          `db:"initial_command_once"`
 	InitialCommandConsumed bool          `db:"initial_command_consumed"`
 	CreatedAt              time.Time     `db:"created_at"`

@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-04
-updated: 2026-10-06
+updated: 2026-11-08
 owners:
   - Kandev team
 ---
@@ -82,6 +82,23 @@ Existing criteria under requirement 001 remain active.
 - **AC-TASKS-PROMPT-ATTACHMENTS-002.6:** The recovered transcript shall retain one original submission with its attachments and the original failure history. A preview shall not imply successful delivery.
 - **AC-TASKS-PROMPT-ATTACHMENTS-002.7:** Ordinary resume and workspace-only restoration shall not replay the original submission. Recovery shall not collect attachments from later messages or sibling sessions.
 - **AC-TASKS-PROMPT-ATTACHMENTS-002.8:** Desktop and phone shall provide the same recovery outcome through their existing controls. Phone users shall retain reachable attachment controls without horizontal overflow.
+
+#### Workflow context clarification (2026-11-08)
+
+Requirement 002 owns the initial submission during recovery, including submissions without attachments.
+The [workflow recovery package](../../../plans/fresh-start-workflow-context/plan.md) defines this repair.
+
+- **AC-TASKS-PROMPT-ATTACHMENTS-002.9:** When explicit fresh recovery retries an initial submission, agent input shall include the applicable workflow and step instructions.
+  Recovery shall retain normal first-launch ordering, placeholder substitution, replacement rules, and plan mode.
+  The same rule shall apply to eligible text-only recovery without a submission receipt.
+- **AC-TASKS-PROMPT-ATTACHMENTS-002.10:** Recovery shall compose those instructions once from current trusted configuration.
+  Stored hidden conversation content shall not authorize instructions for the replacement agent.
+  Recovery shall preserve the original submission and stored conversation without an additional user message.
+- **AC-TASKS-PROMPT-ATTACHMENTS-002.11:** When required workflow context cannot be read, recovery shall stop before prompt delivery.
+  It shall preserve the pending submission and expose a recoverable error instead of delivering an incomplete prompt.
+
+These criteria retain existing recovery eligibility and acceptance safeguards.
+They do not authorize another submission or replay of an accepted conversation.
 
 ## Migrated source detail
 

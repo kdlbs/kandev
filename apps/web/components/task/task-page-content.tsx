@@ -40,6 +40,7 @@ import {
   syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
+import { useRenderedTaskSession } from "@/components/task/task-page-session-ownership";
 import { TaskLoadProgressState } from "@/components/task/task-load-progress-state";
 import { TaskRemovalBoundary } from "@/components/task/task-removal-boundary";
 import { GridSpinner } from "@/components/grid-spinner";
@@ -368,6 +369,20 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
   };
 }
 
+function useTaskPageRepositories(task: Task | null, initialRepositories: Repository[]) {
+  const workspaceId = task?.workspace_id ?? null;
+  const { repositories } = useRepositories(workspaceId, Boolean(workspaceId));
+  const effectiveRepositories = repositories.length ? repositories : initialRepositories;
+  const repository = useMemo(
+    () =>
+      effectiveRepositories.find(
+        (item: Repository) => item.id === task?.repositories?.[0]?.repository_id,
+      ) ?? null,
+    [effectiveRepositories, task?.repositories],
+  );
+  return { repositories: effectiveRepositories, repository };
+}
+
 function useTaskPageData(
   initialTask: Task | null,
   fallbackTaskId: string | null | undefined,
@@ -384,15 +399,6 @@ function useTaskPageData(
   const activeTaskIdForSyncRef = useRef(activeTaskId);
   activeTaskIdForSyncRef.current = activeTaskId;
 
-  // Validate that activeSessionId belongs to activeTaskId to prevent showing
-  // messages from an unrelated session when navigating to a task without sessions.
-  const validatedActiveSessionId = useAppStore((state) => {
-    const sid = state.tasks.activeSessionId;
-    if (!sid || !activeTaskId) return null;
-    const session = state.taskSessions.items[sid];
-    return session?.task_id === activeTaskId ? sid : null;
-  });
-
   const {
     task,
     taskLoadError,
@@ -405,6 +411,7 @@ function useTaskPageData(
   } = useTaskDetails(fallbackTaskId ?? activeTaskId, initialTask);
 
   const agent = useSessionAgent(task);
+  const renderedSession = useRenderedTaskSession(task?.id ?? null, sessionId, agent.taskSessionId);
   const searchParams = useSearchParams();
   const creationPending = isCreationPendingSearch(searchParams);
   const ensureSession = useEnsureTaskSession(
@@ -415,10 +422,13 @@ function useTaskPageData(
       workflowStepId: task?.workflow_step_id,
       workflowId: task?.workflow_id,
     },
-    { enabled: !creationPending },
+    {
+      enabled:
+        !creationPending && !renderedSession.routeSessionUnresolved && !renderedSession.sessionId,
+    },
   );
   const initialSessionId = sessionId ?? agent.taskSessionId ?? null;
-  const effectiveSessionId = validatedActiveSessionId ?? initialSessionId;
+  const effectiveSessionId = renderedSession.sessionId;
 
   useEffect(() => {
     const applied = syncActiveTaskSession({
@@ -433,14 +443,9 @@ function useTaskPageData(
     if (applied) previousRouteTaskId.current = initialTask?.id ?? fallbackTaskId;
   }, [initialTask?.id, fallbackTaskId, initialSessionId, setActiveSessionAuto, setActiveTask]);
 
-  const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
-  const effectiveRepositories = repositories.length ? repositories : initialRepositories;
-  const repository = useMemo(
-    () =>
-      effectiveRepositories.find(
-        (item: Repository) => item.id === task?.repositories?.[0]?.repository_id,
-      ) ?? null,
-    [effectiveRepositories, task?.repositories],
+  const { repositories: effectiveRepositories, repository } = useTaskPageRepositories(
+    task,
+    initialRepositories,
   );
 
   return {

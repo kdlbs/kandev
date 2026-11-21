@@ -5,6 +5,11 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { planScript } from "../../helpers/seed-session-messages";
 import { SessionPage } from "../../pages/session-page";
 import {
+  getSessionState,
+  readSessionMessageIdsContaining,
+  waitForNewSessionMessage,
+} from "../../helpers/session-resume-prompt-queue";
+import {
   assertPlainSendDuringRecovery,
   assertLegacyRecoveryPreservesDraft,
 } from "./plan-comment-recovery-helpers";
@@ -156,6 +161,8 @@ test.describe("mobile: task-owned plan comments", () => {
     await pill.tap();
     await testPage.getByTestId(`mobile-session-row-${secondary.id}`).tap();
     await expect(session.activeChat().getByText("2 plan comments", { exact: true })).toBeVisible();
+    const sendComment = "migrated mobile feedback";
+    const beforeSend = await readSessionMessageIdsContaining(apiClient, secondary.id, sendComment);
     await session.sendMessageViaButton("Handle the migrated feedback in this session");
     await expect
       .poll(
@@ -174,6 +181,12 @@ test.describe("mobile: task-owned plan comments", () => {
         message.content.includes("migrated mobile feedback"),
       ),
     ).toBe(false);
+    await waitForNewSessionMessage(apiClient, secondary.id, beforeSend, sendComment);
+    await expect
+      .poll(async () =>
+        DONE_STATES.includes((await getSessionState(apiClient, task.id, secondary.id)) ?? ""),
+      )
+      .toBe(true);
     await session.waitForChatIdle({ timeout: 45_000 });
     // A completed seed turn can auto-promote the secondary. Pin the intended
     // primary so this flow isolates selected-session Send from primary Run.
@@ -213,6 +226,7 @@ test.describe("mobile: task-owned plan comments", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "mobile plan comment drawer");
     const run = drawer.getByRole("button", { name: "Run", exact: true });
     await expect(run).toBeEnabled();
+    const beforeRun = await readSessionMessageIdsContaining(apiClient, primary.id, runComment);
     await run.tap();
 
     await expect
@@ -229,6 +243,23 @@ test.describe("mobile: task-owned plan comments", () => {
         message.content.includes(runComment),
       ),
     ).toBe(false);
+    await waitForNewSessionMessage(apiClient, primary.id, beforeRun, runComment);
+    await expect
+      .poll(async () =>
+        DONE_STATES.includes((await getSessionState(apiClient, task.id, primary.id)) ?? ""),
+      )
+      .toBe(true);
+    for (const [target, comment] of [
+      [secondary.id, sendComment],
+      [primary.id, runComment],
+    ]) {
+      const { messages } = await apiClient.listSessionMessages(target);
+      expect(
+        messages.filter(
+          (message) => message.author_type === "user" && message.content.includes(comment),
+        ),
+      ).toHaveLength(1);
+    }
   });
 });
 

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -260,6 +261,48 @@ func TestPublishMCPAttachmentAttemptCarriesBackendOwnedIdentity(t *testing.T) {
 	}
 }
 
+type orderedMCPAttachmentPublisher struct {
+	adapter.AgentAdapter
+	events []adapter.AgentEvent
+}
+
+func (p *orderedMCPAttachmentPublisher) TryPublishMCPAttachmentEvent(
+	event adapter.AgentEvent,
+	persist func(adapter.AgentEvent) (adapter.AgentEvent, error),
+) (bool, error) {
+	if persist != nil {
+		persisted, err := persist(event)
+		if err != nil {
+			return false, err
+		}
+		event = persisted
+	}
+	p.events = append(p.events, event)
+	return true, nil
+}
+
+func TestPublishMCPAttachmentUsesAdapterQueueWhenAvailable(t *testing.T) {
+	publisher := &orderedMCPAttachmentPublisher{}
+	m := &Manager{
+		adapter:   publisher,
+		updatesCh: make(chan adapter.AgentEvent, 2),
+		logger:    newTestLogger(t),
+	}
+	attempt := streams.MCPAttachmentAttempt{AttemptID: "attempt-1"}
+	evidence := streams.MCPAttachmentEvidence{
+		AttemptID:  "attempt-1",
+		ServerName: "kandev",
+		Kind:       streams.MCPAttachmentEvidenceToolsListObserved,
+	}
+	m.PublishMCPAttachmentAttempt(attempt)
+	m.PublishMCPAttachment(evidence)
+
+	require.Len(t, publisher.events, 2)
+	require.Equal(t, attempt.AttemptID, publisher.events[0].MCPAttachmentAttempt.AttemptID)
+	require.Equal(t, evidence.Kind, publisher.events[1].MCPAttachment.Kind)
+	require.Empty(t, m.updatesCh, "adapter-owned events must keep their ordered queue")
+}
+
 func TestForwardUpdatesUsesItsGenerationStopChannel(t *testing.T) {
 	stopCh := make(chan struct{})
 	m := &Manager{
@@ -294,6 +337,7 @@ type stubAdapter struct {
 	connectCalled       bool
 	requiresProcessKill bool
 	updatesCh           chan adapter.AgentEvent
+	closeOnce           sync.Once
 }
 
 func newStubAdapter() *stubAdapter {
@@ -331,7 +375,7 @@ func (s *stubAdapter) GetSessionID() string                           { return "
 func (s *stubAdapter) GetOperationID() string                         { return "" }
 func (s *stubAdapter) SetPermissionHandler(adapter.PermissionHandler) {}
 func (s *stubAdapter) Close() error {
-	close(s.updatesCh)
+	s.closeOnce.Do(func() { close(s.updatesCh) })
 	return nil
 }
 func (s *stubAdapter) RequiresProcessKill() bool { return s.requiresProcessKill }

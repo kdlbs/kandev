@@ -2,7 +2,7 @@
 status: current
 system: platform
 created: 2026-10-03
-updated: 2026-10-29
+updated: 2026-11-05
 requirements:
   - REQ-PLATFORM-TURN-CONTINUITY-001
   - REQ-PLATFORM-TURN-CONTINUITY-002
@@ -140,35 +140,45 @@ It does not imply whole-runtime stop unless existing bounded cancellation escala
 
 ## Capacity continuation evidence
 
-Add an optional typed `CapacityContinuationSnapshot` in `internal/agentctl/types/streams`.
-It carries a versioned live-conversation support value, nonzero prompt generation, evidence completeness, and unresolved-work indicators.
-It carries no tool payloads, paths, prompts, results, or credentials.
-Omission and unknown versions never authorize this branch.
-Keep `ContinuationSafetySnapshot.SafeFor` unchanged for the existing read-only restore contract.
+`CapacityContinuationSnapshot` carries bounded, prompt-scoped evidence through the existing terminal pipeline.
+Unknown support values and omitted snapshots cannot authorize continuation.
+Provider dialects own tested support. Orchestration consumes capability evidence without provider-name branches.
+The mock dialect receives isolated test support through construction provenance.
+`ContinuationSafetySnapshot` and transport-loss restoration retain their separate contracts.
 
-The Codex dialect owns support for its tested initialized live-conversation shape.
-Orchestration consumes the typed support value without a provider-name branch.
-The isolated mock dialect supplies test-only support through construction provenance.
-Other dialects cannot inherit support from a generic ACP adapter.
+The ordered worker retains the existing bounded ledger of every active-prompt tool ID.
+V1 support requires successful terminal outcomes for all tools.
+The November 5 amendment introduces `CapacityContinuationCodexLiveSessionV2` (`codex_live_session_v2`) and matching test-only mock V2 support.
+It adds `KnownFailedShellTools` (`known_failed_shell_tools`, uint16) to the snapshot.
+The [decision](../../../decisions/2026-11-05-capacity-known-command-failures.md) records this narrower terminal-outcome policy.
+Delivery results are recorded in the [amendment package](../../../plans/turn-error-continue-capacity/plan.md).
 
-The ordered ACP worker tracks all tool IDs for the active prompt in a bounded ledger.
-Every observed tool must have a provider-confirmed completed status before the terminal snapshot permits recovery.
-Successful shell, write, and MCP calls can qualify. Their semantic kinds do not establish completion.
-Failed, cancelled, pending, unknown, malformed, conflicting, unmatched, or overflowing tool evidence blocks admission.
-Background or subagent activity without authoritative completion blocks admission, including Codex start-only collaboration evidence.
-Unresolved permission activity also blocks admission.
-One completed tool plus one pending or failed tool must block the entire attempt.
+V2 counts an unsuccessful command only when its execute-kind tool has a terminal completed/failed status and authoritative `terminal_exit` metadata.
+Require a nonzero integer exit code, a matching `terminal_id`, and no cancellation or signal termination.
+Use the captured tool identity and prompt generation. A title or diagnostic cannot prove termination.
+Validate signal and identity explicitly. `terminalExitCode` alone does not establish this proof.
+A partial, malformed, contradictory, or conflicting update permanently blocks that tool's evidence for this prompt.
+The incident's sanitized native fixtures supply the tested Codex shapes.
+No provider-neutral failed-tool exemption is introduced.
 
-Capture the snapshot after ordered notifications drain and before synthetic prompt-end cancellation sweeps.
-Synthetic terminal statuses cannot establish completed work.
-Response-attempt resets cannot erase unresolved tool evidence.
-Native load history cannot populate this active-prompt ledger.
-Publish the snapshot only with the same settled prompt and usable-runtime attestation.
+For V2, count qualifying failed commands in `KnownFailedShellTools`, preserving their real failed status and output in history.
+`FailedTools` continues to identify failures that block admission. Every other failed tool sets it.
+`CompletedTools` retains its successful-tool meaning.
+V2 requires at least one successful tool or known failed command and no blocking flags.
+V1 retains its prior predicate and rejects a nonzero V2-only count. Unknown versions fail closed.
+An older backend rejects V2 support rather than treating its missing predicates as permission.
+OpenCode V1 remains unchanged. A failed non-command tool or a failed command without terminal proof still blocks recovery.
 
-Carry it unchanged through stream events, process outcomes, remote JSON, lifecycle prompt evidence, and watcher failure payloads.
-Lifecycle copies immutable evidence at the terminal boundary and verifies the same execution and generation.
-Never reconstruct eligibility from persisted transcript titles or provider prose.
-Older agentctl components keep the current conservative behavior.
+Pending, cancelled, signalled, unknown, unmatched, duplicate, malformed, conflicting, and overflowing evidence blocks recovery.
+Unresolved permission, background, detached, or subagent work also blocks recovery.
+One eligible command cannot override another blocking tool.
+Capture evidence after ordered notifications drain and before synthetic prompt-end cancellation.
+Synthetic statuses, response-attempt resets, and native load history cannot establish a terminal outcome.
+Publish only with the same settled prompt and usable-runtime attestation.
+
+Carry the snapshot unchanged through process outcomes, remote JSON, lifecycle copies, and watcher payloads.
+Lifecycle verifies execution and generation at the terminal boundary.
+Neither persisted transcript rows nor browser input can reconstruct recovery authority.
 
 ## Capacity recovery admission
 
@@ -307,7 +317,7 @@ Capacity evidence must be revalidated for each failed generation.
 
 An admitted live continuation can fail at capacity before producing new output
 or tools. Preserve its continuation mode when its accepted execution/generation
-matches and fresh, complete capacity evidence proves no pending, failed, unknown,
+matches and fresh, complete capacity evidence proves no pending, blocking failed, unknown,
 permission, or background work. Revalidate the original conversation binding;
 do not require another completed tool or replay the original completed request.
 Missing evidence or a stale acceptance still refuses recovery.

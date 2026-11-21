@@ -37,9 +37,10 @@ func TestCreateTaskWorkspaceModeSchema(t *testing.T) {
 					description, ok := property["description"].(string)
 					require.True(t, ok)
 					for _, phrase := range []string{
-						"Omit for subtasks", "inherit_parent requires parent_id",
-						"reuses the parent's materialized workspace/worktree",
-						"new_workspace requests a separate workspace/worktree",
+						"omitting this field creates a separate workspace",
+						"inherit_parent requires parent_id",
+						"share the parent's exact existing checkout(s) and files",
+						"Omit the field instead of sending blank input",
 					} {
 						assert.Contains(t, description, phrase)
 					}

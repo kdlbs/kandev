@@ -88,6 +88,7 @@ func TestRemoteDockerRecoveryAttachesOnlyTheRecordedLiveContainerAndInstance(t *
 	require.Equal(t, "session-1", got.SessionID)
 	require.Equal(t, "task-1", got.TaskID)
 	require.Equal(t, "container-preserved", got.ContainerID)
+	require.True(t, got.CopilotNativeSessionEvents, "recovery must preserve the adopted subscription state")
 	require.NotNil(t, got.Client)
 	require.Equal(t, "saved-token", got.AuthToken)
 	require.True(t, fixture.statusWasChecked())
@@ -516,6 +517,7 @@ func (h *remoteDockerRecoveryHTTP) serveControlInstance(
 	}
 	_ = json.NewEncoder(w).Encode(agentctl.InstanceInfo{
 		ID: id, Port: port, SessionID: ownerSession, TaskID: ownerTask,
+		CopilotNativeSessionEvents: true,
 	})
 }
 

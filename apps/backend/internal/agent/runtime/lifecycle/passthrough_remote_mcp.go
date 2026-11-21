@@ -13,16 +13,18 @@ import (
 
 func (m *Manager) applySSHPassthroughMCP(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig, agent agents.Agent, profile *AgentProfileInfo, operation *preparedMCPOperation) (preparedPassthroughMCP, error) {
 	runner := &remotePassthroughRunner{execution: execution}
-	snapshot, err := runner.snapshot(ctx)
+	client, release, err := runner.client()
 	if err != nil {
 		return preparedPassthroughMCP{}, err
 	}
-	servers := operation.servers
-	resolved := []types.McpServer{{Name: kandevMCPServerName, Type: string(mcpconfig.ServerTypeHTTP), URL: snapshot.MCPURL}}
-	for _, server := range servers {
-		if server.Name != kandevMCPServerName {
-			resolved = append(resolved, server)
-		}
+	defer release()
+	snapshot, err := runner.snapshotWithClient(ctx, client)
+	if err != nil {
+		return preparedPassthroughMCP{}, err
+	}
+	resolved, err := builtinPassthroughMCPServers(execution, client, snapshot.MCPURL, operation.servers)
+	if err != nil {
+		return preparedPassthroughMCP{}, err
 	}
 	artifacts, err := pt.MCPStrategy.BuildPassthroughMCP(resolved, mcpconfig.PassthroughPaths{
 		TempConfigPath: snapshot.ConfigPath, WorkspaceDir: snapshot.WorkspacePath, Unix: true,
@@ -34,11 +36,6 @@ func (m *Manager) applySSHPassthroughMCP(ctx context.Context, execution *AgentEx
 	for _, file := range artifacts.Files {
 		files = append(files, passthroughconfig.File{Path: file.Path, Content: file.Content, MergeKey: file.MergeKey})
 	}
-	client, release, err := runner.client()
-	if err != nil {
-		return preparedPassthroughMCP{}, err
-	}
-	defer release()
 	generation := snapshot.Generation + 1
 	if err := client.PreparePassthrough(ctx, types.PassthroughPrepareRequest{Generation: generation, Files: files}); err != nil {
 		return preparedPassthroughMCP{}, err

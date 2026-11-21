@@ -35,6 +35,25 @@ type quickChatStartFailureCommitter interface {
 	) (bool, time.Time, error)
 }
 
+type workflowLaunchFailureOwnershipKey struct{}
+
+// WithWorkflowLaunchFailureOwnership carries the launch's session snapshot
+// into failure bookkeeping so the orchestrator can serialize it with a profile
+// switch before it marks the session failed.
+func WithWorkflowLaunchFailureOwnership(ctx context.Context, session *models.TaskSession) context.Context {
+	if session == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, workflowLaunchFailureOwnershipKey{}, session)
+}
+
+// WorkflowLaunchFailureOwnershipFromContext returns the session snapshot set
+// by WithWorkflowLaunchFailureOwnership.
+func WorkflowLaunchFailureOwnershipFromContext(ctx context.Context) (*models.TaskSession, bool) {
+	session, ok := ctx.Value(workflowLaunchFailureOwnershipKey{}).(*models.TaskSession)
+	return session, ok && session != nil
+}
+
 func (e *Executor) RecordEarlyQuickChatStartFailure(
 	ctx context.Context,
 	taskID, sessionID, quickChatAttemptID, agentAttemptID string,
@@ -145,6 +164,26 @@ func classifyLaunchFailure(err error) launchFailureClassification {
 		}
 	}
 	switch {
+	case isExecutorRuntimeUnavailable(err):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryGenericLaunchFailure,
+			message: "The selected executor runtime is unavailable. Choose an available runtime or ask an operator to enable it.",
+		}
+	case isExecutorEnvironmentMismatch(err):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryGenericLaunchFailure,
+			message: "The retained execution belongs to a different task environment. Start a new session for the selected workspace.",
+		}
+	case isExecutorRuntimeMismatch(err), isExecutorIdentityUnverified(err):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryGenericLaunchFailure,
+			message: "The retained execution does not satisfy the selected executor runtime. Stop it or start a new session on the selected runtime.",
+		}
+	case errors.Is(err, ErrExecutorRuntimeSelectionUnresolved):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryGenericLaunchFailure,
+			message: "The selected executor could not be resolved. Choose an available executor.",
+		}
 	case errors.Is(err, worktree.ErrWorkspaceCheckoutFailed):
 		return launchFailureClassification{
 			code:    models.LaunchErrorCategoryWorkspaceCheckoutFailed,

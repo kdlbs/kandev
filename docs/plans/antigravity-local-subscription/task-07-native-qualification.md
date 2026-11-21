@@ -130,6 +130,11 @@ Missing prerequisites leave this work order pending/blocked with a specific resu
 
 Blocked. Tasks 01-06 are implemented, but the live gates are still missing:
 
+The [sign-in launch repair](../antigravity-sign-in-launch/plan.md) is an additional prerequisite before retrying native sign-in qualification.
+That repair is now implemented and its fixture regression passes, so the configure defect no longer blocks a retry.
+The November 4 failure stopped at configuration, so it provides no new evidence about SIGILL, OAuth, or model readiness.
+Its fixture regression cannot close this work order.
+
 - No unmodified Linux startup on the investigated host. The vendor 1.4.5 SIGILL remains unresolved; CPU affinity is diagnostic only.
 - No completed real Google consent, authenticated model discovery, prompt, `/usage`, or resume capture.
 - No qualified native journal schema or live human-question observation.

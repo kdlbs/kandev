@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- HTTP DTO definitions intentionally co-locate protocol shapes. */
 
 import type { ExecutorProvider, ExecutorType } from "./executor";
+import type { AuthorExclusionWarning } from "./author-exclusion";
 import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
 import type {
@@ -324,6 +325,8 @@ export type Workspace = {
   acp_idle_suspension_enabled: boolean;
   acp_idle_timeout_minutes: number;
   office_workflow_id?: WorkflowId;
+  /** Office task identifier prefix (e.g. "KAN"). */
+  task_prefix?: string;
   created_at: string;
   updated_at: string;
 };
@@ -650,9 +653,11 @@ export type TaskSessionWorktree = {
   worktree_id: string;
   repository_id?: RepositoryId;
   branch_slug?: string;
+  workspace_relative_path?: string;
   position: number;
   worktree_path?: string;
   worktree_branch?: string;
+  worktree_origin?: "kandev" | "adopted";
   created_at?: string;
 };
 
@@ -719,6 +724,12 @@ export type RuntimeStorageHealth = {
   observed_at?: string;
   /** Backend receipt age. Browser freshness adds local monotonic elapsed time. */
   age_seconds?: number;
+  /** Accepted delivery-health receipt time. Independent from capacity. */
+  pressure_observed_at?: string;
+  /** Backend receipt age for accepted delivery-health reports. Missing means unknown. */
+  pressure_age_seconds?: number;
+  /** Browser receipt time for this local cache entry. Never sent by the backend. */
+  client_received_at_ms?: number;
   write_pressure?: boolean;
   producer_paused?: boolean;
   delivery_state?: string;
@@ -755,6 +766,11 @@ export type TaskSession = ActiveSubagentCountFields & {
   /** Downstream ACP session ID for the currently selected concrete candidate. */
   downstream_acp_session_id?: string;
   container_id?: string;
+  /**
+   * Observed runtime recorded for the same execution as `container_id`.
+   * `null` means unknown; never infer it from the selected executor.
+   */
+  execution_runtime?: string | null;
   executor_id?: string;
   environment_id?: string;
   /** Current backend agent process execution identity for this session. */
@@ -767,6 +783,12 @@ export type TaskSession = ActiveSubagentCountFields & {
   worktree_branch?: string;
   /** Effective task root containing every attached workspace source. */
   workspace_path?: string;
+  /**
+   * Confirmed native-session working directory used as the base for
+   * repository-relative chat links. Omitted means no update; null means the
+   * backend has no authoritative value.
+   */
+  agent_workspace_path?: string | null;
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   /** Latest path-free managed workspace recovery operation for this environment. */
@@ -1270,7 +1292,11 @@ export type StepPortable = {
   pull_from_step_position?: number;
 };
 
-export type ImportWorkflowsResult = { created: string[]; skipped: string[] };
+export type ImportWorkflowsResult = {
+  created: string[];
+  skipped: string[];
+  warnings?: AuthorExclusionWarning[];
+};
 
 export type WorkflowImportProfileCandidate = {
   id: string;
@@ -1299,6 +1325,8 @@ export type WorkflowImportPreview = {
   skipped: string[];
   profiles: WorkflowImportProfileCandidate[];
   steps: WorkflowImportProfileStep[];
+  /** Non-blocking exclude_author_provider setup warnings for the imported steps. */
+  warnings?: AuthorExclusionWarning[];
 };
 
 export type WorkflowImportProfileBinding = {

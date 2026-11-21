@@ -1,5 +1,6 @@
 import type { TaskSession } from "@/lib/types/http";
 import type { ConfigOptionEntry, SessionModelEntry, SessionModelsState } from "./types";
+import { normalizeModelCatalog } from "@/lib/model-catalog";
 
 /** Returns a record containing only string-valued properties. */
 function stringMap(value: unknown): Record<string, string> | undefined {
@@ -63,6 +64,7 @@ function mapSessionConfigOption(
     options: Array.isArray(option.options)
       ? (option.options as { value: string; name: string; description?: string }[])
       : undefined,
+    catalog: normalizeModelCatalog(option.catalog),
   };
 }
 

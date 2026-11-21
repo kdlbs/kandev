@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -146,20 +145,7 @@ func TestInitialPromptPreviewPersistsThroughPassthroughPrepareUpgrade(t *testing
 	require.JSONEq(t, string(expected), string(encoded))
 }
 
-type initialPreviewFailureStore struct {
-	sessionExecutorStore
-	sessionID string
-}
-
-func (s *initialPreviewFailureStore) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
-	if key == models.SessionMetaKeyInitialPromptPreview {
-		s.sessionID = sessionID
-		return errors.New("preview storage unavailable")
-	}
-	return s.sessionExecutorStore.SetSessionMetadataKey(ctx, sessionID, key, value)
-}
-
-func TestInitialPromptPreviewWriteFailureSettlesSession(t *testing.T) {
+func TestInvalidInitialPromptSeedCreatesNoSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	taskRepo := newMockTaskRepo()
@@ -167,14 +153,16 @@ func TestInitialPromptPreviewWriteFailureSettlesSession(t *testing.T) {
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task1", WorkspaceID: "ws1", Title: "Task"}))
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", WorkspaceID: "ws1", Title: "Task"}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
-	failing := &initialPreviewFailureStore{sessionExecutorStore: svc.repo}
-	svc.repo = failing
-	_, err := svc.LaunchSession(ctx, &LaunchSessionRequest{
-		TaskID: "task1", AgentProfileID: "profile1", Intent: IntentPrepare,
-		DeferredStart: true, InitialPromptPreview: models.NewInitialPromptPreview("submitted text", nil),
-	})
-	require.ErrorContains(t, err, "preview storage unavailable")
-	session, err := repo.GetTaskSession(ctx, failing.sessionID)
+	submission, err := models.NewInitialPromptSubmission("submitted text", false, nil)
 	require.NoError(t, err)
-	require.Equal(t, models.TaskSessionStateFailed, session.State)
+	submission.State = "invalid-state"
+
+	_, err = svc.LaunchSession(ctx, &LaunchSessionRequest{
+		TaskID: "task1", AgentProfileID: "profile1", Intent: IntentPrepare,
+		DeferredStart: true, InitialPromptSubmission: submission,
+	})
+	require.ErrorIs(t, err, models.ErrInvalidInitialPromptSubmission)
+	sessions, err := repo.ListTaskSessions(ctx, "task1")
+	require.NoError(t, err)
+	require.Empty(t, sessions, "a rejected seed must not persist a partial session")
 }

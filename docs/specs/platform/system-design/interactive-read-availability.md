@@ -1,7 +1,7 @@
 ---
 status: current
 system: platform
-updated: 2026-10-29
+updated: 2026-11-05
 requirements:
   - REQ-PLATFORM-INTERACTIVE-READS-001
   - REQ-PLATFORM-INTERACTIVE-READS-002
@@ -9,6 +9,7 @@ requirements:
   - REQ-PLATFORM-INTERACTIVE-READS-004
   - REQ-PLATFORM-INTERACTIVE-READS-005
   - REQ-PLATFORM-INTERACTIVE-READS-007
+  - REQ-PLATFORM-INTERACTIVE-READS-008
 ---
 
 # Interactive Read Availability System Design
@@ -32,6 +33,7 @@ remain authoritative. This design adds workload control, not a health bypass.
 | REQ-PLATFORM-INTERACTIVE-READS-004 | Clarification workload control |
 | REQ-PLATFORM-INTERACTIVE-READS-005 | Task navigation recovery |
 | REQ-PLATFORM-INTERACTIVE-READS-007 | Quiet task refresh recovery |
+| REQ-PLATFORM-INTERACTIVE-READS-008 | Delivery environment lookup |
 
 ## Query shape and metric compatibility
 
@@ -416,11 +418,65 @@ Component tests prove that active automatic recovery reserves no visible error-s
 Desktop and phone E2E cover a thirteen-second outage, exhausted recovery, manual recovery, and retained task content.
 Use existing causal waits and request counters. Keep the current permanent-error scenarios.
 
+## Delivery environment lookup
+
+`internal/delivery/sweep.go:mostRecentGitSnapshotObservationQuery` and
+`internal/delivery/observe.go:SnapshotsForPair` resolve snapshots through their
+environment owner or an existing task/session binding.
+The binding predicate uses both `task_environment_id` and `task_id`.
+The task repository owns this access path because delivery reads its tables
+after task schema initialization.
+
+Create the portable, non-unique covering index
+`idx_task_sessions_environment_task` on
+`task_sessions(task_environment_id, task_id)`.
+The environment key leads because the inner lookup receives an environment
+from each outer snapshot. No partial predicate excludes legacy empty values.
+Both SQLite and PostgreSQL use the same DDL.
+
+`internal/task/repository/sqlite/base_migrations.go:runMigrations` installs the
+index with `CREATE INDEX IF NOT EXISTS` after every session-table rebuild.
+Place the checked statement after `migrateTurnChangeHistorySchema` and before
+the final `r.migrate.Err()` check. Use the migration context and return errors.
+This position follows the environment-column addition and the legacy workflow
+step and execution-column removals. It serves fresh databases and upgrades.
+
+Do not reference the environment column from the pre-migration `initSessionSchema`
+index block. An older table can lack that column at this stage.
+Replay must also accept the identical index that an operator already created.
+
+Preserve both query predicates and their result ordering.
+The environment owner qualifies independently of capture provenance.
+For inherited environments, at least one matching session binding qualifies.
+Unrelated sibling bindings do not disqualify that environment.
+Capture provenance can be null. Deleted environment/repository bindings remain
+excluded, and repository-name and root-repository fallback rules remain intact.
+The [environment-owned Git design](../../tasks/system-design/environment-owned-git-status.md)
+continues to own those identity rules.
+
+Use a real task-schema bootstrap and the production query for SQLite plan
+coverage. Seed thousands of bindings with low task selectivity and run `ANALYZE`.
+The binding subquery must use a covering search on both keys, without a binding
+table scan. Assert plan properties rather than an exact complete plan string.
+Measure latency separately from CI assertions.
+
+Schema tests cover fresh creation, existing databases without the index,
+pre-column databases, legacy rebuilds, repeated startup, and unchanged sentinel
+rows. PostgreSQL uses an isolated schema for equivalent lifecycle and result
+coverage. Its planner can choose other efficient paths on small fixtures.
+Do not force planner settings in production.
+
+This repair adds no read pool, health timeout, retry, or scheduler policy.
+Required-store failure and recovery retain their existing contracts.
+Query-plan evidence establishes removal of this scan, not a guarantee against
+all causes of persistence overload.
+
 ## Implementation plans
 
 - [Task navigation availability repair](../../../plans/task-navigation-availability/plan.md) covers REQ-PLATFORM-INTERACTIVE-READS-004 and -005.
 - [Task read resilience](../../../plans/task-read-resilience/plan.md) revises recovery timing and preserves current task content for REQ-PLATFORM-INTERACTIVE-READS-005.
 - [Quiet task refresh recovery](../../../plans/quiet-task-refresh-recovery/plan.md) adds bounded sidebar recovery and defers warnings until exhaustion.
+- [Delivery environment lookup index](../../../plans/delivery-sweep-environment-index/plan.md) covers REQ-PLATFORM-INTERACTIVE-READS-008.
 
 ## Journey loading extension
 

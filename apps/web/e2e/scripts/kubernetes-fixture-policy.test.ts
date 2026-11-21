@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   assertRuntimeImageTagAvailable,
+  cleanupFailedKubernetesSetup,
   FixtureResourceOwnership,
   redactKubernetesDiagnosticText,
   WORKLOAD_RBAC_PROBES,
@@ -93,6 +94,46 @@ describe("Kubernetes E2E fixture safety policy", () => {
     expect(ownership.owns("cluster")).toBe(false);
   });
 
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])("retains setup diagnostics when cleanup fails (%s, %s)", (failCluster, failImage) => {
+    const original = new Error("kind load failed: exit code: 17\nstdout tail\nstderr tail");
+    const clusterError = new Error("cluster deletion failed");
+    const imageError = new Error("image removal failed");
+    const cluster = vi.fn(() => {
+      if (failCluster) throw clusterError;
+    });
+    const image = vi.fn(() => {
+      if (failImage) throw imageError;
+    });
+    let failure: unknown;
+    try {
+      cleanupFailedKubernetesSetup(original, [cluster, image]);
+    } catch (error) {
+      failure = error;
+    }
+    expect(cluster).toHaveBeenCalledOnce();
+    expect(image).toHaveBeenCalledOnce();
+    if (!failCluster && !failImage) {
+      expect(failure).toBe(original);
+      return;
+    }
+    expect(failure).toBeInstanceOf(AggregateError);
+    const combined = failure as AggregateError;
+    expect(combined.cause).toBe(original);
+    expect(combined.errors).toEqual([
+      original,
+      ...(failCluster ? [clusterError] : []),
+      ...(failImage ? [imageError] : []),
+    ]);
+    for (const error of combined.errors as Error[]) {
+      expect(combined.message).toContain(error.message);
+    }
+  });
+
   it("marks the exact Kind name before creation and removes the marker after deletion", () => {
     const source = fs.readFileSync(
       path.join(REPOSITORY_ROOT, "apps/web/e2e/fixtures/kubernetes-tools.ts"),
@@ -110,7 +151,7 @@ describe("Kubernetes E2E fixture safety policy", () => {
     );
     const release = source.indexOf('ownership.release("cluster")', removeMarker);
     const cleanupAfterCreateFailure = source.indexOf(
-      "try {\n      deleteCluster();",
+      "cleanupFailedKubernetesSetup(error, [deleteCluster, removeRuntimeImage])",
       reserveAndCreate,
     );
 

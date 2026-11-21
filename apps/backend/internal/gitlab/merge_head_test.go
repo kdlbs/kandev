@@ -250,7 +250,7 @@ func TestWorkspaceMergeMRFailuresAndOptions(t *testing.T) {
 		{name: "squash options", head: mergeHeadSHA, method: "squash", wantRouteStatus: 200, wantWrites: 1},
 		{name: "missing head", head: "", method: "merge", wantRouteStatus: 502},
 		{name: "read fails", readStatus: 503, method: "merge", wantRouteStatus: 502},
-		{name: "head moves", head: mergeHeadSHA, method: "merge", writeStatus: 409, wantRouteStatus: 502, wantWrites: 1},
+		{name: "head moves", head: mergeHeadSHA, method: "merge", writeStatus: 409, wantRouteStatus: 409, wantWrites: 1},
 		{name: "host mismatch", head: mergeHeadSHA, method: "merge", expectedHost: "https://other.example", wantRouteStatus: 404},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

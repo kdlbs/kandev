@@ -65,6 +65,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/repositories/:id", h.httpGetRepository)
 	api.GET("/repositories/:id/branches", h.httpListRepositoryBranches)
 	api.GET("/repositories/:id/active-session-count", h.httpGetRepositoryActiveSessionCount)
+	api.POST("/repositories/:id/remote-url/validate", h.httpValidateRepositoryRemoteURL)
 	api.PATCH("/repositories/:id", h.httpUpdateRepository)
 	api.DELETE("/repositories/:id", h.httpDeleteRepository)
 	api.GET("/repositories/:id/scripts", h.httpListRepositoryScripts)
@@ -79,6 +80,7 @@ func (h *RepositoryHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionRepositoryCreate, h.wsCreateRepository)
 	dispatcher.RegisterFunc(ws.ActionRepositoryGet, h.wsGetRepository)
 	dispatcher.RegisterFunc(ws.ActionRepositoryUpdate, h.wsUpdateRepository)
+	dispatcher.RegisterFunc(ws.ActionRepositoryValidateRemoteURL, h.wsValidateRepositoryRemoteURL)
 	dispatcher.RegisterFunc(ws.ActionRepositoryDelete, h.wsDeleteRepository)
 	dispatcher.RegisterFunc(ws.ActionRepositoryScriptList, h.wsListRepositoryScripts)
 	dispatcher.RegisterFunc(ws.ActionRepositoryScriptCreate, h.wsCreateRepositoryScript)
@@ -697,6 +699,7 @@ type httpUpdateRepositoryRequest struct {
 	ProviderScope          *string                                 `json:"provider_scope"`
 	ProviderOwner          *string                                 `json:"provider_owner"`
 	ProviderName           *string                                 `json:"provider_name"`
+	RemoteURL              *string                                 `json:"remote_url"`
 	DefaultBranch          *string                                 `json:"default_branch"`
 	WorktreeBranchPrefix   *string                                 `json:"worktree_branch_prefix"`
 	WorktreeBranchTemplate *string                                 `json:"worktree_branch_template"`
@@ -727,6 +730,7 @@ func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 		ProviderScope:          body.ProviderScope,
 		ProviderOwner:          body.ProviderOwner,
 		ProviderName:           body.ProviderName,
+		RemoteURL:              body.RemoteURL,
 		DefaultBranch:          body.DefaultBranch,
 		WorktreeBranchPrefix:   body.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: body.WorktreeBranchTemplate,
@@ -738,11 +742,7 @@ func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 		SecretBindings:         body.SecretBindings,
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidRepositorySettings) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid repository settings"})
-			return
-		}
-		handleNotFound(c, h.logger, err, "repository not found")
+		h.writeRepositoryMutationError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, dto.FromRepository(repository))
@@ -892,6 +892,7 @@ type wsUpdateRepositoryRequest struct {
 	ProviderScope          *string                                 `json:"provider_scope,omitempty"`
 	ProviderOwner          *string                                 `json:"provider_owner,omitempty"`
 	ProviderName           *string                                 `json:"provider_name,omitempty"`
+	RemoteURL              *string                                 `json:"remote_url,omitempty"`
 	DefaultBranch          *string                                 `json:"default_branch,omitempty"`
 	WorktreeBranchPrefix   *string                                 `json:"worktree_branch_prefix,omitempty"`
 	WorktreeBranchTemplate *string                                 `json:"worktree_branch_template,omitempty"`
@@ -923,6 +924,7 @@ func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Mes
 		ProviderScope:          req.ProviderScope,
 		ProviderOwner:          req.ProviderOwner,
 		ProviderName:           req.ProviderName,
+		RemoteURL:              req.RemoteURL,
 		DefaultBranch:          req.DefaultBranch,
 		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
@@ -933,11 +935,7 @@ func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Mes
 		SecretBindings:         req.SecretBindings,
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidRepositorySettings) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid repository settings", nil)
-		}
-		h.logger.Error("failed to update repository", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update repository", nil)
+		return h.repositoryMutationWSError(msg, err)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromRepository(repository))
 }

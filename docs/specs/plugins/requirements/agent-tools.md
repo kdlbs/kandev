@@ -19,11 +19,11 @@ Plugin authors can extend Kandev's UI and data behavior, but task agents cannot 
 
 #### Acceptance criteria
 
-- **AC-PLUGINS-AGENT-TOOLS-001.1:** A managed plugin package (`runtime.type: binary`) may declare zero or more agent tools in its manifest. Each declaration has a plugin-local name, description, input JSON Schema, optional output JSON Schema, supported task surfaces, and optional MCP annotations. Legacy remote HTTP plugins cannot declare agent tools because they do not implement the managed gRPC runtime.
+- **AC-PLUGINS-AGENT-TOOLS-001.1:** A managed plugin package (`runtime.type: binary`) may declare zero or more agent tools in its manifest. Each declaration has a plugin-local name, description, input JSON Schema, optional output JSON Schema, supported MCP surfaces, and optional MCP annotations. Legacy remote HTTP plugins cannot declare agent tools because they do not implement the managed gRPC runtime.
 - **AC-PLUGINS-AGENT-TOOLS-001.2:** Only active plugins contribute tools. Registered, disabled, errored, and uninstalled plugins contribute none.
 - **AC-PLUGINS-AGENT-TOOLS-001.3:** Plugin tools are exposed through the existing task-aware Kandev MCP server. Plugins do not run or register a second MCP server.
 - **AC-PLUGINS-AGENT-TOOLS-001.4:** Kandev derives a readable provider-safe MCP name as `kandev_<plugin-id-slug>_<local-name>`, where the plugin ID slug replaces punctuation with underscores. The manifest does not choose an arbitrary global MCP name. If the readable name exceeds the provider limit, Kandev truncates the slug and appends a short stable hash suffix. Install validation still rejects a final-name collision.
-- **AC-PLUGINS-AGENT-TOOLS-001.5:** A declared tool may target `kanban-task`, `office-task`, or both. Plugin tools are not exposed to `configuration` or `external` MCP surfaces in this version.
+- **AC-PLUGINS-AGENT-TOOLS-001.5:** A declared tool may target supported MCP surfaces explicitly. Existing task declarations retain their behavior. Broader instance-read access follows REQ-PLUGINS-AGENT-TOOLS-002; configuration access remains excluded.
 - **AC-PLUGINS-AGENT-TOOLS-001.6:** Installing, upgrading, enabling, disabling, degrading, recovering, or uninstalling a plugin recomputes the authoritative plugin-tool catalog.
 - **AC-PLUGINS-AGENT-TOOLS-001.7:** Running MCP servers replace their effective tool registry atomically. A changed registry emits one `notifications/tools/list_changed` notification; the agent process, task session, and MCP server do not restart.
 - **AC-PLUGINS-AGENT-TOOLS-001.8:** A client that does not honor `tools/list_changed` sees the new catalog after its next MCP reconnect or task-session restart. Kandev does not terminate a healthy agent process solely to force discovery refresh.
@@ -32,7 +32,45 @@ Plugin authors can extend Kandev's UI and data behavior, but task agents cannot 
 - **AC-PLUGINS-AGENT-TOOLS-001.11:** An ordinary agent-tool invocation started after a config save advertises the tool waits for that plugin's in-progress config restart before looking up the installation and invoking its runtime. Config-presence membership and invalidation on config clear remain unchanged.
 - **AC-PLUGINS-AGENT-TOOLS-001.12:** Concurrent catalog recomputes order readiness calculation and revision assignment together. A catalog request that read config before a successful commit cannot receive a higher revision than the post-commit recompute, for both configuring and clearing required fields.
 
+### REQ-PLUGINS-AGENT-TOOLS-002: Instance reads across MCP contexts
+
+**Intent:** Agents in automations, coordinator conversations, and external
+clients need cached provider percentages when deciding which provider to use.
+The operation reads instance usage and does not require a task.
+
+#### Acceptance criteria
+
+- **AC-PLUGINS-AGENT-TOOLS-002.1:** An installed plugin may explicitly expose an
+  instance read to automation, coordinator, or external contexts. Existing
+  declarations shall not gain access to additional contexts implicitly.
+- **AC-PLUGINS-AGENT-TOOLS-002.2:** An external client admitted by the existing
+  MCP endpoint shall discover and invoke eligible instance reads without a
+  task or session. The call shall preserve existing endpoint authentication
+  and identify no invocation workspace when none is bound.
+- **AC-PLUGINS-AGENT-TOOLS-002.3:** An automation shall discover and invoke the
+  provider usage tool only through its existing valid exact-tool approval.
+  Adding the declaration shall not approve the tool for an existing automation.
+- **AC-PLUGINS-AGENT-TOOLS-002.4:** A phase-2 coordinator shall discover and
+  invoke only eligible instance reads in its trusted current conversation
+  binding. An absent, invalid, or legacy binding shall grant no plugin reads.
+  Existing core tool restrictions shall continue to apply.
+- **AC-PLUGINS-AGENT-TOOLS-002.5:** Provider usage reads shall accept no
+  arguments and return cached instance-wide percentages with freshness and
+  availability. Calls shall not refresh telemetry or read credentials.
+- **AC-PLUGINS-AGENT-TOOLS-002.6:** Each invocation shall revalidate current
+  plugin state, context eligibility, and caller authorization. Removed grants,
+  stale installation approvals, forged caller identity, and unsupported
+  contexts shall fail before plugin execution. Existing task calls, schema
+  validation, cancellation, limits, and retry behavior shall be preserved.
+
+Design: [Plugin tools across MCP contexts](../system-design/agent-tool-contexts.md).
+Plan: [Provider usage across MCP contexts](../../../plans/provider-usage-contexts/plan.md).
+
 ## Migrated source detail
+
+The historical task-only exclusions below describe the initial version.
+REQ-PLUGINS-AGENT-TOOLS-002 defines the broader instance-read contract;
+its design owns the explicit extension and compatibility boundary.
 
 ## Why
 
@@ -50,8 +88,8 @@ Implementation plan: [Plugin-Contributed Agent Tools](../../../plans/plugin-agen
 
 - A managed plugin package (`runtime.type: binary`) may declare zero or more
   agent tools in its manifest. Each declaration has a plugin-local name,
-  description, input JSON Schema, optional output JSON Schema, supported task
-  surfaces, and optional MCP annotations. Legacy remote HTTP plugins cannot
+  description, input JSON Schema, optional output JSON Schema, supported MCP
+  surfaces, optional invocation scope, and optional MCP annotations. Legacy remote HTTP plugins cannot
   declare agent tools because they do not implement the managed gRPC runtime.
 - Only active, configured plugins contribute tools. Registered, disabled,
   errored, and uninstalled plugins contribute none. A plugin that declares
@@ -66,8 +104,10 @@ Implementation plan: [Plugin-Contributed Agent Tools](../../../plans/plugin-agen
   global MCP name. If the readable name exceeds the provider limit, Kandev
   truncates the slug and appends a short stable hash suffix. Install
   validation still rejects a final-name collision.
-- A declared tool may target `kanban-task`, `office-task`, or both. Plugin tools
-  are not exposed to `configuration` or `external` MCP surfaces in this version.
+- A declared tool may target supported MCP surfaces explicitly. Existing task
+  declarations keep their behavior; instance reads may also opt into
+  `automation`, `coordinator`, and `external` when they declare instance scope
+  and a true read-only hint. Plugin tools are never exposed to `configuration`.
 - Installing, upgrading, enabling, disabling, degrading, recovering, or
   uninstalling a plugin recomputes the authoritative plugin-tool catalog.
   Saving a plugin's config recomputes it too, because the save can change
@@ -79,8 +119,9 @@ Implementation plan: [Plugin-Contributed Agent Tools](../../../plans/plugin-agen
   its next MCP reconnect or task-session restart. Kandev does not terminate a
   healthy agent process solely to force discovery refresh.
 - Tool invocation is a single request to the already supervised plugin process.
-  Kandev supplies immutable invocation ID, task ID, session ID, workspace ID,
-  and MCP surface context derived from the running session. Those values are not
+  Kandev supplies immutable invocation ID and MCP surface context derived from
+  the running execution. Task-backed calls also carry their task, session, and
+  workspace identity; external instance reads carry none. Those values are not
   accepted from tool arguments.
 - The plugin returns required fallback text, optional structured JSON content,
   and an `is_error` value. Structured content must conform to the declared
@@ -98,8 +139,9 @@ Implementation plan: [Plugin-Contributed Agent Tools](../../../plans/plugin-agen
   grants no additional Host API capability; existing `api_read`, `api_write`,
   `state`, `secrets`, `agent_invoke`, and `auth` gates remain authoritative.
 - Discovery is not an authorization boundary. Every invocation revalidates the
-  active plugin record, exact declared tool, allowed surface, backend-bound
-  task/session pair, caller scope, and input schema before calling the plugin.
+  active plugin record, exact declared tool, allowed surface, trusted caller
+  identity (including the backend-bound task/session pair when the surface has
+  one), and input schema before calling the plugin.
 - Plugin tool calls are recorded in structured logs with invocation ID, plugin
   ID, local tool name, task ID, session ID, duration, and outcome. Arguments,
   structured output, secret values, and plugin configuration are not logged.
@@ -134,10 +176,16 @@ agent_tools:
       open_world_hint: false
 ```
 
-`name` must match `^[a-z0-9][a-z0-9_]{0,31}$`. `surfaces` must contain one
-or both supported task surfaces without duplicates. `input_schema` is required;
-`output_schema` and `annotations` are optional. Unknown fields continue to
-follow the manifest's existing compatibility rules.
+`name` must match `^[a-z0-9][a-z0-9_]{0,31}$`. `surfaces` must contain one or
+more of `kanban-task`, `office-task`, `managed-conversation`, `automation`,
+`coordinator`, and `external`, without duplicates; `configuration` is not a
+supported surface. `managed-conversation` also requires
+`capabilities.api_write: [managed_agent_tools]`. `coordinator` and `external`
+require `invocation_scope: instance` and a true `annotations.read_only_hint`;
+they also require `min_kandev_version` at or above the first supporting host
+release. `input_schema` is required; `output_schema` and `annotations` are
+optional. Unknown fields continue to follow the manifest's existing
+compatibility rules.
 
 An install or upgrade fails before changing the active installation when its
 declarations are invalid, when two declarations produce the same exposed name,
@@ -209,8 +257,9 @@ is introduced.
 - Installing, upgrading, enabling, disabling, or uninstalling a plugin retains
   the existing operator/admin permission boundary.
 - Any task agent whose backend-owned surface matches an active declaration may
-  discover the tool. There is no per-workspace or per-agent-profile enablement
-  setting in this version.
+  discover the tool. Approved automation selections, exact coordinator
+  version-2 bindings, and the trusted external endpoint are the only instance
+  paths. There is no per-workspace or per-agent-profile enablement setting.
 - Agentctl injects its bound task and session IDs into the backend request. An
   agent cannot select another task or session through arguments.
 - The backend applies the same in-session MCP identity scoping used by built-in
@@ -256,9 +305,9 @@ is introduced.
 - **GIVEN** an active plugin declaring a valid Kanban tool, **WHEN** a Kanban
   task agent initializes MCP, **THEN** `tools/list` includes the derived tool
   name, description, schemas, and conservative or declared annotations.
-- **GIVEN** the same plugin tool targets only `kanban-task`, **WHEN** an Office,
-  Configuration, or External MCP client lists tools, **THEN** that tool is not
-  present.
+- **GIVEN** a plugin tool targets only `kanban-task`, **WHEN** an Office,
+  Configuration, Coordinator, or External MCP client lists tools, **THEN** that
+  tool is not present.
 - **GIVEN** a running compatible task agent, **WHEN** an operator enables a
   plugin with a matching tool, **THEN** the MCP connection receives one
   `tools/list_changed` notification and the next `tools/list` includes it
@@ -289,7 +338,7 @@ is introduced.
 
 - A plugin-hosted MCP server or transparent federation of arbitrary MCP
   resources, prompts, roots, sampling, or elicitation.
-- Plugin tools on Configuration or External MCP surfaces.
+- Plugin tools on the Configuration MCP surface.
 - Per-workspace, per-workflow, per-agent-profile, or per-tool enablement UI.
 - User approval workflows beyond annotations interpreted by the connected MCP
   client.
