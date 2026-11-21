@@ -25,6 +25,9 @@ func handleGet(service *Service) gin.HandlerFunc {
 			})
 			return
 		}
+		if ctx.Query("observation") == "true" {
+			response.Observation = service.ReadObservation(ctx.Request.Context())
+		}
 		ctx.JSON(http.StatusOK, response)
 	}
 }

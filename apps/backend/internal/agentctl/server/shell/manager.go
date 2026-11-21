@@ -70,6 +70,18 @@ func (m *Manager) Get(terminalID string) (*Session, bool) {
 	return s, ok
 }
 
+// HasRunningTerminals reports whether a terminal still owns a shell.
+func (m *Manager) HasRunningTerminals() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, terminal := range m.terminals {
+		if terminal.Status().Running {
+			return true
+		}
+	}
+	return false
+}
+
 // Stop stops and removes the shell session for the given terminal ID.
 func (m *Manager) Stop(terminalID string) error {
 	m.mu.RLock()

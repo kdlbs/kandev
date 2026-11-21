@@ -35,6 +35,9 @@ const instanceHTTPShutdownGrace = 250 * time.Millisecond
 // has already walked past and will never stop.
 var ErrManagerShuttingDown = errors.New("instance manager is shutting down")
 
+// ErrInstanceBusy means idle reclaim left the instance available.
+var ErrInstanceBusy = errors.New("instance has workspace work")
+
 // Manager manages multiple agent instances.
 // It handles creation, tracking, and removal of agent instances,
 // each with their own HTTP server on a dedicated port.
@@ -69,9 +72,10 @@ type Manager struct {
 	// observe activeCreations at zero and a creation could then Add(1) behind
 	// it: admission checks the flag and adds under m.mu, so every creation
 	// either is counted before the flag is set or sees the flag and refuses.
-	abandonWG       sync.WaitGroup
-	activeCreations sync.WaitGroup
-	shuttingDown    bool
+	abandonWG                 sync.WaitGroup
+	activeCreations           sync.WaitGroup
+	shuttingDown              bool
+	inferenceCapacityRequired bool
 
 	// afterTrackerStart runs immediately after StartAllWorkspaceTrackers and is
 	// nil in production. It exists so a test can cancel the caller's context at
@@ -141,8 +145,9 @@ func (m *Manager) SetServerFactory(factory ServerFactory) {
 // createAdmission is an admitted creation: its ID is reserved in m.provisional
 // and its port and listener are bound. The caller must publish or abandon it.
 type createAdmission struct {
-	bundle   *provisionalInstance
-	agentEnv []string
+	freshInferenceOwner bool
+	bundle              *provisionalInstance
+	agentEnv            []string
 }
 
 // CreateInstance creates a new agent instance.
@@ -277,7 +282,7 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 	bundle := &provisionalInstance{id: id, lease: lease, listener: listener}
 	m.provisional[id] = bundle
 	m.activeCreations.Add(1)
-	return &createAdmission{bundle: bundle, agentEnv: agentEnv}, nil
+	return &createAdmission{bundle: bundle, agentEnv: agentEnv, freshInferenceOwner: req.ID == ""}, nil
 }
 
 // startInstance builds an admitted instance without holding m.mu: its process
@@ -304,6 +309,7 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 		return nil, nil, nil, err
 	}
 	instanceCfg.AgentCommandConfigured = req.AgentCommand != ""
+	instanceCfg.InferenceOwnerFresh = admission.freshInferenceOwner
 
 	m.logger.Info("CreateInstance: instance config created",
 		zap.String("config_protocol", string(instanceCfg.Protocol)))
@@ -378,6 +384,9 @@ func (m *Manager) publishInstance(ctx context.Context, inst *Instance, bundle *p
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("create instance abandoned before publication: %w", err)
 	}
+	if err := requireInstanceCapacity(inst, m.inferenceCapacityRequired); err != nil {
+		return err
+	}
 	inst.server = m.startHTTPServer(inst, bundle.listener, handler)
 	m.instances[inst.ID] = inst
 	delete(m.provisional, inst.ID)
@@ -387,6 +396,7 @@ func (m *Manager) publishInstance(ctx context.Context, inst *Instance, bundle *p
 func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd string, agentEnv []string) *config.InstanceOverrides {
 	autoStart := req.AutoStart
 	return &config.InstanceOverrides{
+		InferenceClosureOperationID:  req.InferenceClosureOperationID,
 		InstanceID:                   id,
 		ScopedMCPRoutes:              req.ScopedMCPRoutes,
 		Protocol:                     agent.Protocol(req.Protocol),
@@ -657,6 +667,40 @@ func (m *Manager) ListInstances() []*InstanceInfo {
 	return result
 }
 
+// InferenceInventory closes unreserved starts before returning the current list.
+// Publication takes the same mutex and applies the mode to future instances.
+func (m *Manager) InferenceInventory(required bool) ([]*InstanceInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.shuttingDown {
+		return nil, ErrManagerShuttingDown
+	}
+	m.inferenceCapacityRequired = required
+	result := make([]*InstanceInfo, 0, len(m.instances))
+	for _, inst := range m.instances {
+		if inst == nil || inst.manager == nil {
+			return nil, errors.New("inference instance owner unavailable")
+		}
+		if err := requireInstanceCapacity(inst, required); err != nil {
+			return nil, err
+		}
+		result = append(result, inst.Info())
+	}
+	return result, nil
+}
+
+func requireInstanceCapacity(inst *Instance, required bool) error {
+	owner, ok := inst.manager.(interface{ RequireInferenceCapacity(bool) })
+	if !ok {
+		if required {
+			return errors.New("inference capacity owner unavailable")
+		}
+		return nil
+	}
+	owner.RequireInferenceCapacity(required)
+	return nil
+}
+
 // StopInstance stops and removes an instance by ID.
 func (m *Manager) StopInstance(ctx context.Context, id string) error {
 	m.mu.RLock()
@@ -669,6 +713,15 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 }
 
 func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) error {
+	return m.stopInstanceWithAdmission(ctx, id, inst, false)
+}
+
+// ReclaimIdleInstance stops only the observed instance after closing idle admission.
+func (m *Manager) ReclaimIdleInstance(ctx context.Context, inst *Instance) error {
+	return m.stopInstanceWithAdmission(ctx, inst.ID, inst, true)
+}
+
+func (m *Manager) stopInstanceWithAdmission(ctx context.Context, id string, inst *Instance, idleOnly bool) error {
 	inst.stopMu.Lock()
 	defer inst.stopMu.Unlock()
 
@@ -688,6 +741,16 @@ func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) e
 	if current != inst {
 		m.mu.Unlock()
 		return fmt.Errorf("instance %s not found", id)
+	}
+	inst.statusMu.RLock()
+	stopping := inst.Status == "stopping"
+	inst.statusMu.RUnlock()
+	if idleOnly && !stopping {
+		admission, ok := inst.manager.(interface{ CloseAdmissionIfIdle() bool })
+		if !ok || !admission.CloseAdmissionIfIdle() {
+			m.mu.Unlock()
+			return ErrInstanceBusy
+		}
 	}
 	inst.setStatus("stopping")
 	m.mu.Unlock()
@@ -714,8 +777,7 @@ func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) e
 		}
 	}
 
-	stopErr := errors.Join(httpStopErr, processStopErr)
-	if httpStopErr != nil || processStopErr != nil {
+	if stopErr := errors.Join(httpStopErr, processStopErr); stopErr != nil {
 		return stopErr
 	}
 
@@ -727,16 +789,14 @@ func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) e
 		m.portAlloc.Release(inst.lease)
 		inst.portReleased = true
 	}
-	if stopErr == nil {
-		delete(m.instances, id)
-	}
+	delete(m.instances, id)
 	m.mu.Unlock()
 
 	m.logger.Info("StopInstance completed",
 		zap.String("instance_id", id),
 		zap.Int("port", inst.Port))
 
-	return stopErr
+	return nil
 }
 
 type instanceHTTPServer interface {

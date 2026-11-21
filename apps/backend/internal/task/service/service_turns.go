@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -118,6 +119,7 @@ func (s *Service) createTurn(
 	// Recorded only once the turn is durably persisted — the counter's
 	// "turns created" framing must not count a turn CreateTurn rejected.
 	steptelemetry.RecordTurnStamp(s.logger, stamped)
+	s.logger.Flow(ctx, logger.ExecutionFlow{Stage: "turn", Outcome: "persisted", TaskID: turn.TaskID, SessionID: turn.TaskSessionID, TurnID: turn.ID, ProfileID: turn.ExecutionProfileID, RouteGeneration: uint64(turn.RouteGeneration)})
 
 	if publishStarted {
 		// had_output is only meaningful on turn.completed; omit it from turn.started.
@@ -337,6 +339,7 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 	// Recorded only once the turn is durably persisted — the counter's
 	// "turns created" framing must not count a turn CreateTurn rejected.
 	steptelemetry.RecordTurnStamp(s.logger, stamped)
+	s.logger.Flow(ctx, logger.ExecutionFlow{Stage: "turn", Outcome: "persisted", TaskID: turn.TaskID, SessionID: turn.TaskSessionID, TurnID: turn.ID, ProfileID: turn.ExecutionProfileID, RouteGeneration: uint64(turn.RouteGeneration)})
 	return turn, nil
 }
 
@@ -485,6 +488,7 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		return nil
 	}
 
+	s.logger.Flow(ctx, logger.ExecutionFlow{Stage: "turn", Outcome: "completed", TaskID: turn.TaskID, SessionID: turn.TaskSessionID, TurnID: turn.ID, DurationMS: time.Since(turn.StartedAt).Milliseconds()})
 	hadOutput := s.turnHadOutput(ctx, turn)
 	_ = s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput, receipt)
 
