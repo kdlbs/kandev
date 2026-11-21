@@ -20,6 +20,10 @@ import {
   waitForTaskUnreadSummary,
 } from "../../helpers/unread-divider";
 import { expectTabletConversationRoute } from "../../helpers/session-route-admission";
+import {
+  expectTabletDraftDuringRestore,
+  expectTabletWorkflowFocus,
+} from "../../helpers/tablet-session-ownership";
 
 function unreadDot(row: Locator): Locator {
   return row.getByRole("img", { name: TASK_UNREAD_DOT_LABEL });
@@ -345,4 +349,28 @@ test.describe("Task unread dot", () => {
       );
     });
   }
+  test("coarse tablet preserves a live draft across delayed saved-file restoration", async ({
+    tabletTestPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    await expectTabletDraftDuringRestore(
+      { testPage: tabletTestPage, apiClient, seedData, backend },
+      test.info().outputPath("tablet-owned-draft.png"),
+    );
+  });
+  test("coarse tablet delivers the committed workflow conversation", async ({
+    tabletTestPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    await expectTabletWorkflowFocus(
+      { testPage: tabletTestPage, apiClient, seedData, backend },
+      test.info().outputPath("tablet-workflow-chat.png"),
+    );
+  });
 });

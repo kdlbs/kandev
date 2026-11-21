@@ -273,7 +273,7 @@ the same causal scenario after Task 01 proves a violation:
 Execute sequentially. No subagent authorization is implied.
 
 - [x] [Task 01: Establish the inactive-session failure boundary](task-01-establish-failure-boundary.md) (done: conformance, no violation reproduced).
-- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R29 corrections, 314 targeted tests, seven desktop/tablet and ten phone cases, strict lint/typecheck/build. Independent review continues; broad suites/live NATS remain uncertified).
+- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R30 tablet file/workflow and Saved Layout ownership corrections verified. Independent review continues; broad suites/live NATS remain uncertified).
 
 The prior [task unread dot package](../task-unread-dot/plan.md) is historical
 completed delivery. The [visible-visit divider package](../unread-divider-visible-session-clear/plan.md)
@@ -782,3 +782,17 @@ and ten phone cases pass after the final production edit. Strict lint,
 typecheck, fresh frontend, harness/docs checks pass. Final tablet file/dot,
 Go-boot Chat and local foreground survivor captures inspected. Task 02 records
 the additional restoration RED and intermediate non-green runs separately.
+
+### Production review R30
+
+Sol child `2386540f-7cb4-4536-905a-d0d0d6dc0b87` reviewed
+`4e2547e4d2e903f337726a67892e2c03cbbf4f03`: four P2s, not clean.
+Completed production rounds 30; consecutive clean 0. Task 02 records the
+corrections and targeted RED. R31 follows verified delivery.
+
+R30 author receipts: 14 files/303 targeted tests plus overlapping final
+12/4-case fixture replays; strict lint/typecheck/fresh frontend and
+harness/spec/catalog checks pass. Final single-worker/no-retry browser runs:
+nine desktop/tablet and ten phone cases pass. Final dirty-editor/dot and
+committed-workflow Chat captures inspected. Task 02 separates the initial
+non-green UI fixtures from these final receipts and preserves scope limits.

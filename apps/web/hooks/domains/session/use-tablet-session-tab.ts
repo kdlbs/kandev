@@ -8,6 +8,7 @@ export function useTabletSessionTab(sessionId: string | null) {
   const store = useAppStoreApi();
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   const revision = useAppStore((state) => state.taskRemoval.navigationRevision);
+  const workflowRequest = useAppStore((state) => state.workflowSessionFocus.request);
   const initialTab = useMemo(() => {
     if (typeof window !== "undefined" && sessionId) {
       const saved = getActiveTabForSession(sessionId, "chat");
@@ -47,5 +48,20 @@ export function useTabletSessionTab(sessionId: string | null) {
         null,
     );
   }, [store, taskId, sessionId, revision, setTab]);
+  useLayoutEffect(() => {
+    const state = store.getState();
+    if (
+      !sessionId ||
+      !workflowRequest ||
+      state.workflowSessionFocus.request !== workflowRequest ||
+      workflowRequest.taskId !== taskId ||
+      workflowRequest.sessionId !== sessionId ||
+      state.tasks.activeTaskId !== taskId ||
+      state.tasks.activeSessionId !== sessionId
+    )
+      return;
+    setTab("chat");
+    state.acknowledgeWorkflowSessionFocus(workflowRequest.requestId);
+  }, [store, taskId, sessionId, workflowRequest, setTab]);
   return [tab, setTab] as const;
 }

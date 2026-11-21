@@ -67,6 +67,7 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/lib/state/dockview-store", () => ({
+  captureLayoutApplication: () => () => true,
   useDockviewStore: (selector: (state: unknown) => unknown) =>
     selector({
       applyCustomLayout: mocks.applyCustomLayout,

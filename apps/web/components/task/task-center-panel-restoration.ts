@@ -23,6 +23,7 @@ import { t } from "@/lib/i18n";
 import {
   getFileTabKey,
   installFileEditorTab,
+  mergeRestoredFileTabs,
   type FileEditorTab,
 } from "./task-center-panel-file-tabs";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
@@ -86,27 +87,28 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
 type RestoreLoadedTabsParams = {
   loadedTabs: OpenFileTab[];
   savedActiveTab: string;
-  restoredTabsRef: React.MutableRefObject<string | null>;
+  isCurrent: () => boolean;
   restorationInProgressRef: React.MutableRefObject<boolean>;
   setOpenFileTabs: React.Dispatch<React.SetStateAction<OpenFileTab[]>>;
   setLeftTab: (tab: string) => void;
   store?: StoreApi<AppState>;
+  sessionId: string;
 };
 
 function restoreLoadedTabs({
   loadedTabs,
   savedActiveTab,
-  restoredTabsRef,
+  isCurrent,
   restorationInProgressRef,
   setOpenFileTabs,
   setLeftTab,
   store,
+  sessionId,
 }: RestoreLoadedTabsParams) {
-  const sessionId = restoredTabsRef.current;
-  if (!sessionId) return;
-  if (loadedTabs.length > 0) setOpenFileTabs(loadedTabs);
+  if (!isCurrent()) return;
+  if (loadedTabs.length > 0) setOpenFileTabs((live) => mergeRestoredFileTabs(live, loadedTabs));
   const select = () => {
-    if (restoredTabsRef.current !== sessionId) return;
+    if (!isCurrent()) return;
     const current = store?.getState().tabletSession.activeTabBySessionId[sessionId];
     let selected =
       current ?? (loadedTabs.length > 0 ? savedActiveTab : toPrimaryTab(savedActiveTab));
@@ -114,7 +116,8 @@ function restoreLoadedTabs({
       const key = selected.slice("file:".length);
       // Old path-only preferences resolve to the current repo-aware file key.
       const file = loadedTabs.find((tab) => getFileTabKey(tab) === key || tab.path === key);
-      selected = file ? `file:${getFileTabKey(file)}` : "chat";
+      if (file) selected = `file:${getFileTabKey(file)}`;
+      else if (current === undefined) selected = "chat";
     }
     setLeftTab(selected);
     restorationInProgressRef.current = false;
@@ -130,83 +133,84 @@ export function useFileTabRestoration({
   setLeftTab,
   setOpenFileTabs,
 }: FileTabRestorationOptions) {
-  const restoredTabsRef = useRef<string | null>(null);
   const restorationInProgressRef = useRef<boolean>(false);
-  const prevSessionRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (prevSessionRef.current && leftTab)
-        setActiveTabForSession(prevSessionRef.current, leftTab);
-    };
-  }, [leftTab]);
+  useEffect(
+    () => () => {
+      if (
+        activeSessionId &&
+        store?.getState().tabletSession.activeTabBySessionId[activeSessionId] === undefined
+      )
+        setActiveTabForSession(activeSessionId, leftTab);
+    },
+    [activeSessionId, leftTab, store],
+  );
 
   useEffect(() => {
     if (!activeSessionId) return;
-    if (restoredTabsRef.current !== activeSessionId) {
-      if (prevSessionRef.current && prevSessionRef.current !== activeSessionId)
-        setActiveTabForSession(prevSessionRef.current, leftTab);
-      restoredTabsRef.current = activeSessionId;
-      prevSessionRef.current = activeSessionId;
-      restorationInProgressRef.current = false;
-      setOpenFileTabs([]);
-    } else if (restorationInProgressRef.current || restoredTabsRef.current === activeSessionId) {
-      return;
-    }
+    let current = true;
+    const isCurrent = () => current;
+    const release = () => {
+      current = false;
+    };
+    restorationInProgressRef.current = false;
+    setOpenFileTabs([]);
     const savedTabs = getOpenFileTabs(activeSessionId);
     const savedActiveTab = getActiveTabForSession(activeSessionId, "chat");
     if (savedTabs.length === 0) {
-      setLeftTab(toPrimaryTab(savedActiveTab));
-      return;
+      if (store?.getState().tabletSession.activeTabBySessionId[activeSessionId] === undefined)
+        setLeftTab(toPrimaryTab(savedActiveTab));
+      return release;
     }
     restorationInProgressRef.current = true;
     const loadTabs = async (retryCount = 0): Promise<void> => {
+      if (!current) return;
       if (store) {
         while (
+          current &&
           savedTabs.some((tab) => isRenameReserved(store, activeSessionId, tab.path, tab.repo))
-        ) {
+        )
           await waitForRenameRelease(store, activeSessionId, savedTabs);
-        }
       }
-      if (restoredTabsRef.current !== activeSessionId) return;
+      if (!current) return;
       const pending = store
         ? savedTabs.map((tab) => trackRenameOpen(store, activeSessionId, tab.path, tab.repo))
         : [];
       const loadedTabs = await loadSavedFileTabs(activeSessionId, savedTabs);
       const invalid = pending.some((entry) => !entry.current());
       pending.forEach((entry) => entry.dispose());
+      if (!current) return;
       if (invalid) {
         void loadTabs(retryCount);
         return;
       }
       if (!loadedTabs) {
-        if (retryCount < 5) {
-          setTimeout(() => loadTabs(retryCount + 1), 200);
-          return;
-        }
-        restorationInProgressRef.current = false;
-        return;
-      }
-      if (restoredTabsRef.current !== activeSessionId) {
-        restorationInProgressRef.current = false;
+        if (retryCount < 5) setTimeout(() => loadTabs(retryCount + 1), 200);
+        else restorationInProgressRef.current = false;
         return;
       }
       restoreLoadedTabs({
         loadedTabs,
         savedActiveTab,
-        restoredTabsRef,
+        isCurrent,
         restorationInProgressRef,
         setOpenFileTabs,
         setLeftTab,
         store,
+        sessionId: activeSessionId,
       });
     };
     void loadTabs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- leftTab is intentionally excluded to prevent re-running on tab changes
+    return release;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Tab changes do not start another restoration visit.
   }, [activeSessionId]);
 
   useEffect(() => {
-    if (!activeSessionId || restorationInProgressRef.current) return;
+    if (
+      !activeSessionId ||
+      restorationInProgressRef.current ||
+      store?.getState().tabletSession.activeTabBySessionId[activeSessionId] !== undefined
+    )
+      return;
     setActiveTabForSession(activeSessionId, leftTab);
   }, [activeSessionId, leftTab]);
 

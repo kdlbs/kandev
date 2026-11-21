@@ -18,7 +18,7 @@ import {
 import { withToolFileTask } from "./tool-file-opening";
 import { waitForSessionState } from "./session";
 
-async function waitForIndexedConversation(
+export async function waitForIndexedConversation(
   api: ApiClient,
   workspaceId: string,
   query: string,
@@ -48,7 +48,7 @@ async function waitForIndexedConversation(
     .toBe(true);
 }
 
-async function selectCommandTask(page: Page, query: string, conversation = false) {
+export async function selectCommandTask(page: Page, query: string, conversation = false) {
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   await page.keyboard.press(`${modifier}+k`);
   const dialog = page.getByRole("dialog");

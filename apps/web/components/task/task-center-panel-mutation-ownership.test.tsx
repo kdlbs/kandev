@@ -10,8 +10,13 @@ import {
   type FileEditorTab,
 } from "./task-center-panel-file-tabs";
 import { createAppStore } from "@/lib/state/store";
-import { setOpenFileTabs, setActiveTabForSession } from "@/lib/local-storage";
+import {
+  setOpenFileTabs,
+  setActiveTabForSession,
+  getActiveTabForSession,
+} from "@/lib/local-storage";
 
+import { useStore } from "zustand";
 const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   delete: vi.fn(),
@@ -347,3 +352,112 @@ it.each(["chat", "file", "legacy"] as const)(
     hook.unmount();
   },
 );
+
+it("keeps a newly opened dirty tablet file when older saved metadata arrives", async () => {
+  const store = createAppStore();
+  const oldKey = `file:${getFileTabKey(file("A"))}`;
+  store.getState().setTabletSessionTab("A", oldKey);
+  setOpenFileTabs("A", [{ path: PATH, name: "foo.ts", repo: REPO }]);
+  setActiveTabForSession("A", oldKey);
+  const read = Promise.withResolvers<{ content: string }>();
+  mocks.read.mockReturnValue(read.promise);
+  const hook = renderHook(() => {
+    const [tabs, setTabs] = useState<FileEditorTab[]>([]);
+    const [selected, setSelected] = useState(oldKey);
+    useFileTabRestoration({
+      store,
+      activeSessionId: "A",
+      leftTab: selected,
+      setLeftTab: setSelected,
+      setOpenFileTabs: setTabs,
+    });
+    return { tabs, setTabs, selected, setSelected };
+  });
+  const live = installFileEditorTab({
+    ...file("draft"),
+    path: "src/live.ts",
+    name: "live.ts",
+    isDirty: true,
+  });
+  const liveKey = `file:${getFileTabKey(live)}`;
+  act(() => {
+    hook.result.current.setTabs([live]);
+    store.getState().setTabletSessionTab("A", liveKey);
+    hook.result.current.setSelected(liveKey);
+  });
+  await act(async () => read.resolve({ content: "old saved disk" }));
+  await waitFor(() => expect(hook.result.current.tabs.some((tab) => tab.path === PATH)).toBe(true));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(hook.result.current.tabs.find((tab) => tab.path === live.path)).toBe(live);
+  expect(hook.result.current.tabs.find((tab) => tab.path === live.path)?.content).toBe(
+    "draft buffer",
+  );
+  expect(hook.result.current.selected).toBe(liveKey);
+  hook.unmount();
+});
+
+it("never writes the new tablet session's choice to its predecessor", () => {
+  const store = createAppStore();
+  const oldKey = `file:${getFileTabKey(file("A"))}`;
+  store.getState().setTabletSessionTab("A", oldKey);
+  store.getState().setTabletSessionTab("B", "chat");
+  setActiveTabForSession("A", oldKey);
+  setActiveTabForSession("B", "chat");
+  const hook = renderHook(
+    ({ session, selected }) => {
+      const [tabs, setTabs] = useState<FileEditorTab[]>([]);
+      useFileTabRestoration({
+        store,
+        activeSessionId: session,
+        leftTab: selected,
+        setLeftTab: () => {},
+        setOpenFileTabs: setTabs,
+      });
+      return tabs;
+    },
+    { initialProps: { session: "A", selected: oldKey } },
+  );
+  hook.rerender({ session: "B", selected: "chat" });
+  hook.unmount();
+  expect(getActiveTabForSession("A", "chat")).toBe(oldKey);
+  expect(getActiveTabForSession("B", "chat")).toBe("chat");
+});
+
+it("rejects saved metadata from an older A visit after A-B-A navigation", async () => {
+  const store = createAppStore();
+  const key = `file:${getFileTabKey(file("A"))}`;
+  store.getState().setTabletSessionTab("A", key);
+  store.getState().setTabletSessionTab("B", "chat");
+  setOpenFileTabs("A", [{ path: PATH, name: "foo.ts", repo: REPO }]);
+  setActiveTabForSession("A", key);
+  const old = Promise.withResolvers<{ content: string }>();
+  const fresh = Promise.withResolvers<{ content: string }>();
+  mocks.read.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);
+  const hook = renderHook(
+    ({ session }) => {
+      const [tabs, setTabs] = useState<FileEditorTab[]>([]);
+      const selected = useStore(
+        store,
+        (state) => state.tabletSession.activeTabBySessionId[session],
+      );
+      useFileTabRestoration({
+        store,
+        activeSessionId: session,
+        leftTab: selected,
+        setLeftTab: (tab) => store.getState().setTabletSessionTab(session, tab),
+        setOpenFileTabs: setTabs,
+      });
+      return tabs;
+    },
+    { initialProps: { session: "A" } },
+  );
+  hook.rerender({ session: "B" });
+  hook.rerender({ session: "A" });
+  await act(async () => old.resolve({ content: "stale visit disk" }));
+  expect(hook.result.current).toEqual([]);
+  await act(async () => fresh.resolve({ content: "current visit disk" }));
+  await waitFor(() => expect(hook.result.current[0]?.content).toBe("current visit disk"));
+  hook.unmount();
+});

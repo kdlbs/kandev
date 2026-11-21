@@ -8,6 +8,7 @@ import {
   getManualRightWidth,
   setManualRightWidth,
 } from "@/lib/local-storage";
+import { getEnvMaximizeState, setEnvMaximizeState } from "@/lib/local-storage";
 import {
   CENTER_GROUP,
   RIGHT_BOTTOM_GROUP,
@@ -1011,3 +1012,52 @@ it("fences a Saved Layout completion behind a newer maximized environment", asyn
     raf.mockRestore();
   }
 });
+
+it.each(["overlay", "fallback"])(
+  "fences an older %s restore completion behind Saved Layout",
+  async (mode) => {
+    const x = horizontalLayout({ bottom: [NOTES] });
+    const y = horizontalLayout({ bottom: [PROMPTS] });
+    startIn("restore-x", x, null);
+    useDockviewStore.getState().maximizeGroup(CENTER_GROUP);
+    await settle();
+    if (mode === "fallback") {
+      const saved = getEnvMaximizeState("restore-x")!;
+      setEnvMaximizeState("restore-x", { ...saved, maximizedDockviewJson: {} });
+    }
+    useDockviewStore.getState().switchEnvLayout("restore-x", "restore-y", null, []);
+    await settle();
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((frame) => {
+      frames.push(frame);
+      return frames.length;
+    });
+    try {
+      useDockviewStore.getState().switchEnvLayout("restore-y", "restore-x", null, []);
+      const oldFrames = frames.splice(0);
+      useDockviewStore.getState().switchEnvLayout("restore-x", "restore-y", null, []);
+      useDockviewStore.getState().applyCustomLayout({
+        id: "new-saved",
+        name: "New saved",
+        isDefault: false,
+        createdAt: "2026-11-21T00:00:00Z",
+        layout: toSerializedDockview(y, WIDTH, HEIGHT, new Map()) as unknown as Record<
+          string,
+          unknown
+        >,
+      });
+      expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
+      const layout = vi.spyOn(api, "layout");
+      const before = api.toJSON();
+      for (const frame of oldFrames) frame(0);
+      expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
+      expect(api.toJSON()).toEqual(before);
+      expect(layout).not.toHaveBeenCalled();
+      frames.at(-1)!(0);
+      expect(useDockviewStore.getState().isRestoringLayout).toBe(false);
+      layout.mockRestore();
+    } finally {
+      raf.mockRestore();
+    }
+  },
+);

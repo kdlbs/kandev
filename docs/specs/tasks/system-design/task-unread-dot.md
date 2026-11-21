@@ -251,11 +251,12 @@ re-prove after changed primaries. Proof fills missing recipient identity/lifecyc
 
 Explicit hits use HTTP-safe scoped identity, even at the same URL.
 Routes reopen hidden targets. Restore keeps flat/tree or unique legacy choices.
-Phone/tablet consume Chat focus; unavailable/404 proof vetoes admission/sync.
+Phone/tablet consume route/workflow Chat focus; 404 vetoes admission/sync.
 `workflow_focus_disposition: none`: admitted, no source/effective launch;
 omit while deferred launch is possible. Removal leases protect live/parked groups.
-Committed focus wins restore. API/env/generation fence exit/Saved Layout work.
+Committed focus wins restore; layout intents/frames keep scoped ownership.
 Changed primaries re-prove empty slots. Visibility gates restore/read/dots.
+Late tablet metadata preserves live editors/drafts and each visit's tab.
 
 `invalidateTaskSessionMembership` fences pending/admitted/queued foreground and
 removal-dialog reads, not new reads/unrelated keys. Confirmed UUID deletion

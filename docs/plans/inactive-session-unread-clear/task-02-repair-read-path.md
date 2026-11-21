@@ -3992,3 +3992,97 @@ survivor captures. The intended tab/transcript is visible, and existing panels
 remain contained. Cursor/traffic assertions, not screenshots, prove read scope.
 R29 implementation is done; normal commit/push and independent R30 follow.
 The three-consecutive-clean/50-round production loop remains open.
+
+### Production-fix review round 30 remediation
+
+Sol child `2386540f-7cb4-4536-905a-d0d0d6dc0b87` reviewed
+`4e2547e4d2e903f337726a67892e2c03cbbf4f03`: four P2s, not clean.
+Completed production rounds 30; consecutive clean 0. Work covers tablet
+live-file/draft restoration and tab preference ownership, committed workflow
+Chat focus, pre-commit Saved Layout intent, and reverse maximize completion.
+
+`r30-red-units.log`: five behavioral failures/107 controls. Saved metadata
+removed a newly opened dirty editor; A's preference became B's; tablet
+workflow focus stayed on File; both overlay/fallback old completions released
+a newer restore. `r30-click-red.log`: three behavioral failures/one healthy
+control through the real menu/stores/Dockview: new environment, selection ABA
+and newer Saved Layout all lost to the old admitted click.
+
+Corrections keep one tablet visit/tab owner: delayed metadata fills unused
+slots without replacing live editor instances/drafts or normalizing a newer
+file choice to Chat. Canonical tablet preference writes replace the legacy
+cross-session writers; stale A-B-A reads cannot publish. A still-matching
+committed workflow request selects Chat and is acknowledged once.
+
+Saved Layout captures selection/scope/API/env/layout ownership before its
+membership wait; a newer choice, navigation or layout supersedes that click.
+Both normal and fallback saved-maximize completion frames use the same
+read-only committed-layout guard. Intent admission does not advance the
+committed generation or strand an earlier restore.
+
+`r30-final-units.log`: 14 files/303 targeted tests pass, including dirty
+live-file, independent preferences, A-B-A, workflow acknowledgement, real menu
+intent and both maximize completion producers. The first strict lint pass
+stopped on a repeated test literal; the shared fixture constant removes it.
+These are targeted author receipts, not a broad-suite certificate.
+
+Owning replay from the refreshed cache-safe snapshot:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run components/task/task-center-panel-mutation-ownership.test.tsx \
+  components/task/task-center-panel-restoration.test.ts \
+  components/task/task-center-panel-file-tabs.test.ts \
+  hooks/domains/sidebar/use-unread-task-dot-display.test.tsx \
+  components/task/layout-preset-selector-apply.test.tsx \
+  components/task/layout-preset-selector.test.tsx \
+  components/task/layout-preset-selector-session-ids.test.ts \
+  lib/state/dockview-env-switch.plugin-layout.test.ts \
+  lib/state/dockview-env-switch-maximize-session-filter.test.ts \
+  lib/state/dockview-right-panel-visibility.test.ts \
+  lib/ws/handlers/task-primary-
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/task/task-unread-dot.spec.ts \
+  e2e/tests/session/session-primary-removal.spec.ts -- \
+  --grep 'Task unread dot|ordinary foreground membership' --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+`r30-owner-final.log` (12 cases) and `r30-click-final.log` (four cases) are
+overlapping final fixture replays, not additional disjoint coverage. Strict
+changed-file lint, production typecheck and fresh frontend build pass. The
+first typecheck rejected three test-only fixture types; defaults and the DOM
+Testing Library query now use their actual contracts.
+
+The first new-tablet browser run was 0/2, not green: the file-restoration
+gate timed out; the committed workflow reached Chat, persisted its tail and
+acknowledged focus before a zero-launch assertion rejected its configured
+target's actual `session.launch`. The fixture now waits for persisted file
+metadata, bounds the authentic request gate, and separates the explicit
+workflow launch window from later passive file/read behavior.
+
+The next tablet run was 1/2: the gate incorrectly required exactly one
+restoration request, but the real client sent two. A later probe still used
+the desktop file-tree path selector; the coarse surface uses the shipped
+accessible tree row. A bounded DOM-content entry/row action then passed.
+These were fixture corrections, not product RED or retries.
+
+Final fresh R30 frontend receipts: `r30-final-summary.log` nine
+desktop/tablet cases pass; `r30-phone-summary.log` ten phone cases pass.
+One worker, no retries, sequential runs. New tablet cases exercise real
+saved-file requests, a newly opened/edited live file, the actual workflow
+stepper/committed recipient, exact persisted cursors and later file ownership.
+Only the configured workflow target may launch in that explicit move window;
+later file viewing sends no start or tail acknowledgement.
+
+Inspected final dirty-editor/unread-dot and committed-Chat captures. Harness
+tests/all-file lint, normal targeted harness hook, specification tests/lint
+and catalog validation pass; scoped guidance stays at 300 lines.
+R30 corrections and targeted verification are complete. Normal delivery is
+followed by independent Sol R31; the three-clean/50-round loop remains open.
+Frontend is fresh R30; runtime/agentctl/host/plugin are retained fresh R24.
+No Go, cursor/predicate/projector, promotion/schema/wire change in R30.
+No broad-suite/live-NATS or historical-trigger certification. List readback
+shows convergence, not isolated cursor-event delivery; seeded RUNNING is not
+live execution.

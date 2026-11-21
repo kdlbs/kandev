@@ -649,6 +649,21 @@ function enforceFromStore(api: DockviewApi, get: StoreGet): void {
 
 const layoutVersions = new WeakMap<DockviewApi, number>();
 
+/** A delayed layout action/completion cannot borrow a replacement grid's owner. */
+export function captureLayoutApplication(): () => boolean {
+  const { api, currentLayoutEnvId } = useDockviewStore.getState();
+  const version = api ? layoutVersions.get(api) : undefined;
+  return () => {
+    const current = useDockviewStore.getState();
+    return (
+      !!api &&
+      current.api === api &&
+      current.currentLayoutEnvId === currentLayoutEnvId &&
+      layoutVersions.get(api) === version
+    );
+  };
+}
+
 /**
  * Apply a layout state to the dockview API and persist the resulting group
  * IDs to the store. Uses the caller-provided `preMeasured` container size when
@@ -1222,7 +1237,10 @@ function restorePreMaximizeFallback({
   } catch {
     // Keep the maximize snapshot until its replacement layout is durable.
   }
-  requestAnimationFrame(() => set({ isRestoringLayout: false }));
+  const isCurrent = captureLayoutApplication();
+  requestAnimationFrame(() => {
+    if (isCurrent()) set({ isRestoringLayout: false });
+  });
 }
 
 /** Restore a saved maximize state from sessionStorage onto the dockview API. */
@@ -1305,8 +1323,9 @@ function restoreMaximizeFromStorage(
     removeEnvMaximizeState(envId);
     return false;
   }
+  const isCurrent = captureLayoutApplication();
   requestAnimationFrame(() => {
-    set({ isRestoringLayout: false });
+    if (isCurrent()) set({ isRestoringLayout: false });
   });
   return true;
 }
