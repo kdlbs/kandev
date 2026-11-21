@@ -930,7 +930,7 @@
   "sessionMaximumShort": "Start, Resume, and Send Now can exceed this limit.",
   "queueMaximumShort": "Limit pending messages per session. Use 0 for unlimited.",
   "queueMergeShort": "Combine related queued messages before the agent reads them.",
-  "queueAutoMergeShort": "Merge compatible consecutive messages automatically.",
+  "queueAutoMergeShort": "Merges compatible adjacent messages, and moves sub-task messages up to merge with their sender's latest one.",
   "sleepShort": "Prevent the computer running Kandev from sleeping during tasks.",
   "sidebarPresentation": "Sidebar appearance",
   "sidebarFastActions": "Show fast action icons",

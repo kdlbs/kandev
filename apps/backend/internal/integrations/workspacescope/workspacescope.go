@@ -1,6 +1,7 @@
 package workspacescope
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -32,20 +33,26 @@ func (DefaultResolver) Resolve(db *sqlx.DB) (string, error) {
 // singleton integration config. It prefers the workspace stored in user
 // settings, then the first workspace by creation time.
 func ResolveMigrationTarget(db *sqlx.DB) (string, error) {
+	return ResolveMigrationTargetContext(context.Background(), db)
+}
+
+// ResolveMigrationTargetContext resolves the default workspace using the
+// caller's context for every database read.
+func ResolveMigrationTargetContext(ctx context.Context, db *sqlx.DB) (string, error) {
 	if db == nil {
 		return FallbackWorkspaceID, nil
 	}
-	hasWorkspaces, err := tableExists(db, "workspaces")
+	hasWorkspaces, err := tableExists(ctx, db, "workspaces")
 	if err != nil || !hasWorkspaces {
 		return FallbackWorkspaceID, err
 	}
-	if workspaceID, err := activeWorkspaceFromUsers(db); err != nil {
+	if workspaceID, err := activeWorkspaceFromUsers(ctx, db); err != nil {
 		return "", err
 	} else if workspaceID != "" {
 		return workspaceID, nil
 	}
 	var id string
-	err = db.Get(&id, `SELECT id FROM workspaces ORDER BY created_at ASC LIMIT 1`)
+	err = db.GetContext(ctx, &id, `SELECT id FROM workspaces ORDER BY created_at ASC LIMIT 1`)
 	if errors.Is(err, sql.ErrNoRows) {
 		return FallbackWorkspaceID, nil
 	}
@@ -55,10 +62,10 @@ func ResolveMigrationTarget(db *sqlx.DB) (string, error) {
 	return id, nil
 }
 
-func tableExists(db *sqlx.DB, name string) (bool, error) {
+func tableExists(ctx context.Context, db *sqlx.DB, name string) (bool, error) {
 	if dialect.IsPostgres(db.DriverName()) {
 		var exists bool
-		err := db.Get(&exists, `
+		err := db.GetContext(ctx, &exists, `
 			SELECT EXISTS (
 				SELECT 1
 				FROM pg_catalog.pg_class AS relation
@@ -69,19 +76,19 @@ func tableExists(db *sqlx.DB, name string) (bool, error) {
 		return exists, err
 	}
 	var count int
-	if err := db.Get(&count, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, name); err != nil {
+	if err := db.GetContext(ctx, &count, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, name); err != nil {
 		return false, err
 	}
 	return count > 0, nil
 }
 
-func activeWorkspaceFromUsers(db *sqlx.DB) (string, error) {
-	hasUsers, err := tableExists(db, "users")
+func activeWorkspaceFromUsers(ctx context.Context, db *sqlx.DB) (string, error) {
+	hasUsers, err := tableExists(ctx, db, "users")
 	if err != nil || !hasUsers {
 		return "", err
 	}
 	var settings []string
-	if err := db.Select(&settings, `SELECT settings FROM users ORDER BY updated_at DESC`); err != nil {
+	if err := db.SelectContext(ctx, &settings, `SELECT settings FROM users ORDER BY updated_at DESC`); err != nil {
 		return "", err
 	}
 	for _, raw := range settings {
@@ -91,7 +98,7 @@ func activeWorkspaceFromUsers(db *sqlx.DB) (string, error) {
 		if err := json.Unmarshal([]byte(raw), &parsed); err != nil || parsed.WorkspaceID == "" {
 			continue
 		}
-		if ok, err := workspaceExists(db, parsed.WorkspaceID); err != nil {
+		if ok, err := workspaceExists(ctx, db, parsed.WorkspaceID); err != nil {
 			return "", err
 		} else if ok {
 			return parsed.WorkspaceID, nil
@@ -100,14 +107,14 @@ func activeWorkspaceFromUsers(db *sqlx.DB) (string, error) {
 	return "", nil
 }
 
-func workspaceExists(db *sqlx.DB, id string) (bool, error) {
+func workspaceExists(ctx context.Context, db *sqlx.DB, id string) (bool, error) {
 	if dialect.IsPostgres(db.DriverName()) {
 		var exists bool
-		err := db.Get(&exists, `SELECT EXISTS (SELECT 1 FROM workspaces WHERE id = $1)`, id)
+		err := db.GetContext(ctx, &exists, `SELECT EXISTS (SELECT 1 FROM workspaces WHERE id = $1)`, id)
 		return exists, err
 	}
 	var count int
-	if err := db.Get(&count, `SELECT COUNT(*) FROM workspaces WHERE id = ?`, id); err != nil {
+	if err := db.GetContext(ctx, &count, `SELECT COUNT(*) FROM workspaces WHERE id = ?`, id); err != nil {
 		return false, err
 	}
 	return count > 0, nil

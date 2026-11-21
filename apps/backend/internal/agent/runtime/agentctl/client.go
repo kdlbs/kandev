@@ -1300,6 +1300,9 @@ type (
 	GitBranchSwitchNotification = types.GitBranchSwitchNotification
 	WorktreeInventory           = types.WorktreeInventory
 	WorktreeInventoryEntry      = types.WorktreeInventoryEntry
+	WorkspaceRootFile           = types.WorkspaceRootFile
+	WorkspaceRootDestination    = types.WorkspaceRootDestination
+	WorkspaceRootFiles          = types.WorkspaceRootFiles
 	FileInfo                    = types.FileInfo
 	FileEntry                   = types.FileEntry
 	FileTreeNode                = types.FileTreeNode

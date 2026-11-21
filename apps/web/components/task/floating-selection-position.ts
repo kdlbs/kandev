@@ -43,3 +43,21 @@ export function placeFloatingRect({
     top: fittingTop ?? clamp(topCandidates[0] ?? minimumTop, minimumTop, maximumTop),
   };
 }
+
+type RectLike = { x: number; y: number; width: number; height: number };
+
+/**
+ * Viewport point just below a rectangle's bottom-left corner. `rect` is
+ * relative to `origin` (for example an iframe or image stage); `bounds`
+ * keeps the anchor on the visible host.
+ */
+export function anchorBelowRect(
+  rect: RectLike,
+  origin: { left: number; top: number },
+  bounds?: FloatingBounds,
+) {
+  const x = origin.left + rect.x;
+  const y = origin.top + rect.y + rect.height;
+  if (!bounds) return { x, y };
+  return { x: clamp(x, bounds.left, bounds.right), y: clamp(y, bounds.top, bounds.bottom) };
+}

@@ -108,6 +108,7 @@ vi.mock("@/components/state-provider", () => ({
 
 import {
   shouldRenderTurnChangeFallback,
+  shouldShowTurnChangedFiles,
   turnChangeFallbackIndex,
   useScrollToDividerOrBottom,
 } from "./message-list-native";
@@ -141,6 +142,13 @@ const TEST_MESSAGES = [{} as Message];
 const NEVER_LOCKED = () => false;
 
 describe("turn change transcript fallback placement", () => {
+  it("does not render a fallback before user settings load", () => {
+    expect(shouldRenderTurnChangeFallback(undefined, messageItems, false, false)).toBe(false);
+    expect(shouldShowTurnChangedFiles(false, true)).toBe(false);
+    expect(shouldShowTurnChangedFiles(true, true)).toBe(true);
+    expect(shouldShowTurnChangedFiles(true, false)).toBe(false);
+  });
+
   const messageItems = [
     {
       type: "message",

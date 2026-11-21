@@ -930,7 +930,7 @@
   "sessionMaximumShort": "Iniciar, Retomar e Enviar agora podem ultrapassar este limite.",
   "queueMaximumShort": "Limita as mensagens pendentes por sessão. Usa 0 para não limitar.",
   "queueMergeShort": "Combina mensagens relacionadas na fila antes de o agente as ler.",
-  "queueAutoMergeShort": "Combina automaticamente mensagens consecutivas compatíveis.",
+  "queueAutoMergeShort": "Funde mensagens adjacentes compatíveis e sobe as mensagens das subtarefas para as fundir com a mais recente do mesmo remetente.",
   "sleepShort": "Impede que o computador onde o Kandev está a correr entre em suspensão durante as tarefas.",
   "sidebarPresentation": "Aspeto da barra lateral",
   "sidebarFastActions": "Mostrar ícones de ações rápidas",

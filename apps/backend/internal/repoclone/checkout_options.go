@@ -43,7 +43,9 @@ func (c *Cloner) ensureWorkspaceCheckoutCache(ctx context.Context, request GitCr
 	}
 	identity := checkoutCacheIdentity{Version: 1, Origin: cloneURL, Mode: options.DownloadMode}
 	mu := c.repoMu(path)
-	mu.Lock()
+	if err := mu.LockContext(ctx); err != nil {
+		return "", RemoteRefStateUnknown, err
+	}
 	defer mu.Unlock()
 	if err := c.ensureCheckoutCache(ctx, path, identity, auth); err != nil {
 		return path, RemoteRefStateUnknown, err

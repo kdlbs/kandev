@@ -143,7 +143,7 @@ func (s *Server) registerConfigWorkflowStepTools() {
 		mcp.NewTool("reorder_workflow_steps_kandev",
 			mcp.WithDescription("Reorder workflow steps by providing the full ordered list of step IDs."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
-			mcp.WithArray("step_ids", mcp.Required(), mcp.Description("Ordered list of step IDs defining the new order")),
+			mcp.WithArray("step_ids", mcp.Required(), mcp.Description("Ordered list of step IDs defining the new order"), mcp.Items(map[string]any{typeKey: stringType})),
 		),
 		s.wrapHandler("reorder_workflow_steps_kandev", s.reorderWorkflowStepsHandler()),
 	)

@@ -1161,7 +1161,7 @@ jobs:
       # every platform.
       - name: Test windows-sensitive packages
         if: matrix.suite == 'native'
-        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/... ./cmd/winjob/...
+        run: go test -race -v -json -timeout 25m ./internal/common/winpath/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/... ./cmd/winjob/...
 
       - name: Test Windows recovery mode preservation
         if: matrix.suite == 'native'
@@ -1177,7 +1177,22 @@ jobs:
         env:
           GOMAXPROCS: '2'
           GOMEMLIMIT: 2GiB
-        run: go test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run '^Test(HermesACP|RunCommandCheck)'
+        run: go test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run '^Test(HermesACP|RunCommandCheck|NativeUpdateCheckResolverPlatformCase)'
+
+      # Native update checks contain the check in a kill-on-close job on
+      # Windows; these helper-process tests cover timeout, overflow,
+      # cancellation and descendant cleanup against that branch.
+      - name: Test Windows native update check containment
+        if: matrix.suite == 'native'
+        timeout-minutes: 15
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 2GiB
+        run: |
+          go test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 10m ./internal/agent/proctree/...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 10m ./internal/agent/settings/controller -run '^TestNativeCheckRunner'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test Windows provider quota classification
         if: matrix.suite == 'native'

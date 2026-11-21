@@ -35,6 +35,13 @@ capabilities only after the probe succeeds. It cannot undo an in-place update
 if that probe fails; it retains the prior capability catalogue and reports the
 failure. See [ADR-2026-09-26](../../../decisions/2026-09-26-harness-owned-runtime-updates.md).
 
+When a harness also declares a native update check, the
+[native agent update checks design](runtime-native-update-checks.md) replaces
+the stable-reference status and preview sections below. OMP declares
+`omp update --check`, so it no longer uses the npm stable reference. The
+update, probe, approval, failure, and persistence sections still apply. The
+stable reference remains for harnesses without a native check.
+
 ## Requirement mapping
 
 | Requirement | Design section |
@@ -213,3 +220,4 @@ labels.
 
 - [Delegate updates to harness-owned updaters](../../../decisions/2026-09-26-harness-owned-runtime-updates.md)
 - [Validate and persist pinned managed-runtime selections](../../../decisions/2026-08-12-validated-managed-runtime-version-selection.md)
+- [Let agents declare native update checks](../../../decisions/2026-11-17-native-agent-update-checks.md)

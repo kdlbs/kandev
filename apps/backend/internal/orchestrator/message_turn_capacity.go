@@ -80,7 +80,8 @@ func messageTurnCapacityRefusalOf(err error) (*messageTurnCapacityRefusal, bool)
 	if err == nil {
 		return nil, false
 	}
-	refusal, ok := err.(*messageTurnCapacityRefusal)
+	var refusal *messageTurnCapacityRefusal
+	ok := errors.As(err, &refusal)
 	return refusal, ok
 }
 

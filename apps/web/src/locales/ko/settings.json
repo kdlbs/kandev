@@ -930,7 +930,7 @@
   "sessionMaximumShort": "시작, 재개, 지금 보내기는 이 한도를 초과할 수 있습니다.",
   "queueMaximumShort": "세션당 대기 메시지를 제한합니다. 무제한은 0을 사용하세요.",
   "queueMergeShort": "에이전트가 읽기 전에 관련된 대기 메시지를 결합합니다.",
-  "queueAutoMergeShort": "호환되는 연속 메시지를 자동으로 병합합니다.",
+  "queueAutoMergeShort": "호환되는 인접 메시지를 병합하고, 하위 작업 메시지는 같은 발신자의 최신 메시지 위치로 옮겨 병합합니다.",
   "sleepShort": "작업 중 Kandev를 실행하는 컴퓨터의 절전을 방지합니다.",
   "sidebarPresentation": "사이드바 모양",
   "sidebarFastActions": "빠른 작업 아이콘 표시",

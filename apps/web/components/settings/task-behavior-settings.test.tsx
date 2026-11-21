@@ -49,6 +49,8 @@ vi.mock("./unread-divider-settings", () => ({ UnreadDividerSettings: () => null 
 vi.mock("./unread-task-dot-settings", () => ({ UnreadTaskDotSettings: () => null }));
 vi.mock("./system/message-queue-settings", () => ({
   MessageQueueSettingsContent: () => <div data-testid="message-queue" />,
+}));
+vi.mock("./system/use-message-queue-settings-draft", () => ({
   useMessageQueueSettingsDraft: () => runtimeMocks.queue,
 }));
 vi.mock("./system/session-capacity-settings", () => ({

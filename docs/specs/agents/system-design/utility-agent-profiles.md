@@ -3,6 +3,7 @@ status: draft
 system: agents
 requirements:
   - REQ-AGENTS-UTILITY-AGENT-PROFILES-001
+  - REQ-AGENTS-UTILITY-AGENT-PROFILES-002
 created: 2026-08-08
 owners:
   - kandev
@@ -18,6 +19,47 @@ This design preserves the technical source detail for `REQ-AGENTS-UTILITY-AGENT-
 | Requirement | Design section |
 | --- | --- |
 | `REQ-AGENTS-UTILITY-AGENT-PROFILES-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-AGENTS-UTILITY-AGENT-PROFILES-002` | [Request bounds and call settlement](#request-bounds-and-call-settlement) |
+
+## Request bounds and call settlement
+
+**Enhance prompt context.** `useUtilityAgentGenerator` omits `git_diff` for the
+`enhance-prompt` action and sends `changed_files` capped at 200 names plus a
+"... and N more files" line. Other actions still send the diff. An oversized
+diff is cut on the client 64 bytes below the 100,000-byte server cap, at a UTF-8
+boundary, and marked `[... truncated N bytes ...]`; the reserve keeps the marked
+diff under the server cap, so the server passes it through and the marker keeps
+the real count. `config/utilityagents/enhance-prompt.md` renders `{{ChangedFiles}}`
+instead of `{{GitDiff}}`.
+
+**Server bounds.** `Controller.PreparePromptRequest` passes `GitDiff`,
+`ChangedFiles`, `CommitLog`, `TaskDescription`, and `ConversationHistory`
+through `truncateContext` (`internal/utility/controller/context_limits.go`)
+before template rendering. Every cap is in UTF-8 bytes; the cut backs off to
+a rune boundary and includes `[... truncated N bytes ...]`. Conversation
+history uses a separate tail truncation: it retains the newest text in its
+original order and puts the marker before that text. Other fields retain their
+leading text and put the marker after it. These caps apply to every caller,
+including the API and sessionless calls.
+
+**Stored prompt refresh.** Built-in rows are seeded with `ON CONFLICT DO
+NOTHING`, so an existing install keeps the old diff-based template.
+`refreshUneditedBuiltinPrompts` (`internal/utility/store/builtins.go`) runs
+after the placeholder migration and replaces a stored built-in prompt only when
+its trimmed text hashes to a known shipped revision. The update is conditional
+on the stored prompt text, so a concurrent prompt edit wins. It changes only
+the prompt field, so profile bindings and other agent settings remain intact.
+
+**Call records and settlement.** `CreateCallWithExecutionProfile`
+(`internal/utility/service`) creates the pending row with both logical and
+concrete profile IDs in one repository insert. `settleFailedCall` and completed
+call writes (`internal/utility/handlers`) use a cancellation-independent context
+with a five-second deadline. A cancelled context or a `context.Canceled` cause records
+`models.CallStatusCancelled` through `Service.CancelCall` and answers 499, the
+status the backend uses for a closed client request. Successful calls record
+`completed` even if the client disconnects after the result. A successful
+dynamic fallback stores its concrete execution profile with the same bounded
+write context. Every other failure records `failed`.
 
 ## Migrated source detail
 

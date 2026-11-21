@@ -50,7 +50,7 @@ func (r *pausingAutoMergePolicyRepository) InsertForSessionWithPolicy(
 	message *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) error {
 	return r.admission.InsertForSessionWithPolicy(ctx, identity, message, claim, maxPerSession, policy)
 }
@@ -60,7 +60,7 @@ func (r *pausingAutoMergePolicyRepository) AutoMergeCandidateIntoAboveForSession
 	identity QueueSessionIdentity,
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	return r.admission.AutoMergeCandidateIntoAboveForSessionWithPolicy(ctx, identity, candidate, claim, policy)
 }
@@ -69,7 +69,7 @@ func (r *pausingAutoMergePolicyRepository) AutoMergeIntoAboveForSessionWithPolic
 	ctx context.Context,
 	identity QueueSessionIdentity,
 	sourceID string,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	return r.admission.AutoMergeIntoAboveForSessionWithPolicy(ctx, identity, sourceID, policy)
 }
@@ -88,9 +88,9 @@ func (r *failingAutoMergeReadRepository) Snapshot(
 }
 
 type autoMergePolicyService interface {
-	SetAutoMergePolicy(bool, int64)
+	SetGlobalAutoMergePolicy(AutoMergePolicy)
 	ResolveAutoMergePolicy(context.Context, QueueSessionIdentity) (AutoMergePolicy, error)
-	SetSessionAutoMerge(context.Context, QueueSessionIdentity, bool) (AutoMergePolicy, error)
+	SetSessionAutoMerge(context.Context, QueueSessionIdentity, bool) (SessionPolicyResult, error)
 }
 type identityQueueAdmission interface {
 	QueueMessageWithMetadataForSession(
@@ -124,7 +124,7 @@ func TestServiceResolvesGlobalPolicyUntilSessionOverride(t *testing.T) {
 	seedQueueSessionIdentity(t, repository, identity)
 	seedQueueSessionIdentity(t, repository, untouched)
 
-	policies.SetAutoMergePolicy(true, 4)
+	policies.SetGlobalAutoMergePolicy(AutoMergePolicy{Enabled: true, Revision: 4})
 	resolved, err := policies.ResolveAutoMergePolicy(ctx, identity)
 	assertAutoMergePolicy(t, resolved, err, AutoMergePolicy{
 		Enabled: true, Source: AutoMergeSourceGlobal, Revision: 4,
@@ -133,13 +133,13 @@ func TestServiceResolvesGlobalPolicyUntilSessionOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("set session Auto-merge: %v", err)
 	}
-	if written != (AutoMergePolicy{Enabled: false, Source: AutoMergeSourceSession, Revision: 1}) {
+	if written.AutoMerge != (AutoMergePolicy{Enabled: false, Source: AutoMergeSourceSession, Revision: 1}) {
 		t.Fatalf("written session policy = %+v", written)
 	}
 
-	policies.SetAutoMergePolicy(false, 5)
+	policies.SetGlobalAutoMergePolicy(AutoMergePolicy{Enabled: false, Revision: 5})
 	resolved, err = policies.ResolveAutoMergePolicy(ctx, identity)
-	assertAutoMergePolicy(t, resolved, err, written)
+	assertAutoMergePolicy(t, resolved, err, written.AutoMerge)
 	resolved, err = policies.ResolveAutoMergePolicy(ctx, untouched)
 	assertAutoMergePolicy(t, resolved, err, AutoMergePolicy{
 		Enabled: false, Source: AutoMergeSourceGlobal, Revision: 5,
@@ -153,9 +153,9 @@ func TestServiceReloadsSharedGlobalPolicyForIdentity(t *testing.T) {
 		TaskID: "task-shared", SessionID: "session-shared", SessionIncarnationID: "inc-shared",
 	}
 	seedQueueSessionIdentity(t, repository, identity)
-	service.SetAutoMergePolicy(true, 2)
-	service.SetAutoMergePolicyLoader(func(context.Context) (bool, int64, error) {
-		return false, 3, nil
+	service.SetGlobalAutoMergePolicy(AutoMergePolicy{Enabled: true, Revision: 2})
+	service.SetGlobalAutoMergePolicyLoader(func(context.Context) (AutoMergePolicy, error) {
+		return AutoMergePolicy{Enabled: false, Revision: 3}, nil
 	})
 
 	resolved, err := service.ResolveAutoMergePolicy(context.Background(), identity)
@@ -189,7 +189,7 @@ func TestIdentityAdmissionUsesOneEffectiveSessionPolicy(t *testing.T) {
 	inheritedOn := QueueSessionIdentity{TaskID: "task-on", SessionID: "session-on", SessionIncarnationID: "inc-on"}
 	seedQueueSessionIdentity(t, repository, explicitOff)
 	seedQueueSessionIdentity(t, repository, inheritedOn)
-	service.SetAutoMergePolicy(true, 2)
+	service.SetGlobalAutoMergePolicy(AutoMergePolicy{Enabled: true, Revision: 2})
 	if _, err := service.SetSessionAutoMerge(ctx, explicitOff, false); err != nil {
 		t.Fatalf("set explicit policy: %v", err)
 	}
