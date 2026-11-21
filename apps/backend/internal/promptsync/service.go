@@ -107,6 +107,23 @@ func (s *Service) authorize(ctx context.Context, workspaceID string) error {
 	return s.workspaceAuthorizer(ctx, workspaceID)
 }
 
+// authorizeRemoval authorizes the credential workspace for removal. A deleted
+// workspace has no access left to protect, so removal needs only the
+// configuration-management scope the route already enforces; otherwise a
+// deleted credential workspace would leave Prompt Sync impossible to remove.
+func (s *Service) authorizeRemoval(ctx context.Context, workspaceID string) error {
+	if s.workspaceExists != nil {
+		exists, err := s.workspaceExists(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return nil
+		}
+	}
+	return s.authorize(ctx, workspaceID)
+}
+
 // GetConfig returns the configuration with sanitized errors, or nil.
 func (s *Service) GetConfig(ctx context.Context) (*Config, error) {
 	cfg, err := s.store.Get(ctx)
@@ -172,7 +189,7 @@ func (s *Service) DeleteConfig(ctx context.Context, removal Removal) error {
 		return err
 	}
 	if cfg != nil {
-		if err := s.authorize(ctx, cfg.WorkspaceID); err != nil {
+		if err := s.authorizeRemoval(ctx, cfg.WorkspaceID); err != nil {
 			return err
 		}
 	}
@@ -281,22 +298,24 @@ func (s *Service) syncLocked(
 ) (*SyncResult, error) {
 	var err error
 	if err = s.checkWorkspace(ctx, cfg.WorkspaceID); err != nil {
-		s.recordFailure(ctx, cfg, err)
+		s.recordRunError(ctx, cfg, mode, err)
 		return nil, err
 	}
 	useGitHub := cfg.Provider != reposync.ProviderGitLab && s.github != nil
 	if useGitHub {
 		if mode == syncAutomatic {
-			ctx = github.WithGitHubWorkClass(ctx, github.WorkClassBackground)
+			// The service lock is held for the whole run, so a background run
+			// must not wait for GitHub's quota; a deferred run is retried later.
+			ctx = github.WithNonBlockingGitHubAdmission(github.WithGitHubWorkClass(ctx, github.WorkClassBackground))
 		}
 		if ctx, err = s.github.BindWorkspaceGitHubHost(ctx, cfg.WorkspaceID, cfg.GitHubHost); err != nil {
-			s.recordFailure(ctx, cfg, err)
+			s.recordRunError(ctx, cfg, mode, err)
 			return nil, err
 		}
 	}
 	files, err := s.fetch(ctx, cfg)
 	if err != nil {
-		s.recordFailure(ctx, cfg, err)
+		s.recordRunError(ctx, cfg, mode, err)
 		return nil, err
 	}
 	var result *SyncResult
@@ -311,7 +330,7 @@ func (s *Service) syncLocked(
 		err = apply(ctx)
 	}
 	if err != nil {
-		s.recordFailure(ctx, cfg, err)
+		s.recordRunError(ctx, cfg, mode, err)
 		return nil, err
 	}
 	if err := s.store.RecordSuccess(ctx, result.Warnings, contentHash(files), s.now().UTC()); err != nil {

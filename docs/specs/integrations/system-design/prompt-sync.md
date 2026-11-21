@@ -134,9 +134,8 @@ delete guards check `source <> 'sync'` instead of `source = 'manual'`.
   requires configuration-management authority via
   `PUT /api/v1/prompt-sync/prompts/:id/versions` (`{use_local, local_content?,
   expected_updated_at?}`; 400 invalid, 404 missing, 409 not linked or stale).
-  When the repository version is chosen it then runs a manual sync with the
-  locked configuration so the latest repository version is in use; a failed
-  sync leaves the prompt synced and records the failure like any other run.
+  Choosing the repository version uses the stored version at once and runs no
+  sync; the next sync refreshes it.
 - Prompt DTOs carry `alternate_content` so the editor can show the version
   the switch selects before anything is saved.
 - In `ApplySyncedPrompts`, a desired file whose name matches an override is
@@ -230,7 +229,7 @@ so the empty string is unambiguous.
   sets `content = alternate_content` for the `UseOther` rows, deletes the
   named `delete_repository_only` rows that still match `source = 'sync' AND
   alternate_content = '' AND builtin = 0`, and releases the rest, advancing
-  `updated_at`.
+  `updated_at`. `authorizeRemoval` skips the check for a deleted workspace.
 
 ### Agent access
 
@@ -327,8 +326,9 @@ snapshot rather than reloading it, so a concurrent save cannot substitute a
 workspace the caller was never checked against. The GitHub apply step runs
 inside `CommitWorkspaceGitHubHost`, so files fetched under a replaced
 connection cannot be applied. Automatic runs use the GitHub background work
-class with blocking admission; with only one source, no continuation or
-deferral queue is needed.
+class with non-blocking admission, so the service lock never waits for quota.
+A deferred run is not a failure; the next tick retries it. Manual runs keep
+blocking admission.
 
 ### Prompt file parsing
 
@@ -532,9 +532,9 @@ list, the `unchanged` flag, and the stored status match the current output
 ## Observability
 
 - Expvar counters `prompt_sync_runs_total` with closed keys `success` and
-  `failure`, and `prompt_sync_poll_skipped_total` with the closed key
-  `suspended`. They carry no repository, workspace, or
-  prompt labels.
+  `failure`, and `prompt_sync_poll_skipped_total` with the closed keys
+  `suspended` and `rate_limited` (deferred background run). They carry no
+  repository, workspace, or prompt labels.
 - Structured zap logs: `applied prompt sync` (with counts),
   `prompt sync attempt failed`, `prompt sync polling suspended`, and
   `prompt sync polling recovered`.

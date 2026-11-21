@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/authcircuit"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/reposync"
 )
 
@@ -75,6 +76,18 @@ func (s *Service) recordFailure(ctx context.Context, cfg *Config, syncErr error)
 		return
 	}
 	s.logger.Warn("prompt sync attempt failed", fields...)
+}
+
+// recordRunError records a failed run. A background run that GitHub's local
+// admission deferred did not reach the provider, so it is a scheduling wait and
+// not a failure: the configuration stays due and the next tick retries it.
+func (s *Service) recordRunError(ctx context.Context, cfg *Config, mode syncMode, err error) {
+	var deferred *github.AdmissionDeferredError
+	if mode == syncAutomatic && errors.As(err, &deferred) {
+		incPollSkipped("rate_limited")
+		return
+	}
+	s.recordFailure(ctx, cfg, err)
 }
 
 func (s *Service) recordSuccess(cfg *Config, result *SyncResult) {

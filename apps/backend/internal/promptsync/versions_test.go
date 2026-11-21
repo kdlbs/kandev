@@ -21,7 +21,7 @@ func syncedPromptID(t *testing.T, f *syncFixture, name string) string {
 	return prompt.ID
 }
 
-func TestSaveVersionsSyncsWhenTheRepositoryVersionIsChosen(t *testing.T) {
+func TestSaveVersionsUsesTheStoredRepositoryVersionUntilTheNextSync(t *testing.T) {
 	f := newSyncFixture(t)
 	ctx := context.Background()
 	f.gitlab.files["hook.md"] = "Default"
@@ -43,8 +43,15 @@ func TestSaveVersionsSyncsWhenTheRepositoryVersionIsChosen(t *testing.T) {
 	reverted, err := f.svc.SaveVersions(ctx, id, promptservice.VersionSave{})
 	require.NoError(t, err)
 	assert.True(t, reverted.IsSynced())
-	assert.Equal(t, "Default v3", reverted.Content, "choosing the repository version re-syncs it")
+	assert.Equal(t, "Default v2", reverted.Content, "choosing the repository version uses the stored version at once")
 	assert.Equal(t, "Local", reverted.AlternateContent)
+
+	_, err = f.svc.Sync(ctx)
+	require.NoError(t, err)
+	refreshed, err := f.prompts.GetPromptByID(ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, "Default v3", refreshed.Content, "the next sync refreshes the repository version")
+	assert.Equal(t, "Local", refreshed.AlternateContent)
 }
 
 func TestSaveVersionsAuthorizesTheCredentialWorkspace(t *testing.T) {

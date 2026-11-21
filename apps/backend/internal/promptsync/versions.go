@@ -3,8 +3,6 @@ package promptsync
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	promptmodels "github.com/kandev/kandev/internal/prompts/models"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 )
@@ -26,22 +24,15 @@ func (s *Service) lockedAuthorizedConfig(ctx context.Context) (*Config, error) {
 }
 
 // SaveVersions applies the operator's Local | Repository choice and any edit to
-// the local version in one write. Choosing the repository version runs a sync
-// so the latest repository version is in use; a failed sync leaves the
-// prompt synced and is recorded on the configuration like any other run.
+// the local version in one write. Choosing the repository version uses the
+// repository version stored by the last sync; the next sync refreshes it. The
+// save itself never runs a sync, so one Save that changes several prompts
+// cannot move a prompt that a later save in the same Save is based on.
 func (s *Service) SaveVersions(ctx context.Context, promptID string, save promptservice.VersionSave) (*promptmodels.Prompt, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cfg, err := s.lockedAuthorizedConfig(ctx)
-	if err != nil {
+	if _, err := s.lockedAuthorizedConfig(ctx); err != nil {
 		return nil, err
 	}
-	prompt, err := s.prompts.SavePromptVersions(ctx, promptID, save)
-	if err != nil || save.UseLocal {
-		return prompt, err
-	}
-	if _, err := s.syncLocked(ctx, syncManual, cfg, nil); err != nil {
-		s.logger.Warn("sync after choosing a prompt's repository version failed", zap.String("error", safeErrorMessage(err)))
-	}
-	return s.prompts.GetPromptByID(ctx, promptID)
+	return s.prompts.SavePromptVersions(ctx, promptID, save)
 }

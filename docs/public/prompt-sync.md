@@ -122,7 +122,7 @@ Changing the provider, credential workspace, repository, branch, or directory ke
 
 ## Permissions
 
-Reading the configuration and status follows saved-prompt read access. Saving, removing, and **Sync now** require configuration-management permission and access to the credential workspace when authentication is enabled.
+Reading the configuration and status follows saved-prompt read access. Saving, removing, and **Sync now** require configuration-management permission and access to the credential workspace when authentication is enabled. Removing the configuration still works after its credential workspace was deleted.
 
 <details>
 <summary>HTTP API</summary>
@@ -133,9 +133,9 @@ Reading the configuration and status follows saved-prompt read access. Saving, r
 | `POST` | `/api/v1/prompt-sync/check` | List the name conflicts a source would cause, without saving anything. Send the configuration as the body, or no body to check the saved one. `422` with `error` if the repository cannot be read. |
 | `POST` | `/api/v1/prompt-sync/config` | Validate, save, and run one sync. Optional `resolutions` maps prompt names to `local` or `repository`. Returns `config` plus `result` or `error`. |
 | `GET` | `/api/v1/prompt-sync/kept-versions` | What removal asks about: `prompts` with both a local and a different repository version (both texts and the version in use, `in_use`), and `repository_only`, the names of synced prompts that only came from the repository. |
-| `DELETE` | `/api/v1/prompt-sync/config` | Release synced prompts, then delete. Optional `{"choices": {"name": "local"}, "delete_repository_only": true}` picks the version each listed prompt keeps (others keep the version in use) and deletes the repository-only prompts. Returns `{"deleted":true}`. |
+| `DELETE` | `/api/v1/prompt-sync/config` | Release synced prompts, then delete. Optional `{"choices": {"name": "local"}, "delete_repository_only": ["review"]}` picks the version each listed prompt keeps (others keep the version in use). `delete_repository_only` is a list of prompt names taken from `repository_only` in the kept-versions response; those prompts are deleted and any other name is kept. Returns `{"deleted":true}`. |
 | `POST` | `/api/v1/prompt-sync/sync` | Run now, with optional `{"resolutions": {...}}`. Returns `config` plus `result` or `error`; `404` when not configured. |
-| `PUT` | `/api/v1/prompt-sync/prompts/{id}/versions` | Save the Local | Repository choice (`{"use_local": true}` for Local) and, optionally, an edited local version (`local_content`) and the revision it is based on (`expected_updated_at`). Neither version is lost. Choosing the repository version (`use_local: false`) runs a sync. `400` for empty content, `409` if the prompt is not synced or overridden or changed since that revision. |
+| `PUT` | `/api/v1/prompt-sync/prompts/{id}/versions` | Save the Local | Repository choice (`{"use_local": true}` for Local) and, optionally, an edited local version (`local_content`) and the revision it is based on (`expected_updated_at`). Neither version is lost. Choosing the repository version (`use_local: false`) uses the version the last sync stored; the next sync refreshes it. `400` for empty content, `409` if the prompt is not synced or overridden or changed since that revision. |
 
 ```bash
 curl -fsS -X POST -H 'Content-Type: application/json' \
