@@ -23,7 +23,7 @@ func prepareNativeMCPProcess(cmd *exec.Cmd) error {
 	// HideWindow keeps the child attached to a console while hiding a newly
 	// created console window. Console descendants can then inherit that console.
 	attr.HideWindow = true
-	attr.CreationFlags |= syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED
+	attr.CreationFlags |= syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED | winproc.NoConsoleWindowFlag()
 	cmd.SysProcAttr = &attr
 	return nil
 }
