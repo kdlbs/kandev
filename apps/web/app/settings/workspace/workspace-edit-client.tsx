@@ -204,7 +204,7 @@ function WorkspaceSettingsCard({
           onChange={onExecutorChange}
           options={executorsEmpty ? [] : executorOptions}
           emptyLabel={t("workspaces:noExecutorsAvailable")}
-          emptyValue=""
+          emptyValue="empty-executors"
           discoveryTargetId={workspaceDiscoveryTarget(workspaceId, "default-executor")}
         />
         <SelectField
