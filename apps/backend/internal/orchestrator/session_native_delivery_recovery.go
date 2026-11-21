@@ -6,7 +6,9 @@ import (
 	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 type nativeResumeDeliveryAcknowledger interface {
@@ -193,4 +195,44 @@ func (s *Service) canProveSettledNativeDeliveryBlock(block *models.SessionRecove
 	_, canResolve := s.repo.(nativeResumeEvidenceBlockResolver)
 	return canProve && canResolve && block.ConsumerReference == agentDeliveryConsumer &&
 		block.DeliverySubmissionID == "" && block.DeliveryStreamID == ""
+}
+
+// joinLiveNativeResume reuses a matching prompt-ready execution before capacity
+// admission can create a second queued resume. A legacy replay can join, but it
+// receives no new authority to acknowledge unresolved delivery history.
+func (s *Service) joinLiveNativeResume(
+	ctx context.Context, candidate *resumeSessionCandidate, taskID, sessionID string,
+) (*executor.TaskExecution, bool, error) {
+	claim, _ := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim)
+	claimedResume := claim != nil && claim.svc == s && claim.held && claim.taskID == taskID &&
+		claim.deferral.Kind == models.CeilingLaunchResume && stringField(claim.deferral.Payload, metaKeySessionID) == sessionID
+	if !liveNativeResumeMayJoin(candidate, claimedResume) || !s.agentManager.IsAgentRunningForSession(ctx, sessionID) {
+		return nil, false, nil
+	}
+	existing, found := s.executor.GetExecutionBySession(sessionID)
+	if !found || existing == nil || existing.TaskID != taskID || existing.SessionID != sessionID {
+		return nil, false, nil
+	}
+	if err := s.admitCeilingDispatch(ctx, taskID); err != nil {
+		return nil, true, err
+	}
+	ready, err := s.waitForResumedSessionReady(ctx, sessionID)
+	if err != nil {
+		return nil, true, err
+	}
+	existing.SessionState = v1.TaskSessionState(ready.State)
+	return existing, true, nil
+}
+
+func liveNativeResumeMayJoin(candidate *resumeSessionCandidate, claimedResume bool) bool {
+	// A terminal session must launch a new attempt and enter STARTING.
+	if candidate.session != nil && isTerminalSessionState(candidate.session.State) {
+		return false
+	}
+	options := candidate.options
+	return (options.RecoveryAction == recoveryActionResume || claimedResume) &&
+		!options.RequireIdleSuspensionProvenance && !options.AllowBranchReplacement &&
+		!options.RepairWorkspaceInventory && !options.ForceContextContinuation &&
+		options.InitialPromptSubmission == nil && options.RequiredNativeConversationID == "" &&
+		options.SettingsPolicy != executor.ResumeSettingsPolicyProviderRestored
 }

@@ -171,8 +171,9 @@ type Adapter struct {
 	sessionID string
 
 	// Agent info (populated after Initialize)
-	agentInfo    *AgentInfo
-	capabilities acp.AgentCapabilities
+	agentInfo                       *AgentInfo
+	capabilities                    acp.AgentCapabilities
+	archivedSessionRestoreSupported bool
 
 	// authStatus is the transient provider authentication snapshot used by the
 	// dedicated operator sign-in instance. It never contains durable state.
@@ -690,7 +691,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
-		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil, a.copilotNativeSessionEvents),
+		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil, a.copilotNativeSessionEvents, a.cfg.Extra["allow_archived_thread_restore"] == "true"),
 		ClientInfo:         clientInfoForAgent(a.agentID),
 	})
 	if err != nil {
@@ -708,6 +709,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		a.agentInfo.Version = resp.AgentInfo.Version
 	}
 	a.capabilities = resp.AgentCapabilities
+	a.archivedSessionRestoreSupported = codexArchiveCapability(resp.Meta)
 	a.copilotNativeActive.Store(a.copilotNativeSessionEvents && a.agentInfo != nil &&
 		copilotRuntimeQualified(a.agentInfo.Version))
 	promptQueueing := agentAdvertisesPromptQueueing(resp.AgentCapabilities)
