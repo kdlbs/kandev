@@ -278,6 +278,9 @@ export async function routeGatewayNotifications(page: Page) {
   });
 
   return {
+    isConnected() {
+      return sockets.length > 0;
+    },
     acknowledgeMessageAdds() {
       acknowledgeMessageAdds = true;
     },

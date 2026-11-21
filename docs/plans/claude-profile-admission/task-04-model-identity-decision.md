@@ -1,7 +1,7 @@
 ---
 id: "04-model-identity-decision"
 title: "Qualify model identity evidence and choose the repair surface"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -31,9 +31,9 @@ system_design:
 
 ## Summary
 
-Determine an evidence-backed corrective outcome for #5183 without weakening exact-model identity.
-This is a pending investigation/decision work order. It authorizes no corrective production or permanent test patch.
-It does not gate the confirmed authentication fix.
+Determine an evidence-backed corrective outcome for #5183 that preserves
+exact-model identity. The investigation is complete. The separate
+[Claude model fix package](../claude-exact-model-alias/plan.md) owns delivery.
 
 ## In scope
 
@@ -49,11 +49,10 @@ It does not gate the confirmed authentication fix.
   authoritative runtime-bound alias evidence supports a reviewed contract amendment, or evidence remains insufficient and explicit full-ID repair is the proposed UX.
 - For alias admission, define identity provenance, context/version binding, ambiguity rejection, refresh invalidation, and all start/reset/resume consumers.
   Record the alternatives in a proposed ADR and update the owning requirements/designs for review before implementation.
-- For full-ID repair, specify actionable pre-inference recovery and a profile-context selection advisory.
-  Preserve custom-ID saving, host-advisory status, strict runtime rejection, explicit user selection, and saved fallback values.
-  Do not present host absence as authoritative remote unavailability.
-- Extend this plan with corrective work orders only after the model outcome is settled by evidence and user review.
-  Include the exact desktop/phone previews, mobile exemplar, i18n keys/locales, targeted tests, public docs, and owned files for the selected surface.
+- For full-ID repair, specify an actionable settings error that preserves
+  custom-ID saving and executor authority.
+- The [follow-up plan](../claude-exact-model-alias/plan.md) and its work order
+  contain the desktop and phone previews, mobile exemplar, and implementation checks.
 
 ## Out of scope
 
@@ -89,10 +88,10 @@ That behavior follows AC-AGENTS-HOST-CLI-002.3 and cannot be removed through a g
 The recovery card already shows typed requested/effective-model details and a generic unavailable-model explanation.
 The remaining UX gap must therefore be specified as an observable improvement, not assumed from the original runtime failure alone.
 
-The conservative recommendation is explicit full-ID repair, with an advisory before save and an actionable preflight failure.
-It does not require alias equivalence. It also does not fulfill the issue's possible request for save-time rejection by itself.
-The user must review that distinction before the companion is claimed as a fix.
-No current decision authorizes accepting an alias or blocking all host-unadvertised custom IDs.
+A settings error can catch the reported pair using the profile's explicit
+inputs. It leaves host discovery advisory. The
+[proposed decision](../../decisions/2026-11-20-claude-exact-model-alias-validation.md)
+records how this approach preserves the exact runtime policy.
 
 ## Verification
 
@@ -106,19 +105,8 @@ python3 scripts/lint-spec-files.py --all
 git diff --check -- docs/specs docs/decisions docs/plans/claude-profile-admission
 ```
 
-For a later corrective package, the TDD matrix must include:
-
-- Full-ID success with strictness on, dormant fallback values retained, and no automatic fallback.
-- Unadvertised alias, ambiguous alias, absent alias metadata, catalog-empty, strict mismatch, unsupported selection, transport loss, and cancellation.
-- Profile-aware discovery using `ANTHROPIC_MODEL`, stale results, unavailable host runtime, and different host/executor catalogs.
-- Actual executor evidence on start, fresh reset/rebind, and cold resume. Replacement evidence must not come from the prior session.
-- Explicit saved-model repair, reload, omitted fields in partial saves, and preserved unrelated settings.
-- A command that reaches the mock ACP prompt only after successful full-ID selection, with no automatic replay of a refused attempt.
-
-The exact future frontend commands must name the selected surfaces' tests.
-Likely existing controls are `profile-model-fields.test.tsx`, `profile-form-fields.test.tsx`, and `session-bootstrap-recovery-card.test.tsx`.
-Use `chromium` and `mobile-chrome` as separate managed E2E runs for any new UI.
-An alias contract change also needs pinned bridge qualification, beyond these host policy tests.
+The [follow-up work order](../claude-exact-model-alias/task-01-validate-claude-model-pair.md#verification)
+owns the save-time regression and the desktop and phone checks.
 
 ## Files likely read
 
@@ -162,4 +150,9 @@ Earlier rejection can conflict with the active custom-ID/host-advisory contract.
 
 ## Results
 
-Pending prerequisite. The present package deliberately does not claim an implemented or fully specified corrective fix for #5183.
+On 2026-11-20, the follow-up verified the managed bridge 0.107.0 catalog
+contract. A settings probe reproduced the accepted conflicting pair. A mock
+startup reproduced the strict alias failure and successful full-ID prompt.
+The [fix package](../claude-exact-model-alias/plan.md#diagnostic-results)
+records the results and the implemented save-time validation; its work order is
+complete.

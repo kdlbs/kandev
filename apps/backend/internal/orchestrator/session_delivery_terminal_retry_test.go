@@ -64,3 +64,105 @@ func TestRetrySessionDeliverySettlesProjectedTerminalWithoutOpenBlock(t *testing
 	require.NoError(t, err)
 	require.Equal(t, SessionDeliveryRecoverySettled, result.Outcome)
 }
+
+func TestRetrySessionDeliveryResolvesStaleInactiveSubmissionBlock(t *testing.T) {
+	// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.16
+	for _, state := range []models.DeliverySubmissionState{
+		models.DeliverySubmissionCompleted,
+		models.DeliverySubmissionInterruptedUnknown,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			ctx := context.Background()
+			f := newRetryTerminalFixture(t)
+			block, err := f.repo.GetOpenSessionRecoveryBlock(ctx, f.session.ID,
+				f.session.QueueIncarnationID, f.recovery.HarnessGeneration)
+			require.NoError(t, err)
+			_, err = f.repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
+				ID: "replacement-submission", SessionID: f.session.ID,
+				IncarnationID: f.session.QueueIncarnationID, HarnessGeneration: f.recovery.HarnessGeneration,
+				OwnerGeneration: 2, PayloadHash: "replacement-hash", Payload: []byte("later prompt"), State: state,
+			})
+			require.NoError(t, err)
+			_, err = f.repo.DB().ExecContext(ctx, `UPDATE session_recovery_blocks
+				SET delivery_submission_id = ?, delivery_stream_id = '' WHERE id = ?`,
+				"replacement-submission", block.ID)
+			require.NoError(t, err)
+			f.settle()
+
+			result, err := f.service.RetrySessionDelivery(ctx, f.session.TaskID, f.session.ID)
+			require.NoError(t, err)
+			require.Equal(t, SessionDeliveryRecoverySettled, result.Outcome, result.Reason)
+			resolved, err := f.repo.GetSessionRecoveryBlock(ctx, block.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.RecoveryBlockResolved, resolved.State)
+			require.Equal(t, "retry_connection", resolved.AuthorizedAction)
+			require.Equal(t, "replacement-submission", resolved.DeliverySubmissionID)
+		})
+	}
+}
+
+func TestRetrySessionDeliveryKeepsStaleInFlightSubmissionBlock(t *testing.T) {
+	// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.16
+	ctx := context.Background()
+	f := newRetryTerminalFixture(t)
+	block, err := f.repo.GetOpenSessionRecoveryBlock(ctx, f.session.ID,
+		f.session.QueueIncarnationID, f.recovery.HarnessGeneration)
+	require.NoError(t, err)
+	_, err = f.repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
+		ID: "in-flight-submission", SessionID: f.session.ID,
+		IncarnationID: f.session.QueueIncarnationID, HarnessGeneration: f.recovery.HarnessGeneration,
+		OwnerGeneration: 2, PayloadHash: "in-flight-hash", Payload: []byte("later prompt"),
+		State: models.DeliverySubmissionDispatching,
+	})
+	require.NoError(t, err)
+	_, err = f.repo.DB().ExecContext(ctx, `UPDATE session_recovery_blocks
+		SET delivery_submission_id = ?, delivery_stream_id = '' WHERE id = ?`, "in-flight-submission", block.ID)
+	require.NoError(t, err)
+	f.settle()
+
+	result, err := f.service.RetrySessionDelivery(ctx, f.session.TaskID, f.session.ID)
+	require.NoError(t, err)
+	require.Equal(t, SessionDeliveryRecoveryBlocked, result.Outcome)
+	require.Equal(t, "independent_recovery_block", result.Reason)
+	stillOpen, err := f.repo.GetSessionRecoveryBlock(ctx, block.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RecoveryBlockOpen, stillOpen.State)
+	require.Equal(t, "in-flight-submission", stillOpen.DeliverySubmissionID)
+}
+
+func TestRetrySessionDeliveryKeepsOtherOpenBlockAfterResolvingStaleSubmission(t *testing.T) {
+	// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.16
+	ctx := context.Background()
+	f := newRetryTerminalFixture(t)
+	stale, err := f.repo.GetOpenSessionRecoveryBlock(ctx, f.session.ID,
+		f.session.QueueIncarnationID, f.recovery.HarnessGeneration)
+	require.NoError(t, err)
+	_, err = f.repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
+		ID: "inactive-submission", SessionID: f.session.ID,
+		IncarnationID: f.session.QueueIncarnationID, HarnessGeneration: f.recovery.HarnessGeneration,
+		OwnerGeneration: 2, PayloadHash: "inactive-hash", Payload: []byte("later prompt"),
+		State: models.DeliverySubmissionCompleted,
+	})
+	require.NoError(t, err)
+	_, err = f.repo.DB().ExecContext(ctx, `UPDATE session_recovery_blocks
+		SET delivery_submission_id = ?, delivery_stream_id = '' WHERE id = ?`, "inactive-submission", stale.ID)
+	require.NoError(t, err)
+	other := &models.SessionRecoveryBlock{
+		ID: "independent-block", SessionID: f.session.ID, IncarnationID: f.session.QueueIncarnationID,
+		ExpectedGeneration: f.recovery.HarnessGeneration, Reason: "manual_recovery_required",
+		State: models.RecoveryBlockOpen, ConsumerReference: "workspace", CreatedAt: time.Now().UTC().Add(time.Hour),
+	}
+	require.NoError(t, f.repo.UpsertSessionRecoveryBlock(ctx, other))
+	f.settle()
+
+	result, err := f.service.RetrySessionDelivery(ctx, f.session.TaskID, f.session.ID)
+	require.NoError(t, err)
+	require.Equal(t, SessionDeliveryRecoveryBlocked, result.Outcome)
+	require.Equal(t, "independent_recovery_block", result.Reason)
+	resolved, err := f.repo.GetSessionRecoveryBlock(ctx, stale.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RecoveryBlockResolved, resolved.State)
+	stillOpen, err := f.repo.GetSessionRecoveryBlock(ctx, other.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RecoveryBlockOpen, stillOpen.State)
+}
