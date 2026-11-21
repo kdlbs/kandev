@@ -143,15 +143,15 @@ func (r *Repository) CreateWorkflowIfWorkspaceUnchanged(ctx context.Context, wor
 	workflow.CreatedByUserID = workflowCreator(ctx)
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflows (
-			created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id, workflow_template_id,
-			sort_order, hidden, style, source, source_path, created_at, updated_at
+			created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id, require_explicit_agent_profile,
+			workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at
 		)
-		SELECT ?, ?, ?, ?, ?, ?, ?, ?,
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			(SELECT COALESCE(MAX(sort_order), -1) + 1 FROM workflows WHERE workspace_id = ?),
 			?, ?, ?, ?, ?, ?
 		WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ? AND updated_at = ?)
 	`), workflow.CreatedByUserID, workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt,
-		workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.WorkspaceID,
+		workflow.AgentProfileID, dialect.BoolToInt(workflow.RequireExplicitAgentProfile), workflow.WorkflowTemplateID, workflow.WorkspaceID,
 		dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source),
 		workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt, workflow.WorkspaceID, expected)
 	if err != nil {
@@ -190,9 +190,9 @@ func (r *Repository) insertWorkflow(ctx context.Context, exec sqlx.ExtContext, w
 	workflow.SortOrder = maxOrder + 1
 
 	_, err = exec.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO workflows (created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id, workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workflow.CreatedByUserID, workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt)
+		INSERT INTO workflows (created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id, require_explicit_agent_profile, workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workflow.CreatedByUserID, workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, dialect.BoolToInt(workflow.RequireExplicitAgentProfile), workflow.WorkflowTemplateID, workflow.SortOrder, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt)
 
 	return err
 }
@@ -219,7 +219,7 @@ func normalizeWorkflowStyle(style string) string {
 }
 
 const workflowSelectColumns = `
-	created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id,
+	created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id, require_explicit_agent_profile,
 	workflow_template_id, sort_order, hidden, style, source, source_path,
 	created_at, updated_at
 `
@@ -231,7 +231,7 @@ type workflowScanner interface {
 func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 	workflow := &models.Workflow{}
 	var workflowTemplateID, agentProfileID, style, source, sourcePath sql.NullString
-	var hidden int
+	var hidden, requireExplicitAgentProfile int
 	if err := scanner.Scan(
 		&workflow.CreatedByUserID,
 		&workflow.ID,
@@ -240,6 +240,7 @@ func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 		&workflow.Description,
 		&workflow.Prompt,
 		&agentProfileID,
+		&requireExplicitAgentProfile,
 		&workflowTemplateID,
 		&workflow.SortOrder,
 		&hidden,
@@ -252,6 +253,7 @@ func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 		return nil, err
 	}
 	workflow.Hidden = hidden != 0
+	workflow.RequireExplicitAgentProfile = requireExplicitAgentProfile != 0
 	if agentProfileID.Valid {
 		workflow.AgentProfileID = agentProfileID.String
 	}
@@ -301,8 +303,8 @@ func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workfl
 func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error {
 	workflow.UpdatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE workflows SET name = ?, description = ?, prompt = ?, agent_profile_id = ?, workflow_template_id = ?, hidden = ?, style = ?, source = ?, source_path = ?, updated_at = ? WHERE id = ?
-	`), workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.WorkflowTemplateID, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.UpdatedAt, workflow.ID)
+		UPDATE workflows SET name = ?, description = ?, prompt = ?, agent_profile_id = ?, require_explicit_agent_profile = ?, workflow_template_id = ?, hidden = ?, style = ?, source = ?, source_path = ?, updated_at = ? WHERE id = ?
+	`), workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, dialect.BoolToInt(workflow.RequireExplicitAgentProfile), workflow.WorkflowTemplateID, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.UpdatedAt, workflow.ID)
 	if err != nil {
 		return err
 	}
@@ -317,9 +319,9 @@ func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workfl
 func (r *Repository) UpdateWorkflowIfUnchanged(ctx context.Context, workflow *models.Workflow, expected time.Time) error {
 	workflow.UpdatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE workflows SET name = ?, description = ?, prompt = ?, agent_profile_id = ?, workflow_template_id = ?, hidden = ?, style = ?, source = ?, source_path = ?, updated_at = ?
+		UPDATE workflows SET name = ?, description = ?, prompt = ?, agent_profile_id = ?, require_explicit_agent_profile = ?, workflow_template_id = ?, hidden = ?, style = ?, source = ?, source_path = ?, updated_at = ?
 		WHERE id = ? AND updated_at = ?
-	`), workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.WorkflowTemplateID,
+	`), workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, dialect.BoolToInt(workflow.RequireExplicitAgentProfile), workflow.WorkflowTemplateID,
 		dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source),
 		workflow.SourcePath, workflow.UpdatedAt, workflow.ID, expected)
 	if err != nil {
