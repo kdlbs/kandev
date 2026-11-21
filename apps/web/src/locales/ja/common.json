@@ -282,6 +282,8 @@
   "notificationClarificationTitle": "エージェントが返答待ち",
   "notificationInboxItemBody": "新しい項目に対応必要。",
   "notificationInboxItemTitle": "新しい受信トレイ項目",
+  "notificationChildStallBody": "子タスクが停止しましたが、親タスクが通知を受け取れません。",
+  "notificationChildStallTitle": "子タスクの確認が必要",
   "notificationPermissionBody": "エージェントがあなたの承認を待っています。",
   "notificationPermissionTitle": "エージェントが許可を求めています",
   "notificationSessionFailedBody": "エージェントセッションがエラーで終了しました。",

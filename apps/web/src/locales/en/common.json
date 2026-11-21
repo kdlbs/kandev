@@ -282,6 +282,8 @@
   "notificationClarificationTitle": "Agent needs your answer",
   "notificationInboxItemBody": "A new item needs your attention.",
   "notificationInboxItemTitle": "New inbox item",
+  "notificationChildStallBody": "A child task stalled and its parent task cannot receive the alert.",
+  "notificationChildStallTitle": "Child task needs attention",
   "notificationPermissionBody": "The agent is waiting for your approval.",
   "notificationPermissionTitle": "Agent needs permission",
   "notificationSessionFailedBody": "The agent session ended with an error.",

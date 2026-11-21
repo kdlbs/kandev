@@ -27,6 +27,7 @@ const (
 	EventTaskSessionFailed             = "session.failed"
 	EventOfficeInboxItem               = "office.inbox_item"
 	EventSystemUpdateAvailable         = "system.update_available"
+	EventTaskChildStallUndeliverable   = "session.child_stall_undeliverable"
 	desktopNativeNotificationsEnv      = "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS"
 )
 
@@ -112,6 +113,7 @@ func (s *Service) AvailableEvents() []string {
 		EventTaskSessionFailed,
 		EventOfficeInboxItem,
 		EventSystemUpdateAvailable,
+		EventTaskChildStallUndeliverable,
 	}
 }
 
@@ -245,6 +247,12 @@ func (s *Service) HandleClarificationRequested(ctx context.Context, taskID, sess
 	s.handleSemanticOccurrence(ctx, taskID, sessionID, pendingID, EventTaskSessionClarificationAsked, nil)
 }
 
+// HandleChildStallUndeliverable notifies the workspace owner that a child task
+// stalled while its parent has no promptable primary session to alert.
+func (s *Service) HandleChildStallUndeliverable(ctx context.Context, taskID, sessionID, occurrenceID string) {
+	s.handleSemanticOccurrence(ctx, taskID, sessionID, occurrenceID, EventTaskChildStallUndeliverable, nil)
+}
+
 // SetWebPush wires the Web Push service and its provider adapter. It must be
 // called before the service handles requests.
 func (s *Service) SetWebPush(svc *webpush.Service) {
@@ -283,6 +291,7 @@ var webPushDefaultEvents = []string{
 	EventTaskSessionPermissionAsked,
 	EventTaskSessionFailed,
 	EventTaskSessionTurnFinished,
+	EventTaskChildStallUndeliverable,
 }
 
 // EnsureWebPushProvider creates the user's Web Push provider on first use. An
@@ -592,6 +601,12 @@ func semanticMessageCopy(eventType, taskTitle string) (string, string) {
 	if eventType == EventSystemUpdateAvailable {
 		return "Kandev update available", fmt.Sprintf("Kandev %s is available. Open Settings > System > Updates to review it.", taskTitle)
 	}
+	if eventType == EventTaskChildStallUndeliverable {
+		if taskTitle == "" {
+			return "Child task needs attention", "A child task stalled and its parent task cannot receive the alert."
+		}
+		return "Child task needs attention", fmt.Sprintf("\"%s\" stalled and its parent task cannot receive the alert.", taskTitle)
+	}
 	if eventType == EventTaskSessionPermissionAsked {
 		if taskTitle == "" {
 			return "Agent needs permission", "The agent is waiting for your approval."
@@ -647,6 +662,7 @@ func (s *Service) ensureDefaultProviders(ctx context.Context, userID string) err
 			EventTaskSessionClarificationAsked,
 			EventOfficeInboxItem,
 			EventSystemUpdateAvailable,
+			EventTaskChildStallUndeliverable,
 		}); err != nil {
 			return err
 		}
@@ -679,6 +695,7 @@ func (s *Service) ensureSystemProvider(ctx context.Context, userID string) error
 		EventTaskSessionClarificationAsked,
 		EventOfficeInboxItem,
 		EventSystemUpdateAvailable,
+		EventTaskChildStallUndeliverable,
 	})
 }
 
@@ -720,6 +737,7 @@ func (s *Service) validateEvents(events []string) error {
 		EventTaskSessionFailed:             {},
 		EventOfficeInboxItem:               {},
 		EventSystemUpdateAvailable:         {},
+		EventTaskChildStallUndeliverable:   {},
 	}
 	for _, event := range events {
 		if _, ok := allowed[event]; !ok {

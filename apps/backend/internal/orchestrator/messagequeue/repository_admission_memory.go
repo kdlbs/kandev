@@ -140,7 +140,7 @@ func (r *memoryRepository) admitFullAdmissionLocked(
 	message *QueuedMessage,
 	policy *AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
-	if policy == nil || !policy.AutoMerge.Enabled {
+	if !admissionFoldEnabled(policy, message) {
 		return nil, false, ErrQueueFull
 	}
 	merged, didMerge, err := r.autoMergeCandidateIntoAboveLocked(message, policy)
@@ -158,7 +158,7 @@ func (r *memoryRepository) mergeInsertedAdmissionLocked(
 	message *QueuedMessage,
 	policy *AdmissionPolicy,
 ) (*QueuedMessage, error) {
-	if policy == nil || !policy.AutoMerge.Enabled {
+	if !admissionFoldEnabled(policy, message) {
 		return message, nil
 	}
 	merged, didMerge, err := r.autoMergeIntoAboveLocked(sessionID, message.ID, policy)
