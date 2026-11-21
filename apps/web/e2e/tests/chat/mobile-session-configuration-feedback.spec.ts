@@ -1,0 +1,232 @@
+import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
+import {
+  holdConfigurationCompletions,
+  seedAndOpenChat,
+} from "./session-configuration-feedback-helpers";
+
+test.describe("Picker feedback on phone", () => {
+  test.describe.configure({ retries: 1, timeout: 90_000 });
+
+  test("keeps draft and reading position, and provides a touch-sized dismiss action", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { session } = await seedAndOpenChat(
+      testPage,
+      apiClient,
+      seedData,
+      "Phone Picker Configuration Feedback",
+    );
+    await session.sendMessageViaButton("/e2e:bulk:20");
+    await expect(session.chat.getByText(/Done\. Emitted 20 messages/)).toBeVisible({
+      timeout: 30_000,
+    });
+    await session.waitForChatIdle();
+    const trigger = testPage
+      .getByTestId("mobile-chat-toolbar-left-actions")
+      .getByTestId("model-config-trigger");
+    const transcript = session.activeChat().locator(".chat-message-list");
+    const composer = await session.fillMessage("keep this phone draft");
+    expect((await trigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+
+    // The shorter viewport represents the phone keyboard. Focusing the composer
+    // can scroll the transcript to keep it visible, so capture the baseline
+    // after that viewport change and before opening the picker.
+    await testPage.setViewportSize({ width: 390, height: 420 });
+    await composer.focus();
+    await expect(composer).toBeFocused();
+    await expect
+      .poll(() => transcript.evaluate((element) => element.scrollHeight > element.clientHeight))
+      .toBe(true);
+    const transcriptBounds = await transcript.boundingBox();
+    expect(transcriptBounds).not.toBeNull();
+    await testPage.mouse.move(
+      transcriptBounds!.x + transcriptBounds!.width / 2,
+      transcriptBounds!.y + transcriptBounds!.height / 2,
+    );
+    const beforeReadingScroll = await transcript.evaluate((element) => element.scrollTop);
+    await testPage.mouse.wheel(0, -160);
+    await expect
+      .poll(() => transcript.evaluate((element) => element.scrollTop))
+      .toBeLessThan(beforeReadingScroll);
+    const keyboardScrollTop = await transcript.evaluate((element) => element.scrollTop);
+
+    await trigger.tap();
+    const applied = waitForHttp(
+      testPage,
+      "POST",
+      /\/api\/v1\/task-sessions\/[^/]+\/set-(?:config-option|model|mode)$/,
+    );
+    await testPage.getByRole("option", { name: /Mock Smart/ }).tap();
+    await applied;
+    const feedback = testPage.getByTestId("session-configuration-feedback");
+    await expect(feedback).toBeVisible();
+    await expect(feedback).toHaveAttribute("data-status", "applied");
+    await expect(feedback).toContainText("mock-smart");
+
+    await testPage.route("**/set-config-option", (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "phone picker rejected model. " + "Provider detail remains available. ".repeat(30),
+          configuration_result: {
+            status: "rejected",
+            config_id: "model",
+            requested: "mock-fast",
+            confirmed: false,
+          },
+        }),
+      }),
+    );
+    const rejected = waitForHttp(testPage, "POST", /\/set-config-option$/, {
+      predicate: (response) => response.status() === 500,
+    });
+    await testPage.getByRole("option", { name: /Mock Fast/ }).tap();
+    await rejected;
+    await expect(feedback).toHaveAttribute("data-status", "rejected");
+    await expect(feedback).toContainText("phone picker rejected model");
+    await testPage.getByTestId("model-config-sheet-close").tap();
+    await expect(testPage.getByTestId("model-config-sheet-close")).toHaveCount(0);
+
+    await expect(composer).toContainText("keep this phone draft");
+    expect(await transcript.evaluate((element) => element.scrollTop)).toBe(keyboardScrollTop);
+
+    const feedbackPanel = feedback.locator("xpath=..");
+    const feedbackBounds = await feedbackPanel.boundingBox();
+    const viewportWidth = await testPage.evaluate(
+      () => window.visualViewport?.width ?? window.innerWidth,
+    );
+    expect(feedbackBounds).not.toBeNull();
+    expect(feedbackBounds!.y).toBeGreaterThanOrEqual(0);
+    expect(feedbackBounds!.y + feedbackBounds!.height).toBeLessThanOrEqual(420);
+    expect(feedbackBounds!.x + feedbackBounds!.width).toBeLessThanOrEqual(viewportWidth);
+    const panelMetrics = await feedbackPanel.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      overflowY: getComputedStyle(element).overflowY,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(panelMetrics.overflowY).toBe("auto");
+    const dismiss = testPage.getByTestId("session-configuration-feedback-dismiss");
+    const bounds = await dismiss.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.y).toBeGreaterThanOrEqual(0);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(420);
+    expect(bounds?.width).toBeGreaterThanOrEqual(44);
+    expect(bounds?.height).toBeGreaterThanOrEqual(44);
+    if (panelMetrics.scrollHeight > panelMetrics.clientHeight) {
+      await feedbackPanel.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect
+        .poll(() => feedbackPanel.evaluate((element) => element.scrollTop))
+        .toBeGreaterThan(0);
+      await feedbackPanel.evaluate((element) => {
+        element.scrollTop = 0;
+      });
+    }
+    await dismiss.tap();
+    await expect(feedback).toBeHidden();
+    await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
+  });
+
+  test("shows silent command feedback without replacing the draft or reading position", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const ws = watchWs(testPage);
+    const completionHold = await holdConfigurationCompletions(testPage);
+    let sessionSubscriptionsReady: Promise<unknown[]> | undefined;
+    const { session, sessionId } = await seedAndOpenChat(
+      testPage,
+      apiClient,
+      seedData,
+      "Phone Picker Command Feedback",
+      (nextSessionId) => {
+        completionHold.arm(nextSessionId);
+        sessionSubscriptionsReady = Promise.all([
+          ws.waitForResponse("session.subscribe", {
+            requestWhere: (payload) => payload.session_id === nextSessionId,
+          }),
+          ws.waitForResponse("session.conversation.subscribe", {
+            requestWhere: (payload) => payload.session_id === nextSessionId,
+          }),
+        ]);
+      },
+    );
+    if (!sessionSubscriptionsReady) throw new Error("Session subscription waits were not armed");
+    await sessionSubscriptionsReady;
+    await session.sendMessageViaButton("/e2e:bulk:20");
+    await expect(session.chat.getByText(/Done\. Emitted 20 messages/)).toBeVisible({
+      timeout: 30_000,
+    });
+    await session.waitForChatIdle();
+
+    const transcript = session.activeChat().locator(".chat-message-list");
+    await expect
+      .poll(() => transcript.evaluate((element) => element.scrollHeight > element.clientHeight))
+      .toBe(true);
+    const composer = await session.composerReady();
+    await testPage.clock.install();
+    const completion = ws.waitForEvent("session.turn.completed", {
+      where: (payload) => payload.session_id === sessionId,
+    });
+    await session.sendMessageViaButton("/model mock-smart");
+    const command = session.chat.getByText("/model mock-smart", { exact: true });
+    await expect(command).toBeVisible();
+    await composer.fill("keep this phone draft");
+    const autoScroll = session.chat.getByTestId("auto-scroll-toggle-button");
+    await autoScroll.tap();
+    await expect(autoScroll).toHaveAttribute("aria-pressed", "false");
+    const transcriptBounds = await transcript.boundingBox();
+    expect(transcriptBounds).not.toBeNull();
+    await testPage.mouse.move(
+      transcriptBounds!.x + transcriptBounds!.width / 2,
+      transcriptBounds!.y + transcriptBounds!.height / 2,
+    );
+    const beforeReadingScroll = await transcript.evaluate((element) => element.scrollTop);
+    await testPage.mouse.wheel(0, -160);
+    await expect
+      .poll(() => transcript.evaluate((element) => element.scrollTop))
+      .toBeLessThan(beforeReadingScroll);
+    await composer.fill("keep this phone draft");
+    const scrollTopBeforeReceipt = await transcript.evaluate((element) => element.scrollTop);
+    expect(scrollTopBeforeReceipt).toBeGreaterThan(0);
+    await expect.poll(() => completionHold.pendingCount()).toBeGreaterThan(0);
+    completionHold.release();
+    const completedTurn = await completion;
+    expect(completedTurn.payload.had_output).toBe(false);
+    expect(completedTurn.payload.configuration_result).toMatchObject({
+      status: "applied",
+      requested: "Mock Smart",
+      effective: "Mock Smart",
+      confirmed: true,
+    });
+    await expect(command).toBeVisible();
+
+    const receipt = session.chat
+      .getByRole("status")
+      .filter({ hasText: "The agent applied Mock Smart." });
+    await expect(receipt).toHaveCount(1);
+    await expect(receipt).toContainText("The agent applied Mock Smart.");
+    await expect(session.chat).not.toContainText(/finished without producing any output/i);
+    const followsCommand = await receipt.evaluate((status, commandText) => {
+      const commandMessage = Array.from(
+        document.querySelectorAll('[data-testid="user-message-bubble"]'),
+      ).find((message) => message.textContent?.trim() === commandText);
+      return (
+        commandMessage !== undefined &&
+        Boolean(commandMessage.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING)
+      );
+    }, "/model mock-smart");
+    expect(followsCommand).toBe(true);
+    await expect(composer).toBeFocused();
+    await expect(composer).toContainText("keep this phone draft");
+    expect(await transcript.evaluate((element) => element.scrollTop)).toBe(scrollTopBeforeReceipt);
+    await testPage.clock.runFor(5_000);
+    await expect(receipt).toHaveCount(0);
+  });
+});

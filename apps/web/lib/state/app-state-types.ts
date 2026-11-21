@@ -463,6 +463,7 @@ export type AppState = KanbanSlice & {
   ) => void;
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
+  claimEmptyTurnNotice: import("./slices/session/types").SessionSliceActions["claimEmptyTurnNotice"];
   mergeTurnChangePage: (
     sessionId: string,
     summaries: TurnChangeSetSummary[],

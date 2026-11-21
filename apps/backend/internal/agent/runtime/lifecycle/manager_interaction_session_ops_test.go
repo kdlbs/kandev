@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -239,6 +242,173 @@ func TestSetSessionConfigOptionSendsIDAndValue(t *testing.T) {
 	require.Equal(t, "agent.session.set_config_option", req.action)
 	require.Equal(t, "reasoning", req.payload["config_id"])
 	require.Equal(t, "high", req.payload["value"])
+	require.NotContains(t, req.payload, "include_configuration_result",
+		"error-only lifecycle calls must preserve strict setter behavior")
+}
+
+func TestSetSessionConfigOptionErrorOnlyMethodsDoNotRequestResult(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(*Manager) error
+	}{
+		{
+			name: "execution ID",
+			call: func(mgr *Manager) error {
+				return mgr.SetSessionConfigOption(context.Background(), "exec-ops", "codex_mode", "plan")
+			},
+		},
+		{
+			name: "session ID",
+			call: func(mgr *Manager) error {
+				return mgr.SetSessionConfigOptionBySessionID(context.Background(), "session-ops", "codex_mode", "plan")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newSessionOpsHarness(t)
+			require.NoError(t, tt.call(h.mgr))
+			req := h.only(t)
+			require.Equal(t, "agent.session.set_config_option", req.action)
+			require.NotContains(t, req.payload, "include_configuration_result",
+				"error-only lifecycle calls must preserve strict setter behavior")
+		})
+	}
+}
+
+func TestSetSessionConfigOptionWithResultRequestsPickerEvidence(t *testing.T) {
+	h := newSessionOpsHarness(t)
+
+	result, err := h.mgr.SetSessionConfigOptionWithResult(context.Background(), "exec-ops", "codex_mode", "plan")
+	require.NoError(t, err)
+	require.Equal(t, "exec-ops", result.ExecutionID)
+	require.Equal(t, "codex_mode", result.ConfigID)
+	require.Equal(t, "plan", result.Requested)
+	require.False(t, result.Confirmed)
+
+	req := h.only(t)
+	require.Equal(t, true, req.payload["include_configuration_result"],
+		"picker result calls must explicitly request correlated configuration evidence")
+}
+
+func TestExpectedModelConfigOptionSerializesAgainstModelChange(t *testing.T) {
+	client, requests := newConcurrentSessionConfigurationClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	t.Cleanup(cancel)
+
+	mgr := newTestManager(t)
+	execution := &AgentExecution{
+		ID: "exec-serialized-config", SessionID: "session-serialized-config", ACPSessionID: "acp-live",
+		Status: v1.AgentStatusReady, sessionInitialized: true, agentctl: client,
+	}
+	execution.SetModelState(&CachedModelState{CurrentModelID: "model-b"})
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	configResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.SetSessionConfigOptionBySessionIDWithExpectedModelWithResult(
+			ctx, execution.SessionID, "thinking", "high", "model-b",
+		)
+		configResult <- err
+	}()
+	var configRequest concurrentSessionConfigurationRequest
+	select {
+	case configRequest = <-requests:
+	case <-time.After(time.Second):
+		t.Fatal("expected-model option request was not sent")
+	}
+	require.Equal(t, "agent.session.set_config_option", configRequest.message.Action)
+
+	modelStarted := make(chan struct{})
+	modelResult := make(chan error, 1)
+	go func() {
+		close(modelStarted)
+		_, err := mgr.SetSessionModelWithResult(ctx, execution.ID, "model-c")
+		modelResult <- err
+	}()
+	<-modelStarted
+
+	modelChangedBeforeOptionCompleted := false
+	select {
+	case modelRequest := <-requests:
+		modelChangedBeforeOptionCompleted = true
+		require.Equal(t, "agent.session.set_model", modelRequest.message.Action)
+		respondConcurrentSessionConfigurationRequest(t, modelRequest, map[string]any{
+			"requested": "model-c", "effective": "model-c", "confirmed": true,
+		})
+	case <-time.After(100 * time.Millisecond):
+	}
+	respondConcurrentSessionConfigurationRequest(t, configRequest, map[string]any{
+		"requested": "high", "effective": "high", "confirmed": true,
+	})
+	require.NoError(t, <-configResult)
+	if !modelChangedBeforeOptionCompleted {
+		select {
+		case modelRequest := <-requests:
+			require.Equal(t, "agent.session.set_model", modelRequest.message.Action)
+			respondConcurrentSessionConfigurationRequest(t, modelRequest, map[string]any{
+				"requested": "model-c", "effective": "model-c", "confirmed": true,
+			})
+		case <-time.After(time.Second):
+			t.Fatal("model change did not resume after the option request completed")
+		}
+	}
+	require.NoError(t, <-modelResult)
+	require.False(t, modelChangedBeforeOptionCompleted,
+		"a model change must not cross the expected-model guard and option write")
+}
+
+type concurrentSessionConfigurationRequest struct {
+	message ws.Message
+	conn    *websocket.Conn
+}
+
+func newConcurrentSessionConfigurationClient(t *testing.T) (*agentctlclient.Client, <-chan concurrentSessionConfigurationRequest) {
+	t.Helper()
+	requests := make(chan concurrentSessionConfigurationRequest, 4)
+	connected := make(chan struct{})
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		close(connected)
+		for {
+			_, raw, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var message ws.Message
+			if json.Unmarshal(raw, &message) == nil && message.Type == ws.MessageTypeRequest {
+				requests <- concurrentSessionConfigurationRequest{message: message, conn: conn}
+			}
+		}
+	}))
+	t.Cleanup(server.Close)
+	client := createTestClient(t, server.URL)
+	t.Cleanup(client.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	require.NoError(t, client.StreamUpdates(ctx, func(agentctlclient.AgentEvent) {}, nil, nil))
+	select {
+	case <-connected:
+	case <-time.After(time.Second):
+		t.Fatal("agentctl stream did not connect")
+	}
+	return client, requests
+}
+
+func respondConcurrentSessionConfigurationRequest(
+	t *testing.T,
+	request concurrentSessionConfigurationRequest,
+	payload map[string]any,
+) {
+	t.Helper()
+	response, err := ws.NewResponse(request.message.ID, request.message.Action, payload)
+	require.NoError(t, err)
+	require.NoError(t, request.conn.WriteJSON(response))
 }
 
 func TestSetSessionConfigOptionGuards(t *testing.T) {

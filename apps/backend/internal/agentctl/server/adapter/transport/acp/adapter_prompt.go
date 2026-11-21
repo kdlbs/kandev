@@ -145,6 +145,12 @@ func (a *Adapter) sendPrompt(
 			zap.String("session_id", sessionID),
 			zap.Int("context_length", len(pendingContext)))
 	}
+	if humanPrompt && pendingContext == "" && len(attachments) == 0 {
+		tracker := a.configurationCommandForPrompt(sessionID, message, promptGeneration)
+		turn.evidenceMu.Lock()
+		turn.configurationCommand = tracker
+		turn.evidenceMu.Unlock()
+	}
 	a.beginPromptTurn(sessionID)
 	// Every prompt-ending path must close the honest inspection window for a
 	// launch whose provider ends delivery with this prompt. Success settles
@@ -434,12 +440,17 @@ func (a *Adapter) sendPrompt(
 		usage.ProviderReportedCostSubcents = costSubcents
 		usage.ProviderReportedCostPresent = true
 	}
+	var configurationResult *streams.ConfigurationCommandResult
+	if stopReason == string(acp.StopReasonEndTurn) {
+		configurationResult = a.configurationCommandResult(turn, sessionID)
+	}
 	a.sendUpdate(AgentEvent{
-		Type:             streams.EventTypeComplete,
-		SessionID:        sessionID,
-		PromptGeneration: promptGeneration,
-		Data:             map[string]any{"stop_reason": stopReason},
-		Usage:            usage,
+		Type:                       streams.EventTypeComplete,
+		SessionID:                  sessionID,
+		PromptGeneration:           promptGeneration,
+		Data:                       map[string]any{"stop_reason": stopReason},
+		ConfigurationCommandResult: configurationResult,
+		Usage:                      usage,
 	})
 
 	return nil

@@ -350,6 +350,11 @@ func (m *Manager) claimPromptCompletion(
 		claim.readyPayload = newAgentEventPayloadWithTurnID(current, event.TurnID)
 		claim.readyPayload.AttemptID = event.AttemptID
 		copyDeliveryTerminalIdentity(&claim.readyPayload, event, current)
+		if !event.Recovered && event.TurnID != "" && event.PromptGeneration != 0 &&
+			event.PromptGeneration == current.promptGeneration && event.ConfigurationCommandResult != nil {
+			result := *event.ConfigurationCommandResult
+			claim.readyPayload.ConfigurationCommandResult = &result
+		}
 		// The Office cause belongs to the launch's first turn. Preserve it on
 		// that completion event, then clear it so later user turns on this
 		// session cannot inherit stale run causation.
