@@ -219,6 +219,14 @@ func (s *AgentService) ListAgentInstances(ctx context.Context, wsID string) ([]*
 	return s.ListAgentsFromConfig(ctx, wsID)
 }
 
+// CountAgentInstancesByWorkspaceIDs returns agent totals for the supplied
+// workspaces without loading complete agent profiles.
+func (s *AgentService) CountAgentInstancesByWorkspaceIDs(
+	ctx context.Context, workspaceIDs []string,
+) (map[string]models.AgentWorkspaceCounts, error) {
+	return s.repo.CountAgentInstancesByWorkspaceIDs(ctx, workspaceIDs)
+}
+
 // ListAgentInstancesByIDs returns agent instances whose ids are in `ids`.
 // Implements shared.AgentReader.
 func (s *AgentService) ListAgentInstancesByIDs(ctx context.Context, ids []string) ([]*models.AgentInstance, error) {
