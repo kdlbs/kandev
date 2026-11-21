@@ -232,3 +232,42 @@ The shared lint slot was returned after natural completion. Temporary overlay
 sources and before-source copies were removed after verification; no permanent
 tests, runtime settings, operating data or Git references changed. Integration
 owns the normal commit hooks and subsequent transport work.
+
+## Signed task-bound Office runtime consumer
+
+PR #5073 connects the existing read and prompt grant boundaries to the signed
+Office runtime CLI. A live run must retain its server-owned agent, task and
+session identity before the gateway reaches native task-domain actions. Existing
+Office capabilities and native permissions remain prerequisites; request-supplied
+source identity cannot establish authority. The shipped collaboration default and
+general Office MCP tool inventory remain unchanged.
+
+The consumer provides workspace discovery and task, session, conversation and
+plan reads under read grants, plus ordinary task-message delivery under a separate
+prompt grant. Retained message-operation replay first proves the live run and
+source session, then reads the existing sender-scoped receipt before checking a
+target or prompt grant that may have disappeared. A missing retained operation
+returns to ordinary target and grant validation before any new delivery.
+
+Implementation paths for this existing requirement are:
+
+- `apps/backend/cmd/agentctl/kandev_workspaces.go` and `kandev_tasks.go`.
+- `apps/backend/internal/backendapp/office_cross_workspace.go`, its composition
+  in `helpers.go` and `office_scope.go`, and `internal/office/routes.go`.
+- `apps/backend/internal/office/runtime/crossworkspace.go` and `handler.go`.
+- `apps/backend/internal/mcp/handlers/office_runtime_message_authority.go`,
+  `get_task_message_operation.go`, `message_task_operation.go` and `handlers.go`.
+- `apps/backend/internal/task/service/service_access.go`.
+
+Retained verification for public code head `c2dd5937ee1d` includes the existing
+`TestOfficeCrossWorkspace*` capability, live-run identity, read-versus-prompt,
+hidden-target and retained-replay cases, plus the existing message-operation and
+SQLite receipt selections. Backend, MCP and Office runtime packages compiled in
+that selection, and the existing `TestTasksList_*` CLI checks passed. Normal
+merge-commit hooks also passed. These component/fixture results are reused for
+this delivery-record correction because runtime code is unchanged; Go checks
+were not repeated for the Markdown-only update. Live provider delivery,
+PostgreSQL, browser E2E and large-workspace cost are outside those results.
+
+Task 01 remains in progress. Profile inheritance, delegated/taskless authority,
+aggregate navigation and the original remaining T3 work retain their scope.
