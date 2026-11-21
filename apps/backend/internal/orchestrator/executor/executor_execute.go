@@ -1312,10 +1312,11 @@ func (e *Executor) classifyFailedSessionLaunchWrite(
 		)
 	}
 	return fmt.Errorf(
-		"session %s state changed from %s to %s before runtime persistence",
+		"session %s state changed from %s to %s before runtime persistence: %w",
 		session.ID,
 		expected,
 		current.State,
+		ErrSessionStateChangedBeforeStart,
 	)
 }
 
