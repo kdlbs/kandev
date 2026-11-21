@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/promptsync"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -54,6 +55,7 @@ func registerE2EResetRoutes(
 	githubSvc *github.Service,
 	gitlabSvc *gitlab.Service,
 	coordinatorSvc *coordinator.Service,
+	promptSyncSvc *promptsync.Service,
 	eventBus bus.EventBus,
 	agentRuntimeAvailability *agentruntime.RuntimeOwner,
 	lifecycleMgr agentruntime.SessionExecutionControl,
@@ -73,7 +75,7 @@ func registerE2EResetRoutes(
 	if os.Getenv("KANDEV_E2E_MOCK") == "true" && lifecycleMgr != nil {
 		api.POST("/agent-runtime/disconnect-session-stream", handleE2EDisconnectSessionAgentStream(lifecycleMgr))
 	}
-	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, gitlabSvc, coordinatorSvc, retentionWorker, appCtx, log))
+	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, gitlabSvc, coordinatorSvc, promptSyncSvc, retentionWorker, appCtx, log))
 	if githubSvc != nil {
 		api.POST("/tasks/:id/remote-contribution", handleE2EAttachGitHubContribution(repo, taskSvc, githubSvc, log))
 	}
@@ -266,6 +268,7 @@ func handleE2EReset(
 	githubSvc *github.Service,
 	gitlabSvc *gitlab.Service,
 	coordinatorSvc *coordinator.Service,
+	promptSyncSvc *promptsync.Service,
 	retentionWorker e2eRetentionWorker,
 	appCtx context.Context,
 	log *logger.Logger,
@@ -366,6 +369,13 @@ func handleE2EReset(
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM workflow_sync_configs WHERE workspace_id = ?`, workspaceID); err != nil {
 			log.Error("e2e reset: workflow sync config cleanup failed", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: "workflow sync config cleanup failed"})
+			return
+		}
+		// The prompt-sync poller reads the install-wide row the same way;
+		// synced prompts go with it so the next spec starts without them.
+		if err := resetPromptSync(ctx, promptSyncSvc, repo.DB(), workspaceID); err != nil {
+			log.Error("e2e reset: prompt sync cleanup failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: "prompt sync cleanup failed"})
 			return
 		}
 		// Office config sync's poller reads office_config_sync_configs the
@@ -787,6 +797,34 @@ func resetGitHubAppRegistrationsForE2E(
 		return nil
 	}
 	return service.ResetAppRegistrationsForE2E(ctx, workspaceID)
+}
+
+// resetPromptSync runs the prompt sync cleanup under the prompt sync service
+// lock, so an in-flight sync cannot recreate synced prompts afterward.
+func resetPromptSync(ctx context.Context, svc *promptsync.Service, database *sql.DB, workspaceID string) error {
+	if svc == nil {
+		return deletePromptSyncForReset(ctx, database, workspaceID)
+	}
+	return svc.RunExclusive(func() error { return deletePromptSyncForReset(ctx, database, workspaceID) })
+}
+
+// deletePromptSyncForReset removes the workspace's prompt sync row and, once
+// no configuration remains, the synced prompts it created, returning adopted
+// built-in prompts to manual with their own content.
+func deletePromptSyncForReset(ctx context.Context, database *sql.DB, workspaceID string) error {
+	if _, err := database.ExecContext(ctx, `DELETE FROM prompt_sync_config WHERE workspace_id = ?`, workspaceID); err != nil {
+		return err
+	}
+	if _, err := database.ExecContext(ctx,
+		`DELETE FROM custom_prompts WHERE source = 'sync' AND builtin = ? AND NOT EXISTS (SELECT 1 FROM prompt_sync_config)`, 0); err != nil {
+		return err
+	}
+	_, err := database.ExecContext(ctx, `
+		UPDATE custom_prompts
+		SET source = 'manual', source_path = '', conflict = 0, alternate_content = '',
+			content = CASE WHEN source = 'sync' AND alternate_content <> '' THEN alternate_content ELSE content END
+		WHERE builtin = ? AND source <> 'manual' AND NOT EXISTS (SELECT 1 FROM prompt_sync_config)`, 1)
+	return err
 }
 
 func deleteGitHubAuthForReset(ctx context.Context, database *sql.DB, workspaceID string) error {

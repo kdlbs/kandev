@@ -51,6 +51,7 @@ import (
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/promptsync"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
@@ -182,6 +183,7 @@ func assembleServices(
 		Linear:                   providers.linear,
 		Sentry:                   providers.sentry,
 		WorkflowSync:             providers.workflowSync,
+		PromptSync:               providers.promptSync,
 		Share:                    integrations.shareHTTP,
 		Automation:               integrations.automationComponents,
 		Plugins:                  integrations.pluginsSvc,
@@ -597,6 +599,7 @@ type thirdPartyProviders struct {
 	linear        *linear.Service
 	sentry        *sentry.Service
 	workflowSync  *workflowsync.Service
+	promptSync    *promptsync.Service
 }
 
 func initThirdPartyProviders(
@@ -650,10 +653,17 @@ func initThirdPartyProviders(
 	if recordErr := recordRequiredStore(ctx, storeTracker, "workflow-sync", workflowSyncErr); recordErr != nil {
 		return nil, fmt.Errorf("initialize workflow sync: %w", recordErr)
 	}
+	if workflowSyncSvc != nil && promptSvc != nil {
+		workflowSyncSvc.SetPromptReferenceChecker(promptSvc)
+	}
+	promptSyncSvc, _, promptSyncErr := initPromptSyncServiceRequired(dbPool, githubSvc, gitlabSvc, promptSvc, repos, taskSvc, log)
+	if recordErr := recordRequiredStore(ctx, storeTracker, "prompt-sync", promptSyncErr); recordErr != nil {
+		return nil, fmt.Errorf("initialize prompt sync: %w", recordErr)
+	}
 	return &thirdPartyProviders{
 		github: githubSvc, gitlab: gitlabSvc, gitlabCleanup: gitlabCleanup,
 		jira: jiraSvc, linear: linearSvc,
-		sentry: sentrySvc, workflowSync: workflowSyncSvc,
+		sentry: sentrySvc, workflowSync: workflowSyncSvc, promptSync: promptSyncSvc,
 	}, nil
 }
 

@@ -188,6 +188,7 @@ func buildOwnerBehaviors() map[string]ownerBehavior {
 	behaviors["linear"] = ownerBehavior{actions: []apiAction{linearAction()}}
 	behaviors["sentry"] = ownerBehavior{actions: []apiAction{sentryAction()}}
 	behaviors["workflow-sync"] = ownerBehavior{actions: []apiAction{workflowSyncAction()}}
+	behaviors["prompt-sync"] = ownerBehavior{actions: []apiAction{promptSyncAction()}}
 	behaviors["office-config-sync"] = ownerBehavior{actions: []apiAction{officeConfigSyncAction()}}
 	behaviors["automation"] = ownerBehavior{actions: []apiAction{automationAction()}}
 	behaviors["coordinator"] = ownerBehavior{actions: []apiAction{coordinatorAction()}}

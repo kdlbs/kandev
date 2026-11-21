@@ -457,6 +457,7 @@
     "notification",
     "sentry",
     "workflow-sync",
+    "prompt-sync",
     "office-config-sync",
     "automation",
     "coordinator"

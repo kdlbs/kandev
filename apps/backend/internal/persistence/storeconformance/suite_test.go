@@ -24,7 +24,7 @@ func TestAdapterIDsMatchExpectedCatalogSet(t *testing.T) {
 		"plugin-user-state": {}, "prompts": {}, "quick-terminal": {}, "runtime-flags": {},
 		"schema-meta": {}, "secrets": {}, "sentry": {}, "storage": {}, "system-settings": {},
 		"task": {}, "task-share": {}, "telemetry-contract": {}, "terminal": {},
-		"user": {}, "utility": {}, "workflow": {}, "workflow-sync": {},
+		"user": {}, "utility": {}, "workflow": {}, "workflow-sync": {}, "prompt-sync": {},
 	}
 	seen := make(map[string]struct{})
 	for _, adapter := range Adapters() {

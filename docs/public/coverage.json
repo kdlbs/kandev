@@ -100,7 +100,8 @@
         "tasks-and-workflows",
         "workflow-tips",
         "workflow-import-export",
-        "workflow-sync"
+        "workflow-sync",
+        "prompt-sync"
       ],
       "sources": [
         "apps/backend/internal/orchestrator/workflow_store.go",

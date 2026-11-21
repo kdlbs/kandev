@@ -15,8 +15,8 @@ func (r *sqliteRepository) UpdatePromptForAgent(ctx context.Context, prompt *mod
 	// Identity, built-in status, and the observed revision must still match.
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
   UPDATE custom_prompts SET name = ?, content = ?, updated_at = ?
-  WHERE id = ? AND name = ? AND builtin = ? AND updated_at = ?
- `), prompt.Name, prompt.Content, updatedAt, prompt.ID, expectedName, 0, prompt.UpdatedAt)
+  WHERE id = ? AND name = ? AND builtin = ? AND updated_at = ? AND source <> ?
+ `), prompt.Name, prompt.Content, updatedAt, prompt.ID, expectedName, 0, prompt.UpdatedAt, models.PromptSourceSync)
 	if err != nil {
 		return err
 	}

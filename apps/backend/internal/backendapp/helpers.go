@@ -82,6 +82,7 @@ import (
 	"github.com/kandev/kandev/internal/profiles"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
+	"github.com/kandev/kandev/internal/promptsync"
 	"github.com/kandev/kandev/internal/quickterminal"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/runtimeflags"
@@ -2096,6 +2097,11 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered workflow sync handlers (HTTP)")
 	}
 
+	if p.services.PromptSync != nil {
+		promptsync.RegisterRoutes(p.router, p.services.PromptSync, p.log)
+		p.log.Debug("Registered prompt sync handlers (HTTP)")
+	}
+
 	if p.services.Automation != nil {
 		definitions, _ := p.agentSettingsRepo.(automation.MCPDefinitionReader)
 		policy, _ := p.agentSettingsRepo.(automation.MCPBuiltinPolicyReader)
@@ -2167,7 +2173,8 @@ func registerSecondaryRoutes(
 		automationSvc = p.services.Automation.Service
 	}
 	registerE2EResetRoutes(
-		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.services.Coordinator, p.eventBus,
+		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.services.Coordinator,
+		p.services.PromptSync, p.eventBus,
 		p.agentRuntimeAvailability, p.lifecycleMgr, p.services.DeliveryRetention, p.ctx, p.log,
 	)
 	registerE2ERuntimeUpdateRoutes(
