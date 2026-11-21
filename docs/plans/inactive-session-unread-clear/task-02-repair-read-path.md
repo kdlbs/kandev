@@ -3883,3 +3883,112 @@ for cursor/traffic assertions.
 
 R28 implementation is complete; independent review proceeds R29 after normal
 commit/push. The three-consecutive-clean/50-round loop remains open.
+
+### Production-fix review round 29 remediation
+
+Sol child `20cac842-75ee-4d19-ab1f-3cc5fe6dfccb` reviewed
+`9e524f6df2e9e6d01fa38c05e01d64ca60164cfc`: three P2 source schedules.
+Completed production rounds 29; consecutive clean 0.
+Current work retains ordinary membership proof for confirmed empty slots,
+binds coarse tablet display/activation to its actual center tab, and fences
+Saved Layout completion before any newer environment/layout mutation.
+
+R29 RED: `r29-red-units.log` has three failures/88 controls: confirmed local
+ACK and remote zero-primary retirement fail to use ordinary positive membership,
+and an older Saved Layout frame calls layout in a newer maximized environment.
+`r29-tablet-red-summary.log` independently reproduces both coarse 820px cases on
+the unchanged R28 frontend: missing selected-row dot while a real file tab is
+active, and same-URL conversation hit leaves that file displayed.
+
+Corrections keep proof admission for a still-owned confirmed empty slot, even
+after eviction or changed-primary retarget. Settlement/supersession releases it;
+uncertain background retirement still uses complete task proof. No retry/timer.
+The tablet center tab is now `tabletSession.activeTabBySessionId`, independent
+of phone/Dockview state. Its existing tabs, file viewer, scroll owners and touch
+targets are unchanged. The validated explicit focus opens Chat once; a later
+file choice remains authoritative. Saved Layout completion captures API,
+environment and committed layout generation before any geometry/width/readiness
+or persistence work.
+
+```text
+820px coarse tablet: [Chat] [Dockerfile*]   task B dot on, cursor unchanged
+indexed B hit:       [Chat*] [Dockerfile]   exact B tail read, sibling unchanged
+later file choice:   [Chat] [Dockerfile*]   passive output does not steal focus
+Phone: existing bottom navigation/Plan behavior unchanged.
+Desktop: existing Dockview ownership/independent splits unchanged.
+```
+
+The initial expanded unit run was 300/311, not green. The confirmed-slot
+fixture allowed an ordinary positive refresh automatically during eviction,
+before its intended gate; it now returns 503 until explicitly enabled. Tablet
+initial-state tests exposed missing state projection/type entries; these were
+completed, not bypassed. `r29-green-units-v2.log`: 13 files/311 tests pass,
+including stale ordinary responses, newer pins/workflow, post-cancel no-replay,
+tablet tab/display/focus, and existing lifecycle/layout/file ownership controls.
+
+R29 strict lint initially found two repeated test literals and the handler's
+600-code-line limit. Extracted unchanged complete/unique task-membership
+validation into existing `session-removal.ts`, removed duplicate validation,
+and kept callbacks scoped to the original controller. Tab setter consumers
+rebind when their session changes.
+
+The first fresh-bundle browser run was five passes/two failures, not green.
+Both tablet cases passed the original dot and repeated-hit checks, then the
+added real reload check found saved file restoration displacing explicit Chat.
+`r29-restore-red.log` independently has one behavioral failure/16 controls:
+delayed file metadata selected the old file over the newer Chat owner.
+Restoration now reads the current tablet owner at publication (including its
+queued file activation), retains legacy behavior without that owner, and
+normalizes saved file keys. The canonical tablet setter also owns the existing
+tab preference; the duplicate center-panel writer is removed.
+
+Replay from the refreshed cache-safe snapshot:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run hooks/use-task-sessions.removal.test.ts \
+  hooks/domains/session/use-session-actions.removal-proof.test.ts \
+  lib/ws/handlers/task-primary- lib/state/session-removal \
+  lib/state/dockview-env-switch.plugin-layout.test.ts \
+  lib/state/dockview-env-switch-maximize-session-filter.test.ts \
+  lib/state/dockview-right-panel-visibility.test.ts \
+  hooks/domains/sidebar/use-unread-task-dot-display.test.tsx \
+  components/task/task-center-panel-mutation-ownership.test.tsx \
+  components/task/task-center-panel-restoration.test.ts \
+  components/task/task-center-panel-file-tabs.test.ts
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/task/task-unread-dot.spec.ts \
+  e2e/tests/session/session-primary-removal.spec.ts -- \
+  --grep 'Task unread dot|ordinary foreground membership' --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+The browser replay requires the current R29 frontend build; it reuses retained
+fresh R24 Go/agentctl/host/plugin. No Go source, cursor/predicate/promotion,
+schema or wire change. No broad-suite/live-NATS certification or historical
+trigger attribution. List readback is convergence, not isolated cursor-event
+delivery; seeded RUNNING remains a lifecycle fixture, not live execution.
+
+`r29-final-units-v2.log`: 13 files/314 tests pass after the final production
+edit, including delayed tablet metadata and unchanged legacy/file controls.
+`r29-final-lint-v2.log`, `r29-typecheck-v2.log`, `r29-build-v2.log`: strict
+changed-file lint, full production typecheck and fresh frontend build pass.
+Harness tests/all-file lint, the targeted normal harness hook, specification
+tests/all-file lint and catalog validation pass (456 decisions/2045 specs).
+Scoped guidance remains at 300 lines; it records the new tablet tab owner,
+not a new workflow policy.
+
+Final fresh-bundle browser receipts: `r29-final-summary.log` seven desktop/tablet
+cases pass, and `r29-phone-summary.log` ten phone cases pass. One worker,
+no retries. Both confirmed-local and remote 503/foreground schedules use
+actual Delete and independently requested positive membership, with exact
+survivor cursor/observer traffic and untouched sibling. Tablet cases prove
+file-tab dot, repeated indexed-hit Chat, later file choice, and Go-boot reload
+after saved metadata; the phone owning file remains green.
+
+Inspected the final coarse file/dot, restored explicit Chat and local foreground
+survivor captures. The intended tab/transcript is visible, and existing panels
+remain contained. Cursor/traffic assertions, not screenshots, prove read scope.
+R29 implementation is done; normal commit/push and independent R30 follow.
+The three-consecutive-clean/50-round production loop remains open.

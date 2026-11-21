@@ -1,5 +1,5 @@
 import { StrictMode, useCallback, useState } from "react";
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { useFileSaveDelete, useFileTabRestoration } from "./task-center-panel-restoration";
@@ -9,13 +9,21 @@ import {
   upsertOpenFileTab,
   type FileEditorTab,
 } from "./task-center-panel-file-tabs";
+import { createAppStore } from "@/lib/state/store";
+import { setOpenFileTabs, setActiveTabForSession } from "@/lib/local-storage";
 
-const mocks = vi.hoisted(() => ({ save: vi.fn(), delete: vi.fn(), toast: vi.fn(), lsp: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  save: vi.fn(),
+  delete: vi.fn(),
+  read: vi.fn(),
+  toast: vi.fn(),
+  lsp: vi.fn(),
+}));
 vi.mock("@/lib/ws/connection", () => ({ getWebSocketClient: () => ({}) }));
 vi.mock("@/lib/ws/workspace-files", () => ({
   updateFileContent: (...args: unknown[]) => mocks.save(...args),
   deleteFile: (...args: unknown[]) => mocks.delete(...args),
-  requestFileContent: vi.fn(),
+  requestFileContent: (...args: unknown[]) => mocks.read(...args),
 }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: mocks.toast }) }));
 vi.mock("@/lib/lsp/lsp-client-manager", () => ({
@@ -105,6 +113,7 @@ async function settle(
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.read.mockReset();
   sessionStorage.clear();
 });
 afterEach(cleanup);
@@ -299,5 +308,42 @@ it.each(["save", "delete"] as const)(
     expect(h.result.current.tabs[0]).toMatchObject(file("A"));
     expect(mocks.lsp).not.toHaveBeenCalled();
     expect(h.result.current.savingFiles.size).toBe(0);
+  },
+);
+
+it.each(["chat", "file", "legacy"] as const)(
+  "restores file metadata without replacing the current tablet tab: %s",
+  async (winner) => {
+    const store = createAppStore();
+    const fileKey = `file:${getFileTabKey(file("A"))}`;
+    store.getState().setTabletSessionTab("A", fileKey);
+    setOpenFileTabs("A", [{ path: PATH, name: "foo.ts", repo: REPO }]);
+    setActiveTabForSession("A", fileKey);
+    const read = Promise.withResolvers<{ content: string }>();
+    mocks.read.mockReturnValue(read.promise);
+    const hook = renderHook(() => {
+      const [tabs, setTabs] = useState<FileEditorTab[]>([]);
+      const [selected, setSelected] = useState(fileKey);
+      useFileTabRestoration({
+        store: winner === "legacy" ? undefined : store,
+        activeSessionId: "A",
+        leftTab: selected,
+        setLeftTab: setSelected,
+        setOpenFileTabs: setTabs,
+      });
+      return { tabs, selected, setSelected };
+    });
+    if (winner === "chat")
+      act(() => {
+        store.getState().setTabletSessionTab("A", "chat");
+        hook.result.current.setSelected("chat");
+      });
+    await act(async () => read.resolve({ content: "restored disk content" }));
+    await waitFor(() => expect(hook.result.current.tabs[0]?.content).toBe("restored disk content"));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(hook.result.current.selected).toBe(winner === "chat" ? "chat" : fileKey);
+    hook.unmount();
   },
 );

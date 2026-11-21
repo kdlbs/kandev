@@ -1,5 +1,5 @@
 import { getBackendConfig } from "@/lib/config";
-import type { TaskSession } from "@/lib/types/http";
+import type { TaskSession, TaskSessionsResponse } from "@/lib/types/http";
 import type { TaskSessionsState } from "./slices/session/types";
 
 export type ConfirmedSessionRemovals = {
@@ -40,4 +40,30 @@ export function admitTaskSessionRows(
     if (!removed[row.id]) rows.set(row.id, row);
   }
   return [...rows.values()];
+}
+
+/** Only complete, unique, same-task absence authorizes retirement or a successor. */
+export function proveRemovedSessionMembership(
+  membership: TaskSessionsResponse,
+  taskId: string,
+  removedSessionId: string,
+): { primary: TaskSession | null } | null {
+  if (membership.total !== membership.sessions.length) return null;
+  let primary: TaskSession | null = null;
+  const ids = new Set<string>();
+  for (const session of membership.sessions) {
+    if (
+      !session.id ||
+      ids.has(session.id) ||
+      session.task_id !== taskId ||
+      session.id === removedSessionId
+    )
+      return null;
+    ids.add(session.id);
+    if (session.is_primary) {
+      if (primary) return null;
+      primary = session;
+    }
+  }
+  return { primary };
 }

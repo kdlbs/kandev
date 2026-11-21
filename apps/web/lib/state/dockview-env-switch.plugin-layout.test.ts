@@ -956,3 +956,58 @@ it.each(["next-env", "same-env-layout", "return-to-env", "serialized-layout"])(
     }
   },
 );
+
+it("fences a Saved Layout completion behind a newer maximized environment", async () => {
+  const x = horizontalLayout({ bottom: [NOTES] });
+  const y = horizontalLayout({ bottom: [PROMPTS], centerWidth: 800, rightWidth: 400 });
+  startIn("saved-x", x, null);
+  saveEnvironment("saved-y", y);
+  useDockviewStore.getState().switchEnvLayout("saved-x", "saved-y", null, []);
+  await settle();
+  useDockviewStore.getState().maximizeGroup(RIGHT_BOTTOM_GROUP);
+  await settle();
+  useDockviewStore.getState().switchEnvLayout("saved-y", "saved-x", null, []);
+  await settle();
+  const frames: FrameRequestCallback[] = [];
+  const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((frame) => {
+    frames.push(frame);
+    return frames.length;
+  });
+  try {
+    useDockviewStore.getState().applyCustomLayout({
+      id: "held-saved-layout",
+      name: "Held saved layout",
+      isDefault: false,
+      createdAt: "2026-11-21T00:00:00Z",
+      layout: toSerializedDockview(x, WIDTH, HEIGHT, new Map()) as unknown as Record<
+        string,
+        unknown
+      >,
+    });
+    const oldApply = frames.at(-1)!;
+    useDockviewStore.getState().switchEnvLayout("saved-x", "saved-y", null, []);
+    api.layout(900, 600);
+    expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
+    const geometry = api.groups.map((group) => ({
+      id: group.id,
+      width: group.width,
+      height: group.height,
+    }));
+    const widths = new Map(useDockviewStore.getState().pinnedWidths);
+    const savedX = structuredClone(getEnvLayout("saved-x"));
+    const savedY = structuredClone(getEnvLayout("saved-y"));
+    const layout = vi.spyOn(api, "layout");
+    oldApply(0);
+    expect(layout).not.toHaveBeenCalled();
+    expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
+    expect(useDockviewStore.getState().pinnedWidths).toEqual(widths);
+    expect(
+      api.groups.map((group) => ({ id: group.id, width: group.width, height: group.height })),
+    ).toEqual(geometry);
+    expect(getEnvLayout("saved-x")).toEqual(savedX);
+    expect(getEnvLayout("saved-y")).toEqual(savedY);
+    layout.mockRestore();
+  } finally {
+    raf.mockRestore();
+  }
+});

@@ -90,41 +90,37 @@ type RestoreLoadedTabsParams = {
   restorationInProgressRef: React.MutableRefObject<boolean>;
   setOpenFileTabs: React.Dispatch<React.SetStateAction<OpenFileTab[]>>;
   setLeftTab: (tab: string) => void;
+  store?: StoreApi<AppState>;
 };
 
 function restoreLoadedTabs({
   loadedTabs,
   savedActiveTab,
+  restoredTabsRef,
   restorationInProgressRef,
   setOpenFileTabs,
   setLeftTab,
+  store,
 }: RestoreLoadedTabsParams) {
-  if (loadedTabs.length > 0) {
-    setOpenFileTabs(loadedTabs);
-    if (savedActiveTab.startsWith("file:")) {
-      const savedFileKey = savedActiveTab.slice("file:".length);
-      // Existing sessions may have stored the old path-only tab value. Prefer
-      // the repo-aware key, while keeping that persisted state restorable.
-      const activeTab = loadedTabs.find(
-        (tab) => getFileTabKey(tab) === savedFileKey || tab.path === savedFileKey,
-      );
-      if (activeTab) {
-        setTimeout(() => {
-          setLeftTab(`file:${getFileTabKey(activeTab)}`);
-          restorationInProgressRef.current = false;
-        }, 0);
-      } else {
-        setLeftTab("chat");
-        restorationInProgressRef.current = false;
-      }
-    } else {
-      setLeftTab(savedActiveTab);
-      restorationInProgressRef.current = false;
+  const sessionId = restoredTabsRef.current;
+  if (!sessionId) return;
+  if (loadedTabs.length > 0) setOpenFileTabs(loadedTabs);
+  const select = () => {
+    if (restoredTabsRef.current !== sessionId) return;
+    const current = store?.getState().tabletSession.activeTabBySessionId[sessionId];
+    let selected =
+      current ?? (loadedTabs.length > 0 ? savedActiveTab : toPrimaryTab(savedActiveTab));
+    if (selected.startsWith("file:")) {
+      const key = selected.slice("file:".length);
+      // Old path-only preferences resolve to the current repo-aware file key.
+      const file = loadedTabs.find((tab) => getFileTabKey(tab) === key || tab.path === key);
+      selected = file ? `file:${getFileTabKey(file)}` : "chat";
     }
-  } else {
-    setLeftTab(toPrimaryTab(savedActiveTab));
+    setLeftTab(selected);
     restorationInProgressRef.current = false;
-  }
+  };
+  if (loadedTabs.length > 0 && savedActiveTab.startsWith("file:")) setTimeout(select, 0);
+  else select();
 }
 
 export function useFileTabRestoration({
@@ -202,6 +198,7 @@ export function useFileTabRestoration({
         restorationInProgressRef,
         setOpenFileTabs,
         setLeftTab,
+        store,
       });
     };
     void loadTabs();

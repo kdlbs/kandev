@@ -19,6 +19,7 @@ import {
   taskUnreadSessionIds,
   waitForTaskUnreadSummary,
 } from "../../helpers/unread-divider";
+import { expectTabletConversationRoute } from "../../helpers/session-route-admission";
 
 function unreadDot(row: Locator): Locator {
   return row.getByRole("img", { name: TASK_UNREAD_DOT_LABEL });
@@ -328,4 +329,20 @@ test.describe("Task unread dot", () => {
       await cleanupFailingResumeTask(apiClient, seeded);
     }
   });
+  for (const assertDot of [true, false]) {
+    test(`coarse tablet preserves unread file output and explicit Chat (dot: ${assertDot})`, async ({
+      tabletTestPage,
+      apiClient,
+      seedData,
+      backend,
+    }) => {
+      test.setTimeout(120_000);
+      await apiClient.saveUserSettings({ unread_task_dot_hide_delay_seconds: 0 });
+      await expectTabletConversationRoute(
+        { testPage: tabletTestPage, apiClient, seedData, backend },
+        assertDot,
+        test.info().outputPath(`tablet-route-${assertDot ? "dot" : "focus"}.png`),
+      );
+    });
+  }
 });

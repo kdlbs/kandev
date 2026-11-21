@@ -10,8 +10,16 @@ import {
   hideSessionPanel,
 } from "@/components/task/dockview-hidden-session-panels";
 import { useUnreadTaskDotDisplay } from "./use-unread-task-dot-display";
+import { useTabletSessionTab } from "@/hooks/domains/session/use-tablet-session-tab";
+import { requestTaskRouteFocus, hasTaskRouteFocus } from "@/lib/state/task-navigation-focus";
 
-const viewport = vi.hoisted(() => ({ isMobile: false }));
+const viewport = vi.hoisted(() => ({
+  isMobile: false,
+  isTablet: false,
+  get usesDesktopWorkbench() {
+    return !this.isMobile && !this.isTablet;
+  },
+}));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => viewport,
 }));
@@ -127,6 +135,56 @@ it.each(["chat", "plan", "changes", "files", "terminal"] as const)(
     } finally {
       unmount();
       viewport.isMobile = false;
+    }
+  },
+);
+
+it.each(["chat", "changes", "file:README.md", "pr"])(
+  "uses the coarse tablet's actual tab for unread exclusion: %s",
+  (tab) => {
+    viewport.isTablet = true;
+    const base = createAppStore().getState();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <StateProvider
+        initialState={{
+          tasks: { ...base.tasks, activeTaskId: "t1", activeSessionId: SESSION_ID },
+          tabletSession: { activeTabBySessionId: { [SESSION_ID]: tab } },
+          mobileSession: {
+            ...base.mobileSession,
+            activePanelBySessionId: { [SESSION_ID]: "plan" },
+          },
+        }}
+      >
+        {children}
+      </StateProvider>
+    );
+    const hook = renderHook(
+      () => ({
+        display: useUnreadTaskDotDisplay(),
+        tab: useTabletSessionTab(SESSION_ID),
+        store: useAppStoreApi(),
+      }),
+      { wrapper },
+    );
+    try {
+      expect(hook.result.current.display.displayedSessionId).toBe(
+        tab === "chat" ? SESSION_ID : null,
+      );
+      act(() => {
+        const store = hook.result.current.store;
+        store.getState().setActiveSession("t1", SESSION_ID);
+        requestTaskRouteFocus(store, "t1", SESSION_ID);
+      });
+      expect(hook.result.current.tab[0]).toBe("chat");
+      expect(hook.result.current.display.displayedSessionId).toBe(SESSION_ID);
+      expect(hasTaskRouteFocus(hook.result.current.store, "t1", SESSION_ID)).toBe(false);
+      act(() => hook.result.current.tab[1]("file:README.md"));
+      hook.rerender();
+      expect(hook.result.current.tab[0]).toBe("file:README.md");
+      expect(hook.result.current.display.displayedSessionId).toBeNull();
+    } finally {
+      hook.unmount();
+      viewport.isTablet = false;
     }
   },
 );

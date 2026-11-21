@@ -23,7 +23,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { isRenameReserved, treePath } from "@/hooks/file-rename-continuity";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { executeApprove } from "@/lib/services/session-approve";
-import { getActiveTabForSession, setActiveTabForSession } from "@/lib/local-storage";
+import { useTabletSessionTab } from "@/hooks/domains/session/use-tablet-session-tab";
 import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
@@ -79,47 +79,35 @@ function useLeftTabState(
   hasChanges: boolean | undefined,
   onActiveFileChange?: (filePath: string | null) => void,
 ) {
-  const [leftTab, setLeftTab] = useState(() => {
-    if (typeof window !== "undefined" && activeSessionId) {
-      const savedTab = getActiveTabForSession(activeSessionId, "chat");
-      if (savedTab === "chat" || savedTab === "changes") return savedTab;
-    }
-    return "chat";
-  });
+  const [leftTab, setLeftTab] = useTabletSessionTab(activeSessionId);
   const [showRequestChangesTooltip, setShowRequestChangesTooltip] = useState(false);
 
   useEffect(() => {
     if (leftTab === "changes" && !hasChanges) queueMicrotask(() => setLeftTab("chat"));
-  }, [leftTab, hasChanges]);
+  }, [leftTab, hasChanges, setLeftTab]);
   useEffect(() => {
     const handler = () => {
       if (hasChanges) setLeftTab("changes");
     };
     window.addEventListener("switch-to-changes-tab", handler);
     return () => window.removeEventListener("switch-to-changes-tab", handler);
-  }, [hasChanges]);
+  }, [hasChanges, setLeftTab]);
   useEffect(() => {
     const handler = () => setLeftTab("files");
     window.addEventListener("switch-to-files-tab", handler);
     return () => window.removeEventListener("switch-to-files-tab", handler);
-  }, []);
+  }, [setLeftTab]);
   useEffect(() => {
     if (leftTab.startsWith("file:")) onActiveFileChange?.(leftTab.replace("file:", ""));
     else onActiveFileChange?.(null);
   }, [leftTab, onActiveFileChange]);
 
-  const handleTabChange = useCallback(
-    (tab: string) => {
-      setLeftTab(tab);
-      if (activeSessionId) setActiveTabForSession(activeSessionId, tab);
-    },
-    [activeSessionId],
-  );
+  const handleTabChange = setLeftTab;
   const handleRequestChanges = useCallback(() => {
     setLeftTab("chat");
     setShowRequestChangesTooltip(true);
     setTimeout(() => setShowRequestChangesTooltip(false), 5000);
-  }, []);
+  }, [setLeftTab]);
   return {
     leftTab,
     setLeftTab,

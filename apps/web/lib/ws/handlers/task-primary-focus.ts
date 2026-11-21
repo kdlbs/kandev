@@ -10,7 +10,10 @@ import {
   registerTaskSessionMembershipProof,
   forgetTaskSessionMembershipProof,
 } from "@/lib/state/task-session-reads";
-import { isConfirmedSessionRemoved } from "@/lib/state/session-removal";
+import {
+  isConfirmedSessionRemoved,
+  proveRemovedSessionMembership,
+} from "@/lib/state/session-removal";
 import {
   observedRemovals,
   recordObservedSessionRemoval,
@@ -68,8 +71,12 @@ function observeRemoval(store: StoreApi<AppState>, taskId: string, sessionId: st
     previousSessionId: sessionId,
     scopeIdentity: stateReadScopeIdentity(store.getState()),
   };
-  registerTaskSessionMembershipProof(store, taskId, sessionId, (membership) => {
-    if (provenRemoval(membership, owner)) commitRemovalMembership(store, owner, membership);
+  retainRemovalMembershipProof(store, owner);
+}
+
+function retainRemovalMembershipProof(store: StoreApi<AppState>, owner: RemovalOwner): void {
+  registerTaskSessionMembershipProof(store, owner.taskId, owner.previousSessionId, (membership) => {
+    commitRemovalMembership(store, owner, membership);
   });
 }
 
@@ -187,30 +194,6 @@ function completePendingFollow(
   return true;
 }
 
-function provenRemoval(
-  membership: TaskSessionsResponse,
-  pending: RemovalOwner,
-): { primary: RemovalTarget | null } | null {
-  if (membership.total !== membership.sessions.length) return null;
-  let primary: RemovalTarget | null = null;
-  const ids = new Set<string>();
-  for (const session of membership.sessions) {
-    if (
-      !session.id ||
-      ids.has(session.id) ||
-      session.task_id !== pending.taskId ||
-      session.id === pending.previousSessionId
-    )
-      return null;
-    ids.add(session.id);
-    if (session.is_primary) {
-      if (primary) return null;
-      primary = session;
-    }
-  }
-  return { primary };
-}
-
 function retainEmptySelection(
   store: StoreApi<AppState>,
   removal: RemovalOwner,
@@ -255,7 +238,8 @@ function retireRemovalMembership(store: StoreApi<AppState>, pending: RemovalOwne
   if (state.workflowSessionFocus.request?.sessionId === pending.previousSessionId) {
     state.cancelWorkflowSessionFocus({ taskId: pending.taskId });
   }
-  forgetTaskSessionMembershipProof(store, pending.previousSessionId);
+  if (!ownsEmptySelection(store, pending))
+    forgetTaskSessionMembershipProof(store, pending.previousSessionId);
   if (isConfirmedSessionRemoved(store.getState().taskSessions, pending.previousSessionId)) return;
   invalidateTaskSessionMembership(store, pending.taskId);
   retireSessionReads(store, pending.previousSessionId);
@@ -270,7 +254,11 @@ function commitRemovalMembership(
   pending: RemovalOwner,
   membership: TaskSessionsResponse,
 ) {
-  const proof = provenRemoval(membership, pending);
+  const proof = proveRemovedSessionMembership(
+    membership,
+    pending.taskId,
+    pending.previousSessionId,
+  );
   if (!proof) return;
   const view = pendingByStore.get(store);
   const matchingView =
@@ -374,9 +362,14 @@ function verifyPreviousSession(store: StoreApi<AppState>, owner: FollowOwner): v
   const finish = () => {
     releaseView();
     releaseRestart();
-    if (pendingByStore.get(store) === pending) pendingByStore.delete(store);
+    if (pendingByStore.get(store) === pending) {
+      pendingByStore.delete(store);
+      if (isConfirmedSessionRemoved(store.getState().taskSessions, pending.previousSessionId))
+        forgetTaskSessionMembershipProof(store, pending.previousSessionId);
+    }
   };
   pendingByStore.set(store, pending);
+  if (pending.source === "removed") retainRemovalMembershipProof(store, pending);
   const read =
     pending.source === "removed"
       ? verifyRemoval(store, pending)

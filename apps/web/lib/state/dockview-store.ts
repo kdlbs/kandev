@@ -931,7 +931,15 @@ function performApplyCustomLayout(
     ...visibilityForLayout(effectiveLayout, null),
   });
   const targetEnvId = get().currentLayoutEnvId;
+  const version = layoutVersions.get(api);
   requestAnimationFrame(() => {
+    const current = get();
+    if (
+      current.api !== api ||
+      current.currentLayoutEnvId !== targetEnvId ||
+      layoutVersions.get(api) !== version
+    )
+      return;
     api.layout(safeWidth, safeHeight);
     enforceFromStore(api, get);
     syncPinnedWidthsFromApi(api, set);

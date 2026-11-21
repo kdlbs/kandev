@@ -15,6 +15,8 @@ import {
   taskUnreadSessionIds,
   TASK_UNREAD_DOT_LABEL,
 } from "./unread-divider";
+import { withToolFileTask } from "./tool-file-opening";
+import { waitForSessionState } from "./session";
 
 async function waitForIndexedConversation(
   api: ApiClient,
@@ -511,4 +513,113 @@ async function expectReadInRoute(
     expect(entry.reads.markReads.filter((read) => read.sessionId === id)).toEqual([]);
   }
   expect(await page.evaluate(() => performance.timeOrigin)).toBe(entry.started);
+}
+
+/** The coarse tablet's file tab is a different owner from phone Plan/Dockview. */
+export async function expectTabletConversationRoute(
+  context: Parameters<typeof withToolFileTask>[0],
+  assertDot: boolean,
+  screenshotPath: string,
+) {
+  const { testPage: page, apiClient: api, seedData: seed } = context;
+  await page.setViewportSize({ width: 820, height: 1180 });
+  const reads = observeReadTraffic(page);
+  expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+  await withToolFileTask(context, "read", async (session) => {
+    await expect(page.getByTestId("tablet-task-layout")).toBeVisible();
+    const taskId = new URL(page.url()).pathname.split("/").at(-1)!;
+    const sessionId = (await session.activeChat().getAttribute("data-session-id"))!;
+    await waitForSessionState(api, {
+      taskId,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "The tool-file task must settle before explicit navigation",
+    });
+    const sibling = await api.seedTaskSession(taskId, {
+      sessionId: randomUUID(),
+      agentProfileId: seed.agentProfileId,
+      state: "WAITING_FOR_INPUT",
+    });
+    const beforeSibling = (await sessionReadState(api, sibling.session_id)).cursor;
+    const query = `tablet${randomUUID().replaceAll("-", "")}`;
+    const first = await api.seedSessionMessage(sessionId, { type: "message", content: query });
+    await waitForIndexedConversation(api, seed.workspaceId, query, {
+      sessionId,
+      messageId: first.messageId,
+    });
+    await selectCommandTask(page, query, true);
+    await expect(page).toHaveURL(new RegExp(`sessionId=${sessionId}`));
+    await expect
+      .poll(async () => (await sessionReadState(api, sessionId)).cursor)
+      .toBe(first.messageId);
+    const link = session.activeChat().locator("button[title]").filter({ hasText: "Dockerfile" });
+    await expect(link).toHaveCount(1);
+    await link.tap();
+    const fileTab = page.getByRole("tab", { name: "Dockerfile", exact: true });
+    await expect(fileTab).toHaveAttribute("data-state", "active");
+    await expect(session.activeChat()).toHaveCount(0);
+    const initialStarts = reads.agentStarts().length;
+    const repeat = `tabletrepeat${randomUUID().replaceAll("-", "")}`;
+    const tail = await api.seedSessionMessage(sessionId, { type: "message", content: repeat });
+    await waitForIndexedConversation(api, seed.workspaceId, repeat, {
+      sessionId,
+      messageId: tail.messageId,
+    });
+    await expect
+      .poll(() => taskUnreadSessionIds(api, seed.workspaceId, taskId))
+      .toEqual([sessionId]);
+    await dwell(
+      page,
+      500,
+      "negative-assertion",
+      "Tablet file view must not acknowledge unseen Chat",
+    );
+    expect((await sessionReadState(api, sessionId)).cursor).toBe(first.messageId);
+    expect(reads.markReads.filter((read) => read.messageId === tail.messageId)).toEqual([]);
+    if (assertDot) {
+      const row = session.sidebarTaskItem("Tool file read");
+      await expect(row.getByRole("img", { name: TASK_UNREAD_DOT_LABEL })).toBeVisible();
+    }
+    await page.screenshot({ path: screenshotPath });
+    await selectCommandTask(page, repeat, true);
+    await expect(session.activeChat()).toHaveAttribute("data-session-id", sessionId);
+    await expect(page.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+    await page.screenshot({ path: screenshotPath.replace(".png", "-chat.png") });
+    await expect
+      .poll(async () => (await sessionReadState(api, sessionId)).cursor)
+      .toBe(tail.messageId);
+    expect((await sessionReadState(api, sibling.session_id)).cursor).toBe(beforeSibling);
+    expect(reads.markReads.map((read) => read.sessionId)).not.toContain(sibling.session_id);
+    expect(reads.agentStarts().slice(initialStarts)).toEqual([]);
+    await fileTab.tap();
+    const later = await api.seedSessionMessage(sessionId, {
+      type: "message",
+      content: "Passive tablet output",
+    });
+    await dwell(
+      page,
+      500,
+      "negative-assertion",
+      "Consumed tablet focus must not steal a later file choice",
+    );
+    await expect(fileTab).toHaveAttribute("data-state", "active");
+    expect((await sessionReadState(api, sessionId)).cursor).toBe(tail.messageId);
+    expect(reads.markReads.filter((read) => read.messageId === later.messageId)).toEqual([]);
+    await page.reload();
+    await expect(fileTab).toBeVisible();
+    await dwell(
+      page,
+      500,
+      "negative-assertion",
+      "Restored file tabs must not displace explicit Chat",
+    );
+    await expect(session.activeChat()).toHaveAttribute("data-session-id", sessionId);
+    await expect
+      .poll(async () => (await sessionReadState(api, sessionId)).cursor)
+      .toBe(later.messageId);
+    await page.screenshot({ path: screenshotPath.replace(".png", "-boot.png") });
+  });
 }

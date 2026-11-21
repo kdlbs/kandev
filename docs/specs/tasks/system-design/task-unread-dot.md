@@ -251,10 +251,10 @@ re-prove after changed primaries. Proof fills missing recipient identity/lifecyc
 
 Explicit hits use HTTP-safe scoped identity, even at the same URL.
 Routes reopen hidden targets. Restore keeps flat/tree or unique legacy choices.
-Phone consumes focus for Chat; unavailable/404 proof vetoes admission/sync.
+Phone/tablet consume Chat focus; unavailable/404 proof vetoes admission/sync.
 `workflow_focus_disposition: none`: admitted, no source/effective launch;
 omit while deferred launch is possible. Removal leases protect live/parked groups.
-Committed focus wins restore. API/env/generation fence exit work.
+Committed focus wins restore. API/env/generation fence exit/Saved Layout work.
 Changed primaries re-prove empty slots. Visibility gates restore/read/dots.
 
 `invalidateTaskSessionMembership` fences pending/admitted/queued foreground and
@@ -263,7 +263,7 @@ fences canonical/list/event/route/selection admission per store/backend; evictio
 or restart is not deletion. Queue incarnation/hydration cannot recreate deleted
 UUIDs. Survivors retain membership/freshness/cursors and comment-conflict scope.
 
-Fresh complete membership can settle uncertain removal reads; no retry.
+Fresh lists settle uncertain reads/owned confirmed slots; no retry.
 Unread/promotion/schema stay; optional move-focus metadata is backward-compatible.
 
 An unread failed sibling that was never displayed is not evidence of a failed
@@ -369,7 +369,7 @@ showDot = enabled                                     // AC .1, .3, .4
 ```
 
 Rows select by desktop `highlightedTaskId` or phone `activeTaskId`.
-Phone excludes its selected session only on Chat, not Plan/other panes.
+Phone/tablet exclude only rendered Chat, not Plan/file/other panes.
 Desktop excludes hidden, absent or group-inactive chats. Selected but undisplayed
 output keeps its dot under .17; displayed output has no dot, unread siblings do.
 

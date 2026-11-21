@@ -273,7 +273,7 @@ the same causal scenario after Task 01 proves a violation:
 Execute sequentially. No subagent authorization is implied.
 
 - [x] [Task 01: Establish the inactive-session failure boundary](task-01-establish-failure-boundary.md) (done: conformance, no violation reproduced).
-- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R28 corrections, 304 targeted tests, eight desktop/ten phone cases, strict checks/typecheck/build. Independent review continues; broad suites/live NATS remain uncertified).
+- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R29 corrections, 314 targeted tests, seven desktop/tablet and ten phone cases, strict lint/typecheck/build. Independent review continues; broad suites/live NATS remain uncertified).
 
 The prior [task unread dot package](../task-unread-dot/plan.md) is historical
 completed delivery. The [visible-visit divider package](../unread-divider-visible-session-clear/plan.md)
@@ -768,3 +768,17 @@ reader run (10 cases). Strict lint/typecheck/fresh frontend/docs pass after
 test-only lint/type corrections. Eight desktop and ten phone cases pass,
 one worker/no retries, on the final bundle. Foreground-survivor and phone
 captures inspected; Task 02 records RED/fixture failures and exact replay.
+
+### Production review R29
+
+Sol child `20cac842-75ee-4d19-ab1f-3cc5fe6dfccb` reviewed
+`9e524f6df2e9e6d01fa38c05e01d64ca60164cfc`: three P2s, not clean.
+Completed production rounds 29; consecutive clean 0. Task 02 records the
+confirmed-slot, coarse-tablet and stale Saved Layout completion corrections.
+R30 follows verified delivery.
+
+R29 final author receipts: 13 files/314 targeted tests, seven desktop/tablet
+and ten phone cases pass after the final production edit. Strict lint,
+typecheck, fresh frontend, harness/docs checks pass. Final tablet file/dot,
+Go-boot Chat and local foreground survivor captures inspected. Task 02 records
+the additional restoration RED and intermediate non-green runs separately.

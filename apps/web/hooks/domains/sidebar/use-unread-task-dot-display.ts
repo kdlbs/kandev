@@ -15,10 +15,10 @@ function useSessionHiddenInDesktopLayout(sessionId: string | null): boolean {
   const api = useDockviewStore((state) => state.api);
   // The same API can host a different environment-scoped hide set.
   useDockviewStore((state) => state.currentLayoutEnvId);
-  const { isMobile } = useResponsiveBreakpoint();
+  const { usesDesktopWorkbench } = useResponsiveBreakpoint();
   const subscribe = useCallback(
     (notify: () => void) => {
-      if (!api || isMobile) return () => {};
+      if (!api || !usesDesktopWorkbench) return () => {};
       const hide = onDidHideSessionPanel(api, notify);
       let visibility: { dispose: () => void } | undefined;
       const rebind = () => {
@@ -36,16 +36,16 @@ function useSessionHiddenInDesktopLayout(sessionId: string | null): boolean {
         visibility?.dispose();
       };
     },
-    [api, isMobile, sessionId],
+    [api, usesDesktopWorkbench, sessionId],
   );
   const snapshot = useCallback(
     () =>
       !!api &&
-      !isMobile &&
+      usesDesktopWorkbench &&
       !!sessionId &&
       (hiddenSessionIdsFor(api).has(sessionId) ||
         !api.getPanel(`session:${sessionId}`)?.api.isVisible),
-    [api, isMobile, sessionId],
+    [api, usesDesktopWorkbench, sessionId],
   );
   return useSyncExternalStore(subscribe, snapshot, serverHiddenSnapshot);
 }
@@ -55,17 +55,19 @@ export function useUnreadTaskDotDisplay() {
   const unreadMessagesEnabled = useAppStore((state) => state.userSettings.unreadTaskDot);
   const delaySeconds = useAppStore((state) => state.userSettings.unreadTaskDotHideDelaySeconds);
   const displayedSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const { isMobile } = useResponsiveBreakpoint();
-  const phoneChatVisible = useAppStore(
+  const { isMobile, isTablet } = useResponsiveBreakpoint();
+  const chatVisible = useAppStore(
     (state) =>
-      !isMobile ||
       !displayedSessionId ||
-      (state.mobileSession.activePanelBySessionId[displayedSessionId] ?? "chat") === "chat",
+      (isMobile
+        ? (state.mobileSession.activePanelBySessionId[displayedSessionId] ?? "chat") === "chat"
+        : !isTablet ||
+          (state.tabletSession.activeTabBySessionId[displayedSessionId] ?? "chat") === "chat"),
   );
   const hidden = useSessionHiddenInDesktopLayout(displayedSessionId);
   return {
     unreadMessagesEnabled,
     unreadDotHideDelayMs: delaySeconds * 1000,
-    displayedSessionId: hidden || !phoneChatVisible ? null : displayedSessionId,
+    displayedSessionId: hidden || !chatVisible ? null : displayedSessionId,
   };
 }
