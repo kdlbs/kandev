@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
@@ -675,6 +676,15 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	// and the original-config snapshot could disagree with reality).
 	profileModel = effectiveModel.model
 	runtimeModel = ""
+	thinkingConfigID := ""
+	if agentConfig.ID() == acpcompat.PiAgentID {
+		thinkingConfigID = piThinkingConfigID(execution.GetModelState())
+		profileMode, profileConfigOptions = profileconfig.PiThinkingIntent(profileMode, profileConfigOptions, thinkingConfigID)
+		runtimeMode, runtimeConfigOptions = profileconfig.PiThinkingIntent(runtimeMode, runtimeConfigOptions, thinkingConfigID)
+		if execution.sessionSettingsStartupPolicy() == SessionSettingsPolicyProviderRestored {
+			profileMode, runtimeMode = "", ""
+		}
+	}
 	finalConfigID, profileModelApplied, profileConfigOptionsApplied := sm.applyProfileSessionLayers(
 		ctx, execution, result.SessionID, profileModel, profileConfigOptions,
 		effectiveModel.handled, effectiveModel.appliedModel,
@@ -683,6 +693,12 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	// Capture the effective profile state before runtime overrides or workflow
 	// launch settings are applied. This event is intentionally separate from
 	// ConfigBaselineCandidate, which remains provider-default comparison data.
+	if thinkingConfigID != "" && profileMode != "" {
+		if profileConfigOptionsApplied == nil {
+			profileConfigOptionsApplied = make(map[string]string)
+		}
+		profileConfigOptionsApplied[thinkingConfigID] = profileMode
+	}
 	sm.publishOriginalConfigOptionsWithProfile(execution, result.SessionID, profileModelApplied, profileConfigOptionsApplied)
 
 	finalConfigID, runtimeFailures := sm.applyRuntimeSessionLayers(
@@ -693,7 +709,7 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	if requestedMode == "" {
 		requestedMode = profileMode
 	}
-	if err := sm.applyExplicitSessionMode(ctx, execution, result.SessionID, requestedMode); err != nil {
+	if err := sm.applyStartupSessionMode(ctx, execution, result.SessionID, requestedMode, thinkingConfigID, runtimeMode != ""); err != nil {
 		return err
 	}
 	execution.setSessionInitialized(true)
@@ -1104,13 +1120,17 @@ func (sm *SessionManager) applyExplicitSessionMode(ctx context.Context, executio
 	if mode == "" {
 		return nil
 	}
+	label := "permission mode"
+	if execution.AgentID == acpcompat.PiAgentID {
+		label = "thinking level"
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
 		return permissionModeBootstrapFailure(
 			execution, mode, "", models.AgentErrorCauseCodePermissionModeFailed,
 			models.AgentErrorCauseReasonClientUnavailable,
-			fmt.Errorf("requested permission mode %q cannot be applied: agentctl client is unavailable", mode),
+			fmt.Errorf("requested %s %q cannot be applied: agentctl client is unavailable", label, mode),
 		)
 	}
 	result, err := client.SetMode(ctx, sessionID, mode)
@@ -1121,21 +1141,21 @@ func (sm *SessionManager) applyExplicitSessionMode(ctx context.Context, executio
 		return permissionModeBootstrapFailure(
 			execution, mode, "", models.AgentErrorCauseCodePermissionModeFailed,
 			models.AgentErrorCauseReasonApplicationFailed,
-			fmt.Errorf("apply requested permission mode %q before the first prompt: %w", mode, err),
+			fmt.Errorf("apply requested %s %q before the first prompt: %w", label, mode, err),
 		)
 	}
 	if !result.Confirmed || result.Effective == "" {
 		return permissionModeBootstrapFailure(
 			execution, mode, result.Effective, models.AgentErrorCauseCodePermissionModeUnconfirmed,
 			models.AgentErrorCauseReasonConfirmationMissing,
-			fmt.Errorf("requested permission mode %q was not confirmed by the agent; the first prompt was not sent", mode),
+			fmt.Errorf("requested %s %q was not confirmed by the agent; the first prompt was not sent", label, mode),
 		)
 	}
 	if result.Effective != mode {
 		return permissionModeBootstrapFailure(
 			execution, mode, result.Effective, models.AgentErrorCauseCodePermissionModeMismatch,
 			models.AgentErrorCauseReasonEffectiveMismatch,
-			fmt.Errorf("requested permission mode %q was not applied; agent reported %q and the first prompt was not sent", mode, result.Effective),
+			fmt.Errorf("requested %s %q was not applied; agent reported %q and the first prompt was not sent", label, mode, result.Effective),
 		)
 	}
 	sm.logger.Info("session mode confirmed before first prompt",
@@ -1150,7 +1170,7 @@ func permissionModeBootstrapFailure(
 	cause error,
 ) *BootstrapFailure {
 	promptNotSent := true
-	return &BootstrapFailure{
+	failure := &BootstrapFailure{
 		Operation:     bootstrapOperation(execution),
 		Code:          code,
 		Reason:        reason,
@@ -1160,6 +1180,11 @@ func permissionModeBootstrapFailure(
 		PromptNotSent: &promptNotSent,
 		Cause:         cause,
 	}
+
+	if execution.AgentID == acpcompat.PiAgentID {
+		classifyThinkingFailure(failure)
+	}
+	return failure
 }
 
 func sortedConfigOptionKeys(options map[string]string) []string {

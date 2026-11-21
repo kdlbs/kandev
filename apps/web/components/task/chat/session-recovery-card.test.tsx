@@ -520,3 +520,42 @@ it("keeps a later manual recovery failure visible over the earlier process cause
   expect(screen.queryByTestId(PREREQUISITE)).toBeNull();
   expect(card.textContent).toContain(EXIT_CODE_ONE);
 });
+
+it("routes Pi thinking failures to the owning profile from the active recovery card", () => {
+  render(
+    <StateProvider
+      initialState={
+        {
+          taskSessions: { items: { session } },
+          agentProfiles: { items: [{ id: "profile", agent_name: "pi-acp" }] },
+        } as unknown as Partial<AppState>
+      }
+    >
+      <SessionRecoveryCard
+        model={{
+          sessionId: "session",
+          kind: "generic",
+          error: {
+            message: "startup failed",
+            causes: [
+              {
+                operation: "start",
+                code: "thinking_level_unavailable",
+                reason: "requested_not_advertised",
+                requested_setting: "medium",
+                setting_source: "agent_profile",
+                prompt_not_sent: true,
+              },
+            ],
+          },
+        }}
+        actions={actions}
+        onNewSession={vi.fn()}
+      />
+    </StateProvider>,
+  );
+  expect(screen.getByRole("link", { name: "Edit profile" }).getAttribute("href")).toBe(
+    "/settings/agents/pi-acp/profiles/profile",
+  );
+  expect(screen.getByTestId(RECOVERY_CARD).textContent).toContain("Use provider default");
+});

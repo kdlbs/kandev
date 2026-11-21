@@ -223,6 +223,7 @@ export type ModelConfigSelectorProps = {
   disabled?: boolean;
   placeholder?: string;
   ariaLabel?: string;
+  pickerTitle?: string;
   variant?: "compact" | "field";
   /** Aligns the picker with the trigger edge for context-specific settings surfaces. */
   popoverAlign?: "start" | "center" | "end";
@@ -481,6 +482,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector(
     disabled,
     placeholder,
     ariaLabel,
+    pickerTitle,
     variant = "field",
     popoverAlign = "end",
     popoverSide = "bottom",
@@ -553,7 +555,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector(
       triggerRef={triggerRef}
       align={popoverAlign}
       side={popoverSide}
-      title={t("agents:modelSettings")}
+      title={pickerTitle ?? t("agents:modelSettings")}
     />
   );
 });

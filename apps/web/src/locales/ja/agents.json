@@ -650,5 +650,9 @@
   "runtimeUpdatePreviewRequestError": "この更新を確認できませんでした: {{error}}",
   "runtimeUpdatePreviewUnavailable": "この更新を一括更新用に検証できませんでした。「バージョンを管理」を使用してください。",
   "runtimeUpdatePreviewChanged": "ランタイムまたは対象バージョンが変わりました。更新をもう一度確認してください。",
-  "runtimeUpdatePreviewIndividual": "このランタイムは個別に更新する必要があります。「バージョンを管理」を使用してください。"
+  "runtimeUpdatePreviewIndividual": "このランタイムは個別に更新する必要があります。「バージョンを管理」を使用してください。",
+  "thinkingLevel": "思考レベル",
+  "useProviderDefault": "プロバイダーの既定値を使用",
+  "thinkingLevelUnavailable": "{{value}}（利用不可）",
+  "editProfile": "プロファイルを編集"
 }

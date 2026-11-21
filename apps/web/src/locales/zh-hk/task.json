@@ -3346,5 +3346,15 @@
   "previewHideCapture": "隱藏截取內容",
   "previewHideComments": "隱藏評論",
   "referenceCurrentTitle": "目前標題：{{title}}",
-  "referenceOpenForDetails": "開啟任務以查看詳情。"
+  "referenceOpenForDetails": "開啟任務以查看詳情。",
+  "sessionBootstrapThinkingFailedTitle": "無法應用思考級別",
+  "sessionBootstrapThinkingUnknownBody": "無法在啓動前應用思考級別。",
+  "sessionBootstrapThinkingUnavailableBody": "{{agent}} 無法對所選模型使用思考級別「{{level}}」。",
+  "sessionBootstrapThinkingMismatchBody": "{{agent}} 報告的級別為「{{effectiveLevel}}」，而非請求的思考級別「{{level}}」。",
+  "sessionBootstrapThinkingUnconfirmedBody": "{{agent}} 未確認思考級別「{{level}}」。",
+  "sessionBootstrapThinkingFailedBody": "{{agent}} 無法應用思考級別「{{level}}」。",
+  "sessionErrorDetailThinkingLevel": "請求的思考級別",
+  "sessionErrorDetailEffectiveThinkingLevel": "實際思考級別",
+  "thinkingProfileHelp": "編輯設定檔，選擇「使用提供者預設值」或受支援的思考級別。儲存後再啓動新工作階段。",
+  "thinkingSessionHelp": "此思考級別由工作階段或工作流程的覆蓋設定指定。請修改該覆蓋設定，或將工作階段設定重置為設定檔的設定。"
 }

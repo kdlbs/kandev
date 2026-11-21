@@ -224,7 +224,7 @@ func (a *Adapter) handleACPUpdate(
 			}
 		}
 		if event != nil && event.Type == streams.EventTypeSessionModels && n.Update.ConfigOptionUpdate != nil {
-			if _, hasModeOption := modeConfigOption(event.ConfigOptions); hasModeOption {
+			if _, hasModeOption := a.modeConfigOption(event.ConfigOptions); hasModeOption || a.agentID == acpcompat.PiAgentID {
 				a.mu.RLock()
 				availableModes := append([]streams.SessionModeInfo(nil), a.availableModes...)
 				activeSession := a.sessionID == sessionID && !a.closed
@@ -233,7 +233,7 @@ func (a *Adapter) handleACPUpdate(
 					leadingEvent = &AgentEvent{
 						Type:           streams.EventTypeSessionMode,
 						SessionID:      sessionID,
-						CurrentModeID:  currentModeFromConfig(event.ConfigOptions),
+						CurrentModeID:  a.currentModeFromConfig(event.ConfigOptions),
 						AvailableModes: availableModes,
 					}
 				}
@@ -575,7 +575,7 @@ func (a *Adapter) convertACPSessionNotification(n acp.SessionNotification) (*Age
 
 	case u.ConfigOptionUpdate != nil:
 		configOptions := convertACPConfigOptions(u.ConfigOptionUpdate.ConfigOptions)
-		if len(configOptions) > 0 {
+		if len(configOptions) > 0 || a.agentID == acpcompat.PiAgentID {
 			// Refresh the cached config options so emitSetModelEvent
 			// (called from SetModel) doesn't reuse the stale snapshot from
 			// session/new. Include the cached available models so the event
@@ -587,11 +587,12 @@ func (a *Adapter) convertACPSessionNotification(n acp.SessionNotification) (*Age
 			}
 			cachedModels := a.availableModels
 			a.availableConfigOptions = configOptions
-			if modes, found := sessionModesFromConfig(configOptions); found {
+			a.clearUnknownThinkingModeLocked(configOptions)
+			if modes, found := a.sessionModesFromConfig(configOptions); found {
 				a.availableModes = modes
 			}
 			a.mu.Unlock()
-			if currentMode := currentModeFromConfig(configOptions); currentMode != "" {
+			if currentMode := a.currentModeFromConfig(configOptions); currentMode != "" {
 				a.noteCurrentMode(sessionID, currentMode)
 			}
 			return &AgentEvent{

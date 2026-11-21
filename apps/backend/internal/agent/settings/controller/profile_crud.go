@@ -715,6 +715,11 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	if err := c.applyProviderConfigUpdate(ctx, req, profile); err != nil {
 		return nil, err
 	}
+	if req.Mode != nil || req.ConfigOptions != nil {
+		if err := c.canonicalizePiThinkingProfile(ctx, profile); err != nil {
+			return nil, err
+		}
+	}
 	if req.Mode != nil || req.EnvVars != nil {
 		agentName, agentErr := resolveAgentName()
 		if agentErr != nil {

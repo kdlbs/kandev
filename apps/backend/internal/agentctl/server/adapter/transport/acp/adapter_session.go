@@ -307,7 +307,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 		a.availableModels = initialModels.AvailableModels
 	}
 	if resp.Modes == nil {
-		a.availableModes, _ = sessionModesFromConfig(initialConfigOptions)
+		a.availableModes, _ = a.sessionModesFromConfig(initialConfigOptions)
 	}
 	a.mu.Unlock()
 	if sessionID != priorSessionID {
@@ -794,7 +794,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		a.availableModels = initialModels.AvailableModels
 	}
 	if resp.Modes == nil {
-		a.availableModes, _ = sessionModesFromConfig(initialConfigOptions)
+		a.availableModes, _ = a.sessionModesFromConfig(initialConfigOptions)
 	}
 	a.mu.Unlock()
 	if sessionID != priorSessionID {
@@ -813,7 +813,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// Emit initial session mode if the agent returned mode state
 	if resp.Modes != nil {
 		a.emitInitialModeState(sessionID, resp.Modes, settingsPolicy)
-	} else if _, hasModeOption := modeConfigOption(initialConfigOptions); hasModeOption {
+	} else if _, hasModeOption := a.modeConfigOption(initialConfigOptions); hasModeOption {
 		a.emitInitialModeConfigState(sessionID, initialConfigOptions, settingsPolicy)
 	} else if providerRestoredPolicy(settingsPolicy) == streams.SessionSettingsPolicyProviderRestored {
 		a.emitEmptyInitialModeState(sessionID, settingsPolicy)
@@ -1090,7 +1090,7 @@ func (a *Adapter) emitInitialModeState(sessionID string, modes *acp.SessionModeS
 }
 
 func (a *Adapter) emitInitialModeConfigState(sessionID string, configOptions []streams.ConfigOption, settingsPolicies ...streams.SessionSettingsPolicy) {
-	modeOption, ok := modeConfigOption(configOptions)
+	modeOption, ok := a.modeConfigOption(configOptions)
 	if !ok {
 		return
 	}
@@ -1348,7 +1348,7 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	if sessionID == "" {
 		return streams.ModeResult{Requested: modeID}, fmt.Errorf("no active session: call NewSession before SetMode")
 	}
-	modeOption, hasModeOption, err := selectSessionModeOption(cachedConfig, availableModes, modeID, requestedConfigID)
+	modeOption, hasModeOption, err := selectSessionModeOption(cachedConfig, availableModes, modeID, requestedConfigID, a.agentID)
 	if err != nil {
 		return streams.ModeResult{Requested: modeID}, err
 	}
@@ -1728,12 +1728,12 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 	if sessionID == "" {
 		return fmt.Errorf("no active session: call NewSession before SetConfigOption")
 	}
-	if isModeConfigOptionID(cachedConfig, configID) {
+	if a.isModeConfigOptionID(cachedConfig, configID) {
 		result, err := a.setSessionMode(ctx, value, configID)
 		if err != nil {
 			return err
 		}
-		if !result.Confirmed {
+		if !result.Confirmed || (a.agentID == acpcompat.PiAgentID && result.Effective != value) {
 			return fmt.Errorf("requested mode %q was not confirmed by the agent", value)
 		}
 		return nil
@@ -1876,12 +1876,13 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 		return
 	}
 	a.availableConfigOptions = configOptions
-	if modes, found := sessionModesFromConfig(configOptions); found {
+	a.clearUnknownThinkingModeLocked(configOptions)
+	if modes, found := a.sessionModesFromConfig(configOptions); found {
 		a.availableModes = modes
 	}
 	modeEvent := (*AgentEvent)(nil)
-	if _, hasModeOption := modeConfigOption(configOptions); hasModeOption {
-		if currentMode := currentModeFromConfig(configOptions); currentMode != "" {
+	if _, hasModeOption := a.modeConfigOption(configOptions); hasModeOption || a.agentID == acpcompat.PiAgentID {
+		if currentMode := a.currentModeFromConfig(configOptions); currentMode != "" {
 			a.noteConfigModeSnapshotLocked(sessionID, currentMode, correlatedModeResponse)
 		}
 		if !correlatedModeResponse {
@@ -1889,7 +1890,7 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 				Type:                  streams.EventTypeSessionMode,
 				SessionID:             sessionID,
 				SessionSettingsPolicy: providerRestoredPolicy(settingsPolicy),
-				CurrentModeID:         currentModeFromConfig(configOptions),
+				CurrentModeID:         a.currentModeFromConfig(configOptions),
 				AvailableModes:        append([]streams.SessionModeInfo(nil), a.availableModes...),
 			}
 		}

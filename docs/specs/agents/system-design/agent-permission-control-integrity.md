@@ -242,6 +242,11 @@ layout, because it targets an ACP session ID rather than a workspace file.
 
 ## Mode confirmation and attribution
 
+[Session setting semantics](session-setting-semantics.md) defines the proposed
+Pi thinking classification and canonical application path. The confirmation
+rules below continue to govern real permission settings. Its
+[delivery plan](../../../plans/pi-thinking-settings/plan.md) owns that extension.
+
 ### Confirmation
 
 `acp.Adapter.SetMode` returns requested, effective, and confirmed values.
