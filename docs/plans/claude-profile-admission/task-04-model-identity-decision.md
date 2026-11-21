@@ -154,5 +154,5 @@ On 2026-11-20, the follow-up verified the managed bridge 0.107.0 catalog
 contract. A settings probe reproduced the accepted conflicting pair. A mock
 startup reproduced the strict alias failure and successful full-ID prompt.
 The [fix package](../claude-exact-model-alias/plan.md#diagnostic-results)
-records the results and the proposed save-time error. Implementation is
-pending in its own work order.
+records the results and the implemented save-time validation; its work order is
+complete.

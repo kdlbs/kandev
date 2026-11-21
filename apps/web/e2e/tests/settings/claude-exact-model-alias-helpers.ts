@@ -11,8 +11,25 @@ const CONFLICT_MESSAGE =
   "Choose a full model ID in Start model, or remove ANTHROPIC_MODEL from Environment Variables.";
 
 type Backend = {
-  restart(overrides?: Record<string, string>): Promise<void>;
+  useEnv(overrides: Record<string, string>): Promise<() => Promise<void>>;
 };
+
+async function cleanupClaudeAliasScenario(
+  apiClient: ApiClient,
+  profileId: string | undefined,
+  restoreBackendEnv: () => Promise<void>,
+  baselineAgentIds: ReadonlySet<string>,
+): Promise<void> {
+  if (profileId) await apiClient.deleteAgentProfile(profileId, true).catch(() => {});
+  await restoreBackendEnv();
+  const { agents } = await apiClient.listAgents();
+  // Mock-provider registration can persist an agent row in the shared test database.
+  for (const agent of agents) {
+    if (agent.name === "claude-acp" && !baselineAgentIds.has(agent.id)) {
+      await apiClient.deleteAgentById(agent.id);
+    }
+  }
+}
 
 export async function verifyClaudeExactModelAliasConflict(
   page: Page,
@@ -21,19 +38,26 @@ export async function verifyClaudeExactModelAliasConflict(
   mobile: boolean,
   prCapture?: PrAssetCapture,
 ): Promise<void> {
-  await backend.restart({ KANDEV_MOCK_PROVIDERS: "claude-acp" });
-  const { agents } = await apiClient.listAgents();
-  const agent = agents.find((item) => item.name === "claude-acp");
-  if (!agent) throw new Error("The E2E fixture must provide a Claude ACP mock agent");
-  const profile = await apiClient.createAgentProfile(agent.id, "Claude alias validation", {
-    model: START_MODEL_ALIAS,
-    fallback_model: "haiku",
-    auto_fallback: false,
-    require_exact_model: false,
-    env_vars: [{ key: "ANTHROPIC_MODEL", value: FULL_MODEL_ID }],
-  });
+  const { agents: baselineAgents } = await apiClient.listAgents();
+  const baselineAgentIds = new Set(baselineAgents.map((agent) => agent.id));
+  const { agents: baselineAvailableAgents } = await apiClient.listAvailableAgents();
+  const baselineAvailableAgentNames = baselineAvailableAgents.map((agent) => agent.name).sort();
+  const restoreBackendEnv = await backend.useEnv({ KANDEV_MOCK_PROVIDERS: "claude-acp" });
+  let profileId: string | undefined;
 
   try {
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((item) => item.name === "claude-acp");
+    if (!agent) throw new Error("The E2E fixture must provide a Claude ACP mock agent");
+    const profile = await apiClient.createAgentProfile(agent.id, "Claude alias validation", {
+      model: START_MODEL_ALIAS,
+      fallback_model: "haiku",
+      auto_fallback: false,
+      require_exact_model: false,
+      env_vars: [{ key: "ANTHROPIC_MODEL", value: FULL_MODEL_ID }],
+    });
+    profileId = profile.id;
+
     await page.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
     const modelSelector = page.getByRole("button", { name: "Profile start model settings" });
     await expect(modelSelector).toBeVisible({ timeout: 15_000 });
@@ -131,6 +155,13 @@ export async function verifyClaudeExactModelAliasConflict(
       .toMatchObject({ model: FULL_MODEL_ID, requireExactModel: true });
     if (mobile) await assertNoDocumentHorizontalOverflow(page, "Claude alias repair after reload");
   } finally {
-    await apiClient.deleteAgentProfile(profile.id, true).catch(() => {});
+    await cleanupClaudeAliasScenario(apiClient, profileId, restoreBackendEnv, baselineAgentIds);
   }
+
+  const { agents: restoredAgents } = await apiClient.listAgents();
+  expect(restoredAgents.map((agent) => agent.id).sort()).toEqual([...baselineAgentIds].sort());
+  const { agents: restoredAvailableAgents } = await apiClient.listAvailableAgents();
+  expect(restoredAvailableAgents.map((agent) => agent.name).sort()).toEqual(
+    baselineAvailableAgentNames,
+  );
 }
