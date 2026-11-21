@@ -26,9 +26,10 @@ func (e *AgentExecution) bindSuccessorGenerationOwner(ctx context.Context, req *
 	}
 }
 
-// Native restore, context continuation, and fresh start can emit setup events
-// before their successor generation is committed in SQL. Only explicit
-// successor launches may wait for that commit; receipt and projection still
+// Native restore, fresh start, and context continuation can emit setup events
+// before their successor generation is committed in SQL. Only an explicit
+// interrupted-conversation successor, fresh-start replacement, or authorized
+// context continuation may wait for that commit; receipt and projection still
 // require the committed generation and live owner.
 func awaitSilentRestoreGeneration(
 	ctx context.Context, execution *AgentExecution, reader harnessGenerationReader, sessionID, incarnationID string,
