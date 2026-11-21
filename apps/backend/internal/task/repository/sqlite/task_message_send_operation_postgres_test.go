@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/testutil"
 )
 
 func TestPostgresSendOperationDuplicateClaimsUseIdentityConflict(t *testing.T) {
@@ -118,4 +120,17 @@ func TestPostgresSendOperationPrunePreservesConcurrentSettlement(t *testing.T) {
 	require.Equal(t, models.SendOperationStateCommitted, loaded.State,
 		"cleanup must re-check pending state after waiting for the settlement lock")
 	require.Equal(t, "message-race", loaded.MessageID)
+}
+
+// TestPostgresSendOperationStoreBehavior is the PostgreSQL counterpart to
+// TestSendOperationStoreBehavior: the identity index uses COLLATE "C" and the
+// unique violation is classified by constraint name on this dialect.
+// Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresSendOperationStoreBehavior(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	exerciseSendOperationStore(t, repo)
 }
