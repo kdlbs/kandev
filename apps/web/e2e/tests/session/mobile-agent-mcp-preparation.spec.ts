@@ -191,7 +191,7 @@ test("opens Cursor MCP discovery timeout details on phone", async ({
     expect(await copy.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     await trigger.tap();
     await expect(trigger).toHaveAttribute("aria-expanded", "false");
-    await expect(testPage.evaluate(() => document.activeElement?.tagName)).resolves.toBe("BUTTON");
+    await expect(trigger).toBeFocused();
   } finally {
     await destroyMcpRecoveryTerminals(apiClient, fixture);
   }
