@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/system/hostmemory"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
@@ -143,6 +144,14 @@ type sessionCeilingController struct {
 	logger           *zap.Logger
 	now              func() time.Time
 	newKey           func() string
+
+	memoryGate          hostmemory.Gate
+	memoryReader        memoryPressureReader
+	memoryExempt        memoryGateExemption
+	memoryReadFailed    bool
+	memorySample        hostmemory.Reading
+	memorySampleAt      time.Time
+	memorySamplePresent bool
 }
 
 func newSessionCeilingController(ceiling int, lister admittedSessionLister, logger *zap.Logger) *sessionCeilingController {
@@ -367,7 +376,11 @@ func (c *sessionCeilingController) admitLocked(ctx context.Context, req admissio
 	if c.policy == sessioncapacity.PolicyAll {
 		return c.admitAllLocked(ctx, req, false)
 	}
-	if c.ceiling == unlimitedSessionCeiling {
+	// The memory condition is consulted even when the ceiling is unlimited.
+	// Only a pressured host needs the population read that recognizes an
+	// already-admitted session, so the unlimited fast path is kept otherwise.
+	pressured := c.memoryPressuredLocked(ctx, origin, req)
+	if c.ceiling == unlimitedSessionCeiling && !pressured {
 		return c.persistAdmissionGradeLocked(ctx, req, c.admitUnlimitedLocked(req, origin))
 	}
 
@@ -375,7 +388,7 @@ func (c *sessionCeilingController) admitLocked(ctx context.Context, req admissio
 	if err != nil {
 		return c.decideUnknownPopulationLocked(req, origin, err)
 	}
-	return c.persistAdmissionGradeLocked(ctx, req, c.decideLocked(req, origin, counted))
+	return c.persistAdmissionGradeLocked(ctx, req, c.decideLocked(req, origin, counted, pressured))
 }
 
 // admitUnlimitedLocked keeps launch ownership and callback accounting intact
@@ -395,7 +408,9 @@ func (c *sessionCeilingController) admitUnlimitedLocked(req admissionRequest, or
 
 // decideLocked is the ordinary admission decision, taken against a population the
 // caller has already read inside the critical section.
-func (c *sessionCeilingController) decideLocked(req admissionRequest, origin launchOrigin, counted map[string]struct{}) admissionDecision {
+func (c *sessionCeilingController) decideLocked(
+	req admissionRequest, origin launchOrigin, counted map[string]struct{}, pressured bool,
+) admissionDecision {
 	population := c.populationLocked(counted)
 
 	if decision, ok := c.alreadyAdmittedLocked(req, counted, population); ok {
@@ -406,6 +421,17 @@ func (c *sessionCeilingController) decideLocked(req admissionRequest, origin lau
 		population:      population,
 		populationKnown: true,
 		ceiling:         c.ceiling,
+	}
+	// Host memory pressure refuses an automatic launch that would add an agent
+	// process before the free-slot branch. Manual launches never reach here
+	// pressured, and an already-admitted session returned above, so a prompt
+	// into a live session is never held. The refusal carries no population
+	// reading, so its card note describes the host.
+	if pressured {
+		decision.reasonCode = ceilingReasonMemoryPressure
+		decision.populationKnown = false
+		c.logDecision(req, origin, decision)
+		return decision
 	}
 	switch {
 	case c.ceiling == unlimitedSessionCeiling || population < c.ceiling:
@@ -609,7 +635,8 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 	if c.policy == sessioncapacity.PolicyAll {
 		return c.admitAllLocked(ctx, req, true)
 	}
-	if c.ceiling == unlimitedSessionCeiling {
+	pressured := c.memoryPressuredLocked(ctx, origin, req)
+	if c.ceiling == unlimitedSessionCeiling && !pressured {
 		return c.persistAdmissionGradeLocked(ctx, req, c.admitUnlimitedLocked(req, origin))
 	}
 
@@ -618,7 +645,7 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 		return c.decideUnknownPopulationLocked(req, origin, err)
 	}
 	if _, isCounted := counted[req.sessionID]; req.sessionID == "" || !isCounted {
-		return c.persistAdmissionGradeLocked(ctx, req, c.decideLocked(req, origin, counted))
+		return c.persistAdmissionGradeLocked(ctx, req, c.decideLocked(req, origin, counted, pressured))
 	}
 
 	decision := admissionDecision{

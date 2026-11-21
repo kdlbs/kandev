@@ -115,6 +115,12 @@ func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admis
 		existing.populationKnown = d.populationKnown
 		return c.persistAdmissionGradeLocked(ctx, req, existing)
 	}
+	if d.populationKnown && c.memoryPressuredLocked(ctx, req.origin, req) {
+		d.reasonCode = ceilingReasonMemoryPressure
+		d.populationKnown = false
+		c.logDecision(req, req.origin, d)
+		return d
+	}
 	d = c.gradeCapacityDecisionLocked(req, p, d.populationKnown)
 	if d.admitted {
 		d.reservationKey = c.reserveGradeLocked(req)
