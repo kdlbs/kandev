@@ -117,6 +117,9 @@ errors does not take its own healthy account out of rotation.
   line shall not supply a reset. Other classifications and routing policy remain
   unchanged.
 
+Criterion 001.14's existing OpenCode period-reset behavior is also in scope;
+the exclusions below otherwise remain unchanged.
+
 - **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12:** For `opencode-acp`, an
   opening diagnostic line with one of the established `AI_APICallError:`,
   `Error:`, `Internal error:`, or `API Error:` labels followed by `free usage
@@ -157,10 +160,11 @@ Criterion 001.13 is described in the
 
 - Changing rule order, confidence levels, or classification flags beyond the
   narrow additions in criteria 001.6, 001.7, 001.8, 001.9, 001.10, 001.11,
-  001.12, 001.13, and 001.14.
+  001.12, and 001.13.
 - Changing other or unrelated provider-neutral rules or any runtime-environment
   rules. The named prompt-send context-length signature in criterion 001.7 is in
   scope.
+
 - Changing how classified failures suspend candidates or select a successor.
 
 ## Literal catalog follow-up
