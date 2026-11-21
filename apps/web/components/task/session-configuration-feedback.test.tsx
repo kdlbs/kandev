@@ -1,13 +1,20 @@
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, render, renderHook } from "@testing-library/react";
+import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { usePickerConfigurationFeedback } from "./session-configuration-feedback";
+import { ApiError } from "@/lib/api/client";
+
+import {
+  PickerConfigurationFeedbackMessage,
+  usePickerConfigurationFeedback,
+} from "./session-configuration-feedback";
 
 const SESSION_A = "session-a";
 const SESSION_B = "session-b";
 const EXECUTION_1 = "execution-1";
 const EXECUTION_2 = "execution-2";
 const MODEL_B = "model-b";
+const SAVE_PERSISTENCE_ERROR = "failed to persist session runtime config";
 
 afterEach(() => {
   cleanup();
@@ -186,5 +193,149 @@ describe("picker configuration feedback scope", () => {
       result.current.controller.showError(id, "Model", "model-b", new Error("request timed out"));
     });
     expect(result.current.feedback?.status).toBe("unconfirmed");
+  });
+});
+
+describe("picker configuration outcome summaries", () => {
+  it("shows a deferred persistence failure without implying the setting was applied", () => {
+    const anchorRef = createRef<HTMLDivElement>();
+    const { result } = renderHook(() =>
+      usePickerConfigurationFeedback(false, {
+        sessionId: SESSION_A,
+        executionId: EXECUTION_1,
+      }),
+    );
+    act(() => {
+      const id = result.current.controller.begin();
+      result.current.controller.showResult(id, "Model", MODEL_B, {
+        status: "persistence_failed",
+        requested: MODEL_B,
+        confirmed: false,
+      });
+    });
+
+    expect(result.current.feedback?.status).toBe("persistence_failed");
+    const view = render(
+      <PickerConfigurationFeedbackMessage
+        anchorRef={anchorRef}
+        isMobile={false}
+        message={result.current.message}
+        passive={result.current.passive}
+      />,
+    );
+    expect(view.container.textContent).toContain("could not be saved");
+    expect(view.container.textContent).not.toContain("applied");
+  });
+
+  it("shows the confirmed value and the unconfirmed option in a mixed result", () => {
+    const anchorRef = createRef<HTMLDivElement>();
+    const { result } = renderHook(() =>
+      usePickerConfigurationFeedback(false, {
+        sessionId: SESSION_A,
+        executionId: EXECUTION_1,
+      }),
+    );
+    act(() => {
+      const id = result.current.controller.begin();
+      result.current.controller.showChanges(id, [
+        {
+          label: "Model",
+          requested: MODEL_B,
+          result: {
+            status: "applied",
+            requested: MODEL_B,
+            effective: MODEL_B,
+            confirmed: true,
+            execution_id: EXECUTION_1,
+          },
+        },
+        {
+          label: "Thinking",
+          requested: "high",
+          result: { status: "unconfirmed", requested: "high", confirmed: false },
+        },
+      ]);
+    });
+
+    expect(result.current.feedback?.status).toBe("mixed");
+    const view = render(
+      <PickerConfigurationFeedbackMessage
+        anchorRef={anchorRef}
+        isMobile={false}
+        message={result.current.message}
+        passive={result.current.passive}
+      />,
+    );
+    expect(view.container.textContent).toContain(`Model: ${MODEL_B}`);
+    expect(view.container.textContent).toContain("Thinking: high");
+  });
+});
+
+describe("picker partial persistence feedback", () => {
+  it("keeps a live-but-unsaved base result visible when a later option is rejected", () => {
+    const anchorRef = createRef<HTMLDivElement>();
+    const { result } = renderHook(() =>
+      usePickerConfigurationFeedback(false, {
+        sessionId: SESSION_A,
+        executionId: EXECUTION_1,
+      }),
+    );
+    const modelSaveError = new ApiError(SAVE_PERSISTENCE_ERROR, 500, {
+      error: SAVE_PERSISTENCE_ERROR,
+      configuration_result: {
+        status: "persistence_failed",
+        config_id: "model",
+        requested: MODEL_B,
+        effective: MODEL_B,
+        confirmed: true,
+        execution_id: EXECUTION_1,
+      },
+    });
+    const optionRejection = new ApiError("requested value is unsupported", 500, {
+      error: "requested value is unsupported",
+      configuration_result: {
+        status: "rejected",
+        config_id: "thinking",
+        requested: "high",
+        confirmed: false,
+        execution_id: EXECUTION_1,
+      },
+    });
+    act(() => {
+      const id = result.current.controller.begin();
+      result.current.controller.showChanges(
+        id,
+        [
+          {
+            label: "Model",
+            requested: MODEL_B,
+            result:
+              modelSaveError.body &&
+              (modelSaveError.body as { configuration_result: never }).configuration_result,
+            error: modelSaveError,
+          } as never,
+          {
+            label: "Thinking",
+            requested: "high",
+            result: (optionRejection.body as { configuration_result: never }).configuration_result,
+            error: optionRejection,
+          } as never,
+        ],
+        { label: "Thinking", value: "high", error: optionRejection },
+      );
+    });
+
+    const view = render(
+      <PickerConfigurationFeedbackMessage
+        anchorRef={anchorRef}
+        isMobile={false}
+        message={result.current.message}
+        passive={result.current.passive}
+      />,
+    );
+    expect(view.container.textContent).toContain(`Model: ${MODEL_B} applied`);
+    expect(view.container.textContent).toContain("could not be saved");
+    expect(view.container.textContent).toContain("Thinking: high");
+    expect(view.container.textContent).toContain("requested value is unsupported");
   });
 });

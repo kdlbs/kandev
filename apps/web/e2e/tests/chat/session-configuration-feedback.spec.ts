@@ -1,44 +1,6 @@
-import type { Page } from "@playwright/test";
-
 import { test, expect } from "../../fixtures/test-base";
-import type { ApiClient } from "../../helpers/api-client";
-import type { SeedData } from "../../fixtures/test-base";
 import { waitForHttp, watchWs } from "../../helpers/causal-waits";
-import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
-import { SessionPage } from "../../pages/session-page";
-
-async function seedAndOpenChat(page: Page, apiClient: ApiClient, seedData: SeedData) {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    "Picker Configuration Feedback",
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-  if (!task.session_id) throw new Error("expected an auto-started picker feedback session");
-  await waitForAgentMessage(
-    apiClient,
-    task.session_id,
-    "This is a simple mock response for e2e testing.",
-    30_000,
-  );
-  await waitForSessionState(apiClient, {
-    taskId: task.id,
-    sessionId: task.session_id,
-    expectedState: "WAITING_FOR_INPUT",
-    timeout: 30_000,
-    message: "initial picker feedback turn must settle before interaction",
-  });
-  await page.goto(`/t/${task.id}`);
-  const session = new SessionPage(page);
-  await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 30_000 });
-  return { session, sessionId: task.session_id };
-}
+import { seedAndOpenChat } from "./session-configuration-feedback-helpers";
 
 test.describe("Picker feedback", () => {
   test.describe.configure({ retries: 1, timeout: 90_000 });
@@ -48,7 +10,12 @@ test.describe("Picker feedback", () => {
     apiClient,
     seedData,
   }) => {
-    const { session } = await seedAndOpenChat(testPage, apiClient, seedData);
+    const { session } = await seedAndOpenChat(
+      testPage,
+      apiClient,
+      seedData,
+      "Picker Configuration Feedback",
+    );
     await testPage.clock.install();
     const trigger = testPage.getByRole("button", { name: "Session model settings" });
     await expect(trigger).toContainText("Mock Fast");
@@ -82,6 +49,13 @@ test.describe("Picker feedback", () => {
     await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
     await expect(trigger).toContainText("Mock Smart");
     await expect(session.chat).toContainText("This is a simple mock response for e2e testing.");
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(testPage.getByRole("button", { name: "Session model settings" })).toContainText(
+      "Mock Smart",
+    );
+    await expect(testPage.getByTestId("session-configuration-feedback")).toHaveCount(0);
   });
 
   test("shows the observed model under its silent configuration command", async ({
@@ -90,7 +64,12 @@ test.describe("Picker feedback", () => {
     seedData,
   }) => {
     const ws = watchWs(testPage);
-    const { session, sessionId } = await seedAndOpenChat(testPage, apiClient, seedData);
+    const { session, sessionId } = await seedAndOpenChat(
+      testPage,
+      apiClient,
+      seedData,
+      "Picker Command Feedback",
+    );
     await testPage.clock.install();
     const completion = ws.waitForEvent("session.turn.completed", {
       where: (payload) => payload.session_id === sessionId,

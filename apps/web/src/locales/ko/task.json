@@ -709,6 +709,7 @@
   "sessionConfigurationUnconfirmed": "{{value}}을(를) 확인할 수 없습니다.",
   "sessionConfigurationRejected": "{{value}}을(를) 적용할 수 없습니다. {{reason}}",
   "sessionConfigurationPersistenceFailed": "{{value}}을(를) 적용했지만 저장하지 못했습니다. {{reason}}",
+  "sessionConfigurationSaveFailed": "{{value}}을(를) 저장하지 못했습니다. {{reason}}",
   "sessionConfigurationMixed": "설정 결과가 혼합되어 있습니다. 적용됨: {{applied}}. 다음 실행을 위해 저장됨: {{saved}}. 확인되지 않음: {{unconfirmed}}.",
   "sessionConfigurationRejectedReason": "에이전트가 변경을 거부했습니다.",
   "sessionConfigurationPartial": "{{applied}}을(를) 적용했습니다. {{failed}}은(는) 적용할 수 없습니다. {{reason}}",

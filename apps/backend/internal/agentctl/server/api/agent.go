@@ -1704,7 +1704,12 @@ func (s *Server) adapterAction(
 
 	if err := action(agentAdapter); err != nil {
 		s.logger.Error(msg.Action+" failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		code := ws.ErrorCodeInternalError
+		var rejected *streams.SessionConfigurationRejectedError
+		if errors.As(err, &rejected) {
+			code = ws.ErrorCodeValidation
+		}
+		resp, _ := ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 		return resp
 	}
 

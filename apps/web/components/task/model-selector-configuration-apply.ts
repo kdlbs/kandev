@@ -74,9 +74,12 @@ function createSessionMutator({
         throw error;
       }
     },
-    applyOption: async (optionId: string, value: string) => {
+    applyOption: async (optionId: string, value: string, expectedModelId?: string) => {
       try {
-        return observeResponse(await setSessionConfigOption(sid, optionId, value));
+        const response = expectedModelId
+          ? await setSessionConfigOption(sid, optionId, value, expectedModelId)
+          : await setSessionConfigOption(sid, optionId, value);
+        return observeResponse(response);
       } catch (error) {
         observeResponse(error);
         throw error;
@@ -124,7 +127,10 @@ function createModelValueWriter({
     const live = store.getState().sessionModels.bySessionId[sid] ?? sessionModelsData;
     if (!live) return;
     const next = { ...live, currentModelId: modelId };
-    if (liveChange) next.fallbackModel = undefined;
+    if (liveChange) {
+      next.fallbackModel = undefined;
+      next.savedModelPreferenceId = undefined;
+    }
     setSessionModels(sid, next);
   };
 }
@@ -143,59 +149,6 @@ async function captureConfigurationStep(
     failure.error = error;
     onError?.(error);
     throw error;
-  }
-}
-
-function commitConfirmedConfiguration({
-  sid,
-  changes,
-  modelConfigId,
-  modelConfig,
-  sessionModelsData,
-  store,
-  setActiveModel,
-  setSessionModels,
-  updateLocalConfig,
-  canCommit,
-}: {
-  sid: string;
-  changes: ConfigurationChangeOutcome[];
-  modelConfigId: string;
-  modelConfig: SelectConfigOption | undefined;
-  sessionModelsData: SessionModelsEntry | undefined;
-  store: ReturnType<typeof useAppStoreApi>;
-  setActiveModel: (sessionId: string, modelId: string) => void;
-  setSessionModels: (sessionId: string, data: SessionModelsEntry) => void;
-  updateLocalConfig: (sessionId: string, configId: string, value: string) => void;
-  canCommit: (response: unknown) => boolean;
-}) {
-  for (const change of changes) {
-    const result = change.result;
-    if (
-      (result?.status !== "applied" && result?.status !== "persistence_failed") ||
-      result.confirmed !== true ||
-      !result.effective ||
-      !canCommit({ configuration_result: result })
-    ) {
-      continue;
-    }
-    if (change.configId !== modelConfigId) {
-      updateLocalConfig(sid, change.configId ?? "", result.effective);
-      continue;
-    }
-    if (modelConfig) {
-      updateLocalConfig(sid, modelConfig.id, result.effective);
-      continue;
-    }
-    setActiveModel(sid, result.effective);
-    const live = store.getState().sessionModels.bySessionId[sid] ?? sessionModelsData;
-    if (live) {
-      setSessionModels(sid, {
-        ...live,
-        currentModelId: result.effective,
-        fallbackModel: undefined,
-      });
-    }
   }
 }
 
@@ -259,6 +212,7 @@ function executeModelConfigurationSelection({
             label: modelLabel,
             requested: modelId,
             result: errorConfigurationResult(error),
+            error,
           }),
       ),
     applyOption: (optionId, value) =>
@@ -278,6 +232,7 @@ function executeModelConfigurationSelection({
             label: optionLabels.get(optionId) ?? optionId,
             requested: value,
             result: errorConfigurationResult(error),
+            error,
           }),
       ),
     onModelConfirmed: (modelId) => {
@@ -311,7 +266,11 @@ function reportModelConfigurationOptionFailure(
     error: unknown;
     optionLabels: Map<string, string>;
     applyModel: (model: string) => Promise<SetSessionConfigurationResponse>;
-    applyOption: (optionId: string, value: string) => Promise<SetSessionConfigurationResponse>;
+    applyOption: (
+      optionId: string,
+      value: string,
+      expectedModelId?: string,
+    ) => Promise<SetSessionConfigurationResponse>;
     isCurrent: () => boolean;
     isConfirmedResponse: (response: unknown) => boolean;
   },
@@ -419,18 +378,6 @@ async function runModelConfigurationSelection(options: ModelConfigurationRunOpti
   });
 
   if (result.status === "superseded" || result.status === "cancelled") return;
-  commitConfirmedConfiguration({
-    sid,
-    changes,
-    modelConfigId,
-    modelConfig,
-    sessionModelsData,
-    store,
-    setActiveModel,
-    setSessionModels,
-    updateLocalConfig,
-    canCommit: mutator.canCommit,
-  });
   if (result.status === "model_failed") {
     reportModelConfigurationFailure({
       ...options,

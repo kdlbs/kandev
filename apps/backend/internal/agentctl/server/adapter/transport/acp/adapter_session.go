@@ -1742,13 +1742,10 @@ func (a *Adapter) maybeEmitAuthRequired(err error) bool {
 // equivalent event; downstream persistence is idempotent so duplicates are
 // harmless.
 func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) error {
-	result, err := a.SetConfigOptionWithResult(ctx, configID, value)
+	result, isModeOption, err := a.setConfigOptionWithModeClassification(ctx, configID, value)
 	if err != nil {
 		return err
 	}
-	a.mu.RLock()
-	isModeOption := isModeConfigOptionID(a.availableConfigOptions, configID)
-	a.mu.RUnlock()
 	if isModeOption && !result.Confirmed {
 		return fmt.Errorf("requested mode %q was not confirmed by the agent", value)
 	}
@@ -1761,6 +1758,14 @@ func (a *Adapter) SetConfigOptionWithResult(
 	ctx context.Context,
 	configID, value string,
 ) (streams.ConfigurationResult, error) {
+	result, _, err := a.setConfigOptionWithModeClassification(ctx, configID, value)
+	return result, err
+}
+
+func (a *Adapter) setConfigOptionWithModeClassification(
+	ctx context.Context,
+	configID, value string,
+) (streams.ConfigurationResult, bool, error) {
 	result := streams.ConfigurationResult{ConfigID: configID, Requested: value}
 	settingsPolicy := streams.SessionSettingsPolicyFromContext(ctx)
 	a.mu.RLock()
@@ -1768,35 +1773,37 @@ func (a *Adapter) SetConfigOptionWithResult(
 	sessionID := a.sessionID
 	cachedConfig := a.availableConfigOptions
 	a.mu.RUnlock()
+	isModeOption := isModeConfigOptionID(cachedConfig, configID)
 
 	if conn == nil {
-		return result, fmt.Errorf("adapter not initialized")
+		return result, isModeOption, fmt.Errorf("adapter not initialized")
 	}
 	if sessionID == "" {
-		return result, fmt.Errorf("no active session: call NewSession before SetConfigOption")
+		return result, isModeOption, fmt.Errorf("no active session: call NewSession before SetConfigOption")
 	}
-	if isModeConfigOptionID(cachedConfig, configID) {
-		return a.setModeConfigOptionResult(ctx, configID, value)
+	if isModeOption {
+		result, err := a.setModeConfigOptionResult(ctx, configID, value)
+		return result, isModeOption, err
 	}
 	if err := a.lockConfigChange(ctx); err != nil {
-		return result, err
+		return result, isModeOption, err
 	}
 	defer a.configChangeMu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return result, err
+		return result, isModeOption, err
 	}
 
 	a.mu.RLock()
 	if a.sessionID != sessionID {
 		a.mu.RUnlock()
-		return result, nil
+		return result, isModeOption, nil
 	}
 	cachedModels := append([]modelInfo(nil), a.availableModels...)
 	cachedConfig = cloneConfigOptions(a.availableConfigOptions)
 	a.mu.RUnlock()
 	generation := a.beginConfigChange()
 	if !a.isCurrentConfigChange(sessionID, generation) {
-		return result, nil
+		return result, isModeOption, nil
 	}
 
 	rpc, err := a.dialect.configRequest(dialectConfigChange{
@@ -1807,7 +1814,7 @@ func (a *Adapter) SetConfigOptionWithResult(
 		config:    cachedConfig,
 	})
 	if err != nil {
-		return result, err
+		return result, isModeOption, err
 	}
 	request := configOptionApplyRequest{
 		conn:           conn,
@@ -1820,9 +1827,11 @@ func (a *Adapter) SetConfigOptionWithResult(
 		generation:     generation,
 	}
 	if rpc != nil {
-		return a.applyConfigOptionRPC(ctx, request, rpc)
+		result, err := a.applyConfigOptionRPC(ctx, request, rpc)
+		return result, isModeOption, err
 	}
-	return a.applyConfigOptionStandard(ctx, request)
+	result, err = a.applyConfigOptionStandard(ctx, request)
+	return result, isModeOption, err
 }
 
 func (a *Adapter) setModeConfigOptionResult(
@@ -1910,7 +1919,12 @@ func (a *Adapter) applyConfigOptionStandard(
 		return result, nil
 	}
 	if err != nil {
-		return result, fmt.Errorf("set session config option failed: %w", err)
+		wrapped := fmt.Errorf("set session config option failed: %w", err)
+		var requestErr *acp.RequestError
+		if errors.As(err, &requestErr) && requestErr.IsRemoteResponse() {
+			return result, streams.NewSessionConfigurationRejectedError(wrapped)
+		}
+		return result, wrapped
 	}
 	a.mu.RLock()
 	sessionActive := a.sessionID == request.sessionID

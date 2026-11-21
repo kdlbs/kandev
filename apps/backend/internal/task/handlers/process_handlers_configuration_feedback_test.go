@@ -242,6 +242,70 @@ func TestSessionConfigurationExplicitRejectionKeepsReadableReason(t *testing.T) 
 	}
 }
 
+func TestSessionConfigurationConfigOptionRejectionIsRejected(t *testing.T) {
+	err := errors.New("set config option failed: set session config option failed: requested value is unsupported")
+	for _, configID := range []string{"reasoning_effort", "model", "mode"} {
+		t.Run(configID, func(t *testing.T) {
+			if got := sessionConfigurationSetterErrorStatus("config option", err); got != sessionConfigurationStatusRejected {
+				t.Fatalf("status = %q, want rejected for explicit provider response", got)
+			}
+		})
+	}
+}
+
+func TestSessionConfigurationRetryRequiresExpectedBaseModel(t *testing.T) {
+	setterCalls := make(chan struct{}, 1)
+	client := startConfigurationAgentctlStream(t, func(request ws.Message, connection *websocket.Conn) {
+		setterCalls <- struct{}{}
+		response, err := ws.NewResponse(request.ID, request.Action, map[string]any{
+			"requested": "high", "effective": "high", "confirmed": true,
+		})
+		if err != nil {
+			t.Errorf("create setter response: %v", err)
+			return
+		}
+		if err := connection.WriteJSON(response); err != nil {
+			t.Errorf("write setter response: %v", err)
+		}
+	})
+
+	log := processConfigurationTestLogger(t)
+	session := &models.TaskSession{ID: "session-config-retry-model", TaskID: "task-1", State: models.TaskSessionStateIdle}
+	repo := &mockRepository{sessions: map[string]*models.TaskSession{session.ID: session}}
+	svc := processConfigurationService(repo, repo, log)
+	mgr := newLifecycleManager(t, log)
+	execution := (&lifecycle.ExecutorInstance{InstanceID: "exec-retry-model", Client: client}).ToAgentExecution(
+		&lifecycle.ExecutorCreateRequest{SessionID: session.ID, TaskID: session.TaskID},
+	)
+	execution.ACPSessionID = "acp-session"
+	execution.SetModelState(&lifecycle.CachedModelState{CurrentModelID: "model-c"})
+	setHandlerExecutionInitialized(t, execution)
+	addExecution(t, mgr, execution)
+	router := newProcessStopRouter(t, svc, mgr, log)
+	request := httptest.NewRequest(http.MethodPost,
+		"/api/v1/task-sessions/session-config-retry-model/set-config-option",
+		strings.NewReader(`{"config_id":"thinking","value":"high","expected_model_id":"model-b"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", recorder.Code, recorder.Body.String())
+	}
+	var response sessionConfigurationHTTPResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.ConfigurationResult.Status != "unconfirmed" || response.ConfigurationResult.Confirmed {
+		t.Fatalf("configuration_result = %+v, want unconfirmed precondition failure", response.ConfigurationResult)
+	}
+	select {
+	case <-setterCalls:
+		t.Fatal("provider option mutation ran after the base model changed")
+	default:
+	}
+}
+
 type sessionConfigurationHTTPResponse struct {
 	Error               string `json:"error"`
 	ConfigurationResult struct {

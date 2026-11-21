@@ -7,6 +7,7 @@ import {
   type ReactNode,
   type RefObject,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -562,6 +563,13 @@ export const ModeSelector = memo(function ModeSelector({
   const modeState = useModeSelectorState(sessionId);
   const { dropdownOpen, tooltipOpen, handleDropdownOpenChange, handleTooltipOpenChange } =
     useModeSelectorDropdownState();
+
+  useEffect(() => {
+    if (!sessionId || !modeState) {
+      setPickerOpen(false);
+      handleDropdownOpenChange(false);
+    }
+  }, [handleDropdownOpenChange, modeState, sessionId]);
 
   const handleModeChange = useModeChangeHandler(
     sessionId,

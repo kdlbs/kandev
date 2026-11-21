@@ -404,6 +404,7 @@ export type SessionModelsState = {
       settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model. */
       fallbackModel?: string;
+      savedModelPreferenceId?: string;
     }
   >;
 };
@@ -748,6 +749,7 @@ export type SessionRuntimeSliceActions = {
       /** Set when the session started on the profile's fallback model
        *  because the configured start model was unavailable. */
       fallbackModel?: string;
+      savedModelPreferenceId?: string;
     },
   ) => void;
   /** Hide a previous execution's provider configuration while startup identity settles. */

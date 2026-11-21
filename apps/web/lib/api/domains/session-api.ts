@@ -300,10 +300,24 @@ export async function resolveSessionModelConfig(
   );
 }
 
-export async function setSessionConfigOption(sessionId: string, configId: string, value: string) {
+export async function setSessionConfigOption(
+  sessionId: string,
+  configId: string,
+  value: string,
+  expectedModelId?: string,
+) {
   return fetchJson<SetSessionConfigurationResponse>(
     `/api/v1/task-sessions/${sessionId}/set-config-option`,
-    { init: { method: "POST", body: JSON.stringify({ config_id: configId, value }) } },
+    {
+      init: {
+        method: "POST",
+        body: JSON.stringify({
+          config_id: configId,
+          value,
+          ...(expectedModelId ? { expected_model_id: expectedModelId } : {}),
+        }),
+      },
+    },
   );
 }
 

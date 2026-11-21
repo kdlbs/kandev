@@ -71,12 +71,25 @@ type unconfirmedModeResultAdapter struct {
 	setConfigErr error
 }
 
+type rejectedConfigurationOptionAdapter struct {
+	bareAgentAdapter
+	setConfigErr error
+}
+
 func (a *unconfirmedModeResultAdapter) SetConfigOption(_ context.Context, _, _ string) error {
 	return a.setConfigErr
 }
 
 func (a *unconfirmedModeResultAdapter) SetConfigOptionWithResult(_ context.Context, configID, value string) (streams.ConfigurationResult, error) {
 	return streams.ConfigurationResult{ConfigID: configID, Requested: value}, nil
+}
+
+func (a *rejectedConfigurationOptionAdapter) SetConfigOption(_ context.Context, _, _ string) error {
+	return a.setConfigErr
+}
+
+func (a *rejectedConfigurationOptionAdapter) SetConfigOptionWithResult(_ context.Context, configID, value string) (streams.ConfigurationResult, error) {
+	return streams.ConfigurationResult{ConfigID: configID, Requested: value}, a.setConfigErr
 }
 
 func (a *configurationResultAgentAdapter) SetModelWithResult(_ context.Context, modelID string) (streams.ConfigurationResult, error) {
@@ -398,6 +411,30 @@ func TestAgentSessionSetConfigOptionLegacyPathPreservesStrictModeError(t *testin
 	}
 	if got.Message != strictErr.Error() {
 		t.Fatalf("legacy setter error = %q, want %q", got.Message, strictErr.Error())
+	}
+}
+
+func TestAgentSessionConfigOptionPreservesExplicitProviderRejection(t *testing.T) {
+	s := newTestServer(t)
+	providerErr := errors.New("set session config option failed: unsupported value")
+	s.procMgr.SetAdapterForTest(&rejectedConfigurationOptionAdapter{
+		bareAgentAdapter: bareAgentAdapter{sessionID: "session-1"},
+		setConfigErr:     streams.NewSessionConfigurationRejectedError(providerErr),
+	})
+	msg, err := ws.NewRequest("req-config-rejected", "agent.session.set_config_option", map[string]any{
+		"config_id": "reasoning_effort", "value": "high", "include_configuration_result": true,
+	})
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	response := s.handleWSSetConfigOption(context.Background(), msg)
+	var got ws.ErrorPayload
+	if err := response.ParsePayload(&got); err != nil {
+		t.Fatalf("parse rejection: %v", err)
+	}
+	if got.Code != ws.ErrorCodeValidation || !strings.Contains(got.Message, "unsupported value") {
+		t.Fatalf("provider rejection = %+v, want validation error with readable reason", got)
 	}
 }
 

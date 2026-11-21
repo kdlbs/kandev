@@ -933,7 +933,7 @@ export class WebSocketClient {
     );
   }
 
-  private handleCoreConversationChanged(value: unknown, suppressConfigurationFeedback = false) {
+  private handleCoreConversationChanged(value: unknown) {
     const parsed = parseCoreConversationChange(value);
     if (!parsed) return;
     const { sessionId } = parsed;
@@ -948,13 +948,12 @@ export class WebSocketClient {
       );
       return;
     }
-    this.projectCoreConversationChange(parsed, stream, suppressConfigurationFeedback);
+    this.projectCoreConversationChange(parsed, stream);
   }
 
   private projectCoreConversationChange(
     parsed: ParsedCoreConversationChange,
     stream: CoreSessionStream,
-    suppressConfigurationFeedback: boolean,
   ) {
     const { sessionId } = parsed;
     if (!parsed.valid) return;
@@ -973,11 +972,7 @@ export class WebSocketClient {
       return;
     }
     stream.conversationAppliedRevision = revision;
-    this.projectCoreConversationOperations(
-      sessionId,
-      validPayload.operations ?? [],
-      suppressConfigurationFeedback,
-    );
+    this.projectCoreConversationOperations(sessionId, validPayload.operations ?? []);
   }
 
   private handleCoreConversationControl(
@@ -1045,30 +1040,18 @@ export class WebSocketClient {
     if (!stream.ready || stream.needsHydration || stream.projectionPaused) return;
     const pending = stream.conversationPendingChanges.splice(0);
     for (const change of pending) {
-      this.handleCoreConversationChanged(change, true);
+      this.handleCoreConversationChanged(change);
       if (stream.needsHydration || stream.projectionPaused) return;
     }
     if (this.coreSessionStreams.get(sessionId) !== stream) return;
   }
 
-  private projectCoreConversationOperations(
-    sessionId: string,
-    operations: unknown[],
-    suppressConfigurationFeedback = false,
-  ) {
+  private projectCoreConversationOperations(sessionId: string, operations: unknown[]) {
     for (const value of operations) {
       if (!value || typeof value !== "object" || Array.isArray(value)) continue;
       const operation = value as CoreConversationOperation;
       if (!isCoreConversationOperation(operation)) continue;
       const projected = projectCoreConversationOperation(sessionId, operation);
-      if (
-        suppressConfigurationFeedback &&
-        projected.action === "session.turn.completed" &&
-        projected.payload &&
-        typeof projected.payload === "object"
-      ) {
-        delete (projected.payload as { configuration_result?: unknown }).configuration_result;
-      }
       this.dispatchConversationNotification(projected.action, projected.payload);
     }
   }

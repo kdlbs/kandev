@@ -64,8 +64,9 @@ observation. A bare `/model` uses the ordinary prompt path. An unchanged,
 competing, or missing update stays unconfirmed. Add
 `TestConfigurationCommandFeedbackReady` for the numbered Ready path and
 a case for Core projection. Exercise duplicate completion, replay, and
-settlement of the correct turn. Check that a recognized config command
-cannot be retried by the existing empty-turn classifier.
+settlement of the correct turn. Cover provider-specific model option IDs and
+both directions of the Codex `/plan` toggle. Check that a recognized config
+command cannot be retried by the existing empty-turn classifier.
 
 Use the plain model form in a mock ACP fixture that emits a configuration
 update and an empty `end_turn`. Submit it from the composer in both specs
@@ -77,7 +78,7 @@ projects. Run the desktop build before the no-build phone run.
 (cd apps/backend && go test ./cmd/mock-agent ./internal/agentctl/server/adapter/transport/acp \
   ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/task/service \
   ./internal/gateway/websocket \
-  -run 'Test(ConfigurationCommandFeedback.*|HandleAgentReady_DelayedOldGenerationDoesNotCompleteReplacementTurn|CompleteTurn_PublishesHadOutput|ConversationDeliveryProjectsSafeCoreTurnMetadataAndCompletion)$' -count=1)
+  -run 'Test(ConfigurationCommandFeedback.*|ConfigurationCommandAcceptsProviderModelConfigID|CodexPlanCommandResolvesBothToggleDirections|HandleAgentReady_DelayedOldGenerationDoesNotCompleteReplacementTurn|CompleteTurn_PublishesHadOutput|ConversationDeliveryProjectsSafeCoreTurnMetadataAndCompletion)$' -count=1)
 (cd apps/web && pnpm run test lib/ws/client.test.ts \
   lib/ws/handlers/empty-turn-notice.test.ts \
   lib/state/slices/session-runtime/session-configuration-feedback.test.ts)

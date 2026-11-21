@@ -100,7 +100,23 @@ describe("computeEmptyTurnNotice", () => {
     expect(computeEmptyTurnNotice(baseInput({ hadOutput: undefined }))).toBeNull();
   });
 
-  it("does not show a command receipt without the initiating user command", () => {
+  it("shows an owned backend receipt before the initiating message finishes loading", () => {
+    const notice = computeEmptyTurnNotice(
+      baseInput({
+        messages: [],
+        configuration_result: {
+          status: "applied",
+          config_id: "primary_model",
+          requested: MOCK_SMART,
+          effective: MOCK_SMART,
+          confirmed: true,
+        },
+      }),
+    );
+    expect(notice?.metadata?.variant).toBe("configuration_command_feedback");
+  });
+
+  it("does not show an incomplete command receipt", () => {
     expect(
       computeEmptyTurnNotice(
         baseInput({
@@ -116,20 +132,20 @@ describe("computeEmptyTurnNotice", () => {
     ).toBeNull();
   });
 
-  it("does not attach a command receipt to a different user command", () => {
-    expect(
-      computeEmptyTurnNotice(
-        baseInput({
-          messages: [userMessage("turn-1", "/other-command")],
-          configuration_result: {
-            status: "applied",
-            requested: MOCK_SMART,
-            effective: MOCK_SMART,
-            confirmed: true,
-          },
-        }),
-      ),
-    ).toBeNull();
+  it("accepts a provider-specific model option ID for /model receipts", () => {
+    const notice = computeEmptyTurnNotice(
+      baseInput({
+        messages: [userMessage("turn-1", "/model model-b")],
+        configuration_result: {
+          status: "applied",
+          config_id: "primary_model",
+          requested: "Model B",
+          effective: "Model B",
+          confirmed: true,
+        },
+      }),
+    );
+    expect(notice?.metadata?.variant).toBe("configuration_command_feedback");
   });
 });
 

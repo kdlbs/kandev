@@ -504,6 +504,28 @@ func TestAgentSessionConfigOptionResultIsRequestedOnlyForPickerPath(t *testing.T
 	}
 }
 
+func TestAgentSessionConfigOptionErrorDistinguishesRejectionFromUncertainty(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		code       string
+		wantPrefix string
+	}{
+		{name: "explicit rejection", code: ws.ErrorCodeValidation, wantPrefix: "set config option failed:"},
+		{name: "ambiguous provider failure", code: ws.ErrorCodeInternalError, wantPrefix: "set config option outcome uncertain:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := captureStreamRequest(t, func(msg ws.Message) *ws.Message {
+				resp, _ := ws.NewError(msg.ID, msg.Action, tc.code, "provider response", nil)
+				return resp
+			})
+			_, err := c.SetConfigOptionWithResult(context.Background(), "reasoning_effort", "high")
+			if err == nil || !strings.HasPrefix(err.Error(), tc.wantPrefix) {
+				t.Fatalf("set config option error = %v, want prefix %q", err, tc.wantPrefix)
+			}
+		})
+	}
+}
+
 func TestAgentSessionSetters_SurfaceStreamErrorFrames(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -523,7 +545,7 @@ func TestAgentSessionSetters_SurfaceStreamErrorFrames(t *testing.T) {
 		{
 			name:    "set config option",
 			call:    func(c *Client) error { return c.SetConfigOption(context.Background(), "c", "v") },
-			wantErr: "set config option failed: mode not supported",
+			wantErr: "set config option outcome uncertain: mode not supported",
 		},
 		{
 			name:    "authenticate",

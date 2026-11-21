@@ -70,17 +70,6 @@ function findLastUserMessage(messages: Message[], turnId: string): Message | und
   return undefined;
 }
 
-function ownsConfigurationCommand(
-  message: Message | undefined,
-  result: ConfigurationCommandResult,
-  commands: AvailableCommand[] | undefined,
-): boolean {
-  const command = parseSlashCommand(message?.content);
-  if (!command) return false;
-  if (command.toLowerCase() === "model") return result.config_id === "model";
-  return isKnownCommand(command, commands);
-}
-
 // hasSubagentTaskMessage returns true when the turn contains a Task (subagent)
 // tool call message. Guards against the empty-turn race when a parent agent
 // dispatches a subagent: the Claude Agent SDK may return session/prompt with
@@ -94,6 +83,22 @@ function hasSubagentTaskMessage(messages: Message[], turnId: string): boolean {
     if (meta?.normalized?.kind === "subagent_task") return true;
   }
   return false;
+}
+
+function shouldEmitEmptyTurnNotice(
+  input: EmptyTurnNoticeInput,
+  messages: Message[],
+  id: string,
+): boolean {
+  return (
+    input.hadOutput === false &&
+    input.isPassthrough !== true &&
+    input.metadata?.lifecycle_only !== true &&
+    input.metadata?.error_terminated !== true &&
+    !input.isEphemeralSurface &&
+    !messages.some((message) => message.id === id) &&
+    !hasSubagentTaskMessage(messages, input.turnId)
+  );
 }
 
 function configurationCommandNoticeText(result: ConfigurationCommandResult): string {
@@ -130,25 +135,13 @@ function configurationCommandFeedbackStatus(
  * the turn (keyed by a deterministic id, so it fires once).
  */
 export function computeEmptyTurnNotice(input: EmptyTurnNoticeInput): Message | null {
-  // Only an explicit `false` triggers the notice. `true` means the turn had
-  // output; `undefined` means an older backend that doesn't send the field —
-  // both correctly fall through here and produce no notice.
-  if (input.hadOutput !== false) return null;
-  if (input.isPassthrough === true) return null;
-  if (input.metadata?.lifecycle_only === true) return null;
-  if (input.metadata?.error_terminated === true) return null;
-  if (input.isEphemeralSurface) return null;
-
   const messages = input.messages ?? [];
   const id = noticeId(input.turnId);
-  if (messages.some((m) => m.id === id)) return null;
-
-  if (hasSubagentTaskMessage(messages, input.turnId)) return null;
+  if (!shouldEmitEmptyTurnNotice(input, messages, id)) return null;
 
   if (input.configuration_result) {
     const result = input.configuration_result;
-    const userMessage = findLastUserMessage(messages, input.turnId);
-    if (!ownsConfigurationCommand(userMessage, result, input.availableCommands)) return null;
+    if (!result.config_id?.trim()) return null;
     const status = configurationCommandFeedbackStatus(result);
     const text = configurationCommandNoticeText(result);
     return {

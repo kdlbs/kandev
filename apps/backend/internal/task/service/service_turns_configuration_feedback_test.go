@@ -75,6 +75,24 @@ func TestConfigurationCommandCompletionRequiresInitiatingSlashCommand(t *testing
 	}
 }
 
+func TestConfigurationCommandAcceptsProviderModelConfigID(t *testing.T) {
+	message := &models.Message{
+		AuthorType: models.MessageAuthorUser,
+		Content:    "/model model-b",
+	}
+	result := &streams.ConfigurationCommandResult{
+		Status: "applied", ConfigID: "primary_model", Requested: "Model B", Effective: "Model B", Confirmed: true,
+	}
+	if !isConfigurationCommandMessage(message, result) {
+		t.Fatal("provider model config option ID was rejected for /model")
+	}
+
+	result.ConfigID = ""
+	if isConfigurationCommandMessage(message, result) {
+		t.Fatal("empty config option ID was accepted for /model")
+	}
+}
+
 func TestRecoveredTurnCompletionOmitsConfigurationCommandReceipt(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()

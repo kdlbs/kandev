@@ -732,6 +732,7 @@
   "sessionConfigurationUnconfirmed": "Could not confirm {{value}}.",
   "sessionConfigurationRejected": "Could not apply {{value}}. {{reason}}",
   "sessionConfigurationPersistenceFailed": "{{value}} applied, but it could not be saved. {{reason}}",
+  "sessionConfigurationSaveFailed": "{{value}} could not be saved. {{reason}}",
   "sessionConfigurationMixed": "The selection has mixed results. Applied: {{applied}}. Saved for next launch: {{saved}}. Unconfirmed: {{unconfirmed}}.",
   "sessionConfigurationRejectedReason": "The agent rejected the change.",
   "sessionConfigurationPartial": "Applied {{applied}}. Could not apply {{failed}}. {{reason}}",

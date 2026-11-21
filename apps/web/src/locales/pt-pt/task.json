@@ -682,6 +682,7 @@
   "sessionConfigurationUnconfirmed": "Não foi possível confirmar {{value}}.",
   "sessionConfigurationRejected": "Não foi possível aplicar {{value}}. {{reason}}",
   "sessionConfigurationPersistenceFailed": "{{value}} foi aplicado, mas não foi possível guardá-lo. {{reason}}",
+  "sessionConfigurationSaveFailed": "Não foi possível guardar {{value}}. {{reason}}",
   "sessionConfigurationMixed": "A seleção teve resultados diferentes. Aplicado: {{applied}}. Guardado para o próximo início: {{saved}}. Por confirmar: {{unconfirmed}}.",
   "sessionConfigurationRejectedReason": "O agente rejeitou a alteração.",
   "sessionConfigurationPartial": "Aplicado: {{applied}}. Não foi possível aplicar {{failed}}. {{reason}}",

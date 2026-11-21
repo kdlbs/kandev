@@ -29,6 +29,7 @@ export type SessionModelsEntry = {
   fallbackModel?: string;
   /** Provider execution that produced the confirmed configuration. */
   confirmedConfigOptionsExecutionId?: string;
+  savedModelPreferenceId?: string;
 };
 
 function updateConfigOptionValue(
@@ -105,6 +106,7 @@ function commitEffectiveModel(options: ModelValueUpdateOptions, modelId: string)
     options.setSessionModels(options.sid, {
       ...live,
       currentModelId: modelId,
+      savedModelPreferenceId: undefined,
       fallbackModel: undefined,
     });
   }
@@ -117,7 +119,13 @@ function saveModelPreference(options: ModelValueUpdateOptions, modelId: string) 
   }
   const live =
     options.store.getState().sessionModels.bySessionId[options.sid] ?? options.sessionModelsData;
-  if (live) options.setSessionModels(options.sid, { ...live, currentModelId: modelId });
+  if (live) {
+    options.setSessionModels(options.sid, {
+      ...live,
+      currentModelId: modelId,
+      savedModelPreferenceId: modelId,
+    });
+  }
 }
 
 function useModelValueChangeHandler(options: SettingChangeHandlerOptions) {

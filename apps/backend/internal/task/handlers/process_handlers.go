@@ -581,7 +581,7 @@ func newSessionConfigurationFeedback(
 	}
 }
 
-func sessionConfigurationSetterErrorStatus(configID string, err error) string {
+func sessionConfigurationSetterErrorStatus(operation string, err error) string {
 	if err == nil {
 		return sessionConfigurationStatusUnconfirmed
 	}
@@ -589,13 +589,6 @@ func sessionConfigurationSetterErrorStatus(configID string, err error) string {
 	if errors.As(err, &notSent) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, agentctlclient.ErrAgentStreamNotConnected) {
 		return sessionConfigurationStatusUnconfirmed
-	}
-	operation := "config option"
-	switch configID {
-	case "model":
-		operation = "model"
-	case "mode":
-		operation = "mode"
 	}
 	if strings.HasPrefix(err.Error(), "set "+operation+" failed:") {
 		return sessionConfigurationStatusRejected
@@ -755,14 +748,20 @@ func (h *ProcessHandlers) httpSetSessionConfigOption(c *gin.Context) {
 		return
 	}
 	var req struct {
-		ConfigID string `json:"config_id"`
-		Value    string `json:"value"`
+		ConfigID        string `json:"config_id"`
+		Value           string `json:"value"`
+		ExpectedModelID string `json:"expected_model_id,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
 	result, live, err := h.applyIfSessionReady(sessionID, false, func() (lifecycle.SessionConfigurationResult, error) {
+		if req.ExpectedModelID != "" {
+			return h.lifecycleMgr.SetSessionConfigOptionBySessionIDWithExpectedModelWithResult(
+				c.Request.Context(), sessionID, req.ConfigID, req.Value, req.ExpectedModelID,
+			)
+		}
 		return h.lifecycleMgr.SetSessionConfigOptionBySessionIDWithResult(c.Request.Context(), sessionID, req.ConfigID, req.Value)
 	})
 	if err != nil {
@@ -771,10 +770,14 @@ func (h *ProcessHandlers) httpSetSessionConfigOption(c *gin.Context) {
 			zap.String("config_id", req.ConfigID),
 			zap.Error(err))
 		feedback := sessionConfigurationFeedback{
-			Status: sessionConfigurationSetterErrorStatus(req.ConfigID, err), ConfigID: req.ConfigID,
+			Status: sessionConfigurationSetterErrorStatus("config option", err), ConfigID: req.ConfigID,
 			Requested: req.Value, ExecutionID: result.ExecutionID,
 		}
-		c.JSON(500, gin.H{"error": err.Error(), "configuration_result": feedback})
+		status := http.StatusInternalServerError
+		if errors.Is(err, lifecycle.ErrSessionConfigurationModelChanged) {
+			status = http.StatusConflict
+		}
+		c.JSON(status, gin.H{"error": err.Error(), "configuration_result": feedback})
 		return
 	}
 	feedback := newSessionConfigurationFeedback(req.ConfigID, req.Value, result, live)

@@ -26,7 +26,11 @@ type RetryConfigurationOptions = {
   modelLabel: string;
   optionLabels: Map<string, string>;
   applyModel: (model: string) => Promise<SetSessionConfigurationResponse>;
-  applyOption: (optionId: string, value: string) => Promise<SetSessionConfigurationResponse>;
+  applyOption: (
+    optionId: string,
+    value: string,
+    expectedModelId?: string,
+  ) => Promise<SetSessionConfigurationResponse>;
   updateLocalConfig: (sid: string, configId: string, value: string) => void;
   sid: string;
   isCurrent: () => boolean;
@@ -52,7 +56,7 @@ async function runRetrySteps(
     applyModel: options.applyModel,
     applyOption: async (optionId, value) => {
       try {
-        const response = await options.applyOption(optionId, value);
+        const response = await options.applyOption(optionId, value, options.model);
         changes.push({
           configId: optionId,
           label: options.optionLabels.get(optionId) ?? optionId,

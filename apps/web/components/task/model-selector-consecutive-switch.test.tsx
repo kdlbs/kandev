@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -208,5 +208,44 @@ describe("consecutive session model switches", () => {
     );
     pickModel("Fable 1M");
     expect(setSessionModel).toHaveBeenCalledWith(SESSION_ID, FABLE);
+  });
+
+  it("shows a saved flat-model preference without changing the cached active model", async () => {
+    mocks.appState.activeModel.bySessionId[SESSION_ID] = OPUS;
+    mocks.appState.sessionModels.bySessionId[SESSION_ID] = {
+      currentModelId: OPUS,
+      models: mocks.modelOptions.map((option) => ({ modelId: option.value, name: option.name })),
+      configOptions: [],
+      configOptionsSettled: true,
+    };
+    vi.mocked(setSessionModel).mockResolvedValue({
+      ok: true,
+      configuration_result: {
+        status: "saved_for_launch",
+        requested: FABLE,
+        confirmed: false,
+      },
+    });
+
+    render(
+      <TooltipProvider>
+        <ModelSelector sessionId={SESSION_ID} />
+      </TooltipProvider>,
+    );
+
+    pickModel("Fable 1M");
+    await waitFor(() => {
+      const trigger = screen.getByRole("button", { name: "Session model settings" });
+      expect(trigger.textContent).toContain("Fable 1M");
+    });
+
+    expect(mocks.appState.activeModel.bySessionId[SESSION_ID]).toBe(OPUS);
+    expect(
+      (
+        mocks.appState.sessionModels.bySessionId[SESSION_ID] as {
+          savedModelPreferenceId?: string;
+        }
+      ).savedModelPreferenceId,
+    ).toBe(FABLE);
   });
 });

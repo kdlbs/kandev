@@ -1,44 +1,9 @@
-import type { Page } from "@playwright/test";
-
 import { test, expect } from "../../fixtures/test-base";
-import type { ApiClient } from "../../helpers/api-client";
-import type { SeedData } from "../../fixtures/test-base";
 import { waitForHttp, watchWs } from "../../helpers/causal-waits";
-import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
-import { SessionPage } from "../../pages/session-page";
-
-async function seedAndOpenChat(page: Page, apiClient: ApiClient, seedData: SeedData) {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    "Phone Picker Configuration Feedback",
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-  if (!task.session_id) throw new Error("expected an auto-started picker feedback session");
-  await waitForAgentMessage(
-    apiClient,
-    task.session_id,
-    "This is a simple mock response for e2e testing.",
-    30_000,
-  );
-  await waitForSessionState(apiClient, {
-    taskId: task.id,
-    sessionId: task.session_id,
-    expectedState: "WAITING_FOR_INPUT",
-    timeout: 30_000,
-    message: "initial phone picker feedback turn must settle before interaction",
-  });
-  await page.goto(`/t/${task.id}`);
-  const session = new SessionPage(page);
-  await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 30_000 });
-  return { session, sessionId: task.session_id };
-}
+import {
+  holdConfigurationCompletions,
+  seedAndOpenChat,
+} from "./session-configuration-feedback-helpers";
 
 test.describe("Picker feedback on phone", () => {
   test.describe.configure({ retries: 1, timeout: 90_000 });
@@ -48,7 +13,12 @@ test.describe("Picker feedback on phone", () => {
     apiClient,
     seedData,
   }) => {
-    const { session } = await seedAndOpenChat(testPage, apiClient, seedData);
+    const { session } = await seedAndOpenChat(
+      testPage,
+      apiClient,
+      seedData,
+      "Phone Picker Configuration Feedback",
+    );
     await session.sendMessageViaButton("/e2e:bulk:20");
     await expect(session.chat.getByText(/Done\. Emitted 20 messages/)).toBeVisible({
       timeout: 30_000,
@@ -126,9 +96,13 @@ test.describe("Picker feedback on phone", () => {
 
     const feedbackPanel = feedback.locator("xpath=..");
     const feedbackBounds = await feedbackPanel.boundingBox();
+    const viewportWidth = await testPage.evaluate(
+      () => window.visualViewport?.width ?? window.innerWidth,
+    );
     expect(feedbackBounds).not.toBeNull();
     expect(feedbackBounds!.y).toBeGreaterThanOrEqual(0);
     expect(feedbackBounds!.y + feedbackBounds!.height).toBeLessThanOrEqual(420);
+    expect(feedbackBounds!.x + feedbackBounds!.width).toBeLessThanOrEqual(viewportWidth);
     const panelMetrics = await feedbackPanel.evaluate((element) => ({
       clientHeight: element.clientHeight,
       overflowY: getComputedStyle(element).overflowY,
@@ -164,7 +138,27 @@ test.describe("Picker feedback on phone", () => {
     seedData,
   }) => {
     const ws = watchWs(testPage);
-    const { session, sessionId } = await seedAndOpenChat(testPage, apiClient, seedData);
+    const completionHold = await holdConfigurationCompletions(testPage);
+    let sessionSubscriptionsReady: Promise<unknown[]> | undefined;
+    const { session, sessionId } = await seedAndOpenChat(
+      testPage,
+      apiClient,
+      seedData,
+      "Phone Picker Command Feedback",
+      (nextSessionId) => {
+        completionHold.arm(nextSessionId);
+        sessionSubscriptionsReady = Promise.all([
+          ws.waitForResponse("session.subscribe", {
+            requestWhere: (payload) => payload.session_id === nextSessionId,
+          }),
+          ws.waitForResponse("session.conversation.subscribe", {
+            requestWhere: (payload) => payload.session_id === nextSessionId,
+          }),
+        ]);
+      },
+    );
+    if (!sessionSubscriptionsReady) throw new Error("Session subscription waits were not armed");
+    await sessionSubscriptionsReady;
     await session.sendMessageViaButton("/e2e:bulk:20");
     await expect(session.chat.getByText(/Done\. Emitted 20 messages/)).toBeVisible({
       timeout: 30_000,
@@ -182,6 +176,27 @@ test.describe("Picker feedback on phone", () => {
     });
     await session.sendMessageViaButton("/model mock-smart");
     const command = session.chat.getByText("/model mock-smart", { exact: true });
+    await expect(command).toBeVisible();
+    await composer.fill("keep this phone draft");
+    const autoScroll = session.chat.getByTestId("auto-scroll-toggle-button");
+    await autoScroll.tap();
+    await expect(autoScroll).toHaveAttribute("aria-pressed", "false");
+    const transcriptBounds = await transcript.boundingBox();
+    expect(transcriptBounds).not.toBeNull();
+    await testPage.mouse.move(
+      transcriptBounds!.x + transcriptBounds!.width / 2,
+      transcriptBounds!.y + transcriptBounds!.height / 2,
+    );
+    const beforeReadingScroll = await transcript.evaluate((element) => element.scrollTop);
+    await testPage.mouse.wheel(0, -160);
+    await expect
+      .poll(() => transcript.evaluate((element) => element.scrollTop))
+      .toBeLessThan(beforeReadingScroll);
+    await composer.fill("keep this phone draft");
+    const scrollTopBeforeReceipt = await transcript.evaluate((element) => element.scrollTop);
+    expect(scrollTopBeforeReceipt).toBeGreaterThan(0);
+    await expect.poll(() => completionHold.pendingCount()).toBeGreaterThan(0);
+    completionHold.release();
     const completedTurn = await completion;
     expect(completedTurn.payload.had_output).toBe(false);
     expect(completedTurn.payload.configuration_result).toMatchObject({
@@ -191,11 +206,6 @@ test.describe("Picker feedback on phone", () => {
       confirmed: true,
     });
     await expect(command).toBeVisible();
-    await composer.fill("keep this phone draft");
-    await transcript.evaluate((element) => {
-      element.scrollTop = 0;
-    });
-    const scrollTopBeforeReceipt = await transcript.evaluate((element) => element.scrollTop);
 
     const receipt = session.chat
       .getByRole("status")

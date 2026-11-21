@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -86,16 +87,45 @@ func TestSetConfigOptionWithResultUsesItsACPResponse(t *testing.T) {
 }
 
 func TestSetConfigOptionKeepsUnconfirmedModeAsErrorForLegacyCallers(t *testing.T) {
-	adapter, _, _ := newSetModeTestAdapter(t, func(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+	var adapter *Adapter
+	adapter, agent, _ := newSetModeTestAdapter(t, func(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
 		return acp.SetSessionModeResponse{}, nil
 	})
+	agent.configHandler = func(context.Context, acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+		adapter.mu.Lock()
+		adapter.availableConfigOptions = []streams.ConfigOption{{
+			Type: "select", ID: "reasoning_effort", Category: "reasoning_effort", CurrentValue: "medium",
+		}}
+		adapter.mu.Unlock()
+		return acp.SetSessionConfigOptionResponse{}, nil
+	}
 	adapter.availableConfigOptions = []streams.ConfigOption{{
 		Type: "select", ID: "codex_mode", Category: "mode", CurrentValue: "default",
+		Options: []streams.ConfigOptionValue{{Value: "default"}, {Value: "plan"}},
 	}}
 
 	err := adapter.SetConfigOption(context.Background(), "codex_mode", "plan")
 	if err == nil {
-		t.Fatal("SetConfigOption succeeded without provider confirmation for a mode option")
+		t.Fatal("SetConfigOption succeeded without provider confirmation after the mode catalog was replaced")
+	}
+}
+
+func TestSetConfigOptionResultMarksRemoteRequestRejection(t *testing.T) {
+	adapter, agent, _ := newSetModeTestAdapter(t, func(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+		return acp.SetSessionModeResponse{}, nil
+	})
+	optionCategory := acp.SessionConfigOptionCategory("reasoning_effort")
+	adapter.availableConfigOptions = []streams.ConfigOption{{
+		Type: "select", ID: "reasoning_effort", Category: string(optionCategory), CurrentValue: "medium",
+	}}
+	agent.configHandler = func(context.Context, acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+		return acp.SetSessionConfigOptionResponse{}, &acp.RequestError{Code: -32602, Message: "unsupported value"}
+	}
+
+	_, err := adapter.SetConfigOptionWithResult(context.Background(), "reasoning_effort", "high")
+	var rejected *streams.SessionConfigurationRejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("SetConfigOptionWithResult error = %v, want typed provider rejection", err)
 	}
 }
 

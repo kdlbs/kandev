@@ -158,6 +158,7 @@ const RETRY_TEST_ID = "session-configuration-feedback-retry";
 const FEEDBACK_STATUS_ATTRIBUTE = "data-status";
 const PERSISTENCE_FAILED = "persistence_failed" as const;
 const OPTION_REJECTION = "option rejected";
+const SAVE_PERSISTENCE_ERROR = "failed to persist session runtime config";
 
 vi.mock("@/components/state-provider", async () => {
   const { useEffect, useReducer } = await import("react");
@@ -322,42 +323,6 @@ describe("live composed configuration apply", () => {
     ]);
   });
 
-  it("keeps a live model when saving its preference fails", async () => {
-    vi.mocked(setSessionConfigOption).mockRejectedValueOnce(
-      new ApiError("failed to persist session runtime config", 500, {
-        error: "preference storage is unavailable",
-        configuration_result: {
-          status: PERSISTENCE_FAILED,
-          config_id: "model",
-          requested: PAIR_B,
-          effective: PAIR_B,
-          confirmed: true,
-          execution_id: EXECUTION_ID,
-        },
-      }),
-    );
-    render(
-      <TooltipProvider>
-        <ModelSelector sessionId={SESSION_ID} />
-      </TooltipProvider>,
-    );
-
-    await applyComposedPairing();
-    await waitFor(() => {
-      expect(
-        (
-          mocks.appState.sessionModels.bySessionId[SESSION_ID] as {
-            currentModelId: string;
-          }
-        ).currentModelId,
-      ).toBe(PAIR_B);
-    });
-    const feedback = await screen.findByTestId(FEEDBACK_TEST_ID);
-    expect(feedback.getAttribute(FEEDBACK_STATUS_ATTRIBUTE)).toBe(PERSISTENCE_FAILED);
-    expect(feedback.textContent).toContain("could not be saved");
-    expect(feedback.textContent).toContain("failed to persist session runtime config");
-  });
-
   it("stops dependent option writes when the base model is clamped", async () => {
     vi.mocked(setSessionConfigOption).mockImplementationOnce(
       async (_sessionId, configId, value) => ({
@@ -380,7 +345,6 @@ describe("live composed configuration apply", () => {
 
     await applyComposedPairing();
 
-    expect(setSessionConfigOption).toHaveBeenCalledTimes(1);
     await waitFor(() => {
       expect(
         (
@@ -394,14 +358,32 @@ describe("live composed configuration apply", () => {
     expect(feedback.getAttribute(FEEDBACK_STATUS_ATTRIBUTE)).toBe("clamped");
     expect(feedback.textContent).toContain(PAIR_B);
     expect(feedback.textContent).toContain("solo");
+    expect(setSessionConfigOption).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("composed configuration partial retries", () => {
   it("reports a partial application and retries without re-applying the model", async () => {
+    const session = mocks.appState.sessionModels.bySessionId[SESSION_ID] as {
+      configOptions: Array<{ id: string; currentValue?: string }>;
+    };
+    const thinking = session.configOptions.find((option) => option.id === THINKING_OPTION);
+    if (!thinking) throw new Error("missing thinking config option");
+    thinking.currentValue = "medium";
+
     vi.mocked(setSessionConfigOption)
-      .mockImplementationOnce((_sessionId, configId, value) =>
-        Promise.resolve(mocks.responseFor(configId, value)),
+      .mockRejectedValueOnce(
+        new ApiError(SAVE_PERSISTENCE_ERROR, 500, {
+          error: SAVE_PERSISTENCE_ERROR,
+          configuration_result: {
+            status: PERSISTENCE_FAILED,
+            config_id: "model",
+            requested: PAIR_B,
+            effective: PAIR_B,
+            confirmed: true,
+            execution_id: EXECUTION_ID,
+          },
+        }),
       )
       .mockRejectedValueOnce(
         new ApiError(OPTION_REJECTION, 500, {
@@ -437,6 +419,15 @@ describe("composed configuration partial retries", () => {
     const partial = await screen.findByTestId(FEEDBACK_TEST_ID);
     expect(partial.getAttribute(FEEDBACK_STATUS_ATTRIBUTE)).toBe("partial");
     expect(partial.textContent).toContain(PAIR_B);
+    expect(
+      (
+        mocks.appState.sessionModels.bySessionId[SESSION_ID] as {
+          currentModelId: string;
+        }
+      ).currentModelId,
+    ).toBe(PAIR_B);
+    expect(partial.textContent).toContain("could not be saved");
+    expect(partial.textContent).toContain(SAVE_PERSISTENCE_ERROR);
     expect(partial.textContent).toContain(`Thinking: ${HIGH_OPTION}`);
     expect(partial.textContent).toContain(OPTION_REJECTION);
     expect(screen.getByTestId(RETRY_TEST_ID)).toBeTruthy();
@@ -448,9 +439,15 @@ describe("composed configuration partial retries", () => {
       await Promise.resolve();
     });
     await waitFor(() => expect(setSessionConfigOption).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(setSessionConfigOption).mock.calls[0]?.[1]).toBe(THINKING_OPTION);
+    expect(vi.mocked(setSessionConfigOption).mock.calls[0]).toEqual([
+      SESSION_ID,
+      THINKING_OPTION,
+      HIGH_OPTION,
+      PAIR_B,
+    ]);
     const retried = await screen.findByTestId(FEEDBACK_TEST_ID);
-    expect(retried.getAttribute(FEEDBACK_STATUS_ATTRIBUTE)).toBe("clamped");
+    expect(retried.getAttribute(FEEDBACK_STATUS_ATTRIBUTE)).toBe("partial");
+    expect(retried.textContent).toContain("could not be saved");
     expect(retried.textContent).toContain("Thinking: low");
     expect(
       (
@@ -460,7 +457,9 @@ describe("composed configuration partial retries", () => {
       ).configOptions.find((option) => option.id === THINKING_OPTION)?.currentValue,
     ).toBe("low");
   });
+});
 
+describe("composed configuration retry failures", () => {
   it("keeps the rejection reason after a second retry failure", async () => {
     const rejectedOption = (message: string) =>
       new ApiError(message, 500, {

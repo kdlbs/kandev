@@ -100,12 +100,12 @@ superseded. The wording is illustrative.
 - Both tasks run focused desktop and phone Playwright checks for AC .6.
   Picker checks reopen the control while the check is visible. Command
   checks assert that the system message is in the conversation turn.
-- `make build`, the Vite and e2e web builds, typecheck, web lint, i18n checks,
-  focused Go tests, changed-package Go lint, and docs validation passed.
-  Focused frontend tests passed 139 cases. Desktop Playwright passed 11 tests;
-  phone Playwright passed all 3 picker, command-receipt, and empty-turn tests.
-  The phone picker case verified the long rejection, 44 px dismiss target,
-  retained draft, unchanged reading position, and a 420 px keyboard viewport.
+- Backend build, focused Go tests, changed-package Go lint, web typecheck,
+  web lint, i18n checks, docs validation, and the current Vite e2e build passed.
+  The PR fixup focused frontend suite passed 175 tests. Desktop Playwright
+  passed 10 tests, and phone Playwright passed 2 tests. The phone cases verified
+  the long rejection, 44 px dismiss target, retained draft, unchanged reading
+  position, and a 420 px keyboard viewport.
 
 ## Work orders
 

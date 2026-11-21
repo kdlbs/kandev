@@ -21,15 +21,17 @@ import { ApiError } from "@/lib/api/client";
 import type { SessionConfigurationResult } from "@/lib/api/domains/session-api";
 import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { cn } from "@/lib/utils";
+import { partialConfigurationFeedbackText } from "./session-configuration-feedback-partial";
 
 export type ConfigurationChangeOutcome = {
   configId?: string;
   label: string;
   requested: string;
   result?: SessionConfigurationResult;
+  error?: unknown;
 };
 
-type FeedbackPosition = { left: number; top: number; maxHeight: number };
+type FeedbackPosition = { left: number; top: number; maxWidth: number; maxHeight: number };
 
 function updateMobileFeedbackPosition(
   anchor: HTMLElement,
@@ -44,7 +46,7 @@ function updateMobileFeedbackPosition(
   const viewportWidth = viewport?.width ?? window.innerWidth;
   const viewportHeight = viewport?.height ?? window.innerHeight;
   const maxWidth = Math.min(416, viewportWidth * 0.9);
-  const maxHeight = Math.max(80, viewportHeight - gutter * 2);
+  const maxHeight = Math.max(1, viewportHeight - gutter * 2);
   const contentHeight = Math.min(message?.getBoundingClientRect().height ?? maxHeight, maxHeight);
   const left = Math.max(
     viewportLeft + gutter,
@@ -54,7 +56,7 @@ function updateMobileFeedbackPosition(
     viewportTop + gutter,
     Math.min(bounds.top - contentHeight - 4, viewportTop + viewportHeight - contentHeight - gutter),
   );
-  setPosition({ left, top, maxHeight });
+  setPosition({ left, top, maxWidth, maxHeight });
 }
 
 type FeedbackStatus =
@@ -124,7 +126,7 @@ export function PickerConfigurationFeedbackMessage<T extends HTMLElement>({
       window.visualViewport?.removeEventListener("scroll", updatePosition);
       observer.disconnect();
     };
-  }, [anchorRef, isMobile, Boolean(message)]);
+  }, [anchorRef, isMobile, Boolean(message), position !== null]);
 
   if (!message) return null;
   if (!isMobile) {
@@ -145,7 +147,7 @@ export function PickerConfigurationFeedbackMessage<T extends HTMLElement>({
       style={{
         left: position.left,
         top: position.top,
-        maxWidth: "min(26rem, 90vw)",
+        maxWidth: position.maxWidth,
         maxHeight: position.maxHeight,
         overflowY: "auto",
         overscrollBehavior: "contain",
@@ -200,8 +202,8 @@ function resultStatus(
 ): FeedbackStatus {
   if (result?.status === "saved_for_launch") return "saved_for_launch";
   if (result?.status === "rejected") return "rejected";
+  if (result?.status === "persistence_failed") return "persistence_failed";
   if (!result || !isScopedConfirmation(result, scope)) return "unconfirmed";
-  if (result.status === "persistence_failed") return "persistence_failed";
   if (result.status !== "applied") return "unconfirmed";
   return result.effective === result.requested ? "applied" : "clamped";
 }
@@ -215,6 +217,7 @@ function failureStatus(
   if (resultStatus(result, scope) === "persistence_failed") return "persistence_failed";
   const statuses = changes.map((change) => resultStatus(change.result, scope));
   if (statuses.includes("applied") || statuses.includes("clamped")) return "partial";
+  if (statuses.includes("persistence_failed")) return "partial";
   if (result?.status === "rejected") return "rejected";
   if (failure.error instanceof ApiError && failure.error.status < 500) return "rejected";
   return "unconfirmed";
@@ -233,10 +236,21 @@ function changesStatus(
   const hasSaved = statuses.includes("saved_for_launch");
   const hasLive = statuses.includes("applied") || statuses.includes("clamped");
   const hasUnconfirmed = statuses.includes("unconfirmed");
-  if (hasSaved && (hasLive || hasUnconfirmed)) return "mixed";
-  if (statuses.includes("persistence_failed")) return "persistence_failed";
+  const hasPersistenceFailure = statuses.includes("persistence_failed");
+  if (persistenceFailureHasOtherOutcome(statuses)) return "partial";
+  if ((hasSaved && (hasLive || hasUnconfirmed)) || (hasLive && hasUnconfirmed)) return "mixed";
+  if (hasPersistenceFailure) return "persistence_failed";
   if (hasUnconfirmed) return "unconfirmed";
   return hasLive && statuses.includes("clamped") ? "clamped" : "applied";
+}
+
+function persistenceFailureHasOtherOutcome(statuses: FeedbackStatus[]) {
+  return (
+    statuses.includes("persistence_failed") &&
+    statuses.some((status) =>
+      ["saved_for_launch", "applied", "clamped", "unconfirmed"].includes(status),
+    )
+  );
 }
 
 function valueSummary(
@@ -275,13 +289,19 @@ function feedbackMessageText(feedback: PickerFeedback, t: ReturnType<typeof useT
     case "rejected":
       return t("task:sessionConfigurationRejected", { value: requested, reason: safeReason });
     case "persistence_failed":
-      return t("task:sessionConfigurationPersistenceFailed", {
-        value:
-          valueSummary(feedback.changes, true, ["persistence_failed"], feedback.scope) ||
-          effective ||
-          requested,
-        reason: safeReason,
-      });
+      return feedback.changes.some(
+        (change) => !!change.result && isScopedConfirmation(change.result, feedback.scope),
+      )
+        ? t("task:sessionConfigurationPersistenceFailed", {
+            value: valueSummary(feedback.changes, true, ["persistence_failed"], feedback.scope),
+            reason: safeReason,
+          })
+        : t("task:sessionConfigurationSaveFailed", {
+            value:
+              valueSummary(feedback.changes, false, ["persistence_failed"], feedback.scope) ||
+              requested,
+            reason: safeReason,
+          });
     case "mixed":
       return t("task:sessionConfigurationMixed", {
         applied: valueSummary(feedback.changes, true, ["applied", "clamped"], feedback.scope),
@@ -289,11 +309,32 @@ function feedbackMessageText(feedback: PickerFeedback, t: ReturnType<typeof useT
         unconfirmed: valueSummary(feedback.changes, false, ["unconfirmed"], feedback.scope),
       });
     case "partial":
-      return t("task:sessionConfigurationPartial", {
-        applied: valueSummary(feedback.changes, true, ["applied", "clamped"], feedback.scope),
-        failed: feedback.failed ? `${feedback.failed.label}: ${feedback.failed.value}` : "",
-        reason: safeReason,
-      });
+      return (
+        partialConfigurationFeedbackText({
+          changes: feedback.changes.map((change) => {
+            const status = resultStatus(change.result, feedback.scope);
+            return {
+              label: change.label,
+              requested: change.requested,
+              effective:
+                status !== "persistence_failed" ||
+                (change.result && isScopedConfirmation(change.result, feedback.scope))
+                  ? change.result?.effective
+                  : undefined,
+              status,
+              error: change.error,
+            };
+          }),
+          failed: feedback.failed,
+          reason: safeReason,
+          t,
+        }) ||
+        t("task:sessionConfigurationPartial", {
+          applied: valueSummary(feedback.changes, true, ["applied", "clamped"], feedback.scope),
+          failed: feedback.failed ? `${feedback.failed.label}: ${feedback.failed.value}` : "",
+          reason: safeReason,
+        })
+      );
   }
 }
 
@@ -460,12 +501,12 @@ function resultExecutionIds(changes: ConfigurationChangeOutcome[], error?: unkno
 
 function createFeedbackController({
   latestId,
-  requestScopes,
+  requestScope,
   scopeRef,
   setFeedback,
 }: {
   latestId: RefObject<number>;
-  requestScopes: RefObject<Map<number, PickerConfigurationFeedbackScope | undefined>>;
+  requestScope: RefObject<PickerConfigurationFeedbackScope | undefined>;
   scopeRef: RefObject<PickerConfigurationFeedbackScope | undefined>;
   setFeedback: Dispatch<SetStateAction<PickerFeedback | undefined>>;
 }): PickerConfigurationFeedbackController {
@@ -475,15 +516,11 @@ function createFeedbackController({
     error?: unknown,
   ) =>
     id === latestId.current &&
-    sameFeedbackScope(
-      requestScopes.current.get(id),
-      scopeRef.current,
-      resultExecutionIds(changes, error),
-    );
+    sameFeedbackScope(requestScope.current, scopeRef.current, resultExecutionIds(changes, error));
   const begin = () => {
     const id = latestId.current + 1;
     latestId.current = id;
-    requestScopes.current.set(id, scopeRef.current ? { ...scopeRef.current } : undefined);
+    requestScope.current = scopeRef.current ? { ...scopeRef.current } : undefined;
     setFeedback(undefined);
     return id;
   };
@@ -554,8 +591,10 @@ export function usePickerConfigurationFeedback(
   const [documentVisible, setDocumentVisible] = useState(true);
   const latestId = useRef(0);
   const scopeRef = useRef(scope);
-  scopeRef.current = scope;
-  const requestScopes = useRef(new Map<number, PickerConfigurationFeedbackScope | undefined>());
+  const requestScope = useRef<PickerConfigurationFeedbackScope | undefined>(undefined);
+  useLayoutEffect(() => {
+    scopeRef.current = scope;
+  }, [scope?.sessionId, scope?.executionId]);
   useEffect(() => {
     const updateVisibility = () => setDocumentVisible(document.visibilityState === "visible");
     updateVisibility();
@@ -565,13 +604,12 @@ export function usePickerConfigurationFeedback(
   useFeedbackExpiry(feedback, setFeedback, isPickerOpen, documentVisible);
 
   const controller = useMemo(
-    () => createFeedbackController({ latestId, requestScopes, scopeRef, setFeedback }),
+    () => createFeedbackController({ latestId, requestScope, scopeRef, setFeedback }),
     [],
   );
   const dismiss = useCallback(() => setFeedback(undefined), []);
   const visibleFeedback =
-    feedback &&
-    sameFeedbackScope(feedback.scope, scopeRef.current, resultExecutionIds(feedback.changes))
+    feedback && sameFeedbackScope(feedback.scope, scope, resultExecutionIds(feedback.changes))
       ? feedback
       : undefined;
 

@@ -545,7 +545,10 @@ func (c *Client) setConfigOption(
 		if err := resp.ParsePayload(&errPayload); err != nil {
 			return result, fmt.Errorf("set config option failed: unable to parse error")
 		}
-		return result, fmt.Errorf("set config option failed: %s", errPayload.Message)
+		if errPayload.Code == ws.ErrorCodeValidation {
+			return result, fmt.Errorf("set config option failed: %s", errPayload.Message)
+		}
+		return result, fmt.Errorf("set config option outcome uncertain: %s", errPayload.Message)
 	}
 
 	if !includeConfigurationResult {

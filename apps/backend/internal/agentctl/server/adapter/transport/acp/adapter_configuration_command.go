@@ -6,6 +6,8 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
+const configurationCommandStatusApplied = "applied"
+
 type configurationCommandSpec struct {
 	configID             string
 	requestedID          string
@@ -27,37 +29,17 @@ func (a *Adapter) configurationCommandForPrompt(
 	sessionID, message string,
 	promptGeneration uint64,
 ) *configurationCommandTracker {
-	if !a.configChangeMu.TryLock() {
-		return a.unconfirmedConfigurationCommand(sessionID, message, promptGeneration)
+	conflicted := !a.configChangeMu.TryLock()
+	if !conflicted {
+		defer a.configChangeMu.Unlock()
 	}
-	defer a.configChangeMu.Unlock()
-
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if a.closed || a.sessionID != sessionID {
-		return nil
-	}
-	spec := a.dialect.configurationCommand
-	if spec == nil {
-		spec = modelConfigurationCommand
-	}
-	request := spec(message, a.availableModels, a.availableConfigOptions, a.availableCommandsForSession(sessionID))
-	if request == nil {
-		return nil
-	}
-	return &configurationCommandTracker{
-		sessionID:        sessionID,
-		promptGeneration: promptGeneration,
-		spec:             *request,
-		baseline:         configOptionValue(a.availableConfigOptions, request.configID),
-		configGeneration: a.configGeneration,
-		observed:         make(map[string]string),
-	}
+	return a.buildConfigurationCommandTracker(sessionID, message, promptGeneration, conflicted)
 }
 
-func (a *Adapter) unconfirmedConfigurationCommand(
+func (a *Adapter) buildConfigurationCommandTracker(
 	sessionID, message string,
 	promptGeneration uint64,
+	conflicted bool,
 ) *configurationCommandTracker {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -72,14 +54,18 @@ func (a *Adapter) unconfirmedConfigurationCommand(
 	if request == nil {
 		return nil
 	}
-	return &configurationCommandTracker{
+	tracker := &configurationCommandTracker{
 		sessionID:        sessionID,
 		promptGeneration: promptGeneration,
 		spec:             *request,
 		baseline:         configOptionValue(a.availableConfigOptions, request.configID),
-		conflicted:       true,
+		configGeneration: a.configGeneration,
 		observed:         make(map[string]string),
 	}
+	if conflicted {
+		tracker.conflicted = true
+	}
+	return tracker
 }
 
 func (a *Adapter) availableCommandsForSession(sessionID string) []streams.AvailableCommand {
@@ -222,7 +208,7 @@ func configurationCommandResult(
 			result.Status = "clamped"
 		} else {
 			result.Confirmed = true
-			result.Status = "applied"
+			result.Status = configurationCommandStatusApplied
 		}
 	}
 	return result
@@ -256,9 +242,6 @@ func (a *Adapter) observeConfigurationCommandOptions(
 			continue
 		}
 		name := configValueName(options, option.ID, option.CurrentValue)
-		if name == option.CurrentValue {
-			name = option.CurrentValue
-		}
 		a.observeConfigurationCommandValue(sessionID, promptGeneration, option.ID, option.CurrentValue, name)
 	}
 }

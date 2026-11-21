@@ -35,8 +35,10 @@ their own Save flow.
 1. A confirmed reply names the effective value. A saved preference, a
    clamped value, a rejection, and missing evidence each get accurate wording.
 2. Partial application identifies the observed changes and the failed value.
-   Retry stays scoped to the current action and execution. An obsolete reply
-   cannot confirm or roll back a newer action.
+   Retry stays scoped to the current action and execution, and checks its
+   expected base model at the mutation boundary. Selector state uses the
+   provider's effective value. An obsolete reply cannot confirm or roll back
+   a newer action.
 3. Desktop and phone announce the result beside the selector. A green
    check clears after one visible second. The trigger and nearby controls
    remain usable throughout. Failure is dismissible without losing the
@@ -87,10 +89,11 @@ the no-build phone run.
 (cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp \
   ./internal/agentctl/server/api ./internal/agent/runtime/agentctl \
   ./internal/agent/runtime/lifecycle ./internal/task/handlers \
-  -run 'Test(SessionConfigurationFeedback.*|SetSessionRuntimeConfigOverridesPersistWithoutRunningAgent|SetModeUsesAdvertisedModeConfigOptionAndAuthoritativeClamp)$' -count=1)
+  -run 'Test(SessionConfiguration.*|AgentSessionConfigOption.*|SetSessionRuntimeConfigOverridesPersistWithoutRunningAgent|SetModeUsesAdvertisedModeConfigOptionAndAuthoritativeClamp)$' -count=1)
 (cd apps/web && pnpm run test lib/apply-model-configuration.test.ts \
   components/task/model-selector-composed-config.test.tsx \
   components/task/model-selector-consecutive-switch.test.tsx \
+  components/task/session-configuration-feedback.test.tsx \
   lib/state/slices/session-runtime/session-configuration-feedback.test.ts)
 (cd apps/web && pnpm run typecheck && pnpm run i18n:check && pnpm run i18n:ratchet)
 (cd apps/web && pnpm e2e:run --host --project chromium \

@@ -811,7 +811,7 @@ func isConfigurationCommandMessage(
 		return false
 	}
 	if strings.EqualFold(strings.TrimPrefix(parts[0], "/"), "model") {
-		return result.ConfigID == runtimeModelConfigID
+		return strings.TrimSpace(result.ConfigID) != ""
 	}
 	return true
 }

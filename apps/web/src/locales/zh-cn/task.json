@@ -682,6 +682,7 @@
   "sessionConfigurationUnconfirmed": "无法确认 {{value}}。",
   "sessionConfigurationRejected": "无法应用 {{value}}。{{reason}}",
   "sessionConfigurationPersistenceFailed": "{{value}} 已应用，但无法保存。{{reason}}",
+  "sessionConfigurationSaveFailed": "无法保存 {{value}}。{{reason}}",
   "sessionConfigurationMixed": "配置结果不一致。已应用：{{applied}}。已保存以供下次启动：{{saved}}。未确认：{{unconfirmed}}。",
   "sessionConfigurationRejectedReason": "代理拒绝了此更改。",
   "sessionConfigurationPartial": "已应用 {{applied}}。无法应用 {{failed}}。{{reason}}",

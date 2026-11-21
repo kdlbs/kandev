@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { AgentLogo } from "@/components/agent-logo";
@@ -371,13 +371,17 @@ function resolveModelSelectorInputs({
     profileId: session?.agent_profile_id,
     availableAgents,
   });
-  const currentModel = resolveCurrentModel(
-    activeModel,
-    sessionModelsData?.currentModelId || null,
-    resolveSnapshotModel(session?.agent_profile_snapshot),
-    profileModel,
-    sessionModelsData?.settingsPolicy,
-  );
+  const currentModel =
+    sessionModelsData?.settingsPolicy !== "provider_restored" &&
+    sessionModelsData?.savedModelPreferenceId
+      ? sessionModelsData.savedModelPreferenceId
+      : resolveCurrentModel(
+          activeModel,
+          sessionModelsData?.currentModelId || null,
+          resolveSnapshotModel(session?.agent_profile_snapshot),
+          profileModel,
+          sessionModelsData?.settingsPolicy,
+        );
   return { configOptions, currentModel, availableModels };
 }
 
@@ -539,6 +543,9 @@ export const ModelSelector = memo(function ModelSelector({
     restoredModelUnknown,
     modelOptionsCount: modelOptions.length,
   });
+  useEffect(() => {
+    if (hideSelector) setPickerOpen(false);
+  }, [hideSelector]);
   // Explicit "using fallback" signal: annotate the trigger so the user sees
   // the session is not on the configured start model.
   const currentModelSuffix = fallbackModel ? ` ${t("settings:modelFallbackSuffix")}` : undefined;
