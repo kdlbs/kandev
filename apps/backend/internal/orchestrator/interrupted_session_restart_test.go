@@ -41,6 +41,18 @@ func (m *recordingInterruptedOwnerManager) RecoverAgentPromptStreamWithIdentity(
 }
 
 func TestRestartRecoveryRestoresNativeConversationWithoutPrompt(t *testing.T) {
+	testRestartRecoveryRestoresNativeConversation(t, false)
+}
+
+// With the opt-in enabled, a successful restore resumes the Auto-run it
+// paused, so the preserved queue entry reaches the restored conversation
+// without a manual re-enable. The unknown predecessor stays unresolved.
+func TestRestartRecoveryResumesQueueItPausedWhenEnabled(t *testing.T) {
+	testRestartRecoveryRestoresNativeConversation(t, true)
+}
+
+func testRestartRecoveryRestoresNativeConversation(t *testing.T, resumeQueue bool) {
+	t.Helper()
 	ctx := context.Background()
 	base, _, _ := continuationFailureFixture(t)
 	repo := base.repo.(*sqliterepo.Repository)
@@ -169,7 +181,9 @@ func TestRestartRecoveryRestoresNativeConversationWithoutPrompt(t *testing.T) {
 
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, session.TaskID, v1.TaskStateInProgress)
-	service = NewService(DefaultServiceConfig(), bus.NewMemoryEventBus(testLogger()), manager,
+	serviceConfig := DefaultServiceConfig()
+	serviceConfig.ResumeQueueAfterSilentRestore = resumeQueue
+	service = NewService(serviceConfig, bus.NewMemoryEventBus(testLogger()), manager,
 		taskRepo, repo, nil, nil, nil, testLogger())
 	service.workflowStepGetter = stepGetter
 	service.messageQueue = queue
@@ -208,6 +222,10 @@ func TestRestartRecoveryRestoresNativeConversationWithoutPrompt(t *testing.T) {
 		}
 	}
 	require.Equal(t, "provider-session", current.NativeSessionID)
+	if resumeQueue {
+		assertSilentRestoreResumedQueue(t, ctx, repo, queue, manager, session.ID, recovery.SubmissionID)
+		return
+	}
 	stored, err := repo.GetTaskSession(ctx, session.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.TaskSessionStateWaitingForInput, stored.State)
@@ -289,6 +307,28 @@ func TestRestartRecoveryRestoresNativeConversationWithoutPrompt(t *testing.T) {
 	manager.mu.Lock()
 	require.Equal(t, []string{"ordinary follow-up", "queued before restart"}, manager.capturedPrompts)
 	manager.mu.Unlock()
+}
+
+func assertSilentRestoreResumedQueue(
+	t *testing.T, ctx context.Context, repo *sqliterepo.Repository, queue *messagequeue.Service,
+	manager *recordingInterruptedOwnerManager, sessionID, interruptedSubmissionID string,
+) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		return len(manager.capturedPrompts) == 1
+	}, 5*time.Second, 10*time.Millisecond, "the preserved queue prompt should reach the restored native conversation")
+	manager.mu.Lock()
+	require.Equal(t, []string{"queued before restart"}, manager.capturedPrompts,
+		"only the preserved queue entry is delivered; the unknown predecessor is not replayed")
+	manager.mu.Unlock()
+	status := queue.GetStatus(ctx, sessionID)
+	require.True(t, status.AutoRun, "a successful restore resumes the auto-run it paused")
+	require.Zero(t, status.Count)
+	submission, err := repo.GetAgentDeliverySubmission(ctx, interruptedSubmissionID)
+	require.NoError(t, err)
+	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, submission.State)
 }
 
 func TestContinuedRecoveryDoesNotRetryPreviousOwner(t *testing.T) {
