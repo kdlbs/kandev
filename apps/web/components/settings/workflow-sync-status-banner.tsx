@@ -14,18 +14,36 @@ import { Button } from "@kandev/ui/button";
 import { useTick } from "@/components/integrations/auth-status-banner";
 import type { TFunction } from "i18next";
 import { formatRelative } from "@/lib/i18n/formats";
+import type { ReactNode } from "react";
 import type { WorkflowSyncConfig } from "@/lib/types/workflow-sync";
+
+/** The status fields this card reads; Workflow Sync and Prompt Sync share them. */
+type RepoSyncStatus = Pick<
+  WorkflowSyncConfig,
+  | "provider"
+  | "repo_owner"
+  | "repo_name"
+  | "project_path"
+  | "branch"
+  | "path"
+  | "interval_seconds"
+  | "poll_enabled"
+  | "last_synced_at"
+  | "last_ok"
+  | "last_error"
+  | "last_warnings"
+>;
 
 type SyncState = "waiting" | "ok" | "failed";
 
-function syncState(config: WorkflowSyncConfig): SyncState {
+function syncState(config: RepoSyncStatus): SyncState {
   if (!config.last_synced_at) return "waiting";
   return config.last_ok ? "ok" : "failed";
 }
 
 // syncSourceLabel is the human-readable sync source: "owner/repo" for GitHub,
 // the namespace path (already "group/project" shaped) for GitLab.
-function syncSourceLabel(config: WorkflowSyncConfig): string {
+function syncSourceLabel(config: RepoSyncStatus): string {
   return config.provider === "gitlab"
     ? config.project_path
     : `${config.repo_owner}/${config.repo_name}`;
@@ -37,7 +55,7 @@ function StateIcon({ state }: { state: SyncState }) {
   return <IconClock className="h-4 w-4 text-muted-foreground" />;
 }
 
-function lastSyncedLabel(t: TFunction, config: WorkflowSyncConfig): string {
+function lastSyncedLabel(t: TFunction, config: RepoSyncStatus): string {
   if (config.last_synced_at) {
     // `formatRelative` routes its buckets through i18next; date-fns'
     // `formatDistanceToNow` would render English inside a translated sentence.
@@ -49,7 +67,7 @@ function lastSyncedLabel(t: TFunction, config: WorkflowSyncConfig): string {
   return config.poll_enabled ? t("workflows:waitingForFirstSync") : t("workflows:notSyncedYet");
 }
 
-function MetadataLine({ config }: { config: WorkflowSyncConfig }) {
+function MetadataLine({ config }: { config: RepoSyncStatus }) {
   const { t } = useTranslation();
   useTick(30_000);
   const parts = [
@@ -62,11 +80,11 @@ function MetadataLine({ config }: { config: WorkflowSyncConfig }) {
   return <p className="text-xs text-muted-foreground">{parts.join(" · ")}</p>;
 }
 
-function WarningsAlert({ warnings }: { warnings: string[] }) {
+function WarningsAlert({ warnings, testIdPrefix }: { warnings: string[]; testIdPrefix: string }) {
   if (warnings.length === 0) return null;
   return (
     <Alert
-      data-testid="workflow-sync-warnings"
+      data-testid={`${testIdPrefix}-warnings`}
       className="border-amber-500/40 bg-amber-500/10 dark:border-amber-400/30 dark:bg-amber-400/10"
     >
       <IconAlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
@@ -84,9 +102,13 @@ function WarningsAlert({ warnings }: { warnings: string[] }) {
 }
 
 type WorkflowSyncStatusCardProps = {
-  config: WorkflowSyncConfig;
+  config: RepoSyncStatus;
   syncing: boolean;
   onSyncNow: () => void;
+  /** Prefix for test IDs; Prompt Sync reuses this card. */
+  testIdPrefix?: string;
+  /** Extra actions rendered beside Sync now. */
+  actions?: ReactNode;
 };
 
 // WorkflowSyncStatusCard is the compact always-visible summary of an active
@@ -99,13 +121,15 @@ export function WorkflowSyncStatusCard({
   config,
   syncing,
   onSyncNow,
+  testIdPrefix = "workflow-sync",
+  actions,
 }: WorkflowSyncStatusCardProps) {
   const { t } = useTranslation();
   const state = syncState(config);
   return (
     <div
       className="rounded-lg border bg-card p-4 space-y-2"
-      data-testid="workflow-sync-status"
+      data-testid={`${testIdPrefix}-status`}
       data-state={state}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -121,28 +145,31 @@ export function WorkflowSyncStatusCard({
           </span>
           <Badge variant="secondary">{config.branch}</Badge>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={onSyncNow}
-          disabled={syncing}
-          className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-          data-testid="workflow-sync-now"
-        >
-          {syncing ? (
-            <IconLoader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <IconRefresh className="h-4 w-4 mr-2" />
-          )}
-          {t("workflows:syncNow")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {actions}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onSyncNow}
+            disabled={syncing}
+            className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+            data-testid={`${testIdPrefix}-now`}
+          >
+            {syncing ? (
+              <IconLoader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <IconRefresh className="h-4 w-4 mr-2" />
+            )}
+            {t("workflows:syncNow")}
+          </Button>
+        </div>
       </div>
       <MetadataLine config={config} />
       {state === "failed" && (
         <p className="text-xs text-destructive">{config.last_error || t("workflows:syncFailed")}</p>
       )}
-      <WarningsAlert warnings={config.last_warnings ?? []} />
+      <WarningsAlert warnings={config.last_warnings ?? []} testIdPrefix={testIdPrefix} />
     </div>
   );
 }

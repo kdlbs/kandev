@@ -91,7 +91,7 @@ func (h *Handlers) httpUpdatePrompt(c *gin.Context) {
 			status, message = http.StatusBadRequest, err.Error()
 		case errors.Is(err, service.ErrPromptNotFound):
 			status, message = http.StatusNotFound, err.Error()
-		case errors.Is(err, promptstore.ErrPromptWriteRejected):
+		case errors.Is(err, promptstore.ErrPromptWriteRejected), errors.Is(err, service.ErrPromptSyncManaged):
 			status, message = http.StatusConflict, err.Error()
 		case errors.Is(err, service.ErrPromptAlreadyExists):
 			status, message = http.StatusConflict, err.Error()
@@ -115,6 +115,11 @@ func logRejection(log *logger.Logger, infoMsg, errorMsg string, err error, statu
 
 func (h *Handlers) httpDeletePrompt(c *gin.Context) {
 	if err := h.controller.DeletePrompt(c.Request.Context(), c.Param("id")); err != nil {
+		if errors.Is(err, service.ErrPromptSyncManaged) {
+			logRejection(h.logger, "delete prompt rejected", "failed to delete prompt", err, http.StatusConflict)
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to delete prompt", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete prompt"})
 		return
