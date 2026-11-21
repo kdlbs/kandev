@@ -17,6 +17,9 @@ func (r *Repository) ReorderSteps(ctx context.Context, workflowID string, stepID
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.ensurePromptSourceMutableTx(ctx, tx, workflowID); err != nil {
+		return err
+	}
 	query := `SELECT id FROM workflows WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		// The parent lock serializes reorders and prevents new membership until commit.
