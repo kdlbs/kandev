@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/winproc"
 )
 
 const capturedOutputLimit = 64 * 1024
@@ -146,26 +148,49 @@ func (s *processSupervisor) forceKillAll(reason string) []managedProcessShutdown
 func (s *processSupervisor) attachSignals() {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	// The parent's Windows stop request has its own channel so it can start
+	// shutdown but never counts as the second signal that forces a kill.
+	cooperative := make(chan os.Signal, 1)
+	stopLocal, err := winproc.ListenForShutdown(cooperative)
+	if err != nil {
+		launcherInfof("cooperative shutdown listener unavailable: %v", err)
+		stopLocal = func() {}
+	}
 	shutdownDebugf("launcher signal handler armed launcher_pid=%d", os.Getpid())
 	go func() {
-		sig := <-ch
+		defer stopLocal()
+		var pairing winproc.ShutdownPairing
+		var sig os.Signal
+		select {
+		case sig = <-ch:
+		case sig = <-cooperative:
+			sig = pairing.CooperativeFirst(sig, ch)
+		}
 		shutdownDebugf("launcher received signal=%s launcher_pid=%d", sig.String(), os.Getpid())
 		shutdownDone := make(chan int, 1)
 		go func() {
 			shutdownDone <- s.shutdown("signal " + sig.String())
 		}()
-		select {
-		case nextSig := <-ch:
-			shutdownDebugf("launcher received signal during shutdown=%s launcher_pid=%d", nextSig.String(), os.Getpid())
-			forceStart := time.Now()
-			launcherInfof("forced shutdown after second signal (signal=%s)", nextSig.String())
-			results := s.forceKillAll("second signal " + nextSig.String())
-			logForcedShutdownComplete(time.Since(forceStart), results)
-			signal.Stop(ch)
-			launcherExit(1)
-		case exitCode := <-shutdownDone:
-			signal.Stop(ch)
-			launcherExit(exitCode)
+		for {
+			select {
+			case nextSig := <-ch:
+				shutdownDebugf("launcher received signal during shutdown=%s launcher_pid=%d", nextSig.String(), os.Getpid())
+				if !pairing.Forces(nextSig) {
+					// Same Ctrl+C as the cooperative request that started shutdown.
+					continue
+				}
+				forceStart := time.Now()
+				launcherInfof("forced shutdown after second signal (signal=%s)", nextSig.String())
+				results := s.forceKillAll("second signal " + nextSig.String())
+				logForcedShutdownComplete(time.Since(forceStart), results)
+				signal.Stop(ch)
+				launcherExit(1)
+				return
+			case exitCode := <-shutdownDone:
+				signal.Stop(ch)
+				launcherExit(exitCode)
+				return
+			}
 		}
 	}()
 }

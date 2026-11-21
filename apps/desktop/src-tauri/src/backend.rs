@@ -17,6 +17,10 @@ use std::{
 };
 use url::Url;
 
+#[cfg(windows)]
+#[path = "windows_shutdown.rs"]
+mod windows_shutdown;
+
 #[cfg(feature = "desktop-runtime")]
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 
@@ -1494,6 +1498,10 @@ fn request_graceful_child_shutdown(child: &Child) -> bool {
 
 #[cfg(windows)]
 fn request_graceful_child_shutdown(child: &Child) -> bool {
+    // Console-less children cannot receive taskkill's window-close request.
+    if windows_shutdown::request(child.id()) {
+        return true;
+    }
     let pid = child.id().to_string();
     Command::new("taskkill")
         .args(["/T", "/PID", &pid])
@@ -2563,6 +2571,40 @@ mod tests {
                 .unwrap_err()
                 .contains("exited before /ready reported ready"),
             "wait_for_ready error should name the exit-before-ready reason"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn terminate_child_stops_console_less_child_cooperatively() {
+        use std::io::BufRead;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        // Registers the same per-process stop event as the Kandev launcher and
+        // exits cleanly only when that event is set.
+        let script = concat!(
+            "$e = New-Object System.Threading.EventWaitHandle($false, ",
+            "[System.Threading.EventResetMode]::ManualReset, ('Local\\KandevShutdown-' + $PID)); ",
+            "[Console]::Out.WriteLine('ready'); [Console]::Out.Flush(); ",
+            "if ($e.WaitOne(30000)) { exit 0 } else { exit 3 }",
+        );
+        let mut child = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn console-less child");
+        let mut ready = String::new();
+        std::io::BufReader::new(child.stdout.take().expect("child stdout"))
+            .read_line(&mut ready)
+            .expect("read child readiness");
+        assert_eq!(ready.trim(), "ready");
+
+        assert!(
+            terminate_child_with_timeout(&mut child, Duration::from_secs(10)),
+            "console-less child should exit cleanly from a cooperative stop"
         );
     }
 
