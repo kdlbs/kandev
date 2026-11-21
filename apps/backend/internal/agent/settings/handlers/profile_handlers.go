@@ -164,6 +164,9 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 	}
 	resp, err := h.controller.CreateProfile(c.Request.Context(), controller.CreateProfileRequestFromDTO(body))
 	if err != nil {
+		if writeClaudeExactModelAliasConflict(c, err) {
+			return
+		}
 		if errors.Is(err, controller.ErrDynamicAgentRoutingDisabled) || errors.Is(err, controller.ErrAgentFeatureDisabled) {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			return
@@ -221,6 +224,9 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 }
 
 func writeProfileUpdateError(c *gin.Context, err error) bool {
+	if writeClaudeExactModelAliasConflict(c, err) {
+		return true
+	}
 	switch {
 	case err == controller.ErrAgentProfileNotFound:
 		c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
