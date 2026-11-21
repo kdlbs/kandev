@@ -10,6 +10,7 @@ import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import {
   configurationFeedbackTurnId,
   type ConfigurationFeedbackEntry,
+  type ConfigurationFeedbackOutcome,
   type SessionConfigurationFeedbackUpdate,
 } from "@/lib/state/slices/session-runtime/session-configuration-feedback";
 import type { AppState } from "@/lib/state/store";
@@ -50,7 +51,7 @@ function valueName(state: AppState, sessionId: string, configId: string, value: 
   if (configId === "mode") {
     return (
       state.sessionMode.bySessionId[sessionId]?.availableModes.find((mode) => mode.id === value)
-        ?.name ?? value
+        ?.name || value
     );
   }
   const models = state.sessionModels.bySessionId[sessionId];
@@ -59,10 +60,10 @@ function valueName(state: AppState, sessionId: string, configId: string, value: 
   const optionName = option?.options?.find((item) => item.value === value)?.name;
   if (optionName) return optionName;
   if (configId !== "model" && option?.category !== "model") return value;
-  return models.models.find((model) => model.modelId === value)?.name ?? value;
+  return models.models.find((model) => model.modelId === value)?.name || value;
 }
 
-function outcomeText({
+function feedbackOutcome({
   change,
   result,
   requested,
@@ -72,28 +73,39 @@ function outcomeText({
   result: SessionConfigurationResult | undefined;
   requested: string;
   effective: string | undefined;
-}): Pick<ConfigurationFeedbackEntry, "text" | "dismissible"> {
+}): ConfigurationFeedbackOutcome {
   const reason = sanitizeSessionErrorDetails(change.error);
+  const label = (change.configId === "mode" ? t("common:mode") : change.label).toLowerCase();
+  const withLabel = (value: string) => `${change.label}: ${value}`;
+  const requestedSetting = withLabel(requested);
   switch (result?.status) {
     case "applied":
       if (effective) {
-        const text =
-          result.effective === result.requested
-            ? effective
-            : t("task:sessionConfigurationClamped", { requested, effective });
-        return { text, dismissible: false };
+        if (result.effective === result.requested) {
+          return { kind: "changed", label, value: effective };
+        }
+        return {
+          kind: "notice",
+          text: t("task:sessionConfigurationClamped", {
+            requested: requestedSetting,
+            effective: withLabel(effective),
+          }),
+          dismissible: false,
+        };
       }
       break;
     case "saved_for_launch":
       return {
-        text: t("task:sessionConfigurationSaved", { value: requested }),
+        kind: "notice",
+        text: t("task:sessionConfigurationSaved", { value: requestedSetting }),
         dismissible: true,
       };
     case "persistence_failed":
       return {
+        kind: "notice",
         text: effective
-          ? t("task:sessionConfigurationPersistenceFailed", { value: effective, reason })
-          : t("task:sessionConfigurationSaveFailed", { value: requested, reason }),
+          ? t("task:sessionConfigurationPersistenceFailed", { value: withLabel(effective), reason })
+          : t("task:sessionConfigurationSaveFailed", { value: requestedSetting, reason }),
         dismissible: true,
       };
   }
@@ -102,19 +114,15 @@ function outcomeText({
     (change.error instanceof ApiError && change.error.status < 500)
   ) {
     return {
+      kind: "notice",
       text: t("task:sessionConfigurationRejected", {
-        value: requested,
+        value: requestedSetting,
         reason: reason || t("task:sessionConfigurationRejectedReason"),
       }),
       dismissible: true,
     };
   }
-  return {
-    text: [t("task:sessionConfigurationUnconfirmed", { value: requested }), reason]
-      .filter(Boolean)
-      .join(" "),
-    dismissible: true,
-  };
+  return { kind: "unconfirmed", label, value: requested, reason };
 }
 
 function feedbackEntry(
@@ -124,15 +132,18 @@ function feedbackEntry(
   change: ConfigurationChangeOutcome,
 ): ConfigurationFeedbackEntry {
   const result = change.result ?? errorConfigurationResult(change.error);
-  const withLabel = (value: string) =>
-    `${change.label}: ${valueName(state, sessionId, change.configId, value)}`;
   const effective =
     executionId && result?.execution_id === executionId && result.confirmed && result.effective
-      ? withLabel(result.effective)
+      ? valueName(state, sessionId, change.configId, result.effective)
       : undefined;
   return {
     configId: change.configId,
-    ...outcomeText({ change, result, requested: withLabel(change.requested), effective }),
+    ...feedbackOutcome({
+      change,
+      result,
+      requested: valueName(state, sessionId, change.configId, change.requested),
+      effective,
+    }),
   };
 }
 

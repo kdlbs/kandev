@@ -70,16 +70,17 @@ test.describe("Picker feedback on phone", () => {
     await applied;
     await expect(feedback).toHaveCount(1);
     await expect(feedback).toHaveClass(/text-muted-foreground/);
-    await expect(feedback).toContainText("Model: Mock Smart");
+    await expect(feedback).toHaveText("Changed mode Plan Mock, model Mock Smart.");
+    await expect(feedback.locator("code")).toHaveText(["Plan Mock", "Mock Smart"]);
 
     await testPage.route("**/set-config-option", (route) =>
       route.fulfill({
         status: 500,
         contentType: "application/json",
         body: JSON.stringify({
-          error: "phone picker rejected model. " + "Provider detail remains available. ".repeat(30),
+          error: "Agent reply timed out. " + "Provider detail remains available. ".repeat(30),
           configuration_result: {
-            status: "rejected",
+            status: "unconfirmed",
             config_id: "model",
             requested: "mock-fast",
             confirmed: false,
@@ -87,14 +88,18 @@ test.describe("Picker feedback on phone", () => {
         }),
       }),
     );
-    const rejected = waitForHttp(testPage, "POST", /\/set-config-option$/, {
+    const unconfirmedResponse = waitForHttp(testPage, "POST", /\/set-config-option$/, {
       predicate: (response) => response.status() === 500,
     });
     await testPage.getByRole("option", { name: /Mock Fast/ }).tap();
-    await rejected;
+    await unconfirmedResponse;
     await expect(feedback).toHaveCount(1);
-    await expect(feedback).toContainText("Plan Mock");
-    await expect(feedback).toContainText("phone picker rejected model");
+    await expect(feedback).toContainText("Changed mode Plan Mock.");
+    await expect(feedback).not.toHaveClass(/text-destructive/);
+    await expect(feedback.locator(".text-destructive")).toContainText(
+      "Could not confirm model Mock Fast. Agent reply timed out.",
+    );
+    await expect(feedback.locator("code")).toHaveText(["Plan Mock", "Mock Fast"]);
     await testPage.getByTestId("model-config-sheet-close").tap();
     await expect(testPage.getByTestId("model-config-sheet-close")).toHaveCount(0);
 

@@ -826,9 +826,10 @@ advertised argument hint, such as `/goal`'s supported arguments. These labels
 and hints describe the command; they do not apply it until you send the draft.
 Pasted rich text does not create a command chip; Kandev uses its visible plain text.
 
-In task Chat, model, mode, and option changes appear in a muted system message.
-Changes made before the next turn share one message. If you change a setting
-again, that message shows the latest result for it.
+In task Chat, confirmed changes appear in one muted system message, such as
+“Changed model `Sonnet`, mode `Plan`.” Changes before the next turn share that
+message, with the latest result for each setting. Unconfirmed changes appear
+in red with a message that explains the outcome.
 
 A supported configuration command such as `/model <id>` can also report the
 setting that the agent applied. Kandev shows that result beneath the command

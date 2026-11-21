@@ -1,13 +1,15 @@
 "use client";
 
+import { Fragment, type ReactNode } from "react";
 import { IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { sessionConfigurationExecutionId } from "@/components/task/session-configuration-request";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
   configurationFeedbackTurnId,
+  type ConfigurationFeedbackEntry,
   type SessionConfigurationFeedbackRow,
 } from "@/lib/state/slices/session-runtime/session-configuration-feedback";
 import type { AppState } from "@/lib/state/store";
@@ -20,7 +22,7 @@ export function MutedConfigurationStatus({
   dismiss,
   retry,
 }: {
-  message: string;
+  message: ReactNode;
   testId: string;
   dismiss?: () => void;
   retry?: () => void;
@@ -70,6 +72,56 @@ export function MutedConfigurationStatus({
   );
 }
 
+function SettingValue({ label, value }: { label: string; value: string }) {
+  return (
+    <>
+      {label} <code className="font-mono">{value}</code>
+    </>
+  );
+}
+
+function PickerFeedbackText({ entries }: { entries: ConfigurationFeedbackEntry[] }) {
+  const changed = entries.filter((entry) => entry.kind === "changed");
+  const notices = entries.filter((entry) => entry.kind !== "changed");
+  return (
+    <>
+      {changed.length > 0 && (
+        <Trans
+          i18nKey="task:sessionConfigurationChanged"
+          components={{
+            settings: (
+              <span>
+                {changed.map((entry, index) => (
+                  <Fragment key={entry.configId}>
+                    {index > 0 && ", "}
+                    <SettingValue label={entry.label} value={entry.value} />
+                  </Fragment>
+                ))}
+              </span>
+            ),
+          }}
+        />
+      )}
+      {notices.map((entry, index) => (
+        <Fragment key={entry.configId}>
+          {(changed.length > 0 || index > 0) && " "}
+          {entry.kind === "unconfirmed" ? (
+            <span className="text-destructive">
+              <Trans
+                i18nKey="task:sessionConfigurationUnconfirmed"
+                components={{ setting: <SettingValue label={entry.label} value={entry.value} /> }}
+              />
+              {entry.reason && ` ${entry.reason}`}
+            </span>
+          ) : (
+            entry.text
+          )}
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
 function eligibleRetry(
   state: AppState,
   sessionId: string,
@@ -95,12 +147,14 @@ export function PickerConfigurationStatus({ comment }: { comment: Message }) {
   );
   const retry = useAppStore((state) => eligibleRetry(state, sessionId, row));
   if (!row) return null;
-  const dismiss = row.entries.some((entry) => entry.dismissible)
+  const dismiss = row.entries.some(
+    (entry) => entry.kind === "unconfirmed" || (entry.kind === "notice" && entry.dismissible),
+  )
     ? () => store.getState().dismissSessionConfigurationFeedback(sessionId, id)
     : undefined;
   return (
     <MutedConfigurationStatus
-      message={comment.content}
+      message={<PickerFeedbackText entries={row.entries} />}
       testId="session-configuration-feedback"
       dismiss={dismiss}
       retry={

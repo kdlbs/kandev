@@ -3,11 +3,12 @@ import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import type { Turn } from "@/lib/types/http";
 import type { SessionRuntimeSlice } from "./types";
 
-export type ConfigurationFeedbackEntry = {
-  configId: string;
-  text: string;
-  dismissible: boolean;
-};
+export type ConfigurationFeedbackOutcome =
+  | { kind: "changed"; label: string; value: string }
+  | { kind: "unconfirmed"; label: string; value: string; reason: string }
+  | { kind: "notice"; text: string; dismissible: boolean };
+
+export type ConfigurationFeedbackEntry = ConfigurationFeedbackOutcome & { configId: string };
 
 type ConfigurationFeedbackRetry = {
   run: () => void;

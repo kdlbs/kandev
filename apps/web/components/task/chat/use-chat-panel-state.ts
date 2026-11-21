@@ -368,7 +368,7 @@ function useConfigurationFeedbackMessages(sessionId: string | null, taskId: stri
         author_type: "agent",
         type: "status",
         created_at: row.createdAt,
-        content: row.entries.map((entry) => entry.text).join(" · "),
+        content: "",
         metadata: { configuration_picker_feedback: true },
       }),
     );

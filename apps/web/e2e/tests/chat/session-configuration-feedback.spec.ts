@@ -33,7 +33,8 @@ test.describe("Picker feedback", () => {
     await expect(feedback).toBeVisible();
     await expect(feedback).toHaveAttribute("role", "status");
     await expect(feedback).toHaveClass(/text-muted-foreground/);
-    await expect(feedback).toContainText("Model: Mock Smart");
+    await expect(feedback).toHaveText("Changed model Mock Smart.");
+    await expect(feedback.locator("code")).toHaveText(["Mock Smart"]);
 
     await testPage.keyboard.press("Escape");
     await testPage.getByTestId("session-mode-selector").click();
@@ -41,7 +42,7 @@ test.describe("Picker feedback", () => {
     await testPage.getByRole("menuitem", { name: /Plan Mock/ }).click();
     await modeResponse;
     await expect(feedback).toHaveCount(1);
-    await expect(feedback).toContainText("Plan Mock");
+    await expect(feedback).toHaveText("Changed model Mock Smart, mode Plan Mock.");
 
     await testPage.clock.runFor(6_000);
     await trigger.click();
@@ -50,9 +51,8 @@ test.describe("Picker feedback", () => {
     await testPage.getByRole("button", { name: "Low", exact: true }).click();
     await effortResponse;
     await expect(feedback).toHaveCount(1);
-    await expect(feedback).toContainText("Model: Mock Smart");
-    await expect(feedback).toContainText("Plan Mock");
-    await expect(feedback).toContainText("Effort: Low");
+    await expect(feedback).toHaveText("Changed model Mock Smart, mode Plan Mock, effort Low.");
+    await expect(feedback.locator("code")).toHaveText(["Mock Smart", "Plan Mock", "Low"]);
     await testPage.keyboard.press("Escape");
 
     const prompt = "use this configuration";
@@ -64,9 +64,10 @@ test.describe("Picker feedback", () => {
     await testPage.getByRole("option", { name: /Mock Fast/ }).click();
     await nextModelResponse;
     await expect(feedback).toHaveCount(2);
-    await expect(feedback.first()).toContainText("Model: Mock Smart");
-    await expect(feedback.last()).toContainText("Model: Mock Fast");
-    await expect(feedback.last()).not.toContainText("Effort: Low");
+    await expect(feedback.first()).toHaveText(
+      "Changed model Mock Smart, mode Plan Mock, effort Low.",
+    );
+    await expect(feedback.last()).toHaveText("Changed model Mock Fast.");
     await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
 
     await testPage.reload();

@@ -370,8 +370,9 @@ describe("live composed configuration apply", () => {
       ).toBe("solo");
     });
     const feedback = await latestFeedback();
-    expect(feedback.entries[0].text).toContain("Model: Balanced B");
-    expect(feedback.entries[0].text).toContain("Model: Solo");
+    expect(feedback.entries[0]).toMatchObject({
+      text: "Requested Model: Balanced B. The agent applied Model: Solo.",
+    });
     expect(setSessionConfigOption).toHaveBeenCalledTimes(1);
   });
 });
@@ -438,12 +439,14 @@ describe("composed configuration partial retries", () => {
         }
       ).currentModelId,
     ).toBe(PAIR_B);
-    expect(partial.entries[0].text).toContain(
-      "Model: Balanced B applied, but it could not be saved.",
+    expect(partial.entries[0]).toHaveProperty(
+      "text",
+      `Model: Balanced B applied, but it could not be saved. ${SAVE_PERSISTENCE_ERROR}`,
     );
-    expect(partial.entries[0].text).toContain(SAVE_PERSISTENCE_ERROR);
-    expect(partial.entries[1].text).toContain("Thinking: High");
-    expect(partial.entries[1].text).toContain(OPTION_REJECTION);
+    expect(partial.entries[1]).toHaveProperty(
+      "text",
+      `Could not apply Thinking: High. ${OPTION_REJECTION}`,
+    );
     expect(partial.retry).toBeTruthy();
     expect(mocks.toast).not.toHaveBeenCalled();
 
@@ -462,7 +465,7 @@ describe("composed configuration partial retries", () => {
     ]);
     const retried = await latestFeedback();
     expect(retried.entries).toHaveLength(1);
-    expect(retried.entries[0].text).toContain("Thinking: Low");
+    expect(retried.entries[0]).toHaveProperty("text", expect.stringContaining("Thinking: Low"));
     expect(
       (
         mocks.appState.sessionModels.bySessionId[SESSION_ID] as {
@@ -505,7 +508,10 @@ describe("composed configuration retry failures", () => {
     await act(async () => initial.retry?.run());
 
     const feedback = await latestFeedback();
-    expect(feedback.entries[0].text).toContain("retry option rejection");
+    expect(feedback.entries[0]).toHaveProperty(
+      "text",
+      expect.stringContaining("retry option rejection"),
+    );
     expect(feedback.retry).toBeTruthy();
   });
 });

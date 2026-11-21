@@ -14,9 +14,14 @@ function makeStore() {
   return create<SessionRuntimeSlice>()(immer<SessionRuntimeSlice>(createSessionRuntimeSlice));
 }
 
-const model = { configId: "model", text: "Model: Sonnet", dismissible: false };
-const mode = { configId: "mode", text: "Mode: Plan", dismissible: false };
-const reasoning = { configId: "effort", text: "Reasoning: High", dismissible: false };
+const model = { configId: "model", kind: "changed", label: "model", value: "Sonnet" } as const;
+const mode = { configId: "mode", kind: "changed", label: "mode", value: "Plan" } as const;
+const reasoning = {
+  configId: "effort",
+  kind: "changed",
+  label: "reasoning",
+  value: "High",
+} as const;
 
 describe("session configuration feedback", () => {
   it("merges changes by setting across pauses and preserves the row's position", () => {
@@ -26,7 +31,7 @@ describe("session configuration feedback", () => {
     const initialId = store.getState().configurationFeedback.bySessionId[SESSION][0].id;
     record(SESSION, { turnId: FIRST_TURN, createdAt: FIRST_CHANGE, entries: [mode] });
     record(SESSION, { turnId: FIRST_TURN, createdAt: LATER_CHANGE, entries: [reasoning] });
-    const updatedModel = { ...model, text: "Model: Opus" };
+    const updatedModel = { ...model, value: "Opus" };
     record(SESSION, { turnId: FIRST_TURN, createdAt: LATER_CHANGE, entries: [updatedModel] });
 
     expect(store.getState().configurationFeedback.bySessionId[SESSION]).toEqual([

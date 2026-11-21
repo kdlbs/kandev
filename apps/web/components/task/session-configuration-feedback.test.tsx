@@ -87,7 +87,7 @@ describe("picker configuration feedback", () => {
       vi.advanceTimersByTime(20_000);
     });
     expect(rows()[0].entries).toEqual([
-      { configId: "model", text: "Model: sonnet", dismissible: false },
+      { configId: "model", kind: "changed", label: "model", value: "sonnet" },
     ]);
 
     act(() => {
@@ -101,12 +101,14 @@ describe("picker configuration feedback", () => {
     });
 
     expect(rows().map((row) => row.turnId)).toEqual(["first", "next"]);
-    expect(rows()[0].entries.map((entry) => entry.text)).toEqual([
-      "Model: sonnet",
-      "Reasoning: high",
+    expect(rows()[0].entries).toEqual([
+      { configId: "model", kind: "changed", label: "model", value: "sonnet" },
+      { configId: "effort", kind: "changed", label: "reasoning", value: "high" },
     ]);
     expect(rows()[0].retry).toBeUndefined();
-    expect(rows()[1].entries.map((entry) => entry.text)).toEqual(["Model: opus"]);
+    expect(rows()[1].entries).toEqual([
+      { configId: "model", kind: "changed", label: "model", value: "opus" },
+    ]);
   });
 
   it("drops an obsolete request and results from a different session or execution", () => {
@@ -137,7 +139,9 @@ describe("picker configuration feedback", () => {
     });
     expect(rows(SESSION_B)).toEqual([]);
   });
+});
 
+describe("picker configuration outcomes", () => {
   it("reports missing execution evidence and transport errors as unconfirmed", () => {
     const { result, rows } = mountFeedback();
     const { feedback } = result.current;
@@ -153,9 +157,15 @@ describe("picker configuration feedback", () => {
         },
       ]);
     });
-    expect(rows()[0].entries.map((entry) => entry.text)).toEqual([
-      "Could not confirm Model: sonnet.",
-      "Could not confirm Reasoning: high. request timed out",
+    expect(rows()[0].entries).toEqual([
+      { configId: "model", kind: "unconfirmed", label: "model", value: "sonnet", reason: "" },
+      {
+        configId: "effort",
+        kind: "unconfirmed",
+        label: "reasoning",
+        value: "high",
+        reason: "request timed out",
+      },
     ]);
   });
 
@@ -175,9 +185,19 @@ describe("picker configuration feedback", () => {
       ]);
     });
 
-    expect(rows()[0].entries.map((entry) => entry.text)).toEqual([
-      "Model: sonnet applied, but it could not be saved. could not write the preference",
-      "Could not apply Reasoning: high. requested value is unsupported",
+    expect(rows()[0].entries).toEqual([
+      {
+        configId: "model",
+        kind: "notice",
+        text: "Model: sonnet applied, but it could not be saved. could not write the preference",
+        dismissible: true,
+      },
+      {
+        configId: "effort",
+        kind: "notice",
+        text: "Could not apply Reasoning: high. requested value is unsupported",
+        dismissible: true,
+      },
     ]);
   });
 });

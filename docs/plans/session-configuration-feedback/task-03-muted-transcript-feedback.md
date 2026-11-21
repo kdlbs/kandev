@@ -52,7 +52,7 @@ Tasks 01 and 02. The work is limited to client-side presentation and grouping.
 [ Transcript scrolls ]
   Assistant reply
 
-  Model: Sonnet, Mode: Plan, Reasoning: High       (muted)
+  Changed model Sonnet, mode Plan, effort High.  (muted)
 
 [ Composer ]
 [ Model v ]   [ Mode v ]   [ Send ]
@@ -74,9 +74,9 @@ failure, the reason wraps and the row's actions can wrap below it.
 
 ```text
 [ Transcript scrolls ]
-  Model: Sonnet
-  Reasoning: High unavailable.
-  [ Retry ] [ Dismiss ]
+  Changed model Sonnet.                          (muted)
+  Could not confirm mode Plan.                   (red)
+  [ Dismiss ]
 
 [ Composer ]
 [ Model v ] [ Mode v ] [ Send ]

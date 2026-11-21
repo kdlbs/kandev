@@ -113,9 +113,11 @@ and keep notice data out of conversation history and plugin turns.
 
 Use the transcript's `StatusMessage` renderer for both feedback sources. Use
 compact muted text in normal message flow. Names come from the advertised
-setting and value labels when available. Describe deferred saves, rejections,
-partial changes, and uncertainty in text. Show the sanitized reason when the
-agent supplies one. Dismiss and eligible Retry remain available in the row.
+setting and value labels when available. Start confirmed picker changes with
+one localized verb, then list setting names and monospace values. Use red
+text for unconfirmed picker clauses. Describe deferred saves, rejections,
+partial changes, and uncertainty in text. Show the sanitized reason when
+the agent supplies one. Dismiss and eligible Retry remain available in the row.
 
 `usePickerConfigurationFeedback` forwards outcomes that pass the current
 request and execution checks to one session-scoped collection. Group them by

@@ -62,7 +62,7 @@ the transcript. The next turn closes that group.
 [ Transcript scrolls ]
   Assistant reply
 
-  Model: Sonnet, Mode: Plan, Reasoning: High       (muted)
+  Changed model Sonnet, mode Plan, effort High.  (muted)
 
 [ Composer ]
 [ Model v ]   [ Mode v ]   [ Send ]
@@ -87,9 +87,9 @@ phone layout.
 
 ```text
 [ Transcript scrolls ]
-  Model: Sonnet
-  Reasoning: High unavailable.
-  [ Retry ] [ Dismiss ]
+  Changed model Sonnet.                          (muted)
+  Could not confirm mode Plan.                   (red)
+  [ Dismiss ]
 
 [ Composer ]
 [ Model v ] [ Mode v ] [ Send ]
