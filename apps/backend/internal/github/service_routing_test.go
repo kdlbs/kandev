@@ -410,6 +410,42 @@ func TestPersonalSearchAndStatusResultsIntersectAutomationVisibility(t *testing.
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-REPOSITORY-SCOPE-001.5
+func TestPersonalSearchScopeUnionDoesNotExpandAutomationVisibility(t *testing.T) {
+	service := personalBoundaryTestServiceWithClients(t,
+		map[string]GitHubRepo{"acme/allowed": testGitHubRepo("acme", "allowed")},
+		map[string]GitHubRepo{
+			"acme/allowed":       testGitHubRepo("acme", "allowed"),
+			"outside/tool":       testGitHubRepo("outside", "tool"),
+			"personal-only/repo": testGitHubRepo("personal-only", "repo"),
+		},
+		[]*PR{
+			{RepoOwner: "acme", RepoName: "allowed", Number: 1},
+			{RepoOwner: "outside", RepoName: "tool", Number: 2},
+			{RepoOwner: "personal-only", RepoName: "repo", Number: 3},
+		},
+		[]*Issue{
+			{RepoOwner: "acme", RepoName: "allowed", Number: 1},
+			{RepoOwner: "outside", RepoName: "tool", Number: 2},
+			{RepoOwner: "personal-only", RepoName: "repo", Number: 3},
+		}, false,
+	)
+	if err := service.store.UpsertWorkspaceSettings(context.Background(), &WorkspaceSettings{
+		WorkspaceID: "workspace-1", RepoScopeMode: RepoScopeModeSelected,
+		RepoScopeOrgs: []string{"acme"}, RepoScopeRepos: []RepoFilter{{Owner: "outside", Name: "tool"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prs, err := service.SearchUserPRsPagedForWorkspaceUser(context.Background(), "workspace-1", "user-1", "", "", 1, 25)
+	if err != nil || len(prs.PRs) != 1 || prs.PRs[0].RepoOwner != "acme" || prs.TotalCount != 1 {
+		t.Fatalf("personal PR search escaped workspace automation visibility: %+v, %v", prs, err)
+	}
+	issues, err := service.SearchUserIssuesPagedForWorkspaceUser(context.Background(), "workspace-1", "user-1", "", "", 1, 25)
+	if err != nil || len(issues.Issues) != 1 || issues.Issues[0].RepoOwner != "acme" || issues.TotalCount != 1 {
+		t.Fatalf("personal issue search escaped workspace automation visibility: %+v, %v", issues, err)
+	}
+}
+
 func TestPersonalSearchPaginatesAfterAutomationVisibilityFiltering(t *testing.T) {
 	personalPRs := make([]*PR, 100, 101)
 	personalIssues := make([]*Issue, 100, 101)

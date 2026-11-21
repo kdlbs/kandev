@@ -1300,6 +1300,9 @@ type (
 	GitBranchSwitchNotification = types.GitBranchSwitchNotification
 	WorktreeInventory           = types.WorktreeInventory
 	WorktreeInventoryEntry      = types.WorktreeInventoryEntry
+	WorkspaceRootFile           = types.WorkspaceRootFile
+	WorkspaceRootDestination    = types.WorkspaceRootDestination
+	WorkspaceRootFiles          = types.WorkspaceRootFiles
 	FileInfo                    = types.FileInfo
 	FileEntry                   = types.FileEntry
 	FileTreeNode                = types.FileTreeNode
@@ -1316,6 +1319,13 @@ type (
 	ProcessOutput               = types.ProcessOutput
 	ProcessStatusUpdate         = types.ProcessStatusUpdate
 )
+
+// IsClosed reports whether Close has retired the client's streams.
+func (c *Client) IsClosed() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.closed
+}
 
 // Close closes all connections and releases resources. It is a drain
 // barrier for workspace stream goroutines: when Close returns, the workspace

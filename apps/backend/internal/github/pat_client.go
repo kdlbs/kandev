@@ -873,7 +873,7 @@ func (c *PATClient) GetRepoFileContent(ctx context.Context, owner, repo, path, r
 		return nil, fmt.Errorf("get repo file content: %w", err)
 	}
 	if raw.Encoding != "base64" {
-		return nil, fmt.Errorf("get repo file content: unsupported encoding %q", raw.Encoding)
+		return nil, unsupportedRepoFileEncoding(raw.Encoding)
 	}
 	decoded, err := base64.StdEncoding.DecodeString(stripBase64Whitespace(raw.Content))
 	if err != nil {

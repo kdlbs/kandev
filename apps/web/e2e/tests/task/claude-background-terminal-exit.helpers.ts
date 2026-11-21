@@ -88,7 +88,7 @@ async function expectRunningCount(
 }
 
 /**
- * A qualified Claude 0.97.0 terminal frame ends only its matching detached
+ * A qualified Claude 0.109.0 terminal frame ends only its matching detached
  * shell with a null outcome. Desktop and phone share this flow through their
  * own specs (REQ-AGENTS-BACKGROUND-WORK-005 and -010, AC .5 and .6).
  * `signalFile` is the test-owned gate that releases the fixture's terminal

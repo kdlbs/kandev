@@ -363,7 +363,9 @@ function useWorkflowImportPreview({
       setPreview(nextPreview);
       setSelections(nextSelections);
       const missing = workflowImportMissingSteps(nextPreview, nextSelections);
-      if (missing.length > 0) {
+      // Exclusion warnings never block the import, but the user confirms
+      // after seeing them instead of the import auto-submitting.
+      if (missing.length > 0 || (nextPreview.warnings?.length ?? 0) > 0) {
         setPhase("resolving");
         setActiveStepKey(null);
         return;

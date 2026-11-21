@@ -561,6 +561,7 @@ type PreviewFeedbackRepository interface {
 	ListTaskPreviewFeedback(ctx context.Context, taskID string) (*models.TaskPreviewFeedbackSnapshot, error)
 	CreateTaskPreviewFeedback(ctx context.Context, item *models.TaskPreviewFeedback, ownerID, workspaceID string) (*models.TaskPreviewFeedbackSnapshot, error)
 	UpdateTaskPreviewFeedback(ctx context.Context, taskID, itemID, comment string, expectedVersion int64) (*models.TaskPreviewFeedbackSnapshot, error)
+	ReplaceTaskPreviewFeedbackScreenshot(ctx context.Context, change *models.TaskPreviewFeedbackScreenshotReplacement, ownerID, workspaceID string) (*models.TaskPreviewFeedbackSnapshot, []*models.TaskMessageAttachment, error)
 	DeleteTaskPreviewFeedback(ctx context.Context, taskID, itemID string, expectedVersion int64) (*models.TaskPreviewFeedbackSnapshot, []*models.TaskMessageAttachment, error)
 	ClearTaskPreviewFeedback(ctx context.Context, taskID string, expectedRevision int64) (*models.TaskPreviewFeedbackSnapshot, []*models.TaskMessageAttachment, error)
 }

@@ -154,6 +154,10 @@ test.describe("Prompts settings", () => {
     ).toBeVisible({ timeout: 10_000 });
     // Form should be reset / closed on success.
     await expect(testPage.getByTestId("prompt-create-form")).toHaveCount(0);
+    // The rows carry their own outlines, with no group card around them.
+    await expect(
+      testPage.getByTestId("prompts-custom-section").locator("[data-settings-group-card]"),
+    ).toHaveCount(0);
   });
 
   test("saves prompt name and content, then discards a later draft", async ({

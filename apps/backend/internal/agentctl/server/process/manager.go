@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -50,12 +51,13 @@ import (
 type Status string
 
 const (
-	StatusStopped  Status = "stopped"
-	StatusStarting Status = "starting"
-	StatusRunning  Status = "running"
-	StatusPaused   Status = "paused"
-	StatusStopping Status = "stopping"
-	StatusError    Status = "error"
+	StatusStopped      Status = "stopped"
+	StatusStarting     Status = "starting"
+	StatusRunning      Status = "running"
+	StatusPaused       Status = "paused"
+	StatusStopping     Status = "stopping"
+	StatusError        Status = "error"
+	claudeACPAgentType        = "claude-acp"
 )
 
 // defaultUpdatesChannelCapacity is the updates channel buffer size used when
@@ -362,9 +364,9 @@ type Manager struct {
 	stopChSnapshot atomic.Value // chan struct{}
 	shutdownIntent atomic.Pointer[atomic.Bool]
 	doneCh         chan struct{}
-	// attachedCount is the live count of backend event-stream connections
-	// (see attachment.go). Zero value correctly starts an instance detached.
-	attachedCount atomic.Int32
+	// attach tracks the live backend event-stream connections (see
+	// attachment.go). Zero value correctly starts an instance detached.
+	attach attachTracker
 	// turnOutcomeMu guards recorder wiring independently of lifecycle transitions.
 	turnOutcomeMu            sync.RWMutex
 	turnOutcomeRecorder      TurnOutcomeRecorder
@@ -910,7 +912,11 @@ func (m *Manager) DispatchDeliverySubmission(
 		m.deliveryActiveMu.Unlock()
 	}()
 	stopping := m.shutdownIntent.Load()
-	return (&SubmissionDelivery{Journal: deliveryJournal, Stopping: stopping}).Dispatch(ctx, id, call)
+	return (&SubmissionDelivery{Journal: deliveryJournal, Stopping: stopping}).Dispatch(ctx, id, func(ctx context.Context) error {
+		m.setBudgetInFlight(id)
+		defer m.clearBudgetInFlight(id)
+		return call(ctx)
+	})
 }
 
 func (m *Manager) activeDeliverySubmissionID() string {
@@ -1106,7 +1112,7 @@ func (m *Manager) CancelDeliverySubmission(ctx context.Context, id string) error
 		Type:                 adapter.EventTypeComplete,
 		SessionID:            submission.SessionID,
 		DeliverySubmissionID: id,
-		Data:                 map[string]any{"stop_reason": "cancelled"},
+		Data:                 map[string]any{"stop_reason": stopReasonCancelled},
 	})
 	if err != nil {
 		return err
@@ -2603,6 +2609,7 @@ func (m *Manager) buildAdapterConfig() error {
 	}
 	m.adapterCfg = &adapter.Config{
 		WorkDir:                    m.cfg.WorkDir,
+		ClaudeConfigDir:            claudeConfigDirFromLaunch(m.cfg.AgentType, m.cfg.AgentEnv, m.cfg.StripEnv),
 		AutoApprove:                m.adapterAutoApprove(),
 		McpServers:                 mcpServers,
 		ProjectMCPDelivery:         projectDelivery.Clone(),
@@ -2618,6 +2625,7 @@ func (m *Manager) buildAdapterConfig() error {
 		PromptSuggestions:          m.cfg.PromptSuggestions,
 		CopilotNativeSessionEvents: m.cfg.CopilotNativeSessionEvents,
 	}
+
 	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
 		harness := acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
 		if harness == "" {
@@ -2690,6 +2698,37 @@ func (m *Manager) buildAdapterConfig() error {
 	// must be configured with fresh evidence.
 	m.cfg.ProjectMCPDelivery = nil
 	return nil
+}
+
+func claudeConfigDirFromLaunch(agentType string, env, stripEnv []string) string {
+	if agentType != claudeACPAgentType {
+		return ""
+	}
+	for _, key := range stripEnv {
+		if key == "CLAUDE_CONFIG_DIR" {
+			return ""
+		}
+	}
+	if configDir := acpcompat.EnvValue(env, "CLAUDE_CONFIG_DIR"); configDir != "" {
+		if !filepath.IsAbs(configDir) {
+			return ""
+		}
+		return filepath.Clean(configDir)
+	}
+	homeVariable := "HOME"
+	if runtime.GOOS == checkpointWindowsOS && acpcompat.EnvValue(env, "USERPROFILE") != "" {
+		homeVariable = "USERPROFILE"
+	}
+	for _, key := range stripEnv {
+		if key == homeVariable {
+			return ""
+		}
+	}
+	home := acpcompat.EnvValue(env, homeVariable)
+	if !filepath.IsAbs(home) {
+		return ""
+	}
+	return filepath.Join(filepath.Clean(home), ".claude")
 }
 
 // buildFinalCommand assembles the full command args and creates the exec.Cmd.
@@ -3413,6 +3452,10 @@ func (m *Manager) persistDeliveryBatchRaw(ctx context.Context, updates []adapter
 	}
 	events := make([]journal.Event, len(updates))
 	for i, update := range updates {
+		if update.Type == adapter.EventTypeComplete || update.Type == adapter.EventTypeError {
+			update = m.applyTerminalStamp(update)
+			updates[i] = update
+		}
 		payload, err := json.Marshal(update)
 		if err != nil {
 			return updates, err
@@ -3649,6 +3692,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 // StopForTeardown permanently closes process admission and drains prior owners
 // before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
+	m.StopOfflineBudget()
 	m.CloseAdmission()
 	passthroughErr := m.passthrough.StopAll(ctx)
 	passthroughErr = errors.Join(passthroughErr, m.cleanupPassthroughFiles(ctx))

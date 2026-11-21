@@ -439,7 +439,6 @@ test.describe("Mobile file viewer panel", () => {
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 5_000 });
 
-    await viewer.getByTestId("markdown-preview-toggle").tap();
     await expect(viewer.getByTestId("markdown-preview")).toBeVisible();
     await expect(viewer.locator('div[align="center"]')).toContainText("Embedded HTML body");
 
@@ -504,7 +503,6 @@ test.describe("Mobile file viewer panel", () => {
 
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 5_000 });
-    await viewer.getByTestId("markdown-preview-toggle").tap();
 
     const preview = viewer.getByTestId("markdown-preview");
     const table = preview.locator("table", { hasText: marker });

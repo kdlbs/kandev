@@ -158,6 +158,12 @@ func TestEnterpriseHostReplacementClosesRepositoryScopeAndFlows(t *testing.T) {
 	if _, err := service.SetWorkspaceConnection(ctx, "ws-1", SetWorkspaceConnectionRequest{Source: ConnectionSourcePAT, Token: "public-token"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := service.store.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
+		WorkspaceID: "ws-1", RepoScopeMode: RepoScopeModeSelected,
+		RepoScopeOrgs: []string{"acme"}, RepoScopeRepos: []RepoFilter{{Owner: "outside", Name: "tool"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := service.store.CreateAuthFlow(ctx, &AuthFlow{StateHash: "pending", WorkspaceID: "ws-1", UserID: "alice", AppRegistrationID: "registration-test", Kind: AuthFlowKindPersonal, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
@@ -184,8 +190,15 @@ func TestEnterpriseHostReplacementClosesRepositoryScopeAndFlows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.RepoScopeMode != RepoScopeModeRepos || len(settings.RepoScopeRepos) != 0 {
+	if settings.RepoScopeMode != RepoScopeModeSelected || len(settings.RepoScopeOrgs) != 0 || len(settings.RepoScopeRepos) != 0 {
 		t.Fatalf("replacement scope = %+v", settings)
+	}
+	var storedMode, storedOrgs, storedRepos string
+	if err := service.store.ro.QueryRowContext(ctx, `SELECT repo_scope_mode, repo_scope_orgs, repo_scope_repos FROM github_workspace_settings WHERE workspace_id = ?`, "ws-1").Scan(&storedMode, &storedOrgs, &storedRepos); err != nil {
+		t.Fatal(err)
+	}
+	if storedMode != RepoScopeModeSelected || storedOrgs != `[]` || storedRepos != `[]` {
+		t.Fatalf("stored replacement scope = mode %q, orgs %s, repos %s", storedMode, storedOrgs, storedRepos)
 	}
 	flow, err := service.store.GetAuthFlow(ctx, "pending")
 	if err != nil || flow == nil || flow.ConsumedAt == nil {

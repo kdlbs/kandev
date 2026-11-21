@@ -70,6 +70,7 @@ import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic
 import { buildSaveConfig } from "@/components/settings/profile-edit/serialize-executor-config";
 import { useUserNamespacesFormState } from "@/components/settings/profile-edit/use-user-namespaces-form-state";
 import { useDockerNetworksFormState } from "@/components/settings/profile-edit/use-docker-networks-form-state";
+import { useDockerStorageFormState } from "@/components/settings/profile-edit/use-docker-storage-form-state";
 import { useProfileRuntimeFormState } from "@/components/settings/profile-edit/use-profile-runtime-form-state";
 import { useGitIdentityState } from "@/components/settings/profile-edit/use-git-identity-state";
 import { KubernetesProfileSections } from "@/components/settings/kubernetes-profile-sections";
@@ -241,6 +242,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
   const runtime = useProfileRuntimeFormState(executor, profile);
   const userNamespaces = useUserNamespacesFormState(profile.config);
   const dockerNetworks = useDockerNetworksFormState(profile.config);
+  const dockerStorage = useDockerStorageFormState(profile.config);
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar, resetEnvVars } = useEnvVarRows(
     profile.env_vars,
   );
@@ -279,7 +281,17 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     remoteAuth.reset();
     gitIdentity.reset();
     dockerNetworks.resetDockerNetworks();
-  }, [dockerNetworks, gitIdentity, profile, remoteAuth, resetEnvVars, runtime, userNamespaces]);
+    dockerStorage.resetDockerStorage();
+  }, [
+    dockerNetworks,
+    dockerStorage,
+    gitIdentity,
+    profile,
+    remoteAuth,
+    resetEnvVars,
+    runtime,
+    userNamespaces,
+  ]);
 
   return {
     ...runtime,
@@ -295,6 +307,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     setAllowUserNamespaces: userNamespaces.setAllowUserNamespaces,
     resetUserNamespaces: userNamespaces.resetUserNamespaces,
     ...dockerNetworks,
+    ...dockerStorage,
     isLocalDocker: executor.type === "local_docker",
     envVarRows,
     addEnvVar,
@@ -375,6 +388,7 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           allowUserNamespaces={form.allowUserNamespaces}
           onAllowUserNamespacesChange={form.setAllowUserNamespaces}
           networks={form}
+          storage={form}
         />
       )}
       {form.isKubernetes && (

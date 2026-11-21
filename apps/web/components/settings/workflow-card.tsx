@@ -34,6 +34,9 @@ import { useWorkflowDraftContributor } from "./use-workflow-draft-contributor";
 import { WorkflowPromptSection } from "./workflow-prompt-section";
 import { WorkflowDescriptionField } from "./workflow-description-field";
 import { useWorkflowDuplication } from "@/app/settings/workspace/use-workflow-duplication";
+import { useAppStore } from "@/components/state-provider";
+import { WorkflowCompactRow, type WorkflowReadOnlyReason } from "./workflow-compact-row";
+import { WorkflowCardDisclosureBody, useWorkflowCardDisclosure } from "./workflow-card-disclosure";
 
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
 
@@ -46,6 +49,10 @@ type WorkflowCardProps = {
   otherWorkflows?: Workflow[];
   /** Workflows in the dedicated Improve Kandev workspace are read-only. */
   isImproveWorkspace?: boolean;
+  /** Compact list view: render a collapsible summary row above the editor. */
+  compact?: boolean;
+  /** Start expanded in the compact view (workflow appeared during this visit). */
+  initiallyExpanded?: boolean;
   onUpdateWorkflow: (updates: {
     name?: string;
     description?: string;
@@ -434,10 +441,57 @@ function useWorkflowCardState(props: WorkflowCardProps) {
   };
 }
 
+function readOnlyReasonFor(
+  workflow: Workflow,
+  isImproveWorkspace?: boolean,
+): WorkflowReadOnlyReason {
+  if (isImproveWorkspace) return "improve";
+  if (workflow.source === "github") return "synced";
+  return null;
+}
+
+function WorkflowCardCompactHeader({
+  workflow,
+  isImproveWorkspace,
+  state,
+  disclosure,
+  bodyId,
+}: {
+  workflow: Workflow;
+  isImproveWorkspace?: boolean;
+  state: ReturnType<typeof useWorkflowCardState>;
+  disclosure: ReturnType<typeof useWorkflowCardDisclosure>;
+  bodyId: string;
+}) {
+  const profileId = workflow.agent_profile_id;
+  const agentProfileLabel = useAppStore((store) =>
+    profileId ? store.agentProfiles.items.find((p) => p.id === profileId)?.label : undefined,
+  );
+  return (
+    <WorkflowCompactRow
+      workflow={workflow}
+      steps={state.workflowSteps}
+      stepsLoading={state.workflowLoading}
+      agentProfileLabel={agentProfileLabel}
+      readOnlyReason={readOnlyReasonFor(workflow, isImproveWorkspace)}
+      isDirty={state.hasUnsavedChanges}
+      expanded={disclosure.expanded}
+      onToggle={disclosure.toggle}
+      bodyId={bodyId}
+    />
+  );
+}
+
 export function WorkflowCard(props: WorkflowCardProps) {
   const { t } = useTranslation();
-  const { workflow, savedWorkflow, otherWorkflows = [], onUpdateWorkflow } = props;
+  const { workflow, savedWorkflow, otherWorkflows = [], onUpdateWorkflow, compact = false } = props;
   const s = useWorkflowCardState(props);
+  const disclosure = useWorkflowCardDisclosure({
+    compact,
+    initiallyExpanded: props.initiallyExpanded || workflow.id.startsWith(TEMP_WORKFLOW_PREFIX),
+    targetId: `workflow-card-${workflow.id}`,
+  });
+  const bodyId = `workflow-card-body-${workflow.id}`;
   const visibleSavedSteps = savedWorkflow ? s.savedWorkflowSteps : [];
   const duplicate = useWorkflowDuplication({
     workflow,
@@ -451,50 +505,63 @@ export function WorkflowCard(props: WorkflowCardProps) {
   return (
     <SettingsCard
       isDirty={s.hasUnsavedChanges || props.isOrderDirty}
-      discoveryTargetId={`workflow-card-${workflow.id}`}
+      discoveryTargetId={disclosure.discoveryTargetId}
       data-testid={`workflow-card-${workflow.id}`}
+      data-expanded={disclosure.open}
+      className={compact ? "gap-0 py-0" : undefined}
     >
-      <CardContent className="pt-6">
-        <div className="space-y-4">
-          <WorkflowCardBody
-            workflow={workflow}
-            savedWorkflow={savedWorkflow}
-            onUpdateWorkflow={onUpdateWorkflow}
-            workflowLoading={s.workflowLoading}
-            workflowSteps={s.workflowSteps}
-            savedWorkflowSteps={visibleSavedSteps}
-            diagnostics={s.mutationGuard.diagnostics}
-            mutationPending={s.mutationGuard.isMutationPending}
-            isImproveWorkspace={props.isImproveWorkspace}
-            stepActions={s.stepActions}
-            readOnly={s.readOnly}
-            onSessionConfigResolutionPendingChange={s.setSessionConfigResolutionPending}
-          />
-          <WorkflowCardHeaderActions
-            workflowId={workflow.id}
-            setExportYaml={s.setExportYaml}
-            setExportOpen={s.setExportOpen}
-            toast={s.toast}
-            onDeleteClick={async () => {
-              if (workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)) await s.removeDraftWorkflow();
-              else await s.wfDeleteHandlers.handleDeleteWorkflowClick();
-            }}
-            onDuplicateClick={duplicate.handleDuplicateWorkflow}
-            deleteDisabled={
-              s.mutationGuard.isMutationPending ||
-              s.deleteWorkflowRequest.isLoading ||
-              s.wfDel.workflowDeleteLoading ||
-              s.isRemovingDraft ||
-              s.readOnly
-            }
-            readOnly={s.readOnly}
-            exportDisabled={workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)}
-            duplicateDisabled={duplicate.duplicateDisabled}
-            duplicateDisabledReason={duplicate.duplicateDisabledReason}
-            duplicateLoading={duplicate.duplicateLoading}
-          />
-        </div>
-      </CardContent>
+      {compact && (
+        <WorkflowCardCompactHeader
+          workflow={workflow}
+          isImproveWorkspace={props.isImproveWorkspace}
+          state={s}
+          disclosure={disclosure}
+          bodyId={bodyId}
+        />
+      )}
+      <WorkflowCardDisclosureBody id={bodyId} open={disclosure.open} mounted={disclosure.mounted}>
+        <CardContent className={compact ? "border-t pb-4 pt-4" : "pt-6"}>
+          <div className="space-y-4">
+            <WorkflowCardBody
+              workflow={workflow}
+              savedWorkflow={savedWorkflow}
+              onUpdateWorkflow={onUpdateWorkflow}
+              workflowLoading={s.workflowLoading}
+              workflowSteps={s.workflowSteps}
+              savedWorkflowSteps={visibleSavedSteps}
+              diagnostics={s.mutationGuard.diagnostics}
+              mutationPending={s.mutationGuard.isMutationPending}
+              isImproveWorkspace={props.isImproveWorkspace}
+              stepActions={s.stepActions}
+              readOnly={s.readOnly}
+              onSessionConfigResolutionPendingChange={s.setSessionConfigResolutionPending}
+            />
+            <WorkflowCardHeaderActions
+              workflowId={workflow.id}
+              setExportYaml={s.setExportYaml}
+              setExportOpen={s.setExportOpen}
+              toast={s.toast}
+              onDeleteClick={async () => {
+                if (workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)) await s.removeDraftWorkflow();
+                else await s.wfDeleteHandlers.handleDeleteWorkflowClick();
+              }}
+              onDuplicateClick={duplicate.handleDuplicateWorkflow}
+              deleteDisabled={
+                s.mutationGuard.isMutationPending ||
+                s.deleteWorkflowRequest.isLoading ||
+                s.wfDel.workflowDeleteLoading ||
+                s.isRemovingDraft ||
+                s.readOnly
+              }
+              readOnly={s.readOnly}
+              exportDisabled={workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)}
+              duplicateDisabled={duplicate.duplicateDisabled}
+              duplicateDisabledReason={duplicate.duplicateDisabledReason}
+              duplicateLoading={duplicate.duplicateLoading}
+            />
+          </div>
+        </CardContent>
+      </WorkflowCardDisclosureBody>
       <WorkflowCardDialogs
         wfDel={s.wfDel}
         otherWorkflows={otherWorkflows}

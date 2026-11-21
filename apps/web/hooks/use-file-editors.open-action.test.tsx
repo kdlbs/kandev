@@ -5,7 +5,12 @@ import type { FileEditorState } from "@/lib/state/dockview-store";
 
 const mocks = vi.hoisted(() => {
   const fakeClient = {};
-  const appStore = { getState: () => ({ environmentIdBySessionId: {} }) };
+  const appStore = {
+    getState: () => ({
+      environmentIdBySessionId: {},
+      userSettings: { markdownPreviewByDefault: mocks.markdownPreviewByDefault },
+    }),
+  };
   const toast = vi.fn();
   const requestFileContent = vi.fn();
   const addFileEditorPanel = vi.fn();
@@ -63,6 +68,7 @@ const mocks = vi.hoisted(() => {
   resetDockState();
 
   return {
+    markdownPreviewByDefault: true,
     savedTabs: [] as Array<{ path: string; name: string }>,
     sessionId: "sess-1",
     fakeClient,
@@ -168,6 +174,48 @@ describe("useFileEditors open actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.resetDockState();
+    mocks.markdownPreviewByDefault = true;
+  });
+
+  it("opens ordinary Markdown in Preview by default", async () => {
+    mocks.requestFileContent.mockResolvedValueOnce(fileResponse("README.md", "# Read me"));
+    const { result } = renderHook(() => useFileEditors());
+    await act(async () => result.current.openFile("README.md"));
+    expect(mocks.getDockState().openFiles.get("README.md")?.renderedPreview).toBe(true);
+  });
+
+  it.each([
+    ["README.md", false, false, false],
+    ["README.mdx", true, false, true],
+    ["image.md", true, true, false],
+    ["index.html", true, false, false],
+  ])("opens %s with default %s and binary %s", async (path, enabled, binary, expected) => {
+    mocks.markdownPreviewByDefault = enabled;
+    mocks.requestFileContent.mockResolvedValueOnce({
+      ...fileResponse(path, "content"),
+      is_binary: binary,
+    });
+    const { result } = renderHook(() => useFileEditors());
+    await act(async () => result.current.openFile(path));
+    expect(mocks.getDockState().openFiles.get(path)?.renderedPreview).toBe(expected);
+  });
+
+  it("preserves a buffer loaded while the ordinary open request is pending", async () => {
+    const pending = defer<FileContentResponse>();
+    mocks.requestFileContent.mockReturnValueOnce(pending.promise);
+    const { result } = renderHook(() => useFileEditors());
+    const opening = result.current.openFile("README.md");
+    const buffer = {
+      ...fileState("README.md", "user edit"),
+      renderedPreview: false,
+      isDirty: true,
+    };
+    mocks.getDockState().openFiles.set("README.md", buffer);
+    await act(async () => {
+      pending.resolve(fileResponse("README.md", "disk"));
+      await opening;
+    });
+    expect(mocks.getDockState().openFiles.get("README.md")).toBe(buffer);
   });
 
   it("keeps a pending file open request alive when focusing an already-open file", async () => {

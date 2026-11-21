@@ -117,7 +117,7 @@ test.describe("Mobile live repository attachment", () => {
     await chat.getByRole("link", { name: "primary after" }).tap();
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 15_000 });
-    await expect(viewer.locator(".cm-content, .monaco-editor .view-lines")).toContainText(
+    await expect(viewer.getByTestId("markdown-preview")).toContainText(
       LIVE_ATTACHMENT_WORK_ORDER.trim(),
     );
     await prCapture.screenshot("mobile-chat-link-primary-checkout", {
@@ -128,9 +128,7 @@ test.describe("Mobile live repository attachment", () => {
 
     await session.activeChat().getByRole("link", { name: "secondary README" }).tap();
     await expect(viewer).toBeVisible({ timeout: 15_000 });
-    await expect(viewer.locator(".cm-content, .monaco-editor .view-lines")).toContainText(
-      "secondary checkout readme",
-    );
+    await expect(viewer.getByTestId("markdown-preview")).toContainText("secondary checkout readme");
     await viewer.getByRole("button", { name: /Close/i }).tap();
     await openMobilePanel(testPage, /Chat$/);
 
@@ -147,7 +145,7 @@ test.describe("Mobile live repository attachment", () => {
     await session.waitForChatIdle({ timeout: 60_000 });
     const reloadedChat = session.activeChat();
     await reloadedChat.getByRole("link", { name: "primary after" }).tap();
-    await expect(viewer.locator(".cm-content, .monaco-editor .view-lines")).toContainText(
+    await expect(viewer.getByTestId("markdown-preview")).toContainText(
       LIVE_ATTACHMENT_WORK_ORDER.trim(),
     );
     await viewer.getByRole("button", { name: /Close/i }).tap();

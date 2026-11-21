@@ -22,6 +22,10 @@ const mocks = vi.hoisted(() => {
     editors: [editor],
     setEditors: vi.fn(),
     currentUserSettings: {},
+    markdownPreviewByDefault: true,
+    baselineMarkdownPreviewByDefault: true,
+    setMarkdownPreviewByDefault: vi.fn(),
+    setBaselineMarkdownPreviewByDefault: vi.fn(),
     defaultEditorId: editor.id,
     setDefaultEditorId: vi.fn(),
     baselineDefaultId: editor.id,
@@ -71,9 +75,13 @@ vi.mock("@/components/settings/editors-settings-state", async (importOriginal) =
 vi.mock("@/components/settings/settings-page-template", () => ({
   SettingsPageTemplate: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
-vi.mock("@/components/settings/settings-group", () => ({
-  SettingsGroup: ({ children }: { children: React.ReactNode }) => <section>{children}</section>,
-}));
+vi.mock("@/components/settings/settings-group", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/settings/settings-group")>();
+  return {
+    ...actual,
+    SettingsGroup: ({ children }: { children: React.ReactNode }) => <section>{children}</section>,
+  };
+});
 vi.mock("@/components/settings/lsp-language-cards", () => ({ LspLanguageCards: () => null }));
 vi.mock("@/components/settings/lsp-status-location-setting", () => ({
   LspStatusLocationSetting: () => null,

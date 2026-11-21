@@ -162,6 +162,23 @@ otherwise, review the current assignment and form choices before deciding whethe
 to retry. A multi-task selection keeps the separate bulk workflow action and does
 not support per-task profile mappings.
 
+## Read a task's step history
+
+Scripts and external tools can read who moved a task between workflow steps, and how, without reading Kandev's database:
+
+```text
+GET /api/v1/tasks/:id/step-transitions?limit=50&cursor=
+```
+
+The response lists the task's recorded moves oldest first. Each item has `id`, the source and destination `*_workflow_id`, `*_workflow_step_id`, and current `*_workflow_step_name`, plus `trigger`, `actor_kind`, `actor_id`, and `occurred_at`.
+
+- `trigger` says what moved the task, for example `manual_move` (a person on the board or the move API), `mcp_move` (an agent tool), or `engine_transition` (a workflow step action).
+- `actor_kind` is `human`, `agent`, `system`, `integration`, or `unknown`. `actor_id` is the user ID, session ID, or watch ID, or `null`. For REST moves, `human` means the request used a user credential. An API client can use a user credential too, so this value does not identify the board UI.
+- A removed step, or a step in another workspace, keeps its ID with a `null` name. The task-creation record (`trigger` `task_created`) has no source step.
+- `limit` defaults to 50 and is capped at 200. While `has_more` is `true`, pass `next_cursor` as `cursor` to read the next page.
+
+The read needs the same workspace access as opening the task; an unknown or inaccessible task returns `404`. History starts when Kandev began recording step transitions and is never reconstructed for older moves.
+
 ## Find a task from its conversation
 
 Open `Cmd/Ctrl+K` and enter a phrase from a user message or an assistant reply.
@@ -436,6 +453,21 @@ creation until you choose another profile or reset the row.
 
 ### Open a task mentioned in chat
 
+Agents can also link to existing tasks in their replies. A recognized task link
+appears as a chip with a task icon and title. Click, tap, or press Enter to open
+the task directly. On desktop, hover or focus shows status and session-count
+badges, creation date, workflow, and parent when those details are loaded.
+Sidebar-loaded tasks provide these details without opening a board first.
+Chips follow the task's personal color. Changing or clearing that color updates
+visible references immediately. Tasks without a personal color use Kandev's
+accent color. On phones, long titles wrap inside the message.
+Use Back to return to the source task.
+
+The title written in the message stays unchanged after a task rename. The link
+still opens the same task. Missing or inaccessible tasks use the usual task
+error page. Raw view and copied Markdown retain the original link.
+
+
 Type `@` in the chat composer and select a task from the suggestions. After
 sending, its mention appears as a task chip with an icon. Click the chip, focus
 it and press Enter, or tap it on your phone to open that task. The reference
@@ -626,7 +658,9 @@ When you send the first message from Chat on a prepared task, Kandev keeps the t
 
 After a completed turn, Kandev can show a changed-files card below the agent reply. The card summarizes repository changes captured between that turn's start and end.
 
-For new accounts, this preference is off. Existing saved preferences are unchanged. To change it, open **Settings > General**. Under **Chat preferences**, set **Show changed files after each turn**, then select **Save**.
+This preference is on by default. If you saved a choice, Kandev uses that choice.
+
+To change it, open **Settings > Preferences > Task Behavior > Conversation**. Set **Show changed files after each turn**, then select **Save changes**.
 
 Each card uses retained data for that turn. Later edits, commits, or branch changes do not rewrite it. Select **Open diff** to review the full turn. Select a file row to open its historical diff. On a phone, the diff opens in a full-height drawer.
 

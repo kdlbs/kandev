@@ -333,6 +333,34 @@ test("buildEntry resolves release, manifest, icon_url and stars", async () => {
   assert.deepEqual(record.categories, ["x"]);
 });
 
+test("buildEntry adds curated categories to manifest categories", async () => {
+  stubGitHub({
+    release: {
+      tag_name: "v1.2.0",
+      assets: [
+        {
+          name: "foo-1.2.0.tar.gz",
+          browser_download_url: "https://dl/foo-1.2.0.tar.gz",
+        },
+      ],
+    },
+    manifestText: "categories: [connector]",
+    repoMeta: { owner: { login: "acme" } },
+  });
+
+  const { record, error } = await buildEntry(
+    {
+      id: "foo",
+      repo: "acme/foo",
+      categories: ["integrations", "connector"],
+    },
+    { verifyPackage: async () => verifiedPackage() },
+  );
+
+  assert.equal(error, undefined);
+  assert.deepEqual(record.categories, ["connector", "integrations"]);
+});
+
 test("buildEntry attributes native plugins to the curated repository owner", async () => {
   stubGitHub({
     release: {

@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   promptEditor: vi.fn(),
 }));
 
+// Prompt Sync has its own tests; this file covers the prompt list.
+vi.mock("@/components/settings/prompt-sync-section", () => ({ PromptSyncSection: () => null }));
+
 vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
   useCustomPrompts: () => ({ loaded: true }),
 }));
@@ -60,6 +63,7 @@ const promptId = "prompt-1";
 const promptName = "Review";
 const promptContent = "Review this change";
 const promptRowTestId = "prompt-list-item";
+const promptNameAttribute = "data-prompt-name";
 const promptContentInputTestId = "prompt-content-input";
 const promptDeleteButtonTestId = "prompt-delete-button";
 const promptDeletePopoverTestId = "prompt-delete-confirm-popover";
@@ -322,6 +326,16 @@ describe("PromptsSettings coordinated creation", () => {
 const searchLabel = "Search...";
 const builtinNeedleName = "BuiltIn Needle";
 
+// @covers AC-INTEGRATIONS-PROMPT-SYNC-004.3
+describe("PromptsSettings layout", () => {
+  it("draws no group card around the custom prompts, only the search bar and rows", () => {
+    renderPromptSettings();
+    const section = screen.getByTestId("prompts-custom-section");
+    expect(section.querySelector("[data-settings-group-card]")).toBeNull();
+    expect(within(section).getByTestId(promptRowTestId)).toBeTruthy();
+  });
+});
+
 describe("PromptsSettings search", () => {
   it("filters the mounted list by saved content beyond its preview", () => {
     mocks.prompts = [
@@ -338,7 +352,7 @@ describe("PromptsSettings search", () => {
       target: { value: "hidden body" },
     });
     expect(screen.getAllByTestId(promptRowTestId)).toHaveLength(1);
-    expect(screen.getByTestId(promptRowTestId).getAttribute("data-prompt-name")).toBe("Review");
+    expect(screen.getByTestId(promptRowTestId).getAttribute(promptNameAttribute)).toBe("Review");
   });
 
   it("matches literal name and raw body case insensitively, preserves order and data, and resets", () => {
@@ -362,7 +376,7 @@ describe("PromptsSettings search", () => {
     );
     const search = screen.getByRole("searchbox", { name: searchLabel });
     const names = () =>
-      screen.queryAllByTestId(promptRowTestId).map((row) => row.getAttribute("data-prompt-name"));
+      screen.queryAllByTestId(promptRowTestId).map((row) => row.getAttribute(promptNameAttribute));
 
     fireEvent.change(search, { target: { value: "  nEeDlE  " } });
     expect(names()).toEqual([builtinNeedleName, "Second"]);

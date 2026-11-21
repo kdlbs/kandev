@@ -189,6 +189,7 @@ func (s *Server) setupRoutes() {
 
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
+		api.GET("/workspace/root-files", s.handleWorkspaceRootFiles)
 		api.GET("/workspace/image-preview", s.handleQuestionImage)
 		api.POST("/workspace/file-preview/prepare", s.handlePrepareFilePreview)
 		api.POST("/workspace/file-preview/read", s.handleReadFilePreview)

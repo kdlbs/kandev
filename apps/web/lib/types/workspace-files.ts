@@ -57,6 +57,25 @@ export type WorkspaceContentSearchResponse = {
   error?: string;
 };
 
+export type WorkspaceRootFile = {
+  path: string;
+  size: number;
+  modified_at: string;
+};
+
+export type WorkspaceRootDestination = {
+  repository_name: string;
+  path: string;
+};
+
+export type WorkspaceRootFilesResponse = {
+  supported: boolean;
+  files: WorkspaceRootFile[];
+  truncated: boolean;
+  destinations: WorkspaceRootDestination[];
+  error?: string;
+};
+
 export type FileChangeEvent = {
   timestamp: string;
   path: string;

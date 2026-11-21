@@ -232,7 +232,7 @@ func (r *workflowStartPromptMoveBeforeInsertRepository) InsertForSessionWithWork
 	msg *messagequeue.QueuedMessage,
 	claim *messagequeue.QueueAttachmentClaim,
 	maxPerSession int,
-	policy *messagequeue.AutoMergePolicy,
+	policy *messagequeue.AdmissionPolicy,
 ) error {
 	r.once.Do(r.beforeInsert)
 	repo, ok := r.Repository.(interface {
@@ -243,7 +243,7 @@ func (r *workflowStartPromptMoveBeforeInsertRepository) InsertForSessionWithWork
 			*messagequeue.QueuedMessage,
 			*messagequeue.QueueAttachmentClaim,
 			int,
-			*messagequeue.AutoMergePolicy,
+			*messagequeue.AdmissionPolicy,
 		) error
 	})
 	if !ok {
@@ -258,7 +258,7 @@ func (r *workflowStartPromptMoveBeforeInsertRepository) AutoMergeCandidateIntoAb
 	entry messagequeue.WorkflowEntryIdentity,
 	candidate *messagequeue.QueuedMessage,
 	claim *messagequeue.QueueAttachmentClaim,
-	policy *messagequeue.AutoMergePolicy,
+	policy *messagequeue.AdmissionPolicy,
 ) (*messagequeue.QueuedMessage, bool, error) {
 	repo, ok := r.Repository.(interface {
 		AutoMergeCandidateIntoAboveForSessionWithWorkflowEntry(
@@ -267,7 +267,7 @@ func (r *workflowStartPromptMoveBeforeInsertRepository) AutoMergeCandidateIntoAb
 			messagequeue.WorkflowEntryIdentity,
 			*messagequeue.QueuedMessage,
 			*messagequeue.QueueAttachmentClaim,
-			*messagequeue.AutoMergePolicy,
+			*messagequeue.AdmissionPolicy,
 		) (*messagequeue.QueuedMessage, bool, error)
 	})
 	if !ok {

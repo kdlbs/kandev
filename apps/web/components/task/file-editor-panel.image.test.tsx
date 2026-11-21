@@ -31,6 +31,9 @@ vi.mock("@/components/editors/external-vcs-file-link", () => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({
+    getState: () => ({ userSettings: { markdownPreviewByDefault: true } }),
+  }),
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       tasks: { activeSessionId: "session-1", activeTaskId: "task-1" },

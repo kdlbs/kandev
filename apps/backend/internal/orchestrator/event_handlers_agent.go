@@ -1144,6 +1144,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// Complete the current turn
 	s.reconcileCompletedCIAutoFixTurn(ctx, data.TaskID, data.SessionID, turnAtEventFire)
+	s.recordTurnStatusNotice(ctx, data)
 	completionCtx := withWorkflowEffect(ctx, workflowEffectForCompletion(data, turnAtEventFire))
 	if turnAtEventFire != "" {
 		fixedResourceKey := s.fixedResourceForCleanCompletion(completionCtx, data, turnAtEventFire)
@@ -2134,6 +2135,12 @@ func (s *Service) executeQueuedMessageWithReservation(
 	if isBuiltinIntentError(err) {
 		allowFollowupDrain = false
 	}
+	if deliveryAttempted && err != nil &&
+		s.requeueUndispatchedDelivery(promptCtx, dispatchIdentity, queuedMsg, err) {
+		// A persistent failure waits for the next ready signal instead of spinning.
+		allowFollowupDrain = false
+		return
+	}
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
 		lifecyclePrompt, userMessageRecorded, deliveryAttempted, err,
@@ -2263,6 +2270,7 @@ func (s *Service) finishQueuedMessageExecution(
 ) {
 	exactReservation := reservation != nil && reservation.identity.SessionIncarnationID != ""
 	if deliveryAttempted && err != nil {
+		s.logPossiblyDeliveredAcknowledgement(queuedMsg, err)
 		if exactReservation {
 			s.acknowledgeLifecycleQueueEntryForSession(ctx, reservation.identity, queuedMsg)
 		} else {
@@ -2912,6 +2920,7 @@ func (s *Service) finishAgentCompleted(
 	if !completionFollowUp {
 		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	}
+	s.recordTurnStatusNotice(ctx, data)
 	closingTurnID := s.completedEventClosingTurn(ctx, data)
 	completionCtx := withWorkflowEffect(context.WithoutCancel(ctx), workflowEffectForCompletion(data, closingTurnID))
 	if data.TurnID != "" {

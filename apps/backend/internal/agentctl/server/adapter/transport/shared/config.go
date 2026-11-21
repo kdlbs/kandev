@@ -17,6 +17,11 @@ type Config struct {
 	// WorkDir is the working directory for the agent
 	WorkDir string
 
+	// ClaudeConfigDir is the effective Claude Code data root from the launch
+	// environment. The ACP transport uses it only for qualified Monitor
+	// completion evidence.
+	ClaudeConfigDir string
+
 	// AutoApprove automatically approves permission requests
 	AutoApprove bool
 
