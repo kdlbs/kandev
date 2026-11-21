@@ -34,6 +34,37 @@ function workspaceIdlePolicyUpdate(
   };
 }
 
+function workspaceWipReleaseUpdate(
+  item: WorkspaceItem,
+  payload: WorkspacePayload,
+): Pick<
+  WorkspaceItem,
+  "wip_sessionless_release_enabled" | "wip_sessionless_release_grace_minutes"
+> {
+  return {
+    wip_sessionless_release_enabled:
+      "wip_sessionless_release_enabled" in payload
+        ? (payload.wip_sessionless_release_enabled ?? false)
+        : item.wip_sessionless_release_enabled,
+    wip_sessionless_release_grace_minutes:
+      "wip_sessionless_release_grace_minutes" in payload
+        ? payload.wip_sessionless_release_grace_minutes
+        : item.wip_sessionless_release_grace_minutes,
+  };
+}
+
+function createdWorkspaceWipRelease(
+  payload: WorkspacePayload,
+): Pick<
+  WorkspaceItem,
+  "wip_sessionless_release_enabled" | "wip_sessionless_release_grace_minutes"
+> {
+  return {
+    wip_sessionless_release_enabled: payload.wip_sessionless_release_enabled ?? false,
+    wip_sessionless_release_grace_minutes: payload.wip_sessionless_release_grace_minutes ?? 10,
+  };
+}
+
 function updateWorkspaceItem(item: WorkspaceItem, payload: WorkspacePayload): WorkspaceItem {
   return {
     ...item,
@@ -44,6 +75,7 @@ function updateWorkspaceItem(item: WorkspaceItem, payload: WorkspacePayload): Wo
     default_agent_profile_id: payload.default_agent_profile_id ?? null,
     ...workspacePlacementUpdate(item, payload),
     ...workspaceIdlePolicyUpdate(item, payload),
+    ...workspaceWipReleaseUpdate(item, payload),
     updated_at: payload.updated_at ?? item.updated_at,
   };
 }
@@ -103,6 +135,7 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
           unit_id: payload.unit_id ?? "",
           acp_idle_suspension_enabled: payload.acp_idle_suspension_enabled ?? false,
           acp_idle_timeout_minutes: payload.acp_idle_timeout_minutes ?? 120,
+          ...createdWorkspaceWipRelease(payload),
           created_at: payload.created_at ?? new Date().toISOString(),
           updated_at: payload.updated_at ?? new Date().toISOString(),
         };

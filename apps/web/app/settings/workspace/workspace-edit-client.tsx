@@ -26,6 +26,7 @@ import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { buildWorkspaceSaveHandler, type SavedState } from "./workspace-edit-save";
 import { useWorkspaceIdlePolicyDraft } from "./workspace-edit-idle-policy-draft";
+import { WorkspaceWipReleaseSection } from "./workspace-wip-release-section";
 
 type Workspace = WorkspaceState["items"][number];
 import { useRequest } from "@/lib/http/use-request";
@@ -558,6 +559,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         onAgentProfileChange={setDefaultAgentProfileId}
         agentProfiles={agentProfiles}
       />
+      <WorkspaceWipReleaseSection workspace={currentWorkspace} canManage={canManage} />
       <WorkspaceIdlePolicyFormSection
         canManage={canManage}
         enabled={idleSuspensionEnabled}

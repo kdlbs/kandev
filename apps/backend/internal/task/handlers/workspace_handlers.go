@@ -132,6 +132,9 @@ type httpUpdateWorkspaceRequest struct {
 	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
 	ACPIdleSuspensionEnabled    *bool   `json:"acp_idle_suspension_enabled,omitempty"`
 	ACPIdleTimeoutMinutes       *int    `json:"acp_idle_timeout_minutes,omitempty"`
+	// WIP sessionless release policy (opt-in, off by default).
+	WIPSessionlessReleaseEnabled      *bool `json:"wip_sessionless_release_enabled,omitempty"`
+	WIPSessionlessReleaseGraceMinutes *int  `json:"wip_sessionless_release_grace_minutes,omitempty"`
 	// UnitID moves the workspace to another unit, changing who reaches it.
 	UnitID *string `json:"unit_id,omitempty"`
 }
@@ -151,7 +154,10 @@ func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
 		DefaultConfigAgentProfileID: body.DefaultConfigAgentProfileID,
 		ACPIdleSuspensionEnabled:    body.ACPIdleSuspensionEnabled,
 		ACPIdleTimeoutMinutes:       body.ACPIdleTimeoutMinutes,
-		UnitID:                      body.UnitID,
+
+		WIPSessionlessReleaseEnabled:      body.WIPSessionlessReleaseEnabled,
+		WIPSessionlessReleaseGraceMinutes: body.WIPSessionlessReleaseGraceMinutes,
+		UnitID:                            body.UnitID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workspace not updated")
@@ -274,6 +280,9 @@ type wsUpdateWorkspaceRequest struct {
 	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
 	ACPIdleSuspensionEnabled    *bool   `json:"acp_idle_suspension_enabled,omitempty"`
 	ACPIdleTimeoutMinutes       *int    `json:"acp_idle_timeout_minutes,omitempty"`
+	// WIP sessionless release policy (opt-in, off by default).
+	WIPSessionlessReleaseEnabled      *bool `json:"wip_sessionless_release_enabled,omitempty"`
+	WIPSessionlessReleaseGraceMinutes *int  `json:"wip_sessionless_release_grace_minutes,omitempty"`
 }
 
 func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -294,10 +303,14 @@ func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Messa
 		DefaultConfigAgentProfileID: req.DefaultConfigAgentProfileID,
 		ACPIdleSuspensionEnabled:    req.ACPIdleSuspensionEnabled,
 		ACPIdleTimeoutMinutes:       req.ACPIdleTimeoutMinutes,
+
+		WIPSessionlessReleaseEnabled:      req.WIPSessionlessReleaseEnabled,
+		WIPSessionlessReleaseGraceMinutes: req.WIPSessionlessReleaseGraceMinutes,
 	})
 	if err != nil {
 		h.logger.Error("failed to update workspace", zap.Error(err))
-		if errors.Is(err, service.ErrWorkspaceIdleTimeoutInvalid) {
+		if errors.Is(err, service.ErrWorkspaceIdleTimeoutInvalid) ||
+			errors.Is(err, service.ErrWorkspaceWIPReleaseGraceInvalid) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workspace", nil)

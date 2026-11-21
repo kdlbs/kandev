@@ -321,6 +321,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/bulk-move", h.httpBulkMoveTasks)
 	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)
 	api.GET("/workflow/steps/:id/task-count", h.httpGetStepTaskCount)
+	api.GET("/workflow/steps/:id/wip-occupants", h.httpGetStepWIPOccupants)
 
 	// Kanban task reordering (REQ-TASKS-KANBAN-TASK-REORDERING-001.17): the
 	// only request surface for a reorder, mirroring the hyphenated
