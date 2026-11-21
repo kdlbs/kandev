@@ -11,9 +11,10 @@ function usePersistOpenFileTabs(
   activeSessionId: string | null,
   openFileTabs: OpenFileTab[],
   restoring: RefObject<boolean>,
+  restoredSessionId: string | null,
 ) {
   useEffect(() => {
-    if (!activeSessionId || restoring.current) return;
+    if (!activeSessionId || restoring.current || restoredSessionId !== activeSessionId) return;
     saveOpenFileTabs(
       activeSessionId,
       openFileTabs.map(({ path, name, repo, renderedPreview }) => ({
@@ -23,7 +24,7 @@ function usePersistOpenFileTabs(
         ...(getFilePreviewKind(path) === "markdown" && renderedPreview ? { renderedPreview } : {}),
       })),
     );
-  }, [activeSessionId, openFileTabs, restoring]);
+  }, [activeSessionId, openFileTabs, restoring, restoredSessionId]);
 }
 
 export function useTabletFileState(options: {
@@ -44,12 +45,14 @@ export function useTabletFileState(options: {
     leftTab: selected,
     setLeftTab: setSelected,
   });
-  const { restorationInProgressRef } = useFileTabRestoration({
+  const { restorationInProgressRef, restoredSessionId, retireFile } = useFileTabRestoration({
     store,
     activeSessionId: session,
     leftTab: selected,
     setLeftTab: setSelected,
     setOpenFileTabs: setTabs,
+    openFileTabs: tabs,
   });
-  usePersistOpenFileTabs(session, tabs, restorationInProgressRef);
+  usePersistOpenFileTabs(session, tabs, restorationInProgressRef, restoredSessionId);
+  return { retireFile };
 }

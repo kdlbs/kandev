@@ -250,13 +250,13 @@ surviving pins/cursors and newer user/workflow selection. Owned empty slots can
 re-prove after changed primaries. Proof fills missing recipient identity/lifecycle.
 
 Explicit hits use HTTP-safe scoped identity, even at the same URL.
-Routes reopen hidden targets. Restore keeps flat/tree or unique legacy choices.
+Routes/workflow reopen hidden targets; restore keeps flat/tree/legacy choices.
 Phone/tablet consume route/workflow Chat focus; 404 vetoes admission/sync.
 `workflow_focus_disposition: none`: admitted, no source/effective launch;
 omit while deferred launch is possible. Removal leases protect live/parked groups.
-Committed focus wins restore; layout intents/frames keep scoped ownership.
+Explicit layouts retire maximize only on success; scoped frames stay owned.
 Changed primaries re-prove empty slots. Visibility gates restore/read/dots.
-Late tablet metadata preserves live editors/drafts and each visit's tab.
+Tablet restores initial tabs only; later selection/close/delete wins.
 
 `invalidateTaskSessionMembership` fences pending/admitted/queued foreground and
 removal-dialog reads, not new reads/unrelated keys. Confirmed UUID deletion

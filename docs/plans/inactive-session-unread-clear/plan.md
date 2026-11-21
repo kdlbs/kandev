@@ -273,7 +273,7 @@ the same causal scenario after Task 01 proves a violation:
 Execute sequentially. No subagent authorization is implied.
 
 - [x] [Task 01: Establish the inactive-session failure boundary](task-01-establish-failure-boundary.md) (done: conformance, no violation reproduced).
-- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R30 tablet file/workflow and Saved Layout ownership corrections verified. Independent review continues; broad suites/live NATS remain uncertified).
+- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R31 file admission and workflow/layout corrections verified. Independent review continues; broad suites/live NATS remain uncertified).
 
 The prior [task unread dot package](../task-unread-dot/plan.md) is historical
 completed delivery. The [visible-visit divider package](../unread-divider-visible-session-clear/plan.md)
@@ -796,3 +796,17 @@ harness/spec/catalog checks pass. Final single-worker/no-retry browser runs:
 nine desktop/tablet and ten phone cases pass. Final dirty-editor/dot and
 committed-workflow Chat captures inspected. Task 02 separates the initial
 non-green UI fixtures from these final receipts and preserves scope limits.
+
+### Production review R31
+
+Sol child `b061016f-243c-4873-8177-68bf2abab888` reviewed
+`dee0fe48b586f4e430eb108c0e4c47eb192e6955`: five P2s, not clean.
+Completed production rounds 31; consecutive clean 0. Task 02 records the
+targeted tablet and layout RED, corrections and delivery evidence.
+
+R31 author receipts: 16 files/325 targeted tests; strict lint/typecheck/fresh
+frontend pass. Ten desktop/tablet/maximize and ten phone cases pass on the
+final bundle, one worker/no retries. Final coarse editor/dot and workflow
+captures inspected. Task 02 records intermediate fixture/type failures and
+the visit/negative-mutation/rollback control REDs separately. R32 follows
+normal verified delivery; the review loop remains open.

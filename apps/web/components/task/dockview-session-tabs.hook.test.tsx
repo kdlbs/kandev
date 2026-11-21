@@ -187,7 +187,7 @@ const route = {
   phase: "committed",
 };
 describe("useAutoSessionTab focus requests", () => {
-  it.each([false, true])(
+  it.each([false, true, "maximized", "hidden"] as const)(
     "delivers and acknowledges workflow focus across restore=%s",
     (restoring) => {
       const { api, activationSequence, centerActivePanelId } =
@@ -238,7 +238,7 @@ describe("useAutoSessionTab focus requests", () => {
         useDockviewStore.setState({ api: api as DockviewApi });
       });
       activationSequence.length = 0;
-      if (restoring)
+      if (restoring === true)
         act(() => {
           Object.assign(api, { onDidActivePanelChange: () => ({ dispose: () => {} }) });
           for (const id of [ACTIVE_SESSION_ID, SIBLING_SESSION_ID]) {
@@ -257,6 +257,9 @@ describe("useAutoSessionTab focus requests", () => {
           useDockviewStore.setState({ isRestoringLayout: true });
         });
       activationSequence.length = 0;
+      if (restoring === "maximized")
+        useDockviewStore.setState({ preMaximizeLayout: { columns: [] } });
+      if (restoring === "hidden") hiddenSessionIdsFor(api as DockviewApi).add(ACTIVE_SESSION_ID);
 
       const acknowledge = store.getState().acknowledgeWorkflowSessionFocus;
       const acknowledgeSpy = vi.fn((requestId: number) => acknowledge(requestId));
@@ -278,7 +281,7 @@ describe("useAutoSessionTab focus requests", () => {
         });
         store.getState().reconcileWorkflowSessionFocus(TASK_ID);
       });
-      if (restoring) act(() => useDockviewStore.setState({ isRestoringLayout: false }));
+      if (restoring === true) act(() => useDockviewStore.setState({ isRestoringLayout: false }));
 
       expect(centerActivePanelId()).toBe(`session:${ACTIVE_SESSION_ID}`);
       expect(acknowledgeSpy).toHaveBeenCalledTimes(1);

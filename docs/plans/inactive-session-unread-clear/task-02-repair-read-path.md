@@ -4086,3 +4086,98 @@ No Go, cursor/predicate/projector, promotion/schema/wire change in R30.
 No broad-suite/live-NATS or historical-trigger certification. List readback
 shows convergence, not isolated cursor-event delivery; seeded RUNNING is not
 live execution.
+
+### Production-fix review round 31 remediation
+
+Sol child `b061016f-243c-4873-8177-68bf2abab888` reviewed
+`dee0fe48b586f4e430eb108c0e4c47eb192e6955`: five P2s, not clean.
+Completed production rounds 31; consecutive clean 0. The work is visit-initial
+file fallback, negative file mutation authority, deferred transcript-open
+selection ownership, committed desktop workflow presentation, and successful
+Saved Layout replacement of maximize state. Tablet composition and phone
+entry points are unchanged; existing coarse tabs and phone Chat remain the
+rendered owners.
+
+`r31-tablet-red.log`: four behavioral failures (two unavailable initial-file
+shapes, closed F resurrected, old tool open replaced newer Chat).
+`r31-layout-red-v2.log`: three behavioral failures/13 controls (committed
+hidden/maximized focus and same-environment Saved Layout overlay retention).
+The earlier layout attempt had duplicate-import/missing-active-group fixture
+errors; it is not behavioral RED.
+
+Tablet initial preference admission is distinct from explicit tab/route/workflow
+intent. Restoration validates only the initial choice against installed files;
+an unavailable initial file falls back to Chat. A visit-local file retirement
+set tracks close/delete by key and resolved tree alias before the UI mutation,
+so delayed saved content cannot reopen it; explicit later reopen remains live.
+Restoration completion is reactive for metadata persistence, including an
+unchanged Chat selection. `r31-metadata-active-red.log` caught the retained
+closed descriptor with initial File selected (one failure/three controls).
+
+Transcript opens capture the current visit and tablet selection ticket across
+content/hash reads. New Chat intent cancels their selection authority. Desktop
+committed workflow focus enters the existing hidden/maximized explicit-focus
+path before passive early returns; acknowledgement still needs actual panel
+activation. Successful Saved Layout replacement retires/persists normal
+overlay state. Failed legacy replacement restores the prior grid/profile
+without discarding maximize ownership.
+
+Control expansion caught two first-fix edges: treating a session's initial
+tab clear as a user close excluded the same filename in a different session;
+and a valid initial Review tab without file metadata became Chat.
+`r31-session-admission.log` and `r31-tab-controls-red.log` record those REDs.
+Only explicit close/delete retires a file; initial non-file choices remain.
+Legacy preference effects were grouped separately to keep restoration below
+the function limit, preserving their post-load order.
+
+The legacy-failure control now covers both maximize entry and a persisted
+maximized environment return. `r31-restored-failure.log` demonstrated that
+failed apply invalidated the original return's completion frame and stranded
+its restoring gate (one failure/six controls). Rollback restores the prior
+committed layout generation as well as grid/profile, allowing the original
+owner to settle. The typed fixture uses the actual SavedLayoutConfig fields.
+
+`r31-final-units.log`: 16 files/325 targeted tests pass after the final
+production edit. Strict changed-file lint, full production typecheck and a
+fresh R31 frontend build pass. Early typechecks rejected test-only
+SavedLayoutConfig field names; the final fixture uses its camel-case contract.
+
+Focused regression replay (the R30 command above additionally exercises the
+unchanged file/tab, layout ownership and authority controls):
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run components/task/tablet-file-admission.test.tsx \
+  components/task/task-center-panel-mutation-ownership.test.tsx \
+  components/task/task-center-panel-restoration.test.ts \
+  components/task/dockview-session-tabs.hook.test.tsx \
+  components/task/layout-preset-selector-apply.test.tsx \
+  hooks/domains/sidebar/use-unread-task-dot-display.test.tsx \
+  lib/state/dockview-env-switch.plugin-layout.test.ts \
+  lib/ws/handlers/task-primary-
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/task/task-unread-dot.spec.ts \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/session/session-layout.spec.ts -- \
+  --grep 'Task unread dot|ordinary foreground membership|maximize survives page refresh' \
+  --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+New ownership schedules are driven through mounted tablet hooks and real
+Dockview/menu stores, not new browser race injection. The owning browser
+replay checks the unchanged compositions and persisted-maximize positive.
+No new phone UI or controls were introduced; the existing phone spec is the
+shared-state parity check. Runtime/agentctl/host/plugin remain fresh R24;
+frontend is freshly built R31.
+
+Final fresh-bundle browser receipts: `r31-final-summary.log` ten
+desktop/tablet/maximize cases pass and `r31-phone-summary.log` ten phone cases
+pass. Sequential runs, one worker, no retries. Final dirty-editor/unread-dot
+and committed-workflow Chat captures inspected. R31 targeted implementation
+and verification are complete; independent Sol R32 follows normal delivery.
+The three-clean/50-round loop remains open at completed 31, clean 0.
+No Go/cursor/predicate/projector, promotion/schema/wire changes in this round.
+No broad-suite/live-NATS or historical-trigger certification; list readback
+remains convergence, not isolated cursor-event proof.

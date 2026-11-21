@@ -917,6 +917,9 @@ function performApplyCustomLayout(
 ): void {
   const { api } = get();
   if (!api) return;
+  const previous = get();
+  const previousVersion = layoutVersions.get(api);
+  const previousGrid = !(layout.layout as LayoutState)?.columns ? api.toJSON() : null;
   captureLiveWidths(api, set);
   preserveChatScrollDuringLayout();
   const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
@@ -933,6 +936,19 @@ function performApplyCustomLayout(
     safeHeight,
     set,
   });
+  if (oldFormatRestoreFailed) {
+    if (previousGrid) restoreSerializedDockview(api, previousGrid);
+    if (previousVersion === undefined) layoutVersions.delete(api);
+    else layoutVersions.set(api, previousVersion);
+    set({
+      isRestoringLayout: previous.isRestoringLayout,
+      hiddenRightPane: previous.hiddenRightPane,
+      activeLayoutProfile: previous.activeLayoutProfile,
+    });
+    return;
+  }
+  set({ preMaximizeLayout: null, maximizedGroupId: null });
+  if (get().currentLayoutEnvId) removeEnvMaximizeState(get().currentLayoutEnvId!);
   syncReusableRightTarget(
     get().currentLayoutEnvId,
     appliedState?.columns ? appliedState : null,

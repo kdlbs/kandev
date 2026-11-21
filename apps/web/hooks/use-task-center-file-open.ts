@@ -2,7 +2,11 @@
 
 import { useAppStoreApi } from "@/components/state-provider";
 import { isRenameReserved, trackRenameOpen } from "./file-rename-continuity";
-import { useCallback } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
+import {
+  tabletSelectionOwner,
+  beginTabletSelection,
+} from "./domains/session/use-tablet-session-tab";
 import type { OpenFileTab, FileContentResponse } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent } from "@/lib/ws/workspace-files";
@@ -21,6 +25,13 @@ export function useTaskCenterFileOpen({
   toast,
 }: UseTaskCenterFileOpenOptions) {
   const store = useAppStoreApi();
+  const visit = useRef<object>({});
+  useLayoutEffect(() => {
+    visit.current = {};
+    return () => {
+      visit.current = {};
+    };
+  }, [store, activeSessionId]);
   return useCallback(
     async (filePath: string, repo?: string) => {
       const client = getWebSocketClient();
@@ -33,6 +44,8 @@ export function useTaskCenterFileOpen({
         return;
       }
       const pending = trackRenameOpen(store, activeSessionId, filePath, repo);
+      const admittedVisit = visit.current;
+      const selection = beginTabletSelection(store, activeSessionId);
       try {
         const response: FileContentResponse = await requestFileContent(
           client,
@@ -43,6 +56,11 @@ export function useTaskCenterFileOpen({
         const fileName = filePath.split("/").pop() || filePath;
         const hash = await calculateHash(response.content);
         if (!pending.current() || isRenameReserved(store, activeSessionId, filePath, repo)) return;
+        if (
+          visit.current !== admittedVisit ||
+          tabletSelectionOwner(store, activeSessionId) !== selection
+        )
+          return;
         addFileTab({
           path: filePath,
           repo,

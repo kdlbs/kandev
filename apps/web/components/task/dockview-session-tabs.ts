@@ -476,7 +476,10 @@ function reopenExplicitRouteTarget(
   taskId: string | null,
   sessionId: string | null,
 ) {
-  const requested = !!sessionId && hasTaskRouteFocus(store, taskId, sessionId);
+  const requested =
+    !!sessionId &&
+    (hasTaskRouteFocus(store, taskId, sessionId) ||
+      workflowFocusRequestIdForSession(store, taskId, sessionId) !== null);
   if (requested) clearHiddenSessionPanel(api, sessionId);
   return requested;
 }
@@ -493,7 +496,12 @@ function activateMaximizedRouteTarget(
     store
       .getState()
       .taskSessionsByTask.itemsByTaskId[taskId]?.some((session) => session.id === sessionId);
-  if (!member || !hasTaskRouteFocus(store, taskId, sessionId)) return;
+  if (
+    !member ||
+    (!hasTaskRouteFocus(store, taskId, sessionId) &&
+      workflowFocusRequestIdForSession(store, taskId, sessionId) === null)
+  )
+    return;
   if (!api.getPanel(`session:${sessionId}`)) {
     useDockviewStore.getState().exitMaximizedLayout();
     return;

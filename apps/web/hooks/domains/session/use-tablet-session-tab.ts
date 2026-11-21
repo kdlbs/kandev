@@ -3,6 +3,18 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getActiveTabForSession, setActiveTabForSession } from "@/lib/local-storage";
 import { hasTaskRouteFocus, consumeTaskRouteFocus } from "@/lib/state/task-navigation-focus";
 
+const selectionOwners = new WeakMap<object, Map<string, symbol>>();
+export function tabletSelectionOwner(store: object, sessionId: string) {
+  return selectionOwners.get(store)?.get(sessionId);
+}
+export function beginTabletSelection(store: object, sessionId: string) {
+  let owners = selectionOwners.get(store);
+  if (!owners) selectionOwners.set(store, (owners = new Map()));
+  const owner = Symbol();
+  owners.set(sessionId, owner);
+  return owner;
+}
+
 /** Tablet tab selection is shared with unread display, not the phone panel preference. */
 export function useTabletSessionTab(sessionId: string | null) {
   const store = useAppStoreApi();
@@ -26,6 +38,7 @@ export function useTabletSessionTab(sessionId: string | null) {
       const state = store.getState();
       const previous = state.tabletSession.activeTabBySessionId[sessionId] ?? initialTab;
       const selected = typeof next === "function" ? next(previous) : next;
+      beginTabletSelection(store, sessionId);
       state.setTabletSessionTab(sessionId, selected);
       setActiveTabForSession(sessionId, selected);
     },
@@ -33,8 +46,8 @@ export function useTabletSessionTab(sessionId: string | null) {
   );
   useLayoutEffect(() => {
     if (sessionId && store.getState().tabletSession.activeTabBySessionId[sessionId] === undefined)
-      setTab(initialTab);
-  }, [store, sessionId, initialTab, setTab]);
+      store.getState().setTabletSessionTab(sessionId, initialTab);
+  }, [store, sessionId, initialTab]);
   useLayoutEffect(() => {
     if (!sessionId || !hasTaskRouteFocus(store, taskId, sessionId)) return;
     setTab("chat");

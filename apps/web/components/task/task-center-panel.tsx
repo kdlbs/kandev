@@ -125,6 +125,7 @@ type FileTabOperationsOptions = {
   setLeftTab: (tab: string) => void;
   handleTabChange: (tab: string) => void;
   leftTab: string;
+  retireFile: (file: OpenFileTab) => void;
 };
 
 function useFileTabOperations({
@@ -134,6 +135,7 @@ function useFileTabOperations({
   setLeftTab,
   handleTabChange,
   leftTab,
+  retireFile,
 }: FileTabOperationsOptions) {
   const { toast } = useToast();
   const { t } = useTranslation();
@@ -164,6 +166,12 @@ function useFileTabOperations({
 
   const handleCloseFileTab = useCallback(
     (fileKey: string, instanceId?: symbol) => {
+      const closing = openFileTabs.find(
+        (file: FileEditorTab) =>
+          getFileTabKey(file) === fileKey &&
+          (instanceId === undefined || file.instanceId === instanceId),
+      );
+      if (closing) retireFile(closing);
       setOpenFileTabs((prev) =>
         prev.filter(
           (tab: FileEditorTab) =>
@@ -173,7 +181,7 @@ function useFileTabOperations({
       );
       if (leftTab === `file:${fileKey}`) handleTabChange("chat");
     },
-    [leftTab, handleTabChange, setOpenFileTabs],
+    [leftTab, handleTabChange, setOpenFileTabs, openFileTabs, retireFile],
   );
 
   const handleFileChange = useCallback(
@@ -309,7 +317,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     handleTabChange,
     handleRequestChanges,
   } = useLeftTabState(activeSessionId, hasChanges, onActiveFileChange);
-  useTabletFileState({
+  const { retireFile } = useTabletFileState({
     adapter: props.renameAdapter,
     session: activeSessionId,
     tabs: openFileTabs,
@@ -324,6 +332,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     setLeftTab,
     handleTabChange,
     leftTab,
+    retireFile,
   });
   const { tabs, separatorAfterIndex } = useCenterPanelTabs(
     openFileTabs,
