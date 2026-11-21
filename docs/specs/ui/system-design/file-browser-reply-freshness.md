@@ -134,8 +134,18 @@ Expose a narrow production `refreshChanges` callback from the existing
 `applyFileChanges` through this same owner and `FolderRefreshes` instance.
 After all outcomes settle, submit the distinct captured old/new paths once;
 existing nearest-expanded-folder grouping bounds the reads to affected visible
-parents. Sharing tickets keeps a later event authoritative over a pending
-settlement read. Do not create a second folder-ordering registry, root reload
+parents. A successful move of a captured directory also supplies a local
+`isDirectory` hint for its destination. Include that validated path in the same
+refresh request set even when collapsed, so its children can hydrate. Carry the
+hint through success-time ticket invalidation as well. Failed moves and ordinary
+files never supply it; file-watch events and server APIs are unchanged. Do not
+expand the destination or scan descendants recursively. Keep pending directory
+hydration targets in the existing refresh owner until their current read commits
+or fails. A newer change within that directory, or a scoped ancestor refresh,
+must supersede its pending reply and refresh the same target even while collapsed.
+Invalidation before a replacement read retains this target; commit, read failure,
+and context retirement release it. This keeps later events authoritative without
+continuously refreshing collapsed folders. Do not create a second folder-ordering registry, root reload
 loop, or optimistic overlay. Failed reads preserve the current tree; a failed
 transport request cannot establish that the remote rename did not happen.
 
