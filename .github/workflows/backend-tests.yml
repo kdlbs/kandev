@@ -1161,11 +1161,15 @@ jobs:
       # every platform.
       - name: Test windows-sensitive packages
         if: matrix.suite == 'native'
-        run: go test -race -v -json -timeout 25m ./internal/common/winpath/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/... ./cmd/winjob/... ./internal/system/hostmemory/...
+        run: go test -race -v -json -timeout 25m ./internal/common/winpath/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/... ./cmd/winjob/...
 
       - name: Test Windows recovery mode preservation
         if: matrix.suite == 'native'
         run: go test -tags fts5 -race -v -json -timeout 25m -run '^TestRecoverySnapshotPreservesWindowsReadOnlyMode$' ./internal/worktree
+
+      - name: Test Windows host memory probe
+        if: matrix.suite == 'native'
+        run: go test -race -v -json -timeout 25m ./internal/system/hostmemory/...
 
       - name: Test Windows Git executable memo
         if: matrix.suite == 'native'
