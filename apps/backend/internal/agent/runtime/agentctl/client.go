@@ -987,6 +987,20 @@ func (c *Client) StartWithManagedRuntimePreparation(
 	return c.start(ctx, &directive)
 }
 
+// StartRejectedError reports that agentctl answered a start request without
+// starting the agent. Its message keeps the agentctl response for logs;
+// durable projections classify it by type and store only the sanitized
+// agentctl error field.
+type StartRejectedError struct {
+	StatusCode    int
+	AgentctlError string
+	message       string
+}
+
+func (e *StartRejectedError) Error() string {
+	return e.message
+}
+
 func (c *Client) start(ctx context.Context, preparation *types.ManagedRuntimePreparationDirective) (string, error) {
 	c.mu.Lock()
 	c.processGeneration = 0
@@ -1029,7 +1043,15 @@ func (c *Client) start(ctx context.Context, preparation *types.ManagedRuntimePre
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		httpErr := fmt.Errorf("start request failed with status %d: %s", resp.StatusCode, string(respBody))
+		var rejected struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(respBody, &rejected)
+		httpErr := &StartRejectedError{
+			StatusCode:    resp.StatusCode,
+			AgentctlError: rejected.Error,
+			message:       fmt.Sprintf("start request failed with status %d: %s", resp.StatusCode, string(respBody)),
+		}
 		tracing.TraceHTTPResponse(span, resp.StatusCode, httpErr)
 		return "", httpErr
 	}
@@ -1045,7 +1067,11 @@ func (c *Client) start(ctx context.Context, preparation *types.ManagedRuntimePre
 		return "", fmt.Errorf("failed to parse start response (status %d, body: %s): %w", resp.StatusCode, truncateBody(respBody), err)
 	}
 	if !result.Success {
-		startErr := fmt.Errorf("start failed: %s", result.Error)
+		startErr := &StartRejectedError{
+			StatusCode:    resp.StatusCode,
+			AgentctlError: result.Error,
+			message:       "start failed: " + result.Error,
+		}
 		tracing.TraceHTTPResponse(span, resp.StatusCode, startErr)
 		return "", startErr
 	}
