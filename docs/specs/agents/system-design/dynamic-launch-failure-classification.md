@@ -39,7 +39,10 @@ asynchronous initial start. It does not change ceiling admission.
    validation, runtime detection, and local agentctl errors take this branch,
    so the ordinary launch recovery owns them and no candidate circuit opens.
 3. An agent startup failure is classified with `PhaseProcessStart` for the
-   execution profile. A low-confidence result stays unclassified; any other
+   agent type carried by the startup failure (`AgentStartupFailure.ProviderID`,
+   the lifecycle execution's agent id such as `opencode-acp`), so agent-keyed
+   provider rules match; the execution profile id is used only when the failure
+   carries no agent type. A low-confidence result stays unclassified; any other
    result wraps the original error with the classification.
 
 Before this rule, every launch error text was classified, and the
