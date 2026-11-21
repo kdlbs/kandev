@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -29,15 +31,42 @@ func piThinkingConfigID(state *CachedModelState) string {
 		}
 	}
 	// The Pi bridge used this canonical ID before capability projection existed.
-	return "thought_level"
+	return acpcompat.PiThinkingConfigID
 }
 
-func (sm *SessionManager) applyStartupSessionMode(ctx context.Context, execution *AgentExecution, sessionID, value, configID string, runtimeOverride bool) error {
+// The SetModel acknowledgement can arrive before the options event. Only use
+// a snapshot for the selected model. If it never arrives, SetMode still
+// validates against the adapter's live options and requires confirmation.
+func piStartupModelState(ctx context.Context, execution *AgentExecution, modelID string) *CachedModelState {
+	if modelID == "" {
+		return execution.GetModelState()
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	defer release()
+	wait, cancel := context.WithTimeout(ctx, freshSessionModelStateWait)
+	defer cancel()
+	ticker := time.NewTicker(freshSessionModelStatePoll)
+	defer ticker.Stop()
+	for {
+		if state, ok := sessionModelStateFromClient(client); ok && state.CurrentModelID == modelID {
+			return state
+		}
+		if state := execution.GetModelState(); state != nil && state.CurrentModelID == modelID {
+			return state
+		}
+		select {
+		case <-wait.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func (sm *SessionManager) applyStartupSessionMode(ctx context.Context, execution *AgentExecution, sessionID, value, configID string, state *CachedModelState, runtimeOverride bool) error {
 	if configID == "" || value == "" {
 		return sm.applyExplicitSessionMode(ctx, execution, sessionID, value)
 	}
 	var err error
-	state := execution.GetModelState()
 	if state != nil && len(state.ConfigOptions) > 0 {
 		option, ok := acpcompat.ThinkingOption(state.ConfigOptions)
 		available := false

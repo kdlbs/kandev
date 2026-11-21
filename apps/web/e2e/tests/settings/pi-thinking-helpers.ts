@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
+import { waitForSessionState } from "../../helpers/session";
 
 export async function createPiProfile(backend: BackendContext, api: ApiClient) {
   await backend.restart({ KANDEV_E2E_MOCK_PI: "true" });
@@ -76,11 +77,29 @@ export async function assertPiStartup(
       repository_ids: [seed.repositoryId],
     },
   );
-  expect(task.session_id).toBeTruthy();
-  await page.goto(`/t/${task.id}`);
+  if (!task.session_id) throw new Error("Creating the Pi task did not return a session ID");
+  const sessionId = task.session_id;
   if (fails) {
+    await waitForSessionState(api, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "FAILED",
+      message: "Waiting for the unsupported Pi thinking level to fail startup",
+      timeout: 60_000,
+    });
+    const { session } = await api.getTaskSession(sessionId);
+    expect(session.metadata?.last_agent_error).toMatchObject({
+      causes: expect.arrayContaining([
+        expect.objectContaining({
+          code: "thinking_level_unavailable",
+          requested_setting: "medium",
+          prompt_not_sent: true,
+        }),
+      ]),
+    });
+    await page.goto(`/t/${task.id}`);
     const card = page.getByTestId("session-recovery-card");
-    await expect(card).toBeVisible({ timeout: 60_000 });
+    await expect(card).toBeVisible();
     await expect(card).toContainText("Thinking level");
     await expect(card).toContainText("No prompt was sent");
     await expect(card.getByRole("link", { name: "Edit profile", exact: true })).toHaveAttribute(
@@ -94,12 +113,15 @@ export async function assertPiStartup(
     await editProfile.click();
     await expect(page).toHaveURL(new RegExp(`/settings/agents/pi-acp/profiles/${profileId}$`));
   } else {
-    await expect
-      .poll(async () => (await api.getTaskSession(task.session_id!)).session.state, {
-        timeout: 60_000,
-      })
-      .toBe("WAITING_FOR_INPUT");
-    const { messages } = await api.listSessionMessages(task.session_id!);
+    await waitForSessionState(api, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Waiting for Pi to receive its prompt with the provider default",
+      timeout: 60_000,
+    });
+    await page.goto(`/t/${task.id}`);
+    const { messages } = await api.listSessionMessages(sessionId);
     expect(
       messages.some(
         (message) =>
@@ -111,7 +133,7 @@ export async function assertPiStartup(
       page.getByText("This is a simple mock response for e2e testing.", { exact: true }),
     ).toBeVisible();
     await expect(page.getByTestId("session-recovery-card")).toHaveCount(0);
-    const { session } = await api.getTaskSession(task.session_id!);
+    const { session } = await api.getTaskSession(sessionId);
     expect(session.metadata?.acp_model_state).toMatchObject({ current_model_id: "mock-fast" });
   }
 }

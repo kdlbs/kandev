@@ -5,6 +5,9 @@ import "github.com/kandev/kandev/internal/agentctl/types/streams"
 const PiAgentID = "pi-acp"
 const ThoughtLevelCategory = "thought_level"
 
+// PiThinkingConfigID is the Pi bridge's stable setting ID for saved profiles.
+const PiThinkingConfigID = "thought_level"
+
 // ThinkingOption returns only an unambiguous, explicitly categorized select.
 func ThinkingOption(options []streams.ConfigOption) (streams.ConfigOption, bool) {
 	var selected streams.ConfigOption

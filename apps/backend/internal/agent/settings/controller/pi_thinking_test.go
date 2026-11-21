@@ -2,8 +2,10 @@ package controller
 
 import (
 	"context"
-	"github.com/kandev/kandev/internal/agent/settings/models"
 	"testing"
+
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/settings/models"
 )
 
 // @covers AC-AGENTS-SESSION-SETTING-SEMANTICS-001.4, .5, .7
@@ -41,5 +43,40 @@ func TestPiThinkingProfileSaveAndClear(t *testing.T) {
 	stored, err = repo.GetAgentProfile(ctx, saved.ID)
 	if err != nil || stored.Mode != "" || stored.ConfigOptions["thought_level"] != "" || stored.ConfigOptions["custom"] != "keep" || stored.Model != saved.Model || !stored.RequireExactModel {
 		t.Fatalf("default clear lost intent: %+v %v", stored, err)
+	}
+}
+
+func TestPiThinkingProfileCreateCanonicalizesLegacyMode(t *testing.T) {
+	ctrl, repo := newSQLiteBackedController(t)
+	ctx := context.Background()
+	if err := ctrl.agentRegistry.Register(agents.NewPiACP()); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateAgent(ctx, &models.Agent{ID: "pi", Name: "pi-acp"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		options map[string]string
+		want    string
+	}{
+		{name: "legacy only", want: "medium"},
+		{name: "canonical wins", options: map[string]string{"thought_level": "off"}, want: "off"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profile, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
+				AgentID: "pi", Name: tc.name, Mode: "medium", ConfigOptions: tc.options,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := repo.GetAgentProfile(ctx, profile.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Mode != "" || stored.ConfigOptions["thought_level"] != tc.want {
+				t.Fatalf("stored mode = %q, options = %v", stored.Mode, stored.ConfigOptions)
+			}
+		})
 	}
 }

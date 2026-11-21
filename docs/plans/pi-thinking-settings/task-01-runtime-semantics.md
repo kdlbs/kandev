@@ -107,6 +107,14 @@ Completed on 2026-11-19.
 - No SQL migration, dependency, global Pi setting, permission bypass, or exact-model relaxation was introduced.
 
 
+PR review added creation-time normalization and coverage for a model change acknowledged before the catalog event. Both focused race test runs passed:
+
+```bash
+cd apps/backend
+go test -trimpath -race -tags fts5 ./internal/agent/settings/controller ./internal/agent/runtime/lifecycle ./internal/agentctl/acpcompat -run 'Test(PiThinking|SessionSettingSemantics)' -count=1
+go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle -run 'TestPiThinking|TestInitializeAndPromptWithLayers' -count=1
+```
+
 ### Changed-Go lint invocation
 
 ```bash

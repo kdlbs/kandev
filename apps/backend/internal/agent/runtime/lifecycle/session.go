@@ -677,8 +677,12 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	profileModel = effectiveModel.model
 	runtimeModel = ""
 	thinkingConfigID := ""
+	var thinkingModelState *CachedModelState
 	if agentConfig.ID() == acpcompat.PiAgentID {
-		thinkingConfigID = piThinkingConfigID(execution.GetModelState())
+		if profileMode != "" || runtimeMode != "" || len(profileConfigOptions) > 0 || len(runtimeConfigOptions) > 0 {
+			thinkingModelState = piStartupModelState(ctx, execution, effectiveModel.decision.EffectiveModel)
+		}
+		thinkingConfigID = piThinkingConfigID(thinkingModelState)
 		profileMode, profileConfigOptions = profileconfig.PiThinkingIntent(profileMode, profileConfigOptions, thinkingConfigID)
 		runtimeMode, runtimeConfigOptions = profileconfig.PiThinkingIntent(runtimeMode, runtimeConfigOptions, thinkingConfigID)
 		if execution.sessionSettingsStartupPolicy() == SessionSettingsPolicyProviderRestored {
@@ -709,7 +713,7 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	if requestedMode == "" {
 		requestedMode = profileMode
 	}
-	if err := sm.applyStartupSessionMode(ctx, execution, result.SessionID, requestedMode, thinkingConfigID, runtimeMode != ""); err != nil {
+	if err := sm.applyStartupSessionMode(ctx, execution, result.SessionID, requestedMode, thinkingConfigID, thinkingModelState, runtimeMode != ""); err != nil {
 		return err
 	}
 	execution.setSessionInitialized(true)

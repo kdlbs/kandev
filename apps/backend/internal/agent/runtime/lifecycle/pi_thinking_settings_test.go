@@ -3,16 +3,17 @@ package lifecycle
 import (
 	"context"
 	"errors"
-	"github.com/kandev/kandev/internal/agent/agents"
-	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
-	"github.com/kandev/kandev/internal/agentctl/types/streams"
-	"github.com/kandev/kandev/pkg/agent"
-	ws "github.com/kandev/kandev/pkg/websocket"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/agent/agents"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/pkg/agent"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 func TestPiThinkingStartupFailures(t *testing.T) {
@@ -113,11 +114,12 @@ func TestPiThinkingStartupFailures(t *testing.T) {
 }
 
 func TestPiThinkingStartupWinningIntent(t *testing.T) {
-	tests := []struct{ name, profileMode, profileThinking, runtimeMode, runtimeThinking, want string }{
-		{"canonical wins within layer", "medium", "low", "high", "off", "off"},
-		{"higher legacy source wins", "medium", "low", "off", "", "off"},
-		{"profile canonical", "medium", "off", "", "", "off"},
-		{"provider default", "", "", "", "", ""},
+	tests := []struct{ name, profileMode, profileThinking, runtimeMode, runtimeThinking, want, model string }{
+		{"canonical wins within layer", "medium", "low", "high", "off", "off", ""},
+		{"higher legacy source wins", "medium", "low", "off", "", "off", ""},
+		{"profile canonical", "medium", "off", "", "", "off", ""},
+		{"provider default", "", "", "", "", "", ""},
+		{"previous model catalog cannot veto selection", "", "medium", "", "", "medium", "thinking-model"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,6 +127,21 @@ func TestPiThinkingStartupWinningIntent(t *testing.T) {
 			t.Cleanup(mock.Close)
 			modeRequests := make(chan string, 2)
 			mock.handler = func(msg ws.Message) *ws.Message {
+				if tc.model != "" && msg.Action == "agent.session.new" {
+					response, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+						"success": true, "session_id": "test-session-123",
+						"model_state": streams.SessionModelState{
+							CurrentModelID: "off-only",
+							Models:         []streams.SessionModelInfo{{ModelID: "off-only"}, {ModelID: tc.model}},
+							ConfigOptions: []streams.ConfigOption{{
+								Type: "select", ID: "thought_level", Category: "thought_level", CurrentValue: "off",
+								Options: []streams.ConfigOptionValue{{Value: "off"}},
+							}},
+						},
+					})
+					return response
+				}
+				// The peer acknowledges SetModel while the catalog update is still queued.
 				if msg.Action == "agent.session.set_mode" {
 					var request struct {
 						ModeID string `json:"mode_id"`
@@ -170,7 +187,7 @@ func TestPiThinkingStartupWinningIntent(t *testing.T) {
 
 			err := sm.InitializeAndPromptWithLayers(
 				context.Background(), execution, agentConfig, "do work", nil, nil,
-				func(string) error { return nil }, "", tc.profileMode, map[string]string{"thought_level": tc.profileThinking}, "", tc.runtimeMode, map[string]string{"thought_level": tc.runtimeThinking}, StartModelPolicy{},
+				func(string) error { return nil }, tc.model, tc.profileMode, map[string]string{"thought_level": tc.profileThinking}, "", tc.runtimeMode, map[string]string{"thought_level": tc.runtimeThinking}, StartModelPolicy{},
 			)
 			if err != nil {
 				t.Fatalf("InitializeAndPromptWithLayers: %v", err)
@@ -196,14 +213,20 @@ func TestPiThinkingStartupWinningIntent(t *testing.T) {
 			default:
 			}
 			actions := mock.getActionLog()
-			modeIndex, promptIndex := -1, -1
+			modeIndex, promptIndex, modelIndex := -1, -1, -1
 			for i, action := range actions {
 				if action == "agent.session.set_mode" && modeIndex == -1 {
 					modeIndex = i
 				}
+				if action == "agent.session.set_model" {
+					modelIndex = i
+				}
 				if action == "agent.prompt" {
 					promptIndex = i
 				}
+			}
+			if tc.model != "" && (modelIndex < 0 || modelIndex >= modeIndex) {
+				t.Fatalf("actions = %v, want model before thinking", actions)
 			}
 			if (tc.want != "" && (modeIndex < 0 || modeIndex >= promptIndex)) || promptIndex < 0 {
 				t.Fatalf("actions = %v, want winning mode before prompt", actions)

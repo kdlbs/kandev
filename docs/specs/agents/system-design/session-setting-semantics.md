@@ -47,7 +47,7 @@ Real permission options remain on the existing strict `SetMode` path.
 
 `SessionManager.InitializeAndPromptWithLayers` resolves the winning exact model first.
 After model confirmation, consume the complete configuration snapshot from that same active session and configuration generation.
-Replace Pi's derived thinking choices from that snapshot, including an off-only or empty catalog. Do not retain the initial legacy mode list after a model change.
+Replace Pi's derived thinking choices from that snapshot, including an off-only or empty catalog. Do not retain the initial legacy mode list after a model change. If the model-change reply arrives before the catalog update, wait briefly for the selected model's snapshot. When that snapshot is unavailable, use the adapter's live validation and require confirmation before prompt dispatch.
 Use existing config-change serialization and session/generation fencing in `adapter_session.go`, `adapter_updates.go`, and `adapter_mode_state.go`.
 Settings probes use their authorized selected-model context through the existing capability resolver. A settings probe never becomes authoritative live state.
 
@@ -64,7 +64,7 @@ Use existing `config_options` for new Pi thinking selections. No new SQL column 
 At each source layer, a nonempty canonical thinking selection wins over a nonempty legacy Pi `mode` alias.
 Then apply the existing precedence between sources. Do not let a lower-source canonical value beat a higher-source legacy alias.
 Read compatibility is pure: preserve stored values, original-config baselines, attribution, and historical snapshots.
-On explicit profile save, canonicalize that profile's thinking intent and clear only its duplicate Pi alias.
+On profile creation or an explicit update to thinking settings, store Pi's thinking intent under the bridge's stable `thought_level` ID and clear the duplicate mode alias. At runtime, use the option ID advertised by the active session when available.
 
 **Use provider default** in the profile editor submits `mode: ""` and an updated config map without the thinking override. It preserves unrelated options and the selected model.
 Test actual PATCH omission/empty handling: an omitted mode field is not a clear operation. Generic sanitization that drops blank map values must not accidentally retain a stored value during merge.

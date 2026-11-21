@@ -29,7 +29,7 @@ export function SessionThinkingRecovery({
       {isProfile && profileLink ? (
         <a
           href={profileLink}
-          className="inline-flex min-h-7 items-center text-sm underline max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          className="inline-flex min-h-7 cursor-pointer items-center text-sm underline max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         >
           {t("agents:editProfile")}
         </a>
