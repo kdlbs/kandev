@@ -3544,6 +3544,17 @@ type TaskPreviewFeedbackSnapshot struct {
 	Items    []*TaskPreviewFeedback `json:"items"`
 }
 
+// TaskPreviewFeedbackScreenshotReplacement replaces a saved screenshot item's
+// rectangle and image at an exact version. An empty Comment keeps the stored one.
+type TaskPreviewFeedbackScreenshotReplacement struct {
+	TaskID                 string
+	ItemID                 string
+	ExpectedVersion        int64
+	Comment                string
+	CaptureRect            json.RawMessage
+	ScreenshotAttachmentID string
+}
+
 // TaskPreviewFeedbackRef identifies the exact pending item version included in delivery.
 type TaskPreviewFeedbackRef struct {
 	ID      string `json:"id"`

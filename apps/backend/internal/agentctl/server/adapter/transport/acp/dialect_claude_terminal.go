@@ -16,6 +16,7 @@ const (
 	verifiedClaudeTerminalBridgeName           = "@agentclientprotocol/claude-agent-acp"
 	verifiedClaudeTerminalBridgeVersion        = "0.97.0"
 	verifiedClaudeTerminalBridgeManagedVersion = "0.107.0"
+	verifiedClaudeTerminalBridgeCurrentVersion = "0.109.0"
 )
 
 // connectedAgentIdentity returns the immutable initialize identity of the
@@ -57,7 +58,7 @@ func verifiedClaudeTerminalBridge(agentID, agentName, agentVersion string) bool 
 		return false
 	}
 	switch agentVersion {
-	case verifiedClaudeTerminalBridgeVersion, verifiedClaudeTerminalBridgeManagedVersion:
+	case verifiedClaudeTerminalBridgeVersion, verifiedClaudeTerminalBridgeManagedVersion, verifiedClaudeTerminalBridgeCurrentVersion:
 		return true
 	default:
 		return false

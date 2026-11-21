@@ -2451,7 +2451,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			}
 			repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
 			failureCtx := WithWorkflowLaunchFailureOwnership(launchCtx, session)
-			failureErr := e.handleLaunchFailure(failureCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+			failureErr := e.handleLaunchFailure(failureCtx, task.ID, sessionID, repositoryID, taskRepositoryID, startAgent, err)
 			if !IsSessionStateSwitched(failureErr) {
 				e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
 			}
@@ -2464,7 +2464,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
 			repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
 			failureCtx := WithWorkflowLaunchFailureOwnership(launchCtx, session)
-			return nil, e.handleLaunchFailure(failureCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+			return nil, e.handleLaunchFailure(failureCtx, task.ID, sessionID, repositoryID, taskRepositoryID, startAgent, err)
 		}
 		if startAgent && req.BeforeAgentStart != nil {
 			if err := req.BeforeAgentStart(launchCtx, resp.AgentExecutionID, req.TaskDescription); err != nil {
@@ -2712,12 +2712,13 @@ func resumeTokenForExecutionProfile(running *models.ExecutorRunning, profileID s
 func (e *Executor) handleLaunchFailure(
 	ctx context.Context,
 	taskID, sessionID, repositoryID, taskRepositoryID string,
+	startAgent bool,
 	launchErr error,
 ) error {
 	// Detach from caller context so failure bookkeeping completes even if the
 	// original request context was cancelled.
 	failCtx := context.WithoutCancel(ctx)
-	safeErr, changed := e.transitionLaunchFailure(
+	changed, failureStamp, safeErr := e.transitionLaunchFailure(
 		failCtx, taskID, sessionID, repositoryID, taskRepositoryID, launchErr, nil,
 	)
 	if changed {
@@ -2725,6 +2726,8 @@ func (e *Executor) handleLaunchFailure(
 			e.logger.Warn("failed to mark task as failed after launch error",
 				zap.String("task_id", taskID),
 				zap.Error(updateErr))
+		} else if startAgent && e.onLaunchFailureRecorded != nil {
+			e.onLaunchFailureRecorded(failCtx, taskID, sessionID, safeErr, failureStamp)
 		}
 	}
 	return safeErr
@@ -2784,7 +2787,7 @@ func (e *Executor) handleEarlyLaunchFailure(
 		return routingerr.SanitizeError(launchErr)
 	}
 	expectedState := session.State
-	safeErr, changed := e.transitionLaunchFailure(
+	changed, _, safeErr := e.transitionLaunchFailure(
 		failCtx, taskID, sessionID, repositoryID, "", launchErr, &expectedState,
 	)
 	if !changed {
@@ -2836,18 +2839,21 @@ func (e *Executor) transitionLaunchFailure(
 	taskID, sessionID, repositoryID, taskRepositoryID string,
 	launchErr error,
 	expectedState *models.TaskSessionState,
-) (error, bool) {
+) (bool, string, error) {
 	if launchSession, ok := WorkflowLaunchFailureOwnershipFromContext(failCtx); ok && launchSession.ID == sessionID {
 		expected := launchSession.State
 		expectedState = &expected
 	}
 	safeErr := routingerr.SanitizeError(launchErr)
+	var failureStamp string
 	var onChanged func()
 	onChanged = func() {
+		lastError := e.buildLastAgentError(failCtx, taskID, taskRepositoryID, launchErr)
+		failureStamp = lastError.Stamp()
 		e.persistLastAgentError(
 			failCtx,
 			sessionID,
-			e.buildLastAgentError(failCtx, taskID, taskRepositoryID, launchErr),
+			lastError,
 		)
 		if e.onLaunchFailed != nil {
 			e.onLaunchFailed(failCtx, taskID, sessionID, repositoryID, safeErr)
@@ -2862,7 +2868,7 @@ func (e *Executor) transitionLaunchFailure(
 			e.logger.Info("launch failure was superseded by a workflow session switch",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID))
-			return switchedErr, false
+			return false, "", switchedErr
 		}
 	}
 	e.logger.Error("failed to launch agent",
@@ -2873,7 +2879,7 @@ func (e *Executor) transitionLaunchFailure(
 			zap.String("session_id", sessionID),
 			zap.Error(updateErr))
 	}
-	return safeErr, changed
+	return changed, failureStamp, safeErr
 }
 
 // finalizeLaunch persists launch state and returns the resulting TaskExecution.

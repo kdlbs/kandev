@@ -18,7 +18,7 @@ func TestClaudeMonitorLifecycleFixture(t *testing.T) {
 	signalFile := filepath.Join(t.TempDir(), "monitor.signals")
 	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
 	t.Setenv(mockClaudeMonitorSignalFileEnv, signalFile)
-	t.Setenv(mockClaudeBridgeVersionEnv, mockClaudeBridgeVersion)
+	t.Setenv(mockClaudeBridgeVersionEnv, mockClaudeBridgeMonitorVersion)
 
 	e, updater := newTestEmitter()
 	var cancel context.CancelFunc

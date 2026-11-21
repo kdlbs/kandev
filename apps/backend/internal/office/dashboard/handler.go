@@ -128,6 +128,7 @@ func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo label
 	// Provider routing endpoints (office-provider-routing).
 	api.GET("/workspaces/:wsId/routing", h.getWorkspaceRouting)
 	api.PUT("/workspaces/:wsId/routing", h.updateWorkspaceRouting)
+	api.PUT("/workspaces/:wsId/routing/author-exclusion", h.updateSeatAuthorExclusion)
 	api.POST("/workspaces/:wsId/routing/retry", h.retryWorkspaceProvider)
 	api.GET("/workspaces/:wsId/routing/health", h.listWorkspaceRoutingHealth)
 	api.GET("/workspaces/:wsId/routing/preview", h.getWorkspaceRoutingPreview)

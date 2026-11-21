@@ -64,13 +64,13 @@ async function expectMonitorCardStatus(
   monitorIndex: number,
   status: "watching" | "ended",
 ): Promise<void> {
-  await expect(session.activeChat().getByTestId("monitor-card").nth(monitorIndex)).toContainText(
-    status,
-  );
+  const cards = session.activeChat().locator('[data-testid="monitor-card"]:visible');
+  await expect(cards).toHaveCount(2, { timeout: 30_000 });
+  await expect(cards.nth(monitorIndex)).toContainText(status);
 }
 
 async function expandMonitorCards(session: SessionPage): Promise<void> {
-  const cards = session.activeChat().getByTestId("monitor-card");
+  const cards = session.activeChat().locator('[data-testid="monitor-card"]:visible');
   if ((await cards.count()) === 2) return;
   const groups = session.activeChat().getByRole("button", { name: /2 tool calls/ });
   const groupCount = await groups.count();
@@ -176,7 +176,7 @@ export async function expectClaudeMonitorLifecycle(
     })
     .toBe(2);
   await expandMonitorCards(session);
-  const monitorCards = session.activeChat().getByTestId("monitor-card");
+  const monitorCards = session.activeChat().locator('[data-testid="monitor-card"]:visible');
   await expectMonitorCardStatus(session, 0, "watching");
   await expectMonitorCardStatus(session, 1, "watching");
 

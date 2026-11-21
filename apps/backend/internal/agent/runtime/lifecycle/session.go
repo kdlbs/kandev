@@ -1990,7 +1990,13 @@ func (sm *SessionManager) sendPrompt(
 	dispatchOnly bool,
 	callbacks sendPromptCallbacks,
 	steer bool,
-) (*PromptResult, error) {
+) (_ *PromptResult, err error) {
+	transportStarted := false
+	defer func() {
+		if err != nil && !transportStarted {
+			err = MarkPromptNotDispatched(err)
+		}
+	}()
 	var admissionErr error
 	ctx, admissionErr = sm.admitExecutorPrompt(ctx, execution)
 	if admissionErr != nil {
@@ -2089,6 +2095,7 @@ func (sm *SessionManager) sendPrompt(
 	if sm.beforePromptDispatchHook != nil {
 		sm.beforePromptDispatchHook()
 	}
+	transportStarted = true
 	if err := sm.triggerPrompt(
 		preparedCtx, execution, effectivePrompt, materializedAttachments,
 		promptGeneration, steer, callbacks.deliverySubmissionID,

@@ -30,18 +30,21 @@ regression that reads the managed npm pin and exercises its wire fixture.
 
 ## In scope
 
-- Verify the official `0.107.0` initialize identity and document a sanitized
-  detached launch and subsequent terminal frame. Use the tagged bridge source
-  and the installed `withRunningTerminal` and `SessionBackgroundWork.taskEnded`
-  helpers to attest the fixture. Include a launch that remains live.
+- Verify the official `0.107.0` and `0.109.0` initialize identities and
+  document sanitized detached launches and subsequent terminal frames. Use the
+  tagged bridge sources and the installed `withRunningTerminal` and
+  `SessionBackgroundWork.taskEnded` helpers to attest the fixtures. Include a
+  launch that remains live.
 - Start with `TestClaudeBackgroundTerminalExitManagedDefault`. Read
   `agents.DefaultManagedNPMRuntimeVersion` in the test and require a matching,
   qualified fixture. Verify the expected red result at the version gate.
 - Extend the exact-version check used by both tool conversion and prompt-end
-  binding retention. Keep the strict identity and terminal envelope checks.
+  binding retention to include the current managed release. Keep the strict
+  identity and terminal envelope checks.
   Reuse `RunStateEnded` and the existing durable and accounting paths.
 - Extend the existing mock identity and desktop/phone scenarios to use the
-  managed release. Keep `0.97.0` and rejected variants in adapter tests.
+  current managed release. Keep `0.97.0`, `0.107.0`, and rejected variants in
+  adapter tests.
 
 ## Out of scope
 
@@ -50,7 +53,7 @@ regression that reads the managed npm pin and exercises its wire fixture.
 
 ## Acceptance
 
-1. Both qualified releases settle the matching detached Bash task. Null
+1. All three qualified releases settle the matching detached Bash task. Null
    retains an unavailable outcome. Older launch frames, wrong IDs, and
    malformed evidence leave the running work open.
 2. A delayed exit can settle its own job after prompt resolution. A live
@@ -81,7 +84,7 @@ command when recording results.
 
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/dialect_claude_terminal.go`
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/claude_background_terminal_test.go`
-- `apps/backend/internal/agentctl/server/adapter/transport/acp/testdata/claude-0.107.0-detached-bash.jsonl` (new)
+- `apps/backend/internal/agentctl/server/adapter/transport/acp/testdata/claude-0.107.0-detached-bash.jsonl` and `claude-0.109.0-detached-bash.jsonl` (new)
 - `apps/backend/cmd/mock-agent/claude_background_terminal_fixture.go` and its test
 - `apps/web/e2e/tests/task/claude-background-terminal-exit.helpers.ts`
 - `apps/web/e2e/tests/task/claude-background-terminal-exit.spec.ts`
@@ -119,3 +122,11 @@ phone scenarios passed after reload with the original draft intact. The
 sanitized ACP fixture represents the separate null-code `taskEnded` frame; the
 official v0.107.0 bridge source was inspected, while no new live provider run
 was performed in this work order.
+
+After `main` advanced the managed pin to `0.109.0`, the managed-default test
+failed because that release had no qualified fixture. The tagged v0.109.0
+source retains the same launch suppression and separate null-code terminal
+frame, so a provider-shaped fixture and exact-version qualification were added.
+The managed mock and desktop and phone terminal scenarios now advertise
+0.109.0. The Monitor lifecycle remains qualified against 0.107.0. The focused
+adapter, mock-agent, and both browser scenarios passed with the updated pin.

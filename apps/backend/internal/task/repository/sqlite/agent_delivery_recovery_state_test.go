@@ -94,7 +94,7 @@ func TestAgentDeliveryRecoveryRevisionFencesPhaseOwnerAndSubmission(t *testing.T
 	stored, err = repo.ClearAgentDeliveryRecovery(ctx, session.ID, session.QueueIncarnationID,
 		"submission-recovery-state", 4)
 	if err != nil || !stored {
-		t.Fatalf("clear exact submission = %v, %v; want cleared", stored, err)
+		t.Fatalf("clear exact submission without terminal evidence = %v, %v; want settled notice", stored, err)
 	}
 
 	final, err := repo.GetTaskSession(ctx, session.ID)
@@ -103,7 +103,7 @@ func TestAgentDeliveryRecoveryRevisionFencesPhaseOwnerAndSubmission(t *testing.T
 	}
 	settled, ok := models.LoadAgentDeliveryRecovery(final.Metadata)
 	if !ok || settled.Phase != models.AgentDeliveryRecoverySettled || settled.Revision != 3 {
-		t.Fatalf("recovery metadata is not a settled revisioned tombstone: %+v, ok=%v", settled, ok)
+		t.Fatalf("settled recovery metadata = %+v, ok=%v", settled, ok)
 	}
 	if final.Metadata["last_agent_error"] == nil {
 		t.Fatal("recovery clearing removed the independent last_agent_error")

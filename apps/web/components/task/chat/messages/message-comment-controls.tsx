@@ -12,7 +12,7 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@kandev/ui/drawer";
-import { PlanSelectionPopover } from "@/components/task/plan-selection-popover";
+import { SelectionCommentSurface } from "@/components/shared/selection-comment/selection-comment-surface";
 import { floatingBounds, placeFloatingRect } from "@/components/task/floating-selection-position";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { MessageSelection } from "@/lib/chat/agent-message-comments";
@@ -298,7 +298,7 @@ export function MessageCommentControls({
         />
       ) : null}
       {target && composerOpen && !useDrawer ? (
-        <PlanSelectionPopover
+        <SelectionCommentSurface
           key={target.editingCommentId ?? `${target.selection.start}:${target.selection.end}`}
           selectedText={target.selection.selectedText}
           position={target.position}

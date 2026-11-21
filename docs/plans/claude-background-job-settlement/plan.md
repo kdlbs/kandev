@@ -85,7 +85,7 @@ use existing workload delivery, persistence, and revisions.
 
 | Connection | Evidence | Workload result |
 | --- | --- | --- |
-| Claude ACP v1 `0.97.0` or qualified `0.107.0`, Bash | Matching separate null-code terminal exit | Ended with unavailable outcome. A reported numeric outcome follows the existing path. |
+| Claude ACP v1 `0.97.0`, `0.107.0`, or qualified managed `0.109.0`, Bash | Matching separate null-code terminal exit | Ended with unavailable outcome. A reported numeric outcome follows the existing path. |
 | Older or unqualified Bash bridge | Existing qualified evidence or verified process exit | Existing fallback. |
 | Claude ACP v1, Monitor | Explicit tool-scoped terminal evidence for a tracked Monitor | Only that Monitor records the provider outcome, including after handoff. |
 | Managed Claude ACP v1 `0.107.0`, Monitor | Qualified Claude Code `2.1.323` native outcome for both registration IDs | Exact completed, failed, or interrupted Monitor moves to History. |
@@ -153,7 +153,11 @@ issues. `make -C apps/backend build` passed, as did the Chromium and
 mobile-chrome Monitor lifecycle scenarios. The UI scenarios kept two live
 Monitors through reload and a successor turn, retired one at a time from
 matching native outcomes, retained the draft, and showed both rows in History
-before and after reload.
+before and after reload. Transcript cards join terminal observations by session
+and source-call ID. Desktop and phone scenarios confirmed the completed card
+stops showing Watching while the live sibling remains Watching, before and
+after reload. A focused component test covers this projection, and production
+event dispatch coverage confirms the foreground stays idle.
 
 Deterministic tests used the sanitized native record fixture and covered
 append parsing, exact IDs, duplicate and partial records, and file replacement.

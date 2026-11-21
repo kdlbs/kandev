@@ -33,9 +33,10 @@ signal proves the command was terminated by that signal and still carries no
 exit code.
 
 The managed 0.107.0 release uses the same launch suppression and reports the
-same null-code exit from `SessionBackgroundWork.taskEnded` on ACP v1. Qualify
-the exact 0.107.0 initialize identity with a separate launch and terminal
-fixture. The managed-default regression exercises the version returned by
+same null-code exit from `SessionBackgroundWork.taskEnded` on ACP v1. The
+managed 0.109.0 release retains that contract. Qualify each exact initialize
+identity with a separate launch and terminal fixture. The managed-default
+regression exercises the version returned by
 `agents.DefaultManagedNPMRuntimeVersion` against a qualified fixture.
 
 The inspected 0.81.2 bridge emits terminal-exit metadata with the launch result
@@ -57,7 +58,8 @@ For null-code termination, require all of these conditions:
 
 1. The configured provider uses the Claude dialect.
 2. Initialize identifies the official bridge name and a fixture-qualified
-   release. The qualified releases in this repair are `0.97.0` and `0.107.0`.
+   release. The qualified releases in this repair are `0.97.0`, `0.107.0`,
+   and `0.109.0`.
    An unverified version retains the existing fallback.
 3. The payload belongs to an already recognized detached shell in this session.
 4. The terminal envelope is an object with a nonempty `terminal_id` equal to the

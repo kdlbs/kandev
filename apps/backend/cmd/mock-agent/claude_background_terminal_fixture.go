@@ -20,14 +20,15 @@ const mockClaudeBridgeVersionEnv = "E2E_MOCK_AGENT_CLAUDE_BRIDGE_VERSION"
 const mockClaudeTerminalSignalEnv = "E2E_MOCK_AGENT_CLAUDE_TERMINAL_SIGNAL_FILE"
 
 const (
-	mockClaudeBridgeName          = "@agentclientprotocol/claude-agent-acp"
-	mockClaudeBridgeLegacyVersion = "0.97.0"
-	mockClaudeBridgeVersion       = "0.107.0"
+	mockClaudeBridgeName           = "@agentclientprotocol/claude-agent-acp"
+	mockClaudeBridgeLegacyVersion  = "0.97.0"
+	mockClaudeBridgeMonitorVersion = "0.107.0"
+	mockClaudeBridgeVersion        = "0.109.0"
 )
 
 func mockClaudeBridgeAgentInfo() *acp.Implementation {
 	version := strings.TrimSpace(os.Getenv(mockClaudeBridgeVersionEnv))
-	if version != mockClaudeBridgeVersion && version != mockClaudeBridgeLegacyVersion {
+	if version != mockClaudeBridgeVersion && version != mockClaudeBridgeMonitorVersion && version != mockClaudeBridgeLegacyVersion {
 		return nil
 	}
 	return &acp.Implementation{

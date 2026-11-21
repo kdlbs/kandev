@@ -966,6 +966,18 @@ or unsupported catalog, an unavailable model, or a failed apply stops the
 session before inference. Kandev never sends an unadvertised model and never
 rewrites the saved profile model.
 
+For Claude ACP profiles, you cannot save a new or changed strict selection when
+Start model is the bare `sonnet`, `opus`, `haiku`, or `fable` alias and the same
+profile sets a different nonblank `ANTHROPIC_MODEL` value. Select the full model
+ID you want to use, or remove that environment entry. Existing profiles with
+this pair can still be edited in other ways or repaired. Save validation checks
+only literal values in the profile. It does not resolve secret-backed or
+inherited values, and this alias/environment conflict check runs only when you
+save the profile. At launch, exact-model policy checks whether the selected
+executor advertises and accepts the requested model ID before the first prompt.
+A successful save does not guarantee that the selected executor advertises the
+model.
+
 For Auggie ACP task sessions, Kandev also requires the selected model and mode
 to take effect before it sends the first prompt. If a failed session offers the
 explicit recovery **Resume** action, it keeps the same conversation and skips
@@ -1195,6 +1207,12 @@ repository and task workspace disables before approving imported connections.
 A profile selection cannot override those disables or executor policy. Host
 imports are limited to eligible local/worktree executions using the backend's
 home directory.
+
+The task setup panel labels the row **Discover Cursor MCP servers**. A
+**Details** disclosure shows the reason when discovery fails. The Marketplace
+lookup has a five-second time limit. A parent setup deadline can end the lookup
+before that limit. Kandev skips Marketplace plugin imports for that attempt. If
+setup completes, other configured MCP servers can still connect.
 
 When verification requires provider consent, choose **Authenticate** on the
 preparation step. Kandev opens Cursor's native login flow in the task terminal;

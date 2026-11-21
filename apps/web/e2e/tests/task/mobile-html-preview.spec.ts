@@ -163,7 +163,9 @@ test.describe("Mobile HTML preview", () => {
     await expect(preview).toBeHidden();
   });
 
-  test("captures touch feedback in the native HTML preview drawer", async ({
+  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.1
+  // @covers AC-TASKS-WEB-PREVIEW-FEEDBACK-005.2
+  test("captures touch feedback from the native HTML preview toolbar", async ({
     testPage,
     apiClient,
     seedData,
@@ -195,51 +197,59 @@ test.describe("Mobile HTML preview", () => {
     expect(triggerBox?.height).toBeGreaterThanOrEqual(44);
     await trigger.tap();
 
-    const drawer = testPage.getByTestId("preview-feedback-drawer");
-    await expect(drawer).toBeVisible();
+    const toolbar = preview.getByTestId("preview-annotation-toolbar");
+    await expect(toolbar).toBeVisible();
     const viewport = testPage.viewportSize();
     expect(viewport).not.toBeNull();
-    await expect
-      .poll(async () => {
-        const box = await drawer.boundingBox();
-        return box ? box.y + box.height : Number.POSITIVE_INFINITY;
-      })
-      .toBeLessThanOrEqual(viewport!.height);
-    const drawerBox = await drawer.boundingBox();
-    expect(drawerBox).not.toBeNull();
-    expect(drawerBox!.x).toBeGreaterThanOrEqual(0);
-    expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(viewport!.width);
-    expect(drawerBox!.y + drawerBox!.height).toBeLessThanOrEqual(viewport!.height);
+    const toolbarBox = await toolbar.boundingBox();
+    expect(toolbarBox).not.toBeNull();
+    expect(toolbarBox!.x).toBeGreaterThanOrEqual(0);
+    expect(toolbarBox!.x + toolbarBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(toolbarBox!.y + toolbarBox!.height).toBeLessThanOrEqual(viewport!.height);
 
-    const captureChoices = [
-      { name: "Select text", label: "Text" },
-      { name: "Select element", label: "Element" },
-      { name: "Select screenshot region", label: "Screenshot" },
-    ];
-    const captureChoiceBoxes = [];
-    for (const choice of captureChoices) {
-      const button = drawer.getByRole("button", { name: choice.name, exact: true });
-      await expect(button).toHaveText(choice.label);
-      captureChoiceBoxes.push(await button.boundingBox());
+    const toolBoxes = [];
+    for (const tool of ["interact", "text", "element", "region"]) {
+      const box = await toolbar.getByTestId(`preview-tool-${tool}`).boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+      toolBoxes.push(box);
     }
-    expect(new Set(captureChoiceBoxes.map((box) => Math.round(box?.y ?? -1))).size).toBe(1);
+    expect(new Set(toolBoxes.map((box) => Math.round(box?.y ?? -1))).size).toBe(1);
+    expect(
+      (await toolbar.getByTestId("preview-annotation-exit").boundingBox())?.height,
+    ).toBeGreaterThanOrEqual(44);
 
-    const elementChoice = drawer.getByRole("button", { name: "Select element", exact: true });
-    const elementChoiceBox = await elementChoice.boundingBox();
-    expect(elementChoiceBox?.height).toBeGreaterThanOrEqual(44);
-    await elementChoice.tap();
+    // Coarse pointers keep the comment list in a bottom sheet that starts hidden.
+    await expect(testPage.getByTestId("preview-comment-panel")).toHaveCount(0);
+    const commentsToggle = toolbar.getByTestId("preview-annotation-count");
+    await expect(commentsToggle).toHaveAttribute("aria-pressed", "false");
+    await commentsToggle.tap();
+    const commentsSheet = testPage.getByTestId("preview-feedback-collection-body");
+    await expect(commentsSheet).toBeVisible();
+    await testPage
+      .getByRole("dialog")
+      .filter({ has: commentsSheet })
+      .getByRole("button", {
+        name: "Close",
+      })
+      .tap();
+    await expect(commentsSheet).toBeHidden();
+
+    await toolbar.getByTestId("preview-tool-element").tap();
     await expect(trigger).toHaveAttribute("data-capture-mode", "element");
     await frame.locator("#capture-button").tap();
 
     const elementDraft = testPage.getByTestId("preview-feedback-draft");
     await expect(elementDraft).toContainText("<button#capture-button>");
-    await elementDraft
-      .getByRole("textbox", { name: "Comment on selection" })
+    await testPage
+      .getByTestId("preview-feedback-draft-input")
       .fill("Increase this touch target contrast");
-    await elementDraft.getByRole("button", { name: "Save feedback" }).tap();
+    const elementSave = testPage.getByTestId("preview-feedback-draft-save");
+    expect((await elementSave.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await elementSave.tap();
     await expect(elementDraft).toBeHidden({ timeout: 15_000 });
 
-    await drawer.getByRole("button", { name: "Select screenshot region", exact: true }).tap();
+    await toolbar.getByTestId("preview-tool-region").tap();
     await expect(trigger).toHaveAttribute("data-capture-mode", "screenshot");
     await waitForScreenshotCaptureMode(frame);
     const screenshotTarget = frame.locator("#capture-card");
@@ -269,27 +279,75 @@ test.describe("Mobile HTML preview", () => {
     await expect(screenshotDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible({
       timeout: 15_000,
     });
-    await screenshotDraft
-      .getByRole("textbox", { name: "Comment on selection" })
+    const draftClose = screenshotDraft.getByRole("button", { name: "Close" });
+    expect((await draftClose.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await testPage
+      .getByTestId("preview-feedback-draft-input")
       .fill("Reduce the vertical space in this card");
     createFailure.failNextCreate();
-    await screenshotDraft.getByRole("button", { name: "Save feedback" }).tap();
+    await testPage.getByTestId("preview-feedback-draft-save").tap();
     await expect.poll(() => createFailure.failedCount()).toBe(1);
     await expect(screenshotDraft).toBeVisible();
-    await expect(
-      screenshotDraft.getByRole("textbox", { name: "Comment on selection" }),
-    ).toHaveValue("Reduce the vertical space in this card");
-    await expect(screenshotDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
-    await expect(testPage.getByTestId("preview-feedback-drawer").getByRole("alert")).toContainText(
-      "feedback could not be saved",
+    await expect(testPage.getByTestId("preview-feedback-draft-input")).toHaveValue(
+      "Reduce the vertical space in this card",
     );
-    await screenshotDraft.getByRole("button", { name: "Save feedback" }).tap();
+    await expect(screenshotDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
+    await expect(screenshotDraft.getByRole("alert")).toContainText("feedback could not be saved");
+    await testPage.getByTestId("preview-feedback-draft-save").tap();
     await expect(screenshotDraft).toBeHidden({ timeout: 15_000 });
     await expect(preview.getByTestId("preview-feedback-trigger")).toContainText("2");
-    await assertNoDocumentHorizontalOverflow(testPage, "mobile preview feedback drawer");
+    await expect(preview.getByTestId("preview-region")).toHaveCount(1);
 
-    await testPage.keyboard.press("Escape");
-    await expect(drawer).toBeHidden();
+    await frame.locator("#capture-button").evaluate((element) => {
+      window.scrollTo(0, document.body.scrollHeight);
+      return element.getBoundingClientRect().top;
+    });
+    const annotationToggle = toolbar.getByTestId("preview-annotation-count");
+    await annotationToggle.tap();
+    const annotationSheet = testPage.getByTestId("preview-feedback-collection-body");
+    const annotationItems = annotationSheet.getByTestId("preview-feedback-item");
+    await expect(annotationItems).toHaveCount(2);
+    await expect(annotationItems.nth(0).getByTestId("preview-capture-number")).toHaveText("1");
+    await expect(annotationItems.nth(1).getByTestId("preview-capture-number")).toHaveText("2");
+    const buttonFeedback = annotationItems.filter({ hasText: "#capture-button" });
+    await expect(buttonFeedback).toHaveCount(1);
+    await buttonFeedback.tap();
+    await expect(buttonFeedback).toHaveAttribute("data-selected", "true");
+    await expect
+      .poll(() =>
+        frame.locator("#capture-button").evaluate((element) => element.getBoundingClientRect().top),
+      )
+      .toBeGreaterThanOrEqual(0);
+    await buttonFeedback.getByRole("button", { name: "Edit feedback" }).tap();
+    const annotationEditor = testPage.getByTestId("preview-feedback-edit");
+    await expect(annotationEditor).toBeVisible();
+    await expect(annotationSheet).toBeHidden();
+    await testPage.getByTestId("preview-feedback-edit-input").fill("Keep the mobile edit focused");
+    await testPage.getByTestId("preview-feedback-edit-save").tap();
+    await expect(annotationEditor).toBeHidden();
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile preview annotation toolbar");
+
+    await toolbar.getByTestId("preview-annotation-exit").tap();
+    await expect(trigger).toHaveAttribute("data-annotation-active", "false");
+    await expect(toolbar).toBeHidden();
+
+    await frame.locator("#capture-card").evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    const selectionComment = testPage.getByTestId("preview-selection-comment");
+    await expect(selectionComment).toBeVisible();
+    expect((await selectionComment.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await selectionComment.tap();
+    const selectionDraft = testPage.getByTestId("preview-feedback-draft");
+    await expect(selectionDraft).toContainText("Generated order summary");
+    await testPage.getByTestId("preview-feedback-draft-input").fill("Explain this summary");
+    await testPage.getByTestId("preview-feedback-draft-save").tap();
+    await expect(selectionDraft).toBeHidden({ timeout: 15_000 });
+    await expect(trigger).toContainText("3");
     await preview.getByRole("button", { name: "Show code" }).tap();
     await expect(viewer.locator(".cm-content, .monaco-editor .view-lines")).toContainText(
       "Generated order summary",
@@ -337,21 +395,25 @@ test.describe("Mobile HTML preview", () => {
       ),
     ).toBeGreaterThanOrEqual(16);
     const collectionItems = collectionBody.getByTestId("preview-feedback-item");
-    await expect(collectionItems).toHaveCount(2);
+    await expect(collectionItems).toHaveCount(3);
     await expect(
       collectionItems.nth(1).getByRole("img", { name: "Screenshot preview" }),
     ).toBeVisible();
 
     const firstItem = collectionItems.nth(0);
     await firstItem.getByRole("button", { name: "Edit feedback" }).tap();
-    await firstItem
-      .getByRole("textbox", { name: "Edit comment" })
-      .fill("Keep this touch action clear");
-    await firstItem.getByRole("button", { name: "Save changes" }).tap();
+    const editDrawer = testPage.getByTestId("preview-feedback-edit");
+    await expect(editDrawer).toBeVisible();
+    await testPage.getByTestId("preview-feedback-edit-input").fill("Keep this touch action clear");
+    const editSave = testPage.getByTestId("preview-feedback-edit-save");
+    expect((await editSave.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await editSave.tap();
+    await expect(editDrawer).toBeHidden();
+    await expect(collectionDrawer).toBeVisible();
     await expect(firstItem).toContainText("Keep this touch action clear");
 
     await collectionItems.nth(1).getByRole("button", { name: "Delete feedback" }).tap();
-    await expect(collectionItems).toHaveCount(1);
+    await expect(collectionItems).toHaveCount(2);
     expect(await session.activeChat().getByTestId("user-message-bubble").count()).toBe(
       userMessageCount,
     );
@@ -371,7 +433,7 @@ test.describe("Mobile HTML preview", () => {
     ).toBeVisible();
     await testPage.getByRole("navigation").getByRole("button", { name: "Chat", exact: true }).tap();
     const restoredTrigger = testPage.getByTestId("preview-feedback-collection-trigger");
-    await expect(restoredTrigger).toContainText("1");
+    await expect(restoredTrigger).toContainText("2");
     await restoredTrigger.tap();
     await expect(testPage.getByTestId("preview-feedback-collection-body")).toContainText(
       "Keep this touch action clear",

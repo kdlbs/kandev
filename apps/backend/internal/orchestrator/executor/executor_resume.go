@@ -1069,6 +1069,11 @@ type ResumeOptions struct {
 	// automatic and logs the omission — it is never silently treated as a
 	// manual override.
 	Origin string
+	// TransientRetry* binds a capacity-deferred automatic retry to the failure
+	// that scheduled it. The orchestrator checks these values at replay admission.
+	TransientRetryAttemptID  string
+	TransientRetryErrorStamp string
+	TransientRetryUpdatedAt  time.Time
 	// ForceContextContinuation starts a new native conversation using the
 	// explicit, bounded continuation prompt rather than the persisted native
 	// session identity.

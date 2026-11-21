@@ -351,7 +351,7 @@ prompt or resolve its external effects.
 
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
-The expanded queue also lets you pause or discard stale work. Its compact header places the **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
+The expanded queue also lets you pause or discard stale work. Its compact header places **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
 
 Use **Auto-run** for queue processing:
 
@@ -363,7 +363,9 @@ Use **Auto-run** for queue processing:
 - The setting belongs to the session and survives an empty queue, reload, and backend restart.
 - A pending clarification or another lifecycle guard can hold the queue while Auto-run is on.
 
-**Auto-merge** folds later compatible messages. It follows the install-wide setting until you change the session's pill. That change creates a session override that stays active for the session's lifetime.
+**Auto-merge** combines compatible adjacent messages and folds agent sub-task messages into their sender task's latest queued entry, even across other ordinary messages. User messages never move. It follows the install-wide setting, ON by default, until you change the session's pill; that change creates an override for the session's lifetime.
+
+Turning a session's Auto-merge from OFF to ON immediately compacts pending rows using both rules. OFF disables automatic folds without splitting prior content. Auto-run is unchanged, and global changes affect later messages only, never compacting the backlog. See [queue grouping rules](coordination.md#coordinate-with-targeted-messages).
 
 ### Recover from low disk space
 
@@ -546,7 +548,7 @@ Without an explicit session ID the message goes to the primary session, and fall
 
 The default pending-message limit is 10 per session. An admin can change it live under **Settings > Preferences > Task Behavior > Runtime**; `0` removes the cap. A valid `KANDEV_QUEUE_MAX_PER_SESSION` value takes precedence and makes only the capacity field read-only; changing the environment still requires a restart. Malformed environment values are logged and ignored, so the saved setting or default applies instead. Lowering the saved limit does not delete entries already waiting. An eligible direct automatic fold may still succeed at or above capacity because it does not add a row; other admissions are rejected, and staged attachments are rejected before any fold or claim.
 
-The same card enables **Automatically merge consecutive messages** by default. Untouched sessions inherit this value and later changes to it. Changing a session's **Auto-merge** pill creates an explicit override for that session's lifetime. Compatible consecutive messages from the same strict source fold into the earlier pending entry; incompatible messages remain separate when capacity permits. The earlier entry's ID survives, and only admissions after the effective setting is read are eligible. This behavior is independent from the manual **Enable queued message merging** switch. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders always queue, and only user-origin rows may be edited or manually merged.
+The same card enables **Automatically merge queued messages** by default. Untouched sessions inherit this value and later changes to it. Changing a session's **Auto-merge** pill creates an override for that session's lifetime. Compatible adjacent messages from the same strict source fold into the earlier pending entry; agent messages also try their sender task's latest queued entry across ordinary intervening rows. Incompatible messages remain separate when capacity permits. Turning session Auto-merge from OFF to ON immediately compacts pending rows, while global changes affect later messages only. The target's ID survives. Automatic folding remains independent from manual **Enable queued message merging**. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders always queue, and only user-origin rows may be edited or manually merged.
 
 For urgent replacement work, the parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; this cancels the current approach and immediately tries to dispatch the new prompt, with a safe queued fallback. Use `stop_task_kandev` only for halt-only intent. A successful stop marks every accepted live child session `CANCELLED` and schedules graceful teardown asynchronously. Kandev then attempts to move an eligible unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states remain unchanged. A child with no live execution returns idempotent `not_running`, and its worktrees, environment, commits, task record, descendants, and queued messages are preserved. See [Coordination](coordination.md) for the complete authority and lifecycle contract.
 

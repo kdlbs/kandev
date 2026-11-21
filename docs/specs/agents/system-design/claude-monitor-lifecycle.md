@@ -94,7 +94,10 @@ running summary shows the Monitor kind and opens its details. The active
 Monitor remains visible while the user submits another prompt or reloads the
 page. Finished Monitors are accessible in History. Desktop uses the existing
 Background Work panel. Phone uses the Panels entry and full-height surface.
-Workload updates preserve the composer draft and open detail.
+Workload updates preserve the composer draft and open detail. The transcript
+Monitor card reads the workload projection by its session and source call ID,
+so only the matching card stops showing a watching state. This projection
+survives reload and does not depend on a foreground tool update.
 
 ## Verification
 

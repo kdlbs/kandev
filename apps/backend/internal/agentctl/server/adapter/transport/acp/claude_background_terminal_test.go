@@ -159,6 +159,12 @@ func TestClaudeBackgroundTerminalPromptCleanupScope(t *testing.T) {
 			wantPreserved: true,
 		},
 		{
+			name:          "current managed bridge",
+			agentName:     verifiedClaudeTerminalBridgeName,
+			agentVersion:  verifiedClaudeTerminalBridgeCurrentVersion,
+			wantPreserved: true,
+		},
+		{
 			name:          "legacy bridge",
 			agentName:     verifiedClaudeTerminalBridgeName,
 			agentVersion:  "0.81.2",

@@ -23,6 +23,7 @@ acceptance_criteria:
   - AC-AGENTS-BACKGROUND-WORK-010.5
   - AC-AGENTS-BACKGROUND-WORK-010.7
   - AC-AGENTS-BACKGROUND-WORK-010.8
+  - AC-AGENTS-BACKGROUND-WORK-010.9
 system_design:
   - ../../specs/agents/system-design/claude-monitor-lifecycle.md
 ---
@@ -78,6 +79,9 @@ matching workload when Claude reports its outcome.
 3. On desktop and phone, the summary identifies Monitors. Finishing one
    leaves its live sibling counted. Finishing the last clears the chip and
    leaves both History entries accessible with the draft intact.
+4. A finished transcript card stops showing a watching state when its session
+   and source-call IDs match a terminal workload. A live sibling card remains
+   watching, including after reload, and foreground state stays idle.
 
 ## Verification
 
@@ -90,10 +94,11 @@ source qualification separately from deterministic replay.
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^TestClaudeMonitorSurvivesPromptCompletion$' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run 'TestClaudeMonitor|TestPromptEndSweepsPreserveHandoffBackgroundLineage|TestHumanPromptHandoffAfterAuthoritativeForegroundIdle|TestSweepMonitorsOnPromptEnd' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/server/process -run '^TestClaudeMonitorEvidenceLaunchIdentity$' -count=1)
-(cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator -run 'TestClaudeMonitorWorkloadProjection|TestForegroundBusySignal_MonitorViaUpdate' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator -run 'TestClaudeMonitorWorkloadProjection|TestForegroundBusySignal_MonitorViaUpdate|TestClaudeMonitorTerminalDispatchPreservesNativeOutcomeDuringSuccessorHandoff' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/task/service -run 'Test.*BackgroundWork' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./cmd/mock-agent -run '^TestClaudeMonitorLifecycleFixture' -count=1)
 (cd apps/backend && go test -race -trimpath -tags fts5 ./internal/agentctl/server/adapter/transport/acp ./internal/orchestrator ./cmd/mock-agent -count=1)
+pnpm --dir apps/web exec vitest run components/task/chat/messages/monitor-message.test.tsx
 make -C apps/backend build
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
@@ -155,6 +160,8 @@ Playwright discovers both named scenarios.
 - `apps/web/e2e/tests/task/claude-monitor-lifecycle.helpers.ts` (new)
 - `apps/web/e2e/tests/task/claude-monitor-lifecycle.spec.ts` (new)
 - `apps/web/e2e/tests/task/mobile-claude-monitor-lifecycle.spec.ts` (new)
+- `apps/web/components/task/chat/messages/monitor-message.tsx` and
+  `monitor-message.test.tsx`
 
 ## Dependencies
 
@@ -211,9 +218,13 @@ finish time, origin turn, the successor foreground, and a live sibling.
 `make -C apps/backend build`, changed-Go lint, the docs catalog, specification
 lint, and `git diff --check` passed. Focused ACP, process, orchestrator,
 task-service, and mock-agent commands passed. The race-enabled ACP, orchestrator,
-and mock-agent suites passed. The Chromium and mobile-chrome lifecycle scenarios
-each passed (one test each). Both kept two Monitors visible through reload and a
-successor prompt, settled one at a time, preserved the draft, and showed both
-completed rows in History before and after reload. The Windows test binary could
-not be cross-compiled locally because no MinGW toolchain is installed; the
-CGO-disabled attempt stopped in the unrelated SQLite cgo package.
+and mock-agent suites passed. The Monitor component regression passed. The
+Chromium and mobile-chrome lifecycle scenarios each passed. The desktop
+scenario passed three consecutive runs. Both kept two Monitors visible through
+reload and a successor prompt, settled one at a time, and preserved the draft.
+The matching transcript card stopped showing Watching while its live sibling
+kept showing Watching, including after reload; both completed rows remained in
+History before and after reload. Production event dispatch preserved the idle
+successor foreground. The Windows test binary could not be cross-compiled
+locally because no MinGW toolchain is installed; the CGO-disabled attempt
+stopped in the unrelated SQLite cgo package.
