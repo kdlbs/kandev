@@ -32,10 +32,10 @@ func (s *Service) UnresolvedPromptReferences(ctx context.Context, texts []string
 	return missing, nil
 }
 
-// ReferencedPromptNames counts, for each requested name, how many distinct
+// referencedPromptNames counts, for each requested name, how many distinct
 // owners have a text containing a reference that resolves to that name under
 // the same longest-match rules as expansion.
-func (s *Service) ReferencedPromptNames(ctx context.Context, texts []PromptReferenceText, names []string) (map[string]int, error) {
+func (s *Service) referencedPromptNames(ctx context.Context, texts []PromptReferenceText, names []string) (map[string]int, error) {
 	counts := make(map[string]int, len(names))
 	if len(names) == 0 || len(texts) == 0 {
 		return counts, nil

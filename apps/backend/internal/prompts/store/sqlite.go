@@ -210,34 +210,19 @@ func (r *sqliteRepository) CreatePrompt(ctx context.Context, prompt *models.Prom
 		builtinInt = 1
 	}
 
-	query := `
-		INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`
 	args := []any{prompt.ID, prompt.Name, prompt.Content, builtinInt, prompt.CreatedAt, prompt.UpdatedAt}
-	if !prompt.Builtin {
-		query = `
+	if prompt.Builtin {
+		_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
-			SELECT ?, ?, ?, ?, ?, ?
-			WHERE (SELECT COUNT(*) FROM custom_prompts) < ?
-		`
-		args = append(args, maxPromptListItems)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`), args...)
+		return err
 	}
-	exec := r.db.ExecContext
-	if !prompt.Builtin {
-		exec = r.countGuardedExec
-	}
-	result, err := exec(ctx, r.db.Rebind(query), args...)
-	if err == nil && !prompt.Builtin {
-		rows, rowsErr := result.RowsAffected()
-		if rowsErr != nil {
-			return rowsErr
-		}
-		if rows == 0 {
-			return ErrPromptListLimit
-		}
-	}
-	return err
+	return r.insertCountLimited(ctx, r.db.Rebind(`
+		INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
+		SELECT ?, ?, ?, ?, ?, ?
+		WHERE (SELECT COUNT(*) FROM custom_prompts) < ?
+	`), append(args, maxPromptListItems)...)
 }
 
 func (r *sqliteRepository) UpdatePrompt(ctx context.Context, prompt *models.Prompt) error {

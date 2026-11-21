@@ -55,7 +55,6 @@ type Config struct {
 	CreatedAt            time.Time                `json:"created_at"`
 	UpdatedAt            time.Time                `json:"updated_at"`
 
-	LastHash              string `json:"-"`
 	CredentialFingerprint string `json:"-"`
 }
 
@@ -77,7 +76,7 @@ func (c *Config) circuitState() authcircuit.State {
 
 // due reports whether an automatic sync should run at now.
 func (c *Config) due(now time.Time) bool {
-	if !c.PollEnabled || c.PollSuspended {
+	if !c.PollEnabled {
 		return false
 	}
 	if c.NextAttemptAt != nil {

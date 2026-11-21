@@ -32,7 +32,7 @@ func TestRetryPolicyDelayUsesEqualJitterAndCapsPreJitterDelay(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, RetryPolicyDelay(test.interval, test.failures, test.jitter))
+			assert.Equal(t, test.want, retryPolicyDelay(test.interval, test.failures, test.jitter))
 		})
 	}
 }

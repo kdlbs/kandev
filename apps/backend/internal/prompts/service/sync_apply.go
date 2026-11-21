@@ -331,7 +331,7 @@ func (s *Service) vanishedPromptReferences(
 		for i, prompt := range pending {
 			names[i] = prompt.Name
 		}
-		found, err := s.ReferencedPromptNames(ctx, texts, names)
+		found, err := s.referencedPromptNames(ctx, texts, names)
 		if err != nil {
 			return nil, err
 		}

@@ -12,12 +12,12 @@ import (
 
 // errorClassWorkspaceMissing is the stored error class for a deleted
 // credential workspace.
-const errorClassWorkspaceMissing authcircuit.FailureClass = "credential_workspace_missing"
+const errorClassWorkspaceMissing = "credential_workspace_missing"
 
 func (s *Service) failureDirective(cfg *Config, syncErr error) reposync.FailureDirective {
 	if errors.Is(syncErr, ErrCredentialWorkspaceMissing) {
 		return reposync.FailureDirective{
-			Class: string(errorClassWorkspaceMissing), Consecutive: cfg.ConsecutiveFailures + 1,
+			Class: errorClassWorkspaceMissing, Consecutive: cfg.ConsecutiveFailures + 1,
 			Suspended: true, SuspensionReason: ErrCredentialWorkspaceMissing.Error(),
 			CircuitClass: authcircuit.FailureClassConfig,
 		}
@@ -56,7 +56,8 @@ func safeStoredMessage(message string) string {
 func (s *Service) recordFailure(ctx context.Context, cfg *Config, syncErr error) {
 	directive := s.failureDirective(cfg, syncErr)
 	incRun("failure")
-	if err := s.store.RecordFailure(context.WithoutCancel(ctx), safeErrorMessage(syncErr), directive, s.now().UTC()); err != nil {
+	message := safeErrorMessage(syncErr)
+	if err := s.store.RecordFailure(context.WithoutCancel(ctx), message, directive, s.now().UTC()); err != nil {
 		s.logger.Warn("failed to record prompt sync failure", zap.Error(err))
 		return
 	}
@@ -64,7 +65,7 @@ func (s *Service) recordFailure(ctx context.Context, cfg *Config, syncErr error)
 		zap.String("provider", cfg.Provider),
 		zap.String("failure_class", directive.Class),
 		zap.Bool("poll_suspended", directive.Suspended),
-		zap.String("error", safeErrorMessage(syncErr)),
+		zap.String("error", message),
 	}
 	if directive.NextAttemptAt != nil {
 		fields = append(fields, zap.Time("next_attempt_at", *directive.NextAttemptAt))

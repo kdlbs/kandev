@@ -25,7 +25,7 @@ export function hasRepositoryVersion(prompt: CustomPrompt): boolean {
 }
 
 /** The local version: the override's content, or a synced prompt's kept copy. */
-export function localVersion(prompt: CustomPrompt): string {
+function localVersion(prompt: CustomPrompt): string {
   if (prompt.source === "sync") return prompt.alternate_content || prompt.content;
   return prompt.content;
 }
@@ -40,7 +40,7 @@ export function repositoryVersion(prompt: CustomPrompt): string {
 export function formFromPrompt(prompt: CustomPrompt): PromptFormState {
   return {
     name: prompt.name,
-    content: isLinkedPrompt(prompt) ? localVersion(prompt) : prompt.content,
+    content: localVersion(prompt),
   };
 }
 
@@ -71,7 +71,7 @@ export function withChoice(
 }
 
 /** An unsaved edit to a saved prompt and the revision it started from. */
-export type PromptDraft = { form: PromptFormState; updatedAt: string };
+type PromptDraft = { form: PromptFormState; updatedAt: string };
 
 /** Unsaved edits by prompt ID, only where they differ from the saved prompt. */
 export type PromptDrafts = Record<string, PromptDraft>;

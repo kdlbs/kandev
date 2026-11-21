@@ -29,6 +29,7 @@ import {
   displayUrl,
   formForProvider,
   formFromUrl,
+  repoFormFromConfig,
   repoSyncPayload,
   repoTargetMissing,
   repoUrlInvalid,
@@ -41,18 +42,7 @@ type Draft = { form: PromptSyncFormState; url: string };
 
 function draftFromConfig(cfg: PromptSyncConfig | null, workspaceId: string): Draft {
   const form: PromptSyncFormState = cfg
-    ? {
-        workspace_id: cfg.workspace_id,
-        provider: cfg.provider,
-        github_host: cfg.provider === "gitlab" ? "" : (cfg.github_host ?? PUBLIC_GITHUB_HOST),
-        repo_owner: cfg.repo_owner,
-        repo_name: cfg.repo_name,
-        project_path: cfg.project_path,
-        branch: cfg.branch,
-        path: cfg.path,
-        interval_seconds: cfg.interval_seconds,
-        poll_enabled: cfg.poll_enabled,
-      }
+    ? { ...repoFormFromConfig(cfg), workspace_id: cfg.workspace_id }
     : {
         workspace_id: workspaceId,
         provider: "github",
@@ -300,8 +290,13 @@ function useSaveHandler(
           return false;
         }
       }
-      const saveDeps = { latest, reset, setConfig, toast, review };
-      return await persistDraft(submitted, review.choices, saveDeps);
+      return await persistDraft(submitted, review.choices, {
+        latest,
+        reset,
+        setConfig,
+        toast,
+        review,
+      });
     } catch (err) {
       toast({
         description: t("settings:promptSyncSaveFailed", { error: String(err) }),

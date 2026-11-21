@@ -56,7 +56,7 @@ func BuildFailureDirective(
 	directive := FailureDirective{
 		Class:        string(kind),
 		Consecutive:  input.ConsecutiveFailures + 1,
-		CircuitClass: ClassifyError(syncErr),
+		CircuitClass: classifyError(syncErr),
 	}
 	if input.Provider == ProviderGitHub &&
 		(kind == github.FailureInvalidCredentials || kind == github.FailureMissingResource) {
@@ -74,7 +74,7 @@ func BuildFailureDirective(
 		}
 	}
 
-	retryAt := now.Add(RetryPolicyDelay(input.IntervalSeconds, directive.Consecutive, jitter)).UTC()
+	retryAt := now.Add(retryPolicyDelay(input.IntervalSeconds, directive.Consecutive, jitter)).UTC()
 	if next := input.Circuit.NextRetryAt; next != nil && next.After(retryAt) {
 		retryAt = next.UTC()
 	}
@@ -113,10 +113,10 @@ func failureKind(provider string, syncErr error) github.FailureKind {
 	return kind
 }
 
-// RetryPolicyDelay is the equal-jitter exponential backoff: the base is the
+// retryPolicyDelay is the equal-jitter exponential backoff: the base is the
 // larger of the interval and one minute, each consecutive failure doubles it,
 // and the pre-jitter delay stops growing at one hour.
-func RetryPolicyDelay(
+func retryPolicyDelay(
 	intervalSeconds int,
 	consecutiveFailures int,
 	jitter func(time.Duration) time.Duration,

@@ -33,7 +33,8 @@ import {
   MobileConfirmationHostBody,
 } from "@/components/confirmation/mobile-confirmation-host";
 import {
-  intervalInvalid as repoIntervalInvalid,
+  DEFAULT_WORKFLOWS_PATH,
+  intervalInvalid,
   repoTargetMissing,
 } from "@/lib/settings/repo-sync-form";
 import {
@@ -48,11 +49,12 @@ import { RepoSyncRemovalActions } from "@/components/settings/repo-sync-removal-
 const WORKFLOW_EXPORT_FORMAT = "kandev_workflow";
 const WORKFLOW_EXPORT_EXTENSIONS = ".yml/.yaml/.json";
 const ID_PREFIX = "workflow-sync";
-const WORKFLOW_DIRECTORY = ".kandev/workflows";
 
-function isSaveDisabled(sync: WorkflowSyncController, intervalInvalid: boolean): boolean {
+function isSaveDisabled(sync: WorkflowSyncController): boolean {
   const targetMissing = repoTargetMissing(sync.form);
-  return sync.saving || sync.loading || sync.urlInvalid || intervalInvalid || targetMissing;
+  return (
+    sync.saving || sync.loading || sync.urlInvalid || intervalInvalid(sync.form) || targetMissing
+  );
 }
 
 function useClearWorkflowSyncRemovalConfirmation(
@@ -113,7 +115,7 @@ function WorkflowSyncFields({ sync }: { sync: WorkflowSyncController }) {
         idPrefix={ID_PREFIX}
         form={sync.form}
         update={sync.update}
-        directoryPlaceholder={WORKFLOW_DIRECTORY}
+        directoryPlaceholder={DEFAULT_WORKFLOWS_PATH}
       />
       <PollFields idPrefix={ID_PREFIX} form={sync.form} update={sync.update} />
       <p className="text-xs text-muted-foreground">
@@ -146,8 +148,7 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
   const { t } = useTranslation();
   const [removeConfirming, setRemoveConfirming] = useState(false);
   const hasConfig = !!sync.config;
-  const intervalInvalid = repoIntervalInvalid(sync.form);
-  const disableSave = isSaveDisabled(sync, intervalInvalid);
+  const disableSave = isSaveDisabled(sync);
   const targetKey = workflowSyncConfirmationTarget(sync);
   const completion = useWorkflowSyncLifetime(sync.lifetime, open);
   const committedOpenChange = useRef(onOpenChange);

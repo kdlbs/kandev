@@ -41,11 +41,28 @@ func (r *sqliteRepository) addSourceColumns() error {
 // prompt insert.
 const promptCountLockKey = "custom_prompts:count-limit"
 
-// countGuardedExec runs a count-limited INSERT. On PostgreSQL the count and
+// insertCountLimited runs a count-limited INSERT and returns
+// ErrPromptListLimit when the limit kept it from inserting a row.
+func (r *sqliteRepository) insertCountLimited(ctx context.Context, query string, args ...any) error {
+	result, err := r.execCountLimited(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrPromptListLimit
+	}
+	return nil
+}
+
+// execCountLimited runs a count-limited INSERT. On PostgreSQL the count and
 // insert run under one transaction-scoped advisory lock shared by manual and
 // synced creation, so concurrent creates cannot both pass the limit; SQLite's
 // single writer already serializes the statement.
-func (r *sqliteRepository) countGuardedExec(ctx context.Context, query string, args ...any) (sql.Result, error) {
+func (r *sqliteRepository) execCountLimited(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	if !dialect.IsPostgres(r.db.DriverName()) {
 		return r.db.ExecContext(ctx, query, args...)
 	}
@@ -95,7 +112,7 @@ func (r *sqliteRepository) CreateSyncedPrompt(ctx context.Context, name, content
 		ID: uuid.New().String(), Name: name, Content: content,
 		Source: models.PromptSourceSync, SourcePath: sourcePath, CreatedAt: now, UpdatedAt: now,
 	}
-	result, err := r.countGuardedExec(ctx, r.db.Rebind(`
+	err := r.insertCountLimited(ctx, r.db.Rebind(`
 		INSERT INTO custom_prompts (id, name, content, builtin, source, source_path, created_at, updated_at)
 		SELECT ?, ?, ?, 0, ?, ?, ?, ?
 		WHERE (SELECT COUNT(*) FROM custom_prompts) < ?
@@ -103,13 +120,6 @@ func (r *sqliteRepository) CreateSyncedPrompt(ctx context.Context, name, content
 		prompt.CreatedAt, prompt.UpdatedAt, maxPromptListItems)
 	if err != nil {
 		return nil, err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-	if rows == 0 {
-		return nil, ErrPromptListLimit
 	}
 	return prompt, nil
 }

@@ -22,19 +22,19 @@ import {
 import type { CustomPrompt } from "@/lib/types/http";
 import type { PromptConflictChoice } from "@/lib/types/prompt-sync";
 
-export function getPromptPreview(content: string) {
+function getPromptPreview(content: string) {
   return content.split(/\r?\n/)[0] ?? "";
 }
 
 /** The version control state of a synced prompt or an override. */
-export type PromptRowVersion = {
+type PromptRowVersion = {
   choice: PromptConflictChoice;
   /** The choice differs from the saved one and waits for Save. */
   pending: boolean;
   onChoose: (choice: PromptConflictChoice) => void;
 };
 
-export type PromptListItemProps = {
+type PromptListItemProps = {
   prompt: CustomPrompt;
   /** Present for synced prompts and overrides. */
   version?: PromptRowVersion;

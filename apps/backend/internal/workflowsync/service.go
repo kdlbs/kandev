@@ -415,7 +415,11 @@ func (s *Service) recordFailure(ctx context.Context, workspaceID string, cfg *Co
 // provider. File selection, ordering, and error wrapping are shared; only
 // listing and content-fetch are provider-specific.
 func (s *Service) fetchFiles(ctx context.Context, cfg *Config) ([]fetchedFile, error) {
-	entries, get, err := s.listProviderEntries(ctx, cfg)
+	entries, err := s.listProviderEntries(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	get, err := s.fileGetterForConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -536,7 +540,7 @@ func (s *Service) loadAutomaticContinuationDirectory(
 	if continuation.directoryLoaded {
 		return nil
 	}
-	entries, _, err := s.listProviderEntries(ctx, cfg)
+	entries, err := s.listProviderEntries(ctx, cfg)
 	if err != nil {
 		if validationErr := s.validateAutomaticContinuation(ctx, cfg, state); validationErr != nil {
 			return validationErr
@@ -632,18 +636,9 @@ func sourceForConfig(cfg *Config) reposync.Source {
 	}
 }
 
-// listProviderEntries lists the configured directory for cfg.Provider and
-// returns a getter closed over the same provider and workspace.
-func (s *Service) listProviderEntries(ctx context.Context, cfg *Config) ([]reposync.Entry, reposync.FileGetter, error) {
-	entries, err := s.reader().List(ctx, sourceForConfig(cfg))
-	if err != nil {
-		return nil, nil, err
-	}
-	get, err := s.fileGetterForConfig(cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	return entries, get, nil
+// listProviderEntries lists the configured directory for cfg.Provider.
+func (s *Service) listProviderEntries(ctx context.Context, cfg *Config) ([]reposync.Entry, error) {
+	return s.reader().List(ctx, sourceForConfig(cfg))
 }
 
 func (s *Service) fileGetterForConfig(cfg *Config) (reposync.FileGetter, error) {

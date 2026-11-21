@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 // ReviewKind selects the legend: choosing a version for a conflict, or the
 // version a prompt keeps when Prompt Sync is removed.
-export type ReviewKind = "conflict" | "removal";
+type ReviewKind = "conflict" | "removal";
 
 // Catalog keys, not t() calls, because this is module scope.
 const LEGEND_KEYS: Record<ReviewKind, { local: string; repository: string }> = {

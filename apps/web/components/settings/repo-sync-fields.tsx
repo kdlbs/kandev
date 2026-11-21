@@ -12,7 +12,7 @@ import type { RemoteRepositoryProvider } from "@/hooks/domains/integrations/use-
 
 const SYNC_PROVIDERS: RemoteRepositoryProvider[] = ["github", "gitlab"];
 
-export type ProviderFieldProps = {
+type ProviderFieldProps = {
   provider: WorkflowSyncProvider;
   onChange: (provider: WorkflowSyncProvider) => void;
 };

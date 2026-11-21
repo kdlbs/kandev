@@ -26,7 +26,7 @@ import type { PromptConflictChoice } from "@/lib/types/prompt-sync";
 export const emptyPromptForm: PromptFormState = { name: "", content: "" };
 
 /** Open rows by prompt ID. */
-export type OpenRows = Record<string, true>;
+type OpenRows = Record<string, true>;
 
 function without<T>(record: Record<string, T>, ids: Iterable<string>): Record<string, T> {
   const next = { ...record };
@@ -97,12 +97,16 @@ function usePromptRequests(state: PromptsState, closeCreate: () => void) {
     [setPrompts, store],
   );
 
-  const createRequest = useRequest(async (form: PromptFormState) => {
+  const createAndList = async (form: PromptFormState) => {
     const prompt = await createPrompt(
       { name: form.name.trim(), content: form.content.trim() },
       { cache: "no-store" },
     );
     applyPrompts((current) => [...current.filter((p) => p.id !== prompt.id), prompt]);
+  };
+
+  const createRequest = useRequest(async (form: PromptFormState) => {
+    await createAndList(form);
     closeCreate();
   });
 
@@ -112,11 +116,7 @@ function usePromptRequests(state: PromptsState, closeCreate: () => void) {
   const saveRequest = useRequest(async (plan: PromptSave[]) => {
     for (const save of plan) {
       if (save.kind === "recreate") {
-        const created = await createPrompt(
-          { name: save.form.name.trim(), content: save.form.content.trim() },
-          { cache: "no-store" },
-        );
-        applyPrompts((current) => [...current.filter((p) => p.id !== created.id), created]);
+        await createAndList(save.form);
         forgetRows([save.id]);
         continue;
       }

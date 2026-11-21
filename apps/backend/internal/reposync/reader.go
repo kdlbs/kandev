@@ -71,20 +71,20 @@ type Reader struct {
 // List lists the immediate entries of src.Path in src's repository and ref.
 func (r Reader) List(ctx context.Context, src Source) ([]Entry, error) {
 	if src.Provider == ProviderGitLab {
-		return r.listGitLab(ctx, src, src.Path)
+		return r.listGitLab(ctx, src)
 	}
-	return r.listGitHub(ctx, src, src.Path)
+	return r.listGitHub(ctx, src)
 }
 
-func (r Reader) listGitHub(ctx context.Context, src Source, path string) ([]Entry, error) {
+func (r Reader) listGitHub(ctx context.Context, src Source) ([]Entry, error) {
 	if r.GitHub == nil {
 		return nil, ErrGitHubClientNotConfigured
 	}
 	raw, err := r.GitHub.ListRepoDirectoryForWorkspace(
-		ctx, src.WorkspaceID, src.RepoOwner, src.RepoName, path, src.Branch,
+		ctx, src.WorkspaceID, src.RepoOwner, src.RepoName, src.Path, src.Branch,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list %s/%s@%s:%s: %w", src.RepoOwner, src.RepoName, src.Branch, path, err)
+		return nil, fmt.Errorf("failed to list %s/%s@%s:%s: %w", src.RepoOwner, src.RepoName, src.Branch, src.Path, err)
 	}
 	entries := make([]Entry, len(raw))
 	for i, e := range raw {
@@ -93,13 +93,13 @@ func (r Reader) listGitHub(ctx context.Context, src Source, path string) ([]Entr
 	return entries, nil
 }
 
-func (r Reader) listGitLab(ctx context.Context, src Source, path string) ([]Entry, error) {
+func (r Reader) listGitLab(ctx context.Context, src Source) ([]Entry, error) {
 	if r.GitLab == nil {
 		return nil, ErrGitLabClientNotConfigured
 	}
-	raw, err := r.GitLab.ListRepoTreeForWorkspace(ctx, src.WorkspaceID, src.ProjectPath, path, src.Branch)
+	raw, err := r.GitLab.ListRepoTreeForWorkspace(ctx, src.WorkspaceID, src.ProjectPath, src.Path, src.Branch)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list %s@%s:%s: %w", src.ProjectPath, src.Branch, path, err)
+		return nil, fmt.Errorf("failed to list %s@%s:%s: %w", src.ProjectPath, src.Branch, src.Path, err)
 	}
 	entries := make([]Entry, len(raw))
 	for i, e := range raw {

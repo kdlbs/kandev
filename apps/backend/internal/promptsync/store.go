@@ -64,7 +64,7 @@ const createTableSQL = `
 `
 
 const configColumns = `workspace_id, provider, github_host, repo_owner, repo_name, project_path, branch, path,
-	interval_seconds, poll_enabled, last_synced_at, last_ok, last_error, last_warnings, last_hash,
+	interval_seconds, poll_enabled, last_synced_at, last_ok, last_error, last_warnings,
 	failure_class, consecutive_failures, next_attempt_at, last_error_class, poll_suspended,
 	poll_suspension_reason, credential_fingerprint, created_at, updated_at`
 
@@ -76,7 +76,7 @@ func (s *Store) Get(ctx context.Context) (*Config, error) {
 	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`SELECT `+configColumns+` FROM prompt_sync_config WHERE id = ?`), configRowID).Scan(
 		&cfg.WorkspaceID, &cfg.Provider, &cfg.GitHubHost, &cfg.RepoOwner, &cfg.RepoName, &cfg.ProjectPath,
 		&cfg.Branch, &cfg.Path, &cfg.IntervalSeconds, &cfg.PollEnabled, &lastSyncedAt, &cfg.LastOk,
-		&cfg.LastError, &warningsJSON, &cfg.LastHash, &failureClass, &cfg.ConsecutiveFailures,
+		&cfg.LastError, &warningsJSON, &failureClass, &cfg.ConsecutiveFailures,
 		&nextAttemptAt, &cfg.LastErrorClass, &cfg.PollSuspended, &cfg.PollSuspensionReason,
 		&cfg.CredentialFingerprint, &cfg.CreatedAt, &cfg.UpdatedAt,
 	)

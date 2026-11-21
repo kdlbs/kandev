@@ -14,17 +14,17 @@ import (
 )
 
 func TestClassifySyncErr_NilIsNone(t *testing.T) {
-	assert.Equal(t, authcircuit.FailureClassNone, ClassifyError(nil))
+	assert.Equal(t, authcircuit.FailureClassNone, classifyError(nil))
 }
 
 func TestClassifySyncErr_NotConfiguredIsConfig(t *testing.T) {
-	assert.Equal(t, authcircuit.FailureClassConfig, ClassifyError(github.ErrGitHubHostMismatch))
-	assert.Equal(t, authcircuit.FailureClassConfig, ClassifyError(ErrGitHubClientNotConfigured))
-	assert.Equal(t, authcircuit.FailureClassConfig, ClassifyError(ErrGitLabClientNotConfigured))
+	assert.Equal(t, authcircuit.FailureClassConfig, classifyError(github.ErrGitHubHostMismatch))
+	assert.Equal(t, authcircuit.FailureClassConfig, classifyError(ErrGitHubClientNotConfigured))
+	assert.Equal(t, authcircuit.FailureClassConfig, classifyError(ErrGitLabClientNotConfigured))
 	// Wrapped sentinels must still classify correctly — fetchFiles/list
 	// helpers wrap these with additional context.
 	assert.Equal(t, authcircuit.FailureClassConfig,
-		ClassifyError(fmt.Errorf("listing failed: %w", ErrGitHubClientNotConfigured)))
+		classifyError(fmt.Errorf("listing failed: %w", ErrGitHubClientNotConfigured)))
 }
 
 func TestClassifySyncErr_GitHubAPIErrorByStatus(t *testing.T) {
@@ -44,17 +44,17 @@ func TestClassifySyncErr_GitHubAPIErrorByStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := &github.GitHubAPIError{StatusCode: tt.status, Endpoint: "/repos/x/y", Body: "irrelevant"}
-			assert.Equal(t, tt.want, ClassifyError(err))
+			assert.Equal(t, tt.want, classifyError(err))
 			// Wrapped through a %w chain (the real call sites always wrap).
 			wrapped := fmt.Errorf("failed to list x/y: %w", err)
-			assert.Equal(t, tt.want, ClassifyError(wrapped))
+			assert.Equal(t, tt.want, classifyError(wrapped))
 		})
 	}
 }
 
 func TestClassifySyncErr_GitHubRateLimit403IsTransient(t *testing.T) {
 	err := &github.GitHubAPIError{StatusCode: http.StatusForbidden, Endpoint: "/repos/x/y", Body: "API rate limit exceeded for installation"}
-	assert.Equal(t, authcircuit.FailureClassTransient, ClassifyError(err))
+	assert.Equal(t, authcircuit.FailureClassTransient, classifyError(err))
 }
 
 func TestClassifySyncErr_GitLabAPIErrorByStatus(t *testing.T) {
@@ -71,20 +71,20 @@ func TestClassifySyncErr_GitLabAPIErrorByStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := &gitlab.APIError{StatusCode: tt.status, Endpoint: "/projects/x"}
-			assert.Equal(t, tt.want, ClassifyError(err))
+			assert.Equal(t, tt.want, classifyError(err))
 		})
 	}
 }
 
 func TestClassifySyncErr_SentinelFallbacksAreAuth(t *testing.T) {
-	assert.Equal(t, authcircuit.FailureClassAuth, ClassifyError(github.ErrNoClient))
-	assert.Equal(t, authcircuit.FailureClassAuth, ClassifyError(github.ErrGitHubConnectionInvalid))
-	assert.Equal(t, authcircuit.FailureClassAuth, ClassifyError(github.ErrGitHubNotConfigured))
-	assert.Equal(t, authcircuit.FailureClassAuth, ClassifyError(gitlab.ErrInvalidToken))
+	assert.Equal(t, authcircuit.FailureClassAuth, classifyError(github.ErrNoClient))
+	assert.Equal(t, authcircuit.FailureClassAuth, classifyError(github.ErrGitHubConnectionInvalid))
+	assert.Equal(t, authcircuit.FailureClassAuth, classifyError(github.ErrGitHubNotConfigured))
+	assert.Equal(t, authcircuit.FailureClassAuth, classifyError(gitlab.ErrInvalidToken))
 }
 
 func TestClassifySyncErr_UnrecognizedErrorIsTransient(t *testing.T) {
-	assert.Equal(t, authcircuit.FailureClassTransient, ClassifyError(errors.New("connection reset by peer")))
+	assert.Equal(t, authcircuit.FailureClassTransient, classifyError(errors.New("connection reset by peer")))
 }
 
 // TestClassifySyncErr_TypedErrorTakesPrecedenceOverSentinel confirms the
@@ -93,5 +93,5 @@ func TestClassifySyncErr_UnrecognizedErrorIsTransient(t *testing.T) {
 // checks, because the status code is the more specific signal.
 func TestClassifySyncErr_TypedErrorTakesPrecedenceOverSentinel(t *testing.T) {
 	err := &github.GitHubAPIError{StatusCode: http.StatusNotFound, Endpoint: "/repos/x/y"}
-	assert.Equal(t, authcircuit.FailureClassConfig, ClassifyError(err))
+	assert.Equal(t, authcircuit.FailureClassConfig, classifyError(err))
 }

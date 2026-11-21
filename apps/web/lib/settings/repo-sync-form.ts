@@ -3,8 +3,9 @@ import { PUBLIC_GITHUB_HOST } from "@/lib/github/host";
 import { buildGitHubRepoUrl, parseGitHubRepoUrl } from "@/lib/utils/github-repo-url";
 import { parseGitLabProjectUrl } from "@/lib/utils/gitlab-repo-url";
 
-// The default Prompt Sync directory.
+// The default Prompt Sync and Workflow Sync directories.
 export const DEFAULT_PROMPTS_PATH = ".kandev/prompts"; // i18n-exempt: repository path
+export const DEFAULT_WORKFLOWS_PATH = ".kandev/workflows"; // i18n-exempt: repository path
 
 /** Editable repository source shared by Workflow Sync and Prompt Sync. */
 export type RepoSyncFormState = {
@@ -25,8 +26,25 @@ export type RepoSyncTarget = Pick<
   "provider" | "repo_owner" | "repo_name" | "project_path" | "branch" | "path"
 > & { github_host?: string };
 
+/** The editable repository source of a saved sync configuration. */
+export function repoFormFromConfig(
+  cfg: RepoSyncTarget & Pick<RepoSyncFormState, "interval_seconds" | "poll_enabled">,
+): RepoSyncFormState {
+  return {
+    provider: cfg.provider,
+    github_host: cfg.provider === "gitlab" ? "" : (cfg.github_host ?? PUBLIC_GITHUB_HOST),
+    repo_owner: cfg.repo_owner,
+    repo_name: cfg.repo_name,
+    project_path: cfg.project_path,
+    branch: cfg.branch,
+    path: cfg.path,
+    interval_seconds: cfg.interval_seconds,
+    poll_enabled: cfg.poll_enabled,
+  };
+}
+
 /** Request payload for the repository part of a sync configuration. */
-export type RepoSyncPayload = {
+type RepoSyncPayload = {
   provider: WorkflowSyncProvider;
   github_host?: string;
   repo_owner?: string;
@@ -56,7 +74,7 @@ export function displayUrl(
     : "";
 }
 
-export function parseRepoUrl(provider: WorkflowSyncProvider, value: string, host?: string) {
+function parseRepoUrl(provider: WorkflowSyncProvider, value: string, host?: string) {
   return provider === "gitlab" ? parseGitLabProjectUrl(value) : parseGitHubRepoUrl(value, host);
 }
 

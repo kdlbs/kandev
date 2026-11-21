@@ -194,15 +194,15 @@ func (s *Service) DeleteConfig(ctx context.Context, removal Removal) error {
 }
 
 // Sync runs one sync immediately, bypassing the automatic schedule.
-// The configuration is read and authorized under the service lock, and that
-// same snapshot drives the run, so a concurrent save cannot swap in a
-// workspace the caller was never checked against.
 func (s *Service) Sync(ctx context.Context) (*SyncResult, error) {
 	return s.SyncWithResolutions(ctx, nil)
 }
 
 // SyncWithResolutions runs one sync immediately, applying the user's choices
-// for name conflicts; a conflict without a choice stays unresolved.
+// for name conflicts; a conflict without a choice stays unresolved. The
+// configuration is read and authorized under the service lock, and that same
+// snapshot drives the run, so a concurrent save cannot swap in a workspace the
+// caller was never checked against.
 func (s *Service) SyncWithResolutions(ctx context.Context, resolutions map[string]promptservice.ConflictChoice) (*SyncResult, error) {
 	if err := validateResolutions(resolutions); err != nil {
 		return nil, err

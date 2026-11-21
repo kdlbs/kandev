@@ -8,8 +8,6 @@ import { Button } from "@kandev/ui/button";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { CustomPrompt } from "@/lib/types/http";
 
-const ROW_BUTTON_CLASS = "cursor-pointer max-md:size-11 [@media(pointer:coarse)]:size-11";
-
 type PromptOpenButtonProps = {
   promptId: string;
   /** Edit opens the editable text; otherwise the eye opens it read-only. */
@@ -34,7 +32,7 @@ function PromptOpenButton({ promptId, editable, open, onToggle, disabled }: Prom
       aria-label={editable ? t("settings:edit") : t("settings:promptViewContent")}
       aria-expanded={open}
       aria-controls={`prompt-body-${promptId}`}
-      className={ROW_BUTTON_CLASS}
+      className="cursor-pointer max-md:size-11 [@media(pointer:coarse)]:size-11"
       data-testid={editable ? "prompt-edit-button" : "prompt-view-button"}
     >
       {editable ? <IconEdit className="h-4 w-4" /> : <ViewIcon className="h-4 w-4" />}

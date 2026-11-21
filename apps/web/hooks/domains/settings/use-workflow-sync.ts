@@ -20,9 +20,11 @@ import type {
 } from "@/lib/types/workflow-sync";
 import { PUBLIC_GITHUB_HOST } from "@/lib/github/host";
 import {
+  DEFAULT_WORKFLOWS_PATH,
   displayUrl,
   formForProvider,
   formFromUrl,
+  repoFormFromConfig,
   repoSyncPayload,
   repoUrlInvalid,
   type RepoSyncFormState,
@@ -37,24 +39,13 @@ const DEFAULT_FORM: WorkflowSyncFormState = {
   repo_name: "",
   project_path: "",
   branch: "main",
-  path: ".kandev/workflows",
+  path: DEFAULT_WORKFLOWS_PATH,
   interval_seconds: 300,
   poll_enabled: true,
 };
 
 function configToForm(cfg: WorkflowSyncConfig | null): WorkflowSyncFormState {
-  if (!cfg) return DEFAULT_FORM;
-  return {
-    provider: cfg.provider,
-    github_host: cfg.provider === "gitlab" ? "" : (cfg.github_host ?? PUBLIC_GITHUB_HOST),
-    repo_owner: cfg.repo_owner,
-    repo_name: cfg.repo_name,
-    project_path: cfg.project_path,
-    branch: cfg.branch,
-    path: cfg.path,
-    interval_seconds: cfg.interval_seconds,
-    poll_enabled: cfg.poll_enabled,
-  };
+  return cfg ? repoFormFromConfig(cfg) : DEFAULT_FORM;
 }
 
 // Background refresh so the status banner picks up new poller results
@@ -289,10 +280,6 @@ export function useWorkflowSync(workspaceId: string) {
 
 export type WorkflowSyncController = ReturnType<typeof useWorkflowSync>;
 
-function savePayload(form: WorkflowSyncFormState): WorkflowSyncSetConfigRequest {
-  return repoSyncPayload(form);
-}
-
 type WorkflowSyncActionDeps = Omit<InitialLoadDeps, "setLoading"> & {
   workspaceId: string;
   draft: WorkflowSyncDraft;
@@ -326,7 +313,7 @@ function useWorkflowSyncActions({
       lifetime.saving = ticket;
       setSaving(true);
       try {
-        const payload = savePayload(draft.form);
+        const payload: WorkflowSyncSetConfigRequest = repoSyncPayload(draft.form);
         const saved = await setWorkflowSyncConfig(payload, { workspaceId });
         if (lifetime.active) {
           setConfig(saved);

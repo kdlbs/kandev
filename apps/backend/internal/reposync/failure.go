@@ -24,10 +24,10 @@ var (
 	ErrGitLabClientNotConfigured = errors.New("GitLab is not authenticated; configure a GitLab connection for the workspace")
 )
 
-// ClassifyError maps a sync failure to an authcircuit.FailureClass. Typed
+// classifyError maps a sync failure to an authcircuit.FailureClass. Typed
 // provider API errors carry the HTTP status, which is the boundary between a
 // bad credential, a bad configuration, and a temporary provider failure.
-func ClassifyError(err error) authcircuit.FailureClass {
+func classifyError(err error) authcircuit.FailureClass {
 	if err == nil {
 		return authcircuit.FailureClassNone
 	}
