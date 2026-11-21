@@ -14,16 +14,14 @@ import {
   applyModelConfiguration,
   pendingConfigurationOptions,
 } from "@/lib/apply-model-configuration";
-import type {
-  ConfigurationChangeOutcome,
-  PickerConfigurationFeedbackController,
+import {
+  errorConfigurationResult,
+  type ConfigurationChangeOutcome,
+  type PickerConfigurationFeedbackController,
 } from "./session-configuration-feedback";
 import type { SessionModelsEntry } from "./model-selector-change-handlers";
 import { createSessionConfigurationRequestFence } from "./session-configuration-request";
-import {
-  errorConfigurationResult,
-  retryConfigurationOptions,
-} from "./model-selector-configuration-retry";
+import { retryConfigurationOptions } from "./model-selector-configuration-retry";
 
 type RequestIds = MutableRefObject<Record<string, number>>;
 
@@ -100,8 +98,6 @@ type ModelConfigurationRunOptions = ConfigurationApplyOptions & {
   store: ReturnType<typeof useAppStoreApi>;
 };
 
-type ConfigurationFailureCapture = { error?: unknown };
-
 type SessionMutator = ReturnType<typeof createSessionMutator>;
 
 function createModelValueWriter({
@@ -137,17 +133,15 @@ function createModelValueWriter({
 
 async function captureConfigurationStep(
   action: () => Promise<SetSessionConfigurationResponse>,
-  onSuccess: (response: SetSessionConfigurationResponse) => void,
-  failure: ConfigurationFailureCapture,
-  onError?: (error: unknown) => void,
+  change: ConfigurationChangeOutcome,
+  changes: ConfigurationChangeOutcome[],
 ) {
   try {
     const response = await action();
-    onSuccess(response);
+    changes.push({ ...change, result: response.configuration_result });
     return response;
   } catch (error) {
-    failure.error = error;
-    onError?.(error);
+    changes.push({ ...change, result: errorConfigurationResult(error), error });
     throw error;
   }
 }
@@ -162,7 +156,6 @@ function executeModelConfigurationSelection({
   modelLabel,
   optionLabels,
   changes,
-  failure,
   mutator,
   setActiveModel,
   setSessionModels,
@@ -177,7 +170,6 @@ function executeModelConfigurationSelection({
   modelLabel: string;
   optionLabels: Map<string, string>;
   changes: ConfigurationChangeOutcome[];
-  failure: ConfigurationFailureCapture;
   mutator: SessionMutator;
   setActiveModel: (sessionId: string, modelId: string) => void;
   setSessionModels: (sessionId: string, data: SessionModelsEntry) => void;
@@ -198,42 +190,14 @@ function executeModelConfigurationSelection({
     applyModel: (modelId) =>
       captureConfigurationStep(
         () => applyModel(modelId),
-        (response) =>
-          changes.push({
-            configId: modelConfigId,
-            label: modelLabel,
-            requested: modelId,
-            result: response.configuration_result,
-          }),
-        failure,
-        (error) =>
-          changes.push({
-            configId: modelConfigId,
-            label: modelLabel,
-            requested: modelId,
-            result: errorConfigurationResult(error),
-            error,
-          }),
+        { configId: modelConfigId, label: modelLabel, requested: modelId },
+        changes,
       ),
     applyOption: (optionId, value) =>
       captureConfigurationStep(
         () => applyOption(optionId, value),
-        (response) =>
-          changes.push({
-            configId: optionId,
-            label: optionLabels.get(optionId) ?? optionId,
-            requested: value,
-            result: response.configuration_result,
-          }),
-        failure,
-        (error) =>
-          changes.push({
-            configId: optionId,
-            label: optionLabels.get(optionId) ?? optionId,
-            requested: value,
-            result: errorConfigurationResult(error),
-            error,
-          }),
+        { configId: optionId, label: optionLabels.get(optionId) ?? optionId, requested: value },
+        changes,
       ),
     onModelConfirmed: (modelId) => {
       setActiveModel(sid, modelId);
@@ -247,85 +211,35 @@ function executeModelConfigurationSelection({
   });
 }
 
-function reportModelConfigurationFailure(
-  options: ModelConfigurationRunOptions & {
-    feedbackId: number;
-    changes: ConfigurationChangeOutcome[];
-    error: unknown;
-  },
-) {
-  const { selection, feedbackId, error, modelLabel, feedback } = options;
-  feedback.showError(feedbackId, modelLabel, selection.model, error);
-}
-
-function reportModelConfigurationOptionFailure(
+function modelConfigurationRetry(
   options: ModelConfigurationRunOptions & {
     result: Awaited<ReturnType<typeof applyModelConfiguration>>;
-    feedbackId: number;
     changes: ConfigurationChangeOutcome[];
-    error: unknown;
     optionLabels: Map<string, string>;
-    applyModel: (model: string) => Promise<SetSessionConfigurationResponse>;
-    applyOption: (
-      optionId: string,
-      value: string,
-      expectedModelId?: string,
-    ) => Promise<SetSessionConfigurationResponse>;
-    isCurrent: () => boolean;
-    isConfirmedResponse: (response: unknown) => boolean;
+    mutator: SessionMutator;
   },
 ) {
-  const {
-    sid,
-    selection,
-    result,
-    feedbackId,
-    changes,
-    error,
-    modelLabel,
-    feedback,
-    optionLabels,
-    applyModel,
-    applyOption,
-    updateLocalConfig,
-    isCurrent,
-    isConfirmedResponse,
-  } = options;
+  const { sid, selection, result, changes, feedback, optionLabels, updateLocalConfig, mutator } =
+    options;
   if (result.status !== "option_failed") return;
-  const pending = pendingConfigurationOptions(result, selection.configOptions);
   const failedChange = changes.find((change) => change.configId === result.failedOptionId);
-  const canRetry =
-    failedChange?.result?.status === "rejected" ||
-    errorConfigurationResult(error)?.status === "rejected";
-  feedback.showChanges(
-    feedbackId,
-    changes,
-    {
-      label: optionLabels.get(result.failedOptionId) ?? result.failedOptionId,
-      value: result.failedValue,
-      error,
-    },
-    canRetry
-      ? () => {
-          const retryId = feedback.begin();
-          void retryConfigurationOptions({
-            model: selection.model,
-            pending,
-            previousChanges: changes,
-            feedback,
-            requestId: retryId,
-            modelLabel,
-            optionLabels,
-            applyModel,
-            applyOption,
-            updateLocalConfig,
-            sid,
-            isCurrent,
-            isConfirmedResponse,
-          });
-        }
-      : undefined,
-  );
+  if (failedChange?.result?.status !== "rejected") return;
+  return () => {
+    const requestId = feedback.begin();
+    void retryConfigurationOptions({
+      model: selection.model,
+      pending: pendingConfigurationOptions(result, selection.configOptions),
+      feedback,
+      requestId,
+      optionLabels,
+      applyModel: mutator.applyModel,
+      applyOption: mutator.applyOption,
+      updateLocalConfig,
+      sid,
+      isCurrent: mutator.isCurrent,
+      isConfirmedResponse: mutator.canCommit,
+    });
+  };
 }
 
 async function runModelConfigurationSelection(options: ModelConfigurationRunOptions) {
@@ -351,7 +265,6 @@ async function runModelConfigurationSelection(options: ModelConfigurationRunOpti
   );
   const feedbackId = feedback.begin();
   const changes: ConfigurationChangeOutcome[] = [];
-  const failure: ConfigurationFailureCapture = {};
   const mutator = createSessionMutator({
     sid,
     modelConfig,
@@ -359,7 +272,6 @@ async function runModelConfigurationSelection(options: ModelConfigurationRunOpti
     latestReqId,
     reqId,
   });
-  const { isCurrent, applyModel, applyOption } = mutator;
   const result = await executeModelConfigurationSelection({
     sid,
     selection,
@@ -370,7 +282,6 @@ async function runModelConfigurationSelection(options: ModelConfigurationRunOpti
     modelLabel,
     optionLabels,
     changes,
-    failure,
     mutator,
     setActiveModel,
     setSessionModels,
@@ -378,41 +289,10 @@ async function runModelConfigurationSelection(options: ModelConfigurationRunOpti
   });
 
   if (result.status === "superseded" || result.status === "cancelled") return;
-  if (result.status === "model_failed") {
-    reportModelConfigurationFailure({
-      ...options,
-      feedbackId,
-      changes,
-      error: failure.error,
-    });
-    return;
-  }
-  if (result.status === "option_failed") {
-    reportModelConfigurationOptionFailure({
-      ...options,
-      result,
-      feedbackId,
-      changes,
-      error: failure.error,
-      optionLabels,
-      applyModel,
-      applyOption,
-      isCurrent,
-      isConfirmedResponse: mutator.canCommit,
-    });
-    return;
-  }
-  const persistenceError = changes.find((change) => change.result?.status === "persistence_failed");
   feedback.showChanges(
     feedbackId,
     changes,
-    persistenceError && failure.error
-      ? {
-          label: persistenceError.label,
-          value: persistenceError.result?.effective ?? persistenceError.requested,
-          error: failure.error,
-        }
-      : undefined,
+    modelConfigurationRetry({ ...options, result, changes, optionLabels, mutator }),
   );
 }
 

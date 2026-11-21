@@ -17,6 +17,14 @@ only saved it. A slash command is sent as a prompt. If the agent updates a
 setting without replying in text, chat treats the silent turn as empty.
 [Issue #5376](https://github.com/kdlbs/kandev/issues/5376)
 
+Review of [PR #5411](https://github.com/kdlbs/kandev/pull/5411) found that
+the feedback can crowd the composer and clip. To reproduce on the PR head,
+change the mode in a narrow task chat. The desktop feedback uses absolute
+positioning above the trigger inside the composer. A phone uses a fixed
+portal that competes with the transcript for space when the keyboard is
+open. Send a silent `/model mock-smart` from Mock Fast in the mock session to
+see the bordered slash receipt.
+
 ## Change
 
 1. Return the evidence from the existing picker request. Show a passive,
@@ -25,6 +33,9 @@ setting without replying in text, chat treats the silent turn as empty.
 2. For a recognized silent configuration command, include its outcome in
    the existing turn completion. Show it as a system message beneath
    the command in place of the generic empty-turn hint.
+3. Render picker outcomes and slash receipts as muted transcript rows.
+   Merge picker outcomes by setting ID until the next turn starts. Task 03
+   supersedes the original picker placement and expiry.
 
 The existing mutation order, task chat controls, and conversation delivery
 remain the entry points. Scope the change to structured task chat on desktop
@@ -40,6 +51,58 @@ for Kandev copy. [Requirements](../../specs/agents/requirements/session-configur
 | Copilot ACP `/model auto hydrafusion` | An attributable transition to Auto permits a receipt. Fusion High remains the requested tier. An unchanged or ambiguous snapshot yields an unconfirmed notice. |
 
 ## ASCII UI preview
+
+### UI-03 Muted settings row
+
+From task chat, pick a model, adjust mode, and later choose a reasoning
+level before sending the next prompt. Each result updates the same row in
+the transcript. The next turn closes that group.
+
+```text
+[ Transcript scrolls ]
+  Assistant reply
+
+  Model: Sonnet, Mode: Plan, Reasoning: High       (muted)
+
+[ Composer ]
+[ Model v ]   [ Mode v ]   [ Send ]
+```
+
+### UI-04 Muted slash receipt
+
+Send a supported configuration slash command that finishes silently.
+
+```text
+[ Transcript scrolls ]
+  You: /model auto hydrafusion
+  Copilot reported Auto. Fusion High requested.  (muted)
+
+[ Composer ]
+```
+
+Desktop and phone share the transcript layout. On phone, text wraps above
+the composer, with the transcript owning scroll when the keyboard is open.
+If a composed change only partly applies, the same row fits the narrower
+phone layout.
+
+```text
+[ Transcript scrolls ]
+  Model: Sonnet
+  Reasoning: High unavailable.
+  [ Retry ] [ Dismiss ]
+
+[ Composer ]
+[ Model v ] [ Mode v ] [ Send ]
+```
+
+Dismiss and eligible Retry have 44 px touch targets. These views cover ACs
+.1 through .7. The wording is illustrative.
+[Work order and rendered checks](task-03-muted-transcript-feedback.md)
+
+### Original preview
+
+The following views record the first two work orders. UI-03 and UI-04
+describe the revised presentation.
 
 The conversation owns the scroll area. Picker feedback is anchored to the
 existing controls. On phone, text wraps within the keyboard viewport and
@@ -92,6 +155,16 @@ superseded. The wording is illustrative.
 
 ## Verification
 
+Task 03 verifies grouping across separate selections, latest outcomes per
+setting, the new-turn boundary, and independent slash receipts. It reuses
+the focused desktop and phone specs for wrapping, the draft, reading
+position, and touch actions. [Task 03 commands](task-03-muted-transcript-feedback.md#verification)
+
+Task 03 passed 83 focused web tests, three desktop and two phone Playwright
+tests, typecheck, changed-file lint, localization checks, and spec validation.
+
+### Original implementation results
+
 - Task 01 covers effective values, saves, partial failure, and stale picker
   responses for ACs .1 through .3 and .5.
 - Task 02 covers the same slash-command path with a plain model ID and
@@ -111,6 +184,7 @@ superseded. The wording is illustrative.
 
 - [x] [Task 01 Picker outcomes and selector feedback](task-01-picker-outcomes.md)
 - [x] [Task 02 Configuration slash-command feedback](task-02-slash-command-feedback.md)
+- [x] [Task 03 Muted transcript feedback](task-03-muted-transcript-feedback.md)
 
 ## Review follow-up
 

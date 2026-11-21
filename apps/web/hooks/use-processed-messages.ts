@@ -17,6 +17,7 @@ import {
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { lastAgentErrorStamp, type LastAgentError } from "@/lib/session-last-agent-error";
 import { legacyRecoveryMessageMatchesError } from "@/lib/session-recovery-presentation";
+import { insertionIndexAtTime, insertLocalStatusMessages } from "./transcript-status-placement";
 import {
   buildChildrenByParentToolCallId,
   buildPermissionsByToolCallId,
@@ -153,6 +154,7 @@ export type ProcessedMessagesOptions = {
   historyInitialized?: boolean;
   hasOlderMessages?: boolean;
   isPassthrough?: boolean;
+  localStatusMessages?: Message[];
   lastAgentError?: LastAgentError | null;
   currentTurnId?: string | null;
   currentTurnCompleted?: boolean;
@@ -375,29 +377,6 @@ function buildGroupedItemsForHook(args: {
   );
 }
 
-function itemCreatedAt(item: RenderItem): string | undefined {
-  if (item.type === "message") return item.message.created_at;
-  if (item.type === "turn_group") return item.messages[item.messages.length - 1]?.created_at;
-  return undefined;
-}
-
-function insertionIndexForAgentError(items: RenderItem[], occurredAt?: string): number {
-  if (items.length === 0) return 0;
-  const errorTime = occurredAt ? Date.parse(occurredAt) : Number.NaN;
-  if (Number.isNaN(errorTime)) return items.length;
-  let insertAt = 0;
-  let sawTimestamp = false;
-  for (let i = 0; i < items.length; i++) {
-    const createdAt = itemCreatedAt(items[i]);
-    if (!createdAt) continue;
-    const itemTime = Date.parse(createdAt);
-    if (Number.isNaN(itemTime)) continue;
-    sawTimestamp = true;
-    if (itemTime <= errorTime) insertAt = i + 1;
-  }
-  return sawTimestamp ? insertAt : items.length;
-}
-
 export function insertLastAgentErrorItem(
   items: RenderItem[],
   resolvedSessionId: string | null,
@@ -418,7 +397,7 @@ export function insertLastAgentErrorItem(
     sessionId: resolvedSessionId,
     error,
   };
-  const insertAt = insertionIndexForAgentError(items, error.occurredAt);
+  const insertAt = insertionIndexAtTime(items, error.occurredAt);
   return [...items.slice(0, insertAt), notice, ...items.slice(insertAt)];
 }
 
@@ -639,19 +618,21 @@ export function useProcessedMessages(
   );
 
   const rawGroupedItems = useMemo<RenderItem[]>(() => {
-    return buildGroupedItemsForHook({
+    const items = buildGroupedItemsForHook({
       regularMessages,
       allSessionMessages: messages,
       resolvedSessionId,
       hasOlderMessages: options.hasOlderMessages ?? false,
       lastAgentError: options.lastAgentError,
     });
+    return insertLocalStatusMessages(items, options.localStatusMessages);
   }, [
     regularMessages,
     resolvedSessionId,
     messages,
     options.hasOlderMessages,
     options.lastAgentError,
+    options.localStatusMessages,
   ]);
   const groupedItems = useStableGroupedItems(rawGroupedItems);
 

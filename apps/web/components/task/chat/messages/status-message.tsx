@@ -3,14 +3,11 @@
 import { useEffect, useState, memo, type ReactElement } from "react";
 import {
   IconAlertTriangle,
-  IconCheck,
   IconInfoCircle,
   IconHandStop,
   IconChevronDown,
   IconChevronRight,
-  IconX,
 } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import type { StatusMetadata } from "@/components/task/chat/types";
@@ -18,6 +15,10 @@ import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { useAppStore } from "@/components/state-provider";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import {
+  MutedConfigurationStatus,
+  PickerConfigurationStatus,
+} from "./configuration-feedback-status";
 
 const UNKNOWN_TASK_KEY = "task:unknown";
 
@@ -39,6 +40,7 @@ interface ErrorMetadata extends StatusMetadata {
   executor_profile_id?: string;
   remediation?: string[];
   configuration_command_feedback?: boolean;
+  configuration_picker_feedback?: boolean;
   feedback_status?: "applied" | "clamped" | "unconfirmed";
   dismissible?: boolean;
   original_branch?: string;
@@ -378,7 +380,6 @@ function ConfigurationCommandStatus({
   message: string;
   metadata: ErrorMetadata;
 }) {
-  const { t } = useTranslation();
   const removeMessage = useAppStore((state) => state.removeMessage);
   const positive = metadata.feedback_status === "applied" || metadata.feedback_status === "clamped";
   const dismissible = metadata.dismissible === true;
@@ -423,32 +424,11 @@ function ConfigurationCommandStatus({
   }, [comment.id, comment.session_id, dismissible, positive, removeMessage]);
 
   return (
-    <div className="flex w-full items-start gap-2 rounded border border-border/60 bg-background px-2.5 py-2 shadow-sm">
-      <div className="flex min-w-0 flex-1 items-start gap-2" role="status" aria-live="polite">
-        {positive ? (
-          <IconCheck
-            className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400"
-            aria-hidden
-          />
-        ) : (
-          <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden />
-        )}
-        <span className="min-w-0 break-words text-xs text-foreground">{message}</span>
-      </div>
-      {dismissible && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 min-w-0 shrink-0 [@media(pointer:coarse)]:h-12 [@media(pointer:coarse)]:w-12"
-          aria-label={t("common:close")}
-          data-testid="configuration-command-feedback-dismiss"
-          onClick={() => removeMessage(comment.session_id, comment.id)}
-        >
-          <IconX className="h-3.5 w-3.5" aria-hidden />
-        </Button>
-      )}
-    </div>
+    <MutedConfigurationStatus
+      message={message}
+      testId="configuration-command-feedback"
+      dismiss={dismissible ? () => removeMessage(comment.session_id, comment.id) : undefined}
+    />
   );
 }
 
@@ -484,6 +464,9 @@ function renderConfigurationCommandStatus({
   metadata,
   message,
 }: SpecialStatusArguments): ReactElement | null {
+  if (metadata?.configuration_picker_feedback) {
+    return <PickerConfigurationStatus comment={comment} />;
+  }
   if (metadata?.configuration_command_feedback && metadata.feedback_status) {
     return <ConfigurationCommandStatus comment={comment} message={message} metadata={metadata} />;
   }

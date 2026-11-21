@@ -12,6 +12,7 @@ import type { NativeMCPDiagnostic } from "@/lib/prepare/native-mcp-diagnostic";
 import type { ModelCatalog } from "@kandev/types/model-catalog";
 import type { UserShellScope } from "@/lib/state/user-shell-scope";
 import type { WorkspaceRootFilesResponse } from "@/lib/types/workspace-files";
+import type * as ConfigurationFeedback from "./session-configuration-feedback";
 
 export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
@@ -625,7 +626,7 @@ export type BackgroundOutputWindow = {
   evicted: number;
 };
 
-export type SessionRuntimeSliceState = {
+export type SessionRuntimeSliceState = ConfigurationFeedback.ConfigurationFeedbackState & {
   terminal: TerminalState;
   shell: ShellState;
   processes: ProcessState;
@@ -657,7 +658,7 @@ export type SessionRuntimeSliceState = {
   backgroundWork: BackgroundWorkState;
 };
 
-export type SessionRuntimeSliceActions = {
+export type SessionRuntimeSliceActions = ConfigurationFeedback.ConfigurationFeedbackActions & {
   setTerminalOutput: (terminalId: string, data: string) => void;
   appendShellOutput: (sessionId: string, data: string) => void;
   setShellStatus: (

@@ -13,6 +13,13 @@ type SessionConfigurationStore = {
   getState: () => SessionExecutionState;
 };
 
+export function sessionConfigurationExecutionId(state: SessionExecutionState, sessionId: string) {
+  return (
+    state.taskSessions.items[sessionId]?.agent_execution_id ??
+    state.sessionModels.bySessionId[sessionId]?.confirmedConfigOptionsExecutionId
+  );
+}
+
 type ConfigurationResponse = {
   configuration_result?: {
     status?: string;
@@ -43,13 +50,7 @@ export function createSessionConfigurationRequestFence({
   latestRequestIds: MutableRefObject<Record<string, number>>;
   requestId: number;
 }) {
-  const sessionExecutionId = () => {
-    const state = store.getState();
-    return (
-      state.taskSessions.items[sessionId]?.agent_execution_id ??
-      state.sessionModels.bySessionId[sessionId]?.confirmedConfigOptionsExecutionId
-    );
-  };
+  const sessionExecutionId = () => sessionConfigurationExecutionId(store.getState(), sessionId);
   const initialExecutionId = sessionExecutionId();
   let responseExecutionId: string | undefined;
   let mismatchedResponse = false;

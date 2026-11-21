@@ -8,15 +8,15 @@ requirements:
 
 # Session configuration feedback system design
 
-Agents owns the evidence for a setting change. A picker returns its result
-in the existing request and shows it beside the trigger. A slash command
-supplies its result with turn completion and shows it as a system message.
+Agents owns the evidence for a setting change. A picker reports its result
+in the existing response. A slash command supplies its result with turn
+completion. Task chat presents both as muted system messages.
 
 | Acceptance criteria | Design section |
 | --- | --- |
 | AC-AGENTS-SESSION-CONFIG-FEEDBACK-001.1–.3 | Picker responses |
 | AC-AGENTS-SESSION-CONFIG-FEEDBACK-001.4–.5 | Slash-command completion |
-| AC-AGENTS-SESSION-CONFIG-FEEDBACK-001.5–.6 | Feedback presentation |
+| AC-AGENTS-SESSION-CONFIG-FEEDBACK-001.5–.7 | Feedback presentation |
 
 ## Picker responses
 
@@ -111,33 +111,36 @@ and keep notice data out of conversation history and plugin turns.
 
 ## Feedback presentation
 
-Keep the latest picker result scoped to the session and agentctl execution.
-Anchor a compact green check and short value near the top right of the
-originating trigger. Provider options use the model settings trigger. Keep the
-trigger and nearby controls clear. The positive indicator ignores pointer
-input, takes no focus, and clears after one visible second. Reuse the existing
-picker-open and document-visibility state to count only remaining visible
-time; reopening the picker does not restart the interval. Use a neutral
-indication when the setting was saved for launch or remains unconfirmed.
+Use the transcript's `StatusMessage` renderer for both feedback sources. Use
+compact muted text in normal message flow. Names come from the advertised
+setting and value labels when available. Describe deferred saves, rejections,
+partial changes, and uncertainty in text. Show the sanitized reason when the
+agent supplies one. Dismiss and eligible Retry remain available in the row.
 
-Show an explicit rejection or preference-save failure in red with its reason
-outside the trigger's hit area. Keep it dismissible and leave eligible Retry
-available beside it. Use neutral styling for unconfirmed results and amber for
-partial application. On phone, bound the feedback to the visual viewport above
-the keyboard and keep the message and its actions reachable by scrolling inside
-the feedback. A new selection can start immediately and replaces the old
-picker result.
-Dismiss or expire the specific result so an older timer cannot clear a
-newer one.
+`usePickerConfigurationFeedback` forwards outcomes that pass the current
+request and execution checks to one session-scoped collection. Group them by
+the newest accepted turn start when the picker action begins, with an initial
+group before the first turn. Update the same row by setting ID, including the
+option IDs from a composed Apply or Retry. Keep the row ID and position when
+another outcome arrives. Use the accepted turn start as the group boundary
+instead of a visibility timer. A late result belongs to its initiating
+group if its request is still current. A group stops accepting Retry after
+the next turn begins. An older or replayed start cannot reopen a closed group.
 
-For silent slash commands, reuse the empty-turn notice's client-side status
-message path. Place a system message under the command in its turn.
-A positive receipt clears after five visible seconds. A dismissible
-unconfirmed result stays in that turn. A duplicate completion cannot recreate
-a dismissed or expired receipt. Reuse the existing late-output filter if the
-agent's own reply arrives later.
+Keep picker rows in the session's in-memory UI state and project them as
+local status messages when task chat builds its transcript. This keeps open
+and closed rows available through history refreshes in the same view. A reload
+starts with an empty collection. Remove the collection when the session is
+removed. Keep Retry callbacks in UI state with the row they can update.
+
+For a silent slash command, reuse the empty-turn notice's deterministic row
+under the command. A positive receipt clears after five visible seconds.
+A dismissible unconfirmed result stays in that turn. A duplicate completion
+cannot recreate a dismissed or expired receipt. Reuse the existing late-output
+filter if the agent's own reply arrives later.
 
 Use polite announcements, preserve composer focus and the transcript's
-reading position, and localize copy and accessible names. Keep the phone
-layout inside the keyboard viewport. Give Dismiss and Retry 44 px touch
-targets. Render provider values and error details as plain text.
+reading position, and localize copy and accessible names. On phones, the
+transcript remains the scroll owner above the keyboard. Text wraps and
+Dismiss and Retry have 44 px touch targets. Render provider values and error
+details as plain text.

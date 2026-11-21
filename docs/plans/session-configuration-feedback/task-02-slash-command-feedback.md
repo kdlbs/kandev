@@ -18,6 +18,9 @@ system_design:
 
 # Task 02 Configuration slash-command feedback
 
+This work order records the original slash receipt implementation. [Task 03](task-03-muted-transcript-feedback.md)
+owns the revised presentation.
+
 ## Scope
 
 Recognize the supported ACP configuration commands on the existing prompt

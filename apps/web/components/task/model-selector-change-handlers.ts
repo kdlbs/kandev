@@ -5,16 +5,15 @@ import { useTranslation } from "react-i18next";
 
 import { isModelConfigOption, type SelectConfigOption } from "@/components/model-config-selector";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import {
-  setSessionConfigOption,
-  setSessionModel,
-  type SessionConfigurationResult,
-} from "@/lib/api/domains/session-api";
+import { setSessionConfigOption, setSessionModel } from "@/lib/api/domains/session-api";
 import type {
   ConfigOptionEntry,
   SessionModelEntry,
 } from "@/lib/state/slices/session-runtime/types";
-import type { PickerConfigurationFeedbackController } from "./session-configuration-feedback";
+import {
+  errorConfigurationResult,
+  type PickerConfigurationFeedbackController,
+} from "./session-configuration-feedback";
 import { createSessionConfigurationRequestFence } from "./session-configuration-request";
 import { useSessionConfigurationApply } from "./model-selector-configuration-apply";
 
@@ -52,20 +51,13 @@ function nextCurrentModelId(
   return data.currentModelId;
 }
 
-function errorConfigurationResult(error: unknown): SessionConfigurationResult | undefined {
-  if (!error || typeof error !== "object") return undefined;
-  const body = (error as { body?: unknown }).body;
-  if (!body || typeof body !== "object") return undefined;
-  const result = (body as { configuration_result?: unknown }).configuration_result;
-  return result && typeof result === "object" ? (result as SessionConfigurationResult) : undefined;
-}
-
 type RequestIds = MutableRefObject<Record<string, number>>;
 
 type ChangeFailure = {
   sid: string;
   reqId: number;
   feedbackId: number;
+  configId: string;
   label: string;
   requested: string;
   isCurrent: () => boolean;
@@ -148,6 +140,7 @@ function useModelValueChangeHandler(options: SettingChangeHandlerOptions) {
       const reqId = nextReqId(sid);
       const modelConfig = configOptions.find(isModelConfigOption);
       const label = modelConfig?.name || t("common:model");
+      const change = { configId: modelConfig?.id ?? "model", label, requested: modelId };
       const feedbackId = feedback.begin();
       const fence = createSessionConfigurationRequestFence({
         sessionId: sid,
@@ -159,8 +152,7 @@ function useModelValueChangeHandler(options: SettingChangeHandlerOptions) {
         sid,
         reqId,
         feedbackId,
-        label,
-        requested: modelId,
+        ...change,
         isCurrent: fence.isCurrent,
       });
       const apply = modelConfig
@@ -185,7 +177,7 @@ function useModelValueChangeHandler(options: SettingChangeHandlerOptions) {
           } else if (fence.isCurrent() && outcome?.status === "saved_for_launch") {
             saveModelPreference(updateOptions, modelId);
           }
-          feedback.showResult(feedbackId, label, modelId, outcome);
+          feedback.showChanges(feedbackId, [{ ...change, result: outcome }]);
         })
         .catch((error: unknown) => {
           fence.observeResponse(error);
@@ -221,6 +213,7 @@ function useConfigOptionChangeHandler(options: SettingChangeHandlerOptions) {
       const reqId = nextReqId(sid);
       const option = configOptions.find((item) => item.id === configId);
       const label = option?.name || configId;
+      const change = { configId, label, requested: value };
       const feedbackId = feedback.begin();
       const fence = createSessionConfigurationRequestFence({
         sessionId: sid,
@@ -232,8 +225,7 @@ function useConfigOptionChangeHandler(options: SettingChangeHandlerOptions) {
         sid,
         reqId,
         feedbackId,
-        label,
-        requested: value,
+        ...change,
         isCurrent: fence.isCurrent,
       });
 
@@ -246,7 +238,7 @@ function useConfigOptionChangeHandler(options: SettingChangeHandlerOptions) {
           } else if (fence.isCurrent() && outcome?.status === "saved_for_launch") {
             updateLocalConfig(sid, configId, value);
           }
-          feedback.showResult(feedbackId, label, value, outcome);
+          feedback.showChanges(feedbackId, [{ ...change, result: outcome }]);
         })
         .catch((error: unknown) => {
           fence.observeResponse(error);
@@ -293,10 +285,10 @@ export function useModelChangeHandlers(
   );
 
   const onFail = useCallback(
-    ({ sid, reqId, feedbackId, label, requested, isCurrent }: ChangeFailure) =>
+    ({ sid, reqId, feedbackId, configId, label, requested, isCurrent }: ChangeFailure) =>
       (error: unknown) => {
         if (latestReqId.current[sid] !== reqId || !isCurrent()) return;
-        feedback.showError(feedbackId, label, requested, error);
+        feedback.showChanges(feedbackId, [{ configId, label, requested, error }]);
       },
     [feedback],
   );

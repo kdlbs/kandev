@@ -9,6 +9,7 @@ import {
   type SetSessionConfigurationResponse,
 } from "@/lib/api/domains/session-api";
 import { ApiError } from "@/lib/api/client";
+import type { SessionConfigurationFeedbackUpdate } from "@/lib/state/slices/session-runtime/session-configuration-feedback";
 
 // eslint-disable-next-line max-lines-per-function -- One hoisted fixture graph keeps the live-session state and model catalog consistent.
 const mocks = vi.hoisted(() => {
@@ -110,6 +111,10 @@ const mocks = vi.hoisted(() => {
     sessionMode: { bySessionId: { [SESSION_ID]: { currentModeId: "build" } } },
     settingsAgents: { items: [] },
     agentProfiles: { items: [] },
+    turns: { bySession: {} },
+    quickChat: { sessions: [] },
+    recordSessionConfigurationFeedback:
+      vi.fn<(sessionId: string, update: SessionConfigurationFeedbackUpdate) => void>(),
     taskSessions: {
       items: {
         [SESSION_ID]: {
@@ -153,17 +158,15 @@ const mocks = vi.hoisted(() => {
 
 const SESSION_ID = mocks.SESSION_ID;
 const { EXECUTION_ID, REPLACEMENT_EXECUTION_ID, PAIR_B, THINKING_OPTION, HIGH_OPTION } = mocks;
-const FEEDBACK_TEST_ID = "session-configuration-feedback";
-const RETRY_TEST_ID = "session-configuration-feedback-retry";
-const FEEDBACK_STATUS_ATTRIBUTE = "data-status";
 const PERSISTENCE_FAILED = "persistence_failed" as const;
 const OPTION_REJECTION = "option rejected";
 const SAVE_PERSISTENCE_ERROR = "failed to persist session runtime config";
 
 vi.mock("@/components/state-provider", async () => {
   const { useEffect, useReducer } = await import("react");
+  const store = { getState: () => mocks.appState };
   return {
-    useAppStoreApi: () => ({ getState: () => mocks.appState }),
+    useAppStoreApi: () => store,
     useAppStore: (selector: (state: typeof mocks.appState) => unknown) => {
       const [, force] = useReducer((count: number) => count + 1, 0);
       useEffect(() => {
@@ -247,6 +250,7 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
 }));
 
 beforeEach(() => {
+  mocks.appState.recordSessionConfigurationFeedback.mockClear();
   mocks.appState.activeModel.bySessionId = {};
   (mocks.appState.taskSessions.items as Record<string, Record<string, unknown>>)[SESSION_ID] =
     JSON.parse(JSON.stringify(mocks.initialTaskSession)) as Record<string, unknown>;
@@ -254,6 +258,17 @@ beforeEach(() => {
     JSON.stringify(mocks.initialSession),
   ) as Record<string, unknown>;
 });
+
+function recordedFeedback() {
+  return mocks.appState.recordSessionConfigurationFeedback.mock.calls
+    .map(([, update]) => update)
+    .findLast((update) => update.entries.length > 0);
+}
+
+async function latestFeedback() {
+  await waitFor(() => expect(recordedFeedback()).toBeDefined());
+  return recordedFeedback()!;
+}
 
 function replaceSessionExecution(executionId: string, currentModelId: string) {
   const live = mocks.appState.sessionModels.bySessionId[SESSION_ID] as {
@@ -354,10 +369,9 @@ describe("live composed configuration apply", () => {
         ).currentModelId,
       ).toBe("solo");
     });
-    const feedback = await screen.findByTestId(FEEDBACK_TEST_ID);
-    expect(feedback.getAttribute(FEEDBACK_STATUS_ATTRIBUTE)).toBe("clamped");
-    expect(feedback.textContent).toContain(PAIR_B);
-    expect(feedback.textContent).toContain("solo");
+    const feedback = await latestFeedback();
+    expect(feedback.entries[0].text).toContain("Model: Balanced B");
+    expect(feedback.entries[0].text).toContain("Model: Solo");
     expect(setSessionConfigOption).toHaveBeenCalledTimes(1);
   });
 });
@@ -416,9 +430,7 @@ describe("composed configuration partial retries", () => {
 
     await applyComposedPairing();
 
-    const partial = await screen.findByTestId(FEEDBACK_TEST_ID);
-    expect(partial.getAttribute(FEEDBACK_STATUS_ATTRIBUTE)).toBe("partial");
-    expect(partial.textContent).toContain(PAIR_B);
+    const partial = await latestFeedback();
     expect(
       (
         mocks.appState.sessionModels.bySessionId[SESSION_ID] as {
@@ -426,16 +438,19 @@ describe("composed configuration partial retries", () => {
         }
       ).currentModelId,
     ).toBe(PAIR_B);
-    expect(partial.textContent).toContain("could not be saved");
-    expect(partial.textContent).toContain(SAVE_PERSISTENCE_ERROR);
-    expect(partial.textContent).toContain(`Thinking: ${HIGH_OPTION}`);
-    expect(partial.textContent).toContain(OPTION_REJECTION);
-    expect(screen.getByTestId(RETRY_TEST_ID)).toBeTruthy();
+    expect(partial.entries[0].text).toContain(
+      "Model: Balanced B applied, but it could not be saved.",
+    );
+    expect(partial.entries[0].text).toContain(SAVE_PERSISTENCE_ERROR);
+    expect(partial.entries[1].text).toContain("Thinking: High");
+    expect(partial.entries[1].text).toContain(OPTION_REJECTION);
+    expect(partial.retry).toBeTruthy();
     expect(mocks.toast).not.toHaveBeenCalled();
 
     vi.mocked(setSessionConfigOption).mockClear();
+    mocks.appState.recordSessionConfigurationFeedback.mockClear();
     await act(async () => {
-      fireEvent.click(screen.getByTestId(RETRY_TEST_ID));
+      partial.retry?.run();
       await Promise.resolve();
     });
     await waitFor(() => expect(setSessionConfigOption).toHaveBeenCalledTimes(1));
@@ -445,10 +460,9 @@ describe("composed configuration partial retries", () => {
       HIGH_OPTION,
       PAIR_B,
     ]);
-    const retried = await screen.findByTestId(FEEDBACK_TEST_ID);
-    expect(retried.getAttribute(FEEDBACK_STATUS_ATTRIBUTE)).toBe("partial");
-    expect(retried.textContent).toContain("could not be saved");
-    expect(retried.textContent).toContain("Thinking: low");
+    const retried = await latestFeedback();
+    expect(retried.entries).toHaveLength(1);
+    expect(retried.entries[0].text).toContain("Thinking: Low");
     expect(
       (
         mocks.appState.sessionModels.bySessionId[SESSION_ID] as {
@@ -485,13 +499,14 @@ describe("composed configuration retry failures", () => {
     );
 
     await applyComposedPairing();
-    await screen.findByTestId(RETRY_TEST_ID);
-    fireEvent.click(screen.getByTestId(RETRY_TEST_ID));
+    const initial = await latestFeedback();
+    expect(initial.retry).toBeTruthy();
+    mocks.appState.recordSessionConfigurationFeedback.mockClear();
+    await act(async () => initial.retry?.run());
 
-    const feedback = await screen.findByTestId(FEEDBACK_TEST_ID);
-    await waitFor(() => expect(feedback.textContent).toContain("retry option rejection"));
-    expect(feedback.getAttribute(FEEDBACK_STATUS_ATTRIBUTE)).toBe("partial");
-    expect(screen.getByTestId(RETRY_TEST_ID)).toBeTruthy();
+    const feedback = await latestFeedback();
+    expect(feedback.entries[0].text).toContain("retry option rejection");
+    expect(feedback.retry).toBeTruthy();
   });
 });
 
@@ -583,7 +598,7 @@ describe("composed configuration execution fencing", () => {
         }
       ).currentModelId,
     ).toBe(PAIR_B);
-    expect(screen.queryByTestId(FEEDBACK_TEST_ID)).toBeNull();
+    expect(recordedFeedback()).toBeUndefined();
   });
 
   it("does not restore an old execution snapshot after a delayed failure", async () => {
@@ -619,6 +634,6 @@ describe("composed configuration execution fencing", () => {
         }
       ).currentModelId,
     ).toBe(PAIR_B);
-    expect(screen.queryByTestId(FEEDBACK_TEST_ID)).toBeNull();
+    expect(recordedFeedback()).toBeUndefined();
   });
 });

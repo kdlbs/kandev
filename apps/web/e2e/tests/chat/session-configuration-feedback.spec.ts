@@ -5,7 +5,7 @@ import { seedAndOpenChat } from "./session-configuration-feedback-helpers";
 test.describe("Picker feedback", () => {
   test.describe.configure({ retries: 1, timeout: 90_000 });
 
-  test("reports the effective model and pauses expiry while the picker is open", async ({
+  test("merges picker changes before the next turn in one muted transcript row", async ({
     testPage,
     apiClient,
     seedData,
@@ -28,34 +28,51 @@ test.describe("Picker feedback", () => {
     );
     await testPage.getByRole("option", { name: /Mock Smart/ }).click();
     await configurationResponse;
-    const feedback = testPage.getByTestId("session-configuration-feedback");
+    const transcript = session.activeChat().locator(".chat-message-list");
+    const feedback = transcript.getByTestId("session-configuration-feedback");
     await expect(feedback).toBeVisible();
     await expect(feedback).toHaveAttribute("role", "status");
-    await expect(feedback).toHaveAttribute("data-status", "applied");
-    await expect(feedback).toContainText("mock-smart");
+    await expect(feedback).toHaveClass(/text-muted-foreground/);
+    await expect(feedback).toContainText("Model: Mock Smart");
 
-    const listbox = testPage.getByRole("listbox");
-    await expect(listbox).toBeVisible();
-    await expect(trigger).toHaveAttribute("aria-expanded", "true");
-    await testPage.clock.runFor(1_500);
-    await expect(feedback).toBeVisible();
     await testPage.keyboard.press("Escape");
-    await expect(listbox).toBeHidden();
+    await testPage.getByTestId("session-mode-selector").click();
+    const modeResponse = waitForHttp(testPage, "POST", /\/set-mode$/);
+    await testPage.getByRole("menuitem", { name: /Plan Mock/ }).click();
+    await modeResponse;
+    await expect(feedback).toHaveCount(1);
+    await expect(feedback).toContainText("Plan Mock");
+
+    await testPage.clock.runFor(6_000);
     await trigger.click();
-    await expect(listbox).toBeVisible();
+    await testPage.getByTestId("config-option-trigger-effort").click();
+    const effortResponse = waitForHttp(testPage, "POST", /\/set-config-option$/);
+    await testPage.getByRole("button", { name: "Low", exact: true }).click();
+    await effortResponse;
+    await expect(feedback).toHaveCount(1);
+    await expect(feedback).toContainText("Model: Mock Smart");
+    await expect(feedback).toContainText("Plan Mock");
+    await expect(feedback).toContainText("Effort: Low");
     await testPage.keyboard.press("Escape");
-    await testPage.clock.runFor(1_000);
-    await expect(feedback).toBeHidden();
+
+    const prompt = "use this configuration";
+    await session.sendMessage(prompt);
+    await session.expectChatResponseVisible(prompt);
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await trigger.click();
+    const nextModelResponse = waitForHttp(testPage, "POST", /\/set-config-option$/);
+    await testPage.getByRole("option", { name: /Mock Fast/ }).click();
+    await nextModelResponse;
+    await expect(feedback).toHaveCount(2);
+    await expect(feedback.first()).toContainText("Model: Mock Smart");
+    await expect(feedback.last()).toContainText("Model: Mock Fast");
+    await expect(feedback.last()).not.toContainText("Effort: Low");
     await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
-    await expect(trigger).toContainText("Mock Smart");
-    await expect(session.chat).toContainText("This is a simple mock response for e2e testing.");
 
     await testPage.reload();
     await session.waitForLoad();
-    await expect(testPage.getByRole("button", { name: "Session model settings" })).toContainText(
-      "Mock Smart",
-    );
-    await expect(testPage.getByTestId("session-configuration-feedback")).toHaveCount(0);
+    await expect(trigger).toContainText("Mock Fast");
+    await expect(feedback).toHaveCount(0);
   });
 
   test("shows the observed model under its silent configuration command", async ({
@@ -114,6 +131,7 @@ test.describe("Picker feedback", () => {
     });
     await expect(command).toBeVisible();
     await expect(receipt).toHaveCount(1);
+    await expect(receipt).toHaveClass(/text-muted-foreground/);
     await expect(receipt).toContainText("The agent applied Mock Smart.");
     await expect(session.chat).not.toContainText(/finished without producing any output/i);
     const followsCommand = await receipt.evaluate((status, commandText) => {

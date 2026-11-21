@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { AgentLogo } from "@/components/agent-logo";
@@ -23,11 +23,7 @@ import {
   useModelChangeHandlers,
   type SessionModelsEntry,
 } from "@/components/task/model-selector-change-handlers";
-import {
-  PickerConfigurationFeedbackMessage,
-  usePickerConfigurationFeedback,
-} from "@/components/task/session-configuration-feedback";
-import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { usePickerConfigurationFeedback } from "@/components/task/session-configuration-feedback";
 import type { Agent, AgentProfile, AvailableAgent, TaskSession } from "@/lib/types/http";
 import type { SessionModelEntry } from "@/lib/state/slices/session-runtime/types";
 
@@ -388,7 +384,7 @@ function resolveModelSelectorInputs({
 /** Resolves available models, config options and current model from store state. */
 function useModelSelectorState(
   sessionId: string | null,
-  feedback: ReturnType<typeof usePickerConfigurationFeedback>["controller"],
+  feedback: ReturnType<typeof usePickerConfigurationFeedback>,
 ) {
   useSettingsData(true);
 
@@ -500,13 +496,7 @@ export const ModelSelector = memo(function ModelSelector({
   showAgentIcon = false,
 }: ModelSelectorProps) {
   const { t } = useTranslation();
-  const { isMobile } = useResponsiveBreakpoint();
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const feedbackAnchorRef = useRef<HTMLDivElement>(null);
-  const executionId = useAppStore((state) =>
-    sessionId ? state.taskSessions?.items[sessionId]?.agent_execution_id : undefined,
-  );
-  const feedback = usePickerConfigurationFeedback(pickerOpen, { sessionId, executionId });
+  const feedback = usePickerConfigurationFeedback(sessionId, "model");
   const {
     currentModel,
     modelOptions,
@@ -520,7 +510,7 @@ export const ModelSelector = memo(function ModelSelector({
     handleModelChange,
     handleConfigChange,
     handleConfigurationApply,
-  } = useModelSelectorState(sessionId, feedback.controller);
+  } = useModelSelectorState(sessionId, feedback);
   const { agentName, resolveConfigurationOptions } = useSessionModelResolver(
     sessionId,
     showAgentIcon,
@@ -543,9 +533,6 @@ export const ModelSelector = memo(function ModelSelector({
     restoredModelUnknown,
     modelOptionsCount: modelOptions.length,
   });
-  useEffect(() => {
-    if (hideSelector) setPickerOpen(false);
-  }, [hideSelector]);
   // Explicit "using fallback" signal: annotate the trigger so the user sees
   // the session is not on the configured start model.
   const currentModelSuffix = fallbackModel ? ` ${t("settings:modelFallbackSuffix")}` : undefined;
@@ -564,36 +551,23 @@ export const ModelSelector = memo(function ModelSelector({
   if (hideSelector) return null;
 
   return (
-    <div
-      ref={feedbackAnchorRef}
-      className="relative inline-flex"
-      data-testid="session-model-selector-feedback-anchor"
-    >
-      <ModelConfigSelector
-        providerIcon={providerIcon}
-        modelOptions={modelOptions}
-        currentModel={currentModel}
-        configOptions={configOptions}
-        onModelChange={onModelChange}
-        onConfigChange={onConfigChange}
-        onConfigurationApply={onConfigurationApply}
-        resolveConfigurationOptions={resolveConfigurationOptions}
-        placeholder={restoredModelUnknown ? t("common:unknown") : t("common:model")}
-        ariaLabel={t("task:sessionModelSettings")}
-        variant="compact"
-        popoverSide="top"
-        triggerClassName={triggerClassName}
-        triggerSummary="changed"
-        configBaseline={configBaseline}
-        currentModelSuffix={currentModelSuffix}
-        onOpenStateChange={setPickerOpen}
-      />
-      <PickerConfigurationFeedbackMessage
-        anchorRef={feedbackAnchorRef}
-        isMobile={isMobile}
-        message={feedback.message}
-        passive={feedback.passive}
-      />
-    </div>
+    <ModelConfigSelector
+      providerIcon={providerIcon}
+      modelOptions={modelOptions}
+      currentModel={currentModel}
+      configOptions={configOptions}
+      onModelChange={onModelChange}
+      onConfigChange={onConfigChange}
+      onConfigurationApply={onConfigurationApply}
+      resolveConfigurationOptions={resolveConfigurationOptions}
+      placeholder={restoredModelUnknown ? t("common:unknown") : t("common:model")}
+      ariaLabel={t("task:sessionModelSettings")}
+      variant="compact"
+      popoverSide="top"
+      triggerClassName={triggerClassName}
+      triggerSummary="changed"
+      configBaseline={configBaseline}
+      currentModelSuffix={currentModelSuffix}
+    />
   );
 });

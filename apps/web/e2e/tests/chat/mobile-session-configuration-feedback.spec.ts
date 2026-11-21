@@ -53,6 +53,13 @@ test.describe("Picker feedback on phone", () => {
       .toBeLessThan(beforeReadingScroll);
     const keyboardScrollTop = await transcript.evaluate((element) => element.scrollTop);
 
+    await testPage.getByTestId("session-mode-selector").tap();
+    const modeResponse = waitForHttp(testPage, "POST", /\/set-mode$/);
+    await testPage.getByTestId("session-mode-option-plan-mock").tap();
+    await modeResponse;
+    const feedback = transcript.getByTestId("session-configuration-feedback");
+    await expect(feedback).toContainText("Plan Mock");
+
     await trigger.tap();
     const applied = waitForHttp(
       testPage,
@@ -61,10 +68,9 @@ test.describe("Picker feedback on phone", () => {
     );
     await testPage.getByRole("option", { name: /Mock Smart/ }).tap();
     await applied;
-    const feedback = testPage.getByTestId("session-configuration-feedback");
-    await expect(feedback).toBeVisible();
-    await expect(feedback).toHaveAttribute("data-status", "applied");
-    await expect(feedback).toContainText("mock-smart");
+    await expect(feedback).toHaveCount(1);
+    await expect(feedback).toHaveClass(/text-muted-foreground/);
+    await expect(feedback).toContainText("Model: Mock Smart");
 
     await testPage.route("**/set-config-option", (route) =>
       route.fulfill({
@@ -86,7 +92,8 @@ test.describe("Picker feedback on phone", () => {
     });
     await testPage.getByRole("option", { name: /Mock Fast/ }).tap();
     await rejected;
-    await expect(feedback).toHaveAttribute("data-status", "rejected");
+    await expect(feedback).toHaveCount(1);
+    await expect(feedback).toContainText("Plan Mock");
     await expect(feedback).toContainText("phone picker rejected model");
     await testPage.getByTestId("model-config-sheet-close").tap();
     await expect(testPage.getByTestId("model-config-sheet-close")).toHaveCount(0);
@@ -94,39 +101,18 @@ test.describe("Picker feedback on phone", () => {
     await expect(composer).toContainText("keep this phone draft");
     expect(await transcript.evaluate((element) => element.scrollTop)).toBe(keyboardScrollTop);
 
-    const feedbackPanel = feedback.locator("xpath=..");
-    const feedbackBounds = await feedbackPanel.boundingBox();
-    const viewportWidth = await testPage.evaluate(
-      () => window.visualViewport?.width ?? window.innerWidth,
+    const hasHorizontalOverflow = await feedback.evaluate(
+      (element) => element.scrollWidth > element.clientWidth,
     );
-    expect(feedbackBounds).not.toBeNull();
-    expect(feedbackBounds!.y).toBeGreaterThanOrEqual(0);
-    expect(feedbackBounds!.y + feedbackBounds!.height).toBeLessThanOrEqual(420);
-    expect(feedbackBounds!.x + feedbackBounds!.width).toBeLessThanOrEqual(viewportWidth);
-    const panelMetrics = await feedbackPanel.evaluate((element) => ({
-      clientHeight: element.clientHeight,
-      overflowY: getComputedStyle(element).overflowY,
-      scrollHeight: element.scrollHeight,
-    }));
-    expect(panelMetrics.overflowY).toBe("auto");
-    const dismiss = testPage.getByTestId("session-configuration-feedback-dismiss");
+    expect(hasHorizontalOverflow).toBe(false);
+    const dismiss = transcript.getByTestId("session-configuration-feedback-dismiss");
+    await dismiss.scrollIntoViewIfNeeded();
     const bounds = await dismiss.boundingBox();
     expect(bounds).not.toBeNull();
     expect(bounds!.y).toBeGreaterThanOrEqual(0);
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(420);
     expect(bounds?.width).toBeGreaterThanOrEqual(44);
     expect(bounds?.height).toBeGreaterThanOrEqual(44);
-    if (panelMetrics.scrollHeight > panelMetrics.clientHeight) {
-      await feedbackPanel.evaluate((element) => {
-        element.scrollTop = element.scrollHeight;
-      });
-      await expect
-        .poll(() => feedbackPanel.evaluate((element) => element.scrollTop))
-        .toBeGreaterThan(0);
-      await feedbackPanel.evaluate((element) => {
-        element.scrollTop = 0;
-      });
-    }
     await dismiss.tap();
     await expect(feedback).toBeHidden();
     await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
@@ -211,6 +197,7 @@ test.describe("Picker feedback on phone", () => {
       .getByRole("status")
       .filter({ hasText: "The agent applied Mock Smart." });
     await expect(receipt).toHaveCount(1);
+    await expect(receipt).toHaveClass(/text-muted-foreground/);
     await expect(receipt).toContainText("The agent applied Mock Smart.");
     await expect(session.chat).not.toContainText(/finished without producing any output/i);
     const followsCommand = await receipt.evaluate((status, commandText) => {

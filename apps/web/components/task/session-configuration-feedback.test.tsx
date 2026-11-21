@@ -1,20 +1,75 @@
-import { act, cleanup, render, renderHook } from "@testing-library/react";
-import { createRef } from "react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { ApiError } from "@/lib/api/client";
-
-import {
-  PickerConfigurationFeedbackMessage,
-  usePickerConfigurationFeedback,
-} from "./session-configuration-feedback";
+import type { SessionConfigurationResult } from "@/lib/api/domains/session-api";
+import { sessionId, taskId, type TaskSession, type Turn } from "@/lib/types/http";
+import { usePickerConfigurationFeedback } from "./session-configuration-feedback";
 
 const SESSION_A = "session-a";
 const SESSION_B = "session-b";
-const EXECUTION_1 = "execution-1";
-const EXECUTION_2 = "execution-2";
-const MODEL_B = "model-b";
-const SAVE_PERSISTENCE_ERROR = "failed to persist session runtime config";
+const EXECUTION = "execution-1";
+const SUBSEQUENT_EXECUTION = "execution-2";
+const TIME = "2026-11-21T10:00:00.000Z";
+const model = { configId: "model", label: "Model", requested: "sonnet" };
+const effort = { configId: "effort", label: "Reasoning", requested: "high" };
+
+function session(id: string, executionId: string): TaskSession {
+  return {
+    id: sessionId(id),
+    task_id: taskId("task-1"),
+    agent_execution_id: executionId,
+    state: "WAITING_FOR_INPUT",
+    started_at: TIME,
+    updated_at: TIME,
+  };
+}
+
+function startedTurn(id: string, at: string): Turn {
+  return {
+    id,
+    session_id: sessionId(SESSION_A),
+    task_id: taskId("task-1"),
+    started_at: at,
+    created_at: at,
+    updated_at: at,
+  };
+}
+
+function applied(
+  value: string,
+  executionId: string | undefined = EXECUTION,
+): SessionConfigurationResult {
+  return {
+    status: "applied",
+    requested: value,
+    effective: value,
+    confirmed: true,
+    execution_id: executionId,
+  };
+}
+
+function useTestPickerFeedback(owner: string) {
+  const feedback = usePickerConfigurationFeedback(owner, "model");
+  const store = useAppStoreApi();
+  return { feedback, store };
+}
+
+function mountFeedback() {
+  const view = renderHook(({ owner }) => useTestPickerFeedback(owner), {
+    wrapper: StateProvider,
+    initialProps: { owner: SESSION_A },
+  });
+  const { store } = view.result.current;
+  act(() => {
+    store.getState().setTaskSession(session(SESSION_A, EXECUTION));
+    store.getState().setTaskSession(session(SESSION_B, EXECUTION));
+  });
+  return {
+    ...view,
+    rows: (id = SESSION_A) => store.getState().configurationFeedback.bySessionId[id] ?? [],
+  };
+}
 
 afterEach(() => {
   cleanup();
@@ -22,320 +77,107 @@ afterEach(() => {
 });
 
 describe("picker configuration feedback", () => {
-  it("expires a confirmed result after one visible second and pauses while the picker is open", () => {
+  it("keeps a settled result across a pause and binds late results to their initiating turn", () => {
     vi.useFakeTimers();
-    const { result, rerender } = renderHook(
-      ({ open }) =>
-        usePickerConfigurationFeedback(open, {
-          sessionId: SESSION_A,
-          executionId: EXECUTION_1,
-        }),
-      { initialProps: { open: true } },
-    );
-
+    const { result, rows } = mountFeedback();
+    const { feedback, store } = result.current;
     act(() => {
-      const id = result.current.controller.begin();
-      result.current.controller.showResult(id, "Model", MODEL_B, {
-        status: "applied",
-        requested: MODEL_B,
-        effective: MODEL_B,
-        confirmed: true,
-        execution_id: EXECUTION_1,
-      });
+      store.getState().addTurn(startedTurn("first", TIME));
+      feedback.showChanges(feedback.begin(), [{ ...model, result: applied("sonnet") }]);
+      vi.advanceTimersByTime(20_000);
     });
-
-    expect(result.current.feedback?.status).toBe("applied");
-    act(() => vi.advanceTimersByTime(1500));
-    expect(result.current.feedback?.status).toBe("applied");
-
-    rerender({ open: false });
-    act(() => vi.advanceTimersByTime(999));
-    expect(result.current.feedback?.status).toBe("applied");
-    act(() => vi.advanceTimersByTime(1));
-    expect(result.current.feedback).toBeUndefined();
-  });
-
-  it("expires after only the remaining visible time when the picker is reopened", () => {
-    vi.useFakeTimers();
-    const { result, rerender } = renderHook(
-      ({ open }) =>
-        usePickerConfigurationFeedback(open, {
-          sessionId: SESSION_A,
-          executionId: EXECUTION_1,
-        }),
-      { initialProps: { open: false } },
-    );
+    expect(rows()[0].entries).toEqual([
+      { configId: "model", text: "Model: sonnet", dismissible: false },
+    ]);
 
     act(() => {
-      const id = result.current.controller.begin();
-      result.current.controller.showResult(id, "Model", MODEL_B, {
-        status: "applied",
-        requested: MODEL_B,
-        effective: MODEL_B,
-        confirmed: true,
-        execution_id: EXECUTION_1,
-      });
-    });
-    act(() => vi.advanceTimersByTime(400));
-    rerender({ open: true });
-    act(() => vi.advanceTimersByTime(1_000));
-    rerender({ open: false });
-    act(() => vi.advanceTimersByTime(599));
-    expect(result.current.feedback?.status).toBe("applied");
-    act(() => vi.advanceTimersByTime(1));
-    expect(result.current.feedback).toBeUndefined();
-  });
-
-  it("ignores an obsolete result after a newer picker action", () => {
-    const { result } = renderHook(() => usePickerConfigurationFeedback(false));
-    let firstId = 0;
-    act(() => {
-      firstId = result.current.controller.begin();
-      result.current.controller.begin();
-      result.current.controller.showResult(firstId, "Model", "old", {
-        status: "applied",
-        requested: "old",
-        effective: "old",
-        confirmed: true,
-      });
-    });
-    expect(result.current.feedback).toBeUndefined();
-  });
-
-  it("shows uncertainty as a dismissible result", () => {
-    const { result } = renderHook(() => usePickerConfigurationFeedback(false));
-    act(() => {
-      const id = result.current.controller.begin();
-      result.current.controller.showResult(id, "Model", "model-b");
-    });
-    expect(result.current.feedback?.status).toBe("unconfirmed");
-    act(() => result.current.dismiss());
-    expect(result.current.feedback).toBeUndefined();
-  });
-});
-
-describe("picker configuration feedback scope", () => {
-  it("does not let a delayed success or failure cross a session or execution change", () => {
-    const { result, rerender } = renderHook(
-      ({ scope }) => usePickerConfigurationFeedback(false, scope),
-      { initialProps: { scope: { sessionId: SESSION_A, executionId: EXECUTION_1 } } },
-    );
-    const oldSessionController = result.current.controller;
-    let oldSessionRequest = 0;
-    act(() => {
-      oldSessionRequest = oldSessionController.begin();
-    });
-
-    rerender({ scope: { sessionId: SESSION_B, executionId: EXECUTION_1 } });
-    act(() => {
-      oldSessionController.showResult(oldSessionRequest, "Model", "old-model", {
-        status: "applied",
-        requested: "old-model",
-        effective: "old-model",
-        confirmed: true,
-        execution_id: EXECUTION_1,
-      });
-    });
-    expect(result.current.feedback).toBeUndefined();
-
-    const oldExecutionController = result.current.controller;
-    let oldExecutionRequest = 0;
-    act(() => {
-      oldExecutionRequest = oldExecutionController.begin();
-    });
-    rerender({ scope: { sessionId: SESSION_B, executionId: EXECUTION_2 } });
-    act(() => {
-      oldExecutionController.showError(
-        oldExecutionRequest,
-        "Model",
-        "old-model",
-        new Error("old execution failed"),
-      );
-    });
-    expect(result.current.feedback).toBeUndefined();
-  });
-
-  it("requires a matching execution identity for live confirmation", () => {
-    const { result } = renderHook(() =>
-      usePickerConfigurationFeedback(false, {
-        sessionId: "session-a",
-        executionId: EXECUTION_2,
-      }),
-    );
-    act(() => {
-      const id = result.current.controller.begin();
-      result.current.controller.showResult(id, "Model", MODEL_B, {
-        status: "applied",
-        requested: MODEL_B,
-        effective: MODEL_B,
-        confirmed: true,
-        execution_id: EXECUTION_1,
-      });
-    });
-    expect(result.current.feedback).toBeUndefined();
-
-    act(() => {
-      const id = result.current.controller.begin();
-      result.current.controller.showResult(id, "Model", MODEL_B, {
-        status: "applied",
-        requested: MODEL_B,
-        effective: MODEL_B,
-        confirmed: true,
-      });
-    });
-    expect(result.current.feedback?.status).toBe("unconfirmed");
-  });
-
-  it("keeps transport failures unconfirmed", () => {
-    const { result } = renderHook(() => usePickerConfigurationFeedback(false));
-    act(() => {
-      const id = result.current.controller.begin();
-      result.current.controller.showError(id, "Model", "model-b", new Error("request timed out"));
-    });
-    expect(result.current.feedback?.status).toBe("unconfirmed");
-  });
-});
-
-describe("picker configuration outcome summaries", () => {
-  it("shows a deferred persistence failure without implying the setting was applied", () => {
-    const anchorRef = createRef<HTMLDivElement>();
-    const { result } = renderHook(() =>
-      usePickerConfigurationFeedback(false, {
-        sessionId: SESSION_A,
-        executionId: EXECUTION_1,
-      }),
-    );
-    act(() => {
-      const id = result.current.controller.begin();
-      result.current.controller.showResult(id, "Model", MODEL_B, {
-        status: "persistence_failed",
-        requested: MODEL_B,
-        confirmed: false,
-      });
-    });
-
-    expect(result.current.feedback?.status).toBe("persistence_failed");
-    const view = render(
-      <PickerConfigurationFeedbackMessage
-        anchorRef={anchorRef}
-        isMobile={false}
-        message={result.current.message}
-        passive={result.current.passive}
-      />,
-    );
-    expect(view.container.textContent).toContain("could not be saved");
-    expect(view.container.textContent).not.toContain("applied");
-  });
-
-  it("shows the confirmed value and the unconfirmed option in a mixed result", () => {
-    const anchorRef = createRef<HTMLDivElement>();
-    const { result } = renderHook(() =>
-      usePickerConfigurationFeedback(false, {
-        sessionId: SESSION_A,
-        executionId: EXECUTION_1,
-      }),
-    );
-    act(() => {
-      const id = result.current.controller.begin();
-      result.current.controller.showChanges(id, [
-        {
-          label: "Model",
-          requested: MODEL_B,
-          result: {
-            status: "applied",
-            requested: MODEL_B,
-            effective: MODEL_B,
-            confirmed: true,
-            execution_id: EXECUTION_1,
-          },
-        },
-        {
-          label: "Thinking",
-          requested: "high",
-          result: { status: "unconfirmed", requested: "high", confirmed: false },
-        },
+      const pending = feedback.begin();
+      store.getState().addTurn(startedTurn("next", "2026-11-21T10:00:30.000Z"));
+      store.getState().addTurn(startedTurn("older", "2026-11-21T09:59:00.000Z"));
+      feedback.showChanges(pending, [{ ...effort, result: applied("high") }], vi.fn());
+      feedback.showChanges(feedback.begin(), [
+        { ...model, requested: "opus", result: applied("opus") },
       ]);
     });
 
-    expect(result.current.feedback?.status).toBe("mixed");
-    const view = render(
-      <PickerConfigurationFeedbackMessage
-        anchorRef={anchorRef}
-        isMobile={false}
-        message={result.current.message}
-        passive={result.current.passive}
-      />,
-    );
-    expect(view.container.textContent).toContain(`Model: ${MODEL_B}`);
-    expect(view.container.textContent).toContain("Thinking: high");
+    expect(rows().map((row) => row.turnId)).toEqual(["first", "next"]);
+    expect(rows()[0].entries.map((entry) => entry.text)).toEqual([
+      "Model: sonnet",
+      "Reasoning: high",
+    ]);
+    expect(rows()[0].retry).toBeUndefined();
+    expect(rows()[1].entries.map((entry) => entry.text)).toEqual(["Model: opus"]);
   });
-});
 
-describe("picker partial persistence feedback", () => {
-  it("keeps a live-but-unsaved base result visible when a later option is rejected", () => {
-    const anchorRef = createRef<HTMLDivElement>();
-    const { result } = renderHook(() =>
-      usePickerConfigurationFeedback(false, {
-        sessionId: SESSION_A,
-        executionId: EXECUTION_1,
-      }),
-    );
-    const modelSaveError = new ApiError(SAVE_PERSISTENCE_ERROR, 500, {
-      error: SAVE_PERSISTENCE_ERROR,
-      configuration_result: {
-        status: "persistence_failed",
-        config_id: "model",
-        requested: MODEL_B,
-        effective: MODEL_B,
-        confirmed: true,
-        execution_id: EXECUTION_1,
-      },
+  it("drops an obsolete request and results from a different session or execution", () => {
+    const { result, rerender, rows } = mountFeedback();
+    const { feedback, store } = result.current;
+    act(() => {
+      const old = feedback.begin();
+      feedback.begin();
+      feedback.showChanges(old, [{ ...model, result: applied("sonnet") }]);
     });
-    const optionRejection = new ApiError("requested value is unsupported", 500, {
-      error: "requested value is unsupported",
-      configuration_result: {
-        status: "rejected",
-        config_id: "thinking",
-        requested: "high",
-        confirmed: false,
-        execution_id: EXECUTION_1,
-      },
+    expect(rows()).toEqual([]);
+
+    let pending = 0;
+    act(() => {
+      pending = feedback.begin();
+    });
+    rerender({ owner: SESSION_B });
+    act(() => feedback.showChanges(pending, [{ ...model, result: applied("sonnet") }]));
+    expect(rows(SESSION_A)).toEqual([]);
+    expect(rows(SESSION_B)).toEqual([]);
+
+    act(() => {
+      pending = feedback.begin();
+      store.getState().setTaskSession(session(SESSION_B, SUBSEQUENT_EXECUTION));
+      feedback.showChanges(pending, [
+        { ...model, error: new Error("previous execution timed out") },
+      ]);
+    });
+    expect(rows(SESSION_B)).toEqual([]);
+  });
+
+  it("reports missing execution evidence and transport errors as unconfirmed", () => {
+    const { result, rows } = mountFeedback();
+    const { feedback } = result.current;
+    act(() => {
+      feedback.showChanges(feedback.begin(), [
+        {
+          ...model,
+          result: { ...applied("sonnet"), execution_id: undefined },
+        },
+        {
+          ...effort,
+          error: new Error("request timed out"),
+        },
+      ]);
+    });
+    expect(rows()[0].entries.map((entry) => entry.text)).toEqual([
+      "Could not confirm Model: sonnet.",
+      "Could not confirm Reasoning: high. request timed out",
+    ]);
+  });
+
+  it("keeps a live-but-unsaved model and a rejected option readable in one result", () => {
+    const { result, rows } = mountFeedback();
+    const { feedback } = result.current;
+    const notSaved = new ApiError("could not write the preference", 500, {
+      configuration_result: { ...applied("sonnet"), status: "persistence_failed" },
+    });
+    const rejected = new ApiError("requested value is unsupported", 500, {
+      configuration_result: { status: "rejected", requested: "high", confirmed: false },
     });
     act(() => {
-      const id = result.current.controller.begin();
-      result.current.controller.showChanges(
-        id,
-        [
-          {
-            label: "Model",
-            requested: MODEL_B,
-            result:
-              modelSaveError.body &&
-              (modelSaveError.body as { configuration_result: never }).configuration_result,
-            error: modelSaveError,
-          } as never,
-          {
-            label: "Thinking",
-            requested: "high",
-            result: (optionRejection.body as { configuration_result: never }).configuration_result,
-            error: optionRejection,
-          } as never,
-        ],
-        { label: "Thinking", value: "high", error: optionRejection },
-      );
+      feedback.showChanges(feedback.begin(), [
+        { ...model, error: notSaved },
+        { ...effort, error: rejected },
+      ]);
     });
 
-    const view = render(
-      <PickerConfigurationFeedbackMessage
-        anchorRef={anchorRef}
-        isMobile={false}
-        message={result.current.message}
-        passive={result.current.passive}
-      />,
-    );
-    expect(view.container.textContent).toContain(`Model: ${MODEL_B} applied`);
-    expect(view.container.textContent).toContain("could not be saved");
-    expect(view.container.textContent).toContain("Thinking: high");
-    expect(view.container.textContent).toContain("requested value is unsupported");
+    expect(rows()[0].entries.map((entry) => entry.text)).toEqual([
+      "Model: sonnet applied, but it could not be saved. could not write the preference",
+      "Could not apply Reasoning: high. requested value is unsupported",
+    ]);
   });
 });

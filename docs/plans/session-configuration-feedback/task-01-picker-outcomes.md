@@ -19,6 +19,9 @@ system_design:
 
 # Task 01 Picker outcomes and selector feedback
 
+This work order records the original picker implementation. [Task 03](task-03-muted-transcript-feedback.md)
+owns the revised presentation.
+
 ## Scope
 
 Return the known outcome from the existing session setter. Keep the existing

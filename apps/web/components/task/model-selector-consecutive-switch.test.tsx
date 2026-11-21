@@ -69,6 +69,9 @@ const mocks = vi.hoisted(() => {
       } as Record<string, unknown>,
     },
     settingsAgents: { items: [] },
+    turns: { bySession: {} },
+    quickChat: { sessions: [] },
+    recordSessionConfigurationFeedback: vi.fn(),
     taskSessions: {
       items: {
         [SESSION_ID]: {
@@ -103,8 +106,9 @@ const FABLE = "claude-fable-5[1m]";
 
 vi.mock("@/components/state-provider", async () => {
   const { useEffect, useReducer } = await import("react");
+  const store = { getState: () => mocks.appState };
   return {
-    useAppStoreApi: () => ({ getState: () => mocks.appState }),
+    useAppStoreApi: () => store,
     useAppStore: (selector: (state: typeof mocks.appState) => unknown) => {
       const [, force] = useReducer((count: number) => count + 1, 0);
       useEffect(() => {

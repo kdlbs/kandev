@@ -105,10 +105,13 @@ test.describe("Chat model selector — RPC failure", () => {
     await expect(smartRow).toBeVisible({ timeout: 5_000 });
     await smartRow.click();
 
-    const feedback = testPage.getByTestId("session-configuration-feedback");
+    const feedback = session
+      .activeChat()
+      .locator(".chat-message-list")
+      .getByTestId("session-configuration-feedback");
     await expect(feedback).toBeVisible({ timeout: 5_000 });
     await expect(feedback).toHaveAttribute("role", "status");
-    await expect(feedback).toHaveAttribute("data-status", "unconfirmed");
+    await expect(feedback).toContainText("Could not confirm");
     await expect(feedback).toContainText(backendErrorMessage);
     await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
 
