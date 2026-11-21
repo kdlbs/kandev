@@ -16,6 +16,7 @@ owners:
 | -------- | ----------------------- |
 | .1, .3   | `lifecycle.AgentExecution.AgentctlURL` in `agent/runtime/lifecycle/types.go` |
 | .2       | `lifecycle.Manager.restoreRecoveredFailedExecution` in `manager_interaction.go` |
+| .4       | `lifecycle.StreamManager.replayRecoveredDelivery` and `recoveredReplayClient` in `durable_delivery_stream.go`, with acknowledgement through `delivery_journal_releaser.go` |
 
 ## Lock order
 
@@ -53,6 +54,21 @@ client, and the next prompt fails because the agentctl client is unavailable.
 That prompt failure is accepted in place of the deadlock that holding the
 lease across the store lock caused.
 
+Recovered replay uses the same callbacks as live delivery. A replayed error
+completion can reach `retainedPromptFailureExecutionEligible`, which takes its
+own lease. The outer replay releases its lease before it invokes callbacks.
+
+`recoveredReplayClient` takes a short lease for each page read, delivery status
+read, and synchronous acknowledgement. Every request checks that the original
+client is still installed and open. The journal releaser waits for SQL
+durability before the acknowledgement takes the lease. Ownership checks,
+projection, acknowledgement scheduling, and lifecycle callbacks run outside
+the lease.
+
+A fetched page can finish projection under the existing owner checks. If stop
+or replacement retires the client, the next synchronous request returns an
+error. A later recovery starts from the saved SQL cursor.
+
 ## Verification
 
 Lifecycle unit tests hold a read lease, queue a writer, and require
@@ -65,3 +81,8 @@ pending detach and clears after detach finishes. A recovery-consumer test
 checks lease availability before readiness persistence, with separate status
 error, stopped-process, cancellation, and missing-client cases. No agent process
 is started.
+
+Replay tests assert that the lifecycle callback runs outside the lease. They
+replace or close the client after a page read and check that duplicate
+acknowledgement and expired-cursor recovery reject the retired client. A new
+replay can still acknowledge the persisted sequence.

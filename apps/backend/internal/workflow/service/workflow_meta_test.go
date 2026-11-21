@@ -29,7 +29,7 @@ func TestGetWorkflowMeta_ReturnsProfileAndPromptInOneRead(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "profile-42", meta.AgentProfileID)
 	assert.Equal(t, "Always keep CI green.", meta.Prompt)
-	assert.Equal(t, 1, provider.getWorkflowCalls)
+	assert.Equal(t, int64(1), provider.getWorkflowCalls.Load())
 
 	// Thin wrappers share the batched path but each call still hits the provider
 	// once when no request cache is present (as expected outside orchestrator).
@@ -40,7 +40,7 @@ func TestGetWorkflowMeta_ReturnsProfileAndPromptInOneRead(t *testing.T) {
 	prompt, err := svc.GetWorkflowPrompt(context.Background(), "wf-meta")
 	require.NoError(t, err)
 	assert.Equal(t, "Always keep CI green.", prompt)
-	assert.Equal(t, 3, provider.getWorkflowCalls)
+	assert.Equal(t, int64(3), provider.getWorkflowCalls.Load())
 }
 
 func TestGetWorkflowMeta_PropagatesMissingWorkflow(t *testing.T) {
@@ -50,5 +50,5 @@ func TestGetWorkflowMeta_PropagatesMissingWorkflow(t *testing.T) {
 
 	_, err := svc.GetWorkflowMeta(context.Background(), "missing")
 	require.Error(t, err)
-	assert.Equal(t, 1, provider.getWorkflowCalls)
+	assert.Equal(t, int64(1), provider.getWorkflowCalls.Load())
 }

@@ -276,6 +276,7 @@
   "fallbackNext": "ƒàĺĺƀàćķ: ńēxţ",
   "fallbackModel": "ƒàĺĺƀàćķ: {{model}}",
   "modelRequiredForAllProfiles": "Ḿōďēĺ ĩś ŕēqũĩŕēď ƒōŕ àĺĺ ƥŕōƒĩĺēś.",
+  "claudeExactModelAliasConflict": "Ćĥōōśē à ƒũĺĺ ḿōďēĺ ĨĎ ĩń Śţàŕţ ḿōďēĺ, ōŕ ŕēḿōvē {{envVar}} ƒŕōḿ Ēńvĩŕōńḿēńţ Vàŕĩàƀĺēś.",
   "noAuthHintLogin": "Ćĺĩćķ Ōƥēń ţēŕḿĩńàĺ ţō śĩĝń ĩń, ţĥēń ŕēƒŕēśĥ.",
   "noAuthHintNotInstalled": "Ĩńśţàĺĺ ţĥē àĝēńţ ĆĹĨ, ţĥēń ćĺĩćķ Ŕēƒŕēśĥ.",
   "noAuthHintShell": "Ćĺĩćķ Ōƥēń ţēŕḿĩńàĺ ţō ĺàũńćĥ à śĥēĺĺ, ŕũń ţĥē àĝēńţ'ś śĩĝń-ĩń ćōḿḿàńď, ţĥēń ŕēƒŕēśĥ.",
