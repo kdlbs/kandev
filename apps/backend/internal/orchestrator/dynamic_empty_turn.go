@@ -32,7 +32,7 @@ type emptyTurnCompletion struct {
 }
 
 // routeDynamicEmptyTurn counts a normal end_turn completion with no assistant
-// output, reasoning, or tool activity as an unclassified failure of the
+// answer/plan output or tool activity as an unclassified failure of the
 // current dynamic candidate. It reports true only when a successor was
 // launched, in which case the caller skips the ordinary completion follow-up.
 // Every precondition failure leaves the completion untouched.
@@ -50,7 +50,7 @@ func (s *Service) routeDynamicEmptyTurn(
 	if completion.completeOutput {
 		return false
 	}
-	data := s.withPromptAttemptEvidence(completion.data)
+	data := s.withEmptyTurnEvidence(completion.data)
 	if !dynamicPreResultSafe(data) || data.AgentExecutionID == "" || data.PromptGeneration == 0 ||
 		!s.profileExecutionResolver.UnclassifiedPolicyEnabled(ctx, session.AgentProfileID, session.ExecutionProfileID) {
 		return false
@@ -100,6 +100,44 @@ func (s *Service) unclassifiedEmptyTurnEvidence(
 		routingerr.PhasePromptSend, promptUnclassifiedAttemptID(data), "", "", false,
 		data.EvidenceKnown, data.OutputObserved, data.EffectObserved,
 	)
+}
+
+// withEmptyTurnEvidence excludes reasoning only at a normal completion. Other
+// failure origins retain the conservative output fence, including reasoning.
+func (s *Service) withEmptyTurnEvidence(data watcher.AgentEventData) watcher.AgentEventData {
+	data = s.withPromptAttemptEvidence(data)
+	if !data.EvidenceKnown {
+		return data
+	}
+	evidence, ok := s.promptAttemptForSession(data.SessionID)
+	if !ok {
+		data.EvidenceKnown = false
+		return data
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	if !evidence.evidenceKnown || !evidence.promptIdentityMatchesLocked(data.AgentExecutionID, data.PromptGeneration) {
+		data.EvidenceKnown = false
+		return data
+	}
+	data.OutputObserved = evidence.nonReasoningOutput
+	data.EffectObserved = data.EffectObserved || evidence.effect
+	return data
+}
+
+func (s *Service) observePromptReasoning(sessionID, executionID string, promptGeneration uint64) {
+	evidence, ok := s.promptAttemptForSession(sessionID)
+	if !ok {
+		return
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	if !evidence.promptIdentityMatchesLocked(executionID, promptGeneration) {
+		return
+	}
+	evidence.output = true
+	evidence.providerDiagnosticCode = ""
+	evidence.providerDiagnosticText = ""
 }
 
 func (s *Service) markCountedEmptyTurn(data watcher.AgentEventData) {

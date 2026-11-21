@@ -160,13 +160,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		}
 	case streams.EventTypeReasoning:
 		observedOutput = strings.TrimSpace(payload.Data.Text) != ""
-		s.observePromptAttempt(
-			payload.SessionID,
-			eventExecutionID,
-			payload.Data.PromptGeneration,
-			observedOutput,
-			false,
-		)
+		if observedOutput {
+			s.observePromptReasoning(payload.SessionID, eventExecutionID, payload.Data.PromptGeneration)
+		}
 	case agentEventToolCall, agentEventToolUpdate:
 		observedEffect = true
 		s.observePromptAttempt(
@@ -180,7 +176,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	if eventType != agentEventToolCall {
 		s.observeContinuationActivity(ctx, taskID, sessionID, eventExecutionID, continuationActivityEventFrom(payload.Data))
 	}
-	if observedOutput || observedEffect {
+	if (observedOutput && eventType != streams.EventTypeReasoning) || observedEffect {
 		resetEvent := watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
 			AgentExecutionID: eventExecutionID, PromptGeneration: payload.Data.PromptGeneration,
@@ -550,10 +546,10 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		executionID = payload.AgentID
 	}
 	if sessionID != "" {
-		// Opt-in diagnostics use the transport type; OFF retains legacy attribution.
-		agentType := payload.AgentID
-		if s.config.ProviderKeywordContext && payload.AgentType != "" {
-			agentType = payload.AgentType
+		// Stream AgentID is an execution identity; classification uses the transport type.
+		agentType := payload.AgentType
+		if agentType == "" {
+			agentType = payload.AgentID
 		}
 		failure := watcher.AgentEventData{
 			TaskID:             taskID,
