@@ -54,6 +54,61 @@ func TestRegisterExecutionStopOwner_SuppressesOrphanCleanupAndRecordsForceEscala
 	require.Equal(t, executionTeardownIntentForce, claim.intent)
 }
 
+func TestRegisterExecutionReplacementStopOwner_AcceptsHeldSessionGuard(t *testing.T) {
+	svc := newCoordinatorStopTestService(
+		setupTestRepo(t),
+		newMockTaskRepo(),
+		&mockAgentManager{},
+	)
+	const (
+		sessionID   = "session-replacement-owner"
+		executionID = "execution-replacement-owner"
+	)
+	guard, release := svc.acquireCancelInFlightGuard(sessionID)
+	guard.Lock()
+	ctx := withCancelInFlightGuardHeldForSession(context.Background(), sessionID)
+	registered := svc.RegisterExecutionReplacementStopOwner(ctx, sessionID, executionID)
+	preservesTurn := svc.executionTeardownPreservesActiveTurn(sessionID, executionID)
+	guard.Unlock()
+	release()
+
+	require.True(t, registered, "a launch holding the session guard must still claim stop ownership")
+	require.True(t, preservesTurn, "replacement teardown must preserve the active turn")
+}
+
+func TestRegisterExecutionReplacementStopOwner_AcceptsReplacementGuardMarker(t *testing.T) {
+	const (
+		taskID      = "task-replacement-owner-resume"
+		sessionID   = "session-replacement-owner-resume"
+		executionID = "execution-replacement-owner-resume"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateCreated)
+	svc := newCoordinatorStopTestService(
+		repo,
+		newMockTaskRepo(),
+		&mockAgentManager{},
+	)
+	guard, release := svc.acquireCancelInFlightGuard(sessionID)
+	guard.Lock()
+	ctx := withCancelInFlightGuardHeldForSession(context.Background(), sessionID)
+	ctx = withExecutionReplacementStopOwnerGuardHeldForSession(ctx, sessionID)
+	attempt, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
+	require.NoError(t, err)
+	require.True(t, owner)
+	defer attempt.finish(svc.resumeAttemptStore())
+	launchCtx := cancellableResumeContext(attempt)
+	require.False(t, cancelInFlightGuardHeldForSession(launchCtx, sessionID),
+		"resume attempts must not carry general session-guard ownership into lifecycle work")
+	registered := svc.RegisterExecutionReplacementStopOwner(launchCtx, sessionID, executionID)
+	preservesTurn := svc.executionTeardownPreservesActiveTurn(sessionID, executionID)
+	guard.Unlock()
+	release()
+
+	require.True(t, registered, "resume launch must claim stop ownership while its caller holds the session guard")
+	require.True(t, preservesTurn, "replacement teardown must preserve the active turn")
+}
+
 // @covers AC-TASKS-RUNTIME-CLEANUP-001.1
 func TestRegisterExecutionStopOwner_ContendedGuardDoesNotBlock(t *testing.T) {
 	svc := newCoordinatorStopTestService(

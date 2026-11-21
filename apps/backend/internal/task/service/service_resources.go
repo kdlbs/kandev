@@ -85,8 +85,8 @@ func validateProviderScope(raw string) (string, error) {
 // requires a paired provider_repo_id, because the scope-isolated clone
 // layout needs both to build a unique path. A bare provider_repo_id with no
 // scope is fine — that's the normal shape for every built-in provider
-// (GitHub, GitLab, Azure DevOps), none of which resolve a provider
-// connection scope — and falls through to the legacy owner/name layout.
+// (GitHub, GitLab), neither of which resolves a provider connection scope —
+// and falls through to the legacy owner/name layout.
 func validateProviderScopeAndRepoIDPair(scope, repoID string) error {
 	if strings.TrimSpace(scope) != "" && strings.TrimSpace(repoID) == "" {
 		return fmt.Errorf("%w: provider_scope requires a paired provider_repo_id", ErrInvalidRepositorySettings)
@@ -440,6 +440,10 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 			postCommitErr = errors.Join(postCommitErr, err)
 		}
 	}
+	// The edge tables have no foreign key to tasks, so the cascade leaves them behind.
+	for _, task := range deletedTasks {
+		s.deleteDependencyEdgesForTask(ctx, task.ID)
+	}
 	var lateCleanupErr error
 	cleanups, lateCleanupErr = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
 	postCommitErr = errors.Join(postCommitErr, lateCleanupErr)
@@ -789,19 +793,38 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 	}
 
 	// Create workflow steps from template if specified
-	if req.WorkflowTemplateID != nil && *req.WorkflowTemplateID != "" && s.workflowStepCreator != nil {
+	if req.WorkflowTemplateID != nil && *req.WorkflowTemplateID != "" {
+		if s.workflowStepCreator == nil {
+			initErr := errors.New("workflow step creator is not configured")
+			return nil, s.rollbackVisibleWorkflowAfterTemplateFailure(ctx, workflow, initErr)
+		}
 		if err := s.workflowStepCreator.CreateStepsFromTemplate(ctx, workflow.ID, *req.WorkflowTemplateID); err != nil {
 			s.logger.Error("failed to create workflow steps from template",
 				zap.String("workflow_id", workflow.ID),
 				zap.String("template_id", *req.WorkflowTemplateID),
 				zap.Error(err))
-			// Don't fail workflow creation, just log the error
+			initErr := fmt.Errorf("failed to create workflow steps from template: %w", err)
+			return nil, s.rollbackVisibleWorkflowAfterTemplateFailure(ctx, workflow, initErr)
 		}
 	}
 
 	s.publishWorkflowEvent(ctx, events.WorkflowCreated, workflow)
 	s.logger.Info("workflow created", zap.String("workflow_id", workflow.ID), zap.String("name", workflow.Name))
 	return workflow, nil
+}
+
+func (s *Service) rollbackVisibleWorkflowAfterTemplateFailure(
+	ctx context.Context,
+	workflow *models.Workflow,
+	initErr error,
+) error {
+	if workflow.Hidden {
+		return initErr
+	}
+	if err := s.workflows.DeleteWorkflow(ctx, workflow.ID); err != nil {
+		return errors.Join(initErr, fmt.Errorf("failed to remove workflow after template initialization failure: %w", err))
+	}
+	return initErr
 }
 
 // GetWorkflow retrieves a workflow by ID
@@ -1441,6 +1464,13 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 		return nil, repoerrors.ErrTaskVersionConflict
 	}
 	updates := *req
+	if req.RemoteURL != nil {
+		if err := s.applyRepositoryRemoteURLUpdate(ctx, repository, &updates); err != nil {
+			return nil, err
+		}
+	} else {
+		updates.ObservedIdentity = nil
+	}
 	if req.LocalPath != nil {
 		localPath, pathErr := canonicalRepositoryLocalPath(*req.LocalPath)
 		if pathErr != nil {
@@ -1472,7 +1502,10 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 			}
 			updateErr = exact.UpdateRepositoryWithSecretBindingsIfUnchanged(ctx, repository, replacement, *req.ExpectedUpdatedAt)
 		} else {
-			updateErr = mutator.UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx, repository, replacement, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree})
+			updateErr = mutator.UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx, repository, replacement, taskrepo.RepositoryCheckoutIntent{
+				DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree,
+				RemoteURL: updates.RemoteURL, ObservedIdentity: updates.ObservedIdentity,
+			})
 		}
 		if updateErr != nil {
 			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(updateErr))
@@ -1487,7 +1520,10 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 			return nil, err
 		}
-	} else if err := s.repoEntities.UpdateRepositoryWithCheckoutIntent(ctx, repository, taskrepo.RepositoryCheckoutIntent{DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree}); err != nil {
+	} else if err := s.repoEntities.UpdateRepositoryWithCheckoutIntent(ctx, repository, taskrepo.RepositoryCheckoutIntent{
+		DefaultBranch: req.DefaultBranch, PullBeforeWorktree: req.PullBeforeWorktree,
+		RemoteURL: updates.RemoteURL, ObservedIdentity: updates.ObservedIdentity,
+	}); err != nil {
 		s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 		return nil, err
 	}

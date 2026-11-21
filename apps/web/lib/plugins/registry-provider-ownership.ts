@@ -3,7 +3,7 @@ export interface PluginProviderOwnershipSnapshot {
   declarations: Map<string, Set<string>>;
 }
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
-const CORE_PROVIDER_IDS = new Set(["github", "gitlab", "azure_devops"]);
+const CORE_PROVIDER_IDS = new Set(["github", "gitlab"]);
 
 /** Enforces manifest declaration, canonical IDs, and one active owner per provider. */
 export class PluginProviderOwnership {

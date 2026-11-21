@@ -35,13 +35,18 @@ type RuntimeStorageHealthDTO struct {
 	ObservedAt     *time.Time `json:"observed_at,omitempty"`
 	// AgeSeconds is the backend receipt age. Browsers add local monotonic
 	// elapsed time instead of comparing source and browser clocks.
-	AgeSeconds     int64                     `json:"age_seconds"`
-	WritePressure  bool                      `json:"write_pressure,omitempty"`
-	ProducerPaused bool                      `json:"producer_paused,omitempty"`
-	DeliveryState  string                    `json:"delivery_state,omitempty"`
-	FailureStorage *models.AgentErrorStorage `json:"failure_storage,omitempty"`
-	Revision       uint64                    `json:"revision"`
-	Epoch          uint64                    `json:"epoch"`
+	AgeSeconds int64 `json:"age_seconds"`
+	// PressureObservedAt and PressureAgeSeconds are the independent receipt for
+	// accepted delivery-health observations. A missing age means unknown, not
+	// fresh. A capacity sample never advances either field.
+	PressureObservedAt *time.Time                `json:"pressure_observed_at,omitempty"`
+	PressureAgeSeconds *int64                    `json:"pressure_age_seconds,omitempty"`
+	WritePressure      bool                      `json:"write_pressure,omitempty"`
+	ProducerPaused     bool                      `json:"producer_paused,omitempty"`
+	DeliveryState      string                    `json:"delivery_state,omitempty"`
+	FailureStorage     *models.AgentErrorStorage `json:"failure_storage,omitempty"`
+	Revision           uint64                    `json:"revision"`
+	Epoch              uint64                    `json:"epoch"`
 }
 
 // RuntimeStorageHealthProvider surfaces the lifecycle-owned observation

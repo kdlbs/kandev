@@ -10,6 +10,7 @@ const handleSendMessageMock = vi.fn();
 const mockState = {
   tasks: { activeTaskId: TASK_ID, activeSessionId: null },
   taskRemoval: { navigationRevision: 0 },
+  taskSessions: { items: {} },
   taskSessionsByTask: {
     itemsByTaskId: { [TASK_ID]: [{ id: SESSION_ID, state: "WAITING_FOR_INPUT" }] },
   },
@@ -18,6 +19,7 @@ const mockStoreApi = { getState: () => mockState };
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (select: (state: typeof mockState) => unknown) => select(mockState),
   useAppStoreApi: () => mockStoreApi,
+  useOptionalAppStoreApi: () => mockStoreApi,
 }));
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn(), updateToast: vi.fn() }),

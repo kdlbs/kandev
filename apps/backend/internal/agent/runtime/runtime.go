@@ -48,6 +48,7 @@ type DeliveryRecordEvidence = lifecycle.DeliveryRecordEvidence
 type DeliveryRecordSubmissionRequest = lifecycle.DeliveryRecordSubmissionRequest
 type DeliveryRecordSubmission = lifecycle.DeliveryRecordSubmission
 type RetainedPromptFailureError = lifecycle.RetainedPromptFailureError
+type RequestNotSentError = client.RequestNotSentError
 type RemoteRecoverySnapshot = lifecycle.RemoteRecoverySnapshot
 type WorkspaceRecoveryProjectionError = lifecycle.WorkspaceRecoveryProjectionError
 type BackgroundWorkloadProbeResult = client.ProbeResult
@@ -64,6 +65,9 @@ const (
 	BackgroundWorkloadProbeResultSettled = client.ProbeResultSettled
 	BackgroundWorkloadProbeResultUnknown = client.ProbeResultUnknown
 )
+
+// MetadataKeyTaskEnvironmentID identifies the environment bound to an executor runtime.
+const MetadataKeyTaskEnvironmentID = lifecycle.MetadataKeyTaskEnvironmentID
 
 type CursorMCPAuthenticationSpec = lifecycle.CursorMCPAuthenticationSpec
 type CursorMCPRetryResult = lifecycle.CursorMCPRetryResult

@@ -91,6 +91,7 @@
   "quickChatTerminalConnecting": "터미널에 연결 중...",
   "quickChatTerminalExited": "터미널이 종료되었습니다.",
   "quickChatTerminalExitedWithCode": "터미널이 코드 {{code}}로 종료되었습니다.",
+  "quickChatTerminalStartNewShell": "새 셸 시작",
   "quickChatAdd": "탭 추가 또는 전환",
   "reconnecting": "다시 연결 중",
   "reconnectingToKandev": "Kandev에 다시 연결 중",

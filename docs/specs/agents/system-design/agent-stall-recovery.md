@@ -146,6 +146,13 @@ execution/prompt generation before any subsequent user cancellation. Capture
 from in-memory or already authenticated state; do not perform provider I/O
 while holding the activity or cancellation lock.
 
+The same record may include bounded stream-stage counters and ages for adapter
+updates, agentctl writes, backend reads, and durable projection. An internal
+heartbeat is sent only when the backend requests that capability; retained
+older peers may omit it. Metadata is not a turn event or prompt progress.
+Unavailable or stale measurements remain unknown, and a later connection's
+projection counters cannot be replaced by an older connection.
+
 Allowlist: task/session/execution identity; prompt and harness generations;
 submission and stream identity when known; acceptance state; output/effect
 booleans; last-progress time and elapsed milliseconds; agent type; managed

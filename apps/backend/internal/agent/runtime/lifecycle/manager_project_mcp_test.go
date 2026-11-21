@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentruntime"
 	p "github.com/kandev/kandev/internal/mcp/profile"
 )
 
@@ -29,6 +30,7 @@ func TestMaterializeRuntimeProjectMCPForPiWritesProjectFile(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	agentConfig, ok := mgr.registry.Get("pi-acp")
 	if !ok {
 		t.Fatal("pi-acp agent missing from test registry")
@@ -72,6 +74,7 @@ func TestMaterializeRuntimeProjectMCPForCursorWritesProjectFile(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	agentConfig, ok := mgr.registry.Get("cursor-acp")
 	if !ok {
 		t.Fatal("cursor-acp agent missing from test registry")
@@ -132,18 +135,23 @@ func TestPromoteWorkspaceExecutionResetsCommandWhenProjectMCPFails(t *testing.T)
 		t.Fatal(err)
 	}
 	execution := &AgentExecution{
-		ID:             "exec-1",
-		TaskID:         "task-1",
-		SessionID:      "session-1",
-		AgentProfileID: "profile-1",
-		WorkspacePath:  workspace,
-		metadata:       map[string]interface{}{},
-		standalonePort: 45678,
+		ID:                   "exec-1",
+		TaskID:               "task-1",
+		SessionID:            "session-1",
+		AgentProfileID:       "previous-candidate",
+		OfficeAgentProfileID: "assignee",
+		WorkspacePath:        workspace,
+		metadata:             map[string]interface{}{},
+		standalonePort:       45678,
 	}
+	attachLegacyMCPRouteClient(execution)
+	writer := &captureExecutorRunningWriter{}
+	mgr.SetExecutorRunningWriter(writer)
 	req := &LaunchRequest{
-		TaskID:         "task-1",
-		SessionID:      "session-1",
-		AgentProfileID: "profile-1",
+		TaskID:             "task-1",
+		SessionID:          "session-1",
+		AgentProfileID:     "reviewer",
+		ExecutionProfileID: "selected-candidate",
 	}
 
 	if err := mgr.executionStore.Add(execution); err != nil {
@@ -152,6 +160,15 @@ func TestPromoteWorkspaceExecutionResetsCommandWhenProjectMCPFails(t *testing.T)
 	err := mgr.promoteWorkspaceExecution(context.Background(), execution, req)
 	if err == nil {
 		t.Fatal("expected promotion to fail when .pi/mcp.json cannot be written")
+	}
+	if execution.AgentProfileID != "previous-candidate" {
+		t.Fatalf("AgentProfileID = %q, want previous-candidate after failed promotion", execution.AgentProfileID)
+	}
+	if execution.OfficeAgentProfileID != "assignee" {
+		t.Fatalf("OfficeAgentProfileID = %q, want assignee after failed promotion", execution.OfficeAgentProfileID)
+	}
+	if writer.running != nil {
+		t.Fatalf("failed promotion persisted executor-running state: %#v", writer.running)
 	}
 	if execution.AgentCommand != "" {
 		t.Fatalf("AgentCommand = %q, want reset to empty", execution.AgentCommand)
@@ -209,9 +226,11 @@ func TestPromoteWorkspaceExecutionUsesResolvedExecutionProfileForCursorAuth(t *t
 		WorkspacePath:        workspace,
 		WorkspaceSourceRoots: []string{secondaryRepository},
 		ExecutorType:         "worktree",
+		RuntimeName:          agentruntime.RuntimeStandalone,
 		metadata:             map[string]interface{}{},
 		standalonePort:       45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	execution.setMetadataValue("executor_mcp_policy", mcpconfig.Policy{AllowHTTP: true})
 	req := &LaunchRequest{
 		TaskID:             "task-1",
@@ -278,6 +297,7 @@ func TestMaterializeRuntimeProjectMCP_DiscoversPluginServers(t *testing.T) {
 		metadata:       map[string]interface{}{},
 		standalonePort: 45678,
 	}
+	attachLegacyMCPRouteClient(execution)
 	agentConfig, ok := mgr.registry.Get("cursor-acp")
 	if !ok {
 		t.Fatal("cursor-acp agent missing from test registry")

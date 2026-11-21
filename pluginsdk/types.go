@@ -102,7 +102,8 @@ type WebhookResponse struct {
 // AgentToolContext is the host-owned invocation identity. Surface is one of
 // kanban-task, office-task, managed-conversation, automation, coordinator, or
 // external. TaskID, SessionID, and WorkspaceID are empty for an external
-// instance read; task-backed contexts are always derived from the running
+// instance read; an external workspace read carries only the host-verified
+// WorkspaceID. Task-backed contexts are always derived from the running
 // execution, never from tool arguments.
 type AgentToolContext struct {
 	TaskID               string
@@ -201,22 +202,26 @@ func webhookResponseFromProto(p *pluginv1.WebhookResponse) *WebhookResponse {
 // authorizing an action request. Plugins must treat Body as untrusted input
 // and use this context for all authority decisions.
 type VerifiedActionContext struct {
-	ActorID      string
-	WorkspaceID  string
-	TaskID       string
-	RepositoryID string
-	SessionID    string
-	HeadBranch   string
+	ActorID                  string
+	WorkspaceID              string
+	TaskID                   string
+	RepositoryID             string
+	SessionID                string
+	HeadBranch               string
+	NotificationProviderID   string
+	NotificationFormatterKey string
 }
 
 func (c VerifiedActionContext) toProto() *pluginv1.VerifiedActionContext {
 	return &pluginv1.VerifiedActionContext{
-		ActorId:      c.ActorID,
-		WorkspaceId:  c.WorkspaceID,
-		TaskId:       c.TaskID,
-		RepositoryId: c.RepositoryID,
-		SessionId:    c.SessionID,
-		HeadBranch:   c.HeadBranch,
+		ActorId:                  c.ActorID,
+		WorkspaceId:              c.WorkspaceID,
+		TaskId:                   c.TaskID,
+		RepositoryId:             c.RepositoryID,
+		SessionId:                c.SessionID,
+		HeadBranch:               c.HeadBranch,
+		NotificationProviderId:   c.NotificationProviderID,
+		NotificationFormatterKey: c.NotificationFormatterKey,
 	}
 }
 
@@ -225,12 +230,14 @@ func verifiedActionContextFromProto(p *pluginv1.VerifiedActionContext) VerifiedA
 		return VerifiedActionContext{}
 	}
 	return VerifiedActionContext{
-		ActorID:      p.GetActorId(),
-		WorkspaceID:  p.GetWorkspaceId(),
-		TaskID:       p.GetTaskId(),
-		RepositoryID: p.GetRepositoryId(),
-		SessionID:    p.GetSessionId(),
-		HeadBranch:   p.GetHeadBranch(),
+		ActorID:                  p.GetActorId(),
+		WorkspaceID:              p.GetWorkspaceId(),
+		TaskID:                   p.GetTaskId(),
+		RepositoryID:             p.GetRepositoryId(),
+		SessionID:                p.GetSessionId(),
+		HeadBranch:               p.GetHeadBranch(),
+		NotificationProviderID:   p.GetNotificationProviderId(),
+		NotificationFormatterKey: p.GetNotificationFormatterKey(),
 	}
 }
 

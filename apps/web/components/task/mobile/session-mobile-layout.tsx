@@ -11,6 +11,11 @@ import { TaskPlanPanel } from "../task-plan-panel";
 import { MobileChangesPanel } from "./mobile-changes-panel";
 import { SessionMobileReviewDialog } from "./session-mobile-review-dialog";
 import { TaskFilesPanel } from "../task-files-panel";
+import {
+  ROOT_ACTIVATE_EVENT,
+  ROOT_FOCUS_EVENT,
+  type RootActivationDetail,
+} from "../root-context-menu";
 import { PassthroughToolbar } from "../passthrough-toolbar";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
 import { MobileTerminalPane } from "./mobile-terminal-pane";
@@ -56,6 +61,36 @@ function useMobilePanelChangeHandler(
     },
     [handlePanelChangeAndClearSheet],
   );
+}
+
+/**
+ * Switches to the surface named by the shared root menu, then forwards the
+ * reveal only after the destination panel has mounted. The Files tree listens
+ * for the reveal event; dispatching it before that commit loses it.
+ */
+function useMobileRootActivation(
+  handlePanelChangeAndClearSheet: (panel: MobileSessionPanel) => void,
+  activePanel: MobileSessionPanel,
+) {
+  const pendingRootRevealRef = useRef<RootActivationDetail | null>(null);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<RootActivationDetail>).detail;
+      if (detail?.surface !== "files" && detail?.surface !== "changes") return;
+      pendingRootRevealRef.current = detail;
+      handlePanelChangeAndClearSheet(detail.surface);
+    };
+    window.addEventListener(ROOT_ACTIVATE_EVENT, handler);
+    return () => window.removeEventListener(ROOT_ACTIVATE_EVENT, handler);
+  }, [handlePanelChangeAndClearSheet]);
+
+  useEffect(() => {
+    const pending = pendingRootRevealRef.current;
+    if (!pending || activePanel !== pending.surface) return;
+    pendingRootRevealRef.current = null;
+    window.dispatchEvent(new CustomEvent(ROOT_FOCUS_EVENT, { detail: pending }));
+  }, [activePanel]);
 }
 
 export function useMobileReviewPanelFallback(
@@ -600,9 +635,11 @@ function MobileTopBarSticky(props: MobileTopBarStickyProps) {
 export function useMobilePanelHandlers({
   effectiveSessionId,
   handlePanelChange,
+  activePanel,
 }: {
   effectiveSessionId: string | null;
   handlePanelChange: (panel: MobileSessionPanel) => void;
+  activePanel: MobileSessionPanel;
 }) {
   const { toast } = useToast();
   const [selectedFile, setSelectedFile] = useState<OpenFileTab | null>(null);
@@ -685,6 +722,8 @@ export function useMobilePanelHandlers({
     },
     [handlePanelChange],
   );
+
+  useMobileRootActivation(handlePanelChangeAndClearSheet, activePanel);
 
   return {
     selectedFile,
@@ -799,7 +838,11 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     handleOpenFileFromChat,
     handleOpenFile,
     handlePanelChangeAndClearSheet,
-  } = useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
+  } = useMobilePanelHandlers({
+    effectiveSessionId,
+    handlePanelChange,
+    activePanel: currentMobilePanel,
+  });
   const handleCloseHistoricalDiff = useCallback(
     (target: HistoricalTurnDiffTarget) => {
       handlePanelChangeAndClearSheet("chat");

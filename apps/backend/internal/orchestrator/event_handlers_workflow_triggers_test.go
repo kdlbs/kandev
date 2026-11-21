@@ -434,7 +434,7 @@ func TestProcessOnEnter(t *testing.T) {
 
 		agentMgr := &mockAgentManager{isAgentRunning: true, promptDone: make(chan struct{})}
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-		svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+		svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "user queued msg", "", "user", false, nil); err != nil {
 			t.Fatalf("failed to seed queued message: %v", err)
@@ -481,7 +481,7 @@ func TestProcessOnEnter(t *testing.T) {
 
 		agentMgr := &mockAgentManager{isAgentRunning: true, promptDone: make(chan struct{})}
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-		svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+		svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 		step := workflowmove.OverlayStep(&wfmodels.WorkflowStep{
 			ID: "step2", WorkflowID: "wf1", Name: "Review", Position: 1,

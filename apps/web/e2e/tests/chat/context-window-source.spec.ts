@@ -79,9 +79,11 @@ test("context source help stays open when hovered", async ({
   await expect(contextUsage).toBeVisible();
   const compactionHelp = testPage.locator(`[id="${compactionHelpId}"]`);
   await expect(compactionHelp).toHaveCSS("opacity", "1");
+  await expect(compactionHelp).toContainText("Kandev infers this count from context usage drops");
   await expect(compactionHelp).toContainText(
-    "Copilot ACP usage is excluded because it can mix parent and subagent contexts",
+    "Missing samples or provider resets can affect accuracy",
   );
+  await expect(compactionHelp).not.toContainText("Copilot");
   await prCapture.screenshot("context-source-help", {
     caption: "Context source and inferred compaction count shown with their help visible",
   });

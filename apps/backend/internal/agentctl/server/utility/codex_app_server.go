@@ -19,6 +19,7 @@ import (
 const (
 	codexNPXExecutable        = "npx"
 	codexAppServerSubcommand  = "app-server"
+	codexPackageName          = "@openai/codex"
 	codexNpxYesFlag           = "--yes"
 	codexNpmPreferOfflineFlag = "--prefer-offline"
 	codexNpmPreferOnlineFlag  = "--prefer-online"
@@ -31,14 +32,19 @@ var codexPackageSpec = regexp.MustCompile(`^@openai/codex@[0-9]+\.[0-9]+\.[0-9]+
 // native protocol as task sessions. It accepts only the built-in Codex package
 // command because this endpoint crosses the agentctl process boundary.
 type CodexAppServerInferenceExecutor struct {
-	logger *zap.Logger
+	logger      *zap.Logger
+	preparation *managedRuntimePreparationState
 }
 
-func NewCodexAppServerInferenceExecutor(log *zap.Logger) *CodexAppServerInferenceExecutor {
+func NewCodexAppServerInferenceExecutor(log *zap.Logger, preparation ...*managedRuntimePreparationState) *CodexAppServerInferenceExecutor {
 	if log == nil {
 		log = zap.NewNop()
 	}
-	return &CodexAppServerInferenceExecutor{logger: log}
+	state := newManagedRuntimePreparationState()
+	if len(preparation) != 0 && preparation[0] != nil {
+		state = preparation[0]
+	}
+	return &CodexAppServerInferenceExecutor{logger: log, preparation: state}
 }
 
 func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*ProbeResponse, error) {
@@ -48,7 +54,13 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 	if strings.TrimSpace(req.InferenceConfig.WorkDir) == "" {
 		return &ProbeResponse{Error: "work_dir is required for Codex app-server probe"}, nil
 	}
-	if !req.InferenceConfig.LaunchWrapper.IsZero() || (req.ProfileContext && (len(req.InferenceConfig.CLIFlags) > 0 || len(req.InferenceConfig.CommandPrefix) > 0)) {
+	if !req.InferenceConfig.LaunchWrapper.IsZero() || len(req.InferenceConfig.CommandPrefix) > 0 {
+		return &ProbeResponse{
+			Error:       "profile launch settings are unsupported by the Codex app-server probe",
+			FailureCode: ProbeFailureUnsupportedContext,
+		}, nil
+	}
+	if len(req.InferenceConfig.CLIFlags) > 0 && !isManagedCodexAppServerCommand(req.InferenceConfig.Command) {
 		return &ProbeResponse{
 			Error:       "profile launch settings are unsupported by the Codex app-server probe",
 			FailureCode: ProbeFailureUnsupportedContext,
@@ -61,20 +73,40 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 		}
 		return &ProbeResponse{Error: err.Error()}, nil
 	}
+	prepared, preparationFailure := e.prepareManagedProbeRuntime(ctx, req)
+	if preparationFailure != nil {
+		return preparationFailure, nil
+	}
 	start := time.Now()
-	client, cleanupCommand, stderr, err := e.start(ctx, command, args, req.InferenceConfig)
+	client, cleanupCommand, stderr, launchedExecutable, launchArgs, launchEnv, err := e.startForProbe(ctx, command, args, req.InferenceConfig, prepared)
 	if err != nil {
+		if prepared != nil {
+			if closeErr := prepared.Close(); closeErr != nil {
+				e.preparation.retainOwner(prepared)
+			}
+		}
 		return &ProbeResponse{Error: fmt.Sprintf("start Codex app-server: %v", err), DurationMs: int(time.Since(start).Milliseconds())}, nil
 	}
 	var cleanupOnce sync.Once
 	cleanup := func() { cleanupOnce.Do(cleanupCommand) }
-	defer cleanup()
+	defer func() {
+		cleanup()
+		if prepared != nil {
+			if closeErr := prepared.Close(); closeErr != nil {
+				e.preparation.retainOwner(prepared)
+			}
+		}
+	}()
 	if err := initializeCodexAppServer(ctx, client); err != nil {
 		// Join the process and stderr copier before classifying its failure.
 		cleanup()
 		stderrTail := stderr.tail()
 		failureMessage := utilityUpstreamError(err, stderrTail)
 		failureCode := managedRuntimeProbeFailureCode(req.InferenceConfig.Command, stderrTail)
+		cacheEvidence := e.preparation.managedRuntimeCacheEvidenceForProbe(
+			ctx, req.AgentID, string(req.InferenceConfig.Protocol), req.InferenceConfig,
+			launchArgs, launchEnv, launchedExecutable, req.InferenceConfig.WorkDir, stderr, e.logger,
+		)
 		if req.ProfileContext {
 			failureMessage, failureCode = sanitizeProfileProbeFailure(err, stderrTail)
 			e.logger.Error("Codex app-server profile probe failed",
@@ -84,14 +116,23 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 			e.logger.Error("Codex app-server probe failed",
 				zap.String("agent_id", req.AgentID),
 				zap.Error(err),
-				zap.String("stderr", stderrTail))
+				zap.String("stderr", sanitizeProbeDiagnostic(stderrTail)))
+		}
+		if cacheEvidence != nil {
+			failureCode = ProbeFailureManagedRuntimeCacheIncomplete
 		}
 		return &ProbeResponse{
-			Success:     false,
-			Error:       failureMessage,
-			FailureCode: failureCode,
-			DurationMs:  int(time.Since(start).Milliseconds()),
+			Success:       false,
+			Error:         failureMessage,
+			FailureCode:   failureCode,
+			CacheEvidence: cacheEvidence,
+			DurationMs:    int(time.Since(start).Milliseconds()),
 		}, nil
+	}
+	if prepared != nil && !prepared.RepairPublished() {
+		if publishErr := e.preparation.publishProbeRepair(ctx, prepared, req, req.InferenceConfig); publishErr != nil {
+			e.logger.Warn("managed runtime Codex probe repair publication failed", zap.Error(publishErr))
+		}
 	}
 	var listed protocol.ModelListResponse
 	if err := client.Call(ctx, protocol.MethodModelList, protocol.ModelListParams{}, &listed); err != nil {
@@ -108,7 +149,7 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 			e.logger.Error("Codex app-server probe failed to list models",
 				zap.String("agent_id", req.AgentID),
 				zap.Error(err),
-				zap.String("stderr", stderrTail))
+				zap.String("stderr", sanitizeProbeDiagnostic(stderrTail)))
 		}
 		return &ProbeResponse{
 			Success:     false,
@@ -132,7 +173,20 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 		}
 		models = append(models, ProbeModel{ID: id, Name: name, Description: model.Description})
 	}
-	return &ProbeResponse{Success: true, AgentName: "OpenAI Codex app-server", AgentVersion: protocol.SupportedCodexVersion, Models: models, DurationMs: int(time.Since(start).Milliseconds())}, nil
+	if req.Preparation != nil {
+		e.preparation.retireProbeAttempt(req.Preparation.ProbeAttemptID)
+	}
+	response := &ProbeResponse{
+		Success: true, AgentName: "OpenAI Codex app-server",
+		Models: models, DurationMs: int(time.Since(start).Milliseconds()),
+	}
+	observer := &ACPInferenceExecutor{logger: e.logger, preparation: e.preparation}
+	response.RuntimeInfo = observer.collectRuntimeObservation(
+		ctx, req.RuntimeObservation, req.InferenceConfig.Command, nil,
+		launchArgs, launchEnv, launchedExecutable, req.InferenceConfig.WorkDir,
+		"",
+	)
+	return response, nil
 }
 
 func (e *CodexAppServerInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) (*PromptResponse, error) {
@@ -141,6 +195,9 @@ func (e *CodexAppServerInferenceExecutor) Execute(ctx context.Context, req *Prom
 	}
 	if strings.TrimSpace(req.InferenceConfig.WorkDir) == "" {
 		return &PromptResponse{Error: "work_dir is required for Codex app-server inference"}, nil
+	}
+	if len(req.InferenceConfig.CLIFlags) > 0 {
+		return &PromptResponse{Error: "codex app-server utility requires the built-in unwrapped command"}, nil
 	}
 	command, args, err := resolveCodexAppServerCommand(req.InferenceConfig)
 	if err != nil {
@@ -187,26 +244,50 @@ func (e *CodexAppServerInferenceExecutor) start(
 	args []string,
 	cfg *InferenceConfigDTO,
 ) (*protocol.Client, func(), *stderrBuffer, error) {
+	client, cleanup, stderr, _, _, _, err := e.startForProbe(ctx, command, args, cfg, nil)
+	return client, cleanup, stderr, err
+}
+
+func (e *CodexAppServerInferenceExecutor) startForProbe(
+	ctx context.Context,
+	command string,
+	args []string,
+	cfg *InferenceConfigDTO,
+	prepared *managedruntime.PreparedRuntime,
+) (*protocol.Client, func(), *stderrBuffer, string, []string, []string, error) {
 	args = append([]string(nil), args...)
+	args = append(args, cfg.CLIFlags...)
+	if prepared != nil {
+		var err error
+		var rewritten []string
+		rewritten, err = prepared.RewriteNpxCommand(append([]string{command}, args...))
+		if err == nil {
+			command, args = rewritten[0], rewritten[1:]
+		}
+		if err != nil {
+			return nil, nil, nil, "", nil, nil, err
+		}
+	}
 	if err := managedruntime.PrepareNPMProjectPrefix(args); err != nil {
-		return nil, nil, nil, fmt.Errorf("prepare managed npm project prefix: %w", err)
+		return nil, nil, nil, "", nil, nil, fmt.Errorf("prepare managed npm project prefix: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = cfg.WorkDir
-	cmd.Env = sanitizeEnvForAgent(cfg)
+	env := sanitizeEnvForAgent(cfg)
+	cmd.Env = env
 	configureACPCommand(cmd, e.logger)
 	stderr := &stderrBuffer{}
 	cmd.Stderr = stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, nil, stderr, fmt.Errorf("stdin pipe: %w", err)
+		return nil, nil, stderr, "", nil, nil, fmt.Errorf("stdin pipe: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, nil, stderr, fmt.Errorf("stdout pipe: %w", err)
+		return nil, nil, stderr, "", nil, nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, nil, stderr, fmt.Errorf("start: %w", err)
+		return nil, nil, stderr, "", nil, nil, fmt.Errorf("start: %w", err)
 	}
 	lifecycle, lifecycleErr := installACPCommandLifecycle(cmd)
 	if lifecycleErr != nil {
@@ -217,14 +298,14 @@ func (e *CodexAppServerInferenceExecutor) start(
 		_ = client.Close()
 		cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
 	})
-	return client, cleanup, stderr, nil
+	return client, cleanup, stderr, cmd.Path, args, env, nil
 }
 
 func resolveCodexAppServerCommand(cfg *InferenceConfigDTO) (string, []string, error) {
 	if cfg == nil {
 		return "", nil, errors.New("inference config is required")
 	}
-	if cfg.OperatorDefined || !cfg.LaunchWrapper.IsZero() || len(cfg.CommandPrefix) != 0 || len(cfg.CLIFlags) != 0 {
+	if cfg.OperatorDefined || !cfg.LaunchWrapper.IsZero() || len(cfg.CommandPrefix) != 0 {
 		return "", nil, errors.New("codex app-server utility requires the built-in unwrapped command")
 	}
 	args := cfg.Command
@@ -251,10 +332,8 @@ func isLegacyManagedCodexAppServerCommand(args []string) bool {
 }
 
 func isManagedCodexAppServerCommand(args []string) bool {
-	return len(args) == 7 && args[0] == codexNPXExecutable && args[1] == codexNpxYesFlag &&
-		(args[2] == codexNpmPreferOfflineFlag || args[2] == codexNpmPreferOnlineFlag) &&
-		args[3] == codexNpmPrefixFlag &&
-		args[4] == managedruntime.NPMProjectPrefix && codexPackageSpec.MatchString(args[5]) && args[6] == codexAppServerSubcommand
+	invocation, err := managedruntime.ParseManagedNPMInvocation(args, codexPackageName, []string{codexAppServerSubcommand})
+	return err == nil && len(invocation.AgentArgs()) == 0
 }
 
 func initializeCodexAppServer(ctx context.Context, client *protocol.Client) error {
@@ -401,4 +480,31 @@ func codexUtilityMCPConfig(servers []MCPServerDTO) map[string]any {
 func utilityUpstreamError(err error, stderr string) string {
 	_ = stderr // raw process diagnostics remain in the agentctl log only.
 	return err.Error()
+}
+
+func (e *CodexAppServerInferenceExecutor) prepareManagedProbeRuntime(ctx context.Context, req *ProbeRequest) (*managedruntime.PreparedRuntime, *ProbeResponse) {
+	if req == nil || req.InferenceConfig == nil {
+		return nil, nil
+	}
+	if selected, _ := e.preparation.selectProbeRuntime(ctx, req, req.InferenceConfig); selected != nil {
+		return selected, nil
+	}
+	if req.Preparation == nil {
+		return nil, nil
+	}
+	packageSpec, ok := managedRuntimeProbePackageForAgent(req.AgentID, req.InferenceConfig.Command)
+	if !ok || !e.preparation.validatesDirective(req.Preparation, req.AgentID, string(req.InferenceConfig.Protocol), req.InferenceConfig) {
+		return nil, &ProbeResponse{Error: "verified managed runtime evidence is stale"}
+	}
+	if packageSpec != req.Preparation.PackageSpec {
+		return nil, &ProbeResponse{Error: "verified managed runtime package changed"}
+	}
+	prepared, err := e.preparation.prepareProbeRepair(ctx, req, req.InferenceConfig, sanitizeEnvForAgent(req.InferenceConfig), e.logger)
+	if err != nil {
+		if prepared != nil {
+			e.preparation.retainOwner(prepared)
+		}
+		return nil, &ProbeResponse{Error: "private managed runtime preparation failed"}
+	}
+	return prepared, nil
 }

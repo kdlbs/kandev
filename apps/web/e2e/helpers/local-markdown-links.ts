@@ -97,7 +97,6 @@ export async function verifyLocalMarkdownLinks(page: Page, api: ApiClient, seed:
     await reportRead;
     expect(new URL(page.url()).pathname).toBe(`/t/${task.id}`);
     await expect(page.getByTestId("markdown-preview-toggle").first()).toBeVisible();
-    await page.getByTestId("markdown-preview-toggle").first().click();
     await expect(page.getByRole("heading", { name: "External report marker" })).toBeVisible();
     if (page.viewportSize()!.width < 768) {
       await expect(page.getByTestId("mobile-file-viewer-panel")).toBeVisible();

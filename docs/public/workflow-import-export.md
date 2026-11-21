@@ -21,7 +21,7 @@ Use this for snapshots and one-time copies. Use [Workflow Sync](workflow-sync.md
 Open **Settings → Workspaces → select a workspace → Workflows**.
 
 - **Export All** opens a YAML dialog for the saved Kanban workflows visible on that settings page. Unsaved drafts and Office-style workflows are excluded. Choose **Copy** to put the text on the clipboard or **Download** to save `workflows.yaml`.
-- A workflow card's **Export** button exports only that workflow.
+- A workflow's **Export** button exports only that workflow. In the **Compact** view, select the workflow's row first to open its editor.
 - **Import** accepts a `.yml` or `.yaml` file, or pasted YAML. It previews the workflows that will be created and skipped. Exact direct step-profile matches are selected automatically; each unmatched direct step has a profile picker.
 - The browser import does not create workflows until every affected step has a valid profile selection. If no eligible profile exists, use **Retry** after creating or enabling a profile in **Settings > Agents**. Canceling the picker leaves the workspace unchanged.
 - The result reports created and skipped workflow names.
@@ -215,8 +215,10 @@ An event contains an ordered list of actions. Each action has a `type` and an op
 | `on_turn_start` | A user sends a message. | `move_to_next`, `move_to_previous`, `move_to_step` |
 | `on_turn_complete` | An agent turn completes. | `move_to_next`, `move_to_previous`, `move_to_step`, `disable_plan_mode` |
 | `on_exit` | A task leaves the step. | `disable_plan_mode` |
-| `on_comment`, `on_blocker_resolved`, `on_children_completed`, `on_approval_resolved`, `on_heartbeat`, `on_budget_alert`, `on_agent_error` | Office/Phase-2 lifecycle events: a comment is added, a blocker is resolved, all child tasks complete, an approval is decided, a periodic heartbeat ticks, a budget threshold is crossed, or the agent errors. | `move_to_next`, `move_to_previous`, `move_to_step`, `auto_start_agent`, `queue_run`, `clear_decisions`, `queue_run_for_each_participant` |
+| `on_comment`, `on_blocker_resolved`, `on_children_completed`, `on_approval_resolved`, `on_heartbeat`, `on_budget_alert`, `on_agent_error` | Office/Phase-2 lifecycle events: a comment is added, a blocker is resolved, every counted direct child is completed successfully, an approval is decided, a periodic heartbeat ticks, a budget threshold is crossed, or the agent errors. | `move_to_next`, `move_to_previous`, `move_to_step`, `auto_start_agent`, `queue_run`, `clear_decisions`, `queue_run_for_each_participant` |
 | `on_pr_merged`, `on_pr_closed` | PR lifecycle events: every GitHub pull request linked to the task is merged, or a linked pull request is closed without merging. They run without an agent turn. | Same as the Office/Phase-2 events. |
+
+`on_children_completed` runs only when a parent has at least one counted direct child and every counted child is `COMPLETED`. A `FAILED` or `CANCELLED` child blocks the event. Archived and ephemeral children, and grandchildren, are not counted. This rule applies to existing and imported workflows; workflows that previously advanced after failure or cancellation now wait for successful completion. No additional portable field is required.
 
 `set_session_mode` requires `config.mode` to be a non-empty string. `move_to_step` requires `config.step_position` pointing to a position in the same workflow:
 

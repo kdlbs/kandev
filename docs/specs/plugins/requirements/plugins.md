@@ -53,6 +53,11 @@ Kandev keeps growing external integrations and surface-specific behavior directl
   matching task-specific fixed-step profile, step profile, or workflow default
   takes precedence over the saved agent profile. Kandev shall use the saved
   agent profile when workflow policy selects no profile.
+- **AC-PLUGINS-PLUGINS-001.16:** When Kandev serves a plugin's frontend bundle
+  or UI asset, the response shall require the browser to revalidate before it
+  reuses a cached copy, and an unchanged file shall revalidate without a body.
+  A reinstall of the same plugin version shall therefore load the new files on
+  the next page load.
 
 ## System design
 

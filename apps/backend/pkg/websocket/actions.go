@@ -21,11 +21,12 @@ const (
 	ActionWorkspaceDelete = "workspace.delete"
 
 	// Repository actions
-	ActionRepositoryList   = "repository.list"
-	ActionRepositoryCreate = "repository.create"
-	ActionRepositoryGet    = "repository.get"
-	ActionRepositoryUpdate = "repository.update"
-	ActionRepositoryDelete = "repository.delete"
+	ActionRepositoryList              = "repository.list"
+	ActionRepositoryCreate            = "repository.create"
+	ActionRepositoryGet               = "repository.get"
+	ActionRepositoryUpdate            = "repository.update"
+	ActionRepositoryDelete            = "repository.delete"
+	ActionRepositoryValidateRemoteURL = "repository.remote_url.validate"
 
 	// Repository Set actions
 	ActionRepositorySetList   = "repository_set.list"
@@ -77,6 +78,7 @@ const (
 	ActionTaskGet                   = "task.get"
 	ActionTaskUpdate                = "task.update"
 	ActionTaskRepoUpdate            = "task.repository.update"
+	ActionTaskRepoDetach            = "task.repository.detach"
 	ActionTaskDelete                = "task.delete"
 	ActionTaskMove                  = "task.move"
 	ActionTaskState                 = "task.state"
@@ -349,6 +351,7 @@ const (
 
 	// Workspace file operations
 	ActionWorkspaceFileTreeGet       = "workspace.tree.get"
+	ActionWorkspaceRootFilesList     = "workspace.root_files.list"
 	ActionWorkspaceFileContentGet    = "workspace.file.get"
 	ActionWorkspaceFileContentGetRef = "workspace.file.get_at_ref"
 	ActionWorkspaceFileContentUpdate = "workspace.file.update"
@@ -581,6 +584,7 @@ const (
 	ActionMCPStopTask                    = "mcp.stop_task"
 	ActionMCPSpawnSession                = "mcp.spawn_session"
 	ActionMCPGetTaskConversation         = "mcp.get_task_conversation"
+	ActionMCPGetTaskMessageOperation     = "mcp.get_task_message_operation"
 	ActionMCPListTaskSessions            = "mcp.list_task_sessions"
 	ActionMCPListPendingAgentPermissions = "mcp.list_pending_agent_permissions"
 	ActionMCPResolveAgentPermission      = "mcp.resolve_agent_permission"

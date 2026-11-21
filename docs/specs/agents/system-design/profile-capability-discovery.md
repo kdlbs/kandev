@@ -2,7 +2,7 @@
 status: current
 system: agents
 created: 2026-09-29
-updated: 2026-11-03
+updated: 2026-11-07
 requirements:
   - REQ-AGENTS-PROFILE-DISCOVERY-001
   - REQ-AGENTS-PROFILE-DISCOVERY-002
@@ -26,11 +26,11 @@ These versions describe the reproduction, not a production rule or compatibility
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
-| REQ-AGENTS-PROFILE-DISCOVERY-001 | API and authority; Launch context; Probe execution |
+| Requirement                      | Design sections                                       |
+| -------------------------------- | ----------------------------------------------------- |
+| REQ-AGENTS-PROFILE-DISCOVERY-001 | API and authority; Launch context; Probe execution    |
 | REQ-AGENTS-PROFILE-DISCOVERY-002 | Cache identity and refresh; Failure and observability |
-| REQ-AGENTS-PROFILE-DISCOVERY-003 | Editor state; Responsive behavior |
+| REQ-AGENTS-PROFILE-DISCOVERY-003 | Editor state; Responsive behavior                     |
 
 ## API and authority
 
@@ -135,7 +135,9 @@ Cleanup terminates the owned process tree on success, timeout, cancellation, and
 
 The proposed [missing bundled Codex dependency extension](managed-npm-runtime-recovery.md#missing-bundled-codex-dependency)
 qualifies the no-install rule only for an independently verified incomplete
-managed runtime. Its retry must preserve this document's launch context,
+managed runtime. The proposed [incomplete-cache extension](managed-npm-cache-recovery.md)
+requires verified npm ENOENT for a missing execution-root manifest and matching installed package metadata. A missing executable link alone does not qualify. Both use the
+same private-preparation owner. Their retry must preserve this document's launch context,
 single-flight and late-result guards, and profile-only publication. Both
 baseline discovery and dependent model-option resolution use that same bounded
 recovery helper. It does not run a general runtime update or select another

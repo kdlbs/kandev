@@ -74,7 +74,7 @@ func (r *KubernetesExecutor) recoverKubernetesRecord(
 	}
 
 	instanceForward, client, token, outcome := r.verifyKubernetesRecoveredProcess(
-		attemptCtx, target, control, req, record, token,
+		attemptCtx, target, control, req, record, token, instanceInfo.ScopedMCPRoutes,
 	)
 	if outcome != "" {
 		return nil, outcome
@@ -165,6 +165,7 @@ func (r *KubernetesExecutor) verifyKubernetesRecoveredProcess(
 	req *ExecutorCreateRequest,
 	record *models.ExecutorRunning,
 	token string,
+	scopedMCPRoutes bool,
 ) (kubeexecutor.PortForwardSession, *agentctl.Client, string, RecoveryCandidateOutcome) {
 	forward, err := startKubernetesForward(
 		ctx, target.runtime.streams, target.pod, uint16(target.recorded.remotePort),
@@ -173,7 +174,7 @@ func (r *KubernetesExecutor) verifyKubernetesRecoveredProcess(
 		return nil, nil, "", RecoveryOutcomeUnknown
 	}
 	client := newKubernetesAgentctlClient(
-		r.logger, req, target.recorded.agentctlInstanceID, token, forward.LocalPort(),
+		r.logger, req, target.recorded.agentctlInstanceID, token, forward.LocalPort(), scopedMCPRoutes,
 	)
 	keep := false
 	defer func() {
@@ -184,14 +185,14 @@ func (r *KubernetesExecutor) verifyKubernetesRecoveredProcess(
 	}()
 	var outcome RecoveryCandidateOutcome
 	client, token, outcome = r.authenticateKubernetesRecoveredClient(
-		ctx, target, control, req, record, forward.LocalPort(), client, token,
+		ctx, target, control, req, record, forward.LocalPort(), client, token, scopedMCPRoutes,
 	)
 	if outcome != "" {
 		return nil, nil, "", outcome
 	}
 	var status *agentctl.StatusResponse
 	client, token, status, outcome = r.readKubernetesRecoveredStatus(
-		ctx, target, control, req, record, forward.LocalPort(), client, token,
+		ctx, target, control, req, record, forward.LocalPort(), client, token, scopedMCPRoutes,
 	)
 	if outcome != "" {
 		return nil, nil, "", outcome
@@ -218,6 +219,7 @@ func (r *KubernetesExecutor) authenticateKubernetesRecoveredClient(
 	localPort uint16,
 	client *agentctl.Client,
 	token string,
+	scopedMCPRoutes bool,
 ) (*agentctl.Client, string, RecoveryCandidateOutcome) {
 	if err := client.Health(ctx); err == nil {
 		return client, token, ""
@@ -225,7 +227,7 @@ func (r *KubernetesExecutor) authenticateKubernetesRecoveredClient(
 		return client, token, RecoveryOutcomeUnknown
 	}
 	client, token, refreshed := r.refreshKubernetesRecoveredClient(
-		ctx, target, control, req, record, localPort, client, token,
+		ctx, target, control, req, record, localPort, client, token, scopedMCPRoutes,
 	)
 	if !refreshed {
 		return client, token, RecoveryOutcomeUnknown
@@ -242,12 +244,13 @@ func (r *KubernetesExecutor) readKubernetesRecoveredStatus(
 	localPort uint16,
 	client *agentctl.Client,
 	token string,
+	scopedMCPRoutes bool,
 ) (*agentctl.Client, string, *agentctl.StatusResponse, RecoveryCandidateOutcome) {
 	status, err := client.GetStatus(ctx)
 	if err != nil && isAgentctlAuthError(err) {
 		var refreshed bool
 		client, token, refreshed = r.refreshKubernetesRecoveredClient(
-			ctx, target, control, req, record, localPort, client, token,
+			ctx, target, control, req, record, localPort, client, token, scopedMCPRoutes,
 		)
 		if refreshed {
 			status, err = client.GetStatus(ctx)
@@ -268,6 +271,7 @@ func (r *KubernetesExecutor) refreshKubernetesRecoveredClient(
 	localPort uint16,
 	client *agentctl.Client,
 	token string,
+	scopedMCPRoutes bool,
 ) (*agentctl.Client, string, bool) {
 	if req.BootstrapNonce == "" || token != req.AuthToken {
 		return client, token, false
@@ -278,7 +282,7 @@ func (r *KubernetesExecutor) refreshKubernetesRecoveredClient(
 	token = control.AuthToken()
 	client.Close()
 	client = newKubernetesAgentctlClient(
-		r.logger, req, target.recorded.agentctlInstanceID, token, localPort,
+		r.logger, req, target.recorded.agentctlInstanceID, token, localPort, scopedMCPRoutes,
 	)
 	return client, token, true
 }

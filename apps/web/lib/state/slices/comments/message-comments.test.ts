@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { useCommentsStore } from "./comments-store";
 import { COMMENTS_STORAGE_PREFIX, loadSessionComments } from "./persistence";
 import type { AgentMessageComment } from "./types";
+import { officeTaskCommentScope } from "./types";
 
 const SESSION_ID = "session-message-comments";
 
@@ -61,5 +62,29 @@ describe("agent-message comment persistence", () => {
     expect(state.bySession[SESSION_ID]).toEqual([comment.id]);
     expect(state.pendingForChat).toEqual([comment.id]);
     expect(state.getPendingComments()).toEqual([comment]);
+  });
+});
+
+describe("Office thread extract comments", () => {
+  it("persists the comment author and restores it on hydration", () => {
+    useCommentsStore.setState({
+      byId: {},
+      bySession: {},
+      pendingForChat: [],
+      editingCommentId: null,
+    });
+    window.sessionStorage.clear();
+    const scope = officeTaskCommentScope("task-9");
+    useCommentsStore
+      .getState()
+      .addComment(messageComment({ id: "o1", sessionId: scope, authorName: "CEO" }));
+    useCommentsStore.setState({ byId: {}, bySession: {}, pendingForChat: [] });
+
+    useCommentsStore.getState().hydrateSession(scope);
+
+    expect(scope).toBe("office-task:task-9");
+    const restored = useCommentsStore.getState().byId["o1"] as AgentMessageComment;
+    expect(restored.authorName).toBe("CEO");
+    expect(useCommentsStore.getState().pendingForChat).toEqual(["o1"]);
   });
 });

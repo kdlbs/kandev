@@ -29,6 +29,8 @@ export type WorkspaceState = {
     wip_sessionless_release_enabled?: boolean;
     wip_sessionless_release_grace_minutes?: number;
     office_workflow_id?: string | null;
+    /** Office task identifier prefix (e.g. "KAN"). */
+    task_prefix?: string;
     created_at: string;
     updated_at: string;
   }>;

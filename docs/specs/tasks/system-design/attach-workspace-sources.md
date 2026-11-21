@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-ATTACH-WORKSPACE-SOURCES-001
 created: 2026-07-22
-updated: 2026-09-18
+updated: 2026-11-07
 owners:
   - kandev
 ---
@@ -19,6 +19,8 @@ This design record preserves the technical source for the capability mapped to R
 | Requirement | Design source |
 | --- | --- |
 | REQ-TASKS-ATTACH-WORKSPACE-SOURCES-001 | Migrated legacy design detail below; [Legacy add-branch effective environment](#legacy-add-branch-effective-environment) |
+
+[Workspace source script turns](workspace-source-script-turns.md) defines script-message binding without acquiring the workspace mutation gate again.
 
 ## Placement extension
 

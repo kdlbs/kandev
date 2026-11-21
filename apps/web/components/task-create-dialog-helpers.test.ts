@@ -322,6 +322,15 @@ describe("buildCreateTaskPayload dependencies", () => {
     expect(buildCreateTaskPayload({ ...base, blockedBy: [] }).blocked_by).toBeUndefined();
     expect(buildCreateTaskPayload(base).blocked_by).toBeUndefined();
   });
+
+  it("sends related task selections as related_task_ids", () => {
+    expect(
+      buildCreateTaskPayload({ ...base, relatedTaskIds: ["task-c", "task-d"] }).related_task_ids,
+    ).toEqual(["task-c", "task-d"]);
+    expect(
+      buildCreateTaskPayload({ ...base, relatedTaskIds: [] }).related_task_ids,
+    ).toBeUndefined();
+  });
 });
 
 describe("buildCreateTaskPayload priority", () => {

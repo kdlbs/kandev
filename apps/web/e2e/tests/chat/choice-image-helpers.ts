@@ -117,10 +117,14 @@ export async function exerciseChoiceImageQuestion(
     await inspect.focus();
     await page.keyboard.press("Enter");
   }
-  const viewer = page.getByRole("dialog", { name: "Proposed layout" });
-  await expect(viewer).toBeVisible();
+  const viewer = page.getByRole("dialog");
+  await expect(viewer).toHaveAccessibleName("Proposed layout");
   await viewer.press("2");
+  // Arrows step through the question's images; they never select or advance.
   await viewer.press("ArrowRight");
+  await expect(viewer).not.toHaveAccessibleName("Proposed layout");
+  await viewer.press("ArrowLeft");
+  await expect(viewer).toHaveAccessibleName("Proposed layout");
   if (mobile) await viewer.getByRole("button", { name: "Close", exact: true }).tap();
   else await viewer.press("Escape");
   await expect(inspect).toBeFocused();

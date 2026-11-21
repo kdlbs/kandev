@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 /** Isolate the real pending notification until its UI assertions finish. */
 export async function holdCancellationSettlement(page: Page) {
   let sessionId: string | null = null;
+  let pendingObserved = false;
   const releases = new Set<() => void>();
   await page.routeWebSocket(/\/ws(?:\?.*)?$/, (client) => {
     const server = client.connectToServer();
@@ -37,6 +38,7 @@ export async function holdCancellationSettlement(page: Page) {
           frame.payload?.session_id === sessionId &&
           frame.payload.cancellation_pending === true
         ) {
+          pendingObserved = true;
           client.send(part);
         } else {
           frames.push(part);
@@ -47,7 +49,9 @@ export async function holdCancellationSettlement(page: Page) {
   return {
     arm: (targetSessionId: string) => {
       sessionId = targetSessionId;
+      pendingObserved = false;
     },
+    pendingObserved: () => pendingObserved,
     release: () => {
       sessionId = null;
       for (const release of releases) release();

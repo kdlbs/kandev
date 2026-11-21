@@ -372,83 +372,6 @@ func TestShowCommit_MergeCommitUsesFirstParentDiff(t *testing.T) {
 	}
 }
 
-func TestGitOperatorCreatePR_UsesAzureCLIForAzureRepos(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell wrapper test is Unix-only")
-	}
-
-	repoDir, cleanup := setupTestRepo(t)
-	defer cleanup()
-
-	log := newTestLogger(t)
-	runGit(t, repoDir, "checkout", "-b", "feature/azure-pr")
-	writeFile(t, repoDir, "azure.txt", "azure repos\n")
-	runGit(t, repoDir, "add", ".")
-	runGit(t, repoDir, "commit", "-m", "add azure change")
-
-	realGit, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatalf("find git: %v", err)
-	}
-
-	scriptDir := t.TempDir()
-	azArgsPath := filepath.Join(scriptDir, "az-args.txt")
-	writeExecutable(t, filepath.Join(scriptDir, "git"), fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"remote\" ] && [ \"$2\" = \"get-url\" ] && [ \"$3\" = \"origin\" ]; then\n  printf '%s\\n' 'git@ssh.dev.azure.com:v3/acme/platform/widgets'\n  exit 0\nfi\nexec %q \"$@\"\n", "%s", realGit))
-	writeExecutable(t, filepath.Join(scriptDir, "az"), fmt.Sprintf(`#!/bin/sh
-if [ "$1" = "extension" ] && [ "$2" = "show" ]; then
-  exit 0
-fi
-printf '%%s\n' "$@" > %q
-printf 'WARNING: preview command group\n' >&2
-printf 'Creating pull request...\n'
-cat <<'EOF'
-{"pullRequestId":42,"repository":{"remoteUrl":"https://dev.azure.com/acme/platform/_git/widgets"}}
-EOF
-`, azArgsPath))
-	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	gitOp := NewGitOperator(repoDir, log, nil)
-	result, err := gitOp.CreatePR(context.Background(), "Add Azure support", "PR body", "origin/main", true)
-	if err != nil {
-		t.Fatalf("CreatePR returned error: %v", err)
-	}
-	if !result.Success {
-		t.Fatalf("CreatePR failed: %+v", result)
-	}
-
-	if got, want := result.PRURL, "https://dev.azure.com/acme/platform/_git/widgets/pullrequest/42"; got != want {
-		t.Fatalf("PRURL = %q, want %q", got, want)
-	}
-
-	gotArgs := readScriptArgs(t, azArgsPath)
-	wantArgs := []string{
-		"repos",
-		"pr",
-		"create",
-		"--organization",
-		"https://dev.azure.com/acme",
-		"--project",
-		"platform",
-		"--repository",
-		"widgets",
-		"--source-branch",
-		"feature/azure-pr",
-		"--target-branch",
-		"main",
-		"--title",
-		"Add Azure support",
-		"--description",
-		"PR body",
-		"--draft",
-		"true",
-		"-o",
-		"json",
-	}
-	if strings.Join(gotArgs, "\n") != strings.Join(wantArgs, "\n") {
-		t.Fatalf("az args mismatch\n got: %q\nwant: %q", gotArgs, wantArgs)
-	}
-}
-
 func writeExecutable(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
@@ -510,105 +433,14 @@ printf 'https://gitlab.com/acme/widgets/-/merge_requests/42\n'
 	}
 }
 
-func TestGitOperatorCreatePR_AzureMissingCLI(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell wrapper test is Unix-only")
-	}
-
-	repoDir, cleanup := setupTestRepo(t)
-	defer cleanup()
-
-	log := newTestLogger(t)
-	runGit(t, repoDir, "checkout", "-b", "feature/azure-missing-cli")
-	writeFile(t, repoDir, "azure.txt", "azure\n")
-	runGit(t, repoDir, "add", ".")
-	runGit(t, repoDir, "commit", "-m", "add azure change")
-
-	scriptDir := t.TempDir()
-	writeGitRemoteWrapper(t, scriptDir, "git@ssh.dev.azure.com:v3/acme/platform/widgets")
-	// Isolate PATH so CI's preinstalled az is not visible to LookPath.
-	t.Setenv("PATH", scriptDir)
-
-	gitOp := NewGitOperator(repoDir, log, nil)
-	result, err := gitOp.CreatePR(context.Background(), "Title", "Body", "main", false)
-	if err != nil {
-		t.Fatalf("CreatePR returned error: %v", err)
-	}
-	if result.Success {
-		t.Fatalf("CreatePR should fail without az: %+v", result)
-	}
-	if !result.BranchPushed || result.Error != "branch was pushed; retry pull request creation" {
-		t.Fatalf("partial result = %+v", result)
-	}
-}
-
-func TestGitOperatorCreatePR_AzureMissingExtension(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell wrapper test is Unix-only")
-	}
-
-	repoDir, cleanup := setupTestRepo(t)
-	defer cleanup()
-
-	log := newTestLogger(t)
-	runGit(t, repoDir, "checkout", "-b", "feature/azure-missing-ext")
-	writeFile(t, repoDir, "azure.txt", "azure\n")
-	runGit(t, repoDir, "add", ".")
-	runGit(t, repoDir, "commit", "-m", "add azure change")
-
-	scriptDir := t.TempDir()
-	writeGitRemoteWrapper(t, scriptDir, "git@ssh.dev.azure.com:v3/acme/platform/widgets")
-	writeExecutable(t, filepath.Join(scriptDir, "az"), "#!/bin/sh\nif [ \"$1\" = \"extension\" ] && [ \"$2\" = \"show\" ]; then exit 1; fi\nexit 0\n")
-	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	gitOp := NewGitOperator(repoDir, log, nil)
-	result, err := gitOp.CreatePR(context.Background(), "Title", "Body", "main", false)
-	if err != nil {
-		t.Fatalf("CreatePR returned error: %v", err)
-	}
-	if result.Success {
-		t.Fatalf("CreatePR should fail without azure-devops extension: %+v", result)
-	}
-	if !result.BranchPushed || result.Error != "branch was pushed; retry pull request creation" {
-		t.Fatalf("partial result = %+v", result)
-	}
-}
-
-func TestEnsureAzureDevOpsCLI(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell wrapper test is Unix-only")
-	}
-
-	scriptDir := t.TempDir()
-	writeExecutable(t, filepath.Join(scriptDir, "az"), "#!/bin/sh\nif [ \"$1\" = \"extension\" ] && [ \"$2\" = \"show\" ]; then exit 0; fi\nexit 1\n")
-	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	if err := ensureAzureDevOpsCLI(context.Background()); err != nil {
-		t.Fatalf("ensureAzureDevOpsCLI() error = %v", err)
-	}
-
-	t.Setenv("PATH", "")
-	if err := ensureAzureDevOpsCLI(context.Background()); err == nil {
-		t.Fatal("expected error when az is missing")
-	} else if err.Error() != errAzureCLIMissing {
-		t.Fatalf("error = %q, want %q", err.Error(), errAzureCLIMissing)
-	}
-}
-
 func TestDetectPRProvider(t *testing.T) {
 	tests := []struct {
 		name   string
 		remote string
 		want   prProvider
 	}{
-		{name: "azure https", remote: "https://dev.azure.com/acme/platform/_git/widgets", want: prProviderAzureRepos},
-		{name: "azure ssh", remote: "git@ssh.dev.azure.com:v3/acme/platform/widgets", want: prProviderAzureRepos},
-		{
-			name:   "azure ssh url scheme",
-			remote: "ssh://ssh.dev.azure.com:22/v3/acme/platform/widgets",
-			want:   prProviderAzureRepos,
-		},
-		{name: "visualstudio", remote: "https://acme.visualstudio.com/platform/_git/widgets", want: prProviderAzureRepos},
+		{name: "azure repos is not a built-in provider", remote: "https://dev.azure.com/acme/platform/_git/widgets", want: ""},
+		{name: "visualstudio is not a built-in provider", remote: "https://acme.visualstudio.com/platform/_git/widgets", want: ""},
 		{name: "github", remote: "https://github.com/acme/widgets.git", want: prProviderGitHub},
 		{name: "gitlab https", remote: "https://gitlab.com/acme/widgets.git", want: prProviderGitLab},
 		{name: "gitlab ssh", remote: "git@gitlab.com:acme/widgets.git", want: prProviderGitLab},
@@ -658,95 +490,6 @@ func TestRemoteHostFromURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := remoteHostFromURL(tt.remote); got != tt.want {
 				t.Fatalf("remoteHostFromURL(%q) = %q, want %q", tt.remote, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseAzurePRCreateResponse(t *testing.T) {
-	payload := `{"pullRequestId":42,"repository":{"remoteUrl":"https://dev.azure.com/acme/platform/_git/widgets"}}`
-	stdout := "Creating pull request...\n" + payload
-
-	response, err := parseAzurePRCreateResponse(stdout)
-	if err != nil {
-		t.Fatalf("parseAzurePRCreateResponse() error = %v", err)
-	}
-	if response.PullRequestID != 42 {
-		t.Fatalf("PullRequestID = %d, want 42", response.PullRequestID)
-	}
-}
-
-func TestParseAzurePRCreateResponse_multilineJSON(t *testing.T) {
-	stdout := "Creating pull request...\n{\n  \"pullRequestId\": 9,\n  \"repository\": {\n    \"remoteUrl\": \"https://dev.azure.com/acme/platform/_git/widgets\"\n  }\n}\n"
-
-	response, err := parseAzurePRCreateResponse(stdout)
-	if err != nil {
-		t.Fatalf("parseAzurePRCreateResponse() error = %v", err)
-	}
-	if response.PullRequestID != 9 {
-		t.Fatalf("PullRequestID = %d, want 9", response.PullRequestID)
-	}
-}
-
-func TestParseAzurePRCreateResponse_bracesInString(t *testing.T) {
-	// Braces inside JSON string values must not break line-based parsing.
-	stdout := "status line\n" + `{"pullRequestId":7,"repository":{"remoteUrl":"https://dev.azure.com/o/p/_git/r","note":"} not end"}}`
-
-	response, err := parseAzurePRCreateResponse(stdout)
-	if err != nil {
-		t.Fatalf("parseAzurePRCreateResponse() error = %v", err)
-	}
-	if response.PullRequestID != 7 {
-		t.Fatalf("PullRequestID = %d, want 7", response.PullRequestID)
-	}
-}
-
-func TestParseAzureRepoInfo(t *testing.T) {
-	tests := []struct {
-		name     string
-		remote   string
-		wantOrg  string
-		wantProj string
-		wantRepo string
-	}{
-		{
-			name:     "dev azure https",
-			remote:   "https://dev.azure.com/acme/platform/_git/widgets.git",
-			wantOrg:  "https://dev.azure.com/acme",
-			wantProj: "platform",
-			wantRepo: "widgets",
-		},
-		{
-			name:     "visualstudio https",
-			remote:   "https://acme.visualstudio.com/platform/_git/widgets",
-			wantOrg:  "https://acme.visualstudio.com",
-			wantProj: "platform",
-			wantRepo: "widgets",
-		},
-		{
-			name:     "azure ssh",
-			remote:   "git@ssh.dev.azure.com:v3/acme/platform/widgets",
-			wantOrg:  "https://dev.azure.com/acme",
-			wantProj: "platform",
-			wantRepo: "widgets",
-		},
-		{
-			name:     "azure ssh url scheme",
-			remote:   "ssh://ssh.dev.azure.com:22/v3/acme/platform/widgets",
-			wantOrg:  "https://dev.azure.com/acme",
-			wantProj: "platform",
-			wantRepo: "widgets",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			info, err := parseAzureRepoInfo(tt.remote)
-			if err != nil {
-				t.Fatalf("parseAzureRepoInfo(%q) error = %v", tt.remote, err)
-			}
-			if info.OrganizationURL != tt.wantOrg || info.Project != tt.wantProj || info.Repository != tt.wantRepo {
-				t.Fatalf("parseAzureRepoInfo(%q) = %+v, want org=%q project=%q repo=%q", tt.remote, info, tt.wantOrg, tt.wantProj, tt.wantRepo)
 			}
 		})
 	}

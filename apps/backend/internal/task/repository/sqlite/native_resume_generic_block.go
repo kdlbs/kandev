@@ -44,11 +44,18 @@ func (r *Repository) hasResolvedNativeResumeRecoveryTx(ctx context.Context, tx *
 	var valid bool
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS (
  SELECT 1 FROM session_recovery_blocks WHERE session_id = ? AND incarnation_id = ? AND expected_generation = ?
- AND consumer_reference = 'agent_delivery' AND state = 'resolved' AND authorized_action = 'resume'
+ AND consumer_reference = 'agent_delivery' AND state = 'resolved' AND authorized_action IN (?, ?)
  AND delivery_submission_id = ? AND delivery_stream_id = ? AND resolved_at = ?)`),
-		recovery.SessionID, recovery.IncarnationID, recovery.HarnessGeneration, recovery.SubmissionID, recovery.StreamID, recovery.UpdatedAt).Scan(&valid)
-	if err != nil || valid {
-		return valid, err
+		recovery.SessionID, recovery.IncarnationID, recovery.HarnessGeneration, nativeResumeRecoveryAction,
+		models.SilentRestoreAction, recovery.SubmissionID, recovery.StreamID, recovery.UpdatedAt).Scan(&valid)
+	if err != nil {
+		return false, err
 	}
-	return r.hasLegacyResolvedNativeResumeHistoryTx(ctx, tx, recovery)
+	if !valid {
+		valid, err = r.hasLegacyResolvedNativeResumeHistoryTx(ctx, tx, recovery)
+	}
+	if err != nil || !valid {
+		return false, err
+	}
+	return r.hasNativeResumeGenerationLineageTx(ctx, tx, recovery)
 }

@@ -174,7 +174,7 @@ func TestInitializeWorkspaceDefaultsPreservesExistingWorkspaceState(t *testing.T
 	if err != nil {
 		t.Fatalf("GetWorkspaceSettings: %v", err)
 	}
-	if settings.TaskGitCredentialsMode != TaskGitCredentialsModeManaged || settings.RepoScopeMode != RepoScopeModeRepos {
+	if settings.TaskGitCredentialsMode != TaskGitCredentialsModeManaged || settings.RepoScopeMode != RepoScopeModeSelected {
 		t.Fatalf("existing settings changed: %+v", settings)
 	}
 	connection, err := service.store.GetWorkspaceConnection(ctx, "ws-1")

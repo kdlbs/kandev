@@ -127,6 +127,9 @@ func validateAnswers(questions []Question, answers []Answer) error {
 		if utf8.RuneCountInString(a.CustomText) > answerTextRuneCap {
 			return newValidationError("answer %d custom_text exceeds %d characters", i+1, answerTextRuneCap) // N8b
 		}
+		if err := validateAnswerAnnotations(i, a, q); err != nil {
+			return err
+		}
 		count, bytes, err := validateAnswerAttachments(i, a, q, attachmentIDs)
 		if err != nil {
 			return err
@@ -288,6 +291,7 @@ func normalizeAnswer(q Question, a Answer) Answer {
 		SelectedOptions: deduped,
 		CustomText:      strings.TrimSpace(a.CustomText),
 		Attachments:     normalizeAnswerAttachments(a.Attachments),
+		Annotations:     normalizeAnswerAnnotations(a.Annotations),
 	}
 }
 

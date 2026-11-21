@@ -151,7 +151,9 @@ export async function prepareMetadata({
     manifest.version !== current.sdk_version
   )
     throw new Error("npm package version differs from canonical SDK version");
-  const tags = (await git("tag", "--list", "pluginsdk/v*"))
+  const tags = (
+    await git("tag", "--list", "pluginsdk/v*", "--merged", ref ?? "HEAD")
+  )
     .trim()
     .split("\n")
     .filter((tag) => stablePattern.test(tag.replace(/^pluginsdk\/v/, "")));

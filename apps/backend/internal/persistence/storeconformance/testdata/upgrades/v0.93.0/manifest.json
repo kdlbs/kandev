@@ -15,14 +15,21 @@
           "table": "custom_prompts",
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
-          "values": {"allow_agent_edits": "0"}
+          "values": {"content": "preserved prompt content"}
         },
         {
           "owner": "agent-settings",
           "table": "agent_profiles",
           "key_column": "id",
           "key_value": "fixture-v0930-agent-profile",
-          "values": {"sort_order": "0"}
+          "values": {"sort_order": "0", "execution_grade": ""}
+        },
+        {
+          "owner": "task",
+          "table": "tasks",
+          "key_column": "id",
+          "key_value": "fixture-v0930-task",
+          "values": {"execution_grade": ""}
         },
         {
           "owner": "task",
@@ -223,14 +230,21 @@
           "table": "custom_prompts",
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
-          "values": {"allow_agent_edits": "0"}
+          "values": {"content": "preserved prompt content"}
         },
         {
           "owner": "agent-settings",
           "table": "agent_profiles",
           "key_column": "id",
           "key_value": "fixture-v0930-agent-profile",
-          "values": {"sort_order": "0"}
+          "values": {"sort_order": "0", "execution_grade": ""}
+        },
+        {
+          "owner": "task",
+          "table": "tasks",
+          "key_column": "id",
+          "key_value": "fixture-v0930-task",
+          "values": {"execution_grade": ""}
         },
         {
           "owner": "task",
@@ -442,7 +456,6 @@
     "linear",
     "notification",
     "sentry",
-    "azure-devops",
     "workflow-sync",
     "office-config-sync",
     "automation",
@@ -466,6 +479,7 @@
       "task_environment_checkout_adoptions",
       "task_environment_kubernetes",
       "task_workflow_session_bindings",
+      "task_message_send_operations",
       "task_message_shell_output",
       "task_message_shell_output_chunks",
       "turn_change_content_leases",

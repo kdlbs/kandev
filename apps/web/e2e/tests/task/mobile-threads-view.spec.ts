@@ -505,7 +505,10 @@ test.describe("Mobile Threads view", () => {
     await drawer.getByTestId("threads-task-picker-search").fill("Mobile saved");
     await expect(drawer.getByTestId("threads-task-picker-row")).toHaveCount(2);
     await expect(
-      drawer.getByTestId("threads-task-picker-row").first().getByRole("img", { name: "Review" }),
+      drawer
+        .getByTestId("threads-task-picker-row")
+        .first()
+        .getByRole("img", { name: "Turn finished, awaiting instruction" }),
     ).toBeVisible();
     await expect(
       drawer.getByTestId("threads-task-picker-row").first().getByTestId("threads-task-picker-step"),

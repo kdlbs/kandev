@@ -23,40 +23,12 @@ type SeatCasterWorkflowRepo interface {
 	ListParticipantsForTaskWorkflow(ctx context.Context, taskID, workflowID string) ([]*wfmodels.WorkflowStepParticipant, error)
 }
 
-// seatRolePools maps a participant role to the set of agent roles eligible
-// for its seat, per AC-OFFICE-REVIEW-SEATS-002.1: approver draws from `ceo`;
-// reviewer draws from `ceo` ∪ `specialist` — and only those two. Any other
-// participant role (watcher, collaborator, ...) keeps today's ceo-only
-// behavior; the AC does not cover them, and the pool must not be widened
-// without an amended AC.
-var seatRolePools = map[string]map[models.AgentRole]bool{
-	string(wfmodels.ParticipantRoleReviewer): {
-		models.AgentRoleCEO:        true,
-		models.AgentRoleSpecialist: true,
-	},
-	string(wfmodels.ParticipantRoleApprover): {
-		models.AgentRoleCEO: true,
-	},
-}
-
-// eligibleAgentRolesFor returns role's agent-role allowlist. It is always a
-// positive match, never a denylist: eligibleCandidates lists agents with no
-// Role filter (a union cannot be expressed as a single filter value), so
-// this allowlist is what keeps worker/assistant/empty-role agent profiles
-// from ever being seated.
-func eligibleAgentRolesFor(role string) map[models.AgentRole]bool {
-	if pool, ok := seatRolePools[role]; ok {
-		return pool
-	}
-	return map[models.AgentRole]bool{models.AgentRoleCEO: true}
-}
-
 // SeatCasterAdapter implements engine.ParticipantSeatCaster by applying the
 // casting resolution algorithm of REQ-OFFICE-REVIEW-SEATS-002 (system design
 // "Casting resolution"):
 //
 //  1. List the task's workspace's Office agents eligible for role's seat
-//     (eligibleAgentRolesFor) and whose status is neither `stopped` nor
+//     (models.IsSeatPoolEligible) and whose status is neither `stopped` nor
 //     `pending_approval`, ordered by `created_at` then agent profile
 //     identifier.
 //  2. Empty list: seat the task's runner (fallback provenance); no runner
@@ -118,7 +90,7 @@ func (a *SeatCasterAdapter) CastParticipantSeat(
 }
 
 // eligibleCandidates returns the workspace's Office agents eligible for
-// role's seat (eligibleAgentRolesFor) whose status is neither `stopped` nor
+// role's seat (models.IsSeatPoolEligible) whose status is neither `stopped` nor
 // `pending_approval`, ordered by `created_at` ascending then agent profile
 // identifier ascending (AC-OFFICE-REVIEW-SEATS-002.1, -002.2).
 //
@@ -135,16 +107,11 @@ func (a *SeatCasterAdapter) eligibleCandidates(
 	if err != nil {
 		return nil, err
 	}
-	allowedRoles := eligibleAgentRolesFor(role)
 	eligible := make([]*models.AgentInstance, 0, len(agents))
 	for _, ag := range agents {
-		if !allowedRoles[ag.Role] {
-			continue
+		if models.IsSeatPoolEligible(role, ag) {
+			eligible = append(eligible, ag)
 		}
-		if ag.Status == models.AgentStatusStopped || ag.Status == models.AgentStatusPendingApproval {
-			continue
-		}
-		eligible = append(eligible, ag)
 	}
 	sort.SliceStable(eligible, func(i, j int) bool {
 		ti, tj := eligible[i].CreatedAt, eligible[j].CreatedAt

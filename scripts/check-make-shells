@@ -244,6 +244,131 @@ root_field() {
 	awk -F '\t' -v line="$1" -v field="$2" 'NR == line { print $field }' "$root_record_file"
 }
 
+# @covers AC-PLATFORM-SQLITE-SNAPSHOT-001.4, AC-PLATFORM-STARTUP-LIFECYCLE-001.7
+# Version defaults are queried through real Make expansion in disposable Git
+# histories. The query file only prints each Makefile's public version variable.
+version_targets="$root_probe_dir/version-targets.mk"
+cat >"$version_targets" <<'MAKE'
+.PHONY: print-runtime-version print-backend-version
+print-runtime-version:
+	@printf '%s\n' '$(RUNTIME_VERSION)'
+print-backend-version:
+	@printf '%s\n' '$(VERSION)'
+MAKE
+
+make_runtime_version() {
+	local fixture=$1
+	local git_ceiling=${GIT_CEILING_DIRECTORIES-}
+	local -a git_env=()
+	shift
+	if [ -n "$git_ceiling" ]; then
+		git_env=("GIT_CEILING_DIRECTORIES=$git_ceiling")
+	fi
+	env -u RUNTIME_VERSION -u GIT_CEILING_DIRECTORIES "${git_env[@]}" make -s -C "$fixture" \
+		-f "$root_dir/Makefile" -f "$version_targets" \
+		NULL_REDIR= BUILD_TIME=fixture "$@" print-runtime-version 2>/dev/null
+}
+
+make_backend_version() {
+	local fixture=$1
+	local git_ceiling=${GIT_CEILING_DIRECTORIES-}
+	local -a git_env=()
+	shift
+	if [ -n "$git_ceiling" ]; then
+		git_env=("GIT_CEILING_DIRECTORIES=$git_ceiling")
+	fi
+	env -u VERSION -u GIT_CEILING_DIRECTORIES "${git_env[@]}" make -s -C "$fixture" \
+		-f "$root_dir/apps/backend/Makefile" -f "$version_targets" \
+		NULL_REDIR= BUILD_TIME=fixture "$@" print-backend-version 2>/dev/null
+}
+
+init_version_fixture() {
+	local fixture=$1
+	mkdir -p "$fixture"
+	git -C "$fixture" init -q
+	git -C "$fixture" config user.name 'Kandev Make Check'
+	git -C "$fixture" config user.email 'make-check@example.invalid'
+	git -C "$fixture" config core.abbrev 7
+	git -C "$fixture" config commit.gpgSign false
+	git -C "$fixture" config tag.gpgSign false
+	mkdir -p "$fixture/hooks"
+	git -C "$fixture" config core.hooksPath "$fixture/hooks"
+}
+
+version_history="$root_probe_dir/version-history"
+init_version_fixture "$version_history"
+printf 'runtime release\n' >"$version_history/runtime.txt"
+git -C "$version_history" add runtime.txt
+git -C "$version_history" commit -qm 'runtime release'
+git -C "$version_history" tag v1.2.3
+printf 'next runtime commit\n' >>"$version_history/runtime.txt"
+git -C "$version_history" commit -qam 'runtime commit after release'
+runtime_commit=$(git -C "$version_history" rev-parse --short HEAD)
+runtime_tag_version="v1.2.3-1-g$runtime_commit"
+
+root_runtime_only=$(make_runtime_version "$version_history")
+backend_runtime_only=$(make_backend_version "$version_history")
+root_expect root-runtime-tag-only "$runtime_tag_version" "$root_runtime_only"
+root_expect backend-runtime-tag-only "$runtime_tag_version" "$backend_runtime_only"
+
+# A newer SDK tag at HEAD must not replace the runtime release description.
+git -C "$version_history" tag pluginsdk/v0.1.0
+root_with_sdk_tag=$(make_runtime_version "$version_history")
+backend_with_sdk_tag=$(make_backend_version "$version_history")
+root_expect root-ignores-sdk-tag "$root_runtime_only" "$root_with_sdk_tag"
+root_expect backend-ignores-sdk-tag "$backend_runtime_only" "$backend_with_sdk_tag"
+
+# A v-prefixed namespace also matches v[0-9]* unless slash tags are excluded.
+namespaced_history="$root_probe_dir/namespaced-history"
+init_version_fixture "$namespaced_history"
+printf 'runtime release\n' >"$namespaced_history/runtime.txt"
+git -C "$namespaced_history" add runtime.txt
+git -C "$namespaced_history" commit -qm 'runtime release'
+git -C "$namespaced_history" tag v1.2.3
+printf 'next runtime commit\n' >>"$namespaced_history/runtime.txt"
+git -C "$namespaced_history" commit -qam 'runtime commit after release'
+namespaced_runtime_commit=$(git -C "$namespaced_history" rev-parse --short HEAD)
+namespaced_runtime_version="v1.2.3-1-g$namespaced_runtime_commit"
+git -C "$namespaced_history" tag v1/pluginsdk/v0.1.0
+root_v_prefixed_namespace=$(make_runtime_version "$namespaced_history")
+backend_v_prefixed_namespace=$(make_backend_version "$namespaced_history")
+root_expect root-excludes-v-namespace "$namespaced_runtime_version" "$root_v_prefixed_namespace"
+root_expect backend-excludes-v-namespace "$namespaced_runtime_version" "$backend_v_prefixed_namespace"
+
+# With SDK-only history, --always must produce the fixture's commit hash.
+sdk_only_history="$root_probe_dir/sdk-only-history"
+init_version_fixture "$sdk_only_history"
+printf 'SDK release\n' >"$sdk_only_history/sdk.txt"
+git -C "$sdk_only_history" add sdk.txt
+git -C "$sdk_only_history" commit -qm 'SDK release'
+git -C "$sdk_only_history" tag pluginsdk/v0.1.0
+sdk_only_commit=$(git -C "$sdk_only_history" rev-parse --short HEAD)
+root_sdk_only=$(make_runtime_version "$sdk_only_history")
+backend_sdk_only=$(make_backend_version "$sdk_only_history")
+root_expect root-sdk-only-hash-fallback "$sdk_only_commit" "$root_sdk_only"
+root_expect backend-sdk-only-hash-fallback "$sdk_only_commit" "$backend_sdk_only"
+
+# Dirty state and explicit Make overrides retain their existing precedence.
+printf 'dirty worktree\n' >>"$version_history/runtime.txt"
+root_dirty=$(make_runtime_version "$version_history")
+backend_dirty=$(make_backend_version "$version_history")
+root_expect root-dirty-suffix "$root_runtime_only-dirty" "$root_dirty"
+root_expect backend-dirty-suffix "$backend_runtime_only-dirty" "$backend_dirty"
+root_expect root-explicit-override explicit-runtime \
+	"$(make_runtime_version "$version_history" RUNTIME_VERSION=explicit-runtime)"
+root_expect backend-explicit-override explicit-backend \
+	"$(make_backend_version "$version_history" VERSION=explicit-backend)"
+
+# This nested path belongs to a known Git worktree until the ceiling is applied.
+outside_git="$version_history/outside-git"
+mkdir -p "$outside_git"
+root_expect root-parent-git-control "$root_dirty" "$(make_runtime_version "$outside_git")"
+root_expect backend-parent-git-control "$backend_dirty" "$(make_backend_version "$outside_git")"
+root_expect root-outside-git-fallback dev \
+	"$(GIT_CEILING_DIRECTORIES="$version_history" make_runtime_version "$outside_git")"
+root_expect backend-outside-git-fallback dev \
+	"$(GIT_CEILING_DIRECTORIES="$version_history" make_backend_version "$outside_git")"
+
 # The four Node environments must all compile production React at the pnpm
 # boundary. `build-web-e2e` keeps its package-level pseudo-locale selection.
 for node_env in development test production unset; do
@@ -394,6 +519,6 @@ else
 fi
 
 if [ "$status" -eq 0 ]; then
-	echo "All Makefile shell-dispatch checks passed (run/dev/start-debug/deadcode/test/build-kandev across 3 shells, root web build environments, plus static guards)."
+	echo "All Makefile shell and version checks passed (3-shell recipes, release-tag selection and fallbacks, root web environments, and static guards)."
 fi
 exit "$status"

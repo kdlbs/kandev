@@ -109,20 +109,21 @@ func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.Task
 func (r *Repository) GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error) {
 	env := &models.TaskEnvironment{}
 	var status string
+	var retiredAt sql.NullTime
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, ownership_generation, executor_type, executor_id, executor_profile_id,
 			control_port, status, materialization_session_id,
 			workspace_path, workspace_layout,
 			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id, COALESCE(task_dir_name, ''),
-			created_at, updated_at
+			retired_at, created_at, updated_at
 		FROM task_environments WHERE id = ?
 	`), id).Scan(
 		&env.ID, &env.TaskID, &env.OwnershipGeneration, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
 		&env.ControlPort, &status, &env.MaterializationSessionID,
 		&env.WorkspacePath, &env.WorkspaceLayout,
 		&env.ContainerID, &env.ContainerBootstrapNonceSecretID, &env.ContainerControlAuthTokenSecretID, &env.SandboxID, &env.TaskDirName,
-		&env.CreatedAt, &env.UpdatedAt,
+		&retiredAt, &env.CreatedAt, &env.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, id)
@@ -131,6 +132,9 @@ func (r *Repository) GetTaskEnvironment(ctx context.Context, id string) (*models
 		return nil, err
 	}
 	env.Status = models.TaskEnvironmentStatus(status)
+	if retiredAt.Valid {
+		env.RetiredAt = &retiredAt.Time
+	}
 
 	repos, err := r.ListTaskEnvironmentRepos(ctx, env.ID)
 	if err != nil {
@@ -145,20 +149,21 @@ func (r *Repository) GetTaskEnvironment(ctx context.Context, id string) (*models
 func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
 	env := &models.TaskEnvironment{}
 	var status string
+	var retiredAt sql.NullTime
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, ownership_generation, executor_type, executor_id, executor_profile_id,
 			control_port, status, materialization_session_id,
 			workspace_path, workspace_layout,
 			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id, COALESCE(task_dir_name, ''),
-			created_at, updated_at
-		FROM task_environments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1
+			retired_at, created_at, updated_at
+		FROM task_environments WHERE task_id = ? AND retired_at IS NULL ORDER BY created_at DESC LIMIT 1
 	`), taskID).Scan(
 		&env.ID, &env.TaskID, &env.OwnershipGeneration, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
 		&env.ControlPort, &status, &env.MaterializationSessionID,
 		&env.WorkspacePath, &env.WorkspaceLayout,
 		&env.ContainerID, &env.ContainerBootstrapNonceSecretID, &env.ContainerControlAuthTokenSecretID, &env.SandboxID, &env.TaskDirName,
-		&env.CreatedAt, &env.UpdatedAt,
+		&retiredAt, &env.CreatedAt, &env.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil // No environment yet — not an error
@@ -167,6 +172,9 @@ func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID stri
 		return nil, err
 	}
 	env.Status = models.TaskEnvironmentStatus(status)
+	if retiredAt.Valid {
+		env.RetiredAt = &retiredAt.Time
+	}
 
 	repos, err := r.ListTaskEnvironmentRepos(ctx, env.ID)
 	if err != nil {
@@ -216,7 +224,7 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 			container_id = ?, container_bootstrap_nonce_secret_id = ?, container_control_auth_token_secret_id = ?, sandbox_id = ?,
 			task_dir_name = COALESCE(NULLIF(task_dir_name, ''), NULLIF(?, ''), task_dir_name),
 			updated_at = ?
-		WHERE id = ?
+		WHERE id = ? AND retired_at IS NULL
 	`),
 		env.ExecutorType, env.ExecutorID, env.ExecutorProfileID,
 		env.ControlPort, string(env.Status), env.MaterializationSessionID,
@@ -305,7 +313,7 @@ func (r *Repository) validateReadyTaskEnvironment(ctx context.Context, tx *sqlx.
 func (r *Repository) taskEnvironmentStateTx(ctx context.Context, tx *sqlx.Tx, environmentID string) (string, models.TaskEnvironmentStatus, error) {
 	var taskID string
 	var status string
-	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id, status FROM task_environments WHERE id = ?`), environmentID).Scan(&taskID, &status)
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id, status FROM task_environments WHERE id = ? AND retired_at IS NULL`), environmentID).Scan(&taskID, &status)
 	if err == sql.ErrNoRows {
 		return "", "", fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, environmentID)
 	}
@@ -418,7 +426,7 @@ const reelectTaskEnvironmentMaterializationSQL = `
 		container_id = '', container_bootstrap_nonce_secret_id = '',
 		container_control_auth_token_secret_id = '', sandbox_id = '',
 		updated_at = ?
-	WHERE id = ? AND status = ? AND COALESCE(materialization_session_id, '') = ?
+	WHERE id = ? AND retired_at IS NULL AND status = ? AND COALESCE(materialization_session_id, '') = ?
 	  AND COALESCE(workspace_path, '') = ''
 	  AND COALESCE(container_id, '') = ''
 	  AND COALESCE(sandbox_id, '') = ''
@@ -871,6 +879,9 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 		row.WorktreeSourceClonePath = incoming.WorktreeSourceClonePath
 		row.WorktreeSourceCommonDir = incoming.WorktreeSourceCommonDir
 	}
+	if replacePhysical || incoming.WorktreeOrigin != "" {
+		row.WorktreeOrigin = normalizeWorktreeOrigin(incoming.WorktreeOrigin)
+	}
 	row.Position = position
 	row.ErrorMessage = incoming.ErrorMessage
 	// A later successful transition can recreate a slot that an earlier
@@ -893,12 +904,13 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 			branch_slug = ?, workspace_relative_path = ?, worktree_id = ?, worktree_path = ?, worktree_branch = ?,
 			worktree_branch_owner = ?, worktree_integration_ref = ?,
 			worktree_recovery_head_sha = ?, worktree_source_clone_path = ?, worktree_source_common_dir = ?,
-			worktree_branch_compacted_at = ?,
+			worktree_branch_compacted_at = ?, worktree_origin = ?,
 			position = ?, error_message = ?, status = ?, deleted_at = ?, updated_at = ?
 		WHERE id = ?
 	`), row.BranchSlug, row.WorkspaceRelativePath, row.WorktreeID, row.WorktreePath, row.WorktreeBranch,
 		row.WorktreeBranchOwner, row.WorktreeIntegrationRef,
 		row.WorktreeRecoveryHeadSHA, row.WorktreeSourceClonePath, row.WorktreeSourceCommonDir, row.WorktreeBranchCompactedAt,
+		normalizeWorktreeOrigin(row.WorktreeOrigin),
 		row.Position, row.ErrorMessage, row.Status, row.DeletedAt, row.UpdatedAt, row.ID)
 	return err
 }
@@ -1221,15 +1233,15 @@ func (r *Repository) CreateTaskEnvironmentRepo(ctx context.Context, repo *models
 			worktree_id, worktree_path, worktree_branch,
 			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
 			worktree_source_clone_path, worktree_source_common_dir,
-			worktree_branch_compacted_at,
+			worktree_branch_compacted_at, worktree_origin,
 			position, error_message, status, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		repo.ID, repo.TaskEnvironmentID, repo.RepositoryID, repo.WorkspaceRelativePath, repo.BranchSlug,
 		repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
 		repo.WorktreeBranchOwner, repo.WorktreeIntegrationRef, repo.WorktreeRecoveryHeadSHA,
 		repo.WorktreeSourceClonePath, repo.WorktreeSourceCommonDir,
-		repo.WorktreeBranchCompactedAt,
+		repo.WorktreeBranchCompactedAt, normalizeWorktreeOrigin(repo.WorktreeOrigin),
 		repo.Position, repo.ErrorMessage, repo.Status, repo.CreatedAt, repo.UpdatedAt,
 	); err != nil {
 		return err
@@ -1262,18 +1274,25 @@ func (r *Repository) insertTaskEnvironmentRepoTx(ctx context.Context, tx *sqlx.T
 			worktree_id, worktree_path, worktree_branch,
 			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
 			worktree_source_clone_path, worktree_source_common_dir,
-			worktree_branch_compacted_at,
+			worktree_branch_compacted_at, worktree_origin,
 			position, error_message, status, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		repo.ID, repo.TaskEnvironmentID, repo.RepositoryID, repo.WorkspaceRelativePath, repo.BranchSlug,
 		repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
 		repo.WorktreeBranchOwner, repo.WorktreeIntegrationRef, repo.WorktreeRecoveryHeadSHA,
 		repo.WorktreeSourceClonePath, repo.WorktreeSourceCommonDir,
-		repo.WorktreeBranchCompactedAt,
+		repo.WorktreeBranchCompactedAt, normalizeWorktreeOrigin(repo.WorktreeOrigin),
 		repo.Position, repo.ErrorMessage, repo.Status, repo.CreatedAt, repo.UpdatedAt,
 	)
 	return err
+}
+
+func normalizeWorktreeOrigin(origin string) string {
+	if origin == models.WorktreeOriginAdopted {
+		return origin
+	}
+	return models.WorktreeOriginKandev
 }
 
 // ListTaskEnvironmentRepos returns all per-repo rows for an environment, ordered by position.
@@ -1288,6 +1307,7 @@ func (r *Repository) ListTaskEnvironmentRepos(ctx context.Context, envID string)
 			COALESCE(worktree_source_clone_path, ''),
 			COALESCE(worktree_source_common_dir, ''),
 			worktree_branch_compacted_at,
+			COALESCE(worktree_origin, 'kandev'),
 			position, error_message, COALESCE(status, ''),
 			created_at, updated_at, merged_at, deleted_at
 		FROM task_environment_repos
@@ -1310,6 +1330,7 @@ func (r *Repository) ListTaskEnvironmentRepos(ctx context.Context, envID string)
 			&repo.WorktreeBranchOwner, &repo.WorktreeIntegrationRef, &repo.WorktreeRecoveryHeadSHA,
 			&repo.WorktreeSourceClonePath, &repo.WorktreeSourceCommonDir,
 			&compactedAt,
+			&repo.WorktreeOrigin,
 			&repo.Position, &repo.ErrorMessage, &repo.Status,
 			&repo.CreatedAt, &repo.UpdatedAt, &mergedAt, &deletedAt,
 		); err != nil {
@@ -1361,7 +1382,7 @@ func (r *Repository) UpdateTaskEnvironmentRepo(ctx context.Context, repo *models
 			worktree_id = ?, worktree_path = ?, worktree_branch = ?,
 			worktree_branch_owner = ?, worktree_integration_ref = ?, worktree_recovery_head_sha = ?,
 			worktree_source_clone_path = ?, worktree_source_common_dir = ?,
-			worktree_branch_compacted_at = ?,
+			worktree_branch_compacted_at = ?, worktree_origin = ?,
 			position = ?, error_message = ?, status = ?,
 			merged_at = ?, deleted_at = ?, updated_at = ?
 		WHERE id = ?
@@ -1369,7 +1390,7 @@ func (r *Repository) UpdateTaskEnvironmentRepo(ctx context.Context, repo *models
 		repo.BranchSlug, repo.WorkspaceRelativePath, repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
 		repo.WorktreeBranchOwner, repo.WorktreeIntegrationRef, repo.WorktreeRecoveryHeadSHA,
 		repo.WorktreeSourceClonePath, repo.WorktreeSourceCommonDir,
-		repo.WorktreeBranchCompactedAt,
+		repo.WorktreeBranchCompactedAt, normalizeWorktreeOrigin(repo.WorktreeOrigin),
 		repo.Position, repo.ErrorMessage, repo.Status,
 		repo.MergedAt, repo.DeletedAt, repo.UpdatedAt,
 		repo.ID,

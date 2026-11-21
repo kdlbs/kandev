@@ -483,3 +483,39 @@ func stepAllowsAutoStart(step *wfmodels.WorkflowStep) bool {
 	}
 	return step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
 }
+
+// OfficeLaunchProfilePreviewFunc returns the execution profile Office routing
+// would launch the agent with in the workspace, or "" when routing selects no
+// candidate. It must not record route attempts or change provider health.
+type OfficeLaunchProfilePreviewFunc func(ctx context.Context, workspaceID, agentID string) (string, error)
+
+// SetOfficeLaunchProfilePreview wires the Office routing preview used when a
+// UI-prepared Office session binds its execution profile.
+func (s *Service) SetOfficeLaunchProfilePreview(fn OfficeLaunchProfilePreviewFunc) {
+	s.officeLaunchProfilePreview = fn
+}
+
+// officeLaunchProfileForPrepare binds an assigned Office task's new session to
+// the execution profile Office routing would launch its agent with, so a later
+// run reuses the prepared runtime. Without a routed candidate the agent ID is
+// kept, matching the scheduler's non-routed launch.
+func (s *Service) officeLaunchProfileForPrepare(
+	ctx context.Context, task *models.Task, agentProfileID string,
+) (string, bool) {
+	if s.officeLaunchProfilePreview == nil || !task.IsOfficeOwnedAndAssigned() ||
+		agentProfileID != task.AssigneeAgentProfileID || codexForkSourceSessionFromContext(ctx) != "" {
+		return agentProfileID, false
+	}
+	routed, err := s.officeLaunchProfilePreview(ctx, task.WorkspaceID, agentProfileID)
+	if err != nil {
+		s.logger.Warn("office launch profile preview failed; preparing with the agent profile",
+			zap.String("task_id", task.ID),
+			zap.String("agent_profile_id", agentProfileID),
+			zap.Error(err))
+		return agentProfileID, false
+	}
+	if routed == "" {
+		return agentProfileID, false
+	}
+	return routed, true
+}

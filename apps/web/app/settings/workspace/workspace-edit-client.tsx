@@ -26,6 +26,7 @@ import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { buildWorkspaceSaveHandler, type SavedState } from "./workspace-edit-save";
 import { useWorkspaceIdlePolicyDraft } from "./workspace-edit-idle-policy-draft";
+import { WorkspaceWipReleaseSection } from "./workspace-wip-release-section";
 
 type Workspace = WorkspaceState["items"][number];
 import { useRequest } from "@/lib/http/use-request";
@@ -37,11 +38,9 @@ import { useSettingsSaveContributor } from "@/components/settings/settings-save-
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { workspaceDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
-import { WorkspacePlacementCard } from "@/components/settings/workspaces/workspace-placement-card";
-import { WorkspaceTeamAccessCard } from "@/components/settings/workspaces/workspace-team-access-card";
+import { WorkspaceAccessSettings } from "./workspace-access-settings";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { WorkspaceIdlePolicyFormSection } from "./workspace-idle-policy-form-section";
-import { WorkspaceWipReleaseSection } from "./workspace-wip-release-section";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -560,6 +559,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         onAgentProfileChange={setDefaultAgentProfileId}
         agentProfiles={agentProfiles}
       />
+      <WorkspaceWipReleaseSection workspace={currentWorkspace} canManage={canManage} />
       <WorkspaceIdlePolicyFormSection
         canManage={canManage}
         enabled={idleSuspensionEnabled}
@@ -571,25 +571,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         onEnabledChange={setIdleSuspensionEnabled}
         onTimeoutChange={setIdleTimeoutMinutes}
       />
-      <WorkspaceWipReleaseSection workspace={currentWorkspace} canManage={canManage} />
-      {/*
-        Reads the live store item rather than the form's captured snapshot:
-        scopes arrive with hydration, which can land after this
-        form mounts, and a snapshot would freeze the owner out of their own
-        workspace.
-      */}
-      <WorkspacePlacementCard
-        workspaceId={workspace.id}
-        unitId={workspace.unit_id}
-        scopes={workspace.scopes}
-      />
-      <Separator />
-      <WorkspaceTeamAccessCard
-        workspaceId={workspace.id}
-        ownerId={workspace.owner_id ?? ""}
-        scopes={workspace.scopes}
-      />
-      <Separator />
+      <WorkspaceAccessSettings workspace={workspace} />
       <DeleteWorkspaceCard
         canManage={canManage}
         workspaceName={currentWorkspace.name}

@@ -38,6 +38,76 @@ func TestLoadSessionRuntimeConfigMapStringExtractsReservedKeys(t *testing.T) {
 	}
 }
 
+func TestTaskEnvironmentEffectiveExecutorType(t *testing.T) {
+	tests := []struct {
+		name        string
+		environment TaskEnvironment
+		wantType    ExecutorType
+		wantKnown   bool
+	}{
+		{
+			name:      "legacy implicit local",
+			wantType:  ExecutorTypeLocal,
+			wantKnown: true,
+		},
+		{
+			name: "unresolved executor",
+			environment: TaskEnvironment{
+				ExecutorID: "missing-executor",
+			},
+		},
+		{
+			name: "unresolved profile",
+			environment: TaskEnvironment{
+				ExecutorProfileID: "missing-profile",
+			},
+		},
+		{
+			name: "container handle",
+			environment: TaskEnvironment{
+				ContainerID: "container-123",
+			},
+		},
+		{
+			name: "sandbox handle",
+			environment: TaskEnvironment{
+				SandboxID: "sandbox-123",
+			},
+		},
+		{
+			name: "container secret handles",
+			environment: TaskEnvironment{
+				ContainerBootstrapNonceSecretID:   "bootstrap-secret",
+				ContainerControlAuthTokenSecretID: "control-secret",
+			},
+		},
+		{
+			name: "known explicit remote executor",
+			environment: TaskEnvironment{
+				ExecutorType: string(ExecutorTypeLocalDocker),
+				ContainerID:  "container-123",
+			},
+			wantType:  ExecutorTypeLocalDocker,
+			wantKnown: true,
+		},
+		{
+			name: "unknown explicit executor type",
+			environment: TaskEnvironment{
+				ExecutorType: "future_executor",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotType, gotKnown := test.environment.EffectiveExecutorType()
+			if gotType != test.wantType || gotKnown != test.wantKnown {
+				t.Fatalf("EffectiveExecutorType() = %q, %v; want %q, %v", gotType, gotKnown, test.wantType, test.wantKnown)
+			}
+		})
+	}
+}
+
 func TestLoadSessionRuntimeConfigOverridesUsesDedicatedKey(t *testing.T) {
 	metadata := map[string]interface{}{
 		SessionMetaKeyRuntimeConfig: map[string]interface{}{

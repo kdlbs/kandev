@@ -83,8 +83,12 @@ func (s *Server) registeredToolPackage(name string) mcpprofile.PackageID {
 func (s *Server) initializeBuiltinTransports(port int) {
 	for id, view := range s.builtinPackages {
 		suffix := "/packages/" + string(id)
-		view.http = server.NewStreamableHTTPServer(view.registry, server.WithEndpointPath("/mcp"+suffix), server.WithStateful(true), server.WithHTTPContextFunc(s.mcpHTTPContext))
-		view.sse = server.NewSSEServer(view.registry, server.WithBaseURL(s.sseBaseURLForPort(port)), server.WithSSEEndpoint("/sse"+suffix), server.WithMessageEndpoint("/message"+suffix))
+		view.http = server.NewStreamableHTTPServer(view.registry, server.WithEndpointPath(s.nativeRoutePath("/mcp"+suffix)), server.WithStateful(true), server.WithHTTPContextFunc(s.mcpHTTPContext))
+		sseOptions := []server.SSEOption{server.WithBaseURL(s.sseBaseURLForPort(port)), server.WithSSEEndpoint("/sse" + suffix), server.WithMessageEndpoint("/message" + suffix)}
+		if s.nativeRoutePrefix != "" {
+			sseOptions = append(sseOptions, server.WithStaticBasePath(s.nativeRoutePrefix))
+		}
+		view.sse = server.NewSSEServer(view.registry, sseOptions...)
 	}
 }
 

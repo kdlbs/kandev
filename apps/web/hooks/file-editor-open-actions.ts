@@ -1,3 +1,4 @@
+import { getFilePreviewKind } from "@/lib/utils/file-types";
 import { useCallback } from "react";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -123,7 +124,13 @@ export function useOpenFileAction({
           addFileEditorPanel,
           removeFileState,
         );
-        setFileState(fileKey, state);
+        if (getOpenFiles().has(fileKey)) return;
+        setFileState(fileKey, {
+          ...state,
+          renderedPreview:
+            getFilePreviewKind(filePath, state.isBinary) === "markdown" &&
+            (store.getState().userSettings?.markdownPreviewByDefault ?? true),
+        });
       } catch (error) {
         toast({
           title: t(FAILED_TO_OPEN_FILE),

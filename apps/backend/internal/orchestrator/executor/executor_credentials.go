@@ -301,6 +301,15 @@ func (e *Executor) configureManagedGitCredentials(
 		if hasManagedContributionDestination(infos) {
 			return errors.New("managed contribution destination cannot be activated without the GitHub credential broker")
 		}
+		if e.githubCredentialPolicyResolver == nil {
+			// Without either service, workspace credential management is inactive.
+			return nil
+		}
+		for _, info := range infos {
+			if info != nil && managedGitCredentialProviderForProfile(info.Repository, true, req.Env, profileEnvVars) == gitHubProviderID {
+				return errors.New("managed GitHub credentials require the Git credential broker")
+			}
+		}
 		return nil
 	}
 	scopes, helpers, err := e.issueGitCredentialScopesWithProfileEnv(ctx, req, infos, true, profileEnvVars)
@@ -826,10 +835,10 @@ func managedGitCredentialProviderForProfile(
 	if providerID == "" {
 		providerID = gitHubProviderID
 	}
-	// Native GitLab and Azure DevOps credentials keep their existing executor
-	// paths. The generic broker is reserved for managed GitHub credentials and
-	// manifest-owned plugin providers.
-	if providerID == gitLabProviderID || providerID == providerAzureDevOps {
+	// Native GitLab credentials keep their existing executor path. The generic
+	// broker is reserved for managed GitHub credentials and manifest-owned
+	// plugin providers.
+	if providerID == gitLabProviderID {
 		return ""
 	}
 	if providerID == gitHubProviderID && (!githubManaged || hasExplicitGitHubTokenForRepository(env, profileEnvVars, repository)) {

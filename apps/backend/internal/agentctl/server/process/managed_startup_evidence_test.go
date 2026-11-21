@@ -102,12 +102,12 @@ func TestProcessManagerIdentityScopesRecoveryDescriptor(t *testing.T) {
 }
 
 func TestManagedStartupEvidenceSeparatesEmptyUnknownAndIncompleteDiagnostics(t *testing.T) {
-	empty := newManagedStartupEvidence(1, nil, false, true, true, false, nil)
+	empty := newManagedStartupEvidence(1, nil, false, true, true, false, nil, "", true)
 	if !empty.CollectionComplete || !empty.NPMDiagnosticComplete || empty.NPMDiagnosticPresent || empty.UnclassifiedNPMCode {
 		t.Fatalf("empty diagnostic evidence = %#v, want complete and genuinely empty", empty)
 	}
 
-	ordinaryStderr := newManagedStartupEvidence(4, nil, false, true, true, true, []string{"startup configuration is invalid"})
+	ordinaryStderr := newManagedStartupEvidence(4, nil, false, true, true, true, []string{"startup configuration is invalid"}, "", true)
 	if ordinaryStderr.NPMDiagnosticComplete {
 		t.Fatalf("ordinary stderr evidence = %#v, want it to be ineligible for empty-stderr recovery", ordinaryStderr)
 	}
@@ -116,7 +116,7 @@ func TestManagedStartupEvidenceSeparatesEmptyUnknownAndIncompleteDiagnostics(t *
 	if !keep {
 		t.Fatal("expected an unknown canonical npm code to retain a safe marker")
 	}
-	unknown := newManagedStartupEvidence(2, nil, false, true, true, true, []string{unknownLine})
+	unknown := newManagedStartupEvidence(2, nil, false, true, true, true, []string{unknownLine}, "", true)
 	if !unknown.NPMDiagnosticPresent || !unknown.NPMDiagnosticComplete || !unknown.UnclassifiedNPMCode || unknown.NPMCode != "" {
 		t.Fatalf("unclassified npm diagnostic evidence = %#v, want complete unknown marker without retry code", unknown)
 	}
@@ -124,7 +124,7 @@ func TestManagedStartupEvidenceSeparatesEmptyUnknownAndIncompleteDiagnostics(t *
 	oversized := newManagedStartupEvidence(3, nil, false, true, true, true, []string{
 		"npm error code EACCES",
 		strings.Repeat("diagnostic ", 2_000),
-	})
+	}, "", true)
 	if !oversized.NPMDiagnosticPresent || oversized.NPMDiagnosticComplete || oversized.NPMCode != "" {
 		t.Fatalf("oversized npm diagnostic evidence = %#v, want incomplete and no trusted code", oversized)
 	}

@@ -128,6 +128,7 @@ func TestManagedGoCacheRecoveryFlows(t *testing.T) {
 	orchestratorExecutor := orchestratorexecutor.NewExecutor(
 		adapter, harness.taskRepo, log, orchestratorexecutor.ExecutorConfig{},
 	)
+	orchestratorExecutor.SetCapabilities(adapter)
 	_, err = orchestratorExecutor.LaunchPreparedSession(ctx, task.ToAPI(), initialSession.ID,
 		orchestratorexecutor.LaunchOptions{AgentProfileID: "mock-profile", StartAgent: true})
 	require.NoError(t, err)
