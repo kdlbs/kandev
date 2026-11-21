@@ -346,6 +346,9 @@ func handleE2EReset(
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM github_workspace_settings WHERE workspace_id = ?`, workspaceID); err != nil {
 			log.Warn("e2e reset: GitHub workspace settings cleanup failed", zap.Error(err))
 		}
+		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM plugin_task_change_requests WHERE workspace_id = ?`, workspaceID); err != nil {
+			log.Warn("e2e reset: plugin change request cleanup failed", zap.Error(err))
+		}
 		if err := deleteGitHubAuthForReset(ctx, repo.DB(), workspaceID); err != nil {
 			log.Error("e2e reset: GitHub authentication cleanup failed", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: "GitHub authentication cleanup failed"})

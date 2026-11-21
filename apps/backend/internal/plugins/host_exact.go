@@ -100,6 +100,8 @@ var exactHostMethods = []exactMethod{
 	{method: exactAnswerClarificationMethod, capability: "host.v2.write:interactions", description: "Relay a human-authorized answer to one pending clarification"},
 	{method: exactTaskDirectiveIssueMethod, capability: exactTaskDirectiveCapability, description: "Record one short-lived task directive"},
 	{method: exactTaskDirectiveResolveMethod, capability: exactTaskDirectiveCapability, description: "Resolve one pending task directive"},
+	{method: exactTaskChangeRequestReportMethod, capability: exactTaskChangeRequestCapability, description: "Report one observed task change request"},
+	{method: exactTaskChangeRequestRemoveMethod, capability: exactTaskChangeRequestCapability, description: "Remove one reported task change request"},
 	{method: exactSourceIssueCommentMethod, capability: "host.v2.write:source_issues", description: "Comment on the task's existing linked Jira or Linear issue"},
 	{method: exactSourceIssueTransitionMethod, capability: "host.v2.write:source_issues", description: "Transition the task's existing linked Jira or Linear issue"},
 	{method: "EnsureManagedAgentConversationExact", capability: "host.v2.write:managed_agent_conversations", description: "Ensure or update one installation-owned conversation"},
@@ -338,6 +340,22 @@ func exactExternalMutationUnavailableReason(method string, host *pluginHost, com
 		case host.pendingTaskTransitions == nil || host.pendingTaskTransitions() == nil:
 			return exactReasonTaskTransitionDataUnavailable
 		}
+	case exactTaskChangeRequestReportMethod:
+		switch {
+		case !commandStoreAvailable:
+			return exactReasonCommandStoreUnavailable
+		case host.taskData == nil:
+			return "task_data_unavailable"
+		case host.changeRequestLedger() == nil:
+			return "task_change_requests_unsupported"
+		}
+	case exactTaskChangeRequestRemoveMethod:
+		switch {
+		case !commandStoreAvailable:
+			return exactReasonCommandStoreUnavailable
+		case host.changeRequestLedger() == nil:
+			return "task_change_requests_unsupported"
+		}
 	}
 	return ""
 }
@@ -381,7 +399,8 @@ func exactTaskWriterNeedsCommandStore(method string) bool {
 	case exactTaskCreateMethod, exactTaskLabelsMethod, exactTaskAssignmentMethod, exactTaskMoveMethod,
 		exactTaskArchiveMethod, exactTaskManagementClaimAcquireMethod, exactTaskManagementClaimReleaseMethod,
 		exactTaskManagementClaimTransferMethod, exactTaskCompletionCriteriaMethod, exactTaskCompletionEvidenceMethod,
-		exactTaskRelationAddMethod, exactTaskRelationRemoveMethod:
+		exactTaskRelationAddMethod, exactTaskRelationRemoveMethod,
+		exactTaskChangeRequestReportMethod, exactTaskChangeRequestRemoveMethod:
 		return true
 	default:
 		return false
