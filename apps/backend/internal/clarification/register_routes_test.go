@@ -38,6 +38,9 @@ func TestRegisterRoutes_InboxGatedByFlag(t *testing.T) {
 			"/api/v1/clarification-inbox",
 			"/api/v1/clarification-inbox/hidden",
 			"/api/v1/clarification-inbox/sidecar/:pendingID",
+			"/api/v1/clarification-inbox/unanswered",
+			"/api/v1/clarification-inbox/unanswered/:pendingID/close",
+			"/api/v1/clarification-inbox/unanswered/:pendingID/late-answer",
 		} {
 			if paths[path] {
 				t.Errorf("%s registered with the flag off: the Inbox API must not be reachable in a profile where features.needsYouInbox is false", path)
@@ -55,6 +58,9 @@ func TestRegisterRoutes_InboxGatedByFlag(t *testing.T) {
 			"/api/v1/clarification-inbox",
 			"/api/v1/clarification-inbox/hidden",
 			"/api/v1/clarification-inbox/sidecar/:pendingID",
+			"/api/v1/clarification-inbox/unanswered",
+			"/api/v1/clarification-inbox/unanswered/:pendingID/close",
+			"/api/v1/clarification-inbox/unanswered/:pendingID/late-answer",
 		} {
 			if !paths[path] {
 				t.Errorf("%s missing with the flag on", path)

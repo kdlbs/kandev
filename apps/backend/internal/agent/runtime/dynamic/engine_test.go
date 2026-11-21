@@ -110,8 +110,8 @@ func TestKeywordCircuitKeepsLongestDeadlineAcrossFailureOrder(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := NewEngine(WithClock(func() time.Time { return now }))
-			engine.openCircuitForFailure(profile, candidate.ID, failure(tc.firstHasHint))
-			engine.openCircuitForFailure(profile, candidate.ID, failure(!tc.firstHasHint))
+			engine.openCircuitForFailure(profile, candidate.ID, failure(tc.firstHasHint), SuspensionBinding)
+			engine.openCircuitForFailure(profile, candidate.ID, failure(!tc.firstHasHint), SuspensionBinding)
 			if snapshots := engine.Circuits().Snapshots(); len(snapshots) != 1 || !snapshots[0].Until.Equal(resetAt) {
 				t.Fatalf("circuit deadline = %+v, want %v", snapshots, resetAt)
 			}
@@ -139,7 +139,7 @@ func TestKeywordCircuitFailurePreservesActiveProbeLease(t *testing.T) {
 			Scope: "account", Action: "try_next", Backoff: 5 * time.Minute,
 		},
 	}
-	engine.openCircuitForFailure(profile, candidate.ID, failure)
+	engine.openCircuitForFailure(profile, candidate.ID, failure, SuspensionBinding)
 
 	snapshots := engine.Circuits().Snapshots()
 	if len(snapshots) != 1 || !snapshots[0].ProbeUntil.Equal(lease.ExpiresAt) {

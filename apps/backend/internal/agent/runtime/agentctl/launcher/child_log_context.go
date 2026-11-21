@@ -6,35 +6,37 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // childLogRecordFields is the fixed reconstruction shape for one recognized
 // child record. Optional fields carry only values that passed validation.
 type childLogRecordFields struct {
-	Level         string          `json:"level"`
-	Timestamp     string          `json:"timestamp"`
-	Caller        string          `json:"caller"`
-	Message       string          `json:"msg"`
-	Component     json.RawMessage `json:"component,omitempty"`
-	TaskID        json.RawMessage `json:"task_id,omitempty"`
-	SessionID     json.RawMessage `json:"session_id,omitempty"`
-	InstanceID    json.RawMessage `json:"instance_id,omitempty"`
-	ExecutionID   json.RawMessage `json:"execution_id,omitempty"`
-	SubmissionID  json.RawMessage `json:"submission_id,omitempty"`
-	RequestID     json.RawMessage `json:"request_id,omitempty"`
-	State         json.RawMessage `json:"state,omitempty"`
-	ErrorClass    json.RawMessage `json:"error_class,omitempty"`
-	Reason        json.RawMessage `json:"reason,omitempty"`
-	Operation     json.RawMessage `json:"operation,omitempty"`
-	Trigger       json.RawMessage `json:"trigger,omitempty"`
-	Runtime       json.RawMessage `json:"runtime,omitempty"`
-	PollMode      json.RawMessage `json:"poll_mode,omitempty"`
-	ExitCode      json.RawMessage `json:"exit_code,omitempty"`
-	ExitReason    json.RawMessage `json:"process_reason,omitempty"`
-	ExitState     json.RawMessage `json:"exit_disposition,omitempty"`
-	Generation    json.RawMessage `json:"process_generation,omitempty"`
-	RetainedBytes json.RawMessage `json:"retained_bytes,omitempty"`
-	LimitBytes    json.RawMessage `json:"limit_bytes,omitempty"`
+	Level         string                `json:"level"`
+	Timestamp     string                `json:"timestamp"`
+	Caller        string                `json:"caller"`
+	Message       string                `json:"msg"`
+	Flow          *logger.ExecutionFlow `json:"flow,omitempty"`
+	Component     json.RawMessage       `json:"component,omitempty"`
+	TaskID        json.RawMessage       `json:"task_id,omitempty"`
+	SessionID     json.RawMessage       `json:"session_id,omitempty"`
+	InstanceID    json.RawMessage       `json:"instance_id,omitempty"`
+	ExecutionID   json.RawMessage       `json:"execution_id,omitempty"`
+	SubmissionID  json.RawMessage       `json:"submission_id,omitempty"`
+	RequestID     json.RawMessage       `json:"request_id,omitempty"`
+	State         json.RawMessage       `json:"state,omitempty"`
+	ErrorClass    json.RawMessage       `json:"error_class,omitempty"`
+	Reason        json.RawMessage       `json:"reason,omitempty"`
+	Operation     json.RawMessage       `json:"operation,omitempty"`
+	Trigger       json.RawMessage       `json:"trigger,omitempty"`
+	Runtime       json.RawMessage       `json:"runtime,omitempty"`
+	PollMode      json.RawMessage       `json:"poll_mode,omitempty"`
+	ExitCode      json.RawMessage       `json:"exit_code,omitempty"`
+	ExitReason    json.RawMessage       `json:"process_reason,omitempty"`
+	ExitState     json.RawMessage       `json:"exit_disposition,omitempty"`
+	Generation    json.RawMessage       `json:"process_generation,omitempty"`
+	RetainedBytes json.RawMessage       `json:"retained_bytes,omitempty"`
+	LimitBytes    json.RawMessage       `json:"limit_bytes,omitempty"`
 }
 
 const childLogComponentField = "component"

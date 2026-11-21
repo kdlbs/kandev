@@ -114,6 +114,13 @@ export async function updateWorkspaceAction(
     default_config_agent_profile_id?: string;
     acp_idle_suspension_enabled?: boolean;
     acp_idle_timeout_minutes?: number;
+    dynamic_midturn_failover_enabled?: boolean;
+    dynamic_failed_route_auto_retry_enabled?: boolean;
+    dynamic_failed_route_auto_retry_max?: number;
+    clarification_unanswered_inbox_enabled?: boolean;
+    clarification_unanswered_retention_days?: number;
+    wip_sessionless_release_enabled?: boolean;
+    wip_sessionless_release_grace_minutes?: number;
   },
 ) {
   return fetchJson<Workspace>(`${apiBaseUrl}/api/v1/workspaces/${id}`, {

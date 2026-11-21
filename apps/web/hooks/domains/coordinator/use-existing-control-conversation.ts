@@ -1,14 +1,37 @@
 import { useEffect, useState } from "react";
 import { fetchTask } from "@/lib/api/domains/kanban-api";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
+import type { Task } from "@/lib/types/http";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
-import type { Task } from "@/lib/types/http";
+
+function matchesOriginalConversation(
+  task: Task,
+  workspaceId: string,
+  taskId: string,
+  coordinatorId?: string,
+) {
+  if (task.id !== taskId || task.workspace_id !== workspaceId) return false;
+  if (coordinatorId)
+    return (
+      task.origin === "coordinator" &&
+      task.metadata?.coordinator_id === coordinatorId &&
+      task.metadata?.coordinator_purpose !== "dream"
+    );
+  return (
+    task.is_ephemeral === true &&
+    !task.workflow_id &&
+    task.origin !== "coordinator" &&
+    task.origin !== "automation_run" &&
+    typeof task.metadata?.["kandev.plugin_id"] !== "string" &&
+    task.metadata?.config_mode !== true
+  );
+}
 
 /** Resolve only an existing task; no prepare, conversation-open, or recovery request. */
 export function useExistingControlConversation(
   workspaceId: string,
-  coordinatorId: string,
+  coordinatorId: string | undefined,
   taskId: string,
 ) {
   const store = useAppStoreApi();
@@ -22,11 +45,7 @@ export function useExistingControlConversation(
     fetchTask(taskId, { cache: "no-store", init: { signal: controller.signal } })
       .then((task) => {
         if (!active || stateReadScopeIdentity(store.getState()) !== identity) return;
-        const matches =
-          task.id === taskId &&
-          task.workspace_id === workspaceId &&
-          task.origin === "coordinator" &&
-          task.metadata?.coordinator_id === coordinatorId;
+        const matches = matchesOriginalConversation(task, workspaceId, taskId, coordinatorId);
         setResult({ key, task: matches ? task : null, error: !matches });
       })
       .catch(() => {

@@ -11,6 +11,9 @@ requirements:
 
 # Session recovery convergence
 
+See [automatic session recovery options](automatic-session-recovery-options.md)
+for installation-level settings and admission conditions.
+
 ## Boundaries
 
 Platform owns the contract. Lifecycle authenticates the runtime and assesses the

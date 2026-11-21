@@ -960,6 +960,17 @@ func (h *TaskHandlers) httpGetStepTaskCount(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.TaskCountResponse{TaskCount: count})
 }
 
+// httpGetStepWIPOccupants explains which admitted tasks hold the step's WIP
+// slots and why, so a slot held by a task with no live session is visible.
+func (h *TaskHandlers) httpGetStepWIPOccupants(c *gin.Context) {
+	occupancy, err := h.service.GetWorkflowStepWIPOccupancy(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workflow step not found")
+		return
+	}
+	c.JSON(http.StatusOK, occupancy)
+}
+
 type httpBulkMoveTasksRequest struct {
 	SourceWorkflowID string   `json:"source_workflow_id"`
 	SourceStepID     string   `json:"source_step_id,omitempty"`

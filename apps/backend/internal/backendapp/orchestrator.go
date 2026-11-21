@@ -106,6 +106,10 @@ func provideOrchestrator(
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
 	serviceCfg.CodexAppServerEnabled = cfg != nil && cfg.Features.CodexAppServer
 	serviceCfg.ProviderKeywordContext = cfg != nil && cfg.Features.ProviderKeywordContext
+	serviceCfg.AutoStartPendingWork = cfg != nil && cfg.Features.AutoStartPendingWork
+	serviceCfg.AutoContinueFromHistory = cfg != nil && cfg.Features.AutoContinueFromHistory
+	serviceCfg.AutoRetryUnsentRequests = cfg != nil && cfg.Features.AutoRetryUnsentRequests
+	serviceCfg.TerminalPrimaryQueueHandoff = cfg != nil && cfg.Features.TerminalPrimaryQueueHandoff
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)
@@ -209,7 +213,7 @@ func provideOrchestrator(
 	orchestratorSvc.SetWorkspaceRecoveryErrorReporter(taskSvc)
 	orchestratorSvc.SetWorkspaceRecoveryStatusReader(taskSvc)
 
-	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
+	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log, duplicates: taskRepo}
 	orchestratorSvc.SetMessageCreator(msgCreator)
 	orchestratorSvc.SetTaskTurnErrorRecorder(taskSvc)
 	orchestratorSvc.SetTransientRetryMessageService(taskSvc)

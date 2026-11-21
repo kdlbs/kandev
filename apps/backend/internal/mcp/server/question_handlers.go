@@ -26,6 +26,7 @@ A bundle is pending when no resolution has been recorded for it and at least one
 			mcp.WithString("created_since", mcp.Description("Optional RFC3339 timestamp; only bundles created at or after this time are returned.")),
 			mcp.WithString("cursor", mcp.Description("Optional opaque pagination cursor from a previous call's next_cursor.")),
 			mcp.WithNumber("limit", mcp.Description("Optional page size (default 50, max 200).")),
+			mcp.WithBoolean("include_unanswered", mcp.Description(`Optional. Also list unanswered questions: ones a newer agent turn moved past while they were still pending, in workspaces that enable the unanswered inbox. Each bundle then carries state "active" (the agent is waiting; answer with answer_question_kandev) or "unanswered" (the agent is not waiting; check these before asking the same question again). Unanswered bundles cannot be answered with answer_question_kandev.`)),
 		),
 		s.wrapHandler("list_pending_questions_kandev", s.listPendingQuestionsHandler()),
 	)
@@ -65,6 +66,9 @@ func (s *Server) listPendingQuestionsHandler() server.ToolHandlerFunc {
 		copyOptionalStringArg(payload, req, "created_since")
 		copyOptionalStringArg(payload, req, "cursor")
 		copyOptionalLimitArg(payload, req)
+		if req.GetBool("include_unanswered", false) {
+			payload["include_unanswered"] = true
+		}
 
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListPendingQuestions, payload, &result); err != nil {

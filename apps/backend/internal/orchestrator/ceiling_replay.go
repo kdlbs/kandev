@@ -818,6 +818,7 @@ func (s *Service) replayCeilingLaunchStartCreated(ctx context.Context, task *mod
 		promptReferencesPrepared:    boolField(payload, "prompt_references_prepared"),
 		preserveDirectPrompt:        boolField(payload, "preserve_direct_prompt"),
 		ceilingEntryBinding:         entryBinding,
+		origin:                      launchOrigin(stringField(payload, "origin")),
 	}
 
 	execution, err := s.startCreatedSession(
@@ -939,6 +940,7 @@ func (s *Service) replayCeilingLaunchQueueDrainEnsure(ctx context.Context, task 
 
 // replayCeilingLaunchResume replays an AC-42 "resume" record.
 func (s *Service) replayCeilingLaunchResume(ctx context.Context, task *models.Task, payload map[string]interface{}, origins ...launchOrigin) ceilingReplayResult {
+	sessionID := stringField(payload, metaKeySessionID)
 	identity, hasIdentity, identityErr := transientLaunchIdentityFromPayload(payload)
 	if identityErr != nil {
 		return ceilingReplaySupersededResult()
@@ -949,16 +951,21 @@ func (s *Service) replayCeilingLaunchResume(ctx context.Context, task *models.Ta
 		RequireIdleSuspensionProvenance: boolField(payload, resumePayloadIdleProvenanceKey),
 		Origin:                          string(ceilingAdmissionOrigin(origins...)),
 	}
+	if stringField(payload, resumePayloadRecoveryActionKey) == recoveryActionResume {
+		options.RecoveryAction = recoveryActionResume
+		options.SettingsPolicy = executor.ResumeSettingsPolicy(stringField(payload, resumePayloadSettingsPolicyKey))
+		options.DeferInitialPrompt = true
+		options.StartAgentSynchronously = true
+		if attemptID := stringField(payload, resumePayloadHistoryAttemptKey); attemptID != "" {
+			ctx = context.WithValue(ctx, automaticHistoryAttemptKey{}, attemptID)
+		}
+	}
 	if hasIdentity {
 		options.TransientRetryAttemptID = identity.attemptID
 		options.TransientRetryErrorStamp = identity.errorStamp
 		options.TransientRetryUpdatedAt = identity.updatedAt
 	}
-	execution, err := s.ResumeTaskSessionWithOptions(
-		ctx, task.ID,
-		stringField(payload, metaKeySessionID),
-		options,
-	)
+	execution, err := s.ResumeTaskSessionWithOptions(ctx, task.ID, sessionID, options)
 	if errors.Is(err, errTransientLaunchRetrySuperseded) {
 		return ceilingReplaySupersededResult()
 	}
@@ -966,6 +973,11 @@ func (s *Service) replayCeilingLaunchResume(ctx context.Context, task *models.Ta
 		// The session is no longer parked by the idle policy, so the focus
 		// resume this record carries no longer applies.
 		return ceilingReplaySupersededResult()
+	}
+	if err == nil && execution != nil && options.RecoveryAction == recoveryActionResume {
+		if err = s.acknowledgeNativeResumeDelivery(ctx, sessionID); err == nil {
+			err = s.resolveSessionRecoveryBlock(ctx, sessionID, recoveryActionResume)
+		}
 	}
 	return ceilingReplayResultFromExecution(execution, err)
 }

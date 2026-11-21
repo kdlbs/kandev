@@ -216,20 +216,23 @@ type LaunchSessionRequest struct {
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// IntentStart only; IntentStartCreated keeps its existing profile resolution
 	// behavior.
-	ProfileExplicit   bool   `json:"profile_explicit,omitempty"`
-	ExecutorID        string `json:"executor_id,omitempty"`
-	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
-	Prompt            string `json:"prompt,omitempty"`
-	PlanMode          bool   `json:"plan_mode,omitempty"`
-	WorkflowStepID    string `json:"workflow_step_id,omitempty"`
-	Priority          string `json:"priority,omitempty"`
-	LaunchWorkspace   bool   `json:"launch_workspace,omitempty"`
-	SkipMessageRecord bool   `json:"skip_message_record,omitempty"`
-	AutoStart         bool   `json:"auto_start,omitempty"`
-	// Origin is server-owned launch provenance. It is excluded from the wire
-	// request so clients cannot request an automatic capacity policy.
-	Origin       string   `json:"-"`
-	MCPServerIDs []string `json:"mcp_server_ids,omitempty"`
+	ProfileExplicit   bool     `json:"profile_explicit,omitempty"`
+	ExecutorID        string   `json:"executor_id,omitempty"`
+	ExecutorProfileID string   `json:"executor_profile_id,omitempty"`
+	Prompt            string   `json:"prompt,omitempty"`
+	PlanMode          bool     `json:"plan_mode,omitempty"`
+	WorkflowStepID    string   `json:"workflow_step_id,omitempty"`
+	Priority          string   `json:"priority,omitempty"`
+	LaunchWorkspace   bool     `json:"launch_workspace,omitempty"`
+	SkipMessageRecord bool     `json:"skip_message_record,omitempty"`
+	AutoStart         bool     `json:"auto_start,omitempty"`
+	MCPServerIDs      []string `json:"mcp_server_ids,omitempty"`
+	// Automatic is server-owned provenance for unattended capacity admission,
+	// including launches an agent requested through Kandev MCP tools. It is
+	// set only by server-side handlers and is not part of the wire request.
+	Automatic bool `json:"-"`
+	// Origin is server-owned launch provenance and is excluded from wire requests.
+	Origin string `json:"-"`
 	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
 	// agent launch, even for passthrough profiles (whose prepare would normally
 	// be eagerly upgraded so the PTY exists). It backs the session.ensure
@@ -487,6 +490,9 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 		return nil, err
 	}
 	ctx = preparedCtx
+	if err := s.checkInferenceClosureAdmission(ctx, req.SessionID, true); err != nil {
+		return nil, err
+	}
 	if req.QuickChatInitialStart {
 		releaseLifecycleLock, handleStartFailure, err := s.beginQuickChatStartFailureOwnership(ctx, req)
 		if err != nil {
@@ -586,6 +592,9 @@ func (s *Service) finishLaunchIntent(
 }
 
 func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID string) error {
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, true); err != nil {
+		return err
+	}
 	if sessionID == "" {
 		return nil
 	}
@@ -603,6 +612,10 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	}
 	if err != nil {
 		return fmt.Errorf("check session recovery block: %w", err)
+	}
+	permit, _ := ctx.Value(inferenceClosurePermitKey{}).(*models.InferenceClosureCheckpoint)
+	if permit != nil && block != nil && block.ConsumerReference == models.InferenceClosureConsumer && block.ID == permit.OperationID {
+		return s.checkOtherRecoveryBlocksForClosure(ctx, sessionID, incarnationID, generation, permit)
 	}
 	resolved, finishErr := s.finishLoadedNativeDeliveryBlock(ctx, block)
 	if resolved {
@@ -710,6 +723,9 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 
 func (s *Service) finishSessionRecovery(ctx context.Context, sessionID string) error {
 	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
+	if automaticHistoryAttempt(ctx) != "" {
+		return nil
+	}
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
 		return fmt.Errorf("release parked queue work after session recovery: %w", err)
 	}
@@ -1052,6 +1068,7 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		startTaskOptions{
 			ProfileExplicit:               req.ProfileExplicit,
 			SpawnOrigin:                   req.SpawnOrigin,
+			Origin:                        agentLaunchOrigin(req),
 			PreserveWorkflowSourceBinding: req.PreserveWorkflowSourceBinding,
 			MCPServerIDs:                  req.MCPServerIDs,
 			reusePreparedPrimary:          req.reusePreparedPrimary,
@@ -1116,7 +1133,7 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	}
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
-	options := startCreatedSessionOptions{lifecycleLockHeld: req.QuickChatInitialStart}
+	options := startCreatedSessionOptions{lifecycleLockHeld: req.QuickChatInitialStart, origin: agentLaunchOrigin(req)}
 	if req.Prompt != "" && !req.PromptIsTaskDescription {
 		// The launching caller supplied an explicit instruction, not the
 		// task-description transport used by internals. Select the existing
@@ -1320,13 +1337,23 @@ func (s *Service) sessionOpenRecoveryWaitingResponse(
 }
 
 func launchOriginForActivation(req *LaunchSessionRequest) launchOrigin {
-	if req != nil && req.Origin == string(launchOriginAutomatic) {
+	if req != nil && (req.Automatic || req.Origin == string(launchOriginAutomatic)) {
 		return launchOriginAutomatic
 	}
 	if req != nil && req.ActivationSource == LaunchActivationSourceSessionOpen {
 		return launchOriginAutomatic
 	}
 	return originFromAutoStart(req != nil && req.AutoStart)
+}
+
+// agentLaunchOrigin is the admission origin an agent-requested launch carries
+// into startTask or startCreatedSession. Empty keeps their autoStart-derived
+// origin.
+func agentLaunchOrigin(req *LaunchSessionRequest) launchOrigin {
+	if req != nil && req.Automatic {
+		return launchOriginAutomatic
+	}
+	return ""
 }
 
 func (s *Service) deferredLaunchResponse(
@@ -1608,11 +1635,14 @@ func waitForRestoreWorkspaceRetry(ctx context.Context, retry <-chan time.Time) e
 
 // RecoverSessionOptions carries action-specific recovery authority.
 type RecoverSessionOptions struct {
-	IdempotencyKey         string
-	SettingsPolicy         executor.ResumeSettingsPolicy
-	ErrorStamp             string
-	Origin                 string
-	transientLaunchFailure *transientLaunchFailureIdentity
+	// Automatic is server-owned and preserves automatic capacity admission.
+	Automatic                   bool
+	InferenceClosureOperationID string
+	IdempotencyKey              string
+	SettingsPolicy              executor.ResumeSettingsPolicy
+	ErrorStamp                  string
+	Origin                      string
+	transientLaunchFailure      *transientLaunchFailureIdentity
 }
 
 // RecoverSession handles user-initiated recovery after an agent CLI failure.
@@ -1643,12 +1673,26 @@ func (s *Service) RecoverSessionWithOptions(
 	taskID, sessionID, action string,
 	options RecoverSessionOptions,
 ) (*LaunchSessionResponse, error) {
+	if options.InferenceClosureOperationID != "" {
+		return s.recoverInferenceClosure(ctx, taskID, sessionID, action, options)
+	}
 	if err := validateSessionRecoverySettingsPolicyAction(action, options.SettingsPolicy); err != nil {
 		return nil, err
+	}
+	if options.Automatic && ((action != recoveryActionContinueHistory && action != recoveryActionResume) || !s.config.AutoContinueFromHistory || automaticHistoryAttempt(ctx) == "") {
+		return nil, errors.New("automatic history continuation is not authorized by the runtime policy")
 	}
 	session, err := s.loadSessionForRecovery(ctx, taskID, sessionID, options.SettingsPolicy)
 	if err != nil {
 		return nil, err
+	}
+	if options.Automatic && (!session.IsPrimary || session.State == models.TaskSessionStateCompleted || session.State == models.TaskSessionStateCancelled) {
+		return nil, errors.New("automatic history recovery no longer owns the current primary conversation")
+	}
+	if options.Automatic {
+		if busy, busyErr := s.automaticTaskHasOtherExecution(ctx, taskID, sessionID); busy || busyErr != nil {
+			return nil, errors.New("automatic history recovery cannot replace another active task execution")
+		}
 	}
 	if options.transientLaunchFailure != nil {
 		ctx = withTransientLaunchRetryContext(ctx, *options.transientLaunchFailure)
@@ -1803,6 +1847,7 @@ func (s *Service) RecoverSessionWithOptions(
 	}
 
 	resp, err := s.LaunchSession(launchCtx, &LaunchSessionRequest{
+		Automatic:                        options.Automatic,
 		TaskID:                           taskID,
 		SessionID:                        sessionID,
 		Intent:                           IntentResume,
@@ -1821,6 +1866,12 @@ func (s *Service) RecoverSessionWithOptions(
 		InitialPromptOverride:            initialPromptOverride,
 		initialPromptRecovery:            initialPromptRecovery,
 	})
+	if err == nil && action == recoveryActionResume && resp != nil && resp.ActivationDisposition == activationDispositionQueued {
+		// Capacity admission accepted the request, not the native resume. The
+		// durable replay owns acknowledgement after an execution is ready.
+		resp.InProgress = true
+		return resp, nil
+	}
 	if err == nil && action == recoveryActionResume {
 		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
 	}
@@ -1843,7 +1894,7 @@ func (s *Service) RecoverSessionWithOptions(
 	}
 	if checkpoint == nil {
 		if action == recoveryActionResume {
-			if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
+			if err := s.completeResumeRecoveryBlock(ctx, sessionID); err != nil {
 				s.logDeliveryRecoveryRefusal(ctx, sessionID, err, nil)
 				return nil, normalizeRecoverSessionError(err)
 			}
@@ -1862,8 +1913,12 @@ func (s *Service) RecoverSessionWithOptions(
 		}
 		return nil, normalizeRecoverSessionError(err)
 	}
+	continuationOrigin := launchOriginManual
+	if options.Automatic {
+		continuationOrigin = launchOriginAutomatic
+	}
 	if _, err := s.promptTask(
-		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true, launchOriginManual,
+		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true, continuationOrigin,
 		promptTaskOptions{
 			recoveryAction:             action,
 			preservePromptContext:      true,
@@ -2464,6 +2519,9 @@ func (s *Service) persistContinuationCheckpoint(
 	}
 	now := time.Now().UTC()
 	attemptID := uuid.NewString()
+	if automaticID := automaticHistoryAttempt(ctx); automaticID != "" {
+		attemptID = automaticID
+	}
 	if err := store.CreateRestoreAttempt(ctx, &models.RestoreAttempt{
 		ID:                 attemptID,
 		SessionID:          session.ID,

@@ -2064,6 +2064,8 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 
+		// The calling agent, not a user, starts this task, so the session
+		// ceiling admits it as automatic rather than as a manual override.
 		launchReq := &orchestrator.LaunchSessionRequest{
 			TaskID:            task.ID,
 			Intent:            orchestrator.IntentStart,
@@ -2072,6 +2074,7 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 			ExecutorProfileID: config.ExecutorProfileID,
 			WorkflowStepID:    task.WorkflowStepID,
 			Prompt:            task.Description,
+			Automatic:         true,
 		}
 		if config.InitialCreatePrompt {
 			prepResp, prepErr := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
@@ -2083,6 +2086,7 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 				WorkflowStepID:       task.WorkflowStepID,
 				InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(task.Description), nil),
 				DeferredStart:        true,
+				Automatic:            true,
 			})
 			if prepErr != nil {
 				h.logger.Error("failed to prepare initial MCP creation prompt",
@@ -2105,6 +2109,7 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 				Prompt:                  task.Description,
 				PromptIsTaskDescription: true,
 				InitialCreatePrompt:     true,
+				Automatic:               true,
 			}
 		}
 

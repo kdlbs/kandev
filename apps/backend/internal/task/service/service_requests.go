@@ -271,15 +271,26 @@ type CreateWorkspaceRequest struct {
 
 // UpdateWorkspaceRequest contains the data for updating a workspace
 type UpdateWorkspaceRequest struct {
-	ExpectedUpdatedAt           *time.Time `json:"-"`
-	Name                        *string    `json:"name,omitempty"`
-	Description                 *string    `json:"description,omitempty"`
-	DefaultExecutorID           *string    `json:"default_executor_id,omitempty"`
-	DefaultEnvironmentID        *string    `json:"default_environment_id,omitempty"`
-	DefaultAgentProfileID       *string    `json:"default_agent_profile_id,omitempty"`
-	DefaultConfigAgentProfileID *string    `json:"default_config_agent_profile_id,omitempty"`
-	ACPIdleSuspensionEnabled    *bool      `json:"acp_idle_suspension_enabled,omitempty"`
-	ACPIdleTimeoutMinutes       *int       `json:"acp_idle_timeout_minutes,omitempty"`
+	ExpectedUpdatedAt             *time.Time `json:"-"`
+	Name                          *string    `json:"name,omitempty"`
+	Description                   *string    `json:"description,omitempty"`
+	DefaultExecutorID             *string    `json:"default_executor_id,omitempty"`
+	DefaultEnvironmentID          *string    `json:"default_environment_id,omitempty"`
+	DefaultAgentProfileID         *string    `json:"default_agent_profile_id,omitempty"`
+	DefaultConfigAgentProfileID   *string    `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled      *bool      `json:"acp_idle_suspension_enabled,omitempty"`
+	ACPIdleTimeoutMinutes         *int       `json:"acp_idle_timeout_minutes,omitempty"`
+	DynamicMidTurnFailoverEnabled *bool      `json:"dynamic_midturn_failover_enabled,omitempty"`
+	// DynamicFailedRouteAutoRetryMax must be 1-3 when present.
+	DynamicFailedRouteAutoRetryEnabled *bool `json:"dynamic_failed_route_auto_retry_enabled,omitempty"`
+	DynamicFailedRouteAutoRetryMax     *int  `json:"dynamic_failed_route_auto_retry_max,omitempty"`
+	// Unanswered-clarification inbox settings; nil keeps the stored value.
+	ClarificationUnansweredInboxEnabled  *bool `json:"clarification_unanswered_inbox_enabled,omitempty"`
+	ClarificationUnansweredRetentionDays *int  `json:"clarification_unanswered_retention_days,omitempty"`
+	// WIPSessionlessReleaseEnabled and WIPSessionlessReleaseGraceMinutes set
+	// the opt-in sessionless WIP slot release policy.
+	WIPSessionlessReleaseEnabled      *bool `json:"wip_sessionless_release_enabled,omitempty"`
+	WIPSessionlessReleaseGraceMinutes *int  `json:"wip_sessionless_release_grace_minutes,omitempty"`
 	// Visibility is "private" or "org". Unknown values normalize to private:
 	// unrecognized input must never widen access.
 	Visibility *string `json:"visibility,omitempty"`
