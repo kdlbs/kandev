@@ -239,6 +239,53 @@ func TestSetSessionConfigOptionSendsIDAndValue(t *testing.T) {
 	require.Equal(t, "agent.session.set_config_option", req.action)
 	require.Equal(t, "reasoning", req.payload["config_id"])
 	require.Equal(t, "high", req.payload["value"])
+	require.NotContains(t, req.payload, "include_configuration_result",
+		"error-only lifecycle calls must preserve strict setter behavior")
+}
+
+func TestSetSessionConfigOptionErrorOnlyMethodsDoNotRequestResult(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(*Manager) error
+	}{
+		{
+			name: "execution ID",
+			call: func(mgr *Manager) error {
+				return mgr.SetSessionConfigOption(context.Background(), "exec-ops", "codex_mode", "plan")
+			},
+		},
+		{
+			name: "session ID",
+			call: func(mgr *Manager) error {
+				return mgr.SetSessionConfigOptionBySessionID(context.Background(), "session-ops", "codex_mode", "plan")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newSessionOpsHarness(t)
+			require.NoError(t, tt.call(h.mgr))
+			req := h.only(t)
+			require.Equal(t, "agent.session.set_config_option", req.action)
+			require.NotContains(t, req.payload, "include_configuration_result",
+				"error-only lifecycle calls must preserve strict setter behavior")
+		})
+	}
+}
+
+func TestSetSessionConfigOptionWithResultRequestsPickerEvidence(t *testing.T) {
+	h := newSessionOpsHarness(t)
+
+	result, err := h.mgr.SetSessionConfigOptionWithResult(context.Background(), "exec-ops", "codex_mode", "plan")
+	require.NoError(t, err)
+	require.Equal(t, "exec-ops", result.ExecutionID)
+	require.Equal(t, "codex_mode", result.ConfigID)
+	require.Equal(t, "plan", result.Requested)
+	require.False(t, result.Confirmed)
+
+	req := h.only(t)
+	require.Equal(t, true, req.payload["include_configuration_result"],
+		"picker result calls must explicitly request correlated configuration evidence")
 }
 
 func TestSetSessionConfigOptionGuards(t *testing.T) {

@@ -244,6 +244,9 @@ export type ModelConfigSelectorProps = {
 
   /** Offers a free-text "use this as a model ID" row (opt-in; see model-config-selector-content). */
   allowCustomModel?: boolean;
+
+  /** Reports whether the picker is open so adjacent feedback can pause its expiry. */
+  onOpenStateChange?: (open: boolean) => void;
 };
 
 type ModelConfigSelectorTriggerProps = Pick<
@@ -397,6 +400,7 @@ function useModelConfigSelectorController({
   configOptionsLoading = false,
   keepOpenOnModelChange = false,
   resolveConfigurationOptions,
+  onOpenStateChange,
 }: ModelConfigSelectorProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -409,9 +413,13 @@ function useModelConfigSelectorController({
   const currentModelValue = modelConfig?.currentValue || currentModel || "";
   const catalog = modelConfig?.catalog;
   const hasExtraConfigOptions = extraConfigOptions.length > 0;
+  const setPickerOpen = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    onOpenStateChange?.(nextOpen);
+  };
   const closeAfterApply = () => {
     if (!keepOpenOnModelChange && !hasExtraConfigOptions && !configOptionsLoading) {
-      setOpen(false);
+      setPickerOpen(false);
     }
   };
   const navigation = useModelCatalogNavigation({
@@ -442,12 +450,12 @@ function useModelConfigSelectorController({
     if (!value) return;
     onModelChange(value);
     if (!keepOpenOnModelChange && !hasExtraConfigOptions && !configOptionsLoading) {
-      setOpen(false);
+      setPickerOpen(false);
     }
   };
 
   const onOpenChange = (nextOpen: boolean) => {
-    setOpen(nextOpen);
+    setPickerOpen(nextOpen);
     if (!nextOpen) {
       setActiveConfigId(null);
     }
@@ -456,7 +464,7 @@ function useModelConfigSelectorController({
   return {
     triggerRef,
     open,
-    setOpen,
+    setOpen: setPickerOpen,
     onOpenChange,
     activeConfig,
     setActiveConfigId,

@@ -1,6 +1,10 @@
 /* eslint-disable max-lines -- WebSocketClient intentionally owns one connection's complete request, subscription, and reconnect lifecycle. */
 
-import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend";
+import type {
+  BackendMessageMap,
+  BackendMessageType,
+  ConfigurationCommandResult,
+} from "@/lib/types/backend";
 import type { ConversationChangedPayload } from "@/lib/types/session-events";
 import type { ConnectionStatus } from "@/lib/types/connection";
 import { generateUUID } from "@/lib/utils";
@@ -163,6 +167,7 @@ type CoreConversationOperation = {
   id: string;
   message?: Record<string, unknown>;
   turn?: Record<string, unknown>;
+  configuration_result?: ConfigurationCommandResult;
 };
 
 function coreTurnAction(operation: CoreConversationOperation): BackendMessageType {
@@ -223,6 +228,9 @@ function projectCoreTurnOperation(
       route_generation: turn.route_generation,
       metadata: turn.metadata,
       had_output: turn.had_output,
+      ...(operation.configuration_result
+        ? { configuration_result: operation.configuration_result }
+        : {}),
     });
   }
   return { action: coreTurnAction(operation), payload };
@@ -925,7 +933,7 @@ export class WebSocketClient {
     );
   }
 
-  private handleCoreConversationChanged(value: unknown) {
+  private handleCoreConversationChanged(value: unknown, suppressConfigurationFeedback = false) {
     const parsed = parseCoreConversationChange(value);
     if (!parsed) return;
     const { sessionId } = parsed;
@@ -940,6 +948,15 @@ export class WebSocketClient {
       );
       return;
     }
+    this.projectCoreConversationChange(parsed, stream, suppressConfigurationFeedback);
+  }
+
+  private projectCoreConversationChange(
+    parsed: ParsedCoreConversationChange,
+    stream: CoreSessionStream,
+    suppressConfigurationFeedback: boolean,
+  ) {
+    const { sessionId } = parsed;
     if (!parsed.valid) return;
     const validPayload = parsed.payload as ConversationChangedPayload;
     if (!stream.ready || stream.needsHydration || stream.projectionPaused) {
@@ -956,7 +973,11 @@ export class WebSocketClient {
       return;
     }
     stream.conversationAppliedRevision = revision;
-    this.projectCoreConversationOperations(sessionId, validPayload.operations ?? []);
+    this.projectCoreConversationOperations(
+      sessionId,
+      validPayload.operations ?? [],
+      suppressConfigurationFeedback,
+    );
   }
 
   private handleCoreConversationControl(
@@ -1024,18 +1045,30 @@ export class WebSocketClient {
     if (!stream.ready || stream.needsHydration || stream.projectionPaused) return;
     const pending = stream.conversationPendingChanges.splice(0);
     for (const change of pending) {
-      this.handleCoreConversationChanged(change);
+      this.handleCoreConversationChanged(change, true);
       if (stream.needsHydration || stream.projectionPaused) return;
     }
     if (this.coreSessionStreams.get(sessionId) !== stream) return;
   }
 
-  private projectCoreConversationOperations(sessionId: string, operations: unknown[]) {
+  private projectCoreConversationOperations(
+    sessionId: string,
+    operations: unknown[],
+    suppressConfigurationFeedback = false,
+  ) {
     for (const value of operations) {
       if (!value || typeof value !== "object" || Array.isArray(value)) continue;
       const operation = value as CoreConversationOperation;
       if (!isCoreConversationOperation(operation)) continue;
       const projected = projectCoreConversationOperation(sessionId, operation);
+      if (
+        suppressConfigurationFeedback &&
+        projected.action === "session.turn.completed" &&
+        projected.payload &&
+        typeof projected.payload === "object"
+      ) {
+        delete (projected.payload as { configuration_result?: unknown }).configuration_result;
+      }
       this.dispatchConversationNotification(projected.action, projected.payload);
     }
   }

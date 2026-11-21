@@ -10,6 +10,8 @@ import type { AvailableCommand } from "@/lib/state/slices/session-runtime/types"
 import type { Message } from "@/lib/types/http";
 import { sessionId, taskId } from "@/lib/types/http";
 
+const MOCK_SMART = "Mock Smart";
+
 function userMessage(turnId: string, content: string): Message {
   return {
     id: `user-${turnId}`,
@@ -98,6 +100,40 @@ describe("computeEmptyTurnNotice", () => {
     expect(computeEmptyTurnNotice(baseInput({ hadOutput: undefined }))).toBeNull();
   });
 
+  it("does not show a command receipt without the initiating user command", () => {
+    expect(
+      computeEmptyTurnNotice(
+        baseInput({
+          messages: [],
+          configuration_result: {
+            status: "applied",
+            requested: MOCK_SMART,
+            effective: MOCK_SMART,
+            confirmed: true,
+          },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("does not attach a command receipt to a different user command", () => {
+    expect(
+      computeEmptyTurnNotice(
+        baseInput({
+          messages: [userMessage("turn-1", "/other-command")],
+          configuration_result: {
+            status: "applied",
+            requested: MOCK_SMART,
+            effective: MOCK_SMART,
+            confirmed: true,
+          },
+        }),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("computeEmptyTurnNotice presentation", () => {
   it("returns null on quick-chat / config-chat surfaces", () => {
     expect(computeEmptyTurnNotice(baseInput({ isEphemeralSurface: true }))).toBeNull();
   });

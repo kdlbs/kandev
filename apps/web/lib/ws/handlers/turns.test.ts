@@ -13,6 +13,7 @@ const TURN_COMPLETED = "session.turn.completed";
 const NOTIFICATION = "notification";
 const TURN_STARTED_AT = "2026-07-23T10:00:00.000Z";
 const TURN_COMPLETED_AT = "2026-07-23T10:01:00.000Z";
+const RECEIPT_TURN_ID = "turn-receipt";
 const FAILED_TURN_ID = "turn-failed";
 const WORKSPACE_ID = "workspace-1";
 
@@ -50,7 +51,7 @@ function turn(
   id: string,
   startedAt: string,
   completedAt?: string,
-  evidence: Pick<TurnEventPayload, "metadata" | "had_output"> = {},
+  evidence: Pick<TurnEventPayload, "metadata" | "had_output" | "configuration_result"> = {},
   eventSessionId = SESSION_ID,
 ): TurnEventPayload {
   return {
@@ -69,6 +70,7 @@ function addTurnUserPrompt(
   store: ReturnType<typeof makeStore>,
   turnId: string,
   sessionId = SESSION_ID,
+  content = "Please continue.",
 ): void {
   store.getState().addMessage({
     id: `user-${turnId}`,
@@ -76,7 +78,7 @@ function addTurnUserPrompt(
     task_id: TASK_ID,
     turn_id: turnId,
     author_type: "user",
-    content: "Please continue.",
+    content,
     type: "message",
     created_at: TURN_STARTED_AT,
   } as never);
@@ -245,6 +247,28 @@ describe("session turn WebSocket handlers", () => {
     send(store, TURN_COMPLETED, turn("turn-1", TURN_STARTED_AT, completed));
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
     expect(store.getState().turns.bySession[SESSION_ID][0].completed_at).toBe(completed);
+  });
+
+  it("does not recreate a dismissed receipt for a duplicate completion", () => {
+    const store = makeStore();
+    addTurnUserPrompt(store, RECEIPT_TURN_ID, SESSION_ID, "/model mock-smart");
+    const completion = turn(RECEIPT_TURN_ID, TURN_STARTED_AT, TURN_COMPLETED_AT, {
+      had_output: false,
+      configuration_result: {
+        status: "applied",
+        config_id: "model",
+        requested: "Mock Smart",
+        effective: "Mock Smart",
+        confirmed: true,
+      },
+    });
+
+    send(store, TURN_COMPLETED, completion);
+    expect(emptyTurnNoticeCount(store, RECEIPT_TURN_ID)).toBe(1);
+    store.getState().removeMessage(SESSION_ID, `empty-turn-${RECEIPT_TURN_ID}`);
+    send(store, TURN_COMPLETED, completion);
+
+    expect(emptyTurnNoticeCount(store, RECEIPT_TURN_ID)).toBe(0);
   });
 
   it.each([

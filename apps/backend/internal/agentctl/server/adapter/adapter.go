@@ -157,6 +157,13 @@ type ModelSettableAdapter interface {
 	SetModel(ctx context.Context, modelID string) error
 }
 
+// ModelConfigurationResultAdapter reports only values read from the response
+// to the model change request. Session update notifications remain useful for
+// selector state, but are not evidence for the request that caused them.
+type ModelConfigurationResultAdapter interface {
+	SetModelWithResult(ctx context.Context, modelID string) (streams.ConfigurationResult, error)
+}
+
 // SessionModelStateProvider exposes the model catalog returned by the most
 // recent session creation or load. The agent stream still emits the same
 // session_models event, but this synchronous snapshot prevents lifecycle
@@ -192,6 +199,12 @@ type ProviderErrorContextProvider interface {
 // aren't covered by mode/model.
 type ConfigOptionSettableAdapter interface {
 	SetConfigOption(ctx context.Context, key, value string) error
+}
+
+// ConfigOptionResultAdapter exposes the value returned by the correlated ACP
+// set_config_option response when the provider includes it.
+type ConfigOptionResultAdapter interface {
+	SetConfigOptionWithResult(ctx context.Context, key, value string) (streams.ConfigurationResult, error)
 }
 
 // SessionResettableAdapter is an optional interface implemented by adapters that

@@ -1,9 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { StateProvider, useAppStore } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/store";
 import { StatusMessage } from "./status-message";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 
 afterEach(cleanup);
+afterEach(() => vi.useRealTimers());
 
 const STATUS_CREATED_AT = "2026-08-15T00:00:00Z";
 
@@ -60,6 +63,97 @@ describe("StatusMessage model selection warnings", () => {
       screen.getByText("The executor applied the only advertised variation of the saved model."),
     ).toBeTruthy();
     expect(screen.queryByText(/fallback model/i)).toBeNull();
+  });
+});
+
+function configurationFeedbackText(status: "applied" | "clamped" | "unconfirmed"): string {
+  switch (status) {
+    case "unconfirmed":
+      return "Could not confirm mock-smart.";
+    case "clamped":
+      return "Requested Fusion High. The agent applied Auto.";
+    case "applied":
+      return "The agent applied mock-smart.";
+  }
+}
+
+function storedConfigurationFeedbackMessage(
+  status: "applied" | "clamped" | "unconfirmed",
+): Message {
+  const content = configurationFeedbackText(status);
+  return {
+    id: `empty-turn-${status}`,
+    session_id: toSessionId("session-configuration"),
+    task_id: toTaskId("task-configuration"),
+    turn_id: "turn-configuration",
+    author_type: "agent",
+    content,
+    type: "status",
+    created_at: STATUS_CREATED_AT,
+    metadata: {
+      variant: "configuration_command_feedback",
+      message: content,
+      configuration_command_feedback: true,
+      feedback_status: status,
+      dismissible: status === "unconfirmed",
+    },
+  };
+}
+
+function StoredStatus({ messageId }: { messageId: string }) {
+  const message = useAppStore((state) =>
+    state.messages.bySession["session-configuration"]?.find((item) => item.id === messageId),
+  );
+  return message ? <StatusMessage comment={message} /> : null;
+}
+
+function renderStoredFeedback(message: Message) {
+  const initialState: Partial<AppState> = {
+    messages: {
+      bySession: { [message.session_id]: [message] },
+      metaBySession: {},
+    },
+  };
+  return render(
+    <StateProvider initialState={initialState}>
+      <StoredStatus messageId={message.id} />
+    </StateProvider>,
+  );
+}
+
+describe("StatusMessage configuration command feedback", () => {
+  it("lets the user dismiss an unconfirmed receipt", async () => {
+    renderStoredFeedback(storedConfigurationFeedbackMessage("unconfirmed"));
+
+    expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite");
+    await screen.getByRole("button", { name: "Close" }).click();
+
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  });
+
+  it("expires a confirmed receipt after five visible seconds", async () => {
+    vi.useFakeTimers();
+    const message = storedConfigurationFeedbackMessage("applied");
+    renderStoredFeedback(message);
+
+    expect(screen.getByRole("status")).toBeTruthy();
+    await act(async () => vi.advanceTimersByTimeAsync(4_999));
+    expect(screen.getByRole("status")).toBeTruthy();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("expires the Copilot Auto receipt after five visible seconds", async () => {
+    vi.useFakeTimers();
+    renderStoredFeedback(storedConfigurationFeedbackMessage("clamped"));
+
+    expect(screen.getByRole("status")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Fusion High");
+    expect(screen.getByRole("status").textContent).toContain("Auto");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });
 

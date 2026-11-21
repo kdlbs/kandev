@@ -4,6 +4,8 @@ import {
   forwardRef,
   memo,
   type ComponentPropsWithoutRef,
+  type ReactNode,
+  type RefObject,
   useCallback,
   useMemo,
   useRef,
@@ -26,6 +28,10 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionMode } from "@/lib/api/domains/session-api";
+import {
+  PickerConfigurationFeedbackMessage,
+  usePickerConfigurationFeedback,
+} from "@/components/task/session-configuration-feedback";
 import { cn } from "@/lib/utils";
 import { prioritizeSelectedOption } from "@/lib/utils/selector-options";
 import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
@@ -47,6 +53,10 @@ type ModeSelectorProps = {
   sessionId: string | null;
   triggerClassName?: string;
 };
+
+function translateModeLabel(t: ReturnType<typeof useTranslation>["t"]) {
+  return t("task:agentPermissionMode");
+}
 
 function resolveSnapshotMode(snapshot: unknown): string | null {
   if (!snapshot || typeof snapshot !== "object") return null;
@@ -250,16 +260,25 @@ function MobileModeSelector({
   requestedName,
   triggerClassName,
   onModeChange,
+  onOpenStateChange,
 }: {
   modeState: ModeSelectorState;
   displayName: string;
   requestedName?: string;
   triggerClassName?: string;
   onModeChange: (modeId: string) => Promise<void>;
+  onOpenStateChange: (open: boolean) => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const setPickerOpen = useCallback(
+    (nextOpen: boolean) => {
+      setOpen(nextOpen);
+      onOpenStateChange(nextOpen);
+    },
+    [onOpenStateChange],
+  );
 
   return (
     <>
@@ -273,14 +292,14 @@ function MobileModeSelector({
         label={displayName}
         ariaLabel={displayName}
         isOpen={open}
-        onClick={() => setOpen(true)}
+        onClick={() => setPickerOpen(true)}
         data-testid="session-mode-selector"
         className={cn("h-11 min-h-11 min-w-11", triggerClassName)}
       />
       <MobilePickerSheet
         open={open}
-        onOpenChange={setOpen}
-        title={t("task:agentPermissionMode")}
+        onOpenChange={setPickerOpen}
+        title={translateModeLabel(t)}
         description={t("task:availableModes")}
         contentTestId="session-mode-picker-scroll"
         onCloseAutoFocus={(event) => {
@@ -303,7 +322,7 @@ function MobileModeSelector({
             className="h-12 w-12 shrink-0"
             aria-label={t("common:close")}
             data-testid="session-mode-mobile-picker-close"
-            onClick={() => setOpen(false)}
+            onClick={() => setPickerOpen(false)}
           >
             <IconX className="h-4 w-4" aria-hidden />
           </Button>
@@ -312,7 +331,7 @@ function MobileModeSelector({
         <MobileModeOptions
           modeState={modeState}
           onModeChange={onModeChange}
-          onClose={() => setOpen(false)}
+          onClose={() => setPickerOpen(false)}
         />
       </MobilePickerSheet>
     </>
@@ -387,98 +406,220 @@ function useModeSelectorDropdownState() {
   };
 }
 
+function useModeChangeHandler(
+  sessionId: string | null,
+  feedback: ReturnType<typeof usePickerConfigurationFeedback>["controller"],
+  label: string,
+) {
+  return useCallback(
+    async (modeId: string) => {
+      if (!sessionId) return;
+      const feedbackId = feedback.begin();
+      try {
+        const response = await setSessionMode(sessionId, modeId);
+        feedback.showResult(feedbackId, label, modeId, response.configuration_result);
+      } catch (error) {
+        feedback.showError(feedbackId, label, modeId, error);
+      }
+    },
+    [feedback, label, sessionId],
+  );
+}
+
+function resolveModeTooltipLabel({
+  modeState,
+  requestedName,
+  displayName,
+  defaultLabel,
+  t,
+}: {
+  modeState: ModeSelectorState;
+  requestedName?: string;
+  displayName: string;
+  defaultLabel: string;
+  t: ReturnType<typeof useTranslation>["t"];
+}) {
+  if (!requestedName) return defaultLabel;
+  return modeState.currentModeId
+    ? t("task:sessionModeNotApplied", { requested: requestedName, effective: displayName })
+    : t("task:sessionModeUnconfirmed", { requested: requestedName });
+}
+
+function resolveModeDisplayNames(
+  modeState: ModeSelectorState,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  const currentMode = modeState.availableModes.find((mode) => mode.id === modeState.currentModeId);
+  const displayName = currentMode?.name || modeState.currentModeId || t("common:unknown");
+  // Show a request name only when the agent did not reach the requested mode.
+  const requestedName = modeState.requestedModeId
+    ? (modeState.availableModes.find((mode) => mode.id === modeState.requestedModeId)?.name ??
+      formatModeName(modeState.requestedModeId))
+    : undefined;
+  return { displayName, requestedName };
+}
+
+function DesktopModeSelector({
+  anchorRef,
+  modeState,
+  displayName,
+  requestedName,
+  triggerClassName,
+  tooltipLabel,
+  dropdownOpen,
+  tooltipOpen,
+  onDropdownOpenChange,
+  onTooltipOpenChange,
+  onModeChange,
+  onPickerOpenChange,
+  feedbackMessage,
+  feedbackPassive,
+}: {
+  anchorRef: RefObject<HTMLDivElement | null>;
+  modeState: ModeSelectorState;
+  displayName: string;
+  requestedName?: string;
+  triggerClassName?: string;
+  tooltipLabel: string;
+  dropdownOpen: boolean;
+  tooltipOpen: boolean;
+  onDropdownOpenChange: (open: boolean) => void;
+  onTooltipOpenChange: (open: boolean) => void;
+  onModeChange: (modeId: string) => void;
+  onPickerOpenChange: (open: boolean) => void;
+  feedbackMessage: ReactNode;
+  feedbackPassive: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div ref={anchorRef} className="relative inline-flex">
+      <DropdownMenu
+        open={dropdownOpen}
+        onOpenChange={(open) => {
+          onDropdownOpenChange(open);
+          onPickerOpenChange(open);
+        }}
+      >
+        <Tooltip open={tooltipOpen} onOpenChange={onTooltipOpenChange}>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <ModeSelectorTrigger
+                displayName={displayName}
+                notApplied={Boolean(requestedName)}
+                triggerClassName={triggerClassName}
+              />
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="top">{tooltipLabel}</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="start" side="top" className="min-w-[280px]">
+          <DropdownMenuLabel>{t("task:availableModes")}</DropdownMenuLabel>
+          {modeState.availableModes.map((mode) => (
+            <DropdownMenuItem
+              key={mode.id}
+              onClick={() => onModeChange(mode.id)}
+              className={cn(
+                "relative min-h-11 cursor-pointer border border-transparent pr-7 sm:min-h-8",
+                mode.id === modeState.currentModeId &&
+                  "border-primary/50 bg-card font-medium hover:bg-card",
+              )}
+            >
+              <div className="min-w-0 flex-1">
+                <div>{mode.name}</div>
+                {mode.description && (
+                  <div className="text-xs text-muted-foreground">{mode.description}</div>
+                )}
+              </div>
+              {mode.id === modeState.currentModeId && (
+                <IconCheck className="absolute right-2 h-4 w-4" />
+              )}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <PickerConfigurationFeedbackMessage
+        anchorRef={anchorRef}
+        isMobile={false}
+        message={feedbackMessage}
+        passive={feedbackPassive}
+      />
+    </div>
+  );
+}
+
 export const ModeSelector = memo(function ModeSelector({
   sessionId,
   triggerClassName,
 }: ModeSelectorProps) {
   const { t } = useTranslation();
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const feedbackAnchorRef = useRef<HTMLDivElement>(null);
+  const executionId = useAppStore((state) =>
+    sessionId ? state.taskSessions?.items[sessionId]?.agent_execution_id : undefined,
+  );
+  const feedback = usePickerConfigurationFeedback(pickerOpen, { sessionId, executionId });
   const modeState = useModeSelectorState(sessionId);
   const { dropdownOpen, tooltipOpen, handleDropdownOpenChange, handleTooltipOpenChange } =
     useModeSelectorDropdownState();
 
-  const handleModeChange = useCallback(
-    async (modeId: string) => {
-      if (!sessionId) return;
-      try {
-        await setSessionMode(sessionId, modeId);
-      } catch (err) {
-        console.error("[ModeSelector] set-mode API failed:", err);
-      }
-    },
-    [sessionId],
+  const handleModeChange = useModeChangeHandler(
+    sessionId,
+    feedback.controller,
+    translateModeLabel(t),
   );
 
   if (!sessionId || !modeState) {
     return null;
   }
 
-  const currentMode = modeState.availableModes.find((m) => m.id === modeState.currentModeId);
-  const displayName = currentMode?.name || modeState.currentModeId || t("common:unknown");
-  // Set only when the agent did not end up in the requested mode. Showing the
-  // effective mode alone would be truthful but silent about the mismatch.
-  const requestedName = modeState.requestedModeId
-    ? (modeState.availableModes.find((m) => m.id === modeState.requestedModeId)?.name ??
-      formatModeName(modeState.requestedModeId))
-    : undefined;
+  const { displayName, requestedName } = resolveModeDisplayNames(modeState, t);
 
   if (isMobile || !isFinePointer) {
     return (
-      <MobileModeSelector
-        modeState={modeState}
-        displayName={displayName}
-        requestedName={requestedName}
-        triggerClassName={triggerClassName}
-        onModeChange={handleModeChange}
-      />
+      <div ref={feedbackAnchorRef} className="relative inline-flex">
+        <MobileModeSelector
+          modeState={modeState}
+          displayName={displayName}
+          requestedName={requestedName}
+          triggerClassName={triggerClassName}
+          onModeChange={handleModeChange}
+          onOpenStateChange={setPickerOpen}
+        />
+        <PickerConfigurationFeedbackMessage
+          anchorRef={feedbackAnchorRef}
+          isMobile={isMobile}
+          message={feedback.message}
+          passive={feedback.passive}
+        />
+      </div>
     );
   }
 
-  let tooltipLabel = t("task:agentPermissionMode");
-  if (requestedName) {
-    tooltipLabel = modeState.currentModeId
-      ? t("task:sessionModeNotApplied", { requested: requestedName, effective: displayName })
-      : t("task:sessionModeUnconfirmed", { requested: requestedName });
-  }
+  const tooltipLabel = resolveModeTooltipLabel({
+    modeState,
+    requestedName,
+    displayName,
+    defaultLabel: translateModeLabel(t),
+    t,
+  });
 
   return (
-    <DropdownMenu open={dropdownOpen} onOpenChange={handleDropdownOpenChange}>
-      <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
-        <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <ModeSelectorTrigger
-              displayName={displayName}
-              notApplied={Boolean(requestedName)}
-              triggerClassName={triggerClassName}
-            />
-          </DropdownMenuTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="top">{tooltipLabel}</TooltipContent>
-      </Tooltip>
-      <DropdownMenuContent align="start" side="top" className="min-w-[280px]">
-        <DropdownMenuLabel>{t("task:availableModes")}</DropdownMenuLabel>
-        {modeState.availableModes.map((mode) => (
-          <DropdownMenuItem
-            key={mode.id}
-            onClick={() => handleModeChange(mode.id)}
-            className={cn(
-              "relative min-h-11 cursor-pointer border border-transparent pr-7 sm:min-h-8",
-              mode.id === modeState.currentModeId &&
-                "border-primary/50 bg-card font-medium hover:bg-card",
-            )}
-          >
-            <div className="min-w-0 flex-1">
-              <div>{mode.name}</div>
-              {mode.description && (
-                <div className="text-xs text-muted-foreground">{mode.description}</div>
-              )}
-            </div>
-            {mode.id === modeState.currentModeId && (
-              <IconCheck className="absolute right-2 h-4 w-4" />
-            )}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <DesktopModeSelector
+      anchorRef={feedbackAnchorRef}
+      modeState={modeState}
+      displayName={displayName}
+      requestedName={requestedName}
+      triggerClassName={triggerClassName}
+      tooltipLabel={tooltipLabel}
+      dropdownOpen={dropdownOpen}
+      tooltipOpen={tooltipOpen}
+      onDropdownOpenChange={handleDropdownOpenChange}
+      onTooltipOpenChange={handleTooltipOpenChange}
+      onModeChange={handleModeChange}
+      onPickerOpenChange={setPickerOpen}
+      feedbackMessage={feedback.message}
+      feedbackPassive={feedback.passive}
+    />
   );
 });

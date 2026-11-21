@@ -809,6 +809,12 @@ advertised argument hint, such as `/goal`'s supported arguments. These labels
 and hints describe the command; they do not apply it until you send the draft.
 Pasted rich text does not create a command chip; Kandev uses its visible plain text.
 
+In task Chat, a supported configuration command such as `/model <id>` can
+report the setting that the agent applied. Kandev shows that result beneath the
+command for a short time. If the agent does not report a clear change, the
+message says that the requested setting could not be confirmed. This feedback
+is temporary and does not appear in conversation history after reload.
+
 ## Recover from provider errors
 
 ### Connection loss

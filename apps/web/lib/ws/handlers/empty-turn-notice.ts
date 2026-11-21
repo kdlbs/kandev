@@ -1,7 +1,7 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { AvailableCommand } from "@/lib/state/slices/session-runtime/types";
-import type { TurnEventPayload } from "@/lib/types/backend";
+import type { ConfigurationCommandResult, TurnEventPayload } from "@/lib/types/backend";
 import type { Message } from "@/lib/types/http";
 import { sessionId, taskId } from "@/lib/types/http";
 import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
@@ -54,6 +54,7 @@ export interface EmptyTurnNoticeInput {
   isPassthrough?: boolean;
   messages: Message[] | undefined;
   availableCommands: AvailableCommand[] | undefined;
+  configuration_result?: ConfigurationCommandResult;
   now: string;
 }
 
@@ -69,6 +70,17 @@ function findLastUserMessage(messages: Message[], turnId: string): Message | und
   return undefined;
 }
 
+function ownsConfigurationCommand(
+  message: Message | undefined,
+  result: ConfigurationCommandResult,
+  commands: AvailableCommand[] | undefined,
+): boolean {
+  const command = parseSlashCommand(message?.content);
+  if (!command) return false;
+  if (command.toLowerCase() === "model") return result.config_id === "model";
+  return isKnownCommand(command, commands);
+}
+
 // hasSubagentTaskMessage returns true when the turn contains a Task (subagent)
 // tool call message. Guards against the empty-turn race when a parent agent
 // dispatches a subagent: the Claude Agent SDK may return session/prompt with
@@ -82,6 +94,30 @@ function hasSubagentTaskMessage(messages: Message[], turnId: string): boolean {
     if (meta?.normalized?.kind === "subagent_task") return true;
   }
   return false;
+}
+
+function configurationCommandNoticeText(result: ConfigurationCommandResult): string {
+  const requested = result.requested.trim();
+  const effective = result.effective?.trim() ?? "";
+  const status = configurationCommandFeedbackStatus(result);
+  if (status === "applied") {
+    return t("chat:configurationCommandApplied", { value: effective });
+  }
+  if (status === "clamped") {
+    return t("chat:configurationCommandClamped", { requested, effective });
+  }
+  if (effective) {
+    return t("chat:configurationCommandUnconfirmedWithObservation", { requested, effective });
+  }
+  return t("chat:configurationCommandUnconfirmed", { requested });
+}
+
+function configurationCommandFeedbackStatus(
+  result: ConfigurationCommandResult,
+): ConfigurationCommandResult["status"] {
+  if (result.status === "clamped" && result.effective?.trim()) return "clamped";
+  if (!result.confirmed || !result.effective?.trim()) return "unconfirmed";
+  return result.status === "applied" || result.status === "clamped" ? result.status : "unconfirmed";
 }
 
 /**
@@ -108,6 +144,32 @@ export function computeEmptyTurnNotice(input: EmptyTurnNoticeInput): Message | n
   if (messages.some((m) => m.id === id)) return null;
 
   if (hasSubagentTaskMessage(messages, input.turnId)) return null;
+
+  if (input.configuration_result) {
+    const result = input.configuration_result;
+    const userMessage = findLastUserMessage(messages, input.turnId);
+    if (!ownsConfigurationCommand(userMessage, result, input.availableCommands)) return null;
+    const status = configurationCommandFeedbackStatus(result);
+    const text = configurationCommandNoticeText(result);
+    return {
+      id,
+      session_id: sessionId(input.sessionId),
+      task_id: taskId(input.taskId),
+      turn_id: input.turnId,
+      author_type: "agent",
+      content: text,
+      type: "status",
+      metadata: {
+        variant: "configuration_command_feedback",
+        message: text,
+        empty_turn: true,
+        configuration_command_feedback: true,
+        feedback_status: status,
+        dismissible: status === "unconfirmed",
+      },
+      created_at: input.now,
+    };
+  }
 
   const userMessage = findLastUserMessage(messages, input.turnId);
   const command = parseSlashCommand(userMessage?.content);
@@ -150,6 +212,7 @@ export function maybeEmitEmptyTurnNotice(
     isPassthrough: isPassthroughSession(state.taskSessions.items[sid]),
     messages: state.messages.bySession[sid],
     availableCommands: state.availableCommands.bySessionId[sid],
+    configuration_result: payload.configuration_result,
     now,
   });
 
