@@ -81,3 +81,18 @@ func TestKandevContext_RenderedSizesDeliverRecordedCompaction(t *testing.T) {
 		len([]byte(ordinary)), len([]byte(canvas)), recordedOrdinaryPromptBytesBeforeCompaction,
 		recordedOrdinaryPromptBytesBeforeCompaction-len([]byte(ordinary)))
 }
+
+func TestKandevContext_TellsAgentsCallsMayWaitAndNotToPoll(t *testing.T) {
+	context := FormatKandevContext("task", "session", false)
+
+	assert.Contains(t, context, "Calls wait offline.")
+	assert.Contains(t, context, "Do not poll; end turn at budget.")
+}
+
+func TestKandevContext_KeepsIdentityAndPlanEditingGuidance(t *testing.T) {
+	context := FormatKandevContext("task", "session", false)
+
+	assert.Contains(t, context, "Use these IDs for task_id/session_id.")
+	assert.Contains(t, context, "Never use fragments as replacement documents.")
+	assert.Contains(t, context, "Use discovered schemas.")
+}
