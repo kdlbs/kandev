@@ -215,8 +215,7 @@ func (r *sqliteRepository) DeleteUser(ctx context.Context, id string) error {
 	return err
 }
 
-// CreateUser inserts a new user row with an empty settings blob, stamping
-// creation timestamps.
+// CreateUser inserts a new account with default preferences and timestamps.
 func (r *sqliteRepository) CreateUser(ctx context.Context, user *models.User) error {
 	now := time.Now().UTC()
 	user.CreatedAt = now
@@ -852,7 +851,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ShowTranscriptAutoScrollControl:   false,
 		ShowTodoListPanel:                 false,
 		ShowTodoListPanelOnlyWhenNotEmpty: false,
-		ShowTurnChangedFiles:              false,
+		ShowTurnChangedFiles:              true,
 		ShowReleaseNotification:           true,
 		LspAutoStartLanguages:             []string{},
 		LspAutoInstallLanguages:           []string{},

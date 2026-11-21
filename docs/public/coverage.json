@@ -232,7 +232,9 @@
         "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/adapter.go",
         "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/activity.go",
         "apps/backend/internal/orchestrator/conversation_fork.go",
-        "apps/web/components/task/chat/messages/message-actions.tsx"
+        "apps/web/components/task/chat/messages/message-actions.tsx",
+        "apps/backend/internal/orchestrator/messagequeue/service_policy.go",
+        "apps/web/components/task/chat/queue-automation-pills.tsx"
       ],
       "tests": [
         "apps/backend/internal/mcp/handlers/spawn_session_test.go",
@@ -246,7 +248,9 @@
         "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/adapter_test.go",
         "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/fork_test.go",
         "apps/backend/internal/orchestrator/conversation_fork_test.go",
-        "apps/web/components/task/chat/messages/message-actions.test.tsx"
+        "apps/web/components/task/chat/messages/message-actions.test.tsx",
+        "apps/web/e2e/tests/chat/message-queue-auto-sort-merge.spec.ts",
+        "apps/web/e2e/tests/chat/mobile-message-queue-auto-sort-merge.spec.ts"
       ],
       "mcpTools": [
         "answer_question_kandev",

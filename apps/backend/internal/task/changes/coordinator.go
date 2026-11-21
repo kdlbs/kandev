@@ -63,15 +63,18 @@ type Terminal struct {
 }
 
 type Coordinator struct {
-	repository       repository.TurnChangesRepository
-	turns            TurnReader
-	policies         PolicyResolver
-	content          *ContentService
-	now              func() time.Time
-	logger           *zap.Logger
-	boundaryGuard    TurnChangeOperationGuard
-	exportLimiter    *ExportLimiter
-	summaryPublisher TurnChangeExportSummaryPublisher
+	repository              repository.TurnChangesRepository
+	turns                   TurnReader
+	policies                PolicyResolver
+	content                 *ContentService
+	now                     func() time.Time
+	logger                  *zap.Logger
+	boundaryGuard           TurnChangeOperationGuard
+	exportLimiter           *ExportLimiter
+	startCaptureLimiter     *startCaptureLimiter
+	summaryPublisher        TurnChangeExportSummaryPublisher
+	admissionTimeout        time.Duration
+	startPersistenceReserve time.Duration
 }
 
 // TurnChangeOperationState reports whether the exact runtime ownership can
@@ -128,7 +131,10 @@ func NewCoordinator(repo repository.TurnChangesRepository, turns TurnReader, pol
 	if now == nil {
 		now = time.Now
 	}
-	return &Coordinator{repository: repo, turns: turns, policies: policies, content: content, now: now, logger: zap.NewNop()}
+	return &Coordinator{
+		repository: repo, turns: turns, policies: policies, content: content, now: now,
+		logger: zap.NewNop(), startCaptureLimiter: newStartCaptureLimiter(),
+	}
 }
 
 // SetLogger configures structured logging for coordinator diagnostics.
@@ -146,7 +152,11 @@ func (c *Coordinator) Admit(ctx context.Context, admission Admission, client Che
 	if !c.configuredForAdmission() {
 		return errors.New("turn change coordinator is not configured")
 	}
-	ctx, cancel := context.WithTimeout(ctx, turnChangeAdmissionTimeout)
+	admissionTimeout := c.admissionTimeout
+	if admissionTimeout <= 0 {
+		admissionTimeout = turnChangeAdmissionTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, admissionTimeout)
 	defer cancel()
 	turn, admission, err := c.prepareTurnChangeAdmission(ctx, admission, client)
 	if err != nil || turn == nil {
@@ -309,69 +319,6 @@ func (c *Coordinator) handleTurnChangeIdentityConflict(
 		return nil
 	}
 	return c.captureStart(ctx, admission, client, existing)
-}
-
-func (c *Coordinator) captureStart(ctx context.Context, admission Admission, client CheckpointClient, changeSet *models.TurnChangeSet) error {
-	if client == nil {
-		return errors.Join(errors.New("turn change checkpoint client is unavailable"),
-			c.acceptUnavailableStart(ctx, admission, changeSet, nil, turnchanges.ReasonUnsupportedExecutor))
-	}
-	scopes, err := client.TurnCheckpointRepositoryScopes(ctx)
-	if err != nil {
-		return errors.Join(fmt.Errorf("load turn change repository scopes: %w", err),
-			c.acceptUnavailableStart(ctx, admission, changeSet, nil, turnchanges.ReasonCheckoutUnavailable))
-	}
-	scopeSet := make(map[string]struct{}, len(scopes))
-	for _, scope := range scopes {
-		scopeSet[scope] = struct{}{}
-	}
-	repositories := make([]models.TurnRepositoryChangeSet, 0, len(admission.Checkouts))
-	var captureFailures []error
-	for _, checkout := range admission.Checkouts {
-		row := c.repositoryStartRow(changeSet.ID, checkout)
-		scope, ok := checkoutScope(checkout, len(admission.Checkouts), scopeSet)
-		if !ok {
-			row.Availability = models.TurnChangeAvailabilityUnavailable
-			row.Reason = models.TurnChangeReasonCheckoutUnavailable
-			captureFailures = append(captureFailures, fmt.Errorf("checkout %q is absent from registered repository scopes", checkout.ID))
-			repositories = append(repositories, row)
-			continue
-		}
-		row.RepositorySubpath = scope
-		captured, captureErr := client.CaptureTurnCheckpoint(ctx, turnchanges.CheckpointRequest{
-			ChangeSetID: changeSet.ID, CheckoutID: checkout.ID, Repo: scope, Boundary: turnchanges.CheckpointStart,
-		})
-		if captureErr != nil || !validCheckpoint(captured, changeSet.ID, checkout.ID, turnchanges.CheckpointStart) {
-			row.Availability = models.TurnChangeAvailabilityUnavailable
-			row.Reason = checkpointReason(captureErr, turnchanges.ReasonCaptureFailed)
-			if captureErr == nil {
-				captureErr = errors.New("checkpoint response did not match the admitted start boundary")
-			}
-			captureFailures = append(captureFailures, fmt.Errorf("capture start for checkout %q: %w", checkout.ID, captureErr))
-			repositories = append(repositories, row)
-			continue
-		}
-		row.StartCommitOID = captured.CommitOID
-		row.StartTreeOID = captured.TreeOID
-		row.HashAlgorithm = captured.HashAlgorithm
-		row.StartReachabilityRef = captured.ReachabilityRef
-		row.SourceGitDir = captured.CommonGitDir
-		row.StartProvenanceJSON = encodeTurnChangeProvenance(captured.Provenance)
-		row.CleanupPending = captured.ReachabilityRef != ""
-		capturedAt := captured.CapturedAt.UTC()
-		row.StartCapturedAt = &capturedAt
-		row.Availability = models.TurnChangeAvailabilityPending
-		repositories = append(repositories, row)
-	}
-	accepted, err := c.repository.AcceptTurnChangeSetStart(ctx, changeSet.ID, changeSet.Revision, repositories)
-	if err != nil {
-		return fmt.Errorf("persist turn change start endpoints: %w", err)
-	}
-	if !accepted {
-		return nil
-	}
-	overlapErr := c.reconcileWriterOverlaps(ctx, changeSet)
-	return errors.Join(errors.Join(captureFailures...), overlapErr)
 }
 
 func (c *Coordinator) acceptUnavailableStart(ctx context.Context, admission Admission, changeSet *models.TurnChangeSet, rows []models.TurnRepositoryChangeSet, reason turnchanges.ReasonCode) error {

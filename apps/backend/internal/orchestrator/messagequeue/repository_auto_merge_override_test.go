@@ -8,7 +8,16 @@ import (
 
 type autoMergeOverrideRepository interface {
 	GetAutoMergeOverride(context.Context, QueueSessionIdentity) (*AutoMergeOverride, error)
-	SetAutoMergeOverride(context.Context, QueueSessionIdentity, bool) (AutoMergeOverride, error)
+}
+
+// setAutoMergeOverrideForTest writes an explicit override through the production
+// policy path, so tests exercise the same write as the WebSocket handler.
+// The inherited global is enabled, so the write never compacts the queue.
+func setAutoMergeOverrideForTest(ctx context.Context, repo interface {
+	SetSessionPolicyAndCompact(context.Context, QueueSessionIdentity, SessionPolicyChange, AutoMergePolicy, error) (SessionPolicyResult, error)
+}, identity QueueSessionIdentity, enabled bool) (AutoMergeOverride, error) {
+	result, err := repo.SetSessionPolicyAndCompact(ctx, identity, SessionPolicyChange{Enabled: enabled}, AutoMergePolicy{Enabled: true, Source: AutoMergeSourceGlobal}, nil)
+	return AutoMergeOverride{Enabled: result.AutoMerge.Enabled, Revision: result.AutoMerge.Revision}, err
 }
 
 // @covers AC-UI-MESSAGE-QUEUE-AUTO-MERGE-OVERRIDE-001.2
@@ -31,14 +40,14 @@ func TestMemoryAutoMergeOverridePersistsTriStateAndRejectsTextualReuse(t *testin
 	if inherited != nil {
 		t.Fatalf("inherited override = %+v, want nil", inherited)
 	}
-	written, err := policies.SetAutoMergeOverride(ctx, first, false)
+	written, err := setAutoMergeOverrideForTest(ctx, repo, first, false)
 	if err != nil {
 		t.Fatalf("write explicit OFF: %v", err)
 	}
 	if written.Enabled || written.Revision != 1 {
 		t.Fatalf("explicit OFF = %+v, want false revision 1", written)
 	}
-	written, err = policies.SetAutoMergeOverride(ctx, first, true)
+	written, err = setAutoMergeOverrideForTest(ctx, repo, first, true)
 	if err != nil {
 		t.Fatalf("write explicit ON: %v", err)
 	}
@@ -65,7 +74,7 @@ func TestSQLiteAutoMergeOverrideReadRejectsReplacedSessionIdentity(t *testing.T)
 		TaskID: "task", SessionID: "session", SessionIncarnationID: "incarnation-2",
 	}
 	seedQueueSessionIdentity(t, repo, first)
-	if _, err := repo.SetAutoMergeOverride(ctx, first, true); err != nil {
+	if _, err := setAutoMergeOverrideForTest(ctx, repo, first, true); err != nil {
 		t.Fatalf("set first override: %v", err)
 	}
 	seedQueueSessionIdentity(t, repo, replacement)
@@ -90,7 +99,7 @@ func TestSQLiteAutoMergeOverrideClaimsExistingUnboundSessionState(t *testing.T) 
 		TaskID: "task", SessionID: sessionID, SessionIncarnationID: "incarnation",
 	}
 	seedQueueSessionIdentity(t, repo, identity)
-	written, err := repo.SetAutoMergeOverride(ctx, identity, true)
+	written, err := setAutoMergeOverrideForTest(ctx, repo, identity, true)
 	if err != nil {
 		t.Fatalf("claim queue session state for override: %v", err)
 	}

@@ -30,8 +30,8 @@ func TestArchiveTaskNotifiesQueuePurgeAfterCommit(t *testing.T) {
 	}
 	queue := messagequeue.NewService(mqRepo, messagequeue.DefaultMaxPerSession, log)
 	identity := queueIdentityForSession(t, repo, "session-1")
-	if _, err := mqRepo.SetAutoMergeOverride(ctx, identity, false); err != nil {
-		t.Fatalf("SetAutoMergeOverride: %v", err)
+	if _, err := mqRepo.SetSessionPolicyAndCompact(ctx, identity, messagequeue.SessionPolicyChange{Enabled: false}, messagequeue.AutoMergePolicy{Enabled: true, Source: messagequeue.AutoMergeSourceGlobal}, nil); err != nil {
+		t.Fatalf("SetSessionPolicyAndCompact: %v", err)
 	}
 	if err := queue.SetPendingMove(ctx, identity.SessionID, &messagequeue.PendingMove{
 		MoveID:               "archive-pending-move",
@@ -42,8 +42,8 @@ func TestArchiveTaskNotifiesQueuePurgeAfterCommit(t *testing.T) {
 	}
 	staleIdentity := identity
 	staleIdentity.SessionIncarnationID = "stale-incarnation"
-	if _, err := mqRepo.SetAutoMergeOverride(ctx, staleIdentity, true); !errors.Is(err, messagequeue.ErrSessionIdentityMismatch) {
-		t.Fatalf("stale SetAutoMergeOverride error = %v, want identity mismatch", err)
+	if _, err := mqRepo.SetSessionPolicyAndCompact(ctx, staleIdentity, messagequeue.SessionPolicyChange{Enabled: true}, messagequeue.AutoMergePolicy{Enabled: true, Source: messagequeue.AutoMergeSourceGlobal}, nil); !errors.Is(err, messagequeue.ErrSessionIdentityMismatch) {
+		t.Fatalf("stale SetSessionPolicyAndCompact error = %v, want identity mismatch", err)
 	}
 	if _, err := queue.QueueMessage(ctx, "session-1", "task-queue-purge-notify", "follow up", "", "user", false, nil); err != nil {
 		t.Fatalf("QueueMessage: %v", err)
@@ -148,8 +148,8 @@ func TestDeleteTaskNotifiesQueuePurgeAfterCommit(t *testing.T) {
 	}
 	queue := messagequeue.NewService(mqRepo, messagequeue.DefaultMaxPerSession, log)
 	identity := queueIdentityForSession(t, repo, "session-1")
-	if _, err := mqRepo.SetAutoMergeOverride(ctx, identity, false); err != nil {
-		t.Fatalf("SetAutoMergeOverride: %v", err)
+	if _, err := mqRepo.SetSessionPolicyAndCompact(ctx, identity, messagequeue.SessionPolicyChange{Enabled: false}, messagequeue.AutoMergePolicy{Enabled: true, Source: messagequeue.AutoMergeSourceGlobal}, nil); err != nil {
+		t.Fatalf("SetSessionPolicyAndCompact: %v", err)
 	}
 	if _, err := queue.QueueMessage(ctx, "session-1", "task-delete-purge-notify", "follow up", "", "user", false, nil); err != nil {
 		t.Fatalf("QueueMessage: %v", err)
@@ -196,8 +196,8 @@ func TestDeleteTaskSessionPurgesQueuedMessages(t *testing.T) {
 	}
 	queue := messagequeue.NewService(mqRepo, messagequeue.DefaultMaxPerSession, log)
 	dropIdentity := queueIdentityForSession(t, repo, "session-drop")
-	if _, err := mqRepo.SetAutoMergeOverride(ctx, dropIdentity, false); err != nil {
-		t.Fatalf("SetAutoMergeOverride: %v", err)
+	if _, err := mqRepo.SetSessionPolicyAndCompact(ctx, dropIdentity, messagequeue.SessionPolicyChange{Enabled: false}, messagequeue.AutoMergePolicy{Enabled: true, Source: messagequeue.AutoMergeSourceGlobal}, nil); err != nil {
+		t.Fatalf("SetSessionPolicyAndCompact: %v", err)
 	}
 	if err := queue.SetPendingMove(ctx, dropIdentity.SessionID, &messagequeue.PendingMove{
 		MoveID:               "session-delete-pending-move",
