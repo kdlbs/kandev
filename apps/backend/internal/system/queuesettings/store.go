@@ -25,9 +25,7 @@ func NewStore(raw RawStore) *Store {
 	return &Store{raw: raw}
 }
 
-// storedSettings mirrors Settings for JSON decoding but keeps both merge
-// settings as pointers. Missing keys in records written by older versions
-// therefore default on, while explicit false values remain false.
+// storedSettings preserves omission for legacy merge defaults.
 type storedSettings struct {
 	MaxPerSession     int   `json:"max_per_session"`
 	MergeEnabled      *bool `json:"merge_enabled"`

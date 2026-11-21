@@ -37,8 +37,7 @@ import { SettingsGroup } from "@/components/settings/settings-group";
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { workspaceDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
-import { WorkspacePlacementCard } from "@/components/settings/workspaces/workspace-placement-card";
-import { WorkspaceTeamAccessCard } from "@/components/settings/workspaces/workspace-team-access-card";
+import { WorkspaceAccessSettings } from "./workspace-access-settings";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { WorkspaceIdlePolicyFormSection } from "./workspace-idle-policy-form-section";
 import {
@@ -579,24 +578,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         onEnabledChange={setMidTurnFailoverEnabled}
         autoRetry={failedRouteAutoRetryControls(autoRetry, savedState)}
       />
-      {/*
-        Reads the live store item rather than the form's captured snapshot:
-        scopes arrive with hydration, which can land after this
-        form mounts, and a snapshot would freeze the owner out of their own
-        workspace.
-      */}
-      <WorkspacePlacementCard
-        workspaceId={workspace.id}
-        unitId={workspace.unit_id}
-        scopes={workspace.scopes}
-      />
-      <Separator />
-      <WorkspaceTeamAccessCard
-        workspaceId={workspace.id}
-        ownerId={workspace.owner_id ?? ""}
-        scopes={workspace.scopes}
-      />
-      <Separator />
+      <WorkspaceAccessSettings workspace={workspace} />
       <DeleteWorkspaceCard
         canManage={canManage}
         workspaceName={currentWorkspace.name}

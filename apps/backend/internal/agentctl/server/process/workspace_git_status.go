@@ -205,6 +205,9 @@ func (wt *WorkspaceTracker) GetGitStatusWithDetails(ctx context.Context, fresh b
 	if err != nil || status.DetailState == gitStatusDetailReady {
 		return status, err
 	}
+	if status.StatusState == gitStatusStateUnavailable && status.ErrorCode == gitStatusErrorNoRepository {
+		return status, nil
+	}
 	if status.DetailState != gitStatusDetailPending {
 		return status, errGitStatusDetailsUnavailable
 	}

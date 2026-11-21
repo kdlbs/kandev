@@ -317,7 +317,7 @@ func (r *memoryRepository) InsertForSessionWithPolicy(
 	msg *QueuedMessage,
 	_ *QueueAttachmentClaim,
 	maxPerSession int,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -340,7 +340,7 @@ func (r *memoryRepository) InsertForSessionWithWorkflowEntry(
 	*QueuedMessage,
 	*QueueAttachmentClaim,
 	int,
-	*AutoMergePolicy,
+	*AdmissionPolicy,
 ) error {
 	// The in-memory queue has no shared task repository or workflow-transition
 	// transaction, so accepting a captured entry would falsely claim to fence
@@ -392,7 +392,7 @@ func (r *memoryRepository) restoreLocked(msg *QueuedMessage, maxPerSession int) 
 		msg.QueuedAt = time.Now().UTC()
 	}
 	clone := cloneQueuedMessage(msg)
-	index := sort.Search(len(list), func(i int) bool { return list[i].Position > clone.Position })
+	index := sort.Search(len(list), func(i int) bool { return queueOrderLess(clone, list[i]) })
 	list = append(list, nil)
 	copy(list[index+1:], list[index:])
 	list[index] = clone
@@ -419,23 +419,6 @@ func (r *memoryRepository) GetAutoMergeOverride(
 	return &override, nil
 }
 
-func (r *memoryRepository) SetAutoMergeOverride(
-	_ context.Context,
-	identity QueueSessionIdentity,
-	enabled bool,
-) (AutoMergeOverride, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if err := r.bindIdentityLocked(identity); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	override := r.autoMergeOverrides[identity]
-	override.Enabled = enabled
-	override.Revision++
-	r.autoMergeOverrides[identity] = override
-	return override, nil
-}
-
 func (r *memoryRepository) validateIdentityLocked(identity QueueSessionIdentity) error {
 	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
 		return ErrSessionIdentityMismatch
@@ -447,15 +430,15 @@ func (r *memoryRepository) validateIdentityLocked(identity QueueSessionIdentity)
 	return nil
 }
 
-func (r *memoryRepository) validateAutoMergePolicyLocked(identity QueueSessionIdentity, policy AutoMergePolicy) error {
+func (r *memoryRepository) validateAutoMergePolicyLocked(identity QueueSessionIdentity, policy AdmissionPolicy) error {
 	override, exists := r.autoMergeOverrides[identity]
-	switch policy.Source {
+	switch policy.AutoMerge.Source {
 	case AutoMergeSourceGlobal:
 		if exists {
 			return ErrAutoMergePolicyChanged
 		}
 	case AutoMergeSourceSession:
-		if !exists || override.Enabled != policy.Enabled || override.Revision != policy.Revision {
+		if !exists || override.Enabled != policy.AutoMerge.Enabled || override.Revision != policy.AutoMerge.Revision {
 			return ErrAutoMergePolicyChanged
 		}
 	default:
@@ -859,7 +842,7 @@ func (r *memoryRepository) ListBySession(_ context.Context, sessionID string) ([
 	for i, m := range list {
 		out[i] = *cloneQueuedMessage(m)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Position < out[j].Position })
+	sort.Slice(out, func(i, j int) bool { return queueOrderLess(&out[i], &out[j]) })
 	return out, nil
 }
 
@@ -879,7 +862,7 @@ func (r *memoryRepository) ListDurableLifecycleEntries(_ context.Context) ([]Que
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].SessionID == out[j].SessionID {
-			return out[i].Position < out[j].Position
+			return queueOrderLess(&out[i], &out[j])
 		}
 		return out[i].SessionID < out[j].SessionID
 	})
@@ -916,7 +899,7 @@ func (r *memoryRepository) ListDurableDeliveryEntries(_ context.Context) ([]Queu
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].SessionID == out[j].SessionID {
-			return out[i].Position < out[j].Position
+			return queueOrderLess(&out[i], &out[j])
 		}
 		return out[i].SessionID < out[j].SessionID
 	})
@@ -933,7 +916,7 @@ func (r *memoryRepository) CountBySession(_ context.Context, sessionID string) (
 func lowestPositionIndex(list []*QueuedMessage) int {
 	index := 0
 	for i := 1; i < len(list); i++ {
-		if list[i].Position < list[index].Position {
+		if queueOrderLess(list[i], list[index]) {
 			index = i
 		}
 	}
@@ -1602,7 +1585,7 @@ func (r *memoryRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 			r.nextPosition[sessionID] = clone.Position
 		}
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].Position < list[j].Position })
+	sort.Slice(list, func(i, j int) bool { return queueOrderLess(list[i], list[j]) })
 	r.entries[sessionID] = list
 	r.removeSendNowClaimOwnershipLocked(sessionID, claim.Sources)
 	return nil
@@ -1980,10 +1963,10 @@ func (r *memoryRepository) mergeIntoAboveLocked(sessionID, sourceID, queuedBy st
 
 	var target *QueuedMessage
 	for _, m := range list {
-		if m.Position >= source.Position {
+		if !queueOrderLess(m, source) {
 			continue
 		}
-		if target == nil || m.Position > target.Position {
+		if target == nil || queueOrderLess(target, m) {
 			target = m
 		}
 	}
@@ -2020,7 +2003,7 @@ func (r *memoryRepository) mergeIntoAboveLocked(sessionID, sourceID, queuedBy st
 func (r *memoryRepository) AutoMergeIntoAbove(_ context.Context, sessionID, sourceID string) (*QueuedMessage, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.autoMergeIntoAboveLocked(sessionID, sourceID)
+	return r.autoMergeIntoAboveLocked(sessionID, sourceID, nil)
 }
 
 func (r *memoryRepository) AutoMergeIntoAboveForSession(_ context.Context, identity QueueSessionIdentity, sourceID string) (*QueuedMessage, bool, error) {
@@ -2029,14 +2012,14 @@ func (r *memoryRepository) AutoMergeIntoAboveForSession(_ context.Context, ident
 	if err := r.bindIdentityLocked(identity); err != nil {
 		return nil, false, err
 	}
-	return r.autoMergeIntoAboveLocked(identity.SessionID, sourceID)
+	return r.autoMergeIntoAboveLocked(identity.SessionID, sourceID, nil)
 }
 
 func (r *memoryRepository) AutoMergeIntoAboveForSessionWithPolicy(
 	_ context.Context,
 	identity QueueSessionIdentity,
 	sourceID string,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -2046,10 +2029,10 @@ func (r *memoryRepository) AutoMergeIntoAboveForSessionWithPolicy(
 	if err := r.validateAutoMergePolicyLocked(identity, policy); err != nil {
 		return nil, false, err
 	}
-	return r.autoMergeIntoAboveLocked(identity.SessionID, sourceID)
+	return r.autoMergeIntoAboveLocked(identity.SessionID, sourceID, &policy)
 }
 
-func (r *memoryRepository) autoMergeIntoAboveLocked(sessionID, sourceID string) (*QueuedMessage, bool, error) {
+func (r *memoryRepository) autoMergeIntoAboveLocked(sessionID, sourceID string, policy *AdmissionPolicy) (*QueuedMessage, bool, error) {
 	list := r.entries[sessionID]
 	sourceIndex := -1
 	for index, message := range list {
@@ -2062,17 +2045,11 @@ func (r *memoryRepository) autoMergeIntoAboveLocked(sessionID, sourceID string) 
 		return nil, false, nil
 	}
 	source := list[sourceIndex]
-	var target *QueuedMessage
-	for _, message := range list {
-		if message.Position < source.Position && (target == nil || message.Position > target.Position) {
-			target = message
-		}
+	target, values, err := autoFoldTarget(list[:sourceIndex], source, policy, nil)
+	if err != nil {
+		return nil, false, err
 	}
-	if target == nil {
-		return cloneQueuedMessage(source), false, nil
-	}
-	values, compatible := buildAutoMergedEntry(target, source)
-	if !compatible {
+	if values == nil {
 		return cloneQueuedMessage(source), false, nil
 	}
 	target.Content = values.content
@@ -2089,7 +2066,7 @@ func (r *memoryRepository) autoMergeIntoAboveLocked(sessionID, sourceID string) 
 func (r *memoryRepository) AutoMergeCandidateIntoAbove(_ context.Context, candidate *QueuedMessage) (*QueuedMessage, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.autoMergeCandidateIntoAboveLocked(candidate)
+	return r.autoMergeCandidateIntoAboveLocked(candidate, nil)
 }
 
 func (r *memoryRepository) AutoMergeCandidateIntoAboveForSession(_ context.Context, identity QueueSessionIdentity, candidate *QueuedMessage) (*QueuedMessage, bool, error) {
@@ -2101,7 +2078,7 @@ func (r *memoryRepository) AutoMergeCandidateIntoAboveForSession(_ context.Conte
 	if err := r.bindIdentityLocked(identity); err != nil {
 		return nil, false, err
 	}
-	return r.autoMergeCandidateIntoAboveLocked(candidate)
+	return r.autoMergeCandidateIntoAboveLocked(candidate, nil)
 }
 
 func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithClaim(_ context.Context, identity QueueSessionIdentity, candidate *QueuedMessage, _ QueueAttachmentClaim) (*QueuedMessage, bool, error) {
@@ -2113,7 +2090,7 @@ func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithClaim(_ cont
 	if err := r.bindIdentityLocked(identity); err != nil {
 		return nil, false, err
 	}
-	return r.autoMergeCandidateIntoAboveLocked(candidate)
+	return r.autoMergeCandidateIntoAboveLocked(candidate, nil)
 }
 
 func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
@@ -2121,7 +2098,7 @@ func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
 	identity QueueSessionIdentity,
 	candidate *QueuedMessage,
 	_ *QueueAttachmentClaim,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -2134,7 +2111,7 @@ func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
 	if err := r.validateAutoMergePolicyLocked(identity, policy); err != nil {
 		return nil, false, err
 	}
-	return r.autoMergeCandidateIntoAboveLocked(candidate)
+	return r.autoMergeCandidateIntoAboveLocked(candidate, &policy)
 }
 
 func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithWorkflowEntry(
@@ -2143,7 +2120,7 @@ func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithWorkflowEntr
 	WorkflowEntryIdentity,
 	*QueuedMessage,
 	*QueueAttachmentClaim,
-	*AutoMergePolicy,
+	*AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	// Candidate folding is an admission mutation too. It needs the same
 	// shared task/queue transaction as insertion before it can honor an entry
@@ -2151,19 +2128,12 @@ func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithWorkflowEntr
 	return nil, false, ErrQueueAdmissionUnavailable
 }
 
-func (r *memoryRepository) autoMergeCandidateIntoAboveLocked(candidate *QueuedMessage) (*QueuedMessage, bool, error) {
-	list := r.entries[candidate.SessionID]
-	var target *QueuedMessage
-	for _, message := range list {
-		if target == nil || message.Position > target.Position {
-			target = message
-		}
+func (r *memoryRepository) autoMergeCandidateIntoAboveLocked(candidate *QueuedMessage, policy *AdmissionPolicy) (*QueuedMessage, bool, error) {
+	target, values, err := autoFoldTarget(r.entries[candidate.SessionID], candidate, policy, nil)
+	if err != nil {
+		return nil, false, err
 	}
-	if target == nil {
-		return nil, false, nil
-	}
-	values, compatible := buildAutoMergedEntry(target, candidate)
-	if !compatible {
+	if values == nil {
 		return nil, false, nil
 	}
 	target.Content = values.content
@@ -2202,7 +2172,7 @@ func (r *memoryRepository) reorderEntriesLocked(sessionID string, orderedIDs []s
 	// sort a copy so reserved rows interleave at their persisted places.
 	sorted := make([]*QueuedMessage, len(stored))
 	copy(sorted, stored)
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Position < sorted[j].Position })
+	sort.SliceStable(sorted, func(i, j int) bool { return queueOrderLess(sorted[i], sorted[j]) })
 
 	visible, _ := splitVisibleAndReserved(sorted)
 	ordered, err := validateReorderSet(visible, orderedIDs)
@@ -2515,7 +2485,7 @@ func (r *memoryRepository) replaceSessionLocked(sessionID string, entries []Queu
 			replaced = append(replaced, clone)
 		}
 		sort.Slice(replaced, func(i, j int) bool {
-			return replaced[i].Position < replaced[j].Position
+			return queueOrderLess(replaced[i], replaced[j])
 		})
 		r.entries[sessionID] = replaced
 		if maxPos > r.nextPosition[sessionID] {

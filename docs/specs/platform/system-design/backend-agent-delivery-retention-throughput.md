@@ -36,14 +36,22 @@ progress drains the phase queue and returns to idle cadence. Persisted repositor
 progress makes restart safe; this scheduling hint is process-local and disposable.
 
 A batch deadline halves that phase's process-local candidate ceiling, down to one,
-for subsequent attempts. It never raises the configured ceiling or the 50-candidate
-event ceiling. Other phases keep their own limits. Failed transactions still count
+for subsequent attempts. Each later committed batch in that phase doubles the
+reduced ceiling until it reaches the configured limit again, so a transient writer
+wait cannot leave the worker on single-row batches for the life of the process.
+Recovery never exceeds the configured ceiling or the 50-candidate event ceiling.
+Other phases keep their own limits. Failed transactions still count
 as failures and use the existing retry backoff; parent cancellation and other errors
 do not reduce the ceiling. A new worker starts from the configured limits. This
 allows a heavy page to make progress within the unchanged transaction and byte
 budgets without weakening its eligibility proofs or persisting tuning state.
 Batch-failure logs include the phase, previous and next candidate ceilings, and
 the repository error; pass snapshots retain their aggregate failure accounting.
+
+The orphan phase's bounded unbound-workflow count runs inside the writer
+transaction. On SQLite it states the sparse index's literal predicate and selects
+`idx_agent_delivery_effects_unbound_workflow`, so its cost follows the unbound rows
+it counts rather than every `workflow.on_turn_complete` effect.
 
 Configured interval becomes the idle/recheck interval, not a minimum delay between
 productive passes. No additional setting or runtime flag is introduced. Aggregate
@@ -101,3 +109,5 @@ promise a total storage quota or physical file shrinkage.
 [Database maintenance throughput](../../../plans/database-maintenance-throughput/plan.md).
 
 [Protected discovery continuation repair](../../../plans/delivery-retention-protected-sweep/plan.md).
+
+[Multi-repository status, start capture, and retention load fixes](../../../plans/capture-and-retention-load-fixes/plan.md).

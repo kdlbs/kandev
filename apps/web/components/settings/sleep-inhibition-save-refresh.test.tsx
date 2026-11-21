@@ -39,7 +39,11 @@ let coordinator: SettingsSaveCoordinator;
 let priorLocation: string;
 const sleepId = "general-task-sleep-inhibition";
 const queue: MessageQueueSettingsResponse = {
-  settings: { max_per_session: 0, merge_enabled: true, auto_merge_enabled: true },
+  settings: {
+    max_per_session: 0,
+    merge_enabled: true,
+    auto_merge_enabled: true,
+  },
   effective: {
     max_per_session: 0,
     merge_enabled: true,

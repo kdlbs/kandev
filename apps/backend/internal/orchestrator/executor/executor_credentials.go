@@ -301,6 +301,15 @@ func (e *Executor) configureManagedGitCredentials(
 		if hasManagedContributionDestination(infos) {
 			return errors.New("managed contribution destination cannot be activated without the GitHub credential broker")
 		}
+		if e.githubCredentialPolicyResolver == nil {
+			// Without either service, workspace credential management is inactive.
+			return nil
+		}
+		for _, info := range infos {
+			if info != nil && managedGitCredentialProviderForProfile(info.Repository, true, req.Env, profileEnvVars) == gitHubProviderID {
+				return errors.New("managed GitHub credentials require the Git credential broker")
+			}
+		}
 		return nil
 	}
 	scopes, helpers, err := e.issueGitCredentialScopesWithProfileEnv(ctx, req, infos, true, profileEnvVars)

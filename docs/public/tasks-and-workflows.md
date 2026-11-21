@@ -641,7 +641,9 @@ When you send the first message from Chat on a prepared task, Kandev keeps the t
 
 After a completed turn, Kandev can show a changed-files card below the agent reply. The card summarizes repository changes captured between that turn's start and end.
 
-For new accounts, this preference is off. Existing saved preferences are unchanged. To change it, open **Settings > General**. Under **Chat preferences**, set **Show changed files after each turn**, then select **Save**.
+This preference is on by default. If you saved a choice, Kandev uses that choice.
+
+To change it, open **Settings > Preferences > Task Behavior > Conversation**. Set **Show changed files after each turn**, then select **Save changes**.
 
 Each card uses retained data for that turn. Later edits, commits, or branch changes do not rewrite it. Select **Open diff** to review the full turn. Select a file row to open its historical diff. On a phone, the diff opens in a full-height drawer.
 
