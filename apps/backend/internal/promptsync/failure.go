@@ -85,6 +85,9 @@ func (s *Service) recordRunError(ctx context.Context, cfg *Config, mode syncMode
 	var deferred *github.AdmissionDeferredError
 	if mode == syncAutomatic && errors.As(err, &deferred) {
 		incPollSkipped("rate_limited")
+		s.logger.Info("prompt sync deferred by GitHub admission; the next tick retries",
+			zap.String("provider", cfg.Provider), zap.String("reason", deferred.Reason),
+			zap.Duration("delay", deferred.Delay))
 		return
 	}
 	s.recordFailure(ctx, cfg, err)
