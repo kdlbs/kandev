@@ -70,6 +70,13 @@ type AgentEventPayload struct {
 	// correlate the diagnostic even when the stream subscription is delayed.
 	ProviderDiagnosticCandidate bool   `json:"provider_diagnostic_candidate,omitempty"`
 	ProviderDiagnosticText      string `json:"provider_diagnostic_text,omitempty"`
+
+	// Terminal stamp from agentctl: set when the instance had no live backend
+	// stream at commit, or when the offline budget cancelled the turn.
+	DetachedAtCommit bool       `json:"detached_at_commit,omitempty"`
+	CommittedAt      *time.Time `json:"committed_at,omitempty"`
+	CancelCause      string     `json:"cancel_cause,omitempty"`
+	CancelDecidedAt  *time.Time `json:"cancel_decided_at,omitempty"`
 	// Storage is the immutable host-owned storage evidence captured at the
 	// terminal failure boundary. It never contains provider prose.
 	Storage *models.AgentErrorStorage `json:"storage,omitempty"`

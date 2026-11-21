@@ -244,3 +244,19 @@ function providerRestoredSuccessMessage(selectorMetadata: Record<string, unknown
     },
   };
 }
+
+describe("StatusMessage detached turn notices", () => {
+  it.each([
+    ["turn_ended_detached", "The turn ended while Kandev was unreachable."],
+    [
+      "paused_offline_budget",
+      "The turn was paused because Kandev stayed unreachable beyond the offline budget.",
+    ],
+  ])("renders the %s notice from its kind", (kind, text) => {
+    const comment = modelSelectionWarningMessage();
+    comment.content = "ignored fallback";
+    comment.metadata = { kind, episode: "stream-1:7", occurred_at: STATUS_CREATED_AT };
+    render(<StatusMessage comment={comment} />);
+    expect(screen.getByText(text)).toBeTruthy();
+  });
+});

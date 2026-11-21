@@ -62,8 +62,8 @@ func TestAgentStreamWriterReleasesMCPRequestAfterWriteFailure(t *testing.T) {
 
 	select {
 	case err := <-errCh:
-		if err == nil || !strings.Contains(err.Error(), "failed to write MCP request") {
-			t.Fatalf("request error = %v, want write failure", err)
+		if !errors.Is(err, mcpserver.ErrKandevCallOutcomeUnknown) {
+			t.Fatalf("request error = %v, want outcome unknown after a bound write failure", err)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("MCP request remained blocked after stream write failure")
@@ -104,8 +104,8 @@ func TestAgentStreamWSDisconnectReleasesDeliveredMCPRequest(t *testing.T) {
 
 	select {
 	case err := <-errCh:
-		if err == nil || !strings.Contains(err.Error(), "agent stream disconnected") {
-			t.Fatalf("request error = %v, want agent stream disconnected", err)
+		if !errors.Is(err, mcpserver.ErrKandevCallOutcomeUnknown) {
+			t.Fatalf("request error = %v, want outcome unknown after stream disconnect", err)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("delivered MCP request remained blocked after stream disconnect")
