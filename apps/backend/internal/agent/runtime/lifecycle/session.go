@@ -696,8 +696,8 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	if err := sm.applyExplicitSessionMode(ctx, execution, result.SessionID, requestedMode); err != nil {
 		return err
 	}
-	execution.setSessionInitialized(true)
 	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID, providerDefaultConfig)
+	execution.setSessionInitialized(true)
 	sm.publishWorkflowSessionConfigFailures(execution, result.SessionID, runtimeFailures)
 
 	// Send the task prompt if provided, or mark the execution as ready.

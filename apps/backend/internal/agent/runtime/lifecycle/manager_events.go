@@ -1549,6 +1549,15 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 	}
 
 	event = m.handleAgentEventState(execution, event)
+	// Startup can use cached provider defaults while the previous confirmed
+	// model remains visible until the new execution applies its settings.
+	if event.Type == streams.EventTypeSessionModels &&
+		event.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored &&
+		execution.deliveryStartupSnapshot() != nil && !execution.isSessionInitialized() {
+		if settled, _ := event.Data["config_options_settled"].(bool); !settled {
+			return
+		}
+	}
 	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, event, attemptID)
 }
 
