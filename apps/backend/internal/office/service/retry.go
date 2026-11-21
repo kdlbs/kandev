@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/office/models"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 // MaxRetryCount is the maximum number of retry attempts before marking failed.
@@ -28,12 +30,21 @@ var retryDelays = []time.Duration{
 // HandleRunFailure handles a failed run by scheduling a retry or
 // marking it as permanently failed and escalating to the CEO agent.
 // A launch-validation failure is never retried: the next attempt would build
-// the same command and leave another failed session.
+// the same command and leave another failed session. An unsafe workspace
+// reuse verdict (an inherited environment that cannot be resolved or owned)
+// is never retried either: backoff would only hide a deterministic refusal.
+// The one exception is an inheritance still pending on a live parent that has
+// not materialized its workspace: it keeps the backoff and is recorded once.
 func (s *Service) HandleRunFailure(
 	ctx context.Context, run *runsmodels.Run, runErr error,
 ) error {
-	if routingerr.IsBuiltCommandValidationError(runErr) {
+	pendingInheritance := errors.Is(runErr, taskmodels.ErrInheritedWorkspacePending)
+	if routingerr.IsBuiltCommandValidationError(runErr) ||
+		(errors.Is(runErr, taskmodels.ErrWorkspaceReuseUnsafe) && !pendingInheritance) {
 		return s.escalateFailure(ctx, run, runErr)
+	}
+	if pendingInheritance && run.RetryCount == 0 {
+		s.recordInheritancePending(ctx, run, runErr)
 	}
 	if run.RetryCount < MaxRetryCount {
 		errMsg := ""
@@ -48,6 +59,23 @@ func (s *Service) HandleRunFailure(
 		return s.scheduleRetry(ctx, run)
 	}
 	return s.escalateFailure(ctx, run, runErr)
+}
+
+// recordInheritancePending makes a launch that waits for its parent's
+// workspace visible on its first deferral without escalating it: a warn run
+// event and a run-scoped activity entry both carry the refusal reason.
+func (s *Service) recordInheritancePending(ctx context.Context, run *runsmodels.Run, runErr error) {
+	reason := runErr.Error()
+	s.AppendRunEvent(ctx, run.ID, "workspace.inheritance_pending", "warn", map[string]interface{}{
+		runEventFieldErrorMessage: reason,
+	})
+	agent, err := s.GetAgentFromConfig(ctx, run.AgentProfileID)
+	if err != nil {
+		return
+	}
+	s.LogActivityWithRun(ctx, agent.WorkspaceID, "system", "scheduler",
+		"run.workspace_pending", "agent", run.AgentProfileID,
+		mustJSON(map[string]string{"run_id": run.ID, "reason": run.Reason, "error": reason}), run.ID, "")
 }
 
 // scheduleRetry re-queues the run with exponential backoff + jitter.
