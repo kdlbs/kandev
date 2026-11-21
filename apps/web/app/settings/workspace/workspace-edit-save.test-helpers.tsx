@@ -116,6 +116,21 @@ function transport(current: Fixture, input: RequestInfo | URL, init?: RequestIni
     current.tickets.push(ticket);
     return promise;
   }
+  if (method === "GET" && path === `/api/v1/workspaces/${TARGET_ID}/runtime-footprint`) {
+    return Promise.resolve(
+      json({
+        live_runtimes: 0,
+        workspace_runtimes: 0,
+        processes: 0,
+        committed_bytes: 0,
+        resident_bytes: 0,
+        unreadable_runtimes: 0,
+        complete: false,
+        observed_at: "2026-10-02T00:00:00Z",
+        runtimes: [],
+      }),
+    );
+  }
   const readValues: Record<string, unknown> = {
     "/api/v1/units": { units: [], total: 0 },
     [`/api/v1/workspaces/${TARGET_ID}/members`]: { members: [] },
