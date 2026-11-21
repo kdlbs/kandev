@@ -966,6 +966,18 @@ or unsupported catalog, an unavailable model, or a failed apply stops the
 session before inference. Kandev never sends an unadvertised model and never
 rewrites the saved profile model.
 
+For Claude ACP profiles, you cannot save a new or changed strict selection when
+Start model is the bare `sonnet`, `opus`, `haiku`, or `fable` alias and the same
+profile sets a different nonblank `ANTHROPIC_MODEL` value. Select the full model
+ID you want to use, or remove that environment entry. Existing profiles with
+this pair can still be edited in other ways or repaired. Save validation checks
+only literal values in the profile. It does not resolve secret-backed or
+inherited values, and this alias/environment conflict check runs only when you
+save the profile. At launch, exact-model policy checks whether the selected
+executor advertises and accepts the requested model ID before the first prompt.
+A successful save does not guarantee that the selected executor advertises the
+model.
+
 For Auggie ACP task sessions, Kandev also requires the selected model and mode
 to take effect before it sends the first prompt. If a failed session offers the
 explicit recovery **Resume** action, it keeps the same conversation and skips

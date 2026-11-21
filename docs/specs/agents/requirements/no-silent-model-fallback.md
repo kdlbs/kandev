@@ -84,6 +84,23 @@ preserving working executor launches for existing profiles.
   shall not send an unadvertised model or rewrite the saved profile model.
   Enabling strictness without a concrete model shall produce a validation error.
 
+#### Claude profile save validation
+
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.11:** When Require exact model is
+  enabled for Claude ACP, saving a new profile shall reject a bare `sonnet`,
+  `opus`, `haiku`, or `fable` Start model paired with a different nonblank
+  literal `ANTHROPIC_MODEL` in the same profile. An edit shall reject
+  introducing or changing this pair. The rejection shall keep the stored
+  profile and the editor draft intact. On desktop and phone, the editor shall
+  explain how to choose a full model ID or remove the environment entry.
+- **AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.12:** Existing profiles with this
+  pair shall allow unrelated edits and explicit repairs. Duplication shall
+  preserve the saved model policy and environment entries. The rule applies
+  only to literal values in the profile and the four named selectors. Other
+  selectors, including `default`, `opusplan`, and `sonnet[1m]`, follow the
+  existing settings rules. Under exact-model policy, the executor shall still
+  advertise and apply the requested ID before inference.
+
 ### REQ-AGENTS-NO-SILENT-MODEL-FALLBACK-002: Compatible advertised variation selection
 
 **Intent:** Preserve the pre-PR compatible selection order without treating a
@@ -111,3 +128,4 @@ can launch successfully. No new global enforcement system for model costs.
 - [Policy and persistence](../system-design/no-silent-model-fallback-01.md)
 - [Recovery and profile surfaces](../system-design/no-silent-model-fallback-02.md)
 - [PR implementation package](../../../plans/exact-profile-model-identity/plan.md)
+- [Claude profile save validation](../../../plans/claude-exact-model-alias/plan.md)
