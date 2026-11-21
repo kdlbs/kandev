@@ -35,6 +35,7 @@ import { CustomTUIMcpCard } from "@/components/settings/custom-tui-mcp-card";
 import { InstalledAgentsHeader } from "@/components/settings/installed-agents-header";
 import { InstalledAgentCard } from "@/components/settings/installed-agent-card";
 import { DynamicAgentsCard } from "@/components/settings/dynamic-agents-card";
+import { ProviderLimitsCard } from "@/components/settings/provider-limits-card";
 import { AGENTS_BROWSE_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
 import {
   detectedAgents,
@@ -258,6 +259,7 @@ function InstalledAgentsSection({
       />
 
       <DynamicAgentsCard agent={dynamicAgent} />
+      <ProviderLimitsCard />
 
       {cards.length === 0 && (
         <Card>

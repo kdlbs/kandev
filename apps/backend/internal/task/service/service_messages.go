@@ -344,10 +344,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 	_ = s.publishMessageEvent(ctx, events.MessageAdded, message, snapshots.receipt)
 	s.publishMessageFeedbackSnapshots(ctx, snapshots)
 
-	s.logger.Info("message created",
-		zap.String("message_id", message.ID),
-		zap.String("session_id", message.TaskSessionID),
-		zap.String("author_type", string(message.AuthorType)))
+	s.logMessageFlow(ctx, session.TaskID, message)
 
 	return message, nil
 }
@@ -656,10 +653,7 @@ func (s *Service) CreateQueuedMessageIdempotent(
 
 	_ = s.publishMessageEvent(ctx, events.MessageAdded, message)
 	s.publishMessageFeedbackSnapshots(ctx, &snapshots)
-	s.logger.Info("queued message created with ID",
-		zap.String("message_id", message.ID),
-		zap.String("session_id", message.TaskSessionID),
-		zap.String("author_type", string(message.AuthorType)))
+	s.logMessageFlow(ctx, session.TaskID, message)
 	return message, nil
 }
 
@@ -749,10 +743,7 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 	_ = s.publishMessageEvent(ctx, events.MessageAdded, message, snapshots.receipt)
 	s.publishMessageFeedbackSnapshots(ctx, snapshots)
 
-	s.logger.Info("message created with ID",
-		zap.String("message_id", message.ID),
-		zap.String("session_id", message.TaskSessionID),
-		zap.String("author_type", string(message.AuthorType)))
+	s.logMessageFlow(ctx, session.TaskID, message)
 
 	return message, nil
 }

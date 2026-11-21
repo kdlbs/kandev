@@ -125,6 +125,7 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
+	executionUsage           nativeExecutionUsage
 	processManagerID         string
 	questionImageWorkDir     string
 	questionImageOnce        sync.Once
@@ -181,6 +182,11 @@ type Manager struct {
 	// dedicated route. Ordinary status reads it without filesystem I/O.
 	runtimeStorageCacheMu sync.RWMutex
 	runtimeStorageCache   *streams.RuntimeStorageSnapshot
+
+	inferenceSnapshotMu    sync.RWMutex
+	inferenceSnapshotter   func() utility.AttemptSnapshot
+	finalInferenceSnapshot *utility.AttemptSnapshot
+	inferenceOwner         *utility.InferenceOwner
 
 	// Process state
 	cmd                *exec.Cmd
@@ -306,8 +312,9 @@ type Manager struct {
 	// editor-buffer HTML previews. It is closed with the agentctl instance.
 	workspacePreview *WorkspacePreviewManager
 
-	// Embedded shell session (auto-created when agent starts)
-	shell *shell.Session
+	// Embedded shell session (auto-created when agent starts). Keep reads
+	// independent of the teardown mutex and comparison-target admission.
+	shell atomic.Pointer[shell.Session]
 
 	// Per-terminal shell sessions for remote executor support
 	shellMgr *shell.Manager
@@ -432,6 +439,12 @@ func (m *Manager) admitStart() (func(), error) {
 		m.admissionMu.Unlock()
 		return nil, ErrManagerStopping
 	}
+	if m.inferenceOwner != nil {
+		if err := m.inferenceOwner.Activate(); err != nil {
+			m.admissionMu.Unlock()
+			return nil, err
+		}
+	}
 	if m.admissionCount == 0 {
 		m.admissionDrained = make(chan struct{})
 	}
@@ -473,6 +486,45 @@ func (m *Manager) CloseAdmission() {
 	}
 	if m.shellMgr != nil {
 		m.shellMgr.BeginStop()
+	}
+}
+
+// CloseAdmissionIfIdle closes starts only when no workspace process owns the instance.
+func (m *Manager) CloseAdmissionIfIdle() bool {
+	m.admissionMu.Lock()
+	defer m.admissionMu.Unlock()
+	if m.stopping || m.admissionCount != 0 || m.passthrough.Live() ||
+		(m.shellMgr != nil && m.shellMgr.HasRunningTerminals()) {
+		return false
+	}
+	if shell := m.Shell(); shell != nil && shell.HasUserWork() {
+		return false
+	}
+	if m.hasWorkspaceEditor() || m.workspacePreview.hasOpenRoots() {
+		return false
+	}
+	for _, process := range m.ListProcesses("") {
+		switch process.Status {
+		case types.ProcessStatusExited, types.ProcessStatusFailed, types.ProcessStatusStopped:
+		default:
+			return false
+		}
+	}
+	m.stopping = true
+	return true
+}
+
+func (m *Manager) hasWorkspaceEditor() bool {
+	m.vscodeMu.Lock()
+	defer m.vscodeMu.Unlock()
+	if m.vscode == nil {
+		return false
+	}
+	switch m.vscode.Info().Status {
+	case VscodeStatusRunning, VscodeStatusStarting, VscodeStatusInstalling:
+		return true
+	default:
+		return m.vscode.HasUnreapedOwnership()
 	}
 }
 
@@ -561,8 +613,11 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 			m.repairStore = store
 		}
 	}
+	m.deliveryJournal, m.inferenceOwner, m.deliveryJournalErr = utility.OpenInferenceOwner(cfg)
+	if m.inferenceOwner != nil {
+		m.SetInferenceSnapshotter(m.inferenceOwner.FinalSnapshot)
+	}
 	if cfg.DurableJournalPath != "" {
-		m.deliveryJournal, m.deliveryJournalErr = journal.Open(journal.Config{Path: cfg.DurableJournalPath})
 		if m.deliveryJournalErr == nil {
 			m.deliveryLimit = m.deliveryJournal.MaxEventBytes()
 			sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
@@ -571,6 +626,9 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		if m.deliveryJournalErr != nil {
 			logDeliveryJournalOpenFailure(m.logger, cfg.InstanceID, cfg.SessionID, cfg.DurableJournalPath, m.deliveryJournalErr)
 		}
+	}
+	if m.deliveryJournalErr != nil && m.inferenceOwner != nil {
+		m.inferenceOwner.Unavailable(m.deliveryJournalErr)
 	}
 	// Build the root plus any immediate sibling repositories and recursively
 	// declared initialized submodules. The root remains a real empty-named
@@ -2117,6 +2175,11 @@ func (m *Manager) PublishWorkspacePreview(req WorkspacePreviewRequest) (Workspac
 	if m.workspacePreview == nil {
 		return WorkspacePreviewResponse{}, ErrWorkspacePreviewUnavailable
 	}
+	release, err := m.admitStart()
+	if err != nil {
+		return WorkspacePreviewResponse{}, ErrWorkspacePreviewUnavailable
+	}
+	defer release()
 	root, err := m.resolveWorkspacePreviewRoot(req.Repo)
 	if err != nil {
 		return WorkspacePreviewResponse{}, err
@@ -2178,6 +2241,22 @@ func (m *Manager) JoinRepoPath(subpath, path string) (string, error) {
 func (m *Manager) Start(ctx context.Context) error {
 	_, err := m.StartWithGeneration(ctx)
 	return err
+}
+
+// startOneShotWithUsage binds the execution usage observer and prepares a
+// one-shot adapter, which spawns its own subprocess per prompt. It updates the
+// caller's flow phase and outcome.
+func (m *Manager) startOneShotWithUsage(ctx context.Context, failurePhase, successOutcome *string) (uint64, error) {
+	if err := m.bindExecutionUsage(ctx); err != nil {
+		m.status.Store(StatusError)
+		return 0, err
+	}
+	*failurePhase = "oneshot_admission"
+	*successOutcome = "adapter_ready"
+	if err := m.startOneShot(); err != nil {
+		return 0, err
+	}
+	return m.ProcessGeneration(), nil
 }
 
 // StartWithGeneration starts the agent process and returns the generation
@@ -2308,14 +2387,20 @@ func (m *Manager) startWithGeneration(
 	expectedRevision *uint64,
 	expectedStopGeneration *uint64,
 	expectedRepairContext *managedruntime.RepairContext,
-) (uint64, error) {
+) (startedGeneration uint64, startErr error) {
+	finishFlow := m.logger.BeginFlow(ctx, logger.ExecutionFlow{Stage: "bootstrap", TaskID: m.cfg.TaskID, SessionID: m.cfg.SessionID, ExecutionID: m.cfg.InstanceID, HarnessGeneration: m.cfg.DeliveryHarnessGeneration})
+	failurePhase := "process_start"
+	successOutcome := "process_started"
+	defer finishProcessFlow(finishFlow, &startErr, &failurePhase, &successOutcome)
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 	release, err := m.admitStart()
 	if err != nil {
+		failurePhase = m.processAdmissionFailureReason(err)
 		return 0, err
 	}
 	defer release()
+	failurePhase = "already_running"
 	if m.passthrough.Live() {
 		return 0, fmt.Errorf("passthrough agent is already running")
 	}
@@ -2345,6 +2430,7 @@ func (m *Manager) startWithGeneration(
 			prepared = nil
 		}
 	}
+	failurePhase = "delivery_journal"
 	if m.cfg.DurableJournalPath != "" && m.deliveryJournalErr != nil {
 		m.status.Store(StatusError)
 		return 0, fmt.Errorf("durable delivery journal unavailable: %w", m.deliveryJournalErr)
@@ -2360,6 +2446,7 @@ func (m *Manager) startWithGeneration(
 	// never ran teardown, and Start is reachable without an intervening Stop.
 	m.finishPreviousLifecycle(ctx)
 	if prepared != nil {
+		failurePhase = "managed_runtime_preparation"
 		if preparation != nil {
 			if _, err := m.validateManagedRuntimePreparationDirective(*preparation); err != nil {
 				return 0, err
@@ -2374,46 +2461,46 @@ func (m *Manager) startWithGeneration(
 	// streams workspace state again.
 	m.renewWorkspaceTrackersForStart(ctx)
 
-	m.logger.Info("starting agent process",
-		zap.String("protocol", string(m.cfg.Protocol)),
-		zap.Strings("args", m.cfg.AgentArgs),
-		zap.String("workdir", m.cfg.WorkDir),
-		zap.Int("mcp_servers", len(m.cfg.McpServers)))
+	m.markProcessStarting()
 
-	m.status.Store(StatusStarting)
-	m.exitCode.Store(-1)
-	m.exitErr.Store(errorWrapper{err: nil})
-
+	failurePhase = "command_validation"
 	if err := config.ValidateCommandArgs(m.cfg.AgentArgs); err != nil {
 		m.status.Store(StatusError)
 		return 0, err
 	}
 
 	// Build adapter config and create protocol adapter
+	failurePhase = "adapter_configuration"
 	if err := m.buildAdapterConfig(); err != nil {
 		m.status.Store(StatusError)
 		return 0, err
 	}
 
-	return m.startConfiguredProcess()
+	return m.startConfiguredProcess(ctx, &failurePhase, &successOutcome)
 }
 
-func (m *Manager) startConfiguredProcess() (uint64, error) {
+func (m *Manager) startConfiguredProcess(ctx context.Context, failurePhase, successOutcome *string) (uint64, error) {
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
+	*failurePhase = "usage_binding"
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
-		if err := m.startOneShot(); err != nil {
-			return 0, err
-		}
-		return m.ProcessGeneration(), nil
+		return m.startOneShotWithUsage(ctx, failurePhase, successOutcome)
 	}
 
 	// Assemble final command (does not start the process yet)
+	*failurePhase = "command_assembly"
 	if err := m.buildFinalCommand(); err != nil {
 		m.status.Store(StatusError)
 		m.closeOpenCodePlugin(context.Background())
 		return 0, err
 	}
+	*failurePhase = "usage_binding"
+	if err := m.bindExecutionUsage(ctx, m.cmd.Args); err != nil {
+		m.status.Store(StatusError)
+		m.closeOpenCodePlugin(context.Background())
+		return 0, err
+	}
+	*failurePhase = "managed_process_start"
 	generation, err := m.startManagedProcess()
 	if err != nil {
 		m.closeOpenCodePlugin(context.Background())
@@ -2904,7 +2991,7 @@ func (m *Manager) startAgentShell() {
 		m.logger.Warn("failed to create shell session", zap.Error(err))
 		return
 	}
-	m.shell = shellSession
+	m.shell.Store(shellSession)
 	m.logger.Info("shell session auto-created")
 }
 
@@ -3647,20 +3734,35 @@ func (m *Manager) Stop(ctx context.Context) error {
 // StopForTeardown permanently closes process admission and drains prior owners
 // before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
+	return m.stopForTeardown(ctx, false)
+}
+
+func (m *Manager) stopForTeardown(ctx context.Context, retainJournal bool) error {
 	m.CloseAdmission()
 	passthroughErr := m.passthrough.StopAll(ctx)
 	passthroughErr = errors.Join(passthroughErr, m.cleanupPassthroughFiles(ctx))
 	previewErr := m.CloseWorkspacePreview(ctx)
 	if err := m.WaitForAdmission(ctx); err != nil {
+		drainErr := fmt.Errorf("wait for process admission to drain: %w", err)
+		if retainJournal {
+			return errors.Join(passthroughErr, previewErr, drainErr)
+		}
 		// Close durable storage even when an owner misses the drain deadline.
 		// Late readers then fail with a typed closed-journal error, and cannot
 		// mistake shutdown for an empty successful replay.
-		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err), m.closeDeliveryJournal())
+		return errors.Join(previewErr, drainErr, m.closeDeliveryJournal())
 	}
 	stopErr := m.stop(ctx)
+	if passthroughErr == nil && previewErr == nil && stopErr == nil {
+		m.captureFinalInferenceSnapshot()
+	}
 	preparedErr := m.closePreparedRuntimeOwnersAfterTeardown()
 	instanceCleanupErr := m.closeInstanceCleanupHooks()
-	return errors.Join(passthroughErr, previewErr, stopErr, preparedErr, instanceCleanupErr, m.closeDeliveryJournal())
+	stopResult := errors.Join(passthroughErr, previewErr, stopErr, preparedErr, instanceCleanupErr)
+	if retainJournal {
+		return stopResult
+	}
+	return errors.Join(stopResult, m.closeDeliveryJournal())
 }
 
 // RegisterInstanceCleanupHook attaches resources whose lifetime is bounded by
@@ -3871,12 +3973,12 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) error {
 	m.logger.Debug("vscode server stopped")
 
 	m.logger.Debug("stopping shell session")
-	if m.shell != nil {
-		if err := m.shell.Stop(); err != nil {
+	if session := m.shell.Load(); session != nil {
+		if err := session.Stop(); err != nil {
 			m.logger.Debug("failed to stop shell session", zap.Error(err))
 			errs = append(errs, err)
 		} else {
-			m.shell = nil
+			m.shell.CompareAndSwap(session, nil)
 		}
 	}
 	m.logger.Debug("shell session stopped")
@@ -5101,9 +5203,21 @@ func (m *Manager) CancelPendingPermissions() {
 
 // Shell returns the embedded shell session, or nil if not available
 func (m *Manager) Shell() *shell.Session {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.shell
+	return m.shell.Load()
+}
+
+// WriteWorkspaceShellInput serializes user input with idle instance reclaim.
+func (m *Manager) WriteWorkspaceShellInput(data []byte) (int, error) {
+	release, err := m.admitStart()
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+	session := m.Shell()
+	if session == nil {
+		return 0, errors.New("shell not available")
+	}
+	return session.Write(data)
 }
 
 // ShellManager returns the per-terminal shell session manager.
@@ -5127,7 +5241,7 @@ func (m *Manager) StartShell() error {
 	defer m.mu.Unlock()
 
 	// Already running
-	if m.shell != nil {
+	if m.shell.Load() != nil {
 		return nil
 	}
 
@@ -5144,7 +5258,7 @@ func (m *Manager) StartShell() error {
 		return fmt.Errorf("failed to create shell session: %w", err)
 	}
 
-	m.shell = shellSession
+	m.shell.Store(shellSession)
 	m.logger.Info("shell session started independently")
 	return nil
 }

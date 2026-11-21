@@ -1,0 +1,108 @@
+{
+  "entries": [
+    {
+      "providers": ["openrouter"],
+      "tier": "free",
+      "requests_per_minute": 20,
+      "requests_per_day": 1000,
+      "daily_reset": "00:00 UTC",
+      "provenance": {
+        "requests_per_minute": "published",
+        "requests_per_day": "measured",
+        "daily_reset": "measured"
+      }
+    },
+    {
+      "providers": ["llmgateway"],
+      "tier": "free",
+      "requests_per_model": true,
+      "requests_per_minute": 20,
+      "provenance": {
+        "requests_per_minute": "measured",
+        "requests_per_model": "measured"
+      }
+    },
+    {
+      "providers": ["llmgateway"],
+      "tier": "subscription",
+      "requests_per_minute": 120,
+      "max_concurrent_turns": 50,
+      "provenance": {
+        "requests_per_minute": "measured",
+        "max_concurrent_turns": "measured"
+      }
+    },
+    {
+      "providers": ["llmgateway"],
+      "tier": "paid",
+      "requests_per_minute": 600,
+      "max_concurrent_turns": 100,
+      "windows": [
+        { "window": "day", "unit": "usd", "value": 25, "reset": "utc" },
+        { "window": "month", "unit": "usd", "value": 250, "reset": "utc" }
+      ],
+      "provenance": {
+        "requests_per_minute": "published",
+        "max_concurrent_turns": "published",
+        "windows": "published"
+      }
+    },
+    {
+      "providers": ["opencode", "opencode-zen"],
+      "tier": "free",
+      "daily_reset": "00:00 UTC",
+      "provenance": { "daily_reset": "measured" },
+      "scopes": [
+        {
+          "id": "model:nemotron-3-ultra-free",
+          "kind": "model",
+          "models": ["nemotron-3-ultra-free"],
+          "requests_per_day": 1000,
+          "daily_reset": "00:00 UTC",
+          "provenance": "measured"
+        },
+        {
+          "id": "model:step-5-preview-free",
+          "kind": "model",
+          "models": ["step-5-preview-free"],
+          "requests_per_day": 1000,
+          "daily_reset": "00:00 UTC",
+          "provenance": "measured"
+        },
+        {
+          "id": "model:longcat-2.5-preview-free",
+          "kind": "model",
+          "models": ["longcat-2.5-preview-free"],
+          "requests_per_day": 120,
+          "daily_reset": "00:00 UTC",
+          "provenance": "approximate"
+        },
+        {
+          "id": "group:zen-free-shared",
+          "kind": "group",
+          "models": ["big-pickle", "muse-spark-1.3-contributor-free", "space-bunny-free"],
+          "requests_per_day": 500,
+          "daily_reset": "00:00 UTC",
+          "provenance": "approximate"
+        }
+      ]
+    },
+    {
+      "providers": ["opencode-go-free"],
+      "tier": "free",
+      "daily_reset": "00:00 UTC",
+      "provenance": { "daily_reset": "measured" }
+    },
+    {
+      "providers": ["opencode-go"],
+      "tier": "subscription",
+      "plans": ["go"],
+      "windows": [
+        { "window": "5h", "unit": "usd", "value": 12, "reset": "rolling" },
+        { "window": "week", "unit": "usd", "value": 30, "reset": "provider" },
+        { "window": "month", "unit": "usd", "value": 60, "reset": "provider" }
+      ],
+      "provenance": { "windows": "approximate" }
+    }
+  ]
+}

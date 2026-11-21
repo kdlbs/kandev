@@ -30,6 +30,8 @@ import (
 type ExecutionOwnerKind = lifecycle.ExecutionOwnerKind
 type ExecutionOwner = lifecycle.ExecutionOwner
 type OwnerAdmission = lifecycle.OwnerAdmission
+type ProviderTurnRequest = lifecycle.ProviderTurnRequest
+type ProviderTurnAdmission = lifecycle.ProviderTurnAdmission
 type LaunchRequest = lifecycle.LaunchRequest
 type RouteOverride = lifecycle.RouteOverride
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload

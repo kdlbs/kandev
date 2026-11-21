@@ -558,6 +558,13 @@ type FeaturesConfig struct {
 	// routing, and the shared route health service. It is disabled in every
 	// embedded profile until the complete feature is ready.
 	DynamicAgentRouting bool `mapstructure:"dynamic_agent_routing" json:"dynamicAgentRouting"`
+	DynamicProfileTiers bool `mapstructure:"dynamic_profile_tiers" json:"dynamicProfileTiers"`
+
+	// ProviderUsageLimits exposes account-aware provider usage in agent settings
+	// and gates configured provider allowances, classified limit observations,
+	// and usage-aware candidate eligibility. Off in every embedded profile until
+	// an installation opts in.
+	ProviderUsageLimits bool `mapstructure:"provider_usage_limits" json:"providerUsageLimits"`
 
 	// ClaudeBackgroundPromptHandoff gates the high-risk experiment that lets a
 	// claude-acp session accept a successor prompt after an adapter-attested
@@ -608,6 +615,12 @@ type FeaturesConfig struct {
 	// recorded turn ledger. Recording itself runs without it. It only takes
 	// effect together with Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
 	CoordinatorPhase31 bool `mapstructure:"coordinator_phase31" json:"coordinatorPhase31"`
+
+	// TerminalPrimaryQueueHandoff moves messages still queued on a primary
+	// session that became terminal to the session that takes over the primary
+	// role. Off in every shipped profile; queued messages otherwise keep their
+	// explicit session target.
+	TerminalPrimaryQueueHandoff bool `mapstructure:"terminal_primary_queue_handoff" json:"terminalPrimaryQueueHandoff"`
 
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol

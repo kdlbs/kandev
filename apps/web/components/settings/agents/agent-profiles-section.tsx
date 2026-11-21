@@ -48,6 +48,7 @@ import type { Agent, AgentProfile } from "@/lib/types/http";
 import { RecordDot } from "@/components/settings/record-dot";
 import { DisabledBadge } from "@/components/settings/record-badges";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { AgentProfileUsageLine } from "./agent-profile-usage";
 
 function profileHref(agentName: string, profileId: string): string {
   return `/settings/agents/${encodeURIComponent(agentName)}/profiles/${encodeURIComponent(profileId)}`;
@@ -393,6 +394,7 @@ function ProfileRowCard({
 }: ProfileRowCardProps) {
   const { isMobile } = useResponsiveBreakpoint();
   const { t } = useTranslation();
+  const usageEnabled = useAppStore((state) => state.features?.providerUsageLimits ?? false);
   const fallbackState = classifyAgentProfileFallback(profile);
   let fallbackLabel = t("agents:fallbackNone");
   if (fallbackState.kind === "exact") {
@@ -432,6 +434,9 @@ function ProfileRowCard({
             </Badge>
             {profile.mode && <Badge variant="secondary">{profile.mode}</Badge>}
           </div>
+          {usageEnabled && (
+            <AgentProfileUsageLine profileId={profile.id} dynamic={profile.kind === "dynamic"} />
+          )}
         </div>
         <div className="relative z-10 flex shrink-0 items-center gap-1">
           {dragHandle}

@@ -41,6 +41,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initStepTransitionsSchema,
 		r.initStepEntriesSchema,
 		r.initTaskUsageEventsSchema,
+		r.initUsageLimitObservationsSchema,
 		r.initAttachmentsSchema,
 		r.initPreviewFeedbackSchema,
 		r.initTaskResourceCleanupSchema,
@@ -56,6 +57,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.ensureDefaultWorkspace,
 		r.ensureDefaultExecutorsAndEnvironments,
 		func() error { return r.runMigrations(ctx) },
+		r.initProviderTurnAllowancesSchema,
 		r.initWorkspaceCollaborationSchema,
 		r.hideBuiltinWorkflows,
 		r.healBuiltinWorkflowStepFlags,
@@ -362,6 +364,14 @@ func (r *Repository) initDynamicRoutingSchema() error {
 			updated_at TIMESTAMP NOT NULL
 		);
 
+		CREATE TABLE IF NOT EXISTS dynamic_provider_limits (
+			provider TEXT PRIMARY KEY,
+			monthly_reset_at TIMESTAMP,
+			monthly_reset_timezone TEXT NOT NULL DEFAULT '',
+			block_until TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL
+		);
+
 		CREATE TABLE IF NOT EXISTS dynamic_installation_keys (
 			id INTEGER PRIMARY KEY CHECK (id = 1),
 			key_bytes %s NOT NULL,
@@ -614,6 +624,9 @@ const infraSchemaDDL = `
 		default_config_agent_profile_id TEXT DEFAULT '',
 		acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE,
 		acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0),
+		dynamic_midturn_failover_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		dynamic_failed_route_auto_retry_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		dynamic_failed_route_auto_retry_max INTEGER NOT NULL DEFAULT 1 CHECK (dynamic_failed_route_auto_retry_max BETWEEN 1 AND 3),
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);

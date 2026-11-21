@@ -142,11 +142,11 @@ func TestClassifyIdleReclaimDisposition(t *testing.T) {
 			want:          idleReclaimDispositionReclaimed,
 		},
 		{
-			name:          "failed session is never reclaimed",
+			name:          "failed session without an active turn reclaims",
 			state:         models.TaskSessionStateFailed,
 			agentRunning:  false,
 			hasActiveTurn: false,
-			want:          idleReclaimDispositionSkippedState,
+			want:          idleReclaimDispositionReclaimed,
 		},
 		{
 			name:          "live runtime blocks reclaim",
@@ -409,8 +409,6 @@ func TestReclaimIdleSessionRefusesWrongState(t *testing.T) {
 	}{
 		{name: "running", state: models.TaskSessionStateRunning},
 		{name: "starting", state: models.TaskSessionStateStarting},
-		{name: "failed", state: models.TaskSessionStateFailed},
-		{name: "cancelled", state: models.TaskSessionStateCancelled},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

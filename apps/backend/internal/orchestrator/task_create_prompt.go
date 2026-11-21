@@ -790,6 +790,7 @@ func (s *Service) launchInitialCreatePrompt(
 		nil,
 		"",
 		startCreatedSessionOptions{
+			origin:                  agentLaunchOrigin(&initialReq),
 			initialCreatePrompt:     true,
 			beforeProviderAdmission: beforeAdmission,
 			onInitialPromptAccepted: accepted,
