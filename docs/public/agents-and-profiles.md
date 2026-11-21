@@ -1196,6 +1196,12 @@ A profile selection cannot override those disables or executor policy. Host
 imports are limited to eligible local/worktree executions using the backend's
 home directory.
 
+The task setup panel labels the row **Discover Cursor MCP servers**. A
+**Details** disclosure shows the reason when discovery fails. The Marketplace
+lookup has a five-second time limit. A parent setup deadline can end the lookup
+before that limit. Kandev skips Marketplace plugin imports for that attempt. If
+setup completes, other configured MCP servers can still connect.
+
 When verification requires provider consent, choose **Authenticate** on the
 preparation step. Kandev opens Cursor's native login flow in the task terminal;
 complete its browser consent and choose **Retry connection**. For Cursor ACP,
