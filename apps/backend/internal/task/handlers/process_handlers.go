@@ -764,6 +764,9 @@ func (h *ProcessHandlers) httpSetSessionConfigOption(c *gin.Context) {
 		}
 		return h.lifecycleMgr.SetSessionConfigOptionBySessionIDWithResult(c.Request.Context(), sessionID, req.ConfigID, req.Value)
 	})
+	if err == nil && req.ExpectedModelID != "" && !live {
+		err = lifecycle.ErrSessionConfigurationModelChanged
+	}
 	if err != nil {
 		h.logger.Error("failed to set session config option",
 			zap.String("session_id", sessionID),

@@ -306,6 +306,44 @@ func TestSessionConfigurationRetryRequiresExpectedBaseModel(t *testing.T) {
 	}
 }
 
+func TestSessionConfigurationRetryRejectsWhenExpectedModelCannotBeVerified(t *testing.T) {
+	log := processConfigurationTestLogger(t)
+	session := &models.TaskSession{
+		ID: "session-config-retry-stopped", TaskID: "task-1", State: models.TaskSessionStateIdle,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfigOverrides: models.SessionRuntimeConfig{Model: "model-c"},
+		},
+	}
+	repo := &mockRepository{sessions: map[string]*models.TaskSession{session.ID: session}}
+	svc := processConfigurationService(repo, repo, log)
+	mgr := newLifecycleManager(t, log)
+	router := newProcessStopRouter(t, svc, mgr, log)
+	request := httptest.NewRequest(http.MethodPost,
+		"/api/v1/task-sessions/session-config-retry-stopped/set-config-option",
+		strings.NewReader(`{"config_id":"thinking","value":"high","expected_model_id":"model-b"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", recorder.Code, recorder.Body.String())
+	}
+	var response sessionConfigurationHTTPResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.ConfigurationResult.Status != "unconfirmed" || response.ConfigurationResult.Confirmed {
+		t.Fatalf("configuration_result = %+v, want unconfirmed precondition failure", response.ConfigurationResult)
+	}
+	if !strings.Contains(response.Error, lifecycle.ErrSessionConfigurationModelChanged.Error()) {
+		t.Fatalf("error = %q, want readable inactive-session precondition", response.Error)
+	}
+	overrides, _ := models.LoadSessionRuntimeConfigOverrides(session.Metadata)
+	if overrides.ConfigOptions["thinking"] == "high" {
+		t.Fatal("saved option after refusing to verify the expected model")
+	}
+}
+
 type sessionConfigurationHTTPResponse struct {
 	Error               string `json:"error"`
 	ConfigurationResult struct {

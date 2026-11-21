@@ -655,6 +655,8 @@ func (m *Manager) SetSessionModelWithResult(
 	if !exists {
 		return SessionConfigurationResult{ConfigID: "model", Requested: modelID}, fmt.Errorf("execution %q not found", executionID)
 	}
+	execution.sessionConfigurationMu.Lock()
+	defer execution.sessionConfigurationMu.Unlock()
 	unknown := SessionConfigurationResult{ConfigID: "model", Requested: modelID, ExecutionID: execution.ID}
 	operationRelease, err := execution.acquireContextResetOperation(ctx)
 	if err != nil {
@@ -730,6 +732,8 @@ func (m *Manager) applySessionConfigOption(
 	includeResult bool,
 	expectedModelID string,
 ) (SessionConfigurationResult, error) {
+	execution.sessionConfigurationMu.Lock()
+	defer execution.sessionConfigurationMu.Unlock()
 	unknown := SessionConfigurationResult{ConfigID: configID, Requested: value, ExecutionID: execution.ID}
 	operationRelease, err := execution.acquireContextResetOperation(ctx)
 	if err != nil {
