@@ -120,7 +120,7 @@ func (r *Repository) taskWorkflowContext(ctx context.Context, taskID string) (wo
 	return r.taskWorkflowContextWith(ctx, r.ro, taskID)
 }
 
-func (r *Repository) taskWorkflowContextWith(ctx context.Context, q officeSeatQuery, taskID string) (workflowID, stepID string, err error) {
+func (r *Repository) taskWorkflowContextWith(ctx context.Context, q TaskParticipantQuery, taskID string) (workflowID, stepID string, err error) {
 	var wf, step sql.NullString
 	scanErr := q.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT workflow_id, workflow_step_id FROM tasks WHERE id = ?`,
@@ -167,17 +167,9 @@ func (r *Repository) GetWorkflowStepStageType(ctx context.Context, stepID string
 // role slate.
 type ParticipantWriteOutcome string
 
-// IsTaskWorkflowStepTerminal reports whether a task's current workflow step
-// is the last step, by position, in its workflow, and whether the task has
-// a resolvable step at all. Unlike orchestrator.workflowStepIsTerminal,
-// terminal does not additionally require the step name to match
-// models.IsTerminalStepName: a workflow's final column is terminal
-// regardless of what its author named it, so this gate never locks a task
-// out of completion just because the last step isn't named
-// done/complete/completed/approved.
-// workflowStepIsTerminal keeps the name test because it decides whether a
-// step *move* should auto-complete — a different decision from "may this
-// task be marked done".
+// IsTaskOnFinalStep reports whether a task's current workflow step is final by
+// position, and whether the task has a resolvable step. Finality does not
+// depend on the step name or its completion policy.
 // Returns (false, false, nil) when the task has no resolvable step — a
 // task with no workflow step at all is not the same fact as a task sitting
 // on a genuine non-terminal step, and callers must not conflate the two.
@@ -189,7 +181,7 @@ type ParticipantWriteOutcome string
 // as "no step" either — treating it as hasStep=false would let a task whose
 // step vanished out from under it bypass the position gate entirely, so this
 // case returns an error instead and lets the caller fail closed.
-func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error) {
+func (r *Repository) IsTaskOnFinalStep(ctx context.Context, taskID string) (final, hasStep bool, err error) {
 	var stepID sql.NullString
 	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT workflow_step_id FROM tasks WHERE id = ?
@@ -205,10 +197,9 @@ func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID stri
 	}
 
 	var workflowID string
-	var position int
 	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT workflow_id, position FROM workflow_steps WHERE id = ?
-	`), stepID.String).Scan(&workflowID, &position)
+		SELECT workflow_id FROM workflow_steps WHERE id = ?
+	`), stepID.String).Scan(&workflowID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, false, fmt.Errorf(
 			"workflow step %q referenced by task %q no longer exists", stepID.String, taskID)
@@ -217,14 +208,13 @@ func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID stri
 		return false, false, err
 	}
 
-	var hasNext bool
-	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT EXISTS(SELECT 1 FROM workflow_steps WHERE workflow_id = ? AND position > ?)
-	`), workflowID, position).Scan(&hasNext)
+	var isFinal bool
+	query := `SELECT ` + models.FinalStepSQL("s") + ` FROM workflow_steps s WHERE s.workflow_id = ? AND s.id = ?`
+	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), workflowID, stepID.String).Scan(&isFinal)
 	if err != nil {
 		return false, false, err
 	}
-	return !hasNext, true, nil
+	return isFinal, true, nil
 }
 
 const (
@@ -843,7 +833,7 @@ func (r *Repository) listWorkflowScopedSeatsAt(ctx context.Context, taskID, atSt
 	return r.listWorkflowScopedSeatsAtWith(ctx, r.ro, taskID, atStepID, roleFilter)
 }
 
-func (r *Repository) listWorkflowScopedSeatsAtWith(ctx context.Context, q officeSeatQuery, taskID, atStepID, roleFilter string) ([]Participant, error) {
+func (r *Repository) listWorkflowScopedSeatsAtWith(ctx context.Context, q TaskParticipantQuery, taskID, atStepID, roleFilter string) ([]Participant, error) {
 	workflowID, stepID, err := r.taskWorkflowContextWith(ctx, q, taskID)
 	if err != nil {
 		return nil, err
@@ -895,7 +885,7 @@ func (r *Repository) listPerTaskSeatsForWorkflow(ctx context.Context, taskID, wo
 	return r.listPerTaskSeatsForWorkflowWith(ctx, r.ro, taskID, workflowID, roleFilter)
 }
 
-func (r *Repository) listPerTaskSeatsForWorkflowWith(ctx context.Context, q officeSeatQuery, taskID, workflowID, roleFilter string) ([]officeSeatRow, error) {
+func (r *Repository) listPerTaskSeatsForWorkflowWith(ctx context.Context, q TaskParticipantQuery, taskID, workflowID, roleFilter string) ([]officeSeatRow, error) {
 	query := `
 		SELECT p.id, p.step_id, p.task_id, p.role, p.agent_profile_id, p.decision_required, p.position
 		FROM workflow_step_participants p`
@@ -926,7 +916,7 @@ func (r *Repository) listTemplateSeatsAtStep(ctx context.Context, stepID, roleFi
 	return r.listTemplateSeatsAtStepWith(ctx, r.ro, stepID, roleFilter)
 }
 
-func (r *Repository) listTemplateSeatsAtStepWith(ctx context.Context, q officeSeatQuery, stepID, roleFilter string) ([]officeSeatRow, error) {
+func (r *Repository) listTemplateSeatsAtStepWith(ctx context.Context, q TaskParticipantQuery, stepID, roleFilter string) ([]officeSeatRow, error) {
 	query := `
 		SELECT id, step_id, task_id, role, agent_profile_id, decision_required, position
 		FROM workflow_step_participants
@@ -944,7 +934,7 @@ func (r *Repository) queryOfficeSeatRows(ctx context.Context, query string, args
 	return r.queryOfficeSeatRowsWith(ctx, r.ro, query, args...)
 }
 
-func (r *Repository) queryOfficeSeatRowsWith(ctx context.Context, q officeSeatQuery, query string, args ...any) ([]officeSeatRow, error) {
+func (r *Repository) queryOfficeSeatRowsWith(ctx context.Context, q TaskParticipantQuery, query string, args ...any) ([]officeSeatRow, error) {
 	rows, err := q.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
@@ -1139,12 +1129,19 @@ func (r *Repository) CancelDisplacedParticipantRun(
 		agentProfileID, fanOutRunReason, taskID, stepID)
 }
 
-// officeSeatQuery keeps canonical seat projection inside its caller's transaction.
-type officeSeatQuery interface {
+// TaskParticipantQuery keeps canonical seat projection inside a caller-owned
+// transaction or read pool.
+type TaskParticipantQuery interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+func (r *Repository) ListTaskParticipantsAtStepWithQuery(
+	ctx context.Context, q TaskParticipantQuery, taskID, stepID, role string,
+) ([]Participant, error) {
+	return r.listWorkflowScopedSeatsAtWith(ctx, q, taskID, stepID, role)
+}
+
 func (r *Repository) ListTaskParticipantsAtStepTx(ctx context.Context, tx *sql.Tx, taskID, stepID, role string) ([]Participant, error) {
-	return r.listWorkflowScopedSeatsAtWith(ctx, tx, taskID, stepID, role)
+	return r.ListTaskParticipantsAtStepWithQuery(ctx, tx, taskID, stepID, role)
 }

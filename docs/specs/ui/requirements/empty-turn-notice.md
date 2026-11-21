@@ -24,7 +24,7 @@ app is broken.
 
 #### Acceptance criteria
 
-- **AC-UI-EMPTY-TURN-NOTICE-001.1:** When an agent turn completes having produced **no agent output**, the chat shows an unobtrusive inline status notice instead of nothing. If later output arrives for the same turn, the rendered transcript hides that notice.
+- **AC-UI-EMPTY-TURN-NOTICE-001.1:** When a structured agent turn completes having produced **no agent output**, the chat shows an unobtrusive inline status notice instead of nothing. If later output arrives for the same turn, the rendered transcript hides that notice.
 - **AC-UI-EMPTY-TURN-NOTICE-001.2:** "Output" means at least one agent message that is a tool call (`tool_call`/`tool_edit`/`tool_read`/`tool_search`/`tool_execute`), a native plan/todo (`agent_plan`/`todo`), a permission or clarification prompt (`permission_request`/`clarification_request`), or a non-empty text response (`message`/`content`). Incidental per-turn messages — lifecycle `status`/`script_execution` notices, `log`, `progress`, and `thinking` — do **not** count as output.
 - **AC-UI-EMPTY-TURN-NOTICE-001.3:** The backend is authoritative: the `session.turn.completed` event carries a transient `had_output` boolean computed from the turn's persisted messages at completion time (no DB column; the notice is live-only).
 - **AC-UI-EMPTY-TURN-NOTICE-001.4:** The notice text adapts to the triggering user message:
@@ -34,6 +34,7 @@ app is broken.
 - **AC-UI-EMPTY-TURN-NOTICE-001.8:** The `/command` token is matched case-insensitively against the agent's advertised commands (`availableCommands.bySessionId`), whose names carry no leading slash; the leading `/` is stripped and the first whitespace-delimited word is taken.
 - **AC-UI-EMPTY-TURN-NOTICE-001.9:** A turn that ends in a recoverable agent failure is not an empty turn. Its recovery/error entry is the turn's outcome, so the completed turn reports `had_output=true` and no empty-turn notice is shown for it. The recovery/error entry is the only explanation the user needs; a "finished without producing any output" notice stacked on top of it is misleading.
 - **AC-UI-EMPTY-TURN-NOTICE-001.10:** A recoverable agent failure does not create a second turn whose only content is the recovery status message. The failure's recovery/error entry attaches to the turn that failed, so at most one turn completes for the failure and no empty-turn notice appears for a separate recovery-message turn.
+- **AC-UI-EMPTY-TURN-NOTICE-001.11:** For a session known to use CLI passthrough, completion without stored chat output shall not produce an empty-turn notice. Once hydration identifies that mode, the transcript shall also hide any earlier synthetic empty-turn notice. Stored errors and ordinary messages shall remain visible.
 
 ## Migrated source detail
 
@@ -43,7 +44,7 @@ When a user sends a message to the agent chat and the turn completes with **no c
 
 ## What
 
-- When an agent turn completes having produced **no agent output**, the chat shows an unobtrusive inline status notice instead of nothing.
+- When a structured agent turn completes having produced **no agent output**, the chat shows an unobtrusive inline status notice instead of nothing.
 - "Output" means at least one agent message that is a tool call (`tool_call`/`tool_edit`/`tool_read`/`tool_execute`), a native plan/todo (`agent_plan`/`todo`), a permission or clarification prompt (`permission_request`/`clarification_request`), or a non-empty text response (`message`/`content`). Incidental per-turn messages — lifecycle `status`/`script_execution` notices, `log`, `progress`, and `thinking` — do **not** count as output.
 - The backend is authoritative: the `session.turn.completed` event carries a transient `had_output` boolean computed from the turn's persisted messages at completion time (no DB column; the notice is live-only).
 - The notice text adapts to the triggering user message:
@@ -54,6 +55,7 @@ When a user sends a message to the agent chat and the turn completes with **no c
 - The notice renders as a non-alarming `type:"status"` chat message (amber warning row via the shared `StatusMessage` renderer), so it appears on both desktop and mobile chat with no layout change.
 - It fires once per turn, keyed by a deterministic message id `empty-turn-${turn_id}` (the store merges messages by id).
 - It is scoped to the main task agent chat; quick-chat and config-chat surfaces are excluded.
+- CLI passthrough is also excluded. Its terminal output does not establish stored chat output. Automation-specific capture guidance belongs to [automation runs](../../office/requirements/automation-runs.md#run-output-capture).
 - Orphan turns swept on session resume report `had_output=true`, so they never trigger the notice.
 
 ## Scenarios

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -318,11 +319,72 @@ func (s *fakeSSHServer) handleCancelTCPIPForward(req *ssh.Request) {
 	_ = req.Reply(true, nil)
 }
 
+type acceptSignalListener struct {
+	net.Listener
+	acceptReturned chan struct{}
+}
+
+func (l *acceptSignalListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	close(l.acceptReturned)
+	return conn, err
+}
+
+func TestFakeSSHServerStaleReverseForwardCleanupPreservesReplacement(t *testing.T) {
+	oldBase, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen old reverse forward: %v", err)
+	}
+	oldListener := &acceptSignalListener{Listener: oldBase, acceptReturned: make(chan struct{})}
+	replacement, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		_ = oldListener.Close()
+		t.Fatalf("listen replacement reverse forward: %v", err)
+	}
+	key := "127.0.0.1:38429"
+	server := &fakeSSHServer{reverseForwards: map[string]net.Listener{key: oldListener}}
+	locked := false
+	t.Cleanup(func() {
+		if locked {
+			server.reverseMu.Unlock()
+		}
+		_ = oldListener.Close()
+		_ = replacement.Close()
+		server.wg.Wait()
+	})
+
+	server.reverseMu.Lock()
+	locked = true
+	server.wg.Add(1)
+	go server.serveReverseForward(nil, key, oldListener)
+	if err := oldListener.Close(); err != nil {
+		t.Fatalf("close old reverse forward: %v", err)
+	}
+	select {
+	case <-oldListener.acceptReturned:
+	case <-time.After(time.Second):
+		t.Fatal("old reverse forward did not leave Accept after close")
+	}
+	server.reverseForwards[key] = replacement
+	server.reverseMu.Unlock()
+	locked = false
+	server.wg.Wait()
+
+	server.reverseMu.Lock()
+	got, ok := server.reverseForwards[key]
+	server.reverseMu.Unlock()
+	if !ok || got != replacement {
+		t.Fatalf("reverse forward after stale cleanup = (%v, %v), want replacement listener", got, ok)
+	}
+}
+
 func (s *fakeSSHServer) serveReverseForward(conn *ssh.ServerConn, key string, listener net.Listener) {
 	defer s.wg.Done()
 	defer func() {
 		s.reverseMu.Lock()
-		delete(s.reverseForwards, key)
+		if s.reverseForwards[key] == listener {
+			delete(s.reverseForwards, key)
+		}
 		s.reverseMu.Unlock()
 	}()
 	for {

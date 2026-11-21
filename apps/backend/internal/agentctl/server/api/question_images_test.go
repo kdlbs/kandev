@@ -18,6 +18,7 @@ import (
 // @covers AC-TASKS-QUESTION-IMAGES-002.2
 func TestQuestionImageEndpoint(t *testing.T) {
 	srv, mgr, root := newWorkspacePreviewServer(t)
+	initWorkspaceGitRepo(t, root)
 	var pngBytes, jpgBytes bytes.Buffer
 	require.NoError(t, png.Encode(&pngBytes, image.NewRGBA(image.Rect(0, 0, 8, 8))))
 	require.NoError(t, jpeg.Encode(&jpgBytes, image.NewRGBA(image.Rect(0, 0, 8, 8)), nil))
@@ -43,6 +44,9 @@ func TestQuestionImageEndpoint(t *testing.T) {
 		require.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
 		require.Equal(t, "private, no-store", rec.Header().Get("Cache-Control"))
 	}
+	selfRepository := get("good.PNG", filepath.Base(root))
+	require.Equal(t, http.StatusOK, selfRepository.Code, selfRepository.Body.String())
+	require.Equal(t, pngBytes.Bytes(), selfRepository.Body.Bytes())
 	for _, name := range []string{"wrong.jpg", "broken.png", "escape.png", "../secret.png", filepath.Join(outside, "secret.png"), "https://example.com/a.png", "~/a.png", "missing.png"} {
 		rec := get(name, "")
 		require.NotEqual(t, http.StatusOK, rec.Code, name)

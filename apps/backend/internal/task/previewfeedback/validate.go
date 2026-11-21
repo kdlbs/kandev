@@ -172,3 +172,18 @@ func itemPayloadBytes(item *models.TaskPreviewFeedback) int {
 		len(item.SelectedText) + len(item.TextAnchor) + len(item.ElementSnapshot) +
 		len(item.CaptureRect)
 }
+
+// ValidateScreenshotReplacement checks the new rectangle, image reference, and
+// optional comment for a saved screenshot recapture.
+func ValidateScreenshotReplacement(captureRect json.RawMessage, attachmentID, comment string) error {
+	if strings.TrimSpace(attachmentID) == "" {
+		return ErrCaptureInvalid
+	}
+	if err := validateRequiredJSON(captureRect); err != nil {
+		return err
+	}
+	if comment == "" {
+		return nil
+	}
+	return ValidateComment(comment)
+}

@@ -9,6 +9,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 )
 
 func TestKubernetesRefreshRemoteInstanceUsesRotatedConnectionCredentials(t *testing.T) {
@@ -212,7 +213,12 @@ func TestKubernetesRefreshRemoteInstanceRehandshakesActiveRestart(t *testing.T) 
 }
 
 func TestKubernetesRefreshRemoteInstanceReattachesDeadLocalClientWithoutHandshake(t *testing.T) {
-	initialControlPort := startKubernetesAgentctlServerWithToken(t, true, 41001, "initial-token")
+	req := validKubernetesCreateRequest()
+	info := agentctl.InstanceInfo{
+		ID: "instance-1", Port: 41001, Status: "running", WorkspacePath: kubernetesWorkspacePath,
+		SessionID: req.SessionID, TaskID: req.TaskID,
+	}
+	initialControlPort := startKubernetesAgentctlServerWithInstanceInfo(t, "initial-token", "initial-token", info)
 	initialInstancePort := startKubernetesAgentctlServer(t, false, 0)
 	resources := &fakeKubernetesResources{}
 	forwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{
@@ -222,17 +228,16 @@ func TestKubernetesRefreshRemoteInstanceReattachesDeadLocalClientWithoutHandshak
 	executor := newFakeKubernetesExecutorWithForwarder(
 		resources, &recordingKubernetesExec{}, forwards,
 	)
-	req := validKubernetesCreateRequest()
 	created, err := executor.CreateInstance(context.Background(), req)
 	require.NoError(t, err)
 	initialRequestCount := len(forwards.remotePorts())
 
 	executor.mu.Lock()
 	executor.sessions[created.InstanceID].client = newKubernetesAgentctlClient(
-		executor.logger, req, created.InstanceID, created.AuthToken, 1,
+		executor.logger, req, created.InstanceID, created.AuthToken, 1, created.Client.BuiltinMCPScopedRoutes(),
 	)
 	executor.mu.Unlock()
-	rotatedControlPort := startKubernetesAgentctlServerWithToken(t, true, 41002, "unexpected-rotated-token")
+	rotatedControlPort := startKubernetesAgentctlServerWithInstanceInfo(t, "initial-token", "unexpected-rotated-token", info)
 	rotatedInstancePort := startKubernetesAgentctlServer(t, false, 0)
 	forwards.mu.Lock()
 	forwards.localPorts[uint16(kubeexecutor.DefaultAgentctlPort)] = rotatedControlPort
@@ -247,8 +252,8 @@ func TestKubernetesRefreshRemoteInstanceReattachesDeadLocalClientWithoutHandshak
 	require.NotNil(t, refresh)
 	require.Equal(t, created.AuthToken, refresh.Instance.AuthToken)
 	require.Equal(t, "41001", refresh.Instance.Metadata[MetadataKeyKubernetesAgentctlRemotePort])
-	require.Equal(t, []uint16{41001}, forwards.remotePorts()[initialRequestCount:],
-		"dead local transport must re-forward the recorded instance port without using the nonce control port")
+	require.Equal(t, []uint16{uint16(kubeexecutor.DefaultAgentctlPort), 41001}, forwards.remotePorts()[initialRequestCount:],
+		"reattachment must read route mode over control, then forward the retained instance without a handshake")
 	require.NoError(t, refresh.Commit(nil))
 }
 

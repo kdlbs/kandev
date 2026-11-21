@@ -4,25 +4,12 @@ import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { t as translate } from "@/lib/i18n";
 import { useRouter } from "@/lib/routing/client-router";
-import { IconGripVertical, IconArrowsShuffle } from "@tabler/icons-react";
-import {
-  DndContext,
-  closestCenter,
-  type DragEndEvent,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  arrayMove,
-  useSortable,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { IconArrowsShuffle } from "@tabler/icons-react";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
-import { WorkflowCard } from "@/components/settings/workflow-card";
+import {
+  WorkflowList,
+  type WorkflowSavedParams,
+} from "@/app/settings/workspace/workspace-workflows-list";
 import { WorkflowSectionActions } from "@/components/settings/workflow-section-actions";
 import { WorkflowSyncSection } from "@/components/settings/workflow-sync-section";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
@@ -36,7 +23,6 @@ import {
 import {
   agentProfileId as toAgentProfileId,
   type Workflow,
-  type WorkflowStep,
   type Workspace,
   type WorkflowTemplate,
 } from "@/lib/types/http";
@@ -62,15 +48,6 @@ type WorkflowActionsArgs = {
   workflowTemplates: WorkflowTemplate[];
   setWorkflowItems: React.Dispatch<React.SetStateAction<Workflow[]>>;
   setSavedWorkflowItems: React.Dispatch<React.SetStateAction<Workflow[]>>;
-};
-
-type WorkflowSavedParams = {
-  clientWorkflow: Workflow;
-  submittedWorkflow: Workflow;
-  savedWorkflow: Workflow;
-  currentSteps: WorkflowStep[];
-  savedSteps: WorkflowStep[];
-  finalizeIdentity: boolean;
 };
 
 function useWorkflowImportExport(
@@ -218,6 +195,7 @@ function useWorkflowActions({
 
   return {
     ...creation,
+    locallyFinalizedWorkflowIds: new Set(finalizedWorkflowIdsRef.current.values()),
     handleUpdateWorkflow,
     handleDeleteWorkflow,
     handleWorkflowSaved,
@@ -236,165 +214,6 @@ export function alignSavedWorkflowsToDraftOrder(
     const baseline = savedById.get(persistedId);
     return baseline ? [baseline] : [];
   });
-}
-
-type WorkflowListProps = {
-  workflowItems: Workflow[];
-  savedWorkflowItems: Workflow[];
-  orderDirtyIds: ReadonlySet<string>;
-  initialStepsByWorkflowId: Map<string, WorkflowStep[]>;
-  isWorkflowDirty: (wf: Workflow) => boolean;
-  /** The dedicated Improve Kandev workspace renders workflows read-only. */
-  isImproveWorkspace?: boolean;
-  onUpdate: (
-    id: string,
-    u: {
-      name?: string;
-      description?: string;
-      prompt?: string;
-      agent_profile_id?: string;
-    },
-  ) => void;
-  onDelete: (id: string) => void;
-  onDuplicate: (workflow: Workflow, steps: WorkflowStep[]) => void;
-  onWorkflowSaved: (params: WorkflowSavedParams) => void;
-  onDiscard: (id: string) => void;
-  onReorder: (items: Workflow[]) => void;
-};
-
-function SortableWorkflowItem({
-  workflow,
-  isDirty,
-  readOnly,
-  children,
-}: {
-  workflow: Workflow;
-  isDirty: boolean;
-  readOnly?: boolean;
-  children: React.ReactNode;
-}) {
-  const { t } = useTranslation();
-  const {
-    attributes,
-    listeners,
-    setActivatorNodeRef,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: workflow.id, disabled: readOnly });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="relative min-w-0"
-      data-settings-dirty={isDirty}
-      data-settings-dirty-level="container"
-      data-testid={`workflow-order-item-${workflow.id}`}
-    >
-      {!readOnly && (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                ref={setActivatorNodeRef}
-                type="button"
-                className="absolute right-3 top-4 z-10 flex h-8 w-8 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground transition-[color,background-color,transform] hover:bg-muted hover:text-foreground active:scale-95 active:cursor-grabbing [@media(pointer:coarse)]:top-3 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-                data-testid={`workflow-drag-handle-${workflow.id}`}
-                {...attributes}
-                {...listeners}
-                aria-label={t("workflows:reorderWorkflow", { name: workflow.name })}
-              >
-                <IconGripVertical className="h-5 w-5" aria-hidden="true" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {t("workflows:reorderWorkflow", { name: workflow.name })}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      )}
-      {children}
-    </div>
-  );
-}
-
-function WorkflowList({
-  workflowItems,
-  savedWorkflowItems,
-  orderDirtyIds,
-  initialStepsByWorkflowId,
-  isWorkflowDirty,
-  isImproveWorkspace,
-  onUpdate,
-  onDelete,
-  onDuplicate,
-  onWorkflowSaved,
-  onDiscard,
-  onReorder,
-}: WorkflowListProps) {
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
-  const savedWorkflowsById = useMemo(
-    () => new Map(savedWorkflowItems.map((workflow) => [workflow.id, workflow])),
-    [savedWorkflowItems],
-  );
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = workflowItems.findIndex((wf) => wf.id === active.id);
-    const newIndex = workflowItems.findIndex((wf) => wf.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-    const reordered = arrayMove(workflowItems, oldIndex, newIndex);
-    onReorder(reordered);
-  };
-
-  return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-      <SortableContext
-        items={workflowItems.map((wf) => wf.id)}
-        strategy={verticalListSortingStrategy}
-      >
-        <div
-          className="grid min-w-0 gap-3"
-          data-settings-dirty={orderDirtyIds.size > 0}
-          data-settings-dirty-level="container"
-          data-testid="workflow-order-list"
-        >
-          {workflowItems.map((workflow) => (
-            <SortableWorkflowItem
-              key={workflow.id}
-              workflow={workflow}
-              isDirty={orderDirtyIds.has(workflow.id)}
-              readOnly={isImproveWorkspace}
-            >
-              <WorkflowCard
-                workflow={workflow}
-                savedWorkflow={savedWorkflowsById.get(workflow.id)}
-                isWorkflowDirty={isWorkflowDirty(workflow)}
-                isOrderDirty={orderDirtyIds.has(workflow.id)}
-                initialWorkflowSteps={initialStepsByWorkflowId.get(workflow.id)}
-                otherWorkflows={workflowItems.filter((w) => w.id !== workflow.id)}
-                isImproveWorkspace={isImproveWorkspace}
-                onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
-                onDeleteWorkflow={async () => {
-                  await onDelete(workflow.id);
-                }}
-                onDuplicateWorkflow={(steps) => onDuplicate(workflow, steps)}
-                onWorkflowSaved={onWorkflowSaved}
-                onDiscardWorkflow={() => onDiscard(workflow.id)}
-              />
-            </SortableWorkflowItem>
-          ))}
-        </div>
-      </SortableContext>
-    </DndContext>
-  );
 }
 
 export function WorkspaceWorkflowsClient({
@@ -438,27 +257,32 @@ export function WorkspaceWorkflowsClient({
           )
         }
       >
-        {!isImproveWorkspace && (
-          <WorkflowSyncSection
-            workspaceId={workspace.id}
-            dialogOpen={syncDialogOpen}
-            onDialogOpenChange={setSyncDialogOpen}
+        {/* The unframed section content starts at its divider; pt-4 keeps the
+            first block (sync status or the list view control) off the line. */}
+        <div className="pt-4">
+          {!isImproveWorkspace && (
+            <WorkflowSyncSection
+              workspaceId={workspace.id}
+              dialogOpen={syncDialogOpen}
+              onDialogOpenChange={setSyncDialogOpen}
+            />
+          )}
+          <WorkflowList
+            workflowItems={page.workflowItems}
+            savedWorkflowItems={page.savedWorkflowItems}
+            orderDirtyIds={page.workflowOrderDirtyIds}
+            initialStepsByWorkflowId={page.initialStepsByWorkflowId}
+            locallyFinalizedWorkflowIds={page.locallyFinalizedWorkflowIds}
+            isWorkflowDirty={page.isWorkflowDirty}
+            isImproveWorkspace={isImproveWorkspace}
+            onUpdate={page.handleUpdateWorkflow}
+            onDelete={page.handleDeleteWorkflow}
+            onDuplicate={page.handleDuplicateWorkflow}
+            onWorkflowSaved={page.handleWorkflowSaved}
+            onDiscard={page.handleDiscardWorkflow}
+            onReorder={page.handleReorderWorkflows}
           />
-        )}
-        <WorkflowList
-          workflowItems={page.workflowItems}
-          savedWorkflowItems={page.savedWorkflowItems}
-          orderDirtyIds={page.workflowOrderDirtyIds}
-          initialStepsByWorkflowId={page.initialStepsByWorkflowId}
-          isWorkflowDirty={page.isWorkflowDirty}
-          isImproveWorkspace={isImproveWorkspace}
-          onUpdate={page.handleUpdateWorkflow}
-          onDelete={page.handleDeleteWorkflow}
-          onDuplicate={page.handleDuplicateWorkflow}
-          onWorkflowSaved={page.handleWorkflowSaved}
-          onDiscard={page.handleDiscardWorkflow}
-          onReorder={page.handleReorderWorkflows}
-        />
+        </div>
       </SettingsSection>
       <WorkflowDialogs page={page} />
     </div>

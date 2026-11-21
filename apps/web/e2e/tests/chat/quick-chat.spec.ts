@@ -7,6 +7,7 @@ import { attachAvailableCommandsCapture, attachShellInputCapture } from "../../h
 import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionState } from "../../helpers/session";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
+import type { ExecutePromptRequest } from "@/lib/api/domains/utility-api";
 import {
   openQuickChatSetup,
   openQuickChatWithAgent,
@@ -852,7 +853,9 @@ test.describe("Quick Chat", () => {
       default_utility_agent_id: "mock",
       default_utility_model: "mock-fast",
     });
+    let executeBody: ExecutePromptRequest | null = null;
     await testPage.route("**/api/v1/utility/execute", async (route) => {
+      executeBody = route.request().postDataJSON() as ExecutePromptRequest;
       requestStarted?.();
       await responseGate;
       await route.fulfill({
@@ -868,6 +871,12 @@ test.describe("Quick Chat", () => {
     await editor.fill(initialPrompt);
     await dialog.getByLabel("Enhance prompt with AI").click();
     await requestGate;
+    expect(executeBody).toMatchObject({ utility_agent_id: "builtin-enhance-prompt" });
+    expect(executeBody).not.toHaveProperty("git_diff");
+    const changedFiles = executeBody?.changed_files;
+    if (typeof changedFiles === "string") {
+      expect(changedFiles.split("\n").length).toBeLessThanOrEqual(201);
+    }
     await editor.focus();
     await editor.pressSequentially(" with an added constraint");
     await expect(editor).toHaveText(editedPrompt);

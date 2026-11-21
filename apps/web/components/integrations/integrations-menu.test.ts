@@ -55,9 +55,6 @@ vi.mock("@/hooks/domains/linear/use-linear-availability", () => ({
 function enabledStub() {
   return { enabled: true, setEnabled: () => {}, loaded: true };
 }
-vi.mock("@/hooks/domains/azure-devops/use-azure-devops-enabled", () => ({
-  useAzureDevOpsEnabled: enabledStub,
-}));
 vi.mock("@/hooks/domains/github/use-github-enabled", () => ({
   useGitHubEnabled: enabledStub,
 }));

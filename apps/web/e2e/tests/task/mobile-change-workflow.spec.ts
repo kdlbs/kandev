@@ -202,9 +202,13 @@ test("changes workflow from phone task actions with task-local agent routing", a
   await submitForm.submit();
   await expect(submitForm.phoneDrawer).toBeHidden();
   await waitForWorkflowStep(apiClient, task.id, fixture.prStep.id);
-  await waitForNewWorkflowProfileSession(apiClient, task.id, fixture.profileB.id, [
-    originalSessionId,
-  ]);
+  await waitForNewWorkflowProfileSession(
+    apiClient,
+    task.id,
+    fixture.profileB.id,
+    [originalSessionId],
+    { readiness: "launched" },
+  );
   await waitForWorkflowMoveLifecycle(apiClient, task.id);
   await expect(actions.column(task.id)).toBeVisible();
   await actions.open(task.id);

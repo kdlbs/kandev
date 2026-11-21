@@ -46,7 +46,6 @@ describe("Type surface", () => {
 });
 
 const ALL_INTEGRATIONS: AvailabilityMap = {
-  "azure-devops": true,
   github: true,
   gitlab: true,
   jira: true,

@@ -236,3 +236,11 @@ focused regression in Task 02's results.
 
 See the [proposed launch-proof ADR](../../decisions/2026-11-07-ssh-controller-launch-proof.md).
 The existing guarded pidfile path remains the compatibility boundary.
+
+## Planned follow-up (2026-11-16)
+
+The [broker resume package](../ssh-broker-absent-controller-resume/plan.md)
+extends verify mode for confirmed boot changes. It also preserves directories
+after receipt-backed absence instead of using a numeric pidfile as removal proof.
+The results above describe the original completed implementation.
+The follow-up owns its pending implementation and verification.

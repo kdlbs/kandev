@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, type RefOb
 import { useTaskActions, type TaskActionOptions } from "@/hooks/use-task-actions";
 import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
+import { getBulkMoveApiError } from "@/lib/api";
 import {
   isBulkMoveTargetInWorkflow,
   resolveBulkSelectionWorkflow,
@@ -353,9 +354,11 @@ function useBulkOperations({
       // response timing rather than the selection (REQ-TASKS-KANBAN-TASK-REORDERING-001.29).
       // The server re-derives submission order from each task's current step.
       try {
-        await moveTasks(idList, targetWorkflowId, targetStepId, "step");
-        applyMoveInStore(new Set(idList), targetStepId);
-      } catch {
+        const result = await moveTasks(idList, targetWorkflowId, targetStepId, "step");
+        applyMoveInStore(new Set(result?.moved_task_ids ?? []), targetStepId);
+      } catch (error) {
+        const partial = getBulkMoveApiError(error);
+        if (partial) applyMoveInStore(new Set(partial.result.moved_task_ids), targetStepId);
         // useTaskWorkflowMove already shows the failure toast.
       }
     },

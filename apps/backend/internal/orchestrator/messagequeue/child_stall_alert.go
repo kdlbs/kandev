@@ -46,8 +46,8 @@ func IsChildStallNudge(message *QueuedMessage) bool {
 // entry above it. Child-turn stalled alerts always fold into an adjacent
 // pending alert for the same task so a busy parent handles them in one turn;
 // every other entry follows the session's Auto-merge policy.
-func admissionFoldEnabled(policy *AutoMergePolicy, candidate *QueuedMessage) bool {
-	return (policy != nil && policy.Enabled) || IsChildStallAlert(candidate)
+func admissionFoldEnabled(policy *AdmissionPolicy, candidate *QueuedMessage) bool {
+	return (policy != nil && policy.AutoMerge.Enabled) || IsChildStallAlert(candidate)
 }
 
 func childStallAlertsMergeable(target, source *QueuedMessage) bool {

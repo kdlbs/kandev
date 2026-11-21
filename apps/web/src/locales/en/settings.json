@@ -1,4 +1,8 @@
 {
+  "notificationFormatterLabel": "Notification content",
+  "notificationFormatterDefault": "Use the original notification content",
+  "notificationFormatterUnavailable": "The formatter is unavailable. Notifications use their original content.",
+  "notificationFormatterDescription": "Choose an optional formatter for each provider. Formatting does not change subscriptions or delivery destinations.",
   "notificationEventPermissionRequested": "Agent needs permission",
   "notificationEventPermissionRequestedDescription": "Notify when the agent is waiting for you to approve an action.",
   "notificationEventSessionFailed": "Agent session failed",
@@ -382,7 +386,6 @@
   "inferenceAgentThisAgent": "this agent",
   "inferenceAgentUnavailable": "{{name}} is no longer available.",
   "installed": "Installed",
-  "integrationDescriptionAzureDevops": "Azure Boards work items and Azure Repos pull requests.",
   "integrationDescriptionGithub": "PR review queues, issue watchers, and OAuth credentials.",
   "integrationDescriptionGitlab": "Merge request creation, discussion replies, and self-managed hosts.",
   "integrationDescriptionJira": "Atlassian Cloud credentials and JQL issue watchers.",
@@ -929,7 +932,7 @@
   "sessionMaximumShort": "Start, Resume, and Send Now can exceed this limit.",
   "queueMaximumShort": "Limit pending messages per session. Use 0 for unlimited.",
   "queueMergeShort": "Combine related queued messages before the agent reads them.",
-  "queueAutoMergeShort": "Merge compatible consecutive messages automatically.",
+  "queueAutoMergeShort": "Merges compatible adjacent messages, and moves sub-task messages up to merge with their sender's latest one.",
   "sleepShort": "Prevent the computer running Kandev from sleeping during tasks.",
   "sidebarPresentation": "Sidebar appearance",
   "sidebarFastActions": "Show fast action icons",
@@ -1227,5 +1230,11 @@
   "builtinMcp.currentUnknown": "Current agent packages are unknown. These are the saved choices for the next agent start.",
   "mcpFromAutomation": "From automation",
   "mcpFromAutomationDescription": "Servers selected by the automation that started this process.",
-  "builtinMcp.surfaces.automation": "Automation"
+  "builtinMcp.surfaces.automation": "Automation",
+  "builtinMcp.inheritedValue": "Inherited from workspace: {{value}}",
+  "builtinMcp.overrideValue": "Task override: {{value}}. Workspace default: {{default}}.",
+  "builtinMcp.useInherited": "Use inherited value",
+  "builtinMcp.allowTasks": "Allow tasks to use this package",
+  "markdownPreviewByDefault": "Open Markdown files in Preview",
+  "markdownPreviewByDefaultDescription": "Choose the initial mode for newly opened Markdown files. You can switch modes at any time."
 }

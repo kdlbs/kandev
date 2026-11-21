@@ -23,28 +23,42 @@ func (r *Repository) ReceiveAndProjectCanonicalAgentDeliveryEvents(
 	effects []*models.AgentDeliveryEffect,
 	remoteHighWater int64,
 ) ([]models.CanonicalAgentDeliveryProjectionResult, error) {
+	results, _, err := r.ReceiveAndProjectCanonicalAgentDeliveryEventsWithReceipt(ctx, events, effects, remoteHighWater)
+	return results, err
+}
+
+// ReceiveAndProjectCanonicalAgentDeliveryEventsWithReceipt returns conversation
+// snapshots only after inbox admission, projection, and cursor writes commit.
+func (r *Repository) ReceiveAndProjectCanonicalAgentDeliveryEventsWithReceipt(
+	ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect, remoteHighWater int64,
+) ([]models.CanonicalAgentDeliveryProjectionResult, *models.ConversationMutationReceipt, error) {
 	streamID, err := validateCanonicalDeliveryBatch(events, effects)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(events) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	contentHashes := make([]string, len(events))
 	for index, event := range events {
 		if contentHashes[index], err = r.prepareAgentDeliveryEventReceipt(event); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := r.prepareAgentDeliveryOwnerStatement(ctx, event); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if err := r.prepareAgentDeliveryReceiptStatement(ctx); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return projectCanonicalDeliveryWithRetry(ctx, func() ([]models.CanonicalAgentDeliveryProjectionResult, error) {
-		return r.receiveAndProjectCanonicalDeliveryAttempt(ctx, streamID, events, effects, contentHashes, remoteHighWater)
+	var receipt *models.ConversationMutationReceipt
+	results, err := projectCanonicalDeliveryWithRetry(ctx, func() ([]models.CanonicalAgentDeliveryProjectionResult, error) {
+		var attemptResults []models.CanonicalAgentDeliveryProjectionResult
+		var attemptErr error
+		attemptResults, receipt, attemptErr = r.receiveAndProjectCanonicalDeliveryAttempt(ctx, streamID, events, effects, contentHashes, remoteHighWater)
+		return attemptResults, attemptErr
 	})
+	return results, receipt, err
 }
 
 func (r *Repository) receiveAndProjectCanonicalDeliveryAttempt(
@@ -54,40 +68,48 @@ func (r *Repository) receiveAndProjectCanonicalDeliveryAttempt(
 	effects []*models.AgentDeliveryEffect,
 	contentHashes []string,
 	remoteHighWater int64,
-) ([]models.CanonicalAgentDeliveryProjectionResult, error) {
+) ([]models.CanonicalAgentDeliveryProjectionResult, *models.ConversationMutationReceipt, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.lockCombinedDeliveryWrites(ctx, tx, streamID, events, effects); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for index, event := range events {
 		if _, err := r.receiveAgentDeliveryEventTx(ctx, tx, event, remoteHighWater, contentHashes[index]); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if r.agentDeliveryCombinedProjectionFailpoint != nil {
 		if err := r.agentDeliveryCombinedProjectionFailpoint("project"); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	projectedSequence, boundary, err := loadCanonicalDeliveryCursorTx(ctx, tx, r.db.Rebind, streamID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	changes, err := r.beginCanonicalConversationChanges(ctx, tx, events)
+	if err != nil {
+		return nil, nil, err
 	}
 	results := make([]models.CanonicalAgentDeliveryProjectionResult, len(events))
 	if err := r.projectCanonicalDeliveryBatchTx(
-		ctx, tx, events, effects, results, projectedSequence, boundary,
+		ctx, tx, events, effects, results, projectedSequence, boundary, changes,
 	); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	receipt, err := changes.receipt(ctx, r, tx)
+	if err != nil {
+		return nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	r.refreshAgentDeliveryLag(ctx)
-	return results, nil
+	return results, receipt, nil
 }
 
 // lockCombinedDeliveryWrites takes the union of the receipt and projection lock
