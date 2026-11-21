@@ -264,6 +264,9 @@ func (s *Store) DeleteIssueWatch(ctx context.Context, id string) error {
 	if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM linear_issue_watch_tasks WHERE issue_watch_id = ?`), id); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM linear_issue_watch_pending_issues WHERE issue_watch_id = ?`), id); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM linear_issue_watches WHERE id = ?`), id); err != nil {
 		return err
 	}
@@ -359,9 +362,43 @@ func (s *Store) ResetIssueWatchState(ctx context.Context, watchID string) error 
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, s.db.Rebind(
+		`DELETE FROM linear_issue_watch_pending_issues WHERE issue_watch_id = ?`), watchID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(
 		`UPDATE linear_issue_watches SET last_polled_at = NULL, updated_at = ? WHERE id = ?`),
 		time.Now().UTC(), watchID); err != nil {
 		return err
+	}
+	return tx.Commit()
+}
+
+// ListPendingIssueIDs returns the Linear issue IDs a blocker-aware watch has
+// matched but not yet started.
+func (s *Store) ListPendingIssueIDs(ctx context.Context, watchID string) ([]string, error) {
+	var ids []string
+	err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(
+		`SELECT issue_id FROM linear_issue_watch_pending_issues WHERE issue_watch_id = ? ORDER BY issue_id`), watchID)
+	return ids, err
+}
+
+// ReplacePendingIssueIDs makes ids the complete set of a watch's pending issues.
+func (s *Store) ReplacePendingIssueIDs(ctx context.Context, watchID string, ids []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, s.db.Rebind(
+		`DELETE FROM linear_issue_watch_pending_issues WHERE issue_watch_id = ?`), watchID); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, s.db.Rebind(`
+			INSERT INTO linear_issue_watch_pending_issues (issue_watch_id, issue_id) VALUES (?, ?)
+			ON CONFLICT(issue_watch_id, issue_id) DO NOTHING`), watchID, id); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
