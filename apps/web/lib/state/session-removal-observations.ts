@@ -4,7 +4,7 @@ import { stateReadScopeIdentity } from "./shared-resource-reads";
 
 const observedByStore = new WeakMap<StoreApi<AppState>, { scope: string; ids: Set<string> }>();
 
-/** Committed removal observations exclude admission while absence proof is pending. */
+/** Scoped unavailable observations exclude admission while absence proof is pending. */
 export function observedRemovals(store: StoreApi<AppState>): Set<string> | undefined {
   const observed = observedByStore.get(store);
   return observed?.scope === stateReadScopeIdentity(store.getState()) ? observed.ids : undefined;

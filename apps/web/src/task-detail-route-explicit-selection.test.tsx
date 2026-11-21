@@ -10,7 +10,10 @@ import type { Task, TaskSession } from "@/lib/types/http";
 import { sessionId, taskId, workflowId, workspaceId } from "@/lib/types/ids";
 import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import { registerTaskSessionHandlers } from "@/lib/ws/handlers/agent-session";
-import { listTaskSessions } from "@/lib/api/domains/session-api";
+import { listTaskSessions, fetchTaskSession } from "@/lib/api/domains/session-api";
+import { ApiError } from "@/lib/api/client";
+import { registerTasksHandlers } from "@/lib/ws/handlers/tasks";
+import { makeTask, makeMessage } from "@/lib/ws/handlers/tasks.test-helpers";
 import type * as SessionApi from "@/lib/api/domains/session-api";
 import { TaskDetailRoute } from "./task-detail-route";
 import { commitWorkflowRecipient, taskRouteSelectionState } from "./task-detail-route.test-helpers";
@@ -28,6 +31,7 @@ vi.mock("@/lib/state/task-navigation-reads", async (original) => ({
 vi.mock("@/lib/api/domains/session-api", async (original) => ({
   ...(await original<typeof SessionApi>()),
   listTaskSessions: vi.fn(),
+  fetchTaskSession: vi.fn(),
 }));
 vi.mock("@/lib/ssr/session-page-state", async (original) => ({
   ...(await original<typeof import("@/lib/ssr/session-page-state")>()),
@@ -60,6 +64,7 @@ const OLD = "removed";
 const TARGET = "requested";
 const SURVIVOR = "survivor";
 const TIME = "2026-11-20T12:00:00Z";
+const WORKFLOW = "workflow-1";
 const NOTIFICATION_TYPE = "notification";
 const REMOVED_ACTION = "session.removed";
 function identity(empty: boolean): TaskNavigationIdentity {
@@ -69,7 +74,7 @@ function identity(empty: boolean): TaskNavigationIdentity {
       title: "Explicit route admission",
       description: "",
       workspace_id: workspaceId("workspace-1"),
-      workflow_id: workflowId("workflow-1"),
+      workflow_id: workflowId(WORKFLOW),
       workflow_step_id: "step-1",
       primary_session_id: sessionId(OLD),
       state: "COMPLETED",
@@ -175,7 +180,7 @@ function applyEntryOwner(owner: string, pendingMove: boolean) {
     act(() =>
       store.getState().beginWorkflowSessionFocus({
         taskId: TASK,
-        workflowId: "workflow-1",
+        workflowId: WORKFLOW,
         destinationStepId: "review",
         presentationToken: 1,
         navigationRevision: store.getState().taskRemoval.navigationRevision,
@@ -185,7 +190,7 @@ function applyEntryOwner(owner: string, pendingMove: boolean) {
     act(() =>
       store.getState().beginWorkflowSessionFocus({
         taskId: "unrelated",
-        workflowId: "workflow-1",
+        workflowId: WORKFLOW,
         destinationStepId: "review",
         presentationToken: 1,
         navigationRevision: store.getState().taskRemoval.navigationRevision,
@@ -424,3 +429,67 @@ it.each(
     stop();
   },
 );
+
+it("keeps a held explicit shell behind a scoped predecessor 404 without a removal frame", async () => {
+  const data = identity(false);
+  data.task.primary_session_id = sessionId(TARGET);
+  data.task.archived_at = undefined;
+  const initial = taskRouteSelectionState(TASK, TARGET, data.allSessionsResponse.sessions);
+  initial.kanban = { workflowId: WORKFLOW, steps: [], tasks: [] };
+  initial.workspaces = { activeId: "workspace-1", items: [] } as AppState["workspaces"];
+  const identityRead = Promise.withResolvers<TaskNavigationIdentity>();
+  const commit = Promise.withResolvers<void>();
+  const predecessor = Promise.withResolvers<Awaited<ReturnType<typeof fetchTaskSession>>>();
+  const proof = Promise.withResolvers<TaskNavigationIdentity["allSessionsResponse"]>();
+  mocks.load.mockReturnValue(identityRead.promise);
+  mocks.shellGate = commit.promise;
+  vi.mocked(fetchTaskSession).mockReturnValue(predecessor.promise);
+  vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
+  render(
+    <StateProvider initialState={initial}>
+      <ToastProvider>
+        <CaptureStore />
+        <Suspense fallback={null}>
+          <TaskDetailRoute taskId={TASK} sessionId={TARGET} />
+        </Suspense>
+      </ToastProvider>
+    </StateProvider>,
+  );
+  await waitFor(() => expect(mocks.load).toHaveBeenCalled());
+  act(() =>
+    registerTasksHandlers(store)["task.updated"]!(makeMessage(makeTask(TASK, TARGET, WORKFLOW))),
+  );
+  await act(async () => identityRead.resolve(data));
+  await waitFor(() => expect(mocks.shellBuilt).toHaveBeenCalled());
+  act(() =>
+    registerTasksHandlers(store)["task.updated"]!(
+      makeMessage({
+        ...makeTask(TASK, SURVIVOR, WORKFLOW),
+        updated_at: "2026-11-20T12:00:01Z",
+      }),
+    ),
+  );
+  await waitFor(() => expect(fetchTaskSession).toHaveBeenCalledWith(TARGET, expect.anything()));
+  await act(async () => predecessor.reject(new ApiError("", 404, null)));
+  await waitFor(() => expect(listTaskSessions).toHaveBeenCalled());
+  const selections: Array<string | null> = [];
+  const stop = store.subscribe((state) => selections.push(state.tasks.activeSessionId));
+  await act(async () => {
+    mocks.shellGate = undefined;
+    commit.resolve();
+  });
+  expect(store.getState().tasks.pinnedSessionId).toBeNull();
+  expect(store.getState().kanban.tasks[0]?.primarySessionId).toBe(SURVIVOR);
+  await act(async () =>
+    proof.resolve({
+      sessions: data.allSessionsResponse.sessions
+        .filter((session) => session.id !== TARGET)
+        .map((session) => ({ ...session, is_primary: true })),
+      total: 1,
+    }),
+  );
+  await waitFor(() => expect(store.getState().tasks.activeSessionId).toBe(SURVIVOR));
+  expect(selections).not.toContain(null);
+  expect(store.getState().taskSessions.items[TARGET]).toBeUndefined();
+  stop();
+});

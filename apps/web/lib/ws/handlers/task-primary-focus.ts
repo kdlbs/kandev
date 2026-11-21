@@ -389,6 +389,12 @@ function verifyPreviousSession(store: StoreApi<AppState>, owner: FollowOwner): v
           })
           .catch((error: unknown) => {
             if (!(error instanceof ApiError) || error.status !== 404) throw error;
+            if (
+              controller.signal.aborted ||
+              stateReadScopeIdentity(store.getState()) !== pending.scopeIdentity
+            )
+              return;
+            observeRemoval(store, pending.taskId, pending.previousSessionId);
             pending.source = "removed";
             return verifyRemoval(store, pending);
           });

@@ -647,6 +647,8 @@ function enforceFromStore(api: DockviewApi, get: StoreGet): void {
   });
 }
 
+const layoutVersions = new WeakMap<DockviewApi, number>();
+
 /**
  * Apply a layout state to the dockview API and persist the resulting group
  * IDs to the store. Uses the caller-provided `preMeasured` container size when
@@ -659,6 +661,7 @@ function applyLayoutAndSet(
   set: StoreSet,
   preMeasured?: { width: number; height: number },
 ): LayoutGroupIds {
+  layoutVersions.set(api, (layoutVersions.get(api) ?? 0) + 1);
   // Pass measured container dims so fromJSON's grid.width matches the live
   // container — avoids the proportional rescale that would otherwise grow
   // pinned columns past their legacy initial caps on the next api.layout.
@@ -1488,6 +1491,7 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
       debugSwitch("envSwitch: skip (same env)", { newEnvId });
       return;
     }
+    layoutVersions.set(api, (layoutVersions.get(api) ?? 0) + 1);
     set({ pendingChatInitialPlacement: createChatInitialPlacement(activeSessionId) });
     // First adoption (oldEnvId and currentLayoutEnvId both null) falls through
     // to the general path below. We deliberately do NOT "just adopt" whatever
@@ -1622,10 +1626,21 @@ function reconcileMaximizeSessionList(
 
 /** Layout-only restoration retains each still-live group's chosen panel. */
 function withLiveGroupSelection(layout: LayoutState, api: DockviewApi): LayoutState {
+  const savedGroups = layout.columns.flatMap((column) => column.groups);
   const selectGroup = (group: LayoutGroup): LayoutGroup => {
-    const selected = group.id
-      ? api.groups.find((live) => live.id === group.id)?.activePanel?.id
-      : undefined;
+    const sameId = group.id ? api.groups.find((live) => live.id === group.id) : undefined;
+    const candidates = sameId
+      ? [sameId]
+      : api.groups.filter((live) => {
+          const id = live.activePanel?.id;
+          return (
+            id &&
+            group.panels.some((panel) => panel.id === id) &&
+            savedGroups.filter((saved) => saved.panels.some((panel) => panel.id === id)).length ===
+              1
+          );
+        });
+    const selected = candidates.length === 1 ? candidates[0].activePanel?.id : undefined;
     return selected && group.panels.some((panel) => panel.id === selected)
       ? { ...group, activePanel: selected }
       : group;
@@ -1706,49 +1721,56 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
         }
       });
     },
-    exitMaximizedLayout: () => {
-      const { api, preMaximizeLayout: savedLayout, currentLayoutEnvId } = get();
-      if (!api || !savedLayout) return;
-      const hidden = getLayoutHiddenSessions(api, currentLayoutEnvId);
-      const visibleLayout = hidden.size
-        ? filterPreMaximizeLayout(
-            savedLayout,
-            null,
-            [...collectSessionIdsFromLayout(savedLayout)].filter((id) => !hidden.has(id)),
-          )
-        : savedLayout;
-      const preMaximizeLayout = withLiveGroupSelection(visibleLayout, api);
-      preserveChatScrollDuringLayout();
-      const measured = measureDockviewContainer(api);
-      const safeWidth = measured.width;
-      const safeHeight = measured.height;
-      const liveWidths = resolveRestoredPinnedWidths(
-        preMaximizeLayout,
-        safeWidth,
-        get().pinnedWidths,
-        currentLayoutEnvId,
-      );
-      set({
-        isRestoringLayout: true,
-        preMaximizeLayout: null,
-        maximizedGroupId: null,
-        ...visibilityForLayout(preMaximizeLayout, get().hiddenRightPane),
-      });
-      if (currentLayoutEnvId) {
-        removeEnvMaximizeState(currentLayoutEnvId);
-      }
-      applyLayoutAndSet(api, preMaximizeLayout, liveWidths, set);
-      requestAnimationFrame(() => {
-        api.layout(safeWidth, safeHeight);
-        enforceFromStore(api, get);
-        syncPinnedWidthsFromApi(api, set);
-        set({ isRestoringLayout: false });
-        persistEnvLayoutNow(api, currentLayoutEnvId, null);
-      });
-    },
+    exitMaximizedLayout: () => exitMaximizedLayout(set, get),
     reconcileMaximizeSessionList: (activeSessionId: string | null, currentSessionIds: string[]) =>
       reconcileMaximizeSessionList(set, get, activeSessionId, currentSessionIds),
   };
+}
+
+function exitMaximizedLayout(set: StoreSet, get: StoreGet): void {
+  const { api, preMaximizeLayout: savedLayout, currentLayoutEnvId } = get();
+  if (!api || !savedLayout) return;
+  const hidden = getLayoutHiddenSessions(api, currentLayoutEnvId);
+  const visibleLayout = hidden.size
+    ? filterPreMaximizeLayout(
+        savedLayout,
+        null,
+        [...collectSessionIdsFromLayout(savedLayout)].filter((id) => !hidden.has(id)),
+      )
+    : savedLayout;
+  const preMaximizeLayout = withLiveGroupSelection(visibleLayout, api);
+  preserveChatScrollDuringLayout();
+  const measured = measureDockviewContainer(api);
+  const safeWidth = measured.width;
+  const safeHeight = measured.height;
+  const liveWidths = resolveRestoredPinnedWidths(
+    preMaximizeLayout,
+    safeWidth,
+    get().pinnedWidths,
+    currentLayoutEnvId,
+  );
+  set({
+    isRestoringLayout: true,
+    preMaximizeLayout: null,
+    maximizedGroupId: null,
+    ...visibilityForLayout(preMaximizeLayout, get().hiddenRightPane),
+  });
+  if (currentLayoutEnvId) removeEnvMaximizeState(currentLayoutEnvId);
+  const version = (layoutVersions.get(api) ?? 0) + 1;
+  applyLayoutAndSet(api, preMaximizeLayout, liveWidths, set);
+  requestAnimationFrame(() => {
+    if (
+      get().api !== api ||
+      get().currentLayoutEnvId !== currentLayoutEnvId ||
+      layoutVersions.get(api) !== version
+    )
+      return;
+    api.layout(safeWidth, safeHeight);
+    enforceFromStore(api, get);
+    syncPinnedWidthsFromApi(api, set);
+    set({ isRestoringLayout: false });
+    persistEnvLayoutNow(api, currentLayoutEnvId, null);
+  });
 }
 
 /**

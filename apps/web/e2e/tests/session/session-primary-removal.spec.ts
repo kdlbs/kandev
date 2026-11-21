@@ -284,6 +284,16 @@ test.describe("owned removal transcript visibility", () => {
     await testPage.screenshot({ path: test.info().outputPath("boot-tree-restore.png") });
   });
 
+  test("restores a legacy maximize selection through real Go boot", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await expectBootConversationRoute(testPage, apiClient, seedData, "legacy");
+    await testPage.screenshot({ path: test.info().outputPath("boot-legacy-restore.png") });
+  });
+
   for (const [mode, moveOutcome] of [
     ["hidden", undefined],
     ["failed-workflow", "failed"],

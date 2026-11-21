@@ -3696,3 +3696,91 @@ Chat/composer and Files retain their split; hidden B becomes the explicit
 visible chat; phone Plan remains usable and contained after the one-shot focus
 is consumed. Runtime pass, cursor proof and screenshot observations are separate.
 R26 implementation is complete; independent production review proceeds R27.
+
+### Production-fix review round 27 remediation
+
+Sol child `447beb44-1163-4396-8efb-aacec8fca564` reviewed
+`90b4a0b8f6d6c8f5d6ed1790c6718b6fcb9a164b`: four P2 source schedules.
+Completed rounds 27; consecutive clean 0. Parent RED evidence:
+
+- `r27-red-units.log`: six failures / 93 controls. Four legacy flat/tree
+  B/Plan choices returned A; an old exit frame persisted Y's panels into X;
+  a held explicit shell pinned B after the predecessor GET had returned 404.
+- `r27-phone-red-summary.log`: opening the fresh indexed B hit at B's existing
+  URL left Plan visible, despite the user's new explicit activation.
+
+The repeated-hit fix carries a task/session-scoped activation identity in
+committed history state. It changes neither the URL nor message/cursor APIs.
+Task detail treats each identity as a new navigation attempt through its
+existing membership, scope, removal and newer-selection/workflow admission,
+including deferred workflow handling. Passive output creates no identity.
+Router controls cover blocked/cancelled versus committed pushes.
+
+Legacy overlay selection transfers only on stable group ID or unique panel
+ownership in both live and saved groups. Existing flat/tree geometry and
+A/B/Plan controls remain. The browser fixture writes the baseline-generated
+group ID into the retained v3 overlay blob; it does not fabricate a UI action.
+
+A current-scope predecessor 404 records unavailable evidence and invalidates
+stale membership admission before requesting complete task membership. It is
+not confirmed deletion. The held React-commit case uses real promotion/read
+handlers and no removal notification. Its promotion has a newer durable
+timestamp and the viewer starts in the task's existing workspace/workflow.
+The initial fixture crossed from null workspace during shell hydration; diagnostic
+stack evidence showed that correctly invalidated the old follow and isolated
+its task projection. The final same-scope fixture keeps that unrelated transition
+out of the asserted handoff. Cache-only diagnostics are overwritten by refresh.
+
+Deferred exit work owns API, environment and layout generation before layout,
+readiness or persistence writes. Controlled real-Dockview frames cover a next
+environment, a newer same-environment layout operation, and X-to-Y-to-X.
+No backend/cursor/predicate/promotion/schema/wire behavior changed in this round.
+
+#### R27 final verification
+
+After exit-action extraction and the same-scope fixture repair,
+`r27-final-units-v2.log` passes 20 files / 360 tests. This is a fresh complete
+targeted run, not an aggregation of the earlier partial runs. It includes
+legacy flat/tree A/B/Plan geometry, three delayed-exit schedules, real 404
+promotion and held-shell handling, existing generic-error/scope/pin/workflow
+controls, real router commit/cancel activation and route recovery/admission.
+The initial two affected runs had 359/360 and are not green receipts.
+
+Strict changed-file lint, full production typecheck and fresh frontend build
+pass (`r27-lint.log`, `r27-typecheck.log`, `r27-build.log`). Docs catalog and all
+specifications pass. Cache-only diagnostic logs were removed by the final
+snapshot refresh. The runtime uses fresh R27 frontend and retained fresh R24
+backend/agentctl/host/plugin; no Go source changed.
+
+Focused replay from the refreshed cache-safe snapshot:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run lib/state/dockview-env-switch.plugin-layout.test.ts \
+  lib/state/dockview-env-switch-maximize-session-filter.test.ts \
+  lib/state/dockview-right-panel-visibility.test.ts lib/ws/handlers/task-primary- \
+  src/task-detail-route lib/state/task-navigation lib/routing/client-router.test.ts \
+  hooks/use-command-panel-task-navigation.test.ts
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts -- \
+  --grep 'through real Go boot|explicit conversation route across hidden' \
+  --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+Historical trigger, list-convergence, seeded-execution, broad-suite and
+live-NATS qualifications remain. No new product copy or public API terminology.
+
+Final browser receipts: `r27-green-summary.log` seven desktop cases pass;
+`r27-phone-summary.log` ten phone cases pass, one worker/no retries.
+Desktop covers six real Go-boot variants including the baseline-shaped v3
+overlay plus repeated same-URL hidden-conversation selection. Phone first keeps
+Plan on passive new output, then selects that fresh indexed hit at the unchanged
+B URL and reads its exact tail without reading the sibling or launching.
+Inspected final legacy Restore and phone repeated-hit captures: the requested
+conversation is visible, geometry retained, and phone controls remain contained.
+Stored-cursor/traffic proof remains distinct from screenshots.
+
+R27 implementation is complete. Independent review R28 follows the normal
+commit and exact-ref push; the review loop is not complete.

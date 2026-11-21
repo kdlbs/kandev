@@ -11,6 +11,7 @@ import {
 } from "react";
 import { StateHydrator } from "@/components/state-hydrator";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useTaskSessionActivation } from "@/lib/routing/client-router";
 import { TaskRouteSessionHydrationProvider } from "@/components/task/task-route-session-hydration";
 import { KanbanTaskShell } from "@/app/tasks/[id]/kanban-task-shell";
 import {
@@ -80,8 +81,8 @@ function initialRouteState(
   taskId: string,
   sessionId?: string,
   navigationContext?: TaskNavigationContext,
+  routeKey = taskRouteKey(taskId, sessionId),
 ): TaskDetailRouteState {
-  const routeKey = taskRouteKey(taskId, sessionId);
   if (routeDataMatchesSelection(initialData, taskId, sessionId)) {
     return {
       routeKey,
@@ -270,7 +271,8 @@ function useTaskDetailRouteData({
 }: TaskDetailRouteData) {
   const store = useAppStoreApi();
   const projection = useTaskRouteProjection(taskId, sessionId);
-  const routeKey = taskRouteKey(taskId, sessionId);
+  const activation = useTaskSessionActivation(taskId, sessionId);
+  const routeKey = `${taskRouteKey(taskId, sessionId)}${activation ? `\u0000${activation}` : ""}`;
   const navigationOwnerRef = useRef<object>({});
   const navigationContext = beginTaskNavigation(
     store,
@@ -297,7 +299,7 @@ function useTaskDetailRouteData({
   if (routeKey !== bootRouteKeyRef.current) bootDataConsumedRef.current = true;
   const routeInitialData = bootDataConsumedRef.current ? undefined : initialData;
   const [routeState, setRouteState] = useState<TaskDetailRouteState>(() =>
-    initialRouteState(routeInitialData, taskId, sessionId, navigationContext),
+    initialRouteState(routeInitialData, taskId, sessionId, navigationContext, routeKey),
   );
   const previousLoadedRouteRef = useRef<TaskDetailRouteState | null>(
     routeState.status === "loaded" ? routeState : null,
@@ -460,7 +462,7 @@ function resolveCurrentRouteState(
   sessionId?: string,
 ): TaskDetailRouteState {
   if (routeState.routeKey === routeKey) return routeState;
-  return initialRouteState(routeInitialData, taskId, sessionId);
+  return initialRouteState(routeInitialData, taskId, sessionId, undefined, routeKey);
 }
 
 type TaskDetailRouteFetchArgs = {

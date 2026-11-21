@@ -26,13 +26,34 @@ async function splitBootColumn(page: Page, viewer: SessionPage, sourceId: string
     .toBe(true);
 }
 
+async function seedLegacyMaximize(page: Page, environmentId: string, sourceId: string) {
+  await page.evaluate(
+    ({ environmentId, sourceId }) => {
+      const key = `kandev.dockview.env-maximize-v3.${environmentId}`;
+      const saved = JSON.parse(sessionStorage.getItem(key)!);
+      const overlay = saved.maximizedDockviewJson as import("dockview-react").SerializedDockview;
+      const visit = (node: typeof overlay.grid.root) => {
+        if (Array.isArray(node.data)) node.data.forEach(visit);
+        else if (node.data.views.includes(`session:${sourceId}`)) {
+          if (overlay.activeGroup === node.data.id) overlay.activeGroup = "group-1";
+          node.data.id = "group-1";
+        }
+      };
+      visit(overlay.grid.root);
+      sessionStorage.setItem(key, JSON.stringify(saved));
+    },
+    { environmentId, sourceId },
+  );
+}
+
 /** Real prepared sessions retain the same environment across a new Go-boot document. */
 export async function expectBootConversationRoute(
   page: Page,
   api: ApiClient,
   seed: SeedData,
-  maximized: boolean | "parked" | "hidden" | "tree" = false,
+  maximized: boolean | "parked" | "hidden" | "tree" | "legacy" = false,
 ) {
+  const liveOverlay = maximized === true || maximized === "tree" || maximized === "legacy";
   const task = await api.createTask(seed.workspaceId, "Boot explicit conversation", {
     prepare_session: true,
     agent_profile_id: seed.agentProfileId,
@@ -122,6 +143,7 @@ export async function expectBootConversationRoute(
     )
     .toBe(true);
   await page.goto("/");
+  if (maximized === "legacy") await seedLegacyMaximize(page, environment.id, sourceId);
   const requestedTail = await api.seedSessionMessage(requested.session_id, {
     type: "message",
     content: "Unread explicitly requested boot conversation",
@@ -129,9 +151,7 @@ export async function expectBootConversationRoute(
   const requestedBefore = (await sessionReadState(api, requested.session_id)).cursor;
   await page.goto(`/t/${task.id}`);
   await expect(viewer.activeChat()).toHaveAttribute("data-session-id", sourceId);
-  await expect(viewer.sessionTabBySessionId(requested.session_id)).toHaveCount(
-    maximized === true || maximized === "tree" ? 1 : 0,
-  );
+  await expect(viewer.sessionTabBySessionId(requested.session_id)).toHaveCount(liveOverlay ? 1 : 0);
   expect((await sessionReadState(api, requested.session_id)).cursor).toBe(requestedBefore);
   const sourceBefore = (await sessionReadState(api, sourceId)).cursor;
   await page.goto("/");
@@ -159,7 +179,7 @@ export async function expectBootConversationRoute(
     "negative-assertion",
     "Boot explicit focus must not read the restored sibling",
   );
-  if (maximized === true || maximized === "tree") {
+  if (liveOverlay) {
     await page.getByTestId("dockview-maximize-btn").first().hover();
     await expect(page.getByRole("tooltip")).toHaveText("Restore");
     await page.getByTestId("dockview-maximize-btn").first().click();

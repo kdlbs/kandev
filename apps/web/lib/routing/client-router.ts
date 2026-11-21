@@ -7,6 +7,7 @@ import { pushNavigationState, replaceNavigationState } from "./navigation-guard"
 
 type NavigateOptions = {
   scroll?: boolean;
+  taskSessionActivation?: { taskId: string; sessionId: string };
   /**
    * Runs only once the navigation has actually committed. The unsaved-changes
    * guard can cancel a `push`, and `push` itself returns void, so a caller that
@@ -48,16 +49,35 @@ export function useSearchParams(): URLSearchParams {
   return useMemo(() => new URLSearchParams(search), [search]);
 }
 
+/** Deliberate conversation hits can repeat without changing their URL. */
+export function useTaskSessionActivation(taskId: string, sessionId?: string): string {
+  return useSyncExternalStore(
+    subscribeLocation,
+    () => {
+      const activation = window.history.state?.taskSessionActivation;
+      return activation?.taskId === taskId &&
+        activation.sessionId === sessionId &&
+        typeof activation.id === "string"
+        ? activation.id
+        : "";
+    },
+    () => "",
+  );
+}
+
 export function useParams(): Record<string, string> {
   const { pathname } = parseLocationKey(useLocationKey());
   return useMemo(() => paramsForPath(pathname), [pathname]);
 }
 
 function navigate(mode: "push" | "replace", href: string, options?: NavigateOptions): void {
+  const state = options?.taskSessionActivation
+    ? { taskSessionActivation: { ...options.taskSessionActivation, id: crypto.randomUUID() } }
+    : {};
   if (mode === "push") {
-    pushNavigationState({}, "", href, () => finishNavigation(options));
+    pushNavigationState(state, "", href, () => finishNavigation(options));
   } else {
-    replaceNavigationState({}, "", href, () => finishNavigation(options));
+    replaceNavigationState(state, "", href, () => finishNavigation(options));
   }
 }
 

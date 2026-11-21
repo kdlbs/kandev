@@ -1,7 +1,13 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearNavigationBlockerForTests, setNavigationBlocker } from "./navigation-guard";
-import { useParams, usePathname, useRouter, useSearchParams } from "./client-router";
+import {
+  useParams,
+  usePathname,
+  useRouter,
+  useSearchParams,
+  useTaskSessionActivation,
+} from "./client-router";
 
 const NAV_POSITION_KEY = "__kandevNavigationPosition";
 
@@ -154,4 +160,31 @@ describe("client router adapter", () => {
       expect(go).toHaveBeenCalled();
     });
   });
+});
+
+it("admits each deliberate same-URL conversation activation only after navigation commits", () => {
+  setLocation("/t/t1?sessionId=b");
+  vi.stubGlobal("scrollTo", vi.fn());
+  const { result } = renderHook(() => ({
+    router: useRouter(),
+    activation: useTaskSessionActivation("t1", "b"),
+    unrelated: useTaskSessionActivation("t1", "c"),
+  }));
+  const href = "/t/t1?sessionId=b";
+  const options = { taskSessionActivation: { taskId: "t1", sessionId: "b" } };
+  act(() => result.current.router.push(href, options));
+  const first = result.current.activation;
+  expect(first).not.toBe("");
+  expect(result.current.unrelated).toBe("");
+  const intents: Array<{ proceed: () => void; cancel: () => void }> = [];
+  setNavigationBlocker((intent) => intents.push(intent));
+  act(() => result.current.router.push(href, options));
+  expect(result.current.activation).toBe(first);
+  act(() => intents.shift()!.cancel());
+  expect(result.current.activation).toBe(first);
+  act(() => result.current.router.push(href, options));
+  act(() => intents.shift()!.proceed());
+  expect(result.current.activation).not.toBe(first);
+  expect(result.current.activation).not.toBe("");
+  expect(window.location.pathname + window.location.search).toBe(href);
 });

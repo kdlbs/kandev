@@ -249,13 +249,13 @@ selection/pin and workflow requests targeting it. Preserve independent intent,
 surviving pins/cursors and newer user/workflow selection. Owned empty slots can
 re-prove after changed primaries. Proof fills missing recipient identity/lifecycle.
 
-Explicit routes reopen hidden targets and leave maximize for absent panels.
-Restore retains flat/tree group choices; phone consumes route focus to open Chat.
-Only explicit admission selects at hydration; observed/confirmed removal vetoes sync.
-Correlated `workflow_focus_disposition: none`: admitted, no active source and
-no effective launch (including skip-only); omit for possible deferred launch.
-Committed focus wins restore. Removal leases protect live/parked groups.
-Changed primaries re-prove empty slots. Visibility gates restore, transcripts and dots.
+Explicit hits carry scoped history identity, even at the same URL.
+Routes reopen hidden targets. Restore keeps flat/tree or unique legacy choices.
+Phone consumes focus for Chat; unavailable/404 proof vetoes admission/sync.
+`workflow_focus_disposition: none`: admitted, no source/effective launch;
+omit while deferred launch is possible. Removal leases protect live/parked groups.
+Committed focus wins restore. API/env/generation fence exit work.
+Changed primaries re-prove empty slots. Visibility gates restore/read/dots.
 
 `invalidateTaskSessionMembership` fences pending/admitted/queued foreground and
 removal-dialog reads, not new reads/unrelated keys. Confirmed UUID deletion

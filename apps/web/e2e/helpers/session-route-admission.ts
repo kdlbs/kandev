@@ -179,14 +179,47 @@ export async function expectConversationRouteAfterRemoval(
       .getByTestId("session-mobile-bottom-nav")
       .getByRole("button", { name: "Plan", exact: true })
       .tap();
+    const repeatQuery = `repeat${randomUUID().replaceAll("-", "")}`;
     const after = await api.seedSessionMessage(other.session_id, {
       type: "message",
-      content: "Later output must not reopen Chat",
+      content: repeatQuery,
     });
     await dwell(page, 500, "negative-assertion", "Consumed explicit focus must not reopen Chat");
     await expect(viewer.activeChat()).toHaveCount(0);
     expect((await sessionReadState(api, other.session_id)).cursor).toBe(tail.messageId);
     expect(reads.markReads.filter((read) => read.messageId === after.messageId)).toEqual([]);
+    await waitForIndexedConversation(api, seed.workspaceId, repeatQuery, {
+      sessionId: other.session_id,
+      messageId: after.messageId,
+    });
+    await selectCommandTask(page, repeatQuery, true);
+    await expect(viewer.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+    await expect
+      .poll(async () => (await sessionReadState(api, other.session_id)).cursor)
+      .toBe(after.messageId);
+    expect((await sessionReadState(api, primary.session_id)).cursor).toBe(primaryTail);
+    expect(reads.agentStarts()).toEqual([]);
+  }
+  if (options.hideTarget) {
+    await viewer.sessionTabCloseButton(other.session_id).click();
+    await expect(viewer.sessionTabBySessionId(other.session_id)).toHaveCount(0);
+    const repeatQuery = `hidden${randomUUID().replaceAll("-", "")}`;
+    const after = await api.seedSessionMessage(other.session_id, {
+      type: "message",
+      content: repeatQuery,
+    });
+    await waitForIndexedConversation(api, seed.workspaceId, repeatQuery, {
+      sessionId: other.session_id,
+      messageId: after.messageId,
+    });
+    await selectCommandTask(page, repeatQuery, true);
+    await expect(viewer.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+    await expect
+      .poll(async () => (await sessionReadState(api, other.session_id)).cursor)
+      .toBe(after.messageId);
+    expect((await sessionReadState(api, primary.session_id)).cursor).toBe(primaryTail);
+    expect(reads.agentStarts()).toEqual([]);
+    expect(await page.evaluate(() => performance.timeOrigin)).toBe(started);
   }
 }
 

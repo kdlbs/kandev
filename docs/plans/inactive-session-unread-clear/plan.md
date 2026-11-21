@@ -273,7 +273,7 @@ the same causal scenario after Task 01 proves a violation:
 Execute sequentially. No subagent authorization is implied.
 
 - [x] [Task 01: Establish the inactive-session failure boundary](task-01-establish-failure-boundary.md) (done: conformance, no violation reproduced).
-- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R26 corrections, 469 targeted tests, five desktop Go-boot and ten phone cases, strict checks/typecheck/build. Independent review continues; no broad-suite/live-NATS certificate).
+- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R27 corrections, 360 targeted tests, seven desktop and ten phone cases, strict checks/typecheck/build. Independent review continues; broad suites/live NATS remain uncertified).
 
 The prior [task unread dot package](../task-unread-dot/plan.md) is historical
 completed delivery. The [visible-visit divider package](../unread-divider-visible-session-clear/plan.md)
@@ -738,3 +738,18 @@ lint, typecheck, fresh frontend and docs pass. Five desktop Go-boot and ten
 phone cases pass on the final bundle, one worker/no retries. Tree/hidden
 captures and phone later-Plan preservation inspected. Task 02 has exact replay
 and retained logs; R27 is the next independent round.
+
+### Production review R27
+
+Sol child `447beb44-1163-4396-8efb-aacec8fca564` reviewed
+`90b4a0b8f6d6c8f5d6ed1790c6718b6fcb9a164b`: four P2s, not clean.
+Repeated same-URL conversation activation, legacy maximize group IDs, scoped
+predecessor 404 admission, and a stale exit frame persisting a new environment
+have parent reproductions and targeted corrections in Task 02.
+Completed production rounds 27; consecutive clean 0. R28 follows verified push.
+
+Final R27 author receipts: 20 files / 360 targeted tests pass after the final
+refactor/fixture correction; strict lint/typecheck/fresh frontend/docs pass.
+Seven desktop and ten phone cases pass on the final bundle, one worker/no
+retries. Legacy Restore and repeated-hit phone captures inspected. Task 02
+records failed intermediate runs separately and gives exact scoped replay.
