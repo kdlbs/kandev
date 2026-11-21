@@ -220,6 +220,11 @@
         "agent-communication"
       ],
       "sources": [
+        "apps/backend/internal/mcp/handlers/message_queue_census.go",
+        "apps/backend/internal/mcp/handlers/session_queue_recovery.go",
+        "apps/backend/internal/mcp/handlers/session_cleanup.go",
+        "apps/backend/internal/mcp/handlers/routine_wake.go",
+        "apps/backend/internal/orchestrator/messagequeue/census_disposition.go",
         "apps/backend/internal/mcp/handlers/spawn_session.go",
         "apps/backend/internal/mcp/handlers/parent_question.go",
         "apps/backend/internal/mcp/handlers/agent_permissions.go",
@@ -237,6 +242,11 @@
         "apps/web/components/task/chat/queue-automation-pills.tsx"
       ],
       "tests": [
+        "apps/backend/internal/mcp/handlers/message_queue_census_test.go",
+        "apps/backend/internal/mcp/handlers/session_queue_recovery_test.go",
+        "apps/backend/internal/mcp/handlers/session_cleanup_test.go",
+        "apps/backend/internal/mcp/handlers/routine_wake_test.go",
+        "apps/backend/internal/orchestrator/messagequeue/census_disposition_test.go",
         "apps/backend/internal/mcp/handlers/spawn_session_test.go",
         "apps/backend/internal/mcp/handlers/parent_question_test.go",
         "apps/backend/internal/mcp/handlers/agent_permissions_test.go",
@@ -256,6 +266,9 @@
         "answer_question_kandev",
         "ask_parent_question_kandev",
         "ask_user_question_kandev",
+        "close_task_session_kandev",
+        "dispose_message_queue_entries_kandev",
+        "get_message_queue_census_kandev",
         "get_task_conversation_kandev",
         "get_task_message_operation_kandev",
         "get_task_document_kandev",
@@ -265,6 +278,7 @@
         "list_task_documents_kandev",
         "list_task_sessions_kandev",
         "message_task_kandev",
+        "recover_session_queue_kandev",
         "resolve_agent_permission_kandev",
         "spawn_session_kandev",
         "write_task_document_kandev"

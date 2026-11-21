@@ -1010,7 +1010,8 @@ function useManualResumeSession({
   noticeKind,
 }: ManualResumeParams): () => Promise<boolean> {
   return useCallback(async (): Promise<boolean> => {
-    if (!taskId || !sessionId || taskArchiveState !== false) return false;
+    if (!taskId || !sessionId || taskArchiveState !== false || !session || session.archived_at)
+      return false;
     const capturedRequest = captureRequest();
     const canContinue = () => isCurrentRequest(captureRequest(), capturedRequest);
     const guardedSetters = buildGuardedSettersFor(capturedRequest);
@@ -1081,6 +1082,8 @@ export function useSessionResumption(
   const session = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
   );
+  const preventSessionResume =
+    options.preventAutoResume || !session || Boolean(session.archived_at);
   const setTaskSession = useAppStore((state) => state.setTaskSession);
   const setSessionAgentctlStatus = useAppStore((state) => state.setSessionAgentctlStatus);
   const setResumeSkipped = useAppStore((state) => state.setResumeSkipped);
@@ -1121,7 +1124,7 @@ export function useSessionResumption(
       session,
       setters,
       preventAutoStart: preventAutoStartAgentOnOpen,
-      preventAutoResume: options.preventAutoResume,
+      preventAutoResume: preventSessionResume,
       taskArchiveState,
       skipAutomaticRecovery: options.skipAutomaticRecovery ?? false,
     });

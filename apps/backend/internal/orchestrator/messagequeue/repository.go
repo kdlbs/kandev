@@ -92,6 +92,10 @@ type Repository interface {
 	// ListDurableDeliveryEntries also includes managed-input and caller-identified
 	// plan-comment receipts used for crash-safe prompt delivery.
 	ListDurableDeliveryEntries(ctx context.Context) ([]QueuedMessage, error)
+	// DisposeExact removes only entries whose immutable ID and opaque snapshot
+	// claim still match. It returns one outcome per requested claim plus visible
+	// queue counts from the same atomic session mutation.
+	DisposeExact(ctx context.Context, sessionID string, claims []QueueEntryClaim) (*QueueDispositionResult, error)
 
 	// CountBySession returns the number of entries for a session.
 	CountBySession(ctx context.Context, sessionID string) (int, error)

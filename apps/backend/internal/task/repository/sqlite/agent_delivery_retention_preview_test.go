@@ -41,9 +41,7 @@ func TestDeliveryRetentionPreviewBoundsDeletedHistory(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := repo.DeleteTaskSession(ctx, session); err != nil {
-					t.Fatal(err)
-				}
+				retireRetentionSessionForTest(t, repo, session)
 				if phase != "inbox" {
 					if _, err := repo.db.Exec(repo.db.Rebind(`DELETE FROM agent_delivery_inbox WHERE session_id = ?`), session.ID); err != nil {
 						t.Fatal(err)

@@ -22,6 +22,7 @@ import {
 import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-session-handoff";
 import { hiddenSessionIdsFor, pruneHiddenSessionIds } from "./dockview-hidden-session-panels";
 import { t } from "@/lib/i18n";
+import { filterSessionHistory } from "./session-sort";
 import { resolveVisibleSessionId } from "@/lib/env-hidden-sessions";
 
 const debug = createDebugLogger("dockview:session-tabs");
@@ -380,17 +381,28 @@ function ensureSiblingPanels(
 }
 
 /** Resolve the current session ID list from the store for the active task. */
-function resolveCurrentSessionIds(appStore: ReturnType<typeof useAppStoreApi>): {
+function resolveCurrentSessionIds(
+  appStore: ReturnType<typeof useAppStoreApi>,
+  showHistory: boolean,
+  effectiveSessionId: string | null,
+): {
   tid: string | null;
   currentSessionIds: string[];
+  allSessionIds: string[];
   sessionListLoaded: boolean;
 } {
   const state = appStore.getState();
   const tid = state.tasks.activeTaskId;
   const currentSessions = tid ? (state.taskSessionsByTask.itemsByTaskId[tid] ?? []) : [];
+  const visibleSessions = filterSessionHistory(currentSessions, showHistory);
+  const effectiveSession = currentSessions.find((session) => session.id === effectiveSessionId);
+  if (effectiveSession && !visibleSessions.some((session) => session.id === effectiveSession.id)) {
+    visibleSessions.push(effectiveSession);
+  }
   return {
     tid: tid ?? null,
-    currentSessionIds: currentSessions.map((session) => session.id),
+    currentSessionIds: visibleSessions.map((session) => session.id),
+    allSessionIds: currentSessions.map((session) => session.id),
     sessionListLoaded: tid ? (state.taskSessionsByTask.loadedByTaskId[tid] ?? false) : false,
   };
 }
@@ -507,7 +519,7 @@ function updateAutoSessionTabRefs(
 function reconcileLoadedSessionPanels(
   api: DockviewApi,
   refs: AutoSessionTabRefs,
-  currentSessionIds: string[],
+  sessionIds: { visible: string[]; all: string[] },
   effectiveSessionId: string | null,
   sessionListLoaded: boolean,
 ): void {
@@ -515,10 +527,10 @@ function reconcileLoadedSessionPanels(
   reconcileRemovedSessionPanels(
     api,
     refs.sessionTabCreatedRef.current,
-    currentSessionIds,
+    sessionIds.visible,
     effectiveSessionId ?? "",
   );
-  useDockviewStore.getState().reconcileMaximizeSessionList(effectiveSessionId, currentSessionIds);
+  useDockviewStore.getState().reconcileMaximizeSessionList(effectiveSessionId, sessionIds.all);
 }
 
 function workflowFocusRequestIdForSession(
@@ -538,11 +550,16 @@ export function runAutoSessionTabEffect(
   effectiveSessionId: string | null,
   appStore: ReturnType<typeof useAppStoreApi>,
   refs: AutoSessionTabRefs,
+  showHistory = false,
 ): void {
   const api = useDockviewStore.getState().api;
   if (!api) return;
 
-  const { tid, currentSessionIds, sessionListLoaded } = resolveCurrentSessionIds(appStore);
+  const { tid, currentSessionIds, allSessionIds, sessionListLoaded } = resolveCurrentSessionIds(
+    appStore,
+    showHistory,
+    effectiveSessionId,
+  );
 
   logAutoSessionTabEffectEntry(api, effectiveSessionId, tid, currentSessionIds, refs);
 
@@ -553,7 +570,13 @@ export function runAutoSessionTabEffect(
     return;
   }
 
-  reconcileLoadedSessionPanels(api, refs, currentSessionIds, effectiveSessionId, sessionListLoaded);
+  reconcileLoadedSessionPanels(
+    api,
+    refs,
+    { visible: currentSessionIds, all: allSessionIds },
+    effectiveSessionId,
+    sessionListLoaded,
+  );
   pruneHiddenSessionIds(api, appStore.getState);
 
   if (!effectiveSessionId) {
@@ -671,6 +694,10 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   const prevSessionIdRef = useRef<string | null>(null);
   const appStore = useAppStoreApi();
   const dockviewApi = useDockviewStore((state) => state.api);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const showHistory = useDockviewStore((state) =>
+    activeTaskId ? (state.sessionHistoryVisibleByTaskId[activeTaskId] ?? false) : false,
+  );
 
   // Key-based dependency so the effect re-runs when the task's session list
   // changes (add/remove). Inside the effect we re-read the real array from
@@ -680,7 +707,9 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     if (!tid) return EMPTY_SESSION_IDS_KEY;
     const list = s.taskSessionsByTask.itemsByTaskId[tid];
     if (!list || list.length === 0) return EMPTY_SESSION_IDS_KEY;
-    return list.map((ss) => ss.id).join(",");
+    return list
+      .map((ss) => `${ss.id}:${ss.state}:${ss.is_primary}:${ss.archived_at ?? ""}`)
+      .join(",");
   });
   const sessionListLoaded = useAppStore((s) => {
     const tid = s.tasks.activeTaskId;
@@ -694,11 +723,16 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   });
 
   useEffect(() => {
-    runAutoSessionTabEffect(effectiveSessionId, appStore, {
-      sessionTabCreatedRef,
-      prevTaskIdRef,
-      prevSessionIdRef,
-    });
+    runAutoSessionTabEffect(
+      effectiveSessionId,
+      appStore,
+      {
+        sessionTabCreatedRef,
+        prevTaskIdRef,
+        prevSessionIdRef,
+      },
+      showHistory,
+    );
   }, [
     appStore,
     dockviewApi,
@@ -706,5 +740,6 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     sessionIdsKey,
     sessionListLoaded,
     workflowFocusRequestId,
+    showHistory,
   ]);
 }
