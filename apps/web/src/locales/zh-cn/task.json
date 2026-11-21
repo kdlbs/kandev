@@ -3356,5 +3356,6 @@
   "sessionErrorDetailThinkingLevel": "请求的思考级别",
   "sessionErrorDetailEffectiveThinkingLevel": "实际思考级别",
   "thinkingProfileHelp": "编辑配置文件，选择“使用提供商默认值”或受支持的思考级别。保存后再启动新会话。",
-  "thinkingSessionHelp": "此思考级别由会话或工作流的覆盖设置指定。请修改该覆盖设置，或将会话配置重置为配置文件的设置。"
+  "thinkingSessionHelp": "此思考级别由会话或工作流的覆盖设置指定。请修改该覆盖设置，或将会话配置重置为配置文件的设置。",
+  "thinkingUnknownSourceHelp": "启动新会话前，请检查配置文件中的 Pi 思考级别，以及会话或工作流中的覆盖设置。"
 }

@@ -3356,5 +3356,6 @@
   "sessionErrorDetailThinkingLevel": "Nível de raciocínio solicitado",
   "sessionErrorDetailEffectiveThinkingLevel": "Nível de raciocínio efetivo",
   "thinkingProfileHelp": "Edite o perfil e escolha Usar predefinição do fornecedor ou um nível de raciocínio suportado. Guarde antes de iniciar uma nova sessão.",
-  "thinkingSessionHelp": "Uma substituição da sessão ou do fluxo de trabalho define este nível de raciocínio. Altere essa substituição ou reponha a configuração da sessão a partir do perfil."
+  "thinkingSessionHelp": "Uma substituição da sessão ou do fluxo de trabalho define este nível de raciocínio. Altere essa substituição ou reponha a configuração da sessão a partir do perfil.",
+  "thinkingUnknownSourceHelp": "Verifique o nível de raciocínio do Pi no perfil e nas substituições da sessão ou do fluxo de trabalho antes de iniciar uma nova sessão."
 }

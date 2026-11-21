@@ -272,8 +272,9 @@ function BootstrapRecoveryView({
         onRelocate={() => setRelocationConfirmationOpen(true)}
         copy={copy}
         t={t}
-      />
-      <SessionThinkingRecovery sessionId={sessionId} error={model} />
+      >
+        <SessionThinkingRecovery sessionId={sessionId} error={model} />
+      </RecoveryCardContent>
       <NewSessionDialog
         open={showDialog}
         onOpenChange={setShowDialog}

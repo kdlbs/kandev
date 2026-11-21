@@ -1246,12 +1246,17 @@ func (a *Adapter) emitSetModelEvent(
 	}
 	outConfig = a.dialect.modelConfigAfterChange(outConfig, cachedModels, modelID)
 	a.mu.Lock()
-	if a.sessionID != sessionID ||
+	if a.sessionID != sessionID || a.closed ||
 		(len(expectedGeneration) > 0 && a.configGeneration != expectedGeneration[0]) {
 		a.mu.Unlock()
 		return
 	}
-	if len(outConfig) > 0 {
+	if a.agentID == acpcompat.PiAgentID {
+		outConfig = a.piModelChangeOptionsLocked(modelID, outConfig)
+		a.clearUnknownThinkingModeLocked(outConfig)
+		a.availableModes, _ = a.sessionModesFromConfig(outConfig)
+	}
+	if len(outConfig) > 0 || a.agentID == acpcompat.PiAgentID {
 		// Refresh the cached config options so a subsequent SetConfigOption
 		// (e.g. user toggles reasoning effort after switching model) doesn't
 		// reuse the stale model CurrentValue from session/new and clobber the
@@ -1280,6 +1285,11 @@ func (a *Adapter) emitSetModelEvent(
 	// COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): sendUpdate blocks rather
 	// than drops on a full updatesCh and must run without a.mu held -- see
 	// emitDialectContextWindow's doc comment for the deadlock this avoids.
+	if a.agentID == acpcompat.PiAgentID {
+		if modeEvent := a.modeEventForConfigSnapshot(event); modeEvent != nil {
+			a.sendUpdate(*modeEvent)
+		}
+	}
 	a.sendUpdate(event)
 }
 
@@ -1880,26 +1890,9 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 	if modes, found := a.sessionModesFromConfig(configOptions); found {
 		a.availableModes = modes
 	}
-	modeEvent := (*AgentEvent)(nil)
-	if _, hasModeOption := a.modeConfigOption(configOptions); hasModeOption || a.agentID == acpcompat.PiAgentID {
-		if currentMode := a.currentModeFromConfig(configOptions); currentMode != "" {
-			a.noteConfigModeSnapshotLocked(sessionID, currentMode, correlatedModeResponse)
-		}
-		if !correlatedModeResponse {
-			modeEvent = &AgentEvent{
-				Type:                  streams.EventTypeSessionMode,
-				SessionID:             sessionID,
-				SessionSettingsPolicy: providerRestoredPolicy(settingsPolicy),
-				CurrentModeID:         a.currentModeFromConfig(configOptions),
-				AvailableModes:        append([]streams.SessionModeInfo(nil), a.availableModes...),
-			}
-		}
-	}
+	a.noteConfigModeSnapshotLocked(sessionID, a.currentModeFromConfig(configOptions), correlatedModeResponse)
 	a.sessionSettingsGeneration++
 	event.SessionSettingsGeneration = a.sessionSettingsGeneration
-	if modeEvent != nil {
-		modeEvent.SessionSettingsGeneration = a.sessionSettingsGeneration
-	}
 	if isModelConfigID(configID, configOptions) {
 		if tracker := a.usageBySession[sessionID]; tracker != nil {
 			tracker.maxSize = 0
@@ -1907,8 +1900,10 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 		delete(a.contextSamples, sessionID)
 	}
 	a.mu.Unlock()
-	if modeEvent != nil {
-		a.sendUpdate(*modeEvent)
+	if !correlatedModeResponse {
+		if modeEvent := a.modeEventForConfigSnapshot(event); modeEvent != nil {
+			a.sendUpdate(*modeEvent)
+		}
 	}
 	// COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): sendUpdate blocks rather
 	// than drops on a full updatesCh and must run without a.mu held -- see

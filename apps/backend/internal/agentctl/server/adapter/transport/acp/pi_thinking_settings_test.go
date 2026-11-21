@@ -109,3 +109,77 @@ func TestPiThinkingSettingsEmptySnapshotClearsPublishedMode(t *testing.T) {
 		})
 	}
 }
+
+func TestPiThinkingNotificationKeepsGenerationWhenResponseOvertakesPublication(t *testing.T) {
+	a := newTestAdapter()
+	a.agentID = "pi-acp"
+	a.sessionID = "session-1"
+	earlier := a.convertNotification(acpsdk.SessionNotification{
+		SessionId: "session-1",
+		Update: acpsdk.SessionUpdate{ConfigOptionUpdate: &acpsdk.SessionConfigOptionUpdate{
+			ConfigOptions: piThinkingSnapshot("medium", "off", "medium"),
+		}},
+	})
+	if earlier == nil {
+		t.Fatal("notification did not produce a settings event")
+	}
+	// The RPC response commits a newer snapshot before the notification
+	// worker reaches publication.
+	a.emitAuthoritativeConfigOptions("session-1", "model", piThinkingSnapshot("off", "off"), nil, false)
+	mode := a.modeEventForConfigSnapshot(*earlier)
+	if mode == nil || mode.CurrentModeID != "medium" || len(mode.AvailableModes) != 2 {
+		t.Fatalf("paired mode event did not use the notification snapshot: %+v", mode)
+	}
+	a.stampSessionSettingsReports("session-1", mode, earlier)
+	if mode.SessionSettingsGeneration != earlier.SessionSettingsGeneration {
+		t.Fatal("paired mode and model reports have different generations")
+	}
+
+	for _, event := range drainEvents(a) {
+		if event.Type == streams.EventTypeSessionModels {
+			if earlier.SessionSettingsGeneration == 0 || earlier.SessionSettingsGeneration >= event.SessionSettingsGeneration {
+				t.Fatalf("older notification generation = %d, newer response generation = %d", earlier.SessionSettingsGeneration, event.SessionSettingsGeneration)
+			}
+			return
+		}
+	}
+	t.Fatal("response did not publish a settings event")
+}
+
+func TestPiThinkingSettingsModelChangeWithoutSnapshotInvalidatesChoices(t *testing.T) {
+	a, peer, _ := newSetModeTestAdapter(t, nil)
+	a.agentID = "pi-acp"
+	config := convertACPConfigOptions(piThinkingSnapshot("medium", "off", "medium"))
+	config = append(config, streams.ConfigOption{ID: "model", Type: "select", Category: "model", CurrentValue: "old"})
+	a.availableConfigOptions = config
+	a.availableModes = []streams.SessionModeInfo{{ID: "medium"}}
+	a.noteCurrentMode("session-1", "medium")
+	peer.configHandler = func(context.Context, acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {
+		return acpsdk.SetSessionConfigOptionResponse{}, nil
+	}
+	if err := a.SetConfigOption(context.Background(), "model", "new"); err != nil {
+		t.Fatal(err)
+	}
+	var modelEvent, modeEvent *AgentEvent
+	for _, event := range drainEvents(a) {
+		switch event.Type {
+		case streams.EventTypeSessionMode:
+			modeEvent = &event
+		case streams.EventTypeSessionModels:
+			modelEvent = &event
+		}
+	}
+	if modelEvent == nil || modelEvent.CurrentModelID != "new" {
+		t.Fatalf("missing model convergence: %+v", modelEvent)
+	}
+	if _, ok := a.modeConfigOption(modelEvent.ConfigOptions); ok {
+		t.Fatalf("model event retained the previous thinking option: %+v", modelEvent.ConfigOptions)
+	}
+	if modeEvent == nil || modeEvent.CurrentModeID != "" || len(modeEvent.AvailableModes) != 0 ||
+		modeEvent.SessionSettingsGeneration != modelEvent.SessionSettingsGeneration {
+		t.Fatalf("mode event did not clear the previous thinking choices: %+v", modeEvent)
+	}
+	if a.currentModeSnapshot().mode != "" || len(a.availableModes) != 0 {
+		t.Fatal("adapter retained the previous thinking choices")
+	}
+}

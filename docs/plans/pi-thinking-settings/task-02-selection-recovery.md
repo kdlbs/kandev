@@ -169,6 +169,8 @@ Completed on 2026-11-19.
 - Failure-card fixtures disable automatic resume through the existing user preference and restore its previous value. This keeps reload verification separate from the already-supported provider-restored recovery path. The disposable Pi registration is removed after each test.
 - Public documentation validation and 63 validator tests passed. Specification catalog/lint and whitespace checks passed.
 
+PR review added backend failure assertions before browser recovery checks, made saved thinking choices visible when the option ID differs, and separated recovery guidance by setting source. A thinking option remains available when its ID is `mode`. The four focused selector and recovery files passed.
+
 ### Final focused frontend command
 
 ```bash

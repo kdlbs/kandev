@@ -3356,5 +3356,6 @@
   "sessionErrorDetailThinkingLevel": "要求された思考レベル",
   "sessionErrorDetailEffectiveThinkingLevel": "実際の思考レベル",
   "thinkingProfileHelp": "プロファイルを編集し、プロバイダーの既定値または対応する思考レベルを選択してください。保存してから新しいセッションを開始してください。",
-  "thinkingSessionHelp": "この思考レベルはセッションまたはワークフローの上書き設定で指定されています。その設定を変更するか、セッション設定をプロファイルの設定に戻してください。"
+  "thinkingSessionHelp": "この思考レベルはセッションまたはワークフローの上書き設定で指定されています。その設定を変更するか、セッション設定をプロファイルの設定に戻してください。",
+  "thinkingUnknownSourceHelp": "新しいセッションを開始する前に、プロファイルの Pi の思考レベルと、セッションまたはワークフローの上書き設定を確認してください。"
 }

@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { usableConfigOptions } from "@/components/model-config-selector";
 import { useAppStore } from "@/components/state-provider";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
 import { MobilePillButton } from "@/components/task/mobile/mobile-pill-button";
@@ -154,7 +155,8 @@ function useModeSelectorState(sessionId: string | null) {
   );
 
   const hasThinkingConfig =
-    isPi && configOptions?.some((option) => option.category === "thought_level");
+    isPi &&
+    usableConfigOptions(configOptions).some((option) => option.category === "thought_level");
   return useMemo(() => {
     if (hasThinkingConfig) return undefined;
     const resolved = withRequestedMode(

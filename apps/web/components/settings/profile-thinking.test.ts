@@ -53,3 +53,19 @@ it("uses advertised legacy Pi choices only when no modern catalog exists", async
     ),
   ).toEqual([{ id: "off", name: "Off" }]);
 });
+
+it("reads and clears saved thinking intent when the advertised Pi option ID differs", () => {
+  const saved = { mode: "off", config_options: { thought_level: "medium", custom: "keep" } };
+  expect(thinkingProfileValue(saved, "pi_reasoning")).toBe("medium");
+  expect(thinkingProfilePatch(saved, "pi_reasoning", "off")).toEqual({
+    mode: "",
+    config_options: { thought_level: "off", custom: "keep" },
+  });
+  expect(
+    thinkingProfilePatch(
+      { ...saved, config_options: { ...saved.config_options, pi_reasoning: "high" } },
+      "pi_reasoning",
+      "",
+    ),
+  ).toEqual({ mode: "", config_options: { custom: "keep" } });
+});

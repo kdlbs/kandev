@@ -278,9 +278,10 @@ In **Settings > Agents > Pi**, open the profile and choose **Thinking level**:
 - An unavailable saved value stays visible until you replace or clear it.
 
 If startup reports an unavailable or unapplied thinking level, no prompt was sent.
-Select **Edit profile**, choose a supported level or **Use provider default**, and save.
-Start a fresh session to use the saved profile. Saving does not resend the failed prompt.
-A session or workflow override takes precedence over the profile. Change that override or use the existing session configuration reset when applicable.
+If the level came from the profile, select **Edit profile**, choose a supported level or **Use provider default**, and save.
+If the level came from a session or workflow override, change that override or use the existing session configuration reset when applicable.
+If Kandev cannot identify the source, check both the profile and any overrides.
+Start a fresh session after you correct the setting. Saving a profile does not resend the failed prompt.
 
 Kandev uses the capabilities reported by Pi. Incorrect model metadata in a provider extension must be corrected in that extension.
 

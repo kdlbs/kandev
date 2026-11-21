@@ -47,7 +47,7 @@ Real permission options remain on the existing strict `SetMode` path.
 
 `SessionManager.InitializeAndPromptWithLayers` resolves the winning exact model first.
 After model confirmation, consume the complete configuration snapshot from that same active session and configuration generation.
-Replace Pi's derived thinking choices from that snapshot, including an off-only or empty catalog. Do not retain the initial legacy mode list after a model change. If the model-change reply arrives before the catalog update, wait briefly for the selected model's snapshot. When that snapshot is unavailable, use the adapter's live validation and require confirmation before prompt dispatch.
+Replace Pi's derived thinking choices from that snapshot, including an off-only or empty catalog. Do not retain the initial legacy mode list after a model change. Without a new catalog, clear the previous model's thinking choices and wait for the provider update. Stamp a model report and its paired thinking report when the adapter commits the snapshot. If the model-change reply arrives before the catalog update, wait briefly for the selected model's snapshot. When that snapshot is unavailable, use the adapter's live validation and require confirmation before prompt dispatch.
 Use existing config-change serialization and session/generation fencing in `adapter_session.go`, `adapter_updates.go`, and `adapter_mode_state.go`.
 Settings probes use their authorized selected-model context through the existing capability resolver. A settings probe never becomes authoritative live state.
 
@@ -61,7 +61,7 @@ An unsupported choice, mismatch, refusal, or unknown confirmation holds the firs
 ## Saved intent and defaults
 
 Use existing `config_options` for new Pi thinking selections. No new SQL column is required.
-At each source layer, a nonempty canonical thinking selection wins over a nonempty legacy Pi `mode` alias.
+At each source layer, an explicit selection under the advertised thinking ID wins over the stable saved Pi key. Either key wins over a nonempty legacy Pi `mode` alias. Remove both keys from the generic replay options.
 Then apply the existing precedence between sources. Do not let a lower-source canonical value beat a higher-source legacy alias.
 Read compatibility is pure: preserve stored values, original-config baselines, attribution, and historical snapshots.
 On profile creation or an explicit update to thinking settings, store Pi's thinking intent under the bridge's stable `thought_level` ID and clear the duplicate mode alias. At runtime, use the option ID advertised by the active session when available.

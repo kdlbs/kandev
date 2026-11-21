@@ -115,6 +115,8 @@ go test -trimpath -race -tags fts5 ./internal/agent/settings/controller ./intern
 go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle -run 'TestPiThinking|TestInitializeAndPromptWithLayers' -count=1
 ```
 
+Further review added stable-key lookup when the advertised Pi option ID differs, cleared old thinking choices when a model change returns no catalog, and bound paired mode and model events to one settings generation. The full ACP adapter race suite and the focused backend race tests passed.
+
 ### Changed-Go lint invocation
 
 ```bash

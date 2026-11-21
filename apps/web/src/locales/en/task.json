@@ -3356,5 +3356,6 @@
   "sessionErrorDetailThinkingLevel": "Requested thinking level",
   "sessionErrorDetailEffectiveThinkingLevel": "Effective thinking level",
   "thinkingProfileHelp": "Edit the profile and choose Use provider default or a supported thinking level. Save before starting a fresh session.",
-  "thinkingSessionHelp": "A session or workflow override supplies this thinking level. Change that override or reset the session configuration to its profile."
+  "thinkingSessionHelp": "A session or workflow override supplies this thinking level. Change that override or reset the session configuration to its profile.",
+  "thinkingUnknownSourceHelp": "Check the Pi thinking level in the profile and any session or workflow overrides before starting a fresh session."
 }

@@ -7,6 +7,7 @@ import type { ActiveSessionRecovery } from "@/lib/active-session-recovery";
 import type { Message, TaskSession } from "@/lib/types/http";
 import type { SessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import { SessionRecoveryProvider, useSessionComposerRecovery } from "./session-recovery-context";
+import { SessionThinkingRecovery } from "./session-thinking-recovery";
 import { SessionRecoveryCard } from "./session-recovery-card";
 import { ActionMessage } from "./messages/action-message";
 
@@ -558,4 +559,25 @@ it("routes Pi thinking failures to the owning profile from the active recovery c
     "/settings/agents/pi-acp/profiles/profile",
   );
   expect(screen.getByTestId(RECOVERY_CARD).textContent).toContain("Use provider default");
+});
+
+it("gives neutral Pi thinking guidance when the source is unknown", () => {
+  render(
+    <SessionThinkingRecovery
+      sessionId="session"
+      error={{
+        causes: [
+          {
+            operation: "start",
+            code: "thinking_level_failed",
+            requested_setting: "medium",
+          },
+        ],
+      }}
+    />,
+  );
+  expect(screen.getByTestId("thinking-recovery-guidance").textContent).toContain(
+    "Check the Pi thinking level in the profile and any session or workflow overrides",
+  );
+  expect(screen.queryByRole("link", { name: "Edit profile" })).toBeNull();
 });

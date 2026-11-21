@@ -316,17 +316,7 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		}
 		cause.RuntimeVersion = safeAgentErrorRuntimeVersion(cause.RuntimeVersion)
 	case AgentErrorCauseCodeProcessExited:
-		reason := cause.Reason
-		exitCode := cause.ExitCode
-		clearAgentErrorCauseEvidence(cause)
-		if reason != AgentErrorCauseReasonMiseConfigUntrusted {
-			reason = AgentErrorCauseReasonUnclassified
-		}
-		cause.Reason = reason
-		if exitCode != nil && (*exitCode >= 0 && *exitCode <= math.MaxUint32) {
-			cause.ExitCode = exitCode
-		}
-		cause.Detail = AgentErrorCauseProcessExitedDetail
+		normalizeProcessExitEvidence(cause)
 	case AgentErrorCauseCodeDeliveryStorage:
 		storage := normalizeAgentErrorStorage(cause.Storage)
 		clearAgentErrorCauseEvidence(cause)
@@ -341,6 +331,20 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		value := *cause.PromptNotSent
 		cause.PromptNotSent = &value
 	}
+}
+
+func normalizeProcessExitEvidence(cause *AgentErrorCause) {
+	reason := cause.Reason
+	exitCode := cause.ExitCode
+	clearAgentErrorCauseEvidence(cause)
+	if reason != AgentErrorCauseReasonMiseConfigUntrusted {
+		reason = AgentErrorCauseReasonUnclassified
+	}
+	cause.Reason = reason
+	if exitCode != nil && (*exitCode >= 0 && *exitCode <= math.MaxUint32) {
+		cause.ExitCode = exitCode
+	}
+	cause.Detail = AgentErrorCauseProcessExitedDetail
 }
 
 func clearAgentErrorCauseEvidence(cause *AgentErrorCause) {

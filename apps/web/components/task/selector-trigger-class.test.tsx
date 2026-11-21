@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { usableConfigOptions } from "@/components/model-config-selector";
 import { ModelSelector } from "@/components/task/model-selector";
 import { ModeSelector } from "@/components/task/mode-selector";
 
@@ -322,4 +323,26 @@ it("does not offer a stale Pi mode after an empty live snapshot", () => {
     mode.availableModes = originalModes;
     mode.currentModeId = FULL_ACCESS_MODE;
   }
+});
+
+it("keeps an explicitly categorized thinking option whose ID is mode", () => {
+  const options = [
+    {
+      type: "select",
+      id: "mode",
+      name: "Thinking level",
+      category: "thought_level",
+      currentValue: "medium",
+      options: [{ value: "medium", name: "Medium" }],
+    },
+    {
+      type: "select",
+      id: "approval",
+      name: "Permissions",
+      category: "mode",
+      currentValue: "safe",
+      options: [{ value: "safe", name: "Safe" }],
+    },
+  ];
+  expect(usableConfigOptions(options)).toEqual([options[0]]);
 });

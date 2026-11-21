@@ -74,7 +74,10 @@ export function isModelConfigOption(option: Pick<DynamicConfigOption, "id" | "ca
 }
 
 export function isModeConfigOption(option: Pick<DynamicConfigOption, "id" | "category">): boolean {
-  return option.id === MODE_CONFIG_CATEGORY || option.category === MODE_CONFIG_CATEGORY;
+  return (
+    option.category === MODE_CONFIG_CATEGORY ||
+    (option.id === MODE_CONFIG_CATEGORY && option.category !== "thought_level")
+  );
 }
 
 export function usableConfigOptions(

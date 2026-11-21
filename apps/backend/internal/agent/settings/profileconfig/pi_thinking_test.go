@@ -30,3 +30,16 @@ func TestPiThinkingIntent(t *testing.T) {
 		})
 	}
 }
+
+func TestPiThinkingIntentResolvesSavedIDToAdvertisedOption(t *testing.T) {
+	options := map[string]string{"thought_level": "medium", "unrelated": "keep"}
+	mode, rest := PiThinkingIntent("off", options, "pi_reasoning")
+	if mode != "medium" || len(rest) != 1 || rest["unrelated"] != "keep" {
+		t.Fatalf("stored thinking intent = %q, remaining options = %v", mode, rest)
+	}
+	options["pi_reasoning"] = "off"
+	mode, rest = PiThinkingIntent("high", options, "pi_reasoning")
+	if mode != "off" || len(rest) != 1 || rest["unrelated"] != "keep" {
+		t.Fatalf("advertised thinking intent = %q, remaining options = %v", mode, rest)
+	}
+}

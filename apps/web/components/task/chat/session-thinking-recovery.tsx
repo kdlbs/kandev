@@ -2,6 +2,12 @@ import { useTranslation } from "react-i18next";
 import { useOptionalAppStore } from "@/components/state-provider";
 import type { AgentErrorCause } from "@/lib/types/task-status-summary";
 
+function thinkingGuidanceKey(source: AgentErrorCause["setting_source"]) {
+  if (source === "agent_profile") return "task:thinkingProfileHelp";
+  if (source === "session_override") return "task:thinkingSessionHelp";
+  return "task:thinkingUnknownSourceHelp";
+}
+
 export function SessionThinkingRecovery({
   sessionId,
   error,
@@ -24,7 +30,7 @@ export function SessionThinkingRecovery({
   return (
     <div className="mt-2 space-y-1" data-testid="thinking-recovery-guidance">
       <p className="text-xs text-muted-foreground">
-        {t(isProfile ? "task:thinkingProfileHelp" : "task:thinkingSessionHelp")}
+        {t(thinkingGuidanceKey(cause.setting_source))}
       </p>
       {isProfile && profileLink ? (
         <a
