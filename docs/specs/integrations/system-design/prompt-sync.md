@@ -204,6 +204,10 @@ so the empty string is unambiguous.
   content` (SET reads the pre-update row on SQLite and PostgreSQL).
   `AdoptPromptAsSynced` keeps the old content; `AdoptPromptAsOverride`
   stores the file's content.
+- An override with empty `alternate_content` (file left the source) has no
+  repository version: `SavePromptVersions` rejects Repository with
+  `ErrNoRepositoryVersion` (409), and the row shows "Removed from repository"
+  instead of the switch (`hasRepositoryVersion`).
 - `UpdateSyncedPrompt` leaves `alternate_content` alone. For every override
   whose file is present, `ApplySyncedPrompts` calls
   `SetOverrideRepositoryContent`, which writes only when the version changed
@@ -308,7 +312,7 @@ Poller (60s tick) ──────┼─► promptsync.Service.Sync (install l
                         │     1a. credential workspace must exist, else suspend
                         │     2. bind GitHub host for workspace_id (GitHub)
                         │     3. reposync.List(source) → keep *.md immediate files
-                        │     4. reposync.Get each file (any error → fail run)
+                        │     4. reposync.Get each file (too large → freeze it; other error → fail run)
                         │     5. parse files → desired{name→content,path}, frozen names, warnings
                         │     6. workflow repo ListPromptReferenceTexts → texts
                         │     7. prompts.ApplySyncedPrompts(desired, frozen, texts)
@@ -362,7 +366,7 @@ in its `WHERE` clause:
 | sync | no, name frozen | none |
 | sync, with a kept copy or built-in | no | `RestoreSyncedPrompt` to manual with the kept copy |
 | override with conflict | no | Clear the conflict |
-| sync | no | Referenced by a workflow text or a surviving saved prompt (followed to a fixpoint through prompts kept this way): keep and warn; else `DELETE … WHERE id=? AND source='sync' AND builtin=0` |
+| sync | no | Referenced by a workflow text or a surviving saved prompt (re-read after this run's writes; followed to a fixpoint through prompts kept this way): keep and warn; else `DELETE … WHERE id=? AND source='sync' AND builtin=0` |
 
 The method returns sorted `created`, `updated`, `deleted`, and `warnings`. It
 publishes the existing `prompts changed` event once when anything changed,

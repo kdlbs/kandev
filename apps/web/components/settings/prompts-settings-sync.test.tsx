@@ -159,7 +159,14 @@ describe("prompt overrides", () => {
   it("keeps the switch first among the trailing controls in every row state", () => {
     mocks.prompts = [
       { ...existingPrompt, id: "s1", name: "synced", source: "sync", source_path: "p/s.md" },
-      { ...existingPrompt, id: "o1", name: "local", source: "override", source_path: "p/o.md" },
+      {
+        ...existingPrompt,
+        id: "o1",
+        name: "local",
+        source: "override",
+        alternate_content: "Repository text",
+        source_path: "p/o.md",
+      },
     ];
     renderPrompts();
     const rows = screen.getAllByTestId(promptRowTestId);
@@ -179,10 +186,18 @@ describe("prompt overrides", () => {
         id: "c1",
         name: "clash",
         source: "override",
+        alternate_content: "Repository text",
         source_path: "p/c.md",
         conflict: true,
       },
-      { ...existingPrompt, id: "o1", name: "plain", source: "override", source_path: "p/o.md" },
+      {
+        ...existingPrompt,
+        id: "o1",
+        name: "plain",
+        source: "override",
+        alternate_content: "Repository text",
+        source_path: "p/o.md",
+      },
     ];
     renderPrompts();
     const [clash, plain] = screen.getAllByTestId(promptRowTestId);

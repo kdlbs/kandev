@@ -142,8 +142,10 @@ installation automatically, so that agents act on the reviewed text.
   longer in the source, the sync shall delete it only when nothing still
   references it. A reference is a workflow prompt or workflow step prompt in
   any workspace, or a surviving saved prompt; a prompt kept by this rule
-  survives too, so its own references are followed. A kept prompt shall be
-  reported with a warning that names it and the number of referrers.
+  survives too, so its own references are followed. Surviving prompts are
+  read after the run's other writes, so a reference added by a file created
+  or updated in the same run counts. A kept prompt shall be reported with a
+  warning that names it and the number of referrers.
 - **AC-INTEGRATIONS-PROMPT-SYNC-003.3:** When a prompt file's name matches an
   existing manual or built-in prompt, that is a conflict, handled under
   REQ-INTEGRATIONS-PROMPT-SYNC-008. The sync shall never skip it silently or

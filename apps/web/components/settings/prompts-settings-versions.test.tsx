@@ -262,4 +262,16 @@ describe("editing several prompts before one Save", () => {
     expect(editor("plans").value).toBe("Plans text");
     expect(inRow("plans").queryByTestId(unsavedTestId)).toBeNull();
   });
+
+  it("shows an override whose file left the repository without a version switch", () => {
+    mocks.prompts = [{ ...override, alternate_content: "" }];
+    renderPrompts();
+    const item = row("other");
+    expect(within(item).queryByRole("switch")).toBeNull();
+    expect(within(item).getByTestId("prompt-repository-removed").textContent).toBe(
+      "Removed from repository",
+    );
+    fireEvent.click(within(item).getByTestId(editButtonTestId));
+    expect(within(item).getByTestId(editorTestId)).toHaveProperty("value", "My other text");
+  });
 });

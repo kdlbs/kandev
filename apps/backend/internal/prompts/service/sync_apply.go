@@ -228,25 +228,24 @@ func (s *Service) removeVanishedSyncedPrompts(
 	ctx context.Context, existing []*models.Prompt, desired map[string]bool, input SyncApplyInput, result *SyncApplyResult,
 ) error {
 	var vanished []*models.Prompt
-	var survivors []*models.Prompt
 	for _, prompt := range existing {
-		gone := !desired[prompt.Name] && !input.FrozenNames[prompt.Name]
-		if !gone {
-			survivors = append(survivors, prompt)
+		if desired[prompt.Name] || input.FrozenNames[prompt.Name] {
 			continue
 		}
 		kept, err := s.settleVanishedPrompt(ctx, prompt, result)
 		if err != nil {
 			return err
 		}
-		if kept {
-			survivors = append(survivors, prompt)
-			continue
+		if !kept {
+			vanished = append(vanished, prompt)
 		}
-		vanished = append(vanished, prompt)
 	}
 	if len(vanished) == 0 {
 		return nil
+	}
+	survivors, err := s.survivingPrompts(ctx, vanished)
+	if err != nil {
+		return err
 	}
 	references, err := s.vanishedPromptReferences(ctx, vanished, survivors, input.ReferenceTexts)
 	if err != nil {
@@ -268,6 +267,27 @@ func (s *Service) removeVanishedSyncedPrompts(
 		}
 	}
 	return nil
+}
+
+// survivingPrompts reads every prompt except the vanished ones after this
+// run's writes, so references count the text each prompt has now, including
+// prompts this run created or updated.
+func (s *Service) survivingPrompts(ctx context.Context, vanished []*models.Prompt) ([]*models.Prompt, error) {
+	current, err := s.repo.ListPrompts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	gone := make(map[string]bool, len(vanished))
+	for _, prompt := range vanished {
+		gone[prompt.ID] = true
+	}
+	survivors := current[:0]
+	for _, prompt := range current {
+		if !gone[prompt.ID] {
+			survivors = append(survivors, prompt)
+		}
+	}
+	return survivors, nil
 }
 
 // settleVanishedPrompt handles a prompt whose file left the source, and

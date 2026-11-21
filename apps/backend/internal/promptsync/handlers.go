@@ -62,7 +62,8 @@ func (c *controller) httpSaveVersions(ctx *gin.Context) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, promptservice.ErrInvalidPrompt):
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-	case errors.Is(err, promptservice.ErrPromptNotLinked), errors.Is(err, promptstore.ErrPromptWriteRejected):
+	case errors.Is(err, promptservice.ErrPromptNotLinked), errors.Is(err, promptservice.ErrNoRepositoryVersion),
+		errors.Is(err, promptstore.ErrPromptWriteRejected):
 		ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	default:
 		c.internalError(ctx, "failed to save prompt versions", err)

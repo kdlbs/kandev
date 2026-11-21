@@ -6,6 +6,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { VersionSwitch } from "@/components/settings/prompt-conflict-review";
 import { isConflictedPrompt } from "@/hooks/domains/settings/use-prompt-conflict-count";
+import { hasRepositoryVersion } from "@/lib/settings/prompt-versions";
 import type { PromptConflictChoice } from "@/lib/types/prompt-sync";
 import type { CustomPrompt } from "@/lib/types/http";
 
@@ -18,13 +19,22 @@ type PromptVersionControlProps = {
 
 // PromptVersionControl is a synced or overridden row's Local | Repository
 // switch, the first of its trailing controls. Changing it is a pending edit
-// that the page's save bar applies or resets.
+// that the page's save bar applies or resets. An override whose file left the
+// repository has only its local version, so it shows that instead.
 export function PromptVersionControl({
   prompt,
   choice,
   disabled,
   onChoose,
 }: PromptVersionControlProps) {
+  const { t } = useTranslation();
+  if (!hasRepositoryVersion(prompt)) {
+    return (
+      <span className="text-xs text-muted-foreground" data-testid="prompt-repository-removed">
+        {t("settings:promptRepositoryRemoved")}
+      </span>
+    );
+  }
   return (
     <VersionSwitch
       name={prompt.name}
@@ -73,7 +83,12 @@ function PromptOverrideBadge({ prompt }: { prompt: CustomPrompt }) {
   return (
     <SourceBadge
       label={t("settings:promptOverridden")}
-      tooltip={t("settings:promptOverriddenTooltip", { path: prompt.source_path ?? "" })}
+      tooltip={t(
+        hasRepositoryVersion(prompt)
+          ? "settings:promptOverriddenTooltip"
+          : "settings:promptRepositoryRemovedTooltip",
+        { path: prompt.source_path ?? "" },
+      )}
       testId="prompt-override-badge"
     />
   );

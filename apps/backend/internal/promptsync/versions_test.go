@@ -94,3 +94,24 @@ func TestSaveVersionsRoute(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, doRequest(router, http.MethodPut, "/api/v1/prompt-sync/prompts/missing/versions", `{}`).Code)
 	assert.Equal(t, http.StatusNotFound, doRequest(router, http.MethodPost, "/api/v1/prompt-sync/prompts/"+id+"/override", "").Code, "the old override route is gone")
 }
+
+func TestSaveVersionsRouteRejectsRepositoryWhenTheFileIsGone(t *testing.T) {
+	f := newSyncFixture(t)
+	ctx := context.Background()
+	f.gitlab.files["hook.md"] = "Default"
+	_, err := f.svc.Sync(ctx)
+	require.NoError(t, err)
+	id := syncedPromptID(t, f, "hook")
+	router := newTestRouter(t, f.svc, admin)
+	path := "/api/v1/prompt-sync/prompts/" + id + "/versions"
+	require.Equal(t, http.StatusOK, doRequest(router, http.MethodPut, path, `{"use_local":true,"local_content":"Mine"}`).Code)
+	delete(f.gitlab.files, "hook.md")
+	_, err = f.svc.Sync(ctx)
+	require.NoError(t, err)
+
+	rejected := doRequest(router, http.MethodPut, path, `{"use_local":false}`)
+	assert.Equal(t, http.StatusConflict, rejected.Code, rejected.Body.String())
+	prompt, err := f.prompts.GetPromptByName(ctx, "hook")
+	require.NoError(t, err, "the only copy is never deleted")
+	assert.Equal(t, "Mine", prompt.Content)
+}

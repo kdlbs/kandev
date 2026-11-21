@@ -40,7 +40,7 @@ Saved prompts are shared across the whole installation, so there is exactly one 
 Every sync compares the files with the prompts Prompt Sync owns:
 
 - A new file creates a synced prompt. A changed file updates it. An unchanged file writes nothing.
-- A removed file deletes its prompt only when nothing still references it: no workflow prompt or step prompt in any workspace, and no remaining saved prompt (including prompts kept by this rule). A prompt that is still referenced is kept, and the sync reports which prompt and how many workflows or prompts use it. Remove the references, then sync again.
+- A removed file deletes its prompt only when nothing still references it: no workflow prompt or step prompt in any workspace, and no remaining saved prompt (including prompts kept by this rule, and the new text of files added or changed in the same sync). A prompt that is still referenced is kept, and the sync reports which prompt and how many workflows or prompts use it. Remove the references, then sync again.
 - A file whose name matches a prompt created in Kandev, or a built-in prompt, is a [name conflict](#name-conflicts). Prompt Sync never skips it silently and never replaces your text without your choice.
 - After applying changes, Prompt Sync warns about any `@name` inside a remaining synced prompt (including kept and unchanged ones) that does not resolve to a saved prompt.
 - A successful listing with no prompt files is an empty source and removes unreferenced synced prompts.
@@ -82,6 +82,7 @@ A prompt whose text is identical to its file is not a conflict: Kandev adopts it
   - **Repository** makes it a synced prompt with the repository text. Your text is kept, and switching the row back to **Local** brings it back.
 - **When a later sync finds a new conflict** (for example, someone adds a matching file), your prompt becomes an override marked **Conflict** and keeps your text. It stays flagged until you choose: the row shows a **Conflict** badge, an amber banner at the top of **Settings → Prompts** names the prompts and offers **Review conflicts**, and the Prompts settings entry, the sidebar **Settings** button, and the phone menu's **Settings** row show an amber dot. **Review conflicts** opens the same list; **Apply choices** runs a sync with them. Saving the row with its **Local override** switch on or off also resolves the conflict, in favour of the version you saved.
 - If the conflicting file is removed from the repository, the conflict is cleared and your override stays.
+- If the file of any override is removed from the repository, your version is the only one left. The row shows **Removed from repository** instead of the **Local | Repository** switch, and you edit it like any other prompt.
 - If a synced prompt whose local version Kandev kept is removed from the repository, it becomes a normal prompt with your local text again. Sync never deletes a built-in prompt.
 
 ## Agents

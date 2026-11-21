@@ -1262,6 +1262,8 @@
   "promptSyncOverriddenList": "ローカルで上書き中: {{names}}",
   "promptConflict": "競合",
   "promptConflictTooltip": "リポジトリのファイル {{path}} も同じ名前を使用しています。使用するバージョンを選択してください。",
+  "promptRepositoryRemoved": "リポジトリから削除済み",
+  "promptRepositoryRemovedTooltip": "ファイル {{path}} は同期リポジトリにもう存在しないため、あなたのバージョンだけが残っています。ほかのプロンプトと同じように編集できます。",
   "promptConflictBanner_one": "{{names}} はプロンプトリポジトリのファイルと同じ名前です。選択するまでリポジトリ版は使用されません。",
   "promptConflictBanner_other": "{{names}} はプロンプトリポジトリのファイルと同じ名前です。選択するまでリポジトリ版は使用されません。",
   "promptConflictReview": "競合を確認",

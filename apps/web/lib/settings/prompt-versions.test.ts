@@ -4,6 +4,7 @@ import {
   choiceFor,
   draftForm,
   formFromPrompt,
+  hasRepositoryVersion,
   isDraftValid,
   isLinkedPrompt,
   planPromptSaves,
@@ -140,5 +141,15 @@ describe("prompt versions", () => {
         },
       }),
     ).toEqual([]);
+  });
+});
+
+// @covers AC-INTEGRATIONS-PROMPT-SYNC-009.1
+describe("hasRepositoryVersion", () => {
+  it("has no repository version for an override whose file left the source", () => {
+    expect(hasRepositoryVersion(synced)).toBe(true);
+    expect(hasRepositoryVersion(override)).toBe(true);
+    expect(hasRepositoryVersion({ ...override, alternate_content: "" })).toBe(false);
+    expect(hasRepositoryVersion(manual)).toBe(false);
   });
 });

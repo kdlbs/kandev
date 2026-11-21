@@ -15,6 +15,15 @@ export function isLinkedPrompt(prompt: CustomPrompt): boolean {
   return prompt.source === "sync" || prompt.source === "override";
 }
 
+/**
+ * Whether a linked prompt has a repository version to switch to. An override
+ * whose file left the sync source keeps only its local version.
+ */
+export function hasRepositoryVersion(prompt: CustomPrompt): boolean {
+  if (prompt.source === "override") return Boolean(prompt.alternate_content);
+  return prompt.source === "sync";
+}
+
 /** The local version: the override's content, or a synced prompt's kept copy. */
 export function localVersion(prompt: CustomPrompt): string {
   if (prompt.source === "sync") return prompt.alternate_content || prompt.content;

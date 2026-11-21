@@ -24,7 +24,11 @@ export function usePromptConflictReview() {
         choices: Object.fromEntries(
           conflicts.map((conflict) => [
             conflict.name,
-            current.choices[conflict.name] ?? conflict.in_use ?? defaultChoice,
+            (Object.hasOwn(current.choices, conflict.name)
+              ? current.choices[conflict.name]
+              : undefined) ??
+              conflict.in_use ??
+              defaultChoice,
           ]),
         ),
       })),

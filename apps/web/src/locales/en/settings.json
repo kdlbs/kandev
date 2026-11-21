@@ -1262,6 +1262,8 @@
   "promptSyncOverriddenList": "Overridden locally: {{names}}",
   "promptConflict": "Conflict",
   "promptConflictTooltip": "The repository file {{path}} uses this name too. Choose which version to use.",
+  "promptRepositoryRemoved": "Removed from repository",
+  "promptRepositoryRemovedTooltip": "Its file {{path}} is no longer in the synced repository, so your version is the only one. Edit it like any other prompt.",
   "promptConflictBanner_one": "{{names}} shares its name with a file in the prompt repository. The repository version is not used until you choose.",
   "promptConflictBanner_other": "{{names}} share their names with files in the prompt repository. The repository versions are not used until you choose.",
   "promptConflictReview": "Review conflicts",

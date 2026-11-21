@@ -1262,6 +1262,8 @@
   "promptSyncOverriddenList": "本地已覆盖：{{names}}",
   "promptConflict": "冲突",
   "promptConflictTooltip": "仓库文件 {{path}} 也使用了这个名称。请选择要使用的版本。",
+  "promptRepositoryRemoved": "已从仓库删除",
+  "promptRepositoryRemovedTooltip": "文件 {{path}} 已不在同步仓库中，因此只保留您的版本。可以像其他提示词一样编辑它。",
   "promptConflictBanner_one": "{{names}} 与提示词仓库中的文件同名。在您做出选择之前，不会使用仓库版本。",
   "promptConflictBanner_other": "{{names}} 与提示词仓库中的文件同名。在您做出选择之前，不会使用仓库版本。",
   "promptConflictReview": "查看冲突",

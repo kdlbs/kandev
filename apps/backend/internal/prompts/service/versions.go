@@ -14,6 +14,11 @@ import (
 // does not manage, so it has no repository version.
 var ErrPromptNotLinked = errors.New("only a synced or overridden prompt has a repository version")
 
+// ErrNoRepositoryVersion rejects choosing the repository version of an
+// override whose file left the sync source, so its local version is the only
+// copy.
+var ErrNoRepositoryVersion = errors.New("this prompt's file is no longer in the synced repository, so only your version exists")
+
 // VersionSave is the operator's saved choice for a synced prompt or an
 // override: which version is in use and, optionally, an edited local version.
 type VersionSave struct {
@@ -42,6 +47,9 @@ func (s *Service) SavePromptVersions(ctx context.Context, id string, save Versio
 	if prompt.IsOverride() {
 		local, repository = prompt.Content, prompt.AlternateContent
 	}
+	if !save.UseLocal && repository == "" {
+		return nil, ErrNoRepositoryVersion
+	}
 	if save.LocalContent != nil {
 		trimmed := strings.TrimSpace(*save.LocalContent)
 		if trimmed == "" || len(trimmed) > maxPromptContentBytes {
@@ -61,16 +69,14 @@ func (s *Service) SavePromptVersions(ctx context.Context, id string, save Versio
 }
 
 // nextVersions places the chosen version in use and keeps the other one. A
-// missing version falls back to the one that exists.
+// missing local version falls back to the repository version; a missing
+// repository version is rejected before this point.
 func nextVersions(useLocal bool, local, repository string) promptstore.PromptVersions {
 	if useLocal {
 		if local == "" {
 			local = repository
 		}
 		return promptstore.PromptVersions{Source: models.PromptSourceOverride, Content: local, AlternateContent: repository}
-	}
-	if repository == "" {
-		return promptstore.PromptVersions{Source: models.PromptSourceSync, Content: local}
 	}
 	return promptstore.PromptVersions{Source: models.PromptSourceSync, Content: repository, AlternateContent: local}
 }

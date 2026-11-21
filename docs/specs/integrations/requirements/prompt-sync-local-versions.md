@@ -169,7 +169,10 @@ version after trying the repository version, without retyping it.
 - **AC-INTEGRATIONS-PROMPT-SYNC-009.1:** Returning an override to sync
   ownership (turning the switch off, or choosing the repository version)
   shall keep its local content with the prompt, and use the stored repository
-  version at once when there is one.
+  version at once when there is one. An override whose file left the source
+  has no repository version, so choosing Repository for it shall be rejected
+  and its local version kept; Settings shall show "Removed from repository"
+  in place of its switch, and it stays editable.
 - **AC-INTEGRATIONS-PROMPT-SYNC-009.2:** Switching a synced prompt to Local
   shall show and, when saved, use the kept local content, keeping the
   repository version as the other version. With no kept copy, the override

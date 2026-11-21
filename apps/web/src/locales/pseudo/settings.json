@@ -1262,6 +1262,8 @@
   "promptSyncOverriddenList": "Ōvēŕŕĩďďēń ĺōćàĺĺŷ: {{names}}",
   "promptConflict": "Ćōńƒĺĩćţ",
   "promptConflictTooltip": "Ţĥē ŕēƥōśĩţōŕŷ ƒĩĺē {{path}} ũśēś ţĥĩś ńàḿē ţōō. Ćĥōōśē ŵĥĩćĥ vēŕśĩōń ţō ũśē.",
+  "promptRepositoryRemoved": "Ŕēḿōvēď ƒŕōḿ ŕēƥōśĩţōŕŷ",
+  "promptRepositoryRemovedTooltip": "Ĩţś ƒĩĺē {{path}} ĩś ńō ĺōńĝēŕ ĩń ţĥē śŷńćēď ŕēƥōśĩţōŕŷ, śō ŷōũŕ vēŕśĩōń ĩś ţĥē ōńĺŷ ōńē. Ēďĩţ ĩţ ĺĩķē àńŷ ōţĥēŕ ƥŕōḿƥţ.",
   "promptConflictBanner_one": "{{names}} śĥàŕēś ĩţś ńàḿē ŵĩţĥ à ƒĩĺē ĩń ţĥē ƥŕōḿƥţ ŕēƥōśĩţōŕŷ. Ţĥē ŕēƥōśĩţōŕŷ vēŕśĩōń ĩś ńōţ ũśēď ũńţĩĺ ŷōũ ćĥōōśē.",
   "promptConflictBanner_other": "{{names}} śĥàŕē ţĥēĩŕ ńàḿēś ŵĩţĥ ƒĩĺēś ĩń ţĥē ƥŕōḿƥţ ŕēƥōśĩţōŕŷ. Ţĥē ŕēƥōśĩţōŕŷ vēŕśĩōńś àŕē ńōţ ũśēď ũńţĩĺ ŷōũ ćĥōōśē.",
   "promptConflictReview": "Ŕēvĩēŵ ćōńƒĺĩćţś",

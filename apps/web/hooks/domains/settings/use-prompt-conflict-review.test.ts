@@ -43,4 +43,17 @@ describe("usePromptConflictReview", () => {
     act(() => result.current.open([conflict("a")], "repository"));
     expect(result.current.choices).toEqual({ a: "repository" });
   });
+
+  it("defaults prompts named like Object properties instead of reading inherited values", () => {
+    const { result } = renderHook(() => usePromptConflictReview());
+    const names = ["constructor", "toString", "__proto__", "hasOwnProperty"];
+    act(() => result.current.open(names.map(conflict)));
+    for (const name of names) {
+      expect(Object.hasOwn(result.current.choices, name)).toBe(true);
+      expect(result.current.choices[name]).toBe("local");
+    }
+    act(() => result.current.setChoice("__proto__", "repository"));
+    expect(Object.hasOwn(result.current.choices, "__proto__")).toBe(true);
+    expect(result.current.choices["__proto__"]).toBe("repository");
+  });
 });
