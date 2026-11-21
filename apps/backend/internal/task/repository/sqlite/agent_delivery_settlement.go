@@ -287,14 +287,8 @@ func (r *Repository) resolveBoundDeliveryBlocksTx(
 	effect *models.AgentDeliveryEffect,
 	settledAt time.Time,
 ) error {
-	updated, err := r.bindOpenDeliveryBlocksToTerminalTx(ctx, tx, effect, settledAt, false)
-	if err != nil {
-		return err
-	}
-	if updated {
-		return r.advanceRecoverySessionRevisionTx(ctx, tx, effect.SessionID)
-	}
-	return nil
+	_, err := r.bindOpenDeliveryBlocksToTerminalTx(ctx, tx, effect, settledAt, false)
+	return err
 }
 
 func (r *Repository) bindOpenDeliveryBlocksToTerminalTx(
@@ -335,6 +329,12 @@ func (r *Repository) bindOpenDeliveryBlocksToTerminalTx(
 		return false, err
 	}
 	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	if len(blocks) == 0 {
+		return false, nil
+	}
+	if err := r.advanceRecoverySessionRevisionTx(ctx, tx, effect.SessionID); err != nil {
 		return false, err
 	}
 	updated := false

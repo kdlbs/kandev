@@ -280,84 +280,138 @@ func (r *Repository) ClearAgentDeliveryRecovery(
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	changed, err := r.clearAgentDeliveryRecoveryTx(ctx, tx, sessionID, incarnationID, submissionID, harnessGeneration)
+	if err != nil || !changed {
+		return changed, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Repository) clearAgentDeliveryRecoveryTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID, incarnationID, submissionID string,
+	harnessGeneration int64,
+) (bool, error) {
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
 		return false, err
 	}
 	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
 		return false, err
 	}
-	sessionQuery := `SELECT queue_incarnation_id, metadata FROM task_sessions WHERE id = ?`
-	if dialect.IsPostgres(r.db.DriverName()) {
-		sessionQuery += forUpdateClause
+	recovery, exists, err := r.loadAgentDeliveryRecoveryForClearTx(ctx, tx, sessionID, incarnationID)
+	if err != nil || !exists {
+		return false, err
 	}
-	var storedIncarnation sql.NullString
-	var metadataValue sql.NullString
-	err = tx.QueryRowxContext(ctx, r.db.Rebind(sessionQuery), sessionID).Scan(
-		&storedIncarnation, &metadataValue,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
+	if !agentDeliveryRecoveryMatchesClearIdentity(recovery, sessionID, incarnationID, submissionID, harnessGeneration) {
 		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if !storedIncarnation.Valid || storedIncarnation.String != incarnationID {
-		return false, nil
-	}
-	metadata, err := decodeAgentDeliveryMetadata(metadataValue)
-	if err != nil {
-		return false, err
-	}
-	recovery, exists, err := agentDeliveryRecoveryFromMetadata(metadata)
-	if err != nil {
-		return false, err
-	}
-	if !exists || recovery.SessionID != sessionID || recovery.IncarnationID != incarnationID ||
-		recovery.SubmissionID != submissionID || recovery.HarnessGeneration != harnessGeneration ||
-		recovery.Phase == models.AgentDeliveryRecoverySettled {
-		return false, nil
-	}
-	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, []string{recovery.StreamID}); err != nil {
-		return false, err
 	}
 	effect, err := r.latestTerminalRecoveryEffectTx(ctx, tx, recovery)
 	if err != nil {
 		return false, err
+	}
+	return r.settleAgentDeliveryRecoveryTx(ctx, tx, sessionID, recovery, effect)
+}
+
+func (r *Repository) settleAgentDeliveryRecoveryTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	recovery models.AgentDeliveryRecovery,
+	effect *models.AgentDeliveryEffect,
+) (bool, error) {
+	if recovery.Phase == models.AgentDeliveryRecoverySettled && effect == nil {
+		return false, nil
 	}
 	settledRecovery := recovery
 	settledRecovery.Phase = models.AgentDeliveryRecoverySettled
 	if effect != nil {
 		settledRecovery.StreamID = effect.StreamID
 	}
-	settledRecovery.Revision++
-	settledRecovery.UpdatedAt = r.nowUTC()
-	expectedJSON, err := json.Marshal(recovery)
-	if err != nil {
-		return false, fmt.Errorf("serialize expected delivery recovery: %w", err)
-	}
-	settledJSON, err := json.Marshal(settledRecovery)
-	if err != nil {
-		return false, fmt.Errorf("serialize settled delivery recovery: %w", err)
-	}
-	updated, err := r.setSessionMetadataKeyIfJSONValueTx(
-		ctx, tx, sessionID, models.SessionMetaKeyAgentDeliveryRecovery,
-		expectedJSON, settledJSON, settledRecovery.UpdatedAt,
-	)
-	if err != nil || !updated {
-		return false, err
-	}
-	if effect != nil {
-		if _, err := r.bindOpenDeliveryBlocksToTerminalTx(ctx, tx, effect, settledRecovery.UpdatedAt, true); err != nil {
+	metadataChanged := recovery.Phase != models.AgentDeliveryRecoverySettled || settledRecovery.StreamID != recovery.StreamID
+	if metadataChanged {
+		settledRecovery.Revision++
+		settledRecovery.UpdatedAt = r.nowUTC()
+		updated, err := r.updateAgentDeliveryRecoveryMetadataTx(ctx, tx, sessionID, recovery, settledRecovery)
+		if err != nil || !updated {
 			return false, err
 		}
 	}
-	if err := r.advanceRecoverySessionRevisionTx(ctx, tx, sessionID); err != nil {
-		return false, err
+	blocksChanged := false
+	if effect != nil {
+		changed, err := r.bindOpenDeliveryBlocksToTerminalTx(ctx, tx, effect, r.nowUTC(), true)
+		if err != nil {
+			return false, err
+		}
+		blocksChanged = changed
 	}
-	if err := tx.Commit(); err != nil {
-		return false, err
+	return metadataChanged || blocksChanged, nil
+}
+
+func (r *Repository) loadAgentDeliveryRecoveryForClearTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID, incarnationID string,
+) (models.AgentDeliveryRecovery, bool, error) {
+	sessionQuery := `SELECT queue_incarnation_id, metadata FROM task_sessions WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		sessionQuery += forUpdateClause
 	}
-	return true, nil
+	var storedIncarnation sql.NullString
+	var metadataValue sql.NullString
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(sessionQuery), sessionID).Scan(
+		&storedIncarnation, &metadataValue,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.AgentDeliveryRecovery{}, false, nil
+	}
+	if err != nil {
+		return models.AgentDeliveryRecovery{}, false, err
+	}
+	if !storedIncarnation.Valid || storedIncarnation.String != incarnationID {
+		return models.AgentDeliveryRecovery{}, false, nil
+	}
+	metadata, err := decodeAgentDeliveryMetadata(metadataValue)
+	if err != nil {
+		return models.AgentDeliveryRecovery{}, false, err
+	}
+	recovery, exists, err := agentDeliveryRecoveryFromMetadata(metadata)
+	if err != nil {
+		return models.AgentDeliveryRecovery{}, false, err
+	}
+	return recovery, exists, nil
+}
+
+func agentDeliveryRecoveryMatchesClearIdentity(
+	recovery models.AgentDeliveryRecovery,
+	sessionID, incarnationID, submissionID string,
+	harnessGeneration int64,
+) bool {
+	return recovery.SessionID == sessionID && recovery.IncarnationID == incarnationID &&
+		recovery.SubmissionID == submissionID && recovery.HarnessGeneration == harnessGeneration && recovery.Phase != ""
+}
+
+func (r *Repository) updateAgentDeliveryRecoveryMetadataTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	current, next models.AgentDeliveryRecovery,
+) (bool, error) {
+	expectedJSON, err := json.Marshal(current)
+	if err != nil {
+		return false, fmt.Errorf("serialize expected delivery recovery: %w", err)
+	}
+	nextJSON, err := json.Marshal(next)
+	if err != nil {
+		return false, fmt.Errorf("serialize settled delivery recovery: %w", err)
+	}
+	return r.setSessionMetadataKeyIfJSONValueTx(
+		ctx, tx, sessionID, models.SessionMetaKeyAgentDeliveryRecovery,
+		expectedJSON, nextJSON, next.UpdatedAt,
+	)
 }
 
 func (r *Repository) latestTerminalRecoveryEffectTx(

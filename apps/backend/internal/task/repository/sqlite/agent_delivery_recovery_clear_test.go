@@ -154,3 +154,74 @@ func testClearAgentDeliveryRecoveryWithoutTerminalEffectSettlesNoticeOnly(t *tes
 	require.Equal(t, models.RecoveryBlockOpen, block.State)
 	require.Equal(t, submissionID, block.DeliverySubmissionID)
 }
+
+func TestClearAgentDeliveryRecoveryRepairsSettledNoticeAfterLateReattachedTerminal(t *testing.T) {
+	// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const suffix = "clear-late-terminal"
+	const submissionID = "submission-clear-late-terminal"
+	seedDeliverySettlement(t, repo, ctx, suffix, submissionID)
+	event := terminalDeliveryEvent(suffix, submissionID, "stream-clear-late-terminal", 1, "complete")
+	recovery := models.AgentDeliveryRecovery{
+		Phase: models.AgentDeliveryRecoveryUncertain, Revision: 1,
+		SessionID: event.SessionID, AgentExecutionID: "execution-clear-late-terminal",
+		SubmissionID: submissionID, StreamID: "stream-clear-before-reattach",
+		IncarnationID: event.IncarnationID, HarnessGeneration: event.HarnessGeneration,
+		PromptGeneration: 1, UpdatedAt: time.Now().UTC(),
+	}
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, event.SessionID,
+		models.SessionMetaKeyAgentDeliveryRecovery, recovery))
+	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE session_recovery_blocks
+		SET delivery_stream_id = ? WHERE id = ?`), recovery.StreamID, "block-delivery-"+suffix)
+	require.NoError(t, err)
+
+	changed, err := repo.ClearAgentDeliveryRecovery(ctx, event.SessionID, event.IncarnationID,
+		submissionID, event.HarnessGeneration)
+	require.NoError(t, err)
+	require.True(t, changed)
+	block, err := repo.GetSessionRecoveryBlock(ctx, "block-delivery-"+suffix)
+	require.NoError(t, err)
+	require.Equal(t, models.RecoveryBlockOpen, block.State)
+
+	projectDeliveryEvent(t, repo, ctx, event)
+	settled, err := repo.SettleAgentDeliveryTerminal(ctx, event.StreamID, event.Sequence,
+		models.DeliverySubmissionCompleted, time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, settled)
+
+	changed, err = repo.ClearAgentDeliveryRecovery(ctx, event.SessionID, event.IncarnationID,
+		submissionID, event.HarnessGeneration)
+	require.NoError(t, err)
+	require.True(t, changed, "a settled notice can bind terminal evidence that arrived later")
+
+	block, err = repo.GetSessionRecoveryBlock(ctx, "block-delivery-"+suffix)
+	require.NoError(t, err)
+	require.Equal(t, models.RecoveryBlockResolved, block.State)
+	require.Equal(t, event.StreamID, block.DeliveryStreamID)
+	require.Equal(t, event.Sequence, block.DeliverySequence)
+	session, err := repo.GetTaskSession(ctx, event.SessionID)
+	require.NoError(t, err)
+	settledRecovery, ok := models.LoadAgentDeliveryRecovery(session.Metadata)
+	require.True(t, ok)
+	require.Equal(t, models.AgentDeliveryRecoverySettled, settledRecovery.Phase)
+	require.Equal(t, event.StreamID, settledRecovery.StreamID)
+
+	putRetentionWorkflowOutcome(t, repo, event, "not_required", "turn-"+suffix)
+	completed, err := repo.CompleteAgentDeliveryTerminalSettlement(ctx,
+		terminalRetentionEffectKey(event), time.Now().UTC())
+	require.NoError(t, err)
+	require.True(t, completed)
+	require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID: event.SessionID, IncarnationID: event.IncarnationID,
+		Generation: event.HarnessGeneration, NativeSessionID: "native-clear-late-terminal",
+	}))
+	tx, err := repo.ro.BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	historical, valid, err := repo.loadHistoricalTerminalSettlementTx(ctx, tx, settledRecovery,
+		"native-clear-late-terminal", block.ID, block.Reason)
+	require.NoError(t, err)
+	require.True(t, valid)
+	require.Equal(t, event.StreamID, historical.streamID)
+}
