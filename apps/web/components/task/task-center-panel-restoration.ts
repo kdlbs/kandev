@@ -8,8 +8,11 @@ import {
   waitForRenameRelease,
 } from "@/hooks/file-rename-continuity";
 import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from "react";
-import { treePath } from "@/hooks/file-rename-continuity";
-import { tabletSelectionOwner } from "@/hooks/domains/session/use-tablet-session-tab";
+import { treePath, isWithin } from "@/hooks/file-rename-continuity";
+import {
+  tabletSelectionOwner,
+  subscribeTabletFileDeletion,
+} from "@/lib/state/tablet-file-authority";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import {
@@ -111,9 +114,7 @@ function restoreLoadedTabs({
   visit,
 }: RestoreLoadedTabsParams) {
   if (!isCurrent()) return;
-  loadedTabs = loadedTabs.filter(
-    (file) => !visit.closed.has(getFileTabKey(file)) && !visit.closed.has(`path:${treePath(file)}`),
-  );
+  loadedTabs = loadedTabs.filter((file) => !isRetiredFile(visit, file));
   if (loadedTabs.length > 0) setOpenFileTabs((live) => mergeRestoredFileTabs(live, loadedTabs));
   const select = () => {
     if (!isCurrent()) return;
@@ -149,8 +150,18 @@ type RestorationVisit = {
   owner: symbol | undefined;
   live: FileEditorTab[];
   closed: Set<string>;
+  deleted: Set<string>;
   retire: (file: OpenFileTab) => void;
 };
+
+function isRetiredFile(visit: RestorationVisit, file: OpenFileTab): boolean {
+  const path = treePath(file);
+  if (visit.closed.has(getFileTabKey(file)) || visit.closed.has(`path:${path}`)) return true;
+  if (path !== null) {
+    for (const deleted of visit.deleted) if (isWithin(path, deleted)) return true;
+  }
+  return false;
+}
 function useRestorationVisit(
   store: FileTabRestorationOptions["store"],
   activeSessionId: string | null,
@@ -166,6 +177,7 @@ function useRestorationVisit(
       owner: store && activeSessionId ? tabletSelectionOwner(store, activeSessionId) : undefined,
       live: [],
       closed,
+      deleted: new Set(),
       retire(file) {
         closed.add(getFileTabKey(file));
         const path = treePath(file);
@@ -217,6 +229,17 @@ export function useFileTabRestoration({
   const restorationInProgressRef = useRef<boolean>(false);
   const [restoredSessionId, setRestoredSessionId] = useState<string | null>(null);
   const visit = useRestorationVisit(store, activeSessionId, openFileTabs);
+  useLayoutEffect(() => {
+    if (!store || !activeSessionId) return;
+    return subscribeTabletFileDeletion(store, activeSessionId, (path) => {
+      visit.deleted.add(path);
+      const removed = visit.live.filter((file) => isRetiredFile(visit, file));
+      for (const file of removed) visit.retire(file);
+      setOpenFileTabs((live) => live.filter((file) => !isRetiredFile(visit, file)));
+      const selected = store.getState().tabletSession.activeTabBySessionId[activeSessionId];
+      if (removed.some((file) => selected === `file:${getFileTabKey(file)}`)) setLeftTab("chat");
+    });
+  }, [store, activeSessionId, visit, setOpenFileTabs, setLeftTab]);
 
   useEffect(() => {
     if (!activeSessionId) return;

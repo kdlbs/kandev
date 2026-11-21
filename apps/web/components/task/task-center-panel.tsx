@@ -25,9 +25,6 @@ import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { executeApprove } from "@/lib/services/session-approve";
 import { useTabletSessionTab } from "@/hooks/domains/session/use-tablet-session-tab";
 import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
-import { calculateHash } from "@/lib/utils/file-diff";
 import { useToast } from "@/components/toast-provider";
 import { useFileSaveDelete } from "./task-center-panel-restoration";
 import { useNormalizedTaskReviews } from "./review-panel-provider";
@@ -39,6 +36,12 @@ import {
 } from "./task-center-panel-file-tabs";
 import { TaskCenterReviewContent } from "./task-center-review-content";
 import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
+import { tabletSelectionOwner } from "@/lib/state/tablet-file-authority";
+import {
+  useCenterPanelGitChanges,
+  useLiveFileTabs,
+  useTabletFileRequest,
+} from "./task-center-panel-state";
 
 import type { SelectedDiff } from "./task-layout";
 import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
@@ -80,11 +83,25 @@ function useLeftTabState(
   onActiveFileChange?: (filePath: string | null) => void,
 ) {
   const [leftTab, setLeftTab] = useTabletSessionTab(activeSessionId);
+  const store = useAppStoreApi();
   const [showRequestChangesTooltip, setShowRequestChangesTooltip] = useState(false);
 
   useEffect(() => {
-    if (leftTab === "changes" && !hasChanges) queueMicrotask(() => setLeftTab("chat"));
-  }, [leftTab, hasChanges, setLeftTab]);
+    if (leftTab !== "changes" || hasChanges !== false || !activeSessionId) return;
+    let current = true;
+    const owner = tabletSelectionOwner(store, activeSessionId);
+    queueMicrotask(() => {
+      if (
+        current &&
+        store.getState().tabletSession.activeTabBySessionId[activeSessionId] === "changes" &&
+        tabletSelectionOwner(store, activeSessionId) === owner
+      )
+        setLeftTab("chat");
+    });
+    return () => {
+      current = false;
+    };
+  }, [leftTab, hasChanges, setLeftTab, store, activeSessionId]);
   useEffect(() => {
     const handler = () => {
       if (hasChanges) setLeftTab("changes");
@@ -121,6 +138,7 @@ function useLeftTabState(
 type FileTabOperationsOptions = {
   activeSessionId: string | null;
   openFileTabs: OpenFileTab[];
+  fileTabsRef: RefObject<OpenFileTab[]>;
   setOpenFileTabs: React.Dispatch<React.SetStateAction<OpenFileTab[]>>;
   setLeftTab: (tab: string) => void;
   handleTabChange: (tab: string) => void;
@@ -131,6 +149,7 @@ type FileTabOperationsOptions = {
 function useFileTabOperations({
   activeSessionId,
   openFileTabs,
+  fileTabsRef,
   setOpenFileTabs,
   setLeftTab,
   handleTabChange,
@@ -151,11 +170,16 @@ function useFileTabOperations({
         return;
       }
       const requestedPath = treePath(fileTab);
-      const existing = openFileTabs.find((tab) => requestedPath && treePath(tab) === requestedPath);
-      setOpenFileTabs((prev) => upsertOpenFileTab(prev, fileTab));
-      setLeftTab(`file:${getFileTabKey(existing ?? fileTab)}`);
+      const next = upsertOpenFileTab(fileTabsRef.current, fileTab);
+      setOpenFileTabs(next);
+      const selected = next.find(
+        (tab) =>
+          getFileTabKey(tab) === getFileTabKey(fileTab) ||
+          (requestedPath !== null && treePath(tab) === requestedPath),
+      );
+      if (selected) setLeftTab(`file:${getFileTabKey(selected)}`);
     },
-    [activeSessionId, store, t, toast, openFileTabs, setOpenFileTabs, setLeftTab],
+    [activeSessionId, store, t, toast, fileTabsRef, setOpenFileTabs, setLeftTab],
   );
 
   const handleOpenFileFromChat = useTaskCenterFileOpen({
@@ -237,7 +261,7 @@ function useCenterPanelTabs(
   const { t } = useTranslation();
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
-      ...(hasChanges ? [{ id: "changes", label: t("task:allChanges") }] : []),
+      ...(hasChanges !== false ? [{ id: "changes", label: t("task:allChanges") }] : []),
       { id: "chat", label: t("task:chat") },
       ...(reviewLabel ? [{ id: "pr", label: reviewLabel }] : []),
     ];
@@ -256,7 +280,7 @@ function useCenterPanelTabs(
   }, [openFileTabs, handleCloseFileTab, hasChanges, reviewLabel, t]);
   const separatorAfterIndex = useMemo(() => {
     if (openFileTabs.length === 0) return undefined;
-    const staticCount = (hasChanges ? 1 : 0) + 1 + (reviewLabel ? 1 : 0);
+    const staticCount = (hasChanges !== false ? 1 : 0) + 1 + (reviewLabel ? 1 : 0);
     return staticCount - 1;
   }, [openFileTabs.length, hasChanges, reviewLabel]);
   return { tabs, separatorAfterIndex };
@@ -296,18 +320,13 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
   } = props;
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const gitStatus = useSessionGitStatus(activeSessionId);
-  const { commits } = useSessionCommits(activeSessionId);
-  const hasChanges = useMemo(() => {
-    const hasUncommittedChanges = gitStatus?.files && Object.keys(gitStatus.files).length > 0;
-    return (hasUncommittedChanges || (commits && commits.length > 0)) as boolean;
-  }, [gitStatus, commits]);
+  const hasChanges = useCenterPanelGitChanges(activeSessionId);
   const { activeSession, isPassthroughMode, showApproveButton, handleApprove } = useSessionApprove(
     activeSessionId,
     activeTaskId,
   );
   const { reviews, selectedReview, selectReview, reviewLabel } = useTaskReview(activeTaskId);
-  const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
+  const [openFileTabs, setOpenFileTabs, fileTabsRef] = useLiveFileTabs();
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
   const {
     leftTab,
@@ -328,6 +347,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
   const fileTabOps = useFileTabOperations({
     activeSessionId,
     openFileTabs,
+    fileTabsRef,
     setOpenFileTabs,
     setLeftTab,
     handleTabChange,
@@ -351,19 +371,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     }
   }, [externalSelectedDiff, onDiffHandled, setLeftTab]);
 
-  useEffect(() => {
-    if (!openFileRequest) return;
-    queueMicrotask(async () => {
-      const hash = openFileRequest.originalHash || (await calculateHash(openFileRequest.content));
-      fileTabOps.addFileTab({
-        ...openFileRequest,
-        originalContent: openFileRequest.originalContent || openFileRequest.content,
-        originalHash: hash,
-        isDirty: openFileRequest.isDirty ?? false,
-      });
-      onFileOpenHandled();
-    });
-  }, [openFileRequest, onFileOpenHandled, fileTabOps.addFileTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  useTabletFileRequest(openFileRequest, onFileOpenHandled, fileTabOps.addFileTab);
 
   return {
     activeTaskId,

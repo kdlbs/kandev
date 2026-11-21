@@ -56,8 +56,8 @@ function useOpenFileRequestState() {
     setOpenFileRequest(file);
   }, []);
   const handleFileOpenHandled = useCallback(() => {
-    setOpenFileRequest(null);
-  }, []);
+    setOpenFileRequest((current) => (current === openFileRequest ? null : current));
+  }, [openFileRequest]);
 
   return { openFileRequest, handleOpenFile, handleFileOpenHandled };
 }

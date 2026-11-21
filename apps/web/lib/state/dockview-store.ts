@@ -928,7 +928,7 @@ function performApplyCustomLayout(
     hiddenRightPane: null,
     activeLayoutProfile: profileForCustomLayout(layout),
   });
-  const { appliedState, oldFormatRestoreFailed } = restoreCustomLayout({
+  const { appliedState, restoreFailed } = restoreCustomLayout({
     api,
     layout,
     opts,
@@ -936,7 +936,7 @@ function performApplyCustomLayout(
     safeHeight,
     set,
   });
-  if (oldFormatRestoreFailed) {
+  if (restoreFailed) {
     if (previousGrid) restoreSerializedDockview(api, previousGrid);
     if (previousVersion === undefined) layoutVersions.delete(api);
     else layoutVersions.set(api, previousVersion);
@@ -976,8 +976,7 @@ function performApplyCustomLayout(
     syncPinnedWidthsFromApi(api, set);
     set({ isRestoringLayout: false });
     const { currentLayoutEnvId, preMaximizeLayout } = get();
-    // Don't persist when the legacy fromJSON restore threw: the API may be in a partial state and snapshotting it would propagate corruption to the next load.
-    if (currentLayoutEnvId === targetEnvId && !oldFormatRestoreFailed) {
+    if (currentLayoutEnvId === targetEnvId) {
       persistEnvLayoutNow(api, targetEnvId, preMaximizeLayout);
     }
   });
@@ -1012,8 +1011,7 @@ function visibleCustomLayoutSessions(opts: ApplyCustomLayoutOptions | undefined)
  * Restore a saved custom layout onto the dockview API. New-format layouts
  * (with columns) are normalized (reusable session panels, chat materialization)
  * and applied with resolved pinned widths; legacy serialized blobs are
- * restored via `api.fromJSON`. Returns the applied state and whether a legacy
- * restore threw.
+ * restored via `api.fromJSON`. Both shapes report failure to the same rollback boundary.
  */
 function restoreCustomLayout({
   api,
@@ -1022,40 +1020,42 @@ function restoreCustomLayout({
   safeWidth,
   safeHeight,
   set,
-}: RestoreCustomLayoutParams): { appliedState: LayoutState; oldFormatRestoreFailed: boolean } {
+}: RestoreCustomLayoutParams): { appliedState: LayoutState; restoreFailed: boolean } {
   const state = layout.layout as unknown as LayoutState;
-  if (state?.columns) {
-    // Normalize first so both old saved layouts with session-specific panels
-    // and newer reusable layouts with chat placeholders apply through one path.
-    // Panels whose component is no longer renderable are dropped here as well
-    // as during profile validation, because this explicit apply path does not
-    // go through the settings normalizer.
-    const visibleSessions = visibleCustomLayoutSessions(opts);
-    const materializedState = materializeReusableChatPanel(
-      normalizeReusableSessionPanels(filterLayoutStateByComponents(state)),
-      visibleSessions.activeSessionId,
-      visibleSessions.sessionIds,
-    );
-    const columns = normalizeRightColumnOwnership(materializedState.columns);
-    const activeState =
-      columns === materializedState.columns ? materializedState : { ...materializedState, columns };
-    const savedWidths = resolveCustomLayoutPinnedWidths(
-      activeState.columns,
-      safeWidth,
-      activeState.rootOrientation,
-    );
-    const ids = applyLayoutAndSet(api, activeState, savedWidths, set, {
-      width: safeWidth,
-      height: safeHeight,
-    });
-    set({ ...ids, pinnedWidths: savedWidths });
-    return { appliedState: activeState, oldFormatRestoreFailed: false };
-  }
-
   try {
+    if (state?.columns) {
+      // Normalize first so both old saved layouts with session-specific panels
+      // and newer reusable layouts with chat placeholders apply through one path.
+      // Panels whose component is no longer renderable are dropped here as well
+      // as during profile validation, because this explicit apply path does not
+      // go through the settings normalizer.
+      const visibleSessions = visibleCustomLayoutSessions(opts);
+      const materializedState = materializeReusableChatPanel(
+        normalizeReusableSessionPanels(filterLayoutStateByComponents(state)),
+        visibleSessions.activeSessionId,
+        visibleSessions.sessionIds,
+      );
+      const columns = normalizeRightColumnOwnership(materializedState.columns);
+      const activeState =
+        columns === materializedState.columns
+          ? materializedState
+          : { ...materializedState, columns };
+      const savedWidths = resolveCustomLayoutPinnedWidths(
+        activeState.columns,
+        safeWidth,
+        activeState.rootOrientation,
+      );
+      const ids = applyLayoutAndSet(api, activeState, savedWidths, set, {
+        width: safeWidth,
+        height: safeHeight,
+      });
+      set({ ...ids, pinnedWidths: savedWidths });
+      return { appliedState: activeState, restoreFailed: false };
+    }
+
     const visibleSessions = visibleCustomLayoutSessions(opts);
     const sanitized = sanitizeSerializedLayout(layout.layout);
-    if (!sanitized) return { appliedState: state, oldFormatRestoreFailed: true };
+    if (!sanitized) return { appliedState: state, restoreFailed: true };
     layoutVersions.set(api, (layoutVersions.get(api) ?? 0) + 1);
     restoreSerializedDockview(api, sanitized as SerializedDockview);
     replaceStaleSessionPanels(
@@ -1066,10 +1066,11 @@ function restoreCustomLayout({
       opts?.envId ?? null,
     );
     set(applyLayoutFixups(api));
-    return { appliedState: state, oldFormatRestoreFailed: false };
+    return { appliedState: state, restoreFailed: false };
   } catch (e) {
-    console.warn("applyCustomLayout: old-format restore failed:", e);
-    return { appliedState: state, oldFormatRestoreFailed: true };
+    // i18n-exempt: Internal layout restoration diagnostic.
+    console.warn("applyCustomLayout: restore failed:", e);
+    return { appliedState: state, restoreFailed: true };
   }
 }
 

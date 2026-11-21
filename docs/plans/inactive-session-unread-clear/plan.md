@@ -810,3 +810,19 @@ final bundle, one worker/no retries. Final coarse editor/dot and workflow
 captures inspected. Task 02 records intermediate fixture/type failures and
 the visit/negative-mutation/rollback control REDs separately. R32 follows
 normal verified delivery; the review loop remains open.
+
+### Production review R32
+
+Sol child `5a3aacd8-8802-43fb-8c2a-2ef150c56757` reviewed
+`9c8085e549675489011baa253ed48ecf686a1e34`: five P2s, not clean.
+Completed production rounds 32; consecutive clean 0. Task 02 records the
+Files-tree admission/deletion, installed-alias selection, Git readiness and
+both-format layout rollback corrections and RED receipts.
+
+R32 author unit receipt: 21 files/355 tests, strict changed-file lint,
+production typecheck and fresh frontend build pass. Spec/catalog/harness
+checks pass after keeping the owning design within its size limit. Ten
+desktop/tablet/maximize and ten phone cases pass on the final fresh bundle,
+sequential/one worker/no retries. Tablet Chat and failed-resume phone captures
+inspected. Task 02 retains the exact limits and intermediate non-green
+receipts. R33 follows normal verified delivery; the loop remains open.

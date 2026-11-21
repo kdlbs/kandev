@@ -255,8 +255,9 @@ Phone/tablet consume route/workflow Chat focus; 404 vetoes admission/sync.
 `workflow_focus_disposition: none`: admitted, no source/effective launch;
 omit while deferred launch is possible. Removal leases protect live/parked groups.
 Explicit layouts retire maximize only on success; scoped frames stay owned.
-Changed primaries re-prove empty slots. Visibility gates restore/read/dots.
-Tablet restores initial tabs only; later selection/close/delete wins.
+Visibility gates restore/read/dots.
+Tablet files/restores honor visit/selection; confirmed delete retires aliases.
+Select installed file keys; Changes awaits ready Git/commits.
 
 `invalidateTaskSessionMembership` fences pending/admitted/queued foreground and
 removal-dialog reads, not new reads/unrelated keys. Confirmed UUID deletion

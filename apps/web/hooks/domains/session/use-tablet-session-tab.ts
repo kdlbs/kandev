@@ -3,17 +3,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getActiveTabForSession, setActiveTabForSession } from "@/lib/local-storage";
 import { hasTaskRouteFocus, consumeTaskRouteFocus } from "@/lib/state/task-navigation-focus";
 
-const selectionOwners = new WeakMap<object, Map<string, symbol>>();
-export function tabletSelectionOwner(store: object, sessionId: string) {
-  return selectionOwners.get(store)?.get(sessionId);
-}
-export function beginTabletSelection(store: object, sessionId: string) {
-  let owners = selectionOwners.get(store);
-  if (!owners) selectionOwners.set(store, (owners = new Map()));
-  const owner = Symbol();
-  owners.set(sessionId, owner);
-  return owner;
-}
+import { beginTabletSelection } from "@/lib/state/tablet-file-authority";
 
 /** Tablet tab selection is shared with unread display, not the phone panel preference. */
 export function useTabletSessionTab(sessionId: string | null) {

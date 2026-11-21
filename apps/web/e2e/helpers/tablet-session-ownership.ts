@@ -13,7 +13,7 @@ import { waitForActiveTaskSession } from "./session-store";
 import { waitForSessionState } from "./session";
 
 type Context = Parameters<typeof withToolFileTask>[0];
-async function holdSavedFile(page: Page, sessionId: string) {
+async function holdSavedFile(page: Page, sessionId?: string) {
   let released = false;
   const held: Array<() => void> = [];
   const requests: unknown[] = [];
@@ -44,6 +44,10 @@ async function holdSavedFile(page: Page, sessionId: string) {
     },
   );
   return {
+    arm: (id: string) => {
+      sessionId = id;
+      released = false;
+    },
     wait: () =>
       expect
         .poll(() => ({ blocked: held.length > 0, sessionId, requests }), { timeout: 15_000 })
@@ -144,6 +148,7 @@ export async function expectTabletWorkflowFocus(context: Context, screenshot: st
   await api.saveUserSettings({ prevent_auto_start_agent_on_open: true });
   let workflowId: string | undefined;
   const reads = observeReadTraffic(page);
+  const treeGate = await holdSavedFile(page);
   try {
     const workflow = await api.createWorkflow(seed.workspaceId, `Tablet focus ${randomUUID()}`);
     workflowId = workflow.id;
@@ -224,7 +229,7 @@ export async function expectTabletWorkflowFocus(context: Context, screenshot: st
           expectedState: "WAITING_FOR_INPUT",
           message: "Committed tablet turn must settle",
         });
-        const expectedTail = await newestStoredMessageId(api, sessionId);
+        let expectedTail = await newestStoredMessageId(api, sessionId);
         await expect
           .poll(async () => (await sessionReadState(api, sessionId)).cursor)
           .toBe(expectedTail);
@@ -248,6 +253,37 @@ export async function expectTabletWorkflowFocus(context: Context, screenshot: st
         expect(moveStarts.filter((action) => action !== `session.launch:${sessionId}`)).toEqual([]);
         expect(moveStarts.length).toBeLessThanOrEqual(1);
         const startsAfterMove = reads.agentStarts().length;
+        treeGate.arm(sessionId);
+        await page.getByRole("treeitem", { name: "Dockerfile File actions", exact: true }).tap();
+        await treeGate.wait();
+        const repeatedQuery = `tablettree${randomUUID().replaceAll("-", "")}`;
+        const repeated = await api.seedSessionMessage(sessionId, {
+          type: "message",
+          content: repeatedQuery,
+        });
+        await waitForIndexedConversation(api, seed.workspaceId, repeatedQuery, {
+          sessionId,
+          messageId: repeated.messageId,
+        });
+        await selectCommandTask(page, repeatedQuery, true);
+        await expect(session.activeChat()).toHaveAttribute("data-session-id", sessionId);
+        treeGate.release();
+        await expect
+          .poll(async () => (await sessionReadState(api, sessionId)).cursor)
+          .toBe(repeated.messageId);
+        await dwell(
+          page,
+          500,
+          "negative-assertion",
+          "An older Files-tree open cannot replace the explicitly activated tablet conversation",
+        );
+        await expect(page.getByRole("tab", { name: "Dockerfile", exact: true })).toHaveAttribute(
+          "data-state",
+          "inactive",
+        );
+        await expect(session.activeChat()).toHaveAttribute("data-session-id", sessionId);
+        expect((await sessionReadState(api, sibling.session_id)).cursor).toBe(source.messageId);
+        expectedTail = repeated.messageId;
         await page.getByRole("tab", { name: "Dockerfile", exact: true }).tap();
         const later = await api.seedSessionMessage(sessionId, {
           type: "message",
@@ -269,6 +305,7 @@ export async function expectTabletWorkflowFocus(context: Context, screenshot: st
       },
     );
   } finally {
+    treeGate.release();
     try {
       if (workflowId) await api.deleteWorkflow(workflowId);
     } finally {

@@ -127,20 +127,26 @@ it.each(["current", "environment", "selection-aba", "newer-layout", SAME_ENV_MAX
   },
 );
 
-it.each(["entry", "restored"])(
-  "preserves the pending %s maximize owner when a legacy Saved Layout fails",
-  async (mode) => {
+it.each(
+  ["legacy", "columns"].flatMap((shape) =>
+    ["entry", "restored", "settled"].map((mode) => ({ shape, mode })),
+  ),
+)(
+  "preserves the $mode maximize owner when a $shape Saved Layout fails",
+  async ({ mode, shape }) => {
     const api = mountDockview(1200, 700);
     const original = useDockviewStore.getState();
     try {
       useDockviewStore.setState({ api, currentLayoutEnvId: "failed-x", preMaximizeLayout: null });
       useDockviewStore.getState().applyBuiltInPreset("default");
       await act(settle);
-      if (mode === "restored") {
+      if (mode !== "entry") {
         useDockviewStore.getState().maximizeGroup(api.getPanel("chat")!.group.id);
         await act(settle);
-        useDockviewStore.getState().switchEnvLayout("failed-x", "failed-y", null, []);
-        await act(settle);
+        if (mode === "restored") {
+          useDockviewStore.getState().switchEnvLayout("failed-x", "failed-y", null, []);
+          await act(settle);
+        }
       }
       const frames: FrameRequestCallback[] = [];
       vi.spyOn(window, "requestAnimationFrame").mockImplementation((frame) => {
@@ -149,10 +155,13 @@ it.each(["entry", "restored"])(
       });
       if (mode === "entry")
         useDockviewStore.getState().maximizeGroup(api.getPanel("chat")!.group.id);
-      else useDockviewStore.getState().switchEnvLayout("failed-y", "failed-x", null, []);
+      else if (mode === "restored")
+        useDockviewStore.getState().switchEnvLayout("failed-y", "failed-x", null, []);
       api.getPanel("chat")!.api.setActive();
       const overlay = api.toJSON();
       const parked = useDockviewStore.getState().preMaximizeLayout;
+      const profile = useDockviewStore.getState().activeLayoutProfile;
+      const saved = getEnvMaximizeState("failed-x");
       vi.spyOn(api, "fromJSON").mockImplementationOnce(() => {
         throw new Error("native restore failed");
       });
@@ -161,10 +170,15 @@ it.each(["entry", "restored"])(
         name: "Failed preset",
         isDefault: false,
         createdAt: "2026-11-21T00:00:00Z",
-        layout: JSON.parse(JSON.stringify(overlay)),
+        layout:
+          shape === "legacy"
+            ? JSON.parse(JSON.stringify(overlay))
+            : getBuiltInLayoutProfile("default")!.layout,
       });
       expect(api.toJSON()).toEqual(overlay);
       expect(useDockviewStore.getState().preMaximizeLayout).toBe(parked);
+      expect(useDockviewStore.getState().activeLayoutProfile).toBe(profile);
+      expect(getEnvMaximizeState("failed-x")).toEqual(saved);
       act(() => {
         for (const frame of [...frames]) frame(0);
       });

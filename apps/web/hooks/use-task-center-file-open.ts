@@ -3,10 +3,7 @@
 import { useAppStoreApi } from "@/components/state-provider";
 import { isRenameReserved, trackRenameOpen } from "./file-rename-continuity";
 import { useCallback, useLayoutEffect, useRef } from "react";
-import {
-  tabletSelectionOwner,
-  beginTabletSelection,
-} from "./domains/session/use-tablet-session-tab";
+import { tabletSelectionOwner, beginTabletSelection } from "@/lib/state/tablet-file-authority";
 import type { OpenFileTab, FileContentResponse } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent } from "@/lib/ws/workspace-files";

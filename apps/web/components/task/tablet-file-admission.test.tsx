@@ -4,19 +4,24 @@ import { afterEach, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { useTabletSessionTab } from "@/hooks/domains/session/use-tablet-session-tab";
 import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
+import { useFileOperations } from "@/hooks/use-file-operations";
 import { useTabletFileState } from "./use-tablet-file-state";
 import { getFileTabKey, upsertOpenFileTab } from "./task-center-panel-file-tabs";
 import { getOpenFileTabs, setActiveTabForSession, setOpenFileTabs } from "@/lib/local-storage";
 import type { OpenFileTab } from "@/lib/types/backend";
 const read = vi.hoisted(() => vi.fn());
+const remove = vi.hoisted(() => vi.fn());
+vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock("@/lib/ws/connection", () => ({ getWebSocketClient: () => ({}) }));
 vi.mock("@/lib/ws/workspace-files", () => ({
   requestFileContent: (...args: unknown[]) => read(...args),
+  deleteFile: (...args: unknown[]) => remove(...args),
 }));
 afterEach(() => {
   cleanup();
   sessionStorage.clear();
   read.mockReset();
+  remove.mockReset();
 });
 const f: OpenFileTab = {
   path: "F.txt",
@@ -34,6 +39,7 @@ function setup() {
     ({ session }) => {
       const store = useAppStoreApi();
       const [tab, select] = useTabletSessionTab(session);
+      const operations = useFileOperations(session);
       const [tabs, setTabs] = useState<OpenFileTab[]>([]);
       const files = useTabletFileState({
         adapter: undefined,
@@ -51,7 +57,16 @@ function setup() {
         },
         toast: vi.fn(),
       });
-      return { store, tab, select, tabs, setTabs, open, retireFile: files.retireFile };
+      return {
+        store,
+        tab,
+        select,
+        tabs,
+        setTabs,
+        open,
+        retireFile: files.retireFile,
+        remove: operations.deleteFile,
+      };
     },
     { wrapper, initialProps: { session: "B" } },
   );
@@ -132,5 +147,38 @@ it.each(["changes", "pr"])(
     setActiveTabForSession("B", tab);
     const hook = setup();
     await waitFor(() => expect(hook.result.current.tab).toBe(tab));
+  },
+);
+
+it.each([false, true].flatMap((alias) => [false, true].map((success) => ({ alias, success }))))(
+  "keeps confirmed tree deletion out of delayed restoration (alias=$alias, success=$success)",
+  async ({ alias, success }) => {
+    setActiveTabForSession("B", "file:F.txt");
+    setOpenFileTabs("B", [
+      { path: "F.txt", name: "F.txt", ...(alias ? { repo: "repo" } : {}) },
+      { path: "G.txt", name: "G.txt" },
+    ]);
+    const later = Promise.withResolvers<{ content: string }>();
+    read.mockImplementation((_client, _id, path) =>
+      path === "G.txt" ? later.promise : Promise.resolve({ content: "old F" }),
+    );
+    remove.mockResolvedValue({ success });
+    const hook = setup();
+    await waitFor(() =>
+      expect(read).toHaveBeenCalledWith(expect.anything(), "B", "G.txt", undefined),
+    );
+    await act(async () => {
+      await hook.result.current.remove(alias ? `repo/${f.path}` : f.path);
+    });
+    await act(async () => later.resolve({ content: "G" }));
+    const expected = success ? ["G.txt"] : ["F.txt", "G.txt"];
+    await waitFor(() => expect(hook.result.current.tabs.map((tab) => tab.path)).toEqual(expected));
+    expect(getOpenFileTabs("B").map((tab) => tab.path)).toEqual(expected);
+    if (success) {
+      await act(async () => {
+        await hook.result.current.open(alias ? `repo/${f.path}` : f.path);
+      });
+      expect(hook.result.current.tabs.some((tab) => tab.path.endsWith("F.txt"))).toBe(true);
+    }
   },
 );

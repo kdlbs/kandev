@@ -4154,7 +4154,7 @@ pnpm exec vitest run components/task/tablet-file-admission.test.tsx \
   components/task/layout-preset-selector-apply.test.tsx \
   hooks/domains/sidebar/use-unread-task-dot-display.test.tsx \
   lib/state/dockview-env-switch.plugin-layout.test.ts \
-  lib/ws/handlers/task-primary-
+  lib/ws/handlers/task-primary-*.test.ts
 pnpm e2e:run --host --shards 1 --no-build --project chromium \
   e2e/tests/task/task-unread-dot.spec.ts \
   e2e/tests/session/session-primary-removal.spec.ts \
@@ -4181,3 +4181,77 @@ The three-clean/50-round loop remains open at completed 31, clean 0.
 No Go/cursor/predicate/projector, promotion/schema/wire changes in this round.
 No broad-suite/live-NATS or historical-trigger certification; list readback
 remains convergence, not isolated cursor-event proof.
+
+### Production-fix review round 32 remediation
+
+Sol child `5a3aacd8-8802-43fb-8c2a-2ef150c56757` reviewed
+`9c8085e549675489011baa253ed48ecf686a1e34`: five P2 findings,
+not clean. Completed production rounds 32; consecutive clean 0.
+
+- Files-tree content/hash work now carries the tablet's shared selection,
+  visit, navigation and read scope through publication. The consumer rechecks
+  admission and acknowledges only its own file object. A later explicit Chat
+  invalidates an older tree open; a fresh tree click remains valid.
+- Successful Files-tree deletion notifies the same scoped restoration owner,
+  even without a live editor. Repo/tree aliases and descendants retire from
+  loaded snapshots and live tabs. Failed deletion does not retire them; a
+  later explicit reopen is independent of the old snapshot.
+- File upsert and selected identity use the same current tab transaction.
+  Restoration between request admission and completion cannot leave a
+  noninstalled alias selected or replace an existing dirty editor.
+- Saved Changes remains selected while current Git/commit evidence is
+  unknown. Only ready-empty evidence can queue a fallback, which rechecks
+  the selection owner. Panel-state hooks keep the composition within its
+  file/function limits without changing presentation authority.
+- Both columns and serialized Saved Layout restoration now report to the
+  same rollback boundary. Native failure restores grid/profile, preserves
+  maximize state/blob and restores the prior generation so its own pending
+  completion can settle. Failure remains logged rather than reporting
+  a successful replacement.
+
+RED receipts: `r32-red.log` has two confirmed-tree-deletion failures and three
+columns-native-failure cases (entry, persisted return, settled overlay).
+Its four consumer failures were incomplete WS fixture setup, not product RED.
+`r32-consumer-red.log` then records the installed-alias and unknown-Git failures;
+`r32-tree-red.log` records the old tree reply selecting File over newer Chat.
+The tree test awaits its real content/hash completion before checking selection.
+Initial Git mocks named noncanonical hook paths; final consumer tests mock the
+actual domain reader boundary, including ready-empty and ready-nonempty data.
+An intermediate replay also exposed an obsolete legacy-only completion flag;
+it was removed, not suppressed.
+
+`r32-final-units.log`: 21 files/355 targeted tests pass after the final
+composition refactor, including exact-request acknowledgement. Strict
+changed-file lint, production typecheck and fresh frontend build pass.
+The earlier 354-case receipt preceded the additional acknowledgement test.
+
+The R31 replay now uses the explicit shell glob
+`lib/ws/handlers/task-primary-*.test.ts`. Its former
+`lib/ws/handlers/task-primary-` was a valid Vitest substring filter, not a
+truncated/nonrunnable command. The scoped R32 replay adds:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run components/task/tablet-file-admission.test.tsx \
+  components/task/tablet-file-consumer.test.tsx \
+  components/task/layout-preset-selector-apply.test.tsx \
+  hooks/use-session-layout-state.test.ts
+```
+
+The owning Chromium workflow fixture additionally holds a genuine Files-tree
+request, commits an indexed conversation activation, then releases the old
+request. It checks the visible Chat, exact persisted cursor, inactive File
+tab and unchanged sibling cursor/start traffic. Final fresh-bundle browser
+receipts: `r32-final-summary.log` ten desktop/tablet/maximize cases pass;
+`r32-phone-summary.log` ten phone cases pass. Runs are sequential, one worker,
+no retries. Tablet committed Chat and phone failed-resume captures inspected.
+Unit coverage is not browser certification for every restoration/deletion/
+alias/error interleaving.
+
+Runtime/agentctl/host/plugin remain retained fresh R24; frontend is freshly
+built R32. Catalog/spec/harness checks pass after reducing the owning design
+to its enforced size limit. No Go/cursor/predicate/projector/promotion/schema/
+wire change this round. No broad-suite/live-NATS or historical-trigger claim;
+list readback remains convergence, not isolated cursor-event proof.
+Implementation/targeted verification is complete. Sol R33 follows normal
+verified delivery, with the review loop open at completed 32, clean 0.
