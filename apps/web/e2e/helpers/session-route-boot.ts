@@ -6,7 +6,12 @@ import { observeReadTraffic, sessionReadState } from "./unread-divider";
 import { dwell } from "./causal-waits";
 
 /** Real prepared sessions retain the same environment across a new Go-boot document. */
-export async function expectBootConversationRoute(page: Page, api: ApiClient, seed: SeedData) {
+export async function expectBootConversationRoute(
+  page: Page,
+  api: ApiClient,
+  seed: SeedData,
+  maximized = false,
+) {
   const task = await api.createTask(seed.workspaceId, "Boot explicit conversation", {
     prepare_session: true,
     agent_profile_id: seed.agentProfileId,
@@ -43,20 +48,39 @@ export async function expectBootConversationRoute(page: Page, api: ApiClient, se
   const viewer = new SessionPage(page);
   await page.goto(`/t/${task.id}?sessionId=${sourceId}`);
   await expect(viewer.activeChat()).toHaveAttribute("data-session-id", sourceId);
-  await viewer.sessionTabCloseButton(requested.session_id).click();
-  await expect(viewer.sessionTabBySessionId(requested.session_id)).toHaveCount(0);
+  if (maximized) {
+    await page
+      .locator(".dv-tabs-and-actions-container")
+      .filter({ has: viewer.sessionTabBySessionId(sourceId) })
+      .getByTestId("dockview-maximize-btn")
+      .click();
+  } else {
+    await viewer.sessionTabCloseButton(requested.session_id).click();
+    await expect(viewer.sessionTabBySessionId(requested.session_id)).toHaveCount(0);
+  }
   await expect
     .poll(() =>
       page.evaluate(
-        ({ environmentId, active, hidden }) => {
+        ({ environmentId, active, hidden, maximized }) => {
           const raw = sessionStorage.getItem(`kandev.dockview.env-layout-v3.${environmentId}`);
+          const savedMax = sessionStorage.getItem(
+            `kandev.dockview.env-maximize-v3.${environmentId}`,
+          );
           return (
             !!raw &&
             raw.includes(`"activeView":"session:${active}"`) &&
-            !raw.includes(`"session:${hidden}"`)
+            (maximized
+              ? raw.includes(`"session:${hidden}"`) &&
+                !!savedMax?.includes('"maximizedDockviewJson"')
+              : !raw.includes(`"session:${hidden}"`))
           );
         },
-        { environmentId: environment.id, active: sourceId, hidden: requested.session_id },
+        {
+          environmentId: environment.id,
+          active: sourceId,
+          hidden: requested.session_id,
+          maximized,
+        },
       ),
     )
     .toBe(true);
@@ -68,7 +92,7 @@ export async function expectBootConversationRoute(page: Page, api: ApiClient, se
   const requestedBefore = (await sessionReadState(api, requested.session_id)).cursor;
   await page.goto(`/t/${task.id}`);
   await expect(viewer.activeChat()).toHaveAttribute("data-session-id", sourceId);
-  await expect(viewer.sessionTabBySessionId(requested.session_id)).toHaveCount(0);
+  await expect(viewer.sessionTabBySessionId(requested.session_id)).toHaveCount(maximized ? 1 : 0);
   expect((await sessionReadState(api, requested.session_id)).cursor).toBe(requestedBefore);
   const sourceBefore = (await sessionReadState(api, sourceId)).cursor;
   await page.goto("/");
@@ -95,5 +119,9 @@ export async function expectBootConversationRoute(page: Page, api: ApiClient, se
   );
   expect((await sessionReadState(api, sourceId)).cursor).toBe(sourceBefore);
   expect(traffic.markReads.filter((row) => row.sessionId === sourceId)).toEqual([]);
+  if (maximized) {
+    await page.getByTestId("dockview-maximize-btn").first().hover();
+    await expect(page.getByRole("tooltip")).toHaveText("Restore");
+  }
   return { requestedId: requested.session_id, requestedTail: requestedTail.messageId };
 }

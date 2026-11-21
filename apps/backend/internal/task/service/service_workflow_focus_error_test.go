@@ -7,6 +7,8 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
 
 type moveFocusReadFailure struct {
@@ -43,6 +45,43 @@ func TestService_MoveTaskWorkflowFocusKeepsReadFailureUnknown(t *testing.T) {
 			}
 			if result.WorkflowFocusDisposition != "" {
 				t.Fatalf("unavailable recipient evidence claimed disposition %q", result.WorkflowFocusDisposition)
+			}
+		})
+	}
+}
+
+func TestService_MoveTaskWorkflowFocusPreservesDeferredLaunch(t *testing.T) {
+	for _, deferred := range []bool{false, true} {
+		t.Run(map[bool]string{false: "suppressed", true: "deferred"}[deferred], func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			seedMoveWorkflows(t, ctx, repo)
+			seedMoveSteps(svc)
+			svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+				"step-source": {ID: "step-source", WorkflowID: "wf-source"},
+				"step-review-target": {
+					ID: "step-review-target", WorkflowID: "wf-source",
+					Events: wfmodels.StepEvents{
+						OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
+					},
+				},
+			}})
+			createMoveTask(t, ctx, repo, "skip-focus", "wf-source", "step-source", nil)
+			if deferred {
+				must(t, repo.SetTaskMetadataKey(ctx, "skip-focus", models.MetaKeyDeferredLaunch,
+					map[string]interface{}{"agent_profile_id": "profile", "intent": "start"}))
+			}
+			result, err := svc.MoveTaskWithOptions(ctx, "skip-focus", "wf-source", "step-review-target", 0, MoveTaskOptions{
+				EntryOptions:           &workflowmove.EntryOptions{SkipStepPrompt: true},
+				PreserveDeferredLaunch: true,
+			})
+			must(t, err)
+			expected := workflowFocusDispositionNone
+			if deferred {
+				expected = ""
+			}
+			if result.WorkflowFocusDisposition != expected {
+				t.Fatalf("focus disposition = %q, want %q", result.WorkflowFocusDisposition, expected)
 			}
 		})
 	}

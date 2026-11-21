@@ -19,7 +19,7 @@ import (
 
 func TestMoveTaskWorkflowFocusDisposition(t *testing.T) {
 	for _, transport := range []string{"http", "ws"} {
-		for _, scenario := range []string{"ended", "waiting", "auto-start"} {
+		for _, scenario := range []string{"ended", "waiting", "auto-start", "skip", "skip-instructions", "skip-waiting"} {
 			t.Run(transport+"/"+scenario, func(t *testing.T) {
 				h, repo := newReorderHandlerTest(t, "source", "task-focus")
 				ctx := context.Background()
@@ -29,20 +29,32 @@ func TestMoveTaskWorkflowFocusDisposition(t *testing.T) {
 					"target", "wf-reorder-http", "Target", 1, now, now)
 				require.NoError(t, err)
 				target := &wfmodels.WorkflowStep{ID: "target", WorkflowID: "wf-reorder-http", Name: "Target", Position: 1}
-				if scenario == "auto-start" {
+				if scenario == "auto-start" || strings.HasPrefix(scenario, "skip") {
 					target.Events.OnEnter = []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}
 				}
 				h.service.SetWorkflowStepGetter(&reorderHandlerStepGetter{steps: map[string]*wfmodels.WorkflowStep{
 					"source": {ID: "source", WorkflowID: "wf-reorder-http", Name: "Source"}, "target": target,
 				}})
 				state := models.TaskSessionStateCompleted
-				if scenario == "waiting" {
+				if scenario == "waiting" || scenario == "skip-waiting" {
 					state = models.TaskSessionStateWaitingForInput
 				}
 				require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 					ID: "stored-session", TaskID: "task-focus", State: state, IsPrimary: true,
 				}))
 				request := `{"id":"task-focus","workflow_id":"wf-reorder-http","workflow_step_id":"target"}`
+				if strings.HasPrefix(scenario, "skip") {
+					instructions := ""
+					if scenario == "skip-instructions" {
+						instructions = "Run the requested verification"
+					}
+					body, err := json.Marshal(map[string]any{
+						"id": "task-focus", "workflow_id": "wf-reorder-http", "workflow_step_id": "target",
+						"entry_options": map[string]any{"skip_step_prompt": true, "instructions": instructions},
+					})
+					require.NoError(t, err)
+					request = string(body)
+				}
 				var payload []byte
 				if transport == "http" {
 					gin.SetMode(gin.TestMode)
@@ -62,7 +74,7 @@ func TestMoveTaskWorkflowFocusDisposition(t *testing.T) {
 				var response map[string]any
 				require.NoError(t, json.Unmarshal(payload, &response))
 				require.NotEmpty(t, response["workflow_entry_identity"])
-				if scenario == "ended" {
+				if scenario == "ended" || scenario == "skip" {
 					require.Equal(t, "none", response["workflow_focus_disposition"])
 				} else {
 					require.NotContains(t, response, "workflow_focus_disposition")

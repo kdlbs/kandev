@@ -9,6 +9,10 @@ import {
   invalidateTaskSessionMembership,
 } from "@/lib/state/task-session-reads";
 import { isConfirmedSessionRemoved } from "@/lib/state/session-removal";
+import {
+  observedRemovals,
+  recordObservedSessionRemoval,
+} from "@/lib/state/session-removal-observations";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 import {
   getProvenRemovalPredecessor,
@@ -53,23 +57,10 @@ type RemovalOwner = Pick<FollowOwner, "taskId" | "previousSessionId" | "scopeIde
 type RemovalTarget = Pick<TaskSession, "id" | "task_id" | "state" | "started_at" | "updated_at">;
 // Denied or uncertain reads retain view ownership until selection changes.
 const pendingByStore = new WeakMap<StoreApi<AppState>, PendingFollow>();
-const observedByStore = new WeakMap<StoreApi<AppState>, { scope: string; ids: Set<string> }>();
-
-function observedRemovals(store: StoreApi<AppState>): Set<string> | undefined {
-  const observed = observedByStore.get(store);
-  return observed?.scope === stateReadScopeIdentity(store.getState()) ? observed.ids : undefined;
-}
 
 function observeRemoval(store: StoreApi<AppState>, taskId: string, sessionId: string): void {
-  const scope = stateReadScopeIdentity(store.getState());
-  let observed = observedByStore.get(store);
-  if (!observed || observed.scope !== scope) {
-    observed = { scope, ids: new Set() };
-    observedByStore.set(store, observed);
-  }
-  if (observed.ids.has(sessionId)) return;
-  observed.ids.add(sessionId);
-  invalidateTaskSessionMembership(store, taskId);
+  if (recordObservedSessionRemoval(store, sessionId))
+    invalidateTaskSessionMembership(store, taskId);
 }
 
 /** Look up a task across both single-kanban and multi-kanban snapshots. */

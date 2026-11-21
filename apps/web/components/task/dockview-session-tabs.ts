@@ -481,6 +481,28 @@ function reopenExplicitRouteTarget(
   return requested;
 }
 
+function activateLiveRouteTarget(
+  api: DockviewApi,
+  store: StoreApi<AppState>,
+  refs: AutoSessionTabRefs,
+  taskId: string | null,
+  sessionId: string,
+) {
+  if (!hasTaskRouteFocus(store, taskId, sessionId) || !api.getPanel(`session:${sessionId}`)) return;
+  activateSessionPanel({
+    api,
+    effectiveSessionId: sessionId,
+    activation: {
+      sessionPanelExistedBefore: true,
+      activePanelIdBeforeEnsure: api.activePanel?.id ?? null,
+    },
+    refs,
+    tid: taskId,
+    appStore: store,
+    workflowFocusRequestId: workflowFocusRequestIdForSession(store, taskId, sessionId),
+  });
+}
+
 /**
  * Core effect body for useAutoSessionTab — extracted to reduce complexity of
  * the hook itself.
@@ -534,6 +556,7 @@ export function runAutoSessionTabEffect(
       refs.sessionTabCreatedRef.current,
     )
   ) {
+    activateLiveRouteTarget(api, appStore, refs, tid, effectiveSessionId);
     updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
     return;
   }

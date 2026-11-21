@@ -291,14 +291,16 @@ describe("useAutoSessionTab focus requests", () => {
 
 // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
 it.each([
-  [false, false],
-  [true, false],
-  [true, true],
+  [false, false, false],
+  [true, false, false],
+  [true, true, false],
+  [false, false, true],
+  [true, false, true],
 ])(
-  "reopens a hidden route target only with explicit admission=%s across restore=%s",
-  (explicit, restoring) => {
+  "admits explicit route=%s across restore=%s and maximized=%s",
+  (explicit, restoring, maximized) => {
     const { api, centerActivePanelId } = makeReorderingAutoSessionApi();
-    const environmentId = `route-hidden-${explicit}-${restoring}`;
+    const environmentId = `route-hidden-${explicit}-${restoring}-${maximized}`;
     const sessions = [ACTIVE_SESSION_ID, SIBLING_SESSION_ID].map(
       (id) => ({ id, task_id: TASK_ID, state: "WAITING_FOR_INPUT" }) as TaskSession,
     );
@@ -326,8 +328,12 @@ it.each([
       </StateProvider>,
     );
     const store = capturedStore!;
-    act(() => hideSessionPanel(api, SIBLING_SESSION_ID, TASK_ID));
-    expect(api.getPanel(`session:${SIBLING_SESSION_ID}`)).toBeNull();
+    if (maximized) {
+      act(() => setMaximizedSessions(sessions));
+    } else {
+      act(() => hideSessionPanel(api, SIBLING_SESSION_ID, TASK_ID));
+      expect(api.getPanel(`session:${SIBLING_SESSION_ID}`)).toBeNull();
+    }
     if (restoring)
       act(() => {
         Object.assign(api, { onDidActivePanelChange: () => ({ dispose: () => {} }) });
@@ -360,14 +366,15 @@ it.each([
         });
         useDockviewStore.setState({ isRestoringLayout: false });
       });
-    expect(hiddenSessionIdsFor(api).has(SIBLING_SESSION_ID)).toBe(!explicit);
+    expect(hiddenSessionIdsFor(api).has(SIBLING_SESSION_ID)).toBe(!explicit && !maximized);
     expect(centerActivePanelId()).toBe(
       `session:${explicit ? SIBLING_SESSION_ID : ACTIVE_SESSION_ID}`,
     );
     expect(store.getState().tasks.activeSessionId).toBe(
-      explicit ? SIBLING_SESSION_ID : ACTIVE_SESSION_ID,
+      explicit || maximized ? SIBLING_SESSION_ID : ACTIVE_SESSION_ID,
     );
-    if (explicit) {
+    if (maximized) expect(useDockviewStore.getState().preMaximizeLayout).not.toBeNull();
+    if (explicit && !maximized) {
       act(() => {
         api.getPanel("plan")!.api.setActive();
         store.setState((state) => ({
@@ -387,3 +394,27 @@ it.each([
     }
   },
 );
+
+function setMaximizedSessions(sessions: TaskSession[]) {
+  useDockviewStore.setState({
+    preMaximizeLayout: {
+      columns: [
+        {
+          id: "center",
+          groups: [
+            {
+              id: "center",
+              activePanel: `session:${ACTIVE_SESSION_ID}`,
+              panels: sessions.map((row) => ({
+                id: `session:${row.id}`,
+                component: "chat",
+                title: "Agent",
+                params: { sessionId: row.id },
+              })),
+            },
+          ],
+        },
+      ],
+    },
+  });
+}

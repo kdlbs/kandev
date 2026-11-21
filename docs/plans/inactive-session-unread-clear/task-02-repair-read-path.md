@@ -3426,3 +3426,103 @@ discrepancy was reported to the harness. Both verification and default cache-dri
 export caches were populated before the normal retry. No hook bypass, timeout
 increase or lint suppression is used. Only the final successful normal hook
 receipt qualifies as delivery evidence.
+
+### Production-fix review round 24 remediation
+
+Sol child `061313ff-2a9f-47f8-b659-fbeba258e5c7` reviewed `69ffdf9e4e`
+and reported three P2 source-derived schedules: explicit activation of an
+already-live maximized chat, deferred route replay after observed deletion,
+and optioned skip-prompt entries with no effective launch. Parent is reproducing
+these at the real hook, route/removal and move-response boundaries. No cursor,
+unread predicate or primary-promotion change is authorized.
+
+#### R24 causal and targeted-check receipts
+
+- `r24-maximized-red.log` records the real hook leaving A selected instead of
+  requested B while maximized. An additional fixture failure reused a persisted
+  hide environment; fixture IDs now include maximize mode. Explicit activation
+  now reaches an already-live panel without ensuring siblings or leaving maximize.
+- `r24-hook-route.log` records the deferred route selecting the observed-deleted
+  target before its held proof. Observations now have a shared scope-owned registry
+  consulted by explicit admission as well as lifecycle following. Final route
+  coverage settles a correlated `none`, observes every selection publication,
+  and keeps the retained conversation before and after removal proof.
+- `r24-skip-red.log` records both real HTTP and WS responses omitting `none` for
+  skip-prompt/no-instructions. Classification now uses normalized effective launch
+  policy and remains unknown when configured auto-start can consume deferred launch.
+  Positive skip-only and negative instructions/active-source controls exercise
+  both transports; service coverage preserves a separate deferred launch.
+- `r24-units.log`: 11 files / 255 passed. The final required metadata field in the
+  response fixture was corrected after typecheck; its complete 15-case route file
+  then passed (`r24-route-final.log`). These are split receipts, not a fresh
+  combined run after that test-only edit.
+- Strict changed-web lint, final production typecheck and frontend build pass
+  (`r24-web-lint.log`, `r24-typecheck-final.log`, `r24-build.log`).
+  Focused service/HTTP/WS race tests and scoped Go diff lint pass
+  (`r24-go-race.log`, `r24-go-lint.log`). Docs catalog/spec/public validation
+  passes (`r24-docs.log`).
+
+Desktop maximize is not mounted on phone. The removal-admission and effective
+launch policies are shared; existing phone agentless routing exercises the same
+response forwarding and deferred admission. No composition, touch target,
+scroll ownership or cursor policy changes. Runtime checks use the shipped
+desktop maximize/restore and stepper option controls, not page-state scripts.
+At that checkpoint fresh host artifacts were still building.
+
+The first fresh-bundle browser run passed 31 desktop cases and all ten phone
+cases. The two new desktop cases stopped before their causal assertions:
+the maximize fixture checked its separate maximize payload under the layout
+key, and the default seeded workflow had no auto-start destination.
+The corrected maximize case passed with B visible, its exact tail acknowledged,
+A's cursor unchanged and maximize retained (`r24-owning-summary.log`).
+The skip case now uses an isolated Source/Verify workflow; its Preview URL must
+name that workflow explicitly. Only the affected cases are rerun; these split
+receipts must not be described as one fresh 33-case green run.
+
+#### R24 final runtime and delivery checkpoint
+
+The isolated-workflow Preview was corrected to select its actual workflow.
+The final skip-prompt case passed (`r24-skip-summary.log`, one worker, no retries):
+real stepper options submitted `skip_step_prompt: true`, the correlated response
+returned `none`, and the deferred requested conversation became visible and
+persisted its exact tail without reading the retained sibling. The maximized
+Go-boot case passed separately after its storage-fixture correction. No production
+code changed after the final unit/type/lint/build checks; only these fixtures did.
+
+Inspected `boot-maximized-conversation.png`,
+`explicit-route-skip-prompt-workflow.png` and the current phone agentless capture.
+Maximize remains active, the requested stored conversation is visible, and phone
+has no horizontal overflow. Cursor/traffic proof comes from test assertions,
+not screenshot interpretation. Runtime evidence is 31 initial desktop passes
+plus the two corrected owning passes, and ten phone passes on the same final
+production bundle. This is not one fresh 33-case green desktop run.
+
+Replay after the cache-safe snapshot setup:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run components/task/dockview-session- \
+  lib/ws/handlers/task-primary- src/task-detail-route-explicit-selection.test.tsx \
+  hooks/domains/kanban/use-workflow-step-move-focus.test.tsx
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts -- \
+  --grep 'inactive maximized conversation|skip-prompt-workflow' --workers=1 --retries=0
+cd "$VERIFY/apps/backend"
+go test -trimpath -p 2 -race -timeout 120s ./internal/task/service \
+  ./internal/task/handlers -run WorkflowFocus -count=1
+```
+
+Fresh R24 backend/host/plugin artifacts and frontend were used. Retained logs
+and captures are under the existing cache snapshot. Broad suites, live NATS,
+historical-trigger attribution and isolated cursor-event delivery remain
+uncertified; seeded RUNNING rows do not establish live execution. Implementation
+checks are complete; independent review continues as R25 after normal commit/push.
+
+The first normal R24 commit attempt reported zero Go lint issues but exceeded
+the hook deadline; the other pre-commit checks passed. The sanitized runner
+did not inherit the verification shell's module/temp paths. Its default module
+cache resolved to the root drive. Outside the product checkout, Go defaults
+were set in `~/.config/go/env` to `GOMODCACHE=~/.cache/go-mod` and
+`GOTMPDIR=~/.cache/tmp` (both verified `/dev/sdd`), and the actual hook export
+cache was populated. The normal hook retains its original five-minute limit;
+no bypass, lint suppression or hook timeout increase is used.

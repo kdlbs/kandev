@@ -53,16 +53,32 @@ async function selectCommandTask(page: Page, query: string, conversation = false
   else await option.click();
 }
 
+async function createSkipRouteSeed(api: ApiClient, seed: SeedData): Promise<SeedData> {
+  const workflow = await api.createWorkflow(seed.workspaceId, `Skip route ${randomUUID()}`);
+  const source = await api.createWorkflowStep(workflow.id, "Source", 0, { is_start_step: true });
+  const destination = await api.createWorkflowStep(workflow.id, "Verify", 1);
+  await api.updateWorkflowStep(destination.id, {
+    prompt: "This entry prompt must be skipped",
+    events: { on_enter: [{ type: "auto_start_agent" }] },
+  });
+  return { ...seed, workflowId: workflow.id, startStepId: source.id };
+}
+
 export async function expectConversationRouteAfterRemoval(
   page: Page,
   actor: Page,
   api: ApiClient,
   seed: SeedData,
-  options: { hideTarget?: boolean; moveOutcome?: "failed" | "agentless" } = {},
+  options: { hideTarget?: boolean; moveOutcome?: "failed" | "agentless" | "skip" } = {},
 ) {
   await api.saveUserSettings({ enable_preview_on_click: true });
-  const { task, old, primary, other } = await seedRemovalChoiceTask(api, seed, options.hideTarget);
-  if (options.moveOutcome === "agentless") {
+  const fixtureSeed = options.moveOutcome === "skip" ? await createSkipRouteSeed(api, seed) : seed;
+  const { task, old, primary, other } = await seedRemovalChoiceTask(
+    api,
+    fixtureSeed,
+    options.hideTarget,
+  );
+  if (options.moveOutcome === "agentless" || options.moveOutcome === "skip") {
     for (const session of [primary, other])
       await api.seedTaskSession(task.task_id, {
         sessionId: session.session_id,
@@ -75,7 +91,9 @@ export async function expectConversationRouteAfterRemoval(
   const viewer = new SessionPage(page);
   await page.goto(`/t/${task.task_id}?sessionId=${old.session_id}`);
   await expect(viewer.activeChat()).toHaveAttribute("data-session-id", old.session_id);
-  await actor.goto(`/?taskId=${task.task_id}&sessionId=${old.session_id}`);
+  await actor.goto(
+    `/?workflowId=${fixtureSeed.workflowId}&taskId=${task.task_id}&sessionId=${old.session_id}`,
+  );
   const preview = actor.getByTestId("task-preview-panel");
   await expect(preview.locator('[data-testid="session-chat"]:visible')).toHaveAttribute(
     "data-session-id",
@@ -181,7 +199,12 @@ async function openPrimaryPreview(actor: Page, taskId: string, sessionId: string
 async function selectConversationAcrossMove(
   page: Page,
   api: ApiClient,
-  entry: { taskId: string; retainedId: string; query: string; outcome: "failed" | "agentless" },
+  entry: {
+    taskId: string;
+    retainedId: string;
+    query: string;
+    outcome: "failed" | "agentless" | "skip";
+  },
 ) {
   const gate = await holdTaskIdentityDispatch(page, entry.taskId);
   const releaseFailure = Promise.withResolvers<void>();
@@ -198,6 +221,10 @@ async function selectConversationAcrossMove(
         if (entry.outcome === "failed")
           await route.fulfill({ status: 500, json: { error: "Injected workflow failure" } });
         else {
+          if (entry.outcome === "skip")
+            expect(route.request().postDataJSON().entry_options).toEqual({
+              skip_step_prompt: true,
+            });
           const response = await route.fetch();
           expect(response.ok()).toBe(true);
           expect((await response.json()).workflow_focus_disposition).toBe("none");
@@ -219,7 +246,9 @@ async function selectConversationAcrossMove(
       (step) =>
         step.id !== stepId &&
         (entry.outcome === "failed" ||
-          !step.events?.on_enter?.some((action) => action.type === "auto_start_agent")),
+          (entry.outcome === "skip"
+            ? step.events?.on_enter?.some((action) => action.type === "auto_start_agent")
+            : !step.events?.on_enter?.some((action) => action.type === "auto_start_agent"))),
     );
     if (!destination) throw new Error("Missing workflow destination");
     if (phone) {
@@ -234,6 +263,10 @@ async function selectConversationAcrossMove(
       await page.getByTestId(`task-context-step-${destination.id}`).tap();
     } else {
       await page.getByTestId(`workflow-step-${destination.name}`).hover();
+      if (entry.outcome === "skip") {
+        await page.getByTestId("workflow-step-move-options-trigger").click();
+        await page.getByTestId("workflow-move-skip-step-prompt").check();
+      }
       await page.getByTestId("workflow-step-move-here").click();
     }
     await moveQueued.promise;

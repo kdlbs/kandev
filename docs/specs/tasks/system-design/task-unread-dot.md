@@ -249,14 +249,14 @@ selection/pin and workflow requests targeting it. Preserve independent intent,
 surviving pins/cursors and newer user/workflow selection. Owned empty slots can
 re-prove after changed primaries. Proof fills missing recipient identity/lifecycle.
 
-Validated explicit boot/SPA targets reopen across primary skew. Boot grants
-selection, not client-read ownership. Consume focus in the target's known
-environment. Moves defer admission; cancellation or correlated
-`workflow_focus_disposition: none` rechecks ownership/membership (`none`: admitted
-agentless, proven absent active source; omission unknown). Committed focus wins
-restore. Removal leases protect live/parked groups and restore focus; only changed
-primaries re-prove empty slots. Hide/group visibility gates passive restore,
-transcripts and dots.
+Valid boot/SPA routes reopen hidden/maximized targets. Boot grants selection,
+not client-read ownership. Consume focus in its environment. Moves defer
+admission; replay excludes observed removals. Correlated
+`workflow_focus_disposition: none` rechecks ownership/membership: admitted,
+no active source, no effective launch (including skip-only); omit if deferred
+launch may supply focus. Committed focus wins restore. Removal leases protect
+live/parked groups; changed primaries re-prove empty slots. Hide/group visibility
+gates passive restore, transcripts and dots.
 
 `invalidateTaskSessionMembership` fences pending/admitted/queued foreground and
 removal-dialog reads, not new reads/unrelated keys. Confirmed UUID deletion

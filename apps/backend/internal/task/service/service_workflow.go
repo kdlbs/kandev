@@ -886,7 +886,7 @@ func (s *Service) MoveTaskWithOptions(
 		FromStepID:               resultFromStepID,
 		Transitioned:             resultTransitioned,
 		WorkflowEntryIdentity:    workflowEntryIdentity,
-		WorkflowFocusDisposition: moveFocusDisposition(task, targetStep, noActiveSession, resultTransitioned),
+		WorkflowFocusDisposition: moveFocusDisposition(task, targetStep, entryOptions, noActiveSession, resultTransitioned),
 		MoveID:                   moveID,
 		EntryOptions:             entryOptions,
 	}
@@ -1716,11 +1716,16 @@ func (s *Service) resolvePrimaryOrActiveSession(ctx context.Context, taskID stri
 
 const workflowFocusDispositionNone = "none"
 
-func moveFocusDisposition(task *models.Task, step *wfmodels.WorkflowStep, noActiveSession, transitioned bool) string {
+func moveFocusDisposition(task *models.Task, step *wfmodels.WorkflowStep, entryOptions *workflowmove.EntryOptions, noActiveSession, transitioned bool) string {
 	if !transitioned || !noActiveSession || step == nil || !task.WIPAdmitted ||
 		task.QueuedForStepID != "" || task.WorkflowStepID != step.ID || task.WorkflowID != step.WorkflowID ||
-		step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
+		workflowmove.ShouldAutoStartAgent(step, entryOptions) {
 		return ""
+	}
+	if step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
+		if _, deferred := task.Metadata[models.MetaKeyDeferredLaunch]; deferred {
+			return ""
+		}
 	}
 	return workflowFocusDispositionNone
 }

@@ -238,10 +238,21 @@ test.describe("owned removal transcript visibility", () => {
     }
   });
 
+  test("opens an inactive maximized conversation through real Go boot", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await expectBootConversationRoute(testPage, apiClient, seedData, true);
+    await testPage.screenshot({ path: test.info().outputPath("boot-maximized-conversation.png") });
+  });
+
   for (const [mode, moveOutcome] of [
     ["hidden", undefined],
     ["failed-workflow", "failed"],
     ["agentless-workflow", "agentless"],
+    ["skip-prompt-workflow", "skip"],
   ] as const) {
     // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
     test(`opens an explicit conversation route across ${mode}`, async ({

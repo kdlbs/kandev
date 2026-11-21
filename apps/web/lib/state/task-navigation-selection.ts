@@ -3,6 +3,7 @@ import type { AppState } from "./store";
 import { isConfirmedSessionRemoved } from "./session-removal";
 import { getProvenRemovalPredecessor } from "./session-removal-handoff";
 import { requestTaskRouteFocus } from "./task-navigation-focus";
+import { observedRemovals } from "./session-removal-observations";
 
 export type TaskNavigationSelectionOwner = {
   navigationRevision: number;
@@ -55,6 +56,12 @@ function hasNewerRemoval(
       owner.removal.target !== state.tasks.activeSessionId)
   );
 }
+function isRequestedSessionUnavailable(store: StoreApi<AppState>, sessionId: string) {
+  return (
+    isConfirmedSessionRemoved(store.getState().taskSessions, sessionId) ||
+    observedRemovals(store)?.has(sessionId)
+  );
+}
 
 /** Valid explicit routes supersede entry-time ownership, never a later owner. */
 export function admitExplicitTaskNavigationSelection(
@@ -75,7 +82,7 @@ export function admitExplicitTaskNavigationSelection(
   const state = store.getState();
   if (
     !isTaskEntryCurrent(state, owner, taskId) ||
-    isConfirmedSessionRemoved(state.taskSessions, requestedSessionId)
+    isRequestedSessionUnavailable(store, requestedSessionId)
   )
     return;
   if (hasNewerRemoval(store, owner, taskId)) return;

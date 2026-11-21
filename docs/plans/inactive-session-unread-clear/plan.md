@@ -273,7 +273,7 @@ the same causal scenario after Task 01 proves a violation:
 Execute sequentially. No subagent authorization is implied.
 
 - [x] [Task 01: Establish the inactive-session failure boundary](task-01-establish-failure-boundary.md) (done: conformance, no violation reproduced).
-- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R23 corrections verified with 462 affected unit cases, 31 desktop cases, ten phone cases, scoped Go race and strict checks. Independent production review remains open; broad suites and live NATS remain uncertified).
+- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R24 targeted frontend/Go checks and runtime cases pass. Desktop receipts are split 31 initial plus two corrected owning cases; phone ten passed. Independent review continues; broad suites/live NATS remain uncertified).
 
 The prior [task unread dot package](../task-unread-dot/plan.md) is historical
 completed delivery. The [visible-visit divider package](../unread-divider-visible-session-clear/plan.md)
@@ -711,5 +711,10 @@ fix. It is separate from the five design-only rounds above.
   current-generation explicit-member proof, and forward a positively known,
   entry-correlated no-focus disposition. Task 02 records the wire scope and
   execution evidence. Independent review remains open; round 24 is next.
-- Completed rounds: 23. Consecutive clean: 0. Stop after three consecutive
+- Round 24: Sol child `061313ff-2a9f-47f8-b659-fbeba258e5c7` reviewed
+  `69ffdf9e4e`. Three P2s: maximized explicit activation, deferred replay after
+  observed deletion, and skip-only entries with no effective launch.
+  Parent reproduced each through hook, route/removal and HTTP/WS regressions.
+  Corrections and final verification are recorded in Task 02; round 25 is next.
+- Completed rounds: 24. Consecutive clean: 0. Stop after three consecutive
   clean rounds or 50 rounds. Earlier loops do not count.

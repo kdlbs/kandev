@@ -289,3 +289,52 @@ it.each([true, false])("admits validated Go boot data with explicit route=%s", a
   );
   expect(store.getState().tasks.pinnedSessionId).toBe(explicit ? TARGET : null);
 });
+
+it("does not replay a deferred route after its committed removal observation", async () => {
+  const data = identity(false);
+  const removed = {
+    ...data.allSessionsResponse.sessions[0],
+    id: OLD,
+    state: "FAILED",
+  } as TaskSession;
+  const { requested, retained } = await openRequestedRoute(data, removed, false);
+  applyEntryOwner("pending", true);
+  await act(async () => requested.resolve(data));
+  expect(store.getState().tasks.activeSessionId).toBe(retained);
+  const selections: Array<string | null> = [];
+  const stop = store.subscribe((state) => selections.push(state.tasks.activeSessionId));
+  const proof = Promise.withResolvers<TaskNavigationIdentity["allSessionsResponse"]>();
+  vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
+  await act(async () =>
+    registerTaskSessionHandlers(store)["session.removed"]!({
+      id: "remove-deferred-target",
+      type: "notification",
+      action: "session.removed",
+      payload: { task_id: TASK, session_id: TARGET },
+    }),
+  );
+  const intent = store.getState().workflowSessionFocus.intent!;
+  act(() => {
+    store.getState().bindWorkflowSessionFocus({
+      requestId: intent.requestId,
+      presentationToken: intent.presentationToken,
+      entryIdentity: "entry:no-recipient",
+    });
+    store.getState().reconcileWorkflowSessionFocus(TASK, {
+      metadata: data.task.metadata,
+      entryIdentity: "entry:no-recipient",
+      focusDisposition: "none",
+    });
+  });
+  expect(store.getState().tasks.activeSessionId).toBe(retained);
+  await act(async () =>
+    proof.resolve({
+      sessions: data.allSessionsResponse.sessions.filter((row) => row.id !== TARGET),
+      total: 1,
+    }),
+  );
+  await waitFor(() => expect(store.getState().taskSessions.items[TARGET]).toBeUndefined());
+  expect(store.getState().tasks.activeSessionId).toBe(retained);
+  expect(selections).not.toContain(TARGET);
+  stop();
+});
