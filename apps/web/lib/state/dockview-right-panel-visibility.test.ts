@@ -19,6 +19,7 @@ vi.mock("@/lib/local-storage", () => ({
   getEnvMaximizeState: vi.fn(() => null),
   setEnvMaximizeState: vi.fn(),
   removeEnvMaximizeState: vi.fn(),
+  getSessionStorage: vi.fn((_key: string, fallback: unknown) => fallback),
   getGlobalSidebarWidth: vi.fn(() => null),
   setGlobalSidebarWidth: vi.fn(),
   clearGlobalSidebarWidth: vi.fn(),

@@ -845,3 +845,28 @@ describe("generated right group policy controls", () => {
     },
   );
 });
+
+it.each(["session:a", "session:b", "plan"])(
+  "restores the live overlay selection %s into its original group",
+  async (selected) => {
+    const layout = horizontalLayout({ bottom: [TERMINAL] });
+    const center = layout.columns[0].groups[0];
+    center.panels = [
+      { id: "session:a", component: "chat", title: "A" },
+      { id: "session:b", component: "chat", title: "B" },
+      { id: "plan", component: "plan", title: "Plan" },
+    ];
+    center.activePanel = "session:a";
+    startIn("restore-selection", layout, layout);
+    const before = shape(api);
+    useDockviewStore.getState().maximizeGroup(CENTER_GROUP);
+    await settle();
+    api.getPanel(selected)!.api.setActive();
+    useDockviewStore.getState().exitMaximizedLayout();
+    await settle();
+    expect(api.getPanel(selected)?.group.activePanel?.id).toBe(selected);
+    const restored = shape(api);
+    before.columns[0].groups[0].active = selected;
+    expect(restored).toEqual(before);
+  },
+);

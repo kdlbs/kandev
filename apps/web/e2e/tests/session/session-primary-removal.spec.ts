@@ -248,6 +248,16 @@ test.describe("owned removal transcript visibility", () => {
     await testPage.screenshot({ path: test.info().outputPath("boot-maximized-conversation.png") });
   });
 
+  test("opens a parked split conversation through real Go boot", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await expectBootConversationRoute(testPage, apiClient, seedData, "parked");
+    await testPage.screenshot({ path: test.info().outputPath("boot-parked-conversation.png") });
+  });
+
   for (const [mode, moveOutcome] of [
     ["hidden", undefined],
     ["failed-workflow", "failed"],

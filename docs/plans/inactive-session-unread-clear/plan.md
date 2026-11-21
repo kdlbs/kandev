@@ -273,7 +273,7 @@ the same causal scenario after Task 01 proves a violation:
 Execute sequentially. No subagent authorization is implied.
 
 - [x] [Task 01: Establish the inactive-session failure boundary](task-01-establish-failure-boundary.md) (done: conformance, no violation reproduced).
-- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R24 targeted frontend/Go checks and runtime cases pass. Desktop receipts are split 31 initial plus two corrected owning cases; phone ten passed. Independent review continues; broad suites/live NATS remain uncertified).
+- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R25 layout/hydration regressions, strict checks, final three desktop Go-boot cases and ten phone cases pass. Independent review continues; broad suites/live NATS remain uncertified).
 
 The prior [task unread dot package](../task-unread-dot/plan.md) is historical
 completed delivery. The [visible-visit divider package](../unread-divider-visible-session-clear/plan.md)
@@ -716,5 +716,10 @@ fix. It is separate from the five design-only rounds above.
   observed deletion, and skip-only entries with no effective launch.
   Parent reproduced each through hook, route/removal and HTTP/WS regressions.
   Corrections and final verification are recorded in Task 02; round 25 is next.
-- Completed rounds: 24. Consecutive clean: 0. Stop after three consecutive
+- Round 25: Sol child `971fd8fb-efa6-4d9a-8bfa-bfe6351742ac` reviewed
+  `9170e2b280`. Three P2s: explicit parked-group targets under maximize,
+  Restore losing the consumed selection, and generic hydration bypassing
+  observed-removal admission. Parent reproduced all three at real Go-boot,
+  Dockview and held React-commit boundaries. Results are in Task 02; R26 is next.
+- Completed rounds: 25. Consecutive clean: 0. Stop after three consecutive
   clean rounds or 50 rounds. Earlier loops do not count.

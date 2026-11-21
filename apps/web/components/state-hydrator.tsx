@@ -49,8 +49,10 @@ export function StateHydrator({
       const taskId = initialState.tasks?.activeTaskId;
       const preserveTaskSelection =
         !!taskSelectionAtRequestStart &&
-        !!taskId &&
-        getProvenRemovalPredecessor(store, taskId, store.getState().tasks.activeSessionId) !== null;
+        (!!requestedSessionId ||
+          (!!taskId &&
+            getProvenRemovalPredecessor(store, taskId, store.getState().tasks.activeSessionId) !==
+              null));
       store.getState().hydrate(initialState, {
         forceMergeSessionId: sessionId,
         taskSessionHydrationEpochsAtRequestStart,
@@ -67,6 +69,7 @@ export function StateHydrator({
     taskSessionHydrationEpochsAtRequestStart,
     turnWindowObservationsAtRequestStart,
     taskSelectionAtRequestStart,
+    requestedSessionId,
     admitRouteSelection,
   ]);
 

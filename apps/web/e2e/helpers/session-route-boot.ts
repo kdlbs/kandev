@@ -4,13 +4,14 @@ import type { ApiClient } from "./api-client";
 import { SessionPage } from "../pages/session-page";
 import { observeReadTraffic, sessionReadState } from "./unread-divider";
 import { dwell } from "./causal-waits";
+import { waitForActiveTaskSession } from "./session-store";
 
 /** Real prepared sessions retain the same environment across a new Go-boot document. */
 export async function expectBootConversationRoute(
   page: Page,
   api: ApiClient,
   seed: SeedData,
-  maximized = false,
+  maximized: boolean | "parked" = false,
 ) {
   const task = await api.createTask(seed.workspaceId, "Boot explicit conversation", {
     prepare_session: true,
@@ -49,6 +50,17 @@ export async function expectBootConversationRoute(
   await page.goto(`/t/${task.id}?sessionId=${sourceId}`);
   await expect(viewer.activeChat()).toHaveAttribute("data-session-id", sourceId);
   if (maximized) {
+    if (maximized === "parked") {
+      await viewer.clickTab("Files");
+      await viewer
+        .sessionTabBySessionId(requested.session_id)
+        .dragTo(page.locator(".dv-default-tab:visible").filter({ hasText: /^Files$/ }));
+      await expect(
+        page.locator(
+          `[data-testid="session-chat"][data-session-id="${requested.session_id}"]:visible`,
+        ),
+      ).toBeVisible();
+    }
     await page
       .locator(".dv-tabs-and-actions-container")
       .filter({ has: viewer.sessionTabBySessionId(sourceId) })
@@ -92,7 +104,9 @@ export async function expectBootConversationRoute(
   const requestedBefore = (await sessionReadState(api, requested.session_id)).cursor;
   await page.goto(`/t/${task.id}`);
   await expect(viewer.activeChat()).toHaveAttribute("data-session-id", sourceId);
-  await expect(viewer.sessionTabBySessionId(requested.session_id)).toHaveCount(maximized ? 1 : 0);
+  await expect(viewer.sessionTabBySessionId(requested.session_id)).toHaveCount(
+    maximized === true ? 1 : 0,
+  );
   expect((await sessionReadState(api, requested.session_id)).cursor).toBe(requestedBefore);
   const sourceBefore = (await sessionReadState(api, sourceId)).cursor;
   await page.goto("/");
@@ -104,9 +118,12 @@ export async function expectBootConversationRoute(
   const origin = await page.evaluate(() => performance.timeOrigin);
   await page.goto(`/t/${task.id}?sessionId=${requested.session_id}`);
   expect(await page.evaluate(() => performance.timeOrigin)).not.toBe(origin);
-  await expect(viewer.activeChat()).toHaveAttribute("data-session-id", requested.session_id);
+  const requestedChat = page.locator(
+    `[data-testid="session-chat"][data-session-id="${requested.session_id}"]:visible`,
+  );
+  await expect(requestedChat).toBeVisible();
   await expect(
-    viewer.activeChat().getByText("Unread explicitly requested boot conversation", { exact: true }),
+    requestedChat.getByText("Unread explicitly requested boot conversation", { exact: true }),
   ).toBeVisible();
   await expect
     .poll(async () => (await sessionReadState(api, requested.session_id)).cursor)
@@ -117,11 +134,33 @@ export async function expectBootConversationRoute(
     "negative-assertion",
     "Boot explicit focus must not read the restored sibling",
   );
-  expect((await sessionReadState(api, sourceId)).cursor).toBe(sourceBefore);
-  expect(traffic.markReads.filter((row) => row.sessionId === sourceId)).toEqual([]);
-  if (maximized) {
+  if (maximized === true) {
     await page.getByTestId("dockview-maximize-btn").first().hover();
     await expect(page.getByRole("tooltip")).toHaveText("Restore");
+    await page.getByTestId("dockview-maximize-btn").first().click();
+    await expect(requestedChat).toBeVisible();
+    await dwell(page, 500, "negative-assertion", "Restore must not read the saved sibling");
   }
+  if (maximized === "parked") {
+    await expect
+      .poll(() =>
+        page.evaluate(
+          ({ a, b }) => {
+            const api = (
+              window as Window & { __dockviewApi__?: import("dockview-react").DockviewApi }
+            ).__dockviewApi__;
+            const left = api?.getPanel(`session:${a}`);
+            const right = api?.getPanel(`session:${b}`);
+            return !!left && !!right && left.group.id !== right.group.id;
+          },
+          { a: sourceId, b: requested.session_id },
+        ),
+      )
+      .toBe(true);
+  } else {
+    expect((await sessionReadState(api, sourceId)).cursor).toBe(sourceBefore);
+    expect(traffic.markReads.filter((row) => row.sessionId === sourceId)).toEqual([]);
+  }
+  await waitForActiveTaskSession(page, task.id, requested.session_id);
   return { requestedId: requested.session_id, requestedTail: requestedTail.messageId };
 }

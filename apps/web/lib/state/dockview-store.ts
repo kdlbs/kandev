@@ -1620,6 +1620,24 @@ function reconcileMaximizeSessionList(
   });
 }
 
+/** Layout-only restoration retains each still-live group's chosen panel. */
+function withLiveGroupSelection(layout: LayoutState, api: DockviewApi): LayoutState {
+  return {
+    ...layout,
+    columns: layout.columns.map((column) => ({
+      ...column,
+      groups: column.groups.map((group) => {
+        const selected = group.id
+          ? api.groups.find((live) => live.id === group.id)?.activePanel?.id
+          : undefined;
+        return selected && group.panels.some((panel) => panel.id === selected)
+          ? { ...group, activePanel: selected }
+          : group;
+      }),
+    })),
+  };
+}
+
 /**
  * Build the maximize actions. `maximizeGroup` collapses the layout to the
  * sidebar plus the requested group, persisting the pre-maximize layout (and
@@ -1686,13 +1704,14 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       const { api, preMaximizeLayout: savedLayout, currentLayoutEnvId } = get();
       if (!api || !savedLayout) return;
       const hidden = getLayoutHiddenSessions(api, currentLayoutEnvId);
-      const preMaximizeLayout = hidden.size
+      const visibleLayout = hidden.size
         ? filterPreMaximizeLayout(
             savedLayout,
             null,
             [...collectSessionIdsFromLayout(savedLayout)].filter((id) => !hidden.has(id)),
           )
         : savedLayout;
+      const preMaximizeLayout = withLiveGroupSelection(visibleLayout, api);
       preserveChatScrollDuringLayout();
       const measured = measureDockviewContainer(api);
       const safeWidth = measured.width;

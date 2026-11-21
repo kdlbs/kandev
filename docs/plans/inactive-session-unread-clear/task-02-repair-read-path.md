@@ -3526,3 +3526,81 @@ were set in `~/.config/go/env` to `GOMODCACHE=~/.cache/go-mod` and
 `GOTMPDIR=~/.cache/tmp` (both verified `/dev/sdd`), and the actual hook export
 cache was populated. The normal hook retains its original five-minute limit;
 no bypass, lint suppression or hook timeout increase is used.
+
+### Production-fix review round 25 remediation
+
+Sol child `971fd8fb-efa6-4d9a-8bfa-bfe6351742ac` reviewed `9170e2b280`.
+Three P2 source schedules: explicit parked-group targets under maximize,
+Restore losing a consumed explicit selection, and generic hydration overriding
+an observed-removal admission veto. Parent reproduced these at real layout,
+Go-boot and held React-commit boundaries; cursor/predicate/promotion remain unchanged.
+
+#### R25 boundary evidence
+
+- `r25-red-summary.log`: real Go-boot cases fail with B absent when parked,
+  and B disappearing after Restore in the same-group case. These reached the
+  intended behavioral assertions, unlike the earlier R24 fixture setup failures.
+- `r25-red-units.log`: real Dockview Restore returns A instead of B or Plan;
+  a registered removal delivered after shell construction but before React commit
+  lets generic hydration select B over pinned A. The valid explicit-link control
+  passes. Suspense gates React commit, not a falsely delayed HTTP admission.
+- Missing owned parked targets now restore their saved layout and activate in
+  their own group. Exit carries each live group's still-present selection into
+  the saved geometry; no route token is retained for later replay.
+- Explicit admission is the selection writer; generic hydration preserves its
+  decision while hydrating other data. Passive shell sync also rejects observed
+  deleted route IDs. Final pinned/unpinned controls retain A and its pin (or
+  absence of a pin), still hydrate membership, and never publish B before proof.
+- A broad adjacent layout/hydration run passed 712 cases but exposed one incomplete
+  local-storage fake. Adding its real fallback capability fixed that boundary.
+  The affected final-scope run passed 21 files / 380 cases. Later membership-guard
+  refactoring and expanded pin controls passed 28 boundary cases; the final
+  route-file-only alias cleanup passed all 19 cases. These are distinct receipts,
+  not a single fresh combined suite.
+- Strict changed-web lint, final production typecheck/build, docs catalog and
+  full spec lint pass. No Go code changed; the retained fresh R24 backend/host
+  artifacts are used with the rebuilt R25 frontend.
+
+The fresh-bundle owning Go-boot run passed three cases (hidden/passive/Plan,
+live-maximized Restore, and parked split); the complete owning phone file passed
+ten. A final test-only assertion now also checks AppState's selected conversation,
+not merely panel visibility, and the three owning desktop cases are replayed
+after that assertion. Runtime logs/captures are retained as `r25-*` under the
+existing cache snapshot. No broad-suite/live-NATS or historical-trigger claim.
+
+#### R25 final runtime and delivery checkpoint
+
+The final three-case Go-boot run passes after the AppState assertion
+(`r25-final-summary.log`, one worker, no retries). It covers hidden/task-only
+restore and later Plan, same-group explicit B surviving the real Restore action,
+and explicit parked B restoring into its independent split without a Restore
+click. Exact target tails, selected IDs and same-group sibling non-acknowledgement
+are asserted. A is legitimately visible after restoring both parked splits;
+that case does not claim A must stay unread while displayed.
+
+The owning phone file passes ten cases (`r25-phone-summary.log`) on the same
+final production bundle. The later desktop change added only an assertion.
+Inspected final parked, restored-B and phone explicit-route captures. Geometry
+and independent placement remain intact; phone has no horizontal overflow.
+The stored-cursor/traffic assertions, not screenshots, prove acknowledgement.
+
+Replay from the refreshed cache-safe snapshot:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run lib/state/dockview-env-switch.plugin-layout.test.ts \
+  lib/state/dockview-right-panel-visibility.test.ts components/task/dockview-session- \
+  src/task-detail-route-explicit-selection.test.tsx lib/state/hydration \
+  components/task/task-page-content components/task/task-page-session-ownership.test.tsx
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts -- \
+  --grep 'through real Go boot' --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+Use the R25 rebuilt frontend and retained fresh R24 Go/host/plugin artifacts.
+No Go source changed; no new Go suite or broad local audit was run. Internal
+design/results updated; no public API or terminology change. Historical incident,
+list-convergence, seeded-execution and broad-suite/live-NATS qualifications remain.
+Implementation checks are complete; independent production review continues R26.

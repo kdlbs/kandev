@@ -481,14 +481,29 @@ function reopenExplicitRouteTarget(
   return requested;
 }
 
-function activateLiveRouteTarget(
+function activateMaximizedRouteTarget(
   api: DockviewApi,
   store: StoreApi<AppState>,
   refs: AutoSessionTabRefs,
   taskId: string | null,
   sessionId: string,
 ) {
-  if (!hasTaskRouteFocus(store, taskId, sessionId) || !api.getPanel(`session:${sessionId}`)) return;
+  const member =
+    taskId &&
+    store
+      .getState()
+      .taskSessionsByTask.itemsByTaskId[taskId]?.some((session) => session.id === sessionId);
+  if (!member || !hasTaskRouteFocus(store, taskId, sessionId)) return;
+  if (!api.getPanel(`session:${sessionId}`)) {
+    const layout = useDockviewStore.getState();
+    const parked = layout.preMaximizeLayout?.columns.some((column) =>
+      column.groups.some((group) =>
+        group.panels.some((panel) => panel.id === `session:${sessionId}`),
+      ),
+    );
+    if (parked) layout.exitMaximizedLayout();
+    return;
+  }
   activateSessionPanel({
     api,
     effectiveSessionId: sessionId,
@@ -556,7 +571,7 @@ export function runAutoSessionTabEffect(
       refs.sessionTabCreatedRef.current,
     )
   ) {
-    activateLiveRouteTarget(api, appStore, refs, tid, effectiveSessionId);
+    activateMaximizedRouteTarget(api, appStore, refs, tid, effectiveSessionId);
     updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
     return;
   }

@@ -1,4 +1,5 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { Suspense } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
@@ -15,7 +16,11 @@ import { TaskDetailRoute } from "./task-detail-route";
 import { commitWorkflowRecipient, taskRouteSelectionState } from "./task-detail-route.test-helpers";
 import { buildTaskNavigationShellData } from "@/lib/ssr/session-page-state";
 
-const mocks = vi.hoisted(() => ({ load: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  load: vi.fn(),
+  shellGate: undefined as Promise<void> | undefined,
+  shellBuilt: vi.fn(),
+}));
 vi.mock("@/lib/state/task-navigation-reads", async (original) => ({
   ...(await original<typeof import("@/lib/state/task-navigation-reads")>()),
   readTaskNavigationIdentity: mocks.load,
@@ -39,9 +44,13 @@ vi.mock("@/app/tasks/[id]/kanban-task-shell", async () => {
   // The hoisted shell mock must load its real consumer after dependency mocks register.
   const { TaskPageContent } = await import("@/components/task/task-page-content");
   return {
-    KanbanTaskShell: (props: { task: Task; taskId: string; sessionId: string | null }) => (
-      <TaskPageContent {...props} />
-    ),
+    KanbanTaskShell: (props: { task: Task; taskId: string; sessionId: string | null }) => {
+      if (props.sessionId === TARGET && mocks.shellGate) {
+        mocks.shellBuilt();
+        throw mocks.shellGate;
+      }
+      return <TaskPageContent {...props} />;
+    },
   };
 });
 vi.mock("@/components/task/task-page-inner", () => ({ TaskPageInner: () => null }));
@@ -51,6 +60,8 @@ const OLD = "removed";
 const TARGET = "requested";
 const SURVIVOR = "survivor";
 const TIME = "2026-11-20T12:00:00Z";
+const NOTIFICATION_TYPE = "notification";
+const REMOVED_ACTION = "session.removed";
 function identity(empty: boolean): TaskNavigationIdentity {
   return {
     task: {
@@ -99,6 +110,7 @@ function CaptureStore() {
 }
 afterEach(() => {
   cleanup();
+  mocks.shellGate = undefined;
   vi.resetAllMocks();
 });
 
@@ -130,10 +142,10 @@ async function openRequestedRoute(
   );
   await waitFor(() => expect(mocks.load).toHaveBeenCalled());
   await act(async () => {
-    registerTaskSessionHandlers(store)["session.removed"]!({
+    registerTaskSessionHandlers(store)[REMOVED_ACTION]!({
       id: "remove-before-explicit-route",
-      type: "notification",
-      action: "session.removed",
+      type: NOTIFICATION_TYPE,
+      action: REMOVED_ACTION,
       payload: { task_id: TASK, session_id: OLD },
     });
   });
@@ -222,10 +234,10 @@ it.each([
         total: 2,
       });
       await act(async () =>
-        registerTaskSessionHandlers(store)["session.removed"]!({
+        registerTaskSessionHandlers(store)[REMOVED_ACTION]!({
           id: "remove-after-explicit-entry",
-          type: "notification",
-          action: "session.removed",
+          type: NOTIFICATION_TYPE,
+          action: REMOVED_ACTION,
           payload: { task_id: TASK, session_id: SURVIVOR },
         }),
       );
@@ -306,10 +318,10 @@ it("does not replay a deferred route after its committed removal observation", a
   const proof = Promise.withResolvers<TaskNavigationIdentity["allSessionsResponse"]>();
   vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
   await act(async () =>
-    registerTaskSessionHandlers(store)["session.removed"]!({
+    registerTaskSessionHandlers(store)[REMOVED_ACTION]!({
       id: "remove-deferred-target",
-      type: "notification",
-      action: "session.removed",
+      type: NOTIFICATION_TYPE,
+      action: REMOVED_ACTION,
       payload: { task_id: TASK, session_id: TARGET },
     }),
   );
@@ -336,5 +348,71 @@ it("does not replay a deferred route after its committed removal observation", a
   await waitFor(() => expect(store.getState().taskSessions.items[TARGET]).toBeUndefined());
   expect(store.getState().tasks.activeSessionId).toBe(retained);
   expect(selections).not.toContain(TARGET);
+  stop();
+});
+
+it.each([
+  [false, false],
+  [false, true],
+  [true, false],
+  [true, true],
+])("keeps an explicit shell commit behind removal=%s and pin=%s", async (removed, pinned) => {
+  const data = identity(false);
+  data.task.primary_session_id = sessionId(SURVIVOR);
+  const initial = taskRouteSelectionState(TASK, SURVIVOR, data.allSessionsResponse.sessions);
+  const originalPin = pinned ? SURVIVOR : null;
+  initial.tasks = { ...initial.tasks!, pinnedSessionId: originalPin };
+  const identityRead = Promise.withResolvers<TaskNavigationIdentity>();
+  const commit = Promise.withResolvers<void>();
+  const proof = Promise.withResolvers<TaskNavigationIdentity["allSessionsResponse"]>();
+  mocks.load.mockReturnValue(identityRead.promise);
+  mocks.shellGate = commit.promise;
+  vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
+  render(
+    <StateProvider initialState={initial}>
+      <ToastProvider>
+        <CaptureStore />
+        <Suspense fallback={null}>
+          <TaskDetailRoute taskId={TASK} sessionId={TARGET} />
+        </Suspense>
+      </ToastProvider>
+    </StateProvider>,
+  );
+  await waitFor(() => expect(mocks.load).toHaveBeenCalled());
+  await act(async () => identityRead.resolve(data));
+  await waitFor(() => expect(mocks.shellBuilt).toHaveBeenCalled());
+  const selections: Array<string | null> = [];
+  const stop = store.subscribe((state) => selections.push(state.tasks.activeSessionId));
+  if (removed)
+    await act(async () =>
+      registerTaskSessionHandlers(store)[REMOVED_ACTION]!({
+        id: "remove-before-shell-commit",
+        type: NOTIFICATION_TYPE,
+        action: REMOVED_ACTION,
+        payload: { task_id: TASK, session_id: TARGET },
+      }),
+    );
+  await act(async () => {
+    mocks.shellGate = undefined;
+    commit.resolve();
+  });
+  await waitFor(() =>
+    expect(store.getState().tasks.activeSessionId).toBe(removed ? SURVIVOR : TARGET),
+  );
+  expect(store.getState().tasks.pinnedSessionId).toBe(removed ? originalPin : TARGET);
+  expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK]).toBe(true);
+  expect(store.getState().taskSessions.items[TARGET]).toBeDefined();
+  if (removed) {
+    expect(selections).not.toContain(TARGET);
+    await act(async () =>
+      proof.resolve({
+        sessions: data.allSessionsResponse.sessions.filter((row) => row.id !== TARGET),
+        total: 1,
+      }),
+    );
+    await waitFor(() => expect(store.getState().taskSessions.items[TARGET]).toBeUndefined());
+    expect(store.getState().tasks.activeSessionId).toBe(SURVIVOR);
+    expect(store.getState().tasks.pinnedSessionId).toBe(originalPin);
+  }
   stop();
 });
