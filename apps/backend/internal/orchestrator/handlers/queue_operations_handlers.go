@@ -235,7 +235,7 @@ func (h *QueueHandlers) wsSetAutoMerge(ctx context.Context, msg *ws.Message) (*w
 	identity := messagequeue.QueueSessionIdentity{
 		TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
 	}
-	policy, err := controller.SetSessionAutoMerge(ctx, identity, *req.Enabled)
+	result, err := controller.SetSessionAutoMerge(ctx, identity, *req.Enabled)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrSessionIdentityMismatch) ||
 			errors.Is(err, messagequeue.ErrTaskInactive) {
@@ -252,9 +252,10 @@ func (h *QueueHandlers) wsSetAutoMerge(ctx context.Context, msg *ws.Message) (*w
 		fieldTaskID:             identity.TaskID,
 		fieldSessionID:          identity.SessionID,
 		fieldSessionIncarnation: identity.SessionIncarnationID,
-		fieldAutoMergeEnabled:   policy.Enabled,
-		"auto_merge_source":     policy.Source,
-		"auto_merge_revision":   policy.Revision,
+		fieldAutoMergeEnabled:   result.AutoMerge.Enabled,
+		"auto_merge_source":     result.AutoMerge.Source,
+		"auto_merge_revision":   result.AutoMerge.Revision,
+		"compacted_count":       result.CompactedCount,
 	})
 }
 

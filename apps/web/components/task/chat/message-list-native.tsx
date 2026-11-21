@@ -778,7 +778,7 @@ function TranscriptMessageItems({
   dividerBeforeItemKey,
 }: TranscriptMessageItemsProps) {
   const fallbackByItem = new Map<number, NonNullable<MessageListProps["turnChangeSummaries"]>>();
-  if (showTurnChangedFiles && sessionId) {
+  if (sessionId) {
     turnChangeSummaries.forEach((summary) => {
       if (!isTurnChangeCardVisible(summary)) return;
       if (
@@ -786,6 +786,7 @@ function TranscriptMessageItems({
           summary.final_assistant_message_id,
           items,
           messageHistoryHasMore,
+          showTurnChangedFiles,
         )
       )
         return;
@@ -839,7 +840,9 @@ export function shouldRenderTurnChangeFallback(
   finalAssistantMessageID: string | undefined,
   items: RenderItem[],
   messageHistoryHasMore: boolean,
+  showTurnChangedFiles = true,
 ): boolean {
+  if (!showTurnChangedFiles) return false;
   if (
     finalAssistantMessageID &&
     items.some((item) => item.type === "message" && item.message.id === finalAssistantMessageID)
@@ -848,6 +851,10 @@ export function shouldRenderTurnChangeFallback(
   // The anchor may be in an older message page. Wait until history is complete
   // before treating its absence as a genuinely reply-less terminal turn.
   return !messageHistoryHasMore;
+}
+
+export function shouldShowTurnChangedFiles(userSettingsLoaded: boolean, enabled: boolean): boolean {
+  return userSettingsLoaded && enabled;
 }
 
 export function turnChangeFallbackIndex(
@@ -975,7 +982,12 @@ export const NativeMessageList = memo(
     ref,
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
-    const showTurnChangedFiles = useAppStore((state) => state.userSettings.showTurnChangedFiles);
+    const showTurnChangedFiles = useAppStore((state) =>
+      shouldShowTurnChangedFiles(
+        state.userSettings.loaded,
+        state.userSettings.showTurnChangedFiles,
+      ),
+    );
     const turnChanges = useSessionTurnChanges(sessionId, { detailActive });
 
     const visibleItems = useMemo(

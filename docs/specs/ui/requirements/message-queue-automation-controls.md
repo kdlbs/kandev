@@ -10,9 +10,9 @@ owners:
 
 ## Overview
 
-The expanded queue panel must present queue progress and both session automation
-policies without spending a second row on one control. Auto-run retains its
-backend-owned behavior while Auto-merge gains a session-scoped control.
+The expanded queue panel presents queue progress and its two session automation
+policies in one responsive header. Auto-run retains backend-owned delivery
+behavior; Auto-merge controls adjacent folding and sorted agent-sender folding.
 
 This requirement supersedes `REQ-UI-MESSAGE-QUEUE-RUN-001` when activated. It
 preserves that requirement's queue execution behavior while replacing its
@@ -78,4 +78,5 @@ on desktop and mobile.
 
 - [Control Pending Message Auto-run](message-queue-run.md)
 - [Per-session Automatic Message Merge Overrides](message-queue-auto-merge-session-overrides.md)
+- [Message Queue Auto-sort-merge](message-queue-auto-sort-merge.md)
 - [Send Queued Messages Now](message-queue-send-now.md)
