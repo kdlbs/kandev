@@ -85,7 +85,7 @@ func clarificationBundleWhereClause(opts models.ListClarificationBundlesOptions)
 		conditions = append(conditions, "b.created_at >= ?")
 		args = append(args, *opts.CreatedSince)
 	}
-	if opts.CursorPendingID != "" {
+	if !opts.CursorCreatedAt.IsZero() {
 		conditions = append(conditions, "(b.created_at > ? OR (b.created_at = ? AND b.pending_id > ?))")
 		args = append(args, opts.CursorCreatedAt, opts.CursorCreatedAt, opts.CursorPendingID)
 	}

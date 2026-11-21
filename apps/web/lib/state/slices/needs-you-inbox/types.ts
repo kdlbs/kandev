@@ -1,4 +1,7 @@
-import type { ClarificationInboxBundle } from "@/lib/types/clarification-inbox";
+import type {
+  ClarificationInboxAsyncQuestion,
+  ClarificationInboxBundle,
+} from "@/lib/types/clarification-inbox";
 
 export type NeedsYouInboxReadStatus = "idle" | "loading" | "ready" | "error";
 
@@ -15,6 +18,7 @@ export type NeedsYouInboxBootSeed = {
 
 export type NeedsYouInboxWorkspaceState = {
   bundles: ClarificationInboxBundle[];
+  asyncQuestions: ClarificationInboxAsyncQuestion[];
   count: number;
   hiddenCount: number;
   nextSnoozeExpiry: string | null;
@@ -57,6 +61,7 @@ export type NeedsYouInboxSliceActions = {
     generation: number,
     page: {
       bundles: ClarificationInboxBundle[];
+      asyncQuestions: ClarificationInboxAsyncQuestion[];
       count: number;
       hiddenCount: number;
       nextSnoozeExpiry: string | null;

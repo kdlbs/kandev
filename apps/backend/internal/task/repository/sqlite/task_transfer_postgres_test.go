@@ -228,6 +228,76 @@ func TestPostgresTransferTaskConcurrentCapacityAndChangedKey(t *testing.T) {
 	}
 }
 
+func TestPostgresTransferTaskWaitsForAdmissionLock(t *testing.T) {
+	repo, tasks := seedPostgresConcurrentTransferTasks(t, 1)
+	ctx := context.Background()
+	repo.db.SetMaxOpenConns(3)
+	holder, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin admission lock holder: %v", err)
+	}
+	if _, err := holder.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, taskTransferAdmissionLockKey); err != nil {
+		_ = holder.Rollback()
+		t.Fatalf("hold transfer admission lock: %v", err)
+	}
+
+	command := models.TaskTransferCommand{
+		TaskID: tasks[0].ID, ExpectedSourceWorkspaceID: tasks[0].WorkspaceID,
+		ExpectedSourceWorkflowID: tasks[0].WorkflowID, ExpectedSourceStepID: tasks[0].WorkflowStepID,
+		ExpectedTaskUpdatedAt: tasks[0].UpdatedAt, DestinationWorkspaceID: "pg-race-destination",
+		DestinationWorkflowID: "pg-race-wf-destination", DestinationStepID: "pg-race-step-destination",
+		IdempotencyKey: "pg-admission-lock-key", PreservationPolicy: models.TaskTransferPreservationPolicyV1,
+		Actor:             models.TaskTransferActor{Kind: models.TaskTransferActorHuman, ID: "owner-1"},
+		AuthorizedOwnerID: "owner-1", OwnerPredicateSet: true,
+	}
+	transferDone := make(chan error, 1)
+	go func() {
+		_, transferErr := repo.TransferTask(ctx, command)
+		transferDone <- transferErr
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var waiters int
+		if err := repo.db.GetContext(ctx, &waiters, `
+			SELECT COUNT(*)
+			FROM pg_locks AS locks
+			JOIN pg_stat_activity AS activity ON activity.pid = locks.pid
+			WHERE locks.locktype = 'advisory' AND NOT locks.granted
+			  AND activity.query LIKE '%pg_advisory_xact_lock%'
+		`); err != nil {
+			_ = holder.Rollback()
+			t.Fatalf("inspect waiting transfer admission locks: %v", err)
+		}
+		if waiters > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = holder.Rollback()
+			t.Fatalf("TransferTask did not wait for the held admission lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := holder.Rollback(); err != nil {
+		t.Fatalf("release admission lock: %v", err)
+	}
+	select {
+	case transferErr := <-transferDone:
+		if transferErr != nil {
+			t.Fatalf("TransferTask after admission lock release: %v", transferErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("TransferTask did not finish after admission lock release")
+	}
+	current, err := repo.GetTask(ctx, tasks[0].ID)
+	if err != nil {
+		t.Fatalf("GetTask after admission lock release: %v", err)
+	}
+	if current.WorkspaceID != command.DestinationWorkspaceID {
+		t.Fatalf("workspace after admission lock release = %q, want %q", current.WorkspaceID, command.DestinationWorkspaceID)
+	}
+}
+
 func TestPostgresTransferTaskConflictsWhenDestinationLaneIsLocked(t *testing.T) {
 	repo, tasks := seedPostgresConcurrentTransferTasks(t, 1)
 	db := repo.db

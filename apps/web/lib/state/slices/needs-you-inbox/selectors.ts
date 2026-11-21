@@ -1,11 +1,16 @@
 import type { AppState } from "@/lib/state/store";
-import type { ClarificationInboxBundle } from "@/lib/types/clarification-inbox";
+import type {
+  ClarificationInboxAsyncQuestion,
+  ClarificationInboxBundle,
+} from "@/lib/types/clarification-inbox";
 import type { NeedsYouInboxWorkspaceState } from "./types";
 
 const EMPTY_BUNDLES: ClarificationInboxBundle[] = [];
+const EMPTY_ASYNC_QUESTIONS: ClarificationInboxAsyncQuestion[] = [];
 
 const EMPTY_WORKSPACE_STATE: NeedsYouInboxWorkspaceState = {
   bundles: EMPTY_BUNDLES,
+  asyncQuestions: EMPTY_ASYNC_QUESTIONS,
   count: 0,
   hiddenCount: 0,
   nextSnoozeExpiry: null,
@@ -31,6 +36,12 @@ export function selectNeedsYouInboxCount(state: AppState): number {
 
 export function selectNeedsYouInboxBundles(state: AppState): ClarificationInboxBundle[] {
   return selectActiveWorkspaceState(state).bundles;
+}
+
+export function selectNeedsYouInboxAsyncQuestions(
+  state: AppState,
+): ClarificationInboxAsyncQuestion[] {
+  return selectActiveWorkspaceState(state).asyncQuestions;
 }
 
 export function selectNeedsYouInboxStatus(state: AppState) {

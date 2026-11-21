@@ -39,3 +39,14 @@ func TestBuiltinDescriptorsOwnNamesDefaultsAndActions(t *testing.T) {
 	catalog[0].Tools[0].Actions[0] = "corrupt"
 	require.NotEqual(t, catalog[0].Tools, BuiltinPackageCatalog()[0].Tools)
 }
+
+func TestAsyncQuestionToolsBelongToCorePackage(t *testing.T) {
+	for _, name := range []string{
+		"list_question_answers_kandev",
+		"withdraw_question_kandev",
+		"forward_question_kandev",
+		"wait_for_question_answers_kandev",
+	} {
+		require.Equal(t, PackageCore, BuiltinToolPackage(name), name)
+	}
+}

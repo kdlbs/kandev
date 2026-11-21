@@ -19,6 +19,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 		wantSurface        mcpprofile.Surface
 		wantUserQuestion   bool
 		wantParentQuestion bool
+		wantAsyncQuestions bool
 		wantTaskTitle      bool
 	}{
 		{
@@ -27,6 +28,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			session:            &models.TaskSession{ID: "session", TaskID: "task"},
 			wantSurface:        mcpprofile.SurfaceKanbanTask,
 			wantUserQuestion:   true,
+			wantAsyncQuestions: true,
 			wantParentQuestion: false,
 		},
 		{
@@ -35,6 +37,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			session:            &models.TaskSession{ID: "session", TaskID: "task", IsPassthrough: true},
 			wantSurface:        mcpprofile.SurfaceKanbanTask,
 			wantUserQuestion:   false,
+			wantAsyncQuestions: false,
 			wantParentQuestion: false,
 		},
 		{
@@ -43,6 +46,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			session:            &models.TaskSession{ID: "session", TaskID: "task"},
 			wantSurface:        mcpprofile.SurfaceKanbanTask,
 			wantUserQuestion:   false,
+			wantAsyncQuestions: true,
 			wantParentQuestion: false,
 		},
 		{
@@ -52,6 +56,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			wantSurface:        mcpprofile.SurfaceKanbanTask,
 			wantUserQuestion:   false,
 			wantParentQuestion: true,
+			wantAsyncQuestions: true,
 		},
 		{
 			name:               "autopilot passthrough child",
@@ -60,6 +65,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			wantSurface:        mcpprofile.SurfaceKanbanTask,
 			wantUserQuestion:   false,
 			wantParentQuestion: false,
+			wantAsyncQuestions: false,
 		},
 		{
 			name:               "office task",
@@ -67,6 +73,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			session:            &models.TaskSession{ID: "session", TaskID: "task"},
 			wantSurface:        mcpprofile.SurfaceOfficeTask,
 			wantUserQuestion:   true,
+			wantAsyncQuestions: false,
 			wantParentQuestion: false,
 		},
 		{
@@ -75,6 +82,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			session:            &models.TaskSession{ID: "session", TaskID: "task"},
 			wantSurface:        mcpprofile.SurfaceAutomation,
 			wantUserQuestion:   false,
+			wantAsyncQuestions: false,
 			wantParentQuestion: false,
 		},
 		{
@@ -83,6 +91,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			session:            &models.TaskSession{ID: "session", TaskID: "task", Metadata: map[string]interface{}{"config_mode": true}},
 			wantSurface:        mcpprofile.SurfaceConfiguration,
 			wantUserQuestion:   true,
+			wantAsyncQuestions: false,
 			wantParentQuestion: false,
 		},
 		{
@@ -92,6 +101,7 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			allowTitle:         true,
 			wantSurface:        mcpprofile.SurfaceKanbanTask,
 			wantUserQuestion:   true,
+			wantAsyncQuestions: true,
 			wantParentQuestion: false,
 			wantTaskTitle:      true,
 		},
@@ -109,9 +119,23 @@ func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *tes
 			require.Equal(t, tt.wantSurface, profile.Surface)
 			require.Equal(t, tt.wantUserQuestion, profile.HasCapability(mcpprofile.CapabilityUserQuestion))
 			require.Equal(t, tt.wantParentQuestion, profile.HasCapability(mcpprofile.CapabilityParentQuestion))
+			require.Equal(t, tt.wantAsyncQuestions, profile.HasCapability(mcpprofile.CapabilityAsyncQuestions))
 			require.Equal(t, tt.wantTaskTitle, profile.HasCapability(mcpprofile.CapabilityTaskTitle))
 		})
 	}
+}
+
+func TestResolveTaskSessionMCPProfile_QuickChatDoesNotSupportAsyncQuestions(t *testing.T) {
+	repo := newMockRepository()
+	repo.tasks["chat"] = &models.Task{ID: "chat", IsEphemeral: true}
+	session := &models.TaskSession{ID: "session", TaskID: "chat"}
+	repo.sessions[session.ID] = session
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	profile, err := exec.resolveTaskSessionMCPProfile(context.Background(), "chat", session, false)
+	require.NoError(t, err)
+	require.Equal(t, mcpprofile.SurfaceKanbanTask, profile.Surface)
+	require.False(t, profile.HasCapability(mcpprofile.CapabilityAsyncQuestions))
 }
 
 func TestResolveTaskSessionMCPProfile_CanvasCapabilityFollowsFeatureAndSurface(t *testing.T) {

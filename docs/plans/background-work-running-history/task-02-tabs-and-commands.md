@@ -209,5 +209,3 @@ Browser checks:
   unverified empty list is never presented as history.
 - Added capability-gated Stop and Interrupt controls to the phone detail and
   row-specific accessible names for every Open action.
-
-

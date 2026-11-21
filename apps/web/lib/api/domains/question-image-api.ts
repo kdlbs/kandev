@@ -5,8 +5,9 @@ export async function fetchQuestionImage(
   questionId: string,
   imageId: string,
   signal: AbortSignal,
+  apiPath = "clarification",
 ): Promise<Blob> {
-  const path = `/api/v1/clarification/${encodeURIComponent(pendingId)}/images/${encodeURIComponent(imageId)}?question_id=${encodeURIComponent(questionId)}`;
+  const path = `/api/v1/${apiPath}/${encodeURIComponent(pendingId)}/images/${encodeURIComponent(imageId)}?question_id=${encodeURIComponent(questionId)}`;
   const blob = await fetchBlob(path, { cache: "no-store", init: { signal, redirect: "error" } });
   if (blob.size > 10 * 1024 * 1024 || !["image/png", "image/jpeg"].includes(blob.type)) {
     // i18n-exempt: private error code; components render translated copy.

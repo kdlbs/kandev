@@ -17,6 +17,9 @@ func (s *Service) sessionHasPendingClarification(ctx context.Context, sessionID 
 	if sessionID == "" {
 		return false
 	}
+	if s.asyncQuestionGate != nil && s.asyncQuestionGate.HasParkedWait(ctx, sessionID) {
+		return true
+	}
 	msgs, err := s.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to check pending clarifications; blocking turn-complete transition",
@@ -35,6 +38,9 @@ func (s *Service) sessionHasPendingClarification(ctx context.Context, sessionID 
 func (s *Service) sessionHasLiveClarification(ctx context.Context, sessionID string) bool {
 	if sessionID == "" {
 		return false
+	}
+	if s.asyncQuestionGate != nil && s.asyncQuestionGate.HasParkedWait(ctx, sessionID) {
+		return true
 	}
 	msgs, err := s.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
 	if err != nil {

@@ -115,9 +115,11 @@ function useNeedsYouInboxWsRefresh(
     };
     const offPending = client.on("session.pending_action_changed", bump);
     const offStateChanged = client.on("session.state_changed", bump);
+    const offQuestionChanged = client.on("task.question.changed", bump);
     return () => {
       offPending();
       offStateChanged();
+      offQuestionChanged();
     };
   }, [enabled, scope.connectionStatus, workspaceId, refresh, storeApi]);
 
@@ -196,6 +198,7 @@ export function useNeedsYouInboxController() {
         if (signal.aborted || coordinatorRef.current !== coordinator) return;
         setNeedsYouInboxPage(workspaceId, generation, {
           bundles: page.bundles,
+          asyncQuestions: page.async_questions ?? [],
           count: page.count,
           hiddenCount: page.hidden_count,
           nextSnoozeExpiry: page.next_snooze_expiry,

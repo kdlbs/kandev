@@ -113,6 +113,10 @@ func (r *Repository) TransferTask(
 		return nil, errors.Join(err, r.RecordTaskTransferAttempt(ctx, command, taskTransferResultFailed))
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskTransferAdmission(ctx, tx); err != nil {
+		_ = tx.Rollback()
+		return r.handleTaskTransferApplyError(ctx, command, requestDigest, err)
+	}
 	if err := r.lockTaskTransferWorkspaces(ctx, tx, command); err != nil {
 		_ = tx.Rollback()
 		return r.handleTaskTransferApplyError(ctx, command, requestDigest, err)

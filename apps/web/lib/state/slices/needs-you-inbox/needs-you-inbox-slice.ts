@@ -17,6 +17,7 @@ export const defaultNeedsYouInboxState: NeedsYouInboxSliceState = {
 
 const emptyWorkspaceState = (): NeedsYouInboxWorkspaceState => ({
   bundles: [],
+  asyncQuestions: [],
   count: 0,
   hiddenCount: 0,
   nextSnoozeExpiry: null,
@@ -59,6 +60,7 @@ export const createNeedsYouInboxSlice = (set: ImmerSet): NeedsYouInboxSlice => (
       if (draft.needsYouInbox.generationByWorkspaceId[workspaceId] !== generation) return;
       draft.needsYouInbox.byWorkspaceId[workspaceId] = {
         bundles: page.bundles,
+        asyncQuestions: page.asyncQuestions,
         count: page.count,
         hiddenCount: page.hiddenCount,
         nextSnoozeExpiry: page.nextSnoozeExpiry,
@@ -90,6 +92,7 @@ export const createNeedsYouInboxSlice = (set: ImmerSet): NeedsYouInboxSlice => (
       if (draft.needsYouInbox.byWorkspaceId[workspaceId]) return;
       draft.needsYouInbox.byWorkspaceId[workspaceId] = {
         bundles: [],
+        asyncQuestions: [],
         count: seed.count,
         hiddenCount: 0,
         nextSnoozeExpiry: seed.nextSnoozeExpiry,

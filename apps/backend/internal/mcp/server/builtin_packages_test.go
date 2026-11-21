@@ -41,6 +41,22 @@ func TestBuiltinCoreDoesNotExposeOptionalTools(t *testing.T) {
 	require.NotContains(t, names, "show_walkthrough_kandev")
 }
 
+func TestBuiltinCorePublishesAsyncQuestionTools(t *testing.T) {
+	profile := packageTestProfile(mcpprofile.PackageCore)
+	profile.Capabilities = append(profile.Capabilities, mcpprofile.CapabilityAsyncQuestions)
+	server := NewWithProfile(&testBackend{}, "session", "task", 10005, newTestLogger(t), "", false, profile)
+	t.Cleanup(func() { require.NoError(t, server.Close(context.Background())) })
+
+	for _, name := range []string{
+		"list_question_answers_kandev",
+		"withdraw_question_kandev",
+		"forward_question_kandev",
+		"wait_for_question_answers_kandev",
+	} {
+		require.Contains(t, getRegisteredToolNames(server), name)
+	}
+}
+
 func builtinPackageRequest(t *testing.T, router *gin.Engine, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	initRequest := httptest.NewRequest("POST", path, strings.NewReader(`{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"package-test","version":"1"}}}`))

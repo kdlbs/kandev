@@ -33,10 +33,15 @@ question wait timed out or disconnected.
 ## What
 
 - The first-turn Kandev MCP overview for a normal task identifies
-  `ask_user_question_kandev` as a hard user-input barrier.
-- After calling `ask_user_question_kandev`, the agent does not call another tool,
-  continue working, or produce a final response until the tool returns the
-  user's answers.
+  `ask_user_question_kandev` as a hard user-input barrier when `async` is omitted
+  or `false`.
+- After a blocking `ask_user_question_kandev` call, the agent does not call
+  another tool, continue working, or produce a final response until the tool
+  returns the user's answers.
+- With `async: true`, the call instead returns a durable `question_id`
+  immediately. The agent may continue independent work and read the answer with
+  `list_question_answers_kandev`; the boundary in the previous bullet does not
+  apply. See [Async agent questions](async-agent-questions.md).
 - If the tool reports a validation error before it creates a question, the agent
   corrects the request and retries it.
 - If the accepted call returns without completed user answers or a structured

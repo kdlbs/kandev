@@ -907,6 +907,14 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 			WHERE m.type = 'clarification_request'
 			  AND COALESCE(%s, '') IN ('', 'pending')
 		),
+		pending_async_question_waits AS (
+			SELECT DISTINCT wait.session_id AS task_session_id, 'clarification' AS action
+			FROM task_async_question_waits wait
+			JOIN current_turn current
+			  ON current.task_session_id = wait.session_id
+			 AND current.turn_id = wait.turn_id
+			WHERE wait.status IN ('parked', 'release_requested')
+		),
 		latest_permissions AS (
 			SELECT m.task_session_id,
 			       COALESCE(%s, '') AS status,
@@ -923,6 +931,9 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 		)
 		SELECT task_session_id, action
 		FROM pending_clarifications
+		UNION ALL
+		SELECT task_session_id, action
+		FROM pending_async_question_waits
 		UNION ALL
 		SELECT task_session_id, 'permission' AS action
 		FROM latest_permissions

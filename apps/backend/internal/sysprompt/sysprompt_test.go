@@ -171,13 +171,71 @@ func TestFormatKandevContext_UserQuestionIsHardInputBarrier(t *testing.T) {
 	context := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{
 		IncludeUserQuestionTool:        true,
 		IncludeCoordinatorTaskControls: true,
+		AsyncQuestionsSupported:        true,
 	})
 
 	assert.Contains(t, context, "hard user-input barrier")
 	assert.Contains(t, context, "do no more work, make no tool calls, or send a final response until completed answers or structured rejection")
+	assert.Contains(t, context, "Set async=true when useful independent work remains")
+	assert.Contains(t, context, "list_question_answers_kandev")
 	assert.Contains(t, context, "On validation error before question creation, correct and retry")
-	assert.Contains(t, context, "If an accepted call returns incomplete")
+	assert.Contains(t, context, "If an accepted blocking call returns incomplete")
 	assert.Contains(t, context, "end the turn without inferring an answer or continuing work")
+}
+
+func TestKandevContextQuestionGuidanceIsBlockingOnlyWithoutAsyncCapability(t *testing.T) {
+	context := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{
+		IncludeUserQuestionTool: true,
+	})
+	assert.Contains(t, context, "hard user-input barrier")
+	assert.NotContains(t, context, "async=true")
+	assert.NotContains(t, context, "list_question_answers_kandev")
+	assert.NotContains(t, context, "wait_for_question_answers_kandev")
+	assert.NotContains(t, context, "withdraw_question_kandev")
+}
+
+func TestAsyncQuestionGuidanceByCapability(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		options KandevContextOptions
+		want    bool
+	}{
+		{name: "operator capable", options: KandevContextOptions{IncludeUserQuestionTool: true, AsyncQuestionsSupported: true}, want: true},
+		{name: "parent capable", options: KandevContextOptions{Autopilot: true, IncludeParentQuestionTool: true, AsyncQuestionsSupported: true}, want: true},
+		{name: "office", options: KandevContextOptions{AsyncQuestionsSupported: false}},
+		{name: "configuration", options: KandevContextOptions{IncludeUserQuestionTool: true}},
+		{name: "quick chat", options: KandevContextOptions{IncludeUserQuestionTool: true}},
+		{name: "external", options: KandevContextOptions{}},
+		{name: "autopilot root", options: KandevContextOptions{Autopilot: true, AsyncQuestionsSupported: true}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			context := FormatKandevContextWithOptions("task", "session", test.options)
+			if test.want {
+				for _, expected := range []string{
+					"Set async=true when useful independent work remains",
+					"destructive, irreversible, or expensive to redo",
+					"do not build on work that depends on an open answer",
+					"at a checkpoint and before finishing",
+					"A checkpoint read and later notification may show the same answer",
+					"list_question_answers_kandev",
+					"wait_for_question_answers_kandev",
+					"withdraw_question_kandev",
+				} {
+					assert.Contains(t, context, expected)
+				}
+				assert.Equal(t, 1, strings.Count(context, "Choose blocking mode"), "async guidance should appear once")
+				return
+			}
+			for _, absent := range []string{
+				"async=true",
+				"list_question_answers_kandev",
+				"wait_for_question_answers_kandev",
+				"withdraw_question_kandev",
+			} {
+				assert.NotContains(t, context, absent)
+			}
+		})
+	}
 }
 
 func TestFormatKandevContext_ConciseQuestionContext(t *testing.T) {
