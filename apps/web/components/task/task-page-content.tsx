@@ -22,7 +22,7 @@ import {
   readTaskNavigationIdentity,
   useTaskNavigationReadState,
 } from "@/lib/state/task-navigation-reads";
-import { observedRemovals } from "@/lib/state/session-removal-observations";
+import { isRequestedSessionUnavailable } from "@/lib/state/task-navigation-selection";
 import { useWorkflowStepsById } from "@/hooks/domains/kanban/use-workflow-steps-by-id";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useFeature } from "@/hooks/domains/features/use-feature";
@@ -437,7 +437,7 @@ function useTaskPageData(
 
   useEffect(() => {
     const routeTaskId = initialTask?.id ?? fallbackTaskId;
-    if (initialSessionId && observedRemovals(store)?.has(initialSessionId)) return;
+    if (initialSessionId && isRequestedSessionUnavailable(store, initialSessionId)) return;
     if (routeTaskId && hasOwnedTaskPageSelection(store, routeTaskId)) {
       previousRouteTaskId.current = routeTaskId;
       return;

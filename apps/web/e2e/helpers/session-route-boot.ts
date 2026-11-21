@@ -6,12 +6,32 @@ import { observeReadTraffic, sessionReadState } from "./unread-divider";
 import { dwell } from "./causal-waits";
 import { waitForActiveTaskSession } from "./session-store";
 
+async function splitBootColumn(page: Page, viewer: SessionPage, sourceId: string) {
+  const bounds = await viewer.activeChat().boundingBox();
+  if (!bounds) throw new Error("Source chat is not visible before splitting");
+  await page
+    .locator(".dv-default-tab:visible")
+    .filter({ hasText: /^Files$/ })
+    .dragTo(viewer.activeChat(), { targetPosition: { x: bounds.width / 2, y: bounds.height - 5 } });
+  await expect
+    .poll(() =>
+      page.evaluate((id) => {
+        const api = (window as Window & { __dockviewApi__?: import("dockview-react").DockviewApi })
+          .__dockviewApi__;
+        const chat = api?.getPanel(`session:${id}`)?.group.element.getBoundingClientRect();
+        const files = api?.getPanel("files")?.group.element.getBoundingClientRect();
+        return !!chat && !!files && Math.abs(chat.x - files.x) < 2 && files.y > chat.y;
+      }, sourceId),
+    )
+    .toBe(true);
+}
+
 /** Real prepared sessions retain the same environment across a new Go-boot document. */
 export async function expectBootConversationRoute(
   page: Page,
   api: ApiClient,
   seed: SeedData,
-  maximized: boolean | "parked" = false,
+  maximized: boolean | "parked" | "hidden" | "tree" = false,
 ) {
   const task = await api.createTask(seed.workspaceId, "Boot explicit conversation", {
     prepare_session: true,
@@ -49,7 +69,12 @@ export async function expectBootConversationRoute(
   const viewer = new SessionPage(page);
   await page.goto(`/t/${task.id}?sessionId=${sourceId}`);
   await expect(viewer.activeChat()).toHaveAttribute("data-session-id", sourceId);
+  if (maximized === "hidden") {
+    await viewer.sessionTabCloseButton(requested.session_id).click();
+    await expect(viewer.sessionTabBySessionId(requested.session_id)).toHaveCount(0);
+  }
   if (maximized) {
+    if (maximized === "tree") await splitBootColumn(page, viewer, sourceId);
     if (maximized === "parked") {
       await viewer.clickTab("Files");
       await viewer
@@ -82,7 +107,7 @@ export async function expectBootConversationRoute(
             !!raw &&
             raw.includes(`"activeView":"session:${active}"`) &&
             (maximized
-              ? raw.includes(`"session:${hidden}"`) &&
+              ? (maximized === "hidden" || raw.includes(`"session:${hidden}"`)) &&
                 !!savedMax?.includes('"maximizedDockviewJson"')
               : !raw.includes(`"session:${hidden}"`))
           );
@@ -105,7 +130,7 @@ export async function expectBootConversationRoute(
   await page.goto(`/t/${task.id}`);
   await expect(viewer.activeChat()).toHaveAttribute("data-session-id", sourceId);
   await expect(viewer.sessionTabBySessionId(requested.session_id)).toHaveCount(
-    maximized === true ? 1 : 0,
+    maximized === true || maximized === "tree" ? 1 : 0,
   );
   expect((await sessionReadState(api, requested.session_id)).cursor).toBe(requestedBefore);
   const sourceBefore = (await sessionReadState(api, sourceId)).cursor;
@@ -134,7 +159,7 @@ export async function expectBootConversationRoute(
     "negative-assertion",
     "Boot explicit focus must not read the restored sibling",
   );
-  if (maximized === true) {
+  if (maximized === true || maximized === "tree") {
     await page.getByTestId("dockview-maximize-btn").first().hover();
     await expect(page.getByRole("tooltip")).toHaveText("Restore");
     await page.getByTestId("dockview-maximize-btn").first().click();

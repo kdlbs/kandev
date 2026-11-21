@@ -273,7 +273,7 @@ the same causal scenario after Task 01 proves a violation:
 Execute sequentially. No subagent authorization is implied.
 
 - [x] [Task 01: Establish the inactive-session failure boundary](task-01-establish-failure-boundary.md) (done: conformance, no violation reproduced).
-- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R25 layout/hydration regressions, strict checks, final three desktop Go-boot cases and ten phone cases pass. Independent review continues; broad suites/live NATS remain uncertified).
+- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R26 corrections, 469 targeted tests, five desktop Go-boot and ten phone cases, strict checks/typecheck/build. Independent review continues; no broad-suite/live-NATS certificate).
 
 The prior [task unread dot package](../task-unread-dot/plan.md) is historical
 completed delivery. The [visible-visit divider package](../unread-divider-visible-session-clear/plan.md)
@@ -723,3 +723,18 @@ fix. It is separate from the five design-only rounds above.
   Dockview and held React-commit boundaries. Results are in Task 02; R26 is next.
 - Completed rounds: 25. Consecutive clean: 0. Stop after three consecutive
   clean rounds or 50 rounds. Earlier loops do not count.
+
+### Production review R26
+
+Sol child `2b3d97d4-83fc-4d98-949b-6560ca8907f2` reviewed pushed
+`4da96e018e8fec2fdc8d10ab89f5883f1b10d016`: four P2s, not clean.
+The tree-backed Restore, hidden-before-maximize target, confirmed proof before
+shell commit, and phone retained-Plan cases have parent RED evidence and
+targeted corrections in Task 02. Completed production rounds 26; consecutive
+clean 0. Independent R27 starts only after verified commit/push.
+
+R26 final author evidence: 27 files / 469 focused tests; strict changed-file
+lint, typecheck, fresh frontend and docs pass. Five desktop Go-boot and ten
+phone cases pass on the final bundle, one worker/no retries. Tree/hidden
+captures and phone later-Plan preservation inspected. Task 02 has exact replay
+and retained logs; R27 is the next independent round.

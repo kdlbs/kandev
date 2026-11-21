@@ -258,6 +258,32 @@ test.describe("owned removal transcript visibility", () => {
     await testPage.screenshot({ path: test.info().outputPath("boot-parked-conversation.png") });
   });
 
+  test("opens a hidden never-snapshotted conversation through real Go boot", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const closeBehavior = (await apiClient.getUserSettings()).settings.agent_tab_close_behavior;
+    try {
+      await apiClient.saveUserSettings({ agent_tab_close_behavior: "hide_panel" });
+      await expectBootConversationRoute(testPage, apiClient, seedData, "hidden");
+      await testPage.screenshot({ path: test.info().outputPath("boot-hidden-maximized.png") });
+    } finally {
+      await apiClient.saveUserSettings({ agent_tab_close_behavior: closeBehavior });
+    }
+  });
+
+  test("restores a vertically split conversation through real Go boot", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await expectBootConversationRoute(testPage, apiClient, seedData, "tree");
+    await testPage.screenshot({ path: test.info().outputPath("boot-tree-restore.png") });
+  });
+
   for (const [mode, moveOutcome] of [
     ["hidden", undefined],
     ["failed-workflow", "failed"],

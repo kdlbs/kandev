@@ -846,27 +846,44 @@ describe("generated right group policy controls", () => {
   );
 });
 
-it.each(["session:a", "session:b", "plan"])(
-  "restores the live overlay selection %s into its original group",
-  async (selected) => {
-    const layout = horizontalLayout({ bottom: [TERMINAL] });
-    const center = layout.columns[0].groups[0];
-    center.panels = [
-      { id: "session:a", component: "chat", title: "A" },
-      { id: "session:b", component: "chat", title: "B" },
-      { id: "plan", component: "plan", title: "Plan" },
-    ];
-    center.activePanel = "session:a";
-    startIn("restore-selection", layout, layout);
-    const before = shape(api);
-    useDockviewStore.getState().maximizeGroup(CENTER_GROUP);
-    await settle();
-    api.getPanel(selected)!.api.setActive();
-    useDockviewStore.getState().exitMaximizedLayout();
-    await settle();
-    expect(api.getPanel(selected)?.group.activePanel?.id).toBe(selected);
-    const restored = shape(api);
-    before.columns[0].groups[0].active = selected;
-    expect(restored).toEqual(before);
-  },
-);
+it.each(
+  [false, true].flatMap((tree) =>
+    ["session:a", "session:b", "plan"].map((selected) => ({ tree, selected })),
+  ),
+)("restores live overlay $selected with tree=$tree", async ({ tree, selected }) => {
+  const layout = horizontalLayout({ bottom: [TERMINAL] });
+  const center = layout.columns[0].groups[0];
+  center.panels = [
+    { id: "session:a", component: "chat", title: "A" },
+    { id: "session:b", component: "chat", title: "B" },
+    { id: "plan", component: "plan", title: "Plan" },
+  ];
+  center.activePanel = "session:a";
+  if (tree) {
+    layout.columns[0].groups.push({
+      id: "center-lower",
+      panels: [NOTES],
+      activePanel: NOTES.id,
+    });
+  }
+  startIn("restore-selection", layout, layout);
+  const before = shape(api);
+  const bounds = api.groups.map((group) => ({
+    id: group.id,
+    width: group.width,
+    height: group.height,
+  }));
+  useDockviewStore.getState().maximizeGroup(CENTER_GROUP);
+  await settle();
+  api.getPanel(selected)!.api.setActive();
+  useDockviewStore.getState().exitMaximizedLayout();
+  await settle();
+  expect(api.getPanel(selected)?.group.activePanel?.id).toBe(selected);
+  const restored = shape(api);
+  before.columns[0].groups[0].active = selected;
+  expect(restored).toEqual(before);
+  for (const group of bounds) {
+    expect(api.getGroup(group.id)?.width).toBeCloseTo(group.width, 0);
+    expect(api.getGroup(group.id)?.height).toBeCloseTo(group.height, 0);
+  }
+});

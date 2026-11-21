@@ -1622,18 +1622,24 @@ function reconcileMaximizeSessionList(
 
 /** Layout-only restoration retains each still-live group's chosen panel. */
 function withLiveGroupSelection(layout: LayoutState, api: DockviewApi): LayoutState {
+  const selectGroup = (group: LayoutGroup): LayoutGroup => {
+    const selected = group.id
+      ? api.groups.find((live) => live.id === group.id)?.activePanel?.id
+      : undefined;
+    return selected && group.panels.some((panel) => panel.id === selected)
+      ? { ...group, activePanel: selected }
+      : group;
+  };
+  const selectTree = (node: LayoutNode): LayoutNode =>
+    node.type === "leaf"
+      ? { ...node, group: selectGroup(node.group) }
+      : { ...node, children: node.children.map(selectTree) };
   return {
     ...layout,
     columns: layout.columns.map((column) => ({
       ...column,
-      groups: column.groups.map((group) => {
-        const selected = group.id
-          ? api.groups.find((live) => live.id === group.id)?.activePanel?.id
-          : undefined;
-        return selected && group.panels.some((panel) => panel.id === selected)
-          ? { ...group, activePanel: selected }
-          : group;
-      }),
+      groups: column.groups.map(selectGroup),
+      tree: column.tree ? selectTree(column.tree) : undefined,
     })),
   };
 }

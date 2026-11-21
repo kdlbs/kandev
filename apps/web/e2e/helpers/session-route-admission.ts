@@ -69,7 +69,11 @@ export async function expectConversationRouteAfterRemoval(
   actor: Page,
   api: ApiClient,
   seed: SeedData,
-  options: { hideTarget?: boolean; moveOutcome?: "failed" | "agentless" | "skip" } = {},
+  options: {
+    hideTarget?: boolean;
+    rememberPlan?: boolean;
+    moveOutcome?: "failed" | "agentless" | "skip";
+  } = {},
 ) {
   await api.saveUserSettings({ enable_preview_on_click: true });
   const fixtureSeed = options.moveOutcome === "skip" ? await createSkipRouteSeed(api, seed) : seed;
@@ -104,17 +108,41 @@ export async function expectConversationRouteAfterRemoval(
   await actor.getByTestId("session-delete-confirm").click();
   await waitForActiveTaskSession(page, task.task_id, primary.session_id);
   await expect(viewer.activeChat()).toHaveAttribute("data-session-id", primary.session_id);
+  const returnQuery = `return${randomUUID().replaceAll("-", "")}`;
+  if (options.rememberPlan) {
+    const message = await api.seedSessionMessage(primary.session_id, {
+      type: "message",
+      content: returnQuery,
+    });
+    await waitForIndexedConversation(api, seed.workspaceId, returnQuery, {
+      sessionId: primary.session_id,
+      messageId: message.messageId,
+    });
+  }
   const primaryTail = await newestStoredMessageId(api, primary.session_id);
   await expect
     .poll(async () => (await sessionReadState(api, primary.session_id)).cursor)
     .toBe(primaryTail);
+  if (options.rememberPlan) {
+    await page.getByTestId("mobile-sessions-pill").tap();
+    await page.getByTestId(`mobile-session-row-${other.session_id}`).tap();
+    await expect(viewer.activeChat()).toHaveAttribute("data-session-id", other.session_id);
+    await page
+      .getByTestId("session-mobile-bottom-nav")
+      .getByRole("button", { name: "Plan", exact: true })
+      .tap();
+    await expect(viewer.activeChat()).toHaveCount(0);
+    await selectCommandTask(page, returnQuery, true);
+    await expect(viewer.activeChat()).toHaveAttribute("data-session-id", primary.session_id);
+  }
+  const otherBefore = (await sessionReadState(api, other.session_id)).cursor;
   if (options.hideTarget) {
     await viewer.sessionTabCloseButton(other.session_id).click();
     await expect(viewer.sessionTabBySessionId(other.session_id)).toHaveCount(0);
   }
   const query = `surviving${randomUUID().replaceAll("-", "")}`;
   const tail = await api.seedSessionMessage(other.session_id, { type: "message", content: query });
-  expect((await sessionReadState(api, other.session_id)).cursor).toBeNull();
+  expect((await sessionReadState(api, other.session_id)).cursor).toBe(otherBefore);
   await waitForIndexedConversation(api, seed.workspaceId, query, {
     sessionId: other.session_id,
     messageId: tail.messageId,
@@ -145,6 +173,21 @@ export async function expectConversationRouteAfterRemoval(
   expect((await sessionReadState(api, primary.session_id)).cursor).toBe(primaryTail);
   expect(reads.markReads.filter((read) => read.sessionId === primary.session_id)).toEqual([]);
   expect(await page.evaluate(() => performance.timeOrigin)).toBe(started);
+  expect(reads.agentStarts()).toEqual([]);
+  if (options.rememberPlan) {
+    await page
+      .getByTestId("session-mobile-bottom-nav")
+      .getByRole("button", { name: "Plan", exact: true })
+      .tap();
+    const after = await api.seedSessionMessage(other.session_id, {
+      type: "message",
+      content: "Later output must not reopen Chat",
+    });
+    await dwell(page, 500, "negative-assertion", "Consumed explicit focus must not reopen Chat");
+    await expect(viewer.activeChat()).toHaveCount(0);
+    expect((await sessionReadState(api, other.session_id)).cursor).toBe(tail.messageId);
+    expect(reads.markReads.filter((read) => read.messageId === after.messageId)).toEqual([]);
+  }
 }
 
 /** Hold request dispatch, not a captured DTO: the released GET snapshots the new primary. */

@@ -495,13 +495,7 @@ function activateMaximizedRouteTarget(
       .taskSessionsByTask.itemsByTaskId[taskId]?.some((session) => session.id === sessionId);
   if (!member || !hasTaskRouteFocus(store, taskId, sessionId)) return;
   if (!api.getPanel(`session:${sessionId}`)) {
-    const layout = useDockviewStore.getState();
-    const parked = layout.preMaximizeLayout?.columns.some((column) =>
-      column.groups.some((group) =>
-        group.panels.some((panel) => panel.id === `session:${sessionId}`),
-      ),
-    );
-    if (parked) layout.exitMaximizedLayout();
+    useDockviewStore.getState().exitMaximizedLayout();
     return;
   }
   activateSessionPanel({

@@ -71,7 +71,9 @@ test.describe("Mobile task unread dot", () => {
     const { settings } = await apiClient.getUserSettings();
     await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
     try {
-      await expectConversationRouteAfterRemoval(testPage, desktopTestPage, apiClient, seedData);
+      await expectConversationRouteAfterRemoval(testPage, desktopTestPage, apiClient, seedData, {
+        rememberPlan: true,
+      });
       await testPage.screenshot({
         path: test.info().outputPath("phone-explicit-route-after-removal.png"),
       });

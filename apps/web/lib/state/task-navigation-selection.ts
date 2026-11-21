@@ -56,7 +56,7 @@ function hasNewerRemoval(
       owner.removal.target !== state.tasks.activeSessionId)
   );
 }
-function isRequestedSessionUnavailable(store: StoreApi<AppState>, sessionId: string) {
+export function isRequestedSessionUnavailable(store: StoreApi<AppState>, sessionId: string) {
   return (
     isConfirmedSessionRemoved(store.getState().taskSessions, sessionId) ||
     observedRemovals(store)?.has(sessionId)

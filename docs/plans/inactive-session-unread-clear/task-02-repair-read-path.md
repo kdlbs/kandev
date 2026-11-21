@@ -3604,3 +3604,95 @@ No Go source changed; no new Go suite or broad local audit was run. Internal
 design/results updated; no public API or terminology change. Historical incident,
 list-convergence, seeded-execution and broad-suite/live-NATS qualifications remain.
 Implementation checks are complete; independent production review continues R26.
+
+### Production-fix review round 26 remediation
+
+Sol child `2b3d97d4-83fc-4d98-949b-6560ca8907f2` reviewed
+`4da96e018e8fec2fdc8d10ab89f5883f1b10d016`, reporting four P2 source schedules.
+Completed rounds 26; consecutive clean 0. R27 follows verified delivery.
+
+Parent RED evidence in the existing cache snapshot:
+
+- `r26-red-units.log`: three failures, 88 controls. Real Dockview tree-backed
+  B and Plan Restore chose A; completed absence proof before an unpinned
+  explicit shell commit selected deleted B. Existing flat/pinned/observed-only
+  and valid controls remained.
+- `r26-red-summary.log`: actual Go boot with B hidden before maximize left B
+  absent. Task-only boot preserved the overlay and B's cursor before the
+  explicit link. No manual Restore was used.
+- `r26-phone-red2-summary.log`: real Command Panel selected/pinned B and updated
+  the URL in the same document, but retained B's Plan and no chat appeared.
+  The first phone attempt was fixture failure: the Sessions pill is unavailable
+  on Plan. The corrected setup uses a real indexed conversation result to
+  return to the other session; it does not bypass phone presentation.
+
+Corrections keep the same ownership and unread contracts:
+
+- Restore writes each live selection into both canonical tree leaves and flat
+  groups; real Dockview cases check A/B/Plan and group geometry.
+- A missing current explicit target exits maximize even if it never appeared
+  in the saved layout. The existing owned ensure/activate path then opens it.
+  Passive/task-only requests still cannot materialize it.
+- Passive shell synchronization rejects observed and confirmed removals.
+  Proof-before/after-commit controls retain A/pin and never publish B or
+  rehydrate its retired row.
+- Phone consumes an owned explicit route once to open Chat, just as desktop
+  consumes it to activate a tab. Ordinary restored panels remain unchanged;
+  selecting Plan afterwards must survive later output without reading it.
+
+No cursor writer, unread predicate/projector, backend promotion, Go source,
+schema or wire contract changed. Phone uses its existing bottom navigation and
+Command Panel entry; no new surface, scroll owner, copy or touch geometry.
+Final targeted checks and production-bundle browser results are recorded below.
+
+#### R26 final checks
+
+After sharing the existing unavailable-session predicate with passive page sync,
+`r26-final-units.log` passes 27 files / 469 tests. This includes flat/tree
+real-Dockview A/B/Plan geometry, both proof/React-commit orders with pinned and
+unpinned selection, valid route controls, hydration/page ownership, mobile
+composition, and route-focus/admission owners. The first GREEN was also 469;
+strict lint then caught the page file's line limit. Sharing the existing
+predicate removed duplication; the final regression run followed that refactor.
+
+Strict changed-file lint, full production typecheck and fresh frontend build
+pass (`r26-lint.log`, `r26-typecheck.log`, `r26-build.log`). Docs catalog and all
+specification checks pass. The added tree browser setup is test-only; its final
+formatter/strict-lint check is `r26-final-fixture-lint.log`.
+
+Exact focused replay after the cache-safe snapshot refresh:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run lib/state/dockview-env-switch.plugin-layout.test.ts \
+  lib/state/dockview-right-panel-visibility.test.ts components/task/dockview-session- \
+  src/task-detail-route-explicit-selection.test.tsx lib/state/hydration \
+  components/task/task-page-content components/task/task-page-session-ownership.test.tsx \
+  components/task/mobile/session-mobile-layout.test.tsx lib/state/task-navigation
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts -- \
+  --grep 'through real Go boot' --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+The browser replay uses the new R26 frontend with retained fresh R24 backend,
+agentctl, host and plugin artifacts. No broad suite or live-NATS validation is
+implied; the prior historical-trigger, seeded-execution and list-convergence
+qualifications remain. No public API, terminology, or product-copy change.
+
+Final browser run: `r26-green-summary.log` five desktop Go-boot cases pass;
+`r26-phone-summary.log` ten phone cases pass, one worker and no retries.
+The new tree case uses a real Files-tab drag to form a vertical split, then
+checks explicit B after Restore, exact B cursor and no same-group A read.
+Hidden-before-maximize B opens without manual Restore; passive boot leaves it
+unread. The phone case visits B's Plan, returns via a real conversation result,
+then opens unread B from Command Panel in the same document. B's exact tail is
+read; A is unchanged and no launch is sent. A later Plan choice survives new
+B output without acknowledging that new row.
+
+Inspected final tree, hidden/maximize and phone Plan-preservation captures.
+Chat/composer and Files retain their split; hidden B becomes the explicit
+visible chat; phone Plan remains usable and contained after the one-shot focus
+is consumed. Runtime pass, cursor proof and screenshot observations are separate.
+R26 implementation is complete; independent production review proceeds R27.

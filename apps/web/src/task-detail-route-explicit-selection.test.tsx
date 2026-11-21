@@ -351,68 +351,76 @@ it("does not replay a deferred route after its committed removal observation", a
   stop();
 });
 
-it.each([
-  [false, false],
-  [false, true],
-  [true, false],
-  [true, true],
-])("keeps an explicit shell commit behind removal=%s and pin=%s", async (removed, pinned) => {
-  const data = identity(false);
-  data.task.primary_session_id = sessionId(SURVIVOR);
-  const initial = taskRouteSelectionState(TASK, SURVIVOR, data.allSessionsResponse.sessions);
-  const originalPin = pinned ? SURVIVOR : null;
-  initial.tasks = { ...initial.tasks!, pinnedSessionId: originalPin };
-  const identityRead = Promise.withResolvers<TaskNavigationIdentity>();
-  const commit = Promise.withResolvers<void>();
-  const proof = Promise.withResolvers<TaskNavigationIdentity["allSessionsResponse"]>();
-  mocks.load.mockReturnValue(identityRead.promise);
-  mocks.shellGate = commit.promise;
-  vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
-  render(
-    <StateProvider initialState={initial}>
-      <ToastProvider>
-        <CaptureStore />
-        <Suspense fallback={null}>
-          <TaskDetailRoute taskId={TASK} sessionId={TARGET} />
-        </Suspense>
-      </ToastProvider>
-    </StateProvider>,
-  );
-  await waitFor(() => expect(mocks.load).toHaveBeenCalled());
-  await act(async () => identityRead.resolve(data));
-  await waitFor(() => expect(mocks.shellBuilt).toHaveBeenCalled());
-  const selections: Array<string | null> = [];
-  const stop = store.subscribe((state) => selections.push(state.tasks.activeSessionId));
-  if (removed)
-    await act(async () =>
-      registerTaskSessionHandlers(store)[REMOVED_ACTION]!({
-        id: "remove-before-shell-commit",
-        type: NOTIFICATION_TYPE,
-        action: REMOVED_ACTION,
-        payload: { task_id: TASK, session_id: TARGET },
-      }),
+it.each(
+  [false, true].flatMap((removed) =>
+    [false, true].flatMap((pinned) =>
+      [false, true].map((proofFirst) => ({ removed, pinned, proofFirst })),
+    ),
+  ),
+)(
+  "keeps shell behind removal=$removed pin=$pinned proofFirst=$proofFirst",
+  async ({ removed, pinned, proofFirst }) => {
+    const data = identity(false);
+    data.task.primary_session_id = sessionId(SURVIVOR);
+    const initial = taskRouteSelectionState(TASK, SURVIVOR, data.allSessionsResponse.sessions);
+    const originalPin = pinned ? SURVIVOR : null;
+    initial.tasks = { ...initial.tasks!, pinnedSessionId: originalPin };
+    const identityRead = Promise.withResolvers<TaskNavigationIdentity>();
+    const commit = Promise.withResolvers<void>();
+    const proof = Promise.withResolvers<TaskNavigationIdentity["allSessionsResponse"]>();
+    mocks.load.mockReturnValue(identityRead.promise);
+    mocks.shellGate = commit.promise;
+    vi.mocked(listTaskSessions).mockReturnValue(proof.promise);
+    render(
+      <StateProvider initialState={initial}>
+        <ToastProvider>
+          <CaptureStore />
+          <Suspense fallback={null}>
+            <TaskDetailRoute taskId={TASK} sessionId={TARGET} />
+          </Suspense>
+        </ToastProvider>
+      </StateProvider>,
     );
-  await act(async () => {
-    mocks.shellGate = undefined;
-    commit.resolve();
-  });
-  await waitFor(() =>
-    expect(store.getState().tasks.activeSessionId).toBe(removed ? SURVIVOR : TARGET),
-  );
-  expect(store.getState().tasks.pinnedSessionId).toBe(removed ? originalPin : TARGET);
-  expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK]).toBe(true);
-  expect(store.getState().taskSessions.items[TARGET]).toBeDefined();
-  if (removed) {
-    expect(selections).not.toContain(TARGET);
-    await act(async () =>
-      proof.resolve({
-        sessions: data.allSessionsResponse.sessions.filter((row) => row.id !== TARGET),
-        total: 1,
-      }),
+    await waitFor(() => expect(mocks.load).toHaveBeenCalled());
+    await act(async () => identityRead.resolve(data));
+    await waitFor(() => expect(mocks.shellBuilt).toHaveBeenCalled());
+    const selections: Array<string | null> = [];
+    const stop = store.subscribe((state) => selections.push(state.tasks.activeSessionId));
+    if (removed)
+      await act(async () =>
+        registerTaskSessionHandlers(store)[REMOVED_ACTION]!({
+          id: "remove-before-shell-commit",
+          type: NOTIFICATION_TYPE,
+          action: REMOVED_ACTION,
+          payload: { task_id: TASK, session_id: TARGET },
+        }),
+      );
+    const finishProof = async () => {
+      await act(async () =>
+        proof.resolve({
+          sessions: data.allSessionsResponse.sessions.filter((row) => row.id !== TARGET),
+          total: 1,
+        }),
+      );
+      await waitFor(() => expect(store.getState().taskSessions.items[TARGET]).toBeUndefined());
+    };
+    if (removed && proofFirst) await finishProof();
+    await act(async () => {
+      mocks.shellGate = undefined;
+      commit.resolve();
+    });
+    await waitFor(() =>
+      expect(store.getState().tasks.activeSessionId).toBe(removed ? SURVIVOR : TARGET),
     );
-    await waitFor(() => expect(store.getState().taskSessions.items[TARGET]).toBeUndefined());
-    expect(store.getState().tasks.activeSessionId).toBe(SURVIVOR);
-    expect(store.getState().tasks.pinnedSessionId).toBe(originalPin);
-  }
-  stop();
-});
+    expect(store.getState().tasks.pinnedSessionId).toBe(removed ? originalPin : TARGET);
+    expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK]).toBe(true);
+    if (!removed || !proofFirst) expect(store.getState().taskSessions.items[TARGET]).toBeDefined();
+    if (removed) {
+      expect(selections).not.toContain(TARGET);
+      if (!proofFirst) await finishProof();
+      expect(store.getState().tasks.activeSessionId).toBe(SURVIVOR);
+      expect(store.getState().tasks.pinnedSessionId).toBe(originalPin);
+    }
+    stop();
+  },
+);
