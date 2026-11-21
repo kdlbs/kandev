@@ -22,6 +22,7 @@ const (
 	clarificationStatusResponding = "responding"
 
 	clarificationResponseDeliveryPendingKey = "response_delivery_pending"
+	clarificationAnsweredByMetadataKey      = "answered_by"
 )
 
 func nonTerminalSessionPredicate(messageAlias string) string {
@@ -620,6 +621,7 @@ func (r *Repository) restoreClarificationMessages(
 		restoredMetadata := maps.Clone(message.Metadata)
 		restoredMetadata["status"] = clarificationStatusPending
 		delete(restoredMetadata, "response")
+		delete(restoredMetadata, clarificationAnsweredByMetadataKey)
 		delete(restoredMetadata, clarificationResponseDeliveryPendingKey)
 		metadataJSON, marshalErr := json.Marshal(restoredMetadata)
 		if marshalErr != nil {
@@ -778,6 +780,7 @@ func (r *Repository) completeClaimedClarificationMessagesWithManifests(
 		WHERE id = ? AND %s = ?
 	`, claimedStatusExpr))
 	completedMetadataByMessage := make([]map[string]interface{}, len(messages))
+	answeredByMetadata := clarificationAnsweredByMetadata(responses)
 	for i, message := range messages {
 		questionID, _ := message.Metadata["question_id"].(string)
 		if questionID == "" {
@@ -794,6 +797,7 @@ func (r *Repository) completeClaimedClarificationMessagesWithManifests(
 				completedMetadata["attachments"] = manifest
 			}
 		}
+		maps.Copy(completedMetadata, answeredByMetadata)
 		if status == clarificationStatusAnswered {
 			response, ok := responses[questionID]
 			if !ok {
@@ -858,4 +862,19 @@ func canonicalClarificationResponse(
 		canonical["attachments"] = manifest
 	}
 	return canonical, nil
+}
+
+// clarificationAnsweredByMetadata extracts the bundle-wide answer-channel
+// marker the resolver passes through the reserved responses-map key, the same
+// way per-question answers are passed, as metadata ready to merge onto each
+// message. A missing or empty marker yields nil, leaving the durable rows
+// without an "answered_by" metadata key.
+func clarificationAnsweredByMetadata(responses map[string]interface{}) map[string]interface{} {
+	by, ok := responses[models.ClarificationAnsweredByResponseKey].(models.ClarificationAnsweredBy)
+	if !ok || (by.Channel == "" && by.Ref == "") {
+		return nil
+	}
+	return map[string]interface{}{
+		clarificationAnsweredByMetadataKey: map[string]string{"channel": by.Channel, "ref": by.Ref},
+	}
 }

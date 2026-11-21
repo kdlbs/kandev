@@ -53,6 +53,19 @@ Provide either "answers" (one entry per question in the bundle) or "rejected": t
 			),
 			mcp.WithBoolean("rejected", mcp.Description("Reject the whole bundle instead of answering it.")),
 			mcp.WithString("reject_reason", mcp.Description("Optional reason shown alongside a rejection.")),
+			mcp.WithObject("answered_by",
+				mcp.Description(`Optional answer-channel marker. A caller resolving through another channel (for example a Slack thread) records it here so the resolution carries the channel it came through; callers answering from Kandev omit it.`),
+				mcp.Properties(map[string]any{
+					"channel": map[string]any{
+						typeKey:        stringType,
+						descriptionArg: "The answer channel, for example slack_thread.",
+					},
+					"ref": map[string]any{
+						typeKey:        stringType,
+						descriptionArg: "Optional channel-specific reference, for example the thread id.",
+					},
+				}),
+			),
 		),
 		s.wrapHandler("answer_question_kandev", s.answerQuestionHandler()),
 	)
@@ -89,6 +102,9 @@ func (s *Server) answerQuestionHandler() server.ToolHandlerFunc {
 			payload["rejected"] = true
 		}
 		copyOptionalStringArg(payload, req, "reject_reason")
+		if answeredBy, ok := req.GetArguments()["answered_by"]; ok && answeredBy != nil {
+			payload["answered_by"] = answeredBy
+		}
 
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAnswerQuestion, payload, &result); err != nil {
