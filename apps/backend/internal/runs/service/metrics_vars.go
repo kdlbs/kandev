@@ -15,6 +15,7 @@ var metricReasons = map[string]struct{}{
 	"task_comment":                {},
 	"task_blockers_resolved":      {},
 	"task_children_completed":     {},
+	"task_blocker_failed":         {},
 	"approval_resolved":           {},
 	"task_review_requested":       {},
 	"task_changes_requested":      {},

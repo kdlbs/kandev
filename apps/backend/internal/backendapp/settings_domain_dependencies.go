@@ -8,7 +8,6 @@ import (
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	editormodels "github.com/kandev/kandev/internal/editors/models"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	"github.com/kandev/kandev/internal/github"
@@ -164,17 +163,6 @@ type settingsGitLabService interface {
 	UpdateIssueWatch(context.Context, string, *gitlab.UpdateIssueWatchRequest) error
 }
 
-type settingsAzureDevOpsService interface {
-	GetConfigForWorkspace(context.Context, string) (*azuredevops.Config, error)
-	SetConfigForWorkspace(context.Context, string, *azuredevops.SetConfigRequest) (*azuredevops.Config, error)
-	GetWorkspaceSettings(context.Context, string) (*azuredevops.WorkspaceSettings, error)
-	UpdateWorkspaceSettings(context.Context, *azuredevops.UpdateWorkspaceSettingsRequest) (*azuredevops.WorkspaceSettings, error)
-	ListWorkItemWatches(context.Context, string) ([]*azuredevops.WorkItemWatch, error)
-	UpdateWorkItemWatch(context.Context, string, string, *azuredevops.UpdateWorkItemWatchRequest) (*azuredevops.WorkItemWatch, error)
-	ListPullRequestWatches(context.Context, string) ([]*azuredevops.PullRequestWatch, error)
-	UpdatePullRequestWatch(context.Context, string, string, *azuredevops.UpdatePullRequestWatchRequest) (*azuredevops.PullRequestWatch, error)
-}
-
 func automationServiceFromComponents(components *automation.Components) settingsAutomationService {
 	if components == nil || components.Service == nil {
 		return nil
@@ -211,13 +199,6 @@ func settingsGitHubServiceFromPointer(service *github.Service) settingsGitHubSer
 }
 
 func settingsGitLabServiceFromPointer(service *gitlab.Service) settingsGitLabService {
-	if service == nil {
-		return nil
-	}
-	return service
-}
-
-func settingsAzureDevOpsServiceFromPointer(service *azuredevops.Service) settingsAzureDevOpsService {
 	if service == nil {
 		return nil
 	}

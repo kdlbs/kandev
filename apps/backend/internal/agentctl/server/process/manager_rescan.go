@@ -194,22 +194,25 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 	bareRoot := m.newTrackerForRepo(workDir, "")
 	bareRoot.suppressGitPublication = true
 	m.configureTracker(bareRoot, "", roots)
-	m.prepareTrackerComparisonTarget(bareRoot, false)
-	bareRoot.Start(ctx)
-	for _, sub := range subs {
-		bareRoot.AttachWorkspaceStreamSubscriber(sub)
-	}
 
 	newRepoTrackers := make([]*WorkspaceTracker, 0, len(children))
 	for _, child := range children {
 		tracker := m.newTrackerForRepo(child.path, child.name)
 		m.configureTracker(tracker, child.name, roots)
 		m.prepareTrackerComparisonTarget(tracker, false)
+		newRepoTrackers = append(newRepoTrackers, tracker)
+	}
+	bareRoot.SetCheckoutRoots(workspaceCheckoutRoots(workDir, newRepoTrackers))
+	m.prepareTrackerComparisonTarget(bareRoot, false)
+	bareRoot.Start(ctx)
+	for _, sub := range subs {
+		bareRoot.AttachWorkspaceStreamSubscriber(sub)
+	}
+	for _, tracker := range newRepoTrackers {
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)
 		}
-		newRepoTrackers = append(newRepoTrackers, tracker)
 	}
 
 	m.repoTrackersMu.Lock()
@@ -281,6 +284,10 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, workDir string, chi
 	m.workspaceSourceRoots = append([]string(nil), roots...)
 	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
 	m.repoTrackersMu.Unlock()
+	root, trackers := m.snapshotTrackers()
+	if root != nil && root.suppressGitPublication {
+		root.SetCheckoutRoots(workspaceCheckoutRoots(workDir, trackers))
+	}
 	// Stop + detach any dropped trackers outside the lock so we don't block
 	// readers on potentially-slow Stop() teardown.
 	for _, t := range dropped {

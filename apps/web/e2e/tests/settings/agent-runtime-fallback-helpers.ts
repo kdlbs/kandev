@@ -1,3 +1,4 @@
+import { expectRuntimeVersions } from "./agent-runtime-settings-helpers";
 import { expect, type Page } from "@playwright/test";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
@@ -95,28 +96,28 @@ export async function managedFallbackAwareness(
     }),
   );
   await page.goto("/settings/agents#runtime-update-opencode-acp");
-  const native = page.getByTestId("runtime-policy-opencode-acp");
-  await expect(native).toContainText("Observed: 1.0.0");
-  await expect(native.getByRole("switch")).toHaveCount(0);
-  await expect(native.getByRole("link", { name: "Manual update guidance" })).toHaveAttribute(
-    "href",
-    "https://opencode.ai/docs/cli/",
-  );
-  const selection = native.getByRole("link", { name: "Manage fallback versions" });
-  await selection.scrollIntoViewIfNeeded();
-  if (mobile) expect((await selection.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  const surface = page.getByTestId(`agent-update-${mobile ? "drawer" : "dialog"}-opencode-acp`);
+  await expect(surface).toContainText("Observed: 1.0.0");
+  await expect(surface.getByRole("switch")).toHaveCount(0);
+  const runtimeDetails = surface.getByTestId("agent-update-runtime-details-opencode-acp");
+  const runtimeDetailsSummary = runtimeDetails.locator(":scope > summary");
+  if (mobile) await runtimeDetailsSummary.tap();
+  else await runtimeDetailsSummary.click();
+  await expect(runtimeDetails.getByText("Package", { exact: true })).toBeVisible();
+  await expect(runtimeDetails.getByText("Source", { exact: true })).toBeVisible();
+  await expect(runtimeDetails.getByText("opencode-ai", { exact: true })).toHaveCount(2);
+  const guidance = surface.getByRole("link", { name: "Manual update guidance" });
+  await expect(guidance).toHaveAttribute("href", "https://opencode.ai/docs/cli/");
+  if (mobile) expect((await guidance.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   expect(
-    await selection.evaluate((element) => {
+    await guidance.evaluate((element) => {
       const box = element.getBoundingClientRect();
       return element.contains(
         document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
       );
     }),
   ).toBe(true);
-  await selection.click();
-  await page.getByTestId("agent-update-trigger-opencode-acp").click();
-  const surface = page.getByTestId(`agent-update-${mobile ? "drawer" : "dialog"}-opencode-acp`);
-  await expect(surface).toContainText("Unknown → 9.0.0");
+  await expectRuntimeVersions(surface, "Unknown", "9.0.0");
   await expect(surface).toContainText("Active version: 8.0.0");
   await expect(surface).toContainText("Effective version: 8.0.0");
   const info = surface.getByTestId("agent-update-info-opencode-acp");
@@ -135,7 +136,12 @@ export async function managedFallbackAwareness(
     await page.keyboard.press("Escape");
     await expect(surface).toBeVisible();
   }
-  await expect(surface).toContainText("--package=opencode-ai@9.0.0");
+  const commandDetails = surface.getByTestId("agent-update-command-opencode-acp");
+  if (mobile) await commandDetails.locator("summary").tap();
+  else await commandDetails.locator("summary").click();
+  const command = commandDetails.locator("pre");
+  await expect(command).toBeVisible();
+  await expect(command).toContainText("--package=opencode-ai@9.0.0");
   await waitForFiniteAnimations(surface);
   await capture?.screenshot("runtime-native-fallback", {
     caption: "Native host guidance stays separate from managed fallback version selection.",

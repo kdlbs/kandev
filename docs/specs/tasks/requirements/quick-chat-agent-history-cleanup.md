@@ -10,9 +10,9 @@ owners:
 
 ## Overview
 
-Quick Chat is disposable. Deleting or expiring one already removes its Kandev task, sessions,
-and scratch or worktree materialization through the task deletion path
-([Quick Chat Sessions, Persistence, and Expiration](quick-chat-expiration.md)). The agent CLI
+When a user explicitly deletes a Quick Chat, the task deletion path removes its Kandev
+task, sessions, and scratch or worktree materialization
+([Quick Chat Sessions and Persistence](quick-chat-expiration.md)). The agent CLI
 that served the chat keeps its own conversation transcript outside Kandev, so the transcript
 survives the chat and appears in tools that search every agent conversation.
 
@@ -39,7 +39,7 @@ Confirmed persistence behavior (host-local executors, 2026-10-14):
 ## Terminology
 
 - **Quick Chat task:** an ephemeral task that satisfies the restorable utility-chat predicate in
-  [Quick Chat Sessions, Persistence, and Expiration](quick-chat-expiration.md), including
+  [Quick Chat Sessions and Persistence](quick-chat-expiration.md), including
   configuration chats.
 - **Agent history:** the files an agent CLI writes to its own history store for one agent
   session.
@@ -52,8 +52,8 @@ Confirmed persistence behavior (host-local executors, 2026-10-14):
 
 **Intent:** A deleted Quick Chat removes its agent transcripts while preserving CLI-managed shared stores.
 
-**User story:** As a Kandev user, I want deleting or expiring a Quick Chat to also remove the
-agent's transcript of it, so that disposable chats do not accumulate in my agent history.
+**User story:** As a Kandev user, I want deleting a Quick Chat to also remove the
+agent's transcript of it, so that deleted chats do not accumulate in my agent history.
 
 #### Acceptance criteria
 
@@ -61,12 +61,12 @@ agent's transcript of it, so that disposable chats do not accumulate in my agent
   served by Claude Code on a host-local executor, the system shall remove that session's Claude
   transcript and sidecar directory, and shall remove the Claude project directory when it is
   left empty.
-- **AC-TASKS-QUICK-CHAT-AGENT-HISTORY-001.2:** When the Quick Chat expiration sweep deletes an
-  ordinary Quick Chat, the system shall perform the same agent-history cleanup as manual
-  deletion.
-- **AC-TASKS-QUICK-CHAT-AGENT-HISTORY-001.3:** When a user deletes or the sweep expires a Quick
-  Chat served by Codex on a host-local executor, the system shall remove the rollout file whose
-  name and `session_meta` match the session's thread id and working directory.
+- **AC-TASKS-QUICK-CHAT-AGENT-HISTORY-001.2:** Retired by
+  `REQ-TASKS-QUICK-CHAT-EXPIRATION-003`. The former expiration-sweep cleanup criterion no
+  longer applies.
+- **AC-TASKS-QUICK-CHAT-AGENT-HISTORY-001.3:** When a user deletes a Quick Chat served by
+  Codex on a host-local executor, the system shall remove the rollout file whose name and
+  `session_meta` match the session's thread id and working directory.
 - **AC-TASKS-QUICK-CHAT-AGENT-HISTORY-001.4:** When the agent history is already absent, the
   config dir is missing, or no resume token was recorded, the system shall complete the Quick
   Chat deletion exactly as before and shall not report an error.
@@ -108,4 +108,5 @@ agent's transcript of it, so that disposable chats do not accumulate in my agent
 - Agents other than Claude Code and Codex.
 - Retroactive cleanup of history left by Quick Chats deleted before this change.
 - History on remote executors; those environments are removed by their own executor cleanup.
-- Any UI change. The existing delete confirmation and expiry behavior are unchanged.
+- Any UI change. The existing delete confirmation behavior remains unchanged; the manual
+  lifetime policy is defined in `REQ-TASKS-QUICK-CHAT-EXPIRATION-003`.

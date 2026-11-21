@@ -48,6 +48,10 @@ import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 import { useTranslation } from "react-i18next";
 import { DecisionTimelineEntry, TimelineEntry } from "./task-chat-timeline-entries";
+import {
+  SelectionActionSlot,
+  SelectionActionSlotProvider,
+} from "@/components/shared/selection-action-slot";
 
 const MAX_INLINE_SESSIONS = 50;
 const AUTOSCROLL_THRESHOLD_PX = 80;
@@ -396,6 +400,7 @@ function CommentComposerFooter({
           isConfigured={isUtilityConfigured}
         />
         <span className="flex-1" />
+        <SelectionActionSlot />
         <Tooltip>
           <TooltipTrigger asChild>
             <span tabIndex={isSendDisabled ? 0 : -1} className="inline-flex">
@@ -748,38 +753,40 @@ export function TaskChat({
   const isEmpty = entries.length === 0;
 
   return (
-    <div className="flex flex-col" data-testid="task-chat-root">
-      {showOlderToggle && (
-        <button
-          type="button"
-          onClick={() => setShowOlder(true)}
-          className="self-start text-xs text-muted-foreground hover:text-foreground underline cursor-pointer mb-2"
-          data-testid="show-older-sessions"
-        >
-          {t("task:showOlderSessions", { count: olderGroups.length })}
-        </button>
-      )}
-      {isEmpty ? (
-        <p className="text-sm text-muted-foreground py-4">{t("task:noCommentsYet")}</p>
-      ) : (
-        <div data-testid="task-chat-entries">
-          <ChatEntries
+    <SelectionActionSlotProvider>
+      <div className="flex flex-col" data-testid="task-chat-root">
+        {showOlderToggle && (
+          <button
+            type="button"
+            onClick={() => setShowOlder(true)}
+            className="self-start text-xs text-muted-foreground hover:text-foreground underline cursor-pointer mb-2"
+            data-testid="show-older-sessions"
+          >
+            {t("task:showOlderSessions", { count: olderGroups.length })}
+          </button>
+        )}
+        {isEmpty ? (
+          <p className="text-sm text-muted-foreground py-4">{t("task:noCommentsYet")}</p>
+        ) : (
+          <div data-testid="task-chat-entries">
+            <ChatEntries
+              taskId={taskId}
+              workspaceId={workspaceId}
+              repositories={repositories}
+              entries={entries}
+              readOnly={readOnly}
+            />
+          </div>
+        )}
+        {!readOnly && (
+          <ChatInput
             taskId={taskId}
-            workspaceId={workspaceId}
-            repositories={repositories}
-            entries={entries}
-            readOnly={readOnly}
+            taskTitle={taskTitle}
+            taskDescription={taskDescription}
+            onSubmitted={onCommentsChanged}
           />
-        </div>
-      )}
-      {!readOnly && (
-        <ChatInput
-          taskId={taskId}
-          taskTitle={taskTitle}
-          taskDescription={taskDescription}
-          onSubmitted={onCommentsChanged}
-        />
-      )}
-    </div>
+        )}
+      </div>
+    </SelectionActionSlotProvider>
   );
 }

@@ -616,7 +616,7 @@ func loadSnapshotHistoryRows(ctx context.Context, snapshotPath string) ([]*model
 	after := ""
 	for page := 0; page < 100; page++ {
 		var pageRows []*models.TurnRepositoryChangeSet
-		err := reader.SelectContext(ctx, &pageRows, `
+		err := reader.SelectContext(ctx, &pageRows, reader.Rebind(`
 			SELECT rc.id, rc.change_set_id, rc.checkout_id, rc.repository_id, rc.content_source,
 				rc.source_git_dir, rc.preservation_state, rc.preservation_receipt, rc.hash_algorithm,
 				rc.start_commit_oid, rc.start_tree_oid, rc.end_commit_oid, rc.end_tree_oid
@@ -625,7 +625,7 @@ func loadSnapshotHistoryRows(ctx context.Context, snapshotPath string) ([]*model
 			WHERE cs.availability <> 'expired' AND rc.content_source IN ('git_archive','git_common')
 				AND rc.preservation_state = 'ready' AND rc.id > ?
 			ORDER BY rc.id LIMIT 500
-		`, after)
+		`), after)
 		if err != nil {
 			if isLegacySnapshotSchemaError(err) {
 				return nil, nil

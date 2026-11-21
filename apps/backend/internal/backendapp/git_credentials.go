@@ -39,7 +39,7 @@ func newGitCredentialBroker(
 	githubSvc gitHubCredentialSource,
 	pluginSvc *plugins.Service,
 	repo gitCredentialTaskRepository,
-	reissueSigningKey string,
+	reissueSigner *gitcredentials.ReissueCapabilitySigner,
 ) *gitcredentials.Broker {
 	resolvers := make([]gitcredentials.Resolver, 0, 2)
 	if githubSvc != nil {
@@ -52,9 +52,7 @@ func newGitCredentialBroker(
 		gitcredentials.NewCompositeResolver(resolvers...),
 		&githubBrokerScopeAuthorizer{repo: repo, provider: githubSvc},
 	)
-	if signer, err := gitcredentials.NewReissueCapabilitySigner(reissueSigningKey); err == nil {
-		broker.SetReissueCapabilitySigner(signer)
-	}
+	broker.SetReissueCapabilitySigner(reissueSigner)
 	return broker
 }
 

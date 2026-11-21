@@ -129,3 +129,10 @@ execution environment.
   endpoint, without requiring the `npm` executable.
 - **Let the Settings request name the update command.** Rejected: it would turn
   the update endpoint into an arbitrary command runner.
+
+## Later Decisions
+
+[ADR-2026-11-17-native-agent-update-checks](2026-11-17-native-agent-update-checks.md)
+replaces the stable-reference status lookup for agents that declare a native
+update check, including OMP's `omp update --check`. The update, probe, and
+approval rules in this decision still apply.

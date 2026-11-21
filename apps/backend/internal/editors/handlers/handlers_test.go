@@ -19,6 +19,7 @@ func TestServiceErrorStatus(t *testing.T) {
 		{service.ErrEditorConfigInvalid, http.StatusBadRequest},
 		{service.ErrEditorUnavailable, http.StatusConflict},
 		{service.ErrFolderUnavailable, http.StatusConflict},
+		{service.ErrSessionForbidden, http.StatusForbidden},
 		{fmt.Errorf("wrapped: %w", service.ErrWorkspaceNotFound), http.StatusNotFound},
 		{errors.New("something else"), http.StatusInternalServerError},
 	}

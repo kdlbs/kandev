@@ -94,6 +94,18 @@ func workflowEffectForEvent(data watcher.AgentEventData) *models.AgentDeliveryEf
 	return effect
 }
 
+// workflowEffectForCompletion builds the workflow effect for a terminal event
+// that the caller has already resolved to closingTurnID. A durable delivery
+// terminal can arrive without a turn ID when its prompt was dispatched without
+// one; its delivery identity is otherwise complete, so it is bound to the turn
+// it closes instead of being deferred with an empty effect key.
+func workflowEffectForCompletion(data watcher.AgentEventData, closingTurnID string) *models.AgentDeliveryEffect {
+	if data.TurnID == "" && closingTurnID != "" && agentDeliveryEventIdentityPresent(data) {
+		data.TurnID = closingTurnID
+	}
+	return workflowEffectForEvent(data)
+}
+
 func workflowEffectForTurn(turnID string) *models.AgentDeliveryEffect {
 	return workflowEffectForEvent(watcher.AgentEventData{TurnID: turnID})
 }
@@ -331,4 +343,21 @@ func taskIDOrEmpty(task *models.Task) string {
 		return ""
 	}
 	return task.ID
+}
+
+// completedEventClosingTurn names the turn an agent.completed event closes when
+// the event carries delivery identity but no turn ID: the session's active turn,
+// which the turn-ID-less branch below completes. Lookup failures leave it
+// empty, so the completion keeps its fail-closed deferral.
+func (s *Service) completedEventClosingTurn(ctx context.Context, data watcher.AgentEventData) string {
+	if data.TurnID != "" || !agentDeliveryEventIdentityPresent(data) {
+		return data.TurnID
+	}
+	turnID, err := s.peekActiveTurnID(ctx, data.SessionID)
+	if err != nil {
+		s.logger.Warn("could not resolve the turn closed by a turn-less delivery completion",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
+		return ""
+	}
+	return turnID
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	spritesutil "github.com/kandev/kandev/internal/sprites"
 )
 
@@ -343,7 +344,7 @@ func TestSpritesBuildInstanceResult(t *testing.T) {
 
 	instance := exec.buildInstanceResult(&ExecutorCreateRequest{
 		InstanceID: "instance-1", TaskID: "task-1", SessionID: "session-1",
-	}, "kandev-abc", sprite, 51234, 8765, true)
+	}, "kandev-abc", sprite, 51234, &agentctl.CreateInstanceResponse{ID: "instance-1", Port: 8765, ScopedMCPRoutes: true}, true)
 
 	if instance.InstanceID != "instance-1" || instance.TaskID != "task-1" || instance.SessionID != "session-1" {
 		t.Fatalf("identity = %+v", instance)
@@ -463,21 +464,24 @@ func (c *fakeReconnectControl) Delete(_ context.Context, instanceID string) erro
 	return c.deleteErr
 }
 
-func (c *fakeReconnectControl) Create(context.Context, *ExecutorCreateRequest) (int, error) {
+func (c *fakeReconnectControl) Create(_ context.Context, req *ExecutorCreateRequest) (*agentctl.CreateInstanceResponse, error) {
 	c.created++
-	return c.port, c.createErr
+	if c.createErr != nil {
+		return nil, c.createErr
+	}
+	return &agentctl.CreateInstanceResponse{ID: req.InstanceID, Port: c.port, ScopedMCPRoutes: true}, nil
 }
 
 func TestReplaceSpriteReconnectInstance(t *testing.T) {
 	t.Run("deletes before creating", func(t *testing.T) {
 		control := &fakeReconnectControl{port: 8123}
-		port, err := replaceSpriteReconnectInstance(context.Background(), control,
+		response, err := replaceSpriteReconnectInstance(context.Background(), control,
 			&ExecutorCreateRequest{InstanceID: "instance-1"}, "instance-1")
 		if err != nil {
 			t.Fatalf("replaceSpriteReconnectInstance: %v", err)
 		}
-		if port != 8123 {
-			t.Fatalf("port = %d", port)
+		if response.Port != 8123 || !response.ScopedMCPRoutes {
+			t.Fatalf("response = %+v", response)
 		}
 		if len(control.deleted) != 1 || control.deleted[0] != "instance-1" || control.created != 1 {
 			t.Fatalf("control = %+v", control)

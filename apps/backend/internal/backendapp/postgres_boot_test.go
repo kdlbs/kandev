@@ -121,12 +121,6 @@ func TestPostgresBootInitializesRepositories(t *testing.T) {
 	if _, err := services.Sentry.ListInstances(context.Background(), "boot-workspace"); err != nil {
 		t.Fatalf("Sentry persistence is unavailable after PostgreSQL boot: %v", err)
 	}
-	if services.AzureDevOps == nil {
-		t.Fatal("Azure DevOps service is unavailable after PostgreSQL boot")
-	}
-	if _, err := services.AzureDevOps.GetConfigForWorkspace(context.Background(), "boot-workspace"); err != nil {
-		t.Fatalf("Azure DevOps persistence is unavailable after PostgreSQL boot: %v", err)
-	}
 	if services.WorkflowSync == nil {
 		t.Fatal("workflow sync service is unavailable after PostgreSQL boot")
 	}

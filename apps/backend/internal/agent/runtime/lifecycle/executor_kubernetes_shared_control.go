@@ -52,7 +52,7 @@ func (r *KubernetesExecutor) connectSharedKubernetesAgentctl(ctx context.Context
 	if err != nil {
 		return nil, nil, "", 0, err
 	}
-	client := newKubernetesAgentctlClient(r.logger, req, remoteID, token, instanceForward.LocalPort())
+	client := newKubernetesAgentctlClient(r.logger, req, response.ID, token, instanceForward.LocalPort(), response.ScopedMCPRoutes)
 	if err := client.Health(ctx); err != nil {
 		client.Close()
 		_ = instanceForward.Close()
@@ -66,7 +66,7 @@ func getOrCreateSharedKubernetesInstance(ctx context.Context, control kubernetes
 	applyKubernetesDurableJournalPath(request, req)
 	info, err := control.GetInstance(ctx, remoteID)
 	if err == nil {
-		response := &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port}
+		response := &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port, ScopedMCPRoutes: info.ScopedMCPRoutes}
 		if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {
 			return nil, false, err
 		}

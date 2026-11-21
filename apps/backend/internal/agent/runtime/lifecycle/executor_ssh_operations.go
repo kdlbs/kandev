@@ -819,6 +819,7 @@ func buildSSHCreateInstanceRequest(
 ) agentctl.CreateInstanceRequest {
 	createRequest := agentctl.CreateInstanceRequest{
 		ID:                    req.InstanceID,
+		ScopedMCPRoutes:       true,
 		WorkspacePath:         workspacePath,
 		SessionID:             req.SessionID,
 		TaskID:                req.TaskID,
@@ -875,10 +876,10 @@ func createRemoteAgentInstance(
 	req *ExecutorCreateRequest,
 	authToken string,
 	log *logger.Logger,
-) (int, error) {
+) (*agentctl.CreateInstanceResponse, error) {
 	body, err := json.Marshal(buildSSHCreateInstanceRequest(req, workspacePath, agentctlBin))
 	if err != nil {
-		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)
+		return nil, fmt.Errorf("ssh: marshal create-instance: %w", err)
 	}
 
 	// HTTP-over-direct-tcpip: every request dials a fresh SSH channel to the
@@ -895,42 +896,42 @@ func createRemoteAgentInstance(
 	}
 
 	if err := requireSSHBuiltinHelper(ctx, httpClient, controlPort, authToken, req); err != nil {
-		return 0, err
+		return nil, err
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/api/v1/instances", controlPort)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return 0, fmt.Errorf("ssh: build create-instance request: %w", err)
+		return nil, fmt.Errorf("ssh: build create-instance request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	setSSHControlAuthorization(httpReq, authToken)
 
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
-		return 0, fmt.Errorf("ssh: create-instance dial: %w", err)
+		return nil, fmt.Errorf("ssh: create-instance dial: %w", err)
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 
 	respBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return 0, fmt.Errorf("ssh: read create-instance response: %w", err)
+		return nil, fmt.Errorf("ssh: read create-instance response: %w", err)
 	}
 	if httpResp.StatusCode >= http.StatusBadRequest {
-		return 0, fmt.Errorf("ssh: create-instance returned %d: %s", httpResp.StatusCode, strings.TrimSpace(string(respBody)))
+		return nil, fmt.Errorf("ssh: create-instance returned %d: %s", httpResp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
 	var resp agentctl.CreateInstanceResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return 0, fmt.Errorf("ssh: parse create-instance response: %w (body: %s)", err, string(respBody))
+		return nil, fmt.Errorf("ssh: parse create-instance response: %w (body: %s)", err, string(respBody))
 	}
 	if resp.Port == 0 {
-		return 0, fmt.Errorf("ssh: create-instance returned port 0 (body: %s)", string(respBody))
+		return nil, fmt.Errorf("ssh: create-instance returned port 0 (body: %s)", string(respBody))
 	}
 	log.Info("created remote agent instance",
 		zap.Int("control_port", controlPort),
 		zap.Int("instance_port", resp.Port),
 		zap.String("instance_id", resp.ID))
-	return resp.Port, nil
+	return &resp, nil
 }
 
 func setSSHControlAuthorization(req *http.Request, token string) {

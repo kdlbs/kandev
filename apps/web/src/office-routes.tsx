@@ -64,7 +64,11 @@ const OFFICE_ROUTES: Record<string, RouteRenderer> = {
   "/office/workspace/activity": () => <ActivityPageClient initialActivity={[]} />,
   "/office/workspace/costs": () => <CostsPageClient initialCostSummary={null} />,
   "/office/workspace/skills": () => <SkillsPageClient initialSkills={[]} />,
-  "/office/workspace/routing": () => <ProviderRoutingPage />,
+  "/office/workspace/routing": () => (
+    <SettingsSaveProvider placement="content">
+      <ProviderRoutingPage />
+    </SettingsSaveProvider>
+  ),
   "/office/workspace/settings": () => (
     <SettingsSaveProvider placement="content">
       <SettingsPage />

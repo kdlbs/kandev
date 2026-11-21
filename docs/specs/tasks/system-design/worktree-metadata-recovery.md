@@ -28,7 +28,7 @@ retain authority over their own filesystems.
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-TASKS-WORKTREE-METADATA-RECOVERY-001` | Selected environment admission |
-| `REQ-TASKS-WORKTREE-METADATA-RECOVERY-002` | Classification and preservation, Multiple repositories |
+| `REQ-TASKS-WORKTREE-METADATA-RECOVERY-002` | Classification and preservation, Windows no-follow directory walk, Multiple repositories |
 | `REQ-TASKS-WORKTREE-METADATA-RECOVERY-003` | Recovery authority, Restart and failure, Response path, Inspection contention during resume |
 | `REQ-TASKS-WORKTREE-METADATA-RECOVERY-004` | Missing canonical checkout recovery |
 
@@ -223,6 +223,32 @@ Do not clear a newer error, bulk rewrite historical errors, or add dismissal API
 
 Implementation is complete in the
 [main-checkout fix package](../../../plans/main-checkout-recovery-admission/plan.md).
+
+### Windows no-follow directory walk
+
+The pinned-directory boundary (`storageworkspaces.OpenDirectoryNoFollow`,
+`CreateDirectoryNoFollow`, and `RemoveDirectoryNoFollow`) opens absolute paths
+through `internal/common/winpath`, which implements
+`AC-TASKS-WORKTREE-METADATA-RECOVERY-002.10`. A single `NtCreateFile` of the
+whole NT path (`\??\C:\...`) with `OBJ_DONT_REPARSE` cannot work: `\??\C:` is an
+object-manager symbolic link to the volume device, so the open fails with
+`STATUS_REPARSE_POINT_ENCOUNTERED` before any filesystem component is
+evaluated, even when the path contains no user link.
+
+`winpath.OpenDirectoryPath` splits the path into its volume or share root and
+the components below it. Only the volume root open omits `OBJ_DONT_REPARSE`, so
+the mount manager's drive-letter link resolves once. Every component below it
+is opened relative to its parent handle with `OBJ_DONT_REPARSE` and
+`FILE_OPEN_REPARSE_POINT`, and its `FILE_ATTRIBUTE_REPARSE_POINT` is checked
+before the handle is used as a parent, so a symbolic link or junction anywhere
+below the root, including above the task root, is refused. Ancestors are opened
+with traverse and attribute access only; the final component keeps the caller's
+access, so the existing sharing contract for DELETE requests is unchanged.
+Handles use synchronous I/O because they back `os.File` reads.
+
+`internal/common/winpath` is the shared leaf package for the storage workspace
+boundary and managed npm cache repair. Its path parser is platform independent;
+its native handle operations are Windows-only.
 
 ## Multiple repositories
 

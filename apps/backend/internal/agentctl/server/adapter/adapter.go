@@ -132,6 +132,12 @@ type SessionCapabilityProvider interface {
 	SupportsSessionLoad() bool
 }
 
+// SessionOperationAuthMethodsProvider exposes the initialize method snapshot
+// for a typed session-operation failure response.
+type SessionOperationAuthMethodsProvider interface {
+	GetSessionOperationAuthMethods() []streams.AuthMethodInfo
+}
+
 // StderrProviderSetter is an optional interface implemented by adapters that can use
 // stderr output for error context. The process manager checks for this interface
 // and calls SetStderrProvider if available.
@@ -301,6 +307,18 @@ type AgentAdapter interface {
 	// stdin closes, so their config sets this true to force an immediate
 	// process-group kill instead of waiting on a graceful stdin close.
 	RequiresProcessKill() bool
+}
+
+// MCPAttachmentEventPublisher routes best-effort attachment diagnostics through
+// the adapter's ordered event queue when one is available.
+type MCPAttachmentEventPublisher interface {
+	TryPublishMCPAttachmentEvent(AgentEvent, func(AgentEvent) (AgentEvent, error)) (bool, error)
+}
+
+// MCPAttachmentEventPersisterSetter lets an adapter commit its own attachment
+// events through the same ordered journal path used for observations.
+type MCPAttachmentEventPersisterSetter interface {
+	SetMCPAttachmentEventPersister(func(AgentEvent) (AgentEvent, error))
 }
 
 // McpServerConfig holds configuration for an MCP server.

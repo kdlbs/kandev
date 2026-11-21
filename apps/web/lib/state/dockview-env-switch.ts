@@ -17,13 +17,16 @@ import {
   savedLayoutMatchesLive,
   layoutStructuresMatch,
   getPinnedWidth,
+  getRootOrientation,
   getRootSplitview,
   isCenterCandidateGroupId,
   setPinnedTarget,
+  setReusableRightTarget,
   CENTER_GROUP,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
 } from "./layout-manager";
+import { PLUGIN_PANEL_COMPONENT } from "./layout-manager/plugin-panels";
 import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
 import {
@@ -284,11 +287,73 @@ function fastSwitchStructuresMatch(
   return layoutStructuresMatch(currentLayout, params.getDefaultLayout());
 }
 
+function layoutHasPluginPanel(layout: LayoutState): boolean {
+  return layout.columns.some((column) =>
+    column.groups.some((group) =>
+      group.panels.some((panel) => panel.component === PLUGIN_PANEL_COMPONENT),
+    ),
+  );
+}
+
+function serializedHasPluginPanel(saved: SerializedDockview): boolean {
+  return Object.values(saved.panels ?? {}).some(
+    (panel) => panel.contentComponent === PLUGIN_PANEL_COMPONENT,
+  );
+}
+
+/**
+ * True when either the live layout or the incoming one (saved, else the
+ * effective default) holds a generic plugin panel. The check is structural and
+ * registry-independent: component-only comparison cannot tell two plugins, or
+ * two placements of one plugin, apart, so reuse would keep the wrong panel.
+ */
+function switchInvolvesPluginPanel(
+  params: EnvSwitchParams,
+  currentLayout: LayoutState,
+  saved: object | null,
+): boolean {
+  if (layoutHasPluginPanel(currentLayout)) return true;
+  if (saved) return serializedHasPluginPanel(saved as SerializedDockview);
+  return layoutHasPluginPanel(params.getDefaultLayout());
+}
+
+/** Root axis the incoming environment will use: its saved grid, else the effective default. */
+function targetRootOrientation(params: EnvSwitchParams, saved: object | null): string {
+  if (saved) return (saved as SerializedDockview).grid?.orientation ?? "HORIZONTAL";
+  return params.getDefaultLayout().rootOrientation ?? "HORIZONTAL";
+}
+
+/**
+ * Fast reuse only reapplies horizontal pinned widths. A vertical target needs
+ * its own row extents restored even when the outgoing root has the same axis.
+ */
+function requiresRootGeometryRestore(
+  params: EnvSwitchParams,
+  currentLayout: LayoutState,
+  saved: object | null,
+): boolean {
+  const current = currentLayout.rootOrientation ?? "HORIZONTAL";
+  const target = targetRootOrientation(params, saved);
+  return current !== target || target === "VERTICAL";
+}
+
 function canUseFastEnvSwitch(
   params: EnvSwitchParams,
   currentLayout: LayoutState,
   saved: object | null,
 ): boolean {
+  if (switchInvolvesPluginPanel(params, currentLayout, saved)) {
+    debug("tryFastEnvSwitch: plugin panel involved, falling back to slow path", {
+      newEnvId: params.newEnvId,
+    });
+    return false;
+  }
+  if (requiresRootGeometryRestore(params, currentLayout, saved)) {
+    debug("tryFastEnvSwitch: root geometry requires restoration, falling back to slow path", {
+      newEnvId: params.newEnvId,
+    });
+    return false;
+  }
   if (!fastSwitchStructuresMatch(params, currentLayout, saved)) {
     if (isDebug()) {
       debug("tryFastEnvSwitch: structures do not match, falling back to slow path", {
@@ -385,24 +450,37 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
     );
   }
 
-  // Column widths from the outgoing env stay live across the switch because
-  // we skipped fromJSON. Apply the target env's widths explicitly:
-  //   - saved layout exists → use responsive defaults (or a manual right width)
-  //   - no saved layout with a custom default → use its scaled pinned widths
-  //   - otherwise → compute fresh defaults via getPinnedWidth
-  applyPinnedColumnSizes(
-    api,
-    saved as SerializedDockview | null,
-    params.safeWidth,
-    getManualRightWidth(newEnvId),
-    !saved ? (params.getDefaultPinnedWidths?.(params.safeWidth) ?? new Map()) : new Map(),
-  );
+  return applyFastSwitchGeometry(params, saved as SerializedDockview | null);
+}
 
-  api.layout(params.safeWidth, params.safeHeight);
+/**
+ * Column widths from the outgoing env stay live across the fast path because
+ * it skipped fromJSON. Apply the target env's widths explicitly:
+ *   - saved layout exists → responsive defaults (or a manual right width)
+ *   - no saved layout with a custom default → its scaled pinned widths, owned
+ *     by the new env exactly as the slow default build owns them, so final
+ *     fixups do not revert the right column to the stock ratio
+ *   - otherwise → fresh defaults via getPinnedWidth
+ */
+function applyFastSwitchGeometry(
+  params: EnvSwitchParams,
+  saved: SerializedDockview | null,
+): LayoutGroupIds {
+  const { api, newEnvId, safeWidth, safeHeight } = params;
+  const defaultPinnedWidths = saved
+    ? new Map<string, number>()
+    : (params.getDefaultPinnedWidths?.(safeWidth) ?? new Map<string, number>());
+  applyPinnedColumnSizes(api, saved, safeWidth, getManualRightWidth(newEnvId), defaultPinnedWidths);
+
+  const reusableRight = defaultPinnedWidths.get("right");
+  if (reusableRight !== undefined) setReusableRightTarget(newEnvId, params.getDefaultLayout());
+
+  api.layout(safeWidth, safeHeight);
   return applyLayoutFixups(
     api,
-    savedRightColumnWidth(saved as SerializedDockview | null),
+    savedRightColumnWidth(saved),
     getManualRightWidth(newEnvId),
+    reusableRight === undefined ? undefined : newEnvId,
   );
 }
 
@@ -497,6 +575,8 @@ function applyPinnedColumnSizes(
 ): void {
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
+  // Sidebar/right widths only exist for a horizontal root.
+  if (getRootOrientation(api) === "VERTICAL") return;
 
   const savedSizes = saved ? extractSavedColumnSizes(saved) : null;
   const liveLayout = fromDockviewApi(api);
@@ -579,7 +659,12 @@ function applyInitialRouteLayout(params: EnvSwitchParams): LayoutGroupIds | null
   if (params.oldEnvId !== null || !params.initialLayout) return null;
   params.buildDefault(params.api, params.initialLayout);
   params.api.layout(params.safeWidth, params.safeHeight);
-  return applyLayoutFixups(params.api);
+  return applyLayoutFixups(
+    params.api,
+    undefined,
+    getManualRightWidth(params.newEnvId),
+    params.newEnvId,
+  );
 }
 
 /**
@@ -695,5 +780,6 @@ export function performEnvSwitch({
       livePanelIdsAfter: api.panels.map((p) => p.id),
     });
   }
-  return applyLayoutFixups(api);
+  // This build owns the reusable default's resolved right width for `newEnvId`.
+  return applyLayoutFixups(api, undefined, getManualRightWidth(newEnvId), newEnvId);
 }

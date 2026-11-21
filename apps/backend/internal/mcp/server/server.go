@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/mcpurl"
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -127,6 +128,7 @@ type Server struct {
 	mode                       string // "task" (default), "task-title-pending", "config", "external", "office", or "automation"
 	mcpProviders               []string
 	sseBaseURL                 string
+	nativeRoutePrefix          string
 	profile                    mcpprofile.Context
 	legacyModeCapabilities     []mcpprofile.Capability
 	namespacesMCPToolsByServer bool
@@ -141,6 +143,9 @@ type Server struct {
 	attachmentAttempt          streams.MCPAttachmentAttempt
 	attachmentAttempts         map[string]streams.MCPAttachmentAttempt
 	attachmentReporter         func(streams.MCPAttachmentEvidence)
+	pendingAttachmentEvidence  map[string][]streams.MCPAttachmentEvidence
+	discardedAttachmentAttempt map[string]struct{}
+	discardedAttachmentOrder   []string
 	validatorMu                sync.RWMutex
 	toolValidators             map[string]toolArgumentValidator
 	pluginToolsUpdateMu        sync.Mutex
@@ -170,6 +175,22 @@ func WithSSEBaseURL(baseURL string) ServerOption {
 	return func(s *Server) {
 		s.sseBaseURL = strings.TrimSuffix(baseURL, "/")
 	}
+}
+
+// WithNativeRoutePrefix scopes the instance-owned MCP transports under one
+// helper path. External backend routes do not use this option.
+func WithNativeRoutePrefix(prefix string) ServerOption {
+	return func(s *Server) {
+		s.nativeRoutePrefix = prefix
+	}
+}
+
+func (s *Server) nativeRoutePath(endpoint string) string {
+	path, err := mcpurl.RoutePath(s.nativeRoutePrefix, endpoint)
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 type mcpAttachmentAttemptContextKey struct{}
@@ -209,11 +230,13 @@ func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, l
 		profileContext = profileContext.WithoutCapability(mcpprofile.CapabilityUserQuestion)
 	}
 	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, profileContext, options...)
-	s.sseServer = server.NewSSEServer(s.mcpServer,
-		server.WithBaseURL(s.sseBaseURLForPort(port)),
-	)
+	sseOptions := []server.SSEOption{server.WithBaseURL(s.sseBaseURLForPort(port))}
+	if s.nativeRoutePrefix != "" {
+		sseOptions = append(sseOptions, server.WithStaticBasePath(s.nativeRoutePrefix))
+	}
+	s.sseServer = server.NewSSEServer(s.mcpServer, sseOptions...)
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
-		server.WithEndpointPath("/mcp"),
+		server.WithEndpointPath(s.nativeRoutePath("/mcp")),
 		server.WithStateful(s.profile.BuiltinPackages != nil),
 		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
@@ -266,16 +289,18 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		setter.SetSessionID(sessionID)
 	}
 	s := &Server{
-		backend:                backend,
-		sessionID:              sessionID,
-		taskID:                 taskID,
-		disableAskQuestion:     !profileContext.HasCapability(mcpprofile.CapabilityUserQuestion),
-		mode:                   modeForProfile(profileContext),
-		mcpProviders:           mcpproviders.Normalize(profileContext.Providers),
-		profile:                profileContext,
-		legacyModeCapabilities: slices.Clone(profileContext.Capabilities),
-		logger:                 log.WithFields(zap.String("component", "mcp-server")),
-		attachmentAttempts:     make(map[string]streams.MCPAttachmentAttempt),
+		backend:                    backend,
+		sessionID:                  sessionID,
+		taskID:                     taskID,
+		disableAskQuestion:         !profileContext.HasCapability(mcpprofile.CapabilityUserQuestion),
+		mode:                       modeForProfile(profileContext),
+		mcpProviders:               mcpproviders.Normalize(profileContext.Providers),
+		profile:                    profileContext,
+		legacyModeCapabilities:     slices.Clone(profileContext.Capabilities),
+		logger:                     log.WithFields(zap.String("component", "mcp-server")),
+		attachmentAttempts:         make(map[string]streams.MCPAttachmentAttempt),
+		pendingAttachmentEvidence:  make(map[string][]streams.MCPAttachmentEvidence),
+		discardedAttachmentAttempt: make(map[string]struct{}),
 	}
 	for _, option := range options {
 		if option != nil {
@@ -424,6 +449,65 @@ func (s *Server) SetAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
 	s.attachmentMu.Lock()
 	defer s.attachmentMu.Unlock()
 	s.attachmentAttempt = attempt
+}
+
+// BeginAttachmentAttempt buffers observations until the owning ACP operation
+// publishes its attempt preamble. Authentication failures discard that buffer.
+func (s *Server) BeginAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
+	attempt.BuiltinPackages = s.Profile().BuiltinPackages
+	s.attachmentMu.Lock()
+	defer s.attachmentMu.Unlock()
+	s.attachmentAttempt = attempt
+	delete(s.discardedAttachmentAttempt, attempt.AttemptID)
+	s.pendingAttachmentEvidence[attempt.AttemptID] = nil
+}
+
+// CompleteAttachmentAttempt publishes buffered observations only after the
+// adapter has emitted its preamble for a non-authentication outcome.
+func (s *Server) CompleteAttachmentAttempt(attemptID string, publish bool) {
+	if attemptID == "" {
+		return
+	}
+	if !publish {
+		s.attachmentMu.Lock()
+		delete(s.pendingAttachmentEvidence, attemptID)
+		s.rememberDiscardedAttachmentAttemptLocked(attemptID)
+		s.attachmentMu.Unlock()
+		return
+	}
+
+	for {
+		s.attachmentMu.Lock()
+		evidence, pending := s.pendingAttachmentEvidence[attemptID]
+		if !pending || len(evidence) == 0 {
+			delete(s.pendingAttachmentEvidence, attemptID)
+			s.attachmentMu.Unlock()
+			return
+		}
+		s.pendingAttachmentEvidence[attemptID] = nil
+		reporter := s.attachmentReporter
+		s.attachmentMu.Unlock()
+
+		if reporter != nil {
+			for _, observation := range evidence {
+				reporter(observation)
+			}
+		}
+	}
+}
+
+func (s *Server) rememberDiscardedAttachmentAttemptLocked(attemptID string) {
+	if _, exists := s.discardedAttachmentAttempt[attemptID]; exists {
+		return
+	}
+	s.discardedAttachmentAttempt[attemptID] = struct{}{}
+	s.discardedAttachmentOrder = append(s.discardedAttachmentOrder, attemptID)
+	if len(s.discardedAttachmentOrder) <= streams.MaxMCPAttachmentAttempts*16 {
+		return
+	}
+	oldest := s.discardedAttachmentOrder[0]
+	s.discardedAttachmentOrder = s.discardedAttachmentOrder[1:]
+	delete(s.discardedAttachmentAttempt, oldest)
 }
 
 // mcpHTTPContext snapshots the backend-owned attachment attempt before the MCP
@@ -606,7 +690,7 @@ func (s *Server) reportMCPConnectionWithTools(
 		// a defense for any other evidence producer.
 		tools, _ = streams.NormalizeMCPToolCatalog(tools, toolCount)
 	}
-	reporter(streams.MCPAttachmentEvidence{
+	s.publishAttachmentEvidence(reporter, streams.MCPAttachmentEvidence{
 		BuiltinPackage:     builtinEvidencePackage(attempt.BuiltinPackages, mcpEvidenceServerName(serverNames...)),
 		AttemptID:          attempt.AttemptID,
 		ServerName:         mcpEvidenceServerName(serverNames...),
@@ -619,6 +703,31 @@ func (s *Server) reportMCPConnectionWithTools(
 		ToolTokenEstimator: toolTokenEstimator(tools),
 		Summary:            streams.SanitizeMCPErrorSummary(summary),
 	})
+}
+
+func (s *Server) publishAttachmentEvidence(
+	reporter func(streams.MCPAttachmentEvidence),
+	evidence streams.MCPAttachmentEvidence,
+) {
+	s.attachmentMu.Lock()
+	if _, discarded := s.discardedAttachmentAttempt[evidence.AttemptID]; discarded {
+		s.attachmentMu.Unlock()
+		return
+	}
+	if pending, ok := s.pendingAttachmentEvidence[evidence.AttemptID]; ok {
+		if len(pending) < streams.MaxMCPAttachmentEvidenceEvents {
+			s.pendingAttachmentEvidence[evidence.AttemptID] = append(pending, evidence)
+		}
+		s.attachmentMu.Unlock()
+		return
+	}
+	if s.attachmentReporter != nil {
+		reporter = s.attachmentReporter
+	}
+	s.attachmentMu.Unlock()
+	if reporter != nil {
+		reporter(evidence)
+	}
 }
 
 func toolTokenEstimator(tools []streams.MCPToolSummary) string {
@@ -1494,6 +1603,7 @@ func (s *Server) registerTaskExecutionTools() {
 				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
 			),
 			mcp.WithString("reply_to_question_id", mcp.Description("Optional question ID from an autopilot child. When set, the direct parent answer is recorded against that pending question and the delivery is idempotent.")),
+			mcp.WithString("operation_id", mcp.Description("Optional kanban task identity for one send (letters, digits, dot, underscore, colon, hyphen; 1-128 characters). After a timeout, read get_task_message_operation_kandev before deciding to resend. Replaying a retained identity returns its recorded outcome without delivering again; different target, prompt, mode, session, or question fields return operation_id_conflict. Not accepted with delivery_mode=\"report\".")),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)
@@ -1634,7 +1744,7 @@ func taskChangeRequestToolSchema() json.RawMessage {
 // guidance differ by mode: in external mode there is no current task, so the
 // 'self' shorthand is omitted.
 func (s *Server) registerCreateTaskTool() {
-	toolDesc := `Create a persistent Kandev task or subtask and optionally start its agent. Use only for user-requested Kandev-tracked work; use the host's native subagent mechanism for ordinary delegation. Set parent_id="self" for a subtask of the current task and omit it for an unrelated top-level task. For a Kanban child, self placement creates a sibling under its common parent because Kanban allows one subtask level. The common parent owns coordination; the creating session keeps ordinary messaging. Subtasks inherit the parent's workspace, workflow, repository, profiles, executor, and materialized workspace unless overridden. external_id provides create-if-absent idempotency and is not a lookup.`
+	toolDesc := `Create a persistent Kandev task or subtask and optionally start its agent. Use only for user-requested Kandev-tracked work; use the host's native subagent mechanism for ordinary delegation. Set parent_id="self" for a subtask of the current task and omit it for an unrelated top-level task. For a Kanban child, self placement creates a sibling under its common parent because Kanban allows one subtask level. The common parent owns coordination; the creating session keeps ordinary messaging. Subtasks inherit applicable task defaults from the parent; workspace_mode controls the materialized workspace. external_id provides create-if-absent idempotency and is not a lookup.`
 	parentDesc := "Parent task ID for subtasks. Use 'self' for a user-requested Kandev subtask or plan phase. For a Kanban child, self placement creates a sibling under the common parent because Kanban allows one subtask level. The common parent owns coordination. Omit only for unrelated top-level tasks."
 	agentProfileDesc := "Accepts an agent profile ID only. An ID that names no profile is rejected and creates nothing; the words current_task and workspace_default are values of the mcp_task_agent_profile_default user setting, not accepted arguments, so omit this argument to use the configured policy. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks an explicit ID; otherwise an explicit agent_profile_id wins. When both are absent, the current_task policy uses the verified creating session's profile and effective model, mode, and dynamic options for a session-bound call, then falls back to the current/source or parent profile without verified session context. The workspace_default policy skips those task profiles and the creating session, then uses workflow profiles before the target workspace default. Explicit profiles do not copy creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start. agent_profile_id is the launch profile only and does not set an Office task's assignee; set the Office assignee through the Office UI or PATCH /api/v1/office/tasks/:id with an assignee_agent_profile_id field in the request body. Agent callers need can_assign_tasks for this PATCH operation (agent_profile_id there is not recognized)."
 
@@ -1651,7 +1761,7 @@ func (s *Server) registerCreateTaskTool() {
 			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Auto-resolved if only one workspace exists. Defaulted from parent for subtasks when omitted.")),
 			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Auto-resolved if the workspace has only one workflow. Defaulted from parent for subtasks when workspace_id is also omitted; if supplied, it must belong to the effective workspace_id.")),
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted; for subtasks, pass only with an explicit workflow_id)")),
-			mcp.WithString("workspace_mode", mcp.Enum("inherit_parent", "new_workspace"), mcp.Description("Optional materialized-workspace mode. Omit for subtasks to inherit the parent's workspace/worktree. inherit_parent requires parent_id and normally reuses the parent's materialized workspace/worktree. If a new launch selects a different non-Kubernetes executor, Kandev creates a separate child-owned workspace; uncommitted parent changes are not copied. A session still bound to the inherited environment must resume with its original executor, and Kubernetes environments cannot be shared across tasks. new_workspace requests a separate workspace/worktree.")),
+			mcp.WithString("workspace_mode", mcp.Enum("inherit_parent", "new_workspace"), mcp.Description("Optional materialized-workspace mode. For subtasks, omitting this field creates a separate workspace with fresh checkouts; use inherit_parent to share the parent's exact existing checkout(s) and files. inherit_parent requires parent_id. If a new launch selects a different non-Kubernetes executor, Kandev creates a separate child-owned workspace and does not copy uncommitted parent changes. A session still bound to the inherited environment must resume with its original executor, and Kubernetes environments cannot be shared across tasks. new_workspace also requests a separate workspace. Omit the field instead of sending blank input.")),
 			mcp.WithString("title", mcp.Required(), mcp.MaxLength(taskcontract.TaskTitleMaxLength), mcp.Description("A concise, few-word task title (maximum 60 characters).")),
 			mcp.WithString("prompt", mcp.Description("The initial prompt for the task agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. For auto-started subtasks, provide a specific and detailed prompt; omitting it starts the task agent without task-specific context.")),
 			mcp.WithString("priority", mcp.Enum(models.TaskPriorityCritical, models.TaskPriorityHigh, models.TaskPriorityMedium, models.TaskPriorityLow), mcp.DefaultString(models.TaskPriorityMedium), mcp.Description("Task priority. Defaults to medium when omitted.")),
