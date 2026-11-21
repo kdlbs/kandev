@@ -118,12 +118,14 @@ anything else that has an effect:
    work order 05 provides the gate. A Pause that commits after the second read
    is caught by the `Stopper`, which cancels the running episode.
 3. **Automatic approval:** in `TryAutomaticApproval` after the guards that decide
-   the proposal is one the automatic class would handle (phase 3 on, kind
-   `create_task`, no agent start, the class setting `automatic`) and before the
-   raiser check, the claim and the ten-per-day counter. A proposal of any other
-   kind or class never receives the paused note. The automatic claim re-reads
+   the proposal is one the automatic path would handle (phase 3 on, every class
+   the proposal needs raisable and `automatic`: `create_task`, `resume`, or
+   either with `start_agent`; see [automatic-classes](automatic-classes.md#generalised-automatic-approval)) and before the
+   raiser check, the claim and the daily automatic counter. A proposal that needs a
+   class that is not raisable, or one that is not `automatic`, never receives
+   the paused note. The automatic claim re-reads
    `paused_at` with the policy under the coordinator row lock, before the
-   ten-per-day count and claim. A Pause committed during the raiser check
+   daily automatic count and claim. A Pause committed during the raiser check
    therefore leaves the proposal pending with the paused note and consumes
    no allowance. A claim committed before Pause retains its existing owner.
 
@@ -306,11 +308,12 @@ precondition](#the-precondition), `pendingResult(proposal, pausedNote)` (a
 non-nil `AutomaticResult` with status `pending`, the existing helper
 `TryAutomaticApproval` uses for its other holds), where today the earlier guards
 return `nil, nil` and show no note: the proposal stays `pending` with the note
-"Paused; a manager will decide", and the ten-per-24-hours counter is not read or
+"Paused; a manager will decide", and the daily automatic counter is not read or
 advanced (`002.3`). The note is derived on each call, nothing is stored, so a
-repeated attempt gives the same result. Pause committing after the gate read
-does not stop an approval already past it: that is accepted, one proposal at a
-time and inside the ten-per-day limit. A
+repeated attempt gives the same result. Pause committing after the locked re-read
+of `paused_at` does not stop an approval already past it: that is accepted, and
+the number of such approvals is bounded by the coordinator's daily automatic
+limit (`daily_limit`, [automatic-classes](automatic-classes.md#eligibility-settings)). A
 manager's manual approval is unaffected.
 
 ## Attended messages

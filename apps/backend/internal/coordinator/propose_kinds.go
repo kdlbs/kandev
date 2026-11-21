@@ -49,20 +49,27 @@ func (s *Service) ProposeKind(ctx context.Context, coordinatorID, kind string, a
 	if exec == nil {
 		return nil, false, fmt.Errorf("%w: %q", ErrUnknownProposalKind, kind)
 	}
+	if kind == ProposalKindAnswer {
+		if err := s.recheckAnswerFlag(); err != nil {
+			return nil, false, err
+		}
+	}
 	c, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
 	if err != nil {
 		return nil, false, err
 	}
-	if err := checkOrderIDsShape(orderIDs); err != nil {
-		return nil, false, err
+	if kind == ProposalKindAnswer && !s.policyFor(c).Allows(ActionAnswer) {
+		return nil, false, &PolicyDeniedError{Action: ActionAnswer}
 	}
-	taskID, err := proposeTaskID(args)
+	scope := &proposeScope{}
+	ctx = withProposeScope(ctx, scope)
+	taskID, orderIDs, err := s.proposeStage1(exec, args, scope, orderIDs)
 	if err != nil {
 		return nil, false, err
 	}
 	if open, err := s.store.OpenTargetProposal(ctx, s.store.ro, coordinatorID, kind, taskID); err != nil {
 		return nil, false, err
-	} else if open != nil {
+	} else if open != nil && openAnswersCall(exec, open, args) {
 		return open, true, nil
 	}
 	p, err := s.buildKindProposal(ctx, exec, c, args, taskID, orderIDs)
@@ -77,8 +84,14 @@ func (s *Service) ProposeKind(ctx context.Context, coordinatorID, kind string, a
 			return nil, err
 		}
 		if open != nil {
-			deduped = true
-			return open, nil
+			verdict, err := s.decideOpenProposal(ctx, tx, exec, open, args)
+			if err != nil {
+				return nil, err
+			}
+			if verdict == SupersedeDedupe {
+				deduped = true
+				return open, nil
+			}
 		}
 		return nil, s.checkOrdersActive(ctx, tx, coordinatorID, orderIDs)
 	}
@@ -98,6 +111,39 @@ func (s *Service) ProposeKind(ctx context.Context, coordinatorID, kind string, a
 		s.publishCoordinatorUpdated(ctx, c.WorkspaceID, coordinatorID)
 	}
 	return p, deduped, nil
+}
+
+// proposeStage1 returns the task id and standing order ids of a call: from the
+// kind's own shape check when it validates the whole argument object, else from
+// the shared checks.
+func (s *Service) proposeStage1(exec KindExecutor, args json.RawMessage, scope *proposeScope, orderIDs []string) (string, []string, error) {
+	if owner, ok := exec.(argsOwner); ok {
+		taskID, err := owner.ValidateShape(args, scope)
+		return taskID, scope.OrderIDs, err
+	}
+	if err := checkOrderIDsShape(orderIDs); err != nil {
+		return "", nil, err
+	}
+	taskID, err := proposeTaskID(args)
+	return taskID, orderIDs, err
+}
+
+// openAnswersCall reports whether an open proposal is the result of a repeat
+// call: always, unless the kind says only an equal call is answered by it.
+func openAnswersCall(exec KindExecutor, open *Proposal, args json.RawMessage) bool {
+	if m, ok := exec.(OpenMatcher); ok {
+		return m.OpenMatches(open, args)
+	}
+	return true
+}
+
+// decideOpenProposal is the in-transaction decision for an open proposal: a
+// kind without a supersede rule dedupes to it.
+func (s *Service) decideOpenProposal(ctx context.Context, tx coordinatorExec, exec KindExecutor, open *Proposal, args json.RawMessage) (SupersedeVerdict, error) {
+	if sup, ok := exec.(SupersedeOnPropose); ok {
+		return sup.Supersede(ctx, tx, open, args)
+	}
+	return SupersedeDedupe, nil
 }
 
 // buildKindProposal validates args and returns the unsaved proposal. The stored

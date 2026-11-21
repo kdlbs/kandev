@@ -13,19 +13,17 @@ last_updated: 2026-09-30
 
 ## Overview
 
-Phase 2 builds the coordinator permission model that phase 1 defined and
-hardcoded (decision D17). Each coordinator has a setting per action (May do)
-and a scope of workflows (Watches). A manager edits both in settings. The
-coordinator's tools are the output of that policy, and the coordinator can
-never read or change it. No write action is `automatic` in phase 2 (D13).
+Phase 2 builds the permission model phase 1 hardcoded (decision D17). Each coordinator has a setting per action (May do)
+and a scope of workflows (Watches), both edited by a manager in settings. Its tools are the output of that policy, and the coordinator can
+not read or change it. No write action is `automatic` in phase 2 (D13).
 
 ## Terminology
 
 - **Action:** one of `create_task`, `start_agent`, `message`, `move`, `resume`,
   `stop`. Reading is not an action: the read tools are always available.
-  Merging a pull request and moving a task to Done are never actions.
+  Merging and moving a task to Done are never actions.
 - **Setting:** `denied`, `requires_approval` or `automatic`.
-- **Phase-1 policy:** `create_task` `requires_approval`, every other action
+- **Phase 1:** `create_task` `requires_approval`, every other action
   `denied`.
 - **Watches:** `all` (every workflow of the workspace, including workflows
   created later) or `selected` (a list of the workspace's workflows).
@@ -90,8 +88,8 @@ Mockup:
   sets any action to `automatic`; the last case shall use the error code
   `automatic_not_available`. The error shall name the action.
 - **AC-COORDINATOR-PERMISSIONS-001.4:** The system shall have no setting, tool,
-  proposal kind or approval path that merges a pull request or moves a task
-  into a step that completes the task on entry.
+  proposal kind or approval path that moves a task into a step that completes
+  the task on entry, or merges a pull request except under [merge](merge.md).
 - **AC-COORDINATOR-PERMISSIONS-001.5:** When a reader sends a settings save,
   the system shall refuse it with 403 and change nothing.
 - **AC-COORDINATOR-PERMISSIONS-001.6:** The May do section shall list the six
@@ -101,8 +99,8 @@ Mockup:
   note that it arrives when the coordinator can act on its own. Stop shall
   offer Denied only, with the note that stopping is not available yet.
 - **AC-COORDINATOR-PERMISSIONS-001.7:** Below the six rows, the May do section
-  shall show two locked rows, Merge a pull request and Move a task to Done,
-  each marked "Always human", with no control.
+  shall show locked rows Merge a pull request and Move a task to Done,
+  "Always human", no control; with the merge flag on, Merge reads "Per repository".
 - **AC-COORDINATOR-PERMISSIONS-001.8:** Each action row shall show its last 30
   days from the activity summary
   ([activity log](activity-log.md#req-coordinator-activity-log-005-retention-and-summary)):

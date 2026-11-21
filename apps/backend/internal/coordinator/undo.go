@@ -242,7 +242,7 @@ func (s *Service) moveBack(ctx context.Context, taskID, workflowID, fromStepID s
 // and not found when retention removed it meanwhile.
 func (s *Service) markUndone(ctx context.Context, row *ActivityRow, undoneBy string) error {
 	now := s.store.now().UTC()
-	return s.store.withCoordinatorLock(ctx, row.CoordinatorID, func(tx coordinatorExec) error {
+	err := s.store.withCoordinatorLock(ctx, row.CoordinatorID, func(tx coordinatorExec) error {
 		changed, err := s.store.MarkUndone(ctx, tx, row.ID, undoneBy, now)
 		if err != nil {
 			return err
@@ -269,6 +269,10 @@ func (s *Service) markUndone(ctx context.Context, row *ActivityRow, undoneBy str
 			UpdatedAt:     now,
 		})
 	})
+	if err == nil {
+		row.UndoneAt = &now
+	}
+	return err
 }
 
 // tryAcquire takes key without waiting; ok is false when it is held.

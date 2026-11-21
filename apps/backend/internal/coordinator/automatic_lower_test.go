@@ -41,7 +41,7 @@ func activityIDFor(t *testing.T, store *Store, c *Coordinator, proposalID string
 func TestLowerClass_NoOpWhenNotAutomatic(t *testing.T) {
 	store, c, _, svc, _ := automaticFixture(t)
 	before, _ := store.GetCoordinatorByID(context.Background(), c.ID)
-	if err := svc.LowerClass(context.Background(), c.ID, ActionCreateTask, "x"); err != nil {
+	if _, err := svc.LowerClass(context.Background(), c.ID, ActionCreateTask, "x", LowerGuard{}); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := store.GetCoordinatorByID(context.Background(), c.ID)
@@ -53,7 +53,7 @@ func TestLowerClass_NoOpWhenNotAutomatic(t *testing.T) {
 func TestLowerClass_WritesChangeAndBumpsRevision(t *testing.T) {
 	store, c, _, svc, _ := raisedFixture(t)
 	before, _ := store.GetCoordinatorByID(context.Background(), c.ID)
-	if err := svc.LowerClass(context.Background(), c.ID, ActionCreateTask, "because"); err != nil {
+	if _, err := svc.LowerClass(context.Background(), c.ID, ActionCreateTask, "because", LowerGuard{}); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := store.GetCoordinatorByID(context.Background(), c.ID)
@@ -97,7 +97,7 @@ func TestUndo_OfManagerApprovalAfterFailedAutomaticDoesNotLower(t *testing.T) {
 	if settingOf(t, store, svc, c) != SettingAutomatic {
 		t.Fatal("undo of a manager-approved create lowered the class")
 	}
-	rows, err := store.DecidedRows(context.Background(), c.ID, automaticNow.Add(-time.Hour), automaticNow.Add(time.Hour))
+	rows, err := store.DecidedRows(context.Background(), c.ID, ActionCreateTask, automaticNow.Add(-time.Hour), automaticNow.Add(time.Hour))
 	if err != nil || len(rows) != 1 || rows[0].Outcome != string(ActivityApproved) {
 		t.Fatalf("decided rows = %+v err = %v", rows, err)
 	}
@@ -162,7 +162,7 @@ func TestAutomatic_VolumeIgnoresAutomaticApprovalsAfterLowerAndReRaise(t *testin
 	for i := 0; i < 5; i++ {
 		seedApproved(t, store, c, fmt.Sprintf("mgr-%d", i), ActionCreateTask, automaticNow.Add(-31*24*time.Hour+time.Duration(i)*time.Hour), nil)
 	}
-	if err := svc.LowerClass(context.Background(), c.ID, ActionCreateTask, "manager"); err != nil {
+	if _, err := svc.LowerClass(context.Background(), c.ID, ActionCreateTask, "manager", LowerGuard{}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := svc.SaveSettings(authedContext(testRaiser), c.WorkspaceID, c.ID, []byte(raiseBody()))

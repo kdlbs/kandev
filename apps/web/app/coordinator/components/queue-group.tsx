@@ -5,6 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/
 import { cn } from "@/lib/utils";
 import type { QueueGroupKind, QueueItem } from "@/lib/coordinator/attention";
 import type { TaskPR } from "@/lib/types/github";
+import { useQueueMerge } from "./queue-merge-context";
 import { QueueRow } from "./queue-row";
 
 const GROUP_LABEL_KEY: Record<QueueGroupKind, string> = {
@@ -85,6 +86,7 @@ export function QueueGroup({
   const { t } = useTranslation();
   const label = t(GROUP_LABEL_KEY[group]);
   const open = defaultOpen ?? !COLLAPSED_BY_DEFAULT.has(group);
+  const mergeOn = useQueueMerge() !== null;
 
   if (!COLLAPSED_BY_DEFAULT.has(group)) {
     return (
@@ -97,7 +99,7 @@ export function QueueGroup({
           <span>{label}</span>
           <Badge variant="secondary">{items.length}</Badge>
         </h3>
-        {phase2 && group === "ready_to_merge" && (
+        {phase2 && !mergeOn && group === "ready_to_merge" && (
           <p className="text-muted-foreground text-xs">{t("coordinator:mergeAlwaysHuman")}</p>
         )}
         <QueueGroupRows

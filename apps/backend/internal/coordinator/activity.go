@@ -28,6 +28,10 @@ const (
 	ActivityRefused  ActivityOutcome = "refused"
 	ActivityUndone   ActivityOutcome = "undone"
 	ActivityReturned ActivityOutcome = "returned"
+	// ActivityUncertain records a merge whose provider outcome is not confirmed.
+	ActivityUncertain ActivityOutcome = "uncertain"
+	// ActivityNote records a fact that changes no status.
+	ActivityNote ActivityOutcome = "note"
 )
 
 // ActivityAuthorization records why a row was or was not allowed to proceed.
@@ -89,7 +93,7 @@ type RefusalRecorder interface {
 }
 
 func validActivityClass(a Action) bool {
-	return a == ActionUnknown || a == ActionImprovement || isPolicyAction(a)
+	return a == ActionUnknown || a == ActionImprovement || a == ActionMerge || isPolicyAction(a)
 }
 
 func (r ActivityRow) validate() error {
@@ -100,7 +104,7 @@ func (r ActivityRow) validate() error {
 		return fmt.Errorf("%w: action class %q", ErrInvalidActivity, r.ActionClass)
 	}
 	switch r.Outcome {
-	case ActivityProposed, ActivityApproved, ActivityRejected, ActivityFailed, ActivityRefused, ActivityUndone, ActivityReturned:
+	case ActivityProposed, ActivityApproved, ActivityRejected, ActivityFailed, ActivityRefused, ActivityUndone, ActivityReturned, ActivityUncertain, ActivityNote:
 	default:
 		return fmt.Errorf("%w: outcome %q", ErrInvalidActivity, r.Outcome)
 	}

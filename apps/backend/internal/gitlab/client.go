@@ -125,8 +125,10 @@ type Client interface {
 	GetIssueState(ctx context.Context, projectPath string, iid int) (string, error)
 
 	// MergeMR accepts an MR. squash=true performs a squash merge regardless of
-	// project merge method. squashCommitMessage is used when squash=true.
-	MergeMR(ctx context.Context, projectPath string, iid int, squash bool, squashCommitMessage string) (*MR, error)
+	// project merge method. squashCommitMessage is used when squash=true. A
+	// non-empty expectedSHA must still be the MR head or the call fails with
+	// ErrMergeHeadMoved.
+	MergeMR(ctx context.Context, projectPath string, iid int, squash bool, squashCommitMessage, expectedSHA string) (*MR, error)
 
 	// MarkMRReady strips the leading draft marker from an open draft MR's title
 	// and returns the re-read MR. A non-draft MR is returned unchanged.

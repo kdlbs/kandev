@@ -2,13 +2,22 @@ import type { TFunction } from "i18next";
 import type {
   ImprovementProposal,
   KindProposal,
+  MergeProposal,
   StoredProposal,
 } from "@/lib/api/domains/coordinator-api";
+import { ACTION_LABEL_KEY } from "@/lib/coordinators/control-draft";
 
 const FAILURE_KEYS: Record<string, string> = {
   outcome_unknown: "coordinator:outcomeUnknown",
   task_archived: "coordinator:outcomeTaskArchived",
 };
+
+/** The status line of a refused answer: the stale target or the unavailable task. */
+export function answerRefusedKey(code: string | null): string {
+  return code === "task_archived"
+    ? "coordinator:answerRefusedTaskUnavailable"
+    : "coordinator:answerRefusedStale";
+}
 
 const KIND_FAILURE_KEYS: Record<KindProposal["kind"], Record<string, string>> = {
   resume: { not_resumable: "coordinator:outcomeNotResumable" },
@@ -24,6 +33,13 @@ const KIND_FAILURE_KEYS: Record<KindProposal["kind"], Record<string, string>> = 
     step_starts_agent: "coordinator:outcomeStepStartsAgent",
     agent_running: "coordinator:outcomeAgentRunning",
     step_full: "coordinator:outcomeStepFull",
+  },
+  answer: {
+    stale: "coordinator:answerRefusedStale",
+    invalid_draft: "coordinator:outcomeInvalidDraft",
+    option_not_offered: "coordinator:outcomeOptionNotOffered",
+    resolution_in_progress: "coordinator:outcomeResolutionInProgress",
+    not_delivered: "coordinator:outcomeNotDelivered",
   },
 };
 
@@ -75,24 +91,42 @@ export function kindApprovedToast(
       return flags.queued
         ? t("coordinator:toastApprovedMoveQueued", { card, step })
         : t("coordinator:toastApprovedMove", { card, step });
+    case "answer":
+      return t("coordinator:toastApprovedAnswer", { card });
   }
 }
 
-export type PolicyAction = "create" | "resume" | "message" | "move";
+export type PolicyAction = "create" | "resume" | "message" | "move" | "answer";
 
 const POLICY_KEYS: Record<PolicyAction, string> = {
   create: "coordinator:policyCreate",
   resume: "coordinator:policyResume",
   message: "coordinator:policyMessage",
   move: "coordinator:policyMove",
+  answer: "coordinator:policyAnswer",
 };
 
 /** "Policy: <action> requires approval", fixed text from the stored kind. */
 export function policyLineText(
-  proposal: Exclude<StoredProposal, ImprovementProposal>,
+  proposal: Exclude<StoredProposal, ImprovementProposal | MergeProposal>,
   t: TFunction,
 ): string {
   const action: PolicyAction =
     proposal.kind === undefined || proposal.kind === "create_task" ? "create" : proposal.kind;
   return t(POLICY_KEYS[action]);
+}
+
+type LoweredToastContext = {
+  t: TFunction;
+  toast: (input: { title: string; variant?: "default" | "success" | "error" | "loading" }) => void;
+};
+
+/** Tells the manager which class their decision lowered to requires approval, by display label. */
+export function loweredToast(proposal: StoredProposal, ctx: LoweredToastContext) {
+  const lowered = proposal.lowered_class;
+  if (!lowered) return;
+  ctx.toast({
+    title: ctx.t("coordinator:loweredClassNotice", { class: ctx.t(ACTION_LABEL_KEY[lowered]) }),
+    variant: "default",
+  });
 }

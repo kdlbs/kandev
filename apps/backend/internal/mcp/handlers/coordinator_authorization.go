@@ -30,6 +30,8 @@ var coordinatorSurfaceActions = map[string]struct{}{
 	coordinator.ActionProposeResume:  {},
 	coordinator.ActionProposeMessage: {},
 	coordinator.ActionProposeMove:    {},
+	coordinator.ActionProposeAnswer:  {},
+	coordinator.ActionProposeMerge:   {},
 	coordinator.ActionGetItem:        {},
 	coordinator.ActionListActivity:   {},
 
@@ -53,6 +55,8 @@ var coordinatorPrincipalOnlyActions = map[string]struct{}{
 	coordinator.ActionProposeResume:  {},
 	coordinator.ActionProposeMessage: {},
 	coordinator.ActionProposeMove:    {},
+	coordinator.ActionProposeAnswer:  {},
+	coordinator.ActionProposeMerge:   {},
 	coordinator.ActionGetItem:        {},
 	coordinator.ActionListActivity:   {},
 

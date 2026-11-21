@@ -23,9 +23,32 @@ const (
 	WakeKindCompleted  WakeKind = "completed"
 )
 
+// Merge wake kinds for a watched change. They are recorded for watched cards
+// the coordinator does not own and are not derived by the own-task backstop.
+const (
+	WakeKindChangeRed      WakeKind = "change_red"
+	WakeKindChangeConflict WakeKind = "change_conflict"
+	WakeKindChangeThreads  WakeKind = "change_threads"
+)
+
+var mergeWakeKinds = []WakeKind{WakeKindChangeRed, WakeKindChangeConflict, WakeKindChangeThreads}
+
+// IsMerge reports whether the kind is a change (merge stewardship) wake kind.
+func (k WakeKind) IsMerge() bool {
+	for _, known := range mergeWakeKinds {
+		if k == known {
+			return true
+		}
+	}
+	return false
+}
+
 var wakeKindOrder = []WakeKind{WakeKindQuestion, WakeKindPermission, WakeKindStall, WakeKindError, WakeKindCompleted}
 
 func (k WakeKind) valid() bool {
+	if k.IsMerge() {
+		return true
+	}
 	for _, known := range wakeKindOrder {
 		if k == known {
 			return true
@@ -219,6 +242,12 @@ func (s *Store) RecordWake(ctx context.Context, coordinatorID, taskID string, ki
 }
 
 func (s *Store) recordWakeTx(ctx context.Context, tx coordinatorExec, coordinatorID, taskID string, kind WakeKind, episodeKey string) (RecordWakeResult, error) {
+	return s.recordWakeCore(ctx, tx, coordinatorID, taskID, kind, episodeKey, kind.IsMerge())
+}
+
+// recordWakeCore stores one wake. A merge kind skips the own-task check because
+// the caller already established that the coordinator watches the task.
+func (s *Store) recordWakeCore(ctx context.Context, tx coordinatorExec, coordinatorID, taskID string, kind WakeKind, episodeKey string, watched bool) (RecordWakeResult, error) {
 	var workspaceID string
 	var autonomy int
 	if err := tx.QueryRowContext(ctx, s.db.Rebind(`SELECT workspace_id, autonomy_enabled FROM coordinators WHERE id = ?`), coordinatorID).Scan(&workspaceID, &autonomy); err != nil {
@@ -232,18 +261,20 @@ func (s *Store) recordWakeTx(ctx context.Context, tx coordinatorExec, coordinato
 		result.Outcome = WakeAutonomyOff
 		return result, nil
 	}
-	var owned int
-	err := tx.QueryRowContext(ctx, s.db.Rebind(`SELECT 1 `+ownTaskJoins+`
-		WHERE p.coordinator_id = ? AND p.task_id = ? AND `+ownTaskPredicates+` LIMIT 1`), coordinatorID, taskID).Scan(&owned)
-	if errors.Is(err, sql.ErrNoRows) {
-		result.Outcome = WakeNotOwn
-		return result, nil
-	}
-	if err != nil {
-		return RecordWakeResult{}, fmt.Errorf("check own task for wake: %w", err)
+	if !watched {
+		var owned int
+		err := tx.QueryRowContext(ctx, s.db.Rebind(`SELECT 1 `+ownTaskJoins+`
+			WHERE p.coordinator_id = ? AND p.task_id = ? AND `+ownTaskPredicates+` LIMIT 1`), coordinatorID, taskID).Scan(&owned)
+		if errors.Is(err, sql.ErrNoRows) {
+			result.Outcome = WakeNotOwn
+			return result, nil
+		}
+		if err != nil {
+			return RecordWakeResult{}, fmt.Errorf("check own task for wake: %w", err)
+		}
 	}
 	var stored int
-	err = tx.QueryRowContext(ctx, s.db.Rebind(`SELECT 1 FROM coordinator_wakes
+	err := tx.QueryRowContext(ctx, s.db.Rebind(`SELECT 1 FROM coordinator_wakes
 		WHERE coordinator_id = ? AND task_id = ? AND kind = ? AND episode_key = ? LIMIT 1`), coordinatorID, taskID, string(kind), episodeKey).Scan(&stored)
 	if err == nil {
 		result.Outcome = WakeExists

@@ -60,6 +60,9 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 			workspace.PUT("/coordinators/:cid/pause", h.httpPutPause)
 			workspace.GET("/coordinators/:cid/measures", h.httpGetMeasures)
 			registerLearningRoutes(workspace, h)
+			if svc.notes {
+				registerNoteRoutes(workspace, h)
+			}
 		}
 	}
 	workspace.GET("/coordinator-stalls", h.httpListStalls)
@@ -72,6 +75,9 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 		workspace.POST("/coordinators/:cid/activity/:rid/undo", h.httpUndoActivity)
 		workspace.GET("/coordinators/:cid/settings", h.httpGetSettings)
 		workspace.PUT("/coordinators/:cid/settings", h.httpPutSettings)
+		if svc.merge {
+			registerMergeRoutes(workspace, h)
+		}
 	}
 }
 
@@ -255,7 +261,10 @@ func (h *Handlers) httpGetProposal(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewProposalDTOPhases(found, h.service.phase2, h.service.phase3))
+	found, detail := h.service.OpenMergeDetail(ctx, found)
+	dto := NewProposalDTOPhases(found, h.service.phase2, h.service.phase3)
+	dto.Merge = detail
+	c.JSON(http.StatusOK, dto)
 }
 
 // httpApproveProposal backs
@@ -360,6 +369,7 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 	var undoErr *UndoRefusal
 	var settingsErr *SettingsError
 	var deniedErr *PolicyDeniedError
+	var mergeConflict *MergeConflictError
 	if status, body, ok := automaticErrorResponse(err); ok {
 		c.JSON(status, body)
 		return
@@ -369,6 +379,8 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"code": undoErr.Code, "reason": undoErr.Reason})
 	case errors.As(err, &settingsErr):
 		c.JSON(http.StatusBadRequest, settingsErrorBody(settingsErr))
+	case errors.As(err, &mergeConflict):
+		c.JSON(http.StatusConflict, gin.H{errorKey: mergeConflict.Code, "code": mergeConflict.Code})
 	case errors.As(err, &deniedErr):
 		c.JSON(http.StatusConflict, gin.H{"error": "policy_denied", "action": deniedErr.Action})
 	case errors.As(err, &fieldErr):
@@ -377,8 +389,13 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, NewErrorResponse(err.Error()))
 	case errors.Is(err, ErrStandingOrderLimit):
 		c.JSON(http.StatusBadRequest, NewStandingOrderLimitResponse())
+	case errors.As(err, &conflictErr) && isRefusedAnswer(conflictErr.Proposal):
+		c.JSON(http.StatusConflict, NewRefusedConflictResponse(conflictErr.Proposal, h.service.phase2, h.service.phase3))
 	case errors.As(err, &conflictErr):
 		c.JSON(http.StatusConflict, NewProposalConflictResponsePhases(conflictErr.Proposal, h.service.phase2, h.service.phase3))
+	case errors.Is(err, ErrAnswerTargetRead):
+		h.logger.Error("coordinator answer target read failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": codeTargetReadFailed, "code": codeTargetReadFailed})
 	case errors.Is(err, ErrNotFound), errors.Is(err, repoerrors.ErrWorkspaceNotFound):
 		c.JSON(http.StatusNotFound, NewErrorResponse("not found"))
 	case errors.Is(err, service.ErrForbidden):

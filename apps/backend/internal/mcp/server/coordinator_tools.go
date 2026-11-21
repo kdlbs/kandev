@@ -3,11 +3,15 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/coordinator/mcpcontract"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // registerCoordinatorTools registers each tool the session's bound list names
@@ -81,6 +85,8 @@ func (s *Server) coordinatorToolCatalog() map[string]func() {
 		"propose_resume_kandev":            s.registerProposeResumeTool,
 		"propose_message_kandev":           s.registerProposeMessageTool,
 		"propose_move_kandev":              s.registerProposeMoveTool,
+		"propose_answer_kandev":            s.registerProposeAnswerTool,
+		"propose_merge_kandev":             s.registerProposeMergeTool,
 		"propose_improvement_kandev":       s.registerProposeImprovementTool,
 		"get_coordinator_item_kandev":      s.registerGetCoordinatorItemTool,
 		"list_coordinator_activity_kandev": s.registerListCoordinatorActivityTool,
@@ -101,6 +107,7 @@ func (s *Server) registerProposeTaskTool() {
 			mcp.WithString("source_task_id", mcp.Description("Optional existing task this proposal originated from")),
 			mcp.WithString("in_reply_to", mcp.Description("Optional id of a returned proposal of yours that this one revises after the manager's reply")),
 			standingOrderIDsOption(),
+			s.noteIDsOption(),
 		),
 		s.wrapHandler("propose_task_kandev", s.proposeTaskHandler()),
 	)
@@ -135,6 +142,7 @@ func (s *Server) proposeTaskHandler() server.ToolHandlerFunc {
 			"in_reply_to":               req.GetString("in_reply_to", ""),
 			standingOrderIDsArg:         req.GetStringSlice(standingOrderIDsArg, nil),
 		}
+		withNoteIDs(payload, req)
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -256,6 +264,27 @@ func (s *Server) listCoordinatorTurnsHandler() server.ToolHandlerFunc {
 
 const standingOrderIDsArg = "standing_order_ids"
 
+const noteIDsArg = "note_ids"
+
+// noteIDsOption declares the optional note citation list every proposal tool
+// accepts when the conversation was bound with notes on; otherwise it adds nothing. The value is forwarded untouched; the coordinator service judges it.
+func (s *Server) noteIDsOption() mcp.ToolOption {
+	if p := s.profile.CoordinatorToolPolicy; p == nil || !p.Notes {
+		return func(*mcp.Tool) {}
+	}
+	return mcp.WithArray(noteIDsArg,
+		mcp.Description("Optional ids of the notes from this turn's coordinator notes index that this proposal relies on, at most 5, no duplicates."),
+		mcp.Items(map[string]any{typeKey: stringType}))
+}
+
+// withNoteIDs copies the call's raw note_ids into a forwarded payload.
+func withNoteIDs(payload map[string]interface{}, req mcp.CallToolRequest) map[string]interface{} {
+	if v, ok := req.GetArguments()[noteIDsArg]; ok {
+		payload[noteIDsArg] = v
+	}
+	return payload
+}
+
 func standingOrderIDsOption() mcp.ToolOption {
 	return mcp.WithArray(standingOrderIDsArg,
 		mcp.Description("Optional ids of the standing orders that shaped this proposal, at most 5, no duplicates. Each must be one of your active standing orders."),
@@ -269,6 +298,7 @@ func (s *Server) registerProposeResumeTool() {
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task whose session would be resumed")),
 			mcp.WithString("rationale", mcp.Description("Why the session should be resumed, at most 10,000 characters")),
 			standingOrderIDsOption(),
+			s.noteIDsOption(),
 		),
 		s.wrapHandler("propose_resume_kandev", s.proposeKindHandler(mcpcontract.ActionProposeResume, "task_id", "rationale")),
 	)
@@ -282,6 +312,7 @@ func (s *Server) registerProposeMessageTool() {
 			mcp.WithString("text", mcp.Required(), mcp.Description("The message, 1 to 4,000 characters after trimming")),
 			mcp.WithString("rationale", mcp.Description("Why the message should be sent, at most 10,000 characters")),
 			standingOrderIDsOption(),
+			s.noteIDsOption(),
 		),
 		s.wrapHandler("propose_message_kandev", s.proposeKindHandler(mcpcontract.ActionProposeMessage, "task_id", "text", "rationale")),
 	)
@@ -295,6 +326,7 @@ func (s *Server) registerProposeMoveTool() {
 			mcp.WithString(mcpcontract.FieldStepID, mcp.Required(), mcp.Description("The destination step in the task's current workflow")),
 			mcp.WithString("rationale", mcp.Description("Why the task should move, at most 10,000 characters")),
 			standingOrderIDsOption(),
+			s.noteIDsOption(),
 		),
 		s.wrapHandler("propose_move_kandev", s.proposeKindHandler(mcpcontract.ActionProposeMove, "task_id", mcpcontract.FieldStepID, "rationale")),
 	)
@@ -309,6 +341,7 @@ func (s *Server) proposeKindHandler(action string, fields ...string) server.Tool
 		for _, name := range fields {
 			payload[name] = req.GetString(name, "")
 		}
+		withNoteIDs(payload, req)
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -316,6 +349,91 @@ func (s *Server) proposeKindHandler(action string, fields ...string) server.Tool
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func (s *Server) registerProposeAnswerTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("propose_answer_kandev",
+			mcp.WithDescription("Propose an answer to the pending question or permission request of a task on a board you watch, for a manager to approve, edit or reject. Nothing is delivered until a manager approves. target is \"clarification\" or \"permission\"; pending_id is the pending item's id from get_coordinator_item_kandev. draft is {answers: [{question_id, option_ids, custom_text}]} for a clarification, or {option_id} for a permission. sources lists the links or references you relied on as {ref, label} objects, confidence is one of low, med or high, needs_decision flags a judgement call, rationale says why. A call for a target and pending_id that already has an open proposal returns that proposal unchanged with deduplicated true, whatever draft it carries; a proposal is replaced only once its target is no longer current."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task holding the pending item")),
+			mcp.WithString("target", mcp.Required(), mcp.Description("clarification or permission")),
+			mcp.WithString("pending_id", mcp.Required(), mcp.Description("The pending clarification bundle or permission request id")),
+			mcp.WithAny("draft", mcp.Required(), mcp.Description("The proposed answer")),
+			mcp.WithArray("sources", mcp.Description("Links or references behind the answer"), mcp.Items(map[string]any{
+				typeKey: objType,
+				propsKey: map[string]any{
+					"ref":   map[string]any{typeKey: stringType},
+					"label": map[string]any{typeKey: stringType},
+				},
+				reqKey: []string{"ref"},
+			})),
+			mcp.WithString("confidence", mcp.Required(), mcp.Description("How sure you are: low, med or high"), mcp.Enum("low", "med", "high")),
+			mcp.WithBoolean("needs_decision", mcp.Required(), mcp.Description("True when the answer is a judgement call for the manager")),
+			mcp.WithString("rationale", mcp.Description("Why this answer, at most 10,000 characters")),
+			standingOrderIDsOption(),
+			s.noteIDsOption(),
+		),
+		s.wrapHandler("propose_answer_kandev", s.proposeAnswerHandler()),
+	)
+}
+
+// proposeAnswerHandler forwards the argument object with its types intact. The
+// answer kind validates every member and names the offending field; the error
+// renders as "<message> (field: <field>)", or the bare message when no field is named.
+func (s *Server) proposeAnswerHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := req.GetArguments()
+		if payload == nil {
+			payload = map[string]interface{}{}
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeAnswer, payload, &result); err != nil {
+			return mcp.NewToolResultError(answerErrorText(err)), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) registerProposeMergeTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("propose_merge_kandev",
+			mcp.WithDescription("Propose merging the pull request or merge request linked to a task on a board you watch, at the head commit you looked at. Nothing is merged until a manager approves it, or until the repository is set to automatic and every condition holds. task_id is the task, change is optional and names which linked change when the task has several (provider|host|repository|number), expected_head_sha is the head you reviewed. A call that cannot create a proposal returns proposal_id null, status \"refused\" and a creation_code (change_unknown, policy_denied, predecessor, method, unavailable or head_mismatch). A call for a change that already has an open proposal returns that proposal with deduplicated true."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task whose linked change should be merged")),
+			mcp.WithString("change", mcp.Description("Which linked change, when the task has several")),
+			mcp.WithString("expected_head_sha", mcp.Required(), mcp.Description("The head commit SHA you reviewed")),
+			s.noteIDsOption(),
+		),
+		s.wrapHandler("propose_merge_kandev", s.proposeMergeHandler()),
+	)
+}
+
+func (s *Server) proposeMergeHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := req.GetArguments()
+		if payload == nil {
+			payload = map[string]interface{}{}
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeMerge, payload, &result); err != nil {
+			return mcp.NewToolResultError(answerErrorText(err)), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// answerErrorText renders a refusal as "<message> (field: <field>)", or the
+// bare message when the refusal names no field. Other errors keep their text.
+func answerErrorText(err error) string {
+	var be *BackendError
+	if !errors.As(err, &be) || be.Code != ws.ErrorCodeValidation {
+		return err.Error()
+	}
+	if field, _ := be.Details["field"].(string); field != "" {
+		return fmt.Sprintf("%s (field: %s)", be.Message, field)
+	}
+	return be.Message
 }
 
 const improvementContextArg = "context"
@@ -336,6 +454,7 @@ func (s *Server) registerProposeImprovementTool() {
 						mcpKeyTaskID: map[string]any{typeKey: stringType},
 					},
 				})),
+			s.noteIDsOption(),
 		),
 		s.wrapHandler("propose_improvement_kandev", s.proposeImprovementHandler()),
 	)
@@ -351,6 +470,7 @@ func (s *Server) proposeImprovementHandler() server.ToolHandlerFunc {
 			improvementContextArg:     req.GetString(improvementContextArg, ""),
 			mcpcontract.FieldEvidence: req.GetArguments()[mcpcontract.FieldEvidence],
 		}
+		withNoteIDs(payload, req)
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, mcpcontract.ActionProposeImprovement, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil

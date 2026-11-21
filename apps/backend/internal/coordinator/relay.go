@@ -72,31 +72,43 @@ func (s *Service) ReadRelay(ctx context.Context, workspaceID, coordinatorID, tas
 	if _, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID); err != nil {
 		return nil, err
 	}
+	if err := s.checkRelayTask(ctx, workspaceID, taskID); err != nil {
+		return nil, err
+	}
+	targets, err := s.readTargets(ctx, taskID, false)
+	if err != nil {
+		return nil, s.relayReadFailed(err)
+	}
+	result := &RelayResult{TaskID: taskID, SessionID: targets.sessionID}
+	if targets.bundle != nil {
+		content, err := clarification.HydrateBundle(ctx, s.relayReader, *targets.bundle)
+		if err != nil {
+			return nil, s.relayReadFailed(err)
+		}
+		if content != nil {
+			result.Clarification = &RelayClarification{PendingID: targets.bundle.PendingID, Context: content.Context, Messages: content.Messages}
+		}
+	}
+	if targets.permission != nil {
+		result.Permission = &RelayPermission{Message: targets.permission.ToAPI()}
+	}
+	return result, nil
+}
+
+// checkRelayTask returns ErrNotFound for a task that does not exist or lives
+// in another workspace.
+func (s *Service) checkRelayTask(ctx context.Context, workspaceID, taskID string) error {
 	task, err := s.relayTasks.GetTask(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {
-			return nil, ErrNotFound
+			return ErrNotFound
 		}
-		return nil, s.relayReadFailed(err)
+		return s.relayReadFailed(err)
 	}
 	if task == nil || task.WorkspaceID != workspaceID {
-		return nil, ErrNotFound
+		return ErrNotFound
 	}
-	sessions, err := s.relayTasks.GetPrimarySessionIDsForTasks(ctx, []string{taskID})
-	if err != nil {
-		return nil, s.relayReadFailed(err)
-	}
-	result := &RelayResult{TaskID: taskID, SessionID: sessions[taskID]}
-	if result.SessionID == "" {
-		return result, nil
-	}
-	if result.Clarification, err = s.relayClarification(ctx, result.SessionID); err != nil {
-		return nil, s.relayReadFailed(err)
-	}
-	if result.Permission, err = s.relayPermission(ctx, result.SessionID); err != nil {
-		return nil, s.relayReadFailed(err)
-	}
-	return result, nil
+	return nil
 }
 
 func (s *Service) relayReadFailed(err error) error {
@@ -104,7 +116,42 @@ func (s *Service) relayReadFailed(err error) error {
 	return fmt.Errorf("relay read: %w", err)
 }
 
-func (s *Service) relayClarification(ctx context.Context, sessionID string) (*RelayClarification, error) {
+// relayTargets is one read of a task's answerable interactions: the primary
+// session, the newest unresolved clarification bundle (with its task-model
+// messages when asked for) and the newest answerable permission row.
+type relayTargets struct {
+	sessionID  string
+	bundle     *taskmodels.ClarificationBundleSummary
+	messages   []*taskmodels.Message
+	permission *taskmodels.Message
+}
+
+// readTargets is the one read behind ReadRelay and AnswerTargets. A task with
+// no primary session has no targets.
+func (s *Service) readTargets(ctx context.Context, taskID string, withMessages bool) (*relayTargets, error) {
+	sessions, err := s.relayTasks.GetPrimarySessionIDsForTasks(ctx, []string{taskID})
+	if err != nil {
+		return nil, err
+	}
+	out := &relayTargets{sessionID: sessions[taskID]}
+	if out.sessionID == "" {
+		return out, nil
+	}
+	if out.bundle, err = s.relayBundle(ctx, out.sessionID); err != nil {
+		return nil, err
+	}
+	if out.bundle != nil && withMessages {
+		byPending, err := s.relayReader.FindMessagesByPendingIDs(ctx, []string{out.bundle.PendingID})
+		if err != nil {
+			return nil, err
+		}
+		out.messages = byPending[out.bundle.PendingID]
+	}
+	out.permission, err = s.relayPermission(ctx, out.sessionID)
+	return out, err
+}
+
+func (s *Service) relayBundle(ctx context.Context, sessionID string) (*taskmodels.ClarificationBundleSummary, error) {
 	page, err := s.relayReader.ListUnresolvedClarificationBundles(ctx, taskmodels.ListClarificationBundlesOptions{
 		Unscoped:  true,
 		SessionID: sessionID,
@@ -117,16 +164,12 @@ func (s *Service) relayClarification(ctx context.Context, sessionID string) (*Re
 		return nil, nil
 	}
 	summary := page.Bundles[0]
-	content, err := clarification.HydrateBundle(ctx, s.relayReader, summary)
-	if err != nil || content == nil {
-		return nil, err
-	}
-	return &RelayClarification{PendingID: summary.PendingID, Context: content.Context, Messages: content.Messages}, nil
+	return &summary, nil
 }
 
 // relayPermission returns the newest pending permission row when it can be
 // answered: it must carry a request id, a pending id and at least one option.
-func (s *Service) relayPermission(ctx context.Context, sessionID string) (*RelayPermission, error) {
+func (s *Service) relayPermission(ctx context.Context, sessionID string) (*taskmodels.Message, error) {
 	rows, err := s.relayReader.ListPendingInteractions(ctx, taskmodels.PendingInteractionFilter{
 		SessionIDs: []string{sessionID},
 		Kinds:      []string{string(taskmodels.InteractionKindPermission)},
@@ -141,7 +184,7 @@ func (s *Service) relayPermission(ctx context.Context, sessionID string) (*Relay
 	if newest == nil || !permissionAnswerable(newest.Metadata) {
 		return nil, nil
 	}
-	return &RelayPermission{Message: newest.ToAPI()}, nil
+	return newest, nil
 }
 
 func permissionAnswerable(meta map[string]any) bool {

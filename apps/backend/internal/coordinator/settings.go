@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/authz"
@@ -24,6 +26,7 @@ const (
 	codeInvalidSetting         = "invalid_setting"
 	codeStopDeniedOnly         = "stop_denied_only"
 	codeAutomaticNotAvailable  = "automatic_not_available"
+	codeAnswerUnavailable      = "answer_unavailable"
 	codeInvalidScope           = "invalid_scope"
 	codeWatchesEmpty           = "watches_empty"
 	codeWatchesTooMany         = "watches_too_many"
@@ -68,6 +71,10 @@ type settingsRequest struct {
 	policy   *Policy
 	watches  *watchesRequest
 	projects *projectsRequest
+	// merge lists repository policies; nil when the body names none.
+	merge        []RepoPolicyChange
+	haveRevision bool
+	revision     int
 }
 
 type watchesRequest struct {
@@ -77,14 +84,14 @@ type watchesRequest struct {
 
 // parseSettingsBody validates everything in the body that needs no stored
 // state. Policy is validated before Watches.
-func parseSettingsBody(body []byte, phase3, phase31 bool) (settingsRequest, error) {
+func parseSettingsBody(body []byte, phase3, phase31, answerAllowed bool) (settingsRequest, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil || top == nil {
 		return settingsRequest{}, bodyErr("", "body must be a JSON object")
 	}
 	var req settingsRequest
 	if raw, ok := presentMember(top, "policy"); ok {
-		p, err := parsePolicyMember(raw, phase3)
+		p, err := parsePolicyMember(raw, phase3, answerAllowed)
 		if err != nil {
 			return settingsRequest{}, err
 		}
@@ -116,7 +123,10 @@ func presentMember(obj map[string]json.RawMessage, key string) (json.RawMessage,
 	return raw, true
 }
 
-func parsePolicyMember(raw json.RawMessage, phase3 bool) (*Policy, error) {
+// parsePolicyMember reads a policy object. The original six classes are
+// required; answer is optional, and naming it while answerAllowed is false is
+// the field error answer_unavailable.
+func parsePolicyMember(raw json.RawMessage, phase3, answerAllowed bool) (*Policy, error) {
 	var member map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &member); err != nil || member == nil {
 		return nil, bodyErr("policy", "policy must be an object")
@@ -129,6 +139,29 @@ func parsePolicyMember(raw json.RawMessage, phase3 bool) (*Policy, error) {
 	if err := json.Unmarshal(rawActions, &actions); err != nil || actions == nil {
 		return nil, bodyErr("policy.actions", "policy.actions must be an object")
 	}
+	p, err := policyFromActions(actions, answerAllowed)
+	if err != nil {
+		return nil, err
+	}
+	if err := Validate(*p, phase3); err != nil {
+		return nil, policyValidateErr(err, *p)
+	}
+	if raw, ok := presentMember(member, "eligibility"); ok {
+		e, err := parseEligibilityMember(raw, phase3)
+		if err != nil {
+			return nil, err
+		}
+		p.Eligibility = e
+		if err := Validate(*p, phase3); err != nil {
+			return nil, policyValidateErr(err, *p)
+		}
+	}
+	return p, nil
+}
+
+// policyFromActions checks the named classes and builds the policy they
+// describe. Eligibility is parsed separately.
+func policyFromActions(actions map[string]json.RawMessage, answerAllowed bool) (*Policy, error) {
 	var unknown []string
 	for key := range actions {
 		if !isPolicyAction(Action(key)) {
@@ -140,28 +173,92 @@ func parsePolicyMember(raw json.RawMessage, phase3 bool) (*Policy, error) {
 		return nil, policyFieldErr(codeUnknownAction, unknown[0], "unknown action "+unknown[0])
 	}
 	for _, a := range AllActions {
-		if _, ok := actions[string(a)]; !ok {
+		if _, ok := actions[string(a)]; !ok && a != ActionAnswer {
 			return nil, policyFieldErr(codeActionMissing, string(a), "policy.actions must name every action")
 		}
 	}
-	p := Policy{Version: policyVersion, Actions: make(map[Action]Setting, len(AllActions))}
+	if _, named := actions[string(ActionAnswer)]; named && !answerAllowed {
+		return nil, policyFieldErr(codeAnswerUnavailable, string(ActionAnswer), "the answer class is not available")
+	}
+	p := &Policy{Version: policyVersion, Actions: make(map[Action]Setting, len(AllActions))}
 	for _, a := range AllActions {
+		raw, named := actions[string(a)]
+		if !named {
+			continue
+		}
 		var s string
-		if err := json.Unmarshal(actions[string(a)], &s); err != nil {
+		if err := json.Unmarshal(raw, &s); err != nil {
 			s = ""
 		}
 		p.Actions[a] = Setting(s)
 	}
-	if err := Validate(p, phase3); err != nil {
-		return nil, policyValidateErr(err, p)
+	return p, nil
+}
+
+var integerLiteral = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
+
+// parseEligibilityMember checks the shape of a saved eligibility object: with
+// phase 3 not effective any object is refused; otherwise it must be an object
+// naming exactly the five fields, each a JSON integer literal. The first error
+// is reported in this order: non-object, unknown fields ascending, missing
+// fields, non-integers (field table order). Bounds are Validate's.
+func parseEligibilityMember(raw json.RawMessage, phase3 bool) (*EligibilitySettings, error) {
+	if !phase3 {
+		return nil, eligibilityFieldErr("", "policy.eligibility is available only with automatic")
 	}
-	return &p, nil
+	var member map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &member); err != nil || member == nil {
+		return nil, eligibilityFieldErr("", "policy.eligibility must be an object")
+	}
+	known := make(map[string]bool, len(eligibilityFields))
+	for _, f := range eligibilityFields {
+		known[f.name] = true
+	}
+	var unknown []string
+	for key := range member {
+		if !known[key] {
+			unknown = append(unknown, key)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return nil, eligibilityFieldErr(unknown[0], "unknown eligibility setting "+unknown[0])
+	}
+	for _, f := range eligibilityFields {
+		if _, ok := member[f.name]; !ok {
+			return nil, eligibilityFieldErr(f.name, "policy.eligibility must name every setting")
+		}
+	}
+	var e EligibilitySettings
+	for _, f := range eligibilityFields {
+		lit := strings.TrimSpace(string(member[f.name]))
+		if !integerLiteral.MatchString(lit) {
+			return nil, eligibilityFieldErr(f.name, f.name+" must be an integer")
+		}
+		n, err := strconv.ParseInt(lit, 10, 32)
+		if err != nil {
+			n = int64(f.max) + 1
+		}
+		*f.ptr(&e) = int(n)
+	}
+	return &e, nil
+}
+
+func eligibilityFieldErr(field, message string) *SettingsError {
+	name := "policy.eligibility"
+	if field != "" {
+		name += "." + field
+	}
+	return &SettingsError{Code: codeInvalidSetting, Field: name, Message: message}
 }
 
 func policyValidateErr(err error, p Policy) *SettingsError {
 	fe, ok := err.(*PolicyFieldError)
 	if !ok {
 		return bodyErr("policy", err.Error())
+	}
+	if strings.HasPrefix(fe.Field, eligibilityPrefix) {
+		return eligibilityFieldErr(strings.TrimPrefix(fe.Field, eligibilityPrefix), fe.Error())
 	}
 	code := codeInvalidSetting
 	switch {
@@ -303,6 +400,9 @@ func (s *Service) GetSettings(ctx context.Context, workspaceID, coordinatorID st
 		return nil, err
 	}
 	out.Projects, out.ProjectsConfig = s.projectsView(ctx, workspaceID, state)
+	if out.Merge, err = s.mergeView(ctx, workspaceID, coordinatorID); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -312,7 +412,7 @@ func phase2FromView(v PolicyView) *CoordinatorPhase2 {
 		ids = []string{}
 	}
 	return &CoordinatorPhase2{
-		Policy:         CoordinatorPolicyDTO{Actions: v.Actions},
+		Policy:         CoordinatorPolicyDTO{Actions: v.Actions, Eligibility: v.Eligibility},
 		PolicyRevision: v.PolicyRevision,
 		Watches:        CoordinatorWatchDTO{Scope: v.WatchScope, WorkflowIDs: ids},
 	}
@@ -326,8 +426,11 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, coordinatorID s
 	if _, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID); err != nil {
 		return nil, err
 	}
-	req, err := parseSettingsBody(body, s.phase3, s.phase31)
+	req, err := parseSettingsBody(body, s.phase3, s.phase31, s.answer)
 	if err != nil {
+		return nil, err
+	}
+	if err := parseMergeMember(body, s.merge, &req); err != nil {
 		return nil, err
 	}
 	live, err := s.liveProjectEntries(ctx, workspaceID, req.projects)
@@ -338,12 +441,12 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, coordinatorID s
 		result   *CoordinatorPhase2
 		projects projectState
 		archived string
-		changed  bool
+		out      settingsOutcome
 	)
 	err = s.store.withCoordinatorLock(ctx, coordinatorID, func(tx coordinatorExec) error {
 		var err error
-		result, projects, changed, err = s.applySettings(ctx, tx, workspaceID, coordinatorID, req, live)
-		if err != nil || !changed {
+		result, projects, out, err = s.applySettings(ctx, tx, workspaceID, coordinatorID, req, live)
+		if err != nil || !out.resetConversation {
 			return err
 		}
 		archived, err = s.resetConversation(ctx, tx, coordinatorID)
@@ -352,69 +455,136 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, coordinatorID s
 	if err != nil {
 		return nil, err
 	}
-	if changed {
+	if out.resetConversation {
 		s.archiveConversation(ctx, coordinatorID, archived)
+	}
+	if out.changed {
 		s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
 	}
+	for _, repo := range out.leftDenied {
+		_, _ = s.ObserveProtection(ctx, workspaceID, repo, "")
+	}
 	result.Projects, result.ProjectsConfig = s.projectsView(ctx, workspaceID, projects)
+	if result.Merge, err = s.mergeView(ctx, workspaceID, coordinatorID); err != nil {
+		return nil, err
+	}
 	return result, nil
+}
+
+// settingsOutcome says what a save did: whether anything was written, and
+// whether the change resets the conversation (every change but an
+// eligibility-only one does).
+type settingsOutcome struct {
+	changed           bool
+	resetConversation bool
+	// leftDenied lists repositories whose merge policy left denied.
+	leftDenied []string
 }
 
 // applySettings runs inside the coordinator lock: it reads the stored state,
 // resolves the body against the effective Watches, and writes only when
 // something differs. It returns the project state as stored afterwards; the
 // caller builds the project view once the lock is released.
-func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, req settingsRequest, live map[ProjectEntry]struct{}) (*CoordinatorPhase2, projectState, bool, error) {
+func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, req settingsRequest, live map[ProjectEntry]struct{}) (*CoordinatorPhase2, projectState, settingsOutcome, error) {
 	row, err := s.readSettingsRow(ctx, tx, workspaceID, coordinatorID)
 	if err != nil {
-		return nil, projectState{}, false, err
+		return nil, projectState{}, settingsOutcome{}, err
 	}
 	stored, policyErr := ParsePolicy(row.PolicyJSON)
-	rawSet, err := s.store.LoadWatchSet(ctx, tx, coordinatorID)
+	current, newWatches, err := s.resolveWatchState(ctx, tx, workspaceID, coordinatorID, req.watches)
 	if err != nil {
-		return nil, projectState{}, false, err
-	}
-	current, err := s.effectiveWatchState(ctx, tx, workspaceID, rawSet)
-	if err != nil {
-		return nil, projectState{}, false, err
-	}
-	newWatches, err := s.resolveWatches(ctx, tx, workspaceID, rawSet, current, req.watches)
-	if err != nil {
-		return nil, projectState{}, false, err
+		return nil, projectState{}, settingsOutcome{}, err
 	}
 	storedProjects, newProjects, err := s.resolveProjectsFor(ctx, tx, coordinatorID, req.projects, live)
 	if err != nil {
-		return nil, projectState{}, false, err
+		return nil, projectState{}, settingsOutcome{}, err
 	}
-	policyChanged := req.policy != nil && (policyErr != nil || !policiesEqual(*req.policy, stored))
+	mergePlan, err := s.planMergePolicies(ctx, tx, workspaceID, coordinatorID, req, row.Revision)
+	if err != nil {
+		return nil, projectState{}, settingsOutcome{}, err
+	}
+	actionsChanged, eligibilityChanged := policyDelta(req.policy, stored, policyErr)
+	policyChanged := actionsChanged || eligibilityChanged
 	watchesChanged := newWatches != nil
 	final := stored
 	if policyChanged {
 		final = *req.policy
 	}
-	scope := current
-	if watchesChanged {
-		scope = *newWatches
+	scope := watchesOr(current, newWatches)
+	storedProjects = projectsOr(storedProjects, newProjects)
+	result := s.settingsResult(final, scope, row.Revision)
+	if !policyChanged && !watchesChanged && newProjects == nil && !mergePlan.changed() {
+		return result, storedProjects, settingsOutcome{}, nil
 	}
-	if newProjects != nil {
-		storedProjects = *newProjects
+	if err := s.commitSettings(ctx, tx, workspaceID, coordinatorID, row.PolicyJSON, row.Revision+1, stored, final, policyChanged, watchesChanged, scope, newProjects); err != nil {
+		return nil, projectState{}, settingsOutcome{}, err
 	}
-	result := &CoordinatorPhase2{
-		Policy:         CoordinatorPolicyDTO{Actions: final.Actions},
-		PolicyRevision: row.Revision,
-		Watches:        CoordinatorWatchDTO{Scope: scope.scope, WorkflowIDs: nonNilIDs(scope.ids)},
-	}
-	if !policyChanged && !watchesChanged && newProjects == nil {
-		return result, storedProjects, false, nil
-	}
-	if err := s.commitSettings(ctx, tx, workspaceID, coordinatorID, row.PolicyJSON, stored, final, policyChanged, watchesChanged, scope, newProjects); err != nil {
-		return nil, projectState{}, false, err
+	if err := s.store.writeRepoPolicyPlan(ctx, tx, coordinatorID, decidingUserID(ctx), mergePlan); err != nil {
+		return nil, projectState{}, settingsOutcome{}, err
 	}
 	result.PolicyRevision = row.Revision + 1
 	s.logger.Info("coordinator settings saved",
 		zap.String("coordinator_id", coordinatorID), zap.Int("old_revision", row.Revision),
-		zap.Int("new_revision", row.Revision+1), zap.Bool("policy_changed", policyChanged), zap.Bool("watches_changed", watchesChanged), zap.Bool("projects_changed", newProjects != nil))
-	return result, storedProjects, true, nil
+		zap.Int("new_revision", row.Revision+1), zap.Bool("policy_changed", actionsChanged), zap.Bool("eligibility_changed", eligibilityChanged), zap.Bool("watches_changed", watchesChanged), zap.Bool("projects_changed", newProjects != nil))
+	return result, storedProjects, settingsOutcome{changed: true, resetConversation: actionsChanged || watchesChanged || newProjects != nil, leftDenied: mergePlan.leftDenied()}, nil
+}
+
+// projectsOr returns the resolved project state when the request changes it.
+func projectsOr(stored projectState, resolved *projectState) projectState {
+	if resolved != nil {
+		return *resolved
+	}
+	return stored
+}
+
+// resolveWatchState returns the effective Watches and the resolved change the
+// request makes to them, nil when it makes none.
+func (s *Service) resolveWatchState(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, req *watchesRequest) (watchState, *watchState, error) {
+	rawSet, err := s.store.LoadWatchSet(ctx, tx, coordinatorID)
+	if err != nil {
+		return watchState{}, nil, err
+	}
+	current, err := s.effectiveWatchState(ctx, tx, workspaceID, rawSet)
+	if err != nil {
+		return watchState{}, nil, err
+	}
+	resolved, err := s.resolveWatches(ctx, tx, workspaceID, rawSet, current, req)
+	return current, resolved, err
+}
+
+// settingsResult is the settings answer for a policy, watch state and revision.
+func (s *Service) settingsResult(final Policy, scope watchState, revision int) *CoordinatorPhase2 {
+	return &CoordinatorPhase2{
+		Policy:         CoordinatorPolicyDTO{Actions: publicPolicy(s.withEffectiveAnswer(final).Actions, s.answer), Eligibility: final.EffectiveEligibility()},
+		PolicyRevision: revision,
+		Watches:        CoordinatorWatchDTO{Scope: scope.scope, WorkflowIDs: nonNilIDs(scope.ids)},
+	}
+}
+
+// watchesOr returns the resolved watches when the request changes them, else
+// the current state.
+func watchesOr(current watchState, resolved *watchState) watchState {
+	if resolved != nil {
+		return *resolved
+	}
+	return current
+}
+
+// policyDelta merges an absent eligibility from the stored policy, then
+// reports whether the request changes the actions and the eligibility.
+func policyDelta(requested *Policy, stored Policy, storedErr error) (actions, eligibility bool) {
+	if requested == nil {
+		return false, false
+	}
+	if requested.Eligibility == nil {
+		requested.Eligibility = stored.Eligibility
+	}
+	if _, named := requested.Actions[ActionAnswer]; !named {
+		if v, ok := stored.Actions[ActionAnswer]; ok {
+			requested.Actions[ActionAnswer] = v
+		}
+	}
+	return storedErr != nil || !actionsEqual(*requested, stored), requested.EffectiveEligibility() != stored.EffectiveEligibility()
 }
 
 type settingsRow struct {
@@ -450,7 +620,7 @@ func (s *Service) resolveProjectsFor(ctx context.Context, tx coordinatorExec, co
 
 // commitSettings gates a raise, writes the changed settings and records the
 // class changes, all inside the caller's coordinator lock.
-func (s *Service) commitSettings(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, storedJSON *string, stored, final Policy, policyChanged, watchesChanged bool, scope watchState, projects *projectState) error {
+func (s *Service) commitSettings(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, storedJSON *string, revision int, stored, final Policy, policyChanged, watchesChanged bool, scope watchState, projects *projectState) error {
 	if policyChanged {
 		if err := s.checkRaise(ctx, coordinatorID, stored, final); err != nil {
 			return err
@@ -459,8 +629,14 @@ func (s *Service) commitSettings(ctx context.Context, tx coordinatorExec, worksp
 	if err := s.writeSettings(ctx, tx, workspaceID, coordinatorID, storedJSON, policyChanged, final, watchesChanged, scope, projects); err != nil {
 		return err
 	}
-	if policyChanged {
-		return s.recordClassChanges(ctx, tx, coordinatorID, stored, final)
+	if !policyChanged {
+		return nil
+	}
+	if err := s.recordClassChanges(ctx, tx, coordinatorID, stored, final); err != nil {
+		return err
+	}
+	if from, to := stored.EffectiveEligibility(), final.EffectiveEligibility(); from != to {
+		return s.store.InsertEligibilityChangeTx(ctx, tx, coordinatorID, decidingUserID(ctx), from, to, revision)
 	}
 	return nil
 }
@@ -472,13 +648,25 @@ func nonNilIDs(ids []string) []string {
 	return ids
 }
 
-func policiesEqual(a, b Policy) bool {
+// actionsEqual compares two policies by effective value: an absent answer
+// entry equals requires_approval.
+func actionsEqual(a, b Policy) bool {
 	for _, action := range AllActions {
-		if a.Actions[action] != b.Actions[action] {
+		if effectiveSetting(a, action) != effectiveSetting(b, action) {
 			return false
 		}
 	}
 	return true
+}
+
+// effectiveSetting is the stored setting of an action, with an absent answer
+// entry read as requires_approval.
+func effectiveSetting(p Policy, a Action) Setting {
+	v, ok := p.Actions[a]
+	if !ok && a == ActionAnswer {
+		return SettingRequiresApproval
+	}
+	return v
 }
 
 func (s *Service) effectiveWatchState(ctx context.Context, tx coordinatorExec, workspaceID string, raw WatchSet) (watchState, error) {

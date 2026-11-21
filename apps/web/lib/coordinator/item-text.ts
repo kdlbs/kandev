@@ -37,7 +37,10 @@ export type WhyClearsText = { why: string; clears: string };
 export function whyClearsText(item: NeedsYouItem, t: TFunction): WhyClearsText {
   switch (item.kind) {
     case "proposal":
-      return { why: item.proposal.spec.rationale, clears: t("coordinator:approveEditOrReject") };
+      return {
+        why: item.proposal.spec.rationale ?? t("coordinator:mergeNeedsYouWhy"),
+        clears: t("coordinator:approveEditOrReject"),
+      };
     case "question":
       return { why: t("coordinator:whyQuestion"), clears: t("coordinator:clearsQuestion") };
     case "stall":

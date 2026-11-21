@@ -58,6 +58,14 @@ func decidingUserID(ctx context.Context) string {
 // (docs/specs/coordinator/system-design/proposals.md#approve). edits is the
 // raw request body; an empty map approves the base spec unchanged.
 func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorID, proposalID string, edits ApproveProposalRequest) (*Proposal, error) {
+	decided, err := s.approveProposal(ctx, workspaceID, coordinatorID, proposalID, edits)
+	if err == nil && decided != nil && approvalOverrode(decided) && !decided.ClaimedAutomatically {
+		decided.LoweredClass = s.lowerOnOverride(ctx, decided)
+	}
+	return decided, err
+}
+
+func (s *Service) approveProposal(ctx context.Context, workspaceID, coordinatorID, proposalID string, edits ApproveProposalRequest) (*Proposal, error) {
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage); err != nil {
 		return nil, err
 	}
@@ -69,7 +77,7 @@ func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorI
 		return nil, err
 	}
 	if exec := s.kindExecutor(proposal.Kind); exec != nil {
-		return s.approveKind(ctx, exec, proposal, edits)
+		return s.approveKindResult(ctx, exec, proposal, edits)
 	}
 	carriesEdits := carriesApproveEdits(edits)
 	decidedBy := decidingUserID(ctx)
@@ -338,6 +346,9 @@ func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coord
 			s.logger.Error("unknown_kind", zap.String("proposal_id", proposalID), zap.String("kind", row.Kind))
 			return nil, fmt.Errorf("%w: %q", ErrUnknownProposalKind, row.Kind)
 		}
+		if settler, ok := exec.(staleSettler); ok {
+			return settler.SettleStale(ctx, row, cutoff)
+		}
 		if exec.ReRunsOnStaleClaim() {
 			return nil, fmt.Errorf("coordinator: kind %q cannot re-run on a stale claim", row.Kind)
 		}
@@ -529,7 +540,7 @@ func (s *Service) completeApproval(ctx context.Context, workspaceID, coordinator
 // failApproval runs step 5's failure fence (the same fence completeApproval
 // uses) and its zero-row race handling.
 func (s *Service) failApproval(ctx context.Context, workspaceID, coordinatorID, proposalID, token, errMsg string) (*Proposal, error) {
-	matched, err := s.failProposalStore(ctx, workspaceID, coordinatorID, proposalID, token, errMsg)
+	matched, attempt, err := s.failProposalAttempt(ctx, workspaceID, coordinatorID, proposalID, token, errMsg)
 	if err != nil {
 		return nil, err
 	}
@@ -540,6 +551,7 @@ func (s *Service) failApproval(ctx context.Context, workspaceID, coordinatorID, 
 	s.logger.Info("proposal approval failed",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID),
 		zap.String("workspace_id", workspaceID), zap.String("error", errMsg))
+	s.afterAutomaticFailure(ctx, attempt)
 	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 }
 
@@ -592,6 +604,8 @@ func kindAction(kind string) Action {
 		return ActionResume
 	case ProposalKindImprovement:
 		return ActionImprovement
+	case ProposalKindAnswer:
+		return ActionAnswer
 	default:
 		return ActionCreateTask
 	}
@@ -601,8 +615,11 @@ func kindAction(kind string) Action {
 // policy now denies. It reads only the proposal and the policy, so it runs
 // before any kind's own checks, and only with phase 2 on.
 func (s *Service) recheckPolicy(ctx context.Context, coordinatorID string, proposal *Proposal) error {
-	if !s.phase2 || proposal.Kind == ProposalKindImprovement {
+	if !s.phase2 || proposal.Kind == ProposalKindImprovement || proposal.Kind == ProposalKindMerge {
 		return nil
+	}
+	if proposal.Kind == ProposalKindAnswer {
+		return s.recheckAnswerFlag()
 	}
 	c, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
 	if err != nil {
@@ -618,6 +635,16 @@ func (s *Service) recheckPolicy(ctx context.Context, coordinatorID string, propo
 	}
 	if proposal.StartsAgent && !policy.Allows(ActionStartAgent) {
 		return &PolicyDeniedError{Action: ActionStartAgent}
+	}
+	return nil
+}
+
+// recheckAnswerFlag refuses an answer approval while the feature is not
+// effective. The class setting is not consulted: a pending proposal stays
+// approvable after the class is denied.
+func (s *Service) recheckAnswerFlag() error {
+	if !s.answer {
+		return &PolicyDeniedError{Action: ActionAnswer}
 	}
 	return nil
 }

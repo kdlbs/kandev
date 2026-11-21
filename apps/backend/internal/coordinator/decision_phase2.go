@@ -15,7 +15,7 @@ var ErrUnknownProposalKind = errors.New("coordinator: unknown proposal kind")
 
 func knownProposalKind(kind string) bool {
 	switch kind {
-	case ProposalKindCreateTask, ProposalKindMessage, ProposalKindMove, ProposalKindResume, ProposalKindImprovement:
+	case ProposalKindCreateTask, ProposalKindMessage, ProposalKindMove, ProposalKindResume, ProposalKindImprovement, ProposalKindAnswer, ProposalKindMerge:
 		return true
 	}
 	return false
@@ -114,27 +114,38 @@ func (s *Service) completeProposalStore(ctx context.Context, workspaceID, coordi
 }
 
 func (s *Service) failProposalStore(ctx context.Context, workspaceID, coordinatorID, proposalID, token, errMsg string) (bool, error) {
+	matched, _, err := s.failProposalAttempt(ctx, workspaceID, coordinatorID, proposalID, token, errMsg)
+	return matched, err
+}
+
+// failProposalAttempt settles the create-path row failed and returns the
+// automatic attempt snapshot for the failure hook, nil for a manager's claim.
+func (s *Service) failProposalAttempt(ctx context.Context, workspaceID, coordinatorID, proposalID, token, errMsg string) (bool, *automaticAttempt, error) {
 	if !s.phase2 {
-		return s.store.FailProposal(ctx, proposalID, token, errMsg, time.Now())
+		matched, err := s.store.FailProposal(ctx, proposalID, token, errMsg, time.Now())
+		return matched, nil, err
 	}
 	row := ActivityRow{
 		CoordinatorID: coordinatorID, WorkspaceID: workspaceID, ActionClass: ActionCreateTask,
 		Outcome: ActivityFailed, Authorization: AuthRequiresApproval, ReasonCode: optString(approvalFailedCode),
 		ProposalID: &proposalID, ActorUserID: optString(decidingUserID(ctx)), Detail: errMsg,
 	}
+	var attempt *automaticAttempt
 	current, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		return false, err
+		return false, nil, err
 	}
-	if err == nil && current.ClaimedAutomatically {
-		row.Authorization, row.UnattendedTurnID = AuthAutomatic, automaticTurnFrom(ctx)
-		if current.DecidedBy != nil {
-			row.ActorUserID = optString(*current.DecidedBy)
-		}
+	if err == nil {
+		row.Edited = specEdited(current)
+		attempt = s.stampAutomatic(ctx, current, &row)
 	}
-	return s.settleDecision(ctx, coordinatorID, row, func(tx coordinatorExec) (bool, error) {
+	matched, err := s.settleDecision(ctx, coordinatorID, row, func(tx coordinatorExec) (bool, error) {
 		return s.store.FailProposalTx(ctx, tx, proposalID, token, errMsg, time.Now())
 	})
+	if !matched {
+		attempt = nil
+	}
+	return matched, attempt, err
 }
 
 func (s *Service) rejectProposalStore(ctx context.Context, p *Proposal, reason, decidedBy string, decidedAt time.Time) (bool, error) {
