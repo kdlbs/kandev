@@ -50,16 +50,24 @@ the owned flag. Promotion and removal still go through `SetSessionPrimary`.
 Creation keeps its own `INSERT` (`001.1`). Test fixtures that set the flag
 through the full-row write use `SetSessionPrimary`.
 
-`bestPrimarySessionCandidate(ctx, taskID, sessions, excludeSessionID, activeOnly)`
+`bestPrimarySessionCandidate(ctx, taskID, sessions, excludeSessionID, activeOnly, excludeAwaitingRecovery)`
 skips the excluded and terminal sessions and, with `activeOnly`, sessions that
-are not active. It ranks the rest:
+are not active. `rankPrimarySessionCandidate` ranks recovery availability
+before the existing workflow preference. A stop excludes its awaiting-recovery
+rank; a removal can still use it as the final fallback. It ranks the rest:
 
 1. A session whose `agent_profile_id` equals the effective profile of the
    task's current step: the step's own profile, a task override, or the
    workflow default. A task without a step, an unreadable step, or no
    resolvable profile treats every session as matching.
 2. Any other session.
-3. A session with a valid `workflow_parking` marker, last.
+3. A session with a valid `workflow_parking` marker.
+4. A session with an open current-incarnation/generation recovery block or an
+   `action_required` dynamic route, last and only for removal promotion.
+
+`sessionAwaitsRecoveryAction` uses the existing `GetOpenSessionRecoveryBlock`.
+A read error counts as awaiting recovery; a missing optional store keeps the
+existing no-block behavior. No recovery block is resolved by selection.
 
 Inside a rank it keeps the existing order: `RUNNING`, then other active states,
 then idle (`001.2`). It returns an empty ID only when no session is eligible,
@@ -67,11 +75,20 @@ so a task with only unmatched sessions still gets a primary (`001.3`).
 
 ## Control flow
 
-`maybePromotePrimary` passes `activeOnly=true`, which keeps its rule that only
-an active session can inherit the role. `promoteNextPrimaryAfterRemoval`
-passes `false`; it now excludes terminal sessions, which it accepted before.
-Both promote through `SetPrimarySession`, which neither moves queued messages
-nor changes an explicit session selection (`001.4`).
+`maybePromotePrimary` passes `true, true`, retaining active-only selection and
+excluding sessions awaiting recovery. With no healthy active candidate, the
+stopped primary keeps the role. `promoteNextPrimaryAfterRemoval` passes
+`false, false`, excludes terminal sessions and keeps an awaiting-recovery
+nonterminal session as its final fallback.
+
+A FAILED rollback does not promote while the existing registry contains a live,
+unaccepted startup attempt. The lookup reads acceptance under the registry
+lock and releases it before promotion storage work. Provider acceptance
+transfers startup ownership even while the attempt remains registered until
+its deferred finish. Accepted, cancelled and finished attempts do not retain
+this suppression. Both automatic paths still use `SetPrimarySession`;
+explicit primary selection and its authorization remain unchanged. No queue
+is moved and no unknown prompt outcome is retried (`001.4`).
 
 ## Failure and recovery
 
