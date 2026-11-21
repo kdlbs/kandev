@@ -33,7 +33,6 @@ export type Fixture = {
   store: Store;
   tickets: Ticket[];
   unexpected: string[];
-  reads: string[];
   originalPath: string;
 };
 let mounted: Fixture | undefined;
@@ -97,15 +96,6 @@ function serve(fixture: Fixture, input: RequestInfo | URL, init?: RequestInit) {
       fixture.tickets.push(ticket);
     });
   }
-  const responses: Record<string, unknown> = {
-    "/api/v1/units": { units: [], total: 0 },
-    [`/api/v1/workspaces/${TARGET}/members`]: { members: [] },
-    "/api/v1/users/directory": { users: [] },
-  };
-  if (method === "GET" && path in responses) {
-    fixture.reads.push(path);
-    return Promise.resolve(json(responses[path]));
-  }
   if (method === "POST" && path === "/api/v1/system/logs/frontend-errors") {
     return Promise.resolve(json({}));
   }
@@ -120,7 +110,6 @@ export async function mountDelete({
   const fixture = {
     tickets: [],
     unexpected: [],
-    reads: [],
     originalPath: window.location.pathname + window.location.search,
   } as unknown as Fixture;
   mounted = fixture;
@@ -173,7 +162,6 @@ export async function mountDelete({
       </ToastProvider>
     </StateProvider>,
   );
-  await waitFor(() => expect(fixture.reads).toHaveLength(3));
   await act(async () => {});
   expect(fixture.unexpected).toEqual([]);
   return fixture;

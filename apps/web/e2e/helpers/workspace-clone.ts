@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import type { ApiClient } from "./api-client";
 import { MobileGitHubPage } from "../pages/mobile-github-page";
+import { seedWorkflowListView } from "../pages/workflow-settings-page";
 
 export async function seedCloneSource(api: ApiClient, path: string) {
   const source = await api.createWorkspace("Clone source");
@@ -82,6 +83,7 @@ export async function proveClone(
   );
   await page.goto(`/settings/workspaces/${targetId}/repositories`);
   await expect(page.getByText("Copied repository", { exact: true }).first()).toBeVisible();
+  await seedWorkflowListView(page, "detailed");
   await page.goto(`/settings/workspaces/${targetId}/workflows`);
   await expect(page.locator('input[value="Kanban"]').first()).toBeVisible();
   await api.saveUserSettings({ workspace_id: targetId });

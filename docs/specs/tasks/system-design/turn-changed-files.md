@@ -40,14 +40,14 @@ The [inventory](../../../plans/turn-changed-files/plan.md#source-inventory) sepa
 
 Use `show_turn_changed_files` in storage and API; use `showTurnChangedFiles` in frontend state.
 The backend update request uses `*bool`. Serialization always includes the effective boolean, including false.
-New defaults start at false. JSON hydration overlays a supplied pointer only when present.
-Frontend defaults are false; partial hydration preserves current explicit values.
+New account seeds and unstored preferences start at true. JSON hydration overlays a supplied pointer only when present.
+The frontend uses the same default. Partial hydration preserves the current value when the payload omits the field.
 There is no release flag and no `profiles.yaml` change.
 
 Add the field to models, DTO conversion, service patch/serialization, and store JSON encoding/decoding.
 The existing upgrade backfill inserts true only where the key is absent; it is unchanged.
 It preserves explicit false and existing user-settings revisions through the normal migration convention.
-Unstored settings reads default false; saved true/false values retain their meaning.
+Unstored settings reads default to true. A saved value of true or false overrides that default.
 Cover SQLite JSON and PostgreSQL JSONB behavior, fresh databases, upgrades, and replay.
 
 Expose a narrow user-service method that returns effective settings user ID, enabled value, revision, and resolution kind.
@@ -142,6 +142,7 @@ Do not add checkpoint logic to the mutable monitor or large existing orchestrato
 4. After prompt generation admission and before `triggerPrompt`, call a new synchronous runtime capture callback with immutable ownership evidence.
 5. Capture a fresh start for every eligible checkout. Persist exact accepted object IDs before external dispatch.
 6. If bounded capture fails, persist per-checkout unavailability and continue dispatch. Never manufacture replacement start content.
+   Capture checkouts concurrently within the executor capture bound, in a capture deadline that ends a six-second persistence reserve before the admission deadline. Endpoint acceptance uses that reserve, which exceeds SQLite's five-second writer busy timeout, so checkouts captured in time are persisted when later checkouts miss the deadline. A failed acceptance reports the per-checkout capture failures with the persistence error.
 
 Reuse initial-launch dispatch callbacks, but add the generation-aware seam inside runtime's production send path.
 The existing pre-admission callback alone cannot provide the admitted generation.
@@ -388,12 +389,12 @@ Proposed bounds require measurement before completion:
 
 | Work | Initial bound | Limit behavior |
 | --- | --- | --- |
-| Start capture across attached checkouts | 10 seconds total, including admission and retries | Persist failed checkout reasons; dispatch proceeds |
+| Start capture across attached checkouts | 10 seconds total, including admission and retries; capture ends 6 seconds early to reserve endpoint persistence | Persist captured endpoints and failed checkout reasons; dispatch proceeds |
 | Normal terminal endpoint capture | 20 seconds total | Accept immutable ends or settle affected endpoints before releasing the successor fence |
 | Background comparison/object preservation | 90 seconds per attempt, capped by recovery deadline | Retry transient errors against the accepted Git interval |
 | Preservation recovery window | 3 minutes from the persisted terminal claim | Settle remaining content explicitly, then permit owned-ref cleanup |
 | Stop/Cancel terminal preservation | 2 seconds after provider stop acknowledgement | Mark unpreserved content unavailable; permit cleanup |
-| Git capture concurrency | 2 per executor; 1 per actual checkout | Deadline includes queue time; no unbounded waiting |
+| Git capture concurrency | 2 per executor execution across overlapping admissions; 1 per actual checkout | Deadline includes queue time; no unbounded waiting |
 | Transient Git retry | At most 2 retries, 75/150 ms backoff inside outer deadline | Retry failed command on same private index; do not move accepted endpoints |
 | Full-index inventory | 8 MiB output and existing deadline; no changed-entry count cap | Explicit bounded failure |
 | Candidate/changed enumeration | 8 MiB and 20,000 entries per checkout | Incomplete summary with reason; no deceptive ready zero |
@@ -433,3 +434,5 @@ No source-only latency claims are acceptable.
 - [Implementation plan](../../../plans/turn-changed-files/plan.md)
 
 [Presentation plan](../../../plans/turn-changed-files-presentation/plan.md).
+
+[Multi-repository status, start capture, and retention load fixes](../../../plans/capture-and-retention-load-fixes/plan.md).

@@ -930,7 +930,7 @@
   "sessionMaximumShort": "開始、再開、今すぐ送信はこの上限を超えられます。",
   "queueMaximumShort": "セッションごとの保留メッセージ数を制限します。0 は無制限です。",
   "queueMergeShort": "エージェントが読む前に、関連する保留メッセージをまとめます。",
-  "queueAutoMergeShort": "互換性のある連続メッセージを自動的にまとめます。",
+  "queueAutoMergeShort": "互換性のある隣接メッセージをマージし、サブタスクのメッセージは同じ送信元の最新メッセージの位置へ移動してマージします。",
   "sleepShort": "タスクの実行中、Kandev が動作するコンピューターのスリープを防ぎます。",
   "sidebarPresentation": "サイドバーの外観",
   "sidebarFastActions": "クイックアクションアイコンを表示",
