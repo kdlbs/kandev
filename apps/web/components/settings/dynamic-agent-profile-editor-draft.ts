@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
+import { DYNAMIC_UNCLASSIFIED_MIN_THRESHOLD } from "./dynamic-agent-unclassified-policy-editor";
 import type { AgentProfile } from "@/lib/types/http";
 import type {
   DynamicAgentCandidate,
   DynamicAgentPolicy,
   DynamicErrorClass,
   DynamicErrorPolicy,
+  DynamicUnclassifiedPolicy,
 } from "@/lib/types/agent-profile";
 import {
   isProfileRevisionNewer,
@@ -39,6 +41,8 @@ export type DynamicAgentProfileEditorDraft = {
     errorClass: DynamicErrorClass,
     patch: Partial<DynamicErrorPolicy>,
   ) => void;
+  updateCandidateUnclassified: (index: number, patch: Partial<DynamicUnclassifiedPolicy>) => void;
+  applyUnclassifiedToAllCandidates: () => void;
   applyProfile: (profile: AgentProfile) => void;
   markProfileSubmitted: (profile: AgentProfile | null) => void;
   acceptProfileSaveResponse: (profile: AgentProfile, submitted: AgentProfile) => void;
@@ -185,6 +189,44 @@ export function useDynamicAgentProfileEditorDraft({
     });
   };
 
+  const updateCandidateUnclassified = (
+    index: number,
+    patch: Partial<DynamicUnclassifiedPolicy>,
+  ) => {
+    setCandidates((current) => {
+      const next = current.map((candidate, candidateIndex) =>
+        candidateIndex === index
+          ? {
+              ...candidate,
+              policies: {
+                ...candidate.policies,
+                unclassified: { ...candidate.policies.unclassified, ...patch },
+              },
+            }
+          : candidate,
+      );
+      notifyDraft(name, next);
+      return next;
+    });
+  };
+
+  const applyUnclassifiedToAllCandidates = () => {
+    setCandidates((current) => {
+      const next = current.map((candidate) => ({
+        ...candidate,
+        policies: {
+          ...candidate.policies,
+          unclassified: {
+            enabled: true,
+            consecutiveFailureThreshold: DYNAMIC_UNCLASSIFIED_MIN_THRESHOLD,
+          },
+        },
+      }));
+      notifyDraft(name, next);
+      return next;
+    });
+  };
+
   const reset = () => {
     const nextProfile = savedProfileRef.current;
     setName(nextProfile.name);
@@ -261,6 +303,8 @@ export function useDynamicAgentProfileEditorDraft({
     removeCandidate,
     updateCandidate,
     updateCandidatePolicy,
+    updateCandidateUnclassified,
+    applyUnclassifiedToAllCandidates,
     applyProfile,
     markProfileSubmitted,
     acceptProfileSaveResponse,

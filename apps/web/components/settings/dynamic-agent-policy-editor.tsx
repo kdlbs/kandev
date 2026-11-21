@@ -74,7 +74,11 @@ function waitValidationMessage(
   return undefined;
 }
 
-function DynamicPolicyOptionHelp({ option }: { option: "retry" | "wait" | "outcome" }) {
+export function DynamicPolicyOptionHelp({
+  option,
+}: {
+  option: "retry" | "wait" | "outcome" | "unclassified";
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const titleKey = `agents:dynamicPolicy${option[0].toUpperCase()}${option.slice(1)}`;
