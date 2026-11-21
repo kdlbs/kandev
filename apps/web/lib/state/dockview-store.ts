@@ -1017,6 +1017,7 @@ function restoreCustomLayout({
     const visibleSessions = visibleCustomLayoutSessions(opts);
     const sanitized = sanitizeSerializedLayout(layout.layout);
     if (!sanitized) return { appliedState: state, oldFormatRestoreFailed: true };
+    layoutVersions.set(api, (layoutVersions.get(api) ?? 0) + 1);
     restoreSerializedDockview(api, sanitized as SerializedDockview);
     replaceStaleSessionPanels(
       api,

@@ -7,7 +7,12 @@ import { raceAbort, abortError } from "./task-navigation-attempt";
 
 export type TaskSessionReads = SharedResourceReads<TaskSessionsResponse>;
 
-type TaskSessionReadOwner = { identity: string; reads: TaskSessionReads };
+type MembershipProof = { taskId: string; apply: (response: TaskSessionsResponse) => void };
+type TaskSessionReadOwner = {
+  identity: string;
+  reads: TaskSessionReads;
+  proofs: Map<string, MembershipProof>;
+};
 const owners = new WeakMap<StoreApi<AppState>, TaskSessionReadOwner>();
 
 export function createTaskSessionReads(scopeIsCurrent?: () => boolean): TaskSessionReads {
@@ -21,6 +26,7 @@ export function getTaskSessionReads(store: StoreApi<AppState>): TaskSessionReads
     owner?.reads.dispose();
     const nextOwner: TaskSessionReadOwner = {
       identity,
+      proofs: new Map(),
       reads: new SharedResourceReads<TaskSessionsResponse>(
         () => owners.get(store) === nextOwner && storeReadScopeIdentity(store) === identity,
       ),
@@ -34,6 +40,35 @@ export function getTaskSessionReads(store: StoreApi<AppState>): TaskSessionReads
 /** Confirmed removals invalidate old membership snapshots without creating an owner. */
 export function invalidateTaskSessionMembership(store: StoreApi<AppState>, taskId: string): void {
   owners.get(store)?.reads.invalidate(taskId);
+}
+
+/** Removal proof consumers observe only admitted, current-scope membership responses. */
+export function registerTaskSessionMembershipProof(
+  store: StoreApi<AppState>,
+  taskId: string,
+  sessionId: string,
+  apply: MembershipProof["apply"],
+) {
+  getTaskSessionReads(store);
+  owners.get(store)!.proofs.set(sessionId, { taskId, apply });
+}
+
+export function forgetTaskSessionMembershipProof(store: StoreApi<AppState>, sessionId: string) {
+  owners.get(store)?.proofs.delete(sessionId);
+}
+
+export function publishTaskSessionMembership(
+  store: StoreApi<AppState>,
+  reads: TaskSessionReads,
+  taskId: string,
+  generation: number,
+  response: TaskSessionsResponse,
+) {
+  const owner = owners.get(store);
+  if (owner?.reads !== reads || !reads.isCurrent(taskId, generation)) return;
+  for (const proof of owner.proofs.values()) {
+    if (proof.taskId === taskId) proof.apply(response);
+  }
 }
 
 export async function readTaskNavigationMembership(

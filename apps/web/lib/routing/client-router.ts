@@ -4,6 +4,7 @@ import { useMemo, useSyncExternalStore } from "react";
 
 import { LOCATION_CHANGE_EVENT } from "./navigation-event";
 import { pushNavigationState, replaceNavigationState } from "./navigation-guard";
+import { generateUUID } from "@/lib/uuid";
 
 type NavigateOptions = {
   scroll?: boolean;
@@ -72,7 +73,7 @@ export function useParams(): Record<string, string> {
 
 function navigate(mode: "push" | "replace", href: string, options?: NavigateOptions): void {
   const state = options?.taskSessionActivation
-    ? { taskSessionActivation: { ...options.taskSessionActivation, id: crypto.randomUUID() } }
+    ? { taskSessionActivation: { ...options.taskSessionActivation, id: generateUUID() } }
     : {};
   if (mode === "push") {
     pushNavigationState(state, "", href, () => finishNavigation(options));

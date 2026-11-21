@@ -8,7 +8,13 @@ import { KanbanPage } from "../pages/kanban-page";
 import { dwell } from "./causal-waits";
 import { seedRemovalChoiceTask } from "./session-removal";
 import { waitForActiveTaskSession } from "./session-store";
-import { newestStoredMessageId, observeReadTraffic, sessionReadState } from "./unread-divider";
+import {
+  newestStoredMessageId,
+  observeReadTraffic,
+  sessionReadState,
+  taskUnreadSessionIds,
+  TASK_UNREAD_DOT_LABEL,
+} from "./unread-divider";
 
 async function waitForIndexedConversation(
   api: ApiClient,
@@ -188,6 +194,17 @@ export async function expectConversationRouteAfterRemoval(
     await expect(viewer.activeChat()).toHaveCount(0);
     expect((await sessionReadState(api, other.session_id)).cursor).toBe(tail.messageId);
     expect(reads.markReads.filter((read) => read.messageId === after.messageId)).toEqual([]);
+    await expect
+      .poll(() => taskUnreadSessionIds(api, seed.workspaceId, task.task_id))
+      .toEqual([other.session_id]);
+    await page.getByTestId("mobile-task-picker-trigger").tap();
+    const picker = page.getByRole("dialog");
+    const row = picker.getByTestId("sidebar-task-item").filter({ hasText: "Owned removal choice" });
+    await expect(row.getByRole("img", { name: TASK_UNREAD_DOT_LABEL })).toBeVisible();
+    expect((await sessionReadState(api, other.session_id)).cursor).toBe(tail.messageId);
+    await expect(viewer.activeChat()).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(picker).toHaveCount(0);
     await waitForIndexedConversation(api, seed.workspaceId, repeatQuery, {
       sessionId: other.session_id,
       messageId: after.messageId,
@@ -199,6 +216,7 @@ export async function expectConversationRouteAfterRemoval(
       .toBe(after.messageId);
     expect((await sessionReadState(api, primary.session_id)).cursor).toBe(primaryTail);
     expect(reads.agentStarts()).toEqual([]);
+    await expect.poll(() => taskUnreadSessionIds(api, seed.workspaceId, task.task_id)).toEqual([]);
   }
   if (options.hideTarget) {
     await viewer.sessionTabCloseButton(other.session_id).click();

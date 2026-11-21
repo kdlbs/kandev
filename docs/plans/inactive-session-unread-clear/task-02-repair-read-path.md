@@ -3784,3 +3784,102 @@ Stored-cursor/traffic proof remains distinct from screenshots.
 
 R27 implementation is complete. Independent review R28 follows the normal
 commit and exact-ref push; the review loop is not complete.
+
+### Production-fix review round 28 remediation
+
+Sol child `205d8bc3-1c18-48e4-a2b0-91d5532be760` reviewed
+`8822a18b3dfb91913350bb4273975019d3988fdb`: four P2 source schedules.
+Completed production rounds 28; consecutive clean 0.
+
+Parent RED: `r28-red-units.log` has nine failures / 94 controls: unavailable
+`randomUUID`, a serialized Saved Layout superseding an exit, three uncertain
+removal/ordinary-reader cases, and four phone non-Chat panes suppressing dots.
+`r28-phone-red2-summary.log` reproduces the missing selected-row dot with Plan
+visible, its cursor unchanged and authoritative unread `[B]`. The first phone
+attempt omitted the workspace argument to the summary helper; that is fixture
+failure, not product RED.
+
+Corrections:
+
+- Existing `generateUUID()` provides the non-security activation identity on
+  supported HTTP hosts. Actual router tests retain `getRandomValues`, remove
+  `randomUUID`, and cover first/repeated commits and cancellation.
+- The raw serialized Saved Layout commit advances the same layout generation
+  as column layouts. Controlled real Dockview verifies the older exit cannot
+  layout, persist, adopt widths or release newer restoring state.
+- Scoped read owners retain per-session removal proof consumers. Only ordinary
+  membership admitted after current-scope/current-generation checks publishes
+  its raw response, after workflow reconciliation. Complete task proof uses the
+  existing retirement/focus owner path; partial/error/stale lists do not.
+  Confirmed retirement removes the consumer; scope replacement discards it.
+  No timer, retry, new endpoint or duplicate membership state.
+- Phone non-Chat selection supplies no displayed-session exclusion. Desktop
+  hide/group behavior remains independent. The Plan/picker scenario checks the
+  real row dot before the same-URL hit, then exact B cursor and empty aggregate.
+
+Final reader controls cover failed dedicated proof followed by ordinary refresh,
+incomplete/stale lists, scope change, newer pin and committed workflow. The new
+browser case exercises a transient proof failure, then a real foreground return.
+No cursor writer, unread predicate/projector, backend promotion, Go source,
+schema or wire changes. Existing mobile surfaces, scroll owner and touch targets
+are unchanged; no new product copy.
+
+#### R28 targeted checks
+
+`r28-final-units-v2.log`: 14 files / 304 tests pass after the final production
+edit. Includes HTTP UUID fallback/guard cancellation, serialized-layout exit
+ownership, ordinary/stale/incomplete/scope/pin/workflow proof schedules,
+existing reader cancellation and desktop/phone visibility controls.
+`r28-final-reader.log`: all ten owning reader cases pass after a test-only
+literal extraction. These overlapping receipts are not summed.
+
+The first expanded run was 303/304: the added committed-workflow control omitted
+its destination-step/timestamp evidence. Supplying the real correlated shape
+made the control meaningful; production logic was not weakened. Strict lint
+then caught repeated test literals. A fixture-only `object` cast failed
+typecheck; the serialized layout now uses its required record type.
+Strict changed-file lint, full production typecheck, fresh frontend build and
+docs catalog/spec validation pass. Final type-fixture lint is retained separately.
+
+Replay from the refreshed cache-safe snapshot:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run lib/routing/client-router.test.ts \
+  lib/state/dockview-env-switch.plugin-layout.test.ts \
+  lib/state/dockview-env-switch-maximize-session-filter.test.ts \
+  lib/state/dockview-right-panel-visibility.test.ts lib/state/task-session-reads.test.ts \
+  lib/ws/handlers/task-primary- hooks/use-task-sessions \
+  hooks/domains/sidebar/use-unread-task-dot-display.test.tsx
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts -- \
+  --grep 'through real Go boot|explicit conversation route across hidden|ordinary foreground membership' \
+  --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+```
+
+Runtime uses fresh R28 frontend and retained fresh R24 Go/agentctl/host/plugin.
+No new Go suite, broad local audit or live-NATS check. The real browser proof
+uses a read-only Preview for the deleting actor so it cannot acknowledge the
+survivor on the observer's behalf; observer mark-read traffic and cursor are
+separate assertions. Historical-trigger, list-convergence and seeded-execution
+qualifications remain.
+
+Final browser receipts: `r28-green-summary.log` eight desktop cases pass and
+`r28-phone-summary.log` ten phone cases pass, one worker/no retries on the final
+bundle. The new desktop case retains A's view and B's unread cursor while initial
+absence reads return 503; after a real foreground return, independent positive
+membership evicts A, shows B and sends B's exact mark-read. The read-only deleting
+Preview cannot supply that acknowledgement. The other unread sibling is retained
+and no launch is sent.
+
+Phone proves authoritative `[B]`, unchanged B cursor and the actual selected-row
+dot while Plan is displayed. The genuine same-URL hit then shows Chat, reads B's
+exact tail and converges to an empty aggregate without reading its sibling.
+Inspected final foreground-survivor and phone repeated-hit captures; conversation,
+composer and phone navigation remain contained. Screenshots do not substitute
+for cursor/traffic assertions.
+
+R28 implementation is complete; independent review proceeds R29 after normal
+commit/push. The three-consecutive-clean/50-round loop remains open.

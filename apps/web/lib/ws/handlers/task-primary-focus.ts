@@ -7,6 +7,8 @@ import { retireSessionReads } from "@/lib/state/session-read-coordinator";
 import {
   getTaskSessionReads,
   invalidateTaskSessionMembership,
+  registerTaskSessionMembershipProof,
+  forgetTaskSessionMembershipProof,
 } from "@/lib/state/task-session-reads";
 import { isConfirmedSessionRemoved } from "@/lib/state/session-removal";
 import {
@@ -61,6 +63,14 @@ const pendingByStore = new WeakMap<StoreApi<AppState>, PendingFollow>();
 function observeRemoval(store: StoreApi<AppState>, taskId: string, sessionId: string): void {
   if (recordObservedSessionRemoval(store, sessionId))
     invalidateTaskSessionMembership(store, taskId);
+  const owner = {
+    taskId,
+    previousSessionId: sessionId,
+    scopeIdentity: stateReadScopeIdentity(store.getState()),
+  };
+  registerTaskSessionMembershipProof(store, taskId, sessionId, (membership) => {
+    if (provenRemoval(membership, owner)) commitRemovalMembership(store, owner, membership);
+  });
 }
 
 /** Look up a task across both single-kanban and multi-kanban snapshots. */
@@ -245,6 +255,7 @@ function retireRemovalMembership(store: StoreApi<AppState>, pending: RemovalOwne
   if (state.workflowSessionFocus.request?.sessionId === pending.previousSessionId) {
     state.cancelWorkflowSessionFocus({ taskId: pending.taskId });
   }
+  forgetTaskSessionMembershipProof(store, pending.previousSessionId);
   if (isConfirmedSessionRemoved(store.getState().taskSessions, pending.previousSessionId)) return;
   invalidateTaskSessionMembership(store, pending.taskId);
   retireSessionReads(store, pending.previousSessionId);

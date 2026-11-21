@@ -140,3 +140,96 @@ describe("task membership publication after removal proof", () => {
     },
   );
 });
+
+it.each([
+  "ordinary",
+  "incomplete-first",
+  "stale-first",
+  "newer-pin",
+  "newer-workflow",
+  "scope-change",
+])("settles an uncertain 404 removal on a fresh ordinary membership: %s", async (order) => {
+  vi.mocked(fetchTaskSession).mockRejectedValue(new ApiError("", 404, null));
+  vi.mocked(proofList).mockRejectedValue(new ApiError("unavailable", 503, null));
+  vi.mocked(foregroundList).mockResolvedValue(membership("next", "latest"));
+  const stale = Promise.withResolvers<TaskSessionsResponse>();
+  const staleFirst = order === "stale-first";
+  if (staleFirst) vi.mocked(foregroundList).mockReturnValueOnce(stale.promise);
+  const hook = renderHook(() => useTaskSessions("t1"));
+  let oldRead: Promise<void> | undefined;
+  if (staleFirst) {
+    act(() => {
+      oldRead = hook.result.current.loadSessions(true);
+    });
+    await waitFor(() => expect(foregroundList).toHaveBeenCalledTimes(1));
+  }
+  act(() => promote(store));
+  await waitFor(() => expect(proofList).toHaveBeenCalledTimes(1));
+  await act(async () => flushFocusWork());
+  expect(store.getState().tasks.activeSessionId).toBe("old");
+  expect(store.getState().taskSessions.items.old).toBeDefined();
+  if (staleFirst) {
+    await act(async () => {
+      stale.resolve(membership("next", "latest"));
+      await oldRead;
+    });
+    expect(store.getState().taskSessions.items.old).toBeDefined();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+  }
+  if (order === "scope-change")
+    act(() =>
+      store.setState({
+        workspaceContextGeneration: store.getState().workspaceContextGeneration + 1,
+      }),
+    );
+  if (order === "newer-workflow")
+    act(() => {
+      const requestId = store.getState().beginWorkflowSessionFocus({
+        taskId: "t1",
+        workflowId: "wf1",
+        destinationStepId: "review",
+        presentationToken: 1,
+        navigationRevision: store.getState().taskRemoval.navigationRevision,
+      })!;
+      store.getState().bindWorkflowSessionFocus({
+        requestId,
+        presentationToken: 1,
+        entryIdentity: "entry:fresh",
+      });
+      store.getState().reconcileWorkflowSessionFocus("t1", {
+        workflowStepId: "review",
+        updatedAt: "2026-11-21T12:00:00Z",
+        entryIdentity: "entry:fresh",
+        metadata: {
+          workflow_session_route: {
+            operation_id: "fresh",
+            destination_step_id: "review",
+            entry_identity: "entry:fresh",
+            destination_session_id: "latest",
+            phase: "committed",
+          },
+        },
+      });
+      expect(store.getState().tasks.activeSessionId).toBe("latest");
+    });
+  if (order === "newer-pin") act(() => store.getState().setActiveSession("t1", "latest"));
+  if (order === "incomplete-first") {
+    vi.mocked(foregroundList).mockResolvedValueOnce({ ...membership("next"), total: 10 });
+    await act(async () => hook.result.current.loadSessions(true));
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    expect(store.getState().taskSessions.items.old).toBeDefined();
+  }
+  await act(async () => hook.result.current.loadSessions(true));
+  if (order === "scope-change") {
+    expect(store.getState().taskSessions.items.old).toBeDefined();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    hook.unmount();
+    return;
+  }
+  await waitFor(() => expect(store.getState().taskSessions.items.old).toBeUndefined());
+  expect(store.getState().tasks.activeSessionId).toBe(
+    order === "newer-pin" || order === "newer-workflow" ? "latest" : "next",
+  );
+  expect(proofList).toHaveBeenCalledTimes(1);
+  hook.unmount();
+});

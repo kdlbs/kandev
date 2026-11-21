@@ -249,7 +249,7 @@ selection/pin and workflow requests targeting it. Preserve independent intent,
 surviving pins/cursors and newer user/workflow selection. Owned empty slots can
 re-prove after changed primaries. Proof fills missing recipient identity/lifecycle.
 
-Explicit hits carry scoped history identity, even at the same URL.
+Explicit hits use HTTP-safe scoped identity, even at the same URL.
 Routes reopen hidden targets. Restore keeps flat/tree or unique legacy choices.
 Phone consumes focus for Chat; unavailable/404 proof vetoes admission/sync.
 `workflow_focus_disposition: none`: admitted, no source/effective launch;
@@ -263,8 +263,8 @@ fences canonical/list/event/route/selection admission per store/backend; evictio
 or restart is not deletion. Queue incarnation/hydration cannot recreate deleted
 UUIDs. Survivors retain membership/freshness/cursors and comment-conflict scope.
 
-Uncertain reads preserve the view. Unread rules, promotion and database schemas
-stay unchanged; optional move-focus metadata is backward-compatible.
+Fresh complete membership can settle uncertain removal reads; no retry.
+Unread/promotion/schema stay; optional move-focus metadata is backward-compatible.
 
 An unread failed sibling that was never displayed is not evidence of a failed
 cursor write. It remains unread under AC .2, .9, .12, and .17. Preserve this
@@ -368,11 +368,10 @@ showDot = enabled                                     // AC .1, .3, .4
               || (isSelected && some id != displayedSessionId))  // AC .17
 ```
 
-Rows keep their task selection rule: desktop uses route-aware
-`highlightedTaskId`; phone uses `activeTaskId`. Phone's `displayedSessionId`
-is `tasks.activeSessionId`. With Dockview, desktop excludes hidden, absent or
-group-inactive panels. A selected but undisplayed session keeps its unread dot
-under .17; displayed-session output has no dot, while unread siblings keep theirs.
+Rows select by desktop `highlightedTaskId` or phone `activeTaskId`.
+Phone excludes its selected session only on Chat, not Plan/other panes.
+Desktop excludes hidden, absent or group-inactive chats. Selected but undisplayed
+output keeps its dot under .17; displayed output has no dot, unread siblings do.
 
 `lingering` comes from `useUnreadDotLinger` (`components/task/use-unread-dot-linger.ts`).
 It becomes true when the row turns selected while its dot is showing and the

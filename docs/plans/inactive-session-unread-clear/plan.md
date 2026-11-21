@@ -273,7 +273,7 @@ the same causal scenario after Task 01 proves a violation:
 Execute sequentially. No subagent authorization is implied.
 
 - [x] [Task 01: Establish the inactive-session failure boundary](task-01-establish-failure-boundary.md) (done: conformance, no violation reproduced).
-- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R27 corrections, 360 targeted tests, seven desktop and ten phone cases, strict checks/typecheck/build. Independent review continues; broad suites/live NATS remain uncertified).
+- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R28 corrections, 304 targeted tests, eight desktop/ten phone cases, strict checks/typecheck/build. Independent review continues; broad suites/live NATS remain uncertified).
 
 The prior [task unread dot package](../task-unread-dot/plan.md) is historical
 completed delivery. The [visible-visit divider package](../unread-divider-visible-session-clear/plan.md)
@@ -753,3 +753,18 @@ refactor/fixture correction; strict lint/typecheck/fresh frontend/docs pass.
 Seven desktop and ten phone cases pass on the final bundle, one worker/no
 retries. Legacy Restore and repeated-hit phone captures inspected. Task 02
 records failed intermediate runs separately and gives exact scoped replay.
+
+### Production review R28
+
+Sol child `205d8bc3-1c18-48e4-a2b0-91d5532be760` reviewed
+`8822a18b3dfb91913350bb4273975019d3988fdb`: four P2s, not clean.
+HTTP activation, serialized Saved Layout ownership, ordinary membership after
+uncertain proof and phone Plan dots have parent RED/targeted corrections in
+Task 02. Completed production rounds 28; consecutive clean 0.
+R29 follows verified delivery; earlier review loops do not count toward this one.
+
+R28 final author receipts: 14 files / 304 tests plus an overlapping final owning
+reader run (10 cases). Strict lint/typecheck/fresh frontend/docs pass after
+test-only lint/type corrections. Eight desktop and ten phone cases pass,
+one worker/no retries, on the final bundle. Foreground-survivor and phone
+captures inspected; Task 02 records RED/fixture failures and exact replay.

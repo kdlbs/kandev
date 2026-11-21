@@ -55,10 +55,17 @@ export function useUnreadTaskDotDisplay() {
   const unreadMessagesEnabled = useAppStore((state) => state.userSettings.unreadTaskDot);
   const delaySeconds = useAppStore((state) => state.userSettings.unreadTaskDotHideDelaySeconds);
   const displayedSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const { isMobile } = useResponsiveBreakpoint();
+  const phoneChatVisible = useAppStore(
+    (state) =>
+      !isMobile ||
+      !displayedSessionId ||
+      (state.mobileSession.activePanelBySessionId[displayedSessionId] ?? "chat") === "chat",
+  );
   const hidden = useSessionHiddenInDesktopLayout(displayedSessionId);
   return {
     unreadMessagesEnabled,
     unreadDotHideDelayMs: delaySeconds * 1000,
-    displayedSessionId: hidden ? null : displayedSessionId,
+    displayedSessionId: hidden || !phoneChatVisible ? null : displayedSessionId,
   };
 }

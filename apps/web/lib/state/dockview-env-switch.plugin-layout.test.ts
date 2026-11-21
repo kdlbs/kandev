@@ -905,7 +905,7 @@ it.each(
   },
 );
 
-it.each(["next-env", "same-env-layout", "return-to-env"])(
+it.each(["next-env", "same-env-layout", "return-to-env", "serialized-layout"])(
   "fences an old exit frame across %s",
   async (mode) => {
     const x = horizontalLayout({ bottom: [NOTES] });
@@ -918,15 +918,29 @@ it.each(["next-env", "same-env-layout", "return-to-env"])(
       frames.push(frame);
       return frames.length;
     });
+    const returning = mode === "return-to-env";
     try {
       useDockviewStore.getState().exitMaximizedLayout();
       const oldExit = frames.at(-1)!;
-      if (mode !== "same-env-layout") {
+      if (mode === "next-env" || returning) {
         useDockviewStore.getState().switchEnvLayout("exit-x", "exit-y", null, []);
-        if (mode === "return-to-env")
-          useDockviewStore.getState().switchEnvLayout("exit-y", "exit-x", null, []);
+        if (returning) useDockviewStore.getState().switchEnvLayout("exit-y", "exit-x", null, []);
       }
-      if (mode !== "next-env") useDockviewStore.getState().toggleRightPanels();
+      if (mode === "same-env-layout" || returning) useDockviewStore.getState().toggleRightPanels();
+      if (mode === "serialized-layout") {
+        useDockviewStore.getState().applyCustomLayout({
+          id: "legacy-frame",
+          name: "Legacy frame",
+          isDefault: false,
+          createdAt: "2026-11-21T00:00:00Z",
+          layout: toSerializedDockview(y, WIDTH, HEIGHT, new Map()) as unknown as Record<
+            string,
+            unknown
+          >,
+        });
+        expect(api.getPanel(PROMPTS.id)).toBeDefined();
+        expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
+      }
       const savedX = structuredClone(getEnvLayout("exit-x"));
       const yShape = shape(api);
       const restoring = useDockviewStore.getState().isRestoringLayout;

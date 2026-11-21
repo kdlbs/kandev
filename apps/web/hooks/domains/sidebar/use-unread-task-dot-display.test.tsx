@@ -2,7 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { DockviewApi } from "dockview-react";
 import { expect, it, vi } from "vitest";
-import { StateProvider } from "@/components/state-provider";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { createAppStore } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
@@ -97,3 +97,36 @@ it.each([false, true])("keeps desktop hiding separate from phone display (phone:
     useDockviewStore.setState(original);
   }
 });
+
+it.each(["chat", "plan", "changes", "files", "terminal"] as const)(
+  "excludes a phone conversation only on its Chat surface, not %s",
+  (panel) => {
+    viewport.isMobile = true;
+    const base = createAppStore().getState();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <StateProvider
+        initialState={{
+          tasks: { ...base.tasks, activeTaskId: "t1", activeSessionId: SESSION_ID },
+          mobileSession: { ...base.mobileSession, activePanelBySessionId: { [SESSION_ID]: panel } },
+        }}
+      >
+        {children}
+      </StateProvider>
+    );
+    const { result, unmount } = renderHook(
+      () => ({
+        display: useUnreadTaskDotDisplay(),
+        store: useAppStoreApi(),
+      }),
+      { wrapper },
+    );
+    try {
+      expect(result.current.display.displayedSessionId).toBe(panel === "chat" ? SESSION_ID : null);
+      act(() => result.current.store.getState().setMobileSessionPanel(SESSION_ID, "chat"));
+      expect(result.current.display.displayedSessionId).toBe(SESSION_ID);
+    } finally {
+      unmount();
+      viewport.isMobile = false;
+    }
+  },
+);

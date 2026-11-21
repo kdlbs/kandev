@@ -195,6 +195,95 @@ test.describe("owned removal transcript visibility", () => {
     });
   });
 
+  test("settles removal on an ordinary foreground membership refresh after proof failure", async ({
+    testPage,
+    desktopTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { task, old, primary, other } = await seedRemovalChoiceTask(apiClient, seedData);
+    await apiClient.seedTaskSession(task.task_id, {
+      sessionId: other.session_id,
+      agentProfileId: seedData.agentProfileId,
+      state: "COMPLETED",
+      completedAt: new Date().toISOString(),
+    });
+    await apiClient.setPrimarySession(old.session_id);
+    const observer = new SessionPage(testPage);
+    const watcher = watchWs(testPage);
+    await testPage.goto(`/t/${task.task_id}`);
+    await expect(observer.activeChat()).toHaveAttribute("data-session-id", old.session_id);
+    await waitForTaskSessionsSettled(testPage, task.task_id);
+    const tail = await newestStoredMessageId(apiClient, primary.session_id);
+    const traffic = observeReadTraffic(testPage);
+    const failed = Promise.withResolvers<void>();
+    let fresh = false;
+    let positiveReads = 0;
+    const pattern = `**/api/v1/tasks/${task.task_id}/sessions`;
+    const routeMembership = async (route: import("@playwright/test").Route) => {
+      if (!fresh) {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "temporary proof failure" }),
+        });
+        failed.resolve();
+      } else {
+        positiveReads++;
+        await route.continue();
+      }
+    };
+    await testPage.route(pattern, routeMembership);
+    try {
+      await apiClient.saveUserSettings({ enable_preview_on_click: true });
+      await desktopTestPage.goto(
+        `/?workflowId=${seedData.workflowId}&taskId=${task.task_id}&sessionId=${old.session_id}`,
+      );
+      await desktopTestPage.bringToFront();
+      const preview = desktopTestPage.getByTestId("task-preview-panel");
+      await expect(preview.locator('[data-testid="session-chat"]:visible')).toHaveAttribute(
+        "data-session-id",
+        old.session_id,
+      );
+      const removed = watcher.waitForEvent("session.removed", {
+        where: (payload) => payload.session_id === old.session_id,
+      });
+      const promoted = watcher.waitForEvent("task.updated", {
+        where: (payload) =>
+          payload.task_id === task.task_id && payload.primary_session_id === primary.session_id,
+      });
+      await preview.getByTestId(`preview-session-tab-${old.session_id}`).click({ button: "right" });
+      await desktopTestPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
+      await desktopTestPage.getByTestId("session-delete-confirm").click();
+      await Promise.all([removed, promoted, failed.promise]);
+      await dwell(
+        testPage,
+        500,
+        "negative-assertion",
+        "Failed absence reads must retain the predecessor until independent proof",
+      );
+      await waitForActiveTaskSession(testPage, task.task_id, old.session_id);
+      expect((await sessionReadState(apiClient, primary.session_id)).cursor).toBeNull();
+      fresh = true;
+      await testPage.bringToFront();
+      await waitForActiveTaskSession(testPage, task.task_id, primary.session_id);
+      await expect(observer.activeChat()).toHaveAttribute("data-session-id", primary.session_id);
+      await expect
+        .poll(async () => (await sessionReadState(apiClient, primary.session_id)).cursor)
+        .toBe(tail);
+      expect(traffic.markReads).toContainEqual({ sessionId: primary.session_id, messageId: tail });
+      expect(positiveReads).toBeGreaterThan(0);
+      await expect(observer.sessionTabBySessionId(old.session_id)).toHaveCount(0);
+      expect((await sessionReadState(apiClient, other.session_id)).cursor).toBeNull();
+      expect(traffic.agentStarts()).toEqual([]);
+      await testPage.screenshot({
+        path: test.info().outputPath("membership-proof-foreground.png"),
+      });
+    } finally {
+      await testPage.unroute(pattern, routeMembership);
+    }
+  });
+
   // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.17
   test("opens a Command Panel conversation after a settled same-task removal", async ({
     testPage,
