@@ -31,7 +31,11 @@ func newStepTransitionsFixture(t *testing.T) stepTransitionsFixture {
 	repo := sqliterepo.NewWithInitializedDB(database, database, nil)
 	ownerCtx := authn.WithIdentity(t.Context(), authn.Identity{UserID: "owner", Role: authn.RoleMember, OrgID: "owner-org"})
 	require.NoError(t, repo.CreateWorkspace(ownerCtx, &models.Workspace{ID: "ws-private", OwnerID: "owner", OrgID: "owner-org", Name: "Private"}))
-	_, err := database.Exec(database.Rebind(`INSERT INTO workflow_steps (id, workflow_id, name, position) VALUES (?, ?, ?, ?), (?, ?, ?, ?)`),
+	now := time.Now().UTC()
+	_, err := database.Exec(database.Rebind(`INSERT INTO workflows (id, workspace_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`),
+		"wf-1", "ws-private", "Private workflow", now, now)
+	require.NoError(t, err)
+	_, err = database.Exec(database.Rebind(`INSERT INTO workflow_steps (id, workflow_id, name, position) VALUES (?, ?, ?, ?), (?, ?, ?, ?)`),
 		"step-todo", "wf-1", "Todo", 0, "step-approval", "wf-1", "Approval", 1)
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateTask(ownerCtx, &models.Task{
