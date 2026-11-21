@@ -324,6 +324,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 		}
 		return "", fmt.Errorf("failed to bind new session notifications: %w", barrierErr)
 	}
+	a.resetClaudeMonitorReadersForSessionTransition(priorSessionID, sessionID)
 	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
@@ -803,6 +804,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	}
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	a.installNativeBindingBarrier(sessionID, true, a.copilotNativeSessionEvents)
+	a.resetClaudeMonitorReadersForSessionTransition(priorSessionID, sessionID)
 	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
@@ -914,6 +916,7 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	clear(a.contextSamples)
 	clear(a.nativeGaugeMaxSize)
 	a.advanceNativeGenerationLocked()
+	a.rebindClaudeMonitorReaderGenerationLocked(sessionID, a.nativeGeneration)
 	a.configGeneration++
 	a.mu.Unlock()
 	a.installNativeBindingBarrier(sessionID, false, a.copilotNativeSessionEvents)
