@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/kandev/kandev/internal/agentctl/server/utility"
 )
 
 // InferenceIdentity carries server-resolved relationships, never admission keys.
@@ -31,6 +33,12 @@ func WithInferenceIdentity(ctx context.Context, identity InferenceIdentity) cont
 func InferenceIdentityFromContext(ctx context.Context) InferenceIdentity {
 	identity, _ := ctx.Value(inferenceIdentityKey{}).(InferenceIdentity)
 	return identity
+}
+
+// InferenceConsumer owns prepare, shared admission, provider admission and send.
+// Leaves supply their actual resolved request without changing model selection.
+type InferenceConsumer interface {
+	Execute(context.Context, *Client, *utility.PromptRequest, InferenceIdentity) (*utility.PromptResponse, error)
 }
 
 // InferenceCapacityError is a wait/refusal, not a provider or model failure.

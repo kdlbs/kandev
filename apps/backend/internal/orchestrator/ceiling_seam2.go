@@ -29,6 +29,7 @@ func seam2StartCreatedPayload(
 		"prompt_reference_context":       promptReferenceContext,
 		"skip_message_record":            skipMessageRecord,
 		"auto_start":                     autoStart,
+		"origin":                         string(options.origin),
 		"skip_task_description_fallback": options.skipTaskDescriptionFallback,
 		"prompt_already_composed":        options.promptAlreadyComposed,
 		"retry_prompt":                   options.retryPrompt,

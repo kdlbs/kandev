@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -122,4 +123,26 @@ func TestReleaseCeilingIfLeftPopulation(t *testing.T) {
 	require.NotPanics(t, func() {
 		svc.releaseCeilingIfLeftPopulation("never-existed", models.TaskSessionStateCreated, models.TaskSessionStateFailed)
 	})
+}
+
+func TestInferenceAdmissionLimitClassificationAndExactOwner(t *testing.T) {
+	c := &sessionCeilingController{ceiling: 2, gradeLimits: map[string]int{"A": 1}}
+	request := admissionRequest{grade: "A", gradeKnown: true}
+	both := gradedPopulation{total: 2, grade: 1}
+	if got := c.gradeCapacityDecisionLocked(request, both, true).reasonCode; got != ceilingReasonBothLimits {
+		t.Fatalf("both limits = %q", got)
+	}
+	free := gradedPopulation{total: 1, grade: 0}
+	if got := c.gradeCapacityDecisionLocked(request, free, true).reasonCode; got != "" {
+		t.Fatalf("free capacity = %q", got)
+	}
+	binding := sessioncapacity.InferenceBinding{Key: "inference:owner:attempt", InstanceID: "instance", OwnerID: "owner", AttemptID: "attempt", PreparationID: "prep"}
+	if !sameInferenceOwner(binding, binding) {
+		t.Fatal("identical binding was rejected")
+	}
+	changed := binding
+	changed.PreparationID = "other"
+	if sameInferenceOwner(binding, changed) {
+		t.Fatal("changed preparation identity was accepted")
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -28,8 +29,13 @@ func (s *Service) SetExecutionCapacity(effective sessioncapacity.Effective) {
 	}
 	c := s.sessionCeiling
 	c.mu.Lock()
+	wasRequired := c.policy == sessioncapacity.PolicyAll && (c.ceiling != unlimitedSessionCeiling || len(c.gradeLimits) > 0)
 	c.ceiling, c.policy = effective.MaxSessions, effective.Policy
 	c.gradeLimits = maps.Clone(effective.GradeLimits)
+	if required := c.policy == sessioncapacity.PolicyAll && (c.ceiling != unlimitedSessionCeiling || len(c.gradeLimits) > 0); required != wasRequired {
+		c.inferenceRevision++
+		c.inferenceKnown = false
+	}
 	c.mu.Unlock()
 	s.signalCeilingSweep()
 }
@@ -48,27 +54,38 @@ func (c *sessionCeilingController) readGradedPopulationLocked(ctx context.Contex
 	}
 	lister, ok := c.lister.(admittedExecutionLister)
 	if !ok {
+		c.logPopulationUnknown("task_sessions", "reader_unavailable", "", "")
 		return population, errors.New("admitted execution grades unavailable")
 	}
 	rows, err := lister.ListAdmittedExecutions(ctx)
 	if err != nil {
+		c.logPopulationUnknown("task_sessions", populationReadFailure(err), "", "")
 		return population, err
 	}
 	seenGradeSessions := make(map[string]struct{}, len(rows)+len(c.reservations))
 	for _, row := range rows {
+		if !row.GradeKnown {
+			c.logPopulationUnknown("task_sessions", "grade_unknown", "session_id", row.ID)
+		}
 		population.counted[row.ID] = struct{}{}
 		if row.ID != "" {
 			seenGradeSessions[row.ID] = struct{}{}
 		}
 		c.observeGradeLocked(&population, row.Grade, row.GradeKnown, grade)
 	}
+	if err := c.appendInferenceGradesLocked(ctx, &population, grade); err != nil {
+		return population, err
+	}
 	population.total = c.populationLocked(population.counted)
-	for _, held := range c.reservations {
+	for key, held := range c.reservations {
 		if held.sessionID != "" {
 			if _, observed := seenGradeSessions[held.sessionID]; observed {
 				continue
 			}
 			seenGradeSessions[held.sessionID] = struct{}{}
+		}
+		if !held.gradeKnown {
+			c.logPopulationUnknown("reservations", "grade_unknown", "reservation_id", key)
 		}
 		c.observeGradeLocked(&population, held.grade, held.gradeKnown, grade)
 	}
@@ -101,9 +118,13 @@ func (c *sessionCeilingController) observeGradeLocked(population *gradedPopulati
 	}
 }
 
-func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admissionRequest, handoff bool) admissionDecision {
+func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admissionRequest, handoff bool) (decision admissionDecision) {
+	var observed *gradedPopulation
+	maximum, _ := c.requestedGradeLimitLocked(req)
+	defer func() { c.logGradedAdmissionFlow(ctx, req, decision, observed, maximum) }()
 	d := admissionDecision{ceiling: c.ceiling}
 	p, err := c.readGradedPopulationLocked(ctx, req.grade)
+	observed = &p
 	d.population = p.total
 	d.populationKnown = err == nil && !p.unknown
 	// Existing ownership does not consume another slot when configuration changes.
@@ -160,4 +181,15 @@ func (c *sessionCeilingController) existingGradedAdmissionLocked(req admissionRe
 func (c *sessionCeilingController) requestedGradeLimitLocked(req admissionRequest) (int, bool) {
 	maximum, configured := c.gradeLimits[req.grade]
 	return maximum, c.ceiling >= 1 && (!req.gradeKnown || (req.grade != "" && configured))
+}
+
+func (c *sessionCeilingController) logGradedAdmissionFlow(ctx context.Context, req admissionRequest, d admissionDecision, p *gradedPopulation, maximum int) {
+	e := logger.ExecutionFlow{Stage: "admission", Outcome: "waiting", Reason: d.reasonCode, TaskID: req.taskID, SessionID: req.sessionID, ProfileID: req.profileID, StepID: req.workflowStepID, Grade: req.grade, ReservationID: d.reservationKey, Limit: &d.ceiling, PopulationKnown: &d.populationKnown}
+	if d.admitted {
+		e.Outcome = "admitted"
+	}
+	if p != nil && d.populationKnown {
+		e.Population, e.GradePopulation, e.GradeLimit = &p.total, &p.grade, &maximum
+	}
+	logger.EmitExecutionFlow(c.logger, ctx, e)
 }
