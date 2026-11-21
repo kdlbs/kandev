@@ -38,6 +38,7 @@ export type FormState = {
   description: string;
   workflowId: string;
   workflowStepId: string;
+  parentTaskId: string;
   agentProfileId: string;
   executorProfileId: string;
   taskMode: TaskMode;
@@ -215,6 +216,7 @@ export function buildCreatePayload(
     description: form.description,
     workflow_id: form.workflowId,
     workflow_step_id: "",
+    parent_task_id: form.parentTaskId,
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
     task_mode: form.taskMode,
@@ -264,6 +266,7 @@ export function buildUpdatePayload(
     description: form.description,
     workflow_id: form.workflowId,
     workflow_step_id: "",
+    parent_task_id: form.parentTaskId,
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
     task_mode: form.taskMode,

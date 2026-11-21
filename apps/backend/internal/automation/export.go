@@ -24,6 +24,10 @@ type exportDocument struct {
 // task_mode, managed_destination, repository_mode, task_title_template, prompt,
 // agent_profile, executor_profile, workflow, repositories, triggers.
 //
+// ParentTaskID is deliberately not exported: it names a task row in this install,
+// so it is a workspace-local runtime pointer (like continuation_task_id), not
+// portable configuration. A round trip must not carry it to another install.
+//
 // Prompt and every trigger's Config are *yaml.Node rather than string/json.RawMessage
 // because both need explicit control over emitted Tag/Style that struct-tag marshaling
 // cannot express: Prompt per the prompt-fidelity rules (AC-15/16/17/46/47/49), Config

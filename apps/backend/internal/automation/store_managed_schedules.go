@@ -101,14 +101,14 @@ func (s *Store) CreateManagedSchedule(ctx context.Context, item *Automation, tri
 	}
 	setManagedDestinationColumns(item)
 	_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO automations (created_by_user_id, id, workspace_id, name, description,
-		workflow_id, workflow_step_id, agent_profile_id, executor_profile_id, task_mode,
+		workflow_id, workflow_step_id, parent_task_id, agent_profile_id, executor_profile_id, task_mode,
 		managed_owner_installation_id, managed_destination_installation_id, managed_destination_conversation_id,
 		managed_destination_plugin_id, managed_destination_instance_key, managed_destination_revision,
 		resource_revision, repository_mode, prompt, task_title_template, execution_mode, enabled,
 		max_concurrent_runs, continuation_policy, continuation_task_id, webhook_secret, last_triggered_at,
-		created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`),
+		created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`),
 		executoridentity.CreatorUserID(ctx), item.ID, item.WorkspaceID, item.Name, item.Description, item.WorkflowID, item.WorkflowStepID,
-		item.AgentProfileID, item.ExecutorProfileID, item.TaskMode, item.ManagedOwnerInstallationID,
+		item.ParentTaskID, item.AgentProfileID, item.ExecutorProfileID, item.TaskMode, item.ManagedOwnerInstallationID,
 		item.ManagedDestinationInstallationID, item.ManagedDestinationConversationID,
 		item.ManagedDestinationPluginID, item.ManagedDestinationInstanceKey, item.ManagedDestinationRevision,
 		item.ResourceRevision, item.RepositoryMode, item.Prompt, item.TaskTitleTemplate, item.Enabled,
