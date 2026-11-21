@@ -165,8 +165,12 @@ test.describe("Picker feedback on phone", () => {
     await expect(command).toBeVisible();
     await composer.fill("keep this phone draft");
     const autoScroll = session.chat.getByTestId("auto-scroll-toggle-button");
-    await autoScroll.tap();
-    await expect(autoScroll).toHaveAttribute("aria-pressed", "false");
+    await expect(async () => {
+      if ((await autoScroll.getAttribute("aria-pressed")) === "true") {
+        await autoScroll.tap({ timeout: 2_000 });
+      }
+      expect(await autoScroll.getAttribute("aria-pressed")).toBe("false");
+    }).toPass({ timeout: 5_000 });
     const transcriptBounds = await transcript.boundingBox();
     expect(transcriptBounds).not.toBeNull();
     await testPage.mouse.move(
