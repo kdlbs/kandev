@@ -36,6 +36,7 @@ export type TaskNavigationContext = {
   readonly identity: string;
   readonly generation: number;
   readonly selectionAtStart?: HydrationOptions["taskSelectionAtRequestStart"];
+  readonly requestedSessionId?: string;
 };
 
 export type TaskNavigationReadSnapshot = {
@@ -452,8 +453,9 @@ async function fetchTaskNavigationIdentity(
   taskId: string,
   signal: AbortSignal,
   sessionReads: TaskSessionReads,
-  scopeIsCurrent: () => boolean,
+  options: { scopeIsCurrent: () => boolean; requestedSessionId?: string },
 ): Promise<TaskNavigationIdentity> {
+  const { scopeIsCurrent } = options;
   // The HTTP attempt owns reconciliation; joined and cached callers do not publish again.
   const overviewReadId = store.getState().beginTaskOverviewRead();
   const release = sessionReads.retain(taskId);
@@ -468,7 +470,7 @@ async function fetchTaskNavigationIdentity(
       firstMembership,
       sessionReads,
       signal,
-      scopeIsCurrent,
+      options,
     );
     if (signal.aborted || !scopeIsCurrent()) throw abortError();
     if (isCurrentTaskDetailRead(store, taskId)) {
@@ -530,7 +532,10 @@ function getTaskNavigationOwner(store: StoreApi<AppState>): NavigationReadOwner 
       owners.get(store) === nextOwner && storeIdentity(store.getState()) === identity;
     nextOwner.reads = new TaskNavigationReads(
       (taskId, signal) =>
-        fetchTaskNavigationIdentity(store, taskId, signal, sessionReads, scopeIsCurrent),
+        fetchTaskNavigationIdentity(store, taskId, signal, sessionReads, {
+          scopeIsCurrent,
+          requestedSessionId: nextOwner.navigationContext?.context.requestedSessionId,
+        }),
       scopeIsCurrent,
     );
     owner = nextOwner;
@@ -543,6 +548,7 @@ export function beginTaskNavigation(
   store: StoreApi<AppState>,
   owner: object,
   routeKey: string,
+  requestedSessionId?: string,
 ): TaskNavigationContext {
   const readOwner = getTaskNavigationOwner(store);
   const generation = readOwner.reads.beginNavigation(owner, routeKey);
@@ -559,6 +565,7 @@ export function beginTaskNavigation(
     identity: readOwner.identity,
     generation,
     selectionAtStart: captureTaskNavigationSelection(store),
+    requestedSessionId,
   });
   readOwner.navigationContext = { navigationOwner: owner, routeKey, context };
   return context;

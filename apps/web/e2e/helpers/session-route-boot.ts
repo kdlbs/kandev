@@ -1,0 +1,99 @@
+import { expect, type Page } from "@playwright/test";
+import type { SeedData } from "../fixtures/test-base";
+import type { ApiClient } from "./api-client";
+import { SessionPage } from "../pages/session-page";
+import { observeReadTraffic, sessionReadState } from "./unread-divider";
+import { dwell } from "./causal-waits";
+
+/** Real prepared sessions retain the same environment across a new Go-boot document. */
+export async function expectBootConversationRoute(page: Page, api: ApiClient, seed: SeedData) {
+  const task = await api.createTask(seed.workspaceId, "Boot explicit conversation", {
+    prepare_session: true,
+    agent_profile_id: seed.agentProfileId,
+    executor_profile_id: seed.worktreeExecutorProfileId,
+    workflow_id: seed.workflowId,
+    workflow_step_id: seed.startStepId,
+    repository_ids: [seed.repositoryId],
+  });
+  const sourceId = task.session_id;
+  if (!sourceId) throw new Error("Boot fixture did not prepare its source session");
+  await expect
+    .poll(async () => (await api.getTaskEnvironment(task.id))?.status, { timeout: 60_000 })
+    .toBe("ready");
+  const environment = await api.getTaskEnvironment(task.id);
+  if (!environment) throw new Error("Prepared environment disappeared after readiness");
+  const requested = await api.launchSession({
+    task_id: task.id,
+    agent_profile_id: seed.agentProfileId,
+    executor_profile_id: seed.worktreeExecutorProfileId,
+    workflow_step_id: seed.startStepId,
+    intent: "prepare",
+    prompt: "",
+    launch_workspace: true,
+  });
+  expect(requested.session_id).not.toBe(sourceId);
+  expect((await api.getTaskSession(requested.session_id)).session.task_environment_id).toBe(
+    environment.id,
+  );
+  await api.setPrimarySession(sourceId);
+  await api.seedSessionMessage(sourceId, {
+    type: "message",
+    content: "Saved active boot conversation",
+  });
+  const viewer = new SessionPage(page);
+  await page.goto(`/t/${task.id}?sessionId=${sourceId}`);
+  await expect(viewer.activeChat()).toHaveAttribute("data-session-id", sourceId);
+  await viewer.sessionTabCloseButton(requested.session_id).click();
+  await expect(viewer.sessionTabBySessionId(requested.session_id)).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ({ environmentId, active, hidden }) => {
+          const raw = sessionStorage.getItem(`kandev.dockview.env-layout-v3.${environmentId}`);
+          return (
+            !!raw &&
+            raw.includes(`"activeView":"session:${active}"`) &&
+            !raw.includes(`"session:${hidden}"`)
+          );
+        },
+        { environmentId: environment.id, active: sourceId, hidden: requested.session_id },
+      ),
+    )
+    .toBe(true);
+  await page.goto("/");
+  const requestedTail = await api.seedSessionMessage(requested.session_id, {
+    type: "message",
+    content: "Unread explicitly requested boot conversation",
+  });
+  const requestedBefore = (await sessionReadState(api, requested.session_id)).cursor;
+  await page.goto(`/t/${task.id}`);
+  await expect(viewer.activeChat()).toHaveAttribute("data-session-id", sourceId);
+  await expect(viewer.sessionTabBySessionId(requested.session_id)).toHaveCount(0);
+  expect((await sessionReadState(api, requested.session_id)).cursor).toBe(requestedBefore);
+  const sourceBefore = (await sessionReadState(api, sourceId)).cursor;
+  await page.goto("/");
+  await api.seedSessionMessage(sourceId, {
+    type: "message",
+    content: "Unread saved tab must stay unread",
+  });
+  const traffic = observeReadTraffic(page);
+  const origin = await page.evaluate(() => performance.timeOrigin);
+  await page.goto(`/t/${task.id}?sessionId=${requested.session_id}`);
+  expect(await page.evaluate(() => performance.timeOrigin)).not.toBe(origin);
+  await expect(viewer.activeChat()).toHaveAttribute("data-session-id", requested.session_id);
+  await expect(
+    viewer.activeChat().getByText("Unread explicitly requested boot conversation", { exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(async () => (await sessionReadState(api, requested.session_id)).cursor)
+    .toBe(requestedTail.messageId);
+  await dwell(
+    page,
+    500,
+    "negative-assertion",
+    "Boot explicit focus must not read the restored sibling",
+  );
+  expect((await sessionReadState(api, sourceId)).cursor).toBe(sourceBefore);
+  expect(traffic.markReads.filter((row) => row.sessionId === sourceId)).toEqual([]);
+  return { requestedId: requested.session_id, requestedTail: requestedTail.messageId };
+}

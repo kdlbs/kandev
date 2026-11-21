@@ -145,6 +145,7 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
     if (
       state.tasks.activeSessionId &&
       hiddenSessionIdsFor(api).has(state.tasks.activeSessionId) &&
+      !hasTaskRouteFocus(appStore, state.tasks.activeTaskId, state.tasks.activeSessionId) &&
       !getProvenRemovalPredecessor(appStore, target.taskId, state.tasks.activeSessionId)
     ) {
       state.setActiveSessionAuto(target.taskId, target.sessionId);

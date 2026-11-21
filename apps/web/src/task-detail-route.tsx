@@ -79,10 +79,17 @@ function initialRouteState(
   initialData: FetchedSessionData | undefined,
   taskId: string,
   sessionId?: string,
+  navigationContext?: TaskNavigationContext,
 ): TaskDetailRouteState {
   const routeKey = taskRouteKey(taskId, sessionId);
   if (routeDataMatchesSelection(initialData, taskId, sessionId)) {
-    return { routeKey, status: "loaded", data: initialData, forceMergeSession: true };
+    return {
+      routeKey,
+      status: "loaded",
+      data: initialData,
+      forceMergeSession: true,
+      bootSelectionOwner: sessionId ? navigationContext?.selectionAtStart : undefined,
+    };
   }
   return { routeKey, status: "loading", data: null };
 }
@@ -183,7 +190,9 @@ function TaskDetailRouteBody({
           sessionId={route.forceMergeSession ? (activeSessionId ?? undefined) : undefined}
           taskSessionHydrationEpochsAtRequestStart={route.hydrationEpochsAtRequestStart}
           turnWindowObservationsAtRequestStart={route.turnWindowObservationsAtRequestStart}
-          taskSelectionAtRequestStart={route.navigationContext?.selectionAtStart}
+          taskSelectionAtRequestStart={
+            route.bootSelectionOwner ?? route.navigationContext?.selectionAtStart
+          }
           requestedSessionId={
             route.currentRouteStatus === "loaded" && route.displayedRouteKey === route.routeKey
               ? requestedSessionId
@@ -233,6 +242,26 @@ type TaskDetailRouteData = {
   hydratedState: FetchedSessionData["initialState"] | null;
 };
 
+function useTaskEntrySession(
+  store: ReturnType<typeof useAppStoreApi>,
+  navigationContext: TaskNavigationContext,
+  taskId: string,
+  sessionId?: string,
+) {
+  const entry = useRef<{ navigationContext: TaskNavigationContext; sessionId?: string } | null>(
+    null,
+  );
+  if (entry.current?.navigationContext !== navigationContext) {
+    const state = store.getState();
+    entry.current = {
+      navigationContext,
+      sessionId:
+        sessionId ?? getOwnedTaskSessionId(state, taskId, state.tasks.activeSessionId) ?? undefined,
+    };
+  }
+  return entry.current.sessionId;
+}
+
 function useTaskDetailRouteData({
   taskId,
   sessionId,
@@ -243,20 +272,18 @@ function useTaskDetailRouteData({
   const projection = useTaskRouteProjection(taskId, sessionId);
   const routeKey = taskRouteKey(taskId, sessionId);
   const navigationOwnerRef = useRef<object>({});
-  const navigationContext = beginTaskNavigation(store, navigationOwnerRef.current, routeKey);
-  const selectedSessionForNavigationRef = useRef<{
-    navigationContext: TaskNavigationContext;
-    sessionId?: string;
-  } | null>(null);
-  if (selectedSessionForNavigationRef.current?.navigationContext !== navigationContext) {
-    const state = store.getState();
-    selectedSessionForNavigationRef.current = {
-      navigationContext,
-      sessionId:
-        sessionId ?? getOwnedTaskSessionId(state, taskId, state.tasks.activeSessionId) ?? undefined,
-    };
-  }
-  const selectedSessionForNavigation = selectedSessionForNavigationRef.current.sessionId;
+  const navigationContext = beginTaskNavigation(
+    store,
+    navigationOwnerRef.current,
+    routeKey,
+    sessionId,
+  );
+  const selectedSessionForNavigation = useTaskEntrySession(
+    store,
+    navigationContext,
+    taskId,
+    sessionId,
+  );
   const readState = useTaskNavigationReadState(store, taskId, navigationContext);
   const appliedRecoveryCycleRef = useRef({ generation: navigationContext.generation, cycle: 0 });
   if (appliedRecoveryCycleRef.current.generation !== navigationContext.generation) {
@@ -270,7 +297,7 @@ function useTaskDetailRouteData({
   if (routeKey !== bootRouteKeyRef.current) bootDataConsumedRef.current = true;
   const routeInitialData = bootDataConsumedRef.current ? undefined : initialData;
   const [routeState, setRouteState] = useState<TaskDetailRouteState>(() =>
-    initialRouteState(routeInitialData, taskId, sessionId),
+    initialRouteState(routeInitialData, taskId, sessionId, navigationContext),
   );
   const previousLoadedRouteRef = useRef<TaskDetailRouteState | null>(
     routeState.status === "loaded" ? routeState : null,
@@ -483,6 +510,7 @@ function useTaskDetailRouteFetch(args: TaskDetailRouteFetchArgs) {
         status: "loaded",
         data: routeInitialData,
         forceMergeSession: true,
+        bootSelectionOwner: sessionId ? navigationContext.selectionAtStart : undefined,
       };
       previousLoadedRouteRef.current = loadedState;
       setRouteState(loadedState);

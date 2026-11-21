@@ -49,6 +49,7 @@ export type WorkflowSessionFocusTaskProjection = {
   updatedAt?: string | null;
   entryIdentity?: string | null;
   workflowStepId?: string | null;
+  focusDisposition?: "none";
 };
 
 export type WorkflowSessionFocusReconcileInput = {
@@ -230,6 +231,20 @@ export function cancelWorkflowSessionFocus(
   return clearWorkflowSessionFocusState(state);
 }
 
+function settlesWithoutRecipient(
+  intent: WorkflowSessionFocusIntent,
+  input: WorkflowSessionFocusReconcileInput,
+): boolean {
+  const response = input.responseProjection;
+  return (
+    response?.focusDisposition === "none" &&
+    response.entryIdentity === intent.entryIdentity &&
+    readCommittedWorkflowSessionRoute(input.routeMetadata)?.entryIdentity !==
+      intent.entryIdentity &&
+    readCommittedWorkflowSessionRoute(response.metadata)?.entryIdentity !== intent.entryIdentity
+  );
+}
+
 export function reconcileWorkflowSessionFocus(
   state: WorkflowSessionFocusState,
   input: WorkflowSessionFocusReconcileInput,
@@ -244,6 +259,9 @@ export function reconcileWorkflowSessionFocus(
     return { state: clearWorkflowSessionFocusState(state), sessionId: null };
   }
 
+  if (settlesWithoutRecipient(intent, input)) {
+    return { state: clearWorkflowSessionFocusState(state), sessionId: null };
+  }
   const projection = acceptedTaskProjection(intent, input);
   const route = readCommittedWorkflowSessionRoute(projection.metadata);
   if (

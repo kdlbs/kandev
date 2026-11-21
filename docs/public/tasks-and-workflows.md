@@ -140,6 +140,11 @@ For a keyboard move, press `Cmd/Ctrl+K`, search for **Move to**, and select a de
 
 Moves keep the normal reachability, authorization, WIP, archive, workspace, and active-session rules. A move waits for a running agent to finish, and its options survive queueing and backend restarts. Instructions require an active target session or a destination that auto-starts an agent. Pull-request draft and review status use the PR step's automation. For the agent tool contract, see [Automation and MCP](automation-and-mcp.md#task-mcp).
 
+Moving an all-ended task into a step without agent auto-start does not select a
+new conversation. A conversation search you opened while that move was pending
+can finish after the move succeeds. A move with an actual session recipient
+keeps its explicit destination-focus behavior.
+
 ## Change a task's workflow
 
 Choose **Change workflow...** from a single task's card, sidebar, task actions,

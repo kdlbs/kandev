@@ -452,6 +452,8 @@ type MoveTaskResult struct {
 	// WorkflowEntryIdentity identifies the committed workflow-step entry that
 	// accepted this move. Empty when the write did not transition the task.
 	WorkflowEntryIdentity string
+	// WorkflowFocusDisposition is "none" only when this entry plans no session focus.
+	WorkflowFocusDisposition string
 	// MoveID correlates the one-shot entry options carried on the transient
 	// move marker with the target-step entry. Empty for an option-less move.
 	MoveID string
@@ -799,8 +801,11 @@ func (s *Service) MoveTaskWithOptions(
 	// the queued-exit marker for admitted tasks, so this separate marker carries
 	// the barrier across the task.moved event without changing WIP admission.
 	sessionID := ""
+	noActiveSession := false
 	if stepChanged {
-		if activeSession := s.resolvePrimaryOrActiveSession(ctx, id); activeSession != nil {
+		activeSession, absent := s.resolvePrimaryOrActiveSessionWithEvidence(ctx, id)
+		noActiveSession = absent
+		if activeSession != nil {
 			sessionID = activeSession.ID
 			task.Metadata[models.MetaKeyManualMoveLifecyclePending] = map[string]interface{}{
 				"from_step_id": oldStepID,
@@ -875,14 +880,15 @@ func (s *Service) MoveTaskWithOptions(
 	}
 	alreadyApplied := opts.AlreadyApplied != nil && *opts.AlreadyApplied
 	result := &MoveTaskResult{
-		Task:                  task,
-		Committed:             true,
-		AlreadyApplied:        alreadyApplied,
-		FromStepID:            resultFromStepID,
-		Transitioned:          resultTransitioned,
-		WorkflowEntryIdentity: workflowEntryIdentity,
-		MoveID:                moveID,
-		EntryOptions:          entryOptions,
+		Task:                     task,
+		Committed:                true,
+		AlreadyApplied:           alreadyApplied,
+		FromStepID:               resultFromStepID,
+		Transitioned:             resultTransitioned,
+		WorkflowEntryIdentity:    workflowEntryIdentity,
+		WorkflowFocusDisposition: moveFocusDisposition(task, targetStep, noActiveSession, resultTransitioned),
+		MoveID:                   moveID,
+		EntryOptions:             entryOptions,
 	}
 
 	// An optioned move (moveID != "") always changed step at read time —
@@ -1704,15 +1710,32 @@ func isSessionMoveBlocked(state models.TaskSessionState) bool {
 // resolvePrimaryOrActiveSession returns the primary session if it is in an active
 // state, otherwise falls back to the most recently started active session.
 func (s *Service) resolvePrimaryOrActiveSession(ctx context.Context, taskID string) *models.TaskSession {
-	primary, _ := s.sessions.GetPrimarySessionByTaskID(ctx, taskID)
+	session, _ := s.resolvePrimaryOrActiveSessionWithEvidence(ctx, taskID)
+	return session
+}
+
+const workflowFocusDispositionNone = "none"
+
+func moveFocusDisposition(task *models.Task, step *wfmodels.WorkflowStep, noActiveSession, transitioned bool) string {
+	if !transitioned || !noActiveSession || step == nil || !task.WIPAdmitted ||
+		task.QueuedForStepID != "" || task.WorkflowStepID != step.ID || task.WorkflowID != step.WorkflowID ||
+		step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
+		return ""
+	}
+	return workflowFocusDispositionNone
+}
+
+func (s *Service) resolvePrimaryOrActiveSessionWithEvidence(ctx context.Context, taskID string) (*models.TaskSession, bool) {
+	primary, primaryErr := s.sessions.GetPrimarySessionByTaskID(ctx, taskID)
 	if primary != nil && isSessionActive(primary.State) {
-		return primary
+		return primary, false
 	}
 	active, err := s.sessions.GetActiveTaskSessionByTaskID(ctx, taskID)
-	if err != nil || active == nil {
-		return nil
+	if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
+		return nil, false
 	}
-	return active
+	return active, active == nil &&
+		(primaryErr == nil || errors.Is(primaryErr, taskrepo.ErrNoPrimarySession))
 }
 
 // recordManualStepTransition writes the ADR 0015 audit row for a

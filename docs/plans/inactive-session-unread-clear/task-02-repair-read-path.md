@@ -1,7 +1,7 @@
 ---
 id: "02-repair-read-path"
 title: "Repair the demonstrated inactive-session read path"
-status: in_progress
+status: done
 wave: 2
 depends_on:
   - 01-establish-failure-boundary
@@ -67,6 +67,12 @@ not authorize this production change.
   technical boundary. This is a behavior-preserving repair, not a new product
   contract. Public docs remain unchanged unless the confirmed solution changes
   user actions or terminology; then load `/docs-maintainer` and revise scope.
+
+- R23 extends the existing move response with optional
+  `workflow_focus_disposition: "none"` for a positively source-less, admitted
+  agentless entry. The service owns this fact; HTTP/WS/MCP forward it. Missing
+  disposition never means no recipient. No endpoint, durable metadata, database
+  schema or launch-policy change is needed.
 
 ## Out of scope
 
@@ -3210,3 +3216,213 @@ browser or database mutation, production Go/predicate/cursor/wire changes, broad
 suite or live-NATS certification. Original incident attribution remains qualified;
 list readback proves convergence, not isolated cursor-event delivery, and seeded
 RUNNING rows do not prove live execution. Review loop continues at R23.
+
+### Production-fix review round 23 remediation
+
+R23 reviewed `fc98c6ba5ae687f62c24949d7d09336e683464be` and found three P2s:
+boot routes bypassed explicit admission; unrelated primary reconciliation could
+erase valid explicit membership; a successful agentless move could retain its
+focus intent forever. `r23-red.log` reproduces all three (3 behavioral failures,
+29 controls). The boot fixture additionally needed its normal session-list
+response supplied; its missing-response log was not the asserted failure.
+
+Reconcile scope before backend changes: missing route metadata cannot prove no
+recipient, because genuine recipients can arrive asynchronously. The existing
+move service already resolves the active source and target policy. Return an
+optional, entry-correlated no-focus disposition only when those accepted facts
+positively plan no recipient. Preserve unknown/read-error, queued, active-source
+and auto-start cases. This is response metadata, not a persistence or workflow
+policy change. The UI settles only the matching intent; then normal deferred
+explicit-route admission rechecks membership and newer ownership.
+
+Desktop/phone retain their existing workbench/one-transcript compositions.
+Boot and SPA routes share admission. Desktop reopens only an explicit hidden
+target; phone ignores desktop hide state. Both workflow entry points consume
+the same correlated disposition. No new controls, copy or layout are introduced.
+
+```text
+Before: explicit B -> boot/primary-refresh/no-recipient intent -> A or blank
+After:  valid B -> scoped explicit focus -> B's visible transcript -> B's cursor
+        newer pin / committed recipient / removal -> remains authoritative
+```
+
+R23 implementation and control receipts:
+
+- Explicit boot-loaded identity retains its captured selection owner separately
+  from client read/enrichment context. Task-only boot stays passive, without a
+  new selection owner. Validated boot and SPA links share explicit presentation
+  admission.
+- The identity reader passes its captured requested session into membership
+  reconciliation. Current-generation explicit membership survives unrelated
+  primary skew; missing, invalidated and unavailable membership remain closed.
+- Desktop and phone forward the optional committed move disposition. Matching
+  `none` settles the bound intent before unrelated projection freshness checks;
+  a genuine correlated recipient still wins. A newer-title regression first
+  failed (`r23-no-focus-projection-red.log`: 1 failure, 2 controls).
+- Last completed affected Vitest selection: 34 files, 462 tests
+  (`r23-units-boot-owner.log`). Strict changed-web Oxlint and full web typecheck
+  pass at that checkpoint (`r23-lint-boot-owner.log`,
+  `r23-typecheck-boot-owner.log`), before the final environment-focus correction.
+- Scoped Go race tests pass for service and HTTP/WS response behavior
+  (`r23-go-delivery.log`). Controls cover active sources, auto-start steps,
+  no-op moves and failed primary/active reads. The selected MCP package compiled
+  but contained no matching tests; its response forwarding is not claimed as
+  a separately exercised MCP round trip.
+- The first real boot RED attempts never reached the browser: artifact
+  freshness rejected the old backend, then delivery fixture, then plugin
+  package. These are infrastructure refusals, not product RED. The three
+  consumer regressions above provide RED; final browser verification uses
+  freshly built R23 frontend, backend, host fixtures and plugin package.
+
+
+The first full fresh-bundle desktop run found one fixture error (environment
+DTOs do not expose the executor profile) and two owned-removal control failures.
+The fixture now uses the configured worktree profile, matching the shipped
+prepare-session pattern. Read-only cache-snapshot diagnostics captured the
+stranded null selection and a changed projected primary, with stable navigation
+and workflow identity. Boot selection ownership is narrowed to explicit links;
+task-only bootstrap keeps its existing passive presentation path. Temporary
+store-observation instrumentation is not part of the source changes.
+
+
+#### R23 capacity checkpoint (2026-11-20, before delivery)
+
+The real Go-boot case remained RED after selection admission: the restored
+source was active while the requested sibling remained pinned, at navigation
+revision 1 (`r23-boot-state-debug-quiet/kandev-run.e2e.hyHeIksR.log`).
+The correction then retained route presentation until its target environment
+was current and prevented hidden-tab passive adoption from overriding the
+pending explicit target. It had not yet been verified at this checkpoint.
+
+Cache usage reached 92%. Verification jobs `bg_285`–`bg_287` were cancelled,
+not counted as passing. Older unopened regenerable caches reclaimed about
+1.3 GB; today's/open files were preserved, but the drive remained above the
+90% guard. Hermes delivered the required `[cache drive full]` alert to Clem.
+Resume only after safe headroom is available. Then run the final affected
+units, type/lint checks, fresh frontend build, complete owning desktop and
+phone specs, and inspect captures. Scoped Go diff lint passed after supplying
+the verifier's missing immutable base object and replacing the new repeated
+literal with its semantic constant (`r23-lint-go-repaired.log`).
+
+At this historical checkpoint R23 changes were uncommitted/unpushed; the last
+verified delivery remained `fc98c6ba5ae687f62c24949d7d09336e683464be`.
+R24 had not been dispatched. Do not treat the implementation, mixed checkpoint
+receipts or cancelled checks as completed delivery.
+
+
+#### R23 resumed verification (2026-11-21)
+
+The cache drive was verified at 37% on `/dev/sdd` before resuming. The final
+presentation correction keeps an admitted route request alive through the
+provisional layout until its known target environment is current. Passive
+hidden-tab adoption cannot replace that pending explicit target. Boot carries
+selection proof separately from client read/enrichment ownership.
+
+`r23-resume-units.log` records 34 files / 462 passing tests.
+`r23-resume-lint.log` and `r23-resume-typecheck.log` pass. The fresh frontend
+build and six owning browser cases pass (`r23-resume-build.log`,
+`r23-resume-cases-desktop-final-summary.log`), including real Go boot, both
+previously failing removal controls, explicit member/primary skew, and an
+agentless workflow outcome. Final complete desktop/phone and focused Go race
+receipts follow separately; the prior cancelled checks remain historical.
+
+
+#### R23 final verification and delivery checkpoint (2026-11-21)
+
+Task-defined implementation checks are complete. This checkpoint supersedes the
+historical capacity block above; the independent production review remains open.
+The next reviewer is R24, with 23 completed rounds and zero consecutive clean.
+
+- Final affected units: 34 files / 462 passed (`r23-resume-units.log`).
+- Complete owning Chromium files: 31 passed, one worker and no retries
+  (`r23-resume-full-desktop-summary.log`).
+- Complete phone file: 10 passed, one worker and no retries
+  (`r23-resume-phone-final-summary.log`). The first resumed phone run had nine
+  passes and one fixture failure: the helper closed the picker while its move
+  response was held, unmounting the legitimate workflow-focus owner. The helper
+  now keeps that picker mounted until settlement. No production change or
+  weaker assertion was needed; the complete phone file was rerun.
+- Focused Go service and HTTP/WS race tests pass (`r23-resume-go-race.log`).
+  The MCP package compiled but had no matching `WorkflowFocus` tests; this is
+  not MCP round-trip coverage. Source-worktree scoped Go diff lint passes
+  (`r23-resume-source-go-lint.log`).
+- Strict changed-web lint, production typecheck and fresh frontend build pass
+  (`r23-resume-lint.log`, `r23-resume-typecheck.log`, `r23-resume-build.log`).
+  The test-only picker correction separately passed Prettier and strict lint.
+- Docs catalog, full specification lint, public-doc validator tests and public
+  documentation validation pass (`r23-resume-docs.log`). Final metadata edits
+  are checked again before the normal commit hooks.
+
+Inspected the actual retained Go-boot, primary-skew, desktop agentless-move and
+final phone-agentless screenshots. The requested stored conversation is visible;
+the phone has no horizontal overflow. Persisted-cursor and no-unintended-read
+assertions are in the owning tests, not inferred from screenshots.
+
+All artifacts are under `/home/clem/.cache/tmp/unread-verification.zWhGjx`.
+The frontend is rebuilt from final R23 production code. Backend, agentctl and
+plugin fixture are the fresh R23 artifacts, not the older R02 binaries. The
+final phone rerun changes only the test helper and reuses that same frontend.
+No broad-suite or live-NATS certification is implied. Original incident rows
+were deleted before live tracing; historical attribution remains qualified.
+List readback proves authoritative convergence, not isolated cursor-event
+transport. Seeded RUNNING rows are not evidence of live execution.
+
+Exact narrow replay in the retained snapshot (`env.sh` contains its cache-safe
+setup). If removed, recreate the snapshot with the procedure above first:
+
+```bash
+set -euo pipefail
+S=/home/clem/.cache/tmp/unread-verification.zWhGjx
+source "$S/env.sh"
+[[ "$(findmnt -no SOURCE --target "$VERIFY")" == /dev/sdd* ]]
+export TMPDIR=/home/clem/.cache/tmp GOTMPDIR=/home/clem/.cache/tmp
+export VITEST_MAX_WORKERS=2 NODE_OPTIONS=--max-old-space-size=8192
+cd "$VERIFY/apps/web"
+pnpm run pretypecheck
+pnpm exec vitest run \
+  lib/state/task-navigation-reads.test.ts \
+  lib/state/task-navigation-reads-retry.test.ts \
+  lib/state/task-navigation-reads-budget.test.ts \
+  lib/state/task-session-reads.test.ts \
+  lib/state/hydration \
+  lib/ssr/session-page-state.test.ts \
+  lib/ssr/session-page-enrichment-membership.test.ts \
+  lib/ssr/session-page-navigation-bounded.test.ts \
+  lib/ssr/session-page-model-hydration.test.ts \
+  src/task-detail-route-recovery.test.tsx \
+  src/task-detail-route.test.tsx \
+  src/task-detail-route-session-selection.test.tsx \
+  components/task/task-page-session-ownership.test.tsx \
+  components/task/task-page-content \
+  lib/state/workflow-session-focus.test.ts \
+  lib/state/slices/kanban/kanban-slice.test.ts \
+  hooks/domains/kanban/use-workflow-step-move.test.ts \
+  components/task/dockview-session-tabs.hook.test.tsx \
+  src/task-detail-route-explicit-selection.test.tsx \
+  components/task/dockview-session- \
+  hooks/domains/kanban/use-workflow-step-move-focus.test.tsx
+# Build the final production frontend before --no-build browser replay.
+pnpm run build:vite
+for key in ${!KANDEV_@}; do unset "$key"; done
+pnpm e2e:run --host --shards 1 --no-build --project chromium \
+  e2e/tests/session/session-primary-removal.spec.ts \
+  e2e/tests/task/task-unread-dot.spec.ts -- --workers=1 --retries=0
+pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome \
+  e2e/tests/task/mobile-task-unread-dot.spec.ts -- --workers=1 --retries=0
+cd "$VERIFY/apps/backend"
+GOMAXPROCS=2 go test -trimpath -p 2 -race -timeout 90s \
+  ./internal/task/service ./internal/task/handlers ./internal/mcp/handlers \
+  -run WorkflowFocus -count=1
+```
+
+The complete run receipts preserve build/artifact provenance and original
+statuses. Do not classify an infrastructure failure as behavioral RED or combine
+split intermediate runs into one fresh suite.
+
+Initial normal commit attempts hit the Go package-loading timeout; the other
+pre-commit checks passed. The identical native package/base/concurrency check
+passed within the same five-minute limit in 10.48 seconds. This execution/cache
+discrepancy was reported to the harness. Both verification and default cache-drive
+export caches were populated before the normal retry. No hook bypass, timeout
+increase or lint suppression is used. Only the final successful normal hook
+receipt qualifies as delivery evidence.

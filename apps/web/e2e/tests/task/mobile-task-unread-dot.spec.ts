@@ -589,3 +589,33 @@ test("deletes the displayed session through the phone picker and follows its pro
   });
   await testPage.screenshot({ path: test.info().outputPath("phone-local-session-removed.png") });
 });
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.11, AC-TASKS-TASK-UNREAD-DOT-001.15
+test("opens the requested phone conversation after an agentless move settles", async ({
+  testPage,
+  desktopTestPage,
+  apiClient,
+  seedData,
+}) => {
+  const { settings } = await apiClient.getUserSettings();
+  await apiClient.saveUserSettings({
+    unread_divider: false,
+    unread_task_dot: true,
+    unread_task_dot_hide_delay_seconds: 0,
+    prevent_auto_start_agent_on_open: true,
+  });
+  try {
+    await expectConversationRouteAfterRemoval(testPage, desktopTestPage, apiClient, seedData, {
+      moveOutcome: "agentless",
+    });
+    await testPage.screenshot({ path: test.info().outputPath("phone-agentless-conversation.png") });
+  } finally {
+    await apiClient.saveUserSettings({
+      unread_divider: settings.unread_divider,
+      unread_task_dot: settings.unread_task_dot,
+      unread_task_dot_hide_delay_seconds: settings.unread_task_dot_hide_delay_seconds,
+      prevent_auto_start_agent_on_open: settings.prevent_auto_start_agent_on_open,
+      enable_preview_on_click: settings.enable_preview_on_click,
+    });
+  }
+});

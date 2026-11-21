@@ -34,6 +34,7 @@ import {
   expectConversationRouteAfterRemoval,
   expectPrimarySwapDuringRouteAdmission,
 } from "../../helpers/session-route-admission";
+import { expectBootConversationRoute } from "../../helpers/session-route-boot";
 
 // Following confirmed removal must not require a full document reload.
 test("follows a stopped primary deleted from another client without reloading", async ({
@@ -205,7 +206,43 @@ test.describe("owned removal transcript visibility", () => {
     await testPage.screenshot({ path: test.info().outputPath("explicit-route-after-removal.png") });
   });
 
-  for (const mode of ["hidden", "failed-workflow"] as const) {
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
+  test("opens a hidden explicit conversation through real Go boot", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const closeBehavior = (await apiClient.getUserSettings()).settings.agent_tab_close_behavior;
+    try {
+      await apiClient.saveUserSettings({ agent_tab_close_behavior: "hide_panel" });
+      const opened = await expectBootConversationRoute(testPage, apiClient, seedData);
+      await testPage.screenshot({ path: test.info().outputPath("boot-explicit-conversation.png") });
+      const session = new SessionPage(testPage);
+      await session.addPanelButton().click();
+      await testPage.getByRole("menuitem", { name: "Plan", exact: true }).click();
+      await expect(session.activeChat()).toHaveCount(0);
+      const traffic = observeReadTraffic(testPage);
+      const later = await apiClient.seedSessionMessage(opened.requestedId, {
+        type: "message",
+        content: "Plan must survive consumed boot focus",
+      });
+      await dwell(testPage, 500, "negative-assertion", "Consumed boot focus must not steal Plan");
+      await expect(session.activeChat()).toHaveCount(0);
+      expect((await sessionReadState(apiClient, opened.requestedId)).cursor).toBe(
+        opened.requestedTail,
+      );
+      expect(traffic.markReads.filter((row) => row.messageId === later.messageId)).toEqual([]);
+    } finally {
+      await apiClient.saveUserSettings({ agent_tab_close_behavior: closeBehavior });
+    }
+  });
+
+  for (const [mode, moveOutcome] of [
+    ["hidden", undefined],
+    ["failed-workflow", "failed"],
+    ["agentless-workflow", "agentless"],
+  ] as const) {
     // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
     test(`opens an explicit conversation route across ${mode}`, async ({
       testPage,
@@ -219,7 +256,7 @@ test.describe("owned removal transcript visibility", () => {
           await apiClient.saveUserSettings({ agent_tab_close_behavior: "hide_panel" });
         await expectConversationRouteAfterRemoval(testPage, desktopTestPage, apiClient, seedData, {
           hideTarget: mode === "hidden",
-          failMove: mode === "failed-workflow",
+          moveOutcome,
         });
         await testPage.screenshot({ path: test.info().outputPath(`explicit-route-${mode}.png`) });
       } finally {
@@ -246,14 +283,23 @@ test.describe("owned removal transcript visibility", () => {
     apiClient,
     seedData,
   }) => {
-    await expectPrimarySwapDuringRouteAdmission(
-      testPage,
-      desktopTestPage,
-      apiClient,
-      seedData,
-      true,
-    );
+    await expectPrimarySwapDuringRouteAdmission(testPage, desktopTestPage, apiClient, seedData, {
+      createAfterMembership: true,
+    });
     await testPage.screenshot({ path: test.info().outputPath("created-primary-reconciled.png") });
+  });
+
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.17
+  test("keeps a proven conversation despite unrelated primary refresh failure", async ({
+    testPage,
+    desktopTestPage,
+    apiClient,
+    seedData,
+  }) => {
+    await expectPrimarySwapDuringRouteAdmission(testPage, desktopTestPage, apiClient, seedData, {
+      explicitMember: true,
+    });
+    await testPage.screenshot({ path: test.info().outputPath("explicit-member-primary-skew.png") });
   });
 
   for (const winner of [

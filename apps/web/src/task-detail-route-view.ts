@@ -129,6 +129,7 @@ function loadedRouteMetadata(state: TaskDetailRouteState | null) {
   if (state?.status !== "loaded") {
     return {
       navigationContext: undefined,
+      bootSelectionOwner: undefined,
       enrichmentIdentity: undefined,
       turnWindowObservationsAtRequestStart: undefined,
       hydrationEpochsAtRequestStart: undefined,
@@ -136,6 +137,7 @@ function loadedRouteMetadata(state: TaskDetailRouteState | null) {
   }
   return {
     navigationContext: state.navigationContext,
+    bootSelectionOwner: state.bootSelectionOwner,
     enrichmentIdentity: state.enrichmentIdentity,
     turnWindowObservationsAtRequestStart: state.turnWindowObservationsAtRequestStart,
     hydrationEpochsAtRequestStart: state.hydrationEpochsAtRequestStart,

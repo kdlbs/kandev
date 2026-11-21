@@ -13,6 +13,7 @@ import { listTaskSessions } from "@/lib/api/domains/session-api";
 import type * as SessionApi from "@/lib/api/domains/session-api";
 import { TaskDetailRoute } from "./task-detail-route";
 import { commitWorkflowRecipient, taskRouteSelectionState } from "./task-detail-route.test-helpers";
+import { buildTaskNavigationShellData } from "@/lib/ssr/session-page-state";
 
 const mocks = vi.hoisted(() => ({ load: vi.fn() }));
 vi.mock("@/lib/state/task-navigation-reads", async (original) => ({
@@ -262,3 +263,29 @@ it.each([
     expect(store.getState().taskSessions.items[OLD]).toBeUndefined();
   },
 );
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6, AC-TASKS-TASK-UNREAD-DOT-001.12
+it.each([true, false])("admits validated Go boot data with explicit route=%s", async (explicit) => {
+  const data = identity(false);
+  data.task.primary_session_id = sessionId(SURVIVOR);
+  const boot = buildTaskNavigationShellData(data, explicit ? TARGET : undefined);
+  vi.mocked(listTaskSessions).mockResolvedValue(data.allSessionsResponse);
+  render(
+    <StateProvider
+      initialState={taskRouteSelectionState(TASK, SURVIVOR, data.allSessionsResponse.sessions)}
+    >
+      <ToastProvider>
+        <CaptureStore />
+        <TaskDetailRoute
+          taskId={TASK}
+          sessionId={explicit ? TARGET : undefined}
+          initialData={boot}
+        />
+      </ToastProvider>
+    </StateProvider>,
+  );
+  await waitFor(() =>
+    expect(store.getState().tasks.activeSessionId).toBe(explicit ? TARGET : SURVIVOR),
+  );
+  expect(store.getState().tasks.pinnedSessionId).toBe(explicit ? TARGET : null);
+});

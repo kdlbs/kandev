@@ -249,22 +249,23 @@ selection/pin and workflow requests targeting it. Preserve independent intent,
 surviving pins/cursors and newer user/workflow selection. Owned empty slots can
 re-prove after changed primaries. Proof fills missing recipient identity/lifecycle.
 
-Valid explicit routes beat entry receipts and reopen only their target.
-Pending moves defer admission; cancellation revalidates membership/ownership.
-Primary conflicts re-read membership; committed focus wins restore.
-Removal leases gate parked/live groups; focus resumes after restore.
-Only changed primaries re-prove empty slots; hides gate passive restore.
-Transcript hosts/dots use group visibility; independent split/non-agent focus survives.
+Validated explicit boot/SPA targets reopen across primary skew. Boot grants
+selection, not client-read ownership. Consume focus in the target's known
+environment. Moves defer admission; cancellation or correlated
+`workflow_focus_disposition: none` rechecks ownership/membership (`none`: admitted
+agentless, proven absent active source; omission unknown). Committed focus wins
+restore. Removal leases protect live/parked groups and restore focus; only changed
+primaries re-prove empty slots. Hide/group visibility gates passive restore,
+transcripts and dots.
 
-`invalidateTaskSessionMembership` fences foreground/removal-dialog pending,
-admitted and queued publications. New reads/unrelated keys remain usable.
-Confirmed UUID deletion fences canonical/list/event/route/selection admission for
-the store/backend. Ordinary eviction/restart is not deletion; queue incarnation
-cannot recreate a deleted UUID. Hydration cannot replace this evidence. Survivors
-retain membership, freshness and cursors; comment-conflict reads keep routing scope.
+`invalidateTaskSessionMembership` fences pending/admitted/queued foreground and
+removal-dialog reads, not new reads/unrelated keys. Confirmed UUID deletion
+fences canonical/list/event/route/selection admission per store/backend; eviction
+or restart is not deletion. Queue incarnation/hydration cannot recreate deleted
+UUIDs. Survivors retain membership/freshness/cursors and comment-conflict scope.
 
-Uncertain state/membership preserves the view. Unread predicates, promotion,
-transport ordering, wire contracts and persisted schemas remain unchanged.
+Uncertain reads preserve the view. Unread rules, promotion and database schemas
+stay unchanged; optional move-focus metadata is backward-compatible.
 
 An unread failed sibling that was never displayed is not evidence of a failed
 cursor write. It remains unread under AC .2, .9, .12, and .17. Preserve this

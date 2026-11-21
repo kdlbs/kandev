@@ -47,6 +47,12 @@ export function consumeTaskRouteFocus(
   store: StoreApi<AppState>,
   taskId: string | null,
   sessionId: string,
+  layoutEnvironmentId: string | null,
 ) {
+  const state = store.getState();
+  const targetEnvironment =
+    state.environmentIdBySessionId[sessionId] ??
+    state.taskSessions.items[sessionId]?.task_environment_id;
+  if (targetEnvironment && targetEnvironment !== layoutEnvironmentId) return;
   if (hasTaskRouteFocus(store, taskId, sessionId)) requests.delete(store);
 }

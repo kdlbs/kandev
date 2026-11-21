@@ -273,7 +273,7 @@ the same causal scenario after Task 01 proves a violation:
 Execute sequentially. No subagent authorization is implied.
 
 - [x] [Task 01: Establish the inactive-session failure boundary](task-01-establish-failure-boundary.md) (done: conformance, no violation reproduced).
-- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: retain failed focus, verify predecessor state/removal, and retarget owned primary changes. See Results for scoped checks; broad suites and live NATS-server ordering remain uncertified).
+- [x] [Task 02: Repair the demonstrated inactive-session read path](task-02-repair-read-path.md) (done: R23 corrections verified with 462 affected unit cases, 31 desktop cases, ten phone cases, scoped Go race and strict checks. Independent production review remains open; broad suites and live NATS remain uncertified).
 
 The prior [task unread dot package](../task-unread-dot/plan.md) is historical
 completed delivery. The [visible-visit divider package](../unread-divider-visible-session-clear/plan.md)
@@ -703,5 +703,13 @@ fix. It is separate from the five design-only rounds above.
   workflow that later fails. Parent reproduced all three at real reader,
   hydrator/page and Dockview boundaries. Corrections and execution receipts
   are in Task 02. Independent review remains open; round 23 is next.
-- Completed rounds: 22. Consecutive clean: 0. Stop after three consecutive
+- Round 23: Sol child `30f558db-99d9-4c9e-bafb-10602a412a20` reviewed
+  `fc98c6ba5a`. Three P2s: boot-backed explicit routes lacked presentation
+  ownership; unrelated primary reconciliation could discard proven explicit
+  membership; successful agentless moves left deferred routes pending.
+  Parent reproduced all three. Corrections carry boot ownership, retain
+  current-generation explicit-member proof, and forward a positively known,
+  entry-correlated no-focus disposition. Task 02 records the wire scope and
+  execution evidence. Independent review remains open; round 24 is next.
+- Completed rounds: 23. Consecutive clean: 0. Stop after three consecutive
   clean rounds or 50 rounds. Earlier loops do not count.

@@ -26,6 +26,8 @@ vi.mock("@/lib/api", () => apiMocks);
 
 afterEach(() => {
   vi.useRealTimers();
+  apiMocks.fetchTask.mockReset();
+  apiMocks.listTaskSessions.mockReset();
 });
 
 function makeStore() {
@@ -107,11 +109,6 @@ async function expectReconciledPrimary(
 }
 
 describe("task navigation canonical overview refresh", () => {
-  afterEach(() => {
-    apiMocks.fetchTask.mockReset();
-    apiMocks.listTaskSessions.mockReset();
-  });
-
   it.each(["pending", "fulfilled"] as const)(
     "replaces %s retired membership while the task DTO is still pending",
     async (membershipPhase) => {
@@ -209,6 +206,28 @@ describe("task navigation canonical overview refresh", () => {
     expect(store.getState().taskOverview.byId[ACTIVE_TASK_ID]).toBeUndefined();
     expect(store.getState().taskOverview.reads).toEqual({});
   });
+});
+it("preserves proven explicit membership when only primary reconciliation would fail", async () => {
+  const store = makeStore();
+  const task = deferred<TaskNavigationIdentity["task"]>();
+  const membership = {
+    sessions: [
+      { id: "previous", task_id: ACTIVE_TASK_ID, is_primary: true },
+      { id: "requested", task_id: ACTIVE_TASK_ID, is_primary: false },
+    ],
+    total: 2,
+  };
+  apiMocks.fetchTask.mockReturnValue(task.promise);
+  apiMocks.listTaskSessions.mockResolvedValueOnce(membership).mockRejectedValue(new Error("503"));
+  const context = beginTaskNavigation(store, {}, `${ACTIVE_TASK_ID}\u0000requested`, "requested");
+  const read = readTaskNavigationIdentity(store, ACTIVE_TASK_ID, { context });
+  await vi.waitFor(() => expect(apiMocks.listTaskSessions).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(getTaskSessionReads(store).isReading(ACTIVE_TASK_ID)).toBe(false));
+  task.resolve({ ...refreshedTask(), primary_session_id: "newly-created" } as never);
+  const accepted = await read;
+  expect(accepted.sessionListUnavailable).not.toBe(true);
+  expect(buildTaskNavigationShellData(accepted, "requested").sessionId).toBe("requested");
+  expect(accepted.allSessionsResponse).toEqual(membership);
 });
 
 describe("task navigation store scope", () => {

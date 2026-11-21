@@ -140,5 +140,10 @@ function consumeVisibleRouteFocus(
   requested: boolean,
 ) {
   if (requested && panel.group.activePanel?.id === panel.id)
-    consumeTaskRouteFocus(store, taskId, panel.id.slice("session:".length));
+    consumeTaskRouteFocus(
+      store,
+      taskId,
+      panel.id.slice("session:".length),
+      useDockviewStore.getState().currentLayoutEnvId,
+    );
 }

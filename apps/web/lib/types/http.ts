@@ -610,6 +610,8 @@ export type MoveTaskResponse = {
   task: Task;
   workflow_step: WorkflowStepDTO;
   workflow_entry_identity?: string;
+  /** This committed entry plans no session focus; omission leaves recipient resolution pending. */
+  workflow_focus_disposition?: "none";
   move_id?: string;
   entry_options?: {
     reset_context?: boolean;

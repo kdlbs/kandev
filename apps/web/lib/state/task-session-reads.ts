@@ -79,16 +79,21 @@ export async function reconcileTaskNavigationMembership(
   initial: Awaited<ReturnType<typeof readTaskNavigationMembership>>,
   reads: TaskSessionReads,
   signal: AbortSignal,
-  scopeIsCurrent: () => boolean,
+  options: { scopeIsCurrent: () => boolean; requestedSessionId?: string },
 ) {
+  const { scopeIsCurrent, requestedSessionId } = options;
   if (signal.aborted || !scopeIsCurrent()) throw abortError();
   let membership = initial;
+  while (!reads.isCurrent(task.id, membership.membershipGeneration)) {
+    membership = await readTaskNavigationMembership(reads, task.id, signal, scopeIsCurrent);
+  }
   const sessions = membership.allSessionsResponse.sessions;
   const dtoPrimary = sessions.find(
     (session) => session.task_id === task.id && session.id === task.primary_session_id,
   );
   if (
-    !initial.sessionListUnavailable &&
+    !membership.sessionListUnavailable &&
+    !sessions.some((session) => session.task_id === task.id && session.id === requestedSessionId) &&
     task.primary_session_id &&
     (!dtoPrimary ||
       dtoPrimary.is_primary === false ||
