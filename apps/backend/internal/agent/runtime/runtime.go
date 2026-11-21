@@ -51,6 +51,7 @@ type RetainedPromptFailureError = lifecycle.RetainedPromptFailureError
 type RequestNotSentError = client.RequestNotSentError
 type RemoteRecoverySnapshot = lifecycle.RemoteRecoverySnapshot
 type WorkspaceRecoveryProjectionError = lifecycle.WorkspaceRecoveryProjectionError
+type WorkspaceInfo = lifecycle.WorkspaceInfo
 type BackgroundWorkloadProbeResult = client.ProbeResult
 type TurnChangeCheckout = lifecycle.TurnChangeCheckout
 type TurnChangeAdmission = lifecycle.TurnChangeAdmission

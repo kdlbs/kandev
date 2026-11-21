@@ -1,6 +1,6 @@
 ---
 created: 2026-08-30
-status: done
+status: implemented
 requirements:
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002
@@ -101,9 +101,21 @@ object patterns. The shared Files component supplies the same normalized path
 to desktop and phone; because this fix does not alter layout or interaction,
 no new mobile-only scenario is required.
 
+## Retained LOCAL resume follow-up
+
+Task 02 extends the same existing workspace identity continuity to detached
+historical LOCAL repository preferences and the exact direct-parent inherited
+LOCAL source case. It ports only the repository-context adapters and matching
+cold WorkspaceInfo projection. Normal physical inventory, ownership and native
+recovery admission remain authoritative. This follow-up does not change the
+completed Worktree precedence/UI work above, introduce a schema or policy, or
+restore a historical repository into a shared folder. Focused verification is recorded in Task 02;
+the earlier Task 01 results do not certify the new adapter.
+
 ## Work orders
 
 - [x] [Task 01: Preserve recovered workspace path](task-01-preserve-recovered-workspace-path.md)
+- [x] [Task 02: Retain LOCAL resume context](task-02-retain-local-resume-context.md)
 
 ## Verification results
 
