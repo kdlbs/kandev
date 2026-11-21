@@ -130,7 +130,7 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-009.5:** When all OpenCode jobs become terminal, the active count shall clear while completed history remains reachable.
 - **AC-AGENTS-BACKGROUND-WORK-009.6:** When a job fails, the viewer shall show its failure independently from any later agent recovery attempt.
 
-### REQ-AGENTS-BACKGROUND-WORK-010: Claude background shells do not stay running
+### REQ-AGENTS-BACKGROUND-WORK-010: Claude background workload state
 
 **Intent:** The background jobs count reflects work that is still running.
 
@@ -139,7 +139,10 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-010.3:** When neither task lifecycle support nor attributed shell termination evidence is available, a detached shell shall stay open until process-end evidence applies. An unattributed completion signal shall not settle a specific workload.
 - **AC-AGENTS-BACKGROUND-WORK-010.4:** Task lifecycle support shall add no background job controls, and it shall not change transcript content, turn completion, or prompt admission.
 - **AC-AGENTS-BACKGROUND-WORK-010.5:** When all workloads of a session become terminal, the active count shall clear on desktop and phone and completed history shall remain reachable.
-- **AC-AGENTS-BACKGROUND-WORK-010.6:** When `@agentclientprotocol/claude-agent-acp` version `0.97.0`, identified at initialize, reports a tool-scoped terminal exit for a tracked detached shell, only that workload shall leave the running count. An unavailable outcome shall remain unavailable. Launch completion, malformed evidence, and evidence for another workload shall not imply termination.
+- **AC-AGENTS-BACKGROUND-WORK-010.6:** When a verified version of `@agentclientprotocol/claude-agent-acp` reports a tool-scoped terminal exit for a tracked detached shell, only that workload shall leave the running count. The supported versions shall include the managed default `0.109.0` and the previously verified `0.107.0` and `0.97.0`. An unavailable outcome shall remain unavailable. Launch completion and mismatched or malformed evidence shall leave the workload open.
+- **AC-AGENTS-BACKGROUND-WORK-010.7:** When Claude reports matching terminal evidence for a tracked Monitor, only that Monitor shall leave the running count. Its history shall retain the reported outcome and its original session and turn, including after foreground idle and prompt handoff.
+- **AC-AGENTS-BACKGROUND-WORK-010.8:** When Claude registers an active Monitor, the composer chip above chat shall count it. The running-work summary shall identify it as a Monitor. Its active status shall survive foreground idle, prompt completion, handoff, and page reload while the same runtime retains the watch.
+- **AC-AGENTS-BACKGROUND-WORK-010.9:** When a terminal workload observation matches a Monitor transcript tool call by session and source-call ID, that card shall stop showing a watching state. Each sibling card shall reflect only its own matching workload, including after reload.
 
 The [OpenCode continuity design](../system-design/background-work-opencode.md)
 owns full provider continuity. The
