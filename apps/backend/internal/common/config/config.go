@@ -609,10 +609,21 @@ type FeaturesConfig struct {
 	// effect together with Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
 	CoordinatorPhase31 bool `mapstructure:"coordinator_phase31" json:"coordinatorPhase31"`
 
+	// TerminalPrimaryQueueHandoff moves messages still queued on a primary
+	// session that became terminal to the session that takes over the primary
+	// role. Off in every shipped profile; queued messages otherwise keep their
+	// explicit session target.
+	TerminalPrimaryQueueHandoff bool `mapstructure:"terminal_primary_queue_handoff" json:"terminalPrimaryQueueHandoff"`
+
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol
 	// adapter and profile catalogue are composed at startup.
 	CodexAppServer bool `mapstructure:"codex_app_server" json:"codexAppServer"`
+
+	// ReplacedSessionReclaim stops the execution of a session the user replaced
+	// as primary, once it settles. Off in every shipped profile; replaced
+	// sessions otherwise keep running.
+	ReplacedSessionReclaim bool `mapstructure:"replaced_session_reclaim" json:"replacedSessionReclaim"`
 
 	// AgentBackgroundWork enables normalized background work tracking,
 	// interactive controls, and subagent observation.
