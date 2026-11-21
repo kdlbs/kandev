@@ -127,9 +127,7 @@ export function registerTurnsHandlers(
         );
       markQuickChatTurnUnseen(store, payload.session_id, payload.completed_at, wasCompleted);
       // Surface a notice when the turn finished with no agent output.
-      if (!wasCompleted) {
-        maybeEmitEmptyTurnNotice(store, payload);
-      }
+      maybeEmitEmptyTurnNotice(store, payload);
 
       // Safety net: mark any tool calls still in a non-terminal state as "complete".
       // This handles edge cases where tool_update events were dropped or not processed.

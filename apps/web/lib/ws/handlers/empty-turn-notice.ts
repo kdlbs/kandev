@@ -193,6 +193,9 @@ export function maybeEmitEmptyTurnNotice(
 ): void {
   const state = store.getState();
   const sid = payload.session_id;
+  const id = noticeId(payload.id);
+  const messages = state.messages.bySession[sid] ?? [];
+  const existing = messages.find((message) => message.id === id);
   const isEphemeralSurface = state.quickChat.sessions.some((s) => s.sessionId === sid);
 
   const notice = computeEmptyTurnNotice({
@@ -203,11 +206,26 @@ export function maybeEmitEmptyTurnNotice(
     metadata: payload.metadata,
     isEphemeralSurface,
     isPassthrough: isPassthroughSession(state.taskSessions.items[sid]),
-    messages: state.messages.bySession[sid],
+    messages: existing ? messages.filter((message) => message.id !== id) : messages,
     availableCommands: state.availableCommands.bySessionId[sid],
     configuration_result: payload.configuration_result,
     now,
   });
 
-  if (notice) store.getState().addMessage(notice);
+  if (!notice) return;
+  if (existing) {
+    if (
+      payload.configuration_result &&
+      notice.metadata?.configuration_command_feedback === true &&
+      existing.metadata?.configuration_command_feedback !== true
+    ) {
+      store.getState().updateMessage({
+        ...existing,
+        content: notice.content,
+        metadata: notice.metadata,
+      });
+    }
+    return;
+  }
+  if (state.claimEmptyTurnNotice(sid, payload.id)) state.addMessage(notice);
 }

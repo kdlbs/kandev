@@ -102,7 +102,7 @@ superseded. The wording is illustrative.
   checks assert that the system message is in the conversation turn.
 - Backend build, focused Go tests, changed-package Go lint, web typecheck,
   web lint, i18n checks, docs validation, and the current Vite e2e build passed.
-  The PR fixup focused frontend suite passed 175 tests. Desktop Playwright
+  The PR fixup focused frontend suite passed 177 tests. Desktop Playwright
   passed 10 tests, and phone Playwright passed 2 tests. The phone cases verified
   the long rejection, 44 px dismiss target, retained draft, unchanged reading
   position, and a 420 px keyboard viewport.

@@ -16,6 +16,7 @@ const TURN_COMPLETED_AT = "2026-07-23T10:01:00.000Z";
 const RECEIPT_TURN_ID = "turn-receipt";
 const FAILED_TURN_ID = "turn-failed";
 const WORKSPACE_ID = "workspace-1";
+const MOCK_SMART_MODEL_NAME = "Mock Smart";
 
 type TurnTestState = SessionSlice & {
   quickChat: {
@@ -257,8 +258,8 @@ describe("session turn WebSocket handlers", () => {
       configuration_result: {
         status: "applied",
         config_id: "model",
-        requested: "Mock Smart",
-        effective: "Mock Smart",
+        requested: MOCK_SMART_MODEL_NAME,
+        effective: MOCK_SMART_MODEL_NAME,
         confirmed: true,
       },
     });
@@ -269,6 +270,77 @@ describe("session turn WebSocket handlers", () => {
     send(store, TURN_COMPLETED, completion);
 
     expect(emptyTurnNoticeCount(store, RECEIPT_TURN_ID)).toBe(0);
+  });
+
+  it("emits a first receipt when history already contains the completed turn", () => {
+    const store = makeStore();
+    addTurnUserPrompt(store, RECEIPT_TURN_ID, SESSION_ID, "/model mock-smart");
+    store.getState().addTurn({
+      id: RECEIPT_TURN_ID,
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      started_at: TURN_STARTED_AT,
+      completed_at: TURN_COMPLETED_AT,
+      created_at: TURN_STARTED_AT,
+      updated_at: TURN_COMPLETED_AT,
+    } as never);
+
+    send(
+      store,
+      TURN_COMPLETED,
+      turn(RECEIPT_TURN_ID, TURN_STARTED_AT, TURN_COMPLETED_AT, {
+        had_output: false,
+        configuration_result: {
+          status: "applied",
+          config_id: "model",
+          requested: MOCK_SMART_MODEL_NAME,
+          effective: MOCK_SMART_MODEL_NAME,
+          confirmed: true,
+        },
+      }),
+    );
+
+    const receipt = store
+      .getState()
+      .messages.bySession[
+        SESSION_ID
+      ]?.find((message) => message.id === `empty-turn-${RECEIPT_TURN_ID}`);
+    expect(receipt?.metadata?.configuration_command_feedback).toBe(true);
+  });
+
+  it("upgrades a visible empty-turn notice when the receipt arrives later", () => {
+    const store = makeStore();
+    addTurnUserPrompt(store, RECEIPT_TURN_ID, SESSION_ID, "/model mock-smart");
+    send(
+      store,
+      TURN_COMPLETED,
+      turn(RECEIPT_TURN_ID, TURN_STARTED_AT, TURN_COMPLETED_AT, { had_output: false }),
+    );
+    expect(emptyTurnNoticeCount(store, RECEIPT_TURN_ID)).toBe(1);
+
+    send(
+      store,
+      TURN_COMPLETED,
+      turn(RECEIPT_TURN_ID, TURN_STARTED_AT, TURN_COMPLETED_AT, {
+        had_output: false,
+        configuration_result: {
+          status: "applied",
+          config_id: "model",
+          requested: MOCK_SMART_MODEL_NAME,
+          effective: MOCK_SMART_MODEL_NAME,
+          confirmed: true,
+        },
+      }),
+    );
+
+    const receipt = store
+      .getState()
+      .messages.bySession[
+        SESSION_ID
+      ]?.find((message) => message.id === `empty-turn-${RECEIPT_TURN_ID}`);
+    expect(emptyTurnNoticeCount(store, RECEIPT_TURN_ID)).toBe(1);
+    expect(receipt?.metadata?.configuration_command_feedback).toBe(true);
+    expect(receipt?.content).toContain(`The agent applied ${MOCK_SMART_MODEL_NAME}.`);
   });
 
   it.each([
