@@ -166,6 +166,7 @@ Transient summary and publication failures remain retryable until success or shu
 A permanent summary failure logs its reason and attempt count once. Background shutdown cancellation stops quietly.
 Stopping summary retries does not release an unresolved terminal-capture fence or manufacture historical endpoints.
 Runtime cleanup preserves content or explicitly settles outstanding work before destroying its executor source.
+A terminal failure settles its exact owned interval durably before the successor fence is released.
 Existing completion authority, final-message anchoring, and bounded Stop/Cancel behavior remain dependencies of that lifecycle.
 
 ## Git capture
