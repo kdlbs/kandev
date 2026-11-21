@@ -31,7 +31,7 @@ func validateWorkspaceInventoryBranchContinuity(
 		}
 		return fmt.Errorf("%w: branch changed without completed repair attestation", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
-	if err := validateWorkspaceInventoryRepairCandidate(env, info, row); err != nil {
+	if err := validateAttestedInventoryCandidate(receipt, env, info, row); err != nil {
 		return err
 	}
 	current, err := worktree.InspectCheckoutIdentity(ctx, worktree.PreservationRequest{
@@ -45,4 +45,19 @@ func validateWorkspaceInventoryBranchContinuity(
 		return fmt.Errorf("%w: current checkout identity differs from completed repair", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
 	return nil
+}
+
+// A fenced metadata-only receipt is the only completed repair of a local
+// repository. Its checkout keeps the same local ownership checks on later
+// launches, while automatic local-source repair stays disabled.
+func validateAttestedInventoryCandidate(
+	receipt *models.WorkspaceInventoryRecoveryReceipt,
+	env *models.TaskEnvironment,
+	info *repoInfo,
+	row *models.TaskEnvironmentRepo,
+) error {
+	if receipt.Preservation.Fence != nil && info.Repository != nil && info.Repository.SourceType == sourceTypeLocal {
+		return validateLocalInventoryCandidate(env, info, row)
+	}
+	return validateWorkspaceInventoryRepairCandidate(env, info, row)
 }
