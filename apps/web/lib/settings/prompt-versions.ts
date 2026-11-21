@@ -44,9 +44,19 @@ export function formFromPrompt(prompt: CustomPrompt): PromptFormState {
   };
 }
 
-/** The version a linked prompt uses: pending when switched, otherwise saved. */
+/**
+ * The version a linked prompt uses: pending when switched, otherwise saved.
+ * An override whose file left the repository has only its local version, so
+ * a pending Repository choice no longer applies.
+ */
 export function choiceFor(prompt: CustomPrompt, pending: PendingVersions): PromptConflictChoice {
+  if (prompt.source === "override" && !hasRepositoryVersion(prompt)) return "local";
   return pending[prompt.id] ?? (prompt.source === "override" ? "local" : "repository");
+}
+
+/** Whether a linked prompt's pending choice differs from the saved one. */
+export function isSwitched(prompt: CustomPrompt, pending: PendingVersions): boolean {
+  return choiceFor(prompt, pending) !== choiceFor(prompt, {});
 }
 
 /** Records a switch; a choice equal to the saved one is no longer pending. */
@@ -104,7 +114,22 @@ export function isDraftValid(prompt: CustomPrompt, form: PromptFormState): boole
 
 export type PromptSave =
   | { kind: "versions"; prompt: CustomPrompt; payload: PromptVersionsSave }
-  | { kind: "update"; prompt: CustomPrompt; form: PromptFormState; expectedUpdatedAt: string };
+  | { kind: "update"; prompt: CustomPrompt; form: PromptFormState; expectedUpdatedAt: string }
+  | { kind: "recreate"; id: string; form: PromptFormState };
+
+/**
+ * Drafts whose prompt left the list while being edited (for example, a sync
+ * removed its file). Their text is kept so Save can recreate the prompt.
+ */
+export function orphanedDrafts(
+  prompts: CustomPrompt[],
+  drafts: PromptDrafts,
+): { id: string; form: PromptFormState }[] {
+  const listed = new Set(prompts.map((prompt) => prompt.id));
+  return Object.entries(drafts)
+    .filter(([id]) => !listed.has(id))
+    .map(([id, draft]) => ({ id, form: draft.form }));
+}
 
 function editedLocal(prompt: CustomPrompt, draft: PromptDraft | undefined): string | undefined {
   if (!draft) return undefined;
@@ -118,7 +143,7 @@ function linkedSave(
   draft: PromptDraft | undefined,
 ): PromptSave | undefined {
   const local = editedLocal(prompt, draft);
-  if (pending[prompt.id] === undefined && local === undefined) return undefined;
+  if (!isSwitched(prompt, pending) && local === undefined) return undefined;
   return {
     kind: "versions",
     prompt,
@@ -134,7 +159,8 @@ function linkedSave(
 /**
  * The writes one Save makes, in list order: a versions save for every
  * switched or edited linked prompt (carrying the edit and its starting
- * revision), and a plain update for every edited manual prompt.
+ * revision), a plain update for every edited manual prompt, then a new
+ * prompt for every draft whose prompt was removed while edited.
  */
 export function planPromptSaves({
   prompts,
@@ -155,5 +181,6 @@ export function planPromptSaves({
       plan.push({ kind: "update", prompt, form: draft.form, expectedUpdatedAt: draft.updatedAt });
     }
   }
+  for (const orphan of orphanedDrafts(prompts, drafts)) plan.push({ kind: "recreate", ...orphan });
   return plan;
 }

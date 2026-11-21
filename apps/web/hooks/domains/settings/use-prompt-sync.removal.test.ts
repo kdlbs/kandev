@@ -80,7 +80,7 @@ describe("usePromptSync removal review", () => {
     expect(removed).toBe(true);
     expect(mocks.del).toHaveBeenCalledWith({
       choices: { "house-rules": "local", notes: "local" },
-      delete_repository_only: false,
+      delete_repository_only: [],
     });
     expect(result.current.removal.active).toBe(false);
     expect(result.current.config).toBeNull();
@@ -98,7 +98,7 @@ describe("usePromptSync removal review", () => {
     await act(async () => {
       await result.current.handleDelete();
     });
-    expect(mocks.del).toHaveBeenCalledWith({ choices: {}, delete_repository_only: false });
+    expect(mocks.del).toHaveBeenCalledWith({ choices: {}, delete_repository_only: [] });
   });
 
   it("offers deleting the prompts that only came from the repository, off by default", async () => {
@@ -117,7 +117,10 @@ describe("usePromptSync removal review", () => {
     await act(async () => {
       await result.current.handleDelete();
     });
-    expect(mocks.del).toHaveBeenCalledWith({ choices: {}, delete_repository_only: true });
+    expect(mocks.del).toHaveBeenCalledWith({
+      choices: {},
+      delete_repository_only: ["principles", "release-notes"],
+    });
     expect(result.current.removal.active).toBe(false);
     expect(result.current.removal.deleteRepositoryOnly).toBe(false);
   });

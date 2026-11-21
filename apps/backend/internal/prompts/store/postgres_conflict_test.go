@@ -26,7 +26,7 @@ func TestPostgresRepository_OwnershipTransitionsKeepAlternateContent(t *testing.
 		name string
 		run  func() (bool, error)
 	}{
-		{"adopt as override", func() (bool, error) { return repo.AdoptPromptAsOverride(ctx, manual.ID, "p/pg.md", "Repo", true) }},
+		{"adopt as override", func() (bool, error) { return repo.AdoptPromptAsOverride(ctx, manual, "p/pg.md", "Repo", true) }},
 		{"clear conflict", func() (bool, error) { return repo.ClearOverrideConflict(ctx, manual.ID) }},
 		{"revert", func() (bool, error) { return repo.RevertOverride(ctx, manual.ID) }},
 		{"sync update", func() (bool, error) { return repo.UpdateSyncedPrompt(ctx, manual.ID, "Repo", "p/pg.md") }},
@@ -45,7 +45,7 @@ func TestPostgresRepository_OwnershipTransitionsKeepAlternateContent(t *testing.
 	if err := repo.CreatePrompt(ctx, other); err != nil {
 		t.Fatalf("create prompt: %v", err)
 	}
-	if changed, err := repo.AdoptPromptAsSynced(ctx, other.ID, "Repo", "p/taken.md"); err != nil || !changed {
+	if changed, err := repo.AdoptPromptAsSynced(ctx, other, "Repo", "p/taken.md"); err != nil || !changed {
 		t.Fatalf("adopt as synced = %v, %v", changed, err)
 	}
 	if changed, err := repo.RestoreSyncedPrompt(ctx, other.ID); err != nil || !changed {
@@ -68,14 +68,14 @@ func TestPostgresRepository_ReleaseRestoresChosenKeptVersions(t *testing.T) {
 	if err := repo.CreatePrompt(ctx, prompt); err != nil {
 		t.Fatalf("create prompt: %v", err)
 	}
-	if changed, err := repo.AdoptPromptAsSynced(ctx, prompt.ID, "Repo", "p/pg-restore.md"); err != nil || !changed {
+	if changed, err := repo.AdoptPromptAsSynced(ctx, prompt, "Repo", "p/pg-restore.md"); err != nil || !changed {
 		t.Fatalf("adopt as synced = %v, %v", changed, err)
 	}
 	repoOnly, err := repo.CreateSyncedPrompt(ctx, "pg-repo-only", "Repo only", "p/pg-repo-only.md")
 	if err != nil {
 		t.Fatalf("create synced prompt: %v", err)
 	}
-	opts := ReleaseOptions{UseOther: []string{"pg-restore"}, DeleteRepositoryOnly: true}
+	opts := ReleaseOptions{UseOther: []string{"pg-restore"}, DeleteRepositoryOnly: []string{"pg-repo-only"}}
 	if changed, err := repo.ReleaseSyncedPrompts(ctx, opts); err != nil || changed != 2 {
 		t.Fatalf("release = %d, %v", changed, err)
 	}

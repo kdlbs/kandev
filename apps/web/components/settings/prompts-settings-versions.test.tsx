@@ -9,6 +9,7 @@ import { PromptsSettings } from "./prompts-settings";
 const mocks = vi.hoisted(() => ({
   prompts: [] as CustomPrompt[],
   promptEditor: vi.fn(),
+  createPrompt: vi.fn(),
   saveVersions: vi.fn(),
   updatePrompt: vi.fn(),
 }));
@@ -43,7 +44,7 @@ vi.mock("@/components/settings/settings-prompt-editor", () => ({
   },
 }));
 vi.mock("@/lib/api", () => ({
-  createPrompt: vi.fn(),
+  createPrompt: (...args: unknown[]) => mocks.createPrompt(...args),
   deletePrompt: vi.fn(),
   updatePrompt: (...args: unknown[]) => mocks.updatePrompt(...args),
 }));
@@ -273,5 +274,46 @@ describe("editing several prompts before one Save", () => {
     );
     fireEvent.click(within(item).getByTestId(editButtonTestId));
     expect(within(item).getByTestId(editorTestId)).toHaveProperty("value", "My other text");
+  });
+
+  it("keeps the text of a prompt removed while edited and saves it as a new prompt", async () => {
+    const manual: CustomPrompt = {
+      ...base,
+      id: "m1",
+      name: "notes",
+      source: "manual",
+      content: "Old",
+    };
+    mocks.prompts = [manual];
+    mocks.createPrompt.mockImplementation(async (body: { name: string; content: string }) => ({
+      ...manual,
+      id: "m2",
+      ...body,
+    }));
+    const view = render(
+      <TooltipProvider>
+        <SettingsSaveProvider>
+          <PromptsSettings />
+        </SettingsSaveProvider>
+      </TooltipProvider>,
+    );
+    fireEvent.click(within(row("notes")).getByTestId(editButtonTestId));
+    fireEvent.change(within(row("notes")).getByTestId(editorTestId), { target: { value: "Mine" } });
+    mocks.prompts = [];
+    view.rerender(
+      <TooltipProvider>
+        <SettingsSaveProvider>
+          <PromptsSettings />
+        </SettingsSaveProvider>
+      </TooltipProvider>,
+    );
+    expect(screen.getByTestId("prompt-orphaned-drafts-notice").textContent).toContain("@notes");
+    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
+    await waitFor(() =>
+      expect(mocks.createPrompt).toHaveBeenCalledWith(
+        { name: "notes", content: "Mine" },
+        expect.anything(),
+      ),
+    );
   });
 });

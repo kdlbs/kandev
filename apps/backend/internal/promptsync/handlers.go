@@ -165,11 +165,11 @@ func (c *controller) httpRemovalReview(ctx *gin.Context) {
 }
 
 // deleteRequest picks, by prompt name, which version a prompt with both a
-// local and a repository version keeps when Prompt Sync is removed, and
-// whether prompts that only came from the repository are deleted.
+// local and a repository version keeps when Prompt Sync is removed, and names
+// the reviewed prompts that only came from the repository to delete.
 type deleteRequest struct {
 	Choices              map[string]promptservice.ConflictChoice `json:"choices"`
-	DeleteRepositoryOnly bool                                    `json:"delete_repository_only"`
+	DeleteRepositoryOnly []string                                `json:"delete_repository_only"`
 }
 
 func (c *controller) httpDeleteConfig(ctx *gin.Context) {

@@ -27,16 +27,24 @@ describe("getPromptDraftMeta", () => {
     ).toEqual({ isDirty: true, revision: 'new:{"name":"","content":""}' });
   });
 
-  it("is dirty for every listed prompt's edit and switch, not for removed prompts", () => {
+  it("is dirty for every edit, including a removed prompt's, but not a removed prompt's switch", () => {
     const edit = { form: { name: "Review", content: "Changed" }, updatedAt: prompt.updated_at };
     const clean = getPromptDraftMeta({
       prompts: [prompt],
       showCreate: false,
       createForm: empty,
-      drafts: { gone: edit },
+      drafts: {},
       pending: { gone: "local" },
     });
     expect(clean.isDirty).toBe(false);
+    const orphaned = getPromptDraftMeta({
+      prompts: [prompt],
+      showCreate: false,
+      createForm: empty,
+      drafts: { gone: edit },
+      pending: {},
+    });
+    expect(orphaned.isDirty).toBe(true);
     const edited = getPromptDraftMeta({
       prompts: [prompt],
       showCreate: false,

@@ -70,7 +70,7 @@ func TestSavePromptVersionsClearsConflictAndNeverWritesManualPrompts(t *testing.
 	require.NoError(t, err)
 	assert.False(t, changed, "a manual prompt has no repository version")
 
-	_, err = repo.AdoptPromptAsOverride(ctx, manual.ID, "p/clash.md", "Repo", true)
+	_, err = repo.AdoptPromptAsOverride(ctx, manual, "p/clash.md", "Repo", true)
 	require.NoError(t, err)
 	adopted, err := repo.GetPromptByID(ctx, manual.ID)
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestReleaseCanDeleteRepositoryOnlyPrompts(t *testing.T) {
 	require.NoError(t, err)
 	kept := &models.Prompt{Name: "kept", Content: "Local kept"}
 	require.NoError(t, repo.CreatePrompt(ctx, kept))
-	_, err = repo.AdoptPromptAsSynced(ctx, kept.ID, "Repo kept", "p/kept.md")
+	_, err = repo.AdoptPromptAsSynced(ctx, kept, "Repo kept", "p/kept.md")
 	require.NoError(t, err)
 	over, err := repo.CreateSyncedPrompt(ctx, "over", "Repo over", "p/over.md")
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestReleaseCanDeleteRepositoryOnlyPrompts(t *testing.T) {
 	manual := &models.Prompt{Name: "manual", Content: "Manual"}
 	require.NoError(t, repo.CreatePrompt(ctx, manual))
 
-	changed, err := repo.ReleaseSyncedPrompts(ctx, ReleaseOptions{DeleteRepositoryOnly: true})
+	changed, err := repo.ReleaseSyncedPrompts(ctx, ReleaseOptions{DeleteRepositoryOnly: []string{"only", "code-review"}})
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), changed, "one deleted and two released")
 	_, err = repo.GetPromptByID(ctx, only.ID)
@@ -126,7 +126,7 @@ func TestReleaseNeverDeletesBuiltinPrompts(t *testing.T) {
 		models.PromptSourceSync, "p/code-review.md", builtin.ID)
 	require.NoError(t, err)
 
-	_, err = repo.ReleaseSyncedPrompts(ctx, ReleaseOptions{DeleteRepositoryOnly: true})
+	_, err = repo.ReleaseSyncedPrompts(ctx, ReleaseOptions{DeleteRepositoryOnly: []string{"only", "code-review"}})
 	require.NoError(t, err)
 	released, err := repo.GetPromptByID(ctx, builtin.ID)
 	require.NoError(t, err)

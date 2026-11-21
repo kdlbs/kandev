@@ -112,7 +112,7 @@ describe("prompt sync removal api", () => {
     await getPromptSyncKeptVersions();
     await deletePromptSyncConfig({
       choices: { "house-rules": "local" },
-      delete_repository_only: true,
+      delete_repository_only: ["principles"],
     });
     await deletePromptSyncConfig();
     const calls = spy.mock.calls as [string, RequestInit][];
@@ -120,7 +120,7 @@ describe("prompt sync removal api", () => {
     expect(calls[1]![1].method).toBe("DELETE");
     expect(JSON.parse(calls[1]![1].body as string)).toEqual({
       choices: { "house-rules": "local" },
-      delete_repository_only: true,
+      delete_repository_only: ["principles"],
     });
     expect(calls[2]![1].body).toBeUndefined();
   });

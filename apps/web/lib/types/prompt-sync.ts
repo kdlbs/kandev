@@ -63,7 +63,8 @@ export interface PromptSyncRemovalReview {
 /** The user's choices when Prompt Sync is removed. */
 export interface PromptSyncRemoval {
   choices: PromptConflictResolutions;
-  delete_repository_only: boolean;
+  /** The reviewed prompts that only came from the repository to delete. */
+  delete_repository_only: string[];
 }
 
 /** A saved Local override switch with an optional edited local version. */

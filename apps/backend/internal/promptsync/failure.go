@@ -31,17 +31,24 @@ func (s *Service) failureDirective(cfg *Config, syncErr error) reposync.FailureD
 	}, syncErr, s.now().UTC(), s.jitter)
 }
 
+// ownMessages are this package's errors whose text is safe to show as is.
+var ownMessages = []error{ErrCredentialWorkspaceMissing, ErrListingIncomplete}
+
 func safeErrorMessage(err error) string {
-	if errors.Is(err, ErrCredentialWorkspaceMissing) {
-		return ErrCredentialWorkspaceMissing.Error()
+	for _, own := range ownMessages {
+		if errors.Is(err, own) {
+			return own.Error()
+		}
 	}
 	return reposync.SafeErrorMessage(err, genericFailureMessage)
 }
 
 // safeStoredMessage keeps only the exact safe summaries this package writes.
 func safeStoredMessage(message string) string {
-	if message == ErrCredentialWorkspaceMissing.Error() {
-		return message
+	for _, own := range ownMessages {
+		if message == own.Error() {
+			return message
+		}
 	}
 	return reposync.SafeStoredErrorMessage(message, genericFailureMessage)
 }

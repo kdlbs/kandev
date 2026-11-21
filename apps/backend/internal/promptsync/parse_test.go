@@ -84,3 +84,22 @@ func TestParsePromptFilesInvalidDuplicateFreezesInEitherOrder(t *testing.T) {
 	assert.Len(t, desired, 1, "a single valid file still applies")
 	assert.False(t, frozen["review"])
 }
+
+func TestParsePromptFilesFreezesAFileWithANulCharacter(t *testing.T) {
+	desired, frozen, warnings := parsePromptFiles([]fetchedFile{
+		{path: "p/broken.md", content: []byte("before\x00after")},
+		{path: "p/valid.md", content: []byte("Valid")},
+	})
+	assert.Equal(t, []promptservice.SyncedPromptFile{{Name: "valid", Content: "Valid", Path: "p/valid.md"}}, desired)
+	assert.True(t, frozen["broken"])
+	assert.Len(t, warnings, 1)
+}
+
+func TestCompleteListingRejectsACappedGitHubDirectory(t *testing.T) {
+	full := make([]reposync.Entry, githubContentsListLimit)
+	assert.ErrorIs(t, completeListing(reposync.ProviderGitHub, full), ErrListingIncomplete)
+	assert.NoError(t, completeListing(reposync.ProviderGitHub, full[:githubContentsListLimit-1]))
+	assert.NoError(t, completeListing(reposync.ProviderGitLab, full), "GitLab listings are paginated to the end")
+	assert.Equal(t, ErrListingIncomplete.Error(), safeErrorMessage(ErrListingIncomplete))
+	assert.Equal(t, ErrListingIncomplete.Error(), safeStoredMessage(ErrListingIncomplete.Error()))
+}

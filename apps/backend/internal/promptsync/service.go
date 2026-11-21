@@ -151,11 +151,11 @@ func (s *Service) saveLocked(ctx context.Context, req *SetConfigRequest) (*Confi
 
 // Removal is the user's choices when Prompt Sync is removed: Choices picks the
 // local or repository version for prompts that have both (others keep the
-// version in use), and DeleteRepositoryOnly deletes the synced prompts that
-// only came from the repository instead of keeping them.
+// version in use), and DeleteRepositoryOnly names the reviewed synced prompts
+// that only came from the repository to delete instead of keeping them.
 type Removal struct {
 	Choices              map[string]promptservice.ConflictChoice
-	DeleteRepositoryOnly bool
+	DeleteRepositoryOnly []string
 }
 
 // DeleteConfig releases every synced prompt and override to manual
@@ -188,7 +188,7 @@ func (s *Service) DeleteConfig(ctx context.Context, removal Removal) error {
 		return fmt.Errorf("failed to release synced prompts: %w", err)
 	}
 	if released > 0 {
-		s.logger.Info("released synced prompts", zap.Int64("count", released), zap.Bool("deleted_repository_only", removal.DeleteRepositoryOnly))
+		s.logger.Info("released synced prompts", zap.Int64("count", released), zap.Int("repository_only_to_delete", len(removal.DeleteRepositoryOnly)))
 	}
 	return s.store.Delete(ctx)
 }
@@ -343,6 +343,9 @@ func (s *Service) fetch(ctx context.Context, cfg *Config) ([]fetchedFile, error)
 	}
 	get, err := reader.Getter(cfg.source())
 	if err != nil {
+		return nil, err
+	}
+	if err := completeListing(cfg.Provider, entries); err != nil {
 		return nil, err
 	}
 	paths := selectPromptFiles(entries)

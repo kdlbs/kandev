@@ -29,8 +29,8 @@ type Repository interface {
 	// Ownership transitions, each guarded by the expected current source.
 	SavePromptVersions(ctx context.Context, id string, from, to PromptVersions) (bool, error)
 	RevertOverride(ctx context.Context, id string) (bool, error)
-	AdoptPromptAsOverride(ctx context.Context, id, sourcePath, repositoryContent string, conflict bool) (bool, error)
-	AdoptPromptAsSynced(ctx context.Context, id, content, sourcePath string) (bool, error)
+	AdoptPromptAsOverride(ctx context.Context, seen *models.Prompt, sourcePath, repositoryContent string, conflict bool) (bool, error)
+	AdoptPromptAsSynced(ctx context.Context, seen *models.Prompt, content, sourcePath string) (bool, error)
 	SetOverrideRepositoryContent(ctx context.Context, id, content string) (bool, error)
 	ClearOverrideConflict(ctx context.Context, id string) (bool, error)
 	DetachOverride(ctx context.Context, id string) (bool, error)

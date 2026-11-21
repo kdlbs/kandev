@@ -202,7 +202,7 @@ func (s *Service) adoptClashingPrompt(
 	ctx context.Context, file SyncedPromptFile, current *models.Prompt, choice ConflictChoice, result *SyncApplyResult,
 ) error {
 	if choice == ChoiceRepository {
-		adopted, err := s.repo.AdoptPromptAsSynced(ctx, current.ID, file.Content, file.Path)
+		adopted, err := s.repo.AdoptPromptAsSynced(ctx, current, file.Content, file.Path)
 		if err != nil {
 			return err
 		}
@@ -212,7 +212,7 @@ func (s *Service) adoptClashingPrompt(
 		return nil
 	}
 	conflict := choice != ChoiceLocal
-	adopted, err := s.repo.AdoptPromptAsOverride(ctx, current.ID, file.Path, file.Content, conflict)
+	adopted, err := s.repo.AdoptPromptAsOverride(ctx, current, file.Path, file.Content, conflict)
 	if err != nil || !adopted {
 		return err
 	}

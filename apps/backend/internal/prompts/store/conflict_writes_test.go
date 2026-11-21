@@ -75,7 +75,7 @@ func TestAdoptManualPromptAsOverrideWithConflict(t *testing.T) {
 	manual := &models.Prompt{Name: "principles", Content: "Mine"}
 	require.NoError(t, repo.CreatePrompt(ctx, manual))
 
-	changed, err := repo.AdoptPromptAsOverride(ctx, manual.ID, "p/principles.md", "Repo", true)
+	changed, err := repo.AdoptPromptAsOverride(ctx, manual, "p/principles.md", "Repo", true)
 	require.NoError(t, err)
 	require.True(t, changed)
 	adopted := mustGet(t, repo, manual.ID)
@@ -84,7 +84,7 @@ func TestAdoptManualPromptAsOverrideWithConflict(t *testing.T) {
 	assert.Equal(t, "Mine", adopted.Content)
 	assert.Equal(t, "p/principles.md", adopted.SourcePath)
 
-	changed, err = repo.AdoptPromptAsOverride(ctx, manual.ID, "p/principles.md", "Repo", false)
+	changed, err = repo.AdoptPromptAsOverride(ctx, manual, "p/principles.md", "Repo", false)
 	require.NoError(t, err)
 	assert.False(t, changed, "only a manual prompt can be adopted")
 
@@ -97,7 +97,7 @@ func TestAdoptManualPromptAsOverrideWithConflict(t *testing.T) {
 	assert.True(t, changed)
 	assert.False(t, mustGet(t, repo, manual.ID).Conflict)
 
-	_, err = repo.AdoptPromptAsOverride(ctx, manual.ID, "p/principles.md", "Repo", false)
+	_, err = repo.AdoptPromptAsOverride(ctx, manual, "p/principles.md", "Repo", false)
 	require.NoError(t, err)
 	changed, err = repo.RevertOverride(ctx, manual.ID)
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestAdoptManualPromptAsSyncedKeepsAlternateContent(t *testing.T) {
 	manual := &models.Prompt{Name: "principles", Content: "Mine"}
 	require.NoError(t, repo.CreatePrompt(ctx, manual))
 
-	changed, err := repo.AdoptPromptAsSynced(ctx, manual.ID, "Repo", "p/principles.md")
+	changed, err := repo.AdoptPromptAsSynced(ctx, manual, "Repo", "p/principles.md")
 	require.NoError(t, err)
 	require.True(t, changed)
 	adopted := mustGet(t, repo, manual.ID)
@@ -140,7 +140,7 @@ func TestSyncNeverDeletesBuiltinPrompt(t *testing.T) {
 	builtin, err := repo.GetPromptByName(ctx, "code-review")
 	require.NoError(t, err)
 	require.True(t, builtin.Builtin)
-	_, err = repo.AdoptPromptAsSynced(ctx, builtin.ID, "Repo review", "p/code-review.md")
+	_, err = repo.AdoptPromptAsSynced(ctx, builtin, "Repo review", "p/code-review.md")
 	require.NoError(t, err)
 
 	deleted, err := repo.DeleteSyncedPrompt(ctx, builtin.ID)
@@ -157,9 +157,9 @@ func TestReleaseClearsConflictAndKeptContent(t *testing.T) {
 	require.NoError(t, repo.CreatePrompt(ctx, first))
 	second := &models.Prompt{Name: "second", Content: "Also mine"}
 	require.NoError(t, repo.CreatePrompt(ctx, second))
-	_, err := repo.AdoptPromptAsOverride(ctx, first.ID, "p/first.md", "Repo first", true)
+	_, err := repo.AdoptPromptAsOverride(ctx, first, "p/first.md", "Repo first", true)
 	require.NoError(t, err)
-	_, err = repo.AdoptPromptAsSynced(ctx, second.ID, "Repo", "p/second.md")
+	_, err = repo.AdoptPromptAsSynced(ctx, second, "Repo", "p/second.md")
 	require.NoError(t, err)
 
 	released, err := repo.ReleaseSyncedPrompts(ctx, ReleaseOptions{})
@@ -182,7 +182,7 @@ func TestReleaseRestoresChosenKeptVersions(t *testing.T) {
 	for _, name := range []string{"restore-me", "keep-repo"} {
 		prompt := &models.Prompt{Name: name, Content: "Local " + name}
 		require.NoError(t, repo.CreatePrompt(ctx, prompt))
-		_, err := repo.AdoptPromptAsSynced(ctx, prompt.ID, "Repo "+name, "p/"+name+".md")
+		_, err := repo.AdoptPromptAsSynced(ctx, prompt, "Repo "+name, "p/"+name+".md")
 		require.NoError(t, err)
 		ids[name] = prompt.ID
 	}

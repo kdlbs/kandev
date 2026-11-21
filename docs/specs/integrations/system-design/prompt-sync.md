@@ -92,13 +92,11 @@ Guards (AC-INTEGRATIONS-PROMPT-SYNC-004.1):
   UI renders its own localized copy).
 - `updateAgentPrompt` rejects synced prompts with `ErrPromptSyncManaged`. MCP
   maps it to a forbidden error, like a built-in prompt.
-- Store writes add `AND source = 'manual'` to the operator update, agent
-  update, and delete statements. This closes the race in which a prompt
-  becomes synced between the service's read and the write; the write then
-  affects no row and an update reports the existing stale-write rejection.
-- DTOs (`PromptDTO`, MCP summaries and reads, boot payload) add
-  `source: "manual" | "sync"` and `source_path`. `allow_agent_edits` becomes
-  `!builtin && source == "manual"`.
+- Store operator update, agent update, and delete statements also guard on
+  ownership (see [Local overrides](#local-overrides)), so a prompt that
+  becomes synced after the service's read is not written.
+- DTOs (`PromptDTO`, MCP summaries and reads, boot payload) add `source`
+  and `source_path`.
 
 The sync-only methods are `ApplySyncedPrompts(ctx, SyncApplyInput{Desired,
 FrozenNames, ReferenceTexts})` and `ReleaseSyncedPrompts(ctx)`. They are not reachable from
@@ -115,7 +113,8 @@ delete guards check `source <> 'sync'` instead of `source = 'manual'`.
   `UPDATE ... WHERE id = ? AND source = ?` statement that reports whether a
   row changed: `RevertOverride` (`override -> sync`, used by sync when the
   user chose the repository version), `AdoptPromptAsOverride` and
-  `AdoptPromptAsSynced` (`manual -> override|sync`), `ClearOverrideConflict`,
+  `AdoptPromptAsSynced` (`manual -> override|sync`, also guarded by the name
+  and content the sync read), `ClearOverrideConflict`,
   and `RestoreSyncedPrompt` (`sync -> manual`).
 - The operator's Local | Repository choice is saved by
   `SavePromptVersions(ctx, id, from, to PromptVersions)`: one `UPDATE` that
@@ -228,9 +227,10 @@ so the empty string is unambiguous.
   validates the choices, names the prompts whose choice differs from the
   version in use, and passes a `ReleaseOptions{UseOther,
   DeleteRepositoryOnly}` to `ReleaseSyncedPrompts`. In one transaction it
-  sets `content = alternate_content` for the `UseOther` rows, deletes
-  `source = 'sync' AND alternate_content = '' AND builtin = 0` rows when
-  asked, and releases everything else.
+  sets `content = alternate_content` for the `UseOther` rows, deletes the
+  named `delete_repository_only` rows that still match `source = 'sync' AND
+  alternate_content = '' AND builtin = 0`, and releases the rest, advancing
+  `updated_at`.
 
 ### Agent access
 
@@ -311,7 +311,7 @@ Poller (60s tick) ──────┼─► promptsync.Service.Sync (install l
                         │     1. load config, check due/suspended (automatic only)
                         │     1a. credential workspace must exist, else suspend
                         │     2. bind GitHub host for workspace_id (GitHub)
-                        │     3. reposync.List(source) → keep *.md immediate files
+                        │     3. reposync.List(source) (GitHub ≥1,000 entries → fail) → *.md files
                         │     4. reposync.Get each file (too large → freeze it; other error → fail run)
                         │     5. parse files → desired{name→content,path}, frozen names, warnings
                         │     6. workflow repo ListPromptReferenceTexts → texts
@@ -336,7 +336,7 @@ deferral queue is needed.
 - Name: `strings.TrimSuffix` of the case-insensitive `.md` extension. It is
   not trimmed further, so a name with surrounding whitespace is invalid
   (AC-INTEGRATIONS-PROMPT-SYNC-002.3).
-- Content: `utf8.Valid` check, then `strings.TrimSpace`, then the
+- Content: `utf8.Valid` and no NUL byte, then `strings.TrimSpace`, then the
   saved-prompt limits (name ≤ 512 bytes, content ≤ 1 MiB). Provider reads
   share one oversize contract: GitLab returns `gitlab.ErrRepoFileTooLarge`
   above 1 MiB and GitHub returns `github.ErrRepoFileTooLarge` when the
@@ -378,9 +378,6 @@ the configuration remains while its prompts are already manual; later syncs
 adopt those files as conflicted overrides instead of updating them. The caller
 receives the error, and a retried removal releases nothing and deletes the
 configuration, so the state recovers without losing prompt content.
-`ReleaseSyncedPrompts` runs one statement,
-`UPDATE custom_prompts SET source='manual', source_path='' WHERE
-source='sync'`, and publishes once when any row changed.
 
 ### Workflow Sync reference warnings
 
@@ -487,6 +484,8 @@ list, the `unchanged` flag, and the stored status match the current output
   along) and `updatePrompt` per edited manual prompt, in list order; each
   written prompt closes and leaves the maps, so a failure keeps only what is
   unsaved. **Reset** clears both maps and closes the rows they touched.
+  A draft whose prompt left the list stays dirty, is named by
+  `PromptOrphanedDraftsNotice`, and Save recreates it (`orphanedDrafts`).
   Synced rows add `PromptSyncedBadge` and no delete; overrides add
   `PromptOverrideBadge` and, while conflicted, `PromptConflictBadge`. The
   status card lists overridden prompt names separately from warnings.

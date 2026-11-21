@@ -7,6 +7,8 @@ import {
   hasRepositoryVersion,
   isDraftValid,
   isLinkedPrompt,
+  isSwitched,
+  orphanedDrafts,
   planPromptSaves,
   repositoryVersion,
   showsEditor,
@@ -130,15 +132,12 @@ describe("prompt versions", () => {
     ]);
   });
 
-  it("plans nothing for a draft equal to the saved prompt or for a removed prompt", () => {
+  it("plans nothing for a draft equal to the saved prompt", () => {
     expect(
       planPromptSaves({
         prompts: [override],
         pending: {},
-        drafts: {
-          p2: { form: formFromPrompt(override), updatedAt: "rev" },
-          gone: { form: { name: "x", content: "y" }, updatedAt: "rev" },
-        },
+        drafts: { p2: { form: formFromPrompt(override), updatedAt: "rev" } },
       }),
     ).toEqual([]);
   });
@@ -151,5 +150,48 @@ describe("hasRepositoryVersion", () => {
     expect(hasRepositoryVersion(override)).toBe(true);
     expect(hasRepositoryVersion({ ...override, alternate_content: "" })).toBe(false);
     expect(hasRepositoryVersion(manual)).toBe(false);
+  });
+});
+
+// @covers AC-INTEGRATIONS-PROMPT-SYNC-009.1
+describe("an override whose file left the repository", () => {
+  const detached: CustomPrompt = { ...override, alternate_content: "" };
+
+  it("drops a pending Repository choice and keeps the local version in use", () => {
+    expect(choiceFor(detached, { [detached.id]: "repository" })).toBe("local");
+    expect(isSwitched(detached, { [detached.id]: "repository" })).toBe(false);
+    expect(
+      planPromptSaves({
+        prompts: [detached],
+        pending: { [detached.id]: "repository" },
+        drafts: {},
+      }),
+    ).toEqual([]);
+  });
+
+  it("still saves an edit of the local version", () => {
+    const drafts = {
+      [detached.id]: { form: { name: "other", content: "Edited" }, updatedAt: "t1" },
+    };
+    expect(
+      planPromptSaves({ prompts: [detached], pending: { [detached.id]: "repository" }, drafts }),
+    ).toEqual([
+      {
+        kind: "versions",
+        prompt: detached,
+        payload: { use_local: true, local_content: "Edited", expected_updated_at: "t1" },
+      },
+    ]);
+  });
+});
+
+describe("drafts of prompts removed while edited", () => {
+  const draft = { form: { name: "gone", content: "My text" }, updatedAt: "t1" };
+
+  it("are listed and saved as new prompts", () => {
+    expect(orphanedDrafts([manual], { gone: draft })).toEqual([{ id: "gone", form: draft.form }]);
+    expect(
+      planPromptSaves({ prompts: [manual], pending: { gone: "local" }, drafts: { gone: draft } }),
+    ).toEqual([{ kind: "recreate", id: "gone", form: draft.form }]);
   });
 });

@@ -22,6 +22,10 @@ var ErrInvalidConfig = errors.New("invalid prompt sync config")
 // ErrNotConfigured is returned when a sync runs without a configuration.
 var ErrNotConfigured = errors.New("prompt sync is not configured")
 
+// ErrListingIncomplete fails a run whose directory listing may be truncated,
+// so files missing from it are never treated as removed.
+var ErrListingIncomplete = errors.New("the prompt directory lists 1,000 or more entries, the most the GitHub contents API returns; move prompts to a directory with fewer entries")
+
 // ErrCredentialWorkspaceMissing is returned when the configured credential
 // workspace no longer exists.
 var ErrCredentialWorkspaceMissing = errors.New("the credential workspace for prompt sync no longer exists; choose another workspace")

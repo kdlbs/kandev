@@ -61,7 +61,7 @@ func TestDetachOverrideDropsConflictAndRepositoryVersion(t *testing.T) {
 	ctx := context.Background()
 	manual := &models.Prompt{Name: "clash", Content: "Mine"}
 	require.NoError(t, repo.CreatePrompt(ctx, manual))
-	_, err := repo.AdoptPromptAsOverride(ctx, manual.ID, "p/clash.md", "Repo", true)
+	_, err := repo.AdoptPromptAsOverride(ctx, manual, "p/clash.md", "Repo", true)
 	require.NoError(t, err)
 
 	changed, err := repo.DetachOverride(ctx, manual.ID)
@@ -80,7 +80,7 @@ func TestReleaseCanSwitchAnOverrideToItsRepositoryVersion(t *testing.T) {
 	ctx := context.Background()
 	manual := &models.Prompt{Name: "clash", Content: "Mine"}
 	require.NoError(t, repo.CreatePrompt(ctx, manual))
-	_, err := repo.AdoptPromptAsOverride(ctx, manual.ID, "p/clash.md", "Repo", false)
+	_, err := repo.AdoptPromptAsOverride(ctx, manual, "p/clash.md", "Repo", false)
 	require.NoError(t, err)
 
 	_, err = repo.ReleaseSyncedPrompts(ctx, ReleaseOptions{UseOther: []string{"clash"}})

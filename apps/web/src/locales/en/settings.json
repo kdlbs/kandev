@@ -1264,6 +1264,8 @@
   "promptConflictTooltip": "The repository file {{path}} uses this name too. Choose which version to use.",
   "promptRepositoryRemoved": "Removed from repository",
   "promptRepositoryRemovedTooltip": "Its file {{path}} is no longer in the synced repository, so your version is the only one. Edit it like any other prompt.",
+  "promptRemovedWhileEditing_one": "{{names}} was removed while you were editing it. Save keeps your text as a new prompt; Reset discards it.",
+  "promptRemovedWhileEditing_other": "{{names}} were removed while you were editing them. Save keeps your text as new prompts; Reset discards it.",
   "promptConflictBanner_one": "{{names}} shares its name with a file in the prompt repository. The repository version is not used until you choose.",
   "promptConflictBanner_other": "{{names}} share their names with files in the prompt repository. The repository versions are not used until you choose.",
   "promptConflictReview": "Review conflicts",

@@ -1,6 +1,7 @@
 package promptsync
 
 import (
+	"bytes"
 	"fmt"
 	"path"
 	"sort"
@@ -12,6 +13,19 @@ import (
 )
 
 const promptFileExtension = ".md"
+
+// githubContentsListLimit is the most entries the GitHub contents API returns
+// for one directory; a listing that reaches it may be truncated.
+const githubContentsListLimit = 1000
+
+// completeListing rejects a listing that may be truncated. GitLab listings
+// are paginated to the end; GitHub's contents API stops at its limit.
+func completeListing(provider string, entries []reposync.Entry) error {
+	if provider != reposync.ProviderGitLab && len(entries) >= githubContentsListLimit {
+		return ErrListingIncomplete
+	}
+	return nil
+}
 
 // fetchedFile is one prompt file read from the repository. tooLarge marks a
 // file the provider refused to return because of its size.
@@ -110,6 +124,9 @@ func validatePromptFile(name string, file fetchedFile) (string, string) {
 	}
 	if !utf8.Valid(raw) {
 		return "", "the file is not valid UTF-8 text"
+	}
+	if bytes.IndexByte(raw, 0) >= 0 {
+		return "", "the file contains a NUL character"
 	}
 	content := strings.TrimSpace(string(raw))
 	if content == "" {

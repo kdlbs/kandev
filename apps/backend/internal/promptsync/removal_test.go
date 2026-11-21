@@ -102,7 +102,7 @@ func TestHandlersListTwoVersionPromptsAndRemoveWithChoices(t *testing.T) {
 func TestDeleteConfigCanDeleteRepositoryOnlyPrompts(t *testing.T) {
 	f := twoVersionFixture(t)
 	router := newTestRouter(t, f.svc, admin)
-	removed := doRequest(router, http.MethodDelete, "/api/v1/prompt-sync/config", `{"delete_repository_only":true}`)
+	removed := doRequest(router, http.MethodDelete, "/api/v1/prompt-sync/config", `{"delete_repository_only":["plain"]}`)
 	require.Equal(t, http.StatusOK, removed.Code, removed.Body.String())
 
 	_, err := f.prompts.GetPromptByName(context.Background(), "plain")
@@ -110,4 +110,12 @@ func TestDeleteConfigCanDeleteRepositoryOnlyPrompts(t *testing.T) {
 	for _, name := range []string{"taken", "kept", "edited", "untouched"} {
 		assert.Equal(t, promptmodels.PromptSourceManual, f.prompt(t, name).Source, name)
 	}
+}
+
+func TestDeleteConfigKeepsRepositoryOnlyPromptsTheUserDidNotReview(t *testing.T) {
+	f := twoVersionFixture(t)
+	router := newTestRouter(t, f.svc, admin)
+	removed := doRequest(router, http.MethodDelete, "/api/v1/prompt-sync/config", `{"delete_repository_only":["missing"]}`)
+	require.Equal(t, http.StatusOK, removed.Code, removed.Body.String())
+	assert.Equal(t, promptmodels.PromptSourceManual, f.prompt(t, "plain").Source, "an unreviewed prompt is released, not deleted")
 }

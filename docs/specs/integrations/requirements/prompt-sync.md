@@ -107,7 +107,7 @@ file, so that prompt changes are easy to review in a pull request.
 - **AC-INTEGRATIONS-PROMPT-SYNC-002.3:** A prompt file is invalid when it
   meets any of these conditions:
   - its name is empty or longer than the saved-prompt name limit;
-  - its content is not valid UTF-8;
+  - its content is not valid UTF-8 or contains a NUL character;
   - its content is empty after trimming;
   - its content is longer than the saved-prompt content limit;
   - the provider refuses to return it because of its size.
@@ -121,7 +121,10 @@ file, so that prompt changes are easy to review in a pull request.
 - **AC-INTEGRATIONS-PROMPT-SYNC-002.5:** A directory listing or file download
   failure shall fail the run before any saved prompt changes. A file refused
   only for its size is not a download failure; it follows
-  AC-INTEGRATIONS-PROMPT-SYNC-002.3.
+  AC-INTEGRATIONS-PROMPT-SYNC-002.3. A listing that may be truncated (a
+  GitHub directory with 1,000 or more entries, the most its contents API
+  returns) shall fail the run the same way, so no file missing from it is
+  treated as removed.
 
 ### REQ-INTEGRATIONS-PROMPT-SYNC-003: Reconciliation
 
@@ -149,8 +152,10 @@ installation automatically, so that agents act on the reviewed text.
 - **AC-INTEGRATIONS-PROMPT-SYNC-003.3:** When a prompt file's name matches an
   existing manual or built-in prompt, that is a conflict, handled under
   REQ-INTEGRATIONS-PROMPT-SYNC-008. The sync shall never skip it silently or
-  overwrite the existing content without the user's choice. A file whose name
-  matches an override follows AC-INTEGRATIONS-PROMPT-SYNC-007.3 instead.
+  overwrite the existing content without the user's choice. A prompt renamed
+  or edited after the sync read it shall not be adopted by that run. A file
+  whose name matches an override follows AC-INTEGRATIONS-PROMPT-SYNC-007.3
+  instead.
 - **AC-INTEGRATIONS-PROMPT-SYNC-003.4:** A successful listing with no prompt
   files shall be treated as an empty source. It shall remove unreferenced
   synced prompts under REQ-INTEGRATIONS-PROMPT-SYNC-003.2.

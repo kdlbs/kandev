@@ -135,9 +135,10 @@ type ReleaseOptions struct {
 	// UseOther names the prompts that take their other version (kept local
 	// version or repository version) as their content.
 	UseOther []string
-	// DeleteRepositoryOnly deletes the synced prompts that only came from the
-	// repository: not built-in and without a kept local version.
-	DeleteRepositoryOnly bool
+	// DeleteRepositoryOnly names the synced prompts the user reviewed and chose
+	// to delete. Only those that still came only from the repository (not
+	// built-in, no kept local version) are deleted; any other is released.
+	DeleteRepositoryOnly []string
 }
 
 // ReleaseSyncedPrompts converts every synced prompt and override to a manual
@@ -159,21 +160,24 @@ func (r *sqliteRepository) ReleaseSyncedPrompts(ctx context.Context, opts Releas
 		}
 	}
 	var deleted int64
-	if opts.DeleteRepositoryOnly {
+	for _, name := range opts.DeleteRepositoryOnly {
 		result, err := tx.ExecContext(ctx, tx.Rebind(`
-			DELETE FROM custom_prompts WHERE source = ? AND alternate_content = '' AND builtin = ?
-		`), models.PromptSourceSync, 0)
+			DELETE FROM custom_prompts WHERE name = ? AND source = ? AND alternate_content = '' AND builtin = ?
+		`), name, models.PromptSourceSync, 0)
 		if err != nil {
 			return 0, err
 		}
-		if deleted, err = result.RowsAffected(); err != nil {
+		count, err := result.RowsAffected()
+		if err != nil {
 			return 0, err
 		}
+		deleted += count
 	}
+	// Advancing updated_at rejects any save based on a pre-release revision.
 	result, err := tx.ExecContext(ctx, tx.Rebind(`
-		UPDATE custom_prompts SET source = ?, source_path = '', alternate_content = '', conflict = 0
+		UPDATE custom_prompts SET source = ?, source_path = '', alternate_content = '', conflict = 0, updated_at = ?
 		WHERE source IN (?, ?)
-	`), models.PromptSourceManual, models.PromptSourceSync, models.PromptSourceOverride)
+	`), models.PromptSourceManual, time.Now().UTC(), models.PromptSourceSync, models.PromptSourceOverride)
 	if err != nil {
 		return 0, err
 	}

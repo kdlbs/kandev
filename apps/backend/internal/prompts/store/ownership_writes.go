@@ -60,9 +60,10 @@ func (r *sqliteRepository) RevertOverride(ctx context.Context, id string) (bool,
 // AdoptPromptAsOverride turns a manual or built-in prompt whose name a
 // repository file uses into an override of that file, keeping its content and
 // storing the file's content as the repository version. conflict records that
-// the user has not chosen a side yet.
+// the user has not chosen a side yet. seen is the prompt as the sync read it;
+// a prompt renamed or edited since then is left alone.
 func (r *sqliteRepository) AdoptPromptAsOverride(
-	ctx context.Context, id, sourcePath, repositoryContent string, conflict bool,
+	ctx context.Context, seen *models.Prompt, sourcePath, repositoryContent string, conflict bool,
 ) (bool, error) {
 	conflictInt := 0
 	if conflict {
@@ -71,18 +72,22 @@ func (r *sqliteRepository) AdoptPromptAsOverride(
 	return r.execChanged(ctx, `
 		UPDATE custom_prompts
 		SET source = ?, source_path = ?, alternate_content = ?, conflict = ?, updated_at = ?
-		WHERE id = ? AND source = ?
-	`, models.PromptSourceOverride, sourcePath, repositoryContent, conflictInt, time.Now().UTC(), id, models.PromptSourceManual)
+		WHERE id = ? AND source = ? AND name = ? AND content = ?
+	`, models.PromptSourceOverride, sourcePath, repositoryContent, conflictInt, time.Now().UTC(),
+		seen.ID, models.PromptSourceManual, seen.Name, seen.Content)
 }
 
 // AdoptPromptAsSynced turns a manual or built-in prompt into a synced prompt
 // with the repository content, keeping its own content as the local version.
-func (r *sqliteRepository) AdoptPromptAsSynced(ctx context.Context, id, content, sourcePath string) (bool, error) {
+// seen is the prompt as the sync read it; a prompt renamed or edited since
+// then is left alone.
+func (r *sqliteRepository) AdoptPromptAsSynced(ctx context.Context, seen *models.Prompt, content, sourcePath string) (bool, error) {
 	return r.execChanged(ctx, `
 		UPDATE custom_prompts
 		SET source = ?, alternate_content = content, content = ?, source_path = ?, conflict = 0, updated_at = ?
-		WHERE id = ? AND source = ?
-	`, models.PromptSourceSync, content, sourcePath, time.Now().UTC(), id, models.PromptSourceManual)
+		WHERE id = ? AND source = ? AND name = ? AND content = ?
+	`, models.PromptSourceSync, content, sourcePath, time.Now().UTC(),
+		seen.ID, models.PromptSourceManual, seen.Name, seen.Content)
 }
 
 // SetOverrideRepositoryContent records the current repository version of an

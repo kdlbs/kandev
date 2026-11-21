@@ -66,7 +66,10 @@ version without forking the repository.
   atomic write per prompt; every prompt with an unsaved switch or edit shall
   be marked unsaved until saved or reset, including while its row is
   closed. **Reset** shall restore every pending switch and edit, and leaving
-  the page shall warn about them like any other unsaved edit. The prompt's
+  the page shall warn about them like any other unsaved edit. When a prompt
+  with an unsaved edit leaves the list (for example, a sync removes its
+  file), its text shall be kept: the page shall name it, **Save** shall
+  create it as a new prompt, and **Reset** shall discard it. The prompt's
   name is owned by its repository file and shall not be editable. Saving
   Local shall turn
   the prompt into an override with the same name and identity, starting
@@ -203,7 +206,10 @@ version after trying the repository version, without retyping it.
   removal step shall offer one checkbox, off by default, to delete those
   prompts instead of keeping them. It shall state how many prompts it deletes
   and name them, and note that an `@name` mention of a deleted prompt stops
-  expanding. Prompts with a local version follow their row's choice and
+  expanding. Only the named prompts shall be deleted; one synced after the
+  step opened shall be released instead. Removal shall advance the revision
+  of every released prompt, so a save based on an earlier revision is
+  rejected. Prompts with a local version follow their row's choice and
   built-in prompts are never deleted. Deleting and releasing shall run in the
   same transaction, before the configuration is deleted.
 

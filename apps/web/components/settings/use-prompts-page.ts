@@ -9,6 +9,8 @@ import { useRequest } from "@/lib/http/use-request";
 import { t } from "@/lib/i18n";
 import {
   isDraftValid,
+  isSwitched,
+  orphanedDrafts,
   planPromptSaves,
   showsEditor,
   withChoice,
@@ -109,6 +111,15 @@ function usePromptRequests(state: PromptsState, closeCreate: () => void) {
   // is unsaved.
   const saveRequest = useRequest(async (plan: PromptSave[]) => {
     for (const save of plan) {
+      if (save.kind === "recreate") {
+        const created = await createPrompt(
+          { name: save.form.name.trim(), content: save.form.content.trim() },
+          { cache: "no-store" },
+        );
+        applyPrompts((current) => [...current.filter((p) => p.id !== created.id), created]);
+        forgetRows([save.id]);
+        continue;
+      }
       const updated =
         save.kind === "versions"
           ? await savePromptVersions(save.prompt.id, save.payload, { cache: "no-store" })
@@ -180,9 +191,13 @@ export function usePromptsActions(state: PromptsState) {
 
   const isValid = useMemo(() => {
     if (showCreate) return Boolean(createForm.name.trim() && createForm.content.trim());
-    return prompts.every(
+    const listedValid = prompts.every(
       (prompt) => !drafts[prompt.id] || isDraftValid(prompt, drafts[prompt.id]!.form),
     );
+    const orphansValid = orphanedDrafts(prompts, drafts).every(
+      ({ form }) => form.name.trim() && form.content.trim(),
+    );
+    return listedValid && orphansValid;
   }, [showCreate, createForm, prompts, drafts]);
 
   const { createRequest, saveRequest, deleteRequest, forgetRows } = usePromptRequests(
@@ -230,7 +245,7 @@ export function usePromptsActions(state: PromptsState) {
   };
 }
 
-/** The route draft: the create form, or every listed prompt's edit and switch. */
+/** The route draft: the create form, or every edit and every listed prompt's switch. */
 export function getPromptDraftMeta({
   prompts,
   showCreate,
@@ -239,11 +254,12 @@ export function getPromptDraftMeta({
   pending,
 }: Pick<PromptsState, "prompts" | "showCreate" | "createForm" | "drafts" | "pending">) {
   if (showCreate) return { isDirty: true, revision: `new:${JSON.stringify(createForm)}` };
-  const listed = new Set(prompts.map((prompt) => prompt.id));
-  const edits = Object.entries(drafts)
-    .filter(([id]) => listed.has(id))
-    .map(([id, draft]) => [id, draft.form]);
-  const switches = Object.entries(pending).filter(([id]) => listed.has(id));
+  // Every draft counts, including one whose prompt was removed while edited,
+  // so leaving the page still warns before its text is lost.
+  const edits = Object.entries(drafts).map(([id, draft]) => [id, draft.form]);
+  const switches = prompts
+    .filter((prompt) => isSwitched(prompt, pending))
+    .map((prompt) => [prompt.id, pending[prompt.id]]);
   return {
     isDirty: edits.length > 0 || switches.length > 0,
     revision: JSON.stringify({ edits, switches }),

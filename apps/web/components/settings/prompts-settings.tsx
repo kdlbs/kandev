@@ -7,6 +7,7 @@ import { Input } from "@kandev/ui/input";
 import { PromptListItem } from "@/components/settings/prompt-list-item";
 import { PromptSyncSection } from "@/components/settings/prompt-sync-section";
 import { PromptConflictNotice } from "@/components/settings/prompt-conflict-review-dialog";
+import { PromptOrphanedDraftsNotice } from "@/components/settings/prompt-orphaned-drafts-notice";
 import {
   filterSavedPrompts,
   PromptCreateButton,
@@ -20,6 +21,8 @@ import {
   choiceFor,
   draftForm,
   isLinkedPrompt,
+  isSwitched,
+  orphanedDrafts,
   type PromptFormState,
 } from "@/lib/settings/prompt-versions";
 import type { PromptConflictChoice } from "@/lib/types/prompt-sync";
@@ -102,7 +105,7 @@ function PromptRows({ state, actions, prompts, isFinePointer }: PromptRowsProps)
             isLinkedPrompt(prompt)
               ? {
                   choice: choiceFor(prompt, pending),
-                  pending: pending[prompt.id] !== undefined,
+                  pending: isSwitched(prompt, pending),
                   onChoose: (choice: PromptConflictChoice) => actions.choose(prompt, choice),
                 }
               : undefined
@@ -183,6 +186,7 @@ export function PromptsSettings() {
     >
       <div className="space-y-6">
         <PromptConflictNotice />
+        <PromptOrphanedDraftsNotice drafts={orphanedDrafts(prompts, state.drafts)} />
         <PromptMentionHelp />
         <PromptSyncSection />
         <SettingsGroup

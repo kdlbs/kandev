@@ -1264,6 +1264,8 @@
   "promptConflictTooltip": "O ficheiro do repositório {{path}} também usa este nome. Escolha a versão a usar.",
   "promptRepositoryRemoved": "Removido do repositório",
   "promptRepositoryRemovedTooltip": "O ficheiro {{path}} já não está no repositório sincronizado, por isso só existe a sua versão. Edite-a como qualquer outro prompt.",
+  "promptRemovedWhileEditing_one": "{{names}} foi removido enquanto o editava. Guardar mantém o seu texto como um novo prompt; Repor descarta-o.",
+  "promptRemovedWhileEditing_other": "{{names}} foram removidos enquanto os editava. Guardar mantém o seu texto como novos prompts; Repor descarta-o.",
   "promptConflictBanner_one": "{{names}} partilha o nome com um ficheiro do repositório de prompts. A versão do repositório não é usada até escolher.",
   "promptConflictBanner_other": "{{names}} partilham o nome com ficheiros do repositório de prompts. As versões do repositório não são usadas até escolher.",
   "promptConflictReview": "Rever conflitos",
