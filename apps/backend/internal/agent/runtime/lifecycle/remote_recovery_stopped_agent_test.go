@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -26,119 +27,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
-
-func TestValidateRemoteSessionAssociationAcceptsStoppedRetainedRemote(t *testing.T) {
-	for _, runtime := range []agentruntime.Runtime{agentruntime.RuntimeRemoteDocker, agentruntime.RuntimePluginRemote} {
-		t.Run(string(runtime), func(t *testing.T) {
-			instance := &ExecutorInstance{
-				InstanceID: "execution-stopped", SessionID: "session-stopped", RuntimeName: runtime,
-				ProviderSessionID: "native-saved",
-				Metadata:          map[string]interface{}{MetadataKeyRemoteDockerAgentctlInstanceID: "agentctl-stopped"},
-			}
-			association := stoppedRemoteAssociation()
-			require.NoError(t, validateRemoteSessionAssociation(instance, association, "agentctl-stopped"))
-
-			association.NativeSessionID = "native-saved"
-			require.NoError(t, validateRemoteSessionAssociation(instance, association, "agentctl-stopped"))
-
-			association.NativeSessionID = "foreign-native"
-			require.Error(t, validateRemoteSessionAssociation(instance, association, "agentctl-stopped"))
-		})
-	}
-}
-
-func TestValidateRemoteSessionAssociationKeepsRunningProofStrict(t *testing.T) {
-	instance := &ExecutorInstance{
-		InstanceID: "execution-stopped", SessionID: "session-stopped", RuntimeName: agentruntime.RuntimeRemoteDocker,
-		Metadata: map[string]interface{}{MetadataKeyRemoteDockerAgentctlInstanceID: "agentctl-stopped"},
-	}
-	association := stoppedRemoteAssociation()
-	association.AgentStatus = agentProcessStatusRunning
-	require.Error(t, validateRemoteSessionAssociation(instance, association, "agentctl-stopped"),
-		"a running process without its initialized native session is not adoptable")
-	association.NativeSessionID = "native-running"
-	require.NoError(t, validateRemoteSessionAssociation(instance, association, "agentctl-stopped"))
-}
-
-func TestFailedRemoteRecoveryWithoutDeliveryRequiresStoppedAssociation(t *testing.T) {
-	for _, runtime := range []agentruntime.Runtime{agentruntime.RuntimeRemoteDocker, agentruntime.RuntimePluginRemote} {
-		t.Run(string(runtime), func(t *testing.T) {
-			snapshot := &RemoteRecoverySnapshot{
-				Runtime: string(runtime), SessionState: models.TaskSessionStateFailed,
-			}
-			require.NoError(t, validateRemoteRecoverySnapshotSession(snapshot))
-			require.True(t, remoteRecoveryNeedsStoppedAgentProof(snapshot))
-
-			instance := &ExecutorInstance{agentSessionAssociation: &agentctl.AgentSessionAssociation{
-				AgentStatus: agentProcessStatusRunning,
-			}}
-			require.Error(t, validateFailedRemoteRecoveryAgentProof(snapshot, instance),
-				"a live process cannot prove a failed session without delivery evidence")
-			instance.agentSessionAssociation.AgentStatus = agentProcessStatusStopped
-			require.NoError(t, validateFailedRemoteRecoveryAgentProof(snapshot, instance))
-
-			snapshot.RecoverySourcePresent = true
-			require.False(t, remoteRecoveryNeedsStoppedAgentProof(snapshot),
-				"the durable delivery path keeps its existing recovery requirements")
-		})
-	}
-}
-
-func TestFailedRecoveryWithoutDeliveryRejectsUnrelatedRuntime(t *testing.T) {
-	snapshot := &RemoteRecoverySnapshot{
-		Runtime: string(agentruntime.RuntimeSSH), SessionState: models.TaskSessionStateFailed,
-	}
-	require.Error(t, validateRemoteRecoverySnapshotSession(snapshot))
-}
-
-func TestValidateRemoteSessionAssociationRejectsStoppedIdentityConflicts(t *testing.T) {
-	instance := &ExecutorInstance{
-		InstanceID: "execution-stopped", SessionID: "session-stopped", RuntimeName: agentruntime.RuntimeRemoteDocker,
-		Metadata: map[string]interface{}{MetadataKeyRemoteDockerAgentctlInstanceID: "agentctl-stopped"},
-	}
-	for _, mutate := range []struct {
-		name string
-		edit func(*agentSessionAssociationAlias)
-	}{
-		{name: "instance", edit: func(a *agentSessionAssociationAlias) { a.InstanceID = "foreign" }},
-		{name: "session", edit: func(a *agentSessionAssociationAlias) { a.SessionID = "foreign" }},
-	} {
-		t.Run(mutate.name, func(t *testing.T) {
-			association := stoppedRemoteAssociation()
-			copy := agentSessionAssociationAlias{
-				InstanceID: association.InstanceID, SessionID: association.SessionID,
-				IncarnationID: association.IncarnationID, HarnessGeneration: association.HarnessGeneration,
-				NativeSessionID: association.NativeSessionID, AgentStatus: association.AgentStatus,
-			}
-			mutate.edit(&copy)
-			association.InstanceID, association.SessionID = copy.InstanceID, copy.SessionID
-			association.IncarnationID, association.HarnessGeneration = copy.IncarnationID, copy.HarnessGeneration
-			require.Error(t, validateRemoteSessionAssociation(instance, association, "agentctl-stopped"))
-		})
-	}
-	instance.RuntimeName = agentruntime.RuntimeSSH
-	require.Error(t, validateRemoteSessionAssociation(instance, stoppedRemoteAssociation(), "agentctl-stopped"),
-		"only retained Remote Docker and plugin runtimes may settle stopped evidence")
-}
-
-// agentSessionAssociationAlias keeps the mutation table explicit without
-// adding test-only methods to the agentctl wire type.
-type agentSessionAssociationAlias struct {
-	InstanceID        string
-	SessionID         string
-	IncarnationID     string
-	HarnessGeneration uint64
-	NativeSessionID   string
-	AgentStatus       string
-}
-
-func stoppedRemoteAssociation() *agentctl.AgentSessionAssociation {
-	return &agentctl.AgentSessionAssociation{
-		InstanceID: "agentctl-stopped", SessionID: "session-stopped",
-		IncarnationID: "incarnation-stopped", HarnessGeneration: 2,
-		AgentStatus: agentProcessStatusStopped,
-	}
-}
 
 type stoppedAgentDeliveryRepository struct {
 	recordingAgentDeliveryRepository
@@ -214,39 +102,18 @@ func TestRemoteRecoverySettlesStoppedRetainedAgent(t *testing.T) {
 	})
 }
 
-func TestRemoteRecoverySettlesRetainedTerminalOutcome(t *testing.T) {
-	for _, outcome := range []models.DeliverySubmissionState{
-		models.DeliverySubmissionFailed, models.DeliverySubmissionCompleted, models.DeliverySubmissionCancelled,
-	} {
-		t.Run(string(outcome), func(t *testing.T) {
-			runStoppedRemoteRecoveryScenario(t, stoppedRemoteRecoveryScenario{
-				runtime: agentruntime.RuntimeRemoteDocker, realDelivery: true, terminalOutcome: outcome,
-			})
-		})
-	}
-	t.Run("completed terminal uses the saved turn binding when its effect omits the turn", func(t *testing.T) {
-		runStoppedRemoteRecoveryScenario(t, stoppedRemoteRecoveryScenario{
-			runtime: agentruntime.RuntimeRemoteDocker, realDelivery: true,
-			terminalOutcome: models.DeliverySubmissionCompleted, terminalTurnIDMissing: true,
-		})
-	})
-}
-
-func TestRemoteRecoveryCreatesInterruptedNoticeWhenMetadataWasNotWritten(t *testing.T) {
-	runStoppedRemoteRecoveryScenario(t, stoppedRemoteRecoveryScenario{
-		runtime: agentruntime.RuntimeRemoteDocker, realDelivery: true, missingRecoveryNotice: true,
-	})
-}
-
 type stoppedRemoteRecoveryScenario struct {
-	runtime               agentruntime.Runtime
-	retryUnavailable      bool
-	changeResource        bool
-	realDelivery          bool
-	terminalOutcome       models.DeliverySubmissionState
-	terminalTurnIDMissing bool
-	missingRecoveryNotice bool
-	stopAfterCommit       bool
+	runtime                  agentruntime.Runtime
+	retryUnavailable         bool
+	changeResource           bool
+	realDelivery             bool
+	terminalOutcome          models.DeliverySubmissionState
+	terminalTurnIDMissing    bool
+	missingRecoveryNotice    bool
+	snapshotFailsAfterNotice bool
+	noOpenTurn               bool
+	omitTerminalSummary      bool
+	stopAfterCommit          bool
 }
 
 type stoppedRemoteSettlementBarrierWriter struct {
@@ -267,12 +134,13 @@ func (w *stoppedRemoteSettlementBarrierWriter) SettleStoppedRemoteExecutionIfOwn
 	expectedSessionState models.TaskSessionState,
 	interruptedTurnID string,
 	terminalOutcome models.DeliverySubmissionState,
+	workflowOutcome *models.AgentDeliveryEffect,
 	owner models.RemoteRecoveryOwnerLockIDs,
 	validateOwner func(context.Context) error,
 ) (bool, time.Time, error) {
 	changed, updatedAt, err := w.Repository.SettleStoppedRemoteExecutionIfOwnerCurrent(
 		ctx, sessionID, expectedExecID, expectedUpdatedAt, expectedSessionState,
-		interruptedTurnID, terminalOutcome, owner, validateOwner,
+		interruptedTurnID, terminalOutcome, workflowOutcome, owner, validateOwner,
 	)
 	if err != nil {
 		return changed, updatedAt, err
@@ -291,10 +159,12 @@ func TestStopClaimsStoppedRemoteSettlementAfterSQLCommit(t *testing.T) {
 
 type stoppedRemoteRepositorySnapshotProvider struct {
 	*task08RemoteSnapshotProvider
-	repo           *tasksqlite.Repository
-	mu             sync.Mutex
-	cachedRecovery models.AgentDeliveryRecovery
-	cached         bool
+	repo             *tasksqlite.Repository
+	mu               sync.Mutex
+	cachedRecovery   models.AgentDeliveryRecovery
+	cached           bool
+	failAfterNotice  bool
+	failedNoticeRead bool
 }
 
 func (p *stoppedRemoteRepositorySnapshotProvider) GetRemoteRecoverySnapshot(
@@ -323,7 +193,14 @@ func (p *stoppedRemoteRepositorySnapshotProvider) GetRemoteRecoverySnapshot(
 	p.mu.Lock()
 	p.cachedRecovery = recovery
 	p.cached = true
+	failNext := p.failAfterNotice && !p.failedNoticeRead
+	if failNext {
+		p.failedNoticeRead = true
+	}
 	p.mu.Unlock()
+	if failNext {
+		return nil, errors.New("injected snapshot failure after persisting recovery notice")
+	}
 	applyStoppedRemoteRecoveryNotice(snapshot, recovery)
 	return snapshot, nil
 }
@@ -397,10 +274,14 @@ func runStoppedRemoteRecoveryScenario(t *testing.T, scenario stoppedRemoteRecove
 	row, err := repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	require.NoError(t, err)
 	startedAt := time.Now().UTC().Add(-time.Minute)
-	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+	turn := &models.Turn{
 		ID: "turn-stopped-recovery", TaskID: taskID, TaskSessionID: sessionID,
 		StartedAt: startedAt, CreatedAt: startedAt, UpdatedAt: startedAt,
-	}))
+	}
+	if scenario.noOpenTurn {
+		turn.CompletedAt = &startedAt
+	}
+	require.NoError(t, repo.CreateTurn(ctx, turn))
 	require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
 		SessionID: sessionID, IncarnationID: incarnationID, Generation: 2,
 		NativeSessionID: "native-stopped-recovery", CreationReason: "initial",
@@ -499,6 +380,11 @@ func runStoppedRemoteRecoveryScenario(t *testing.T, scenario stoppedRemoteRecove
 			TerminalSequence: peerSubmission.TerminalSequence,
 		}}, SubmissionCount: 1,
 	}
+	if scenario.omitTerminalSummary {
+		status.Submissions = nil
+		status.SubmissionCount = 0
+		status.Stream.Acknowledged = status.Stream.HighWater
+	}
 	retainedEvent := journal.Event{
 		SessionID: sessionID, IncarnationID: incarnationID, HarnessGeneration: 2,
 		StreamID: streamID, Sequence: 1, SubmissionID: peerSubmission.ID,
@@ -528,6 +414,8 @@ func runStoppedRemoteRecoveryScenario(t *testing.T, scenario stoppedRemoteRecove
 			}{Events: replay, Stream: stream})
 		case "/api/v1/agent/submissions":
 			_ = json.NewEncoder(w).Encode([]journal.Submission{peerSubmission})
+		case "/api/v1/agent/submissions/" + peerSubmission.ID:
+			_ = json.NewEncoder(w).Encode(peerSubmission)
 		case "/api/v1/stop":
 			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 		default:
@@ -546,19 +434,25 @@ func runStoppedRemoteRecoveryScenario(t *testing.T, scenario stoppedRemoteRecove
 		backendName = executor.NamePluginRemote
 	}
 	backendCalls := 0
+	workerErrors := make(chan error, 4)
 	backend := &task08DetailedRecoveryBackend{
 		MockExecutor: &MockExecutor{name: backendName},
 		recoveryResult: func(records []*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
 			backendCalls++
 			if len(records) != 1 || records[0].AgentExecutionID != executionID {
-				t.Fatalf("recovery candidates = %+v", records)
+				validationErr := fmt.Errorf("recovery candidates = %+v", records)
+				workerErrors <- validationErr
+				return nil, nil, validationErr
 			}
 			if scenario.retryUnavailable && backendCalls == 1 {
 				return nil, nil, errors.New("provider inspection unavailable")
 			}
 			if runtime == agentruntime.RuntimePluginRemote && (scenario.retryUnavailable || scenario.changeResource) {
 				current, readErr := repo.GetExecutorRunningBySessionID(ctx, sessionID)
-				require.NoError(t, readErr)
+				if readErr != nil {
+					workerErrors <- readErr
+					return nil, nil, readErr
+				}
 				resource := "resource-stopped-recovery"
 				if scenario.changeResource {
 					resource = "resource-foreign"
@@ -600,7 +494,9 @@ func runStoppedRemoteRecoveryScenario(t *testing.T, scenario stoppedRemoteRecove
 	}
 	provider := &task08RemoteSnapshotProvider{snapshots: map[string]*RemoteRecoverySnapshot{sessionID: snapshot}}
 	if scenario.missingRecoveryNotice {
-		manager.workspaceInfoProvider = &stoppedRemoteRepositorySnapshotProvider{task08RemoteSnapshotProvider: provider, repo: repo}
+		manager.workspaceInfoProvider = &stoppedRemoteRepositorySnapshotProvider{
+			task08RemoteSnapshotProvider: provider, repo: repo, failAfterNotice: scenario.snapshotFailsAfterNotice,
+		}
 	} else {
 		manager.workspaceInfoProvider = provider
 	}
@@ -617,21 +513,24 @@ func runStoppedRemoteRecoveryScenario(t *testing.T, scenario stoppedRemoteRecove
 		t.Cleanup(settlementBarrier.unblock)
 	}
 	var stateEventCount int
+	publicationErrors := make(chan error, 4)
 	eventBus.OnPublish = func(subject string, _ *bus.Event) {
 		if subject == events.TaskSessionStateChanged {
 			stateEventCount++
-			require.NotNil(t, client)
-			require.True(t, client.IsClosed(), "the stopped attempt transport must close before state publication")
-			require.NoError(t, manager.recoveryGuard.CheckLaunchAllowed(sessionID),
-				"the matching recovery guard must be released before state publication")
+			if client == nil || client.IsClosed() {
+				publicationErrors <- errors.New("committed waiting state published after the stopped transport closed")
+			}
+			if !errors.Is(manager.recoveryGuard.CheckLaunchAllowed(sessionID), ErrSessionRecoveryGuarded) {
+				publicationErrors <- errors.New("committed waiting state published after releasing the recovery guard")
+			}
 		}
 	}
 
 	if scenario.stopAfterCommit {
 		retryDone := make(chan struct{})
 		go func() {
+			defer close(retryDone)
 			manager.retryRemoteRecovery(ctx, entry)
-			close(retryDone)
 		}()
 		select {
 		case <-settlementBarrier.committed:
@@ -661,7 +560,22 @@ func runStoppedRemoteRecoveryScenario(t *testing.T, scenario stoppedRemoteRecove
 		case <-time.After(5 * time.Second):
 			t.Fatal("stopped recovery did not yield its pending entry to Stop")
 		}
-		require.NoError(t, <-stopDone, "Stop must take over the exact committed stopped owner")
+		select {
+		case err := <-stopDone:
+			require.NoError(t, err, "Stop must take over the exact committed stopped owner")
+		case <-time.After(5 * time.Second):
+			t.Fatal("Stop did not return after taking over the committed stopped owner")
+		}
+		select {
+		case err := <-workerErrors:
+			require.NoError(t, err)
+		default:
+		}
+		select {
+		case err := <-publicationErrors:
+			require.NoError(t, err)
+		default:
+		}
 		require.Nil(t, manager.pendingRemoteRecoveryForSession(sessionID))
 		require.NoError(t, manager.recoveryGuard.CheckLaunchAllowed(sessionID))
 		current, readErr = repo.GetExecutorRunningBySessionID(ctx, sessionID)
@@ -677,9 +591,20 @@ func runStoppedRemoteRecoveryScenario(t *testing.T, scenario stoppedRemoteRecove
 	}
 
 	manager.retryRemoteRecovery(ctx, entry)
+	select {
+	case err := <-workerErrors:
+		require.NoError(t, err)
+	default:
+	}
 	if scenario.retryUnavailable {
 		require.Same(t, entry, manager.pendingRemoteRecoveryForSession(sessionID),
 			"provider unavailability must retain the same pending owner for periodic retry")
+		require.ErrorIs(t, manager.recoveryGuard.CheckLaunchAllowed(sessionID), ErrSessionRecoveryGuarded)
+		manager.retryRemoteRecovery(ctx, entry)
+	}
+	if scenario.snapshotFailsAfterNotice {
+		require.Same(t, entry, manager.pendingRemoteRecoveryForSession(sessionID),
+			"a snapshot read failure after the exact notice must retain the recovery guard")
 		require.ErrorIs(t, manager.recoveryGuard.CheckLaunchAllowed(sessionID), ErrSessionRecoveryGuarded)
 		manager.retryRemoteRecovery(ctx, entry)
 	}
@@ -696,7 +621,13 @@ func runStoppedRemoteRecoveryScenario(t *testing.T, scenario stoppedRemoteRecove
 		require.Empty(t, delivery.projected, "a changed plugin resource must be fenced before replay")
 		return
 	}
-	require.Nil(t, manager.pendingRemoteRecoveryForSession(sessionID))
+	if pending := manager.pendingRemoteRecoveryForSession(sessionID); pending != nil {
+		state, stateErr := repo.GetTaskSession(ctx, sessionID)
+		submission, submissionErr := repo.GetAgentDeliverySubmission(ctx, submissionID)
+		cursor, cursorErr := repo.GetAgentDeliveryCursor(ctx, streamID)
+		t.Fatalf("stopped recovery remains pending: snapshot=%+v state=%+v/%v submission=%+v/%v cursor=%+v/%v",
+			pending.snapshot, state, stateErr, submission, submissionErr, cursor, cursorErr)
+	}
 	require.NoError(t, manager.recoveryGuard.CheckLaunchAllowed(sessionID))
 	current, err := repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	require.NoError(t, err)
@@ -705,54 +636,23 @@ func runStoppedRemoteRecoveryScenario(t *testing.T, scenario stoppedRemoteRecove
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	require.NoError(t, err)
 	require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
-	turn, err := repo.GetTurn(ctx, "turn-stopped-recovery")
+	turn, err = repo.GetTurn(ctx, "turn-stopped-recovery")
 	require.NoError(t, err)
 	require.NotNil(t, turn.CompletedAt)
 	if scenario.realDelivery {
-		submission, readErr := repo.GetAgentDeliverySubmission(ctx, submissionID)
-		require.NoError(t, readErr)
-		if scenario.terminalOutcome != "" {
-			require.True(t, turn.CompletedAt.After(turn.StartedAt), "a retained terminal closes the original turn as completed")
-			require.Equal(t, scenario.terminalOutcome, submission.State)
-			require.Equal(t, string(scenario.terminalOutcome), submission.Outcome)
-			workflowOutcome, readErr := repo.GetAgentDeliveryEffect(ctx, "workflow.on_turn_complete:turn-stopped-recovery")
-			require.NoError(t, readErr)
-			require.NotNil(t, workflowOutcome)
-			require.Equal(t, models.DeliveryWorkflowOutcomeStoppedRecovery, workflowOutcome.Outcome)
-			require.Zero(t, submission.TerminalSequence, "the existing settlement consumer owns terminal-sequence acknowledgement")
-			_, hasRecovery := models.LoadAgentDeliveryRecovery(session.Metadata)
-			require.False(t, hasRecovery, "a proven terminal outcome must not create an interruption notice")
-		} else {
-			require.Equal(t, turn.StartedAt, *turn.CompletedAt, "unknown outcome closes only the original turn as interrupted")
-			require.Equal(t, models.DeliverySubmissionInterruptedUnknown, submission.State)
-			recovery, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
-			require.True(t, exists, "the exact interrupted submission must establish its recovery notice")
-			require.Equal(t, models.AgentDeliveryRecoveryUncertain, recovery.Phase)
-			require.Equal(t, submissionID, recovery.SubmissionID)
-			require.Equal(t, uint64(7), recovery.PromptGeneration)
-			block, readErr := repo.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, 2)
-			require.NoError(t, readErr)
-			require.NotNil(t, block)
-			require.Equal(t, "unknown_prompt_outcome", block.Reason)
-			require.Equal(t, submissionID, block.DeliverySubmissionID)
-			binding, exists := models.LoadAgentDeliveryPromptTurnBinding(row.Metadata)
-			require.True(t, exists)
-			require.Equal(t, "turn-stopped-recovery", binding.TurnID)
-		}
-		cursor, readErr := repo.GetAgentDeliveryCursor(ctx, streamID)
-		require.NoError(t, readErr)
-		require.Equal(t, int64(1), cursor.ProjectedSequence)
+		assertStoppedRemoteRetainedDelivery(t, ctx, repo, scenario, sessionID, submissionID, streamID, incarnationID, row, session, turn)
 	} else {
-		require.Equal(t, turn.StartedAt, *turn.CompletedAt, "unknown outcome closes only the original turn as interrupted")
-		require.Equal(t, models.DeliverySubmissionInterruptedUnknown, delivery.submission.State)
-		require.Equal(t, 1, delivery.transitioned, "the exact dispatch is reconciled once")
-		require.Len(t, delivery.projected, 1)
-		require.Equal(t, int64(1), delivery.cursor.ProjectedSequence)
+		assertStoppedRemoteLegacyDelivery(t, delivery, turn)
 	}
 	queuedAfter, err := queue.ListBySession(ctx, sessionID)
 	require.NoError(t, err)
 	require.Equal(t, []string{queued.ID}, queuedMessageIDs(queuedAfter), "stopped settlement leaves the queued instruction for Resume")
 	require.Equal(t, 1, stateEventCount)
+	select {
+	case err := <-publicationErrors:
+		require.NoError(t, err)
+	default:
+	}
 	eventBus.mu.Lock()
 	published := append([]*bus.Event(nil), eventBus.PublishedEvents...)
 	eventBus.mu.Unlock()
@@ -760,6 +660,93 @@ func runStoppedRemoteRecoveryScenario(t *testing.T, scenario stoppedRemoteRecove
 		require.NotEqual(t, events.AgentReady, event.Type, "stopped settlement must not publish readiness")
 		require.NotEqual(t, events.AgentBootReady, event.Type, "stopped settlement must not publish recovered availability")
 	}
+}
+
+func assertStoppedRemoteRetainedDelivery(
+	t *testing.T,
+	ctx context.Context,
+	repo *tasksqlite.Repository,
+	scenario stoppedRemoteRecoveryScenario,
+	sessionID, submissionID, streamID, incarnationID string,
+	row *models.ExecutorRunning,
+	session *models.TaskSession,
+	turn *models.Turn,
+) {
+	t.Helper()
+	submission, err := repo.GetAgentDeliverySubmission(ctx, submissionID)
+	require.NoError(t, err)
+	if scenario.terminalOutcome == "" {
+		assertStoppedRemoteInterruptedDelivery(t, ctx, repo, sessionID, submissionID, incarnationID, row, session, submission, turn)
+	} else {
+		assertStoppedRemoteTerminalDelivery(t, ctx, repo, scenario, session, submission, turn)
+	}
+	cursor, err := repo.GetAgentDeliveryCursor(ctx, streamID)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), cursor.ProjectedSequence)
+}
+
+func assertStoppedRemoteInterruptedDelivery(
+	t *testing.T,
+	ctx context.Context,
+	repo *tasksqlite.Repository,
+	sessionID, submissionID, incarnationID string,
+	row *models.ExecutorRunning,
+	session *models.TaskSession,
+	submission *models.AgentDeliverySubmission,
+	turn *models.Turn,
+) {
+	t.Helper()
+	require.Equal(t, turn.StartedAt, *turn.CompletedAt, "unknown outcome closes only the original turn as interrupted")
+	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, submission.State)
+	recovery, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
+	require.True(t, exists, "the exact interrupted submission must establish its recovery notice")
+	require.Equal(t, models.AgentDeliveryRecoveryUncertain, recovery.Phase)
+	require.Equal(t, submissionID, recovery.SubmissionID)
+	require.Equal(t, uint64(7), recovery.PromptGeneration)
+	block, err := repo.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, 2)
+	require.NoError(t, err)
+	require.NotNil(t, block)
+	require.Equal(t, "unknown_prompt_outcome", block.Reason)
+	require.Equal(t, submissionID, block.DeliverySubmissionID)
+	binding, exists := models.LoadAgentDeliveryPromptTurnBinding(row.Metadata)
+	require.True(t, exists)
+	require.Equal(t, "turn-stopped-recovery", binding.TurnID)
+}
+
+func assertStoppedRemoteTerminalDelivery(
+	t *testing.T,
+	ctx context.Context,
+	repo *tasksqlite.Repository,
+	scenario stoppedRemoteRecoveryScenario,
+	session *models.TaskSession,
+	submission *models.AgentDeliverySubmission,
+	turn *models.Turn,
+) {
+	t.Helper()
+	if scenario.noOpenTurn {
+		require.Equal(t, turn.StartedAt, *turn.CompletedAt,
+			"a previously closed turn remains unchanged while its terminal workflow effect is recorded")
+	} else {
+		require.True(t, turn.CompletedAt.After(turn.StartedAt), "a retained terminal closes the original turn as completed")
+	}
+	require.Equal(t, scenario.terminalOutcome, submission.State)
+	require.Equal(t, string(scenario.terminalOutcome), submission.Outcome)
+	workflowOutcome, err := repo.GetAgentDeliveryEffect(ctx, "workflow.on_turn_complete:turn-stopped-recovery")
+	require.NoError(t, err)
+	require.NotNil(t, workflowOutcome)
+	require.Equal(t, models.DeliveryWorkflowOutcomeStoppedRecovery, workflowOutcome.Outcome)
+	require.Zero(t, submission.TerminalSequence, "the existing settlement consumer owns terminal-sequence acknowledgement")
+	_, hasRecovery := models.LoadAgentDeliveryRecovery(session.Metadata)
+	require.False(t, hasRecovery, "a proven terminal outcome must not create an interruption notice")
+}
+
+func assertStoppedRemoteLegacyDelivery(t *testing.T, delivery *stoppedAgentDeliveryRepository, turn *models.Turn) {
+	t.Helper()
+	require.Equal(t, turn.StartedAt, *turn.CompletedAt, "unknown outcome closes only the original turn as interrupted")
+	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, delivery.submission.State)
+	require.Equal(t, 1, delivery.transitioned, "the exact dispatch is reconciled once")
+	require.Len(t, delivery.projected, 1)
+	require.Equal(t, int64(1), delivery.cursor.ProjectedSequence)
 }
 
 func queuedMessageIDs(messages []messagequeue.QueuedMessage) []string {

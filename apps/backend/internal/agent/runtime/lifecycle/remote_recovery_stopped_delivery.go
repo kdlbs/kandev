@@ -72,10 +72,26 @@ func stoppedRemoteTerminalTurnBinding(
 	if !exists || binding.SubmissionID != terminal.SubmissionID {
 		return terminalTurnID, nil
 	}
+	if binding.TurnID == "" || binding.TaskID != execution.TaskID || binding.SessionID != execution.SessionID ||
+		binding.ExecutionID != execution.ID || binding.IncarnationID != execution.DeliveryIncarnationID ||
+		binding.HarnessGeneration != execution.DeliveryHarnessGeneration || binding.StreamID != execution.DeliveryStreamID {
+		return "", fmt.Errorf("%w: terminal submission does not match its saved owner binding", ErrDurableAdoptionIdentityMismatch)
+	}
 	if terminalTurnID != "" && terminalTurnID != binding.TurnID {
 		return "", fmt.Errorf("%w: terminal event changed the original prompt turn", ErrDurableAdoptionIdentityMismatch)
 	}
 	return binding.TurnID, nil
+}
+
+func stoppedRemoteTerminalWorkflowTurnID(
+	execution *AgentExecution,
+	terminal *models.AgentDeliveryEffect,
+	openTurnID string,
+) (string, error) {
+	if openTurnID != "" {
+		return openTurnID, nil
+	}
+	return stoppedRemoteTerminalTurnBinding(execution, terminal)
 }
 
 func stoppedRemoteInterruptedOpenTurn(
@@ -84,6 +100,9 @@ func stoppedRemoteInterruptedOpenTurn(
 	execution *AgentExecution,
 	delivery *stoppedRemoteDeliveryReplay,
 ) (string, models.DeliverySubmissionState, error) {
+	if execution.DeliveryMode == DurableDeliveryLegacy {
+		return turn.ID, "", nil
+	}
 	if execution.DeliveryMode == DurableDeliveryV1 && !snapshot.RecoverySourcePresent {
 		return "", "", fmt.Errorf("%w: stopped remote turn has no pinned interruption source", ErrDurableAdoptionBlocked)
 	}
@@ -129,7 +148,46 @@ func (m *Manager) stoppedRemoteTerminalEvidence(
 		return m.stoppedRemoteTerminalEffectForIdentity(ctx, submission, submission.TerminalStreamID, submission.TerminalSequence,
 			submission.State)
 	}
+	effect, found, err := m.stoppedRemoteRetainedTerminalEffect(ctx, submission)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return effect, nil
+	}
 	return m.stoppedRemoteTerminalPeerEffect(ctx, execution, ri, peer, submission)
+}
+
+func (m *Manager) stoppedRemoteRetainedTerminalEffect(
+	ctx context.Context,
+	submission *models.AgentDeliverySubmission,
+) (*models.AgentDeliveryEffect, bool, error) {
+	if reader, ok := m.streamManager.deliveryRepository().(interface {
+		GetAgentDeliveryTerminalEffectBySubmission(context.Context, string) (*models.AgentDeliveryEffect, error)
+	}); ok {
+		effect, err := reader.GetAgentDeliveryTerminalEffectBySubmission(ctx, submission.ID)
+		if err == nil {
+			if !stoppedRemoteTerminalEffectMatchesSubmission(effect, submission) {
+				return nil, false, fmt.Errorf("%w: stopped remote retained SQL terminal identity changed", ErrDurableAdoptionIdentityMismatch)
+			}
+			resolved, err := m.stoppedRemoteTerminalEffectForIdentity(ctx, submission, effect.StreamID, effect.Sequence, submission.State)
+			return resolved, true, err
+		}
+		if errors.Is(err, repoerrors.ErrAgentDeliveryEffectNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("%w: read stopped remote terminal effect by submission: %v", ErrDurableAdoptionEvidenceUnavailable, err)
+	}
+	return nil, false, nil
+}
+
+func stoppedRemoteTerminalEffectMatchesSubmission(
+	effect *models.AgentDeliveryEffect,
+	submission *models.AgentDeliverySubmission,
+) bool {
+	return effect != nil && effect.SubmissionID == submission.ID && effect.StreamID != "" && effect.Sequence > 0 &&
+		effect.SessionID == submission.SessionID && effect.IncarnationID == submission.IncarnationID &&
+		effect.HarnessGeneration == submission.HarnessGeneration && effect.Outcome == string(submission.State)
 }
 
 func (m *Manager) readStoppedRemoteTerminalSubmission(
@@ -384,6 +442,11 @@ func stoppedRemoteOwnerMatchesNewInterruptionNotice(
 		current.RecoveryRevision <= previous.RecoveryRevision {
 		return false
 	}
+	base := remoteRecoverySnapshotWithNotice(previous, current)
+	return sameRemoteRecoveryOwner(&base, current, record) && validateRemoteRecoverySnapshot(current, record) == nil
+}
+
+func remoteRecoverySnapshotWithNotice(previous, current *RemoteRecoverySnapshot) RemoteRecoverySnapshot {
 	base := *previous
 	base.RecoverySourcePresent = current.RecoverySourcePresent
 	base.RecoverableDeliveryPending = current.RecoverableDeliveryPending
@@ -393,20 +456,41 @@ func stoppedRemoteOwnerMatchesNewInterruptionNotice(
 	base.RecoveryIncarnationID = current.RecoveryIncarnationID
 	base.RecoveryHarnessGeneration = current.RecoveryHarnessGeneration
 	base.RecoveryRevision = current.RecoveryRevision
+	return base
+}
+
+func stoppedRemoteOwnerMatchesSavedInterruptionNotice(
+	previous, current *RemoteRecoverySnapshot,
+	record *models.ExecutorRunning,
+) bool {
+	if !stoppedRemoteNoticeRevisionMatches(previous, current, record) ||
+		!stoppedRemoteNoticeMatchesSavedBinding(current, record) {
+		return false
+	}
+	base := remoteRecoverySnapshotWithNotice(previous, current)
 	return sameRemoteRecoveryOwner(&base, current, record) && validateRemoteRecoverySnapshot(current, record) == nil
 }
 
-func (m *Manager) recordStoppedRemoteTerminalWorkflowOutcome(
-	ctx context.Context,
-	entry *remoteRecoveryRetry,
-	terminal *models.AgentDeliveryEffect,
-	turnID string,
-) error {
-	workflow, taskID, err := m.stoppedRemoteWorkflowEffect(ctx, entry, terminal, turnID)
-	if err != nil {
-		return err
+func stoppedRemoteNoticeRevisionMatches(
+	previous, current *RemoteRecoverySnapshot,
+	record *models.ExecutorRunning,
+) bool {
+	return previous != nil && current != nil && record != nil && !previous.RecoverySourcePresent &&
+		current.RecoverySourcePresent && current.RecoverableDeliveryPending &&
+		current.RecoveryExecutionID == record.AgentExecutionID &&
+		current.RecoveryRevision > previous.RecoveryRevision
+}
+
+func stoppedRemoteNoticeMatchesSavedBinding(current *RemoteRecoverySnapshot, record *models.ExecutorRunning) bool {
+	if current == nil || record == nil {
+		return false
 	}
-	return persistStoppedRemoteWorkflowOutcome(ctx, m.streamManager.deliveryRepository(), taskID, workflow)
+	binding, exists := models.LoadAgentDeliveryPromptTurnBinding(record.Metadata)
+	return exists && binding.SubmissionID != "" && binding.TurnID != "" && binding.TaskID == record.TaskID &&
+		binding.SessionID == record.SessionID && binding.ExecutionID == record.AgentExecutionID &&
+		binding.StreamID == current.RecoveryStreamID && binding.SubmissionID == current.RecoverySubmissionID &&
+		binding.IncarnationID == current.RecoveryIncarnationID &&
+		int64(binding.HarnessGeneration) == current.RecoveryHarnessGeneration
 }
 
 func (m *Manager) stoppedRemoteWorkflowEffect(
@@ -481,76 +565,6 @@ func (m *Manager) stoppedRemoteTerminalTask(
 		return nil, fmt.Errorf("%w: read stopped remote task for terminal settlement: %v", ErrDurableAdoptionEvidenceUnavailable, err)
 	}
 	return task, nil
-}
-
-func persistStoppedRemoteWorkflowOutcome(
-	ctx context.Context,
-	repository interface{},
-	taskID string,
-	workflow *models.AgentDeliveryEffect,
-) error {
-	reader, ok := repository.(agentDeliveryEffectReader)
-	if !ok {
-		return fmt.Errorf("%w: stopped remote workflow outcome reader is unavailable", ErrDurableAdoptionEvidenceUnavailable)
-	}
-	stored, err := stoppedRemoteWorkflowOutcome(ctx, reader, workflow.EffectKey)
-	if err != nil {
-		return fmt.Errorf("read stopped remote workflow outcome: %w", err)
-	}
-	if stored != nil {
-		return validateStoppedRemoteWorkflowOutcome(stored, workflow)
-	}
-	recorder, ok := repository.(interface {
-		RecordAgentDeliveryWorkflowOutcome(context.Context, string, *models.AgentDeliveryEffect) (bool, error)
-	})
-	if !ok {
-		return fmt.Errorf("%w: stopped remote workflow outcome writer is unavailable", ErrDurableAdoptionEvidenceUnavailable)
-	}
-	committed, err := recorder.RecordAgentDeliveryWorkflowOutcome(ctx, taskID, workflow)
-	if err != nil {
-		if verifyStoppedRemoteWorkflowOutcome(ctx, reader, workflow) == nil {
-			return nil
-		}
-		return fmt.Errorf("record stopped remote terminal workflow outcome: %w", err)
-	}
-	if committed {
-		return nil
-	}
-	return verifyStoppedRemoteWorkflowOutcome(ctx, reader, workflow)
-}
-
-func verifyStoppedRemoteWorkflowOutcome(
-	ctx context.Context,
-	reader agentDeliveryEffectReader,
-	workflow *models.AgentDeliveryEffect,
-) error {
-	stored, err := stoppedRemoteWorkflowOutcome(ctx, reader, workflow.EffectKey)
-	if err != nil {
-		return err
-	}
-	return validateStoppedRemoteWorkflowOutcome(stored, workflow)
-}
-
-func validateStoppedRemoteWorkflowOutcome(
-	stored *models.AgentDeliveryEffect,
-	workflow *models.AgentDeliveryEffect,
-) error {
-	if stoppedRemoteWorkflowOutcomeMatches(stored, workflow) {
-		return nil
-	}
-	return fmt.Errorf("%w: stopped remote workflow outcome conflicts with the retained terminal", ErrDurableAdoptionBlocked)
-}
-
-func stoppedRemoteWorkflowOutcome(
-	ctx context.Context,
-	reader agentDeliveryEffectReader,
-	effectKey string,
-) (*models.AgentDeliveryEffect, error) {
-	effect, err := reader.GetAgentDeliveryEffect(ctx, effectKey)
-	if errors.Is(err, repoerrors.ErrAgentDeliveryEffectNotFound) {
-		return nil, nil
-	}
-	return effect, err
 }
 
 func stoppedRemoteWorkflowOutcomeMatches(existing, expected *models.AgentDeliveryEffect) bool {

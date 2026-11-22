@@ -173,6 +173,109 @@ func (m *Manager) restoreRecoveredDelivery(
 	return m.restoreRecoveredSubmission(ctx, execution, status, delivery, ri.Client)
 }
 
+func (m *Manager) restoreStoppedRemoteDelivery(
+	ctx context.Context,
+	execution *AgentExecution,
+	snapshot *RemoteRecoverySnapshot,
+	ri *ExecutorInstance,
+) error {
+	if err := validateStoppedRemoteDeliveryOwner(execution, ri); err != nil {
+		return err
+	}
+	if ri.DeliveryStatus == nil {
+		if !ri.DeliveryLegacyEvidence {
+			return nil
+		}
+		return m.restoreLegacyDelivery(ctx, execution)
+	}
+	status := ri.DeliveryStatus
+	delivery := m.streamManager.deliveryRepository()
+	generation, cursor, err := restoreStoppedRemoteDeliveryCursor(ctx, execution, ri, delivery, status)
+	if err != nil {
+		return err
+	}
+	applyRecoveredDeliveryIdentity(execution, status, generation, cursor)
+	if execution.ACPSessionID == "" {
+		execution.ACPSessionID = generation.NativeSessionID
+	}
+	return bindStoppedRemoteDeliverySubmission(ctx, execution, snapshot, delivery)
+}
+
+func validateStoppedRemoteDeliveryOwner(execution *AgentExecution, ri *ExecutorInstance) error {
+	if ri == nil || execution == nil {
+		return fmt.Errorf("%w: stopped remote delivery owner is incomplete", ErrDurableAdoptionBlocked)
+	}
+	if ri.DeliveryRecoveryError != nil {
+		return fmt.Errorf("%w: %w: %v", ErrDurableAdoptionBlocked, ErrDurableAdoptionEvidenceUnavailable, ri.DeliveryRecoveryError)
+	}
+	return nil
+}
+
+func restoreStoppedRemoteDeliveryCursor(
+	ctx context.Context,
+	execution *AgentExecution,
+	ri *ExecutorInstance,
+	delivery AgentDeliveryRepository,
+	status *agentctl.DeliveryStatus,
+) (*models.HarnessSessionGeneration, uint64, error) {
+	if err := validateRecoveredDeliveryStatus(execution, status); err != nil {
+		return nil, 0, err
+	}
+	generation, err := loadRecoveredHarnessGeneration(ctx, delivery, execution.SessionID, status.IncarnationID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := validateRecoveredHarnessGeneration(execution, ri, status, generation); err != nil {
+		return nil, 0, err
+	}
+	if err := validateRecoveredStream(status); err != nil {
+		return nil, 0, err
+	}
+	cursor, err := adoptionReplayCursor(ctx, delivery, status.StreamID, status.Stream)
+	if err != nil {
+		return nil, 0, fmt.Errorf("%w: %w: %v", ErrDurableAdoptionBlocked, ErrDurableAdoptionEvidenceUnavailable, err)
+	}
+	if err := validateRecoveredCursor(cursor, status.Stream); err != nil {
+		return nil, 0, err
+	}
+	return generation, cursor, nil
+}
+
+func bindStoppedRemoteDeliverySubmission(
+	ctx context.Context,
+	execution *AgentExecution,
+	snapshot *RemoteRecoverySnapshot,
+	delivery AgentDeliveryRepository,
+) error {
+	submissionID, err := stoppedRemoteTerminalSubmissionID(snapshot, execution)
+	if err != nil {
+		return err
+	}
+	active, err := activeBackendSubmissions(ctx, delivery, execution.SessionID)
+	if err != nil {
+		return err
+	}
+	if len(active) > 1 {
+		return fmt.Errorf("%w: stopped remote session has multiple unresolved submissions", ErrDurableAdoptionBlocked)
+	}
+	if len(active) == 1 {
+		submission := active[0]
+		if submission == nil || submission.ID == "" || submission.SessionID != execution.SessionID ||
+			submission.IncarnationID != execution.DeliveryIncarnationID ||
+			submission.HarnessGeneration != int64(execution.DeliveryHarnessGeneration) || submission.PayloadHash == "" {
+			return fmt.Errorf("%w: stopped remote SQL submission identity is incomplete", ErrDurableAdoptionIdentityMismatch)
+		}
+		if submissionID != "" && submissionID != submission.ID {
+			return fmt.Errorf("%w: stopped remote SQL submission changed from its saved binding", ErrDurableAdoptionIdentityMismatch)
+		}
+		submissionID = submission.ID
+	}
+	if submissionID != "" {
+		execution.setDeliverySubmissionID(submissionID)
+	}
+	return nil
+}
+
 func validateRecoveredDeliveryStatus(execution *AgentExecution, status *agentctl.DeliveryStatus) error {
 	if status == nil || !status.Durable || !journal.SupportsDeliveryVersion(status.Version) {
 		return fmt.Errorf("%w: peer did not advertise compatible retained storage", ErrDurableAdoptionBlocked)

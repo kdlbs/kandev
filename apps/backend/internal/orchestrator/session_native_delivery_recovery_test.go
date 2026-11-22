@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"sync/atomic"
@@ -145,6 +146,8 @@ func TestNativeResumeAfterLateRecoveryNoticePreservesConversationWithoutPrompt(t
 	require.NoError(t, err)
 	_, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
 	require.False(t, exists, "the crashed backend had not persisted a recovery notice")
+	_, err = repo.GetOpenSessionRecoveryBlock(ctx, session.ID, session.QueueIncarnationID, 1)
+	require.ErrorIs(t, err, sql.ErrNoRows, "the crashed backend had not persisted a Resume block")
 
 	recovery := models.AgentDeliveryRecovery{
 		Phase: models.AgentDeliveryRecoveryUncertain, Revision: 1, PromptGeneration: 1,
@@ -514,7 +517,9 @@ func nativeResumeFixtureWithRecoveryMetadata(t *testing.T, reason string, failLa
 		ConsumerReference: "agent_delivery", DeliverySubmissionID: submission.ID,
 		ExpectedGeneration: submission.HarnessGeneration, DeliveryStreamID: "native-resume-stream",
 	}
-	require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, block))
+	if seedRecoveryMetadata {
+		require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, block))
+	}
 	if seedRecoveryMetadata {
 		seedNativeResumeDeliveryMetadata(t, repo, session, block, submission, now)
 	}

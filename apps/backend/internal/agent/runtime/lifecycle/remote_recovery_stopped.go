@@ -42,7 +42,8 @@ func (m *Manager) settleStoppedRemoteInstance(
 	}
 	stateChanged, updatedAt, err := settlement.writer.SettleStoppedRemoteExecutionIfOwnerCurrent(
 		ctx, entry.record.SessionID, settlement.attemptRecord.AgentExecutionID, settlement.attemptRecord.UpdatedAt,
-		snapshot.SessionState, settlement.turnID, settlement.terminalOutcome, remoteRecoveryOwnerLockIDs(snapshot),
+		snapshot.SessionState, settlement.turnID, settlement.terminalOutcome, settlement.workflowOutcome,
+		remoteRecoveryOwnerLockIDs(snapshot),
 		func(ownerCtx context.Context) error {
 			return m.validateStoppedRemoteSettlementOwner(ownerCtx, entry)
 		},
@@ -50,13 +51,13 @@ func (m *Manager) settleStoppedRemoteInstance(
 	if err != nil {
 		return fmt.Errorf("settle stopped remote execution: %w", err)
 	}
-	m.discardRemoteRecoveryInstance(ri)
-	if !m.completeStoppedRemoteRecovery(entry, ctx) {
-		return errRemoteRecoveryFenced
-	}
 	if stateChanged {
 		m.publishStoppedRemoteSessionState(ctx, entry.record, snapshot.SessionState, updatedAt)
 	}
+	if !m.completeStoppedRemoteRecovery(entry, ctx) {
+		return errRemoteRecoveryFenced
+	}
+	m.discardRemoteRecoveryInstance(ri)
 	return nil
 }
 
@@ -64,6 +65,7 @@ type stoppedRemoteSettlement struct {
 	attemptRecord   *models.ExecutorRunning
 	turnID          string
 	terminalOutcome models.DeliverySubmissionState
+	workflowOutcome *models.AgentDeliveryEffect
 	writer          stoppedRemoteExecutionOwnerCASWriter
 }
 
@@ -82,7 +84,7 @@ func (m *Manager) prepareStoppedRemoteSettlement(
 	if !m.remoteRecoveryAbsenceDispositionAllowed(ctx, entry) {
 		return nil, errRemoteRecoveryFenced
 	}
-	execution, err := m.prepareRecoveredRemoteExecution(ctx, entry.record, snapshot, ri)
+	execution, err := m.prepareStoppedRemoteExecution(ctx, entry.record, snapshot, ri)
 	if err != nil {
 		return nil, fmt.Errorf("reconstruct stopped remote execution: %w", err)
 	}
@@ -95,10 +97,9 @@ func (m *Manager) prepareStoppedRemoteSettlement(
 	if err != nil {
 		return nil, err
 	}
-	if delivery.terminal != nil {
-		if err := m.recordStoppedRemoteTerminalWorkflowOutcome(ctx, entry, delivery.terminal, turnID); err != nil {
-			return nil, err
-		}
+	workflowOutcome, err := m.stoppedRemoteWorkflowOutcome(ctx, entry, execution, delivery.terminal, turnID)
+	if err != nil {
+		return nil, err
 	}
 	attemptRecord, rowPresent, err := m.remoteRecoveryAttemptRecord(ctx, entry)
 	if err != nil {
@@ -116,8 +117,27 @@ func (m *Manager) prepareStoppedRemoteSettlement(
 		return nil, errors.New("stopped remote settlement requires owner-locked runtime and session compare-and-set support")
 	}
 	return &stoppedRemoteSettlement{
-		attemptRecord: attemptRecord, turnID: turnID, terminalOutcome: terminalOutcome, writer: writer,
+		attemptRecord: attemptRecord, turnID: turnID, terminalOutcome: terminalOutcome,
+		workflowOutcome: workflowOutcome, writer: writer,
 	}, nil
+}
+
+func (m *Manager) stoppedRemoteWorkflowOutcome(
+	ctx context.Context,
+	entry *remoteRecoveryRetry,
+	execution *AgentExecution,
+	terminal *models.AgentDeliveryEffect,
+	openTurnID string,
+) (*models.AgentDeliveryEffect, error) {
+	if terminal == nil {
+		return nil, nil
+	}
+	turnID, err := stoppedRemoteTerminalWorkflowTurnID(execution, terminal, openTurnID)
+	if err != nil {
+		return nil, err
+	}
+	effect, _, err := m.stoppedRemoteWorkflowEffect(ctx, entry, terminal, turnID)
+	return effect, err
 }
 
 func (m *Manager) validateStoppedRemoteSettlementOwner(

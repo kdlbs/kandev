@@ -55,6 +55,7 @@ func (r *Repository) SettleStoppedRemoteExecutionIfOwnerCurrent(
 	expectedSessionState models.TaskSessionState,
 	interruptedTurnID string,
 	terminalOutcome models.DeliverySubmissionState,
+	workflowOutcome *models.AgentDeliveryEffect,
 	owner models.RemoteRecoveryOwnerLockIDs,
 	validateOwner func(context.Context) error,
 ) (bool, time.Time, error) {
@@ -82,6 +83,9 @@ func (r *Repository) SettleStoppedRemoteExecutionIfOwnerCurrent(
 	if currentSessionState != expectedSessionState {
 		return false, time.Time{}, models.ErrExecutionRotated
 	}
+	if err := r.recordStoppedRemoteWorkflowOutcomeTx(ctx, tx, owner.TaskID, workflowOutcome); err != nil {
+		return false, time.Time{}, fmt.Errorf("record stopped remote workflow outcome: %w", err)
+	}
 	now := time.Now().UTC()
 	if err := r.settleStoppedRemoteTurnTx(ctx, tx, now, sessionID, interruptedTurnID, terminalOutcome); err != nil {
 		return false, time.Time{}, err
@@ -97,6 +101,68 @@ func (r *Repository) SettleStoppedRemoteExecutionIfOwnerCurrent(
 		return false, time.Time{}, err
 	}
 	return stateChanged, now, nil
+}
+
+func (r *Repository) recordStoppedRemoteWorkflowOutcomeTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	effect *models.AgentDeliveryEffect,
+) error {
+	if effect == nil {
+		return nil
+	}
+	if !validAgentDeliveryWorkflowNoOp(taskID, effect) {
+		return errors.New("exact stopped remote workflow outcome identity is required")
+	}
+	var existing models.AgentDeliveryEffect
+	var completedAt sql.NullTime
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT effect_key, stream_id, sequence, effect_type, state, completed_at,
+		       session_id, incarnation_id, harness_generation, submission_id, turn_id, outcome
+		FROM agent_delivery_effects WHERE effect_key = ?`), effect.EffectKey).Scan(
+		&existing.EffectKey, &existing.StreamID, &existing.Sequence, &existing.EffectType,
+		&existing.State, &completedAt, &existing.SessionID, &existing.IncarnationID,
+		&existing.HarnessGeneration, &existing.SubmissionID, &existing.TurnID, &existing.Outcome)
+	if err == nil {
+		if completedAt.Valid && stoppedRemoteWorkflowOutcomeMatchesTx(&existing, effect) {
+			return nil
+		}
+		return errors.New("stopped remote workflow outcome conflicts with the retained terminal")
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err := r.requireWorkflowOutcomeSourceTx(ctx, tx, taskID, effect); err != nil {
+		return err
+	}
+	valid, err := r.agentDeliveryWorkflowTerminalMatchesTx(ctx, tx, effect)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return errors.New("stopped remote workflow outcome no longer matches its terminal")
+	}
+	_, err = insertDeliveryEffectTx(ctx, tx, r.db.Rebind, effect)
+	return err
+}
+
+func stoppedRemoteWorkflowOutcomeMatchesTx(existing, expected *models.AgentDeliveryEffect) bool {
+	if existing == nil || expected == nil || existing.EffectKey != expected.EffectKey ||
+		existing.EffectType != expected.EffectType || existing.State != models.DeliveryEffectCompleted ||
+		existing.StreamID != expected.StreamID || existing.Sequence != expected.Sequence ||
+		existing.SessionID != expected.SessionID || existing.IncarnationID != expected.IncarnationID ||
+		existing.HarnessGeneration != expected.HarnessGeneration || existing.SubmissionID != expected.SubmissionID ||
+		existing.TurnID != expected.TurnID {
+		return false
+	}
+	switch existing.Outcome {
+	case models.DeliveryWorkflowOutcomeApplied, models.DeliveryWorkflowOutcomeNoAutomaticTransition,
+		models.DeliveryWorkflowOutcomeNotRequired, models.DeliveryWorkflowOutcomeStoppedRecovery:
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *Repository) remoteRecoverySessionStateTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (models.TaskSessionState, error) {

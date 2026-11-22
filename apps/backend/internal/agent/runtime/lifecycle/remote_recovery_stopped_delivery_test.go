@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"testing"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
@@ -36,6 +37,29 @@ func TestStoppedRemoteTerminalSubmissionIDUsesExactSavedBindingAfterProjection(t
 	submissionID, err = stoppedRemoteTerminalSubmissionID(snapshot, foreign)
 	require.NoError(t, err)
 	require.Empty(t, submissionID, "a binding from another execution cannot identify the stopped submission")
+}
+
+func TestStoppedRemoteLegacyTurnSettlesWithoutDurableSubmission(t *testing.T) {
+	turn := &models.Turn{ID: "legacy-open-turn"}
+	execution := &AgentExecution{DeliveryMode: DurableDeliveryLegacy}
+	turnID, outcome, err := stoppedRemoteInterruptedOpenTurn(turn, nil, execution, &stoppedRemoteDeliveryReplay{})
+	require.NoError(t, err)
+	require.Equal(t, turn.ID, turnID)
+	require.Empty(t, outcome, "legacy delivery has no retained terminal result")
+}
+
+func TestApplyRemoteLegacySessionEvidencePreservesSavedNativeSessionID(t *testing.T) {
+	execution := &AgentExecution{ACPSessionID: "native-saved"}
+	instance := &ExecutorInstance{
+		DeliveryLegacyEvidence: true,
+		agentSessionAssociation: &agentctl.AgentSessionAssociation{
+			IncarnationID: "legacy-incarnation", HarnessGeneration: 5,
+		},
+	}
+	applyRemoteLegacySessionEvidence(execution, instance)
+	require.Equal(t, "native-saved", execution.ACPSessionID)
+	require.Equal(t, "legacy-incarnation", execution.DeliveryIncarnationID)
+	require.Equal(t, uint64(5), execution.DeliveryHarnessGeneration)
 }
 
 func TestStoppedRemoteWorkflowOutcomeAcceptsExactExistingCompletion(t *testing.T) {

@@ -821,6 +821,7 @@ test.describe("remote docker executor — recoverable resume", () => {
     apiClient,
     seedData,
     backend,
+    testPage,
   }) => {
     test.setTimeout(300_000);
     const { task, sessionId, containerId, repoRoot, markerCommit } = await prepareRecoverableTask(
@@ -907,17 +908,24 @@ test.describe("remote docker executor — recoverable resume", () => {
         execInContainer(containerId, `cat ${repoRoot}/untracked-recovery-marker.txt`),
       ).toContain("untracked marker");
 
-      const resumeOutcome = await requestSessionResumeAfterRestart(
-        backend.baseUrl,
-        task.id,
-        sessionId,
-      );
-      expect(resumeOutcome.type, JSON.stringify(resumeOutcome.payload)).toBe("response");
-      expect(resumeOutcome.payload).toMatchObject({
-        session_id: sessionId,
-        agent_execution_id: expect.any(String),
-      });
+      await testPage.goto(`/t/${task.id}?sessionId=${sessionId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      const recoveryFailure = testPage.getByRole("heading", { name: "Session recovery failed" });
+      await expect(recoveryFailure).toBeVisible();
+      await expect(testPage.getByRole("button", { name: /Agent failed/ })).toBeVisible();
+      await expect(session.recoveryResumeButton()).toBeVisible();
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(
+        testPage.getByRole("heading", { name: "Session recovery failed" }),
+      ).toBeVisible();
+      await expect(testPage.getByRole("button", { name: /Agent failed/ })).toBeVisible();
+      await session.recoveryResumeButton().click();
       await waitForResumedSession(apiClient, task.id, sessionId);
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(session.anyIdleInput()).toBeVisible();
       await sendMarkerTurn(apiClient, task.id, sessionId);
 
       expect(containerExists(containerId), "Resume replaced the Remote Docker container").toBe(
@@ -939,6 +947,7 @@ test.describe("remote docker executor — recoverable resume", () => {
     apiClient,
     seedData,
     backend,
+    testPage,
   }) => {
     test.setTimeout(240_000);
     const { task, sessionId, containerId } = await prepareRecoverableTask(
@@ -988,6 +997,19 @@ test.describe("remote docker executor — recoverable resume", () => {
       const recovered = readExecutorRunning(backend.tmpDir, sessionId);
       expect(recovered?.agent_execution_id).toBeTruthy();
       expect((await apiClient.getTaskSession(sessionId)).session.state).toBe("FAILED");
+      await testPage.goto(`/t/${task.id}?sessionId=${sessionId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(
+        testPage.getByRole("heading", { name: "Session recovery failed" }),
+      ).toBeVisible();
+      await expect(testPage.getByRole("button", { name: /Agent failed/ })).toBeVisible();
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(
+        testPage.getByRole("heading", { name: "Session recovery failed" }),
+      ).toBeVisible();
+      await expect(testPage.getByRole("button", { name: /Agent failed/ })).toBeVisible();
     } finally {
       if (backendStopped) await backend.restart();
     }
@@ -997,6 +1019,7 @@ test.describe("remote docker executor — recoverable resume", () => {
     apiClient,
     seedData,
     backend,
+    testPage,
   }) => {
     test.setTimeout(300_000);
     const { task, sessionId, containerId, repoRoot, markerCommit } = await prepareRecoverableTask(
@@ -1080,6 +1103,13 @@ test.describe("remote docker executor — recoverable resume", () => {
           },
         )
         .toBe("stopped");
+      const stoppedRemoteHighWater = readAgentctlDeliveryHighWater(
+        containerId,
+        managedAgent.agentctlPort,
+        managedAgent.authToken,
+        streamId,
+      );
+      expect(stoppedRemoteHighWater).toBeGreaterThan(initialRemoteHighWater);
 
       await backend.restart();
       backendStopped = false;
@@ -1106,17 +1136,25 @@ test.describe("remote docker executor — recoverable resume", () => {
       const settledCursor = readDeliveryCursor(backend.tmpDir, sessionId)!;
       expect(settledCursor.stream_id).toBe(streamId);
       expect(settledCursor.projected_sequence).toBeGreaterThan(outageCursor);
-      expect(settledCursor.projected_sequence).toBeGreaterThanOrEqual(
-        settledCursor.remote_high_water,
-      );
+      expect(settledCursor.projected_sequence).toBeGreaterThanOrEqual(stoppedRemoteHighWater);
       const tail = readProjectedTailCounts(
         backend.tmpDir,
         streamId,
         outageCursor,
-        settledCursor.projected_sequence,
+        stoppedRemoteHighWater,
       );
       expect(tail.count).toBeGreaterThan(0);
       expect(tail.distinct_count).toBe(tail.count);
+
+      await testPage.goto(`/t/${task.id}?sessionId=${sessionId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.anyIdleInput()).toBeVisible();
+      await expect(session.activeChat()).toContainText("Running slow response");
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(session.anyIdleInput()).toBeVisible();
+      await expect(session.activeChat()).toContainText("Running slow response");
 
       const resumeOutcome = await requestSessionResumeAfterRestart(
         backend.baseUrl,

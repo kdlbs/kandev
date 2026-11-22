@@ -779,6 +779,49 @@ func (r *Repository) GetAgentDeliveryEffect(ctx context.Context, effectKey strin
 	return &effect, nil
 }
 
+func (r *Repository) GetAgentDeliveryTerminalEffectBySubmission(
+	ctx context.Context,
+	submissionID string,
+) (*models.AgentDeliveryEffect, error) {
+	if submissionID == "" {
+		return nil, fmt.Errorf("submission ID is required")
+	}
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT effect_key, stream_id, sequence, effect_type, state, created_at, completed_at,
+		       session_id, incarnation_id, harness_generation, submission_id, turn_id, outcome
+		FROM agent_delivery_effects WHERE submission_id = ? AND effect_type = ?
+		ORDER BY sequence`), submissionID, models.DeliveryTerminalEffectType)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var effect *models.AgentDeliveryEffect
+	for rows.Next() {
+		if effect != nil {
+			return nil, repoerrors.ErrAgentDeliveryEffectConflict
+		}
+		var candidate models.AgentDeliveryEffect
+		var completedAt sql.NullTime
+		if err := rows.Scan(&candidate.EffectKey, &candidate.StreamID, &candidate.Sequence, &candidate.EffectType,
+			&candidate.State, &candidate.CreatedAt, &completedAt, &candidate.SessionID, &candidate.IncarnationID,
+			&candidate.HarnessGeneration, &candidate.SubmissionID, &candidate.TurnID, &candidate.Outcome); err != nil {
+			return nil, err
+		}
+		if completedAt.Valid {
+			completed := completedAt.Time
+			candidate.CompletedAt = &completed
+		}
+		effect = &candidate
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if effect == nil {
+		return nil, repoerrors.ErrAgentDeliveryEffectNotFound
+	}
+	return effect, nil
+}
+
 type deliveryEffectTx interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row

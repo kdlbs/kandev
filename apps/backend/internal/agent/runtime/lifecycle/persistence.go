@@ -629,6 +629,7 @@ type stoppedRemoteExecutionOwnerCASWriter interface {
 		expectedSessionState models.TaskSessionState,
 		interruptedTurnID string,
 		terminalOutcome models.DeliverySubmissionState,
+		workflowOutcome *models.AgentDeliveryEffect,
 		owner models.RemoteRecoveryOwnerLockIDs,
 		validateOwner func(context.Context) error,
 	) (bool, time.Time, error)
