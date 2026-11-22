@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useWebSocketClient } from "@/lib/ws/connection";
 import {
   listBackgroundWorkloads,
   executeBackgroundAction,
@@ -202,6 +203,39 @@ async function readBackgroundWorkloads(
   }
 }
 
+function useBackgroundWorkSubscription({
+  detailActive,
+  enabled,
+  fetchWorkloads,
+  sessionId,
+}: {
+  detailActive: boolean;
+  enabled: boolean;
+  fetchWorkloads: () => Promise<void>;
+  sessionId: string | null;
+}) {
+  const client = useWebSocketClient();
+  const connectionStatus = useAppStore((state) => state.connection.status);
+
+  useEffect(() => {
+    if (!detailActive || !sessionId || !enabled || !client || connectionStatus !== "connected") {
+      return;
+    }
+    const subscription = client.subscribeSessionWithReady(sessionId);
+    let active = true;
+    void subscription.ready
+      .then(() => {
+        if (active) void fetchWorkloads();
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, [client, connectionStatus, detailActive, enabled, fetchWorkloads, sessionId]);
+}
+
 export function useBackgroundWork(
   sessionId: string | null,
   { detailActive = true }: { detailActive?: boolean } = {},
@@ -234,6 +268,13 @@ export function useBackgroundWork(
     lastFetchedSessionIdRef.current = sessionId;
     fetchWorkloads();
   }, [detailActive, sessionId, enabled, fetchWorkloads]);
+
+  useBackgroundWorkSubscription({
+    detailActive,
+    enabled,
+    fetchWorkloads,
+    sessionId,
+  });
 
   const activeWorkload = useActiveWorkload(workloads, activeWorkId);
 

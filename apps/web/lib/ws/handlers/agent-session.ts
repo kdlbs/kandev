@@ -2,6 +2,10 @@
 import type { StoreApi } from "zustand";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
+import {
+  mergeQueuePolicyMeta,
+  queuePolicyStatusMeta,
+} from "@/lib/state/slices/session/queue-policy-meta";
 import type { QueueMeta } from "@/lib/state/slices/session/types";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import {
@@ -855,46 +859,11 @@ function queueIdentityMeta(
   };
 }
 
-function resolveQueuePolicyValue<T>(
-  preserveSessionPolicy: boolean,
-  previousValue: T | undefined,
-  incomingValue: T | undefined,
-): T | undefined {
-  return preserveSessionPolicy ? previousValue : (incomingValue ?? previousValue);
-}
-
-function queueAutoMergeMeta(
-  payload: QueueStatusChangedPayload,
-  previousMeta: QueueMeta | undefined,
-) {
-  if (
-    payload.auto_merge_available === undefined &&
-    previousMeta?.autoMergeAvailable === undefined
-  ) {
-    return {};
-  }
-  const preserveSessionPolicy =
-    previousMeta?.sessionIncarnationId === payload.session_incarnation_id &&
-    previousMeta?.autoMergeSource === "session" &&
-    payload.auto_merge_source === "global";
-  return {
-    autoMergeAvailable: payload.auto_merge_available ?? previousMeta?.autoMergeAvailable,
-    autoMergeEnabled: resolveQueuePolicyValue(
-      preserveSessionPolicy,
-      previousMeta?.autoMergeEnabled,
-      payload.auto_merge_enabled,
-    ),
-    autoMergeSource: resolveQueuePolicyValue(
-      preserveSessionPolicy,
-      previousMeta?.autoMergeSource,
-      payload.auto_merge_source,
-    ),
-    autoMergeRevision: resolveQueuePolicyValue(
-      preserveSessionPolicy,
-      previousMeta?.autoMergeRevision,
-      payload.auto_merge_revision,
-    ),
-  };
+function queuePolicyMeta(payload: QueueStatusChangedPayload, previousMeta: QueueMeta | undefined) {
+  return mergeQueuePolicyMeta(previousMeta, {
+    ...queuePolicyStatusMeta(payload),
+    sessionIncarnationId: payload.session_incarnation_id ?? previousMeta?.sessionIncarnationId,
+  });
 }
 
 /** Writes a message.queue.status_changed broadcast into the queue slice,
@@ -921,7 +890,7 @@ function handleQueueStatusChangedMessage(
     mergeEnabled: payload.merge_enabled ?? previousMeta?.mergeEnabled ?? true,
     autoRun: payload.auto_run ?? previousMeta?.autoRun ?? true,
     ...queueIdentityMeta(payload, previousMeta),
-    ...queueAutoMergeMeta(payload, previousMeta),
+    ...queuePolicyMeta(payload, previousMeta),
   };
   const establishesStatusEpoch =
     payload.status_epoch !== undefined &&

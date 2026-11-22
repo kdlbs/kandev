@@ -1027,17 +1027,19 @@ func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecyc
 	terminal := isTerminalToolStatus(status)
 	turnID := ""
 	if terminal {
-		var err error
-		turnID, err = s.peekActiveTurnID(ctx, payload.SessionID)
-		if err != nil {
-			s.logger.Warn("failed to look up active turn for terminal tool update",
-				zap.String("task_id", payload.TaskID),
-				zap.String("session_id", payload.SessionID),
-				zap.String("tool_call_id", payload.Data.ToolCallID),
-				zap.Error(err))
-			// Fail closed: without a confirmed active turn, this must be an
-			// update-only reconciliation and cannot wake a settled session.
-			turnID = ""
+		if !isMonitorPresentationOnlyToolUpdate(payload) {
+			var err error
+			turnID, err = s.peekActiveTurnID(ctx, payload.SessionID)
+			if err != nil {
+				s.logger.Warn("failed to look up active turn for terminal tool update",
+					zap.String("task_id", payload.TaskID),
+					zap.String("session_id", payload.SessionID),
+					zap.String("tool_call_id", payload.Data.ToolCallID),
+					zap.Error(err))
+				// Fail closed: without a confirmed active turn, this must be an
+				// update-only reconciliation and cannot wake a settled session.
+				turnID = ""
+			}
 		}
 	} else if s.messageCreator != nil {
 		// Only message creation needs a turn to attach a fallback-created

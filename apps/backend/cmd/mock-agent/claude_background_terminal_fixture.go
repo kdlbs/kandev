@@ -20,17 +20,20 @@ const mockClaudeBridgeVersionEnv = "E2E_MOCK_AGENT_CLAUDE_BRIDGE_VERSION"
 const mockClaudeTerminalSignalEnv = "E2E_MOCK_AGENT_CLAUDE_TERMINAL_SIGNAL_FILE"
 
 const (
-	mockClaudeBridgeName    = "@agentclientprotocol/claude-agent-acp"
-	mockClaudeBridgeVersion = "0.97.0"
+	mockClaudeBridgeName           = "@agentclientprotocol/claude-agent-acp"
+	mockClaudeBridgeLegacyVersion  = "0.97.0"
+	mockClaudeBridgeMonitorVersion = "0.107.0"
+	mockClaudeBridgeVersion        = "0.109.0"
 )
 
 func mockClaudeBridgeAgentInfo() *acp.Implementation {
-	if strings.TrimSpace(os.Getenv(mockClaudeBridgeVersionEnv)) != mockClaudeBridgeVersion {
+	version := strings.TrimSpace(os.Getenv(mockClaudeBridgeVersionEnv))
+	if version != mockClaudeBridgeVersion && version != mockClaudeBridgeMonitorVersion && version != mockClaudeBridgeLegacyVersion {
 		return nil
 	}
 	return &acp.Implementation{
 		Name:    mockClaudeBridgeName,
-		Version: mockClaudeBridgeVersion,
+		Version: version,
 	}
 }
 
@@ -40,7 +43,7 @@ type claudeBackgroundTerminalJob struct {
 	title      string
 }
 
-// emitClaudeBackgroundTerminalFixture replays the captured Claude 0.97.0
+// emitClaudeBackgroundTerminalFixture replays the qualified Claude
 // detached-shell lifecycle: two launches complete their Bash tool calls while
 // the jobs keep running, then each job's own terminal frame reports a null
 // exit. The foreground prompt returns before either terminal frame.

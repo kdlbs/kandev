@@ -90,7 +90,7 @@ apps/backend/
 │   ├── user/             # User management
 │   ├── utility/          # Shared utility functions
 │   ├── workflow/         # Workflow engine (engine, models, repository, service)
-│   ├── workflowsync/     # GitHub workflow sync (per-workspace repo config, poller, force sync)
+│   ├── workflowsync/     # Per-workspace workflow sync; promptsync/ syncs install-wide saved prompts; both share reposync/
 │   └── worktree/         # Git worktree management for workspace isolation
 ```
 

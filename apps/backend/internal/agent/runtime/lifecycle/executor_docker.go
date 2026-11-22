@@ -722,6 +722,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		PromptSuggestions:          req.PromptSuggestions,
 		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		RequiresProcessKill:        requiresProcessKill,
+		OfflineBudgetMinutes:       offlineBudgetFromMetadata(req.Metadata),
 		StripEnv:                   stripEnv,
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),

@@ -80,7 +80,7 @@ func (r *sqliteRepository) AdmitQueueMessage(
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 	workflowEntry *WorkflowEntryIdentity,
 ) (*QueuedMessage, bool, error) {
 	if err := validateQueueAdmissionInput(identity, clientQueueID, candidate); err != nil {
@@ -165,7 +165,7 @@ func (r *sqliteRepository) guardQueueAdmissionTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	identity QueueSessionIdentity,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) error {
 	if err := r.guardActiveTaskTx(ctx, tx, identity.TaskID); err != nil {
 		return err
@@ -235,7 +235,7 @@ func (r *sqliteRepository) admitQueueCandidateTx(
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, error) {
 	if candidate.QueuedAt.IsZero() {
 		candidate.QueuedAt = time.Now().UTC()
@@ -248,10 +248,10 @@ func (r *sqliteRepository) admitQueueCandidateTx(
 	if claim != nil && len(claim.IDs) > 0 {
 		return nil, ErrQueueFull
 	}
-	if policy == nil || !policy.Enabled {
+	if policy == nil || !policy.AutoMerge.Enabled {
 		return nil, ErrQueueFull
 	}
-	return r.admitFullQueueCandidateTx(ctx, tx, candidate, claim)
+	return r.admitFullQueueCandidateTx(ctx, tx, candidate, claim, policy)
 }
 
 func (r *sqliteRepository) insertQueueCandidateTx(
@@ -260,7 +260,7 @@ func (r *sqliteRepository) insertQueueCandidateTx(
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, error) {
 	if err := claimOptionalMessageAttachmentsTx(
 		ctx, tx, &QueueSessionIdentity{TaskID: candidate.TaskID, SessionID: candidate.SessionID},
@@ -277,33 +277,23 @@ func (r *sqliteRepository) insertQueueCandidateTx(
 		}
 		return nil, err
 	}
-	if policy == nil || !policy.Enabled {
+	if policy == nil || !policy.AutoMerge.Enabled {
 		return candidate, nil
 	}
-	return r.mergeInsertedAdmissionCandidateTx(ctx, tx, candidate)
+	return r.mergeInsertedAdmissionCandidateTx(ctx, tx, candidate, policy)
 }
 
 func (r *sqliteRepository) mergeInsertedAdmissionCandidateTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	candidate *QueuedMessage,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, error) {
-	target, err := readMergeTarget(ctx, r, tx, candidate.SessionID, candidate.Position)
-	if errors.Is(err, ErrNoMergeTarget) {
-		return candidate, nil
-	}
+	target, values, err := r.readAutoFoldTargetTx(ctx, tx, candidate, policy)
 	if err != nil {
 		return nil, err
 	}
-	values, compatible := buildAutoMergedEntry(target, candidate)
-	if !compatible {
-		return candidate, nil
-	}
-	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, candidate.SessionID, target.ID)
-	if err != nil {
-		return nil, err
-	}
-	if blocked {
+	if values == nil {
 		return candidate, nil
 	}
 	if err := applyMergeWrites(ctx, r, tx, target, candidate, values.content, values.attachments, values.metadata, candidate.SessionID); err != nil {
@@ -321,25 +311,17 @@ func (r *sqliteRepository) admitFullQueueCandidateTx(
 	tx *sqlx.Tx,
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, error) {
-	target, storedContent, storedAttachmentsJSON, storedMetadataJSON, err := r.scanTailWithRawJSON(ctx, tx, candidate.SessionID)
+	fold, err := r.readCandidateFoldTx(ctx, tx, candidate, policy)
 	if err != nil {
 		return nil, err
 	}
-	if target == nil {
+	if fold == nil {
 		return nil, ErrQueueFull
 	}
-	values, compatible := buildAutoMergedEntry(target, candidate)
-	if !compatible {
-		return nil, ErrQueueFull
-	}
-	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, candidate.SessionID, target.ID)
-	if err != nil {
-		return nil, err
-	}
-	if blocked {
-		return nil, ErrQueueFull
-	}
+	target, values := fold.target, fold.values
+	storedContent, storedAttachmentsJSON, storedMetadataJSON := fold.rawContent, fold.rawAttachments, fold.rawMetadata
 	if err := claimOptionalMessageAttachmentsTx(
 		ctx, tx, &QueueSessionIdentity{TaskID: candidate.TaskID, SessionID: candidate.SessionID},
 		claim, candidate.TaskID, candidate.SessionID,
@@ -374,9 +356,9 @@ func updateAdmissionMergeTargetTx(
 		UPDATE queued_messages
 		SET content = ?, attachments_json = ?, metadata_json = ?, queued_at = ?
 		WHERE id = ? AND session_id = ? AND position = ? AND content = ?
-		  AND attachments_json = ? AND metadata_json = ?
+		  AND attachments_json = ? AND metadata_json = ? AND queued_at = ?
 	`), values.content, attachmentsJSON, metadataJSON, values.queuedAt, target.ID,
-		target.SessionID, target.Position, storedContent, storedAttachmentsJSON, storedMetadataJSON)
+		target.SessionID, target.Position, storedContent, storedAttachmentsJSON, storedMetadataJSON, target.QueuedAt)
 	if err != nil {
 		return fmt.Errorf("update full queue admission target: %w", err)
 	}

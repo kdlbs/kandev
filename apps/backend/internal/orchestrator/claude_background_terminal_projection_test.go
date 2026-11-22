@@ -17,7 +17,7 @@ func feedBackgroundWorkObservation(
 	taskID, sessionID string,
 	observation *streams.WorkloadRunObservation,
 ) {
-	svc.recordBackgroundWorkObservationFromToolPayload(context.Background(), &lifecycle.AgentStreamEventPayload{
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
 		TaskID:    taskID,
 		SessionID: sessionID,
 		Data: &lifecycle.AgentStreamEventData{

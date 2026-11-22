@@ -1,11 +1,11 @@
 {
-  "@agentclientprotocol/claude-agent-acp": "0.107.0",
-  "@agentclientprotocol/codex-acp": "2.7.0",
+  "@agentclientprotocol/claude-agent-acp": "0.109.0",
+  "@agentclientprotocol/codex-acp": "2.8.0",
   "@bex-co/muse-code-acp": "0.11.0",
-  "@github/copilot": "1.0.111",
-  "@google/gemini-cli": "0.68.0",
-  "@openai/codex": "0.169.0",
-  "@opencode/cli": "2.3.0",
-  "opencode-ai": "1.19.5",
+  "@github/copilot": "1.0.114",
+  "@google/gemini-cli": "0.70.0",
+  "@openai/codex": "0.171.0",
+  "@opencode/cli": "2.3.2",
+  "opencode-ai": "1.19.6",
   "pi-acp": "0.0.34"
 }

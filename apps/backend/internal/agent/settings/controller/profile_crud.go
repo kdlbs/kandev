@@ -203,6 +203,9 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if err := validateProfileEnvVarDTOs(envVars); err != nil {
 		return nil, err
 	}
+	if err := validateClaudeExactModelAliasConflict(agent.Name, req.Model, req.RequireExactModel, envVarsFromDTO(envVars)); err != nil {
+		return nil, err
+	}
 	if err := validateDevinProfilePermissionIntent(agent.Name, mode, envVars); err != nil {
 		return nil, err
 	}
@@ -529,8 +532,25 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	if err != nil {
 		return nil, ErrAgentProfileNotFound
 	}
+	savedModel := profile.Model
+	savedRequireExactModel := profile.RequireExactModel
+	savedEnvVars := append([]models.ProfileEnvVar(nil), profile.EnvVars...)
+	var resolvedAgentName string
+	agentNameResolved := false
+	resolveAgentName := func() (string, error) {
+		if agentNameResolved {
+			return resolvedAgentName, nil
+		}
+		name, err := c.agentNameForProfile(ctx, profile)
+		if err != nil {
+			return "", err
+		}
+		resolvedAgentName = name
+		agentNameResolved = true
+		return resolvedAgentName, nil
+	}
 	if req.CopilotSelectedPlugins != nil {
-		agentName, agentErr := c.agentNameForProfile(ctx, profile)
+		agentName, agentErr := resolveAgentName()
 		if agentErr != nil {
 			return nil, agentErr
 		}
@@ -668,6 +688,21 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 		profile.EnvVars = envVarsFromDTO(*req.EnvVars)
 	}
+	if (req.Model != nil || req.RequireExactModel != nil || req.EnvVars != nil) &&
+		isNewClaudeExactModelAliasConflict(
+			profile.Model, profile.RequireExactModel, profile.EnvVars,
+			savedModel, savedRequireExactModel, savedEnvVars,
+		) {
+		agentName, agentErr := resolveAgentName()
+		if agentErr != nil {
+			return nil, agentErr
+		}
+		if err := validateClaudeExactModelAliasConflict(
+			agentName, profile.Model, profile.RequireExactModel, profile.EnvVars,
+		); err != nil {
+			return nil, err
+		}
+	}
 	if req.ExecutionGrade != nil {
 		profile.ExecutionGrade = *req.ExecutionGrade
 	}
@@ -681,7 +716,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		return nil, err
 	}
 	if req.Mode != nil || req.EnvVars != nil {
-		agentName, agentErr := c.agentNameForProfile(ctx, profile)
+		agentName, agentErr := resolveAgentName()
 		if agentErr != nil {
 			return nil, agentErr
 		}

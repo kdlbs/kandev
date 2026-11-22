@@ -184,6 +184,13 @@ A later explicit submission repeats normal admission. See the unchanged Retry
 contracts in [reattachment](durable-agent-reattachment.md) and
 [delivery failure](durable-delivery-failure.md).
 
+### Delivery block binding
+
+Open delivery blocks keep their incident binding. Clear binds any already
+projected terminal effect to its matching block; later terminal settlement
+resolves the block when the effect is not yet present. See [delivery recovery
+block binding](delivery-recovery-block-binding.md).
+
 ### Restored chat presentation
 
 Publish restored metadata and cleared matching blocks only after SQL commits.

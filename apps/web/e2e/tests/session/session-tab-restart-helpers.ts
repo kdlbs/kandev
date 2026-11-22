@@ -112,6 +112,45 @@ export async function routeRestartContinuationGuidance(page: Page, sessionId: st
   return { requests };
 }
 
+/** Keeps automatic focus recovery from consuming the block under test. */
+export async function suppressSessionFocusLaunches(page: Page) {
+  await page.routeWebSocket(/\/ws$/, (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      if (typeof message !== "string") return server.send(message);
+      for (const part of message.split("\n").filter(Boolean)) {
+        const frame = JSON.parse(part) as {
+          id?: string;
+          type?: string;
+          action?: string;
+          payload?: Record<string, unknown>;
+        };
+        if (
+          frame.type === "request" &&
+          frame.id &&
+          frame.action === "session.launch" &&
+          frame.payload?.activation_source === "session_focus"
+        ) {
+          socket.send(
+            JSON.stringify({
+              id: frame.id,
+              type: "error",
+              action: frame.action,
+              payload: {
+                code: "CONFLICT",
+                message: "Automatic focus recovery is suppressed in this test.",
+              },
+            }),
+          );
+        } else {
+          server.send(part);
+        }
+      }
+    });
+    server.onMessage((message) => socket.send(message));
+  });
+}
+
 /** Checks editable-draft retention and rejects button and keyboard prompt admission. */
 export async function assertRestartSubmissionBlocked(
   page: Page,
