@@ -2,7 +2,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { fetchTaskSession, listTaskSessions } from "@/lib/api/domains/session-api";
 import { ApiError } from "@/lib/api/client";
-import type { TaskSession, TaskSessionsResponse } from "@/lib/types/http";
+import type { TaskSessionsResponse } from "@/lib/types/http";
 import { retireSessionReads } from "@/lib/state/session-read-coordinator";
 import {
   getTaskSessionReads,
@@ -40,27 +40,17 @@ import {
   allowsFollowState,
   NEW_SESSION_SOURCE,
   inheritFallbackReadiness,
-  type FollowSource,
 } from "./session-selection";
 import { findTaskInState } from "./task-lookup";
+import {
+  captureOwner,
+  type FollowOwner,
+  type PendingFollow,
+  type RemovalOwner,
+  type RemovalTarget,
+} from "./task-primary-focus-owner";
 
 const debug = createDebugLogger("task-lifecycle:ws");
-type FollowOwner = {
-  taskId: string;
-  previousSessionId: string;
-  selectedSessionId: string | null;
-  targetSessionId: string | null;
-  projectedPrimaryId: string | null | undefined;
-  source: FollowSource;
-  lifecycleRecipient: boolean;
-  scopeIdentity: string;
-  navigationRevision: number | undefined;
-  pinnedSessionId: string | null;
-  workflowFocus: AppState["workflowSessionFocus"];
-};
-type PendingFollow = FollowOwner & { cancel: () => void; authorized: boolean };
-type RemovalOwner = Pick<FollowOwner, "taskId" | "previousSessionId" | "scopeIdentity">;
-type RemovalTarget = Pick<TaskSession, "id" | "task_id" | "state" | "started_at" | "updated_at">;
 // Denied or uncertain reads retain view ownership until selection changes.
 const pendingByStore = new WeakMap<StoreApi<AppState>, PendingFollow>();
 
@@ -244,9 +234,17 @@ function withdrawRemoval(store: StoreApi<AppState>, pending: RemovalOwner): void
   observedRemovals(store)?.delete(pending.previousSessionId);
   forgetTaskSessionMembershipProof(store, pending.previousSessionId);
   const view = pendingByStore.get(store);
-  const ownsView = view?.taskId === pending.taskId && view.selectedSessionId !== null;
-  if (ownsView && view.source === "removed" && view.previousSessionId === pending.previousSessionId)
-    view.cancel();
+  if (view?.taskId !== pending.taskId || view.selectedSessionId === null) return;
+  if (view.source !== "removed" || view.previousSessionId !== pending.previousSessionId) return;
+  view.cancel();
+  // Intent that arrived while removal was unproven resumes as ordinary verification.
+  if (!view.deferred) return;
+  const { taskId, previousSessionId, selectedSessionId, lifecycleRecipient } = view;
+  const { source, targetSessionId } = view.deferred;
+  const owner = captureOwner(store.getState(), taskId, previousSessionId, targetSessionId, source);
+  Object.assign(owner, { selectedSessionId, resumedAfterDisproof: true });
+  owner.lifecycleRecipient ||= lifecycleRecipient;
+  if (ownsSelection(store, owner)) verifyPreviousSession(store, owner);
 }
 
 function commitRemovalMembership(
@@ -402,9 +400,7 @@ function verifyPreviousSession(store: StoreApi<AppState>, owner: FollowOwner): v
               stateReadScopeIdentity(store.getState()) !== pending.scopeIdentity
             )
               return;
-            observeRemoval(store, pending.taskId, pending.previousSessionId);
-            pending.source = "removed";
-            return verifyRemoval(store, pending);
+            return convertToRemoval(store, pending);
           });
   void read.catch(() => {
     if (!controller.signal.aborted) {
@@ -417,36 +413,26 @@ function verifyPreviousSession(store: StoreApi<AppState>, owner: FollowOwner): v
   });
 }
 
-function captureOwner(
-  state: AppState,
-  taskId: string,
-  previousSessionId: string,
-  targetSessionId: string | null,
-  source: FollowSource,
-): FollowOwner {
-  return {
-    taskId,
-    previousSessionId,
-    selectedSessionId: previousSessionId,
-    targetSessionId,
-    source,
-    lifecycleRecipient: source === "terminal" || source === NEW_SESSION_SOURCE,
-    scopeIdentity: stateReadScopeIdentity(state),
-    projectedPrimaryId:
-      source === "primary" ? targetSessionId : findTaskInState(state, taskId)?.primarySessionId,
-    navigationRevision: state.taskRemoval?.navigationRevision,
-    pinnedSessionId: state.tasks.pinnedSessionId,
-    workflowFocus: state.workflowSessionFocus,
-  };
+/** A 404 converts the owner to removal verification, deferring its original intent once. */
+function convertToRemoval(store: StoreApi<AppState>, pending: PendingFollow): Promise<void> {
+  observeRemoval(store, pending.taskId, pending.previousSessionId);
+  const { source, targetSessionId } = pending;
+  if (!pending.resumedAfterDisproof) pending.deferred ??= { source, targetSessionId };
+  pending.source = "removed";
+  return verifyRemoval(store, pending);
 }
 
 function reverifyLifecycleFollow(
   store: StoreApi<AppState>,
   pending: PendingFollow,
   source: "terminal" | "new-session",
+  targetSessionId: string | undefined,
 ): void {
-  if (pending.source === "removed") return;
   pending.lifecycleRecipient ||= source === "terminal";
+  if (pending.source === "removed") {
+    pending.deferred = { source, targetSessionId: targetSessionId ?? null };
+    return;
+  }
   pending.cancel();
   verifyPreviousSession(store, pending);
 }
@@ -464,7 +450,7 @@ export function followSessionTransition(
   if (getProvenRemovalPredecessor(store, taskId, null)) return true;
   const existing = pendingByStore.get(store);
   if (existing?.taskId === taskId && ownsSelection(store, existing)) {
-    reverifyLifecycleFollow(store, existing, source);
+    reverifyLifecycleFollow(store, existing, source, targetSessionId);
     return true;
   }
   const previous = state.tasks.activeSessionId;
@@ -579,6 +565,7 @@ function retargetFollow(
   const source =
     empty || (existing?.taskId === taskId && existing.source === "removed") ? "removed" : "primary";
   const owner = captureOwner(store.getState(), taskId, previousSessionId, targetSessionId, source);
+  if (source === "removed") owner.deferred = { source: "primary", targetSessionId };
   if (empty) owner.selectedSessionId = null;
   if (existing && ownsSelection(store, existing)) {
     owner.selectedSessionId = existing.selectedSessionId;

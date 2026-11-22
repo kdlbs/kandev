@@ -4574,3 +4574,35 @@ frontend build and spec/catalog/harness checks pass. Fresh-bundle browser
 receipts: `r41-final-summary.log` 41 desktop/tablet/maximize cases including the
 whole owned-removal visibility group, and `r41-phone-summary.log` ten phone
 cases, pass with one worker and no retries under host load of about 20.
+
+### Production-fix review round 42 remediation
+
+Opus child `6b661e78-f546-46c5-beb8-2b14150b34a4` reviewed
+`3ea22e37f236649175b5b42b91f7bbeaf6317cc1`: one P3, not clean. Completed
+production rounds 42; consecutive clean 0. R41's post-disproof cancel was
+confirmed, including its finish, proof and re-removal side effects.
+
+- P3: a primary promotion, terminal transition or new-session adoption that
+  arrived while a removal read was pending folded into the removal-sourced
+  owner, and R41's disproof cancel then discarded it. The view stayed on the
+  disproved session while the unobserved control followed. The removal owner
+  now records that intent (`deferred`, the latest wins) instead of dropping
+  it; a disproof resumes it as ordinary verification of the still-selected
+  session, so explicit selection and the follow-state gate still apply. An
+  owner converted to removal by a 404 defers its own source and target the
+  same way. A resumed owner never defers again, so a 404 that a complete
+  membership keeps contradicting costs one extra session read, not a loop.
+  `r42-red.log`: at `3ea22e3` the in-window promotion and new-session
+  adoption leave the view on `old`, and the 404-then-disproved promotion does
+  not follow; the unobserved controls and the no-intent disproof pass.
+- `captureOwner` and the follow-owner types moved into
+  `lib/ws/handlers/task-primary-focus-owner.ts` so the handler stays within
+  its line limit.
+
+Verification: `r42-units.log` 11 files/263 tests; strict changed-file lint,
+production typecheck, fresh frontend build and spec/catalog/harness checks
+pass. `r42-final-summary.log`: 40 of 41 desktop/tablet/maximize cases pass with
+one worker and no retries. The one failure, the inactive-parked
+split-neighbour case, failed before any removal: its second page booted an
+empty board. `r42-isolated-summary.log` passes it 3 of 3 alone.
+`r42-phone-summary.log` passes ten phone cases.
