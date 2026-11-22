@@ -685,13 +685,14 @@ On a Windows host:
 - Profile prepare and cleanup scripts run as PowerShell. An empty prepare script uses Kandev's Windows default, which clones or reuses the task checkout and selects the Kandev branch.
 - Kandev keeps its files under `%USERPROFILE%\.kandev`. The helper is `bin\agentctl.exe`, and task directories are under `tasks\`.
 - A helper upgrade renames a running `agentctl.exe` aside, so sessions that still use the old helper keep running.
-- Stop forcibly ends the controller's process tree, because Windows has no graceful stop signal.
+- Stop forcibly ends the controller's process tree, because Windows has no graceful stop signal. The next controller start removes the temporary files that a stopped controller left in `%TEMP%`.
+- The task terminal panel opens a PowerShell session in the task directory.
 
 <details>
 <summary>Not supported on Windows hosts</summary>
 
 - ARM64 Windows hosts. They fail the connection test as an unsupported platform.
-- Remote Docker, CLI passthrough, and the task terminal panel.
+- Remote Docker and CLI passthrough.
 - Task-directory reclamation. Kandev keeps the directory and records the cleanup as skipped (`unsupported_platform`).
 - Agent remote-authentication setup scripts. They are POSIX shell scripts, so Kandev skips them and logs a warning.
 - WSL as a Windows host. Run `sshd` inside the WSL distribution and connect to it as a Linux host instead.

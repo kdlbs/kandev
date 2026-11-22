@@ -162,7 +162,8 @@ Cleanup on the test host: all validation tasks were archived, and no
 artifacts and was removed. `mock-agent.exe` and every `%TEMP%\kandev-*` entry
 were deleted, and `DefaultShell` is absent.
 
-Findings recorded as known limitations, or as exclusions where noted:
+Findings recorded as known limitations, or as exclusions where noted. Tasks 07
+through 09 later resolved all three:
 
 - agentctl's interactive shell cannot start a PTY on Windows
   (`failed to start PTY: unsupported`). The task terminal panel is therefore

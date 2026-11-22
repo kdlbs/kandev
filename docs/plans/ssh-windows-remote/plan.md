@@ -49,6 +49,10 @@ records the probes that shaped the transport and launch.
 | F10 | The CI filter is an 11-alternative regex copied into two files | `backend-tests.yml`, `Makefile` | Task 05 uses a `TestSSHWindows` prefix |
 | F11 | OpenSSH ends a `Start-Process` controller when its launch channel closes | Real-host probe | Task 04 launches through `Win32_Process.Create` |
 | F12 | The fork ships and accepts `windows/arm64`, which is now out of scope | Fork helper tables and `requireSupportedRemotePlatform` | Task 01 removes the helper; task 02 rejects the platform |
+| F13 | agentctl's interactive shell cannot start a PTY on Windows | Real-host H2: `failed to start PTY: unsupported` | Task 07 starts the shell under ConPTY |
+| F14 | The first turn of each new session misses its turn-change start checkpoint | Real-host H2: 9 of 9 change sets `capture_failed`; a thread-snapshot resume per Git command | Task 08 resumes by handle |
+| F15 | Forced stops leave one `%TEMP%\kandev-github-cli-*` directory per session | Real-host H5 | Task 09 sweeps released shim directories |
+| F16 | A port inside a Windows excluded range fails the launch without a retry | Real-host launch: bind refused with an access error | Task 09 classifies the refusal as a port collision |
 
 ## Decisions
 
@@ -70,7 +74,7 @@ fork's `main`, because it carries `release: 0.102.1` and is 29 commits behind.
    separately, and it carries the size cost. Its first commit adds this design
    package, because the release design links to
    `REQ-EXECUTORS-SSH-WINDOWS-002`.
-2. **PR B: `feat(ssh): support Windows remote hosts`** (tasks 02 through 06).
+2. **PR B: `feat(ssh): support Windows remote hosts`** (tasks 02 through 09).
    This PR is stacked on PR A. Keep it in draft until PR A merges, then rebase
    it onto `main`. Use one commit per work order. Its executor-only diff also
    contains public docs, copy, spec promotion, and work-order results.
@@ -91,8 +95,13 @@ real-host validation matrix from task 06 and links the requirement and design.
 | 4 | [04 Launch the controller through WMI](task-04-cim-controller-launch.md) | 03 | B |
 | 5 | [05 Execute PowerShell on Windows CI](task-05-windows-native-script-tests.md) | 04 | B |
 | 6 | [06 Docs, copy, and real-host evidence](task-06-docs-copy-and-host-validation.md) | 02, 05 | B |
+| 7 | [07 Task terminal under ConPTY](task-07-windows-task-terminal.md) | 06 | B |
+| 8 | [08 Resume managed processes by handle](task-08-windows-managed-process-resume.md) | 06 | B |
+| 8 | [09 Shim sweep and excluded-port retry](task-09-windows-shim-sweep-and-port-retry.md) | 06 | B |
 
-The order is sequential. Each work order changes code that the next one tests.
+Waves 1 through 6 are sequential. Each of those work orders changes code that
+the next one tests. Tasks 07 through 09 resolve the findings from task 06's
+real-host matrix and do not depend on each other.
 
 ## Lifecycle evidence
 

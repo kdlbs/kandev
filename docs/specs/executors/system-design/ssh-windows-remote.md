@@ -35,8 +35,11 @@ Windows hosts.
 | `AC-EXECUTORS-SSH-WINDOWS-001.5`, `.9` | PowerShell command transport |
 | `AC-EXECUTORS-SSH-WINDOWS-001.6`, `.7` | Helper upload and remote layout |
 | `AC-EXECUTORS-SSH-WINDOWS-001.8`, `.10`, `.19` | Preparation, cleanup, and credentials |
-| `AC-EXECUTORS-SSH-WINDOWS-001.11`, `.12` | Controller launch, readiness, and resume |
+| `AC-EXECUTORS-SSH-WINDOWS-001.11`, `.12`, `.23` | Controller launch, readiness, and resume |
 | `AC-EXECUTORS-SSH-WINDOWS-001.13`, `.14`, `.15` | Stop, identity, orphan sweep, and reconciliation |
+| `AC-EXECUTORS-SSH-WINDOWS-001.20` | Task terminal |
+| `AC-EXECUTORS-SSH-WINDOWS-001.21` | GitHub CLI shim cleanup |
+| `AC-EXECUTORS-SSH-WINDOWS-001.22` | Managed process start |
 | `AC-EXECUTORS-SSH-WINDOWS-001.16` | Web copy |
 | `AC-EXECUTORS-SSH-WINDOWS-001.18` | Task-directory reclamation |
 | `AC-EXECUTORS-SSH-WINDOWS-002.1` through `.4` | Helper distribution |
@@ -256,7 +259,12 @@ service instead, which creates processes outside the channel:
 
 Environment values reach the child through WMI, never through a command line.
 `retryRemoteAgentctlPort` and the existing handshake retry keep their POSIX
-behavior.
+behavior. Windows refuses a bind inside an excluded port range with an access
+error, and `agentctl` then logs `HTTP server failed to bind` and exits. When it
+exits before step 4 finds its PID, the bind failure reaches the launch stderr
+through the log tail. `startRemoteWindowsAgentctlOnPort` maps that stderr to
+`errSSHAgentctlPortInUse`, as the readiness loop maps the same log line, so
+both paths select another port.
 
 `awaitRemoteAgentctlReadyForPlatform` reads the log with a shared-read file
 stream. It checks liveness with `Get-Process`. The control handshake and launch
@@ -289,6 +297,50 @@ The `agentctl ssh-reconcile` command on non-Linux builds returns
 `ReasonUnsupportedIdentity`. `runRemoteWindowsSSHReconcile` invokes it through
 the envelope with `input`. The executor therefore uses guarded stop and
 confirmed absence for Windows controllers, as it does for macOS controllers.
+
+## Task terminal
+
+The task terminal panel reaches `agentctl`'s `/shell/terminal` routes, as it
+does for every remote executor. `shell.Session` starts its shell through the
+shared `ptyexec` package: `creack/pty` on Unix and ConPTY on Windows. On a
+Windows host the default shell resolves to PowerShell in the task directory.
+
+ConPTY creates the process itself and ignores `exec.Cmd` process attributes.
+`configureShellProcess` is therefore a no-op on Windows, and
+`installShellProcessLifecycle` attaches the kill-on-close job to the running
+process with `winproc.InstallKillOnCloseJobForCommand`. A process that the
+shell starts before that assignment is outside the job. An interactive shell
+starts none before it reads input. `exec.Cmd.Wait` fails
+for a command that `exec` did not start, so `waitShellCommand` reaps through
+`cmd.Process.Wait` on Windows. ConPTY works in the non-interactive WMI context
+that the controller launch uses.
+
+## GitHub CLI shim cleanup
+
+`agentctl` installs its `gh` shim in a fresh `%TEMP%\kandev-github-cli-*`
+directory and removes it on a clean exit. A Windows stop forcibly ends
+`agentctl`, so that cleanup never runs there.
+
+`installGitHubCLIShim` creates `.owner.lock` in the shim directory and holds it
+open for the life of the process. Windows refuses to delete an open file. On
+Windows, `sweepStaleGitHubCLIShimDirs` runs before a new shim is installed. It
+deletes `.owner.lock` in each shim directory and removes the directory only when
+that delete succeeds, which proves that the owner exited. A directory without a
+lock came from an earlier `agentctl` version and is kept, because the sweep
+cannot prove its owner is gone.
+
+## Managed process start
+
+Every managed Git command on Windows starts suspended, joins a kill-on-close job
+object, and then resumes. `winproc.ResumeSuspendedProcess` resumes through
+`NtResumeProcess` on a process handle. When that call is unavailable or fails,
+it falls back to walking a `CreateToolhelp32Snapshot` thread snapshot.
+
+That snapshot lists every thread on the machine. On the validation host it took
+about 50 ms per Git command. A turn-change start checkpoint runs many Git
+commands inside the backend's request deadline, so the first checkpoint of a
+fresh checkout exceeded that deadline. The handle-based resume costs no more
+than an unmanaged start.
 
 ## Task-directory reclamation
 
@@ -337,6 +389,8 @@ Stable archives grow only by one manifest entry.
 - A non-zero `Win32_Process.Create` return value fails the launch, and the
   error includes that return code. If no `agentctl.exe` child appears within the
   poll bound, the launch terminates the wrapper tree and reports the log tail.
+- A refused bind on the selected port retries with another port, up to the
+  shared `retryRemoteAgentctlPort` attempt limit.
 - Preparation failures report redacted output through the existing progress
   callback.
 
@@ -346,8 +400,10 @@ Unit tests use the fake SSH server in `ssh_fake_server_test.go`. It decodes the
 loader and envelope, then returns canned outputs. These tests prove the command
 order, parameters, and parsing. They do not prove PowerShell semantics.
 
-The Windows `native` suite in `backend-tests.yml` runs `^TestSSHWindows`, and
-`make test-windows` runs the same filter. The `TestSSHWindowsExec*` tests in
+The Windows `native` suite in `backend-tests.yml` runs `^TestSSHWindows`,
+`^TestConfigureShellProcessLeavesCreationToConPTY$`, and
+`^TestResumeSuspendedProcess` over the lifecycle, SSH, shell, `cmd/agentctl`,
+and `winproc` packages. `make test-windows` runs the same filter. The `TestSSHWindowsExec*` tests in
 `executor_ssh_windows_exec_test.go` skip on other platforms. On Windows, a fake
 SSH server runs each exec request through `cmd.exe /c` with stdin, as stock
 OpenSSH does, so the production Go code drives real `powershell.exe` and, when
@@ -365,22 +421,12 @@ raw command-line setter carries a Windows build tag. The tests cover:
 - identity, orphan inventory, and log reads
 - tree-terminating stop
 - helper replacement against a running image on NTFS
+- a ConPTY PowerShell session that echoes input
+- a shim sweep that keeps a live owner's directory
+- handle-based resume of a suspended process
 
 Real-host evidence for `AC-EXECUTORS-SSH-WINDOWS-001.5`, `.8`, and `.11` comes
 from a stock Windows OpenSSH Server.
-
-## Known limitations
-
-These limitations were observed on the validation host. Each needs separate
-work:
-
-- The first turn of a new Windows session can miss its turn-change start
-  checkpoint. On a fresh clone, agentctl's Git checkpoint took longer than the
-  backend's request deadline. The backend logs a warning, and later turns
-  capture normally.
-- Stop forcibly ends `agentctl.exe`, so agentctl cannot remove its
-  `%TEMP%\kandev-github-cli-*` shim directory. Each session leaves one directory
-  of links, or of copies when the volume refuses links.
 
 ## Real-host evidence
 
@@ -409,3 +455,17 @@ PowerShell 7.
 
 Messages from `cmd.exe` itself, such as the length error, use the host's OEM
 code page. Kandev reports them as received.
+
+These product runs used the same host on 2026-11-23, with a mock agent and a
+disposable backend:
+
+| Probe | Result |
+| --- | --- |
+| Thread count on the host | 9,363 |
+| Managed Git command, thread-snapshot resume | 73 ms average, against 25 ms for an unmanaged start |
+| Managed Git command, `NtResumeProcess` resume | 23.5 ms average |
+| First turn of 9 new sessions with the thread-snapshot resume | Each logged `failed to capture turn-change start checkpoint`; each change set ended `unavailable` with reason `capture_failed` |
+| First turn of 3 new sessions with the handle-based resume | No warning; each change set ended `ready` |
+| Task terminal over the product WebSocket | PowerShell 7 prompt in the task directory; `Write-Output` echoed its marker |
+| 13 shim directories left by forced stops, then one new launch | All 13 removed. The new controller's directory and a lockless fixture directory remained |
+
