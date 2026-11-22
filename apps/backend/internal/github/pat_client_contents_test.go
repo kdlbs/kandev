@@ -103,6 +103,9 @@ func TestPATClient_GetRepoFileContent_RejectsUnsupportedEncoding(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `unsupported encoding "none"`) {
 		t.Fatalf("err = %v, want it to name the unsupported encoding", err)
 	}
+	if !errors.Is(err, ErrRepoFileTooLarge) {
+		t.Fatalf("err = %v, want ErrRepoFileTooLarge for an oversized file", err)
+	}
 }
 
 func TestPATClient_GetRepoFileContent_RejectsUndecodableBase64(t *testing.T) {

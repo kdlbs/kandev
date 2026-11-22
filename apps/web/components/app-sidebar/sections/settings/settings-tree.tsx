@@ -10,6 +10,8 @@ import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import { useSettingsDiscovery } from "@/hooks/domains/settings/use-settings-discovery";
 import { BUILT_IN_LAYOUT_PROFILES, isBuiltInLayoutOverride } from "@/lib/layout/layout-profiles";
+import { PROMPTS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog";
+import { PromptConflictIndicator } from "@/components/settings/prompt-conflict-indicator";
 import { SettingsBranch, SettingsLeaf, SettingsSectionHeader } from "./settings-nav-primitives";
 import { SettingsSearch } from "./settings-search";
 import { SettingsMenuNodeRow } from "./settings-menu-node";
@@ -109,7 +111,14 @@ function SettingsMenuRow({
 }) {
   const { t } = useTranslation();
   const label = t(item.labelKey);
-  const labelSuffix = count !== undefined ? <MenuCountBadge count={count} /> : undefined;
+  const attention = item.href === PROMPTS_SETTINGS_HREF ? <PromptConflictIndicator /> : null;
+  const labelSuffix =
+    count !== undefined || attention ? (
+      <>
+        {count !== undefined && <MenuCountBadge count={count} />}
+        {attention}
+      </>
+    ) : undefined;
 
   if (!branch) {
     return (
