@@ -119,6 +119,7 @@ func agentDeliveryPromptRetentionCandidateQuery(
 	return strings.Replace(agentDeliveryPromptRetentionCandidateSQL, "/* submission filters */", filter, 1), args
 }
 
+// A settled failure without terminal identifiers is a local non-delivery receipt.
 const agentDeliveryPromptRetentionCandidateSQL = `
 	WITH source AS (
 		SELECT s.id, s.session_id, s.incarnation_id, s.harness_generation,
@@ -134,11 +135,16 @@ const agentDeliveryPromptRetentionCandidateSQL = `
 			CASE WHEN state IN ('completed', 'failed', 'cancelled') AND outcome = state
 			  AND payload_hash <> '' AND payload_length > 0
 			  AND (payload_bytes = 0 OR payload_bytes = payload_length)
-			  AND terminal_stream_id <> '' AND terminal_sequence > 0 AND terminal_turn_id <> ''
 			  AND EXISTS (
 				SELECT 1 FROM task_sessions sess
 				WHERE sess.id = source.session_id AND sess.queue_incarnation_id = source.incarnation_id
 			  )
+			  AND ((state = 'failed' AND terminal_stream_id = '' AND terminal_sequence = 0 AND terminal_turn_id = ''
+			    AND NOT EXISTS (SELECT 1 FROM agent_delivery_inbox sent
+			      WHERE sent.submission_id = source.id AND sent.terminal <> 0)
+			    AND NOT EXISTS (SELECT 1 FROM agent_delivery_effects sent
+			      WHERE sent.effect_type = 'agent_delivery.terminal_settlement' AND sent.submission_id = source.id))
+			  OR (terminal_stream_id <> '' AND terminal_sequence > 0 AND terminal_turn_id <> ''
 			  AND EXISTS (
 				SELECT 1 FROM agent_delivery_cursors cur
 				WHERE cur.stream_id = source.terminal_stream_id AND cur.session_id = source.session_id
@@ -184,13 +190,13 @@ const agentDeliveryPromptRetentionCandidateSQL = `
 				WHERE newer.effect_type = 'agent_delivery.terminal_settlement'
 				  AND newer.submission_id = source.id AND newer.stream_id = source.terminal_stream_id
 				  AND newer.sequence > source.terminal_sequence
-			  )
+			  )))
 			  AND NOT EXISTS (
 				SELECT 1 FROM session_recovery_blocks blk
 				WHERE blk.session_id = source.session_id AND blk.incarnation_id = source.incarnation_id
 				  AND blk.expected_generation = source.harness_generation
 				  AND blk.consumer_reference = 'agent_delivery' AND blk.delivery_submission_id = source.id
-				  AND (blk.delivery_stream_id = '' OR blk.delivery_stream_id = source.terminal_stream_id)
+				  AND (source.terminal_stream_id = '' OR blk.delivery_stream_id = '' OR blk.delivery_stream_id = source.terminal_stream_id)
 				  AND blk.state = 'open'
 			  ) THEN 1 ELSE 0 END AS proven
 		FROM source
@@ -276,6 +282,12 @@ const agentDeliveryPromptRetentionUpdateSQL = `
 				WHERE session.id = agent_delivery_submissions.session_id
 				  AND session.queue_incarnation_id = agent_delivery_submissions.incarnation_id
 			  )
+			  AND ((state = 'failed' AND terminal_stream_id = '' AND terminal_sequence = 0 AND terminal_turn_id = ''
+			    AND NOT EXISTS (SELECT 1 FROM agent_delivery_inbox sent
+			      WHERE sent.submission_id = agent_delivery_submissions.id AND sent.terminal <> 0)
+			    AND NOT EXISTS (SELECT 1 FROM agent_delivery_effects sent
+			      WHERE sent.effect_type = 'agent_delivery.terminal_settlement' AND sent.submission_id = agent_delivery_submissions.id))
+			  OR (terminal_stream_id <> '' AND terminal_sequence > 0 AND terminal_turn_id <> ''
 			  AND EXISTS (
 				SELECT 1 FROM agent_delivery_cursors cursor
 				WHERE cursor.stream_id = agent_delivery_submissions.terminal_stream_id
@@ -335,7 +347,7 @@ const agentDeliveryPromptRetentionUpdateSQL = `
 				  AND newer.submission_id = agent_delivery_submissions.id
 				  AND newer.stream_id = agent_delivery_submissions.terminal_stream_id
 				  AND newer.sequence > agent_delivery_submissions.terminal_sequence
-			  )
+			  )))
 			  AND NOT EXISTS (
 				SELECT 1 FROM session_recovery_blocks block
 				WHERE block.session_id = agent_delivery_submissions.session_id
@@ -343,6 +355,6 @@ const agentDeliveryPromptRetentionUpdateSQL = `
 				  AND block.expected_generation = agent_delivery_submissions.harness_generation
 				  AND block.consumer_reference = 'agent_delivery'
 				  AND block.delivery_submission_id = agent_delivery_submissions.id
-				  AND (block.delivery_stream_id = '' OR block.delivery_stream_id = agent_delivery_submissions.terminal_stream_id)
+				  AND (agent_delivery_submissions.terminal_stream_id = '' OR block.delivery_stream_id = '' OR block.delivery_stream_id = agent_delivery_submissions.terminal_stream_id)
 				  AND block.state = 'open'
 			  )`

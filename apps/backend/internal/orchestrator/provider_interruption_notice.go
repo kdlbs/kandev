@@ -19,5 +19,9 @@ func (s *Service) updateContinuationPhase(ctx context.Context, taskID, sessionID
 	}
 	data := watcher.AgentEventData{TaskID: taskID, SessionID: sessionID, RecoveryMode: recoveryModeContinue, RecoveryPhase: phase}
 	data.ProviderError = &streams.ProviderError{ProviderID: entry.providerID, ModelID: entry.modelID}
-	s.createTransientRetryStatusMessageLocked(state, ctx, data, &routingerr.Error{Code: routingerr.CodeAgentTransportLost}, entry.attempt, 0, time.Now().UTC())
+	code := routingerr.CodeAgentTransportLost
+	if entry.continuationPolicy == continuationPolicyCapacityLive {
+		code = routingerr.CodeModelCapacity
+	}
+	s.createTransientRetryStatusMessageLocked(state, ctx, data, &routingerr.Error{Code: code}, entry.attempt, 0, time.Now().UTC())
 }

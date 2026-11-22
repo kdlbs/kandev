@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/worktree/copyfiles"
 	"go.uber.org/zap"
@@ -52,6 +53,31 @@ func (c *Client) RequestFileTree(ctx context.Context, path string, depth int) (*
 	}
 
 	return &response, nil
+}
+
+// ListWorkspaceRootFiles requests the files outside repository checkouts.
+func (c *Client) ListWorkspaceRootFiles(ctx context.Context) (*types.WorkspaceRootFiles, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/workspace/root-files", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create workspace root file request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workspace root files: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close workspace root files response body", zap.Error(err))
+		}
+	}()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("workspace root file listing failed with status %d", resp.StatusCode)
+	}
+	var listing types.WorkspaceRootFiles
+	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
+		return nil, fmt.Errorf("failed to parse workspace root files response: %w", err)
+	}
+	return &listing, nil
 }
 
 // SearchFiles searches for files matching the query via HTTP GET

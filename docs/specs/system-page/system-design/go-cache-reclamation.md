@@ -6,7 +6,7 @@ requirements:
   - REQ-SYSTEM-PAGE-GO-CACHE-004
   - REQ-SYSTEM-PAGE-GO-CACHE-005
 created: 2026-10-02
-updated: 2026-10-02
+updated: 2026-11-03
 owners:
   - cfl
 ---
@@ -129,6 +129,40 @@ removed bytes from before-minus-after while writers are active. A bounded final
 measurement can report remaining bytes or incomplete status. Open files and
 sparse files mean these bytes are not an exact filesystem-free-space delta.
 
+### Resumed scan validation
+
+`cleanupSession` retains directory handles and `directories` identities across
+bounded calls. `prepareCleanupSession` currently validates only the root when
+reusing a session. The root can remain unchanged while a cache shard is recreated.
+An open frame then describes the old directory, while path inspection sees its
+replacement. `openEntryDirectory` correctly refuses this identity mismatch.
+
+Before resuming discovery or deletion, validate the retained active frame chain
+against its saved identities through the anchored root. This check is bounded by
+`cleanupMaxDepth`. Check cancellation during validation. Preserve inode identity,
+symlink, and path/descriptor mount checks. Modification time alone is not identity.
+
+If an active directory disappeared or was recreated as a regular directory on the
+same validated mount, close the old session and start fresh discovery once in that
+invocation. Reuse the original deadline and pass budget. Do not carry the old
+threshold measurement or candidates into the new session. A replacement below the
+threshold must survive. Unchanged sessions continue from their existing cursors.
+
+A symlink, changed root, mount mismatch, or unavailable mount identity remains a
+safety failure. Do not classify those conditions as ordinary cache churn. A fresh
+attempt still uses all existing ownership and containment checks.
+
+Directory replacement can also occur after validation or affect saved candidates
+whose frames already closed. Keep removal-time checks authoritative. On such an
+identity mismatch, stop stale traversal and retire its session rather than emitting
+one error per remaining file. Return a partial result with the stable issue
+`cache_parent_changed` and reason `cache_scan_invalidated`. Retain bytes successfully
+removed during that pass. The next eligible call starts fresh threshold discovery.
+Do not restart repeatedly within one call or schedule an unbounded catch-up loop.
+
+These rules implement `AC-SYSTEM-PAGE-GO-CACHE-004.8`, `.11`, `.12`, and `.13`.
+They preserve the existing direct-deletion decision and safety authority.
+
 No quarantine intent means no retention delay and no `active_quarantine` blocker.
 Historical quarantine records still use their old controller and retention rules.
 Preserve historical result decoding and keep `quarantine_entry: null` in new results.
@@ -186,6 +220,61 @@ help and at least 44-pixel phone targets, and do not enlarge desktop controls.
 The nearest exemplar is the existing Storage policy card and storage-setting-help.
 Localize all new copy in seven languages and regenerate Traditional Chinese.
 
+### Maintenance history presentation
+
+Keep persisted run states and historical JSON unchanged. Derive a display outcome
+from `StorageMaintenanceRun` in a pure, feature-local history summary helper.
+Use structured provider results before raw error strings. Preserve queued,
+running, cancelled, and busy states. A terminal run with only Go entry-budget
+progress can show **Incomplete**, even when its stored legacy state is `failed`.
+Expected progress requires `incomplete_scan` or `cleanup_in_progress`, no issue
+codes except `entry_limit_reached`, and no error from another provider.
+If a raw provider error exists, it must contain only the recognized budget issue.
+An unknown error must prevent progress classification even beside known codes.
+
+Any genuine provider error takes precedence over progress. Show **Partial** when
+structured results prove some cleanup succeeded, otherwise show **Failed**.
+Nonzero removed or quarantined bytes prove useful work. A successful no-op alone
+does not. A stored failed run without explanatory provider data remains Failed.
+Unknown or malformed error results remain failures. Missing remaining measurements
+remain unknown. Skipped resources are separate context, never evidence of failure
+or a reason to reinterpret an unknown error as harmless progress.
+
+`StorageRunHistory` owns status, trigger, timestamp, and the result disclosure.
+`StorageGoCacheResult` owns removed/remaining facts and concise Go explanations.
+Deduplicate issue codes without claiming exact failure counts: the backend retains
+only a bounded sample. Recognize legacy parent-change messages for their localized
+explanation, but do not classify outcomes from English text alone. Use a generic
+localized explanation for unknown errors. Read and delete failures keep their own
+explanations; only explicit parent-change or directory-identity evidence may fold
+them into the changed-entry explanation. Retain stored `partial` and raw provider
+error evidence so a result without a recognized issue category still shows one
+generic explanation, including in the inline overview. Preserve full `run.message`
+and JSON inside a separately labelled **Technical details** disclosure, initially
+closed.
+
+Use `text-sm` for result facts and explanations. Keep metadata and badges at the
+existing metadata size. Override the feature's inherited accordion paragraph
+margins with compact, explicit gaps. The shared accordion defaults to `text-xs`
+and adds paragraph margins, so setting the result child's text size alone is
+insufficient. Keep this override local to storage history. Do not change shared
+accordion, card, or global typography for this repair.
+
+Desktop places removed and remaining facts together. Phone uses labelled facts
+on separate lines, followed by issue context and the details control. The entry
+point is Settings > System > Storage > Host > Maintenance history. The existing
+storage history accordion and policy card supply the inline phone precedent.
+No drawer is needed for this short, read-only result. The page owns normal vertical
+scrolling. The optional diagnostic block contains its own overflow and height.
+Phone disclosure controls have at least 44px touch targets. Ordinary desktop
+buttons retain the shared 28px size. Content-sized run rows can wrap naturally.
+Both viewports share outcome derivation, data, permissions, and disclosure state.
+
+Map labels through i18next at render time. Add copy in English, Portuguese,
+Simplified Chinese, Japanese, and Korean. Generate the Traditional Chinese pair
+and the pseudo-locale with the repository scripts. No new API or database schema
+is required. `AC-SYSTEM-PAGE-GO-CACHE-005.5` through `.9` define the visible results.
+
 ## Verification
 
 The completed [implementation package](../../../plans/go-cache-reclamation/plan.md)
@@ -196,3 +285,6 @@ still reject a malicious path. Do not require an active build to succeed in busy
 
 Public operations documentation describes the shipped behavior. Implementation
 changes do not alter live settings or storage during development.
+
+The [scan recovery and history repair package](../../../plans/storage-cleanup-recovery/plan.md)
+adds resumed-directory replacement regressions and desktop/phone history checks.

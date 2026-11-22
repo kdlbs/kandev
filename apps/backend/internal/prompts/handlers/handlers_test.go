@@ -28,6 +28,12 @@ func newTestRouter(t *testing.T) (*gin.Engine, func()) {
 
 func newTestRouterForIdentity(t *testing.T, identity authn.Identity) (*gin.Engine, func()) {
 	t.Helper()
+	router, _, cleanup := newTestRouterWithService(t, identity)
+	return router, cleanup
+}
+
+func newTestRouterWithService(t *testing.T, identity authn.Identity) (*gin.Engine, *service.Service, func()) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	tmpDir := t.TempDir()
@@ -59,7 +65,7 @@ func newTestRouterForIdentity(t *testing.T, identity authn.Identity) (*gin.Engin
 			t.Errorf("close repo: %v", err)
 		}
 	}
-	return router, cleanup
+	return router, svc, cleanup
 }
 
 func postJSON(t *testing.T, router *gin.Engine, path string, body any) *httptest.ResponseRecorder {

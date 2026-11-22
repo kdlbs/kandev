@@ -1,7 +1,11 @@
 import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
-import { openQuickChatWithAgent, startQuickChatFromSetup } from "./quick-chat-helpers";
+import {
+  openNewQuickChatSetup,
+  openQuickChatWithAgent,
+  startQuickChatFromSetup,
+} from "./quick-chat-helpers";
 
 /**
  * Quick chats are shared state: they are created, renamed and closed from any
@@ -12,6 +16,8 @@ import { openQuickChatWithAgent, startQuickChatFromSetup } from "./quick-chat-he
  * "Device B" is a second browser context against the same backend — a distinct
  * client with its own store and WebSocket, which is exactly what a phone is.
  */
+
+test.use({ trace: "retain-on-failure" });
 
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 };
 const MOBILE_VIEWPORT = { width: 393, height: 851 };
@@ -81,8 +87,7 @@ test.describe("Quick Chat cross-device sync", () => {
 
     // Device A starts a second chat while B is already open and idle. B must
     // learn about it from the task event alone — no reload, no navigation.
-    await dialogA.getByTestId("quick-chat-add-menu-trigger").click();
-    await testPage.getByTestId("quick-chat-new-agent").click();
+    await openNewQuickChatSetup(dialogA, testPage);
     await startQuickChatFromSetup(dialogA, testPage);
     await expect(dialogA.getByTestId("quick-chat-tab")).toHaveCount(2);
 
@@ -124,8 +129,7 @@ test.describe("Quick Chat cross-device sync", () => {
 
     await testPage.setViewportSize(DESKTOP_VIEWPORT);
     const dialogA = await openQuickChatWithAgent(testPage);
-    await dialogA.getByTestId("quick-chat-add-menu-trigger").click();
-    await testPage.getByTestId("quick-chat-new-agent").click();
+    await openNewQuickChatSetup(dialogA, testPage);
     await startQuickChatFromSetup(dialogA, testPage);
     await expect(dialogA.getByTestId("quick-chat-tab")).toHaveCount(2);
 

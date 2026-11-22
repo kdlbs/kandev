@@ -1,5 +1,7 @@
 "use client";
 
+import { FileViewerOptions } from "../file-viewer-options";
+import { PluginFilePreview } from "../plugin-file-preview";
 import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -7,6 +9,7 @@ import { IconEye, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { PanelBody, PanelHeaderBarSplit, PanelRoot } from "../panel-primitives";
 import { FileViewerContent } from "../file-viewer-content";
+import { FileEditorContent } from "../file-editor-content";
 import { HtmlPreviewContent } from "../html-preview-content";
 import { MarkdownPreviewContent } from "../markdown-preview-content";
 import { FileImageViewer } from "../file-image-viewer";
@@ -34,9 +37,57 @@ type MobileFileViewerPanelProps = {
   initialRenderedPreview?: boolean;
 };
 
+const ignoreFileChange = () => {};
+
 function resolveViewerKind(file: OpenFileTab): "image" | "binary" | "text" {
   if (!file.isBinary) return "text";
   return getFileCategory(file.path) === "image" ? "image" : "binary";
+}
+
+function MobileTextFileContent({
+  file,
+  worktreePath,
+  sessionId,
+  taskId,
+  repositoryId,
+}: {
+  file: OpenFileTab;
+  worktreePath?: string;
+  sessionId: string | null;
+  taskId: string | null;
+  repositoryId?: string;
+}) {
+  if (!sessionId) {
+    return (
+      <FileViewerContent
+        path={file.path}
+        repo={file.repo}
+        content={file.content}
+        sessionId={undefined}
+      />
+    );
+  }
+
+  return (
+    <FileEditorContent
+      path={file.path}
+      content={file.content}
+      originalContent={file.originalContent}
+      isDirty={false}
+      isSaving={false}
+      sessionId={sessionId}
+      taskId={taskId}
+      repositoryId={repositoryId}
+      worktreePath={worktreePath}
+      repo={file.repo}
+      enableComments
+      readOnly
+      enableLsp={false}
+      showToolbar={false}
+      onChange={ignoreFileChange}
+      onSave={ignoreFileChange}
+    />
+  );
 }
 
 function MobileViewerBody({
@@ -67,7 +118,9 @@ function MobileViewerBody({
   };
 }) {
   let viewerContent: ReactNode;
-  if (viewerKind === "image") {
+  if (file.previewOnly && sessionId) {
+    viewerContent = <PluginFilePreview path={file.path} repo={file.repo} sessionId={sessionId} />;
+  } else if (viewerKind === "image") {
     viewerContent = (
       <FileImageViewer path={file.path} content={file.content} worktreePath={worktreePath} />
     );
@@ -107,17 +160,23 @@ function MobileViewerBody({
     );
   } else {
     viewerContent = (
-      <FileViewerContent
-        path={file.path}
-        repo={file.repo}
-        content={file.content}
-        sessionId={sessionId ?? undefined}
-      />
+      <FileViewerOptions path={file.path} repo={file.repo} sessionId={sessionId}>
+        <MobileTextFileContent
+          file={file}
+          worktreePath={worktreePath}
+          sessionId={sessionId}
+          taskId={taskId}
+          repositoryId={repositoryId}
+        />
+      </FileViewerOptions>
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="mobile-file-viewer-content">
+    <div
+      className="flex h-full min-h-0 flex-col [&_.cm-scroller]:touch-pan-y [&_.cm-scroller]:overscroll-contain"
+      data-testid="mobile-file-viewer-content"
+    >
       {viewerContent}
     </div>
   );
@@ -180,7 +239,7 @@ function MobileFileViewerHeader({
             repositoryName={file.repo}
             size="touch"
           />
-          <FileViewerDownloadButton onDownload={onDownload} />
+          <FileViewerDownloadButton onDownload={file.previewOnly ? undefined : onDownload} />
           {canPreview && (
             <Button
               variant="ghost"
@@ -239,13 +298,15 @@ export function MobileFileViewerPanel({
     [file.path, file.content, file.isBinary],
   );
 
-  const initialMarkdownPreview = initialRenderedPreview && previewKind === "markdown";
+  const defaultPreview = useAppStore((s) => s.userSettings?.markdownPreviewByDefault ?? true);
+  const initialMarkdownPreview =
+    (initialRenderedPreview || defaultPreview) && previewKind === "markdown";
   const [renderedPreview, setRenderedPreview] = useState(initialMarkdownPreview);
   const fileIdentity = `${file.repo ?? ""}\u0000${file.path}`;
   const [lastFileIdentity, setLastFileIdentity] = useState(fileIdentity);
 
-  // Reset preview mode when the file changes so reopening a previewable file
-  // always starts in editor view, not the previous preview state.
+  // Restore the initial mode for each file identity, using the saved default
+  // or the caller-supplied Preview request.
   // Adjust state during render per React docs recommendation.
   if (lastFileIdentity !== fileIdentity) {
     setLastFileIdentity(fileIdentity);
@@ -273,7 +334,7 @@ export function MobileFileViewerPanel({
         previewKind={previewKind}
         renderedPreview={renderedPreview}
         htmlPreview={htmlPreview}
-        onDownload={onDownload}
+        onDownload={file.previewOnly ? undefined : onDownload}
         onPreviewHtml={publishCurrentHtmlPreview}
         onPreviewMarkdown={() => setRenderedPreview(true)}
         onClose={onClose}

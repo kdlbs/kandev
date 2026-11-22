@@ -58,7 +58,7 @@ func TestExistingWorkspaceStart_ActiveAgent(t *testing.T) {
 	}
 
 	_, err := exec.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, "queued follow-up", true, "", request, nil, nil, nil, nil, true,
+		ctx, task, session, "queued follow-up", true, "", request, nil, nil, nil, nil, nil, true,
 	)
 	if err == nil {
 		<-started
@@ -102,7 +102,7 @@ func TestExistingWorkspaceStart_PreparedWorkspaceCanStart(t *testing.T) {
 	}
 
 	execution, err := exec.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, "initial brief", true, "", request, nil, nil, nil, nil, true,
+		ctx, task, session, "initial brief", true, "", request, nil, nil, nil, nil, nil, true,
 	)
 
 	require.NoError(t, err)
@@ -158,7 +158,7 @@ func TestExistingWorkspaceStart_BindsInitialDeliveryBeforeAdmission(t *testing.T
 	}
 	exec := newTestExecutor(t, manager, repo)
 	_, err := exec.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, "initial prompt", true, "", request, nil, nil, nil, nil, false,
+		ctx, task, session, "initial prompt", true, "", request, nil, nil, nil, nil, nil, false,
 	)
 	require.NoError(t, err)
 	select {
@@ -288,8 +288,7 @@ func assertCancelledResumeCleanupOwnership(t *testing.T, f *cancelledResumeStart
 
 type runningStateRaceRepository struct{ *mockRepository }
 
-func (r *runningStateRaceRepository) UpdateTaskSessionIfCurrentState(
-	_ context.Context,
+func (r *runningStateRaceRepository) advanceToRunningAndReject(
 	session *models.TaskSession,
 	expected models.TaskSessionState,
 ) (bool, error) {
@@ -303,6 +302,32 @@ func (r *runningStateRaceRepository) UpdateTaskSessionIfCurrentState(
 	current.State = models.TaskSessionStateRunning
 	r.sessions[session.ID] = current
 	return false, nil
+}
+
+func (r *runningStateRaceRepository) UpdateTaskSessionIfCurrentState(
+	_ context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+) (bool, error) {
+	return r.advanceToRunningAndReject(session, expected)
+}
+
+func (r *runningStateRaceRepository) UpdateTaskSessionIfCurrentStateForLaunch(
+	_ context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	_ string,
+) (bool, error) {
+	return r.advanceToRunningAndReject(session, expected)
+}
+
+func (r *runningStateRaceRepository) UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+	_ context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	_ string,
+) (bool, error) {
+	return r.advanceToRunningAndReject(session, expected)
 }
 
 func TestSessionStartingRaceWithRunningStateReturnsBusy(t *testing.T) {

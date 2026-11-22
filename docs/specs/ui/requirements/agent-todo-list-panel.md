@@ -44,6 +44,17 @@ checklist.
 - **AC-UI-AGENT-TODO-LIST-PANEL-001.7:** Once present, the Todos tab has a normal close control and normal drag/reorder/split behavior — no special restriction is introduced. Closing it removes it from the current view; there is no per-session memory of that closure. The preference — not the close action — is the authoritative on/off control: switching tasks and back, or any other event that re-runs the synchronization (e.g. a layout restoration completing), re-adds it while the preference remains on. This mirrors the existing PR Details pattern, minus its closed-for-session suppression, which this feature does not need because the preference itself is the single deliberate on/off action here (PR Details additionally suppresses re-creation because *review linkage*, not a deliberate user setting, is what re-triggers it).
 - **AC-UI-AGENT-TODO-LIST-PANEL-001.8:** The Todos panel is also listed in the task workbench's own "+" add-panel menu (`apps/web/components/task/dockview-add-panel-items.tsx`), alongside Plan/Browser/VS Code, so a user can manually open (or refocus) it in any group regardless of the preference's current value — mirroring Plan's always-shown convention (no session-count guard) since, like Plan, it is off by default and single-instance rather than a near-always-open panel like Files/Changes. Manually adding it while the preference is off is not itself persisted or protected: the next event that re-runs the visibility-sync hook (e.g. switching tasks and back) removes it again, the same as it would for any other task once the preference turns off.
 
+### REQ-UI-AGENT-TODO-LIST-PANEL-002: Status chip disclosure
+
+The status chip provides access to the active session checklist across input modes.
+
+- **AC-UI-AGENT-TODO-LIST-PANEL-002.1:** When a session has todo items, a user on a coarse-pointer desktop can tap the status chip to reveal the checklist, including its item text, status and completed count, and dismiss it.
+- **AC-UI-AGENT-TODO-LIST-PANEL-002.2:** When a session has todo items on a phone or tablet, tapping the status chip reveals the same checklist and allows dismissal.
+- **AC-UI-AGENT-TODO-LIST-PANEL-002.3:** On a fine-pointer desktop, hovering over or focusing the status chip reveals the same checklist. The chip and panel retain the same item order, statuses and completion values.
+- **AC-UI-AGENT-TODO-LIST-PANEL-002.4:** When the active session has no todo items, the status chip is absent.
+
+This disclosure does not change todo production, persistence, panel preference or task layout.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/agent-todo-list-panel.md).

@@ -24,7 +24,11 @@ import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
 import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
-import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
+import type {
+  TaskStatusSummaryLaunchQueue,
+  TaskStatusSummaryQuotaWait,
+} from "@/lib/types/task-status-summary";
+import type { TaskWaitReason } from "@/lib/ui/waiting-reason";
 import { TaskItemLeadingBadges } from "./task-item-leading-badges";
 import {
   resolveTaskRowPresentation,
@@ -121,9 +125,13 @@ type TaskItemProps = {
   /** Destination-resident WIP queue status, separate from queued prompts. */
   wipQueue?: WipQueueStatus;
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  quotaWait?: TaskStatusSummaryQuotaWait | null;
+  waitReason?: TaskWaitReason | null;
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
+  /** Show the unread dot; the shared row resolves setting and selection. */
+  hasUnreadMessages?: boolean;
   automaticColor?: TaskMarkerPresentation;
   taskRowPresentation?: import("@/lib/state/slices/ui/sidebar-task-row-presentation").SidebarTaskRowPresentation;
 };
@@ -135,6 +143,10 @@ function handleTaskItemKeyDown(
   isPendingRemoval?: boolean,
 ): void {
   if (e.key !== "Enter" && e.key !== " ") return;
+  if (e.target instanceof Element) {
+    const button = e.target.closest("button");
+    if (button && e.currentTarget.contains(button)) return;
+  }
   e.preventDefault();
   if (isPendingRemoval) return;
   // Keyboard activation mirrors mouse: when a selection-aware handler is wired,
@@ -233,6 +245,7 @@ type TaskItemContentProps = {
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
+  hasUnreadMessages?: boolean;
   comparisonUnavailable?: boolean;
   resolvedTaskRow: ResolvedTaskRowPresentation;
   relativeTime?: string;
@@ -258,6 +271,7 @@ function TaskItemContent({
   launchQueue,
   issueInfo,
   agentErrorMessage,
+  hasUnreadMessages,
   comparisonUnavailable,
   resolvedTaskRow,
   relativeTime,
@@ -273,9 +287,13 @@ function TaskItemContent({
           isPinned={isPinned}
           taskId={taskId}
           prInfo={prInfo}
-          showChangeRequestStatus={resolvedTaskRow.trailing !== "change_request_status"}
+          showChangeRequestStatus={
+            resolvedTaskRow.trailing !== "change_request_status" &&
+            resolvedTaskRow.trailing !== "none"
+          }
           issueInfo={issueInfo}
           agentErrorMessage={agentErrorMessage}
+          hasUnreadMessages={hasUnreadMessages}
         />
         <TaskItemComparisonUnavailable unavailable={comparisonUnavailable} />
         {isRemoteExecutor && (
@@ -404,7 +422,10 @@ export const TaskItem = memo(function TaskItem({
   issueInfo,
   isPinned,
   agentErrorMessage,
+  hasUnreadMessages,
   automaticColor,
+  quotaWait,
+  waitReason,
   isOnLastWorkflowStep = false,
   taskRowPresentation,
 }: TaskItemProps) {
@@ -448,6 +469,9 @@ export const TaskItem = memo(function TaskItem({
         state={state}
         foregroundActivity={foregroundActivity}
         parkedOnBackgroundWork={parkedOnBackgroundWork}
+        waitReason={waitReason}
+        launchQueue={launchQueue}
+        quotaWait={quotaWait}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
         isPendingRemoval={isPendingRemoval}
@@ -475,6 +499,7 @@ export const TaskItem = memo(function TaskItem({
         launchQueue={launchQueue}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
+        hasUnreadMessages={hasUnreadMessages}
         comparisonUnavailable={comparisonUnavailable}
         resolvedTaskRow={resolvedTaskRow}
         relativeTime={relativeTime}

@@ -13,6 +13,7 @@ import (
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/retention"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -54,6 +55,14 @@ func (i *storageInventory) LoadWorkspaceInventory(ctx context.Context) (workspac
 		return workspaces.Inventory{}, err
 	}
 	inventory.KnownTaskIDs, inventory.ArchivedTaskIDs = taskEligibilitySets(tasks)
+	retained, err := retention.Load(ctx, i.reader)
+	if err != nil {
+		return workspaces.Inventory{}, err
+	}
+	for taskID := range retained.TaskIDs {
+		inventory.KnownTaskIDs[taskID] = struct{}{}
+		delete(inventory.ArchivedTaskIDs, taskID)
+	}
 	return inventory, nil
 }
 
@@ -70,7 +79,11 @@ func (i *storageInventory) activeWorktreePaths(ctx context.Context) ([]string, e
 	if err := i.reader.SelectContext(ctx, &paths, query); err != nil {
 		return nil, err
 	}
-	return paths, nil
+	retained, err := retention.Load(ctx, i.reader)
+	if err != nil {
+		return nil, err
+	}
+	return append(paths, retained.Paths...), nil
 }
 
 func (i *storageInventory) activeWorkspaceRows(ctx context.Context) ([]activeWorkspaceRow, error) {
@@ -125,6 +138,13 @@ func taskEligibilitySets(tasks []taskWorkspaceState) (map[string]struct{}, map[s
 type containerInventory struct{ reader *sqlx.DB }
 
 func (i *containerInventory) ContainerTaskRemovable(ctx context.Context, taskID string) (bool, error) {
+	retained, err := retention.LoadForTask(ctx, i.reader, taskID)
+	if err != nil {
+		return false, err
+	}
+	if retained.Protects(taskID, "", "") {
+		return false, nil
+	}
 	task, err := i.loadContainerTask(ctx, taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil

@@ -77,6 +77,15 @@ This is explicit maintenance of selected records. It does not extend automatic
   REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-004. An unaudited change to branch or checkout
   identity shall still block removal. Repair itself shall preserve local files
   until an authorized cleanup removes the checkout.
+- **AC-TASKS-WORKTREE-INVENTORY-REPAIR-002.4:** A cleanup identity conflict shall expose a reconciliation-required diagnostic for each affected worktree.
+  It shall identify the failed recorded-versus-current comparison and a safe inspection action without exposing paths, commits, or repository contents.
+  Oversized diagnostic selections shall expose truncation and retain the original evidence.
+- **AC-TASKS-WORKTREE-INVENTORY-REPAIR-002.5:** Cascade-critical conflicts shall retain capped, generation-fenced retry and the original immutable evidence across restart.
+  Every attempt shall inspect current identity again.
+  Repetition alone shall neither authorize deletion nor create a terminal failure.
+- **AC-TASKS-WORKTREE-INVENTORY-REPAIR-002.6:** An independent safe resource shall remain eligible for cleanup beside a conflicting resource.
+  Explicit reconciliation shall preserve historical evidence and require the existing ownership checks before resumed cleanup.
+  Transient Git, cancellation, and deadline errors shall remain distinguishable from proven identity conflicts.
 
 ### REQ-TASKS-WORKTREE-INVENTORY-REPAIR-003: Accurate recovery diagnostics
 
@@ -156,3 +165,4 @@ Existing repair guarantees remain applicable.
 - [System design](../system-design/worktree-inventory-repair.md)
 - [Implementation plan](../../../plans/worktree-inventory-repair/plan.md)
 - [Legacy duplicate repair package](../../../plans/legacy-worktree-alias-repair/plan.md)
+- [Startup and shutdown diagnostic integrity](../../../plans/startup-shutdown-diagnostic-integrity/plan.md)

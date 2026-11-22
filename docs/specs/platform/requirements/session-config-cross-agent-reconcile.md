@@ -170,3 +170,14 @@ changes only in that it no longer lists keys the current agent never advertised.
 ## Open questions
 
 - None.
+
+## System design
+
+- [Session config reconciliation](../system-design/session-config-cross-agent-reconcile.md).
+
+## Implementation plans
+
+- [Original cross-agent reconciliation](../../../plans/session-config-cross-agent-reconcile/plan.md).
+- [Selector availability with stale config](../../../plans/model-selector-stale-config-availability/plan.md).
+  This package restores the selector availability criteria for catalogs without
+  a true settlement marker. The acceptance criteria remain unchanged.

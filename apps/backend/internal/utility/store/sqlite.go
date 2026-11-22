@@ -148,8 +148,9 @@ func (r *sqliteRepository) initSchema() error {
 	if err := r.migrateTemplatePlaceholders(); err != nil {
 		return fmt.Errorf("failed to migrate template placeholders: %w", err)
 	}
-
-	return nil
+	// Runs after the placeholder migration so a legacy row is compared in its
+	// normalized form.
+	return r.refreshUneditedBuiltinPrompts()
 }
 
 // migrateTemplatePlaceholders fixes old {{.Key}} format to {{Key}} format in builtin prompts.
@@ -288,6 +289,11 @@ func (r *sqliteRepository) UpdateAgent(ctx context.Context, agent *models.Utilit
 	agent.Description = strings.TrimSpace(agent.Description)
 	agent.Prompt = strings.TrimSpace(agent.Prompt)
 	agent.UpdatedAt = time.Now().UTC()
+	// Keep persisted updated_at strictly after created_at so startup repair
+	// does not treat an explicit edit as an untouched legacy row.
+	if !agent.UpdatedAt.Truncate(time.Microsecond).After(agent.CreatedAt.Truncate(time.Microsecond)) {
+		agent.UpdatedAt = agent.CreatedAt.Add(time.Microsecond)
+	}
 
 	enabledInt := 0
 	if agent.Enabled {

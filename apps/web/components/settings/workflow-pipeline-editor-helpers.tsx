@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import type { WorkflowStep } from "@/lib/types/http";
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
 
 /**
@@ -48,14 +49,16 @@ export function HelpTip({
   const { t } = useTranslation();
   const label = ariaLabel ?? t("workflows:moreInformation");
   const touchDrawer = useTouchDrawer();
-  const usesTouchDrawer = mobileTouchTarget && touchDrawer;
+  const { isMobile } = useResponsiveBreakpoint();
+  const usesTouchDrawer = mobileTouchTarget && (isMobile || touchDrawer);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const button = (
     <button
       type="button"
       className={cn(
         "inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/50 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        mobileTouchTarget && "h-11 w-11 md:h-5 md:w-5",
+        mobileTouchTarget &&
+          "h-11 w-11 md:h-5 md:w-5 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11",
       )}
       aria-label={label}
       aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
@@ -73,7 +76,9 @@ export function HelpTip({
         <DrawerContent>
           <DrawerHeader>
             <DrawerTitle>{label}</DrawerTitle>
-            <DrawerDescription>{text}</DrawerDescription>
+            <DrawerDescription asChild>
+              <div>{text}</div>
+            </DrawerDescription>
           </DrawerHeader>
         </DrawerContent>
       </Drawer>
@@ -264,6 +269,22 @@ Only report real, actionable findings. Do not flag theoretical issues without ev
 
 export function hasOnEnterAction(step: WorkflowStep, type: string): boolean {
   return step.events?.on_enter?.some((a) => a.type === type) ?? false;
+}
+
+/**
+ * The next stage_type when the hold checkbox changes. Ticking always sets
+ * `hold`. Unticking restores the value the step carried before it was marked a
+ * hold, so an accidental toggle does not turn a review or approval step into
+ * custom; a step with no prior non-hold nature falls back to `custom`.
+ */
+export function stageTypeOnHoldToggle(
+  checked: boolean,
+  savedStageType: WorkflowStep["stage_type"],
+): WorkflowStep["stage_type"] {
+  if (checked) {
+    return "hold";
+  }
+  return savedStageType && savedStageType !== "hold" ? savedStageType : "custom";
 }
 
 export function getTransitionType(step: WorkflowStep): string {

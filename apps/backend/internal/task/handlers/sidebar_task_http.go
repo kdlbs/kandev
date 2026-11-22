@@ -18,15 +18,18 @@ import (
 const sidebarTaskRequestLimit = 256 * 1024
 
 type sidebarTaskPageResponse struct {
-	QueryKey          string                         `json:"query_key"`
-	Page              int                            `json:"page"`
-	PageSize          int                            `json:"page_size"`
-	TotalEntries      int                            `json:"total_entries"`
-	TotalTasks        int                            `json:"total_tasks"`
-	TotalVisibleTasks int                            `json:"total_visible_tasks"`
-	HasPrevious       bool                           `json:"has_previous"`
-	HasNext           bool                           `json:"has_next"`
-	Entries           []sidebarTaskPageEntryResponse `json:"entries"`
+	QueryKey           string                         `json:"query_key"`
+	Page               int                            `json:"page"`
+	PageSize           int                            `json:"page_size"`
+	TotalEntries       int                            `json:"total_entries"`
+	TotalTasks         int                            `json:"total_tasks"`
+	TotalVisibleTasks  int                            `json:"total_visible_tasks"`
+	HasPrevious        bool                           `json:"has_previous"`
+	HasNext            bool                           `json:"has_next"`
+	GroupingKeys       []string                       `json:"grouping_keys,omitempty"`
+	GroupingRevision   string                         `json:"grouping_revision,omitempty"`
+	GroupingGeneration string                         `json:"grouping_generation,omitempty"`
+	Entries            []sidebarTaskPageEntryResponse `json:"entries"`
 }
 
 type sidebarTaskPageEntryResponse struct {
@@ -35,6 +38,7 @@ type sidebarTaskPageEntryResponse struct {
 	Task             *dto.TaskDTO `json:"task,omitempty"`
 	GroupKey         string       `json:"group_key,omitempty"`
 	GroupLabel       string       `json:"group_label,omitempty"`
+	GroupColor       string       `json:"group_color,omitempty"`
 	WorkflowName     string       `json:"workflow_name,omitempty"`
 	StepName         string       `json:"workflow_step_name,omitempty"`
 	StepColor        string       `json:"workflow_step_color,omitempty"`
@@ -68,37 +72,24 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 		return
 	}
 
-	var prefs models.SidebarTaskViewPreferences
-	if h.sidebarSettingsReader != nil {
-		settings, err := h.sidebarSettingsReader.GetUserSettings(c.Request.Context())
-		if err != nil {
-			if h.abortSidebarRequestAfterRead(c, "failed to read sidebar task preferences", err) {
-				return
-			}
-			h.logger.Error("failed to read sidebar task preferences", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+	if h.abortSidebarDisclosureIfUnauthorized(c, query) {
+		return
+	}
+	prefs, err := h.sidebarTaskPreferences(c.Request.Context(), c.Param("id"), query)
+	if h.abortSidebarRequestAfterRead(c, "failed to read sidebar task preferences", err) {
+		return
+	}
+	if err != nil {
+		if h.abortSidebarDisclosureIfUnauthorized(c, query) {
 			return
 		}
-		if abortSidebarRequestIfCanceled(c) {
+		if errors.Is(err, errSidebarDisclosureView) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "error_code": "sidebar_query_invalid"})
 			return
 		}
-		if settings != nil {
-			automation, marshalErr := json.Marshal(settings.SidebarTaskColorAutomation)
-			if marshalErr != nil {
-				h.logger.Error("failed to prepare sidebar task color settings", zap.Error(marshalErr))
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
-				return
-			}
-			prefs = models.SidebarTaskViewPreferences{
-				PinnedTaskIDs:          settings.SidebarTaskPrefs.PinnedTaskIDs,
-				OrderedTaskIDs:         settings.SidebarTaskPrefs.OrderedTaskIDs,
-				SubtaskOrderByParentID: settings.SidebarTaskPrefs.SubtaskOrderByParentID,
-				ColorSettings: &models.SidebarTaskColorSettings{
-					ManualColors: settings.SidebarTaskColors,
-					Automation:   automation,
-				},
-			}
-		}
+		h.logger.Error("failed to read sidebar task preferences", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": requestFailedMessage})
+		return
 	}
 
 	page, err := h.service.QuerySidebarTaskPage(c.Request.Context(), c.Param("id"), query, prefs)
@@ -106,14 +97,18 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		if errors.Is(err, models.ErrSidebarGroupingUnavailable) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sidebar grouping unavailable", "error_code": "sidebar_grouping_unavailable"})
+			return
+		}
 		if errors.Is(err, service.ErrSidebarTaskViewUnavailable) {
 			h.logger.Error("sidebar task query repository unavailable", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": requestFailedMessage})
 			return
 		}
 		if errors.Is(err, context.Canceled) {
 			h.logger.Error("sidebar task query failed", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": requestFailedMessage})
 			return
 		}
 		handleNotFound(c, h.logger, err, "tasks not found")
@@ -125,13 +120,28 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 	}
 	if err != nil {
 		h.logger.Error("failed to enrich sidebar task page", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": requestFailedMessage})
 		return
 	}
 	if abortSidebarRequestIfCanceled(c) {
 		return
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+func (h *TaskHandlers) abortSidebarDisclosureIfUnauthorized(c *gin.Context, query models.SidebarTaskViewQuery) bool {
+	if query.DisclosureViewID == "" {
+		return false
+	}
+	err := h.service.AuthorizeWorkspaceAccess(c.Request.Context(), c.Param("id"))
+	if h.abortSidebarRequestAfterRead(c, "sidebar disclosure authorization failed", err) {
+		return true
+	}
+	if err == nil {
+		return false
+	}
+	handleNotFound(c, h.logger, err, "tasks not found")
+	return true
 }
 
 func abortSidebarRequestIfCanceled(c *gin.Context) bool {
@@ -199,6 +209,7 @@ func (h *TaskHandlers) sidebarTaskPageResponse(c *gin.Context, page *models.Side
 		entries = append(entries, sidebarTaskPageEntryResponse{
 			Kind: entry.Kind, TaskID: entry.TaskID, Task: tasksByID[entry.TaskID],
 			GroupKey: entry.GroupKey, GroupLabel: entry.GroupLabel, Depth: entry.Depth,
+			GroupColor:   entry.GroupColor,
 			WorkflowName: entry.WorkflowName, StepName: entry.StepName, StepColor: entry.StepColor,
 			ParentID: entry.ParentID, ParentTitle: entry.ParentTitle,
 			Continuation: entry.Continuation, MatchingCount: entry.MatchingCount,
@@ -211,5 +222,7 @@ func (h *TaskHandlers) sidebarTaskPageResponse(c *gin.Context, page *models.Side
 		TotalEntries: page.TotalEntries, TotalTasks: page.TotalTasks,
 		TotalVisibleTasks: page.TotalVisibleTasks, HasPrevious: page.HasPrevious,
 		HasNext: page.HasNext, Entries: entries,
+		GroupingRevision: page.GroupingRevision, GroupingGeneration: page.GroupingGeneration,
+		GroupingKeys: page.GroupingKeys,
 	}, nil
 }

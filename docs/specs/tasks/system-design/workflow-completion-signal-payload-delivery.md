@@ -21,8 +21,9 @@ current-tree shapes those criteria were written against, the mechanism chosen fo
 each, and the prior art followed rather than re-derived. Where the two disagree,
 the requirement wins and this document is wrong.
 
-Line numbers are omitted: they drifted between sessions of this card. Every element
-below is named by symbol, so a builder greps for it.
+The [completion outcomes design](workflow-completion-outcomes.md) owns
+source-turn identity, duplicate scope, and committed transition proof.
+This design continues to own one-hop carriage and prompt claims.
 
 ## Provenance
 
@@ -58,12 +59,10 @@ review. Every claim here was read from the code, not inferred.
    `blockers` optional.
 2. `internal/mcp/handlers`'s `handleStepComplete` trims all three and builds a
    `models.PendingStepCompletionSignal`, then calls `claimStepCompletionSignal`.
-3. That claim is `SetSessionMetadataKeyIfAbsentOrDifferentStep[IfTaskAtStep]`,
-   so a second call at the same step returns `stored=false` and the first signal
-   stands. This is the mechanism behind AC-001.13 and AC-003.5a: the duplicate
-   path runs `handleDuplicateStepComplete`, which re-publishes the event and
-   returns `{accepted:false, reason:"already_signaled"}`. The second call's
-   `handoff` and `blockers` are already discarded today, and stay discarded.
+3. Production now claims through `ClaimStepCompletionSignal`, with an entry
+   fence. The outcomes design adds source-turn identity to that claim.
+   Same-source duplicates retain the first payload. A later eligible source
+   can replace an unconsumed signal before the guarded move commits.
 4. Two consuming-transition sites exist in `internal/orchestrator`, both in
    `event_handlers_workflow.go`: `executeStepTransition` (legacy
    on_turn_complete) and **`applyEngineTransitionWithCommitMode`** (engine path).

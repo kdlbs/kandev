@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -97,6 +98,18 @@ func githubComparisonTargetCandidate(pr *PR) (taskmodels.ComparisonTargetCandida
 	if err != nil {
 		return taskmodels.ComparisonTargetCandidate{}, false
 	}
+	host := githubhost.Public()
+	rawURL := pr.HTMLURL
+	if rawURL == "" {
+		rawURL = pr.URL
+	}
+	if rawURL != "" {
+		parsed, err := providerGitHubURLHost(rawURL)
+		if err != nil {
+			return taskmodels.ComparisonTargetCandidate{}, false
+		}
+		host = parsed
+	}
 	return taskmodels.ComparisonTargetCandidate{
 		Provider:     taskmodels.ComparisonTargetProviderGitHub,
 		Kind:         taskmodels.ComparisonTargetKindPullRequest,
@@ -104,16 +117,16 @@ func githubComparisonTargetCandidate(pr *PR) (taskmodels.ComparisonTargetCandida
 		HeadBranch:   headBranch,
 		TargetBranch: targetBranch,
 		HeadRepository: taskmodels.ComparisonTargetRepository{
-			Host:       "github.com",
+			Host:       host.String(),
 			Path:       headOwner + "/" + headName,
 			ProviderID: githubHeadProviderID(pr),
-			RemoteURL:  fmt.Sprintf("https://github.com/%s/%s.git", headOwner, headName),
+			RemoteURL:  fmt.Sprintf("%s/%s/%s.git", host.WebURL(), headOwner, headName),
 		},
 		TargetRepository: taskmodels.ComparisonTargetRepository{
-			Host:       "github.com",
+			Host:       host.String(),
 			Path:       targetOwner + "/" + targetName,
 			ProviderID: positiveID(pr.BaseRepoID),
-			RemoteURL:  fmt.Sprintf("https://github.com/%s/%s.git", targetOwner, targetName),
+			RemoteURL:  fmt.Sprintf("%s/%s/%s.git", host.WebURL(), targetOwner, targetName),
 		},
 	}, true
 }

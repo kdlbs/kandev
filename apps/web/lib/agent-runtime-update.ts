@@ -1,26 +1,24 @@
 import type {
+  AgentUpdateCheckReason,
   AgentUpdateJob,
   AgentUpdateOperation,
   AgentUpdatePreview,
-  AgentUpdateVersion,
 } from "@/lib/api";
 import { t } from "@/lib/i18n";
 
-export function latestRuntimeVersions(versions: AgentUpdateVersion[]): AgentUpdateVersion[] {
-  return versions;
-}
+export const ACTIVE_UPDATE_STATUSES = new Set<AgentUpdateJob["status"]>([
+  "queued",
+  "resolving",
+  "updating",
+  "probing",
+  "saving",
+  "refreshing",
+]);
 
 export type RuntimeVersionPair = {
   /** Display copy — localized, and therefore never compared. */
   currentVersion: string;
-  /**
-   * Whether a real version was reported. The predicate this replaced was
-   * `currentVersion !== "Unknown"`, which compared against the English
-   * placeholder; once `currentVersion` became localized that test was true in
-   * every other locale, so a missing version read as known and the update
-   * gate opened. docs/i18n.md calls this out under "Do not translate" — the
-   * flag is the state, the string is only for the user.
-   */
+  /** Version availability is state; the localized display placeholder is not. */
   hasCurrentVersion: boolean;
   targetVersion?: string;
   versionsMatch: boolean;
@@ -50,12 +48,12 @@ export function resolveRuntimeActiveVersion(
 export function resolveRuntimeEffectiveVersion(
   preview: AgentUpdatePreview,
   job?: AgentUpdateJob,
-): string {
+): string | undefined {
   return (
     job?.effective_version ??
     preview.effective_version ??
     resolveRuntimeActiveVersion(preview, job) ??
-    resolveRuntimeVersionPair(preview, job).currentVersion
+    (job?.current_version || preview.current_version || undefined)
   );
 }
 
@@ -82,6 +80,26 @@ export function runtimeOperationLabelKey(operation: AgentUpdateOperation | undef
     default:
       return "agents:updateRuntime";
   }
+}
+
+const NATIVE_CHECK_REASON_KEYS: Record<AgentUpdateCheckReason, string> = {
+  check_failed: "agents:nativeCheckReasonCheckFailed",
+  unsupported: "agents:nativeCheckReasonUnsupported",
+  unrecognized_output: "agents:nativeCheckReasonUnrecognizedOutput",
+  timeout: "agents:nativeCheckReasonTimeout",
+  output_limit: "agents:nativeCheckReasonOutputLimit",
+  not_installed: "agents:nativeCheckReasonNotInstalled",
+  runtime_mismatch: "agents:nativeCheckReasonRuntimeMismatch",
+  cancelled: "agents:nativeCheckReasonCancelled",
+  unavailable: "agents:nativeCheckReasonUnavailable",
+};
+
+/** Locale key explaining an unknown native check; unknown codes use the generic copy. */
+export function nativeCheckReasonKey(reason: string | undefined): string {
+  if (reason && Object.hasOwn(NATIVE_CHECK_REASON_KEYS, reason)) {
+    return NATIVE_CHECK_REASON_KEYS[reason as AgentUpdateCheckReason];
+  }
+  return "agents:runtimeCheckUnknown";
 }
 
 export function canApproveAgentRuntimeUpdate({

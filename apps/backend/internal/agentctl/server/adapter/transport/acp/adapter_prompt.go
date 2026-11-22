@@ -5,11 +5,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
 	"github.com/coder/acp-go-sdk"
-	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -19,6 +19,8 @@ import (
 )
 
 const maxNativeAttachmentBytes int64 = 8 << 20
+
+const claudeCancelQueueDrainTimeout = 250 * time.Millisecond
 
 // Prompt sends a prompt to the agent.
 // If pending context is set (from SetPendingContext), it will be prepended to the message.
@@ -79,6 +81,11 @@ func (a *Adapter) sendPrompt(
 	promptGeneration uint64,
 	steer bool,
 ) error {
+	// Validate attachments before a steer can transfer the generating turn.
+	contentBlocks, contentErr := a.buildPromptContentBlocks(message, attachments)
+	if contentErr != nil {
+		return contentErr
+	}
 	humanPrompt := expectSession == ""
 	promptCtx, turn := newPromptTurnState(
 		ctx,
@@ -140,9 +147,20 @@ func (a *Adapter) sendPrompt(
 			zap.String("session_id", sessionID),
 			zap.Int("context_length", len(pendingContext)))
 	}
+	if humanPrompt && pendingContext == "" && len(attachments) == 0 {
+		tracker := a.configurationCommandForPrompt(sessionID, message, promptGeneration)
+		turn.evidenceMu.Lock()
+		turn.configurationCommand = tracker
+		turn.evidenceMu.Unlock()
+	}
 	a.beginPromptTurn(sessionID)
+	// Every prompt-ending path must close the honest inspection window for a
+	// launch whose provider ends delivery with this prompt. Success settles
+	// before the complete event below; this covers error and cancel returns.
+	defer a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
+	a.markPromptSentForSuggestion(turn)
 
-	contentBlocks := a.buildPromptContentBlocks(finalMessage, attachments)
+	contentBlocks[0] = acp.TextBlock(finalMessage)
 
 	// Start prompt span — notification spans become children via getPromptTraceCtx()
 	traceCtx, promptSpan := shared.TraceProtocolRequest(
@@ -163,6 +181,7 @@ func (a *Adapter) sendPrompt(
 	a.mu.Lock()
 	wasLoading := a.isLoadingSession
 	a.isLoadingSession = false
+	a.loadingSessionID = ""
 	a.mu.Unlock()
 
 	if wasLoading {
@@ -175,8 +194,15 @@ func (a *Adapter) sendPrompt(
 		zap.Int("content_blocks", len(contentBlocks)),
 		zap.Int("image_attachments", len(attachments)))
 
+	var antigravityBoundary *antigravityOutcomeBoundary
+	if expectSession == "" && !isAntigravityNonModelCommand(finalMessage) {
+		antigravityBoundary = a.captureAntigravityOutcomeBoundary(sessionID)
+	}
+
 	var resp acp.PromptResponse
 	var err error
+	monitorReaderPrompt := a.beginClaudeMonitorPrompt(sessionID)
+	defer a.endClaudeMonitorPrompt(sessionID, monitorReaderPrompt)
 	go func() {
 		defer close(turn.rpcDone)
 		resp, err = conn.Prompt(traceCtx, acp.PromptRequest{
@@ -219,6 +245,13 @@ func (a *Adapter) sendPrompt(
 		// agent_message_chunk cannot be overtaken by the terminal failure event.
 		notificationsDrained := a.syncNotifQueue()
 		if a.dialect.continuationError != nil && a.dialect.continuationError(err) {
+			if a.dialect.continuationSupportForError != nil {
+				if support := a.dialect.continuationSupportForError(err); support != "" {
+					turn.evidenceMu.Lock()
+					turn.continuationSupportOverride = support
+					turn.evidenceMu.Unlock()
+				}
+			}
 			// Recognized interruptions follow queued output regardless of continuation eligibility.
 			snapshot := a.continuationSafetySnapshot(turn)
 			a.cancelAsyncTurnComplete(sessionID)
@@ -234,69 +267,95 @@ func (a *Adapter) sendPrompt(
 			return nil
 		}
 		normalizedErr := normalizePromptErrorAfterCancel(traceCtx, err)
+		disposition := a.promptFailureDisposition(
+			conn, sessionID, turn, promptGeneration, notificationsDrained,
+		)
+		if providerError, ok := a.antigravityPromptProviderError(normalizedErr); ok && disposition != "" {
+			a.sendRetainedPromptError(
+				sessionID, promptGeneration, turn, notificationsDrained, disposition, providerError,
+			)
+			return nil
+		}
 		if a.agentID == codexAgentID &&
 			!errors.Is(normalizedErr, errPromptAbandonedAfterCancel) &&
 			isGenericCodexPromptError(err) {
 			if providerError, ok := turn.codexUsageLimitFailure(); ok {
+				// Retention requires the peer's response, not just quota stream
+				// evidence: a local deadline or undecodable reply can follow the
+				// same notifications. Preserve the richer quota diagnostic on
+				// the conservative failure path when provenance is absent.
+				_, remote := remotePromptRequestError(normalizedErr)
+				if remote && disposition != "" {
+					mergeAllowlistedProviderErrorMetadata(providerError, err, a.agentID, "")
+					a.sendRetainedPromptError(
+						sessionID, promptGeneration, turn, notificationsDrained, disposition, providerError,
+					)
+					return nil
+				}
 				return &providerPromptError{ProviderError: *providerError, cause: normalizedErr}
 			}
 		}
-		if providerError, ok := a.retainableACPApplicationError(normalizedErr); ok {
-			if disposition := a.promptFailureDisposition(
-				conn, sessionID, turn, promptGeneration, notificationsDrained,
-			); disposition != "" {
-				var capacityContinuation *streams.CapacityContinuationSnapshot
-				if classified := routingerr.Classify(routingerr.Input{
-					Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: providerError.Message,
-				}); classified.Code == routingerr.CodeModelCapacity {
-					capacityContinuation = a.capacityContinuationSnapshot(turn, notificationsDrained)
-				}
-				a.cancelAsyncTurnComplete(sessionID)
-				a.sendUpdate(AgentEvent{
-					Type:                     streams.EventTypeError,
-					SessionID:                sessionID,
-					PromptGeneration:         promptGeneration,
-					Error:                    providerError.Message,
-					ProviderError:            providerError,
-					CapacityContinuation:     capacityContinuation,
-					PromptFailureDisposition: disposition,
-				})
-				return nil
-			}
+		if providerError, ok := a.retainedACPApplicationError(normalizedErr); ok && disposition != "" {
+			a.sendRetainedPromptError(
+				sessionID, promptGeneration, turn, notificationsDrained, disposition, providerError,
+			)
+			return nil
 		}
 		return normalizedErr
 	}
 
-	// Drain queued ACP notifications before running the post-prompt sweeps and
+	// Drain queued ACP notifications before running post-prompt cleanup and
 	// the complete event. The worker (now async) may still hold final frames
 	// the agent emitted right before its prompt response — the final text
 	// chunk, the terminal monitor_end tool_call_update, the registration
 	// frame for a Monitor whose events haven't yet been routed. Without this
-	// barrier:
-	//   - cancelActiveToolCalls / sweepMonitorsOnPromptEnd race the worker
-	//     for activeToolCalls and activeMonitors. If the worker hasn't added
-	//     a Monitor yet when the sweep takes the map, subsequent monitor_event
-	//     text frames find no tracking and drop their events on the floor.
-	//   - The complete event emitted to updatesCh outruns the final text chunk,
+	// barrier, cancelPromptEndToolCalls could race the worker for active tool
+	// and Monitor state. A Monitor that has not registered yet cannot receive
+	// later monitor_event text frames. The complete event could also outrun the final text chunk,
 	//     so the downstream buffer flush yields empty and the turn persists as
 	//     had_output=false even when the agent did produce text.
 	notificationsDrained := a.syncNotifQueue()
+	a.settleClaudeSubagents(sessionID, promptGeneration, stopReason, a.promptTurnWasHandedOff(turn))
 
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
 	// tool_call without a terminal status update from the agent).
 	continuationSafety := a.continuationSafetySnapshot(turn)
 	capacityContinuation := a.capacityContinuationSnapshot(turn, notificationsDrained)
+	// Retained launches whose provider ends delivery with this prompt become
+	// unknown before the generic sweep: no later terminal frame can arrive, so
+	// they must neither be reported as cancelled nor keep fencing new prompts.
+	a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
 	a.cancelPromptEndToolCalls(sessionID)
-
-	// Mark any tracked Monitors as ended. They live longer than a typical tool
-	// call (the script keeps running across model turns), so this sweep runs
-	// after `cancelActiveToolCalls` to give the Monitor card a clean terminal
-	// state when the parent prompt completes naturally.
-	a.sweepMonitorsOnPromptEnd(sessionID)
 
 	// Drop any Cursor `cursor/task` metadata for this session that never matched
 	// a subagent tool_call this turn.
 	a.sweepCursorTaskMetaOnPromptEnd(sessionID)
+
+	if antigravityBoundary != nil {
+		failure, unverified := a.checkAntigravityOutcome(antigravityBoundary, stopReason)
+		if failure == nil && unverified != "" {
+			failure = a.antigravityOutcomeUnverifiedFailure(unverified)
+		}
+		if failure != nil {
+			a.logger.Info("antigravity prompt ended with a current-turn failure",
+				zap.String("session_id", sessionID),
+				zap.Uint64("prompt_generation", promptGeneration),
+				zap.String("routing_code", string(failure.code)))
+			a.cancelAsyncTurnComplete(sessionID)
+			a.sendUpdate(AgentEvent{
+				Type:               streams.EventTypeError,
+				SessionID:          sessionID,
+				PromptGeneration:   promptGeneration,
+				Error:              failure.message,
+				ContinuationSafety: continuationSafety,
+				PromptFailureDisposition: a.promptFailureDisposition(
+					conn, sessionID, turn, promptGeneration, notificationsDrained,
+				),
+				ProviderError: failure.providerError,
+			})
+			return nil
+		}
+	}
 
 	if cursorRetriable, safeMessage, occurredAt, identityComplete := turn.cursorRetriableFailureDetails(); cursorRetriable {
 		if occurredAt.IsZero() {
@@ -377,12 +436,17 @@ func (a *Adapter) sendPrompt(
 		usage.ProviderReportedCostSubcents = costSubcents
 		usage.ProviderReportedCostPresent = true
 	}
+	var configurationResult *streams.ConfigurationCommandResult
+	if stopReason == string(acp.StopReasonEndTurn) {
+		configurationResult = a.configurationCommandResult(turn, sessionID)
+	}
 	a.sendUpdate(AgentEvent{
-		Type:             streams.EventTypeComplete,
-		SessionID:        sessionID,
-		PromptGeneration: promptGeneration,
-		Data:             map[string]any{"stop_reason": stopReason},
-		Usage:            usage,
+		Type:                       streams.EventTypeComplete,
+		SessionID:                  sessionID,
+		PromptGeneration:           promptGeneration,
+		Data:                       map[string]any{"stop_reason": stopReason},
+		ConfigurationCommandResult: configurationResult,
+		Usage:                      usage,
 	})
 
 	return nil
@@ -438,10 +502,18 @@ func isGenericCodexPromptError(err error) bool {
 		requestErr.Code == -32603 && requestErr.Message == "Internal error"
 }
 
-func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.MessageAttachment) []acp.ContentBlock {
+func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.MessageAttachment) ([]acp.ContentBlock, error) {
 	contentBlocks := []acp.ContentBlock{acp.TextBlock(message)}
 
 	for _, att := range attachments {
+		if att.AttachmentID != "" && att.Data == "" {
+			block, err := a.materializedAttachmentBlock(att)
+			if err != nil {
+				return nil, err
+			}
+			contentBlocks = append(contentBlocks, block)
+			continue
+		}
 		if att.DeliveryMode == "path" {
 			saved, saveErr := a.attachMgr.SaveAttachments([]v1.MessageAttachment{att})
 			if saveErr != nil || len(saved) == 0 {
@@ -453,20 +525,6 @@ func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.Mess
 			contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved, true)))
 			continue
 		}
-		if att.AttachmentID != "" && att.Data == "" && (att.Type == contentTypeImage || att.Type == contentTypeAudio) {
-			data, saved, ok := a.loadMaterializedAttachmentData(att)
-			switch {
-			case ok:
-				att.Data = data
-			case len(saved) > 0:
-				contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved, false)))
-				continue
-			default:
-				a.logger.Warn("failed to load materialized prompt attachment",
-					zap.String("attachment_id", att.AttachmentID), zap.String("name", att.Name))
-			}
-		}
-
 		switch att.Type {
 		case contentTypeImage:
 			contentBlocks = append(contentBlocks, acp.ImageBlock(att.Data, att.MimeType))
@@ -489,26 +547,53 @@ func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.Mess
 		}
 	}
 
-	return contentBlocks
+	return contentBlocks, nil
 }
 
-func (a *Adapter) loadMaterializedAttachmentData(att v1.MessageAttachment) (string, []shared.SavedAttachment, bool) {
+func (a *Adapter) materializedAttachmentBlock(att v1.MessageAttachment) (acp.ContentBlock, error) {
+	unavailable := fmt.Errorf("attachment %q could not be loaded for delivery", att.AttachmentID)
 	if a.attachMgr == nil {
-		return "", nil, false
+		return acp.ContentBlock{}, unavailable
 	}
 	saved, err := a.attachMgr.SaveAttachments([]v1.MessageAttachment{att})
 	if err != nil || len(saved) == 0 {
-		return "", nil, false
+		return acp.ContentBlock{}, unavailable
 	}
-	info, err := os.Stat(saved[0].AbsPath)
-	if err != nil || info.Size() > maxNativeAttachmentBytes {
-		return "", saved, false
-	}
-	data, err := os.ReadFile(saved[0].AbsPath)
+	file, err := os.Open(saved[0].AbsPath)
 	if err != nil {
-		return "", saved, false
+		return acp.ContentBlock{}, unavailable
 	}
-	return base64.StdEncoding.EncodeToString(data), saved, true
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		return acp.ContentBlock{}, unavailable
+	}
+	if att.DeliveryMode == "path" || info.Size() > maxNativeAttachmentBytes ||
+		(att.Type == contentTypeResource && !a.capabilities.PromptCapabilities.EmbeddedContext) {
+		return acp.TextBlock(shared.BuildAttachmentPrompt(saved, att.DeliveryMode == "path")), nil
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxNativeAttachmentBytes+1))
+	if err != nil {
+		return acp.ContentBlock{}, unavailable
+	}
+	if int64(len(data)) != info.Size() {
+		return acp.ContentBlock{}, unavailable
+	}
+	att.Data = base64.StdEncoding.EncodeToString(data)
+	return buildNativeAttachmentBlock(att)
+}
+
+func buildNativeAttachmentBlock(att v1.MessageAttachment) (acp.ContentBlock, error) {
+	switch att.Type {
+	case contentTypeImage:
+		return acp.ImageBlock(att.Data, att.MimeType), nil
+	case contentTypeAudio:
+		return acp.AudioBlock(att.Data, att.MimeType), nil
+	case contentTypeResource:
+		return buildResourceBlock(att), nil
+	default:
+		return acp.ContentBlock{}, fmt.Errorf("attachment %q has unsupported type %q", att.AttachmentID, att.Type)
+	}
 }
 
 func buildAttachmentFallbackBlock(att v1.MessageAttachment) acp.ContentBlock {
@@ -637,19 +722,27 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 
 	a.logger.Info("cancelling session", zap.String("session_id", sessionID))
 
-	// Mark all active tool calls as cancelled before sending cancel to agent.
-	a.cancelActiveToolCalls(sessionID)
+	a.prepareSessionCancel(sessionID)
+	name, version := a.connectedAgentIdentity()
+	orderedClaudeCleanup := verifiedClaudeTerminalBridge(a.agentID, name, version)
+	if !orderedClaudeCleanup {
+		a.cancelActiveToolCalls(sessionID)
+	}
 
-	if err := conn.Cancel(ctx, acp.CancelNotification{
+	cancelErr := conn.Cancel(ctx, acp.CancelNotification{
 		SessionId: acp.SessionId(sessionID),
-	}); err != nil {
-		span.RecordError(err)
+	})
+	if orderedClaudeCleanup {
+		a.waitForClaudeCancelCleanup(ctx, sessionID)
+	}
+	if cancelErr != nil {
+		span.RecordError(cancelErr)
 		// Still wake the in-flight prompt waiter so sendPrompt can exit within
 		// promptCancelJoinTimeout rather than blocking the gate forever. The
 		// timeout branch in waitForPromptRPCAfterUserCancel will cancel
 		// promptCtx if the agent never acknowledges.
 		a.signalPromptTurnAbort()
-		return err
+		return cancelErr
 	}
 
 	turn := a.signalPromptTurnAbort()
@@ -666,14 +759,30 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 	return nil
 }
 
-// cancelActiveToolCalls emits cancelled tool_update events for all in-flight tool calls
-// and clears the activeToolCalls map.
+func (a *Adapter) waitForClaudeCancelCleanup(ctx context.Context, sessionID string) {
+	drained := a.syncNotifQueueThenBounded(ctx, claudeCancelQueueDrainTimeout, func() {
+		a.cancelActiveToolCalls(sessionID)
+	})
+	if !drained {
+		a.logger.Warn("Claude cancellation cleanup remains queued behind ACP notifications",
+			zap.String("session_id", sessionID))
+	}
+}
+
+// prepareSessionCancel settles launches whose provider ends delivery with the
+// session. It runs before the generic cancel sweep so an identified launch
+// becomes unknown instead of a cancelled tool with running background work.
+func (a *Adapter) prepareSessionCancel(sessionID string) {
+	a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
+}
+
+// cancelActiveToolCalls cancels ordinary in-flight calls and retains entries
+// whose provider can still deliver authoritative terminal evidence.
 //
-// Monitor tool calls are intentionally skipped here — they are tracked in
-// activeMonitors and given their own terminal sweep (sweepMonitorsOnPromptEnd
-// or sweepMonitorsOnReplayEnd) which uses the appropriate status and a
-// payload snapshot. Without this skip the Monitor would receive two
-// terminal events with conflicting states.
+// Monitor tool calls are intentionally skipped by prompt-end cleanup — their
+// watches outlive foreground turns. Explicit terminal evidence or replay after
+// process replacement owns their terminal transition. Without this skip a
+// foreground boundary would cancel a still-running watch.
 //
 // Subagent (Task) tool calls are also preserved: the Claude Agent SDK can
 // return session/prompt with stop_reason while the subagent is still running
@@ -686,8 +795,8 @@ func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 }
 
 // cancelPromptEndToolCalls preserves background work inherited from a
-// handed-off predecessor. Explicit session cancellation still uses
-// cancelActiveToolCalls so it can terminate the whole session.
+// handed-off predecessor. Explicit cancellation also preserves work with an
+// exact terminal binding while cancelling ordinary active calls.
 func (a *Adapter) cancelPromptEndToolCalls(sessionID string) {
 	a.cancelActiveToolCallsPreservingHandoff(sessionID, true)
 }
@@ -704,7 +813,11 @@ func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
 	for _, tcID := range a.activeMonitors[sessionID] {
 		monitorToolCallIDs[tcID] = true
 	}
-	toCancel := make(map[string]*streams.NormalizedPayload)
+	type cancelledToolCall struct {
+		payload        *streams.NormalizedPayload
+		backgroundWork *streams.WorkloadRunObservation
+	}
+	toCancel := make(map[string]cancelledToolCall)
 	preserved := make(map[string]*streams.NormalizedPayload)
 	for tcID, payload := range a.activeToolCalls {
 		switch {
@@ -712,17 +825,22 @@ func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
 			preserved[tcID] = payload
 		case monitorToolCallIDs[tcID]:
 			preserved[tcID] = payload
+		case a.preservesVerifiedClaudeBackgroundShell(payload) && payload.BackgroundWork().WorkID == tcID:
+			// A completed detached shell keeps its exact binding so the qualified
+			// bridge's later tool-scoped exit can settle the workload.
+			preserved[tcID] = payload
 		case payload != nil && payload.Kind() == streams.ToolKindSubagentTask:
 			preserved[tcID] = payload
 		default:
-			toCancel[tcID] = payload
+			backgroundWork := a.endUnconfirmedClaudeBackgroundShellLocked(payload, tcID)
+			toCancel[tcID] = cancelledToolCall{payload: payload, backgroundWork: backgroundWork}
 			a.forgetPromptHandoffToolLocked(tcID)
 		}
 	}
 	a.activeToolCalls = preserved
 	a.mu.Unlock()
 
-	for toolCallID, normalized := range toCancel {
+	for toolCallID, cancelled := range toCancel {
 		a.logger.Debug("cancelling active tool call",
 			zap.String("session_id", sessionID),
 			zap.String("tool_call_id", toolCallID))
@@ -731,7 +849,8 @@ func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
 			SessionID:         sessionID,
 			ToolCallID:        toolCallID,
 			ToolStatus:        toolStatusCancelled,
-			NormalizedPayload: normalized,
+			NormalizedPayload: cancelled.payload,
+			BackgroundWork:    cancelled.backgroundWork,
 		})
 	}
 }

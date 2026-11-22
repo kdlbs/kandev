@@ -361,6 +361,49 @@ func TestFeatureFlagDefaults_LowercasesShortName(t *testing.T) {
 	}
 }
 
+// TestShippedProfilesEnableBackgroundWork pins AC-AGENTS-BACKGROUND-WORK-001.5:
+// shipped profiles default shared background-work inspection to enabled, and an
+// explicit operator value still wins over the profile default.
+func TestShippedProfilesEnableBackgroundWork(t *testing.T) {
+	clearProfileSelectors(t)
+	clearProfilesYAMLVars(t)
+
+	for _, selector := range []struct {
+		name  string
+		env   string
+		value string
+	}{
+		{"prod", "", ""},
+		{"dev", "KANDEV_DEBUG_DEV_MODE", "true"},
+		{"e2e", "KANDEV_E2E_MOCK", "true"},
+	} {
+		t.Run(selector.name, func(t *testing.T) {
+			if selector.env != "" {
+				t.Setenv(selector.env, selector.value)
+			}
+			defaults, err := EnvironmentDefaults()
+			if err != nil {
+				t.Fatalf("EnvironmentDefaults: %v", err)
+			}
+			if got := defaults["KANDEV_FEATURES_AGENT_BACKGROUND_WORK"]; got != "true" {
+				t.Fatalf("KANDEV_FEATURES_AGENT_BACKGROUND_WORK = %q, want \"true\"", got)
+			}
+		})
+	}
+}
+
+// TestExplicitBackgroundWorkOffWinsOverProfileDefault pins that an operator's
+// explicit false is never overwritten by the profile default.
+func TestExplicitBackgroundWorkOffWinsOverProfileDefault(t *testing.T) {
+	t.Setenv("KANDEV_FEATURES_AGENT_BACKGROUND_WORK", "false")
+	if _, _, err := ApplyProfile(); err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+	if got := os.Getenv("KANDEV_FEATURES_AGENT_BACKGROUND_WORK"); got != "false" {
+		t.Fatalf("KANDEV_FEATURES_AGENT_BACKGROUND_WORK = %q, want explicit \"false\"", got)
+	}
+}
+
 func TestProfilesYAMLFeatureKeysUseRequiredPrefix(t *testing.T) {
 	file, err := parse(profilesYAML)
 	if err != nil {

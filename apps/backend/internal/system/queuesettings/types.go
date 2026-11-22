@@ -37,6 +37,11 @@ type Settings struct {
 	AutoMergeRevision int64 `json:"-"`
 }
 
+// GlobalAutoMergePolicy returns the global snapshot carried by this settings envelope.
+func (s Settings) GlobalAutoMergePolicy() messagequeue.AutoMergePolicy {
+	return messagequeue.AutoMergePolicy{Enabled: s.AutoMergeEnabled, Source: messagequeue.AutoMergeSourceGlobal, Revision: s.AutoMergeRevision}
+}
+
 // SettingsPatch is a partial update to Settings: a nil field means "leave
 // unchanged" rather than "reset to zero value". Without this distinction a
 // client that PATCHes one field would otherwise silently reset either merge

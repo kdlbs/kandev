@@ -24,7 +24,6 @@ import {
   useFitAndResize,
 } from "./use-passthrough-terminal";
 import { useTouchScroll } from "./use-touch-scroll";
-import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useTerminalSearch } from "./use-terminal-search";
 import { TerminalSearchBar } from "./terminal-search-bar";
 import { usePanelSearch } from "@/hooks/use-panel-search";
@@ -39,6 +38,7 @@ import {
 } from "@/hooks/domains/session/use-workspace-restoration";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
 import { isMissingTerminalEnvironment } from "./ws-reconnect";
+import { TerminalJumpToLatest } from "./terminal-jump-to-latest";
 
 type BaseProps = {
   autoFocus?: boolean;
@@ -193,12 +193,10 @@ export function shouldGuardPassthroughEscape(
 /**
  * Whether every session sharing this environment has ended.
  *
- * Shell terminals are environment-scoped, but the session handle this component
- * holds is not a proxy for one: `useEnvironmentSessionId` deliberately caches
- * the first session seen for an environment, so once session A ends and session
- * B reuses that environment, the handle still resolves to A. Gating on A's
- * state alone would refuse a shell on a live environment — worse than the loop
- * this exists to stop.
+ * Shell terminals are environment-scoped. The selected conversation is not a
+ * proxy for the whole environment: an ended session can share it with a live
+ * sibling. Gating on the selected session alone would refuse a shell on that
+ * live environment.
  *
  * So refuse only on positive knowledge: sessions for this environment are
  * known, and every one of them is terminal. Anything unknown connects.
@@ -238,6 +236,32 @@ export function computeTerminalPaneState(
   return isConnected ? "connected" : "connecting";
 }
 
+function PassthroughJumpToLatest({
+  terminal,
+  mode,
+  paneState,
+  restorationStatus,
+  searchOpen,
+}: {
+  terminal: Terminal | null;
+  mode: "agent" | "shell";
+  paneState: ReturnType<typeof computeTerminalPaneState>;
+  restorationStatus: WorkspaceRestorationResult["status"];
+  searchOpen: boolean;
+}) {
+  return (
+    <TerminalJumpToLatest
+      terminal={terminal}
+      enabled={
+        mode === "shell" &&
+        paneState === "connected" &&
+        (!restorationStatus || restorationStatus === "ready") &&
+        !searchOpen
+      }
+    />
+  );
+}
+
 /** Reads the two store slices `isEnvironmentEnded` needs. */
 function useEnvironmentEnded(environmentId: string | null | undefined): boolean {
   return useAppStore((state) =>
@@ -260,6 +284,7 @@ type PassthroughConnectionOptions = {
 
 type PassthroughConnectionState = {
   isTerminalReady: boolean;
+  terminal: Terminal | null;
   isConnected: boolean;
   isUnavailable: boolean;
   onTerminalReady: () => void;
@@ -276,8 +301,10 @@ function usePassthroughConnection({
   wsRef,
 }: PassthroughConnectionOptions): PassthroughConnectionState {
   const [isTerminalReady, setIsTerminalReady] = useState(false);
+  const [terminal, setTerminal] = useState<Terminal | null>(null);
   const onTerminalReady = useCallback(() => {
     setIsTerminalReady(true);
+    setTerminal(xtermRef.current);
     if (xtermRef.current) onXtermReady?.(xtermRef.current);
   }, [onXtermReady, xtermRef]);
 
@@ -315,6 +342,7 @@ function usePassthroughConnection({
 
   return {
     isTerminalReady,
+    terminal,
     isConnected,
     isUnavailable,
     onTerminalReady,
@@ -414,7 +442,7 @@ function usePassthroughEffects({
   useTouchScroll({ terminalRef, xtermRef, enabled: !!enableTouchScroll, isTerminalReady });
   useWebSocketConnection({
     taskId,
-    sessionId,
+    sessionId: mode === "agent" ? sessionId : null,
     environmentId,
     canConnect: canConnect && !connection.isUnavailable,
     isTerminalReady,
@@ -445,8 +473,9 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const refs = useTerminalRefs();
   const { terminalRef, xtermRef, wsRef, attachAddonRef } = refs;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const environmentSessionId = useEnvironmentSessionId();
-  const sessionId = mode === "agent" ? (props.sessionId ?? storeSessionId) : environmentSessionId;
+  // The shell connection remains environment-scoped, but restoration must
+  // inspect and repair the conversation the user currently selected.
+  const sessionId = mode === "agent" ? (props.sessionId ?? storeSessionId) : storeSessionId;
   const { session } = useSession(sessionId);
   const taskId = session?.task_id ?? null;
   const workspaceRestoration = useWorkspaceRestoration(
@@ -506,6 +535,13 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
         <div ref={terminalRef} data-testid="terminal-xterm-host" className="h-full w-full" />
       </div>
       <TerminalSearchBar search={search} />
+      <PassthroughJumpToLatest
+        terminal={connection.terminal}
+        mode={mode}
+        paneState={paneState}
+        restorationStatus={workspaceRestoration.status}
+        searchOpen={search.isOpen}
+      />
       <TerminalPaneOverlay
         paneState={paneState}
         mode={mode}

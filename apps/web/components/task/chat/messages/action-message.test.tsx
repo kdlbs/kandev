@@ -541,6 +541,57 @@ describe("ActionMessage — transient retry (warning variant)", () => {
   });
 });
 
+describe("ActionMessage — confirmed continuation activity", () => {
+  it("renders neutral feedback only after attested resumed activity", () => {
+    const message = retryMessage({ content: "Agent resumed" });
+    message.metadata = {
+      ...message.metadata,
+      variant: "default",
+      failure_code: "agent_transport_lost",
+      provider_name: "Cursor",
+      model_id: "claude-sonnet",
+      recovery_mode: "continue",
+      recovery_phase: "continuing",
+      recovery_activity_confirmed: true,
+    };
+    renderAction(message, "RUNNING");
+    const card = screen.getByTestId(RETRY_CARD_TEST_ID);
+    expect(card.textContent).toContain("Agent resumed");
+    expect(card.textContent).toContain("Cursor · claude-sonnet");
+    expect(card.textContent).toContain("Previous conversation is preserved.");
+    expect(card.textContent).not.toContain("Attempt 1 of 5");
+    expect(screen.queryByLabelText("Retry countdown")).toBeNull();
+    expect(screen.getByTestId(CANCEL_TEST_ID)).toBeTruthy();
+    expect(card.getAttribute("role")).toBe("status");
+    expect(card.getAttribute("aria-live")).toBe("polite");
+    expect(card.className).not.toContain("amber");
+    expect(card.className).not.toContain("red");
+  });
+
+  it.each([
+    ["omitted", {}],
+    ["false", { recovery_activity_confirmed: false }],
+    ["malformed", { recovery_activity_confirmed: "true" }],
+  ])("keeps warning feedback when the resumed marker is %s", (_label, marker) => {
+    renderAction(
+      retryMessage({
+        metadata: {
+          ...transientRetryMetadata(1, 5),
+          failure_code: "agent_transport_lost",
+          recovery_mode: "continue",
+          recovery_phase: "continuing",
+          ...marker,
+        },
+      }),
+      "RUNNING",
+    );
+    const card = screen.getByTestId(RETRY_CARD_TEST_ID);
+    expect(card.textContent).toContain("Agent connection lost");
+    expect(card.textContent).toContain("Attempt 1 of 5");
+    expect(card.textContent).not.toContain("Agent resumed");
+  });
+});
+
 describe("ActionMessage recovery ownership", () => {
   it("keeps a retained provider turn error visible after a later session completion", () => {
     const error = recoveryMessage(true);
@@ -698,7 +749,7 @@ describe("ActionMessage recovery settlement", () => {
 });
 
 describe("ActionMessage active legacy recovery ownership", () => {
-  it("keeps an active legacy recovery row compact when the owner has no stamp", () => {
+  it("keeps the error and details readable when the recovery owner has no mounted card", () => {
     const legacyMessage = recoveryMessage();
     legacyMessage.id = "legacy-recovery-owner";
     legacyMessage.metadata = {
@@ -741,9 +792,11 @@ describe("ActionMessage active legacy recovery ownership", () => {
       </StateProvider>,
     );
 
-    expect(screen.getByTestId(RECOVERY_HISTORY_TEST_ID).textContent).toContain(
-      "This failure is explained in the recovery card above.",
+    expect(screen.getByTestId(RECOVERY_HISTORY_TEST_ID).textContent).toContain(RECOVERY_MESSAGE);
+    expect(screen.getByTestId("session-recovery-history-details").textContent).toContain(
+      "The provider request failed.",
     );
+    expect(screen.queryByTestId("session-recovery-card")).toBeNull();
     expect(screen.queryByTestId("legacy-recovery-archive-button")).toBeNull();
   });
 });
@@ -775,6 +828,7 @@ describe("ActionMessage historical typed recovery evidence", () => {
   it("renders same-text historical failures from their own evidence after a successor replaces the current error", async () => {
     const first = recoveryHistoryMessage("failure-first");
     first.created_at = "2026-09-29T09:00:00Z";
+    first.content = "The provider rejected the saved session. token=private-preview-value";
     first.metadata = {
       ...(first.metadata as Record<string, unknown>),
       phase: "bootstrap",
@@ -786,13 +840,13 @@ describe("ActionMessage historical typed recovery evidence", () => {
           code: "model_unavailable",
           reason: "requested_not_advertised",
           requested_model: "first-model",
-          detail: "The saved model was not advertised.",
         },
       ],
       error_output: "token=old-private-value",
     };
     const second = recoveryHistoryMessage("failure-second");
     second.id = "recovery-second";
+    second.content = first.content;
     second.metadata = {
       ...(second.metadata as Record<string, unknown>),
       phase: "bootstrap",
@@ -841,7 +895,10 @@ describe("ActionMessage historical typed recovery evidence", () => {
     expect(displayed).toContain("Attempt: resume-1");
     expect(displayed).toContain("Requested model: first-model");
     expect(displayed).toContain("Phase: bootstrap");
+    expect(displayed).toContain("The provider rejected the saved session.");
     expect(displayed).not.toContain("old-private-value");
+    expect(displayed).not.toContain("private-preview-value");
+    expect(screen.queryByTestId("session-recovery-card")).toBeNull();
     fireEvent.click(screen.getAllByRole("button", { name: "Copy details" })[0]);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(displayed));
   });
@@ -879,7 +936,14 @@ describe("ActionMessage retained provider turn recovery feedback", () => {
     {
       disposition: "refused",
       attempts: 0,
-      copy: "Automatic retry stopped. You can send another message.",
+      reason: "future_reason",
+      copy: "Automatic continuation is unavailable. You can send another message.",
+    },
+    {
+      disposition: "refused",
+      attempts: undefined,
+      reason: undefined,
+      copy: "Automatic continuation is unavailable. You can send another message.",
     },
     {
       disposition: "cancelled",
@@ -893,14 +957,15 @@ describe("ActionMessage retained provider turn recovery feedback", () => {
     },
   ])(
     "shows $disposition without replacing the provider error",
-    ({ disposition, attempts, copy }) => {
+    ({ disposition, attempts, reason, copy }) => {
       const providerError = retryMessage({
         content: CAPACITY_ERROR,
         metadata: {
           variant: "error",
           runtime_retained: true,
           recovery_disposition: disposition,
-          attempts_started: attempts,
+          ...(attempts === undefined ? {} : { attempts_started: attempts }),
+          ...(reason === undefined ? {} : { recovery_reason: reason }),
           recovery_actions: false,
         },
       });
@@ -911,6 +976,38 @@ describe("ActionMessage retained provider turn recovery feedback", () => {
       expect(screen.getByTestId("retained-turn-recovery-feedback").textContent).toBe(copy);
     },
   );
+
+  it("uses generic copy for unsupported errors and shows only attempts that started", () => {
+    const providerError = retryMessage({
+      content: CAPACITY_ERROR,
+      metadata: {
+        variant: "error",
+        runtime_retained: true,
+        recovery_disposition: "refused",
+        recovery_reason: "unsupported_restore",
+        attempts_started: 2,
+        provider_error: {
+          source: "acp_prompt",
+          provider_id: "mock-agent",
+          error_kind: "server_error",
+          rpc_code: -32603,
+        },
+        recovery_actions: false,
+      },
+    });
+
+    renderAction(providerError, "WAITING_FOR_INPUT");
+
+    expect(screen.getByTestId("retained-turn-recovery-feedback").textContent).toContain(
+      "Kandev cannot continue automatically because this interruption does not support automatic continuation.",
+    );
+    expect(screen.getByTestId("retained-turn-recovery-feedback").textContent).not.toContain(
+      "live agent runtime is unavailable",
+    );
+    expect(screen.getByTestId("retained-turn-recovery-attempts").textContent).toBe(
+      "2 automatic attempts started.",
+    );
+  });
 });
 
 function recoveryHistoryMessage(stamp: string): Message {

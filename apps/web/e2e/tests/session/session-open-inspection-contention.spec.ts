@@ -1,6 +1,6 @@
 import { expect, test } from "../../fixtures/test-base";
 import { routeSessionOpenInspectionContention } from "../../helpers/session-open-inspection-contention";
-import { waitForSessionState } from "../../helpers/session";
+import { waitForRestorableSessionWorkspace, waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("session open inspection contention", () => {
@@ -49,6 +49,8 @@ test.describe("session open inspection contention", () => {
       message: "Waiting for the retained session to stop before recovery",
     });
 
+    await waitForRestorableSessionWorkspace(apiClient, task.id, sessionId);
+
     const proxy = await routeSessionOpenInspectionContention(testPage, {
       taskId: task.id,
       sessionId,
@@ -61,7 +63,9 @@ test.describe("session open inspection contention", () => {
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 15_000 });
     await session.recoveryResumeButton().click();
     await expect.poll(() => proxy.interceptedResumeCount()).toBe(1);
-    await expect(session.activeChat().getByText("Resuming...", { exact: true })).toBeVisible();
+    await expect(session.activeChat().getByTestId("recovery-progress-status")).toHaveText(
+      "Resuming session",
+    );
     await expect(
       session
         .activeChat()

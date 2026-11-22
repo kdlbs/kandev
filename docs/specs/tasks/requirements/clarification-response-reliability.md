@@ -15,6 +15,10 @@ active clarification. The response path must remain responsive as unrelated
 task-session history grows, and a transient failure must leave the user's
 choices recoverable.
 
+Unsubmitted answers also remain recoverable during navigation within the same
+browser page. The [system design](../system-design/clarification-response-reliability.md)
+defines their lifecycle separately from an accepted response.
+
 The task system owns this contract because it owns clarification authority,
 the durable response claim, and the response endpoint. The UI presents the
 result on desktop and phone but does not decide whether a bundle was accepted.
@@ -64,6 +68,40 @@ response reached the agent.
   startup. Unrelated message history shall not require a full message-table
   scan.
 
+### REQ-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-002: Unsubmitted answer continuity
+
+**Intent:** Users can inspect other tasks and return to an unfinished question
+without entering their answers again.
+
+#### Acceptance criteria
+
+- **AC-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-002.1:** On desktop and phone,
+  task or session navigation shall preserve selected options, custom text,
+  and the current question for a retained pending bundle. This includes text
+  that the user has not committed with Enter or Send.
+- **AC-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-002.2:** A restored draft shall
+  belong to the same task, source session, pending bundle, and form mode.
+  Another bundle shall start without those answers, including bundles that
+  reuse question IDs.
+- **AC-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-002.3:** Navigation and draft
+  restoration shall neither submit nor reject a bundle. Existing single-question
+  selection and explicit multi-question Submit behavior shall remain unchanged.
+- **AC-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-002.4:** An accepted answer,
+  accepted Skip, or authoritative terminal outcome shall prevent restoration
+  of that pending draft. A retryable response failure shall preserve its answers.
+- **AC-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-002.5:** Drafts shall remain
+  available during client navigation, including a task-page unmount, within
+  one browser page. Reload, logout, or a change of authenticated identity or
+  authority shall clear them. Returning to an earlier identity shall not
+  restore its cleared drafts, including changes while no task page is open.
+- **AC-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-002.6:** The browser shall retain
+  at most eight pending-bundle drafts per application instance. Access or edit
+  shall refresh recency. A ninth draft shall evict the least recently used
+  draft without changing the remaining drafts.
+- **AC-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-002.7:** A desktop/phone layout
+  change shall preserve the same draft and question position. Answer retention
+  shall not reset unrelated task panels or their pending focus state.
+
 ## Out of scope
 
 - Changing current-turn authority, detached-resume semantics, or the durable
@@ -73,3 +111,7 @@ response reached the agent.
 - Supporting more than one Kandev backend replica against PostgreSQL.
 - Making local dismiss resolve or reject a clarification. Skip remains the
   explicit rejection action.
+- Preserving unsubmitted answers across reloads, browser tabs, devices, or
+  backend installations.
+- Extending historical late-answer admission, Quick Chat, or Inbox draft
+  retention beyond their existing contracts.

@@ -67,6 +67,10 @@ type Attribution struct {
 	// the initiator. Left empty when there is none or several candidates
 	// exist with no single initiator — never guessed.
 	SessionID string
+	// CausingRunID is the trusted Office run that initiated an agent-caused
+	// transition. Lifecycle retains it with the execution so handoff processing
+	// does not infer it from mutable session or claim state.
+	CausingRunID string
 }
 
 type attributionContextKey struct{}

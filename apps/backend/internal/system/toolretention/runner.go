@@ -31,6 +31,17 @@ func (s *Service) stepCleanup(ctx context.Context, id string) error {
 	if err != nil || handled {
 		return err
 	}
+	// History work owns its own transactions and Git I/O; run it before the
+	// settings write transaction so SQLite never spans external storage.
+	applied, historyErr := s.stepHistoryCleanup(ctx, &before)
+	if applied {
+		if err := s.storeScanProgress(ctx, before); err != nil {
+			return err
+		}
+	}
+	if historyErr != nil {
+		return historyErr
+	}
 	var changed []string
 	_, err = s.change(ctx, func(r *record, tx *sqlx.Tx) error {
 		if !operationMatches(r, id) {
@@ -69,7 +80,18 @@ func (s *Service) prepareFirstBatch(ctx context.Context, r record) (bool, error)
 		return false, err
 	}
 	if len(ids) == 0 {
-		return true, s.storeScanProgress(ctx, r)
+		historyWork := false
+		if s.opts.History != nil {
+			historyWork, err = s.opts.History.HasWork(ctx, r.Operation.Cutoff)
+			if err != nil {
+				return false, err
+			}
+		}
+		if !historyWork {
+			r.Progress.HistoryDone = true
+			finishOperation(&r, stateSucceeded, "", s.opts.Now())
+			return true, s.storeScanProgress(ctx, r)
+		}
 	}
 	return false, s.checkReceipt(ctx, r)
 }

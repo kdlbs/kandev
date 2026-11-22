@@ -105,7 +105,7 @@ func TestNpmStrategyUsesInjectedCommandRunner(t *testing.T) {
 	if runner.spec.Path != npmPath || runner.spec.Dir != binDir {
 		t.Fatalf("command spec = %+v, want path %q and dir %q", runner.spec, npmPath, binDir)
 	}
-	wantArgs := []string{installSubcommand, "--prefix", binDir, "pyright"}
+	wantArgs := []string{installSubcommand, "--global=false", "--location=project", "--prefix", binDir, "pyright"}
 	if len(runner.spec.Args) != len(wantArgs) {
 		t.Fatalf("args = %v, want %v", runner.spec.Args, wantArgs)
 	}
@@ -113,6 +113,20 @@ func TestNpmStrategyUsesInjectedCommandRunner(t *testing.T) {
 		if runner.spec.Args[i] != wantArgs[i] {
 			t.Fatalf("args[%d] = %q, want %q", i, runner.spec.Args[i], wantArgs[i])
 		}
+	}
+}
+
+func TestNpmStrategyPropagatesRunnerErrors(t *testing.T) {
+	putFakeExecutableOnPath(t, "npm")
+	for _, runnerErr := range []error{errors.New("npm failed"), context.Canceled} {
+		t.Run(runnerErr.Error(), func(t *testing.T) {
+			runner := &recordingCommandRunner{output: []byte("npm output"), err: runnerErr}
+			strategy := NewNpmStrategy(t.TempDir(), "server", []string{"package"}, installStrategyTestLogger(t), runner)
+			_, err := strategy.Install(context.Background())
+			if !errors.Is(err, runnerErr) {
+				t.Fatalf("Install() error = %v, want wrapped %v", err, runnerErr)
+			}
+		})
 	}
 }
 

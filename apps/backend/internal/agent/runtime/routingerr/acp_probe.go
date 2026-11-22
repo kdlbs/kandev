@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/managednpm"
 )
 
 // CommandResolver returns the argv to spawn for a given provider id. The
@@ -84,6 +85,17 @@ func (p *ACPProbe) Probe(ctx context.Context, in ProbeInput) *Error {
 			Phase:      PhaseAuthCheck,
 			ProviderID: in.ProviderID,
 			Stderr:     "acp-probe: provider has no resolvable command",
+		})
+	}
+
+	// PrepareNPMProjectPrefix rewrites in place; copy so a shared resolver
+	// slice is never mutated.
+	argv = append([]string(nil), argv...)
+	if err := managednpm.PrepareNPMProjectPrefix(argv); err != nil {
+		return Classify(Input{
+			Phase:      PhaseAuthCheck,
+			ProviderID: in.ProviderID,
+			Stderr:     "acp-probe: " + err.Error(),
 		})
 	}
 

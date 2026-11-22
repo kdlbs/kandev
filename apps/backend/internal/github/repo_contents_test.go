@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRepoContentsPath(t *testing.T) {
@@ -89,6 +90,38 @@ func TestPATClient_ListRepoDirectory_RootOmitsPathSegment(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("expected 0 entries, got %d", len(entries))
+	}
+}
+
+func TestPATClient_ListRepoDirectoryOptInInteractiveAdmissionReturnsQuotaRetry(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+	client := newPATClientPointingAt(t, srv.URL)
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "prompt-sync-pat-user",
+	}, nil)
+	retryAt := time.Now().Add(time.Hour).UTC()
+	tracker.ObserveSecondary(ResourceCore, retryAt, RetrySourceRetryAfter, "fixture")
+	client.WithRateTracker(tracker).withRateAdmission(admission)
+	ctx, cancel := context.WithTimeout(WithNonBlockingGitHubAdmission(context.Background()), time.Second)
+	defer cancel()
+
+	_, err := client.ListRepoDirectory(ctx, "o", "r", "prompts", "main")
+	if !errors.Is(err, ErrGitHubAdmissionWaitRequired) {
+		t.Fatalf("ListRepoDirectory error = %v, want non-blocking quota refusal", err)
+	}
+	var waitErr *AdmissionWaitError
+	if !errors.As(err, &waitErr) || !waitErr.RetryAt.Equal(retryAt) {
+		t.Fatalf("ListRepoDirectory error = %v, want retry at %s", err, retryAt)
+	}
+	if requests != 0 {
+		t.Fatalf("provider requests = %d, want no request while quota is blocked", requests)
 	}
 }
 
@@ -384,6 +417,37 @@ esac
 	}
 	if !strings.Contains(string(logged), "-f ref=main") {
 		t.Fatalf("expected ref field in gh args, got:\n%s", logged)
+	}
+}
+
+func TestGHClient_ListRepoDirectoryOptInInteractiveAdmissionReturnsQuotaRetry(t *testing.T) {
+	logPath := installFakeGH(t, `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_ARGS_LOG"
+`)
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "prompt-sync-cli-user",
+	}, nil)
+	retryAt := time.Now().Add(time.Hour).UTC()
+	tracker.Record(RateSnapshot{
+		Resource: ResourceCore, Limit: 5000, Remaining: 0,
+		RemainingObserved: true, ParsedFromHeaders: true, UpdatedAt: time.Now().UTC(),
+	})
+	tracker.ObservePrimary(ResourceCore, retryAt, RetrySourceRetryAfter)
+	client := NewGHClient().WithRateTracker(tracker).withRateAdmission(admission)
+	ctx, cancel := context.WithTimeout(WithNonBlockingGitHubAdmission(context.Background()), time.Second)
+	defer cancel()
+
+	_, err := client.ListRepoDirectory(ctx, "o", "r", "prompts", "main")
+	if !errors.Is(err, ErrGitHubAdmissionWaitRequired) {
+		t.Fatalf("ListRepoDirectory error = %v, want non-blocking quota refusal", err)
+	}
+	var waitErr *AdmissionWaitError
+	if !errors.As(err, &waitErr) || !waitErr.RetryAt.Equal(retryAt) {
+		t.Fatalf("ListRepoDirectory error = %v, want retry at %s", err, retryAt)
+	}
+	if _, err := os.Stat(logPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("gh invocation log exists or stat failed: %v", err)
 	}
 }
 

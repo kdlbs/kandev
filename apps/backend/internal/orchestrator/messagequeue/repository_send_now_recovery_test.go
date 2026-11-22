@@ -465,6 +465,7 @@ func TestSQLiteSendNowClaimMigratesLegacyIdentity(t *testing.T) {
 	ctx := context.Background()
 	repo := newTestSQLiteRepo(t).(*sqliteRepository)
 	_, err := repo.db.ExecContext(ctx, `
+		DROP TABLE IF EXISTS queue_send_now_claims;
 		CREATE TABLE queue_send_now_claims (
 			session_id TEXT PRIMARY KEY,
 			claim_json TEXT NOT NULL,

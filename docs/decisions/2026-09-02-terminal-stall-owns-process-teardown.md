@@ -4,6 +4,10 @@
 **Date:** 2026-09-02
 **Area:** backend
 
+The inactivity-only terminal classification and teardown are superseded by
+[the silent prompt decision](2026-10-20-silent-prompt-acceptance.md).
+The progress clock and execution-registry stop authority remain accepted.
+
 ## Context
 
 [ADR-2026-08-18-never-started-agent-stall-terminal](2026-08-18-never-started-agent-stall-terminal.md)

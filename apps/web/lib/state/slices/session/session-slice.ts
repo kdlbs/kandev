@@ -1,6 +1,7 @@
+import type { SliceCreator } from "@/lib/state/slice-creator";
 import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 /* eslint-disable max-lines -- session state intentionally keeps its coordinated actions together. */
-import type { StateCreator } from "zustand";
+
 import type { Draft } from "immer";
 import { original } from "immer";
 import type { Message, TaskSession, WorkspaceRecoveryProjection } from "@/lib/types/http";
@@ -12,11 +13,13 @@ import type {
   TaskSessionHydrationEpoch,
 } from "./types";
 import { buildTurnActions, isSettledSessionState, parseTurnTimestamp } from "./turn-actions";
+import { buildTurnChangeActions } from "./turn-changes-actions";
 import {
   buildTaskSessionProjectionActions,
   mergeOrphanPendingActionProjection,
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
+import { compareMessageTimestamps } from "./message-timestamp";
 import { resolveRunningNotices } from "./running-notice-activity";
 import {
   buildPromptMessageActions,
@@ -39,6 +42,7 @@ import {
   getWalkthroughLastSeen,
   setWalkthroughLastSeen,
 } from "@/lib/walkthrough-notification-storage";
+import { mergeQueuePolicyMeta } from "./queue-policy-meta";
 
 /** Ensure message metadata exists for a session, initializing with defaults if needed. */
 function ensureMessageMeta(
@@ -102,8 +106,21 @@ function retainDismissedMetadata(
   return true;
 }
 
+/** Keep a newer local row when a delayed/duplicate payload carries an older
+ *  server timestamp. The backend always bumps updated_at on a mutation, so an
+ *  older payload must not reverse a newer outcome such as a promoted
+ *  permission prompt or an approved decision. */
+function isOlderMessagePayload(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): boolean {
+  if (typeof target.updated_at !== "string" || typeof source.updated_at !== "string") return false;
+  return compareMessageTimestamps(target.updated_at, source.updated_at) === 1;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeMessageFields(target: Record<string, unknown>, source: Record<string, any>) {
+  if (isOlderMessagePayload(target, source)) return;
   const noticeResolved = (target.metadata as Message["metadata"])?.running_notice_resolved === true;
   for (const key of Object.keys(source)) {
     if (
@@ -321,11 +338,13 @@ export const defaultSessionState: SessionSliceState = {
   turns: {
     bySession: {},
     activeBySession: {},
+    emptyTurnNoticeTurnIdsBySession: {},
     windowCoverageBySession: {},
     loadedBySession: {},
     reconcileEpochBySession: {},
     settledBoundaryBySession: {},
   },
+  turnChanges: { bySession: {}, nextOffsetBySession: {}, loadedBySession: {} },
   taskSessions: {
     items: {},
     activityEpochBySession: {},
@@ -660,10 +679,46 @@ function buildTaskPlanCommentActions(set: ImmerSet) {
   };
 }
 
+/** Runtime read ownership is local to one session slice, with no retained history. */
+function buildTaskPlanReadActions(get: ImmerGet) {
+  const pendingReads = new Map<string, symbol>();
+  return {
+    retire: (taskId: string) => {
+      pendingReads.delete(taskId);
+    },
+    actions: {
+      beginTaskPlanRead: (taskId: string) => {
+        const token = Symbol();
+        pendingReads.set(taskId, token);
+        get().setTaskPlanLoading(taskId, true);
+        return token;
+      },
+      finishTaskPlanRead: (
+        taskId: string,
+        token: symbol,
+        plan?: Parameters<SessionSlice["setTaskPlan"]>[1],
+      ) => {
+        if (pendingReads.get(taskId) !== token) return false;
+        pendingReads.delete(taskId);
+        if (plan !== undefined) {
+          get().setTaskPlan(taskId, plan);
+          get().markTaskPlanSeen(taskId);
+        } else {
+          get().setTaskPlanLoading(taskId, false);
+        }
+        return true;
+      },
+    },
+  };
+}
+
 /** Create the task-plan store actions (set, loading, saving, clear, seen, revisions, preview, compare) backed by the given Immer setter and getter. */
 function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
+  const reads = buildTaskPlanReadActions(get);
   return {
+    ...reads.actions,
     setTaskPlan: (taskId: string, plan: Parameters<SessionSlice["setTaskPlan"]>[1]) => {
+      reads.retire(taskId);
       const shouldHydrateLastSeen = get().taskPlans.lastSeenUpdatedAtByTaskId[taskId] === undefined;
       const storedLastSeen = shouldHydrateLastSeen ? getPlanLastSeen(taskId) : null;
       set((draft) => {
@@ -686,6 +741,7 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
       }),
     ...buildTaskPlanCommentActions(set),
     clearTaskPlan: (taskId: string) => {
+      reads.retire(taskId);
       setPlanLastSeen(taskId, null);
       set((draft) => {
         // revisionContentCache is keyed by revisionId, so pick the IDs for this
@@ -879,12 +935,18 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       generations[sessionId] = (generations[sessionId] ?? 0) + 1;
       delete draft.turns.bySession[sessionId];
       delete draft.turns.activeBySession[sessionId];
+      if (draft.turns.emptyTurnNoticeTurnIdsBySession) {
+        delete draft.turns.emptyTurnNoticeTurnIdsBySession[sessionId];
+      }
       if (draft.turns.windowCoverageBySession) {
         delete draft.turns.windowCoverageBySession[sessionId];
       }
       delete draft.turns.loadedBySession[sessionId];
       delete draft.turns.reconcileEpochBySession[sessionId];
       delete draft.turns.settledBoundaryBySession[sessionId];
+      delete draft.turnChanges.bySession[sessionId];
+      delete draft.turnChanges.nextOffsetBySession[sessionId];
+      delete draft.turnChanges.loadedBySession[sessionId];
       // Cascade into the runtime slice (shell/process/git buffers + per-session
       // maps); this also removes the environmentIdBySessionId mapping.
       purgeSessionRuntimeState(draft as unknown as SessionRuntimeSliceState, sessionId);
@@ -1136,31 +1198,6 @@ function isStaleQueueSnapshot(
   );
 }
 
-function shouldPreserveSessionPolicy(previous: QueueMeta | undefined, meta: QueueMetaInput) {
-  return (
-    previous?.sessionIncarnationId === meta.sessionIncarnationId &&
-    previous?.autoMergeSource === "session" &&
-    meta.autoMergeSource === "global"
-  );
-}
-
-function shouldPreservePolicyRevision(previous: QueueMeta | undefined, meta: QueueMetaInput) {
-  return (
-    previous?.sessionIncarnationId === meta.sessionIncarnationId &&
-    previous?.autoMergeSource === meta.autoMergeSource &&
-    previous?.autoMergeRevision !== undefined &&
-    meta.autoMergeRevision !== undefined &&
-    meta.autoMergeRevision < previous.autoMergeRevision
-  );
-}
-
-function copyAutoMergePolicy(target: QueueMetaInput, source: QueueMeta) {
-  target.autoMergeAvailable = source.autoMergeAvailable;
-  target.autoMergeEnabled = source.autoMergeEnabled;
-  target.autoMergeSource = source.autoMergeSource;
-  target.autoMergeRevision = source.autoMergeRevision;
-}
-
 function resolveQueueMeta(
   currentIncarnationId: string | undefined,
   previous: QueueMeta | undefined,
@@ -1173,12 +1210,13 @@ function resolveQueueMeta(
     Object.assign(nextMeta, previous, meta);
   }
   if (isStaleQueueSnapshot(previous, meta, establishStatusEpoch)) return null;
-  if (
-    previous &&
-    (shouldPreserveSessionPolicy(previous, meta) || shouldPreservePolicyRevision(previous, meta))
-  ) {
-    copyAutoMergePolicy(nextMeta, previous);
-  }
+  Object.assign(
+    nextMeta,
+    mergeQueuePolicyMeta(previous, {
+      ...meta,
+      sessionIncarnationId: nextMeta.sessionIncarnationId,
+    }),
+  );
   return nextMeta;
 }
 
@@ -1249,15 +1287,11 @@ function buildQueueActions(set: ImmerSet) {
 }
 
 /** Create the session slice, combining the default state with all session action builders wired to the store's Immer set/get. */
-export const createSessionSlice: StateCreator<
-  SessionSlice,
-  [["zustand/immer", never]],
-  [],
-  SessionSlice
-> = (set, get) => ({
+export const createSessionSlice: SliceCreator<SessionSlice> = (set, get) => ({
   ...defaultSessionState,
   ...buildMessageActions(set),
   ...buildTurnActions(set),
+  ...buildTurnChangeActions(set),
   ...buildTaskSessionActions(set),
   ...buildTaskSessionReconciliationActions(set),
   ...buildTaskSessionProjectionActions(set),

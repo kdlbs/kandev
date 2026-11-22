@@ -32,6 +32,7 @@ const PORTABLE_CONFIG_LABEL_KEYS: Record<string, string> = {
   "claude.settings": "executors:portableConfigBundleClaudeSettings",
   "codex.config": "executors:portableConfigBundleCodexConfig",
   "opencode.config": "executors:portableConfigBundleOpenCodeConfig",
+  "pi.config": "executors:portableConfigBundlePiConfig",
   "mock.settings": "executors:portableConfigBundleMockSettings",
 };
 

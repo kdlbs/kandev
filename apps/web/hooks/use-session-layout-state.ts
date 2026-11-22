@@ -8,10 +8,12 @@ import { executeApprove } from "@/lib/services/session-approve";
 import type { OpenFileTab } from "@/lib/types/backend";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
+import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
 
 export type SelectedDiff = {
   path: string;
   content?: string;
+  historical?: HistoricalTurnDiffTarget;
 };
 
 type UseSessionLayoutStateOptions = {
@@ -38,11 +40,14 @@ function useSelectedDiffState() {
   const handleSelectDiff = useCallback((path: string, content?: string) => {
     setSelectedDiff({ path, content });
   }, []);
+  const handleSelectHistoricalDiff = useCallback((target: HistoricalTurnDiffTarget) => {
+    setSelectedDiff({ path: target.path ?? "", historical: target });
+  }, []);
   const handleClearSelectedDiff = useCallback(() => {
     setSelectedDiff(null);
   }, []);
 
-  return { selectedDiff, handleSelectDiff, handleClearSelectedDiff };
+  return { selectedDiff, handleSelectDiff, handleSelectHistoricalDiff, handleClearSelectedDiff };
 }
 
 function useOpenFileRequestState() {
@@ -92,7 +97,8 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
 
   const isPassthroughMode = useMemo(() => isPassthroughSession(activeSession), [activeSession]);
 
-  const { selectedDiff, handleSelectDiff, handleClearSelectedDiff } = useSelectedDiffState();
+  const { selectedDiff, handleSelectDiff, handleSelectHistoricalDiff, handleClearSelectedDiff } =
+    useSelectedDiffState();
   const { openFileRequest, handleOpenFile, handleFileOpenHandled } = useOpenFileRequestState();
 
   // --- Git status for badges ---
@@ -167,6 +173,7 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
     // Diff selection
     selectedDiff,
     handleSelectDiff,
+    handleSelectHistoricalDiff,
     handleClearSelectedDiff,
 
     // File open

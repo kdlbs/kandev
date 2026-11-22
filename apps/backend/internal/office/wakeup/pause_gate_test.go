@@ -86,6 +86,26 @@ func TestDispatch_BlockedByPause_MarksSkippedWithWorkspacePausedReason(t *testin
 	}
 }
 
+func TestDispatch_BlockedByPause_BlockerFailureRemainsQueued(t *testing.T) {
+	h := newHarness(t, wakeup.PolicyCoalesceIfActive)
+	h.seedWakeup("w-blocker", "blocker_failure", `{"task_id":"parent","blocker_failure_alerts":{"occurrence":{"blocker_task_id":"blocker"}}}`)
+	h.dispatcher.SetPauseGate(&fakeWakeupPauseGate{active: []*officemodels.WorkspacePause{
+		{ID: "pause-1", WorkspaceID: "ws-1"},
+	}})
+
+	err := h.dispatcher.Dispatch(context.Background(), "w-blocker")
+	if !errors.Is(err, shared.ErrWorkspacePaused) {
+		t.Fatalf("err = %v, want shared.ErrWorkspacePaused", err)
+	}
+	got, gErr := h.repo.GetWakeupRequest(context.Background(), "w-blocker")
+	if gErr != nil {
+		t.Fatalf("get wakeup request: %v", gErr)
+	}
+	if got.Status != officesqlite.WakeupStatusQueued {
+		t.Fatalf("status = %q, want queued so resume can replay the alert", got.Status)
+	}
+}
+
 // TestDispatch_PauseGateError_LeavesRequestQueued proves a gate-read
 // error fails closed (shared.ErrPauseGateUnavailable) without marking
 // the request skipped or claimed — nothing has been written yet, so the

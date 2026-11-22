@@ -1,21 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchAccessibleRepos } from "@/lib/api/domains/github-api";
+import { fetchAccessibleRepos, fetchGitHubScopeEditorRepos } from "@/lib/api/domains/github-api";
 import { listUserProjects } from "@/lib/api/domains/gitlab-api";
-import {
-  listAzureDevOpsProjects,
-  listAzureDevOpsRepositories,
-} from "@/lib/api/domains/azure-devops-api";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitLabStatus } from "@/hooks/domains/gitlab/use-gitlab-status";
-import { useAzureDevOpsConnection } from "@/hooks/domains/azure-devops/use-azure-devops-browse";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginRepositoryProviderRegistration } from "@/lib/plugins/registry";
 import { repositoryProviderMatchesURL } from "@/lib/plugins/repository-provider-url-resolution";
+import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { looksLikeSupportedRemoteURL } from "@/components/workspace-source-picker/remote-url";
 
-export const REMOTE_REPOSITORY_PROVIDERS = ["github", "gitlab", "azure_devops"] as const;
+export const REMOTE_REPOSITORY_PROVIDERS = ["github", "gitlab"] as const;
 
 export type RemoteRepositoryProvider = (typeof REMOTE_REPOSITORY_PROVIDERS)[number] | (string & {});
 
@@ -42,29 +38,9 @@ export type UseRemoteRepositoriesResult = {
   search: (query: string) => void;
   refresh?: () => void;
   matchesURL?: (url: string) => boolean;
+  /** The workspace's GitHub host, for parsing typed repository URLs. */
+  githubHost?: string;
 };
-
-async function loadAzureRepositories(workspaceId: string): Promise<RemoteRepository[]> {
-  if (!workspaceId) return [];
-  const { projects = [] } = await listAzureDevOpsProjects(workspaceId);
-  const batches = await Promise.all(
-    projects.map((project) =>
-      listAzureDevOpsRepositories(workspaceId, project.id).then(({ repositories = [] }) =>
-        repositories.map((repo) => ({
-          provider: "azure_devops" as const,
-          id: repo.id,
-          owner: repo.projectId,
-          name: repo.name,
-          fullName: `${repo.projectName}/${repo.name}`,
-          url: repo.webUrl,
-          defaultBranch: (repo.defaultBranch || "").replace(/^refs\/heads\//, ""),
-          private: true,
-        })),
-      ),
-    ),
-  );
-  return batches.flat();
-}
 
 type RemoteRepositoryLoad = {
   repos: RemoteRepository[];
@@ -95,27 +71,29 @@ type ProviderConnectionStatus = {
 type BuiltInRepositoryAccess = {
   eligibility: BuiltInRepositoryEligibility;
   refresh: () => void;
+  githubHost?: string;
 };
+
+export type GitHubRepositorySource = "workspace" | "scope-editor";
 
 function hasProviderConnection(status: ProviderConnectionStatus | null | undefined) {
   return Boolean(status?.authenticated || status?.token_configured);
 }
 
-function useBuiltInRepositoryAccess(workspaceId: string): BuiltInRepositoryAccess {
+function useBuiltInRepositoryAccess(
+  workspaceId: string,
+  allowed: ReadonlySet<string> | null,
+): BuiltInRepositoryAccess {
+  const wantsGitLab = !allowed || allowed.has("gitlab");
   const githubStatus = useGitHubStatus(workspaceId);
-  const gitlabStatus = useGitLabStatus(workspaceId);
-  const azureDevOpsConnection = useAzureDevOpsConnection(workspaceId || undefined);
+  // An empty workspace disables a status load that the caller did not request.
+  const gitlabStatus = useGitLabStatus(wantsGitLab ? workspaceId : "");
   const providers = useMemo(() => {
     const eligible = new Set<RemoteRepositoryProvider>();
     if (hasProviderConnection(githubStatus.status)) eligible.add("github");
     if (hasProviderConnection(gitlabStatus.status)) eligible.add("gitlab");
-    if (azureDevOpsConnection.data?.hasSecret && azureDevOpsConnection.data.lastOk) {
-      eligible.add("azure_devops");
-    }
     return eligible;
   }, [
-    azureDevOpsConnection.data?.hasSecret,
-    azureDevOpsConnection.data?.lastOk,
     githubStatus.status?.authenticated,
     githubStatus.status?.token_configured,
     gitlabStatus.status?.authenticated,
@@ -126,45 +104,53 @@ function useBuiltInRepositoryAccess(workspaceId: string): BuiltInRepositoryAcces
       providers,
       loading:
         Boolean(workspaceId) &&
-        (githubStatus.loading ||
-          !githubStatus.loaded ||
-          gitlabStatus.loading ||
-          azureDevOpsConnection.loading),
+        (githubStatus.loading || !githubStatus.loaded || (wantsGitLab && gitlabStatus.loading)),
     }),
     [
-      azureDevOpsConnection.loading,
       gitlabStatus.loading,
       githubStatus.loaded,
       githubStatus.loading,
       providers,
+      wantsGitLab,
       workspaceId,
     ],
   );
   const refresh = useCallback(() => {
     void githubStatus.refresh();
-    void gitlabStatus.refresh();
-    azureDevOpsConnection.refresh();
-  }, [azureDevOpsConnection.refresh, githubStatus.refresh, gitlabStatus.refresh]);
-  return { eligibility, refresh };
+    if (wantsGitLab) void gitlabStatus.refresh();
+  }, [githubStatus.refresh, gitlabStatus.refresh, wantsGitLab]);
+  return { eligibility, refresh, githubHost: githubStatus.status?.automation?.github_host };
 }
 
 async function loadBuiltInRepositories(
   workspaceId: string,
   eligibleProviders: ReadonlySet<RemoteRepositoryProvider>,
+  bypassCache: boolean,
+  githubRepositorySource: GitHubRepositorySource,
 ): Promise<RemoteRepositoryLoad> {
   if (!workspaceId) return { repos: [], availableProviders: [], sourceErrors: [] };
   const requests: RepositoryRequest[] = [];
   if (eligibleProviders.has("github")) {
+    const request = bypassCache
+      ? { workspaceId, limit: 100, refresh: true }
+      : { workspaceId, limit: 100 };
+    const fetchRepos =
+      githubRepositorySource === "scope-editor"
+        ? fetchGitHubScopeEditorRepos
+        : fetchAccessibleRepos;
     requests.push({
       provider: "github",
-      load: fetchAccessibleRepos({ workspaceId, limit: 100 }).then((repos) =>
+      load: fetchRepos(request).then((repos) =>
         repos.map((repo) => ({
           provider: "github" as const,
-          id: repo.full_name,
+          id: `${repo.github_host ?? "github.com"}/${repo.full_name}`,
+          providerHost: `https://${repo.github_host ?? "github.com"}`,
           owner: repo.owner,
           name: repo.name,
           fullName: repo.full_name,
-          url: `https://github.com/${repo.owner}/${repo.name}`,
+          url:
+            repo.html_url ||
+            `https://${repo.github_host ?? "github.com"}/${repo.owner}/${repo.name}`,
           defaultBranch: repo.default_branch,
           private: repo.private,
         })),
@@ -187,9 +173,6 @@ async function loadBuiltInRepositories(
         })),
       ),
     });
-  }
-  if (eligibleProviders.has("azure_devops")) {
-    requests.push({ provider: "azure_devops", load: loadAzureRepositories(workspaceId) });
   }
   return settleRepositoryRequests(requests);
 }
@@ -302,12 +285,15 @@ function useBuiltInRepositorySource(
   workspaceId: string,
   refreshVersion: number,
   eligibility: BuiltInRepositoryEligibility,
+  githubRepositorySource: GitHubRepositorySource,
 ): RepositorySourceState {
   const [repos, setRepos] = useState<RemoteRepository[]>([]);
   const [loading, setLoading] = useState(true);
   const [sourceErrors, setSourceErrors] = useState<RemoteRepositorySourceError[]>([]);
   const [availableProviders, setAvailableProviders] = useState<RemoteRepositoryProvider[]>([]);
   const workspaceRef = useRef(workspaceId);
+  // The refresh version whose load has completed; a newer version bypasses server caches.
+  const loadedRefreshRef = useRef(refreshVersion);
 
   useEffect(() => {
     let cancelled = false;
@@ -324,9 +310,11 @@ function useBuiltInRepositorySource(
         cancelled = true;
       };
     }
-    loadBuiltInRepositories(workspaceId, eligibility.providers)
+    const bypassCache = loadedRefreshRef.current !== refreshVersion;
+    loadBuiltInRepositories(workspaceId, eligibility.providers, bypassCache, githubRepositorySource)
       .then((result) => {
         if (cancelled) return;
+        loadedRefreshRef.current = refreshVersion;
         setRepos(result.repos);
         setAvailableProviders(result.availableProviders);
         setSourceErrors(result.sourceErrors);
@@ -340,7 +328,13 @@ function useBuiltInRepositorySource(
     return () => {
       cancelled = true;
     };
-  }, [eligibility.loading, eligibility.providers, refreshVersion, workspaceId]);
+  }, [
+    eligibility.loading,
+    eligibility.providers,
+    githubRepositorySource,
+    refreshVersion,
+    workspaceId,
+  ]);
 
   return { repos, availableProviders, sourceErrors, loading };
 }
@@ -388,18 +382,58 @@ function usePluginRepositorySource(
   return { repos, availableProviders, sourceErrors, loading };
 }
 
-export function useRemoteRepositories(workspaceId: string): UseRemoteRepositoriesResult {
+export type UseRemoteRepositoriesOptions = {
+  /** Restricts listing to these providers. Omitted means every connected provider. */
+  providers?: readonly RemoteRepositoryProvider[];
+  /** Selects the scope-editing discovery route for GitHub repositories. */
+  githubRepositorySource?: GitHubRepositorySource;
+};
+
+function useProviderRestriction(providers: readonly RemoteRepositoryProvider[] | undefined) {
+  const key = providers ? providers.join("\u0000") : null;
+  return useMemo(() => (key === null ? null : new Set(key.split("\u0000"))), [key]);
+}
+
+function useRestrictedEligibility(
+  eligibility: BuiltInRepositoryEligibility,
+  allowed: ReadonlySet<string> | null,
+): BuiltInRepositoryEligibility {
+  return useMemo(() => {
+    if (!allowed) return eligibility;
+    const providers = new Set([...eligibility.providers].filter((p) => allowed.has(p)));
+    return { providers, loading: eligibility.loading };
+  }, [allowed, eligibility]);
+}
+
+export function useRemoteRepositories(
+  workspaceId: string,
+  options?: UseRemoteRepositoriesOptions,
+): UseRemoteRepositoriesResult {
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 250);
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const allowedProviders = useProviderRestriction(options?.providers);
   const registry = usePluginRegistry();
   const registryVersion = registry.getVersion();
   const pluginProviders = useMemo(
-    () => registry.getRepositoryProviders(),
-    [registry, registryVersion],
+    () =>
+      registry
+        .getRepositoryProviders()
+        .filter((provider) => !allowedProviders || allowedProviders.has(provider.id)),
+    [allowedProviders, registry, registryVersion],
   );
-  const { eligibility, refresh: refreshBuiltIns } = useBuiltInRepositoryAccess(workspaceId);
-  const builtInSource = useBuiltInRepositorySource(workspaceId, refreshVersion, eligibility);
+  const {
+    eligibility: connectedEligibility,
+    refresh: refreshBuiltIns,
+    githubHost,
+  } = useBuiltInRepositoryAccess(workspaceId, allowedProviders);
+  const eligibility = useRestrictedEligibility(connectedEligibility, allowedProviders);
+  const builtInSource = useBuiltInRepositorySource(
+    workspaceId,
+    refreshVersion,
+    eligibility,
+    options?.githubRepositorySource ?? "workspace",
+  );
   const pluginSource = usePluginRepositorySource(
     workspaceId,
     pluginProviders,
@@ -434,9 +468,10 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
   }, [refreshBuiltIns]);
   const matchesURL = useCallback(
     (url: string) =>
+      Boolean(parseGitHubAnyUrl(url, githubHost)) ||
       looksLikeSupportedRemoteURL(url) ||
       pluginProviders.some((provider) => repositoryProviderMatchesURL(provider, url)),
-    [pluginProviders],
+    [githubHost, pluginProviders],
   );
   return {
     repos,
@@ -448,6 +483,7 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     search,
     refresh,
     matchesURL,
+    githubHost,
   };
 }
 

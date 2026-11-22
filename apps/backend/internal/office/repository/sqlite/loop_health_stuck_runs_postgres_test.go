@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
-	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/testutil"
@@ -59,7 +60,7 @@ func TestPostgresListStuckRuns(t *testing.T) {
 		}
 	}
 
-	claimed := &models.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	claimed := &runsmodels.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, claimed); err != nil {
 		t.Fatalf("create claimed run: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestPostgresListStuckRuns(t *testing.T) {
 		t.Fatalf("seed claimed state: %v", err)
 	}
 
-	queued := &models.Run{AgentProfileID: "agent-b", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	queued := &runsmodels.Run{AgentProfileID: "agent-b", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, queued); err != nil {
 		t.Fatalf("create queued run: %v", err)
 	}

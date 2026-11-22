@@ -26,6 +26,9 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/completion"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -113,6 +116,9 @@ func TestWorkspaceSourceHTTPStatusUsesTypedErrors(t *testing.T) {
 		{service.ErrWorkspaceSourceActive, http.StatusConflict},
 		{service.ErrUnsupportedWorkspaceSource, http.StatusUnprocessableEntity},
 		{service.ErrWorkspaceSourceMaterialize, http.StatusUnprocessableEntity},
+		{service.ErrInvalidWorkspaceRepositoryPlacement, http.StatusBadRequest},
+		{service.ErrWorkspaceSourcePreviewStale, http.StatusConflict},
+		{service.ErrWorkspaceExpansionUnavailable, http.StatusUnprocessableEntity},
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.want, workspaceSourceHTTPStatus(tt.err))
@@ -149,8 +155,13 @@ func TestQuickChatResolveParamsForcesWorktreeForRepositoryContext(t *testing.T) 
 
 type quickChatHandlerRepo struct {
 	mockRepository
-	taskRepos []*models.TaskRepository
-	task      *models.Task
+	taskRepos           []*models.TaskRepository
+	task                *models.Task
+	primarySession      *models.TaskSession
+	repositoryErr       error
+	createTaskCalls     int
+	settleExternalIDErr error
+	deleteTaskOnSettle  bool
 }
 
 func (r *quickChatHandlerRepo) GetWorkspace(_ context.Context, id string) (*models.Workspace, error) {
@@ -164,12 +175,52 @@ func (r *quickChatHandlerRepo) GetWorkspace(_ context.Context, id string) (*mode
 }
 
 func (r *quickChatHandlerRepo) GetRepository(_ context.Context, id string) (*models.Repository, error) {
+	if r.repositoryErr != nil {
+		return nil, r.repositoryErr
+	}
 	return &models.Repository{ID: id, WorkspaceID: "ws-1", Name: id, DefaultBranch: "main"}, nil
 }
 
 func (r *quickChatHandlerRepo) CreateTask(_ context.Context, task *models.Task) error {
+	r.createTaskCalls++
 	r.task = task
 	return nil
+}
+
+func (r *quickChatHandlerRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
+	if r.task != nil && r.task.ID == id {
+		return r.task, nil
+	}
+	return nil, taskrepo.ErrTaskNotFound
+}
+
+func (r *quickChatHandlerRepo) GetTaskByExternalID(_ context.Context, workspaceID, externalID string) (*models.Task, error) {
+	if r.task != nil && r.task.WorkspaceID == workspaceID && r.task.ExternalID == externalID {
+		return r.task, nil
+	}
+	return nil, taskrepo.ErrTaskNotFound
+}
+
+func (r *quickChatHandlerRepo) SettleTaskExternalID(_ context.Context, taskID, externalID string, settledAt time.Time) (bool, error) {
+	if r.settleExternalIDErr != nil {
+		return false, r.settleExternalIDErr
+	}
+	if r.deleteTaskOnSettle {
+		r.task = nil
+		return false, nil
+	}
+	if r.task == nil || r.task.ID != taskID || r.task.ExternalID != externalID || r.task.ExternalIDSettledAt != nil {
+		return false, nil
+	}
+	r.task.ExternalIDSettledAt = &settledAt
+	return true, nil
+}
+
+func (r *quickChatHandlerRepo) GetPrimarySessionByTaskID(_ context.Context, taskID string) (*models.TaskSession, error) {
+	if r.primarySession != nil && r.primarySession.TaskID == taskID {
+		return r.primarySession, nil
+	}
+	return nil, taskrepo.ErrNoPrimarySession
 }
 
 func (r *quickChatHandlerRepo) CreateTaskRepository(_ context.Context, taskRepo *models.TaskRepository) error {
@@ -184,7 +235,24 @@ func (r *quickChatHandlerRepo) ListTaskRepositories(_ context.Context, _ string)
 func newQuickChatHandlerForTest(t *testing.T) (*TaskHandlers, *captureOrchestrator, *quickChatHandlerRepo) {
 	t.Helper()
 	log := newTestLogger(t)
-	repo := &quickChatHandlerRepo{}
+	repo := &quickChatHandlerRepo{mockRepository: mockRepository{
+		executors: map[string]*models.Executor{
+			models.ExecutorIDLocal: {
+				ID:       models.ExecutorIDLocal,
+				Name:     "Local",
+				Type:     models.ExecutorTypeLocal,
+				Status:   models.ExecutorStatusActive,
+				IsSystem: true,
+			},
+			models.ExecutorIDWorktree: {
+				ID:       models.ExecutorIDWorktree,
+				Name:     "Worktree",
+				Type:     models.ExecutorTypeWorktree,
+				Status:   models.ExecutorStatusActive,
+				IsSystem: true,
+			},
+		},
+	}}
 	svc := service.NewService(service.Repos{
 		Workspaces: repo, Tasks: repo, TaskRepos: repo,
 		Workflows: repo, Messages: repo, Turns: repo,
@@ -256,7 +324,7 @@ func TestHTTPStartQuickChatForwardsAutoTitleAndKeepsProvisionalTitle(t *testing.
 	require.NotNil(t, repo.task)
 	assert.Equal(t, "Agent A - Chat 1", repo.task.Title)
 	assert.True(t, models.IsAgentTitlePending(repo.task.Metadata))
-	assert.Len(t, orch.requests, 1)
+	assert.Equal(t, 1, quickChatIntentCount(orch, orchestrator.IntentPrepare))
 }
 
 func TestHTTPStartQuickChatWithoutAutoTitleDoesNotMarkPendingTitle(t *testing.T) {
@@ -277,7 +345,7 @@ func TestHTTPStartQuickChatWithoutAutoTitleDoesNotMarkPendingTitle(t *testing.T)
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 	require.NotNil(t, repo.task)
 	assert.False(t, models.IsAgentTitlePending(repo.task.Metadata))
-	assert.Len(t, orch.requests, 1)
+	assert.Equal(t, 1, quickChatIntentCount(orch, orchestrator.IntentPrepare))
 }
 
 // TestStartAgentForNewTask_SetsDeferredStart pins the call-site half of the
@@ -1394,7 +1462,7 @@ func TestHandleSelectedMoveError(t *testing.T) {
 		},
 		{
 			name:     "move conflict",
-			err:      errors.New("task task-1 cannot be moved: task has an active session (running)"),
+			err:      fmt.Errorf("task task-1 cannot be moved: %w (running)", service.ErrTaskMoveActiveSession),
 			want:     http.StatusConflict,
 			wantCode: moveConflictCodeActiveSession,
 		},
@@ -1462,6 +1530,26 @@ func (m *moveTaskConflictRepo) UpdateTask(ctx context.Context, task *models.Task
 }
 
 func (m *moveTaskConflictRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return m.UpdateTask(ctx, task)
+}
+
+func (m *moveTaskConflictRepo) UpdateTaskIfWorkflowMatchesWithCompletionAdmission(
+	ctx context.Context,
+	task *models.Task,
+	expectedWorkflowID string,
+	_ *completion.Admission,
+) error {
+	if m.task.WorkflowID != expectedWorkflowID {
+		return repoerrors.ErrWorkflowResolutionConflict
+	}
+	return m.UpdateTask(ctx, task)
+}
+
+func (m *moveTaskConflictRepo) UpdateTaskPreservingDeferredLaunchWithCompletionAdmission(
+	ctx context.Context,
+	task *models.Task,
+	_ *completion.Admission,
+) error {
 	return m.UpdateTask(ctx, task)
 }
 

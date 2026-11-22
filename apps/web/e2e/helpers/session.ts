@@ -6,6 +6,21 @@ import type { AppState } from "../../lib/state/store";
 import type { StoreApi } from "zustand";
 import { pollUntil } from "./poll-until";
 
+export async function firstSessionId(apiClient: ApiClient, taskId: string): Promise<string> {
+  let sessionId = "";
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(taskId);
+        sessionId = sessions[0]?.id ?? "";
+        return sessionId;
+      },
+      { message: "session row should be created", timeout: 30_000 },
+    )
+    .not.toBe("");
+  return sessionId;
+}
+
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const FAILED_STATES = ["FAILED", "CANCELLED"];
 
@@ -117,6 +132,24 @@ export async function waitForAgentMessage(
     timeout,
     `Waiting for agent message containing ${JSON.stringify(content)}`,
   );
+}
+
+/** Cancellation is persisted before runtime teardown makes the workspace restorable. */
+export async function waitForRestorableSessionWorkspace(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+): Promise<void> {
+  await expect
+    .poll(
+      () => apiClient.wsRequest("task.session.status", { task_id: taskId, session_id: sessionId }),
+      { timeout: 30_000, message: "Waiting for stopped runtime teardown before workspace restore" },
+    )
+    .toMatchObject({
+      is_agent_running: false,
+      needs_workspace_restore: true,
+      auto_resume_allowed: true,
+    });
 }
 
 export async function waitForSessionState(

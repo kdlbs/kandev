@@ -29,6 +29,18 @@ func (p *CachedInstallationCredentialProvider) ResolveInstallation(
 	if p.tokens.registrationID != "" && connection.AppRegistrationID != p.tokens.registrationID {
 		return nil, ErrGitHubNotConfigured
 	}
+	host, err := connectionHost(connection.GitHubHost)
+	if err != nil {
+		return nil, err
+	}
+	if app, ok := p.tokens.minter.(*AppClient); ok {
+		if app == nil {
+			return nil, ErrGitHubNotConfigured
+		}
+		if app.host != host {
+			return nil, ErrGitHubHostMismatch
+		}
+	}
 	var repositories []string
 	if req.RepoName != "" {
 		repositories = []string{req.RepoName}
@@ -40,11 +52,13 @@ func (p *CachedInstallationCredentialProvider) ResolveInstallation(
 		return nil, err
 	}
 	tracker := NewRateTracker(nil, nil)
-	client := NewTokenClient(token.Token, token.Principal).WithRateTracker(tracker)
+	client := NewTokenClientForHost(token.Token, token.Principal, host).WithRateTracker(tracker)
 	return &ResolvedCredential{
-		Client: client,
+		Client:     client,
+		GitHubHost: host.String(),
 		Principal: AuthPrincipal{
-			Kind: AuthPrincipalApp, Source: ConnectionSourceGitHubAppInstallation,
+			GitHubHost: host.String(),
+			Kind:       AuthPrincipalApp, Source: ConnectionSourceGitHubAppInstallation,
 			Login: connection.InstallationAccountLogin, InstallationID: *connection.InstallationID,
 			AppRegistrationID:       p.tokens.registrationID,
 			AppCredentialGeneration: p.tokens.credentialGeneration,

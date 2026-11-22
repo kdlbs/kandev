@@ -25,7 +25,7 @@ func (d *mockDetector) ShouldAcceptStateChange(currentState, newState AgentState
 func TestStatusTracker_Write(t *testing.T) {
 	log := newTestLogger(t)
 	detector := &mockDetector{state: StateUnknown, acceptTransition: true}
-	config := DefaultStatusTrackerConfig()
+	config := testStatusTrackerConfig()
 
 	tracker := NewStatusTracker("test-session", detector, nil, config, log)
 
@@ -110,7 +110,7 @@ func TestStatusTracker_CheckAndUpdate_StateChange(t *testing.T) {
 		callbackMu.Unlock()
 	}
 
-	config := DefaultStatusTrackerConfig()
+	config := testStatusTrackerConfig()
 	tracker := NewStatusTracker("test-session", detector, callback, config, log)
 
 	// First check should emit the initial state change
@@ -139,7 +139,7 @@ func TestStatusTracker_CheckAndUpdate_NoChangeNoCallback(t *testing.T) {
 		callCount++
 	}
 
-	config := DefaultStatusTrackerConfig()
+	config := testStatusTrackerConfig()
 	tracker := NewStatusTracker("test-session", detector, callback, config, log)
 
 	// First check triggers callback
@@ -162,7 +162,7 @@ func TestStatusTracker_CheckAndUpdate_TransitionRejected(t *testing.T) {
 		callCount++
 	}
 
-	config := DefaultStatusTrackerConfig()
+	config := testStatusTrackerConfig()
 	tracker := NewStatusTracker("test-session", detector, callback, config, log)
 
 	// Check - detector rejects the transition
@@ -219,7 +219,7 @@ func TestStatusTracker_CurrentState(t *testing.T) {
 	log := newTestLogger(t)
 	detector := &mockDetector{state: StateWaitingInput, acceptTransition: true}
 
-	config := DefaultStatusTrackerConfig()
+	config := testStatusTrackerConfig()
 	tracker := NewStatusTracker("test-session", detector, nil, config, log)
 
 	// Initial state
@@ -235,34 +235,21 @@ func TestStatusTracker_CurrentState(t *testing.T) {
 	}
 }
 
-func TestDefaultStatusTrackerConfig(t *testing.T) {
-	config := DefaultStatusTrackerConfig()
-
-	if config.Rows != 24 {
-		t.Errorf("DefaultStatusTrackerConfig().Rows = %d, want 24", config.Rows)
-	}
-	if config.Cols != 80 {
-		t.Errorf("DefaultStatusTrackerConfig().Cols = %d, want 80", config.Cols)
-	}
-	if config.CheckInterval != 100*time.Millisecond {
-		t.Errorf("DefaultStatusTrackerConfig().CheckInterval = %v, want 100ms", config.CheckInterval)
-	}
-	if config.StabilityWindow != 0 {
-		t.Errorf("DefaultStatusTrackerConfig().StabilityWindow = %v, want 0", config.StabilityWindow)
-	}
-}
-
-func TestNoOpDetector(t *testing.T) {
-	detector := &NoOpDetector{}
+func TestIdleDetector(t *testing.T) {
+	detector := NewIdleDetector()
 
 	// Always returns unknown
 	state := detector.DetectState(nil, nil)
 	if state != StateUnknown {
-		t.Errorf("NoOpDetector.DetectState() = %v, want %v", state, StateUnknown)
+		t.Errorf("IdleDetector.DetectState() = %v, want %v", state, StateUnknown)
 	}
 
 	// Always accepts transitions
 	if !detector.ShouldAcceptStateChange(StateWorking, StateUnknown) {
-		t.Error("NoOpDetector.ShouldAcceptStateChange() should always return true")
+		t.Error("IdleDetector.ShouldAcceptStateChange() should always return true")
 	}
+}
+
+func testStatusTrackerConfig() StatusTrackerConfig {
+	return StatusTrackerConfig{Rows: 24, Cols: 80, CheckInterval: 100 * time.Millisecond, StabilityWindow: 0}
 }

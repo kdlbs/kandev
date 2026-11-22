@@ -84,10 +84,10 @@ func testMetadataMergeProtectedDocument(t *testing.T, repo *Repository) {
 	ctx := context.Background()
 	id := "merge-owners"
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: id, WorkspaceID: "merge-ws", Title: "Untouched"}))
-	original := `{"deferred_launch":null,"step_handoff_carry":{"key":"current"},"handoff_source":{"task_id":"source"},"handoffs":[{"task_id":"child"}],"office_carrier_causation_depth":3,"agent_title_pending":true,"agent_title_owner_session_id":"owner","ordinary":null}`
+	original := `{"deferred_launch":null,"step_handoff_carry":{"key":"current"},"handoff_source":{"task_id":"source"},"handoffs":[{"task_id":"child"}],"office_carrier_causation_depth":3,"agent_title_pending":true,"agent_title_owner_session_id":"owner","kandev.office_required_subtask_count":3,"ordinary":null}`
 	_, err := repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE tasks SET metadata=? WHERE id=?`), original, id)
 	require.NoError(t, err)
-	patch := map[string]interface{}{"new": "allowed"}
+	patch := map[string]interface{}{"new": "allowed", models.MetaKeyRequiredSubtaskCount: 0}
 	for _, key := range []string{models.MetaKeyDeferredLaunch, models.MetaKeyStepHandoffCarry, models.MetaKeyHandoffSource, models.MetaKeyHandoffs, models.MetaKeyOfficeCarrierCausationDepth, models.MetaKeyAgentTitlePending, models.MetaKeyAgentTitleOwnerSessionID} {
 		patch[key] = "forged"
 	}
@@ -107,6 +107,13 @@ func testMetadataMergeProtectedDocument(t *testing.T, repo *Repository) {
 	current, err = repo.GetTask(ctx, id)
 	require.NoError(t, err)
 	require.Equal(t, map[string]interface{}{"new": "allowed"}, current.Metadata)
+
+	forgedID := "merge-forged-required-count"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: forgedID, WorkspaceID: "merge-ws", Title: "Ordinary task"}))
+	require.NoError(t, repo.MergeTaskMetadata(ctx, forgedID, map[string]interface{}{models.MetaKeyRequiredSubtaskCount: 3}))
+	forged, err := repo.GetTask(ctx, forgedID)
+	require.NoError(t, err)
+	require.NotContains(t, forged.Metadata, models.MetaKeyRequiredSubtaskCount)
 }
 
 func rawValueMap(t *testing.T, raw string) map[string]json.RawMessage {

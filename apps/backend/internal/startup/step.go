@@ -12,6 +12,11 @@ const (
 	StepMessageTimestampsBackfill StepID = "task.message_timestamps.backfill"
 	StepSubagentContextBackfill   StepID = "task.subagent_context.backfill"
 	StepSessionsRecovery          StepID = "sessions.recovery"
+	StepQueueReconciliation       StepID = "startup.queue_reconciliation"
+	StepTurnReconciliation        StepID = "startup.turn_reconciliation"
+	StepRouteReconciliation       StepID = "startup.route_reconciliation"
+	StepRuntimeInventory          StepID = "startup.runtime_inventory"
+	StepTaskReconciliation        StepID = "startup.task_reconciliation"
 )
 
 // Measure is the ladder a step's reported progress can occupy: counted (done
@@ -72,6 +77,11 @@ type StepSpec struct {
 // registry is the complete, exhaustive set of registered steps
 // (AC-PLATFORM-STARTUP-PROGRESS-005.3).
 var registry = []StepSpec{
+	{ID: StepQueueReconciliation, Phase: RecoveringSessions, Measure: MeasureOpaque, Unit: UnitRows, LabelKey: "startup.step.queue_reconciliation", Dialects: bothDialects},
+	{ID: StepTurnReconciliation, Phase: RecoveringSessions, Measure: MeasureOpaque, Unit: UnitTurns, LabelKey: "startup.step.turn_reconciliation", Dialects: bothDialects},
+	{ID: StepRouteReconciliation, Phase: RecoveringSessions, Measure: MeasureOpaque, Unit: UnitRows, LabelKey: "startup.step.route_reconciliation", Dialects: bothDialects},
+	{ID: StepRuntimeInventory, Phase: RecoveringSessions, Measure: MeasureCounted, Unit: UnitSessions, LabelKey: "startup.step.runtime_inventory", Dialects: bothDialects, Corpus: "runtime inventory rows requiring reconciliation"},
+	{ID: StepTaskReconciliation, Phase: RecoveringSessions, Measure: MeasureOpaque, Unit: UnitRows, LabelKey: "startup.step.task_reconciliation", Dialects: bothDialects},
 	{
 		ID:       StepDatabaseBackup,
 		Phase:    BackingUpDatabase,

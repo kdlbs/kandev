@@ -163,3 +163,44 @@ func (a *Adapter) discardShellSnapshot() {
 	}
 	a.shellSnapshots = shellSnapshotState{}
 }
+
+func shellOutputCompactEligible(n sdk.SessionNotification, event *AgentEvent) bool {
+	if shellSnapshotEligible(n, event) {
+		return true
+	}
+	update := n.Update.ToolCallUpdate
+	if update == nil || event == nil || event.Type != streams.EventTypeToolUpdate || event.NormalizedPayload == nil ||
+		event.NormalizedPayload.BackgroundWork() != nil || len(n.Meta) != 0 || !shellOutputContents(event.ToolCallContents) {
+		return false
+	}
+	shell := event.NormalizedPayload.ShellExec()
+	if shell == nil || shell.Background || shell.Output == nil {
+		return false
+	}
+	switch event.ToolStatus {
+	case toolStatusComplete, toolStatusError, toolStatusCancelled:
+	default:
+		return false
+	}
+	return shellCompactTerminalMetadata(update.Meta, event.ToolCallID)
+}
+
+func shellCompactTerminalMetadata(meta map[string]any, toolID string) bool {
+	output := make(map[string]any, len(meta))
+	for key, value := range meta {
+		if key == "terminal_exit" {
+			fields, ok := value.(map[string]any)
+			if !ok {
+				return false
+			}
+			for field := range fields {
+				if field != "exit_code" && field != "code" {
+					return false
+				}
+			}
+		} else {
+			output[key] = value
+		}
+	}
+	return shellOutputMetadata(output, toolID)
+}

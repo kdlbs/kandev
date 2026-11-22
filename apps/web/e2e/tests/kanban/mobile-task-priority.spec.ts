@@ -95,7 +95,15 @@ test.describe("Mobile kanban — task priority", () => {
     const menuLabels = (await menu.locator(":scope > [role='menuitem']").allTextContents()).map(
       (text) => text.replace(/\s+/g, " ").trim(),
     );
-    expect(menuLabels).toEqual(["Priority", "Edit", "Link", "Move to", "Archive", "Delete"]);
+    expect(menuLabels).toEqual([
+      "Priority",
+      "Edit",
+      "Show in graph",
+      "Link",
+      "Move to",
+      "Archive",
+      "Delete",
+    ]);
     await expect(menu.locator(":scope > [data-slot='dropdown-menu-separator']")).toHaveCount(4);
     const deleteItem = menu.getByRole("menuitem", { name: "Delete", exact: true });
     await deleteItem.scrollIntoViewIfNeeded();

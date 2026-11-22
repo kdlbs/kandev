@@ -144,6 +144,10 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 			"MCP_TIMEOUT":      "30000",
 			"MCP_TOOL_TIMEOUT": "7200000",
 		},
+
+		ToolTimeoutEnvKey: "MCP_TOOL_TIMEOUT",
+		ToolTimeoutUnit:   time.Millisecond,
+
 		ContainerEnv: map[string]string{
 			// Claude's ACP bridge limits bypass mode for root unless the process
 			// runs in a declared sandbox. Executor isolation makes this available;
@@ -184,6 +188,10 @@ cat > "${HOME}/.claude.json" <<'JSON'
 JSON
 chmod 600 "$config_dir/.credentials.json"
 chmod 600 "${HOME}/.claude.json"`,
+			},
+			{
+				Type:   "env",
+				EnvVar: "ANTHROPIC_API_KEY",
 			},
 		},
 	}

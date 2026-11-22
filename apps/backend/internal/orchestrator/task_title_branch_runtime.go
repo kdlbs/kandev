@@ -14,15 +14,11 @@ import (
 )
 
 // titleBranchRuntime is intentionally narrower than the full agent manager
-// interface. Branch renames are workspace operations owned by lifecycle, so
-// adding this seam does not force every runtime test double to implement a new
-// method.
+// interface. Generated branch renames are workspace operations owned by
+// lifecycle, and the expected old branch plus primary identity are required so
+// agentctl never renames an unrelated checkout.
 type titleBranchRuntime interface {
-	RenameBranchForSession(ctx context.Context, sessionID, newName, repo string) (*runtimeapi.GitOperationResult, error)
-}
-
-type titleBranchPrimaryRuntime interface {
-	RenameBranchForSessionWithPrimary(ctx context.Context, sessionID, newName, repo string, primary bool) (*runtimeapi.GitOperationResult, error)
+	RenameGeneratedBranchForSession(ctx context.Context, sessionID, expectedBranch, newName, repo string, primary bool) (*runtimeapi.GitOperationResult, error)
 }
 
 // titleBranchStore contains the repository reads and per-repository snapshot
@@ -383,7 +379,7 @@ func (s *Service) performTitleBranchRename(
 		return newName, nil
 	}
 	repoPath := titleBranchAgentctlRepoPath(env, binding, multiRepo)
-	operation, err := s.renameTitleBranchRuntime(ctx, binding.sessionID, newName, repoPath, primary)
+	operation, err := s.renameTitleBranchRuntime(ctx, binding.sessionID, branch, newName, repoPath, primary)
 	if err != nil {
 		return "", err
 	}
@@ -396,11 +392,8 @@ func (s *Service) performTitleBranchRename(
 	return newName, nil
 }
 
-func (s *Service) renameTitleBranchRuntime(ctx context.Context, sessionID, newName, repoPath string, primary bool) (*runtimeapi.GitOperationResult, error) {
-	if scoped, ok := s.titleBranchRuntime.(titleBranchPrimaryRuntime); ok {
-		return scoped.RenameBranchForSessionWithPrimary(ctx, sessionID, newName, repoPath, primary)
-	}
-	return s.titleBranchRuntime.RenameBranchForSession(ctx, sessionID, newName, repoPath)
+func (s *Service) renameTitleBranchRuntime(ctx context.Context, sessionID, expectedBranch, newName, repoPath string, primary bool) (*runtimeapi.GitOperationResult, error) {
+	return s.titleBranchRuntime.RenameGeneratedBranchForSession(ctx, sessionID, expectedBranch, newName, repoPath, primary)
 }
 
 func titleBranchPreservationReason(taskRepository *models.TaskRepository, executorType models.ExecutorType) string {

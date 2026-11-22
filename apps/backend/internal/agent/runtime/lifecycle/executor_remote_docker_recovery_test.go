@@ -39,6 +39,40 @@ func TestIsAgentctlAuthErrorClassifiesHealthUnauthorizedOnly(t *testing.T) {
 	}
 }
 
+// @covers AC-EXECUTORS-REMOTE-DOCKER-001.12
+func TestRemoteDockerRecoveryUsesPersistedAdoptedAgentctlInstanceID(t *testing.T) {
+	fixture := newRemoteDockerRecoveryFixture(t, "running", remoteDockerRecoveryInstance{})
+	fixture.backendExecutionID = "new-backend-execution"
+
+	instances, outcomes := recoverRemoteDockerCandidates(t, fixture.executor, []*models.ExecutorRunning{
+		fixture.recordWithIDs("new-backend-execution", "adopted-agentctl-instance", "saved-token", ""),
+	})
+
+	require.Len(t, instances, 1)
+	require.Empty(t, outcomes)
+	got := instances[0]
+	require.Equal(t, "new-backend-execution", got.InstanceID, "the backend execution identity must stay fenced")
+	require.Equal(t, "adopted-agentctl-instance", got.Metadata[MetadataKeyRemoteDockerAgentctlInstanceID])
+	require.True(t, fixture.controlReadWasFor("adopted-agentctl-instance"),
+		"recovery must look up the actual remote instance, not the backend execution ID")
+	require.True(t, fixture.statusWasChecked())
+	require.Equal(t, "adopted-agentctl-instance", fixture.instance.agentctlIDForPath("/api/v1/status"),
+		"the instance client must send the actual agentctl identity")
+	require.Zero(t, fixture.createInstanceCalls(), "recovery must not create another instance")
+	require.Zero(t, fixture.engineMutationCalls(), "recovery must not mutate the retained container")
+}
+
+func (h *remoteDockerRecoveryHTTP) agentctlIDForPath(path string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := len(h.seen) - 1; i >= 0; i-- {
+		if h.seen[i].path == path {
+			return h.seen[i].agentctlID
+		}
+	}
+	return ""
+}
+
 func TestRemoteDockerRecoveryAttachesOnlyTheRecordedLiveContainerAndInstance(t *testing.T) {
 	fixture := newRemoteDockerRecoveryFixture(t, "running", remoteDockerRecoveryInstance{})
 	exec := fixture.executor
@@ -54,6 +88,7 @@ func TestRemoteDockerRecoveryAttachesOnlyTheRecordedLiveContainerAndInstance(t *
 	require.Equal(t, "session-1", got.SessionID)
 	require.Equal(t, "task-1", got.TaskID)
 	require.Equal(t, "container-preserved", got.ContainerID)
+	require.True(t, got.CopilotNativeSessionEvents, "recovery must preserve the adopted subscription state")
 	require.NotNil(t, got.Client)
 	require.Equal(t, "saved-token", got.AuthToken)
 	require.True(t, fixture.statusWasChecked())
@@ -85,6 +120,23 @@ func TestRemoteDockerRecoveryAttachesOnlyTheRecordedLiveContainerAndInstance(t *
 	require.Nil(t, fixture.remoteSession.takeAgentctlClient(), "discard closes the old attempt's authenticated client")
 }
 
+func TestRemoteDockerRecoveryAttachesStoppedAgentctlForLifecycleSettlement(t *testing.T) {
+	fixture := newRemoteDockerRecoveryFixture(t, "running", remoteDockerRecoveryInstance{agentStatus: "stopped"})
+
+	instances, outcomes := recoverRemoteDockerCandidates(t, fixture.executor, []*models.ExecutorRunning{
+		fixture.record("saved-token", ""),
+	})
+
+	require.Len(t, instances, 1, "the lifecycle manager must authenticate and inspect stopped-agent evidence")
+	require.Empty(t, outcomes)
+	status, err := instances[0].Client.GetStatus(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "stopped", status.AgentStatus)
+	require.True(t, fixture.statusWasChecked())
+	require.Zero(t, fixture.createInstanceCalls(), "recovery must not create another agentctl instance")
+	require.Zero(t, fixture.engineMutationCalls(), "recovery must not start or mutate the retained container")
+}
+
 func TestRemoteDockerRecoveryDoesNotStartStoppedContainer(t *testing.T) {
 	fixture := newRemoteDockerRecoveryFixture(t, "exited", remoteDockerRecoveryInstance{})
 
@@ -92,10 +144,28 @@ func TestRemoteDockerRecoveryDoesNotStartStoppedContainer(t *testing.T) {
 		fixture.record("saved-token", ""),
 	})
 	require.Empty(t, instances)
-	require.Equal(t, RecoveryOutcomeNoMatchingInstance, outcomes["session-1"])
+	require.Equal(t, RecoveryOutcomeRecordedResourceAbsent, outcomes["session-1"])
 	require.True(t, fixture.engineOnlyInspectedRecordedContainer())
 	require.Empty(t, fixture.controlRequests(), "a stopped container must not be started to inspect agentctl")
 	require.Zero(t, fixture.engineMutationCalls(), "startup must preserve, not restart, the stopped container")
+}
+
+func TestRemoteDockerRecoveryKeepsAmbiguousContainerStatesGuarded(t *testing.T) {
+	for _, state := range []string{"created", "paused", "restarting", "removing", "dead", "unknown"} {
+		t.Run(state, func(t *testing.T) {
+			fixture := newRemoteDockerRecoveryFixture(t, state, remoteDockerRecoveryInstance{})
+
+			instances, outcomes := recoverRemoteDockerCandidates(t, fixture.executor, []*models.ExecutorRunning{
+				fixture.record("saved-token", ""),
+			})
+
+			require.Empty(t, instances)
+			require.Equal(t, RecoveryOutcomeUnknown, outcomes["session-1"])
+			require.True(t, fixture.engineOnlyInspectedRecordedContainer())
+			require.Empty(t, fixture.controlRequests(), "ambiguous container state cannot authenticate a stopped association")
+			require.Zero(t, fixture.engineMutationCalls(), "recovery must not mutate an ambiguously stopped container")
+		})
+	}
 }
 
 func TestRemoteDockerRecoveryDoesNotRecreateMissingAgentctlInstance(t *testing.T) {
@@ -184,6 +254,7 @@ func recoverRemoteDockerCandidates(
 
 type remoteDockerRecoveryInstance struct {
 	missing               bool
+	agentStatus           string
 	requiredToken         string
 	instanceRequiredToken string
 	refreshedPort         int
@@ -198,6 +269,7 @@ type remoteDockerRecoveryFixture struct {
 	instance                  *remoteDockerRecoveryHTTP
 	nonce                     string
 	containerState            string
+	backendExecutionID        string
 	connectContextHadDeadline bool
 }
 
@@ -207,7 +279,7 @@ func newRemoteDockerRecoveryFixture(
 	instance remoteDockerRecoveryInstance,
 ) *remoteDockerRecoveryFixture {
 	t.Helper()
-	fixture := &remoteDockerRecoveryFixture{containerState: containerState}
+	fixture := &remoteDockerRecoveryFixture{containerState: containerState, backendExecutionID: "execution-1"}
 	fixture.control = newRemoteDockerRecoveryHTTP(t, true, instance)
 	fixture.instance = newRemoteDockerRecoveryHTTP(t, false, instance)
 	controlPort := fixture.control.port(t)
@@ -232,7 +304,7 @@ func newRemoteDockerRecoveryFixture(
 	}
 	fixture.executor.connect = func(ctx context.Context, req *ExecutorCreateRequest) (*remoteDockerSession, error) {
 		_, fixture.connectContextHadDeadline = ctx.Deadline()
-		if req.InstanceID != "execution-1" || req.SessionID != "session-1" || req.TaskID != "task-1" {
+		if req.InstanceID != fixture.backendExecutionID || req.SessionID != "session-1" || req.TaskID != "task-1" {
 			return nil, fmt.Errorf("unexpected saved identity in recovery request: %#v", req)
 		}
 		return fixture.remoteSession, nil
@@ -251,15 +323,25 @@ func newRemoteDockerRecoveryFixture(
 }
 
 func (f *remoteDockerRecoveryFixture) record(token, nonce string) *models.ExecutorRunning {
+	return f.recordWithIDs(f.backendExecutionID, "", token, nonce)
+}
+
+func (f *remoteDockerRecoveryFixture) recordWithIDs(
+	agentExecutionID, agentctlInstanceID, token, nonce string,
+) *models.ExecutorRunning {
+	metadata := map[string]interface{}{
+		MetadataKeySSHHost:            "build-box",
+		MetadataKeySSHHostFingerprint: "SHA256:pinned",
+		MetadataKeyContainerID:        "container-preserved",
+	}
+	if agentctlInstanceID != "" {
+		metadata[MetadataKeyRemoteDockerAgentctlInstanceID] = agentctlInstanceID
+	}
 	return &models.ExecutorRunning{
-		ID: "inventory-row", AgentExecutionID: "execution-1", SessionID: "session-1", TaskID: "task-1",
+		ID: "inventory-row", AgentExecutionID: agentExecutionID, SessionID: "session-1", TaskID: "task-1",
 		Runtime: agentruntime.RuntimeRemoteDocker, ContainerID: "container-preserved",
 		TransientAuthToken: token, TransientBootstrapNonce: nonce,
-		Metadata: map[string]interface{}{
-			MetadataKeySSHHost:            "build-box",
-			MetadataKeySSHHostFingerprint: "SHA256:pinned",
-			MetadataKeyContainerID:        "container-preserved",
-		},
+		Metadata: metadata,
 	}
 }
 
@@ -349,10 +431,11 @@ type remoteDockerRecoveryHTTP struct {
 }
 
 type remoteDockerHTTPRequest struct {
-	method string
-	path   string
-	token  string
-	nonce  string
+	method     string
+	path       string
+	token      string
+	nonce      string
+	agentctlID string
 }
 
 func newRemoteDockerRecoveryHTTP(
@@ -386,7 +469,8 @@ func (h *remoteDockerRecoveryHTTP) serve(w http.ResponseWriter, request *http.Re
 func (h *remoteDockerRecoveryHTTP) recordRequest(request *http.Request) (remoteDockerHTTPRequest, bool) {
 	seen := remoteDockerHTTPRequest{
 		method: request.Method, path: request.URL.Path,
-		token: strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "),
+		token:      strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "),
+		agentctlID: request.Header.Get("X-Instance-ID"),
 	}
 	if request.URL.Path == "/auth/handshake" && request.Method == http.MethodPost {
 		var body map[string]string
@@ -469,6 +553,7 @@ func (h *remoteDockerRecoveryHTTP) serveControlInstance(
 	}
 	_ = json.NewEncoder(w).Encode(agentctl.InstanceInfo{
 		ID: id, Port: port, SessionID: ownerSession, TaskID: ownerTask,
+		CopilotNativeSessionEvents: true,
 	})
 }
 
@@ -483,7 +568,11 @@ func (h *remoteDockerRecoveryHTTP) serveInstance(
 	if !h.authorizedInstanceRequest(w, seen) {
 		return true
 	}
-	_ = json.NewEncoder(w).Encode(map[string]string{"agent_status": "running"})
+	status := h.config.agentStatus
+	if status == "" {
+		status = "running"
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"agent_status": status})
 	return true
 }
 

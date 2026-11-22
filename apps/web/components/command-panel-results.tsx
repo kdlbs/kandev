@@ -1,6 +1,7 @@
 "use client";
 import { workflowMoveShortcutLabel } from "./task/use-workflow-move-submit";
 
+import { ConversationExcerpt } from "./command-panel-conversation";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { formatTimeDistance, useDateLocale } from "@/lib/i18n/date-locale";
@@ -14,7 +15,7 @@ import {
   sortCommandsForSearch,
 } from "@/lib/commands/search";
 import { formatShortcut } from "@/lib/keyboard/utils";
-import type { Task } from "@/lib/types/http";
+import type { ConversationTask as Task } from "@/lib/types/conversation-search";
 import type { FileSearchResult } from "@/lib/types/backend";
 import { FileIcon } from "@/components/ui/file-icon";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
@@ -147,6 +148,8 @@ function TaskResultItem({
   return (
     <CommandItem
       key={task.id}
+      className="max-sm:min-h-11 data-[conversation=true]:flex-col data-[conversation=true]:items-start data-[conversation=true]:gap-1 data-[conversation=true]:[&>svg:last-child]:hidden"
+      data-conversation={Boolean(task.conversation_match)}
       value={getTaskResultValue(task)}
       onSelect={() => onSelect(task)}
       forceMount
@@ -196,6 +199,7 @@ function TaskResultItem({
           </span>
         )}
       </div>
+      <ConversationExcerpt match={task.conversation_match} />
     </CommandItem>
   );
 }

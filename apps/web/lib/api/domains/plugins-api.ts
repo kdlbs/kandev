@@ -10,6 +10,8 @@ import type {
   UpdatePluginCapabilityApprovalInput,
 } from "@/lib/types/plugins";
 import type { ManagedConversationDestinationOption } from "@/lib/types/automation";
+import type { SidebarGroupingProvider } from "@kdlbs/plugin-sdk";
+import { readSidebarGroupingProviders } from "@/lib/plugins/sidebar-grouping-metadata";
 
 const BASE = "/api/plugins";
 
@@ -28,6 +30,13 @@ export async function listManagedConversationDestinations(
 export async function listPlugins(options?: ApiRequestOptions) {
   const res = await fetchJson<{ plugins?: PluginRecord[] }>(BASE, options);
   return res.plugins ?? [];
+}
+
+export async function listSidebarGroupingProviders(): Promise<readonly SidebarGroupingProvider[]> {
+  const response = await fetchJson<{ groupings?: unknown }>(`${BASE}/sidebar-groupings`, {
+    cache: "no-store",
+  });
+  return readSidebarGroupingProviders(response.groupings) ?? [];
 }
 
 // getPlugin fetches a single plugin record by id. Rejects with a 404

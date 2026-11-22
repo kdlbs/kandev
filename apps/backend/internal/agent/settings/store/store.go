@@ -106,6 +106,20 @@ type AgentProfileModelAdopter interface {
 	UpdateAgentProfileModelIfEmpty(ctx context.Context, profileID, model string) (bool, error)
 }
 
+// AgentProfileSelectionIntent extends ordinary profile updates with an atomic
+// supplied-field rule for Copilot plugin selections. A nil intent preserves
+// the committed column inside the same UPDATE, so a concurrent selection
+// commit cannot be overwritten by a stale read/modify/write snapshot. The
+// committed value is written back to profile.CopilotSelectedPlugins.
+type AgentProfileSelectionIntent interface {
+	UpdateAgentProfileWithSelectionIntent(
+		ctx context.Context,
+		profile *models.AgentProfile,
+		enabled *bool,
+		selection *[]string,
+	) error
+}
+
 // DynamicProfileRepository is the optional extension implemented by settings
 // stores that persist the dynamic profile document. Keeping it separate from
 // Repository lets small controller fakes and plugin adapters retain the
@@ -115,6 +129,10 @@ type DynamicProfileRepository interface {
 	GetDynamicAgentProfile(ctx context.Context, profileID string) (*models.DynamicAgentProfile, []models.DynamicAgentRoute, error)
 	UpdateDynamicAgentProfile(ctx context.Context, profile *models.DynamicAgentProfile, expectedVersion int64, routes []models.DynamicAgentRoute) error
 	ListDynamicProfileReferencesByExecutionProfile(ctx context.Context, profileID string) ([]models.DynamicProfileReference, error)
+	// DeleteDynamicAgentRoutesForDeletedProfiles removes routes that point at
+	// executionProfileID from soft-deleted dynamic parents, so a deleted
+	// candidate does not stay referenced by configuration that can never run.
+	DeleteDynamicAgentRoutesForDeletedProfiles(ctx context.Context, executionProfileID string) (int64, error)
 }
 
 // AtomicDynamicProfileRepository updates the base profile row and its

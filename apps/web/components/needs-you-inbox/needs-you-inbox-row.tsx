@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
 import {
   IconChevronDown,
   IconChevronRight,
@@ -174,16 +174,20 @@ function taskHrefForBundle(bundle: ClarificationInboxBundle): string {
 // eslint-disable-next-line max-lines-per-function -- the row keeps its responsive actions and inline panel together.
 export function NeedsYouInboxRow({
   bundle,
+  allocationRef,
   onLateAnswer,
   lateAnswerState,
 }: {
   bundle: ClarificationInboxBundle;
+  allocationRef?: RefObject<HTMLElement | null>;
   onLateAnswer?: (snapshot: LateClarificationSnapshot) => Promise<MessageAdmissionOutcome>;
   lateAnswerState?: LateClarificationState;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
+  const rowHeaderRef = useRef<HTMLDivElement>(null);
+  const reservedSiblingRefs = useMemo(() => [rowHeaderRef], []);
   const bumpRefreshTick = useAppStore((s) => s.bumpNeedsYouInboxRefreshTick);
 
   const primaryText = rowPrimaryText(bundle, t("needsYouInbox:questionFromAgent"));
@@ -212,7 +216,7 @@ export function NeedsYouInboxRow({
 
   return (
     <div ref={rowRef} data-testid="needs-you-inbox-row" data-pending-id={bundle.pending_id}>
-      <div className="flex items-center gap-3 px-4 py-2.5">
+      <div ref={rowHeaderRef} className="flex items-center gap-3 px-4 py-2.5">
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center gap-3 text-left cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
@@ -280,7 +284,10 @@ export function NeedsYouInboxRow({
           onLateAnswer={onLateAnswer}
           lateAnswerState={lateAnswerState}
           shortcutScopeRef={rowRef}
-          maxHeightVh={50}
+          initialMaxHeightVh={50}
+          allocationRef={allocationRef}
+          anchorRef={rowRef}
+          reservedSiblingRefs={reservedSiblingRefs}
         />
       )}
     </div>

@@ -19,6 +19,8 @@ import { SidebarFilterPopover } from "@/components/task/sidebar-filter/sidebar-f
 import { useSidebarViewPopover } from "@/components/task/sidebar-filter/use-sidebar-view-popover";
 import { cn } from "@/lib/utils";
 import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { SidebarPluginGroupingMenu } from "@/components/task/sidebar-filter/sidebar-plugin-grouping-menu";
+import { useSidebarViewTransition } from "@/hooks/domains/sidebar/use-sidebar-view-transition";
 
 const TRIGGER_BUTTON_CLASS = cn(
   "flex h-7 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 items-center justify-center rounded-md border border-border/60 px-1.5 cursor-pointer",
@@ -31,6 +33,7 @@ export function TasksViewPicker() {
   const views = useAppStore((s) => selectSidebarViews(s).views);
   const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
   const draft = useAppStore((s) => selectSidebarViews(s).draft);
+  const { pending, interactionProps } = useSidebarViewTransition();
   const setActiveView = useAppStore((s) => s.setSidebarActiveView);
   const openPopoverAfterPickerCloseRef = useRef(false);
   const {
@@ -52,6 +55,7 @@ export function TasksViewPicker() {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
+            {...interactionProps}
             type="button"
             data-testid="tasks-view-picker"
             className={cn(TRIGGER_BUTTON_CLASS, "max-w-[120px] gap-0.5")}
@@ -63,7 +67,7 @@ export function TasksViewPicker() {
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="w-52"
+          className="w-52 max-w-[calc(100vw-2rem)] max-h-[min(var(--radix-dropdown-menu-content-available-height),calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem))] overflow-y-auto"
           onCloseAutoFocus={(event) => {
             if (!openPopoverAfterPickerCloseRef.current) return;
             event.preventDefault();
@@ -76,6 +80,7 @@ export function TasksViewPicker() {
             return (
               <DropdownMenuItem
                 key={view.id}
+                disabled={pending}
                 onSelect={() => setActiveView(view.id)}
                 data-testid="sidebar-view-chip"
                 data-view-id={view.id}
@@ -88,9 +93,10 @@ export function TasksViewPicker() {
               </DropdownMenuItem>
             );
           })}
+          <SidebarPluginGroupingMenu />
           <DropdownMenuSeparator />
           <NewViewMenuItem
-            disabledReason={newViewDisabledReason}
+            disabledReason={pending ? t("common:loadingIndicatorLabel") : newViewDisabledReason}
             hasDraft={draft !== null}
             onSelect={() => {
               openPopoverAfterPickerCloseRef.current = startNewView({ openPopover: false });
@@ -106,6 +112,7 @@ export function TasksViewPicker() {
         onRenameRequestHandled={consumeRenameRequest}
         trigger={
           <button
+            {...interactionProps}
             type="button"
             data-testid="sidebar-filter-gear"
             aria-label={t("sidebar:filtersAndSort")}
@@ -116,7 +123,18 @@ export function TasksViewPicker() {
           </button>
         }
       />
+      <SidebarViewPendingStatus pending={pending} label={activeLabel} />
     </div>
+  );
+}
+
+function SidebarViewPendingStatus({ pending, label }: { pending: boolean; label: string }) {
+  const { t } = useTranslation();
+  if (!pending) return null;
+  return (
+    <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      {t("common:loadingLabel", { label })}
+    </span>
   );
 }
 

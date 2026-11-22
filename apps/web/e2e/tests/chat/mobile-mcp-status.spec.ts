@@ -1,6 +1,9 @@
+import { checkMCPStatusClarity } from "../../helpers/mcp-status-clarity";
 import { type Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+
+test.use({ trace: "retain-on-failure" });
 
 async function expectMinTouchHeight(control: Locator) {
   const box = await control.boundingBox();
@@ -36,7 +39,7 @@ test("mobile MCP explorer uses servers, tools, and tool detail pages", async ({
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
-  await session.sendMessageViaButton("e2e:mcp:kandev:list_workspaces_kandev({})");
+  await session.sendMessageViaButton("e2e:mcp:kandev:list_agents_kandev({})");
   await session.waitForChatIdle({ timeout: 30_000 });
 
   const trigger = testPage.getByTestId("mcp-status-trigger");
@@ -112,3 +115,16 @@ test("mobile MCP explorer uses servers, tools, and tool detail pages", async ({
   ).toBe(true);
   prCapture.flush();
 });
+
+// @covers AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.13, AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.14, AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.15, AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.17, AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.14
+for (const width of [320, 393, 767]) {
+  test(`contains multiline MCP connection rows and centers the touch header at ${width}px`, async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+    await testPage.setViewportSize({ width, height: 900 });
+    await checkMCPStatusClarity({ page: testPage, apiClient, seedData, mobile: true });
+  });
+}

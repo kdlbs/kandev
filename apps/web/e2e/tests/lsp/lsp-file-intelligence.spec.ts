@@ -353,9 +353,11 @@ test.describe("LSP file intelligence", () => {
     const initialLocation =
       initial.settings.lsp_status_location === "status_bar" ? "status_bar" : "toolbar";
     const initialStatusBarEnabled = initial.settings.app_status_bar_enabled === true;
+    const initialMarkdownPreview = initial.settings.markdown_preview_by_default ?? true;
     await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
       app_status_bar_enabled: true,
       lsp_status_location: "toolbar",
+      markdown_preview_by_default: false,
     });
 
     try {
@@ -451,6 +453,7 @@ test.describe("LSP file intelligence", () => {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         app_status_bar_enabled: initialStatusBarEnabled,
         lsp_status_location: initialLocation,
+        markdown_preview_by_default: initialMarkdownPreview,
       });
     }
   });
@@ -519,7 +522,7 @@ test.describe("LSP file intelligence", () => {
     await testPage.keyboard.press("Escape");
     const editor = testPage.locator(".monaco-editor:visible");
     await editor.click();
-    await testPage.keyboard.press("Control+Space");
+    await editor.locator(".native-edit-context").press("Control+Space");
     const manualCompletion = await expectFakeLspEvent(
       backend,
       (event) => event.event === "message" && event.method === "textDocument/completion",

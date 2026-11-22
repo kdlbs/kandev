@@ -72,6 +72,21 @@ type VirtualAgent interface {
 	IsVirtual() bool
 }
 
+// LocalInstallAgent is an agent whose runtime can be installed explicitly
+// through the server-owned install job path. The implementation owns the
+// trusted artifact table; requests never supply a URL or version.
+type LocalInstallAgent interface {
+	SupportsLocalInstall() bool
+	LocalInstall(ctx context.Context, progress func(string)) error
+}
+
+// LocalRuntimeAgent resolves a complete local runtime executable and the
+// environment entries that pin its validated helper. It is only consulted for
+// host-local executions.
+type LocalRuntimeAgent interface {
+	ResolveLocalRuntime(ctx context.Context) (Command, map[string]string, error)
+}
+
 // StoredProfilePreserver marks a disabled optional agent whose saved profiles
 // remain valid historical configuration and must not be orphan-cleaned.
 type StoredProfilePreserver interface {
@@ -285,6 +300,12 @@ type PassthroughOptions struct {
 
 // RuntimeConfig holds Docker / standalone runtime settings.
 type RuntimeConfig struct {
+	// ToolTimeoutEnvKey names the environment variable that bounds one MCP
+	// tool call in this harness, and ToolTimeoutUnit is its unit. Empty means
+	// the harness has no such variable and no floor is applied.
+	ToolTimeoutEnvKey string
+	ToolTimeoutUnit   time.Duration
+
 	// ContainerEnv provides agent-specific environment required only when the
 	// process runs inside a container runtime. These values are independent of
 	// session mode and never reach host or SSH processes.
@@ -563,6 +584,9 @@ type RemoteAuthMethod struct {
 	// FileConflictPolicy controls how an existing target file is handled. It is
 	// an internal transfer contract and is not part of the remote-auth API.
 	FileConflictPolicy RemoteAuthFileConflictPolicy `json:"-"`
+	// ProvisionAtLaunch keeps the credential selection available when the agent
+	// uses its CLI instead of copying a local credential file.
+	ProvisionAtLaunch bool `json:"-"`
 	// SetupScript is an optional shell script that runs on the remote after the
 	// env var is resolved. Used to bootstrap credential files from env vars.
 	// Only meaningful for type="env". Can reference the env var by name.

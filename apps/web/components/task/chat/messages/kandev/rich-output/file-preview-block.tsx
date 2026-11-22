@@ -1,16 +1,22 @@
 "use client";
 
-import { useCallback, useId, useEffect } from "react";
+import { useCallback, useId, useEffect, useState } from "react";
 import { IconChevronDown, IconChevronRight, IconExternalLink, IconFile } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
+import { useOptionalAppStore } from "@/components/state-provider";
 import { GridSpinner } from "@/components/grid-spinner";
+import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import { getFileCategory, getImageMimeType } from "@/lib/utils/file-types";
 import {
   useWorkspaceFilePreview,
   type WorkspaceFilePreviewState,
 } from "@/hooks/domains/session/use-workspace-file-preview";
 import type { FilePreviewProps } from "@/lib/rich-output/catalog";
+
+import { usePluginRegistry } from "@/lib/plugins/registry";
+import { shouldOpenFilePreview, fileViewerCandidates } from "@/lib/plugins/file-viewer-selection";
+import { PluginFilePreview } from "@/components/task/plugin-file-preview";
 
 import { useRichOutputViewState } from "./view-state";
 
@@ -47,11 +53,10 @@ function FilePreviewContent({
     }
     return (
       <div className="flex justify-center py-2">
-        <img
+        <ImagePreviewDialog
           src={`data:${getImageMimeType(file.path)};base64,${state.response.content}`}
           alt={file.title || file.path}
-          className="max-h-64 max-w-full rounded-md object-contain ring-1 ring-black/10 dark:ring-white/10"
-          draggable={false}
+          thumbnailClassName="max-h-64 max-w-full rounded-md object-contain ring-1 ring-black/10 dark:ring-white/10"
         />
       </div>
     );
@@ -78,21 +83,31 @@ type NativeFilePreviewProps = FilePreviewProps & {
 export function FilePreview({ sessionId, onOpenFile, ...file }: NativeFilePreviewProps) {
   const { t } = useTranslation();
   const previewId = useId();
+  usePluginRegistry();
+  const eligible = shouldOpenFilePreview(file.path);
+  // Keep the permission-aware route if a plugin disappears while this card is open.
+  const [pluginPreview, setPluginPreview] = useState(eligible);
+  if (eligible && !pluginPreview) setPluginPreview(true);
+  const defaultExpanded = useOptionalAppStore(
+    (store) => store.imagePreviewsExpandedByDefault,
+    true,
+  );
   const [expanded, setExpanded] = useRichOutputViewState(
     JSON.stringify([file.repo, file.path]),
-    getFileCategory(file.path) === "image",
+    (pluginPreview && fileViewerCandidates(file.path).length > 0) ||
+      (getFileCategory(file.path) === "image" && defaultExpanded),
   );
   const { load, state } = useWorkspaceFilePreview(sessionId, file.path, file.repo);
 
   useEffect(() => {
-    if (expanded && state.kind === "idle") void load();
-  }, [expanded, load, state.kind]);
+    if (!pluginPreview && expanded && state.kind === "idle") void load();
+  }, [pluginPreview, expanded, load, state.kind]);
 
   const handleToggle = useCallback(() => {
     const next = !expanded;
     setExpanded(next);
-    if (next && state.kind === "error") void load();
-  }, [expanded, load, state.kind]);
+    if (!pluginPreview && next && state.kind === "error") void load();
+  }, [pluginPreview, expanded, load, state.kind]);
 
   return (
     <article
@@ -148,7 +163,16 @@ export function FilePreview({ sessionId, onOpenFile, ...file }: NativeFilePrevie
       </div>
       {expanded && (
         <div id={previewId} className="border-t border-border/50 px-3 py-2">
-          <FilePreviewContent file={file} state={state} />
+          {pluginPreview && sessionId ? (
+            <div
+              className="h-[min(32rem,70dvh)] min-h-80 overflow-hidden"
+              data-testid="rich-output-plugin-viewport"
+            >
+              <PluginFilePreview path={file.path} repo={file.repo} sessionId={sessionId} />
+            </div>
+          ) : (
+            <FilePreviewContent file={file} state={state} />
+          )}
         </div>
       )}
     </article>

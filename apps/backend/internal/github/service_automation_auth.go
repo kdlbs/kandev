@@ -44,6 +44,9 @@ func (s *Service) findPRByBranchForWatch(ctx context.Context, watch *PRWatch) (*
 	if watch == nil {
 		return nil, ErrGitHubWorkspaceRequired
 	}
+	if err := s.checkPRWatchActive(ctx, watch); err != nil {
+		return nil, err
+	}
 	return s.findPRByBranchForWorkspace(ctx, watch.WorkspaceID, watch.Owner, watch.Repo, watch.Branch, watch)
 }
 
@@ -53,6 +56,11 @@ func (s *Service) findPRByBranchForWorkspace(
 ) (*PR, error) {
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
 		return nil, err
+	}
+	if watch != nil {
+		if err := s.validatePRWatchHost(ctx, workspaceID, watch); err != nil {
+			return nil, err
+		}
 	}
 	resolved, err := s.resolveAutomationClient(ctx, workspaceID, owner, repo)
 	if err != nil {
@@ -86,6 +94,9 @@ func (s *Service) findPRByBranchForWorkspace(
 		}
 		return nil, err
 	}
+	if err := s.requireCurrentHost(ctx, workspaceID, resolved); err != nil {
+		return nil, err
+	}
 	if tracked {
 		if !attempt.joined {
 			s.completePRDiscoveryWatchAttempt(attempt, &PRStatus{PR: pr}, true, false, nil, false)
@@ -105,6 +116,12 @@ func (s *Service) findPRByBranchForWorkspace(
 				workspaceID, resolved.CacheScope, credentialGeneration, &rebound,
 			)
 		}
+	}
+	if pr != nil {
+		copy := *pr
+		fence := githubOperationFence{service: s, workspaceID: workspaceID, resolved: resolved}
+		copy.operationFence = &fence
+		pr = &copy
 	}
 	return pr, nil
 }
@@ -155,6 +172,15 @@ func (s *Service) findPRInForkParent(
 		return nil, nil
 	}
 	pr, err := finder.FindPRByHead(ctx, parentOwner, parentRepo, owner, repo, branch)
+	if isParentNotFound(err) {
+		// The fork exposes its parent's name even when this credential cannot
+		// read the parent, so not-found means no visible parent PR. Caching the
+		// fork as parentless skips the parent until the entry expires.
+		if s != nil && s.forkParentCache != nil {
+			s.forkParentCache.set(scopedCacheKey(cacheScope, repoErrorCacheKey(owner, repo)), forkParent{})
+		}
+		return nil, nil
+	}
 	if err != nil || pr == nil {
 		return pr, err
 	}
@@ -162,6 +188,20 @@ func (s *Service) findPRInForkParent(
 		return nil, nil
 	}
 	return pr, nil
+}
+
+func isParentNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *GitHubAPIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == 404
+	}
+	// The CLI searches PRs through GraphQL, which reports a missing repository
+	// without an HTTP 404 status.
+	return isNotFoundErr(err) ||
+		strings.Contains(strings.ToLower(err.Error()), "could not resolve to a repository")
 }
 
 // forkParent is the cached outcome of one fork-parent resolution.

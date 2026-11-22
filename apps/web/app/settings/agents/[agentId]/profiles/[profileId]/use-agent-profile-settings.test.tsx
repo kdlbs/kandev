@@ -37,6 +37,25 @@ const snapshot = (profileIds: string[]): ListAgentsResponse => ({
 describe("useAgentProfileSettings list snapshot guard", () => {
   afterEach(() => vi.clearAllMocks());
 
+  it.each([AGENT_ID, AGENT_NAME])(
+    "resolves only the profile under its stored agent through %s",
+    async (key) => {
+      vi.mocked(listAgents).mockResolvedValue(snapshot([PROFILE_IDS.live]));
+      let result!: ReturnType<typeof useAgentProfileSettings>;
+      function Harness() {
+        result = useAgentProfileSettings(key, PROFILE_IDS.live);
+        return null;
+      }
+      render(
+        <StateProvider>
+          <Harness />
+        </StateProvider>,
+      );
+      await waitFor(() => expect(result.profile?.id).toBe(PROFILE_IDS.live));
+      expect(result.agent?.id).toBe(AGENT_ID);
+    },
+  );
+
   it("discards a delayed pre-create/delete GET and refreshes both mirrored lists", async () => {
     const pending = Promise.withResolvers<ListAgentsResponse>();
     vi.mocked(listAgents)

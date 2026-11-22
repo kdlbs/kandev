@@ -12,6 +12,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useEditors } from "@/hooks/domains/settings/use-editors";
+import { useExternalFileTarget } from "@/hooks/domains/session/use-external-file-target";
 import { useOpenSessionInEditor } from "@/hooks/use-open-session-in-editor";
 import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
 import { useAppStore } from "@/components/state-provider";
@@ -24,6 +25,8 @@ type FileActionsDropdownProps = {
   filePath: string;
   /** Session ID override — defaults to activeSessionId from store */
   sessionId?: string;
+  repositoryId?: string | null;
+  repositoryName?: string | null;
   /** Button size variant */
   size?: "sm" | "xs" | "touch";
   /** Optional toast callback after copy */
@@ -34,7 +37,7 @@ type FileActionsDropdownProps = {
 
 type FileActionsMenuItemsProps = Pick<
   FileActionsDropdownProps,
-  "filePath" | "sessionId" | "onCopied"
+  "filePath" | "sessionId" | "repositoryId" | "repositoryName" | "onCopied"
 > & {
   includeCopyPath?: boolean;
 };
@@ -51,6 +54,8 @@ function useFileActions({
   filePath,
   sessionId: sessionIdProp,
   onCopied,
+  repositoryId,
+  repositoryName,
 }: FileActionsMenuItemsProps) {
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = sessionIdProp ?? storeSessionId ?? null;
@@ -59,6 +64,7 @@ function useFileActions({
     return state.taskSessions.items[sessionId]?.worktree_path;
   });
 
+  const target = useExternalFileTarget(sessionId, { repositoryId, repositoryName });
   const openEditor = useOpenSessionInEditor(sessionId);
   const openFolder = useOpenSessionFolder(sessionId);
   const { editors } = useEditors();
@@ -89,10 +95,14 @@ function useFileActions({
   }, [absolutePath, onCopied]);
 
   const handleOpenInEditor = useCallback(
-    (editorId: string) => {
-      void openEditor.open({ editorId, filePath });
+    (editor: EditorOption) => {
+      if (editor.kind === "internal_vscode") {
+        void openEditor.open({ editorId: editor.id, filePath });
+      } else if (target) {
+        void openEditor.open({ editorId: editor.id, filePath, worktreeId: target.worktreeId });
+      }
     },
-    [openEditor, filePath],
+    [openEditor, filePath, target],
   );
 
   const handleOpenFolder = useCallback(() => {
@@ -100,6 +110,7 @@ function useFileActions({
   }, [openFolder]);
 
   return {
+    target,
     folderDisabled: !sessionId || !openFolder.available || openFolder.isLoading,
     defaultEditorId,
     enabledEditors,
@@ -113,6 +124,7 @@ export function FileActionsMenuItems(props: FileActionsMenuItemsProps) {
   const { t } = useTranslation();
   const { includeCopyPath = true } = props;
   const {
+    target,
     folderDisabled,
     defaultEditorId,
     enabledEditors,
@@ -127,7 +139,8 @@ export function FileActionsMenuItems(props: FileActionsMenuItemsProps) {
         <DropdownMenuItem
           key={editor.id}
           className="cursor-pointer text-xs"
-          onSelect={() => handleOpenInEditor(editor.id)}
+          disabled={editor.kind !== "internal_vscode" && !target}
+          onSelect={() => handleOpenInEditor(editor)}
         >
           <IconExternalLink className="h-3.5 w-3.5" />
           {editor.name}
@@ -165,6 +178,8 @@ export function FileActionsMenuItems(props: FileActionsMenuItemsProps) {
 export function FileActionsDropdown({
   filePath,
   sessionId,
+  repositoryId,
+  repositoryName,
   size = "xs",
   onCopied,
   includeCopyPath,
@@ -189,6 +204,8 @@ export function FileActionsDropdown({
         <FileActionsMenuItems
           filePath={filePath}
           sessionId={sessionId}
+          repositoryId={repositoryId}
+          repositoryName={repositoryName}
           onCopied={onCopied}
           includeCopyPath={includeCopyPath}
         />

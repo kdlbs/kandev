@@ -21,12 +21,17 @@ import { getChatDraftContent, setChatDraftContent } from "@/lib/local-storage";
 import {
   extractEntityReferences,
   getMarkdownText,
-  textToHtml,
+  textToEditorContent,
   handleEditorPaste,
 } from "./tiptap-helpers";
 import type { ImagePasteIssue } from "./clipboard-attachments";
 import { CodeBlockView } from "./tiptap-code-block-view";
 import { DynamicPlaceholder, updateDynamicPlaceholder } from "./tiptap-dynamic-placeholder";
+import {
+  PromptSuggestion,
+  acceptPromptSuggestion,
+  submitWithPromptSuggestion,
+} from "./tiptap-prompt-suggestion";
 import { EntityReferenceNode } from "./tiptap-entity-reference-extension";
 import { ContextMention } from "./tiptap-mention-extension";
 import { SlashCommandNode } from "./tiptap-slash-command-extension";
@@ -58,6 +63,10 @@ export type TipTapInputHandle = {
   getMentions: () => ContextFile[];
   getTaskMentions: () => TaskMentionData[];
   getEntityReferences: () => EntityReference[];
+  /** Copies the visible next-prompt suggestion into the draft; false when none is visible. */
+  acceptPromptSuggestion: () => boolean;
+  /** Runs `submit`, first filling an empty draft with the visible suggestion. */
+  submitWithPromptSuggestion: (submit: () => void) => void;
 };
 
 const lowlightInstance = createLowlight(common);
@@ -192,6 +201,7 @@ export function buildEditorExtensions(args: {
       },
     }).configure({ lowlight: lowlightInstance }),
     DynamicPlaceholder,
+    PromptSuggestion,
     SlashCommandNode,
     EntityReferenceNode,
     ContextMention.configure({
@@ -462,7 +472,7 @@ function syncEditorValue({
   }
 
   isSyncingRef.current = true;
-  editor.commands.setContent(textToHtml(value));
+  editor.commands.setContent(textToEditorContent(value));
   isSyncingRef.current = false;
   initialSyncDoneRef.current = true;
 }
@@ -524,6 +534,7 @@ function useSubmitKeymap(refs: {
     return Extension.create({
       name: "submitKeymap",
       addKeyboardShortcuts() {
+        const editor = this.editor;
         const run = (pressed: "enter" | "mod-enter") => {
           const decision = decideSubmitShortcut({
             pressed,
@@ -533,7 +544,7 @@ function useSubmitKeymap(refs: {
           });
           if (decision === "consume-noop") return true;
           if (decision === "submit") {
-            onSubmitRef.current?.();
+            submitWithPromptSuggestion(editor, () => onSubmitRef.current?.());
             return true;
           }
           return false;
@@ -596,7 +607,7 @@ function useEditorImperativeHandle(
         if (v === "") {
           editor.commands.clearContent();
         } else {
-          editor.commands.setContent(textToHtml(v));
+          editor.commands.setContent(textToEditorContent(v));
         }
         isSyncingRef.current = false;
         onChange(v);
@@ -647,6 +658,9 @@ function useEditorImperativeHandle(
         return mentions;
       },
       getEntityReferences: () => (editor ? extractEntityReferences(editor.getJSON()) : []),
+      acceptPromptSuggestion: () => (editor ? acceptPromptSuggestion(editor) : false),
+      submitWithPromptSuggestion: (submit: () => void) =>
+        submitWithPromptSuggestion(editor, submit),
     }),
     [editor, onChange, isSyncingRef],
   );

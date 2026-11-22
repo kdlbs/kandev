@@ -102,6 +102,11 @@ The source audit records that narrow exception and rejects new unprepared direct
 
 ## Failure and recovery
 
+The [worktree lock recovery design](../../workspaces/system-design/worktree-base-refresh-recovery.md)
+owns its narrow contention retry loop. The shared runner remains single-attempt.
+Each retry uses existing classified admission and managed process cleanup.
+Authentication and transport failures retain their current behavior.
+
 Keep existing API/WS shapes, error wrapping, redaction, locks, singleflight cleanup, and cooldown behavior.
 Required operations finish with their existing error result. Optional materialization publishes unavailable comparison data while local Changes remains usable.
 Desktop and phone retain their current navigation and unavailable notice. No new rendered UI is planned.

@@ -1,4 +1,5 @@
 "use client";
+import { useSidebarViewTransition } from "@/hooks/domains/sidebar/use-sidebar-view-transition";
 
 import { useSidebarWorkspaceGuard } from "@/hooks/domains/sidebar/use-sidebar-workspace-guard";
 import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
@@ -90,10 +91,10 @@ export function SidebarFilterPopover({
 }: Props) {
   const guard = useSidebarWorkspaceGuard();
   const { t } = useTranslation();
-  const views = useAppStore((s) => selectSidebarViews(s).views);
-  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
+  const sidebarViews = useAppStore(selectSidebarViews);
+  const { views, activeViewId, draft: storedDraft, syncPending: savePending } = sidebarViews;
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const storedDraft = useAppStore((s) => selectSidebarViews(s).draft);
+  const { pending } = useSidebarViewTransition();
   const updateDraft = guard(useAppStore((s) => s.updateSidebarDraft));
   const saveAs = guard(useAppStore((s) => s.saveSidebarDraftAs));
   const saveOverwrite = guard(useAppStore((s) => s.saveSidebarDraftOverwrite));
@@ -116,17 +117,17 @@ export function SidebarFilterPopover({
     onConfirm: deleteView,
   });
   const headerProps: ComponentProps<typeof ViewHeaderRow> = {
+    savePending,
     activeView,
     hasDraft,
+    draftOwner: hasDraft ? storedDraft : null,
     canDelete: views.length > 1,
     onSaveOverwrite: saveOverwrite,
     onSaveAs: saveAs,
     onRename: renameView,
     onDiscard: discard,
-    onDelete: () => {
-      if (!activeView) return;
-      deletion.request({ id: activeView.id, label: sidebarViewName(activeView, t) });
-    },
+    onDelete: () =>
+      activeView && deletion.request({ id: activeView.id, label: sidebarViewName(activeView, t) }),
     deleteAnchorRef: deletion.anchorRef,
     deleteDensity: usesInlineDeleteConfirmation ? "touch" : "compact",
     deleteConfirmation: inlineDeleteConfirmation,
@@ -134,24 +135,26 @@ export function SidebarFilterPopover({
     onRenameRequestHandled,
   };
   const editor = (
-    <SidebarViewEditor
-      current={current}
-      isDrawerLayout={!usesDesktopWorkbench}
-      reorderScopeKey={`${workspaceId ?? ""}:${activeViewId ?? ""}`}
-      headerProps={headerProps}
-      onUpdate={updateDraft}
-      onAddFilter={() =>
-        updateDraft({ filters: [...current.filters, createSidebarFilterClause()] })
-      }
-      onChangeClause={(next: FilterClause) =>
-        updateDraft({
-          filters: current.filters.map((clause) => (clause.id === next.id ? next : clause)),
-        })
-      }
-      onRemoveClause={(id) =>
-        updateDraft({ filters: current.filters.filter((clause) => clause.id !== id) })
-      }
-    />
+    <SidebarViewPendingSurface pending={pending}>
+      <SidebarViewEditor
+        current={current}
+        isDrawerLayout={!usesDesktopWorkbench}
+        reorderScopeKey={`${workspaceId ?? ""}:${activeViewId ?? ""}`}
+        headerProps={headerProps}
+        onUpdate={updateDraft}
+        onAddFilter={() =>
+          updateDraft({ filters: [...current.filters, createSidebarFilterClause()] })
+        }
+        onChangeClause={(next: FilterClause) =>
+          updateDraft({
+            filters: current.filters.map((clause) => (clause.id === next.id ? next : clause)),
+          })
+        }
+        onRemoveClause={(id) =>
+          updateDraft({ filters: current.filters.filter((clause) => clause.id !== id) })
+        }
+      />
+    </SidebarViewPendingSurface>
   );
 
   if (usesDesktopWorkbench) {
@@ -285,5 +288,25 @@ function MobileSidebarFilterSurface({
         </Drawer>
       )}
     </MobileConfirmationHost>
+  );
+}
+
+function SidebarViewPendingSurface({
+  pending,
+  children,
+}: {
+  pending: boolean;
+  children: ComponentProps<"fieldset">["children"];
+}) {
+  const { t } = useTranslation();
+  return (
+    <fieldset disabled={pending} aria-busy={pending || undefined} className="min-w-0">
+      {pending && (
+        <span role="status" className="sr-only">
+          {t("common:loadingIndicatorLabel")}
+        </span>
+      )}
+      {children}
+    </fieldset>
   );
 }

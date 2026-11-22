@@ -22,7 +22,6 @@ type SecretListItemRowProps = {
   onCopyMove: (secret: SecretListItem) => void;
   isBusy: boolean;
   showCreate: boolean;
-  isEditing: boolean;
   isDeleteConfirming: boolean;
   isDeleteLoading?: boolean;
   isDeleteBlocked?: boolean;
@@ -38,7 +37,6 @@ type SecretListItemRowActionsProps = {
   onReveal: () => void | Promise<void>;
   isBusy: boolean;
   showCreate: boolean;
-  isEditing: boolean;
   isDeleteConfirming: boolean;
   isDeleteLoading: boolean;
   isDeleteBlocked: boolean;
@@ -72,7 +70,6 @@ export function SecretListItemRow({
   onCopyMove,
   isBusy,
   showCreate,
-  isEditing,
   isDeleteConfirming,
   isDeleteLoading = false,
   isDeleteBlocked = false,
@@ -134,7 +131,6 @@ export function SecretListItemRow({
           onReveal={handleReveal}
           isBusy={isBusy}
           showCreate={showCreate}
-          isEditing={isEditing}
           isDeleteConfirming={isDeleteConfirming}
           isDeleteLoading={isDeleteLoading}
           isDeleteBlocked={isDeleteBlocked}
@@ -163,7 +159,6 @@ function SecretListItemRowActions({
   onReveal,
   isBusy,
   showCreate,
-  isEditing,
   isDeleteConfirming,
   isDeleteLoading,
   isDeleteBlocked,
@@ -185,9 +180,9 @@ function SecretListItemRowActions({
             <Button
               variant="ghost"
               onClick={() => onCopyMove(secret)}
-              // A Move removes the source; it must never run while that secret's
-              // edit/create draft is open (the draft would outlive its row).
-              disabled={isBusy || showCreate || isEditing}
+              // A Move removes the source; it must never run while a create
+              // draft is open (the draft would outlive its row).
+              disabled={isBusy || showCreate}
               className="cursor-pointer"
               aria-label={t("settings:copyMoveSecretNamed", { name: secret.name })}
             >
@@ -212,7 +207,7 @@ function SecretListItemRowActions({
               variant="ghost"
               size="icon"
               onClick={() => onEdit(secret)}
-              disabled={isBusy || showCreate || isEditing}
+              disabled={isBusy || showCreate}
               className="cursor-pointer"
               aria-label={t("settings:editSecretNamed", { name: secret.name })}
             >

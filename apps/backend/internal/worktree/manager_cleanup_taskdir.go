@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/retention"
 	"os"
 	"path/filepath"
 	"sort"
@@ -134,11 +135,20 @@ func readTaskDirectoryOwner(handle storageworkspaces.DirectoryHandle) (storagewo
 // CleanupTaskDirectory removes the root only after every recorded checkout is gone.
 // Archive identity, runtime stop, and environment ownership are guarded by the caller.
 func (m *Manager) CleanupTaskDirectory(ctx context.Context, target *TaskDirectoryCleanup) (bool, error) {
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return false, retentionErr
+	}
+	defer releaseRetention()
+
 	if target == nil || target.Identity == "" || target.TaskID == "" {
 		return false, errors.New("task directory cleanup lacks retained identity")
 	}
 	if m.store == nil {
 		return false, errors.New("task directory inventory is unavailable")
+	}
+	if err := m.checkWorkspaceRetention(ctx, target.TaskID, "", target.Path); err != nil {
+		return false, err
 	}
 	base, err := m.taskDirectoryCleanupBase(target.Path, target.Owner.TaskDirName)
 	if err != nil {

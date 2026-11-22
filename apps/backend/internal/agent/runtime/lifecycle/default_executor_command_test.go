@@ -51,7 +51,7 @@ func TestBuildExecutionUsesResolvedStandaloneForNativeOpenCode(t *testing.T) {
 
 func TestPromoteWorkspaceExecutionUsesResolvedStandaloneForNativeOpenCode(t *testing.T) {
 	writeNativeOpenCodeVersionFixture(t, "1.18.32")
-	for _, requested := range []string{"", "unknown", string(models.ExecutorTypeLocal), string(models.ExecutorTypeLocalDocker)} {
+	for _, requested := range []string{"", string(models.ExecutorTypeLocal)} {
 		t.Run("requested_"+requested, func(t *testing.T) {
 			m := newTestManager(t)
 			m.profileResolver = nil
@@ -59,6 +59,9 @@ func TestPromoteWorkspaceExecutionUsesResolvedStandaloneForNativeOpenCode(t *tes
 			execution := &AgentExecution{
 				ID: "workspace-execution", TaskID: "task-1", SessionID: "session-1",
 				RuntimeName: agentruntime.RuntimeStandalone, WorkspacePath: t.TempDir(),
+			}
+			if err := m.executionStore.Add(execution); err != nil {
+				t.Fatal(err)
 			}
 			req := &LaunchRequest{
 				TaskID: execution.TaskID, SessionID: execution.SessionID,
@@ -70,6 +73,38 @@ func TestPromoteWorkspaceExecutionUsesResolvedStandaloneForNativeOpenCode(t *tes
 			}
 			if want := []string{"opencode", "acp", "--print-logs"}; !reflect.DeepEqual(execution.AgentArgs, want) {
 				t.Fatalf("promoted command = %q, want %q", execution.AgentArgs, want)
+			}
+		})
+	}
+}
+
+// A required Docker selection never promotes a retained standalone workspace;
+// the same mismatch is refused before any agent command or MCP mutation.
+func TestPromoteWorkspaceExecutionRefusesMismatchedRequiredRuntime(t *testing.T) {
+	writeNativeOpenCodeVersionFixture(t, "1.18.32")
+	for _, requested := range []string{"unknown", string(models.ExecutorTypeLocalDocker)} {
+		t.Run("requested_"+requested, func(t *testing.T) {
+			m := newTestManager(t)
+			m.profileResolver = nil
+			m.SetManagedRuntimeSelectionStore(nativeOpenCodeAdmissionManager("1.18.32").managedRuntimeSelections)
+			execution := &AgentExecution{
+				ID: "workspace-execution", TaskID: "task-1", SessionID: "session-1",
+				RuntimeName: agentruntime.RuntimeStandalone, WorkspacePath: t.TempDir(),
+			}
+			if err := m.executionStore.Add(execution); err != nil {
+				t.Fatal(err)
+			}
+			req := &LaunchRequest{
+				TaskID: execution.TaskID, SessionID: execution.SessionID,
+				AgentProfileID: agents.OpenCodeACPAgentID, ExecutorType: requested,
+				IsPassthrough: true,
+			}
+			err := m.promoteWorkspaceExecution(context.Background(), execution, req)
+			if err == nil {
+				t.Fatal("expected retained standalone execution to be refused")
+			}
+			if execution.AgentCommand != "" || execution.AgentArgs != nil {
+				t.Fatalf("refused promotion mutated the execution: command=%q args=%q", execution.AgentCommand, execution.AgentArgs)
 			}
 		})
 	}

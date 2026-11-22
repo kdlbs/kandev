@@ -190,10 +190,10 @@ nobody answered, so a blocked or abandoned line of work stops being invisible.
 
 **Read-only**
 
-- **AC-UI-INBOX-HISTORY-001.14:** The History tab shall expose no affordance that
-  answers, rejects, re-asks, dismisses, snoozes or otherwise mutates an
-  interaction. The only actions shall be opening the owning task and copying its
-  identifier.
+- **AC-UI-INBOX-HISTORY-001.14:** History shall not answer, reject, re-ask,
+  dismiss, snooze, or otherwise mutate interactions. Row actions shall open the
+  task or copy its identifier. References follow the
+  [Markdown contract](clarification-markdown.md).
 - **AC-UI-INBOX-HISTORY-001.15:** The history read path shall expose no endpoint
   accepting a request method other than a read, and the History tab shall issue no
   request to any mutating endpoint. A test shall assert that rendering, paging and

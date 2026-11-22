@@ -5,6 +5,7 @@ updated: 2026-10-04
 requirements:
   - REQ-TASKS-RESUME-PROMPT-QUEUE-001
   - REQ-TASKS-RESUME-PROMPT-QUEUE-002
+  - REQ-TASKS-RESUME-PROMPT-QUEUE-003
 ---
 
 # Resume Prompt Queue System Design
@@ -220,6 +221,14 @@ a reserved entry returns to the head of its own session incarnation and keeps
 its recorded-user-message marker. The next boot-ready or turn-ready trigger
 dispatches it. No timer or resume attempt is added (`002.2`). Other failures,
 including a provider rejection, keep the lost branch (`002.3`).
+
+## Backend restart
+
+Lazy recovery leaves an idle session without a runtime until a user returns to
+it, and that is the required behavior. Backend startup performs no queue drain.
+Startup paths may restore or repair queue state, but they never start or resume
+an agent to deliver it. Delivery resumes through the existing path: opening the
+task resumes the session, and its readiness transition drains the queue.
 
 ## Responsive behavior
 

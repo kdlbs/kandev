@@ -68,6 +68,20 @@ func TestWSRouteActionReportsNonDynamicProfileAsValidation(t *testing.T) {
 	require.Equal(t, orchestrator.ErrRouteActionRequiresDynamicProfile.Error(), payload.Message)
 }
 
+func TestMaterializedRouteProfileChangeReportsValidation(t *testing.T) {
+	msg := createTestMessage(t, ws.ActionSessionLaunch, map[string]interface{}{})
+	response, err := materializedRouteProfileChangeResponse(msg, orchestrator.ErrMaterializedRouteProfileChange)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	require.Equal(t, orchestrator.ErrMaterializedRouteProfileChange.Error(), payload.Message)
+
+	response, err = materializedRouteProfileChangeResponse(msg, errors.New("unrelated launch failure"))
+	require.NoError(t, err)
+	require.Nil(t, response)
+}
+
 func TestWsRecoverSessionValidatesSettingsPolicyAndOriginalAction(t *testing.T) {
 	handlers := setupOrchestratorHandlers(t)
 	tests := []struct {

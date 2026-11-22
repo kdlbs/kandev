@@ -39,7 +39,18 @@ test.describe.serial("Mobile cancel turn availability", () => {
     await session.sendMessageViaButton("/detached-background 60s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 20_000 });
     await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
-    await waitForActiveSessionForegroundActivity(testPage, "background", sessionId);
+    await expect
+      .poll(
+        async () => {
+          const { workloads } = await apiClient.listBackgroundWorkloads(sessionId);
+          return workloads.filter((workload) =>
+            ["running", "waiting", "unknown"].includes(workload.state),
+          ).length;
+        },
+        { message: "the session should own active background work", timeout: 30_000 },
+      )
+      .toBeGreaterThan(0);
+    await expect(testPage.getByTestId("background-work-chip")).toBeVisible();
 
     const chat = session.activeChat();
     const cancel = chat.getByTestId("cancel-agent-button");

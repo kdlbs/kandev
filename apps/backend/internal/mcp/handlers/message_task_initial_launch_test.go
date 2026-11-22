@@ -40,6 +40,7 @@ func TestPeerMessageInitialLaunch_Delivery(t *testing.T) {
 		session,
 		"follow up during initial launch",
 		metadata,
+		false,
 	)
 
 	require.NoError(t, err)
@@ -380,6 +381,14 @@ type peerLaunchAgentManager struct {
 	onFailure        func()
 }
 
+func (*peerLaunchAgentManager) RequiresCloneURL(string) bool          { return false }
+func (*peerLaunchAgentManager) ShouldApplyPreferredShell(string) bool { return false }
+func (*peerLaunchAgentManager) ValidateExecutorRuntime(string) error  { return nil }
+
+func (*peerLaunchAgentManager) ValidateExecutionRuntime(context.Context, string, string, string) error {
+	return nil
+}
+
 func (m *peerLaunchAgentManager) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	m.launchEntered <- req
 	select {
@@ -509,6 +518,7 @@ func TestPeerMessageInitialLaunch_PreservesOlderFIFOEntry(t *testing.T) {
 
 	result, err := h.dispatchPreparedTaskMessage(
 		ctx, target.ID, session, "follow-up", map[string]interface{}{"sender_task_id": sender.ID},
+		false,
 	)
 
 	require.NoError(t, err)

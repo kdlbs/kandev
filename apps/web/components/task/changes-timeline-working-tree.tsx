@@ -3,6 +3,8 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { useActiveTaskRepositoryRoots } from "@/hooks/domains/session/use-task-repository-roots";
+import { RootContextMenuIfAvailable } from "./root-context-menu";
 import { useMultiSelect } from "@/hooks/use-multi-select";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -506,25 +508,33 @@ function ChangesRepositoryTimelineRow({
   onToggle: () => void;
 }) {
   const stop = (event: React.MouseEvent) => event.stopPropagation();
+  const roots = useActiveTaskRepositoryRoots();
+  const root = roots.byTrackerName.get(row.repositoryName);
+  const headerLabel = root?.displayLabel ?? displayName;
+  const headerButton = (
+    <button
+      type="button"
+      className="flex min-h-6 min-w-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80 cursor-pointer hover:text-foreground/80 [@media(pointer:coarse)]:min-h-11"
+      data-testid="changes-repo-header"
+      data-changes-row-focus
+      aria-expanded={!row.collapsed}
+      onClick={onToggle}
+    >
+      {row.collapsed ? (
+        <IconChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+      ) : (
+        <IconChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+      )}
+      <span className="truncate">{headerLabel}</span>
+      <span className="text-muted-foreground/50 normal-case tracking-normal">{row.count}</span>
+    </button>
+  );
   return (
     <div className={row.treeMode ? "-ml-2" : ""}>
       <div className="flex items-center justify-between gap-2 px-1 py-0.5">
-        <button
-          type="button"
-          className="flex min-h-6 min-w-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80 cursor-pointer hover:text-foreground/80 [@media(pointer:coarse)]:min-h-11"
-          data-testid="changes-repo-header"
-          data-changes-row-focus
-          aria-expanded={!row.collapsed}
-          onClick={onToggle}
-        >
-          {row.collapsed ? (
-            <IconChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-          ) : (
-            <IconChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-          )}
-          <span className="truncate">{displayName}</span>
-          <span className="text-muted-foreground/50 normal-case tracking-normal">{row.count}</span>
-        </button>
+        <RootContextMenuIfAvailable root={root} surface="changes">
+          {headerButton}
+        </RootContextMenuIfAvailable>
         {(onPrimaryAction || onSecondaryAction) && (
           <div className="flex items-center gap-1" onClick={stop}>
             {onPrimaryAction && (

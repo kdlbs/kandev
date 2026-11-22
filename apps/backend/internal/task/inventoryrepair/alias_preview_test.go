@@ -102,7 +102,18 @@ func TestAliasPreviewRefusals(t *testing.T) {
 				p.Aliases[0].CanonicalRowID = "alias"
 				p.Aliases[0].AliasRowIDs = []string{"slot"}
 			case "omitted claim":
-				execSQL(t, f.db, `INSERT INTO task_environment_repos SELECT 'third',task_environment_id,repository_id,'third',worktree_id,worktree_path,worktree_branch,worktree_branch_owner,worktree_integration_ref,worktree_recovery_head_sha,worktree_source_clone_path,worktree_source_common_dir,worktree_branch_compacted_at,position,error_message,status,created_at,updated_at,merged_at,deleted_at FROM task_environment_repos WHERE id='alias'`)
+				execSQL(t, f.db, `INSERT INTO task_environment_repos (
+ id, task_environment_id, repository_id, branch_slug, worktree_id,
+ worktree_path, worktree_branch, worktree_branch_owner, worktree_integration_ref,
+ worktree_recovery_head_sha, worktree_source_clone_path, worktree_source_common_dir,
+ worktree_branch_compacted_at, position, error_message, status,
+ created_at, updated_at, merged_at, deleted_at
+) SELECT 'third', task_environment_id, repository_id, 'third', worktree_id,
+ worktree_path, worktree_branch, worktree_branch_owner, worktree_integration_ref,
+ worktree_recovery_head_sha, worktree_source_clone_path, worktree_source_common_dir,
+ worktree_branch_compacted_at, position, error_message, status,
+ created_at, updated_at, merged_at, deleted_at
+FROM task_environment_repos WHERE id='alias'`)
 			case "foreign path":
 				execSQL(t, f.db, `UPDATE task_environment_repos SET worktree_path='/foreign' WHERE id='alias'`)
 			case "broken pointer":

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // TestFindInflightRunForAgent_ReturnsTheNewestQueuedOrClaimedRun pins
@@ -208,12 +208,12 @@ func TestGetClaimedRunForCausationAttribution_MultipleClaimsResolveToDeepestCaus
 	ctx := context.Background()
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
-	shallow := mustCreateRun(t, repo, &models.Run{
+	shallow := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "shallow-claim", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":"t1"}`, CausationDepth: 1,
 	})
 	setStatus(t, repo, shallow.ID, "claimed", timePtr(base), nil)
-	deep := mustCreateRun(t, repo, &models.Run{
+	deep := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "deep-claim", AgentProfileID: "a1", Reason: "task_assigned",
 		Payload: `{"task_id":"t2"}`, CausationDepth: 4,
 	})
@@ -237,12 +237,12 @@ func TestGetClaimedTasklessRunForAgent_OnlyMatchesRunsWithoutATask(t *testing.T)
 	ctx := context.Background()
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
-	missing := mustCreateRun(t, repo, &models.Run{
+	missing := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "missing-task-id", AgentProfileID: "a1", Reason: "heartbeat",
 		Payload: `{"note":"no task"}`,
 	})
 	setStatus(t, repo, missing.ID, "claimed", timePtr(base), nil)
-	empty := mustCreateRun(t, repo, &models.Run{
+	empty := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "empty-task-id", AgentProfileID: "a1", Reason: "heartbeat",
 		Payload: `{"task_id":""}`,
 	})
@@ -267,10 +267,10 @@ func TestGetClaimedTasklessRunForAgent_ScopedToTheAgentAndToClaimedRuns(t *testi
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	queued := mustCreateRun(t, repo, &models.Run{
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "queued", AgentProfileID: "a1", Reason: "heartbeat",
 	})
-	otherAgent := mustCreateRun(t, repo, &models.Run{
+	otherAgent := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "other-agent", AgentProfileID: "a2", Reason: "heartbeat",
 	})
 	setStatus(t, repo, otherAgent.ID, "claimed", timePtr(now), nil)
@@ -320,7 +320,7 @@ func TestGetRunWithCosts_TasklessRunRollsUpToZero(t *testing.T) {
 	repo, writer := newTestRepoWithDB(t)
 	ctx := context.Background()
 
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "taskless", AgentProfileID: "a1", Reason: "heartbeat",
 	})
 	seedCostEvent(t, writer, "orphan", "", 500, 50, 60, 70)

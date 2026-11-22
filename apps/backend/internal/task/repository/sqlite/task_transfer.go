@@ -108,14 +108,18 @@ func (r *Repository) TransferTask(
 		return nil, errors.Join(err, r.RecordTaskTransferAttempt(ctx, command, taskTransferResultFailed))
 	}
 
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return nil, errors.Join(err, r.RecordTaskTransferAttempt(ctx, command, taskTransferResultFailed))
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskTransferWorkspaces(ctx, tx, command); err != nil {
+		_ = tx.Rollback()
+		return r.handleTaskTransferApplyError(ctx, command, requestDigest, err)
+	}
 	if err := r.lockTaskTransferRelations(ctx, tx, projections, counts, inventory); err != nil {
 		_ = tx.Rollback()
-		return nil, errors.Join(err, r.RecordTaskTransferAttempt(ctx, command, taskTransferResultFailed))
+		return r.handleTaskTransferApplyError(ctx, command, requestDigest, err)
 	}
 	receipt, err := r.applyTaskTransfer(ctx, tx, command, requestDigest, projections, counts, inventory)
 	if err != nil {
@@ -744,6 +748,17 @@ func (r *Repository) taskTransferPreservation(
 		return nil, "", err
 	}
 	counts["task_children"] = childCount
+	var compactionIDs []string
+	if err := tx.SelectContext(ctx, &compactionIDs, r.db.Rebind(`
+		SELECT c.session_id || '|' || c.provider || '|' || c.native_session_id || '|' || c.compaction_attempt_id
+		FROM task_session_compactions c
+		JOIN task_sessions s ON s.id = c.session_id
+		WHERE s.task_id = ?
+		ORDER BY 1`), taskID); err != nil {
+		return nil, "", err
+	}
+	counts["task_session_compactions"] = len(compactionIDs)
+	identities["task_session_compactions"] = compactionIDs
 	payload := struct {
 		TaskID       string                              `json:"task_id"`
 		Sessions     []models.TaskTransferSessionReceipt `json:"sessions"`
@@ -803,4 +818,23 @@ func (r *Repository) updateTaskTransferPlacement(
 		return 0, err
 	}
 	return transitionID, nil
+}
+
+// lockTaskTransferWorkspaces acquires the complete authorized set before the
+// exceptional relation reservation. The source is rechecked again under its
+// row lock after reservation, so a stale locator never grows a held lock set.
+func (r *Repository) lockTaskTransferWorkspaces(ctx context.Context, tx *sqlx.Tx, command models.TaskTransferCommand) error {
+	if err := r.lockTaskHierarchy(ctx, tx, []string{command.ExpectedSourceWorkspaceID, command.DestinationWorkspaceID}, nil); err != nil {
+		return err
+	}
+	var workspace, workflow, step string
+	var version time.Time
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT workspace_id,workflow_id,workflow_step_id,updated_at FROM tasks WHERE id=?`), command.TaskID).Scan(&workspace, &workflow, &step, &version)
+	if err != nil {
+		return taskTransferConflict(err, "source predicate changed")
+	}
+	if workspace != command.ExpectedSourceWorkspaceID || workflow != command.ExpectedSourceWorkflowID || step != command.ExpectedSourceStepID || !version.Equal(command.ExpectedTaskUpdatedAt) {
+		return repoerrors.ErrTaskTransferConflict
+	}
+	return nil
 }

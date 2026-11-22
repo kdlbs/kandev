@@ -5,8 +5,13 @@ import { expect, test, type Page } from "@playwright/test";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
+import { createDelayedResumeProfile } from "./session-resume-prompt-queue";
 import { SessionPage } from "../pages/session-page";
 import { attachGatewayTrafficCapture } from "./ws-traffic";
+import {
+  observeAgentRuntimeAvailability,
+  waitForAgentRuntimeReplacement,
+} from "./agent-runtime-availability";
 import {
   captureSilentRestartSnapshot,
   expectRestartConversationIdentity,
@@ -21,16 +26,21 @@ export async function verifyAutomaticRestartReconciliation(
   api: ApiClient,
   seed: SeedData,
   backend: BackendContext,
+  resumeDelay?: string,
 ) {
   const release = await backend.useEnv({
     KANDEV_FEATURES_AGENT_SURVIVAL: "true",
     KANDEV_LOG_LEVEL: "debug",
   });
+  let delayedProfile: string | undefined;
+  let createdTask: string | undefined;
+  let siblingTask: string | undefined;
   try {
+    if (resumeDelay) delayedProfile = await createDelayedResumeProfile(api, resumeDelay);
     const task = await api.createTaskWithAgent(
       seed.workspaceId,
       "Automatic crash recovery",
-      seed.agentProfileId,
+      delayedProfile ?? seed.agentProfileId,
       {
         workflow_id: seed.workflowId,
         workflow_step_id: seed.startStepId,
@@ -39,6 +49,7 @@ export async function verifyAutomaticRestartReconciliation(
         start_agent: false,
       },
     );
+    createdTask = task.id;
     await page.goto(`/t/${task.id}`);
     const session = new SessionPage(page);
     await session.waitForLoad();
@@ -52,7 +63,12 @@ export async function verifyAutomaticRestartReconciliation(
     const snapshot = await captureSilentRestartSnapshot(api, task.id, active.id);
     const traffic = attachGatewayTrafficCapture(page);
     const bootId = await api.getBackendBootID();
-    expect((await api.killLocalAgentRuntimeChild()).killed).toBe(true);
+    await observeAgentRuntimeAvailability(page);
+    const killedRuntime = await api.killLocalAgentRuntimeChild();
+    expect(killedRuntime.killed).toBe(true);
+    await waitForAgentRuntimeReplacement(page, killedRuntime.runtime_epoch, bootId);
+    const sibling = resumeDelay ? await createRecoverySibling(api, seed) : undefined;
+    siblingTask = sibling?.taskId;
     try {
       await expectSilentRestartRestoration(page, api, task.id, snapshot, traffic.frames);
     } catch (error) {
@@ -105,6 +121,9 @@ export async function verifyAutomaticRestartReconciliation(
       throw error;
     }
     expect(await api.getBackendBootID()).toBe(bootId);
+    if (sibling) await verifyRecoverySibling(page, api, sibling);
+    await page.goto(`/t/${task.id}`);
+    await session.waitForLoad();
     const restored = await captureSilentRestartSnapshot(api, task.id, active.id);
     await backend.restart();
     await page.reload();
@@ -141,7 +160,84 @@ export async function verifyAutomaticRestartReconciliation(
       ),
     ).toHaveLength(1);
     await expect(session.chat.getByText("Slow response complete", { exact: false })).toHaveCount(0);
+  } catch (error) {
+    await test
+      .info()
+      .attach("restart-reconciliation-backend-log", {
+        path: backend.logPath,
+        contentType: "text/plain",
+      })
+      .catch(() => undefined);
+    await test
+      .info()
+      .attach("restart-reconciliation-file-log", {
+        path: path.join(backend.tmpDir, ".kandev/logs/backend-logs.log"),
+        contentType: "text/plain",
+      })
+      .catch(() => undefined);
+    throw error;
   } finally {
-    await release();
+    try {
+      if (siblingTask) await api.deleteTask(siblingTask);
+      if (delayedProfile) {
+        if (createdTask) await api.deleteTask(createdTask);
+        await api.deleteAgentProfile(delayedProfile, true);
+      }
+    } finally {
+      await release();
+    }
   }
+}
+
+async function createRecoverySibling(api: ApiClient, seed: SeedData) {
+  const task = await api.createTaskWithAgent(
+    seed.workspaceId,
+    "Healthy recovery sibling",
+    seed.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seed.workflowId,
+      workflow_step_id: seed.startStepId,
+      repository_ids: [seed.repositoryId],
+      executor_profile_id: seed.worktreeExecutorProfileId,
+    },
+  );
+  if (!task.session_id) throw new Error("healthy sibling has no session");
+  try {
+    await expect
+      .poll(async () => (await api.getTaskSession(task.session_id!)).session.state, {
+        timeout: 30_000,
+      })
+      .toBe("WAITING_FOR_INPUT");
+  } catch (error) {
+    await test
+      .info()
+      .attach("recovery-sibling-session", {
+        body: JSON.stringify(await api.getTaskSession(task.session_id).catch(() => null)),
+        contentType: "application/json",
+      })
+      .catch(() => undefined);
+    throw error;
+  }
+  return {
+    taskId: task.id,
+    snapshot: await captureSilentRestartSnapshot(api, task.id, task.session_id),
+  };
+}
+
+async function verifyRecoverySibling(
+  page: Page,
+  api: ApiClient,
+  sibling: Awaited<ReturnType<typeof createRecoverySibling>>,
+) {
+  await page.goto(`/t/${sibling.taskId}`);
+  const session = new SessionPage(page);
+  await session.waitForLoad();
+  await session.expectChatResponseVisible("simple mock response", 0);
+  await session.sendMessageViaButton("/e2e:simple-message");
+  await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
+  await session.waitForChatIdle({ timeout: 30_000 });
+  const after = await captureSilentRestartSnapshot(api, sibling.taskId, sibling.snapshot.sessionId);
+  expect(after.agentExecutionId).toBe(sibling.snapshot.agentExecutionId);
+  expect(after.nativeSessionId).toBe(sibling.snapshot.nativeSessionId);
 }

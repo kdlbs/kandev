@@ -371,3 +371,33 @@ describe("resolveSettingsDiscovery visibility", () => {
     expect(connection?.breadcrumb[1]).toBe("Main");
   });
 });
+
+it("orders appearance motion and image defaults to match the settings page", () => {
+  const ids = [
+    "appearance-rich-output-motion",
+    "appearance-chat-motion",
+    "appearance-image-preview-defaults",
+    "appearance-settings-menu",
+  ];
+  const controls = SETTINGS_DISCOVERY_DEFINITIONS.filter((entry) => ids.includes(entry.id)).sort(
+    (a, b) => a.order - b.order,
+  );
+  expect(controls.map((entry) => entry.id)).toEqual(ids);
+  expect(new Set(controls.map((entry) => entry.order)).size).toBe(controls.length);
+});
+
+// @covers AC-SYSTEM-PAGE-DATA-STORAGE-PAGES-002.7
+it.each([undefined, false, true])("gates retention discovery with Office=%s", (officeEnabled) => {
+  const items = resolveSettingsDiscovery({
+    t,
+    showAccount: false,
+    showUsers: false,
+    showOrganizations: false,
+    workspaces: [],
+    agents: [],
+    executors: [],
+    officeEnabled,
+  });
+  expect(items.some((item) => item.id === "system-retention")).toBe(officeEnabled === true);
+  expect(items.some((item) => item.id === "system-storage")).toBe(true);
+});

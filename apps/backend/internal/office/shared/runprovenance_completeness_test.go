@@ -31,6 +31,7 @@ import (
 var attendedForTest = map[string]bool{
 	"task_assigned":               true,
 	"task_comment":                true,
+	"handoff_completed":           true,
 	"task_review_requested":       true,
 	"task_changes_requested":      true,
 	"task_blockers_resolved":      true,
@@ -59,6 +60,7 @@ var unattendedForTest = map[string]bool{
 	"routine_dispatch":      true,
 	"routine_dispatch_cron": true,
 	"routine_trigger":       true,
+	"task_blocker_failed":   true,
 }
 
 // runReasonBlock names one of AC-OFFICE-BUDGET-007.3's seven enumerated

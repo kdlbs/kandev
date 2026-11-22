@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/notifications/models"
 	"github.com/kandev/kandev/internal/notifications/providers"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
+	"github.com/kandev/kandev/internal/notifications/webpush"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	userstore "github.com/kandev/kandev/internal/user/store"
 	"go.uber.org/zap"
@@ -22,6 +23,8 @@ import (
 const (
 	EventTaskSessionTurnFinished       = "session.turn_finished"
 	EventTaskSessionClarificationAsked = "session.clarification_requested"
+	EventTaskSessionPermissionAsked    = "session.permission_requested"
+	EventTaskSessionFailed             = "session.failed"
 	EventOfficeInboxItem               = "office.inbox_item"
 	EventSystemUpdateAvailable         = "system.update_available"
 	desktopNativeNotificationsEnv      = "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS"
@@ -55,6 +58,11 @@ type Service struct {
 	logger             *logger.Logger
 	providers          map[models.ProviderType]providers.Provider
 	authEnforced       AuthEnforced
+	webPush            *webpush.Service
+	formatterMu        sync.RWMutex
+	formatterRuntime   FormatterRuntime
+	formatterConfig    formatterConfigurationGate
+	formatterLeases    formatterCaptureLeases
 }
 
 // NewService builds the notification service. authEnforced decides what
@@ -62,10 +70,18 @@ type Service struct {
 // enforced the notification is dropped, otherwise it falls back to the single
 // pre-auth user. It is a constructor parameter rather than a setter so no call
 // site can silently leave the fail-closed behavior unwired.
-func NewService(repo notificationstore.Repository, taskRepo TaskContextReader, hub *gatewayws.Hub, log *logger.Logger, authEnforced AuthEnforced) *Service {
+func NewService(
+	repo notificationstore.Repository,
+	taskRepo TaskContextReader,
+	hub *gatewayws.Hub,
+	log *logger.Logger,
+	authEnforced AuthEnforced,
+	webhookPrivateNetworksAllowed bool,
+) *Service {
 	providerMap := map[models.ProviderType]providers.Provider{
 		models.ProviderTypeLocal:   providers.NewLocalProvider(hub),
 		models.ProviderTypeApprise: providers.NewAppriseProvider(),
+		models.ProviderTypeWebhook: providers.NewWebhookProvider(webhookPrivateNetworksAllowed),
 	}
 	if os.Getenv(desktopNativeNotificationsEnv) != "true" {
 		providerMap[models.ProviderTypeSystem] = providers.NewSystemProvider()
@@ -89,7 +105,14 @@ func (s *Service) AppriseAvailable() bool {
 }
 
 func (s *Service) AvailableEvents() []string {
-	return []string{EventTaskSessionTurnFinished, EventTaskSessionClarificationAsked, EventOfficeInboxItem, EventSystemUpdateAvailable}
+	return []string{
+		EventTaskSessionTurnFinished,
+		EventTaskSessionClarificationAsked,
+		EventTaskSessionPermissionAsked,
+		EventTaskSessionFailed,
+		EventOfficeInboxItem,
+		EventSystemUpdateAvailable,
+	}
 }
 
 func (s *Service) ListProviders(ctx context.Context, userID string) ([]*models.Provider, map[string][]string, error) {
@@ -121,6 +144,11 @@ func (s *Service) ListProviders(ctx context.Context, userID string) ([]*models.P
 }
 
 func (s *Service) CreateProvider(ctx context.Context, userID, name string, providerType models.ProviderType, config map[string]interface{}, enabled bool, events []string) (*models.Provider, error) {
+	release, err := s.BeginFormatterManagement(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := s.validateProvider(providerType, config); err != nil {
 		return nil, err
 	}
@@ -143,6 +171,11 @@ func (s *Service) CreateProvider(ctx context.Context, userID, name string, provi
 // UpdateProvider mutates a provider the caller owns. A provider ID belonging
 // to another user resolves to ErrProviderNotFound before any write happens.
 func (s *Service) UpdateProvider(ctx context.Context, userID, providerID string, updates ProviderUpdate) (*models.Provider, error) {
+	release, err := s.BeginFormatterManagement(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	provider, err := s.ownedProvider(ctx, userID, providerID)
 	if err != nil {
 		return nil, err
@@ -175,6 +208,11 @@ func (s *Service) UpdateProvider(ctx context.Context, userID, providerID string,
 
 // DeleteProvider removes a provider the caller owns.
 func (s *Service) DeleteProvider(ctx context.Context, userID, providerID string) error {
+	release, err := s.BeginFormatterManagement(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	return s.repo.DeleteProvider(ctx, userID, providerID)
 }
 
@@ -207,6 +245,74 @@ func (s *Service) HandleClarificationRequested(ctx context.Context, taskID, sess
 	s.handleSemanticOccurrence(ctx, taskID, sessionID, pendingID, EventTaskSessionClarificationAsked, nil)
 }
 
+// SetWebPush wires the Web Push service and its provider adapter. It must be
+// called before the service handles requests.
+func (s *Service) SetWebPush(svc *webpush.Service) {
+	s.webPush = svc
+	s.RegisterProvider(models.ProviderTypeWebPush, webpush.NewProvider(svc))
+}
+
+// WebPush returns the Web Push service, or nil when push is not configured.
+func (s *Service) WebPush() *webpush.Service { return s.webPush }
+
+// HandlePermissionRequested notifies that an agent is blocked on a tool
+// permission. pendingID identifies the request and dedupes redelivery.
+func (s *Service) HandlePermissionRequested(ctx context.Context, taskID, sessionID, pendingID string) {
+	s.handleSemanticOccurrence(ctx, taskID, sessionID, pendingID, EventTaskSessionPermissionAsked, nil)
+}
+
+// HandleSessionFailed notifies that a session entered the failed state.
+// occurrenceID must be unique per failure so a later failure of the same
+// session is not swallowed by delivery dedupe.
+func (s *Service) HandleSessionFailed(ctx context.Context, taskID, sessionID, occurrenceID string) {
+	s.handleSemanticOccurrence(ctx, taskID, sessionID, occurrenceID, EventTaskSessionFailed, nil)
+}
+
+// RegisterProvider installs an adapter for a provider type that is wired after
+// construction (for example Web Push, which needs the database). It must be
+// called before the service handles requests.
+func (s *Service) RegisterProvider(providerType models.ProviderType, adapter providers.Provider) {
+	s.providers[providerType] = adapter
+}
+
+// webPushDefaultEvents are the events a user's Web Push provider starts with:
+// everything that needs attention on a phone. They can be changed in the
+// notification events table like any other provider.
+var webPushDefaultEvents = []string{
+	EventTaskSessionClarificationAsked,
+	EventTaskSessionPermissionAsked,
+	EventTaskSessionFailed,
+	EventTaskSessionTurnFinished,
+}
+
+// EnsureWebPushProvider creates the user's Web Push provider on first use. An
+// existing provider is left untouched so the user's event choices survive
+// resubscribing a device.
+func (s *Service) EnsureWebPushProvider(ctx context.Context, userID string) error {
+	if s.providers[models.ProviderTypeWebPush] == nil {
+		return fmt.Errorf("web push is not available")
+	}
+	s.defaultProvidersMu.Lock()
+	defer s.defaultProvidersMu.Unlock()
+	existing, err := s.repo.ListProvidersByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	for _, provider := range existing {
+		if provider.Type == models.ProviderTypeWebPush {
+			return nil
+		}
+	}
+	return s.repo.CreateProviderWithSubscriptions(ctx, &models.Provider{
+		ID:      uuid.New().String(),
+		UserID:  userID,
+		Name:    "Web Push",
+		Type:    models.ProviderTypeWebPush,
+		Config:  map[string]interface{}{},
+		Enabled: true,
+	}, webPushDefaultEvents)
+}
+
 func (s *Service) HandleUpdateAvailable(ctx context.Context, version, releaseURL string) {
 	if version == "" {
 		return
@@ -218,6 +324,8 @@ func (s *Service) HandleUpdateAvailable(ctx context.Context, version, releaseURL
 }
 
 func (s *Service) handleSemanticOccurrence(ctx context.Context, taskID, sessionID, occurrenceID, eventType string, payload map[string]string) {
+	ctx, finishFormatting := withFormatterBudget(ctx)
+	defer finishFormatting()
 	if occurrenceID == "" {
 		return
 	}
@@ -244,6 +352,8 @@ func (s *Service) handleSemanticOccurrence(ctx context.Context, taskID, sessionI
 // providers. Every provider it can reach belongs to userID, so a webhook only
 // ever receives events from workspaces its owner can see.
 func (s *Service) deliverOccurrence(ctx context.Context, userID string, message notificationPayload) {
+	ctx, finishFormatting := withFormatterBudget(ctx)
+	defer finishFormatting()
 	providers, subscriptions, err := s.ListProviders(ctx, userID)
 	if err != nil {
 		s.logger.Error("failed to load notification providers", zap.Error(err))
@@ -253,6 +363,8 @@ func (s *Service) deliverOccurrence(ctx context.Context, userID string, message 
 		if !provider.Enabled || !containsEvent(subscriptions[provider.ID], message.EventType) {
 			continue
 		}
+		providerMessage := message
+		providerMessage.formatter = s.captureFormatter(ctx, userID, provider)
 		inserted, err := s.repo.InsertDelivery(ctx, &models.Delivery{
 			UserID:        userID,
 			ProviderID:    provider.ID,
@@ -267,7 +379,7 @@ func (s *Service) deliverOccurrence(ctx context.Context, userID string, message 
 		if !inserted {
 			continue
 		}
-		if err := s.dispatchProvider(ctx, userID, provider, message); err != nil {
+		if err := s.dispatchProvider(ctx, userID, provider, providerMessage); err != nil {
 			s.logger.Warn("notification delivery failed", zap.String("provider_id", provider.ID), zap.Error(err))
 			_ = s.repo.DeleteDelivery(ctx, provider.ID, message.EventType, message.OccurrenceID)
 		}
@@ -367,6 +479,8 @@ func (s *Service) providerOwners(ctx context.Context) ([]string, bool) {
 // resolvable owner, so under enforced authentication it is dropped rather than
 // delivered to whichever account the fallback would pick.
 func (s *Service) HandleInboxItem(ctx context.Context, workspaceID, itemType, title string) {
+	ctx, finishFormatting := withFormatterBudget(ctx)
+	defer finishFormatting()
 	userID, ok := s.workspaceOwner(ctx, workspaceID)
 	if !ok {
 		return
@@ -389,7 +503,10 @@ func (s *Service) HandleInboxItem(ctx context.Context, workspaceID, itemType, ti
 		if !containsEvent(events, EventOfficeInboxItem) {
 			continue
 		}
-		if err := s.dispatchGenericNotification(ctx, userID, provider, EventOfficeInboxItem, notifTitle, body); err != nil {
+		payload := notificationPayload{EventType: EventOfficeInboxItem, Title: notifTitle, Body: body,
+			Payload:   map[string]string{"workspace_id": workspaceID, "inbox_type": itemType, "inbox_title": title},
+			formatter: s.captureFormatter(ctx, userID, provider)}
+		if err := s.dispatchProvider(ctx, userID, provider, payload); err != nil {
 			s.logger.Warn("inbox item notification delivery failed",
 				zap.String("provider_id", provider.ID), zap.Error(err))
 		}
@@ -411,6 +528,7 @@ func (s *Service) dispatchGenericNotification(ctx context.Context, userID string
 }
 
 type notificationPayload struct {
+	formatter      *models.FormatterBinding
 	TaskID         string
 	TaskSessionID  string
 	OccurrenceID   string
@@ -425,6 +543,12 @@ type notificationPayload struct {
 // resolved recipient rather than a constant: the local provider broadcasts it
 // over that user's WebSocket connections.
 func (s *Service) dispatchProvider(ctx context.Context, userID string, provider *models.Provider, payload notificationPayload) error {
+	payload = s.formatNotification(ctx, userID, payload)
+	if payload.formatter != nil || formattedFanout(ctx) {
+		if err := s.revalidateFormattedDelivery(ctx, userID, provider, payload.EventType); err != nil {
+			return err
+		}
+	}
 	adapter := s.providers[provider.Type]
 	if adapter == nil {
 		return fmt.Errorf("unknown provider type: %s", provider.Type)
@@ -467,6 +591,18 @@ func (s *Service) buildSemanticMessage(ctx context.Context, taskID, eventType st
 func semanticMessageCopy(eventType, taskTitle string) (string, string) {
 	if eventType == EventSystemUpdateAvailable {
 		return "Kandev update available", fmt.Sprintf("Kandev %s is available. Open Settings > System > Updates to review it.", taskTitle)
+	}
+	if eventType == EventTaskSessionPermissionAsked {
+		if taskTitle == "" {
+			return "Agent needs permission", "The agent is waiting for your approval."
+		}
+		return "Agent needs permission", fmt.Sprintf("The agent is waiting for your approval on \"%s\".", taskTitle)
+	}
+	if eventType == EventTaskSessionFailed {
+		if taskTitle == "" {
+			return "Agent session failed", "The agent session ended with an error."
+		}
+		return "Agent session failed", fmt.Sprintf("The agent session failed on \"%s\".", taskTitle)
 	}
 	if eventType == EventTaskSessionClarificationAsked {
 		if taskTitle == "" {
@@ -580,6 +716,8 @@ func (s *Service) validateEvents(events []string) error {
 	allowed := map[string]struct{}{
 		EventTaskSessionTurnFinished:       {},
 		EventTaskSessionClarificationAsked: {},
+		EventTaskSessionPermissionAsked:    {},
+		EventTaskSessionFailed:             {},
 		EventOfficeInboxItem:               {},
 		EventSystemUpdateAvailable:         {},
 	}

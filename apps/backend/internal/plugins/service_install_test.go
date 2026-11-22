@@ -96,6 +96,12 @@ func TestServiceInstallOverActivePluginRestartsWithNewVersion(t *testing.T) {
 	if rec2.InstallPath == rec1.InstallPath {
 		t.Fatal("rec2.InstallPath == rec1.InstallPath, want the new version's own install dir")
 	}
+	if rec2.InstallationID != rec1.InstallationID || rec2.InstallationID == "" {
+		t.Fatalf("installation id changed across upgrade: %q -> %q", rec1.InstallationID, rec2.InstallationID)
+	}
+	if rec2.AgentToolPolicyVersion == "" || rec2.AgentToolPolicyVersion == rec1.AgentToolPolicyVersion {
+		t.Fatalf("policy version did not rotate across upgrade: %q -> %q", rec1.AgentToolPolicyVersion, rec2.AgentToolPolicyVersion)
+	}
 	if !rt.stopped("kandev-plugin-slack") {
 		t.Fatal("Install() over an active plugin did not stop the old runtime process")
 	}

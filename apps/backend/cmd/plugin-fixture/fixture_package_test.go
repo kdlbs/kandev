@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,12 +33,18 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.True(t, m.Capabilities.State)
 	require.True(t, m.Capabilities.UserState)
 	require.Equal(t, []string{"fixture-source-control"}, m.RepositoryProviders)
-	require.Equal(t, "connection-status", m.Actions[0].Key)
-	require.Equal(t, "workspace", m.Actions[0].ResourceScope)
 	actions := make(map[string]manifest.Action, len(m.Actions))
 	for _, action := range m.Actions {
 		actions[action.Key] = action
 	}
+	require.Contains(t, actions, "connection-status")
+	require.Equal(t, "workspace", actions["connection-status"].ResourceScope)
+	require.Contains(t, actions, "notification.prepare")
+	require.Equal(t, "notification_provider", actions["notification.prepare"].ResourceScope)
+	require.EqualValues(t, 131072, actions["notification.prepare"].MaxBodyBytes)
+	require.Len(t, m.NotificationFormatters, 1)
+	require.Equal(t, "fixture-text", m.NotificationFormatters[0].Key)
+	require.Equal(t, []string{"notification.prepare"}, m.NotificationFormatters[0].ManagementActions)
 	require.Equal(t, "workspace", actions[repositoryInspectActionKey].ResourceScope)
 	require.Equal(t, "workspace", actions[repositoryBranchesActionKey].ResourceScope)
 	require.Equal(t, "workspace", actions[utilityDefaultAction].ResourceScope)
@@ -69,8 +75,11 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.Equal(t, "fixture-pull-requests", m.ReferenceSources[0].Source)
 	require.Equal(t, "fixture-source-control", m.ReferenceSources[0].Provider)
 	require.Equal(t, "pull_request", m.ReferenceSources[0].Kind)
-	require.Len(t, m.AgentTools, 1)
+	require.Len(t, m.AgentTools, 3)
 	require.Equal(t, "test_echo", m.AgentTools[0].Name)
+	require.Equal(t, []string{manifest.AgentToolSurfaceAutomation}, m.AgentTools[1].Surfaces)
+	require.Equal(t, "list_findings", m.AgentTools[1].Name)
+	require.Equal(t, "complete_report", m.AgentTools[2].Name)
 
 	require.Len(t, m.Webhooks, 2)
 	require.Equal(t, "test-hook", m.Webhooks[0].Key)

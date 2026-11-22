@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- HTTP DTO definitions intentionally co-locate protocol shapes. */
 
 import type { ExecutorProvider, ExecutorType } from "./executor";
+import type { AuthorExclusionWarning } from "./author-exclusion";
 import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
 import type {
@@ -22,6 +23,7 @@ import type { TaskStatusSummary } from "./task-status-summary";
 import type { AgentGoalReconciliation } from "@/lib/agent-goal";
 
 export type { TaskStatusSummary } from "./task-status-summary";
+export type * from "./http-mcp";
 
 export type { ExecutorProvider, ExecutorProviderCapabilities, ExecutorType } from "./executor";
 export type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
@@ -66,6 +68,9 @@ export type {
   TaskRepository,
   WorkspaceFolder,
   WorkspaceFolderSourceRequest,
+  WorkspaceRepositoryPlacement,
+  WorkspaceRepositoryPlacementOption,
+  WorkspaceRepositoryPlacementPreview,
   WorkspaceRepositorySourceRequest,
   WorkspaceSourceRequest,
 } from "./http-workspace-sources";
@@ -100,6 +105,8 @@ export type TaskState =
   | "CANCELLED";
 
 export type TaskPriority = "critical" | "high" | "medium" | "low";
+
+export type InitialWorkspaceLayout = "repository" | "task_root";
 
 // Workflow Review Status
 export type WorkflowReviewStatus = "pending" | "approved" | "changes_requested" | "rejected";
@@ -170,7 +177,7 @@ export type WorkflowStep = {
    * Phase 2 (ADR-0004) semantic UX hint. Backend code does not branch on this;
    * frontend uses it to choose presentation (review/approval styling, etc).
    */
-  stage_type?: "work" | "review" | "approval" | "custom";
+  stage_type?: "work" | "review" | "approval" | "custom" | "hold";
   /**
    * ADR 0015: gate on_turn_complete transitions on an explicit
    * `step_complete_kandev` MCP signal from the agent. When true, the
@@ -318,6 +325,8 @@ export type Workspace = {
   acp_idle_suspension_enabled: boolean;
   acp_idle_timeout_minutes: number;
   office_workflow_id?: WorkflowId;
+  /** Office task identifier prefix (e.g. "KAN"). */
+  task_prefix?: string;
   created_at: string;
   updated_at: string;
 };
@@ -435,6 +444,8 @@ export function primaryTaskRepository(
 
 export type Task = ActiveSubagentCountFields & {
   id: TaskId;
+  /** Caller-supplied create-idempotency identity, absent once released. */
+  external_id?: string;
   workspace_id: WorkspaceId;
   workflow_id: WorkflowId;
   workflow_step_id: string;
@@ -453,6 +464,8 @@ export type Task = ActiveSubagentCountFields & {
   queued_for_step_id?: string;
   queued_at?: string | null;
   repositories?: TaskRepository[];
+  /** Initial working-directory layout for task creation. */
+  initial_workspace_layout?: InitialWorkspaceLayout;
   workspace_folders?: WorkspaceFolder[];
   primary_session_id?: SessionId | null;
   primary_session_state?: TaskSessionState | null;
@@ -546,6 +559,14 @@ export type CreateTaskResponse = Task & {
   session_id?: string;
   agent_execution_id?: string;
   agent_profile_id?: AgentProfileId;
+  /**
+   * Native REST creation metadata. Required on a native create response;
+   * absent on custom plugin transports that keep their own contract.
+   * `creation_complete` is false only when the matching task exists but its
+   * required synchronous creation work has not settled.
+   */
+  deduplicated?: boolean;
+  creation_complete?: boolean;
 };
 
 // Backend workflow step DTO (flat fields, as returned from API)
@@ -566,7 +587,7 @@ export type WorkflowStepDTO = {
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   disable_unclassified_fallback?: boolean;
   session_target?: WorkflowSessionTarget | null;
-  stage_type?: "work" | "review" | "approval" | "custom";
+  stage_type?: "work" | "review" | "approval" | "custom" | "hold";
   wip_limit?: number;
   pull_from_step_id?: string | null;
   complete_task_on_enter: boolean;
@@ -632,9 +653,11 @@ export type TaskSessionWorktree = {
   worktree_id: string;
   repository_id?: RepositoryId;
   branch_slug?: string;
+  workspace_relative_path?: string;
   position: number;
   worktree_path?: string;
   worktree_branch?: string;
+  worktree_origin?: "kandev" | "adopted";
   created_at?: string;
 };
 
@@ -677,6 +700,44 @@ export type SessionRecoveryBlockProjection = {
   updated_at: string;
 };
 
+/** Bounded storage evidence shared by live pressure and terminal causes. */
+export type RuntimeStorageFailure = {
+  reason?: string;
+  location?: string;
+  executor_label?: string;
+  observed_at?: string;
+  disk_available_bytes?: number;
+  disk_required_bytes?: number;
+  retained_bytes?: number;
+  limit_bytes?: number;
+  event_bytes?: number;
+};
+
+/** Runtime-only advisory storage state owned by the lifecycle observation. */
+export type RuntimeStorageHealth = {
+  state: "warning" | "normal" | "unavailable";
+  storage_kind?: "journal" | "workspace";
+  location: "local_runtime" | "executor_runtime" | "unknown";
+  executor_label?: string;
+  total_bytes?: number;
+  available_bytes?: number;
+  observed_at?: string;
+  /** Backend receipt age. Browser freshness adds local monotonic elapsed time. */
+  age_seconds?: number;
+  /** Accepted delivery-health receipt time. Independent from capacity. */
+  pressure_observed_at?: string;
+  /** Backend receipt age for accepted delivery-health reports. Missing means unknown. */
+  pressure_age_seconds?: number;
+  /** Browser receipt time for this local cache entry. Never sent by the backend. */
+  client_received_at_ms?: number;
+  write_pressure?: boolean;
+  producer_paused?: boolean;
+  delivery_state?: string;
+  failure_storage?: RuntimeStorageFailure;
+  revision: number;
+  epoch: number;
+};
+
 export type TaskSession = ActiveSubagentCountFields & {
   id: SessionId;
   task_id: TaskId;
@@ -705,6 +766,11 @@ export type TaskSession = ActiveSubagentCountFields & {
   /** Downstream ACP session ID for the currently selected concrete candidate. */
   downstream_acp_session_id?: string;
   container_id?: string;
+  /**
+   * Observed runtime recorded for the same execution as `container_id`.
+   * `null` means unknown; never infer it from the selected executor.
+   */
+  execution_runtime?: string | null;
   executor_id?: string;
   environment_id?: string;
   /** Current backend agent process execution identity for this session. */
@@ -717,6 +783,12 @@ export type TaskSession = ActiveSubagentCountFields & {
   worktree_branch?: string;
   /** Effective task root containing every attached workspace source. */
   workspace_path?: string;
+  /**
+   * Confirmed native-session working directory used as the base for
+   * repository-relative chat links. Omitted means no update; null means the
+   * backend has no authoritative value.
+   */
+  agent_workspace_path?: string | null;
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   /** Latest path-free managed workspace recovery operation for this environment. */
@@ -728,6 +800,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   cancellation_pending?: boolean;
   /** Process-local cancellation transition generation used to reject stale snapshots. */
   cancellation_revision?: number;
+  /** Live advisory capacity; omitted by older backends and healthy peers. */
+  runtime_storage_health?: RuntimeStorageHealth | null;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
   /**
@@ -786,7 +860,7 @@ export type {
   ApproveSessionResponse,
 } from "./http-session-responses";
 
-export type NotificationProviderType = "local" | "apprise" | "system";
+export type NotificationProviderType = "local" | "apprise" | "system" | "webhook" | "webpush";
 
 export type NotificationProvider = {
   id: string;
@@ -837,6 +911,23 @@ export type CustomPrompt = {
   name: string;
   content: string;
   builtin: boolean;
+  /**
+   * "sync" when Prompt Sync owns the prompt (read-only); "override" when an
+   * operator replaced a synced prompt locally (editable, sync leaves it).
+   */
+  source?: "manual" | "sync" | "override";
+  /** Repository file a synced or overridden prompt comes from. */
+  source_path?: string;
+  /**
+   * True for an override adopted from a prompt whose name a repository file
+   * also uses, until the user chooses the local or repository version.
+   */
+  conflict?: boolean;
+  /**
+   * The version not in use: the kept local version of a synced prompt, or
+   * the repository version of an override.
+   */
+  alternate_content?: string;
   created_at: string;
   updated_at: string;
 };
@@ -897,10 +988,13 @@ export type SidebarTaskQuery = {
   };
   group: string;
   collapsed_group_keys: string[];
+  disclosure_view_id?: string;
   collapsed_task_ids: string[];
   page: number;
   page_size: number;
   locale: string;
+  grouping_revision?: string;
+  grouping_generation?: string;
 };
 
 export type SidebarTaskPageEntry = {
@@ -909,6 +1003,7 @@ export type SidebarTaskPageEntry = {
   task?: Task;
   group_key?: string;
   group_label?: string;
+  group_color?: string;
   workflow_name?: string;
   workflow_id?: string;
   workflow_step_id?: string;
@@ -935,6 +1030,9 @@ export type SidebarTaskPageResponse = {
   total_visible_tasks: number;
   has_previous: boolean;
   has_next: boolean;
+  grouping_revision?: string;
+  grouping_generation?: string;
+  grouping_keys?: string[];
   entries: SidebarTaskPageEntry[];
 };
 
@@ -1150,6 +1248,8 @@ export type Message = {
    * created_at ascending, ties by id); present only on user messages from an
    * indexed server payload, omitted on older payloads. */
   prompt_index?: number;
+  /** Response-only: the accepted prompt could not retire the observed turn-error badge. */
+  turn_error_acknowledgement_failed?: boolean;
 };
 
 export type Turn = {
@@ -1183,6 +1283,7 @@ export type AgentProfilePortable = {
   agent_name: string;
   model?: string;
   mode?: string;
+  config_options?: Record<string, string>;
 };
 
 export type WorkflowPortable = {
@@ -1215,7 +1316,11 @@ export type StepPortable = {
   pull_from_step_position?: number;
 };
 
-export type ImportWorkflowsResult = { created: string[]; skipped: string[] };
+export type ImportWorkflowsResult = {
+  created: string[];
+  skipped: string[];
+  warnings?: AuthorExclusionWarning[];
+};
 
 export type WorkflowImportProfileCandidate = {
   id: string;
@@ -1244,6 +1349,8 @@ export type WorkflowImportPreview = {
   skipped: string[];
   profiles: WorkflowImportProfileCandidate[];
   steps: WorkflowImportProfileStep[];
+  /** Non-blocking exclude_author_provider setup warnings for the imported steps. */
+  warnings?: AuthorExclusionWarning[];
 };
 
 export type WorkflowImportProfileBinding = {

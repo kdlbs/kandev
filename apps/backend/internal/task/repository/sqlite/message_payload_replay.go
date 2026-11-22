@@ -24,13 +24,14 @@ func (r *Repository) updateMessageWithPayloadGuard(ctx context.Context, message 
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.updateMessageWithPayloadGuardTx(ctx, tx, message, metadataJSON, requestsInput); err != nil {
+	preserveLegacyRemoval := !dialect.IsPostgres(r.db.DriverName())
+	if err := r.updateMessageWithPayloadGuardTx(ctx, tx, message, metadataJSON, requestsInput, preserveLegacyRemoval); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (r *Repository) updateMessageWithPayloadGuardTx(ctx context.Context, tx *sqlx.Tx, message *models.Message, metadataJSON []byte, requestsInput int) error {
+func (r *Repository) updateMessageWithPayloadGuardTx(ctx context.Context, tx *sqlx.Tx, message *models.Message, metadataJSON []byte, requestsInput int, preserveLegacyRemoval bool) error {
 	query := `SELECT metadata,type,updated_at,payload_digest,payload_size FROM task_session_messages WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += forUpdateClause
@@ -48,7 +49,16 @@ func (r *Repository) updateMessageWithPayloadGuardTx(ctx context.Context, tx *sq
 		}
 		return err
 	}
+	// Direct PostgreSQL replacements guard canonical shell history without
+	// applying the SQLite-only retention policy to legacy message bodies.
+	if !preserveLegacyRemoval && !hasIncrementalShellHistory([]byte(raw)) {
+		raw = "{}"
+	}
 	metadataJSON, sanitized, err := mergeRetainedMessageMetadata([]byte(raw), metadataJSON)
+	if err != nil {
+		return err
+	}
+	metadataJSON, replacement, err := reconcileShellOutputStorageTx(ctx, tx, message.ID, message.PayloadDigest, []byte(raw), metadataJSON)
 	if err != nil {
 		return err
 	}
@@ -70,6 +80,8 @@ func (r *Repository) updateMessageWithPayloadGuardTx(ctx context.Context, tx *sq
 		message.Metadata = sanitized
 		message.Type = nextType
 		message.UpdatedAt = storedUpdatedAt
+	} else if replacement != nil {
+		message.Metadata = replacement
 	}
 	return nil
 }

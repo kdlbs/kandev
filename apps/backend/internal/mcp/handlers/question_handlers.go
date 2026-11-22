@@ -318,6 +318,11 @@ func (h *Handlers) handleAnswerQuestion(ctx context.Context, msg *ws.Message) (*
 	if req.PendingID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "pending_id is required", nil)
 	}
+	for _, answer := range req.Answers {
+		if len(answer.Attachments) > 0 {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "answer attachments require the operator question panel", nil)
+		}
+	}
 	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && principal.IsAutomation() &&
 		!h.automationQuestionVisible(ctx, principal, req.PendingID) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "clarification request not found", nil)

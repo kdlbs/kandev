@@ -64,7 +64,7 @@ test.describe("Archiving a task freezes its runtime state", () => {
     await apiClient.saveUserSettings({ repository_ids: [] });
     await testPage.goto("/tasks");
     await testPage.waitForLoadState("networkidle");
-    await testPage.getByRole("checkbox", { name: "Show archived" }).click();
+    await testPage.getByTestId("tasks-list-archive-all").click();
 
     const row = testPage
       .getByTestId("tasks-list-row")

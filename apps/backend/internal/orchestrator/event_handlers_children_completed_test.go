@@ -11,7 +11,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTerminal(t *testing.T) {
+func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenCompleted(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "parent", "parent-session", "step_wait")
@@ -37,6 +37,23 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTermin
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createEngineService(t, repo, stepGetter, agentMgr)
+	var wakeReceipt struct {
+		parentID    string
+		childSetKey string
+		generation  string
+		operationID string
+		called      bool
+	}
+	svc.SetParentChildrenCompletionWakeRecorder(func(_ context.Context, parentID, childSetKey, generation, operationID string) error {
+		wakeReceipt = struct {
+			parentID    string
+			childSetKey string
+			generation  string
+			operationID string
+			called      bool
+		}{parentID, childSetKey, generation, operationID, true}
+		return nil
+	})
 	onEnterDone := make(chan struct{}, 1)
 	svc.onProcessOnEnterComplete = func() {
 		select {
@@ -72,7 +89,7 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTermin
 	}
 
 	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); transitioned {
-		t.Fatalf("expected mixed terminal/non-terminal children not to transition")
+		t.Fatalf("expected mixed completed/in-progress children not to transition")
 	}
 	parent, err := repo.GetTask(ctx, "parent")
 	if err != nil {
@@ -86,9 +103,13 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTermin
 		t.Fatalf("complete child-open: %v", err)
 	}
 	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); !transitioned {
-		t.Fatalf("expected all-terminal active children to transition parent")
+		t.Fatalf("expected all active children completed successfully to transition parent")
 	}
 	waitForChildrenCompletedOnEnter(t, onEnterDone)
+	if !wakeReceipt.called || wakeReceipt.parentID != "parent" || wakeReceipt.childSetKey == "" ||
+		wakeReceipt.generation == "" || wakeReceipt.operationID == "" {
+		t.Fatalf("parent wake receipt = %+v, want the committed child completion after on_enter delivery", wakeReceipt)
+	}
 
 	parent, err = repo.GetTask(ctx, "parent")
 	if err != nil {
@@ -106,6 +127,79 @@ func TestProcessOnChildrenCompleted_TransitionsParentWhenAllActiveChildrenTermin
 	}
 	if parent.WorkflowStepID != "step_done" {
 		t.Fatalf("expected parent to remain on step_done after duplicate evaluation, got %q", parent.WorkflowStepID)
+	}
+}
+
+func TestProcessOnChildrenCompleted_DoesNotRecordWakeForNonTransition(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "parent", "parent-session", "step_wait")
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step_wait"] = &wfmodels.WorkflowStep{
+		ID: "step_wait", WorkflowID: "wf1", Name: "Wait", Position: 0,
+	}
+	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{repoForExecutionLookup: repo})
+	var receiptCalls int
+	svc.SetParentChildrenCompletionWakeRecorder(func(context.Context, string, string, string, string) error {
+		receiptCalls++
+		return nil
+	})
+	requireCreateTask(t, repo, &models.Task{
+		ID: "child-complete", WorkflowID: "wf1", Title: "Child",
+		State: v1.TaskStateCompleted, ParentID: "parent",
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+
+	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); transitioned {
+		t.Fatal("parent transitioned despite no on_children_completed action")
+	}
+	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); transitioned {
+		t.Fatal("duplicate non-transition delivery unexpectedly transitioned parent")
+	}
+	if receiptCalls != 0 {
+		t.Fatalf("wake receipts = %d, want no receipt for a non-transition", receiptCalls)
+	}
+}
+
+func TestProcessOnChildrenCompleted_DoesNotRecordWakeWhenOnEnterDeliveryFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "parent", "parent-session", "step_wait")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step_wait"] = &wfmodels.WorkflowStep{
+		ID: "step_wait", WorkflowID: "wf1", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnChildrenCompleted: []wfmodels.GenericAction{{Type: wfmodels.GenericActionMoveToNext}},
+		},
+	}
+	stepGetter.steps["step_done"] = &wfmodels.WorkflowStep{
+		ID: "step_done", WorkflowID: "wf1", Position: 1, Prompt: "Continue the parent task",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}},
+	}
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, stepGetter, agentMgr)
+	var receiptCalls int
+	svc.SetParentChildrenCompletionWakeRecorder(func(context.Context, string, string, string, string) error {
+		receiptCalls++
+		return nil
+	})
+	onEnterDone := make(chan struct{}, 1)
+	svc.onProcessOnEnterComplete = func() { onEnterDone <- struct{}{} }
+
+	requireCreateTask(t, repo, &models.Task{
+		ID: "child-complete", WorkflowID: "wf1", Title: "Complete child",
+		State: v1.TaskStateCompleted, ParentID: "parent",
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+
+	if transitioned := svc.processOnChildrenCompleted(ctx, "parent"); !transitioned {
+		t.Fatal("expected child completion to transition the parent")
+	}
+	waitForChildrenCompletedOnEnter(t, onEnterDone)
+	if receiptCalls != 0 {
+		t.Fatalf("wake receipts = %d after failed on_enter delivery, want 0 so reconciliation can retry", receiptCalls)
 	}
 }
 

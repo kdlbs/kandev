@@ -95,6 +95,9 @@ func (r *RemoteDockerExecutor) attachRemoteDockerRecord(
 	session *remoteDockerSession,
 ) (*ExecutorInstance, *agentctl.Client, RecoveryCandidateOutcome) {
 	if outcome := verifyLiveRemoteDockerContainer(ctx, session.dockerClient, containerID); outcome != "" {
+		if outcome == RecoveryOutcomeNoMatchingInstance {
+			return nil, nil, RecoveryOutcomeRecordedResourceAbsent
+		}
 		return nil, nil, outcome
 	}
 	control, outcome := r.remoteDockerControl(ctx, req, record.SessionID, containerID, session.endpoints)
@@ -127,6 +130,9 @@ func verifyLiveRemoteDockerContainer(
 ) RecoveryCandidateOutcome {
 	containerInfo, err := client.GetContainerInfo(ctx, containerID)
 	if err != nil {
+		if ctx.Err() != nil {
+			return RecoveryOutcomeUnknown
+		}
 		if errdefs.IsNotFound(err) {
 			return RecoveryOutcomeNoMatchingInstance
 		}
@@ -135,13 +141,17 @@ func verifyLiveRemoteDockerContainer(
 	if containerInfo == nil || containerInfo.ID != containerID {
 		return RecoveryOutcomeUnknown
 	}
-	if containerInfo.State != containerStateRunning {
-		return RecoveryOutcomeNoMatchingInstance
-	}
 	if ctx.Err() != nil {
 		return RecoveryOutcomeUnknown
 	}
-	return ""
+	switch containerInfo.State {
+	case containerStateRunning:
+		return ""
+	case containerStateExited:
+		return RecoveryOutcomeNoMatchingInstance
+	default:
+		return RecoveryOutcomeUnknown
+	}
 }
 
 func (r *RemoteDockerExecutor) remoteDockerControl(
@@ -181,7 +191,7 @@ func (r *RemoteDockerExecutor) authenticateRemoteDockerInstance(
 	if err != nil {
 		return nil, nil, "", RecoveryOutcomeUnknown
 	}
-	client := newRemoteDockerRecoveryClient(r, req, host, port, token)
+	client := newRemoteDockerRecoveryClient(r, req, host, port, token, info.ScopedMCPRoutes)
 	if err := client.Health(ctx); err != nil {
 		if !isAgentctlAuthError(err) || req.BootstrapNonce == "" {
 			client.Close()
@@ -194,7 +204,7 @@ func (r *RemoteDockerExecutor) authenticateRemoteDockerInstance(
 		}
 		client.Close()
 		info, token = newInfo, newToken
-		client = newRemoteDockerRecoveryClient(r, req, host, port, token)
+		client = newRemoteDockerRecoveryClient(r, req, host, port, token, info.ScopedMCPRoutes)
 	}
 	status, err := client.GetStatus(ctx)
 	if err != nil && isAgentctlAuthError(err) && req.BootstrapNonce != "" && token == req.AuthToken {
@@ -205,14 +215,14 @@ func (r *RemoteDockerExecutor) authenticateRemoteDockerInstance(
 		}
 		client.Close()
 		info, token = newInfo, newToken
-		client = newRemoteDockerRecoveryClient(r, req, host, port, token)
+		client = newRemoteDockerRecoveryClient(r, req, host, port, token, info.ScopedMCPRoutes)
 		status, err = client.GetStatus(ctx)
 	}
 	if err != nil || status == nil {
 		client.Close()
 		return nil, nil, "", RecoveryOutcomeUnknown
 	}
-	if !status.IsAgentRunning() {
+	if !status.IsAgentRunning() && status.AgentStatus != agentProcessStatusStopped {
 		client.Close()
 		return nil, nil, "", RecoveryOutcomeNoMatchingInstance
 	}
@@ -247,9 +257,25 @@ func newRemoteDockerRecoveryClient(
 	host string,
 	port int,
 	token string,
+	scopedMCPRoutes bool,
 ) *agentctl.Client {
 	return agentctl.NewClient(host, port, r.logger,
-		agentctl.WithExecutionID(req.InstanceID), agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(token))
+		agentctl.WithExecutionID(remoteDockerAgentctlInstanceID(req)),
+		agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(token),
+		agentctl.WithBuiltinMCPScopedRoutes(scopedMCPRoutes))
+}
+
+// remoteDockerAgentctlInstanceID is the actual agentctl instance inside the
+// retained container. It is persisted separately from the backend execution
+// ID because live adoption can retain an older remote identity.
+func remoteDockerAgentctlInstanceID(req *ExecutorCreateRequest) string {
+	if req == nil {
+		return ""
+	}
+	if id := strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyRemoteDockerAgentctlInstanceID)); id != "" {
+		return id
+	}
+	return req.InstanceID
 }
 
 func buildRemoteDockerRecoveredInstance(
@@ -264,12 +290,16 @@ func buildRemoteDockerRecoveredInstance(
 	if workspacePath == "" {
 		workspacePath = getMetadataString(req.Metadata, MetadataKeyOriginalWorkspacePath)
 	}
+	metadata := cloneKubernetesMetadata(req.Metadata)
+	metadata[MetadataKeyRemoteDockerAgentctlInstanceID] = info.ID
 	return &ExecutorInstance{
 		InstanceID: req.InstanceID, TaskID: req.TaskID, SessionID: req.SessionID,
 		RuntimeName: r.Name(), Client: client, ContainerID: containerID, WorkspacePath: workspacePath,
-		Metadata: cloneKubernetesMetadata(req.Metadata), Env: cloneStringMap(info.Env),
+		ReusedWorkspace: true,
+		Metadata:        metadata, Env: cloneStringMap(info.Env),
 		WorkspaceSourceRoots: append([]string(nil), info.WorkspaceSourceRoots...),
 		ProviderSessionID:    info.ProviderSessionID, AuthToken: token, BootstrapNonce: req.BootstrapNonce,
+		CopilotNativeSessionEvents: info.CopilotNativeSessionEvents,
 	}
 }
 
@@ -313,12 +343,13 @@ func recoverRemoteDockerControlInstance(
 		}
 	}
 	control.SetAuthToken(token)
-	info, err := control.GetInstance(ctx, req.InstanceID)
+	agentctlID := remoteDockerAgentctlInstanceID(req)
+	info, err := control.GetInstance(ctx, agentctlID)
 	if err != nil && isAgentctlAuthError(err) && req.BootstrapNonce != "" && token == req.AuthToken {
 		token, err = control.Handshake(ctx, req.BootstrapNonce)
 		if err == nil {
 			control.SetAuthToken(token)
-			info, err = control.GetInstance(ctx, req.InstanceID)
+			info, err = control.GetInstance(ctx, agentctlID)
 		}
 	}
 	if errors.Is(err, agentctl.ErrInstanceNotFound) {
@@ -344,7 +375,7 @@ func refreshRemoteDockerRecoveryToken(
 		return "", nil, err
 	}
 	control.SetAuthToken(token)
-	info, err := control.GetInstance(ctx, req.InstanceID)
+	info, err := control.GetInstance(ctx, remoteDockerAgentctlInstanceID(req))
 	if err != nil {
 		return "", nil, err
 	}
@@ -359,7 +390,8 @@ func sameRemoteDockerInstance(
 	record *models.ExecutorRunning,
 	req *ExecutorCreateRequest,
 ) bool {
-	return info != nil && info.ID == req.InstanceID && info.SessionID == record.SessionID && info.TaskID == record.TaskID
+	return info != nil && info.ID == remoteDockerAgentctlInstanceID(req) &&
+		info.SessionID == record.SessionID && info.TaskID == record.TaskID
 }
 
 func (r *RemoteDockerExecutor) trackRecoveredRemoteDocker(

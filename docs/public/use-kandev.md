@@ -129,6 +129,12 @@ grouped by area; selecting a specific control opens its owning page, scrolls it 
 it, and briefly highlights it without changing the saved value. The same search is available in
 the Settings menu on phones.
 
+To return to the page that opened Settings, select **Close settings** in the desktop
+sidebar or the **X** in the phone header. This preserves the task and selected
+session, even after visiting several Settings pages. Unsaved changes still require
+a choice before leaving. Opening Settings directly or refreshing it uses Home as
+the close destination.
+
 From anywhere, press `Cmd/Ctrl+K` and begin typing a setting name or familiar alias. Individual
 settings appear only after typing, while **Go to Settings** remains in the command menu at rest.
 Discovery searches setting names and curated aliases, never saved values, secrets, paths, or other
@@ -151,6 +157,11 @@ enabled. Its visibility and position are independent of Automations. Settings re
 choice while a feature is unavailable and restores it when the feature is enabled again. The
 setting belongs to your account and workspace, so it follows you across clients without changing
 another user's layout.
+
+In regular workspaces, integration plugins, such as YouTrack, appear inside **Integrations** on desktop and phone.
+Their visibility controls remain individual, and their move controls reorder them within that section.
+Hiding Integrations hides its original plugin links without changing each link's visibility choice.
+Explicit shortcuts in custom sections remain independent.
 
 Create named shortcut sections for destinations, canvases, automations, and plugin links. Fold a
 section to keep its header icons visible, or open the labelled list to use a shortcut. Automation
@@ -196,6 +207,10 @@ Settings, direct **Stats** access, theme switching, and the three-dot menu share
 single-row desktop footer, in that order. The three-dot menu contains plugin utilities,
 Improve Kandev, and release notes.
 
+Improve Kandev prepares its repository before it can create a contribution. If preparation fails,
+choose **Retry** in the dialog. Your title and description stay in place. If the app restarts while
+preparing, reopen Improve Kandev and retry; completed workspace setup is reused.
+
 Expand **Automations** and choose **Open automations** below its entries to see the
 full list. This labelled link sits inside the group on desktop and phones, like
 **Integration settings** inside Integrations.
@@ -204,6 +219,10 @@ full list. This labelled link sits inside the group on desktop and phones, like
 
 The workspace picker sits in the sidebar header, next to the Kandev brand. It lists every
 workspace with a **Kanban** or **Office** badge and ends with the workspace-creation actions.
+
+Office is experimental and disabled by default. To evaluate a persistent agent team,
+follow [Get started with Office](office-getting-started.md); the [Office guide](office.md)
+covers its separate project, task, review, routine, and operations flows.
 
 From anywhere, press `Cmd/Ctrl+E` to open it with the keyboard: focus lands inside the menu,
 so arrow keys move between workspaces and **Enter** switches to the highlighted one. If the sidebar
@@ -221,6 +240,11 @@ workspace there from the menu sheet instead.
 3. Choose a discovered repository, or enter an absolute path and select **Validate**. The backend accepts any existing Git repository the Kandev process can access. Configured discovery roots bound automatic scans; they do not restrict an explicit path.
 4. Select **Use Repository**. This opens an unsaved repository card.
 5. Review the repository name, worktree branch template, pull behavior, setup/cleanup/dev scripts, copied files, and custom commands. Then select **Save changes**.
+
+If Save fails after some changes were accepted, keep the page open and select
+**Retry save**. Accepted repositories and custom scripts keep their saved identities;
+failed and newer edits stay available for retry. **Reset** restores the changes
+already accepted by the server and discards the remaining draft edits.
 
 If discovery cannot scan a root, the picker keeps repositories from successful
 roots available and retains its normal **Refresh repositories** action. Failed
@@ -242,7 +266,7 @@ Scripts execute in agent workspaces and therefore belong to the trust boundary. 
 
 Repositories saved by an older Kandev version may still contain a path spelling with symbolic-link components. If branch operations report that such a saved path resolves to a different location after upgrading, edit and save the repository path again to record its current canonical location. Kandev does not silently accept the new resolution because that would also accept a saved path whose symbolic-link target was changed after registration.
 
-**Add repository > Remote repository** registers a provider-hosted repository without creating a task. The picker is the same one the **Remote** tab in **New Task** uses: search configured GitHub, GitLab, and Azure DevOps repositories, repositories from a connected plugin provider, or paste a supported provider URL, then choose the default base branch. Kandev validates built-in provider URLs and resolves plugin repositories through the connected provider before saving. A self-managed GitLab picker selection must match the origin configured for that workspace. Optional branch-list lookups do not block a picked repository; pasted plugin URLs must finish provider inspection before registration. A repository the workspace already has is reused rather than duplicated. Issue and PR URLs are still added from **New Task**. See [Integrations](integrations.md) and [Tasks and workflows](tasks-and-workflows.md).
+**Add repository > Remote repository** registers a provider-hosted repository without creating a task. The picker is the same one the **Remote** tab in **New Task** uses: search configured GitHub and GitLab repositories, repositories from a connected plugin provider, or paste a supported provider URL, then choose the default base branch. Kandev validates built-in provider URLs and resolves plugin repositories through the connected provider before saving. A self-managed GitLab picker selection must match the origin configured for that workspace. Optional branch-list lookups do not block a picked repository; pasted plugin URLs must finish provider inspection before registration. A repository the workspace already has is reused rather than duplicated. Issue and PR URLs are still added from **New Task**. See [Integrations](integrations.md) and [Tasks and workflows](tasks-and-workflows.md).
 
 ## Configure an agent profile
 
@@ -290,6 +314,13 @@ The dialog also supports multiple repositories, remote GitHub rows, and a single
 4. Run the repository's required checks. Agent completion does not prove that tests passed.
 5. Inspect commits and branch state. Create or associate a pull request only after provider credentials and the target base branch are correct.
 6. Move the task through the workflow's human review gate. Archive it only after deciding what should happen to its branch, worktree, and external issue or pull request.
+
+When a clarification includes an image, select **Inspect image** to enlarge it.
+Choices can also have images. Select a choice label to answer. Select its image
+or **Inspect image** to examine it without selecting the choice.
+Close inspection, answer each question, then submit the bundle. Image errors do
+not prevent an answer. See [image questions](agent-communication.md#show-an-image-with-an-operator-question)
+for supported files and reload behavior.
 
 Large user messages keep their complete source for storage, agent input, copying, editing, and delivery. Kandev shortens the rendered transcript, raw text, workflow instructions, pinned prompt, and queued-message previews when they exceed the display limit. Select **Download full text** below a shortened preview to save the complete message.
 

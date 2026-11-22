@@ -155,8 +155,8 @@ func (w *sshKeepaliveWatchdog) runProber(replies chan<- time.Time, errs chan<- e
 // already signaled before that iteration's blocking select begins — it
 // cannot catch a stop delivered concurrently with a probe error or an
 // expired deadline, since the blocking select itself picks at random among
-// whichever cases are ready together. So every path that is about to
-// declare loss re-checks the stop signal immediately first and yields to it.
+// whichever cases are ready together. The common declareLost boundary
+// re-checks the stop signal before notifying the owner.
 func (w *sshKeepaliveWatchdog) runLoop(replies <-chan time.Time, errs <-chan error, startedAt time.Time) {
 	defer close(w.loopDone)
 	lastReply := startedAt
@@ -174,9 +174,6 @@ func (w *sshKeepaliveWatchdog) runLoop(replies <-chan time.Time, errs <-chan err
 		case at := <-replies:
 			w.handleReply(at, &lastReply, timer)
 		case <-errs:
-			if w.stopRequested() {
-				return
-			}
 			w.declareLost(sshTransportLostReasonProbeError, time.Since(lastReply))
 			return
 		case <-timer.C:
@@ -188,15 +185,9 @@ func (w *sshKeepaliveWatchdog) runLoop(replies <-chan time.Time, errs <-chan err
 				w.handleReply(at, &lastReply, timer)
 			case err := <-errs:
 				_ = err
-				if w.stopRequested() {
-					return
-				}
 				w.declareLost(sshTransportLostReasonProbeError, time.Since(lastReply))
 				return
 			default:
-				if w.stopRequested() {
-					return
-				}
 				if w.handleDeadline(lastReply, timer) {
 					return
 				}
@@ -218,6 +209,7 @@ func (w *sshKeepaliveWatchdog) stopRequested() bool {
 	}
 }
 
+// handleReply records a completed probe and restarts the liveness deadline.
 func (w *sshKeepaliveWatchdog) handleReply(at time.Time, lastReply *time.Time, timer *time.Timer) {
 	*lastReply = at
 	if w.recordReply != nil {
@@ -232,6 +224,7 @@ func (w *sshKeepaliveWatchdog) handleReply(at time.Time, lastReply *time.Time, t
 	timer.Reset(w.deadline)
 }
 
+// handleDeadline reports loss only after silence exceeds the configured deadline.
 func (w *sshKeepaliveWatchdog) handleDeadline(lastReply time.Time, timer *time.Timer) bool {
 	silence := time.Since(lastReply)
 	if silence > w.deadline {
@@ -249,7 +242,11 @@ func (w *sshKeepaliveWatchdog) handleDeadline(lastReply time.Time, timer *time.T
 	return false
 }
 
+// declareLost gives a pending stop signal priority over loss notifications.
 func (w *sshKeepaliveWatchdog) declareLost(reason string, silence time.Duration) {
+	if w.stopRequested() {
+		return
+	}
 	if w.onLost != nil {
 		w.onLost(reason, silence)
 	}

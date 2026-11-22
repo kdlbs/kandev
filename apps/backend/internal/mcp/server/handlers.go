@@ -16,10 +16,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// askQuestionKeepAliveInterval controls progress notifications during the
-// blocking ask_user_question call. Managed defaults keep it below client idle
-// deadlines. Tests can shorten it for fast transport tests.
-var askQuestionKeepAliveInterval = 20 * time.Second
+// toolKeepAliveInterval controls progress notifications during every Kandev
+// tool call. Managed defaults keep it below client idle deadlines. Tests can
+// shorten it for fast transport tests.
+var toolKeepAliveInterval = 15 * time.Second
+
+// toolKeepAliveSendTimeout bounds one progress notification send.
+const toolKeepAliveSendTimeout = 5 * time.Second
 
 // Argument-name constants used across the ask_user_question_kandev handler.
 // Pulled out so goconst stays happy and renames stay safe.
@@ -251,6 +254,9 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
 		}
+		if priority := req.GetString("priority", ""); priority != "" {
+			payload["priority"] = priority
+		}
 		if s.sessionID != "" && s.taskID != "" {
 			payload["source_session_id"] = s.sessionID
 		}
@@ -269,6 +275,9 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		// never declared the parameter, so no agent could reach it.
 		if blockedBy := stringArrayArg(req, "blocked_by"); len(blockedBy) > 0 {
 			payload["blocked_by"] = blockedBy
+		}
+		if relatedTaskIDs := stringArrayArg(req, "related_task_ids"); len(relatedTaskIDs) > 0 {
+			payload["related_task_ids"] = relatedTaskIDs
 		}
 		// Omitted means "derive": with blocked_by set, a start request becomes a
 		// start-when-unblocked intent. start_agent defaults to true and agents
@@ -336,6 +345,9 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 		if desc := req.GetString("description", ""); desc != "" {
 			payload["description"] = desc
 		}
+		if priority := req.GetString("priority", ""); priority != "" {
+			payload["priority"] = priority
+		}
 		if state := req.GetString("state", ""); state != "" {
 			payload["state"] = state
 		}
@@ -351,20 +363,6 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 		// unrelated to it — echoing it costs the caller thousands of tokens
 		// either way. Read it deliberately via list_related_tasks_kandev.
 		delete(result, descriptionArg)
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
-}
-
-func (s *Server) getTaskPRAutomationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(
-			ctx, ws.ActionMCPGetTaskPRAutomation, map[string]interface{}{"task_id": s.taskID}, &result,
-		); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		removeLifecyclePromptFields(result)
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
@@ -517,42 +515,6 @@ func validateChangeRequestAutomationTarget(args map[string]interface{}) string {
 	return ""
 }
 
-func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		payload := map[string]interface{}{"task_id": s.taskID}
-		args := req.GetArguments()
-		if hasLifecyclePromptOverrideArgument(args) {
-			return mcp.NewToolResultError("lifecycle prompt overrides are not supported"), nil
-		}
-		for _, key := range []string{
-			"auto_fix_enabled", "auto_merge_enabled",
-			"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed",
-		} {
-			if value, ok := args[key].(bool); ok {
-				payload[key] = value
-			}
-		}
-		for _, key := range []string{"auto_fix_prompt_override"} {
-			if value, ok := args[key].(string); ok {
-				payload[key] = value
-			}
-		}
-		if len(payload) == 1 {
-			return mcp.NewToolResultError("at least one PR automation option is required"), nil
-		}
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPRAutomation, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
-}
-
-func (s *Server) reportTaskPRAutoFixOutcomeHandler() server.ToolHandlerFunc {
-	return s.reportTaskAutoFixOutcomeHandler(ws.ActionMCPReportPRAutoFixOutcome)
-}
-
 func (s *Server) reportTaskChangeRequestAutoFixOutcomeHandler() server.ToolHandlerFunc {
 	return s.reportTaskAutoFixOutcomeHandler(ws.ActionMCPReportTaskChangeRequestAutoFixOutcome)
 }
@@ -608,19 +570,6 @@ func (s *Server) mrAutomationToolError(logMsg string, err error) (*mcp.CallToolR
 	return mcp.NewToolResultError("failed to process MR automation request"), nil
 }
 
-func (s *Server) getTaskMRAutomationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(
-			ctx, ws.ActionMCPGetTaskMRAutomation, map[string]interface{}{"task_id": s.taskID}, &result,
-		); err != nil {
-			return s.mrAutomationToolError("get task MR automation failed", err)
-		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
-}
-
 // copyMRIdentityArgs copies the optional repository_id/project_path/mr_iid
 // triple that scopes a patch to one linked MR. repository_id is frequently
 // an empty string on self-managed hosts without a numeric project ID (R6),
@@ -648,42 +597,6 @@ func isValidMRIID(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0) && value > 0 && math.Trunc(value) == value
 }
 
-func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		payload := map[string]interface{}{"task_id": s.taskID}
-		args := req.GetArguments()
-		if hasLifecyclePromptOverrideArgument(args) {
-			return mcp.NewToolResultError("lifecycle prompt overrides are not supported"), nil
-		}
-		if err := copyMRIdentityArgs(payload, args); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		fieldCount := 0
-		for _, key := range []string{
-			"auto_fix_enabled", "auto_merge_enabled",
-			"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed",
-		} {
-			if value, ok := args[key].(bool); ok {
-				payload[key] = value
-				fieldCount++
-			}
-		}
-		if value, ok := args["auto_fix_prompt_override"].(string); ok {
-			payload["auto_fix_prompt_override"] = value
-			fieldCount++
-		}
-		if fieldCount == 0 {
-			return mcp.NewToolResultError("at least one MR automation option is required"), nil
-		}
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskMRAutomation, payload, &result); err != nil {
-			return s.mrAutomationToolError("update task MR automation failed", err)
-		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
-}
-
 func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskID, err := req.RequireString("task_id")
@@ -706,6 +619,7 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 		copyOptionalStringArg(payload, req, "delivery_mode")
 		copyOptionalStringArg(payload, req, "session_id")
 		copyOptionalStringArg(payload, req, "reply_to_question_id")
+		copyOptionalStringArg(payload, req, "operation_id")
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPMessageTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -909,15 +823,6 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			payload[retryKeyArg] = retryKey
 		}
 
-		// Waiting on a human answer routinely outlasts the agent MCP client's
-		// idle timeout on the in-flight tool call. Stream periodic progress
-		// notifications until the backend responds; mcp-go flushes them onto the
-		// POST/SSE response, resetting the client's idle timer so the call is not
-		// aborted mid-question.
-		stop := make(chan struct{})
-		defer close(stop)
-		go emitKeepAlivePings(ctx, stop, askQuestionKeepAliveInterval, s.clarificationKeepAlive(ctx, req))
-
 		// Use the MCP request context from the agent. This ensures that if the agent's
 		// MCP client times out, we'll detect it and not update the session state.
 		var result map[string]interface{}
@@ -940,6 +845,16 @@ func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 		questions, errResult := parseQuestions(req)
 		if errResult != nil {
 			return errResult, nil
+		}
+		for _, q := range questions {
+			if _, ok := q["images"]; ok {
+				return mcp.NewToolResultError("parent questions do not support images"), nil
+			}
+			for _, option := range q[optionsArg].([]map[string]interface{}) {
+				if _, ok := option["images"]; ok {
+					return mcp.NewToolResultError("parent questions do not support images"), nil
+				}
+			}
 		}
 		payload := map[string]interface{}{
 			"task_id":    s.taskID,
@@ -965,8 +880,7 @@ func readQuestionContext(req mcp.CallToolRequest) string {
 }
 
 // emitKeepAlivePings invokes send on every interval tick until stop is closed or
-// ctx is cancelled. It is the transport-agnostic core of the ask_user_question
-// keepalive, split out so the timing loop is unit-testable without a live MCP
+// ctx is cancelled. It is the transport-agnostic core of the tool keepalive, split out so the timing loop is unit-testable without a live MCP
 // session.
 func emitKeepAlivePings(ctx context.Context, stop <-chan struct{}, interval time.Duration, send func()) {
 	if interval <= 0 || send == nil {
@@ -981,34 +895,13 @@ func emitKeepAlivePings(ctx context.Context, stop <-chan struct{}, interval time
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			select {
+			case <-stop:
+				return
+			default:
+			}
 			send()
 		}
-	}
-}
-
-// clarificationKeepAlive builds the keepalive callback that streams a
-// notifications/progress message to the agent. The progress token mirrors the one
-// the client attached to the tool call when present, so spec-compliant clients
-// associate the updates with the in-flight request; clients that omitted a token
-// ignore the unknown one. Returns a no-op when no MCP server is bound to the
-// context (e.g. direct unit-test invocation of the handler).
-func (s *Server) clarificationKeepAlive(ctx context.Context, req mcp.CallToolRequest) func() {
-	srv := server.ServerFromContext(ctx)
-	if srv == nil {
-		return func() {}
-	}
-	var token mcp.ProgressToken = fmt.Sprintf("ask_user_question:%s", s.sessionID)
-	if req.Params.Meta != nil && req.Params.Meta.ProgressToken != nil {
-		token = req.Params.Meta.ProgressToken
-	}
-	var progress float64
-	return func() {
-		progress++
-		_ = srv.SendNotificationToClient(ctx, "notifications/progress", map[string]any{
-			"progressToken": token,
-			"progress":      progress,
-			messageArg:      "Waiting for your response in Kandev",
-		})
 	}
 }
 
@@ -1027,6 +920,9 @@ func parseQuestions(req mcp.CallToolRequest) ([]map[string]interface{}, *mcp.Cal
 			return nil, errResult
 		}
 		questions[i] = q
+	}
+	if err := validateQuestionImagePayloads(questions); err != nil {
+		return nil, mcp.NewToolResultError(err.Error())
 	}
 	return questions, nil
 }
@@ -1167,6 +1063,9 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 			continue
 		}
 		if entry, ok := answersByID[qid]; ok {
+			if label := selectedAnswerLabel(q, entry); label != "" {
+				entry["selected_label"] = label
+			}
 			out[qid] = entry
 			continue
 		}
@@ -1185,6 +1084,28 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 
 	data, _ := json.MarshalIndent(out, "", "  ")
 	return mcp.NewToolResultStructured(out, string(data))
+}
+
+// selectedAnswerLabel returns the offered label only when the selected ID
+// identifies exactly one option. Missing or ambiguous selections return no label.
+func selectedAnswerLabel(question, answer map[string]interface{}) string {
+	selected, _ := answer["selected_option"].(string)
+	if selected == "" {
+		return ""
+	}
+	options, _ := question[optionsArg].([]map[string]interface{})
+	var label string
+	matches := 0
+	for _, option := range options {
+		if option[optionIDFieldName] == selected {
+			matches++
+			label, _ = option[labelArg].(string)
+		}
+	}
+	if matches != 1 {
+		return ""
+	}
+	return label
 }
 
 // simplifyAnswer normalizes the answer map. Single-choice per question, but
@@ -1208,6 +1129,12 @@ func simplifyAnswer(ans map[string]interface{}, rejected bool) map[string]interf
 	if customText, ok := ans["custom_text"].(string); ok && customText != "" {
 		out["custom_text"] = customText
 	}
+	if attachments, ok := ans["attachments"].([]interface{}); ok && len(attachments) > 0 {
+		out["attachments"] = attachments
+	}
+	if annotations, ok := ans["annotations"].([]interface{}); ok && len(annotations) > 0 {
+		out["annotations"] = annotations
+	}
 	if rejected && len(out) == 0 {
 		return map[string]interface{}{answeredFieldKey: false, rejectedFieldKey: true}
 	}
@@ -1223,7 +1150,7 @@ func simplifyAnswer(ans map[string]interface{}, rejected bool) map[string]interf
 // the event fallback path (new turn) instead of the primary path (same turn).
 func (s *Server) notifyClarificationTimeout() {
 	payload := map[string]string{"session_id": s.sessionID}
-	if err := s.backend.RequestPayload(context.Background(), ws.ActionMCPClarificationTimeout, payload, nil); err != nil {
+	if err := s.backend.RequestPayload(WithNoWait(context.Background()), ws.ActionMCPClarificationTimeout, payload, nil); err != nil {
 		s.logger.Warn("failed to notify backend of clarification timeout",
 			zap.String("session_id", s.sessionID),
 			zap.Error(err))

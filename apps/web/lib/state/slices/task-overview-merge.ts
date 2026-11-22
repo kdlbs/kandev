@@ -1,6 +1,11 @@
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import { pickFreshestStatusSummary } from "@/lib/task-status-summary";
-import type { TaskOverview, TaskOverviewPatch, TaskOverviewState } from "./task-overview-types";
+import type {
+  TaskOverview,
+  TaskOverviewPatch,
+  TaskOverviewState,
+  TaskOverviewRead,
+} from "./task-overview-types";
 
 export function mergeTaskOverview(
   current: TaskOverview | undefined,
@@ -22,14 +27,23 @@ export function mergeTaskOverview(
     : next;
 }
 
+export function isStaleTaskOverviewPatch(
+  current: TaskOverviewPatch | undefined,
+  patch: TaskOverviewPatch,
+): boolean {
+  const before = parseStrictRfc3339Timestamp(current?.updatedAt?.replace(" ", "T"));
+  const incoming = parseStrictRfc3339Timestamp(patch.updatedAt?.replace(" ", "T"));
+  return before !== null && incoming !== null && incoming < before;
+}
+
 function mergeTaskOverviewPatch(
   current: TaskOverviewPatch | undefined,
   patch: TaskOverviewPatch,
 ): TaskOverviewPatch {
-  const before = parseStrictRfc3339Timestamp(current?.updatedAt?.replace(" ", "T"));
-  const incoming = parseStrictRfc3339Timestamp(patch.updatedAt?.replace(" ", "T"));
-  const stale = before !== null && incoming !== null && incoming < before;
-  const next = { ...current, ...(stale ? {} : patch) } as TaskOverviewPatch;
+  const next = {
+    ...current,
+    ...(isStaleTaskOverviewPatch(current, patch) ? {} : patch),
+  } as TaskOverviewPatch;
   if (
     Object.hasOwn(patch, "statusSummary") ||
     (current && Object.hasOwn(current, "statusSummary"))
@@ -104,4 +118,32 @@ export function reconcileTaskOverviewRead(
     }
   }
   return reconciled;
+}
+
+export function recordAcceptedTaskStages(
+  state: TaskOverviewState,
+  read: TaskOverviewRead,
+  incoming: TaskOverview[],
+): TaskOverviewState {
+  if (read.scope !== state.scope) return state;
+  let next = state;
+  for (const task of incoming) {
+    const current = state.byId[task.id];
+    const change = read.changes[task.id];
+    if (
+      !current ||
+      current.workflowId !== task.workflowId ||
+      current.workspaceId !== task.workspaceId ||
+      !Object.hasOwn(task, "workflowStepId") ||
+      isStaleTaskOverviewPatch(current, task) ||
+      change === null ||
+      (change && Object.hasOwn(change, "workflowStepId"))
+    )
+      continue;
+    next = recordTaskOverviewChange(next, task.id, {
+      id: task.id,
+      workflowStepId: task.workflowStepId,
+    });
+  }
+  return next;
 }

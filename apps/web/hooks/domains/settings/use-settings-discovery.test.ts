@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   authEnabled: false,
   coordinatorEnabled: false,
+  officeEnabled: false,
   state: {
     auth: {
       mode: "disabled" as "disabled" | "enabled" | "setup",
@@ -32,8 +33,11 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: (name: string) =>
-    name === "coordinator" ? mocks.coordinatorEnabled : mocks.authEnabled,
+  useFeature: (name: string) => {
+    if (name === "coordinator") return mocks.coordinatorEnabled;
+    if (name === "office") return mocks.officeEnabled;
+    return mocks.authEnabled;
+  },
 }));
 
 import { useSettingsDiscovery } from "./use-settings-discovery";
@@ -42,6 +46,7 @@ describe("useSettingsDiscovery hook", () => {
   beforeEach(() => {
     mocks.authEnabled = false;
     mocks.coordinatorEnabled = false;
+    mocks.officeEnabled = false;
     mocks.state.auth.mode = "disabled";
     mocks.state.auth.user = null;
     mocks.state.workspaces.items = [];
@@ -124,4 +129,20 @@ describe("useSettingsDiscovery hook", () => {
       true,
     );
   });
+});
+
+// @covers AC-SYSTEM-PAGE-DATA-STORAGE-PAGES-002.7
+it("updates retention discovery when Office availability changes", () => {
+  mocks.officeEnabled = false;
+  const { result, rerender } = renderHook(() => useSettingsDiscovery());
+  const retention = () => result.current.find((entry) => entry.id === "system-retention");
+  expect(retention()).toBeUndefined();
+  mocks.officeEnabled = true;
+  rerender();
+  expect(retention()?.href).toBe(
+    "/settings/system/storage?tab=office-retention#setting-system-retention",
+  );
+  mocks.officeEnabled = false;
+  rerender();
+  expect(retention()).toBeUndefined();
 });

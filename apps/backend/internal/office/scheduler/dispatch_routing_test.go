@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -141,9 +143,9 @@ func seedRoutingConfig(t *testing.T, repo *officesqlite.Repository, providers []
 	}
 }
 
-func seedRun(t *testing.T, repo *officesqlite.Repository, payload string) *officemodels.Run {
+func seedRun(t *testing.T, repo *officesqlite.Repository, payload string) *runsmodels.Run {
 	t.Helper()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID:             "run-" + t.Name(),
 		AgentProfileID: testAgentID,
 		Reason:         "task_assigned",
@@ -167,7 +169,7 @@ func makeAgent() *officemodels.AgentInstance {
 	}
 }
 
-func seedInFlightRoute(t *testing.T, repo *officesqlite.Repository, runID string) *officemodels.Run {
+func seedInFlightRoute(t *testing.T, repo *officesqlite.Repository, runID string) *runsmodels.Run {
 	t.Helper()
 	run := seedRun(t, repo, `{"task_id":"`+runID+`"}`)
 	seq, err := repo.IncrementRouteAttemptSeq(context.Background(), run.ID)

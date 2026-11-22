@@ -9,7 +9,6 @@ import (
 
 	"go.uber.org/zap"
 
-	agentctlconfig "github.com/kandev/kandev/internal/agentctl/server/config"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
 
@@ -86,20 +85,19 @@ func classifyUserOwnedProjectServers(
 	return userOwned
 }
 
-func composeEffectiveMCPServers(
+func composeLegacyMCPServers(
 	execution *AgentExecution,
 	allowedProfileServers []agentctltypes.McpServer,
 	userOwnedProjectServers map[string]json.RawMessage,
 	allowedImportCandidates map[string]agentctltypes.McpServer,
-	host string,
+	coreURL string,
 ) (map[string]any, map[string]string) {
 	newMCPServers := make(map[string]any)
 	newOwnership := make(map[string]string)
 
-	port := passthroughMCPConfigPort(execution)
-	if port > 0 {
+	if coreURL != "" {
 		newMCPServers[kandevMCPServerName] = map[string]any{
-			"url": agentctlconfig.MCPServerURL(host, port, "/mcp"),
+			"url": coreURL,
 		}
 	}
 

@@ -5,6 +5,9 @@ import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 import { expectBoundedTimeline, scrollChangesToEnd } from "./large-changes-helpers";
 import path from "node:path";
+import { watchWs } from "../../helpers/causal-waits";
+
+test.use({ trace: "retain-on-failure" });
 
 function seedStaleCheckout(git: GitHelper, remoteUrl: string): string {
   git.exec("git checkout -f main");
@@ -492,6 +495,7 @@ test.describe("Mobile rewritten contribution history", () => {
     backend,
     prCapture,
   }) => {
+    const ws = watchWs(testPage);
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
     const providerBranch = "feature/mobile-local-rebase";
@@ -568,7 +572,8 @@ test.describe("Mobile rewritten contribution history", () => {
       base_branch: "main",
       author_login: "mobile-local-rebase-contributor",
     });
-    await apiClient.ensureTaskSession(task.id);
+    const prepared = await apiClient.ensureTaskSession(task.id);
+    if (!prepared.session_id) throw new Error("the prepared contribution task has no session");
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
@@ -597,6 +602,7 @@ test.describe("Mobile rewritten contribution history", () => {
     const warning = changes.getByTestId("header-remote-contribution-warning");
     await warning.tap();
     const menu = testPage.getByTestId("header-remote-contribution-menu");
+    const historyDrawer = testPage.getByRole("dialog").filter({ has: menu });
     await expect(menu).toBeVisible();
     await expect(menu).toContainText("Task and PR histories differ");
     await expect(menu).toContainText("The task branch was rebased locally");
@@ -604,7 +610,7 @@ test.describe("Mobile rewritten contribution history", () => {
     await expect(menu).toContainText("Published commits: 5");
     await expect(menu).toContainText("Newer base commits: 3");
     await expect(menu.getByRole("button", { name: "Close" })).toBeVisible();
-    await waitForFiniteAnimations(menu);
+    await waitForFiniteAnimations(historyDrawer);
     await prCapture.screenshot("remote-contribution-menu-mobile", {
       caption: "Phone history drawer explains the local rebase and version choices",
     });
@@ -629,6 +635,7 @@ test.describe("Mobile rewritten contribution history", () => {
     await warning.tap();
     const resolutionMenu = testPage.getByTestId("header-remote-contribution-menu");
     await expect(resolutionMenu).toBeVisible();
+    await waitForFiniteAnimations(historyDrawer);
     const recoveryBefore = recoveryBranches(git);
     git.createFile("mobile-local-rebase-dirty.txt", "uncommitted mobile local change");
     await resolutionMenu.getByTestId("header-use-pr-version").tap();
@@ -642,7 +649,15 @@ test.describe("Mobile rewritten contribution history", () => {
     expect(recoveryBranches(git)).toEqual(recoveryBefore);
 
     git.deleteFile("mobile-local-rebase-dirty.txt");
+    const usedContribution = ws.waitForResponse("worktree.use_contribution", {
+      timeout: 60_000,
+      requestWhere: (payload) =>
+        payload.session_id === prepared.session_id &&
+        payload.expected_remote_head === history.publishedHead &&
+        payload.repo === "",
+    });
     await dialog.getByTestId("remote-contribution-confirm").tap();
+    expect((await usedContribution).payload.success).toBe(true);
     await expect(dialog).toHaveCount(0);
     expect(git.getCurrentSha()).toBe(history.publishedHead);
     expect(git.exec("git status --porcelain").trim()).toBe("");

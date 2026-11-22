@@ -41,11 +41,14 @@ var (
 )
 
 type Candidate struct {
-	ID         string
-	Enabled    bool
-	BindingKey string
-	Rules      map[string]Action
-	Policies   routingpolicy.Document
+	KeywordContextEnabled bool
+	KeywordAccountID      string
+	ModelID               string
+	ID                    string
+	Enabled               bool
+	BindingKey            string
+	Rules                 map[string]Action
+	Policies              routingpolicy.Document
 }
 
 type Profile struct {
@@ -171,6 +174,9 @@ type UnclassifiedFailureEvidence struct {
 	EvidenceKnown      bool
 	OutputObserved     bool
 	EffectObserved     bool
+	// StrictStartupModelRejection is set only after the typed pre-prompt
+	// requested-model rejection has been verified by the launch owner.
+	StrictStartupModelRejection bool
 }
 
 func (e UnclassifiedFailureEvidence) currentFor(

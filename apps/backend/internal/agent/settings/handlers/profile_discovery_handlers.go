@@ -77,6 +77,10 @@ func (h *Handlers) httpResolveAgentModelConfig(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid profile discovery context"})
 			return
 		}
+		if errors.Is(err, controller.ErrInvalidDevinPermissionIntent) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to resolve agent model options", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve agent model options"})
 		return
@@ -130,6 +134,8 @@ func writeProfileDiscoveryError(c *gin.Context, log *logger.Logger, message stri
 		c.JSON(http.StatusNotFound, gin.H{"error": "profile discovery target not found"})
 	case errors.Is(err, controller.ErrInvalidProfileDiscovery):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid profile discovery context"})
+	case errors.Is(err, controller.ErrInvalidDevinPermissionIntent):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
 		log.Error(message, zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": message})

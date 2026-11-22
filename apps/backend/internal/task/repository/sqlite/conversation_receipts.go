@@ -290,7 +290,7 @@ func (r *Repository) UpdateMessageWithConversationReceipt(ctx context.Context, m
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.updateMessageWithPayloadGuardTx(ctx, tx, message, metadataJSON, requestsInput); err != nil {
+	if err := r.updateMessageWithPayloadGuardTx(ctx, tx, message, metadataJSON, requestsInput, true); err != nil {
 		return nil, err
 	}
 	receipt := &models.ConversationMutationReceipt{}

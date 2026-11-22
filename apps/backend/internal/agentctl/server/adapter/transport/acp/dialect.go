@@ -10,9 +10,9 @@ import (
 // session state, serialization, and event delivery.
 type acpDialect struct {
 	continuationSupport         streams.ContinuationSupport
+	continuationSupportForError func(error) streams.ContinuationSupport
 	capacityContinuationSupport streams.CapacityContinuationSupport
 	continuationError           func(error) bool
-	retainedApplicationErr      func(error) bool
 	normalizeSessionConfig      func(
 		[]streams.ConfigOption,
 		[]modelInfo,
@@ -33,6 +33,9 @@ type acpDialect struct {
 	mcpToolResult        func(any) (any, bool)
 	responseAttemptReset func(map[string]any) bool
 	permissionToolName   func(*string, map[string]any, string, string) *string
+	subagentControl      func(string, map[string]any, any) streams.SubagentControl
+	subagentResult       func(any) (SubagentTaskResult, bool)
+	configurationCommand func(string, []modelInfo, []streams.ConfigOption, []streams.AvailableCommand) *configurationCommandSpec
 }
 
 type mcpToolCallFrame struct {
@@ -68,10 +71,14 @@ func newACPDialect(agentID string) acpDialect {
 		return newCursorACPDialect()
 	case claudeAgentID:
 		return newClaudeACPDialect()
+	case copilotAgentID:
+		return newCopilotACPDialect()
+	case openCodeAgentID:
+		return newOpenCodeACPDialect()
 	case mockAgentID:
 		return newMockACPDialect()
 	}
-	return acpDialect{}
+	return acpDialect{configurationCommand: modelConfigurationCommand}
 }
 
 func (d acpDialect) parseSubagentFrame(meta map[string]any, title string, rawInput any) (subagentFrame, bool) {
@@ -175,4 +182,22 @@ func (d acpDialect) normalizePermissionToolName(
 		return name
 	}
 	return d.permissionToolName(name, meta, title, actionType)
+}
+
+func (d acpDialect) parseSubagentControl(
+	toolName string,
+	meta map[string]any,
+	rawInput any,
+) streams.SubagentControl {
+	if d.subagentControl == nil {
+		return ""
+	}
+	return d.subagentControl(toolName, meta, rawInput)
+}
+
+func (d acpDialect) parseSubagentResult(rawOutput any) (SubagentTaskResult, bool) {
+	if d.subagentResult == nil {
+		return SubagentTaskResult{}, false
+	}
+	return d.subagentResult(rawOutput)
 }

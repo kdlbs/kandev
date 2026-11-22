@@ -1,13 +1,15 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Automation } from "@/lib/types/automation";
+import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { LIVE_REFRESH_INTERVAL_MS } from "@/components/runs/use-live-refresh";
 
 const WORKSPACE_ID = "workspace-1";
 const AUTOMATION_ID = "automation-1";
 const AUTOMATIONS_SECTION = "automations";
 const OPEN_AUTOMATIONS = "Open automations";
+const EMPTY_ROW = "sidebar-automations-empty";
+const COLLAPSED_SUMMARY = "sidebar-section-collapsed-summary";
 
 const mocks = vi.hoisted(() => ({
   listAutomations: vi.fn(),
@@ -57,6 +59,14 @@ function mkAutomation(overrides: Partial<Automation> = {}): Automation {
     id: AUTOMATION_ID,
     workspace_id: WORKSPACE_ID,
     name: "Nightly drift",
+    description: "",
+    workflow_id: "",
+    workflow_step_id: "",
+    agent_profile_id: "",
+    executor_profile_id: "",
+    repository_ids: [],
+    prompt: "",
+    task_title_template: "",
     enabled: true,
     max_concurrent_runs: 1,
     last_triggered_at: null,
@@ -64,7 +74,23 @@ function mkAutomation(overrides: Partial<Automation> = {}): Automation {
     updated_at: "2026-07-01T00:00:00Z",
     triggers: [],
     ...overrides,
-  } as unknown as Automation;
+  };
+}
+
+function mkRun(overrides: Partial<AutomationRun> = {}): AutomationRun {
+  return {
+    id: "run-failed",
+    automation_id: AUTOMATION_ID,
+    trigger_id: "",
+    trigger_type: "manual",
+    task_id: "",
+    status: "failed",
+    dedup_key: "",
+    trigger_data: {},
+    error_message: "",
+    created_at: new Date().toISOString(),
+    ...overrides,
+  };
 }
 
 function renderSection(collapsed = false) {
@@ -123,7 +149,7 @@ describe("AutomationsSection", () => {
 
     renderSection();
 
-    const summary = await screen.findByTestId("sidebar-section-collapsed-summary");
+    const summary = await screen.findByTestId(COLLAPSED_SUMMARY);
     expect(summary.textContent).toBe("2");
   });
 
@@ -131,7 +157,7 @@ describe("AutomationsSection", () => {
     renderOpenSection();
 
     await screen.findByTestId(`sidebar-automation-${AUTOMATION_ID}`);
-    expect(screen.queryByTestId("sidebar-section-collapsed-summary")).toBeNull();
+    expect(screen.queryByTestId(COLLAPSED_SUMMARY)).toBeNull();
   });
 
   it("shows when each automation last ran, in the runs rail's own phrasing", async () => {
@@ -193,7 +219,7 @@ describe("AutomationsSection", () => {
 
     renderOpenSection();
 
-    const empty = await screen.findByTestId("sidebar-automations-empty");
+    const empty = await screen.findByTestId(EMPTY_ROW);
     expect(empty.getAttribute("href")).toBe("/settings/automations");
     expect(screen.getByRole("link", { name: OPEN_AUTOMATIONS }).getAttribute("href")).toBe(
       "/automations",
@@ -282,7 +308,7 @@ describe("AutomationsSection live running state", () => {
       });
       await waitFor(() => expect(mocks.listAutomationSummaries).toHaveBeenCalledTimes(3));
       expect(screen.queryByTestId(`sidebar-automation-running-${AUTOMATION_ID}`)).toBeNull();
-      expect(screen.getByText("Idle.")).toBeTruthy();
+      expect(screen.getByText("Succeeded.")).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }
@@ -318,7 +344,7 @@ describe("AutomationsSection empty state", () => {
 
     const header = screen.getByRole("button", { name: "Automations" });
     expect(header.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByTestId("sidebar-automations-empty")).toBeNull();
+    expect(screen.queryByTestId(EMPTY_ROW)).toBeNull();
   });
 });
 
@@ -366,4 +392,247 @@ describe("AutomationsSection last-run age", () => {
       vi.useRealTimers();
     }
   });
+});
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.10
+// Real hooks must update the builtin, independently of catalog requests.
+describe("external definitions", () => {
+  beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it.each(["create", "rename", "delete"])(
+    "updates an external %s while mounted",
+    async (change) => {
+      mocks.listAutomations.mockResolvedValue(change === "create" ? [] : [mkAutomation()]);
+      renderOpenSection();
+      await act(async () => {});
+      const section = document.getElementById("sidebar-section-automations");
+      expect(section).not.toBeNull();
+      if (change === "create") expect(screen.getByTestId(EMPTY_ROW)).toBeTruthy();
+      else
+        expect(screen.getByTestId(`sidebar-automation-${AUTOMATION_ID}`).textContent).toContain(
+          "Nightly drift",
+        );
+
+      mocks.listAutomations.mockResolvedValue(
+        change === "delete" ? [] : [mkAutomation({ name: "External change" })],
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS);
+      });
+
+      expect(document.getElementById("sidebar-section-automations")).toBe(section);
+      if (change === "delete")
+        expect(screen.queryByTestId(`sidebar-automation-${AUTOMATION_ID}`)).toBeNull();
+      else
+        expect(screen.getByTestId(`sidebar-automation-${AUTOMATION_ID}`).textContent).toContain(
+          "External change",
+        );
+    },
+  );
+
+  // @covers AC-OFFICE-AUTOMATION-RUNS-001.3
+  it("updates the folded count without starting health reads or opening the section", async () => {
+    renderSection();
+    await act(async () => {});
+    expect(screen.getByTestId(COLLAPSED_SUMMARY).textContent).toBe("1");
+    mocks.listAutomations.mockResolvedValue([mkAutomation(), mkAutomation({ id: "second" })]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS);
+    });
+    expect(screen.getByTestId(COLLAPSED_SUMMARY).textContent).toBe("2");
+    expect(screen.getByRole("button", { name: /Automations/ }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(mocks.listAutomationSummaries).not.toHaveBeenCalled();
+    expect(mocks.toggleSection).not.toHaveBeenCalled();
+  });
+});
+
+describe("external definitions lifecycle", () => {
+  beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+  // @covers AC-OFFICE-AUTOMATION-RUNS-001.12
+  it.each(["focus", "online", "visibilitychange"])(
+    "recovers definitions on %s before the next interval",
+    async (event) => {
+      renderOpenSection();
+      await act(async () => {});
+      mocks.listAutomations.mockResolvedValue([mkAutomation({ name: "Foreground name" })]);
+      await act(async () => {
+        if (event === "visibilitychange") document.dispatchEvent(new Event(event));
+        else window.dispatchEvent(new Event(event));
+      });
+      expect(screen.getByTestId(`sidebar-automation-${AUTOMATION_ID}`).textContent).toContain(
+        "Foreground name",
+      );
+    },
+  );
+
+  it("retries a failed read on the next interval", async () => {
+    mocks.listAutomations.mockRejectedValueOnce(new Error("offline"));
+    renderOpenSection();
+    await act(async () => {});
+    expect(screen.getByTestId(EMPTY_ROW)).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS);
+    });
+    expect(screen.getByTestId(`sidebar-automation-${AUTOMATION_ID}`)).toBeTruthy();
+  });
+
+  it("stops definition reads in the rail and after unmount, then reloads on reopen", async () => {
+    const view = renderOpenSection();
+    await act(async () => {});
+    view.rerender(
+      <TooltipProvider>
+        <AutomationsSection collapsed />
+      </TooltipProvider>,
+    );
+    const calls = mocks.listAutomations.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS);
+    });
+    expect(mocks.listAutomations).toHaveBeenCalledTimes(calls);
+    mocks.listAutomations.mockResolvedValue([mkAutomation({ name: "Reopened" })]);
+    view.rerender(
+      <TooltipProvider>
+        <AutomationsSection collapsed={false} />
+      </TooltipProvider>,
+    );
+    await act(async () => {});
+    expect(screen.getByTestId(`sidebar-automation-${AUTOMATION_ID}`).textContent).toContain(
+      "Reopened",
+    );
+    view.unmount();
+    const finalCalls = mocks.listAutomations.mock.calls.length;
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS);
+    });
+    expect(mocks.listAutomations).toHaveBeenCalledTimes(finalCalls);
+  });
+});
+
+describe("slow external definitions", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("lets slow reads publish before resuming automatic refresh", async () => {
+    let release!: (rows: Automation[]) => void;
+    const releases: Array<(rows: Automation[]) => void> = [];
+    mocks.listAutomations.mockImplementation(
+      () =>
+        new Promise<Automation[]>((resolve) => {
+          release = resolve;
+          releases.push(resolve);
+        }),
+    );
+    renderOpenSection();
+    try {
+      for (const name of ["Slow initial read", "Slow refreshed name"]) {
+        const calls = mocks.listAutomations.mock.calls.length;
+        await act(async () => {
+          window.dispatchEvent(new Event("focus"));
+          await vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS * 2);
+        });
+        expect(mocks.listAutomations).toHaveBeenCalledTimes(calls);
+        await act(async () => release([mkAutomation({ name })]));
+        expect(screen.getByTestId(`sidebar-automation-${AUTOMATION_ID}`).textContent).toContain(
+          name,
+        );
+        await act(async () => vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS));
+        expect(mocks.listAutomations).toHaveBeenCalledTimes(calls + 1);
+      }
+    } finally {
+      await act(async () => releases.forEach((resolve) => resolve([])));
+    }
+  });
+});
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.9 AC-OFFICE-AUTOMATION-RUNS-001.19 AC-OFFICE-AUTOMATION-RUNS-001.21
+describe("newest outcome refresh", () => {
+  it("live failure becomes red with outcome before age and a newer success clears it without remount", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const createdAt = new Date(Date.now() - 4 * 60_000).toISOString();
+    const lastRun = mkRun({ created_at: createdAt });
+    mocks.listAutomationSummaries.mockResolvedValue([
+      {
+        automation_id: AUTOMATION_ID,
+        open_runs: 1,
+        last_run: { ...lastRun, status: "task_created" },
+      },
+    ]);
+    try {
+      renderOpenSection();
+      await screen.findByTestId(`sidebar-automation-running-${AUTOMATION_ID}`);
+      const row = screen.getByTestId(`sidebar-automation-${AUTOMATION_ID}`);
+      mocks.listAutomationSummaries.mockResolvedValue([
+        { automation_id: AUTOMATION_ID, open_runs: 0, last_run: lastRun },
+      ]);
+      await act(async () => vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS));
+      expect(row.querySelector(".bg-red-500")).not.toBeNull();
+      expect(screen.getByTestId(`sidebar-automation-last-run-${AUTOMATION_ID}`).textContent).toBe(
+        "Failed, 4m ago",
+      );
+      expect(row.textContent).not.toContain("Idle");
+      mocks.listAutomationSummaries.mockResolvedValue([
+        {
+          automation_id: AUTOMATION_ID,
+          open_runs: 0,
+          last_run: {
+            ...lastRun,
+            id: "new-success",
+            status: "succeeded",
+            created_at: new Date(Date.now() - 2 * 60_000).toISOString(),
+          },
+        },
+      ]);
+      await act(async () => vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS));
+      expect(screen.getByTestId(`sidebar-automation-${AUTOMATION_ID}`)).toBe(row);
+      expect(row.querySelector(".bg-emerald-500")).not.toBeNull();
+      expect(row.textContent).not.toContain("Failed");
+      expect(row.textContent).toContain("Succeeded");
+      expect(screen.getByTestId(`sidebar-automation-last-run-${AUTOMATION_ID}`).textContent).toBe(
+        "2m ago",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // @covers AC-OFFICE-AUTOMATION-RUNS-001.20
+  it.each([
+    { enabled: false, openRuns: 0, status: "failed", activity: "Paused", outcome: "Failed" },
+    { enabled: true, openRuns: 1, status: "skipped", activity: "Running", outcome: "Skipped" },
+  ] as const)(
+    "keeps $activity separate from newest $outcome",
+    async ({ enabled, openRuns, status, activity, outcome }) => {
+      mocks.listAutomations.mockResolvedValue([mkAutomation({ enabled })]);
+      mocks.listAutomationSummaries.mockResolvedValue([
+        {
+          automation_id: AUTOMATION_ID,
+          open_runs: openRuns,
+          last_run: mkRun({ id: "newest", status }),
+        },
+      ]);
+      renderOpenSection();
+      await waitFor(() =>
+        expect(
+          screen.getByTestId(`sidebar-automation-last-run-${AUTOMATION_ID}`).textContent,
+        ).toContain(outcome),
+      );
+      const row = screen.getByTestId(`sidebar-automation-${AUTOMATION_ID}`);
+      expect(row.textContent).toContain(activity);
+      expect(row.querySelector(".bg-red-500")).toBeNull();
+    },
+  );
 });

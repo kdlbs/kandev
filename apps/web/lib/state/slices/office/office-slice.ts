@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { OfficeSlice, OfficeSliceState } from "./types";
 import type { WorkspacePauseOutcome } from "./pause-types";
 import { normalizeOfficeTask, normalizeTaskStatus } from "@/lib/api/domains/office-task-normalize";
@@ -64,7 +65,7 @@ export const defaultOfficeState: OfficeSliceState = {
   },
 };
 
-type ImmerSet = StateCreator<OfficeSlice, [["zustand/immer", never]], [], OfficeSlice>;
+type ImmerSet = SliceCreator<OfficeSlice>;
 type SetFn = Parameters<ImmerSet>[0];
 
 type AgentProfiles = OfficeSlice["office"]["agentProfilesByWorkspaceId"][string];
