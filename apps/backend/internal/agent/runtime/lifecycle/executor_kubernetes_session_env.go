@@ -10,6 +10,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const (
+	kubernetesSessionNPMCachePath = "/opt/kandev/cache/npm"
+	kubernetesSessionXDGCachePath = "/opt/kandev/cache/xdg"
+)
+
 func kubernetesSessionHome(req *ExecutorCreateRequest) string {
 	if !getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
 		return kubernetesAuthHomePath
@@ -33,6 +38,17 @@ func kubernetesSessionEnvironment(req *ExecutorCreateRequest) map[string]string 
 		}
 	}
 	env["HOME"] = kubernetesSessionHome(req)
+	if getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
+		_, hasUppercaseNPMCache := req.Env["NPM_CONFIG_CACHE"]
+		_, hasLowercaseNPMCache := req.Env["npm_config_cache"]
+		if !hasUppercaseNPMCache && !hasLowercaseNPMCache {
+			env["NPM_CONFIG_CACHE"] = kubernetesSessionNPMCachePath
+			env["npm_config_cache"] = kubernetesSessionNPMCachePath
+		}
+		if _, hasXDGCache := req.Env["XDG_CACHE_HOME"]; !hasXDGCache {
+			env["XDG_CACHE_HOME"] = kubernetesSessionXDGCachePath
+		}
+	}
 	env[kubernetesEnvSessionID] = req.SessionID
 	env[kubernetesEnvTaskID] = req.TaskID
 	env[kubernetesEnvInstanceID] = req.InstanceID
