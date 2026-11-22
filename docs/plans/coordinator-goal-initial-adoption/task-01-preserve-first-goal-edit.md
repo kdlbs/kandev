@@ -76,9 +76,10 @@ Milestone
 
 ## Verification
 
-Run from the repository root. Run the two browser commands in order. The
-desktop command builds the app, and the phone command uses that build.
-Repeat the checks after the hook change.
+Run from the repository root. In a fresh worktree, first install the workspace
+dependencies from `apps/` with `pnpm install --frozen-lockfile`. Run the two
+browser commands in order. The desktop command builds the app, and the phone
+command uses that build. Repeat the checks after the hook change.
 
 ```bash
 pnpm --dir apps/web exec vitest run components/coordinators/sections/goal-section.test.tsx -t 'keeps the first goal name edit after load'

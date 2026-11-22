@@ -97,5 +97,9 @@ test.describe("Coordinator sections on a phone viewport", () => {
     expect(response.request().postDataJSON()).toEqual({ name: "Ship", due_on: null, criteria: [] });
     await expect(testPage.getByTestId("goal-name")).toHaveValue("Ship");
     await expect(testPage.getByTestId("goal-mark-met")).toBeVisible();
+
+    await testPage.reload();
+    await expect(testPage.getByTestId("goal-name")).toHaveValue("Ship");
+    await expect(testPage.getByTestId("goal-mark-met")).toBeVisible();
   });
 });

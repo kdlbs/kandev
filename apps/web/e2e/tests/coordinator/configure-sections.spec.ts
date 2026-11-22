@@ -140,6 +140,10 @@ test.describe("Coordinator page sections", () => {
     });
     await expect(testPage.getByTestId("goal-name")).toHaveValue(GOAL_NAME);
     await expect(testPage.getByTestId("goal-mark-met")).toBeVisible();
+
+    await testPage.reload();
+    await expect(testPage.getByTestId("goal-name")).toHaveValue(GOAL_NAME);
+    await expect(testPage.getByTestId("goal-mark-met")).toBeVisible();
   });
 });
 
