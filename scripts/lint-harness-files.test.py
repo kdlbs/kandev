@@ -93,6 +93,24 @@ class HarnessLinterTest(unittest.TestCase):
 
         self.assertEqual(linter.lint_path(path, "agent", {"agent-line-limit": {"limit": 0}}), [])
 
+    def test_codex_budget_counts_utf8_and_inherited_files(self) -> None:
+        linter = load_linter()
+        self.write("AGENTS.md", "é" * 5)
+        child = self.write("nested/AGENTS.md", "x" * 5)
+        self.assertEqual(linter.check_project_instruction_budget(child, self.workdir, 15), [])
+        violations = linter.check_project_instruction_budget(child, self.workdir, 14)
+        self.assertEqual(violations[0].rule, "project-instruction-byte-limit")
+        self.assertIn("15 bytes", violations[0].msg)
+        self.write("nested/AGENTS.override.md", "y")
+        self.assertEqual(linter.check_project_instruction_budget(child, self.workdir, 11), [])
+
+    def test_codex_budget_checks_descendants_of_changed_root(self) -> None:
+        self.write("AGENTS.md", "x" * 20000)
+        self.write("nested/AGENTS.md", "x" * 10000)
+        result = self.run_cli("AGENTS.md")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("project-instruction-byte-limit", result.stdout)
+
     def test_config_line_limit_is_wired(self) -> None:
         linter = load_linter()
         path = self.write(".codex/config.toml", "model = \"gpt-5\"\n" * 301)

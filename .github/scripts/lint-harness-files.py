@@ -83,6 +83,9 @@ EMOJI_RANGES = (
     (0x1F000, 0x1FAFF),
 )
 
+# Leave 4 KiB of Codex's default 32 KiB budget for instructions outside the repo.
+PROJECT_INSTRUCTION_BUDGET = 28 * 1024
+
 
 class Violation:
     def __init__(self, rule: str, path: Path, line: int, msg: str) -> None:
@@ -137,6 +140,8 @@ def main() -> int:
                     continue
                 rules.setdefault(rule, {})
             violations.extend(lint_path(path, kind, rules=rules, disabled=disabled))
+        if "project-instruction-byte-limit" not in disabled:
+            violations.extend(lint_project_instruction_paths(cwd, paths, args.all))
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -152,6 +157,39 @@ def main() -> int:
 
     print(f"All {linted} harness file(s) passed.")
     return 0
+
+
+def check_project_instruction_budget(path: Path, root: Path, limit: int) -> list[Violation]:
+    """Count selected Codex instruction files from the repository root to path."""
+    directory = path.parent
+    total = 0
+    while directory == root or root in directory.parents:
+        override = directory / "AGENTS.override.md"
+        normal = directory / "AGENTS.md"
+        selected = override if override.is_file() else normal
+        if selected.is_file():
+            total += selected.stat().st_size
+        if directory == root:
+            break
+        directory = directory.parent
+    if total <= limit:
+        return []
+    return [Violation("project-instruction-byte-limit", path, 0,
+                      f"instruction path is {total} bytes (limit {limit}); move conditional guidance to references.")]
+
+
+def lint_project_instruction_paths(root: Path, targets: list[Path], all_files: bool) -> list[Violation]:
+    changed = [p for p in targets if p.name in {"AGENTS.md", "AGENTS.override.md"}]
+    if not all_files and not changed:
+        return []
+    candidates = []
+    for directory, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "dist", "target"} and not (Path(directory) / d).is_symlink()]
+        if "AGENTS.md" in files or "AGENTS.override.md" in files:
+            candidate = Path(directory) / ("AGENTS.override.md" if "AGENTS.override.md" in files else "AGENTS.md")
+            if all_files or any(p.parent == candidate.parent or p.parent in candidate.parents for p in changed):
+                candidates.append(candidate)
+    return [v for path in candidates for v in check_project_instruction_budget(path, root, PROJECT_INSTRUCTION_BUDGET)]
 
 
 def discover_all(cwd: Path) -> list[Path]:
