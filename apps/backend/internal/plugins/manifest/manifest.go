@@ -353,6 +353,7 @@ type ReferenceSource struct {
 // optional/secondary when a bundle is declared: native routes come from the
 // bundle at runtime.
 type UISection struct {
+	FileViewers []FileViewer   `yaml:"file_viewers,omitempty" json:"file_viewers,omitempty"`
 	Pages       []UIPage       `yaml:"pages,omitempty" json:"pages,omitempty"`
 	Bundle      string         `yaml:"bundle,omitempty" json:"bundle,omitempty"`
 	Styles      []string       `yaml:"styles,omitempty" json:"styles,omitempty"`
@@ -416,4 +417,11 @@ func Parse(data []byte) (*Manifest, error) {
 		}
 	}
 	return &m, nil
+}
+
+// FileViewer declares the exact formats a native UI contribution can preview.
+type FileViewer struct {
+	ID         string   `yaml:"id" json:"id"`
+	Title      string   `yaml:"title" json:"title"`
+	Extensions []string `yaml:"extensions" json:"extensions"`
 }

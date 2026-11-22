@@ -259,6 +259,7 @@ function readPlugin(value: Record<string, unknown>): ActivePlugin | undefined {
   const styleUrls = Array.isArray(value.styleUrls)
     ? value.styleUrls.filter((entry): entry is string => typeof entry === "string")
     : undefined;
+  const fileViewers = readFileViewers(value.fileViewers);
   const repositoryProviderIds = Array.isArray(value.repositoryProviderIds)
     ? value.repositoryProviderIds.filter((entry): entry is string => typeof entry === "string")
     : undefined;
@@ -268,7 +269,34 @@ function readPlugin(value: Record<string, unknown>): ActivePlugin | undefined {
     bundleUrl,
     styleUrls,
     ...(repositoryProviderIds ? { repositoryProviderIds } : {}),
+    ...(fileViewers ? { fileViewers } : {}),
   };
+}
+
+function readFileViewers(value: unknown): ActivePlugin["fileViewers"] {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .slice(0, 16)
+    .filter(isRecord)
+    .flatMap((entry) => {
+      const id = readString(entry.id),
+        title = readString(entry.title);
+      if (
+        !id ||
+        id.length > 64 ||
+        !title ||
+        title.length > 128 ||
+        !Array.isArray(entry.extensions) ||
+        entry.extensions.length === 0 ||
+        entry.extensions.length > 32
+      )
+        return [];
+      const extensions = entry.extensions.filter(
+        (ext): ext is string => typeof ext === "string" && /^[a-z0-9][a-z0-9_-]{0,31}$/.test(ext),
+      );
+      if (extensions.length !== entry.extensions.length) return [];
+      return [{ id, title, extensions }];
+    });
 }
 
 export async function loadBootPayload(

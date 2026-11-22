@@ -416,6 +416,7 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	s.filePreviewGrantStore().revokeInstallation(rec.InstallationID)
 	if len(rec.ExecutorProviders) > 0 {
 		s.closeExecutorProviderAdmission(id)
 		defer s.reopenExecutorProviderAdmissionIfActive(id)

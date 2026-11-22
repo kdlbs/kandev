@@ -171,6 +171,7 @@ function failPluginGeneration(
 }
 
 function setPluginDeclarations(plugin: ActivePlugin): void {
+  pluginRegistry.setDeclaredFileViewers(plugin.id, plugin.fileViewers ?? []);
   if (plugin.repositoryProviderIds) {
     pluginRegistry.setDeclaredRepositoryProviderIds(plugin.id, plugin.repositoryProviderIds);
   } else {
@@ -221,8 +222,10 @@ async function loadPlugin(
   const generation = claimLoadGeneration(plugin.id);
   const previousRuntime = activePluginRuntimes.get(plugin.id);
   const previousPluginName = pluginRegistry.getPluginName(plugin.id);
+  const previousFileViewers = pluginRegistry.getDeclaredFileViewers(plugin.id);
   const previousProviderIds = pluginRegistry.getDeclaredRepositoryProviderIds(plugin.id);
   const restorePublishedMetadata = () => {
+    pluginRegistry.setDeclaredFileViewers(plugin.id, previousFileViewers);
     pluginRegistry.restorePluginName(plugin.id, previousPluginName);
     if (previousProviderIds) {
       pluginRegistry.setDeclaredRepositoryProviderIds(plugin.id, previousProviderIds);
