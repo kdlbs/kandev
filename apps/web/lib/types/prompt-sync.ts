@@ -4,12 +4,16 @@ import type {
   WorkflowSyncSetConfigRequest,
 } from "@/lib/types/workflow-sync";
 
+// i18n-exempt: stable error code returned by the GitHub API layer.
+export const PROMPT_SYNC_RATE_LIMIT_ERROR_CODE = "github_rate_limited";
+
 /**
  * The install-wide Prompt Sync configuration. It has the same repository and
  * status fields as Workflow Sync; `workspace_id` names the credential
  * workspace whose GitHub or GitLab connection reads the repository.
  */
 export type PromptSyncConfig = WorkflowSyncConfig & {
+  last_error_class?: string;
   poll_suspended?: boolean;
   poll_suspension_reason?: string;
 };
@@ -50,6 +54,7 @@ export interface PromptSyncRunResponse {
   config: PromptSyncConfig;
   result?: PromptSyncResult;
   error?: string;
+  error_code?: string;
 }
 
 /** What removing Prompt Sync asks about. */

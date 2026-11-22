@@ -24,6 +24,10 @@ func (m Manifest) Clone() Manifest {
 	clone.Capabilities.APIWrite = cloneStrings(m.Capabilities.APIWrite)
 	clone.UI.Pages = append([]UIPage(nil), m.UI.Pages...)
 	clone.UI.Styles = cloneStrings(m.UI.Styles)
+	clone.UI.FileViewers = append([]FileViewer(nil), m.UI.FileViewers...)
+	for i := range clone.UI.FileViewers {
+		clone.UI.FileViewers[i].Extensions = append([]string(nil), m.UI.FileViewers[i].Extensions...)
+	}
 	clone.UI.Keybindings = append([]UIKeybinding(nil), m.UI.Keybindings...)
 	clone.UI.WebApps = cloneWebApps(m.UI.WebApps)
 	clone.Runtime.Executables = cloneStringMap(m.Runtime.Executables)

@@ -131,7 +131,7 @@ it("a queued successor persists earlier unsaved intent against the acknowledged 
   const created = store.getState().createSidebarView()!;
   store.getState().renameSidebarView("base", "Renamed");
   await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
-  const createPatch = updateUserSettings.mock.calls[0][0].sidebar_view_state!;
+  const createPatch = vi.mocked(updateUserSettings).mock.calls[0][0].sidebar_view_state!;
   applyViewMutationsForTest(persisted, createPatch);
   activeViewId = createPatch.active_view_id ?? activeViewId;
   mockCurrentSettings(persisted, () => activeViewId);

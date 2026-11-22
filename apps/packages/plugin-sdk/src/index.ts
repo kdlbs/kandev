@@ -1502,7 +1502,19 @@ export interface IntegrationSettingsActionProps {
   surface: IntegrationSettingsActionSurface;
 }
 
+/** Host-selected, read-only file bytes. The host grants access before mounting. */
+export interface FileViewerProps {
+  file: { name: string; sizeBytes: number; generation: string };
+  readBytes(signal: AbortSignal): Promise<ArrayBuffer>;
+}
+export interface FileViewerRegistration {
+  id: string;
+  Component: Component<FileViewerProps>;
+}
+
 export interface PluginRegistry {
+  /** Register a viewer declared in ui.file_viewers. */
+  registerFileViewer(registration: FileViewerRegistration): void;
   registerTranslations(catalogs: PluginTranslationCatalogs): void;
   registerRoute(path: string, component: Component, options?: PluginRouteOptions): void;
   registerNavItem(item: {

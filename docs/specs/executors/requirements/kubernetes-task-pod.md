@@ -72,10 +72,18 @@ It implements the user's explicit one-pod-per-task expectation.
   credentials or generated credential routing in subsequently started processes.
   Managed access shall preserve repository-scoped redemption and verified TLS,
   without placing raw Git tokens in the agent environment, profile, or image.
+- **AC-EXECUTORS-KUBERNETES-TASK-POD-001.11:** Package-manager and tool caches
+  written by a session's agent or preparation processes shall default to
+  disk-backed pod storage shared by the task's sessions, not to the
+  memory-backed session home. Additional sessions shall reuse that cache rather
+  than duplicating it. A cache location set in the executor profile
+  environment shall take precedence. Session configuration and credential files shall keep their
+  current location, so CLI login, credential refresh, and resume are unchanged.
 
 ## Implementation plans
 
 - [Managed Git handoff repair](../../../plans/kubernetes-managed-git-handoff/plan.md).
+- [Disk-backed session caches](../../../plans/kubernetes-session-cache-storage/plan.md).
 
 ## Related contracts
 

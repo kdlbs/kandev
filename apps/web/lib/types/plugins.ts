@@ -73,7 +73,14 @@ export interface PluginKeybinding {
   allow_in_editor?: boolean;
 }
 
+export interface PluginFileViewerDeclaration {
+  id: string;
+  title: string;
+  extensions: string[];
+}
+
 export interface PluginUISection {
+  file_viewers?: PluginFileViewerDeclaration[];
   pages?: PluginUIPage[];
   bundle?: string;
   styles?: string[];
@@ -229,6 +236,7 @@ export interface MarketplacePermissions {
  * marketplace.CatalogEntry.
  */
 export interface MarketplaceEntry {
+  file_extensions?: string[];
   id: string;
   kind?: "plugin" | "canvas";
   name: string;

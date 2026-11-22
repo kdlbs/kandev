@@ -239,6 +239,7 @@ func (s *Service) setStatus(id string, status Status) error {
 // reports (for example, a failed retry while the record is already in error);
 // public SetStatus keeps same-state transitions invalid.
 func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error, allowSame bool) error {
+	grants := s.filePreviewGrantStore()
 	committed := false
 	defer func() {
 		if committed {
@@ -254,6 +255,7 @@ func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error
 	}
 	committed = true
 	if status != StatusActive {
+		grants.revokeInstallation(updated.InstallationID)
 		s.closeExecutorProviderAdmission(id)
 		if err := s.cancelAutomationDeliveries(id); err != nil {
 			return err

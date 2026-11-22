@@ -15,6 +15,7 @@ import { useSyncExternalStore } from "react";
 import type { SidebarGroupingProvider } from "@kdlbs/plugin-sdk";
 import { i18n } from "@/lib/i18n";
 import type {
+  FileViewerRegistration,
   NavItem,
   IntegrationSettingsRegistration,
   PluginRegistry,
@@ -67,6 +68,10 @@ import type {
 } from "./registry-registration-types";
 export * from "./registry-registration-types";
 
+import type { PluginFileViewerDeclaration } from "@/lib/types/plugins";
+export type RegisteredFileViewer = FileViewerRegistration &
+  PluginFileViewerDeclaration & { pluginId: string; generation: number };
+
 interface Owned<T> {
   pluginId: string;
   value: T;
@@ -97,6 +102,8 @@ type PluginRegistryStateSnapshot = {
   taskActions: Map<string, Owned<TaskActionRegistration>>;
   reviewProviders: Map<string, Owned<ReviewProviderRegistration>>;
   taskPanels: Owned<TaskPanelRegistration>[];
+  fileViewers: Owned<FileViewerRegistration>[];
+  declaredFileViewers: Map<string, PluginFileViewerDeclaration[]>;
   taskMenuActions: Owned<TaskMenuActionRegistration>[];
   taskFilters: Owned<TaskFilterRegistration>[];
   taskListFacets: Owned<TaskListFacetRegistration>[];
@@ -180,6 +187,8 @@ class PluginRegistryStore {
   private reviewProviders = new Map<string, Owned<ReviewProviderRegistration>>();
   private providerOwnership = new PluginProviderOwnership();
   private workLifecycle = new PluginWorkLifecycle();
+  private fileViewers: Owned<FileViewerRegistration>[] = [];
+  private declaredFileViewers = new Map<string, PluginFileViewerDeclaration[]>();
   private taskPanels: Owned<TaskPanelRegistration>[] = [];
   private taskMenuActions: Owned<TaskMenuActionRegistration>[] = [];
   private reportedUnreadableTaskMenuActions = new WeakSet<Owned<TaskMenuActionRegistration>>();
@@ -260,6 +269,8 @@ class PluginRegistryStore {
       taskActions: new Map(this.taskActions),
       reviewProviders: new Map(this.reviewProviders),
       taskPanels: [...this.taskPanels],
+      fileViewers: [...this.fileViewers],
+      declaredFileViewers: new Map(this.declaredFileViewers),
       taskMenuActions: [...this.taskMenuActions],
       taskFilters: [...this.taskFilters],
       taskListFacets: [...this.taskListFacets],
@@ -287,6 +298,8 @@ class PluginRegistryStore {
     this.taskActions = snapshot.taskActions;
     this.reviewProviders = snapshot.reviewProviders;
     this.taskPanels = snapshot.taskPanels;
+    this.fileViewers = snapshot.fileViewers;
+    this.declaredFileViewers = snapshot.declaredFileViewers;
     this.taskMenuActions = snapshot.taskMenuActions;
     this.taskFilters = snapshot.taskFilters;
     this.taskListFacets = snapshot.taskListFacets;
@@ -450,6 +463,54 @@ class PluginRegistryStore {
     this.notify();
   }
 
+  setDeclaredFileViewers(pluginId: string, viewers: PluginFileViewerDeclaration[]): void {
+    this.declaredFileViewers.set(
+      pluginId,
+      viewers.map((v) => ({ ...v, extensions: [...v.extensions] })),
+    );
+  }
+  getDeclaredFileViewers(pluginId: string): PluginFileViewerDeclaration[] {
+    return (this.declaredFileViewers.get(pluginId) ?? []).map((v) => ({
+      ...v,
+      extensions: [...v.extensions],
+    }));
+  }
+  registerFileViewer(pluginId: string, registration: FileViewerRegistration): void {
+    const declared = this.declaredFileViewers.get(pluginId)?.some((v) => v.id === registration.id);
+    if (
+      !declared ||
+      this.fileViewers.some((v) => v.pluginId === pluginId && v.value.id === registration.id)
+    ) {
+      // i18n-exempt: developer contract error, not rendered UI
+      throw new Error("Invalid or duplicate file viewer registration");
+    }
+    this.fileViewers.push({ pluginId, value: { ...registration } });
+    this.notify();
+  }
+  getFileViewers(): RegisteredFileViewer[] {
+    return this.fileViewers
+      .flatMap(({ pluginId, value }) => {
+        const lifecycle = this.pluginLifecycles.get(pluginId);
+        const declared = this.declaredFileViewers.get(pluginId)?.find((v) => v.id === value.id);
+        if (lifecycle?.status !== "ready" || !declared) return [];
+        return [
+          {
+            ...value,
+            ...declared,
+            extensions: [...declared.extensions],
+            pluginId,
+            generation: lifecycle.generation,
+          },
+        ];
+      })
+      .sort(
+        (a, b) =>
+          a.title.localeCompare(b.title) ||
+          a.pluginId.localeCompare(b.pluginId) ||
+          a.id.localeCompare(b.id),
+      );
+  }
+
   registerTaskPanel(pluginId: string, registration: TaskPanelRegistration): void {
     this.taskPanels.push({ pluginId, value: registration });
     this.notify();
@@ -583,6 +644,8 @@ class PluginRegistryStore {
     this.abortPluginWork(pluginId);
     this.providerOwnership.releasePlugin(pluginId);
     this.taskPanels = removeByPlugin(this.taskPanels, pluginId);
+    this.fileViewers = removeByPlugin(this.fileViewers, pluginId);
+    this.declaredFileViewers.delete(pluginId);
     this.taskMenuActions = removeByPlugin(this.taskMenuActions, pluginId);
     this.taskFilters = removeByPlugin(this.taskFilters, pluginId);
     this.taskListFacets = removeByPlugin(this.taskListFacets, pluginId);
@@ -783,6 +846,7 @@ class PluginRegistryStore {
       registerRepositoryProvider: (provider) => this.registerRepositoryProvider(pluginId, provider),
       registerTaskAction: (action) => this.registerTaskAction(pluginId, action),
       registerReviewProvider: (provider) => this.registerReviewProvider(pluginId, provider),
+      registerFileViewer: (registration) => this.registerFileViewer(pluginId, registration),
       registerTaskPanel: (registration) => this.registerTaskPanel(pluginId, registration),
       registerTaskMenuAction: (registration) => this.registerTaskMenuAction(pluginId, registration),
       registerTaskFilter: (registration) => this.registerTaskFilter(pluginId, registration),
@@ -834,6 +898,7 @@ class PluginRegistryStore {
       this.taskActions.size +
       this.reviewProviders.size +
       this.taskPanels.length +
+      this.fileViewers.length +
       this.taskMenuActions.length +
       this.taskFilters.length +
       this.taskListFacets.length

@@ -41,6 +41,26 @@ func TestPostgresRepository_OwnershipTransitionsKeepAlternateContent(t *testing.
 	if err != nil || !read.IsOverride() || read.Content != "Mine" || read.AlternateContent != "Repo" || read.Conflict {
 		t.Fatalf("restored override = %+v, %v", read, err)
 	}
+	if changed, err := repo.SetOverrideRepositoryFile(ctx, manual.ID, "p/moved/pg.md", "Repo"); err != nil || !changed {
+		t.Fatalf("update override repository path = %v, %v", changed, err)
+	}
+	read, err = repo.GetPromptByID(ctx, manual.ID)
+	if err != nil || read.SourcePath != "p/moved/pg.md" || read.AlternateContent != "Repo" {
+		t.Fatalf("updated override repository file = %+v, %v", read, err)
+	}
+	if changed, err := repo.SetOverrideRepositoryFile(ctx, manual.ID, "p/moved/pg.md", "Repo"); err != nil || changed {
+		t.Fatalf("unchanged override repository file = %v, %v", changed, err)
+	}
+	if changed, err := repo.SetOverrideRepositoryFile(ctx, manual.ID, "p/renamed/pg.md", "Repo"); err != nil || !changed {
+		t.Fatalf("path-only override repository update = %v, %v", changed, err)
+	}
+	if changed, err := repo.DetachOverride(ctx, manual.ID); err != nil || !changed {
+		t.Fatalf("detach override = %v, %v", changed, err)
+	}
+	read, err = repo.GetPromptByID(ctx, manual.ID)
+	if err != nil || read.SourcePath != "" || read.AlternateContent != "" {
+		t.Fatalf("detached override = %+v, %v", read, err)
+	}
 	other := &models.Prompt{Name: "pg-taken", Content: "Local"}
 	if err := repo.CreatePrompt(ctx, other); err != nil {
 		t.Fatalf("create prompt: %v", err)

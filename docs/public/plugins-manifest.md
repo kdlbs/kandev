@@ -863,3 +863,14 @@ admitted but unclaimed runs before removing receipts.
 The displayed webhook URL uses the configured backend origin. For live Bitbucket
 delivery, expose that endpoint through an address reachable from your Bitbucket
 installation; a local development address alone is not externally reachable.
+
+### File viewer declarations
+
+`ui.file_viewers` declares up to 16 native viewers. Each entry has a unique local
+`id`, a `title`, and 1 to 32 unique `extensions`. Extension values use lowercase
+ASCII without a leading period: `[a-z0-9][a-z0-9_-]{0,31}`. Wildcards, paths, MIME
+guesses, and duplicate values are rejected. A UI bundle is required.
+
+Runtime `registerFileViewer({ id, Component })` must match a declaration. The host
+owns selection, byte delivery, external-file consent, and lifecycle cleanup.
+See [File viewer plugins](plugins-authoring.md#file-viewer-plugins).

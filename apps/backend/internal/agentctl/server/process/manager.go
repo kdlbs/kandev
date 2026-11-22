@@ -127,6 +127,8 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
+	filePreviewOnce          sync.Once
+	filePreviews             *filePreviewPool
 	processManagerID         string
 	questionImageWorkDir     string
 	questionImageOnce        sync.Once

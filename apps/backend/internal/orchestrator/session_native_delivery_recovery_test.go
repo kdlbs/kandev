@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"sync/atomic"
@@ -125,7 +126,7 @@ func TestNativeResumeStartFailureLeavesUnknownDeliveryUnacknowledged(t *testing.
 	require.NotNil(t, *launched)
 	require.Equal(t, "native-conversation", (*launched).ACPSessionID)
 
-	repo := service.repo.(nativeResumeTestRepository)
+	repo := service.repo.(*sqliterepo.Repository)
 	stored, err := repo.GetAgentDeliverySubmission(context.Background(), submission.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, stored.State)
@@ -133,6 +134,67 @@ func TestNativeResumeStartFailureLeavesUnknownDeliveryUnacknowledged(t *testing.
 	recovery, err := repo.GetSessionRecoveryBlock(context.Background(), block.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.RecoveryBlockOpen, recovery.State)
+}
+
+func TestNativeResumeAfterLateRecoveryNoticePreservesConversationWithoutPrompt(t *testing.T) {
+	ctx := context.Background()
+	service, manager, block, submission, launched, started := nativeResumeFixtureWithoutRecoveryMetadata(
+		t, "unknown_prompt_outcome", false, false,
+	)
+	repo := service.repo.(*sqliterepo.Repository)
+	session, err := service.repo.GetTaskSession(ctx, submission.SessionID)
+	require.NoError(t, err)
+	_, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
+	require.False(t, exists, "the crashed backend had not persisted a recovery notice")
+	_, err = repo.GetOpenSessionRecoveryBlock(ctx, session.ID, session.QueueIncarnationID, 1)
+	require.ErrorIs(t, err, sql.ErrNoRows, "the crashed backend had not persisted a Resume block")
+
+	recovery := models.AgentDeliveryRecovery{
+		Phase: models.AgentDeliveryRecoveryUncertain, Revision: 1, PromptGeneration: 1,
+		SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
+		AgentExecutionID: "old-execution", SubmissionID: submission.ID,
+		StreamID: block.DeliveryStreamID, HarnessGeneration: submission.HarnessGeneration,
+	}
+	changed, err := repo.UpsertAgentDeliveryRecovery(ctx, &recovery, block)
+	require.NoError(t, err, "stopped-owner reconciliation persists the exact interrupted delivery before Resume")
+	require.True(t, changed, "the previously absent recovery notice and its Resume block must be committed")
+	openBlock, err := repo.GetOpenSessionRecoveryBlock(ctx, session.ID, session.QueueIncarnationID, 1)
+	require.NoError(t, err)
+	require.Equal(t, block.ID, openBlock.ID)
+	storedSession, err := service.repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	storedRecovery, exists := models.LoadAgentDeliveryRecovery(storedSession.Metadata)
+	require.True(t, exists)
+	require.Equal(t, submission.ID, storedRecovery.SubmissionID)
+	require.Equal(t, block.DeliveryStreamID, storedRecovery.StreamID)
+	require.Equal(t, uint64(1), storedRecovery.PromptGeneration)
+
+	response, err := service.RecoverSession(ctx, "task1", session.ID, "resume")
+	require.NoError(t, err)
+	require.True(t, response.Success)
+	require.True(t, *started)
+	require.NotNil(t, *launched)
+	require.Equal(t, "native-conversation", (*launched).ACPSessionID,
+		"native Resume must reopen the saved provider conversation")
+	require.Empty(t, manager.capturedPromptCalls, "native Resume must never dispatch the uncertain prompt again")
+
+	storedSubmission, err := repo.GetAgentDeliverySubmission(ctx, submission.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, storedSubmission.State)
+	require.Equal(t, submission.PayloadHash, storedSubmission.PayloadHash)
+	require.Equal(t, submission.Payload, storedSubmission.Payload)
+	require.Equal(t, submission.Outcome, storedSubmission.Outcome)
+	resolvedBlock, err := repo.GetSessionRecoveryBlock(ctx, block.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RecoveryBlockResolved, resolvedBlock.State)
+	resolvedSession, err := service.repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	resolvedRecovery, exists := models.LoadAgentDeliveryRecovery(resolvedSession.Metadata)
+	require.True(t, exists)
+	require.Equal(t, models.AgentDeliveryRecoveryRestored, resolvedRecovery.Phase)
+	currentGeneration, err := repo.GetCurrentHarnessSessionGeneration(ctx, session.ID, session.QueueIncarnationID)
+	require.NoError(t, err)
+	require.Equal(t, "native-conversation", currentGeneration.NativeSessionID)
 }
 
 func TestAgentStoppedAfterNativeResumeStartFailureDoesNotCompleteTurn(t *testing.T) {
@@ -415,6 +477,14 @@ type nativeResumeTestRepository interface {
 }
 
 func nativeResumeFixture(t *testing.T, reason string, failLaunch, failAcknowledgement bool) (*Service, *nativeResumeTestManager, *models.SessionRecoveryBlock, *models.AgentDeliverySubmission, **executor.LaunchAgentRequest, *bool) {
+	return nativeResumeFixtureWithRecoveryMetadata(t, reason, failLaunch, failAcknowledgement, true)
+}
+
+func nativeResumeFixtureWithoutRecoveryMetadata(t *testing.T, reason string, failLaunch, failAcknowledgement bool) (*Service, *nativeResumeTestManager, *models.SessionRecoveryBlock, *models.AgentDeliverySubmission, **executor.LaunchAgentRequest, *bool) {
+	return nativeResumeFixtureWithRecoveryMetadata(t, reason, failLaunch, failAcknowledgement, false)
+}
+
+func nativeResumeFixtureWithRecoveryMetadata(t *testing.T, reason string, failLaunch, failAcknowledgement, seedRecoveryMetadata bool) (*Service, *nativeResumeTestManager, *models.SessionRecoveryBlock, *models.AgentDeliverySubmission, **executor.LaunchAgentRequest, *bool) {
 	t.Helper()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -436,14 +506,23 @@ func nativeResumeFixture(t *testing.T, reason string, failLaunch, failAcknowledg
 	}
 	_, err = repo.PrepareAgentDeliverySubmission(ctx, submission)
 	require.NoError(t, err)
+	require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID: session.ID, IncarnationID: session.QueueIncarnationID, Generation: submission.HarnessGeneration,
+		NativeSessionID: "native-conversation", AgentType: "codex", CreationReason: "initial",
+		CreatedAt: now, CommittedAt: now,
+	}))
 	block := &models.SessionRecoveryBlock{
 		SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
 		Reason: reason, State: models.RecoveryBlockOpen,
 		ConsumerReference: "agent_delivery", DeliverySubmissionID: submission.ID,
 		ExpectedGeneration: submission.HarnessGeneration, DeliveryStreamID: "native-resume-stream",
 	}
-	require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, block))
-	seedNativeResumeDeliveryMetadata(t, repo, session, block, submission, now)
+	if seedRecoveryMetadata {
+		require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, block))
+	}
+	if seedRecoveryMetadata {
+		seedNativeResumeDeliveryMetadata(t, repo, session, block, submission, now)
+	}
 	var launched *executor.LaunchAgentRequest
 	started := false
 	manager := &sessionUpdatingAgentManager{
@@ -476,11 +555,6 @@ func nativeResumeFixture(t *testing.T, reason string, failLaunch, failAcknowledg
 func seedNativeResumeDeliveryMetadata(t *testing.T, repo *sqliterepo.Repository, session *models.TaskSession, block *models.SessionRecoveryBlock, submission *models.AgentDeliverySubmission, now time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
-		SessionID: session.ID, IncarnationID: session.QueueIncarnationID, Generation: submission.HarnessGeneration,
-		NativeSessionID: "native-conversation", AgentType: "codex", CreationReason: "initial",
-		CreatedAt: now, CommittedAt: now,
-	}))
 	recovery := &models.AgentDeliveryRecovery{
 		Phase: models.AgentDeliveryRecoveryUncertain, Revision: 1, PromptGeneration: 1,
 		SessionID: session.ID, IncarnationID: session.QueueIncarnationID,

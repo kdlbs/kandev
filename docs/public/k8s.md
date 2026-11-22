@@ -217,6 +217,8 @@ Kandev owns generated resource names, namespace, `restartPolicy: Always`, Linux 
 | `kandev-auth` | `/run/kandev` | Memory-backed auth environment and runtime home |
 | `kandev-workspace` | `/workspace` | Selected `emptyDir`, managed PVC, or existing claim |
 
+Task-owned sessions default npm and XDG caches to `/opt/kandev/cache/npm` and `/opt/kandev/cache/xdg`; set `NPM_CONFIG_CACHE` (or `npm_config_cache`) or `XDG_CACHE_HOME` in the profile environment to override them.
+
 The template cannot set the main container's command, args, or working directory; use reserved volume names or mount paths except the explicit companion workspace grant below; use container port 8765 or the `kandev-agentctl` port name; or define `HOME`, `AGENTCTL_*`, or `KANDEV_*` environment keys. It also cannot set Pod name/namespace/UID, owner references, finalizers, restart policy, node name, OS, or Linux OS/architecture selectors. Kandev defaults `automountServiceAccountToken: false` only when the template leaves it unset.
 
 An ordinary non-main container may explicitly mount `kandev-workspace` once at

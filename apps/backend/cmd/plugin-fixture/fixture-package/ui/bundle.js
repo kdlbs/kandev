@@ -191,6 +191,29 @@
         },
       );
       var React = host.React;
+      registry.registerFileViewer({
+        id: "stl",
+        Component: function FixtureFilePreview(props) {
+          var state = React.useState(null);
+          React.useEffect(
+            function () {
+              var controller = new AbortController();
+              props
+                .readBytes(controller.signal)
+                .then(function (bytes) {
+                  if (!controller.signal.aborted) state[1](bytes.byteLength);
+                })
+                .catch(function () {});
+              return function () {
+                controller.abort();
+              };
+            },
+            [props.file.generation],
+          );
+          return React.createElement("div", { "data-testid": "fixture-file-preview" }, state[0]);
+        },
+      });
+
       var jsx = host.jsx;
       var ui = host.ui;
 

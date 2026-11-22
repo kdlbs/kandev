@@ -50,6 +50,10 @@ type userStateCleanupStore interface {
 //     (e.g. proxies checking a plugin's manifest/capabilities without
 //     going through Service's error-wrapping Get).
 type Service struct {
+	filePreviewWorkspaceAuthorizer        func(context.Context, string) error
+	filePreviewPolicies                   *filePreviewPolicies
+	filePreviewBackend                    func(context.Context, string, string, string) (*FilePreviewSource, error)
+	filePreviewGrants                     *filePreviewGrants
 	notificationProviders                 NotificationProviderAccess
 	hostCallContextEnabled                bool
 	hostCallContextValidator              func(context.Context, bool) error
@@ -803,6 +807,7 @@ func (s *Service) Runtime() PluginRuntime {
 // backendapp's startPluginsSubsystems) register this with addCleanup for
 // graceful backend shutdown.
 func (s *Service) Shutdown() {
+	s.filePreviewGrantStore().close()
 	if s.runtime != nil {
 		s.runtime.StopAll()
 	}
