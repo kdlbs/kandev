@@ -12,6 +12,7 @@ import {
 import type { TFunction } from "i18next";
 import { Trans, useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
+import { CursorMcpDiscoveryDetails } from "./cursor-mcp-discovery-details";
 import { ExpandableRow } from "@/components/task/chat/messages/expandable-row";
 import { isFallbackNoticeStep } from "@/lib/prepare/summarize";
 import { cn } from "@/lib/utils";
@@ -129,7 +130,11 @@ const AGENT_MCP_STEP_LABEL_KEYS: Record<string, string> = {
 };
 
 function agentMcpStepLabel(t: TFunction, step: PrepareStepInfo): string {
-  const stage = t(AGENT_MCP_STEP_LABEL_KEYS[step.kind ?? ""] ?? "task:agentMcpPreparationStep");
+  const labelKey =
+    step.kind === "agent_mcp_discovery" && step.mcpProvider === "cursor"
+      ? "task:agentMcpCursorDiscoveryStep"
+      : (AGENT_MCP_STEP_LABEL_KEYS[step.kind ?? ""] ?? "task:agentMcpPreparationStep");
+  const stage = t(labelKey);
   return step.mcpServerId
     ? t("task:agentMcpServerStep", { stage, server: step.mcpServerId })
     : stage;
@@ -222,6 +227,7 @@ function StepRow({
       </div>
       <div className="ml-[22px]">
         {detailsExpanded && !isAgentMcp && <StepDetails step={step} blockCommand={blockCommand} />}
+        <CursorMcpDiscoveryDetails step={step} />
         <StepRowActions isAgentMcp={isAgentMcp} step={step} sessionId={sessionId} taskId={taskId} />
       </div>
     </div>

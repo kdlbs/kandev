@@ -43,6 +43,9 @@ connections. Server approval is separate from permission to invoke tools.
 
 - **AC-AGENTS-MCP-PREP-002.6:** When imported plugin connection verification requires authentication but environment preparation succeeds, the preparation summary, server row, and authentication message shall show a warning rather than an error. The server shall remain explicitly unavailable until authentication and verification succeed; the agent can continue without those tools.
 - **AC-AGENTS-MCP-PREP-002.7:** When an authentication warning coexists with a genuine preparation failure, the failure shall retain error priority. Live updates and persisted preparation results shall produce the same severity, including older authentication-required rows recorded as failed.
+- **AC-AGENTS-MCP-PREP-002.8:** The task setup panel shall label Cursor discovery **Discover Cursor MCP servers**. A discovery row for an individual server shall also show its identity.
+- **AC-AGENTS-MCP-PREP-002.9:** When Cursor MCP discovery fails, the row shall offer a localized **Details** disclosure, even without a server ID. The disclosure shall support desktop keyboard and phone touch input. The explanation shall be available during setup and after reload.
+- **AC-AGENTS-MCP-PREP-002.10:** Expanded details shall explain the recorded reason in localized text. For an inventory timeout, the explanation shall identify the timed-out Marketplace lookup and skipped Marketplace imports for that attempt. It shall say that other configured MCP servers can still connect. Unknown or missing reasons shall use a general discovery explanation.
 
 ### REQ-AGENTS-MCP-PREP-003: Authentication recovery
 
@@ -92,6 +95,7 @@ business operations during readiness checks are excluded.
 
 ## Implementation plans
 
+- [Cursor MCP discovery feedback](../../../plans/cursor-mcp-discovery-feedback/plan.md)
 - [Native MCP failure diagnostics](../../../plans/native-mcp-failure-diagnostics/plan.md)
 - [Setup recovery UX](../../../plans/setup-recovery-ux/plan.md)
 - [Agent MCP preparation](../../../plans/agent-mcp-preparation/plan.md)

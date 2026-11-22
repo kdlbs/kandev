@@ -229,7 +229,7 @@ func (s *Server) registerConfigPromptTools() {
 	s.registerConfigPromptWriteTools()
 	listTool := mcp.NewToolWithRawSchema(
 		"list_shared_prompts_kandev",
-		"List saved prompts without their content. Each summary includes the prompt name, whether it is built in, and its UTF-8 content size.",
+		"List saved prompts without their content. Each summary includes the prompt name, whether it is built in, its source (manual, sync for a prompt synced from the prompt repository, or override for a local override of one), whether it has an unresolved conflict with the repository, editing guidance to relay to the user, and its UTF-8 content size.",
 		json.RawMessage(`{"type":"object","properties":{}}`),
 	)
 	// NewToolWithRawSchema does not accept option functions, so set annotations directly.

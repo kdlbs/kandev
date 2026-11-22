@@ -35,6 +35,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/marketplace"
 	pluginstate "github.com/kandev/kandev/internal/plugins/state"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
+	"github.com/kandev/kandev/internal/promptsync"
 	quickterminalrepo "github.com/kandev/kandev/internal/quickterminal/repository"
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
@@ -121,6 +122,7 @@ var schemaInitializers = map[string]testconformance.Scenario{
 	"linear":                linearSchema,
 	"sentry":                sentrySchema,
 	"workflow-sync":         workflowSyncSchema,
+	"prompt-sync":           promptSyncSchema,
 	"office-config-sync":    officeConfigSyncSchema,
 	"automation":            automationSchema,
 	"coordinator":           coordinatorSchema,
@@ -460,6 +462,13 @@ func workflowSyncSchema(s testconformance.ScenarioContext) error {
 	}
 	if _, err := workflowsync.NewStore(s.DB, s.DB); err != nil {
 		return fmt.Errorf("workflow sync schema: %w", err)
+	}
+	return nil
+}
+
+func promptSyncSchema(s testconformance.ScenarioContext) error {
+	if _, err := promptsync.NewStore(s.DB, s.DB); err != nil {
+		return fmt.Errorf("prompt sync schema: %w", err)
 	}
 	return nil
 }
