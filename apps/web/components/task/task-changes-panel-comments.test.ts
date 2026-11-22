@@ -58,7 +58,14 @@ it("retries the same file-bearing Changes request after a lost acknowledgement",
     text: "See evidence",
     status: "pending",
     createdAt: "now",
-    attachments: [{ attachment_id: "uploaded-file", type: "resource", delivery_mode: "path" }],
+    attachments: [
+      {
+        attachment_id: "uploaded-file",
+        type: "resource",
+        mime_type: "text/plain",
+        delivery_mode: "path",
+      },
+    ],
   };
   useCommentsStore.getState().addComment(comment);
   request.mockRejectedValueOnce(new Error("Lost response"));

@@ -95,7 +95,10 @@ function areCommentsEqual(
 ): boolean {
   if (prev === next) return true;
   if (!prev || !next || prev.length !== next.length) return false;
-  return prev.every((c, i) => c.id === next[i].id && c.text === next[i].text);
+  return prev.every(
+    (c, i) =>
+      c.id === next[i].id && c.text === next[i].text && c.attachments === next[i].attachments,
+  );
 }
 
 /** Auto-load expansion content and return whether expansion can be used. */
