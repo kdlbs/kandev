@@ -4640,3 +4640,32 @@ under host load of about 20. The two failures (Go-boot hidden explicit
 conversation, rebuilding-parked split neighbour) timed out on initial chat
 visibility before any removal; `r43-isolated-summary.log` passes both 3 of 3
 alone. `r43-phone-summary.log` passes ten phone cases.
+
+### Production-fix review rounds 44-46: loop closed
+
+R44, R45 and R46 (Opus children `3e5c09d0-6f1a-4ede-a1a3-c962f2af17d7`,
+`528c7014-e3b2-4c36-81be-4ba821b79764`, `40dced2d-b3a2-43a9-b471-73db37ca0ea5`)
+each reviewed `9a9a8825973da66d0e302fc1b0121ad645a39b06` read-only and found
+nothing. Completed production rounds 46; consecutive clean 3. The loop stop
+condition is met.
+
+- R44 re-derived the R41-R43 removal and deferral code: intent inheritance
+  only on the selection-owning removal path, first-intent deferral, no
+  inheritance for local deletion, and the bounded resumed-owner marker.
+- R45 traced the Go move-focus disposition and its consumer, the failed-focus
+  owners, unread-dot display on every layout, URL activation, hydration,
+  membership proofs and kanban preview adoption.
+- R46 traced the backend read path (unchanged by the branch), display and
+  read-gating parity, docs against code, test quality, and i18n and lint
+  rules.
+
+Non-findings kept on record: a disproof writes no store state, so a blocked
+authorized owner waits for the next store change (both backend removal
+producers publish only after the delete commit); `moveFocusDisposition`
+"none" paths; the tablet chat default before its layout-effect seed. The two
+recorded residuals still have no traced producer.
+
+Open product question, not a defect against the current design: manual
+Resume from the failed-session recovery card does not own focus (restart
+does), so a retained primary follow can move the view to a newly promoted
+primary once the resumed session is healthy again.
