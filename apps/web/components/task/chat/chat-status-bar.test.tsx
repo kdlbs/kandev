@@ -13,6 +13,7 @@ const PROCEED_TEST_ID = "proceed-next-step";
 const statusStore = vi.hoisted(() => {
   const state = {
     features: { agentBackgroundWork: false },
+    connection: { status: "disconnected" as const },
     userSettings: { showTranscriptAutoScrollControl: false },
     taskSessions: {
       items: {

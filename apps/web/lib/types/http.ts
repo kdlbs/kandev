@@ -911,6 +911,23 @@ export type CustomPrompt = {
   name: string;
   content: string;
   builtin: boolean;
+  /**
+   * "sync" when Prompt Sync owns the prompt (read-only); "override" when an
+   * operator replaced a synced prompt locally (editable, sync leaves it).
+   */
+  source?: "manual" | "sync" | "override";
+  /** Repository file a synced or overridden prompt comes from. */
+  source_path?: string;
+  /**
+   * True for an override adopted from a prompt whose name a repository file
+   * also uses, until the user chooses the local or repository version.
+   */
+  conflict?: boolean;
+  /**
+   * The version not in use: the kept local version of a synced prompt, or
+   * the repository version of an override.
+   */
+  alternate_content?: string;
   created_at: string;
   updated_at: string;
 };

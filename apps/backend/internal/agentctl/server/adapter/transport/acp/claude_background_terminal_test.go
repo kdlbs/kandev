@@ -1,11 +1,17 @@
 package acp
 
 import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
@@ -79,6 +85,52 @@ func activeClaudeToolCallCount(a *Adapter) int {
 
 // @covers AC-AGENTS-BACKGROUND-WORK-010.3
 // @covers AC-AGENTS-BACKGROUND-WORK-010.6
+func TestClaudeBackgroundTerminalExitManagedDefault(t *testing.T) {
+	packageName := agents.NewClaudeACP().ManagedNPMRuntime().Package
+	version, err := agents.DefaultManagedNPMRuntimeVersion(packageName)
+	require.NoError(t, err)
+
+	fixturePath := filepath.Join("testdata", fmt.Sprintf("claude-%s-detached-bash.jsonl", version))
+	fixture, err := os.Open(fixturePath)
+	require.NoError(t, err, "managed Claude bridge version %s needs a qualified detached Bash fixture", version)
+	t.Cleanup(func() { require.NoError(t, fixture.Close()) })
+
+	a := newTestAdapterForAgent(claudeAgentID)
+	a.agentInfo = &AgentInfo{Name: verifiedClaudeTerminalBridgeName, Version: version}
+	t.Cleanup(func() { _ = a.Close() })
+	var events []AgentEvent
+	scanner := bufio.NewScanner(fixture)
+	for scanner.Scan() {
+		var notification acp.SessionNotification
+		require.NoError(t, json.Unmarshal(scanner.Bytes(), &notification), "decode managed bridge fixture frame")
+		a.sessionID = string(notification.SessionId)
+		a.handleACPUpdate(notification, 0)
+		events = append(events, drainEvents(a)...)
+		if notification.Update.ToolCallUpdate != nil && notification.Update.ToolCallUpdate.Status != nil &&
+			*notification.Update.ToolCallUpdate.Status == acp.ToolCallStatusCompleted {
+			require.Equal(t, 1, activeClaudeToolCallCount(a), "the detached launch result must leave its shell tracked")
+		}
+	}
+	require.NoError(t, scanner.Err())
+	require.NotEmpty(t, events)
+
+	var terminal *AgentEvent
+	for i := range events {
+		if events[i].BackgroundWork != nil && events[i].BackgroundWork.State == streams.RunStateEnded {
+			terminal = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, terminal, "the separate managed-bridge terminal frame must settle its detached shell")
+	require.Equal(t, "toolu_managed_detached", terminal.ToolCallID)
+	require.Equal(t, "toolu_managed_detached", terminal.BackgroundWork.WorkID)
+	require.Equal(t, streams.RunStateEnded, terminal.BackgroundWork.State)
+	require.Nil(t, terminal.BackgroundWork.ExitCode, "a null exit code remains unavailable")
+	require.Equal(t, 0, activeClaudeToolCallCount(a))
+}
+
+// @covers AC-AGENTS-BACKGROUND-WORK-010.3
+// @covers AC-AGENTS-BACKGROUND-WORK-010.6
 func TestClaudeBackgroundTerminalPromptCleanupScope(t *testing.T) {
 	cleanups := []struct {
 		name      string
@@ -98,6 +150,18 @@ func TestClaudeBackgroundTerminalPromptCleanupScope(t *testing.T) {
 			name:          "verified bridge",
 			agentName:     verifiedClaudeTerminalBridgeName,
 			agentVersion:  verifiedClaudeTerminalBridgeVersion,
+			wantPreserved: true,
+		},
+		{
+			name:          "managed bridge",
+			agentName:     verifiedClaudeTerminalBridgeName,
+			agentVersion:  verifiedClaudeTerminalBridgeManagedVersion,
+			wantPreserved: true,
+		},
+		{
+			name:          "current managed bridge",
+			agentName:     verifiedClaudeTerminalBridgeName,
+			agentVersion:  verifiedClaudeTerminalBridgeCurrentVersion,
 			wantPreserved: true,
 		},
 		{

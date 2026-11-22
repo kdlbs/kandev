@@ -849,7 +849,11 @@ export class ApiClient {
     const { agents } = await this.listAgents();
     const agent = agents.find((candidate) => candidate.name === name);
     if (!agent) return;
-    await this.request("DELETE", `/api/v1/agents/${agent.id}`);
+    await this.deleteAgentById(agent.id);
+  }
+
+  async deleteAgentById(agentId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/agents/${agentId}`);
   }
 
   async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {
@@ -3510,6 +3514,8 @@ export class ApiClient {
   async getQueueStatus(identity: QueueSessionIdentityInput): Promise<{
     count: number;
     entries: Array<{
+      id: string;
+      position: number;
       content: string;
       queued_by: string;
       metadata?: Record<string, unknown>;

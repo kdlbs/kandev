@@ -114,6 +114,10 @@ type terminalDeliverySettlement struct {
 	latestSequence int64
 }
 
+type deliveryRecoveryBlockIdentity struct {
+	id, reason, streamID string
+}
+
 func (r *Repository) settleAgentDeliveryTerminalTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -283,59 +287,93 @@ func (r *Repository) resolveBoundDeliveryBlocksTx(
 	effect *models.AgentDeliveryEffect,
 	settledAt time.Time,
 ) error {
-	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
-		SELECT id, reason FROM session_recovery_blocks
+	_, err := r.bindOpenDeliveryBlocksToTerminalTx(ctx, tx, effect, settledAt, false)
+	return err
+}
+
+func (r *Repository) bindOpenDeliveryBlocksToTerminalTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	effect *models.AgentDeliveryEffect,
+	settledAt time.Time,
+	replaceMismatchedStream bool,
+) (bool, error) {
+	query := `SELECT id, reason, delivery_stream_id FROM session_recovery_blocks
 		WHERE session_id = ? AND incarnation_id = ? AND expected_generation = ?
-		  AND consumer_reference = 'agent_delivery' AND delivery_submission_id = ?
-		  AND (delivery_stream_id = '' OR delivery_stream_id = ?) AND state = ?`),
-		effect.SessionID, effect.IncarnationID, effect.HarnessGeneration,
-		effect.SubmissionID, effect.StreamID, models.RecoveryBlockOpen)
-	if err != nil {
-		return err
+		  AND consumer_reference = 'agent_delivery' AND delivery_submission_id = ? AND state = ?`
+	args := []any{effect.SessionID, effect.IncarnationID, effect.HarnessGeneration,
+		effect.SubmissionID, models.RecoveryBlockOpen}
+	if !replaceMismatchedStream {
+		query = `SELECT id, reason, delivery_stream_id FROM session_recovery_blocks
+			WHERE session_id = ? AND incarnation_id = ? AND expected_generation = ?
+			  AND consumer_reference = 'agent_delivery' AND delivery_submission_id = ?
+			  AND (delivery_stream_id = '' OR delivery_stream_id = ?) AND state = ?`
+		args = []any{effect.SessionID, effect.IncarnationID, effect.HarnessGeneration,
+			effect.SubmissionID, effect.StreamID, models.RecoveryBlockOpen}
 	}
-	type blockIdentity struct{ id, reason string }
-	var blocks []blockIdentity
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	var blocks []deliveryRecoveryBlockIdentity
 	for rows.Next() {
-		var block blockIdentity
-		if err := rows.Scan(&block.id, &block.reason); err != nil {
+		var block deliveryRecoveryBlockIdentity
+		if err := rows.Scan(&block.id, &block.reason, &block.streamID); err != nil {
 			_ = rows.Close()
-			return err
+			return false, err
 		}
 		blocks = append(blocks, block)
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return err
+		return false, err
 	}
 	if err := rows.Close(); err != nil {
-		return err
+		return false, err
 	}
-	if len(blocks) > 0 {
-		if err := r.advanceRecoverySessionRevisionTx(ctx, tx, effect.SessionID); err != nil {
-			return err
-		}
+	if len(blocks) == 0 {
+		return false, nil
 	}
+	if err := r.advanceRecoverySessionRevisionTx(ctx, tx, effect.SessionID); err != nil {
+		return false, err
+	}
+	updated := false
 	for _, block := range blocks {
-		result, err := tx.ExecContext(ctx, r.db.Rebind(`
-			UPDATE session_recovery_blocks
-			SET state = ?, delivery_stream_id = ?, delivery_sequence = ?, delivery_turn_id = ?,
-			    delivery_outcome = ?, authorized_action = ?, updated_at = ?, resolved_at = ?
-			WHERE id = ? AND reason = ? AND session_id = ? AND incarnation_id = ?
-			  AND expected_generation = ? AND consumer_reference = 'agent_delivery'
-			  AND delivery_submission_id = ? AND (delivery_stream_id = '' OR delivery_stream_id = ?)
-			  AND state = ?`),
-			models.RecoveryBlockResolved, effect.StreamID, effect.Sequence, effect.TurnID,
-			effect.Outcome, "durable_delivery_"+effect.Outcome, settledAt, settledAt,
-			block.id, block.reason, effect.SessionID, effect.IncarnationID,
-			effect.HarnessGeneration, effect.SubmissionID, effect.StreamID, models.RecoveryBlockOpen)
+		changed, err := r.updateDeliveryBlockTerminalBindingTx(ctx, tx, effect, block, settledAt)
 		if err != nil {
-			return err
+			return false, err
 		}
-		if _, err := result.RowsAffected(); err != nil {
-			return err
+		if !changed {
+			return false, fmt.Errorf("delivery recovery block %q changed during terminal binding", block.id)
 		}
+		updated = true
 	}
-	return nil
+	return updated, nil
+}
+
+func (r *Repository) updateDeliveryBlockTerminalBindingTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	effect *models.AgentDeliveryEffect,
+	block deliveryRecoveryBlockIdentity,
+	settledAt time.Time,
+) (bool, error) {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE session_recovery_blocks
+		SET state = ?, delivery_stream_id = ?, delivery_sequence = ?, delivery_turn_id = ?,
+		    delivery_outcome = ?, authorized_action = ?, updated_at = ?, resolved_at = ?
+		WHERE id = ? AND reason = ? AND session_id = ? AND incarnation_id = ?
+		  AND expected_generation = ? AND consumer_reference = 'agent_delivery'
+		  AND delivery_submission_id = ? AND delivery_stream_id = ? AND state = ?`),
+		models.RecoveryBlockResolved, effect.StreamID, effect.Sequence, effect.TurnID,
+		effect.Outcome, "durable_delivery_"+effect.Outcome, settledAt, settledAt,
+		block.id, block.reason, effect.SessionID, effect.IncarnationID,
+		effect.HarnessGeneration, effect.SubmissionID, block.streamID, models.RecoveryBlockOpen)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
 }
 
 func (r *Repository) loadTerminalDeliveryEffectTx(

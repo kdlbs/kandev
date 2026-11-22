@@ -13,8 +13,10 @@ import (
 // same metadata name to the launch result, so only the exact inspected tuple
 // may interpret a null exit as job termination.
 const (
-	verifiedClaudeTerminalBridgeName    = "@agentclientprotocol/claude-agent-acp"
-	verifiedClaudeTerminalBridgeVersion = "0.97.0"
+	verifiedClaudeTerminalBridgeName           = "@agentclientprotocol/claude-agent-acp"
+	verifiedClaudeTerminalBridgeVersion        = "0.97.0"
+	verifiedClaudeTerminalBridgeManagedVersion = "0.107.0"
+	verifiedClaudeTerminalBridgeCurrentVersion = "0.109.0"
 )
 
 // connectedAgentIdentity returns the immutable initialize identity of the
@@ -52,9 +54,15 @@ func claudeBackgroundTerminalExit(
 }
 
 func verifiedClaudeTerminalBridge(agentID, agentName, agentVersion string) bool {
-	return agentID == claudeAgentID &&
-		agentName == verifiedClaudeTerminalBridgeName &&
-		agentVersion == verifiedClaudeTerminalBridgeVersion
+	if agentID != claudeAgentID || agentName != verifiedClaudeTerminalBridgeName {
+		return false
+	}
+	switch agentVersion {
+	case verifiedClaudeTerminalBridgeVersion, verifiedClaudeTerminalBridgeManagedVersion, verifiedClaudeTerminalBridgeCurrentVersion:
+		return true
+	default:
+		return false
+	}
 }
 
 func claudeActiveDetachedShell(payload *streams.NormalizedPayload) bool {

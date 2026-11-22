@@ -13,7 +13,7 @@ test.describe("Claude background terminal exit (mobile)", () => {
     fs.rmSync(terminalSignalFile, { force: true });
     await backend.restart({
       KANDEV_MOCK_PROVIDERS: "claude-acp",
-      E2E_MOCK_AGENT_CLAUDE_BRIDGE_VERSION: "0.97.0",
+      E2E_MOCK_AGENT_CLAUDE_BRIDGE_VERSION: "0.109.0",
       E2E_MOCK_AGENT_CLAUDE_TERMINAL_SIGNAL_FILE: terminalSignalFile,
     });
   });

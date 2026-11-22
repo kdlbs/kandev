@@ -2027,6 +2027,19 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   border-left: 3px solid color-mix(in oklab, var(--primary) 72%, transparent) !important;
 }
 
+/* The prompt editor uses the dark editor theme in every app theme. A
+   read-only one sits on a lighter dark surface (keeping the theme's text
+   contrast) without a cursor, inside a dashed frame, so it reads as
+   read-only next to an editable one. */
+.settings-prompt-editor[data-read-only="true"] .monaco-editor {
+  --vscode-editor-background: #2a2a2a !important;
+  --vscode-editorGutter-background: #2a2a2a !important;
+}
+
+.settings-prompt-editor[data-read-only="true"] .monaco-editor .cursors-layer {
+  display: none;
+}
+
 /* Monaco Editor - Peek view / references widget overrides */
 .settings-prompt-editor .monaco-editor .suggest-widget {
   /* Keep completion rows above the mobile settings save bar. */

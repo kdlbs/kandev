@@ -124,8 +124,7 @@ type Repository interface {
 	// GetAutoMergeOverride returns nil while the exact session inherits globally.
 	GetAutoMergeOverride(ctx context.Context, identity QueueSessionIdentity) (*AutoMergeOverride, error)
 
-	// SetAutoMergeOverride writes an explicit value and advances its session revision.
-	SetAutoMergeOverride(ctx context.Context, identity QueueSessionIdentity, enabled bool) (AutoMergeOverride, error)
+	SetSessionPolicyAndCompact(ctx context.Context, identity QueueSessionIdentity, change SessionPolicyChange, global AutoMergePolicy, globalErr error) (SessionPolicyResult, error)
 
 	// PauseAutoRunIfPending atomically persists OFF only when at least one
 	// visible pending entry remains. Reserved lifecycle rows do not count.

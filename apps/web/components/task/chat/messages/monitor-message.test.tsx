@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { useEffect } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MonitorMessage } from "./monitor-message";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import type { WorkloadRunObservation } from "@/lib/types/background-work";
+import { StateProvider, useAppStore } from "@/components/state-provider";
 
 // monitorMessage is a tiny test-helper that constructs the kandev Message
 // shape produced by the orchestrator for a Monitor tool_call. The fields
@@ -15,6 +19,7 @@ function monitorMessage(opts: {
   recentEvents?: string[];
   ended?: boolean;
   endReason?: string;
+  callId?: string;
 }): Message {
   return {
     id: "msg-1",
@@ -25,7 +30,7 @@ function monitorMessage(opts: {
     type: "tool_call",
     created_at: "2026-04-25T10:00:00Z",
     metadata: {
-      tool_call_id: "tc-monitor",
+      tool_call_id: opts.callId ?? "tc-monitor",
       title: "Monitor",
       status: opts.status ?? "running",
       normalized: {
@@ -49,6 +54,44 @@ function monitorMessage(opts: {
     },
   };
 }
+
+function monitorWorkload(
+  workId: string,
+  sourceCallId: string,
+  state: WorkloadRunObservation["state"],
+): WorkloadRunObservation {
+  return {
+    session_id: "s1",
+    work_id: workId,
+    kind: "monitor",
+    title: "Monitor",
+    state,
+    source_call_id: sourceCallId,
+    capabilities: {
+      discovery: "snapshot",
+      output: "none",
+      transcript: false,
+      parentage: false,
+      reasoning_summary: false,
+      attributable_usage: false,
+    },
+    revision: 1,
+  };
+}
+
+function BackgroundWorkSetter({
+  onSet,
+}: {
+  onSet: (setWorkloads: (workloads: WorkloadRunObservation[]) => void) => void;
+}) {
+  const setBackgroundWorkloads = useAppStore((state) => state.setBackgroundWorkloads);
+  useEffect(() => {
+    onSet((workloads) => setBackgroundWorkloads("s1", workloads));
+  }, [onSet, setBackgroundWorkloads]);
+  return null;
+}
+
+afterEach(() => cleanup());
 
 describe("MonitorMessage", () => {
   it("renders a 'watching' pill while the monitor is in progress", () => {
@@ -134,5 +177,28 @@ describe("MonitorMessage", () => {
     const html = renderToStaticMarkup(<MonitorMessage comment={empty} />);
     expect(html).toContain("Monitor");
     expect(html).toContain("watching");
+  });
+
+  it("settles only the Monitor card with the matching source call workload", async () => {
+    let setWorkloads: ((workloads: WorkloadRunObservation[]) => void) | undefined;
+    render(
+      <StateProvider>
+        <BackgroundWorkSetter onSet={(setter) => (setWorkloads = setter)} />
+        <MonitorMessage comment={monitorMessage({ callId: "tc-first" })} />
+        <MonitorMessage comment={monitorMessage({ callId: "tc-second", command: "other check" })} />
+      </StateProvider>,
+    );
+
+    await waitFor(() => expect(setWorkloads).toBeTypeOf("function"));
+    await act(async () => {
+      setWorkloads?.([
+        monitorWorkload("monitor-first", "tc-first", "completed"),
+        monitorWorkload("monitor-second", "tc-second", "running"),
+      ]);
+    });
+    await waitFor(() => {
+      const statuses = screen.getAllByTestId("monitor-status-pill");
+      expect(statuses.map((status) => status.textContent)).toEqual(["ended", "watching"]);
+    });
   });
 });

@@ -160,6 +160,12 @@ function parseStatusMetadata(comment: Message) {
   };
 }
 
+function detachedEpisodeNotice(kind: string | undefined): string | null {
+  if (kind === "turn_ended_detached") return t("task:turnEndedDetached");
+  if (kind === "paused_offline_budget") return t("task:pausedOfflineBudget");
+  return null;
+}
+
 function getStatusMessage(
   comment: Message,
   metadata: ErrorMetadata | undefined,
@@ -178,6 +184,8 @@ function getStatusMessage(
       : t("task:providerRestoredResumeSuccess");
   }
   if (metadata?.kind === "model_selection_warning") return t("task:modelSelectionWarning");
+  const episodeNotice = detachedEpisodeNotice(metadata?.kind);
+  if (episodeNotice) return episodeNotice;
   return metadata?.message || comment.content || statusLine || t("task:statusUpdate");
 }
 
