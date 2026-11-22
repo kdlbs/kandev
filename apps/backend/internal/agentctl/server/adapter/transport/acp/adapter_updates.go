@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"time"
@@ -101,6 +102,30 @@ func (a *Adapter) discardPendingSessionStartupWarnings() {
 	a.sessionCreationPending = false
 	a.pendingSessionStartupWarnings = nil
 	a.mu.Unlock()
+}
+
+// syncNotifQueueThenBounded queues a FIFO barrier and waits only within the
+// caller's deadline and timeout. If the wait expires, the barrier remains
+// queued and afterBarrier still runs when the worker reaches it.
+func (a *Adapter) syncNotifQueueThenBounded(
+	ctx context.Context,
+	timeout time.Duration,
+	afterBarrier func(),
+) bool {
+	done := make(chan struct{})
+	go func() {
+		a.syncNotifQueueThen(afterBarrier)
+		close(done)
+	}()
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	select {
+	case <-done:
+		return true
+	case <-waitCtx.Done():
+		return false
+	}
 }
 
 // startUpdateWorker spawns the goroutine that drains notifQueue and calls

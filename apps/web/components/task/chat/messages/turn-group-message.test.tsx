@@ -169,7 +169,7 @@ describe("TurnGroupMessage Codex subagent activity", () => {
 // agree. The old label built its noun from a subagent-excluding count and read
 // "3 tool call, 2 subagents" — wrong number, wrong plural.
 describe("TurnGroupMessage collapsed label", () => {
-  function renderLabel(messageCount: number): string {
+  function renderLabel(messageCount: number, isTurnActive = false): string {
     return renderToStaticMarkup(
       <TurnGroupMessage
         group={{
@@ -182,6 +182,8 @@ describe("TurnGroupMessage collapsed label", () => {
         }}
         sessionId="s1"
         permissionsByToolCallId={new Map()}
+        isLastGroup
+        isTurnActive={isTurnActive}
       />,
     );
   }
@@ -195,5 +197,10 @@ describe("TurnGroupMessage collapsed label", () => {
 
   it("never mentions subagents, which are hoisted out of groups", () => {
     expect(renderLabel(3)).not.toContain("subagent");
+  });
+
+  it("exposes collapsed and active expansion state on the toggle", () => {
+    expect(renderLabel(2)).toContain('aria-expanded="false"');
+    expect(renderLabel(2, true)).toContain('aria-expanded="true"');
   });
 });

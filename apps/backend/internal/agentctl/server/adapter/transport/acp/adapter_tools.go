@@ -249,6 +249,9 @@ func (a *Adapter) trackToolCallPayload(
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.isStaleClaudeNativeToolFrameLocked(sessionID) {
+		return nil, "", signal, "", "", true
+	}
 	if signal == codexSubagentSignalNone {
 		a.trackCodexSubagentControlLocked(sessionID, toolCallID, payload)
 		a.trackCopilotSubagentCallLocked(sessionID, toolCallID, payload)
@@ -779,6 +782,10 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	agentName, agentVersion := a.connectedAgentIdentity()
 
 	a.mu.Lock()
+	if a.isStaleClaudeNativeToolFrameLocked(sessionID) {
+		a.mu.Unlock()
+		return nil
+	}
 	if a.claudeMonitorToolCallSettledLocked(sessionID, toolCallID) {
 		a.mu.Unlock()
 		return nil
@@ -862,6 +869,12 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	if payload != nil && payload.Kind() == streams.ToolKindShellExec {
 		recognizedShellUpdate = a.normalizer.NormalizeShellToolUpdate(payload, tcu.Meta, convertedContents, tcu.RawOutput)
 		a.normalizer.confirmBackgroundLaunch(payload, tcu.RawOutput)
+		if status == toolStatusComplete && verifiedClaudeTerminalBridge(a.agentID, agentName, agentVersion) &&
+			payload.IsDetachedBackgroundLaunch() && payload.IsVerifiedBackgroundWork() &&
+			payload.BackgroundWork().WorkID == "" {
+			background := payload.BackgroundWork()
+			payload.SetBackgroundWorkIdentity(background.Kind, toolCallID, background.Detached, background.Ended)
+		}
 		a.recordOpenCodePluginClaimLocked(string(tcu.ToolCallId), pluginPromptGeneration, payload)
 		if claudeBackgroundTerminalExit(
 			a.agentID, agentName, agentVersion, tcu.Meta, toolCallID, payload,

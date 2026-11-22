@@ -269,6 +269,9 @@ func (a *Adapter) installNativeBindingBarrier(
 	var startupWarnings []AgentEvent
 	bind := func() {
 		a.mu.Lock()
+		if a.sessionID != sessionID {
+			a.clearVerifiedClaudeShellBindingsLocked()
+		}
 		a.sessionID = sessionID
 		a.bindingCopilotNative = false
 		if a.sessionCreationPending {
@@ -302,6 +305,9 @@ func (a *Adapter) installNativeBindingBarrier(
 		return true
 	}
 	a.mu.Lock()
+	if a.sessionID != sessionID {
+		a.clearVerifiedClaudeShellBindingsLocked()
+	}
 	a.sessionID = sessionID
 	a.bindingCopilotNative = false
 	if clearLoading {
