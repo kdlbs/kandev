@@ -310,6 +310,9 @@ acknowledgement, because the external system may already have accepted the
 prompt. Startup reconciliation resumes expired pre-attempt receipts and clears
 attempted receipts without redispatching them.
 
+A failure after the marker but before transport keeps the message queued. See
+[plan comments part 2](plan-comments-02.md).
+
 Send Now follows the same rule for every comment-bearing source. It persists
 one deterministic transcript for the combined ordered envelope before marking
 all source receipts attempted in one transaction; source-level transcript
@@ -594,3 +597,4 @@ correctness boundary.
 
 - [Task-owned plan comments](../../../plans/task-owned-plan-comments/plan.md)
 - [Plan comment recovery](../../../plans/plan-comment-recovery/plan.md)
+- [Web preview feedback and comment surface](../../../plans/web-preview-feedback-comment-surface/plan.md)

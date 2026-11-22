@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- HTTP DTO definitions intentionally co-locate protocol shapes. */
 
 import type { ExecutorProvider, ExecutorType } from "./executor";
+import type { AuthorExclusionWarning } from "./author-exclusion";
 import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
 import type {
@@ -910,6 +911,23 @@ export type CustomPrompt = {
   name: string;
   content: string;
   builtin: boolean;
+  /**
+   * "sync" when Prompt Sync owns the prompt (read-only); "override" when an
+   * operator replaced a synced prompt locally (editable, sync leaves it).
+   */
+  source?: "manual" | "sync" | "override";
+  /** Repository file a synced or overridden prompt comes from. */
+  source_path?: string;
+  /**
+   * True for an override adopted from a prompt whose name a repository file
+   * also uses, until the user chooses the local or repository version.
+   */
+  conflict?: boolean;
+  /**
+   * The version not in use: the kept local version of a synced prompt, or
+   * the repository version of an override.
+   */
+  alternate_content?: string;
   created_at: string;
   updated_at: string;
 };
@@ -1291,7 +1309,11 @@ export type StepPortable = {
   pull_from_step_position?: number;
 };
 
-export type ImportWorkflowsResult = { created: string[]; skipped: string[] };
+export type ImportWorkflowsResult = {
+  created: string[];
+  skipped: string[];
+  warnings?: AuthorExclusionWarning[];
+};
 
 export type WorkflowImportProfileCandidate = {
   id: string;
@@ -1320,6 +1342,8 @@ export type WorkflowImportPreview = {
   skipped: string[];
   profiles: WorkflowImportProfileCandidate[];
   steps: WorkflowImportProfileStep[];
+  /** Non-blocking exclude_author_provider setup warnings for the imported steps. */
+  warnings?: AuthorExclusionWarning[];
 };
 
 export type WorkflowImportProfileBinding = {

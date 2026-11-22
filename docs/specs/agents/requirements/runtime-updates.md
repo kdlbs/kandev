@@ -61,6 +61,8 @@ CLI installs updates and cannot install an arbitrary version.
 
 **Intent:** Some built-in harnesses ship their own package-manager-independent updater. The operator needs the same Settings update surface for those harnesses without Kandev assuming an installer, staging a candidate, or pinning a version the harness cannot install.
 
+For an agent that also declares a native update check, [native agent update checks](runtime-native-update-checks.md) replace the stable-reference status and preview behavior in AC-AGENTS-RUNTIME-UPDATES-003.2, 003.6, 003.7, and 003.11. The other criteria still apply.
+
 #### Acceptance criteria
 
 - **AC-AGENTS-RUNTIME-UPDATES-003.1:** When a built-in agent declares a trusted self-update command, Settings shall expose the update control, the update-state indicator, and the maintenance job that a pinned runtime exposes.

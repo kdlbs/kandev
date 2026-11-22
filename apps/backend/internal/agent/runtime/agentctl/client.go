@@ -1320,6 +1320,13 @@ type (
 	ProcessStatusUpdate         = types.ProcessStatusUpdate
 )
 
+// IsClosed reports whether Close has retired the client's streams.
+func (c *Client) IsClosed() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.closed
+}
+
 // Close closes all connections and releases resources. It is a drain
 // barrier for workspace stream goroutines: when Close returns, the workspace
 // read/write loops have fully exited and future StreamWorkspace calls return

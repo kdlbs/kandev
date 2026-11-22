@@ -1221,30 +1221,62 @@ func (e *Executor) persistSessionFullRowIfCurrentState(
 	session *models.TaskSession,
 	expected models.TaskSessionState,
 ) error {
-	var changed bool
-	var err error
-	if attemptID := models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]); attemptID != "" {
-		updater, ok := e.repo.(interface {
-			UpdateTaskSessionIfCurrentStateWithStartAttempt(
-				context.Context,
-				*models.TaskSession,
-				models.TaskSessionState,
-				string,
-			) (bool, error)
-		})
-		if !ok {
-			return fmt.Errorf("session start requires a startup-attempt-aware repository write")
-		}
-		changed, err = updater.UpdateTaskSessionIfCurrentStateWithStartAttempt(ctx, session, expected, attemptID)
-	} else {
-		changed, err = e.repo.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+	updater, ok := e.repo.(interface {
+		UpdateTaskSessionIfCurrentStateForLaunch(
+			context.Context,
+			*models.TaskSession,
+			models.TaskSessionState,
+			string,
+		) (bool, error)
+	})
+	if !ok {
+		return fmt.Errorf("session launch requires parking-aware repository writes")
 	}
+	attemptID := models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+	changed, err := updater.UpdateTaskSessionIfCurrentStateForLaunch(ctx, session, expected, attemptID)
 	if err != nil {
 		return err
 	}
 	if changed {
 		return nil
 	}
+	return e.classifyFailedSessionLaunchWrite(ctx, session, expected)
+}
+
+func (e *Executor) persistAgentStartAttemptIfCurrentState(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) error {
+	updater, ok := e.repo.(interface {
+		UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+			context.Context,
+			*models.TaskSession,
+			models.TaskSessionState,
+			string,
+		) (bool, error)
+	})
+	if !ok {
+		return fmt.Errorf("session launch requires parking-aware start-attempt writes")
+	}
+	changed, err := updater.UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+		ctx, session, expected, attemptID,
+	)
+	if err != nil {
+		return err
+	}
+	if changed {
+		return nil
+	}
+	return e.classifyFailedSessionLaunchWrite(ctx, session, expected)
+}
+
+func (e *Executor) classifyFailedSessionLaunchWrite(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+) error {
 	current, err := e.repo.GetTaskSession(ctx, session.ID)
 	if err != nil {
 		return err
@@ -1254,6 +1286,11 @@ func (e *Executor) persistSessionFullRowIfCurrentState(
 	}
 	if isStopTerminalSessionState(current.State) {
 		return &SessionStateSupersededError{SessionID: session.ID, State: current.State}
+	}
+	// The current parking stamp is the durable ownership fence. It also catches
+	// a park that has not changed WAITING_FOR_INPUT yet.
+	if models.WorkflowParkingSupersedesLaunch(session, current, expected) {
+		return &SessionStateSwitchedError{SessionID: session.ID, State: current.State}
 	}
 	if current.State == models.TaskSessionStateStarting || current.State == models.TaskSessionStateRunning {
 		if current.State == models.TaskSessionStateRunning {
@@ -2387,6 +2424,21 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 				return result, existingErr
 			}
 		}
+		var startAttemptID string
+		if startAgent {
+			// Claim the attempt before LaunchAgent. Workspace materialization can
+			// fail before persistLaunchState runs, and the failure transition must
+			// still be fenced against a replacement start attempt.
+			expectedState := session.State
+			startAttemptID = claimAgentStartAttempt(session)
+			session.UpdatedAt = time.Now().UTC()
+			if err := e.persistAgentStartAttemptIfCurrentState(launchCtx, session, expectedState, startAttemptID); err != nil {
+				return nil, err
+			}
+			if opts.OnStartAttemptClaimed != nil {
+				opts.OnStartAttemptClaimed(startAttemptID)
+			}
+		}
 
 		// Call the AgentManager to launch the container
 		resp, err := e.agentManager.LaunchAgent(launchCtx, req)
@@ -2394,9 +2446,16 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			if err == nil {
 				err = errors.New("agent launch returned no response")
 			}
-			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
+			if switchedErr := e.workflowParkingSuperseded(launchCtx, session, session.State); switchedErr != nil {
+				return nil, switchedErr
+			}
 			repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
-			return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+			failureCtx := WithWorkflowLaunchFailureOwnership(launchCtx, session)
+			failureErr := e.handleLaunchFailure(failureCtx, task.ID, sessionID, repositoryID, taskRepositoryID, startAgent, err)
+			if !IsSessionStateSwitched(failureErr) {
+				e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
+			}
+			return nil, failureErr
 		}
 
 		// Create or update the task environment with launch results
@@ -2404,7 +2463,8 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
 			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
 			repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
-			return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+			failureCtx := WithWorkflowLaunchFailureOwnership(launchCtx, session)
+			return nil, e.handleLaunchFailure(failureCtx, task.ID, sessionID, repositoryID, taskRepositoryID, startAgent, err)
 		}
 		if startAgent && req.BeforeAgentStart != nil {
 			if err := req.BeforeAgentStart(launchCtx, resp.AgentExecutionID, req.TaskDescription); err != nil {
@@ -2446,6 +2506,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return execution, finalizeErr
 	}()
 	if err != nil && sessionOwned && task != nil && !errors.Is(err, ErrExecutionAlreadyRunning) &&
+		!IsSessionStateSwitched(err) &&
 		(!isCancellableResumeContext(ctx) || ctx.Err() == nil) {
 		// Release while the session lock is still held so a losing launch
 		// cannot fail a claim a later same-session launch already elected.
@@ -2651,12 +2712,13 @@ func resumeTokenForExecutionProfile(running *models.ExecutorRunning, profileID s
 func (e *Executor) handleLaunchFailure(
 	ctx context.Context,
 	taskID, sessionID, repositoryID, taskRepositoryID string,
+	startAgent bool,
 	launchErr error,
 ) error {
 	// Detach from caller context so failure bookkeeping completes even if the
 	// original request context was cancelled.
 	failCtx := context.WithoutCancel(ctx)
-	safeErr, changed := e.transitionLaunchFailure(
+	changed, failureStamp, safeErr := e.transitionLaunchFailure(
 		failCtx, taskID, sessionID, repositoryID, taskRepositoryID, launchErr, nil,
 	)
 	if changed {
@@ -2664,9 +2726,37 @@ func (e *Executor) handleLaunchFailure(
 			e.logger.Warn("failed to mark task as failed after launch error",
 				zap.String("task_id", taskID),
 				zap.Error(updateErr))
+		} else if startAgent && e.onLaunchFailureRecorded != nil {
+			e.onLaunchFailureRecorded(failCtx, taskID, sessionID, safeErr, failureStamp)
 		}
 	}
 	return safeErr
+}
+
+func (e *Executor) workflowParkingSuperseded(
+	ctx context.Context,
+	launchSession *models.TaskSession,
+	expectedState models.TaskSessionState,
+) *SessionStateSwitchedError {
+	if launchSession == nil || launchSession.ID == "" {
+		return nil
+	}
+	lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	current, err := e.repo.GetTaskSession(lookupCtx, launchSession.ID)
+	if err != nil {
+		e.logger.Warn("failed to inspect session ownership after agent launch failure",
+			zap.String("session_id", launchSession.ID),
+			zap.Error(err))
+		return nil
+	}
+	if !models.WorkflowParkingSupersedesLaunch(launchSession, current, expectedState) {
+		return nil
+	}
+	e.logger.Info("agent launch failure was superseded by a workflow session switch",
+		zap.String("task_id", launchSession.TaskID),
+		zap.String("session_id", launchSession.ID))
+	return &SessionStateSwitchedError{SessionID: launchSession.ID, State: current.State}
 }
 
 func (e *Executor) handleEarlyLaunchFailure(
@@ -2674,6 +2764,12 @@ func (e *Executor) handleEarlyLaunchFailure(
 	taskID, sessionID, repositoryID string,
 	launchErr error,
 ) error {
+	if IsSessionStateSwitched(launchErr) {
+		e.logger.Info("launch superseded by a concurrent workflow session switch",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return routingerr.SanitizeError(launchErr)
+	}
 	failCtx := context.WithoutCancel(ctx)
 	session, loadErr := e.repo.GetTaskSession(failCtx, sessionID)
 	if loadErr != nil || session == nil || session.TaskID != taskID {
@@ -2691,7 +2787,7 @@ func (e *Executor) handleEarlyLaunchFailure(
 		return routingerr.SanitizeError(launchErr)
 	}
 	expectedState := session.State
-	safeErr, changed := e.transitionLaunchFailure(
+	changed, _, safeErr := e.transitionLaunchFailure(
 		failCtx, taskID, sessionID, repositoryID, "", launchErr, &expectedState,
 	)
 	if !changed {
@@ -2743,17 +2839,21 @@ func (e *Executor) transitionLaunchFailure(
 	taskID, sessionID, repositoryID, taskRepositoryID string,
 	launchErr error,
 	expectedState *models.TaskSessionState,
-) (error, bool) {
+) (bool, string, error) {
+	if launchSession, ok := WorkflowLaunchFailureOwnershipFromContext(failCtx); ok && launchSession.ID == sessionID {
+		expected := launchSession.State
+		expectedState = &expected
+	}
 	safeErr := routingerr.SanitizeError(launchErr)
-	e.logger.Error("failed to launch agent",
-		zap.String("task_id", taskID),
-		zap.Error(safeErr))
+	var failureStamp string
 	var onChanged func()
 	onChanged = func() {
+		lastError := e.buildLastAgentError(failCtx, taskID, taskRepositoryID, launchErr)
+		failureStamp = lastError.Stamp()
 		e.persistLastAgentError(
 			failCtx,
 			sessionID,
-			e.buildLastAgentError(failCtx, taskID, taskRepositoryID, launchErr),
+			lastError,
 		)
 		if e.onLaunchFailed != nil {
 			e.onLaunchFailed(failCtx, taskID, sessionID, repositoryID, safeErr)
@@ -2763,11 +2863,23 @@ func (e *Executor) transitionLaunchFailure(
 		failCtx, taskID, sessionID, expectedState, models.TaskSessionStateFailed, safeErr.Error(), onChanged,
 	)
 	if updateErr != nil {
+		var switchedErr *SessionStateSwitchedError
+		if errors.As(updateErr, &switchedErr) {
+			e.logger.Info("launch failure was superseded by a workflow session switch",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+			return false, "", switchedErr
+		}
+	}
+	e.logger.Error("failed to launch agent",
+		zap.String("task_id", taskID),
+		zap.Error(safeErr))
+	if updateErr != nil {
 		e.logger.Warn("failed to mark session as failed after launch error",
 			zap.String("session_id", sessionID),
 			zap.Error(updateErr))
 	}
-	return safeErr, changed
+	return changed, failureStamp, safeErr
 }
 
 // finalizeLaunch persists launch state and returns the resulting TaskExecution.

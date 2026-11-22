@@ -108,6 +108,7 @@ function TurnGroupHeader({
   return (
     <button
       type="button"
+      aria-expanded={isExpanded}
       onClick={onToggle}
       className={cn(
         "flex items-center gap-2 w-full text-left px-2 py-1.5 -mx-2 rounded",

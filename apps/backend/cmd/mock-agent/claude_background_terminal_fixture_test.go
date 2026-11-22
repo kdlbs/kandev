@@ -65,10 +65,16 @@ func TestMockClaudeBridgeAgentInfoRequiresVerifiedVersion(t *testing.T) {
 
 	t.Setenv(mockClaudeBridgeVersionEnv, "0.81.2")
 	require.Nil(t, mockClaudeBridgeAgentInfo())
+	t.Setenv(mockClaudeBridgeVersionEnv, "0.98.0")
+	require.Nil(t, mockClaudeBridgeAgentInfo())
 
-	t.Setenv(mockClaudeBridgeVersionEnv, mockClaudeBridgeVersion)
-	info := mockClaudeBridgeAgentInfo()
-	require.NotNil(t, info)
-	require.Equal(t, mockClaudeBridgeName, info.Name)
-	require.Equal(t, mockClaudeBridgeVersion, info.Version)
+	for _, version := range []string{mockClaudeBridgeLegacyVersion, mockClaudeBridgeMonitorVersion, mockClaudeBridgeVersion} {
+		t.Run(version, func(t *testing.T) {
+			t.Setenv(mockClaudeBridgeVersionEnv, version)
+			info := mockClaudeBridgeAgentInfo()
+			require.NotNil(t, info)
+			require.Equal(t, mockClaudeBridgeName, info.Name)
+			require.Equal(t, version, info.Version)
+		})
+	}
 }

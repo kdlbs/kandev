@@ -439,52 +439,41 @@ export async function sendQueuedNow(
   }
 }
 
+async function setQueueBooleanPolicy<T>(
+  action: "message.queue.auto_run.set" | "message.queue.auto_merge.set",
+  identity: QueueSessionIdentity,
+  enabled: boolean,
+  context: QueueErrorContext = "operation",
+): Promise<T> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
+  try {
+    return await client.request<T>(action, { ...identity, enabled }, 35_000);
+  } catch (err) {
+    rethrowQueueError(err, context);
+  }
+}
+
 /** Persist the per-session queue Auto-run policy and start the queue when enabling it. */
-export async function setQueueAutoRun(
+export function setQueueAutoRun(
   identity: QueueSessionIdentity,
   enabled: boolean,
 ): Promise<{ session_id: string; auto_run: boolean; dispatched: boolean }> {
-  const client = getWebSocketClient();
-  if (!client) {
-    throw new Error(WS_CLIENT_UNAVAILABLE);
-  }
-  try {
-    return await client.request<{ session_id: string; auto_run: boolean; dispatched: boolean }>(
-      "message.queue.auto_run.set",
-      { ...identity, enabled },
-      35_000,
-    );
-  } catch (err) {
-    rethrowQueueError(err, "admission");
-  }
+  return setQueueBooleanPolicy("message.queue.auto_run.set", identity, enabled, "admission");
 }
 export type QueueAutoMergePolicyResponse = QueueSessionIdentity & {
   auto_merge_enabled: boolean;
   auto_merge_source: "global" | "session";
   auto_merge_revision: number;
+  compacted_count: number;
 };
 
 /** Persist an explicit automatic-merge policy for one immutable session. */
-export async function setQueueAutoMerge(
+export function setQueueAutoMerge(
   identity: QueueSessionIdentity,
   enabled: boolean,
 ): Promise<QueueAutoMergePolicyResponse> {
-  const client = getWebSocketClient();
-  if (!client) {
-    throw new Error(WS_CLIENT_UNAVAILABLE);
-  }
-  try {
-    return await client.request<QueueAutoMergePolicyResponse>(
-      "message.queue.auto_merge.set",
-      {
-        ...identity,
-        enabled,
-      },
-      35_000,
-    );
-  } catch (err) {
-    rethrowQueueError(err);
-  }
+  return setQueueBooleanPolicy("message.queue.auto_merge.set", identity, enabled);
 }
 
 /** Fetch the full queue snapshot for one immutable session identity. */

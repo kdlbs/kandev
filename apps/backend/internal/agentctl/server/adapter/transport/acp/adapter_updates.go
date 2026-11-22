@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"time"
@@ -93,6 +94,30 @@ func (a *Adapter) syncNotifQueueThen(afterBarrier func()) bool {
 		return false
 	case <-ch:
 		return true
+	}
+}
+
+// syncNotifQueueThenBounded queues a FIFO barrier and waits only within the
+// caller's deadline and timeout. If the wait expires, the barrier remains
+// queued and afterBarrier still runs when the worker reaches it.
+func (a *Adapter) syncNotifQueueThenBounded(
+	ctx context.Context,
+	timeout time.Duration,
+	afterBarrier func(),
+) bool {
+	done := make(chan struct{})
+	go func() {
+		a.syncNotifQueueThen(afterBarrier)
+		close(done)
+	}()
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	select {
+	case <-done:
+		return true
+	case <-waitCtx.Done():
+		return false
 	}
 }
 
@@ -200,6 +225,16 @@ func (a *Adapter) handleACPUpdate(
 	}
 
 	sessionID := string(n.SessionId)
+	if n.Update.ConfigOptionUpdate != nil {
+		a.observeConfigurationCommandOptions(
+			sessionID,
+			promptGeneration,
+			convertACPConfigOptions(n.Update.ConfigOptionUpdate.ConfigOptions),
+		)
+	}
+	if n.Update.CurrentModeUpdate != nil {
+		a.observeConfigurationCommandMode(sessionID, promptGeneration, string(n.Update.CurrentModeUpdate.CurrentModeId))
+	}
 
 	suppressed := a.dialect.suppresses(n)
 	handled := suppressed
@@ -903,6 +938,14 @@ func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.Session
 		}
 		commands = append(commands, ac)
 	}
+	a.mu.Lock()
+	if !a.closed {
+		if a.availableCommandsBySession == nil {
+			a.availableCommandsBySession = make(map[string][]streams.AvailableCommand)
+		}
+		a.availableCommandsBySession[sessionID] = append([]streams.AvailableCommand(nil), commands...)
+	}
+	a.mu.Unlock()
 	return &AgentEvent{
 		Type:              streams.EventTypeAvailableCommands,
 		SessionID:         sessionID,

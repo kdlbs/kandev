@@ -156,6 +156,9 @@ func (a *Adapter) convertToolCallUpdateForGeneration(
 	if suppress {
 		return nil
 	}
+	if _, isMonitorCall := recognizeMonitorTaskCall(tc); isMonitorCall {
+		a.startClaudeMonitorCompletionReader(sessionID, nil)
+	}
 	a.mu.Lock()
 	a.trackClaudeSubagentCallLocked(sessionID, emittedToolCallID, promptGeneration, normalizedPayload)
 	a.mu.Unlock()
@@ -216,6 +219,9 @@ func (a *Adapter) trackToolCallPayload(
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.isStaleClaudeNativeToolFrameLocked(sessionID) {
+		return nil, "", signal, "", "", true
+	}
 	if signal == codexSubagentSignalNone {
 		a.trackCodexSubagentControlLocked(sessionID, toolCallID, payload)
 		a.trackCopilotSubagentCallLocked(sessionID, toolCallID, payload)
@@ -746,6 +752,14 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	agentName, agentVersion := a.connectedAgentIdentity()
 
 	a.mu.Lock()
+	if a.isStaleClaudeNativeToolFrameLocked(sessionID) {
+		a.mu.Unlock()
+		return nil
+	}
+	if a.claudeMonitorToolCallSettledLocked(sessionID, toolCallID) {
+		a.mu.Unlock()
+		return nil
+	}
 	updateTitle := ""
 	if tcu.Title != nil {
 		updateTitle = *tcu.Title
@@ -785,13 +799,23 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 			status,
 		)
 	}
+	var earlyMonitorCompletion *claudeMonitorCompletion
+	if isMonitorRegistration {
+		if completion, ok := a.takePendingClaudeMonitorCompletionLocked(sessionID, monitorTaskID, toolCallID); ok {
+			status, _ = claudeMonitorToolStatus(completion.State)
+			statusMissing = false
+			earlyMonitorCompletion = &completion
+		}
+	}
+	var earlyMonitorSettlement *claudeMonitorSettlement
 
 	// A terminal tool_call_update for an already-tracked Monitor (the agent
 	// proactively ended the watch). NormalizeToolResult would otherwise stomp
 	// the `{monitor: …}` view in Generic.Output with the raw string body, so
 	// we suppress the normalize call and let the closing-out logic below mark
 	// the view as ended instead.
-	isTrackedMonitorTerminal := !isMonitorRegistration && isMonitorMeta(tcu.Meta) && a.isTrackedMonitorLocked(sessionID, toolCallID)
+	isTrackedMonitor := !isMonitorRegistration && isMonitorMeta(tcu.Meta) && a.isTrackedMonitorLocked(sessionID, toolCallID)
+	isTrackedMonitorTerminal := isTrackedMonitor && isTerminalToolUpdateStatus(status)
 
 	// Recognize claude-acp's async-launched subagent envelope: the Task tool
 	// successfully dispatched a background subagent. The dispatch IS terminal
@@ -815,6 +839,12 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	if payload != nil && payload.Kind() == streams.ToolKindShellExec {
 		recognizedShellUpdate = a.normalizer.NormalizeShellToolUpdate(payload, tcu.Meta, convertedContents, tcu.RawOutput)
 		a.normalizer.confirmBackgroundLaunch(payload, tcu.RawOutput)
+		if status == toolStatusComplete && verifiedClaudeTerminalBridge(a.agentID, agentName, agentVersion) &&
+			payload.IsDetachedBackgroundLaunch() && payload.IsVerifiedBackgroundWork() &&
+			payload.BackgroundWork().WorkID == "" {
+			background := payload.BackgroundWork()
+			payload.SetBackgroundWorkIdentity(background.Kind, toolCallID, background.Detached, background.Ended)
+		}
 		a.recordOpenCodePluginClaimLocked(string(tcu.ToolCallId), pluginPromptGeneration, payload)
 		if claudeBackgroundTerminalExit(
 			a.agentID, agentName, agentVersion, tcu.Meta, toolCallID, payload,
@@ -825,7 +855,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 				payload, emittedToolCallID, time.Now().UTC(),
 			)
 		}
-	} else if tcu.RawOutput != nil && payload != nil && !isTrackedMonitorTerminal {
+	} else if tcu.RawOutput != nil && payload != nil && !isTrackedMonitor {
 		result := tcu.RawOutput
 		if canonicalMCPUpdate {
 			if normalizedResult, ok := a.dialect.normalizeMCPToolResult(tcu.RawOutput); ok {
@@ -874,23 +904,24 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		)
 	}
 
-	// Seed the Monitor view AFTER NormalizeToolResult so we overwrite the
-	// banner string the normalizer just stuffed into Generic.Output. The
-	// Monitor card detects itself by `output.monitor` presence — the banner
-	// would shadow it and the frontend would render this as a generic
-	// tool_call instead.
-	if isMonitorRegistration && payload != nil {
+	// Preserve and mark-ended the Monitor view on tracked-Monitor terminal
+	// updates so the card flips from "watching" to "ended" without losing
+	// the accumulated event count or recent-events tail.
+	var claudeMonitorObservation *streams.WorkloadRunObservation
+	switch {
+	case isMonitorRegistration && earlyMonitorCompletion != nil && payload != nil:
 		seedMonitorView(payload, monitorTaskID, monitorCommand)
 		if a.agentID == claudeAgentID || a.agentID == mockAgentID {
 			payload.SetMonitorIdentity(monitorTaskID, false)
 		}
-	}
-
-	// Preserve and mark-ended the Monitor view on tracked-Monitor terminal
-	// updates so the card flips from "watching" to "ended" without losing
-	// the accumulated event count or recent-events tail.
-	if isTrackedMonitorTerminal && payload != nil {
-		markMonitorEnded(payload, "exited")
+		earlyMonitorSettlement = a.settleClaudeMonitorLocked(sessionID, *earlyMonitorCompletion, payload)
+	case isMonitorRegistration && payload != nil:
+		seedMonitorView(payload, monitorTaskID, monitorCommand)
+		if a.agentID == claudeAgentID || a.agentID == mockAgentID {
+			payload.SetMonitorIdentity(monitorTaskID, false)
+		}
+	case isTrackedMonitorTerminal && isTerminal && payload != nil:
+		claudeMonitorObservation = a.settleTrackedMonitorFromACPUpdateLocked(sessionID, toolCallID, status, payload)
 	}
 
 	// Enrich modify_file payload from tool_call_contents.
@@ -930,6 +961,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	}
 	emittedPayload := cloneSubagentPayload(payload)
 	a.mu.Unlock()
+	earlyMonitorSettlement.sendBackgroundWork(a)
 	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
 
 	// ScheduleWakeup tracking: tool_call_update is where rawInput.prompt and
@@ -984,7 +1016,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		ToolStatusMissing: statusMissing,
 		NormalizedPayload: emittedPayload,
 		ToolCallContents:  convertedContents,
-		BackgroundWork:    claudeTerminalObservation,
+		BackgroundWork:    selectWorkloadObservation(claudeTerminalObservation, claudeMonitorObservation),
 	}
 }
 

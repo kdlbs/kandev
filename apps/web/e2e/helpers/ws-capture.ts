@@ -293,6 +293,9 @@ export async function routeGatewayNotifications(page: Page, blockedNotifications
   });
 
   return {
+    isConnected() {
+      return sockets.length > 0;
+    },
     acknowledgeMessageAdds() {
       acknowledgeMessageAdds = true;
     },

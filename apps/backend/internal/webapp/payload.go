@@ -38,11 +38,18 @@ type BootEntityGraph struct {
 // ActivePluginPayload is one entry of BootPayload.Plugins: the browser-facing
 // shape the SPA's plugin host (apps/web/lib/plugins/host.ts) iterates to
 // inject styles and dynamically import() each plugin's bundle.
+type FileViewerPayload struct {
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	Extensions []string `json:"extensions"`
+}
+
 type ActivePluginPayload struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	BundleURL string   `json:"bundleUrl"`
-	StyleURLs []string `json:"styleUrls,omitempty"`
+	FileViewers []FileViewerPayload `json:"fileViewers,omitempty"`
+	ID          string              `json:"id"`
+	Name        string              `json:"name"`
+	BundleURL   string              `json:"bundleUrl"`
+	StyleURLs   []string            `json:"styleUrls,omitempty"`
 	// RepositoryProviderIDs is nil only for legacy manifests that omit
 	// repository_providers. A non-nil empty slice is an explicit declaration
 	// that must reach the browser as [] so the plugin registry can deny every

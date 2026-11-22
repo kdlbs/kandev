@@ -1,7 +1,12 @@
 package store
 
 import (
+	"crypto/sha256"
+	"database/sql"
+	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	utilcfg "github.com/kandev/kandev/config/utilityagents"
@@ -44,6 +49,66 @@ var builtinDefs = []builtinDef{
 // CodeReviewAgentID is the built-in utility agent that supplies the default
 // reviewer identity for a native code-review pass.
 const CodeReviewAgentID = "builtin-code-review"
+
+// enhancePromptV1SHA256 identifies the enhance-prompt template shipped before
+// it listed changed files instead of embedding the session diff. Hashes use the
+// same TrimSpace normalization as utilcfg.Get.
+const enhancePromptV1SHA256 = "2196530e1daf3ecbbf8b8d3883aa98475db5dc052b11ca5c0e02533eb351de15"
+
+// builtinPromptRefresh replaces a stored built-in prompt with the current
+// embedded template when the stored text is an exact shipped revision.
+type builtinPromptRefresh struct {
+	id           string
+	promptFile   string
+	legacyHashes []string
+}
+
+var builtinPromptRefreshes = []builtinPromptRefresh{
+	{id: "builtin-enhance-prompt", promptFile: "enhance-prompt", legacyHashes: []string{enhancePromptV1SHA256}},
+}
+
+// refreshUneditedBuiltinPrompts upgrades known built-in prompt revisions.
+// Custom prompt text and profile bindings remain unchanged.
+func (r *sqliteRepository) refreshUneditedBuiltinPrompts() error {
+	for _, refresh := range builtinPromptRefreshes {
+		if err := r.refreshUneditedBuiltinPrompt(refresh); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *sqliteRepository) refreshUneditedBuiltinPrompt(refresh builtinPromptRefresh) error {
+	var storedPrompt string
+	var builtinInt int
+	err := r.db.QueryRow(r.db.Rebind(`
+		SELECT prompt, builtin
+		FROM utility_agents
+		WHERE id = ?
+	`), refresh.id).Scan(&storedPrompt, &builtinInt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read stored built-in prompt %s: %w", refresh.id, err)
+	}
+	if builtinInt != 1 || !isShippedPromptRevision(storedPrompt, refresh.legacyHashes) {
+		return nil
+	}
+	if _, err := r.db.Exec(r.db.Rebind(`
+		UPDATE utility_agents
+		SET prompt = ?
+		WHERE id = ? AND builtin = ? AND prompt = ?
+	`), utilcfg.Get(refresh.promptFile), refresh.id, true, storedPrompt); err != nil {
+		return fmt.Errorf("refresh stored built-in prompt %s: %w", refresh.id, err)
+	}
+	return nil
+}
+
+func isShippedPromptRevision(prompt string, hashes []string) bool {
+	sum := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimSpace(prompt))))
+	return slices.Contains(hashes, sum)
+}
 
 // builtinSeedAgentID is the inference-agent ID embedded in seeded built-in
 // rows. Kept aligned with the schema DEFAULT so a row that survives every

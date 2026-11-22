@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { ClarificationAnswerAnnotation } from "@/lib/types/http";
-import { MAX_REGIONS, type RegionRect } from "@/lib/question-review/regions";
+import { MAX_REGIONS } from "@/lib/question-review/regions";
+import type { RegionRect } from "@/lib/regions/geometry";
 import type { Size } from "@/lib/question-review/viewport";
 
 export type ReviewAnnotations = Record<string, readonly ClarificationAnswerAnnotation[]>;

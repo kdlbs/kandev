@@ -94,7 +94,7 @@ function captureRefreshOwner({ fileKey, path, repo, isCurrent }: SyncOpenFileArg
  *    via `hasRemoteUpdate` so the user explicitly chooses to clobber edits.
  */
 export async function syncOpenFileFromWorkspace(args: SyncOpenFileArgs): Promise<void> {
-  if (!args.client) return;
+  if (!args.client || useDockviewStore.getState().openFiles.get(args.fileKey)?.previewOnly) return;
   const owner = captureRefreshOwner(args);
   if (!owner) return;
   try {

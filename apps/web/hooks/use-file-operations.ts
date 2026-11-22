@@ -22,9 +22,12 @@ export async function downloadFileContent(
   sessionId: string,
   path: string,
   unknownError: string,
+  repo?: string,
 ): Promise<DownloadResult> {
   try {
-    const response = await requestFileContent(client, sessionId, path);
+    const response = repo
+      ? await requestFileContent(client, sessionId, path, repo)
+      : await requestFileContent(client, sessionId, path);
     if (response.error) return { ok: false, error: response.error };
     triggerFileDownload({
       fileName: path,
@@ -76,10 +79,10 @@ export function useFileOperations(
   const handleRenameFile = useFileRename(sessionId, options);
 
   const handleDownloadFile = useCallback(
-    async (path: string): Promise<boolean> => {
+    async (path: string, repo?: string): Promise<boolean> => {
       const client = getWebSocketClient();
       if (!client || !sessionId) return false;
-      const result = await downloadFileContent(client, sessionId, path, unknownError);
+      const result = await downloadFileContent(client, sessionId, path, unknownError, repo);
       if (!result.ok) {
         toast({
           title: t("task:failedToDownloadFile"),

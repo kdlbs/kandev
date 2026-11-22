@@ -602,7 +602,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.logger.Info("recovered executions", zap.Int("count", len(recovered)))
 	}
 	for _, record := range records {
-		if record == nil || detailedOutcomes[record.SessionID] != RecoveryOutcomeNoMatchingInstance ||
+		if record == nil || !remoteRecoveryOutcomeProvesAbsence(record.Runtime, detailedOutcomes[record.SessionID]) ||
 			!remoteRecoveryNoMatchProvesStopped(record.Runtime) {
 			continue
 		}

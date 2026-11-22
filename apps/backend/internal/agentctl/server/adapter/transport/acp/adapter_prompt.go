@@ -20,6 +20,8 @@ import (
 
 const maxNativeAttachmentBytes int64 = 8 << 20
 
+const claudeCancelQueueDrainTimeout = 250 * time.Millisecond
+
 // Prompt sends a prompt to the agent.
 // If pending context is set (from SetPendingContext), it will be prepended to the message.
 // Attachments (images) are converted to ACP ImageBlocks and included in the prompt.
@@ -145,6 +147,12 @@ func (a *Adapter) sendPrompt(
 			zap.String("session_id", sessionID),
 			zap.Int("context_length", len(pendingContext)))
 	}
+	if humanPrompt && pendingContext == "" && len(attachments) == 0 {
+		tracker := a.configurationCommandForPrompt(sessionID, message, promptGeneration)
+		turn.evidenceMu.Lock()
+		turn.configurationCommand = tracker
+		turn.evidenceMu.Unlock()
+	}
 	a.beginPromptTurn(sessionID)
 	// Every prompt-ending path must close the honest inspection window for a
 	// launch whose provider ends delivery with this prompt. Success settles
@@ -192,6 +200,8 @@ func (a *Adapter) sendPrompt(
 
 	var resp acp.PromptResponse
 	var err error
+	monitorReaderPrompt := a.beginClaudeMonitorPrompt(sessionID)
+	defer a.endClaudeMonitorPrompt(sessionID, monitorReaderPrompt)
 	go func() {
 		defer close(turn.rpcDone)
 		resp, err = conn.Prompt(traceCtx, acp.PromptRequest{
@@ -293,17 +303,14 @@ func (a *Adapter) sendPrompt(
 		return normalizedErr
 	}
 
-	// Drain queued ACP notifications before running the post-prompt sweeps and
+	// Drain queued ACP notifications before running post-prompt cleanup and
 	// the complete event. The worker (now async) may still hold final frames
 	// the agent emitted right before its prompt response — the final text
 	// chunk, the terminal monitor_end tool_call_update, the registration
 	// frame for a Monitor whose events haven't yet been routed. Without this
-	// barrier:
-	//   - cancelActiveToolCalls / sweepMonitorsOnPromptEnd race the worker
-	//     for activeToolCalls and activeMonitors. If the worker hasn't added
-	//     a Monitor yet when the sweep takes the map, subsequent monitor_event
-	//     text frames find no tracking and drop their events on the floor.
-	//   - The complete event emitted to updatesCh outruns the final text chunk,
+	// barrier, cancelPromptEndToolCalls could race the worker for active tool
+	// and Monitor state. A Monitor that has not registered yet cannot receive
+	// later monitor_event text frames. The complete event could also outrun the final text chunk,
 	//     so the downstream buffer flush yields empty and the turn persists as
 	//     had_output=false even when the agent did produce text.
 	notificationsDrained := a.syncNotifQueue()
@@ -318,12 +325,6 @@ func (a *Adapter) sendPrompt(
 	// they must neither be reported as cancelled nor keep fencing new prompts.
 	a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
 	a.cancelPromptEndToolCalls(sessionID)
-
-	// Mark any tracked Monitors as ended. They live longer than a typical tool
-	// call (the script keeps running across model turns), so this sweep runs
-	// after `cancelActiveToolCalls` to give the Monitor card a clean terminal
-	// state when the parent prompt completes naturally.
-	a.sweepMonitorsOnPromptEnd(sessionID)
 
 	// Drop any Cursor `cursor/task` metadata for this session that never matched
 	// a subagent tool_call this turn.
@@ -434,12 +435,17 @@ func (a *Adapter) sendPrompt(
 		usage.ProviderReportedCostSubcents = costSubcents
 		usage.ProviderReportedCostPresent = true
 	}
+	var configurationResult *streams.ConfigurationCommandResult
+	if stopReason == string(acp.StopReasonEndTurn) {
+		configurationResult = a.configurationCommandResult(turn, sessionID)
+	}
 	a.sendUpdate(AgentEvent{
-		Type:             streams.EventTypeComplete,
-		SessionID:        sessionID,
-		PromptGeneration: promptGeneration,
-		Data:             map[string]any{"stop_reason": stopReason},
-		Usage:            usage,
+		Type:                       streams.EventTypeComplete,
+		SessionID:                  sessionID,
+		PromptGeneration:           promptGeneration,
+		Data:                       map[string]any{"stop_reason": stopReason},
+		ConfigurationCommandResult: configurationResult,
+		Usage:                      usage,
 	})
 
 	return nil
@@ -715,22 +721,27 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 
 	a.logger.Info("cancelling session", zap.String("session_id", sessionID))
 
-	// Settle retained launches whose provider cannot report a later outcome
-	// before the generic cancel sweep can turn them into cancelled tools.
 	a.prepareSessionCancel(sessionID)
-	// Mark all active tool calls as cancelled before sending cancel to agent.
-	a.cancelActiveToolCalls(sessionID)
+	name, version := a.connectedAgentIdentity()
+	orderedClaudeCleanup := verifiedClaudeTerminalBridge(a.agentID, name, version)
+	if !orderedClaudeCleanup {
+		a.cancelActiveToolCalls(sessionID)
+	}
 
-	if err := conn.Cancel(ctx, acp.CancelNotification{
+	cancelErr := conn.Cancel(ctx, acp.CancelNotification{
 		SessionId: acp.SessionId(sessionID),
-	}); err != nil {
-		span.RecordError(err)
+	})
+	if orderedClaudeCleanup {
+		a.waitForClaudeCancelCleanup(ctx, sessionID)
+	}
+	if cancelErr != nil {
+		span.RecordError(cancelErr)
 		// Still wake the in-flight prompt waiter so sendPrompt can exit within
 		// promptCancelJoinTimeout rather than blocking the gate forever. The
 		// timeout branch in waitForPromptRPCAfterUserCancel will cancel
 		// promptCtx if the agent never acknowledges.
 		a.signalPromptTurnAbort()
-		return err
+		return cancelErr
 	}
 
 	turn := a.signalPromptTurnAbort()
@@ -747,6 +758,16 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 	return nil
 }
 
+func (a *Adapter) waitForClaudeCancelCleanup(ctx context.Context, sessionID string) {
+	drained := a.syncNotifQueueThenBounded(ctx, claudeCancelQueueDrainTimeout, func() {
+		a.cancelActiveToolCalls(sessionID)
+	})
+	if !drained {
+		a.logger.Warn("Claude cancellation cleanup remains queued behind ACP notifications",
+			zap.String("session_id", sessionID))
+	}
+}
+
 // prepareSessionCancel settles launches whose provider ends delivery with the
 // session. It runs before the generic cancel sweep so an identified launch
 // becomes unknown instead of a cancelled tool with running background work.
@@ -754,14 +775,13 @@ func (a *Adapter) prepareSessionCancel(sessionID string) {
 	a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
 }
 
-// cancelActiveToolCalls emits cancelled tool_update events for all in-flight tool calls
-// and clears the activeToolCalls map.
+// cancelActiveToolCalls cancels ordinary in-flight calls and retains entries
+// whose provider can still deliver authoritative terminal evidence.
 //
-// Monitor tool calls are intentionally skipped here — they are tracked in
-// activeMonitors and given their own terminal sweep (sweepMonitorsOnPromptEnd
-// or sweepMonitorsOnReplayEnd) which uses the appropriate status and a
-// payload snapshot. Without this skip the Monitor would receive two
-// terminal events with conflicting states.
+// Monitor tool calls are intentionally skipped by prompt-end cleanup — their
+// watches outlive foreground turns. Explicit terminal evidence or replay after
+// process replacement owns their terminal transition. Without this skip a
+// foreground boundary would cancel a still-running watch.
 //
 // Subagent (Task) tool calls are also preserved: the Claude Agent SDK can
 // return session/prompt with stop_reason while the subagent is still running
@@ -774,8 +794,8 @@ func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 }
 
 // cancelPromptEndToolCalls preserves background work inherited from a
-// handed-off predecessor. Explicit session cancellation still uses
-// cancelActiveToolCalls so it can terminate the whole session.
+// handed-off predecessor. Explicit cancellation also preserves work with an
+// exact terminal binding while cancelling ordinary active calls.
 func (a *Adapter) cancelPromptEndToolCalls(sessionID string) {
 	a.cancelActiveToolCallsPreservingHandoff(sessionID, true)
 }
@@ -792,7 +812,11 @@ func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
 	for _, tcID := range a.activeMonitors[sessionID] {
 		monitorToolCallIDs[tcID] = true
 	}
-	toCancel := make(map[string]*streams.NormalizedPayload)
+	type cancelledToolCall struct {
+		payload        *streams.NormalizedPayload
+		backgroundWork *streams.WorkloadRunObservation
+	}
+	toCancel := make(map[string]cancelledToolCall)
 	preserved := make(map[string]*streams.NormalizedPayload)
 	for tcID, payload := range a.activeToolCalls {
 		switch {
@@ -800,22 +824,22 @@ func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
 			preserved[tcID] = payload
 		case monitorToolCallIDs[tcID]:
 			preserved[tcID] = payload
-		case preserveHandoff && a.preservesVerifiedClaudeBackgroundShell(payload):
-			// Prompt-end cleanup keeps the verified bridge's shell binding so a
-			// later tool-scoped frame can settle the exact job. Explicit
-			// cancellation still terminates the card.
+		case a.preservesVerifiedClaudeBackgroundShell(payload) && payload.BackgroundWork().WorkID == tcID:
+			// A completed detached shell keeps its exact binding so the qualified
+			// bridge's later tool-scoped exit can settle the workload.
 			preserved[tcID] = payload
 		case payload != nil && payload.Kind() == streams.ToolKindSubagentTask:
 			preserved[tcID] = payload
 		default:
-			toCancel[tcID] = payload
+			backgroundWork := a.endUnconfirmedClaudeBackgroundShellLocked(payload, tcID)
+			toCancel[tcID] = cancelledToolCall{payload: payload, backgroundWork: backgroundWork}
 			a.forgetPromptHandoffToolLocked(tcID)
 		}
 	}
 	a.activeToolCalls = preserved
 	a.mu.Unlock()
 
-	for toolCallID, normalized := range toCancel {
+	for toolCallID, cancelled := range toCancel {
 		a.logger.Debug("cancelling active tool call",
 			zap.String("session_id", sessionID),
 			zap.String("tool_call_id", toolCallID))
@@ -824,7 +848,8 @@ func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
 			SessionID:         sessionID,
 			ToolCallID:        toolCallID,
 			ToolStatus:        toolStatusCancelled,
-			NormalizedPayload: normalized,
+			NormalizedPayload: cancelled.payload,
+			BackgroundWork:    cancelled.backgroundWork,
 		})
 	}
 }

@@ -2110,6 +2110,11 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 
 		resp, err := h.sessionLauncher.LaunchSession(ctx, launchReq)
 		if err != nil {
+			if orchestrator.IsWorkflowSwitchLaunchSuperseded(err) {
+				h.logger.Info("MCP task auto-start yielded to a workflow session switch",
+					zap.String("task_id", task.ID), zap.Error(err))
+				return
+			}
 			h.logger.Error("failed to auto-start task",
 				zap.String("task_id", task.ID), zap.Error(err))
 			h.recordAutoStartFailure(ctx, task.ID, err.Error())

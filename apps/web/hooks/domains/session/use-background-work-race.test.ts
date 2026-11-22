@@ -22,7 +22,10 @@ vi.mock("@/lib/api/domains/background-work-api", () => ({
 }));
 vi.mock("@/hooks/domains/features/use-feature", () => ({ useFeature: () => true }));
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: SessionRuntimeSlice) => unknown) => useStore(store, selector),
+  useAppStore: (selector: (state: SessionRuntimeSlice) => unknown) =>
+    useStore(store, (state) =>
+      selector({ ...state, connection: { status: "disconnected" } } as SessionRuntimeSlice),
+    ),
   useAppStoreApi: () => store,
 }));
 

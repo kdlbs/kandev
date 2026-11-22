@@ -27,6 +27,11 @@ const (
 	DeliveryRecoveryRefusalUnclassified           = lifecycle.DeliveryRecoveryRefusalUnclassified
 )
 
+// MarkPromptNotDispatched classifies err as a failure before prompt transport.
+func MarkPromptNotDispatched(err error) error {
+	return lifecycle.MarkPromptNotDispatched(err)
+}
+
 func IsDeliveryRecoveryRefusalReason(reason string) bool {
 	return lifecycle.IsDeliveryRecoveryRefusalReason(reason)
 }
@@ -39,6 +44,7 @@ var (
 	ErrDeliveryRecoveryBlocked            = lifecycle.ErrDeliveryRecoveryBlocked
 	ErrDeliveryOwnerMismatch              = lifecycle.ErrDeliveryOwnerMismatch
 	ErrUncertainPromptDelivery            = lifecycle.ErrUncertainPromptDelivery
+	ErrPromptNotDispatched                = lifecycle.ErrPromptNotDispatched
 	ErrDurableAdoptionBlocked             = lifecycle.ErrDurableAdoptionBlocked
 	ErrDurableAdoptionEvidenceUnavailable = lifecycle.ErrDurableAdoptionEvidenceUnavailable
 	ErrDurableAdoptionIdentityMismatch    = lifecycle.ErrDurableAdoptionIdentityMismatch

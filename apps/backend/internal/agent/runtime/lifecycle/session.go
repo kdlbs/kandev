@@ -696,8 +696,8 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	if err := sm.applyExplicitSessionMode(ctx, execution, result.SessionID, requestedMode); err != nil {
 		return err
 	}
-	execution.setSessionInitialized(true)
 	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID, providerDefaultConfig)
+	execution.setSessionInitialized(true)
 	sm.publishWorkflowSessionConfigFailures(execution, result.SessionID, runtimeFailures)
 
 	// Send the task prompt if provided, or mark the execution as ready.
@@ -1990,7 +1990,13 @@ func (sm *SessionManager) sendPrompt(
 	dispatchOnly bool,
 	callbacks sendPromptCallbacks,
 	steer bool,
-) (*PromptResult, error) {
+) (_ *PromptResult, err error) {
+	transportStarted := false
+	defer func() {
+		if err != nil && !transportStarted {
+			err = MarkPromptNotDispatched(err)
+		}
+	}()
 	var admissionErr error
 	ctx, admissionErr = sm.admitExecutorPrompt(ctx, execution)
 	if admissionErr != nil {
@@ -2089,6 +2095,7 @@ func (sm *SessionManager) sendPrompt(
 	if sm.beforePromptDispatchHook != nil {
 		sm.beforePromptDispatchHook()
 	}
+	transportStarted = true
 	if err := sm.triggerPrompt(
 		preparedCtx, execution, effectivePrompt, materializedAttachments,
 		promptGeneration, steer, callbacks.deliverySubmissionID,

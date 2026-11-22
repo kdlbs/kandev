@@ -6,6 +6,10 @@ import { defaultState } from "@/lib/state/default-state";
 import { AppNavSheet } from "./app-nav-sheet";
 import { AppNavSections, useAppNavDialogs } from "./app-nav-sections";
 
+vi.mock("@/components/settings/prompt-conflict-indicator", () => ({
+  PromptConflictIndicator: () => null,
+}));
+
 const mocks = vi.hoisted(() => ({
   routerPush: vi.fn(),
   openStatusDrawer: vi.fn(),

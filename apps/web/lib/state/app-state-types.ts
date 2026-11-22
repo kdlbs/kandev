@@ -84,6 +84,10 @@ import type { AppStateExtraActions } from "./app-state-extra-actions";
 import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
 import type { GitStatusRefreshState } from "./slices/session-runtime/types";
 import type {
+  ConfigurationFeedbackActions,
+  ConfigurationFeedbackState,
+} from "./slices/session-runtime/session-configuration-feedback";
+import type {
   AvailableCommand,
   SessionModeEntry,
   AgentCapabilitiesEntry,
@@ -463,6 +467,7 @@ export type AppState = KanbanSlice & {
   ) => void;
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
+  claimEmptyTurnNotice: import("./slices/session/types").SessionSliceActions["claimEmptyTurnNotice"];
   mergeTurnChangePage: (
     sessionId: string,
     summaries: TurnChangeSetSummary[],
@@ -766,6 +771,8 @@ export type AppState = KanbanSlice & {
   dismissAgentError: UIA["dismissAgentError"];
 } & TaskOverviewSlice &
   AppStateExtraActions &
+  ConfigurationFeedbackState &
+  ConfigurationFeedbackActions &
   Pick<
     UIA,
     | "setQuickChatInitialPrompt"
@@ -784,7 +791,11 @@ export type AppState = KanbanSlice & {
 // without fabricating placeholder values for the rest.
 export type HydrationState = Omit<
   Partial<AppState>,
-  "system" | "quickChat" | "gitStatusDisplay"
+  | "system"
+  | "quickChat"
+  | "gitStatusDisplay"
+  | keyof ConfigurationFeedbackState
+  | keyof ConfigurationFeedbackActions
 > & {
   quickChat?: Partial<AppState["quickChat"]>;
   system?: Partial<AppState["system"]>;

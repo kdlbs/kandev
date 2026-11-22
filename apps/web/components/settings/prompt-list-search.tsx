@@ -4,18 +4,17 @@ import { useTranslation } from "react-i18next";
 import type { CustomPrompt } from "@/lib/types/http";
 import { settingsActionClassName, settingsControlClassName } from "./settings-control";
 
+/** Prompts matching the search, plus the rows that must stay listed. */
 export function filterSavedPrompts(
   prompts: CustomPrompt[],
   query: string,
-  editingId: string | null,
-  deleteTargetId: string | null,
+  keepIds: ReadonlySet<string>,
 ): CustomPrompt[] {
   const normalized = query.trim().toLowerCase();
   return normalized
     ? prompts.filter(
         (prompt) =>
-          prompt.id === editingId ||
-          prompt.id === deleteTargetId ||
+          keepIds.has(prompt.id) ||
           [prompt.name, prompt.content].some((value) => value.toLowerCase().includes(normalized)),
       )
     : prompts;

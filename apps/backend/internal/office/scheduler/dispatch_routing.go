@@ -44,7 +44,7 @@ const (
 	RouteAttemptOutcomeSkippedUserAction     = "skipped_user_action"
 	RouteAttemptOutcomeSkippedMissingMapping = "skipped_missing_mapping"
 	RouteAttemptOutcomeMaxAttempts           = "skipped_max_attempts"
-	RouteAttemptOutcomeDeferredCapacity      = "deferred_capacity"
+	RouteAttemptOutcomeDeferredCapacity      = models.RouteAttemptOutcomeDeferredCapacity
 	RouteAttemptOutcomeDeferredCircuit       = models.RouteAttemptOutcomeDeferredCircuit
 )
 
@@ -99,14 +99,23 @@ func (ss *SchedulerService) DispatchWithRouting(
 		}
 		return false, true, nil
 	}
-	excluded := excludedFromAttempts(prior, run.RouteCycleBaselineSeq)
-	res, err := ss.resolver.Resolve(ctx, agent.WorkspaceID, *agent,
-		routing.ResolveOptions{
-			ExcludeProviders: excluded,
-			Reason:           run.Reason,
-		})
+	excl, err := ss.resolveAuthorExclusion(ctx, run, agent)
+	if err != nil {
+		return false, false, fmt.Errorf("dispatch: author exclusion: %w", err)
+	}
+	opts := routing.ResolveOptions{
+		ExcludeProviders: excludedFromAttempts(prior, run.RouteCycleBaselineSeq),
+		Reason:           run.Reason,
+	}
+	if excl.Applies {
+		opts.AuthorProvider = excl.AuthorProvider
+	}
+	res, err := ss.resolver.Resolve(ctx, agent.WorkspaceID, *agent, opts)
 	if err != nil {
 		return false, false, fmt.Errorf("dispatch: resolve: %w", err)
+	}
+	if excl.Applies {
+		ss.recordAuthorExclusion(ctx, run.ID, excl, res.Enabled)
 	}
 	if !res.Enabled && len(res.Candidates) == 0 {
 		if res.BlockReason.Status == routing.StatusWaitingForCapacity {
@@ -220,26 +229,8 @@ func (ss *SchedulerService) parkRunBlocked(
 	ctx context.Context, run *runsmodels.Run, workspaceID string, res *routing.Resolution,
 ) (bool, *routing.BlockReason, error) {
 	br := res.BlockReason
-	for _, sk := range res.SkippedDegraded {
-		seq, err := ss.repo.IncrementRouteAttemptSeq(ctx, run.ID)
-		if err != nil {
-			return false, nil, err
-		}
-		attempt := models.RouteAttempt{
-			RunID:      run.ID,
-			Seq:        seq,
-			ProviderID: string(sk.ProviderID),
-			Tier:       string(res.RequestedTier),
-			TierSource: res.TierSource,
-			Outcome:    skipOutcome(sk.Reason),
-			ErrorCode:  sk.ErrorCode,
-			RawExcerpt: sk.RawExcerpt,
-			StartedAt:  time.Now().UTC(),
-		}
-		if err := ss.repo.AppendRouteAttempt(ctx, &attempt); err != nil {
-			return false, nil, err
-		}
-		ss.publishRouteAttemptAppended(ctx, run.ID, attempt)
+	if err := ss.recordSkippedAttempts(ctx, run, res, res.SkippedDegraded); err != nil {
+		return false, nil, err
 	}
 	if err := ss.repo.ParkRunForProviderCapacity(ctx,
 		run.ID, br.Status, br.EarliestRetry); err != nil {
@@ -253,6 +244,45 @@ func (ss *SchedulerService) parkRunBlocked(
 	return false, &br, nil
 }
 
+// recordSkippedAttempts appends one route attempt per skipped provider.
+func (ss *SchedulerService) recordSkippedAttempts(
+	ctx context.Context, run *runsmodels.Run, res *routing.Resolution, skipped []routing.SkippedCandidate,
+) error {
+	for _, sk := range skipped {
+		seq, err := ss.repo.IncrementRouteAttemptSeq(ctx, run.ID)
+		if err != nil {
+			return err
+		}
+		attempt := models.RouteAttempt{
+			RunID:      run.ID,
+			Seq:        seq,
+			ProviderID: string(sk.ProviderID),
+			Tier:       string(res.RequestedTier),
+			TierSource: res.TierSource,
+			Outcome:    skipOutcome(sk.Reason),
+			ErrorCode:  sk.ErrorCode,
+			RawExcerpt: sk.RawExcerpt,
+			StartedAt:  time.Now().UTC(),
+		}
+		if err := ss.repo.AppendRouteAttempt(ctx, &attempt); err != nil {
+			return err
+		}
+		ss.publishRouteAttemptAppended(ctx, run.ID, attempt)
+	}
+	return nil
+}
+
+// authorSkips returns the resolver's skip entries for the author's provider.
+func authorSkips(res *routing.Resolution) []routing.SkippedCandidate {
+	var out []routing.SkippedCandidate
+	for _, sk := range res.SkippedDegraded {
+		if sk.Reason == routing.SkipReasonAuthorProvider {
+			out = append(out, sk)
+		}
+	}
+	return out
+}
+
 func skipOutcome(reason string) models.RouteAttemptOutcome {
 	switch reason {
 	case routing.SkipReasonDegraded:
@@ -261,6 +291,8 @@ func skipOutcome(reason string) models.RouteAttemptOutcome {
 		return RouteAttemptOutcomeSkippedUserAction
 	case routing.SkipReasonMissingModelMapping:
 		return RouteAttemptOutcomeSkippedMissingMapping
+	case routing.SkipReasonAuthorProvider:
+		return RouteAttemptOutcomeSkippedAuthorProvider
 	}
 	return RouteAttemptOutcomeSkippedDegraded
 }
@@ -352,6 +384,11 @@ func (ss *SchedulerService) tryCandidates(
 		// the fallback hop on success.
 		c := candidate
 		prev = &c
+	}
+	// Every launched candidate failed and the run parks, so its history must
+	// still show that the author's provider was skipped rather than tried.
+	if err := ss.recordSkippedAttempts(ctx, run, res, authorSkips(res)); err != nil {
+		return false, nil, err
 	}
 	return ss.exhaustedCandidates(ctx, run, agent, res.RequestedTier)
 }

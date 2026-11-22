@@ -47,7 +47,8 @@ const setActiveBackgroundWorkload = vi.fn((sessionId: string, workId: string) =>
 });
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: Record<string, unknown>) => unknown) => selector(storeState),
+  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({ connection: { status: "disconnected" }, ...storeState }),
   useAppStoreApi: () => ({
     getState: () => ({
       ...storeState,

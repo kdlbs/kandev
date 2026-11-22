@@ -111,6 +111,8 @@ The plugin provisions and removes provider compute. Kandev owns agentctl, agent 
 
 Review each provider's retention and expiry before launch. `persistent` means the provider reports no fixed expiry. `bounded` includes a maximum lifetime. `ephemeral` means workspace data ends with the compute environment. `unknown` makes no retention promise. The task environment disclosure reports effective retention, known expiry, current status, and available cleanup actions.
 
+A backend restart preserves the attachment record for an established provider resource so recovery can retry with the original operation identity. This does not extend the lifetime reported by the provider.
+
 Remote environments need outbound access to the Kandev API. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to a non-local HTTPS URL of this Kandev; plugin launches fail without it. Select agent credentials on the profile page as for other remote executors: Kandev copies the selected credential files into the environment and passes selected secrets as agent environment variables. When the profile sets both a Git name and email, Kandev writes them to the same effective global Git configuration that the agent uses, before the agent starts. Providers return short-lived HTTPS connection leases for agentctl. Do not place provider credentials in endpoint URLs, task metadata, or resource state. See [Authoring plugins](plugins-authoring.md#remote-executor-providers) and the [plugin manifest reference](plugins-manifest.md#remote-executor-providers).
 
 ## Embedded VS Code availability
@@ -264,6 +266,27 @@ Provider expiration and external process termination can still stop a remote
 agent. Backend tools and credential services require connectivity to Kandev.
 If the retained journal is unavailable, Kandev blocks unsafe prompt admission.
 It does not silently use a less durable path.
+
+### Offline budget
+
+While an agent cannot reach Kandev, its Kandev tool calls wait for the
+connection instead of failing, and nothing is queued or replayed. Each call
+sends a periodic keepalive so the harness does not time it out. If a call was
+already sent when the connection dropped, the agent receives an "outcome
+unknown" error and should check the result before retrying.
+
+The wait is limited by an offline budget of 15 minutes. To change it for an
+executor profile, set the key `offline_budget_minutes` to a whole number from
+1 to 1440. Any other value fails the profile save or launch with an error that
+names the key. When the budget runs out, Kandev cancels the running turn and
+records a "paused" notice in the conversation when the connection returns. A
+turn that ends while Kandev is unreachable is also marked with a notice.
+
+Upgrade note: for agents with a managed harness tool timeout, Kandev sets it
+to the offline budget plus 10 minutes so the budget elapses first. A profile
+that sets `MCP_TOOL_TIMEOUT` explicitly must exceed the budget by at least one
+minute (16 minutes at the default budget). A smaller or invalid value now fails
+launch; raise it or remove it.
 
 ### Model selection in remote executors
 
@@ -531,7 +554,7 @@ Docker profiles can inject resolved environment secrets. For agent file-based au
 
 A container is a useful boundary, not a hostile-code security sandbox. The Docker daemon has host-level power, bind mounts expose their sources, the agent can use every injected secret, and the default image has outbound network access. Kandev does **not** mount the Docker socket into agent containers automatically.
 
-Plain Stop preserves a healthy container for resume. Recoverable agent failure also retains the established container and workspace, including when the container was stopped externally. A failed resume that attached to an existing container follows the same rule; a failed fresh allocation still rolls back. This does not resend an interrupted prompt. A later launch reconnects to an existing running container, or starts one in a stopped/exited state; if reconnect fails, it creates a fresh container. Stale execution cleanup stops the container and preserves it for resume. Archive, delete, explicit force-stop, removal in the profile page, and **Reset Environment** can remove it. Inspect matching containers before manual cleanup:
+Plain Stop preserves a healthy container for resume. For Remote Docker, a backend restart preserves the established container and workspace for resume, even when the agent has stopped or Kandev cannot restore the native conversation. Recoverable agent failure also retains the established container and workspace, including when the container was stopped externally. A failed resume that attached to an existing container follows the same rule; a failed fresh allocation still rolls back. This does not resend an interrupted prompt. A later launch reconnects to an existing running container, or starts one in a stopped/exited state; if reconnect fails, it creates a fresh container. Stale execution cleanup stops the container and preserves it for resume. Archive, delete, explicit force-stop, removal in the profile page, and **Reset Environment** can remove it. Inspect matching containers before manual cleanup:
 
 ```bash
 docker ps -a --filter label=kandev.managed=true
