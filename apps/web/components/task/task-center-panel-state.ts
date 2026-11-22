@@ -15,7 +15,7 @@ import { calculateHash } from "@/lib/utils/file-diff";
 import { useAppStore } from "@/components/state-provider";
 import { useShallow } from "zustand/react/shallow";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
-import { findTaskInState } from "@/lib/ws/handlers/task-primary-focus";
+import { resolveLatestTaskProjection } from "./task-page-content-helpers";
 import type { AppState } from "@/lib/state/store";
 import type { FileEditorTab } from "./task-center-panel-file-tabs";
 
@@ -76,14 +76,19 @@ type GitEvidence = {
   repositoryRefresh?: Record<string, unknown>;
 };
 
-/** Git and task-repository evidence for the session's environment, read in one store pass. */
+/** Git evidence plus the task page's own projection of the session's task (overview, then newest board row). */
 function selectGitEvidence(state: AppState, sessionId: string | null): GitEvidence {
   if (!sessionId) return { taskRepositoryCount: 0 };
   const environment = state.environmentIdBySessionId[sessionId] ?? sessionId;
   const taskId = state.taskSessions.items[sessionId]?.task_id ?? state.tasks.activeTaskId;
   const gitStatus = state.gitStatus;
   return {
-    taskRepositoryCount: taskId ? (findTaskInState(state, taskId)?.repositories?.length ?? 0) : 0,
+    taskRepositoryCount: taskId
+      ? ((
+          state.taskOverview.byId[taskId] ??
+          resolveLatestTaskProjection(taskId, state.kanban.tasks, state.kanbanMulti.snapshots)
+        )?.repositories?.length ?? 0)
+      : 0,
     scopes: gitStatus.inventoryByEnvironment?.[environment]?.scopes,
     repositories: gitStatus.byEnvironmentRepo[environment],
     refresh: gitStatus.refreshByEnvironmentId?.[environment],

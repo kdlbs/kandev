@@ -4469,3 +4469,33 @@ the changed tablet hook. Rerun under the same bundle they passed 4/4
 host load from other tasks was about 20 during the first run. All other cases,
 including every coarse-tablet case, passed. No Go/cursor/predicate/projector/
 promotion/schema/wire change in R36.
+
+### Production-fix review round 37 remediation
+
+Sol child `b6919db6-a3c9-44f6-96db-89ab3b92091c` reviewed
+`931b7e6cace251fb917e76582714908e1b5650af`: one P2, not clean. Completed
+production rounds 37; consecutive clean 0. Further review rounds use the Opus
+profile at the user's direction; R37 was already running on Sol and completed.
+
+- The R36 guard counted repositories from `findTaskInState` (first kanban
+  row, then multi-kanban snapshots). The task page resolves its task from
+  `taskOverview.byId`, then the newest board row. Navigating to a task through
+  the shell (detail overview retained, board rows absent until enrichment) or
+  returning with a stale off-workflow kanban row could therefore count zero or
+  one repository for a multi-repo task and permit the lone-root inference. The
+  guard now uses the task page's resolution order.
+
+`r37-red.log`: against `931b7e6`, a detail-owned overview with two
+repositories returns `false` both with no board row and with a stale
+one-repository row from another workflow (board on workflow X). The first
+fixture wrote `taskOverview.byId` directly and was pruned by overview
+normalization, so it did not exercise the store; the final fixture uses the real
+`retainTaskOverviews("detail", ...)` path with the task active.
+
+Final verification: `r37-units.log` 11 files/166 tests pass, including the
+task-page helper owner of `resolveLatestTaskProjection`. Strict changed-file
+lint, production typecheck, fresh frontend build and spec/catalog/harness
+checks pass. Fresh-bundle browser receipts: `r37-final-summary.log` 11
+desktop/tablet/maximize cases and `r37-phone-summary.log` ten phone cases pass
+with one worker and no retries, under host load of about 20 from other tasks.
+No Go/cursor/predicate/projector/promotion/schema/wire change in R37.

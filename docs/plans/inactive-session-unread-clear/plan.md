@@ -868,3 +868,11 @@ Sol child `0528c855-ecda-4eb0-ab30-8cfa5009ae94` reviewed
 Completed production rounds 36; consecutive clean 0. The lone-root inference
 now also requires at most one registered task repository. Task 02 records the
 RED and verification; R37 follows normal verified delivery.
+
+### Production review R37
+
+Sol child `b6919db6-a3c9-44f6-96db-89ab3b92091c` reviewed
+`931b7e6cace251fb917e76582714908e1b5650af`: one P2, not clean.
+Completed production rounds 37; consecutive clean 0. The repository-count guard
+now resolves the task like the task page. Review rounds from R38 use the Opus
+profile at the user's direction; R38 follows normal verified delivery.

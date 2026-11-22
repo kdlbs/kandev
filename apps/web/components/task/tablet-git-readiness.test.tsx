@@ -125,3 +125,34 @@ it.each([
     expect(hook.result.current.changes).toBe(expected);
   },
 );
+it.each([false, true])(
+  "reads repositories from the task page's overview before stale kanban rows (stale=%s)",
+  (stale) => {
+    const hook = setup(null);
+    const store = hook.result.current.store;
+    const repositories = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({ id: `r${i}` }));
+    act(() => {
+      store.setState((state) => {
+        state.tasks.activeTaskId = "T";
+        state.taskSessions.items.B = { id: "B", task_id: "T" } as never;
+        state.kanban.workflowId = "X";
+        state.kanban.tasks = (
+          stale ? [{ id: "T", workflowId: "Y", repositories: repositories(1) }] : []
+        ) as never;
+        return state;
+      });
+      const readId = store.getState().beginTaskOverviewRead();
+      store
+        .getState()
+        .retainTaskOverviews(
+          "detail",
+          [{ id: "T", workflowId: "Y", repositories: repositories(2) } as never],
+          readId,
+        );
+      store.getState().setGitStatus("env", { ...status(""), repository_name: undefined });
+    });
+    expect(store.getState().taskOverview.byId.T?.repositories).toHaveLength(2);
+    expect(hook.result.current.changes).toBeUndefined();
+  },
+);
