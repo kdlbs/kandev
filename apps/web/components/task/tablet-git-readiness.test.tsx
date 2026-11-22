@@ -92,3 +92,15 @@ it("keeps named repositories unknown until inventory is validated", () => {
   act(() => hook.result.current.store.getState().setGitStatus("env", status("A")));
   expect(hook.result.current.changes).toBeUndefined();
 });
+it.each(["unavailable", "pending"] as const)(
+  "keeps a lone unnamed root unknown while a named scope is %s",
+  (state) => {
+    const hook = setup(null);
+    const store = hook.result.current.store.getState();
+    act(() => {
+      store.setGitStatus("env", { ...status(""), repository_name: undefined });
+      store.setGitStatusRefresh("env", "vendor/lib", { state });
+    });
+    expect(hook.result.current.changes).toBeUndefined();
+  },
+);

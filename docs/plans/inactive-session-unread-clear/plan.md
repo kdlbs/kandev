@@ -851,3 +851,12 @@ tablet ready-empty now treats an exclusively unnamed status as the single scope;
 named repositories stay unknown. An intermediate tablet refresh was withdrawn
 after it delayed restored file tabs. Task 02 records the evidence; R35 follows
 normal verified delivery.
+
+### Production review R35
+
+Sol child `30e33040-dc31-4c0a-9b41-6c636bd4c581` reviewed
+`51c96a7dcd34be451eecec31734f0f49b1e2f569`: one P2, not clean.
+Completed production rounds 35; consecutive clean 0. Named refresh evidence
+now also blocks the lone-unnamed inference. Task 02 records the RED, the
+accepted untraced frame-order residual and verification; R36 follows normal
+verified delivery.

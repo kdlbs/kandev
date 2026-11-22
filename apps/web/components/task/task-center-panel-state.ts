@@ -46,14 +46,18 @@ function readyGitStatus(status: GitStatusEntry | undefined): boolean {
   );
 }
 
-/** Only a validated inventory, or an exclusively unnamed (single-repo) status, defines scopes. */
+/** Only a validated inventory, or an unnamed status with no named status/refresh, defines scopes. */
 function knownScopes(
   inventory: readonly string[] | null | undefined,
-  repositories: Record<string, GitStatusEntry> | undefined,
+  repositories: Record<string, unknown> | undefined,
+  repositoryRefresh: Record<string, unknown> | undefined,
   legacy: GitStatusEntry | undefined,
 ): readonly string[] | undefined {
   if (inventory) return inventory;
-  const named = Object.keys(repositories ?? {}).some((repository) => repository !== "");
+  const named = [
+    ...Object.entries(repositories ?? {}),
+    ...Object.entries(repositoryRefresh ?? {}),
+  ].some(([scope, value]) => scope !== "" && !!value);
   return legacy && !legacy.repository_name && !named ? [""] : undefined;
 }
 
@@ -80,7 +84,7 @@ export function useCenterPanelGitChanges(sessionId: string | null): boolean | un
   const legacyScope = gitStatus?.repository_name ?? "";
   return useMemo(() => {
     const { repositories, refresh, repositoryRefresh } = evidence;
-    const scopes = knownScopes(evidence.scopes, repositories, gitStatus);
+    const scopes = knownScopes(evidence.scopes, repositories, repositoryRefresh, gitStatus);
     if (commits.length > 0 || hasScopedFiles(repositories, scopes, gitStatus)) return true;
     if (!scopes || refresh || !loaded || loading) return undefined;
     for (const repository of scopes) {

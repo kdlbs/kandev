@@ -4398,3 +4398,36 @@ That desktop path never mounts the changed tablet hook. Isolated, it passed
 Runs used one worker and no retries after the host restart. The clean tablet
 capture was inspected: Chat only, no All changes, the new tail shown, dot gone.
 No Go/cursor/predicate/projector/promotion/schema/wire change in R34.
+
+### Production-fix review round 35 remediation
+
+Sol child `30e33040-dc31-4c0a-9b41-6c636bd4c581` reviewed
+`51c96a7dcd34be451eecec31734f0f49b1e2f569`: one P2, not clean. Completed
+production rounds 35; consecutive clean 0. Its first two turns hit transient
+usage limits; that is not a separate round.
+
+- R34's single-scope inference checked only named entries in
+  `byEnvironmentRepo`. A named scope can also be known only through refresh
+  evidence: an unavailable or incomplete submodule, adopted worktree or attached
+  repository updates `refreshByEnvironmentRepo` without a status. A clean
+  unnamed root then settled the tablet to empty and moved saved Changes to
+  Chat while that named scope was unknown. The root's porcelain query does not
+  cover untracked submodule content. Any named status or named refresh now keeps
+  the result unknown until a validated inventory exists.
+
+`r35-red.log`: against `51c96a7`, an unnamed ready root plus a named
+`unavailable` or `pending` refresh returns `false`. The unnamed-only and
+named-status controls hold.
+
+Accepted residual (reviewer inference, not traced): without inventory, a ready
+unnamed root frame can be rendered before a later named status frame on live
+subscribe. No local evidence names that scope yet, so the frontend cannot
+distinguish it from a single-repo workspace without adding a request. The R34
+refresh mount that would supply inventory stays withdrawn.
+
+Final verification: `r35-units.log` 10 files/115 tests pass; strict changed-file
+lint, production typecheck, fresh frontend build and spec/catalog/harness
+checks pass. Fresh-bundle browser receipts: `r35-final-summary.log` 11
+desktop/tablet/maximize cases pass, including the clean tablet Changes case;
+`r35-phone-summary.log` ten phone cases pass. Runs used one worker and no
+retries. No Go/cursor/predicate/projector/promotion/schema/wire change in R35.
