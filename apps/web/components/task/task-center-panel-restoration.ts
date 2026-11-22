@@ -8,7 +8,7 @@ import {
   waitForRenameRelease,
 } from "@/hooks/file-rename-continuity";
 import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from "react";
-import { treePath, isWithin } from "@/hooks/file-rename-continuity";
+import { treePath } from "@/hooks/file-rename-continuity";
 import {
   tabletSelectionOwner,
   subscribeTabletFileDeletion,
@@ -33,6 +33,7 @@ import {
 } from "./task-center-panel-file-tabs";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
 import { getFilePreviewKind } from "@/lib/utils/file-types";
+import { matchesTabletFileDeletion, retireDeletedTabletFile } from "./tablet-file-deletion";
 
 export type FileTabRestorationOptions = {
   store?: StoreApi<AppState>;
@@ -41,6 +42,7 @@ export type FileTabRestorationOptions = {
   setLeftTab: (tab: string) => void;
   setOpenFileTabs: React.Dispatch<React.SetStateAction<OpenFileTab[]>>;
   openFileTabs?: FileEditorTab[];
+  currentTabs: React.RefObject<OpenFileTab[]>;
 };
 
 export type FileSaveDeleteOptions = {
@@ -157,9 +159,7 @@ type RestorationVisit = {
 function isRetiredFile(visit: RestorationVisit, file: OpenFileTab): boolean {
   const path = treePath(file);
   if (visit.closed.has(getFileTabKey(file)) || visit.closed.has(`path:${path}`)) return true;
-  if (path !== null) {
-    for (const deleted of visit.deleted) if (isWithin(path, deleted)) return true;
-  }
+  for (const deleted of visit.deleted) if (matchesTabletFileDeletion(file, deleted)) return true;
   return false;
 }
 function useRestorationVisit(
@@ -225,6 +225,7 @@ export function useFileTabRestoration({
   setLeftTab,
   setOpenFileTabs,
   openFileTabs,
+  currentTabs,
 }: FileTabRestorationOptions) {
   const restorationInProgressRef = useRef<boolean>(false);
   const [restoredSessionId, setRestoredSessionId] = useState<string | null>(null);
@@ -233,13 +234,9 @@ export function useFileTabRestoration({
     if (!store || !activeSessionId) return;
     return subscribeTabletFileDeletion(store, activeSessionId, (path) => {
       visit.deleted.add(path);
-      const removed = visit.live.filter((file) => isRetiredFile(visit, file));
-      for (const file of removed) visit.retire(file);
-      setOpenFileTabs((live) => live.filter((file) => !isRetiredFile(visit, file)));
-      const selected = store.getState().tabletSession.activeTabBySessionId[activeSessionId];
-      if (removed.some((file) => selected === `file:${getFileTabKey(file)}`)) setLeftTab("chat");
+      setOpenFileTabs(retireDeletedTabletFile(store, activeSessionId, path, currentTabs.current));
     });
-  }, [store, activeSessionId, visit, setOpenFileTabs, setLeftTab]);
+  }, [store, activeSessionId, visit, setOpenFileTabs, currentTabs]);
 
   useEffect(() => {
     if (!activeSessionId) return;

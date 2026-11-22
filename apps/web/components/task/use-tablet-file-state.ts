@@ -31,11 +31,12 @@ export function useTabletFileState(options: {
   adapter: RefObject<RenameAdapter | null> | undefined;
   session: string | null;
   tabs: OpenFileTab[];
+  tabsRef: RefObject<OpenFileTab[]>;
   setTabs: Dispatch<SetStateAction<OpenFileTab[]>>;
   selected: string;
   setSelected: Dispatch<SetStateAction<string>>;
 }) {
-  const { adapter, session, tabs, setTabs, selected, setSelected } = options;
+  const { adapter, session, tabs, tabsRef, setTabs, selected, setSelected } = options;
   const store = useAppStoreApi();
   useTabletFileRename({
     adapterRef: adapter,
@@ -52,6 +53,7 @@ export function useTabletFileState(options: {
     setLeftTab: setSelected,
     setOpenFileTabs: setTabs,
     openFileTabs: tabs,
+    currentTabs: tabsRef,
   });
   usePersistOpenFileTabs(session, tabs, restorationInProgressRef, restoredSessionId);
   return { retireFile };

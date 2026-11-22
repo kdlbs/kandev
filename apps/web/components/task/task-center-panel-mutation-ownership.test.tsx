@@ -3,11 +3,11 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { useFileSaveDelete, useFileTabRestoration } from "./task-center-panel-restoration";
+import { useLiveFileTabs } from "./task-center-panel-state";
 import {
   getFileTabKey,
   installFileEditorTab,
   upsertOpenFileTab,
-  type FileEditorTab,
 } from "./task-center-panel-file-tabs";
 import { createAppStore } from "@/lib/state/store";
 import {
@@ -61,13 +61,14 @@ function file(label: string, repo = REPO): OpenFileTab {
 function setup() {
   const hook = renderHook(
     ({ session }) => {
-      const [tabs, setTabs] = useState<FileEditorTab[]>([]);
+      const [tabs, setTabs, currentTabs] = useLiveFileTabs();
       const [leftTab, setLeftTab] = useState("chat");
       useFileTabRestoration({
         activeSessionId: session,
         leftTab,
         setLeftTab,
         setOpenFileTabs: setTabs,
+        currentTabs,
       });
       const close = useCallback((key: string, instanceId?: symbol) => {
         setTabs((prev) =>
@@ -327,7 +328,7 @@ it.each(["chat", "file", "legacy"] as const)(
     const read = Promise.withResolvers<{ content: string }>();
     mocks.read.mockReturnValue(read.promise);
     const hook = renderHook(() => {
-      const [tabs, setTabs] = useState<FileEditorTab[]>([]);
+      const [tabs, setTabs, currentTabs] = useLiveFileTabs();
       const [selected, setSelected] = useState(fileKey);
       useFileTabRestoration({
         store: winner === "legacy" ? undefined : store,
@@ -335,6 +336,7 @@ it.each(["chat", "file", "legacy"] as const)(
         leftTab: selected,
         setLeftTab: setSelected,
         setOpenFileTabs: setTabs,
+        currentTabs,
       });
       return { tabs, selected, setSelected };
     });
@@ -362,7 +364,7 @@ it("keeps a newly opened dirty tablet file when older saved metadata arrives", a
   const read = Promise.withResolvers<{ content: string }>();
   mocks.read.mockReturnValue(read.promise);
   const hook = renderHook(() => {
-    const [tabs, setTabs] = useState<FileEditorTab[]>([]);
+    const [tabs, setTabs, currentTabs] = useLiveFileTabs();
     const [selected, setSelected] = useState(oldKey);
     useFileTabRestoration({
       store,
@@ -370,6 +372,7 @@ it("keeps a newly opened dirty tablet file when older saved metadata arrives", a
       leftTab: selected,
       setLeftTab: setSelected,
       setOpenFileTabs: setTabs,
+      currentTabs,
     });
     return { tabs, setTabs, selected, setSelected };
   });
@@ -407,13 +410,14 @@ it("never writes the new tablet session's choice to its predecessor", () => {
   setActiveTabForSession("B", "chat");
   const hook = renderHook(
     ({ session, selected }) => {
-      const [tabs, setTabs] = useState<FileEditorTab[]>([]);
+      const [tabs, setTabs, currentTabs] = useLiveFileTabs();
       useFileTabRestoration({
         store,
         activeSessionId: session,
         leftTab: selected,
         setLeftTab: () => {},
         setOpenFileTabs: setTabs,
+        currentTabs,
       });
       return tabs;
     },
@@ -437,7 +441,7 @@ it("rejects saved metadata from an older A visit after A-B-A navigation", async 
   mocks.read.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);
   const hook = renderHook(
     ({ session }) => {
-      const [tabs, setTabs] = useState<FileEditorTab[]>([]);
+      const [tabs, setTabs, currentTabs] = useLiveFileTabs();
       const selected = useStore(
         store,
         (state) => state.tabletSession.activeTabBySessionId[session],
@@ -448,6 +452,7 @@ it("rejects saved metadata from an older A visit after A-B-A navigation", async 
         leftTab: selected,
         setLeftTab: (tab) => store.getState().setTabletSessionTab(session, tab),
         setOpenFileTabs: setTabs,
+        currentTabs,
       });
       return tabs;
     },

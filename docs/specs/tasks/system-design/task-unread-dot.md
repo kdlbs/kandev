@@ -254,10 +254,10 @@ Routes/workflow reopen hidden targets; restore keeps flat/tree/legacy choices.
 Phone/tablet consume route/workflow Chat focus; 404 vetoes admission/sync.
 `workflow_focus_disposition: none`: admitted, no source/effective launch;
 omit while deferred launch is possible. Removal leases protect live/parked groups.
-Explicit layouts retire maximize only on success; scoped frames stay owned.
-Visibility gates restore/read/dots.
-Tablet files/restores honor visit/selection; confirmed delete retires aliases.
-Select installed file keys; Changes awaits ready Git/commits.
+Layouts validate first and roll back once; only success retires maximize.
+Scoped frames own visibility/read/dots.
+File intents own reads/creates; deletes retire reads/tabs/saved aliases.
+Use installed keys; empty Git needs ready repos/commits and no pending file.
 
 `invalidateTaskSessionMembership` fences pending/admitted/queued foreground and
 removal-dialog reads, not new reads/unrelated keys. Confirmed UUID deletion

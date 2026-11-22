@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
@@ -6,9 +6,16 @@ import { useTabletSessionTab } from "@/hooks/domains/session/use-tablet-session-
 import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
 import { useFileOperations } from "@/hooks/use-file-operations";
 import { useTabletFileState } from "./use-tablet-file-state";
+import { useLiveFileTabs } from "./task-center-panel-state";
 import { getFileTabKey, upsertOpenFileTab } from "./task-center-panel-file-tabs";
-import { getOpenFileTabs, setActiveTabForSession, setOpenFileTabs } from "@/lib/local-storage";
+import {
+  getOpenFileTabs,
+  getActiveTabForSession,
+  setActiveTabForSession,
+  setOpenFileTabs,
+} from "@/lib/local-storage";
 import type { OpenFileTab } from "@/lib/types/backend";
+const LEGACY_FILE_TAB = "file:F.txt";
 const read = vi.hoisted(() => vi.fn());
 const remove = vi.hoisted(() => vi.fn());
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
@@ -40,11 +47,12 @@ function setup() {
       const store = useAppStoreApi();
       const [tab, select] = useTabletSessionTab(session);
       const operations = useFileOperations(session);
-      const [tabs, setTabs] = useState<OpenFileTab[]>([]);
+      const [tabs, setTabs, tabsRef] = useLiveFileTabs();
       const files = useTabletFileState({
         adapter: undefined,
         session,
         tabs,
+        tabsRef,
         setTabs,
         selected: tab,
         setSelected: select,
@@ -74,7 +82,7 @@ function setup() {
 it.each([false, true])(
   "falls back from an unavailable initial file (descriptor=%s)",
   async (descriptor) => {
-    setActiveTabForSession("B", "file:F.txt");
+    setActiveTabForSession("B", LEGACY_FILE_TAB);
     if (descriptor)
       setOpenFileTabs("B", [
         { path: "F.txt", name: "F.txt" },
@@ -90,7 +98,7 @@ it.each([false, true])(
 it.each([false, true])(
   "does not resurrect a closed file or saved descriptor (alias=%s)",
   async (alias) => {
-    setActiveTabForSession("B", "file:F.txt");
+    setActiveTabForSession("B", LEGACY_FILE_TAB);
     setOpenFileTabs("B", [
       { path: "F.txt", name: "F.txt", ...(alias ? { repo: "repo" } : {}) },
       { path: "G.txt", name: "G.txt" },
@@ -153,7 +161,7 @@ it.each(["changes", "pr"])(
 it.each([false, true].flatMap((alias) => [false, true].map((success) => ({ alias, success }))))(
   "keeps confirmed tree deletion out of delayed restoration (alias=$alias, success=$success)",
   async ({ alias, success }) => {
-    setActiveTabForSession("B", "file:F.txt");
+    setActiveTabForSession("B", LEGACY_FILE_TAB);
     setOpenFileTabs("B", [
       { path: "F.txt", name: "F.txt", ...(alias ? { repo: "repo" } : {}) },
       { path: "G.txt", name: "G.txt" },
@@ -180,5 +188,41 @@ it.each([false, true].flatMap((alias) => [false, true].map((success) => ({ alias
       });
       expect(hook.result.current.tabs.some((tab) => tab.path.endsWith("F.txt"))).toBe(true);
     }
+  },
+);
+
+it.each([false, true])(
+  "persists tree deletion before an unfinished visit leaves (success=%s)",
+  async (success) => {
+    setActiveTabForSession("B", LEGACY_FILE_TAB);
+    setOpenFileTabs("B", [
+      { path: "F.txt", name: "F.txt" },
+      { path: "G.txt", name: "G.txt" },
+    ]);
+    const later = Promise.withResolvers<{ content: string }>();
+    read.mockImplementation((_client, id, path) =>
+      id === "B" && path === "G.txt" ? later.promise : Promise.resolve({ content: "old F" }),
+    );
+    remove.mockResolvedValue({ success });
+    const hook = setup();
+    await waitFor(() =>
+      expect(read).toHaveBeenCalledWith(expect.anything(), "B", "G.txt", undefined),
+    );
+    await act(async () => {
+      await hook.result.current.remove("F.txt");
+    });
+    hook.rerender({ session: "C" });
+    expect(getOpenFileTabs("B").map((tab) => tab.path)).toEqual(
+      success ? ["G.txt"] : ["F.txt", "G.txt"],
+    );
+    expect(getActiveTabForSession("B", "chat")).toBe(success ? "chat" : LEGACY_FILE_TAB);
+    read.mockResolvedValue({ content: "recreated F or surviving G" });
+    await act(async () => later.resolve({ content: "late old G" }));
+    hook.rerender({ session: "B" });
+    await waitFor(() =>
+      expect(hook.result.current.tabs.map((tab) => tab.path)).toEqual(
+        success ? ["G.txt"] : ["F.txt", "G.txt"],
+      ),
+    );
   },
 );

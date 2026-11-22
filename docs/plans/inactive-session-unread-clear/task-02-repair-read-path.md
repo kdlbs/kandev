@@ -4255,3 +4255,94 @@ wire change this round. No broad-suite/live-NATS or historical-trigger claim;
 list readback remains convergence, not isolated cursor-event proof.
 Implementation/targeted verification is complete. Sol R33 follows normal
 verified delivery, with the review loop open at completed 32, clean 0.
+
+### Production-fix review round 33 remediation
+
+Sol child `2381536b-2336-4269-a1a8-77baeaa19248` reviewed
+`02ba6642589f12017d0ce1bb0bcf27492ddd070d`: seven P2 findings,
+not clean. Completed production rounds 33; consecutive clean 0.
+
+- Confirmed tree deletion retires overlapping admitted reads, including
+  parent paths and delivered objects waiting for consumer publication.
+  Transcript, Files-tree and New File share the scoped presentation ticket.
+  A fresh open after deletion is independent; unsuccessful deletion does
+  not retire it.
+- Live retirement matches only the newly confirmed path. Snapshot-only close/
+  delete history cannot remove a reopened dirty editor when another path is
+  deleted. Removal and selected-key repair use the current tab ref, not the
+  last layout-effect snapshot.
+- Verified deletion synchronously prunes matching saved descriptors and file
+  preferences, preserving unrelated pending entries. Leaving before restore
+  completes cannot revive the retired preference. Repo-aware, workspace and
+  old path-only keys are resolved without conflating another repo's basename.
+- New File tickets presentation before create/hash work. Superseded creates
+  still report the real mutation outcome but cannot steal Chat.
+- Negative All Changes evidence needs the validated current repository
+  inventory, every expected ready snapshot, settled refreshes and loaded
+  commits. A clean last-write mirror cannot hide a dirty or still-unknown repo.
+- Pending user file intent is separate from a committed tab selection.
+  Ready-empty fallback waits for that intent; success presents File and
+  failure can settle unavailable Changes to Chat.
+- Invalid serialized layouts are rejected before native/grid/profile
+  mutation. A native attempt and its post-apply work share one rollback;
+  failed rollback is logged without another native retry. Metadata/generation
+  cleanup runs in the guarded finalization boundary even on failure.
+
+`r33-file-red.log`: nine behavioral failures/22 controls across admitted reads,
+reopened dirty state, leave-before-restore persistence, New File and pending
+Changes intent. `r33-git-layout-red.log`: six behavioral failures/12 controls
+for multi-repo evidence, invalid legacy detachment and repeated rollback.
+`r33-file-green.log`: four files/61 cases after the file fixes;
+`r33-core-green.log`: six files/79 cases after Git/layout integration.
+
+The additional workspace-key control first had three fixture failures because
+stored descriptors normalize `pinned: true`. `r33-alias-red-v2.log` then
+exposed one genuine unmatched workspace preference/three controls. Selection
+repair now handles that alias. Delivered-object consumer tests separately
+cover retirement between producer delivery and publication.
+
+The first affected replay passed 24 files/385 tests, but strict lint rejected
+duplicate fixture strings, an unused type and the Git predicate's complexity.
+Typed positive/readiness predicates and fixture constants correct those
+warnings without narrowing coverage. An intermediate typecheck rejected the
+library-native serialized fixture as a saved JSON record and exposed an erased
+optional editor-instance type. The fixture now uses its persisted JSON shape;
+the live-tab hook retains `FileEditorTab` identity in its type.
+
+Final `r33-final-units.log`: 24 files/387 targeted tests pass after the final
+typed refactor and delivered-object controls. Strict changed-file lint,
+production typecheck and fresh R33 frontend build pass. Catalog/spec/harness
+checks pass; the owning design remains within its enforced size limit.
+
+Focused R33 additions to the existing owning replay:
+
+```bash
+cd "$VERIFY/apps/web"
+pnpm exec vitest run components/task/tablet-file-consumer.test.tsx \
+  components/task/tablet-file-admission.test.tsx \
+  components/task/tablet-file-deletion.test.ts \
+  components/task/tablet-git-readiness.test.tsx \
+  components/task/layout-preset-selector-apply.test.tsx \
+  components/task/task-center-panel-mutation-ownership.test.tsx \
+  hooks/use-session-layout-state.test.ts
+```
+
+New exact schedules use real store/hook/consumer and Dockview boundaries,
+with IO controlled at request/response or native restoration. They are not
+new browser race injections. The existing owning desktop/tablet and phone
+flows remain the composition/read-cursor parity checks; unchanged composition
+does not imply browser certification of every new ordering.
+
+Final fresh-bundle receipts: `r33-final-summary.log` ten desktop/tablet/maximize
+cases pass; `r33-phone-summary.log` ten phone cases pass. Runs are sequential,
+one worker/no retries. The dirty tablet editor/task-dot and failed-resume
+phone captures were inspected. Runtime/agentctl/host/plugin remain retained
+fresh R24; frontend is freshly built R33.
+
+Rollback failure coverage proves bounded native attempts and settled metadata,
+not successful pixel recovery when the native rollback itself rejects.
+No broad-suite/live-NATS, historical-trigger, seeded execution-liveness or
+isolated cursor-event certification is implied. List readback remains
+authoritative convergence. No Go/cursor/predicate/projector/promotion/schema/
+wire change in R33. Implementation and task-defined verification are complete;
+Sol R34 follows normal verified delivery at completed 33, clean 0.

@@ -917,9 +917,13 @@ function performApplyCustomLayout(
 ): void {
   const { api } = get();
   if (!api) return;
+  const raw = layout.layout as unknown as LayoutState;
+  const serialized = raw?.columns
+    ? null
+    : (sanitizeSerializedLayout(layout.layout) as SerializedDockview | null);
+  if (!raw?.columns && !serialized) return;
   const previous = get();
   const previousVersion = layoutVersions.get(api);
-  const previousGrid = !(layout.layout as LayoutState)?.columns ? api.toJSON() : null;
   captureLiveWidths(api, set);
   preserveChatScrollDuringLayout();
   const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
@@ -928,25 +932,23 @@ function performApplyCustomLayout(
     hiddenRightPane: null,
     activeLayoutProfile: profileForCustomLayout(layout),
   });
-  const { appliedState, restoreFailed } = restoreCustomLayout({
-    api,
-    layout,
-    opts,
-    safeWidth,
-    safeHeight,
-    set,
-  });
-  if (restoreFailed) {
-    if (previousGrid) restoreSerializedDockview(api, previousGrid);
-    if (previousVersion === undefined) layoutVersions.delete(api);
-    else layoutVersions.set(api, previousVersion);
-    set({
-      isRestoringLayout: previous.isRestoringLayout,
-      hiddenRightPane: previous.hiddenRightPane,
-      activeLayoutProfile: previous.activeLayoutProfile,
-    });
-    return;
+  let result: ReturnType<typeof restoreCustomLayout> | undefined;
+  try {
+    result = restoreCustomLayout({ api, layout, opts, serialized, safeWidth, safeHeight, set });
+  } finally {
+    if (!result || result.restoreFailed) {
+      if (previousVersion === undefined) layoutVersions.delete(api);
+      else layoutVersions.set(api, previousVersion);
+      set({
+        isRestoringLayout: previous.isRestoringLayout,
+        hiddenRightPane: previous.hiddenRightPane,
+        activeLayoutProfile: previous.activeLayoutProfile,
+        pinnedWidths: previous.pinnedWidths,
+      });
+    }
   }
+  if (result.restoreFailed) return;
+  const { appliedState } = result;
   set({ preMaximizeLayout: null, maximizedGroupId: null });
   if (get().currentLayoutEnvId) removeEnvMaximizeState(get().currentLayoutEnvId!);
   syncReusableRightTarget(
@@ -987,6 +989,7 @@ type RestoreCustomLayoutParams = {
   layout: SavedLayoutConfig;
   opts: ApplyCustomLayoutOptions | undefined;
   safeWidth: number;
+  serialized: SerializedDockview | null;
   safeHeight: number;
   set: StoreSet;
 };
@@ -1017,6 +1020,7 @@ function restoreCustomLayout({
   api,
   layout,
   opts,
+  serialized,
   safeWidth,
   safeHeight,
   set,
@@ -1053,24 +1057,42 @@ function restoreCustomLayout({
       return { appliedState: activeState, restoreFailed: false };
     }
 
-    const visibleSessions = visibleCustomLayoutSessions(opts);
-    const sanitized = sanitizeSerializedLayout(layout.layout);
-    if (!sanitized) return { appliedState: state, restoreFailed: true };
-    layoutVersions.set(api, (layoutVersions.get(api) ?? 0) + 1);
-    restoreSerializedDockview(api, sanitized as SerializedDockview);
-    replaceStaleSessionPanels(
-      api,
-      visibleSessions.activeSessionId,
-      visibleSessions.sessionIds,
-      undefined,
-      opts?.envId ?? null,
-    );
-    set(applyLayoutFixups(api));
+    if (!serialized) return { appliedState: state, restoreFailed: true };
+    restoreCustomSerializedLayout(api, serialized, opts, set);
     return { appliedState: state, restoreFailed: false };
   } catch (e) {
     // i18n-exempt: Internal layout restoration diagnostic.
     console.warn("applyCustomLayout: restore failed:", e);
     return { appliedState: state, restoreFailed: true };
+  }
+}
+
+function restoreCustomSerializedLayout(
+  api: DockviewApi,
+  serialized: SerializedDockview,
+  opts: ApplyCustomLayoutOptions | undefined,
+  set: StoreSet,
+) {
+  const previous = api.toJSON();
+  layoutVersions.set(api, (layoutVersions.get(api) ?? 0) + 1);
+  try {
+    api.fromJSON(serialized);
+    const visible = visibleCustomLayoutSessions(opts);
+    replaceStaleSessionPanels(
+      api,
+      visible.activeSessionId,
+      visible.sessionIds,
+      undefined,
+      opts?.envId ?? null,
+    );
+    set(applyLayoutFixups(api));
+  } catch (error) {
+    try {
+      api.fromJSON(previous);
+    } catch (rollbackError) {
+      console.warn(rollbackError);
+    }
+    throw error;
   }
 }
 

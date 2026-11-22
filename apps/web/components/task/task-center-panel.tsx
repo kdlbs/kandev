@@ -36,7 +36,8 @@ import {
 } from "./task-center-panel-file-tabs";
 import { TaskCenterReviewContent } from "./task-center-review-content";
 import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
-import { tabletSelectionOwner } from "@/lib/state/tablet-file-authority";
+import { tabletSelectionOwner, hasPendingTabletFileOpen } from "@/lib/state/tablet-file-authority";
+import { usePendingTabletFileOpen } from "@/hooks/domains/session/use-tablet-file-admission";
 import {
   useCenterPanelGitChanges,
   useLiveFileTabs,
@@ -85,14 +86,16 @@ function useLeftTabState(
   const [leftTab, setLeftTab] = useTabletSessionTab(activeSessionId);
   const store = useAppStoreApi();
   const [showRequestChangesTooltip, setShowRequestChangesTooltip] = useState(false);
+  const pendingFile = usePendingTabletFileOpen(activeSessionId);
 
   useEffect(() => {
-    if (leftTab !== "changes" || hasChanges !== false || !activeSessionId) return;
+    if (leftTab !== "changes" || hasChanges !== false || !activeSessionId || pendingFile) return;
     let current = true;
     const owner = tabletSelectionOwner(store, activeSessionId);
     queueMicrotask(() => {
       if (
         current &&
+        !hasPendingTabletFileOpen(store, activeSessionId) &&
         store.getState().tabletSession.activeTabBySessionId[activeSessionId] === "changes" &&
         tabletSelectionOwner(store, activeSessionId) === owner
       )
@@ -101,7 +104,7 @@ function useLeftTabState(
     return () => {
       current = false;
     };
-  }, [leftTab, hasChanges, setLeftTab, store, activeSessionId]);
+  }, [leftTab, hasChanges, setLeftTab, store, activeSessionId, pendingFile]);
   useEffect(() => {
     const handler = () => {
       if (hasChanges) setLeftTab("changes");
@@ -341,6 +344,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     session: activeSessionId,
     tabs: openFileTabs,
     setTabs: setOpenFileTabs,
+    tabsRef: fileTabsRef,
     selected: leftTab,
     setSelected: setLeftTab,
   });

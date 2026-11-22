@@ -11,7 +11,9 @@ import {
 } from "@/lib/state/layout-manager/dockview-test-host.test-helpers";
 import { LayoutPresetSelector } from "./layout-preset-selector";
 import { createAppStore } from "@/lib/state/store";
+import { setupPortalCleanup } from "./dockview-layout-setup";
 
+const CREATED_AT = "2026-11-21T00:00:00Z";
 const load = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/use-task-sessions", () => ({
   useTaskSessions: () => ({ isLoaded: false, loadSessions: load }),
@@ -55,7 +57,7 @@ it.each(["current", "environment", "selection-aba", "newer-layout", SAME_ENV_MAX
       id: `saved-${index}`,
       name,
       is_default: false,
-      created_at: "2026-11-21T00:00:00Z",
+      created_at: CREATED_AT,
       layout: getBuiltInLayoutProfile(index ? "plan" : "preview").layout,
     }));
     const base = createAppStore().getState();
@@ -169,7 +171,7 @@ it.each(
         id: "failed",
         name: "Failed preset",
         isDefault: false,
-        createdAt: "2026-11-21T00:00:00Z",
+        createdAt: CREATED_AT,
         layout:
           shape === "legacy"
             ? JSON.parse(JSON.stringify(overlay))
@@ -186,6 +188,80 @@ it.each(
     } finally {
       disposeDockview(api);
       useDockviewStore.setState(original);
+    }
+  },
+);
+
+it.each([false, true])(
+  "rejects an invalid legacy preset without detaching transcript ownership (overlay=%s)",
+  async (overlay) => {
+    const api = mountDockview(1200, 700);
+    const previous = useDockviewStore.getState();
+    const app = createAppStore();
+    try {
+      useDockviewStore.setState({ api, currentLayoutEnvId: "invalid", preMaximizeLayout: null });
+      useDockviewStore.getState().applyBuiltInPreset("default");
+      await act(settle);
+      if (overlay) {
+        useDockviewStore.getState().maximizeGroup(api.getPanel("chat")!.group.id);
+        await act(settle);
+      }
+      app.setState({ tasks: { ...app.getState().tasks, activeSessionId: "B" } });
+      setupPortalCleanup(api, app);
+      const target = { sessionId: "B", messageId: "indexed", token: 100, hostPanelId: "chat" };
+      useDockviewStore.setState({ scrollTarget: target });
+      const panel = api.getPanel("chat");
+      const fromJSON = vi.spyOn(api, "fromJSON");
+      const profile = useDockviewStore.getState().activeLayoutProfile;
+      useDockviewStore.getState().applyCustomLayout({
+        id: "invalid",
+        name: "Invalid",
+        isDefault: false,
+        createdAt: CREATED_AT,
+        layout: {},
+      });
+      expect(useDockviewStore.getState().scrollTarget).toEqual(target);
+      expect(api.getPanel("chat")).toBe(panel);
+      expect(fromJSON).not.toHaveBeenCalled();
+      expect(useDockviewStore.getState().activeLayoutProfile).toBe(profile);
+    } finally {
+      disposeDockview(api);
+      useDockviewStore.setState(previous);
+    }
+  },
+);
+
+it.each(["legacy", "columns"])(
+  "settles metadata after a failed %s native rollback without retrying it",
+  async (shape) => {
+    const api = mountDockview(1200, 700);
+    const previous = useDockviewStore.getState();
+    try {
+      useDockviewStore.setState({ api, currentLayoutEnvId: "rollback", preMaximizeLayout: null });
+      useDockviewStore.getState().applyBuiltInPreset("default");
+      await act(settle);
+      const grid = api.toJSON();
+      const profile = useDockviewStore.getState().activeLayoutProfile;
+      const fromJSON = vi.spyOn(api, "fromJSON").mockImplementation(() => {
+        throw new Error("native and rollback failure");
+      });
+      useDockviewStore.getState().applyCustomLayout({
+        id: "failure",
+        name: "Failure",
+        isDefault: false,
+        createdAt: CREATED_AT,
+        layout:
+          shape === "legacy"
+            ? JSON.parse(JSON.stringify(grid))
+            : getBuiltInLayoutProfile("default")!.layout,
+      });
+      expect(fromJSON).toHaveBeenCalledTimes(2);
+      expect(useDockviewStore.getState().isRestoringLayout).toBe(false);
+      expect(useDockviewStore.getState().activeLayoutProfile).toBe(profile);
+    } finally {
+      vi.restoreAllMocks();
+      disposeDockview(api);
+      useDockviewStore.setState(previous);
     }
   },
 );

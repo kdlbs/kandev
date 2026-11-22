@@ -9,6 +9,7 @@ import type { OpenFileTab } from "@/lib/types/backend";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
+import { finishTabletFileOpen } from "@/lib/state/tablet-file-authority";
 
 export type SelectedDiff = {
   path: string;
@@ -56,6 +57,7 @@ function useOpenFileRequestState() {
     setOpenFileRequest(file);
   }, []);
   const handleFileOpenHandled = useCallback(() => {
+    if (openFileRequest) finishTabletFileOpen(openFileRequest);
     setOpenFileRequest((current) => (current === openFileRequest ? null : current));
   }, [openFileRequest]);
 
