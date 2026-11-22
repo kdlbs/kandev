@@ -7,11 +7,27 @@ import (
 	"strings"
 )
 
+// Canonical wire field spellings, in decode-index order.
+const (
+	sidebarFieldRevision    = "revision"
+	sidebarFieldGroups      = "groups"
+	sidebarFieldMemberships = "memberships"
+	sidebarFieldLabel       = "label"
+	sidebarFieldTaskID      = "task_id"
+	sidebarFieldGroupID     = "group_id"
+)
+
+var (
+	sidebarSnapshotFields   = []string{"version", sidebarFieldRevision, "complete", sidebarFieldGroups, sidebarFieldMemberships}
+	sidebarValueFields      = []string{"id", sidebarFieldLabel, "color"}
+	sidebarMembershipFields = []string{sidebarFieldTaskID, sidebarFieldGroupID}
+)
+
 func decodeSidebarGroupingJSON(body []byte) (SidebarGroupingSnapshot, error) {
 	var snapshot SidebarGroupingSnapshot
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
-	err := decodeSidebarObject(decoder, []string{"version", "revision", "complete", "groups", "memberships"}, func(index int) error {
+	err := decodeSidebarObject(decoder, sidebarSnapshotFields, func(index int) error {
 		switch index {
 		case 0:
 			return decoder.Decode(&snapshot.Version)
@@ -96,7 +112,7 @@ func decodeSidebarArray[T any](decoder *json.Decoder, limit int, read func(*json
 }
 
 func decodeSidebarValue(decoder *json.Decoder, value *SidebarGroupingValue) error {
-	return decodeSidebarObject(decoder, []string{"id", "label", "color"}, func(index int) error {
+	return decodeSidebarObject(decoder, sidebarValueFields, func(index int) error {
 		switch index {
 		case 0:
 			return decoder.Decode(&value.ID)
@@ -109,7 +125,7 @@ func decodeSidebarValue(decoder *json.Decoder, value *SidebarGroupingValue) erro
 }
 
 func decodeSidebarMembership(decoder *json.Decoder, value *SidebarGroupingMembership) error {
-	return decodeSidebarObject(decoder, []string{"task_id", "group_id"}, func(index int) error {
+	return decodeSidebarObject(decoder, sidebarMembershipFields, func(index int) error {
 		if index == 0 {
 			return decoder.Decode(&value.TaskID)
 		}

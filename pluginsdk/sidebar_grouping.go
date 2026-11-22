@@ -40,38 +40,55 @@ type SidebarGroupingMembership struct {
 
 // DecodeSidebarGroupingSnapshot validates a bounded, explicitly complete snapshot.
 func DecodeSidebarGroupingSnapshot(body []byte) (*SidebarGroupingSnapshot, error) {
-	invalid := errInvalidSidebarGroupingSnapshot
 	if len(body) > MaxSidebarGroupingResponseBytes || !utf8.Valid(body) {
-		return nil, invalid
+		return nil, errInvalidSidebarGroupingSnapshot
 	}
 	snapshot, err := decodeSidebarGroupingJSON(body)
-	if err != nil {
-		return nil, invalid
+	if err != nil || !validSidebarGroupingEnvelope(&snapshot) {
+		return nil, errInvalidSidebarGroupingSnapshot
 	}
-	if snapshot.Version != 1 || !snapshot.Complete || !sidebarGroupingText(snapshot.Revision, 256) ||
-		snapshot.Groups == nil || snapshot.Memberships == nil ||
-		len(snapshot.Groups) > MaxSidebarGroupingValues || len(snapshot.Memberships) > MaxSidebarGroupingMemberships {
-		return nil, invalid
+	values, ok := sidebarGroupingValueIDs(snapshot.Groups)
+	if !ok {
+		return nil, errInvalidSidebarGroupingSnapshot
 	}
-	values := make(map[string]struct{}, len(snapshot.Groups))
-	for _, group := range snapshot.Groups {
+	pairs, ok := dedupeSidebarGroupingMemberships(snapshot.Memberships, values)
+	if !ok {
+		return nil, errInvalidSidebarGroupingSnapshot
+	}
+	snapshot.Memberships = pairs
+	return &snapshot, nil
+}
+
+func validSidebarGroupingEnvelope(snapshot *SidebarGroupingSnapshot) bool {
+	return snapshot.Version == 1 && snapshot.Complete && sidebarGroupingText(snapshot.Revision, 256) &&
+		snapshot.Groups != nil && snapshot.Memberships != nil &&
+		len(snapshot.Groups) <= MaxSidebarGroupingValues && len(snapshot.Memberships) <= MaxSidebarGroupingMemberships
+}
+
+func sidebarGroupingValueIDs(groups []SidebarGroupingValue) (map[string]struct{}, bool) {
+	values := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
 		if !sidebarGroupingText(group.ID, 256) || !sidebarGroupingText(group.Label, 256) ||
 			(group.Color != "" && !sidebarGroupingColor.MatchString(group.Color)) {
-			return nil, invalid
+			return nil, false
 		}
 		if _, exists := values[group.ID]; exists {
-			return nil, invalid
+			return nil, false
 		}
 		values[group.ID] = struct{}{}
 	}
-	seen := make(map[SidebarGroupingMembership]struct{}, len(snapshot.Memberships))
-	pairs := snapshot.Memberships[:0]
-	for _, pair := range snapshot.Memberships {
+	return values, true
+}
+
+func dedupeSidebarGroupingMemberships(memberships []SidebarGroupingMembership, values map[string]struct{}) ([]SidebarGroupingMembership, bool) {
+	seen := make(map[SidebarGroupingMembership]struct{}, len(memberships))
+	pairs := memberships[:0]
+	for _, pair := range memberships {
 		if !sidebarGroupingText(pair.TaskID, 256) {
-			return nil, invalid
+			return nil, false
 		}
 		if _, exists := values[pair.GroupID]; !exists {
-			return nil, invalid
+			return nil, false
 		}
 		if _, duplicate := seen[pair]; duplicate {
 			continue
@@ -79,8 +96,7 @@ func DecodeSidebarGroupingSnapshot(body []byte) (*SidebarGroupingSnapshot, error
 		seen[pair] = struct{}{}
 		pairs = append(pairs, pair)
 	}
-	snapshot.Memberships = pairs
-	return &snapshot, nil
+	return pairs, true
 }
 
 func sidebarGroupingText(value string, maxBytes int) bool {
