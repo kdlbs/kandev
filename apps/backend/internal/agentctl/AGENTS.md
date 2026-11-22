@@ -45,7 +45,7 @@ drains in-flight cleanup and retries retained bundles before returning.
 
 ## Env stripping for credential-mode agents (`StripEnv`)
 
-For credential-mode subprocess environment changes, read [environment stripping guidance](ENV-STRIPPING.md).
+For credential-mode environments, Tracker Git environment snapshots, or SSH command rewriting, read [environment stripping guidance](ENV-STRIPPING.md).
 
 ## Idle-instance reaper (`KANDEV_ACP_IDLE_TIMEOUT`)
 

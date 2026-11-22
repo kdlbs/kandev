@@ -141,7 +141,8 @@ def main() -> int:
                 rules.setdefault(rule, {})
             violations.extend(lint_path(path, kind, rules=rules, disabled=disabled))
         if "project-instruction-byte-limit" not in disabled:
-            violations.extend(lint_project_instruction_paths(cwd, paths, args.all))
+            explicit = [Path(target) if Path(target).is_absolute() else cwd / target for target in args.targets]
+            violations.extend(lint_project_instruction_paths(cwd, paths, args.all, explicit))
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -178,17 +179,18 @@ def check_project_instruction_budget(path: Path, root: Path, limit: int) -> list
                       f"instruction path is {total} bytes (limit {limit}); move conditional guidance to references.")]
 
 
-def lint_project_instruction_paths(root: Path, targets: list[Path], all_files: bool) -> list[Violation]:
+def lint_project_instruction_paths(root: Path, targets: list[Path], all_files: bool, explicit: list[Path]) -> list[Violation]:
     changed = [p for p in targets if p.name in {"AGENTS.md", "AGENTS.override.md"}]
     if not all_files and not changed:
         return []
-    candidates = []
-    for directory, dirs, files in os.walk(root, followlinks=False):
-        dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "dist", "target"} and not (Path(directory) / d).is_symlink()]
-        if "AGENTS.md" in files or "AGENTS.override.md" in files:
-            candidate = Path(directory) / ("AGENTS.override.md" if "AGENTS.override.md" in files else "AGENTS.md")
-            if all_files or any(p.parent == candidate.parent or p.parent in candidate.parents for p in changed):
-                candidates.append(candidate)
+    try:
+        tracked = targets if all_files else discover_all(root)
+    except RuntimeError:
+        tracked = targets
+    selected = [p for p in tracked + explicit if p.name in {"AGENTS.md", "AGENTS.override.md"}]
+    candidates = sorted({p for p in selected if p.is_file() and (
+        all_files or any(q.parent == p.parent or q.parent in p.parents for q in changed)
+    )})
     return [v for path in candidates for v in check_project_instruction_budget(path, root, PROJECT_INSTRUCTION_BUDGET)]
 
 
@@ -211,7 +213,7 @@ def discover_targets(targets: list[Path], cwd: Path) -> list[Path]:
     paths = []
     for target in targets:
         path = target if target.is_absolute() else cwd / target
-        if not path.exists():
+        if not path.exists() and path.name not in {"AGENTS.md", "AGENTS.override.md"}:
             continue
         if path.is_dir() and not path.is_symlink():
             paths.extend(walk_without_symlink_dirs(path))

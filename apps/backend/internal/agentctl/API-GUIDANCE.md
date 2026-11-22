@@ -26,8 +26,8 @@ the per-instance ones above, and it owns the agent-survival surface:
   backend repeats on a cadence derived from the unowned period), plus the
   filesystem paths kept off `/identity`.
 
-Auth on that router is `controlCredentialAuth`, which has three tiers rather
-than on/off. `/health`, `/auth/handshake`, `/identity`, and `/ownership/prove`
+If no control credential is configured, `controlCredentialAuth` allows all requests.
+When a credential is configured, `/health`, `/auth/handshake`, `/identity`, and `/ownership/prove`
 are exempt entirely. The paths in `adoptionOnlyPaths` (`rotate`, `shutdown`)
 additionally accept the **superseded** credential until the rotation that
 replaced it is confirmed, so a backend that crashed mid-rotation can still

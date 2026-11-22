@@ -107,8 +107,34 @@ class HarnessLinterTest(unittest.TestCase):
     def test_codex_budget_checks_descendants_of_changed_root(self) -> None:
         self.write("AGENTS.md", "x" * 20000)
         self.write("nested/AGENTS.md", "x" * 10000)
+        self.init_git()
         result = self.run_cli("AGENTS.md")
         self.assertEqual(result.returncode, 1)
+        self.assertIn("project-instruction-byte-limit", result.stdout)
+
+    def test_codex_budget_ignores_untracked_and_ignored_checkouts(self) -> None:
+        self.write("AGENTS.md", "x" * 20000)
+        self.write(".gitignore", ".worktrees/\n")
+        self.init_git()
+        self.write(".worktrees/other/AGENTS.md", "x" * 10000)
+        for target in ("--all", "AGENTS.md"):
+            with self.subTest(target=target):
+                result = self.run_cli(target)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_codex_budget_checks_deleted_override_and_new_explicit_file(self) -> None:
+        self.write("AGENTS.md", "x" * 20000)
+        self.write("nested/AGENTS.md", "x" * 10000)
+        override = self.write("nested/AGENTS.override.md", "small")
+        self.init_git()
+        override.unlink()
+        result = self.run_cli("nested/AGENTS.override.md")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("project-instruction-byte-limit", result.stdout)
+
+        new_file = self.write("new/AGENTS.md", "x" * 10000)
+        result = self.run_cli(str(new_file))
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("project-instruction-byte-limit", result.stdout)
 
     def test_config_line_limit_is_wired(self) -> None:
