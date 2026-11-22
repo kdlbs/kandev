@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: executors
 requirements:
   - REQ-EXECUTORS-SSH-WINDOWS-001
@@ -368,6 +368,19 @@ raw command-line setter carries a Windows build tag. The tests cover:
 
 Real-host evidence for `AC-EXECUTORS-SSH-WINDOWS-001.5`, `.8`, and `.11` comes
 from a stock Windows OpenSSH Server.
+
+## Known limitations
+
+These limitations were observed on the validation host. Each needs separate
+work:
+
+- The first turn of a new Windows session can miss its turn-change start
+  checkpoint. On a fresh clone, agentctl's Git checkpoint took longer than the
+  backend's request deadline. The backend logs a warning, and later turns
+  capture normally.
+- Stop forcibly ends `agentctl.exe`, so agentctl cannot remove its
+  `%TEMP%\kandev-github-cli-*` shim directory. Each session leaves one directory
+  of links, or of copies when the volume refuses links.
 
 ## Real-host evidence
 

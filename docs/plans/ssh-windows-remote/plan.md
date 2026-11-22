@@ -1,7 +1,7 @@
 ---
 created: 2026-11-22
-updated: 2026-11-22
-status: in_progress
+updated: 2026-11-23
+status: implemented
 requirements:
   - REQ-EXECUTORS-SSH-WINDOWS-001
   - REQ-EXECUTORS-SSH-WINDOWS-002

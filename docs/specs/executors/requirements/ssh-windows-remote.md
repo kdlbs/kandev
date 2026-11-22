@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: executors
 created: 2026-11-22
 owners:
@@ -151,6 +151,8 @@ as the Linux and macOS helpers.
 - SSH passthrough mode on Windows hosts until a separate requirement specifies
   remote Windows terminal behavior.
 - Task-directory reclamation on Windows hosts.
+- The task terminal panel on Windows hosts. agentctl's interactive shell needs a
+  PTY, and agentctl has no Windows PTY implementation.
 - Remote-authentication setup scripts on Windows hosts.
 
 ## System design
