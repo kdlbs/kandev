@@ -7,7 +7,6 @@ import type { RepositoryInspection, RepositoryProviderRegistration } from "@/lib
 const fetchBranches = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/domains/github-api", () => ({ fetchRepoBranches: fetchBranches }));
 vi.mock("@/lib/api/domains/gitlab-api", () => ({ listProjectBranches: vi.fn() }));
-vi.mock("@/lib/api/domains/azure-devops-api", () => ({ listAzureDevOpsBranches: vi.fn() }));
 
 const PLUGIN = "branch-cache-refresh-test";
 const HOST = "https://code.example.test";

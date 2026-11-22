@@ -4,6 +4,7 @@ import type {
   FileContentResponse,
   FileSearchResponse,
   WorkspaceContentSearchResponse,
+  WorkspaceRootFilesResponse,
 } from "@/lib/types/backend";
 
 /**
@@ -95,6 +96,16 @@ export async function searchWorkspaceContent(
     session_id: sessionId,
     query,
     limit_per_repo: limitPerRepo,
+  });
+}
+
+/** List files at the task workspace root that sit outside repository checkouts. */
+export async function listWorkspaceRootFiles(
+  client: WebSocketClient,
+  sessionId: string,
+): Promise<WorkspaceRootFilesResponse> {
+  return client.request<WorkspaceRootFilesResponse>("workspace.root_files.list", {
+    session_id: sessionId,
   });
 }
 

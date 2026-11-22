@@ -54,6 +54,10 @@ type AgentEventData struct {
 	DeliverySequence          uint64                                `json:"delivery_sequence,omitempty"`
 	DeliverySubmissionID      string                                `json:"delivery_submission_id,omitempty"`
 	DeliveryOutcome           string                                `json:"delivery_outcome,omitempty"`
+	DetachedAtCommit          bool                                  `json:"detached_at_commit,omitempty"`
+	CommittedAt               *time.Time                            `json:"committed_at,omitempty"`
+	CancelCause               string                                `json:"cancel_cause,omitempty"`
+	CancelDecidedAt           *time.Time                            `json:"cancel_decided_at,omitempty"`
 	Status                    string                                `json:"status,omitempty"`
 	ExitCode                  *int                                  `json:"exit_code,omitempty"`
 	ErrorMessage              string                                `json:"error_message,omitempty"`
@@ -66,14 +70,18 @@ type AgentEventData struct {
 	AttemptID                 string                                `json:"attempt_id,omitempty"`
 	ErrorStamp                string                                `json:"error_stamp,omitempty"`
 	Causes                    []models.AgentErrorCause              `json:"causes,omitempty"`
-	ProviderError             *streams.ProviderError                `json:"provider_error,omitempty"`
-	PromptFailureDisposition  streams.PromptFailureDisposition      `json:"prompt_failure_disposition,omitempty"`
-	SessionSettingsPolicy     streams.SessionSettingsPolicy         `json:"session_settings_policy,omitempty"`
-	PromptGeneration          uint64                                `json:"prompt_generation,omitempty"`
-	RecoveredAvailabilityOnly bool                                  `json:"recovered_availability_only,omitempty"`
-	RunID                     string                                `json:"run_id,omitempty"`
-	CausingRunID              string                                `json:"causing_run_id,omitempty"`
-	TerminalCausingRunID      string                                `json:"terminal_causing_run_id,omitempty"`
+	// SessionAuthMethods is the validated, connection-scoped snapshot returned
+	// with a failed startup operation. It is projected into recovery metadata,
+	// not serialized as an agent event or stored on the durable error record.
+	SessionAuthMethods        []streams.AuthMethodInfo         `json:"-"`
+	ProviderError             *streams.ProviderError           `json:"provider_error,omitempty"`
+	PromptFailureDisposition  streams.PromptFailureDisposition `json:"prompt_failure_disposition,omitempty"`
+	SessionSettingsPolicy     streams.SessionSettingsPolicy    `json:"session_settings_policy,omitempty"`
+	PromptGeneration          uint64                           `json:"prompt_generation,omitempty"`
+	RecoveredAvailabilityOnly bool                             `json:"recovered_availability_only,omitempty"`
+	RunID                     string                           `json:"run_id,omitempty"`
+	CausingRunID              string                           `json:"causing_run_id,omitempty"`
+	TerminalCausingRunID      string                           `json:"terminal_causing_run_id,omitempty"`
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.

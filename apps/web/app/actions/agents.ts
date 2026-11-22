@@ -2,6 +2,7 @@
 
 import { getBackendConfig } from "@/lib/config";
 import { ApiError, fetchJson } from "@/lib/api/client";
+import { t } from "@/lib/i18n";
 import type {
   Agent,
   AgentProfile,
@@ -43,7 +44,12 @@ function normalizeAgentInPlace(agent: Agent): Agent {
   };
 }
 
-function agentSettingsRequest<T>(url: string, init?: RequestInit): Promise<T> {
+// i18n-exempt: backend API contract error code
+const CLAUDE_EXACT_MODEL_ALIAS_CONFLICT = "claude_exact_model_alias_conflict";
+// i18n-exempt: profile environment variable identifier
+const ANTHROPIC_MODEL_ENV_VAR = "ANTHROPIC_MODEL";
+
+async function agentSettingsRequest<T>(url: string, init?: RequestInit): Promise<T> {
   // Pin the URL origin to the configured backend so a tainted path segment
   // (agent ID from a form, profile ID from a route param) cannot redirect
   // the request to a different host. Closes the CodeQL SSRF finding.
@@ -52,7 +58,16 @@ function agentSettingsRequest<T>(url: string, init?: RequestInit): Promise<T> {
   if (parsed.origin !== allowed.origin) {
     throw new Error(`Refusing to fetch outside configured backend origin: ${parsed.origin}`);
   }
-  return fetchJson<T>(parsed.toString(), { cache: "no-store", init });
+  try {
+    return await fetchJson<T>(parsed.toString(), { cache: "no-store", init });
+  } catch (error) {
+    if (error instanceof ApiError && error.errorCode === CLAUDE_EXACT_MODEL_ALIAS_CONFLICT) {
+      error.message = t("agents:claudeExactModelAliasConflict", {
+        envVar: ANTHROPIC_MODEL_ENV_VAR,
+      });
+    }
+    throw error;
+  }
 }
 
 export async function listAgentDiscoveryAction(): Promise<ListAgentDiscoveryResponse> {
@@ -241,6 +256,7 @@ export async function duplicateAgentProfileAction(id: string): Promise<AgentProf
 import type {
   ActiveSessionInfo,
   AutomationReference,
+  DynamicProfileReference,
   RoutingTierReference,
   WatcherReference,
   UtilityAgentReference,
@@ -255,6 +271,7 @@ export type DeleteProfileResult =
       routingTiers: RoutingTierReference[];
       automations: AutomationReference[];
       utilityAgents: UtilityAgentReference[];
+      dynamicProfiles: DynamicProfileReference[];
     }
   | { status: "error"; message: string; handled?: boolean };
 
@@ -278,6 +295,7 @@ type DeleteProfileErrorBody = {
   routing_tiers?: RoutingTierReference[];
   automations?: AutomationReference[];
   utility_agents?: UtilityAgentReference[];
+  dynamic_profiles?: DynamicProfileReference[];
 };
 
 function readDeleteProfileErrorBody(value: unknown): DeleteProfileErrorBody {
@@ -290,7 +308,8 @@ function hasDeleteProfileConflict(body: DeleteProfileErrorBody): boolean {
     body.watchers ||
     body.routing_tiers ||
     body.automations ||
-    body.utility_agents,
+    body.utility_agents ||
+    body.dynamic_profiles,
   );
 }
 
@@ -308,6 +327,7 @@ function deleteAgentProfileError(error: unknown): DeleteProfileResult {
       routingTiers: body.routing_tiers ?? [],
       automations: body.automations ?? [],
       utilityAgents: body.utility_agents ?? [],
+      dynamicProfiles: body.dynamic_profiles ?? [],
     };
   }
   // i18n-exempt: server-provided error text, or an HTTP status diagnostic when

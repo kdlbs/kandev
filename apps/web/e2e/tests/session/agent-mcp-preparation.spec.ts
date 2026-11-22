@@ -1,4 +1,4 @@
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import {
@@ -9,8 +9,125 @@ import {
   E2E_MCP_LEGACY_ERROR,
   E2E_MCP_LEGACY_OUTPUT,
   installAgentMcpRecoveryRoutes,
+  seedCursorMcpDiscoveryPreparation,
   seedMcpDiagnosticPreparation,
 } from "../../helpers/agent-mcp-preparation";
+import { routeGatewayNotifications } from "../../helpers/ws-capture";
+
+type McpRecoveryFixture = Awaited<ReturnType<typeof createMcpRecoveryFixture>>;
+type GatewayNotifications = Awaited<ReturnType<typeof routeGatewayNotifications>>;
+
+async function exerciseLiveCursorMcpDiscoveryFeedback(
+  testPage: Page,
+  notifications: GatewayNotifications,
+  fixture: McpRecoveryFixture,
+) {
+  const preparation = testPage.getByTestId("prepare-progress-panel");
+  const common = {
+    task_id: fixture.taskId,
+    session_id: fixture.sessionId,
+    execution_id: "e2e-cursor-discovery-execution",
+    step_name: "",
+    step_kind: "agent_mcp_discovery",
+    mcp_provider: "cursor",
+    step_index: 0,
+    total_steps: 3,
+    status: "failed",
+    preparation_id: "e2e-live-cursor-discovery-attempt",
+    preparation_started_at: "2101-01-01T00:00:00.000000001Z",
+    timestamp: new Date().toISOString(),
+  };
+  notifications.send("executor.prepare.progress", { ...common, failure_code: "timeout" });
+
+  const timeoutDetails = preparation.getByTestId("cursor-mcp-discovery-details");
+  await expect(preparation).toHaveAttribute("data-status", "preparing");
+  await expect(preparation).toContainText("Discover Cursor MCP servers");
+  await expect(timeoutDetails).toBeVisible();
+
+  const setupCollapseToggle = preparation.getByRole("button", {
+    name: "Hide preparation details",
+  });
+  await setupCollapseToggle.click();
+  await expect(preparation).toHaveAttribute("data-expanded", "false");
+  const setupExpandToggle = preparation.getByRole("button", {
+    name: "Show preparation details",
+  });
+  await expect(setupExpandToggle).toBeFocused();
+  await setupExpandToggle.click();
+  await expect(preparation).toHaveAttribute("data-expanded", "true");
+  await expect(setupCollapseToggle).toBeFocused();
+
+  const timeoutTrigger = timeoutDetails.getByRole("button", { name: "Details" });
+  await testPage.keyboard.press("Tab");
+  await expect(timeoutTrigger).toBeFocused();
+  await testPage.keyboard.press("Enter");
+  await expect(timeoutTrigger).toHaveAttribute("aria-expanded", "true");
+  await expect(timeoutTrigger).toBeFocused();
+  await expect(timeoutDetails).toContainText(
+    "Checking enabled Cursor Marketplace plugins timed out (5-second limit).",
+  );
+  await expect(timeoutDetails).toContainText(
+    "Kandev skipped Marketplace plugin imports for this setup attempt. If setup completes, other configured MCP servers can still connect.",
+  );
+  await testPage.keyboard.press("Space");
+  await expect(timeoutTrigger).toHaveAttribute("aria-expanded", "false");
+  await expect(timeoutTrigger).toBeFocused();
+
+  notifications.send("executor.prepare.progress", {
+    ...common,
+    failure_code: "credentials_unavailable",
+  });
+  await timeoutTrigger.click();
+  await expect(timeoutDetails).toContainText(
+    "The lookup could not obtain Cursor account credentials.",
+  );
+  await timeoutTrigger.click();
+
+  notifications.send("executor.prepare.progress", {
+    ...common,
+    failure_code: "unknown_reason",
+  });
+  await timeoutTrigger.click();
+  await expect(timeoutDetails).toContainText(
+    "Kandev could not complete Cursor MCP discovery for this attempt.",
+  );
+  await timeoutTrigger.click();
+
+  await testPage.setViewportSize({ width: 420, height: 900 });
+  await testPage.evaluate(() => {
+    document.documentElement.style.fontSize = "14px";
+  });
+  const narrowBox = await timeoutTrigger.boundingBox();
+  expect(narrowBox?.height).toBeGreaterThanOrEqual(44);
+  await testPage.evaluate(() => {
+    document.documentElement.style.removeProperty("font-size");
+  });
+  await expect(timeoutDetails).not.toHaveAttribute("data-failure-code");
+
+  notifications.send("executor.prepare.progress", { ...common, failure_code: "canceled" });
+  await timeoutTrigger.click();
+  await expect(timeoutDetails).toContainText(
+    "The check for enabled Cursor Marketplace plugins was canceled.",
+  );
+  await expect(timeoutDetails).not.toContainText(
+    "Kandev skipped Marketplace plugin imports for this setup attempt.",
+  );
+  await timeoutTrigger.click();
+}
+
+async function expectHydratedCursorMcpDiscoveryFeedback(testPage: Page) {
+  const preparation = testPage.getByTestId("prepare-progress-panel");
+  await expect(preparation).toHaveAttribute("data-status", "completed_with_error");
+  await preparation.getByRole("button", { name: "Show preparation details" }).click();
+  await expect(preparation).toContainText("Discover Cursor MCP servers");
+  await expect(preparation).toContainText("Verify connection: kandev-diagnostics");
+  const details = preparation.getByTestId("cursor-mcp-discovery-details");
+  await details.getByRole("button", { name: "Details" }).click();
+  await expect(details).toContainText(
+    "Checking enabled Cursor Marketplace plugins timed out (5-second limit).",
+  );
+  await expect(preparation).toContainText("Verify connection: kandev-diagnostics");
+}
 
 test.describe("Agent MCP preparation recovery", () => {
   test("opens the exact DB-backed authentication terminal and retries in the same session", async ({
@@ -41,7 +158,7 @@ test.describe("Agent MCP preparation recovery", () => {
       await expect(preparation).toHaveAttribute("data-status", "completed_with_warnings");
       await expect(preparation).toHaveAttribute("data-expanded", "true");
       await expect(preparation).toContainText("Prepare workspace");
-      await expect(preparation).toContainText("Discover servers: plugin-atlassian-jira");
+      await expect(preparation).toContainText("Discover Cursor MCP servers: plugin-atlassian-jira");
       await expect(preparation).toContainText("Apply profile selection: plugin-atlassian-jira");
       await expect(preparation).toContainText("Check credentials: plugin-atlassian-jira");
       await expect(preparation).toContainText("Approve server: plugin-atlassian-jira");
@@ -229,6 +346,36 @@ test.describe("Agent MCP preparation recovery", () => {
         { server_id: E2E_MCP_SERVER_ID },
         { server_id: E2E_MCP_SERVER_ID },
       ]);
+    } finally {
+      await destroyMcpRecoveryTerminals(apiClient, fixture);
+    }
+  });
+
+  test("explains a Cursor MCP discovery timeout during setup and after reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const notifications = await routeGatewayNotifications(testPage);
+    const fixture = await createMcpRecoveryFixture(
+      apiClient,
+      seedData,
+      "Cursor MCP Discovery Feedback",
+    );
+
+    try {
+      await testPage.goto(`/t/${fixture.taskId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect.poll(() => notifications.isConnected()).toBe(true);
+
+      await exerciseLiveCursorMcpDiscoveryFeedback(testPage, notifications, fixture);
+
+      await seedCursorMcpDiscoveryPreparation(apiClient, seedData, fixture);
+      await testPage.reload();
+      await session.waitForLoad();
+      await expectHydratedCursorMcpDiscoveryFeedback(testPage);
     } finally {
       await destroyMcpRecoveryTerminals(apiClient, fixture);
     }

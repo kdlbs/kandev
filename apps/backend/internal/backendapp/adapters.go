@@ -1220,6 +1220,7 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		return nil, err
 	}
 	return &executor.AgentProfileInfo{
+		ExecutionGrade:             info.ExecutionGrade,
 		ProfileID:                  info.ProfileID,
 		ProfileName:                info.ProfileName,
 		AgentID:                    info.AgentID,
@@ -1612,6 +1613,11 @@ func (w *orchestratorWrapper) QueueUserPrompt(ctx context.Context, taskID, sessi
 	return w.svc.QueueUserPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
 }
 
+// QueueUserPromptWithReceipt forwards the accepted workflow queue identity.
+func (w *orchestratorWrapper) QueueUserPromptWithReceipt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) (string, error) {
+	return w.svc.QueueUserPromptWithReceipt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
+}
+
 func (w *orchestratorWrapper) MaxQueuedPromptsPerSession() int {
 	return w.svc.MaxQueuedPromptsPerSession()
 }
@@ -1883,10 +1889,31 @@ func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
 	messageID, taskID, content, agentSessionID, messageType, turnID string,
 	metadata map[string]interface{}, requestsInput bool,
 ) error {
+	return a.createSessionMessageIdempotent(
+		ctx, messageID, taskID, content, agentSessionID, messageType, turnID, metadata, requestsInput, false,
+	)
+}
+
+func (a *messageCreatorAdapter) CreateSessionLifecycleMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, messageType string,
+	metadata map[string]interface{},
+) error {
+	return a.createSessionMessageIdempotent(
+		ctx, messageID, taskID, content, agentSessionID, messageType, "", metadata, false, true,
+	)
+}
+
+func (a *messageCreatorAdapter) createSessionMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, messageType, turnID string,
+	metadata map[string]interface{}, requestsInput, completedTurn bool,
+) error {
 	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
+		CompletedTurn: completedTurn,
 		Content:       content,
 		AuthorType:    "agent",
 		Type:          messageType,
@@ -2151,8 +2178,8 @@ func (a *messageCreatorAdapter) AppendAgentMessage(ctx context.Context, messageI
 // PublishMessageEvent announces a message that was already persisted by a
 // canonical projector. It is used by the orchestrator's durable streaming
 // path to notify connected clients without repeating the message write.
-func (a *messageCreatorAdapter) PublishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
-	return a.svc.PublishMessageEvent(ctx, eventType, message)
+func (a *messageCreatorAdapter) PublishMessageEvent(ctx context.Context, eventType string, message *models.Message, receipts ...*models.ConversationMutationReceipt) error {
+	return a.svc.PublishMessageEvent(ctx, eventType, message, receipts...)
 }
 
 // CreateThinkingMessageStreaming creates a new thinking message with a pre-generated ID.

@@ -829,6 +829,7 @@ export class ApiClient {
   async createCustomTUIAgent(options: {
     display_name: string;
     command: string;
+    command_args?: string[];
     model?: string;
     description?: string;
     mcp_strategy?: string;
@@ -848,7 +849,11 @@ export class ApiClient {
     const { agents } = await this.listAgents();
     const agent = agents.find((candidate) => candidate.name === name);
     if (!agent) return;
-    await this.request("DELETE", `/api/v1/agents/${agent.id}`);
+    await this.deleteAgentById(agent.id);
+  }
+
+  async deleteAgentById(agentId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/agents/${agentId}`);
   }
 
   async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {
@@ -3509,6 +3514,8 @@ export class ApiClient {
   async getQueueStatus(identity: QueueSessionIdentityInput): Promise<{
     count: number;
     entries: Array<{
+      id: string;
+      position: number;
       content: string;
       queued_by: string;
       metadata?: Record<string, unknown>;
@@ -3634,40 +3641,6 @@ export class ApiClient {
       // the bounded poll can observe the recovered backend.
       return false;
     }
-  }
-
-  // --- Azure DevOps Mock Control ---
-
-  async mockAzureDevOpsSeed(state: unknown): Promise<void> {
-    await this.request("POST", "/api/v1/azure-devops/mock/state", state);
-  }
-
-  async mockAzureDevOpsReset(): Promise<void> {
-    await this.request("DELETE", "/api/v1/azure-devops/mock/state");
-  }
-
-  async setAzureDevOpsConfig(
-    workspaceId: string,
-    payload: { organizationUrl: string; pat: string },
-  ): Promise<void> {
-    await this.request(
-      "POST",
-      `/api/v1/azure-devops/config?workspace_id=${encodeURIComponent(workspaceId)}`,
-      { ...payload, authMethod: "pat" },
-    );
-  }
-
-  async associateAzureDevOpsTaskPR(
-    workspaceId: string,
-    taskId: string,
-    repositoryId: string,
-    pullRequestId: number,
-  ): Promise<void> {
-    await this.request(
-      "POST",
-      `/api/v1/azure-devops/tasks/${encodeURIComponent(taskId)}/pull-requests?workspace_id=${encodeURIComponent(workspaceId)}`,
-      { repositoryId, pullRequestId },
-    );
   }
 
   // --- Jira Mock Control ---
@@ -4425,11 +4398,13 @@ export class ApiClient {
     taskId: string,
     state: string,
     isPrimary = true,
+    options?: { isPassthrough?: boolean },
   ): Promise<{ id: string; task_id: string; status: string }> {
     return this.request("POST", "/api/v1/e2e/task-sessions", {
       task_id: taskId,
       state,
       is_primary: isPrimary,
+      is_passthrough: options?.isPassthrough,
     });
   }
 }

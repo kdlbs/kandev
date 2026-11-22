@@ -15,10 +15,9 @@ owners:
 
 The task service's deletion pipeline already removes a Quick Chat's sessions, executor rows, and
 scratch directory (`performTaskCleanup` → `cleanupQuickChatDirs` in
-`internal/task/service/service_tasks.go`). Manual deletion (`DeleteTask`) and the expiration
-sweep (`runQuickChatExpiration` → `deleteExpiredQuickChatTask`) both reach that pipeline, so one
-hook there serves both paths. This design adds an agent-history step to that pipeline. It does
-not change the deletion API, events, UI, the expiration predicate, or any agent launch path.
+`internal/task/service/service_tasks.go`). Explicit Quick Chat deletion reaches that
+pipeline, so one hook there owns this cleanup. This design adds an agent-history step to that
+pipeline. It does not change the deletion API, events, UI, or any agent launch path.
 
 The agent CLIs own their history formats. Kandev deletes only files it can prove belong to the
 deleted session, and never edits agent-owned shared indexes.
@@ -54,7 +53,7 @@ its history write commit together, so a rejected stale execution cannot append a
 The existing session-turn write lock serializes writers on PostgreSQL; SQLite serializes its
 writers. The metadata update changes only the history key, preserving unrelated session data.
 History bookkeeping preserves the session activity timestamp, so retaining an identity during
-runtime persistence does not make an idle Quick Chat ineligible for expiration.
+runtime persistence does not refresh the session's activity time.
 Repeated identities are deduplicated. Only eligible Quick Chats and standalone runtimes
 produce host-history records.
 
@@ -115,7 +114,7 @@ delete route is covered:
 Quick Chat tab close -> HandoffService.DeleteTaskTree
   -> PrepareTaskResourceCleanupWithOptions (cascade_delete)
        snapshot.agent_history = capture(task, sessions)   (deleting triggers only)
-DeleteTask / deleteExpiredQuickChatTask (quick_chat_expire)
+Explicit Quick Chat deletion (`delete`)
   -> deleteTaskWithManagedClaim
        envCleanup.agentHistory = capture(task, sessions)  -> snapshot.agent_history
 cleanup job / async cleanup

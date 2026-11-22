@@ -211,7 +211,7 @@ test("mobile drawer attaches a script-enabled repository and keeps the session c
   await markerRow.tap();
   const viewer = testPage.getByTestId("mobile-file-viewer-panel");
   await expect(viewer).toBeVisible({ timeout: 15_000 });
-  await expect(viewer.locator(".cm-line").filter({ hasText: SETUP_MARKER })).toBeVisible();
+  await expect(viewer.getByText(SETUP_MARKER, { exact: true })).toBeVisible();
   await viewer.getByRole("button", { name: "Close" }).tap();
 
   await testPage.reload();

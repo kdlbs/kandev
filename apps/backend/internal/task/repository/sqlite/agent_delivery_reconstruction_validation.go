@@ -14,10 +14,40 @@ func validateAgentDeliveryReconstructionRequest(request *models.AgentDeliveryRec
 		return repoerrors.ErrAgentDeliveryReconstructionConflict
 	}
 	if !validReconstructionSubmission(request) || !validReconstructionBlock(request) ||
-		!validReconstructionRecovery(request) || !validReconstructionProvenance(request) {
+		!validReconstructionRecovery(request) || !validReconstructionProvenance(request) ||
+		!validReconstructionPromptTurnBinding(request) {
 		return repoerrors.ErrAgentDeliveryReconstructionConflict
 	}
 	return validateReconstructionCursorEvidence(request)
+}
+
+func validReconstructionPromptTurnBinding(request *models.AgentDeliveryReconstructionRequest) bool {
+	binding := request.PromptTurnBinding
+	if binding == nil {
+		return true
+	}
+	return reconstructionPromptTurnBindingMatchesRequest(binding, request) &&
+		reconstructionPromptTurnBindingMatchesRecovery(binding, request) &&
+		reconstructionPromptTurnBindingHasDeadSource(request)
+}
+
+func reconstructionPromptTurnBindingMatchesRequest(binding *models.AgentDeliveryPromptTurnBinding, request *models.AgentDeliveryReconstructionRequest) bool {
+	return binding.TaskID == request.TaskID && binding.SessionID == request.SessionID &&
+		binding.IncarnationID == request.IncarnationID && binding.HarnessGeneration == uint64(request.HarnessGeneration) &&
+		binding.SubmissionID == request.Submission.ID && binding.StreamID == request.Recovery.StreamID &&
+		binding.ExecutionID != "" && binding.TurnID != "" && binding.PromptGeneration > 0 &&
+		binding.OriginalRuntime.Validate() == nil
+}
+
+func reconstructionPromptTurnBindingMatchesRecovery(binding *models.AgentDeliveryPromptTurnBinding, request *models.AgentDeliveryReconstructionRequest) bool {
+	return request.Recovery.AgentExecutionID == binding.ExecutionID &&
+		request.Recovery.PromptGeneration == binding.PromptGeneration && request.Recovery.OriginalRuntime == binding.OriginalRuntime &&
+		request.Recovery.Reconstruction.ProcessIdentityKnown
+}
+
+func reconstructionPromptTurnBindingHasDeadSource(request *models.AgentDeliveryReconstructionRequest) bool {
+	processTerminated := request.Recovery.Reconstruction.ProcessTerminated
+	return processTerminated != nil && *processTerminated
 }
 
 func validReconstructionSubmission(request *models.AgentDeliveryReconstructionRequest) bool {

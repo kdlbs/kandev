@@ -109,6 +109,19 @@ errors does not take its own healthy account out of rotation.
   precedence. Do not infer a reset hint when the diagnostic gives no reset
   time. This criterion and criterion 001.6 are OpenCode-specific exceptions to
   the shared quota signature list in criterion 001.3.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.13:** For `devin-acp`, a diagnostic
+  line that opens with `Reached free model rate limit`, optionally after an
+  `AI_APICallError:`, `Error:`, `Internal error:`, or `API Error:` label, shall
+  classify as high-confidence `rate_limited` (transient, fallback allowed).
+  Matching is case-insensitive, accepts horizontal whitespace between words,
+  and ignores fenced code examples, mid-sentence prose, and other providers.
+  When that line carries an `(at HH:MM <zone>)` clock and a valid relative
+  duration, the reset hint is the occurrence of that clock on the estimated
+  reset date or either adjacent calendar date in the stated zone that is
+  closest to the observation time plus the duration. Without a usable duration,
+  use the first occurrence after the observation time. Only the matched line
+  may supply the clock, and a line without a clock classifies without a reset
+  hint.
 
 Criterion 001.11 was added by the October 28
 [OpenCode capacity package](../../../plans/opencode-capacity-retry/plan.md).
@@ -116,10 +129,14 @@ Criterion 001.11 was added by the October 28
 Criterion 001.12 is described in the
 [provider error signature plan](../../../plans/provider-error-signatures/plan.md).
 
+Criterion 001.13 is described in the
+[Devin free-model rate limit plan](../../../plans/devin-free-model-rate-limit/plan.md).
+
 ## Out of scope
 
 - Changing rule order, confidence levels, or classification flags beyond the
-  narrow additions in criteria 001.6, 001.8, 001.9, 001.10, 001.11, and 001.12.
+  narrow additions in criteria 001.6, 001.8, 001.9, 001.10, 001.11, 001.12,
+  and 001.13.
 - Changing unrelated provider-neutral rules or any runtime-environment rules.
 - Changing how classified failures suspend candidates or select a successor.
 

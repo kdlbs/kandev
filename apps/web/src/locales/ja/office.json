@@ -719,6 +719,7 @@
   "routeOutcomeRetryScheduled": "再試行を予約済み",
   "routeOutcomeSkippedDegraded": "劣化のためスキップ",
   "routeOutcomeSkippedMaxAttempts": "最大試行回数のためスキップ",
+  "routeOutcomeSkippedAuthorProvider": "スキップ: このタスクを作成",
   "routeOutcomeSkippedMissingMapping": "マッピング不足のためスキップ",
   "routeOutcomeSkippedUserAction": "ユーザー操作のためスキップ",
   "routineActivated": "ルーチンを有効化しました",
@@ -741,6 +742,7 @@
   "routineStatusPaused": "一時停止中",
   "routingOverridesSaved": "ルーティングの上書きを保存しました",
   "routingSettingsSaved": "ルーティング設定を保存しました",
+  "routingSavedWithExclusionWarnings": "設定を保存しましたが、現在の設定では「別プロバイダでのレビュー」が機能しません。ページ上部の警告を確認してください。",
   "run": "実行",
   "runActivity": "実行アクティビティ",
   "runCancelAssigneeChanged": "担当者が変更されました",
@@ -1024,5 +1026,10 @@
   "openSessionRecovery": "セッション復旧を開く",
   "sessionRecoveryDescription": "この実行はセッションが復旧されるまで保留されています。Kandev はプロンプトを自動的に再送信しません。",
   "sessionRecoveryReason": "理由: {{reason}}",
-  "sessionRecoveryRequired": "セッションの復旧が必要"
+  "sessionRecoveryRequired": "セッションの復旧が必要",
+  "authorExclusionStepsTitle": "別プロバイダでのレビュー",
+  "authorExclusionStepsDescription": "ステップのレビュー担当や承認者を、タスクの作業を行ったプロバイダから外し、レビューを独立したチェックにします。ほかに使えるプロバイダがない場合、操作するまでレビューは待機します。プロバイダ自動フォールバックと 2 つ以上のプロバイダが必要です。独自の実行プロファイルを持つエージェントは対象外です。",
+  "authorExclusionStepsEmpty": "このワークスペースには、レビュー担当または承認者のステップがあるワークフローはありません。",
+  "authorExclusionStepLabel": "{{workflow}} ワークフロー、{{step}} ステップ",
+  "authorExclusionStepSwitchLabel": "{{workflow}} ワークフロー、{{step}} ステップ（{{role}}）の別プロバイダでのレビュー"
 }

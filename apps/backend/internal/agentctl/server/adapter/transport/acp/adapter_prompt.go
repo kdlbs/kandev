@@ -192,6 +192,8 @@ func (a *Adapter) sendPrompt(
 
 	var resp acp.PromptResponse
 	var err error
+	monitorReaderPrompt := a.beginClaudeMonitorPrompt(sessionID)
+	defer a.endClaudeMonitorPrompt(sessionID, monitorReaderPrompt)
 	go func() {
 		defer close(turn.rpcDone)
 		resp, err = conn.Prompt(traceCtx, acp.PromptRequest{
@@ -293,17 +295,14 @@ func (a *Adapter) sendPrompt(
 		return normalizedErr
 	}
 
-	// Drain queued ACP notifications before running the post-prompt sweeps and
+	// Drain queued ACP notifications before running post-prompt cleanup and
 	// the complete event. The worker (now async) may still hold final frames
 	// the agent emitted right before its prompt response — the final text
 	// chunk, the terminal monitor_end tool_call_update, the registration
 	// frame for a Monitor whose events haven't yet been routed. Without this
-	// barrier:
-	//   - cancelActiveToolCalls / sweepMonitorsOnPromptEnd race the worker
-	//     for activeToolCalls and activeMonitors. If the worker hasn't added
-	//     a Monitor yet when the sweep takes the map, subsequent monitor_event
-	//     text frames find no tracking and drop their events on the floor.
-	//   - The complete event emitted to updatesCh outruns the final text chunk,
+	// barrier, cancelPromptEndToolCalls could race the worker for active tool
+	// and Monitor state. A Monitor that has not registered yet cannot receive
+	// later monitor_event text frames. The complete event could also outrun the final text chunk,
 	//     so the downstream buffer flush yields empty and the turn persists as
 	//     had_output=false even when the agent did produce text.
 	notificationsDrained := a.syncNotifQueue()
@@ -318,12 +317,6 @@ func (a *Adapter) sendPrompt(
 	// they must neither be reported as cancelled nor keep fencing new prompts.
 	a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
 	a.cancelPromptEndToolCalls(sessionID)
-
-	// Mark any tracked Monitors as ended. They live longer than a typical tool
-	// call (the script keeps running across model turns), so this sweep runs
-	// after `cancelActiveToolCalls` to give the Monitor card a clean terminal
-	// state when the parent prompt completes naturally.
-	a.sweepMonitorsOnPromptEnd(sessionID)
 
 	// Drop any Cursor `cursor/task` metadata for this session that never matched
 	// a subagent tool_call this turn.
@@ -757,11 +750,10 @@ func (a *Adapter) prepareSessionCancel(sessionID string) {
 // cancelActiveToolCalls emits cancelled tool_update events for all in-flight tool calls
 // and clears the activeToolCalls map.
 //
-// Monitor tool calls are intentionally skipped here — they are tracked in
-// activeMonitors and given their own terminal sweep (sweepMonitorsOnPromptEnd
-// or sweepMonitorsOnReplayEnd) which uses the appropriate status and a
-// payload snapshot. Without this skip the Monitor would receive two
-// terminal events with conflicting states.
+// Monitor tool calls are intentionally skipped by prompt-end cleanup — their
+// watches outlive foreground turns. Explicit terminal evidence or replay after
+// process replacement owns their terminal transition. Without this skip a
+// foreground boundary would cancel a still-running watch.
 //
 // Subagent (Task) tool calls are also preserved: the Claude Agent SDK can
 // return session/prompt with stop_reason while the subagent is still running

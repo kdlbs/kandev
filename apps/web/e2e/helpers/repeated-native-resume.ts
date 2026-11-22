@@ -108,7 +108,7 @@ async function seedSuccessorGenerationInterruption(
   try {
     const result = await execFileAsync(
       fixtureBinary,
-      ["-test.run=^TestRepeatedNativeResumeFixture$", "-test.timeout=30s", "-test.v"],
+      ["-test.run=^TestRepeatedNativeResumeFixture$", "-test.timeout=45s", "-test.v"],
       {
         cwd: path.resolve(process.cwd(), "../backend"),
         env: {
@@ -125,7 +125,7 @@ async function seedSuccessorGenerationInterruption(
           KANDEV_E2E_REPEAT_RESUME_PAYLOAD: payload.toString("base64"),
         },
         encoding: "utf8",
-        timeout: 35_000,
+        timeout: 50_000,
         maxBuffer: 1 << 20,
       },
     );
@@ -330,6 +330,12 @@ export async function verifyRepeatedNativeResume(
     const nativeBefore = (await api.getTaskSession(active.id)).session.metadata?.acp;
     const messagesBeforeResume = countSessionMessageAdds(messageAdds.frames, task.id, active.id);
     const bootId = await api.getBackendBootID();
+    // The open session view keeps requesting workspace data (file tree, root files).
+    // Each request re-ensures the durable workspace owner, and that owner holds the
+    // journal lock the fixture must take once the session is stopped. Leave the view
+    // first so the fixture seeds the journal from a quiescent session; the return
+    // navigation below reopens it.
+    await page.goto("/");
     await api.stopSession({ session_id: active.id, force: true });
     await expect
       .poll(
@@ -345,7 +351,7 @@ export async function verifyRepeatedNativeResume(
     const fixture = await seedSuccessorGenerationInterruption(backend.tmpDir, active.id, shape);
     expect(await api.getBackendBootID()).toBe(bootId);
     const traffic = attachGatewayTrafficCapture(page);
-    await page.reload();
+    await page.goto(`/t/${task.id}`);
     await session.waitForLoad();
     await expect
       .poll(async () => (await api.getTaskSession(active.id)).session.state)

@@ -66,6 +66,7 @@ vi.mock("react-i18next", () => ({
           "Stop was requested. The prompt outcome is still unknown.",
         "task:resume": "Resume",
         "task:resuming": "Resuming...",
+        "task:resumingSession": "Resuming session",
         "task:starting": "Starting...",
         "task:startFreshSession": "Start fresh session",
         "task:agentProfileNoLongerExists": "The agent profile no longer exists.",

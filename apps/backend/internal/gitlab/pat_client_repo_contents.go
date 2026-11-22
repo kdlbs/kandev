@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,9 @@ import (
 // files are a few KiB at most; the cap keeps a misconfigured path from pulling
 // an arbitrarily large blob into memory.
 const maxRepoFileBytes = 1 << 20
+
+// ErrRepoFileTooLarge marks a repository file larger than maxRepoFileBytes.
+var ErrRepoFileTooLarge = errors.New("repository file is too large")
 
 // ListRepoTree lists one repository directory at ref, non-recursively.
 // Pagination is followed to completion — a truncated listing would silently
@@ -83,7 +87,7 @@ func (c *PATClient) getRaw(ctx context.Context, endpoint string) ([]byte, error)
 		return nil, err
 	}
 	if len(content) > maxRepoFileBytes {
-		return nil, fmt.Errorf("file exceeds the %d byte limit", maxRepoFileBytes)
+		return nil, fmt.Errorf("file exceeds the %d byte limit: %w", maxRepoFileBytes, ErrRepoFileTooLarge)
 	}
 	return content, nil
 }

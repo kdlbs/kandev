@@ -60,6 +60,7 @@ type McpServerConfig struct {
 // CreateInstanceRequest contains the parameters for creating a new agent instance.
 type CreateInstanceRequest struct {
 	ID                         string              `json:"id,omitempty"`
+	ScopedMCPRoutes            bool                `json:"scoped_mcp_routes,omitempty"`
 	WorkspacePath              string              `json:"workspace_path"`
 	AgentCommand               string              `json:"agent_command,omitempty"`
 	Protocol                   string              `json:"protocol,omitempty"` // Protocol adapter to use (currently "acp")
@@ -85,6 +86,10 @@ type CreateInstanceRequest struct {
 	// runtime keeps child processes (e.g. MCP servers) alive when stdin closes
 	// — notably opencode acp.
 	RequiresProcessKill bool `json:"requires_process_kill,omitempty"`
+	// OfflineBudgetMinutes is the longest the instance runs without a stable
+	// backend connection. Launch always sets it; an agentctl without the
+	// capability ignores the field.
+	OfflineBudgetMinutes *int `json:"offline_budget_minutes,omitempty"`
 
 	// StripEnv lists environment variables to strip from the agent's child
 	// process environment entirely (not just set to empty). Propagated from
@@ -143,13 +148,15 @@ type CreateInstanceRequest struct {
 
 // CreateInstanceResponse contains the result of creating a new agent instance.
 type CreateInstanceResponse struct {
-	ID   string `json:"id"`
-	Port int    `json:"port"`
+	ID              string `json:"id"`
+	Port            int    `json:"port"`
+	ScopedMCPRoutes bool   `json:"scoped_mcp_routes"`
 }
 
 // InstanceInfo contains information about an agent instance.
 type InstanceInfo struct {
 	ID              string            `json:"id"`
+	ScopedMCPRoutes bool              `json:"scoped_mcp_routes"`
 	Port            int               `json:"port"`
 	LeaseGeneration uint64            `json:"lease_generation"`
 	ListenerActive  bool              `json:"listener_active"`

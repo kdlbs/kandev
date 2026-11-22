@@ -108,16 +108,17 @@ from the advertised contract.
 - **AC-TASKS-MCP-WORKSPACE-MODE-004.1:** Task and external MCP catalogs shall
   advertise optional string `workspace_mode` with exactly the ordered enum
   `["inherit_parent", "new_workspace"]` and no schema default.
-- **AC-TASKS-MCP-WORKSPACE-MODE-004.2:** The field description shall explain
-  that omission for a subtask inherits its parent's materialized workspace,
-  explicit `inherit_parent` requires `parent_id` and normally reuses that
-  workspace or worktree, and `new_workspace` requests a separate workspace or
-  worktree. It shall link the eligible executor-transition exception to
-  `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5`.
-- **AC-TASKS-MCP-WORKSPACE-MODE-004.3:** Omitted input shall retain existing
-  parent-dependent defaulting. Both explicit enum values shall reach existing
-  backend validation, including the parent requirement for `inherit_parent`.
-  No workspace modes or execution behavior shall be added.
+- **AC-TASKS-MCP-WORKSPACE-MODE-004.2:** The tool description and public
+  subtask guidance shall explain that omission for a subtask selects a
+  separate workspace. They shall explain that `inherit_parent` requires
+  `parent_id` and how callers use it to share the parent's files. The
+  executor-transition exception in
+  `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5` still applies.
+- **AC-TASKS-MCP-WORKSPACE-MODE-004.3:** When `create_task_kandev` resolves a
+  parent and the caller omits `workspace_mode`, the subtask shall use
+  `new_workspace`. This includes parents with a saved
+  `default_child_workspace`. An explicit mode shall take precedence.
+  Omitted mode on a top-level task shall retain its existing behavior.
 - **AC-TASKS-MCP-WORKSPACE-MODE-004.4:** MCP schema validation shall reject
   out-of-enum input before backend dispatch, including `shared`, `shared_group`,
   empty strings, whitespace-only strings, and padded mode names. Public caller
@@ -129,13 +130,34 @@ from the advertised contract.
   ambiguous match shall fail before task or session creation, without mutation,
   and shall direct the caller to `new_workspace` when it needs a different
   checkout.
+- **AC-TASKS-MCP-WORKSPACE-MODE-004.6:** When a `new_workspace` subtask omits
+  repository inputs, it shall inherit one selection per distinct repository
+  and effective base branch from its parent. A top-level `base_branch`
+  override applies before equivalent selections are combined.
+- **AC-TASKS-MCP-WORKSPACE-MODE-004.7:** On the Worktree executor, each
+  `new_workspace` subtask shall materialize its own worktrees and working
+  branches. This applies when the parent has more than one checkout of the
+  same repository on the same base. Each child shall keep its parent link.
+- **AC-TASKS-MCP-WORKSPACE-MODE-004.8:** When an explicit `inherit_parent`
+  subtask omits repository inputs and branch overrides, it shall retain
+  each of the parent's checkout identities. For a compatible Worktree
+  launch it shall reuse those checkouts, including any adopted checkout
+  and its existing files.
+- **AC-TASKS-MCP-WORKSPACE-MODE-004.9:** When the parent's Worktree workspace is ready,
+  each inherited checkout shall match exactly one eligible checkout, and
+  each match shall be distinct. A selection that fails either condition
+  shall fail before task and session creation. The validation message shall
+  identify the unmatched repository and checkout and explain how to request
+  a separate workspace.
 
 ## Exclusions
 
 - New Office MCP tools or external assignment fields.
 - Office CLI, permission, scheduler, or lifecycle redesign.
-- External creation schema changes beyond materialization enum metadata and its
-  description; changes to launch behavior or idempotency contracts.
+- Default parity with HTTP, Office runtime, and workflow actions. This is
+  tracked in [issue #4606](https://github.com/kdlbs/kandev/issues/4606).
+- New external creation arguments, new executor compatibility rules, or
+  changes to the external-ID contract.
 - Workspace conversion, historical migration, rendered UI, or new endpoints.
 - Changes to automation/configuration catalogs or their established authority.
 
@@ -144,3 +166,4 @@ from the advertised contract.
 - [System design](../system-design/mcp-workspace-mode.md)
 - [Implementation plan](../../../plans/mcp-workspace-mode/plan.md)
 - [Enum discoverability follow-up](../../../plans/mcp-workspace-mode-enum/plan.md)
+- [Subtask workspace repair](../../../plans/mcp-subtask-workspaces/plan.md)

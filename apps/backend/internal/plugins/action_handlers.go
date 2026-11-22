@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/store"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	userstore "github.com/kandev/kandev/internal/user/store"
 	"github.com/kdlbs/kandev/pluginsdk"
 )
 
@@ -26,11 +27,13 @@ const (
 )
 
 type actionHTTPEnvelope struct {
-	WorkspaceID  string          `json:"workspaceId"`
-	TaskID       string          `json:"taskId"`
-	SessionID    string          `json:"sessionId"`
-	RepositoryID string          `json:"repositoryId"`
-	Body         json.RawMessage `json:"body"`
+	NotificationFormatter  *formatterActionContext `json:"notificationFormatter,omitempty"`
+	NotificationProviderID string                  `json:"notificationProviderId"`
+	WorkspaceID            string                  `json:"workspaceId"`
+	TaskID                 string                  `json:"taskId"`
+	SessionID              string                  `json:"sessionId"`
+	RepositoryID           string                  `json:"repositoryId"`
+	Body                   json.RawMessage         `json:"body"`
 }
 
 // action serves POST /api/plugins/:id/actions/:key. Unlike webhooks, this
@@ -51,6 +54,8 @@ func (c *Controller) action(ctx *gin.Context) {
 	if !authorizeActionAccess(ctx, declared) {
 		return
 	}
+	cancelManagement := boundFormatterManagement(ctx, declared.ResourceScope)
+	defer cancelManagement()
 
 	envelope, ok := readActionEnvelope(ctx, declared.MaxBodyBytes)
 	if !ok {
@@ -59,6 +64,16 @@ func (c *Controller) action(ctx *gin.Context) {
 	verified, ok := c.verifyActionContext(ctx, declared.ResourceScope, envelope)
 	if !ok {
 		return
+	}
+	var formatterCurrent func() bool
+	if declared.ResourceScope == manifest.ActionScopeNotificationProvider {
+		release, current, ok := c.beginFormatterAction(ctx, record, verified, envelope.NotificationFormatter)
+		if !ok {
+			return
+		}
+		defer release()
+		formatterCurrent = current
+		verified.NotificationFormatterKey = envelope.NotificationFormatter.FormatterKey
 	}
 	if c.actionInvoker == nil {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{actionErrorField: "plugin action unavailable"})
@@ -72,6 +87,9 @@ func (c *Controller) action(ctx *gin.Context) {
 		Context:   verified,
 		Body:      envelope.Body,
 	})
+	if err == nil {
+		err = invokeCtx.Err()
+	}
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(invokeCtx.Err(), context.DeadlineExceeded) {
 			ctx.JSON(http.StatusGatewayTimeout, gin.H{actionErrorField: "plugin action timed out"})
@@ -80,7 +98,7 @@ func (c *Controller) action(ctx *gin.Context) {
 		if errors.Is(ctx.Request.Context().Err(), context.Canceled) {
 			return
 		}
-		c.log.Warn("plugin action invocation failed", zap.String("plugin", record.ID), zap.String("action", declared.Key), zap.Error(err))
+		c.log.Warn("plugin action invocation failed", zap.String("plugin", record.ID), zap.String("action", declared.Key), actionFailureDetail(declared.ResourceScope, err))
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{actionErrorField: "plugin action unavailable"})
 		return
 	}
@@ -88,8 +106,12 @@ func (c *Controller) action(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadGateway, gin.H{actionErrorField: "plugin returned an empty action response"})
 		return
 	}
-	if len(resp.Body) > maxPluginActionResponseBytes {
+	if len(resp.Body) > actionResponseLimit(declared.ResourceScope) {
 		ctx.JSON(http.StatusBadGateway, gin.H{actionErrorField: "plugin action response exceeds maximum size"})
+		return
+	}
+	if formatterCurrent != nil && !formatterCurrent() {
+		ctx.JSON(http.StatusConflict, gin.H{actionErrorField: "notification formatter binding changed"})
 		return
 	}
 	c.writeActionResponse(ctx, resp)
@@ -165,6 +187,13 @@ func (c *Controller) verifyActionContext(
 		ctx.JSON(http.StatusUnauthorized, gin.H{actionErrorField: authenticationRequiredMessage})
 		return pluginsdk.VerifiedActionContext{}, false
 	}
+	if resourceScope == manifest.ActionScopeNotificationProvider {
+		return c.verifyNotificationProviderAction(ctx, envelope)
+	}
+	if envelope.NotificationProviderID != "" || envelope.NotificationFormatter != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{actionErrorField: "unexpected notification provider selector"})
+		return pluginsdk.VerifiedActionContext{}, false
+	}
 	if c.svc.taskData == nil {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{actionErrorField: "plugin action authorization unavailable"})
 		return pluginsdk.VerifiedActionContext{}, false
@@ -184,6 +213,27 @@ func (c *Controller) verifyActionContext(
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{actionErrorField: "plugin action has invalid resource scope"})
 		return pluginsdk.VerifiedActionContext{}, false
 	}
+}
+
+func (c *Controller) verifyNotificationProviderAction(ctx *gin.Context, envelope actionHTTPEnvelope) (pluginsdk.VerifiedActionContext, bool) {
+	if envelope.NotificationProviderID == "" || envelope.WorkspaceID != "" || envelope.TaskID != "" || envelope.SessionID != "" || envelope.RepositoryID != "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{actionErrorField: "notification provider action requires only notificationProviderId"})
+		return pluginsdk.VerifiedActionContext{}, false
+	}
+	identity, _ := authn.FromGin(ctx)
+	owner := identity.UserID
+	if identity.Synthetic {
+		owner = userstore.DefaultUserID
+	}
+	if c.svc.notificationProviders == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{actionErrorField: "notification provider authorization unavailable"})
+		return pluginsdk.VerifiedActionContext{}, false
+	}
+	if _, err := c.svc.notificationProviders.NotificationProviderType(ctx.Request.Context(), owner, envelope.NotificationProviderID); err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{actionErrorField: "notification provider not found"})
+		return pluginsdk.VerifiedActionContext{}, false
+	}
+	return pluginsdk.VerifiedActionContext{ActorID: owner, NotificationProviderID: envelope.NotificationProviderID}, true
 }
 
 func (c *Controller) verifyWorkspaceAction(

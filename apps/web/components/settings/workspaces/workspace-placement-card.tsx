@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconSitemap } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -18,16 +18,10 @@ type Props = {
   scopes?: readonly string[];
 };
 
-/**
- * Where a workspace sits, and therefore who reaches it.
- *
- * Moving it is the only way to widen or narrow access: roles combine by
- * maximum, so nothing can be subtracted from a workspace in place. That makes
- * this control the counterpart of unit membership rather than a filing
- * convenience.
- */
 export function WorkspacePlacementCard({ workspaceId, unitId, scopes }: Props) {
   const { t } = useTranslation();
+  const title = t("workspaces:placement.title");
+  const descriptionId = useId();
   const units = useOrgUnits();
   const canManage = hasScope(scopes, SCOPE.workspaceManage);
   const [saving, setSaving] = useState(false);
@@ -54,12 +48,16 @@ export function WorkspacePlacementCard({ workspaceId, unitId, scopes }: Props) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <IconSitemap className="text-muted-foreground size-4" aria-hidden />
-          {t("workspaces:placement.title")}
+          {title}
         </CardTitle>
-        <CardDescription>{t("workspaces:placement.description")}</CardDescription>
+        <CardDescription id={descriptionId}>
+          {t("workspaces:placement.description")}
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-wrap items-center gap-2">
         <Combobox
+          ariaLabel={title}
+          ariaDescribedBy={descriptionId}
           options={units.units.map((unit) => ({
             value: unit.id,
             label: `${"  ".repeat(unit.depth)}${unit.name}`,

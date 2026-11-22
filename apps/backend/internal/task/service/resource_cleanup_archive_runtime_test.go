@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/require"
 )
 
 // @covers AC-TASKS-DIRTY-WORKTREE-ARCHIVE-004.3
@@ -28,16 +29,17 @@ func TestArchiveReclaimPreservesCheckoutAfterOwnerStopFails(t *testing.T) {
 	if content, err := os.ReadFile(path); err != nil || string(content) != "live work" {
 		t.Fatalf("reclaim removed a running owner's checkout: content=%q, err=%v (reclaim=%v)", content, err, reclaimErr)
 	}
-	if reclaimErr != nil {
-		t.Fatal(reclaimErr)
-	}
+	require.ErrorContains(t, reclaimErr, "archive source manifest is unavailable")
 	deferred, err := repo.GetTaskResourceCleanupJob(t.Context(), job.ID)
-	if err != nil || deferred.State != models.TaskResourceCleanupStateWaitingForClean {
-		t.Fatalf("live-owner reclaim was not deferred: %+v: %v", deferred, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, models.TaskResourceCleanupStateRetryWait, deferred.State)
 	if err := repo.DeleteExecutorRunningBySessionID(t.Context(), wt.SessionID); err != nil {
 		t.Fatal(err)
 	}
+	// The archive worker must capture evidence after the runtime stops.
+	svc.executionStopper = sessionSelectiveFailingStopper{}
+	archiveJob := latestCleanupJob(t, repo, wt.TaskID, models.TaskResourceCleanupTriggerArchive)
+	require.NoError(t, svc.processTaskResourceCleanupJob(t.Context(), archiveJob.ID))
 	if err := repo.CompleteTaskResourceCleanupJob(t.Context(), job.ID, models.TaskResourceCleanupStatePending, "", nil); err != nil {
 		t.Fatal(err)
 	}

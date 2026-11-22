@@ -27,6 +27,7 @@ artifact, signing, and backfill semantics.
   publication jobs.
 - Workflow contract tests for these boundaries.
 - Pull request documentation coverage and explicit exceptions.
+- Pull request UI evidence checks and persistent maintainer exceptions.
 
 ## Exclusions
 
