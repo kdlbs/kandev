@@ -4,19 +4,17 @@ package shell
 
 import (
 	"os/exec"
-	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sys/windows"
 )
 
-func TestConfigureShellProcessStartsSuspendedForJobAssignment(t *testing.T) {
+// ConPTY creates the shell process itself, so exec.Cmd attributes would be
+// ignored. The kill-on-close job is attached to the running process instead.
+func TestConfigureShellProcessLeavesCreationToConPTY(t *testing.T) {
 	cmd := exec.Command("cmd.exe")
 
 	configureShellProcess(cmd)
 
-	require.NotNil(t, cmd.SysProcAttr)
-	require.NotZero(t, cmd.SysProcAttr.CreationFlags&syscall.CREATE_NEW_PROCESS_GROUP)
-	require.NotZero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_SUSPENDED)
+	require.Nil(t, cmd.SysProcAttr)
 }
