@@ -89,7 +89,7 @@ function StepComposer({
     <div
       className={
         open
-          ? "min-h-[8.125rem] max-h-[60dvh] shrink overflow-y-auto overscroll-contain px-4 py-2 [@media(max-height:400px)]:max-h-[8.125rem] [@media(max-height:400px)]:[&_textarea]:h-11 [@media(max-height:400px)]:[&_textarea]:max-h-11"
+          ? "min-h-[8.125rem] max-h-[60dvh] shrink-0 overflow-y-auto overscroll-contain px-4 py-2 [@media(max-height:400px)]:max-h-[8.125rem] [@media(max-height:400px)]:[&_textarea]:h-11 [@media(max-height:400px)]:[&_textarea]:max-h-11"
           : "shrink-0 px-4 py-2"
       }
     >
