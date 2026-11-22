@@ -1,7 +1,7 @@
 ---
 id: "01-host-control-rpcs-adr"
 title: "ADR: plugin task control from external chat surfaces"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -53,19 +53,19 @@ approval issue; do not start it before that feedback exists.
 - **Output contract:** summary, files changed, checks run, blockers, risks, and task/plan status update.
 
 ## Results
-Draft recorded as
 [`2026-11-22-plugin-external-chat-task-control`](../../decisions/2026-11-22-plugin-external-chat-task-control.md)
-with status `proposed`. It decides the `raw_content` delivery fix,
-`Message.Source`, and the non-goals. It records `CancelTurn`, the item-2
-variant (a, b, or c), and `ApproveStep`/`GetStepApproval` as pending, because
-issue #5420 has no maintainer answer yet.
+is `accepted`. It records the maintainer decision on
+[#5420](https://github.com/kdlbs/kandev/issues/5420#issuecomment-7083766483):
+`CancelTurn`; account linking gated by the `host.v2.write:human_responses`
+admin grant, with receipts minted for the linked Kandev user; one receipt
+model shared with #5202; `ApproveStep`/`GetStepApproval` on that receipt with
+Office stages `Unimplemented`; `Message.Source`; `raw_content` kept in
+`message.*` payloads with a docs correction; and the non-goals. Options (a)
+alone and (c) are recorded as rejected alternatives.
 
-- **Files:** `docs/decisions/2026-11-22-plugin-external-chat-task-control.md`.
-  `docs/decisions/INDEX.md` is unchanged: it is a static entry page and the
-  catalog is derived (`python3 scripts/list-docs.py decisions`), so the ADR is
-  discoverable without a row.
-- **Checks:** `git diff --check`; `python3 scripts/list-docs.py validate`
-  (461 decisions valid); `python3 scripts/list-docs.py decisions --text
-  external-chat --format paths` lists the ADR.
-- **Blocker:** the maintainer decision on #5420. Set the ADR to `accepted`
-  with the chosen variant, then mark this task `done`.
+- **Files:** `docs/decisions/2026-11-22-plugin-external-chat-task-control.md`;
+  the spec and plan were reconciled. `docs/decisions/INDEX.md` is unchanged:
+  it is a static entry page and the catalog is derived
+  (`python3 scripts/list-docs.py decisions`).
+- **Checks:** `git diff --check`; `python3 scripts/list-docs.py validate`;
+  `python3 scripts/lint-spec-files.py --all`.

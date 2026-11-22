@@ -83,8 +83,11 @@ It also needs a small set of Kandev Host API additions in `kdlbs/kandev`; see
   | Queue full | Rejected | ⚠️ with an explanatory reply |
 
   Discord never interrupts a running turn.
-- **Slash commands.** They are guild-scoped and only act inside a task
-  channel.
+- **Slash commands.** They are guild-scoped. `/link` works in any channel of
+  a bound guild; the others only act inside a task channel.
+  - `/link <code>`: redeems a link code generated on the plugin's settings
+    page in Kandev and links the caller's Discord account to that Kandev user.
+    The reply is ephemeral and never echoes the code.
   - `/status`: replies ephemerally with the task, workflow step, session
     states, queue depth, and pending interactions.
   - `/stop [scope:turn|task]`:
@@ -102,8 +105,8 @@ It also needs a small set of Kandev Host API additions in `kdlbs/kandev`; see
       Approve button. `/deny` does not apply to steps; posting a message
       requests changes.
     - With no argument, pending permission requests come first, then the step.
-    - Both kinds require the delegated human-response authority described
-      under "Host API additions requested".
+    - Both kinds require the linked-account human-response flow described
+      under "Host API additions". An unlinked operator gets a deep link.
 - **Quick setup and connection test.** Settings > Plugins > Discord combines
   two parts:
   - Kandev's schema-driven form (admin-only; saving restarts the plugin) for
@@ -161,13 +164,14 @@ Invariants:
 ```yaml
 id: kandev-plugin-discord
 api_version: 2
-min_kandev_version: "<first release containing the requested Host additions>"
+min_kandev_version: "<first release containing the Host additions>"
 capabilities:
   events: [task.created, task.updated, task.state_changed, task.deleted, task.moved,
            turn.completed, task_session.state_changed, message.queue.status_changed,
            "permission_request.received.*", clarification.answered]
   api_read: [tasks, sessions, messages, interactions, workspaces, workflows]
-  api_write: [messages, execution, interactions]   # Host v2 grants: write:execution, write:interactions
+  api_write: [messages, execution, interactions, human_responses]
+  # Host v2 grants: write:execution, write:interactions, write:human_responses
   state: true
 actions:
   - { key: connection.test,   scope: workspace, access: admin }
@@ -207,49 +211,50 @@ ui: { bundle: /ui/bundle.js }   # plugin-settings quick-setup card
 | Stop a task's execution | `HostExecutionCommands(host).StopTaskRun` (`api_write: execution` + `host.v2.write:execution`) |
 | Settings card calls | Manifest `actions` with `access: admin`; plugin config routes are admin-only |
 
-### Host API additions requested (`kdlbs/kandev`, needs maintainer approval)
+### Host API additions (`kdlbs/kandev`)
+
+Decided by the maintainers on
+[#5420](https://github.com/kdlbs/kandev/issues/5420#issuecomment-7083766483)
+and recorded in
+[ADR 2026-11-22-plugin-external-chat-task-control](../../decisions/2026-11-22-plugin-external-chat-task-control.md).
 
 1. **`CancelTurn`.** Interrupt the current turn without stopping the session,
    matching WebSocket `agent.cancel` and `orchestrator.Service.CancelAgent`.
    It belongs to the exact execution commands (`host.v2.write:execution`) and
-   is fenced by the session resource version and the execution ID.
-2. **Delegated human-response authority for external chat surfaces.**
-   - Today exact `RespondPermission`/`AnswerClarification` require a Host-issued
-     human response receipt. Only the authenticated native UI can mint one, for
-     a user with `session.control`. A Discord user cannot obtain one, and the
-     v1 response methods return `PermissionDenied`.
-   - The proposal is a workspace-manager-granted Host v2 delegation (for
-     example `host.v2.delegate:human_responses`), recorded in the existing
-     Workspace access approval ledger. With it, the plugin can request a
-     receipt for one interaction revision and exact payload, attaching an
-     external actor attestation `{provider: "discord", subject, display_name}`.
-   - The host stores that attestation in the audit history and in the resolved
-     interaction.
-   - The alternative is linking Discord identities to Kandev users and minting
-     receipts for the linked user. It is stronger but heavier; the maintainers
-     choose.
+   is fenced like `StopTaskRun` by the session resource version, the
+   execution ID, and the management claim.
+2. **Human responses from linked Kandev users.**
+   - A workspace manager grants `host.v2.write:human_responses` (manifest
+     `api_write: [human_responses]`) in Settings > Plugins > Workspace access.
+   - A Kandev user generates a short-lived link code on the plugin's settings
+     page and runs `/link <code>` in Discord; the plugin redeems it with
+     `LinkExternalIdentity`. The user and an instance admin can revoke links.
+   - With the grant and an active link, the plugin calls
+     `RequestHumanResponseReceipt` for one target revision and exact payload.
+     The Host mints a single-use, five-minute receipt only when the linked
+     Kandev user holds `session.control` on the workspace.
+   - Exact `RespondPermission`/`AnswerClarification`/`ApproveStep` consume
+     the receipt. Kandev records the Kandev user and the surface, and the
+     resolved interaction shows them ("alice via discord").
+   - An unlinked Discord user gets a deep link to Kandev instead of an action.
 3. **Workflow step approval.**
-   - `ApproveStep(session_id, receipt)` reuses `task/service.ApproveSession`,
-     the path behind `POST /api/v1/sessions/:id/approve` and the UI Approve
-     button. It resolves the step's configured transition, moves the task
-     through `MoveTask` (firing `task.moved` and `on_enter`), and sets
-     `review_status=approved`. It requires the same delegated human-response
-     authority as item 2.
-   - `GetStepApproval(session_id)` is a read, gated on `api_read: sessions`. It
-     returns `{awaiting, from/to step id and name}`. `awaiting` is true when
-     the session is not running, `review_status` is not `approved`, and either
-     `review_status` is `pending` or the current step has an `on_turn_complete`
-     transition with `requires_approval=true` and a turn completed in this step.
+   - `ApproveStep` reuses `task/service.ApproveSession`, the path behind
+     `POST /api/v1/sessions/:id/approve` and the UI Approve button, with a
+     `step_approval` receipt from item 2.
+   - `GetStepApproval(session_id)` (`api_read: sessions`) returns
+     `{awaiting, from/to step id and name}`. `awaiting` is true when the
+     session is not running, `review_status` is not `approved`, and either
+     `review_status` is `pending` or the current step has an
+     `on_turn_complete` transition with `requires_approval=true` and a turn
+     completed after the task entered the step.
    - Office approval stages (participant quorum) return `Unimplemented`.
 4. **`Message.Source`** on the `Message` read DTO. It carries the persisted
    `metadata.source` only (for example `plugin:<id>`), so a bridge can
    suppress its own echoes without subscribing to the high-volume
    `message.*` events.
-5. **Event sanitization fix.** Plugin deliveries of `message.*` subjects SHALL
-   NOT include `raw_content`. Today `publishMessageEvent` adds it whenever
-   hidden system content exists, and plugin delivery forwards payloads
-   unfiltered. This contradicts the documented contract that plugins never see
-   injected system content.
+5. **`raw_content` stays** in `message.*` event payloads to avoid breaking
+   existing consumers. The plugin reads message text from `content` or
+   `Messages().List`, never `raw_content`. The public docs say so.
 6. **Docs** for items 1–5 in `docs/public/plugins-authoring.md` and
    `plugins-manifest.md`.
 
@@ -257,7 +262,8 @@ Error mapping for the additions follows the exact-command conventions:
 
 - typed outcomes `APPLIED`, `ALREADY_APPLIED`, `CONFLICT`, `UNAVAILABLE`,
   `UNSUPPORTED`;
-- `PermissionDenied` without the capability or grant;
+- `PermissionDenied`, or a `DENIED` command result, without the capability,
+  the grant, or an active link;
 - `FailedPrecondition` for "nothing awaiting approval" or a running session;
 - `Unimplemented` for office stages.
 
@@ -305,14 +311,17 @@ Error mapping for the additions follows the exact-command conventions:
   - viewer role: view only;
   - the bot: what it needs.
 - **Trust boundary.** Discord operators act with the plugin's authority on
-  every task in the bound workspace, regardless of their Kandev membership.
+  every task in the bound workspace, regardless of their Kandev membership,
+  for chat messages and `/status`.
   - Their messages are recorded as `author_type=user` with
     `source=plugin:kandev-plugin-discord`.
   - Anyone who can grant the operator role in the guild can control tasks:
     the guild owner and holders of `MANAGE_ROLES`.
-  - Approvals additionally require a workspace manager to grant the
-    delegated human-response authority in Kandev, and every approval carries
-    the Discord actor attestation in Kandev's audit history.
+  - `/stop` uses the plugin's `host.v2.write:execution` grant.
+  - Approvals and answers act for a **linked Kandev user** only. They need a
+    workspace manager's `host.v2.write:human_responses` grant, an active link
+    for the Discord user, and that Kandev user's `session.control` on the
+    workspace. Kandev records the Kandev user and the Discord surface.
 - **Kandev-side config.** Plugin config, enable/disable, and install are
   admin-only on `origin/main` (`RequireAdmin` on `/api/plugins/*` mutations).
   The settings card's actions use `access: admin`.
@@ -352,8 +361,9 @@ Error mapping for the additions follows the exact-command conventions:
     is edited to "resolved elsewhere".
   - `ApproveStep` `FailedPrecondition`: ephemeral reply, and the prompt is
     edited to "no longer pending".
-  - Missing delegated authority: ephemeral reply "an admin must grant Discord
-    approvals in Kandev".
+  - Missing grant: ephemeral reply "an admin must grant Discord approvals in
+    Kandev". Unlinked account: ephemeral reply with a deep link and `/link`
+    instructions.
 - **Content limits.** Messages are split at 2000 characters on line or
   code-fence boundaries, with at most 5 chunks, followed by "truncated — open
   in Kandev".
@@ -412,24 +422,33 @@ Error mapping for the additions follows the exact-command conventions:
 
 ### Approvals
 
-- **GIVEN** a pending permission request posted with buttons and the
-  delegation granted, **WHEN** an operator clicks "Allow once", **THEN** Kandev
-  records the response with the Discord actor attestation, the buttons are
-  removed, and the message shows who approved.
+- **GIVEN** a pending permission request posted with buttons, the grant, and
+  an operator linked to a Kandev user with `session.control`, **WHEN** the
+  operator clicks "Allow once", **THEN** Kandev records the response for that
+  Kandev user via Discord, the buttons are removed, and the message shows who
+  approved.
+- **GIVEN** an operator whose Discord account is not linked, **WHEN** they
+  click a button, **THEN** an ephemeral reply links to the request in Kandev
+  and explains `/link`, and nothing changes in Kandev.
 - **GIVEN** the request was answered in the Kandev UI, **WHEN** an operator
   clicks a button, **THEN** the reply is "already resolved" and the message is
   marked resolved.
 - **GIVEN** a step whose `on_turn_complete` transition has
   `requires_approval=true`, **WHEN** the turn completes, **THEN** the channel
   shows "Step *<from>* awaits approval → *<to>*" with Approve.
-- **GIVEN** that message, **WHEN** an operator approves, **THEN** the task
-  moves to *<to>* exactly as with the Kandev Approve button,
-  `review_status=approved`, and the message shows who approved.
+- **GIVEN** that message and a linked operator, **WHEN** the operator
+  approves, **THEN** the task moves to *<to>* exactly as with the Kandev
+  Approve button, `review_status=approved`, and the message shows who
+  approved.
 - **GIVEN** the step was already approved in Kandev, **WHEN** `/approve`,
   **THEN** "nothing awaiting approval", and the task does not move.
-- **GIVEN** no workspace manager granted the delegation, **WHEN** an operator
-  approves anything, **THEN** an ephemeral reply explains the missing grant,
-  and nothing changes in Kandev.
+- **GIVEN** no workspace manager granted `human_responses`, **WHEN** an
+  operator approves anything, **THEN** an ephemeral reply explains the missing
+  grant, and nothing changes in Kandev.
+- **GIVEN** a Kandev user generated a link code, **WHEN** they run
+  `/link <code>` in the bound guild within ten minutes, **THEN** the plugin
+  confirms the link, and the link appears on the plugin's settings page in
+  Kandev, where the user or an admin can revoke it.
 
 ### Setup and health
 
@@ -448,8 +467,8 @@ Error mapping for the additions follows the exact-command conventions:
 - Attachments.
 - Voice and DMs.
 - Several guilds per workspace or several workspaces per guild.
-- Discord ↔ Kandev account linking, unless the maintainers choose it for
-  item 2.
+- Linking a Discord account to several Kandev users, or linking from
+  Discord without a code generated in Kandev.
 - Answering clarification bundles from Discord. The delegation covers them,
   but the UI for multi-question forms is deferred.
 - Interrupting a running turn with a message.
@@ -475,16 +494,21 @@ Planner defaults for the minor questions:
 4. **Binding.** 1:1 workspace ↔ guild.
 5. **Subtasks.** Subtasks get their own channel, and the topic names the
    parent.
-6. **Attribution.** The plugin prefixes the Discord display name into the
-   text; there is no host external-author field.
+6. **Attribution.** Chat messages carry the Discord display name as a text
+   prefix. Approvals and answers are attributed by the Host to the linked
+   Kandev user plus the Discord surface.
 7. **Health.** Health goes through plugin logs, `#kandev-status`, and the
    admin `connection.status` action; there is no `ReportStatus` RPC.
 
-## Open questions (for the Kandev maintainers)
+## Maintainer decisions (2026-11-22)
 
-- Item 2: delegated receipts with an external actor attestation, or
-  Discord ↔ Kandev account linking? This blocks `/approve` for permissions and
-  steps. Everything else (channels, chat, `/status`, and `/stop scope:task`)
-  ships without it.
-- Item 1: is `CancelTurn` acceptable as an exact execution command, or should
-  turn cancellation stay human-only?
+From [#5420](https://github.com/kdlbs/kandev/issues/5420#issuecomment-7083766483):
+
+- Item 2: account linking gated by the admin grant. A plugin-attested actor
+  alone and Host-verified Discord signatures are rejected.
+- Item 1: `CancelTurn` is accepted with the same fencing and grants as
+  `StopTaskRun`.
+- Item 3: `ApproveStep`/`GetStepApproval` are accepted on top of the item 2
+  receipt; Office stages return `Unimplemented`.
+- Item 4: `Message.Source` is accepted, limited to `metadata.source`.
+- Item 5: `raw_content` stays in `message.*` payloads; the docs are corrected.

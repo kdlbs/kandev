@@ -22,10 +22,11 @@ Repository: `Fclem/kandev-plugin-discord`. Use `/tdd`.
        - the prompt is recorded in `task/<id>/interaction_prompts`;
        - duplicates post nothing.
      - **Resolving.** A button, `/approve`, or `/deny` from an operator first
-       obtains a delegated human-response receipt (host task-15). The receipt
-       carries the observed interaction revision, the exact option, and the
-       attestation `{provider: "discord", subject: <user id>, display_name}`.
-       The plugin then calls exact `RespondPermission`.
+       requests a human-response receipt for the operator's linked Kandev
+       account (host task-15) with `{provider: "discord", subject: <user
+       id>}`, the observed interaction revision, and the exact option. The
+       plugin then calls exact `RespondPermission`. An unlinked operator gets
+       an ephemeral deep link and `/link` instructions instead.
        - `/approve` picks `allow_once`, falling back to the first `allow_*`
          option.
        - `/deny` picks `reject_once`, falling back to the first `reject_*`
@@ -44,9 +45,10 @@ Repository: `Fclem/kandev-plugin-discord`. Use `/tdd`.
      - **Outcomes.**
        - `FailedPrecondition`: "nothing awaiting approval".
        - `Unimplemented` (office stage): "approve this stage in Kandev".
-  3. **Missing grant.** Without the delegated grant, every approval replies
-     ephemerally that "a Kandev workspace manager must grant Discord
-     approvals", and nothing changes. With no argument, permission requests
+  3. **Missing grant or link.** Without the `human_responses` grant, every
+     approval replies ephemerally that "a Kandev workspace manager must grant
+     Discord approvals"; without a link, it replies with a deep link and
+     `/link` instructions. Nothing changes in Kandev. With no argument, permission requests
      take precedence over the step. Autocomplete lists both kinds, and `/deny`
      never applies to steps.
 - **Verification:** `make test-backend`

@@ -10,14 +10,15 @@ status: draft
 
 There are two deliverables.
 
-- **(A) Host API changes in `kdlbs/kandev`.** These are additive and need
-  maintainer approval (spec "Host API additions requested"):
+- **(A) Host API changes in `kdlbs/kandev`.** These are additive and were
+  decided by the maintainers on
+  [#5420](https://github.com/kdlbs/kandev/issues/5420#issuecomment-7083766483)
+  (spec "Host API additions"):
   - `CancelTurn`;
-  - delegated human-response authority for external chat surfaces;
+  - human responses from linked Kandev users, gated by an admin grant;
   - workflow step approval (`ApproveStep`/`GetStepApproval`);
   - `Message.Source`;
-  - the `raw_content` plugin-event leak fix;
-  - docs.
+  - docs, including the `raw_content` correction (the payload field stays).
 - **(B) The plugin
   [`Fclem/kandev-plugin-discord`](https://github.com/Fclem/kandev-plugin-discord).**
   It is scaffolded from `kdlbs/kandev-plugin-template` on the standalone
@@ -109,14 +110,14 @@ Packages under `server/`:
 | `authz` | Operator checks |
 | `health` | Health cache and admin actions |
 
-## Backend — Kandev host (`kdlbs/kandev`, needs maintainer approval)
+## Backend — Kandev host (`kdlbs/kandev`)
 
 | Task | Change | Key files |
 |---|---|---|
 | [01](task-01-host-control-rpcs-adr.md) | An ADR for all host additions | `docs/decisions/` |
 | [02](task-02-host-control-rpcs.md) | `CancelTurn` exact execution command → `orchestrator.Service.CancelAgent` | `pluginsdk/exact_execution*.go`, `pluginsdk/proto/kandev/plugin/v1/plugin.proto`, `apps/backend/internal/plugins/host_exact_execution.go`, `apps/backend/internal/backendapp/adapters_plugin_execution.go` |
-| [03](task-03-host-plugin-event-sanitization.md) | Drop `raw_content` from plugin deliveries of `message.*` | `apps/backend/internal/plugins/delivery/` |
-| [15](task-15-host-delegated-human-responses.md) | Delegated human-response receipts with an external actor attestation, as a workspace grant | Interaction receipt service, Host v2 grant ledger, `pluginsdk` |
+| [03](task-03-host-plugin-event-sanitization.md) | Cancelled: `raw_content` stays in `message.*` payloads | — |
+| [15](task-15-host-delegated-human-responses.md) | Account linking, `host.v2.write:human_responses` grant, receipts minted for the linked Kandev user | Interaction receipt service, identity links, Host v2 grant ledger, `pluginsdk`, plugin settings UI |
 | [16](task-16-host-step-approval-rpcs.md) | `ApproveStep` (reusing `ApproveSession`) and `GetStepApproval` | `apps/backend/internal/task/service/service_workflow.go`, plugin host, `pluginsdk` |
 | [17](task-17-host-message-source.md) | `Message.Source` on the read DTO | `pluginsdk/data_types.go`, `apps/backend/internal/plugins/host_data.go` |
 | [04](task-04-host-plugin-docs.md) | Public docs for the above | `docs/public/plugins-authoring.md`, `docs/public/plugins-manifest.md` |
@@ -154,10 +155,10 @@ The card adds:
 | What (spec scenario) | File | How |
 |---|---|---|
 | `CancelTurn` fencing, grant gating, delegation to `CancelAgent` | `apps/backend/internal/plugins/host_exact_execution_test.go`, `apps/backend/internal/backendapp/adapters_plugin_execution_test.go` | Table-driven, fake orchestrator |
-| Delegated receipts: grant required, attestation recorded, single use, revision-bound | Receipt service tests, `apps/backend/internal/plugins/*_test.go` | Real ledger plus fake interactions |
+| Linked receipts: grant, link, `session.control`, single use, revision- and installation-bound, attribution | `apps/backend/internal/plugins/*_test.go` | Real ledger and link store, fake interactions |
 | `ApproveStep`/`GetStepApproval`: awaiting rules, `FailedPrecondition`, office `Unimplemented` | `apps/backend/internal/task/service/service_workflow_test.go`, plugin host tests | Real workflow fixtures |
 | `Message.Source` projected from `metadata.source` only | `apps/backend/internal/plugins/host_data_test.go`, `pluginsdk/host_data_test.go` | Fake message source; wire round-trip |
-| `raw_content` stripped for plugins, kept for WebSocket | `apps/backend/internal/plugins/delivery/deliverer_test.go` | Publish an event with hidden content |
+| `raw_content` documented as present in `message.*` payloads | `docs/public/plugins-manifest.md` | Docs review |
 | Binding parse | `server/config/config_test.go` | Table-driven |
 | Naming, rename debounce, rollover, capacity | `server/channels/*_test.go` | Fake `discordapi`, fake clock |
 | Provisioning idempotency | `server/provision/provision_test.go` | Fake `discordapi` |
@@ -234,17 +235,16 @@ Wave 7:
 
 ## Risks
 
-- **Maintainer decision on task-15.** Delegated receipts change the "humans
-  answer through the native UI" boundary. If the maintainers prefer account
-  linking, task-15 grows by about 3–4 days. If they refuse both,
-  `/approve`/`/deny` ship as deep links to Kandev instead.
+- **Account linking scope.** The maintainers chose linking gated by an admin
+  grant (task-15), which adds link storage, a link-code flow, and a settings
+  card. Unlinked Discord users get deep links instead of actions.
 - **Discord policy.** Further restrictions on bots or privileged intents would
   break inbound chat. Discord sits behind `discordapi`.
 - **Channel cap.** Retention, deletion, and rollover mitigate it; forum
   threads were rejected.
-- **Authority.** Guild role admins effectively control tasks. Approvals also
-  need the Kandev workspace grant, and every approval is audited with the
-  Discord actor.
+- **Authority.** Guild role admins effectively control chat and `/stop`.
+  Approvals and answers act only for a linked Kandev user with
+  `session.control`, need the Kandev workspace grant, and are audited.
 - **Event loss.** Cursor pulls and a 5-minute reconcile mitigate it; the worst
   case is a 5-minute delay.
 - **Identify budget.** Config edits and crash loops each re-identify. A
@@ -254,6 +254,4 @@ Wave 7:
 
 ## Open Questions
 
-See the spec "Decisions" and "Open questions". The remaining ones are for the
-Kandev maintainers: the shape of the delegated authority (task-15) and
-whether `CancelTurn` is acceptable (task-02).
+None for the Kandev maintainers; see the spec "Maintainer decisions".

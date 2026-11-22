@@ -1,6 +1,6 @@
 # ADR-2026-11-22-plugin-external-chat-task-control: Plugin task control from external chat surfaces
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-11-22
 **Area:** protocol
 
@@ -11,128 +11,183 @@ Chat-bridge plugins such as
 conversation (a Discord channel) to a Kandev task. They mirror agent output,
 deliver chat messages to the task, and let operators stop work, answer agent
 permission requests, and approve workflow review steps from chat. The request
-and its acceptance criteria are tracked in
-[kdlbs/kandev#5420](https://github.com/kdlbs/kandev/issues/5420).
+is [kdlbs/kandev#5420](https://github.com/kdlbs/kandev/issues/5420); the
+maintainer decision is
+[#5420 (comment)](https://github.com/kdlbs/kandev/issues/5420#issuecomment-7083766483).
 
 Most of that runs on the shipped Host API: `Tasks()`, `Messages().Send/List`,
 `Interactions().ListPending/Get`, exact `StopTaskRun`, and admin `actions`.
-Five gaps remain:
+Five gaps remained:
 
-1. Exact `StopTaskRun` ends the execution. Nothing lets a plugin interrupt only
+1. Exact `StopTaskRun` ends the execution. Nothing let a plugin interrupt only
    the current turn, as the native `agent.cancel` action does through
    `orchestrator.Service.CancelAgent`.
 2. Exact `RespondPermission`/`AnswerClarification` require a single-use human
    response receipt. Only an authenticated native UI request
    (`POST /api/plugins/host/interactions/response-receipts`) by a user with
-   `session.control` can obtain one
+   `session.control` could obtain one
    ([coordination platform decision](2026-09-25-plugin-coordination-platform.md)).
-   A person in an external chat can never answer.
+   A person in an external chat could never answer.
 3. The native Approve button (`POST /api/v1/sessions/:id/approve`, served by
    `task/service.Service.ApproveSession`) resolves the step's configured
-   transition, moves the task, and sets `review_status=approved`. A plugin can
-   only call `Tasks().Move`, which records no approval and does not resolve
-   the configured target.
-4. The `pluginsdk.Message` read DTO carries no provenance. A bridge cannot
-   recognize the messages it delivered itself without subscribing to the
+   transition, moves the task, and sets `review_status=approved`. A plugin
+   could only call `Tasks().Move`, which records no approval and does not
+   resolve the configured target.
+4. The `pluginsdk.Message` read DTO carried no provenance, so a bridge could
+   not recognize the messages it delivered itself without subscribing to the
    high-volume `message.*` events.
 5. `newMessageEvent` adds `raw_content` (the unstripped message) whenever a
-   message holds hidden `<kandev-system>` content, and plugin event delivery
-   forwards bus payloads unfiltered. The public plugin docs state that plugins
-   never see injected system content.
+   message holds hidden `<kandev-system>` content, plugin event delivery
+   forwards bus payloads unchanged, and the public docs claimed plugins never
+   see injected system content.
 
-Items 1 to 3 change who may act on a running task and need a maintainer
-decision. Items 4 and 5 are read-surface repairs.
+Issue #5202 asks for native human approval of plugin tool operations bound to
+an operation digest, with the rule that agents and plugins never mint
+approval or substitute a human name. Item 2 crosses the same boundary, so both
+must use one receipt model.
 
 ## Decision
 
-### Decided
+### Turn cancellation
 
-- **No `raw_content` in plugin deliveries.** The plugin event deliverer
-  removes `raw_content` from every `message.*` payload before it builds the
-  `pluginsdk.Event`. `content` stays stripped and
-  `metadata.has_hidden_prompts` stays. WebSocket clients and other bus
-  subscribers keep receiving `raw_content`, because the native UI needs it to
-  render hidden prompts.
-- **`Message.Source`.** `pluginsdk.Message` gains `Source`, read only from the
-  persisted `metadata.source` (for example `plugin:<id>`) and empty when
-  absent. It is populated on `Messages().List` and on exact message
-  observations. No other metadata key is exposed.
-- **Non-goals.** Plugins get no interrupt-by-message, no arbitrary workflow
-  moves beyond the existing `Tasks().Move`, no Office approval-stage
-  decisions, and no receipts minted without an explicit grant.
+`CancelTurn` is an exact execution command in
+`pluginsdk.HostExecutionCommands`, under `api_write: execution` and the
+workspace grant `host.v2.write:execution`. Admission and fencing are the same
+as `StopTaskRun`: request ID, idempotency key, observed session resource
+version, observed execution ID, management claim fence, approval revision, and
+manifest digest. It delegates to `orchestrator.Service.CancelAgent`, so the
+session ends `WAITING_FOR_INPUT`, stays promptable, and the queue is not
+drained. It returns `APPLIED` when a turn was interrupted, `NO_CHANGE` when no
+turn was active, `CONFLICT` for a stale session or execution, and
+`ALREADY_APPLIED` on replay.
 
-### Pending maintainer decision
+### External human responses: linked Kandev users behind an admin grant
 
-The following are proposed and must not be implemented until the maintainers
-answer on #5420.
+A plugin relays a human decision only for a **Kandev user** who linked the
+external identity, and only in a workspace whose manager granted the
+installation that authority.
 
-- **`CancelTurn`.** An exact execution command in
-  `pluginsdk.HostExecutionCommands`, under `api_write: execution` and the
-  workspace grant `host.v2.write:execution`. It is admitted and fenced exactly
-  like `StopTaskRun`: observed session resource version, execution ID, and
-  management claim. It delegates to `orchestrator.Service.CancelAgent`, so the
-  session ends `WAITING_FOR_INPUT` and stays promptable. The open question is
-  whether turn cancellation may be plugin-initiated at all or remains a native
-  human action.
-- **External human-response authority.** One of three variants:
-  - **(a) Delegated grant with external actor attestation (requested).** A
-    workspace manager grants a new Host v2 delegation (working name
-    `host.v2.delegate:human_responses`) in Settings > Plugins > Workspace
-    access, with reason, approval revision, audit, and revocation. With it, a
-    plugin requests a single-use, five-minute receipt bound to one interaction
-    revision and the exact response payload. The request carries an
-    attestation `{provider, subject, display_name}`. The Host stores the
-    attestation on the resolved interaction and in the audit history, labeled
-    as plugin-attested. The rule that plugins never mint approval for, or
-    substitute, a Kandev human identity (#5202) is unchanged; the attestation
-    names an external person only.
-  - **(b) Account linking.** An external identity is linked to a Kandev user
-    once, through an authenticated native flow. Receipts are minted for the
-    linked user only while that user holds `session.control`. Attribution is a
-    real Kandev identity, at the cost of a linking flow, link storage, and
-    unlink and revocation semantics.
-  - **(c) Host-verified provider signatures.** The Host verifies the
-    provider's signed interaction payload (Discord Ed25519) and mints the
-    receipt itself. The plugin cannot forge an actor, but the Host gains
-    provider-specific verification code and key configuration, and the plugin
-    must forward raw signed interaction bodies, which a gateway-based bot does
-    not receive.
-- **Step approval.** `ApproveStep(session_id, receipt)` reuses
-  `task/service.Service.ApproveSession`, the same path as the native Approve
-  button, and is gated by the authority chosen above with a `step_approval`
-  receipt kind. `GetStepApproval(session_id)` is a read under
-  `api_read: sessions` that reports whether approval is awaited and the
-  source and target steps. Nothing awaiting approval returns
-  `FailedPrecondition`; a replay returns `ALREADY_APPLIED` and never moves the
-  task twice. Office approval stages return `Unimplemented`.
+- **Grant.** The manifest declares `api_write: [human_responses]`, which maps
+  to the Host v2 capability `host.v2.write:human_responses`. A workspace
+  manager approves it per installation in Settings > Plugins > Workspace
+  access, with a reason, an approval revision, and the existing audit history,
+  and can revoke it. The Host checks the grant when a receipt is requested and
+  again when it is consumed.
+- **Link.** A signed-in Kandev user asks Kandev for a link code on the plugin's
+  settings page. The code is random, single-use, valid for ten minutes, bound
+  to that user and that plugin installation, and stored only as a digest. The
+  user gives it to the external surface (for example `/link <code>` in
+  Discord), and the plugin redeems it with `LinkExternalIdentity(code,
+  provider, subject, display_name)`. Redemption requires the manifest
+  declaration above; it creates one durable link
+  `{installation, provider, subject} -> Kandev user`. A subject links to at
+  most one user and a user to at most one subject per provider and
+  installation. The user can revoke their own links and an instance admin can
+  revoke any link of an installation from the same page. Uninstalling the
+  plugin deletes its links.
+- **Receipt.** With the grant and an active link, the plugin calls
+  `RequestHumanResponseReceipt` with the workspace, provider, subject, target
+  (an interaction, or a session for step approval), observed resource version,
+  and exact response payload. The Host resolves the linked user, verifies the
+  user is active and holds `session.control` on the workspace, verifies the
+  target is still pending at that revision, and mints a receipt. The receipt
+  has the same shape as a native receipt: single-use, five minutes, bound to
+  the workspace, target, revision, and payload digest. A delegated receipt is
+  also bound to the requesting installation and to the link. Unlinked
+  subjects, revoked links, and users without `session.control` are denied;
+  the plugin then offers a deep link to Kandev instead of an action.
+- **Consumption.** The existing exact `RespondPermission`,
+  `AnswerClarification`, and the new `ApproveStep` accept the receipt
+  unchanged. At consumption the Host re-checks the installation binding, that
+  the link is still active, and that the user still holds `session.control`,
+  so a revocation takes effect inside the five-minute window. The response
+  runs under the linked user's identity, never a plugin-chosen one.
+- **Attribution and audit.** Every delegated receipt is recorded durably with
+  the installation, workspace, Kandev user, provider, subject, target kind and
+  ID, payload digest, issue time, and consumption time. The resolved
+  interaction (`Interactions().Get`) carries `ResolvedBy {user_id,
+  display_name, via}`, for example "alice via discord", and the permission
+  resolution audit records the Kandev user as the actor with source `plugin`.
 
-When the maintainers answer, this ADR is updated to `accepted` with the
-selected variant and the rejected alternatives move to the section below.
+### One receipt model with #5202
+
+A **human response receipt** is the only proof that a person decided. It
+always binds: the authenticated Kandev user who decided; the surface that
+carried the decision (the native UI, or a plugin installation plus the
+external provider); the workspace; the target kind, target ID, and target
+revision; the exact payload digest; an expiry; and single use. The Host
+derives the user from an authenticated session or from an active link; a
+plugin never names the user. Plugin-relayed approvals (this decision) and
+plugin-tool approvals (#5202) differ only in target kind: #5202 adds a target
+kind whose revision is the operation digest. Neither path lets a plugin mint a
+receipt on its own authority.
+
+### Workflow step approval
+
+`ApproveStep` is an exact command under `api_write: execution` and
+`host.v2.write:execution` that also requires a `step_approval` receipt from the
+flow above. It reuses `task/service.Service.ApproveSession`, the path behind
+the native Approve button, so the task moves to the same configured target,
+`task.moved` and `on_enter` fire, and `review_status` becomes `approved`. It
+returns `FailedPrecondition` when nothing awaits approval and
+`ALREADY_APPLIED` on replay, and it never moves a task twice.
+
+`GetStepApproval(session_id)` is a read under `api_read: sessions` that
+returns whether approval is awaited and the source and target steps.
+Approval is awaited when the session is not running or starting,
+`review_status` is not `approved`, and either `review_status` is `pending` or
+the current step has an `on_turn_complete` transition with
+`requires_approval=true` and the session completed a turn after the task
+entered that step. The step entry time is the newest recorded step transition
+into the current step, or the task creation time when none exists. The target
+step uses the same resolver as `ApproveSession`. An Office approval stage
+(`stage_type: approval`) returns `Unimplemented`.
+
+### Message provenance and event payloads
+
+- `pluginsdk.Message.Source` carries the persisted `metadata.source` (for
+  example `plugin:<id>`) and nothing else, on `Messages().List` and on exact
+  message observations.
+- `message.*` event payloads keep `raw_content` so existing consumers do not
+  break; plugin delivery forwards the bus payload as it is. `Messages().List`
+  stays stripped. The public docs state that `message.*` payloads may include
+  `raw_content` with the unstripped `<kandev-system>` content.
+
+### Non-goals
+
+Interrupt-by-message, arbitrary workflow moves beyond the existing
+`Tasks().Move`, Office approval-stage decisions, plugin-asserted identities
+without a link, provider-specific signature verification in the Host, and
+rendering response attribution in the native chat UI.
 
 ## Consequences
 
-- Plugins lose access to `raw_content`. A third-party plugin that read it must
-  use the stripped `content`. No official plugin reads it.
-- `Message.Source` adds a field to the public SDK and wire DTO; adopting it
-  requires a `pluginsdk` release and a raised `min_kandev_version` in plugins.
-- Every pending addition follows the exact-command conventions: resource
-  version fencing, idempotency keys, approval revision, manifest digest, and
-  Host v2 workspace grants. Missing grants return `PermissionDenied`.
-- Variant (a) weakens the invariant that only the native UI obtains response
-  receipts. It stays bounded by an explicit per-workspace grant, revocation,
-  single-use payload-bound receipts, and an audited attestation that never
-  names a Kandev user.
+- A chat operator can stop a turn, answer a permission request or question,
+  and approve a review step, and Kandev records which Kandev user acted and
+  through which surface.
+- A workspace that never grants `host.v2.write:human_responses` is unaffected.
+  A user who never links an identity cannot be acted for.
+- The Host stores identity links and delegated receipt records in the plugin
+  store. Link codes and receipts stay in memory: a restart invalidates
+  unredeemed codes and unconsumed receipts, which only costs a retry.
+- New proto RPCs and DTO fields require a `pluginsdk` minor release; plugins
+  raise `min_kandev_version` to use them.
+- `raw_content` remains visible to plugins that subscribe to `message.*`.
 
 ## Alternatives Considered
 
+- **(a) Delegated grant with a plugin-attested external actor.** Rejected: an
+  unverifiable attestation would let a plugin approve under any name, which
+  conflicts with #5202. Its admin grant is kept as the gate in front of
+  linking.
+- **(c) Host-verified provider signatures.** Rejected: it puts
+  Discord-specific verification in the Host and still does not identify the
+  Kandev user who acts.
 - **Deep links only.** Chat commands open the Kandev UI instead of acting.
-  This works today but defeats the mobile and chat use case.
-- **Plugin-minted receipts without a grant.** Rejected: any installed plugin
-  could answer for humans.
+  It remains the fallback for unlinked users.
 - **`Tasks().Move` for step approval.** Rejected: it skips `review_status` and
-  the configured-transition resolution, so the result diverges from the native
-  Approve button.
+  the configured-transition resolution.
 - **`message.added` subscriptions for echo suppression.** Rejected: streaming
   emits one event per chunk and floods the bounded plugin event queue.
-- **Strip `raw_content` at the publisher.** Rejected: the native UI renders
-  hidden prompts from it, so only the plugin delivery boundary changes.
+- **Strip `raw_content` from plugin deliveries.** Rejected by the maintainers
+  to avoid breaking existing consumers; the docs were corrected instead.
