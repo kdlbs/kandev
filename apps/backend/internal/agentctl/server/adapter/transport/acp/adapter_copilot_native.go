@@ -266,6 +266,7 @@ func (a *Adapter) installNativeBindingBarrier(
 	clearLoading bool,
 	emitAvailableReporting bool,
 ) bool {
+	var startupWarnings []AgentEvent
 	bind := func() {
 		a.mu.Lock()
 		if a.sessionID != sessionID {
@@ -273,10 +274,23 @@ func (a *Adapter) installNativeBindingBarrier(
 		}
 		a.sessionID = sessionID
 		a.bindingCopilotNative = false
+		if a.sessionCreationPending {
+			for _, event := range a.pendingSessionStartupWarnings {
+				if event.SessionID == sessionID {
+					startupWarnings = append(startupWarnings, event)
+				}
+			}
+			a.sessionCreationPending = false
+			a.pendingSessionStartupWarnings = nil
+		}
 		if clearLoading {
 			a.isLoadingSession = false
+			a.loadingSessionID = ""
 		}
 		a.mu.Unlock()
+		for _, event := range startupWarnings {
+			a.sendUpdate(event)
+		}
 		if a.onNativeBindingInstalled != nil {
 			a.onNativeBindingInstalled()
 		}
@@ -298,7 +312,10 @@ func (a *Adapter) installNativeBindingBarrier(
 	a.bindingCopilotNative = false
 	if clearLoading {
 		a.isLoadingSession = false
+		a.loadingSessionID = ""
 	}
+	a.sessionCreationPending = false
+	a.pendingSessionStartupWarnings = nil
 	a.pendingCopilotNative = nil
 	a.pendingCopilotNativeDropped = false
 	a.mu.Unlock()

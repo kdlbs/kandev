@@ -234,6 +234,8 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	// Publish the binding barrier only once every pre-RPC return has been
 	// cleared, so a failed preparation cannot strand the previous session.
 	a.bindingCopilotNative = a.copilotNativeSessionEvents
+	a.sessionCreationPending = true
+	a.pendingSessionStartupWarnings = nil
 	a.mu.Unlock()
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
@@ -252,13 +254,18 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 		// An agent may have emitted provisional usage before returning an RPC
 		// error. Clear at the FIFO boundary so an already queued notification
 		// cannot repopulate the tracker after this failure cleanup.
-		a.mu.Lock()
-		a.bindingCopilotNative = false
-		a.pendingCopilotNative = nil
-		a.pendingCopilotNativeDropped = false
-		a.mu.Unlock()
-		if !a.syncNotifQueueThen(a.clearUsageTrackers) {
+		clearFailedCreation := func() {
+			a.mu.Lock()
+			a.bindingCopilotNative = false
+			a.pendingCopilotNative = nil
+			a.pendingCopilotNativeDropped = false
+			a.sessionCreationPending = false
+			a.pendingSessionStartupWarnings = nil
+			a.mu.Unlock()
 			a.clearUsageTrackers()
+		}
+		if !a.syncNotifQueueThen(clearFailedCreation) {
+			clearFailedCreation()
 		}
 		span.RecordError(err)
 		if a.maybeEmitAuthRequired(err) {
@@ -283,6 +290,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 		a.mu.Unlock()
 	}) {
 		a.clearUsageTrackers()
+		a.discardPendingSessionStartupWarnings()
 		barrierErr := context.Cause(a.lifetimeCtx)
 		if barrierErr == nil {
 			barrierErr = context.Canceled
@@ -319,6 +327,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	}
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	if !a.installNativeBindingBarrier(sessionID, false, a.copilotNativeSessionEvents) {
+		a.discardPendingSessionStartupWarnings()
 		barrierErr := context.Cause(a.lifetimeCtx)
 		if barrierErr == nil {
 			barrierErr = context.Canceled
@@ -723,6 +732,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// The flag will be cleared when we send the next prompt (see Prompt method).
 	a.mu.Lock()
 	a.isLoadingSession = true
+	a.loadingSessionID = sessionID
 	a.loadReplayPlan = nil
 	delete(a.usageBySession, sessionID)
 	a.mu.Unlock()
@@ -749,6 +759,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		clearFailedLoad := func() {
 			a.mu.Lock()
 			a.isLoadingSession = false
+			a.loadingSessionID = ""
 			a.loadReplayPlan = nil
 			a.pendingCopilotNative = nil
 			a.pendingCopilotNativeDropped = false

@@ -412,6 +412,11 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 	if err := mockContinuationRestoreFailure(req.SessionId); err != nil {
 		return acp.LoadSessionResponse{}, err
 	}
+	if mockMCPStartupReportEnabled() {
+		if err := a.emitMCPStartupReport(ctx, req.SessionId); err != nil {
+			return acp.LoadSessionResponse{}, err
+		}
+	}
 	if parseFailOnResumeFlag() {
 		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: refusing resume for session %s (--fail-on-resume), exiting 1\n", os.Getpid(), req.SessionId)
 		os.Exit(1)
@@ -467,6 +472,30 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 		ConfigOptions: responseConfigOptions,
 		Modes:         mockSessionModes(currentMode),
 	}, nil
+}
+
+func mockMCPStartupReportEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("E2E_MOCK_AGENT_MCP_STARTUP_REPORT")), "true")
+}
+
+func (a *mockAgent) emitMCPStartupReport(ctx context.Context, sessionID acp.SessionId) error {
+	return a.conn.SessionUpdate(ctx, acp.SessionNotification{
+		SessionId: sessionID,
+		Update: acp.SessionUpdate{
+			ToolCall: &acp.SessionUpdateToolCall{
+				ToolCallId: "mcp_startup.e2e-server.550e8400-e29b-41d4-a716-446655440000",
+				Title:      "mcp__e2e-server__startup",
+				Kind:       acp.ToolKindOther,
+				Status:     acp.ToolCallStatusFailed,
+				Content: []acp.ToolCallContent{{
+					Content: &acp.ToolCallContentContent{
+						Type:    "content",
+						Content: acp.ContentBlock{Text: &acp.ContentBlockText{Type: "text", Text: "MCP server `e2e-server` failed to start: e2e startup report"}},
+					},
+				}},
+			},
+		},
+	})
 }
 
 // Prompt processes a user message and streams responses via SessionUpdate.
