@@ -1337,7 +1337,7 @@ jobs:
       # replacement. Fake-server unit tests cannot prove these semantics.
       - name: Test Windows SSH remote executor
         if: matrix.suite == 'native'
-        run: go test -race -tags fts5 -v -run '^TestSSHWindows|^TestConfigureShellProcessLeavesCreationToConPTY$' ./internal/agent/runtime/lifecycle ./internal/ssh ./internal/agentctl/server/shell
+        run: go test -race -tags fts5 -v -run '^TestSSHWindows|^TestConfigureShellProcessLeavesCreationToConPTY$|^TestResumeSuspendedProcess' ./internal/agent/runtime/lifecycle ./internal/ssh ./internal/agentctl/server/shell ./internal/common/winproc
 
       - name: Save Windows Go modules
         if: success() && matrix.suite == 'compile' && steps.windows_module_cache.outputs.cache-hit != 'true'
