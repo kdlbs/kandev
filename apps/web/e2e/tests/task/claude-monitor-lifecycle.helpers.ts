@@ -77,15 +77,10 @@ async function expandMonitorCards(session: SessionPage): Promise<void> {
   for (let groupIndex = groupCount - 1; groupIndex >= 0; groupIndex--) {
     const group = groups.nth(groupIndex);
     await expect(group).toBeVisible({ timeout: 30_000 });
-    for (let attempt = 0; attempt < 2; attempt++) {
+    if ((await group.getAttribute("aria-expanded")) !== "true") {
       await group.click();
-      try {
-        await expect(cards).toHaveCount(2, { timeout: 1_500 });
-        return;
-      } catch {
-        // Reopen a group if it was auto-expanded while its owning turn was active.
-      }
     }
+    if ((await cards.count()) === 2) return;
   }
   await expect(cards).toHaveCount(2, { timeout: 30_000 });
 }
