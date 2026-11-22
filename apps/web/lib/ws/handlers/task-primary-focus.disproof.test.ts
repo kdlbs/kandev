@@ -1,10 +1,16 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type * as SessionApi from "@/lib/api/domains/session-api";
-import { listTaskSessions } from "@/lib/api/domains/session-api";
+import { fetchTaskSession, listTaskSessions } from "@/lib/api/domains/session-api";
 import { observedRemovals } from "@/lib/state/session-removal-observations";
 import { isRequestedSessionUnavailable } from "@/lib/state/task-navigation-selection";
 import { followRemovedSession } from "./task-primary-focus";
-import { flushFocusWork, membership, withSiblings } from "./task-primary-focus.test-helpers";
+import {
+  flushFocusWork,
+  membership,
+  promote,
+  response,
+  withSiblings,
+} from "./task-primary-focus.test-helpers";
 
 vi.mock("@/lib/api/domains/session-api", async (original) => ({
   ...(await original<typeof SessionApi>()),
@@ -14,6 +20,7 @@ vi.mock("@/lib/api/domains/session-api", async (original) => ({
 
 beforeEach(() => {
   vi.mocked(listTaskSessions).mockReset();
+  vi.mocked(fetchTaskSession).mockReset();
 });
 
 // @covers AC-TASKS-TASK-UNREAD-DOT-001.11
@@ -35,5 +42,22 @@ it.each([
     expect(store.getState().taskSessions.items.next).toBeDefined();
     // Explicit route/command admission uses the same unavailability predicate.
     expect(isRequestedSessionUnavailable(store, "next")).toBe(!complete);
+  },
+);
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+it.each([true, false])(
+  "follows a later primary after the viewed session's removal is disproved (observed=%s)",
+  async (observed) => {
+    const store = withSiblings();
+    vi.mocked(listTaskSessions).mockResolvedValue(membership("old", "next", "latest"));
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("WAITING_FOR_INPUT"));
+    if (observed) followRemovedSession(store, "old", "t1");
+    await flushFocusWork();
+    expect(observedRemovals(store)?.has("old") ?? false).toBe(false);
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    promote(store, "next");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("next");
   },
 );

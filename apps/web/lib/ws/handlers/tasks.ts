@@ -34,7 +34,8 @@ import {
 import { taskRemovalOwnsDepartureForTask } from "@/lib/state/task-removal";
 import { applyTaskOverviewEvent, applyTaskOverviewPatch } from "./task-overview";
 import { taskOverviewPatch } from "@/lib/state/slices/task-overview-patch";
-import { findTaskInState, followUpdatedTaskPrimary } from "./task-primary-focus";
+import { followUpdatedTaskPrimary } from "./task-primary-focus";
+import { findTaskInState } from "./task-lookup";
 const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
 function upsertTask(

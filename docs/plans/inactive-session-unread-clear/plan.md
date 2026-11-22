@@ -885,3 +885,10 @@ activation (P2) and a disproved removal observation never withdrawn (P3), and
 noted a base gateway test removed by a withdrawn R1 experiment. Completed
 production rounds 40; consecutive clean 0. Task 02 records the corrections,
 the restored base test and verification; R41 follows normal verified delivery.
+
+### Production review R41
+
+Opus child `f500a039-b090-491a-a1f0-f22b43167a86` reviewed
+`ceb9cdfa6150be2b7b0e74b4ebdc81a58eaf9ca6`: one P3, not clean. Completed
+production rounds 41; consecutive clean 0. A disproved removal now also
+releases the removal-sourced view owner. R42 follows normal verified delivery.

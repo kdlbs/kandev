@@ -4547,3 +4547,30 @@ timeout occurred on the pre-R40 R34 bundle. Membership-proof listeners receive
 only current-generation reads, so a pre-removal list cannot reach the new
 disproof. Isolated, the local/remote pair passed 6/6
 (`r40-remote-summary.log`). `r40-phone-summary.log`: ten phone cases pass.
+
+### Production-fix review round 41 remediation
+
+Opus child `f500a039-b090-491a-a1f0-f22b43167a86` reviewed
+`ceb9cdfa6150be2b7b0e74b4ebdc81a58eaf9ca6`: one P3, not clean. Completed
+production rounds 41; consecutive clean 0. R40's activation carry and
+observation withdrawal were confirmed.
+
+- P3: when the disproved session was the one in view, R40 withdrew the
+  observation but left the removal-sourced view owner. That owner swallowed
+  later lifecycle, new-session and primary follows until the user changed
+  selection. Disproof now also cancels a matching removal-sourced view owner
+  without touching selection; empty-selection and incomplete-read paths are
+  unchanged. `r41-red.log`: at `ceb9cdf`, after a disproved removal of the
+  viewed session a later primary promotion leaves the view on it, while the
+  unobserved control follows.
+- `findTaskInState` moved unchanged to `lib/ws/handlers/task-lookup.ts` so
+  the primary-focus handler stays within its line limit.
+
+Verification: `r41-units.log` 11 files/256 tests (router, primary-focus and
+disproof, tasks, task-session reads, explicit selection, command panel, removal
+and agent-session owners). Strict changed-file lint (after tightening the new
+guard to keep the handler within its line limit), production typecheck, fresh
+frontend build and spec/catalog/harness checks pass. Fresh-bundle browser
+receipts: `r41-final-summary.log` 41 desktop/tablet/maximize cases including the
+whole owned-removal visibility group, and `r41-phone-summary.log` ten phone
+cases, pass with one worker and no retries under host load of about 20.

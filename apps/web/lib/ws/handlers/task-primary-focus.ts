@@ -42,7 +42,7 @@ import {
   inheritFallbackReadiness,
   type FollowSource,
 } from "./session-selection";
-import type { KanbanTask } from "./task-archive-cache";
+import { findTaskInState } from "./task-lookup";
 
 const debug = createDebugLogger("task-lifecycle:ws");
 type FollowOwner = {
@@ -79,17 +79,6 @@ function retainRemovalMembershipProof(store: StoreApi<AppState>, owner: RemovalO
   registerTaskSessionMembershipProof(store, owner.taskId, owner.previousSessionId, (membership) => {
     commitRemovalMembership(store, owner, membership);
   });
-}
-
-/** Look up a task across both single-kanban and multi-kanban snapshots. */
-export function findTaskInState(state: AppState, taskId: string): KanbanTask | undefined {
-  const fromKanban = state.kanban.tasks.find((task) => task.id === taskId);
-  if (fromKanban) return fromKanban;
-  for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
-    const found = snapshot.tasks.find((task) => task.id === taskId);
-    if (found) return found;
-  }
-  return undefined;
 }
 
 function ownsSelection(store: StoreApi<AppState>, pending: FollowOwner): boolean {
@@ -250,6 +239,16 @@ function retireRemovalMembership(store: StoreApi<AppState>, pending: RemovalOwne
   observedRemovals(store)?.delete(pending.previousSessionId);
 }
 
+/** A disproved removal releases its observation and any removal-sourced view owner. */
+function withdrawRemoval(store: StoreApi<AppState>, pending: RemovalOwner): void {
+  observedRemovals(store)?.delete(pending.previousSessionId);
+  forgetTaskSessionMembershipProof(store, pending.previousSessionId);
+  const view = pendingByStore.get(store);
+  const ownsView = view?.taskId === pending.taskId && view.selectedSessionId !== null;
+  if (ownsView && view.source === "removed" && view.previousSessionId === pending.previousSessionId)
+    view.cancel();
+}
+
 function commitRemovalMembership(
   store: StoreApi<AppState>,
   pending: RemovalOwner,
@@ -261,11 +260,8 @@ function commitRemovalMembership(
     pending.previousSessionId,
   );
   if (!proof) {
-    // A fresh complete read that still lists the session withdraws the observation.
-    if (disprovesSessionRemoval(membership, pending.taskId, pending.previousSessionId)) {
-      observedRemovals(store)?.delete(pending.previousSessionId);
-      forgetTaskSessionMembershipProof(store, pending.previousSessionId);
-    }
+    if (disprovesSessionRemoval(membership, pending.taskId, pending.previousSessionId))
+      withdrawRemoval(store, pending);
     return;
   }
   const view = pendingByStore.get(store);
