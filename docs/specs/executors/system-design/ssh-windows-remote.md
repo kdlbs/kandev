@@ -219,11 +219,11 @@ scripts. `runOneAuthSetupScript` skips them on Windows hosts and logs a warning
 
 ## Controller launch, readiness, and resume
 
-Win32 OpenSSH puts every process started from an exec channel in a job object,
-and it ends that job when the channel closes. A `Start-Process` child therefore
-dies with its launch channel. The real-host evidence below shows this.
-`startRemoteWindowsAgentctlOnPort` uses the Windows Management Instrumentation
-service instead. WMI creates processes outside the channel's job:
+Win32 OpenSSH ends every process of an exec channel when the channel closes, so
+a `Start-Process` child dies with its launch channel. The real-host evidence
+below shows this. `windowsAgentctlLaunchScript` in
+`executor_ssh_windows_launch.go` uses the Windows Management Instrumentation
+service instead, which creates processes outside the channel:
 
 1. Create an empty `agentctl.log` in the session directory.
 2. Build the child environment block from the launching PowerShell process
@@ -233,9 +233,11 @@ service instead. WMI creates processes outside the channel's job:
 3. Call `Invoke-CimMethod Win32_Process Create`. Pass the task directory as
    `CurrentDirectory`, a hidden window, that environment block, and this command
    line:
-   `cmd.exe /d /c ""<agentctl.exe>" --workdir "<task dir>" > "<log>" 2>&1"`.
+   `cmd.exe /d /s /c ""<agentctl.exe>" --workdir "<task dir>" > "<log>" 2>&1"`.
    `agentctl` has no log-file option, so the `cmd.exe` wrapper owns the
-   redirection.
+   redirection. `quoteWindowsArgAlways` quotes every argument, which keeps
+   `cmd.exe` metacharacters such as `&` literal. `cmd.exe` still expands
+   `%NAME%` inside quotes, so a path containing such a sequence is unsupported.
 4. Poll `Win32_Process` with a bound of 10 seconds for the `agentctl.exe` child
    whose `ParentProcessId` is the wrapper PID. Write that child's PID to
    `agentctl.pid` and print it. The recorded PID must be the `agentctl.exe` PID,
@@ -359,6 +361,10 @@ PowerShell 7.
 | `Win32_ProcessStartup` with only one variable | Child lost `PATH`; `cmd.exe` could not find `powershell.exe` |
 | Same, with the merged environment block | Child had the variable, `USERPROFILE`, and Git on `PATH`. Its stdout and stderr reached a log in a path with spaces |
 | `taskkill /T /F` on the wrapper | Wrapper and child ended |
+| Generated launch script with the real `agentctl.exe`, 15 seconds after its channel closed | `agentctl.exe` alive, with `cmd.exe` as parent. `agentctl.pid` names the `agentctl.exe` PID. `/health` on the `AGENTCTL_PORT` port returns 200, and the log shows `HTTP server bound successfully` |
+| `remoteWindowsAgentctlStopScript` for that PID | Exit 0. No `agentctl.exe` or wrapper process remains, and the session directory is removed |
+| Launch script with a missing `agentctl.exe` | Exit 1. The error and the log tail report that `cmd.exe` does not recognize the path |
+| Production loader with a 64 KiB script, environment values, and input | Ran through `cmd.exe`. Values round-tripped, and exit codes matched `-Command` |
 
 Messages from `cmd.exe` itself, such as the length error, use the host's OEM
 code page. Kandev reports them as received.

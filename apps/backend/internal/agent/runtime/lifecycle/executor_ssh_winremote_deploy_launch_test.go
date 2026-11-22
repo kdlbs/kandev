@@ -457,7 +457,7 @@ func (h *windowsSSHLaunchHarness) handlePowerShell(script, stdin string) sshExec
 		return sshOut("git version 2.47.0.windows.1\r\n")
 	case strings.Contains(script, "$env:USERPROFILE"):
 		return sshOut(h.winHome)
-	case strings.Contains(script, "Start-Process -FilePath $agentctlBin"):
+	case strings.Contains(script, "Invoke-CimMethod -ClassName Win32_Process -MethodName Create"):
 		h.mu.Lock()
 		h.startScripts = append(h.startScripts, script)
 		h.mu.Unlock()
@@ -467,7 +467,7 @@ func (h *windowsSSHLaunchHarness) handlePowerShell(script, stdin string) sshExec
 		_ = os.WriteFile(filepath.Join(sessionHostDir, "agentctl.pid"), []byte("4242\r\n"), 0o644)
 		_ = os.WriteFile(filepath.Join(sessionHostDir, "agentctl.log"), []byte(`{"msg":"HTTP server bound successfully","address":"127.0.0.1:45124"}`+"\r\n"), 0o644)
 		return sshOut("4242\r\n")
-	case strings.Contains(script, "foreach ($name in @('agentctl.log', 'agentctl.err.log'))") || strings.Contains(script, "Join-Path") && strings.Contains(script, "'agentctl.log'"):
+	case strings.Contains(script, "Join-Path") && strings.Contains(script, "'agentctl.log'"):
 		logFile := h.toHostPath(`C:\Users\Kandev User\.kandev\tasks\task-task-win\.kandev\sessions\session-win\agentctl.log`)
 		data, err := os.ReadFile(logFile)
 		if err != nil {
@@ -625,6 +625,6 @@ func TestSSHWindowsCreateInstancePowerShellEndToEnd(t *testing.T) {
 		t.Fatalf("expected GITHUB_TOKEN in PowerShell stdin JSON, got: %s", prepStdin[0])
 	}
 	if len(startScripts) != 1 || !strings.Contains(startScripts[0], `--workdir "C:\Users\Kandev User\.kandev\tasks\task-task-win"`) {
-		t.Fatalf("expected Win32-quoted --workdir in PowerShell Start-Process script, got: %v", startScripts)
+		t.Fatalf("expected Win32-quoted --workdir in the WMI launch wrapper, got: %v", startScripts)
 	}
 }

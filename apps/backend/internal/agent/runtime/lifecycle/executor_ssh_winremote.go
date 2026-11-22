@@ -230,67 +230,18 @@ func ensureWindowsRemoteSessionDir(ctx context.Context, client *ssh.Client, task
 	return sessionDir, nil
 }
 
-func startRemoteWindowsAgentctlOnPort(
-	ctx context.Context,
-	client *ssh.Client,
-	shell, agentctlBin, workspacePath, sessionDir string,
-	env map[string]string,
-	port int,
-	log *logger.Logger,
-) (int, error) {
-	cleanSessionDir := cleanWindowsRemotePath(sessionDir)
-	cleanBin := cleanWindowsRemotePath(agentctlBin)
-	cleanWorkdir := cleanWindowsRemotePath(workspacePath)
-	argLine := "--workdir " + quoteWindowsArg(cleanWorkdir)
-	script := fmt.Sprintf(`$sessionDir = %[1]s
-$agentctlBin = %[2]s
-$workspacePath = %[3]s
-$argLine = %[4]s
-$logPath = Join-Path $sessionDir 'agentctl.log'
-$errLogPath = Join-Path $sessionDir 'agentctl.err.log'
-$pidPath = Join-Path $sessionDir 'agentctl.pid'
-[System.IO.Directory]::CreateDirectory($sessionDir) | Out-Null
-[System.IO.File]::WriteAllText($logPath, '')
-[System.IO.File]::WriteAllText($errLogPath, '')
-[Environment]::SetEnvironmentVariable('AGENTCTL_PORT', '%[5]d', 'Process')
-$proc = Start-Process -FilePath $agentctlBin -ArgumentList $argLine -WorkingDirectory $workspacePath -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError $errLogPath -PassThru
-[System.IO.File]::WriteAllText($pidPath, "$($proc.Id)" + [Environment]::NewLine)
-Write-Output $proc.Id
-`,
-		powerShellQuote(cleanSessionDir),
-		powerShellQuote(cleanBin),
-		powerShellQuote(cleanWorkdir),
-		powerShellQuote(argLine),
-		port,
-	)
-	out, stderr, err := runPowerShellEnvelope(ctx, client, shell, powerShellEnvelope{Login: true, Env: env, Script: script})
-	if err != nil {
-		return 0, fmt.Errorf("ssh: launch Windows agentctl.exe: %w (stderr: %s)", err, strings.TrimSpace(stderr))
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(out))
-	if err != nil {
-		return 0, fmt.Errorf("ssh: Windows agentctl wrapper returned non-numeric pid %q", out)
-	}
-	return awaitRemoteAgentctlReadyForPlatform(
-		ctx, client, cleanSessionDir, port, pid, sshAgentctlReadyTimeout, sshAgentctlReadyPoll,
-		SSHRemotePlatform{GOOS: sshRemoteGOOSWindows}, log,
-	)
-}
-
 func readRemoteWindowsAgentctlLog(ctx context.Context, client *ssh.Client, sessionDir string) string {
 	cleanSessionDir := cleanWindowsRemotePath(sessionDir)
 	script := fmt.Sprintf(`$sd = %s
-foreach ($name in @('agentctl.log', 'agentctl.err.log')) {
-  $p = Join-Path $sd $name
-  if (Test-Path -LiteralPath $p -PathType Leaf) {
-    $fs = [System.IO.FileStream]::new($p, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-    try {
-      $sr = [System.IO.StreamReader]::new($fs, [System.Text.Encoding]::UTF8)
-      $text = $sr.ReadToEnd()
-      if ($text) { [Console]::Out.Write($text); if (-not $text.EndsWith("`+"`n"+`")) { [Console]::Out.Write("`+"`n"+`") } }
-    } finally {
-      $fs.Dispose()
-    }
+$p = Join-Path $sd 'agentctl.log'
+if (Test-Path -LiteralPath $p -PathType Leaf) {
+  $fs = [System.IO.FileStream]::new($p, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+  try {
+    $sr = [System.IO.StreamReader]::new($fs, [System.Text.Encoding]::UTF8)
+    $text = $sr.ReadToEnd()
+    if ($text) { [Console]::Out.Write($text); if (-not $text.EndsWith("`+"`n"+`")) { [Console]::Out.Write("`+"`n"+`") } }
+  } finally {
+    $fs.Dispose()
   }
 }`, powerShellQuote(cleanSessionDir))
 	out, _, _ := runPowerShell(ctx, client, defaultWindowsLoginShell, script, false)

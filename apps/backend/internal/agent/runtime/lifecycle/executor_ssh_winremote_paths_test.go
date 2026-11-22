@@ -113,6 +113,13 @@ func TestSSHWindowsQuoteArgAndCredentialHelper(t *testing.T) {
 }
 
 func TestSSHWindowsCommandLineFlagExtractionAndMatching(t *testing.T) {
+	// Exact Win32_Process.CommandLine of agentctl.exe started by the WMI cmd.exe
+	// wrapper on a Windows 11 host: two spaces before --workdir and a trailing
+	// space left by the stripped redirection.
+	realLaunch := `"C:\Users\Kandev User\AppData\Local\Temp\kandev wo4\bin\agentctl.exe"  --workdir "C:\Users\Kandev User\AppData\Local\Temp\kandev wo4\tasks\task 1" `
+	if !remoteWindowsAgentctlCommandLineMatches(realLaunch, `C:\Users\Kandev User\AppData\Local\Temp\kandev wo4\tasks\task 1`) {
+		t.Fatal("identity check rejected the command line of a WMI-launched agentctl.exe")
+	}
 	taskDir := `C:\Users\Kandev User\.kandev\tasks\task-1`
 	cases := []struct {
 		name    string

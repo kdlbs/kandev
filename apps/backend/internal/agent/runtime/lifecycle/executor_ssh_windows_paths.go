@@ -270,11 +270,18 @@ func sshRemotePathsEqual(left, right string, platform SSHRemotePlatform) bool {
 	return normLeft == normRight
 }
 
-// quoteWindowsArg quotes a single argument for Win32 CommandLineToArgvW.
+// quoteWindowsArg quotes a single argument for Win32 CommandLineToArgvW,
+// leaving an argument without whitespace or quotes bare.
 func quoteWindowsArg(arg string) string {
 	if arg != "" && !strings.ContainsAny(arg, " \t\n\v\"") {
 		return arg
 	}
+	return quoteWindowsArgAlways(arg)
+}
+
+// quoteWindowsArgAlways quotes arg for CommandLineToArgvW even when it has no
+// whitespace, which keeps cmd.exe metacharacters such as & literal.
+func quoteWindowsArgAlways(arg string) string {
 	var b strings.Builder
 	b.WriteByte('"')
 	backslashes := 0

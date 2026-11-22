@@ -1,7 +1,7 @@
 ---
 id: "04-cim-controller-launch"
 title: "Launch the Windows controller through WMI"
-status: pending
+status: done
 wave: 4
 depends_on:
   - "03-stdin-transport-and-helper-replacement"
@@ -102,4 +102,40 @@ following task 06 H3, on an isolated instance. Record the result here.
 
 ## Results
 
-Pending.
+Completed on 2026-11-22.
+
+Implementation:
+
+- `executor_ssh_windows_launch.go` holds `windowsAgentctlLaunchScript` and
+  `startRemoteWindowsAgentctlOnPort`.
+- The wrapper is `cmd.exe /d /s /c`, with every argument quoted by the new
+  `quoteWindowsArgAlways`.
+- The missing-child branch kills the wrapper only while it is alive, inside
+  `try`/`catch`. A real-host run showed why: with
+  `$ErrorActionPreference = 'Stop'`, PowerShell 5.1 turns `taskkill` stderr into
+  a terminating error that replaced the launch error.
+- `agentctl.err.log` is removed, and the log reader reads only `agentctl.log`.
+- The real Win32 command line of a WMI-launched `agentctl.exe` has two spaces
+  before `--workdir` and a trailing space. That string is now a regression case
+  for `remoteWindowsAgentctlCommandLineMatches`.
+- The Windows-native survival test is in task 05's file. The real-host smoke
+  test below gives the stronger proof.
+
+| Command | Result |
+| --- | --- |
+| `go test -race -run '^TestSSHWindows'` on `lifecycle` and `ssh` | Passed. Red first: an undefined builder, then the missing-child branch lacked the guarded `taskkill` and the log tail |
+| SSH, SFTP, and Windows tests in `lifecycle` and `ssh` | 5 failures, all in the baseline set |
+| `lint-go-changed` | 0 issues, after replacing a `strings.Index` slice that `gocritic` flagged |
+| Real host: generated launch script, real `agentctl.exe` built by task 01, paths with spaces | Launch exit 0. 15 seconds after the channel closed, `agentctl.exe` was alive with a `cmd.exe` parent. The pidfile held the `agentctl.exe` PID. `/health` on `AGENTCTL_PORT` 45177 returned 200, and the log shows `HTTP server bound successfully` |
+| Real host: `remoteWindowsAgentctlStopScript` | Exit 0. No process remained, and the session directory was removed |
+| Real host: missing `agentctl.exe` | Exit 1, with the launch error and `cmd.exe`'s "not recognized" log line |
+
+Every probe directory and process on the test host was removed afterward.
+
+Lifecycle evidence:
+
+| Scenario | Criterion | Evidence | Result |
+| --- | --- | --- | --- |
+| Channel close | `001.11` | Real-host smoke test above | Passed |
+| Restart and recovery | `001.12` | `TestSSHWindowsBackendShutdownPreservesAgentctlAndResumeReconnects` | Passed after the launcher change |
+| PID ownership | `001.13` | `TestSSHWindowsLaunchRecordsAgentctlChildPID`, and the real-host pidfile check | Passed |
