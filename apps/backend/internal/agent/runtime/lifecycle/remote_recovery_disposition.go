@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -16,6 +17,9 @@ func (m *Manager) settleRemoteRecoveryAbsence(
 	outcome RecoveryCandidateOutcome,
 ) (bool, error) {
 	if !remoteRecoveryAbsenceEligible(entry, outcome) {
+		return false, nil
+	}
+	if remoteRecoveryAbsenceNeedsStoppedAgentProof(entry.snapshot, outcome) {
 		return false, nil
 	}
 	if ctx == nil {
@@ -55,9 +59,30 @@ func (m *Manager) settleRemoteRecoveryAbsence(
 	return true, nil
 }
 
+func remoteRecoveryAbsenceNeedsStoppedAgentProof(snapshot *RemoteRecoverySnapshot, outcome RecoveryCandidateOutcome) bool {
+	if !remoteRecoveryNeedsStoppedAgentProof(snapshot) {
+		return false
+	}
+	return snapshot.Runtime != string(agentruntime.RuntimeRemoteDocker) || outcome != RecoveryOutcomeRecordedResourceAbsent
+}
+
 func remoteRecoveryAbsenceEligible(entry *remoteRecoveryRetry, outcome RecoveryCandidateOutcome) bool {
-	return entry != nil && entry.record != nil && outcome == RecoveryOutcomeNoMatchingInstance &&
-		remoteRecoveryNoMatchProvesStopped(entry.record.Runtime) && !remoteRecoveryOwnerUnsupported(entry.record)
+	if entry == nil || entry.record == nil || !remoteRecoveryOutcomeProvesAbsence(entry.record.Runtime, outcome) ||
+		!remoteRecoveryNoMatchProvesStopped(entry.record.Runtime) || remoteRecoveryOwnerUnsupported(entry.record) {
+		return false
+	}
+	if entry.record.Runtime == agentruntime.RuntimeRemoteDocker && outcome == RecoveryOutcomeRecordedResourceAbsent {
+		_, containerID, ok := remoteDockerRecoveryRequest(entry.record)
+		return ok && containerID != ""
+	}
+	return true
+}
+
+func remoteRecoveryOutcomeProvesAbsence(runtime agentruntime.Runtime, outcome RecoveryCandidateOutcome) bool {
+	if outcome == RecoveryOutcomeNoMatchingInstance {
+		return true
+	}
+	return runtime == agentruntime.RuntimeRemoteDocker && outcome == RecoveryOutcomeRecordedResourceAbsent
 }
 
 func validateRemoteRecoveryAbsenceAttempt(entry *remoteRecoveryRetry, attemptRecord *models.ExecutorRunning) error {
@@ -121,17 +146,39 @@ func remoteRecoveryOwnerLockIDs(snapshot *RemoteRecoverySnapshot) models.RemoteR
 func (m *Manager) completeRemoteRecoveryAbsence(entry *remoteRecoveryRetry, ctx context.Context) {
 	m.remoteRecoveryMu.Lock()
 	defer m.remoteRecoveryMu.Unlock()
-	if m.remoteRecoveryPending[entry.record.SessionID] != entry || !entry.inProgress || entry.stopRequested ||
-		m.shuttingDown.Load() || ctx.Err() != nil || m.remoteRecoverySessionTracked(entry) {
+	if !m.completeRemoteRecoveryDispositionLocked(entry, ctx) {
 		return
-	}
-	select {
-	case <-m.stopCh:
-		return
-	default:
 	}
 	delete(m.remoteRecoveryPending, entry.record.SessionID)
 	m.recoveryGuard.Release(entry.record.SessionID)
+}
+
+func (m *Manager) completeStoppedRemoteRecovery(entry *remoteRecoveryRetry, ctx context.Context) bool {
+	if entry == nil || entry.record == nil {
+		return false
+	}
+	m.remoteRecoveryMu.Lock()
+	defer m.remoteRecoveryMu.Unlock()
+	if !m.completeRemoteRecoveryDispositionLocked(entry, ctx) {
+		return false
+	}
+	delete(m.remoteRecoveryPending, entry.record.SessionID)
+	m.recoveryGuard.Release(entry.record.SessionID)
+	return true
+}
+
+func (m *Manager) completeRemoteRecoveryDispositionLocked(entry *remoteRecoveryRetry, ctx context.Context) bool {
+	if entry == nil || entry.record == nil || m.remoteRecoveryPending[entry.record.SessionID] != entry ||
+		!entry.inProgress || entry.stopRequested || m.shuttingDown.Load() || ctx == nil || ctx.Err() != nil ||
+		m.remoteRecoverySessionTracked(entry) {
+		return false
+	}
+	select {
+	case <-m.stopCh:
+		return false
+	default:
+	}
+	return true
 }
 
 func (m *Manager) remoteRecoveryAbsenceAttemptCurrent(entry *remoteRecoveryRetry) bool {

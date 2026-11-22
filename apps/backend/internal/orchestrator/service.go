@@ -3963,6 +3963,9 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		if isTaskSessionNotFound(err) {
+			if s.preserveRemoteWorkspaceOnStartup(running, "missing") {
+				return
+			}
 			s.handleMissingSessionOnStartup(ctx, running, report, scope)
 			return
 		}
@@ -3973,6 +3976,12 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	}
 
 	previousState := session.State
+	if startupCleanupState(previousState) && s.preserveRemoteWorkspaceOnStartup(running, string(previousState)) {
+		if previousState == models.TaskSessionStateFailed {
+			s.ensureFailedTaskReviewOnStartup(ctx, session)
+		}
+		return
+	}
 
 	// Handle terminal and never-started states (reuse existing cleanup logic)
 	if skip := s.handleTerminalSessionOnStartup(ctx, session, running, previousState, report, scope); skip {
@@ -4252,29 +4261,35 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 	return false
 }
 
+func startupCleanupState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled,
+		models.TaskSessionStateFailed, models.TaskSessionStateCreated:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) preserveRemoteWorkspaceOnStartup(running *models.ExecutorRunning, state string) bool {
+	if running == nil || running.Runtime != runtimekind.RuntimeRemoteDocker &&
+		running.Runtime != runtimekind.RuntimePluginRemote {
+		return false
+	}
+	s.logger.Info("preserving remote workspace ownership during startup reconciliation",
+		zap.String("session_id", running.SessionID),
+		zap.String("runtime", string(running.Runtime)),
+		zap.String("state", state))
+	return true
+}
+
 // handleFailedSessionOnStartup handles a failed session during startup recovery.
 func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, report *startupCleanupReport, scope interface{}) {
 	sessionID := session.ID
 	if running.Runtime != runtimekind.RuntimeStandalone {
 		s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
 	}
-	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
-	if session.TaskID != "" {
-		task, taskErr := s.repo.GetTask(ctx, session.TaskID)
-		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
-			s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
-				zap.String("task_id", session.TaskID),
-				zap.String("session_id", sessionID))
-			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
-			// so the write is atomic against archived_at — see the matching
-			// comment in reconcileOneSessionOnStartup above.
-			if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, session.TaskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
-				s.logger.Warn("failed to update task state to REVIEW",
-					zap.String("task_id", session.TaskID),
-					zap.Error(updateErr))
-			}
-		}
-	}
+	s.ensureFailedTaskReviewOnStartup(ctx, session)
 	if running.Runtime == runtimekind.RuntimeStandalone {
 		s.reconcileAbsentTerminalRuntime(ctx, running, scope)
 		return
@@ -4293,6 +4308,25 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 		// Prune only subject to the resume-safety invariant (a lingering
 		// resume_token is repaired in place rather than deleted).
 		s.pruneOrRepairExecutorRow(ctx, running, models.TaskSessionStateFailed)
+	}
+}
+
+func (s *Service) ensureFailedTaskReviewOnStartup(ctx context.Context, session *models.TaskSession) {
+	if session == nil || session.TaskID == "" {
+		return
+	}
+	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS).
+	task, taskErr := s.repo.GetTask(ctx, session.TaskID)
+	if taskErr != nil || task == nil || task.State != v1.TaskStateInProgress || taskArchived(task) {
+		return
+	}
+	s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
+		zap.String("task_id", session.TaskID), zap.String("session_id", session.ID))
+	// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState) so the
+	// write is atomic against archived_at; see the matching comment above.
+	if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, session.TaskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
+		s.logger.Warn("failed to update task state to REVIEW",
+			zap.String("task_id", session.TaskID), zap.Error(updateErr))
 	}
 }
 
