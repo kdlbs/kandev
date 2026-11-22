@@ -1043,7 +1043,15 @@ export class ApiClient {
   }
 
   async listPrompts(): Promise<{
-    prompts: Array<{ id: string; name: string; content: string; builtin: boolean }>;
+    prompts: Array<{
+      id: string;
+      name: string;
+      content: string;
+      builtin: boolean;
+      source?: string;
+      source_path?: string;
+      alternate_content?: string;
+    }>;
   }> {
     return this.request("GET", "/api/v1/prompts");
   }
