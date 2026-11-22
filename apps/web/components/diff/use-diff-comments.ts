@@ -1,5 +1,6 @@
 "use client";
 
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import { useCallback, useMemo } from "react";
 import type { SelectedLineRange } from "@pierre/diffs";
 import { useCommentsStore } from "@/lib/state/slices/comments";
@@ -30,7 +31,11 @@ interface UseDiffCommentsReturn {
   /** Annotations formatted for @pierre/diffs */
   annotations: CommentAnnotation[];
   /** Add a new comment */
-  addComment: (range: SelectedLineRange, text: string) => DiffComment;
+  addComment: (
+    range: SelectedLineRange,
+    text: string,
+    attachments?: MessageAttachment[],
+  ) => DiffComment;
   /** Remove a comment */
   removeComment: (commentId: string) => void;
   /** Update a comment */
@@ -62,7 +67,7 @@ export function useDiffComments({
   const annotations = useMemo(() => commentsToAnnotations(comments), [comments]);
 
   const addComment = useCallback(
-    (range: SelectedLineRange, text: string) => {
+    (range: SelectedLineRange, text: string, attachments?: MessageAttachment[]) => {
       const side = (range.side || "additions") as AnnotationSide;
       const startLine = Math.min(range.start, range.end);
       const endLine = Math.max(range.start, range.end);
@@ -89,6 +94,7 @@ export function useDiffComments({
         side,
         codeContent,
         text,
+        ...(attachments?.length && { attachments }),
         createdAt: new Date().toISOString(),
         status: "pending",
       };

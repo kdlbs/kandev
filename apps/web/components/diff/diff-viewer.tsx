@@ -206,6 +206,8 @@ function useDiffViewerWiring(args: WiringArgs) {
     hideTimeoutRef: state.hideTimeoutRef,
   });
   const renderAnnotation = useAnnotationRenderer({
+    sessionId: args.sessionId ?? undefined,
+    draftKey: JSON.stringify([args.sessionId, data.filePath, state.selectedLines]),
     handleRevertBlock: state.handleRevertBlock,
     onButtonEnter,
     onButtonLeave,

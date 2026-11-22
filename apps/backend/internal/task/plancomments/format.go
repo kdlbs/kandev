@@ -90,6 +90,9 @@ func formatMarkdown(comments []*models.TaskPlanComment) string {
 			out.WriteByte('\n')
 		}
 		out.WriteByte('\n')
+		if len(comment.Attachments) > 0 {
+			fmt.Fprintf(&out, "<!-- kandev-comment-files:%s -->\n\n", comment.ID)
+		}
 	}
 	out.WriteString("---\n\n")
 	return out.String()

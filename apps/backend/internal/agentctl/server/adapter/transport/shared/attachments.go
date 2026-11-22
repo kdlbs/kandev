@@ -15,6 +15,9 @@ import (
 
 // SavedAttachment represents an attachment saved to the workspace.
 type SavedAttachment struct {
+	CommentID    string
+	AttachmentID string
+	DisplayName  string
 	// RelPath is the path relative to workDir (e.g. ".kandev/attachments/{sid}/file.pdf").
 	RelPath string
 	// AbsPath is the absolute path to the saved file.
@@ -174,6 +177,7 @@ func (m *AttachmentManager) SaveAttachmentStream(att v1.MessageAttachment, src i
 	}
 	relPath := filepath.Join(".kandev", "attachments", m.sessionID, name)
 	saved := SavedAttachment{
+		CommentID: att.CommentID, AttachmentID: att.AttachmentID, DisplayName: att.Name,
 		RelPath:  relPath,
 		AbsPath:  absPath,
 		Name:     name,

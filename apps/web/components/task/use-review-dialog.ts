@@ -12,7 +12,10 @@ import { useReviewPRSelection } from "@/hooks/domains/github/use-review-pr-selec
 import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { usePRReviewRepositoryIdentity } from "@/hooks/domains/github/use-pr-review-repository-identity";
 import { useTaskRepositories } from "@/hooks/domains/kanban/use-task-repositories";
-import { formatReviewCommentsAsMarkdown } from "@/components/task/chat/messages/review-comments-attachment";
+import {
+  commentAttachmentsForDelivery,
+  formatReviewCommentsAsMarkdown,
+} from "@/lib/state/slices/comments/format";
 import {
   getCumulativeReviewRepositoryNames,
   isReviewMultiRepo,
@@ -135,6 +138,43 @@ function useReviewGitStatusFiles(
   );
 }
 
+function isPendingReviewComment(
+  comment: ReviewComment,
+  sessionId: string,
+  state: ReturnType<typeof useCommentsStore.getState>,
+): boolean {
+  return (
+    comment.sessionId === sessionId &&
+    comment.status === "pending" &&
+    state.byId[comment.id] === comment &&
+    state.pendingForChat.includes(comment.id)
+  );
+}
+
+type ReviewFileAdmission = { key: string; id: string };
+
+function prepareReviewCommentRequest(
+  taskId: string,
+  sessionId: string,
+  comments: ReviewComment[],
+  pendingAdmission: { current: ReviewFileAdmission | null },
+) {
+  const attachments = commentAttachmentsForDelivery(comments);
+  const content = formatReviewCommentsAsMarkdown(comments);
+  const key =
+    attachments.length > 0 ? JSON.stringify([taskId, sessionId, content, attachments]) : null;
+  const messageId =
+    key && pendingAdmission.current?.key === key ? pendingAdmission.current.id : generateUUID();
+  pendingAdmission.current = key ? { key, id: messageId } : null;
+  return {
+    task_id: taskId,
+    session_id: sessionId,
+    client_message_id: messageId,
+    content,
+    ...(attachments.length > 0 && { attachments }),
+  };
+}
+
 function useReviewCommentDelivery(
   taskId: string | null,
   sessionId: string | null,
@@ -142,6 +182,7 @@ function useReviewCommentDelivery(
 ) {
   const { toast } = useToast();
   const pending = useRef(false);
+  const pendingFileAdmission = useRef<ReviewFileAdmission | null>(null);
   const [sendingReviewComments, setSendingReviewComments] = useState(false);
   const owner = useRef<{ taskId: string | null; sessionId: string | null } | null>(null);
   useEffect(() => {
@@ -156,12 +197,7 @@ function useReviewCommentDelivery(
       if (pending.current || !taskId || !sessionId) return false;
       const state = useCommentsStore.getState();
       const submitted = comments.filter(
-        (comment) =>
-          comment.sessionId === sessionId &&
-          comment.status === "pending" &&
-          isReviewComment(comment) &&
-          state.byId[comment.id] === comment &&
-          state.pendingForChat.includes(comment.id),
+        (comment) => isReviewComment(comment) && isPendingReviewComment(comment, sessionId, state),
       );
       if (submitted.length === 0) return false;
       const client = getWebSocketClient();
@@ -172,26 +208,18 @@ function useReviewCommentDelivery(
       pending.current = true;
       setSendingReviewComments(true);
       try {
-        await client.request(
-          "message.add",
-          {
-            task_id: taskId,
-            session_id: sessionId,
-            client_message_id: generateUUID(),
-            content: formatReviewCommentsAsMarkdown(submitted),
-          },
-          10000,
+        const request = prepareReviewCommentRequest(
+          taskId,
+          sessionId,
+          submitted,
+          pendingFileAdmission,
         );
+        await client.request("message.add", request, 10000);
+        pendingFileAdmission.current = null;
         const current = useCommentsStore.getState();
         // Immutable row identity keeps edits made during delivery pending.
         const acknowledgedIds = submitted
-          .filter(
-            (comment) =>
-              current.byId[comment.id] === comment &&
-              comment.sessionId === sessionId &&
-              comment.status === "pending" &&
-              current.pendingForChat.includes(comment.id),
-          )
+          .filter((comment) => isPendingReviewComment(comment, sessionId, current))
           .map((comment) => comment.id);
         current.markCommentsSent(acknowledgedIds);
         const remaining = useCommentsStore

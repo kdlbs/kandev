@@ -25,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/planws"
 	"github.com/kandev/kandev/internal/task/previewfeedback"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	"github.com/kandev/kandev/internal/task/repository/previewfeedbacktx"
@@ -618,6 +619,9 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if validationError := validatePlanCommentQueueRequest(req); validationError != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, validationError, nil)
 	}
+	if err := h.canonicalizeQueuedCommentFiles(ctx, req.TaskID, req.Content, req.Attachments); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid comment files", nil)
+	}
 	if invalid := firstInvalidDeliveryMode(req.Attachments); invalid >= 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment delivery_mode must be prompt or path",
 			map[string]interface{}{"attachment_index": invalid})
@@ -1131,6 +1135,10 @@ func validatePlanCommentQueueRequest(req wsQueueMessageRequest) string {
 }
 
 func planCommentQueueError(msg *ws.Message, err error) *ws.Message {
+	if validation := planws.CommentAttachmentValidationMessage(err); validation != "" {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, validation, nil)
+		return response
+	}
 	if errors.Is(err, plancomments.ErrRenderedTooLarge) || errors.Is(err, previewfeedback.ErrPromptTooLarge) {
 		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Rendered message content is too long", nil)
 		return response
@@ -1418,6 +1426,9 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	}
 	if req.Content == "" && len(req.Attachments) == 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
+	}
+	if err := h.canonicalizeQueuedCommentFiles(ctx, req.TaskID, req.Content, req.Attachments); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid comment files", nil)
 	}
 	if invalid := firstInvalidDeliveryMode(req.Attachments); invalid >= 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment delivery_mode must be prompt or path",
@@ -2501,38 +2512,6 @@ func attachmentPayloadBytes(attachment messagequeue.MessageAttachment) (int64, b
 		return 0, false
 	}
 	return int64(len(decoded)), true
-}
-
-// queueAttachmentsToV1 converts queue attachments to the API v1 representation.
-func queueAttachmentsToV1(attachments []messagequeue.MessageAttachment) []v1.MessageAttachment {
-	if len(attachments) == 0 {
-		return nil
-	}
-	converted := make([]v1.MessageAttachment, 0, len(attachments))
-	for _, attachment := range attachments {
-		converted = append(converted, v1.MessageAttachment{
-			AttachmentID: attachment.AttachmentID,
-			Type:         attachment.Type,
-			Data:         attachment.Data,
-			MimeType:     attachment.MimeType,
-			Name:         attachment.Name,
-			SizeBytes:    attachment.SizeBytes,
-			DeliveryMode: attachment.DeliveryMode,
-		})
-	}
-	return converted
-}
-
-func queueAttachmentsFromV1(attachments []v1.MessageAttachment) []messagequeue.MessageAttachment {
-	converted := make([]messagequeue.MessageAttachment, 0, len(attachments))
-	for _, attachment := range attachments {
-		converted = append(converted, messagequeue.MessageAttachment{
-			AttachmentID: attachment.AttachmentID, Type: attachment.Type, Data: attachment.Data,
-			MimeType: attachment.MimeType, Name: attachment.Name, SizeBytes: attachment.SizeBytes,
-			DeliveryMode: attachment.DeliveryMode,
-		})
-	}
-	return converted
 }
 
 type wsAppendToQueueRequest struct {

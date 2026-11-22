@@ -1,3 +1,4 @@
+import { attachCommentFile } from "../../helpers/comment-attachment";
 import { test, expect } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
 import {
@@ -86,6 +87,7 @@ test.describe("Agent message comments on mobile", () => {
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await drawer.getByTestId("agent-message-comment-input").fill("Run with this correction.");
+    const attachmentId = await attachCommentFile(testPage, drawer, "reply-note.txt");
     await runButton.click();
 
     await expect(drawer).not.toBeVisible({ timeout: 15_000 });
@@ -98,7 +100,9 @@ test.describe("Agent message comments on mobile", () => {
               message.author_type === "user" &&
               message.content.includes("### Agent Message Comments") &&
               message.content.includes(SELECTED_REPLY_TEXT) &&
-              message.content.includes("Run with this correction."),
+              message.content.includes("Run with this correction.") &&
+              Array.isArray(message.metadata?.attachments) &&
+              message.metadata.attachments.some((file) => file.attachment_id === attachmentId),
           );
         },
         { timeout: 20_000 },

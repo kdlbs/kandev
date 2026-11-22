@@ -55,6 +55,34 @@ function registerFailureTests(surface: Surface) {
     expect(isReviewOpen()).toBe(false);
   });
 
+  // @covers AC-TASKS-COMMENT-FILES-001.5
+  it("retries a file-bearing Review with the same admission ID and ordered references", async () => {
+    const { primary, notes } = await openDelivery(surface);
+    const file = {
+      type: "resource",
+      name: "notes.txt",
+      mime_type: "text/plain",
+      delivery_mode: "path",
+      attachment_id: "review-upload",
+    } as const;
+    const withFiles = { ...notes[0], attachments: [file] };
+    act(() => useCommentsStore.getState().updateComment(withFiles.id, { attachments: [file] }));
+    await flushDelivery();
+
+    clickDelivery(surface);
+    expect(sends()[0].payload).toMatchObject({
+      attachments: [{ ...file, comment_id: withFiles.id }],
+      content: expect.stringContaining(`<!-- kandev-comment-files:${withFiles.id} -->`),
+    });
+    await acknowledge(0, "server refused this feedback");
+    assertRetained([withFiles, ...notes.slice(1)], primary.sessionId);
+
+    clickDelivery(surface);
+    expect(sends()[1].payload).toEqual(sends()[0].payload);
+    await acknowledge(1);
+    assertRetained([], primary.sessionId);
+  });
+
   // @covers AC-UI-REVIEW-COMMENT-DELIVERY-001.2 .6 .8
   it("unavailable transport preserves persisted feedback and allows a later send", async () => {
     const { primary, notes } = await openDelivery(surface);

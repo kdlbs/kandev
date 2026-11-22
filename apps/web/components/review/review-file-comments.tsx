@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useOptionalAppStore } from "@/components/state-provider";
 import { Button } from "@kandev/ui/button";
 import { CommentForm } from "@/components/diff/comment-form";
 import { MarkdownComment } from "@/components/task/simple/markdown-comment";
@@ -31,7 +32,13 @@ function useFileComments(file: ReviewFile, sessionId: string) {
   );
 }
 
-function FileCommentCard({ comment }: { comment: ReviewFileComment }) {
+function FileCommentCard({
+  comment,
+  taskId,
+}: {
+  comment: ReviewFileComment;
+  taskId: string | null;
+}) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const editRef = useRef<HTMLButtonElement>(null);
@@ -55,11 +62,12 @@ function FileCommentCard({ comment }: { comment: ReviewFileComment }) {
     >
       {editing ? (
         <CommentForm
+          attachmentOptions={taskId ? { taskId, initial: comment.attachments } : undefined}
           initialContent={comment.text}
           isEditing
           onCancel={close}
-          onSubmit={(text) => {
-            update(comment.id, { text });
+          onSubmit={(text, attachments) => {
+            update(comment.id, { text, ...(attachments && { attachments }) });
             close();
           }}
         />
@@ -114,6 +122,7 @@ export function ReviewFileComments({
   creating: boolean;
   onClose: () => void;
 }) {
+  const taskId = useOptionalAppStore((state) => state.tasks.activeTaskId, null);
   const comments = useFileComments(file, sessionId);
   const regionRef = useRef<HTMLDivElement>(null);
   const add = useCommentsStore((state) => state.addComment);
@@ -142,12 +151,14 @@ export function ReviewFileComments({
         {[file.repository_name, file.path].filter(Boolean).join("/")}
       </p>
       {comments.map((comment) => (
-        <FileCommentCard key={comment.id} comment={comment} />
+        <FileCommentCard key={comment.id} comment={comment} taskId={taskId} />
       ))}
       {creating && (
         <CommentForm
+          key={`${taskId}:${sessionId}:${file.repository_name}:${file.path}`}
+          attachmentOptions={taskId ? { taskId } : undefined}
           onCancel={close}
-          onSubmit={(text) => {
+          onSubmit={(text, attachments) => {
             const comment = buildReviewFileComment(
               {
                 sessionId,
@@ -160,6 +171,7 @@ export function ReviewFileComments({
               text,
             );
             if (comment) {
+              if (attachments?.length) comment.attachments = attachments;
               add(comment);
               close();
             }

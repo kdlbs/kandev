@@ -1,3 +1,4 @@
+import { attachCommentFile } from "../../helpers/comment-attachment";
 import { assertCommentSurvivesForeground } from "./plan-comment-foreground-helpers";
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
@@ -121,6 +122,7 @@ test.describe("task-owned plan comments", () => {
     const textarea = await openPlanCommentComposer(testPage, session);
     const sendComment = "Send this feedback only to the selected secondary session";
     await textarea.fill(sendComment);
+    const attachmentId = await attachCommentFile(testPage, testPage, "plan-note.txt");
     await testPage.getByRole("button", { name: "Add", exact: true }).click();
     await expect(session.planPanel.locator(".comment-badge[data-comment-id]")).toHaveCount(1);
 
@@ -145,7 +147,9 @@ test.describe("task-owned plan comments", () => {
             (message) =>
               message.author_type === "user" &&
               message.content.includes(sendComment) &&
-              message.content.includes("Apply the selected feedback here"),
+              message.content.includes("Apply the selected feedback here") &&
+              Array.isArray(message.metadata?.attachments) &&
+              message.metadata.attachments.some((file) => file.attachment_id === attachmentId),
           ),
         { timeout: 30_000 },
       )

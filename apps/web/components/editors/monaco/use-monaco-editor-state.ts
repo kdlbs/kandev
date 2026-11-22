@@ -1,3 +1,4 @@
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import { useCallback, useEffect, useState, useRef, type RefObject } from "react";
 import type { OnMount, OnChange } from "@monaco-editor/react";
 import type { editor as monacoEditor, IDisposable } from "monaco-editor";
@@ -99,11 +100,15 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   });
 
   // Stable callback refs for ViewZone renders (avoids stale closures)
-  const handleCommentSubmitRef = useRef((() => {}) as (annotation: string) => void);
+  const handleCommentSubmitRef = useRef((() => {}) as (
+    annotation: string,
+    attachments?: MessageAttachment[],
+  ) => void);
   const handleCommentDeleteRef = useRef((() => {}) as (commentId: string) => void);
   const handleCommentUpdateRef = useRef((() => {}) as (
     commentId: string,
     annotation: string,
+    attachments?: MessageAttachment[],
   ) => void);
 
   // Editor mount
@@ -340,7 +345,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   });
 
   const createCommentFromForm = useCallback(
-    (annotation: string): DiffComment | null => {
+    (annotation: string, attachments?: MessageAttachment[]): DiffComment | null => {
       if (!formZoneRange || !sessionId) return null;
       const comment = buildDiffComment({
         filePath: path,
@@ -350,6 +355,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
         endLine: formZoneRange.endLine,
         side: "additions",
         text: annotation,
+        attachments,
         codeContent: formZoneRange.codeContent,
       });
       addComment(comment);
@@ -372,8 +378,8 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   );
 
   const handleCommentSubmit = useCallback(
-    (annotation: string) => {
-      const comment = createCommentFromForm(annotation);
+    (annotation: string, attachments?: MessageAttachment[]) => {
+      const comment = createCommentFromForm(annotation, attachments);
       if (comment) {
         toast({
           title: t("editors:commentAdded"),
@@ -385,8 +391,8 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   );
 
   const handleCommentSubmitAndRun = useCallback(
-    async (annotation: string) => {
-      const comment = createCommentFromForm(annotation);
+    async (annotation: string, attachments?: MessageAttachment[]) => {
+      const comment = createCommentFromForm(annotation, attachments);
       if (comment) {
         try {
           const { queued } = await runComment(comment);
@@ -435,8 +441,8 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   );
 
   const handleUpdateComment = useCallback(
-    (commentId: string, annotation: string) => {
-      updateComment(commentId, { text: annotation });
+    (commentId: string, annotation: string, attachments?: MessageAttachment[]) => {
+      updateComment(commentId, { text: annotation, ...(attachments && { attachments }) });
       setEditingComment(null);
       toast({ title: t("editors:commentUpdated") });
     },
@@ -463,6 +469,7 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
   }, [handleCommentRun]);
 
   return {
+    attachmentTaskId: sessionId ? activeTaskId : null,
     touch,
     hasSelection: currentSelection !== null,
     wrapEnabled,

@@ -13,7 +13,10 @@ import { useCommentsStore, isReviewComment } from "@/lib/state/slices/comments";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { generateUUID } from "@/lib/utils";
 import { updateUserSettings } from "@/lib/api";
-import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
+import {
+  commentAttachmentsForDelivery,
+  formatReviewCommentsAsMarkdown,
+} from "@/lib/state/slices/comments/format";
 import { ReviewDiffList } from "@/components/review/review-diff-list";
 import { ReviewPRDiffBoundary } from "@/components/review/review-dialog-pr-state";
 import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
@@ -246,25 +249,34 @@ export function useFixCommentsRequest(
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
   const { toast } = useToast();
 
-  return useCallback(() => {
-    if (workspaceBlocked || !activeSessionId || !activeTaskId) return;
+  const sending = useRef(false);
+  return useCallback(async () => {
+    if (sending.current || workspaceBlocked || !activeSessionId || !activeTaskId) return;
     const comments = getPendingComments()
       .filter(isReviewComment)
       .filter((comment) => comment.sessionId === activeSessionId);
     if (comments.length === 0) return;
-    const markdown = formatReviewCommentsAsMarkdown(comments);
-    if (!markdown) return;
     const client = getWebSocketClient();
-    if (client)
-      client
-        .request("message.add", {
-          task_id: activeTaskId,
-          session_id: activeSessionId,
-          client_message_id: generateUUID(),
-          content: markdown,
-        })
-        .catch(() => toast({ title: t("task:failedToSendComments"), variant: "error" }));
-    markCommentsSent(comments.map((c) => c.id));
+    if (!client) return;
+    const attachments = commentAttachmentsForDelivery(comments);
+    sending.current = true;
+    try {
+      await client.request("message.add", {
+        task_id: activeTaskId,
+        session_id: activeSessionId,
+        client_message_id: generateUUID(),
+        content: formatReviewCommentsAsMarkdown(comments),
+        ...(attachments.length > 0 && { attachments }),
+      });
+      const { byId } = useCommentsStore.getState();
+      markCommentsSent(
+        comments.filter((comment) => byId[comment.id] === comment).map((comment) => comment.id),
+      );
+    } catch {
+      toast({ title: t("task:failedToSendComments"), variant: "error" });
+    } finally {
+      sending.current = false;
+    }
   }, [
     activeSessionId,
     activeTaskId,

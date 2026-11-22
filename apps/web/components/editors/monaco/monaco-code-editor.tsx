@@ -82,8 +82,15 @@ function buildCommentZones(
     const node = isEditing ? (
       <div className="px-2 py-0.5" data-comment-zone>
         <CommentForm
+          attachmentOptions={
+            state.attachmentTaskId
+              ? { taskId: state.attachmentTaskId, initial: comment.attachments }
+              : undefined
+          }
           initialContent={comment.text}
-          onSubmit={(c) => state.handleCommentUpdateRef.current(comment.id, c)}
+          onSubmit={(c, attachments) =>
+            state.handleCommentUpdateRef.current(comment.id, c, attachments)
+          }
           onCancel={() => state.setEditingComment(null)}
           isEditing
         />
@@ -108,8 +115,13 @@ function buildCommentZones(
       120,
       <div className="px-2 py-1" data-comment-zone>
         <CommentForm
-          onSubmit={(c) => state.handleCommentSubmitRef.current(c)}
-          onSubmitAndRun={(c) => state.handleCommentSubmitAndRunRef.current(c)}
+          attachmentOptions={
+            state.attachmentTaskId ? { taskId: state.attachmentTaskId } : undefined
+          }
+          onSubmit={(c, attachments) => state.handleCommentSubmitRef.current(c, attachments)}
+          onSubmitAndRun={(c, attachments) =>
+            state.handleCommentSubmitAndRunRef.current(c, attachments)
+          }
           onCancel={() => {
             state.setFormZoneRange(null);
             state.clearGutterSelection();
@@ -181,7 +193,14 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
   });
   useEditorViewZoneComments(
     state.editorInstance,
-    [state.comments, state.formZoneRange, state.editingCommentId],
+    [
+      state.attachmentTaskId,
+      sessionId,
+      path,
+      state.comments,
+      state.formZoneRange,
+      state.editingCommentId,
+    ],
     (addZone) => buildCommentZones(state, addZone),
   );
   const options = {
