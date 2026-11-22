@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/office-fixture";
 import { balancedExecutionProfileRouting } from "../../helpers/office-routing";
 
-type RunRow = { id: string; task_id?: string; agent_profile_id: string };
+type RunRow = { id: string; task_id?: string; agent_profile_id: string; status: string };
 type StepEvents = NonNullable<
   Parameters<import("../../helpers/api-client").ApiClient["updateWorkflowStep"]>[1]["events"]
 >;
@@ -69,24 +69,31 @@ test.describe("Office reviewer author-provider exclusion", () => {
       })) as { id: string };
       await officeApi.assignTask(task.id, officeSeed.agentId);
 
-      const launchedProvider = async (agentId: string): Promise<string> => {
-        const runs = (await officeApi.listRuns(officeSeed.workspaceId)) as { runs?: RunRow[] };
-        for (const run of runs.runs ?? []) {
-          if (run.task_id !== task.id || run.agent_profile_id !== agentId) continue;
-          const { attempts } = await officeApi.listRouteAttempts(run.id);
-          const launched = attempts.find((a) => a.outcome === "launched");
-          if (launched) return launched.provider_id;
-        }
-        return "";
+      const finishedRoute = async (agentId: string) => {
+        const { runs = [] } = (await officeApi.listRuns(officeSeed.workspaceId)) as {
+          runs?: RunRow[];
+        };
+        const run = runs.find(
+          (r) => r.task_id === task.id && r.agent_profile_id === agentId && r.status === "finished",
+        );
+        if (!run) return undefined;
+        const { attempts } = await officeApi.listRouteAttempts(run.id);
+        const launched = attempts.find((a) => a.outcome === "launched");
+        return launched && { runId: run.id, providerId: launched.provider_id };
       };
 
+      // An attempt is marked launched before the agent starts. Wait for the
+      // Work run to finish before moving the task out of Work.
+      let author: string | undefined;
       await expect
-        .poll(() => launchedProvider(officeSeed.agentId), {
-          timeout: 40_000,
-          message: "work run never launched",
-        })
-        .not.toBe("");
-      const author = await launchedProvider(officeSeed.agentId);
+        .poll(
+          async () => {
+            author = (await finishedRoute(officeSeed.agentId))?.providerId;
+            return author;
+          },
+          { timeout: 40_000, message: "work run never finished with a launched provider" },
+        )
+        .toBeDefined();
       const other = author === "claude-acp" ? "codex-acp" : "claude-acp";
 
       // Entering Review seats the reviewer and queues its run. The move is
@@ -106,20 +113,19 @@ test.describe("Office reviewer author-provider exclusion", () => {
         )
         .toBe("moved");
 
+      let reviewRunId: string | undefined;
       await expect
-        .poll(() => launchedProvider(reviewer.id), {
-          // A first claim can hit checkout contention with the finishing
-          // Work run and is retried after its backoff (about a minute).
-          timeout: 120_000,
-          message: "reviewer run never launched",
-        })
+        .poll(
+          async () => {
+            const route = await finishedRoute(reviewer.id);
+            reviewRunId = route?.runId;
+            return route?.providerId;
+          },
+          { timeout: 120_000, message: "reviewer run never finished on the other provider" },
+        )
         .toBe(other);
 
-      const runs = (await officeApi.listRuns(officeSeed.workspaceId)) as { runs?: RunRow[] };
-      const reviewRun = (runs.runs ?? []).find(
-        (r) => r.task_id === task.id && r.agent_profile_id === reviewer.id,
-      );
-      await testPage.goto(`/office/agents/${reviewer.id}/runs/${reviewRun!.id}`);
+      await testPage.goto(`/office/agents/${reviewer.id}/runs/${reviewRunId}`);
       const events = testPage.getByTestId("events-log");
       await expect(events).toContainText("routing.author_exclusion", { timeout: 15_000 });
       await expect(events).toContainText(`"author_provider_id":"${author}"`);

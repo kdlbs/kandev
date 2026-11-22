@@ -33,6 +33,7 @@ func (s *Service) applyFetchedFiles(ctx context.Context, cfg *Config, files []fe
 		return nil, err
 	}
 	warnings = append(warnings, applied.Warnings...)
+	warnings = append(warnings, s.unresolvedReferenceWarnings(ctx, parsed)...)
 	successState := cfg.circuitState()
 	successState.RecordSuccess()
 	persistCtx, cancel := terminalSyncPersistenceContext(ctx, mode)

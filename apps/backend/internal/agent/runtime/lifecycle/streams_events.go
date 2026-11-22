@@ -26,6 +26,11 @@ type preparedAgentEvent struct {
 	duplicate           bool
 }
 
+type agentDeliveryEventPeer interface {
+	agentDeliveryStatusReader
+	agentDeliveryAcknowledger
+}
+
 func (sm *StreamManager) processAgentEvent(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -44,7 +49,7 @@ func (sm *StreamManager) processAgentEvent(
 func (sm *StreamManager) prepareAgentEvent(
 	ctx context.Context,
 	execution *AgentExecution,
-	client *agentctl.Client,
+	client agentDeliveryEventPeer,
 	delivery AgentDeliveryRepository,
 	event agentctl.AgentEvent,
 ) (preparedAgentEvent, error) {
@@ -59,7 +64,7 @@ func (sm *StreamManager) prepareAgentEvent(
 func (sm *StreamManager) prepareAgentEventWithReceipt(
 	ctx context.Context,
 	execution *AgentExecution,
-	client *agentctl.Client,
+	client agentDeliveryEventPeer,
 	delivery AgentDeliveryRepository,
 	event agentctl.AgentEvent,
 	deferReceipt bool,
@@ -127,7 +132,7 @@ func preparedLegacyAgentEvent(execution *AgentExecution, event agentctl.AgentEve
 
 func (sm *StreamManager) acknowledgeDuplicateDurableEvent(
 	ctx context.Context,
-	client *agentctl.Client,
+	client agentDeliveryAcknowledger,
 	event agentctl.AgentEvent,
 ) error {
 	if err := sm.deliveryJournalReleaser().acknowledge(
@@ -157,7 +162,7 @@ func (sm *StreamManager) prepareDurableAgentDeliveryEvent(
 	execution *AgentExecution,
 	durableEvent *models.AgentDeliveryEvent,
 	repository AgentDeliveryRepository,
-	client *agentctl.Client,
+	client agentDeliveryEventPeer,
 	deferReceipt bool,
 	attempt *deliveryStartupAttempt,
 ) (process, skipCallback bool, effect *models.AgentDeliveryEffect, deferred bool, err error) {

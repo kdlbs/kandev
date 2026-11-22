@@ -184,12 +184,11 @@ also includes open runs under terminal parents, so older partial settlements
 remain repairable. Delayed non-terminal observations cannot reopen terminal
 parents or runs, including runs first observed after their parent ended. Late
 terminal provider observations may still supply the actual outcome and exit code.
-A provider without attributed completion evidence cannot leave rows running past
-verified process termination. Claude's separate, tool-scoped terminal evidence
-follows the [shell termination design](claude-background-shell-terminal-evidence.md),
-without enabling the rejected async-task capability. Browser
-disconnection alone does not imply provider disconnection. Session reset/deletion fences its
-incarnation before clearing client state; late events cannot recreate it.
+Verified process termination ends unconfirmed work. See the Claude [shell exit
+design](claude-background-shell-terminal-evidence.md) and [Monitor lifecycle
+design](claude-monitor-lifecycle.md). Browser disconnection alone does not imply
+provider disconnection. Session reset and deletion fence the incarnation before
+clearing client state. Late events cannot recreate it.
 
 Every process-ending path attempts settlement before a successor launches.
 Owned teardown passes the stopped execution ID. After successful stale-runtime
