@@ -17807,6 +17807,7 @@ type Message struct {
 	Content       string                 `protobuf:"bytes,6,opt,name=content,proto3" json:"content,omitempty"`                         // <kandev-system> blocks stripped
 	Type          string                 `protobuf:"bytes,7,opt,name=type,proto3" json:"type,omitempty"`                               // "message" default; see MessageType
 	CreatedAt     string                 `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`    // RFC3339
+	Source        string                 `protobuf:"bytes,9,opt,name=source,proto3" json:"source,omitempty"`                           // persisted metadata.source only, e.g. "plugin:<id>"; empty when absent
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -17893,6 +17894,13 @@ func (x *Message) GetType() string {
 func (x *Message) GetCreatedAt() string {
 	if x != nil {
 		return x.CreatedAt
+	}
+	return ""
+}
+
+func (x *Message) GetSource() string {
+	if x != nil {
+		return x.Source
 	}
 	return ""
 }
@@ -27052,7 +27060,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x04page\x18\x02 \x01(\v2\x16.kandev.plugin.v1.PageR\x04page\"\x91\x01\n" +
 	"\x1cListSessionCodeStatsResponse\x128\n" +
 	"\x05stats\x18\x01 \x03(\v2\".kandev.plugin.v1.SessionCodeStatsR\x05stats\x127\n" +
-	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\xd8\x01\n" +
+	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\xf0\x01\n" +
 	"\aMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -27064,7 +27072,8 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\acontent\x18\x06 \x01(\tR\acontent\x12\x12\n" +
 	"\x04type\x18\a \x01(\tR\x04type\x12\x1d\n" +
 	"\n" +
-	"created_at\x18\b \x01(\tR\tcreatedAt\"\xab\x01\n" +
+	"created_at\x18\b \x01(\tR\tcreatedAt\x12\x16\n" +
+	"\x06source\x18\t \x01(\tR\x06source\"\xab\x01\n" +
 	"\rMessageFilter\x12\x1f\n" +
 	"\vsession_ids\x18\x01 \x03(\tR\n" +
 	"sessionIds\x12\x19\n" +

@@ -2191,6 +2191,7 @@ message Message {
   string content = 6;     // <kandev-system> blocks stripped
   string type = 7;        // "message" default; see MessageType
   string created_at = 8;  // RFC3339
+  string source = 9;      // persisted metadata.source only, e.g. "plugin:<id>"; empty when absent
 }
 message MessageFilter {
   repeated string session_ids = 1; // empty → not constrained by session
