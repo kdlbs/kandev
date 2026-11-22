@@ -1,12 +1,30 @@
 package remoteauth
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
+
+type openCodeV2Selection struct{}
+
+func (openCodeV2Selection) GetOpenCodeSelection(context.Context) (managedruntime.OpenCodeSelection, bool, error) {
+	return managedruntime.OpenCodeSelection{Family: managedruntime.OpenCodeFamilyV2, SelectedVersion: "2.1.2"}, true, nil
+}
+
+func TestBuildCatalogOpenCodeV2PreservesSelectionWithoutCopyingLegacyFiles(t *testing.T) {
+	ag := agents.NewOpenCodeACP()
+	ag.SetOpenCodeSelectionReader(openCodeV2Selection{})
+	catalog := BuildCatalogForHost([]agents.Agent{ag}, "linux", t.TempDir())
+	method, found := catalog.FindMethod("agent:opencode-acp:files:0")
+	if !found || !method.HasLocalFiles || len(method.SourceFiles) != 0 {
+		t.Fatalf("V2 must remain selectable without legacy credential copies: %+v", method)
+	}
+}
 
 // Agents that declare RemoteAuth with no Methods (e.g. mock) must still
 // serialize "methods": [] rather than "methods": null — the frontend reads
