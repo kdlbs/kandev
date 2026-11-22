@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"time"
@@ -93,6 +94,30 @@ func (a *Adapter) syncNotifQueueThen(afterBarrier func()) bool {
 		return false
 	case <-ch:
 		return true
+	}
+}
+
+// syncNotifQueueThenBounded queues a FIFO barrier and waits only within the
+// caller's deadline and timeout. If the wait expires, the barrier remains
+// queued and afterBarrier still runs when the worker reaches it.
+func (a *Adapter) syncNotifQueueThenBounded(
+	ctx context.Context,
+	timeout time.Duration,
+	afterBarrier func(),
+) bool {
+	done := make(chan struct{})
+	go func() {
+		a.syncNotifQueueThen(afterBarrier)
+		close(done)
+	}()
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	select {
+	case <-done:
+		return true
+	case <-waitCtx.Done():
+		return false
 	}
 }
 

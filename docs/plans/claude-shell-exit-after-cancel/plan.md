@@ -47,21 +47,25 @@ remains unverified.
 
 ## Technical approach
 
-Before the cancel sweep, drain ACP notifications already accepted by the
+Send `session/cancel` before waiting for notification processing. Then enqueue
+a FIFO cleanup barrier behind ACP notifications already accepted by the
 adapter. This preserves queue order when a completed detached launch is
-waiting behind the notification worker. When the qualified bridge confirms a
-detached launch, fill the existing `BackgroundWorkPayload.WorkID` with the
-tool-call ID. The workload already uses that ID through the orchestrator's
-fallback. The confirmed ID lets the cancel sweep keep only those Claude shell
-entries in `activeToolCalls`. A pending Bash request still follows the
-ordinary cancel sweep, and its unconfirmed detached workload is ended as part
-of cancellation.
+waiting behind the notification worker. Bound the caller's wait; if the wait
+expires, the cleanup remains queued and runs when the worker reaches the
+barrier. When the qualified bridge confirms a detached launch, fill the
+existing `BackgroundWorkPayload.WorkID` with the tool-call ID. The workload
+already uses that ID through the orchestrator's fallback. The confirmed ID
+lets the cancel sweep keep only those Claude shell entries in
+`activeToolCalls`. A pending Bash request still follows the ordinary cancel
+sweep; attach an explicit `ended` observation so projection cannot treat its
+cancelled tool event as running.
 
 Use the current native session and launch ID to match exits. The native
-session binding boundary drops old entries on replacement. Late qualified
-shell starts and launch updates from the old native session are rejected
-before they can change a reused tool-call binding. The existing exit handler
-ends the matching job.
+session binding boundary drops old shell entries on replacement. Qualified
+Claude tool starts and updates from the outgoing native session are rejected
+before payload inspection or mutation, including unclassified frames without
+shell metadata. This prevents an old start from replacing a new binding that
+reuses the same tool-call ID. The existing exit handler ends the matching job.
 The existing projection clears its activity and records `ended` with no
 exit code when the bridge supplies a null code.
 
@@ -69,8 +73,8 @@ exit code when the bridge supplies a null code.
 
 | Acceptance criteria | Evidence |
 | --- | --- |
-| 010.3, 010.6 | `TestClaudeBackgroundTerminalExitAfterTurnCancel` queues a completed launch behind a blocked notification worker before `Adapter.Cancel`. It verifies Stop's queue barrier, exact-ID settlement after cancellation, a live sibling, and cancellation of a pending background Bash request and foreground tool. |
-| 002.2 | `TestClaudeBackgroundTerminalBindingEndsOnNativeSessionReplacement` reuses the tool-call ID in the new native session, rejects a late old-session start, launch result, and exit, then accepts the new session's matching exit. |
+| 010.3, 010.6 | `TestClaudeBackgroundTerminalExitAfterTurnCancel` queues a completed launch behind a blocked notification worker before `Adapter.Cancel`. It verifies `session/cancel` is sent before a bounded barrier wait, exact-ID settlement after cancellation, a live sibling, and cancellation of pending background Bash and foreground tools. The cancelled Bash workload has an explicit `ended` observation. |
+| 002.2 | `TestClaudeBackgroundTerminalBindingEndsOnNativeSessionReplacement` reuses the tool-call ID in the new native session, rejects an unclassified late old-session start plus a late launch result and exit, then accepts the new session's matching exit. |
 | 002.1, 002.2, 010.5, 010.6 | Reuse `TestClaudeBackgroundTerminalExitRetiresExactAccounting` and `TestClaudeBackgroundTerminalProjection`. They cover exact retirement, duplicate handling, stored state, and the original turn association. |
 
 ## E2E tests
@@ -104,6 +108,20 @@ connection. [Existing browser evidence](../claude-background-job-settlement/task
   passed lint.
 - `make build` passed from `apps/backend`. The plan and work order record the
   remaining compaction timing limitation.
+- Review fixup verified that a pending detached Bash cancellation projects as
+  `ended`, and that an outgoing Claude session's unclassified start cannot
+  overwrite a reused current binding.
+
+Post-review verification on the updated adapter:
+
+- The focused ACP regression command, the ACP race command, and the focused
+  orchestrator projection command recorded in the work order all passed.
+- `make build` passed from `apps/backend` after the final adapter edit. The
+  platform Go builds succeeded; macOS signing tools were unavailable, so those
+  artifacts were left unsigned.
+- The full changed-Go command in the work order reported 0 issues.
+- The docs catalog validated 460 decisions and 2081 specifications;
+  specification lint, `gofmt -l`, and `git diff --check` passed.
 
 ## Risks
 

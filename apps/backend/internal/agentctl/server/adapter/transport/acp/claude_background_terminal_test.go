@@ -176,6 +176,9 @@ func cancelClaudeWithQueuedLaunchUpdate(
 	workerEntered := make(chan struct{})
 	workerRelease := make(chan struct{})
 	workerDone := make(chan bool, 1)
+	var releaseOnce sync.Once
+	releaseWorker := func() { releaseOnce.Do(func() { close(workerRelease) }) }
+	t.Cleanup(releaseWorker)
 	go func() {
 		workerDone <- a.syncNotifQueueThen(func() {
 			close(workerEntered)
@@ -187,9 +190,6 @@ func cancelClaudeWithQueuedLaunchUpdate(
 	case <-time.After(2 * time.Second):
 		t.Fatal("notification worker did not reach the test barrier")
 	}
-	var releaseOnce sync.Once
-	releaseWorker := func() { releaseOnce.Do(func() { close(workerRelease) }) }
-	t.Cleanup(releaseWorker)
 
 	completed := acp.ToolCallStatusCompleted
 	require.NoError(t, peer.connection.SessionUpdate(t.Context(), acp.SessionNotification{
@@ -209,18 +209,27 @@ func cancelClaudeWithQueuedLaunchUpdate(
 	require.Eventually(t, func() bool { return len(a.notifQueue) == 1 }, 2*time.Second, time.Millisecond,
 		"completed launch update must be queued behind the held worker")
 	cancelDone := make(chan error, 1)
-	go func() { cancelDone <- a.Cancel(t.Context()) }()
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+	go func() { cancelDone <- a.Cancel(ctx) }()
 	require.Eventually(t, func() bool { return len(a.notifQueue) == 2 }, 2*time.Second, time.Millisecond,
 		"Stop must queue its sweep barrier after the launch update")
-	releaseWorker()
-	require.True(t, <-workerDone)
-	require.NoError(t, <-cancelDone)
 	select {
 	case request := <-peer.cancelRequests:
 		require.Equal(t, "session-claude", string(request.SessionId))
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for ACP session/cancel")
+		t.Fatal("session/cancel must be sent before waiting for the blocked notification worker")
 	}
+	select {
+	case err := <-cancelDone:
+		require.NoError(t, err, "Stop must return while notification output is blocked")
+	case <-time.After(2 * time.Second):
+		t.Fatal("Cancel waited indefinitely for the blocked notification worker")
+	}
+	releaseWorker()
+	require.True(t, <-workerDone)
+	require.Eventually(t, func() bool { return activeClaudeToolCallCount(a) == 2 }, 2*time.Second, time.Millisecond,
+		"queued completion must be processed before the cancellation sweep")
 	return drainEvents(a)
 }
 
@@ -287,9 +296,28 @@ func TestClaudeBackgroundTerminalExitAfterTurnCancel(t *testing.T) {
 			require.NotNil(t, work)
 			require.True(t, work.Ended, "an unconfirmed launch cannot remain live after cancellation")
 			require.False(t, event.NormalizedPayload.IsActiveBackgroundWork())
+			require.NotNil(t, event.BackgroundWork, "cancellation must project the terminal workload state explicitly")
+			require.Equal(t, streams.RunStateEnded, event.BackgroundWork.State)
 		}
 	}
 	require.ElementsMatch(t, []string{pendingID, foregroundID}, cancelledIDs)
+}
+
+// @covers AC-AGENTS-BACKGROUND-WORK-010.6
+func TestCancelPendingClaudeShellEmitsEndedWorkObservation(t *testing.T) {
+	a := claudeTerminalAdapter(t)
+	launch := claudeBackgroundLaunch{toolCallID: "toolu_cancel_pending", command: "sleep 30", title: "Pending"}
+	startClaudeBackgroundShell(t, a, "session-claude", launch)
+	drainEvents(a)
+
+	a.cancelActiveToolCalls("session-claude")
+	events := drainEvents(a)
+	require.Len(t, events, 1)
+	require.Equal(t, toolStatusCancelled, events[0].ToolStatus)
+	require.NotNil(t, events[0].BackgroundWork)
+	require.Equal(t, launch.toolCallID, events[0].BackgroundWork.WorkID)
+	require.Equal(t, streams.RunStateEnded, events[0].BackgroundWork.State)
+	require.True(t, events[0].NormalizedPayload.BackgroundWork().Ended)
 }
 
 // @covers AC-AGENTS-BACKGROUND-WORK-002.2
@@ -305,16 +333,20 @@ func TestClaudeBackgroundTerminalBindingEndsOnNativeSessionReplacement(t *testin
 	newLaunch := claudeBackgroundLaunch{toolCallID: launch.toolCallID, command: "sleep 20", title: "New shell"}
 	startClaudeBackgroundLaunch(t, a, "session-new", newLaunch)
 	drainEvents(a)
+	a.mu.RLock()
+	newBinding := a.activeToolCalls[newLaunch.toolCallID]
+	a.mu.RUnlock()
+	require.NotNil(t, newBinding)
 
 	staleStart := a.convertToolCallUpdate("session-old", &acp.SessionUpdateToolCall{
-		ToolCallId: acp.ToolCallId(launch.toolCallID), Kind: acp.ToolKindExecute,
-		Status: acp.ToolCallStatusPending, Title: "Terminal", SessionUpdate: "tool_call",
-		Meta: map[string]any{"claudeCode": map[string]any{"toolName": "Bash"}},
-		RawInput: map[string]any{
-			"command": "stale old shell", "run_in_background": true,
-		},
+		ToolCallId: acp.ToolCallId(launch.toolCallID), Kind: acp.ToolKind("unknown"),
+		Status: acp.ToolCallStatusPending, Title: "Unclassified stale start", SessionUpdate: "tool_call",
 	})
 	require.Nil(t, staleStart, "a stale session cannot replace the current shell binding")
+	a.mu.RLock()
+	retainedBinding := a.activeToolCalls[newLaunch.toolCallID]
+	a.mu.RUnlock()
+	require.Same(t, newBinding, retainedBinding, "a stale start must leave the new session's binding untouched")
 	staleLaunchResult := acp.ToolCallStatusCompleted
 	require.Nil(t, a.convertToolCallResultUpdate("session-old", &acp.SessionToolCallUpdate{
 		ToolCallId: acp.ToolCallId(launch.toolCallID), Status: &staleLaunchResult,

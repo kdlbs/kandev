@@ -121,36 +121,16 @@ func (a *Adapter) preservesVerifiedClaudeBackgroundShell(payload *streams.Normal
 		payload.IsActiveBackgroundWork()
 }
 
-func (a *Adapter) isStaleClaudeShellNotificationLocked(
-	sessionID, toolCallID string,
-	payload *streams.NormalizedPayload,
-	meta map[string]any,
-	rawInput any,
-) bool {
+// isStaleClaudeNativeToolFrameLocked keeps tool-call state scoped to the
+// adapter's current native session. Tool frames from an outgoing session can
+// omit shell metadata, so session ownership must be checked before inspecting
+// or mutating a reused tool-call ID.
+func (a *Adapter) isStaleClaudeNativeToolFrameLocked(sessionID string) bool {
 	name, version := a.connectedAgentIdentity()
 	if !verifiedClaudeTerminalBridge(a.agentID, name, version) || a.sessionID == "" || sessionID == a.sessionID {
 		return false
 	}
-	if payload != nil && payload.Kind() == streams.ToolKindShellExec {
-		return true
-	}
-	if claudeBashToolUpdate(meta) {
-		return true
-	}
-	if input, ok := rawInput.(map[string]any); ok && isBackgroundExecInputFor(claudeAgentID, input) {
-		return true
-	}
-	_, terminalExit := claudeTerminalExitEnvelope(meta, toolCallID)
-	return terminalExit
-}
-
-func claudeBashToolUpdate(meta map[string]any) bool {
-	claudeMeta, ok := meta["claudeCode"].(map[string]any)
-	if !ok {
-		return false
-	}
-	toolName, _ := claudeMeta["toolName"].(string)
-	return toolName == "Bash"
+	return true
 }
 
 func (a *Adapter) clearVerifiedClaudeShellBindingsLocked() {
@@ -165,16 +145,20 @@ func (a *Adapter) clearVerifiedClaudeShellBindingsLocked() {
 	}
 }
 
-func (a *Adapter) endUnconfirmedClaudeBackgroundShellLocked(payload *streams.NormalizedPayload) {
+func (a *Adapter) endUnconfirmedClaudeBackgroundShellLocked(
+	payload *streams.NormalizedPayload,
+	toolCallID string,
+) *streams.WorkloadRunObservation {
 	name, version := a.connectedAgentIdentity()
 	if !verifiedClaudeTerminalBridge(a.agentID, name, version) || payload == nil {
-		return
+		return nil
 	}
 	work := payload.BackgroundWork()
 	if work == nil || work.Kind != streams.BackgroundWorkKindShell || !work.Detached || work.WorkID != "" || work.Ended {
-		return
+		return nil
 	}
 	payload.SetBackgroundWorkIdentity(work.Kind, work.WorkID, work.Detached, true)
+	return claudeBackgroundTerminalObservation(payload, toolCallID, time.Now().UTC())
 }
 
 // claudeBackgroundTerminalObservation builds the typed terminal observation

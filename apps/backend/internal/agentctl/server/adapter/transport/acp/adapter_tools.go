@@ -219,7 +219,7 @@ func (a *Adapter) trackToolCallPayload(
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.isStaleClaudeShellNotificationLocked(sessionID, toolCallID, payload, call.Meta, call.RawInput) {
+	if a.isStaleClaudeNativeToolFrameLocked(sessionID) {
 		return nil, "", signal, "", "", true
 	}
 	if signal == codexSubagentSignalNone {
@@ -752,9 +752,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	agentName, agentVersion := a.connectedAgentIdentity()
 
 	a.mu.Lock()
-	if a.isStaleClaudeShellNotificationLocked(
-		sessionID, toolCallID, a.activeToolCalls[toolCallID], tcu.Meta, tcu.RawInput,
-	) {
+	if a.isStaleClaudeNativeToolFrameLocked(sessionID) {
 		a.mu.Unlock()
 		return nil
 	}
