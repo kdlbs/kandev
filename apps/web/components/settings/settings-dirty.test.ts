@@ -20,6 +20,8 @@ describe("settings dirty comparisons", () => {
 
   it("compares the complete editors draft", () => {
     const baseline = {
+      markdownPreviewByDefault: true,
+      baselineMarkdownPreviewByDefault: true,
       defaultEditorId: "vscode",
       baselineDefaultId: "vscode",
       lspAutoStartLanguages: ["go"],
@@ -33,6 +35,7 @@ describe("settings dirty comparisons", () => {
     };
 
     expect(isEditorsSettingsDirty(baseline)).toBe(false);
+    expect(isEditorsSettingsDirty({ ...baseline, markdownPreviewByDefault: false })).toBe(true);
     expect(isEditorsSettingsDirty({ ...baseline, defaultEditorId: "cursor" })).toBe(true);
     expect(isEditorsSettingsDirty({ ...baseline, lspStatusLocation: "status_bar" })).toBe(true);
   });

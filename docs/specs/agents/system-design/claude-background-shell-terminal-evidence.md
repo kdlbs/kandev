@@ -32,6 +32,13 @@ Both `exit_code` and `signal` can be null. Null proves no outcome. A non-null
 signal proves the command was terminated by that signal and still carries no
 exit code.
 
+The managed 0.107.0 release uses the same launch suppression and reports the
+same null-code exit from `SessionBackgroundWork.taskEnded` on ACP v1. The
+managed 0.109.0 release retains that contract. Qualify each exact initialize
+identity with a separate launch and terminal fixture. The managed-default
+regression exercises the version returned by
+`agents.DefaultManagedNPMRuntimeVersion` against a qualified fixture.
+
 The inspected 0.81.2 bridge emits terminal-exit metadata with the launch result
 and has no equivalent retained-terminal path. The same metadata name therefore
 does not establish detached-command termination across all bridge versions.
@@ -50,8 +57,10 @@ agent information, the current tool update, and its tracked shell payload.
 For null-code termination, require all of these conditions:
 
 1. The configured provider uses the Claude dialect.
-2. Initialize identifies the exact inspected official bridge name and version
-   `0.97.0`. An unverified version retains the existing fallback.
+2. Initialize identifies the official bridge name and a fixture-qualified
+   release. The qualified releases in this repair are `0.97.0`, `0.107.0`,
+   and `0.109.0`.
+   An unverified version retains the existing fallback.
 3. The payload belongs to an already recognized detached shell in this session.
 4. The terminal envelope is an object with a nonempty `terminal_id` equal to the
    current `toolCallId`. The bridge uses this same ID for its display terminal.
@@ -122,10 +131,11 @@ repair a persisted `running` record.
 
 ## Verification
 
-Use sanitized frames from the [repair package](../../../plans/claude-background-terminal-exit/plan.md).
+Use sanitized frames from the [0.97.0 repair](../../../plans/claude-background-terminal-exit/plan.md)
+and the [managed-bridge repair](../../../plans/claude-background-job-settlement/plan.md).
 Adapter cases cover delayed null exit, numeric exit, fast completion, legacy
-launch exit, foreign/malformed evidence, duplicate exit, and late launch replay.
-Use two simultaneous jobs to prove that one exit retires only its matching job.
+launch exit, foreign or malformed evidence, duplicate exit, and late launch
+replay. Use two simultaneous jobs to prove exact settlement.
 
 An integration test carries the adapter event through the existing durable
 projection and publication path. It asserts `ended`, no exit code, preserved

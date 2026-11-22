@@ -213,17 +213,18 @@ if [ "${1:-}" = "rev-parse" ]; then
   exit 0
 fi
 if [ "${1:-}" = "pull" ] && [ "$count" -eq 1 ]; then
+  sleep 0.4
   echo "`+refreshLockFixtureOutput+`" >&2
   exit 128
 fi
 if [ "${1:-}" = "pull" ]; then
-  sleep 1
+  sleep 1.7
   exit 0
 fi
 exit 0
 `)
 	mgr := newRecreateTestManager(t)
-	mgr.pullTimeout = 300 * time.Millisecond
+	mgr.pullTimeout = 2 * time.Second
 
 	_, err := mgr.pullCurrentBranchOrFallback(
 		context.Background(), t.TempDir(), "main", "origin/main", "Sync base branch", nil, false,

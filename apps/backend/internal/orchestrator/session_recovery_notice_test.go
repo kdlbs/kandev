@@ -36,6 +36,31 @@ func TestRecoveryNoticeAcceptsSessionIDAsLegacyIncarnation(t *testing.T) {
 	require.True(t, recoveryNoticeSourceMatchesSession(source, session))
 }
 
+func TestClearRecoveryNoticePendingMarkerAcceptsConcurrentClear(t *testing.T) {
+	ctx := context.Background()
+	service, _, _, _, _, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
+	repo := service.repo.(*sqliterepo.Repository)
+	pending := "pending-recovery-notice"
+	require.NoError(t, repo.SetSessionMetadataKey(
+		ctx, "session1", models.SessionMetaKeyRecoveryNoticePending, pending,
+	))
+
+	require.NoError(t, service.clearRecoveryNoticePendingMarker(ctx, "session1", pending))
+	require.NoError(t, service.clearRecoveryNoticePendingMarker(ctx, "session1", pending),
+		"a concurrent publisher may have already cleared the same marker")
+
+	changed := "later-recovery-notice"
+	require.NoError(t, repo.SetSessionMetadataKey(
+		ctx, "session1", models.SessionMetaKeyRecoveryNoticePending, changed,
+	))
+	require.ErrorContains(t, service.clearRecoveryNoticePendingMarker(ctx, "session1", pending),
+		"recovery notice pending marker changed before publication completed")
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	require.Equal(t, changed, session.Metadata[models.SessionMetaKeyRecoveryNoticePending],
+		"a later notice marker must remain pending")
+}
+
 func (m *failOnceRecoveryNoticeCreator) CreateSessionMessageIdempotent(
 	ctx context.Context,
 	messageID, taskID, content, sessionID, messageType, turnID string,

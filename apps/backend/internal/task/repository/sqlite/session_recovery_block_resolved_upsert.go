@@ -81,14 +81,13 @@ func (r *Repository) updateResolvedSessionRecoveryBlockTx(
 	block *models.SessionRecoveryBlock,
 	stored *storedRecoveryBlockBinding,
 ) (bool, error) {
-	submissionDiffers := stored.ConsumerReference == reconstructionDeliveryConsumer &&
-		block.ConsumerReference == reconstructionDeliveryConsumer &&
-		stored.DeliverySubmissionID != block.DeliverySubmissionID
-	if submissionDiffers && stored.State != models.RecoveryBlockOpen {
+	bindingDiffers := stored.ConsumerReference == reconstructionDeliveryConsumer && stored.DeliverySubmissionID != "" &&
+		(block.ConsumerReference != reconstructionDeliveryConsumer || stored.DeliverySubmissionID != block.DeliverySubmissionID)
+	if bindingDiffers && stored.State != models.RecoveryBlockOpen {
 		return false, nil
 	}
 	block.ID = stored.ID
-	if submissionDiffers {
+	if bindingDiffers {
 		_, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE session_recovery_blocks SET updated_at = ? WHERE id = ?`),
 			block.UpdatedAt, stored.ID)
 		return true, err

@@ -65,3 +65,18 @@ func TestE2ERuntimeUpdateHooksReleaseAndCancel(t *testing.T) {
 		}
 	})
 }
+
+// Every E2E backend disables native checks, including restarts without a
+// canned release version; production backends never do.
+func TestE2EDisablesNativeUpdateChecksWithoutCannedVersion(t *testing.T) {
+	t.Setenv("KANDEV_E2E_RUNTIME_UPDATE_LATEST_VERSION", "")
+	t.Setenv("KANDEV_MOCK_AGENT", "true")
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	if newE2ERuntimeUpdateHooks() != nil || !e2eDisablesNativeUpdateChecks() {
+		t.Error("an E2E backend without a canned version still runs native checks")
+	}
+	t.Setenv("KANDEV_E2E_MOCK", "")
+	if e2eDisablesNativeUpdateChecks() {
+		t.Error("a production backend disabled native checks")
+	}
+}

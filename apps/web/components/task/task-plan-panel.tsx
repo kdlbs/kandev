@@ -10,7 +10,7 @@ import { useTaskPlan } from "@/hooks/domains/session/use-task-plan";
 import { usePlanDraft } from "@/hooks/domains/session/use-plan-draft";
 import { TaskPlanSaveErrorBanner } from "./task-plan-save-error-banner";
 import { useAppStore } from "@/components/state-provider";
-import { PlanSelectionPopover } from "./plan-selection-popover";
+import { SelectionCommentSurface } from "@/components/shared/selection-comment/selection-comment-surface";
 import { usePlanComments } from "@/hooks/domains/comments/use-plan-comments";
 import {
   resolvePlanCommentRunAvailability,
@@ -454,7 +454,7 @@ function PlanSelectionPopoverWrapper({
       }
     : undefined;
   return (
-    <PlanSelectionPopover
+    <SelectionCommentSurface
       selectedText={textSelection.text}
       position={textSelection.position}
       onAdd={handleAdd}

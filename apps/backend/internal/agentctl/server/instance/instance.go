@@ -5,6 +5,7 @@ package instance
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,6 +39,9 @@ type processManager interface {
 type Instance struct {
 	// ID is the unique identifier for this instance
 	ID string
+
+	// ScopedMCPRoutes records the effective native MCP route mode.
+	ScopedMCPRoutes bool
 
 	// Port is the HTTP port this instance is listening on
 	Port int
@@ -152,6 +156,9 @@ type CreateRequest struct {
 	// ID is an optional identifier for the instance. If empty, one will be generated.
 	ID string `json:"id,omitempty"`
 
+	// ScopedMCPRoutes opts this helper into instance-scoped built-in MCP routes.
+	ScopedMCPRoutes bool `json:"scoped_mcp_routes,omitempty"`
+
 	// WorkspacePath is the required absolute path to the workspace directory.
 	WorkspacePath string `json:"workspace_path"`
 
@@ -221,6 +228,14 @@ type CreateRequest struct {
 	// clients that append the injected server name to every tool.
 	NamespacesMCPToolsByServer bool `json:"namespaces_mcp_tools_by_server,omitempty"`
 
+	// OfflineBudgetMinutes is the raw JSON offline budget. Absent or null
+	// means the default; the control server validates it and stores the result
+	// in OfflineBudget so a malformed value is never silently replaced.
+	OfflineBudgetMinutes json.RawMessage `json:"offline_budget_minutes,omitempty"`
+
+	// OfflineBudget is the validated budget; zero means no budget clock.
+	OfflineBudget time.Duration `json:"-"`
+
 	// RequiresProcessKill forces the agent's process group to be killed on
 	// shutdown instead of relying on stdin close. Required for agents whose
 	// runtime keeps child processes alive when stdin closes (notably
@@ -272,6 +287,9 @@ type CreateResponse struct {
 
 	// Port is the HTTP port the instance is listening on
 	Port int `json:"port"`
+
+	// ScopedMCPRoutes is the effective mode accepted by this helper.
+	ScopedMCPRoutes bool `json:"scoped_mcp_routes"`
 }
 
 // InstanceInfo contains serializable information about an instance for API responses.
@@ -279,6 +297,9 @@ type CreateResponse struct {
 type InstanceInfo struct {
 	// ID is the unique identifier for this instance
 	ID string `json:"id"`
+
+	// ScopedMCPRoutes is the retained helper's effective route mode.
+	ScopedMCPRoutes bool `json:"scoped_mcp_routes"`
 
 	// Port is the HTTP port this instance is listening on
 	Port int `json:"port"`
@@ -358,6 +379,7 @@ func (i *Instance) Info() *InstanceInfo {
 
 	return &InstanceInfo{
 		ID:                         i.ID,
+		ScopedMCPRoutes:            i.ScopedMCPRoutes,
 		Port:                       i.Port,
 		LeaseGeneration:            i.lease.Generation,
 		ListenerActive:             i.listenerActive.Load(),

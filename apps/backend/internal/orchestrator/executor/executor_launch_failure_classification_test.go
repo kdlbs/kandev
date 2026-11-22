@@ -40,7 +40,7 @@ func TestWorktreeRecoveryFailureIsActionableWithoutRetryActions(t *testing.T) {
 		Reason: `linked-worktree admin target "/repos/main/.git/worktrees/task-1" is missing`,
 	}
 
-	_, changed := exec.transitionLaunchFailure(
+	changed, _, _ := exec.transitionLaunchFailure(
 		context.Background(), "task-1", "session-1", "repo-1", "task-repo-1", recoveryErr, nil,
 	)
 	if !changed {
@@ -151,7 +151,7 @@ func TestTransitionLaunchFailurePersistsTypedErrorAndExactTaskRepository(t *test
 	}
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
 
-	_, changed := exec.transitionLaunchFailure(
+	changed, _, _ := exec.transitionLaunchFailure(
 		context.Background(), "task-1", "session-1", "repo-1", "task-repo-1",
 		errors.Join(errors.New("prepare failed"), worktree.ErrInvalidBaseBranch), nil,
 	)

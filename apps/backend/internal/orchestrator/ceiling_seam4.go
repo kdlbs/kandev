@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
@@ -37,6 +38,11 @@ func seam4ResumePayloadWithBinding(
 			"entry_identity":         binding.EntryIdentity,
 			"destination_session_id": binding.DestinationSessionID,
 		}
+	}
+	if !options.TransientRetryUpdatedAt.IsZero() {
+		payload["transient_retry_attempt_id"] = options.TransientRetryAttemptID
+		payload["transient_retry_error_stamp"] = options.TransientRetryErrorStamp
+		payload["transient_retry_updated_at"] = options.TransientRetryUpdatedAt.UTC().Format(time.RFC3339Nano)
 	}
 	return payload
 }

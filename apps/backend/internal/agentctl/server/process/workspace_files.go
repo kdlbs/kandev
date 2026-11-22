@@ -935,7 +935,8 @@ func (wt *WorkspaceTracker) RenameFile(oldPath, newPath string) error {
 	}
 	runWorkspaceMutationBarrier()
 
-	if _, err := oldResolved.root.Lstat(oldResolved.rel); err != nil {
+	sourceInfo, err := oldResolved.root.Lstat(oldResolved.rel)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("path does not exist: %s", oldPath)
 		}
@@ -949,12 +950,35 @@ func (wt *WorkspaceTracker) RenameFile(oldPath, newPath string) error {
 		return fmt.Errorf("failed to create target parent directories: %w", err)
 	}
 
-	if err := oldResolved.root.Rename(oldResolved.rel, newResolved.rel); err != nil {
+	if sourceInfo.Mode().IsRegular() {
+		err = renameWorkspaceRegularFileNoReplace(oldResolved.root, oldResolved.rel, newResolved.rel)
+	} else {
+		err = oldResolved.root.Rename(oldResolved.rel, newResolved.rel)
+	}
+	if err != nil {
 		return fmt.Errorf("failed to rename path: %w", err)
 	}
 
 	wt.notifyRename(oldResolved.safe, newResolved.safe)
 
+	return nil
+}
+
+func renameWorkspaceRegularFileNoReplace(root *os.Root, oldPath, newPath string) error {
+	if err := root.Link(oldPath, newPath); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("target already exists: %s", newPath)
+		}
+		return err
+	}
+	if err := root.Remove(oldPath); err != nil {
+		sourceInfo, sourceErr := root.Lstat(oldPath)
+		destinationInfo, destinationErr := root.Lstat(newPath)
+		if sourceErr == nil && destinationErr == nil && os.SameFile(sourceInfo, destinationInfo) {
+			_ = root.Remove(newPath)
+		}
+		return fmt.Errorf("failed to remove source after creating destination: %w", err)
+	}
 	return nil
 }
 

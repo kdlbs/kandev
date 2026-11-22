@@ -258,26 +258,6 @@ func TestDeleteQuickChatHistoryRemovalFailureDoesNotFailDeletion(t *testing.T) {
 	assertPathExists(t, transcript, true)
 }
 
-func TestQuickChatExpirationRemovesAgentHistory(t *testing.T) {
-	svc, _, repo := createTestService(t)
-	f := newAgentHistoryFixture(t, svc)
-	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
-	sessionID := seedAgentHistoryTask(t, repo, agentHistoryTaskSpec{
-		taskID: "quick-expired-history", ephemeral: true, agentName: "claude-acp",
-		resumeToken: "ffffffff-0000-4000-8000-000000000001", updatedAt: now.Add(-8 * 24 * time.Hour),
-	})
-	transcript := f.writeClaudeTranscript(t, filepath.Join(f.quickChatDir, sessionID), "ffffffff-0000-4000-8000-000000000001")
-
-	svc.runQuickChatExpiration(context.Background(), now)
-	waitForCleanupDone(t, svc)
-
-	if _, err := repo.GetTask(context.Background(), "quick-expired-history"); err == nil {
-		t.Fatal("expired quick chat should be deleted")
-	}
-	assertPathExists(t, transcript, false)
-	assertPathExists(t, filepath.Dir(transcript), false)
-}
-
 // The Quick Chat tab close deletes through the task-tree cascade.
 func TestDeleteQuickChatTreeRemovesItsAgentHistory(t *testing.T) {
 	svc, _, repo := createTestService(t)

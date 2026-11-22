@@ -9,6 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
 )
 
 const (
@@ -16,10 +17,21 @@ const (
 	deliveryUnresolvedWorkReason = "unresolved_durable_work"
 )
 
+type nativeResumeResolutionStep string
+
+const (
+	nativeResumeResolutionSnapshot      nativeResumeResolutionStep = "snapshot"
+	nativeResumeResolutionIncidentBlock nativeResumeResolutionStep = "incident_blocks"
+	nativeResumeResolutionAttempt       nativeResumeResolutionStep = "prepared_attempt"
+	nativeResumeResolutionNotice        nativeResumeResolutionStep = "notice"
+	nativeResumeResolutionBlockUpdate   nativeResumeResolutionStep = "block_update"
+)
+
 // ResolveSessionRecoveryBlockWithNativeEvidence commits only after authenticated
 // native retirement. All incident fences are verified before any becomes usable.
 func (r *Repository) ResolveSessionRecoveryBlockWithNativeEvidence(ctx context.Context, id string, proof *models.NativeResumeDeliveryEvidence, completedAt time.Time) (bool, error) {
 	if !validNativeResumeProof(proof) {
+		r.logNativeResumeResolutionRefusal(proof, id, nativeResumeResolutionSnapshot)
 		return false, nil
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
@@ -31,32 +43,67 @@ func (r *Repository) ResolveSessionRecoveryBlockWithNativeEvidence(ctx context.C
 		return false, err
 	}
 	valid, err := r.verifyNativeResumeSnapshotTx(ctx, tx, proof)
-	if err != nil || !valid {
+	if err != nil {
 		return false, err
+	}
+	if !valid {
+		r.logNativeResumeResolutionRefusal(proof, id, nativeResumeResolutionSnapshot)
+		return false, nil
 	}
 	blocks, err := r.nativeResumeIncidentBlocksTx(ctx, tx, id, proof)
-	if err != nil || len(blocks) == 0 {
+	if err != nil {
 		return false, err
+	}
+	if len(blocks) == 0 {
+		r.logNativeResumeResolutionRefusal(proof, id, nativeResumeResolutionIncidentBlock)
+		return false, nil
 	}
 	valid, err = r.finishPreparedNativeAttemptTx(ctx, tx, proof, blocks, completedAt)
-	if err != nil || !valid {
+	if err != nil {
 		return false, err
 	}
+	if !valid {
+		r.logNativeResumeResolutionRefusal(proof, id, nativeResumeResolutionAttempt)
+		return false, nil
+	}
 	valid, err = r.restoreAuthenticatedNativePresentationTx(ctx, tx, proof, blocks, completedAt)
-	if err != nil || !valid {
+	if err != nil {
 		return false, err
+	}
+	if !valid {
+		r.logNativeResumeResolutionRefusal(proof, id, nativeResumeResolutionNotice)
+		return false, nil
 	}
 	if err := r.advanceRecoverySessionRevisionTx(ctx, tx, proof.SessionID); err != nil {
 		return false, err
 	}
 	changed, err := r.resolveNativeIncidentBlocksTx(ctx, tx, blocks, proof, completedAt)
-	if err != nil || !changed {
+	if err != nil {
 		return false, err
+	}
+	if !changed {
+		r.logNativeResumeResolutionRefusal(proof, id, nativeResumeResolutionBlockUpdate)
+		return false, nil
 	}
 	if err := r.restoreFailedNativeSessionStateTx(ctx, tx, proof, completedAt); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+func (r *Repository) logNativeResumeResolutionRefusal(proof *models.NativeResumeDeliveryEvidence, blockID string, step nativeResumeResolutionStep) {
+	if r.log == nil {
+		return
+	}
+	sessionID := ""
+	if proof != nil {
+		sessionID = proof.SessionID
+	}
+	r.log.Warn("native resume recovery block resolution refused",
+		zap.String("session_id", sessionID),
+		zap.String("block_id", blockID),
+		zap.String("step", string(step)),
+	)
 }
 
 func (r *Repository) restoreFailedNativeSessionStateTx(

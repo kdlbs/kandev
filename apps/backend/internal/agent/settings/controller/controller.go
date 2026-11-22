@@ -73,48 +73,61 @@ var (
 )
 
 type Controller struct {
-	repo                        store.Repository
-	accountBlockReleaser        AccountBlockReleaser
-	routingCircuitReader        RoutingCircuitReader
-	discovery                   *discovery.Registry
-	agentRegistry               *registry.Registry
-	sessionChecker              SessionChecker
-	watcherDeps                 WatcherDependencyChecker
-	routingTierDeps             RoutingTierDependencyChecker
-	automationDeps              AutomationDependencyChecker
-	utilityDeps                 UtilityDependencyChecker
-	mcpService                  *mcpconfig.Service
-	cursorMCPDiscoverySource    *cursorMCPDiscoverySource
-	copilotPluginRunnerImpl     copilotplugins.Runner
-	copilotPluginCache          *copilotPluginDiscoveryCache
-	copilotPluginMu             sync.Mutex
-	copilotPluginGenerations    map[string]uint64
-	copilotPluginGeneration     uint64
-	copilotPluginKey            []byte
-	copilotPluginRandom         io.Reader
-	hostUtility                 hostUtilityProvider
-	jobStore                    *JobStore
-	updateJobStore              *AgentUpdateJobStore
-	runtimeUpdater              RuntimeUpdater
-	managedRuntimeSelections    managedruntime.SelectionStore
-	openCodeMigrationGuard      OpenCodeMigrationGuard
-	maintenance                 *maintenanceCoordinator
-	hub                         JobBroadcaster
-	logger                      *logger.Logger
-	secretStore                 secrets.SecretStore
-	runtimeUpdateStatusMu       sync.Mutex
-	runtimeUpdateStatusCache    map[string]runtimeUpdateStatusCacheEntry
-	runtimeUpdateStatusNow      func() time.Time
-	runtimeUpdateStatusResolver RuntimeUpdateStatusResolver
-	runtimeUpdateStatusLookup   chan struct{}
-	runtimeUpdateStatusFlight   singleflight.Group
-	runtimeAutoUpdateStore      *managedruntime.AutoUpdateStore
-	runtimeUpdateNotifier       RuntimeUpdateNotifier
-	runtimeBackgroundMu         sync.Mutex
-	runtimeBackground           *runtimeUpdateBackground
-	runtimeAutoUpdateMu         sync.Mutex
-	runtimeUpdatePassMu         sync.Mutex
-	dynamicAgentRoutingEnabled  bool
+	repo                           store.Repository
+	accountBlockReleaser           AccountBlockReleaser
+	routingCircuitReader           RoutingCircuitReader
+	discovery                      *discovery.Registry
+	agentRegistry                  *registry.Registry
+	sessionChecker                 SessionChecker
+	watcherDeps                    WatcherDependencyChecker
+	routingTierDeps                RoutingTierDependencyChecker
+	automationDeps                 AutomationDependencyChecker
+	utilityDeps                    UtilityDependencyChecker
+	mcpService                     *mcpconfig.Service
+	cursorMCPDiscoverySource       *cursorMCPDiscoverySource
+	copilotPluginRunnerImpl        copilotplugins.Runner
+	copilotPluginCache             *copilotPluginDiscoveryCache
+	copilotPluginMu                sync.Mutex
+	copilotPluginGenerations       map[string]uint64
+	copilotPluginGeneration        uint64
+	copilotPluginKey               []byte
+	copilotPluginRandom            io.Reader
+	hostUtility                    hostUtilityProvider
+	jobStore                       *JobStore
+	updateJobStore                 *AgentUpdateJobStore
+	runtimeUpdater                 RuntimeUpdater
+	managedRuntimeSelections       managedruntime.SelectionStore
+	openCodeMigrationGuard         OpenCodeMigrationGuard
+	maintenance                    *maintenanceCoordinator
+	hub                            JobBroadcaster
+	logger                         *logger.Logger
+	secretStore                    secrets.SecretStore
+	runtimeUpdateStatusMu          sync.Mutex
+	runtimeUpdateStatusCache       map[string]runtimeUpdateStatusCacheEntry
+	runtimeUpdateStatusNow         func() time.Time
+	runtimeUpdateStatusResolver    RuntimeUpdateStatusResolver
+	runtimeUpdateStatusLookup      chan struct{}
+	nativeUpdateCheckIdentityReads chan struct{}
+	runtimeUpdateStatusFlight      singleflight.Group
+	nativeUpdateCheckRunner        nativeUpdateCheckRunner
+	nativeUpdateCheckGeneration    map[string]uint64
+	// nativeUpdateCheckActive is each agent's current native identity and
+	// epoch; a different identity evicts the agent's other entries.
+	nativeUpdateCheckActive map[string]nativeActiveIdentity
+	// nativeUpdateCheckObserved orders identity observations; an observation
+	// never replaces an identity committed by a later-started one.
+	nativeUpdateCheckObserved uint64
+	// nativeCheckBeforePublish is a test seam run before a native flight
+	// publishes its result; nil in production.
+	nativeCheckBeforePublish   func()
+	nativeCheckLifetime        *nativeCheckLifetime
+	runtimeAutoUpdateStore     *managedruntime.AutoUpdateStore
+	runtimeUpdateNotifier      RuntimeUpdateNotifier
+	runtimeBackgroundMu        sync.Mutex
+	runtimeBackground          *runtimeUpdateBackground
+	runtimeAutoUpdateMu        sync.Mutex
+	runtimeUpdatePassMu        sync.Mutex
+	dynamicAgentRoutingEnabled bool
 
 	hostCLIMu         sync.Mutex
 	hostCLIRunner     hostcli.Runner
@@ -194,13 +207,12 @@ type UtilityAgentReference struct {
 	Name string `json:"name"`
 }
 
-// DynamicProfileReference identifies a dynamic profile that contains the
-// concrete profile as a candidate. The route remains stored after a forced
-// disable or delete so the router can skip it and the user can repair it.
+// DynamicProfileReference identifies a live dynamic profile that contains the
+// concrete profile as a candidate. A soft-deleted dynamic profile is never
+// reported: its routes cannot execute and must not block the candidate.
 type DynamicProfileReference struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Deleted bool   `json:"deleted"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type UtilityDependencyChecker interface {
@@ -306,6 +318,7 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 		runtimeUpdateStatusCache:  make(map[string]runtimeUpdateStatusCacheEntry),
 		runtimeUpdateStatusNow:    time.Now,
 		runtimeUpdateStatusLookup: make(chan struct{}, runtimeUpdateStatusMaxConcurrent),
+		nativeCheckLifetime:       newNativeCheckLifetime(),
 		hostCLIRunner:             hostcli.ExecRunner{},
 		hostCLIModels:             make(map[string]hostCLIModelEntry),
 	}
@@ -503,7 +516,7 @@ func (c *Controller) initializeUpdateJobStore() {
 		c.BroadcastAvailableAgents,
 		c.managedRuntimeSelections,
 	)
-	c.updateJobStore.SetStatusInvalidator(c.InvalidateRuntimeUpdateStatus)
+	c.updateJobStore.SetStatusInvalidator(c.invalidateRuntimeUpdateStatusForJob)
 	if reader, ok := c.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader); ok {
 		c.updateJobStore.SetOpenCodeSelectionReader(reader)
 	}

@@ -1,6 +1,7 @@
 package streams
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/modelcatalog"
@@ -214,6 +215,16 @@ type AgentEvent struct {
 	// when agentctl can establish that association.
 	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
 
+	// DetachedAtCommit is stamped on a terminal event when the instance had no
+	// live backend stream at the moment agentctl committed it, and CommittedAt
+	// is the agentctl clock at that moment.
+	DetachedAtCommit bool       `json:"detached_at_commit,omitempty"`
+	CommittedAt      *time.Time `json:"committed_at,omitempty"`
+
+	// CancelCause is "offline_budget" when the offline budget cancelled the
+	// turn; CancelDecidedAt is the time of that expiry decision.
+	CancelCause     string     `json:"cancel_cause,omitempty"`
+	CancelDecidedAt *time.Time `json:"cancel_decided_at,omitempty"`
 	// DeliveryEventID is a stable producer identity for an observation that
 	// can be retried after a lost acknowledgement. The journal stores it
 	// beside the committed event so a retry cannot project twice.
@@ -267,6 +278,10 @@ type AgentEvent struct {
 	// CanonicalProjection marks an event whose canonical task message and inbox
 	// cursor were committed before the event was published to consumers.
 	CanonicalProjection bool `json:"canonical_projection,omitempty"`
+
+	// CanonicalConversationReceipt is attached by the host after SQL commit.
+	// It is never accepted from agent transport or persisted in the journal.
+	CanonicalConversationReceipt json.RawMessage `json:"-"`
 
 	// CanonicalMessageAppend tells lifecycle/UI consumers whether the stable
 	// canonical message already existed when this event was projected.

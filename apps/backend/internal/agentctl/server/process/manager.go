@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -50,12 +51,13 @@ import (
 type Status string
 
 const (
-	StatusStopped  Status = "stopped"
-	StatusStarting Status = "starting"
-	StatusRunning  Status = "running"
-	StatusPaused   Status = "paused"
-	StatusStopping Status = "stopping"
-	StatusError    Status = "error"
+	StatusStopped      Status = "stopped"
+	StatusStarting     Status = "starting"
+	StatusRunning      Status = "running"
+	StatusPaused       Status = "paused"
+	StatusStopping     Status = "stopping"
+	StatusError        Status = "error"
+	claudeACPAgentType        = "claude-acp"
 )
 
 // defaultUpdatesChannelCapacity is the updates channel buffer size used when
@@ -360,9 +362,9 @@ type Manager struct {
 	stopChSnapshot atomic.Value // chan struct{}
 	shutdownIntent atomic.Pointer[atomic.Bool]
 	doneCh         chan struct{}
-	// attachedCount is the live count of backend event-stream connections
-	// (see attachment.go). Zero value correctly starts an instance detached.
-	attachedCount atomic.Int32
+	// attach tracks the live backend event-stream connections (see
+	// attachment.go). Zero value correctly starts an instance detached.
+	attach attachTracker
 	// turnOutcomeMu guards recorder wiring independently of lifecycle transitions.
 	turnOutcomeMu            sync.RWMutex
 	turnOutcomeRecorder      TurnOutcomeRecorder
@@ -716,6 +718,76 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 	return descriptor, nil
 }
 
+// SuccessorDeliveryStreams lists streams in this session lifetime that belong
+// to generations newer than the process owner's configured generation.
+func (m *Manager) SuccessorDeliveryStreams(ctx context.Context) ([]journal.Stream, error) {
+	if m == nil || m.cfg == nil {
+		return nil, journal.ErrOwnerMismatch
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return nil, err
+	}
+	return deliveryJournal.ListSuccessorStreams(
+		ctx, m.cfg.SessionID, m.DeliveryIncarnationID(), m.DeliveryHarnessGeneration(),
+	)
+}
+
+// AbandonSuccessorDeliveryStream removes an uncommitted successor stream while
+// the configured generation owner is idle. This process owns the journal and
+// emits only to its configured stream, so a newer-generation stream has no
+// live writer through this owner.
+func (m *Manager) AbandonSuccessorDeliveryStream(ctx context.Context, expected journal.Stream) error {
+	if m == nil || m.cfg == nil {
+		return journal.ErrOwnerMismatch
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+	if expected.SessionID != sessionID || expected.IncarnationID != incarnationID ||
+		expected.HarnessGeneration <= generation || m.activeDeliverySubmissionID() != "" {
+		return journal.ErrOwnerMismatch
+	}
+	return deliveryJournal.AbandonStream(ctx, expected)
+}
+
+// AbandonFailedBootstrapDeliveryStream removes this owner's stream after its
+// agent process has stopped and the lifecycle has confirmed that SQL never
+// committed the successor generation or its cursor.
+func (m *Manager) AbandonFailedBootstrapDeliveryStream(ctx context.Context, streamID string, generation uint64) error {
+	if m == nil || m.cfg == nil || m.Status() != StatusStopped {
+		return journal.ErrSubmissionState
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	sessionID, incarnationID, configuredGeneration := m.DeliverySubmissionIdentity()
+	if streamID != m.DeliveryStreamID() || generation != configuredGeneration ||
+		m.activeDeliverySubmissionID() != "" {
+		return journal.ErrOwnerMismatch
+	}
+	stream, err := deliveryJournal.GetStream(ctx, streamID)
+	if err != nil {
+		return err
+	}
+	if stream.SessionID != sessionID || stream.IncarnationID != incarnationID ||
+		stream.HarnessGeneration != generation {
+		return journal.ErrOwnerMismatch
+	}
+	return deliveryJournal.AbandonStream(ctx, stream)
+}
+
 // DeliveryStreamID returns the stable transport stream identity. Agentctl
 // instance IDs identify a process incarnation and may change during executor
 // replacement; the Kandev session owns the retained event stream.
@@ -838,7 +910,11 @@ func (m *Manager) DispatchDeliverySubmission(
 		m.deliveryActiveMu.Unlock()
 	}()
 	stopping := m.shutdownIntent.Load()
-	return (&SubmissionDelivery{Journal: deliveryJournal, Stopping: stopping}).Dispatch(ctx, id, call)
+	return (&SubmissionDelivery{Journal: deliveryJournal, Stopping: stopping}).Dispatch(ctx, id, func(ctx context.Context) error {
+		m.setBudgetInFlight(id)
+		defer m.clearBudgetInFlight(id)
+		return call(ctx)
+	})
 }
 
 func (m *Manager) activeDeliverySubmissionID() string {
@@ -946,6 +1022,78 @@ func (m *Manager) RetireDeliverySubmission(ctx context.Context, id string, recov
 	return err
 }
 
+// RetireMissingUnknownDeliverySubmission writes a non-replayable journal record
+// for a SQL-confirmed interrupted prompt while the process dispatcher is idle.
+func (m *Manager) RetireMissingUnknownDeliverySubmission(ctx context.Context, submission journal.Submission) error {
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	if !validMissingUnknownSubmissionShape(submission) || !m.missingUnknownSubmissionOwned(submission) {
+		return journal.ErrOwnerMismatch
+	}
+	existing, err := deliveryJournal.GetSubmission(ctx, submission.ID)
+	if errors.Is(err, journal.ErrSubmissionNotFound) {
+		return m.createMissingUnknownSubmission(ctx, deliveryJournal, submission)
+	}
+	if err != nil {
+		return err
+	}
+	return m.retireExistingMissingUnknown(ctx, deliveryJournal, existing, submission)
+}
+
+func validMissingUnknownSubmissionShape(submission journal.Submission) bool {
+	return submission.ID != "" && submission.Hash != "" && len(submission.Payload) == 0 &&
+		submission.State == journal.SubmissionInterruptedUnknown && !submission.Retired &&
+		submission.HarnessGeneration > 0 && submission.StreamID != ""
+}
+
+func (m *Manager) missingUnknownSubmissionOwned(submission journal.Submission) bool {
+	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+	return submission.SessionID == sessionID && submission.IncarnationID == incarnationID &&
+		submission.HarnessGeneration <= generation && submission.StreamID == m.DeliveryStreamID()
+}
+
+func (m *Manager) createMissingUnknownSubmission(ctx context.Context, deliveryJournal *journal.Journal, submission journal.Submission) error {
+	submission.Retired = true
+	created, err := deliveryJournal.PutSubmission(ctx, submission)
+	if err != nil {
+		return err
+	}
+	if !created.Retired || created.State != journal.SubmissionInterruptedUnknown || !sameMissingUnknownSubmissionIdentity(created, submission) {
+		return journal.ErrSubmissionState
+	}
+	return nil
+}
+
+func (m *Manager) retireExistingMissingUnknown(ctx context.Context, deliveryJournal *journal.Journal, existing, requested journal.Submission) error {
+	if !sameMissingUnknownSubmissionIdentity(existing, requested) {
+		return journal.ErrOwnerMismatch
+	}
+	if existing.State != journal.SubmissionInterruptedUnknown {
+		if existing.State == journal.SubmissionPrepared || existing.State == journal.SubmissionDispatching || existing.State == journal.SubmissionAccepted {
+			return journal.ErrSubmissionState
+		}
+		return journal.ErrOwnerMismatch
+	}
+	if existing.Retired {
+		return nil
+	}
+	_, err := deliveryJournal.RetireSubmission(ctx, requested.ID, m.DeliveryHarnessGeneration())
+	return err
+}
+
+func sameMissingUnknownSubmissionIdentity(existing, requested journal.Submission) bool {
+	return existing.ID == requested.ID && existing.SessionID == requested.SessionID &&
+		existing.IncarnationID == requested.IncarnationID &&
+		existing.HarnessGeneration == requested.HarnessGeneration &&
+		existing.StreamID == requested.StreamID && existing.Hash == requested.Hash
+}
+
 // CancelDeliverySubmission settles one prompt after an explicit user cancel.
 // Unlike retirement, cancellation is valid in the current harness generation
 // and preserves the record as an auditable terminal outcome.
@@ -962,7 +1110,7 @@ func (m *Manager) CancelDeliverySubmission(ctx context.Context, id string) error
 		Type:                 adapter.EventTypeComplete,
 		SessionID:            submission.SessionID,
 		DeliverySubmissionID: id,
-		Data:                 map[string]any{"stop_reason": "cancelled"},
+		Data:                 map[string]any{"stop_reason": stopReasonCancelled},
 	})
 	if err != nil {
 		return err
@@ -2459,6 +2607,7 @@ func (m *Manager) buildAdapterConfig() error {
 	}
 	m.adapterCfg = &adapter.Config{
 		WorkDir:                    m.cfg.WorkDir,
+		ClaudeConfigDir:            claudeConfigDirFromLaunch(m.cfg.AgentType, m.cfg.AgentEnv, m.cfg.StripEnv),
 		AutoApprove:                m.adapterAutoApprove(),
 		McpServers:                 mcpServers,
 		ProjectMCPDelivery:         projectDelivery.Clone(),
@@ -2474,6 +2623,7 @@ func (m *Manager) buildAdapterConfig() error {
 		PromptSuggestions:          m.cfg.PromptSuggestions,
 		CopilotNativeSessionEvents: m.cfg.CopilotNativeSessionEvents,
 	}
+
 	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
 		harness := acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
 		if harness == "" {
@@ -2546,6 +2696,37 @@ func (m *Manager) buildAdapterConfig() error {
 	// must be configured with fresh evidence.
 	m.cfg.ProjectMCPDelivery = nil
 	return nil
+}
+
+func claudeConfigDirFromLaunch(agentType string, env, stripEnv []string) string {
+	if agentType != claudeACPAgentType {
+		return ""
+	}
+	for _, key := range stripEnv {
+		if key == "CLAUDE_CONFIG_DIR" {
+			return ""
+		}
+	}
+	if configDir := acpcompat.EnvValue(env, "CLAUDE_CONFIG_DIR"); configDir != "" {
+		if !filepath.IsAbs(configDir) {
+			return ""
+		}
+		return filepath.Clean(configDir)
+	}
+	homeVariable := "HOME"
+	if runtime.GOOS == checkpointWindowsOS && acpcompat.EnvValue(env, "USERPROFILE") != "" {
+		homeVariable = "USERPROFILE"
+	}
+	for _, key := range stripEnv {
+		if key == homeVariable {
+			return ""
+		}
+	}
+	home := acpcompat.EnvValue(env, homeVariable)
+	if !filepath.IsAbs(home) {
+		return ""
+	}
+	return filepath.Join(filepath.Clean(home), ".claude")
 }
 
 // buildFinalCommand assembles the full command args and creates the exec.Cmd.
@@ -3269,6 +3450,10 @@ func (m *Manager) persistDeliveryBatchRaw(ctx context.Context, updates []adapter
 	}
 	events := make([]journal.Event, len(updates))
 	for i, update := range updates {
+		if update.Type == adapter.EventTypeComplete || update.Type == adapter.EventTypeError {
+			update = m.applyTerminalStamp(update)
+			updates[i] = update
+		}
 		payload, err := json.Marshal(update)
 		if err != nil {
 			return updates, err
@@ -3505,6 +3690,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 // StopForTeardown permanently closes process admission and drains prior owners
 // before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
+	m.StopOfflineBudget()
 	m.CloseAdmission()
 	passthroughErr := m.passthrough.StopAll(ctx)
 	passthroughErr = errors.Join(passthroughErr, m.cleanupPassthroughFiles(ctx))

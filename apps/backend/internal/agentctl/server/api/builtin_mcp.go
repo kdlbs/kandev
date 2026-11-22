@@ -8,10 +8,13 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/mcpurl"
 	p "github.com/kandev/kandev/internal/mcp/profile"
+	"go.uber.org/zap"
 )
 
 func (s *Server) builtinSessionMCPServers(requested []types.McpServer) ([]types.McpServer, error) {
@@ -24,7 +27,7 @@ func (s *Server) builtinSessionMCPServers(requested []types.McpServer) ([]types.
 			return nil, fmt.Errorf("reserved built-in MCP name %q must be renamed", server.Name)
 		}
 	}
-	injected, err := config.BuiltinMCPServers(manifest, s.cfg.MCPHost, s.cfg.Port)
+	injected, err := config.BuiltinMCPServersForInstance(manifest, s.cfg.MCPHost, s.cfg.Port, s.cfg.InstanceID, s.cfg.ScopedMCPRoutes)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +39,11 @@ func (s *Server) builtinSessionMCPServers(requested []types.McpServer) ([]types.
 }
 
 func builtinMCPExemptPaths(cfg *config.InstanceConfig) []string {
-	paths := []string{"/health", "/sse", "/message", "/mcp"}
+	return builtinMCPRoutePaths(cfg)
+}
+
+func builtinMCPEndpoints() []string {
+	paths := []string{"/mcp", "/sse", "/message"}
 	for _, descriptor := range p.BuiltinPackageCatalog() {
 		id := descriptor.ID
 		if id == p.PackageCore {
@@ -48,6 +55,62 @@ func builtinMCPExemptPaths(cfg *config.InstanceConfig) []string {
 		}
 	}
 	return paths
+}
+
+func builtinMCPRoutePaths(cfg *config.InstanceConfig) []string {
+	paths := []string{"/health"}
+	for _, endpoint := range builtinMCPEndpoints() {
+		path, err := mcpurl.BuiltinPath(cfg.InstanceID, cfg.ScopedMCPRoutes, endpoint)
+		if err == nil {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
+func (s *Server) rejectUnboundBuiltinMCPRoutes() gin.HandlerFunc {
+	allowed := make(map[string]struct{})
+	for _, path := range builtinMCPRoutePaths(s.cfg) {
+		allowed[path] = struct{}{}
+	}
+	return func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if !isBuiltinMCPRequestPath(path) {
+			c.Next()
+			return
+		}
+		if _, ok := allowed[path]; ok {
+			c.Next()
+			return
+		}
+		if s.builtinMCPRejectionLogLimiter.allow() {
+			s.logger.Warn("rejected stale built-in MCP route", zap.String("reason", "wrong_instance_route"), zap.String("route_template", "native_mcp"))
+		}
+		c.JSON(http.StatusNotFound, gin.H{"code": "stale_mcp_endpoint", "hint": "Use the MCP endpoint provided by this agent."})
+		c.Abort()
+	}
+}
+
+func isBuiltinMCPRequestPath(path string) bool {
+	if isBuiltinMCPEndpointPath(path) {
+		return true
+	}
+	if !strings.HasPrefix(path, mcpurl.InstanceRoutePrefix) {
+		return false
+	}
+	instanceAndEndpoint := strings.TrimPrefix(path, mcpurl.InstanceRoutePrefix)
+	separator := strings.IndexByte(instanceAndEndpoint, '/')
+	return separator > 0 && isBuiltinMCPEndpointPath(instanceAndEndpoint[separator:])
+}
+
+func isBuiltinMCPEndpointPath(path string) bool {
+	if mcpurl.IsBuiltinEndpoint(path) {
+		return true
+	}
+	parts := strings.Split(path, "/")
+	return len(parts) == 4 && parts[0] == "" &&
+		(parts[1] == "mcp" || parts[1] == "sse" || parts[1] == "message") &&
+		parts[2] == "packages" && parts[3] != "" && !strings.ContainsAny(parts[3], "?#%")
 }
 
 func (s *Server) handlePrepareBuiltinMCP(c *gin.Context) {

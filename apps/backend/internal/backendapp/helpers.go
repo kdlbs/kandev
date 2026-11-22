@@ -82,6 +82,7 @@ import (
 	"github.com/kandev/kandev/internal/profiles"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
+	"github.com/kandev/kandev/internal/promptsync"
 	"github.com/kandev/kandev/internal/quickterminal"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/runtimeflags"
@@ -91,6 +92,7 @@ import (
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
 	"github.com/kandev/kandev/internal/startup"
 	systemsvc "github.com/kandev/kandev/internal/system"
+	"github.com/kandev/kandev/internal/system/maintenance"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
@@ -1173,6 +1175,7 @@ type routeParams struct {
 	authSvc                       *auth.Service
 	agentRuntimeAvailability      *client.Availability
 	addCleanup                    func(func() error)
+	addRestoreCleanup             func(func() error)
 	repoCloner                    *repoclone.Cloner
 	version                       string
 	commit                        string
@@ -1340,6 +1343,13 @@ func registerRoutes(p routeParams) {
 		p.services.Linear.SetTaskDeleter(handoffSvc)
 		p.services.Linear.SetRepositoryLookup(repoLookup)
 		p.services.Linear.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
+		p.services.Linear.SetWorkspaceWriteAuthorizer(func(ctx context.Context, workspaceID string) error {
+			err := p.taskSvc.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeTaskWrite)
+			if taskservice.IsForbidden(err) {
+				return linear.ErrWorkspaceWriteForbidden
+			}
+			return err
+		})
 	}
 	if p.services.Sentry != nil {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)
@@ -2087,6 +2097,11 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered workflow sync handlers (HTTP)")
 	}
 
+	if p.services.PromptSync != nil {
+		promptsync.RegisterRoutes(p.router, p.services.PromptSync, p.log)
+		p.log.Debug("Registered prompt sync handlers (HTTP)")
+	}
+
 	if p.services.Automation != nil {
 		definitions, _ := p.agentSettingsRepo.(automation.MCPDefinitionReader)
 		policy, _ := p.agentSettingsRepo.(automation.MCPBuiltinPolicyReader)
@@ -2146,26 +2161,7 @@ func registerSecondaryRoutes(
 		runtimeflags.RegisterRoutes(p.router, p.runtimeFlagsSvc)
 	}
 
-	if p.repoCloner != nil {
-		var ghCopier improvekandev.GitHubWorkspaceCopier
-		var resolveDefaultWorkspace improvekandev.DefaultWorkspaceResolver
-		if p.services.GitHub != nil && p.dbPool != nil {
-			ghCopier = p.services.GitHub
-			resolveDefaultWorkspace = func(context.Context) (string, error) {
-				return workspacescope.ResolveMigrationTarget(p.dbPool.Reader())
-			}
-		}
-		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, ghCopier, resolveDefaultWorkspace, p.version, p.log)
-		if p.services.GitHub != nil {
-			ikHandler.SetManagedGitHubForkProber(p.services.GitHub)
-		}
-		ikHandler.SetTemporaryArtifactRegistry(p.temporaryArtifacts)
-		if p.systemSvc != nil {
-			ikHandler.SetLogBundles(p.systemSvc.LogBundles)
-		}
-		improvekandev.RegisterRoutes(p.router, ikHandler)
-		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
-	}
+	registerImproveKandevRoutes(p)
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 	if p.features.Coordinator {
@@ -2177,7 +2173,8 @@ func registerSecondaryRoutes(
 		automationSvc = p.services.Automation.Service
 	}
 	registerE2EResetRoutes(
-		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.services.Coordinator, p.eventBus,
+		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.services.Coordinator,
+		p.services.PromptSync, p.eventBus,
 		p.agentRuntimeAvailability, p.lifecycleMgr, p.services.DeliveryRetention, p.ctx, p.log,
 	)
 	registerE2ERuntimeUpdateRoutes(
@@ -2220,6 +2217,35 @@ func registerSecondaryRoutes(
 		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, handoffDeps, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
 	}
+}
+
+func registerImproveKandevRoutes(p routeParams) {
+	if p.repoCloner == nil {
+		return
+	}
+	var ghCopier improvekandev.GitHubWorkspaceCopier
+	var resolveDefaultWorkspace improvekandev.DefaultWorkspaceResolver
+	if p.services.GitHub != nil && p.dbPool != nil {
+		ghCopier = p.services.GitHub
+		resolveDefaultWorkspace = func(ctx context.Context) (string, error) {
+			return workspacescope.ResolveMigrationTargetContext(ctx, p.dbPool.Reader())
+		}
+	}
+	ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, ghCopier, resolveDefaultWorkspace, p.version, p.log)
+	if p.services.GitHub != nil {
+		ikHandler.SetManagedGitHubForkProber(p.services.GitHub)
+	}
+	ikHandler.SetTemporaryArtifactRegistry(p.temporaryArtifacts)
+	if p.systemSvc != nil {
+		ikHandler.SetLogBundles(p.systemSvc.LogBundles)
+	}
+	if p.addRestoreCleanup != nil {
+		p.addRestoreCleanup(ikHandler.Stop)
+	} else if p.addCleanup != nil {
+		p.addCleanup(ikHandler.Stop)
+	}
+	improvekandev.RegisterRoutes(p.router, ikHandler)
+	p.log.Debug("Registered Improve Kandev handlers (HTTP)")
 }
 
 func newSSHAgentctlResolver(p routeParams) *lifecycle.AgentctlResolver {
@@ -2655,6 +2681,25 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
+	if p.taskRepo != nil {
+		mcpHandlers.SetSendOperationStore(p.taskRepo)
+	}
+	if p.taskRepo != nil && p.dbPool != nil {
+		taskRepo, pool, log := p.taskRepo, p.dbPool, p.log
+		stopRetention := mcpHandlers.SetSendOperationRetention(p.ctx, func(ctx context.Context) {
+			release, admitted := maintenance.ForPool(pool).TryAcquire()
+			if !admitted {
+				return
+			}
+			defer release()
+			if _, _, err := taskRepo.PruneSendOperations(ctx, sqliterepo.SendOperationPruneBatch); err != nil {
+				log.Warn("send-operation retention batch failed", zap.Error(err))
+			}
+		})
+		if p.addCleanup != nil {
+			p.addCleanup(func() error { stopRetention(); return nil })
+		}
+	}
 	mcpHandlers.SetPromptReader(p.services.Prompts)
 	mcpHandlers.SetPromptWriter(p.services.Prompts, func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled })
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)

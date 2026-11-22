@@ -413,10 +413,17 @@ func indexExists(t *testing.T, db *sqlx.DB, index string) bool {
 func TestCutover_NormalizesLegacyFlatEnvironment(t *testing.T) {
 	db := openLegacyDB(t)
 	now := time.Now().UTC().Truncate(time.Second)
+	retiredAt := now.Add(-time.Hour)
 	seed := legacySeed{envID: "env-1", taskID: "task-1", repoID: "repo-1", sessionID: "sess-1"}
 	seedLegacyTask(t, db, seed, now)
 	seedLegacySessionWorktree(t, db, "sess-1", "wt-1", "repo-1", "", "/tasks/t-1/kandev", "feature/x", "active", now)
 	seedLegacyFlatEnv(t, db, seed, "wt-1", "/tasks/t-1/kandev", "feature/x", now)
+	if _, err := db.Exec(`ALTER TABLE task_environments ADD COLUMN retired_at TIMESTAMP`); err != nil {
+		t.Fatalf("add task environment retirement timestamp: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`UPDATE task_environments SET retired_at = ? WHERE id = ?`), retiredAt, seed.envID); err != nil {
+		t.Fatalf("seed task environment retirement timestamp: %v", err)
+	}
 
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
@@ -433,6 +440,9 @@ func TestCutover_NormalizesLegacyFlatEnvironment(t *testing.T) {
 	}
 	if len(env.Repos) != 1 {
 		t.Fatalf("env repos = %d, want 1", len(env.Repos))
+	}
+	if env.RetiredAt == nil || !env.RetiredAt.Equal(retiredAt) {
+		t.Fatalf("retired_at = %v, want %v", env.RetiredAt, retiredAt)
 	}
 	row := env.Repos[0]
 	if row.RepositoryID != "repo-1" || row.WorktreeID != "wt-1" ||

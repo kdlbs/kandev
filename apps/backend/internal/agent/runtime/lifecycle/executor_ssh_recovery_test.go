@@ -243,6 +243,44 @@ func TestSSHRecoveryReadsLegacyControlPortFromExactSessionLog(t *testing.T) {
 	}
 }
 
+func TestSSHResumeReadsMissingControlPortFromExactSessionLog(t *testing.T) {
+	controlServer := newSSHRecoveryInstanceInfoServer(t, agentctl.InstanceInfo{
+		ID: "native-execution-id", Port: 41234, Status: "running", WorkspacePath: "/remote/task",
+		SessionID: "session-ssh", TaskID: "task-ssh", ScopedMCPRoutes: true,
+	})
+	const logCommand = "head -c 32768 '/remote/session/agentctl.log' 2>/dev/null; printf '\\n'; tail -c 32768 '/remote/session/agentctl.log' 2>/dev/null"
+	server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
+		if command != logCommand {
+			return sshExecResult{Stderr: "unexpected command", ExitCode: 127}
+		}
+		return sshExecResult{Stdout: `{"msg":"HTTP server bound successfully","address":"127.0.0.1:41235"}`}
+	})
+	server.forwardTo(controlServer.Listener.Addr().String())
+	metadata := sshConnectionMetadata(t, server)
+	metadata[MetadataKeySSHRemoteAgentctlPort] = "41234"
+	metadata[MetadataKeySSHRemoteSessionDir] = "/remote/session"
+	metadata[MetadataKeySSHRemoteTaskDir] = "/remote/task"
+	metadata[MetadataKeySSHAgentctlInstanceID] = "native-execution-id"
+	req := &ExecutorCreateRequest{
+		InstanceID: "backend-execution-id", SessionID: "session-ssh", TaskID: "task-ssh",
+		AuthToken: "refreshed-auth-token", Metadata: metadata,
+	}
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	client := server.dial(t)
+	defer func() { _ = client.Close(); _ = exec.Close() }()
+
+	info, err := exec.readResumedSSHInstanceInfo(context.Background(), client, req)
+	if err != nil {
+		t.Fatalf("read resumed SSH instance: %v", err)
+	}
+	if info.ID != "native-execution-id" || !info.ScopedMCPRoutes {
+		t.Fatalf("resumed SSH instance info = %+v, want native identity with scoped route mode", info)
+	}
+	if commands := server.commands(); len(commands) != 1 || commands[0] != logCommand {
+		t.Fatalf("SSH resume commands = %q, want one exact session-log control-port read", commands)
+	}
+}
+
 func TestLatestSSHAgentctlControlPortRequiresLoopbackBind(t *testing.T) {
 	for _, test := range []struct {
 		name    string

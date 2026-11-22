@@ -23,7 +23,7 @@ of automatic approval only for final eligible profile-authorized imports.
 | Requirement | Design sections |
 | --- | --- |
 | REQ-AGENTS-MCP-PREP-001 | Profile and discovery contract; settings UI |
-| REQ-AGENTS-MCP-PREP-002 | Adapter; lifecycle and progress; concurrency |
+| REQ-AGENTS-MCP-PREP-002 | Adapter, lifecycle and progress, concurrency, Cursor discovery feedback |
 | REQ-AGENTS-MCP-PREP-003 | Recovery; credential continuity |
 | REQ-AGENTS-MCP-PREP-004 | Retained native command diagnostics |
 | REQ-AGENTS-MCP-PREP-005 | Project-local file ownership and execution generations |
@@ -311,6 +311,47 @@ rows show failures and Authenticate/Retry actions; expanded details contain
 sanitized status and the typed diagnostic causes defined below. Use the existing mobile terminal navigation, not a new
 nested drawer or desktop-only tab. Guard async discovery by profile/agent and
 request generation so stale responses never reset current choices.
+
+### Cursor discovery feedback
+
+For AC-AGENTS-MCP-PREP-002.8 through .10, `PrepareProgress` matches
+`agent_mcp_discovery` with `mcpProvider === "cursor"`. It uses a Cursor-specific
+label and the existing stage-and-server format for any server ID. Live progress,
+completion and reload hydration already provide the provider and failure code.
+The row reads those fields from `PrepareStepInfo`.
+
+Place a collapsed `@kandev/ui` disclosure below each failed Cursor discovery
+label. Its trigger uses the shared Button sizing. On phones it spans the row
+content width, and the text wraps within the existing conversation scroller.
+Use the same disclosure and reason lookup on all viewports. The trigger exposes
+its expanded state and keeps focus during toggling. The existing server recovery
+branch requires a task and server ID.
+
+Resolve the reason through an exact lookup of localized messages. The inventory
+client and `cursorInventoryFailureReason` define the following inputs.
+
+| Recorded code | Explanation |
+| --- | --- |
+| `timeout` | The check for enabled Cursor Marketplace plugins timed out. The lookup allows up to five seconds. |
+| `canceled` | The Marketplace lookup was canceled. |
+| `credential_reader_unavailable` | The host credential reader was unavailable. |
+| `credentials_unavailable` | The lookup could not obtain Cursor account credentials. |
+| `request_invalid` | Kandev could not create the Marketplace request. |
+| `request_failed` | Kandev could not complete the Marketplace request. |
+| `service_status` | The Cursor service returned an unsuccessful status. |
+| `response_unreadable` | Kandev could not read the Marketplace response. |
+| `response_too_large` | The Marketplace response exceeded the size limit. |
+| `response_invalid` | The Marketplace response had an unexpected format. |
+| `unavailable`, missing or unknown | Kandev could not complete Cursor MCP discovery for this attempt. |
+
+For the inventory-specific reasons, add one localized message about skipped
+Marketplace imports and independently configured MCP servers. The five-second
+limit covers credential access and the request. Keep the displayed value in sync
+with `cursorInventoryTimeout`. The general explanation covers several paths,
+including errors reading local discovery preferences. The disclosure uses its
+translation keys as the sole source of text. Use the existing preparation
+attempt reconciliation and failed-step severity. See the
+[fix package](../../../plans/cursor-mcp-discovery-feedback/plan.md).
 
 ## Retained native command diagnostics (2026-10-07, draft)
 

@@ -214,6 +214,7 @@ type Service struct {
 	eb       bus.EventBus
 	log      *logger.Logger
 	resolver AgentResolver
+	taskStep TaskStepResolver
 	signalCh chan struct{}
 
 	// maxCausationDepth, selfTriggerAllowance, and
@@ -333,6 +334,7 @@ func (s *Service) QueueRunAndReturn(ctx context.Context, req QueueRunRequest) (Q
 	}
 
 	payloadMap := runPayload(req, agentInstanceID)
+	s.stampTaskStep(ctx, payloadMap)
 	payload, err := encodePayload(payloadMap)
 	if err != nil {
 		return QueueOutcomeNone, nil, fmt.Errorf("encode payload: %w", err)

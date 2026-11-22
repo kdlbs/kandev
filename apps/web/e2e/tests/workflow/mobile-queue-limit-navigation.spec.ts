@@ -33,6 +33,11 @@ test("mobile WIP queue links to workflow settings and updates without reload", a
     "data-settings-target-highlight",
     "true",
   );
+  // The compact list expands the targeted workflow so its step settings are editable.
+  await expect(testPage.getByTestId(`workflow-card-${scenario.workflowId}`)).toHaveAttribute(
+    "data-expanded",
+    "true",
+  );
 
   await testPage.goBack();
   await sessionPage.waitForLoad();
