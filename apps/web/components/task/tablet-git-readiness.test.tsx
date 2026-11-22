@@ -104,3 +104,24 @@ it.each(["unavailable", "pending"] as const)(
     expect(hook.result.current.changes).toBeUndefined();
   },
 );
+it.each([
+  [1, false],
+  [2, undefined],
+] as const)(
+  "uses the task's %s registered repositories before inferring a lone root",
+  (count, expected) => {
+    const hook = setup(null);
+    const store = hook.result.current.store;
+    act(() => {
+      store.setState((state) => {
+        state.taskSessions.items.B = { id: "B", task_id: "T" } as never;
+        state.kanban.tasks = [
+          { id: "T", repositories: Array.from({ length: count }, (_, i) => ({ id: `r${i}` })) },
+        ] as never;
+        return state;
+      });
+      store.getState().setGitStatus("env", { ...status(""), repository_name: undefined });
+    });
+    expect(hook.result.current.changes).toBe(expected);
+  },
+);

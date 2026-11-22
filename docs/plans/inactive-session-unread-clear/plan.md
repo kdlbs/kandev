@@ -860,3 +860,11 @@ Completed production rounds 35; consecutive clean 0. Named refresh evidence
 now also blocks the lone-unnamed inference. Task 02 records the RED, the
 accepted untraced frame-order residual and verification; R36 follows normal
 verified delivery.
+
+### Production review R36
+
+Sol child `0528c855-ecda-4eb0-ab30-8cfa5009ae94` reviewed
+`ee2f77f5cc8452f597d3c15d81af40629ea691d7`: one P2, not clean.
+Completed production rounds 36; consecutive clean 0. The lone-root inference
+now also requires at most one registered task repository. Task 02 records the
+RED and verification; R37 follows normal verified delivery.

@@ -15,6 +15,8 @@ import { calculateHash } from "@/lib/utils/file-diff";
 import { useAppStore } from "@/components/state-provider";
 import { useShallow } from "zustand/react/shallow";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import { findTaskInState } from "@/lib/ws/handlers/task-primary-focus";
+import type { AppState } from "@/lib/state/store";
 import type { FileEditorTab } from "./task-center-panel-file-tabs";
 
 function hasScopedFiles(
@@ -46,45 +48,63 @@ function readyGitStatus(status: GitStatusEntry | undefined): boolean {
   );
 }
 
-/** Only a validated inventory, or an unnamed status with no named status/refresh, defines scopes. */
+/**
+ * Only a validated inventory, or an unnamed status in a task with at most one
+ * registered repository and no named status/refresh, defines scopes.
+ */
 function knownScopes(
   inventory: readonly string[] | null | undefined,
   repositories: Record<string, unknown> | undefined,
   repositoryRefresh: Record<string, unknown> | undefined,
   legacy: GitStatusEntry | undefined,
+  taskRepositoryCount: number,
 ): readonly string[] | undefined {
   if (inventory) return inventory;
-  const named = [
-    ...Object.entries(repositories ?? {}),
-    ...Object.entries(repositoryRefresh ?? {}),
-  ].some(([scope, value]) => scope !== "" && !!value);
+  const named =
+    taskRepositoryCount > 1 ||
+    [...Object.entries(repositories ?? {}), ...Object.entries(repositoryRefresh ?? {})].some(
+      ([scope, value]) => scope !== "" && !!value,
+    );
   return legacy && !legacy.repository_name && !named ? [""] : undefined;
+}
+
+type GitEvidence = {
+  taskRepositoryCount: number;
+  scopes?: readonly string[] | null;
+  repositories?: Record<string, GitStatusEntry>;
+  refresh?: unknown;
+  repositoryRefresh?: Record<string, unknown>;
+};
+
+/** Git and task-repository evidence for the session's environment, read in one store pass. */
+function selectGitEvidence(state: AppState, sessionId: string | null): GitEvidence {
+  if (!sessionId) return { taskRepositoryCount: 0 };
+  const environment = state.environmentIdBySessionId[sessionId] ?? sessionId;
+  const taskId = state.taskSessions.items[sessionId]?.task_id ?? state.tasks.activeTaskId;
+  const gitStatus = state.gitStatus;
+  return {
+    taskRepositoryCount: taskId ? (findTaskInState(state, taskId)?.repositories?.length ?? 0) : 0,
+    scopes: gitStatus.inventoryByEnvironment?.[environment]?.scopes,
+    repositories: gitStatus.byEnvironmentRepo[environment],
+    refresh: gitStatus.refreshByEnvironmentId?.[environment],
+    repositoryRefresh: gitStatus.refreshByEnvironmentRepo?.[environment],
+  };
 }
 
 export function useCenterPanelGitChanges(sessionId: string | null): boolean | undefined {
   const gitStatus = useSessionGitStatus(sessionId);
   const { commits, loaded, loading } = useSessionCommits(sessionId);
-  const evidence = useAppStore(
-    useShallow((state) => {
-      const environment = sessionId
-        ? (state.environmentIdBySessionId[sessionId] ?? sessionId)
-        : null;
-      return {
-        scopes: environment
-          ? state.gitStatus.inventoryByEnvironment?.[environment]?.scopes
-          : undefined,
-        repositories: environment ? state.gitStatus.byEnvironmentRepo[environment] : undefined,
-        refresh: environment ? state.gitStatus.refreshByEnvironmentId?.[environment] : undefined,
-        repositoryRefresh: environment
-          ? state.gitStatus.refreshByEnvironmentRepo?.[environment]
-          : undefined,
-      };
-    }),
-  );
+  const evidence = useAppStore(useShallow((state) => selectGitEvidence(state, sessionId)));
   const legacyScope = gitStatus?.repository_name ?? "";
   return useMemo(() => {
     const { repositories, refresh, repositoryRefresh } = evidence;
-    const scopes = knownScopes(evidence.scopes, repositories, repositoryRefresh, gitStatus);
+    const scopes = knownScopes(
+      evidence.scopes,
+      repositories,
+      repositoryRefresh,
+      gitStatus,
+      evidence.taskRepositoryCount,
+    );
     if (commits.length > 0 || hasScopedFiles(repositories, scopes, gitStatus)) return true;
     if (!scopes || refresh || !loaded || loading) return undefined;
     for (const repository of scopes) {

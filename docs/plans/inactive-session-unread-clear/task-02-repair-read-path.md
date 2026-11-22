@@ -4431,3 +4431,41 @@ checks pass. Fresh-bundle browser receipts: `r35-final-summary.log` 11
 desktop/tablet/maximize cases pass, including the clean tablet Changes case;
 `r35-phone-summary.log` ten phone cases pass. Runs used one worker and no
 retries. No Go/cursor/predicate/projector/promotion/schema/wire change in R35.
+
+### Production-fix review round 36 remediation
+
+Sol child `0528c855-ecda-4eb0-ab30-8cfa5009ae94` reviewed
+`ee2f77f5cc8452f597d3c15d81af40629ea691d7`: one P2, not clean. Completed
+production rounds 36; consecutive clean 0. Its first turn hit a transient usage
+limit; that is not a separate round.
+
+- The R35 residual was reopened with a traced producer: a root-preserving
+  multi-repo task (unnamed git root plus adopted/attached named repositories)
+  already exposes its registered repositories through the task snapshot, but
+  the root status frame arrives first. A clean root then settled the tablet to
+  empty and replaced saved Changes before the dirty named frame. The lone-root
+  inference now also requires the session's task (kanban or multi-kanban
+  snapshot) to register at most one repository, the same evidence the Changes
+  panel uses for multi-repo detection. A registered but unmaterialized
+  repository keeps the tablet unknown, which preserves saved Changes.
+
+`r36-red.log`: against `ee2f77f`, two registered repositories with a lone clean
+unnamed root return `false`; the one-repository control returns `false` as
+intended. Submodule-only scopes remain the recorded residual because they are
+not in task repositories.
+
+Lint caught the store selector's complexity; it is now one named, typed
+selector. An intermediate typecheck rejected the test's draft setter until it
+returned the draft. Final `r36-units.log`: 11 files/172 tests, including the
+task-primary-focus owner of `findTaskInState`. Strict changed-file lint,
+production typecheck, fresh frontend build and spec/catalog/harness checks pass.
+
+Fresh-bundle browser receipts: `r36-final-summary.log` failed only the confirmed
+local ordinary-foreground membership case at initial active-chat render;
+`r36-phone-summary.log` failed only the last-stopped-session removal case at the
+same initial-render step. Neither desktop Dockview nor the phone layout mounts
+the changed tablet hook. Rerun under the same bundle they passed 4/4
+(`r36-rerun-desktop-summary.log`) and 3/3 (`r36-rerun-phone-summary.log`);
+host load from other tasks was about 20 during the first run. All other cases,
+including every coarse-tablet case, passed. No Go/cursor/predicate/projector/
+promotion/schema/wire change in R36.
