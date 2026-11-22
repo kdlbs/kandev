@@ -350,6 +350,11 @@ func (m *Manager) claimPromptCompletion(
 		claim.readyPayload = newAgentEventPayloadWithTurnID(current, event.TurnID)
 		claim.readyPayload.AttemptID = event.AttemptID
 		copyDeliveryTerminalIdentity(&claim.readyPayload, event, current)
+		if !event.Recovered && event.TurnID != "" && event.PromptGeneration != 0 &&
+			event.PromptGeneration == current.promptGeneration && event.ConfigurationCommandResult != nil {
+			result := *event.ConfigurationCommandResult
+			claim.readyPayload.ConfigurationCommandResult = &result
+		}
 		// The Office cause belongs to the launch's first turn. Preserve it on
 		// that completion event, then clear it so later user turns on this
 		// session cannot inherit stale run causation.
@@ -1544,6 +1549,15 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 	}
 
 	event = m.handleAgentEventState(execution, event)
+	// Startup can use cached provider defaults while the previous confirmed
+	// model remains visible until the new execution applies its settings.
+	if event.Type == streams.EventTypeSessionModels &&
+		event.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored &&
+		execution.deliveryStartupSnapshot() != nil && !execution.isSessionInitialized() {
+		if settled, _ := event.Data["config_options_settled"].(bool); !settled {
+			return
+		}
+	}
 	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, event, attemptID)
 }
 

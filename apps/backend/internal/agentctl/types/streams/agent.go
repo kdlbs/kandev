@@ -157,6 +157,10 @@ func (d PromptFailureDisposition) Valid() bool {
 // take ownership before the held session/prompt RPC returns.
 const AgentEventDataPromptHandoff = "prompt_handoff"
 
+// AgentEventDataConfigurationCommandResult carries a transient result for a
+// configuration command completed by this prompt generation.
+const AgentEventDataConfigurationCommandResult = "configuration_result"
+
 // Session status constants for EventTypeSessionStatus events.
 const (
 	SessionStatusResumed = "resumed"
@@ -244,6 +248,10 @@ type AgentEvent struct {
 	// It travels with the completion frame so consumers do not have to infer
 	// ownership from cross-subject event ordering.
 	TurnID string `json:"turn_id,omitempty"`
+
+	// ConfigurationCommandResult is set only for the live prompt completion
+	// that observed the result of this configuration command.
+	ConfigurationCommandResult *ConfigurationCommandResult `json:"configuration_result,omitempty"`
 
 	// ControlTurnID is the control-server-assigned turn identifier
 	// (AC-EXECUTORS-SURVIVAL-004.1), stamped onto a terminal event at the

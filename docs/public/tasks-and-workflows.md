@@ -826,6 +826,20 @@ advertised argument hint, such as `/goal`'s supported arguments. These labels
 and hints describe the command; they do not apply it until you send the draft.
 Pasted rich text does not create a command chip; Kandev uses its visible plain text.
 
+In task Chat, confirmed changes appear in one muted system message, such as
+“Changed model `Sonnet`, mode `Plan`.” Changes before the next turn share that
+message, with the latest result for each setting. Unconfirmed changes appear
+in red with a message that explains the outcome.
+
+Settings you choose before the agent starts appear as “Saved … for agent
+startup.” When the agent starts, later changes appear in a new message.
+
+A supported configuration command such as `/model <id>` can also report the
+setting that the agent applied. Kandev shows that result beneath the command
+for a short time. If the agent does not report a clear change, the message
+says that the requested setting could not be confirmed. Reloading the page
+clears these feedback messages.
+
 ## Recover from provider errors
 
 ### Connection loss

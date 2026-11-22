@@ -507,6 +507,9 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 		return resp, err
 	}
 	a.emitAvailableCommandsOnce(promptCtx, req.SessionId)
+	if handled, commandErr := a.handleConfigurationCommandFeedback(promptCtx, req.SessionId, prompt); handled {
+		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, commandErr
+	}
 	if cancelHold != nil {
 		if acceptanceMarker != "" {
 			// The newline flushes the acceptance marker through lifecycle message buffering before the hold.
@@ -586,6 +589,52 @@ func (a *mockAgent) sessionModel(sessionID acp.SessionId) string {
 		}
 	}
 	return a.model
+}
+
+func (a *mockAgent) handleConfigurationCommandFeedback(
+	ctx context.Context,
+	sessionID acp.SessionId,
+	prompt string,
+) (bool, error) {
+	parts := strings.Fields(prompt)
+	if len(parts) != 2 || parts[0] != "/model" || parts[1] != string(modelSmart) {
+		return false, nil
+	}
+	timer := time.NewTimer(750 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return true, ctx.Err()
+	case <-timer.C:
+	}
+
+	a.mu.Lock()
+	previous, ok := a.sessionConfig[sessionID]
+	if !ok {
+		a.mu.Unlock()
+		return false, nil
+	}
+	mode := mockConfigOptionValue(previous, "mode")
+	options := mockSessionConfigOptionsForModel(string(modelSmart))
+	for i := range options {
+		if options[i].Select != nil && options[i].Select.Id == "mode" && mode != "" &&
+			mockConfigOptionContainsValue(options[i].Select.Options, mode) {
+			options[i].Select.CurrentValue = mode
+		}
+	}
+	a.sessionConfig[sessionID] = cloneSessionConfigOptions(options)
+	conn := a.conn
+	a.mu.Unlock()
+
+	if conn != nil {
+		_ = conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: sessionID,
+			Update: acp.SessionUpdate{
+				ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{ConfigOptions: cloneSessionConfigOptions(options)},
+			},
+		})
+	}
+	return true, nil
 }
 
 // Cancel handles session cancellation.

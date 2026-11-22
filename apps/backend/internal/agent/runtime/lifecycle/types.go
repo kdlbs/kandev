@@ -397,6 +397,7 @@ type AgentExecution struct {
 	providerDefaultModelState    *CachedModelState
 	authoritativeConfigResponses map[string]*CachedModelState
 	pendingConfigSettlement      *configSettlement
+	sessionConfigurationMu       sync.Mutex
 	modelStateMu                 sync.RWMutex
 
 	// Cached auth methods from agent_capabilities (for error recovery metadata)
