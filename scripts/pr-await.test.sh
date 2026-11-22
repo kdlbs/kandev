@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT_DIR/scripts/pr-await"
+export PR_AWAIT_TEST_REAL_SLEEP="$(command -v sleep)"
 
 pass() { printf 'ok - %s\n' "$1"; }
 fail() {
@@ -136,6 +137,7 @@ for event_status in 0 8 1; do
   out="$(run_await "$d" 12 --quiet --format json)"
   jq -e '.polls == 4 and .exit_code == 0' <<<"$out" >/dev/null || fail "event wait must recheck evidence"
   listens=2; sleeps=1
+  if [[ "$event_status" == 0 ]]; then sleeps=3; fi
   if [[ "$event_status" == 1 ]]; then listens=1; sleeps=3; fi
   [[ "$(wc -l < "$d/listens")" -eq "$listens" && "$(wc -l < "$d/sleeps")" -eq "$sleeps" ]] || fail "event fallback cadence"
   grep -q 'event listen --resource https://github.com/test/repo/pull/12 .*--timeout 60s' "$d/listens" || fail "bounded PR subscription"
@@ -301,7 +303,7 @@ snapshot "$d" 1 20 0 0
 cat >"$d/slow-sleep" <<'SLOWSLEEP'
 #!/usr/bin/env bash
 printf 'slept %s\n' "$1" >> "$FAKE_DIR/sleeps"
-sleep "$1"
+"$PR_AWAIT_TEST_REAL_SLEEP" "$1"
 SLOWSLEEP
 chmod +x "$d/slow-sleep"
 out="$(PR_AWAIT_DEADLINE_SEC=5 PR_AWAIT_SLEEP_OVERRIDE="$d/slow-sleep" \
@@ -321,7 +323,7 @@ d="$(make_tmp_dir)"; setup_fake "$d"
 snapshot "$d" 1 20 1 0
 cat >"$d/slow-sleep" <<'SLOWSLEEP'
 #!/usr/bin/env bash
-sleep "$1"
+"$PR_AWAIT_TEST_REAL_SLEEP" "$1"
 SLOWSLEEP
 chmod +x "$d/slow-sleep"
 out="$(PR_AWAIT_DEADLINE_SEC=5 PR_AWAIT_SLEEP_OVERRIDE="$d/slow-sleep" \

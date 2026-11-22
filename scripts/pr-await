@@ -486,7 +486,15 @@ sleep_or_stop() {
         --event com.github.pull_request.merge_conflict.v1 \
         --timeout "${remaining}s" || rc=$?
       case "$rc" in
-        0|8|124) return 0 ;;
+        0)
+          # Bound API reads when several events arrive in quick succession.
+          [[ "$remaining" -le 2 ]] || remaining=2
+          remaining=$((remaining - (SECONDS - started)))
+          [[ "$remaining" -le 0 ]] || "$SLEEP" "$remaining"
+          return
+          ;;
+        # gh exits 8 on --timeout. The outer watchdog returns 124.
+        8|124) return 0 ;;
       esac
       EVENT_WAIT_AVAILABLE=0
       progress "Event listener unavailable (exit $rc). Continuing with timed checks."
