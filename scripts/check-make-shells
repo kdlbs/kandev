@@ -506,7 +506,7 @@ fi
 cgo_status=0
 cgo_unprefixed=$(grep -nE '\$\(GO\) build' "$backend_dir/Makefile" \
 	| grep -E '\./cmd/(kandev|agentctl)$' \
-	| grep -vE 'CGO_LOCALE|GOOS=|\$\(GO_(LINUX|DARWIN)') || cgo_status=$?
+	| grep -vE 'CGO_LOCALE|GOOS=|\$\(GO_(LINUX|DARWIN|WINDOWS)') || cgo_status=$?
 if [ "$cgo_status" -gt 1 ]; then
 	printf 'FAIL  %-16s unable to scan Makefile (grep exit %s)\n' "static-cgo" "$cgo_status"
 	status=1

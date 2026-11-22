@@ -30,6 +30,7 @@ REMOTE_AGENTCTL_HELPERS=(
   "agentctl-linux-arm64:agentctl linux/arm64 helper"
   "agentctl-darwin-arm64:agentctl darwin/arm64 helper"
   "agentctl-darwin-amd64:agentctl darwin/amd64 helper"
+  "agentctl-windows-amd64.exe:agentctl windows/amd64 helper"
 )
 
 while [ "$#" -gt 0 ]; do

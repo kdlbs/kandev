@@ -36,7 +36,7 @@ asset_mib() {
       fi
     done
   done
-  for asset in agentctl-linux-amd64.gz agentctl-linux-arm64.gz agentctl-darwin-amd64.gz agentctl-darwin-arm64.gz; do
+  for asset in agentctl-linux-amd64.gz agentctl-linux-arm64.gz agentctl-darwin-amd64.gz agentctl-darwin-arm64.gz agentctl-windows-amd64.exe.gz; do
     bytes="$(asset_size "$asset")"
     printf '| helper | `%s` | %s | %s |\n' "$asset" "$bytes" "$(asset_mib "$bytes")"
   done

@@ -27,6 +27,11 @@ export const REMOTE_HELPERS = [
     platform: "darwin/arm64",
     asset: "agentctl-darwin-arm64.gz",
   },
+  {
+    name: "agentctl-windows-amd64.exe",
+    platform: "windows/amd64",
+    asset: "agentctl-windows-amd64.exe.gz",
+  },
 ];
 
 const MANIFEST_NAME = "remote-helpers.json";
@@ -35,7 +40,7 @@ const MAX_HELPER_BYTES = 256 * 1024 * 1024;
 const VERSION_PATTERN = /^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/;
 const COMMIT_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const HELPER_ASSET_PATTERN =
-  /^agentctl-(?:linux|darwin)-(?:amd64|arm64)\.gz(?:\.sha256)?$/;
+  /^agentctl-(?:(?:linux|darwin)-(?:amd64|arm64)|windows-amd64\.exe)\.gz(?:\.sha256)?$/;
 
 function fail(message) {
   throw new Error(message);
