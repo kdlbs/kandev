@@ -42,6 +42,23 @@ describe("usePluginIdentityLinks", () => {
     await waitFor(() => expect(listPluginIdentityLinks).toHaveBeenCalledWith("chat", "own"));
   });
 
+  it("refreshes the list when the window regains focus after a link was made elsewhere", async () => {
+    // Read the current server state on every call: mount effects may run more
+    // than once, so counting calls would be brittle.
+    let serverLinks: PluginIdentityLink[] = [];
+    listPluginIdentityLinks.mockImplementation(async () => serverLinks);
+    const { result } = renderHook(() => usePluginIdentityLinks("chat", false));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.links).toEqual([]);
+
+    serverLinks = [link("a")];
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(result.current.links.map((l) => l.id)).toEqual(["a"]));
+    expect(result.current.loading).toBe(false);
+  });
+
   it("keeps a link listed when revoking it fails", async () => {
     listPluginIdentityLinks.mockResolvedValue([link("a"), link("b")]);
     revokePluginIdentityLink.mockRejectedValueOnce(new Error("offline"));

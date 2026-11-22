@@ -277,7 +277,7 @@
   "identityLinks": "Contas de chat associadas",
   "identityLinksDescription": "Associe uma conta de chat à sua conta Kandev para que as aprovações que der através deste plugin sejam registadas em seu nome. Os administradores veem todas as contas associadas.",
   "identityLinkCodeCreate": "Gerar código de associação",
-  "identityLinkCodeInstructions": "Envie /link {{code}} ao plugin na sua aplicação de chat dentro de 10 minutos. O código só funciona uma vez.",
+  "identityLinkCodeInstructions": "Entregue este código ao plugin dentro de 10 minutos. O código só funciona uma vez.",
   "identityLinkCodeFailed": "Não foi possível gerar um código de associação.",
   "identityLinksLoadFailed": "Não foi possível carregar as contas associadas.",
   "identityLinkRevokeFailed": "Não foi possível desassociar a conta.",

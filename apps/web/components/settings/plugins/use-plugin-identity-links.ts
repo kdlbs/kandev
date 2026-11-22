@@ -20,21 +20,35 @@ export function usePluginIdentityLinks(pluginId: string, isAdmin: boolean) {
   const [errorKey, setErrorKey] = useState<string | null>(null);
   const scope = isAdmin ? "all" : "own";
 
-  const reload = useCallback(async () => {
-    setLoading(true);
+  const fetchLinks = useCallback(async () => {
     try {
       setLinks(await listPluginIdentityLinks(pluginId, scope));
       setErrorKey(null);
     } catch {
       setErrorKey("plugins:identityLinksLoadFailed");
+    }
+  }, [pluginId, scope]);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      await fetchLinks();
     } finally {
       setLoading(false);
     }
-  }, [pluginId, scope]);
+  }, [fetchLinks]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // A code is redeemed in the external chat app, so the account links change
+  // while this page is in the background. Refresh quietly when it regains focus.
+  useEffect(() => {
+    const onFocus = () => void fetchLinks();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [fetchLinks]);
 
   const createCode = useCallback(async () => {
     setBusy(true);

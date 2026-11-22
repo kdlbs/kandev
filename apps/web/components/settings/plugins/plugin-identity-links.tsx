@@ -49,7 +49,7 @@ export function PluginIdentityLinks({ plugin }: { plugin: PluginRecord }) {
           >
             <p className="font-mono text-lg tracking-wider select-all">{state.code.code}</p>
             <p className="text-sm text-muted-foreground">
-              {t("plugins:identityLinkCodeInstructions", { code: state.code.code })}
+              {t("plugins:identityLinkCodeInstructions")}
             </p>
           </div>
         )}

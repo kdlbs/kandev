@@ -277,7 +277,7 @@
   "identityLinks": "Linked chat accounts",
   "identityLinksDescription": "Link a chat account to your Kandev account so approvals you give through this plugin act as you. Admins see every linked account.",
   "identityLinkCodeCreate": "Generate link code",
-  "identityLinkCodeInstructions": "Send /link {{code}} to the plugin in your chat app within 10 minutes. The code works once.",
+  "identityLinkCodeInstructions": "Give this code to the plugin within 10 minutes. The code works once.",
   "identityLinkCodeFailed": "Could not generate a link code.",
   "identityLinksLoadFailed": "Could not load linked accounts.",
   "identityLinkRevokeFailed": "Could not unlink the account.",

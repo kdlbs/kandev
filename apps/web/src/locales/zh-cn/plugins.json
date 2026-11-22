@@ -277,7 +277,7 @@
   "identityLinks": "已关联的聊天账号",
   "identityLinksDescription": "将聊天账号关联到你的 Kandev 账号后，你通过此插件做出的审批将以你的身份记录。管理员可以查看所有已关联的账号。",
   "identityLinkCodeCreate": "生成关联码",
-  "identityLinkCodeInstructions": "请在 10 分钟内在聊天应用中向插件发送 /link {{code}}。关联码只能使用一次。",
+  "identityLinkCodeInstructions": "请在 10 分钟内把此代码提供给插件。关联码只能使用一次。",
   "identityLinkCodeFailed": "无法生成关联码。",
   "identityLinksLoadFailed": "无法加载已关联的账号。",
   "identityLinkRevokeFailed": "无法取消关联该账号。",
