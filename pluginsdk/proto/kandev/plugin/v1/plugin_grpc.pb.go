@@ -879,6 +879,7 @@ const (
 	Host_DeleteManagedConversationScheduleExact_FullMethodName     = "/kandev.plugin.v1.Host/DeleteManagedConversationScheduleExact"
 	Host_EnsureTaskRunExact_FullMethodName                         = "/kandev.plugin.v1.Host/EnsureTaskRunExact"
 	Host_StopTaskRunExact_FullMethodName                           = "/kandev.plugin.v1.Host/StopTaskRunExact"
+	Host_CancelTurnExact_FullMethodName                            = "/kandev.plugin.v1.Host/CancelTurnExact"
 	Host_RecoverSessionExact_FullMethodName                        = "/kandev.plugin.v1.Host/RecoverSessionExact"
 	Host_CancelPendingTaskTransitionExact_FullMethodName           = "/kandev.plugin.v1.Host/CancelPendingTaskTransitionExact"
 	Host_GetSessionModeContextExact_FullMethodName                 = "/kandev.plugin.v1.Host/GetSessionModeContextExact"
@@ -1019,6 +1020,9 @@ type HostClient interface {
 	// approval and resource-version/execution-generation fences.
 	EnsureTaskRunExact(ctx context.Context, in *EnsureTaskRunExactRequest, opts ...grpc.CallOption) (*EnsureTaskRunExactResponse, error)
 	StopTaskRunExact(ctx context.Context, in *StopTaskRunExactRequest, opts ...grpc.CallOption) (*StopTaskRunExactResponse, error)
+	// CancelTurnExact interrupts the observed execution's current turn without
+	// stopping the session; the session stays promptable.
+	CancelTurnExact(ctx context.Context, in *CancelTurnExactRequest, opts ...grpc.CallOption) (*CancelTurnExactResponse, error)
 	RecoverSessionExact(ctx context.Context, in *RecoverSessionExactRequest, opts ...grpc.CallOption) (*RecoverSessionExactResponse, error)
 	CancelPendingTaskTransitionExact(ctx context.Context, in *CancelPendingTaskTransitionExactRequest, opts ...grpc.CallOption) (*CancelPendingTaskTransitionExactResponse, error)
 	GetSessionModeContextExact(ctx context.Context, in *GetSessionModeContextExactRequest, opts ...grpc.CallOption) (*GetSessionModeContextExactResponse, error)
@@ -1541,6 +1545,16 @@ func (c *hostClient) StopTaskRunExact(ctx context.Context, in *StopTaskRunExactR
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StopTaskRunExactResponse)
 	err := c.cc.Invoke(ctx, Host_StopTaskRunExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) CancelTurnExact(ctx context.Context, in *CancelTurnExactRequest, opts ...grpc.CallOption) (*CancelTurnExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelTurnExactResponse)
+	err := c.cc.Invoke(ctx, Host_CancelTurnExact_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2306,6 +2320,9 @@ type HostServer interface {
 	// approval and resource-version/execution-generation fences.
 	EnsureTaskRunExact(context.Context, *EnsureTaskRunExactRequest) (*EnsureTaskRunExactResponse, error)
 	StopTaskRunExact(context.Context, *StopTaskRunExactRequest) (*StopTaskRunExactResponse, error)
+	// CancelTurnExact interrupts the observed execution's current turn without
+	// stopping the session; the session stays promptable.
+	CancelTurnExact(context.Context, *CancelTurnExactRequest) (*CancelTurnExactResponse, error)
 	RecoverSessionExact(context.Context, *RecoverSessionExactRequest) (*RecoverSessionExactResponse, error)
 	CancelPendingTaskTransitionExact(context.Context, *CancelPendingTaskTransitionExactRequest) (*CancelPendingTaskTransitionExactResponse, error)
 	GetSessionModeContextExact(context.Context, *GetSessionModeContextExactRequest) (*GetSessionModeContextExactResponse, error)
@@ -2567,6 +2584,9 @@ func (UnimplementedHostServer) EnsureTaskRunExact(context.Context, *EnsureTaskRu
 }
 func (UnimplementedHostServer) StopTaskRunExact(context.Context, *StopTaskRunExactRequest) (*StopTaskRunExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StopTaskRunExact not implemented")
+}
+func (UnimplementedHostServer) CancelTurnExact(context.Context, *CancelTurnExactRequest) (*CancelTurnExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelTurnExact not implemented")
 }
 func (UnimplementedHostServer) RecoverSessionExact(context.Context, *RecoverSessionExactRequest) (*RecoverSessionExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RecoverSessionExact not implemented")
@@ -3473,6 +3493,24 @@ func _Host_StopTaskRunExact_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).StopTaskRunExact(ctx, req.(*StopTaskRunExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_CancelTurnExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelTurnExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).CancelTurnExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_CancelTurnExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).CancelTurnExact(ctx, req.(*CancelTurnExactRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -4852,6 +4890,10 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StopTaskRunExact",
 			Handler:    _Host_StopTaskRunExact_Handler,
+		},
+		{
+			MethodName: "CancelTurnExact",
+			Handler:    _Host_CancelTurnExact_Handler,
 		},
 		{
 			MethodName: "RecoverSessionExact",

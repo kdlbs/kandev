@@ -93,6 +93,10 @@ type ExactClarificationResponse struct {
 type ExactExecutionCommandManager interface {
 	EnsureTaskRun(context.Context, ExactTaskRunCommand) (*CommandResult, ExactTaskRunResult, error)
 	StopTaskRun(context.Context, ExactTaskExecutionCommand) (*CommandResult, bool, error)
+	// CancelTurn interrupts the observed execution's current turn without
+	// stopping the session. It reports false with NO_CHANGE when no turn is
+	// active, and uses the same fences and grant as StopTaskRun.
+	CancelTurn(context.Context, ExactTaskExecutionCommand) (*CommandResult, bool, error)
 	RecoverSession(context.Context, ExactSessionRecoveryCommand) (*CommandResult, ExactTaskRunResult, error)
 	CancelPendingTaskTransition(context.Context, ExactPendingTransitionCommand) (*CommandResult, error)
 	GetSessionModeContext(context.Context, ExactTaskExecutionCommand) (SessionModeContext, error)

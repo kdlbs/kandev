@@ -73,6 +73,7 @@ var hostCallCallerRequired = map[string]struct{}{
 
 	pluginv1.Host_EnsureTaskRunExact_FullMethodName:               {},
 	pluginv1.Host_StopTaskRunExact_FullMethodName:                 {},
+	pluginv1.Host_CancelTurnExact_FullMethodName:                  {},
 	pluginv1.Host_RecoverSessionExact_FullMethodName:              {},
 	pluginv1.Host_CancelPendingTaskTransitionExact_FullMethodName: {},
 	pluginv1.Host_GetSessionModeContextExact_FullMethodName:       {},

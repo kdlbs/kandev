@@ -175,6 +175,9 @@ service Host {
   // approval and resource-version/execution-generation fences.
   rpc EnsureTaskRunExact(EnsureTaskRunExactRequest) returns (EnsureTaskRunExactResponse);
   rpc StopTaskRunExact(StopTaskRunExactRequest) returns (StopTaskRunExactResponse);
+  // CancelTurnExact interrupts the observed execution's current turn without
+  // stopping the session; the session stays promptable.
+  rpc CancelTurnExact(CancelTurnExactRequest) returns (CancelTurnExactResponse);
   rpc RecoverSessionExact(RecoverSessionExactRequest) returns (RecoverSessionExactResponse);
   rpc CancelPendingTaskTransitionExact(CancelPendingTaskTransitionExactRequest) returns (CancelPendingTaskTransitionExactResponse);
   rpc GetSessionModeContextExact(GetSessionModeContextExactRequest) returns (GetSessionModeContextExactResponse);
@@ -1277,6 +1280,25 @@ message StopTaskRunExactRequest {
 message StopTaskRunExactResponse {
   HostCommandResult result = 1;
   bool stopped = 2;
+}
+
+message CancelTurnExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string session_id = 4;
+  string expected_session_resource_version = 5;
+  string expected_execution_id = 6;
+  string idempotency_key = 7;
+  uint64 approval_revision = 8;
+  string manifest_digest = 9;
+  string management_instance_key = 10;
+  int64 expected_claim_generation = 11;
+}
+
+message CancelTurnExactResponse {
+  HostCommandResult result = 1;
+  bool cancelled = 2; // false with NO_CHANGE when no turn was active
 }
 
 message RecoverSessionExactRequest {

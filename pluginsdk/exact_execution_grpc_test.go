@@ -28,12 +28,13 @@ func (h *exactExecutionHostFixture) ExactInteractionCommands() ExactInteractionC
 }
 
 type exactExecutionManagerFixture struct {
-	ensure   ExactTaskRunCommand
-	stop     ExactTaskExecutionCommand
-	recover  ExactSessionRecoveryCommand
-	cancel   ExactPendingTransitionCommand
-	modeRead ExactTaskExecutionCommand
-	modeSet  ExactSessionModeCommand
+	ensure     ExactTaskRunCommand
+	stop       ExactTaskExecutionCommand
+	cancelTurn ExactTaskExecutionCommand
+	recover    ExactSessionRecoveryCommand
+	cancel     ExactPendingTransitionCommand
+	modeRead   ExactTaskExecutionCommand
+	modeSet    ExactSessionModeCommand
 }
 
 func (f *exactExecutionManagerFixture) EnsureTaskRun(_ context.Context, in ExactTaskRunCommand) (*CommandResult, ExactTaskRunResult, error) {
@@ -43,6 +44,11 @@ func (f *exactExecutionManagerFixture) EnsureTaskRun(_ context.Context, in Exact
 
 func (f *exactExecutionManagerFixture) StopTaskRun(_ context.Context, in ExactTaskExecutionCommand) (*CommandResult, bool, error) {
 	f.stop = in
+	return &CommandResult{Status: CommandApplied}, true, nil
+}
+
+func (f *exactExecutionManagerFixture) CancelTurn(_ context.Context, in ExactTaskExecutionCommand) (*CommandResult, bool, error) {
+	f.cancelTurn = in
 	return &CommandResult{Status: CommandApplied}, true, nil
 }
 
@@ -112,6 +118,12 @@ func TestExactExecutionAndInteractionCommandsRoundTrip(t *testing.T) {
 	require.Equal(t, CommandApplied, result.Status)
 	require.True(t, stopped)
 	require.Equal(t, base, fixture.execution.stop)
+
+	result, cancelled, err := execution.CancelTurn(context.Background(), base)
+	require.NoError(t, err)
+	require.Equal(t, CommandApplied, result.Status)
+	require.True(t, cancelled)
+	require.Equal(t, base, fixture.execution.cancelTurn)
 
 	recovery := ExactSessionRecoveryCommand{ExactTaskExecutionCommand: base, Action: "resume"}
 	_, recovered, err := execution.RecoverSession(context.Background(), recovery)

@@ -11,6 +11,7 @@ import (
 type ExactExecutionController interface {
 	EnsureTaskRun(context.Context, string, pluginsdk.ExactTaskRunCommand) (pluginsdk.ExactTaskRunResult, error)
 	StopTaskRun(context.Context, string, pluginsdk.ExactTaskExecutionCommand) (bool, error)
+	CancelTurn(context.Context, string, pluginsdk.ExactTaskExecutionCommand) (bool, error)
 	RecoverSession(context.Context, string, pluginsdk.ExactSessionRecoveryCommand) (pluginsdk.ExactTaskRunResult, error)
 	CancelPendingTaskTransition(context.Context, string, pluginsdk.ExactPendingTransitionCommand) (bool, error)
 	GetSessionModeContext(context.Context, string, pluginsdk.ExactTaskExecutionCommand) (pluginsdk.SessionModeContext, error)

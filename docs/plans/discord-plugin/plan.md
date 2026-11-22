@@ -206,7 +206,7 @@ Wave 1 (parallel candidates — different repositories):
 - [ ] [task-05-plugin-bootstrap-config](task-05-plugin-bootstrap-config.md)
 
 Wave 2:
-- [ ] [task-02-host-control-rpcs](task-02-host-control-rpcs.md)  (CancelTurn)
+- [x] [task-02-host-control-rpcs](task-02-host-control-rpcs.md)  (CancelTurn)
 - [x] ~~[task-03-host-plugin-event-sanitization](task-03-host-plugin-event-sanitization.md)~~  (cancelled: maintainers keep `raw_content`; task-04 corrects the docs)
 - [x] [task-17-host-message-source](task-17-host-message-source.md)  (sequential with 02: shared proto)
 - [ ] [task-06-plugin-gateway-provisioning](task-06-plugin-gateway-provisioning.md)

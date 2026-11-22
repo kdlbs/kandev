@@ -56,6 +56,7 @@ const exactTaskRelationRemoveMethod = "RemoveTaskRelationExact"
 const exactTaskMessageMethod = "SendTaskMessageExact"
 const exactEnsureTaskRunMethod = "EnsureTaskRunExact"
 const exactStopTaskRunMethod = "StopTaskRunExact"
+const exactCancelTurnMethod = "CancelTurnExact"
 const exactRecoverSessionMethod = "RecoverSessionExact"
 const exactCancelTaskTransitionMethod = "CancelPendingTaskTransitionExact"
 const exactGetSessionModeMethod = "GetSessionModeContextExact"
@@ -92,6 +93,7 @@ var exactHostMethods = []exactMethod{
 	{method: exactTaskMessageMethod, capability: "host.v2.write:messages", description: "Queue one version-fenced task message"},
 	{method: exactEnsureTaskRunMethod, capability: "host.v2.write:execution", description: "Ensure one task has a live run through native launch admission"},
 	{method: exactStopTaskRunMethod, capability: "host.v2.write:execution", description: "Stop only the observed session execution"},
+	{method: exactCancelTurnMethod, capability: "host.v2.write:execution", description: "Interrupt the observed execution's current turn and keep the session"},
 	{method: exactRecoverSessionMethod, capability: "host.v2.write:execution", description: "Recover one observed interrupted session through native launch"},
 	{method: exactCancelTaskTransitionMethod, capability: "host.v2.write:execution", description: "Cancel one observed pending workflow transition"},
 	{method: exactGetSessionModeMethod, capability: "host.v2.read:sessions", description: "Read provider-advertised modes for one session"},
@@ -401,7 +403,7 @@ func isManagedAutomationScheduleMethod(method string) bool {
 
 func isExactExecutionMethod(method string) bool {
 	switch method {
-	case exactEnsureTaskRunMethod, exactStopTaskRunMethod, exactRecoverSessionMethod,
+	case exactEnsureTaskRunMethod, exactStopTaskRunMethod, exactCancelTurnMethod, exactRecoverSessionMethod,
 		exactCancelTaskTransitionMethod, exactGetSessionModeMethod, exactSetSessionModeMethod:
 		return true
 	default:
