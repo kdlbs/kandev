@@ -2,13 +2,18 @@ package acp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -20,6 +25,8 @@ import (
 func claudeTerminalAdapter(t *testing.T) *Adapter {
 	t.Helper()
 	a := newTestAdapterForAgent(claudeAgentID)
+	t.Cleanup(func() { _ = a.Close() })
+	a.sessionID = "session-claude"
 	a.agentInfo = &AgentInfo{
 		Name:    verifiedClaudeTerminalBridgeName,
 		Version: verifiedClaudeTerminalBridgeVersion,
@@ -63,6 +70,35 @@ func startClaudeBackgroundLaunch(t *testing.T, a *Adapter, sessionID string, lau
 	return event
 }
 
+func startClaudeBackgroundShell(t *testing.T, a *Adapter, sessionID string, launch claudeBackgroundLaunch) *AgentEvent {
+	t.Helper()
+	call := &acp.SessionUpdateToolCall{
+		ToolCallId:    acp.ToolCallId(launch.toolCallID),
+		Kind:          acp.ToolKindExecute,
+		Status:        acp.ToolCallStatusPending,
+		Title:         "Terminal",
+		SessionUpdate: "tool_call",
+		RawInput:      map[string]any{},
+	}
+	require.NotNil(t, a.convertToolCallUpdate(sessionID, call))
+	status := acp.ToolCallStatus("in_progress")
+	event := a.convertToolCallResultUpdate(sessionID, &acp.SessionToolCallUpdate{
+		ToolCallId:    acp.ToolCallId(launch.toolCallID),
+		Status:        &status,
+		SessionUpdate: "tool_call_update",
+		Meta:          map[string]any{"claudeCode": map[string]any{"toolName": "Bash"}},
+		RawInput: map[string]any{
+			"command":           launch.command,
+			"description":       launch.title,
+			"run_in_background": true,
+		},
+	})
+	require.NotNil(t, event)
+	require.True(t, event.NormalizedPayload.IsDetachedBackgroundLaunch())
+	require.Empty(t, event.NormalizedPayload.BackgroundWork().WorkID)
+	return event
+}
+
 func claudeTerminalExitUpdate(toolCallID string, exitCode, signal any) *acp.SessionToolCallUpdate {
 	return &acp.SessionToolCallUpdate{
 		ToolCallId:    acp.ToolCallId(toolCallID),
@@ -81,6 +117,222 @@ func activeClaudeToolCallCount(a *Adapter) int {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return len(a.activeToolCalls)
+}
+
+type claudeCancelTestAgent struct {
+	sessionRequestCaptureAgent
+	connection     *acp.AgentSideConnection
+	cancelRequests chan acp.CancelNotification
+}
+
+func (a *claudeCancelTestAgent) Cancel(_ context.Context, request acp.CancelNotification) error {
+	a.cancelRequests <- request
+	return nil
+}
+
+func newClaudeCancelTestConnection(t *testing.T, a *Adapter, sessionID string) *claudeCancelTestAgent {
+	t.Helper()
+	clientToAgentReader, clientToAgentWriter := io.Pipe()
+	agentToClientReader, agentToClientWriter := io.Pipe()
+	client := acpclient.NewClient(acpclient.WithUpdateHandler(a.enqueueACPUpdate))
+	connection := acp.NewClientSideConnection(client, clientToAgentWriter, agentToClientReader)
+	peer := &claudeCancelTestAgent{cancelRequests: make(chan acp.CancelNotification, 1)}
+	peer.connection = acp.NewAgentSideConnection(peer, agentToClientWriter, clientToAgentReader)
+	a.acpClient = client
+	a.acpConn = connection
+	a.sessionID = sessionID
+	t.Cleanup(func() {
+		_ = clientToAgentReader.Close()
+		_ = clientToAgentWriter.Close()
+		_ = agentToClientReader.Close()
+		_ = agentToClientWriter.Close()
+	})
+	return peer
+}
+
+func waitForClaudeToolUpdate(t *testing.T, a *Adapter, toolCallID string) AgentEvent {
+	t.Helper()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case event := <-a.updatesCh:
+			if event.Type == streams.EventTypeToolUpdate && event.ToolCallID == toolCallID {
+				return event
+			}
+		case <-timer.C:
+			t.Fatalf("timed out waiting for tool update %q", toolCallID)
+		}
+	}
+}
+
+func cancelClaudeWithQueuedLaunchUpdate(
+	t *testing.T,
+	a *Adapter,
+	peer *claudeCancelTestAgent,
+	launch claudeBackgroundLaunch,
+) []AgentEvent {
+	t.Helper()
+	workerEntered := make(chan struct{})
+	workerRelease := make(chan struct{})
+	workerDone := make(chan bool, 1)
+	go func() {
+		workerDone <- a.syncNotifQueueThen(func() {
+			close(workerEntered)
+			<-workerRelease
+		})
+	}()
+	select {
+	case <-workerEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("notification worker did not reach the test barrier")
+	}
+	var releaseOnce sync.Once
+	releaseWorker := func() { releaseOnce.Do(func() { close(workerRelease) }) }
+	t.Cleanup(releaseWorker)
+
+	completed := acp.ToolCallStatusCompleted
+	require.NoError(t, peer.connection.SessionUpdate(t.Context(), acp.SessionNotification{
+		SessionId: "session-claude",
+		Update: acp.SessionUpdate{ToolCallUpdate: &acp.SessionToolCallUpdate{
+			ToolCallId:    acp.ToolCallId(launch.toolCallID),
+			Status:        &completed,
+			SessionUpdate: "tool_call_update",
+			Meta:          map[string]any{"claudeCode": map[string]any{"toolName": "Bash"}},
+			RawInput: map[string]any{
+				"command":           launch.command,
+				"description":       launch.title,
+				"run_in_background": true,
+			},
+		}},
+	}))
+	require.Eventually(t, func() bool { return len(a.notifQueue) == 1 }, 2*time.Second, time.Millisecond,
+		"completed launch update must be queued behind the held worker")
+	cancelDone := make(chan error, 1)
+	go func() { cancelDone <- a.Cancel(t.Context()) }()
+	require.Eventually(t, func() bool { return len(a.notifQueue) == 2 }, 2*time.Second, time.Millisecond,
+		"Stop must queue its sweep barrier after the launch update")
+	releaseWorker()
+	require.True(t, <-workerDone)
+	require.NoError(t, <-cancelDone)
+	select {
+	case request := <-peer.cancelRequests:
+		require.Equal(t, "session-claude", string(request.SessionId))
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ACP session/cancel")
+	}
+	return drainEvents(a)
+}
+
+// @covers AC-AGENTS-BACKGROUND-WORK-010.3
+// @covers AC-AGENTS-BACKGROUND-WORK-010.6
+func TestClaudeBackgroundTerminalExitAfterTurnCancel(t *testing.T) {
+	a := claudeTerminalAdapter(t)
+	peer := newClaudeCancelTestConnection(t, a, "session-claude")
+	first := claudeBackgroundLaunch{toolCallID: "toolu_cancel_first", command: "sleep 10", title: "First"}
+	second := claudeBackgroundLaunch{toolCallID: "toolu_cancel_second", command: "sleep 20", title: "Second"}
+	startClaudeBackgroundShell(t, a, "session-claude", first)
+	secondLaunch := startClaudeBackgroundLaunch(t, a, "session-claude", second)
+	require.Equal(t, second.toolCallID, secondLaunch.NormalizedPayload.BackgroundWork().WorkID)
+	pendingID := "toolu_cancel_pending"
+	require.NotNil(t, a.convertToolCallUpdate("session-claude", &acp.SessionUpdateToolCall{
+		ToolCallId: acp.ToolCallId(pendingID), Kind: acp.ToolKindExecute,
+		Status: acp.ToolCallStatusPending, Title: "Terminal", SessionUpdate: "tool_call",
+		Meta: map[string]any{"claudeCode": map[string]any{"toolName": "Bash"}},
+		RawInput: map[string]any{
+			"command":           "sleep 30",
+			"description":       "Pending background shell",
+			"run_in_background": true,
+		},
+	}))
+	foregroundID := "toolu_cancel_foreground"
+	require.NotNil(t, a.convertToolCallUpdate("session-claude", &acp.SessionUpdateToolCall{
+		ToolCallId: acp.ToolCallId(foregroundID), Kind: acp.ToolKindRead,
+		Status: acp.ToolCallStatusPending, Title: "Read", SessionUpdate: "tool_call",
+		RawInput: map[string]any{"path": "README.md"},
+	}))
+	drainEvents(a)
+
+	allEvents := cancelClaudeWithQueuedLaunchUpdate(t, a, peer, first)
+	var cancelEvents []AgentEvent
+	for _, event := range allEvents {
+		if event.ToolStatus == toolStatusCancelled {
+			cancelEvents = append(cancelEvents, event)
+		}
+	}
+	a.mu.RLock()
+	retained := a.activeToolCalls[first.toolCallID]
+	a.mu.RUnlock()
+	require.NotNil(t, retained)
+	require.Equal(t, first.toolCallID, retained.BackgroundWork().WorkID)
+
+	require.NoError(t, peer.connection.SessionUpdate(t.Context(), acp.SessionNotification{
+		SessionId: "session-claude",
+		Update:    acp.SessionUpdate{ToolCallUpdate: claudeTerminalExitUpdate(first.toolCallID, nil, nil)},
+	}))
+	terminal := waitForClaudeToolUpdate(t, a, first.toolCallID)
+	require.NotNil(t, terminal.BackgroundWork, "the matching exit must retain its workload observation after Stop")
+	require.Equal(t, streams.RunStateEnded, terminal.BackgroundWork.State)
+	require.Equal(t, first.toolCallID, terminal.BackgroundWork.WorkID)
+	require.Nil(t, terminal.BackgroundWork.ExitCode)
+	require.Equal(t, toolStatusComplete, terminal.ToolStatus)
+	require.Equal(t, 1, activeClaudeToolCallCount(a), "the live sibling remains tracked")
+	require.Len(t, cancelEvents, 2, "pending Bash and foreground tools receive ordinary cancellation")
+	cancelledIDs := make([]string, 0, len(cancelEvents))
+	for _, event := range cancelEvents {
+		require.Equal(t, toolStatusCancelled, event.ToolStatus)
+		cancelledIDs = append(cancelledIDs, event.ToolCallID)
+		if event.ToolCallID == pendingID {
+			work := event.NormalizedPayload.BackgroundWork()
+			require.NotNil(t, work)
+			require.True(t, work.Ended, "an unconfirmed launch cannot remain live after cancellation")
+			require.False(t, event.NormalizedPayload.IsActiveBackgroundWork())
+		}
+	}
+	require.ElementsMatch(t, []string{pendingID, foregroundID}, cancelledIDs)
+}
+
+// @covers AC-AGENTS-BACKGROUND-WORK-002.2
+func TestClaudeBackgroundTerminalBindingEndsOnNativeSessionReplacement(t *testing.T) {
+	a := claudeTerminalAdapter(t)
+	a.sessionID = "session-old"
+	launch := claudeBackgroundLaunch{toolCallID: "toolu_reused", command: "sleep 10", title: "Old shell"}
+	startClaudeBackgroundShell(t, a, "session-old", launch)
+	drainEvents(a)
+
+	require.True(t, a.installNativeBindingBarrier("session-new", false, false))
+	require.Equal(t, 0, activeClaudeToolCallCount(a), "native session replacement releases old shell bindings")
+	newLaunch := claudeBackgroundLaunch{toolCallID: launch.toolCallID, command: "sleep 20", title: "New shell"}
+	startClaudeBackgroundLaunch(t, a, "session-new", newLaunch)
+	drainEvents(a)
+
+	staleStart := a.convertToolCallUpdate("session-old", &acp.SessionUpdateToolCall{
+		ToolCallId: acp.ToolCallId(launch.toolCallID), Kind: acp.ToolKindExecute,
+		Status: acp.ToolCallStatusPending, Title: "Terminal", SessionUpdate: "tool_call",
+		Meta: map[string]any{"claudeCode": map[string]any{"toolName": "Bash"}},
+		RawInput: map[string]any{
+			"command": "stale old shell", "run_in_background": true,
+		},
+	})
+	require.Nil(t, staleStart, "a stale session cannot replace the current shell binding")
+	staleLaunchResult := acp.ToolCallStatusCompleted
+	require.Nil(t, a.convertToolCallResultUpdate("session-old", &acp.SessionToolCallUpdate{
+		ToolCallId: acp.ToolCallId(launch.toolCallID), Status: &staleLaunchResult,
+		SessionUpdate: "tool_call_update",
+		Meta:          map[string]any{"claudeCode": map[string]any{"toolName": "Bash"}},
+		RawInput: map[string]any{
+			"command": "stale old shell", "run_in_background": true,
+		},
+	}), "a stale launch result cannot mutate the current shell")
+
+	require.Nil(t, a.convertToolCallResultUpdate("session-old", claudeTerminalExitUpdate(launch.toolCallID, nil, nil)),
+		"a late exit from the replaced native session cannot settle a reused launch ID")
+	require.Equal(t, 1, activeClaudeToolCallCount(a))
+	terminal := a.convertToolCallResultUpdate("session-new", claudeTerminalExitUpdate(newLaunch.toolCallID, nil, nil))
+	require.NotNil(t, terminal)
+	require.NotNil(t, terminal.BackgroundWork)
+	require.Equal(t, newLaunch.title, terminal.BackgroundWork.Title)
+	require.Equal(t, streams.RunStateEnded, terminal.BackgroundWork.State)
 }
 
 // @covers AC-AGENTS-BACKGROUND-WORK-010.3
@@ -133,12 +385,11 @@ func TestClaudeBackgroundTerminalExitManagedDefault(t *testing.T) {
 // @covers AC-AGENTS-BACKGROUND-WORK-010.6
 func TestClaudeBackgroundTerminalPromptCleanupScope(t *testing.T) {
 	cleanups := []struct {
-		name      string
-		preserves bool
-		run       func(*Adapter)
+		name string
+		run  func(*Adapter)
 	}{
-		{name: "prompt end", preserves: true, run: func(a *Adapter) { a.cancelPromptEndToolCalls("session-claude") }},
-		{name: "explicit cancel", preserves: false, run: func(a *Adapter) { a.cancelActiveToolCalls("session-claude") }},
+		{name: "prompt end", run: func(a *Adapter) { a.cancelPromptEndToolCalls("session-claude") }},
+		{name: "explicit cancel", run: func(a *Adapter) { a.cancelActiveToolCalls("session-claude") }},
 	}
 	identities := []struct {
 		name          string
@@ -191,7 +442,7 @@ func TestClaudeBackgroundTerminalPromptCleanupScope(t *testing.T) {
 				cleanup.run(a)
 
 				events := drainEvents(a)
-				if identity.wantPreserved && cleanup.preserves {
+				if identity.wantPreserved {
 					require.Equal(t, 1, activeClaudeToolCallCount(a),
 						"the verified bridge can still report this shell's terminal exit")
 					for _, event := range events {

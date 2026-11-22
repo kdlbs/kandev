@@ -110,6 +110,26 @@ workload. Existing terminal monotonicity rejects delayed nonterminal reopening.
 A terminal frame without its session's launch binding cannot settle another
 job. No event creates a prompt, changes a successor turn, or emits root completion.
 
+### Exit delivery after turn cancellation
+
+Chat Stop sends `session/cancel` to the current Claude bridge. The bridge can
+report a detached shell's exit on the same connection after that request.
+Before the cancellation sweep, the adapter drains notifications already
+accepted from ACP so a queued completed launch can establish its binding.
+When the qualified bridge confirms a detached launch, the adapter fills the
+existing workload ID with the launch tool-call ID. The durable row already
+uses that same ID. The cancel sweep keeps that entry in `activeToolCalls` for
+the current native session. A pending Bash request remains eligible for the
+ordinary cancel sweep, and its unconfirmed workload is ended by cancellation.
+
+The existing exit handler consumes the entry on a terminal frame for the
+same native session and launch call. Native session replacement drops the
+old entries at the binding boundary. Late shell starts and launch updates from
+the old qualified session are rejected before they can change a reused tool
+call ID. Adapter close ends their lifetime.
+
+See the [turn cancellation fix plan](../../../plans/claude-shell-exit-after-cancel/plan.md).
+
 ## Existing desktop and phone behavior
 
 The existing shared running selector excludes `ended` rows. The chip decreases

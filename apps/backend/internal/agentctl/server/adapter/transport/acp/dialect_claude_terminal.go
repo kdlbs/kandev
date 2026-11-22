@@ -104,9 +104,8 @@ func claudeTerminalOutcomeUnavailable(terminal map[string]any) bool {
 }
 
 // preservesVerifiedClaudeBackgroundShell reports whether this adapter can
-// still deliver a tracked shell's own terminal evidence after the foreground
-// prompt ends. Only the exact verified bridge qualifies; legacy and unknown
-// implementations keep their prompt-end cleanup fallback.
+// still deliver a tracked shell's own terminal evidence after turn cleanup.
+// Only a completed launch from the verified bridge qualifies.
 func (a *Adapter) preservesVerifiedClaudeBackgroundShell(payload *streams.NormalizedPayload) bool {
 	name, version := a.connectedAgentIdentity()
 	if !verifiedClaudeTerminalBridge(a.agentID, name, version) {
@@ -116,9 +115,66 @@ func (a *Adapter) preservesVerifiedClaudeBackgroundShell(payload *streams.Normal
 	return work != nil &&
 		work.Kind == streams.BackgroundWorkKindShell &&
 		work.Detached &&
+		work.WorkID != "" &&
 		!work.Ended &&
 		payload.IsVerifiedBackgroundWork() &&
 		payload.IsActiveBackgroundWork()
+}
+
+func (a *Adapter) isStaleClaudeShellNotificationLocked(
+	sessionID, toolCallID string,
+	payload *streams.NormalizedPayload,
+	meta map[string]any,
+	rawInput any,
+) bool {
+	name, version := a.connectedAgentIdentity()
+	if !verifiedClaudeTerminalBridge(a.agentID, name, version) || a.sessionID == "" || sessionID == a.sessionID {
+		return false
+	}
+	if payload != nil && payload.Kind() == streams.ToolKindShellExec {
+		return true
+	}
+	if claudeBashToolUpdate(meta) {
+		return true
+	}
+	if input, ok := rawInput.(map[string]any); ok && isBackgroundExecInputFor(claudeAgentID, input) {
+		return true
+	}
+	_, terminalExit := claudeTerminalExitEnvelope(meta, toolCallID)
+	return terminalExit
+}
+
+func claudeBashToolUpdate(meta map[string]any) bool {
+	claudeMeta, ok := meta["claudeCode"].(map[string]any)
+	if !ok {
+		return false
+	}
+	toolName, _ := claudeMeta["toolName"].(string)
+	return toolName == "Bash"
+}
+
+func (a *Adapter) clearVerifiedClaudeShellBindingsLocked() {
+	name, version := a.connectedAgentIdentity()
+	if !verifiedClaudeTerminalBridge(a.agentID, name, version) {
+		return
+	}
+	for toolCallID, payload := range a.activeToolCalls {
+		if payload != nil && payload.Kind() == streams.ToolKindShellExec {
+			delete(a.activeToolCalls, toolCallID)
+		}
+	}
+}
+
+func (a *Adapter) endUnconfirmedClaudeBackgroundShellLocked(payload *streams.NormalizedPayload) {
+	name, version := a.connectedAgentIdentity()
+	if !verifiedClaudeTerminalBridge(a.agentID, name, version) || payload == nil {
+		return
+	}
+	work := payload.BackgroundWork()
+	if work == nil || work.Kind != streams.BackgroundWorkKindShell || !work.Detached || work.WorkID != "" || work.Ended {
+		return
+	}
+	payload.SetBackgroundWorkIdentity(work.Kind, work.WorkID, work.Detached, true)
 }
 
 // claudeBackgroundTerminalObservation builds the typed terminal observation

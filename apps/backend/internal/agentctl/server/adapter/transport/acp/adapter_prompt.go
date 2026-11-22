@@ -744,11 +744,15 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 // session. It runs before the generic cancel sweep so an identified launch
 // becomes unknown instead of a cancelled tool with running background work.
 func (a *Adapter) prepareSessionCancel(sessionID string) {
+	name, version := a.connectedAgentIdentity()
+	if verifiedClaudeTerminalBridge(a.agentID, name, version) {
+		a.syncNotifQueue()
+	}
 	a.settleUnverifiedOpenCodeBackgroundWork(sessionID)
 }
 
-// cancelActiveToolCalls emits cancelled tool_update events for all in-flight tool calls
-// and clears the activeToolCalls map.
+// cancelActiveToolCalls cancels ordinary in-flight calls and retains entries
+// whose provider can still deliver authoritative terminal evidence.
 //
 // Monitor tool calls are intentionally skipped by prompt-end cleanup — their
 // watches outlive foreground turns. Explicit terminal evidence or replay after
@@ -766,8 +770,8 @@ func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 }
 
 // cancelPromptEndToolCalls preserves background work inherited from a
-// handed-off predecessor. Explicit session cancellation still uses
-// cancelActiveToolCalls so it can terminate the whole session.
+// handed-off predecessor. Explicit cancellation also preserves work with an
+// exact terminal binding while cancelling ordinary active calls.
 func (a *Adapter) cancelPromptEndToolCalls(sessionID string) {
 	a.cancelActiveToolCallsPreservingHandoff(sessionID, true)
 }
@@ -792,14 +796,14 @@ func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
 			preserved[tcID] = payload
 		case monitorToolCallIDs[tcID]:
 			preserved[tcID] = payload
-		case preserveHandoff && a.preservesVerifiedClaudeBackgroundShell(payload):
-			// Prompt-end cleanup keeps the verified bridge's shell binding so a
-			// later tool-scoped frame can settle the exact job. Explicit
-			// cancellation still terminates the card.
+		case a.preservesVerifiedClaudeBackgroundShell(payload) && payload.BackgroundWork().WorkID == tcID:
+			// A completed detached shell keeps its exact binding so the qualified
+			// bridge's later tool-scoped exit can settle the workload.
 			preserved[tcID] = payload
 		case payload != nil && payload.Kind() == streams.ToolKindSubagentTask:
 			preserved[tcID] = payload
 		default:
+			a.endUnconfirmedClaudeBackgroundShellLocked(payload)
 			toCancel[tcID] = payload
 			a.forgetPromptHandoffToolLocked(tcID)
 		}

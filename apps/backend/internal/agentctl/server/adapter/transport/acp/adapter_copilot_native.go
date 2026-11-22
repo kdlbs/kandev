@@ -268,6 +268,9 @@ func (a *Adapter) installNativeBindingBarrier(
 ) bool {
 	bind := func() {
 		a.mu.Lock()
+		if a.sessionID != sessionID {
+			a.clearVerifiedClaudeShellBindingsLocked()
+		}
 		a.sessionID = sessionID
 		a.bindingCopilotNative = false
 		if clearLoading {
@@ -288,6 +291,9 @@ func (a *Adapter) installNativeBindingBarrier(
 		return true
 	}
 	a.mu.Lock()
+	if a.sessionID != sessionID {
+		a.clearVerifiedClaudeShellBindingsLocked()
+	}
 	a.sessionID = sessionID
 	a.bindingCopilotNative = false
 	if clearLoading {
