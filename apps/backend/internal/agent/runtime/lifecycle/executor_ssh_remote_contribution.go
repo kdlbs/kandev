@@ -39,15 +39,25 @@ func (r *SSHExecutor) materializeSSHRemoteContribution(
 	}
 
 	env := sshRemoteContributionEnv(req, agentctlBin)
-	envScript, err := buildSSHEnvInitScript(env)
-	if err != nil {
-		return fmt.Errorf("ssh: prepare remote contribution environment: %w", err)
-	}
-
 	shell := sshShellForRemote(req.Metadata, platform)
-	inner := sshRemoteContributionScript(taskDir, targetURL, binding)
-	wrapped := WrapLoginShell(shell, "set -ae; "+sshStdinEnvImport+"; set +a\n"+inner)
-	_, _, runErr := runSSHCommandStdin(ctx, client, wrapped, strings.NewReader(envScript))
+	var envPayload, wrapped string
+	var err error
+	if isPowerShellShell(shell) {
+		envPayload, err = buildPowerShellEnvInitScript(env)
+		if err != nil {
+			return fmt.Errorf("ssh: prepare remote contribution environment: %w", err)
+		}
+		inner := sshWindowsRemoteContributionScript(taskDir, targetURL, binding)
+		wrapped = WrapPowerShell(shell, powerShellStdinEnvImport+"\n"+inner, true)
+	} else {
+		envPayload, err = buildSSHEnvInitScript(env)
+		if err != nil {
+			return fmt.Errorf("ssh: prepare remote contribution environment: %w", err)
+		}
+		inner := sshRemoteContributionScript(taskDir, targetURL, binding)
+		wrapped = WrapLoginShell(shell, "set -ae; "+sshStdinEnvImport+"; set +a\n"+inner)
+	}
+	_, _, runErr := runSSHCommandStdin(ctx, client, wrapped, strings.NewReader(envPayload))
 	if runErr != nil {
 		// Git may include a credentialed helper URL in stderr. Keep the error
 		// deliberately generic; provider and credential data never leave the
@@ -76,7 +86,7 @@ func sshRemoteContributionEnv(req *ExecutorCreateRequest, agentctlBin string) ma
 	managedBroker := hasManagedGitHubBrokerEnv(req.Env)
 	foundManagedHelper := rewriteSSHManagedGitCredentialHelpers(env, count, managedBroker, agentctlBin)
 	if managedBroker && !foundManagedHelper && agentctlBin != "" {
-		count = appendSSHGitConfig(env, count, gitHubCredentialHelperConfigKey, "!"+agentctlBin+" git-credential")
+		count = appendSSHGitConfig(env, count, gitHubCredentialHelperConfigKey, gitCredentialHelperCommand(agentctlBin))
 	}
 	if !managedBroker && (env[envKeyGHToken] != "" || env[envKeyGitHubToken] != "") && count < 64 {
 		count = appendSSHGitConfig(env, count, gitHubCredentialHelperConfigKey, `!f() { echo "username=x-access-token"; echo "password=${GH_TOKEN:-${GITHUB_TOKEN}}"; }; f`)
@@ -108,7 +118,7 @@ func rewriteSSHManagedGitCredentialHelpers(env map[string]string, count int, man
 			continue
 		}
 		found = true
-		env[valueKey] = "!" + agentctlBin + " git-credential"
+		env[valueKey] = gitCredentialHelperCommand(agentctlBin)
 	}
 	return found
 }

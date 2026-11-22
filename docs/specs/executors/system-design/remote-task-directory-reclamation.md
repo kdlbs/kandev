@@ -397,7 +397,7 @@ Structured logs at the reclamation phase carry `task_id`, `host`, `remote_task_d
 and an `outcome` of `removed`, `skipped`, or `failed`, with a `reason` on the
 latter two. `skipped` reasons are enumerated (`disabled`, `shared`,
 `dirty_worktree`, `unpushed_commits`, `stash_present`, `not_a_checkout`,
-`probe_failed`) so an operator can tell a deliberate preservation from a broken
+`probe_failed`, `unsupported_platform`) so an operator can tell a deliberate preservation from a broken
 probe.
 
 The existing `task_resource_cleanup_jobs` row remains the durable record of a

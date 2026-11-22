@@ -114,6 +114,31 @@ func (r *SSHExecutor) runOneAuthSetupScript(
 	platform SSHRemotePlatform,
 ) {
 	shell := sshShellForRemote(req.Metadata, platform)
+	if isPowerShellShell(shell) || isWindowsRemotePlatform(platform) {
+		envJSON, err := buildPowerShellEnvInitScript(sshRemoteAgentEnv(req))
+		if err != nil {
+			r.logger.Warn("auth setup script skipped: invalid environment key",
+				zap.String("display_name", displayName),
+				zap.String("method_id", method.MethodID),
+				zap.Error(err))
+			return
+		}
+		wrapped := WrapPowerShell(shell, powerShellStdinEnvImport+"\n"+method.SetupScript, true)
+		out, stderr, err := runSSHCommandStdin(ctx, client, wrapped, strings.NewReader(envJSON))
+		if err != nil {
+			r.logger.Warn("auth setup script failed",
+				zap.String("display_name", displayName),
+				zap.String("method_id", method.MethodID),
+				zap.String("stdout", strings.TrimSpace(out)),
+				zap.String("stderr", strings.TrimSpace(stderr)),
+				zap.Error(err))
+			return
+		}
+		r.logger.Debug("auth setup script completed",
+			zap.String("display_name", displayName),
+			zap.String("method_id", method.MethodID))
+		return
+	}
 	envScript, err := buildSSHEnvInitScript(sshRemoteAgentEnv(req))
 	if err != nil {
 		r.logger.Warn("auth setup script skipped: invalid environment key",
@@ -215,6 +240,14 @@ func (r *SSHExecutor) resolveRemoteAuthHomeDir(
 		r.logger.Debug("using remote auth home override", zap.String("home_dir", override))
 		return override, nil
 	}
+	if isWindowsRemotePlatform(platform) {
+		home, err := expandWindowsRemoteHome(ctx, client, "~")
+		if err != nil {
+			return "", fmt.Errorf("ssh: resolve remote Windows home for credentials: %w", err)
+		}
+		r.logger.Debug("resolved remote Windows auth home", zap.String("home_dir", home))
+		return home, nil
+	}
 	shell := sshShellForRemote(req.Metadata, platform)
 	out, _, err := runSSHCommand(ctx, client, WrapLoginShell(shell, `printf %s "$HOME"`))
 	if err != nil {
@@ -284,19 +317,20 @@ type sshFileUploader struct {
 	client *ssh.Client
 }
 
-func (u *sshFileUploader) ReadFile(ctx context.Context, path string) ([]byte, error) {
+func (u *sshFileUploader) ReadFile(ctx context.Context, remotePath string) ([]byte, error) {
 	c, err := newSFTPClientContext(ctx, u.client)
 	if err != nil {
 		return nil, fmt.Errorf("sftp: new client: %w", err)
 	}
 	defer func() { _ = c.Close() }()
 
-	data, err := readSFTPFileContext(ctx, c, path)
+	sftpPath := toSFTPPath(remotePath)
+	data, err := readSFTPFileContext(ctx, c, sftpPath)
 	if err != nil {
 		if isSFTPNotExist(err) {
-			return nil, &fs.PathError{Op: fileReadOperation, Path: path, Err: fs.ErrNotExist}
+			return nil, &fs.PathError{Op: fileReadOperation, Path: remotePath, Err: fs.ErrNotExist}
 		}
-		return nil, fmt.Errorf("sftp: read %s: %w", path, err)
+		return nil, fmt.Errorf("sftp: read %s: %w", remotePath, err)
 	}
 	return data, nil
 }
@@ -360,32 +394,33 @@ func isSFTPNotExist(err error) bool {
 	return errors.As(err, &statusErr) && statusErr.FxCode() == sftp.ErrSSHFxNoSuchFile
 }
 
-func (u *sshFileUploader) WriteFile(_ context.Context, path string, data []byte, mode os.FileMode) error {
+func (u *sshFileUploader) WriteFile(_ context.Context, remotePath string, data []byte, mode os.FileMode) error {
 	c, err := sftp.NewClient(u.client)
 	if err != nil {
 		return fmt.Errorf("sftp: new client: %w", err)
 	}
 	defer func() { _ = c.Close() }()
 
+	sftpPath := toSFTPPath(remotePath)
 	// Ensure the parent directory exists. SFTP doesn't have a `mkdir -p`
 	// equivalent, so walk the path and create each segment.
-	if err := sshMkdirAll(c, parentDir(path)); err != nil {
-		return fmt.Errorf("sftp: mkdir for %s: %w", path, err)
+	if err := sshMkdirAll(c, parentDir(sftpPath)); err != nil {
+		return fmt.Errorf("sftp: mkdir for %s: %w", sftpPath, err)
 	}
 
-	f, err := c.Create(path)
+	f, err := c.Create(sftpPath)
 	if err != nil {
-		return fmt.Errorf("sftp: create %s: %w", path, err)
+		return fmt.Errorf("sftp: create %s: %w", sftpPath, err)
 	}
 	if _, err := f.Write(data); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("sftp: write %s: %w", path, err)
+		return fmt.Errorf("sftp: write %s: %w", sftpPath, err)
 	}
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("sftp: close %s: %w", path, err)
+		return fmt.Errorf("sftp: close %s: %w", sftpPath, err)
 	}
-	if err := c.Chmod(path, mode); err != nil {
-		return fmt.Errorf("sftp: chmod %s: %w", path, err)
+	if err := c.Chmod(sftpPath, mode); err != nil && !isSFTPOpUnsupported(err) {
+		return fmt.Errorf("sftp: chmod %s: %w", sftpPath, err)
 	}
 	return nil
 }
@@ -396,7 +431,8 @@ func (u *sshFileUploader) RemoveAll(ctx context.Context, target string) error {
 		return fmt.Errorf("sftp: new client: %w", err)
 	}
 	defer func() { _ = c.Close() }()
-	if err := removeSFTPPath(ctx, c, target); err != nil && !isSFTPNotExist(err) && !errors.Is(err, os.ErrNotExist) {
+	sftpTarget := toSFTPPath(target)
+	if err := removeSFTPPath(ctx, c, sftpTarget); err != nil && !isSFTPNotExist(err) && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("sftp: remove %s: %w", target, err)
 	}
 	return nil
@@ -434,7 +470,7 @@ func removeSFTPPath(ctx context.Context, client *sftp.Client, target string) err
 // sshMkdirAll mimics `mkdir -p` over SFTP. Walks every prefix of dir and
 // creates segments that don't exist; treats "already exists" as success.
 func sshMkdirAll(c *sftp.Client, dir string) error {
-	if dir == "" || dir == "/" {
+	if dir == "" || dir == "/" || isSFTPWindowsDriveRoot(dir) {
 		return nil
 	}
 	if _, err := c.Stat(dir); err == nil {

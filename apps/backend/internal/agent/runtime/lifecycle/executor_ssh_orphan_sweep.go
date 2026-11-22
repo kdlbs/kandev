@@ -188,11 +188,21 @@ func sweepSSHExecutorOrphansUnderRoot(
 	log *logger.Logger,
 	acquireTaskFence func(taskID string) func(),
 ) error {
-	stdout, _, err := runSSHCommand(ctx, client, sshOrphanInventoryCommand(resolvedRoot))
+	windowsRoot := isWindowsRemotePath(resolvedRoot)
+	inventoryCmd := sshOrphanInventoryCommand(resolvedRoot)
+	if windowsRoot {
+		inventoryCmd = sshWindowsOrphanInventoryCommand(resolvedRoot)
+	}
+	stdout, _, err := runSSHCommand(ctx, client, inventoryCmd)
 	if err != nil {
 		return fmt.Errorf("ssh orphan sweep: inventory: %w", err)
 	}
-	inventory := parseSSHOrphanInventory(stdout, resolvedRoot)
+	var inventory sshOrphanInventory
+	if windowsRoot {
+		inventory = parseSSHWindowsOrphanInventory(stdout, resolvedRoot)
+	} else {
+		inventory = parseSSHOrphanInventory(stdout, resolvedRoot)
+	}
 	report.Found += len(inventory.Processes)
 
 	for _, proc := range inventory.Processes {
@@ -259,6 +269,12 @@ func recheckAndStopSSHOrphanProcess(
 	}
 	freshDecision := decideSSHOrphanProcess(proc.PID, sessionID, claimed, tainted, freshTaskCtx)
 	if freshDecision.Verdict == sshOrphanPreserve {
+		return freshDecision, nil
+	}
+	if isWindowsRemotePath(resolvedRoot) {
+		if err := stopSSHWindowsOrphanProcess(ctx, client, resolvedRoot, proc, claimed, sessionID); err != nil {
+			return freshDecision, fmt.Errorf("stop remote process: %w", err)
+		}
 		return freshDecision, nil
 	}
 	if err := stopSSHOrphanProcess(ctx, client, resolvedRoot, proc, claimed, sessionID); err != nil {

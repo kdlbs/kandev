@@ -1,7 +1,7 @@
 ---
 id: "02-port-windows-ssh-lifecycle"
 title: "Port the Windows SSH lifecycle with shell and passthrough guards"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-publish-windows-helpers"
@@ -22,6 +22,7 @@ acceptance_criteria:
   - AC-EXECUTORS-SSH-WINDOWS-001.14
   - AC-EXECUTORS-SSH-WINDOWS-001.15
   - AC-EXECUTORS-SSH-WINDOWS-001.17
+  - AC-EXECUTORS-SSH-WINDOWS-001.18
 system_design:
   - ../../specs/executors/system-design/ssh-windows-remote.md
 ---
@@ -60,6 +61,9 @@ commit.
     Windows host whose resolved shell fails `isPowerShellShell`. Use a typed
     error that names the saved shell and the supported shells.
 - F8: In the same check, reject `req.IsPassthrough` for Windows hosts.
+- Reclamation gap found during the port: `SSHTaskDirReclaimer.Reclaim` skips a
+  Windows task directory with `unsupported_platform` before running any remote
+  command (`AC-EXECUTORS-SSH-WINDOWS-001.18`).
 - F7:
   - Replace `isRemoteAgentctlAlive(ctx, client, pid, platforms ...)` with an
     explicit `platform` parameter.
@@ -79,7 +83,7 @@ commit.
   - `TestSSHWindowsRejectsARM64Host`: a `KANDEV_WIN_INFO` probe that reports
     `ARM64` yields `windows/arm64`, which fails with the unsupported-platform
     error. That error lists `windows/amd64` as the only Windows platform.
-- F12: `requireSupportedSSHPlatform` and its error text omit `windows/arm64`. Update the fork's ported tests that expect it to be supported:
+- F12: `requireSupportedSSHPlatform` and its error text omit `windows/arm64`. Update the fork's ported tests that expect `windows/arm64` to be supported:
   `TestRequireSupportedRemotePlatform` and
   `TestRequireSupportedRemotePlatformPreservesRawDetail`. Arch normalization
   still maps `ARM64`, so a rejection names the real platform.
@@ -139,4 +143,48 @@ Record each of these tests with its command and result:
 
 ## Results
 
-Pending.
+Completed on 2026-11-22.
+
+Port method:
+
+- New files were checked out from `0191092a3`.
+- Modified files received the fork diff through `git apply -3`.
+  `executor_backend.go` and `executor_ssh_operations.go` had changed upstream
+  since the fork base, so copying whole files would have reverted upstream
+  work. Only the platform-gate hunk conflicted. It was resolved into the
+  three-gate split.
+
+Additional changes:
+
+- The Remote Docker files are unchanged. The fork's
+  `SSHRequireSupportedRemoteDockerPlatform` is not ported.
+- `SSHRequireSupportedExecutorPlatform` is the exported SSH gate, which the
+  `internal/ssh` connection test uses.
+- `validateSSHWindowsLaunch` rejects passthrough launches and non-PowerShell
+  shells in `prepareRemoteHost`, before any helper upload or preparation.
+- `SSHTaskDirReclaimer.Reclaim` skips Windows task directories with
+  `unsupported_platform` (`AC-EXECUTORS-SSH-WINDOWS-001.18`). Without this
+  check, an enabled profile failed path validation and the job retried.
+- Personal names in the fork's test fixtures were replaced with `Kandev User`
+  and `example/demo`.
+- `apps/backend/AGENTS.md` now documents the Windows default shell and the three
+  platform gates.
+
+| Command | Result |
+| --- | --- |
+| `go test -race -run '^TestSSHWindows\|...'` on `lifecycle` and `ssh` | Passed. New guard tests failed first, with build failures and a probe list of 4 |
+| `go test ./internal/agent/runtime/lifecycle/ ./internal/launcher/ ./internal/backendapp/ ./internal/ssh/ ./internal/agent/runtime/` | 63 failing names, all in the 64-name baseline set from this macOS environment. No new failures |
+| `lint-go-changed`, using bash word splitting over every changed file | 0 issues |
+
+Lifecycle evidence:
+
+| Scenario | Test | Result |
+| --- | --- | --- |
+| Restart and recovery | `TestSSHWindowsBackendShutdownPreservesAgentctlAndResumeReconnects`, `TestSSHWindowsRecoverInstancesDetailedReattachesAndDiscoversControlPort` | Passed |
+| Confirmed absence | `TestSSHWindowsResumeClearsMetadataWhenRemoteProcessExited` | Passed |
+| PID reuse | `TestSSHWindowsPersistedStopVerifiesIdentityAndGuardsSessionDir` | Passed |
+| Orphan ownership | `TestSSHWindowsOrphanSweepInventoriesAndStopsOrphanedAgentctl` | Passed |
+| Entry paths | `TestSSHWindowsDetectRemoteInfoFallsBackToPowerShell`, `TestSSHWindowsShellProbeOffersOnlyPowerShell` | Passed |
+
+These tests use the fake SSH server. Task 05 proves the PowerShell semantics,
+and task 06 proves real-host behavior.

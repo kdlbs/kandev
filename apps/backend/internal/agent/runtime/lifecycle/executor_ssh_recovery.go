@@ -286,8 +286,9 @@ func (r *SSHExecutor) readSSHRecoveryInstanceInfo(
 	if err != nil {
 		return nil, 0, fmt.Errorf("read exact agentctl instance: %w", err)
 	}
+	platform := sshPlatformFromMetadata(record.Metadata, identity.taskDir, identity.sessionDir)
 	if info == nil || info.ID != identity.nativeID || info.SessionID != record.SessionID ||
-		info.TaskID != record.TaskID || info.Port != identity.port || info.WorkspacePath != identity.taskDir {
+		info.TaskID != record.TaskID || info.Port != identity.port || !sshRemotePathsEqual(info.WorkspacePath, identity.taskDir, platform) {
 		return nil, 0, errors.New("live agentctl metadata does not match the persisted SSH instance")
 	}
 	return info, controlPort, nil
@@ -297,6 +298,9 @@ func (r *SSHExecutor) readSSHRecoveryControlPortFromLog(ctx context.Context, cli
 	sessionDir = strings.TrimSpace(sessionDir)
 	if sessionDir == "" {
 		return 0, errors.New("persisted agentctl session directory is unavailable")
+	}
+	if isWindowsRemotePath(sessionDir) {
+		return readWindowsSSHRecoveryControlPortFromLog(ctx, client, sessionDir)
 	}
 	logPath := shellQuote(sessionDir + "/agentctl.log")
 	command := "head -c 32768 " + logPath + " 2>/dev/null; printf '\\n'; tail -c 32768 " + logPath + " 2>/dev/null"
@@ -386,8 +390,12 @@ func (r *SSHExecutor) preparedSSHRecoveryState(
 	controlPort int,
 ) (*ExecutorInstance, *sshSessionState) {
 	metadata := cloneSSHMetadata(req.Metadata)
+	platform := sshPlatformFromMetadata(metadata, identity.taskDir, identity.sessionDir)
 	metadata[MetadataKeySSHLocalForwardPort] = strconv.Itoa(forwarder.LocalPort())
 	metadata[MetadataKeySSHRemoteControlPort] = strconv.Itoa(controlPort)
+	if platform.isKnown() {
+		metadata[MetadataKeySSHRemotePlatform] = platform.String()
+	}
 	metadata[MetadataKeyReuseExistingProcess] = true
 	metadata[MetadataKeyIsRemote] = true
 	state := &sshSessionState{
@@ -407,6 +415,7 @@ func (r *SSHExecutor) preparedSSHRecoveryState(
 		launchReceipt:    identity.launchReceipt,
 		metadata:         metadata,
 		prepareEnv:       make(map[string]string),
+		platform:         platform,
 		runtimeAPITunnel: runtimeTunnel,
 		port:             identity.port,
 		controlPort:      controlPort,

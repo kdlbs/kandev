@@ -38,6 +38,7 @@ Windows hosts.
 | `AC-EXECUTORS-SSH-WINDOWS-001.11`, `.12` | Controller launch, readiness, and resume |
 | `AC-EXECUTORS-SSH-WINDOWS-001.13`, `.14`, `.15` | Stop, identity, orphan sweep, and reconciliation |
 | `AC-EXECUTORS-SSH-WINDOWS-001.16` | Web copy |
+| `AC-EXECUTORS-SSH-WINDOWS-001.18` | Task-directory reclamation |
 | `AC-EXECUTORS-SSH-WINDOWS-002.1` through `.4` | Helper distribution |
 
 ## Platform detection and persistence
@@ -256,6 +257,15 @@ The `agentctl ssh-reconcile` command on non-Linux builds returns
 `ReasonUnsupportedIdentity`. `runRemoteWindowsSSHReconcile` invokes it through
 the envelope with `input`. The executor therefore uses guarded stop and
 confirmed absence for Windows controllers, as it does for macOS controllers.
+
+## Task-directory reclamation
+
+`SSHTaskDirReclaimer.Reclaim` checks for a Windows path before any remote
+command runs. When the task directory or the workdir root is a Windows path, it
+returns a skip with `SSHReclaimSkipUnsupportedPlatform`
+(`unsupported_platform`). The cleanup job treats every skip as success, so it
+does not retry. The POSIX reclamation probes in the
+[reclamation design](remote-task-directory-reclamation.md) stay unchanged.
 
 ## Web copy
 

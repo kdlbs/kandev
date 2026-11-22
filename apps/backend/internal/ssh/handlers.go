@@ -335,9 +335,19 @@ func probeOneAgent(ctx context.Context, client *ssh.Client, shell string, ag age
 	return row
 }
 
-// candidateShells is the closed set the probe walks. Common Linux shells
-// plus dash; expanding this is cheap (one extra `command -v` per entry).
+// candidateShells is the closed set the probe walks on POSIX SSH hosts.
 var candidateShells = []string{"bash", "zsh", "sh", "fish", "dash"}
+
+// windowsCandidateShells is the closed set for Windows hosts. The executor runs
+// Windows commands only through PowerShell.
+var windowsCandidateShells = []string{"powershell", "pwsh"}
+
+func candidateShellsForPlatform(platform lifecycle.SSHRemotePlatform) ([]string, string) {
+	if platform.GOOS == "windows" {
+		return windowsCandidateShells, "powershell"
+	}
+	return candidateShells, "sh"
+}
 
 // ProbeShellsResponse is the body of POST /api/v1/ssh/executors/:id/probe-shells.
 type ProbeShellsResponse struct {
@@ -383,13 +393,12 @@ func (h *Handler) probeShells(ctx context.Context, executorID string) (*ProbeShe
 	defer func() { _ = client.Close() }()
 
 	platform := h.probeRemotePlatform(ctx, client, "probe-shells")
-	available := make([]string, 0, len(candidateShells))
-	for _, shell := range candidateShells {
-		// Probe without login-shell wrapping — we're checking whether the
-		// shell binary itself exists in PATH, which is independent of the
-		// shell-init files we'd source. /bin/sh -c 'command -v bash' is
-		// fine.
-		resolved, probeErr := lifecycle.ProbeRemoteBinary(ctx, client, "sh", shell)
+	shellsToProbe, probeShell := candidateShellsForPlatform(platform)
+	available := make([]string, 0, len(shellsToProbe))
+	for _, shell := range shellsToProbe {
+		// Probe without user login-shell wrapping on POSIX ("sh"); on Windows
+		// use PowerShell Get-Command to resolve each candidate shell binary.
+		resolved, probeErr := lifecycle.ProbeRemoteBinary(ctx, client, probeShell, shell)
 		if probeErr != nil {
 			h.logger.Warn("probe-shells: SSH probe failed",
 				zap.String("shell", shell), zap.Error(probeErr))
@@ -578,7 +587,7 @@ func (h *Handler) testProbeAndPlatform(ctx context.Context, client *ssh.Client, 
 	result.GitVersion = info.GitVer
 	result.Steps = append(result.Steps, TestStep{Name: "Probe remote", Success: true, Output: info.UnameAll})
 
-	if err := lifecycle.SSHRequireSupportedRemotePlatform(info.Platform); err != nil {
+	if err := lifecycle.SSHRequireSupportedExecutorPlatform(info.Platform); err != nil {
 		result.Steps = append(result.Steps, TestStep{Name: "Verify platform", Success: false, Error: err.Error()})
 		result.Error = err.Error()
 		return lifecycle.SSHRemotePlatform{}, err

@@ -43,7 +43,11 @@ func materializeSSHSkillManifest(
 	if workspace == nil {
 		return fmt.Errorf("SSH skill workspace is required")
 	}
-	taskRoot := path.Clean(strings.TrimSpace(taskDir))
+	trimmedTaskDir := strings.TrimSpace(taskDir)
+	if trimmedTaskDir == "" || !isRemoteAbsPath(trimmedTaskDir) {
+		return fmt.Errorf("SSH task directory must be absolute")
+	}
+	taskRoot := path.Clean(toSFTPPath(trimmedTaskDir))
 	if taskRoot == "." || !path.IsAbs(taskRoot) {
 		return fmt.Errorf("SSH task directory must be absolute")
 	}

@@ -105,6 +105,10 @@ installing Linux or WSL.
 - **AC-EXECUTORS-SSH-WINDOWS-001.17:** When an SSH passthrough launch targets a
   Windows host, launch shall fail before task preparation. The error shall state
   that passthrough mode is unavailable on Windows hosts.
+- **AC-EXECUTORS-SSH-WINDOWS-001.18:** When task-directory reclamation is enabled
+  for a Windows host task, the system shall preserve the task directory and run
+  no remote command. It shall record the cleanup as skipped with reason
+  `unsupported_platform` and shall not retry it.
 
 ### REQ-EXECUTORS-SSH-WINDOWS-002: Windows helper distribution
 
@@ -143,6 +147,7 @@ as the Linux and macOS helpers.
   remains reproducible and unsigned, unlike the signed native Windows runtime.
 - SSH passthrough mode on Windows hosts until a separate requirement specifies
   remote Windows terminal behavior.
+- Task-directory reclamation on Windows hosts.
 
 ## System design
 

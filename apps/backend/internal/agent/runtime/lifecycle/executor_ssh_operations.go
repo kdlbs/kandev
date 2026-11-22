@@ -75,9 +75,15 @@ func SSHProbeRemote(ctx context.Context, client *ssh.Client) (*SSHRemoteInfo, er
 	return detectRemoteInfo(ctx, client)
 }
 
-// SSHRequireSupportedRemotePlatform is the exported platform support gate.
+// SSHRequireSupportedRemotePlatform is the exported Linux and macOS gate that
+// Remote Docker uses.
 func SSHRequireSupportedRemotePlatform(platform SSHRemotePlatform) error {
 	return requireSupportedRemotePlatform(platform)
+}
+
+// SSHRequireSupportedExecutorPlatform is the exported SSH executor gate.
+func SSHRequireSupportedExecutorPlatform(platform SSHRemotePlatform) error {
+	return requireSupportedSSHPlatform(platform)
 }
 
 // SSHCheckAgentctlCached reports whether the remote already has an agentctl
@@ -98,9 +104,12 @@ func SSHCheckAgentctlCached(ctx context.Context, client *ssh.Client, resolver *A
 			return false, err
 		}
 	}
-	remoteShaFile, err := expandRemoteHome(ctx, client, sshRemoteAgentctlSha256)
+	remoteShaFile, err := expandRemoteHomeForPlatform(ctx, client, sshRemoteAgentctlSha256Path(platform), platform)
 	if err != nil {
 		return false, err
+	}
+	if isWindowsRemotePlatform(platform) {
+		return checkWindowsAgentctlCached(ctx, client, remoteShaFile, localSha)
 	}
 	// The `|| true` falls back to empty stdout if the sidecar is missing,
 	// so a successful SSH session with no file is the "not cached" path —
@@ -327,11 +336,17 @@ func detectRemoteInfo(ctx context.Context, client *ssh.Client) (*SSHRemoteInfo, 
 	}
 	out, _, err := runSSHCommand(ctx, client, "uname -m")
 	if err != nil {
+		if winInfo, ok := detectWindowsRemoteInfo(ctx, client); ok {
+			return winInfo, nil
+		}
 		return nil, fmt.Errorf("ssh: uname -m: %w", err)
 	}
 	info.Arch = strings.TrimSpace(out)
 	out, _, err = runSSHCommand(ctx, client, "uname -s")
 	if err != nil {
+		if winInfo, ok := detectWindowsRemoteInfo(ctx, client); ok {
+			return winInfo, nil
+		}
 		return nil, fmt.Errorf("ssh: uname -s: %w", err)
 	}
 	info.OS = strings.TrimSpace(out)
@@ -340,6 +355,11 @@ func detectRemoteInfo(ctx context.Context, client *ssh.Client) (*SSHRemoteInfo, 
 
 	if out, _, err := runSSHCommand(ctx, client, "git --version"); err == nil {
 		info.GitVer = strings.TrimSpace(out)
+	} else if isWindowsRemotePlatform(platform) {
+		gitCmd := "try { $v = (git --version 2>$null | Out-String).Trim(); if ($v) { Write-Output $v } } catch {}"
+		if gitOut, _, gitErr := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, gitCmd, true)); gitErr == nil {
+			info.GitVer = strings.TrimSpace(gitOut)
+		}
 	}
 	return info, nil
 }
@@ -348,18 +368,24 @@ func normalizeSSHRemotePlatform(osName, arch string) (SSHRemotePlatform, bool) {
 	goos := normalizeSSHRemoteOS(osName)
 	goarch := normalizeSSHRemoteArch(arch)
 	platform := SSHRemotePlatform{GOOS: goos, GOARCH: goarch, UnameOS: osName, UnameArch: arch}
-	if err := requireSupportedRemotePlatform(platform); err != nil {
+	if err := requireSupportedSSHPlatform(platform); err != nil {
 		return platform, false
 	}
 	return platform, true
 }
 
 func normalizeSSHRemoteOS(osName string) string {
-	switch strings.ToLower(strings.TrimSpace(osName)) {
-	case "linux":
+	lower := strings.ToLower(strings.TrimSpace(osName))
+	switch {
+	case lower == "linux":
 		return sshRemoteGOOSLinux
-	case "darwin":
+	case lower == "darwin":
 		return sshRemoteGOOSDarwin
+	case lower == "windows", lower == "windows_nt",
+		strings.HasPrefix(lower, "mingw"),
+		strings.HasPrefix(lower, "msys"),
+		strings.HasPrefix(lower, "cygwin"):
+		return sshRemoteGOOSWindows
 	default:
 		return ""
 	}
@@ -369,25 +395,46 @@ func normalizeSSHRemoteArch(arch string) string {
 	switch strings.ToLower(strings.TrimSpace(arch)) {
 	case "x86_64", "amd64":
 		return sshRemoteGOARCHAMD64
-	case "arm64", "aarch64":
+	case "arm64", "aarch64", "arm64v8":
 		return sshRemoteGOARCHARM64
 	default:
 		return ""
 	}
 }
 
+// requireSupportedRemotePlatform is the Linux and macOS gate shared by Remote
+// Docker and plugin executors. The SSH executor uses requireSupportedSSHPlatform.
 func requireSupportedRemotePlatform(platform SSHRemotePlatform) error {
+	if isPOSIXRemotePlatform(platform) {
+		return nil
+	}
+	return fmt.Errorf(
+		"unsupported remote platform %q — supported platforms are linux/{amd64,arm64} and darwin/{amd64,arm64}",
+		reportedRemotePlatform(platform),
+	)
+}
+
+// requireSupportedSSHPlatform accepts the platforms the SSH executor can drive:
+// Linux and macOS through a POSIX shell, and x64 Windows through PowerShell.
+func requireSupportedSSHPlatform(platform SSHRemotePlatform) error {
+	if isPOSIXRemotePlatform(platform) || platform.String() == sshRemoteGOOSWindows+"/"+sshRemoteGOARCHAMD64 {
+		return nil
+	}
+	return fmt.Errorf(
+		"unsupported remote platform %q — SSH executor supports linux/{amd64,arm64}, darwin/{amd64,arm64}, and windows/amd64",
+		reportedRemotePlatform(platform),
+	)
+}
+
+func isPOSIXRemotePlatform(platform SSHRemotePlatform) bool {
 	switch platform.String() {
 	case sshRemoteGOOSLinux + "/" + sshRemoteGOARCHAMD64,
 		sshRemoteGOOSLinux + "/" + sshRemoteGOARCHARM64,
 		sshRemoteGOOSDarwin + "/" + sshRemoteGOARCHARM64,
 		sshRemoteGOOSDarwin + "/" + sshRemoteGOARCHAMD64:
-		return nil
+		return true
 	default:
-		return fmt.Errorf(
-			"unsupported remote platform %q — SSH executor supports linux/{amd64,arm64} and darwin/{amd64,arm64}",
-			reportedRemotePlatform(platform),
-		)
+		return false
 	}
 }
 
@@ -402,24 +449,39 @@ func reportedRemotePlatform(platform SSHRemotePlatform) string {
 }
 
 // expandRemoteHome rewrites a leading ~/ to the home directory reported by the
-// remote (`echo $HOME`). The result is an absolute path. Called once per
-// connection and cached by the caller.
+// remote (`echo $HOME` on POSIX, `%USERPROFILE%` on Windows).
 func expandRemoteHome(ctx context.Context, client *ssh.Client, path string) (string, error) {
-	if !strings.HasPrefix(path, "~/") && path != "~" {
-		return path, nil
+	return expandRemoteHomeForPlatform(ctx, client, path, SSHRemotePlatform{})
+}
+
+func expandRemoteHomeForPlatform(ctx context.Context, client *ssh.Client, rawPath string, platform SSHRemotePlatform) (string, error) {
+	if isWindowsRemotePlatform(platform) || isWindowsRemotePath(rawPath) {
+		return expandWindowsRemoteHome(ctx, client, rawPath)
+	}
+	if !strings.HasPrefix(rawPath, "~/") && !strings.HasPrefix(rawPath, `~\`) && rawPath != "~" {
+		return rawPath, nil
 	}
 	out, _, err := runSSHCommand(ctx, client, "printf %s \"$HOME\"")
 	if err != nil {
+		if winExpanded, winErr := expandWindowsRemoteHome(ctx, client, rawPath); winErr == nil {
+			return winExpanded, nil
+		}
 		return "", fmt.Errorf("ssh: resolve $HOME: %w", err)
 	}
 	home := strings.TrimSpace(out)
 	if home == "" {
 		return "", errors.New("ssh: remote $HOME is empty")
 	}
-	if path == "~" {
+	if isWindowsRemotePath(home) {
+		if rawPath == "~" {
+			return cleanWindowsRemotePath(home), nil
+		}
+		return joinWindowsRemotePath(home, rawPath[2:]), nil
+	}
+	if rawPath == "~" {
 		return home, nil
 	}
-	return home + "/" + strings.TrimPrefix(path, "~/"), nil
+	return home + "/" + rawPath[2:], nil
 }
 
 // localAgentctlSha256 returns the hex sha256 of the local agentctl binary
@@ -453,13 +515,16 @@ func ensureAgentctlOnHostWithProgress(ctx, helperCtx context.Context, client *ss
 		return "", err
 	}
 
-	remoteBin, err := expandRemoteHome(ctx, client, sshRemoteAgentctlPath)
+	remoteBin, err := expandRemoteHomeForPlatform(ctx, client, sshRemoteAgentctlBinaryPath(platform), platform)
 	if err != nil {
 		return "", err
 	}
-	remoteShaFile, err := expandRemoteHome(ctx, client, sshRemoteAgentctlSha256)
+	remoteShaFile, err := expandRemoteHomeForPlatform(ctx, client, sshRemoteAgentctlSha256Path(platform), platform)
 	if err != nil {
 		return "", err
+	}
+	if isWindowsRemotePlatform(platform) {
+		return ensureWindowsAgentctlOnHost(ctx, client, localSha, localData, localPath, remoteBin, remoteShaFile, log)
 	}
 
 	// Compare existing remote sha256, if any. Every path that lands in a
@@ -515,7 +580,8 @@ func sftpUploadBytes(client *ssh.Client, remotePath string, data []byte, mode os
 	}
 	defer func() { _ = c.Close() }()
 
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", remotePath, os.Getpid(), mrand.Uint64())
+	sftpPath := toSFTPPath(remotePath)
+	tmp := fmt.Sprintf("%s.tmp.%d.%d", sftpPath, os.Getpid(), mrand.Uint64())
 	f, err := c.Create(tmp)
 	if err != nil {
 		return fmt.Errorf("sftp: create %s: %w", tmp, err)
@@ -529,18 +595,34 @@ func sftpUploadBytes(client *ssh.Client, remotePath string, data []byte, mode os
 		_ = c.Remove(tmp)
 		return fmt.Errorf("sftp: close %s: %w", tmp, err)
 	}
-	if err := c.Chmod(tmp, mode); err != nil {
+	if err := c.Chmod(tmp, mode); err != nil && !isSFTPOpUnsupported(err) {
 		_ = c.Remove(tmp)
 		return fmt.Errorf("sftp: chmod %s: %w", tmp, err)
 	}
-	if err := c.PosixRename(tmp, remotePath); err != nil {
-		// Some servers don't support POSIX rename; fall back to a non-atomic rename.
-		if rerr := c.Rename(tmp, remotePath); rerr != nil {
-			_ = c.Remove(tmp)
-			return fmt.Errorf("sftp: rename %s -> %s: %w", tmp, remotePath, rerr)
+	return renameSFTPUpload(c, tmp, sftpPath, isWindowsRemotePath(remotePath))
+}
+
+func renameSFTPUpload(c *sftp.Client, tmp, sftpPath string, overwriteOnFallback bool) error {
+	if err := c.PosixRename(tmp, sftpPath); err == nil {
+		return nil
+	}
+	rerr := c.Rename(tmp, sftpPath)
+	if rerr == nil {
+		return nil
+	}
+	if overwriteOnFallback {
+		_ = c.Remove(sftpPath)
+		if c.Rename(tmp, sftpPath) == nil {
+			return nil
 		}
 	}
-	return nil
+	_ = c.Remove(tmp)
+	return fmt.Errorf("sftp: rename %s -> %s: %w", tmp, sftpPath, rerr)
+}
+
+func isSFTPOpUnsupported(err error) bool {
+	var statusErr *sftp.StatusError
+	return errors.As(err, &statusErr) && statusErr.FxCode() == sftp.ErrSSHFxOpUnsupported
 }
 
 // shellQuote is a minimal POSIX shell-safe single-quote wrapper.
@@ -558,43 +640,36 @@ const defaultLoginShell = "bash"
 // SSHDefaultShellForPlatform returns the login shell Kandev should prefer
 // when an SSH profile has no explicit shell saved.
 func SSHDefaultShellForPlatform(platform SSHRemotePlatform) string {
-	if platform.GOOS == sshRemoteGOOSDarwin {
+	switch platform.GOOS {
+	case sshRemoteGOOSDarwin:
 		return "zsh"
+	case sshRemoteGOOSWindows:
+		return defaultWindowsLoginShell
+	default:
+		return defaultLoginShell
 	}
-	return defaultLoginShell
 }
 
-// WrapLoginShell wraps cmd in `${shell} -lc '<cmd>'` so commands run under
-// a login shell that has sourced the user's profile (~/.profile,
-// ~/.bash_profile, etc.). This is the canonical fix for "I have nvm
-// installed but kandev can't find npx" — sshd's default exec channel
-// runs a non-interactive non-login shell which doesn't pick up shell-init
-// PATH additions.
-//
-// Empty shell falls back to defaultLoginShell. The inner cmd is
-// single-quote-escaped so embedded quotes don't break the wrapper.
+// WrapLoginShell wraps cmd in `${shell} -lc '<cmd>'` (or PowerShell's
+// non-interactive UTF-8 encoded wrapper when shell is powershell/pwsh) so
+// commands run under a login shell that has sourced the user's profile.
 func WrapLoginShell(shell, cmd string) string {
+	if isPowerShellShell(shell) {
+		return WrapPowerShell(shell, cmd, true)
+	}
 	if shell == "" {
 		shell = defaultLoginShell
 	}
 	return shell + " -lc " + shellQuote(cmd)
 }
 
-// ProbeRemoteBinary runs `command -v <binary>` over the existing SSH client
-// and reports whether the binary resolves on the remote's $PATH. Returns
-// the resolved absolute path on success (the `command -v` stdout), or an
-// empty string when missing. err is non-nil only when the SSH call itself
-// fails — a missing binary is not an error.
-//
-// shell is the login shell to run the probe under (e.g. "bash", "zsh");
-// empty defaults to bash. Running through a login shell is what makes the
-// probe pick up nvm/asdf/brew PATH setup — without it, every node-based
-// agent would show as "missing" on dev machines.
-//
-// Exported for the SSH agent-readiness probe in package ssh; callers
-// outside lifecycle would otherwise have to copy the shellQuote + run
-// dance and risk drifting from the launch-time pre-flight semantics.
+// ProbeRemoteBinary runs `command -v <binary>` (or `Get-Command` under
+// PowerShell) over the existing SSH client and reports whether the binary
+// resolves on the remote's $PATH.
 func ProbeRemoteBinary(ctx context.Context, client *ssh.Client, shell, binary string) (string, error) {
+	if isPowerShellShell(shell) {
+		return probeWindowsRemoteBinary(ctx, client, shell, binary)
+	}
 	probe := "command -v " + shellQuote(binary) + " 2>/dev/null || true"
 	out, _, err := runSSHCommand(ctx, client, WrapLoginShell(shell, probe))
 	if err != nil {
@@ -607,12 +682,22 @@ func ProbeRemoteBinary(ctx context.Context, client *ssh.Client, shell, binary st
 // returns the absolute remote path. Repo clones happen via the prepare-script
 // path (scriptengine), not here; this is just the parent dir.
 func ensureRemoteTaskDir(ctx context.Context, client *ssh.Client, workdirRoot, taskDirName string) (string, error) {
+	return ensureRemoteTaskDirForPlatform(ctx, client, workdirRoot, taskDirName, SSHRemotePlatform{})
+}
+
+func ensureRemoteTaskDirForPlatform(ctx context.Context, client *ssh.Client, workdirRoot, taskDirName string, platform SSHRemotePlatform) (string, error) {
+	if isWindowsRemotePlatform(platform) || isWindowsRemotePath(workdirRoot) {
+		return ensureWindowsRemoteTaskDir(ctx, client, workdirRoot, taskDirName)
+	}
 	if taskDirName == "" {
 		return "", errors.New("ssh: task dir name is empty")
 	}
 	root, err := expandRemoteHome(ctx, client, workdirRoot)
 	if err != nil {
 		return "", err
+	}
+	if isWindowsRemotePath(root) {
+		return ensureWindowsRemoteTaskDir(ctx, client, root, taskDirName)
 	}
 	taskDir := root + "/tasks/" + taskDirName
 	if _, _, err := runSSHCommand(ctx, client, "mkdir -p "+shellQuote(taskDir)); err != nil {
@@ -629,6 +714,9 @@ func ensureReuseRequiredRemoteTaskDirExists(ctx context.Context, client *ssh.Cli
 	if strings.TrimSpace(taskDir) == "" {
 		return fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
 	}
+	if isWindowsRemotePath(taskDir) {
+		return ensureReuseRequiredWindowsRemoteTaskDirExists(ctx, client, taskDir)
+	}
 	if _, _, err := runSSHCommand(ctx, client, "test -d "+shellQuote(taskDir)); err != nil {
 		return fmt.Errorf("%w: remote task directory is unavailable", models.ErrWorkspaceReuseUnsafe)
 	}
@@ -641,6 +729,9 @@ func ensureReuseRequiredRemoteTaskDirExists(ctx context.Context, client *ssh.Cli
 func ensureRemoteSessionDir(ctx context.Context, client *ssh.Client, taskDir, sessionID string) (string, error) {
 	if sessionID == "" {
 		return "", errors.New("ssh: session ID is empty")
+	}
+	if isWindowsRemotePath(taskDir) {
+		return ensureWindowsRemoteSessionDir(ctx, client, taskDir, sessionID)
 	}
 	sessionDir := taskDir + "/.kandev/sessions/" + sessionID
 	// Change into the canonical directory before creating session-scoped state.
@@ -672,6 +763,17 @@ func startRemoteAgentctl(
 	env map[string]string,
 	log *logger.Logger,
 ) (port int, pid int, err error) {
+	if isPowerShellShell(shell) || isWindowsRemotePath(agentctlBin) || isWindowsRemotePath(workspacePath) || isWindowsRemotePath(sessionDir) {
+		envJSON, err := buildPowerShellEnvInitScript(env)
+		if err != nil {
+			return 0, 0, fmt.Errorf("ssh: launch agentctl: %w", err)
+		}
+		return retryRemoteAgentctlPort(pickRemoteAgentctlPort, func(port int) (int, error) {
+			return startRemoteWindowsAgentctlOnPort(
+				ctx, client, shell, agentctlBin, workspacePath, sessionDir, envJSON, port, log,
+			)
+		})
+	}
 	envScript, err := buildSSHEnvInitScript(env)
 	if err != nil {
 		return 0, 0, fmt.Errorf("ssh: launch agentctl: %w", err)
@@ -776,10 +878,26 @@ func awaitRemoteAgentctlReady(
 	timeout, poll time.Duration,
 	log *logger.Logger,
 ) (int, error) {
+	var platform SSHRemotePlatform
+	if isWindowsRemotePath(sessionDir) {
+		platform.GOOS = sshRemoteGOOSWindows
+	}
+	return awaitRemoteAgentctlReadyForPlatform(ctx, client, sessionDir, port, pid, timeout, poll, platform, log)
+}
+
+func awaitRemoteAgentctlReadyForPlatform(
+	ctx context.Context,
+	client *ssh.Client,
+	sessionDir string,
+	port, pid int,
+	timeout, poll time.Duration,
+	platform SSHRemotePlatform,
+	log *logger.Logger,
+) (int, error) {
+	windowsRemote := isWindowsRemotePlatform(platform) || isWindowsRemotePath(sessionDir)
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		logOut, _, _ := runSSHCommand(ctx, client,
-			"cat "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
+		logOut := readRemoteAgentctlStartupLog(ctx, client, sessionDir, windowsRemote)
 		if strings.Contains(logOut, "HTTP server bound successfully") {
 			log.Info("agentctl started on remote",
 				zap.Int("port", port),
@@ -793,8 +911,8 @@ func awaitRemoteAgentctlReady(
 				lastLines(logOut, sshAgentctlLogTailLines))
 		}
 		// Also catch "exited without binding" via pid check — if the wrapper
-		// exited before logging, kill -0 confirms absence and we fail fast.
-		alive, probeErr := probeRemoteAgentctlLiveness(ctx, client, pid)
+		// exited before logging, kill -0 / Get-Process confirms absence and we fail fast.
+		alive, probeErr := probeRemoteAgentctlLivenessForPlatform(ctx, client, pid, platform)
 		if !alive {
 			if probeErr != nil {
 				return pid, fmt.Errorf(
@@ -807,14 +925,27 @@ func awaitRemoteAgentctlReady(
 		}
 		time.Sleep(poll)
 	}
-	tail, _, _ := runSSHCommand(ctx, client,
-		"tail -n 50 "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
-	// The loop above only reaches the deadline after a liveness probe reported
-	// the process alive. That probe is not a permanent guarantee, so describe
-	// it as alive on the last probe before the deadline. Return its pid so the
-	// caller can tear it down instead of leaking it.
+	tail := readRemoteAgentctlDeadlineTail(ctx, client, sessionDir, windowsRemote)
 	return pid, fmt.Errorf("ssh: agentctl did not become ready within %v; log tail:\n%s",
 		timeout, tail)
+}
+
+func readRemoteAgentctlStartupLog(ctx context.Context, client *ssh.Client, sessionDir string, windowsRemote bool) string {
+	if windowsRemote {
+		return readRemoteWindowsAgentctlLog(ctx, client, sessionDir)
+	}
+	logOut, _, _ := runSSHCommand(ctx, client,
+		"cat "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
+	return logOut
+}
+
+func readRemoteAgentctlDeadlineTail(ctx context.Context, client *ssh.Client, sessionDir string, windowsRemote bool) string {
+	if windowsRemote {
+		return lastLines(readRemoteWindowsAgentctlLog(ctx, client, sessionDir), 50)
+	}
+	tail, _, _ := runSSHCommand(ctx, client,
+		"tail -n 50 "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
+	return tail
 }
 
 const sshAgentctlLogTailLines = 25
@@ -862,8 +993,8 @@ func buildSSHCreateInstanceRequest(
 		// The SSH task directory is the stable remote environment. Keep the
 		// journal below it so agentctl replacement does not move delivery state
 		// with the process or session directory.
-		createRequest.DurableJournalPath = filepath.Join(
-			workspacePath, ".kandev", "agentctl-journals", req.DurableJournalOwnerID, "delivery.bbolt",
+		createRequest.DurableJournalPath = joinRemotePath(
+			SSHRemotePlatform{}, workspacePath, ".kandev", "agentctl-journals", req.DurableJournalOwnerID, "delivery.bbolt",
 		)
 	}
 	return createRequest
@@ -1006,6 +1137,9 @@ func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort
 // session's agentctl.log, for attaching to a diagnosable error. Errors are
 // swallowed — a missing or unreadable log must not mask the real failure.
 func readRemoteAgentctlLogTail(ctx context.Context, client *ssh.Client, sessionDir string) string {
+	if isWindowsRemotePath(sessionDir) {
+		return lastLines(readRemoteWindowsAgentctlLog(ctx, client, sessionDir), sshAgentctlLogTailLines)
+	}
 	tail, _, _ := runSSHCommand(ctx, client,
 		"tail -n "+strconv.Itoa(sshAgentctlLogTailLines)+" "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
 	return tail
@@ -1258,12 +1392,18 @@ const sshAgentctlStopPollAttempts = 50
 // stopRemoteAgentctl stops a remote agentctl by PID, waits for graceful exit,
 // escalates if necessary, and only then removes the session runtime dir.
 func stopRemoteAgentctl(ctx context.Context, client *ssh.Client, sessionDir string, pid int) error {
+	if isWindowsRemotePath(sessionDir) {
+		return stopRemoteWindowsAgentctl(ctx, client, sessionDir, pid)
+	}
 	_, _, err := runSSHCommand(ctx, client, remoteAgentctlStopCommand(sessionDir, pid))
 	return err
 }
 
 //nolint:dupword // shell branches contain repeated `fi` tokens.
 func remoteAgentctlStopCommand(sessionDir string, pid int) string {
+	if isWindowsRemotePath(sessionDir) {
+		return remoteWindowsAgentctlStopCommand(sessionDir, pid)
+	}
 	removeSessionDir := removeRemoteDirCommand(sessionDir)
 	if pid <= 0 {
 		return removeSessionDir
@@ -1296,6 +1436,9 @@ fi
 // removeRemoteDirCommand builds the shell command that reclaims a remote
 // session directory on its own, independent of whether a process is stopped.
 func removeRemoteDirCommand(dir string) string {
+	if isWindowsRemotePath(dir) {
+		return removeWindowsRemoteDirCommand(dir)
+	}
 	return "rm -rf " + shellQuote(dir)
 }
 
@@ -1331,6 +1474,9 @@ func removeRemoteDirCommand(dir string) string {
 func verifyRemoteAgentctlIdentity(ctx context.Context, client *ssh.Client, pid int, sessionDir, taskDir string) (bool, error) {
 	if pid <= 0 {
 		return false, nil
+	}
+	if isWindowsRemotePath(sessionDir) || isWindowsRemotePath(taskDir) {
+		return verifyRemoteWindowsAgentctlIdentity(ctx, client, pid, sessionDir, taskDir)
 	}
 	stdout, stderr, err := runSSHCommand(ctx, client, remoteProcessCommandLineCommand(pid))
 	if err != nil {
@@ -1497,8 +1643,15 @@ func remoteSessionDirExists(ctx context.Context, client *ssh.Client, sessionDir 
 // probeRemoteAgentctlLiveness distinguishes a completed remote process probe
 // from an SSH failure that leaves the process state unknown.
 func probeRemoteAgentctlLiveness(ctx context.Context, client *ssh.Client, pid int) (bool, error) {
+	return probeRemoteAgentctlLivenessForPlatform(ctx, client, pid, SSHRemotePlatform{})
+}
+
+func probeRemoteAgentctlLivenessForPlatform(ctx context.Context, client *ssh.Client, pid int, platform SSHRemotePlatform) (bool, error) {
 	if pid <= 0 {
 		return false, nil
+	}
+	if isWindowsRemotePlatform(platform) {
+		return probeRemoteWindowsAgentctlLiveness(ctx, client, pid)
 	}
 	_, stderr, err := runSSHCommand(ctx, client, fmt.Sprintf("kill -0 %d", pid))
 	if err == nil {
@@ -1546,8 +1699,8 @@ func remoteProcessProbeError(command string, pid int, err error, stderr string) 
 
 // isRemoteAgentctlAlive is the best-effort boolean form used by status and
 // startup polling, where either absence or an unavailable probe means down.
-func isRemoteAgentctlAlive(ctx context.Context, client *ssh.Client, pid int) bool {
-	alive, _ := probeRemoteAgentctlLiveness(ctx, client, pid)
+func isRemoteAgentctlAlive(ctx context.Context, client *ssh.Client, pid int, platform SSHRemotePlatform) bool {
+	alive, _ := probeRemoteAgentctlLivenessForPlatform(ctx, client, pid, platform)
 	return alive
 }
 
