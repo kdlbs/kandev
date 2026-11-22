@@ -30,8 +30,9 @@ session can accept queued work.
    frame and `handleACPUpdate`. The current code arms a finalizer for the report.
 2. Recognize the Codex ACP report before tool handling. Check its failed
    status, `other` kind, reserved `mcp_startup.` ID, and startup title. Put the
-   predicate in `acpcompat` so the lifecycle callback can use it for older
-   agentctl events. Ordinary failed calls use the existing tool handler.
+   predicate in `internal/common/acpcompat` so the lifecycle callback and
+   standalone agentctl binary share the same classification. Ordinary failed
+   calls use the existing tool handler.
 3. Carry the report as `EventTypeMCPStartupWarning` with the existing text and
    report ID fields. Sanitize the provider detail or title with
    `streams.SanitizeProviderMessage`. Add the event to the metadata retention
@@ -51,9 +52,13 @@ session can accept queued work.
 ## Regression cases
 
 - `TestCodexMCPStartupWarningDoesNotArmAsyncTurn` checks the report, a genuine
-  failed tool with a similar title, and a report during an active prompt.
+  failed tool with a similar title, and a report during an active prompt; the
+  active-prompt assertion checks that capacity evidence remains clean.
 - `TestCodexMCPStartupWarningPassesDuringOwnedLoad` checks that the warning
   passes its restore owner while ordinary and stale replay calls stay suppressed.
+- `TestCodexMCPStartupWarningBuffersUntilNewSessionBinding` checks reports
+  emitted before `session/new` returns; only the returned session's warning is
+  released after its binding is installed.
 - `TestCodexMCPStartupWarningBypassesTurnActivity` checks a Ready execution
   with the warning and with the older normalized tool-call form.
 - `TestCodexMCPStartupWarningDoesNotOpenTurnOrStrandQueue` uses SQLite and the
@@ -65,9 +70,13 @@ session can accept queued work.
   specs for the queue controls.
 - `TestCodexMCPStartupReportDoesNotAdoptLegacySubmission` and
   `TestCodexMCPStartupReportKeepsDurableReceiptWithoutAdoptingSubmission`
-  check legacy and durable stream admission.
+  check legacy and durable stream admission, including preservation of the
+  durable report's original submission receipt.
 - `TestRejectedMCPStartupWarningDoesNotCancelClarificationWatchdog` checks
   cancellation identity rejection without removing recovery state.
+- Desktop and mobile browser cases in the resume queue specs check a visible
+  startup warning, queued prompt admission during restore, and one delivery
+  after readiness.
 
 ## Verification
 
@@ -80,19 +89,20 @@ session can accept queued work.
 (scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --project chromium tests/session/session-resume-prompt-queue.spec.ts)
 (scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --project mobile-chrome tests/session/mobile-session-resume-prompt-queue.spec.ts)
 (cd apps/backend && go build -trimpath ./...)
-(cd apps/backend && go test -trimpath -count=1 ./internal/agentctl/acpcompat)
+(cd apps/backend && go test -trimpath -count=1 \
+  ./internal/common/acpcompat ./internal/agentctl/acpcompat ./cmd/mock-agent)
 git diff --check
 ```
 
 ## Files likely touched
 
-- `apps/backend/internal/agentctl/acpcompat/codex_mcp_startup.go`
-- `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_updates.go`, `dialect_codex.go`, and `async_complete_status_test.go`
-- `apps/backend/internal/agentctl/types/streams/agent.go`
-- `apps/backend/internal/agentctl/server/process/manager.go` and `delivery_event_identity_test.go`
-- `apps/backend/internal/agent/runtime/lifecycle/manager_events.go` and `wakeup_statusless_test.go`
-- `apps/backend/internal/orchestrator/event_handlers_streaming.go` and `resume_todo_turn_boundary_test.go`
-- `apps/backend/internal/task/repository/sqlite/agent_delivery_retention_proof.go` and `agent_delivery_retention_compatibility_test.go`
+- `apps/backend/internal/common/acpcompat/codex_mcp_startup.go`
+- `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_updates.go`, `adapter_session.go`, and `adapter_session_startup_warning_test.go`
+- `apps/backend/cmd/mock-agent/main.go`
+- `apps/backend/internal/agent/runtime/lifecycle/streams_events.go` and `streams_events_codex_mcp_startup_test.go`
+- `apps/backend/internal/orchestrator/event_handlers_streaming.go` and `event_handlers_mcp_startup_warning_test.go`
+- `apps/web/e2e/helpers/session-resume-prompt-queue.ts`
+- `apps/web/e2e/tests/session/session-resume-prompt-queue.spec.ts` and `mobile-session-resume-prompt-queue.spec.ts`
 
 ## Dependencies
 
@@ -120,11 +130,14 @@ before taking the warning path.
 Implemented and verified:
 
 - The focused Go regression command passed for all five packages.
-- ACP restore replay, legacy and durable stream admission, and rejected-warning
+- ACP session creation and load reports, clean capacity evidence during an
+  active prompt, legacy and durable stream admission, and rejected-warning
   watchdog regressions passed.
+- The common classifier, retained agentctl compatibility package, and mock
+  agent package tests passed.
 - The complete backend build passed with `go build -trimpath ./...`.
-- Desktop Chromium resume and prompt queue checks passed: 3 tests.
-- Mobile Chrome resume and prompt queue check passed: 1 test.
+- Desktop Chromium resume and prompt queue checks passed: 4 tests.
+- Mobile Chrome resume and prompt queue checks passed: 2 tests.
 - `git diff --check` passed.
 - Changed-package Go lint reported zero issues but exceeded the five-minute
   runner timeout.

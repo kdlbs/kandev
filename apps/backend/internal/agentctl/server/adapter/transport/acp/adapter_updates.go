@@ -96,6 +96,13 @@ func (a *Adapter) syncNotifQueueThen(afterBarrier func()) bool {
 	}
 }
 
+func (a *Adapter) discardPendingSessionStartupWarnings() {
+	a.mu.Lock()
+	a.sessionCreationPending = false
+	a.pendingSessionStartupWarnings = nil
+	a.mu.Unlock()
+}
+
 // startUpdateWorker spawns the goroutine that drains notifQueue and calls
 // handleACPUpdate for each notification. Called exactly once from
 // NewAdapter so the queue always has a consumer for the adapter's
@@ -154,11 +161,16 @@ func (a *Adapter) handleACPUpdate(
 ) {
 	sessionID := string(n.SessionId)
 	startupWarning, isStartupWarning := codexMCPStartupWarningEvent(a.agentID, sessionID, n.Update.ToolCall)
-	a.mu.RLock()
+	a.mu.Lock()
+	if isStartupWarning && a.sessionCreationPending && !a.closed {
+		a.pendingSessionStartupWarnings = append(a.pendingSessionStartupWarnings, *startupWarning)
+		a.mu.Unlock()
+		return
+	}
 	isLoading := a.isLoadingSession
 	startupWarningOwned := !a.closed &&
 		((isLoading && a.loadingSessionID == sessionID) || (!isLoading && a.sessionID == sessionID))
-	a.mu.RUnlock()
+	a.mu.Unlock()
 	if isStartupWarning && !startupWarningOwned {
 		startupWarning = nil
 		if !isLoading {

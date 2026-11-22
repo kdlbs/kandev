@@ -56,9 +56,16 @@ The focused Go regressions check warning classification, lifecycle readiness,
 and actual queue delivery with SQLite. Use a genuine failed tool call as a
 control. Those tests cover the startup warning and Auto-run admission criteria.
 
-The existing desktop and phone resume queue specs exercise queue controls. The
-warning uses the same status renderer in both layouts. The SQLite regression
-checks that Kandev stores the warning in the message format that renderer reads.
+The desktop and phone resume queue specs register the mock ACP peer under the
+`codex-acp` identity and emit a matching startup report during `session/load`.
+Each spec checks that the warning is visible, a prompt is accepted into the
+queue while resume is pending, and the prompt is delivered once after the
+session becomes ready. The SQLite regression checks that Kandev stores the
+warning in the message format rendered by both layouts.
+
+The browser coverage lives in
+`apps/web/e2e/tests/session/session-resume-prompt-queue.spec.ts` and
+`apps/web/e2e/tests/session/mobile-session-resume-prompt-queue.spec.ts`.
 
 ## Work orders
 
@@ -82,11 +89,16 @@ change Ready state. The existing boot and queue paths dispatch eligible work.
 
 Verification passed:
 
-- Focused Go regressions for ACP conversion, lifecycle readiness, delivery
-  attribution, metadata retention, and SQLite queue admission.
+- Focused Go regressions for ACP session creation and load reports, active-prompt
+  capacity evidence, lifecycle readiness, legacy and durable submission
+  ownership, watchdog cancellation identity, and SQLite queue admission.
+- `go test -trimpath -count=1 ./internal/common/acpcompat
+  ./internal/agentctl/acpcompat ./cmd/mock-agent`.
 - `go build -trimpath ./...` in `apps/backend`.
-- Desktop Chromium resume and prompt queue spec: 3 passed.
-- Mobile Chrome resume and prompt queue spec: 1 passed.
+- Desktop Chromium resume and prompt queue spec: 4 passed, including a report
+  emitted during restore and one queued prompt delivered after readiness.
+- Mobile Chrome resume and prompt queue spec: 2 passed, with the same warning
+  visibility and queued delivery assertions.
 - `git diff --check`.
 - Changed-package Go lint produced zero issues but did not finish before the
   repository runner's five-minute timeout.

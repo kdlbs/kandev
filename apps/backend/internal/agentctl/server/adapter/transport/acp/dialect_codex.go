@@ -4,8 +4,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/acpcompat"
 )
 
 const (
