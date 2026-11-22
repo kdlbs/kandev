@@ -596,7 +596,7 @@ describe("reorderSidebarViews", () => {
     vi.mocked(updateUserSettings).mockClear();
   });
 
-  it("reorders by id, persists the order, and syncs the backend payload", () => {
+  it("reorders by id, persists the order, and syncs the backend payload", async () => {
     const store = makeStore();
     setSidebarViews(store, {
       views: [
@@ -615,6 +615,7 @@ describe("reorderSidebarViews", () => {
       "two",
       "one",
     ]);
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalled());
     expect(updateUserSettings).toHaveBeenCalledWith({
       sidebar_view_state: {
         workspace_id: "ws",
@@ -683,7 +684,7 @@ describe("sidebar view backend state", () => {
     vi.mocked(updateUserSettings).mockClear();
   });
 
-  it("syncs active view changes to backend user settings", () => {
+  it("syncs active view changes to backend user settings", async () => {
     const store = makeStore();
     setSidebarViews(store, {
       views: [makeSidebarView("all", "All"), makeSidebarView("mine", "Mine")],
@@ -700,6 +701,7 @@ describe("sidebar view backend state", () => {
     store.getState().setSidebarActiveView("mine");
 
     expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe("mine");
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalled());
     expect(updateUserSettings).toHaveBeenCalledWith({
       sidebar_view_state: {
         workspace_id: "ws",
@@ -709,7 +711,7 @@ describe("sidebar view backend state", () => {
     });
   });
 
-  it("syncs filter sort and group drafts to backend user settings", () => {
+  it("syncs filter sort and group drafts to backend user settings", async () => {
     const store = makeStore();
     setSidebarViews(store, {
       views: [makeSidebarView("all", "All")],
@@ -722,6 +724,7 @@ describe("sidebar view backend state", () => {
       group: "workflow",
     });
 
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalled());
     expect(updateUserSettings).toHaveBeenCalledWith({
       sidebar_view_state: {
         workspace_id: "ws",
@@ -736,7 +739,7 @@ describe("sidebar view backend state", () => {
     });
   });
 
-  it("sends a sparse view order with its observed base while an owned draft is retained", () => {
+  it("sends a sparse view order with its observed base while an owned draft is retained", async () => {
     const draft: SidebarViewDraft = {
       baseViewId: "all",
       filters: [],
@@ -753,6 +756,7 @@ describe("sidebar view backend state", () => {
 
     store.getState().reorderSidebarViews("two", "all");
 
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalled());
     expect(updateUserSettings).toHaveBeenCalledWith({
       sidebar_view_state: {
         workspace_id: "ws",
