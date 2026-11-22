@@ -10225,6 +10225,13 @@ func (s *Service) RespondToPermission(ctx context.Context, taskID, sessionID, re
 	return err
 }
 
+// CancelAgentPermission dismisses one live permission request on the same
+// generation-safe path as RespondToPermission. Unlike that wrapper, the caller
+// supplies Source and ActorKind, so the audit record names who dismissed it.
+func (s *Service) CancelAgentPermission(ctx context.Context, request ResolveAgentPermissionRequest) error {
+	return s.cancelAgentPermission(ctx, request)
+}
+
 // DrainQueuedMessage dispatches one queued message for a session that is ready
 // for input. It is intentionally one-at-a-time: each successful prompt will
 // complete its own turn and then drain the next entry through handleAgentReady.
