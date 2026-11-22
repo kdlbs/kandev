@@ -6,6 +6,7 @@ import type {
   PromptSyncController,
 } from "@/hooks/domains/settings/use-prompt-sync";
 import type { PromptSyncConfig, PromptSyncConflict } from "@/lib/types/prompt-sync";
+import { PROMPT_SYNC_RATE_LIMIT_ERROR_CODE } from "@/lib/types/prompt-sync";
 import type { PromptConflictReview } from "@/hooks/domains/settings/use-prompt-conflict-review";
 
 const mocks = vi.hoisted(() => ({
@@ -182,6 +183,21 @@ describe("PromptSyncSection", () => {
     expect(mocks.controller.handleSyncNow).toHaveBeenCalled();
     fireEvent.click(screen.getByTestId(OPEN_TEST_ID));
     expect(screen.getByTestId("prompt-sync-remove")).toBeTruthy();
+  });
+
+  it("shows localized retry guidance for a saved GitHub quota block", () => {
+    mocks.controller = makeController({
+      config: {
+        ...config,
+        last_ok: false,
+        last_error_class: PROMPT_SYNC_RATE_LIMIT_ERROR_CODE,
+        last_error: "GitHub quota is temporarily unavailable",
+      },
+    });
+    renderSection();
+    expect(screen.getByTestId("prompt-sync-status").textContent).toContain(
+      "GitHub quota is unavailable. Try again after quota resets.",
+    );
   });
 });
 

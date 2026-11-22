@@ -224,6 +224,16 @@ func (a *Adapter) handleACPUpdate(
 		shared.LogRawEvent(shared.ProtocolACP, a.agentID, string(n.SessionId), "session_notification", rawData)
 	}
 
+	if n.Update.ConfigOptionUpdate != nil {
+		a.observeConfigurationCommandOptions(
+			sessionID,
+			promptGeneration,
+			convertACPConfigOptions(n.Update.ConfigOptionUpdate.ConfigOptions),
+		)
+	}
+	if n.Update.CurrentModeUpdate != nil {
+		a.observeConfigurationCommandMode(sessionID, promptGeneration, string(n.Update.CurrentModeUpdate.CurrentModeId))
+	}
 	suppressed := a.dialect.suppresses(n)
 	handled := suppressed
 	var event, leadingEvent *AgentEvent
@@ -926,6 +936,14 @@ func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.Session
 		}
 		commands = append(commands, ac)
 	}
+	a.mu.Lock()
+	if !a.closed {
+		if a.availableCommandsBySession == nil {
+			a.availableCommandsBySession = make(map[string][]streams.AvailableCommand)
+		}
+		a.availableCommandsBySession[sessionID] = append([]streams.AvailableCommand(nil), commands...)
+	}
+	a.mu.Unlock()
 	return &AgentEvent{
 		Type:              streams.EventTypeAvailableCommands,
 		SessionID:         sessionID,

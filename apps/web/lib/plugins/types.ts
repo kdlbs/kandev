@@ -42,7 +42,11 @@ export type {
 export type { PluginIcon } from "@kdlbs/plugin-sdk";
 
 /** Entry in the boot payload's `plugins` array (backend `ActivePlugin`). */
+export type FileViewerRegistration = PluginSDK.FileViewerRegistration;
+export type FileViewerProps = PluginSDK.FileViewerProps;
+
 export interface ActivePlugin {
+  fileViewers?: import("@/lib/types/plugins").PluginFileViewerDeclaration[];
   id: string;
   name: string;
   bundleUrl: string;

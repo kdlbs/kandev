@@ -323,7 +323,8 @@ type Adapter struct {
 
 	// Available models from the most recent session creation/load.
 	// Used by SetModel to validate the requested model exists.
-	availableModels []modelInfo
+	availableModels            []modelInfo
+	availableCommandsBySession map[string][]streams.AvailableCommand
 
 	// usageBySession tracks the latest and previously consumed cumulative
 	// `usage_update` samples. codex-acp DOES emit a typed per-turn usage
@@ -453,6 +454,7 @@ type promptTurnState struct {
 	providerErrorCh              chan openCodeStderrDiagnostic
 	promptGeneration             uint64
 	evidenceMu                   sync.Mutex
+	configurationCommand         *configurationCommandTracker
 	codexSystemError             bool
 	codexCapacity                bool
 	codexUsageLimit              *streams.ProviderError

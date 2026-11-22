@@ -338,6 +338,7 @@ export const defaultSessionState: SessionSliceState = {
   turns: {
     bySession: {},
     activeBySession: {},
+    emptyTurnNoticeTurnIdsBySession: {},
     windowCoverageBySession: {},
     loadedBySession: {},
     reconcileEpochBySession: {},
@@ -934,6 +935,9 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       generations[sessionId] = (generations[sessionId] ?? 0) + 1;
       delete draft.turns.bySession[sessionId];
       delete draft.turns.activeBySession[sessionId];
+      if (draft.turns.emptyTurnNoticeTurnIdsBySession) {
+        delete draft.turns.emptyTurnNoticeTurnIdsBySession[sessionId];
+      }
       if (draft.turns.windowCoverageBySession) {
         delete draft.turns.windowCoverageBySession[sessionId];
       }
