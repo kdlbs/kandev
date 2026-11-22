@@ -504,6 +504,9 @@ func (s *Service) completeTurnForStreamEvent(
 	if len(capturedTurnIDs) > 0 {
 		capturedTurnID = capturedTurnIDs[0]
 	}
+	if capturedTurnID != "" && payload.Data != nil && payload.Data.TurnID == capturedTurnID {
+		ctx = withConfigurationCommandResult(ctx, payload.Data.ConfigurationCommandResult)
+	}
 	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, payload.TaskID, payload.SessionID, capturedTurnID)
 	if capturedTurnID != "" {
 		// A durable turn ID is authoritative. If the event is stale and an
@@ -3791,9 +3794,10 @@ func emptyTurnCompletionFromPayload(payload *lifecycle.AgentStreamEventPayload) 
 			ExecutionProfileID: payload.ExecutionProfileID,
 			PromptGeneration:   payload.Data.PromptGeneration,
 		},
-		stopReason:     extractStopReason(payload),
-		isError:        extractCompleteIsError(payload),
-		completeOutput: completeFrameCarriesOutput(payload),
+		stopReason:                 extractStopReason(payload),
+		isError:                    extractCompleteIsError(payload),
+		completeOutput:             completeFrameCarriesOutput(payload),
+		configurationCommandResult: payload.Data.ConfigurationCommandResult,
 	}
 }
 

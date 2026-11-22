@@ -657,6 +657,7 @@ export type {
   SessionPendingActionChangedPayload,
   TaskSessionNotificationPayload,
   TaskSessionAgentctlPayload,
+  ConfigurationCommandResult,
   TurnEventPayload,
   AvailableCommandPayload,
   AvailableCommandsPayload,
