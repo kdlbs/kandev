@@ -50,8 +50,10 @@ completed, without changing the watch's matching or ordering otherwise.
   watch, so issues that can start are not hidden behind held ones. A held
   issue, and a released issue whose dispatch the in-flight cap defers, shall
   be re-checked on later polls even after it has left the watch's paged
-  search window, for up to 250 such issues per watch, until a task is started
-  for it or it no longer matches the watch filter.
+  search window, for up to 250 such issues per watch. An issue stays pending
+  until the watch records a task for it or a complete re-check confirms that
+  it no longer matches. A temporary reservation prevents duplicate dispatch
+  while the issue stays eligible for retry if task creation fails.
 - **AC-INTEGRATIONS-LINEAR-BLOCKERS-001.3:** A canceled blocker shall keep the
   issue held. Blockers in another team or project shall count like any other
   blocker. When Linear reports more blocker relations than the watch fetched,

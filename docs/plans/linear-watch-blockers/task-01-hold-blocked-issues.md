@@ -48,8 +48,11 @@ before they are published.
    canceled, cross-team, and truncated cases, releases an issue on the first
    poll after completion, and pages past held issues. A held issue outside
    the search window is re-checked by ID and released, in bounded batches,
-   and a released issue stays pending until dispatch reserves it.
-3. A flag-only filter is rejected as empty; a watch with the flag off keeps
+   and a released issue stays pending until dispatch records its task ID.
+3. A poll discards stale results after a concurrent pending write or reset.
+   A partial re-check keeps unchecked IDs within the same request budget.
+   Default dispatch order uses the most recent update across re-check batches.
+4. A flag-only filter is rejected as empty; a watch with the flag off keeps
    its single plain search.
 
 ## Verification

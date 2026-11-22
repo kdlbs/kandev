@@ -7,7 +7,12 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // pendingWatchFixture serves a paged search window from window and answers
@@ -110,11 +115,8 @@ func TestService_CheckIssueWatch_ReleasesHeldIssueOutsideSearchWindow(t *testing
 	}
 }
 
-// A released issue whose event the in-flight cap defers is not reserved; it
-// must stay pending so a later poll publishes it again once a slot frees up.
-//
 // @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.2
-func TestService_CheckIssueWatch_KeepsReleasedIssuePendingUntilReserved(t *testing.T) {
+func TestService_CheckIssueWatch_KeepsReleasedIssuePendingUntilTaskCreated(t *testing.T) {
 	h := newPendingWatchFixture(t)
 	h.window = []LinearIssue{{ID: "id-2", Identifier: "ENG-2", Blockers: blockedBy("started")}}
 	h.poll(t)
@@ -136,9 +138,148 @@ func TestService_CheckIssueWatch_KeepsReleasedIssuePendingUntilReserved(t *testi
 	if got := h.poll(t); len(got) != 0 {
 		t.Fatalf("reserved issue published again: %v", got)
 	}
-	if len(h.pending(t)) != 0 {
-		t.Fatalf("reserved issue still pending: %v", h.pending(t))
+	require.Equal(t, []string{"id-2"}, h.pending(t))
+
+	require.NoError(t, h.store.ReleaseIssueWatchTask(ctx, h.watch.ID, "ENG-2"))
+	require.Equal(t, []string{"ENG-2"}, h.poll(t))
+
+	reserved, err := h.store.ReserveIssueWatchTask(ctx, h.watch.ID, "ENG-2", "")
+	require.NoError(t, err)
+	require.True(t, reserved)
+	require.NoError(t, h.store.AssignIssueWatchTaskID(ctx, h.watch.ID, "ENG-2", "task-2"))
+	require.Empty(t, h.poll(t))
+	require.Empty(t, h.pending(t))
+}
+
+// @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.2
+func TestService_CheckIssueWatch_RejectsStalePendingPoll(t *testing.T) {
+	for _, scenario := range []string{"newer poll", "reset"} {
+		t.Run(scenario, func(t *testing.T) {
+			h := newPendingWatchFixture(t)
+			held := LinearIssue{ID: "id-1", Identifier: "ENG-1", Blockers: blockedBy("started")}
+			h.window = []LinearIssue{held}
+			h.poll(t)
+
+			recheckStarted := make(chan struct{})
+			release := make(chan struct{})
+			releaseOldPoll := sync.OnceFunc(func() { close(release) })
+			var windowCalls atomic.Int32
+			h.client.searchIssuesFn = func(filter SearchFilter, _ string, _ int) (*SearchResult, error) {
+				if len(filter.IssueIDs) > 0 {
+					close(recheckStarted)
+					<-release
+					return &SearchResult{IsLast: true, Issues: []LinearIssue{{ID: held.ID, Identifier: held.Identifier}}}, nil
+				}
+				if windowCalls.Add(1) == 1 {
+					return &SearchResult{IsLast: true}, nil
+				}
+				newHeld := LinearIssue{ID: "id-2", Identifier: "ENG-2", Blockers: blockedBy("started")}
+				return &SearchResult{IsLast: true, Issues: []LinearIssue{held, newHeld}}, nil
+			}
+
+			var issues []*LinearIssue
+			var err error
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				issues, err = h.svc.CheckIssueWatch(t.Context(), h.watch)
+			}()
+			t.Cleanup(func() {
+				releaseOldPoll()
+				<-done
+			})
+			select {
+			case <-recheckStarted:
+			case <-time.After(5 * time.Second):
+				t.Fatal("older poll did not reach the pending recheck")
+			}
+
+			var want []string
+			if scenario == "reset" {
+				require.NoError(t, h.store.ResetIssueWatchState(t.Context(), h.watch.ID))
+			} else {
+				require.Empty(t, h.poll(t))
+				want = []string{"id-1", "id-2"}
+			}
+			releaseOldPoll()
+			<-done
+			require.NoError(t, err)
+			require.Equal(t, want, h.pending(t))
+			require.Empty(t, issues)
+			if scenario == "reset" {
+				watch, err := h.store.GetIssueWatch(t.Context(), h.watch.ID)
+				require.NoError(t, err)
+				require.Nil(t, watch.LastPolledAt)
+			}
+		})
 	}
+}
+
+// @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.2
+func TestService_CheckIssueWatch_ContinuesIncompletePendingRecheck(t *testing.T) {
+	h := newPendingWatchFixture(t)
+	first := LinearIssue{ID: "id-1", Identifier: "ENG-1", Blockers: blockedBy("started")}
+	second := LinearIssue{ID: "id-2", Identifier: "ENG-2", Blockers: blockedBy("started")}
+	h.window = []LinearIssue{first, second}
+	h.poll(t)
+	second.Blockers = nil
+
+	h.client.searchIssuesFn = func(filter SearchFilter, cursor string, _ int) (*SearchResult, error) {
+		if len(filter.IssueIDs) == 0 {
+			return &SearchResult{IsLast: true}, nil
+		}
+		if cursor == "next" {
+			return &SearchResult{IsLast: true, Issues: []LinearIssue{second}}, nil
+		}
+		return &SearchResult{NextPageToken: "next", Issues: []LinearIssue{first}}, nil
+	}
+
+	require.Equal(t, []string{"ENG-2"}, h.poll(t))
+	require.Equal(t, []string{"id-1", "id-2"}, h.pending(t))
+}
+
+// @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.4
+func TestService_CheckIssueWatch_KeepsUncheckedIDsAtRecheckLimit(t *testing.T) {
+	h := newPendingWatchFixture(t)
+	h.window = []LinearIssue{{ID: "id-1", Identifier: "ENG-1", Blockers: blockedBy("started")}}
+	h.poll(t)
+
+	rechecks := 0
+	h.client.searchIssuesFn = func(filter SearchFilter, _ string, _ int) (*SearchResult, error) {
+		if len(filter.IssueIDs) == 0 {
+			return &SearchResult{IsLast: true}, nil
+		}
+		rechecks++
+		return &SearchResult{NextPageToken: fmt.Sprintf("page-%d", rechecks)}, nil
+	}
+
+	require.Empty(t, h.poll(t))
+	require.Equal(t, issueWatchMaxPages, rechecks)
+	require.Equal(t, []string{"id-1"}, h.pending(t))
+}
+
+// @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.2
+func TestService_CheckIssueWatch_DefaultOrderAcrossPendingBatches(t *testing.T) {
+	h := newPendingWatchFixture(t)
+	for i := range issueWatchSearchPageSize + 1 {
+		issue := LinearIssue{
+			ID: fmt.Sprintf("id-%03d", i), Identifier: fmt.Sprintf("ENG-%d", i),
+			Updated: "2026-01-01T00:00:00Z",
+		}
+		if i == issueWatchSearchPageSize {
+			issue.Updated = "2026-01-02T00:00:00Z"
+		}
+		// Every issue is held during the poll that first sees it.
+		h.byID[issue.ID] = issue
+		issue.Blockers = blockedBy("started")
+		h.window = append(h.window, issue)
+	}
+	require.Empty(t, h.poll(t))
+	h.window = nil
+
+	got := h.poll(t)
+	require.Len(t, got, issueWatchSearchPageSize+1)
+	require.Equal(t, "ENG-50", got[0])
 }
 
 // @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.2
@@ -205,27 +346,20 @@ func TestService_CheckIssueWatch_RechecksHeldIssuesInBoundedBatches(t *testing.T
 func TestStore_PendingIssueIDsFollowWatchLifecycle(t *testing.T) {
 	h := newPendingWatchFixture(t)
 	ctx := context.Background()
-	if err := h.store.ReplacePendingIssueIDs(ctx, h.watch.ID, []string{"b", "a"}); err != nil {
-		t.Fatalf("replace: %v", err)
+	h.window = []LinearIssue{
+		{ID: "b", Identifier: "ENG-2", Blockers: blockedBy("started")},
+		{ID: "a", Identifier: "ENG-1", Blockers: blockedBy("started")},
 	}
-	if want := []string{"a", "b"}; !reflect.DeepEqual(h.pending(t), want) {
-		t.Fatalf("pending = %v, want %v", h.pending(t), want)
-	}
-	if err := h.store.ResetIssueWatchState(ctx, h.watch.ID); err != nil {
-		t.Fatalf("reset: %v", err)
-	}
-	if len(h.pending(t)) != 0 {
-		t.Fatalf("reset must clear pending issues")
-	}
-	if err := h.store.ReplacePendingIssueIDs(ctx, h.watch.ID, []string{"a"}); err != nil {
-		t.Fatalf("replace: %v", err)
-	}
-	if err := h.store.DeleteIssueWatch(ctx, h.watch.ID); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-	if len(h.pending(t)) != 0 {
-		t.Fatalf("delete must clear pending issues")
-	}
+	h.poll(t)
+	require.Equal(t, []string{"a", "b"}, h.pending(t))
+
+	require.NoError(t, h.store.ResetIssueWatchState(ctx, h.watch.ID))
+	require.Empty(t, h.pending(t))
+
+	h.poll(t)
+	require.Equal(t, []string{"a", "b"}, h.pending(t))
+	require.NoError(t, h.store.DeleteIssueWatch(ctx, h.watch.ID))
+	require.Empty(t, h.pending(t))
 }
 
 // @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.4

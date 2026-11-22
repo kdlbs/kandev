@@ -34,12 +34,12 @@ GraphQL schema exposes blockers as `Issue.inverseRelations` nodes of type
 
 - `REQ-INTEGRATIONS-LINEAR-BLOCKERS-001` and `-002` with all their criteria.
 - Linear models, GraphQL client, mock client, watch service, watch dialog,
-  watch table, locales, and public docs.
+  watch storage, watch table, locales, and public docs.
 
 ### Out of scope
 
 - Other relation types, sub-issues, and the `/linear` browser.
-- Changes to the orchestrator, the storage schema, or other providers.
+- Changes to the orchestrator or other providers.
 
 ## Work orders
 

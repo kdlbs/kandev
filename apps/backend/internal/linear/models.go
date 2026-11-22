@@ -127,11 +127,11 @@ const ProjectDescriptionPlaceholder = "{{issue.project.description}}"
 
 // IssueSortBy selects the order in which a watch's matched issues are published
 // (and therefore dispatched) under the per-watch in-flight cap. The empty value
-// preserves Linear's API order (updatedAt asc).
+// preserves Linear's API order (updatedAt desc).
 type IssueSortBy string
 
 const (
-	SortByDefault      IssueSortBy = ""             // preserve Linear API order (updatedAt asc)
+	SortByDefault      IssueSortBy = ""             // preserve Linear API order (updatedAt desc)
 	SortByPriorityDesc IssueSortBy = "priority"     // most important first: urgent>high>medium>low>none
 	SortByPriorityAsc  IssueSortBy = "priority_asc" // least important first
 	SortByCreatedDesc  IssueSortBy = "created_desc" // newest created first

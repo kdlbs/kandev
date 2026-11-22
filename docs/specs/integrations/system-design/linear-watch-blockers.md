@@ -66,13 +66,10 @@ points to a plain search.
 matches Kandev task dependencies, where only a successful prerequisite
 resolves a link; a canceled blocker means the planned work did not happen.
 
-After `CheckIssueWatch` has collected the unseen issues of every page, and
-before project descriptions and `sortIssues`, `dropBlockedIssues` removes each
-issue with a blocker that is not done or with a truncated relation list. A
-held issue is not published, so the orchestrator neither reserves it in the
-dedup table nor counts it against `maxInflightTasks`. The next poll reads its
-blockers again, and once they are completed it is published and sorted with
-the other issues. Held counts are logged at debug level.
+After `CheckIssueWatch` reads the search pages, `holdBlockedIssues` re-checks
+pending IDs and holds issues with open blockers or incomplete relation lists.
+Held issues use no in-flight slots. The service sorts eligible issues before
+publication and logs the held count at debug level.
 
 ## Pending issues
 
@@ -81,25 +78,31 @@ Linear's search orders by `updatedAt`, and a watch reads at most
 completes, so in a busy team it can leave that window while it waits. A
 released issue can also miss its start: when the watch's in-flight cap is
 full, dispatch defers the event without reserving the issue. To start such
-issues anyway, a blocker-aware watch records the Linear IDs of the issues it
-has matched but not yet started (held issues and released issues not yet
-reserved) in `linear_issue_watch_pending_issues (issue_watch_id, issue_id)`,
-keyed by watch and cleared with it and on reset.
+issues after they leave the search window, a blocker-aware watch stores their
+Linear IDs in `linear_issue_watch_pending_issues (issue_watch_id, issue_id)`.
+Reset and deletion clear this list.
 
 On each poll, `holdBlockedIssues` takes the pending IDs that the paged search
 did not return and re-checks them with the same search and filter plus
 `SearchFilter.IssueIDs`, which `buildIssueFilter` maps to `id: { in: [...] }`.
 `IssueIDs` is `json:"-"`, so it is never stored or read from a request.
-Re-checks run in batches of 50 IDs, and the pending set is capped at
-`maxPendingIssues` (250), so a poll adds at most five requests. Re-checked
-issues join the window's unseen issues before blockers are evaluated. The
-stored set is then replaced by the unseen issues of this poll, held first:
-an issue leaves it once dispatch has reserved it (it is then seen) or once it
-no longer matches the filter (it is absent from the response). When a
-re-check request fails, its unchecked IDs stay pending and the rest of the
-poll continues; a canceled poll fails as a whole. When the pending set cannot
-be read, the stored set is left unchanged. Beyond 250 pending issues, the
-extra ones start only while they are inside the search window.
+The pending set holds up to 250 IDs. The service re-checks up to 50 IDs per
+batch and follows the cursor within a shared budget of five requests per poll.
+If the budget ends or a request fails, unchecked IDs stay pending. A
+cancellation or deadline error aborts the poll.
+
+Re-checked issues join the search results before the blocker check. A temporary
+reservation suppresses publication and keeps the issue pending. A recorded task
+ID or a confirmed filter mismatch removes the issue from the pending set.
+Beyond 250 pending issues, additional matches depend on the search window.
+
+The store adds `poll_revision` to `linear_issue_watches` during schema setup.
+Each poll with the setting on reads this revision before its Linear requests.
+One transaction advances the revision and replaces the pending set if the
+revision still matches. A reset, a watch edit, or another committed poll can
+invalidate the revision. If the revision check fails, the poll discards its
+results and skips the poll timestamp update. A pending storage error aborts
+the poll.
 
 ## Pagination
 
@@ -107,7 +110,8 @@ A watch with default order normally reads a single page, because sorting a
 default watch changes nothing. With the setting on, the watch reads up to
 `issueWatchMaxPages` pages like a sorted watch, so a first page full of held
 issues cannot hide issues that can start. A watch with the setting off keeps
-its current page count and requests.
+its current page count and requests. With the setting on, default dispatch
+order sorts the combined results by most recent Linear update.
 
 ## Watch dialog
 
@@ -133,10 +137,10 @@ issues that were held are then started by the next poll if they match.
 Real `GraphQLClient` requests against `httptest.Server` cover the query
 choice, the relation mapping, and truncation. Service tests cover holding,
 release after completion, canceled, cross-team, and truncated blockers,
-pagination past held issues, the unchanged default path, re-checks of pending
-issues outside the window (release, a release deferred until reservation,
-filter mismatch, request failure, cancellation, and batch bounds), and the
-pending table across reset and delete. Web unit tests
+pagination past held issues, and the default path with the setting off. Pending
+issue tests cover reservation release, stale polls, reset, partial re-checks,
+request budgets, and default dispatch order across batches. SQLite and
+PostgreSQL tests cover revision writes. Web unit tests
 cover the form round trip and the switch. Playwright covers the setting across
 team pick, save, and reopen on desktop and phone, and a mock-Linear dispatch
 where a blocked issue gets a task only after its blocker completes. The mock
