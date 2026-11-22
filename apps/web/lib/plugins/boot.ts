@@ -8,6 +8,7 @@ import type { AppState } from "@/lib/state/store";
 import type { BootPayload } from "@/src/boot-payload";
 import { buildHostApi } from "./host-api";
 import { installPluginGlobal, loadPlugins, unloadPlugin } from "./host";
+import { seedSidebarGroupingCatalog } from "./sidebar-grouping-catalog";
 
 type PluginE2EWindow = Window & {
   __KANDEV_E2E_EXPOSE_STORE__?: boolean;
@@ -28,12 +29,14 @@ const bootedStores = new WeakSet<StoreApi<AppState>>();
  * a bundle for a store that has already booted.
  */
 export function bootPlugins(
-  bootPayload: Pick<BootPayload, "plugins">,
+  bootPayload: Pick<BootPayload, "plugins" | "sidebarGroupings">,
   storeApi: StoreApi<AppState>,
 ): void {
-  if (!bootPayload.plugins || bootPayload.plugins.length === 0) return;
   if (bootedStores.has(storeApi)) return;
   bootedStores.add(storeApi);
+  if (bootPayload.sidebarGroupings)
+    seedSidebarGroupingCatalog(storeApi, bootPayload.sidebarGroupings);
+  if (!bootPayload.plugins || bootPayload.plugins.length === 0) return;
 
   installPluginGlobal();
   const e2eWindow = window as PluginE2EWindow;

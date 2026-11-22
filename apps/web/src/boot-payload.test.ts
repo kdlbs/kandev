@@ -326,6 +326,21 @@ describe("loadBootPayload", () => {
   });
 });
 
+it("retains complete provider boot metadata without treating facets or malformed identities as complete groupings", () => {
+  const provider = { reference: "plugin:acme:labels", label: "Tag", generation: "install-1" };
+  const win = {
+    __KANDEV_BOOT_PAYLOAD__: {
+      sidebarGroupings: [
+        provider,
+        { ...provider, reference: "facet:acme:labels" },
+        { ...provider, reference: "plugin:acme:../labels" },
+        { ...provider, reference: "plugin:other:labels", generation: "" },
+      ],
+    },
+  } as unknown as Window;
+  expect(readBootPayload(win).sidebarGroupings).toEqual([provider]);
+});
+
 it("preserves validated file viewer declarations during boot", () => {
   const declaration = { id: "stl", title: "STL", extensions: ["stl"] };
   const win = {

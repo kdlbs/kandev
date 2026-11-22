@@ -92,3 +92,32 @@ func TestFilePreviewGrantOneTransferPerUser(t *testing.T) {
 		t.Fatal("concurrent transfers exceeded user budget")
 	}
 }
+
+func TestPluginStatusChangeRevokesFilePreviewGrant(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	record := installTestPlugin(t, svc, "kandev-plugin-preview")
+	grants := svc.filePreviewGrantStore()
+	scope := filePreviewScope{
+		UserID:         "user",
+		WorkspaceID:    "workspace",
+		InstallationID: record.InstallationID,
+		Digest:         "digest",
+	}
+	closed := false
+	token, err := grants.add(scope, 1, false, &filePreviewSource{
+		Read:  func(context.Context, io.Writer) error { return nil },
+		Close: func() { closed = true },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Disable(record.ID); err != nil {
+		t.Fatalf("Disable plugin: %v", err)
+	}
+	if err := grants.read(t.Context(), token, scope, 1, false, io.Discard); err == nil {
+		t.Fatal("preview grant remained usable after plugin disable")
+	}
+	if !closed {
+		t.Fatal("preview source remained open after plugin disable")
+	}
+}
