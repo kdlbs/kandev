@@ -183,10 +183,16 @@ service Host {
   rpc GetSessionModeContextExact(GetSessionModeContextExactRequest) returns (GetSessionModeContextExactResponse);
   rpc SetSessionModeExact(SetSessionModeExactRequest) returns (SetSessionModeExactResponse);
   // Human interaction responses require a Host-issued single-use receipt from
-  // the authenticated native UI, bound to the exact interaction revision and
-  // response payload.
+  // the authenticated native UI or minted for a linked Kandev user, bound to
+  // the exact interaction revision and response payload.
   rpc RespondPermissionExact(RespondPermissionExactRequest) returns (RespondPermissionExactResponse);
   rpc AnswerClarificationExact(AnswerClarificationExactRequest) returns (AnswerClarificationExactResponse);
+  // LinkExternalIdentity redeems a Kandev-issued link code for the calling
+  // installation (api_write: human_responses). RequestHumanResponseReceipt
+  // mints a receipt for the Kandev user linked to an external account
+  // (host.v2.write:human_responses).
+  rpc LinkExternalIdentity(LinkExternalIdentityRequest) returns (LinkExternalIdentityResponse);
+  rpc RequestHumanResponseReceipt(RequestHumanResponseReceiptRequest) returns (RequestHumanResponseReceiptResponse);
   rpc ListWorkspacesExact(ListWorkspacesExactRequest) returns (ListWorkspacesExactResponse);
   rpc ListWorkflowsExact(ListWorkflowsExactRequest) returns (ListWorkflowsExactResponse);
   rpc ListWorkflowStepsExact(ListWorkflowStepsExactRequest) returns (ListWorkflowStepsExactResponse);
@@ -1425,6 +1431,64 @@ message AnswerClarificationExactResponse {
   Interaction interaction = 2;
 }
 
+message LinkExternalIdentityRequest {
+  string request_id = 1;
+  string code = 2;
+  string provider = 3;
+  string subject = 4;
+  string display_name = 5;
+}
+
+message ExternalIdentityLink {
+  string id = 1;
+  string provider = 2;
+  string subject = 3;
+  string display_name = 4;
+  string user_id = 5;
+  string user_display_name = 6;
+  string created_at = 7; // RFC3339
+}
+
+message LinkExternalIdentityResponse {
+  HostCommandResult result = 1;
+  ExternalIdentityLink link = 2;
+}
+
+message RequestHumanResponseReceiptRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string provider = 3;
+  string subject = 4;
+  string kind = 5; // "permission" | "clarification" | "step_approval"
+  string target_id = 6; // interaction id, or session id for step_approval
+  string expected_resource_version = 7;
+  string option_id = 8;
+  bool cancelled = 9;
+  repeated ClarificationAnswer answers = 10;
+  uint64 approval_revision = 11;
+  string manifest_digest = 12;
+}
+
+message InteractionActor {
+  string user_id = 1;
+  string display_name = 2;
+  string via = 3; // external provider, e.g. "discord"
+}
+
+message HumanResponseReceipt {
+  string id = 1;
+  string kind = 2;
+  string target_id = 3;
+  string resource_version = 4;
+  string expires_at = 5; // RFC3339
+  InteractionActor actor = 6;
+}
+
+message RequestHumanResponseReceiptResponse {
+  HostCommandResult result = 1;
+  HumanResponseReceipt receipt = 2;
+}
+
 message Event {
   string event_id = 1; // fresh uuid per delivery
   string event_type = 2; // bus subject, e.g. "task.created"
@@ -2277,6 +2341,9 @@ message Interaction {
   bool agent_disconnected = 13;
   string created_at = 14; // RFC3339
   string updated_at = 15; // RFC3339
+  // Set on an interaction resolved through a receipt minted for a linked
+  // Kandev user: that user and the external surface.
+  InteractionActor resolved_by = 16;
 }
 message InteractionFilter {
   repeated string session_ids = 1; // empty → not constrained by session

@@ -886,6 +886,8 @@ const (
 	Host_SetSessionModeExact_FullMethodName                        = "/kandev.plugin.v1.Host/SetSessionModeExact"
 	Host_RespondPermissionExact_FullMethodName                     = "/kandev.plugin.v1.Host/RespondPermissionExact"
 	Host_AnswerClarificationExact_FullMethodName                   = "/kandev.plugin.v1.Host/AnswerClarificationExact"
+	Host_LinkExternalIdentity_FullMethodName                       = "/kandev.plugin.v1.Host/LinkExternalIdentity"
+	Host_RequestHumanResponseReceipt_FullMethodName                = "/kandev.plugin.v1.Host/RequestHumanResponseReceipt"
 	Host_ListWorkspacesExact_FullMethodName                        = "/kandev.plugin.v1.Host/ListWorkspacesExact"
 	Host_ListWorkflowsExact_FullMethodName                         = "/kandev.plugin.v1.Host/ListWorkflowsExact"
 	Host_ListWorkflowStepsExact_FullMethodName                     = "/kandev.plugin.v1.Host/ListWorkflowStepsExact"
@@ -1028,10 +1030,16 @@ type HostClient interface {
 	GetSessionModeContextExact(ctx context.Context, in *GetSessionModeContextExactRequest, opts ...grpc.CallOption) (*GetSessionModeContextExactResponse, error)
 	SetSessionModeExact(ctx context.Context, in *SetSessionModeExactRequest, opts ...grpc.CallOption) (*SetSessionModeExactResponse, error)
 	// Human interaction responses require a Host-issued single-use receipt from
-	// the authenticated native UI, bound to the exact interaction revision and
-	// response payload.
+	// the authenticated native UI or minted for a linked Kandev user, bound to
+	// the exact interaction revision and response payload.
 	RespondPermissionExact(ctx context.Context, in *RespondPermissionExactRequest, opts ...grpc.CallOption) (*RespondPermissionExactResponse, error)
 	AnswerClarificationExact(ctx context.Context, in *AnswerClarificationExactRequest, opts ...grpc.CallOption) (*AnswerClarificationExactResponse, error)
+	// LinkExternalIdentity redeems a Kandev-issued link code for the calling
+	// installation (api_write: human_responses). RequestHumanResponseReceipt
+	// mints a receipt for the Kandev user linked to an external account
+	// (host.v2.write:human_responses).
+	LinkExternalIdentity(ctx context.Context, in *LinkExternalIdentityRequest, opts ...grpc.CallOption) (*LinkExternalIdentityResponse, error)
+	RequestHumanResponseReceipt(ctx context.Context, in *RequestHumanResponseReceiptRequest, opts ...grpc.CallOption) (*RequestHumanResponseReceiptResponse, error)
 	ListWorkspacesExact(ctx context.Context, in *ListWorkspacesExactRequest, opts ...grpc.CallOption) (*ListWorkspacesExactResponse, error)
 	ListWorkflowsExact(ctx context.Context, in *ListWorkflowsExactRequest, opts ...grpc.CallOption) (*ListWorkflowsExactResponse, error)
 	ListWorkflowStepsExact(ctx context.Context, in *ListWorkflowStepsExactRequest, opts ...grpc.CallOption) (*ListWorkflowStepsExactResponse, error)
@@ -1615,6 +1623,26 @@ func (c *hostClient) AnswerClarificationExact(ctx context.Context, in *AnswerCla
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AnswerClarificationExactResponse)
 	err := c.cc.Invoke(ctx, Host_AnswerClarificationExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) LinkExternalIdentity(ctx context.Context, in *LinkExternalIdentityRequest, opts ...grpc.CallOption) (*LinkExternalIdentityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LinkExternalIdentityResponse)
+	err := c.cc.Invoke(ctx, Host_LinkExternalIdentity_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) RequestHumanResponseReceipt(ctx context.Context, in *RequestHumanResponseReceiptRequest, opts ...grpc.CallOption) (*RequestHumanResponseReceiptResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestHumanResponseReceiptResponse)
+	err := c.cc.Invoke(ctx, Host_RequestHumanResponseReceipt_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2328,10 +2356,16 @@ type HostServer interface {
 	GetSessionModeContextExact(context.Context, *GetSessionModeContextExactRequest) (*GetSessionModeContextExactResponse, error)
 	SetSessionModeExact(context.Context, *SetSessionModeExactRequest) (*SetSessionModeExactResponse, error)
 	// Human interaction responses require a Host-issued single-use receipt from
-	// the authenticated native UI, bound to the exact interaction revision and
-	// response payload.
+	// the authenticated native UI or minted for a linked Kandev user, bound to
+	// the exact interaction revision and response payload.
 	RespondPermissionExact(context.Context, *RespondPermissionExactRequest) (*RespondPermissionExactResponse, error)
 	AnswerClarificationExact(context.Context, *AnswerClarificationExactRequest) (*AnswerClarificationExactResponse, error)
+	// LinkExternalIdentity redeems a Kandev-issued link code for the calling
+	// installation (api_write: human_responses). RequestHumanResponseReceipt
+	// mints a receipt for the Kandev user linked to an external account
+	// (host.v2.write:human_responses).
+	LinkExternalIdentity(context.Context, *LinkExternalIdentityRequest) (*LinkExternalIdentityResponse, error)
+	RequestHumanResponseReceipt(context.Context, *RequestHumanResponseReceiptRequest) (*RequestHumanResponseReceiptResponse, error)
 	ListWorkspacesExact(context.Context, *ListWorkspacesExactRequest) (*ListWorkspacesExactResponse, error)
 	ListWorkflowsExact(context.Context, *ListWorkflowsExactRequest) (*ListWorkflowsExactResponse, error)
 	ListWorkflowStepsExact(context.Context, *ListWorkflowStepsExactRequest) (*ListWorkflowStepsExactResponse, error)
@@ -2605,6 +2639,12 @@ func (UnimplementedHostServer) RespondPermissionExact(context.Context, *RespondP
 }
 func (UnimplementedHostServer) AnswerClarificationExact(context.Context, *AnswerClarificationExactRequest) (*AnswerClarificationExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AnswerClarificationExact not implemented")
+}
+func (UnimplementedHostServer) LinkExternalIdentity(context.Context, *LinkExternalIdentityRequest) (*LinkExternalIdentityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LinkExternalIdentity not implemented")
+}
+func (UnimplementedHostServer) RequestHumanResponseReceipt(context.Context, *RequestHumanResponseReceiptRequest) (*RequestHumanResponseReceiptResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RequestHumanResponseReceipt not implemented")
 }
 func (UnimplementedHostServer) ListWorkspacesExact(context.Context, *ListWorkspacesExactRequest) (*ListWorkspacesExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorkspacesExact not implemented")
@@ -3619,6 +3659,42 @@ func _Host_AnswerClarificationExact_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).AnswerClarificationExact(ctx, req.(*AnswerClarificationExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_LinkExternalIdentity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LinkExternalIdentityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).LinkExternalIdentity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_LinkExternalIdentity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).LinkExternalIdentity(ctx, req.(*LinkExternalIdentityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_RequestHumanResponseReceipt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestHumanResponseReceiptRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).RequestHumanResponseReceipt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_RequestHumanResponseReceipt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).RequestHumanResponseReceipt(ctx, req.(*RequestHumanResponseReceiptRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -4918,6 +4994,14 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AnswerClarificationExact",
 			Handler:    _Host_AnswerClarificationExact_Handler,
+		},
+		{
+			MethodName: "LinkExternalIdentity",
+			Handler:    _Host_LinkExternalIdentity_Handler,
+		},
+		{
+			MethodName: "RequestHumanResponseReceipt",
+			Handler:    _Host_RequestHumanResponseReceipt_Handler,
 		},
 		{
 			MethodName: "ListWorkspacesExact",

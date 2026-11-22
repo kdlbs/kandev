@@ -273,5 +273,17 @@
   "webAppUnavailable": "이 캔버스를 사용할 수 없습니다.",
   "workspace": "워크스페이스",
   "writeCapabilities": "쓰기 권한",
-  "yes": "예"
+  "yes": "예",
+  "identityLinks": "연결된 채팅 계정",
+  "identityLinksDescription": "채팅 계정을 Kandev 계정에 연결하면 이 플러그인을 통해 한 승인이 본인 이름으로 처리됩니다. 관리자는 연결된 모든 계정을 볼 수 있습니다.",
+  "identityLinkCodeCreate": "연결 코드 생성",
+  "identityLinkCodeInstructions": "10분 안에 채팅 앱에서 플러그인에 /link {{code}}를 보내세요. 코드는 한 번만 사용할 수 있습니다.",
+  "identityLinkCodeFailed": "연결 코드를 생성하지 못했습니다.",
+  "identityLinksLoadFailed": "연결된 계정을 불러오지 못했습니다.",
+  "identityLinkRevokeFailed": "계정 연결을 해제하지 못했습니다.",
+  "identityLinksLoading": "연결된 계정을 불러오는 중…",
+  "identityLinksEmpty": "아직 연결된 계정이 없습니다.",
+  "identityLinkAccount": "{{provider}}의 {{name}}",
+  "identityLinkUser": "Kandev 사용자: {{user}}",
+  "identityLinkRevoke": "연결 해제"
 }

@@ -80,6 +80,24 @@ func TestPluginsInteractionResponderForwardsPermissionIdentity(t *testing.T) {
 	}
 }
 
+// A linked user's decision is audited as a person deciding through the
+// plugin surface, not as plugin automation.
+func TestPluginsInteractionResponderAttributesLinkedUserResponses(t *testing.T) {
+	permissions := &recordingPermissionResolver{}
+	adapter := pluginsInteractionResponderAdapter{permissions: permissions}
+
+	if err := adapter.RespondToPermission(context.Background(), plugins.PluginPermissionResponse{
+		TaskID: "task-1", SessionID: "session-1", RequestID: "request-1",
+		PendingID: "pending-1", OptionID: "allow", LinkedUser: true,
+	}); err != nil {
+		t.Fatalf("RespondToPermission: %v", err)
+	}
+	if permissions.request.Source != taskmodels.PermissionSourcePlugin ||
+		permissions.request.ActorKind != taskmodels.PermissionActorLinkedIdentity {
+		t.Fatalf("resolver saw source=%q actor kind=%q, want plugin/linked_identity", permissions.request.Source, permissions.request.ActorKind)
+	}
+}
+
 // TestPluginsInteractionResponderDismissalUsesCancelPath keeps a dismissal off
 // the option path: there is no option to select, and inventing one would
 // report an outcome the agent never offered.

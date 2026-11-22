@@ -68,14 +68,21 @@ func (a pluginsInteractionResponderAdapter) RespondToPermission(
 		return permissionResolutionStatus(a.permissions.RespondToPermission(
 			ctx, in.TaskID, in.SessionID, in.RequestID, in.PendingID, "", true, false))
 	}
-	_, err := a.permissions.ResolveAgentPermission(ctx, orchestrator.ResolveAgentPermissionRequest{
+	request := orchestrator.ResolveAgentPermissionRequest{
 		TaskID:    in.TaskID,
 		SessionID: in.SessionID,
 		RequestID: in.RequestID,
 		PendingID: in.PendingID,
 		OptionID:  in.OptionID,
 		Source:    taskmodels.PermissionSourceAutomation,
-	})
+	}
+	// A linked user's decision is audited as that user (the context carries
+	// their identity) with the plugin as the carrying surface.
+	if in.LinkedUser {
+		request.Source = taskmodels.PermissionSourcePlugin
+		request.ActorKind = taskmodels.PermissionActorLinkedIdentity
+	}
+	_, err := a.permissions.ResolveAgentPermission(ctx, request)
 	return permissionResolutionStatus(err)
 }
 

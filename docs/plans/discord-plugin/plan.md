@@ -212,7 +212,7 @@ Wave 2:
 - [ ] [task-06-plugin-gateway-provisioning](task-06-plugin-gateway-provisioning.md)
 
 Wave 3:
-- [ ] [task-15-host-delegated-human-responses](task-15-host-delegated-human-responses.md)
+- [x] [task-15-host-delegated-human-responses](task-15-host-delegated-human-responses.md)
 - [ ] [task-07-plugin-channel-lifecycle](task-07-plugin-channel-lifecycle.md)
 
 Wave 4:

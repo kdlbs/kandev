@@ -273,5 +273,17 @@
   "webAppUnavailable": "Ţĥĩś ćàńvàś ĩś ũńàvàĩĺàƀĺē.",
   "workspace": "Ŵōŕķśƥàćē",
   "writeCapabilities": "Ŵŕĩţē àććēśś",
-  "yes": "ŷēś"
+  "yes": "ŷēś",
+  "identityLinks": "Ĺĩńķēď ćĥàţ àććōũńţś",
+  "identityLinksDescription": "Ĺĩńķ à ćĥàţ àććōũńţ ţō ŷōũŕ Ķàńďēv àććōũńţ śō àƥƥŕōvàĺś ŷōũ ĝĩvē ţĥŕōũĝĥ ţĥĩś ƥĺũĝĩń àćţ àś ŷōũ. Àďḿĩńś śēē ēvēŕŷ ĺĩńķēď àććōũńţ.",
+  "identityLinkCodeCreate": "Ĝēńēŕàţē ĺĩńķ ćōďē",
+  "identityLinkCodeInstructions": "Śēńď /ĺĩńķ {{code}} ţō ţĥē ƥĺũĝĩń ĩń ŷōũŕ ćĥàţ àƥƥ ŵĩţĥĩń 10 ḿĩńũţēś. Ţĥē ćōďē ŵōŕķś ōńćē.",
+  "identityLinkCodeFailed": "Ćōũĺď ńōţ ĝēńēŕàţē à ĺĩńķ ćōďē.",
+  "identityLinksLoadFailed": "Ćōũĺď ńōţ ĺōàď ĺĩńķēď àććōũńţś.",
+  "identityLinkRevokeFailed": "Ćōũĺď ńōţ ũńĺĩńķ ţĥē àććōũńţ.",
+  "identityLinksLoading": "Ĺōàďĩńĝ ĺĩńķēď àććōũńţś…",
+  "identityLinksEmpty": "Ńō ĺĩńķēď àććōũńţś ŷēţ.",
+  "identityLinkAccount": "{{name}} ōń {{provider}}",
+  "identityLinkUser": "Ķàńďēv ũśēŕ: {{user}}",
+  "identityLinkRevoke": "Ũńĺĩńķ"
 }

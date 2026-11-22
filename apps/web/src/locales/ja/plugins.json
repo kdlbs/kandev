@@ -273,5 +273,17 @@
   "webAppUnavailable": "このキャンバスは利用不可。",
   "workspace": "ワークスペース",
   "writeCapabilities": "書き込みアクセス",
-  "yes": "はい"
+  "yes": "はい",
+  "identityLinks": "連携済みのチャットアカウント",
+  "identityLinksDescription": "チャットアカウントを Kandev アカウントに連携すると、このプラグイン経由で行った承認があなたとして記録されます。管理者はすべての連携を確認できます。",
+  "identityLinkCodeCreate": "連携コードを生成",
+  "identityLinkCodeInstructions": "10 分以内にチャットアプリでプラグインに /link {{code}} を送信してください。コードは 1 回のみ使用できます。",
+  "identityLinkCodeFailed": "連携コードを生成できませんでした。",
+  "identityLinksLoadFailed": "連携済みアカウントを読み込めませんでした。",
+  "identityLinkRevokeFailed": "アカウントの連携を解除できませんでした。",
+  "identityLinksLoading": "連携済みアカウントを読み込み中…",
+  "identityLinksEmpty": "連携済みのアカウントはまだありません。",
+  "identityLinkAccount": "{{provider}} の {{name}}",
+  "identityLinkUser": "Kandev ユーザー: {{user}}",
+  "identityLinkRevoke": "連携を解除"
 }

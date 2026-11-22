@@ -80,6 +80,8 @@ var hostCallCallerRequired = map[string]struct{}{
 	pluginv1.Host_SetSessionModeExact_FullMethodName:              {},
 	pluginv1.Host_RespondPermissionExact_FullMethodName:           {},
 	pluginv1.Host_AnswerClarificationExact_FullMethodName:         {},
+	pluginv1.Host_LinkExternalIdentity_FullMethodName:             {},
+	pluginv1.Host_RequestHumanResponseReceipt_FullMethodName:      {},
 
 	pluginv1.Host_ListWorkspacesExact_FullMethodName:             {},
 	pluginv1.Host_ListWorkflowsExact_FullMethodName:              {},

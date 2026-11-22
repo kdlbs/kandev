@@ -100,6 +100,7 @@ var exactHostMethods = []exactMethod{
 	{method: exactSetSessionModeMethod, capability: "host.v2.write:execution", description: "Set one provider-advertised safe mode on the observed execution"},
 	{method: exactRespondPermissionMethod, capability: "host.v2.write:interactions", description: "Relay a human-authorized permission response to one pending request"},
 	{method: exactAnswerClarificationMethod, capability: "host.v2.write:interactions", description: "Relay a human-authorized answer to one pending clarification"},
+	{method: requestHumanResponseMethod, capability: humanResponsesCapability, description: "Mint a single-use response receipt for a linked Kandev user with session control"},
 	{method: exactTaskDirectiveIssueMethod, capability: exactTaskDirectiveCapability, description: "Record one short-lived task directive"},
 	{method: exactTaskDirectiveResolveMethod, capability: exactTaskDirectiveCapability, description: "Resolve one pending task directive"},
 	{method: exactSourceIssueCommentMethod, capability: "host.v2.write:source_issues", description: "Comment on the task's existing linked Jira or Linear issue"},
@@ -294,6 +295,13 @@ func exactExecutionUnavailableReason(method string, commandStoreAvailable, contr
 }
 
 func exactInteractionUnavailableReason(method string, host *pluginHost, commandStoreAvailable, responderAvailable bool) string {
+	if method == requestHumanResponseMethod {
+		if host.service.linkedUserResolverDep() == nil || host.service.humanInteractionResponseAuthorizer == nil ||
+			host.interactionData == nil || !commandStoreAvailable {
+			return "human_response_authorization_unavailable"
+		}
+		return ""
+	}
 	if method != exactRespondPermissionMethod && method != exactAnswerClarificationMethod {
 		return ""
 	}

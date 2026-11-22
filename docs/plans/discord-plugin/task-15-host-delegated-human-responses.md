@@ -1,7 +1,7 @@
 ---
 id: "15-host-delegated-human-responses"
 title: "Host: human responses from linked Kandev users"
-status: pending
+status: done
 wave: 3
 depends_on: ["01-host-control-rpcs-adr"]
 plan: "plan.md"
@@ -86,4 +86,39 @@ account linking gated by an admin grant. The design is in
 - **Output contract:** summary, files changed, tests run, blockers, risks, and task/plan status update.
 
 ## Results
-Pending.
+Implemented as planned. The grant is `host.v2.write:human_responses`, derived
+from `api_write: [human_responses]` and approved in the existing Workspace
+access ledger, so no new grant UI was needed (capabilities render by ID).
+
+- **Backend:** `apps/backend/internal/plugins/human_responses.go` (link codes,
+  `LinkExternalIdentity`, `RequestHumanResponseReceipt`, consumption
+  re-checks, attribution), `identity_link_handlers.go` and routes,
+  `state/identity_links.go` (tables `plugin_identity_links` and
+  `plugin_delegated_human_responses`, created by the command store),
+  installation binding on receipts in `human_interaction_receipts.go`,
+  consumption in `host_exact_interactions.go`, `Interaction.ResolvedBy` on
+  `Interactions().Get`, exact `GetInteraction`, and exact responses,
+  uninstall cleanup, capability discovery. `backendapp` resolves the linked
+  user (`plugins_linked_users.go`: auth service identity, or the single local
+  user while auth is disabled) and audits permissions with source `plugin`
+  and actor kind `linked_identity`.
+- **SDK:** `pluginsdk/human_responses.go` (+ gRPC, proto, classification as
+  caller-required), `Interaction.ResolvedBy`.
+- **Web:** "Linked chat accounts" card on the plugin settings page
+  (`plugin-identity-links.tsx`, `use-plugin-identity-links.ts`), API client
+  functions, seven locales.
+- **Tests:** `human_responses_test.go` covers the end-to-end linked response
+  (acting identity, attribution, audit, replay) and the denials: no grant,
+  revoked grant, unlinked subject, user without session control,
+  cross-workspace interaction, payload mismatch, link revoked or session
+  control lost before consumption, and a receipt presented by another
+  installation; link-code tests cover foreign installation, reuse, expiry,
+  normalization, and an undeclared manifest; `identity_link_handlers_test.go`,
+  `state/identity_links_test.go`, the backendapp responder test, the SDK
+  round trips, and the web API client and hook tests.
+- **Checks:** `go test ./internal/plugins/... ./internal/backendapp/...`,
+  `cd pluginsdk && go test ./...`, changed-package lint, web typecheck,
+  vitest, oxlint, and `pnpm run i18n:check` passed.
+- **Risk:** the permission-resolution audit records the user; clarification
+  answers are attributed only through the delegated-response ledger, because
+  the clarification store has no actor field.

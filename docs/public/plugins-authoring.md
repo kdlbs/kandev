@@ -1132,6 +1132,7 @@ subscription vocabulary and wildcard rules are in the
 | Task directives            | `IssueDirective`, `ResolveDirective`                                                                                             | `api_write: task_directives` plus `host.v2.write:task_directives`; delegated capability must also be approved for the target                      | Short-lived, version-fenced request records; instruction and resolution bodies are represented by digests                                                                                                                                                                                 |
 | Native task deletion       | `PluginOwnedTaskTrees().Preview`; legacy `Delete` remains in the v1 SDK                                                          | Preview is source-scoped; native deletion is a Human-only task UI action                                                                          | The current Host denies plugin `Delete` with `PermissionDenied` and `native_human_confirmation_required`; see [deletion consent](#native-task-deletion-consent)                                                                                                                           |
 | Exact execution controls   | `HostExecutionCommands(host)`: `EnsureTaskRun`, `StopTaskRun`, `CancelTurn`, `RecoverSession`, `CancelPendingTaskTransition`, `GetSessionModeContext`, `SetSessionMode` | Writes require `api_write: execution` plus `host.v2.write:execution`; mode reads require `api_read: sessions` plus `host.v2.read:sessions` | Exact task/session versions, execution IDs, and the observed management claim generation fence controls; the Host derives the caller installation and serializes effects with ownership changes. Recovery uses normal launch admission; unsafe provider modes are filtered |
+| Linked human responses     | `HostHumanResponseDelegation(host)`: `LinkExternalIdentity`, `RequestHumanResponseReceipt`                                           | `api_write: human_responses`; receipts also need `host.v2.write:human_responses`                                                                  | Receipts are minted only for the Kandev user linked to the external account, when that user holds `session.control`; single-use, five minutes, payload- and revision-bound to the calling installation; `Interaction.ResolvedBy` names the user and surface                              |
 | Managed conversations      | `ExactHost.ManagedAgentConversations()`                                                                                          | `api_read` and/or `api_write: managed_agent_conversations`, plus matching Host v2 workspace grant                                                 | Installation-owned hidden conversations with revisioned launch settings, pause state, retained lifecycle, and durable mutation receipts                                                                                                                                                   |
 | Managed conversation input | `EnqueueInput`, `GetInput`, `ListInputs`, `CancelInput`, `Dispatch`                                                              | Reads use `api_read: managed_agent_conversations`; writes use `api_write: managed_agent_conversations`, plus the matching Host v2 workspace grant | Durable FIFO receipts, bounded sequence reads, exact active cancellation, and immediate dispatch whose `busy` result never queues                                                                                                                                                         |
 | Managed conversation schedules | `HostManagedConversationSchedules(host)`: `List`, `Create`, `Update`, `SetEnabled`, `Delete`                              | Reads require `api_read: automations` plus `host.v2.read:automations`; writes require `api_write: automations` plus `host.v2.write:automations` | Installation-owned schedules use revisioned commands and durable receipts; delivery reauthorizes the retained destination and retries by occurrence ID                                                                                                                                   |
@@ -1793,6 +1794,59 @@ result, interaction, err := responses.RespondPermission(ctx, pluginsdk.ExactPerm
 `AnswerClarification` uses the same receipt flow. The first valid response
 wins. A stale revision or changed payload is denied or conflicted and cannot
 answer a replacement interaction.
+
+#### Responses from linked chat accounts
+
+A chat bridge relays decisions made outside Kandev, such as a button press in
+Discord. Kandev only accepts them from a Kandev user who linked that external
+account, so a plugin can never answer under a name of its choosing.
+
+1. Declare `api_write: [human_responses]` (plus `interactions` for the
+   responses). A workspace manager grants `host.v2.write:human_responses`
+   in Settings > Plugins > Workspace access.
+2. The plugin settings page shows a **Linked chat accounts** card. A Kandev
+   user generates a link code there (single-use, ten minutes) and sends it to
+   your plugin, for example `/link ABCD-EFGH-JKMN`. Redeem it with
+   `LinkExternalIdentity`, passing the external provider and account ID. A
+   later link of the same account or the same user replaces the earlier one.
+   Users revoke their own links on that card and admins revoke any link;
+   uninstalling the plugin removes them.
+3. When a linked person decides, request a receipt for that account and the
+   exact payload, then send the exact response with it:
+
+```go
+delegation, ok := pluginsdk.HostHumanResponseDelegation(host)
+if !ok {
+    return errors.New("linked human responses are unsupported")
+}
+minted, receipt, err := delegation.RequestHumanResponseReceipt(ctx, pluginsdk.HumanResponseReceiptRequest{
+    RequestID: "request-13", WorkspaceID: workspaceID,
+    Provider: "discord", Subject: discordUserID,
+    Kind: pluginsdk.HumanResponseKindPermission, TargetID: observed.Interaction.ID,
+    ExpectedResourceVersion: observed.ResourceVersion, OptionID: selectedOptionID,
+    ApprovalRevision: capability.ApprovalRevision, ManifestDigest: capability.ManifestDigest,
+})
+if err != nil || minted.Status != pluginsdk.CommandApplied {
+    // DENIED "external_identity_not_linked": offer a deep link and /link.
+    // DENIED "linked_user_not_authorized": the user lacks session control.
+    return err
+}
+// receipt.Actor is the Kandev user, e.g. {UserID, DisplayName: "Alice", Via: "discord"}.
+result, interaction, err := responses.RespondPermission(ctx, pluginsdk.ExactPermissionResponse{
+    RequestID: "request-14", WorkspaceID: workspaceID,
+    InteractionID: observed.Interaction.ID, ExpectedResourceVersion: observed.ResourceVersion,
+    OptionID: selectedOptionID, HumanResponseReceiptID: receipt.ID,
+    ApprovalRevision: capability.ApprovalRevision, ManifestDigest: capability.ManifestDigest,
+})
+```
+
+The receipt is bound to your installation; another plugin cannot spend it.
+When it is spent, Kandev checks again that the link exists, the grant is
+active, and the user still holds `session.control`, then responds as that
+user. The permission audit records the user with source `plugin`, and
+`Interactions().Get` returns `ResolvedBy` (for example "Alice via discord").
+`AnswerClarification` works the same way with `Kind:
+pluginsdk.HumanResponseKindClarification` and the exact `Answers`.
 
 ### Exact workspace observations
 
