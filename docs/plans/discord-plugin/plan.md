@@ -202,7 +202,7 @@ authorization.
 
 ```
 Wave 1 (parallel candidates — different repositories):
-- [ ] [task-01-host-control-rpcs-adr](task-01-host-control-rpcs-adr.md)
+- [x] [task-01-host-control-rpcs-adr](task-01-host-control-rpcs-adr.md)
 - [ ] [task-05-plugin-bootstrap-config](task-05-plugin-bootstrap-config.md)
 
 Wave 2:
