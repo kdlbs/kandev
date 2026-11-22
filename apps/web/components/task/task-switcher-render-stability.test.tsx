@@ -1,6 +1,8 @@
 import type { ReactElement, ReactNode } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
 import type { GroupedSidebarList } from "@/lib/sidebar/apply-view";
 import type { TaskSwitcherItem } from "./task-switcher-types";
 
@@ -88,6 +90,16 @@ vi.mock("./task-switcher-subtask-dnd", () => ({
 }));
 
 import { TaskSwitcher } from "./task-switcher";
+
+function renderWithProviders(element: ReactElement) {
+  return render(element, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <StateProvider>
+        <ToastProvider>{children}</ToastProvider>
+      </StateProvider>
+    ),
+  });
+}
 
 const onSelectTask = vi.fn();
 const onToggleSubtasks = vi.fn();
@@ -179,7 +191,7 @@ describe("TaskSwitcher render stability", () => {
       unreadDotHideDelayMs: 0,
       displayedSessionId: null,
     };
-    const view = render(<TaskSwitcher {...props} activeTaskId={TASK_A} />);
+    const view = renderWithProviders(<TaskSwitcher {...props} activeTaskId={TASK_A} />);
     view.rerender(<TaskSwitcher {...props} activeTaskId={TASK_B} />);
 
     expect(screen.getByRole("button", { name: TASK_A }).getAttribute("aria-pressed")).toBe("false");
@@ -198,7 +210,7 @@ describe("TaskSwitcher render stability", () => {
       unreadMessagesEnabled: true,
       unreadDotHideDelayMs: 0,
     };
-    const view = render(<TaskSwitcher {...props} displayedSessionId="session-1" />);
+    const view = renderWithProviders(<TaskSwitcher {...props} displayedSessionId="session-1" />);
     view.rerender(<TaskSwitcher {...props} displayedSessionId="session-2" />);
 
     expect(renderCounts.rows.get("Task C")).toBe(1);
@@ -208,7 +220,7 @@ describe("TaskSwitcher render stability", () => {
     const taskA = task(TASK_A, WORKFLOW_A);
     const taskB = task(TASK_B, WORKFLOW_B);
     const initial = groupedByWorkflow([taskA, taskB]);
-    const view = render(switcher(initial));
+    const view = renderWithProviders(switcher(initial));
     const updated = groupedByWorkflow([{ ...taskA, title: TASK_A_UPDATED }, { ...taskB }]);
 
     view.rerender(switcher(updated));
@@ -220,7 +232,7 @@ describe("TaskSwitcher render stability", () => {
     const taskA = task(TASK_A, WORKFLOW_A);
     const taskB = task(TASK_B, WORKFLOW_A);
     const initial = groupedTogether([taskA, taskB]);
-    const view = render(switcher(initial));
+    const view = renderWithProviders(switcher(initial));
     const updated = groupedTogether([{ ...taskA, title: TASK_A_UPDATED }, { ...taskB }]);
 
     view.rerender(switcher(updated));
@@ -235,7 +247,7 @@ describe("TaskSwitcher render stability", () => {
     const taskA = task(TASK_A, WORKFLOW_A);
     const taskB = task(TASK_B, WORKFLOW_A);
     const initial = groupedTogether([taskA, taskB]);
-    const view = render(switcher(initial, vi.fn()));
+    const view = renderWithProviders(switcher(initial, vi.fn()));
     const updated = groupedTogether([{ ...taskA, title: TASK_A_UPDATED }, { ...taskB }]);
 
     view.rerender(switcher(updated, vi.fn()));
@@ -247,7 +259,7 @@ describe("TaskSwitcher render stability", () => {
     const taskA = task(TASK_A, WORKFLOW_A);
     const taskB = task(TASK_B, WORKFLOW_A);
     const initial = groupedTogether([taskA, taskB]);
-    const view = render(switcher(initial, vi.fn()));
+    const view = renderWithProviders(switcher(initial, vi.fn()));
     const latestHandler = vi.fn();
 
     view.rerender(
@@ -261,7 +273,7 @@ describe("TaskSwitcher render stability", () => {
   it("gives a skipped row the latest nest candidates", () => {
     const taskA = task(TASK_A, WORKFLOW_A);
     const taskB = task(TASK_B, WORKFLOW_A);
-    const view = render(switcher(groupedTogether([taskA, taskB])));
+    const view = renderWithProviders(switcher(groupedTogether([taskA, taskB])));
 
     view.rerender(switcher(groupedTogether([{ ...taskA, title: TASK_A_UPDATED }, { ...taskB }])));
 
@@ -286,7 +298,7 @@ describe("TaskSwitcher nested render stability", () => {
       ],
       "workflow",
     );
-    const view = render(switcher(initial));
+    const view = renderWithProviders(switcher(initial));
     const updated = groupedTrees(
       [
         { root: { ...parentA }, child: { ...childA, title: "Child A updated" } },
@@ -312,7 +324,7 @@ describe("TaskSwitcher nested render stability", () => {
       ],
       "none",
     );
-    const view = render(switcher(initial));
+    const view = renderWithProviders(switcher(initial));
     const updated = groupedTrees(
       [
         { root: { ...parentA }, child: { ...childA, title: "Child A updated" } },
@@ -330,7 +342,7 @@ describe("TaskSwitcher nested render stability", () => {
     const taskA = task(TASK_A, WORKFLOW_A);
     const taskB = task(TASK_B, WORKFLOW_A);
     const initial = groupedTogether([taskA, taskB]);
-    const view = render(switcher(initial));
+    const view = renderWithProviders(switcher(initial));
 
     view.rerender(switcher(groupedTogether([{ ...taskA, title: TASK_A_UPDATED }, { ...taskB }])));
 

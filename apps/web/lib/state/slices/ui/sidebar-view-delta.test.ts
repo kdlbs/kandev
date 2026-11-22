@@ -2,7 +2,7 @@ import { waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { create, type StateCreator } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import { updateUserSettings } from "@/lib/api/domains/settings-api";
+import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 import { createUISlice } from "./ui-slice";
 import { createDefaultSidebarView } from "./sidebar-view-builtins";
 import type { UISlice } from "./types";
@@ -15,9 +15,13 @@ import { applyViewMutationsForTest } from "./sidebar-view-test-helpers";
 import { workspaceId } from "@/lib/types/ids";
 
 const USER_ID = "default-user";
-vi.mock("@/lib/api/domains/settings-api", () => ({ updateUserSettings: vi.fn() }));
+vi.mock("@/lib/api/domains/settings-api", () => ({
+  fetchUserSettings: vi.fn(),
+  updateUserSettings: vi.fn(),
+}));
 beforeEach(() => {
   window.localStorage.clear();
+  vi.mocked(fetchUserSettings).mockReset();
   vi.mocked(updateUserSettings).mockReset();
 });
 
@@ -31,6 +35,24 @@ function makeStore() {
   >;
   return create<UISlice>()(
     immer((...args) => ({ ...createTestSlice(...args), workspaces: { activeId: "ws" } })),
+  );
+}
+
+function mockCurrentSettings(persisted: Map<string, SidebarViewApi>, activeViewId: () => string) {
+  vi.mocked(fetchUserSettings).mockImplementation(
+    async () =>
+      ({
+        settings: {
+          user_id: USER_ID,
+          workspace_id: workspaceId("ws"),
+          repository_ids: [],
+          updated_at: "",
+          revision: 1,
+          sidebar_views_by_workspace: {
+            ws: { views: [...persisted.values()], active_view_id: activeViewId(), draft: null },
+          },
+        },
+      }) as UserSettingsResponse,
   );
 }
 
@@ -80,6 +102,7 @@ it("a queued successor persists earlier unsaved intent against the acknowledged 
     },
   });
   const persisted = new Map<string, SidebarViewApi>([[base.id, toApiSidebarView(base)]]);
+  let activeViewId = base.id;
   const first = Promise.withResolvers<UserSettingsResponse>();
   vi.mocked(updateUserSettings)
     .mockReturnValueOnce(first.promise)
@@ -100,13 +123,18 @@ it("a queued successor persists earlier unsaved intent against the acknowledged 
           updated_at: "",
           revision: 1,
           sidebar_views_by_workspace: {
-            ws: { views, active_view_id: patch.active_view_id!, draft: null },
+            ws: { views, active_view_id: patch.active_view_id ?? activeViewId, draft: null },
           },
         },
       } as UserSettingsResponse;
     });
   const created = store.getState().createSidebarView()!;
   store.getState().renameSidebarView("base", "Renamed");
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
+  const createPatch = updateUserSettings.mock.calls[0][0].sidebar_view_state!;
+  applyViewMutationsForTest(persisted, createPatch);
+  activeViewId = createPatch.active_view_id ?? activeViewId;
+  mockCurrentSettings(persisted, () => activeViewId);
   first.reject(new ApiError("first write failed", 500, {}));
   await waitFor(() => expect(store.getState().sidebarViewsByWorkspace.ws.syncPending).toBe(false));
   expect(persisted.get("base")?.name).toBe("Renamed");
@@ -157,6 +185,7 @@ it.each(["add", "delete"])(
       .mockImplementation(async (payload) => apply(payload));
     store.getState().renameSidebarView(base.id, "Locally renamed");
     store.getState().toggleSidebarGroupCollapsed(base.id, "workflow:local");
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
     if (remoteChange === "add") {
       persisted.set(created.id, toApiSidebarView(created));
       active = created.id;
@@ -197,6 +226,8 @@ it("does not replay a discarded failed creation on a later unrelated edit", asyn
     },
   });
   const persisted = new Map([[base.id, toApiSidebarView(base)]]);
+  const activeViewId = base.id;
+  mockCurrentSettings(persisted, () => activeViewId);
   const first = Promise.withResolvers<UserSettingsResponse>();
   vi.mocked(updateUserSettings)
     .mockReturnValueOnce(first.promise)
@@ -216,6 +247,7 @@ it("does not replay a discarded failed creation on a later unrelated edit", asyn
     });
   const failed = store.getState().createSidebarView()!;
   store.getState().setSidebarActiveView(base.id);
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
   first.reject(new ApiError("creation refused", 500, {}));
   await waitFor(() => expect(store.getState().sidebarViewsByWorkspace.ws.syncPending).toBe(false));
   expect(persisted.has(failed)).toBe(false);
@@ -234,10 +266,14 @@ it("a successor keeps edits when an already committed creation loses its acknowl
     },
   });
   const persisted = new Map([[base.id, toApiSidebarView(base)]]);
+  let activeViewId = base.id;
+  mockCurrentSettings(persisted, () => activeViewId);
   const first = Promise.withResolvers<UserSettingsResponse>();
   let writes = 0;
   vi.mocked(updateUserSettings).mockImplementation(async (payload) => {
-    applyViewMutationsForTest(persisted, payload.sidebar_view_state!);
+    const patch = payload.sidebar_view_state!;
+    applyViewMutationsForTest(persisted, patch);
+    activeViewId = patch.active_view_id ?? activeViewId;
     if (++writes === 1) return first.promise;
     return {
       settings: {
@@ -247,12 +283,13 @@ it("a successor keeps edits when an already committed creation loses its acknowl
         updated_at: "",
         revision: writes,
         sidebar_views_by_workspace: {
-          ws: { views: [...persisted.values()], active_view_id: created!, draft: null },
+          ws: { views: [...persisted.values()], active_view_id: activeViewId, draft: null },
         },
       },
     };
   });
   const created = store.getState().createSidebarView()!;
+  await waitFor(() => expect(writes).toBe(1));
   persisted.set(created, { ...persisted.get(created)!, name: "Remote rename" });
   store.getState().toggleSidebarGroupCollapsed(created, "kept");
   first.reject(new ApiError("Proxy failed after commit", 503, {}));

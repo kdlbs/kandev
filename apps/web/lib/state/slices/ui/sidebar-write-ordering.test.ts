@@ -1,3 +1,4 @@
+import { waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { createAppStore } from "@/lib/state/store";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
@@ -107,6 +108,7 @@ it.each([
     });
     if (field === "disclosure") f.store.getState().toggleSidebarGroupCollapsed(f.base.id, "kept");
     else f.store.getState().renameSidebarView(f.base.id, "B");
+    await waitFor(() => expect(committed).toBeDefined());
     if (field === "disclosure") f.store.getState().toggleSidebarGroupCollapsed(f.base.id, "kept");
     else f.store.getState().renameSidebarView(f.base.id, "A");
     if (delivered)
@@ -138,6 +140,7 @@ it("queued reorder uses the acknowledged remote append without replacing field i
     return f.apply(payload);
   });
   f.store.getState().renameSidebarView(f.base.id, "Local rename");
+  await waitFor(() => expect(predecessor).toBeDefined());
   f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
   f.append();
   first.resolve(f.apply(predecessor!));
@@ -170,6 +173,7 @@ it("pending provider selection rejects dependent actions until the authoritative
   const pending = f.store
     .getState()
     .selectSidebarPluginGrouping({ reference: GROUP, label: "Tag" });
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
   try {
     f.store.getState().setSidebarActiveView(f.other.id);
     f.store.getState().updateSidebarDraft({ group: "state" });
@@ -199,6 +203,7 @@ it("a queued drag preserves an acknowledged disjoint remote drag", async () => {
     return f.apply(payload);
   });
   f.store.getState().renameSidebarView(f.base.id, "Renamed");
+  await waitFor(() => expect(predecessor).toBeDefined());
   f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
   f.reorder([f.base.id, f.other.id, "d", "c"]);
   first.resolve(f.apply(predecessor!));
@@ -220,6 +225,7 @@ it("a queued drag reports a removed destination without restoring it", async () 
     return f.apply(payload);
   });
   f.store.getState().renameSidebarView(f.base.id, "Renamed");
+  await waitFor(() => expect(predecessor).toBeDefined());
   f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
   f.reorder([f.base.id, "c", "d"]);
   first.resolve(f.apply(predecessor!));
@@ -241,6 +247,7 @@ it("a retired queued drag does not abort the following independent rename", asyn
     return f.apply(payload);
   });
   f.store.getState().renameSidebarView(f.base.id, "Renamed");
+  await waitFor(() => expect(predecessor).toBeDefined());
   f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
   f.store.getState().renameSidebarView("c", "Independent");
   f.reorder([f.base.id, "c", "d"]);
@@ -257,6 +264,7 @@ it("an uncertain drag with a now-deleted endpoint is not replayed by its success
   vi.mocked(updateUserSettings).mockImplementationOnce(() => failed.promise);
   vi.mocked(updateUserSettings).mockImplementation((payload) => Promise.resolve(f.apply(payload)));
   f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
   f.store.getState().renameSidebarView("c", "Independent");
   f.reorder([f.base.id, "c", "d"]);
   registerUsersHandlers(f.store)[SETTINGS_UPDATED]!({
@@ -281,6 +289,7 @@ it.each([400, 409, 408, 429, 503])(
     );
     vi.mocked(updateUserSettings).mockImplementationOnce(() => failed.promise);
     f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
     f.store.getState().renameSidebarView("c", "Independent");
     const remoteOrder = [f.base.id, "c", "d", f.other.id];
     f.reorder(remoteOrder);
@@ -312,6 +321,7 @@ it("a definite rejection retires an older uncertain move before the next sparse 
       return second.promise;
     });
   f.store.getState().reorderSidebarViews(f.base.id, f.other.id);
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
   f.store.getState().renameSidebarView("c", "Independent C");
   f.store.getState().renameSidebarView("d", "Independent D");
   const remoteOrder = [f.base.id, "c", "d", f.other.id];
@@ -337,6 +347,7 @@ it("an intermediate local ACK does not retire intent that a later view write hea
     .mockImplementation((payload) => Promise.resolve(f.apply(payload)))
     .mockImplementationOnce(() => first.promise);
   f.store.getState().renameSidebarView(f.base.id, "Recovered");
+  await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
   f.store.getState().setSidebarActiveView(f.other.id);
   f.store.getState().renameSidebarView("c", "Independent");
   first.reject(new ApiError("Rename was not committed", 500, {}));

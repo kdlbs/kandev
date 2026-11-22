@@ -1,3 +1,4 @@
+import { waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { workspaceId } from "@/lib/types/ids";
 import { createAppStore } from "@/lib/state/store";
@@ -59,6 +60,7 @@ it.each(["newer rename event", "newer delete event", "deletion before update adm
       return acknowledge();
     });
     store.getState().renameSidebarView(view.id, "Local rename");
+    await waitFor(() => expect(initial).toBeDefined());
     store.getState().toggleSidebarGroupCollapsed(view.id, "kept-disclosure");
     if (schedule === "newer rename event")
       persisted.set(view.id, { ...persisted.get(view.id)!, name: "Remote rename" });

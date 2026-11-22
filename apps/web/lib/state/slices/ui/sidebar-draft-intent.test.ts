@@ -1,3 +1,4 @@
+import { waitFor } from "@testing-library/react";
 import { applyDraftMutationForTest, applyViewMutationsForTest } from "./sidebar-view-test-helpers";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
@@ -280,6 +281,7 @@ it.each(
     else if (transition === "save") store.getState().saveSidebarDraftOverwrite();
     else if (transition === "rename") store.getState().renameSidebarView(base.id, "Renamed");
     else store.getState().reorderSidebarViews(base.id, "other");
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(1));
     let current = true;
     const compacted = store
       .getState()
@@ -310,9 +312,13 @@ it.each(
     expect(state.views[0].collapsedGroups).toEqual(skip ? base.collapsedGroups : ["kept"]);
     expect(state.draft).toEqual(mapSidebarWorkspaces({ ws: server }).ws.draft);
     expect(state.transitionPending).toBe(false);
-    if (transition === "rename" && !skip) {
+    if (transition === "rename" && !skip && status !== 400) {
       expect(state.views[0].name).toBe("Renamed");
       expect(state.syncError).toBeNull();
-    } else expect(state.syncError).toBeTruthy();
+    } else {
+      if (transition === "rename" && !skip && status === 400)
+        expect(state.views[0].name).toBe("Tag");
+      expect(state.syncError).toBeTruthy();
+    }
   },
 );

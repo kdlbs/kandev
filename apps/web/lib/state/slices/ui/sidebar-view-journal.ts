@@ -75,6 +75,16 @@ export function replayableSidebarMove(journal: SidebarWriteJournal, move?: Sideb
   );
 }
 
+function shouldPreserveIndependentMutation(
+  journal: SidebarWriteJournal,
+  mutation: SidebarViewMutation,
+  kind: SidebarWriteKind,
+  rejected: boolean,
+) {
+  if (!rejected || kind !== "views" || mutation.move) return false;
+  return Boolean(journal.failedViewMutations?.some((failedMutation) => failedMutation.move));
+}
+
 export function recordSidebarWriteFailure(
   journal: SidebarWriteJournal,
   mutation: SidebarViewMutation,
@@ -90,9 +100,15 @@ export function recordSidebarWriteFailure(
     error.status < 500 &&
     error.status !== 408 &&
     error.status !== 429;
+  const preserveIndependentMutation = shouldPreserveIndependentMutation(
+    journal,
+    mutation,
+    kind,
+    rejected,
+  );
   if (rejected) retireRejectedSidebarMutations(journal);
   if (kind === "create" && !rejected) journal.reconcileUncertainCreate = true;
-  recordFailedViewIntent(journal, mutation, kind, rejected);
+  recordFailedViewIntent(journal, mutation, kind, rejected && !preserveIndependentMutation);
   const rollback = journal.failedRollback ?? before;
   journal.failedRollback = rollback;
   journal.failedWriteKind ??= kind;

@@ -395,9 +395,9 @@ test("groups the whole saved forest before pagination and recovers without rewri
   });
   await expect(
     sidebar.locator(
-      `[data-testid="sidebar-group-header"][data-group-key="${SIDEBAR_GROUPING}:untagged"]`,
+      `[data-testid="sidebar-group-header"][data-group-key="${SIDEBAR_GROUPING}:unassigned"]`,
     ),
-  ).toContainText("Untagged");
+  ).toContainText("Unassigned");
   await expect(sidebar.getByRole("alert")).toBeHidden();
   expect(
     (await readGroupingPage(apiClient, seedData.workspaceId, { group: "none" })).total_tasks,
