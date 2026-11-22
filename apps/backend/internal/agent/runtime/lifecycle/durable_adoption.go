@@ -166,6 +166,9 @@ func (m *Manager) restoreRecoveredDelivery(
 	}
 
 	applyRecoveredDeliveryIdentity(execution, status, generation, cursor)
+	if execution.ACPSessionID == "" {
+		execution.ACPSessionID = generation.NativeSessionID
+	}
 
 	return m.restoreRecoveredSubmission(ctx, execution, status, delivery, ri.Client)
 }
@@ -441,7 +444,9 @@ func peerSubmissionsForRecovery(
 }
 
 func retainedPeerTerminal(status *agentctl.DeliveryStatus, submission journal.SubmissionSummary) bool {
-	if submission.State != journal.SubmissionCompleted || !submission.TerminalEventRetained || submission.TerminalSequence == 0 {
+	terminalState := submission.State == journal.SubmissionCompleted ||
+		submission.State == journal.SubmissionFailed || submission.State == journal.SubmissionCancelled
+	if !terminalState || !submission.TerminalEventRetained || submission.TerminalSequence == 0 {
 		return false
 	}
 	return status.Stream == nil || submission.TerminalSequence > status.Stream.Acknowledged

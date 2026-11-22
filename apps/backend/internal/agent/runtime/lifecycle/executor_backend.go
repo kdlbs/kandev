@@ -181,9 +181,10 @@ type ExecutorBackend interface {
 type RecoveryCandidateOutcome string
 
 const (
-	RecoveryOutcomeNoMatchingInstance RecoveryCandidateOutcome = "no_matching_instance"
-	RecoveryOutcomeEnumerationFailed  RecoveryCandidateOutcome = "enumeration_failed"
-	RecoveryOutcomeUnknown            RecoveryCandidateOutcome = "unknown"
+	RecoveryOutcomeNoMatchingInstance     RecoveryCandidateOutcome = "no_matching_instance"
+	RecoveryOutcomeRecordedResourceAbsent RecoveryCandidateOutcome = "recorded_resource_absent"
+	RecoveryOutcomeEnumerationFailed      RecoveryCandidateOutcome = "enumeration_failed"
+	RecoveryOutcomeUnknown                RecoveryCandidateOutcome = "unknown"
 )
 
 // DetailedRecoveryBackend is an optional extension for ExecutorBackend implementations

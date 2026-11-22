@@ -11,6 +11,94 @@ import (
 	"github.com/kandev/kandev/internal/testutil"
 )
 
+func TestPostgresSettleStoppedRemoteExecutionIfOwnerCurrent(t *testing.T) {
+	dsn := testutil.PostgresDSNFromEnv(t)
+	db := testutil.OpenIsolatedPostgres(t, dsn)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	const (
+		taskID        = "task-stopped-remote-settlement-pg"
+		workspaceID   = "ws-task-stopped-remote-settlement-pg"
+		sessionID     = "session-stopped-remote-settlement-pg"
+		environmentID = "environment-stopped-remote-settlement-pg"
+		executionID   = "execution-stopped-remote-settlement-pg"
+		turnID        = "turn-stopped-remote-settlement-pg"
+		toolID        = "tool-stopped-remote-settlement-pg"
+	)
+	seedExecutorRunningCleanupTask(t, repo, taskID)
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: taskID, ExecutorType: string(models.ExecutorTypeRemoteDocker),
+		ExecutorID: "executor-stopped-remote-settlement-pg", WorkspacePath: "/workspace/stopped-remote-settlement-pg",
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: environmentID,
+		State: models.TaskSessionStateRunning,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: sessionID, SessionID: sessionID, TaskID: taskID, AgentExecutionID: executionID,
+		Runtime: agentruntime.RuntimeRemoteDocker, Status: models.ExecutorRunningStatusReady,
+	}); err != nil {
+		t.Fatalf("UpsertExecutorRunning: %v", err)
+	}
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: turnID, TaskSessionID: sessionID, TaskID: taskID,
+		StartedAt: startedAt, CreatedAt: startedAt, UpdatedAt: startedAt,
+	}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: toolID, TaskID: taskID, TaskSessionID: sessionID, TurnID: turnID,
+		Type: models.MessageTypeToolCall, Metadata: map[string]interface{}{
+			"tool_call_id": "stopped-remote-tool-call", "status": "running",
+		},
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	observed, err := repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetExecutorRunningBySessionID: %v", err)
+	}
+	owner := models.RemoteRecoveryOwnerLockIDs{
+		TaskID: taskID, SessionID: sessionID, WorkspaceID: workspaceID,
+		EnvironmentID: environmentID, EnvironmentOwnerTaskID: taskID,
+	}
+	changed, _, err := repo.SettleStoppedRemoteExecutionIfOwnerCurrent(
+		ctx, sessionID, executionID, observed.UpdatedAt, models.TaskSessionStateRunning,
+		turnID, "", owner, func(context.Context) error { return nil },
+	)
+	if err != nil {
+		t.Fatalf("SettleStoppedRemoteExecutionIfOwnerCurrent: %v", err)
+	}
+	if !changed {
+		t.Fatal("active session did not transition to waiting")
+	}
+	runtime, err := repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil || runtime.Status != models.ExecutorRunningStatusStopped {
+		t.Fatalf("executor status = %v, err=%v; want stopped", runtime, err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %v, err=%v; want waiting", session, err)
+	}
+	turn, err := repo.GetTurn(ctx, turnID)
+	if err != nil || turn.CompletedAt == nil || !turn.CompletedAt.Equal(turn.StartedAt) {
+		t.Fatalf("interrupted turn = %v, err=%v; want zero-duration completion", turn, err)
+	}
+	message, err := repo.GetMessage(ctx, toolID)
+	if err != nil || message.Metadata["status"] != "complete" {
+		t.Fatalf("tool message = %v, err=%v; want complete", message, err)
+	}
+}
+
 func TestPostgresRepairExecutorRunningDeadIfOwnerCurrentSerializesOwnerAndDeliveryChanges(t *testing.T) {
 	dsn := testutil.PostgresDSNFromEnv(t)
 	observerDB := testutil.OpenIsolatedPostgres(t, dsn)
