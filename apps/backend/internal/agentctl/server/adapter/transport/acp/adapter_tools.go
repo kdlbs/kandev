@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
@@ -198,6 +199,35 @@ func (a *Adapter) convertToolCallUpdateForGeneration(
 		NormalizedPayload: normalizedPayload,
 		ToolCallContents:  a.convertToolCallContents(tc.Content),
 	}
+}
+
+func codexMCPStartupWarningEvent(agentID, sessionID string, call *acp.SessionUpdateToolCall) (*AgentEvent, bool) {
+	if call == nil || !acpcompat.IsCodexMCPStartupReport(
+		agentID,
+		string(call.ToolCallId),
+		call.Title,
+		string(call.Kind),
+		string(call.Status),
+	) {
+		return nil, false
+	}
+
+	var details []string
+	for _, item := range call.Content {
+		if item.Content != nil && item.Content.Content.Text != nil {
+			details = append(details, item.Content.Content.Text.Text)
+		}
+	}
+	message := streams.SanitizeProviderMessage(strings.Join(details, "\n"))
+	if message == "" {
+		message = streams.SanitizeProviderMessage(call.Title)
+	}
+	return &AgentEvent{
+		Type:       streams.EventTypeMCPStartupWarning,
+		SessionID:  sessionID,
+		ToolCallID: string(call.ToolCallId),
+		Text:       message,
+	}, true
 }
 
 func (a *Adapter) trackToolCallPayload(

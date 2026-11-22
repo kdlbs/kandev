@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
@@ -1529,6 +1530,9 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 	if m.handleMCPAttachmentEvent(execution, &event, attemptID) {
 		return
 	}
+	if m.handleCodexMCPStartupWarningEvent(execution, &event, attemptID) {
+		return
+	}
 	if event.PromptGeneration == 0 || (event.Type != toolStatusComplete && event.Type != toolStatusError) {
 		m.recordActivity(execution, event)
 	}
@@ -1545,6 +1549,56 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 
 	event = m.handleAgentEventState(execution, event)
 	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, event, attemptID)
+}
+
+func (m *Manager) handleCodexMCPStartupWarningEvent(
+	execution *AgentExecution,
+	event *agentctl.AgentEvent,
+	attemptID string,
+) bool {
+	if event.Type != streams.EventTypeMCPStartupWarning && !isCodexMCPStartupToolCall(execution, *event) {
+		return false
+	}
+
+	event.Type = streams.EventTypeMCPStartupWarning
+	event.PromptGeneration = 0
+	event.DeliverySubmissionID = ""
+	event.Text = codexMCPStartupWarningText(*event)
+	event.ToolName = ""
+	event.ToolTitle = ""
+	event.ToolStatus = ""
+	event.ToolStatusMissing = false
+	event.ToolCallContents = nil
+	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, *event, attemptID)
+	return true
+}
+
+func isCodexMCPStartupToolCall(execution *AgentExecution, event agentctl.AgentEvent) bool {
+	return execution != nil && event.Type == streams.EventTypeToolCall && acpcompat.IsCodexMCPStartupReport(
+		execution.AgentID,
+		event.ToolCallID,
+		event.ToolTitle,
+		event.ToolName,
+		event.ToolStatus,
+	)
+}
+
+func codexMCPStartupWarningText(event agentctl.AgentEvent) string {
+	message := strings.TrimSpace(event.Text)
+	if message == "" {
+		var details []string
+		for _, item := range event.ToolCallContents {
+			if item.Content != nil && item.Content.Type == "text" {
+				details = append(details, item.Content.Text)
+			}
+		}
+		message = strings.Join(details, "\n")
+	}
+	message = streams.SanitizeProviderMessage(message)
+	if message != "" {
+		return message
+	}
+	return streams.SanitizeProviderMessage(event.ToolTitle)
 }
 
 func (m *Manager) handleMCPAttachmentEvent(

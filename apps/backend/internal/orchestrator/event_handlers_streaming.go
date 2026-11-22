@@ -92,7 +92,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		eventExecutionID,
 		payload.Data.PromptGeneration,
 	) {
-		s.cancelClarificationWatchdogsForSession(payload.SessionID, eventType, payload)
+		if eventType != streams.EventTypeMCPStartupWarning {
+			s.cancelClarificationWatchdogsForSession(payload.SessionID, eventType, payload)
+		}
 		s.logger.Debug("ignoring stream event for execution outside cancellation identity",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID),
@@ -134,6 +136,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		if eventType != streams.EventTypeUsageObservation {
 			return
 		}
+	}
+	if eventType == streams.EventTypeMCPStartupWarning {
+		s.handleCodexMCPStartupWarning(ctx, payload, eventExecutionID)
+		return
 	}
 	switch eventType {
 	case streams.EventTypeMessageChunk:

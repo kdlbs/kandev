@@ -106,6 +106,10 @@ const (
 	// protocol frames, tool payloads, credentials, and full endpoints.
 	EventTypeMCPAttachment = "mcp_attachment"
 
+	// EventTypeMCPStartupWarning carries a Codex ACP MCP startup failure as
+	// session metadata rather than a work-turn tool call.
+	EventTypeMCPStartupWarning = "mcp_startup_warning"
+
 	// EventTypeTurnStarted marks the single turn boundary this feature relies
 	// on: agentctl's own session/prompt dispatch, emitted on both a human
 	// prompt and a synthetic ScheduleWakeup self-resume. It carries only the

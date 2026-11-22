@@ -722,6 +722,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// The flag will be cleared when we send the next prompt (see Prompt method).
 	a.mu.Lock()
 	a.isLoadingSession = true
+	a.loadingSessionID = sessionID
 	a.loadReplayPlan = nil
 	delete(a.usageBySession, sessionID)
 	a.mu.Unlock()
@@ -748,6 +749,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		clearFailedLoad := func() {
 			a.mu.Lock()
 			a.isLoadingSession = false
+			a.loadingSessionID = ""
 			a.loadReplayPlan = nil
 			a.pendingCopilotNative = nil
 			a.pendingCopilotNativeDropped = false

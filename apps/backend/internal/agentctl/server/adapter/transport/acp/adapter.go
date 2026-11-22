@@ -238,6 +238,9 @@ type Adapter struct {
 	// AvailableCommandsUpdate is NOT suppressed — it may arrive after the replay as a
 	// "ready" signal, and the last one always wins in the frontend.
 	isLoadingSession bool
+	// loadingSessionID identifies the restore owner before the binding barrier
+	// publishes it as sessionID.
+	loadingSessionID string
 	loadReplayPlan   *acp.SessionUpdatePlan
 
 	// nativeGeneration identifies the current native conversation within this

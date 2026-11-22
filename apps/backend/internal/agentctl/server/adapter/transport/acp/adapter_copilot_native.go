@@ -272,6 +272,7 @@ func (a *Adapter) installNativeBindingBarrier(
 		a.bindingCopilotNative = false
 		if clearLoading {
 			a.isLoadingSession = false
+			a.loadingSessionID = ""
 		}
 		a.mu.Unlock()
 		if a.onNativeBindingInstalled != nil {
@@ -292,6 +293,7 @@ func (a *Adapter) installNativeBindingBarrier(
 	a.bindingCopilotNative = false
 	if clearLoading {
 		a.isLoadingSession = false
+		a.loadingSessionID = ""
 	}
 	a.pendingCopilotNative = nil
 	a.pendingCopilotNativeDropped = false
