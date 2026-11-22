@@ -77,11 +77,13 @@ version without forking the repository.
   current content, editable and deletable like a manual prompt by operators
   and agents.
 - **AC-INTEGRATIONS-PROMPT-SYNC-007.2:** An override shall show an
-  "Overridden" badge naming the repository file it replaces, with the control
-  on Local. Saving Repository shall return the prompt to sync ownership, keep
-  its local content (including unsaved edits to it) under
-  AC-INTEGRATIONS-PROMPT-SYNC-009.1, use the repository version, and run a
-  sync. Saving either way shall resolve a conflict on the prompt.
+  "Overridden" badge. If the repository version is available, the badge
+  shall name its file and the saved choice shall be Local. Saving Repository
+  shall return the prompt to sync ownership and use the stored repository
+  version under AC-INTEGRATIONS-PROMPT-SYNC-009.1. The save shall keep the
+  local content, including unsaved edits. The next sync shall refresh the
+  repository version. Saving either way shall resolve a conflict on the
+  prompt.
 - **AC-INTEGRATIONS-PROMPT-SYNC-007.3:** A sync shall leave an override's
   content and ownership unchanged when its file is present, report its name as
   overridden rather than as a warning, and leave it in place when its file is
@@ -151,8 +153,11 @@ knowing.
   resolve it like AC-INTEGRATIONS-PROMPT-SYNC-007.2. Resolution shall
   require configuration-management authority.
 - **AC-INTEGRATIONS-PROMPT-SYNC-008.7:** When the file of an override leaves
-  the source, its conflict and stored repository version shall be cleared and
-  the override kept.
+  the source, the sync shall clear its conflict, repository version, and
+  file path. It shall keep the override's identity and local text. Reads in
+  Settings, the HTTP API, and MCP shall report no repository path for an
+  override without a repository version. Agent guidance shall describe the
+  remaining local version.
 - **AC-INTEGRATIONS-PROMPT-SYNC-008.8:** A prompt file whose content equals
   the existing prompt's content is not a conflict. The check shall not list
   it, and the sync shall adopt a manual or built-in prompt as a synced prompt
@@ -181,9 +186,10 @@ version after trying the repository version, without retyping it.
   repository version as the other version. With no kept copy, the override
   shall start from the current synced content.
 - **AC-INTEGRATIONS-PROMPT-SYNC-009.3:** Syncs that update a synced prompt
-  shall preserve its kept local version. Every override whose file is present
-  shall keep the current repository version, so both versions are known
-  however the prompt became an override.
+  shall preserve its kept local version. Every override with a valid file
+  shall keep the current repository version and file path. When a valid file
+  with the same prompt name returns, the override shall regain both and
+  keep its local text.
 - **AC-INTEGRATIONS-PROMPT-SYNC-009.4:** When a synced prompt with kept local
   content leaves the source, the sync shall turn it into a manual prompt with
   the kept local content instead of deleting it. A sync shall never delete a
