@@ -8,12 +8,24 @@ const reloadMocks = vi.hoisted(() => ({
   signalBackendReloadRequired: vi.fn(),
 }));
 
+const translationMocks = vi.hoisted(() => ({
+  t: vi.fn(() => "localized correction message"),
+}));
+
 vi.mock("@/lib/platform/backend-reload-coordinator", () => ({
   signalBackendReloadRequired: (...args: unknown[]) =>
     reloadMocks.signalBackendReloadRequired(...args),
 }));
 
-import { deleteAgentProfileAction, reorderAgentProfilesAction } from "./agents";
+vi.mock("@/lib/i18n", () => ({
+  t: translationMocks.t,
+}));
+
+import {
+  createAgentProfileAction,
+  deleteAgentProfileAction,
+  reorderAgentProfilesAction,
+} from "./agents";
 
 const bootWindow = window as unknown as { __KANDEV_BOOT_PAYLOAD__?: unknown };
 
@@ -122,5 +134,43 @@ describe("reorderAgentProfilesAction", () => {
     } finally {
       timeout.mockRestore();
     }
+  });
+});
+
+describe("agentSettingsRequest validation errors", () => {
+  it("localizes the Claude alias conflict and preserves the API error evidence", async () => {
+    const responseBody = {
+      error: "backend validation message",
+      error_code: "claude_exact_model_alias_conflict",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(responseBody), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(
+      createAgentProfileAction("agent-1", {
+        name: "Default",
+        model: "sonnet",
+        auto_approve: false,
+        allow_indexing: false,
+        cli_passthrough: false,
+        require_exact_model: true,
+        env_vars: [{ key: "ANTHROPIC_MODEL", value: "claude-sonnet-5-5" }],
+      }),
+    ).rejects.toMatchObject({
+      message: "localized correction message",
+      status: 400,
+      errorCode: "claude_exact_model_alias_conflict",
+      body: responseBody,
+    });
+    expect(translationMocks.t).toHaveBeenCalledWith("agents:claudeExactModelAliasConflict", {
+      envVar: "ANTHROPIC_MODEL",
+    });
   });
 });

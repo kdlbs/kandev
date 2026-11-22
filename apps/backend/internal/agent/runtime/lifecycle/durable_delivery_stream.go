@@ -108,11 +108,13 @@ func (sm *StreamManager) replayRecoveredDelivery(
 	if after > target {
 		return fmt.Errorf("durable recovery cursor %d is ahead of captured high-water %d", after, target)
 	}
+	// Capture the client identity. Each synchronous replay request takes its
+	// own lease so SQL operations and lifecycle callbacks can run without it.
 	client, releaseClient := execution.AcquireAgentCtlClient()
+	releaseClient()
 	if client == nil {
 		return errors.New("durable recovery agentctl client is unavailable")
 	}
-	defer releaseClient()
 	if after > 0 && !suppressLifecycleCallbacks {
 		sm.scheduleDurableDeliveryAck(execution, client, agentctl.AgentEvent{DeliveryStreamID: streamID, DeliverySequence: after})
 	}
@@ -152,7 +154,8 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 	if remaining < uint64(limit) {
 		limit = int(remaining)
 	}
-	page, stream, err := client.ReplayDelivery(ctx, streamID, after, limit)
+	peer := recoveredReplayClient{execution: execution, client: client}
+	page, stream, err := peer.replayPage(ctx, streamID, after, limit)
 	if err != nil {
 		return after, fmt.Errorf("replay durable delivery after sequence %d: %w", after, err)
 	}
@@ -193,6 +196,49 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 	return after, nil
 }
 
+// recoveredReplayClient keeps synchronous requests on the client that started
+// the replay. Each method takes a lease only for its request.
+type recoveredReplayClient struct {
+	execution *AgentExecution
+	client    *agentctl.Client
+}
+
+func (p recoveredReplayClient) acquire() (func(), error) {
+	current, release := p.execution.AcquireAgentCtlClient()
+	if current == nil || current != p.client {
+		release()
+		return nil, errors.New("durable recovery agentctl client changed during replay")
+	}
+	if current.IsClosed() {
+		release()
+		return nil, errors.New("durable recovery agentctl client closed during replay")
+	}
+	return release, nil
+}
+
+func (p recoveredReplayClient) replayPage(
+	ctx context.Context,
+	streamID string,
+	after uint64,
+	limit int,
+) ([]journal.Event, journal.Stream, error) {
+	release, err := p.acquire()
+	if err != nil {
+		return nil, journal.Stream{}, err
+	}
+	defer release()
+	return p.client.ReplayDelivery(ctx, streamID, after, limit)
+}
+
+func (p recoveredReplayClient) GetDeliveryStatus(ctx context.Context, streamID string) (*agentctl.DeliveryStatus, error) {
+	release, err := p.acquire()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return p.client.GetDeliveryStatus(ctx, streamID)
+}
+
 func validateRecoveredReplayStream(
 	stream journal.Stream,
 	execution *AgentExecution,
@@ -231,7 +277,8 @@ func (sm *StreamManager) processRecoveredDeliveryEvent(
 	event.DeliverySubmissionID = committed.SubmissionID
 	event.Recovered = true
 	event.RecoveredActivityAt = &committed.CreatedAt
-	prepared, err := sm.prepareAgentEvent(ctx, execution, client, delivery, event)
+	peer := recoveredReplayClient{execution: execution, client: client}
+	prepared, err := sm.prepareAgentEvent(ctx, execution, peer, delivery, event)
 	if err != nil {
 		return fmt.Errorf("durable replay event ownership check: %w", err)
 	}

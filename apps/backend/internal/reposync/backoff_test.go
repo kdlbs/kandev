@@ -1,4 +1,4 @@
-package workflowsync
+package reposync
 
 import (
 	"context"
@@ -40,34 +40,30 @@ func TestRetryPolicyDelayUsesEqualJitterAndCapsPreJitterDelay(t *testing.T) {
 func TestBuildFailureDirectiveHonorsProviderRetryLowerBound(t *testing.T) {
 	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
 	providerRetry := now.Add(17 * time.Minute)
-	directive := buildFailureDirective(&Config{
-		Provider: ProviderGitHub, IntervalSeconds: 60,
-	}, &github.GitHubAPIError{
+	directive := BuildFailureDirective(FailureInput{Provider: ProviderGitHub, IntervalSeconds: 60}, &github.GitHubAPIError{
 		StatusCode: 429, FailureKind: github.FailureSecondaryRateLimit,
 		RetryAt: providerRetry, RetrySource: github.RetrySourceRetryAfter,
 	}, now, func(time.Duration) time.Duration { return 0 })
 
-	require.NotNil(t, directive.nextAttemptAt)
-	assert.Equal(t, providerRetry, *directive.nextAttemptAt)
-	assert.Equal(t, github.RetrySourceRetryAfter, directive.retrySource)
-	assert.Equal(t, string(github.FailureSecondaryRateLimit), directive.class)
+	require.NotNil(t, directive.NextAttemptAt)
+	assert.Equal(t, providerRetry, *directive.NextAttemptAt)
+	assert.Equal(t, github.RetrySourceRetryAfter, directive.RetrySource)
+	assert.Equal(t, string(github.FailureSecondaryRateLimit), directive.Class)
 }
 
 func TestBuildFailureDirectiveHonorsCanceledAdmissionRetryLowerBound(t *testing.T) {
 	now := time.Date(2026, 9, 9, 7, 0, 0, 0, time.UTC)
 	providerRetry := now.Add(17 * time.Minute)
-	directive := buildFailureDirective(&Config{
-		Provider: ProviderGitHub, IntervalSeconds: 60,
-	}, &github.AdmissionWaitError{
+	directive := BuildFailureDirective(FailureInput{Provider: ProviderGitHub, IntervalSeconds: 60}, &github.AdmissionWaitError{
 		Resource: github.ResourceCore, RetryAt: providerRetry,
 		RetrySource: github.RetrySourceRetryAfter,
 		Reason:      "observed_secondary_rate_limit", Cause: context.Canceled,
 	}, now, func(time.Duration) time.Duration { return 0 })
 
-	require.NotNil(t, directive.nextAttemptAt)
-	assert.Equal(t, providerRetry, *directive.nextAttemptAt)
-	assert.Equal(t, github.RetrySourceRetryAfter, directive.retrySource)
-	assert.Equal(t, string(github.FailureTransient), directive.class)
+	require.NotNil(t, directive.NextAttemptAt)
+	assert.Equal(t, providerRetry, *directive.NextAttemptAt)
+	assert.Equal(t, github.RetrySourceRetryAfter, directive.RetrySource)
+	assert.Equal(t, string(github.FailureTransient), directive.Class)
 }
 
 func TestBuildFailureDirectiveSuspendsOnlyPermanentGitHubFailures(t *testing.T) {
@@ -76,34 +72,28 @@ func TestBuildFailureDirectiveSuspendsOnlyPermanentGitHubFailures(t *testing.T) 
 		github.FailureInvalidCredentials,
 		github.FailureMissingResource,
 	} {
-		directive := buildFailureDirective(&Config{
-			Provider: ProviderGitHub, IntervalSeconds: 60,
-		}, &github.GitHubAPIError{StatusCode: 403, FailureKind: kind}, now, defaultJitter)
-		assert.True(t, directive.suspended, "kind %s", kind)
-		assert.Nil(t, directive.nextAttemptAt, "kind %s", kind)
+		directive := BuildFailureDirective(FailureInput{Provider: ProviderGitHub, IntervalSeconds: 60}, &github.GitHubAPIError{StatusCode: 403, FailureKind: kind}, now, DefaultJitter)
+		assert.True(t, directive.Suspended, "kind %s", kind)
+		assert.Nil(t, directive.NextAttemptAt, "kind %s", kind)
 	}
 
-	gitLab := buildFailureDirective(&Config{
-		Provider: ProviderGitLab, IntervalSeconds: 60,
-	}, errors.New("forbidden"), now, func(time.Duration) time.Duration { return 0 })
-	assert.False(t, gitLab.suspended)
-	assert.Equal(t, string(github.FailureTransient), gitLab.class)
-	assert.NotNil(t, gitLab.nextAttemptAt)
+	gitLab := BuildFailureDirective(FailureInput{Provider: ProviderGitLab, IntervalSeconds: 60}, errors.New("forbidden"), now, func(time.Duration) time.Duration { return 0 })
+	assert.False(t, gitLab.Suspended)
+	assert.Equal(t, string(github.FailureTransient), gitLab.Class)
+	assert.NotNil(t, gitLab.NextAttemptAt)
 }
 
 func TestBuildFailureDirectiveKeepsGitLabAuthCircuitRetry(t *testing.T) {
 	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
-	directive := buildFailureDirective(&Config{
-		Provider: ProviderGitLab, IntervalSeconds: 60,
-	}, &gitlab.APIError{StatusCode: 401, Endpoint: "/projects/x"}, now,
+	directive := BuildFailureDirective(FailureInput{Provider: ProviderGitLab, IntervalSeconds: 60}, &gitlab.APIError{StatusCode: 401, Endpoint: "/projects/x"}, now,
 		func(time.Duration) time.Duration { return 0 })
 
-	assert.False(t, directive.suspended)
-	assert.Equal(t, authcircuit.FailureClassAuth, directive.circuitClass)
-	assert.Equal(t, string(authcircuit.FailureClassAuth), directive.class)
-	require.NotNil(t, directive.nextAttemptAt)
-	assert.False(t, directive.nextAttemptAt.Before(now.Add(authcircuit.PermanentBackoff.Base)))
-	assert.False(t, directive.nextAttemptAt.After(now.Add(3*time.Minute)))
+	assert.False(t, directive.Suspended)
+	assert.Equal(t, authcircuit.FailureClassAuth, directive.CircuitClass)
+	assert.Equal(t, string(authcircuit.FailureClassAuth), directive.Class)
+	require.NotNil(t, directive.NextAttemptAt)
+	assert.False(t, directive.NextAttemptAt.Before(now.Add(authcircuit.PermanentBackoff.Base)))
+	assert.False(t, directive.NextAttemptAt.After(now.Add(3*time.Minute)))
 }
 
 func TestFailureKindTreatsMissingAndInvalidGitHubConnectionsAsPermanent(t *testing.T) {
@@ -119,11 +109,9 @@ func TestEqualJitterSeamCanSpreadWorkspaceRetries(t *testing.T) {
 	seen := map[time.Time]bool{}
 	for i := 0; i < 6; i++ {
 		offset := time.Duration(i) * time.Second
-		directive := buildFailureDirective(&Config{
-			Provider: ProviderGitHub, IntervalSeconds: 60,
-		}, errors.New("temporary"), now, func(time.Duration) time.Duration { return offset })
-		require.NotNil(t, directive.nextAttemptAt)
-		seen[*directive.nextAttemptAt] = true
+		directive := BuildFailureDirective(FailureInput{Provider: ProviderGitHub, IntervalSeconds: 60}, errors.New("temporary"), now, func(time.Duration) time.Duration { return offset })
+		require.NotNil(t, directive.NextAttemptAt)
+		seen[*directive.NextAttemptAt] = true
 	}
 	assert.Len(t, seen, 6)
 }

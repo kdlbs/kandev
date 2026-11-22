@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
   promptEditor: vi.fn(),
 }));
 
+// Prompt Sync has its own tests; this file covers the prompt list.
+vi.mock("@/components/settings/prompt-sync-section", () => ({ PromptSyncSection: () => null }));
+
 vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
   useCustomPrompts: () => ({ loaded: true }),
 }));
