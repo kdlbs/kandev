@@ -13,6 +13,9 @@ export function sidebarTaskQueryError(error: unknown, hasPage: boolean, t: TFunc
   if (isSidebarTaskAccessDenied(error)) {
     return { message: t("sidebar:workspaceContextAccessDenied"), canRetry: false };
   }
+  if (error instanceof ApiError && error.errorCode === "sidebar_grouping_unavailable") {
+    return { message: t("sidebar:pluginGroupingUnavailable"), canRetry: true };
+  }
   if (!(error instanceof ApiError) || error.errorCode !== "sidebar_query_invalid") {
     return {
       message: t(hasPage ? "sidebar:queryRefreshFailed" : "sidebar:pageLoadFailed"),

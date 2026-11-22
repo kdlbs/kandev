@@ -97,6 +97,13 @@ func (a *Adapter) syncNotifQueueThen(afterBarrier func()) bool {
 	}
 }
 
+func (a *Adapter) discardPendingSessionStartupWarnings() {
+	a.mu.Lock()
+	a.sessionCreationPending = false
+	a.pendingSessionStartupWarnings = nil
+	a.mu.Unlock()
+}
+
 // syncNotifQueueThenBounded queues a FIFO barrier and waits only within the
 // caller's deadline and timeout. If the wait expires, the barrier remains
 // queued and afterBarrier still runs when the worker reaches it.
@@ -177,17 +184,34 @@ func (a *Adapter) handleACPUpdate(
 	n acp.SessionNotification,
 	promptGeneration uint64,
 ) {
+	sessionID := string(n.SessionId)
+	startupWarning, isStartupWarning := codexMCPStartupWarningEvent(a.agentID, sessionID, n.Update.ToolCall)
+	a.mu.Lock()
+	if isStartupWarning && a.sessionCreationPending && !a.closed {
+		a.pendingSessionStartupWarnings = append(a.pendingSessionStartupWarnings, *startupWarning)
+		a.mu.Unlock()
+		return
+	}
+	isLoading := a.isLoadingSession
+	startupWarningOwned := !a.closed &&
+		((isLoading && a.loadingSessionID == sessionID) || (!isLoading && a.sessionID == sessionID))
+	a.mu.Unlock()
+	if isStartupWarning && !startupWarningOwned {
+		startupWarning = nil
+		if !isLoading {
+			a.logger.Debug("ignoring Codex MCP startup report outside the bound session",
+				zap.String("event_session_id", sessionID))
+			return
+		}
+	}
+
 	// Fast path during session/load: history-replay notifications can arrive as
 	// a burst large enough to overflow the ACP SDK's 1024-deep notification
 	// queue if the per-item handler is slow. Check the loading flag first and
 	// skip json.Marshal + LogRawEvent for replay notifications we'd suppress
 	// anyway. We still capture the Plan + Monitor state needed to reconcile
 	// after replay.
-	a.mu.RLock()
-	isLoading := a.isLoadingSession
-	a.mu.RUnlock()
-
-	if isLoading {
+	if isLoading && startupWarning == nil {
 		u := n.Update
 		// Capture the last Plan from replay so we can re-emit it after load completes.
 		a.mu.Lock()
@@ -215,8 +239,21 @@ func (a *Adapter) handleACPUpdate(
 		}
 	}
 
-	a.observeContinuationSafety(n, promptGeneration)
-	a.observeCapacityContinuation(n, promptGeneration)
+	if startupWarning == nil {
+		a.observeContinuationSafety(n, promptGeneration)
+		a.observeCapacityContinuation(n, promptGeneration)
+	}
+	if startupWarning != nil {
+		rawData, _ := json.Marshal(n)
+		if len(rawData) > 0 {
+			shared.LogRawEvent(shared.ProtocolACP, a.agentID, sessionID, "session_notification", rawData)
+		}
+		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, startupWarning)
+		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
+			startupWarning.Type, rawData, startupWarning)
+		a.sendUpdate(*startupWarning)
+		return
+	}
 
 	// Marshal once for both debug logging and tracing.
 	rawData, _ := json.Marshal(n)
@@ -224,7 +261,6 @@ func (a *Adapter) handleACPUpdate(
 		shared.LogRawEvent(shared.ProtocolACP, a.agentID, string(n.SessionId), "session_notification", rawData)
 	}
 
-	sessionID := string(n.SessionId)
 	if n.Update.ConfigOptionUpdate != nil {
 		a.observeConfigurationCommandOptions(
 			sessionID,
@@ -235,7 +271,6 @@ func (a *Adapter) handleACPUpdate(
 	if n.Update.CurrentModeUpdate != nil {
 		a.observeConfigurationCommandMode(sessionID, promptGeneration, string(n.Update.CurrentModeUpdate.CurrentModeId))
 	}
-
 	suppressed := a.dialect.suppresses(n)
 	handled := suppressed
 	var event, leadingEvent *AgentEvent

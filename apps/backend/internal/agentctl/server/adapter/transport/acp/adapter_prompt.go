@@ -181,6 +181,7 @@ func (a *Adapter) sendPrompt(
 	a.mu.Lock()
 	wasLoading := a.isLoadingSession
 	a.isLoadingSession = false
+	a.loadingSessionID = ""
 	a.mu.Unlock()
 
 	if wasLoading {

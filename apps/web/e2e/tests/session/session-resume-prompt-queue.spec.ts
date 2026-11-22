@@ -3,6 +3,7 @@ import { test } from "../../fixtures/test-base";
 import {
   cleanupDelayedResumeFixture,
   seedDelayedResumeFixture,
+  waitForSessionStarting,
   waitForSessionReady,
   waitForQueuedCount,
 } from "../../helpers/session-resume-prompt-queue";
@@ -65,6 +66,68 @@ test.describe("Send during session resume", () => {
       await expect(response).toHaveCount(1, { timeout: 60_000 });
     } finally {
       await cleanupDelayedResumeFixture(apiClient, fixture);
+    }
+  });
+
+  test("shows a Codex MCP startup warning and delivers a queued prompt after resume", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(180_000);
+
+    const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+      title: "Codex MCP startup warning resume queue",
+      resumeDelay: "20s",
+      agentId: "codex-acp",
+      mcpStartupReport: true,
+      resumeEnvOverrides: { KANDEV_MOCK_PROVIDERS: "codex-acp" },
+      reloadDuringResume: false,
+    });
+    const marker = "Codex startup warning queued prompt";
+
+    try {
+      const chat = fixture.session.activeChat();
+      const warning = testPage.getByText(/MCP server.*failed to start: e2e startup report/);
+      await waitForSessionStarting(
+        testPage,
+        apiClient,
+        fixture.task.id,
+        fixture.identity.sessionId,
+      );
+      await expect(apiClient.setQueueAutoRun(fixture.identity, false)).resolves.toMatchObject({
+        auto_run: false,
+      });
+
+      const editor = chat.getByTestId("chat-input-editor");
+      const submit = fixture.session.submitButton();
+      await editor.fill(`e2e:message("${marker}")`);
+      await expect(submit).toBeEnabled();
+      await submit.click();
+      await expect(editor).toHaveText("");
+      await waitForQueuedCount(apiClient, fixture.identity, 1);
+      await expect(warning).toBeVisible({ timeout: 30_000 });
+
+      await waitForSessionReady(testPage, apiClient, fixture.task.id, fixture.identity.sessionId);
+      await expect(apiClient.setQueueAutoRun(fixture.identity, true)).resolves.toMatchObject({
+        auto_run: true,
+      });
+      await expect
+        .poll(() => apiClient.getQueueStatus(fixture.identity).then((status) => status.count), {
+          timeout: 30_000,
+        })
+        .toBe(0);
+      await expect(
+        chat.locator("[data-agent-message-body][data-message-id]").filter({ hasText: marker }),
+      ).toHaveCount(1, { timeout: 60_000 });
+      await expect(warning).toBeVisible();
+    } finally {
+      try {
+        await cleanupDelayedResumeFixture(apiClient, fixture);
+      } finally {
+        await backend.restart();
+      }
     }
   });
 

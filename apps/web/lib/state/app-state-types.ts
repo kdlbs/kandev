@@ -719,6 +719,7 @@ export type AppState = KanbanSlice & {
   setBackgroundWorkLoading: (sessionId: string, loading: boolean) => void;
   /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
   createSidebarView: UIA["createSidebarView"];
+  selectSidebarPluginGrouping: UIA["selectSidebarPluginGrouping"];
   updateSidebarDraft: UIA["updateSidebarDraft"];
   saveSidebarDraftAs: UIA["saveSidebarDraftAs"];
   saveSidebarDraftOverwrite: UIA["saveSidebarDraftOverwrite"];

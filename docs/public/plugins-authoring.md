@@ -587,9 +587,10 @@ For the additive notification formatter extension, see the
 [notification content formatter contract](../plans/plugins/PLUGIN-API.md#notification-content-formatters).
 It covers the optional Go interface, provider-scoped management envelope,
 owner-isolated editor slot, immutable snapshots, activation CAS, cancellation,
-and default fallback. The source prepares SDK `0.3.0` for the next Stable
-release. Wait for verified host and SDK publication before using this extension
-in a released plugin. The release stamps its host floor into `sdk-release.json`;
+and default fallback. The source prepares SDK `0.4.0`, which adds the complete
+sidebar grouping contract, for the next Stable release. Wait for verified host
+and SDK publication before using this extension in a released plugin. The
+release stamps its host floor into `sdk-release.json`;
 the metadata alone does not establish public availability.
 
 The guide summarizes the contract for discovery. These files remain the source
@@ -4195,6 +4196,77 @@ registry.registerTaskListFacet({
   subscribe: (listener) => tagStore.subscribe(listener),
 });
 ```
+
+### Complete saved-sidebar groupings
+
+Use a manifest `sidebar_groupings` declaration when classification must cover
+the complete sidebar view before its 100-row page boundary. This is a backend
+contract, not a `registerTaskListFacet` option. It works without a browser bundle.
+Declare `min_kandev_version: "0.103.0"` or later. This unreleased floor excludes
+Stable 0.102.0, which lacks the contract. Until a supporting release ships, use
+a matching development checkout and do not publish the package.
+
+```yaml
+min_kandev_version: "0.103.0"
+actions:
+  - key: "sidebar-labels"
+    scope: "workspace"
+    access: "authenticated"
+    max_body_bytes: 16
+sidebar_groupings:
+  - id: "labels"
+    label: "Labels"
+    label_key: "plugin:labels"
+    action: "sidebar-labels"
+```
+
+The host authorizes the workspace and invokes the supervised action with an
+empty object body, verified actor/workspace context, and a five-second deadline.
+Return a complete classification of the plugin's shared workspace data:
+
+```json
+{
+  "version": 1,
+  "revision": "stable-classification-revision",
+  "complete": true,
+  "groups": [{"id": "ready", "label": "Ready", "color": "#22aa66"}],
+  "memberships": [{"task_id": "task-id", "group_id": "ready"}]
+}
+```
+
+- Keep revisions stable while classification is unchanged. Change them when a
+  value's label/color or task membership changes.
+- Include both arrays even when empty. Never truncate a snapshot or infer
+  completeness from the browser's loaded tasks.
+- Limits are 1 MiB for the existing action response, 1,000 group values, and
+  10,000 membership pairs before deduplication. Exceeding a limit must fail,
+  not return partial success.
+- Recognized JSON field names use the exact canonical spelling shown above
+  and occur once, including fields inside each group or membership object.
+  Duplicate fields or case-folded aliases make the snapshot unavailable.
+  Unrelated extension metadata does not change classification.
+- IDs, labels, revision, and task IDs are nonblank UTF-8 text without control
+  characters, at most 256 bytes each. Group IDs are unique. Colors, when present,
+  are `#RRGGBB`. Every membership names a declared group; duplicate pairs collapse.
+- Memberships never grant access. The host joins only authorized, filtered
+  workspace roots, ignores foreign/deleted task IDs, and repeats each complete
+  root tree in its matching groups. Unclassified roots appear in **Untagged**.
+- Successful Host state writes/deletes invalidate declared providers using
+  plugin/workspace identity only. Catalog and reconnect events fence old
+  generations; state values are never broadcast.
+
+The selector creates a normal personal workspace view with
+`group: "plugin:<plugin-id>:<grouping-id>"`. An unchanged generated view is reused;
+renamed/custom views, drafts, and the 50-view limit retain their protections.
+Disabled, failed, or incomplete providers keep the saved reference and show
+unavailable/retry recovery, never an empty classification fallback.
+
+The Go SDK exports `SidebarGroupingSnapshot`, `SidebarGroupingValue`,
+`SidebarGroupingMembership`, and `DecodeSidebarGroupingSnapshot`. Browser SDK
+snapshot/provider types describe the same wire contract; plugins do not register
+these providers through the browser registry. The separate `/tasks` facet remains
+page-local and unchanged.
+
 
 ## Build, package, install, and test
 

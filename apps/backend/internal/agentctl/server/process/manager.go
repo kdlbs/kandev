@@ -974,6 +974,9 @@ func (m *Manager) submissionForGeneration(generation uint64) string {
 }
 
 func (m *Manager) deliverySubmissionIDForEvent(update adapter.AgentEvent) string {
+	if update.Type == streams.EventTypeMCPStartupWarning {
+		return ""
+	}
 	active := m.activeDeliverySubmissionID()
 	m.deliveryPromptMu.Lock()
 	defer m.deliveryPromptMu.Unlock()
