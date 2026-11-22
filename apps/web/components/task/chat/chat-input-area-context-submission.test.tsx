@@ -410,9 +410,9 @@ it("retains submitted walkthrough feedback and leaves later feedback pending", a
   await waitForAdmission();
   expect(requestPayload()).toMatchObject({
     content: expect.stringContaining(
-      "> First note\n\n<!-- kandev-comment-files:submitted-note -->",
+      "> First note\n\n<!-- kandev-comment-files:walkthrough-file -->",
     ),
-    attachments: [{ ...note.attachments?.[0], comment_id: note.id }],
+    attachments: [{ ...note.attachments?.[0], comment_id: "walkthrough-file" }],
   });
   act(() =>
     useCommentsStore.getState().addComment({ ...note, id: "next-note", text: "Next note" }),
