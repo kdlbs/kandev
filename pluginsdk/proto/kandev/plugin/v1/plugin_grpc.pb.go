@@ -884,6 +884,8 @@ const (
 	Host_CancelPendingTaskTransitionExact_FullMethodName           = "/kandev.plugin.v1.Host/CancelPendingTaskTransitionExact"
 	Host_GetSessionModeContextExact_FullMethodName                 = "/kandev.plugin.v1.Host/GetSessionModeContextExact"
 	Host_SetSessionModeExact_FullMethodName                        = "/kandev.plugin.v1.Host/SetSessionModeExact"
+	Host_GetStepApprovalExact_FullMethodName                       = "/kandev.plugin.v1.Host/GetStepApprovalExact"
+	Host_ApproveStepExact_FullMethodName                           = "/kandev.plugin.v1.Host/ApproveStepExact"
 	Host_RespondPermissionExact_FullMethodName                     = "/kandev.plugin.v1.Host/RespondPermissionExact"
 	Host_AnswerClarificationExact_FullMethodName                   = "/kandev.plugin.v1.Host/AnswerClarificationExact"
 	Host_LinkExternalIdentity_FullMethodName                       = "/kandev.plugin.v1.Host/LinkExternalIdentity"
@@ -1029,6 +1031,12 @@ type HostClient interface {
 	CancelPendingTaskTransitionExact(ctx context.Context, in *CancelPendingTaskTransitionExactRequest, opts ...grpc.CallOption) (*CancelPendingTaskTransitionExactResponse, error)
 	GetSessionModeContextExact(ctx context.Context, in *GetSessionModeContextExactRequest, opts ...grpc.CallOption) (*GetSessionModeContextExactResponse, error)
 	SetSessionModeExact(ctx context.Context, in *SetSessionModeExactRequest, opts ...grpc.CallOption) (*SetSessionModeExactResponse, error)
+	// GetStepApprovalExact reads whether a session's workflow step awaits the
+	// native Approve action (host.v2.read:sessions). ApproveStepExact approves
+	// it through the same path with a step_approval human response receipt
+	// (host.v2.write:execution). Office approval stages are Unimplemented.
+	GetStepApprovalExact(ctx context.Context, in *GetStepApprovalExactRequest, opts ...grpc.CallOption) (*GetStepApprovalExactResponse, error)
+	ApproveStepExact(ctx context.Context, in *ApproveStepExactRequest, opts ...grpc.CallOption) (*ApproveStepExactResponse, error)
 	// Human interaction responses require a Host-issued single-use receipt from
 	// the authenticated native UI or minted for a linked Kandev user, bound to
 	// the exact interaction revision and response payload.
@@ -1603,6 +1611,26 @@ func (c *hostClient) SetSessionModeExact(ctx context.Context, in *SetSessionMode
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetSessionModeExactResponse)
 	err := c.cc.Invoke(ctx, Host_SetSessionModeExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetStepApprovalExact(ctx context.Context, in *GetStepApprovalExactRequest, opts ...grpc.CallOption) (*GetStepApprovalExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetStepApprovalExactResponse)
+	err := c.cc.Invoke(ctx, Host_GetStepApprovalExact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ApproveStepExact(ctx context.Context, in *ApproveStepExactRequest, opts ...grpc.CallOption) (*ApproveStepExactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ApproveStepExactResponse)
+	err := c.cc.Invoke(ctx, Host_ApproveStepExact_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2355,6 +2383,12 @@ type HostServer interface {
 	CancelPendingTaskTransitionExact(context.Context, *CancelPendingTaskTransitionExactRequest) (*CancelPendingTaskTransitionExactResponse, error)
 	GetSessionModeContextExact(context.Context, *GetSessionModeContextExactRequest) (*GetSessionModeContextExactResponse, error)
 	SetSessionModeExact(context.Context, *SetSessionModeExactRequest) (*SetSessionModeExactResponse, error)
+	// GetStepApprovalExact reads whether a session's workflow step awaits the
+	// native Approve action (host.v2.read:sessions). ApproveStepExact approves
+	// it through the same path with a step_approval human response receipt
+	// (host.v2.write:execution). Office approval stages are Unimplemented.
+	GetStepApprovalExact(context.Context, *GetStepApprovalExactRequest) (*GetStepApprovalExactResponse, error)
+	ApproveStepExact(context.Context, *ApproveStepExactRequest) (*ApproveStepExactResponse, error)
 	// Human interaction responses require a Host-issued single-use receipt from
 	// the authenticated native UI or minted for a linked Kandev user, bound to
 	// the exact interaction revision and response payload.
@@ -2633,6 +2667,12 @@ func (UnimplementedHostServer) GetSessionModeContextExact(context.Context, *GetS
 }
 func (UnimplementedHostServer) SetSessionModeExact(context.Context, *SetSessionModeExactRequest) (*SetSessionModeExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetSessionModeExact not implemented")
+}
+func (UnimplementedHostServer) GetStepApprovalExact(context.Context, *GetStepApprovalExactRequest) (*GetStepApprovalExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetStepApprovalExact not implemented")
+}
+func (UnimplementedHostServer) ApproveStepExact(context.Context, *ApproveStepExactRequest) (*ApproveStepExactResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ApproveStepExact not implemented")
 }
 func (UnimplementedHostServer) RespondPermissionExact(context.Context, *RespondPermissionExactRequest) (*RespondPermissionExactResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RespondPermissionExact not implemented")
@@ -3623,6 +3663,42 @@ func _Host_SetSessionModeExact_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).SetSessionModeExact(ctx, req.(*SetSessionModeExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetStepApprovalExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetStepApprovalExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetStepApprovalExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetStepApprovalExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetStepApprovalExact(ctx, req.(*GetStepApprovalExactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ApproveStepExact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ApproveStepExactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ApproveStepExact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ApproveStepExact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ApproveStepExact(ctx, req.(*ApproveStepExactRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -4986,6 +5062,14 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetSessionModeExact",
 			Handler:    _Host_SetSessionModeExact_Handler,
+		},
+		{
+			MethodName: "GetStepApprovalExact",
+			Handler:    _Host_GetStepApprovalExact_Handler,
+		},
+		{
+			MethodName: "ApproveStepExact",
+			Handler:    _Host_ApproveStepExact_Handler,
 		},
 		{
 			MethodName: "RespondPermissionExact",

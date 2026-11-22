@@ -302,17 +302,26 @@ func (m humanResponseDelegationManager) LinkExternalIdentity(ctx context.Context
 }
 
 func validHumanResponseReceiptRequest(in pluginsdk.HumanResponseReceiptRequest) bool {
-	if !isBoundedApprovalIdentifier(in.RequestID) || !isBoundedApprovalIdentifier(in.WorkspaceID) ||
-		!isExactCapabilityResource(in.Provider) || !isBoundedApprovalIdentifier(in.Subject) ||
-		!isBoundedApprovalIdentifier(in.TargetID) || in.ExpectedResourceVersion == "" ||
-		in.ApprovalRevision == 0 || len(in.ManifestDigest) != 64 {
-		return false
-	}
+	return validHumanResponseReceiptEnvelope(in) && validHumanResponseReceiptPayload(in)
+}
+
+func validHumanResponseReceiptEnvelope(in pluginsdk.HumanResponseReceiptRequest) bool {
+	return isBoundedApprovalIdentifier(in.RequestID) && isBoundedApprovalIdentifier(in.WorkspaceID) &&
+		isExactCapabilityResource(in.Provider) && isBoundedApprovalIdentifier(in.Subject) &&
+		isBoundedApprovalIdentifier(in.TargetID) && in.ExpectedResourceVersion != "" &&
+		in.ApprovalRevision > 0 && len(in.ManifestDigest) == 64
+}
+
+// validHumanResponseReceiptPayload requires exactly the payload shape of the
+// exact command the receipt authorizes.
+func validHumanResponseReceiptPayload(in pluginsdk.HumanResponseReceiptRequest) bool {
 	switch in.Kind {
 	case pluginsdk.HumanResponseKindPermission:
 		return len(in.Answers) == 0 && (in.Cancelled == (in.OptionID == ""))
 	case pluginsdk.HumanResponseKindClarification:
 		return in.OptionID == "" && !in.Cancelled && len(in.Answers) > 0
+	case pluginsdk.HumanResponseKindStepApproval:
+		return in.OptionID == "" && !in.Cancelled && len(in.Answers) == 0
 	default:
 		return false
 	}
@@ -421,6 +430,9 @@ func (h *pluginHost) authorizeLinkedHuman(ctx context.Context, userID, workspace
 // humanResponseTargetVersion verifies the receipt target is still awaiting
 // this kind of response at the observed version.
 func (h *pluginHost) humanResponseTargetVersion(ctx context.Context, in pluginsdk.HumanResponseReceiptRequest) (string, *pluginsdk.CommandResult) {
+	if in.Kind == pluginsdk.HumanResponseKindStepApproval {
+		return h.stepApprovalReceiptVersion(ctx, in.WorkspaceID, in.TargetID, in.ExpectedResourceVersion)
+	}
 	version, err := h.service.pendingInteractionVersion(ctx, in.WorkspaceID, in.TargetID, in.ExpectedResourceVersion, in.Kind)
 	switch {
 	case err == nil:

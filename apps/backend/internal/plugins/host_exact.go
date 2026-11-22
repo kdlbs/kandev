@@ -61,6 +61,8 @@ const exactRecoverSessionMethod = "RecoverSessionExact"
 const exactCancelTaskTransitionMethod = "CancelPendingTaskTransitionExact"
 const exactGetSessionModeMethod = "GetSessionModeContextExact"
 const exactSetSessionModeMethod = "SetSessionModeExact"
+const exactGetStepApprovalMethod = "GetStepApprovalExact"
+const exactApproveStepMethod = "ApproveStepExact"
 const exactRespondPermissionMethod = "RespondPermissionExact"
 const exactAnswerClarificationMethod = "AnswerClarificationExact"
 const exactSourceIssueCommentMethod = "CommentSourceIssueExact"
@@ -98,6 +100,8 @@ var exactHostMethods = []exactMethod{
 	{method: exactCancelTaskTransitionMethod, capability: "host.v2.write:execution", description: "Cancel one observed pending workflow transition"},
 	{method: exactGetSessionModeMethod, capability: "host.v2.read:sessions", description: "Read provider-advertised modes for one session"},
 	{method: exactSetSessionModeMethod, capability: "host.v2.write:execution", description: "Set one provider-advertised safe mode on the observed execution"},
+	{method: exactGetStepApprovalMethod, capability: "host.v2.read:sessions", description: "Read whether one session's workflow step awaits approval"},
+	{method: exactApproveStepMethod, capability: "host.v2.write:execution", description: "Approve one awaiting workflow step for a linked Kandev user"},
 	{method: exactRespondPermissionMethod, capability: "host.v2.write:interactions", description: "Relay a human-authorized permission response to one pending request"},
 	{method: exactAnswerClarificationMethod, capability: "host.v2.write:interactions", description: "Relay a human-authorized answer to one pending clarification"},
 	{method: requestHumanResponseMethod, capability: humanResponsesCapability, description: "Mint a single-use response receipt for a linked Kandev user with session control"},
@@ -412,7 +416,8 @@ func isManagedAutomationScheduleMethod(method string) bool {
 func isExactExecutionMethod(method string) bool {
 	switch method {
 	case exactEnsureTaskRunMethod, exactStopTaskRunMethod, exactCancelTurnMethod, exactRecoverSessionMethod,
-		exactCancelTaskTransitionMethod, exactGetSessionModeMethod, exactSetSessionModeMethod:
+		exactCancelTaskTransitionMethod, exactGetSessionModeMethod, exactSetSessionModeMethod,
+		exactGetStepApprovalMethod, exactApproveStepMethod:
 		return true
 	default:
 		return false
@@ -420,7 +425,7 @@ func isExactExecutionMethod(method string) bool {
 }
 
 func exactExecutionRequiresCommandStore(method string) bool {
-	return method != exactGetSessionModeMethod
+	return method != exactGetSessionModeMethod && method != exactGetStepApprovalMethod
 }
 
 func exactReadUnavailableReason(method string, host *pluginHost) string {

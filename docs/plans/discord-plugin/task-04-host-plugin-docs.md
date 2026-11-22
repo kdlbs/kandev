@@ -1,7 +1,7 @@
 ---
 id: "04-host-plugin-docs"
 title: "Public plugin docs for the external-chat control additions"
-status: pending
+status: done
 wave: 5
 depends_on: ["02-host-control-rpcs", "15-host-delegated-human-responses", "16-host-step-approval-rpcs", "17-host-message-source"]
 plan: "plan.md"
@@ -35,4 +35,17 @@ Repository: `kdlbs/kandev`. Use `/docs-maintainer`.
 - **Output contract:** summary, files changed, checks run, blockers, risks, and task/plan status update.
 
 ## Results
-Pending.
+Each implementation commit carried its docs, as the maintainers asked:
+
+- `docs/public/plugins-authoring.md`: Host API matrix rows for `CancelTurn`,
+  `GetStepApproval`/`ApproveStep`, and the linked human-response flow;
+  "Exact execution controls" covers `CancelTurn`, "Responses from linked chat
+  accounts", and "Approving workflow review steps" with Go examples; the
+  `Messages().List` section documents `Source` and that `message.*` payloads
+  may carry `raw_content`.
+- `docs/public/plugins-manifest.md`: the `human_responses` write resource and
+  its `host.v2.write:human_responses` grant, turn cancellation under
+  `execution`, `source` in the `messages` resource, and the `raw_content`
+  note under the event vocabulary.
+- **Checks:** `git diff --check`; `pnpm run i18n:check` (public copy em-dash
+  guard) passed with the web changes.

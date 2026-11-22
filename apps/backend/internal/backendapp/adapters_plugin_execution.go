@@ -42,6 +42,7 @@ type pluginsExactExecutionController struct {
 	orchestrator exactExecutionOrchestrator
 	lifecycle    agentruntime.SessionExecutionControl
 	queue        *messagequeue.Service
+	steps        exactStepApprovalService
 }
 
 func (a pluginsExactExecutionController) EnsureTaskRun(ctx context.Context, installationID string, in pluginsdk.ExactTaskRunCommand) (pluginsdk.ExactTaskRunResult, error) {

@@ -264,8 +264,9 @@ Error mapping for the additions follows the exact-command conventions:
   `UNSUPPORTED`;
 - `PermissionDenied`, or a `DENIED` command result, without the capability,
   the grant, or an active link;
-- `FailedPrecondition` for "nothing awaiting approval" or a running session;
-- `Unimplemented` for office stages.
+- `CONFLICT` with reason `step_not_awaiting_approval` (the command form of
+  `FailedPrecondition`) when nothing awaits approval;
+- `Unimplemented` for office stages on the read, `UNSUPPORTED` on the command.
 
 ### Discord surface
 
@@ -359,8 +360,8 @@ Error mapping for the additions follows the exact-command conventions:
   - Queue full or terminal session: ⚠️ reply.
   - An interaction already resolved (`CONFLICT` or stale revision): the prompt
     is edited to "resolved elsewhere".
-  - `ApproveStep` `FailedPrecondition`: ephemeral reply, and the prompt is
-    edited to "no longer pending".
+  - `ApproveStep` `CONFLICT` `step_not_awaiting_approval`: ephemeral reply,
+    and the prompt is edited to "no longer pending".
   - Missing grant: ephemeral reply "an admin must grant Discord approvals in
     Kandev". Unlinked account: ephemeral reply with a deep link and `/link`
     instructions.

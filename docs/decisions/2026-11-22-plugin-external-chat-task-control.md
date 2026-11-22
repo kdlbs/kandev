@@ -128,20 +128,25 @@ receipt on its own authority.
 `host.v2.write:execution` that also requires a `step_approval` receipt from the
 flow above. It reuses `task/service.Service.ApproveSession`, the path behind
 the native Approve button, so the task moves to the same configured target,
-`task.moved` and `on_enter` fire, and `review_status` becomes `approved`. It
-returns `FailedPrecondition` when nothing awaits approval and
-`ALREADY_APPLIED` on replay, and it never moves a task twice.
+`task.moved` and `on_enter` fire, and `review_status` becomes `approved`.
+Following the exact-command convention, nothing awaiting approval is the typed
+result `CONFLICT` with reason `step_not_awaiting_approval` (the command form
+of `FailedPrecondition`); a replay returns `ALREADY_APPLIED`, and it never
+moves a task twice. It carries no management-claim fence: like an
+interaction response, it is a human decision.
 
-`GetStepApproval(session_id)` is a read under `api_read: sessions` that
-returns whether approval is awaited and the source and target steps.
-Approval is awaited when the session is not running or starting,
-`review_status` is not `approved`, and either `review_status` is `pending` or
-the current step has an `on_turn_complete` transition with
-`requires_approval=true` and the session completed a turn after the task
-entered that step. The step entry time is the newest recorded step transition
-into the current step, or the task creation time when none exists. The target
-step uses the same resolver as `ApproveSession`. An Office approval stage
-(`stage_type: approval`) returns `Unimplemented`.
+`GetStepApproval(session_id)` is an exact read under `api_read: sessions` and
+`host.v2.read:sessions` that returns whether approval is awaited, the source
+and target steps, and the resource version that the receipt and
+`ApproveStep` bind to. Approval is awaited when the session is not running or
+starting, `review_status` is not `approved`, and either `review_status` is
+`pending` or the current step has an `on_turn_complete` transition with
+`requires_approval=true` and the session's latest turn completed in the
+current step entry. Turns already record the step and the step-transition
+entry they started in, so a turn from an earlier visit to the same step does
+not count and no timestamp comparison is needed. The target step uses the same
+resolver as `ApproveSession`. An Office approval stage (`stage_type:
+approval`) returns `Unimplemented`.
 
 ### Message provenance and event payloads
 

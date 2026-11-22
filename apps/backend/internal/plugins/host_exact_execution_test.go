@@ -51,6 +51,12 @@ type fakeExactExecutionController struct {
 	cancelInput                                                                   pluginsdk.ExactPendingTransitionCommand
 	modeReadInput                                                                 pluginsdk.ExactTaskExecutionCommand
 	modeSetInput                                                                  pluginsdk.ExactSessionModeCommand
+	// Step approval: the observed state, approvals made, and the acting user.
+	stepAwaiting   bool
+	stepVersion    string
+	stepErr        error
+	approveCalls   int
+	approveActorID string
 }
 
 func (f *fakeExactExecutionController) EnsureTaskRun(_ context.Context, installationID string, in pluginsdk.ExactTaskRunCommand) (pluginsdk.ExactTaskRunResult, error) {
@@ -113,6 +119,33 @@ func (f *fakeExactExecutionController) SetSessionMode(_ context.Context, install
 		return "", status.Error(codes.Aborted, "replacement execution")
 	}
 	return in.ModeID, nil
+}
+
+func (f *fakeExactExecutionController) GetStepApproval(_ context.Context, _ string, in pluginsdk.ExactStepApprovalQuery) (pluginsdk.StepApproval, error) {
+	if f.stepErr != nil {
+		return pluginsdk.StepApproval{}, f.stepErr
+	}
+	return pluginsdk.StepApproval{
+		SessionID: in.SessionID, TaskID: "task-exact", Awaiting: f.stepAwaiting, FromStepID: "review", ToStepID: "done",
+		ResourceVersion: f.stepVersion,
+	}, nil
+}
+
+func (f *fakeExactExecutionController) ApproveStep(ctx context.Context, _ string, in pluginsdk.ExactStepApprovalCommand) (pluginsdk.StepApprovalResult, error) {
+	if f.stepErr != nil {
+		return pluginsdk.StepApprovalResult{}, f.stepErr
+	}
+	if !f.stepAwaiting {
+		return pluginsdk.StepApprovalResult{}, status.Error(codes.FailedPrecondition, "not awaiting")
+	}
+	if in.ExpectedResourceVersion != f.stepVersion {
+		return pluginsdk.StepApprovalResult{}, status.Error(codes.Aborted, "changed")
+	}
+	f.approveCalls++
+	f.approveActorID = actingUserID(ctx)
+	f.stepAwaiting = false
+	f.stepVersion = "sha256:approved"
+	return pluginsdk.StepApprovalResult{FromStepID: "review", ToStepID: "done"}, nil
 }
 
 func newExactExecutionHost(t *testing.T, controller *fakeExactExecutionController) (*pluginHost, string) {

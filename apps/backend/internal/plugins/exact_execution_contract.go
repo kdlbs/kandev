@@ -16,6 +16,10 @@ type ExactExecutionController interface {
 	CancelPendingTaskTransition(context.Context, string, pluginsdk.ExactPendingTransitionCommand) (bool, error)
 	GetSessionModeContext(context.Context, string, pluginsdk.ExactTaskExecutionCommand) (pluginsdk.SessionModeContext, error)
 	SetSessionMode(context.Context, string, pluginsdk.ExactSessionModeCommand) (string, error)
+	GetStepApproval(context.Context, string, pluginsdk.ExactStepApprovalQuery) (pluginsdk.StepApproval, error)
+	// ApproveStep runs with the context of the Kandev user whose receipt
+	// authorized it and approves through the native Approve path.
+	ApproveStep(context.Context, string, pluginsdk.ExactStepApprovalCommand) (pluginsdk.StepApprovalResult, error)
 }
 
 type exactExecutionController = ExactExecutionController

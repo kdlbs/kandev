@@ -89,6 +89,39 @@ type ExactClarificationResponse struct {
 	ManifestDigest                                                 string
 }
 
+// ExactStepApprovalQuery reads one session's workflow-step approval state.
+type ExactStepApprovalQuery struct {
+	RequestID, WorkspaceID, SessionID string
+}
+
+// StepApproval reports whether a session's current workflow step awaits the
+// native Approve action and where approval moves the task. ToStepID is empty
+// when approval does not move the task (a final step). ResourceVersion is the
+// target revision a step_approval receipt and ApproveStep must name.
+type StepApproval struct {
+	SessionID, TaskID           string
+	Awaiting                    bool
+	FromStepID, FromStepName    string
+	ToStepID, ToStepName        string
+	ResourceVersion, ObservedAt string
+}
+
+// ExactStepApprovalCommand approves one awaiting step with a step_approval
+// human response receipt, exactly like the native Approve button.
+type ExactStepApprovalCommand struct {
+	RequestID, WorkspaceID, SessionID       string
+	ExpectedResourceVersion, IdempotencyKey string
+	HumanResponseReceiptID                  string
+	ApprovalRevision                        uint64
+	ManifestDigest                          string
+}
+
+// StepApprovalResult names the step the session was approved in and the step
+// the task moved to; ToStepID is empty when the task did not move.
+type StepApprovalResult struct {
+	FromStepID, ToStepID string
+}
+
 // ExactExecutionCommandManager exposes exact task and session lifecycle controls.
 type ExactExecutionCommandManager interface {
 	EnsureTaskRun(context.Context, ExactTaskRunCommand) (*CommandResult, ExactTaskRunResult, error)
@@ -101,6 +134,12 @@ type ExactExecutionCommandManager interface {
 	CancelPendingTaskTransition(context.Context, ExactPendingTransitionCommand) (*CommandResult, error)
 	GetSessionModeContext(context.Context, ExactTaskExecutionCommand) (SessionModeContext, error)
 	SetSessionMode(context.Context, ExactSessionModeCommand) (*CommandResult, string, error)
+	// GetStepApproval reads whether the session's current step awaits approval.
+	// An Office approval stage returns gRPC Unimplemented.
+	GetStepApproval(context.Context, ExactStepApprovalQuery) (StepApproval, error)
+	// ApproveStep approves an awaiting step through the native Approve path.
+	// A step that no longer awaits approval returns CONFLICT.
+	ApproveStep(context.Context, ExactStepApprovalCommand) (*CommandResult, StepApprovalResult, error)
 }
 
 // ExactInteractionCommandManager exposes responses that require a Host-issued human receipt.

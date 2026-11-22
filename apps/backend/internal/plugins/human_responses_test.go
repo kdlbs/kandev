@@ -15,6 +15,8 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kdlbs/kandev/pluginsdk"
 	_ "github.com/mattn/go-sqlite3"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -58,11 +60,12 @@ func newLinkedResponseFixture(t *testing.T, grants []string) *linkedResponseFixt
 	interaction := pendingPermissionInteraction()
 	withInteraction(data, interaction)
 	data.tasks.tasksByID = map[string]*taskmodels.Task{interaction.TaskID: {ID: interaction.TaskID, WorkspaceID: linkedWorkspace}}
+	data.tasks.workspaces = []*taskmodels.Workspace{{ID: linkedWorkspace}}
 	resolved := *interaction
 	resolved.Status = taskmodels.InteractionStatusApproved
 	data.interactions.afterWrite = &resolved
 
-	caps := manifest.Capabilities{APIRead: []string{"interactions"}, APIWrite: []string{"interactions", resourceHumanResponses}}
+	caps := manifest.Capabilities{APIRead: []string{"interactions", "sessions"}, APIWrite: []string{"interactions", "execution", resourceHumanResponses}}
 	record := &pluginstore.Record{Manifest: manifest.Manifest{ID: linkedPluginID, Capabilities: caps}, InstallationID: linkedInstall}
 	other := &pluginstore.Record{Manifest: manifest.Manifest{ID: "other-bridge", Capabilities: caps}, InstallationID: "other-installation"}
 	registry := NewRegistry()
@@ -384,4 +387,86 @@ func TestIdentityLinkManagementScopesUsersAndAdmins(t *testing.T) {
 	if links, _ := f.svc.ListIdentityLinks(ctx, linkedPluginID, "", true); len(links) != 0 {
 		t.Fatalf("links after uninstall cleanup = %+v, want none", links)
 	}
+}
+
+func TestApproveStepActsAsTheLinkedUserOnce(t *testing.T) {
+	f := newLinkedResponseFixture(t, append(allLinkedGrants(), "host.v2.read:sessions", "host.v2.write:execution"))
+	controller := &fakeExactExecutionController{stepAwaiting: true, stepVersion: "sha256:step-1"}
+	f.svc.SetExactExecutionController(controller)
+	f.link(t, "alice", "d-1")
+	execution, _ := pluginsdk.HostExecutionCommands(f.host)
+	ctx := context.Background()
+
+	approval, err := execution.GetStepApproval(ctx, pluginsdk.ExactStepApprovalQuery{RequestID: "read-step", WorkspaceID: linkedWorkspace, SessionID: "session-1"})
+	if err != nil || !approval.Awaiting || approval.ToStepID != "done" {
+		t.Fatalf("GetStepApproval = %+v err=%v", approval, err)
+	}
+	receiptRequest := pluginsdk.HumanResponseReceiptRequest{
+		RequestID: "receipt-step", WorkspaceID: linkedWorkspace, Provider: "discord", Subject: "d-1",
+		Kind: pluginsdk.HumanResponseKindStepApproval, TargetID: "session-1", ExpectedResourceVersion: approval.ResourceVersion,
+		ApprovalRevision: 1, ManifestDigest: f.digest,
+	}
+	stale := receiptRequest
+	stale.ExpectedResourceVersion = "sha256:old"
+	if result, _, _ := f.delegation.RequestHumanResponseReceipt(ctx, stale); result.Status != pluginsdk.CommandConflict {
+		t.Fatalf("stale step receipt = %+v, want CONFLICT", result)
+	}
+	minted, receipt, err := f.delegation.RequestHumanResponseReceipt(ctx, receiptRequest)
+	if err != nil || minted.Status != pluginsdk.CommandApplied {
+		t.Fatalf("step receipt = %+v err=%v", minted, err)
+	}
+	command := pluginsdk.ExactStepApprovalCommand{
+		RequestID: "approve-1", WorkspaceID: linkedWorkspace, SessionID: "session-1",
+		ExpectedResourceVersion: approval.ResourceVersion, IdempotencyKey: "approve-1",
+		HumanResponseReceiptID: receipt.ID, ApprovalRevision: 1, ManifestDigest: f.digest,
+	}
+	result, approved, err := execution.ApproveStep(ctx, command)
+	if err != nil || result.Status != pluginsdk.CommandApplied || approved.ToStepID != "done" || controller.approveActorID != "alice" {
+		t.Fatalf("ApproveStep = %+v approved=%+v actor=%q err=%v", result, approved, controller.approveActorID, err)
+	}
+	replayed, replayedResult, _ := execution.ApproveStep(ctx, command)
+	if replayed.Status != pluginsdk.CommandAlreadyApplied || replayedResult.ToStepID != "done" || controller.approveCalls != 1 {
+		t.Fatalf("replay = %+v %+v calls=%d, want ALREADY_APPLIED without a second move", replayed, replayedResult, controller.approveCalls)
+	}
+	if _, err := f.store.ConsumedDelegatedResponse(ctx, "session-1"); err != nil {
+		t.Fatalf("step approval audit: %v", err)
+	}
+
+	// Nothing awaits approval any more: a fresh receipt is refused up front.
+	if result, _, _ := f.delegation.RequestHumanResponseReceipt(ctx, receiptRequest); result.Status != pluginsdk.CommandConflict || result.Reason != reasonStepNotAwaitingApproval {
+		t.Fatalf("receipt after approval = %+v, want CONFLICT step_not_awaiting_approval", result)
+	}
+
+	controller.stepErr = statusUnimplemented()
+	if _, err := execution.GetStepApproval(ctx, pluginsdk.ExactStepApprovalQuery{RequestID: "read-office", WorkspaceID: linkedWorkspace, SessionID: "session-1"}); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("office stage read err = %v, want Unimplemented", err)
+	}
+}
+
+func TestApproveStepWithoutAwaitingIsConflict(t *testing.T) {
+	f := newLinkedResponseFixture(t, append(allLinkedGrants(), "host.v2.read:sessions", "host.v2.write:execution"))
+	controller := &fakeExactExecutionController{stepAwaiting: true, stepVersion: "sha256:step-1"}
+	f.svc.SetExactExecutionController(controller)
+	f.link(t, "alice", "d-1")
+	execution, _ := pluginsdk.HostExecutionCommands(f.host)
+	ctx := context.Background()
+	_, receipt, _ := f.delegation.RequestHumanResponseReceipt(ctx, pluginsdk.HumanResponseReceiptRequest{
+		RequestID: "receipt-step", WorkspaceID: linkedWorkspace, Provider: "discord", Subject: "d-1",
+		Kind: pluginsdk.HumanResponseKindStepApproval, TargetID: "session-1", ExpectedResourceVersion: "sha256:step-1",
+		ApprovalRevision: 1, ManifestDigest: f.digest,
+	})
+	// Approved elsewhere (for example the native button) after the receipt.
+	controller.stepAwaiting = false
+	result, _, err := execution.ApproveStep(ctx, pluginsdk.ExactStepApprovalCommand{
+		RequestID: "approve-late", WorkspaceID: linkedWorkspace, SessionID: "session-1",
+		ExpectedResourceVersion: "sha256:step-1", IdempotencyKey: "approve-late",
+		HumanResponseReceiptID: receipt.ID, ApprovalRevision: 1, ManifestDigest: f.digest,
+	})
+	if err != nil || result.Status != pluginsdk.CommandConflict || result.Reason != reasonStepNotAwaitingApproval || controller.approveCalls != 0 {
+		t.Fatalf("late approval = %+v calls=%d err=%v, want CONFLICT step_not_awaiting_approval", result, controller.approveCalls, err)
+	}
+}
+
+func statusUnimplemented() error {
+	return status.Error(codes.Unimplemented, "office approval stage")
 }

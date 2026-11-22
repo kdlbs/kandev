@@ -216,12 +216,12 @@ Wave 3:
 - [ ] [task-07-plugin-channel-lifecycle](task-07-plugin-channel-lifecycle.md)
 
 Wave 4:
-- [ ] [task-16-host-step-approval-rpcs](task-16-host-step-approval-rpcs.md)
+- [x] [task-16-host-step-approval-rpcs](task-16-host-step-approval-rpcs.md)
 - [ ] [task-08-plugin-reconciler](task-08-plugin-reconciler.md)
 - [ ] [task-09-plugin-outbound-mirroring](task-09-plugin-outbound-mirroring.md)
 
 Wave 5:
-- [ ] [task-04-host-plugin-docs](task-04-host-plugin-docs.md)
+- [x] [task-04-host-plugin-docs](task-04-host-plugin-docs.md)
 - [ ] [task-10-plugin-inbound-delivery](task-10-plugin-inbound-delivery.md)
 - [ ] [task-11-plugin-status-stop-commands](task-11-plugin-status-stop-commands.md)
 

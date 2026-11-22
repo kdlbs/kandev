@@ -182,6 +182,12 @@ service Host {
   rpc CancelPendingTaskTransitionExact(CancelPendingTaskTransitionExactRequest) returns (CancelPendingTaskTransitionExactResponse);
   rpc GetSessionModeContextExact(GetSessionModeContextExactRequest) returns (GetSessionModeContextExactResponse);
   rpc SetSessionModeExact(SetSessionModeExactRequest) returns (SetSessionModeExactResponse);
+  // GetStepApprovalExact reads whether a session's workflow step awaits the
+  // native Approve action (host.v2.read:sessions). ApproveStepExact approves
+  // it through the same path with a step_approval human response receipt
+  // (host.v2.write:execution). Office approval stages are Unimplemented.
+  rpc GetStepApprovalExact(GetStepApprovalExactRequest) returns (GetStepApprovalExactResponse);
+  rpc ApproveStepExact(ApproveStepExactRequest) returns (ApproveStepExactResponse);
   // Human interaction responses require a Host-issued single-use receipt from
   // the authenticated native UI or minted for a linked Kandev user, bound to
   // the exact interaction revision and response payload.
@@ -1389,6 +1395,41 @@ message SetSessionModeExactRequest {
 message SetSessionModeExactResponse {
   HostCommandResult result = 1;
   string current_mode_id = 2;
+}
+
+message GetStepApprovalExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string session_id = 3;
+}
+
+message GetStepApprovalExactResponse {
+  string session_id = 1;
+  string task_id = 2;
+  bool awaiting = 3;
+  string from_step_id = 4;
+  string from_step_name = 5;
+  string to_step_id = 6; // empty when approval does not move the task
+  string to_step_name = 7;
+  string resource_version = 8;
+  string observed_at = 9; // RFC3339
+}
+
+message ApproveStepExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string session_id = 3;
+  string expected_resource_version = 4;
+  string idempotency_key = 5;
+  string human_response_receipt_id = 6;
+  uint64 approval_revision = 7;
+  string manifest_digest = 8;
+}
+
+message ApproveStepExactResponse {
+  HostCommandResult result = 1;
+  string from_step_id = 2;
+  string to_step_id = 3;
 }
 
 message HumanInteractionResponseReceipt {
