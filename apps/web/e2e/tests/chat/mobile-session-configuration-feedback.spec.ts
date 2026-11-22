@@ -137,7 +137,6 @@ test.describe("Picker feedback on phone", () => {
       seedData,
       "Phone Picker Command Feedback",
       (nextSessionId) => {
-        completionHold.arm(nextSessionId);
         sessionSubscriptionsReady = Promise.all([
           ws.waitForResponse("session.subscribe", {
             requestWhere: (payload) => payload.session_id === nextSessionId,
@@ -162,6 +161,7 @@ test.describe("Picker feedback on phone", () => {
       .toBe(true);
     const composer = await session.composerReady();
     await testPage.clock.install();
+    completionHold.arm(sessionId);
     const completion = ws.waitForEvent("session.turn.completed", {
       where: (payload) => payload.session_id === sessionId,
     });

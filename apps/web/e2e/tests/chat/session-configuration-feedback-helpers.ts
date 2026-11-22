@@ -17,18 +17,17 @@ function framePayload(frame: WireFrame): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function isConfigurationCompletion(frameText: string, sessionId: string): boolean {
-  let frame: WireFrame;
+function readFrame(frameText: string): WireFrame | undefined {
   try {
-    frame = JSON.parse(frameText) as WireFrame;
+    return JSON.parse(frameText) as WireFrame;
   } catch {
-    return false;
+    return undefined;
   }
-  if (frame.type !== "notification") return false;
-  const payload = framePayload(frame);
-  if (payload?.session_id !== sessionId) return false;
-  if (frame.action === "session.turn.completed") return !!payload.configuration_result;
-  if (frame.action !== "session.conversation.changed" || !Array.isArray(payload.operations)) {
+}
+
+function isConfigurationCompletion(action: unknown, payload: Record<string, unknown>): boolean {
+  if (action === "session.turn.completed") return !!payload.configuration_result;
+  if (action !== "session.conversation.changed" || !Array.isArray(payload.operations)) {
     return false;
   }
   return payload.operations.some((value) => {
@@ -73,10 +72,18 @@ export async function holdConfigurationCompletions(
       }
       const passthrough: string[] = [];
       for (const part of message.split("\n")) {
-        const frame = part.trim();
-        if (!frame) continue;
-        if (isConfigurationCompletion(frame, sessionId)) held.push(frame);
-        else passthrough.push(frame);
+        const value = part.trim();
+        if (!value) continue;
+        const frame = readFrame(value);
+        const payload = frame && framePayload(frame);
+        if (frame?.type !== "notification" || payload?.session_id !== sessionId) {
+          passthrough.push(value);
+          continue;
+        }
+        // A revision check can recover the held turn from history before its live receipt arrives.
+        if (frame.action === "session.conversation.changed" && payload.check === true) continue;
+        if (isConfigurationCompletion(frame.action, payload)) held.push(value);
+        else passthrough.push(value);
       }
       if (passthrough.length > 0) socket.send(passthrough.join("\n"));
     });
