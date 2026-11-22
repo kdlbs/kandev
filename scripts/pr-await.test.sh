@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT_DIR/scripts/pr-await"
+export PR_AWAIT_TEST_REAL_SLEEP="$(command -v sleep)"
 
 pass() { printf 'ok - %s\n' "$1"; }
 fail() {
@@ -40,6 +41,11 @@ cat "$FAKE_DIR/seq/$n.json"
 FAKE
   cat >"$dir/gh" <<'FAKEGH'
 #!/usr/bin/env bash
+if [[ "$1" == event ]]; then
+  printf '%s\n' "$*" >> "$FAKE_DIR/listens"
+  echo '{"event":"wake"}'
+  exit "$(cat "$FAKE_DIR/event-status")"
+fi
 cat "$FAKE_DIR/gh.json" 2>/dev/null || printf '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"aaaaaaaaaaaa"}'
 FAKEGH
   cat >"$dir/jq-ok" <<'JQOK'
@@ -120,6 +126,23 @@ assert_json_envelope() {
     and (.summary == null or (.summary | type) == "object")
   ' <<<"$json" >/dev/null || fail "$name" "$json"
 }
+
+for event_status in 0 8 1; do
+  d="$(make_tmp_dir)"; setup_fake "$d"
+  echo "$event_status" > "$d/event-status"
+  for index in 1 2; do
+    snapshot "$d" "$index" 0 0 1 true aaaaaaaaaaaa '{"pr":{"url":"https://github.com/test/repo/pull/12"}}'
+  done
+  snapshot "$d" 3 1 0 0
+  out="$(run_await "$d" 12 --quiet --format json)"
+  jq -e '.polls == 4 and .exit_code == 0' <<<"$out" >/dev/null || fail "event wait must recheck evidence"
+  listens=2; sleeps=1
+  if [[ "$event_status" == 0 ]]; then sleeps=3; fi
+  if [[ "$event_status" == 1 ]]; then listens=1; sleeps=3; fi
+  [[ "$(wc -l < "$d/listens")" -eq "$listens" && "$(wc -l < "$d/sleeps")" -eq "$sleeps" ]] || fail "event fallback cadence"
+  grep -q 'event listen --resource https://github.com/test/repo/pull/12 .*--timeout 60s' "$d/listens" || fail "bounded PR subscription"
+  pass "listener exit $event_status preserves the terminal confirmation interval"
+done
 
 # --- final head observation rejects races after the embedded read ----------
 for mode in first-failure all-terminal; do
@@ -280,7 +303,7 @@ snapshot "$d" 1 20 0 0
 cat >"$d/slow-sleep" <<'SLOWSLEEP'
 #!/usr/bin/env bash
 printf 'slept %s\n' "$1" >> "$FAKE_DIR/sleeps"
-/usr/bin/sleep "$1"
+"$PR_AWAIT_TEST_REAL_SLEEP" "$1"
 SLOWSLEEP
 chmod +x "$d/slow-sleep"
 out="$(PR_AWAIT_DEADLINE_SEC=5 PR_AWAIT_SLEEP_OVERRIDE="$d/slow-sleep" \
@@ -300,7 +323,7 @@ d="$(make_tmp_dir)"; setup_fake "$d"
 snapshot "$d" 1 20 1 0
 cat >"$d/slow-sleep" <<'SLOWSLEEP'
 #!/usr/bin/env bash
-/usr/bin/sleep "$1"
+"$PR_AWAIT_TEST_REAL_SLEEP" "$1"
 SLOWSLEEP
 chmod +x "$d/slow-sleep"
 out="$(PR_AWAIT_DEADLINE_SEC=5 PR_AWAIT_SLEEP_OVERRIDE="$d/slow-sleep" \
@@ -1054,14 +1077,14 @@ FAKE_DIR="$d" PR_AWAIT_PR_STATE="$d/pr-state" PR_AWAIT_GH="$d/gh" \
 await_pid=$!
 for _ in 1 2 3 4 5; do
   [[ -s "$d/childpid" ]] && break
-  /bin/sleep 1
+  sleep 1
 done
 [[ -s "$d/childpid" ]] || { kill -KILL "$await_pid" 2>/dev/null || true; fail "the fake did not start a bounded child read"; }
 child="$(<"$d/childpid")"
 kill -TERM "$await_pid"
 for _ in 1 2 3 4 5; do
   kill -0 "$await_pid" 2>/dev/null || break
-  /bin/sleep 1
+  sleep 1
 done
 if kill -0 "$await_pid" 2>/dev/null; then
   kill -KILL "$await_pid" 2>/dev/null || true
