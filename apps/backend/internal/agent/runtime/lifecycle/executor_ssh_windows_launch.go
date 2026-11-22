@@ -58,7 +58,7 @@ for ($attempt = 0; $attempt -lt 100; $attempt++) {
 }
 if ($agentPid -eq 0) {
   if ($null -ne (Get-Process -Id $wrapperPid -ErrorAction SilentlyContinue)) {
-    try { & taskkill.exe /PID $wrapperPid /T /F *>$null } catch {}
+    Invoke-KandevNative { & taskkill.exe /PID $wrapperPid /T /F *>$null }
   }
   [Console]::Error.WriteLine("agentctl.exe did not start under wrapper pid $wrapperPid")
   $tail = Get-Content -LiteralPath $logPath -Tail 25 -ErrorAction SilentlyContinue

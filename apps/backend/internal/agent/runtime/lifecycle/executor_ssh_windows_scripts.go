@@ -52,9 +52,9 @@ $repositoryBranch = {{repository.branch}}
 [System.IO.Directory]::CreateDirectory($workspace) | Out-Null
 
 if (-not [string]::IsNullOrWhiteSpace($repositoryUrl)) {
-  & git -C $workspace rev-parse --git-dir *>$null
+  Invoke-KandevNative { & git -C $workspace rev-parse --git-dir *>$null }
   if ($LASTEXITCODE -eq 0) {
-    $configuredUrl = (& git -C $workspace config --get remote.origin.url 2>$null | Out-String).Trim()
+    $configuredUrl = (Invoke-KandevNative { & git -C $workspace config --get remote.origin.url 2>$null } | Out-String).Trim()
     if ([string]::IsNullOrWhiteSpace($configuredUrl)) {
       & git -C $workspace remote add origin $repositoryUrl
       if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -84,12 +84,12 @@ if (-not [string]::IsNullOrWhiteSpace($repositoryUrl)) {
     [Console]::Error.WriteLine('kandev: target repository has no base branch')
     exit 1
   }
-  & git -C $workspace fetch --no-tags origin ("+refs/heads/" + $repositoryBranch + ":refs/remotes/origin/" + $repositoryBranch) *>$null
+  Invoke-KandevNative { & git -C $workspace fetch --no-tags origin ("+refs/heads/" + $repositoryBranch + ":refs/remotes/origin/" + $repositoryBranch) *>$null }
   if ($LASTEXITCODE -ne 0) {
     [Console]::Error.WriteLine('kandev: target base branch is unavailable')
     exit 1
   }
-  & git -C $workspace rev-parse --verify HEAD *>$null
+  Invoke-KandevNative { & git -C $workspace rev-parse --verify HEAD *>$null }
   if ($LASTEXITCODE -ne 0) {
     & git -C $workspace checkout -b $repositoryBranch ("origin/" + $repositoryBranch)
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -112,19 +112,19 @@ try {
       ($__kWorktreeBranch -ne $__kRepositoryBranch)) {
     Push-Location -LiteralPath $__kWorkspace
     try {
-      $__kShallow = (& git rev-parse --is-shallow-repository 2>$null | Out-String).Trim()
+      $__kShallow = (Invoke-KandevNative { & git rev-parse --is-shallow-repository 2>$null } | Out-String).Trim()
       if ($__kShallow -eq 'true') {
-        & git fetch --unshallow --no-tags origin *>$null
+        Invoke-KandevNative { & git fetch --unshallow --no-tags origin *>$null }
       }
-      & git rev-parse --verify $__kWorktreeBranch *>$null
+      Invoke-KandevNative { & git rev-parse --verify $__kWorktreeBranch *>$null }
       if ($LASTEXITCODE -eq 0) {
-        & git checkout $__kWorktreeBranch *>$null
+        Invoke-KandevNative { & git checkout $__kWorktreeBranch *>$null }
       } else {
-        & git fetch --no-tags origin ("+refs/heads/" + $__kWorktreeBranch + ":refs/remotes/origin/" + $__kWorktreeBranch) *>$null
+        Invoke-KandevNative { & git fetch --no-tags origin ("+refs/heads/" + $__kWorktreeBranch + ":refs/remotes/origin/" + $__kWorktreeBranch) *>$null }
         if ($LASTEXITCODE -eq 0) {
-          & git checkout -b $__kWorktreeBranch ("origin/" + $__kWorktreeBranch) *>$null
+          Invoke-KandevNative { & git checkout -b $__kWorktreeBranch ("origin/" + $__kWorktreeBranch) *>$null }
         } else {
-          & git checkout -b $__kWorktreeBranch *>$null
+          Invoke-KandevNative { & git checkout -b $__kWorktreeBranch *>$null }
         }
       }
     } finally {
@@ -286,8 +286,8 @@ func windowsGitHubAuthProvider(env map[string]string) scriptengine.PlaceholderPr
 			}
 		}
 		ghSnippet := `if (Get-Command gh -ErrorAction SilentlyContinue) {
-  try { & gh config set git_protocol https --host github.com *>$null } catch {}
-  try { & gh auth setup-git *>$null } catch {}
+  Invoke-KandevNative { & gh config set git_protocol https --host github.com *>$null }
+  Invoke-KandevNative { & gh auth setup-git *>$null }
 }`
 		if token == "" {
 			return map[string]string{"github.auth_setup": ghSnippet}
@@ -304,7 +304,7 @@ func sshWindowsContributionDestinationScript(workspacePath string, destination *
 	return fmt.Sprintf(`$__kDestDir = %[1]s
 $__kDestRemote = %[2]s
 $__kDestUrl = %[3]s
-$__kConfigured = (& git -C $__kDestDir config --get ("remote." + $__kDestRemote + ".url") 2>$null | Out-String).Trim()
+$__kConfigured = (Invoke-KandevNative { & git -C $__kDestDir config --get ("remote." + $__kDestRemote + ".url") 2>$null } | Out-String).Trim()
 if ($__kConfigured) {
   if ($__kConfigured -ne $__kDestUrl) { throw 'kandev: contribution destination identity conflict' }
 } else {
@@ -333,32 +333,32 @@ $__kContribBranch = %[6]s
 $__kContribRef = %[7]s
 $__kContribRefspec = %[8]s
 $__kExpectedHead = (%[9]s).ToLowerInvariant()
-& git -C $__kWs rev-parse --git-dir *>$null
+Invoke-KandevNative { & git -C $__kWs rev-parse --git-dir *>$null }
 if ($LASTEXITCODE -eq 0) {
-  $__kOrigin = (& git -C $__kWs config --get remote.origin.url 2>$null | Out-String).Trim()
+  $__kOrigin = (Invoke-KandevNative { & git -C $__kWs config --get remote.origin.url 2>$null } | Out-String).Trim()
   if (-not $__kOrigin) { & git -C $__kWs remote add origin $__kTargetUrl }
   elseif ($__kOrigin -ne $__kTargetUrl) { throw 'kandev: target origin identity conflict' }
 } else {
   & git init -q $__kWs
   & git -C $__kWs remote add origin $__kTargetUrl
 }
-& git -C $__kWs fetch --no-tags origin ("+refs/heads/" + $__kBaseBranch + ":refs/remotes/origin/" + $__kBaseBranch) *>$null
+Invoke-KandevNative { & git -C $__kWs fetch --no-tags origin ("+refs/heads/" + $__kBaseBranch + ":refs/remotes/origin/" + $__kBaseBranch) *>$null }
 if ($LASTEXITCODE -ne 0) { throw 'kandev: target base branch is unavailable' }
-$__kRemoteUrl = (& git -C $__kWs config --get ("remote." + $__kContribRemote + ".url") 2>$null | Out-String).Trim()
+$__kRemoteUrl = (Invoke-KandevNative { & git -C $__kWs config --get ("remote." + $__kContribRemote + ".url") 2>$null } | Out-String).Trim()
 if (-not $__kRemoteUrl) { & git -C $__kWs remote add $__kContribRemote $__kContribUrl }
 elseif ($__kRemoteUrl -ne $__kContribUrl) { throw 'kandev: contribution remote identity conflict' }
-& git -C $__kWs fetch --no-tags $__kContribRemote $__kContribRefspec *>$null
+Invoke-KandevNative { & git -C $__kWs fetch --no-tags $__kContribRemote $__kContribRefspec *>$null }
 if ($LASTEXITCODE -ne 0) { throw 'kandev: contribution source branch is unavailable' }
-$__kActualHead = (& git -C $__kWs rev-parse --verify $__kContribRef 2>$null | Out-String).Trim().ToLowerInvariant()
+$__kActualHead = (Invoke-KandevNative { & git -C $__kWs rev-parse --verify $__kContribRef 2>$null } | Out-String).Trim().ToLowerInvariant()
 if (-not $__kActualHead -or ($__kActualHead -ne $__kExpectedHead)) { throw 'kandev: contribution source head changed' }
 $__kCheckout = $__kContribBranch
 & git -C $__kWs show-ref --verify --quiet ("refs/heads/" + $__kCheckout)
 if ($LASTEXITCODE -eq 0) {
-  & git -C $__kWs merge-base --is-ancestor $__kExpectedHead ("refs/heads/" + $__kCheckout) *>$null
+  Invoke-KandevNative { & git -C $__kWs merge-base --is-ancestor $__kExpectedHead ("refs/heads/" + $__kCheckout) *>$null }
   if ($LASTEXITCODE -ne 0) { $__kCheckout = $__kContribBranch + "-kandev-%[10]s" }
 }
-& git -C $__kWs checkout -B $__kCheckout $__kContribRef *>$null
-& git -C $__kWs branch --set-upstream-to=($__kContribRemote + "/" + $__kContribBranch) $__kCheckout *>$null`,
+Invoke-KandevNative { & git -C $__kWs checkout -B $__kCheckout $__kContribRef *>$null }
+Invoke-KandevNative { & git -C $__kWs branch --set-upstream-to=($__kContribRemote + "/" + $__kContribBranch) $__kCheckout *>$null }`,
 		powerShellQuote(cleanWindowsRemotePath(taskDir)),
 		powerShellQuote(targetURL),
 		powerShellQuote(remoteName),

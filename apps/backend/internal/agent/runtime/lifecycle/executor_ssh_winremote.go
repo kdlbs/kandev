@@ -544,7 +544,7 @@ func remoteWindowsAgentctlStopScript(sessionDir string, pid int) string {
 	script := fmt.Sprintf(`$targetPid = %[1]d
 $proc = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
 if ($null -ne $proc -and -not $proc.HasExited) {
-  try { & taskkill.exe /PID $targetPid /T /F *>$null } catch {}
+  Invoke-KandevNative { & taskkill.exe /PID $targetPid /T /F *>$null }
   try { Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue } catch {}
   for ($attempt = 0; $attempt -lt %[2]d; $attempt++) {
     $check = Get-Process -Id $targetPid -ErrorAction SilentlyContinue

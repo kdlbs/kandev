@@ -76,7 +76,7 @@ func TestSSHWindowsLaunchStopsWrapperWhenChildMissing(t *testing.T) {
 		t.Fatal("launch script has no missing-child branch")
 	}
 	for _, want := range []string{
-		"try { & taskkill.exe /PID $wrapperPid /T /F *>$null } catch {}",
+		"Invoke-KandevNative { & taskkill.exe /PID $wrapperPid /T /F *>$null }",
 		"Get-Content -LiteralPath $logPath -Tail 25",
 		"agentctl.exe did not start",
 		"exit 1",

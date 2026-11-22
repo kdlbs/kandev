@@ -1,7 +1,7 @@
 ---
 id: "05-windows-native-script-tests"
 title: "Execute generated PowerShell on the Windows CI runner"
-status: pending
+status: done
 wave: 5
 depends_on:
   - "04-cim-controller-launch"
@@ -110,4 +110,46 @@ On Windows, run the same command under `make test-windows`. Record the PR's
 
 ## Results
 
-Pending.
+Completed on 2026-11-23.
+
+Fix found by these tests (F13): under `$ErrorActionPreference = 'Stop'`,
+Windows PowerShell 5.1 throws on every redirected native stderr line. The fork's
+default preparation therefore failed in a fresh workspace, and so did the
+branch postlude, contribution setup, and `gh` setup. The loader now defines
+`Invoke-KandevNative`, which wraps 23 redirected native calls. A cross-platform
+source guard, `TestSSHWindowsScriptsWrapRedirectedNativeCommands`, keeps the
+rule.
+
+Deviations from the plan:
+
+- The execution tests live in an untagged file that skips off Windows. Only the
+  raw command-line setter carries the Windows tag, so lint and type checks run
+  on every platform.
+- The tests run production functions over a fake SSH server whose exec handler
+  uses local `cmd.exe /c`. They do not call scripts directly, so the Go call
+  paths are covered too.
+- They could not run here. This machine is macOS, and the test host's Go
+  toolchain is older than the module requires. Installing a toolchain there was
+  out of scope. The equivalent scenarios ran on the test host through a
+  throwaway local harness that drove the production functions over real SSH.
+  That harness was not committed.
+
+| Command | Result |
+| --- | --- |
+| `go vet -tags fts5 ./internal/agent/runtime/lifecycle/` | Clean |
+| `go test -run 'TestSSHWindowsExec\|TestSSHWindowsScriptsWrap'` on macOS | The six execution tests skip. The source guard passes |
+| Source-guard mutation: one Git probe unwrapped | Guard failed, naming the file and line. The source was then restored |
+| `go test -race -run '^TestSSHWindows'` on `lifecycle` and `ssh` | Passed |
+| `backend-tests-workflow-contract_test.py`, `lint-action-pinning_test.py`, `check-make-shells`, `git diff --check` | Passed. `zizmor` is not installed locally |
+| `lint-go-changed` | 0 issues |
+| Real-host harness on the test host, PowerShell 5.1 and 7 | Fresh, reuse, and conflicting-origin preparation behaved as specified. Checkout verification, helper upload, WMI launch and readiness, running-helper replacement, identity, orphan inventory, log read, and stop all passed |
+| Fork-style preparation without the wrapper on the test host, PowerShell 5.1 | Failed with `fatal: not a git repository`, which proves F13 |
+| Windows `native` CI suite | Pending until PR B runs CI. Record the job URL here |
+
+Lifecycle evidence:
+
+| Scenario | Criterion | Test | Result |
+| --- | --- | --- | --- |
+| Stale owner and PID reuse | `001.13` | `TestSSHWindowsExecControllerLifecycle` (another task directory does not match) | Pending CI. Passed in the real-host harness |
+| Orphan ownership | `001.14` | `TestSSHWindowsExecControllerLifecycle` (inventory pidfile claim) | Pending CI. Passed in the real-host harness |
+| Concurrent work | `001.6` | `TestSSHWindowsExecReplacesRunningHelper` | Pending CI. Passed in the real-host harness |

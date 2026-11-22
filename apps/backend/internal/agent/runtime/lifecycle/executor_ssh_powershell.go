@@ -13,6 +13,10 @@ import (
 )
 
 // powerShellLoaderScript is the only script placed on a Windows command line.
+// It defines Invoke-KandevNative for scripts that redirect a native command's
+// stderr: under $ErrorActionPreference = 'Stop', Windows PowerShell 5.1 turns
+// each redirected stderr line into a terminating error, even when the command
+// succeeds.
 // Stock Win32 OpenSSH passes exec requests through cmd.exe, which accepts at
 // most 8,191 characters, so every script body, environment value, and input
 // travels on stdin in one JSON envelope. The loader preserves -Command exit
@@ -44,6 +48,12 @@ if ($__kEnvelope.login) {
     try { . $PROFILE *>$null } catch {}
   }
   $ErrorActionPreference = 'Stop'
+}
+function Invoke-KandevNative {
+  param([Parameter(Mandatory = $true)][scriptblock]$Command)
+  $__kPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { & $Command } finally { $ErrorActionPreference = $__kPreference }
 }
 $KandevInput = [string]$__kEnvelope.input
 $__kScript = [ScriptBlock]::Create([string]$__kEnvelope.script + "` + "`" + `n` + "`" + `$__kLastOk = ` + "`" + `$?")

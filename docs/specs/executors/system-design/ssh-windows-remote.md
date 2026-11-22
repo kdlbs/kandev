@@ -140,6 +140,16 @@ to `-Command`:
   `$LASTEXITCODE`, or 1. A dot-sourced block hides that status, so the loader
   appends `$__kLastOk = $?` to the script text.
 
+The loader defines `Invoke-KandevNative { ... }`, which runs one native command
+under a local `$ErrorActionPreference = 'Continue'`. Under `Stop`, Windows
+PowerShell 5.1 turns each line of a native command's redirected stderr into a
+terminating error, even when the command succeeds. Git writes probe failures and
+fetch progress to stderr, so the default preparation failed on its first probe
+in a fresh workspace. PowerShell 7 does not have this behavior. Every Windows
+script line that redirects native stderr (`*>$null`, `2>$null`, or `2>&1`) runs
+inside `Invoke-KandevNative`. `TestSSHWindowsScriptsWrapRedirectedNativeCommands`
+scans the script sources and enforces this rule on every platform.
+
 `newPowerShellCommand` validates environment keys with `posixSSHEnvIdentifier`
 and JSON-encodes the envelope. `runPowerShell`, `runPowerShellEnvelope`, and
 `runPowerShellEnvelopeBounded` send the envelope through `runSSHCommandStdin` or
@@ -336,12 +346,27 @@ Unit tests use the fake SSH server in `ssh_fake_server_test.go`. It decodes the
 loader and envelope, then returns canned outputs. These tests prove the command
 order, parameters, and parsing. They do not prove PowerShell semantics.
 
-The Windows `native` suite in `backend-tests.yml` runs `//go:build windows`
-tests. Those tests execute the generated scripts through the local
-`powershell.exe` and, when present, `pwsh.exe`. They cover environment import,
-exit-code propagation, default preparation against a local Git fixture, stop
-with process-tree termination, identity matching, orphan inventory, and log
-reads. Real-host evidence for `AC-EXECUTORS-SSH-WINDOWS-001.5` and `.11` comes
+The Windows `native` suite in `backend-tests.yml` runs `^TestSSHWindows`, and
+`make test-windows` runs the same filter. The `TestSSHWindowsExec*` tests in
+`executor_ssh_windows_exec_test.go` skip on other platforms. On Windows, a fake
+SSH server runs each exec request through `cmd.exe /c` with stdin, as stock
+OpenSSH does, so the production Go code drives real `powershell.exe` and, when
+installed, `pwsh.exe`.
+
+A copy of the test binary serves as a stand-in `agentctl.exe`. An `init` hook
+switches it to controller behavior when its marker variable is set. Only the
+raw command-line setter carries a Windows build tag. The tests cover:
+
+- environment and input import
+- exit codes
+- default preparation against a local Git fixture
+- a 64 KiB custom script
+- a WMI launch that outlives its request
+- identity, orphan inventory, and log reads
+- tree-terminating stop
+- helper replacement against a running image on NTFS
+
+Real-host evidence for `AC-EXECUTORS-SSH-WINDOWS-001.5`, `.8`, and `.11` comes
 from a stock Windows OpenSSH Server.
 
 ## Real-host evidence
@@ -365,6 +390,9 @@ PowerShell 7.
 | `remoteWindowsAgentctlStopScript` for that PID | Exit 0. No `agentctl.exe` or wrapper process remains, and the session directory is removed |
 | Launch script with a missing `agentctl.exe` | Exit 1. The error and the log tail report that `cmd.exe` does not recognize the path |
 | Production loader with a 64 KiB script, environment values, and input | Ran through `cmd.exe`. Values round-tripped, and exit codes matched `-Command` |
+| `& git ... *>$null` under `Stop` | Windows PowerShell 5.1 threw a terminating error; PowerShell 7 did not |
+| Fork default prepare with `Invoke-KandevNative` removed, fresh workspace, PowerShell 5.1 | Failed with `fatal: not a git repository` |
+| Production executor functions over real SSH: default prepare (fresh, reuse, conflicting origin) under `powershell` and `pwsh`, checkout verification, helper upload, WMI launch, running-helper replacement, identity, orphan inventory, log read, and stop | All behaved as specified. Replacement kept the running image as `agentctl.exe.old-*` |
 
 Messages from `cmd.exe` itself, such as the length error, use the host's OEM
 code page. Kandev reports them as received.
