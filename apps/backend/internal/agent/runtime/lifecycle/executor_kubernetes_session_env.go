@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"path"
+	"strings"
 
 	"github.com/kandev/kandev/internal/githubauth"
 	corev1 "k8s.io/api/core/v1"
@@ -39,13 +40,20 @@ func kubernetesSessionEnvironment(req *ExecutorCreateRequest) map[string]string 
 	}
 	env["HOME"] = kubernetesSessionHome(req)
 	if getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
-		_, hasUppercaseNPMCache := req.Env["NPM_CONFIG_CACHE"]
-		_, hasLowercaseNPMCache := req.Env["npm_config_cache"]
-		if !hasUppercaseNPMCache && !hasLowercaseNPMCache {
-			env["NPM_CONFIG_CACHE"] = kubernetesSessionNPMCachePath
-			env["npm_config_cache"] = kubernetesSessionNPMCachePath
+		npmCachePath, hasProfileNPMCache := kubernetesSessionNPMCacheOverride(req.Env)
+		if !hasProfileNPMCache {
+			npmCachePath = kubernetesSessionNPMCachePath
 		}
-		if _, hasXDGCache := req.Env["XDG_CACHE_HOME"]; !hasXDGCache {
+		for key, value := range req.Env {
+			if value == "" && strings.EqualFold(key, "npm_config_cache") {
+				env[key] = npmCachePath
+			}
+		}
+		if !hasProfileNPMCache {
+			env["NPM_CONFIG_CACHE"] = npmCachePath
+			env["npm_config_cache"] = npmCachePath
+		}
+		if env["XDG_CACHE_HOME"] == "" {
 			env["XDG_CACHE_HOME"] = kubernetesSessionXDGCachePath
 		}
 	}
@@ -59,6 +67,15 @@ func kubernetesSessionEnvironment(req *ExecutorCreateRequest) map[string]string 
 		env[githubauth.CredentialHelperPathEnv] = kubernetesAgentctlPath
 	}
 	return env
+}
+
+func kubernetesSessionNPMCacheOverride(env map[string]string) (string, bool) {
+	for key, value := range env {
+		if strings.EqualFold(key, "npm_config_cache") && value != "" {
+			return value, true
+		}
+	}
+	return "", false
 }
 
 func (r *KubernetesExecutor) writeKubernetesSessionAuth(ctx context.Context, runtime *kubernetesRuntimeClient, req *ExecutorCreateRequest, pod *corev1.Pod, container string) error {

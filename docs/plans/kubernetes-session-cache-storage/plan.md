@@ -60,12 +60,12 @@ trust boundary.
 
 In `kubernetesSessionEnvironment`, next to the existing `HOME` assignment, set
 `NPM_CONFIG_CACHE` and `npm_config_cache` to `/opt/kandev/cache/npm`, and
-`XDG_CACHE_HOME` to `/opt/kandev/cache/xdg`. Skip a default if `req.Env`
-(profile env) already sets it; for npm, either spelling suppresses both. That
-one function already feeds agentctl configuration, the session auth file and
-bootstrap `auth.env`, so no other call site changes. Pod template `env` is not
-parsed: a template-level cache path is overridden by another disk-backed path,
-which is harmless.
+`XDG_CACHE_HOME` to `/opt/kandev/cache/xdg`. Skip a default for a non-empty
+profile value; match npm cache keys case-insensitively, and use the default for
+empty values. That one function already feeds agentctl configuration, the
+session auth file and bootstrap `auth.env`, so no other call site changes. Pod
+template `env` is not parsed: a template-level cache path is overridden by
+another disk-backed path, which is harmless.
 
 No pod spec, volume, PodTemplate validation, schema, UI or runtime-flag change.
 

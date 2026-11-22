@@ -58,12 +58,46 @@ func TestKubernetesSessionEnvironmentKeepsProfileCacheLocations(t *testing.T) {
 			absent: []string{"NPM_CONFIG_CACHE"},
 		},
 		{
+			name:       "mixed-case npm cache",
+			profileEnv: map[string]string{"Npm_Config_Cache": "/profile/npm-mixed"},
+			want:       map[string]string{"Npm_Config_Cache": "/profile/npm-mixed"},
+			absent:     []string{"NPM_CONFIG_CACHE", "npm_config_cache"},
+		},
+		{
+			name:       "empty npm cache",
+			profileEnv: map[string]string{"NPM_CONFIG_CACHE": ""},
+			want: map[string]string{
+				"NPM_CONFIG_CACHE": "/opt/kandev/cache/npm",
+				"npm_config_cache": "/opt/kandev/cache/npm",
+				"XDG_CACHE_HOME":   "/opt/kandev/cache/xdg",
+			},
+		},
+		{
+			name:       "empty mixed-case npm cache",
+			profileEnv: map[string]string{"Npm_Config_Cache": ""},
+			want: map[string]string{
+				"NPM_CONFIG_CACHE": "/opt/kandev/cache/npm",
+				"Npm_Config_Cache": "/opt/kandev/cache/npm",
+				"npm_config_cache": "/opt/kandev/cache/npm",
+				"XDG_CACHE_HOME":   "/opt/kandev/cache/xdg",
+			},
+		},
+		{
 			name:       "XDG cache home",
 			profileEnv: map[string]string{"XDG_CACHE_HOME": "/profile/xdg"},
 			want: map[string]string{
 				"NPM_CONFIG_CACHE": "/opt/kandev/cache/npm",
 				"npm_config_cache": "/opt/kandev/cache/npm",
 				"XDG_CACHE_HOME":   "/profile/xdg",
+			},
+		},
+		{
+			name:       "empty XDG cache home",
+			profileEnv: map[string]string{"XDG_CACHE_HOME": ""},
+			want: map[string]string{
+				"NPM_CONFIG_CACHE": "/opt/kandev/cache/npm",
+				"npm_config_cache": "/opt/kandev/cache/npm",
+				"XDG_CACHE_HOME":   "/opt/kandev/cache/xdg",
 			},
 		},
 	}

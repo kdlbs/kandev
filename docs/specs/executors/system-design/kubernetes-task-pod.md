@@ -138,11 +138,13 @@ disk-backed `kandev-runtime` volume, which every task pod already mounts at
 | `NPM_CONFIG_CACHE`, `npm_config_cache` | `/opt/kandev/cache/npm` |
 | `XDG_CACHE_HOME` | `/opt/kandev/cache/xdg` |
 
-A default is skipped when the executor profile environment (`req.Env`) already
-sets that variable; for npm, either spelling counts. Pod template `env` is not
-inspected: the session environment overrides it, so a template-level cache path
-is replaced by another disk-backed path, and operators who need a specific path
-set it in the profile environment. The defaults reach preparation
+A default is skipped when the executor profile environment (`req.Env`) provides
+a non-empty value for that variable. npm cache keys are matched
+case-insensitively, so any spelling counts; empty values receive the disk
+default. Pod template `env` is not inspected: the session environment overrides
+it, so a template-level cache path is replaced by another disk-backed path,
+and operators who need a specific path set it in the profile environment. The
+defaults reach preparation
 through the bootstrap auth file and agent subprocesses through agentctl
 configuration, because both consume the same session environment.
 

@@ -31,9 +31,10 @@ disk-backed `kandev-runtime` volume unless the operator has already set them.
     to `/opt/kandev/cache/xdg`. HOME stays the `/run/kandev/...` session home.
     Fails on the base because the keys are absent.
   - `TestKubernetesSessionEnvironmentKeepsProfileCacheLocations`, as a small
-    table: profile env with uppercase npm, lowercase npm, or `XDG_CACHE_HOME`.
-    The profile value is kept, the other npm spelling is not added, and the
-    unrelated variable is still defaulted.
+    table: profile env with uppercase, lowercase, or mixed-case npm keys;
+    `XDG_CACHE_HOME`; and empty npm or XDG values. Non-empty profile values are
+    kept, empty values receive the disk defaults, the other npm spelling is not
+    added, and the unrelated variable is still defaulted.
 - In `executor_kubernetes_session_env.go`, add two path constants and about ten
   lines in `kubernetesSessionEnvironment` after the `HOME` assignment. No new
   call sites; that function already feeds agentctl configuration, the session
@@ -78,11 +79,13 @@ Run the first command before the fix and keep the expected failure output.
   defaults before the production change.
 - The focused lifecycle selector passed after the change:
   `go test -trimpath ./internal/agent/runtime/lifecycle -run 'KubernetesSession|KubernetesTaskPod' -count=1`.
+- It passed again after adding mixed-case npm and empty npm/XDG cases.
 - Lifecycle and Kubernetes packages passed:
   `go test -trimpath ./internal/agent/runtime/lifecycle ./internal/agent/kubernetes -count=1`.
 - Kubernetes lifecycle race tests passed:
   `go test -trimpath -race ./internal/agent/runtime/lifecycle -run 'Kubernetes' -count=1`.
-- Changed-Go-file lint reported `0 issues`.
+- The package tests and race tests passed again after the additional cases.
+- Changed-Go-file lint reported `0 issues` again.
 - The Kubernetes public guide now documents cache defaults and profile overrides.
   `node --test scripts/validate-public-docs.test.mjs` and
   `node scripts/validate-public-docs.mjs` passed.
