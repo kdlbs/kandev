@@ -73,10 +73,11 @@ impl NativeNotificationState {
 /// Event identities this bridge will display. Session-scoped events require
 /// a non-empty task_id (they're gated on task context); the update-available
 /// event has no task and must omit it.
-const SESSION_EVENT_PREFIXES: [&str; 3] = [
+const SESSION_EVENT_PREFIXES: [&str; 4] = [
     "session.failed:",
     "session.turn_finished:",
     "session.clarification_requested:",
+    "session.permission_requested:",
 ];
 const UPDATE_AVAILABLE_PREFIX: &str = "system.update_available:";
 const SETTINGS_TEST_PREFIX: &str = "desktop.test_notification:";
@@ -240,6 +241,7 @@ mod tests {
             "session.turn_finished:turn-1",
             "session.clarification_requested:request-1",
             "session.failed:session-1",
+            "session.permission_requested:request-1",
         ] {
             assert_eq!(validate_request(&request(event_id, "task-1")), Ok(()));
         }

@@ -159,9 +159,11 @@ test("opens the phone picker and delivers the opening prompt", async ({
     await picker.getByRole("option").last().tap();
     await expect(agentTrigger).not.toContainText("Select agent");
 
-    const prompt = "Review this feature from my phone";
+    const prompt = "Review this feature from my phone\n\nInclude phone behavior";
     await completeQuickChatOpening(testPage, dialog, apiClient, prompt, {
       submit: (button) => button.tap(),
+      expectExactPrompt: true,
+      verifyReload: true,
     });
     await expectNoHorizontalOverflow(testPage);
   } finally {

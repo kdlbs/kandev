@@ -54,7 +54,7 @@ func TestSetQueueAutoRunOnDispatchesPromptableHead(t *testing.T) {
 		promptDone:             make(chan struct{}),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
-	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateWaitingForInput)
 	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
 	_, err := svc.messageQueue.QueueMessage(ctx, "session-1", "task-1", "resume me", "", messagequeue.QueuedByUser, false, nil)
@@ -103,7 +103,7 @@ func TestExecuteQueuedMessageDrainsNextMessageAfterCompletion(t *testing.T) {
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
-	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	svc.messageQueue.SetAutoMergeEnabled(false)
 	require.NoError(t, svc.messageQueue.SetAutoRun(ctx, "session-1", true))
@@ -119,7 +119,7 @@ func TestExecuteQueuedMessageDrainsNextMessageAfterCompletion(t *testing.T) {
 	queued, ok, _, err := svc.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
 	require.NoError(t, err)
 	require.True(t, ok)
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, queued.ID, queued)
 
 	svc.executeQueuedMessageWithReservation("session-1", queued, reservation)
 

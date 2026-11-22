@@ -4,6 +4,7 @@ import { useCallback, useRef, useState, type ReactNode } from "react";
 import { IconGitMerge, IconGitPullRequestClosed, IconX } from "@tabler/icons-react";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { useAppStore } from "@/components/state-provider";
+import { useScopedTaskPRResult } from "@/hooks/domains/github/scoped-task-pr-context";
 import { useTaskArchiveConfirm } from "@/hooks/use-task-archive-confirm";
 import {
   markPRClosedBannerDismissed,
@@ -48,7 +49,7 @@ function ArchiveDismissBanner({
         data-testid={`${testIdPrefix}-banner`}
         className={cn(
           containerClass,
-          "min-w-0 max-md:order-first max-md:basis-full",
+          "min-w-[min(100%,20rem)] max-w-full basis-80 max-md:order-first max-md:basis-full",
           archive.target && !isFinePointer && "flex-wrap",
         )}
       >
@@ -101,7 +102,9 @@ function ArchiveDismissBanner({
 export function PRMergedBanner({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
-  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const scoped = useScopedTaskPRResult(taskId);
+  const globalPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const taskPRs = scoped?.prs ?? globalPRs;
   const [dismissed, setDismissed] = useState(() => wasPRMergedBannerDismissed(taskId));
 
   const handleDismiss = useCallback(() => {
@@ -140,7 +143,9 @@ export function PRMergedBanner({ taskId }: { taskId: string }) {
 export function PRClosedBanner({ taskId }: { taskId: string }) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
-  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const scoped = useScopedTaskPRResult(taskId);
+  const globalPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const taskPRs = scoped?.prs ?? globalPRs;
   const [dismissed, setDismissed] = useState(() => wasPRClosedBannerDismissed(taskId));
 
   const handleDismiss = useCallback(() => {

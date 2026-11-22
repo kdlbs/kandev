@@ -5,7 +5,8 @@ requirements:
   - REQ-TASKS-COMPLETION-001
   - REQ-TASKS-COMPLETION-002
   - REQ-TASKS-COMPLETION-003
-updated: 2026-09-10
+  - REQ-TASKS-COMPLETION-005
+updated: 2026-11-11
 ---
 
 # Task Completion System Design
@@ -22,6 +23,7 @@ their current owners and authorization checks.
 | `REQ-TASKS-COMPLETION-001` | Step contract, Migration, Entry and notification |
 | `REQ-TASKS-COMPLETION-002` | Explicit resume, Follow-up ownership, Cleanup and races, User interface |
 | `REQ-TASKS-COMPLETION-003` | Workspace admission, Workspace runtime continuity, Workspace failure feedback |
+| `REQ-TASKS-COMPLETION-005` | Completing-step predicate, Completion policy hook, Completion effects, Bulk move admission |
 
 ## Step contract
 
@@ -381,6 +383,137 @@ vertical scroll region. Preserve the mobile layout's dynamic viewport and
 safe-area navigation, keyboard focus, file-viewer back action, and saved desktop
 layout. Shared state and retry behavior remain identical across viewports.
 
+## Completing-step predicate
+
+`internal/workflow/models` owns both step facts:
+
+- `IsFinalStep(step, next)`: the step has no successor by position. Ties at the
+  maximum position follow `GetNextStepByPosition` (strictly greater position).
+- `CompletesTaskOnEnter(step, next)`: `IsFinalStep` and `CompleteTaskOnEnter`.
+  `IsTerminalStep` is renamed to this name; callers keep their successor lookup.
+
+They answer different questions. "May a human Done request target this step"
+and Office's "this task has nowhere further to advance" are final-step
+questions. "Does entering this step complete the task" is a completing-step
+question. Comments at each caller name which one it asks.
+
+SQL callers do not restate the rule. The same package exports
+`FinalStepSQL(alias)` and `CompletingStepSQL(alias)` predicate fragments over a
+`workflow_steps` alias. Both use `NOT EXISTS (... successor.position >
+alias.position)`, so tied maxima are final in Go and SQL alike. The task
+repository's completion policy query and Office's step-position read
+(`IsTaskWorkflowStepTerminal`, renamed `IsTaskOnFinalStep`) use these
+fragments. The explicit Done path stops selecting "the highest position, then
+highest id" and instead checks `FinalStepSQL` on the task's current step. A
+table-driven test runs each Go predicate and each SQL fragment over the same
+fixtures on SQLite and PostgreSQL. Office's `IsTaskInTerminalStep` reads task
+state only; it is renamed `IsTaskInTerminalState`.
+
+## Completion policy hook
+
+The task repository admits completions without knowing who contributes policy.
+A `completion` package under `internal/task/repository/` defines:
+
+```go
+type Admission struct {
+    TaskID   string
+    Actor    wfmodels.StepTransitionActor
+    Kind     AdmissionKind // Move, SetState, FinalStepDone, Fields
+    Expected Scope         // WorkspaceID, WorkflowID, StepID, TaskState
+}
+
+type Policy interface {
+    AdmitCompletion(ctx context.Context, q Querier, current, candidate *models.Task, a Admission) error
+}
+```
+
+`Querier` is the read subset that both `*sql.Tx` and the read pool satisfy, so
+bulk preflight can call the same policy outside the write transaction.
+`Repository.SetCompletionPolicies(...Policy)` registers policies at startup.
+
+The admission travels as an explicit typed parameter, never in
+`context.Context`. Every admission-aware repository method takes one required
+`*completion.Admission`; non-human callers pass nil. Full-row, field, state,
+same-step, WIP cross-step, workflow-change, and exact cross-step writes expose
+it. The service builds it from the authenticated request in
+`MoveTaskWithOptions`, `UpdateTaskAsHuman`, `UpdateTaskStateAsHuman`, and the
+Office Done adapter, then passes it to the authorized repository write.
+Post-commit work, step-entry dispatch, and event publication receive no
+admission
+(`AC-TASKS-COMPLETION-005.3`).
+
+Inside the transaction, after `lockTaskHierarchy`, the generic scope fence
+compares the locked row with `Expected`. WIP admission then decides whether
+the move completes or queues. Only an admitted completion reaches the generic
+step check and policies, which run against `(current, candidate)`. A queued
+move keeps its state and skips completion policy. `lockTaskHierarchy` only
+locks, and the human WIP-limit re-read keys on a non-nil admission. A policy refusal is a typed
+`completion.RefusedError{Code, Subjects}`; the service maps code
+`approvals_pending` to the existing `ApprovalsPendingMoveError` and HTTP 409
+`task_approvals_pending` contract.
+
+Office implements `Policy` in `internal/office/completionpolicy`. It uses
+`current.IsFromOffice`, reads approvers and active decisions, and limits
+`FinalStepDone` to Office tasks on their final step. `backendapp` registers
+the policy and checks it at startup. Completion admission has no
+Office-specific context type or string kinds.
+
+The service-level fallback (`guardOfficeHumanCompletion`,
+`OfficeApprovalGuard.PendingApproversForCompletion`,
+`atomicOfficeCompletionConfigured`, and the legacy branch of
+`persistHumanTaskState`) is removed. Name resolution for a refusal remains a
+service dependency, `SetApproverNameResolver`. Tests that relied on the
+fallback use a real SQLite repository with the Office policy registered.
+Policy queries through the task transaction use the workflow repository's SQL
+binding. One startup helper registers the policy; approver-name resolution
+uses a named reader interface.
+
+## Completion effects
+
+Completion effects key on the committed state transition, never on step name,
+position, or assignee (`AC-TASKS-COMPLETION-001.9`). For Office dependencies,
+the scheduler wakes dependents only when every blocker is `COMPLETED`, as
+defined by `REQ-OFFICE-BLOCKER-POLICY-001`. `FAILED` and `CANCELLED` blockers
+remain unsatisfied; the scheduler's blocker-failure subscriber sends the
+durable `task_blocker_failed` alert defined by
+`REQ-OFFICE-BLOCKER-POLICY-002`. The orchestrator
+`processParentChildrenCompletedForTaskState` wakes the parent. Reconciliation
+must not duplicate that wake; its test covers run and receipt visibility.
+Routine-run sync moves from the `task.moved` name check to a
+`task.state_changed` subscriber. It maps `COMPLETED` to `done`, `CANCELLED`
+to `cancelled`, and `FAILED` to `failed`, and calls `SyncRunStatus`, which is
+already idempotent through `UpdateRunStatusIfTaskCreated`. `finalizeDone` and
+its blocker and parent calls are deleted; the dedup keys of the state-keyed
+owners satisfy `AC-TASKS-COMPLETION-001.10`. `handleTaskMoved` keeps only its
+activity-log write, and that write keeps its assignee condition.
+
+## Bulk move admission
+
+`BulkMoveSelectedTasks` and `BulkMoveTasks` both run a batch preflight after
+acquiring the bulk step locks and before the first write. For each task not
+already in the target, the preflight runs `validateTaskMove` and, for a
+human-attributed bulk move into a completing step, the completion gate check
+and every registered completion policy over the read pool. It collects all
+refusals instead of stopping at the first one. Any refusal returns
+`BulkMoveRefusedError{Refusals []TaskRefusal}` with zero writes
+(`AC-TASKS-COMPLETION-005.5`).
+
+The writes stay one task at a time; each runs its own transaction, entry
+actions, and events. A refusal after a passing preflight is a concurrent
+change. The loop stops and returns `BulkMovePartialError{MovedTaskIDs,
+Refused TaskRefusal}` (`AC-TASKS-COMPLETION-005.6`). One transaction for the
+whole batch is rejected because each move commits before its post-commit
+entry dispatch and event publication.
+
+HTTP maps both errors to 409. The body is `{code, moved_task_ids, refusals:
+[{task_id, code, message, pending_approvers?}]}`, where `code` is
+`bulk_move_refused` or `bulk_move_partial`. The web bulk-move hook reads
+this body, shows the result through localized toast copy (moved count, refused
+titles, and reason), and reconciles the board from `moved_task_ids` and the
+task events that were already published. Phone and desktop share the toast.
+Typed refusal codes and safe messages exclude internal repository details.
+Write-time errors after a move return the partial-result body for reconciliation.
+
 ## Verification and observability
 
 Use barrier-based Go tests for resume/stop, reclaim/resume, stale receipt/new
@@ -420,6 +553,7 @@ path. Exact regression names and commands belong to the linked fix package.
 
 - [Task completion and follow-ups](../../../plans/task-completion/plan.md)
 - [Workspace restoration after completion](../../../plans/completed-workspace-restoration/plan.md)
+- [Completion policy consolidation](../../../plans/completion-policy-consolidation/plan.md)
 
 ## Proposed coordination extension
 

@@ -337,7 +337,7 @@ func (a *permissionFlowAgent) selectedOption() string {
 func newPermissionACPFlow(t *testing.T, test permissionACPCase) (*Manager, *permissionFlowAgent, func()) {
 	t.Helper()
 	workDir := t.TempDir()
-	cfg := (&config.Config{
+	cfg, err := (&config.Config{
 		Defaults: config.InstanceDefaults{
 			Protocol: agent.ProtocolACP,
 			WorkDir:  workDir,
@@ -349,6 +349,9 @@ func newPermissionACPFlow(t *testing.T, test permissionACPCase) (*Manager, *perm
 		SessionID:  permissionFlowSessionID,
 		McpServers: permissionFlowConfigMCPServers(),
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !cfg.InjectedKandevMCP {
 		t.Fatal("NewInstanceConfig did not record injected Kandev MCP provenance")
 	}

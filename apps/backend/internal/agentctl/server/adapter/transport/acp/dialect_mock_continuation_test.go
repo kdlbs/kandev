@@ -17,7 +17,7 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 	}{
 		{"supported mock after completed tool", mockAgentID, 1, true, true, true, true},
 		{"supported mock before output", mockAgentID, 0, true, true, false, false},
-		{"untrusted provider marker", "other-acp", 0, false, false, false, false},
+		{"unlisted provider remote error", "other-acp", 0, false, true, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, fake, conn := setupHandoffFakeAgent(t)
@@ -70,7 +70,7 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 						require.Equal(t, streams.PromptFailureDispositionRetainRuntime, event.PromptFailureDisposition)
 					} else {
 						require.Nil(t, event.ContinuationSafety)
-						require.Empty(t, event.PromptFailureDisposition)
+						require.Equal(t, streams.PromptFailureDispositionRetainRuntime, event.PromptFailureDisposition)
 					}
 				}
 				require.NotEqual(t, streams.EventTypeComplete, event.Type)
@@ -91,4 +91,50 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMockPendingToolFixtureOverridesOnlyItsSnapshotToV3(t *testing.T) {
+	a, fake, conn := setupHandoffFakeAgent(t)
+	a.agentID, a.dialect, a.normalizer = mockAgentID, newMockACPDialect(), NewNormalizer(mockAgentID)
+	fake.promptFailure = &sdk.RequestError{
+		Code: -32603, Message: "peer disconnected before response",
+		Data: map[string]any{"kandevMock": map[string]any{
+			"continuationInterruption": true, "agentManagedPendingTools": true,
+		}},
+	}
+	require.NoError(t, a.Initialize(t.Context()))
+	a.capabilities.LoadSession = true
+	_, err := a.NewSession(t.Context(), nil)
+	require.NoError(t, err)
+	_ = drainEvents(a)
+	done := make(chan error, 1)
+	go func() { done <- a.Prompt(t.Context(), "fixture", nil, 7) }()
+	select {
+	case <-fake.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt not accepted")
+	}
+	sendCapturedUpdate(t, conn, `{"sessionId":"session-handoff","update":{"sessionUpdate":"tool_call","toolCallId":"completed-shell","title":"Completed inspection","kind":"execute","status":"completed","rawInput":{"command":"printf fixture"}}}`)
+	sendCapturedUpdate(t, conn, `{"sessionId":"session-handoff","update":{"sessionUpdate":"tool_call","toolCallId":"pending-shell","title":"Interrupted inspection","kind":"execute","status":"in_progress","rawInput":{"command":"printf pending"}}}`)
+	fake.releasePrompts()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt did not settle")
+	}
+	var failure *AgentEvent
+	for _, event := range drainEvents(a) {
+		if event.Type == streams.EventTypeError {
+			failure = &event
+		}
+	}
+	require.NotNil(t, failure)
+	require.Equal(t, streams.ContinuationNativeSavedHistoryV2, newMockACPDialect().continuationSupport,
+		"ordinary mock interruptions must keep the legacy contract")
+	require.Equal(t, streams.ContinuationAgentManagedToolsV3, failure.ContinuationSafety.Support)
+	require.True(t, failure.ContinuationSafety.Pending)
+	require.Equal(t, uint16(1), failure.ContinuationSafety.CompletedTools)
+	require.True(t, failure.ContinuationSafety.PermissionsResolved)
+	require.True(t, failure.ContinuationSafety.SafeFor(7))
 }

@@ -53,6 +53,19 @@ func TestBuildRecoveryActions_NormalOrdering(t *testing.T) {
 	}
 }
 
+func TestBuildRecoveryActions_AuthenticationKeepsEligibleResume(t *testing.T) {
+	actions := buildRecoveryActions("t1", "s1", true, true, false)
+	if len(actions) != 2 {
+		t.Fatalf("expected eligible resume and restart actions, got %d", len(actions))
+	}
+	if actions[0]["test_id"] != recoveryResumeButtonTestID {
+		t.Errorf("expected eligible resume first, got %v", actions[0]["test_id"])
+	}
+	if actions[1]["test_id"] != recoveryRestartButtonTestID {
+		t.Errorf("expected authentication-aware restart second, got %v", actions[1]["test_id"])
+	}
+}
+
 func TestBuildRecoveryActions_ResumeCorruptedReordersFreshFirst(t *testing.T) {
 	actions := buildRecoveryActions("t1", "s1", true /*hasResumeToken*/, false /*auth*/, true /*resumeCorrupted*/)
 	if len(actions) != 2 {

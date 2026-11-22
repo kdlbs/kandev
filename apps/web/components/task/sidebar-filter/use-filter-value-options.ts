@@ -63,11 +63,8 @@ export function useFilterValueOptions(dimension: FilterDimension): Option[] {
     scope,
   );
   const repositoriesByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
-  // `executorTypeOptions` resolves its labels through `getExecutorLabel`, which
-  // now reads the catalog. Subscribing here — and keeping the language in the
-  // memo's deps — is what makes those labels follow a runtime locale switch;
-  // without it the memo only recomputes when store data changes.
-  const { i18n } = useTranslation();
+  // Option labels follow the active locale without a store update.
+  const { t, i18n } = useTranslation();
 
   return useMemo(() => {
     if (dimension === "workflow")
@@ -93,7 +90,21 @@ export function useFilterValueOptions(dimension: FilterDimension): Option[] {
       return workflowStepOptions(metadata);
     }
     if (dimension === "executorType") return executorTypeOptions(snapshots);
-    if (dimension === "repository") return repositoryOptions(repositoriesByWorkspace);
+    if (dimension === "repository") {
+      return [
+        // Missing repository paths use the string "undefined" in filter clauses.
+        { value: String(undefined), label: t("task:none") },
+        ...repositoryOptions(repositoriesByWorkspace),
+      ];
+    }
     return [];
-  }, [dimension, snapshots, repositoriesByWorkspace, i18n.language, authorizedWorkflows, previews]);
+  }, [
+    dimension,
+    snapshots,
+    repositoriesByWorkspace,
+    i18n.language,
+    authorizedWorkflows,
+    previews,
+    t,
+  ]);
 }

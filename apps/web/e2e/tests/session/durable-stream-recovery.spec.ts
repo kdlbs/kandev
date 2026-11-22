@@ -68,7 +68,9 @@ test("surfaces uncertain delivery with state-only retry and Stop", async ({
 
   const banner = testPage.getByTestId("failed-session-banner");
   await expect(banner).toBeVisible({ timeout: 30_000 });
-  await expect(banner).toContainText("Delivery was interrupted. The prompt outcome is uncertain.");
+  await expect(banner).toContainText(
+    "The connection was interrupted. Kandev cannot confirm whether the agent processed your message.",
+  );
   await expect(banner.getByTestId("recovery-resume-button")).toHaveCount(0);
   await expect(banner.getByTestId("recovery-fresh-button")).toHaveCount(0);
   await expect(testPage.getByTestId("interrupted-sessions-notice")).toHaveCount(0);
@@ -137,6 +139,23 @@ test("legacy empty delivery fence exposes Resume without replaying the old promp
   await verifyNativeResumeClearsRecoveryNotice(testPage, apiClient, seedData, backend.tmpDir, true);
 });
 
+// @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-002.8
+test("unproven SQL completion recovers the saved conversation without replay", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await verifyNativeResumeClearsRecoveryNotice(
+    testPage,
+    apiClient,
+    seedData,
+    backend.tmpDir,
+    "unproven",
+  );
+});
+
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-008.5
 test("ordinary native resume surfaces recovery before first send and retains the draft", async ({
   testPage,
@@ -151,5 +170,25 @@ test("ordinary native resume surfaces recovery before first send and retains the
     seedData,
     backend.tmpDir,
     "readiness",
+  );
+});
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8
+test("cancelled prompt recovery remains reachable without an error record", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.skip(
+    process.platform !== "linux",
+    "isolated original-process death proof is Linux-specific",
+  );
+  await verifyNativeResumeClearsRecoveryNotice(
+    testPage,
+    apiClient,
+    seedData,
+    backend.tmpDir,
+    "cancelled",
   );
 });

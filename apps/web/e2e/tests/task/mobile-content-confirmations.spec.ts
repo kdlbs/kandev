@@ -1,16 +1,18 @@
 import { test, expect } from "../../fixtures/test-base";
-import { startQuickChatFromSetup } from "../chat/quick-chat-helpers";
+import { startQuickChatFromSetup, waitForSessionSettledBaseline } from "../chat/quick-chat-helpers";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 
 test("Quick Chat hosts context reset without losing its draft or dialog", async ({
   testPage,
+  apiClient,
   prCapture,
 }) => {
   await testPage.goto("/");
   await testPage.getByTestId("app-nav-trigger").tap();
   await testPage.getByTestId("mobile-quick-chat-button").tap();
   const chat = testPage.getByRole("dialog", { name: "Quick Chat" });
-  await startQuickChatFromSetup(chat, testPage);
+  const started = await startQuickChatFromSetup(chat, testPage);
+  await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
   const reset = chat.getByTestId("reset-context-button");
   await expect(reset).toBeVisible({ timeout: 30_000 });
   const editor = chat.locator(".tiptap.ProseMirror");

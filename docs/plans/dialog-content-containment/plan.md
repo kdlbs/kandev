@@ -1,6 +1,9 @@
 ---
-spec: docs/specs/ui/requirements/dialog-content-containment.md
-design: docs/specs/ui/system-design/dialog-content-containment.md
+requirements:
+  - REQ-UI-DIALOG-CONTENT-CONTAINMENT-001
+system_design:
+  - ../../specs/ui/system-design/dialog-content-containment.md
+legacy_specs: []
 created: 2026-08-26
 status: complete
 ---
@@ -142,3 +145,16 @@ None.
   Chromium tests, 7 focused mobile-Chrome tests, web typecheck, targeted ESLint
   with no errors or warnings, i18n check and ratchet, specification lint, and
   `git diff --check`.
+
+## Follow-up correction
+
+[Issue #4894](https://github.com/kdlbs/kandev/issues/4894) exposes clipping of
+the Office repository picker outside the dialog shell. The results above
+record the original implementation and its checks. They do not establish
+picker hit testing outside that shell.
+
+The [Office picker correction package](../office-project-picker-clipping/plan.md)
+owns this follow-up. Task 05 retains its completed original scope; the follow-up
+work order is complete. Tasks 01 through 04 need no changes. The follow-up
+retains both existing Office long-chip cases and adds picker geometry,
+interaction, and selection-persistence coverage.

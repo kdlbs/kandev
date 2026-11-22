@@ -7,7 +7,32 @@ import (
 
 	sdk "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/stretchr/testify/require"
 )
+
+func TestQueuedACPContentKeepsGenerationAfterPromptEnds(t *testing.T) {
+	for _, kind := range []string{"agent_message_chunk", "agent_thought_chunk"} {
+		t.Run(kind, func(t *testing.T) {
+			a := newTestAdapter()
+			t.Cleanup(func() { _ = a.Close() })
+			var notification sdk.SessionNotification
+			require.NoError(t, json.Unmarshal([]byte(`{"sessionId":"s1","update":{"sessionUpdate":"`+kind+`","content":{"type":"text","text":"buffered output"}}}`), &notification))
+			a.mu.Lock()
+			_, turn := a.registerPromptTurn(t.Context(), 42)
+			a.enqueueACPUpdate(notification)
+			a.clearPromptTurn(turn)
+			a.mu.Unlock()
+			require.True(t, a.syncNotifQueue())
+			events := drainEvents(a)
+			require.Len(t, events, 1)
+			require.Equal(t, uint64(42), events[0].PromptGeneration)
+			require.Empty(t, events[0].ProtocolMessageID, "buffered prompt output must not acquire a native-async ID")
+			a.asyncTurnMu.Lock()
+			defer a.asyncTurnMu.Unlock()
+			require.Empty(t, a.asyncTurnFinalizers, "buffered prompt output must not schedule a second completion")
+		})
+	}
+}
 
 func TestEnqueueACPUpdateSnapshotsPromptGenerationBeforeWorkerConversion(t *testing.T) {
 	a := newTestAdapter()

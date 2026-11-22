@@ -24,8 +24,9 @@ func TestRepositoryCheckoutDefaultsPresence(t *testing.T) {
 	require.True(t, created.PullBeforeWorktree)
 	f[0].bus.ClearEvents()
 	for _, payload := range []string{`{}`, `{"default_branch":null,"pull_before_worktree":null}`, `{"default_branch":"","pull_before_worktree":false}`, `{"default_branch":"topic","pull_before_worktree":true}`, `{"pull_before_worktree":false}`} {
-		// A historical baseline keeps timestamp advancement independent of clock resolution.
-		baseline := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+		// A future baseline makes the strict advancement assertion independent of
+		// clock resolution while still proving the version moves forward.
+		baseline := time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC)
 		result, err := f[0].db.ExecContext(t.Context(), "UPDATE repositories SET updated_at = ? WHERE id = ?", baseline, "checkout-repo")
 		require.NoError(t, err)
 		affected, err := result.RowsAffected()

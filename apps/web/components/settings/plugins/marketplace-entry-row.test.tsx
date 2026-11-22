@@ -54,6 +54,25 @@ describe("MarketplaceEntryRow repo link", () => {
   });
 });
 
+describe("MarketplaceEntryRow attribution", () => {
+  it("renders the curated catalog author with its canonical repository", () => {
+    render(
+      <MarketplaceEntryRow
+        entry={entry({
+          author: "acme",
+          repo_url: "https://github.com/acme/kandev-plugin-acme",
+        })}
+        busy={false}
+        onInstall={noop}
+      />,
+    );
+
+    expect(screen.getByText("by acme")).toBeTruthy();
+    const link = screen.getByText("Repo").closest("a");
+    expect(link?.getAttribute("href")).toBe("https://github.com/acme/kandev-plugin-acme");
+  });
+});
+
 describe("MarketplaceEntryRow member view", () => {
   it("keeps catalog metadata visible without install or update actions", () => {
     const { rerender } = render(

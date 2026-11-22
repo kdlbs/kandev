@@ -53,14 +53,15 @@ func TestMigrate_PriorityRebuildPreservesAssignmentGeneration(t *testing.T) {
 			labels TEXT DEFAULT '[]',
 			identifier TEXT,
 			assignee_user_id TEXT NOT NULL DEFAULT '',
-			assignment_generation INTEGER NOT NULL DEFAULT 0
+			assignment_generation INTEGER NOT NULL DEFAULT 0,
+ executor_actor_user_id TEXT NOT NULL DEFAULT ''
 		);
 	`); err != nil {
 		t.Fatalf("seed legacy schema: %v", err)
 	}
 	if _, err := db.Exec(`
-		INSERT INTO tasks (id, workspace_id, title, assignment_generation)
-		VALUES ('task-1', 'ws-1', 'reassigned task', 3)
+		INSERT INTO tasks (id, workspace_id, title, assignment_generation, executor_actor_user_id)
+		VALUES ('task-1', 'ws-1', 'reassigned task', 3, 'alice')
 	`); err != nil {
 		t.Fatalf("seed reassigned task: %v", err)
 	}
@@ -69,6 +70,10 @@ func TestMigrate_PriorityRebuildPreservesAssignmentGeneration(t *testing.T) {
 		t.Fatalf("init office repo (run migrations): %v", err)
 	}
 
+	var actor string
+	if err := db.Get(&actor, `SELECT executor_actor_user_id FROM tasks WHERE id = 'task-1'`); err != nil || actor != "alice" {
+		t.Fatalf("executor actor lost after priority rebuild: %q, %v", actor, err)
+	}
 	var generation int64
 	if err := db.Get(&generation, `SELECT assignment_generation FROM tasks WHERE id = 'task-1'`); err != nil {
 		t.Fatalf("tasks.assignment_generation missing after priority rebuild: %v", err)

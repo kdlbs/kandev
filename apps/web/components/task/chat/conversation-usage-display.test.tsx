@@ -202,6 +202,30 @@ describe("ConversationUsageDisplay", () => {
   });
 });
 
+describe("ConversationUsageDisplay subscription disclosure", () => {
+  it("Antigravity subscription cost disclosure", () => {
+    mocks.touchDrawer = true;
+    const { rerender } = render(
+      <TooltipProvider>
+        <ConversationUsageDisplay taskId="task-1" sessionId="session-1" />
+      </TooltipProvider>,
+    );
+    fireEvent.click(screen.getByTestId("conversation-usage-trigger"));
+    expect(screen.queryByTestId("usage-subscription-cost-disclosure")).toBeNull();
+
+    rerender(
+      <TooltipProvider>
+        <ConversationUsageDisplay taskId="task-1" sessionId="session-1" subscriptionBilling />
+      </TooltipProvider>,
+    );
+
+    const disclosure = screen.getByTestId("usage-subscription-cost-disclosure");
+    expect(disclosure.textContent).toContain("not an additional Google subscription bill");
+    expect(disclosure.textContent).toContain("/usage");
+    expect(disclosure.textContent).toContain("native account allowance report");
+  });
+});
+
 describe("ConversationUsageDisplay refreshed usage", () => {
   it("keeps the refreshed latest turn ahead of stale loaded detail", () => {
     mocks.touchDrawer = true;

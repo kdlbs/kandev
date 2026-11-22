@@ -221,7 +221,7 @@ to today's behavior, so I can turn off a misbehaving capability without downgrad
   no recovered instances, and reproduce today's observable restart behavior.
 - **AC-EXECUTORS-SURVIVAL-005.2:** The capability shall default to
   disabled in every shipped runtime profile.
-- **AC-EXECUTORS-SURVIVAL-005.3:** When a session runs in passthrough mode,
+- **AC-EXECUTORS-SURVIVAL-005.3:** When a standalone session runs in passthrough mode,
   the system shall behave as if the capability were disabled for that session,
   shall never report it as re-tracked, and shall not represent it as having
   survived. Such a session shall not be guarded under
@@ -284,11 +284,9 @@ to today's behavior, so I can turn off a misbehaving capability without downgrad
   [standalone control-server ownership](standalone-control-server-ownership.md);
   which backend drives it and what happens when nobody owns one, owned by
   [standalone control-server single driver and unowned lifetime](standalone-control-server-single-driver.md).
-- Survival of passthrough sessions. A passthrough agent runs on a terminal owned by
-  the backend process, so surviving one means moving that ownership into the control
-  server: a separate capability, excluded rather than half-delivered.
-  AC-EXECUTORS-SURVIVAL-005.3 states what this contract does require of them. The
-  same applies to user-owned terminals, which use that same mechanism.
+- Survival of standalone passthrough and user terminals under this capability.
+  AC-EXECUTORS-SURVIVAL-005.3 defines that exclusion. Remote recovery belongs to
+  [SSH passthrough](ssh-passthrough.md).
 - Provider-native resume semantics and resume-token clearing, owned by
   [agent resume and runtime recovery](../../agents/requirements/agent-resume-runtime-recovery.md).
 - The cold-resume cost for sessions that did not survive, owned by

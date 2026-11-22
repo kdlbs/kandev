@@ -6,16 +6,20 @@ import (
 
 // BackgroundWorkload is the durable projection model for an agent background workload.
 type BackgroundWorkload struct {
-	ID              string     `json:"id" db:"id"`
-	TaskID          string     `json:"task_id" db:"task_id"`
-	SessionID       string     `json:"session_id" db:"session_id"`
-	Kind            string     `json:"kind" db:"kind"`
-	Title           string     `json:"title" db:"title"`
-	State           string     `json:"state" db:"state"`
-	ParentWorkID    *string    `json:"parent_work_id,omitempty" db:"parent_work_id"`
-	OriginTurnID    string     `json:"origin_turn_id,omitempty" db:"origin_turn_id"`
-	SourceMessageID string     `json:"source_message_id,omitempty" db:"source_message_id"`
-	SourceCallID    string     `json:"source_call_id,omitempty" db:"source_call_id"`
+	ID              string  `json:"id" db:"id"`
+	TaskID          string  `json:"task_id" db:"task_id"`
+	SessionID       string  `json:"session_id" db:"session_id"`
+	Kind            string  `json:"kind" db:"kind"`
+	Title           string  `json:"title" db:"title"`
+	State           string  `json:"state" db:"state"`
+	ParentWorkID    *string `json:"parent_work_id,omitempty" db:"parent_work_id"`
+	OriginTurnID    string  `json:"origin_turn_id,omitempty" db:"origin_turn_id"`
+	SourceMessageID string  `json:"source_message_id,omitempty" db:"source_message_id"`
+	SourceCallID    string  `json:"source_call_id,omitempty" db:"source_call_id"`
+	// Capabilities is the adapter's JSON-encoded capability declaration for
+	// this workload. Empty means no verified declaration was recorded, which
+	// readers treat as unavailable rather than inventing a surface.
+	Capabilities    string     `json:"-" db:"capabilities"`
 	ExitCode        *int       `json:"exit_code,omitempty" db:"exit_code"`
 	Output          string     `json:"output,omitempty" db:"output"`
 	OutputTruncated bool       `json:"output_truncated,omitempty" db:"output_truncated"`

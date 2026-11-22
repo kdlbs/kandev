@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	terminalmodels "github.com/kandev/kandev/internal/terminal/models"
 	terminalservice "github.com/kandev/kandev/internal/terminal/service"
@@ -162,7 +163,7 @@ func newCursorMCPRecoveryRouter(
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	log := newTestLogger(t)
-	svc := service.NewService(service.Repos{}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc, _ := newSessionHandlerService(t, &models.TaskSession{ID: "session-1", TaskID: "task-1"})
 	if manager.authSpec.TaskID == "" {
 		manager.authSpec = runtime.CursorMCPAuthenticationSpec{
 			TaskID: "task-1", TaskEnvironmentID: "env-1", WorkspacePath: "/private/workspace",
@@ -416,7 +417,7 @@ func TestCursorMCPRecoveryDeniesForeignSessionBeforeManagerCall(t *testing.T) {
 func TestCursorMCPRecoveryUnavailableWhenDependenciesAreMissing(t *testing.T) {
 	log := newTestLogger(t)
 	router := gin.New()
-	serviceForTest := service.NewService(service.Repos{}, nil, log, service.RepositoryDiscoveryConfig{})
+	serviceForTest, _ := newSessionHandlerService(t, &models.TaskSession{ID: "session-1", TaskID: "task-1"})
 	h := RegisterProcessRoutes(router, serviceForTest, nil, log)
 	h.cursorMCPRecovery = nil
 	rec := performMCPRecoveryRequest(router, http.MethodPost, "/api/v1/task-sessions/session-1/mcp/retry", `{"server_id":"server-exact"}`)

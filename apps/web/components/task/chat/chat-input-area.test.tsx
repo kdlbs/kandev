@@ -21,6 +21,9 @@ const mockState = {
   office: { tasks: { items: [] } },
 };
 
+vi.mock("@/components/task/chat/use-composer-prompt-suggestion", () => ({
+  useComposerPromptSuggestion: () => ({ promptSuggestion: null }),
+}));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
   useAppStoreApi: () => ({ getState: () => mockState }),
@@ -36,10 +39,6 @@ vi.mock("@/components/github/pr-status-chip", () => ({
 
 vi.mock("@/components/gitlab/mr-status-chip", () => ({
   MRStatusChip: () => null,
-}));
-
-vi.mock("@/components/azure-devops/azure-devops-task-pull-request-chip", () => ({
-  AzureDevOpsTaskPullRequestChip: () => null,
 }));
 
 vi.mock("@/components/integrations/registered-change-request-status", () => ({

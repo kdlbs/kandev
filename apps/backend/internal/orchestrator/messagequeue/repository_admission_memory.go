@@ -38,7 +38,7 @@ func (r *memoryRepository) AdmitQueueMessage(
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 	workflowEntry *WorkflowEntryIdentity,
 ) (*QueuedMessage, bool, error) {
 	if workflowEntry != nil {
@@ -105,8 +105,13 @@ func (r *memoryRepository) admitNewAdmissionLocked(
 	message *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
+	if policy != nil {
+		if err := r.validateAutoMergePolicyLocked(identity, *policy); err != nil {
+			return nil, false, err
+		}
+	}
 	if message.QueuedAt.IsZero() {
 		message.QueuedAt = time.Now().UTC()
 	}
@@ -133,12 +138,12 @@ func (r *memoryRepository) admitFullAdmissionLocked(
 	key queueAdmissionKey,
 	fingerprint string,
 	message *QueuedMessage,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
-	if policy == nil || !policy.Enabled {
+	if policy == nil || !policy.AutoMerge.Enabled {
 		return nil, false, ErrQueueFull
 	}
-	merged, didMerge, err := r.autoMergeCandidateIntoAboveLocked(message)
+	merged, didMerge, err := r.autoMergeCandidateIntoAboveLocked(message, policy)
 	if err != nil {
 		return nil, false, err
 	}
@@ -151,12 +156,12 @@ func (r *memoryRepository) admitFullAdmissionLocked(
 func (r *memoryRepository) mergeInsertedAdmissionLocked(
 	sessionID string,
 	message *QueuedMessage,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, error) {
-	if policy == nil || !policy.Enabled {
+	if policy == nil || !policy.AutoMerge.Enabled {
 		return message, nil
 	}
-	merged, didMerge, err := r.autoMergeIntoAboveLocked(sessionID, message.ID)
+	merged, didMerge, err := r.autoMergeIntoAboveLocked(sessionID, message.ID, policy)
 	if err != nil {
 		return nil, err
 	}
@@ -177,4 +182,34 @@ func (r *memoryRepository) rememberAdmissionLocked(
 	snapshot := queueAdmissionResponseSnapshot(message)
 	r.admissionReceipts[key] = queueAdmissionReceipt{Fingerprint: fingerprint, Message: snapshot}
 	return cloneQueuedMessage(message), false, nil
+}
+
+// The memory repository has no shared task transaction. Its identity-free
+// fallback still folds under the captured admission policy, so in-process edit
+// leases and sorted sender folds apply exactly as they do in SQLite.
+var _ legacyAutoMergePolicyRepository = (*memoryRepository)(nil)
+
+func (r *memoryRepository) autoMergeIntoAbove(_ context.Context, identity *QueueSessionIdentity, sessionID, sourceID string, policy *AdmissionPolicy) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if identity != nil {
+		if err := r.bindIdentityLocked(*identity); err != nil {
+			return nil, false, err
+		}
+	}
+	return r.autoMergeIntoAboveLocked(sessionID, sourceID, policy)
+}
+
+func (r *memoryRepository) autoMergeCandidateIntoAbove(_ context.Context, identity *QueueSessionIdentity, candidate *QueuedMessage, _ *QueueAttachmentClaim, policy *AdmissionPolicy, workflowEntry *WorkflowEntryIdentity) (*QueuedMessage, bool, error) {
+	if workflowEntry != nil {
+		return nil, false, ErrQueueAdmissionUnavailable
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if identity != nil {
+		if err := r.bindIdentityLocked(*identity); err != nil {
+			return nil, false, err
+		}
+	}
+	return r.autoMergeCandidateIntoAboveLocked(candidate, policy)
 }

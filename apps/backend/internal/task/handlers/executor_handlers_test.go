@@ -625,3 +625,31 @@ func TestWSDeleteExecutorDeletesAndReportsActiveSessions(t *testing.T) {
 	require.Equal(t, "executor is used by an active agent session", payload.Message)
 	require.Empty(t, busy.deleted)
 }
+
+func (r *executorRepo) DeleteExecutorIfOwnershipUnmodified(ctx context.Context, id, owner string) error {
+	row, err := r.GetExecutor(ctx, id)
+	if err != nil {
+		return err
+	}
+	if row.OwnerUserID != owner {
+		return models.ErrExecutorOwnershipChanged
+	}
+	return r.DeleteExecutor(ctx, id)
+}
+func (r *executorRepo) DeleteExecutorProfileIfOwnershipUnmodified(ctx context.Context, profile *models.ExecutorProfile, parentOwner *string) error {
+	row, err := r.GetExecutorProfile(ctx, profile.ID)
+	if err != nil {
+		return err
+	}
+	if row.OwnerUserID != profile.OwnerUserID {
+		return models.ErrExecutorOwnershipChanged
+	}
+	parent, parentErr := r.GetExecutor(ctx, profile.ExecutorID)
+	if parentOwner != nil && (parentErr != nil || parent.OwnerUserID != *parentOwner) {
+		return models.ErrExecutorOwnershipChanged
+	}
+	if parentOwner == nil && parentErr == nil {
+		return models.ErrExecutorOwnershipChanged
+	}
+	return r.DeleteExecutorProfile(ctx, profile.ID)
+}

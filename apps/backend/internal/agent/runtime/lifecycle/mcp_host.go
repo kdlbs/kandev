@@ -1,7 +1,10 @@
 package lifecycle
 
 import (
+	"fmt"
+
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctlconfig "github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentruntime"
 )
@@ -21,6 +24,10 @@ func (m *Manager) agentMCPHost(execution *AgentExecution) string {
 	return agentctlconfig.MCPReachableHost(standalone.host)
 }
 
-func (m *Manager) agentMCPURL(execution *AgentExecution, port int, path string) string {
-	return agentctlconfig.MCPServerURL(m.agentMCPHost(execution), port, path)
+func (m *Manager) agentMCPURL(execution *AgentExecution, client *agentctl.Client, port int, path string) (string, error) {
+	if client == nil {
+		return "", fmt.Errorf("agent helper is unavailable for native MCP URL construction")
+	}
+	instanceID, scoped := builtinMCPRouteMode(client)
+	return agentctlconfig.MCPServerURLForInstance(m.agentMCPHost(execution), port, instanceID, scoped, path)
 }

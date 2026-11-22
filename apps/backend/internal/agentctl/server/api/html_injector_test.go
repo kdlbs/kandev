@@ -42,7 +42,7 @@ func TestInjectInspectorScript_UpperCaseBodyTag(t *testing.T) {
 
 func TestInspectorScript_CapturesVersionedTextEvidence(t *testing.T) {
 	wants := []string{
-		"var PROTOCOL_VERSION = 2;",
+		"var PROTOCOL_VERSION = 3;",
 		"function captureTextSelection()",
 		"selection.getRangeAt(0)",
 		"function captureTextEndpoint(",

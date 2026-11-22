@@ -113,3 +113,13 @@ func (a *stepActivation) rateWindowStart(now time.Time) (time.Time, int64) {
 	}
 	return now, a.done
 }
+
+// CompletedStepSnapshot is a bounded timing record for one boot-local activation.
+type CompletedStepSnapshot struct {
+	ID            StepID `json:"id"`
+	LabelKey      string `json:"label_key"`
+	ActivationSeq uint64 `json:"activation_seq"`
+	Phase         Phase  `json:"phase"`
+	ElapsedMS     int64  `json:"elapsed_ms"`
+	Completed     bool   `json:"completed"`
+}

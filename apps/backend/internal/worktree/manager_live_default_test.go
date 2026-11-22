@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestResolveRemoteDefaultBranchReadsOriginHeadBeforeRunningGit(t *testing.T) {
@@ -142,7 +144,11 @@ func TestResolveBaseRefWithFallbackUsesLiveRemoteDefault(t *testing.T) {
 		t.Fatalf("write origin HEAD: %v", err)
 	}
 
-	req := CreateRequest{RepositoryPath: repoPath, BaseBranch: "stale-base"}
+	req := CreateRequest{
+		RepositoryPath:           repoPath,
+		BaseBranch:               "stale-base",
+		BaseBranchFallbackPolicy: models.BaseBranchFallbackPolicyRepositoryDefault,
+	}
 	base, warning, detail, err := mgr.resolveBaseRefWithFallback(context.Background(), &req)
 	if err != nil {
 		t.Fatalf("resolveBaseRefWithFallback() error: %v", err)

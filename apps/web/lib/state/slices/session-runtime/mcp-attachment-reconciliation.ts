@@ -1,3 +1,8 @@
+import {
+  validBuiltinAcceptance,
+  validBuiltinAttempt,
+  validBuiltinServer,
+} from "./builtin-mcp-validation";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import type {
   MCPAttachmentHistory,
@@ -86,6 +91,8 @@ function isValidMcpAttachmentServerFields(value: Record<string, unknown>): boole
       "tool_token_estimator",
     ]) &&
     isOptionalTimestamp(value.tools_listed_at) &&
+    isOptionalTimestamp(value.accepted_at) &&
+    validBuiltinServer(value) &&
     isOptionalNonNegativeInteger(value.tool_count) &&
     isOptionalBoolean(value.tool_catalog_truncated) &&
     (value.tools === undefined ||
@@ -112,7 +119,7 @@ function isValidMcpAttachmentAttempt(value: unknown): value is MCPAttachmentHist
   ) {
     return false;
   }
-  if (!isOptionalTimestamp(value.updated_at)) return false;
+  if (!isOptionalTimestamp(value.updated_at) || !validBuiltinAttempt(value)) return false;
   return (
     value.servers === undefined ||
     value.servers === null ||
@@ -124,6 +131,7 @@ function isValidMcpAttachmentHistory(value: unknown): value is MCPAttachmentHist
   if (!isRecord(value) || value.version !== 1 || !isValidMcpAttachmentAttempt(value.current)) {
     return false;
   }
+  if (!validBuiltinAcceptance(value.builtin_binding, value.current)) return false;
   return (
     value.previous === undefined ||
     value.previous === null ||

@@ -14,6 +14,21 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
 }));
 
+vi.mock("@/hooks/domains/workspace/use-workspace-clone", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/domains/workspace/use-workspace-clone")>()),
+  useWorkspaceClone: () => ({
+    source: null,
+    name: "",
+    setName: vi.fn(),
+    pending: false,
+    error: null,
+    open: vi.fn(),
+    close: vi.fn(),
+    submit: vi.fn(),
+    restoreFocus: vi.fn(),
+  }),
+}));
+
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));

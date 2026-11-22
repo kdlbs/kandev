@@ -5,8 +5,12 @@ It is a backlog, not approval to implement every proposal.
 Requirements and system designs remain authoritative under `docs/specs/`.
 Finite delivery packages remain under `docs/plans/`.
 
+The [2026-10-20 code complexity audit](complexity-audit-2026-10-20.md) adds a
+source-linked cleanup assessment and complete static-analysis candidate inventories.
+It is a dated assessment, not approval to implement the proposed changes.
+
 **Last inventory:** 2026-09-27, main commit `359b5ffdbb6`.
-**Next proposed review:** 2026-10-11.
+**Current cleanup:** [2026-10-21 implementation outcomes](complexity-audit-2026-10-20/implementation.md).
 **Coordination owner:** repository maintainers. A named assignee is required before each work item starts.
 **Umbrella issue:** not created. This documentation PR does not create tasks or start agents.
 
@@ -27,9 +31,10 @@ Markdown belongs on main. Each change uses a short-lived PR.
 An open draft PR is not the permanent status database.
 The umbrella issue can remain open across milestones without duplicating these tables.
 
-## Next finite milestone: prove the second resource
+## September milestone record: prove the second resource
 
-The first proposed milestone contains three independent outcomes:
+This historical milestone contains three independent outcomes. Current source
+ownership and cleanup outcomes are recorded in the linked trackers:
 
 1. Migrate database statistics after approval of its identity and freshness design.
 2. Remove unsafe composition casts from one additional small Zustand slice.

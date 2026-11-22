@@ -8,7 +8,14 @@ depends_on:
   - "03-desktop-local-first-contribution-ui"
   - "04-mobile-contribution-version-choices"
 plan: "plan.md"
-spec: "../../specs/tasks/system-design/remote-contribution-tasks.md"
+requirements:
+  - REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-001
+acceptance_criteria:
+  - AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.4
+  - AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.5
+  - AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.6
+system_design:
+  - ../../specs/tasks/system-design/remote-contribution-tasks.md
 ---
 
 # Task 05: Desktop and Mobile Drift E2E
@@ -87,3 +94,33 @@ Completed 2026-08-12.
   `RemoteContribution` binding. Therefore the browser scenarios stop at the confirmation boundary;
   destructive ref mutation and provider adoption are covered by the real-Git process tests rather than
   by these REST-created browser tasks. A future bound-provider E2E can use the MCP task-creation path.
+
+## Mutation receipt correction (2026-10-27)
+
+SDK PR CI on `e0415183a79` read the prior local HEAD after the mobile
+confirmation disappeared. The failed attempt has no trace; its later screenshot
+shows a success toast and recovery branch. It does not establish the operation's
+completion time relative to the failed HEAD read.
+
+A controlled real file-watch update establishes the invalid test boundary:
+while the second `worktree.use_contribution` request is held, a real pending
+Git-detail update removes the confirmation and HEAD remains local. The former
+immediate HEAD expectation fails. Removing the probe file, releasing enrichment
+and forwarding the original request produces a real successful response, then
+all original HEAD, cleanliness, and recovery-branch checks pass.
+
+The normal fixture now arms the existing request-ID-correlated WebSocket
+watcher before confirmation, matching the prepared session, expected provider
+head, and explicit workspace-root repository scope. It asserts the operation's
+success before dialog absence and Git postconditions. Dirty-worktree refusal,
+lease, recovery-branch, viewport, and focus checks remain intact. This is a test
+completion correction, not a claim that the original CI ordering was traced.
+The temporary probe was removed. Full paired mobile validation follows.
+
+
+Validation: the controlled former HEAD assertion failed while the actual request
+was held and the real pending-detail event had removed the dialog. The control
+passed after waiting for the matching successful response and preserving all
+Git checks. Both normal mobile cases passed three repetitions each (6/6) with
+retries disabled. Independent review found no actionable issue in the fixture
+correction. The original CI request timing remains untraced.

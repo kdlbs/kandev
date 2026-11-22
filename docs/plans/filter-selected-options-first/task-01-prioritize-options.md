@@ -183,3 +183,22 @@ Phone verification passed with the provider repository seeded: the shared
 mobile recovery batch ran seven cases with `--retries=0`, including
 `tests/task/mobile-sidebar-filter-selected-first.spec.ts`. Ordering, selection,
 search, reopen, touch-target size, and viewport assertions passed.
+
+## Phone Tasks entry observation (2026-10-27)
+
+The failed CI trace records the parent Tasks sheet moving during the single
+filter-gear tap. It does not retain native hit targets, so it does not prove
+why the child drawer stayed closed. Five unchanged focused repetitions and
+three controlled 1,500 ms opening-animation probes passed. Those probes are
+negative evidence, not a failing/passing reproduction.
+
+The phone fixture now asserts its exact Tasks dialog is visible and awaits
+that owner's finite animations before its one gear tap. This follows the
+existing mobile sidebar recovery fixture. Selection, ordering, touch, and
+reopen assertions and their budgets remain unchanged. No production behavior
+changes. Focused combined repetitions, typecheck and lint verify the fixture;
+current-head CI remains the delivery gate.
+
+Focused post-correction validation passed three repetitions with retries
+disabled, plus full web typecheck, zero-warning scoped lint, catalog validation
+and specification lint. Normal hooks and fresh integrated CI remain required.

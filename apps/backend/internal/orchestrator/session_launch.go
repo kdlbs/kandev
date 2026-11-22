@@ -27,7 +27,7 @@ const (
 	recoveryActionRepairWorkspaceInventory = "repair_workspace_inventory"
 	recoveryActionResume                   = "resume"
 	recoveryActionResumeNewBranch          = models.RecoveryActionResumeNewBranch
-	recoveryActionFreshStart               = "fresh_start"
+	recoveryActionFreshStart               = executor.RecoveryActionFreshStart
 	recoveryActionRuntimeRetry             = "runtime_retry"
 	recoveryActionContinueHistory          = "continue_from_history"
 )
@@ -60,9 +60,11 @@ const (
 	LaunchActivationSourceUserAction   LaunchActivationSource = "user_action"
 	LaunchActivationSourceSessionOpen  LaunchActivationSource = "session_open"
 	LaunchActivationSourceSessionFocus LaunchActivationSource = "session_focus"
+	// LaunchActivationDispositionQueued reports that launch admission was deferred.
+	LaunchActivationDispositionQueued = "queued"
 
 	activationDispositionSuppressed = "suppressed"
-	activationDispositionQueued     = "queued"
+	activationDispositionQueued     = LaunchActivationDispositionQueued
 )
 
 type sessionOpenRecoveryContextKey struct{}
@@ -122,7 +124,9 @@ type recoveryRequiredSignal interface {
 var ErrSessionRecoveryRequired = errors.New("session recovery required")
 
 type sessionRecoveryRequiredError struct {
-	Block *models.SessionRecoveryBlock
+	Block                 *models.SessionRecoveryBlock
+	DeliveryRefusalReason string
+	internalCause         error
 }
 
 func (e *sessionRecoveryRequiredError) Error() string {
@@ -151,6 +155,20 @@ func (e *sessionRecoveryRequiredError) RecoveryGeneration() int64 {
 		return 0
 	}
 	return e.Block.ExpectedGeneration
+}
+
+func (e *sessionRecoveryRequiredError) RecoveryBlockID() string {
+	if e == nil || e.Block == nil {
+		return ""
+	}
+	return e.Block.ID
+}
+
+func (e *sessionRecoveryRequiredError) RecoveryIncarnationID() string {
+	if e == nil || e.Block == nil {
+		return ""
+	}
+	return e.Block.IncarnationID
 }
 
 // DispatchDeferred leaves an automation run admitted but open until the
@@ -182,11 +200,18 @@ type continuationCheckpoint struct {
 
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
-	TaskID                string                        `json:"task_id"`
-	Intent                SessionIntent                 `json:"intent,omitempty"`
-	SessionID             string                        `json:"session_id,omitempty"`
-	SessionSettingsPolicy executor.ResumeSettingsPolicy `json:"-"`
-	AgentProfileID        string                        `json:"agent_profile_id,omitempty"`
+	// reusePreparedPrimary is reserved for the recorded dependency launch consumer.
+	reusePreparedPrimary   bool
+	transientLaunchFailure *transientLaunchFailureIdentity
+	TaskID                 string                        `json:"task_id"`
+	Intent                 SessionIntent                 `json:"intent,omitempty"`
+	SessionID              string                        `json:"session_id,omitempty"`
+	SessionSettingsPolicy  executor.ResumeSettingsPolicy `json:"-"`
+	AgentProfileID         string                        `json:"agent_profile_id,omitempty"`
+	// Explicit MCP spawn intent also sets ProfileExplicit, even for an empty
+	// profile. Workflow session-target routing is bypassed; normal empty-profile
+	// defaults still apply.
+	//
 	// ProfileExplicit marks a non-empty profile selected through an explicit
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// IntentStart only; IntentStartCreated keeps its existing profile resolution
@@ -201,6 +226,10 @@ type LaunchSessionRequest struct {
 	LaunchWorkspace   bool   `json:"launch_workspace,omitempty"`
 	SkipMessageRecord bool   `json:"skip_message_record,omitempty"`
 	AutoStart         bool   `json:"auto_start,omitempty"`
+	// Origin is server-owned launch provenance. It is excluded from the wire
+	// request so clients cannot request an automatic capacity policy.
+	Origin       string   `json:"-"`
+	MCPServerIDs []string `json:"mcp_server_ids,omitempty"`
 	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
 	// agent launch, even for passthrough profiles (whose prepare would normally
 	// be eagerly upgraded so the PTY exists). It backs the session.ensure
@@ -212,6 +241,12 @@ type LaunchSessionRequest struct {
 	// NoInitialPrompt starts an explicitly replaced utility session without
 	// composing configuration instructions into an otherwise empty first turn.
 	NoInitialPrompt bool `json:"-"`
+	// QuickChatInitialStart identifies the deferred startup launched after a
+	// newly accepted Quick Chat response. Launch errors preserve the retained
+	// session's existing recovery state.
+	QuickChatInitialStart        bool   `json:"-"`
+	QuickChatStartAttemptID      string `json:"-"`
+	QuickChatStartAgentAttemptID string `json:"-"`
 	// DeferredStart marks a prepare whose caller will follow up with an explicit
 	// IntentStartCreated that carries the prompt (the two-phase create flow:
 	// cheap sync prepare + async start). It suppresses the passthrough
@@ -225,12 +260,25 @@ type LaunchSessionRequest struct {
 	// create flow. It is server-side provenance, so clients cannot turn the
 	// generic launch path into a workflow turn-start admission.
 	InitialCreatePrompt bool `json:"-"`
+	// PromptIsTaskDescription marks Prompt as an internal task-description
+	// transport rather than an explicit launch instruction. Task-creation
+	// producers set it so workflow step templates keep their existing
+	// replacement behavior. It is server-side provenance, kept off the wire
+	// protocol so a client cannot opt an explicit brief out of preservation.
+	PromptIsTaskDescription bool `json:"-"`
 	// InitialPromptPreview is supplied only by task creation after attachment claim.
 	InitialPromptPreview *models.InitialPromptPreview `json:"-"`
 	// InitialPromptSubmission is persisted during task-session preparation and
 	// is only set by the server for the explicit fresh-start replay path.
 	InitialPromptSubmission *models.InitialPromptSubmission `json:"-"`
-	Attachments             []v1.MessageAttachment          `json:"attachments,omitempty"`
+	// InitialPromptOverride replaces the description fallback for an eligible
+	// text-only fresh-start recovery. It is composed by the server before
+	// provider identity is cleared and is never accepted from a client.
+	InitialPromptOverride *string `json:"-"`
+	// InitialPromptRecovery carries the current workflow composition for an
+	// owned receipt replay. The raw receipt remains the transcript source.
+	initialPromptRecovery *initialRecoveryPrompt
+	Attachments           []v1.MessageAttachment `json:"attachments,omitempty"`
 	// SpawnOrigin identifies the agent session that requested this launch via
 	// spawn_session_kandev, so the new session's first turn can carry spawner
 	// attribution and reply instructions. Like DeferredStart it is kept off the
@@ -238,6 +286,12 @@ type LaunchSessionRequest struct {
 	// <kandev-system> block that survives first-turn canonicalization, so a WS
 	// client must not be able to forge one and fabricate server authority.
 	SpawnOrigin *SpawnOrigin `json:"-"`
+	// PreserveWorkflowSourceBinding marks a spawn_session_kandev launch: the
+	// helper session must not become the recorded recipient of the workflow
+	// step it was spawned from. It is server-only intent, independent of the
+	// optional SpawnOrigin attribution, and is kept off the wire protocol so a
+	// client cannot suppress source-binding writes.
+	PreserveWorkflowSourceBinding bool `json:"-"`
 	// AllowBranchReplacement is set only by RecoverSession for the explicit
 	// resume_new_branch action. Clients cannot grant this permission directly.
 	AllowBranchReplacement           bool   `json:"-"`
@@ -373,47 +427,100 @@ func IsBenignLaunchTeardownErr(err error) bool {
 	if errors.Is(err, context.Canceled) {
 		return true
 	}
+	// A launch that lost its session to a concurrent workflow switch is an
+	// expected handover, not a fault.
+	if executor.IsSessionStateSwitched(err) {
+		return true
+	}
 	msg := err.Error()
 	return strings.Contains(msg, context.Canceled.Error()) ||
 		strings.Contains(msg, sessionTerminalErrText)
 }
 
-// LaunchSession is the unified entry point for all session operations.
-func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+// IsWorkflowSwitchLaunchSuperseded reports whether a launch yielded ownership
+// to a workflow profile switch. Launch consumers should treat this as a
+// neutral handoff, not as a failed task start.
+func IsWorkflowSwitchLaunchSuperseded(err error) bool {
+	return executor.IsSessionStateSwitched(err)
+}
+
+func (s *Service) prepareLaunchRequest(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+) (context.Context, SessionIntent, error) {
 	if req == nil {
-		return nil, errors.New("launch request is required")
+		return nil, "", errors.New("launch request is required")
 	}
 	ctx = worktree.WithRecoveryLifecycleContext(ctx, s.recoveryLifecycleContext())
 	req.Prompt = strings.TrimSpace(req.Prompt)
 	if err := validateLaunchActivationSource(req.ActivationSource); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if req.ActivationSource == LaunchActivationSourceSessionOpen && req.Prompt != "" {
-		return nil, errors.New("session_open activation cannot include a prompt")
+		return nil, "", errors.New("session_open activation cannot include a prompt")
 	}
 	intent := ResolveIntent(req)
 	if intent == IntentRestoreWorkspace && req.Prompt != "" {
-		return nil, errors.New("restore_workspace cannot include a prompt")
+		return nil, "", errors.New("restore_workspace cannot include a prompt")
 	}
 	if err := validateFocusActivationIntent(req); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	// Every intent funnels through here. SessionID is empty when creating, so
-	// that case is carried by the task check alone.
-	// Launching a session starts an agent turn: session.prompt.
-	// Workspace restoration only opens retained infrastructure. It must not
-	// require permission to start or resume an agent; lifecycle applies the
-	// session.exec check at the execution boundary.
 	if intent != IntentRestoreWorkspace {
 		if err := s.authorizeTaskPrompt(ctx, req.TaskID); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
-	// Existing-session launches must also prove that the supplied session and
-	// task belong together; independent reach checks do not establish that
-	// binding when a caller can access more than one task.
 	if err := s.authorizeTaskSessionPair(ctx, req.TaskID, req.SessionID); err != nil {
+		return nil, "", err
+	}
+	return ctx, intent, nil
+}
+
+// LaunchSession is the unified entry point for all session operations.
+func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) (launchResponse *LaunchSessionResponse, launchErr error) {
+	if req != nil && req.transientLaunchFailure != nil {
+		ctx = withTransientLaunchRetryContext(ctx, *req.transientLaunchFailure)
+	}
+	preparedCtx, intent, err := s.prepareLaunchRequest(ctx, req)
+	if err != nil {
 		return nil, err
+	}
+	ctx = preparedCtx
+	if req.QuickChatInitialStart {
+		releaseLifecycleLock, handleStartFailure, err := s.beginQuickChatStartFailureOwnership(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		defer releaseLifecycleLock()
+		defer func() {
+			if launchErr != nil {
+				launchErr = handleStartFailure(launchErr)
+			}
+		}()
+	}
+	return s.launchIntent(ctx, req, intent)
+}
+
+func (s *Service) launchIntent(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+	intent SessionIntent,
+) (*LaunchSessionResponse, error) {
+	if response, err := s.prepareLaunchIntent(ctx, req, intent); err != nil || response != nil {
+		return response, err
+	}
+	response, err := s.dispatchLaunchIntent(ctx, req, intent)
+	return s.finishLaunchIntent(ctx, req, intent, response, err)
+}
+
+func (s *Service) prepareLaunchIntent(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+	intent SessionIntent,
+) (*LaunchSessionResponse, error) {
+	if response, err := s.prioritizeRestartRestore(ctx, req, intent); err != nil || response != nil {
+		return response, err
 	}
 	if response := s.passiveLaunchResponse(ctx, req, intent); response != nil {
 		return response, nil
@@ -426,11 +533,16 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	if err := s.claimLaunchAttachments(ctx, req); err != nil {
 		return nil, fmt.Errorf("claim launch attachments: %w", err)
 	}
+	return nil, nil
+}
 
-	var (
-		response *LaunchSessionResponse
-		err      error
-	)
+func (s *Service) dispatchLaunchIntent(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+	intent SessionIntent,
+) (*LaunchSessionResponse, error) {
+	var response *LaunchSessionResponse
+	var err error
 	switch intent {
 	case IntentPrepare:
 		response, err = s.launchPrepare(ctx, req)
@@ -447,6 +559,16 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	default:
 		err = fmt.Errorf("unknown intent: %s", intent)
 	}
+	return response, err
+}
+
+func (s *Service) finishLaunchIntent(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+	intent SessionIntent,
+	response *LaunchSessionResponse,
+	err error,
+) (*LaunchSessionResponse, error) {
 	if err != nil {
 		if req.RecoveryAction == "" {
 			if blockErr := s.recordRecoveryBlockForError(ctx, req, err); blockErr != nil {
@@ -482,10 +604,21 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	if err != nil {
 		return fmt.Errorf("check session recovery block: %w", err)
 	}
-	if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); resolved {
+	resolved, finishErr := s.finishLoadedNativeDeliveryBlock(ctx, block)
+	if resolved {
 		return nil
 	}
-	return &sessionRecoveryRequiredError{Block: block}
+	required := &sessionRecoveryRequiredError{Block: block}
+	if finishErr != nil {
+		required.DeliveryRefusalReason = deliveryRecoveryRefusalReason(finishErr)
+		required.internalCause = finishErr
+	}
+	if isBootDeliveryReadinessContext(ctx) {
+		s.logBootDeliveryRecoveryRefusal(ctx, sessionID, required, block)
+	} else {
+		s.logDeliveryRecoveryRefusal(ctx, sessionID, required, block)
+	}
+	return required
 }
 
 // GetOpenSessionRecoveryBlock returns the canonical block for an autonomous
@@ -547,6 +680,9 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 	}
 	block, err := store.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, generation)
 	if errors.Is(err, sql.ErrNoRows) {
+		if action == recoveryActionResume {
+			return s.finishSessionRecovery(ctx, sessionID)
+		}
 		return nil
 	}
 	if err != nil {
@@ -564,11 +700,21 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 		return fmt.Errorf("resolve session recovery block: %w", err)
 	}
 	if !resolved {
+		if action == recoveryActionResume {
+			return sessionRecoveryBlockResolutionGuidance(ctx, store, sessionID, incarnationID, generation, block, handled)
+		}
 		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
+	return s.finishSessionRecovery(ctx, sessionID)
+}
+
+func (s *Service) finishSessionRecovery(ctx context.Context, sessionID string) error {
 	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
 		return fmt.Errorf("release parked queue work after session recovery: %w", err)
+	}
+	if err := s.publishPendingRecoveryNotice(ctx, sessionID); err != nil {
+		return fmt.Errorf("persist session recovery notice: %w", err)
 	}
 	return nil
 }
@@ -837,6 +983,9 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 	if err != nil {
 		return nil, err
 	}
+	if err := s.applyMCPServerSelections(ctx, req.TaskID, sessionID, req.MCPServerIDs); err != nil {
+		return nil, err
+	}
 	return &LaunchSessionResponse{
 		Success:   true,
 		TaskID:    req.TaskID,
@@ -900,7 +1049,13 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
-		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin},
+		startTaskOptions{
+			ProfileExplicit:               req.ProfileExplicit,
+			SpawnOrigin:                   req.SpawnOrigin,
+			PreserveWorkflowSourceBinding: req.PreserveWorkflowSourceBinding,
+			MCPServerIDs:                  req.MCPServerIDs,
+			reusePreparedPrimary:          req.reusePreparedPrimary,
+		},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {
 		return s.deferredLaunchResponse(ctx, req, "")
@@ -961,7 +1116,18 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	}
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
-	options := startCreatedSessionOptions{}
+	options := startCreatedSessionOptions{lifecycleLockHeld: req.QuickChatInitialStart}
+	if req.Prompt != "" && !req.PromptIsTaskDescription {
+		// The launching caller supplied an explicit instruction, not the
+		// task-description transport used by internals. Select the existing
+		// preserving composer before seam 2 can serialize this request.
+		options.preserveDirectPrompt = true
+	}
+	if req.QuickChatInitialStart {
+		options.onQuickChatStartAttemptClaimed = func(attemptID string) {
+			req.QuickChatStartAgentAttemptID = attemptID
+		}
+	}
 	if !req.NoInitialPrompt {
 		beforeAdmission, accepted, callbackErr := s.initialSubmissionDispatchCallbacks(
 			ctx, req.TaskID, req.SessionID, req.Prompt, req.PlanMode, req.Attachments,
@@ -971,11 +1137,24 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 		}
 		options.beforeProviderAdmission = beforeAdmission
 		options.onInitialPromptAccepted = accepted
+		if options.preserveDirectPrompt && beforeAdmission != nil {
+			// A matching pending receipt can outlive a failed launch and drive
+			// fresh-start recovery. Persist the explicit origin next to the
+			// receipt so recovery uses the same preserving composer.
+			if err := s.repo.SetSessionMetadataKey(
+				ctx, req.SessionID, models.SessionMetaKeyInitialPromptExplicitLaunch, true,
+			); err != nil {
+				return nil, fmt.Errorf("record explicit initial prompt origin: %w", err)
+			}
+		}
 	}
 	if req.NoInitialPrompt {
 		options.skipTaskDescriptionFallback = true
 		options.promptAlreadyComposed = true
 		options.noInitialTurn = true
+	}
+	if err := s.applyMCPServerSelections(ctx, req.TaskID, req.SessionID, req.MCPServerIDs); err != nil {
+		return nil, err
 	}
 	execution, err := s.startCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,
@@ -1032,8 +1211,17 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		ContinuationPrompt:               req.ContinuationPrompt,
 		DeferInitialPrompt:               req.DeferRecoveryResolution,
 		RecoveryAction:                   req.RecoveryAction,
-		StartAgentSynchronously: req.DeferRecoveryResolution &&
-			(req.ForceContextContinuation || req.RecoveryAction == recoveryActionResume),
+		InitialPromptOverride:            req.InitialPromptOverride,
+		StartAgentSynchronously: req.transientLaunchFailure != nil ||
+			(req.DeferRecoveryResolution && (req.ForceContextContinuation || req.RecoveryAction == recoveryActionResume)),
+	}
+	if req.transientLaunchFailure != nil {
+		resumeOptions.TransientRetryAttemptID = req.transientLaunchFailure.attemptID
+		resumeOptions.TransientRetryErrorStamp = req.transientLaunchFailure.errorStamp
+		resumeOptions.TransientRetryUpdatedAt = req.transientLaunchFailure.updatedAt
+	}
+	if resumeOptions.InitialPromptOverride != nil {
+		s.installLegacyRecoveryPromptGuard(ctx, req.TaskID, &resumeOptions)
 	}
 	var execution *executor.TaskExecution
 	var err error
@@ -1045,7 +1233,8 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 			resumeCtx, req.TaskID, req.SessionID, resumeOptions,
 			func(promptCtx context.Context, attempt *resumeAttempt, _ *executor.TaskExecution) error {
 				return s.replayInitialPromptSubmission(
-					promptCtx, req.TaskID, req.SessionID, req.InitialPromptSubmission, attempt,
+					promptCtx, req.TaskID, req.SessionID, req.InitialPromptSubmission,
+					req.initialPromptRecovery, attempt,
 				)
 			},
 		)
@@ -1087,6 +1276,25 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 	return executionToLaunchResponse(req.TaskID, execution), nil
 }
 
+// installLegacyRecoveryPromptGuard binds a text-only fresh-start launch to the
+// workflow entry captured before reset. The resume dispatch fence remains held
+// until the executor reports prompt acceptance or failure.
+func (s *Service) installLegacyRecoveryPromptGuard(
+	ctx context.Context,
+	taskID string,
+	options *executor.ResumeOptions,
+) {
+	binding := ceilingEntryBindingFromContext(ctx)
+	if binding == nil {
+		return
+	}
+	options.BeforeInitialPromptDispatch = func(dispatchCtx context.Context) error {
+		guardCtx := withCeilingEntryBinding(dispatchCtx, binding)
+		guardCtx = withCeilingEntryKind(guardCtx, models.CeilingLaunchResume)
+		return s.validateClaimedCeilingBinding(guardCtx, taskID, binding)
+	}
+}
+
 func (s *Service) sessionOpenRecoveryWaitingResponse(
 	ctx context.Context,
 	req *LaunchSessionRequest,
@@ -1112,6 +1320,9 @@ func (s *Service) sessionOpenRecoveryWaitingResponse(
 }
 
 func launchOriginForActivation(req *LaunchSessionRequest) launchOrigin {
+	if req != nil && req.Origin == string(launchOriginAutomatic) {
+		return launchOriginAutomatic
+	}
 	if req != nil && req.ActivationSource == LaunchActivationSourceSessionOpen {
 		return launchOriginAutomatic
 	}
@@ -1303,17 +1514,10 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 		return nil, err
 	}
 
-	if err := s.agentManager.EnsureWorkspaceExecutionForSession(ctx, req.TaskID, req.SessionID); err != nil {
-		var projectionErr *agentruntime.WorkspaceRecoveryProjectionError
-		if errors.As(err, &projectionErr) {
-			if projectionErr.PersistFailed {
-				return nil, errors.New("workspace recovery state could not be saved")
-			}
-			return nil, &ManagedCloneRelocationRecoveryError{Stamp: projectionErr.Stamp, Stale: projectionErr.Stale}
-		}
-		return nil, fmt.Errorf("failed to restore workspace: %w", err)
+	agentExecutionID, err := s.ensureRestoreWorkspaceExecutionReady(ctx, req.TaskID, req.SessionID)
+	if err != nil {
+		return nil, err
 	}
-	agentExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, req.SessionID)
 
 	resp := &LaunchSessionResponse{
 		Success:          true,
@@ -1334,11 +1538,81 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 	return resp, nil
 }
 
+func (s *Service) ensureRestoreWorkspaceExecutionReady(
+	ctx context.Context,
+	taskID, sessionID string,
+) (string, error) {
+	readyCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	retry := time.NewTicker(100 * time.Millisecond)
+	defer retry.Stop()
+
+	for {
+		if err := s.ensureWorkspaceExecutionForRestore(readyCtx, taskID, sessionID); err != nil {
+			return "", err
+		}
+
+		// An environment may already have an execution owned by another session.
+		// Restoration succeeds only after this session has its own ready binding.
+		executionID, err := s.agentManager.GetExecutionIDForSession(readyCtx, sessionID)
+		if err != nil || strings.TrimSpace(executionID) == "" {
+			if err := waitForRestoreWorkspaceRetry(readyCtx, retry.C); err != nil {
+				return "", fmt.Errorf("workspace execution is not bound to the requested session: %w", err)
+			}
+			continue
+		}
+		if err := s.agentManager.WaitForAgentctlReady(readyCtx, sessionID); err != nil {
+			if !errors.Is(err, executor.ErrAgentctlClientUnavailable) {
+				return "", fmt.Errorf("workspace execution is not ready: %w", err)
+			}
+			if err := waitForRestoreWorkspaceRetry(readyCtx, retry.C); err != nil {
+				return "", fmt.Errorf("workspace execution is not ready: %w", err)
+			}
+			continue
+		}
+
+		currentExecutionID, err := s.agentManager.GetExecutionIDForSession(readyCtx, sessionID)
+		if err != nil || currentExecutionID != executionID {
+			if err := waitForRestoreWorkspaceRetry(readyCtx, retry.C); err != nil {
+				return "", fmt.Errorf("workspace execution binding did not stabilize: %w", err)
+			}
+			continue
+		}
+		return executionID, nil
+	}
+}
+
+func (s *Service) ensureWorkspaceExecutionForRestore(ctx context.Context, taskID, sessionID string) error {
+	err := s.agentManager.EnsureWorkspaceExecutionForSession(ctx, taskID, sessionID)
+	if err == nil {
+		return nil
+	}
+	var projectionErr *agentruntime.WorkspaceRecoveryProjectionError
+	if errors.As(err, &projectionErr) {
+		if projectionErr.PersistFailed {
+			return errors.New("workspace recovery state could not be saved")
+		}
+		return &ManagedCloneRelocationRecoveryError{Stamp: projectionErr.Stamp, Stale: projectionErr.Stale}
+	}
+	return fmt.Errorf("failed to restore workspace: %w", err)
+}
+
+func waitForRestoreWorkspaceRetry(ctx context.Context, retry <-chan time.Time) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-retry:
+		return nil
+	}
+}
+
 // RecoverSessionOptions carries action-specific recovery authority.
 type RecoverSessionOptions struct {
-	IdempotencyKey string
-	SettingsPolicy executor.ResumeSettingsPolicy
-	ErrorStamp     string
+	IdempotencyKey         string
+	SettingsPolicy         executor.ResumeSettingsPolicy
+	ErrorStamp             string
+	Origin                 string
+	transientLaunchFailure *transientLaunchFailureIdentity
 }
 
 // RecoverSession handles user-initiated recovery after an agent CLI failure.
@@ -1376,6 +1650,12 @@ func (s *Service) RecoverSessionWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	if options.transientLaunchFailure != nil {
+		ctx = withTransientLaunchRetryContext(ctx, *options.transientLaunchFailure)
+		if err := s.validateTransientLaunchFailure(ctx, taskID, sessionID, *options.transientLaunchFailure); err != nil {
+			return nil, err
+		}
+	}
 	if s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
@@ -1385,9 +1665,13 @@ func (s *Service) RecoverSessionWithOptions(
 	}
 	if action == recoveryActionResume {
 		if response, handled, err := s.resumePrunedDelivery(ctx, session); handled || err != nil {
+			if err != nil {
+				s.logDeliveryRecoveryRefusal(ctx, sessionID, err, nil)
+			}
 			return response, err
 		}
 		if err := s.checkNativeResumeDeliveryBlock(ctx, taskID, sessionID); err != nil {
+			s.logDeliveryRecoveryRefusal(ctx, sessionID, err, nil)
 			return nil, err
 		}
 	}
@@ -1419,6 +1703,12 @@ func (s *Service) RecoverSessionWithOptions(
 		}
 	}
 	resumeOptions := executor.ResumeOptions{}
+	resumeOptions.Origin = options.Origin
+	if options.transientLaunchFailure != nil {
+		resumeOptions.TransientRetryAttemptID = options.transientLaunchFailure.attemptID
+		resumeOptions.TransientRetryErrorStamp = options.transientLaunchFailure.errorStamp
+		resumeOptions.TransientRetryUpdatedAt = options.transientLaunchFailure.updatedAt
+	}
 	var checkpoint *continuationCheckpoint
 	var continuation executor.ContextContinuation
 	if action == recoveryActionContinueHistory {
@@ -1439,7 +1729,10 @@ func (s *Service) RecoverSessionWithOptions(
 		}
 	}
 
-	recoveryAdmission, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
+	recoveryAdmission, releaseReplacement, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
+	if releaseReplacement != nil {
+		defer s.releaseRecoveryReplacement(context.WithoutCancel(ctx), releaseReplacement, taskID, sessionID)
+	}
 	if err != nil {
 		if checkpoint != nil {
 			if settleErr := s.finishContinuationCheckpoint(context.WithoutCancel(ctx), checkpoint, models.ContinuitySnapshotUncertain); settleErr != nil {
@@ -1463,20 +1756,50 @@ func (s *Service) RecoverSessionWithOptions(
 		launchCtx = worktree.WithRecoveryAdmission(launchCtx, recoveryAdmission)
 	}
 	var initialSubmission *models.InitialPromptSubmission
+	var initialRecoveryPlan *initialRecoveryPromptPlan
 	if action == recoveryActionFreshStart {
 		initialSubmission, err = s.initialSubmissionForFreshStart(launchCtx, taskID, session)
 		if err != nil {
 			return nil, err
 		}
+		initialRecoveryPlan, err = s.prepareInitialRecoveryPrompt(launchCtx, taskID, session, initialSubmission)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var initialPromptRecovery *initialRecoveryPrompt
+	var initialPromptOverride *string
+	if initialRecoveryPlan != nil {
+		initialPromptRecovery = initialRecoveryPlan.receipt
+		initialPromptOverride = initialRecoveryPlan.legacyOverride
+		if initialRecoveryPlan.binding != nil {
+			launchCtx = withCeilingEntryBinding(launchCtx, initialRecoveryPlan.binding)
+			launchCtx = withCeilingEntryKind(launchCtx, models.CeilingLaunchResume)
+			if err := s.validateClaimedCeilingBinding(launchCtx, taskID, initialRecoveryPlan.binding); err != nil {
+				return nil, err
+			}
+		}
 	}
 
-	if err := s.applyRecoveryActionWithSettlement(launchCtx, recoveryAdmission, sessionID, action); err != nil {
+	if err := s.applyRecoveryActionWithSettlement(launchCtx, recoveryAdmission, taskID, sessionID, action); err != nil {
 		if checkpoint != nil {
 			if settleErr := s.finishContinuationCheckpoint(context.WithoutCancel(ctx), checkpoint, models.ContinuitySnapshotUncertain); settleErr != nil {
 				err = errors.Join(err, settleErr)
 			}
 		}
 		return nil, normalizeRecoverSessionError(err)
+	}
+
+	continuationSucceeded := false
+	if checkpoint != nil {
+		claimed, claimErr := s.claimContextContinuationRoute(launchCtx, session)
+		if claimErr != nil {
+			settleErr := s.finishContinuationCheckpoint(context.WithoutCancel(ctx), checkpoint, models.ContinuitySnapshotUncertain)
+			return nil, errors.Join(claimErr, settleErr)
+		}
+		if claimed || s.retainedContextContinuationRoute(launchCtx, session) {
+			defer s.releaseAbandonedContextContinuationRoute(ctx, sessionID, session.RouteGeneration, &continuationSucceeded)
+		}
 	}
 
 	resp, err := s.LaunchSession(launchCtx, &LaunchSessionRequest{
@@ -1488,16 +1811,23 @@ func (s *Service) RecoverSessionWithOptions(
 		RepairWorkspaceInventory:         action == recoveryActionRepairWorkspaceInventory,
 		WorkspaceInventoryIdempotencyKey: strings.TrimSpace(options.IdempotencyKey),
 		SessionSettingsPolicy:            options.SettingsPolicy,
+		Origin:                           options.Origin,
+		transientLaunchFailure:           options.transientLaunchFailure,
 		ForceContextContinuation:         resumeOptions.ForceContextContinuation,
 		ContinuationPrompt:               resumeOptions.ContinuationPrompt,
 		RecoveryAction:                   action,
 		DeferRecoveryResolution:          checkpoint != nil || action == recoveryActionResume,
 		InitialPromptSubmission:          initialSubmission,
+		InitialPromptOverride:            initialPromptOverride,
+		initialPromptRecovery:            initialPromptRecovery,
 	})
 	if err == nil && action == recoveryActionResume {
 		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
 	}
 	if err != nil {
+		if action == recoveryActionResume {
+			s.logDeliveryRecoveryRefusal(launchCtx, sessionID, err, nil)
+		}
 		if recoveryAdmission != nil {
 			if persistErr := recoveryAdmission.CompleteRecoveryResume(launchCtx, false, "resume_failed"); persistErr != nil {
 				err = errors.Join(err, persistErr)
@@ -1506,11 +1836,15 @@ func (s *Service) RecoverSessionWithOptions(
 		return s.handleContinuationLaunchError(ctx, checkpoint, err)
 	}
 	if err := completeRecoveryResumeAfterLaunch(launchCtx, recoveryAdmission, resp); err != nil {
+		if action == recoveryActionResume {
+			s.logDeliveryRecoveryRefusal(launchCtx, sessionID, err, nil)
+		}
 		return nil, err
 	}
 	if checkpoint == nil {
 		if action == recoveryActionResume {
 			if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
+				s.logDeliveryRecoveryRefusal(ctx, sessionID, err, nil)
 				return nil, normalizeRecoverSessionError(err)
 			}
 		}
@@ -1549,6 +1883,7 @@ func (s *Service) RecoverSessionWithOptions(
 	if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
 		return nil, normalizeRecoverSessionError(err)
 	}
+	continuationSucceeded = true
 	return resp, nil
 }
 
@@ -1607,8 +1942,15 @@ func completeRecoveryResumeAfterLaunch(
 func (s *Service) applyRecoveryActionWithSettlement(
 	ctx context.Context,
 	admission *worktree.RecoveryAdmission,
-	sessionID, action string,
+	taskID, sessionID, action string,
 ) error {
+	if identity, ok := transientLaunchFailureFromContext(ctx); ok {
+		release := s.acquireSessionLifecycleLock(sessionID)
+		defer release()
+		if err := s.validateTransientLaunchFailure(ctx, taskID, sessionID, identity); err != nil {
+			return err
+		}
+	}
 	if err := s.applySessionRecoveryAction(ctx, sessionID, action); err != nil {
 		if admission != nil {
 			if persistErr := admission.CompleteRecoveryResume(ctx, false, "resume_action_failed"); persistErr != nil {
@@ -1636,19 +1978,22 @@ func (s *Service) preflightSessionRecovery(
 	taskID string,
 	session *models.TaskSession,
 	action string,
-) (*worktree.RecoveryAdmission, error) {
+) (*worktree.RecoveryAdmission, func(context.Context) error, error) {
 	// Inventory repair must attest the original checkout before any filesystem
 	// recovery can modify it. Its executor path validates inventory first.
 	if action == recoveryActionRepairWorkspaceInventory {
-		return nil, nil
+		return nil, nil, nil
 	}
-	admission, err := s.executor.PreflightSessionWorktreeRecovery(
+	return s.executor.PreflightSessionWorktreeRecovery(
 		ctx, taskID, session, action == recoveryActionResumeNewBranch,
 	)
-	if err != nil {
-		return nil, err
+}
+
+func (s *Service) releaseRecoveryReplacement(ctx context.Context, release func(context.Context) error, taskID, sessionID string) {
+	if err := release(ctx); err != nil {
+		s.logger.Warn("failed to release unused recovery replacement",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
 	}
-	return admission, nil
 }
 
 func (s *Service) loadSessionForRecovery(

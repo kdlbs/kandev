@@ -31,8 +31,11 @@ Mirror the Unix helper flow in `scripts/dev-isolated.ps1`,
 `scripts/kandev-kill.ps1`, and `scripts/kandev-instances.ps1`. Reuse the native
 launcher binaries and the `dev` profile via `make -C apps/backend build`. Keep
 the numeric backend pidfile and record process start times and the isolated home
-in sidecars. Launch Vite directly through Node so its pidfile names the actual
-listener; verify process identity before terminating either process tree.
+in sidecars. Launch the backend and Vite through the existing native `winjob.exe` helper,
+which assigns each suspended child to a Job Object before resuming it. Record
+only the exact child identity published by that supervisor and verify its
+executable and listener rows. Retain supervisor handles for complete startup
+failure cleanup; verify recorded process identity during normal teardown.
 Default the Vite host to `127.0.0.1` and refuse a resolved home that is a
 live-state boundary before any write.
 
@@ -44,7 +47,7 @@ live-state boundary before any write.
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.2` | Unique default home, isolated `KANDEV_HOME_DIR`, `HOME`, `USERPROFILE`, and fresh `data` database |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.3` | `Resolve-SafeIsolatedHome` refuses live-home descendants, reparse aliases, drive/workspace boundaries before any write |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.4` | `-WebHost` defaults to `127.0.0.1`; the Go backend proxies to the selected Vite host |
-| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.5` | Direct Vite PID, start-time verification, and full-tree teardown after backend exit |
+| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.5` | Supervisor-published exact Vite listener identity, start-time verification, and full-tree teardown after backend exit |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.6` | `kandev-kill.ps1` guarded-port refusal unless `-Force` |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.7` | Recorded home and pipeline-friendly `-Raw` listing |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.8` | Backend and Vite child environments are allowlisted; backend config discovery is disabled |
@@ -59,12 +62,16 @@ python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
 
-PowerShell parser check for the three scripts, plus a one-off guard test with a
-disposable fake profile.
+Hosted Windows runs the existing home/environment guards, native supervisor
+tests, and `scripts/tests/isolated-launch.Tests.ps1`. The launch suite exercises
+real executable fixtures and sockets, with positive controls for both listeners,
+caller-pipe EOF, concurrency, cleanup, literal paths, and native build stderr.
+Backend path-filter contract tests keep PowerShell inputs selected in future CI.
 
 ## Work orders
 
 - [x] [Task 01: Windows isolated-instance scripts](task-01-windows-isolated-scripts.md)
+- [x] [Task 02: Detach launched children from the caller](task-02-detach-launched-children.md)
 
 ## Risks
 

@@ -47,6 +47,41 @@ This requirement supersedes requirement 001's automatic cancellation policy.
   focus, recovery, and follow-up messaging without an orphan-cancellation banner.
   Actual recovery failures shall retain explicit retry actions and stored history.
 
+### REQ-TASKS-RESTART-ORPHAN-SESSIONS-003: Accepted automatic starts survive a restart
+
+**Intent:** A backend restart must not strand a task whose automatic workflow
+start was accepted but had not produced a running session.
+
+This requirement does not relax 002.2. It covers an accepted step start that
+never delivered its entry prompt, not an interrupted conversation.
+
+#### Acceptance criteria
+
+- **AC-TASKS-RESTART-ORPHAN-SESSIONS-003.1:** On startup, a task left in
+  `SCHEDULING` on a step with an `auto_start_agent` entry action, with no
+  deferred-launch record, workflow queue destination, lifecycle token, or
+  recorded launch error, shall be started again through the existing automatic
+  start path. Capacity admission, workflow WIP admission, the step prompt, and
+  session serialization shall apply unchanged.
+- **AC-TASKS-RESTART-ORPHAN-SESSIONS-003.2:** A task that waits for workflow
+  WIP admission, holds a deferred-launch record or a lifecycle token, records a
+  launch error, belongs to Office, sits on a step without automatic start, or
+  has unresolved dependencies shall be left to its existing owner. An Office
+  ownership read error shall not authorize recovery; any present deferred-launch
+  key, including an empty or malformed value, shall retain its owner.
+- **AC-TASKS-RESTART-ORPHAN-SESSIONS-003.3:** When the current step already
+  holds a `WAITING_FOR_INPUT` or `IDLE` session without an accepted user
+  prompt for the current entry, the step entry shall run on that session. No second session shall be
+  created. Lifecycle-only turns and turns from an earlier visit to the same step shall
+  not prove delivery of the current entry. When that session already accepted
+  this entry's prompt, the stale `SCHEDULING` state shall be repaired only while
+  the observed entry still owns the task. A later entry, including a revisit to the same step, shall remain
+  unchanged and shall receive no stale state-change event. A `CREATED`, `STARTING`, or `RUNNING`
+  session shall be left alone.
+- **AC-TASKS-RESTART-ORPHAN-SESSIONS-003.4:** The pass shall run once per
+  startup, before the lifecycle-token sweep, and shall not start a second
+  session or turn for a task that another recovery path owns.
+
 ## Interruption visibility
 
 Interrupted tasks retain the [interruption warning](interrupted-task-indicator.md)

@@ -1,7 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Page, Route } from "@playwright/test";
-import type { StorageMaintenanceSettings, StorageSettingsResponse } from "../../lib/types/system";
+import type {
+  StorageMaintenanceRun,
+  StorageMaintenanceSettings,
+  StorageSettingsResponse,
+} from "../../lib/types/system";
 import type { ApiClient } from "./api-client";
 
 const ABOVE_DEFAULT_LIMIT_BYTES = 16 * 1024 * 1024 * 1024;
@@ -158,6 +162,97 @@ function resolveGoCacheCleanupEligibleSize(options: {
   goCacheCleanupEligible?: number;
 }): number {
   return options.goCacheCleanupEligible ?? options.goCache ?? 7 * 1024 ** 3;
+}
+
+export function storageMaintenanceHistoryRuns(): StorageMaintenanceRun[] {
+  const gib = 1024 ** 3;
+  const parentChangeMessage = Array.from(
+    { length: 12 },
+    () => "go-cache parent changed after scan\npath_changed_or_unsafe",
+  ).join("\n");
+  return [
+    {
+      id: "history-partial",
+      trigger: "scheduled",
+      state: "failed",
+      settings_snapshot: {
+        go_cache: { allow_cleanup_while_busy: true },
+      } as never,
+      result: {
+        go_cache: {
+          result: {
+            reclaimed_bytes: Math.round(10.75 * gib),
+            bytes_after: Math.round(53.69 * gib),
+            partial: true,
+            errors: [
+              "cache_parent_changed",
+              "entry_delete_failed",
+              "cache_parent_changed",
+              "entry_delete_failed",
+            ],
+          },
+          error: parentChangeMessage,
+        },
+        skipped_providers: {
+          workspaces: { reason: "activity_busy" },
+          quarantine: { reason: "activity_busy" },
+        },
+      },
+      message: parentChangeMessage,
+      started_at: "2026-11-03T05:54:07Z",
+    },
+    {
+      id: "history-progress",
+      trigger: "manual",
+      state: "failed",
+      settings_snapshot: {} as never,
+      result: {
+        go_cache: {
+          result: {
+            reclaimed_bytes: Math.round(58.04 * gib),
+            bytes_after: null,
+            partial: true,
+            reason: "cleanup_in_progress",
+            errors: ["entry_limit_reached"],
+          },
+          error: "entry_limit_reached",
+        },
+      },
+      message: "go_cache: entry_limit_reached",
+      started_at: "2026-11-02T23:54:07Z",
+    },
+    {
+      id: "history-unknown",
+      trigger: "manual",
+      state: "failed",
+      settings_snapshot: {} as never,
+      result: {
+        go_cache: {
+          result: { reclaimed_bytes: 0, errors: ["future_code"] },
+          error: "unexpected cleanup failure",
+        },
+      },
+      message: "go_cache: unexpected cleanup failure",
+      started_at: "2026-11-03T06:00:00Z",
+    },
+  ];
+}
+
+export async function mockStorageMaintenanceRuns(
+  page: Page,
+  runs: StorageMaintenanceRun[] = storageMaintenanceHistoryRuns(),
+): Promise<void> {
+  await page.route("**/api/v1/system/storage/runs**", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ runs }),
+    });
+  });
 }
 
 export function storageBarsSnapshot(

@@ -44,6 +44,7 @@
   "undo": "撤销",
   "update": "更新",
   "walkthrough": "导览",
+  "walkthroughGeneratedAt": "生成于 {{date}}",
   "walkthroughNoteAdded": "已添加导览备注",
   "walkthroughNoteQueued": "导览备注已排队",
   "walkthroughNoteSent": "导览备注已发送",
@@ -52,5 +53,14 @@
   "fileStatusModified": "已修改",
   "fileStatusMoved": "已移动",
   "fileStatusMovedFrom": "从 {{oldPath}} 移动而来",
-  "fileStatusUntracked": "未跟踪"
+  "fileStatusUntracked": "未跟踪",
+  "walkthroughComment": "评论",
+  "walkthroughPending": "待发送",
+  "walkthroughSubmitted": "已提交",
+  "walkthroughCommentCount_one": "{{count}} 条评论",
+  "walkthroughCommentCount_other": "{{count}} 条评论",
+  "walkthroughSelectStep": "跳转到步骤",
+  "walkthroughUntitledStep": "步骤 {{number}}",
+  "walkthroughStepOption_one": "{{number}}. {{title}}（{{count}} 条评论）",
+  "walkthroughStepOption_other": "{{number}}. {{title}}（{{count}} 条评论）"
 }

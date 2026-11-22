@@ -1227,6 +1227,7 @@ func (m *MockClient) Reset() {
 	m.prsByBranch = make(map[branchKey]*PR)
 	m.orgs = nil
 	m.repos = make(map[string][]GitHubRepo)
+	m.repositoryDetails = make(map[repoKey]*GitHubRepository)
 	m.branches = make(map[repoKey][]RepoBranch)
 	m.reviews = make(map[prKey][]PRReview)
 	m.comments = make(map[prKey][]PRComment)

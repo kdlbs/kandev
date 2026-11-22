@@ -478,12 +478,11 @@ rule guards against.
 
 ## Prior art
 
-**Leg 1, internal wiki — DID NOT RUN.** Receipt: `@henry` resolved
-`OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki`,
-`QMD_WIKI_COLLECTION=wiki`. The path exists but every read returns `Operation not
-permitted` even with the sandbox disabled (macOS TCC, not the agent sandbox), and
-there is no `qmd` MCP server or CLI, so the grep fallback needed the same blocked
-filesystem. No wiki content read and none claimed; a re-run needs Full Disk Access.
+**Leg 1, internal wiki — DID NOT RUN.** The author's private notes vault (local
+path omitted) is present, but every read returns `Operation not permitted` even
+with the sandbox disabled (macOS TCC, not the agent sandbox). There is no `qmd`
+MCP server or CLI, so the grep fallback needs the same blocked filesystem. No
+wiki content was read, and none is claimed; a re-run needs Full Disk Access.
 
 **Leg 2, cross-vendor `saas-kb` — DID NOT RUN.** Receipt: no `saas-kb` MCP server
 attached and no local checkout or CLI, so `search_fsm_docs` with

@@ -207,8 +207,9 @@ const (
 // whenever a new matching issue appears. Mirrors the Linear/Jira shape so the
 // orchestrator's WatcherSource pipeline applies uniformly.
 type IssueWatch struct {
-	ID          string `json:"id" db:"id"`
-	WorkspaceID string `json:"workspaceId" db:"workspace_id"`
+	CreatedByUserID string `json:"-" db:"created_by_user_id"`
+	ID              string `json:"id" db:"id"`
+	WorkspaceID     string `json:"workspaceId" db:"workspace_id"`
 	// SentryInstanceID binds the watch to exactly one Sentry instance. Empty =
 	// legacy unbound watch (stored as SQL NULL); the poller resolves an unbound
 	// watch to the workspace's sole instance at poll time. Immutable once set:
@@ -262,8 +263,9 @@ type IssueWatchTask struct {
 // issue matching a watch that has no existing dedup row. The orchestrator
 // consumes this to create (and optionally auto-start) a Kandev task.
 type NewSentryIssueEvent struct {
-	IssueWatchID string `json:"issueWatchId"`
-	WorkspaceID  string `json:"workspaceId"`
+	CreatedByUserID string `json:"created_by_user_id,omitempty"`
+	IssueWatchID    string `json:"issueWatchId"`
+	WorkspaceID     string `json:"workspaceId"`
 	// SentryInstanceID is the instance the originating watch is bound to (empty
 	// for a migrated legacy watch resolved to its workspace's sole instance).
 	// Carried onto the created task's metadata for traceability.

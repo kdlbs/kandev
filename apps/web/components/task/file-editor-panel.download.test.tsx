@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { StateProvider } from "@/components/state-provider";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const triggerFileDownload = vi.fn();
@@ -52,10 +53,12 @@ describe("viewer headerActions contract", () => {
     const onDownload = vi.fn();
     render(
       <TooltipProvider>
-        <FileBinaryViewer
-          path="assets/bundle.zip"
-          headerActions={<FileViewerDownloadButton onDownload={onDownload} />}
-        />
+        <StateProvider>
+          <FileBinaryViewer
+            path="assets/bundle.zip"
+            headerActions={<FileViewerDownloadButton onDownload={onDownload} />}
+          />
+        </StateProvider>
       </TooltipProvider>,
     );
 

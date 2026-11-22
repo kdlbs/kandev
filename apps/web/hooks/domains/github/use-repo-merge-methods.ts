@@ -20,8 +20,8 @@ const completed = new Map<string, CachedEntry>();
 // no unhandled-rejection warnings in the browser console).
 const pending = new Map<string, Promise<void>>();
 
-function repoKey(workspaceId: string, owner: string, repo: string) {
-  return `${workspaceId}:${owner}/${repo}`;
+function repoKey(workspaceId: string, owner: string, repo: string, host: string) {
+  return `${workspaceId}:${host}/${owner}/${repo}`;
 }
 
 function readFresh(key: string): RepoMergeMethods | null {
@@ -48,19 +48,20 @@ export function useRepoMergeMethods(
   workspaceId: string | null,
   owner: string | null,
   repo: string | null,
+  host = "github.com",
 ): RepoMergeMethods | null {
   const [, rerender] = useReducer((c: number) => c + 1, 0);
 
   useEffect(() => {
     if (!workspaceId || !owner || !repo) return;
-    const key = repoKey(workspaceId, owner, repo);
+    const key = repoKey(workspaceId, owner, repo, host);
     if (readFresh(key)) return;
     const existing = pending.get(key);
     if (existing) {
       void existing.then(rerender);
       return;
     }
-    const promise = getRepoMergeMethods(workspaceId, owner, repo)
+    const promise = getRepoMergeMethods(workspaceId, owner, repo, { expectedHost: host })
       .then((result) => {
         completed.set(key, { value: result, expiresAt: Date.now() + CACHE_TTL_MS });
         pending.delete(key);
@@ -76,8 +77,8 @@ export function useRepoMergeMethods(
         rerender();
       });
     pending.set(key, promise);
-  }, [workspaceId, owner, repo]);
+  }, [host, workspaceId, owner, repo]);
 
   if (!workspaceId || !owner || !repo) return null;
-  return readFresh(repoKey(workspaceId, owner, repo));
+  return readFresh(repoKey(workspaceId, owner, repo, host));
 }

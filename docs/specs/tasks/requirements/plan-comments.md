@@ -127,6 +127,15 @@ context to a non-primary session when I choose.
   a final server-rendered prompt larger than 1 MiB before inserting the delivery
   or consuming its comments. The comments and composer draft shall remain
   available for the user to shorten and retry.
+- **AC-TASKS-PLAN-COMMENTS-002.9:** When the queued or Send now dispatch of an
+  accepted comment-bearing message (plan comments or web preview feedback) fails before
+  the Agent runtime could have received the prompt, Kandev shall keep the
+  message, or every source of a Send now, queued for the same session and
+  visible in that session's queue, and shall not show it as delivered by
+  deleting its queue entry. When a failure
+  happens after the prompt could have reached the Agent, Kandev may complete
+  the entry without retry so the comments are delivered no more than once.
+  Kandev shall log both outcomes with the error and queue entry identifier.
 
 ### REQ-TASKS-PLAN-COMMENTS-003: Primary-session Run routing
 
@@ -222,6 +231,8 @@ migration gate without changing task ownership or backend acceptance semantics.
 
 ## Implementation plans
 
+- [Plan comment Send delivery](../../../plans/plan-comment-send-lock-order/plan.md)
+  repairs notification ordering and agent admission under requirements 002 and 003.
 - [Plan comment foreground preservation](../../../plans/plan-comment-foreground-preservation/plan.md)
 
 - [Task-owned plan comments](../../../plans/task-owned-plan-comments/plan.md)

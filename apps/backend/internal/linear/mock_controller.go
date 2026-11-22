@@ -31,6 +31,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.PUT("/auth-health", c.setAuthHealth)
 	api.POST("/teams", c.setTeams)
 	api.POST("/states", c.setStates)
+	api.POST("/projects", c.setProjects)
 	api.POST("/issues", c.addIssues)
 	api.PUT("/get-issue-error", c.setGetIssueError)
 	api.DELETE("/reset", c.reset)
@@ -94,6 +95,28 @@ func (c *MockController) setStates(ctx *gin.Context) {
 	}
 	c.mock.SetStates(req.TeamKey, req.States)
 	ctx.JSON(http.StatusOK, gin.H{"count": len(req.States)})
+}
+
+func (c *MockController) setProjects(ctx *gin.Context) {
+	var req struct {
+		TeamKey  string `json:"teamKey"`
+		Projects []struct {
+			LinearProject
+			Content string `json:"content"`
+		} `json:"projects"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.TeamKey == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "teamKey required"})
+		return
+	}
+	projects := make([]LinearProject, 0, len(req.Projects))
+	contents := make(map[string]string, len(req.Projects))
+	for _, p := range req.Projects {
+		projects = append(projects, p.LinearProject)
+		contents[p.ID] = p.Content
+	}
+	c.mock.SetProjects(req.TeamKey, projects, contents)
+	ctx.JSON(http.StatusOK, gin.H{"count": len(projects)})
 }
 
 func (c *MockController) addIssues(ctx *gin.Context) {

@@ -8,14 +8,18 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// RecoveryActionFreshStart is the explicit recovery action that replaces the
+// session's native conversation.
+const RecoveryActionFreshStart = "fresh_start"
+
 type harnessSessionGenerationReader interface {
 	GetCurrentHarnessSessionGeneration(context.Context, string, string) (*models.HarnessSessionGeneration, error)
 }
 
 // applyDeliveryIdentity resolves the durable stream owner before an executor
 // launch. A process replacement keeps the same generation and stream; an
-// explicit context continuation advances the generation before its new native
-// conversation can publish events.
+// explicit context continuation or fresh start advances the generation before
+// its new native conversation can publish events.
 func (e *Executor) applyDeliveryIdentity(
 	ctx context.Context,
 	req *LaunchAgentRequest,
@@ -37,7 +41,9 @@ func (e *Executor) applyDeliveryIdentity(
 	} else if req.OriginalWorkspacePath == "" {
 		req.OriginalWorkspacePath = session.WorkspacePath
 	}
-	if req.ForceContextContinuation && current != nil {
+	// Without a committed predecessor, a fresh start is the first generation.
+	req.ReplaceNativeConversation = req.ReplaceNativeConversation && current != nil
+	if (req.ForceContextContinuation || req.ReplaceNativeConversation) && current != nil {
 		generation++
 	}
 	if req.InterruptedSubmissionID != "" {

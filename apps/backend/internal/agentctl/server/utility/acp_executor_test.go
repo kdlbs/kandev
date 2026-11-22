@@ -121,6 +121,7 @@ func TestStderrBufferSurvivesConcurrentUse(t *testing.T) {
 	}()
 	for range 200 {
 		_ = buf.tail()
+		_, _ = buf.probeTails()
 	}
 	<-written
 

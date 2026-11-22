@@ -7,6 +7,7 @@ import {
   updateGitHubWorkspaceSettings,
 } from "@/lib/api/domains/github-api";
 import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
+import { generateUUID } from "@/lib/uuid";
 import {
   readSavedPresets,
   setSavedPresetDefault,
@@ -66,13 +67,18 @@ function queuePortableMutation(mutation: () => Promise<void>): Promise<void> {
 // Separate workspaces remain independent during navigation between them.
 const workspaceSyncQueues = new Map<string, Promise<void>>();
 
-function syncWorkspaceSavedPresets(workspaceId: string, next: SavedPreset[]): Promise<void> {
+function syncWorkspaceSavedPresets(
+  workspaceId: string,
+  next: SavedPreset[],
+  host: string,
+): Promise<void> {
   const previous = workspaceSyncQueues.get(workspaceId) ?? Promise.resolve();
   const queued = previous
     .catch(() => undefined)
     .then(() =>
       updateGitHubWorkspaceSettings({
         workspace_id: workspaceId,
+        expected_host: host,
         saved_presets: next,
       }).then(() => undefined),
     );
@@ -127,6 +133,7 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
   const [state, setState] = useState<{
     workspaceId: string | null;
     presets?: SavedPreset[];
+    host?: string;
     loading: boolean;
     error: boolean;
   }>({ workspaceId, loading: true, error: false });
@@ -145,7 +152,13 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
       .then((settings) => {
         if (cancelled || seq !== writeSeq.current) return;
         const serverPresets = readSavedPresets(settings.saved_presets);
-        setState({ workspaceId, presets: serverPresets, loading: false, error: false });
+        setState({
+          workspaceId,
+          host: settings.github_host ?? "github.com",
+          presets: serverPresets,
+          loading: false,
+          error: false,
+        });
       })
       .catch(() => {
         if (!cancelled && seq === writeSeq.current) {
@@ -159,12 +172,19 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
   const setWorkspacePresetsFromLocal = useCallback(
     (next: SavedPreset[]) => {
       writeSeq.current += 1;
-      setState({ workspaceId, presets: next, loading: false, error: false });
+      setState((current) => ({
+        ...current,
+        workspaceId,
+        presets: next,
+        loading: false,
+        error: false,
+      }));
     },
     [workspaceId],
   );
   const current = state.workspaceId === workspaceId;
   return {
+    workspaceHost: current ? state.host : undefined,
     workspacePresets: current ? state.presets : undefined,
     setWorkspacePresets: setWorkspacePresetsFromLocal,
     loading: current ? state.loading : true,
@@ -194,6 +214,7 @@ function restoreSavedPreset(
 }
 
 type SavedPresetMutationContext = {
+  host: string;
   workspaceId: string | null;
   presets: SavedPreset[];
   portableGeneration: number;
@@ -208,7 +229,7 @@ function persistSavedPresets(
   next: SavedPreset[],
 ): Promise<void> {
   if (context.workspaceId !== null) {
-    return syncWorkspaceSavedPresets(context.workspaceId, next);
+    return syncWorkspaceSavedPresets(context.workspaceId, next, context.host);
   }
   return syncServer(next);
 }
@@ -217,18 +238,22 @@ function useSavedPresetMutationContext(
   workspaceId: string | null,
   activePresets: SavedPreset[],
   setWorkspacePresets: (next: SavedPreset[]) => void,
+  host: string,
 ) {
   const mutationContextRef = useRef<SavedPresetMutationContext>({
     workspaceId,
+    host,
     presets: activePresets,
     portableGeneration: portableMutationGeneration,
   });
   if (
     mutationContextRef.current.workspaceId !== workspaceId ||
+    mutationContextRef.current.host !== host ||
     mutationContextRef.current.portableGeneration !== portableMutationGeneration
   ) {
     mutationContextRef.current = {
       workspaceId,
+      host,
       presets: activePresets,
       portableGeneration: portableMutationGeneration,
     };
@@ -274,7 +299,7 @@ function useSavedPresetMutationQueue(workspaceId: string | null) {
 
 export function useSavedPresets(workspaceId: string | null = null) {
   const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const { workspacePresets, setWorkspacePresets, ...workspaceLoad } =
+  const { workspaceHost, workspacePresets, setWorkspacePresets, ...workspaceLoad } =
     useWorkspaceSavedPresets(workspaceId);
   const workspacePresetsRef = useRef(workspacePresets);
   workspacePresetsRef.current = workspacePresets;
@@ -284,6 +309,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
     workspaceId,
     activePresets,
     setWorkspacePresets,
+    workspaceHost ?? "github.com",
   );
   const queueMutation = useSavedPresetMutationQueue(workspaceId);
 
@@ -297,7 +323,7 @@ export function useSavedPresets(workspaceId: string | null = null) {
       const context = mutationContextRef.current;
       const preset: SavedPreset = {
         ...input,
-        id: `p_${crypto.randomUUID()}`,
+        id: `p_${generateUUID()}`,
         createdAt: new Date().toISOString(),
         isDefault: false,
       };

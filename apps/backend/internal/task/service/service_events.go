@@ -105,6 +105,21 @@ func (s *Service) PublishTaskStateChanged(ctx context.Context, task *models.Task
 	s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
 }
 
+// PublishCommittedTaskStateChange publishes one receipt returned by the task
+// repository's state writer. activityHandled is true when the caller already
+// wrote the Office activity row before entering this publisher.
+func (s *Service) PublishCommittedTaskStateChange(
+	ctx context.Context, change models.TaskStateChange, activityHandled bool,
+) {
+	if !change.Matched || !change.Changed || change.Task == nil {
+		return
+	}
+	oldState := change.OldState
+	s.publishTaskEventWithExtraOptions(
+		ctx, events.TaskStateChanged, change.Task, &oldState, nil, activityHandled,
+	)
+}
+
 // PublishAfterTaskEvents appends a task-scoped publication behind any task
 // events already being drained. Reentrant callers append without waiting,
 // preserving FIFO order without deadlocking the active publication.
@@ -302,6 +317,13 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 // Caller-supplied keys must not shadow the standard task fields written below
 // (task_id, title, workflow_id, etc.); colliding keys silently overwrite them.
 func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, extra map[string]interface{}, oldWorkflowIDs ...string) {
+	s.publishTaskEventWithExtraOptions(ctx, eventType, task, oldState, extra, false, oldWorkflowIDs...)
+}
+
+func (s *Service) publishTaskEventWithExtraOptions(
+	ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState,
+	extra map[string]interface{}, activityHandled bool, oldWorkflowIDs ...string,
+) {
 	if s.eventBus == nil {
 		return
 	}
@@ -320,7 +342,10 @@ func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType strin
 		oldStateSnapshot = &value
 	}
 	s.enqueueTaskPublication(ctx, taskSnapshot.ID, eventType, func(publicationCtx context.Context) {
-		s.publishTaskEventNow(publicationCtx, eventType, taskSnapshot, oldStateSnapshot, extraSnapshot, oldWorkflowSnapshot, nil)
+		s.publishTaskEventNowWithOptions(
+			publicationCtx, eventType, taskSnapshot, oldStateSnapshot, extraSnapshot,
+			oldWorkflowSnapshot, nil, activityHandled,
+		)
 	})
 }
 
@@ -457,6 +482,14 @@ func snapshotTaskForPublication(task *models.Task) *models.Task {
 }
 
 func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, extra map[string]interface{}, oldWorkflowIDs []string, activity *taskActivitySnapshot) {
+	s.publishTaskEventNowWithOptions(ctx, eventType, task, oldState, extra, oldWorkflowIDs, activity, false)
+}
+
+func (s *Service) publishTaskEventNowWithOptions(
+	ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState,
+	extra map[string]interface{}, oldWorkflowIDs []string, activity *taskActivitySnapshot,
+	activityHandled bool,
+) {
 
 	data := map[string]interface{}{
 		"task_id":            task.ID,
@@ -468,6 +501,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		"description":        task.Description,
 		"state":              string(task.State),
 		"priority":           task.Priority,
+		"execution_grade":    task.ExecutionGrade,
 		"position":           task.Position,
 		"wip_admitted":       task.WIPAdmitted,
 		"created_at":         task.CreatedAt.Format(time.RFC3339Nano),
@@ -517,7 +551,19 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 
 	activity = s.addTaskSessionEventFieldsWithActivity(ctx, task.ID, data, activity)
 	s.addTaskParkedEventField(data, task.ID)
+	s.addTaskEventOptionalFields(ctx, eventType, task, oldState, extra, oldWorkflowIDs, data)
+	s.publishTaskEventPayload(ctx, eventType, task, oldState, activity, activityHandled, data)
+}
 
+func (s *Service) addTaskEventOptionalFields(
+	ctx context.Context,
+	eventType string,
+	task *models.Task,
+	oldState *v1.TaskState,
+	extra map[string]interface{},
+	oldWorkflowIDs []string,
+	data map[string]interface{},
+) {
 	if task.ParentID != "" {
 		data["parent_id"] = task.ParentID
 	}
@@ -557,7 +603,18 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	for k, v := range extra {
 		data[k] = v
 	}
-	if eventType == events.TaskStateChanged && oldState != nil && s.taskStateActivity != nil {
+}
+
+func (s *Service) publishTaskEventPayload(
+	ctx context.Context,
+	eventType string,
+	task *models.Task,
+	oldState *v1.TaskState,
+	activity *taskActivitySnapshot,
+	activityHandled bool,
+	data map[string]interface{},
+) {
+	if !activityHandled && eventType == events.TaskStateChanged && oldState != nil && s.taskStateActivity != nil {
 		// Write the Office read-model row before publishing the event. The
 		// WebSocket broadcaster can then trigger a detail GET without racing
 		// the activity projection that supplies Started and Completed.
@@ -835,6 +892,9 @@ func serializeTaskRepositories(repos []*models.TaskRepository) []map[string]inte
 		if r.CheckoutBranch != "" {
 			serialized["checkout_branch"] = r.CheckoutBranch
 		}
+		if r.WorkspaceRelativePath != "" {
+			serialized["workspace_relative_path"] = r.WorkspaceRelativePath
+		}
 		if r.BranchPolicyID != "" {
 			serialized["branch_policy_id"] = r.BranchPolicyID
 		}
@@ -876,13 +936,14 @@ func serializeTaskWorkspaceFolders(folders []*models.TaskWorkspaceFolder) []map[
 	out := make([]map[string]interface{}, 0, len(folders))
 	for _, folder := range folders {
 		out = append(out, map[string]interface{}{
-			"id":           folder.ID,
-			"task_id":      folder.TaskID,
-			"local_path":   folder.LocalPath,
-			"display_name": folder.DisplayName,
-			"position":     folder.Position,
-			"created_at":   folder.CreatedAt.Format(time.RFC3339),
-			"updated_at":   folder.UpdatedAt.Format(time.RFC3339),
+			"id":                      folder.ID,
+			"task_id":                 folder.TaskID,
+			"local_path":              folder.LocalPath,
+			"display_name":            folder.DisplayName,
+			"workspace_relative_path": folder.WorkspaceRelativePath,
+			"position":                folder.Position,
+			"created_at":              folder.CreatedAt.Format(time.RFC3339),
+			"updated_at":              folder.UpdatedAt.Format(time.RFC3339),
 		})
 	}
 	return out
@@ -890,7 +951,7 @@ func serializeTaskWorkspaceFolders(folders []*models.TaskWorkspaceFolder) []map[
 
 // publishTaskMovedEvent publishes a task.moved event so the orchestrator can process
 // on_exit/on_enter actions for the new workflow step.
-func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID, moveID string) {
+func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID, moveID string, oldState v1.TaskState) {
 	if s.eventBus == nil {
 		return
 	}
@@ -900,6 +961,9 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 	}
 	data := map[string]interface{}{
 		"task_id":                   task.ID,
+		"workspace_id":              task.WorkspaceID,
+		"old_state":                 string(oldState),
+		"new_state":                 string(task.State),
 		"step_transition_id":        task.WorkflowStepTransitionID,
 		"move_id":                   moveID,
 		"from_workflow_id":          fromWorkflowID,
@@ -1003,15 +1067,16 @@ func (s *Service) publishExecutorEvent(ctx context.Context, eventType string, ex
 	}
 
 	data := map[string]interface{}{
-		"id":         executor.ID,
-		"name":       executor.Name,
-		"type":       executor.Type,
-		"status":     executor.Status,
-		"is_system":  executor.IsSystem,
-		"resumable":  executor.Resumable,
-		"config":     executor.Config,
-		"created_at": executor.CreatedAt.Format(time.RFC3339),
-		"updated_at": executor.UpdatedAt.Format(time.RFC3339),
+		"owner_user_id": executor.OwnerUserID,
+		"id":            executor.ID,
+		"name":          executor.Name,
+		"type":          executor.Type,
+		"status":        executor.Status,
+		"is_system":     executor.IsSystem,
+		"resumable":     executor.Resumable,
+		"config":        executor.Config,
+		"created_at":    executor.CreatedAt.Format(time.RFC3339),
+		"updated_at":    executor.UpdatedAt.Format(time.RFC3339),
 	}
 
 	s.publishEventToBus(ctx, eventType, "executor", executor.ID, data)
@@ -1027,6 +1092,7 @@ func (s *Service) publishExecutorProfileEvent(ctx context.Context, eventType str
 		provider = executor.Provider
 	}
 	data := map[string]interface{}{
+		"owner_user_id":  profile.OwnerUserID,
 		"id":             profile.ID,
 		"executor_id":    profile.ExecutorID,
 		"name":           profile.Name,
@@ -1141,6 +1207,10 @@ func projectConversationReceipt(receipt *models.ConversationMutationReceipt) *mo
 		if operation.HadOutput != nil {
 			hadOutput := *operation.HadOutput
 			copyOperation.HadOutput = &hadOutput
+		}
+		if operation.ConfigurationCommandResult != nil {
+			result := *operation.ConfigurationCommandResult
+			copyOperation.ConfigurationCommandResult = &result
 		}
 		projected.Operations = append(projected.Operations, copyOperation)
 	}
@@ -1402,6 +1472,9 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 		"secret_bindings":        bindings,
 		"created_at":             repository.CreatedAt.Format(time.RFC3339),
 		"updated_at":             repository.UpdatedAt.Format(time.RFC3339),
+	}
+	if remoteURL, ok := displayableRemoteURL(repository.RemoteURL); ok {
+		data["remote_url"] = remoteURL
 	}
 	event := bus.NewEvent(eventType, "task-service", data)
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {

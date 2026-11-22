@@ -120,7 +120,7 @@ func TestHandleTaskStateChanged_FiresBothChildrenCompletedAndDependency(t *testi
 		}
 		svc.scheduler = scheduler.NewScheduler(
 			queue.NewTaskQueue(100),
-			executor.NewExecutor(agentMgr, repo, newTestLogger(), executor.ExecutorConfig{}),
+			withTestCapabilities(executor.NewExecutor(agentMgr, repo, newTestLogger(), executor.ExecutorConfig{})),
 			mockT,
 			newTestLogger(),
 			scheduler.SchedulerConfig{},

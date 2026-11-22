@@ -34,9 +34,9 @@ func (r *Repository) CreateExecutor(ctx context.Context, executor *models.Execut
 	}
 
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), executor.ID, executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.CreatedAt, executor.UpdatedAt, executor.DeletedAt)
+		INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at, owner_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))
+	`), executor.ID, executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.CreatedAt, executor.UpdatedAt, executor.DeletedAt, executor.OwnerUserID)
 	return err
 }
 
@@ -47,11 +47,11 @@ func (r *Repository) GetExecutor(ctx context.Context, id string) (*models.Execut
 	var resumable int
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at
+		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at, COALESCE(owner_user_id, '')
 		FROM executors WHERE id = ? AND deleted_at IS NULL
 	`), id).Scan(
 		&executor.ID, &executor.Name, &executor.Type, &executor.Status,
-		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
+		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt, &executor.OwnerUserID,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("%w: %s", models.ErrExecutorNotFound, id)
@@ -78,10 +78,19 @@ func (r *Repository) UpdateExecutor(ctx context.Context, executor *models.Execut
 		return fmt.Errorf("failed to serialize executor config: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE executors SET name = ?, type = ?, status = ?, is_system = ?, resumable = ?, config = ?, updated_at = ?
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	owner, err := r.executorOwnershipForUpdateTx(ctx, tx, executor)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE executors SET name = ?, type = ?, status = ?, is_system = ?, resumable = ?, config = ?, updated_at = ?, owner_user_id = NULLIF(?, '')
 		WHERE id = ? AND deleted_at IS NULL
-	`), executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.UpdatedAt, executor.ID)
+	`), executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.UpdatedAt, owner, executor.ID)
 	if err != nil {
 		return err
 	}
@@ -89,10 +98,19 @@ func (r *Repository) UpdateExecutor(ctx context.Context, executor *models.Execut
 	if rows == 0 {
 		return fmt.Errorf("executor not found: %s", executor.ID)
 	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	executor.OwnerUserID = owner
+	executor.OwnershipIntent = nil
 	return nil
 }
 
 func (r *Repository) DeleteExecutor(ctx context.Context, id string) error {
+	return r.deleteExecutor(ctx, id, nil)
+}
+
+func (r *Repository) deleteExecutor(ctx context.Context, id string, expectedOwner *string) error {
 	now := time.Now().UTC()
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -100,14 +118,24 @@ func (r *Repository) DeleteExecutor(ctx context.Context, id string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	result, err := tx.ExecContext(ctx, tx.Rebind(`
-		UPDATE executors SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
-	`), now, now, id)
+	if err := r.lockExecutorOwnershipTx(ctx, tx, id); err != nil {
+		return err
+	}
+	query := "UPDATE executors SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL"
+	args := []any{now, now, id}
+	if expectedOwner != nil {
+		query += " AND COALESCE(owner_user_id, '') = ?"
+		args = append(args, *expectedOwner)
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(query), args...)
 	if err != nil {
 		return err
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		if expectedOwner != nil {
+			return models.ErrExecutorOwnershipChanged
+		}
 		return fmt.Errorf("executor not found: %s", id)
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
@@ -132,7 +160,7 @@ func scanExecutorRow(scanner interface{ Scan(...any) error }) (*models.Executor,
 	var resumable int
 	if err := scanner.Scan(
 		&executor.ID, &executor.Name, &executor.Type, &executor.Status,
-		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
+		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt, &executor.OwnerUserID,
 	); err != nil {
 		return nil, err
 	}
@@ -148,7 +176,7 @@ func scanExecutorRow(scanner interface{ Scan(...any) error }) (*models.Executor,
 
 func (r *Repository) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at
+		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at, COALESCE(owner_user_id, '')
 		FROM executors WHERE deleted_at IS NULL ORDER BY created_at ASC
 	`)
 	if err != nil {
@@ -238,6 +266,10 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		}
 	}
 	if err := r.retainQuickChatHistoryTx(ctx, tx, running.SessionID); err != nil {
+		return err
+	}
+	metadataJSON, err = r.retainBuiltinBindingTx(ctx, tx, running, metadataJSON)
+	if err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
@@ -630,6 +662,31 @@ func (r *Repository) HasExecutorRunningRow(ctx context.Context, sessionID string
 		SELECT 1 FROM executors_running WHERE session_id = ? LIMIT 1
 	`), sessionID).Scan(&exists)
 	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// HasActiveExecutorRunningRow returns true if sessionID has an executors_running
+// row whose runtime may still be writing to the workspace. Failed rows remain
+// active because a stream failure does not confirm that the runtime stopped.
+func (r *Repository) HasActiveExecutorRunningRow(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, fmt.Errorf("session_id is required")
+	}
+	var exists int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT 1 FROM executors_running
+		WHERE session_id = ? AND (status IS NULL OR status NOT IN (?, ?))
+		LIMIT 1
+	`), sessionID,
+		models.ExecutorRunningStatusStopped,
+		models.ExecutorRunningStatusComplete,
+	).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {

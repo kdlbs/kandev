@@ -5,6 +5,9 @@ import type { WebSocketClient } from "@/lib/ws/client";
 import type { RepositoryScript } from "@/lib/types/http";
 import { useTerminals } from "./use-terminals";
 import { deferred, renderSessionRead } from "./session-read-test-helpers";
+import { userShellScopeKey } from "@/lib/state/user-shell-scope";
+
+const SCOPE_KEY = userShellScopeKey({ environmentId: "environment", taskId: "task" });
 
 afterEach(() => {
   cleanup();
@@ -41,7 +44,7 @@ it.each(["ordinary", "script"])(
       (store) => store.setState((state) => ({ tasks: { ...state.tasks, activeTaskId: "task" } })),
     );
     await waitFor(() =>
-      expect(result.current.store.getState().userShells.loaded.environment).toBe(true),
+      expect(result.current.store.getState().userShells.listed[SCOPE_KEY]).toBe(true),
     );
     for (let index = 0; index < 2; index++) {
       await act(async () => {
@@ -55,19 +58,31 @@ it.each(["ordinary", "script"])(
     }
     const [sibling, target] = result.current.value.terminals;
     expect(result.current.value.terminals).toHaveLength(2);
-    expect(
+    const scopedIds =
+      result.current.store.getState().userShells.byScope[SCOPE_KEY]?.map((s) => s.terminalId) ?? [];
+    const sharedIds =
       result.current.store
         .getState()
-        .userShells.byEnvironmentId.environment.map((s) => s.terminalId),
-    ).toEqual([sibling.id, target.id]);
+        .userShells.byEnvironmentId.environment?.map((s) => s.terminalId) ?? [];
+    expect([...scopedIds, ...sharedIds]).toEqual([sibling.id, target.id]);
     let closing!: Promise<boolean>;
     act(() => {
       closing = result.current.value.destroyTerminal(target.id);
     });
     expect(result.current.value.terminals.map((terminal) => terminal.id)).toEqual([sibling.id]);
-    expect(result.current.store.getState().userShells.byEnvironmentId.environment).toEqual([
-      expect.objectContaining({ terminalId: sibling.id, kind, running: true }),
-    ]);
+    if (kind === "ordinary") {
+      expect(result.current.store.getState().userShells.byScope[SCOPE_KEY]).toEqual([
+        expect.objectContaining({ terminalId: sibling.id, kind, running: true }),
+      ]);
+      expect(result.current.store.getState().userShells.byEnvironmentId.environment ?? []).toEqual(
+        [],
+      );
+    } else {
+      expect(result.current.store.getState().userShells.byScope[SCOPE_KEY]).toEqual([]);
+      expect(result.current.store.getState().userShells.byEnvironmentId.environment).toEqual([
+        expect.objectContaining({ terminalId: sibling.id, kind, running: true }),
+      ]);
+    }
     expect(request.mock.calls.filter(([action]) => action === "user_shell.list")).toHaveLength(1);
     await act(async () => {
       destroy.resolve({});

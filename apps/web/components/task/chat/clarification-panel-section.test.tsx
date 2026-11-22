@@ -1,17 +1,35 @@
 import { createRef } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, cleanup, fireEvent, screen } from "@testing-library/react";
+import { act, render, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { i18n } from "@/lib/i18n";
-import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type ClarificationRequestMetadata,
+  type Message,
+} from "@/lib/types/http";
 import { ClarificationPanelSection } from "./clarification-panel-section";
 import { ClarificationHeaderActions } from "./clarification-overlay-header";
+import {
+  ComposerDisclosureContext,
+  type ComposerDisclosureContextValue,
+} from "./composer-disclosure";
+
+/* eslint-disable max-lines, max-lines-per-function -- one harness shares clarification lifecycle regressions. */
 
 vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "https://api.test" }),
 }));
 
 const mockUpdateMessage = vi.fn();
+const imageMocks = vi.hoisted(() => ({ fetch: vi.fn() }));
+vi.mock("@/lib/api/domains/question-image-api", () => ({
+  fetchQuestionImage: imageMocks.fetch,
+  questionImageErrorCode: () => "unavailable",
+}));
 vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({ auth: { mode: "none", authenticated: true, user: null } }),
   useAppStoreApi: () => ({
     getState: () => ({ updateMessage: mockUpdateMessage }),
   }),
@@ -57,7 +75,47 @@ function clarMessage(opts: {
   };
 }
 
-function renderSection(pending: boolean, messages: Message[], maxHeightVh = 50) {
+function setTestRect(element: HTMLElement, top: number, height: number) {
+  element.getBoundingClientRect = () =>
+    ({ top, bottom: top + height, left: 0, right: 800, width: 800, height }) as DOMRect;
+}
+
+class PanelResizeObserverStub {
+  static instances: PanelResizeObserverStub[] = [];
+  readonly observed = new Set<Element>();
+
+  constructor(readonly callback: ResizeObserverCallback) {
+    PanelResizeObserverStub.instances.push(this);
+  }
+
+  observe(element: Element) {
+    this.observed.add(element);
+  }
+
+  unobserve(element: Element) {
+    this.observed.delete(element);
+  }
+
+  disconnect() {
+    this.observed.clear();
+  }
+}
+
+function triggerResize(element: Element) {
+  const observers = PanelResizeObserverStub.instances.filter((observer) =>
+    observer.observed.has(element),
+  );
+  act(() =>
+    observers.forEach((observer) => observer.callback([], observer as unknown as ResizeObserver)),
+  );
+}
+
+function renderSection(
+  pending: boolean,
+  messages: Message[],
+  initialMaxHeightVh = 50,
+  host: { allocationRef?: React.RefObject<HTMLElement | null>; reservedHeightPx?: number } = {},
+) {
   const scopeRef = createRef<HTMLDivElement>();
   const onResolved = vi.fn();
   const utils = render(
@@ -67,15 +125,42 @@ function renderSection(pending: boolean, messages: Message[], maxHeightVh = 50) 
         messages={messages}
         onResolved={onResolved}
         shortcutScopeRef={scopeRef}
-        maxHeightVh={maxHeightVh}
+        initialMaxHeightVh={initialMaxHeightVh}
+        allocationRef={host.allocationRef}
+        reservedHeightPx={host.reservedHeightPx}
       />
     </div>,
   );
   return { ...utils, scopeRef, onResolved };
 }
 
+function renderThreadSection(messages: Message[], allocation: HTMLElement) {
+  const scopeRef = createRef<HTMLDivElement>();
+  const allocationRef = { current: allocation } as React.RefObject<HTMLElement | null>;
+  const disclosure = {
+    clarificationAllocationRef: allocationRef,
+    clarificationReservedHeightPx: 0,
+  } as ComposerDisclosureContextValue;
+  const utils = render(
+    <ComposerDisclosureContext.Provider value={disclosure}>
+      <div ref={scopeRef} tabIndex={-1}>
+        <ClarificationPanelSection
+          pending
+          messages={messages}
+          onResolved={vi.fn()}
+          shortcutScopeRef={scopeRef}
+          initialMaxHeightVh={50}
+        />
+      </div>
+    </ComposerDisclosureContext.Provider>,
+  );
+  return { ...utils, scopeRef };
+}
+
 beforeEach(() => {
+  Object.defineProperty(window, "innerHeight", { configurable: true, writable: true, value: 1000 });
   fetchMock.mockReset();
+  imageMocks.fetch.mockReset();
   mockUpdateMessage.mockReset();
   fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
@@ -83,6 +168,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   cleanup();
+  vi.unstubAllGlobals();
   // Restoring the locale is load-bearing: changeLanguage mutates the shared
   // instance vitest.setup.ts initializes, so leaving it on pseudo would leak
   // into every test that runs after this file.
@@ -94,6 +180,85 @@ const OPTION_TESTID = "clarification-option";
 const CONTAINER_TESTID = "clarification-overlay-container";
 const QUESTION_COUNT_TESTID = "clarification-question-count";
 const SUBMITTING_STATUS_TESTID = "clarification-submitting-status";
+const SIZE_TOGGLE_TESTID = "clarification-panel-size-toggle";
+const EXPAND_LABEL = "Expand";
+const RESTORE_LABEL = "Restore";
+const ARIA_LABEL = "aria-label";
+const ARIA_DISABLED = "aria-disabled";
+
+async function submitSinglePanelAnswer() {
+  const button = await screen.findByTestId("clarification-custom-submit");
+  await vi.waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(button);
+}
+
+describe("ClarificationPanelSection — image lifecycle", () => {
+  it("cancels hidden question and choice reads while preserving the answer draft", async () => {
+    const images = [1, 2, 3, 4].map((id) => ({
+      id: `image${id}`,
+      path: `${id}.png`,
+      alt: `Preview ${id}`,
+    }));
+    const message = clarMessage({
+      pendingId: "images",
+      id: "m1",
+      questionId: "q1",
+      index: 0,
+      total: 1,
+    });
+    const metadata = message.metadata as ClarificationRequestMetadata;
+    metadata.question.images = images.slice(0, 2);
+    metadata.question.options = images.slice(2).map((image) => ({
+      option_id: image.id,
+      label: image.alt,
+      description: "",
+      images: [image],
+    }));
+    const pending: { signal: AbortSignal; resolve: (blob: Blob) => void }[] = [];
+    imageMocks.fetch.mockImplementation(
+      (_pending, _question, _image, signal: AbortSignal) =>
+        new Promise<Blob>((resolve) => pending.push({ signal, resolve })),
+    );
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn(() => "blob:preview"),
+      revokeObjectURL: vi.fn(),
+    });
+    const { unmount, onResolved } = renderSection(true, [message]);
+    try {
+      await waitFor(() => expect(imageMocks.fetch).toHaveBeenCalledTimes(2));
+      fireEvent.change(screen.getByTestId("clarification-input"), {
+        target: { value: "Keep this answer draft." },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Collapse clarification" }));
+      expect(pending.every(({ signal }) => signal.aborted)).toBe(true);
+      await act(async () => pending.forEach(({ resolve }) => resolve(new Blob(["late"]))));
+      expect(imageMocks.fetch).toHaveBeenCalledTimes(2);
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(onResolved).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Expand clarification" }));
+      expect((screen.getByTestId("clarification-input") as HTMLTextAreaElement).value).toBe(
+        "Keep this answer draft.",
+      );
+      await waitFor(() => expect(imageMocks.fetch).toHaveBeenCalledTimes(4));
+      await act(async () =>
+        pending.slice(2).forEach(({ resolve }) => resolve(new Blob(["fresh"]))),
+      );
+      await waitFor(() => expect(imageMocks.fetch).toHaveBeenCalledTimes(6));
+      await act(async () =>
+        pending.slice(4).forEach(({ resolve }) => resolve(new Blob(["choice"]))),
+      );
+      expect(screen.getAllByRole("img")).toHaveLength(4);
+      fireEvent.click(screen.getByRole("button", { name: "Collapse clarification" }));
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(4);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      unmount();
+      await act(async () => pending.forEach(({ resolve }) => resolve(new Blob(["cleanup"]))));
+    }
+  });
+});
 
 describe("ClarificationPanelSection — collapse affordance", () => {
   it("keeps the expanded question controls in one header row", () => {
@@ -109,6 +274,7 @@ describe("ClarificationPanelSection — collapse affordance", () => {
     expect(header.querySelector('[data-testid="clarification-submit"]')).not.toBeNull();
     expect(header.querySelector('[data-testid="clarification-skip"]')).not.toBeNull();
     expect(header.querySelector('[data-testid="clarification-collapse-toggle"]')).not.toBeNull();
+    expect(screen.getAllByTestId(SIZE_TOGGLE_TESTID)).toHaveLength(1);
     expect(screen.queryByText("Clarification needed")).toBeNull();
   });
 
@@ -142,6 +308,27 @@ describe("ClarificationPanelSection — collapse affordance", () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   });
 
+  it("preserves expanded sizing and its Restore target when collapsed and reopened", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages);
+    const container = screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement;
+    const sizeToggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+
+    fireEvent.click(sizeToggle);
+    expect(sizeToggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+    expect(container.style.height).toBe("1000px");
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse clarification" }));
+    expect(screen.getByTestId(SCROLL_REGION_TESTID).className).toContain("hidden");
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand clarification" }));
+    expect(screen.getByTestId(SCROLL_REGION_TESTID).className).not.toContain("hidden");
+    expect(container.style.height).toBe("1000px");
+    expect(screen.getByTestId(SIZE_TOGGLE_TESTID).getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+  });
+
   it("resets to expanded when a new bundle (different pending_id) arrives while collapsed", () => {
     const bundleA = [
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
@@ -161,7 +348,7 @@ describe("ClarificationPanelSection — collapse affordance", () => {
           messages={bundleB}
           onResolved={vi.fn()}
           shortcutScopeRef={scopeRef}
-          maxHeightVh={50}
+          initialMaxHeightVh={50}
         />
       </div>,
     );
@@ -184,9 +371,9 @@ describe("ClarificationPanelSection — submitting feedback", () => {
 
     const status = screen.getByTestId(SUBMITTING_STATUS_TESTID);
     const submit = screen.getByTestId("clarification-submit");
-    expect(status.getAttribute("aria-label")).toBe(i18n.t("task:submitting"));
+    expect(status.getAttribute(ARIA_LABEL)).toBe(i18n.t("task:submitting"));
     expect(status.getAttribute("aria-hidden")).toBeNull();
-    expect(submit.getAttribute("aria-label")).toBe(i18n.t("task:submit"));
+    expect(submit.getAttribute(ARIA_LABEL)).toBe(i18n.t("task:submit"));
   });
 
   it("shows the translated submitting status before Skip while a single answer is in flight", async () => {
@@ -204,10 +391,11 @@ describe("ClarificationPanelSection — submitting feedback", () => {
 
     try {
       fireEvent.click(screen.getByTestId(OPTION_TESTID));
+      await submitSinglePanelAnswer();
 
       const status = await screen.findByTestId(SUBMITTING_STATUS_TESTID);
       const skip = screen.getByTestId("clarification-skip");
-      expect(status.getAttribute("aria-label")).toBe(i18n.t("task:submitting"));
+      expect(status.getAttribute(ARIA_LABEL)).toBe(i18n.t("task:submitting"));
       expect(status.getAttribute("aria-hidden")).toBeNull();
       expect(status.compareDocumentPosition(skip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect((skip as HTMLButtonElement).disabled).toBe(true);
@@ -242,6 +430,7 @@ describe("ClarificationPanelSection — submitting feedback", () => {
 
     try {
       fireEvent.click(screen.getByTestId(OPTION_TESTID));
+      await submitSinglePanelAnswer();
       await screen.findByTestId(SUBMITTING_STATUS_TESTID);
 
       rejectResponse(new Error("network"));
@@ -257,25 +446,250 @@ describe("ClarificationPanelSection — submitting feedback", () => {
   });
 });
 
-describe("ClarificationPanelSection — per-surface max-height cap", () => {
-  it("renders the CSS max-height from the maxHeightVh prop instead of a hardcoded value", () => {
+describe("ClarificationPanelSection — per-surface initial height cap", () => {
+  it("renders the initial cap as pixels before the host budget is expanded", () => {
     const messages = [
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
     ];
     renderSection(true, messages, 50);
 
     const container = screen.getByTestId(CONTAINER_TESTID);
-    expect(container.style.maxHeight).toBe("50vh");
+    expect(container.style.maxHeight).toBe("500px");
   });
 
-  it("a different surface's maxHeightVh renders a different cap (e.g. Quick Chat's 35vh)", () => {
+  it("keeps a different surface's initial ratio (e.g. Quick Chat's 35vh)", () => {
     const messages = [
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
     ];
     renderSection(true, messages, 35);
 
     const container = screen.getByTestId(CONTAINER_TESTID);
-    expect(container.style.maxHeight).toBe("35vh");
+    expect(container.style.maxHeight).toBe("350px");
+  });
+
+  it("expands to measured host space and restores content sizing without losing an answer draft", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages);
+    const container = screen.getByTestId(CONTAINER_TESTID);
+    const input = screen.getByTestId("clarification-input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Keep this answer." } });
+
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+    expect(toggle.getAttribute("aria-controls")).toBe(
+      screen.getByTestId("clarification-scroll-region").id,
+    );
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBeNull();
+    fireEvent.click(toggle);
+
+    expect(container.style.height).toBe("1000px");
+    expect(container.style.maxHeight).toBe("1000px");
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBeNull();
+    expect(input.value).toBe("Keep this answer.");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(toggle);
+
+    expect(container.style.height).toBe("");
+    expect(container.style.maxHeight).toBe("500px");
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+    expect(input.value).toBe("Keep this answer.");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the size toggle focusable and focused through expansion and restoration", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages);
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+
+    toggle.focus();
+    fireEvent.click(toggle);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+
+    fireEvent.click(toggle);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+  });
+
+  it("activates the size toggle without answering or skipping", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages);
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+
+    toggle.focus();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("restores the expanded panel to its previous manual height", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages);
+    const container = screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement;
+
+    const handle = screen.getByRole("button", { name: /resize/i });
+    fireEvent.mouseDown(handle, { clientY: 500 });
+    fireEvent.mouseMove(document, { clientY: 50 });
+    fireEvent.mouseUp(document);
+    expect(container.style.height).toBe("450px");
+
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+    fireEvent.click(toggle);
+    expect(container.style.height).toBe("1000px");
+
+    fireEvent.click(toggle);
+    expect(container.style.height).toBe("450px");
+    expect(container.style.maxHeight).toBe("1000px");
+  });
+
+  it("disables Expand when the host has no unreserved space", () => {
+    const allocation = document.createElement("div");
+    document.body.append(allocation);
+    setTestRect(allocation, 0, 100);
+    const allocationRef = { current: allocation } as React.RefObject<HTMLElement | null>;
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages, 50, { allocationRef, reservedHeightPx: 100 });
+
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBe("true");
+    expect(toggle.disabled).toBe(false);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+    fireEvent.click(toggle);
+    expect((screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement).style.height).toBe("");
+    expect(screen.getByTestId(CONTAINER_TESTID).getAttribute("data-host-max-height")).toBe("0");
+    expect((screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement).style.minHeight).toBe("0px");
+  });
+
+  it("keeps the viewport fallback minimum while its host allocation is unavailable", () => {
+    const allocation = document.createElement("div");
+    const allocationRef = { current: allocation } as React.RefObject<HTMLElement | null>;
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages, 50, { allocationRef });
+
+    const container = screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement;
+    expect(container.dataset.hostMaxHeight).toBe("");
+    expect(container.style.minHeight).toBe("120px");
+  });
+
+  it("uses a non-Threads host budget below the normal panel minimum", () => {
+    const allocation = document.createElement("div");
+    document.body.append(allocation);
+    setTestRect(allocation, 0, 150);
+    const allocationRef = { current: allocation } as React.RefObject<HTMLElement | null>;
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages, 50, { allocationRef, reservedHeightPx: 100 });
+
+    const container = screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement;
+    expect(container.dataset.hostMaxHeight).toBe("50");
+    expect(container.style.maxHeight).toBe("50px");
+    expect(container.style.minHeight).toBe("50px");
+  });
+
+  it("omits manual height while Threads uses the footer scroll fallback", async () => {
+    const allocation = document.createElement("div");
+    document.body.append(allocation);
+    setTestRect(allocation, 0, 800);
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderThreadSection(messages, allocation);
+
+    const container = screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement;
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+    fireEvent.click(toggle);
+    expect(container.style.height).toBe("800px");
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+
+    setTestRect(allocation, 0, 50);
+    act(() => window.dispatchEvent(new Event("resize")));
+    await waitFor(() => expect(container.dataset.hostMaxHeight).toBe("50"));
+
+    expect(container.dataset.scrollOwner).toBe("thread-footer");
+    expect(container.style.height).toBe("");
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBeNull();
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+  });
+});
+
+describe("ClarificationPanelSection — size toggle focus continuity", () => {
+  it("keeps the same focused button through keyboard Expand and Restore while measurements catch up", async () => {
+    PanelResizeObserverStub.instances = [];
+    vi.stubGlobal("ResizeObserver", PanelResizeObserverStub);
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const allocation = document.createElement("div");
+    document.body.append(allocation);
+    setTestRect(allocation, 0, 800);
+    const allocationRef = { current: allocation } as React.RefObject<HTMLElement | null>;
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages, 50, { allocationRef });
+    const container = screen.getByTestId(CONTAINER_TESTID) as HTMLDivElement;
+    setTestRect(container, 0, 300);
+    triggerResize(container);
+
+    const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
+    toggle.focus();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBeNull();
+
+    // The expanded measurement arrives only after the state change.
+    setTestRect(container, 0, 800);
+    triggerResize(container);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+    expect(screen.getByTestId(SIZE_TOGGLE_TESTID)).toBe(toggle);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBe("true");
+
+    setTestRect(container, 0, 300);
+    triggerResize(container);
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+
+    // Host contraction legitimately leaves no headroom for the next Restore.
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
+    setTestRect(container, 0, 800);
+    triggerResize(container);
+    setTestRect(allocation, 0, 300);
+    triggerResize(allocation);
+    await waitFor(() =>
+      expect(screen.getByTestId(CONTAINER_TESTID).getAttribute("data-host-max-height")).toBe("300"),
+    );
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
+    expect(screen.getByTestId(SIZE_TOGGLE_TESTID)).toBe(toggle);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute(ARIA_DISABLED)).toBe("true");
   });
 });
 
@@ -355,13 +769,41 @@ describe("ClarificationPanelSection — dragged height does not survive a bundle
           messages={bundleB}
           onResolved={vi.fn()}
           shortcutScopeRef={scopeRef}
-          maxHeightVh={50}
+          initialMaxHeightVh={50}
         />
       </div>,
     );
 
     // Bundle B must not inherit bundle A's dragged pixel height.
     expect(container.style.height).toBe("");
+  });
+
+  it("resets an expanded size and Restore target when a new bundle replaces one still pending", () => {
+    const bundleA = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    const bundleB = [
+      clarMessage({ pendingId: "p2", id: "m2", questionId: "q2", index: 0, total: 1 }),
+    ];
+    const { rerender, scopeRef } = renderSection(true, bundleA);
+    const container = screen.getByTestId(CONTAINER_TESTID);
+    fireEvent.click(screen.getByTestId(SIZE_TOGGLE_TESTID));
+    expect(container.style.height).toBe("1000px");
+
+    rerender(
+      <div ref={scopeRef} tabIndex={-1}>
+        <ClarificationPanelSection
+          pending={true}
+          messages={bundleB}
+          onResolved={vi.fn()}
+          shortcutScopeRef={scopeRef}
+          initialMaxHeightVh={50}
+        />
+      </div>,
+    );
+
+    expect(container.style.height).toBe("");
+    expect(screen.getByTestId(SIZE_TOGGLE_TESTID).getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
   });
 });
 
@@ -390,12 +832,13 @@ describe("ClarificationPanelSection — onOutcome forwarding (AC .39)", () => {
           onResolved={vi.fn()}
           onOutcome={onOutcome}
           shortcutScopeRef={scopeRef}
-          maxHeightVh={50}
+          initialMaxHeightVh={50}
         />
       </div>,
     );
 
     fireEvent.click(screen.getByTestId(OPTION_TESTID));
+    await submitSinglePanelAnswer();
 
     await vi.waitFor(() =>
       expect(onOutcome).toHaveBeenCalledWith({
@@ -412,6 +855,7 @@ describe("ClarificationPanelSection — onOutcome forwarding (AC .39)", () => {
     ]);
 
     fireEvent.click(screen.getByTestId(OPTION_TESTID));
+    await submitSinglePanelAnswer();
 
     await vi.waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
   });

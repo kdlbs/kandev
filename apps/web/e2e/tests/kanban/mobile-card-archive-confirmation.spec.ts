@@ -82,7 +82,7 @@ test.describe("Mobile Kanban card archive confirmation", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(TASK_TITLE);
     await expect(dialog.getByTestId("task-confirmation-outcome")).toContainText(TASK_TITLE);
-    await expect(dialog).toContainText("Clean Git worktrees are removed.");
+    await expect(dialog).toContainText("Git worktrees and local changes are deleted on archive.");
     await expect(dialog).toContainText("Unpublished local branches remain available.");
     await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Archive", exact: true })).toBeVisible();

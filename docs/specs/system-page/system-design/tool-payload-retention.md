@@ -9,12 +9,19 @@ requirements:
 
 # Tool Payload Retention System Design
 
+## Unified scope amendment
+
+The [unified history-compaction design](history-compaction.md) expands this service to old tool details and historical diff content.
+It owns the combined policy scope, backup coverage, and cross-store cleanup sequencing.
+The tool-specific reducer, activity checks, preparation machinery, and replay guards below remain dependencies.
+There is one policy and operation, not a separate historical-diff control.
+
 ## Presentation allocation
 
 The [settings storage tabs design](../../system-page/system-design/system-data-storage-pages.md)
 defines the shipped page allocation. Office retention lives at Storage > Office retention.
-Message compaction remains in Data & Logs > Database.
-Policy, API, and persistence contracts remain unchanged.
+History compaction remains in Data & Logs > Database.
+The unified-scope amendment updates policy coverage while preserving the existing page allocation and controls.
 
 ## Purpose and boundaries
 
@@ -68,7 +75,7 @@ and options.
 
 ## Policy and persistence
 
-Use a dedicated settings key `tool_payload_retention`, version 1:
+Use the existing settings key `tool_payload_retention`; the unified-scope amendment versions the original record:
 `enabled=false`, `age={value:3,unit:"months"}`, and a monotonic `revision`.
 The units are `weeks` and `months`. Reject invalid ranges and unknown fields.
 Never derive enablement from Office or filesystem maintenance settings.
@@ -340,9 +347,9 @@ handling, job status, backup list, and `useIsAdmin` conventions.
 Saving an enablement draft requires an explicit inline backup choice. A save
 with pending backup means 'Preparing', not 'Enabled'. Disable is always available.
 
-The card is titled Messages compaction. Control order: description, compact age
+The card is titled History compaction. Control order: description, compact age
 controls and Analyze savings, estimate, Automatic compaction switch, backup
-review, then last/next run and Compact messages now. Place the switch beside its
+review, then last/next run and Compact history now. Place the switch beside its
 label. Show the 24-hour check frequency and that Kandev must be running. Keep
 scan counts, skipped reasons, and scan windows in expandable analysis/run
 details; show outcomes, timestamps, partial results, and errors outside them.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kandev/kandev/internal/common/offlinebudget"
 	"math"
 	"strconv"
 	"strings"
@@ -36,9 +37,13 @@ var kandevExecutorProfileKeys = map[string]func() any{
 	"remote_auth_target_home": nil,
 	"git_user_name":           nil,
 	"git_user_email":          nil,
+	offlinebudget.Key:         nil,
 }
 
 func validateKandevExecutorProfileValue(key, value string) error {
+	if key == offlinebudget.Key {
+		return validateOfflineBudgetConfig(map[string]string{key: value})
+	}
 	shape := kandevExecutorProfileKeys[key]
 	if shape == nil {
 		return nil
@@ -657,7 +662,7 @@ func (s *Service) createPluginExecutorProfile(ctx context.Context, executor *mod
 		return nil, fmt.Errorf("%w: provider profiles accept schema fields only", ErrInvalidExecutorConfig)
 	}
 	profile := &models.ExecutorProfile{
-		ID: newExecutorProfileID(), ExecutorID: executor.ID, Name: req.Name,
+		ID: newExecutorProfileID(), ExecutorID: executor.ID, Name: req.Name, OwnerUserID: req.OwnerUserID,
 		McpPolicy: req.McpPolicy, PrepareScript: "", CleanupScript: "",
 	}
 	config, created, err := s.normalizePluginExecutorProfileConfig(ctx, *provider, profile.ID, nil, req.Config)

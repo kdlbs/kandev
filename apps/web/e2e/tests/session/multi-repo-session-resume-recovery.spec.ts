@@ -9,6 +9,7 @@ import {
   capturedSessionRecoveryResponse,
   capturedSessionRecoveryResponseType,
   countSimpleMockResponses,
+  expectWorkspaceRecoveryResuming,
   readManagedCloneRecoveryConsumers,
 } from "../../helpers/session-resume-recovery";
 import {
@@ -118,13 +119,7 @@ test.describe("multi-repository managed clone recovery", () => {
     await expect(confirmation).toContainText("staging choices");
     await testPage.getByTestId("managed-clone-relocation-confirm").click();
     await expect.poll(() => recovery.requestCounts.relocate_and_resume ?? 0).toBe(1);
-    await expect(testPage.getByTestId("workspace-recovery-agent-pending")).toBeVisible({
-      timeout: 60_000,
-    });
-    await expect(testPage.getByTestId("workspace-recovery-progress")).toHaveAttribute(
-      "data-recovery-phase",
-      "resuming",
-    );
+    await expectWorkspaceRecoveryResuming(testPage);
     await waitForMultiRepoRecoveryReady(
       apiClient,
       backend.tmpDir,

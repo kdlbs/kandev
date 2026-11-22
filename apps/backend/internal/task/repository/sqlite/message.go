@@ -873,6 +873,7 @@ func (r *Repository) GetPendingActionsBySessionIDs(ctx context.Context, sessionI
 func pendingActionsBySessionQuery(driverName string, placeholders []string) string {
 	placeholderList := strings.Join(placeholders, ",")
 	statusExpr := dialect.JSONExtract(driverName, "m.metadata", "status")
+	presentationExpr := dialect.JSONExtract(driverName, "m.metadata", models.PermissionPresentationMetadataKey)
 	permissionOrderExpr := pendingActionMessageOrder(driverName, "m")
 	// Durable turns are authoritative. A message without a matching turn is
 	// malformed under the schema foreign key and must not reactivate old input.
@@ -909,6 +910,7 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 		latest_permissions AS (
 			SELECT m.task_session_id,
 			       COALESCE(%s, '') AS status,
+			       COALESCE(%s, '') AS presentation,
 			       ROW_NUMBER() OVER (
 			         PARTITION BY m.task_session_id
 			         ORDER BY m.created_at DESC, %s DESC
@@ -925,8 +927,10 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 		SELECT task_session_id, 'permission' AS action
 		FROM latest_permissions
 		WHERE rn = 1 AND status IN ('', 'pending')
+		  AND presentation NOT IN ('automatic', 'unavailable')
 	`, orderBy, placeholderList, predicate,
-		nonTerminalSessionPredicate("turn_row"), statusExpr, statusExpr, permissionOrderExpr)
+		nonTerminalSessionPredicate("turn_row"), statusExpr, statusExpr, presentationExpr,
+		permissionOrderExpr)
 }
 
 func pendingActionMessageOrder(driverName string, qualifier string) string {
@@ -1011,22 +1015,7 @@ func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message)
 	}
 
 	message.UpdatedAt = time.Now().UTC()
-	if !dialect.IsPostgres(r.db.DriverName()) {
-		return r.updateMessageWithPayloadGuard(ctx, message, []byte(metadataJSON), requestsInput)
-	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?, payload_digest = ?, payload_size = ?, updated_at = ?
-		WHERE id = ?
-	`), message.Content, requestsInput, string(message.Type), metadataJSON, message.PayloadDigest, message.PayloadSize, message.UpdatedAt, message.ID)
-	if err != nil {
-		return err
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("message not found: %s", message.ID)
-	}
-	return nil
+	return r.updateMessageWithPayloadGuard(ctx, message, []byte(metadataJSON), requestsInput)
 }
 
 // ClaimPermissionResolution installs the first durable dispatch claim for one
@@ -1040,18 +1029,24 @@ func (r *Repository) ClaimPermissionResolution(ctx context.Context, request mode
 	}
 	driver := r.db.DriverName()
 	now := time.Now().UTC()
+	presentationCondition := ""
+	if request.AutomaticOnly {
+		presentationCondition = fmt.Sprintf(" AND COALESCE(%s, '') IN ('', 'automatic')",
+			permissionJSONExtract(driver, "metadata", models.PermissionPresentationMetadataKey))
+	}
 	query := fmt.Sprintf(`
 		UPDATE task_session_messages
 		SET metadata = %s, updated_at = ?
 		WHERE task_id = ? AND task_session_id = ? AND type = 'permission_request'
 		  AND %s = ? AND %s = ?
 		  AND COALESCE(%s, '') = ''
-		  AND %s IS NULL
+		  AND %s IS NULL%s
 	`, permissionClaimJSONExpression(driver),
 		permissionJSONExtract(driver, "metadata", "request_id"),
 		permissionJSONExtract(driver, "metadata", "pending_id"),
 		permissionJSONExtract(driver, "metadata", "status"),
-		permissionJSONExtract(driver, "metadata", "permission_resolution"))
+		permissionJSONExtract(driver, "metadata", "permission_resolution"),
+		presentationCondition)
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), string(auditJSON), now,
 		request.TaskID, request.SessionID, request.Audit.RequestID, request.Audit.PendingID)
 	if err != nil {

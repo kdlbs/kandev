@@ -77,7 +77,6 @@ func TestPromptEndSweepsPreserveHandoffBackgroundLineage(t *testing.T) {
 	// prompt-end cleanup.
 	a.activeToolCalls["successor-bash-1"] = streams.NewShellExec("false", "", "successor work", 0, false)
 	a.cancelPromptEndToolCalls("session-1")
-	a.sweepMonitorsOnPromptEnd("session-1")
 
 	a.mu.RLock()
 	_, parentTracked := a.activeToolCalls["subagent-1"]
@@ -129,7 +128,7 @@ func TestBuildPromptContentBlocks_PathModeAttachmentSavesWritableFile(t *testing
 	}
 
 	encoded := base64.StdEncoding.EncodeToString([]byte("remote bytes"))
-	blocks := a.buildPromptContentBlocks("inspect this", []v1.MessageAttachment{{
+	blocks, blockErr := a.buildPromptContentBlocks("inspect this", []v1.MessageAttachment{{
 		Type:         "image",
 		Data:         encoded,
 		MimeType:     "image/png",
@@ -137,6 +136,9 @@ func TestBuildPromptContentBlocks_PathModeAttachmentSavesWritableFile(t *testing
 		DeliveryMode: "path",
 	}})
 
+	if blockErr != nil {
+		t.Fatal(blockErr)
+	}
 	if len(blocks) != 2 {
 		t.Fatalf("expected text prompt plus attachment path prompt, got %d blocks", len(blocks))
 	}
@@ -180,7 +182,7 @@ func TestBuildPromptContentBlocks_PromptModeMaterializedImageUsesFileBytes(t *te
 	a.attachMgr.SetSessionID("sess-prompt")
 	a.capabilities = acp.AgentCapabilities{PromptCapabilities: acp.PromptCapabilities{Image: true}}
 
-	blocks := a.buildPromptContentBlocks("inspect this", []v1.MessageAttachment{{
+	blocks, blockErr := a.buildPromptContentBlocks("inspect this", []v1.MessageAttachment{{
 		Type:         "image",
 		AttachmentID: "attachment-1",
 		MimeType:     "image/png",
@@ -188,6 +190,9 @@ func TestBuildPromptContentBlocks_PromptModeMaterializedImageUsesFileBytes(t *te
 		DeliveryMode: "prompt",
 	}})
 
+	if blockErr != nil {
+		t.Fatal(blockErr)
+	}
 	if len(blocks) != 2 || blocks[1].Image == nil {
 		t.Fatalf("expected materialized prompt image block, got %#v", blocks)
 	}
@@ -221,7 +226,7 @@ func TestBuildPromptContentBlocks_LargeMaterializedImageUsesReadOnlyPath(t *test
 	a.attachMgr.SetSessionID("sess-large-prompt")
 	a.capabilities = acp.AgentCapabilities{PromptCapabilities: acp.PromptCapabilities{Image: true}}
 
-	blocks := a.buildPromptContentBlocks("inspect this", []v1.MessageAttachment{{
+	blocks, blockErr := a.buildPromptContentBlocks("inspect this", []v1.MessageAttachment{{
 		Type:         "image",
 		AttachmentID: "attachment-large",
 		MimeType:     "image/png",
@@ -229,6 +234,9 @@ func TestBuildPromptContentBlocks_LargeMaterializedImageUsesReadOnlyPath(t *test
 		DeliveryMode: "prompt",
 	}})
 
+	if blockErr != nil {
+		t.Fatal(blockErr)
+	}
 	if len(blocks) != 2 || blocks[1].Text == nil {
 		t.Fatalf("expected large prompt image to use a path block, got %#v", blocks)
 	}
@@ -250,7 +258,7 @@ func TestBuildPromptContentBlocks_PathModeSaveFailureFallsBackToNativeBlock(t *t
 	}
 
 	encoded := base64.StdEncoding.EncodeToString([]byte("image bytes"))
-	blocks := a.buildPromptContentBlocks("inspect this", []v1.MessageAttachment{{
+	blocks, blockErr := a.buildPromptContentBlocks("inspect this", []v1.MessageAttachment{{
 		Type:         "image",
 		Data:         encoded,
 		MimeType:     "image/png",
@@ -258,6 +266,9 @@ func TestBuildPromptContentBlocks_PathModeSaveFailureFallsBackToNativeBlock(t *t
 		DeliveryMode: "path",
 	}})
 
+	if blockErr != nil {
+		t.Fatal(blockErr)
+	}
 	if len(blocks) != 2 {
 		t.Fatalf("expected text prompt plus native fallback block, got %d blocks", len(blocks))
 	}
@@ -283,13 +294,16 @@ func TestBuildPromptContentBlocks_UnsupportedEmbeddedResourceSavesReadOnlyFile(t
 	}
 
 	encoded := base64.StdEncoding.EncodeToString([]byte("doc bytes"))
-	blocks := a.buildPromptContentBlocks("read this", []v1.MessageAttachment{{
+	blocks, blockErr := a.buildPromptContentBlocks("read this", []v1.MessageAttachment{{
 		Type:     "resource",
 		Data:     encoded,
 		MimeType: "application/pdf",
 		Name:     "doc.pdf",
 	}})
 
+	if blockErr != nil {
+		t.Fatal(blockErr)
+	}
 	if len(blocks) != 2 {
 		t.Fatalf("expected text prompt plus attachment path prompt, got %d blocks", len(blocks))
 	}

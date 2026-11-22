@@ -33,6 +33,9 @@ func Decide(context ExecutionContext, e *Error, now time.Time) RecoveryDecision 
 	if isShortRetryable(e, now) {
 		return DecisionShortRetry
 	}
+	if context == ContextKanban && e.Code == CodeRateLimited && e.Confidence == ConfHigh && e.ResetHint == nil {
+		return DecisionShortRetry
+	}
 
 	switch context {
 	case ContextOffice:

@@ -38,6 +38,8 @@ change Git commands that an agent runs after launch.
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.12` | [Pull-request base reconciliation](#pull-request-base-reconciliation) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13` | [Missing-base fallback](#missing-base-fallback) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.14` | [Safe refresh diagnostics](#safe-refresh-diagnostics) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.24` | [Required refresh verification cause](#required-refresh-verification-cause) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.29` through `.34` | [Lock recovery](worktree-base-refresh-recovery.md) |
 
 ## Components and responsibilities
 
@@ -448,17 +450,16 @@ HTTPS route must not replace an executor-owned SSH route.
 
 ## Missing-base fallback
 
-A fetch error that explicitly reports a missing remote ref is the only failed
-fetch eligible for fallback. When the request carries a different non-empty
-fallback base, the manager fetches that branch through the same non-interactive
-route and applies the normal containing-ref checks. Success completes sync,
-uses the fallback ref, and records a warning naming the requested and fallback
-branches.
+The [worktree base selection design](worktree-base-selection.md) defines
+substitution eligibility for criteria .25 through .28. `FallbackBaseBranch`
+supplies a candidate, not permission to abandon an explicit selection.
 
-If the fallback is absent or its refresh fails, preparation remains failed. A
-missing requested or fallback remote ref uses `missing_remote_ref`; auth,
-network, timeout, cancellation, and other Git failures keep their existing
-fail-closed classifications.
+For an eligible inherited/default selection, a proven missing remote ref can
+use a separately refreshed fallback through the same non-interactive route.
+Containing-ref checks and warnings remain required. Without a usable fallback,
+preparation fails. Auth, network, timeout, cancellation, and unproven errors
+retain their existing classifications. The selection amendment is implemented;
+its linked plan owns the recorded evidence.
 
 ## Empty remote
 
@@ -532,13 +533,47 @@ reading its remote URL. Existing failure or fallback logs can carry these fields
 instead of adding a duplicate diagnostic. Cover both required and best-effort
 paths, including a failed configured fallback branch.
 
-Classification is observational. Do not feed new diagnostic categories into
-missing-base fallback eligibility or alter `syncFailureCause` identities.
-Preserve context errors and current progress/error payloads. Correct the
-`syncFailureCause` comment that implies raw output reaches internal logs.
-No new logging configuration, subprocess, retry, or persistence is required.
+Diagnostic categories do not authorize missing-base fallback.
+The [lock recovery design](worktree-base-refresh-recovery.md) adds bounded
+re-execution and fixed lock errors under criteria .29 through .34.
+Context precedence, error identities, and credential exclusion remain authoritative.
 
 Delivery: [Recovery diagnostic fixes](../../../plans/recovery-diagnostics/plan.md).
+
+#### Invalid local ref diagnostics
+
+Under AC .14, classify fatal `bad object refs/...` and `bad ref refs/...` lines
+as `invalid_local_ref`. Emit only: "Git reported an invalid local reference.
+Inspect repository references before retrying." Ignore incidental URL or branch
+text. Cancellation and timeout win. Missing blobs, arbitrary object IDs, and
+`did not send all necessary objects` alone remain unknown.
+
+Preserve refresh policy and error identities. Add no repair or Git command.
+Test required and best-effort refresh with an unrelated empty fixture ref,
+negative matches, secret exclusion, and context precedence.
+Delivery: [Invalid Git ref diagnostics](../../../plans/git-invalid-ref-diagnostics/plan.md).
+
+### Required refresh verification cause
+
+AC .24 extends the same diagnostics contract to the required checkout-branch
+refresh. `fetchBranchToLocalWithPolicy` retries a fetch that Git refused
+because the branch is already checked out, fetching the branch as a
+remote-tracking ref instead. When that retry still cannot verify the refreshed
+ref and the refresh is required, the manager returns a generic command-failure
+error. The `FetchBranchResult` already carries the user-facing `Warning` and the
+diagnostic `WarningDetail`, and the best-effort path returns them to the caller.
+
+The required path shall reuse those values instead of discarding them. Resolve
+the detail as `WarningDetail`, falling back to `Warning` when the detail is
+empty. Emit one structured warning that records the branch and the resolved
+detail, and carry the resolved detail in the returned error before
+`ErrGitCommandFailed`. The warning records no raw command output. The existing
+suppression of a result whose warning is empty, the non-required result, and
+every fallback decision remain unchanged. On this path the detail is the fixed
+probe string from `resolveRetryStartPoint`; it is not a raw credential or remote
+URL.
+
+Delivery: [Fail-closed worktree refresh](../../../plans/worktree-refresh-fail-closed/plan.md).
 
 ## Related decisions
 

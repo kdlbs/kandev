@@ -6,6 +6,8 @@ import type {
 } from "@/components/task/chat/chat-input-container";
 import type { ChatPanelState } from "./use-chat-panel-state";
 import { readAgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
+import { useSessionComposerRecovery } from "./session-recovery-context";
+import { useComposerPromptSuggestion } from "./use-composer-prompt-suggestion";
 
 // i18n-exempt: stable backend failure code, not user-facing copy.
 const DURABLE_DELIVERY_UNCERTAIN = "DURABLE_DELIVERY_UNCERTAIN";
@@ -16,6 +18,7 @@ type ComposerPropsArgs = {
   workspaceResolutionFailed: boolean;
   onRetryWorkspaceResolution: () => void;
   isMoving: boolean;
+  isRestarting?: boolean;
   implementPlanHandler: ((fresh: boolean) => Promise<void> | Promise<boolean>) | undefined;
   executor: { unavailable: boolean; reason?: string };
   placeholder: string;
@@ -54,7 +57,10 @@ function deliveryRecoveryPresentation(
   };
 }
 
-function deliveryRecoveryBlockPresentation(session: ChatPanelState["session"]) {
+function deliveryRecoveryBlockPresentation(
+  session: ChatPanelState["session"],
+  hasRecoveryCard: boolean,
+) {
   const blocks = session?.session_recovery_blocks?.filter(
     (block) => block.consumer_reference === "agent_delivery",
   );
@@ -62,7 +68,10 @@ function deliveryRecoveryBlockPresentation(session: ChatPanelState["session"]) {
     requiresRecovery: Boolean(blocks?.length),
     hasDeliveryRecoveryBlock:
       blocks?.some(
-        (block) => block.reason !== "unknown_prompt_outcome" || !block.delivery_submission_id,
+        (block) =>
+          !hasRecoveryCard ||
+          block.reason !== "unknown_prompt_outcome" ||
+          !block.delivery_submission_id,
       ) ?? false,
   };
 }
@@ -89,6 +98,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     workspaceResolutionFailed,
     onRetryWorkspaceResolution,
     isMoving,
+    isRestarting = false,
     implementPlanHandler,
     executor,
     placeholder,
@@ -107,8 +117,10 @@ export function useComposerProps(args: ComposerPropsArgs) {
   const { resolvedSessionId, taskId, isAgentBusy, isWorking, needsRecovery, planModeEnabled } =
     panelState;
   const deliveryRecovery = readAgentDeliveryRecovery(panelState.session?.metadata);
+  const composerRecovery = useSessionComposerRecovery(resolvedSessionId);
   const { hasDeliveryRecoveryBlock, requiresRecovery } = deliveryRecoveryBlockPresentation(
     panelState.session,
+    Boolean(composerRecovery?.model && !composerRecovery.model.requestLocal),
   );
   const legacyUncertainDelivery = panelState.lastAgentError?.code === DURABLE_DELIVERY_UNCERTAIN;
   const recoveryPresentation = deliveryRecoveryPresentation(
@@ -116,10 +128,15 @@ export function useComposerProps(args: ComposerPropsArgs) {
     legacyUncertainDelivery,
     hasDeliveryRecoveryBlock,
   );
+  const promptSuggestion = useComposerPromptSuggestion(
+    panelState,
+    isMoving || requiresRecovery || recoveryPresentation.uncertainDelivery,
+  );
   const canQueueWhileStarting = panelState.inputMode === "queue" && panelState.isQueueReady;
   const supportsSteering = panelState.supportsSteering;
   const hasPendingContextComments = hasContextComments(panelState);
   return {
+    ...promptSuggestion,
     onSubmit: handleSubmit,
     sessionId: resolvedSessionId,
     detailActive: panelState.detailActive,
@@ -142,6 +159,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     canQueueWhileStarting,
     isPreparingEnvironment: panelState.isPreparingEnvironment,
     isMoving,
+    isRestarting,
     isSending,
     launchErrorOwned,
     onCancel: handleCancelTurn,

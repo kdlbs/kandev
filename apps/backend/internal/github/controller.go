@@ -43,6 +43,7 @@ func NewController(svc *Service, log *logger.Logger) *Controller {
 // RegisterHTTPRoutes registers all GitHub HTTP routes.
 func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api := router.Group("/api/v1/github")
+	api.Use(c.captureExpectedGitHubHost)
 	api.GET("/status", c.httpGetStatus)
 	api.POST("/token", c.httpConfigureToken)
 	api.DELETE("/token", c.httpClearToken)
@@ -99,6 +100,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 
 	api.GET("/watches/pr", c.httpListPRWatches)
 	api.DELETE("/watches/pr/:id", c.httpDeletePRWatch)
+	api.POST("/watches/pr/:id/resume", c.httpResumePRWatch)
 
 	api.GET("/watches/review", c.httpListReviewWatches)
 	api.POST("/watches/review", c.httpCreateReviewWatch)
@@ -123,9 +125,11 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 
 	api.GET("/orgs", c.httpListUserOrgs)
 	api.GET("/repos", c.httpListAccessibleRepos)
+	api.GET("/workspace-settings/repositories", c.httpListScopeEditorRepos)
 	api.GET("/repos/search", c.httpSearchRepos)
 	api.GET("/repos/:owner/:repo/branches", c.httpListRepoBranches)
 	api.GET("/repos/:owner/:repo/merge-methods", c.httpGetRepoMergeMethods)
+	api.GET("/repos/:owner/:repo/merge-access", c.httpGetRepoMergeAccess)
 
 	api.GET("/user/prs", c.httpSearchUserPRs)
 	api.GET("/user/issues", c.httpSearchUserIssues)
@@ -666,6 +670,10 @@ func parseRouteNumber(ctx *gin.Context, invalidMessage string) (int, bool) {
 }
 
 func handleGitHubInfoError(ctx *gin.Context, err error) {
+	if errors.Is(err, ErrGitHubHostMismatch) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "github_host_mismatch"})
+		return
+	}
 	if isGitHubNotConfiguredError(err) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "GitHub is not configured. Connect GitHub in Settings > Integrations.",
@@ -846,7 +854,8 @@ func (c *Controller) httpListPRWatches(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
 		return
 	}
-	watches, err := c.service.ListActivePRWatchesForWorkspace(ctx.Request.Context(), workspaceID)
+	includeRetired := ctx.Query("include_retired") == "true"
+	watches, err := c.service.ListPRWatchesForWorkspace(ctx.Request.Context(), workspaceID, includeRetired)
 	if err != nil {
 		if writeWatchWorkspaceError(ctx, "PR watch", err) {
 			return
@@ -863,6 +872,10 @@ func (c *Controller) httpDeletePRWatch(ctx *gin.Context) {
 		return
 	}
 	if err := c.service.DeletePRWatch(ctx.Request.Context(), id); err != nil {
+		if errors.Is(err, ErrPRWatchNotFound) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "PR watch not found"})
+			return
+		}
 		if writeWatchWorkspaceError(ctx, "PR watch", err) {
 			return
 		}
@@ -870,6 +883,30 @@ func (c *Controller) httpDeletePRWatch(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+func (c *Controller) httpResumePRWatch(ctx *gin.Context) {
+	id := ctx.Param("id")
+	if !c.requirePRWatchInWorkspace(ctx, id) {
+		return
+	}
+	watch, err := c.service.ResumePRWatch(ctx.Request.Context(), id, ctx.Query("workspace_id"))
+	if err != nil {
+		if errors.Is(err, ErrPRWatchNotFound) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "PR watch not found"})
+			return
+		}
+		if errors.Is(err, ErrPRWatchTargetIneligible) || errors.Is(err, ErrTaskPRRepositoryMismatch) {
+			ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		if writeWatchWorkspaceError(ctx, "PR watch", err) {
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"watch": watch})
 }
 
 // httpListReviewWatches returns watches scoped to the requested workspace.
@@ -996,6 +1033,7 @@ func (c *Controller) httpListUserOrgs(ctx *gin.Context) {
 // user can access (own repos + each org they belong to). Accepts:
 //   - q: optional GitHub search qualifier appended to the per-source query
 //   - limit: 1..100, defaults to 50 when missing / non-positive
+//   - refresh: "true" bypasses the 60s cache and stores the fresh list
 //
 // Returns 503 with `{"code":"github_not_configured"}` (matches every other
 // GitHub-not-configured 503 in this file) when GitHub is not configured /
@@ -1003,9 +1041,27 @@ func (c *Controller) httpListUserOrgs(ctx *gin.Context) {
 func (c *Controller) httpListAccessibleRepos(ctx *gin.Context) {
 	query := ctx.Query("q")
 	limit, _ := strconv.Atoi(ctx.Query("limit"))
+	refresh := ctx.Query("refresh") == "true"
 	repos, err := c.service.ListAccessibleReposForWorkspace(
-		ctx.Request.Context(), ctx.Query("workspace_id"), currentGitHubUserID(ctx), query, limit,
+		ctx.Request.Context(), ctx.Query("workspace_id"), currentGitHubUserID(ctx), query, limit, refresh,
 	)
+	writeAccessibleReposResponse(ctx, repos, err)
+}
+
+// httpListScopeEditorRepos provides the settings editor with repositories it
+// may add to the saved scope. The service keeps personal and automation
+// visibility checks and omits only the saved-scope filter.
+func (c *Controller) httpListScopeEditorRepos(ctx *gin.Context) {
+	query := ctx.Query("q")
+	limit, _ := strconv.Atoi(ctx.Query("limit"))
+	refresh := ctx.Query("refresh") == "true"
+	repos, err := c.service.ListScopeEditorReposForWorkspace(
+		ctx.Request.Context(), ctx.Query("workspace_id"), currentGitHubUserID(ctx), query, limit, refresh,
+	)
+	writeAccessibleReposResponse(ctx, repos, err)
+}
+
+func writeAccessibleReposResponse(ctx *gin.Context, repos []GitHubRepo, err error) {
 	if err != nil {
 		if isGitHubNotConfiguredError(err) {
 			ctx.JSON(http.StatusServiceUnavailable, gin.H{
@@ -1063,6 +1119,9 @@ func (c *Controller) httpListRepoBranches(ctx *gin.Context) {
 			})
 			return
 		}
+		if writeGitHubOperationalAuthError(ctx, err) {
+			return
+		}
 		status := http.StatusInternalServerError
 		var apiErr *GitHubAPIError
 		if errors.As(err, &apiErr) {
@@ -1093,6 +1152,9 @@ func (c *Controller) httpGetRepoMergeMethods(ctx *gin.Context) {
 				"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
 				"code":  "github_not_configured",
 			})
+			return
+		}
+		if writeGitHubOperationalAuthError(ctx, err) {
 			return
 		}
 		status := http.StatusInternalServerError
@@ -1250,6 +1312,10 @@ func parsePaginationQuery(ctx *gin.Context) (int, int) {
 
 // handleSearchError maps client errors to proper HTTP responses.
 func (c *Controller) handleSearchError(ctx *gin.Context, err error) {
+	if errors.Is(err, ErrGitHubHostMismatch) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "github_host_mismatch"})
+		return
+	}
 	if isGitHubNotConfiguredError(err) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",

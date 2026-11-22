@@ -1,5 +1,6 @@
 import type { StoreApi } from "zustand";
 import { vi } from "vitest";
+import type { TaskRemovalState } from "@/lib/state/task-removal";
 
 export type TaskRow = {
   id: string;
@@ -13,6 +14,8 @@ export type FakeState = {
   kanban: { tasks: TaskRow[] };
   kanbanMulti: { snapshots: Record<string, { tasks: TaskRow[] }> };
   environmentIdBySessionId: Record<string, string>;
+  taskRemoval?: TaskRemovalState;
+  workspaces?: { activeId: string | null };
   taskSessionsByTask: {
     itemsByTaskId: Record<string, never[]>;
     loadedByTaskId: Record<string, boolean>;
@@ -30,6 +33,7 @@ export function makeTaskRemovalStore(init: {
   activeSessionId?: string | null;
   remainingTasks: TaskRow[];
   canonicalTasks?: TaskRow[];
+  taskRemoval?: TaskRemovalState;
 }): StoreApi<FakeState> & { getRecorded: () => FakeState } {
   const state: FakeState = {
     tasks: {
@@ -39,6 +43,7 @@ export function makeTaskRemovalStore(init: {
     kanban: { tasks: init.canonicalTasks ?? [] },
     kanbanMulti: { snapshots: { "wf-1": { tasks: init.remainingTasks } } },
     environmentIdBySessionId: { "sess-next": "env-next", "sess-A": "env-A" },
+    taskRemoval: init.taskRemoval,
     taskSessionsByTask: {
       itemsByTaskId: {},
       loadedByTaskId: {},

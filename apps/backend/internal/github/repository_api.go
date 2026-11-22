@@ -49,24 +49,25 @@ type githubRepositoryResponse struct {
 		FullName string `json:"full_name"`
 	} `json:"parent"`
 	Permissions struct {
-		Push  bool `json:"push"`
-		Admin bool `json:"admin"`
+		Push  *bool `json:"push"`
+		Admin bool  `json:"admin"`
 	} `json:"permissions"`
 }
 
 func projectGitHubRepository(raw githubRepositoryResponse) *GitHubRepository {
 	repository := &GitHubRepository{
-		ID:            raw.ID,
-		NodeID:        raw.NodeID,
-		FullName:      raw.FullName,
-		Owner:         raw.Owner.Login,
-		Name:          raw.Name,
-		CloneURL:      raw.CloneURL,
-		HTMLURL:       raw.HTMLURL,
-		DefaultBranch: raw.DefaultBranch,
-		Fork:          raw.Fork,
-		PushAccess:    raw.Permissions.Push,
-		AdminAccess:   raw.Permissions.Admin,
+		ID:              raw.ID,
+		NodeID:          raw.NodeID,
+		FullName:        raw.FullName,
+		Owner:           raw.Owner.Login,
+		Name:            raw.Name,
+		CloneURL:        raw.CloneURL,
+		HTMLURL:         raw.HTMLURL,
+		DefaultBranch:   raw.DefaultBranch,
+		Fork:            raw.Fork,
+		PushAccess:      raw.Permissions.Push != nil && *raw.Permissions.Push,
+		PushAccessKnown: raw.Permissions.Push != nil,
+		AdminAccess:     raw.Permissions.Admin,
 	}
 	if raw.Parent != nil {
 		repository.ParentID = raw.Parent.ID

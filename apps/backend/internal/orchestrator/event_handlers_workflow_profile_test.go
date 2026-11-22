@@ -93,6 +93,9 @@ func TestCreateNewSessionForStepKeepsCurrentSessionWhenWorkspaceAttachFails(t *t
 	if err := repo.UpdateTaskSession(ctx, current); err != nil {
 		t.Fatal(err)
 	}
+	if err := repo.SetSessionPrimary(ctx, current.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID: current.TaskEnvironmentID, TaskID: current.TaskID,
 		ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady,
@@ -702,7 +705,7 @@ func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *tes
 		},
 	}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
 	svc.logger = log
 	svc.executor = exec
@@ -789,7 +792,7 @@ func TestSwitchWorkflowDispatcherCarriesSourceEndPolicyAcrossWorkflowSwitch(t *t
 		},
 	}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
 	svc.logger = log
 	svc.executor = exec
@@ -915,7 +918,7 @@ func TestSwitchWorkflowDispatcherOnEnterSkipsSessionIndependentAction(t *testing
 		},
 	}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
 	svc.logger = log
 	svc.executor = exec
@@ -981,7 +984,7 @@ func TestSwitchWorkflowDispatcherSkipsPreflightForAppliedOperation(t *testing.T)
 	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
 	svc.logger = log
 	svc.executor = exec
@@ -1127,7 +1130,7 @@ func TestSwitchSessionForStep(t *testing.T) {
 			},
 		}
 		log := testLogger()
-		exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+		exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 		sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 		svc := &Service{
 			logger:             log,
@@ -1240,7 +1243,7 @@ func TestSwitchSessionForStep_ReusesNonterminalSession(t *testing.T) {
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 	publisher := &recordingTaskUpdatedPublisher{}
 	svc := &Service{
@@ -1335,7 +1338,7 @@ func TestSwitchSessionForStep_CreatesFreshSessionWhenCandidateTerminalizesBefore
 	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkspaceID: "ws1", WorkflowID: "wf1", Title: "Test", Description: "Test", State: v1.TaskStateInProgress}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	svc := &Service{
 		logger: log, workflowStepGetter: newMockStepGetter(), taskRepo: taskRepo, agentManager: agentMgr,
 		messageQueue: newAuthoritativeMemoryQueue(repo, log), executor: exec,
@@ -1461,7 +1464,7 @@ func TestSwitchSessionForStep_CompletedSessionNotReused(t *testing.T) {
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 	svc := &Service{
 		logger:             log,
@@ -1624,7 +1627,7 @@ func TestSwitchSessionForStep_FailedSessionNotReused(t *testing.T) {
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 	svc := &Service{
 		logger:             log,
@@ -1739,7 +1742,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			},
 		}
 		log := testLogger()
-		exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+		exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 		sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 		svc := &Service{
 			logger:             log,
@@ -2018,7 +2021,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 
 		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		log := testLogger()
-		exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+		exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 		sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 		svc := &Service{
 			logger:             log,
@@ -2095,7 +2098,7 @@ func TestSwitchSessionForStep_PreservesOldSessionOnFailure(t *testing.T) {
 
 		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		log := testLogger()
-		exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+		exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 		sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 		svc := &Service{
 			logger:             log,

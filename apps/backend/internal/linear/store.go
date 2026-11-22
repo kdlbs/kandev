@@ -126,7 +126,7 @@ func (s *Store) initSchema() error {
 	if err := s.addIssueWatchRepositoryColumns(); err != nil {
 		return err
 	}
-	return nil
+	return s.migrateExecutorCreators()
 }
 
 // addConfigColumns brings old per-workspace tables up to the current

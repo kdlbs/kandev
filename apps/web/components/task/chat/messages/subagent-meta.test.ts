@@ -86,6 +86,13 @@ describe("subagentMetaChips", () => {
       { id: "background", label: "background", value: "background" },
     ]);
   });
+
+  it("shows how many times a background subagent was resumed", () => {
+    expect(subagentMetaChips({ is_async: true, resume_count: 1 })).toEqual([
+      { id: "background", label: "background", value: "background" },
+      { id: "resume", label: "Resumed x1", value: "Resumed x1" },
+    ]);
+  });
 });
 
 // The card header already reads "10 tool calls" from the rendered child count.

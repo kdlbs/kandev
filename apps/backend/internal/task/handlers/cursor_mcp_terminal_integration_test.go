@@ -20,7 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentprocess "github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/gateway/websocket"
-	"github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/models"
 	terminalrepo "github.com/kandev/kandev/internal/terminal/repository"
 	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 	_ "github.com/mattn/go-sqlite3"
@@ -72,7 +72,7 @@ func TestCursorMCPAuthenticateAfterCompletedTerminalReconnectStartsFreshLogin(t 
 		WorkspacePath: workspace, InitialCommand: command,
 		Label: "Sign in to Issue Tracker", ServerID: "server-exact",
 	}}
-	taskService := service.NewService(service.Repos{}, nil, log, service.RepositoryDiscoveryConfig{})
+	taskService, _ := newSessionHandlerService(t, &models.TaskSession{ID: execution.SessionID, TaskID: execution.TaskID})
 	recoveryRouter := gin.New()
 	recoveryHandlers := RegisterProcessRoutes(recoveryRouter, taskService, manager, log)
 	recoveryHandlers.cursorMCPRecovery = recoveryManager

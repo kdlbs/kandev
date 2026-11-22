@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -107,7 +109,7 @@ func (s *Service) ReplayDeferredAssignments(ctx context.Context, workspaceID str
 	for _, da := range pending {
 		s.replayDeferredAssignment(ctx, &da)
 	}
-	return nil
+	return s.replayBlockerFailureWakeups(ctx, workspaceID, 0)
 }
 
 // ReplayPendingDeferredAssignments is the recovery tick's backstop: it
@@ -124,7 +126,7 @@ func (s *Service) ReplayPendingDeferredAssignments(ctx context.Context) error {
 	for _, da := range pending {
 		s.replayDeferredAssignment(ctx, &da)
 	}
-	return nil
+	return s.replayBlockerFailureWakeups(ctx, "", maxRecoveryTickDeferredReplay)
 }
 
 // replayDeferredAssignment re-validates one pending deferred assignment
@@ -167,7 +169,7 @@ func (s *Service) replayDeferredAssignment(ctx context.Context, da *models.Defer
 	var queueErr error
 	if s.deferredAssignmentQueue != nil {
 		queueErr = s.deferredAssignmentQueue.QueueDeferredAssignment(ctx, *da)
-	} else if actorKind := models.ActorKind(da.ActorType); actorKind.Valid() {
+	} else if actorKind := runsmodels.ActorKind(da.ActorType); actorKind.Valid() {
 		queueErr = s.QueueRunFromTaskBoundaryWithActor(ctx, da.AgentProfileID, RunReasonTaskAssigned, payload, key, da.TaskID, actorKind, da.ActorID)
 	} else {
 		queueErr = s.QueueRunFromTaskBoundary(ctx, da.AgentProfileID, RunReasonTaskAssigned, payload, key, da.TaskID)

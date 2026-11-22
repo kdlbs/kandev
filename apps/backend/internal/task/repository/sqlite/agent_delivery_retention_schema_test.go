@@ -52,7 +52,7 @@ func assertDeliveryRetentionSchema(t *testing.T, repo *Repository) {
 	t.Helper()
 	columns := map[string][]string{
 		"agent_delivery_inbox": {
-			"content_hash", "hash_version", "payload_pruned_at", "payload_bytes",
+			"content_hash", "hash_version", "payload_pruned_at", "payload_bytes", "canonical_message_id",
 		},
 		"agent_delivery_submissions": {
 			"payload_pruned_at", "payload_bytes", "fully_settled_at",

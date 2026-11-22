@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
@@ -28,30 +29,46 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
-// ExecutorFallbackPolicy controls behavior when a requested runtime is unavailable.
+// ExecutorFallbackPolicy is retained for internal source compatibility only.
+// A concrete executor selection is always required: an unavailable mapped
+// backend is refused instead of replaced, regardless of this value. The
+// constants remain so existing wiring and tests can migrate independently of
+// the required-runtime correction.
 type ExecutorFallbackPolicy string
 
 const (
-	// ExecutorFallbackAllow silently falls back to the default runtime (current behavior).
+	// ExecutorFallbackAllow is retained for compatibility; it no longer
+	// authorizes replacing a concrete selection with the default runtime.
 	ExecutorFallbackAllow ExecutorFallbackPolicy = "allow"
-	// ExecutorFallbackWarn falls back but logs a warning (current behavior, explicit).
+	// ExecutorFallbackWarn is retained for compatibility; it no longer
+	// authorizes replacing a concrete selection with the default runtime.
 	ExecutorFallbackWarn ExecutorFallbackPolicy = "warn"
-	// ExecutorFallbackDeny returns an error if the requested runtime is unavailable.
+	// ExecutorFallbackDeny expresses the required-runtime intent. Production
+	// wiring uses it, although selection admission no longer depends on it.
 	ExecutorFallbackDeny ExecutorFallbackPolicy = "deny"
 )
 
 // Manager manages agent instance lifecycles
 type Manager struct {
-	registry              *registry.Registry
-	eventBus              bus.EventBus
-	credsMgr              CredentialsManager
-	profileResolver       ProfileResolver
-	ownerAdmission        OwnerAdmission
-	worktreeMgr           *worktree.Manager
-	mcpProvider           McpConfigProvider
-	cursorInventoryLoader func(context.Context) (mcpconfig.CursorNativeInventory, error)
-	cursorNativeMCPRunner mcpconfig.NativeMCPCommandRunner
-	logger                *logger.Logger
+	openCodeCredentialSource openCodeCredentialSource
+	registry                 *registry.Registry
+	eventBus                 bus.EventBus
+	credsMgr                 CredentialsManager
+	profileResolver          ProfileResolver
+	ownerAdmission           OwnerAdmission
+	worktreeMgr              *worktree.Manager
+	mcpProvider              McpConfigProvider
+	mcpResolver              MCPResolutionProvider
+	mcpStateRepo             mcpconfig.SessionMCPSelectionStateRepository
+	cursorInventoryLoader    func(context.Context) (mcpconfig.CursorNativeInventory, error)
+	cursorNativeMCPRunner    mcpconfig.NativeMCPCommandRunner
+	// copilotPlugins is the bounded native inventory runner. Tests inject a
+	// fake so plugin resolution never requires an installed Copilot runtime.
+	copilotPlugins copilotplugins.Runner
+	// passthroughRunnerOverride is a test seam for the interactive process
+	// boundary. Production always resolves the executor-backed runner.
+	passthroughRunnerOverride executionPassthroughRunner
+	logger                    *logger.Logger
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
 	// typically ~/.kandev) here, not ResolvedDataDir(). Used for:
@@ -82,6 +99,7 @@ type Manager struct {
 	// Workspace info provider for on-demand instance creation
 	workspaceInfoProvider          WorkspaceInfoProvider
 	workspaceRecoveryErrorReporter WorkspaceRecoveryErrorReporter
+	turnChangeCaptureHandler       TurnChangeCaptureHandler
 
 	// taskRuntimeFences serialize runtime creation with task-scoped cleanup.
 	taskRuntimeFences taskRuntimeOwnershipFences
@@ -99,6 +117,10 @@ type Manager struct {
 	// startupRecoveryDelay overrides the managed-runtime retry delay in tests.
 	startupRecoveryDelay func() time.Duration
 
+	// managedRuntimeSingleUserOwner supplies the disabled-authentication
+	// single-user repair owner. Backend composition owns the live auth mode.
+	managedRuntimeSingleUserOwner func() (string, bool)
+
 	// preparerRegistry maps executor types to environment preparers.
 	preparerRegistry *PreparerRegistry
 
@@ -110,7 +132,8 @@ type Manager struct {
 	// the caller a shell, a file write, or a port preview. Reading a
 	// transcript and running a command in the worktree are different
 	// permissions, so they get different checks.
-	sessionExecCheck func(ctx context.Context, sessionID string) error
+	sessionExecCheck  func(ctx context.Context, sessionID string) error
+	executorAdmission func(context.Context, string, string, string) (context.Context, error)
 
 	// recoveryGuard is the in-memory per-session acquire-or-observe map of
 	// AC-EXECUTORS-SURVIVAL-002.8, taken over the live standalone
@@ -118,6 +141,13 @@ type Manager struct {
 	// is contacted, and consulted by Launch to refuse a concurrent request
 	// for a session that might still be re-tracking. Always non-nil.
 	recoveryGuard *RecoveryGuard
+
+	// runtimeStorage holds the latest owner-verified advisory capacity per
+	// session. It is runtime-only and never persisted.
+	runtimeStorage *runtimeStorageProbeState
+	// runtimeStorageClock is a test seam for independent capacity and pressure
+	// receipt ages.
+	runtimeStorageClock func() time.Time
 
 	// retrackedSessionsMu guards retrackedSessions.
 	retrackedSessionsMu sync.RWMutex
@@ -227,6 +257,7 @@ type Manager struct {
 	remoteContributionPreflightTimeout time.Duration
 	stopCh                             chan struct{}
 	stopOnce                           sync.Once
+	turnChangeRetryMu                  sync.Mutex
 	wg                                 sync.WaitGroup
 	// shuttingDown is flipped true when graceful shutdown begins (see
 	// StopAllAgents) so handlers running in detached goroutines can
@@ -251,6 +282,9 @@ type Manager struct {
 	// every workspace can be seeded at agentctl-ready time, not just full
 	// launches. See manager_base_branches.go.
 	baseBranchProvider BaseBranchProvider
+
+	// promptSuggestionsPreference reads the user's next-prompt suggestion opt-in at launch.
+	promptSuggestionsPreference PromptSuggestionsPreference
 
 	// comparisonTargetProvider hydrates task-repository comparison bindings so
 	// every workspace creation path can seed agentctl from durable state.
@@ -338,6 +372,12 @@ func (m *Manager) SetCursorNativeMCPCommandRunner(runner mcpconfig.NativeMCPComm
 	m.cursorNativeMCPRunner = runner
 }
 
+// SetCopilotPluginRunner installs the bounded runner used to resolve Copilot
+// plugin directories for new local processes. Production uses the exec runner.
+func (m *Manager) SetCopilotPluginRunner(runner copilotplugins.Runner) {
+	m.copilotPlugins = runner
+}
+
 // SetOwnerAdmission wires the durable owner gate used by run-owned launches.
 // Task launches keep their existing task/session admission when no owner gate
 // is configured.
@@ -356,10 +396,29 @@ func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEn
 	m.managedGoCache = provider
 }
 
+// SetManagedRuntimeSingleUserOwner wires the live authentication mode and the
+// established single-user identity. The callback must return allowed=false for
+// setup, enabled, unknown, or unavailable authentication.
+func (m *Manager) SetManagedRuntimeSingleUserOwner(owner func() (string, bool)) {
+	m.managedRuntimeSingleUserOwner = owner
+}
+
 // SetManagedRuntimeSelectionStore wires the install-wide exact-version
 // resolver used by standalone managed-agent launches.
 func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
 	m.managedRuntimeSelections = store
+}
+
+// SetMCPResolver wires the workspace catalog and additive scope resolver.
+// Leaving it unset preserves legacy profile JSON behavior for compatibility.
+func (m *Manager) SetMCPResolver(resolver MCPResolutionProvider) {
+	m.mcpResolver = resolver
+}
+
+// SetMCPSelectionStateRepository wires durable desired/applied state for
+// task-session MCP reconfiguration. It is optional for embedded managers.
+func (m *Manager) SetMCPSelectionStateRepository(repo mcpconfig.SessionMCPSelectionStateRepository) {
+	m.mcpStateRepo = repo
 }
 
 // SetActivityCoordinator wires the install-wide host-resource activity gate.
@@ -485,6 +544,7 @@ func NewManager(
 	}
 
 	mgr := &Manager{
+		openCodeCredentialSource:       captureOpenCodeCredentialSource(),
 		registry:                       reg,
 		eventBus:                       eventBus,
 		executorRegistry:               executorRegistry,
@@ -508,6 +568,7 @@ func NewManager(
 		skillDeployer:                  NoopSkillDeployer(),
 		remediateNpxCache:              routingerr.RemediateNpxCache,
 		recoveryGuard:                  NewRecoveryGuard(),
+		runtimeStorage:                 newRuntimeStorageProbeState(),
 		retrackedSessions:              make(map[string]struct{}),
 		standaloneOwnSessions:          make(map[string]struct{}),
 		passthroughMCPActiveClaims:     make(map[string]map[string]passthroughMCPFileClaim),
@@ -526,6 +587,7 @@ func NewManager(
 		OnGitReset:                       mgr.handleGitResetDetected,
 		OnBranchSwitch:                   mgr.handleBranchSwitch,
 		OnFileChange:                     mgr.handleFileChangeNotification,
+		OnWorktreeInventory:              mgr.handleWorktreeInventory,
 		OnShellOutput:                    mgr.handleShellOutput,
 		OnShellExit:                      mgr.handleShellExit,
 		OnProcessOutput:                  mgr.handleProcessOutput,
@@ -536,12 +598,16 @@ func NewManager(
 		return exists && current == execution && mgr.runtimeExecutionCurrent(execution)
 	}
 	mgr.streamManager.onDeliveryReconciliationPhase = mgr.recordDeliveryReconciliationPhase
+	mgr.streamManager.onRuntimeStorageProbe = mgr.applyRuntimeStorageProbe
+	mgr.streamManager.onRuntimeStoragePressure = mgr.applyRuntimeStoragePressure
+	mgr.streamManager.onRuntimeStorageDetached = mgr.retireRuntimeStorageObservation
 
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 	sessionManager.SetPromptStarter(mgr.BeginPrompt)
 	sessionManager.persistPromptTurnBinding = mgr.persistExecutorRunningResult
 	sessionManager.SetInitialPromptFailureHandler(mgr.handleInitialPromptFailure)
+	sessionManager.SetTurnChangeCaptureCallbacks(mgr.admitTurnChangeCapture, mgr.failTurnChangeDispatch)
 
 	mgr.pollAggregator = newWorkspacePollAggregator(mgr)
 
@@ -552,6 +618,13 @@ func NewManager(
 	return mgr
 }
 
+// SetTurnChangeCaptureHandler installs the task-owned immutable interval
+// coordinator. Set this during backend composition before runtime prompts are
+// accepted.
+func (m *Manager) SetTurnChangeCaptureHandler(handler TurnChangeCaptureHandler) {
+	m.turnChangeCaptureHandler = handler
+}
+
 func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 	execution, exists := m.executionStore.Get(failure.ExecutionID)
 	if !exists {
@@ -560,6 +633,7 @@ func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 			zap.Uint64("prompt_generation", failure.PromptGeneration))
 		return
 	}
+	storage, _ := agentctl.StorageDiagnosticFromError(failure.Err)
 	settled := m.handleErrorEvent(execution, agentctl.AgentEvent{
 		Type: toolStatusError,
 		// Preserve the ACP prompt failure. Dynamic profiles classify this exact
@@ -567,6 +641,7 @@ func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 		// fallback is permitted; replacing it with a generic label makes a 529
 		// indistinguishable from a local delivery failure.
 		Error:            routingerr.Sanitize(failure.Err.Error()),
+		Storage:          storage,
 		SessionID:        failure.SessionID,
 		PromptGeneration: failure.PromptGeneration,
 		TurnID:           failure.TurnID,
@@ -1003,4 +1078,11 @@ func (m *Manager) execAccessCheck() func(ctx context.Context, sessionID string) 
 		return m.sessionExecCheck
 	}
 	return m.sessionAccessCheck
+}
+
+func (m *Manager) SetExecutorAdmission(admit func(context.Context, string, string, string) (context.Context, error)) {
+	m.executorAdmission = admit
+	if m.sessionManager != nil {
+		m.sessionManager.executorAdmission = admit
+	}
 }

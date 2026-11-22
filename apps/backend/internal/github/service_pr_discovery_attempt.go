@@ -246,14 +246,6 @@ func (h *prDiscoveryHealthStore) beginWithJoinScopeLocked(
 	return state.attempt, true, false
 }
 
-func (h *prDiscoveryHealthStore) trackConsumerAndBegin(
-	workspaceID, cacheScope string, credentialGeneration int64, watchID string, target prDiscoveryHealthTarget,
-) ([]string, uint64, bool, bool, *PRDiscoveryHealth) {
-	return h.trackConsumerAndBeginWithOptions(
-		workspaceID, cacheScope, credentialGeneration, watchID, target, false,
-	)
-}
-
 func (h *prDiscoveryHealthStore) trackConsumerAndBeginWithOptions(
 	workspaceID, cacheScope string, credentialGeneration int64, watchID string,
 	target prDiscoveryHealthTarget, explicitRefresh bool,

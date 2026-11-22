@@ -21,10 +21,24 @@ export function resolveMobilePluginPanel(
   return registrationPresent ? panel : "chat";
 }
 
+/** Core mobile panels can lose their backing capability while restored state
+ *  still names them. Review falls back without a review source; Background Work
+ *  falls back for passthrough sessions or a disabled feature. */
+export function resolveMobileCorePanel(
+  panel: MobileSessionPanel,
+  reviewSource: MobileReviewSource,
+  backgroundWorkAvailable: boolean,
+): MobileSessionPanel {
+  if (panel === "review" && !reviewSource) return "chat";
+  if (panel === "background-work" && !backgroundWorkAvailable) return "chat";
+  return panel;
+}
+
 export function useEffectiveMobilePanel(
   currentMobilePanel: MobileSessionPanel,
   reviewSource: MobileReviewSource,
   handlePanelChange: (panel: MobileSessionPanel) => void,
+  backgroundWorkAvailable = false,
 ): MobileSessionPanel {
   usePluginRegistry();
   const parsedPluginPanel = parsePluginPanelId(currentMobilePanel);
@@ -36,7 +50,7 @@ export function useEffectiveMobilePanel(
           undefined
       : false,
   );
-  const effectivePanel = panel === "review" && !reviewSource ? "chat" : panel;
+  const effectivePanel = resolveMobileCorePanel(panel, reviewSource, backgroundWorkAvailable);
   useEffect(() => {
     if (effectivePanel !== currentMobilePanel) handlePanelChange(effectivePanel);
   }, [currentMobilePanel, effectivePanel, handlePanelChange]);

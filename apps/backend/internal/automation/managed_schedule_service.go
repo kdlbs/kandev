@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func (s *Service) ListManagedConversationSchedules(ctx context.Context, installationID, workspaceID string) ([]pluginsdk.ManagedConversationSchedule, error) {
@@ -108,6 +108,9 @@ func (s *Service) applyManagedScheduleUpdate(ctx context.Context, installationID
 	}
 	request, err := s.managedScheduleAutomation(ctx, schedule, installationID)
 	if err != nil {
+		return pluginsdk.ManagedConversationSchedule{}, false, err
+	}
+	if _, err := s.executorActorContext(ctx, current.CreatedByUserID, request.ExecutorProfileID, current.WorkspaceID); err != nil {
 		return pluginsdk.ManagedConversationSchedule{}, false, err
 	}
 	replayed, revision, err := s.store.UpdateManagedSchedule(ctx, installationID, workspaceID, automationID,

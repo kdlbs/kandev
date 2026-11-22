@@ -299,11 +299,11 @@ fifty tasks sees cleanup stay as fast as it is today.
 
 ## Prior art
 
-**Our own prior reasoning (wiki).** Searched: nothing. Receipt: vault
-`/Users/henry/Documents/henry/wiki` via the `@henry` pin,
-`QMD_WIKI_COLLECTION=wiki`; every read under it returns `EPERM` from this session
-(macOS protection on `~/Documents`), confirmed with `ls`, `cat` and the sandbox
-disabled, and `qmd` is not on `PATH`. A blocked leg, not an empty result.
+**Our own prior reasoning (wiki).** Searched: nothing. Receipt: the author's
+private notes vault (local path omitted), collection `wiki`; every read under it
+returns `EPERM` from this session (macOS protection on `~/Documents`), confirmed
+with `ls`, `cat` and the sandbox disabled, and `qmd` is not on `PATH`. A blocked
+leg, not an empty result.
 
 **What other products shipped (saas-kb).** Searched: `search_fsm_docs`,
 `category: "ai_sdlc"`, four queries on orphan cleanup at teardown, background

@@ -22,7 +22,10 @@ import {
   waitForTaskRunningSummary,
   seedSidebarSortScenario,
   touchDragSortRule,
+  startSidebarKeyboardReorder,
 } from "./sidebar-running-first-activity-sort-helpers";
+
+test.describe.configure({ retries: 0 });
 
 // @covers AC-UI-SIDEBAR-RUNNING-ACTIVITY-001.1, .2, .4, .5, .8, .11, .13 AC-UI-SIDEBAR-GROUP-INDENT-001.1, .2, .3, .4, .5, .6
 test("phone drawer edits and saves a touch-reachable sort chain and group inset", async ({
@@ -138,6 +141,19 @@ test("phone drawer edits and saves a touch-reachable sort chain and group inset"
         savedPopover.locator("[data-testid^='sort-rule-key-']").allTextContents(),
       ]).then(([primary, secondary]) => [primary, ...secondary]);
     const drawer = testPage.getByTestId("sidebar-filter-drawer");
+    const cancelHandle = savedPopover.getByTestId("sort-rule-handle-0");
+    await startSidebarKeyboardReorder(testPage, cancelHandle);
+    await testPage.keyboard.press("ArrowDown");
+    await testPage.keyboard.press("Escape");
+    await expect(drawer).toBeVisible();
+    await expect(cancelHandle).not.toHaveAttribute("aria-pressed");
+    await expect(savedPopover.locator('[data-dragging="true"]')).toHaveCount(0);
+    await expect(cancelHandle).toBeFocused();
+    await expect.poll(readSortKeys).toEqual(["Running", "Color", "Last activity"]);
+    await testPage.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
+    await savedFilters.open();
+    await savedFilters.openSortSettings();
     await savedPopover.evaluate((element) => element.scrollTo(0, 0));
     await waitForFiniteAnimations(savedPopover);
     const drawerBeforeDownwardDrag = await drawer.boundingBox();

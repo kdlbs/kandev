@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -291,5 +292,59 @@ func TestFetchBranchToLocal_RetryWithoutRemoteTrackingRefKeepsLocalBranch(t *tes
 	}
 	if !strings.Contains(result.Warning, retryFallbackWarningMarker) {
 		t.Fatalf("warning %q is not the retry path's; the retry may not have run at all", result.Warning)
+	}
+}
+
+// TestFetchBranchToLocal_RequiredRetryRefreshReportsProbeCause pins the
+// required=true arm of the fetch-refused retry. The retry fetch succeeds, but
+// the ancestry probe that decides whether origin/<branch> is a safe start point
+// cannot answer, so resolveRetryStartPoint records a warning instead of a start
+// point. A required refresh must fail closed on that warning and carry its
+// reason: dropping the cause leaves the caller with a bare ErrGitCommandFailed
+// that cannot be told apart from a real git command failure.
+func TestFetchBranchToLocal_RequiredRetryRefreshReportsProbeCause(t *testing.T) {
+	scriptDir := writeFakeGitScript(t, `
+case "${1:-}" in
+  fetch)
+    case "$*" in
+      *:*)
+        echo "fatal: refusing to fetch into branch 'refs/heads/feature/pr-branch' checked out at '/elsewhere'" >&2
+        exit 1
+        ;;
+      *)
+        exit 0
+        ;;
+    esac
+    ;;
+  merge-base)
+    echo "fatal: Not a valid object name origin/feature/pr-branch" >&2
+    exit 128
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	result, err := mgr.fetchBranchToLocalWithPolicy(
+		context.Background(), t.TempDir(), "feature/pr-branch", 0, true,
+	)
+	if err == nil {
+		t.Fatal("required retry refresh succeeded after an unverifiable ancestry probe")
+	}
+	if result != nil {
+		t.Fatalf("required retry refresh returned a result: %+v", result)
+	}
+	if !errors.Is(err, ErrGitCommandFailed) {
+		t.Fatalf("error = %v, want ErrGitCommandFailed", err)
+	}
+	if !strings.Contains(err.Error(), "git merge-base ancestry could not be verified") {
+		t.Fatalf("error %q discarded the probe cause; the required refresh must carry WarningDetail", err.Error())
 	}
 }

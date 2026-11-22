@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/turnchanges"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/lsp/installer"
@@ -44,6 +45,19 @@ type Service struct {
 	defaultUser            string
 }
 
+type TurnChangedFilesPolicyResolutionKind = turnchanges.PolicyResolutionKind
+
+const (
+	TurnChangedFilesPolicyAuthenticatedUser = turnchanges.PolicyAuthenticatedUser
+	TurnChangedFilesPolicyDefaultUser       = turnchanges.PolicyDefaultUser
+	TurnChangedFilesPolicySyntheticDefault  = turnchanges.PolicySyntheticDefault
+	TurnChangedFilesPolicyReadFailed        = turnchanges.PolicyReadFailed
+)
+
+// TurnChangedFilesCapturePolicy records the saved setting that governs one
+// admitted turn. It contains the settings identity, not a presumed human actor.
+type TurnChangedFilesCapturePolicy = turnchanges.CapturePolicy
+
 type UpdateUserSettingsRequest struct {
 	SidebarViewState                  *models.SidebarWorkspacePatch
 	SidebarLayoutState                *models.SidebarLayoutPatch
@@ -59,12 +73,16 @@ type UpdateUserSettingsRequest struct {
 	PreferredShell                    *string
 	DefaultEditorID                   *string
 	EnablePreviewOnClick              *bool
+	EscapeCancelsAgent                *bool
 	ChatSubmitKey                     *string
 	ReviewAutoMarkOnScroll            *bool
 	ConfirmTaskArchive                *bool
 	PreventAutoStartAgentOnOpen       *bool
 	UnreadDivider                     *bool
+	UnreadTaskDot                     *bool
+	UnreadTaskDotHideDelaySeconds     *int
 	AgentGeneratedTaskTitles          *bool
+	PromptSuggestions                 *bool
 	AutoFocusNewTasks                 *bool
 	MCPTaskAgentProfileDefault        *string
 	ShowAnchoredPromptBar             *bool
@@ -73,11 +91,13 @@ type UpdateUserSettingsRequest struct {
 	ShowTranscriptAutoScrollControl   *bool
 	ShowTodoListPanel                 *bool
 	ShowTodoListPanelOnlyWhenNotEmpty *bool
+	ShowTurnChangedFiles              *bool
 	ShowReleaseNotification           *bool
 	ReleaseNotesLastSeenVersion       *string
 	LspAutoStartLanguages             *[]string
 	LspAutoInstallLanguages           *[]string
 	LspServerConfigs                  *map[string]map[string]interface{}
+	MarkdownPreviewByDefault          *bool
 	LspStatusLocation                 *string
 	SavedLayouts                      *[]models.SavedLayout
 	SidebarViews                      *[]models.SidebarView
@@ -96,7 +116,6 @@ type UpdateUserSettingsRequest struct {
 	GitHubSavedPresets                **json.RawMessage
 	GitHubDefaultQueryPresets         **json.RawMessage
 	GitLabSavedPresets                **json.RawMessage
-	AzureDevOpsBrowsePreferences      **json.RawMessage
 	DefaultUtilityAgentID             *string
 	DefaultUtilityModel               *string
 	DefaultUtilityAgentProfileID      *string
@@ -156,6 +175,30 @@ func (s *Service) settingsUserID(ctx context.Context) string {
 	return identity.UserID
 }
 
+// ResolveTurnChangedFilesCapturePolicy reads the effective settings user once
+// so callers can persist this decision with the admitted turn. On failure it
+// returns a disabled policy and the read error; callers must still dispatch.
+func (s *Service) ResolveTurnChangedFilesCapturePolicy(ctx context.Context) (TurnChangedFilesCapturePolicy, error) {
+	userID := s.settingsUserID(ctx)
+	kind := TurnChangedFilesPolicyDefaultUser
+	if identity, ok := authn.IdentityFromContext(ctx); ok {
+		if identity.Synthetic {
+			kind = TurnChangedFilesPolicySyntheticDefault
+		} else if identity.UserID != "" {
+			kind = TurnChangedFilesPolicyAuthenticatedUser
+		}
+	}
+	policy := TurnChangedFilesCapturePolicy{SettingsUserID: userID, ResolutionKind: kind}
+	settings, err := s.repo.GetUserSettings(ctx, userID)
+	if err != nil {
+		policy.ResolutionKind = TurnChangedFilesPolicyReadFailed
+		return policy, err
+	}
+	policy.Enabled = settings.ShowTurnChangedFiles
+	policy.Revision = settings.Revision
+	return policy, nil
+}
+
 // GetCurrentUser returns the current (or default) user, mapping a missing
 // row to ErrUserNotFound.
 func (s *Service) GetCurrentUser(ctx context.Context) (*models.User, error) {
@@ -191,6 +234,13 @@ func (s *Service) GetDefaultUtilitySettings(ctx context.Context) (agentID, model
 		return "", "", err
 	}
 	return settings.DefaultUtilityAgentID, settings.DefaultUtilityModel, nil
+}
+
+// PromptSuggestionsEnabled reports whether the user opted in to next-prompt
+// suggestions. A settings read failure leaves suggestions off.
+func (s *Service) PromptSuggestionsEnabled(ctx context.Context) bool {
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
+	return err == nil && settings != nil && settings.PromptSuggestions
 }
 
 // GetDefaultUtilityAgentProfileID returns the profile used by new built-in utility actions.
@@ -381,17 +431,14 @@ func (s *Service) RecordTaskCreateLastUsed(ctx context.Context, patch models.Tas
 	if taskCreateLastUsedPatchEmpty(patch) {
 		return nil
 	}
-	settings, err := s.updateTaskCreateLastUsed(ctx, patch)
+	settings, changed, err := s.repo.UpdateTaskCreateLastUsed(ctx, s.settingsUserID(ctx), patch)
 	if err != nil {
 		return err
 	}
-	s.publishUserSettingsEvent(ctx, settings)
+	if changed {
+		s.publishUserSettingsEvent(ctx, settings)
+	}
 	return nil
-}
-
-// updateTaskCreateLastUsed delegates the patch to the repository.
-func (s *Service) updateTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
-	return s.repo.UpdateTaskCreateLastUsed(ctx, s.settingsUserID(ctx), patch)
 }
 
 // taskCreateLastUsedPatchEmpty reports whether every field of the patch is
@@ -406,6 +453,12 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.MarkdownPreviewByDefault != nil {
+		settings.MarkdownPreviewByDefault = *req.MarkdownPreviewByDefault
+	}
+	if req.ShowTurnChangedFiles != nil {
+		settings.ShowTurnChangedFiles = *req.ShowTurnChangedFiles
+	}
 	if req.JiraDefaultViewID != nil {
 		settings.JiraDefaultViewID = strings.TrimSpace(*req.JiraDefaultViewID)
 	}
@@ -413,6 +466,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		return err
 	}
 	if err := applySidebarHoverSettings(settings, req); err != nil {
+		return err
+	}
+	if err := applyUnreadTaskDotHideDelay(settings, req); err != nil {
 		return err
 	}
 	if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
@@ -687,6 +743,9 @@ func applyStartupPage(settings *models.UserSettings, value *string) error {
 // (archive confirmation, auto-start prevention, transcript display toggles,
 // MCP default profile, release notification) from the patch.
 func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.EscapeCancelsAgent != nil {
+		settings.EscapeCancelsAgent = *req.EscapeCancelsAgent
+	}
 	if req.ReviewAutoMarkOnScroll != nil {
 		settings.ReviewAutoMarkOnScroll = *req.ReviewAutoMarkOnScroll
 	}
@@ -699,8 +758,14 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	if req.UnreadDivider != nil {
 		settings.UnreadDivider = *req.UnreadDivider
 	}
+	if req.UnreadTaskDot != nil {
+		settings.UnreadTaskDot = *req.UnreadTaskDot
+	}
 	if req.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *req.AgentGeneratedTaskTitles
+	}
+	if req.PromptSuggestions != nil {
+		settings.PromptSuggestions = *req.PromptSuggestions
 	}
 	if req.AutoFocusNewTasks != nil {
 		settings.AutoFocusNewTasks = *req.AutoFocusNewTasks
@@ -818,7 +883,7 @@ func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupVa
 			v = models.TasksListSortDefault
 		}
 		if !models.IsValidTasksListSort(v) {
-			return fmt.Errorf("tasks_list_sort must be one of %s", strings.Join(models.TasksListSortValues(), ", "))
+			return fmt.Errorf("tasks_list_sort must be one of %s or %s", strings.Join(models.TasksListSortValues(), ", "), models.TaskListFacetFormat)
 		}
 		settings.TasksListSort = v
 	}
@@ -828,7 +893,7 @@ func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupVa
 			v = models.TasksListGroupDefault
 		}
 		if !models.IsValidTasksListGroup(v) {
-			return fmt.Errorf("tasks_list_group must be one of %s", strings.Join(models.TasksListGroupValues(), ", "))
+			return fmt.Errorf("tasks_list_group must be one of %s or %s", strings.Join(models.TasksListGroupValues(), ", "), models.TaskListFacetFormat)
 		}
 		settings.TasksListGroup = models.NormalizeTasksListGroup(v)
 	}
@@ -1045,6 +1110,9 @@ func applySidebarViews(settings *models.UserSettings, req *UpdateUserSettingsReq
 		if strings.TrimSpace(views[i].Name) == "" {
 			return errors.New("sidebar_views: view name must not be empty")
 		}
+		if err := validateSidebarPluginView(&views[i]); err != nil {
+			return fmt.Errorf("sidebar_views: %w", err)
+		}
 		if _, dup := seen[views[i].ID]; dup {
 			return fmt.Errorf("sidebar_views: duplicate view id %q", views[i].ID)
 		}
@@ -1072,6 +1140,11 @@ func applySidebarViewState(settings *models.UserSettings, req *UpdateUserSetting
 		settings.SidebarActiveViewID = activeViewID
 	}
 	if req.SidebarDraft != nil {
+		if *req.SidebarDraft != nil {
+			if err := validateSidebarPluginGrouping((*req.SidebarDraft).Group); err != nil {
+				return err
+			}
+		}
 		settings.SidebarDraft = *req.SidebarDraft
 	}
 	return nil
@@ -1090,7 +1163,7 @@ func sidebarViewIDExists(views []models.SidebarView, id string) bool {
 const maxUserPreferenceBlobBytes = 64 * 1024
 
 // applyUserPreferenceBlobs applies each free-form preference blob (sidebar
-// task prefs, Jira/GitHub/GitLab/Azure saved views and presets), validating
+// task prefs, Jira/GitHub/GitLab saved views and presets), validating
 // size and shape via applyUserPreferenceBlob.
 func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.SidebarTaskPrefs != nil {
@@ -1109,9 +1182,6 @@ func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSett
 		return err
 	}
 	if err := applyUserPreferenceBlob("gitlab_saved_presets", req.GitLabSavedPresets, &settings.GitLabSavedPresets); err != nil {
-		return err
-	}
-	if err := applyUserPreferenceBlob("azure_devops_browse_preferences", req.AzureDevOpsBrowsePreferences, &settings.AzureDevOpsBrowsePreferences); err != nil {
 		return err
 	}
 	return nil
@@ -1197,12 +1267,16 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"preferred_shell":                          settings.PreferredShell,
 		"default_editor_id":                        settings.DefaultEditorID,
 		"enable_preview_on_click":                  settings.EnablePreviewOnClick,
+		"escape_cancels_agent":                     settings.EscapeCancelsAgent,
 		"chat_submit_key":                          settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":               settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                     settings.ConfirmTaskArchive,
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
+		"unread_task_dot":                          settings.UnreadTaskDot,
+		"unread_task_dot_hide_delay_seconds":       settings.UnreadTaskDotHideDelaySeconds,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"prompt_suggestions":                       settings.PromptSuggestions,
 		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
@@ -1211,11 +1285,13 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"show_transcript_auto_scroll_control":      settings.ShowTranscriptAutoScrollControl,
 		"show_todo_list_panel":                     settings.ShowTodoListPanel,
 		"show_todo_list_panel_only_when_not_empty": settings.ShowTodoListPanelOnlyWhenNotEmpty,
+		"show_turn_changed_files":                  settings.ShowTurnChangedFiles,
 		"show_release_notification":                settings.ShowReleaseNotification,
 		"release_notes_last_seen_version":          settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":                 settings.LspAutoStartLanguages,
 		"lsp_auto_install_languages":               settings.LspAutoInstallLanguages,
 		"lsp_server_configs":                       settings.LspServerConfigs,
+		"markdown_preview_by_default":              settings.MarkdownPreviewByDefault,
 		"lsp_status_location":                      models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"saved_layouts":                            settings.SavedLayouts,
 		"sidebar_views":                            settings.SidebarViews,
@@ -1234,7 +1310,6 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"github_saved_presets":                     settings.GitHubSavedPresets,
 		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
 		"gitlab_saved_presets":                     settings.GitLabSavedPresets,
-		"azure_devops_browse_preferences":          settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":                 settings.DefaultUtilityAgentID,
 		"default_utility_model":                    settings.DefaultUtilityModel,
 		"default_utility_agent_profile_id":         settings.DefaultUtilityAgentProfileID,

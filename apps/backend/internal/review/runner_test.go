@@ -60,6 +60,9 @@ func (f *fakeStore) CreateRun(_ context.Context, req taskservice.CreateRunReques
 func (f *fakeStore) ActiveRun(context.Context, string) (*models.TaskReviewRun, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.active != nil && f.active.Status.IsTerminal() {
+		return nil, nil
+	}
 	return f.active, nil
 }
 

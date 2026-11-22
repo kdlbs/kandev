@@ -22,6 +22,12 @@ Keep every `AGENTS.md` and `CLAUDE.md` file at 300 lines or fewer. Move detail
 to the nearest scoped file or a referenced document when a parent reaches the
 limit.
 
+The harness linter also limits each repository root-to-leaf Codex instruction
+chain to 28 KiB, leaving 4 KiB of the default budget for instructions outside
+the repository. User-level instructions and custom Codex limits can still change
+the available budget. Keep topic references near their owning subsystem and link
+them with an explicit reading trigger.
+
 Compare word and byte counts with the previous version. If the common workflow
 grows, remove duplicate rules or move conditional detail into linked references.
 Line limits do not measure reading cost.

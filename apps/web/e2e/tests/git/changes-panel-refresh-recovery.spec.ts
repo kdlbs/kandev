@@ -7,9 +7,10 @@ import {
 } from "../../helpers/git-helper";
 import { createGitEnrichmentGate, routeGitStatusRefresh } from "./git-status-refresh-helpers";
 import path from "node:path";
+import { waitForSessionDone } from "../../helpers/session";
 
 test.describe("Changes panel Git refresh recovery", () => {
-  test.describe.configure({ timeout: 120_000 });
+  test.describe.configure({ timeout: 120_000, retries: 0 });
 
   test("keeps initial pending feedback in a narrow toolbar until refresh completes", async ({
     testPage,
@@ -70,6 +71,8 @@ test.describe("Changes panel Git refresh recovery", () => {
 
       const priorFreshResponses = bridge.responseCount("fresh");
       gate.release();
+      await bridge.waitForReadyNotification();
+      gate.dispose();
       bridge.releaseReadyGitStatusNotifications();
       bridge.releaseFreshGitRefreshRequests();
       const response = await bridge.waitForResponse("fresh", priorFreshResponses);
@@ -102,12 +105,13 @@ test.describe("Changes panel Git refresh recovery", () => {
     git.createFile(filePath, "refresh recovery content\n");
 
     const bridge = await routeGitStatusRefresh(testPage);
+    bridge.holdFreshGitRefreshRequests();
     const gate = createGitEnrichmentGate(backend.tmpDir);
     gate.arm();
 
     try {
       const profile = await createStandardProfile(apiClient, "Git Refresh Recovery Profile");
-      await apiClient.createTaskWithAgent(
+      const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         "Git Refresh Recovery",
         profile.id,
@@ -118,16 +122,26 @@ test.describe("Changes panel Git refresh recovery", () => {
           repository_ids: [seedData.repositoryId],
         },
       );
+      if (!task.session_id) throw new Error("The Git refresh task should have a session identity");
       const priorFreshResponses = bridge.responseCount("fresh");
       const session = await openTaskSession(testPage, "Git Refresh Recovery");
       await gate.waitUntilStarted();
 
       await session.clickTab("Changes");
       await expect(session.changes).toBeVisible();
+      // Enrichment can start before the agent finishes startup.
+      await bridge.waitForHeldFreshGitRefreshRequests(1, task.session_id);
+      await waitForSessionDone(
+        apiClient,
+        task.id,
+        task.session_id,
+        "The Git refresh fixture should finish its initial prompt",
+      );
+      bridge.releaseFreshGitRefreshRequests();
       const response = await bridge.waitForResponse("fresh", priorFreshResponses);
       expect(response.success).toBe(true);
-      expect(bridge.responseIncludesFile("fresh", filePath)).toBe(true);
-      expect(bridge.responseHasPendingDetails("fresh", filePath)).toBe(true);
+      expect(bridge.responseIncludesFile("fresh", filePath, task.session_id)).toBe(true);
+      expect(bridge.responseHasPendingDetails("fresh", filePath, task.session_id)).toBe(true);
       await bridge.waitForDroppedPendingStatus();
 
       const fileRow = session.changes.getByTestId(`file-row-${filePath}`);
@@ -185,6 +199,7 @@ test.describe("Changes panel Git refresh recovery", () => {
       await expect(refreshStatus).toHaveCount(0);
     } finally {
       gate.dispose();
+      bridge.releaseFreshGitRefreshRequests();
     }
   });
 

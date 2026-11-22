@@ -1,6 +1,7 @@
 // Filename starts with "mobile-" so this runs on the mobile-chrome project.
 import path from "node:path";
 import { expect, test } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import { openTaskSession, waitForAgentMessage } from "../../helpers/session";
 import {
   readIdleSuspensionSnapshot,
@@ -8,6 +9,7 @@ import {
   readSessionContentMessageCount,
   readSessionMessageCount,
   updateWorkspaceIdlePolicy,
+  watchSessionFocusLaunches,
 } from "../../helpers/idle-parking";
 
 test.describe("mobile: workspace ACP idle suspension", () => {
@@ -73,6 +75,23 @@ test.describe("mobile: workspace ACP idle suspension", () => {
         })
         .toContain('"idleSuspensionState":"suspended"');
 
+      // With prevent-auto-start on, opening the task must leave the parked
+      // session stopped and surface the composer hint instead of resuming.
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
+      const focusLaunches = watchSessionFocusLaunches(testPage, task.session_id);
+      await openTaskSession(testPage, task.id);
+      await expect(testPage.getByTestId("composer-agent-start-hint")).toBeVisible({
+        timeout: 30_000,
+      });
+      await dwell(
+        testPage,
+        1_500,
+        "negative-assertion",
+        "opening an idle-suspended task on a phone with prevent-auto-start on must not resume the agent",
+      );
+      expect(focusLaunches.requestIds.size).toBe(0);
+      expect(readIdleSuspensionState(databasePath, task.session_id)).toBe("suspended");
+
       await apiClient.addUserMessage(task.id, task.session_id, "/e2e:simple-message");
       await expect
         .poll(() => readIdleSuspensionState(databasePath, task.session_id!), {
@@ -121,6 +140,7 @@ test.describe("mobile: workspace ACP idle suspension", () => {
           .getByText("This is a simple mock response for e2e testing.", { exact: true }),
       ).toHaveCount(3);
     } finally {
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
       await updateWorkspaceIdlePolicy(backend.baseUrl, seedData.workspaceId, false, 120);
     }
   });

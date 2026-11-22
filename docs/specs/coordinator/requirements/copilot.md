@@ -92,8 +92,8 @@ Mockup:
 - **AC-COORDINATOR-COPILOT-001.7:** An open shall return a conversation task
   whose session exists and has no agent running unless a manager's message
   started one; the open itself shall never start an agent.
-- **AC-COORDINATOR-COPILOT-001.8:** A conversation task shall not be removed by
-  Quick Chat idle expiry, however long it stays idle.
+- **AC-COORDINATOR-COPILOT-001.8:** A conversation task shall remain until its
+  coordinator lifecycle explicitly deletes it, regardless of inactivity duration.
 - **AC-COORDINATOR-COPILOT-001.9:** When an open loses the race described in
   `AC-COORDINATOR-COPILOT-001.2` and finds no other task to converge on
   because a context or profile change cleared the reference concurrently, the

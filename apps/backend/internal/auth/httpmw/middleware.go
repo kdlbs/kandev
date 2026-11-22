@@ -41,9 +41,12 @@ func Middleware(svc *auth.Service) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		if identity, ok := ResolveRequest(c, svc); ok {
+		if identity, ok, err := ResolveRequest(c, svc); ok {
 			authn.SetOnGin(c, identity)
 			c.Next()
+			return
+		} else if err != nil {
+			authn.AbortAuthenticationUnavailable(c)
 			return
 		}
 		path := c.Request.URL.Path
@@ -270,19 +273,33 @@ func SyntheticIdentity() authn.Identity {
 // upgraded connections (it never calls this function); PAT ?token= upgrades
 // go through AuthPolicy.ResolveToken instead. The resolved client IP rides
 // the session touch so the stored IP tracks the client's current address.
-func ResolveRequest(c *gin.Context, svc *auth.Service) (authn.Identity, bool) {
+//
+// A cookie lookup error is remembered while the bearer is attempted, because a
+// successful bearer still authenticates. When no candidate succeeds, the
+// remembered error is returned so the caller can distinguish an unavailable
+// verification from a definitive rejection.
+func ResolveRequest(c *gin.Context, svc *auth.Service) (authn.Identity, bool, error) {
 	ctx := c.Request.Context()
+	var lookupErr error
 	if cookie, err := c.Cookie(svc.CookieNameForRequest(c.Request)); err == nil && cookie != "" {
-		if identity, ok := svc.ResolveSessionToken(ctx, cookie, c.ClientIP()); ok {
-			return identity, true
+		identity, ok, err := svc.ResolveSessionToken(ctx, cookie, c.ClientIP())
+		if ok {
+			return identity, true, nil
+		}
+		if err != nil {
+			lookupErr = err
 		}
 	}
 	if bearer := BearerToken(c.Request); bearer != "" {
-		if identity, ok := svc.ResolveBearer(ctx, bearer); ok {
-			return identity, true
+		identity, ok, err := svc.ResolveBearer(ctx, bearer)
+		if ok {
+			return identity, true, nil
+		}
+		if lookupErr == nil && err != nil {
+			lookupErr = err
 		}
 	}
-	return authn.Identity{}, false
+	return authn.Identity{}, false, lookupErr
 }
 
 // BearerToken extracts an Authorization bearer credential.

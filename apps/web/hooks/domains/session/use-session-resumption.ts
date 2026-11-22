@@ -333,6 +333,50 @@ function sendSessionFocus(
   }
 }
 
+type VisibleRestartParams = {
+  requested: { current: string | null };
+  key: string;
+  session: SessionLike;
+  taskId: string;
+  sessionId: string;
+  preventAutoStart: boolean;
+};
+
+function prioritizeVisibleRestart({
+  requested,
+  key,
+  session,
+  taskId,
+  sessionId,
+  preventAutoStart,
+}: VisibleRestartParams): void {
+  if (
+    requested.current === key ||
+    document.visibilityState !== "visible" ||
+    !session?.session_recovery_blocks?.some(
+      (block) => block.consumer_reference === "agent_delivery",
+    )
+  )
+    return;
+  // The workspace idle policy suspends only settled states. A restart-priority
+  // focus on one of them can resume the parked agent, so the preference must
+  // gate it. Other states cannot be idle-suspended and keep their recovery.
+  if (preventAutoStart && canBeIdleSuspended(session?.state)) return;
+  requested.current = key;
+  sendSessionFocus(getWebSocketClient(), taskId, sessionId);
+}
+
+const IDLE_SUSPENDABLE_SESSION_STATES = new Set<TaskSessionState>([
+  "WAITING_FOR_INPUT",
+  "IDLE",
+  "COMPLETED",
+]);
+
+function canBeIdleSuspended(state: string | undefined): boolean {
+  if (state === undefined) return true;
+  return IDLE_SUSPENDABLE_SESSION_STATES.has(state as TaskSessionState);
+}
+
 type ResumeActionParams = {
   status: SessionStatus;
   taskId: string;
@@ -353,6 +397,11 @@ async function performResumeAction({
   canContinue,
 }: ResumeActionParams): Promise<boolean> {
   if (status.is_idle_suspended && !status.is_agent_running) {
+    if (preventAutoStart) {
+      recordResumeSkipIfStopped(setters, sessionId);
+      setters.setResumptionState("idle");
+      return false;
+    }
     if (status.auto_resume_allowed === false || document.visibilityState !== "visible") {
       setters.setResumptionState("idle");
       return false;
@@ -579,6 +628,7 @@ function useSessionResetAndCheck({
   const requestGenerationRef = useRef(0);
   const startupRecoveryInFlightRef = useRef(new Map<string, Promise<void>>());
   const focusRequestInFlightRef = useRef(false);
+  const restartPriorityRequestRef = useRef<string | null>(null);
   const lastFocusRequestAtRef = useRef(0);
   const [committedRequest, setCommittedRequest] = useState<SessionRequestIdentity>({
     key: requestKey,
@@ -595,7 +645,7 @@ function useSessionResetAndCheck({
       generation: requestGenerationRef.current,
     };
     setCommittedRequest(activeRequestRef.current);
-  }, [requestKey, preventAutoResume]);
+  }, [requestKey, preventAutoResume, skipAutomaticRecovery]);
 
   // Reset all local state when session or task changes to prevent stale data
   // from a previous session leaking into the new one (e.g. topbar branch).
@@ -619,12 +669,20 @@ function useSessionResetAndCheck({
       !sessionId ||
       connectionStatus !== "connected" ||
       taskArchiveState !== false ||
-      preventAutoResume ||
-      hasAttemptedResume.current
+      preventAutoResume
     )
       return;
-    hasAttemptedResume.current = true;
     const capturedRequest = activeRequestRef.current;
+    prioritizeVisibleRestart({
+      requested: restartPriorityRequestRef,
+      key: JSON.stringify([capturedRequest.key, capturedRequest.generation]),
+      session,
+      taskId,
+      sessionId,
+      preventAutoStart,
+    });
+    if (hasAttemptedResume.current) return;
+    hasAttemptedResume.current = true;
     const guardedSetters = buildGuardedSetters(activeRequestRef, capturedRequest, setters);
     const canContinue = () => isCurrentRequest(activeRequestRef.current, capturedRequest);
     const recoveryKey = JSON.stringify([capturedRequest.key, capturedRequest.generation]);
@@ -662,6 +720,7 @@ function useSessionResetAndCheck({
 
   useEffect(() => {
     if (
+      skipAutomaticRecovery ||
       !taskId ||
       !sessionId ||
       connectionStatus !== "connected" ||
@@ -687,6 +746,14 @@ function useSessionResetAndCheck({
       focusRequestInFlightRef.current = true;
       try {
         const recoveryKey = JSON.stringify([capturedRequest.key, capturedRequest.generation]);
+        prioritizeVisibleRestart({
+          requested: restartPriorityRequestRef,
+          key: recoveryKey,
+          session,
+          taskId,
+          sessionId,
+          preventAutoStart,
+        });
         const startupRecovery = startupRecoveryInFlightRef.current.get(recoveryKey);
         if (startupRecovery) {
           await startupRecovery;
@@ -737,6 +804,7 @@ function useSessionResetAndCheck({
     connectionStatus,
     preventAutoStart,
     preventAutoResume,
+    skipAutomaticRecovery,
     session,
     sessionId,
     setters,

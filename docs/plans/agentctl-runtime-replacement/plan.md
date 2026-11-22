@@ -162,3 +162,11 @@ Live remote reattachment remains distinct from confirmed local runtime replaceme
 The [repair package](../agentctl-journal-shutdown-recovery/plan.md) owns the observed journal-close panic and retry failure after execution removal.
 It also covers recovery-control alignment and the complete post-crash desktop/phone interaction.
 Its four work orders are completed. The repair package records the backend, desktop, and phone validation results. Earlier results and outstanding release gates remain unchanged.
+
+## Renewal lifetime correction (PR #4691)
+
+[Task 04](task-04-replacement-coordinator.md#renewal-lifetime-correction-pr-4691)
+records a focused restoration of published-runtime renewal and monitoring
+after the bounded provisioning attempt returns. The existing requirement and
+design boundaries apply. Task 04 records focused local validation. Historical platform and browser
+results above do not establish coverage for this correction.

@@ -29,6 +29,10 @@ Wrote code before a test? Delete it. Start over from a failing test.
 
 **Skip** for: pure UI components (we don't test React components), config files, generated code.
 
+For scheduling, background delivery, or task/session lifecycle changes, use the
+single [lifecycle evidence checklist](references/lifecycle-evidence.md) to map
+applicable scenarios to their acceptance criteria and focused proof.
+
 For UI rendering bugs, prefer extracting or using a pure helper and testing that helper. Add Playwright only when the behavior is truly visual or integration-level. Avoid adding React component tests just to assert DOM output; that does not match this project's testing convention.
 
 ## Test-value gate
@@ -77,6 +81,10 @@ Choose the right level:
 - **E2E:** critical user-facing browser flows; keep these focused and use `/e2e`.
 
 Prefer state/output assertions over interaction assertions. Mock only slow, nondeterministic, or external boundaries; use real implementations or fakes when they keep the test deterministic.
+
+When a change targets one path but edits a helper or predicate shared by other
+paths, scope the change at the call site or add a regression for every unchanged
+path. Shared-helper coverage alone does not prove those paths stayed unchanged.
 
 When one behavior has separate wheel, keyboard, touch, or pointer handlers,
 inventory and test every handler with distinct branching. For input at a hard

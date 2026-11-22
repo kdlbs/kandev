@@ -864,35 +864,107 @@ func TestRollbackResumeStateAfterFailure_SkipsTransitionAfterConcurrentStateChan
 	}
 }
 
-func TestResumeSession_PreservesStartingOnLiveAlreadyRunningRace(t *testing.T) {
+type resumeRaceReadinessAgentManager struct {
+	*mockAgentManager
+	ready       bool
+	beforeReady func()
+}
+
+func (m *resumeRaceReadinessAgentManager) IsAgentReadyForPrompt(context.Context, string) bool {
+	if m.beforeReady != nil {
+		m.beforeReady()
+	}
+	return m.ready
+}
+
+func TestResumeSession_PreservesLiveStateOnAlreadyRunningRace(t *testing.T) {
 	for _, initialState := range []models.TaskSessionState{
 		models.TaskSessionStateWaitingForInput,
 		models.TaskSessionStateRunning,
 		models.TaskSessionStateStarting,
 	} {
-		t.Run(string(initialState), func(t *testing.T) {
+		for _, ready := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/ready=%t", initialState, ready), func(t *testing.T) {
+				repo := newMockRepository()
+				setupLiveResumeTestFixture(repo)
+				repo.sessions["sess-1"].State = initialState
+				repo.sessions["sess-1"].UpdatedAt = time.Now().Add(-time.Minute)
+				var runningChecks int
+				agentMgr := &resumeRaceReadinessAgentManager{
+					ready: ready,
+					mockAgentManager: &mockAgentManager{
+						launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+							return nil, fmt.Errorf("%w: session %q", lifecycle.ErrAgentAlreadyRunning, req.SessionID)
+						},
+						isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool {
+							runningChecks++
+							return runningChecks > 1
+						},
+					},
+				}
+				exec := newTestExecutor(t, agentMgr, repo)
+				_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+				if !errors.Is(err, ErrExecutionAlreadyRunning) {
+					t.Fatalf("ResumeSession error = %v, want ErrExecutionAlreadyRunning", err)
+				}
+				want := models.TaskSessionStateStarting
+				if initialState == models.TaskSessionStateWaitingForInput && ready {
+					want = models.TaskSessionStateWaitingForInput
+				}
+				if got := repo.sessions["sess-1"].State; got != want {
+					t.Fatalf("session state after live race = %s, want %s", got, want)
+				}
+				if agentMgr.cleanupStaleExecutionCallCount != 0 {
+					t.Fatal("live runtime must not be cleaned up")
+				}
+			})
+		}
+	}
+}
+
+func TestResumeSession_RecoveredIdleRacePreservesNewerStateAndAttempt(t *testing.T) {
+	for _, newerState := range []models.TaskSessionState{
+		models.TaskSessionStateCancelled, models.TaskSessionStateRunning, models.TaskSessionStateStarting,
+	} {
+		t.Run(string(newerState), func(t *testing.T) {
 			repo := newMockRepository()
 			setupLiveResumeTestFixture(repo)
-			repo.sessions["sess-1"].State = initialState
-			repo.sessions["sess-1"].UpdatedAt = time.Now().Add(-time.Minute)
+			repo.sessions["sess-1"].State = models.TaskSessionStateWaitingForInput
 			var runningChecks int
-			agentMgr := &mockAgentManager{
-				launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
-					return nil, fmt.Errorf("%w: session %q", lifecycle.ErrAgentAlreadyRunning, req.SessionID)
+			agentMgr := &resumeRaceReadinessAgentManager{
+				ready: true,
+				beforeReady: func() {
+					repo.sessions["sess-1"].State = newerState
+					if newerState == models.TaskSessionStateStarting {
+						repo.sessions["sess-1"].Metadata[models.SessionMetaKeyAgentStartAttemptID] = "newer-attempt"
+					}
 				},
-				isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool {
-					runningChecks++
-					return runningChecks > 1
+				mockAgentManager: &mockAgentManager{
+					launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+						return nil, lifecycle.ErrAgentAlreadyRunning
+					},
+					isAgentRunningForSessionFunc: func(context.Context, string) bool {
+						runningChecks++
+						return runningChecks > 1
+					},
 				},
 			}
 			exec := newTestExecutor(t, agentMgr, repo)
-
+			var releases int
+			exec.SetOnCeilingReservationRelease(func(string) { releases++ })
 			_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
-			if !errors.Is(err, ErrExecutionAlreadyRunning) {
-				t.Fatalf("ResumeSession error = %v, want ErrExecutionAlreadyRunning", err)
+			var superseded *SessionStateSupersededError
+			if !errors.As(err, &superseded) {
+				t.Fatalf("ResumeSession error = %v, want superseded attempt", err)
 			}
-			if got := repo.sessions["sess-1"].State; got != models.TaskSessionStateStarting {
-				t.Fatalf("session state after live race from %s = %s, want %s", initialState, got, models.TaskSessionStateStarting)
+			if !errors.Is(err, ErrExecutionAlreadyRunning) {
+				t.Fatalf("ResumeSession error = %v, want duplicate-runtime classification", err)
+			}
+			if got := repo.sessions["sess-1"].State; got != newerState {
+				t.Fatalf("state = %s, want %s", got, newerState)
+			}
+			if releases != 0 || agentMgr.cleanupStaleExecutionCallCount != 0 {
+				t.Fatal("superseded resume must retain the newer reservation and live runtime")
 			}
 		})
 	}

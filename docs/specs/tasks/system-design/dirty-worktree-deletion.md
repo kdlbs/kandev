@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-09-05
-updated: 2026-09-10
+updated: 2026-10-19
 owners:
   - cfl
 ---
@@ -20,12 +20,20 @@ consent, and preserves every existing ownership and Git identity safeguard.
 It does not change archive, session deletion, workspace reset, automatic commit
 or push behavior, or branch redundancy rules.
 
+This document describes normal deletion with workspace cleanup. The explicit
+keep-files alternative is defined in [task deletion recovery](task-delete-recovery.md).
+Its retention choice does not grant permission for destructive cleanup. The
+same recovery design defines explicit admission with unknown inspection. That
+extension supersedes the unconditional inspection-error block below only when
+its separate acknowledgement and discard consent are both present. Physical
+removal audits remain mandatory.
+
 ## Requirement mapping
 
 | Requirement | Design source |
 | --- | --- |
-| REQ-TASKS-RUNTIME-CLEANUP-001.10-.12 | Admission, cleanup snapshot, audited removal, and failure classification below |
-| REQ-TASKS-RUNTIME-CLEANUP-001.14-.17 | Read-only confirmation inspection below |
+| AC-TASKS-RUNTIME-CLEANUP-001.9 | Admission, audited removal, and failure classification below |
+| AC-TASKS-RUNTIME-CLEANUP-001.6, .25 | Cleanup snapshot persistence |
 
 ## Existing system context
 
@@ -145,8 +153,10 @@ Executor type, descendant count alone, and cached session Git summaries do not
 establish whether consent is needed. The explicit `requireDiscardConsent` prop
 must no longer override a fresh clean result; remove its heuristic callers.
 
-Loading and error states hide the checkbox and disable Delete. Errors offer
-localized retry feedback. Clean results hide the checkbox and send
+Loading and transport/admission errors hide discard consent and disable Delete.
+A typed unknown-inspection result uses the recovery acknowledgement flow.
+The independent keep-files choice remains available under the recovery design.
+Errors offer localized retry feedback. Clean results hide discard consent and send
 `discardWorktreeChanges:false`. Dirty results show the existing unchecked option
 and enable Delete only after selection. Closing resets all consent. The existing
 typed mutation conflict remains the race guard; reopening performs fresh
@@ -158,8 +168,8 @@ and its footer keeps stacked touch actions; desktop keeps compact row actions.
 Archive's full dialog, popover, inline confirmation, and preference bypass remain
 unchanged. Its cascade checkbox concerns descendants, not dirty files.
 
-This exposes an existing inspection boundary. It adds no ownership model,
-persistence, or alternate cleanup policy, so no new ADR is required.
+The normal inspection boundary adds no alternate cleanup policy. The separate
+retain mode has its own linked design and retention decision.
 
 ## Cleanup snapshot persistence
 
@@ -168,8 +178,10 @@ schema change is required. A missing field is `false`.
 
 ## Failure and recovery
 
-- A status inspection error fails admission closed and returns no consent prompt
-  that could authorize an uncertain path.
+- A status inspection error fails ordinary admission closed. The recovery
+  design permits explicit consent to delete the task with unknown changes and
+  durable pending cleanup. This does not authorize removal of an uncertain path.
+  The separate keep-files action does not inspect or remove the workspace.
 - A dirty conflict preserves the task, worktree, branch, and local changes. The
   user can commit the changes or retry with explicit discard consent.
 - A non-cleanliness audit failure preserves the checkout even when consent is

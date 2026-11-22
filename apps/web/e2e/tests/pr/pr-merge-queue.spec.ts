@@ -169,6 +169,7 @@ async function seedQueuedPR(apiClient: ApiClient, taskId: string) {
 }
 
 async function seedEligiblePR(apiClient: ApiClient, taskId: string) {
+  await apiClient.mockGitHubSetRepositoryDetails(OWNER, REPO, true);
   await apiClient.mockGitHubAddRepos(OWNER, [
     { full_name: `${OWNER}/${REPO}`, owner: OWNER, name: REPO },
   ]);

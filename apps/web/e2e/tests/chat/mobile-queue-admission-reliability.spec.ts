@@ -6,7 +6,13 @@ import { registerSeparateQueueRows } from "../../helpers/message-queue-settings"
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { routeMainWebSocketWithQueueAdmissionDrops } from "../../helpers/ws-drop";
-import { openQuickChatWithAgent, sendQuickChatMessage } from "./quick-chat-helpers";
+import {
+  openQuickChatSetup,
+  sendQuickChatMessage,
+  startQuickChatFromSetup,
+  waitForQuickChatDirectInput,
+  waitForSessionSettledBaseline,
+} from "./quick-chat-helpers";
 import { SessionPage } from "../../pages/session-page";
 
 registerSeparateQueueRows(test);
@@ -79,10 +85,13 @@ test.describe("mobile queue admission reliability", () => {
   test.describe("lost accepted Quick Chat response", () => {
     test.describe.configure({ retries: 0 });
 
-    test("reconciles through a touch submit", async ({ testPage }) => {
+    test("reconciles through a touch submit", async ({ testPage, apiClient }) => {
       test.setTimeout(120_000);
       const drops = await routeMainWebSocketWithQueueAdmissionDrops(testPage);
-      const dialog = await openQuickChatWithAgent(testPage);
+      const dialog = await openQuickChatSetup(testPage);
+      const started = await startQuickChatFromSetup(dialog, testPage);
+      await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
+      await waitForQuickChatDirectInput(dialog);
       await sendQuickChatMessage(dialog, testPage, "/sleep 30");
       await expect(
         testPage.getByRole("status", { name: /Agent is (starting|running)/ }),

@@ -1181,7 +1181,7 @@ func collectLocalBranches(localRefsRoot string, branchMap map[string]Branch) {
 			return nil
 		}
 		name := filepath.ToSlash(rel)
-		branchMap[name] = Branch{Name: name, Type: "local"}
+		branchMap["refs/heads/"+name] = Branch{Name: name, Type: "local"}
 		return nil
 	})
 }
@@ -1200,7 +1200,7 @@ func collectRemoteBranches(remoteRefsRoot string, branchMap map[string]Branch) {
 		if len(parts) < 2 || parts[1] == gitHEAD {
 			return nil
 		}
-		branchMap["remotes/"+fullPath] = Branch{Name: parts[1], Type: "remote", Remote: parts[0]}
+		branchMap["refs/remotes/"+fullPath] = Branch{Name: parts[1], Type: "remote", Remote: parts[0]}
 		return nil
 	})
 }
@@ -1371,8 +1371,8 @@ func parsePackedRefs(refsRoot string, branchMap map[string]Branch) {
 		ref := parts[1]
 		if strings.HasPrefix(ref, "refs/heads/") {
 			name := strings.TrimPrefix(ref, "refs/heads/")
-			if _, exists := branchMap[name]; !exists {
-				branchMap[name] = Branch{Name: name, Type: "local"}
+			if _, exists := branchMap[ref]; !exists {
+				branchMap[ref] = Branch{Name: name, Type: "local"}
 			}
 		} else if strings.HasPrefix(ref, "refs/remotes/") {
 			fullPath := strings.TrimPrefix(ref, "refs/remotes/")
@@ -1380,9 +1380,8 @@ func parsePackedRefs(refsRoot string, branchMap map[string]Branch) {
 			if len(rp) < 2 || rp[1] == gitHEAD {
 				continue
 			}
-			key := "remotes/" + fullPath
-			if _, exists := branchMap[key]; !exists {
-				branchMap[key] = Branch{Name: rp[1], Type: "remote", Remote: rp[0]}
+			if _, exists := branchMap[ref]; !exists {
+				branchMap[ref] = Branch{Name: rp[1], Type: "remote", Remote: rp[0]}
 			}
 		}
 	}

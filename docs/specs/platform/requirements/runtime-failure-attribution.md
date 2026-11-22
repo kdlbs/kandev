@@ -2,6 +2,7 @@
 status: active
 system: platform
 created: 2026-09-24
+updated: 2026-11-04
 owners:
   - kandev
 ---
@@ -25,8 +26,10 @@ an identity rejection, and expected non-recovery without exposing request data.
 
 - **AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.1:** When a required persistence
   probe fails, one bounded diagnostic shall identify the failing probe stage,
-  elapsed time, error class, and writer/reader connection-pool pressure. The
-  existing health transition and recovery behavior shall remain unchanged.
+  elapsed time, error class, and writer/reader connection-pool pressure.
+  The stage shall distinguish connection acquisition from a ping on an acquired connection.
+  An acquisition duration shall not claim to measure only SQLite lock time.
+  The existing health transition and recovery behavior shall remain unchanged.
 - **AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.2:** When a plugin webhook
   returns a server error, a diagnostic shall distinguish host lifecycle failure,
   host RPC failure, and a plugin-supplied response. It shall identify the plugin
@@ -51,9 +54,30 @@ an identity rejection, and expected non-recovery without exposing request data.
   from a verified absent reference. Ownership and changed-commit refusals shall
   remain distinguishable. Diagnostics shall preserve cleanup evidence and
   existing retry and deletion-safety policy.
+- **AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.7:** Recovery progress shall count each conclusively resolved inventory candidate exactly once, including verified absence and definitive reconstruction refusal.
+  Retracked count shall remain separate from completed work.
+  Unresolved cancellation, deadline, enumeration failure, and unknown outcomes shall remain incomplete.
+  Unknown inventory shall not become a measured empty inventory.
+- **AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.8:** When a shared durability run
+  fails or takes at least one second, one diagnostic shall identify its observed phases and durations.
+  Connection acquisition, connection ownership, transaction entry, generation write, and commit shall remain distinguishable.
+  An unobserved phase shall remain distinguishable from a measured zero duration.
+  The diagnostic shall describe the shared run independently of a caller that stops waiting.
+  It shall preserve durability, cancellation, and connection-release behavior.
+- **AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.9:** When Git status, agent configuration,
+  or a capability probe fails, forwarded diagnostics shall retain the operation and a bounded error class.
+  Available trusted correlation identifiers shall remain available.
+  Missing identity shall not cause a guessed identifier.
+  Unsupported causes shall use an explicit unknown classification.
+  Existing response bodies, statuses, provider redaction, and recovery decisions shall remain unchanged.
 
 ## Out of scope
 
 - Changing probe timeouts or readiness policy before the database stall is attributed.
 - Changing plugin-provided webhook responses or external plugin manifests.
 - Relaxing the pull-request identity guard or suppressing the startup progress warning.
+
+## Implementation plans
+
+- [Startup and shutdown diagnostic integrity](../../../plans/startup-shutdown-diagnostic-integrity/plan.md)
+- [Runtime stall diagnostics](../../../plans/runtime-stall-diagnostics/plan.md)

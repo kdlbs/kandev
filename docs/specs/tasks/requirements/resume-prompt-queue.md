@@ -60,6 +60,39 @@ admission, and deferred dispatch. The shared composer exposes this behavior.
   message-triggered transition shall not revive the session, clear its error,
   or dispatch input before the applicable recovery and admission barriers permit it.
 
+### REQ-TASKS-RESUME-PROMPT-QUEUE-002: Expired runtime waits keep queued work
+
+**Intent:** A queued prompt is not lost because a bounded wait for its session's
+runtime ran out.
+
+#### Acceptance criteria
+
+- **AC-TASKS-RESUME-PROMPT-QUEUE-002.1:** When dispatch of a reserved queued
+  entry fails because a bounded wait for its session's runtime or readiness
+  expired, Kandev shall return the entry to the head of its session queue with
+  its identity, payload, and order unchanged.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-002.2:** The returned entry shall be eligible
+  on the next existing delivery trigger. Kandev shall not add a timer, retry
+  loop, or new resume attempt for it.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-002.3:** A dispatch failure that is not a
+  wait expiry or another existing retryable case shall keep its current
+  disposition, so a permanent error cannot block the head of the queue.
+
+### REQ-TASKS-RESUME-PROMPT-QUEUE-003: A restart starts no agent
+
+**Intent:** Restarting Kandev never starts agent work on its own. Queued work
+stays safe until a user returns to the task.
+
+#### Acceptance criteria
+
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.1:** After a backend restart, pending queued
+  messages shall not start or resume any agent, regardless of Auto-run.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.2:** Across the restart, those messages shall
+  stay pending with their identity, payload, order, and Auto-run setting unchanged.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.3:** When a user opens the task and the
+  session resumes and becomes ready, Auto-run ON shall deliver eligible queued
+  work under existing queue policy, and each message shall be delivered once.
+
 ## Compatibility and exclusions
 
 This behavior uses the existing startup queue capability. It also applies to

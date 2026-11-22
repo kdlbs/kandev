@@ -257,3 +257,59 @@ func TestReconcileWorkspaceRepositories_LinksPrimaryWhenRootIsTaskDirectory(t *t
 		t.Fatalf("primary link = %q, %v; the primary must be linked into a Kandev task root", got, err)
 	}
 }
+
+func TestReconcileWorkspaceRepositoriesAtLayoutUsesNestedDurablePath(t *testing.T) {
+	taskRoot := canonicalTempDir(t)
+	workspace := filepath.Join(taskRoot, "repo")
+	if err := os.MkdirAll(filepath.Join(workspace, "kandev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := t.TempDir()
+	writeMarker(t, source)
+
+	err := reconcileWorkspaceRepositoriesAtLayout(workspace, "repository", []WorkspaceRepositorySpec{{
+		RepoName:              "backend",
+		RepositoryPath:        source,
+		WorkspaceRelativePath: "repo/kandev/backend",
+	}}, nil, testWorkspaceLinkOwner())
+	if err != nil {
+		t.Fatalf("reconcileWorkspaceRepositoriesAtLayout: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(workspace, "kandev", "backend", "live.txt")); err != nil || string(got) != "one" {
+		t.Fatalf("nested repository link = %q, %v; want the durable task-root destination", got, err)
+	}
+}
+
+func TestReconcileWorkspaceRepositoriesAtLayoutCurrentRootLinksSibling(t *testing.T) {
+	root, sibling := canonicalTempDir(t), t.TempDir()
+	writeMarker(t, sibling)
+
+	err := reconcileWorkspaceRepositoriesAtLayout(root, "current_root", []WorkspaceRepositorySpec{
+		{RepoName: "primary", RepositoryPath: root},
+		{RepoName: "libs", RepositoryPath: sibling},
+	}, nil, testWorkspaceLinkOwner())
+	if err != nil {
+		t.Fatalf("reconcileWorkspaceRepositoriesAtLayout: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "primary")); !os.IsNotExist(err) {
+		t.Fatalf("current-root reconciliation created a self link: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "libs", "live.txt")); err != nil || string(got) != "one" {
+		t.Fatalf("sibling link = %q, %v", got, err)
+	}
+}
+
+func TestReconcileWorkspaceRepositoriesAtLayoutKandevDirectoryLinksUnderKandev(t *testing.T) {
+	root, source := canonicalTempDir(t), t.TempDir()
+	writeMarker(t, source)
+
+	err := reconcileWorkspaceRepositoriesAtLayout(root, "kandev_directory", []WorkspaceRepositorySpec{{
+		RepoName: "api", RepositoryPath: source,
+	}}, nil, testWorkspaceLinkOwner())
+	if err != nil {
+		t.Fatalf("reconcileWorkspaceRepositoriesAtLayout: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "kandev", "api", "live.txt")); err != nil || string(got) != "one" {
+		t.Fatalf("Kandev directory link = %q, %v", got, err)
+	}
+}

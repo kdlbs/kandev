@@ -35,7 +35,8 @@ provider API keys. The mobile project uses Chromium with Pixel-5 emulation,
 so the same browser installation serves both commands.
 
 Select the project before the spec path. The default `chromium` project excludes
-`mobile-*.spec.ts`, auth, routing, and container suites. If a file reports
+mobile specs, auth and routing suites, container tests, and the isolated
+first-profile tests. If a file reports
 `No tests found`, check its owning project before changing the file or filters.
 Pass runner options such as `--project` before any `--` separator; options after
 the separator are forwarded to Playwright and do not select the managed runner's
@@ -84,15 +85,18 @@ artifact, and each shard validates that immutable identity after download.
 `KANDEV_E2E_BIN` selects a custom backend binary. The setup still checks the
 local mock agent and other required artifacts.
 
-Recovery tests also require `bin/e2e-delivery-fixture`. The managed runner builds
-it with `make build-e2e-delivery-fixture`. CI and Docker runs use the compiled
+Recovery tests also require `bin/e2e-delivery-fixture`, and Send Now claim-loss
+tests require `bin/e2e-send-now-fixture`. The managed runner builds both with
+`make build-e2e-delivery-fixture build-e2e-send-now-fixture`. CI and Docker runs
+use the compiled
 fixture, so test execution does not require Go. Its test-only source has its own
 freshness check. The fixture fills an isolated, stopped session's retained
 journal to the shipped 256 MiB limit and checks pruning after Retry.
 
 ## Playwright projects
 
-The suite is split into six projects. Pick one with `--project=<name>`.
+The suite uses separate projects for browser targets and tests that need an
+isolated backend worker. Pick one with `--project=<name>`.
 
 ### `routing`
 
@@ -128,6 +132,12 @@ pnpm e2e:raw
 ### `mobile-chrome`
 
 Same as `chromium` but on Playwright's Pixel-5 viewport, gated on `tests/**/mobile-*.spec.ts`. Runs in the same CI shard matrix as `chromium`.
+
+### `first-profile-capability` and `mobile-first-profile-capability`
+
+Run the desktop and phone first-profile capability tests in dedicated backend
+workers. These tests require a clean agent registry and database before they
+create the first saved profile. The projects run in the normal CI shard matrix.
 
 ### `containers` — **Docker required**
 
@@ -255,8 +265,9 @@ Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (fl
 ### Duration-aware CI sharding
 
 CI creates an ephemeral manifest for each cohort from the current test catalog.
-The normal cohort has 28 shards and runs `chromium` plus `mobile-chrome`; the
-container cohort has 6 shards and runs `containers`. The independent
+The normal cohort has 28 shards and runs desktop, phone, and isolated
+first-profile projects. The container cohort has 6 shards and runs
+`containers`. The independent
 `kubernetes-compat` matrix is deliberately excluded from both catalogs. The manifest assigns
 project/file units with a deterministic longest-processing-time planner. Matrix
 jobs pass the assigned files to `run-planned-shard.sh`; they do not use ordinal
@@ -272,6 +283,11 @@ multiplier. If the artifact is missing, the planner records
 The runner validates the manifest against the checkout before launching
 Playwright. A missing, stale, overlapping, or incomplete manifest is a hard
 failure; it cannot silently fall back to ordinal sharding.
+
+Concurrent processes within a planned shard receive separate, invocation-owned
+Playwright transform caches. The supervisor removes only those caches after all
+children close, including failed children; an inherited `PWTEST_CACHE_DIR` and
+other runner invocations remain untouched.
 
 Build collects the native inventory once and includes `native-catalog.json`
 in the manifest artifact. CI parents verify its checkout, run and successful
@@ -331,10 +347,10 @@ baseline.
 
 ### Flake rate and trend
 
-CI retries hide flakes: with `retries: 3` and `failOnFlakyTests: false`, a test
-that fails and then passes never fails the build. The **E2E flake rate** section
-of the `e2e-report` job summary makes that number visible without downloading
-anything. It reports, for the run:
+CI allows three retries and accepts tests that pass after a retry. Set
+`E2E_FAIL_ON_FLAKY=1` for a diagnostic run that fails on retry passes. The
+**E2E flake rate** section of the `e2e-report` job summary reports these results
+without requiring a download:
 
 - the flake count, the number of executed tests, and the rate per 1000;
 - the baseline (median of the last 10 recorded runs) and the change against it;
@@ -427,7 +443,7 @@ storage reporting are filtered by the process-scoped ownership label.
 
 ## Mocked vs real
 
-- **Mocked**: Azure DevOps (`KANDEV_MOCK_AZURE_DEVOPS=true`), Jira (`KANDEV_MOCK_JIRA=true`), Linear (`KANDEV_MOCK_LINEAR=true`), GitHub (`KANDEV_MOCK_GITHUB=true`), and the agent process itself (`KANDEV_MOCK_AGENT=only`). These are third-party services or external processes we don't want CI to depend on.
+- **Mocked**: Jira (`KANDEV_MOCK_JIRA=true`), Linear (`KANDEV_MOCK_LINEAR=true`), GitHub (`KANDEV_MOCK_GITHUB=true`), and the agent process itself (`KANDEV_MOCK_AGENT=only`). These are third-party services or external processes we don't want CI to depend on.
 - **Real**: Everything inside the kandev backend — orchestrator, lifecycle manager, agentctl, SSH/SFTP, Docker SDK, Kubernetes API/exec/port-forward, git, and worktree manager. The point of e2e is to exercise the real code paths.
 
 The SSH and Kubernetes executors have no mock controller. SSH tests use a real Docker-hosted sshd target. Kubernetes tests use a real Kind API server, node, scheduler, storage provisioner, Pod exec, and port-forward; fault injection operates on those resources directly.
@@ -900,3 +916,56 @@ skips the suite; skips and test discovery do not count as execution acceptance.
 ### Original-artifact retention rollback evidence
 
 The frozen format-1 rollback case in `tests/session/delivery-retention.spec.ts` is optional for the current retention issue fix. It reports a skip when `KANDEV_RETENTION_COMPAT_BINARY` is absent; the required suite still exercises current delivery cleanup, saved-history recovery and provider continuation on desktop and mobile. When the original binary is supplied, the test verifies its fixed hash and retains all rollback/new-write/deletion/forward-upgrade assertions. A skip is not original rollback acceptance. The 2026-10-11 user-directed scope change is recorded in `docs/plans/backend-agent-delivery-retention/task-08-integration-and-storage.md`; historical benchmark failures remain labelled there.
+
+## Release upgrade rehearsal
+
+Run this suite only through the **Release upgrade regression** GitHub Actions
+workflow on main. It runs after main pushes, nightly, or through **Run workflow**
+with main selected. The optional `baseline` input accepts `latest` (default) or
+an exact published Stable tag such as `v0.97.0`. It does not run for pull requests.
+
+After the workflow has landed on main, it can also be dispatched with:
+
+```bash
+gh workflow run upgrade-regression.yml --ref main -f baseline=latest
+```
+
+Do not run the upgrade runner, release preparation, or upgrade Playwright
+projects on a local machine. They compile multiple runtimes and start a full
+application/database/browser installation. Entry points require GitHub Actions
+metadata for main and refuse local execution. The ordinary E2E projects exclude
+these scenarios, and the managed runner rejects a local upgrade project before
+building artifacts or probing Docker. There is no local override flag.
+
+CI resolves the latest published Stable once and shares its verified archive
+and exact candidate commit across SQLite desktop, PostgreSQL 16 lifecycle, and
+SQLite phone jobs. Each job has its own hosted runner, disposable data and one
+Playwright worker. The released backend and matching agentctl create the seed
+before the candidate opens the database. Its deterministic mock provider is
+built from the release's source commit. No `_test` routes or direct database
+writes seed tasks. Production profile defaults remain selected, with explicit
+mock/process/permission overrides recorded in the manifest.
+
+The suite checks preservation, SQLite backup and integrity, PostgreSQL
+relationships/constraints, replay, pending start, old-conversation recovery,
+follow-up, new task execution, stop/resume, workflow profile switching,
+completion, archive and unarchive. Archive cleanup must finish before unarchive;
+this does not test immediate unarchive racing a running cleanup job. Desktop
+and phone checks also render preserved history and the plan and send a follow-up
+through the existing UI. Real providers and remote executors are outside this
+suite's compatibility claim.
+
+Every required scenario must run exactly once and pass. Skips, absent scenarios,
+worker errors and failed attempts fail the job. No retries are configured.
+Failure uploads retain the manifest, semantic snapshots, process/runtime logs,
+JUnit/JSON reports and Playwright traces for 14 days. Owned runtime processes,
+fixture storage and PostgreSQL services are cleaned up on failure too.
+
+The frozen SQL fixtures under backend store conformance remain independent
+historical migration gates. They do not substitute for this live rehearsal.
+
+The upgrade workflow's **Summary** tab shows the Stable release and source commit,
+verified archive digest, candidate commit, and planned matrix. Each database/browser
+job adds its actual test list, statuses, durations, and artifact name, including
+failure and missing-report cases. These summaries are published even when an
+acquisition, setup, or test step fails. The job's result remains the acceptance gate.

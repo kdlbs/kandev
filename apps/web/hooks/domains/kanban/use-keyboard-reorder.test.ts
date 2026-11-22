@@ -191,3 +191,68 @@ describe("useKeyboardReorder — bubbled key events", () => {
     expect(reorderBand).not.toHaveBeenCalled();
   });
 });
+
+describe("useKeyboardReorder gesture availability", () => {
+  const tasks = [admittedTask("a", 0), admittedTask("b", 1), admittedTask("c", 2)];
+
+  // @covers AC-TASKS-KANBAN-TASK-REORDERING-001.9, AC-TASKS-KANBAN-TASK-REORDERING-001.12
+  it("cancels a missing pickup and allows another card to reorder", async () => {
+    const { result, rerender } = renderHook(
+      ({ visibleTasks }) => useKeyboardReorder(WORKFLOW_ID, visibleTasks),
+      { initialProps: { visibleTasks: tasks } },
+    );
+    act(() => result.current.handleKeyDown(keyEvent(" "), tasks[0]));
+    act(() => result.current.handleKeyDown(keyEvent("ArrowDown"), tasks[0]));
+
+    rerender({ visibleTasks: tasks.slice(1) });
+
+    expect({
+      task: result.current.pickedUpTaskId,
+      order: result.current.draftOrder,
+      step: result.current.draftStepId,
+      band: result.current.draftBand,
+    }).toEqual({ task: null, order: null, step: null, band: null });
+    expect(reorderBand).not.toHaveBeenCalled();
+    act(() => result.current.handleKeyDown(keyEvent("Escape"), tasks[1]));
+    act(() => result.current.handleKeyDown(keyEvent(" "), tasks[1]));
+    act(() => result.current.handleKeyDown(keyEvent("ArrowDown"), tasks[1]));
+    await act(async () => result.current.handleKeyDown(keyEvent("Enter"), tasks[1]));
+    expect(reorderBand).toHaveBeenCalledExactlyOnceWith({
+      workflowId: WORKFLOW_ID,
+      stepId: STEP_ID,
+      band: "admitted",
+      draggedId: "b",
+      visibleOrderAfterMove: ["c", "b"],
+    });
+  });
+
+  it("does not revive a pickup after an empty board is repopulated", () => {
+    const { result, rerender } = renderHook(
+      ({ visibleTasks }) => useKeyboardReorder(WORKFLOW_ID, visibleTasks),
+      { initialProps: { visibleTasks: tasks } },
+    );
+    act(() => result.current.handleKeyDown(keyEvent(" "), tasks[0]));
+    rerender({ visibleTasks: [] });
+    expect(result.current.pickedUpTaskId).toBeNull();
+    rerender({ visibleTasks: tasks });
+    expect(result.current.pickedUpTaskId).toBeNull();
+    expect(result.current.draftOrder).toBeNull();
+    expect(reorderBand).not.toHaveBeenCalled();
+  });
+
+  it("retains a pickup across equivalent and unrelated task updates", () => {
+    const { result, rerender } = renderHook(
+      ({ visibleTasks }) => useKeyboardReorder(WORKFLOW_ID, visibleTasks),
+      { initialProps: { visibleTasks: tasks } },
+    );
+    act(() => result.current.handleKeyDown(keyEvent(" "), tasks[0]));
+    act(() => result.current.handleKeyDown(keyEvent("ArrowDown"), tasks[0]));
+    const draft = result.current.draftOrder;
+    rerender({ visibleTasks: tasks.map((task) => ({ ...task })) });
+    expect(result.current.draftOrder).toBe(draft);
+    rerender({ visibleTasks: [tasks[0], { ...tasks[1], title: "Updated B" }] });
+    expect(result.current.pickedUpTaskId).toBe("a");
+    expect(result.current.draftOrder).toBe(draft);
+    expect(reorderBand).not.toHaveBeenCalled();
+  });
+});

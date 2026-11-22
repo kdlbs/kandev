@@ -25,6 +25,17 @@ export function routeWorkspaceTreeGet(
   return false;
 }
 
+export function routeWorkspaceRootFilesList(socketId: string, id: string, action: string): boolean {
+  if (action !== "workspace.root_files.list") return false;
+  respond(socketId, id, {
+    supported: false,
+    files: [],
+    truncated: false,
+    destinations: [],
+  });
+  return true;
+}
+
 export function routeWorkspaceFileGet(
   socketId: string,
   id: string,

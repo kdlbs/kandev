@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -37,6 +38,7 @@ func (h *WorkspaceHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/workspaces", h.httpListWorkspaces)
 	api.POST("/workspaces", h.httpCreateWorkspace)
+	api.POST("/workspaces/:id/clone", h.httpCloneWorkspace)
 	api.GET("/workspaces/:id", h.httpGetWorkspace)
 	api.PATCH("/workspaces/:id", h.httpUpdateWorkspace)
 	api.DELETE("/workspaces/:id", h.httpDeleteWorkspace)
@@ -187,8 +189,10 @@ func (h *WorkspaceHandlers) handleHTTPDeleteWorkspaceError(c *gin.Context, err e
 	switch {
 	case errors.Is(err, service.ErrWorkspaceConfirmNameMismatch):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-	case isNotFound(err):
+	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+	case service.IsForbidden(err):
+		c.JSON(http.StatusForbidden, gin.H{"error": service.ErrForbidden.Error()})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "workspace not deleted"})
 	}
@@ -327,8 +331,10 @@ func (h *WorkspaceHandlers) wsDeleteWorkspaceError(msg *ws.Message, err error) (
 	switch {
 	case errors.Is(err, service.ErrWorkspaceConfirmNameMismatch):
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
-	case isNotFound(err):
+	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Workspace not found", nil)
+	case service.IsForbidden(err):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrForbidden.Error(), nil)
 	default:
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to delete workspace", nil)
 	}

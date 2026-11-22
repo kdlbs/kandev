@@ -115,6 +115,8 @@ async function startKeyboardDrag(page: Page, handle: Locator, row: Locator): Pro
     };
   });
   try {
+    // focus() does not wait for controls disabled during a queue refresh.
+    await expect(handle).toBeEnabled();
     await handle.focus();
     await expect(handle).toBeFocused();
     await handle.press("Space");

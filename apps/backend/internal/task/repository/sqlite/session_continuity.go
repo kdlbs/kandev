@@ -12,6 +12,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+const nativeReplacementCreationReason = "native_replaced"
+
 const sessionContinuitySchema = `
 		CREATE TABLE IF NOT EXISTS harness_session_generations (
 			session_id TEXT NOT NULL,
@@ -32,6 +34,20 @@ const sessionContinuitySchema = `
 		);
 		CREATE INDEX IF NOT EXISTS idx_harness_generations_current
 			ON harness_session_generations(session_id, incarnation_id, generation DESC);
+
+		CREATE TABLE IF NOT EXISTS harness_native_session_rebinds (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			incarnation_id TEXT NOT NULL,
+			generation BIGINT NOT NULL,
+			previous_native_session_id TEXT NOT NULL,
+			native_session_id TEXT NOT NULL,
+			execution_id TEXT NOT NULL,
+			rebound_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_harness_native_rebinds_session
+			ON harness_native_session_rebinds(session_id, incarnation_id, generation);
 
 		CREATE TABLE IF NOT EXISTS session_restore_attempts (
 			id TEXT PRIMARY KEY,
@@ -90,11 +106,13 @@ const sessionContinuitySchema = `
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
 			resolved_at TIMESTAMP,
-			UNIQUE (session_id, incarnation_id, expected_generation, reason),
 			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 		);
 		CREATE INDEX IF NOT EXISTS idx_session_recovery_blocks_open
 			ON session_recovery_blocks(session_id, incarnation_id, state);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_session_recovery_blocks_open_reason
+			ON session_recovery_blocks(session_id, incarnation_id, expected_generation, reason)
+			WHERE state = 'open';
 	`
 
 func (r *Repository) initSessionContinuitySchema() error {
@@ -163,6 +181,27 @@ func (r *Repository) GetCurrentHarnessSessionGeneration(ctx context.Context, ses
 }
 
 func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generation *models.HarnessSessionGeneration, expectedGeneration int64) (bool, error) {
+	return r.commitHarnessSessionGeneration(ctx, generation, expectedGeneration, "", "")
+}
+
+// CommitHarnessSessionGenerationForExecution commits only while the event's
+// task, incarnation, execution and native token still own the session. The
+// ownership check and predecessor CAS share the executor writer's SQL locks.
+func (r *Repository) CommitHarnessSessionGenerationForExecution(
+	ctx context.Context, generation *models.HarnessSessionGeneration, expectedGeneration int64,
+	taskID, executionID string,
+) (bool, error) {
+	if generation == nil || taskID == "" || executionID == "" ||
+		generation.Generation != expectedGeneration+1 || generation.PredecessorGeneration != expectedGeneration {
+		return false, fmt.Errorf("adjacent generation and execution identity are required")
+	}
+	return r.commitHarnessSessionGeneration(ctx, generation, expectedGeneration, taskID, executionID)
+}
+
+func (r *Repository) commitHarnessSessionGeneration(
+	ctx context.Context, generation *models.HarnessSessionGeneration, expectedGeneration int64,
+	taskID, executionID string,
+) (bool, error) {
 	if generation == nil {
 		return false, fmt.Errorf("harness generation is required")
 	}
@@ -176,6 +215,12 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 	}
 	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{generation.SessionID}, nil); err != nil {
 		return false, err
+	}
+	if executionID != "" {
+		owns, err := r.harnessGenerationExecutionOwnsTx(ctx, tx, generation, taskID, executionID)
+		if err != nil || !owns {
+			return false, err
+		}
 	}
 	var current int64
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
@@ -193,11 +238,26 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 	if err := insertGenerationTx(ctx, tx, r.db.Rebind, generation); err != nil {
 		return false, err
 	}
+	if err := r.retireContextContinuationNoticeTx(ctx, tx, generation, expectedGeneration); err != nil {
+		return false, err
+	}
+	if err := r.moveOpenRecoveryBlocksWithGenerationTx(ctx, tx, generation, expectedGeneration); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Repository) moveOpenRecoveryBlocksWithGenerationTx(
+	ctx context.Context, tx *sql.Tx, generation *models.HarnessSessionGeneration, expectedGeneration int64,
+) error {
 	// A context continuation publishes a replacement generation while the
 	// operator's recovery block is still the admission fence. Move that fence
 	// with the generation in the same transaction so a successful commit cannot
 	// leave an open block stranded on the predecessor generation.
-	if generation.Generation == expectedGeneration+1 {
+	if generation.Generation == expectedGeneration+1 && generation.CreationReason != nativeReplacementCreationReason {
 		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE session_recovery_blocks
 			SET expected_generation = ?, updated_at = ?
@@ -206,13 +266,25 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 			generation.Generation, generation.CommittedAt,
 			generation.SessionID, generation.IncarnationID,
 			expectedGeneration, models.RecoveryBlockOpen); err != nil {
-			return false, fmt.Errorf("move open recovery blocks with generation: %w", err)
+			return fmt.Errorf("move open recovery blocks with generation: %w", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return true, nil
+	return nil
+}
+
+func (r *Repository) harnessGenerationExecutionOwnsTx(
+	ctx context.Context, tx *sql.Tx, generation *models.HarnessSessionGeneration, taskID, executionID string,
+) (bool, error) {
+	var owns bool
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+  SELECT EXISTS (
+   SELECT 1 FROM task_sessions ts
+   JOIN executors_running er ON er.session_id = ts.id AND er.task_id = ts.task_id
+   WHERE ts.id = ? AND ts.task_id = ?
+    AND COALESCE(NULLIF(ts.queue_incarnation_id, ''), ts.id) = ?
+    AND er.agent_execution_id = ? AND er.resume_token = ?
+  )`), generation.SessionID, taskID, generation.IncarnationID, executionID, generation.NativeSessionID).Scan(&owns)
+	return owns, err
 }
 
 func insertGenerationTx(ctx context.Context, tx *sql.Tx, rebind func(string) string, generation *models.HarnessSessionGeneration) error {
@@ -262,6 +334,9 @@ func (r *Repository) CreateRestoreAttempt(ctx context.Context, attempt *models.R
 }
 
 func (r *Repository) CompleteRestoreAttempt(ctx context.Context, id, outcome string, completedAt time.Time) error {
+	if outcome == contextContinuationOutcome {
+		return r.completeContextContinuationAttempt(ctx, id, completedAt)
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE session_restore_attempts SET outcome = ?, completed_at = ? WHERE id = ?`), outcome, completedAt, id)
 	if err != nil {
@@ -371,32 +446,45 @@ func (r *Repository) upsertSessionRecoveryBlockTx(
 	if err := r.bindProjectedTerminalToRecoveryBlock(ctx, tx, block); err != nil {
 		return err
 	}
+	if block.State == models.RecoveryBlockResolved {
+		handled, err := r.upsertResolvedSessionRecoveryBlockTx(ctx, tx, block)
+		if err != nil {
+			return err
+		}
+		if handled {
+			return nil
+		}
+	}
 	query := `
 		INSERT INTO session_recovery_blocks
 		(id, session_id, incarnation_id, expected_generation, reason, state,
 		 consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence,
 		 delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (session_id, incarnation_id, expected_generation, reason) DO UPDATE SET
+		ON CONFLICT (session_id, incarnation_id, expected_generation, reason) WHERE state = 'open' DO UPDATE SET
 		 state = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.state ELSE excluded.state END,
 		 consumer_reference = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.consumer_reference ELSE excluded.consumer_reference END,
 		 delivery_submission_id = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.delivery_submission_id ELSE excluded.delivery_submission_id END,
 		 delivery_stream_id = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.delivery_stream_id
            WHEN session_recovery_blocks.consumer_reference = 'agent_delivery'
            AND excluded.consumer_reference = 'agent_delivery'
@@ -405,29 +493,34 @@ func (r *Repository) upsertSessionRecoveryBlockTx(
            ELSE excluded.delivery_stream_id END,
 		 delivery_sequence = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.delivery_sequence ELSE excluded.delivery_sequence END,
 		 delivery_turn_id = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.delivery_turn_id ELSE excluded.delivery_turn_id END,
 		 delivery_outcome = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.delivery_outcome ELSE excluded.delivery_outcome END,
 		 authorized_action = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.authorized_action ELSE excluded.authorized_action END,
 		 updated_at = excluded.updated_at,
 		 resolved_at = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
-		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
+		   AND session_recovery_blocks.delivery_submission_id != ''
+		   AND (excluded.consumer_reference != 'agent_delivery'
+		        OR session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id)
 		   THEN session_recovery_blocks.resolved_at ELSE excluded.resolved_at END
 		RETURNING id`
 	var canonicalID string

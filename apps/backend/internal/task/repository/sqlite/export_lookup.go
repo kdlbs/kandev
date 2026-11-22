@@ -66,11 +66,11 @@ func (r *Repository) GetExecutorProfileTx(ctx context.Context, tx *sqlx.Tx, id s
 	var envVarsJSON sql.NullString
 
 	err := tx.QueryRowContext(ctx, tx.Rebind(`
-		SELECT id, executor_id, name, mcp_policy, config, prepare_script, cleanup_script, env_vars, created_at, updated_at
+		SELECT id, executor_id, name, mcp_policy, config, prepare_script, cleanup_script, env_vars, created_at, updated_at, COALESCE(owner_user_id, '')
 		FROM executor_profiles WHERE id = ?
 	`), id).Scan(
 		&profile.ID, &profile.ExecutorID, &profile.Name, &profile.McpPolicy,
-		&configJSON, &profile.PrepareScript, &profile.CleanupScript, &envVarsJSON, &profile.CreatedAt, &profile.UpdatedAt,
+		&configJSON, &profile.PrepareScript, &profile.CleanupScript, &envVarsJSON, &profile.CreatedAt, &profile.UpdatedAt, &profile.OwnerUserID,
 	)
 	if err == sql.ErrNoRows {
 		return nil, false, nil

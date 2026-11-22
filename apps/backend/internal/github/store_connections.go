@@ -100,7 +100,15 @@ func (s *Store) ListWorkspaceConnectionsByAppInstallation(
 }
 
 // UpsertWorkspaceConnection creates or replaces workspace automation metadata.
+type connectionSQLExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
 func (s *Store) UpsertWorkspaceConnection(ctx context.Context, connection *WorkspaceConnection) error {
+	return s.upsertWorkspaceConnection(ctx, s.db, connection)
+}
+
+func (s *Store) upsertWorkspaceConnection(ctx context.Context, executor connectionSQLExecutor, connection *WorkspaceConnection) error {
 	if connection == nil {
 		return fmt.Errorf("workspace connection is required")
 	}
@@ -112,7 +120,7 @@ func (s *Store) UpsertWorkspaceConnection(ctx context.Context, connection *Works
 		connection.CredentialGeneration = 1
 	}
 	connection.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	_, err := executor.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO github_workspace_connections (
 			workspace_id, source, github_host, login, installation_id,
 			installation_account_login, installation_account_type, app_registration_id, status,
@@ -404,11 +412,12 @@ func (s *Store) CreateAuthFlow(ctx context.Context, flow *AuthFlow) error {
 	}
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO github_auth_flows (
-			state_hash, workspace_id, user_id, app_registration_id, kind, pkce_verifier,
+			state_hash, workspace_id, user_id, app_registration_id, kind, pkce_verifier, github_host, oauth_policy, redirect_uri, app_credential_generation,
 			expected_workspace_source, expected_workspace_generation, expected_installation_id,
 			expected_workspace_app_registration_id, expected_personal_generation, expires_at, consumed_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		flow.StateHash, flow.WorkspaceID, flow.UserID, flow.AppRegistrationID, flow.Kind, flow.PKCEVerifier,
+		defaultAuthFlowHost(flow.GitHubHost), defaultOAuthPolicy(flow.OAuthPolicy), flow.RedirectURI, flow.ExpectedAppCredentialGeneration,
 		flow.ExpectedWorkspaceSource, flow.ExpectedWorkspaceGeneration, flow.ExpectedInstallationID,
 		nullString(flow.ExpectedWorkspaceAppRegistrationID),
 		flow.ExpectedPersonalGeneration,
@@ -420,7 +429,7 @@ func (s *Store) CreateAuthFlow(ctx context.Context, flow *AuthFlow) error {
 func (s *Store) GetAuthFlow(ctx context.Context, stateHash string) (*AuthFlow, error) {
 	var flow AuthFlow
 	err := s.ro.GetContext(ctx, &flow, s.ro.Rebind(`
-		SELECT state_hash, workspace_id, user_id, app_registration_id, kind, pkce_verifier,
+		SELECT state_hash, workspace_id, user_id, app_registration_id, kind, pkce_verifier, github_host, oauth_policy, redirect_uri, app_credential_generation,
 			expected_workspace_source, expected_workspace_generation, expected_installation_id,
 			COALESCE(expected_workspace_app_registration_id, '') AS expected_workspace_app_registration_id,
 			expected_personal_generation, expires_at, consumed_at, created_at
@@ -569,4 +578,17 @@ func nullString(value string) any {
 		return nil
 	}
 	return value
+}
+
+func defaultAuthFlowHost(host string) string {
+	if host == "" {
+		return defaultGitHubHost
+	}
+	return host
+}
+func defaultOAuthPolicy(policy OAuthPolicy) OAuthPolicy {
+	if policy == "" {
+		return OAuthPolicyPKCES256
+	}
+	return policy
 }

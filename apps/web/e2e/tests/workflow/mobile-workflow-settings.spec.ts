@@ -186,6 +186,27 @@ test.describe("Workflow settings on mobile", () => {
     await expect(card).toBeVisible();
     await page.stepNodeByName(card, "Waiting").click();
 
+    const childrenCompletedHelp = card.getByTestId(`${waitStep.id}-children-completed-help`);
+    await expect(childrenCompletedHelp).toBeVisible();
+    await childrenCompletedHelp.tap();
+    const childrenCompletedDrawer = testPage.getByRole("dialog", {
+      name: "How child task completion transitions work",
+    });
+    await expect(childrenCompletedDrawer).toContainText(
+      "Runs after every active direct child succeeds.",
+    );
+    await expect(childrenCompletedDrawer).toContainText(
+      "At least one counted active direct child is required.",
+    );
+    await expect(childrenCompletedDrawer).toContainText(
+      "Archived, ephemeral, and automation-run children are ignored; grandchildren do not count.",
+    );
+    await expect(childrenCompletedDrawer).toContainText(
+      "Failed or cancelled children keep the parent waiting.",
+    );
+    await testPage.keyboard.press("Escape");
+    await expect(childrenCompletedDrawer).toHaveCount(0);
+
     const childCompletionSelect = card.getByTestId(
       `${waitStep.id}-children-completed-transition-select`,
     );
@@ -313,10 +334,11 @@ test.describe("Workflow settings on mobile", () => {
     ).toBe(false);
   });
 
-  test("shows optional feeder guidance from the WIP info tooltip", async ({
+  test("shows optional feeder guidance in a touch drawer", async ({
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Mobile WIP Guidance");
     await apiClient.createWorkflowStep(workflow.id, "Backlog", 0, { is_start_step: true });
@@ -329,24 +351,35 @@ test.describe("Workflow settings on mobile", () => {
 
     const guidanceHelp = card.getByTestId(`${reviewStep.id}-pull-from-guidance-help`);
     await expect(guidanceHelp).toBeVisible();
+    const helpBox = await guidanceHelp.boundingBox();
+    expect(helpBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(helpBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     await guidanceHelp.tap();
-    const guidanceTooltip = testPage.getByRole("tooltip");
-    await expect(guidanceTooltip).toContainText(
+    const guidanceDrawer = testPage.getByRole("dialog", { name: "More information" });
+    await expect(guidanceDrawer).toContainText(
       "No feeder is selected. Direct moves and automatic transitions queue in this destination",
     );
-    await expect(guidanceTooltip).toContainText(
+    await expect(guidanceDrawer).toContainText(
       "WIP limits active work, not visibility. Overflow remains on the board until capacity opens",
     );
     await testPage.keyboard.press("Escape");
+    await expect(guidanceDrawer).toHaveCount(0);
+    await expect(guidanceHelp).toBeFocused();
 
     await card.getByTestId(`${reviewStep.id}-pull-from-step-select`).tap();
     await testPage.getByRole("option", { name: "Backlog" }).tap();
     await guidanceHelp.tap();
-    await expect(guidanceTooltip).toContainText(
+    await expect(guidanceDrawer).toContainText(
       "Optional automatic feeder intake. Destination-queued tasks are admitted first",
     );
-    await expect(guidanceTooltip).toContainText(
+    await expect(guidanceDrawer).toContainText(
       "Direct moves and automatic transitions queue in the destination",
     );
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await prCapture.screenshot("mobile-wip-guidance-drawer", {
+      caption: "WIP feeder guidance stays open in a readable touch drawer.",
+    });
   });
 });

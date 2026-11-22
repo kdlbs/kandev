@@ -46,12 +46,16 @@ export function createDefaultUserSettings(): UserSettingsState {
     shellOptions: [],
     defaultEditorId: null,
     enablePreviewOnClick: false,
+    escapeCancelsAgent: false,
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,
     preventAutoStartAgentOnOpen: false,
     unreadDivider: false,
+    unreadTaskDot: false,
+    unreadTaskDotHideDelaySeconds: 2,
     agentGeneratedTaskTitles: true,
+    promptSuggestions: false,
     autoFocusNewTasks: true,
     agentTabCloseBehavior: "delete_session",
     mcpTaskAgentProfileDefault: "current_task",
@@ -61,11 +65,13 @@ export function createDefaultUserSettings(): UserSettingsState {
     showTranscriptAutoScrollControl: false,
     showTodoListPanel: false,
     showTodoListPanelOnlyWhenNotEmpty: false,
+    showTurnChangedFiles: true,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},
+    markdownPreviewByDefault: true,
     lspStatusLocation: "toolbar",
     savedLayouts: [],
     sidebarViews: [],
@@ -92,7 +98,6 @@ export function createDefaultUserSettings(): UserSettingsState {
     githubSavedPresets: undefined,
     githubDefaultQueryPresets: undefined,
     gitlabSavedPresets: undefined,
-    azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
     defaultUtilityAgentProfileId: null,
     keyboardShortcuts: {},
@@ -286,13 +291,18 @@ function buildIdentityFields(s: UserSettingsData, current: UserSettingsState) {
 function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
   return {
     enablePreviewOnClick: s.enable_preview_on_click ?? current.enablePreviewOnClick,
+    escapeCancelsAgent: s.escape_cancels_agent ?? current.escapeCancelsAgent,
     chatSubmitKey: s.chat_submit_key ?? current.chatSubmitKey,
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? current.reviewAutoMarkOnScroll,
     confirmTaskArchive: s.confirm_task_archive ?? current.confirmTaskArchive,
     preventAutoStartAgentOnOpen:
       s.prevent_auto_start_agent_on_open ?? current.preventAutoStartAgentOnOpen,
     unreadDivider: s.unread_divider ?? current.unreadDivider,
+    unreadTaskDot: s.unread_task_dot ?? current.unreadTaskDot,
+    unreadTaskDotHideDelaySeconds:
+      s.unread_task_dot_hide_delay_seconds ?? current.unreadTaskDotHideDelaySeconds,
     agentGeneratedTaskTitles: s.agent_generated_task_titles ?? current.agentGeneratedTaskTitles,
+    promptSuggestions: s.prompt_suggestions ?? current.promptSuggestions,
     autoFocusNewTasks: s.auto_focus_new_tasks ?? current.autoFocusNewTasks,
     agentTabCloseBehavior: mapDefined(
       s.agent_tab_close_behavior,
@@ -320,6 +330,7 @@ function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) 
     showTodoListPanel: s.show_todo_list_panel ?? current.showTodoListPanel,
     showTodoListPanelOnlyWhenNotEmpty:
       s.show_todo_list_panel_only_when_not_empty ?? current.showTodoListPanelOnlyWhenNotEmpty,
+    showTurnChangedFiles: s.show_turn_changed_files ?? current.showTurnChangedFiles,
     showReleaseNotification: s.show_release_notification ?? current.showReleaseNotification,
     releaseNotesLastSeenVersion: mapNullableString(
       s.release_notes_last_seen_version,
@@ -398,11 +409,6 @@ export function buildCoreFields(
       current.gitlabSavedPresets,
       (value) => value,
     ),
-    azureDevOpsBrowsePreferences: mapDefined(
-      s.azure_devops_browse_preferences,
-      current.azureDevOpsBrowsePreferences,
-      (value) => value,
-    ),
     appStatusBarOrder: mapDefined(
       s.app_status_bar_order,
       current.appStatusBarOrder,
@@ -439,6 +445,8 @@ export function buildLspFields(
     lspAutoStartLanguages: s?.lsp_auto_start_languages ?? current.lspAutoStartLanguages,
     lspAutoInstallLanguages: s?.lsp_auto_install_languages ?? current.lspAutoInstallLanguages,
     lspServerConfigs: s?.lsp_server_configs ?? current.lspServerConfigs,
+    markdownPreviewByDefault:
+      s?.markdown_preview_by_default ?? current.markdownPreviewByDefault ?? true,
     lspStatusLocation:
       s?.lsp_status_location === undefined
         ? current.lspStatusLocation

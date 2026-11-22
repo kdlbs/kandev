@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
@@ -24,7 +26,7 @@ type tasklessTestLauncher struct {
 }
 
 func (l *tasklessTestLauncher) StartRunSession(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 	launch service.LaunchContext, _ *service.RouteOverride,
 ) (service.RunSessionLaunch, error) {
 	l.calls = append(l.calls, launch)

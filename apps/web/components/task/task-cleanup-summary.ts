@@ -97,7 +97,7 @@ export function getCleanupSummary(
     : { effects: [t(GENERIC_EFFECT_KEY)], notes: [] };
 }
 
-/** Archive variant. Delete confirmation keeps the stronger removal warning. */
+/** Archive variant with local-change removal and committed-branch recovery. */
 export function getArchiveCleanupSummary(executorType: string | null | undefined): CleanupSummary {
   const known = normalize(executorType);
   if (known === "worktree") return resolveCopy(ARCHIVE_SINGLE_WORKTREE_COPY);
@@ -173,7 +173,7 @@ export function getBulkCleanupSummary(
   return getBulkSummary(executorTypes, BULK_COPIES);
 }
 
-/** Bulk archive variant with conditional worktree cleanup wording. */
+/** Bulk archive variant with managed worktree removal wording. */
 export function getBulkArchiveCleanupSummary(
   executorTypes: Array<string | null | undefined>,
 ): CleanupSummary {

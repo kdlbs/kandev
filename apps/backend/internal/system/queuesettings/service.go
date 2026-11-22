@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"go.uber.org/zap"
 )
 
@@ -18,11 +19,9 @@ type Target interface {
 	AutoMergeEnabled() bool
 	SetAutoMergeEnabled(bool)
 }
-type revisionedAutoMergeTarget interface {
-	SetAutoMergePolicy(enabled bool, revision int64)
-}
-type autoMergePolicyLoaderTarget interface {
-	SetAutoMergePolicyLoader(func(context.Context) (bool, int64, error))
+type globalAutoMergePolicyTarget interface {
+	SetGlobalAutoMergePolicy(messagequeue.AutoMergePolicy)
+	SetGlobalAutoMergePolicyLoader(func(context.Context) (messagequeue.AutoMergePolicy, error))
 }
 
 type EnvironmentReader func() Environment
@@ -54,8 +53,8 @@ func NewService(
 		store: store, target: target, readEnvironment: readEnvironment,
 		configuration: configuration, logger: log,
 	}
-	if target, ok := target.(autoMergePolicyLoaderTarget); ok {
-		target.SetAutoMergePolicyLoader(service.loadAutoMergePolicy)
+	if target, ok := target.(globalAutoMergePolicyTarget); ok {
+		target.SetGlobalAutoMergePolicyLoader(service.loadGlobalAutoMergePolicy)
 	}
 	return service
 }
@@ -124,24 +123,24 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
 	}
 	s.target.SetMaxPerSession(updated.Effective.MaxPerSession)
 	s.target.SetMergeEnabled(updated.Effective.MergeEnabled)
-	if target, ok := s.target.(revisionedAutoMergeTarget); ok {
-		target.SetAutoMergePolicy(updated.Effective.AutoMergeEnabled, settings.AutoMergeRevision)
+	if target, ok := s.target.(globalAutoMergePolicyTarget); ok {
+		target.SetGlobalAutoMergePolicy(settings.GlobalAutoMergePolicy())
 	} else {
 		s.target.SetAutoMergeEnabled(updated.Effective.AutoMergeEnabled)
 	}
 	return updated.Response, nil
 }
 
-func (s *Service) loadAutoMergePolicy(ctx context.Context) (bool, int64, error) {
+func (s *Service) loadGlobalAutoMergePolicy(ctx context.Context) (messagequeue.AutoMergePolicy, error) {
 	configured, err := s.loadConfiguredConsistent(ctx)
 	if err != nil {
-		return false, 0, err
+		return messagequeue.AutoMergePolicy{}, err
 	}
 	resolution, err := Resolve(configured, s.readEnvironment(), s.configuration)
 	if err != nil {
-		return false, 0, err
+		return messagequeue.AutoMergePolicy{}, err
 	}
-	return resolution.Effective.AutoMergeEnabled, resolution.Settings.AutoMergeRevision, nil
+	return resolution.Settings.GlobalAutoMergePolicy(), nil
 }
 
 func (s *Service) loadConfigured(ctx context.Context) (*Settings, error) {

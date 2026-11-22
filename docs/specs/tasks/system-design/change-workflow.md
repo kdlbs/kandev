@@ -27,7 +27,7 @@ second workflow transition engine.
 
 | Requirement | Sections |
 | --- | --- |
-| REQ-TASKS-CHANGE-WORKFLOW-001 | Shared form, Preview, Mobile contract, Failure handling |
+| REQ-TASKS-CHANGE-WORKFLOW-001 | Shared form, Selector field appearance, Preview, Mobile contract, Failure handling |
 | REQ-TASKS-CHANGE-WORKFLOW-002 | Request contract, Validation and persistence, Routing and compatibility |
 
 ## Request contract
@@ -249,6 +249,55 @@ colors in both option rows and the selected trigger; class presence alone does
 not establish visible color. Component regressions cover class-token input,
 custom hex input, neutral fallback, and reset to the placeholder.
 
+### Selector field appearance
+
+`AC-TASKS-CHANGE-WORKFLOW-001.10` applies to `WorkflowPickerSection`,
+`StepPickerSection`, and `WorkflowAgentRow` in
+`apps/web/components/task/change-workflow-form-sections.tsx`. Their `Combobox`
+triggers currently inherit the ghost Button style and a transparent border.
+An agent row's surrounding card border does not identify its selector as a field.
+
+Apply one local field style through each existing `triggerClassName` prop.
+Use the shared Input and SelectTrigger tokens: `border-input`, `bg-background`,
+and a neutral hover fill. Keep the inherited rounded border, keyboard focus
+ring, chevron, expanded feedback, and disabled feedback. Account for existing
+dark-theme state variants when composing classes. The border occupies the same
+space in every state, so focus and opening cause no layout shift.
+
+Keep `Combobox` and the shared Button defaults unchanged. Preserve their search,
+option ordering, selected-value rendering, popover containment, and focus return.
+The current step renderer retains its decorative dot and truncated name.
+The existing labels and placeholders need no new translation keys.
+
+The replacement-profile trigger constrains its custom rich label to the field, so
+the agent mark, model hint, trailing chevron, and Reset action remain visible at
+phone width. Nested form grids use shrinkable tracks (`minmax(0, 1fr)`); a long
+selected name truncates inside its field instead of widening the drawer or
+creating a second horizontal scroller.
+
+The current Change workflow phone drawer is the nearest shipped form exemplar.
+Its composition follows `components/kanban/mobile-menu-sheet.tsx`: a fixed
+header, one scrolling body, and safe-area-aware footer. Retain this composition
+and the current touch-usable, contained search popovers. Borders do not require
+a new picker surface or navigation step. The same local field style serves
+phone, coarse-pointer tablet, and fine-pointer desktop controls without changing
+their existing sizing conditions.
+
+Browser regressions inspect computed border width, style, color, and background
+for all three fields in light and dark themes. Exercise normal, hover,
+keyboard-focus, expanded, and disabled states. Compare settled bounds before and
+after state changes. Retain desktop 28px control height and touch targets of at
+least 44px under the [shared sizing contract](../../ui/requirements/control-sizing.md).
+Phone checks also cover containment, one form scroller, and long-name truncation.
+Existing component and move scenarios continue to cover reset, validation,
+search, cancellation, and submission. No new data, API, storage, or routing
+contract is involved.
+
+The [selector appearance package](../../../plans/change-workflow-selector-affordance/plan.md)
+owns delivery. Its pending work order distinguishes planned styling from
+implemented behavior. The appearance uses the neutral interaction tokens from
+[ADR 2026-07-29](../../../decisions/2026-07-29-interactive-accent-surface-semantics.md).
+
 ## Mobile contract
 
 Use `useResponsiveBreakpoint` for a phone form and wider dialog. The nearest
@@ -294,6 +343,7 @@ must reconcile from the committed task using existing event/store paths.
 - [Session policy decision](../../../decisions/2026-08-31-workflow-profile-session-switch-policy.md)
 - [Implementation package](../../../plans/change-workflow/plan.md)
 - [Step-color follow-up package](../../../plans/change-workflow-step-colors/plan.md)
+- [Selector appearance package](../../../plans/change-workflow-selector-affordance/plan.md)
 
 No new ADR is needed. This feature reuses the existing storage owner and routing
 policy; the request opt-in and legacy compatibility rationale are captured here.

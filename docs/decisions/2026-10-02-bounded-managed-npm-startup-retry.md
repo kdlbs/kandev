@@ -44,6 +44,18 @@ Non-destructive recovery may leave a genuinely corrupted execution tree unresolv
 That case remains an explicit maintenance action instead of risking active sibling processes.
 Older agentctl versions retain strict ETARGET recovery; missing structured evidence never grants the new early-exit fallback.
 
+The accepted [isolated dependency recovery extension](2026-10-19-isolated-managed-dependency-recovery.md)
+qualifies the explicit-maintenance consequence for verified missing bundled
+Codex platform dependencies once its draft implementation package is delivered.
+It also adds that verified condition to host capability-probe eligibility;
+other probe failures remain strict ETARGET-only.
+It does not authorize mutation or deletion of a shared runtime tree.
+
+The [incomplete-cache extension](2026-11-07-isolated-managed-npm-cache-recovery.md)
+also permits private preparation for an independently verified missing
+execution-tree root manifest. It includes managed ACP and native Codex app-server paths.
+Its implementation is delivered; shared-tree protection remains mandatory.
+
 ## Alternatives considered
 
 - A global launch mutex: delays healthy sessions and does not establish the reported cause.

@@ -63,6 +63,11 @@ func (j *journal) verifyRoots(r Repair) error {
 		if err != nil {
 			return err
 		}
+		if j.Plan.Version == 2 {
+			if _, err := os.Lstat(filepath.Join(root, ".git")); !errors.Is(err, os.ErrNotExist) {
+				return errors.New("canonical task root acquired competing Git metadata")
+			}
+		}
 		if digest(marker) != j.Plan.ExpectedRows["marker:"+root] {
 			return errors.New("root ownership changed since preview")
 		}

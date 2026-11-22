@@ -1,7 +1,7 @@
 ---
 id: "07-native-prompt-readiness"
 title: "Reconcile native delivery before prompt readiness"
-status: in_progress
+status: completed
 wave: 7
 depends_on:
   - 06-terminal-delivery-recovery
@@ -70,3 +70,5 @@ leaving the old provider-failure card after delivery metadata was restored.
 A focused regression reproduces that stale error. Boot now completes provider
 recovery bookkeeping while retaining the independent delivery fence and skipping
 queue drain until delivery is ready. CI owns the existing browser regressions.
+
+PR #4468 merged at 2026-10-14T00:38:18Z as 2f501583ff55b9f64047ae29c99b39c33ee5d2cb. All 57 executed checks passed, including the previously failing browser regressions; 11 checks skipped. No unresolved review threads remained.

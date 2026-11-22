@@ -92,3 +92,22 @@ Wave 2:
 - `cd apps/web && pnpm e2e -- tests/task/mobile-create-task-repository-selection.spec.ts`
 - Focused workspace-creation Playwright spec selected during implementation from the nearest existing
   settings coverage.
+
+## PR #4519 CI remediation
+
+The established post-picker disclosure contract was violated when mouse selection
+left the pointer outside the repository chip: the suppression hook cleared its
+guard after two animation frames, allowing later focus restoration to reopen the
+tooltip before a deliberate hover. CI shard 27 reproduced this on every attempt.
+
+Keep suppression armed after those frames until a later pointer interaction or
+the existing keyboard blur releases it. Touch selection continues to ignore
+restored focus and blur. This preserves the existing dialog, picker, containment,
+keyboard, and touch contract from [Task 01](task-01-repository-tooltip.md).
+
+The existing Pill unit regression now advances real scheduled frame callbacks,
+restores focus, checks that the tooltip remains closed, and then checks the first
+later mouse hover. Touch coverage uses the same frame scheduling. The regression
+failed before the hook correction and all 26 Pill tests pass afterward. Desktop
+E2E assertions remain unchanged and retries are disabled for that suite; CI owns
+desktop and mobile browser validation under the host resource constraint.

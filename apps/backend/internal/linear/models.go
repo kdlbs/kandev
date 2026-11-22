@@ -87,7 +87,21 @@ type LinearIssue struct {
 	Created       string                `json:"created,omitempty"` // createdAt timestamp from Linear
 	URL           string                `json:"url"`
 	States        []LinearWorkflowState `json:"states"`
+	// Project* describe the issue's Linear project; all empty when the issue
+	// has no project. ProjectSummary is Linear's short project description.
+	// ProjectDescription is the project's markdown content, populated only by
+	// watches whose prompt references ProjectDescriptionPlaceholder.
+	ProjectID          string `json:"projectId,omitempty"`
+	ProjectName        string `json:"projectName,omitempty"`
+	ProjectURL         string `json:"projectUrl,omitempty"`
+	ProjectSummary     string `json:"projectSummary,omitempty"`
+	ProjectDescription string `json:"projectDescription,omitempty"`
 }
+
+// ProjectDescriptionPlaceholder is the watch prompt placeholder for the
+// project's markdown content. Watches fetch that content only when their
+// prompt contains it.
+const ProjectDescriptionPlaceholder = "{{issue.project.description}}"
 
 // IssueSortBy selects the order in which a watch's matched issues are published
 // (and therefore dispatched) under the per-watch in-flight cap. The empty value
@@ -133,6 +147,13 @@ type LinearLabel struct {
 	Color string `json:"color,omitempty"`
 }
 
+// LinearProject is a project accessible to a team. Projects are returned by
+// `GET /api/v1/linear/projects` and surfaced in the issue watch filter UI.
+type LinearProject struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // LinearUser is a workspace member returned by `GET /api/v1/linear/teams/:key/members`
 // (and the generic users list). Used as options in creator/assignee selectors.
 type LinearUser struct {
@@ -161,6 +182,8 @@ type SearchFilter struct {
 	// LabelIDs filters issues that have ANY of the given label UUIDs (Linear's
 	// labels filter is OR by default).
 	LabelIDs []string `json:"labelIds,omitempty"`
+	// ProjectIDs filters issues that belong to ANY of the given project UUIDs.
+	ProjectIDs []string `json:"projectIds,omitempty"`
 	// CreatorID restricts to issues created by a specific user UUID. Empty
 	// means any creator.
 	CreatorID string `json:"creatorId,omitempty"`
@@ -207,10 +230,11 @@ const DefaultIssueWatchPollInterval = 300
 // As with Jira, Linear issues have no repository affinity — the target
 // workflow step's defaults determine where the resulting task runs.
 type IssueWatch struct {
-	ID             string `json:"id" db:"id"`
-	WorkspaceID    string `json:"workspaceId" db:"workspace_id"`
-	WorkflowID     string `json:"workflowId" db:"workflow_id"`
-	WorkflowStepID string `json:"workflowStepId" db:"workflow_step_id"`
+	CreatedByUserID string `json:"-" db:"created_by_user_id"`
+	ID              string `json:"id" db:"id"`
+	WorkspaceID     string `json:"workspaceId" db:"workspace_id"`
+	WorkflowID      string `json:"workflowId" db:"workflow_id"`
+	WorkflowStepID  string `json:"workflowStepId" db:"workflow_step_id"`
 	// RepositoryID optionally binds watcher-created tasks to a repository so the
 	// agent launches in an isolated worktree of that repo instead of a blank
 	// scratch checkout. Empty = unbound, which preserves the historical
@@ -261,10 +285,11 @@ type IssueWatchTask struct {
 // issue matching a watch that has no existing dedup row. The orchestrator
 // consumes this to create (and optionally auto-start) a Kandev task.
 type NewLinearIssueEvent struct {
-	IssueWatchID   string `json:"issueWatchId"`
-	WorkspaceID    string `json:"workspaceId"`
-	WorkflowID     string `json:"workflowId"`
-	WorkflowStepID string `json:"workflowStepId"`
+	CreatedByUserID string `json:"created_by_user_id,omitempty"`
+	IssueWatchID    string `json:"issueWatchId"`
+	WorkspaceID     string `json:"workspaceId"`
+	WorkflowID      string `json:"workflowId"`
+	WorkflowStepID  string `json:"workflowStepId"`
 	// RepositoryID / BaseBranch carry the watch's optional repository binding so
 	// the orchestrator source can populate IssueTaskRequest.Repositories without
 	// reloading the watch row. Empty RepositoryID = unbound (repo-less task).

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"strings"
 	"sync"
 	"time"
@@ -111,6 +112,9 @@ type RunDispatcher interface {
 	) error
 }
 
+// DispatchDeferredFixedProfileSuspended identifies a pre-provider circuit wait.
+const DispatchDeferredFixedProfileSuspended = "fixed_profile_suspended"
+
 // RunDispatchDeferred marks an error that must leave the admitted run open
 // for an explicit recovery action. The automation package deliberately keeps
 // this contract generic so the orchestrator can classify native-session
@@ -201,13 +205,18 @@ type ManagedConversationAutomationDelivery interface {
 
 // Service coordinates automation operations.
 type Service struct {
-	pluginAutomation PluginAutomationProvider
-	store            *Store
-	eventBus         bus.EventBus
-	logger           *logger.Logger
-	taskDeleter      TaskDeleter // optional; nil-safe
-	runStopper       RunStopper  // optional; wired by the orchestrator composition
-	runLiveness      RunLivenessChecker
+	mcpDefinitions           MCPDefinitionReader
+	mcpBuiltinPolicy         MCPBuiltinPolicyReader
+	executorContext          func(context.Context, string, string) (context.Context, error)
+	pluginAutomation         PluginAutomationProvider
+	pluginToolOptions        PluginToolOptionsProvider
+	pluginToolCatalogChanged func()
+	store                    *Store
+	eventBus                 bus.EventBus
+	logger                   *logger.Logger
+	taskDeleter              TaskDeleter // optional; nil-safe
+	runStopper               RunStopper  // optional; wired by the orchestrator composition
+	runLiveness              RunLivenessChecker
 	// workflowLocator gates workflow ownership. Optional: when nil (isolated
 	// tests) ownership is not enforced.
 	workflowLocator WorkflowLocator
@@ -535,6 +544,14 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 	if err := validateManagedDestination(taskMode, req.ManagedDestination); err != nil {
 		return nil, err
 	}
+	if err := s.validateMCPSelection(ctx, req.WorkspaceID, taskMode, req.MCPSelection); err != nil {
+		return nil, err
+	}
+	pluginTools, unlockPluginTools, err := s.pluginToolsForSave(ctx, req.WorkspaceID, req.PluginTools, hasNativePluginToolIntent(ctx), taskMode)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockPluginTools()
 	var destinationInstallationID, destinationConversationID string
 	if taskMode == TaskModeManagedConversation {
 		if s.managedDestinationResolver == nil {
@@ -599,6 +616,8 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 		Prompt:                           req.Prompt,
 		TaskTitleTemplate:                req.TaskTitleTemplate,
 		RetryPolicy:                      req.RetryPolicy,
+		PluginTools:                      pluginTools,
+		MCPSelection:                     req.MCPSelection.Clone(),
 		Enabled:                          true,
 		MaxConcurrentRuns:                maxRuns,
 		ContinuationPolicy:               continuationPolicy,
@@ -636,6 +655,10 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 			return nil, err
 		}
 	}
+	if _, err := s.executorActorContext(ctx, executoridentity.CreatorUserID(ctx), a.ExecutorProfileID, a.WorkspaceID); err != nil {
+		return nil, err
+	}
+	a.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if ownerInstallationID != "" {
 		if _, err := s.store.CreateManagedSchedule(ctx, a, req.Triggers, operationID, payloadDigest); err != nil {
 			return nil, fmt.Errorf("create managed schedule: %w", err)
@@ -651,6 +674,9 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 					zap.String("automation_id", a.ID), zap.String("type", string(ts.Type)), zap.Error(err))
 			}
 		}
+	}
+	if len(pluginTools) > 0 {
+		s.notifyPluginToolCatalogChanged()
 	}
 
 	return s.store.GetAutomation(ctx, a.ID)
@@ -707,6 +733,13 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	if existing == nil {
 		return nil, ErrAutomationNotFound
 	}
+	profileID := existing.ExecutorProfileID
+	if req.ExecutorProfileID != nil {
+		profileID = *req.ExecutorProfileID
+	}
+	if _, err := s.executorActorContext(ctx, existing.CreatedByUserID, profileID, existing.WorkspaceID); err != nil {
+		return nil, err
+	}
 	taskMode := existing.TaskMode
 	if taskMode == "" {
 		taskMode = TaskModeAutomationRun
@@ -723,6 +756,19 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	}
 	if err := validateManagedDestination(taskMode, managedDestination); err != nil {
 		return nil, err
+	}
+	if err := s.validateMCPSelection(ctx, existing.WorkspaceID, taskMode, req.MCPSelection); err != nil {
+		return nil, err
+	}
+	if req.PluginTools != nil {
+		if !hasNativePluginToolIntent(ctx) {
+			return nil, errors.New("plugin tools may only be changed by the native automation editor")
+		}
+		_, unlockPluginTools, err := s.pluginToolsForSave(ctx, existing.WorkspaceID, *req.PluginTools, true, taskMode)
+		if err != nil {
+			return nil, err
+		}
+		defer unlockPluginTools()
 	}
 	destinationInstallationID, destinationConversationID := "", ""
 	if taskMode == TaskModeManagedConversation {
@@ -811,10 +857,21 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 		clone.RepositoryMode = &repositoryMode
 		storeReq = &clone
 	}
+	validated := *storeReq
+	validated.validatedTaskMode = &existing.TaskMode
+	storeReq = &validated
+	selectionChanged := req.PluginTools != nil || (req.TaskMode != nil && taskMode != existing.TaskMode)
+	notifySelectionChanged := func() {
+		if selectionChanged {
+			s.notifyPluginToolCatalogChanged()
+		}
+	}
 	if req.Enabled != nil && !*req.Enabled {
-		if err := s.store.UpdateAutomation(ctx, id, storeReq); err != nil {
+		saved, err := s.store.updateAutomationReturning(ctx, id, storeReq)
+		if err != nil {
 			return nil, err
 		}
+		notifySelectionChanged()
 		if err := s.cancelAutomationWebhookReceipts(ctx, id); err != nil {
 			return nil, err
 		}
@@ -824,12 +881,14 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 		if err := s.CancelAutomationRetries(ctx, id); err != nil {
 			return nil, err
 		}
-		return s.store.GetAutomation(ctx, id)
+		return saved, nil
 	}
-	if err := s.store.UpdateAutomation(ctx, id, storeReq); err != nil {
+	saved, err := s.store.updateAutomationReturning(ctx, id, storeReq)
+	if err != nil {
 		return nil, err
 	}
-	return s.store.GetAutomation(ctx, id)
+	notifySelectionChanged()
+	return saved, nil
 }
 
 // authorizeUpdatedReferences checks the fields of req that name something the
@@ -914,12 +973,12 @@ func (s *Service) DeleteAutomation(ctx context.Context, id string) error {
 		return err
 	}
 	disabled := false
+	unlock := s.automationRunLock(id)
+	defer unlock()
 	if err := s.store.UpdateAutomation(ctx, id, &UpdateAutomationRequest{Enabled: &disabled}); err != nil {
 		return err
 	}
 
-	unlock := s.automationRunLock(id)
-	defer unlock()
 	cleanupTaskIDs, err := s.hiddenAutomationTaskIDs(ctx, id)
 	if err != nil {
 		return err
@@ -2074,6 +2133,11 @@ func (s *Service) fireTriggerWithMatchedTriggers(
 	if !a.Enabled {
 		return FireResult{Skipped: true, Reason: "automation is disabled"}, nil
 	}
+	var executorErr error
+	ctx, executorErr = s.executorActorContext(ctx, a.CreatedByUserID, a.ExecutorProfileID, a.WorkspaceID)
+	if executorErr != nil {
+		return FireResult{}, executorErr
+	}
 	now := time.Now().UTC()
 	// Serialize deduplication, the concurrency admission check, and the run
 	// insert. Otherwise two scheduler/webhook callers can both observe a free
@@ -2088,28 +2152,29 @@ func (s *Service) fireTriggerWithMatchedTriggers(
 	if duplicate {
 		return FireResult{Skipped: true, Duplicate: true, Reason: "this trigger has already fired"}, nil
 	}
-
-	// Record that the trigger was evaluated now that the cap check itself
-	// has succeeded. Scheduled triggers use this to pace themselves against
-	// their cron interval (CronScheduler.shouldFire): if this were updated
-	// before the cap check (or despite the cap check returning an error), an
-	// infrastructural failure in the check would look like a completed
-	// evaluation and suppress the next attempt until the full cron interval
-	// elapses, instead of retrying on the next scheduler tick. And if it
-	// were only updated on an actual fire, a trigger stuck behind
-	// max_concurrent_runs would look "overdue" again on every subsequent
-	// tick and get re-evaluated — and re-skipped — far more often than its
-	// configured schedule.
-	if updateErr := s.store.UpdateTriggerEvaluatedAt(ctx, triggerID, now); updateErr != nil {
-		s.logger.Warn("failed to update last_evaluated_at",
-			zap.String("trigger_id", triggerID), zap.Error(updateErr))
-	}
 	if capReason != "" {
 		return FireResult{Skipped: true, Reason: capReason}, nil
 	}
+	return s.completeAdmittedFire(
+		ctx, admittedRun, automationID, triggerID, triggerType,
+		triggerData, initialTriggerData, dedup.Key(), now,
+	)
+}
 
+// completeAdmittedFire publishes an admitted run outside the admission lock
+// and records its automation-level trigger time. The evaluation cursor is
+// already advanced by admitTriggerLocked while that lock was held.
+func (s *Service) completeAdmittedFire(
+	ctx context.Context,
+	admittedRun *AutomationRun,
+	automationID, triggerID string,
+	triggerType TriggerType,
+	triggerData, initialTriggerData json.RawMessage,
+	dedupKey string,
+	resolvedAt time.Time,
+) (FireResult, error) {
 	evt := automationTriggeredEventForAdmission(
-		admittedRun, automationID, triggerID, triggerType, triggerData, initialTriggerData, dedup.Key(),
+		admittedRun, automationID, triggerID, triggerType, triggerData, initialTriggerData, dedupKey,
 	)
 
 	if admittedRun.RetryGroupID != "" {
@@ -2127,7 +2192,7 @@ func (s *Service) fireTriggerWithMatchedTriggers(
 	if err := s.publishAutomationTriggered(ctx, admittedRun, evt); err != nil {
 		return FireResult{}, err
 	}
-	if updateErr := s.store.UpdateLastTriggered(ctx, automationID, now); updateErr != nil {
+	if updateErr := s.store.UpdateLastTriggered(ctx, automationID, resolvedAt); updateErr != nil {
 		s.logger.Warn("failed to update last_triggered_at",
 			zap.String("automation_id", automationID), zap.Error(updateErr))
 	}
@@ -2185,6 +2250,7 @@ func (s *Service) admitTriggerLocked(
 	}
 	if full {
 		s.recordSkippedTrigger(ctx, a, triggerID, triggerType, triggerData, dedupKey, dedupReason, capReason, active)
+		s.recordTriggerEvaluation(ctx, triggerID, resolvedAt)
 		return nil, capReason, false, nil
 	}
 
@@ -2246,7 +2312,18 @@ func (s *Service) admitTriggerLocked(
 	if persistErr != nil {
 		return nil, "", false, persistErr
 	}
+	s.recordTriggerEvaluation(ctx, triggerID, resolvedAt)
 	return run, "", false, nil
+}
+
+// recordTriggerEvaluation advances the trigger's evaluation cursor while the
+// caller still holds the per-automation admission lock. A failed write keeps
+// the existing warning policy and must not fail the admitted firing.
+func (s *Service) recordTriggerEvaluation(ctx context.Context, triggerID string, evaluatedAt time.Time) {
+	if err := s.store.UpdateTriggerEvaluatedAt(ctx, triggerID, evaluatedAt); err != nil {
+		s.logger.Warn("failed to update last_evaluated_at",
+			zap.String("trigger_id", triggerID), zap.Error(err))
+	}
 }
 
 func (s *Service) persistAdmittedRun(

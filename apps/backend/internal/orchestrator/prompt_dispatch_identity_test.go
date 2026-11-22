@@ -52,7 +52,7 @@ func TestPromptTaskExpectedIdentityRejectsReplacementAfterClaim(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
 	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
 	if err != nil {
@@ -131,7 +131,7 @@ func TestPromptTaskReleasesDispatchGuardBeforeMissingExecutionRecovery(t *testin
 	if err != nil || !ok || queued == nil {
 		t.Fatalf("reserve queued prompt: queued=%+v ok=%v err=%v", queued, ok, err)
 	}
-	if reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued); reservation == nil {
+	if reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, queued.ID, queued); reservation == nil {
 		t.Fatal("mark queued dispatch in flight returned nil")
 	}
 
@@ -193,7 +193,7 @@ func TestPromptTaskHoldsQueuedDispatchGuardDuringInPlaceModelMutation(t *testing
 		allowSwitch:   make(chan struct{}),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
 	t.Cleanup(func() {
 		select {
@@ -220,7 +220,7 @@ func TestPromptTaskHoldsQueuedDispatchGuardDuringInPlaceModelMutation(t *testing
 	if err != nil || !ok || queued == nil {
 		t.Fatalf("reserve queued prompt: queued=%+v ok=%v err=%v", queued, ok, err)
 	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, queued.ID, queued)
 	if reservation == nil {
 		t.Fatal("mark queued dispatch in flight returned nil")
 	}

@@ -4,9 +4,12 @@ import type { CommandItem } from "@/lib/commands/types";
 import { activateLocale, DEFAULT_LOCALE } from "@/lib/i18n";
 import { GlobalCommands } from "./global-commands";
 
+const DEFAULT_WORKSPACE_ID = "workspace-1";
+
 const mocks = vi.hoisted(() => {
   return {
     commands: [] as CommandItem[],
+    workspaceId: "workspace-1" as string | null,
     destinations: [
       {
         id: "stats",
@@ -33,7 +36,7 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       userSettings: { keyboardShortcuts: {} },
-      workspaces: { activeId: "workspace-1" },
+      workspaces: { activeId: mocks.workspaceId },
     }),
 }));
 vi.mock("@/components/theme/app-theme", () => ({
@@ -75,6 +78,7 @@ function navigationCommand(): CommandItem {
 
 beforeEach(async () => {
   mocks.commands = [];
+  mocks.workspaceId = DEFAULT_WORKSPACE_ID;
   mocks.quickChatLauncherCalls = [];
   mocks.keyboardShortcutCalls = [];
   mocks.push.mockReset();
@@ -87,6 +91,32 @@ afterEach(async () => {
 });
 
 describe("GlobalCommands navigation commands", () => {
+  // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-001.4
+  it("disables archive navigation without a workspace and follows workspace changes", () => {
+    mocks.workspaceId = null;
+    const { rerender } = render(<GlobalCommands />);
+    const disabled = mocks.commands.find((item) => item.id === "nav-archived-tasks");
+    expect(disabled?.disabled).toBe(true);
+    disabled?.action?.();
+    expect(mocks.push).not.toHaveBeenCalled();
+    mocks.workspaceId = "next-workspace";
+    rerender(<GlobalCommands />);
+    mocks.commands.find((item) => item.id === "nav-archived-tasks")?.action?.();
+    expect(mocks.push).toHaveBeenCalledWith(
+      "/tasks?workspace=next-workspace&archive=archived&workflow=all&repository=all",
+    );
+  });
+  // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-001.1 AC-TASKS-LIST-ARCHIVE-FILTERS-001.2
+  it("opens the current workspace archive without inheriting list filters", () => {
+    render(<GlobalCommands />);
+    const command = mocks.commands.find((item) => item.id === "nav-archived-tasks");
+    expect(command).toBeDefined();
+    command?.action?.();
+    expect(mocks.push).toHaveBeenCalledWith(
+      "/tasks?workspace=workspace-1&archive=archived&workflow=all&repository=all",
+    );
+  });
+
   it("maps destinations to commands and navigation actions", () => {
     render(<GlobalCommands />);
 
@@ -106,8 +136,8 @@ describe("GlobalCommands navigation commands", () => {
     render(<GlobalCommands />);
 
     expect(mocks.quickChatLauncherCalls).toEqual([
-      ["workspace-1", "chat", { silentFocusReturn: false, toggleWhenOpen: true }],
-      ["workspace-1", "config", { silentFocusReturn: false }],
+      [DEFAULT_WORKSPACE_ID, "chat", { silentFocusReturn: false, toggleWhenOpen: true }],
+      [DEFAULT_WORKSPACE_ID, "config", { silentFocusReturn: false }],
     ]);
   });
 

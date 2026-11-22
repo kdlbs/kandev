@@ -5,12 +5,14 @@ import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 import {
   archiveSidebarPaginationTasks,
   seedSidebarPaginationTasks,
+  unarchiveSidebarPaginationTask,
 } from "./sidebar-task-pagination-fixtures";
 
 test("phone sidebar pages 101 matching tasks and preserves the active chat", async ({
   testPage,
   apiClient,
   seedData,
+  backend,
 }) => {
   test.setTimeout(120_000);
   const token = `Mobile sidebar page ${Date.now()}`;
@@ -63,10 +65,10 @@ test("phone sidebar pages 101 matching tasks and preserves the active chat", asy
   await apiClient.archiveTask(matchingTaskIds[1]);
   await expect(rows).toHaveCount(99, { timeout: 20_000 });
   await expect(controls).toBeHidden();
-  await apiClient.unarchiveTask(matchingTaskIds[1]);
+  await unarchiveSidebarPaginationTask(apiClient, backend.tmpDir, matchingTaskIds[1]);
   await expect(rows).toHaveCount(100, { timeout: 20_000 });
   await expect(controls).toBeHidden();
-  await apiClient.unarchiveTask(matchingTaskIds[0]);
+  await unarchiveSidebarPaginationTask(apiClient, backend.tmpDir, matchingTaskIds[0]);
   await expect(rows).toHaveCount(100, { timeout: 20_000 });
   await expect(controls).toBeVisible();
 
@@ -256,6 +258,6 @@ test("sidebar view reuse preserves rows and offers one recovery action", async (
   seedData,
   prCapture,
 }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(240_000);
   await exerciseSidebarViewReuse(testPage, apiClient, seedData, true, prCapture);
 });

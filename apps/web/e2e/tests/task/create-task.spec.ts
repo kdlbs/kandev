@@ -1,9 +1,13 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { expectTaskDescription } from "../../pages/task-description-editor";
 import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { seedIncompatibleAgentScenario, seedLockedWorkflow } from "./agent-compatibility-helpers";
 
@@ -113,6 +117,7 @@ test.describe("Task creation", () => {
 
   test("dialog pre-selects repository, branch, and agent profile from seed data", async ({
     testPage,
+    apiClient,
   }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -121,45 +126,65 @@ test.describe("Task creation", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
-    // Fill title + description to trigger the "Start task" split button (showStartTask)
-    await testPage.getByTestId("task-title-input").fill("Pre-select Test");
-    await testPage.getByTestId("task-description-input").fill("testing pre-selections");
+    const repository = dialog.getByTestId("repo-chip").first();
+    await expect(repository).toHaveAttribute("data-repository-id", /.+/);
+    const repositoryId = await repository.getAttribute("data-repository-id");
+    const policy = await apiClient.createRepositoryBranchPolicy(repositoryId!, {
+      name: `Preselection policy ${Date.now()}`,
+      base_branch: "main",
+      branch_template: "feature/{title}-{suffix}",
+      pull_request_target: "main",
+    });
+    try {
+      await testPage.reload();
+      await kanban.createTaskButton.first().click();
+      await expect(dialog).toBeVisible();
 
-    // Wait for the submit button to be enabled — confirms all selections resolved
-    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
-    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
+      // Fill title + description to trigger the "Start task" split button (showStartTask)
+      await testPage.getByTestId("task-title-input").fill("Pre-select Test");
+      await testPage.getByTestId("task-description-input").fill("testing pre-selections");
 
-    // Verify the pre-seeded selections are displayed in the dialog selectors.
-    // The dialog uses chip-style repo/branch pills since the multi-repo refactor.
-    await expect(testPage.getByTestId("repo-chip-trigger").first()).toContainText("E2E Repo");
-    await expect(testPage.getByTestId("branch-chip-trigger").first()).toContainText("main");
-    // Agent profile name varies — just verify it's not the empty placeholder
-    await expect(testPage.getByTestId("agent-profile-selector")).not.toContainText(
-      "Select agent...",
-    );
+      // Wait for the submit button to be enabled — confirms all selections resolved
+      const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
+      await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
 
-    const repositorySelector = testPage.getByTestId("repo-chip-trigger").first();
-    await repositorySelector.click();
-    const repositoryListbox = testPage.getByRole("listbox");
-    const repositoryOptions = repositoryListbox.getByRole("option");
-    await expect(repositoryOptions.first()).toHaveAttribute("aria-selected", "true");
-    await expect(repositoryOptions.first()).toHaveClass(/bg-card/);
-    await testPage.keyboard.press("Escape");
+      // Verify the pre-seeded selections are displayed in the dialog selectors.
+      // The dialog uses chip-style repo/branch pills since the multi-repo refactor.
+      await expect(testPage.getByTestId("repo-chip-trigger").first()).toContainText("E2E Repo");
+      await expect(testPage.getByTestId("branch-chip-trigger").first()).toContainText("main");
+      // Agent profile name varies — just verify it's not the empty placeholder
+      await expect(testPage.getByTestId("agent-profile-selector")).not.toContainText(
+        "Select agent...",
+      );
 
-    const agentSelector = testPage.getByTestId("agent-profile-selector");
-    await agentSelector.click();
-    const agentListbox = testPage.getByRole("listbox");
-    const agentOptions = agentListbox.getByRole("option");
-    await expect(agentOptions.first()).toHaveAttribute("aria-selected", "true");
-    await expect(agentOptions.first()).toHaveClass(/bg-card/);
-    await testPage.keyboard.press("Escape");
+      const repositorySelector = testPage.getByTestId("repo-chip-trigger").first();
+      await repositorySelector.click();
+      const repositoryListbox = testPage.getByRole("listbox");
+      const repositoryOptions = repositoryListbox.getByRole("option");
+      await expect(repositoryOptions.first()).toHaveAttribute("aria-selected", "true");
+      await expect(repositoryOptions.first()).toHaveClass(/bg-card/);
+      await testPage.keyboard.press("Escape");
 
-    const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
-    await branchSelector.click();
-    const branchListbox = testPage.getByRole("listbox");
-    const branchOptions = branchListbox.getByRole("option");
-    await expect(branchOptions.first()).toHaveAttribute("aria-selected", "true");
-    await expect(branchOptions.first()).toHaveClass(/bg-card/);
+      const agentSelector = testPage.getByTestId("agent-profile-selector");
+      await agentSelector.click();
+      const agentListbox = testPage.getByRole("listbox");
+      const agentOptions = agentListbox.getByRole("option");
+      await expect(agentOptions.first()).toHaveAttribute("aria-selected", "true");
+      await expect(agentOptions.first()).toHaveClass(/bg-card/);
+      await testPage.keyboard.press("Escape");
+
+      const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
+      await branchSelector.click();
+      const branchListbox = testPage.getByRole("listbox");
+      const branchOptions = branchListbox.getByRole("option");
+      await expect(branchOptions.first()).toHaveAttribute("aria-selected", "true");
+      await expect(branchListbox.locator(`[data-value="policy:${policy.id}"]`)).toBeVisible();
+      const selectedMain = branchListbox.locator('[data-value="main"]');
+      await expect(selectedMain).toHaveClass(/bg-card/);
+      await expect(selectedMain).toHaveClass(/border-primary\/50/);
+    } finally {
+      await apiClient.deleteRepositoryBranchPolicy(policy.id);
+    }
   });
 
   test("dialog remembers selections after creating a task", async ({ testPage }) => {
@@ -437,6 +462,69 @@ test.describe("Task creation", () => {
         workflow_filter_id: seedData.workflowId,
       });
     }
+  });
+
+  test("creates a single-repository task in the optional parent workspace layout", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.createTaskButton.first().click();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("task-title-input").fill("Parent workspace task");
+    await dialog.getByTestId("task-description-input").fill("/e2e:simple-message");
+    await expect(dialog.getByTestId(START_AGENT_TEST_ID)).toBeEnabled({
+      timeout: START_ENABLED_TIMEOUT,
+    });
+
+    await dialog.getByTestId("task-create-advanced-settings-trigger").click();
+    const layoutSetting = dialog.getByTestId("task-create-initial-workspace-layout-setting");
+    await expect(layoutSetting).toBeVisible();
+    const checkbox = layoutSetting.getByTestId("task-create-initial-workspace-layout-checkbox");
+    await checkbox.click();
+    await expect(checkbox).toHaveAttribute("data-state", "checked");
+
+    await dialog.getByTestId("submit-start-agent-chevron").click();
+    await testPage.getByTestId("submit-create-without-agent").click();
+    await expect(dialog).not.toBeVisible();
+
+    const createdTaskId = await getTaskIdFromPage(testPage);
+    await expect
+      .poll(() => apiClient.getTask(createdTaskId), { timeout: 15_000 })
+      .toMatchObject({ initial_workspace_layout: "task_root" });
+    expect(createdTaskId).not.toBe(seedData.repositoryId);
+
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(createdTaskId))?.status, {
+        timeout: 30_000,
+      })
+      .toBe("ready");
+    const environment = await apiClient.getTaskEnvironment(createdTaskId);
+    expect(environment?.repos).toHaveLength(1);
+    const checkout = environment!.repos![0].worktree_path!;
+    expect(path.dirname(checkout)).toBe(environment?.workspace_path);
+    expect(
+      execFileSync("git", ["-C", checkout, "rev-parse", "--show-toplevel"], {
+        encoding: "utf8",
+        env: makeGitEnv(backend.tmpDir),
+      }).trim(),
+    ).toBe(checkout);
+    await expect
+      .poll(
+        async () => (await apiClient.listTaskSessions(createdTaskId)).sessions[0]?.workspace_path,
+        {
+          timeout: 30_000,
+        },
+      )
+      .toBe(environment?.workspace_path);
+
+    await apiClient.deleteTask(createdTaskId, { discardWorktreeChanges: true });
+    await expect.poll(() => fs.existsSync(checkout), { timeout: 30_000 }).toBe(false);
   });
 
   test("explains when a Docker executor has no compatible agent credentials", async ({

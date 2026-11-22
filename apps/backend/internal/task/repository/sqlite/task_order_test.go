@@ -58,3 +58,14 @@ func TestDetachTaskQueryUsesDialectJSONFunctions(t *testing.T) {
 		t.Fatalf("Postgres detach query uses SQLite JSON functions: %s", postgresQuery)
 	}
 }
+
+// A facet selection is page-local and never an order-by input: a facet sort
+// string must produce exactly the default ordering.
+func TestTaskListOrderBy_FacetSortUsesDefaultOrdering(t *testing.T) {
+	defaultOrder := taskListOrderBy("sqlite3", "t", usermodels.TasksListSortDefault)
+	for _, sort := range []string{"facet:kandev-plugin-tags:tags", "facet:com.example.tags:tags"} {
+		if got := taskListOrderBy("sqlite3", "t", sort); got != defaultOrder {
+			t.Fatalf("taskListOrderBy(%q) = %q, want default ordering %q", sort, got, defaultOrder)
+		}
+	}
+}

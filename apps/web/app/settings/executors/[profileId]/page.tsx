@@ -8,6 +8,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
+import { useExecutorProfileAccess } from "@/hooks/domains/settings/use-executor-profile-access";
 import {
   updateExecutorProfile,
   deleteExecutorProfile,
@@ -15,6 +16,7 @@ import {
   listScriptPlaceholders,
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
+import { ExecutorOwnershipCard } from "@/components/settings/executor-ownership";
 import { ProfileDetailsCard } from "@/components/settings/profile-edit/profile-details-card";
 import { getExecutorDescription } from "@/components/settings/executor-description";
 import {
@@ -68,6 +70,7 @@ import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic
 import { buildSaveConfig } from "@/components/settings/profile-edit/serialize-executor-config";
 import { useUserNamespacesFormState } from "@/components/settings/profile-edit/use-user-namespaces-form-state";
 import { useDockerNetworksFormState } from "@/components/settings/profile-edit/use-docker-networks-form-state";
+import { useDockerStorageFormState } from "@/components/settings/profile-edit/use-docker-storage-form-state";
 import { useProfileRuntimeFormState } from "@/components/settings/profile-edit/use-profile-runtime-form-state";
 import { useGitIdentityState } from "@/components/settings/profile-edit/use-git-identity-state";
 import { KubernetesProfileSections } from "@/components/settings/kubernetes-profile-sections";
@@ -86,16 +89,6 @@ import {
 } from "@/hooks/domains/settings/use-kubernetes-settings";
 
 const EXECUTORS_ROUTE = "/settings/executors";
-
-function useProfileFromStore(profileId: string) {
-  const executor = useAppStore(
-    (state) =>
-      state.executors.items.find((e: Executor) => e.profiles?.some((p) => p.id === profileId)) ??
-      null,
-  );
-  const profile = executor?.profiles?.find((p: ExecutorProfile) => p.id === profileId) ?? null;
-  return executor && profile ? { executor, profile } : null;
-}
 
 function useRemoteAuthState(profile: ExecutorProfile) {
   const [networkPolicyRules, setNetworkPolicyRules] = useState<NetworkPolicyRule[]>(() =>
@@ -138,7 +131,7 @@ function useRemoteAuthState(profile: ExecutorProfile) {
 export default function ProfileEditPage({ profileId }: { profileId: string }) {
   const { t } = useTranslation();
   const router = useRouter();
-  const result = useProfileFromStore(profileId);
+  const { result, checking } = useExecutorProfileAccess(profileId);
 
   if (!result) {
     return (
@@ -153,14 +146,27 @@ export default function ProfileEditPage({ profileId }: { profileId: string }) {
     );
   }
 
-  return result.executor.type === "plugin_remote" ? (
-    <PluginExecutorProfilePage
-      key={result.profile.id}
-      executor={result.executor}
-      profile={result.profile}
-    />
-  ) : (
-    <ProfileEditForm key={result.profile.id} executor={result.executor} profile={result.profile} />
+  return (
+    <div
+      className={checking ? "hidden" : "contents"}
+      hidden={checking}
+      inert={checking}
+      aria-busy={checking}
+    >
+      {result.executor.type === "plugin_remote" ? (
+        <PluginExecutorProfilePage
+          key={result.profile.id}
+          executor={result.executor}
+          profile={result.profile}
+        />
+      ) : (
+        <ProfileEditForm
+          key={result.profile.id}
+          executor={result.executor}
+          profile={result.profile}
+        />
+      )}
+    </div>
   );
 }
 
@@ -236,6 +242,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
   const runtime = useProfileRuntimeFormState(executor, profile);
   const userNamespaces = useUserNamespacesFormState(profile.config);
   const dockerNetworks = useDockerNetworksFormState(profile.config);
+  const dockerStorage = useDockerStorageFormState(profile.config);
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar, resetEnvVars } = useEnvVarRows(
     profile.env_vars,
   );
@@ -274,7 +281,17 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     remoteAuth.reset();
     gitIdentity.reset();
     dockerNetworks.resetDockerNetworks();
-  }, [dockerNetworks, gitIdentity, profile, remoteAuth, resetEnvVars, runtime, userNamespaces]);
+    dockerStorage.resetDockerStorage();
+  }, [
+    dockerNetworks,
+    dockerStorage,
+    gitIdentity,
+    profile,
+    remoteAuth,
+    resetEnvVars,
+    runtime,
+    userNamespaces,
+  ]);
 
   return {
     ...runtime,
@@ -290,6 +307,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     setAllowUserNamespaces: userNamespaces.setAllowUserNamespaces,
     resetUserNamespaces: userNamespaces.resetUserNamespaces,
     ...dockerNetworks,
+    ...dockerStorage,
     isLocalDocker: executor.type === "local_docker",
     envVarRows,
     addEnvVar,
@@ -370,6 +388,7 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           allowUserNamespaces={form.allowUserNamespaces}
           onAllowUserNamespacesChange={form.setAllowUserNamespaces}
           networks={form}
+          storage={form}
         />
       )}
       {form.isKubernetes && (
@@ -529,6 +548,8 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         actions={<ProfileConnectionSettingsAction executor={executor} />}
       />
       {memberReadOnly && <KubernetesReadOnlyNotice />}
+      {!executor.is_system && <ExecutorOwnershipCard executor={executor} />}
+      <ExecutorOwnershipCard executor={executor} profile={profile} />
       {form.isKubernetes && (
         <KubernetesProfileClusterSection
           executor={executor}

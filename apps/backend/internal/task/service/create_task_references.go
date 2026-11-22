@@ -45,6 +45,46 @@ func unknownBlockerReferenceError(index int, blockerID string) error {
 	)
 }
 
+func unknownRelatedReferenceError(index int, relatedID string) error {
+	return fmt.Errorf("%w: unknown related_task_ids[%d] %q; no task with that id exists in this workspace",
+		ErrTaskReferenceNotFound, index, relatedID)
+}
+
+func (s *Service) validateRelationReferences(ctx context.Context, req *CreateTaskRequest) error {
+	if len(req.RelatedTaskIDs) == 0 {
+		return nil
+	}
+	if s.relations == nil {
+		return ErrDependencyRepositoryUnavailable
+	}
+	for index, relatedID := range req.RelatedTaskIDs {
+		if relatedID == "" {
+			return fmt.Errorf("%w: related_task_ids[%d] is empty", ErrTaskReferenceNotFound, index)
+		}
+		if err := s.authorizeTaskID(ctx, relatedID); err != nil {
+			if errors.Is(err, taskrepo.ErrTaskNotFound) {
+				return unknownRelatedReferenceError(index, relatedID)
+			}
+			return err
+		}
+		task, err := s.tasks.GetTask(ctx, relatedID)
+		if err != nil {
+			if errors.Is(err, taskrepo.ErrTaskNotFound) {
+				return unknownRelatedReferenceError(index, relatedID)
+			}
+			return fmt.Errorf("resolve related_task_ids[%d]: %w", index, err)
+		}
+		if task == nil || task.ArchivedAt != nil {
+			return unknownRelatedReferenceError(index, relatedID)
+		}
+		if req.WorkspaceID != "" && task.WorkspaceID != "" && task.WorkspaceID != req.WorkspaceID {
+			return fmt.Errorf("%w: related_task_ids[%d] %q belongs to a different workspace",
+				ErrTaskReferenceNotFound, index, relatedID)
+		}
+	}
+	return nil
+}
+
 // validateBlockerReferences checks every blocked_by id BEFORE the task row is
 // inserted.
 //
@@ -123,6 +163,15 @@ func (s *Service) rollbackPartialTask(ctx context.Context, taskID string, cause 
 	if deleteErr != nil {
 		s.logger.Error("rollback delete failed; task left in inconsistent state",
 			zap.String("task_id", taskID), zap.Error(deleteErr))
+	}
+	if deleteErr == nil && s.attachmentSvc != nil {
+		// Creation attachments were claimed in the task insert transaction.
+		// Once the task row (and its association rows) is gone, release the
+		// registry rows and private bytes owned by this failed create.
+		if err := s.attachmentSvc.DeleteByTask(rollbackCtx, taskID); err != nil {
+			s.logger.Warn("rollback attachment cleanup failed",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
 	}
 	s.deleteDependencyEdgesForTask(rollbackCtx, taskID)
 	if deleteErr != nil {

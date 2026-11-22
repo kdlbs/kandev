@@ -111,6 +111,7 @@ describe("workflow source raw acknowledgement", () => {
     });
     expect(hook.result.current.form).toEqual({
       provider: "gitlab",
+      github_host: "",
       repo_owner: "",
       repo_name: "",
       project_path: "team/sub/project",
@@ -260,3 +261,7 @@ describe("failure and independent current owners", () => {
     expect(second.result.current.config?.branch).toBe("main");
   });
 });
+
+vi.mock("@/hooks/domains/github/use-github-status", () => ({
+  useGitHubStatus: () => ({ status: null }),
+}));

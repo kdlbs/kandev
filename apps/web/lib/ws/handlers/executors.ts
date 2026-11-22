@@ -2,13 +2,16 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { Executor } from "@/lib/types/http";
+import { refreshExecutorCatalogue } from "./executor-catalogue";
 
 export function registerExecutorsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
+    "executor.catalogue.invalidated": () => refreshExecutorCatalogue(store),
     "executor.created": (message) => {
       const payload = message.payload;
       const executor: Executor = {
         id: payload.id,
+        owner_user_id: payload.owner_user_id,
         name: payload.name,
         type: payload.type,
         status: payload.status,

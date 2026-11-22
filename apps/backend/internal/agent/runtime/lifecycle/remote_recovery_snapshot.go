@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -49,6 +50,14 @@ type RemoteRecoverySnapshotProvider interface {
 	GetRemoteRecoverySnapshot(ctx context.Context, sessionID string) (*RemoteRecoverySnapshot, error)
 }
 
+// RemoteRecoveryAbsenceSnapshotProvider re-reads durable ownership after the
+// executor row has disappeared. It must not infer that the old execution is
+// still current from the supplied record; the repository holds owner locks
+// while this snapshot is validated.
+type RemoteRecoveryAbsenceSnapshotProvider interface {
+	GetRemoteRecoveryAbsenceSnapshot(ctx context.Context, record *models.ExecutorRunning) (*RemoteRecoverySnapshot, error)
+}
+
 func validateRemoteRecoverySnapshot(snapshot *RemoteRecoverySnapshot, record *models.ExecutorRunning) error {
 	if err := validateRemoteRecoverySnapshotIdentity(snapshot, record); err != nil {
 		return err
@@ -59,7 +68,10 @@ func validateRemoteRecoverySnapshot(snapshot *RemoteRecoverySnapshot, record *mo
 	if err := validateRemoteRecoverySnapshotEligibility(snapshot); err != nil {
 		return err
 	}
-	return validateRemoteRecoverySnapshotSession(snapshot)
+	if err := validateRemoteRecoverySnapshotSession(snapshot); err != nil {
+		return err
+	}
+	return nil
 }
 
 func validateRemoteRecoverySnapshotIdentity(snapshot *RemoteRecoverySnapshot, record *models.ExecutorRunning) error {
@@ -111,9 +123,28 @@ func validateRemoteRecoverySnapshotSession(snapshot *RemoteRecoverySnapshot) err
 	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
 		return fmt.Errorf("remote recovery session is terminal: %s", snapshot.SessionState)
 	case models.TaskSessionStateFailed:
-		if !snapshot.RecoverySourcePresent {
+		if !snapshot.RecoverySourcePresent && !remoteRecoveryNeedsStoppedAgentProof(snapshot) {
 			return fmt.Errorf("failed remote recovery session has no pending delivery proof")
 		}
+	}
+	return nil
+}
+
+func remoteRecoveryNeedsStoppedAgentProof(snapshot *RemoteRecoverySnapshot) bool {
+	if snapshot == nil || snapshot.SessionState != models.TaskSessionStateFailed || snapshot.RecoverySourcePresent {
+		return false
+	}
+	return snapshot.Runtime == string(agentruntime.RuntimeRemoteDocker) ||
+		snapshot.Runtime == string(agentruntime.RuntimePluginRemote)
+}
+
+func validateFailedRemoteRecoveryAgentProof(snapshot *RemoteRecoverySnapshot, instance *ExecutorInstance) error {
+	if !remoteRecoveryNeedsStoppedAgentProof(snapshot) {
+		return nil
+	}
+	if instance == nil || instance.agentSessionAssociation == nil ||
+		instance.agentSessionAssociation.AgentStatus != agentProcessStatusStopped {
+		return errors.New("failed remote recovery without delivery proof requires an authenticated stopped agent")
 	}
 	return nil
 }
@@ -131,7 +162,8 @@ func sameRemoteRecoveryOwner(initial, current *RemoteRecoverySnapshot, record *m
 
 func sameRemoteRecoveryIdentity(initial, current *RemoteRecoverySnapshot) bool {
 	return initial.TaskID == current.TaskID && initial.SessionID == current.SessionID &&
-		initial.AgentExecutionID == current.AgentExecutionID && initial.Runtime == current.Runtime
+		initial.AgentExecutionID == current.AgentExecutionID && initial.Runtime == current.Runtime &&
+		initial.SessionState == current.SessionState
 }
 
 func sameRemoteRecoveryWorkspace(initial, current *RemoteRecoverySnapshot) bool {
@@ -148,16 +180,19 @@ func sameRemoteRecoveryEnvironment(initial, current *RemoteRecoverySnapshot) boo
 }
 
 func sameRemoteRecoveryRoute(initial, current *RemoteRecoverySnapshot) bool {
-	return initial.RouteGeneration == current.RouteGeneration && initial.IsPassthrough == current.IsPassthrough
+	return initial.RouteState == current.RouteState && initial.RouteGeneration == current.RouteGeneration &&
+		initial.IsPassthrough == current.IsPassthrough
 }
 
 func sameRemoteRecoveryDelivery(initial, current *RemoteRecoverySnapshot) bool {
 	return initial.RecoverySourcePresent == current.RecoverySourcePresent &&
+		initial.RecoverableDeliveryPending == current.RecoverableDeliveryPending &&
 		initial.RecoveryExecutionID == current.RecoveryExecutionID &&
 		initial.RecoverySubmissionID == current.RecoverySubmissionID &&
 		initial.RecoveryStreamID == current.RecoveryStreamID &&
 		initial.RecoveryIncarnationID == current.RecoveryIncarnationID &&
-		initial.RecoveryHarnessGeneration == current.RecoveryHarnessGeneration
+		initial.RecoveryHarnessGeneration == current.RecoveryHarnessGeneration &&
+		initial.RecoveryRevision == current.RecoveryRevision
 }
 
 func remoteRecoverySnapshotMatchesRecord(snapshot *RemoteRecoverySnapshot, record *models.ExecutorRunning) bool {

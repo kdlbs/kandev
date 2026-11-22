@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -25,7 +27,7 @@ func (n *noopActivityLogger) LogActivityWithRun(_ context.Context, _, _, _, _, _
 type noopRunQueuer struct{}
 
 func (n *noopRunQueuer) QueueRunWithActor(
-	_ context.Context, _, _, _, _ string, _ models.ActorKind, _ string, _ string,
+	_ context.Context, _, _, _, _ string, _ runsmodels.ActorKind, _ string, _ string,
 ) (runsservice.QueueOutcome, error) {
 	return runsservice.QueueOutcomeQueued, nil
 }
@@ -37,14 +39,14 @@ type capturingRunQueuer struct {
 	called          bool
 	agentInstanceID string
 	reason          string
-	actorKind       models.ActorKind
+	actorKind       runsmodels.ActorKind
 	actorID         string
 	causingRunID    string
 }
 
 func (c *capturingRunQueuer) QueueRunWithActor(
 	_ context.Context, agentInstanceID, reason, _, _ string,
-	actorKind models.ActorKind, actorID string, causingRunID string,
+	actorKind runsmodels.ActorKind, actorID string, causingRunID string,
 ) (runsservice.QueueOutcome, error) {
 	c.called = true
 	c.agentInstanceID = agentInstanceID
@@ -149,7 +151,7 @@ func TestDecideApproval_Approve(t *testing.T) {
 		t.Fatalf("CreateApprovalWithActivity: %v", err)
 	}
 
-	decided, err := svc.DecideApproval(ctx, approval.ID, "approved", "user-1", models.ActorKindUser, "Looks good")
+	decided, err := svc.DecideApproval(ctx, approval.ID, "approved", "user-1", runsmodels.ActorKindUser, "Looks good")
 	if err != nil {
 		t.Fatalf("DecideApproval: %v", err)
 	}
@@ -183,7 +185,7 @@ func TestDecideApproval_ApproveHireAgentActivatesPendingAgent(t *testing.T) {
 		t.Fatalf("CreateApprovalWithActivity: %v", err)
 	}
 
-	if _, err := svc.DecideApproval(ctx, approval.ID, "approved", "user-1", models.ActorKindUser, ""); err != nil {
+	if _, err := svc.DecideApproval(ctx, approval.ID, "approved", "user-1", runsmodels.ActorKindUser, ""); err != nil {
 		t.Fatalf("DecideApproval: %v", err)
 	}
 
@@ -211,7 +213,7 @@ func TestDecideApproval_RejectHireAgentStopsPendingAgent(t *testing.T) {
 		t.Fatalf("CreateApprovalWithActivity: %v", err)
 	}
 
-	if _, err := svc.DecideApproval(ctx, approval.ID, "rejected", "user-1", models.ActorKindUser, "not needed"); err != nil {
+	if _, err := svc.DecideApproval(ctx, approval.ID, "rejected", "user-1", runsmodels.ActorKindUser, "not needed"); err != nil {
 		t.Fatalf("DecideApproval: %v", err)
 	}
 
@@ -236,7 +238,7 @@ func TestDecideApproval_Reject(t *testing.T) {
 		t.Fatalf("CreateApprovalWithActivity: %v", err)
 	}
 
-	decided, err := svc.DecideApproval(ctx, approval.ID, "rejected", "user-1", models.ActorKindUser, "Needs work")
+	decided, err := svc.DecideApproval(ctx, approval.ID, "rejected", "user-1", runsmodels.ActorKindUser, "Needs work")
 	if err != nil {
 		t.Fatalf("DecideApproval: %v", err)
 	}
@@ -259,12 +261,12 @@ func TestDecideApproval_AlreadyDecided(t *testing.T) {
 	}
 
 	// First decision succeeds.
-	if _, err := svc.DecideApproval(ctx, approval.ID, "approved", "user-1", models.ActorKindUser, ""); err != nil {
+	if _, err := svc.DecideApproval(ctx, approval.ID, "approved", "user-1", runsmodels.ActorKindUser, ""); err != nil {
 		t.Fatalf("DecideApproval: %v", err)
 	}
 
 	// Second decision fails.
-	if _, err := svc.DecideApproval(ctx, approval.ID, "rejected", "user-2", models.ActorKindUser, ""); err == nil {
+	if _, err := svc.DecideApproval(ctx, approval.ID, "rejected", "user-2", runsmodels.ActorKindUser, ""); err == nil {
 		t.Error("expected error when deciding already-decided approval")
 	}
 }
@@ -284,7 +286,7 @@ func TestGetPendingApprovals(t *testing.T) {
 			t.Fatalf("create %d: %v", i, err)
 		}
 		if i == 0 {
-			if _, err := svc.DecideApproval(ctx, a.ID, "approved", "user-1", models.ActorKindUser, ""); err != nil {
+			if _, err := svc.DecideApproval(ctx, a.ID, "approved", "user-1", runsmodels.ActorKindUser, ""); err != nil {
 				t.Fatalf("decide: %v", err)
 			}
 		}
@@ -320,7 +322,7 @@ func TestQueueApprovalRun_AgentActorThreadedToQueueRun(t *testing.T) {
 	}
 
 	if _, err := svc.DecideApproval(
-		ctx, approval.ID, "approved", "ceo-1", models.ActorKindAgent, "",
+		ctx, approval.ID, "approved", "ceo-1", runsmodels.ActorKindAgent, "",
 	); err != nil {
 		t.Fatalf("DecideApproval: %v", err)
 	}
@@ -334,8 +336,8 @@ func TestQueueApprovalRun_AgentActorThreadedToQueueRun(t *testing.T) {
 	if queuer.reason != "approval_resolved" {
 		t.Errorf("reason = %q, want approval_resolved", queuer.reason)
 	}
-	if queuer.actorKind != models.ActorKindAgent {
-		t.Errorf("actorKind = %q, want %q", queuer.actorKind, models.ActorKindAgent)
+	if queuer.actorKind != runsmodels.ActorKindAgent {
+		t.Errorf("actorKind = %q, want %q", queuer.actorKind, runsmodels.ActorKindAgent)
 	}
 	if queuer.actorID != "ceo-1" {
 		t.Errorf("actorID = %q, want ceo-1", queuer.actorID)
@@ -364,7 +366,7 @@ func TestQueueApprovalRun_UserActorThreadedToQueueRun(t *testing.T) {
 	}
 
 	if _, err := svc.DecideApproval(
-		ctx, approval.ID, "approved", "ui", models.ActorKindUser, "",
+		ctx, approval.ID, "approved", "ui", runsmodels.ActorKindUser, "",
 	); err != nil {
 		t.Fatalf("DecideApproval: %v", err)
 	}
@@ -372,8 +374,8 @@ func TestQueueApprovalRun_UserActorThreadedToQueueRun(t *testing.T) {
 	if !queuer.called {
 		t.Fatal("QueueRunWithActor was not called")
 	}
-	if queuer.actorKind != models.ActorKindUser {
-		t.Errorf("actorKind = %q, want %q", queuer.actorKind, models.ActorKindUser)
+	if queuer.actorKind != runsmodels.ActorKindUser {
+		t.Errorf("actorKind = %q, want %q", queuer.actorKind, runsmodels.ActorKindUser)
 	}
 	if queuer.actorID != "ui" {
 		t.Errorf("actorID = %q, want ui", queuer.actorID)

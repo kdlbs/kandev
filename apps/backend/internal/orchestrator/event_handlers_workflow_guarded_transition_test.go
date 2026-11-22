@@ -95,7 +95,7 @@ func TestApplyGuardedTransitionLifecycle_OfficeRejectLeg_DoesNotPromptDeciderSes
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	svc := &Service{
 		logger: log, repo: repo, workflowStepGetter: stepGetter, taskRepo: taskRepo, agentManager: agentMgr,
 		messageQueue: messagequeue.NewServiceMemory(log), executor: exec,

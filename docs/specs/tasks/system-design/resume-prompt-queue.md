@@ -4,6 +4,8 @@ system: tasks
 updated: 2026-10-04
 requirements:
   - REQ-TASKS-RESUME-PROMPT-QUEUE-001
+  - REQ-TASKS-RESUME-PROMPT-QUEUE-002
+  - REQ-TASKS-RESUME-PROMPT-QUEUE-003
 ---
 
 # Resume Prompt Queue System Design
@@ -19,8 +21,10 @@ the current queue storage, session incarnation, and agent readiness events.
 | `001.3`, `001.4`, `001.5` | Server dispatch |
 | `001.7`, `001.8` | Failure and identity |
 | `001.10`, `001.11` | Workflow transitions during resume |
+| `002.1`, `002.2`, `002.3` | Expired runtime waits |
 
-All criterion suffixes refer to `AC-TASKS-RESUME-PROMPT-QUEUE-001`.
+Criterion suffixes `001.*` refer to `AC-TASKS-RESUME-PROMPT-QUEUE-001` and
+`002.*` to `AC-TASKS-RESUME-PROMPT-QUEUE-002`.
 
 ## Current behavior
 
@@ -193,6 +197,38 @@ Queue-full, unavailable identity, and rejected submissions preserve the draft.
 Existing queue reconciliation handles transport errors. This change does not
 introduce blind retries or promise provider-level exactly-once execution.
 Concurrent readiness and admission must not create duplicate dispatches.
+
+## Expired runtime waits
+
+`handleQueuedMessageExecutionError` decides whether a failed queued dispatch
+returns its entry to the queue or drops it. `ensureSessionRunning` bounds its
+waits before a prompt can be sent. For example, a caller that joins another
+caller's resume attempt waits at most `cancellationOperationTTL`. When such a
+wait expires, the error reaches the classifier as
+`failed to ensure session is running: context deadline exceeded`.
+`ErrSessionRuntimeUnavailable` wraps only the not-yet-launched case, so this
+error matched no retryable shape and the entry was dropped with a "message is
+lost" warning.
+
+The shared-resume wait and both readiness waits mark deadline errors only
+when their own bounded wait context has expired. `isEnsureSessionRunningTimeout`
+requires that private marker, the wrapped deadline, and the ensure-session
+classifier boundary. A provider or RPC deadline is not marked merely because
+the generic classifier wraps it; cancellation also retains its disposition.
+The predicate joins the existing retryable cases beside
+`ErrSessionRuntimeUnavailable`. The entry takes the existing requeue branch, so
+a reserved entry returns to the head of its own session incarnation and keeps
+its recorded-user-message marker. The next boot-ready or turn-ready trigger
+dispatches it. No timer or resume attempt is added (`002.2`). Other failures,
+including a provider rejection, keep the lost branch (`002.3`).
+
+## Backend restart
+
+Lazy recovery leaves an idle session without a runtime until a user returns to
+it, and that is the required behavior. Backend startup performs no queue drain.
+Startup paths may restore or repair queue state, but they never start or resume
+an agent to deliver it. Delivery resumes through the existing path: opening the
+task resumes the session, and its readiness transition drains the queue.
 
 ## Responsive behavior
 

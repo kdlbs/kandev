@@ -365,7 +365,7 @@ func (p *SystemProvider) sendLinuxNotification(ctx context.Context, cfg systemCo
 		if cfg.IconPath != "" {
 			args = append(args, "-i", cfg.IconPath)
 		}
-		args = append(args, title, body)
+		args = append(args, "--", title, body)
 		return runCommand(ctx, "notify-send", args...)
 	}
 	if _, err := exec.LookPath("zenity"); err == nil {

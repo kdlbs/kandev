@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -28,7 +30,7 @@ var retryDelays = []time.Duration{
 // A launch-validation failure is never retried: the next attempt would build
 // the same command and leave another failed session.
 func (s *Service) HandleRunFailure(
-	ctx context.Context, run *models.Run, runErr error,
+	ctx context.Context, run *runsmodels.Run, runErr error,
 ) error {
 	if routingerr.IsBuiltCommandValidationError(runErr) {
 		return s.escalateFailure(ctx, run, runErr)
@@ -49,7 +51,7 @@ func (s *Service) HandleRunFailure(
 }
 
 // scheduleRetry re-queues the run with exponential backoff + jitter.
-func (s *Service) scheduleRetry(ctx context.Context, run *models.Run) error {
+func (s *Service) scheduleRetry(ctx context.Context, run *runsmodels.Run) error {
 	if stale, reason := isRetryStale(run); stale {
 		return s.cancelRetry(ctx, run, reason)
 	}
@@ -71,7 +73,7 @@ func (s *Service) scheduleRetry(ctx context.Context, run *models.Run) error {
 // logging the source and the parsed reset time for observability.
 func (s *Service) scheduleRetryAt(
 	ctx context.Context,
-	run *models.Run,
+	run *runsmodels.Run,
 	retryAt time.Time,
 	source string,
 ) error {
@@ -94,7 +96,7 @@ func (s *Service) scheduleRetryAt(
 const retryMaxAge = 24 * time.Hour
 
 // isRetryStale returns (true, reason) when retrying the run would be pointless.
-func isRetryStale(run *models.Run) (bool, string) {
+func isRetryStale(run *runsmodels.Run) (bool, string) {
 	if time.Since(run.RequestedAt) > retryMaxAge {
 		return true, "run_too_old"
 	}
@@ -105,7 +107,7 @@ func isRetryStale(run *models.Run) (bool, string) {
 // recording and the OfficeRunProcessed broadcast only happen when the
 // cancel actually applied: a run another writer already finished or
 // failed must not be reported to subscribers as cancelled.
-func (s *Service) cancelRetry(ctx context.Context, run *models.Run, reason string) error {
+func (s *Service) cancelRetry(ctx context.Context, run *runsmodels.Run, reason string) error {
 	s.logger.Info("cancelling stale run retry",
 		zap.String("run_id", run.ID),
 		zap.String("reason", reason))
@@ -125,7 +127,7 @@ func (s *Service) cancelRetry(ctx context.Context, run *models.Run, reason strin
 // escalateFailure marks the run as permanently failed, logs an inbox
 // item, and queues an agent_error run for the CEO agent.
 func (s *Service) escalateFailure(
-	ctx context.Context, run *models.Run, runErr error,
+	ctx context.Context, run *runsmodels.Run, runErr error,
 ) error {
 	wrote, err := s.FailRun(ctx, run.ID)
 	if err != nil {
@@ -176,7 +178,7 @@ func (s *Service) escalateFailure(
 // queueCEOAgentError. A run failed by a budget-admission fault must not
 // queue any new run, by any path.
 func (s *Service) failRunNoEscalation(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 	cause budgetDeferralCause, policyID string,
 ) error {
 	wrote, err := s.FailRun(ctx, run.ID)
@@ -214,7 +216,7 @@ func (s *Service) failRunNoEscalation(
 // loop.
 func (s *Service) queueCEOAgentError(
 	ctx context.Context, agent *models.AgentInstance,
-	run *models.Run, errMsg string,
+	run *runsmodels.Run, errMsg string,
 ) {
 	ceos, err := s.ListAgentInstancesFiltered(ctx, agent.WorkspaceID,
 		AgentListFilter{Role: string(models.AgentRoleCEO)})

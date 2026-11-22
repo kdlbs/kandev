@@ -55,6 +55,18 @@ func TestValidateRejectsInvalidGenericStepPositions(t *testing.T) {
 				events.OnApprovalResolved = []GenericAction{{Type: GenericActionMoveToStep, Config: map[string]any{"step_position": 99}}}
 			},
 		},
+		{
+			name: "on_pr_merged",
+			set: func(events *StepEvents) {
+				events.OnPRMerged = []GenericAction{{Type: GenericActionMoveToStep, Config: map[string]any{"step_position": 99}}}
+			},
+		},
+		{
+			name: "on_pr_closed",
+			set: func(events *StepEvents) {
+				events.OnPRClosed = []GenericAction{{Type: GenericActionMoveToStep, Config: map[string]any{"step_position": 99}}}
+			},
+		},
 	}
 
 	for _, trigger := range triggers {
@@ -63,6 +75,35 @@ func TestValidateRejectsInvalidGenericStepPositions(t *testing.T) {
 			trigger.set(&export.Workflows[0].Steps[0].Events)
 
 			assert.ErrorContains(t, export.Validate(), "does not match any step")
+		})
+	}
+}
+
+func TestValidateStageTypes(t *testing.T) {
+	tests := []struct {
+		name      string
+		stageType StageType
+		wantError string
+	}{
+		{name: "omitted legacy value"},
+		{name: "work", stageType: StageTypeWork},
+		{name: "review", stageType: StageTypeReview},
+		{name: "approval", stageType: StageTypeApproval},
+		{name: "custom", stageType: StageTypeCustom},
+		{name: "hold", stageType: StageTypeHold},
+		{name: "unsupported", stageType: "unknown", wantError: "unsupported stage type"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			export := validExportForAdditionalValidation()
+			export.Workflows[0].Steps[0].StageType = tt.stageType
+
+			err := export.Validate()
+			if tt.wantError == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, tt.wantError)
 		})
 	}
 }

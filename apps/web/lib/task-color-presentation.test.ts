@@ -1,17 +1,13 @@
 import { describe, expect, it } from "vitest";
-import {
-  fixedAutomaticTaskColor,
-  parseWorkflowStepColor,
-  taskColorPresentation,
-} from "./task-color-presentation";
+import { taskColorPresentation, parseWorkflowStepColor } from "./task-color-presentation";
 
 describe("task color presentation", () => {
   it("maps fixed automatic colors through the static safe registry", () => {
-    expect(fixedAutomaticTaskColor("gray")).toEqual({
+    expect(taskColorPresentation("gray")).toEqual({
       token: "gray",
       className: "bg-slate-500",
     });
-    expect(fixedAutomaticTaskColor("cyan")).toEqual({
+    expect(taskColorPresentation("cyan")).toEqual({
       token: "cyan",
       className: "bg-cyan-500",
     });

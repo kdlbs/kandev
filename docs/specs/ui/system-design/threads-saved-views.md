@@ -312,7 +312,8 @@ only. Hidden candidates do not mount task shells, session-list hooks, or chats.
 ## Sort, admission, and stable order
 
 Sort keys include attention, last activity, updated time, created time, title,
-task state, workflow then step, priority, and primary agent label. Direction
+task state, workflow then step, priority, primary agent label, and selection
+order ([Selection order](#selection-order)). Direction
 applies to every key. Each comparator uses task ID as its final tie-breaker.
 
 Each sort option supplies a localized description to the shared sort-picker
@@ -323,6 +324,43 @@ Attention sort preserves the current deck precedence. It puts explicit person
 action first, then running or ready-for-review work, and then waiting work. It
 uses activity recency inside each group. Plain `WAITING_FOR_INPUT` does not
 become a person-action rank.
+
+### Selection order
+
+`ThreadSortKey` adds `selection`, with wire key `"selection"`. Its order source
+is the existing `taskScope.taskIds` array. The task picker already appends a
+newly checked ID, removes an unchecked ID, and appends Select all additions in
+visible picker order. The backend validates and stores `task_ids` as an
+ordered JSON array without reordering it. No new persisted field is needed.
+
+The comparator ranks a candidate by its index in `taskScope.taskIds`. The
+direction and the task-ID tie-breaker apply as they do for other keys. The rank
+depends only on saved preferences. Therefore a reload, a backend restart, and
+task events produce the same full order.
+
+`queryThreadView` resolves the effective sort through `effectiveThreadSort`
+before it compares candidates. A `selection` key with the `all` scope uses
+ascending attention. This keeps a stored or synchronized combination valid
+without rewriting the view. The sort picker displays the same effective sort,
+so its key and direction always describe the order on screen.
+
+`THREAD_SORT_OPTIONS` registers Selection order with a localized label and
+description. `ThreadSortSection` receives the effective scope mode and omits
+the option while the scope is `all`. `TaskScopeSection` changes the scope and
+the sort in one draft update when the user selects `all` while the sort is
+`selection`. One update creates one persisted draft write and one fingerprint
+change.
+
+The task picker receives the active sort key. With `selection`, each checked
+row shows a muted one-based ordinal next to the checkbox. Unchecked rows show
+no ordinal. The ordinal is a number, not translated copy. The row's accessible
+name includes it through a localized `selectionPosition` label.
+
+Changing `taskIds` changes the query fingerprint and resets the stable order.
+The next render therefore uses the complete selection order. A selected task
+that becomes eligible later, while the fingerprint is unchanged, follows the
+normal arrival rule. It takes its selected position after a reload or Reapply
+sort.
 
 The query fingerprint contains the active view ID, effective scope, filters,
 sort, and chat limit. A fingerprint change or explicit Reapply sort action
@@ -421,6 +459,8 @@ detail-active.
   not the fixed-height page title row. Desktop and tablet keep inline recovery.
 - An unknown filter dimension, operator, sort key, or task ID is ignored during
   frontend normalization. Known valid fields remain available for editing.
+  A client older than Selection order normalizes `selection` to attention. If
+  that client then saves the same view, it writes attention.
 - If the active ID is invalid, normalization selects the canonical view. It
   does not erase other valid saved views.
 - A selected task that leaves eligibility disappears without removal from the
@@ -447,7 +487,9 @@ semantics, JSON round trips, revision updates, and settings broadcasts.
 
 Frontend unit tests cover wire mapping, normalization, optimistic rollback,
 scope semantics, every filter dimension, sort ties, admission limits, deep-link
-inclusion, hidden counts, and stable-order resets.
+inclusion, hidden counts, and stable-order resets. Selection order tests cover
+both directions, the `all` scope fallback, and the scope-change sort reset.
+A backend round-trip test proves that `task_ids` keeps its submitted order.
 
 Desktop component and Playwright tests cover top-bar placement, saved-view
 switching, task metadata, sort descriptions, a three-column cap, persistence,

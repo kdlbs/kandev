@@ -61,7 +61,7 @@ describe("integration health resource", () => {
   it("stops the polling timer when the last consumer releases", async () => {
     vi.useFakeTimers();
     const { scope } = setupScope();
-    const key = scope.key("azure-devops", "ws-1");
+    const key = scope.key("sentry", "ws-1");
     const fetch = vi.fn(async () => null);
     const release = scope.subscribe(key, vi.fn(), fetch, 100);
     await Promise.resolve();

@@ -15,6 +15,7 @@ type ReviewerIdentity struct {
 	AgentID   string
 	Model     string
 	Mode      string
+	Route     *ReviewerRoute
 	// Source names where the identity came from, for the run record and logs:
 	// "agent_profile", "utility_agent", or "user_default".
 	Source string
@@ -34,6 +35,17 @@ type ReviewerProfile struct {
 	Mode           string
 	CLIPassthrough bool
 	Name           string
+	Route          *ReviewerRoute
+}
+
+// ReviewerRoute is the transient execution identity of one logical review run.
+// Its current candidate persists across prompt batches without another picker.
+type ReviewerRoute struct {
+	ExecutionProfileID string
+	SessionID          string
+	Generation         int64
+	AgentID            string
+	Model              string
 }
 
 // ProfileLookup resolves an agent profile ID. Returns found=false for an unknown
@@ -114,6 +126,10 @@ func (r *Resolver) Resolve(ctx context.Context, agentProfileID string) (Reviewer
 var errDeferToDefaults = errors.New("defer to default utility settings")
 
 func (r *Resolver) resolveFromProfile(ctx context.Context, profileID string) (ReviewerIdentity, error) {
+	return r.resolveProfile(ctx, profileID, true)
+}
+
+func (r *Resolver) resolveProfile(ctx context.Context, profileID string, requireModel bool) (ReviewerIdentity, error) {
 	if r.Profiles == nil {
 		return ReviewerIdentity{}, fmt.Errorf("%w: agent profiles are not available", ErrAgentUnavailable)
 	}
@@ -134,12 +150,12 @@ func (r *Resolver) resolveFromProfile(ctx context.Context, profileID string) (Re
 			ErrAgentUnavailable, describeProfile(profile, profileID))
 	}
 	model := profile.Model
-	if model == "" {
+	if model == "" && requireModel {
 		// The profile names an agent but no model; borrow the user's default
 		// model only when it belongs to the same agent.
 		model = r.sameAgentDefaultModel(ctx, profile.AgentID)
 	}
-	if model == "" {
+	if model == "" && requireModel {
 		return ReviewerIdentity{}, fmt.Errorf("%w: agent profile %q has no model configured",
 			ErrAgentUnavailable, describeProfile(profile, profileID))
 	}
@@ -148,6 +164,7 @@ func (r *Resolver) resolveFromProfile(ctx context.Context, profileID string) (Re
 		AgentID:   profile.AgentID,
 		Model:     model,
 		Mode:      profile.Mode,
+		Route:     profile.Route,
 		Source:    SourceAgentProfile,
 	}, nil
 }
@@ -181,7 +198,7 @@ func (r *Resolver) resolveFromUtilityAgent(ctx context.Context) (ReviewerIdentit
 		if !found || !enabled || profileID == "" {
 			return ReviewerIdentity{}, fmt.Errorf("%w: code-review utility profile is not configured", errDeferToDefaults)
 		}
-		return ReviewerIdentity{ProfileID: profileID, Source: SourceUtilityAgent}, nil
+		return r.resolveBoundProfile(ctx, profileID, SourceUtilityAgent)
 	}
 	if r.Utility == nil {
 		return ReviewerIdentity{}, fmt.Errorf("%w: %w: no code-review utility agent is wired",
@@ -233,7 +250,7 @@ func (r *Resolver) resolveFromDefaults(ctx context.Context) (ReviewerIdentity, e
 		if profileID == "" {
 			return ReviewerIdentity{}, fmt.Errorf("%w: no default utility profile configured", ErrAgentUnavailable)
 		}
-		return ReviewerIdentity{ProfileID: profileID, Source: SourceUserDefault}, nil
+		return r.resolveBoundProfile(ctx, profileID, SourceUserDefault)
 	}
 	if r.Defaults == nil {
 		return ReviewerIdentity{}, fmt.Errorf("%w: no default utility agent is configured", ErrAgentUnavailable)
@@ -248,4 +265,13 @@ func (r *Resolver) resolveFromDefaults(ctx context.Context) (ReviewerIdentity, e
 			ErrAgentUnavailable)
 	}
 	return ReviewerIdentity{AgentID: agentID, Model: model, Source: SourceUserDefault}, nil
+}
+
+func (r *Resolver) resolveBoundProfile(ctx context.Context, id, source string) (ReviewerIdentity, error) {
+	if r.Profiles == nil {
+		return ReviewerIdentity{ProfileID: id, Source: source}, nil
+	}
+	identity, err := r.resolveProfile(ctx, id, false)
+	identity.Source = source
+	return identity, err
 }

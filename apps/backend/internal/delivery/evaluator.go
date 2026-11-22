@@ -22,16 +22,16 @@ type Snapshot struct {
 // ProviderRequest is one provider pull/merge request row read for a
 // candidate pair, already normalized to the "Provider predicates" table
 // (Merged/Detached are the per-provider SQL predicates evaluated at the
-// read layer, since the three provider tables share no schema).
+// read layer, since the provider tables share no schema).
 type ProviderRequest struct {
-	Provider      string // ProviderAzureDevOps | ProviderGitHub | ProviderGitLab
+	Provider      string // ProviderGitHub | ProviderGitLab
 	Merged        bool
 	Detached      bool
 	MergeInstant  time.Time
 	RequestNumber int
 	URL           string
 	BaseBranch    string
-	ScopeValue    string // github: owner+"/"+repo; gitlab: project_path; azure: azure_repository_id
+	ScopeValue    string // github: owner+"/"+repo; gitlab: project_path
 }
 
 // AncestryOutcome is the result of an ancestry check attempted this
@@ -304,7 +304,7 @@ func selectHeadCommit(snapshots []Snapshot, keep func(Snapshot) bool) string {
 // over the subset of merged, non-detached rows satisfying filter (nil =
 // no filter, i.e. rule 1's ref selection). Earliest merge instant, then
 // request number ascending, then provider name ascending
-// (azure_devops, github, gitlab), then that provider's scope column
+// (github, gitlab), then that provider's scope column
 // ascending.
 func selectProviderRef(prs []ProviderRequest, filter func(ProviderRequest) bool) (string, bool) {
 	var best ProviderRequest

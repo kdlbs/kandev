@@ -239,7 +239,7 @@ func sidebarProviderHostExpression(driver string) string {
 	explicit := "TRIM(COALESCE(r.provider_host, ''))"
 	explicitHost := sidebarNormalizeProviderHost(driver, explicit, false, true)
 	remoteHost := sidebarNormalizeProviderHost(driver, "COALESCE(r.remote_url, '')", true, false)
-	defaultHost := `CASE r.provider WHEN 'github' THEN 'github.com' WHEN 'gitlab' THEN 'gitlab.com' WHEN 'azure_devops' THEN 'dev.azure.com' ELSE '' END`
+	defaultHost := `CASE r.provider WHEN 'github' THEN 'github.com' WHEN 'gitlab' THEN 'gitlab.com' ELSE '' END`
 	return "CASE WHEN " + explicitHost + " <> '' THEN " + explicitHost + " WHEN " + remoteHost + " <> '' THEN " + remoteHost + " ELSE " + defaultHost + " END"
 }
 

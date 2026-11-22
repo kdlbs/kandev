@@ -68,7 +68,7 @@ Run from the repository root. Obtain behavioral RED evidence before production e
 (cd apps/web && pnpm e2e:run --project chromium tests/plugins/conversation-recovery.spec.ts tests/plugins/prompt-history-plugin.spec.ts tests/task/prompt-history-panel.spec.ts tests/session/session-stream-overload-isolation.spec.ts)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/plugins/mobile-prompt-history-plugin.spec.ts tests/session/mobile-session-stream-overload-isolation.spec.ts)
 (cd apps/web && pnpm run typecheck)
-(cd apps && pnpm --filter @kandev/plugin-sdk test && pnpm --filter @kandev/plugin-sdk typecheck)
+(cd apps && pnpm --filter @kdlbs/plugin-sdk test && pnpm --filter @kdlbs/plugin-sdk typecheck)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 python3 scripts/list-docs.py validate

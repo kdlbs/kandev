@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { IconBrandDocker } from "@tabler/icons-react";
+import { ExecutorOwnerChoice } from "@/components/settings/executor-ownership";
 import { useAppStoreApi } from "@/components/state-provider";
 import {
   createExecutor,
@@ -34,11 +35,13 @@ const EXECUTORS_ROUTE = "/settings/executors";
 export function RemoteDockerCreatePage() {
   const router = useRouter();
   const store = useAppStoreApi();
+  const [owner, setOwner] = useState("");
 
   const handleSave = useCallback(
     async (cfg: SSHExecutorConfig) => {
       const created = await createExecutor({
         name: cfg.name,
+        ...(owner ? { owner_user_id: owner } : {}),
         type: "remote_docker",
         config: buildSSHExecutorConfig(cfg),
       });
@@ -59,6 +62,7 @@ export function RemoteDockerCreatePage() {
         status: "active",
         is_system: false,
         config: created.config,
+        ...(owner ? { owner_user_id: owner } : {}),
         profiles: [profile],
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -68,13 +72,14 @@ export function RemoteDockerCreatePage() {
       store.getState().setExecutors(merged);
       router.push(`/settings/executors/${profile.id}`);
     },
-    [router, store],
+    [router, store, owner],
   );
 
   return (
     <div className="space-y-8">
       <RemoteDockerCreateHeader />
       <RemoteDockerAuthorityNotice />
+      <ExecutorOwnerChoice value={owner} onChange={setOwner} creating baseline="" />
       <SSHConnectionCard onSave={handleSave} testConnection={testRemoteDockerConnection} />
     </div>
   );

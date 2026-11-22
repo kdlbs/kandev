@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ type Repository struct {
 	db      *sqlx.DB // writer
 	ro      *sqlx.DB // reader
 	migrate *db.MigrateLogger
+	log     *logger.Logger
 }
 
 // NewWithDB creates a new SQLite repository with existing database connections.
@@ -34,11 +36,17 @@ func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error)
 		db:      writer,
 		ro:      reader,
 		migrate: db.NewRequiredMigrateLogger(writer, log),
+		log:     log,
 	}
 	if err := repo.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize workflow schema: %w", err)
 	}
 	return repo, nil
+}
+
+// Rebind converts question-mark parameters to the repository driver's syntax.
+func (r *Repository) Rebind(query string) string {
+	return r.db.Rebind(query)
 }
 
 // initSchema creates the database tables if they don't exist.
@@ -163,10 +171,16 @@ func (r *Repository) initSchema() error {
 	if err := r.backfillCompletionPolicy(); err != nil {
 		return fmt.Errorf("backfill task completion policy: %w", err)
 	}
+	if err := r.backfillHoldStageType(); err != nil {
+		return fmt.Errorf("backfill hold step stage type: %w", err)
+	}
 
 	// Seed system templates
 	if err := r.seedSystemTemplates(); err != nil {
 		return fmt.Errorf("failed to seed system templates: %w", err)
+	}
+	if err := r.upgradeImproveKandevPrompts(); err != nil {
+		return fmt.Errorf("failed to upgrade Improve Kandev prompts: %w", err)
 	}
 
 	// Seed default workflow steps for workflows that don't have any
@@ -517,7 +531,7 @@ func (r *Repository) GetTemplate(ctx context.Context, id string) (*models.Workfl
 	`), id).Scan(&template.ID, &template.Name, &template.Description, &isSystem, &stepsJSON, &template.CreatedAt, &template.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("workflow template not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", models.ErrWorkflowTemplateNotFound, id)
 	}
 	if err != nil {
 		return nil, err
@@ -649,6 +663,35 @@ func (r *Repository) CreateStepWithDemotedStartStepsIfWorkflowUnchanged(
 	return r.createStepWithDemotedStartSteps(ctx, step, &expectedWorkflow)
 }
 
+// lockWorkflowRowForStepWrite serializes step creation with workflow deletion
+// on PostgreSQL. The task repository's delete paths take the same row lock
+// before deleting steps, so a step cannot be inserted between the step delete
+// and the workflow delete. SQLite serializes writers at transaction start, so
+// the plain read is enough there.
+func (r *Repository) lockWorkflowRowForStepWrite(
+	ctx context.Context, tx *sqlx.Tx, workflowID string, expectedWorkflow *time.Time,
+) error {
+	query := `SELECT updated_at FROM workflows WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE`
+	}
+	var updatedAt time.Time
+	err := tx.QueryRowxContext(ctx, tx.Rebind(query), workflowID).Scan(&updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		if expectedWorkflow != nil {
+			return repoerrors.ErrTaskVersionConflict
+		}
+		return fmt.Errorf("%w: %s", repoerrors.ErrWorkflowNotFound, workflowID)
+	}
+	if err != nil {
+		return err
+	}
+	if expectedWorkflow != nil && !updatedAt.Equal(*expectedWorkflow) {
+		return repoerrors.ErrTaskVersionConflict
+	}
+	return nil
+}
+
 func (r *Repository) createStepWithDemotedStartSteps(
 	ctx context.Context, step *models.WorkflowStep, expectedWorkflow *time.Time,
 ) ([]*models.WorkflowStep, error) {
@@ -670,11 +713,18 @@ func (r *Repository) createStepWithDemotedStartSteps(
 		return nil, fmt.Errorf("failed to marshal events: %w", err)
 	}
 
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, nil, nil, []string{step.WorkflowID}); err != nil {
+		return nil, err
+	}
+
+	if err := r.lockWorkflowRowForStepWrite(ctx, tx, step.WorkflowID, expectedWorkflow); err != nil {
+		return nil, err
+	}
 
 	var demoted []*models.WorkflowStep
 	if step.IsStartStep {
@@ -727,7 +777,7 @@ func (r *Repository) createStepWithDemotedStartSteps(
 // who do not set the field stay schema-compliant.
 func normalizeStageType(s models.StageType) string {
 	switch s {
-	case models.StageTypeWork, models.StageTypeReview, models.StageTypeApproval, models.StageTypeCustom:
+	case models.StageTypeWork, models.StageTypeReview, models.StageTypeApproval, models.StageTypeCustom, models.StageTypeHold:
 		return string(s)
 	}
 	return string(models.StageTypeCustom)
@@ -863,11 +913,14 @@ func (r *Repository) updateStepWithDemotedStartSteps(
 		return nil, fmt.Errorf("failed to marshal events: %w", err)
 	}
 
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, nil, []string{step.ID}, []string{step.WorkflowID}); err != nil {
+		return nil, err
+	}
 
 	var demoted []*models.WorkflowStep
 	if isStartStep != nil && *isStartStep {
@@ -927,7 +980,7 @@ func (r *Repository) writeStepUpdate(
 		if expectedWorkflow != nil && expectedStep != nil {
 			return false, repoerrors.ErrTaskVersionConflict
 		}
-		return false, fmt.Errorf("workflow step not found: %s", step.ID)
+		return false, fmt.Errorf("%w: %s", models.ErrWorkflowStepNotFound, step.ID)
 	}
 	var savedFlag int
 	if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT is_start_step FROM workflow_steps WHERE id = ? AND workflow_id = ?`), step.ID, step.WorkflowID).Scan(&savedFlag); err != nil {
@@ -988,11 +1041,14 @@ func (r *Repository) ReorderStepsIfUnchanged(
 		}
 		seen[id] = struct{}{}
 	}
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, nil, nil, []string{workflowID}); err != nil {
+		return err
+	}
 	var workflowVersion time.Time
 	if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT updated_at FROM workflows WHERE id = ?`), workflowID).Scan(&workflowVersion); err != nil {
 		return repoerrors.ErrTaskVersionConflict
@@ -1030,11 +1086,22 @@ func (r *Repository) ReorderStepsIfUnchanged(
 
 // ClearStartStepFlag clears the is_start_step flag for all steps in a workflow except the given step.
 func (r *Repository) ClearStartStepFlag(ctx context.Context, workflowID, exceptStepID string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, r.officeCompletionTxOptions())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx.Tx, nil, nil, []string{workflowID}); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflow_steps SET is_start_step = 0, updated_at = ?
 		WHERE workflow_id = ? AND id != ? AND is_start_step = 1
 	`), time.Now().UTC(), workflowID, exceptStepID)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) demoteOtherStartSteps(ctx context.Context, tx *sqlx.Tx, workflowID, exceptStepID string, updatedAt time.Time) ([]*models.WorkflowStep, error) {
@@ -1163,16 +1230,23 @@ func clearGenericStepReferences(events models.StepEvents, stepID string) (models
 	modified = modified || changed
 	events.OnAgentError, changed = removeStepReferences(events.OnAgentError, shouldRemove)
 	modified = modified || changed
+	events.OnPRMerged, changed = removeStepReferences(events.OnPRMerged, shouldRemove)
+	modified = modified || changed
+	events.OnPRClosed, changed = removeStepReferences(events.OnPRClosed, shouldRemove)
+	modified = modified || changed
 	return events, modified
 }
 
 // DeleteStep deletes a workflow step by ID.
 func (r *Repository) DeleteStep(ctx context.Context, id string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.officeCompletionTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockOfficeEligibilityScopes(ctx, tx, nil, []string{id}, nil); err != nil {
+		return err
+	}
 	cleanupQuery := `
 		UPDATE tasks
 		SET queued_for_step_id = '', queued_at = NULL, wip_admitted = 1, metadata = `
@@ -1200,7 +1274,7 @@ func (r *Repository) DeleteStep(ctx context.Context, id string) error {
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("workflow step not found: %s", id)
+		return fmt.Errorf("%w: %s", models.ErrWorkflowStepNotFound, id)
 	}
 	return tx.Commit()
 }

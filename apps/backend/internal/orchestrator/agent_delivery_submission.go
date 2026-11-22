@@ -30,6 +30,7 @@ type durableDeliveryCapabilityReader = agentruntime.DurableDeliveryCapabilityRea
 type deliveryClaimUpdater func(context.Context, string, string, string) error
 
 type agentDeliverySubmissionRuntime struct {
+	expected     *models.AgentDeliverySubmission
 	store        repository.AgentDeliveryRepository
 	id           string
 	sessionID    string
@@ -154,14 +155,14 @@ func (s *Service) deliveryCapabilityForExecution(
 		}, false
 	}
 	peerVersion := capability.Version
-	if peerVersion == journal.CurrentVersion && !capability.Durable && capability.Reason == durableDeliveryStorageNotDurable {
+	if journal.SupportsDeliveryVersion(peerVersion) && !capability.Durable && capability.Reason == durableDeliveryStorageNotDurable {
 		// Supported peers without retained storage use legacy delivery;
 		// unresolved work still blocks that negotiation.
 		peerVersion = 0
 	}
 	return agentruntime.NegotiateDurableDelivery(
 		journal.StorageCapability{
-			Version: journal.CurrentVersion,
+			Version: journal.CurrentProtocolVersion,
 			Durable: true,
 		},
 		peerVersion,
@@ -208,6 +209,10 @@ func (s *Service) prepareAgentDeliverySubmission(
 		zap.String("submission_id", options.deliverySubmissionID))
 	if session == nil {
 		return nil, nil
+	}
+
+	if err := s.checkUnknownPromptAdmission(ctx, session.ID); err != nil {
+		return nil, err
 	}
 
 	protocol, err := s.resolveDeliveryProtocol(
@@ -368,7 +373,7 @@ func (s *Service) prepareBackendDeliverySubmission(
 		zap.String("session_id", session.ID), zap.String("submission_id", submissionID),
 		zap.Int64("harness_generation", generation))
 	return &agentDeliverySubmissionRuntime{
-		store: store, id: submissionID, sessionID: session.ID,
+		store: store, id: submissionID, sessionID: session.ID, expected: submission,
 		dispatchOnly: false,
 	}, nil
 }

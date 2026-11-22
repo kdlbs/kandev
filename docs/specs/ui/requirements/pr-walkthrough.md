@@ -34,6 +34,10 @@ Reviewers can inspect a diff in GitHub, but a large pull request still takes tim
 - **AC-UI-PR-WALKTHROUGH-001.12:** When a draft has invalid JSON, the renderer shall report its file, parser message, line, and column without dumping source content.
 - **AC-UI-PR-WALKTHROUGH-001.13:** When rendering completes, generation shall accept the verified output pair for the current attempt and exact PR head without requiring another agent response.
 - **AC-UI-PR-WALKTHROUGH-001.14:** Generation shall enforce one total time limit across attempts and retain diagnostics before the outer job deadline. Cancellation, invalid output, or expiration without verified completion shall prevent publication.
+- **AC-UI-PR-WALKTHROUGH-001.15:** When generation does not produce a verified output pair, the workflow shall report a warning, skip publication and description linking, and leave the pull request check successful.
+- **AC-UI-PR-WALKTHROUGH-001.16:** Each generation discovers the current free models from the `opencode` provider and tries eligible models when an earlier model is unavailable, rate-limited, or its usage limit is reached.
+- **AC-UI-PR-WALKTHROUGH-001.17:** If no eligible free model exists or every eligible free model fails with a recoverable provider error, generation shall try OpenCode Go Muse Spark 1.3 Contributor, subject to the shared deadline and available credentials.
+- **AC-UI-PR-WALKTHROUGH-001.18:** Generation shall report the model and outcome of each attempt without exposing credentials. The selected models may retain submitted PR context or use it for training.
 
 ## Migrated source detail
 
@@ -48,11 +52,14 @@ the dedicated Cloudflare R2 walkthrough bucket. Lifecycle controls retention.
 [ADR-2026-08-23-pr-walkthrough-workflow-provenance](../../../decisions/2026-08-23-pr-walkthrough-workflow-provenance.md),
 [ADR-2026-09-05-pr-walkthrough-description-integrity](../../../decisions/2026-09-05-pr-walkthrough-description-integrity.md),
 [ADR-2026-08-24-unified-fork-approval-label](../../../decisions/2026-08-24-unified-fork-approval-label.md),
-[ADR-2026-09-30-pr-walkthrough-render-completion](../../../decisions/2026-09-30-pr-walkthrough-render-completion.md)
+[ADR-2026-09-30-pr-walkthrough-render-completion](../../../decisions/2026-09-30-pr-walkthrough-render-completion.md),
+[ADR-2026-10-27-advisory-pr-walkthrough-generation](../../../decisions/2026-10-27-advisory-pr-walkthrough-generation.md),
+[ADR-2026-10-28-pr-walkthrough-model-fallback](../../../decisions/2026-10-28-pr-walkthrough-model-fallback.md)
 
 **Implementation plans:**
 [PR walkthrough description integrity fix](../../../plans/pr-walkthrough-description-integrity-fix/plan.md),
-[PR walkthrough generation completion](../../../plans/pr-walkthrough-generation-completion/plan.md)
+[PR walkthrough generation completion](../../../plans/pr-walkthrough-generation-completion/plan.md),
+[PR walkthrough model fallback](../../../plans/pr-walkthrough-model-fallback/plan.md)
 
 ## Generation contract
 
@@ -68,8 +75,13 @@ binds identity and links to trusted event metadata before rendering.
 
 The managed adapter accepts a renderer-completed output pair after independent
 verification. A process that remains live after rendering does not delay this
-completion. Unexpected non-zero exits fail without a retry. An incomplete
-zero-exit attempt can retry once within the remaining total time limit.
+completion. Recoverable model availability and quota failures can advance to
+the next candidate. An incomplete zero-exit attempt can retry once within the
+remaining total time limit.
+
+The generation job is advisory. An attempt that does not return a verified
+output pair reports a warning and keeps the pull request check successful.
+Publication and description linking start only for a verified pair.
 
 Each attempt starts with an empty draft and no final outputs or completion
 record. Diagnostics distinguish render completion, process exit, expiration,
@@ -125,10 +137,14 @@ adapters remain outside the skill because they are platform integration code.
 
 ## Failure modes
 
-- If the agent exits non-zero unexpectedly, generation fails and records
-  diagnostics. Expected termination after verified rendering is successful.
+- If the agent exits non-zero without a recognized recoverable provider error,
+  generation fails and records diagnostics. Expected termination after
+  verified rendering is successful.
 - If the total time limit expires without verified completion, generation
   stops, retains diagnostics, and prevents publication.
+- If generation does not produce a verified output pair, the workflow reports
+  a warning annotation and a job summary entry, skips publication and
+  description linking, and does not fail the pull request check.
 - External cancellation prevents publication, even if final files exist.
 - If OpenCode exits zero without both required files, the adapter removes
   partial output and retries once from an empty draft. A second incomplete
@@ -145,10 +161,11 @@ adapters remain outside the skill because they are platform integration code.
   the workflow fails rather than exposing a partial page.
 - If optional browser validation is unavailable on the runner, the workflow
   still validates the generated file structurally and reports live browser
-  rendering as unverified. HTML generation itself remains a required check.
+  rendering as unverified. The structural HTML check remains required for a
+  walkthrough to count as generated.
 - If the R2 upload, object metadata validation, or bounded-retry public URL
-  check fails, the workflow fails and does not report the walkthrough as
-  published.
+  check fails after a verified generation, the publishing job fails and the
+  workflow does not report the walkthrough as published.
 - If the PR body contains malformed, duplicate, or non-leading walkthrough
   markers, the link job fails closed and does not rewrite contributor content.
 
@@ -183,6 +200,12 @@ not from merge time.
   keeps separate diagnostics for each attempt.
 - **GIVEN** the clean retry also exits zero without both final files, **WHEN**
   the second attempt ends, **THEN** generation fails and publication does not
+  start.
+- **GIVEN** generation does not produce a verified output pair, **WHEN** the
+  generation job ends, **THEN** it reports a warning, uploads diagnostics, and
+  leaves the pull request check successful.
+- **GIVEN** an advisory generation failure, **WHEN** the downstream jobs
+  evaluate their gates, **THEN** publication and description linking do not
   start.
 - **GIVEN** a future agent replaces OpenCode, **WHEN** its adapter starts the
   walkthrough, **THEN** it receives the same prompt, context, draft path,

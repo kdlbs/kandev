@@ -33,6 +33,7 @@ export type ActiveSessionRecovery = {
   stamp?: string;
   error?: import("./session-last-agent-error").LastAgentError | null;
   kind: string;
+  requestLocal?: boolean;
   loading?: boolean;
   summary?: string;
   details?: string;

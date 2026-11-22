@@ -1,5 +1,7 @@
 "use client";
 
+import { queueMutationErrorKey } from "@/lib/queue-mutation-error";
+
 import {
   forwardRef,
   useCallback,
@@ -36,6 +38,7 @@ import {
 } from "@/lib/entity-references/message-references";
 import { buildEntityReferenceMarkdownComponents } from "@/components/task/chat/messages/entity-reference-chip";
 import { BoundedMessagePreview } from "@/components/task/chat/messages/bounded-message-preview";
+import { MessageTimestamp } from "./messages/message-timestamp";
 import { QueuedGhostRowActions } from "@/components/task/chat/queued-ghost-row-actions";
 import { useQueuedMessageOverflow } from "@/components/task/chat/use-queued-message-overflow";
 import { AttachmentRow, type QueuedAttachment } from "@/components/task/chat/queued-attachment-row";
@@ -270,6 +273,7 @@ function DisplayView({
           />
         )}
         <AttachmentRow attachments={attachments} interactive={true} />
+        <MessageTimestamp createdAt={entry.queued_at} wrap />
       </div>
       <QueuedGhostRowActions
         canExpand={canExpand}
@@ -532,7 +536,7 @@ function useQueuedGhostSave({
       if (err instanceof QueueEntryNotFoundError) {
         toast.error(t("chat:queueEditAlreadySent"));
       } else {
-        toast.error(t("chat:queueEditSaveFailed"));
+        toast.error(t(queueMutationErrorKey(err, "chat:queueEditSaveFailed")));
       }
       setEditing(false);
       await onEditComplete?.(editToken, false);

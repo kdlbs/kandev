@@ -4,6 +4,7 @@ import type { ExecutorProvider, ExecutorType } from "./executor";
 import type { NativeMCPDiagnosticPayload } from "@/lib/prepare/native-mcp-diagnostic";
 
 export type ExecutorPayload = {
+  owner_user_id?: string | null;
   id: string;
   name: string;
   type: ExecutorType;
@@ -16,6 +17,7 @@ export type ExecutorPayload = {
 };
 
 export type ExecutorProfilePayload = {
+  owner_user_id?: string | null;
   id: string;
   executor_id: string;
   name: string;

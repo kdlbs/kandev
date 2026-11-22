@@ -56,6 +56,7 @@ type legacyTransportCredentialFactory func(ctx context.Context) (Client, string,
 type ghAccountTokenResolver func(ctx context.Context, host, login string) (string, error)
 
 type credentialCacheKey struct {
+	githubHost              string
 	workspaceID             string
 	source                  ConnectionSource
 	generation              int64
@@ -80,16 +81,16 @@ type credentialCacheEntry struct {
 // Its cache is keyed by workspace and generation so replacement or revocation
 // cannot reuse a client created for another principal.
 type CredentialResolver struct {
-	connections workspaceConnectionReader
-	secrets     authSecretReader
-	app         installationCredentialProvider
-	users       userCredentialProvider
-	automation  automationCredentialProvider
-	legacy      legacyCredentialFactory
-	legacyGit   legacyTransportCredentialFactory
-	ghToken     ghAccountTokenResolver
-	now         func() time.Time
-	rateTracker *RateTracker
+	connections     workspaceConnectionReader
+	secrets         authSecretReader
+	app             installationCredentialProvider
+	users           userCredentialProvider
+	automation      automationCredentialProvider
+	legacy          legacyCredentialFactory
+	legacyGit       legacyTransportCredentialFactory
+	ghToken         ghAccountTokenResolver
+	now             func() time.Time
+	rateCoordinator *RateCoordinator
 
 	mu              sync.Mutex
 	cache           map[credentialCacheKey]credentialCacheEntry
@@ -111,6 +112,7 @@ func NewCredentialResolver(connections workspaceConnectionReader, secrets authSe
 		now:             time.Now,
 		cache:           make(map[credentialCacheKey]credentialCacheEntry),
 		workspaceEpochs: make(map[string]uint64),
+		rateCoordinator: NewRateCoordinator(nil, nil),
 	}
 }
 
@@ -126,8 +128,10 @@ func (r *CredentialResolver) SetLegacyTransportFactory(factory legacyTransportCr
 	}
 }
 
-func (r *CredentialResolver) SetRateTracker(tracker *RateTracker) {
-	r.rateTracker = tracker
+func (r *CredentialResolver) SetRateCoordinator(coordinator *RateCoordinator) {
+	if coordinator != nil {
+		r.rateCoordinator = coordinator
+	}
 }
 
 func (r *CredentialResolver) SetInstallationProvider(provider installationCredentialProvider) {
@@ -178,6 +182,10 @@ func (r *CredentialResolver) resolveAtEpoch(
 
 	if req.Purpose == CredentialPurposePersonalRead || req.Purpose == CredentialPurposePersonalWrite {
 		if personal, resolveErr := r.resolvePersonal(ctx, req, connection); personal != nil || resolveErr != nil {
+			if personal != nil {
+				personal.WorkspaceCredentialGeneration = connection.CredentialGeneration
+			}
+			r.coordinateResolved(connection.GitHubHost, personal)
 			return personal, resolveErr
 		}
 	}
@@ -277,16 +285,29 @@ func (r *CredentialResolver) resolveAutomation(
 	}
 	resolved.Principal.WorkspaceID = req.WorkspaceID
 	resolved.CredentialGeneration = connection.CredentialGeneration
+	resolved.WorkspaceCredentialGeneration = connection.CredentialGeneration
 	if err := applyAppCredentialMetadata(connection, resolved, &key); err != nil {
 		return nil, err
 	}
 	if !resolved.ExpiresAt.IsZero() && !resolved.ExpiresAt.After(r.now()) {
 		return nil, ErrInstallationTokenExpired
 	}
+	r.coordinateResolved(connection.GitHubHost, resolved)
 	if !r.storeCached(key, resolved, epoch) {
 		return nil, errCredentialResolutionInvalidated
 	}
 	return resolved, nil
+}
+
+func (r *CredentialResolver) coordinateResolved(host string, resolved *ResolvedCredential) {
+	if resolved == nil || resolved.Client == nil || r.rateCoordinator == nil {
+		return
+	}
+	preferred := resolved.RateTracker
+	tracker, admission := r.rateCoordinator.coordinate(host, resolved.Principal, preferred)
+	resolved.RateTracker = tracker
+	wireRateTracker(resolved.Client, tracker)
+	wireRateAdmission(resolved.Client, admission)
 }
 
 func (r *CredentialResolver) automationCacheKey(
@@ -294,6 +315,7 @@ func (r *CredentialResolver) automationCacheKey(
 	req ResolveCredentialRequest,
 ) (credentialCacheKey, error) {
 	key := credentialCacheKey{
+		githubHost:  defaultAuthFlowHost(connection.GitHubHost),
 		workspaceID: req.WorkspaceID, source: connection.Source,
 		generation: connection.CredentialGeneration, appRegistrationID: connection.AppRegistrationID,
 		purpose: req.Purpose, repoOwner: strings.ToLower(strings.TrimSpace(req.RepoOwner)),
@@ -366,24 +388,30 @@ func (r *CredentialResolver) resolvePAT(ctx context.Context, connection *Workspa
 	if r.secrets == nil {
 		return nil, ErrGitHubNotConfigured
 	}
-	token, err := r.secrets.Reveal(ctx, WorkspacePATSecretKey(connection.WorkspaceID))
+	token, err := r.secrets.Reveal(ctx, WorkspacePATSecretKeyForHost(connection.WorkspaceID, connection.GitHubHost))
 	if err != nil {
 		return nil, fmt.Errorf("reveal workspace GitHub PAT: %w", err)
 	}
+	host, err := connectionHost(connection.GitHubHost)
+	if err != nil {
+		return nil, err
+	}
 	tracker := NewRateTracker(nil, nil)
-	client := NewTokenClient(token, TokenPrincipal{
+	client := NewTokenClientForHost(token, TokenPrincipal{
 		Kind:        TokenCredentialPAT,
 		PrincipalID: "login:" + connection.Login,
 		Login:       connection.Login,
-	}).WithRateTracker(tracker)
+	}, host).WithRateTracker(tracker)
 	return &ResolvedCredential{
 		Client:       client,
 		Capabilities: allTokenCapabilities(),
 		credential:   token,
+		GitHubHost:   host.String(),
 		Principal: AuthPrincipal{
-			Kind:   AuthPrincipalHuman,
-			Source: ConnectionSourcePAT,
-			Login:  connection.Login,
+			GitHubHost: host.String(),
+			Kind:       AuthPrincipalHuman,
+			Source:     ConnectionSourcePAT,
+			Login:      connection.Login,
 		},
 		RateTracker: tracker,
 	}, nil
@@ -394,20 +422,26 @@ func (r *CredentialResolver) resolveGHCLI(ctx context.Context, connection *Works
 	if err != nil {
 		return nil, err
 	}
+	host, err := connectionHost(connection.GitHubHost)
+	if err != nil {
+		return nil, err
+	}
 	tracker := NewRateTracker(nil, nil)
-	client := NewTokenClient(token, TokenPrincipal{
+	client := NewTokenClientForHost(token, TokenPrincipal{
 		Kind:        TokenCredentialCLI,
 		PrincipalID: "login:" + connection.Login,
 		Login:       connection.Login,
-	}).WithRateTracker(tracker)
+	}, host).WithRateTracker(tracker)
 	return &ResolvedCredential{
 		Client:       client,
 		Capabilities: allTokenCapabilities(),
 		credential:   token,
+		GitHubHost:   host.String(),
 		Principal: AuthPrincipal{
-			Kind:   AuthPrincipalHuman,
-			Source: ConnectionSourceGHCLI,
-			Login:  connection.Login,
+			GitHubHost: host.String(),
+			Kind:       AuthPrincipalHuman,
+			Source:     ConnectionSourceGHCLI,
+			Login:      connection.Login,
 		},
 		RateTracker: tracker,
 	}, nil
@@ -436,23 +470,64 @@ func (r *CredentialResolver) resolveLegacy(
 		(purpose == CredentialPurposeGitTransport && strings.TrimSpace(credential) == "") {
 		return nil, ErrGitHubNotConfigured
 	}
-	tracker := r.rateTracker
+	tracker := clientRateTracker(client)
 	if tracker == nil {
 		tracker = NewRateTracker(nil, nil)
 	}
+	tracker, admission := r.coordinateLegacyClient(
+		connection.GitHubHost,
+		connection.WorkspaceID,
+		"",
+		tracker,
+	)
 	wireRateTracker(client, tracker)
-	login, _ := client.GetAuthenticatedUser(ctx)
+	wireRateAdmission(client, admission)
+	login, err := client.GetAuthenticatedUser(ctx)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		if strings.TrimSpace(connection.Login) == "" || FailureKindOf(err) != FailureTransient {
+			return nil, fmt.Errorf("resolve legacy GitHub identity: %w", err)
+		}
+		login = connection.Login
+	}
+	tracker, admission = r.coordinateLegacyClient(
+		connection.GitHubHost,
+		connection.WorkspaceID,
+		login,
+		tracker,
+	)
+	wireRateTracker(client, tracker)
+	wireRateAdmission(client, admission)
 	return &ResolvedCredential{
 		Client:       client,
 		Capabilities: allTokenCapabilities(),
 		credential:   credential,
+		GitHubHost:   defaultGitHubHost,
 		Principal: AuthPrincipal{
-			Kind:   AuthPrincipalHuman,
-			Source: ConnectionSourceLegacyShared,
-			Login:  login,
+			GitHubHost: defaultGitHubHost,
+			Kind:       AuthPrincipalHuman,
+			Source:     ConnectionSourceLegacyShared,
+			Login:      login,
 		},
 		RateTracker: tracker,
 	}, nil
+}
+
+func (r *CredentialResolver) coordinateLegacyClient(
+	host, workspaceID, login string,
+	preferred *RateTracker,
+) (*RateTracker, *RateAdmission) {
+	if r.rateCoordinator == nil {
+		return preferred, nil
+	}
+	return r.rateCoordinator.coordinate(host, AuthPrincipal{
+		Kind:        AuthPrincipalHuman,
+		Source:      ConnectionSourceLegacyShared,
+		WorkspaceID: workspaceID,
+		Login:       login,
+	}, preferred)
 }
 
 func (r *CredentialResolver) cached(key credentialCacheKey) *ResolvedCredential {

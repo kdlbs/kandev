@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { verifyRegistryExampleCopy } from "./canvas-clipboard-helpers";
 import { expectTouchControl } from "../../helpers/control-sizing";
 import {
   approvePendingCanvas,
@@ -10,8 +11,10 @@ import {
 } from "./canvas-fixture";
 
 test.describe("Canvas sharing on mobile", () => {
+  test.describe.configure({ retries: 0 });
   test("keeps sharing actions in a focused drawer with touch-sized downloads", async ({
     testPage,
+    prCapture,
     apiClient,
     backend,
     seedData,
@@ -36,6 +39,30 @@ test.describe("Canvas sharing on mobile", () => {
 
       const drawer = testPage.getByRole("dialog").last();
       await expect(drawer).toBeVisible();
+      await verifyRegistryExampleCopy(testPage, drawer, false, true);
+      await drawer.getByRole("button", { name: "Cancel", exact: true }).tap();
+      await expect(actions).toBeVisible();
+      await testPage
+        .getByTestId("canvas-mobile-actions-sheet")
+        .getByRole("button", { name: "Share canvas", exact: true })
+        .tap();
+      await expect(drawer).toBeVisible();
+      await verifyRegistryExampleCopy(testPage, drawer, true, true);
+      if (prCapture.capturing) {
+        await drawer.evaluate(async (element) => {
+          await Promise.all(
+            element
+              .getAnimations({ subtree: true })
+              .filter((animation) =>
+                Number.isFinite(animation.effect?.getComputedTiming().iterations),
+              )
+              .map((animation) => animation.finished.catch(() => undefined)),
+          );
+        });
+        await prCapture.screenshot("registry-copy-phone", {
+          caption: "Registry example copied after controlled modern clipboard rejection",
+        });
+      }
       await drawer.getByText("Package details", { exact: true }).tap();
       await expectTouchControl(drawer.getByLabel("Package ID", { exact: true }));
       await expectTouchControl(drawer.getByRole("combobox", { name: "Source mode" }));

@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import type {
   PluginHostV2ManagedAgentInputReceipt,
   PluginManagedConversationSnapshot,
-} from "@kandev/plugin-sdk";
+} from "@kdlbs/plugin-sdk";
 import { WorkspaceAgentChatInteractions } from "./workspace-agent-chat-interactions";
 import type { ClarificationAnswer } from "./workspace-agent-chat-interactions";
 

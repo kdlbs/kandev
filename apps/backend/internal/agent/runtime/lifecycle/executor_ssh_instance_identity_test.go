@@ -43,7 +43,10 @@ func TestSSHAgentctlIdentitySurvivesRepeatedRecovery(t *testing.T) {
 					AuthToken:           "token",
 					Metadata:            metadata,
 				}
-				client, reusing := executor.newResumedAgentctlClient(context.Background(), port, req)
+				client, reusing, probeErr := executor.newResumedAgentctlClient(context.Background(), port, req)
+				if probeErr != nil {
+					t.Fatalf("resume inspection: %v", probeErr)
+				}
 				require.True(t, reusing, "recovery %d must reach the original remote controller", generation)
 				state := &sshSessionState{
 					target:    &SSHTarget{Host: "ssh.example", Port: 22, User: "agent"},
@@ -72,7 +75,7 @@ func TestSSHNewControllerRecordsItsOwnIdentity(t *testing.T) {
 		}},
 		&SSHTarget{Host: "ssh.example", Port: 22, User: "agent"},
 		&SSHPortForwarder{localPort: 43124},
-		"/remote/task", "/remote/session", 43123, 43122, 99, "/home/agent/.kandev", "token",
+		"/remote/task", "/remote/session", 43123, 43122, 99, "/home/agent/.kandev", "token", nil,
 	)
 	require.Equal(t, "new-instance", instance.Metadata["ssh_remote_agentctl_instance_id"])
 	require.Equal(t, "43122", instance.Metadata[MetadataKeySSHRemoteControlPort])

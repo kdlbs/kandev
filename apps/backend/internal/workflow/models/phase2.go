@@ -40,8 +40,9 @@ const (
 	ParticipantProvenanceManual ParticipantProvenance = "manual"
 )
 
-// StageType classifies a workflow_step's UX role. A semantic hint for the
-// frontend; the engine itself does not branch on it.
+// StageType classifies a workflow_step's stored nature. The execution engine
+// does not branch on it: a step of any stage type runs the same triggers. It is
+// read by the frontend to choose presentation.
 type StageType string
 
 const (
@@ -49,7 +50,20 @@ const (
 	StageTypeReview   StageType = "review"
 	StageTypeApproval StageType = "approval"
 	StageTypeCustom   StageType = "custom"
+	// StageTypeHold marks a step that parks a task on a person's decision. It
+	// is a classification only: it stops no run and moves no task.
+	StageTypeHold StageType = "hold"
 )
+
+// IsValid reports whether the stage type is one of the supported values.
+func (stageType StageType) IsValid() bool {
+	switch stageType {
+	case StageTypeWork, StageTypeReview, StageTypeApproval, StageTypeCustom, StageTypeHold:
+		return true
+	default:
+		return false
+	}
+}
 
 // WorkflowStyle classifies a workflow's UX presentation. Read by the frontend
 // only — backend code MUST NOT branch on this value.

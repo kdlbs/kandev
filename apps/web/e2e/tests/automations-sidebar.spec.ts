@@ -2,6 +2,8 @@ import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../fixtures/test-base";
 import type { ApiClient } from "../helpers/api-client";
 import { watchWs } from "../helpers/causal-waits";
+import type { AutomationRun } from "@/lib/types/automation";
+import { summaryHasRun } from "../helpers/automation-summary-waits";
 
 /**
  * The Automations section of the app sidebar.
@@ -167,4 +169,141 @@ test.describe("Automations section in the app sidebar", () => {
       caption: "Expanded desktop Automations sidebar with a running automation indicator",
     });
   });
+});
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.10 AC-OFFICE-AUTOMATION-RUNS-001.12
+test("external definitions update the mounted builtin after create, rename, and delete", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const ws = watchWs(testPage);
+  await testPage.goto("/");
+  await automationsHeader(testPage).click();
+  await expect(testPage.getByTestId("sidebar-automations-empty")).toBeVisible();
+  const section = testPage.locator("#sidebar-section-automations");
+  const original = await section.elementHandle();
+  const url = testPage.url();
+  const timeOrigin = await testPage.evaluate(() => performance.timeOrigin);
+  const layout = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+    seedData.workspaceId
+  ];
+
+  const createdRead = ws.waitForResponse("automation.list", {
+    where: (rows) => Array.isArray(rows) && rows.some((row) => row.name === "External definition"),
+  });
+  const created = await apiClient.wsRequest<{ id: string }>("automation.create", {
+    workspace_id: seedData.workspaceId,
+    name: "External definition",
+    enabled: false,
+    repository_mode: "none",
+  });
+  const row = testPage.getByTestId(`sidebar-automation-${created.id}`);
+  await createdRead;
+  await expect(row).toContainText("External definition");
+  await expect(row).toHaveAttribute("href", `/automations/${created.id}`);
+
+  const renamedRead = ws.waitForResponse("automation.list", {
+    where: (rows) =>
+      Array.isArray(rows) &&
+      rows.some((row) => row.id === created.id && row.name === "External rename"),
+  });
+  await apiClient.wsRequest("automation.update", { id: created.id, name: "External rename" });
+  await renamedRead;
+  await expect(row).toContainText("External rename");
+
+  const deletedRead = ws.waitForResponse("automation.list", {
+    where: (rows) =>
+      rows === null || (Array.isArray(rows) && rows.every((row) => row.id !== created.id)),
+  });
+  await apiClient.wsRequest("automation.delete", { id: created.id });
+  await deletedRead;
+  await expect(row).toHaveCount(0);
+  await expect(testPage.getByTestId("sidebar-automations-empty")).toBeVisible();
+  await expect(automationsHeader(testPage)).toHaveAttribute("aria-expanded", "true");
+  expect(await section.evaluate((element, previous) => element === previous, original)).toBe(true);
+  expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+  await expect(testPage).toHaveURL(url);
+  expect(
+    (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+      seedData.workspaceId
+    ],
+  ).toEqual(layout);
+  await original?.dispose();
+});
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.9 AC-OFFICE-AUTOMATION-RUNS-001.19 AC-OFFICE-AUTOMATION-RUNS-001.20 AC-OFFICE-AUTOMATION-RUNS-001.21
+test("latest failed run is red and recovers after a newer success", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  const [automation, paused] = await seedAutomations(apiClient, seedData, [
+    "PR tagging",
+    "Paused monitor",
+  ]);
+  await apiClient.seedTrigger({
+    automationId: automation.id,
+    type: "scheduled",
+    config: { cron_expression: "0 0 * * *" },
+  });
+  await apiClient.wsRequest("automation.update", { id: paused.id, enabled: false });
+  const failed = await apiClient.seedAutomationRun(automation.id, "failed");
+  await apiClient.seedAutomationRun(paused.id, "failed");
+  const ws = watchWs(testPage);
+  await testPage.goto("/");
+  const loaded = ws.waitForResponse("automation.summaries", {
+    where: (payload) => summaryHasRun(payload, failed.id),
+  });
+  await automationsHeader(testPage).click();
+  await loaded;
+  const row = testPage.getByTestId(`sidebar-automation-${automation.id}`);
+  await expect(row.locator(".bg-red-500")).toBeVisible();
+  await expect(row.getByTestId(`sidebar-automation-last-run-${automation.id}`)).toHaveText(
+    /^Failed, (just now|\d+[smh] ago)$/,
+  );
+  const pausedRow = testPage.getByTestId(`sidebar-automation-${paused.id}`);
+  await expect(pausedRow.locator(".bg-muted-foreground\\/50")).toBeVisible();
+  await expect(pausedRow).toContainText("Failed");
+  await expect(pausedRow).toContainText("Paused");
+  await prCapture.screenshot("automation-latest-failure-desktop", {
+    caption: "UI-01: newest failure and paused-gray failure in the expanded desktop sidebar",
+  });
+  await row.click();
+  const detail = testPage.getByTestId(`run-row-${failed.id}`);
+  await expect(detail).toContainText("Failed");
+  await expect(detail.locator(".bg-red-500")).toBeVisible();
+  await testPage.getByTestId("automations-all-runs").click();
+  const agenda = testPage.getByTestId(`agenda-row-${automation.id}`);
+  await expect(agenda.locator(".bg-red-500")).toBeVisible();
+  await expect(agenda).toContainText("Failed");
+  await expect(agenda.getByTestId("automation-next-run")).toContainText("~");
+  await expect(agenda).not.toContainText("ago");
+  await prCapture.screenshot("automation-latest-failure-agenda", {
+    caption: "UI-02: failure is separate from the next-firing datum",
+  });
+  const mountedRow = await row.elementHandle();
+  const runs = await apiClient.wsRequest<AutomationRun[]>("automation.runs.list", {
+    automation_id: automation.id,
+  });
+  await expect.poll(() => Date.now()).toBeGreaterThan(Date.parse(runs[0].created_at) + 1000);
+  let successId = "";
+  const refreshed = ws.waitForResponse("automation.summaries", {
+    where: (payload) => summaryHasRun(payload, successId, "succeeded"),
+  });
+  successId = (await apiClient.seedAutomationRun(automation.id, "succeeded")).id;
+  await refreshed;
+  await expect(row.locator(".bg-emerald-500")).toBeVisible();
+  await expect(row.getByTestId(`sidebar-automation-last-run-${automation.id}`)).toHaveText(
+    /^(just now|\d+[smh] ago)$/,
+  );
+  await expect(row).not.toContainText("Failed");
+  expect(await row.evaluate((element, original) => element === original, mountedRow)).toBe(true);
+  const newest = await apiClient.wsRequest<AutomationRun[]>("automation.runs.list", {
+    automation_id: automation.id,
+  });
+  expect(newest[0].id).toBe(successId);
+  expect(Date.parse(newest[0].created_at)).toBeGreaterThan(Date.parse(runs[0].created_at));
+  await mountedRow?.dispose();
 });

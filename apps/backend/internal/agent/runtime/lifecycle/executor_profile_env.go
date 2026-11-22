@@ -59,6 +59,13 @@ func (m *Manager) ExecutorProfileEnvForSession(ctx context.Context, sessionID, t
 	if profileID == "" {
 		return nil, nil
 	}
+	if m.executorAdmission != nil {
+		var err error
+		ctx, err = m.executorAdmission(ctx, sessionID, "", profileID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	profile, err := m.executorProfileReader.GetExecutorProfile(ctx, profileID)
 	if err != nil {
 		m.logger.Warn("failed to load executor profile for terminal env",

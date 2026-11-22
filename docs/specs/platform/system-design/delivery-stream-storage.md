@@ -177,3 +177,10 @@ describe periodic live shell snapshots, replay preservation and physical reclama
 ## Implementation plan
 
 [Single-PR delivery stream storage repair](../../../plans/delivery-stream-storage/plan.md).
+
+## Incremental delivery extension
+
+The [incremental shell delivery design](incremental-shell-delivery.md) extends
+these cadence bounds with lifetime byte-volume bounds and versioned readers.
+This document remains the version-1 admission contract and the shared logical
+coalescing rule; version 2 adds compact accepted output and canonical chunks.

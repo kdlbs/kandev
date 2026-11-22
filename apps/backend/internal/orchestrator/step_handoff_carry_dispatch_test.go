@@ -52,7 +52,7 @@ func TestAutoStartStepPrompt_DeliversHandoffLastAfterQueuedHandoff(t *testing.T)
 	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-order")
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-handoff-order")
 
 	_, err := svc.messageQueue.QueueMessage(ctx, sessionID, taskID, queued, "", "user", false, nil)
@@ -98,7 +98,7 @@ func TestAutoStartStepPrompt_NoTokenNoHeading(t *testing.T) {
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-no-handoff")
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	require.NoError(t, err)
@@ -136,7 +136,7 @@ func TestAutoStartStepPrompt_ReplacementLaunchReusesClaimedHandoff(t *testing.T)
 	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-replacement")
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-replacement-handoff")
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	require.NoError(t, err)
@@ -192,7 +192,7 @@ func TestLaunchAfterOnEnterDispatch_PassthroughEmptyPromptDeliversViaDrain(t *te
 	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-passthrough")
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, isPassthrough: true}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-passthrough-drain")
 
 	_, err := svc.messageQueue.QueueMessage(ctx, sessionID, taskID, queued, "", "user", false, nil)
@@ -251,7 +251,7 @@ func TestProcessOnEnter_NoOnEnterActionsDrainDeliversHandoff(t *testing.T) {
 	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-no-onenter")
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-no-onenter-drain")
 
 	_, err := svc.messageQueue.QueueMessage(ctx, sessionID, taskID, queued, "", "user", false, nil)
@@ -325,7 +325,7 @@ func TestAutoStartPassthroughPrompt_ClaimedTokenNotRestoredOnDispatchFailure(t *
 		passthroughStdinErr: errors.New("simulated stdin write failure"),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-unrestored-handoff")
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	require.NoError(t, err)
@@ -436,7 +436,7 @@ func TestStartSessionForWorkflowStep_ComposedHandoffSurvivesLazyResumeFallback(t
 	}
 	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
 	svc.promptExpander = promptService
-	exec := executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.executor = exec
 	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, testLogger(), scheduler.DefaultSchedulerConfig())
 	svc.messageCreator = &mockMessageCreator{}
@@ -478,7 +478,7 @@ func TestAutoStartStepPrompt_QueueFallbackWhenRunningCarriesHandoffMetadata(t *t
 	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-queue-fallback")
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-queue-fallback-running")
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	require.NoError(t, err)
@@ -548,7 +548,7 @@ func TestAutoStartStepPrompt_QueueFallbackPreservesEntityReferenceOrderingBefore
 	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-queue-fallback-refs")
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-queue-fallback-refs")
 
 	reference := queuedReferenceFixture()
@@ -685,7 +685,7 @@ func TestLaunchAfterOnEnterDispatch_FallbackDrainDeliversHandoff(t *testing.T) {
 	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-fallback")
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-fallback-drain")
 
 	_, err := svc.messageQueue.QueueMessage(ctx, sessionID, taskID, queued, "", "user", false, nil)
@@ -739,7 +739,7 @@ func TestLaunchAfterOnEnterDispatch_AsyncProfileSwitchFailureDrainDeliversHandof
 		promptErr: errors.New("simulated fatal profile switch prompt error"),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	seedExecutorRunning(t, repo, sessionID, taskID, "exec-profile-switch-drain")
 
 	_, err := svc.messageQueue.QueueMessage(ctx, sessionID, taskID, queued, "", "user", false, nil)

@@ -78,6 +78,9 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	lock := s.lifecycleLocks.lockFor(result.Manifest.ID)
 	lock.Lock()
 	defer lock.Unlock()
+	captureLock := s.formatterLifecycleLock(result.Manifest.ID)
+	captureLock.Lock()
+	defer captureLock.Unlock()
 	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
 	if (hadOldRec && len(oldRec.ExecutorProviders) > 0) || len(result.Manifest.ExecutorProviders) > 0 {
 		s.closeExecutorProviderAdmission(result.Manifest.ID)
@@ -134,11 +137,20 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	if rec.InstallationID == "" {
 		rec.InstallationID = uuid.NewString()
 	}
+	// Every admitted installation replacement starts a new policy version,
+	// including replacement by the same package version. Automation tool
+	// approvals from the previous record therefore require review. The policy
+	// write lease spans the record save and registry swap so an automation
+	// selection save cannot validate against the superseded record.
+	s.agentToolPolicyMu.Lock()
+	rec.AgentToolPolicyVersion = uuid.NewString()
 	if err := s.store.Save(rec); err != nil {
+		s.agentToolPolicyMu.Unlock()
 		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
 		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
 	}
 	if err := s.reviewInstalledApprovals(rec); err != nil {
+		s.agentToolPolicyMu.Unlock()
 		if hadOldRec {
 			if restoreErr := s.store.Save(oldRec); restoreErr != nil {
 				s.log.Warn("plugins: failed to restore old plugin record after approval review error",
@@ -156,6 +168,7 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		return nil, err
 	}
 	s.registry.Add(rec)
+	s.agentToolPolicyMu.Unlock()
 	s.agentToolInstallMu.Unlock()
 	catalogLocked = false
 
@@ -396,10 +409,14 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	captureLock := s.formatterLifecycleLock(id)
+	captureLock.Lock()
+	defer captureLock.Unlock()
 	rec, err := s.Get(id)
 	if err != nil {
 		return err
 	}
+	s.filePreviewGrantStore().revokeInstallation(rec.InstallationID)
 	if len(rec.ExecutorProviders) > 0 {
 		s.closeExecutorProviderAdmission(id)
 		defer s.reopenExecutorProviderAdmissionIfActive(id)
@@ -459,6 +476,7 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		return err
 	}
 	s.registry.Remove(id)
+	s.notifySidebarGroupingCatalog(id)
 	s.deletePluginState(id)
 	s.notifyDeliverer()
 	s.notifyAgentToolCatalogChanged()

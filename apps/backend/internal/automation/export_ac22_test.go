@@ -20,6 +20,7 @@ type fieldDisposition struct {
 }
 
 var automationFieldDispositions = map[string]fieldDisposition{
+	"CreatedByUserID":                  {exported: false}, // Trusted execution authority is rebound to the importer.
 	"Name":                             {exported: true, yamlKey: "name"},
 	"Description":                      {exported: true, yamlKey: "description"},
 	"Prompt":                           {exported: true, yamlKey: "prompt"},
@@ -46,6 +47,11 @@ var automationFieldDispositions = map[string]fieldDisposition{
 	"Repositories":                     {exported: false},
 	"RetryPolicy":                      {exported: true, yamlKey: "retry_policy"},
 	"RetryPolicyJSON":                  {exported: false}, // persisted JSON representation
+	"MCPSelection":                     {exported: false}, // Workspace-local grants require native selection after import.
+	"MCPSelectionJSON":                 {exported: false}, // Persisted representation of local grants.
+	"MCPSelectionRevision":             {exported: false}, // Local concurrency token.
+	"PluginTools":                      {exported: false}, // approval authority is never portable
+	"PluginToolsJSON":                  {exported: false}, // persisted JSON representation of the approval
 	"AutomationRevision":               {exported: false}, // configuration revision
 	"ContinuationTaskID":               {exported: false}, // runtime pointer to the reused task
 

@@ -293,3 +293,14 @@ Wave 8 (parallel after Tasks 11 and 12):
 
 - [x] [Task 13: UX delta end-to-end coverage](task-13-ux-delta-e2e.md)
 - [x] [Task 14: UX terminology documentation](task-14-ux-terminology-documentation.md)
+
+
+## Later repository placement package
+
+The [workspace repository placement package](../workspace-repository-placement/plan.md) extends the explicit Worktree batch flow.
+Its work orders own the new creation option, nested placements, and explicit expansion recovery.
+This plan's completed results remain historical evidence. The later package does not authorize restarting legacy active-turn add-branch callers.
+
+## Current-workspace follow-up
+
+The [new uncommitted planning package](../current-workspace-sources/plan.md) owns the Files + menu entry and Local/scratch/remote source extension. Historical test results and existing work-order statuses remain unchanged. This follow-up does not satisfy or remove any pending root-expansion recovery gate.

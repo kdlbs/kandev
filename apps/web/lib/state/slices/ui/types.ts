@@ -5,6 +5,7 @@ import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import type {
   FilterClause,
   GroupKey,
+  SidebarDisclosureContext,
   SidebarSliceState,
   SidebarTaskRowPresentation,
   SidebarView,
@@ -63,7 +64,14 @@ export type MobileKanbanState = {
 /** Core, host-defined mobile panels. Kept as a named union (rather than
  *  inlined into MobileSessionPanel) so existing `=== "chat"`-style narrowing
  *  still works unchanged after MobileSessionPanel grew a plugin variant. */
-export type MobileSessionCorePanel = "chat" | "plan" | "changes" | "files" | "terminal" | "review";
+export type MobileSessionCorePanel =
+  | "chat"
+  | "plan"
+  | "changes"
+  | "files"
+  | "terminal"
+  | "review"
+  | "background-work";
 
 /** A plugin task panel id on mobile, `plugin:<pluginId>:<panelKey>` — see
  *  lib/state/layout-manager/plugin-panels.ts's pluginPanelId. */
@@ -163,6 +171,10 @@ export type QuickChatSession = {
   taskId?: string;
   name?: string;
   agentProfileId?: string;
+  /** Idempotency key for browser-owned Quick Chat creation. */
+  creationId?: string;
+  /** The accepted startup still owns a CREATED/STARTING session. */
+  startupPending?: boolean;
   initialPrompt?: QuickChatInitialPrompt;
 };
 
@@ -359,6 +371,8 @@ export type UISliceState = {
   appSidebar: AppSidebarState;
   /** Settings menu shape + open branches (localStorage). */
   settingsMenu: SettingsMenuState;
+  /** Initial image-preview disclosure preference (localStorage). */
+  imagePreviewsExpandedByDefault: boolean;
   /** Agent rich-output chart animation preference (localStorage). */
   richOutputMotion: RichOutputMotionState;
   chatMotion: ChatMotionState;
@@ -377,6 +391,7 @@ export type UISliceState = {
 };
 
 export type UISliceActions = {
+  commitImagePreviewsExpandedByDefault: (enabled: boolean) => void;
   setPreviewOpen: (sessionId: string, open: boolean) => void;
   togglePreviewOpen: (sessionId: string) => void;
   setPreviewView: (sessionId: string, view: PreviewViewMode) => void;
@@ -474,6 +489,10 @@ export type UISliceActions = {
   clearBottomTerminalCommand: () => void;
   setSidebarActiveView: (viewId: string) => void;
   createSidebarView: () => string | null;
+  selectSidebarPluginGrouping: (grouping: {
+    reference: `plugin:${string}:${string}`;
+    label: string;
+  }) => Promise<boolean>;
   updateSidebarDraft: (
     patch: Partial<{
       filters: FilterClause[];
@@ -483,7 +502,10 @@ export type UISliceActions = {
       taskRow: SidebarTaskRowPresentation;
     }>,
   ) => void;
-  saveSidebarDraftAs: (name: string) => void;
+  saveSidebarDraftAs: (
+    name: string,
+    owner: Pick<SidebarViewDraft, "baseViewId" | "group">,
+  ) => Promise<boolean>;
   saveSidebarDraftOverwrite: () => void;
   discardSidebarDraft: () => void;
   deleteSidebarView: (viewId: string) => void;
@@ -491,6 +513,14 @@ export type UISliceActions = {
   duplicateSidebarView: (viewId: string, name: string) => void;
   reorderSidebarViews: (activeViewId: string, overViewId: string) => void;
   toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
+  waitForSidebarViewSync: (workspaceId: string) => Promise<void>;
+  reconcileSidebarGroupDisclosure: (
+    viewId: string,
+    reference: string,
+    expected: string[],
+    valid: string[],
+    context?: SidebarDisclosureContext,
+  ) => Promise<boolean>;
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: (workspaceId?: string) => void;
   setThreadActiveView: (viewId: string) => void;

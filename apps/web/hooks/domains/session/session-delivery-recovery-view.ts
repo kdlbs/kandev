@@ -2,7 +2,6 @@ import type { TFunction } from "i18next";
 import type { SessionRecoveryBlockProjection } from "@/lib/types/http";
 import type { AgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
 import { sessionDeliveryRecoveryReasonMessage } from "@/lib/services/session-recovery-service";
-
 export function deliveryRecoveryRequestIdentity(
   recovery: AgentDeliveryRecovery | null,
   block: SessionRecoveryBlockProjection | undefined,
@@ -30,7 +29,7 @@ export function persistedDeliveryRecoveryNotice(
   block: SessionRecoveryBlockProjection | undefined,
   t: TFunction,
 ): string | null {
-  if (canResumeLegacyDeliveryBlock(recovery, block)) return t("task:deliveryRecoveryLegacyResume");
+  if (canResumeDeliveryBlock(recovery, block)) return t("task:deliveryRecoveryLegacyResume");
   if (
     recovery?.historyGap &&
     (recovery.phase === "uncertain" || recovery.phase === "reconnecting")
@@ -59,13 +58,14 @@ export function isDeliveryRecoveryResultCurrent(
   return result.recovery_revision === recoveryRevision;
 }
 
-export function canResumeLegacyDeliveryBlock(
+export function canResumeDeliveryBlock(
   recovery: AgentDeliveryRecovery | null,
   block: SessionRecoveryBlockProjection | undefined,
 ): boolean {
   if (recovery?.phase === "uncertain" || recovery?.phase === "reconnecting") return false;
+  if (block?.consumer_reference !== "agent_delivery") return false;
+  if (block.reason === "unknown_prompt_outcome" && block.delivery_submission_id) return true;
   return (
-    block?.consumer_reference === "agent_delivery" &&
     block.reason === "unresolved_durable_work" &&
     !block.delivery_submission_id &&
     !block.delivery_stream_id

@@ -24,7 +24,10 @@ import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-v
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
-import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
+import type {
+  TasksListGroupPreference,
+  TasksListSortPreference,
+} from "@/lib/tasks/tasks-list-options";
 import type { KanbanSort } from "@/lib/kanban/kanban-sort";
 import type { TaskPriority } from "@/lib/types/http";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
@@ -37,6 +40,7 @@ import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profil
 import type { TaskColor } from "@/lib/task-colors";
 import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
 import type { AgentUpdateJob } from "@/lib/api";
+import type { RuntimeUpdateBatchState } from "@/lib/agents/runtime-update-batch";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -424,19 +428,24 @@ export type UserSettingsState = {
   startupPage: StartupPage;
   workflowId: string | null;
   repositoryIds: string[];
-  tasksListSort: TasksListSort;
-  tasksListGroup: TasksListGroup;
+  tasksListSort: TasksListSortPreference;
+  tasksListGroup: TasksListGroupPreference;
   tasksListShowDetails: boolean;
   preferredShell: string | null;
   shellOptions: Array<{ value: string; label: string }>;
   defaultEditorId: string | null;
   enablePreviewOnClick: boolean;
+  escapeCancelsAgent: boolean;
   chatSubmitKey: "enter" | "cmd_enter";
   reviewAutoMarkOnScroll: boolean;
   confirmTaskArchive: boolean;
   preventAutoStartAgentOnOpen: boolean;
   unreadDivider: boolean;
+  unreadTaskDot: boolean;
+  unreadTaskDotHideDelaySeconds: number;
   agentGeneratedTaskTitles: boolean;
+  /** Show next-prompt suggestions in the chat composer. */
+  promptSuggestions: boolean;
   autoFocusNewTasks: boolean;
   agentTabCloseBehavior: "delete_session" | "hide_panel";
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
@@ -446,11 +455,13 @@ export type UserSettingsState = {
   showTranscriptAutoScrollControl: boolean;
   showTodoListPanel: boolean;
   showTodoListPanelOnlyWhenNotEmpty: boolean;
+  showTurnChangedFiles: boolean;
   showReleaseNotification: boolean;
   releaseNotesLastSeenVersion: string | null;
   lspAutoStartLanguages: string[];
   lspAutoInstallLanguages: string[];
   lspServerConfigs: Record<string, Record<string, unknown>>;
+  markdownPreviewByDefault: boolean;
   lspStatusLocation: LspStatusLocation;
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];
@@ -470,7 +481,6 @@ export type UserSettingsState = {
   githubSavedPresets: unknown;
   githubDefaultQueryPresets: unknown;
   gitlabSavedPresets: unknown;
-  azureDevOpsBrowsePreferences: unknown;
   defaultUtilityAgentId: string | null;
   defaultUtilityAgentProfileId: string | null;
   keyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
@@ -523,6 +533,7 @@ export type SettingsSliceState = {
   agentProfiles: AgentProfilesState;
   installJobs: InstallJobsState;
   updateJobs: AgentUpdateJobsState;
+  runtimeUpdateBatch: RuntimeUpdateBatchState;
   editors: EditorsState;
   prompts: PromptsState;
   secrets: SecretsState;
@@ -570,6 +581,7 @@ export type SettingsSliceActions = {
   upsertAgentUpdateJob: (job: AgentUpdateJob) => void;
   appendAgentUpdateOutput: (agentName: string, jobId: string, chunk: string) => void;
   clearAgentUpdateJob: (agentName: string) => void;
+  setRuntimeUpdateBatch: (state: RuntimeUpdateBatchState) => void;
   setEditors: (editors: EditorsState["items"], folderOpeningAvailable?: boolean) => void;
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState["items"]) => void;

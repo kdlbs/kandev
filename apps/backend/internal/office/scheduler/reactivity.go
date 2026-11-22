@@ -326,7 +326,7 @@ func (ss *SchedulerService) reactToAssigneeChange(
 		return
 	}
 
-	// The current step must accept an auto-started run before this wake is
+	// The current step and blockers must permit assignment before this wake is
 	// queued — the interrupt above already fired and is unaffected. See
 	// shared.IsAssignmentWakeEligible for the fail-open rationale.
 	if !shared.IsAssignmentWakeEligible(ctx, ss.logger, ss.repo, ss.workflowStepGetter, task.ID, "reactivity.assignee_change") {
@@ -759,7 +759,7 @@ func childrenCompletedIdempotencyKey(parentID, agentID string, children []sqlite
 }
 
 // allBlockersResolvedExcept returns true if every blocker on `taskID`
-// other than `excludeBlockerID` is in a terminal step, alongside the full
+// other than `excludeBlockerID` is satisfied, alongside the full
 // blocker-task-id set it read to decide — the caller digests that same
 // slice for the wake's dedup key rather than re-reading it (AC-001.9
 // applied to a set: a second read could observe a different set than the
@@ -775,11 +775,11 @@ func (ss *SchedulerService) allBlockersResolvedExcept(
 		if b.BlockerTaskID == excludeBlockerID {
 			continue
 		}
-		done, err := ss.repo.IsTaskInTerminalStep(ctx, b.BlockerTaskID)
+		status, err := ss.repo.GetBlockerStatus(ctx, b.BlockerTaskID)
 		if err != nil {
 			return false, nil, err
 		}
-		if !done {
+		if status != models.BlockerSatisfied {
 			return false, blockers, nil
 		}
 	}

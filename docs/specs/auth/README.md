@@ -21,6 +21,10 @@ This system owns authenticated identity, trusted proxy handling, session and
 cookie boundaries, self-action guards, share-link access, and security checks
 for user and service requests.
 
+Executor/profile ownership and private-compute admission belong to the
+[executor system](../executors/README.md), consuming this system's authenticated
+identity and scopes without granting workspace reach.
+
 ## Exclusions
 
 - Provider credentials and external service connections belong to the

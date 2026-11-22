@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -118,7 +120,7 @@ func TestReconcileAgentWorkingStatus_ClearsTerminalOwner(t *testing.T) {
 	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:             "run-orphaned-working",
 		AgentProfileID: agent.ID,
 		Reason:         "test",

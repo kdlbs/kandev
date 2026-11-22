@@ -171,6 +171,7 @@ They do not prohibit the separate late-answer message action specified below.
 - **AC-TASKS-CLARIFICATION-LIFECYCLE-001.1:** When a clarification is pending, the system shall process tool responses only for the bundle owned by the session's current turn. Earlier questions can accept new-message answers under the late-answer criteria below.
 - **AC-TASKS-CLARIFICATION-LIFECYCLE-001.2:** When a newer turn or terminal session state supersedes a bundle, the system shall keep its transcript history without leaving the original tool request answerable or able to block workflow progress. Users can answer through a separate new-message action.
 - **AC-TASKS-CLARIFICATION-LIFECYCLE-001.3:** When detached clarification recovery succeeds or fails, the system shall return the bounded response and durable recovery outcome defined by the lifecycle contract.
+- **AC-TASKS-CLARIFICATION-LIFECYCLE-001.10:** When an agent sends a queued-mode message to a session whose current-turn clarification still has a live waiter, the system shall queue the message instead of prompting the session, so the message cannot start a newer turn that supersedes the question. The ordinary queue drain delivers it once the clarification no longer owns the turn. Interrupt-mode messages keep their existing behavior.
 
 
 

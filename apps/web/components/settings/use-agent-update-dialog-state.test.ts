@@ -26,6 +26,18 @@ const FIRST_PREVIEW: AgentUpdatePreview = {
 const AGENT_NAME = FIRST_PREVIEW.agent_name;
 const UPDATE_ALREADY_RUNNING = "Update is already running";
 
+function targetedPreview(targetVersion: string, selectedProfileCount: number): AgentUpdatePreview {
+  return {
+    ...FIRST_PREVIEW,
+    target_version: targetVersion,
+    copilot_plugin_compatibility: {
+      runtime_version: targetVersion,
+      state: "not_checked",
+      selected_profile_count: selectedProfileCount,
+    },
+  };
+}
+
 describe("useAgentUpdateDialogState family migration", () => {
   it("submits an explicit family migration with the preview revision", async () => {
     const migrationPreview: AgentUpdatePreview = {
@@ -284,7 +296,9 @@ describe("useAgentUpdateDialogState target selection", () => {
     expect(result.current.preview).toBeNull();
     expect(result.current.previewError).toBe("preview failed");
   });
+});
 
+describe("useAgentUpdateDialogState target response fencing", () => {
   it("refreshes a selected target and ignores an older target response", async () => {
     const first = deferred<AgentUpdatePreview>();
     const olderTarget = deferred<AgentUpdatePreview>();
@@ -301,30 +315,28 @@ describe("useAgentUpdateDialogState target selection", () => {
         onUpdate: vi.fn(),
       }),
     );
-
     act(() => void result.current.loadPreview());
     await waitFor(() => expect(onPreview).toHaveBeenCalledWith(AGENT_NAME, undefined));
     await act(async () => {
       first.resolve(FIRST_PREVIEW);
       await first.promise;
     });
-
     act(() => result.current.selectTarget("0.61.0"));
     act(() => result.current.selectTarget("0.60.0"));
     await waitFor(() => expect(onPreview).toHaveBeenCalledTimes(3));
-
     await act(async () => {
-      olderTarget.resolve({ ...FIRST_PREVIEW, target_version: "0.61.0" });
+      olderTarget.resolve(targetedPreview("0.61.0", 3));
       await olderTarget.promise;
     });
     expect(result.current.preview).toEqual(FIRST_PREVIEW);
-
     await act(async () => {
-      newerTarget.resolve({ ...FIRST_PREVIEW, target_version: "0.60.0" });
+      newerTarget.resolve(targetedPreview("0.60.0", 1));
       await newerTarget.promise;
     });
     expect(result.current.selectedTarget).toBe("0.60.0");
     expect(result.current.preview?.target_version).toBe("0.60.0");
+    expect(result.current.preview?.copilot_plugin_compatibility?.runtime_version).toBe("0.60.0");
+    expect(result.current.preview?.copilot_plugin_compatibility?.selected_profile_count).toBe(1);
   });
 });
 

@@ -3,6 +3,7 @@ import { useEffect, type MutableRefObject } from "react";
 import type { useAppStoreApi } from "@/components/state-provider";
 import type { Message } from "@/lib/types/http";
 import type { MessageHistoryStatus } from "./use-message-fetch-state";
+import type { MessageWindowAuthority } from "./message-window-reconciliation";
 
 type SessionMessageStore = ReturnType<typeof useAppStoreApi>;
 
@@ -181,7 +182,7 @@ type DoFetchMessagesParams = {
 
 export type MessageFetchOptions = {
   force?: boolean;
-  authoritative?: boolean;
+  authoritative?: MessageWindowAuthority;
 };
 
 export async function doFetchMessages({

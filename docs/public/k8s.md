@@ -217,6 +217,8 @@ Kandev owns generated resource names, namespace, `restartPolicy: Always`, Linux 
 | `kandev-auth` | `/run/kandev` | Memory-backed auth environment and runtime home |
 | `kandev-workspace` | `/workspace` | Selected `emptyDir`, managed PVC, or existing claim |
 
+Task-owned sessions default npm and XDG caches to `/opt/kandev/cache/npm` and `/opt/kandev/cache/xdg`; set `NPM_CONFIG_CACHE` (or `npm_config_cache`) or `XDG_CACHE_HOME` in the profile environment to override them.
+
 The template cannot set the main container's command, args, or working directory; use reserved volume names or mount paths except the explicit companion workspace grant below; use container port 8765 or the `kandev-agentctl` port name; or define `HOME`, `AGENTCTL_*`, or `KANDEV_*` environment keys. It also cannot set Pod name/namespace/UID, owner references, finalizers, restart policy, node name, OS, or Linux OS/architecture selectors. Kandev defaults `automountServiceAccountToken: false` only when the template leaves it unset.
 
 An ordinary non-main container may explicitly mount `kandev-workspace` once at
@@ -375,7 +377,7 @@ Do not manually delete by name or label alone. If manual incident cleanup is una
 
 Subtasks cannot attach to a different task's Kubernetes environment. When creating a runnable child with `create_task_kandev`, explicitly select `workspace_mode: "new_workspace"` and keep the desired Kubernetes executor profile.
 
-Queued creation with `start_agent: false` can still default to `inherit_parent`; later workspace or agent admission returns `workspace_reuse_unsupported` before creating a session. Restoring or retrying the parent does not change this ownership restriction. See [MCP workspace modes](automation-and-mcp.md#task-creation-boundaries).
+Queued creation with `start_agent: false` can explicitly select `inherit_parent`; later workspace or agent admission returns `workspace_reuse_unsupported` before creating a session. Omission selects `new_workspace`. Restoring or retrying the parent does not change this ownership restriction. See [MCP workspace modes](automation-and-mcp.md#task-creation-boundaries).
 
 Older installations may have several session Pods for one task. Kandev does not merge or delete those Pods automatically. Additional attachment requires an unambiguous recorded Pod and claim with matching task ownership and recoverable credentials; conflicting inventory blocks attachment. Adopted legacy resources keep their original labels.
 

@@ -82,6 +82,8 @@ func TestHandleTrigger_NewTriggers_DispatchToCallbacks(t *testing.T) {
 		{"on_heartbeat", TriggerOnHeartbeat, OnHeartbeatPayload{}},
 		{"on_budget_alert", TriggerOnBudgetAlert, OnBudgetAlertPayload{BudgetPct: 90, Scope: "task"}},
 		{"on_agent_error", TriggerOnAgentError, OnAgentErrorPayload{FailedAgentID: "a", FailedSessionID: "s", ErrorMessage: "boom"}},
+		{"on_pr_merged", TriggerOnPRMerged, OnPRMergedPayload{PRs: []LinkedPR{{Owner: "o", Repo: "r", PRNumber: 1, State: "merged"}}}},
+		{"on_pr_closed", TriggerOnPRClosed, OnPRClosedPayload{PR: LinkedPR{Owner: "o", Repo: "r", PRNumber: 2, State: "closed"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

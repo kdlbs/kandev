@@ -48,6 +48,9 @@ const mocks = vi.hoisted(() => {
       },
     },
     settingsAgents: { items: [] },
+    turns: { bySession: {} },
+    quickChat: { sessions: [] },
+    recordSessionConfigurationFeedback: vi.fn(),
     taskSessions: {
       items: {
         [sessionId]: {
@@ -79,6 +82,7 @@ const SESSION_ID = mocks.sessionId;
 const MODE_SELECTOR_TEST_ID = "session-mode-selector";
 
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({ getState: () => mocks.appState }),
   useAppStore: (selector: (state: typeof mocks.appState) => unknown) => {
     const result = selector(mocks.appState);
     mocks.storeSelections.push(result);

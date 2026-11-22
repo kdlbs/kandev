@@ -25,7 +25,7 @@ func newFastPathDispatchService(t *testing.T, repo *sqliterepo.Repository) *Serv
 	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
 	agentManager := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
-	svc.executor = executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentManager, repo, testLogger(), executor.ExecutorConfig{}))
 	workerDone := make(chan struct{})
 	svc.onQueuedMessageExecutionComplete = func() { close(workerDone) }
 	t.Cleanup(func() {
@@ -165,7 +165,7 @@ func TestQueueUserPrompt_T2SkipsFastPathWhenInFlight(t *testing.T) {
 	// Simulate an in-flight dispatch: the gate is set by the dispatcher's
 	// own markQueuedDispatchInFlight. Set the same internal flag the
 	// fast-path checks.
-	svc.markQueuedDispatchInFlightWithSourceLocked("s1", "in-flight-source-id", nil)
+	svc.markQueuedDispatchInFlightWithSourceLocked(context.Background(), "s1", "in-flight-source-id", nil)
 
 	if err := svc.QueueUserPrompt(ctx, "t1", "s1", "during-in-flight", "", false, nil, map[string]interface{}{}, true); err != nil {
 		t.Fatalf("QueueUserPrompt: %v", err)
@@ -378,7 +378,7 @@ func TestQueueUserPrompt_T2DrainsWhenTaskAdmitted(t *testing.T) {
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	workerDone := make(chan struct{})
 	svc.onQueuedMessageExecutionComplete = func() { close(workerDone) }
 

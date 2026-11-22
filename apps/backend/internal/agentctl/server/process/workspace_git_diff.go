@@ -15,6 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/common/unidiff"
 	"go.uber.org/zap"
 )
 
@@ -971,28 +972,5 @@ func readUntrackedFile(ctx context.Context, safePath string) ([]byte, string, er
 }
 
 func buildUntrackedDiff(ctx context.Context, filePath string, content []byte) (string, int, bool, error) {
-	lines := strings.Split(string(content), "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-
-	var diffBuilder strings.Builder
-	diffBuilder.WriteString("diff --git a/" + filePath + " b/" + filePath + "\n")
-	diffBuilder.WriteString("new file mode 100644\n")
-	diffBuilder.WriteString("index 0000000..0000000\n")
-	diffBuilder.WriteString("--- /dev/null\n")
-	diffBuilder.WriteString("+++ b/" + filePath + "\n")
-	diffBuilder.WriteString("@@ -0,0 +1," + strconv.Itoa(len(lines)) + " @@\n")
-	for _, line := range lines {
-		if err := ctx.Err(); err != nil {
-			return "", 0, false, err
-		}
-		diffBuilder.WriteString("+" + line + "\n")
-	}
-
-	diffContent := diffBuilder.String()
-	if len(diffContent) > maxDiffOutputSize {
-		return diffContent[:maxDiffOutputSize], len(lines), true, nil
-	}
-	return diffContent, len(lines), false, nil
+	return unidiff.BuildUntrackedDiff(ctx, filePath, content, maxDiffOutputSize)
 }

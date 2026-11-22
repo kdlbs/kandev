@@ -28,7 +28,7 @@ The Kandev MCP tools a coordinator session gets, the backend guard that confines
 ## Tool surface
 
 `registerCoordinatorTools` in `internal/mcp/server` registers exactly these
-seven tools, the phase-1 tool profile, reusing the existing handlers
+seven core tools, the phase-1 tool profile, reusing the existing handlers
 unchanged except for the new two:
 
 | Tool | Why |
@@ -41,10 +41,13 @@ unchanged except for the new two:
 | `get_coordinator_item_kandev` | new; the record behind an Ask about this reference: `{kind: "proposal", id}` returns the coordinator's own proposal row (spec, status, error, timestamps), `{kind: "stall", id}` the stall record of that task ([needs-you](needs-you.md#stall-records)) |
 | `propose_task_kandev` | new; sends the `coordinator.propose_task` action |
 
-It registers no other tool: in particular no `list_related_tasks_kandev`, no
-`get_task_plan_kandev`, no plan,
-document or session reads, and no user-question, title, plugin, create, move,
-message, archive or delete tool. The backend guard in
+It registers no other core tool: in particular no `list_related_tasks_kandev`,
+no `get_task_plan_kandev`, no plan, document or session reads, and no
+user-question, title, create, move, message, archive or delete tool. A phase-2
+conversation may additionally receive the exact instance-read plugin tools in
+its version-2 binding ([plugin reads](#plugin-reads)).
+
+Phase-1 conversations are exactly the seven-tool profile. The backend guard in
 `internal/mcp/handlers/coordinator_authorization.go` runs for every action from
 a coordinator principal: an allowlist of action names (anything else is
 refused with an error naming it), and a workspace check over four categories
@@ -63,6 +66,25 @@ tested by a table over every registered MCP action, so a newly added action is
 refused unless listed. Approve and reject are never on this surface; the guard
 refuses their reserved names from a coordinator and from an unresolved
 principal ([proposals](proposals.md#security)).
+
+### Plugin reads
+
+The only non-core additions are exact instance-read plugin tools. The
+coordinator binding version 2 carries, separately from `ToolNames`, a list of
+`plugin_tools` references with `plugin_id`, `local_name`, `installation_id`,
+and `policy_version`. A new conversation binds the active, configured catalog
+whose declaration explicitly includes the `coordinator` surface and satisfies
+`invocation_scope: instance` plus `read_only_hint: true`.
+
+Discovery and invocation both require the trusted current conversation,
+coordinator, workspace, binding identity, and the live installation and policy
+version. `mcp.list_plugin_tools` and `mcp.invoke_plugin_tool` are the only
+plugin actions allowed through the coordinator guard, and the plugin handler
+revalidates every reference before dispatch. A missing, invalid, or version-1
+binding exposes no plugin reads; installing or changing a plugin requires a
+new conversation binding (reopen the conversation). The declaration,
+transport, and failure rules live in
+[plugin tools across MCP contexts](../../plugins/system-design/agent-tool-contexts.md).
 
 ### Item read
 
@@ -117,4 +139,3 @@ recovery and never starts or messages a session.
   own-workspace stalled task, own-workspace task with no stall row, foreign
   task, missing task, `task` kind, unknown kind, empty id; plus a
   non-coordinator principal refused with the unknown-action error.
-

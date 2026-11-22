@@ -305,7 +305,7 @@ function TaskSwitcherSurfaceContent({
           />
         )}
         <div className="shrink-0">
-          <SidebarFilterBar />
+          <SidebarFilterBar groupingSurface={inline ? "inline" : presentation} />
         </div>
         <div
           className={inline ? "p-2" : "flex-1 min-h-0 overflow-y-auto p-2"}
@@ -327,8 +327,6 @@ function TaskSwitcherSurfaceContent({
               onCreateSubtask={onCreateSubtask}
               onNestTask={actions.handleNestTask}
               deletingTaskId={actions.deletingTaskId}
-              archivingTaskId={actions.archivingTaskId}
-              isArchiving={actions.isArchiving}
               isLoading={
                 data.tasksLoading ||
                 (data.workspaceContextPending && data.tasksWithRepositories.length === 0)

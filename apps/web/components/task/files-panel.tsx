@@ -6,7 +6,6 @@ import { useAppStore } from "@/components/state-provider";
 import { useFileOperations } from "@/hooks/use-file-operations";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { FileBrowser } from "@/components/task/file-browser";
-import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import type { OpenFileTab } from "@/lib/types/backend";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
@@ -38,7 +37,7 @@ function TaskSourceDialog({
   opener,
   openerRef,
 }: TaskSourceDialogProps) {
-  if (!activeTask || !(activeTask.repositoryId ?? activeTask.repositories?.length)) return null;
+  if (!activeTask) return null;
   return (
     <AddWorkspaceSourcesDialog
       open={open}
@@ -101,10 +100,9 @@ function useFilesPanelSourceDialog(activeSessionId: string | null) {
 }
 
 const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
-  const { t } = useTranslation();
-  // Use environment-stable sessionId so the file browser doesn't re-fetch
-  // when switching between sessions in the same environment.
-  const activeSessionId = useEnvironmentSessionId();
+  // Readiness and recovery belong to the selected session even when its
+  // environment and retained file tree are shared with another conversation.
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const environmentId = useAppStore((state) => {
     if (!activeSessionId) return null;
     return (
@@ -130,10 +128,6 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
     addSourcesButtonRef,
     addSourcesDisabledReason,
   } = sourceDialog;
-  const hasRepository = Boolean(activeTask?.repositoryId ?? activeTask?.repositories?.length);
-  const resolvedAddSourcesDisabledReason = hasRepository
-    ? addSourcesDisabledReason
-    : t("task:taskNeedsRepositoryForSources");
   const { createFile, deleteFile, renameFile, downloadFile } = useFileOperations(
     activeSessionId ?? null,
   );
@@ -175,15 +169,11 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
             onRenameFile={renameFile}
             onDownloadFile={downloadFile}
             activeFilePath={activeTreePath}
-            onAddSources={
-              hasRepository
-                ? (opener) => {
-                    setAddSourcesOpener(opener);
-                    setAddSourcesOpen(true);
-                  }
-                : undefined
-            }
-            addSourcesDisabledReason={resolvedAddSourcesDisabledReason}
+            onAddSources={(opener) => {
+              setAddSourcesOpener(opener);
+              setAddSourcesOpen(true);
+            }}
+            addSourcesDisabledReason={addSourcesDisabledReason}
             addSourcesButtonRef={addSourcesButtonRef}
           />
         ) : (

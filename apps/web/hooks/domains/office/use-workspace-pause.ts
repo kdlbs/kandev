@@ -34,7 +34,8 @@ type MutateAction = (workspaceId: string, reason: string) => Promise<WorkspacePa
 /**
  * Implements the workspace kill switch's "Frontend state" input table
  * (docs/specs/office/system-design/workspace-kill-switch-02.md): mount and
- * workspace-change reset+read, WS-reconnect read, and pause/resume mutations
+ * workspace-change loading+read (record cleared on workspace change only),
+ * WS-reconnect read, and pause/resume mutations
  * — every response funneled through the store's `applyPauseResponse` guard
  * so a superseded response (wrong workspace, or an older request tag) is
  * discarded rather than clobbering fresher state.
@@ -44,14 +45,14 @@ export function useWorkspacePause(workspaceId: string | null): UseWorkspacePause
   const record = useAppStore((s) => s.office.pause.record);
   const status = useAppStore((s) => s.office.pause.status);
   const beginPauseRequest = useAppStore((s) => s.beginPauseRequest);
-  const resetPauseState = useAppStore((s) => s.resetPauseState);
+  const beginPauseRead = useAppStore((s) => s.beginPauseRead);
   const applyPauseResponse = useAppStore((s) => s.applyPauseResponse);
   const [isMutating, setIsMutating] = useState(false);
   const [sweep, setSweep] = useState<WorkspacePauseSweep | null>(null);
 
   const read = useCallback(async () => {
     if (!workspaceId) return;
-    const tag = beginPauseRequest();
+    const tag = beginPauseRequest("read");
     try {
       const res = await getWorkspacePause(workspaceId);
       const activeWorkspaceId = storeApi.getState().workspaces.activeId;
@@ -66,17 +67,19 @@ export function useWorkspacePause(workspaceId: string | null): UseWorkspacePause
     }
   }, [workspaceId, beginPauseRequest, applyPauseResponse, storeApi]);
 
-  // Mount, and every change of selected workspace: status `unknown`, clear
-  // the record, then issue a read. `read` is intentionally omitted from the
+  // Mount, and every change of selected workspace: mark `loading`, then
+  // issue a read. The store clears the record only when the workspace
+  // changed, so a same-workspace remount re-reads while the last state
+  // stays on screen. `read` is intentionally omitted from the
   // dependency array — it is recreated whenever workspaceId changes, which
   // this effect already depends on directly.
   useEffect(() => {
     if (!workspaceId) return;
-    resetPauseState();
+    beginPauseRead(workspaceId);
     setSweep(null);
     void read();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, resetPauseState]);
+  }, [workspaceId, beginPauseRead]);
 
   // WS reconnect: issue a read; status stays whatever it was, since the last
   // known state remains the best available until the read answers.
@@ -95,7 +98,7 @@ export function useWorkspacePause(workspaceId: string | null): UseWorkspacePause
       updateSweep: boolean,
     ): Promise<WorkspacePauseActionResult> => {
       if (!workspaceId) return { ok: false, error: t("office:pauseUnavailable") };
-      const tag = beginPauseRequest();
+      const tag = beginPauseRequest("mutate");
       setIsMutating(true);
       try {
         const res = await action(workspaceId, reason);

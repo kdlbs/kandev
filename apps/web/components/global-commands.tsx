@@ -6,7 +6,14 @@ import type { TFunction } from "i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { useTheme } from "@/components/theme/app-theme";
 import { getThemeToggleLabelKey, getThemeToggleTarget } from "@/components/theme/theme-toggle";
-import { IconSun, IconMoon, IconMessageCircle, IconSparkles } from "@tabler/icons-react";
+import {
+  IconSun,
+  IconMoon,
+  IconMessageCircle,
+  IconSparkles,
+  IconArchive,
+} from "@tabler/icons-react";
+import { linkToArchivedTasks } from "@/lib/links";
 import { useStaticDestinations } from "@/hooks/use-app-destinations";
 import { PALETTE_NAVIGATION_GROUP_KEY } from "@/lib/navigation/surface-policy";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
@@ -158,12 +165,24 @@ export function GlobalCommands() {
   const commands = useMemo<CommandItem[]>(
     () => [
       ...navigationCommands,
+      {
+        id: "nav-archived-tasks",
+        label: t("common:commandGoToArchivedTasks"),
+        group: t(GROUP_NAVIGATION),
+        icon: <IconArchive className="size-3.5" />,
+        keywords: searchKeywords(t, "common:commandGoToArchivedTasksKeywords"),
+        disabled: !activeWorkspaceId,
+        action: () => {
+          if (activeWorkspaceId) router.push(linkToArchivedTasks(activeWorkspaceId));
+        },
+      },
       buildThemeCommand(resolvedTheme, setTheme, t),
       quickChatCommand,
       configChatCommand,
     ],
     [
       navigationCommands,
+      activeWorkspaceId,
       router.push,
       resolvedTheme,
       setTheme,
