@@ -189,11 +189,13 @@ func sweepSSHExecutorOrphansUnderRoot(
 	acquireTaskFence func(taskID string) func(),
 ) error {
 	windowsRoot := isWindowsRemotePath(resolvedRoot)
-	inventoryCmd := sshOrphanInventoryCommand(resolvedRoot)
+	var stdout string
+	var err error
 	if windowsRoot {
-		inventoryCmd = sshWindowsOrphanInventoryCommand(resolvedRoot)
+		stdout, _, err = runPowerShell(ctx, client, defaultWindowsLoginShell, sshWindowsOrphanInventoryScript(resolvedRoot), false)
+	} else {
+		stdout, _, err = runSSHCommand(ctx, client, sshOrphanInventoryCommand(resolvedRoot))
 	}
-	stdout, _, err := runSSHCommand(ctx, client, inventoryCmd)
 	if err != nil {
 		return fmt.Errorf("ssh orphan sweep: inventory: %w", err)
 	}

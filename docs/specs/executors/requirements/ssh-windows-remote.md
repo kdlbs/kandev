@@ -109,6 +109,9 @@ installing Linux or WSL.
   for a Windows host task, the system shall preserve the task directory and run
   no remote command. It shall record the cleanup as skipped with reason
   `unsupported_platform` and shall not retry it.
+- **AC-EXECUTORS-SSH-WINDOWS-001.19:** When an agent's remote-authentication
+  method declares a setup script, a Windows launch shall skip that script and log
+  the skip. Those scripts are POSIX shell scripts.
 
 ### REQ-EXECUTORS-SSH-WINDOWS-002: Windows helper distribution
 
@@ -148,6 +151,7 @@ as the Linux and macOS helpers.
 - SSH passthrough mode on Windows hosts until a separate requirement specifies
   remote Windows terminal behavior.
 - Task-directory reclamation on Windows hosts.
+- Remote-authentication setup scripts on Windows hosts.
 
 ## System design
 

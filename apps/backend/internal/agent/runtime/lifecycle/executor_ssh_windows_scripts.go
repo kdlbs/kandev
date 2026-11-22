@@ -380,13 +380,13 @@ func (r *SSHExecutor) verifyWindowsPrimaryCheckout(ctx context.Context, client *
 	shell := sshShellForRemote(req.Metadata, platform)
 	cleanTask := cleanWindowsRemotePath(taskDir)
 	canonCmd := fmt.Sprintf("[Console]::Out.Write((Get-Item -LiteralPath %s -Force).FullName)", powerShellQuote(cleanTask))
-	canonicalTaskDir, taskDirStderr, taskDirErr := runSSHCommand(ctx, client, WrapPowerShell(shell, canonCmd, true))
+	canonicalTaskDir, taskDirStderr, taskDirErr := runPowerShell(ctx, client, shell, canonCmd, true)
 	if taskDirErr != nil {
 		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, sshCommandFailureDetail(canonicalTaskDir, taskDirStderr, taskDirErr))
 		return fmt.Errorf("ssh: primary repository checkout is missing")
 	}
 	rootCmd := fmt.Sprintf("& git -C %s rev-parse --show-toplevel; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }", powerShellQuote(cleanTask))
-	root, rootStderr, rootErr := runSSHCommand(ctx, client, WrapPowerShell(shell, rootCmd, true))
+	root, rootStderr, rootErr := runPowerShell(ctx, client, shell, rootCmd, true)
 	if rootErr != nil || !sshRemotePathsEqual(root, canonicalTaskDir, platform) {
 		detail := sshCommandFailureDetail(root, rootStderr, rootErr)
 		if rootErr == nil {
@@ -396,13 +396,13 @@ func (r *SSHExecutor) verifyWindowsPrimaryCheckout(ctx context.Context, client *
 		return fmt.Errorf("ssh: primary repository checkout is missing")
 	}
 	originCmd := fmt.Sprintf("& git -C %s config --get remote.origin.url; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }", powerShellQuote(cleanTask))
-	origin, originStderr, originErr := runSSHCommand(ctx, client, WrapPowerShell(shell, originCmd, true))
+	origin, originStderr, originErr := runPowerShell(ctx, client, shell, originCmd, true)
 	if originErr != nil || strings.TrimSpace(origin) != targetURL {
 		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, sshCommandFailureDetail(origin, originStderr, originErr))
 		return fmt.Errorf("ssh: primary repository origin does not match configured repository")
 	}
 	headCmd := fmt.Sprintf("& git -C %s rev-parse --verify HEAD; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }", powerShellQuote(cleanTask))
-	if head, headStderr, headErr := runSSHCommand(ctx, client, WrapPowerShell(shell, headCmd, true)); headErr != nil {
+	if head, headStderr, headErr := runPowerShell(ctx, client, shell, headCmd, true); headErr != nil {
 		r.report(req.OnProgress, "Verifying primary checkout", PrepareStepFailed, sshCommandFailureDetail(head, headStderr, headErr))
 		return fmt.Errorf("ssh: primary repository has no checkout")
 	}
@@ -410,7 +410,7 @@ func (r *SSHExecutor) verifyWindowsPrimaryCheckout(ctx context.Context, client *
 	return nil
 }
 
-func sshWindowsOrphanInventoryCommand(resolvedRoot string) string {
+func sshWindowsOrphanInventoryScript(resolvedRoot string) string {
 	tasksRoot := joinWindowsRemotePath(resolvedRoot, "tasks")
 	script := fmt.Sprintf(`$root = %s
 $procs = Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue
@@ -433,7 +433,7 @@ if (Test-Path -LiteralPath $root -PathType Container) {
     }
   }
 }`, powerShellQuote(tasksRoot))
-	return WrapPowerShell(defaultWindowsLoginShell, script, false)
+	return script
 }
 
 func parseSSHWindowsOrphanInventory(output, resolvedRoot string) sshOrphanInventory {
@@ -523,7 +523,7 @@ func verifyOrphanWindowsProcessStillMatches(ctx context.Context, client *ssh.Cli
 		"$proc = Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId = %d' -ErrorAction Stop; if ($null -eq $proc) { Write-Output '%s' } else { Write-Output ('%s' + [string]$proc.CommandLine) }",
 		pid, windowsLivenessAbsentToken, windowsCmdlinePrefix,
 	)
-	stdout, stderr, err := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, script, false))
+	stdout, stderr, err := runPowerShell(ctx, client, defaultWindowsLoginShell, script, false)
 	if err != nil {
 		return false, remoteProcessProbeError("Win32_Process", pid, err, stderr)
 	}

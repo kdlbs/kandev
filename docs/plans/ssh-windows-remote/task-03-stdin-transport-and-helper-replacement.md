@@ -1,7 +1,7 @@
 ---
 id: "03-stdin-transport-and-helper-replacement"
 title: "Fixed-length PowerShell transport and running-helper replacement"
-status: pending
+status: done
 wave: 3
 depends_on:
   - "02-port-windows-ssh-lifecycle"
@@ -12,6 +12,7 @@ acceptance_criteria:
   - AC-EXECUTORS-SSH-WINDOWS-001.5
   - AC-EXECUTORS-SSH-WINDOWS-001.6
   - AC-EXECUTORS-SSH-WINDOWS-001.9
+  - AC-EXECUTORS-SSH-WINDOWS-001.19
 system_design:
   - ../../specs/executors/system-design/ssh-windows-remote.md
 ---
@@ -95,4 +96,42 @@ cd ../.. && bash scripts/lint-go-changed $(git diff --name-only origin/main -- '
 
 ## Results
 
-Pending.
+Completed on 2026-11-22.
+
+Implementation:
+
+- `executor_ssh_powershell.go` holds the loader, `powerShellEnvelope`,
+  `newPowerShellCommand`, and the three run helpers. `WrapPowerShell`,
+  `buildPowerShellEnvInitScript`, and the production
+  `decodePowerShellEncodedCommand` are removed.
+- The loader semantics were proven on the real test host before coding (see
+  below). Two behaviors required loader changes. A dot-sourced script hides a
+  failing last statement, so the loader appends `$__kLastOk = $?`. PowerShell
+  5.1 writes redirected errors as `#< CLIXML`, so the loader catches errors and
+  writes plain messages.
+- `WrapLoginShell` returns to its upstream POSIX-only form. The stop,
+  remove-directory, and orphan-inventory builders return scripts.
+  `removeRemoteDir` dispatches the one shared caller.
+- `sftpReplaceWindowsFile` installs the helper and its sidecar by renaming the
+  existing file aside. `sftpUploadBytes` returns to its upstream form, so the
+  fork's `renameSFTPUpload` is removed.
+- Found during the port: the catalog's remote-auth setup scripts are POSIX
+  shell, and the fork ran them under PowerShell. They are now skipped on Windows
+  with a warning (`AC-EXECUTORS-SSH-WINDOWS-001.19`,
+  `TestSSHWindowsSkipsPOSIXAuthSetupScripts`).
+- The fake SFTP filesystem now refuses `rmdir` on a file. pkg/sftp retries a
+  failed file removal as a directory removal, and the old fake deleted an
+  in-use file through that path.
+
+| Command | Result |
+| --- | --- |
+| `go test -race -run '^TestSSHWindows'` on `lifecycle` and `ssh` | Passed. Red first: build failures for the new transport, and the running-helper upload failed with `SSH_FX_FAILURE` |
+| SSH, SFTP, reclaim, orphan, and Remote Docker tests across `lifecycle`, `ssh`, and `runtime` | 5 failures, all in the baseline set |
+| `lint-go-changed` on every changed Go file | 0 issues |
+| Production loader on the test host through stock `cmd.exe` (Windows PowerShell 5.1) | Command line 4,183 characters. Login `PATH` finds Git. Env with quotes, `$`, backtick, and CJK round-trips. `input` is delivered. `exit 7` returns 7, a failing last native command returns 5, and a 64 KiB script runs |
+
+Lifecycle evidence:
+
+| Scenario | Criterion | Test | Result |
+| --- | --- | --- | --- |
+| Concurrent work | `001.6` | `TestSSHWindowsReplacesRunningHelperByRenamingAside`, `TestSSHWindowsHelperReplacementRestoresPreviousOnFailure` | Passed |

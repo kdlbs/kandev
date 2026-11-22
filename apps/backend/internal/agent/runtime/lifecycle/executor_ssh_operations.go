@@ -357,7 +357,7 @@ func detectRemoteInfo(ctx context.Context, client *ssh.Client) (*SSHRemoteInfo, 
 		info.GitVer = strings.TrimSpace(out)
 	} else if isWindowsRemotePlatform(platform) {
 		gitCmd := "try { $v = (git --version 2>$null | Out-String).Trim(); if ($v) { Write-Output $v } } catch {}"
-		if gitOut, _, gitErr := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, gitCmd, true)); gitErr == nil {
+		if gitOut, _, gitErr := runPowerShell(ctx, client, defaultWindowsLoginShell, gitCmd, true); gitErr == nil {
 			info.GitVer = strings.TrimSpace(gitOut)
 		}
 	}
@@ -580,8 +580,7 @@ func sftpUploadBytes(client *ssh.Client, remotePath string, data []byte, mode os
 	}
 	defer func() { _ = c.Close() }()
 
-	sftpPath := toSFTPPath(remotePath)
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", sftpPath, os.Getpid(), mrand.Uint64())
+	tmp := fmt.Sprintf("%s.tmp.%d.%d", remotePath, os.Getpid(), mrand.Uint64())
 	f, err := c.Create(tmp)
 	if err != nil {
 		return fmt.Errorf("sftp: create %s: %w", tmp, err)
@@ -595,29 +594,18 @@ func sftpUploadBytes(client *ssh.Client, remotePath string, data []byte, mode os
 		_ = c.Remove(tmp)
 		return fmt.Errorf("sftp: close %s: %w", tmp, err)
 	}
-	if err := c.Chmod(tmp, mode); err != nil && !isSFTPOpUnsupported(err) {
+	if err := c.Chmod(tmp, mode); err != nil {
 		_ = c.Remove(tmp)
 		return fmt.Errorf("sftp: chmod %s: %w", tmp, err)
 	}
-	return renameSFTPUpload(c, tmp, sftpPath, isWindowsRemotePath(remotePath))
-}
-
-func renameSFTPUpload(c *sftp.Client, tmp, sftpPath string, overwriteOnFallback bool) error {
-	if err := c.PosixRename(tmp, sftpPath); err == nil {
-		return nil
-	}
-	rerr := c.Rename(tmp, sftpPath)
-	if rerr == nil {
-		return nil
-	}
-	if overwriteOnFallback {
-		_ = c.Remove(sftpPath)
-		if c.Rename(tmp, sftpPath) == nil {
-			return nil
+	if err := c.PosixRename(tmp, remotePath); err != nil {
+		// Some servers don't support POSIX rename; fall back to a non-atomic rename.
+		if rerr := c.Rename(tmp, remotePath); rerr != nil {
+			_ = c.Remove(tmp)
+			return fmt.Errorf("sftp: rename %s -> %s: %w", tmp, remotePath, rerr)
 		}
 	}
-	_ = c.Remove(tmp)
-	return fmt.Errorf("sftp: rename %s -> %s: %w", tmp, sftpPath, rerr)
+	return nil
 }
 
 func isSFTPOpUnsupported(err error) bool {
@@ -650,13 +638,10 @@ func SSHDefaultShellForPlatform(platform SSHRemotePlatform) string {
 	}
 }
 
-// WrapLoginShell wraps cmd in `${shell} -lc '<cmd>'` (or PowerShell's
-// non-interactive UTF-8 encoded wrapper when shell is powershell/pwsh) so
-// commands run under a login shell that has sourced the user's profile.
+// WrapLoginShell wraps cmd in `${shell} -lc '<cmd>'` so commands run under a
+// POSIX login shell that has sourced the user's profile. Windows hosts use the
+// PowerShell envelope transport instead (runPowerShell).
 func WrapLoginShell(shell, cmd string) string {
-	if isPowerShellShell(shell) {
-		return WrapPowerShell(shell, cmd, true)
-	}
 	if shell == "" {
 		shell = defaultLoginShell
 	}
@@ -764,13 +749,9 @@ func startRemoteAgentctl(
 	log *logger.Logger,
 ) (port int, pid int, err error) {
 	if isPowerShellShell(shell) || isWindowsRemotePath(agentctlBin) || isWindowsRemotePath(workspacePath) || isWindowsRemotePath(sessionDir) {
-		envJSON, err := buildPowerShellEnvInitScript(env)
-		if err != nil {
-			return 0, 0, fmt.Errorf("ssh: launch agentctl: %w", err)
-		}
 		return retryRemoteAgentctlPort(pickRemoteAgentctlPort, func(port int) (int, error) {
 			return startRemoteWindowsAgentctlOnPort(
-				ctx, client, shell, agentctlBin, workspacePath, sessionDir, envJSON, port, log,
+				ctx, client, shell, agentctlBin, workspacePath, sessionDir, env, port, log,
 			)
 		})
 	}
@@ -1401,9 +1382,6 @@ func stopRemoteAgentctl(ctx context.Context, client *ssh.Client, sessionDir stri
 
 //nolint:dupword // shell branches contain repeated `fi` tokens.
 func remoteAgentctlStopCommand(sessionDir string, pid int) string {
-	if isWindowsRemotePath(sessionDir) {
-		return remoteWindowsAgentctlStopCommand(sessionDir, pid)
-	}
 	removeSessionDir := removeRemoteDirCommand(sessionDir)
 	if pid <= 0 {
 		return removeSessionDir
@@ -1436,10 +1414,17 @@ fi
 // removeRemoteDirCommand builds the shell command that reclaims a remote
 // session directory on its own, independent of whether a process is stopped.
 func removeRemoteDirCommand(dir string) string {
-	if isWindowsRemotePath(dir) {
-		return removeWindowsRemoteDirCommand(dir)
-	}
 	return "rm -rf " + shellQuote(dir)
+}
+
+// removeRemoteDir removes a remote session directory on either host family.
+func removeRemoteDir(ctx context.Context, client *ssh.Client, dir string) error {
+	if isWindowsRemotePath(dir) {
+		_, _, err := runPowerShell(ctx, client, defaultWindowsLoginShell, removeWindowsRemoteDirScript(cleanWindowsRemotePath(dir)), false)
+		return err
+	}
+	_, _, err := runSSHCommand(ctx, client, removeRemoteDirCommand(dir))
+	return err
 }
 
 // verifyRemoteAgentctlIdentity confirms that a pid recovered from persisted

@@ -113,32 +113,13 @@ func (r *SSHExecutor) runOneAuthSetupScript(
 	method remoteauth.Method,
 	platform SSHRemotePlatform,
 ) {
-	shell := sshShellForRemote(req.Metadata, platform)
-	if isPowerShellShell(shell) || isWindowsRemotePlatform(platform) {
-		envJSON, err := buildPowerShellEnvInitScript(sshRemoteAgentEnv(req))
-		if err != nil {
-			r.logger.Warn("auth setup script skipped: invalid environment key",
-				zap.String("display_name", displayName),
-				zap.String("method_id", method.MethodID),
-				zap.Error(err))
-			return
-		}
-		wrapped := WrapPowerShell(shell, powerShellStdinEnvImport+"\n"+method.SetupScript, true)
-		out, stderr, err := runSSHCommandStdin(ctx, client, wrapped, strings.NewReader(envJSON))
-		if err != nil {
-			r.logger.Warn("auth setup script failed",
-				zap.String("display_name", displayName),
-				zap.String("method_id", method.MethodID),
-				zap.String("stdout", strings.TrimSpace(out)),
-				zap.String("stderr", strings.TrimSpace(stderr)),
-				zap.Error(err))
-			return
-		}
-		r.logger.Debug("auth setup script completed",
+	if isWindowsRemotePlatform(platform) {
+		r.logger.Warn("auth setup script skipped: setup scripts are POSIX shell scripts and do not run on Windows hosts",
 			zap.String("display_name", displayName),
 			zap.String("method_id", method.MethodID))
 		return
 	}
+	shell := sshShellForRemote(req.Metadata, platform)
 	envScript, err := buildSSHEnvInitScript(sshRemoteAgentEnv(req))
 	if err != nil {
 		r.logger.Warn("auth setup script skipped: invalid environment key",

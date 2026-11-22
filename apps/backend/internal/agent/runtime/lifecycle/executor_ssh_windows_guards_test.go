@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/agent/remoteauth"
 )
 
 func newWindowsGuardRequest(t *testing.T, harness *windowsSSHLaunchHarness) *ExecutorCreateRequest {
@@ -138,5 +140,22 @@ func TestSSHWindowsReclaimPreservesWindowsTaskDirWithoutRemoteCommands(t *testin
 	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("Reclaim ran remote commands on a Windows task dir: %v", runner.calls)
+	}
+}
+
+// @covers AC-EXECUTORS-SSH-WINDOWS-001.19
+func TestSSHWindowsSkipsPOSIXAuthSetupScripts(t *testing.T) {
+	var commands []string
+	server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
+		commands = append(commands, command)
+		return sshOK
+	})
+	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+	t.Cleanup(func() { _ = exec.Close() })
+	method := remoteauth.Method{MethodID: "agent:claude:env:ANTHROPIC_API_KEY", Type: "env", SetupScript: `mkdir -p "${HOME}/.claude"`}
+	exec.runOneAuthSetupScript(context.Background(), server.dial(t), &ExecutorCreateRequest{Metadata: map[string]interface{}{}},
+		"Claude", method, SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"})
+	if len(commands) != 0 {
+		t.Fatalf("POSIX auth setup script ran on a Windows host: %v", commands)
 	}
 }

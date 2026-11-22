@@ -200,11 +200,11 @@ func TestSSHWindowsDetectRemoteInfoFallsBackToPowerShell(t *testing.T) {
 		{name: "windows arm64 is detected but unsupported", winArch: "ARM64", wantArch: "arm64"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
+			server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
 				if strings.HasPrefix(command, "uname ") {
 					return sshFail("'uname' is not recognized as an internal or external command")
 				}
-				script, ok := decodePowerShellEncodedCommand(command)
+				script, ok := decodeTestPowerShell(command, stdin)
 				if !ok {
 					return sshFail("expected PowerShell -EncodedCommand, got: " + command)
 				}
@@ -257,8 +257,8 @@ func TestSSHWindowsEnsureAgentctlUploadsAndReplacesExeViaSFTP(t *testing.T) {
 	t.Setenv("KANDEV_AGENTCTL_WINDOWS_AMD64_BINARY", localHelper)
 
 	var mkdirCalls atomic.Int32
-	server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
-		script, ok := decodePowerShellEncodedCommand(command)
+	server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
+		script, ok := decodeTestPowerShell(command, stdin)
 		if !ok {
 			return sshFail("expected PowerShell command, got: " + command)
 		}
@@ -353,6 +353,7 @@ func TestSSHWindowsEnsureAgentctlUploadsAndReplacesExeViaSFTP(t *testing.T) {
 }
 
 type windowsSSHLaunchHarness struct {
+	commandLines     []string
 	server           *fakeSSHServer
 	driveRoot        string
 	winHome          string
@@ -424,10 +425,13 @@ func newWindowsSSHLaunchHarness(t *testing.T, pid int) *windowsSSHLaunchHarness 
 	t.Setenv("KANDEV_AGENTCTL_WINDOWS_AMD64_BINARY", helperPath)
 
 	h.server = newFakeSSHServer(t, func(command, stdin string) sshExecResult {
+		h.mu.Lock()
+		h.commandLines = append(h.commandLines, command)
+		h.mu.Unlock()
 		if strings.HasPrefix(command, "uname ") {
 			return sshFail("uname not found")
 		}
-		script, ok := decodePowerShellEncodedCommand(command)
+		script, ok := decodeTestPowerShell(command, stdin)
 		if !ok {
 			return sshFail("expected PowerShell -EncodedCommand, got: " + command)
 		}
@@ -608,6 +612,14 @@ func TestSSHWindowsCreateInstancePowerShellEndToEnd(t *testing.T) {
 	}
 	if strings.Contains(prepScripts[0], "ghs_secret_win_token") {
 		t.Fatal("secret GitHub token leaked into PowerShell script command instead of stdin JSON")
+	}
+	harness.mu.Lock()
+	commandLines := append([]string(nil), harness.commandLines...)
+	harness.mu.Unlock()
+	for _, line := range commandLines {
+		if strings.Contains(line, "ghs_secret_win_token") {
+			t.Fatalf("secret GitHub token appeared on a remote command line: %.120s", line)
+		}
 	}
 	if !strings.Contains(prepStdin[0], `"GITHUB_TOKEN":"ghs_secret_win_token"`) {
 		t.Fatalf("expected GITHUB_TOKEN in PowerShell stdin JSON, got: %s", prepStdin[0])

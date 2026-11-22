@@ -34,7 +34,7 @@ Windows hosts.
 | `AC-EXECUTORS-SSH-WINDOWS-001.3`, `.4`, `.17` | Shell policy |
 | `AC-EXECUTORS-SSH-WINDOWS-001.5`, `.9` | PowerShell command transport |
 | `AC-EXECUTORS-SSH-WINDOWS-001.6`, `.7` | Helper upload and remote layout |
-| `AC-EXECUTORS-SSH-WINDOWS-001.8`, `.10` | Preparation, cleanup, and credentials |
+| `AC-EXECUTORS-SSH-WINDOWS-001.8`, `.10`, `.19` | Preparation, cleanup, and credentials |
 | `AC-EXECUTORS-SSH-WINDOWS-001.11`, `.12` | Controller launch, readiness, and resume |
 | `AC-EXECUTORS-SSH-WINDOWS-001.13`, `.14`, `.15` | Stop, identity, orphan sweep, and reconciliation |
 | `AC-EXECUTORS-SSH-WINDOWS-001.16` | Web copy |
@@ -110,7 +110,8 @@ script grows by about 2.7 times. The fork transport encoded the full script and
 produced a 13,171-character default prepare command. That command fails under
 stock OpenSSH.
 
-`WrapPowerShell` therefore encodes only a fixed loader:
+`executor_ssh_powershell.go` therefore places only a fixed loader
+(`powerShellLoaderScript`) on the command line:
 
 ```text
 <exe> -NoLogo -NoProfile -NonInteractive -InputFormat Text -OutputFormat Text
@@ -118,26 +119,41 @@ stock OpenSSH.
 ```
 
 The loader sets UTF-8 console encodings, `$ErrorActionPreference = 'Stop'`, and
-`$ProgressPreference = 'SilentlyContinue'`. Without that last setting,
-PowerShell 5.1 writes `#< CLIXML` progress records to stderr when output is redirected.
-It reads one JSON envelope from standard input:
+`$ProgressPreference = 'SilentlyContinue'`. It reads one JSON envelope
+(`powerShellEnvelope`) from standard input:
 
 ```json
 {"login": true, "env": {"KEY": "value"}, "script": "...", "input": "..."}
 ```
 
-The loader sets `env` entries in process scope. For `login`, it merges the
-Machine and User `Path` values and dot-sources `$PROFILE` with output and errors
-suppressed. It exposes `input` as `$KandevInput` and runs `script` as a script
-block. A terminating error exits with status 1. `exit <n>` and a failing
-native command's `$LASTEXITCODE` pass through unchanged.
+The loader sets the `env` entries in process scope. When `login` is set, it
+merges the Machine and User `Path` values and dot-sources `$PROFILE`, with output
+and errors suppressed. It exposes `input` as `$KandevInput` and dot-sources
+`script` as a script block. Exit codes match those of a script passed directly
+to `-Command`:
 
-`buildPowerShellEnvelope` validates environment keys with
-`posixSSHEnvIdentifier` and JSON-encodes the envelope. Environment values never
-enter a command line. Every command that uses `WrapPowerShell` sends the
-envelope through `runSSHCommandStdin` or `runSSHCommandStdinBounded`. The loader
-command line has a fixed length, and a unit test bounds it below 8,191
-characters.
+- `exit <n>` exits with `n`.
+- A terminating error exits with 1. The loader catches it and writes its message
+  as plain text, because PowerShell 5.1 otherwise serializes redirected errors as
+  `#< CLIXML`.
+- When the last statement fails, the loader exits with that statement's native
+  `$LASTEXITCODE`, or 1. A dot-sourced block hides that status, so the loader
+  appends `$__kLastOk = $?` to the script text.
+
+`newPowerShellCommand` validates environment keys with `posixSSHEnvIdentifier`
+and JSON-encodes the envelope. `runPowerShell`, `runPowerShellEnvelope`, and
+`runPowerShellEnvelopeBounded` send the envelope through `runSSHCommandStdin` or
+`runSSHCommandStdinBounded`. Environment values never enter a command line. The
+loader command line has a fixed length of about 4,200 characters, and
+`TestSSHWindowsCommandLineStaysBelowCmdLimit` bounds it below 8,191. The fake
+SSH server's decoder rejects any Windows command line that is not the loader, so
+every Windows unit test enforces the same bound.
+
+`WrapLoginShell` stays POSIX-only. Windows builders return PowerShell scripts,
+not command strings: `remoteWindowsAgentctlStopScript`,
+`removeWindowsRemoteDirScript`, and `sshWindowsOrphanInventoryScript`. Callers
+that can reach either host family dispatch explicitly, as
+`stopRemoteAgentctl` and `removeRemoteDir` do.
 
 `-ExecutionPolicy Bypass` applies only to that process. It permits the profile
 dot-source under a restrictive policy and changes no machine or user policy.
@@ -196,6 +212,10 @@ envelope.
 
 POSIX helper paths keep their existing format unless they contain whitespace or
 quotes, which now require quoting.
+
+Remote-authentication setup scripts in the agent catalog are POSIX shell
+scripts. `runOneAuthSetupScript` skips them on Windows hosts and logs a warning
+(`AC-EXECUTORS-SSH-WINDOWS-001.19`). It never runs them under PowerShell.
 
 ## Controller launch, readiness, and resume
 

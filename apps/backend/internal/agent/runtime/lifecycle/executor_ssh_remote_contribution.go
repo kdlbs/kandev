@@ -43,12 +43,13 @@ func (r *SSHExecutor) materializeSSHRemoteContribution(
 	var envPayload, wrapped string
 	var err error
 	if isPowerShellShell(shell) {
-		envPayload, err = buildPowerShellEnvInitScript(env)
-		if err != nil {
-			return fmt.Errorf("ssh: prepare remote contribution environment: %w", err)
+		cmd, cmdErr := newPowerShellCommand(shell, powerShellEnvelope{
+			Login: true, Env: env, Script: sshWindowsRemoteContributionScript(taskDir, targetURL, binding),
+		})
+		if cmdErr != nil {
+			return fmt.Errorf("ssh: prepare remote contribution environment: %w", cmdErr)
 		}
-		inner := sshWindowsRemoteContributionScript(taskDir, targetURL, binding)
-		wrapped = WrapPowerShell(shell, powerShellStdinEnvImport+"\n"+inner, true)
+		wrapped, envPayload = cmd.line, cmd.stdin
 	} else {
 		envPayload, err = buildSSHEnvInitScript(env)
 		if err != nil {

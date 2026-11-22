@@ -184,8 +184,8 @@ func TestSSHWindowsRecoverInstancesDetailedReattachesAndDiscoversControlPort(t *
 	})
 
 	alive := true
-	server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
-		script, ok := decodePowerShellEncodedCommand(command)
+	server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
+		script, ok := decodeTestPowerShell(command, stdin)
 		if !ok {
 			return sshFail("expected PowerShell command: " + command)
 		}
@@ -264,8 +264,8 @@ func TestSSHWindowsPersistedStopVerifiesIdentityAndGuardsSessionDir(t *testing.T
 	t.Run("confirmed Windows agentctl pid is killed and session dir removed", func(t *testing.T) {
 		killed := false
 		removed := false
-		server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
-			script, ok := decodePowerShellEncodedCommand(command)
+		server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
+			script, ok := decodeTestPowerShell(command, stdin)
 			if !ok {
 				return sshFail("expected PowerShell: " + command)
 			}
@@ -304,8 +304,8 @@ func TestSSHWindowsPersistedStopVerifiesIdentityAndGuardsSessionDir(t *testing.T
 	t.Run("reused PID running unrelated Windows process skips kill and reclaims abandoned dir", func(t *testing.T) {
 		killed := false
 		dirRemoved := false
-		server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
-			script, ok := decodePowerShellEncodedCommand(command)
+		server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
+			script, ok := decodeTestPowerShell(command, stdin)
 			if !ok {
 				return sshFail("expected PowerShell: " + command)
 			}
@@ -348,8 +348,8 @@ func TestSSHWindowsPersistedStopVerifiesIdentityAndGuardsSessionDir(t *testing.T
 
 	t.Run("session dir claimed by newer Windows PID fails closed without killing or deleting", func(t *testing.T) {
 		acted := false
-		server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
-			script, ok := decodePowerShellEncodedCommand(command)
+		server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
+			script, ok := decodeTestPowerShell(command, stdin)
 			if !ok {
 				return sshFail("expected PowerShell: " + command)
 			}
@@ -406,11 +406,11 @@ func TestSSHWindowsOrphanSweepInventoriesAndStopsOrphanedAgentctl(t *testing.T) 
 	}
 	stoppedPID := false
 	removedSessionDir := false
-	server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
+	server := newFakeSSHServer(t, func(command, stdin string) sshExecResult {
 		if command == remoteHomeCommand {
 			return sshFail("printf not found")
 		}
-		script, ok := decodePowerShellEncodedCommand(command)
+		script, ok := decodeTestPowerShell(command, stdin)
 		if !ok {
 			return sshFail("expected PowerShell command: " + command)
 		}

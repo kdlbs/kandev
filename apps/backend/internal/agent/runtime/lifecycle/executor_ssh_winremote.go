@@ -2,14 +2,10 @@ package lifecycle
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode/utf16"
 
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
@@ -29,130 +25,9 @@ const (
 	windowsCmdlinePrefix       = "CMDLINE:"
 )
 
-const powerShellUTF8Preamble = `$ErrorActionPreference = 'Stop'
-[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-`
-
-const powerShellLoginPreamble = `foreach ($__kScope in @('Machine', 'User')) {
-  $__kPath = [Environment]::GetEnvironmentVariable('Path', $__kScope)
-  if ($__kPath) {
-    foreach ($__kEntry in ($__kPath -split ';')) {
-      if ($__kEntry -and (($env:PATH -split ';') -notcontains $__kEntry)) {
-        $env:PATH = if ($env:PATH) { "$env:PATH;$__kEntry" } else { $__kEntry }
-      }
-    }
-  }
-}
-Remove-Variable -Name __kScope, __kPath, __kEntry -ErrorAction SilentlyContinue
-if ($PROFILE -and (Test-Path -LiteralPath $PROFILE)) {
-  try { . $PROFILE *>$null } catch {}
-}
-$ErrorActionPreference = 'Stop'
-`
-
-const powerShellStdinEnvImport = `$__kEnvRaw = [Console]::In.ReadToEnd()
-if ($__kEnvRaw -and $__kEnvRaw.Trim().Length -gt 0) {
-  $__kEnvObj = ConvertFrom-Json -InputObject $__kEnvRaw
-  foreach ($__kProp in $__kEnvObj.PSObject.Properties) {
-    [Environment]::SetEnvironmentVariable($__kProp.Name, [string]$__kProp.Value, 'Process')
-  }
-}
-Remove-Variable -Name __kEnvRaw, __kEnvObj, __kProp -ErrorAction SilentlyContinue
-`
-
-func powerShellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
-
-func isPowerShellShell(shell string) bool {
-	cleaned := strings.Trim(strings.TrimSpace(shell), `"'`)
-	if cleaned == "" {
-		return false
-	}
-	normalized := strings.ReplaceAll(cleaned, `\`, "/")
-	if idx := strings.LastIndexByte(normalized, '/'); idx >= 0 {
-		normalized = normalized[idx+1:]
-	}
-	normalized = strings.TrimSuffix(strings.ToLower(normalized), ".exe")
-	return normalized == defaultWindowsLoginShell || normalized == windowsPowerShellCoreBinary
-}
-
-func powerShellExecutable(shell string) string {
-	cleaned := strings.Trim(strings.TrimSpace(shell), `"'`)
-	if cleaned == "" || !isPowerShellShell(cleaned) {
-		return defaultWindowsLoginShell
-	}
-	if strings.ContainsAny(cleaned, " \t") {
-		return `"` + cleaned + `"`
-	}
-	return cleaned
-}
-
-func encodePowerShellCommand(script string) string {
-	utf16Units := utf16.Encode([]rune(script))
-	raw := make([]byte, len(utf16Units)*2)
-	for i, unit := range utf16Units {
-		binary.LittleEndian.PutUint16(raw[i*2:], unit)
-	}
-	return base64.StdEncoding.EncodeToString(raw)
-}
-
-func decodePowerShellEncodedCommand(command string) (string, bool) {
-	const flag = "-EncodedCommand "
-	idx := strings.Index(command, flag)
-	if idx < 0 {
-		return "", false
-	}
-	encoded := strings.TrimSpace(command[idx+len(flag):])
-	if fields := strings.Fields(encoded); len(fields) > 0 {
-		encoded = fields[0]
-	}
-	raw, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil || len(raw)%2 != 0 {
-		return "", false
-	}
-	units := make([]uint16, len(raw)/2)
-	for i := range units {
-		units[i] = binary.LittleEndian.Uint16(raw[i*2:])
-	}
-	return string(utf16.Decode(units)), true
-}
-
-// WrapPowerShell encodes script into a non-interactive UTF-8 PowerShell
-// invocation safe across cmd.exe, powershell.exe, pwsh.exe, and POSIX sshd
-// default shells.
-func WrapPowerShell(shell, script string, login bool) string {
-	var full strings.Builder
-	full.WriteString(powerShellUTF8Preamble)
-	if login {
-		full.WriteString(powerShellLoginPreamble)
-	}
-	full.WriteString(script)
-	exe := powerShellExecutable(shell)
-	return exe + " -NoLogo -NoProfile -NonInteractive -InputFormat Text -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand " + encodePowerShellCommand(full.String())
-}
-
-func buildPowerShellEnvInitScript(env map[string]string) (string, error) {
-	if len(env) == 0 {
-		return "", nil
-	}
-	for key := range env {
-		if !posixSSHEnvIdentifier.MatchString(key) {
-			return "", fmt.Errorf("invalid SSH environment variable key %q", key)
-		}
-	}
-	encoded, err := json.Marshal(env)
-	if err != nil {
-		return "", fmt.Errorf("encode SSH environment JSON: %w", err)
-	}
-	return string(encoded), nil
-}
-
 func detectWindowsRemoteInfo(ctx context.Context, client *ssh.Client) (*SSHRemoteInfo, bool) {
 	for _, candidate := range []string{defaultWindowsLoginShell, windowsPowerShellCoreBinary} {
-		out, _, err := runSSHCommand(ctx, client, WrapPowerShell(candidate, windowsProbeScript, false))
+		out, _, err := runPowerShell(ctx, client, candidate, windowsProbeScript, false)
 		if err != nil {
 			continue
 		}
@@ -161,7 +36,7 @@ func detectWindowsRemoteInfo(ctx context.Context, client *ssh.Client) (*SSHRemot
 			continue
 		}
 		gitCmd := "try { $v = (git --version 2>$null | Out-String).Trim(); if ($v) { Write-Output $v } } catch {}"
-		if gitOut, _, gitErr := runSSHCommand(ctx, client, WrapPowerShell(candidate, gitCmd, true)); gitErr == nil {
+		if gitOut, _, gitErr := runPowerShell(ctx, client, candidate, gitCmd, true); gitErr == nil {
 			info.GitVer = strings.TrimSpace(gitOut)
 		}
 		return info, true
@@ -211,7 +86,7 @@ func expandWindowsRemoteHome(ctx context.Context, client *ssh.Client, rawPath st
 		return trimmed, nil
 	}
 	script := "$h = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }; if ($h) { [Console]::Out.Write($h) }"
-	out, _, err := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, script, false))
+	out, _, err := runPowerShell(ctx, client, defaultWindowsLoginShell, script, false)
 	if err != nil {
 		return "", fmt.Errorf("ssh: resolve Windows home directory: %w", err)
 	}
@@ -245,7 +120,7 @@ func checkWindowsAgentctlCached(ctx context.Context, client *ssh.Client, remoteS
 		"$p = %s; if (Test-Path -LiteralPath $p -PathType Leaf) { [Console]::Out.Write([System.IO.File]::ReadAllText($p).Trim()) }",
 		powerShellQuote(remoteShaFile),
 	)
-	out, _, err := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, script, false))
+	out, _, err := runPowerShell(ctx, client, defaultWindowsLoginShell, script, false)
 	if err != nil {
 		return false, fmt.Errorf("ssh: read remote Windows agentctl sha256: %w", err)
 	}
@@ -265,7 +140,7 @@ func ensureWindowsAgentctlOnHost(
 		powerShellQuote(remoteShaFile),
 		powerShellQuote(remoteBin),
 	)
-	if out, _, err := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, checkScript, false)); err == nil {
+	if out, _, err := runPowerShell(ctx, client, defaultWindowsLoginShell, checkScript, false); err == nil {
 		if strings.TrimSpace(out) == localSha {
 			log.Debug("agentctl.exe already up-to-date on Windows remote", zap.String("sha256", localSha))
 			return remoteBin, nil
@@ -280,20 +155,20 @@ func ensureWindowsAgentctlOnHost(
 
 	binDir := parentWindowsRemotePath(remoteBin)
 	mkdirScript := fmt.Sprintf("[System.IO.Directory]::CreateDirectory(%s) | Out-Null", powerShellQuote(binDir))
-	if _, _, err := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, mkdirScript, false)); err != nil {
+	if _, _, err := runPowerShell(ctx, client, defaultWindowsLoginShell, mkdirScript, false); err != nil {
 		return "", fmt.Errorf("ssh: mkdir for Windows agentctl.exe: %w", err)
 	}
-	if err := sftpUploadBytes(client, remoteBin, localData, 0o755); err != nil {
+	if err := sftpReplaceWindowsFile(client, remoteBin, localData); err != nil {
 		return "", fmt.Errorf("ssh: upload Windows agentctl.exe: %w", err)
 	}
-	if err := sftpUploadBytes(client, remoteShaFile, []byte(localSha+"\n"), 0o644); err != nil {
+	if err := sftpReplaceWindowsFile(client, remoteShaFile, []byte(localSha+"\n")); err != nil {
 		return "", fmt.Errorf("ssh: upload Windows agentctl.exe sha256: %w", err)
 	}
 	verifyScript := fmt.Sprintf(
 		"$bin = %s; if (-not (Test-Path -LiteralPath $bin -PathType Leaf) -or ((Get-Item -LiteralPath $bin).Length -le 0)) { throw 'agentctl.exe missing after upload' }",
 		powerShellQuote(remoteBin),
 	)
-	if _, _, err := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, verifyScript, false)); err != nil {
+	if _, _, err := runPowerShell(ctx, client, defaultWindowsLoginShell, verifyScript, false); err != nil {
 		return "", fmt.Errorf("ssh: agentctl.exe not ready after upload: %w", err)
 	}
 	return remoteBin, nil
@@ -304,7 +179,7 @@ func probeWindowsRemoteBinary(ctx context.Context, client *ssh.Client, shell, bi
 		"$cmd = Get-Command -Name %s -CommandType Application,ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1; if ($null -ne $cmd) { $p = if ($cmd.Path) { $cmd.Path } else { $cmd.Source }; if ($p) { [Console]::Out.Write($p) } }",
 		powerShellQuote(binaryName),
 	)
-	out, _, err := runSSHCommand(ctx, client, WrapPowerShell(shell, script, true))
+	out, _, err := runPowerShell(ctx, client, shell, script, true)
 	if err != nil {
 		return "", err
 	}
@@ -321,7 +196,7 @@ func ensureWindowsRemoteTaskDir(ctx context.Context, client *ssh.Client, workdir
 	}
 	taskDir := joinWindowsRemotePath(root, "tasks", taskDirName)
 	script := fmt.Sprintf("[System.IO.Directory]::CreateDirectory(%s) | Out-Null", powerShellQuote(taskDir))
-	if _, _, err := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, script, false)); err != nil {
+	if _, _, err := runPowerShell(ctx, client, defaultWindowsLoginShell, script, false); err != nil {
 		return "", fmt.Errorf("ssh: mkdir Windows task dir %s: %w", taskDir, err)
 	}
 	return taskDir, nil
@@ -332,7 +207,7 @@ func ensureReuseRequiredWindowsRemoteTaskDirExists(ctx context.Context, client *
 		return fmt.Errorf("%w: missing remote task directory", models.ErrWorkspaceReuseUnsafe)
 	}
 	script := fmt.Sprintf("if (-not (Test-Path -LiteralPath %s -PathType Container)) { exit 1 }", powerShellQuote(cleanWindowsRemotePath(taskDir)))
-	if _, _, err := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, script, false)); err != nil {
+	if _, _, err := runPowerShell(ctx, client, defaultWindowsLoginShell, script, false); err != nil {
 		return fmt.Errorf("%w: remote task directory is unavailable", models.ErrWorkspaceReuseUnsafe)
 	}
 	return nil
@@ -349,7 +224,7 @@ func ensureWindowsRemoteSessionDir(ctx context.Context, client *ssh.Client, task
 		powerShellQuote(cleanTaskDir),
 		powerShellQuote(sessionDir),
 	)
-	if _, _, err := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, script, false)); err != nil {
+	if _, _, err := runPowerShell(ctx, client, defaultWindowsLoginShell, script, false); err != nil {
 		return "", fmt.Errorf("ssh: mkdir Windows session dir: %w", err)
 	}
 	return sessionDir, nil
@@ -358,7 +233,8 @@ func ensureWindowsRemoteSessionDir(ctx context.Context, client *ssh.Client, task
 func startRemoteWindowsAgentctlOnPort(
 	ctx context.Context,
 	client *ssh.Client,
-	shell, agentctlBin, workspacePath, sessionDir, envJSON string,
+	shell, agentctlBin, workspacePath, sessionDir string,
+	env map[string]string,
 	port int,
 	log *logger.Logger,
 ) (int, error) {
@@ -366,7 +242,7 @@ func startRemoteWindowsAgentctlOnPort(
 	cleanBin := cleanWindowsRemotePath(agentctlBin)
 	cleanWorkdir := cleanWindowsRemotePath(workspacePath)
 	argLine := "--workdir " + quoteWindowsArg(cleanWorkdir)
-	script := powerShellStdinEnvImport + fmt.Sprintf(`$sessionDir = %[1]s
+	script := fmt.Sprintf(`$sessionDir = %[1]s
 $agentctlBin = %[2]s
 $workspacePath = %[3]s
 $argLine = %[4]s
@@ -387,7 +263,7 @@ Write-Output $proc.Id
 		powerShellQuote(argLine),
 		port,
 	)
-	out, stderr, err := runSSHCommandStdin(ctx, client, WrapPowerShell(shell, script, true), strings.NewReader(envJSON))
+	out, stderr, err := runPowerShellEnvelope(ctx, client, shell, powerShellEnvelope{Login: true, Env: env, Script: script})
 	if err != nil {
 		return 0, fmt.Errorf("ssh: launch Windows agentctl.exe: %w (stderr: %s)", err, strings.TrimSpace(stderr))
 	}
@@ -417,7 +293,7 @@ foreach ($name in @('agentctl.log', 'agentctl.err.log')) {
     }
   }
 }`, powerShellQuote(cleanSessionDir))
-	out, _, _ := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, script, false))
+	out, _, _ := runPowerShell(ctx, client, defaultWindowsLoginShell, script, false)
 	return out
 }
 
@@ -444,7 +320,7 @@ try {
 } finally {
   $fs.Dispose()
 }`, powerShellQuote(cleanSessionDir))
-	output, _, err := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, script, false))
+	output, _, err := runPowerShell(ctx, client, defaultWindowsLoginShell, script, false)
 	if err != nil {
 		return 0, fmt.Errorf("read exact Windows agentctl session log: %w", err)
 	}
@@ -459,7 +335,7 @@ func probeRemoteWindowsAgentctlLiveness(ctx context.Context, client *ssh.Client,
 		"$p = Get-Process -Id %d -ErrorAction SilentlyContinue; if ($null -ne $p -and -not $p.HasExited) { Write-Output '%s' } else { Write-Output '%s' }",
 		pid, windowsLivenessAliveToken, windowsLivenessAbsentToken,
 	)
-	stdout, stderr, err := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, script, false))
+	stdout, stderr, err := runPowerShell(ctx, client, defaultWindowsLoginShell, script, false)
 	if err != nil {
 		return false, remoteProcessProbeError("Get-Process", pid, err, stderr)
 	}
@@ -481,7 +357,7 @@ func verifyRemoteWindowsAgentctlIdentity(ctx context.Context, client *ssh.Client
 		"$proc = Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId = %d' -ErrorAction Stop; if ($null -eq $proc) { Write-Output '%s' } else { Write-Output ('%s' + [string]$proc.CommandLine) }",
 		pid, windowsLivenessAbsentToken, windowsCmdlinePrefix,
 	)
-	stdout, stderr, err := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, script, false))
+	stdout, stderr, err := runPowerShell(ctx, client, defaultWindowsLoginShell, script, false)
 	if err != nil {
 		return false, remoteProcessProbeError("Win32_Process", pid, err, stderr)
 	}
@@ -551,7 +427,7 @@ Write-Output ('%s' + [System.IO.File]::ReadAllText($pf).Trim())`,
 		windowsPidFileMissingToken,
 		windowsPidPrefix,
 	)
-	stdout, stderr, err := runSSHCommand(ctx, client, WrapPowerShell(defaultWindowsLoginShell, script, false))
+	stdout, stderr, err := runPowerShell(ctx, client, defaultWindowsLoginShell, script, false)
 	if err != nil {
 		return 0, false, fmt.Errorf("remote Windows pidfile probe %s failed: %w (stderr: %s)", cleanSessionDir, err, strings.TrimSpace(stderr))
 	}
@@ -698,7 +574,7 @@ func (t *windowsCmdTokenizer) consumeDoubleQuotedBackslashes(line string, start 
 }
 
 func stopRemoteWindowsAgentctl(ctx context.Context, client *ssh.Client, sessionDir string, pid int) error {
-	_, stderr, err := runSSHCommand(ctx, client, remoteWindowsAgentctlStopCommand(sessionDir, pid))
+	_, stderr, err := runPowerShell(ctx, client, defaultWindowsLoginShell, remoteWindowsAgentctlStopScript(sessionDir, pid), false)
 	if err != nil {
 		if trimmed := strings.TrimSpace(stderr); trimmed != "" {
 			return fmt.Errorf("%w (stderr: %s)", err, trimmed)
@@ -708,11 +584,11 @@ func stopRemoteWindowsAgentctl(ctx context.Context, client *ssh.Client, sessionD
 	return nil
 }
 
-func remoteWindowsAgentctlStopCommand(sessionDir string, pid int) string {
+func remoteWindowsAgentctlStopScript(sessionDir string, pid int) string {
 	cleanSessionDir := cleanWindowsRemotePath(sessionDir)
 	removeSnippet := removeWindowsRemoteDirScript(cleanSessionDir)
 	if pid <= 0 {
-		return WrapPowerShell(defaultWindowsLoginShell, removeSnippet, false)
+		return removeSnippet
 	}
 	script := fmt.Sprintf(`$targetPid = %[1]d
 $proc = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
@@ -731,11 +607,7 @@ if ($null -ne $proc -and -not $proc.HasExited) {
   }
 }
 %[3]s`, pid, sshAgentctlStopPollAttempts, removeSnippet)
-	return WrapPowerShell(defaultWindowsLoginShell, script, false)
-}
-
-func removeWindowsRemoteDirCommand(dir string) string {
-	return WrapPowerShell(defaultWindowsLoginShell, removeWindowsRemoteDirScript(cleanWindowsRemotePath(dir)), false)
+	return script
 }
 
 func removeWindowsRemoteDirScript(cleanDir string) string {
@@ -762,11 +634,11 @@ if (Test-Path -LiteralPath $dirToRemove) {
 func runRemoteWindowsSSHReconcile(ctx context.Context, client *ssh.Client, bin string, body []byte) (string, string, bool, error) {
 	cleanBin := cleanWindowsRemotePath(bin)
 	script := fmt.Sprintf(
-		"$inText = [Console]::In.ReadToEnd(); $inText | & %s ssh-reconcile; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
+		"$KandevInput | & %s ssh-reconcile; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
 		powerShellQuote(cleanBin),
 	)
-	return runSSHCommandStdinBounded(
-		ctx, client, WrapPowerShell(defaultWindowsLoginShell, script, false),
-		strings.NewReader(string(body)), maxSSHReconcileResponseBytes,
+	return runPowerShellEnvelopeBounded(
+		ctx, client, defaultWindowsLoginShell, powerShellEnvelope{Script: script, Input: string(body)},
+		maxSSHReconcileResponseBytes,
 	)
 }

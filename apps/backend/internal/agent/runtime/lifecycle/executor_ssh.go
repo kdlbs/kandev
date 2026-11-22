@@ -511,12 +511,7 @@ func (r *SSHExecutor) preflightGitHubCredentialBroker(
 }
 
 func runWindowsBrokerReachability(ctx context.Context, client *ssh.Client, shell string, env map[string]string) ([]byte, error) {
-	envJSON, err := buildPowerShellEnvInitScript(env)
-	if err != nil {
-		return nil, err
-	}
-	wrapped := WrapPowerShell(shell, powerShellStdinEnvImport+"\n"+windowsBrokerReachabilityScript, false)
-	stdout, stderr, err := runSSHCommandStdin(ctx, client, wrapped, strings.NewReader(envJSON))
+	stdout, stderr, err := runPowerShellEnvelope(ctx, client, shell, powerShellEnvelope{Env: env, Script: windowsBrokerReachabilityScript})
 	return []byte(stdout + stderr), err
 }
 
@@ -1133,7 +1128,7 @@ func (r *SSHExecutor) stopPersistedRemoteAgentctl(ctx context.Context, instance 
 				zap.String("session_dir", sessionDir))
 			return nil
 		}
-		if _, _, err := runSSHCommand(cleanupCtx, client, removeRemoteDirCommand(sessionDir)); err != nil {
+		if err := removeRemoteDir(cleanupCtx, client, sessionDir); err != nil {
 			return fmt.Errorf("ssh: remove persisted session dir for unmatched pid on instance %q: %w", instance.InstanceID, err)
 		}
 		return nil

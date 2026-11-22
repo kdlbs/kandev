@@ -192,11 +192,11 @@ func (r *SSHExecutor) runPrepareScript(ctx context.Context, client *ssh.Client, 
 	env := sshRemoteContributionEnv(req, agentctlBin)
 	var envPayload, command string
 	if usePowerShell {
-		envPayload, err = buildPowerShellEnvInitScript(env)
-		if err != nil {
-			return fmt.Errorf("ssh: prepare script environment: %w", err)
+		cmd, cmdErr := newPowerShellCommand(shell, powerShellEnvelope{Login: true, Env: env, Script: script})
+		if cmdErr != nil {
+			return fmt.Errorf("ssh: prepare script environment: %w", cmdErr)
 		}
-		command = WrapPowerShell(shell, powerShellStdinEnvImport+"\n"+script, true)
+		command, envPayload = cmd.line, cmd.stdin
 	} else {
 		envPayload, err = buildSSHEnvInitScript(env)
 		if err != nil {
@@ -342,11 +342,11 @@ func (r *SSHExecutor) buildSSHCleanupInvocation(
 		if err != nil {
 			return "", "", err
 		}
-		envPayload, err := buildPowerShellEnvInitScript(env)
+		cmd, err := newPowerShellCommand(shell, powerShellEnvelope{Login: true, Env: env, Script: resolved})
 		if err != nil {
 			return "", "", err
 		}
-		return WrapPowerShell(shell, powerShellStdinEnvImport+"\n"+resolved, true), envPayload, nil
+		return cmd.line, cmd.stdin, nil
 	}
 	resolved, err := r.resolveSSHScript(req, taskDir, "", script)
 	if err != nil {
