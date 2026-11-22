@@ -11,6 +11,7 @@ import {
   forgetTaskSessionMembershipProof,
 } from "@/lib/state/task-session-reads";
 import {
+  disprovesSessionRemoval,
   isConfirmedSessionRemoved,
   proveRemovedSessionMembership,
 } from "@/lib/state/session-removal";
@@ -259,7 +260,14 @@ function commitRemovalMembership(
     pending.taskId,
     pending.previousSessionId,
   );
-  if (!proof) return;
+  if (!proof) {
+    // A fresh complete read that still lists the session withdraws the observation.
+    if (disprovesSessionRemoval(membership, pending.taskId, pending.previousSessionId)) {
+      observedRemovals(store)?.delete(pending.previousSessionId);
+      forgetTaskSessionMembershipProof(store, pending.previousSessionId);
+    }
+    return;
+  }
   const view = pendingByStore.get(store);
   const matchingView =
     view?.taskId === pending.taskId && view.previousSessionId === pending.previousSessionId

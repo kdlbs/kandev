@@ -876,3 +876,12 @@ Sol child `b6919db6-a3c9-44f6-96db-89ab3b92091c` reviewed
 Completed production rounds 37; consecutive clean 0. The repository-count guard
 now resolves the task like the task page. Review rounds from R38 use the Opus
 profile at the user's direction; R38 follows normal verified delivery.
+
+### Production reviews R38-R40
+
+R38 and R39 (Opus) reviewed `1de14a578eab4adb92eeb43176162b4d729e6767` clean.
+R40 (Opus) found a same-task URL replace erasing a committed conversation
+activation (P2) and a disproved removal observation never withdrawn (P3), and
+noted a base gateway test removed by a withdrawn R1 experiment. Completed
+production rounds 40; consecutive clean 0. Task 02 records the corrections,
+the restored base test and verification; R41 follows normal verified delivery.

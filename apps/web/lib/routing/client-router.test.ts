@@ -9,6 +9,8 @@ import {
   useTaskSessionActivation,
 } from "./client-router";
 
+const CONVERSATION_HREF = "/t/t1?sessionId=b";
+
 const NAV_POSITION_KEY = "__kandevNavigationPosition";
 
 function setLocation(path: string) {
@@ -165,7 +167,7 @@ describe("client router adapter", () => {
 it.each([false, true])(
   "admits committed conversation hits with randomUUID unavailable=%s",
   (insecure) => {
-    setLocation("/t/t1?sessionId=b");
+    setLocation(CONVERSATION_HREF);
     if (insecure) vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
     vi.stubGlobal("scrollTo", vi.fn());
     const { result } = renderHook(() => ({
@@ -173,7 +175,7 @@ it.each([false, true])(
       activation: useTaskSessionActivation("t1", "b"),
       unrelated: useTaskSessionActivation("t1", "c"),
     }));
-    const href = "/t/t1?sessionId=b";
+    const href = CONVERSATION_HREF;
     const options = { taskSessionActivation: { taskId: "t1", sessionId: "b" } };
     act(() => result.current.router.push(href, options));
     const first = result.current.activation;
@@ -192,3 +194,20 @@ it.each([false, true])(
     expect(window.location.pathname + window.location.search).toBe(href);
   },
 );
+
+it("keeps a committed conversation activation across same-task URL replaces", () => {
+  setLocation(CONVERSATION_HREF);
+  vi.stubGlobal("scrollTo", vi.fn());
+  const { result } = renderHook(() => ({
+    router: useRouter(),
+    activation: useTaskSessionActivation("t1", "b"),
+  }));
+  const activation = { taskSessionActivation: { taskId: "t1", sessionId: "b" } };
+  act(() => result.current.router.push(CONVERSATION_HREF, activation));
+  const committed = result.current.activation;
+  expect(committed).not.toBe("");
+  act(() => result.current.router.replace(`${CONVERSATION_HREF}&panel=task-graph`));
+  expect(result.current.activation).toBe(committed);
+  act(() => result.current.router.push(CONVERSATION_HREF));
+  expect(result.current.activation).toBe("");
+});

@@ -67,3 +67,18 @@ export function proveRemovedSessionMembership(
   }
   return { primary };
 }
+
+/** Complete, unique, same-task membership that still lists the session disproves its removal. */
+export function disprovesSessionRemoval(
+  membership: TaskSessionsResponse,
+  taskId: string,
+  sessionId: string,
+): boolean {
+  if (membership.total !== membership.sessions.length) return false;
+  const ids = new Set<string>();
+  for (const session of membership.sessions) {
+    if (!session.id || ids.has(session.id) || session.task_id !== taskId) return false;
+    ids.add(session.id);
+  }
+  return ids.has(sessionId);
+}

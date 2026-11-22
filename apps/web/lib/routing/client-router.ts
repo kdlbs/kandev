@@ -71,10 +71,16 @@ export function useParams(): Record<string, string> {
   return useMemo(() => paramsForPath(pathname), [pathname]);
 }
 
+function nextActivation(mode: "push" | "replace", options?: NavigateOptions) {
+  if (options?.taskSessionActivation)
+    return { ...options.taskSessionActivation, id: generateUUID() };
+  // A replace rewrites the current entry, so its committed activation stays with it.
+  return mode === "replace" ? window.history.state?.taskSessionActivation : undefined;
+}
+
 function navigate(mode: "push" | "replace", href: string, options?: NavigateOptions): void {
-  const state = options?.taskSessionActivation
-    ? { taskSessionActivation: { ...options.taskSessionActivation, id: generateUUID() } }
-    : {};
+  const activation = nextActivation(mode, options);
+  const state = activation ? { taskSessionActivation: activation } : {};
   if (mode === "push") {
     pushNavigationState(state, "", href, () => finishNavigation(options));
   } else {

@@ -229,6 +229,82 @@ func TestTaskEventBroadcaster_OrdersTranscriptMutationsAcrossTransportSubjects(t
 	}, actions)
 }
 
+// TestTaskEventBroadcaster_NoDuplicateSubscriptions verifies that
+// RegisterTaskNotifications creates one subscription per routed subject (with
+// lifecycle state events intentionally sharing one ordered wildcard).
+//
+// The old code had a second subscription system (subscribeEventBusHandlers in
+// cmd/kandev/helpers.go) that subscribed to the same routed events, causing
+// duplicate broadcasts. This test counts the broadcaster's internal
+// subscriptions directly to guard against re-introducing duplicates.
+func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
+	log := testLogger()
+	eventBus := bus.NewMemoryEventBus(log)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	hub := NewHub(nil, log)
+	go hub.Run(ctx)
+
+	b := RegisterTaskNotifications(ctx, eventBus, hub, log)
+
+	// Count how many subscriptions RegisterTaskNotifications creates. If any
+	// event is subscribed twice, this count will increase and the test will fail.
+	//
+	// Update this number when adding or removing event subscriptions in
+	// RegisterTaskNotifications — it is intentionally exact.
+	const wantSubscriptions = 79
+	if got := len(b.subscriptions); got != wantSubscriptions {
+		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
+			"did an event get subscribed twice?", got, wantSubscriptions)
+	}
+
+	// Verify no event subject appears more than once by publishing each of
+	// the 4 previously-duplicated events and counting hub broadcasts.
+	// We use a fresh event bus per sub-test so each has exactly
+	// 1 broadcaster subscription + 1 counter subscription.
+	for _, subject := range []string{
+		events.MessageAdded,
+		events.MessageUpdated,
+		events.TaskSessionStateChanged,
+		events.TaskSessionActivityChanged,
+		events.GitHubTaskPRUpdated,
+		events.GitHubTaskPRDeleted,
+		events.GitLabTaskMRUpdated,
+		events.GitLabTaskMRDeleted,
+		events.TaskPreviewFeedbackChanged,
+	} {
+		subject := subject
+		t.Run(subject, func(t *testing.T) {
+			perEventBus := bus.NewMemoryEventBus(log)
+			perHub := NewHub(nil, log)
+			go perHub.Run(ctx)
+
+			_ = RegisterTaskNotifications(ctx, perEventBus, perHub, log)
+
+			var count int
+			_, _ = perEventBus.Subscribe(subject, func(_ context.Context, _ *bus.Event) error {
+				count++
+				return nil
+			})
+
+			data := map[string]interface{}{
+				"session_id": "s1", "task_id": "t1",
+			}
+			evt := bus.NewEvent(subject, "test", data)
+			_ = perEventBus.Publish(context.Background(), subject, evt)
+
+			// This verifies that publishing one event reaches our handler exactly
+			// once. Duplicate-subscription detection is handled by the
+			// len(b.subscriptions) guard above; these sub-tests cover event
+			// delivery correctness for the four previously-duplicated subjects.
+			if count != 1 {
+				t.Errorf("counter handler fired %d times, want 1", count)
+			}
+		})
+	}
+}
+
 // TestTaskEventBroadcaster_PreservesAllFields verifies that event data passes through the
 // event bus unmodified — the broadcaster receives the same object that was published,
 // including fields like turn_id, raw_content, and updated_at that the old

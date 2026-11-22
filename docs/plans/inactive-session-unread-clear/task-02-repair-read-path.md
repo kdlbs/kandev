@@ -4499,3 +4499,51 @@ checks pass. Fresh-bundle browser receipts: `r37-final-summary.log` 11
 desktop/tablet/maximize cases and `r37-phone-summary.log` ten phone cases pass
 with one worker and no retries, under host load of about 20 from other tasks.
 No Go/cursor/predicate/projector/promotion/schema/wire change in R37.
+
+### Production-fix review rounds 38-40
+
+Review rounds use the Opus profile from R38 at the user's direction.
+
+- R38 (Opus `be8e29b0-62c3-46ec-aeaf-bccd3986e357`) reviewed
+  `1de14a578eab4adb92eeb43176162b4d729e6767`: clean. Consecutive clean 1.
+- R39 (Opus `23ea0830-a7fd-42cf-a422-dcbef15448fc`) reviewed the same head
+  independently: clean. Consecutive clean 2. Its coverage concentrated on the
+  tablet Git-readiness path.
+- R40 (Opus `fefa1503-7f3e-4833-a095-db6fff455dae`) reviewed the same head with
+  the broader cumulative fix in scope: one P2 and one P3, not clean. Completed
+  production rounds 40; consecutive clean 0.
+
+R40 remediation:
+
+- P2: a same-task `router.replace` (the topbar Task Graph button keeps the
+  current `sessionId`) wrote empty history state and erased a committed
+  conversation activation. The route key changed, a new navigation generation
+  re-read identity and re-admitted the old explicit session over the user's
+  later tab choice. A replace without a new activation now carries the current
+  entry's activation; a push without one still starts unactivated.
+  `r40-red.log` shows the activation erased at `1de14a5`.
+- P3: a synthesized `session.removed` whose fresh complete, unique, same-task
+  membership still lists the session left the observation in place until
+  reload, refusing explicit navigation and primary follow to a live session.
+  That disproof now withdraws the observation and forgets the pending
+  membership proof. Incomplete reads still keep it.
+  `r40-red.log` shows the observation retained at `1de14a5`.
+- Observation: R1 deleted `TestTaskEventBroadcaster_NoDuplicateSubscriptions`
+  with a gateway routing experiment that R2 withdrew. `task_notifications.go`
+  is identical to base, so the base test is restored byte-for-byte instead of
+  leaving an unrelated regression guard removed.
+
+Verification: `r40-units.log` 10 files/163 tests (router, primary-focus and
+disproof, task-session reads, explicit selection, command panel, removal and
+tablet readiness owners). Strict changed-file lint (after replacing a nested
+ternary with a named activation step and a repeated fixture literal),
+production typecheck and fresh frontend build pass. `r40-go.log`:
+`go test -race ./internal/gateway/websocket -run TestTaskEventBroadcaster`
+passes with the restored base test. Fresh-bundle browser receipts:
+`r40-final-summary.log` 40 desktop/tablet/maximize cases passed, including the
+whole owned-removal visibility group. The remote ordinary-foreground case timed
+out at its foreground reread (line 286) under host load of about 25; the same
+timeout occurred on the pre-R40 R34 bundle. Membership-proof listeners receive
+only current-generation reads, so a pre-removal list cannot reach the new
+disproof. Isolated, the local/remote pair passed 6/6
+(`r40-remote-summary.log`). `r40-phone-summary.log`: ten phone cases pass.
