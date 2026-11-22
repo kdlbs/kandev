@@ -740,7 +740,7 @@
   "modelConfigurationPartialDescription": "The provider rejected {{option}}. Retry from the confirmed state.",
   "modelConfigurationPartialRetry": "Retry from confirmed state",
   "sessionConfigurationClamped": "Requested {{requested}}. The agent applied {{effective}}.",
-  "sessionConfigurationSaved": "{{value}} saved for the next launch.",
+  "sessionConfigurationSaved": "Saved <0/> for agent startup.",
   "sessionConfigurationChanged": "Changed <settings/>.",
   "sessionConfigurationUnconfirmed": "Could not confirm <setting/>.",
   "sessionConfigurationRejected": "Could not apply {{value}}. {{reason}}",

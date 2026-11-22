@@ -740,7 +740,7 @@
   "modelConfigurationPartialDescription": "Ţĥē ƥŕōvĩďēŕ ŕēĵēćţēď {{option}}. Ŕēţŕŷ ƒŕōḿ ţĥē ćōńƒĩŕḿēď śţàţē.",
   "modelConfigurationPartialRetry": "Ŕēţŕŷ ƒŕōḿ ćōńƒĩŕḿēď śţàţē",
   "sessionConfigurationClamped": "Ŕēqũēśţēď {{requested}}. Ţĥē àĝēńţ àƥƥĺĩēď {{effective}}.",
-  "sessionConfigurationSaved": "{{value}} śàvēď ƒōŕ ţĥē ńēxţ ĺàũńćĥ.",
+  "sessionConfigurationSaved": "Śàvēď <0/> ƒōŕ àĝēńţ śţàŕţũƥ.",
   "sessionConfigurationChanged": "Ćĥàńĝēď <śēţţĩńĝś/>.",
   "sessionConfigurationUnconfirmed": "Ćōũĺď ńōţ ćōńƒĩŕḿ <śēţţĩńĝ/>.",
   "sessionConfigurationRejected": "Ćōũĺď ńōţ àƥƥĺŷ {{value}}. {{reason}}",

@@ -80,31 +80,49 @@ function SettingValue({ label, value }: { label: string; value: string }) {
   );
 }
 
+function SettingsList({
+  entries,
+}: {
+  entries: { configId: string; label: string; value: string }[];
+}) {
+  return (
+    <span>
+      {entries.map((entry, index) => (
+        <Fragment key={entry.configId}>
+          {index > 0 && ", "}
+          <SettingValue label={entry.label} value={entry.value} />
+        </Fragment>
+      ))}
+    </span>
+  );
+}
+
 function PickerFeedbackText({ entries }: { entries: ConfigurationFeedbackEntry[] }) {
   const changed = entries.filter((entry) => entry.kind === "changed");
-  const notices = entries.filter((entry) => entry.kind !== "changed");
+  const saved = entries.filter((entry) => entry.kind === "saved");
+  const notices = entries.filter(
+    (entry) => entry.kind === "notice" || entry.kind === "unconfirmed",
+  );
   return (
     <>
       {changed.length > 0 && (
         <Trans
           i18nKey="task:sessionConfigurationChanged"
-          components={{
-            settings: (
-              <span>
-                {changed.map((entry, index) => (
-                  <Fragment key={entry.configId}>
-                    {index > 0 && ", "}
-                    <SettingValue label={entry.label} value={entry.value} />
-                  </Fragment>
-                ))}
-              </span>
-            ),
-          }}
+          components={{ settings: <SettingsList entries={changed} /> }}
         />
+      )}
+      {saved.length > 0 && (
+        <>
+          {changed.length > 0 && " "}
+          <Trans
+            i18nKey="task:sessionConfigurationSaved"
+            components={[<SettingsList key="settings" entries={saved} />]}
+          />
+        </>
       )}
       {notices.map((entry, index) => (
         <Fragment key={entry.configId}>
-          {(changed.length > 0 || index > 0) && " "}
+          {changed.length + saved.length + index > 0 && " "}
           {entry.kind === "unconfirmed" ? (
             <span className="text-destructive">
               <Trans
@@ -148,7 +166,10 @@ export function PickerConfigurationStatus({ comment }: { comment: Message }) {
   const retry = useAppStore((state) => eligibleRetry(state, sessionId, row));
   if (!row) return null;
   const dismiss = row.entries.some(
-    (entry) => entry.kind === "unconfirmed" || (entry.kind === "notice" && entry.dismissible),
+    (entry) =>
+      entry.kind === "saved" ||
+      entry.kind === "unconfirmed" ||
+      (entry.kind === "notice" && entry.dismissible),
   )
     ? () => store.getState().dismissSessionConfigurationFeedback(sessionId, id)
     : undefined;

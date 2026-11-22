@@ -112,22 +112,23 @@ and keep notice data out of conversation history and plugin turns.
 ## Feedback presentation
 
 Use the transcript's `StatusMessage` renderer for both feedback sources. Use
-compact muted text in normal message flow. Names come from the advertised
-setting and value labels when available. Start confirmed picker changes with
-one localized verb, then list setting names and monospace values. Use red
-text for unconfirmed picker clauses. Describe deferred saves, rejections,
-partial changes, and uncertainty in text. Show the sanitized reason when
-the agent supplies one. Dismiss and eligible Retry remain available in the row.
+compact muted text in normal message flow. Use live setting and value labels
+when available and the agent catalog labels before startup. Group confirmed
+changes under “Changed” and saved settings under “Saved … for agent startup.”
+List setting names and monospace values in both cases. Use red text for
+unconfirmed picker clauses. Describe rejections, partial changes, and
+uncertainty in text. Show the sanitized reason when the agent supplies one.
+Dismiss and eligible Retry remain available in the row.
 
 `usePickerConfigurationFeedback` forwards outcomes that pass the current
 request and execution checks to one session-scoped collection. Group them by
-the newest accepted turn start when the picker action begins, with an initial
-group before the first turn. Update the same row by setting ID, including the
-option IDs from a composed Apply or Retry. Keep the row ID and position when
-another outcome arrives. Use the accepted turn start as the group boundary
-instead of a visibility timer. A late result belongs to its initiating
-group if its request is still current. A group stops accepting Retry after
-the next turn begins. An older or replayed start cannot reopen a closed group.
+the execution identity and newest accepted turn start when the picker action
+begins. The execution closes the pre-launch group even when turn history is
+still loading. Update the same row by setting ID, including the option IDs
+from a composed Apply or Retry. Keep the row ID and position when another
+outcome arrives. A late result belongs to its initiating group if its request
+is still current. A group stops accepting Retry when its execution or turn
+changes. An older or replayed start cannot reopen a closed group.
 
 Keep picker rows in the session's in-memory UI state and project them as
 local status messages when task chat builds its transcript. This keeps open

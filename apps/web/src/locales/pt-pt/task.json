@@ -690,7 +690,7 @@
   "modelConfigurationPartialDescription": "O fornecedor rejeitou {{option}}. Tente novamente a partir do estado confirmado.",
   "modelConfigurationPartialRetry": "Tentar novamente a partir do estado confirmado",
   "sessionConfigurationClamped": "Pedido: {{requested}}. O agente aplicou {{effective}}.",
-  "sessionConfigurationSaved": "{{value}} guardado para o próximo início.",
+  "sessionConfigurationSaved": "Guardou <0/> para o arranque do agente.",
   "sessionConfigurationChanged": "Alterou <settings/>.",
   "sessionConfigurationUnconfirmed": "Não foi possível confirmar <setting/>.",
   "sessionConfigurationRejected": "Não foi possível aplicar {{value}}. {{reason}}",

@@ -106,8 +106,11 @@ before and after sending a prompt. On the PR head the picker result is
 positioned by the selector.
 
 Cover the stable row ID, per-setting replacement, late replies, and a new
-turn in the session runtime test. Retain the composed Apply and Retry
-tests. In the existing desktop and phone slash specs, verify the muted
+turn in the session runtime test. Cover a first launch that reaches the
+picker before its turn history. In the desktop flow, save the model and
+mode, start the agent, and verify that a later change appears in a new row
+below the first prompt. Retain the composed Apply and Retry tests. In the
+existing desktop and phone slash specs, verify the muted
 row under the command. Update the phone keyboard-height flow to verify
 that outcomes from separate picker sheets merge even when one is a rejection.
 Check wrapping, preserved draft and reading position, and the Dismiss
@@ -150,3 +153,7 @@ position, and reachable Dismiss action.
 
 All 83 focused web tests passed. Typecheck, changed-file Oxlint, localization,
 the specification catalog, specification lint, and `git diff --check` passed.
+
+The first-launch regression passed in the focused suite of 86 web tests.
+Four desktop and two phone Playwright checks passed. The desktop startup case
+confirmed the saved model and mode at launch and the new row below the prompt.

@@ -737,7 +737,7 @@
   "modelConfigurationPartialDescription": "プロバイダーが {{option}} を拒否しました。確認済みの状態から再試行してください。",
   "modelConfigurationPartialRetry": "確認済みの状態から再試行",
   "sessionConfigurationClamped": "要求: {{requested}}。エージェントは {{effective}} を適用しました。",
-  "sessionConfigurationSaved": "{{value}} は次回起動用に保存されました。",
+  "sessionConfigurationSaved": "<0/> をエージェントの起動用に保存しました。",
   "sessionConfigurationChanged": "<settings/>を変更しました。",
   "sessionConfigurationUnconfirmed": "<setting/>を確認できませんでした。",
   "sessionConfigurationRejected": "{{value}} を適用できませんでした。{{reason}}",

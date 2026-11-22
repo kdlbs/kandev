@@ -77,6 +77,38 @@ afterEach(() => {
 });
 
 describe("picker configuration feedback", () => {
+  it("keeps pre-launch feedback separate while the first turn is still missing", () => {
+    const { result, rows } = mountFeedback();
+    const { feedback, store } = result.current;
+    act(() => {
+      store.getState().setTaskSession({
+        ...session(SESSION_A, EXECUTION),
+        state: "CREATED",
+        agent_execution_id: undefined,
+      });
+      feedback.showChanges(feedback.begin(), [
+        {
+          configId: "mode",
+          label: "Agent permission mode",
+          requested: "plan-mock",
+          result: { status: "saved_for_launch", requested: "plan-mock", confirmed: false },
+        },
+      ]);
+    });
+    const [beforeLaunch] = rows();
+
+    act(() => {
+      store.getState().setTaskSession(session(SESSION_A, EXECUTION));
+      feedback.showChanges(feedback.begin(), [{ ...model, result: applied("sonnet") }]);
+    });
+
+    expect(rows()).toHaveLength(2);
+    expect(rows()[0]).toEqual(beforeLaunch);
+    expect(rows()[1].entries).toEqual([
+      { configId: "model", kind: "changed", label: "model", value: "sonnet" },
+    ]);
+  });
+
   it("keeps a settled result across a pause and binds late results to their initiating turn", () => {
     vi.useFakeTimers();
     const { result, rows } = mountFeedback();

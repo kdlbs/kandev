@@ -1,9 +1,72 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { SessionPage } from "../../pages/session-page";
 import { seedAndOpenChat } from "./session-configuration-feedback-helpers";
 
 test.describe("Picker feedback", () => {
   test.describe.configure({ retries: 1, timeout: 90_000 });
+
+  // @covers AC-AGENTS-SESSION-CONFIG-FEEDBACK-001.2, AC-AGENTS-SESSION-CONFIG-FEEDBACK-001.7
+  test("starts a new feedback row after the first launch", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "First launch feedback", {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+      prepare_session: true,
+    });
+    expect(task.session_id).toBeTruthy();
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const feedback = session.activeChat().getByTestId("session-configuration-feedback");
+
+    await testPage.getByTestId("session-mode-selector").click();
+    const saved = waitForHttp(testPage, "POST", /\/set-mode$/);
+    await testPage.getByRole("menuitem", { name: /Plan Mock/ }).click();
+    expect(await (await saved).json()).toMatchObject({
+      configuration_result: { status: "saved_for_launch" },
+    });
+    const trigger = testPage.getByRole("button", { name: "Session model settings" });
+    await trigger.click();
+    const savedModel = waitForHttp(testPage, "POST", /\/set-(?:config-option|model)$/);
+    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+    expect(await (await savedModel).json()).toMatchObject({
+      configuration_result: { status: "saved_for_launch" },
+    });
+    const savedSettings = "Saved mode Plan Mock, model Mock Smart for agent startup.";
+    await expect(feedback).toHaveCount(1);
+    await expect(feedback).toHaveText(savedSettings);
+    await expect(feedback.locator("code")).toHaveText(["Plan Mock", "Mock Smart"]);
+    await testPage.keyboard.press("Escape");
+
+    await testPage.getByTestId("task-description-start-button").click();
+    await expect(
+      session.activeChat().getByText("This is a simple mock response for e2e testing."),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(session.anyIdleInput()).toBeVisible();
+    await expect(trigger).toContainText("Mock Smart");
+    await expect(testPage.getByTestId("session-mode-selector")).toContainText("Plan Mock");
+    await trigger.click();
+    const applied = waitForHttp(testPage, "POST", /\/set-(?:config-option|model)$/);
+    await testPage.getByRole("option", { name: /Mock Slow/ }).click();
+    expect(await (await applied).json()).toMatchObject({
+      configuration_result: { status: "applied", confirmed: true },
+    });
+
+    await expect(
+      session
+        .activeChat()
+        .locator(
+          '[data-testid="session-configuration-feedback"], [data-testid="user-message-bubble"]',
+        ),
+    ).toHaveText([savedSettings, "/e2e:simple-message", "Changed model Mock Slow."]);
+  });
 
   test("merges picker changes before the next turn in one muted transcript row", async ({
     testPage,

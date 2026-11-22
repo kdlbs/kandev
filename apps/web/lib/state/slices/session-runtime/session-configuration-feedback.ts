@@ -5,6 +5,7 @@ import type { SessionRuntimeSlice } from "./types";
 
 export type ConfigurationFeedbackOutcome =
   | { kind: "changed"; label: string; value: string }
+  | { kind: "saved"; label: string; value: string }
   | { kind: "unconfirmed"; label: string; value: string; reason: string }
   | { kind: "notice"; text: string; dismissible: boolean };
 
@@ -18,6 +19,7 @@ type ConfigurationFeedbackRetry = {
 export type SessionConfigurationFeedbackRow = {
   id: string;
   turnId: string | null;
+  executionId?: string;
   createdAt: string;
   entries: ConfigurationFeedbackEntry[];
   retry?: ConfigurationFeedbackRetry;
@@ -62,9 +64,10 @@ export function buildSessionConfigurationFeedbackActions(
       update: SessionConfigurationFeedbackUpdate,
     ) =>
       set((draft) => {
-        const { turnId, createdAt, entries, retry } = update;
+        const { turnId, executionId, createdAt, entries, retry } = update;
         const rows = draft.configurationFeedback.bySessionId[sessionId] ?? [];
-        const row = rows.find((item) => item.turnId === turnId);
+        // Execution identity separates startup settings from live changes before the first turn arrives.
+        const row = rows.find((item) => item.turnId === turnId && item.executionId === executionId);
         if (row) {
           if (entries.length > 0) {
             const bySetting = new Map(row.entries.map((entry) => [entry.configId, entry]));
@@ -78,8 +81,9 @@ export function buildSessionConfigurationFeedbackActions(
         draft.configurationFeedback.bySessionId[sessionId] = [
           ...rows,
           {
-            id: `configuration-feedback-${sessionId}-${turnId ?? "initial"}`,
+            id: `configuration-feedback-${sessionId}-${turnId ?? "initial"}-${executionId ?? "saved"}`,
             turnId,
+            executionId,
             createdAt,
             entries,
             retry: retry ?? undefined,

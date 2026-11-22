@@ -47,20 +47,42 @@ export function errorConfigurationResult(error: unknown): SessionConfigurationRe
   return result && typeof result === "object" ? (result as SessionConfigurationResult) : undefined;
 }
 
+function advertisedValueName(
+  state: AppState,
+  sessionId: string,
+  kind: "mode" | "model",
+  value: string,
+) {
+  const profileId = state.taskSessions.items[sessionId]?.agent_profile_id;
+  const agent = state.settingsAgents.items.find((item) =>
+    item.profiles.some((profile) => profile.id === profileId),
+  );
+  const config = state.availableAgents.items.find(
+    (item) => item.name === agent?.name,
+  )?.model_config;
+  const options = kind === "mode" ? config?.available_modes : config?.available_models;
+  return options?.find((option) => option.id === value)?.name || value;
+}
+
+function modeValueName(state: AppState, sessionId: string, value: string) {
+  const modes = state.sessionMode.bySessionId[sessionId]?.availableModes;
+  return (
+    modes?.find((mode) => mode.id === value)?.name ||
+    advertisedValueName(state, sessionId, "mode", value)
+  );
+}
+
 function valueName(state: AppState, sessionId: string, configId: string, value: string) {
-  if (configId === "mode") {
-    return (
-      state.sessionMode.bySessionId[sessionId]?.availableModes.find((mode) => mode.id === value)
-        ?.name || value
-    );
-  }
+  if (configId === "mode") return modeValueName(state, sessionId, value);
   const models = state.sessionModels.bySessionId[sessionId];
-  if (!models) return value;
-  const option = models.configOptions.find((item) => item.id === configId);
+  const option = models?.configOptions.find((item) => item.id === configId);
   const optionName = option?.options?.find((item) => item.value === value)?.name;
   if (optionName) return optionName;
   if (configId !== "model" && option?.category !== "model") return value;
-  return models.models.find((model) => model.modelId === value)?.name || value;
+  return (
+    models?.models.find((model) => model.modelId === value)?.name ||
+    advertisedValueName(state, sessionId, "model", value)
+  );
 }
 
 function feedbackOutcome({
@@ -95,11 +117,7 @@ function feedbackOutcome({
       }
       break;
     case "saved_for_launch":
-      return {
-        kind: "notice",
-        text: t("task:sessionConfigurationSaved", { value: requestedSetting }),
-        dismissible: true,
-      };
+      return { kind: "saved", label, value: requested };
     case "persistence_failed":
       return {
         kind: "notice",
@@ -183,17 +201,19 @@ function createFeedbackController(
     }
     const state = store.getState();
     const turnId = configurationFeedbackTurnId(state.turns.bySession[sessionId]);
+    const executionId = sessionConfigurationExecutionId(state, sessionId);
     const createdAt = new Date().toISOString();
     request = {
       id,
       sessionId,
-      executionId: sessionConfigurationExecutionId(state, sessionId),
+      executionId,
       turnId,
       createdAt,
     };
     if (source === "model") {
       state.recordSessionConfigurationFeedback(sessionId, {
         turnId,
+        executionId,
         createdAt,
         entries: [],
         retry: null,
@@ -222,10 +242,14 @@ function createFeedbackController(
     const currentTurnId = configurationFeedbackTurnId(state.turns.bySession[sessionId]);
     let retryAction: SessionConfigurationFeedbackUpdate["retry"];
     if (source === "model") {
-      retryAction = retry && turnId === currentTurnId ? { run: retry, executionId } : null;
+      retryAction =
+        retry && turnId === currentTurnId && request.executionId === executionId
+          ? { run: retry, executionId }
+          : null;
     }
     state.recordSessionConfigurationFeedback(sessionId, {
       turnId,
+      executionId: request.executionId,
       createdAt,
       entries: changes.map((change) => feedbackEntry(state, sessionId, executionId, change)),
       retry: retryAction,

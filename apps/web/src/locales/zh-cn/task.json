@@ -690,7 +690,7 @@
   "modelConfigurationPartialDescription": "提供方拒绝了 {{option}}。请从已确认状态重试。",
   "modelConfigurationPartialRetry": "从已确认状态重试",
   "sessionConfigurationClamped": "请求值：{{requested}}。代理已应用 {{effective}}。",
-  "sessionConfigurationSaved": "{{value}} 已保存，将在下次启动时使用。",
+  "sessionConfigurationSaved": "已保存 <0/>，供智能体启动时使用。",
   "sessionConfigurationChanged": "已更改 <settings/>。",
   "sessionConfigurationUnconfirmed": "无法确认 <setting/>。",
   "sessionConfigurationRejected": "无法应用 {{value}}。{{reason}}",
