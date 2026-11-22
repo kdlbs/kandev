@@ -13,6 +13,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/acpcompat"
 	"github.com/kandev/kandev/internal/events"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -350,6 +351,11 @@ func (m *Manager) claimPromptCompletion(
 		claim.readyPayload = newAgentEventPayloadWithTurnID(current, event.TurnID)
 		claim.readyPayload.AttemptID = event.AttemptID
 		copyDeliveryTerminalIdentity(&claim.readyPayload, event, current)
+		if !event.Recovered && event.TurnID != "" && event.PromptGeneration != 0 &&
+			event.PromptGeneration == current.promptGeneration && event.ConfigurationCommandResult != nil {
+			result := *event.ConfigurationCommandResult
+			claim.readyPayload.ConfigurationCommandResult = &result
+		}
 		// The Office cause belongs to the launch's first turn. Preserve it on
 		// that completion event, then clear it so later user turns on this
 		// session cannot inherit stale run causation.
@@ -1529,6 +1535,9 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 	if m.handleMCPAttachmentEvent(execution, &event, attemptID) {
 		return
 	}
+	if m.handleCodexMCPStartupWarningEvent(execution, &event, attemptID) {
+		return
+	}
 	if event.PromptGeneration == 0 || (event.Type != toolStatusComplete && event.Type != toolStatusError) {
 		m.recordActivity(execution, event)
 	}
@@ -1544,7 +1553,66 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 	}
 
 	event = m.handleAgentEventState(execution, event)
+	// Startup can use cached provider defaults while the previous confirmed
+	// model remains visible until the new execution applies its settings.
+	if event.Type == streams.EventTypeSessionModels &&
+		event.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored &&
+		execution.deliveryStartupSnapshot() != nil && !execution.isSessionInitialized() {
+		if settled, _ := event.Data["config_options_settled"].(bool); !settled {
+			return
+		}
+	}
 	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, event, attemptID)
+}
+
+func (m *Manager) handleCodexMCPStartupWarningEvent(
+	execution *AgentExecution,
+	event *agentctl.AgentEvent,
+	attemptID string,
+) bool {
+	if event.Type != streams.EventTypeMCPStartupWarning && !isCodexMCPStartupToolCall(execution, *event) {
+		return false
+	}
+
+	event.Type = streams.EventTypeMCPStartupWarning
+	event.PromptGeneration = 0
+	event.DeliverySubmissionID = ""
+	event.Text = codexMCPStartupWarningText(*event)
+	event.ToolName = ""
+	event.ToolTitle = ""
+	event.ToolStatus = ""
+	event.ToolStatusMissing = false
+	event.ToolCallContents = nil
+	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, *event, attemptID)
+	return true
+}
+
+func isCodexMCPStartupToolCall(execution *AgentExecution, event agentctl.AgentEvent) bool {
+	return execution != nil && event.Type == streams.EventTypeToolCall && acpcompat.IsCodexMCPStartupReport(
+		execution.AgentID,
+		event.ToolCallID,
+		event.ToolTitle,
+		event.ToolName,
+		event.ToolStatus,
+	)
+}
+
+func codexMCPStartupWarningText(event agentctl.AgentEvent) string {
+	message := strings.TrimSpace(event.Text)
+	if message == "" {
+		var details []string
+		for _, item := range event.ToolCallContents {
+			if item.Content != nil && item.Content.Type == "text" {
+				details = append(details, item.Content.Text)
+			}
+		}
+		message = strings.Join(details, "\n")
+	}
+	message = streams.SanitizeProviderMessage(message)
+	if message != "" {
+		return message
+	}
+	return streams.SanitizeProviderMessage(event.ToolTitle)
 }
 
 func (m *Manager) handleMCPAttachmentEvent(

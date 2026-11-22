@@ -20,3 +20,19 @@ func TestLateTerminalKeepsItsSubmissionDuringSuccessorDispatch(t *testing.T) {
 		t.Fatal("late terminal removed successor association")
 	}
 }
+
+func TestCodexMCPStartupWarningDoesNotClaimSubmission(t *testing.T) {
+	manager := &Manager{deliveryActiveID: "active-submission"}
+	manager.TrackDeliverySubmission("generation-submission", 42)
+	warning := adapter.AgentEvent{
+		Type:                 "mcp_startup_warning",
+		PromptGeneration:     42,
+		DeliverySubmissionID: "provider-submission",
+	}
+	if got := manager.deliverySubmissionIDForEvent(warning); got != "" {
+		t.Fatalf("startup warning submission = %q, want no prompt attribution", got)
+	}
+	if got := manager.deliverySubmissionIDForEvent(adapter.AgentEvent{PromptGeneration: 42}); got != "generation-submission" {
+		t.Fatalf("startup warning consumed prompt attribution = %q, want generation-submission", got)
+	}
+}

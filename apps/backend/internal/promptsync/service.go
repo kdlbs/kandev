@@ -307,6 +307,8 @@ func (s *Service) syncLocked(
 			// The service lock is held for the whole run, so a background run
 			// must not wait for GitHub's quota; a deferred run is retried later.
 			ctx = github.WithNonBlockingGitHubAdmission(github.WithGitHubWorkClass(ctx, github.WorkClassBackground))
+		} else {
+			ctx = github.WithNonBlockingGitHubAdmission(ctx)
 		}
 		if ctx, err = s.github.BindWorkspaceGitHubHost(ctx, cfg.WorkspaceID, cfg.GitHubHost); err != nil {
 			s.recordRunError(ctx, cfg, mode, err)

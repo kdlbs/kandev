@@ -28,6 +28,38 @@ export type SidebarViewApi = {
   group_indent?: boolean;
   collapsed_groups: string[];
   task_row?: SidebarTaskRowPresentationApi | null;
+  generated_plugin_grouping?: { reference: `plugin:${string}:${string}`; name: string };
+};
+
+export type SidebarViewUpdateApi = Partial<
+  Omit<SidebarViewApi, "id" | "collapsed_groups" | "generated_plugin_grouping">
+> & {
+  id: string;
+  generated_plugin_grouping?: SidebarViewApi["generated_plugin_grouping"] | null;
+  disclosure?: {
+    group: string;
+    add?: string[];
+    remove?: string[];
+    replace?: string[];
+    canonicalize?: boolean;
+  };
+};
+
+export type SidebarDraftUpdateApi = Omit<
+  SidebarViewUpdateApi,
+  "id" | "name" | "generated_plugin_grouping"
+> & {
+  base_view_id: string;
+  expected_group: string;
+  clear?: boolean;
+  require_existing?: boolean;
+};
+
+export type SidebarDraftSaveApi = {
+  base_view_id: string;
+  expected_group: string;
+  target_view_id: string;
+  name?: string;
 };
 
 export type SidebarViewDraftApi = {
@@ -41,6 +73,7 @@ export type SidebarViewDraftApi = {
   };
   group: string;
   group_indent?: boolean;
+  collapsed_groups?: string[];
   task_row?: SidebarTaskRowPresentationApi | null;
 };
 
@@ -333,8 +366,17 @@ export type UserSettingsUpdatePayload = {
   sidebar_view_state?: {
     workspace_id: string;
     views?: SidebarViewApi[];
+    views_create?: SidebarViewApi[];
+    views_upsert?: SidebarViewApi[];
+    views_update?: SidebarViewUpdateApi[];
+    view_ids_delete?: string[];
+    view_order?: string[];
+    view_order_base?: string[];
     active_view_id?: string;
     draft?: SidebarViewDraftApi | null;
+    draft_update?: SidebarDraftUpdateApi;
+    select_plugin_grouping?: SidebarViewApi;
+    save_draft?: SidebarDraftSaveApi;
   };
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;

@@ -1,5 +1,6 @@
 "use client";
 
+import { FindFileViewer } from "./find-file-viewer";
 import { IconFileOff } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import { FileViewerHeader } from "./file-viewer-header";
@@ -31,6 +32,7 @@ export function FileBinaryViewer({
         <IconFileOff size={48} strokeWidth={1.2} />
         <div className="text-sm font-medium">{t("task:cannotPreviewThisFile")}</div>
         <div className="text-xs">{t("task:binaryFile")}</div>
+        <FindFileViewer path={path} />
       </div>
     </div>
   );

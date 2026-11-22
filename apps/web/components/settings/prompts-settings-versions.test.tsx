@@ -264,7 +264,7 @@ describe("editing several prompts before one Save", () => {
     expect(inRow("plans").queryByTestId(unsavedTestId)).toBeNull();
   });
 
-  it("shows an override whose file left the repository without a version switch", () => {
+  it("shows an editable override after removal with a pathless tooltip", async () => {
     mocks.prompts = [{ ...override, alternate_content: "" }];
     renderPrompts();
     const item = row("other");
@@ -272,6 +272,11 @@ describe("editing several prompts before one Save", () => {
     expect(within(item).getByTestId("prompt-repository-removed").textContent).toBe(
       "Removed from repository",
     );
+    fireEvent.focus(within(item).getByTestId("prompt-override-badge"));
+    expect((await screen.findByRole("tooltip")).textContent).toContain(
+      "Its repository file is no longer available. Your local version remains the only version and is still editable.",
+    );
+    expect(screen.queryByText("p/other.md")).toBeNull();
     fireEvent.click(within(item).getByTestId(editButtonTestId));
     expect(within(item).getByTestId(editorTestId)).toHaveProperty("value", "My other text");
   });

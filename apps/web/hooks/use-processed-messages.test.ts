@@ -133,6 +133,33 @@ describe("useProcessedMessages passthrough mode", () => {
   });
 });
 
+it("places a local status row between turns without including it in persisted message counts", () => {
+  const prior = {
+    ...makeMessage("reply", "message"),
+    created_at: "2026-11-21T10:00:00Z",
+  };
+  const next = {
+    ...makeMessage("prompt", "message"),
+    author_type: "user" as const,
+    created_at: "2026-11-21T10:02:00Z",
+  };
+  const feedback = {
+    ...makeMessage("settings", "status"),
+    created_at: "2026-11-21T10:01:00Z",
+  };
+  const { result } = renderHook(() =>
+    useProcessedMessages([prior, next], "t1", "s1", null, { localStatusMessages: [feedback] }),
+  );
+
+  expect(
+    result.current.groupedItems.flatMap((item) =>
+      item.type === "message" ? [item.message.id] : [],
+    ),
+  ).toEqual(["reply", "settings", "prompt"]);
+  expect(result.current.allMessages.map((message) => message.id)).toEqual(["reply", "prompt"]);
+  expect(result.current.agentMessageCount).toBe(1);
+});
+
 describe("isSetupScriptMessage", () => {
   it("returns true for a script_execution with script_type=setup", () => {
     const msg = makeMessage("x", "script_execution", { script_type: "setup", status: "exited" });

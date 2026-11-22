@@ -5,6 +5,7 @@ const BASE = "/api/plugins/marketplace";
 
 // CatalogQuery is the filter/sort applied server-side to the merged catalog.
 export type CatalogQuery = {
+  extension?: string;
   q?: string;
   category?: string;
   sort?: "stars" | "name" | "recent";
@@ -14,6 +15,7 @@ export type CatalogQuery = {
 function toQueryString(query?: CatalogQuery): string {
   if (!query) return "";
   const params = new URLSearchParams();
+  if (query.extension) params.set("extension", query.extension);
   if (query.q) params.set("q", query.q);
   if (query.category) params.set("category", query.category);
   if (query.sort) params.set("sort", query.sort);

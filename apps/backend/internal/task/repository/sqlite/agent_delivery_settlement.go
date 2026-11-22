@@ -564,7 +564,8 @@ func (r *Repository) hasExactAgentDeliveryWorkflowOutcomeTx(
 		return false
 	}
 	switch effect.Outcome {
-	case "applied", "no_automatic_transition", "not_required":
+	case models.DeliveryWorkflowOutcomeApplied, models.DeliveryWorkflowOutcomeNoAutomaticTransition,
+		models.DeliveryWorkflowOutcomeNotRequired, models.DeliveryWorkflowOutcomeStoppedRecovery:
 		return true
 	default:
 		return false

@@ -86,6 +86,11 @@ text.
   Prompt Sync shall not change Workflow Sync configuration, scheduling, or
   results. The only Workflow Sync change in this package is
   REQ-INTEGRATIONS-PROMPT-SYNC-006.
+- **AC-INTEGRATIONS-PROMPT-SYNC-001.6:** When GitHub quota blocks a manual
+  sync, that sync shall return a retryable error before changing prompts.
+  Pending saves and removal shall be able to proceed while quota is
+  unavailable. Settings on desktop and phone shall identify the quota
+  block and tell the operator to retry when quota is available.
 
 ### REQ-INTEGRATIONS-PROMPT-SYNC-002: Prompt files
 

@@ -76,19 +76,17 @@ function SourceBadge({
   );
 }
 
-// PromptOverrideBadge marks a local override and names the repository file
-// it replaces.
+// PromptOverrideBadge marks an override and describes whether its repository
+// file is still linked.
 function PromptOverrideBadge({ prompt }: { prompt: CustomPrompt }) {
   const { t } = useTranslation();
+  const tooltip = hasRepositoryVersion(prompt)
+    ? t("settings:promptOverriddenTooltip", { path: prompt.source_path ?? "" })
+    : t("settings:promptRepositoryRemovedTooltip");
   return (
     <SourceBadge
       label={t("settings:promptOverridden")}
-      tooltip={t(
-        hasRepositoryVersion(prompt)
-          ? "settings:promptOverriddenTooltip"
-          : "settings:promptRepositoryRemovedTooltip",
-        { path: prompt.source_path ?? "" },
-      )}
+      tooltip={tooltip}
       testId="prompt-override-badge"
     />
   );

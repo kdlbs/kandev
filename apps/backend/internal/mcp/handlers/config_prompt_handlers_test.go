@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	promptdto "github.com/kandev/kandev/internal/prompts/dto"
 	promptmodels "github.com/kandev/kandev/internal/prompts/models"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -124,6 +125,37 @@ func TestHandleGetSharedPrompt_TrimsNameAndOmitsInternalID(t *testing.T) {
 	assert.Equal(t, "2025-01-02T02:04:05Z", payload["created_at"])
 	assert.Equal(t, "2025-01-02T03:04:05Z", payload["updated_at"])
 	assert.NotContains(t, payload, "id")
+}
+
+func TestSharedPromptReadOmitsStaleRepositoryPathForDetachedOverride(t *testing.T) {
+	reader := &sharedPromptReaderStub{prompt: &promptmodels.Prompt{
+		Name: "hook", Content: "Mine", Source: promptmodels.PromptSourceOverride,
+		SourcePath: "p/old-hook.md",
+	}}
+	h := &Handlers{promptReader: reader, logger: testLogger(t)}
+	read := func() sharedPromptRead {
+		resp, err := h.handleGetSharedPrompt(context.Background(), makeWSMessage(t, ws.ActionMCPGetSharedPrompt, map[string]string{
+			"name": "hook",
+		}))
+		require.NoError(t, err)
+		var result sharedPromptRead
+		require.NoError(t, json.Unmarshal(resp.Payload, &result))
+		return result
+	}
+
+	detached := read()
+	assert.Empty(t, promptdto.FromPrompt(reader.prompt).SourcePath)
+	assert.Empty(t, detached.SourcePath)
+	assert.Contains(t, detached.EditGuidance, "Only the local version remains in use")
+	assert.Contains(t, detached.EditGuidance, "repository file is no longer available")
+
+	reader.prompt = &promptmodels.Prompt{
+		Name: "hook", Content: "Mine", AlternateContent: "Repo",
+		Source: promptmodels.PromptSourceOverride, SourcePath: "p/current/hook.md",
+	}
+	linked := read()
+	assert.Equal(t, "p/current/hook.md", linked.SourcePath)
+	assert.NotContains(t, linked.EditGuidance, "no longer available")
 }
 
 func TestHandleGetSharedPrompt_RejectsBlankAndMapsNotFound(t *testing.T) {
