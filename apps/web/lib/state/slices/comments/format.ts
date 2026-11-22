@@ -20,13 +20,14 @@ export function commentAttachmentsForDelivery(comments: Comment[]): MessageAttac
   return comments.flatMap((comment) =>
     (comment.attachments ?? []).map((attachment) => ({
       ...attachment,
-      comment_id: comment.id,
+      comment_id: comment.attachments?.[0]?.attachment_id,
     })),
   );
 }
 
 export function appendCommentAttachmentMarker(lines: string[], comment: Comment): void {
-  if (comment.attachments?.length) lines.push("", `<!-- kandev-comment-files:${comment.id} -->`);
+  const groupId = comment.attachments?.[0]?.attachment_id;
+  if (groupId) lines.push("", `<!-- kandev-comment-files:${groupId} -->`);
 }
 
 /**

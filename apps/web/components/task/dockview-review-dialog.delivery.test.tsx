@@ -49,7 +49,7 @@ function registerFailureTests(surface: Surface) {
     clickDelivery(surface);
     expect(sends()).toHaveLength(2);
     expect(sends()[1].payload.content).toBe(submittedMarkdown);
-    expect(sends()[1].payload.client_message_id).not.toBe(sends()[0].payload.client_message_id);
+    expect(sends()[1].payload.client_message_id).toBe(sends()[0].payload.client_message_id);
     await acknowledge(1);
     assertRetained([], primary.sessionId);
     expect(isReviewOpen()).toBe(false);
@@ -71,8 +71,8 @@ function registerFailureTests(surface: Surface) {
 
     clickDelivery(surface);
     expect(sends()[0].payload).toMatchObject({
-      attachments: [{ ...file, comment_id: withFiles.id }],
-      content: expect.stringContaining(`<!-- kandev-comment-files:${withFiles.id} -->`),
+      attachments: [{ ...file, comment_id: file.attachment_id }],
+      content: expect.stringContaining(`<!-- kandev-comment-files:${file.attachment_id} -->`),
     });
     await acknowledge(0, "server refused this feedback");
     assertRetained([withFiles, ...notes.slice(1)], primary.sessionId);

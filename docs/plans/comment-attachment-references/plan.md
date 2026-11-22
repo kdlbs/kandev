@@ -39,3 +39,5 @@ Extend plan repository and message admission tests for ownership transfer, rejec
 ## Verification results
 
 Nine targeted browser scenarios passed across Chromium desktop and mobile. The tests cover both file editors, Review, plan Send and Run, walkthroughs and agent-output feedback. The same-name file test read the bytes at both paths from the actual mock agent prompt. Focused backend delivery and web composer tests passed. The web production build, TypeScript check, full web lint and localization ratchet passed. The browser runs used rebuilt local binaries with the repository freshness check disabled for ancillary fixtures. SSH terminal delivery was verified with a test agentctl endpoint. See the work orders for package-level results and host limitations.
+
+PR review verification covered replay on SQLite and PostgreSQL 17, legacy file comment IDs containing file paths, retry after lost acknowledgement, and SSH startup with the materialized prompt. The focused web suite passed 85 tests. The phone walkthrough passed in portrait and landscape.

@@ -976,7 +976,7 @@ func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentE
 	// until the session leaves STARTING, but the process never starts without a resize.
 	// This matches ResumePassthroughSession and restartPassthroughProcess.
 	startReq := buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, stripEnv, true)
-	startReq.InitialPromptChunks = passthroughInitialPromptChunks(execution, pt)
+	startReq.InitialPromptChunks = passthroughInitialPromptChunks(passthroughPromptText(execution, cmd.initialPrompt), pt)
 
 	processInfo, err := m.startPassthroughWithMCP(ctx, execution, interactiveRunner, startReq, operation)
 	if err != nil {
@@ -986,11 +986,18 @@ func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentE
 	return processInfo, nil
 }
 
-func passthroughInitialPromptChunks(execution *AgentExecution, pt agents.PassthroughConfig) int {
-	if !requiresPassthroughInitialPrompt(execution, pt) {
+func passthroughPromptText(execution *AgentExecution, prepared ...string) string {
+	if len(prepared) > 0 && prepared[0] != "" {
+		return prepared[0]
+	}
+	return getTaskDescriptionFromMetadata(execution)
+}
+
+func passthroughInitialPromptChunks(prompt string, pt agents.PassthroughConfig) int {
+	if !pt.PromptFlag.IsEmpty() || prompt == "" {
 		return 0
 	}
-	return len(agents.PlanPassthroughStdinChunks(getTaskDescriptionFromMetadata(execution), pt))
+	return len(agents.PlanPassthroughStdinChunks(prompt, pt))
 }
 
 // startPassthroughSession starts an agent in passthrough mode (direct terminal interaction).
@@ -1660,8 +1667,15 @@ func (m *Manager) attemptResumeFallbackForProcess(execution *AgentExecution, run
 		m.notifyFallbackInfrastructureFailure(runner, sessionID, "prepare copilot profile plugins", err)
 		return
 	}
+	if pt.PromptFlag.IsEmpty() {
+		cmd.initialPrompt, err = m.preparePassthroughCommentPrompt(ctx, execution, getTaskDescriptionFromMetadata(execution))
+		if err != nil {
+			m.notifyFallbackInfrastructureFailure(runner, sessionID, "prepare initial comment files", err)
+			return
+		}
+	}
 	startReq := buildInteractiveStartRequest(sessionID, execution, pt, env, cmd, rt.StripEnv, true)
-	startReq.InitialPromptChunks = passthroughInitialPromptChunks(execution, pt)
+	startReq.InitialPromptChunks = passthroughInitialPromptChunks(passthroughPromptText(execution, cmd.initialPrompt), pt)
 
 	processInfo, err := m.startPassthroughWithMCP(ctx, execution, runner, startReq, resolved.mcpOperation)
 	if err != nil {
@@ -1695,7 +1709,7 @@ func (m *Manager) attemptResumeFallbackForProcess(execution *AgentExecution, run
 	m.connectPassthroughServices(ctx, execution)
 
 	// Fallback path is a fresh session (no --resume) — re-inject the prompt.
-	go m.autoInjectInitialPrompt(execution, pt, processInfo.ID)
+	go m.autoInjectInitialPrompt(execution, pt, processInfo.ID, cmd.initialPrompt)
 }
 
 func (m *Manager) connectPassthroughServices(ctx context.Context, execution *AgentExecution) {
@@ -1893,8 +1907,8 @@ func (m *Manager) autoInjectInitialPrompt(execution *AgentExecution, pt agents.P
 		return
 	}
 	if remote, ok := runner.(*remotePassthroughRunner); ok {
-		count := len(agents.PlanPassthroughStdinChunks(getTaskDescriptionFromMetadata(execution), pt))
-		m.autoInjectInitialPromptWith(&remoteInitialPromptRunner{remotePassthroughRunner: remote, manager: m, count: count}, execution, pt, processID)
+		count := passthroughInitialPromptChunks(passthroughPromptText(execution, prompt...), pt)
+		m.autoInjectInitialPromptWith(&remoteInitialPromptRunner{remotePassthroughRunner: remote, manager: m, count: count}, execution, pt, processID, prompt...)
 		return
 	}
 	m.autoInjectInitialPromptWith(runner, execution, pt, processID, prompt...)
@@ -1911,10 +1925,7 @@ func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, executio
 		// and custom TUI agents) both land here for stdin delivery.
 		return
 	}
-	description := getTaskDescriptionFromMetadata(execution)
-	if len(prompt) > 0 {
-		description = prompt[0]
-	}
+	description := passthroughPromptText(execution, prompt...)
 	if description == "" {
 		// Nothing to inject (e.g. a non-LLM TUI tool with no task
 		// description). Generic passthrough tools launched without a task

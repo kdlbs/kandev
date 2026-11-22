@@ -10,12 +10,24 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/testutil"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
 
 func TestPlanCommentFilesSurviveExpiryAndAreReleasedOnDelete(t *testing.T) {
-	repo := newRepoForSessionTests(t)
+	assertPlanCommentFileLifecycle(t, newRepoForSessionTests(t))
+}
+
+func TestPostgresPlanCommentFilesSurviveExpiryAndAreReleasedOnDelete(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	assertPlanCommentFileLifecycle(t, repo)
+}
+
+func assertPlanCommentFileLifecycle(t *testing.T, repo *Repository) {
+	t.Helper()
 	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "owner"})
 	seedWorkspace(t, repo, "workspace")
 	seedAttachmentTask(t, repo, "task", "workspace")
@@ -33,7 +45,9 @@ func TestPlanCommentFilesSurviveExpiryAndAreReleasedOnDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"second", "first"}, snapshot.Comments[0].AttachmentIDs)
 
-	reloaded, err := repo.ListTaskPlanComments(ctx, "task")
+	reopened, err := NewWithDB(repo.db, repo.db, nil)
+	require.NoError(t, err)
+	reloaded, err := reopened.ListTaskPlanComments(ctx, "task")
 	require.NoError(t, err)
 	require.Equal(t, []string{"second", "first"}, reloaded.Comments[0].AttachmentIDs)
 	require.Equal(t, "same.txt", reloaded.Comments[0].Attachments[0].Name)

@@ -4,7 +4,7 @@ import type { ReviewComment } from "./types";
 
 it("keeps equal filenames attached below their respective review comments", () => {
   const comments: ReviewComment[] = ["first", "second"].map((id) => ({
-    id,
+    id: `src/main.go-${id}`,
     source: "review-file",
     status: "pending",
     sessionId: "session",
@@ -23,12 +23,12 @@ it("keeps equal filenames attached below their respective review comments", () =
     ],
   }));
   expect(formatReviewCommentsAsMarkdown(comments)).toContain(
-    "> first\n\n<!-- kandev-comment-files:first -->",
+    "> first\n\n<!-- kandev-comment-files:upload-first -->",
   );
   expect(
     commentAttachmentsForDelivery(comments).map((file) => [file.comment_id, file.attachment_id]),
   ).toEqual([
-    ["first", "upload-first"],
-    ["second", "upload-second"],
+    ["upload-first", "upload-first"],
+    ["upload-second", "upload-second"],
   ]);
 });

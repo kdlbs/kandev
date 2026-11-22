@@ -13,16 +13,12 @@ import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { usePRReviewRepositoryIdentity } from "@/hooks/domains/github/use-pr-review-repository-identity";
 import { useTaskRepositories } from "@/hooks/domains/kanban/use-task-repositories";
 import {
-  commentAttachmentsForDelivery,
-  formatReviewCommentsAsMarkdown,
-} from "@/lib/state/slices/comments/format";
-import {
   getCumulativeReviewRepositoryNames,
   isReviewMultiRepo,
   reviewFileKey,
 } from "@/components/review/types";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { generateUUID } from "@/lib/utils";
+import { prepareReviewCommentRequest, type ReviewFileAdmission } from "./review-comment-request";
 import { useToast } from "@/components/toast-provider";
 import { isReviewComment, useCommentsStore, type ReviewComment } from "@/lib/state/slices/comments";
 import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
@@ -149,30 +145,6 @@ function isPendingReviewComment(
     state.byId[comment.id] === comment &&
     state.pendingForChat.includes(comment.id)
   );
-}
-
-type ReviewFileAdmission = { key: string; id: string };
-
-function prepareReviewCommentRequest(
-  taskId: string,
-  sessionId: string,
-  comments: ReviewComment[],
-  pendingAdmission: { current: ReviewFileAdmission | null },
-) {
-  const attachments = commentAttachmentsForDelivery(comments);
-  const content = formatReviewCommentsAsMarkdown(comments);
-  const key =
-    attachments.length > 0 ? JSON.stringify([taskId, sessionId, content, attachments]) : null;
-  const messageId =
-    key && pendingAdmission.current?.key === key ? pendingAdmission.current.id : generateUUID();
-  pendingAdmission.current = key ? { key, id: messageId } : null;
-  return {
-    task_id: taskId,
-    session_id: sessionId,
-    client_message_id: messageId,
-    content,
-    ...(attachments.length > 0 && { attachments }),
-  };
 }
 
 function useReviewCommentDelivery(

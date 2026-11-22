@@ -137,7 +137,7 @@ func (r *Repository) createMessageWithTaskFeedback(
 		return nil, nil, err
 	}
 	message.Content = previewResolution.Content
-	if err := applyMessagePlanCommentFiles(ctx, tx, message, nil, planResolution, claim); err != nil {
+	if err = applyMessagePlanCommentFiles(ctx, tx, message, nil, planResolution, claim); err != nil {
 		return nil, nil, err
 	}
 	if err = r.persistDirectTaskFeedbackMessage(
@@ -248,7 +248,7 @@ func (r *Repository) createMessageWithTaskFeedbackAndQueue(
 		return nil, nil, err
 	}
 	message.Content = previewResolution.Content
-	if err := applyMessagePlanCommentFiles(ctx, tx, message, queued, planResolution, claim); err != nil {
+	if err = applyMessagePlanCommentFiles(ctx, tx, message, queued, planResolution, claim); err != nil {
 		return nil, nil, err
 	}
 	if err = r.persistQueuedTaskFeedbackMessage(

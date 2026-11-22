@@ -331,7 +331,7 @@ describe("useRunComment — busy agent queues", () => {
     const comment = { ...makeDiffComment(), attachments: [queuedReviewFile] };
     await expect(result.current.runComment(comment)).resolves.toEqual({ queued: true });
     expect(mockQueueMessage.mock.calls[0]?.[0].attachments).toEqual([
-      { ...queuedReviewFile, comment_id: comment.id },
+      { ...queuedReviewFile, comment_id: queuedReviewFile.attachment_id },
     ]);
     expect(mockAppendToQueue).not.toHaveBeenCalled();
   });

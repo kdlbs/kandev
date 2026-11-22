@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -43,6 +44,9 @@ func queueAttachmentsFromV1(attachments []v1.MessageAttachment) []messagequeue.M
 func (h *QueueHandlers) canonicalizeQueuedCommentFiles(
 	ctx context.Context, taskID, content string, attachments []messagequeue.MessageAttachment,
 ) error {
+	if len(attachments) > models.MaxMessageAttachmentCount {
+		return models.ErrTooManyAttachments
+	}
 	files := queueAttachmentsToV1(attachments)
 	if !v1.HasCommentAttachments(files) {
 		return nil
