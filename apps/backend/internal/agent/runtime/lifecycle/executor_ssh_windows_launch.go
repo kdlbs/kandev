@@ -87,7 +87,14 @@ func startRemoteWindowsAgentctlOnPort(
 	script := windowsAgentctlLaunchScript(agentctlBin, workspacePath, sessionDir, port)
 	out, stderr, err := runPowerShellEnvelope(ctx, client, shell, powerShellEnvelope{Login: true, Env: env, Script: script})
 	if err != nil {
-		return 0, fmt.Errorf("ssh: launch Windows agentctl.exe: %w (stderr: %s)", err, strings.TrimSpace(stderr))
+		detail := strings.TrimSpace(stderr)
+		// An agentctl that cannot bind exits before the script finds its PID,
+		// so the bind failure arrives here instead of in the readiness log.
+		if strings.Contains(detail, "HTTP server failed to bind") {
+			return 0, fmt.Errorf("%w (port %d); launch stderr:\n%s", errSSHAgentctlPortInUse, port,
+				lastLines(detail, sshAgentctlLogTailLines))
+		}
+		return 0, fmt.Errorf("ssh: launch Windows agentctl.exe: %w (stderr: %s)", err, detail)
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(out))
 	if err != nil {
