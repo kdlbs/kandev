@@ -606,12 +606,14 @@ automatically.
 
 `messages` reads historical **conversation content** (`Messages().List`):
 one user/agent message per row (`id`, `session_id`, `task_id`, `turn_id`,
-`author_type`, `content`, `type`, `created_at`), filterable by session ids,
-task ids, a `created_at` time range (`since` inclusive / `until` exclusive,
-RFC3339), and message `types`. Content is sanitized; kandev-injected
-`<kandev-system>` blocks are stripped, exactly like the `message.added` bus
-event, so raw system prompts are never exposed. `author_type` is `user` or
-`agent` (there is no `system` author).
+`author_type`, `content`, `type`, `created_at`, `source`), filterable by
+session ids, task ids, a `created_at` time range (`since` inclusive / `until`
+exclusive, RFC3339), and message `types`. Content is sanitized;
+kandev-injected `<kandev-system>` blocks are stripped, so raw system prompts
+are never exposed through this read. `author_type` is `user` or `agent`
+(there is no `system` author). `source` is the message's persisted
+provenance, for example `plugin:<id>` on a message a plugin sent, and is empty
+when none was recorded. No other message metadata is exposed.
 
 ## Config schema validation and secret fields
 
@@ -717,6 +719,12 @@ here.
 
 > Event list current as of 2026-07-16; regenerate from
 > `apps/backend/internal/events/types.go` if this page drifts from the code.
+
+`message.*` event payloads are the bus payloads that the native chat UI
+consumes. Their `content` is stripped of `<kandev-system>` blocks, but a
+payload may also include `raw_content` with the unstripped content, and then
+`metadata.has_hidden_prompts` is `true`. A plugin that must not handle system
+content reads only `content`, or reads messages through `Messages().List`.
 
 ## Runtime-managed fields (do not author these)
 

@@ -2328,9 +2328,19 @@ conversation content (capability `api_read:messages`). Filter by `SessionIDs`,
 `TaskIDs`, a `Since`/`Until` `created_at` window (RFC3339; `Since` inclusive,
 `Until` exclusive, the natural way to fetch "yesterday"), and message
 `Types`. Each `Message` carries `id`, `session_id`, `task_id`, `turn_id`,
-`author_type` (`user` or `agent`), `content`, `type`, and `created_at`.
-`content` has kandev's injected `<kandev-system>` blocks stripped; a plugin
-never sees raw system prompts.
+`author_type` (`user` or `agent`), `content`, `type`, `created_at`, and
+`source`. `content` has kandev's injected `<kandev-system>` blocks stripped,
+so this read never returns raw system prompts. `Source` is the persisted
+`metadata.source` provenance only, for example `plugin:<id>` on a message your
+plugin sent through `Messages().Send`; it is empty when none was recorded. A
+chat bridge compares it with its own `plugin:<id>` to skip echoes of the
+messages it delivered. The same field is set on exact message observations
+(`ListSanitizedMessages`).
+
+`message.*` bus events are not sanitized the same way. Their `content` is
+stripped, but a payload may also carry `raw_content` with the unstripped
+`<kandev-system>` content. A plugin that must not handle system content uses
+`content` or `Messages().List` and ignores `raw_content`.
 
 ### Pending agent interactions
 

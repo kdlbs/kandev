@@ -1,7 +1,7 @@
 ---
 id: "03-host-plugin-event-sanitization"
 title: "Strip raw_content from plugin event deliveries"
-status: done
+status: cancelled
 wave: 2
 depends_on: []
 plan: "plan.md"
@@ -34,18 +34,14 @@ contract: plugins never see injected system content.
 - **Output contract:** summary, files changed, tests run, blockers, risks, and task/plan status update.
 
 ## Results
-The plugin deliverer now drops `raw_content` from every `message.*` payload
-after `dataToMap` copies the bus event, so plugins receive only the stripped
-`content` and `metadata.has_hidden_prompts`. The shared bus event is not
-modified, so WebSocket clients and other subscribers keep `raw_content`.
+Cancelled by the maintainer decision on
+[#5420](https://github.com/kdlbs/kandev/issues/5420#issuecomment-7083766483):
+`message.*` event payloads keep `raw_content` so existing consumers do not
+break. The field came from the web UI chat rendering (#272), and plugin
+delivery forwards the bus payload unchanged. `Messages().List` stays stripped.
 
-- **Files:** `apps/backend/internal/plugins/delivery/payload.go`
-  (`sanitizePluginPayload`), `apps/backend/internal/plugins/delivery/deliverer.go`
-  (call at the conversion point), `apps/backend/internal/plugins/delivery/deliverer_test.go`
-  (`TestDeliverer_StripsRawContentFromMessageEvents`, `message.added` and
-  `message.updated`; it also asserts the shared event keeps `raw_content`).
-- **Tests:** red first (both subtests failed with `raw_content` present), then
-  `cd apps/backend && go test ./internal/plugins/delivery/...` passed;
-  `scripts/lint-go-changed` on the three files reported 0 issues.
-- **Risks:** a third-party plugin reading `raw_content` loses it. The public
-  docs already promise stripped content; task 04 adds the explicit statement.
+The stripping change was implemented and then reverted on this branch; plugin
+delivery is unchanged from `main`. Task 04 instead corrects the public docs:
+`message.*` payloads may include `raw_content` with the unstripped
+`<kandev-system>` content, and plugins that must not handle system content
+rely on `content` or `Messages().List`.

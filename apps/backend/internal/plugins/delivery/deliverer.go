@@ -350,7 +350,6 @@ func (d *Deliverer) makeHandler(w *pluginWorker, pattern string) bus.EventHandle
 				zap.String("plugin_id", w.id), zap.String("event_type", subject), zap.Error(err))
 			return nil
 		}
-		sanitizePluginPayload(subject, payload)
 
 		w.enqueue(Delivery{
 			PluginID: w.id,

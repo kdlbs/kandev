@@ -3,24 +3,7 @@ package delivery
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 )
-
-// messageSubjectPrefix marks the message.* subjects whose payloads carry the
-// unstripped raw_content field for the native UI.
-const messageSubjectPrefix = "message."
-
-// rawContentKey holds a message's content including injected
-// <kandev-system> blocks. Plugins only ever receive the stripped content.
-const rawContentKey = "raw_content"
-
-// sanitizePluginPayload removes fields plugins must never observe from a
-// payload already copied by dataToMap, so other bus subscribers keep them.
-func sanitizePluginPayload(subject string, payload map[string]any) {
-	if strings.HasPrefix(subject, messageSubjectPrefix) {
-		delete(payload, rawContentKey)
-	}
-}
 
 // dataToMap converts a bus.Event's Data field (arbitrary JSON-serializable
 // Go value: struct, map, nil, ...) into the map[string]any shape
