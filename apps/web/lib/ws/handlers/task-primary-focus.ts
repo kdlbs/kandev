@@ -44,6 +44,7 @@ import {
 import { findTaskInState } from "./task-lookup";
 import {
   captureOwner,
+  inheritFollowIntent,
   type FollowOwner,
   type PendingFollow,
   type RemovalOwner,
@@ -430,7 +431,7 @@ function reverifyLifecycleFollow(
 ): void {
   pending.lifecycleRecipient ||= source === "terminal";
   if (pending.source === "removed") {
-    pending.deferred = { source, targetSessionId: targetSessionId ?? null };
+    pending.deferred ??= { source, targetSessionId: targetSessionId ?? null };
     return;
   }
   pending.cancel();
@@ -532,7 +533,9 @@ export function followRemovedSession(
   const owningTask = owner.taskId;
   observeRemoval(store, owningTask, sessionId);
   if (ownsSelection(store, owner)) {
-    pendingByStore.get(store)?.cancel();
+    const existing = pendingByStore.get(store);
+    inheritFollowIntent(owner, existing);
+    existing?.cancel();
     verifyPreviousSession(store, owner);
   } else {
     void verifyRemoval(store, owner).catch(() => {

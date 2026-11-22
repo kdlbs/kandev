@@ -4606,3 +4606,37 @@ one worker and no retries. The one failure, the inactive-parked
 split-neighbour case, failed before any removal: its second page booted an
 empty board. `r42-isolated-summary.log` passes it 3 of 3 alone.
 `r42-phone-summary.log` passes ten phone cases.
+
+### Production-fix review round 43 remediation
+
+Opus child `ad1c32cb-38b9-4016-8080-19a6efab79b8` reviewed
+`cdf1ec55c65ff0517825dfec3caea1137ac32680`: two P3s, not clean. Completed
+production rounds 43; consecutive clean 0. R42's deferral was confirmed for
+its named schedules, including resume-time primary projection, ownership
+re-gating and genuine-removal confirmation.
+
+- P3: a `session.removed` that arrived after an in-flight primary, terminal or
+  new-session follow for the viewed session cancelled that owner without
+  carrying its intent, so a disproof left the view on the old session. A
+  duplicate removal discarded an existing `deferred` the same way. The new
+  removal owner now inherits a same-task, same-session, same-selection
+  owner's intent (`inheritFollowIntent`): a non-removal owner's source and
+  target, or a removal owner's `deferred` and resumed marker, with its
+  lifecycle-recipient flag.
+- P3: deferral used "latest wins", so primary then terminal resumed as a
+  terminal follow and ranked the newest sibling instead of the promoted
+  primary. Ordinary verification keeps the owner's source and only marks a
+  lifecycle recipient; the removal branch now keeps the first deferred intent
+  the same way.
+- `r43-red.log`: at `cdf1ec5` the single and duplicate removal-after-promotion
+  cases stay on `old` and the observed primary-then-terminal case lands on
+  `latest`; the unobserved control lands on `next`.
+
+Verification: `r43-units.log` 12 files/316 tests (adds the primary-lifecycle
+ordering suite); strict changed-file lint, production typecheck, fresh
+frontend build and spec/catalog/harness checks pass. `r43-final-summary.log`:
+39 of 41 desktop/tablet/maximize cases pass with one worker and no retries
+under host load of about 20. The two failures (Go-boot hidden explicit
+conversation, rebuilding-parked split neighbour) timed out on initial chat
+visibility before any removal; `r43-isolated-summary.log` passes both 3 of 3
+alone. `r43-phone-summary.log` passes ten phone cases.

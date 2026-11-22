@@ -52,3 +52,14 @@ export function captureOwner(
     workflowFocus: state.workflowSessionFocus,
   };
 }
+
+/** A removal observed over an in-flight owner keeps that owner's intent for a disproof. */
+export function inheritFollowIntent(owner: FollowOwner, existing: FollowOwner | undefined): void {
+  if (existing?.taskId !== owner.taskId) return;
+  if (existing.previousSessionId !== owner.previousSessionId) return;
+  if (existing.selectedSessionId !== owner.selectedSessionId) return;
+  const { source, targetSessionId } = existing;
+  owner.deferred = source === "removed" ? existing.deferred : { source, targetSessionId };
+  owner.resumedAfterDisproof = existing.resumedAfterDisproof;
+  owner.lifecycleRecipient ||= existing.lifecycleRecipient;
+}

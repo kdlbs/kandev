@@ -900,3 +900,11 @@ Opus child `6b661e78-f546-46c5-beb8-2b14150b34a4` reviewed
 production rounds 42; consecutive clean 0. Follow intent that arrives while a
 removal is unproven now resumes as ordinary verification when the removal is
 disproved. R43 follows normal verified delivery.
+
+### Production review R43
+
+Opus child `ad1c32cb-38b9-4016-8080-19a6efab79b8` reviewed
+`cdf1ec55c65ff0517825dfec3caea1137ac32680`: two P3s, not clean. Completed
+production rounds 43; consecutive clean 0. A removal observed over an
+in-flight follow now keeps that intent, and a later lifecycle transition no
+longer replaces a deferred primary target. R44 follows normal verified delivery.

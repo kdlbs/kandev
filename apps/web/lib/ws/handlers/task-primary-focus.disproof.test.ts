@@ -9,6 +9,7 @@ import {
   flushFocusWork,
   membership,
   notifySibling,
+  notifyState,
   promote,
   response,
   selectedStore,
@@ -119,5 +120,35 @@ it.each([1, 2])(
     // A second 404 after the disproof is not retried: fetch and list disagreement stays bounded.
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(store.getState().tasks.activeSessionId).toBe(misses === 1 ? "next" : "old");
+  },
+);
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+it.each(["single", "duplicate"] as const)(
+  "keeps an in-flight promotion when a %s removal arrives after it and is disproved",
+  async (removals) => {
+    const store = withSiblings();
+    vi.mocked(listTaskSessions).mockResolvedValue(membership("old", "next", "latest"));
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("WAITING_FOR_INPUT"));
+    if (removals === "duplicate") followRemovedSession(store, "old", "t1");
+    promote(store, "next");
+    followRemovedSession(store, "old", "t1");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("next");
+  },
+);
+
+// @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+it.each([true, false])(
+  "keeps the primary target when a terminal transition follows it (observed=%s)",
+  async (observed) => {
+    const store = withSiblings();
+    vi.mocked(listTaskSessions).mockResolvedValue(membership("old", "next", "latest"));
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    if (observed) followRemovedSession(store, "old", "t1");
+    promote(store, "next");
+    notifyState(store, "COMPLETED", "2026-11-19T12:00:01Z");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("next");
   },
 );
