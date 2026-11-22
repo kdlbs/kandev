@@ -98,6 +98,13 @@ guard after the exact recorded container exits, stopped-agent tail replay and
 Resume, and the same-session Resume control. The backend and E2E fixtures were
 rebuilt before the final container run.
 
+The PR fixup head 4920de0e591ad17d87d13f8ea279a6a1f729229c was validated on
+its exact merge with main. Its focused merged-tree regressions and PostgreSQL
+owner-change test passed. The E2E shard that failed once also failed on main;
+the retries-disabled synthetic-merge replay and the single CI rerun both
+passed. At fixup head 4920de0, all checks were terminal with none failed or
+pending, and no review threads remained unresolved.
+
 ## Risks
 
 - A plugin can save a newer checkpoint during attachment. Check that the row

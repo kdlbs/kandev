@@ -195,3 +195,29 @@ submission and turn binding; pending tool-message cleanup; Stop arbitration
 after the settlement write; and the distinction between an exited recorded
 container and ambiguous Docker states. The E2E helper resolves only fixture
 credential IDs and passes the selected token through stdin.
+
+### PR review fixup verification
+
+The fixup commit 4920de0e591ad17d87d13f8ea279a6a1f729229c passed the
+focused lifecycle, SQLite, and orchestrator regressions on the exact synthetic
+merge tree for base 018808f8d9494f0e614648a90861d85e4e1dc857. The tree matched
+GitHub's synthetic merge tree ca9fa5150a902fa1a4fb9f40c70a23107a0d9e8b.
+
+- Lifecycle tests passed:
+  go test ./internal/agent/runtime/lifecycle -run
+  'Test(RemoteRecoverySettles|RemoteRecoveryCreatesInterrupted|RemoteRecoveryAdopts|StoppedRemote|ApplyRemoteLegacy|ValidateRemoteSession|FailedRemote|FailedRecovery|StopClaimsStoppedRemote)' -count=1
+- SQLite owner-CAS and delivery-retention tests passed:
+  go test ./internal/task/repository/sqlite -run
+  'Test(RepairExecutorRunningDeadIfOwnerCurrentValidatesOwnerBeforeRepair|SettleStoppedRemoteExecutionIfOwnerCurrent|ConfirmExecutorRunningAbsentIfOwnerCurrentRejectsReappearedRow|DeliveryRetentionWorkflowOutcome|DeliveryRetentionWorkflowOutcomeWriteFailure|DeliveryRetentionTurnlessTerminalBindsWorkflowTurn)' -count=1
+- Native Resume regressions passed:
+  go test ./internal/orchestrator -run
+  'Test(NativeResumeAfterLateRecoveryNoticePreservesConversationWithoutPrompt|RecoverSessionUnknownPromptKeepsNativeHistory|NativeResumeStartFailureLeavesUnknownDeliveryUnacknowledged|AgentStoppedAfterNativeResumeStartFailureDoesNotCompleteTurn)' -count=1
+- TestPostgresSettleStoppedRemoteExecutionIfOwnerCurrentSerializesOwnerChange
+  passed against a disposable PostgreSQL 16 database.
+- The focused mobile Claude Monitor test passed with retries disabled. The
+  downloaded shard 16/28 manifest then passed on the merged tree with the same
+  four-process partition and retries disabled: 185 passed, 1 skipped.
+- The first current-head E2E attempt failed at the same mobile Monitor card
+  assertion as main run 44934819406. The failed current-head jobs were rerun
+  once; attempt 2 passed. At fixup head 4920de0, 92 checks passed, 15 were
+  skipped, and none failed or remained pending.
