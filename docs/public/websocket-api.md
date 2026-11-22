@@ -363,6 +363,79 @@ When a view is not covered by current workspace data, the web sidebar reads one 
 
 The route is read-only. It rejects unknown request fields and limits the request body to 256 KiB. Clients must not send pin, manual ordering, or subtask-order preferences in the query; the server reads those from the authenticated user's settings. The existing workspace task-list route remains available for its other callers.
 
+Complete plugin groupings also return their `grouping_revision`,
+`grouping_generation` and complete `grouping_keys`. With empty inline collapse
+keys, `disclosure_view_id` resolves disclosure from that authenticated user's
+saved view in the requested workspace. The server intersects it with the full
+provider snapshot, not the current page. This supports recovery of retired
+disclosure without increasing the request cap. The web client reconciles those
+keys through its saved-view journal before admitting a bounded successor page.
+
+Saved-view edits use scoped `sidebar_view_state` on
+`PATCH /api/v1/user/settings`. `views_create` inserts absent IDs only.
+`views_update` carries sparse changed fields for existing IDs and never
+recreates a deleted view. Its optional `disclosure` has a `group` owner and
+`add`/`remove` key arrays; `replace` is reserved for an explicit grouping change.
+An insert-only creation and a later sparse update may share an ID in one request.
+`views_upsert` intentionally creates/replaces whole views for explicit imports.
+`view_ids_delete` removes IDs. Survivors retain order and new IDs append; send
+complete `view_order` only for explicit reorder. These mutate one `workspace_id`
+under the normal settings CAS. Do not mix view deltas with `views` replacement.
+The 50-view and 2 MiB request limits remain.
+
+`draft_update` carries sparse presentation fields under `base_view_id` and
+`expected_group`; `clear: true` discards only that matching draft.
+Do not mix it with full `draft` replacement. `select_plugin_grouping` supplies a
+generated-default view candidate: the CAS reuses a latest unchanged matching
+view or creates it with a unique name, protecting custom views, drafts and the
+view limit. Use the returned active ID, not the candidate ID, as authoritative.
+
+For a draft whose grouping differs from its base view, optional draft
+`collapsed_groups` stores that preview's disclosure independently. Omitting it
+starts the different grouping expanded; a same-group draft uses its base view.
+Saved-disclosure recovery also resolves the matching draft. The client checks
+the captured workspace, provider identity, owner and expected disclosure again
+when queued compaction is admitted. Draft edits merge only changed fields and
+disclosure intent onto the latest acknowledged state. A failed cleanup write
+retains saved preferences and offers manual Retry; the metadata-read deadline
+does not retry an admitted settings write. The probe page is never task data.
+Compaction also disables automatic network retries. Skipped compaction does not
+acknowledge failed predecessor edits that still have an ordinary successor.
+
+
+Complete plugin groupings use `group: "plugin:<plugin-id>:<grouping-id>"`.
+These always use the server query, even when the browser has complete resident
+task coverage. The server authorizes before saved-preference lookup and provider
+execution, then renews workspace authorization after the RPC before reading
+tasks. Missing personal preferences cannot mask a workspace-access denial.
+Classification is joined to filtered roots before pagination and never grants
+access to another workspace's tasks.
+
+Successful plugin pages add `grouping_revision` and `grouping_generation`;
+clients can send their previous values on a later-page request. A changed source
+resets that request to page one. `query_key` includes both source identities.
+Entries can add `group_color`. `total_tasks` counts unique matching tasks;
+`total_visible_tasks` and page bounds count visible occurrences, including roots
+and descendants repeated across groups.
+
+A missing, disabled, failed, timed-out, malformed, oversized, or incomplete
+provider returns HTTP 503 with `error_code: "sidebar_grouping_unavailable"`.
+This is not a successful empty snapshot. Workspace authorization failures remain
+separate and clear previously retained results.
+The complete-snapshot wire format rejects duplicate recognized fields and
+case-folded aliases before interpreting classification or raw array limits.
+Such ambiguous replies cannot become successful **Untagged** pages.
+
+`GET /api/plugins/sidebar-groupings` returns active compatible provider metadata,
+also supplied as boot `sidebarGroupings`. The
+`plugin.sidebar-grouping.updated` WebSocket notification carries either
+`{plugin_id, workspace_id}`, install-wide `{plugin_id}`, or
+`{catalog: true, plugin_id?}`. Workspace notifications use workspace authorization;
+global notifications contain identity only, never classification/state values.
+Catalog events with a plugin identity fence only that provider before metadata
+refresh. A catalog refresh preserves unchanged provider generations and pages;
+store/account/workspace changes and reconnect retain their broader fences.
+
 A query accepts up to 20 filter clauses. Each `in` or `not_in` membership filter
 accepts up to 1,000 values, including an empty list. Each decoded string is
 limited to 256 UTF-8 bytes; JSON escaping does not consume that decoded limit.

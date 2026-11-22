@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-10-11
-updated: 2026-11-12
+updated: 2026-11-22
 owners:
   - kandev
 ---
@@ -33,6 +33,23 @@ inconsistent delivery records do not strand their saved conversations.
 - **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.3:** Recovery shall validate every unresolved submission in the affected session before acknowledging uncertainty. One matching record shall not override conflicting or unverifiable evidence. Missing ownership, process-termination, native-state, or payload evidence shall leave that session inspectably blocked while unrelated eligible sessions recover.
 - **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.4:** Successful automatic restoration or explicit native Resume shall persist and publish a newer restored recovery snapshot with resolution of the matching delivery block. Desktop and phone shall show the ordinary available composer after recovery and reload, without an obsolete interruption banner. A distinct later instruction shall use normal admission; the old interrupted submission remains non-replayable.
 - **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.5:** Repeated reconciliation and crashes between journal and SQL writes shall converge from retained progress without duplicate restore, fabricated completion, or clearing independent recovery causes. Restored sessions shall not repeatedly consult retired runtime handles or rediscover resolved historical recovery as new uncertainty. A newer notice for an identical source may refresh an unallocated checkpoint; allocating a candidate pins its source. Later partial failure notices shall preserve the same submission's known stream binding; existing partial fences require authenticated owner and payload evidence before repair.
+
+- **AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.6:** When authenticated
+  evidence proves that an agent stopped in its retained remote workspace,
+  restart reconciliation shall project its retained output before settling
+  the stopped execution. If an open turn lacks a proven outcome, preserve
+  its interruption and allow ordinary Resume when the existing admission
+  checks pass. A formerly active session shall then show that it needs
+  Resume. Settlement shall leave the agent stopped and preserve queued work.
+  For a failed Remote Docker or plugin session without a delivery source,
+  recovery may release its startup guard only after the exact authenticated
+  agentctl association proves the recorded agent is stopped. A failed
+  tokenless Remote Docker session may also release its guard when the executor
+  definitively proves that the exact recorded container exited during the
+  outage. Keep the session failed for ordinary Resume. A running or unknown
+  agent, a missing agentctl instance inside a still-running container, or
+  ambiguous container evidence does not provide this proof. Plugin sessions
+  still require the authenticated stopped association.
 
 ### REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-002: Convergent interrupted-session recovery
 

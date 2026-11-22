@@ -911,6 +911,23 @@ export type CustomPrompt = {
   name: string;
   content: string;
   builtin: boolean;
+  /**
+   * "sync" when Prompt Sync owns the prompt (read-only); "override" when an
+   * operator replaced a synced prompt locally (editable, sync leaves it).
+   */
+  source?: "manual" | "sync" | "override";
+  /** Repository file a synced or overridden prompt comes from. */
+  source_path?: string;
+  /**
+   * True for an override adopted from a prompt whose name a repository file
+   * also uses, until the user chooses the local or repository version.
+   */
+  conflict?: boolean;
+  /**
+   * The version not in use: the kept local version of a synced prompt, or
+   * the repository version of an override.
+   */
+  alternate_content?: string;
   created_at: string;
   updated_at: string;
 };
@@ -971,10 +988,13 @@ export type SidebarTaskQuery = {
   };
   group: string;
   collapsed_group_keys: string[];
+  disclosure_view_id?: string;
   collapsed_task_ids: string[];
   page: number;
   page_size: number;
   locale: string;
+  grouping_revision?: string;
+  grouping_generation?: string;
 };
 
 export type SidebarTaskPageEntry = {
@@ -983,6 +1003,7 @@ export type SidebarTaskPageEntry = {
   task?: Task;
   group_key?: string;
   group_label?: string;
+  group_color?: string;
   workflow_name?: string;
   workflow_id?: string;
   workflow_step_id?: string;
@@ -1009,6 +1030,9 @@ export type SidebarTaskPageResponse = {
   total_visible_tasks: number;
   has_previous: boolean;
   has_next: boolean;
+  grouping_revision?: string;
+  grouping_generation?: string;
+  grouping_keys?: string[];
   entries: SidebarTaskPageEntry[];
 };
 

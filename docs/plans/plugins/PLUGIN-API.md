@@ -2021,6 +2021,41 @@ plugin is unavailable, the list and controls temporarily use their built-in defa
 the saved selection remains intact and resumes when the plugin registers again. The host
 catches callback errors and revokes registrations and active subscriptions on unload.
 
+### Complete saved-sidebar groupings
+
+Complete sidebar classification is manifest-owned, not a browser registration.
+`sidebar_groupings: [{id, label, label_key?, action}]` names an authenticated
+workspace action and requires the unreleased `min_kandev_version` floor `0.103.0`.
+Stable 0.102.0 lacks this contract; coordinate publication with the supporting
+Host release. Matching development builds remain usable.
+Backend-only plugins are eligible. Active catalog metadata contains
+`{reference, label, labelKey?, generation}`, where `reference` is
+`plugin:<plugin-id>:<grouping-id>`.
+
+The browser SDK exports `SidebarGroupingReference`, `SidebarGroupingProvider`,
+and `SidebarGroupingSnapshot`. A snapshot has `version: 1`, nonblank stable
+`revision`, `complete: true`, `groups: {id,label,color?}[]`, and
+`memberships: {task_id,group_id}[]`. The host invokes the action after workspace
+authorization, outside the task read transaction, with a five-second deadline
+and the unchanged 1 MiB action-response limit. Values are bounded at 1,000 and
+raw membership pairs at 10,000. Partial results are unavailable, never truncated.
+
+Saved view grouping, sorting, filters, presentation, and collapse stay in the
+ordinary workspace journal. Generated-view selection resolves reuse/create
+atomically in the backend settings CAS; the browser adopts its returned active
+ID without inserting a provisional view. Reuse requires an unchanged
+generated-origin marker, preserving renamed/custom views. Sparse field and
+group-owned disclosure updates merge inside that CAS rather than replacing
+stale after-images. Missing providers retain saved references and expose
+recovery instead of reverting to a built-in.
+Source revision/generation and client catalog/workspace/account epochs fence
+query identity, retained pages, hydration, and late metadata responses.
+
+See [the authoring contract](../../public/plugins-authoring.md#complete-saved-sidebar-groupings)
+for validation and [the sidebar query API](../../public/websocket-api.md#query-sidebar-tasks-over-http)
+for paging and invalidation. `/tasks` facets above remain page-local.
+
+
 ## Registry internals (host side)
 
 `apps/web/lib/plugins/registry.ts` holds a singleton `PluginRegistry` whose data
@@ -2138,3 +2173,31 @@ Ship a bundle that on `initialize` registers: a nav item "Hello" → route
 `/plugins/hello` rendering a native page (uses `host.jsx` + `host.ui`), a
 `task-sidebar` slot component, and a WS handler for `task.created` that updates a
 counter in its page via the plugin's own module state. No bundled React.
+
+### File viewers
+
+`registry.registerFileViewer({ id, Component })` registers a native component
+against `ui.file_viewers[].id`. The manifest owns `title` and `extensions`.
+Undeclared or duplicate runtime registrations fail. Only ready generations can
+be selected. Unload revokes registrations and aborts mounted preview work.
+
+```ts
+interface FileViewerProps {
+  file: { name: string; sizeBytes: number; generation: string };
+  readBytes(signal: AbortSignal): Promise<ArrayBuffer>;
+}
+```
+
+The host mounts a component only after applicable external-file consent and
+successful bounded byte delivery. Treat the buffer as owned by this preview;
+a worker may receive it by transfer. Do not retry a detached buffer. A new load
+requires a new user request. No raw body enters persisted editor or plugin state.
+The host byte protocol's completion marker is private to the host wrapper and
+never appears in `readBytes` output. The same component serves desktop and phone.
+
+See the [authoring guide](../../public/plugins-authoring.md#file-viewer-plugins)
+for permission, resource, and cleanup obligations. This additive contract has not
+yet been assigned a released SDK or minimum host version.
+
+File viewers also render rich-output `FilePreview` cards in chat through the
+same registration and permission checks. See the [authoring guide](../../public/plugins-authoring.md#reuse-viewers-in-rich-file-previews) for the agent payload and lifecycle.

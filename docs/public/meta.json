@@ -47,6 +47,7 @@
     "workflow-tips",
     "workflow-import-export",
     "workflow-sync",
+    "prompt-sync",
     "git-operations",
     "---Contribute to Kandev---",
     "contributing",

@@ -247,6 +247,10 @@ const (
 // writing user's own WS connections only, via UserEventBroadcaster.
 const PluginUserStateUpdated = "plugin.user-state.updated"
 
+// PluginSidebarGroupingUpdated carries only provider identity and an optional
+// workspace. Catalog changes carry catalog=true without any workspace data.
+const PluginSidebarGroupingUpdated = "plugins.sidebar-grouping.updated"
+
 // Event types for system maintenance jobs (VACUUM, factory reset, snapshot
 // create/restore, disk walk). Published by internal/system/jobs.Tracker on
 // every state transition and broadcast to all WebSocket clients.

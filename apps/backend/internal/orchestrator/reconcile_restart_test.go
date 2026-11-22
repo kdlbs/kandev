@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -11,11 +12,147 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // errWorkTransient is a non-not-found stop error used to assert that a transient
 // stop failure never causes a confirmed-dead row to be pruned.
 var errWorkTransient = errors.New("runtime stop transient failure")
+
+func TestReconcileRetainedRemoteWorkspaceOnStartup(t *testing.T) {
+	states := []models.TaskSessionState{
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateCancelled,
+		models.TaskSessionStateCreated,
+	}
+	for _, runtime := range []agentruntime.Runtime{agentruntime.RuntimeRemoteDocker, agentruntime.RuntimePluginRemote} {
+		for _, state := range states {
+			t.Run(string(runtime)+"/"+string(state), func(t *testing.T) {
+				assertRetainedRemoteStartupOwner(t, runtime, state, true, true, "")
+			})
+		}
+		t.Run(string(runtime)+"/missing", func(t *testing.T) {
+			assertRetainedRemoteStartupOwner(t, runtime, "", false, true, "")
+		})
+	}
+	t.Run("plugin owner with unusable resume token", func(t *testing.T) {
+		assertRetainedRemoteStartupOwner(t, agentruntime.RuntimePluginRemote, models.TaskSessionStateFailed, true, true, "token-without-resumability")
+	})
+	t.Run("remote owner with incomplete resource identity", func(t *testing.T) {
+		assertRetainedRemoteStartupOwner(t, agentruntime.RuntimeRemoteDocker, models.TaskSessionStateCompleted, true, false, "")
+	})
+
+	t.Run("tokenless local failure is cleaned up", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		seedTaskAndSession(t, repo, "task-local", "session-local", models.TaskSessionStateFailed)
+		row := &models.ExecutorRunning{
+			ID: "session-local", SessionID: "session-local", TaskID: "task-local",
+			Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusRunning,
+			AgentExecutionID: "execution-local", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		}
+		if err := repo.UpsertExecutorRunning(ctx, row); err != nil {
+			t.Fatalf("upsert local executor row: %v", err)
+		}
+		manager := &mockAgentManager{}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+		svc.reconcileSessionsOnStartup(ctx)
+		if _, err := repo.GetExecutorRunningBySessionID(ctx, row.SessionID); err == nil {
+			t.Fatal("tokenless local failed row should be pruned after its runtime stops")
+		}
+		if len(manager.stopAgentWithReasonArgs) != 1 {
+			t.Fatalf("local cleanup stop calls = %d, want 1", len(manager.stopAgentWithReasonArgs))
+		}
+	})
+}
+
+func assertRetainedRemoteStartupOwner(
+	t *testing.T,
+	runtime agentruntime.Runtime,
+	state models.TaskSessionState,
+	sessionExists bool,
+	resourceRecorded bool,
+	resumeToken string,
+) {
+	t.Helper()
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID, sessionID = "task-retained-remote", "session-retained-remote"
+	if sessionExists {
+		seedTaskAndSession(t, repo, taskID, sessionID, state)
+	}
+	row := &models.ExecutorRunning{
+		ID: sessionID, SessionID: sessionID, TaskID: taskID,
+		Runtime: runtime, Status: models.ExecutorRunningStatusRunning,
+		AgentExecutionID: "execution-retained-remote", ResumeToken: resumeToken,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if resourceRecorded && runtime == agentruntime.RuntimeRemoteDocker {
+		row.ContainerID = "container-retained"
+		row.AgentctlURL = "https://retained.example.test"
+		row.AgentctlPort = 41006
+		row.Metadata = map[string]interface{}{"remote_target": "ssh-retained.example.test:22"}
+	} else if resourceRecorded {
+		row.Metadata = map[string]interface{}{"plugin_executor": map[string]interface{}{
+			"provider": "fixture-provider", "resource_handle": "resource-retained", "checkpoint": "checkpoint-retained",
+		}}
+	}
+	if err := repo.UpsertExecutorRunning(ctx, row); err != nil {
+		t.Fatalf("upsert remote executor row: %v", err)
+	}
+	before, err := repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("load remote executor row: %v", err)
+	}
+	if sessionExists {
+		turn := &models.Turn{
+			ID: "turn-retained-remote", TaskSessionID: sessionID, TaskID: taskID,
+			StartedAt: time.Now().UTC(), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		}
+		if err := repo.CreateTurn(ctx, turn); err != nil {
+			t.Fatalf("create retained open turn: %v", err)
+		}
+	}
+	taskRepo := newMockTaskRepo()
+	if state == models.TaskSessionStateFailed {
+		seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	}
+	manager := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, manager)
+	svc.turnService = &repoTurnService{repo: repo}
+
+	for pass := 1; pass <= 2; pass++ {
+		svc.reconcileSessionsOnStartup(ctx)
+		got, loadErr := repo.GetExecutorRunningBySessionID(ctx, sessionID)
+		if loadErr != nil {
+			t.Fatalf("pass %d removed retained %s owner: %v", pass, runtime, loadErr)
+		}
+		if !reflect.DeepEqual(got, before) {
+			t.Fatalf("pass %d changed retained runtime row:\ngot  %#v\nwant %#v", pass, got, before)
+		}
+		if len(manager.stopAgentWithReasonArgs) != 0 {
+			t.Fatalf("pass %d requested a runtime stop: %+v", pass, manager.stopAgentWithReasonArgs)
+		}
+		if sessionExists {
+			session, sessionErr := repo.GetTaskSession(ctx, sessionID)
+			if sessionErr != nil {
+				t.Fatalf("load retained session after pass %d: %v", pass, sessionErr)
+			}
+			if session.State != state {
+				t.Errorf("pass %d changed session state to %q, want %q", pass, session.State, state)
+			}
+			if gotTurns := openTurnCount(t, repo, sessionID); gotTurns != 1 {
+				t.Errorf("pass %d open turns = %d, want retained turn", pass, gotTurns)
+			}
+		}
+	}
+	if state == models.TaskSessionStateFailed {
+		if got := taskRepo.updatedStates[taskID]; got != v1.TaskStateReview {
+			t.Errorf("failed task state = %q, want REVIEW despite workspace retention", got)
+		}
+	}
+}
 
 func TestReconcileSessionsOnStartupPublishesSettledSessionState(t *testing.T) {
 	for _, previousState := range []models.TaskSessionState{

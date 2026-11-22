@@ -186,6 +186,12 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 		if err := validateCreateProfileRequest(req.Profiles[i]); err != nil {
 			return nil, err
 		}
+		if err := validateClaudeExactModelAliasConflict(
+			req.Name, req.Profiles[i].Model, req.Profiles[i].RequireExactModel,
+			envVarsFromDTO(req.Profiles[i].EnvVars),
+		); err != nil {
+			return nil, err
+		}
 		mode, envVars := devinProfilePermissionDefaults(
 			req.Name, req.Profiles[i].Mode, req.Profiles[i].EnvVars,
 			!req.Profiles[i].DevinSandboxInherited,

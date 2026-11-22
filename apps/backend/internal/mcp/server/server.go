@@ -156,6 +156,7 @@ type Server struct {
 	filteredPluginTools        plugintools.Snapshot
 	filteredPluginToolsReady   bool
 	pluginToolsEpoch           atomic.Uint64
+	keepAliveCalls             uint64
 }
 
 // ServerOption configures the per-instance MCP transport.
@@ -329,6 +330,7 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		server.WithToolCapabilities(true),
 		server.WithCacheHints(0, mcp.CacheScopePrivate),
 		server.WithHooks(hooks),
+		server.WithToolHandlerMiddleware(s.keepAliveMiddleware),
 	)
 	hooks.AddBeforeAny(func(ctx context.Context, _ any, _ mcp.MCPMethod, _ any) {
 		if server.IsModernRequest(ctx) {

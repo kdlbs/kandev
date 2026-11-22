@@ -330,7 +330,10 @@ export async function checkBulkPreviewRecovery(
   await expect(page.getByTestId("runtime-bulk-approve")).toHaveText("Update selected (1)");
   const retry = page.getByTestId("runtime-bulk-retry-preview");
   await expect(retry).toHaveText("Retry checks");
-  if (mobile) expect((await retry.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  if (mobile) {
+    await waitForFiniteAnimations(surface);
+    expect((await retry.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   if (captureOverview) {
     await waitForFiniteAnimations(surface);

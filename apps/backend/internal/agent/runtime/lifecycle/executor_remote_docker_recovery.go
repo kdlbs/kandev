@@ -95,6 +95,9 @@ func (r *RemoteDockerExecutor) attachRemoteDockerRecord(
 	session *remoteDockerSession,
 ) (*ExecutorInstance, *agentctl.Client, RecoveryCandidateOutcome) {
 	if outcome := verifyLiveRemoteDockerContainer(ctx, session.dockerClient, containerID); outcome != "" {
+		if outcome == RecoveryOutcomeNoMatchingInstance {
+			return nil, nil, RecoveryOutcomeRecordedResourceAbsent
+		}
 		return nil, nil, outcome
 	}
 	control, outcome := r.remoteDockerControl(ctx, req, record.SessionID, containerID, session.endpoints)
@@ -127,6 +130,9 @@ func verifyLiveRemoteDockerContainer(
 ) RecoveryCandidateOutcome {
 	containerInfo, err := client.GetContainerInfo(ctx, containerID)
 	if err != nil {
+		if ctx.Err() != nil {
+			return RecoveryOutcomeUnknown
+		}
 		if errdefs.IsNotFound(err) {
 			return RecoveryOutcomeNoMatchingInstance
 		}
@@ -135,13 +141,17 @@ func verifyLiveRemoteDockerContainer(
 	if containerInfo == nil || containerInfo.ID != containerID {
 		return RecoveryOutcomeUnknown
 	}
-	if containerInfo.State != containerStateRunning {
-		return RecoveryOutcomeNoMatchingInstance
-	}
 	if ctx.Err() != nil {
 		return RecoveryOutcomeUnknown
 	}
-	return ""
+	switch containerInfo.State {
+	case containerStateRunning:
+		return ""
+	case containerStateExited:
+		return RecoveryOutcomeNoMatchingInstance
+	default:
+		return RecoveryOutcomeUnknown
+	}
 }
 
 func (r *RemoteDockerExecutor) remoteDockerControl(
@@ -212,7 +222,7 @@ func (r *RemoteDockerExecutor) authenticateRemoteDockerInstance(
 		client.Close()
 		return nil, nil, "", RecoveryOutcomeUnknown
 	}
-	if !status.IsAgentRunning() {
+	if !status.IsAgentRunning() && status.AgentStatus != agentProcessStatusStopped {
 		client.Close()
 		return nil, nil, "", RecoveryOutcomeNoMatchingInstance
 	}

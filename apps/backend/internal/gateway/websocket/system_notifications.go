@@ -35,6 +35,7 @@ func RegisterSystemNotifications(ctx context.Context, eventBus bus.EventBus, hub
 
 	b.subscribe(eventBus, events.SystemJobUpdate, ws.ActionSystemJobUpdate)
 	b.subscribe(eventBus, events.SystemStorageAnalysisUpdated, ws.ActionSystemStorageAnalysisUpdated)
+	b.subscribeSidebarGrouping(eventBus)
 
 	go func() {
 		<-ctx.Done()

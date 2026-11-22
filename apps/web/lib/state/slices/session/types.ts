@@ -51,6 +51,8 @@ export type PromptsState = MessagesState & {
 export type TurnsState = {
   bySession: Record<string, Turn[]>;
   activeBySession: Record<string, string | null>; // sessionId -> active turnId
+  /** Completed-turn IDs whose empty-turn notice was already emitted. */
+  emptyTurnNoticeTurnIdsBySession?: Record<string, Record<string, true>>;
   /** Message IDs whose matching turn rows were read with the same message window. */
   windowCoverageBySession?: Record<string, { messageIds: string[]; activeTurnObserved: boolean }>;
   /**
@@ -383,6 +385,8 @@ export type SessionSliceActions = {
   setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
+  /** Claims the one live empty-turn notice for a completed turn identity. */
+  claimEmptyTurnNotice: (sessionId: string, turnId: string) => boolean;
   /** Merges a complete REST snapshot and reconciles its marker atomically. */
   mergeTurnsSnapshot: (
     sessionId: string,

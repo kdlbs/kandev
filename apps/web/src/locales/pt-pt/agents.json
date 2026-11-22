@@ -260,6 +260,7 @@
   "modelOptionsResolutionFailed": "Não foi possível carregar as opções do modelo.",
   "copilotPluginModelOptionsRecovery": "Esta seleção de plugins bloqueia as opções do modelo. Desmarque os plugins, guarde o perfil e tente novamente as opções do modelo.",
   "modelRequiredForAllProfiles": "O modelo é obrigatório em todos os perfis.",
+  "claudeExactModelAliasConflict": "Escolha um ID de modelo completo em Modelo inicial ou remova {{envVar}} das Variáveis de ambiente.",
   "modelSettings": "Definições do modelo",
   "noAuthHintLogin": "Clique em Abrir terminal para iniciar sessão e depois atualize.",
   "noAuthHintNotInstalled": "Instale a CLI do agente e depois clique em Atualizar.",

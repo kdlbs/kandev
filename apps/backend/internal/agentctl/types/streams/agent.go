@@ -106,6 +106,10 @@ const (
 	// protocol frames, tool payloads, credentials, and full endpoints.
 	EventTypeMCPAttachment = "mcp_attachment"
 
+	// EventTypeMCPStartupWarning carries a Codex ACP MCP startup failure as
+	// session metadata rather than a work-turn tool call.
+	EventTypeMCPStartupWarning = "mcp_startup_warning"
+
 	// EventTypeTurnStarted marks the single turn boundary this feature relies
 	// on: agentctl's own session/prompt dispatch, emitted on both a human
 	// prompt and a synthetic ScheduleWakeup self-resume. It carries only the
@@ -156,6 +160,10 @@ func (d PromptFailureDisposition) Valid() bool {
 // whose provider and transport have attested that the next human prompt may
 // take ownership before the held session/prompt RPC returns.
 const AgentEventDataPromptHandoff = "prompt_handoff"
+
+// AgentEventDataConfigurationCommandResult carries a transient result for a
+// configuration command completed by this prompt generation.
+const AgentEventDataConfigurationCommandResult = "configuration_result"
 
 // Session status constants for EventTypeSessionStatus events.
 const (
@@ -215,6 +223,16 @@ type AgentEvent struct {
 	// when agentctl can establish that association.
 	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
 
+	// DetachedAtCommit is stamped on a terminal event when the instance had no
+	// live backend stream at the moment agentctl committed it, and CommittedAt
+	// is the agentctl clock at that moment.
+	DetachedAtCommit bool       `json:"detached_at_commit,omitempty"`
+	CommittedAt      *time.Time `json:"committed_at,omitempty"`
+
+	// CancelCause is "offline_budget" when the offline budget cancelled the
+	// turn; CancelDecidedAt is the time of that expiry decision.
+	CancelCause     string     `json:"cancel_cause,omitempty"`
+	CancelDecidedAt *time.Time `json:"cancel_decided_at,omitempty"`
 	// DeliveryEventID is a stable producer identity for an observation that
 	// can be retried after a lost acknowledgement. The journal stores it
 	// beside the committed event so a retry cannot project twice.
@@ -234,6 +252,10 @@ type AgentEvent struct {
 	// It travels with the completion frame so consumers do not have to infer
 	// ownership from cross-subject event ordering.
 	TurnID string `json:"turn_id,omitempty"`
+
+	// ConfigurationCommandResult is set only for the live prompt completion
+	// that observed the result of this configuration command.
+	ConfigurationCommandResult *ConfigurationCommandResult `json:"configuration_result,omitempty"`
 
 	// ControlTurnID is the control-server-assigned turn identifier
 	// (AC-EXECUTORS-SURVIVAL-004.1), stamped onto a terminal event at the

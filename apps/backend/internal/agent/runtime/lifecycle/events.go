@@ -96,6 +96,10 @@ func copyDeliveryTerminalIdentity(
 	payload.DeliveryHarnessGeneration = terminal.DeliveryHarnessGeneration
 	payload.DeliverySequence = terminal.DeliverySequence
 	payload.DeliverySubmissionID = terminal.DeliverySubmissionID
+	payload.DetachedAtCommit = terminal.DetachedAtCommit
+	payload.CommittedAt = terminal.CommittedAt
+	payload.CancelCause = terminal.CancelCause
+	payload.CancelDecidedAt = terminal.CancelDecidedAt
 	copyTerminalStorageIdentity(payload, terminal, execution)
 	payload.DeliveryOutcome = string(models.DeliverySubmissionCompleted)
 	if isError, _ := terminal.Data["is_error"].(bool); isError {
@@ -461,6 +465,10 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 }
 
 func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData {
+	configurationResult := event.ConfigurationCommandResult
+	if event.Recovered {
+		configurationResult = nil
+	}
 	return &AgentStreamEventData{
 		Type:                             event.Type,
 		ACPSessionID:                     event.SessionID,
@@ -482,6 +490,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		SessionSettingsPolicy:            event.SessionSettingsPolicy,
 		SessionSettingsGeneration:        event.SessionSettingsGeneration,
 		PromptGeneration:                 event.PromptGeneration,
+		ConfigurationCommandResult:       configurationResult,
 		RetractedMessageIDs:              append([]string(nil), event.RetractedMessageIDs...),
 		TurnID:                           event.TurnID,
 		Data:                             event.Data,

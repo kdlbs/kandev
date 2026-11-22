@@ -66,7 +66,8 @@ export type GroupKey =
   | "workflow"
   | "workflowStep"
   | "executorType"
-  | "state";
+  | "state"
+  | `plugin:${string}:${string}`;
 
 export type SidebarView = {
   id: string;
@@ -78,10 +79,12 @@ export type SidebarView = {
   groupIndent: boolean;
   collapsedGroups: string[];
   taskRow?: SidebarTaskRowPresentation;
+  generatedPluginGrouping?: { reference: `plugin:${string}:${string}`; name: string };
 };
 
 export type SidebarSliceState = {
   syncPending?: boolean;
+  transitionPending?: boolean;
   serverRevision?: number | null;
   deferredServerState?: SidebarSliceState | null;
   views: SidebarView[];
@@ -98,5 +101,16 @@ export type SidebarViewDraft = {
   sortWarningCount?: number;
   group: GroupKey;
   groupIndent: boolean;
+  collapsedGroups?: string[];
   taskRow?: SidebarTaskRowPresentation;
 };
+
+export type SidebarDisclosureContext = {
+  workspaceId?: string;
+  isCurrent?: () => boolean;
+};
+
+export type SidebarViewStateSetter = (
+  recipe: (draft: { sidebarViews: SidebarSliceState }) => void,
+  shouldReplace?: false | undefined,
+) => void;
