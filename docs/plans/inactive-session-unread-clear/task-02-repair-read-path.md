@@ -4346,3 +4346,55 @@ isolated cursor-event certification is implied. List readback remains
 authoritative convergence. No Go/cursor/predicate/projector/promotion/schema/
 wire change in R33. Implementation and task-defined verification are complete;
 Sol R34 follows normal verified delivery at completed 33, clean 0.
+
+### Production-fix review round 34 remediation
+
+Sol child `c4530143-78ce-4b8f-a9a6-c021ab8a45be` reviewed
+`c64cd5070beb906fb008a76b6e51b5d023fe2cd8`: one P2, not clean. Completed
+production rounds 34; consecutive clean 0. Its first turn hit a transient
+usage limit and resumed; that is not a separate round.
+
+- R33's ready-empty predicate requires validated repository inventory, but
+  only the Dockview and phone Changes panels mount `useSessionGitRefresh`.
+  The tablet layout had no inventory producer, so a clean tablet workspace
+  stayed unknown: the empty All changes tab remained and Changes never fell
+  back to Chat. With unknown inventory, `useCenterPanelGitChanges` now treats
+  an exclusively unnamed status as the single repository scope. Any named
+  repository status keeps the result unknown until a validated inventory
+  exists. No new request is added.
+
+A first correction mounted `useSessionGitRefresh` in the tablet panel.
+`r34-red.log` showed the gap through that hook (the first attempt failed only
+on a missing client stub). Fresh-bundle browser runs then failed: the restored
+file tab appeared only after the reload's `recover`-mode refresh returned
+(observed up to 8.5 s, `r34-diag3.log`), past the 5 s restore assertion. The
+desktop membership case also failed when it ran after the tablet cases in the
+same worker, but passed in isolation (`r34-iso-removal-summary.log`). On the R33
+bundle and the same host the same cases passed 8/8
+(`r34-r33base-repeat-summary.log`). The extra refresh was withdrawn.
+
+Final RED `r34-red-v2.log`: against the R33 source, the unnamed single-repo
+case stays `undefined`. The named-repository control stays unknown.
+
+The coarse-tablet browser case saves a `changes` preference on a clean
+tool-file workspace and reloads. It requires Chat active, no All changes tab,
+the exact new tail acknowledged, an empty authoritative unread list, and no
+agent start after the fallback. The reload may send the existing
+`session_focus` launch for an already-running agent; that is not a start and
+is excluded by counting from the settled Chat. Against the R33 bundle
+`r34-browser-red-summary.log` fails with All changes still rendered.
+
+Final verification after the store-derived correction. RED: `r34-red-v2.log`.
+GREEN: `r34-units-v2.log` 10 files/113 tests pass, including the R33 tablet
+file/layout owners and `use-session-git-refresh`. Strict changed-file lint,
+production typecheck and a fresh frontend build pass. Spec/catalog/harness
+checks pass; the owning design remains within its size limit.
+
+Fresh-bundle browser receipts: `r34-final-summary.log` ran every desktop/tablet
+case including the new clean-workspace case. The only failure was the remote
+ordinary-foreground membership case at its foreground reread (line 286).
+That desktop path never mounts the changed tablet hook. Isolated, it passed
+3/3 (`r34-remote-summary.log`). `r34-phone-summary.log`: ten phone cases pass.
+Runs used one worker and no retries after the host restart. The clean tablet
+capture was inspected: Chat only, no All changes, the new tail shown, dot gone.
+No Go/cursor/predicate/projector/promotion/schema/wire change in R34.

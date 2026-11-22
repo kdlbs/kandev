@@ -841,3 +841,13 @@ and ten phone cases pass, sequential/one worker/no retries. Dirty tablet
 editor/dot and phone failed-resume captures inspected. Task 02 records the
 RED, fixture/type corrections and exact browser/rollback limits. R34 follows
 normal verified delivery; the review loop remains open.
+
+### Production review R34
+
+Sol child `c4530143-78ce-4b8f-a9a6-c021ab8a45be` reviewed
+`c64cd5070beb906fb008a76b6e51b5d023fe2cd8`: one P2, not clean.
+Completed production rounds 34; consecutive clean 0. With unknown inventory,
+tablet ready-empty now treats an exclusively unnamed status as the single scope;
+named repositories stay unknown. An intermediate tablet refresh was withdrawn
+after it delayed restored file tabs. Task 02 records the evidence; R35 follows
+normal verified delivery.

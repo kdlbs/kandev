@@ -23,6 +23,7 @@ import { expectTabletConversationRoute } from "../../helpers/session-route-admis
 import {
   expectTabletDraftDuringRestore,
   expectTabletWorkflowFocus,
+  expectTabletCleanChangesFallback,
 } from "../../helpers/tablet-session-ownership";
 
 function unreadDot(row: Locator): Locator {
@@ -371,6 +372,18 @@ test.describe("Task unread dot", () => {
     await expectTabletWorkflowFocus(
       { testPage: tabletTestPage, apiClient, seedData, backend },
       test.info().outputPath("tablet-workflow-chat.png"),
+    );
+  });
+  test("coarse tablet settles a saved Changes view to Chat on a clean workspace", async ({
+    tabletTestPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    await expectTabletCleanChangesFallback(
+      { testPage: tabletTestPage, apiClient, seedData, backend },
+      test.info().outputPath("tablet-clean-changes-chat.png"),
     );
   });
 });

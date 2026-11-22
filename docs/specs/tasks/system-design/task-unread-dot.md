@@ -257,7 +257,7 @@ omit while deferred launch is possible. Removal leases protect live/parked group
 Layouts validate first and roll back once; only success retires maximize.
 Scoped frames own visibility/read/dots.
 File intents own reads/creates; deletes retire reads/tabs/saved aliases.
-Use installed keys; empty Git needs ready repos/commits and no pending file.
+Installed keys; empty Git: ready repos (lone unnamed=1), commits, no pending.
 
 `invalidateTaskSessionMembership` fences pending/admitted/queued foreground and
 removal-dialog reads, not new reads/unrelated keys. Confirmed UUID deletion

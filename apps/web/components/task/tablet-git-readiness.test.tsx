@@ -29,7 +29,7 @@ function status(repository: string, dirty = false): GitStatusEntry {
     timestamp: null,
   };
 }
-function setup() {
+function setup(inventory: string[] | null = ["A", "B"]) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <StateProvider>{children}</StateProvider>
   );
@@ -40,7 +40,8 @@ function setup() {
   act(() => {
     hook.result.current.store.getState().registerSessionEnvironment("B", "env");
     hook.result.current.store.getState().setSessionCommits("B", [], { allowEmpty: true });
-    hook.result.current.store.getState().reconcileGitStatusInventory("env", 0, ["A", "B"]);
+    if (inventory)
+      hook.result.current.store.getState().reconcileGitStatusInventory("env", 0, inventory);
   });
   return hook;
 }
@@ -75,5 +76,19 @@ it("requires complete current scopes and refresh evidence before declaring ready
   act(() => state.setGitStatusRefresh("env", "A", null));
   expect(hook.result.current.changes).toBe(false);
   act(() => state.invalidateGitStatusInventory("B"));
+  expect(hook.result.current.changes).toBeUndefined();
+});
+it("settles a single unnamed repository without a refreshed inventory", () => {
+  const hook = setup(null);
+  const state = hook.result.current.store.getState();
+  expect(hook.result.current.changes).toBeUndefined();
+  act(() => state.setGitStatus("env", { ...status(""), repository_name: undefined }));
+  expect(hook.result.current.changes).toBe(false);
+  act(() => state.setGitStatus("env", { ...status("", true), repository_name: undefined }));
+  expect(hook.result.current.changes).toBe(true);
+});
+it("keeps named repositories unknown until inventory is validated", () => {
+  const hook = setup(null);
+  act(() => hook.result.current.store.getState().setGitStatus("env", status("A")));
   expect(hook.result.current.changes).toBeUndefined();
 });

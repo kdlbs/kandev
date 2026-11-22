@@ -315,3 +315,46 @@ export async function expectTabletWorkflowFocus(context: Context, screenshot: st
     }
   }
 }
+
+/** A saved Changes preference on a clean tablet workspace settles to Chat from the tablet's own refresh. */
+export async function expectTabletCleanChangesFallback(context: Context, screenshot: string) {
+  const { testPage: page, apiClient: api } = context;
+  await page.setViewportSize({ width: 820, height: 1180 });
+  const reads = observeReadTraffic(page);
+  await withToolFileTask(context, "read", async (session) => {
+    const taskId = new URL(page.url()).pathname.split("/").at(-1)!;
+    const sessionId = (await session.activeChat().getAttribute("data-session-id"))!;
+    await waitForSessionState(api, {
+      taskId,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Clean tablet fixture must settle",
+    });
+    await page.evaluate(
+      (id) => sessionStorage.setItem(`kandev.activeTab.${id}`, "changes"),
+      sessionId,
+    );
+    await page.goto(`/t/${taskId}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
+    await waitForActiveTaskSession(page, taskId, sessionId);
+    await expect(page.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute(
+      "data-state",
+      "active",
+      { timeout: 15_000 },
+    );
+    await expect(page.getByRole("tab", { name: "All changes", exact: true })).toHaveCount(0);
+    // Reload may send the existing session_focus signal; reading the fallback Chat must not start.
+    const startsBefore = reads.agentStarts().length;
+    const tail = await api.seedSessionMessage(sessionId, {
+      type: "message",
+      content: "Clean tablet output after Changes fallback",
+    });
+    await expect
+      .poll(async () => (await sessionReadState(api, sessionId)).cursor)
+      .toBe(tail.messageId);
+    await expect
+      .poll(() => taskUnreadSessionIds(api, context.seedData.workspaceId, taskId))
+      .toEqual([]);
+    expect(reads.agentStarts().slice(startsBefore)).toEqual([]);
+    await page.screenshot({ path: screenshot });
+  });
+}
