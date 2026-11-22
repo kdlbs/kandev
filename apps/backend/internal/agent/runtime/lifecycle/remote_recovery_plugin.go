@@ -59,11 +59,15 @@ func (m *Manager) currentPluginRemoteRecoveryAttemptRecord(
 	if err := validatePluginRecoveryCheckpoint(record, current); err != nil {
 		return nil, err
 	}
-	if record.Metadata == nil {
-		record.Metadata = make(map[string]interface{})
+	fresh := cloneRemoteRecoveryRecord(record)
+	if fresh.Metadata == nil {
+		fresh.Metadata = make(map[string]interface{})
 	}
-	record.Metadata[MetadataKeyPluginExecutor] = current.Metadata[MetadataKeyPluginExecutor]
-	return record, nil
+	fresh.Metadata[MetadataKeyPluginExecutor] = current.Metadata[MetadataKeyPluginExecutor]
+	fresh.UpdatedAt = current.UpdatedAt
+	fresh.Status = current.Status
+	fresh.LocalPID = current.LocalPID
+	return fresh, nil
 }
 
 func samePluginRecoveryRecordOwner(record, current *models.ExecutorRunning) bool {

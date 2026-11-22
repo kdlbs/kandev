@@ -9,7 +9,10 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/journal"
 )
 
-const agentProcessStatusRunning = "running"
+const (
+	agentProcessStatusRunning = "running"
+	agentProcessStatusStopped = "stopped"
+)
 
 func (m *Manager) adoptExistingAgentSession(
 	ctx context.Context,
