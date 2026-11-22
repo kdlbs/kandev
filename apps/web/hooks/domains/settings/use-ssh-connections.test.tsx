@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as api from "@/lib/api/domains/ssh-connections-api";
-import type { SSHIdentity } from "@/lib/types/http-ssh-connections";
+import type { SSHIdentity, SSHRoute } from "@/lib/types/http-ssh-connections";
 import { ApiError } from "@/lib/api/client";
 import { useSSHConnections } from "./use-ssh-connections";
 
@@ -145,7 +145,7 @@ it("reconciles a failed test instead of retaining the old ready snapshot", async
   const route = {
     destination: { id: "route", verified_route: "stamp" },
     stamp: "stamp",
-  } as import("@/lib/types/http-ssh-connections").SSHRoute;
+  } as SSHRoute;
   vi.mocked(api.listManagedSSHConnections).mockResolvedValue([route]);
   const { result } = renderHook(useSSHConnections);
   await waitFor(() => expect(result.current.loaded).toBe(true));
@@ -167,7 +167,7 @@ it("keeps failed probe evidence scoped to its route stamp until a successful ret
   const route = {
     destination: { id: "route", verified_route: "stamp" },
     stamp: "stamp",
-  } as import("@/lib/types/http-ssh-connections").SSHRoute;
+  } as SSHRoute;
   vi.mocked(api.listManagedSSHConnections).mockResolvedValue([route]);
   const { result } = renderHook(useSSHConnections);
   await waitFor(() => expect(result.current.loaded).toBe(true));
@@ -189,4 +189,65 @@ it("keeps failed probe evidence scoped to its route stamp until a successful ret
   expect(
     (result.current as unknown as { failedTests: Record<string, string> }).failedTests,
   ).toEqual({});
+});
+
+// @covers AC-EXECUTORS-SSH-CONNECTIONS-004.17
+it("keeps operation feedback tied to its route and excludes private error details", async () => {
+  const route = {
+    destination: { id: "route" },
+    stamp: "revision",
+  } as SSHRoute;
+  vi.mocked(api.observeManagedSSH).mockRejectedValue(
+    new ApiError("private failure", 422, {
+      error: "ssh_host_key_changed",
+      hop: "bastion",
+      stderr: "private diagnostic",
+    }),
+  );
+  const { result } = renderHook(useSSHConnections);
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  await act(async () => {
+    await expect(result.current.observe(route)).rejects.toThrow();
+  });
+  expect(result.current.operation).toEqual({
+    kind: "observe",
+    connectionId: "route",
+    stamp: "revision",
+    status: "failed",
+    error: "ssh_host_key_changed",
+    hop: "bastion",
+  });
+  await act(async () => {
+    await result.current.reload();
+  });
+  expect(result.current.operation).toBeNull();
+});
+
+it("keeps active test feedback pending through reload and rejects duplicate admission", async () => {
+  const route = {
+    destination: { id: "route" },
+    stamp: "revision",
+  } as SSHRoute;
+  const pending = deferred<typeof route>();
+  vi.mocked(api.testManagedSSH).mockReturnValue(pending.promise);
+  const { result } = renderHook(useSSHConnections);
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  let request!: Promise<typeof route>;
+  act(() => {
+    request = result.current.test(route);
+  });
+  expect(result.current.operation).toMatchObject({
+    kind: "test",
+    stamp: "revision",
+    status: "pending",
+  });
+  await act(async () => {
+    await expect(result.current.observe(route)).rejects.toThrow();
+  });
+  expect(result.current.operation?.kind).toBe("test");
+  await act(async () => {
+    pending.resolve(route);
+    await request;
+  });
+  expect(result.current.operation?.status).toBe("succeeded");
 });

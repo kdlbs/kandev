@@ -52,25 +52,23 @@ export async function exerciseSSHEnrollmentConfirmation(page: Page, identity: SS
   await page.goto(
     "/settings/ssh-connections?tab=connections&id=confirmation-fixture&section=access",
   );
-  await page.getByRole("button", { name: "Install key", exact: true }).click();
-  const password = page.getByLabel("One-time password", { exact: true });
-  const install = page.getByRole("button", { name: "Enroll key", exact: true });
+  await page.getByRole("button", { name: "Install public key", exact: true }).click();
+  await page.getByRole("radio", { name: "Password", exact: true }).click();
+  const password = page.getByLabel("SSH password", { exact: true });
+  const install = page.getByRole("button", { name: "Review installation", exact: true });
   await password.fill("disposable-browser-password");
   await install.click();
-  let confirmation = page.getByRole("dialog", {
-    name: "Authorize this key on the remote account?",
-  });
+  const confirmation = page.getByRole("region", { name: "Authorize this key", exact: true });
   await expect(confirmation).toContainText("deploy@target.invalid:22");
   await expect(confirmation).toContainText("SHA256:fixture-host");
   await expect(confirmation).toContainText(identity.fingerprint);
-  await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(confirmation).toBeHidden();
+  await confirmation.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Review installation" })).toHaveCount(0);
   await expect(password).toHaveValue("");
   expect(submissions).toBe(0);
   await password.fill("disposable-browser-password");
   await install.click();
-  confirmation = page.getByRole("dialog", { name: "Authorize this key on the remote account?" });
-  await confirmation.getByRole("button", { name: "Enroll key", exact: true }).click();
+  await confirmation.getByRole("button", { name: "Install public key", exact: true }).click();
   await expect(password).toHaveCount(0);
   await expect(
     page.getByText(

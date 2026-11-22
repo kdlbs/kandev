@@ -5,7 +5,7 @@ import type { SSHRoute } from "@/lib/types/http-ssh-connections";
 
 /** Fresh failures belong to the tested route revision, not every visible host. */
 export function useSSHAuthentication(
-  perform: (operation: () => Promise<SSHRoute>) => Promise<SSHRoute>,
+  perform: (operation: () => Promise<SSHRoute>, route: SSHRoute) => Promise<SSHRoute>,
   reload: () => Promise<void>,
 ) {
   const [failedTests, setFailedTests] = useState<Record<string, string>>({});
@@ -34,6 +34,6 @@ export function useSSHAuthentication(
         await reload().catch(() => undefined);
         throw error;
       }
-    });
+    }, route);
   return { test, failedTests };
 }

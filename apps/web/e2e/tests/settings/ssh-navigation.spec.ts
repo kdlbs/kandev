@@ -1,6 +1,7 @@
 import { test } from "../../fixtures/test-base";
 import {
   exerciseSSHNavigation,
+  exerciseSSHSidebar,
   exerciseSSHBookmark,
   exerciseSSHSearch,
   exerciseSSHPseudo,
@@ -13,6 +14,7 @@ for (const width of [767, 768, 1280]) {
     try {
       await testPage.setViewportSize({ width, height: 900 });
       await exerciseSSHNavigation(testPage, width < 768);
+      await exerciseSSHSidebar(testPage, width < 768);
       await exerciseSSHBookmark(testPage);
       await exerciseSSHSearch(testPage, width < 768);
       await exerciseSSHPseudo(testPage);

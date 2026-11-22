@@ -117,7 +117,7 @@ for (const topology of ["direct", "bastion", "unpinned"] as const) {
             `/settings/executors/ssh-connections?tab=connections&id=${draft.bastion.id}&section=access`,
           );
           await activate(page, "Inspect host key", touch);
-          await confirm(page, "Trust this host key", touch);
+          await activate(page, "Trust this host key", touch);
           await verifyAccess(page, touch);
           await page.goto(destinationUrl.toString());
         }
@@ -126,7 +126,7 @@ for (const topology of ["direct", "bastion", "unpinned"] as const) {
             page.getByRole("button", { name: "Test SSH access", exact: true }),
           ).toHaveCount(0);
           await activate(page, "Inspect host key", touch);
-          await confirm(page, "Trust this host key", touch);
+          await activate(page, "Trust this host key", touch);
         }
         await verifyAccess(page, touch);
         const readyResponse = await fetch(

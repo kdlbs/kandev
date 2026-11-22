@@ -1,7 +1,7 @@
 "use client";
 import { useTranslation } from "react-i18next";
 import { IconChevronRight, IconKey, IconServer } from "@tabler/icons-react";
-import { Badge } from "@kandev/ui/badge";
+import { ConnectionStatusBadge } from "./status-badge";
 import Link from "@/components/routing/app-link";
 import { sshConnectionSettingsPath } from "@/lib/settings/ssh-connection-settings-routes";
 import type { SSHManager } from "@/hooks/domains/settings/use-ssh-connections";
@@ -83,11 +83,7 @@ export function ConnectionCollection({
               <span className="min-w-0 flex-1 space-y-1">
                 <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span className="font-medium text-sm break-words">{item.name}</span>
-                  {item.state && (
-                    <Badge variant="outline" className="font-normal shrink-0">
-                      {t(`settings:sshManager.ui.states.${item.state}`)}
-                    </Badge>
-                  )}
+                  {item.state && <ConnectionStatusBadge state={item.state} />}
                 </span>
                 <span className="block text-xs text-muted-foreground break-all">
                   {item.description}

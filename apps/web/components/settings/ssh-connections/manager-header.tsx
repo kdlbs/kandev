@@ -2,7 +2,7 @@
 import { useTranslation } from "react-i18next";
 import { IconPlus, IconPencil } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Badge } from "@kandev/ui/badge";
+import { ConnectionStatusBadge } from "./status-badge";
 import type { SSHManager } from "@/hooks/domains/settings/use-ssh-connections";
 import type { ManagerNavigation } from "./use-manager-navigation";
 import { SettingsPageHeader } from "../settings-typography";
@@ -23,17 +23,31 @@ export function ManagerHeader({
   const { name, description } = useManagerTitle(manager, n);
   const showTabs = !n.creating && !n.editing && (!details || !n.identities);
   return (
-    <SettingsPageHeader
-      title={<span className="break-words">{name}</span>}
-      description={
-        <span className="flex flex-wrap items-center gap-2 break-all">
-          <ManagerStatus manager={manager} navigation={n} />
-          <span>{description}</span>
-        </span>
-      }
-      tabs={showTabs ? <SettingsTabsList ariaLabel={t("settings:sshManager.title")} /> : undefined}
-      actions={<ManagerActions manager={manager} navigation={n} details={details} />}
-    />
+    <div className="space-y-4 min-w-0">
+      <SettingsPageHeader
+        title={<span className="break-words">{name}</span>}
+        description={
+          <span className="flex flex-wrap items-center gap-2 [overflow-wrap:anywhere]">
+            <ManagerStatus manager={manager} navigation={n} />
+            <span>{description}</span>
+          </span>
+        }
+        actions={
+          details ? (
+            <ManagerActions manager={manager} navigation={n} details={details} />
+          ) : undefined
+        }
+      />
+      {showTabs && (
+        <div className="flex min-w-0 flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+          <SettingsTabsList
+            ariaLabel={t("settings:sshManager.title")}
+            className="w-full md:w-fit"
+          />
+          {!details && <ManagerActions manager={manager} navigation={n} details={false} />}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -65,15 +79,17 @@ function ManagerStatus({
   manager: SSHManager;
   navigation: ManagerNavigation;
 }) {
-  const { t } = useTranslation();
   const route = manager.routes.find((item) => item.destination.id === n.selected);
   if (!route || n.creating || n.editing) return null;
   return (
-    <Badge variant="outline" className="text-xs font-normal">
-      {t(
-        `settings:sshManager.ui.states.${connectionState(route, manager.identities, manager.failedTests?.[route.destination.id])}`,
+    <ConnectionStatusBadge
+      className="text-xs"
+      state={connectionState(
+        route,
+        manager.identities,
+        manager.failedTests?.[route.destination.id],
       )}
-    </Badge>
+    />
   );
 }
 
@@ -91,7 +107,7 @@ export function ManagerActions({
     return (
       <Button
         id="ssh-create-resource"
-        className={settingsActionClassName()}
+        className={settingsActionClassName("max-md:w-full")}
         disabled={manager.busy}
         onClick={n.create}
       >

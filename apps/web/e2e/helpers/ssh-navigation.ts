@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { assertNoDocumentHorizontalOverflow, requireBox } from "./layout-assertions";
 import { dwell } from "./causal-waits";
 
@@ -6,21 +6,28 @@ const manager = "/settings/executors/ssh-connections";
 
 export async function exerciseSSHNavigation(page: Page, touch: boolean) {
   await page.goto("/settings/executors");
-  const entry = page.getByRole("link", { name: "SSH connections", exact: true });
+  const entry = page.locator("main").getByRole("link", { name: "SSH connections", exact: true });
   await expect(entry).toHaveCount(1);
   await expect(entry).toBeVisible();
-  expect((await requireBox(entry, "SSH manager entry")).height).toBeGreaterThanOrEqual(
-    touch ? 44 : 28,
+  const title = page.getByRole("heading", { name: "Executors", exact: true });
+  const titleBox = await requireBox(title, "Executors title");
+  const entryBox = await requireBox(entry, "SSH navigation card");
+  expect(entryBox.height).toBeGreaterThanOrEqual(44);
+  expect(entryBox.y).toBeGreaterThan(titleBox.y + titleBox.height);
+  expect(Math.abs(entryBox.x - titleBox.x)).toBeLessThanOrEqual(1);
+  const contentBox = await requireBox(title.locator("../.."), "Executors header");
+  expect(Math.abs(entryBox.width - contentBox.width)).toBeLessThanOrEqual(1);
+  const profiles = await requireBox(
+    page.getByRole("heading", { name: "Profiles", exact: true }),
+    "Profiles heading",
   );
-  const titleBox = await requireBox(
-    page.getByRole("heading", { name: "Executors", exact: true }),
-    "Executors title",
-  );
-  const entryBox = await requireBox(entry, "SSH header action");
-  if ((page.viewportSize()?.width ?? 1280) >= 768)
-    expect(Math.abs(entryBox.y - titleBox.y)).toBeLessThanOrEqual(1);
-  else expect(entryBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
-  await entry.click();
+  expect(entryBox.y + entryBox.height).toBeLessThan(profiles.y);
+  await page.screenshot({
+    path: test.info().outputPath("ssh-executors-entry.png"),
+    fullPage: true,
+  });
+  if (touch && (await page.evaluate(() => navigator.maxTouchPoints > 0))) await entry.tap();
+  else await entry.click();
   await expect(page).toHaveURL(manager);
   await expect(page.getByRole("button", { name: "New connection", exact: true })).toBeVisible();
   await assertNoDocumentHorizontalOverflow(page);
@@ -78,5 +85,23 @@ export async function exerciseSSHPseudo(page: Page) {
   await expect(link).not.toHaveText("SSH connections");
   await link.click();
   await expect(page).toHaveURL(manager);
+  await assertNoDocumentHorizontalOverflow(page);
+}
+
+export async function exerciseSSHSidebar(page: Page, mobile: boolean) {
+  await page.goto(mobile ? "/settings" : "/settings/executors/ssh-connections");
+  const scope = page.getByTestId(mobile ? "settings-index" : "app-sidebar-settings-mode");
+  const entry = scope.locator(`a[href="${manager}"]`);
+  if (mobile) await scope.getByRole("button", { name: "Expand Executors", exact: true }).click();
+  await expect(entry).toHaveCount(1);
+  await expect(entry).toBeVisible();
+  await expect(entry.locator("button")).toHaveCount(0);
+  if (mobile) expect((await entry.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  const links = scope.locator('a[href^="/settings/executors"]');
+  expect(await links.nth(1).getAttribute("href")).toBe(manager);
+  if (mobile && (await page.evaluate(() => navigator.maxTouchPoints > 0))) await entry.tap();
+  else await entry.press("Enter");
+  await expect(page).toHaveURL(manager);
+  if (!mobile) await expect(entry).toHaveAttribute("data-active", "true");
   await assertNoDocumentHorizontalOverflow(page);
 }

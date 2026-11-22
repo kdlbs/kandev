@@ -19,7 +19,9 @@ export function useManagerNavigation() {
         id: returnIdentity,
         return_identity_connection: null,
         select_identity: identity ?? null,
-        mode: "edit",
+        mode: !identity && search.get("return_section") ? null : "edit",
+        section: !identity ? search.get("return_section") : null,
+        return_section: null,
       }),
     );
   return {
@@ -30,6 +32,12 @@ export function useManagerNavigation() {
       : "overview",
     edit: () => router.push(path({ mode: "edit", section: null })),
     cancelEdit: () => router.push(path({ mode: null, section: null, select_identity: null })),
+    openRemedy: (
+      remedy: "edit" | "access" | "identity",
+      connectionId: string,
+      identityId?: string,
+      returnConnection?: string,
+    ) => router.push(path(remedyQuery(search, remedy, connectionId, identityId, returnConnection))),
     setSection: (section: string) => router.push(path({ section, mode: null })),
     saved: (id: string, ready: boolean) =>
       router.push(path({ ...list, id, section: ready ? null : "access" })),
@@ -80,3 +88,24 @@ export function useManagerNavigation() {
   };
 }
 export type ManagerNavigation = ReturnType<typeof useManagerNavigation>;
+
+function remedyQuery(
+  search: URLSearchParams,
+  remedy: "edit" | "access" | "identity",
+  connectionId: string,
+  identityId?: string,
+  returnConnection?: string,
+) {
+  return {
+    new: null,
+    select_identity: null,
+    tab: remedy === "identity" ? "identities" : "connections",
+    id: remedy === "identity" ? (identityId ?? null) : connectionId,
+    mode: remedy === "edit" ? "edit" : null,
+    section: remedy === "access" ? "access" : null,
+    ...(returnConnection ? { return_connection: returnConnection } : {}),
+    ...(remedy === "identity"
+      ? { return_identity_connection: search.get("id"), return_section: search.get("section") }
+      : {}),
+  };
+}

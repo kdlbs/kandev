@@ -203,3 +203,29 @@ describe("useSettingsMenuBranches integration visibility", () => {
     expect(result.current).toEqual({});
   });
 });
+
+const sshAccess = vi.hoisted(() => ({ enabled: false, admin: false }));
+vi.mock("@/hooks/domains/auth/use-is-admin", () => ({ useIsAdmin: () => sshAccess.admin }));
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: (name: string) => name === "sshConnectionManager" && sshAccess.enabled,
+}));
+it("updates the SSH child when feature or administrator eligibility changes", () => {
+  sshAccess.enabled = true;
+  sshAccess.admin = true;
+  const { result, rerender } = renderHook(() => useSettingsMenuBranches("accordion"));
+  expect(result.current["/settings/executors"]?.children?.[0].href).toBe(
+    "/settings/executors/ssh-connections",
+  );
+  sshAccess.admin = false;
+  rerender();
+  expect(result.current["/settings/executors"]).toBeUndefined();
+  sshAccess.admin = true;
+  sshAccess.enabled = false;
+  rerender();
+  expect(result.current["/settings/executors"]).toBeUndefined();
+  sshAccess.enabled = true;
+  const flat = renderHook(() => useSettingsMenuBranches("flat"));
+  expect(flat.result.current).toEqual({});
+  sshAccess.enabled = false;
+  sshAccess.admin = false;
+});

@@ -358,3 +358,19 @@ docs/specs/executors/requirements/ssh-connection-manager.md
 docs/specs/executors/system-design/ssh-connection-management-ui.md
 docs/specs/executors/system-design/ssh-connection-manager.md
 ```
+
+## Subsequent discovery feedback
+
+On 2026-10-28 the user rejected the far-right Executors entry and collection
+controls and requested a green SSH verified badge. The proposed
+[discovery/status package](../ssh-discovery-status/plan.md) owns that follow-up.
+The completed results above remain evidence for commit `106018b68ca6` and are
+not acceptance evidence for the unimplemented follow-up.
+
+
+## Proposed enrollment and diagnostics follow-up (2026-11-15)
+
+The [access experience package](../ssh-access-experience/plan.md) revises enrollment
+and diagnostics after new user feedback. Its work orders are pending. This
+package's completed status and validation above remain historical evidence.
+Discovery placement, green status, ownership and security contracts remain.

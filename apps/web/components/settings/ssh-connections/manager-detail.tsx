@@ -7,6 +7,7 @@ import { IdentityDetails } from "./identity-details";
 import { ConnectionDetails } from "./connection-details";
 import { ConnectionOverview } from "./connection-overview";
 import { ConnectionAccess } from "./connection-access";
+import type { RemedyAction } from "./diagnostic-issues";
 import { PrerequisitePanel } from "./prerequisite-panel";
 
 export function ManagerDetail({
@@ -55,12 +56,29 @@ export function ManagerDetail({
         />
       );
     if (route) {
+      const remedy: RemedyAction = (action, hop) => {
+        const target = hop === "bastion" && route.bastion ? route.bastion : route.destination;
+        n.openRemedy(
+          action,
+          target.id,
+          target.identity_id,
+          target.id === route.destination.id ? undefined : route.destination.id,
+        );
+      };
       if (n.section === "access")
         return (
-          <ConnectionAccess key={route.stamp} route={route} manager={manager} onEdit={n.edit} />
+          <ConnectionAccess
+            key={route.destination.id}
+            route={route}
+            manager={manager}
+            onEdit={n.edit}
+            onBastion={() => remedy("access", "bastion")}
+          />
         );
       if (n.section === "diagnostics")
-        return <PrerequisitePanel key={route.stamp} route={route} manager={manager} />;
+        return (
+          <PrerequisitePanel key={route.stamp} route={route} manager={manager} onRemedy={remedy} />
+        );
       return (
         <ConnectionOverview
           route={route}

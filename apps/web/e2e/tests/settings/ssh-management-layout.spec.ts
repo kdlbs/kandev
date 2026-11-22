@@ -1,3 +1,4 @@
+import { exerciseSSHVerifiedStatus } from "../../helpers/ssh-verified-status";
 import { test, expect } from "../../fixtures/test-base";
 import {
   exerciseSSHLayout,
@@ -83,6 +84,19 @@ test("SSH identity removal uses confirmation and restores useful focus", async (
   const release = await backend.useEnv({ KANDEV_FEATURES_SSH_CONNECTION_MANAGER: "true" });
   try {
     await exerciseSSHIdentityRemoval(testPage, backend.baseUrl, false);
+  } finally {
+    await testPage.close();
+    await release();
+  }
+});
+
+test("SSH verified badges are green only for current success (UI fixtures)", async ({
+  backend,
+  testPage,
+}) => {
+  const release = await backend.useEnv({ KANDEV_FEATURES_SSH_CONNECTION_MANAGER: "true" });
+  try {
+    await exerciseSSHVerifiedStatus(testPage, backend.baseUrl);
   } finally {
     await testPage.close();
     await release();

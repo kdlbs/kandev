@@ -22,7 +22,21 @@ export function sshManagerError(error: unknown): string {
     return error.body.error;
   return "ssh_operation_failed";
 }
+export type SSHOperation = {
+  kind: "observe" | "trust" | "test" | "enroll" | "preflight";
+  connectionId: string;
+  stamp: string;
+  status: "pending" | "succeeded" | "failed";
+  error?: string;
+  hop?: "bastion" | "destination";
+};
+function operationHop(error: unknown): SSHOperation["hop"] {
+  if (!(error instanceof ApiError) || !error.body || typeof error.body !== "object") return;
+  const hop = "hop" in error.body ? error.body.hop : undefined;
+  return hop === "bastion" || hop === "destination" ? hop : undefined;
+}
 export function useSSHConnections() {
+  const [operation, setOperation] = useState<SSHOperation | null>(null);
   const [identities, setIdentities] = useState<SSHIdentity[]>([]);
   const [routes, setRoutes] = useState<SSHRoute[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -59,21 +73,36 @@ export function useSSHConnections() {
     };
   }, [reload]);
   const perform = useCallback(
-    async <T>(operation: () => Promise<T>, refresh = true): Promise<T> => {
+    async <T>(
+      run: () => Promise<T>,
+      refresh = true,
+      context?: Omit<SSHOperation, "status" | "error" | "hop">,
+    ): Promise<T> => {
       // Admission must precede React's next render, including same-tick submissions.
       if (pending.current) throw new Error();
       pending.current = true;
       setBusy(true);
       setError(null);
+      setOperation(context ? { ...context, status: "pending" } : null);
       try {
-        const value = await operation();
+        const value = await run();
         if (refresh) await reload();
+        if (alive.current && context) setOperation({ ...context, status: "succeeded" });
         return value;
       } catch (e) {
         if (alive.current && sshManagerError(e) === "ssh_resource_in_use") {
           await reload().catch(() => undefined);
         }
-        if (alive.current) setError(sshManagerError(e));
+        if (alive.current) {
+          setError(sshManagerError(e));
+          if (context)
+            setOperation({
+              ...context,
+              status: "failed",
+              error: sshManagerError(e),
+              ...(operationHop(e) ? { hop: operationHop(e) } : {}),
+            });
+        }
         throw e;
       } finally {
         pending.current = false;
@@ -82,8 +111,12 @@ export function useSSHConnections() {
     },
     [reload],
   );
-  const authentication = useSSHAuthentication(perform, reload);
+  const authentication = useSSHAuthentication(
+    (run, route) => perform(run, true, operationContext("test", route)),
+    reload,
+  );
   return {
+    operation,
     failedTests: authentication.failedTests,
     identities,
     routes,
@@ -91,19 +124,39 @@ export function useSSHConnections() {
     busy,
     error,
     reload: () => perform(() => reload(), false),
+    ...connectionCommands(perform),
+    test: authentication.test,
+  };
+}
+export type SSHManager = ReturnType<typeof useSSHConnections>;
+
+type SSHPerform = <T>(
+  run: () => Promise<T>,
+  refresh?: boolean,
+  context?: Omit<SSHOperation, "status" | "error" | "hop">,
+) => Promise<T>;
+function operationContext(kind: SSHOperation["kind"], route: SSHRoute) {
+  return { kind, connectionId: route.destination.id, stamp: route.stamp };
+}
+function connectionCommands(perform: SSHPerform) {
+  return {
     createIdentity: (req: CreateSSHIdentity) => perform(() => api.createSSHIdentity(req)),
     renameIdentity: (identity: SSHIdentity, label: string) =>
       perform(() => api.renameSSHIdentity(identity, label)),
     deleteIdentity: (identity: SSHIdentity) => perform(() => api.deleteSSHIdentity(identity)),
     saveConnection: (req: SaveSSHConnection) => perform(() => api.saveManagedSSHConnection(req)),
     deleteConnection: (route: SSHRoute) => perform(() => api.deleteManagedSSHConnection(route)),
-    observe: (route: SSHRoute) => perform(() => api.observeManagedSSH(route), false),
+    observe: (route: SSHRoute) =>
+      perform(() => api.observeManagedSSH(route), false, operationContext("observe", route)),
     trust: (route: SSHRoute, observation: SSHObservation) =>
-      perform(() => api.trustManagedSSH(route, observation)),
+      perform(
+        () => api.trustManagedSSH(route, observation),
+        true,
+        operationContext("trust", route),
+      ),
     enroll: (route: SSHRoute, request: EnrollSSHKey) =>
-      perform(() => api.enrollManagedSSH(route, request)),
-    preflight: (route: SSHRoute) => perform(() => api.preflightManagedSSH(route), false),
-    test: authentication.test,
+      perform(() => api.enrollManagedSSH(route, request), true, operationContext("enroll", route)),
+    preflight: (route: SSHRoute) =>
+      perform(() => api.preflightManagedSSH(route), false, operationContext("preflight", route)),
   };
 }
-export type SSHManager = ReturnType<typeof useSSHConnections>;

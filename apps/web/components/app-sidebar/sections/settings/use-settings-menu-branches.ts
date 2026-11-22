@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 
 import { useAppStore } from "@/components/state-provider";
 import { useHideDisabledIntegrationsInNav } from "@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav";
@@ -53,6 +55,9 @@ const MENU_ITEMS_BY_HREF: ReadonlyMap<string, SettingsMenuItem> = new Map(
  */
 export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBranches {
   const pluginRegistry = usePluginRegistry();
+  const sshEnabled = useFeature("sshConnectionManager");
+  const admin = useIsAdmin();
+  const sshEligible = sshEnabled && admin;
   const isTree = isTreeSettingsMenuMode(mode);
   const workspaces = useAppStore((s) => s.workspaces.items);
   const agents = useAppStore((s) => s.settingsAgents.items);
@@ -108,10 +113,11 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
         AGENTS_SETTINGS_HREF,
         buildAgentsBranch(orderedAgents, detectedNames, hideDisabledAgentProfiles),
       ),
-      ...branchEntry(EXECUTORS_SETTINGS_HREF, buildExecutorsBranch(executors)),
+      ...branchEntry(EXECUTORS_SETTINGS_HREF, buildExecutorsBranch(executors, sshEligible)),
     };
   }, [
     isTree,
+    sshEligible,
     workspaces,
     activeWorkspaceId,
     canvasesEnabled,

@@ -4,6 +4,7 @@ import { Button } from "@kandev/ui/button";
 import { IconPlayerPlay } from "@tabler/icons-react";
 import type { SSHRoute } from "@/lib/types/http-ssh-connections";
 import type { SSHManager } from "@/hooks/domains/settings/use-ssh-connections";
+import { OperationFeedback } from "./operation-feedback";
 import { SettingsGroup, SettingsRow } from "../settings-group";
 import { settingsActionClassName } from "../settings-control";
 
@@ -45,6 +46,7 @@ export function ConnectionOverview({
         />
       </SettingsGroup>
       <div className="space-y-3">
+        <OperationFeedback manager={manager} route={route} kind="test" />
         <Button
           className={settingsActionClassName()}
           disabled={manager.busy}

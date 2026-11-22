@@ -40,7 +40,7 @@ export async function exerciseSSHLayout(page: Page, baseUrl: string, mobile: boo
   await expect(page.getByLabel("Host", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Layout connection", exact: true })).toBeVisible();
   await expect(page.getByText("deploy@layout.invalid:22", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("One-time password", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("SSH password", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Delete connection", exact: true })).toHaveCount(0);
   const edit = page.getByRole("button", { name: "Edit", exact: true });
   const box = await edit.boundingBox();
@@ -96,6 +96,8 @@ export async function exerciseSSHCollection(page: Page, baseUrl: string) {
   const rows = page.getByRole("link").filter({ hasText: "Layout connection" });
   await expect(rows.filter({ hasText: route.destination.id })).toHaveCount(1);
   await expect(rows.filter({ hasText: duplicate.destination.id })).toHaveCount(1);
+  await assertSSHCollectionToolbar(page);
+
   await expect(rows.filter({ hasText: route.destination.id })).toContainText(
     "deploy@layout.invalid:22",
   );
@@ -148,4 +150,30 @@ export async function exerciseSSHIdentityRemoval(page: Page, baseUrl: string, to
   await expect(page).not.toHaveURL(/id=/);
   await expect(page.getByRole("button", { name: "New identity", exact: true })).toBeFocused();
   await expect(page.getByRole("link").filter({ hasText: name })).toHaveCount(0);
+}
+
+// @covers AC-EXECUTORS-SSH-CONNECTIONS-004.13
+export async function assertSSHCollectionToolbar(page: Page) {
+  const title = await page
+    .getByRole("heading", { name: "SSH connections", exact: true })
+    .boundingBox();
+  const tabs = await page.getByRole("tablist").boundingBox();
+  const create = await page.locator("#ssh-create-resource").boundingBox();
+  expect(title).not.toBeNull();
+  expect(tabs).not.toBeNull();
+  expect(create).not.toBeNull();
+  expect(tabs!.y).toBeGreaterThan(title!.y + title!.height);
+  expect(Math.abs(tabs!.x - title!.x)).toBeLessThanOrEqual(1);
+  if ((page.viewportSize()?.width ?? 1280) < 768) {
+    expect(create!.y).toBeGreaterThanOrEqual(tabs!.y + tabs!.height);
+    expect(Math.abs(create!.x - title!.x)).toBeLessThanOrEqual(1);
+    const toolbar = await page.locator("#ssh-create-resource").locator("..").boundingBox();
+    expect(Math.abs(create!.width - toolbar!.width)).toBeLessThanOrEqual(1);
+  } else {
+    expect(
+      Math.abs(create!.y + create!.height / 2 - (tabs!.y + tabs!.height / 2)),
+    ).toBeLessThanOrEqual(1);
+    expect(create!.x - (tabs!.x + tabs!.width)).toBeGreaterThanOrEqual(8);
+    expect(create!.x - (tabs!.x + tabs!.width)).toBeLessThanOrEqual(24);
+  }
 }

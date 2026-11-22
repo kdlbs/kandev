@@ -1,118 +1,157 @@
 "use client";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import type { SSHRoute, SSHObservation } from "@/lib/types/http-ssh-connections";
 import type { SSHManager } from "@/hooks/domains/settings/use-ssh-connections";
-import { SettingsGroup } from "../settings-group";
 import { settingsActionClassName } from "../settings-control";
 import { connectionState } from "./connection-presentation";
 import { ConnectionTrust } from "./connection-trust";
 import { EnrollmentPanel, EnrollmentStatus } from "./enrollment-panel";
-import { PublicKeyDetails } from "./public-key-details";
+import { AccessProgress } from "./access-progress";
+import { AccessHeading, AccessSurface } from "./access-primitives";
 
 export function ConnectionAccess({
   route,
   manager,
   onEdit,
+  onBastion,
 }: {
   route: SSHRoute;
   manager: SSHManager;
   onEdit: () => void;
+  onBastion?: () => void;
 }) {
   const { t } = useTranslation();
   const [observation, setObservation] = useState<SSHObservation | null>(null);
-
+  const [enrolling, setEnrolling] = useState(false);
+  const identity = manager.identities.find((item) => item.id === route.destination.identity_id);
   const state = connectionState(
     route,
     manager.identities,
     manager.failedTests?.[route.destination.id],
   );
+  const focusReturn = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!enrolling && focusReturn.current) {
+      document.getElementById(focusReturn.current)?.focus();
+      focusReturn.current = null;
+    }
+  }, [enrolling]);
+  const close = (focusId: string) => {
+    focusReturn.current = focusId;
+    setEnrolling(false);
+  };
   if (state === "incomplete" || state === "unavailable")
     return (
-      <SettingsGroup title={t("settings:sshManager.ui.access")}>
-        <div className="py-4 space-y-4">
-          <p className="text-sm text-muted-foreground">
-            {t("settings:sshManager.ui.setupDetails")}
-          </p>
+      <div className="max-w-3xl space-y-6">
+        <AccessProgress state={state} />
+        <AccessSurface className="space-y-5">
+          <AccessHeading
+            title={t("settings:sshManager.experience.details")}
+            description={t("settings:sshManager.ui.setupDetails")}
+          />
           <Button variant="outline" className={settingsActionClassName()} onClick={onEdit}>
             {t("common:edit")}
           </Button>
-        </div>
-      </SettingsGroup>
+        </AccessSurface>
+      </div>
     );
-  return (
-    <div className="space-y-8">
-      <SettingsGroup
-        title={t("settings:sshManager.ui.access")}
-        description={t(
-          state === "untrusted"
-            ? "settings:sshManager.ui.setupTrust"
-            : "settings:sshManager.ui.setupTest",
-        )}
-      >
-        <div className="py-4">
-          <ConnectionTrust
+  if (needsBastionSetup(route, manager)) return <BastionSetup onOpen={onBastion} />;
+  if (enrolling)
+    return (
+      <div className="max-w-3xl space-y-4">
+        <AccessSurface>
+          <EnrollmentPanel
             route={route}
             manager={manager}
-            observation={observation}
-            setObservation={setObservation}
+            onCompleted={() => close(`ssh-test-${route.destination.id}`)}
           />
-        </div>
-      </SettingsGroup>
-      <ConnectionAuthorization route={route} manager={manager} />
+        </AccessSurface>
+        <Button
+          variant="ghost"
+          className={settingsActionClassName()}
+          onClick={() => close(`ssh-install-${route.destination.id}`)}
+        >
+          {t("settings:sshManager.ui.cancelInstall")}
+        </Button>
+      </div>
+    );
+  return (
+    <div className="max-w-3xl space-y-6">
+      <AccessProgress state={observation ? "untrusted" : state} />
+      <AccessSurface>
+        <ConnectionTrust
+          route={route}
+          manager={manager}
+          observation={observation}
+          setObservation={setObservation}
+        />
+      </AccessSurface>
+      {identity?.public_key && (
+        <InstallationEntry route={route} manager={manager} onInstall={() => setEnrolling(true)} />
+      )}
     </div>
   );
 }
 
-function ConnectionAuthorization({ route, manager }: { route: SSHRoute; manager: SSHManager }) {
+function needsBastionSetup(route: SSHRoute, manager: SSHManager) {
+  if (!route.bastion) return false;
+  const bastion = manager.routes?.find((item) => item.destination.id === route.bastion?.id);
+  return (
+    !bastion ||
+    connectionState(bastion, manager.identities, manager.failedTests?.[bastion.destination.id]) !==
+      "ready"
+  );
+}
+function BastionSetup({ onOpen }: { onOpen?: () => void }) {
   const { t } = useTranslation();
-  const [enrolling, setEnrolling] = useState(false);
-  const identity = manager.identities.find((item) => item.id === route.destination.identity_id);
+  return (
+    <div className="max-w-3xl space-y-6">
+      <AccessProgress state="untrusted" />
+      <AccessSurface className="space-y-5">
+        <AccessHeading
+          title={t("settings:sshManager.bastion")}
+          description={t("settings:sshManager.errors.ssh_bastion_not_ready")}
+        />
+        <Button className={settingsActionClassName()} onClick={onOpen}>
+          {t("settings:sshManager.experience.remedyAccess")}
+        </Button>
+      </AccessSurface>
+    </div>
+  );
+}
+function InstallationEntry({
+  route,
+  manager,
+  onInstall,
+}: {
+  route: SSHRoute;
+  manager: SSHManager;
+  onInstall: () => void;
+}) {
+  const { t } = useTranslation();
   const latest =
     route.latest_enrollment?.stamp === route.stamp ? route.latest_enrollment : undefined;
-  const close = (focusId: string) => {
-    setEnrolling(false);
-    requestAnimationFrame(() => document.getElementById(focusId)?.focus());
-  };
-  if (!identity?.public_key) return null;
   return (
-    <SettingsGroup title={t("settings:sshManager.enrollment.title")}>
-      <div className="py-4 space-y-5">
-        {!enrolling && (
-          <>
-            <EnrollmentStatus latest={latest} />
-            <PublicKeyDetails publicKey={identity.public_key} />
-            {route.destination.fingerprint && (
-              <Button
-                id={`ssh-install-${route.destination.id}`}
-                variant="outline"
-                className={settingsActionClassName()}
-                disabled={manager.busy || latest?.state === "started"}
-                onClick={() => setEnrolling(true)}
-              >
-                {t("settings:sshManager.ui.installKey")}
-              </Button>
-            )}
-          </>
-        )}
-        {enrolling && (
-          <>
-            <EnrollmentPanel
-              route={route}
-              manager={manager}
-              onCompleted={() => close(`ssh-test-${route.destination.id}`)}
-            />
-            <Button
-              variant="ghost"
-              className={settingsActionClassName()}
-              onClick={() => close(`ssh-install-${route.destination.id}`)}
-            >
-              {t("settings:sshManager.ui.cancelInstall")}
-            </Button>
-          </>
-        )}
-      </div>
-    </SettingsGroup>
+    <div className="space-y-4">
+      <EnrollmentStatus latest={latest} />
+      {route.destination.fingerprint && (
+        <div className="flex flex-col gap-3 border-t pt-5 md:flex-row md:items-center md:justify-between">
+          <p className="text-sm text-muted-foreground">
+            {t("settings:sshManager.experience.optionalInstall")}
+          </p>
+          <Button
+            id={`ssh-install-${route.destination.id}`}
+            variant="outline"
+            className={settingsActionClassName("shrink-0")}
+            disabled={manager.busy || latest?.state === "started"}
+            onClick={onInstall}
+          >
+            {t("settings:sshManager.ui.installKey")}
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }

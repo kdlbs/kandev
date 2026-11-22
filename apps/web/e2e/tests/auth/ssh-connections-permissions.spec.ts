@@ -83,6 +83,11 @@ test("only administrators can read or manage SSH identities and connections", as
         page.getByText("SSH connection management is not available.", { exact: true }),
       ).toBeVisible();
     }
+    await expect(
+      page
+        .getByTestId("app-sidebar-settings-mode")
+        .getByRole("link", { name: "SSH connections", exact: true }),
+    ).toHaveCount(0);
     await expect(page.getByRole("button", { name: "New identity", exact: true })).toHaveCount(0);
     await expect(page.getByText("Administrator SSH key", { exact: true })).toHaveCount(0);
     const adminPage = await admin.newPage();

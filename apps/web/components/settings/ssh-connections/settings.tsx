@@ -66,7 +66,7 @@ function SSHConnectionsContent() {
         <ManagerHeader manager={manager} navigation={n} />
         <ManagerContext manager={manager} navigation={n} />
         <ManagerError manager={manager} />
-        {manager.busy && (
+        {manager.busy && !manager.operation && (
           <p role="status" className="text-sm text-muted-foreground">
             {t("settings:sshManager.ui.working")}
           </p>
@@ -129,7 +129,7 @@ function ManagerContext({
 
 function ManagerError({ manager }: { manager: SSHManager }) {
   const { t } = useTranslation();
-  if (!manager.error) return null;
+  if (!manager.error || manager.operation) return null;
   return (
     <div
       role="alert"

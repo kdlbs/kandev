@@ -171,6 +171,9 @@ and validation records live in the linked plans.
   shall reach it from the Executors page even when no executor profile exists,
   from SSH executor setup, and from settings search. Breadcrumbs and the active
   settings entry shall identify Executors as its parent on desktop and phone.
+  In tree navigation, SSH connections shall be the first direct child of
+  Executors, including with no profiles. It shall open the manager and remain
+  selected throughout its views, without increasing the profile count.
 - **AC-EXECUTORS-SSH-CONNECTIONS-004.7:** Connection setup shall offer identity
   selection and creation at the identity field, with advanced identity management
   available within SSH connections. Creating or cancelling an identity shall
@@ -186,7 +189,8 @@ and validation records live in the linked plans.
   status. Opening a row shall show one focused detail view on desktop and
   phone. Separate records with identical names shall remain distinguishable
   without merging or deleting them. Executors shall expose SSH management as
-  a secondary header action, including when no profile exists.
+  a full-width navigation entry in its main content, before the profiles,
+  including when no profile exists.
 - **AC-EXECUTORS-SSH-CONNECTIONS-004.9:** A saved connection shall initially show
   its endpoint, identity, optional bastion, and current saved verification state
   as a readable overview. Metadata fields shall become editable through an
@@ -211,6 +215,52 @@ and validation records live in the linked plans.
   least 44px hit areas. Long names, public keys, and translated labels shall
   fit without horizontal document scrolling. Optional explanatory detail shall
   not obscure required trust, custody, failure, or deletion consequences.
+
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.13:** Collection tabs and the active
+  collection's New action shall appear below the manager title, aligned with
+  the content's leading edge. They shall remain visible in populated, empty,
+  loading, and failed-read states without relying on a far-right header cluster.
+  Phone layouts shall place the create action on its own full-width row.
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.14:** A current ready connection's
+  `SSH verified` badge shall use a green success treatment in the collection
+  and saved detail header, with readable text in light and dark themes.
+  The text label shall remain present. Incomplete, untrusted, unavailable,
+  unchecked, freshly failed, and uncertain-enrollment states shall not receive
+  that success treatment. Color shall not change verification semantics.
+
+#### Enrollment and diagnostics revision
+
+Implemented by the [experience package](../../../plans/ssh-access-experience/plan.md).
+Earlier criteria remain accepted.
+
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.15:** Access setup shall show one current
+  task, completed prerequisites, and one primary action. Optional installation
+  shall not be a mandatory step for an identity that already authenticates.
+  Opening installation shall replace competing setup controls with its focused
+  method, credential, review, and result views.
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.16:** Trust and installation reviews shall
+  label the remote account, server fingerprint, and key fingerprint separately.
+  Required values shall be readable without a tooltip or narrow popover. A
+  changed server key shall show both values and a blocking warning. Review
+  alone shall not submit. Changing its target or leaving review shall invalidate
+  confirmation and clear bootstrap secrets.
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.17:** Each operation shall show progress
+  and its result beside the initiating task. Unknown intermediate progress
+  shall not be fabricated. Failed, installed-but-unverified, and unknown
+  enrollment outcomes shall offer distinct recovery actions. Only current
+  verified access shall receive the green SSH success treatment.
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.18:** Diagnostics shall explain its scope
+  before running. Results shall group actual problems by affected hop, with a
+  short explanation and a relevant remedy. A failed request shall not appear
+  as an empty successful report. No reported setup problems shall not imply a
+  successful live SSH test. Unreported individual checks shall not be shown as
+  passed. Unknown codes shall retain a safe fallback and recovery path.
+- **AC-EXECUTORS-SSH-CONNECTIONS-004.19:** Desktop and phone shall support the
+  same method, review, result, and recovery steps. Phone shall show one active
+  step with full-width choices, labelled wrapping evidence, one page scroller,
+  and a reachable primary action. Keyboard focus shall follow deliberate step
+  changes without being moved by background results. Loading, failure, long
+  translations, and reduced motion shall preserve the same hierarchy.
 
 ### REQ-EXECUTORS-SSH-CONNECTIONS-005: Compatibility and rollout
 
@@ -264,3 +314,5 @@ remains [#3710](https://github.com/kdlbs/kandev/issues/3710).
 - [Implementation plan](../../../plans/ssh-connection-manager/plan.md)
 - [Executor navigation follow-up](../../../plans/ssh-connections-executor-navigation/plan.md)
 - [SSH management UX revision](../../../plans/ssh-connections-ux/plan.md)
+
+- [SSH discovery and status follow-up](../../../plans/ssh-discovery-status/plan.md)

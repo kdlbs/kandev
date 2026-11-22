@@ -9,6 +9,7 @@ const queryKeys = [
   "adopt_connection",
   "return_connection",
   "return_identity_connection",
+  "return_section",
   "select_identity",
   "section",
   "mode",
@@ -23,6 +24,7 @@ export function sshConnectionSettingsPath(
   const query = new URLSearchParams();
   for (const key of queryKeys) {
     const value = key in changes ? changes[key] : current.get(key);
+    if (key === "return_section" && !["access", "diagnostics"].includes(value ?? "")) continue;
     if (key === "section" && !["overview", "access", "diagnostics"].includes(value ?? "")) continue;
     if (key === "mode" && value !== "edit") continue;
     if (value) query.set(key, value);

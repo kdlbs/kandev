@@ -1,4 +1,6 @@
 import type { ComponentType } from "react";
+import { IconKey } from "@tabler/icons-react";
+import { SSH_CONNECTIONS_SETTINGS_HREF } from "@/lib/settings/ssh-connection-settings-routes";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AGENTS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
 import { EXECUTORS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/executors";
@@ -327,8 +329,11 @@ export function buildAgentsBranch(
  * Its standalone connection route remains reachable only when there is no
  * profile to recover through.
  */
-export function buildExecutorsBranch(executors: ReadonlyArray<BranchExecutor>): SettingsMenuNode[] {
-  return executors.map((executor) => {
+export function buildExecutorsBranch(
+  executors: ReadonlyArray<BranchExecutor>,
+  sshEligible = false,
+): SettingsMenuNode[] {
+  const records = executors.map((executor) => {
     const profiles = executor.profiles ?? [];
     const executorHref =
       executor.type === "k8s" && profiles.length > 0
@@ -348,6 +353,16 @@ export function buildExecutorsBranch(executors: ReadonlyArray<BranchExecutor>): 
       })),
     };
   });
+  if (!sshEligible) return records;
+  return [
+    {
+      key: "executors:ssh-connections",
+      href: SSH_CONNECTIONS_SETTINGS_HREF,
+      label: { key: "settings:sshManager.title" },
+      icon: IconKey,
+    },
+    ...records,
+  ];
 }
 
 /** True when `pathname` is this node's page or lives underneath it. */
