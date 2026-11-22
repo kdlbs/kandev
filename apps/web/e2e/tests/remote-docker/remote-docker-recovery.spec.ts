@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createDecipheriv, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { devices, type Page } from "@playwright/test";
@@ -41,6 +41,19 @@ function execInContainer(containerId: string, script: string): string {
   })
     .toString()
     .trim();
+}
+
+function execInContainerWithInput(containerId: string, script: string, input: string): string {
+  try {
+    return execFileSync("docker", ["exec", "-i", containerId, "sh", "-lc", script], {
+      encoding: "utf8",
+      input,
+    })
+      .toString()
+      .trim();
+  } catch {
+    throw new Error("Authenticated agentctl request failed inside the task container");
+  }
 }
 
 function findRepositoryRoot(containerId: string): string {
@@ -166,6 +179,239 @@ function readExecutorRunning(tmpDir: string, sessionId: string) {
   );
 }
 
+function readDeliveryCursor(tmpDir: string, sessionId: string) {
+  return withDatabase(
+    tmpDir,
+    (db) =>
+      db
+        .prepare(
+          `SELECT stream_id, projected_sequence, remote_high_water
+           FROM agent_delivery_cursors WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1`,
+        )
+        .get(sessionId) as
+        | { stream_id: string; projected_sequence: number; remote_high_water: number }
+        | undefined,
+  );
+}
+
+function readSecretValue(tmpDir: string, secretID: string): string | undefined {
+  if (!secretID) return undefined;
+  const row = withDatabase(
+    tmpDir,
+    (db) =>
+      db.prepare("SELECT encrypted_value, nonce FROM secrets WHERE id = ?").get(secretID) as
+        | { encrypted_value: Uint8Array; nonce: Uint8Array }
+        | undefined,
+  );
+  if (!row) return undefined;
+  const encrypted = Buffer.from(row.encrypted_value);
+  const key = fs.readFileSync(path.join(tmpDir, ".kandev", "data", "master.key"));
+  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(row.nonce));
+  decipher.setAuthTag(encrypted.subarray(-16));
+  return Buffer.concat([decipher.update(encrypted.subarray(0, -16)), decipher.final()]).toString();
+}
+
+function readAgentctlCredentials(
+  tmpDir: string,
+  sessionId: string,
+): { agentctlToken: string; controlToken: string } {
+  const references = withDatabase(tmpDir, (db) => {
+    const runtime = db
+      .prepare(
+        `SELECT e.container_control_auth_token_secret_id AS control_secret_id, r.metadata
+         FROM executors_running r
+         JOIN task_sessions s ON s.id = r.session_id
+         JOIN task_environments e ON e.id = s.task_environment_id
+         WHERE r.session_id = ?`,
+      )
+      .get(sessionId) as { control_secret_id: string; metadata: string } | undefined;
+    const metadata = runtime ? (JSON.parse(runtime.metadata) as Record<string, unknown>) : {};
+    const agentctlSecretID = metadata.env_secret_id_AGENTCTL_AUTH_TOKEN;
+    return {
+      agentctlSecretID: typeof agentctlSecretID === "string" ? agentctlSecretID : "",
+      controlSecretID: runtime?.control_secret_id ?? "",
+    };
+  });
+  const agentctlToken = readSecretValue(tmpDir, references.agentctlSecretID);
+  const controlToken = readSecretValue(tmpDir, references.controlSecretID);
+  expect(agentctlToken, "the fixture agentctl credential is missing").toBeTruthy();
+  expect(controlToken, "the fixture control credential is missing").toBeTruthy();
+  return { agentctlToken: agentctlToken!, controlToken: controlToken! };
+}
+
+async function findManagedAgentPID(
+  tmpDir: string,
+  sessionId: string,
+  containerId: string,
+): Promise<{ pid: number; agentctlPort: number; authToken: string }> {
+  const runtime = withDatabase(
+    tmpDir,
+    (db) =>
+      db
+        .prepare("SELECT agentctl_url FROM executors_running WHERE session_id = ?")
+        .get(sessionId) as { agentctl_url: string } | undefined,
+  );
+  expect(runtime?.agentctl_url, "the runtime agentctl endpoint is missing").toBeTruthy();
+  const credentials = readAgentctlCredentials(tmpDir, sessionId);
+  const status = await readAuthenticatedAgentctlJSON<{
+    agent_status?: string;
+    process_info?: { pid?: number };
+  }>(runtime!.agentctl_url, "/api/v1/status", credentials.agentctlToken);
+  if (status.agent_status !== "running" || !Number.isInteger(status.process_info?.pid)) {
+    throw new Error("agentctl did not report a running managed process");
+  }
+  const controlPort = Number(execInContainer(containerId, 'printf "%s" "$AGENTCTL_PORT"'));
+  const agentctlPort = readManagedAgentInstancePort(
+    containerId,
+    controlPort,
+    sessionId,
+    credentials.controlToken,
+  );
+  return { pid: status.process_info!.pid!, agentctlPort, authToken: credentials.agentctlToken };
+}
+
+async function readAuthenticatedAgentctlJSON<T>(
+  endpoint: string,
+  route: string,
+  token: string,
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(new URL(route, endpoint), {
+      headers: { authorization: `Bearer ${token}` },
+    });
+  } catch {
+    throw new Error(`Could not read authenticated agentctl route ${route}`);
+  }
+  if (!response.ok) throw new Error(`Could not read authenticated agentctl route ${route}`);
+  return (await response.json()) as T;
+}
+
+function readManagedAgentInstancePort(
+  containerId: string,
+  controlPort: number,
+  sessionId: string,
+  authToken: string,
+): number {
+  expect(Number.isInteger(controlPort) && controlPort > 0, "agentctl control port is missing").toBe(
+    true,
+  );
+  const response = execInContainerWithInput(
+    containerId,
+    `IFS= read -r token; printf 'header = "Authorization: Bearer %s"\\n' "$token" | ` +
+      `curl --config - --max-time 3 -fsS http://127.0.0.1:${controlPort}/api/v1/instances`,
+    `${authToken}\n`,
+  );
+  const payload = JSON.parse(response) as {
+    instances?: Array<{ id: string; port: number; session_id?: string }>;
+  };
+  const instances =
+    payload.instances?.filter((candidate) => candidate.session_id === sessionId) ?? [];
+  expect(instances, "the control server has no unique instance for this session").toHaveLength(1);
+  const instance = instances[0];
+  expect(Number.isInteger(instance?.port) && instance!.port > 0).toBe(true);
+  return instance!.port;
+}
+
+async function readAgentctlAssociationStatus(
+  sessionId: string,
+  containerId: string,
+  agentctlPort: number,
+  authToken: string,
+) {
+  expect(
+    Number.isInteger(agentctlPort) && agentctlPort > 0,
+    "the task session agentctl port is missing",
+  ).toBe(true);
+  const result = execInContainerWithInput(
+    containerId,
+    `IFS= read -r token; printf 'header = "Authorization: Bearer %s"\\n' "$token" | ` +
+      `curl --config - --max-time 3 -sS -w '\\n__HTTP_STATUS__%{http_code}' ` +
+      `http://127.0.0.1:${agentctlPort}/api/v1/agent/session 2>/dev/null || true`,
+    `${authToken}\n`,
+  );
+  const statusMarker = "\n__HTTP_STATUS__";
+  const marker = result.lastIndexOf(statusMarker);
+  const httpStatus = marker < 0 ? "no HTTP response" : result.slice(marker + statusMarker.length);
+  if (httpStatus !== "200") {
+    const agentctlStatus = execInContainerWithInput(
+      containerId,
+      `IFS= read -r token; printf 'header = "Authorization: Bearer %s"\\n' "$token" | ` +
+        `curl --config - --max-time 3 -sS -o /dev/null -w '%{http_code}' ` +
+        `http://127.0.0.1:${agentctlPort}/api/v1/status 2>/dev/null || true`,
+      `${authToken}\n`,
+    );
+    const healthStatus = execInContainer(
+      containerId,
+      `curl --max-time 3 -sS -o /dev/null -w '%{http_code}' ` +
+        `http://127.0.0.1:${agentctlPort}/health || true`,
+    );
+    throw new Error(
+      `agentctl association returned HTTP ${httpStatus}; status returned ${agentctlStatus}; ` +
+        `health returned ${healthStatus} on instance port ${agentctlPort}`,
+    );
+  }
+  const association = JSON.parse(result.slice(0, marker)) as {
+    session_id: string;
+    agent_status: string;
+  };
+  expect(association.session_id).toBe(sessionId);
+  return association.agent_status;
+}
+
+function readAgentctlDeliveryHighWater(
+  containerId: string,
+  agentctlPort: number,
+  authToken: string,
+  streamId: string,
+): number {
+  const response = execInContainerWithInput(
+    containerId,
+    `IFS= read -r token; printf 'header = "Authorization: Bearer %s"\\n' "$token" | ` +
+      `curl --config - --max-time 3 -fsS ` +
+      `"http://127.0.0.1:${agentctlPort}/api/v1/agent/delivery?stream_id=${encodeURIComponent(streamId)}"`,
+    `${authToken}\n`,
+  );
+  const descriptor = JSON.parse(response) as { stream?: { high_water?: number } };
+  return descriptor.stream?.high_water ?? 0;
+}
+
+function containerProcessIsAlive(containerId: string, pid: number): boolean {
+  return execInContainer(containerId, `test -e /proc/${pid} && echo true || echo false`) === "true";
+}
+
+function readProjectedTailCounts(
+  tmpDir: string,
+  streamId: string,
+  afterSequence: number,
+  throughSequence: number,
+) {
+  return withDatabase(
+    tmpDir,
+    (db) =>
+      db
+        .prepare(
+          `SELECT COUNT(*) AS count, COUNT(DISTINCT sequence) AS distinct_count
+         FROM agent_delivery_inbox
+         WHERE stream_id = ? AND sequence > ? AND sequence <= ? AND projected_at IS NOT NULL`,
+        )
+        .get(streamId, afterSequence, throughSequence) as { count: number; distinct_count: number },
+  );
+}
+
+function getNativeSessionId(session: { metadata?: Record<string, unknown> | null }): string {
+  const acp = session.metadata?.acp;
+  const nativeSessionId =
+    typeof acp === "object" && acp !== null
+      ? (acp as Record<string, unknown>).session_id
+      : undefined;
+  expect(nativeSessionId, "the session has no saved native ACP identity").toEqual(
+    expect.any(String),
+  );
+  expect(nativeSessionId).not.toBe("");
+  return nativeSessionId as string;
+}
+
 function expectExplicitResumePreservedUncertainty(
   tmpDir: string,
   blockId: string,
@@ -246,6 +492,37 @@ async function requestSessionResume(baseUrl: string, taskId: string, sessionId: 
     });
     socket.addEventListener("error", () => fail(new Error("session.recover websocket failed")));
   });
+}
+
+async function requestSessionResumeAfterRestart(
+  baseUrl: string,
+  taskId: string,
+  sessionId: string,
+) {
+  let latest: RecoveryWireOutcome | undefined;
+  await expect
+    .poll(
+      async () => {
+        latest = await requestSessionResume(baseUrl, taskId, sessionId);
+        if (latest.type === "response") return "ready";
+        const payload = latest.payload as {
+          details?: { kind?: string; retryable?: boolean };
+        };
+        if (
+          payload.details?.kind === "session_recovery_in_progress" &&
+          payload.details.retryable === true
+        ) {
+          return "reconciling";
+        }
+        throw new Error(`session Resume failed: ${JSON.stringify(latest.payload)}`);
+      },
+      {
+        timeout: 90_000,
+        message: "Wait for backend restart reconciliation before requesting Resume",
+      },
+    )
+    .toBe("ready");
+  return latest!;
 }
 
 async function seedRemoteLossAndRestart(
@@ -515,6 +792,19 @@ async function waitForResumedSession(apiClient: ApiClient, taskId: string, sessi
   ).toEqual([]);
 }
 
+async function killFixtureBackend(backend: BackendContext): Promise<number> {
+  const pid = backend.pid();
+  expect(pid, "the test-owned backend PID is unavailable").toBeTruthy();
+  process.kill(pid!, "SIGKILL");
+  await expect
+    .poll(() => processIsAlive(pid!), {
+      timeout: 30_000,
+      message: "Wait for the owned backend to stop",
+    })
+    .toBe(false);
+  return pid!;
+}
+
 async function sendMarkerTurn(
   apiClient: ApiClient,
   taskId: string,
@@ -527,6 +817,380 @@ async function sendMarkerTurn(
 }
 
 test.describe("remote docker executor — recoverable resume", () => {
+  test("failed session without a resume token keeps its Remote Docker workspace", async ({
+    apiClient,
+    seedData,
+    backend,
+    testPage,
+  }) => {
+    test.setTimeout(300_000);
+    const { task, sessionId, containerId, repoRoot, markerCommit } = await prepareRecoverableTask(
+      apiClient,
+      seedData,
+      "remote docker failed session without resume token",
+    );
+    const managedAgent = await findManagedAgentPID(backend.tmpDir, sessionId, containerId);
+    await expect
+      .poll(
+        () =>
+          readAgentctlAssociationStatus(
+            sessionId,
+            containerId,
+            managedAgent.agentctlPort,
+            managedAgent.authToken,
+          ),
+        {
+          timeout: 15_000,
+          message: "the fixture host should reach the live agentctl port",
+        },
+      )
+      .toBe("running");
+
+    const backendPid = await killFixtureBackend(backend);
+    let backendStopped = true;
+    try {
+      const runtimeCheckpoint = withDatabase(backend.tmpDir, (db) => {
+        db.prepare("UPDATE task_sessions SET state = 'FAILED', error_message = ? WHERE id = ?").run(
+          "Agent process exited",
+          sessionId,
+        );
+        db.prepare(
+          "UPDATE executors_running SET resumable = 0, resume_token = '' WHERE session_id = ?",
+        ).run(sessionId);
+        return db
+          .prepare(
+            "SELECT container_id, agentctl_url, resumable, resume_token FROM executors_running WHERE session_id = ?",
+          )
+          .get(sessionId) as
+          | { container_id: string; agentctl_url: string; resumable: number; resume_token: string }
+          | undefined;
+      });
+      expect(runtimeCheckpoint).toMatchObject({
+        container_id: containerId,
+        resumable: 0,
+        resume_token: "",
+      });
+      expect(runtimeCheckpoint?.agentctl_url).toMatch(/^\S+$/);
+      execInContainer(containerId, `kill -9 ${managedAgent.pid}`);
+      await expect
+        .poll(() => containerProcessIsAlive(containerId, managedAgent.pid), {
+          timeout: 15_000,
+          message: "the fixture mock-agent should stop while its workspace stays attached",
+        })
+        .toBe(false);
+      await expect
+        .poll(
+          () =>
+            readAgentctlAssociationStatus(
+              sessionId,
+              containerId,
+              managedAgent.agentctlPort,
+              managedAgent.authToken,
+            ),
+          {
+            timeout: 30_000,
+            message: "authenticated agentctl association should report the stopped session",
+          },
+        )
+        .toBe("stopped");
+
+      await backend.restart();
+      backendStopped = false;
+      expect(processIsAlive(backendPid)).toBe(false);
+      expect(containerExists(containerId), "startup removed the retained task container").toBe(
+        true,
+      );
+      expect((await apiClient.getTaskEnvironment(task.id))?.container_id).toBe(containerId);
+      expect(execInContainer(containerId, `cd ${repoRoot} && git rev-parse HEAD`)).toBe(
+        markerCommit,
+      );
+      expect(
+        execInContainer(containerId, `cat ${repoRoot}/untracked-recovery-marker.txt`),
+      ).toContain("untracked marker");
+
+      await testPage.goto(`/t/${task.id}?sessionId=${sessionId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      const recoveryFailure = testPage.getByRole("heading", { name: "Session recovery failed" });
+      await expect(recoveryFailure).toBeVisible();
+      await expect(testPage.getByRole("button", { name: /Agent failed/ })).toBeVisible();
+      await expect(session.recoveryResumeButton()).toBeVisible();
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(
+        testPage.getByRole("heading", { name: "Session recovery failed" }),
+      ).toBeVisible();
+      await expect(testPage.getByRole("button", { name: /Agent failed/ })).toBeVisible();
+      await session.recoveryResumeButton().click();
+      await waitForResumedSession(apiClient, task.id, sessionId);
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(session.anyIdleInput()).toBeVisible();
+      await sendMarkerTurn(apiClient, task.id, sessionId);
+
+      expect(containerExists(containerId), "Resume replaced the Remote Docker container").toBe(
+        true,
+      );
+      expect((await apiClient.getTaskEnvironment(task.id))?.container_id).toBe(containerId);
+      expect(execInContainer(containerId, `cd ${repoRoot} && git rev-parse HEAD`)).toBe(
+        markerCommit,
+      );
+      expect(
+        execInContainer(containerId, `cat ${repoRoot}/untracked-recovery-marker.txt`),
+      ).toContain("untracked marker");
+    } finally {
+      if (backendStopped) await backend.restart();
+    }
+  });
+
+  test("failed tokenless session releases recovery after its recorded container exits", async ({
+    apiClient,
+    seedData,
+    backend,
+    testPage,
+  }) => {
+    test.setTimeout(240_000);
+    const { task, sessionId, containerId } = await prepareRecoverableTask(
+      apiClient,
+      seedData,
+      "remote docker failed tokenless exited container",
+    );
+    const backendPid = await killFixtureBackend(backend);
+    let backendStopped = true;
+    try {
+      const checkpoint = withDatabase(backend.tmpDir, (db) => {
+        db.prepare("UPDATE task_sessions SET state = 'FAILED', error_message = ? WHERE id = ?").run(
+          "Agent process exited",
+          sessionId,
+        );
+        db.prepare(
+          "UPDATE executors_running SET resumable = 0, resume_token = '' WHERE session_id = ?",
+        ).run(sessionId);
+        return db
+          .prepare(
+            "SELECT container_id, resumable, resume_token FROM executors_running WHERE session_id = ?",
+          )
+          .get(sessionId) as
+          | { container_id: string; resumable: number; resume_token: string }
+          | undefined;
+      });
+      expect(checkpoint).toMatchObject({
+        container_id: containerId,
+        resumable: 0,
+        resume_token: "",
+      });
+      execFileSync("docker", ["stop", containerId], { encoding: "utf8" });
+
+      await backend.restart();
+      backendStopped = false;
+      expect(processIsAlive(backendPid)).toBe(false);
+      expect(containerExists(containerId), "startup removed the recorded exited container").toBe(
+        true,
+      );
+      expect((await apiClient.getTaskEnvironment(task.id))?.container_id).toBe(containerId);
+      await expect
+        .poll(() => readExecutorRunning(backend.tmpDir, sessionId)?.status, {
+          timeout: 30_000,
+          message: "the definitively exited recorded container should release runtime recovery",
+        })
+        .toBe("stopped");
+      const recovered = readExecutorRunning(backend.tmpDir, sessionId);
+      expect(recovered?.agent_execution_id).toBeTruthy();
+      expect((await apiClient.getTaskSession(sessionId)).session.state).toBe("FAILED");
+      await testPage.goto(`/t/${task.id}?sessionId=${sessionId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(
+        testPage.getByRole("heading", { name: "Session recovery failed" }),
+      ).toBeVisible();
+      await expect(testPage.getByRole("button", { name: /Agent failed/ })).toBeVisible();
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(
+        testPage.getByRole("heading", { name: "Session recovery failed" }),
+      ).toBeVisible();
+      await expect(testPage.getByRole("button", { name: /Agent failed/ })).toBeVisible();
+    } finally {
+      if (backendStopped) await backend.restart();
+    }
+  });
+
+  test("stopped agent resumes after restart in the same Remote Docker workspace", async ({
+    apiClient,
+    seedData,
+    backend,
+    testPage,
+  }) => {
+    test.setTimeout(300_000);
+    const { task, sessionId, containerId, repoRoot, markerCommit } = await prepareRecoverableTask(
+      apiClient,
+      seedData,
+      "remote docker stopped agent restart recovery",
+    );
+    const originalSession = (await apiClient.getTaskSession(sessionId)).session;
+    const originalNativeSessionId = getNativeSessionId(originalSession);
+    const managedAgent = await findManagedAgentPID(backend.tmpDir, sessionId, containerId);
+    await expect
+      .poll(
+        () =>
+          readAgentctlAssociationStatus(
+            sessionId,
+            containerId,
+            managedAgent.agentctlPort,
+            managedAgent.authToken,
+          ),
+        {
+          timeout: 15_000,
+          message: "the fixture host should reach the live agentctl port",
+        },
+      )
+      .toBe("running");
+
+    await apiClient.addUserMessage(task.id, sessionId, "/slow 30");
+    await waitForAgentMessage(apiClient, sessionId, "Running slow response", 30_000);
+    const initialCursor = readDeliveryCursor(backend.tmpDir, sessionId);
+    expect(initialCursor, "the prompt has no projected delivery cursor").toBeTruthy();
+    const streamId = initialCursor!.stream_id;
+    const initialRemoteHighWater = readAgentctlDeliveryHighWater(
+      containerId,
+      managedAgent.agentctlPort,
+      managedAgent.authToken,
+      streamId,
+    );
+    expect(initialRemoteHighWater).toBeGreaterThanOrEqual(initialCursor!.projected_sequence);
+
+    const backendPid = await killFixtureBackend(backend);
+    let backendStopped = true;
+    try {
+      const outageCursor = initialCursor!.projected_sequence;
+      // /slow 30 completes only after this outage window and leaves its final
+      // output in the retained agentctl journal before the process is stopped.
+      await expect
+        .poll(
+          () =>
+            readAgentctlDeliveryHighWater(
+              containerId,
+              managedAgent.agentctlPort,
+              managedAgent.authToken,
+              streamId,
+            ),
+          {
+            timeout: 40_000,
+            message:
+              "the slow command should append output to the retained journal during the outage",
+          },
+        )
+        .toBeGreaterThan(initialRemoteHighWater);
+      execInContainer(containerId, `kill -9 ${managedAgent.pid}`);
+      await expect
+        .poll(() => containerProcessIsAlive(containerId, managedAgent.pid), {
+          timeout: 15_000,
+          message: "the exact fixture mock-agent process should stop during the backend outage",
+        })
+        .toBe(false);
+      await expect
+        .poll(
+          () =>
+            readAgentctlAssociationStatus(
+              sessionId,
+              containerId,
+              managedAgent.agentctlPort,
+              managedAgent.authToken,
+            ),
+          {
+            timeout: 30_000,
+            message: "authenticated agentctl association should report the stopped session",
+          },
+        )
+        .toBe("stopped");
+      const stoppedRemoteHighWater = readAgentctlDeliveryHighWater(
+        containerId,
+        managedAgent.agentctlPort,
+        managedAgent.authToken,
+        streamId,
+      );
+      expect(stoppedRemoteHighWater).toBeGreaterThan(initialRemoteHighWater);
+
+      await backend.restart();
+      backendStopped = false;
+      expect(processIsAlive(backendPid)).toBe(false);
+      await expect
+        .poll(async () => (await apiClient.getTaskSession(sessionId)).session.state, {
+          timeout: 90_000,
+          message: "startup recovery should settle the stopped agent session",
+        })
+        .toBe("WAITING_FOR_INPUT");
+
+      const settledSession = (await apiClient.getTaskSession(sessionId)).session;
+      expect(getNativeSessionId(settledSession)).toBe(originalNativeSessionId);
+      expect(readExecutorRunning(backend.tmpDir, sessionId)?.status).toBe("stopped");
+      expect(containerExists(containerId)).toBe(true);
+      expect((await apiClient.getTaskEnvironment(task.id))?.container_id).toBe(containerId);
+
+      await expect
+        .poll(() => readDeliveryCursor(backend.tmpDir, sessionId)?.projected_sequence ?? 0, {
+          timeout: 30_000,
+          message: "startup replay should project the retained output from the stopped agent",
+        })
+        .toBeGreaterThan(outageCursor);
+      const settledCursor = readDeliveryCursor(backend.tmpDir, sessionId)!;
+      expect(settledCursor.stream_id).toBe(streamId);
+      expect(settledCursor.projected_sequence).toBeGreaterThan(outageCursor);
+      expect(settledCursor.projected_sequence).toBeGreaterThanOrEqual(stoppedRemoteHighWater);
+      const tail = readProjectedTailCounts(
+        backend.tmpDir,
+        streamId,
+        outageCursor,
+        stoppedRemoteHighWater,
+      );
+      expect(tail.count).toBeGreaterThan(0);
+      expect(tail.distinct_count).toBe(tail.count);
+
+      await testPage.goto(`/t/${task.id}?sessionId=${sessionId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.anyIdleInput()).toBeVisible();
+      await expect(session.activeChat()).toContainText("Running slow response");
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(session.anyIdleInput()).toBeVisible();
+      await expect(session.activeChat()).toContainText("Running slow response");
+
+      const resumeOutcome = await requestSessionResumeAfterRestart(
+        backend.baseUrl,
+        task.id,
+        sessionId,
+      );
+      expect(resumeOutcome.type, JSON.stringify(resumeOutcome.payload)).toBe("response");
+      await waitForResumedSession(apiClient, task.id, sessionId);
+      expect(getNativeSessionId((await apiClient.getTaskSession(sessionId)).session)).toBe(
+        originalNativeSessionId,
+      );
+      await sendMarkerTurn(apiClient, task.id, sessionId);
+
+      expect(containerExists(containerId), "Resume replaced the Remote Docker container").toBe(
+        true,
+      );
+      expect((await apiClient.getTaskEnvironment(task.id))?.container_id).toBe(containerId);
+      expect(execInContainer(containerId, `cd ${repoRoot} && git rev-parse HEAD`)).toBe(
+        markerCommit,
+      );
+      expect(
+        execInContainer(containerId, `cat ${repoRoot}/untracked-recovery-marker.txt`),
+      ).toContain("untracked marker");
+
+      await apiClient.deleteTask(task.id);
+      await expect
+        .poll(() => containerExists(containerId), {
+          message: "container survived task deletion on the remote daemon",
+          timeout: 90_000,
+        })
+        .toBe(false);
+    } finally {
+      if (backendStopped) await backend.restart();
+    }
+  });
+
   test("same-session resume keeps the container, journal, and unpushed work", async ({
     apiClient,
     seedData,

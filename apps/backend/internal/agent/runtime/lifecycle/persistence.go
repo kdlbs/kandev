@@ -621,6 +621,24 @@ type executorRunningOwnerCASWriter interface {
 	) error
 }
 
+type stoppedRemoteExecutionOwnerCASWriter interface {
+	SettleStoppedRemoteExecutionIfOwnerCurrent(
+		ctx context.Context,
+		sessionID, expectedExecutionID string,
+		expectedUpdatedAt time.Time,
+		expectedSessionState models.TaskSessionState,
+		interruptedTurnID string,
+		terminalOutcome models.DeliverySubmissionState,
+		workflowOutcome *models.AgentDeliveryEffect,
+		owner models.RemoteRecoveryOwnerLockIDs,
+		validateOwner func(context.Context) error,
+	) (bool, time.Time, error)
+}
+
+type activeSessionTurnReader interface {
+	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
+}
+
 type executorRunningOwnerAbsentWriter interface {
 	ConfirmExecutorRunningAbsentIfOwnerCurrent(
 		ctx context.Context,
