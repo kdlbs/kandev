@@ -618,13 +618,8 @@ describe("reorderSidebarViews", () => {
     expect(updateUserSettings).toHaveBeenCalledWith({
       sidebar_view_state: {
         workspace_id: "ws",
-        views: [
-          expect.objectContaining({ id: "all" }),
-          expect.objectContaining({ id: "two" }),
-          expect.objectContaining({ id: "one" }),
-        ],
-        active_view_id: "two",
-        draft: null,
+        view_order: ["all", "two", "one"],
+        view_order_base: ["all", "one", "two"],
       },
     });
   });
@@ -709,7 +704,7 @@ describe("sidebar view backend state", () => {
       sidebar_view_state: {
         workspace_id: "ws",
         active_view_id: "mine",
-        draft: null,
+        draft_update: { base_view_id: "all", expected_group: "state", clear: true },
       },
     });
   });
@@ -730,20 +725,18 @@ describe("sidebar view backend state", () => {
     expect(updateUserSettings).toHaveBeenCalledWith({
       sidebar_view_state: {
         workspace_id: "ws",
-        active_view_id: "all",
-        draft: {
+        draft_update: {
           base_view_id: "all",
-          filters: [],
+          expected_group: "none",
           sort: { key: "updatedAt", direction: "desc" },
           group: "workflow",
-          group_indent: true,
-          task_row: expect.any(Object),
+          disclosure: { group: "workflow", replace: [] },
         },
       },
     });
   });
 
-  it("includes active view and draft state when syncing saved view mutations", () => {
+  it("sends a sparse view order with its observed base while an owned draft is retained", () => {
     const draft: SidebarViewDraft = {
       baseViewId: "all",
       filters: [],
@@ -763,16 +756,8 @@ describe("sidebar view backend state", () => {
     expect(updateUserSettings).toHaveBeenCalledWith({
       sidebar_view_state: {
         workspace_id: "ws",
-        views: [expect.objectContaining({ id: "two" }), expect.objectContaining({ id: "all" })],
-        active_view_id: "all",
-        draft: {
-          base_view_id: "all",
-          filters: [],
-          sort: { key: "updatedAt", direction: "desc" },
-          group: "state",
-          group_indent: true,
-          task_row: expect.any(Object),
-        },
+        view_order: ["two", "all"],
+        view_order_base: ["all", "two"],
       },
     });
   });
