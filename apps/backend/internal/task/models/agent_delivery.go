@@ -77,6 +77,9 @@ type AgentDeliveryOrphanBatchResult struct {
 }
 
 const (
+	DeliveryWorkflowOutcomeApplied               = "applied"
+	DeliveryWorkflowOutcomeNoAutomaticTransition = "no_automatic_transition"
+	DeliveryWorkflowOutcomeNotRequired           = "not_required"
 	// DeliveryEffectPending means an effect has been recorded but its
 	// authoritative consumer has not committed the state transition yet.
 	DeliveryEffectPending = "pending"
@@ -85,8 +88,9 @@ const (
 	DeliveryEffectBlockResolved = "block_resolved"
 	// DeliveryEffectCompleted means the effect key was committed together with
 	// the authoritative state transition.
-	DeliveryEffectCompleted    = "completed"
-	DeliveryTerminalEffectType = "agent_delivery.terminal_settlement"
+	DeliveryEffectCompleted                = "completed"
+	DeliveryTerminalEffectType             = "agent_delivery.terminal_settlement"
+	DeliveryWorkflowOutcomeStoppedRecovery = "stopped_recovery"
 )
 
 // DeliverySubmissionState is the durable state of one immutable prompt
