@@ -831,3 +831,39 @@ func (b *handlerCapturingBus) handlerFor(subject string) bus.EventHandler {
 	defer b.mu.Unlock()
 	return b.handlers[subject]
 }
+
+// TestDeliverer_StripsRawContentFromMessageEvents pins the plugin contract that
+// injected system content never reaches a plugin: the message publisher adds
+// raw_content for the native UI, and plugin delivery must drop it without
+// touching the event the other bus subscribers share.
+func TestDeliverer_StripsRawContentFromMessageEvents(t *testing.T) {
+	for _, subject := range []string{"message.added", "message.updated"} {
+		t.Run(subject, func(t *testing.T) {
+			eventBus, receivedCh := newSubjectFixture(t, "message.*")
+			data := map[string]interface{}{
+				"message_id":  "msg-1",
+				"content":     "visible text",
+				"raw_content": "<kandev-system>hidden</kandev-system>visible text",
+				"metadata":    map[string]interface{}{"has_hidden_prompts": true},
+			}
+			if err := eventBus.Publish(context.Background(), subject, bus.NewEvent(subject, "test", data)); err != nil {
+				t.Fatalf("Publish(%s): %v", subject, err)
+			}
+
+			got := requireNoTimeout(t, receivedCh, 2*time.Second, "message delivery")
+			if _, ok := got.Payload["raw_content"]; ok {
+				t.Fatalf("plugin payload must not carry raw_content, got %v", got.Payload["raw_content"])
+			}
+			if got.Payload["content"] != "visible text" {
+				t.Errorf("Payload[content] = %v, want the stripped content", got.Payload["content"])
+			}
+			meta, _ := got.Payload["metadata"].(map[string]any)
+			if meta["has_hidden_prompts"] != true {
+				t.Errorf("Payload[metadata][has_hidden_prompts] = %v, want true", meta["has_hidden_prompts"])
+			}
+			if data["raw_content"] == nil {
+				t.Error("plugin delivery must not remove raw_content from the shared bus event")
+			}
+		})
+	}
+}
