@@ -324,13 +324,18 @@ func (a *RateAdmission) retryBoundary(
 		return secondary.RetryAt, secondary.RetrySource
 	case rateLimitBlockPrimary, rateLimitBlockPrimaryReserve:
 		primary := a.principal.tracker.PrimaryRetry(resource)
+		snapshot, known := a.principal.tracker.Snapshot(resource)
+		if reason == rateLimitBlockPrimary && !primary.RetryAt.After(now) &&
+			(!known || !primaryRateExhausted(snapshot)) {
+			return time.Time{}, RetrySourceNone
+		}
 		if primary.RetryAt.After(now) {
-			if snapshot, known := a.principal.tracker.Snapshot(resource); known && snapshot.ResetAt.After(primary.RetryAt) {
+			if known && snapshot.ResetAt.After(primary.RetryAt) {
 				return snapshot.ResetAt, RetrySourcePrimaryReset
 			}
 			return primary.RetryAt, primary.RetrySource
 		}
-		if snapshot, known := a.principal.tracker.Snapshot(resource); known {
+		if known {
 			if snapshot.ResetAt.After(now) {
 				if primary.RetryAt.After(snapshot.ResetAt) {
 					return primary.RetryAt, primary.RetrySource

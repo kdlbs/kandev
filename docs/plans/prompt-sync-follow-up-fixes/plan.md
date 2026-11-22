@@ -125,14 +125,17 @@ AC-INTEGRATIONS-PROMPT-SYNC-007.2, 008.7, and 009.3 apply to this view.
 ## Tests
 
 - AC-INTEGRATIONS-PROMPT-SYNC-001.6, 002.5, 005.2, and 005.4 use
-  `TestRateCoordinatorOptInInteractiveAdmissionReturnsQuotaRetry` and
+  `TestRateCoordinatorOptInInteractiveAdmissionReturnsQuotaRetry`,
+  `TestRateCoordinatorOptInInteractiveAdmissionUsesLatestActiveQuotaDeadline`,
+  `TestRateCoordinatorOptInInteractiveAdmissionUsesSecondaryDeadlineWithHealthyPrimary`, and
   `TestPromptSyncManualQuotaDoesNotBlockVersionSave`. Route tests cover
   the shared sync response for Sync now and configuration Save.
 - AC-INTEGRATIONS-PROMPT-SYNC-007.2, 008.7, 009.1, 009.3, and 010.2 use
   `TestDetachedOverrideClearsAndRestoresRepositoryPath` and
   `TestSharedPromptReadOmitsStaleRepositoryPathForDetachedOverride`.
   The existing stored-version test checks the version Save contract.
-- Work order 02 exercises the guarded updates on SQLite and PostgreSQL.
+- Work order 02 exercises the guarded updates on SQLite. The PostgreSQL
+  ownership test was skipped because `KANDEV_TEST_POSTGRES_DSN` was not set.
   Its older-row case covers the read of a detached override with a stale path.
 
 ## E2E tests
@@ -166,11 +169,19 @@ AC-INTEGRATIONS-PROMPT-SYNC-007.2, 008.7, and 009.3 apply to this view.
 - Catalog validation, specification lint, and whitespace checks passed.
   The documentation coverage preflight accepted the six design files
   and the projected implementation paths.
+- PR review coverage confirms that an exhausted primary reset wins over a
+  shorter secondary throttle, while a healthy primary reset does not override
+  a secondary-only retry deadline.
+- Desktop Chromium and mobile Chrome recovery tests reload after detachment and
+  after file recovery, then verify the path, Local selection, and local content.
 
 ```bash
 (cd apps/backend && go test -trimpath -tags fts5 -timeout 45s -count=1 -run '^TestTaskMetadataMergeSQLiteCancellation$' -v ./internal/task/repository/sqlite)
 (cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/session/multi-repo-session-resume-recovery.spec.ts -- --retries=0)
 (cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project chromium tests/settings/prompt-sync.spec.ts -- --grep 'switches and edits several prompts' --retries=0)
+(cd apps/backend && go test -trimpath -tags fts5 -count=1 -run '^(TestRateCoordinatorOptInInteractiveAdmissionUsesLatestActiveQuotaDeadline|TestRateCoordinatorOptInInteractiveAdmissionUsesSecondaryDeadlineWithHealthyPrimary)$' ./internal/github)
+(cd apps/web && pnpm e2e:run --host --no-build --project chromium tests/settings/prompt-sync.spec.ts -- --grep 'restores an override file after removal' --retries=0)
+(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/settings/mobile-prompt-sync.spec.ts -- --grep 'restores an override file after removal' --retries=0)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check -- docs/specs docs/plans/prompt-sync-follow-up-fixes

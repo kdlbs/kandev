@@ -96,6 +96,10 @@ Set a future quota boundary on the tracker and use a guard deadline in the
 test. The original coordinator waits for the guard context and returns
 cancellation. The fixed one returns the typed refusal before transport.
 Cover both primary quota and a secondary throttle.
+Also cover overlapping windows in both directions: an exhausted primary reset
+one hour away beats a secondary throttle one minute away, while a healthy
+primary snapshot with the same reset does not override a one-minute
+secondary-only retry.
 
 Add `TestPromptSyncManualQuotaDoesNotBlockVersionSave` with a concurrent
 version save and a blocked manual sync. Table-drive blocks before the
@@ -172,6 +176,10 @@ Completed.
   read through a PAT client wired to the real coordinator. Seeded quota windows
   and guard deadlines prove that the sync returns early and Save finishes while
   quota remains active.
+- `TestRateCoordinatorOptInInteractiveAdmissionUsesLatestActiveQuotaDeadline`
+  and `TestRateCoordinatorOptInInteractiveAdmissionUsesSecondaryDeadlineWithHealthyPrimary`
+  passed. Together they verify that only active primary limits compete with a
+  secondary retry deadline.
 - Focused Settings and API tests passed. Web typecheck and i18n validation
   passed.
 - Desktop Chromium and mobile Chrome browser tests passed for quota guidance

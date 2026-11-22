@@ -95,6 +95,9 @@ and a valid path on a linked override.
 Check the existing stored-version test for item 5's spec correction.
 Use the browser test title phrase `restores an override file after removal`
 in both projects. Exercise the real fixture repository and sync API.
+Reload after detachment and again after repository recovery. Verify the cleared
+or restored path, Local selection, detached state, and local content after each
+reload before continuing the version-switch assertions.
 
 ```bash
 (cd apps/backend && go test -trimpath -tags fts5 -count=1 ./internal/prompts/... ./internal/promptsync ./internal/mcp/handlers)
@@ -165,7 +168,8 @@ Completed.
   local version.
 - Settings tests passed for the pathless tooltip and editable local version.
   Desktop Chromium and mobile Chrome tests passed for removal and restoration
-  at a changed configured path.
+  at a changed configured path. Both browser tests reload after detachment and
+  after recovery, then recheck the path and Local content/selection.
 - Web typecheck, i18n validation, public documentation validation, changed Go
   lint, and whitespace checks passed. The PostgreSQL ownership test was skipped
   because `KANDEV_TEST_POSTGRES_DSN` was not configured.

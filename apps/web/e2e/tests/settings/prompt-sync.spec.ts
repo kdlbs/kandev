@@ -270,10 +270,17 @@ test.describe("Prompt Sync", () => {
       "Removed from repository",
     );
     await expect(versionSwitch).toHaveCount(0);
+    await testPage.reload();
+    await expect(row.getByTestId("prompt-repository-removed")).toHaveText(
+      "Removed from repository",
+    );
+    await expect(row.getByTestId("prompt-override-badge")).toBeVisible();
+    await expect(versionSwitch).toHaveCount(0);
     let savedPrompts = await apiClient.listPrompts();
     expect(
       savedPrompts.prompts.find((prompt) => prompt.name === "recovery-rule")?.source_path,
     ).toBe("");
+    await expect(row).toContainText("My local override.");
     await row.getByTestId("prompt-edit-button").click();
     await replacePromptEditor(
       testPage,
@@ -296,11 +303,13 @@ test.describe("Prompt Sync", () => {
     await dialog.getByTestId("prompt-sync-save").click();
     expect((await configSaved).ok()).toBe(true);
     await expect(dialog).toHaveCount(0);
+    await testPage.reload();
     savedPrompts = await apiClient.listPrompts();
     expect(
       savedPrompts.prompts.find((prompt) => prompt.name === "recovery-rule")?.source_path,
     ).toBe(`${recoveredDirectory}/recovery-rule.md`);
     await expect(versionSwitch).toHaveAttribute("aria-checked", "false");
+    await expect(row.getByTestId("prompt-override-badge")).toBeVisible();
     await expect(row).toContainText("My local override after removal.");
     await versionSwitch.click();
     await saveVersions(testPage);
