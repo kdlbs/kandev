@@ -28,7 +28,11 @@ afterEach(() => {
 it("preserves other provider identities through catalog additions and replacements", () => {
   pluginRegistry.setSidebarGroupings([provider]);
   const before = pluginRegistry.sidebarGroupingIdentity(provider.reference, "workspace");
-  const other = { reference: "plugin:other:labels", label: "Other", generation: "g1" };
+  const other: SidebarGroupingProvider = {
+    reference: "plugin:other:labels",
+    label: "Other",
+    generation: "g1",
+  };
   pluginRegistry.setSidebarGroupings([provider, other]);
   expect(pluginRegistry.sidebarGroupingIdentity(provider.reference, "workspace")).toBe(before);
   const otherBefore = pluginRegistry.sidebarGroupingIdentity(other.reference, "workspace");

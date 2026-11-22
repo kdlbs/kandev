@@ -43,5 +43,5 @@ func TestSidebarPluginDisclosureFitsPublicQueryBudget(t *testing.T) {
 	reopened, err := repo.QuerySidebarTaskPage(t.Context(), "ws", restored, prefs)
 	require.NoError(t, err)
 	require.Equal(t, 1, reopened.TotalVisibleTasks)
-	require.NotEqual(t, models.SidebarPluginValueKey(reference, "untagged"), reference+":untagged")
+	require.NotEqual(t, models.SidebarPluginValueKey(reference, "unassigned"), models.SidebarPluginUnassignedKey(reference))
 }

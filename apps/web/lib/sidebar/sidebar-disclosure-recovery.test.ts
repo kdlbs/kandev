@@ -29,9 +29,9 @@ it.each(["current", "source changed", "workspace changed", WORKSPACE_CHANGE_DURI
     const keys = [
       ...Array.from({ length: 6000 }, (_, i) => `plugin-group:${i.toString(16).padStart(64, "0")}`),
       keep,
-      reference + ":untagged",
+      reference + ":unassigned",
     ];
-    const valid = [keep, reference + ":untagged"];
+    const valid = [keep, reference + ":unassigned"];
     store.setState({
       workspaces: { items: [], activeId: "ws" },
       sidebarViewsByWorkspace: {

@@ -46,7 +46,7 @@ func TestSidebarSavedDisclosureIntersectsTheCompleteProviderSnapshot(t *testing.
 		return rec.Code
 	}
 	require.Equal(t, http.StatusOK, read("saved"))
-	require.Equal(t, []string{keep, reference + ":untagged"}, repo.sidebarQuery.CollapsedGroupKeys)
+	require.Equal(t, []string{keep, reference + ":unassigned"}, repo.sidebarQuery.CollapsedGroupKeys)
 	state := settings.SidebarViewsByWorkspace["ws-b"]
 	state.Views[0].CollapsedGroups = keys[:6000]
 	require.Equal(t, http.StatusOK, read("saved"))

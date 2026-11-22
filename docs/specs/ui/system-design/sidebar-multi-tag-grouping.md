@@ -52,7 +52,7 @@ not an intermediate copy of the complete singleton snapshot.
 For each task, union active human/agent applications, omit deleted tag IDs,
 deduplicate and sort member IDs bytewise. Enumerate every nonempty subset.
 Only observed subsets become values; unused catalog tags do not create compound
-values. Empty tag sets emit no membership; host projection supplies Untagged.
+values. Empty tag sets emit no membership; host projection supplies Unassigned.
 Every subset produces exactly one task/value pair, independent of input order.
 Only the host decides which records are accessible roots and repeats descendants;
 child-only tags do not reparent or independently reclassify an inherited tree.
@@ -102,7 +102,7 @@ Tag's original action remains independent of combination-only overflow.
 ## Existing host projection and UI
 
 Use the existing authorized query and SQL occurrence windows unchanged: complete
-classification before slicing, label ordering/value-ID tie-break, Untagged last,
+classification before slicing, label ordering/value-ID tie-break, Unassigned last,
 canonical hydration/task actions, per-occurrence continuations and group-scoped
 collapse. Do not enumerate combinations in the browser or query plugin state from
 host code. Saved Multi-tag views use ordinary workspace journals and copy/reload

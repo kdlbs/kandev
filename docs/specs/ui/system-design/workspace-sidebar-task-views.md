@@ -37,9 +37,10 @@ legacy IDs may be identical in independent workspaces. Keep the map inside the
 existing users.settings JSON and revision CAS mechanism; no separate view table.
 
 The single-workspace `sidebar_view_state` PATCH requires `workspace_id`.
-Normal collection mutations use `views_upsert` for creation, `views_update`
-for existing-view edits, and `view_ids_delete`, alongside `active_view_id` and
-nullable `draft`. Updates to absent IDs are ignored rather than recreating a
+Normal collection mutations use insert-only `views_create` for creation,
+`views_update` for existing-view edits, and `view_ids_delete`, alongside
+`active_view_id` and nullable `draft`. Explicit full replacement remains a
+separate operation. Updates to absent IDs are ignored rather than recreating a
 remotely deleted view. Natural order preserves surviving IDs and appends new
 ones; send a complete `view_order` only for an explicit reorder.
 Only changed views cross the wire, so ordinary copies and edits of valid

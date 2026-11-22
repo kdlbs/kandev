@@ -59,11 +59,7 @@ export function TasksViewPicker() {
             type="button"
             data-testid="tasks-view-picker"
             className={cn(TRIGGER_BUTTON_CLASS, "max-w-[120px] gap-0.5")}
-            aria-label={
-              pending
-                ? t("common:loadingLabel", { label: activeLabel })
-                : t("sidebar:viewLabel", { name: activeLabel })
-            }
+            aria-label={t("sidebar:viewLabel", { name: activeLabel })}
           >
             <span className="truncate">{activeLabel}</span>
             <IconChevronDown className="h-3 w-3 shrink-0 opacity-70" />
@@ -127,7 +123,18 @@ export function TasksViewPicker() {
           </button>
         }
       />
+      <SidebarViewPendingStatus pending={pending} label={activeLabel} />
     </div>
+  );
+}
+
+function SidebarViewPendingStatus({ pending, label }: { pending: boolean; label: string }) {
+  const { t } = useTranslation();
+  if (!pending) return null;
+  return (
+    <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      {t("common:loadingLabel", { label })}
+    </span>
   );
 }
 

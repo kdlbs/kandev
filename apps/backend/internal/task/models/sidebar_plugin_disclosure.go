@@ -21,11 +21,17 @@ func SidebarPluginValueKey(reference, value string) string {
 	return string(key[:])
 }
 
+// SidebarPluginUnassignedKey returns the host-owned key for missing values.
+func SidebarPluginUnassignedKey(reference string) string {
+	return reference + ":unassigned"
+}
+
 // SidebarPluginDisclosure intersects preferences with the complete provider
 // snapshot, never just the groups present in a bounded task page.
 func SidebarPluginDisclosure(grouping *SidebarPluginGrouping, collapsed []string) (current, kept []string) {
 	current = make([]string, 0, len(grouping.Snapshot.Groups)+1)
-	current = append(current, grouping.Reference+":untagged")
+	unassignedKey := SidebarPluginUnassignedKey(grouping.Reference)
+	current = append(current, unassignedKey)
 	for _, value := range grouping.Snapshot.Groups {
 		current = append(current, SidebarPluginValueKey(grouping.Reference, value.ID))
 	}
@@ -38,6 +44,9 @@ func SidebarPluginDisclosure(grouping *SidebarPluginGrouping, collapsed []string
 		allowed[key] = true
 	}
 	for _, key := range collapsed {
+		if key == grouping.Reference+":untagged" {
+			key = unassignedKey
+		}
 		if allowed[key] {
 			kept = append(kept, key)
 			allowed[key] = false

@@ -150,7 +150,7 @@ func TestSidebarPluginGroupingContinuationIsPerOccurrence(t *testing.T) {
 	}
 }
 
-func TestSidebarPluginGroupingClassifiesFilteredRootsAndUntagged(t *testing.T) {
+func TestSidebarPluginGroupingClassifiesFilteredRootsAndUnassigned(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			repo := newRepoForSidebarConformance(t, backend)
@@ -175,8 +175,8 @@ func TestSidebarPluginGroupingClassifiesFilteredRootsAndUntagged(t *testing.T) {
 					groups[entry.TaskID] = entry.GroupKey
 				}
 			}
-			if page.TotalTasks != 3 || page.TotalVisibleTasks != 3 || groups["child"] != models.SidebarPluginValueKey(reference, "parent") || groups["untagged"] != reference+":untagged" {
-				t.Fatalf("root inheritance or untagged membership lost: %+v", page)
+			if page.TotalTasks != 3 || page.TotalVisibleTasks != 3 || groups["child"] != models.SidebarPluginValueKey(reference, "parent") || groups["untagged"] != reference+":unassigned" {
+				t.Fatalf("root inheritance or unassigned membership lost: %+v", page)
 			}
 			query.Filters = []models.SidebarTaskViewClause{{Dimension: "titleMatch", Op: "matches", Value: json.RawMessage(`"Child"`)}}
 			filtered, err := repo.QuerySidebarTaskPage(t.Context(), "ws", query, prefs)
@@ -194,6 +194,52 @@ func TestSidebarPluginGroupingClassifiesFilteredRootsAndUntagged(t *testing.T) {
 			}
 			if child.TaskID != "child" || child.GroupKey != models.SidebarPluginValueKey(reference, "child") || child.Depth != 0 || child.ParentID != "" {
 				t.Fatalf("promoted filtered root ignored its own value or display context: %+v", child)
+			}
+		})
+	}
+}
+
+func TestSidebarPluginGroupingDoesNotUseAProviderLabelAsTheUnassignedSentinel(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			repo := newRepoForSidebarConformance(t, backend)
+			seedWorkspace(t, repo, "ws")
+			for _, task := range []*models.Task{
+				{ID: "tagged", WorkspaceID: "ws", Title: "Tagged"},
+				{ID: "unassigned", WorkspaceID: "ws", Title: "Unassigned"},
+			} {
+				if err := repo.CreateTask(t.Context(), task); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reference := "plugin:acme:labels"
+			prefs := models.SidebarTaskViewPreferences{PluginGrouping: &models.SidebarPluginGrouping{
+				Reference:  reference,
+				Generation: "g1",
+				Snapshot: &pluginsdk.SidebarGroupingSnapshot{
+					Version: 1, Complete: true, Revision: "r1",
+					Groups:      []pluginsdk.SidebarGroupingValue{{ID: "literal", Label: "__untagged__"}},
+					Memberships: []pluginsdk.SidebarGroupingMembership{{TaskID: "tagged", GroupID: "literal"}},
+				},
+			}}
+			query := sidebarTaskQuery(1)
+			query.Group = reference
+			page, err := repo.QuerySidebarTaskPage(t.Context(), "ws", query, prefs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			labels := make(map[string]string)
+			for _, entry := range page.Entries {
+				if entry.Kind == "group" {
+					labels[entry.GroupKey] = entry.GroupLabel
+				}
+			}
+			if labels[models.SidebarPluginValueKey(reference, "literal")] != "__untagged__" {
+				t.Fatalf("provider label changed: %+v", labels)
+			}
+			unassignedLabel, found := labels[reference+":unassigned"]
+			if !found || unassignedLabel != "" {
+				t.Fatalf("unassigned bucket reused a provider label: %+v", labels)
 			}
 		})
 	}

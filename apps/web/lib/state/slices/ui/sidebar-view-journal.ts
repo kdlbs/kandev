@@ -5,7 +5,13 @@ import { cloneDraft, cloneView } from "./sidebar-view-clone";
 import type { SidebarSnapshot } from "./sidebar-view-delta";
 import type { SidebarSliceState } from "./sidebar-view-types";
 
-export type SidebarWriteKind = "views" | "local" | "compaction" | "selection" | "draft_save";
+export type SidebarWriteKind =
+  | "views"
+  | "create"
+  | "local"
+  | "compaction"
+  | "selection"
+  | "draft_save";
 type SidebarViewMutation = {
   before: SidebarSnapshot;
   after: SidebarSnapshot;
@@ -19,6 +25,7 @@ export type SidebarWriteJournal = {
   failedWriteKind?: SidebarWriteKind;
   failedUnreplayedWrite?: boolean;
   failedViewMutations?: SidebarViewMutation[];
+  reconcileUncertainCreate?: boolean;
 };
 
 const journals = new WeakMap<object, SidebarWriteJournal>();
@@ -83,7 +90,8 @@ export function recordSidebarWriteFailure(
     error.status < 500 &&
     error.status !== 408 &&
     error.status !== 429;
-  if (rejected) retireRejectedSidebarMoves(journal);
+  if (rejected) retireRejectedSidebarMutations(journal);
+  if (kind === "create" && !rejected) journal.reconcileUncertainCreate = true;
   recordFailedViewIntent(journal, mutation, kind, rejected);
   const rollback = journal.failedRollback ?? before;
   journal.failedRollback = rollback;
@@ -97,10 +105,10 @@ export function restoreSidebarSnapshot(state: SidebarSliceState, snapshot: Sideb
   state.syncError = error;
 }
 
-function retireRejectedSidebarMoves(journal: SidebarWriteJournal) {
+function retireRejectedSidebarMutations(journal: SidebarWriteJournal) {
   const failed = journal.failedViewMutations;
-  if (failed?.some((mutation) => mutation.move)) journal.failedUnreplayedWrite = true;
-  journal.failedViewMutations = failed?.filter((mutation) => !mutation.move);
+  if (failed?.length) journal.failedUnreplayedWrite = true;
+  journal.failedViewMutations = undefined;
 }
 
 function recordFailedViewIntent(
@@ -110,9 +118,11 @@ function recordFailedViewIntent(
   rejected: boolean,
 ) {
   if (kind !== "views") return;
-  if ((mutation.move && rejected) || !replayableSidebarMove(journal, mutation.move))
+  if (rejected || !replayableSidebarMove(journal, mutation.move)) {
     journal.failedUnreplayedWrite = true;
-  else (journal.failedViewMutations ??= []).push(mutation);
+    return;
+  }
+  (journal.failedViewMutations ??= []).push(mutation);
 }
 
 export function settleSidebarFailures(

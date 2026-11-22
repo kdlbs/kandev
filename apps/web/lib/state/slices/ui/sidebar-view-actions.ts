@@ -1,14 +1,8 @@
 import { moveSidebarView, type SidebarViewMove } from "./sidebar-view-move";
-import { createSidebarWorkspaceState, mapSidebarWorkspaces } from "./sidebar-workspace-state";
+import { createSidebarWorkspaceState } from "./sidebar-workspace-state";
 import { produce } from "immer";
 import type { WorkspaceSliceState } from "../workspace/types";
-import { requestUserSettingsUpdateWithRetry } from "@/lib/user-settings-sync";
-import { updateUserSettings } from "@/lib/api/domains/settings-api";
-import type {
-  SidebarDraftSaveApi,
-  SidebarViewApi,
-  UserSettingsUpdatePayload,
-} from "@/lib/types/http-user-settings";
+import type { SidebarDraftSaveApi, SidebarViewApi } from "@/lib/types/http-user-settings";
 import type { UISlice, UISliceState } from "./types";
 import type {
   FilterClause,
@@ -31,7 +25,6 @@ import { rollbackSidebarState, restoreFailedViewMutation } from "./sidebar-view-
 import { createDefaultSidebarView, MAX_SIDEBAR_VIEWS } from "./sidebar-view-builtins";
 import { t } from "@/lib/i18n";
 import {
-  admitSidebarServerSnapshot,
   clearSidebarWriteRollback,
   getSidebarWriteJournal,
   pruneSidebarFailures,
@@ -39,9 +32,15 @@ import {
   settleSidebarFailures,
   restoreSidebarSnapshot,
   snapshotSidebar,
-  type SidebarWriteJournal,
   type SidebarWriteKind,
 } from "./sidebar-view-journal";
+import {
+  admitDeferredSidebarState,
+  bindSidebarViewSettingsWorkspace,
+  enqueueSidebarSettingsSync,
+  trackSidebarSettingsWrite,
+  waitForSidebarSettings,
+} from "./sidebar-view-settings-sync";
 import {
   createSidebarPluginView,
   findGeneratedSidebarPluginView,
@@ -49,10 +48,6 @@ import {
   type SidebarPluginGroupingChoice,
 } from "@/lib/sidebar/sidebar-plugin-grouping";
 
-type SidebarViewPatch = Omit<
-  NonNullable<UserSettingsUpdatePayload["sidebar_view_state"]>,
-  "workspace_id"
->;
 type SidebarActionState = Pick<UISliceState, "sidebarViews">;
 type SidebarWriteOptions = {
   kind: SidebarWriteKind;
@@ -61,8 +56,6 @@ type SidebarWriteOptions = {
   saveDraft?: SidebarDraftSaveApi;
   move?: SidebarViewMove;
 };
-const workspaceBySetter = new WeakMap<ImmerSet, string>();
-
 function makeId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -74,67 +67,6 @@ function nextNewViewName(views: SidebarView[]): string {
   let suffix = 2;
   while (names.has(t("sidebar:newViewNumbered", { suffix }))) suffix += 1;
   return t("sidebar:newViewNumbered", { suffix });
-}
-
-const sidebarSettingsQueues = new WeakMap<ImmerSet, Promise<void>>();
-
-function admitDeferredSidebarState(journal: SidebarWriteJournal, get: () => SidebarActionState) {
-  const server = get().sidebarViews.deferredServerState;
-  if (server) admitSidebarServerSnapshot(journal, snapshotSidebar(server));
-}
-
-function enqueueSidebarSettingsSync(
-  set: ImmerSet,
-  get: () => SidebarActionState,
-  payload: () => SidebarViewPatch | null,
-  after: () => SidebarSnapshot,
-  kind: SidebarWriteKind,
-): Promise<boolean> {
-  const workspaceId = workspaceBySetter.get(set);
-  if (!workspaceId) {
-    // i18n-exempt: programmer invariant diagnostic; this setter is registered before use.
-    return Promise.reject(new Error("sidebar set not bound to a workspace"));
-  }
-  const send = () => {
-    const patch = payload();
-    return patch
-      ? (kind === "compaction" || kind === "draft_save" || kind === "selection"
-          ? updateUserSettings
-          : requestUserSettingsUpdateWithRetry)({
-          sidebar_view_state: { workspace_id: workspaceId, ...patch },
-        })
-      : Promise.resolve(undefined);
-  };
-  const previous = sidebarSettingsQueues.get(set);
-  const write = previous ? previous.then(send) : send();
-  return write.then((response) => {
-    if (!response) return false;
-    const server = response.settings.sidebar_views_by_workspace?.[workspaceId];
-    if (!server && (kind === "selection" || kind === "draft_save"))
-      throw new Error(t("sidebar:failedToSyncSidebarViews"));
-    const journal = getSidebarWriteJournal(set);
-    admitDeferredSidebarState(journal, get);
-    admitSidebarServerSnapshot(
-      journal,
-      server
-        ? snapshotSidebar(
-            mapSidebarWorkspaces({ [workspaceId]: server }, {}, response.settings.revision)[
-              workspaceId
-            ],
-          )
-        : { ...after(), views: kind !== "local" ? after().views : journal.confirmed!.views },
-    );
-    if (!server) return true;
-    set((state) => {
-      const mapped = mapSidebarWorkspaces(
-        { [workspaceId]: server },
-        { [workspaceId]: state.sidebarViews },
-        response.settings.revision,
-      );
-      Object.assign(state.sidebarViews, mapped[workspaceId]);
-    });
-    return true;
-  });
 }
 
 function syncSidebarWrite(
@@ -226,7 +158,7 @@ function syncSidebarWrite(
       journal.failedViewMutations = undefined;
     },
   );
-  sidebarSettingsQueues.set(set, completed);
+  trackSidebarSettingsWrite(set, completed);
   return completed.then(() => succeeded);
 }
 
@@ -343,8 +275,7 @@ function updateSidebarDraft(
 
 function buildSidebarLocalActions(set: ImmerSet, get: () => SidebarActionState) {
   return {
-    waitForSidebarViewSync: (_workspaceId: string) =>
-      sidebarSettingsQueues.get(set) ?? Promise.resolve(),
+    waitForSidebarViewSync: (_workspaceId: string) => waitForSidebarSettings(set),
     setSidebarActiveView: (viewId: string) => {
       const before = snapshotSidebar(get().sidebarViews);
       let committed = false;
@@ -377,14 +308,19 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => SidebarActionState) 
 
 function createSidebarView(set: ImmerSet, get: () => SidebarActionState) {
   let createdViewId: string | null = null;
-  mutateViews(set, get, (s) => {
-    if (s.draft) return false;
-    if (s.views.length >= MAX_SIDEBAR_VIEWS) return false;
-    const view = createDefaultSidebarView(makeId("view"), nextNewViewName(s.views));
-    s.views.push(view);
-    s.activeViewId = view.id;
-    createdViewId = view.id;
-  });
+  mutateViews(
+    set,
+    get,
+    (s) => {
+      if (s.draft) return false;
+      if (s.views.length >= MAX_SIDEBAR_VIEWS) return false;
+      const view = createDefaultSidebarView(makeId("view"), nextNewViewName(s.views));
+      s.views.push(view);
+      s.activeViewId = view.id;
+      createdViewId = view.id;
+    },
+    { kind: "create" },
+  );
   return createdViewId;
 }
 
@@ -463,8 +399,10 @@ function buildSidebarDisclosureReconciler(set: ImmerSet, get: () => SidebarActio
 }
 
 function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState) {
-  const mv = (mutate: (s: UISliceState["sidebarViews"]) => boolean | void) =>
-    mutateViews(set, get, mutate);
+  const mv = (
+    mutate: (s: UISliceState["sidebarViews"]) => boolean | void,
+    options: Partial<SidebarWriteOptions> = {},
+  ) => mutateViews(set, get, mutate, options);
   return {
     reconcileSidebarGroupDisclosure: buildSidebarDisclosureReconciler(set, get),
     createSidebarView: () => createSidebarView(set, get),
@@ -485,24 +423,27 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => SidebarActionState
       saveSidebarDraft(set, get, name, owner),
     saveSidebarDraftOverwrite: () => saveSidebarDraft(set, get),
     duplicateSidebarView: (viewId: string, name: string) =>
-      mv((s) => {
-        const source = s.views.find((v) => v.id === viewId);
-        if (!source) return false;
-        s.views.push({
-          id: makeId("view"),
-          name: name.trim() || `${source.name} copy`,
-          filters: source.filters.map((f) => ({ ...f, id: makeId("clause") })),
-          sort: source.sort,
-          ...(source.sortWarningCount !== undefined
-            ? { sortWarningCount: source.sortWarningCount }
-            : {}),
-          group: source.group,
-          groupIndent: source.groupIndent,
-          collapsedGroups: [...source.collapsedGroups],
-          taskRow: source.taskRow ? cloneSidebarTaskRowPresentation(source.taskRow) : undefined,
-        });
-        s.activeViewId = s.views[s.views.length - 1].id;
-      }),
+      mv(
+        (s) => {
+          const source = s.views.find((v) => v.id === viewId);
+          if (!source) return false;
+          s.views.push({
+            id: makeId("view"),
+            name: name.trim() || `${source.name} copy`,
+            filters: source.filters.map((f) => ({ ...f, id: makeId("clause") })),
+            sort: source.sort,
+            ...(source.sortWarningCount !== undefined
+              ? { sortWarningCount: source.sortWarningCount }
+              : {}),
+            group: source.group,
+            groupIndent: source.groupIndent,
+            collapsedGroups: [...source.collapsedGroups],
+            taskRow: source.taskRow ? cloneSidebarTaskRowPresentation(source.taskRow) : undefined,
+          });
+          s.activeViewId = s.views[s.views.length - 1].id;
+        },
+        { kind: "create" },
+      ),
     deleteSidebarView: (viewId: string) =>
       mv((s) => {
         const remaining = s.views.filter((v) => v.id !== viewId);
@@ -571,7 +512,7 @@ export function buildSidebarViewActions(
     const scopedGet = () => ({
       sidebarViews: get().sidebarViewsByWorkspace[workspaceId] ?? createSidebarWorkspaceState(),
     });
-    workspaceBySetter.set(scopedSet, workspaceId);
+    bindSidebarViewSettingsWorkspace(scopedSet, workspaceId);
     const actions = {
       ...buildSidebarLocalActions(scopedSet, scopedGet),
       ...buildSidebarBackendActions(scopedSet, scopedGet),

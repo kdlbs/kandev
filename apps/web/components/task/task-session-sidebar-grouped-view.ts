@@ -113,7 +113,7 @@ function shareGroup(
 }
 
 function pageGroupLabel(group: GroupedSidebarList["groupKey"], key: string, label: string): string {
-  if (group && key === `${group}:untagged`) return t("sidebar:pluginGroupUntagged");
+  if (group && key === `${group}:unassigned`) return t("sidebar:groupUnassigned");
   if (key === "__unassigned__") return t("sidebar:groupUnassigned");
   if (key === "__all__") return t("sidebar:groupAll");
   if (key === "__multi__") return t("sidebar:groupMultiRepo");

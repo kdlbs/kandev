@@ -265,3 +265,14 @@ it("does not attach a continuation child to another plugin group's on-page paren
     { id: CHILD_ID, continuationParentTitle: "Parent" },
   ]);
 });
+
+it("uses a provider-neutral label for an unassigned plugin group", () => {
+  const reference = "plugin:acme:labels";
+  const grouped = groupSidebarTaskPage(
+    [],
+    [{ kind: "group", group_key: reference + ":unassigned", group_label: "" }],
+    reference,
+  );
+
+  expect(grouped.groups[0].label).toBe("Unassigned");
+});

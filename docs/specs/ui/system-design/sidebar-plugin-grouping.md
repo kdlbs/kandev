@@ -126,8 +126,12 @@ localized metadata at render time; saved names follow normal user view-name
 semantics. Collapsed value identity is `plugin-group:` plus SHA-256 of the
 complete provider reference, a NUL delimiter (forbidden in references), and the
 opaque value ID. Labels are excluded, so rename/recolor preserves disclosure.
-Each complete snapshot has at most 1,000 compact value keys plus Untagged.
-Normal reads carry the exact client disclosure inline. A view with accumulated
+Each complete snapshot has at most 1,000 compact value keys plus Unassigned.
+The host owns the missing-value group key and its localized Unassigned label.
+Provider labels are data and never act as host sentinels. For disclosure reads,
+map the legacy `<reference>:untagged` key to `<reference>:unassigned` so an
+existing collapsed preference remains collapsed. Normal reads carry the exact
+client disclosure inline. A view with accumulated
 retired keys can recover using `disclosure_view_id` instead of transmitting its
 oversized array. The authenticated settings reader resolves that personal view
 only within the requested workspace, with authorization checked before lookup
@@ -186,7 +190,7 @@ Each root inherits its own declared values; descendants remain with that root
 as in existing built-in grouping. A root in multiple groups has a separate
 display occurrence per group; never mutate parentage or attach a child to an
 unrelated root. Deduplicate repeated values for one task. Group order is stable
-Unicode-lowercased label order with value-ID tie-break and Untagged last; existing
+Unicode-lowercased label order with value-ID tie-break and Unassigned last; existing
 sort/pin/manual-child precedence orders tasks inside each group. Collapse
 visibility is applied before the 100-occurrence page window. Group continuation
 and off-page parent context retain their existing meanings.
@@ -255,7 +259,7 @@ signed-in and auth-off boot follow the discovery identity policy.
 Loading, timeout, disabled/replaced plugin and incomplete snapshot are distinct
 from a successful empty classification. Retain same-context eligible pages
 marked stale with Retry; on first failure show unavailable state with access to
-other saved views. Never synthesize a successful Untagged-only result from an
+other saved views. Never synthesize a successful Unassigned-only result from an
 error. Missing provider identity remains saved, and successful reactivation
 requeries it. Access denial clears visible/retained data. Error messages are
 localized, sanitized and exclude plugin response bodies and credentials.
