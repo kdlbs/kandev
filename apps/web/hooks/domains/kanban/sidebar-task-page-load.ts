@@ -16,6 +16,7 @@ import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http
 import type { SidebarPageLoadOptions } from "./sidebar-task-page-refresh";
 import { sidebarContentKey } from "./use-sidebar-page-context";
 
+import { pluginRegistry } from "@/lib/plugins/registry";
 export type SidebarPageStore = { getState: () => AppState };
 
 export function queryRevision(store: SidebarPageStore, workspaceId: string) {
@@ -57,7 +58,10 @@ export function createSidebarRequestCheck(args: {
   workspaceGeneration: number;
   scope: string;
   rankingKey: string;
+  groupingReference?: string;
 }) {
+  const reference = args.groupingReference ?? "";
+  const groupingIdentity = pluginRegistry.sidebarGroupingIdentity(reference, args.workspaceId);
   return () =>
     currentSidebarRequest(args.store, args.workspaceId, {
       request: args.generationRef.current === args.generation,
@@ -65,7 +69,7 @@ export function createSidebarRequestCheck(args: {
       workspaceGeneration: args.workspaceGeneration,
       scope: args.scope,
       rankingKey: args.rankingKey,
-    });
+    }) && groupingIdentity === pluginRegistry.sidebarGroupingIdentity(reference, args.workspaceId);
 }
 
 export function showCachedSidebarPage(args: {
@@ -137,6 +141,7 @@ export function publishSidebarLoadFailure(args: {
 }
 
 export type SidebarPageLoadState = {
+  response?: SidebarTaskPageResponse | null;
   requestGeneration: { current: number };
   activeRequestRef: { current: ReturnType<SidebarTaskPageCache["request"]> | null };
   errorIdentityRef: { current: string | null };
@@ -186,6 +191,7 @@ export function beginSidebarLoad(args: {
     workspaceGeneration: args.workspaceGeneration,
     scope: startingScope,
     rankingKey: startingRankingKey,
+    groupingReference: queryBase.group,
   });
   const cached = requestedPage === 1 ? sidebarTaskPageCache(store).get(key) : null;
   showCachedSidebarPage({
@@ -200,7 +206,16 @@ export function beginSidebarLoad(args: {
   }
   const request = sidebarTaskPageCache(store).request(
     workspaceId,
-    { ...queryBase, page: requestedPage },
+    {
+      ...queryBase,
+      page: requestedPage,
+      ...(requestedPage > 1
+        ? {
+            grouping_revision: state.response?.grouping_revision,
+            grouping_generation: state.response?.grouping_generation,
+          }
+        : {}),
+    },
     key,
     {
       manualRetry: options.manualRetry,

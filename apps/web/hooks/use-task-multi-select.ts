@@ -19,6 +19,7 @@ import { taskMatchesPriorityFilter } from "@/lib/kanban/priority-filter-tokens";
 import { selectWorkflowSwimlanes, type WorkflowLike } from "@/lib/kanban/workflow-swimlanes";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPriority } from "@/lib/types/http";
+import { INITIAL_STATE, multiSelectReducer } from "./task-multi-select-state";
 
 /**
  * Builds a step-id to displayed-index lookup across the effective workflow
@@ -373,112 +374,6 @@ function useBulkOperations({
   );
 
   return { bulkDelete, bulkArchive, bulkMove };
-}
-
-type MultiSelectState = {
-  selectedIds: Set<string>;
-  isMultiSelectEnabled: boolean;
-  isDeleting: boolean;
-  isArchiving: boolean;
-  /**
-   * The task that anchors a shift-click range selection — the last task the
-   * user toggled/range-selected. `null` when there is no active anchor.
-   */
-  anchorId: string | null;
-};
-
-type MultiSelectAction =
-  | { type: "reset" }
-  | { type: "toggle_select"; taskId: string }
-  | { type: "select_range"; taskId: string; orderedIds: string[] }
-  | { type: "set_selected"; ids: Set<string> }
-  | { type: "set_enabled"; value: boolean }
-  | { type: "set_deleting"; value: boolean }
-  | { type: "set_archiving"; value: boolean };
-
-/** @internal Exported for testing. */
-export const INITIAL_STATE: MultiSelectState = {
-  selectedIds: new Set(),
-  isMultiSelectEnabled: false,
-  isDeleting: false,
-  isArchiving: false,
-  anchorId: null,
-};
-
-/**
- * Pick a valid range anchor after the selection set is replaced wholesale: keep
- * the existing anchor if it survived, otherwise fall back to any remaining id
- * (or null when the selection is now empty).
- */
-function realignAnchor(state: MultiSelectState, ids: Set<string>): string | null {
-  if (ids.size === 0) return null;
-  if (state.anchorId && ids.has(state.anchorId)) return state.anchorId;
-  return ids.values().next().value ?? null;
-}
-
-/**
- * Union-select every id from the anchor to `taskId` (inclusive) within
- * `orderedIds`. When there is no valid anchor in `orderedIds` (first shift
- * click, or anchor lives in a different column), fall back to union-selecting
- * just `taskId` — the previous selection is preserved — and make it the new
- * anchor.
- */
-function applyRangeSelect(
-  state: MultiSelectState,
-  taskId: string,
-  orderedIds: string[],
-): MultiSelectState {
-  const anchor = state.anchorId;
-  const anchorIdx = anchor ? orderedIds.indexOf(anchor) : -1;
-  const targetIdx = orderedIds.indexOf(taskId);
-  if (anchorIdx === -1 || targetIdx === -1) {
-    const next = new Set(state.selectedIds);
-    next.add(taskId);
-    return { ...state, selectedIds: next, anchorId: taskId };
-  }
-  const [lo, hi] = anchorIdx < targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx];
-  const next = new Set(state.selectedIds);
-  for (let i = lo; i <= hi; i++) next.add(orderedIds[i]);
-  return { ...state, selectedIds: next };
-}
-
-/** @internal Exported for testing. */
-export function multiSelectReducer(
-  state: MultiSelectState,
-  action: MultiSelectAction,
-): MultiSelectState {
-  switch (action.type) {
-    case "reset":
-      return INITIAL_STATE;
-    case "toggle_select": {
-      const next = new Set(state.selectedIds);
-      const added = !next.has(action.taskId);
-      if (added) next.add(action.taskId);
-      else next.delete(action.taskId);
-      // Adding anchors to the toggled task; removing realigns to a surviving id
-      // (or clears the anchor when the selection is now empty) so a later
-      // Shift+click can't range from a stale anchor.
-      return {
-        ...state,
-        selectedIds: next,
-        anchorId: added ? action.taskId : realignAnchor(state, next),
-      };
-    }
-    case "select_range":
-      return applyRangeSelect(state, action.taskId, action.orderedIds);
-    case "set_selected":
-      // Keep the range anchor pointing at a still-selected task. After a partial
-      // bulk failure (selection replaced with the failed ids) the old anchor may
-      // be gone, so realign to a remaining id rather than stranding the next
-      // Shift+click on an invalid anchor.
-      return { ...state, selectedIds: action.ids, anchorId: realignAnchor(state, action.ids) };
-    case "set_enabled":
-      return { ...state, isMultiSelectEnabled: action.value };
-    case "set_deleting":
-      return { ...state, isDeleting: action.value };
-    case "set_archiving":
-      return { ...state, isArchiving: action.value };
-  }
 }
 
 export function useTaskMultiSelect(workflowId: string | null) {

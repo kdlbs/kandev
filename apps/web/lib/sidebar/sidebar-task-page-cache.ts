@@ -6,11 +6,11 @@ import type { AppState } from "@/lib/state/store";
 import { generateUUID } from "@/lib/utils";
 import { reconcileSidebarPage, sidebarPageMembership } from "./sidebar-page-overviews";
 import { repositoryIdentityForSavedRepository } from "./repository-rule-identity";
-import {
-  startSidebarPageRecoveryCycle,
-  type SidebarPageRecoveryCycle,
-} from "./sidebar-task-page-recovery";
+import { startSidebarPageRecoveryCycle } from "./sidebar-task-page-recovery";
+import type { ReadAttempt, RecoveryRecord } from "./sidebar-task-page-record";
 
+import { pluginRegistry } from "@/lib/plugins/registry";
+import { usesSavedSidebarDisclosure } from "./sidebar-disclosure-query";
 const MAX_PAGES = 5;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_AGE_MS = 5 * 60 * 1000;
@@ -26,24 +26,12 @@ type SidebarRankingInputs = {
 
 let cachedRanking: { inputs: SidebarRankingInputs; key: string } | undefined;
 
-type PageSnapshot = { page: SidebarTaskPageResponse; owner: string; fetchedAt: number };
-type ReadAttempt = {
-  controller: AbortController;
+type PageSnapshot = {
+  page: SidebarTaskPageResponse;
   owner: string;
-  readId?: string;
-  released: boolean;
-  settled: boolean;
-};
-type RecoveryRecord = {
-  cacheKey: string;
-  consumers: number;
-  exhausted: boolean;
-  lastError?: unknown;
-  promise?: Promise<SidebarTaskPageResponse>;
-  cycle?: SidebarPageRecoveryCycle<SidebarTaskPageResponse>;
-  attempt?: ReadAttempt;
-  retainedOwner?: string;
-  lastForegroundEpisode?: object;
+  fetchedAt: number;
+  groupingReference: string;
+  groupingIdentity: string;
 };
 type SidebarPageRequestOptions = {
   manualRetry?: boolean;
@@ -53,13 +41,15 @@ type SidebarPageRead = {
   workspaceId: string;
   query: SidebarTaskQuery;
   requestKey: string;
-  identity: { key: string; epoch: number; scope: string };
+  identity: { key: string; epoch: number; scope: string; groupingIdentity: string };
 };
 type PageStore = {
   getState: () => AppState;
   subscribe?: (listener: (state: AppState, previous: AppState) => void) => () => void;
 };
 const byteSize = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+
+class SidebarDisclosureSyncError extends Error {}
 
 /** Bounded ID memberships and shared reads. All retained overview objects live in Zustand. */
 export class SidebarTaskPageCache {
@@ -258,6 +248,11 @@ export class SidebarTaskPageCache {
     const workspaceId = state.workspaces.activeId ?? "";
     if (
       !entry ||
+      entry.groupingIdentity !==
+        pluginRegistry.sidebarGroupingIdentity(
+          entry.groupingReference,
+          state.workspaces.activeId,
+        ) ||
       sidebarTaskPageScope(state) !== this.scope ||
       sidebarTaskPageRankingKey(state) !== this.rankingKey ||
       (state.sidebarArchivedTasks?.revisionByWorkspaceId?.[workspaceId] ?? 0) !== this.revision ||
@@ -272,7 +267,7 @@ export class SidebarTaskPageCache {
       : entry.page;
   }
 
-  private retain(key: string, page: SidebarTaskPageResponse) {
+  private retain(key: string, page: SidebarTaskPageResponse, query: SidebarTaskQuery) {
     if (page.page !== 1 || page.provisional) return;
     this.remove(key);
     const owner = `sidebar:cache:${generateUUID()}`;
@@ -282,7 +277,16 @@ export class SidebarTaskPageCache {
       return task ? [task] : [];
     });
     state.retainTaskOverviews?.(owner, tasks);
-    this.pages.set(key, { page, owner, fetchedAt: Date.now() });
+    this.pages.set(key, {
+      page,
+      owner,
+      fetchedAt: Date.now(),
+      groupingReference: query.group,
+      groupingIdentity: pluginRegistry.sidebarGroupingIdentity(
+        query.group,
+        state.workspaces.activeId,
+      ),
+    });
     this.enforceBudget();
     this.scheduleExpiry();
   }
@@ -291,13 +295,18 @@ export class SidebarTaskPageCache {
     request: ReadAttempt,
     raw: SidebarTaskPageResponse,
     query: SidebarTaskQuery,
-    identity: { key: string; epoch: number; scope: string },
+    identity: SidebarPageRead["identity"],
   ) {
     const { key, epoch, scope } = identity;
     this.synchronize();
     if (request.controller.signal.aborted || scope !== this.scope)
       return sidebarPageMembership(raw);
     const state = this.store.getState();
+    if (
+      identity.groupingIdentity !==
+      pluginRegistry.sidebarGroupingIdentity(query.group, state.workspaces.activeId)
+    )
+      throw new DOMException("", "AbortError");
     let page = sidebarPageMembership(raw);
     if (request.readId) {
       const reconciled = reconcileSidebarPage(state, raw, query, request.readId);
@@ -312,7 +321,7 @@ export class SidebarTaskPageCache {
       );
       page = { ...reconciled.page, provisional: reconciled.provisional || epoch !== this.epoch };
     } else if (epoch !== this.epoch) page = { ...page, provisional: true };
-    if (!page.provisional && epoch === this.epoch) this.retain(key, page);
+    if (!page.provisional && epoch === this.epoch) this.retain(key, page, query);
     return page;
   }
 
@@ -334,7 +343,17 @@ export class SidebarTaskPageCache {
     record.consumers++;
     const promise = this.admit(
       record,
-      { workspaceId, query, requestKey, identity: { key: cacheKey, epoch, scope } },
+      {
+        workspaceId,
+        query,
+        requestKey,
+        identity: {
+          key: cacheKey,
+          epoch,
+          scope,
+          groupingIdentity: pluginRegistry.sidebarGroupingIdentity(query.group, workspaceId),
+        },
+      },
       options,
     );
     let released = false;
@@ -366,7 +385,11 @@ export class SidebarTaskPageCache {
     }
     const newEpisode = Boolean(episode && episode !== record.lastForegroundEpisode);
     if (episode) record.lastForegroundEpisode = episode;
-    if (record.exhausted && !options.manualRetry && !newEpisode) {
+    if (
+      record.exhausted &&
+      !options.manualRetry &&
+      (!newEpisode || record.lastError instanceof SidebarDisclosureSyncError)
+    ) {
       return Promise.reject(record.lastError ?? new Error("Sidebar page recovery exhausted"));
     }
     return this.startCycle(record, read);
@@ -384,6 +407,17 @@ export class SidebarTaskPageCache {
     });
     record.cycle = cycle;
     const promise = cycle.promise
+      .then(async (page) => {
+        if (!usesSavedSidebarDisclosure(read.query)) return page;
+        const compacted = await this.reconcileDisclosure(read, page, cycle.signal);
+        if (compacted === false) {
+          throw new SidebarDisclosureSyncError(
+            this.store.getState().sidebarViewsByWorkspace[read.workspaceId]?.syncError ?? "",
+          );
+        }
+        // Probe rows remain excluded; the bounded successor owns its task read.
+        throw new DOMException("", "AbortError");
+      })
       .then(
         (page) => {
           record.exhausted = false;
@@ -392,7 +426,8 @@ export class SidebarTaskPageCache {
         },
         (error) => {
           if (!isReadAbort(error)) {
-            record.exhausted = isTemporaryReadError(error);
+            record.exhausted =
+              isTemporaryReadError(error) || error instanceof SidebarDisclosureSyncError;
             record.lastError = error;
           }
           throw error;
@@ -407,8 +442,54 @@ export class SidebarTaskPageCache {
     return promise;
   }
 
-  private runAttempt(read: SidebarPageRead, signal: AbortSignal): Promise<SidebarTaskPageResponse> {
+  private reconcileDisclosure(
+    read: SidebarPageRead,
+    page: SidebarTaskPageResponse,
+    signal: AbortSignal,
+  ) {
+    const { workspaceId, query, identity } = read;
+    if (!query.disclosure_view_id || !page.grouping_keys) return;
+    const isCurrent = () => {
+      this.synchronize();
+      return (
+        !signal.aborted &&
+        identity.scope === this.scope &&
+        this.store.getState().workspaces.activeId === workspaceId &&
+        identity.groupingIdentity ===
+          pluginRegistry.sidebarGroupingIdentity(query.group, workspaceId)
+      );
+    };
+    if (!isCurrent()) return;
+    return this.store
+      .getState()
+      .reconcileSidebarGroupDisclosure(
+        query.disclosure_view_id,
+        query.group,
+        query.collapsed_group_keys,
+        page.grouping_keys,
+        { workspaceId, isCurrent },
+      );
+  }
+
+  private async runAttempt(
+    read: SidebarPageRead,
+    signal: AbortSignal,
+  ): Promise<SidebarTaskPageResponse> {
     const { workspaceId, query, requestKey, identity } = read;
+    const savedDisclosure = usesSavedSidebarDisclosure(query);
+    if (savedDisclosure) {
+      await this.store.getState().waitForSidebarViewSync(workspaceId);
+      this.synchronize();
+      if (
+        signal.aborted ||
+        identity.scope !== this.scope ||
+        this.store.getState().workspaces.activeId !== workspaceId ||
+        identity.groupingIdentity !==
+          pluginRegistry.sidebarGroupingIdentity(query.group, workspaceId)
+      ) {
+        throw new DOMException("", "AbortError");
+      }
+    }
     const attempt: ReadAttempt = {
       controller: new AbortController(),
       owner: `sidebar:read:${generateUUID()}`,
@@ -434,7 +515,9 @@ export class SidebarTaskPageCache {
       init: { signal: attempt.controller.signal },
     })
       .then((page) => {
+        if (savedDisclosure) return page;
         const settled = this.settle(attempt, page, query, identity);
+        void this.reconcileDisclosure(read, page, attempt.controller.signal);
         attempt.settled = true;
         if (record) {
           if (record.retainedOwner && record.retainedOwner !== attempt.owner) {

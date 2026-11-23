@@ -44,6 +44,7 @@ import { clarificationTurnIdForSession } from "@/lib/utils/pending-clarification
 import { usePlanCommentMigration } from "@/hooks/domains/comments/use-plan-comment-migration";
 import { usePreviewFeedback } from "@/hooks/domains/comments/use-preview-feedback";
 import { hasPendingClarification } from "./types";
+import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 
 const EMPTY_CONTEXT_FILES: ContextFile[] = [];
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -353,6 +354,27 @@ export function useCommentsState(
   };
 }
 
+function useConfigurationFeedbackMessages(sessionId: string | null, taskId: string | null) {
+  const rows = useAppStore((state) =>
+    sessionId ? state.configurationFeedback.bySessionId[sessionId] : undefined,
+  );
+  return useMemo(() => {
+    if (!sessionId || !taskId || !rows?.length) return undefined;
+    return rows.map(
+      (row): Message => ({
+        id: row.id,
+        session_id: toSessionId(sessionId),
+        task_id: toTaskId(taskId),
+        author_type: "agent",
+        type: "status",
+        created_at: row.createdAt,
+        content: "",
+        metadata: { configuration_picker_feedback: true },
+      }),
+    );
+  }, [rows, sessionId, taskId]);
+}
+
 function useSessionData(
   resolvedSessionId: string | null,
   session: ReturnType<typeof useSessionState>["session"],
@@ -387,15 +409,21 @@ function useSessionData(
     return turns.find((turn) => turn.id === currentTurnId)?.completed_at != null;
   }, [currentTurnId, turns]);
   const lastAgentError = useMemo(() => readLastAgentError(session?.metadata), [session?.metadata]);
+  const isPassthrough = isPassthroughSession(session);
+  const localStatusMessages = useConfigurationFeedbackMessages(
+    isPassthrough ? null : resolvedSessionId,
+    taskId,
+  );
   const processed = useProcessedMessages(messages, taskId, resolvedSessionId, taskDescription, {
     initialPromptPreview: session?.metadata?.initial_prompt_preview,
     historyInitialized,
     hasOlderMessages,
-    isPassthrough: isPassthroughSession(session),
+    isPassthrough,
     lastAgentError,
     currentTurnId,
     currentTurnCompleted,
     pendingAction: session?.pending_action,
+    localStatusMessages,
   });
   const { sessionModel, activeModel } = useSessionModel(
     resolvedSessionId,

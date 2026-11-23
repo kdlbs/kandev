@@ -15,9 +15,12 @@
 #                        become terminal; it is for an explicit fixed-duration
 #                        wait.
 #   --deadline-min N     Hard stop, in minutes (default 45).
-#   --interval-sec N     Seconds between polls (default 60).
+#   --interval-sec N     Maximum wait before the next read (default 60 seconds).
 #   --format text | json Report format (default text).
 #   --quiet              Suppress per-poll progress on stderr.
+#
+# While checks are pending, a GitHub.com PR event can trigger an early read.
+# If the listener is unavailable, timed reads continue until the deadline.
 #
 # Why this exists: `pr-state --summary` is a one-shot snapshot, so waiting for CI
 # costs one model round-trip per snapshot. Measured over 6,658 such round-trips,
@@ -466,14 +469,39 @@ strict_deadline_reached() {
 # Sleep until the next poll unless the deadline arrives first, capping the last
 # sleep to whatever time is left. Returns 1 when the caller must stop, so a
 # retry path cannot outlive a limit the caller asked for.
+EVENT_WAIT_AVAILABLE=1
 sleep_or_stop() {
   local remaining=$((DEADLINE_SEC - (SECONDS - START_SEC)))
   [[ "$remaining" -gt 0 ]] || return 1
-  if [[ "$remaining" -lt "$INTERVAL_SEC" ]]; then
-    "$SLEEP" "$remaining"
-  else
-    "$SLEEP" "$INTERVAL_SEC"
+  [[ "$remaining" -le "$INTERVAL_SEC" ]] || remaining=$INTERVAL_SEC
+  if [[ ${1:-} == pending && $EVENT_WAIT_AVAILABLE == 1 ]]; then
+    local url started=$SECONDS rc=0
+    url=$(jq -r '.pr.url // empty' <<<"$SUMMARY_JSON")
+    if [[ "$url" == https://github.com/*/pull/"$PR" ]]; then
+      run_bounded_capture "$remaining" '' "$GH" event listen --resource "$url" \
+        --event com.github.pull_request.check_suite.status.changed.v1 \
+        --event com.github.pull_request.review.submitted.v1 \
+        --event com.github.pull_request.head.changed.v1 \
+        --event com.github.pull_request.state.changed.v1 \
+        --event com.github.pull_request.merge_conflict.v1 \
+        --timeout "${remaining}s" || rc=$?
+      case "$rc" in
+        0)
+          # Bound API reads when several events arrive in quick succession.
+          [[ "$remaining" -le 2 ]] || remaining=2
+          remaining=$((remaining - (SECONDS - started)))
+          [[ "$remaining" -le 0 ]] || "$SLEEP" "$remaining"
+          return
+          ;;
+        # gh exits 8 on --timeout. The outer watchdog returns 124.
+        8|124) return 0 ;;
+      esac
+      EVENT_WAIT_AVAILABLE=0
+      progress "Event listener unavailable (exit $rc). Continuing with timed checks."
+      remaining=$((remaining - (SECONDS - started)))
+    fi
   fi
+  [[ "$remaining" -le 0 ]] || "$SLEEP" "$remaining"
 }
 START_SEC=$SECONDS
 POLLS=0
@@ -719,7 +747,7 @@ Honor Retry-After or X-RateLimit-Reset when present, then retry the waiter; merg
     TERMINAL_ROLLUP_STREAK=0
     TERMINAL_ROLLUP_PROVISIONAL=0
     progress "poll ${POLLS}: no checks registered at this head yet; waiting"
-    if ! sleep_or_stop; then
+    if ! sleep_or_stop pending; then
       OUTCOME='deadline'
       break
     fi
@@ -829,7 +857,7 @@ Honor Retry-After or X-RateLimit-Reset when present, then retry the waiter; merg
     continue
   fi
 
-  if ! sleep_or_stop; then
+  if ! sleep_or_stop pending; then
     OUTCOME='deadline'
     break
   fi

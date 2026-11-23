@@ -1110,6 +1110,9 @@ func applySidebarViews(settings *models.UserSettings, req *UpdateUserSettingsReq
 		if strings.TrimSpace(views[i].Name) == "" {
 			return errors.New("sidebar_views: view name must not be empty")
 		}
+		if err := validateSidebarPluginView(&views[i]); err != nil {
+			return fmt.Errorf("sidebar_views: %w", err)
+		}
 		if _, dup := seen[views[i].ID]; dup {
 			return fmt.Errorf("sidebar_views: duplicate view id %q", views[i].ID)
 		}
@@ -1137,6 +1140,11 @@ func applySidebarViewState(settings *models.UserSettings, req *UpdateUserSetting
 		settings.SidebarActiveViewID = activeViewID
 	}
 	if req.SidebarDraft != nil {
+		if *req.SidebarDraft != nil {
+			if err := validateSidebarPluginGrouping((*req.SidebarDraft).Group); err != nil {
+				return err
+			}
+		}
 		settings.SidebarDraft = *req.SidebarDraft
 	}
 	return nil

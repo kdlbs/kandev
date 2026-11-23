@@ -7,6 +7,7 @@ export const E2E_MCP_SECOND_SERVER_ID = "plugin-atlassian-confluence";
 export const E2E_MCP_LEGACY_ERROR = "Raw error must stay hidden";
 export const E2E_MCP_LEGACY_OUTPUT = "Raw output must stay hidden";
 export const E2E_MCP_LONG_DIAGNOSTIC = `Native MCP command failed: ${"x".repeat(930)}`;
+export const E2E_CURSOR_DISCOVERY_VERIFICATION_SERVER = "kandev-diagnostics";
 
 export async function createMcpRecoveryFixture(
   apiClient: ApiClient,
@@ -163,6 +164,41 @@ export async function seedMcpDiagnosticPreparation(
               kind: "wait_failed",
               message: "Native MCP connection verification command failed",
             },
+          },
+        ],
+      },
+    },
+  });
+}
+
+export async function seedCursorMcpDiscoveryPreparation(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  fixture: { taskId: string; sessionId: string },
+) {
+  await apiClient.seedTaskSession(fixture.taskId, {
+    state: "WAITING_FOR_INPUT",
+    sessionId: fixture.sessionId,
+    agentProfileId: seedData.agentProfileId,
+    metadata: {
+      prepare_result: {
+        status: "completed",
+        preparation_id: "e2e-cursor-discovery-attempt",
+        preparation_started_at: "2100-01-01T00:00:00.000000001Z",
+        steps: [
+          {
+            name: "",
+            kind: "agent_mcp_discovery",
+            mcp_provider: "cursor",
+            failure_code: "timeout",
+            status: "failed",
+          },
+          {
+            name: "",
+            kind: "agent_mcp_verification",
+            mcp_provider: "cursor",
+            mcp_server_id: E2E_CURSOR_DISCOVERY_VERIFICATION_SERVER,
+            status: "completed",
           },
         ],
       },

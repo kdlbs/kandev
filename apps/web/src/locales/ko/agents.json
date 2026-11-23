@@ -270,6 +270,7 @@
   "fallbackNext": "폴백: next",
   "fallbackModel": "폴백: {{model}}",
   "modelRequiredForAllProfiles": "모든 프로필에 모델이 필요합니다.",
+  "claudeExactModelAliasConflict": "시작 모델에서 전체 모델 ID를 선택하거나 환경 변수에서 {{envVar}}을(를) 제거하세요.",
   "noAuthHintLogin": "로그인하려면 터미널 열기를 클릭한 다음 새로 고치세요.",
   "noAuthHintNotInstalled": "에이전트 CLI를 설치한 다음 새로 고침을 클릭하세요.",
   "noAuthHintShell": "셸을 열려면 터미널 열기를 클릭하고 에이전트 로그인 명령을 실행한 다음 새로 고치세요.",

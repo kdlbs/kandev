@@ -77,7 +77,6 @@ func TestPromptEndSweepsPreserveHandoffBackgroundLineage(t *testing.T) {
 	// prompt-end cleanup.
 	a.activeToolCalls["successor-bash-1"] = streams.NewShellExec("false", "", "successor work", 0, false)
 	a.cancelPromptEndToolCalls("session-1")
-	a.sweepMonitorsOnPromptEnd("session-1")
 
 	a.mu.RLock()
 	_, parentTracked := a.activeToolCalls["subagent-1"]

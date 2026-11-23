@@ -276,6 +276,7 @@
   "fallbackNext": "fallback: next",
   "fallbackModel": "fallback: {{model}}",
   "modelRequiredForAllProfiles": "Model is required for all profiles.",
+  "claudeExactModelAliasConflict": "Choose a full model ID in Start model, or remove {{envVar}} from Environment Variables.",
   "noAuthHintLogin": "Click Open terminal to sign in, then refresh.",
   "noAuthHintNotInstalled": "Install the agent CLI, then click Refresh.",
   "noAuthHintShell": "Click Open terminal to launch a shell, run the agent's sign-in command, then refresh.",

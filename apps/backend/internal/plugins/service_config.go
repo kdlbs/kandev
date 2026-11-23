@@ -53,6 +53,7 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	if err != nil {
 		return err
 	}
+	defer s.notifySidebarGroupingCatalog(id)
 	catalogNotified := false
 	notifyCatalog := func() {
 		if catalogNotified {
@@ -103,18 +104,15 @@ func (s *Service) rotateAgentToolPolicyVersion(id string) (*store.Record, error)
 	defer s.agentToolPolicyMu.Unlock()
 	s.recordPersistMu.Lock()
 	defer s.recordPersistMu.Unlock()
-	previous, ok := s.registry.Get(id)
+	updated, ok := s.registry.Get(id)
 	if !ok {
 		return nil, store.ErrNotFound
 	}
-	updated, ok := s.registry.SetAgentToolPolicyVersion(id, uuid.NewString())
-	if !ok {
-		return nil, store.ErrNotFound
-	}
+	updated.AgentToolPolicyVersion = uuid.NewString()
 	if err := s.store.Save(updated); err != nil {
-		s.registry.Add(previous)
 		return nil, fmt.Errorf("plugins: persist agent tool policy version: %w", err)
 	}
+	s.registry.Add(updated)
 	return updated, nil
 }
 

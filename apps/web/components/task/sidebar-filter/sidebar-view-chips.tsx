@@ -1,4 +1,5 @@
 "use client";
+import { useSidebarViewTransition } from "@/hooks/domains/sidebar/use-sidebar-view-transition";
 
 import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
 
@@ -85,8 +86,10 @@ function SidebarViewChip({
   onSelect: () => void;
 }) {
   const { t } = useTranslation();
+  const { pending } = useSidebarViewTransition();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: view.id,
+    disabled: pending,
   });
   const sortableAttributes = {
     ...attributes,
@@ -138,6 +141,8 @@ function SidebarViewChip({
       ref={setNodeRef}
       style={style}
       type="button"
+      disabled={pending}
+      aria-busy={pending || undefined}
       {...sortableAttributes}
       {...listeners}
       onPointerDownCapture={handlePointerDownCapture}

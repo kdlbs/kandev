@@ -486,6 +486,7 @@ type Service struct {
 	unitReach                       UnitReachResolver
 	userOrgs                        func(ctx context.Context, userID string) (string, error)
 	tasks                           repository.TaskRepository
+	sidebarGroupingResolver         sidebarGroupingResolver
 	taskRepos                       repository.TaskRepoRepository
 	workspaceFolders                repository.TaskWorkspaceFolderRepository
 	workflows                       repository.WorkflowRepository

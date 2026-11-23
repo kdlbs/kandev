@@ -5,10 +5,11 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/acpcompat"
 )
 
 const (
-	codexAgentID                   = "codex-acp"
+	codexAgentID                   = acpcompat.CodexAgentID
 	codexCollaborationSpawnAgent   = "spawnAgent"
 	codexSubagentStarted           = "started"
 	codexSystemErrorType           = "systemError"
