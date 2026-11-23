@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { setAgentAutomaticUpdates, type AgentUpdateStatus } from "@/lib/api";
 import { useAppStoreApi } from "@/components/state-provider";
 import { refreshRuntimeUpdateStatuses } from "@/lib/agents/runtime-update-statuses";
@@ -27,6 +27,7 @@ export function useRuntimeAutoUpdatePolicy(status: AgentUpdateStatus) {
     });
   }, [status.auto_update, status.runtime_id]);
   const isDirty = draft !== saved;
+  const reset = useCallback(() => setDraft(saved), [saved]);
   useSettingsSaveContributor({
     id: `runtime-automatic-${status.agent_name}-${status.runtime_id}`,
     revision: Number(draft),
@@ -53,5 +54,5 @@ export function useRuntimeAutoUpdatePolicy(status: AgentUpdateStatus) {
     },
     discard: () => setDraft(saved),
   });
-  return { draft, setDraft, isDirty };
+  return { draft, setDraft, isDirty, reset, saved };
 }

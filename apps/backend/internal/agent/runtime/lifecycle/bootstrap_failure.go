@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -33,6 +34,7 @@ type BootstrapFailure struct {
 	RuntimeVersion string
 	PromptNotSent  *bool
 	ExitCode       *int
+	SessionFailure *agentctltypes.SessionOperationFailure
 	Cause          error
 }
 
@@ -238,6 +240,21 @@ func bootstrapFailureFor(execution *AgentExecution, err error) *BootstrapFailure
 	}
 	if failure := startupProcessBootstrapFailure(execution, err); failure != nil {
 		return failure
+	}
+	var sessionFailureProvider interface {
+		SessionOperationFailure() agentctltypes.SessionOperationFailure
+	}
+	if errors.As(err, &sessionFailureProvider) {
+		projected := sessionFailureProvider.SessionOperationFailure()
+		if safe := agentctltypes.NormalizeSessionOperationFailure(&projected); safe != nil {
+			return &BootstrapFailure{
+				Operation:      bootstrapOperation(execution),
+				Code:           models.AgentErrorCauseCodeAuthenticationRequired,
+				Detail:         bootstrapFailureDetail(models.AgentErrorCauseCodeAuthenticationRequired),
+				SessionFailure: safe,
+				Cause:          err,
+			}
+		}
 	}
 	return &BootstrapFailure{
 		Operation: bootstrapOperation(execution),

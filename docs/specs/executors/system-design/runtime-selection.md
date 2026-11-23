@@ -99,6 +99,18 @@ Do not remove the cached worker, rotate its execution ID, relabel it, or create 
 Any later deliberate runtime transition follows existing workspace policy and requires its normal authorization.
 Unknown retained runtime or conflicting container evidence blocks new work. It does not imply standalone compatibility.
 
+### Registration must settle before comparison
+
+`registerAndPublishCreatedExecution` adds an execution to the in-memory store before `persistExecutorRunningResult` rewrites `executors_running.agent_execution_id`.
+Callers that compare outside the session's coalesced slot (the orchestrator's resume admission through `admitRetainedExecutionRuntime`) can otherwise observe the new execution next to the predecessor's row and refuse it as an identity mismatch (`AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001.10`).
+
+Each newly created `AgentExecution` carries a registration-settled signal that closes exactly once, after its inventory row is persisted or after its registration is rolled back.
+`ValidateExecutionRuntime` waits for that signal, bounded by the caller's context, before it reads the retained row, then re-reads the store.
+A rolled-back or rotated execution falls through to the durable-row path; it is never compared against its own unsettled registration.
+Executions adopted by recovery or built without the creation path have no pending registration and compare immediately.
+The wait never weakens the predicate: a settled registration whose row still names another execution remains refused.
+Do not take `remoteInstanceLifecycleMu` in the validator. Rollback holds it across provider teardown, and the lock is not context-aware.
+
 ### Authorized transitions are separate from reuse
 
 PR #5175's refreshed transition design can claim a child environment and retire that session's exact inherited predecessor.

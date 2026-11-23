@@ -35,6 +35,7 @@ type acpDialect struct {
 	permissionToolName   func(*string, map[string]any, string, string) *string
 	subagentControl      func(string, map[string]any, any) streams.SubagentControl
 	subagentResult       func(any) (SubagentTaskResult, bool)
+	configurationCommand func(string, []modelInfo, []streams.ConfigOption, []streams.AvailableCommand) *configurationCommandSpec
 }
 
 type mcpToolCallFrame struct {
@@ -77,7 +78,7 @@ func newACPDialect(agentID string) acpDialect {
 	case mockAgentID:
 		return newMockACPDialect()
 	}
-	return acpDialect{}
+	return acpDialect{configurationCommand: modelConfigurationCommand}
 }
 
 func (d acpDialect) parseSubagentFrame(meta map[string]any, title string, rawInput any) (subagentFrame, bool) {

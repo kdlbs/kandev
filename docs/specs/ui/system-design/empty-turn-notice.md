@@ -27,6 +27,8 @@ this design consumes that outcome and does not define recovery behavior.
 | AC-UI-EMPTY-TURN-NOTICE-001.3 | Backend output signal |
 | AC-UI-EMPTY-TURN-NOTICE-001.4 through .8 | Frontend notice |
 | AC-UI-EMPTY-TURN-NOTICE-001.9, .10 | Recoverable-failure exception |
+| AC-UI-EMPTY-TURN-NOTICE-001.11 | Passthrough exclusion |
+| AC-UI-EMPTY-TURN-NOTICE-001.12, .13 | Configuration-command result |
 
 ## Backend output signal
 
@@ -71,6 +73,25 @@ no layout change. `filterVisibleMessages`
 (`apps/web/hooks/processed-message-filtering.ts`) hides the notice if later output
 arrives for the same turn.
 
+## Configuration-command result
+
+When a silent completion includes `configuration_result`, the same turn notice
+path creates a command-specific status message instead of the generic hint. The
+task service includes the result only when its read for that turn finds the
+initiating user slash command. The live completion and its Core conversation
+receipt carry the result; buffered or recovered Core playback strips it before
+the completion handler. Both live events use `empty-turn-${turn_id}`, so clients
+that receive both update one synthetic row. The row is not persisted and does
+not return after reload.
+
+The completed-turn identity is recorded independently from the notice state.
+Dismissal or expiry removes the row but does not make a duplicate completion
+eligible to recreate it.
+
+Confirmed outcomes expire after five visible seconds. Unconfirmed outcomes
+remain dismissible. The row is inserted without changing focus or forcing a
+scroll to the latest message. Provider text remains in ordinary agent rows.
+
 ## Recoverable-failure exception
 
 A turn that ends in a recoverable agent failure is not empty: its recovery or
@@ -86,10 +107,43 @@ sanitized provider detail is surfaced separately in the recovery entry's
 `error_output` disclosure, per the
 [session-recovery-failures design](../../agents/system-design/session-recovery-failures.md).
 
+## Passthrough exclusion
+
+`had_output` measures stored messages. PTY output can exist while this field is
+false. The frontend must not interpret that combination as an empty agent turn.
+
+`maybeEmitEmptyTurnNotice` resolves the event's own session from
+`taskSessions.items[payload.session_id]`. It uses `isPassthroughSession`, which
+honors explicit `is_passthrough=false` before the legacy profile snapshot.
+Pass that result as an `isPassthrough` input to `computeEmptyTurnNotice`.
+The pure decision excludes passthrough before it constructs notice text.
+Do not use the globally active session or the profile's current settings.
+
+Hydration can follow completion. The rendering filter must therefore also
+exclude messages with `metadata.empty_turn === true` for a known passthrough
+session. Carry the mode through `useChatPanelState`, `ProcessedMessagesOptions`,
+and `useVisibleMessages` into `filterVisibleMessages`. Retain normal messages,
+errors, permission handling, and existing structured-session notice rules.
+The filter changes presentation without deleting messages from the store.
+
+Session identity and mode changes must invalidate the filtered result even
+when the message array has not changed. A warning created before hydration
+then disappears on the next render. Unknown mode retains the existing notice
+behavior until authoritative session data arrives.
+
+The [Office design](../../office/system-design/automation-run-output.md) owns
+the explanation shown on automation runs. No backend signal or persistence
+change is required for this reusable notice exclusion.
+
 ## Compatibility and verification
 
-No protocol, persistence, or runtime flag changes: `had_output` is a transient
-event field. Backend coverage asserts the output allowlist and the
+No persistence or runtime flag changes: `had_output` and
+`configuration_result` are transient event fields. Backend coverage asserts the output allowlist and the
 error-terminated exception in the task service and orchestrator packages.
 Frontend coverage in `empty-turn-notice.test.ts` asserts the three notice
 variants, the once-per-turn keying, and the ephemeral-surface exclusion.
+Configuration-command tests assert result projection, notice precedence,
+visibility-based expiry, and dismissal.
+Passthrough cases cover the pure decision, real-store event handling, explicit
+false precedence, and late hydration. Filtering tests preserve errors and
+ordinary messages while hiding only synthetic empty-turn notices.

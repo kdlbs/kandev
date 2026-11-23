@@ -12,7 +12,6 @@ import {
 import { GATED_SECTIONS, type AvailabilityMap } from "./types";
 
 const ALL_INTEGRATIONS: AvailabilityMap = {
-  "azure-devops": true,
   github: true,
   gitlab: true,
   jira: true,

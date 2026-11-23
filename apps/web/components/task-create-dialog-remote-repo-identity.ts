@@ -79,12 +79,7 @@ function remoteSSHRepositoryIdentity(value: string): string | undefined {
   if (github) return githubRepositoryIdentity(github[1], github[2]);
 
   const gitlab = value.match(/^git@gitlab\.com:([^\s]+?)(?:\.git)?\/?$/i);
-  if (gitlab) return `gitlab:${gitlab[1]}`;
-
-  const azure = value.match(
-    /^git@ssh\.dev\.azure\.com:v3\/([^/\s]+)\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i,
-  );
-  return azure ? `azure_devops:${azure[1]}/${azure[2]}/${azure[3]}` : undefined;
+  return gitlab ? `gitlab:${gitlab[1]}` : undefined;
 }
 
 function remoteHTTPSRepositoryIdentity(url: URL): string | undefined {
@@ -102,10 +97,6 @@ function remoteHTTPSRepositoryIdentity(url: URL): string | undefined {
         ? `gitlab:${repositorySegments.map(stripGitSuffix).join("/")}`
         : undefined;
     }
-    case "dev.azure.com":
-      return segments.length >= 4 && segments[2]?.toLowerCase() === "_git"
-        ? `azure_devops:${segments[0]}/${segments[1]}/${stripGitSuffix(segments[3])}`
-        : undefined;
     default:
       return undefined;
   }

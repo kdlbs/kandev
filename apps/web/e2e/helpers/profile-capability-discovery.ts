@@ -66,7 +66,7 @@ async function expectRuntimeUpdateOutcome(
 ) {
   const result = surface.getByTestId(`agent-update-result-${agentName}`);
   const expectedMessage =
-    outcome === "succeeded" ? "Runtime updated successfully" : "Candidate ACP probe failed.";
+    outcome === "succeeded" ? "Runtime updated to 0.63.0." : "Candidate ACP probe failed.";
   await expect(result).toContainText(expectedMessage);
   if (outcome === "failed") await expectFailedUpdateRetry(surface, agentName);
 }

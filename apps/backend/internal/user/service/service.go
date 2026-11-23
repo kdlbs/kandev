@@ -97,6 +97,7 @@ type UpdateUserSettingsRequest struct {
 	LspAutoStartLanguages             *[]string
 	LspAutoInstallLanguages           *[]string
 	LspServerConfigs                  *map[string]map[string]interface{}
+	MarkdownPreviewByDefault          *bool
 	LspStatusLocation                 *string
 	SavedLayouts                      *[]models.SavedLayout
 	SidebarViews                      *[]models.SidebarView
@@ -115,7 +116,6 @@ type UpdateUserSettingsRequest struct {
 	GitHubSavedPresets                **json.RawMessage
 	GitHubDefaultQueryPresets         **json.RawMessage
 	GitLabSavedPresets                **json.RawMessage
-	AzureDevOpsBrowsePreferences      **json.RawMessage
 	DefaultUtilityAgentID             *string
 	DefaultUtilityModel               *string
 	DefaultUtilityAgentProfileID      *string
@@ -453,6 +453,9 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.MarkdownPreviewByDefault != nil {
+		settings.MarkdownPreviewByDefault = *req.MarkdownPreviewByDefault
+	}
 	if req.ShowTurnChangedFiles != nil {
 		settings.ShowTurnChangedFiles = *req.ShowTurnChangedFiles
 	}
@@ -1107,6 +1110,9 @@ func applySidebarViews(settings *models.UserSettings, req *UpdateUserSettingsReq
 		if strings.TrimSpace(views[i].Name) == "" {
 			return errors.New("sidebar_views: view name must not be empty")
 		}
+		if err := validateSidebarPluginView(&views[i]); err != nil {
+			return fmt.Errorf("sidebar_views: %w", err)
+		}
 		if _, dup := seen[views[i].ID]; dup {
 			return fmt.Errorf("sidebar_views: duplicate view id %q", views[i].ID)
 		}
@@ -1134,6 +1140,11 @@ func applySidebarViewState(settings *models.UserSettings, req *UpdateUserSetting
 		settings.SidebarActiveViewID = activeViewID
 	}
 	if req.SidebarDraft != nil {
+		if *req.SidebarDraft != nil {
+			if err := validateSidebarPluginGrouping((*req.SidebarDraft).Group); err != nil {
+				return err
+			}
+		}
 		settings.SidebarDraft = *req.SidebarDraft
 	}
 	return nil
@@ -1152,7 +1163,7 @@ func sidebarViewIDExists(views []models.SidebarView, id string) bool {
 const maxUserPreferenceBlobBytes = 64 * 1024
 
 // applyUserPreferenceBlobs applies each free-form preference blob (sidebar
-// task prefs, Jira/GitHub/GitLab/Azure saved views and presets), validating
+// task prefs, Jira/GitHub/GitLab saved views and presets), validating
 // size and shape via applyUserPreferenceBlob.
 func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.SidebarTaskPrefs != nil {
@@ -1171,9 +1182,6 @@ func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSett
 		return err
 	}
 	if err := applyUserPreferenceBlob("gitlab_saved_presets", req.GitLabSavedPresets, &settings.GitLabSavedPresets); err != nil {
-		return err
-	}
-	if err := applyUserPreferenceBlob("azure_devops_browse_preferences", req.AzureDevOpsBrowsePreferences, &settings.AzureDevOpsBrowsePreferences); err != nil {
 		return err
 	}
 	return nil
@@ -1283,6 +1291,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"lsp_auto_start_languages":                 settings.LspAutoStartLanguages,
 		"lsp_auto_install_languages":               settings.LspAutoInstallLanguages,
 		"lsp_server_configs":                       settings.LspServerConfigs,
+		"markdown_preview_by_default":              settings.MarkdownPreviewByDefault,
 		"lsp_status_location":                      models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"saved_layouts":                            settings.SavedLayouts,
 		"sidebar_views":                            settings.SidebarViews,
@@ -1301,7 +1310,6 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"github_saved_presets":                     settings.GitHubSavedPresets,
 		"github_default_query_presets":             settings.GitHubDefaultQueryPresets,
 		"gitlab_saved_presets":                     settings.GitLabSavedPresets,
-		"azure_devops_browse_preferences":          settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":                 settings.DefaultUtilityAgentID,
 		"default_utility_model":                    settings.DefaultUtilityModel,
 		"default_utility_agent_profile_id":         settings.DefaultUtilityAgentProfileID,

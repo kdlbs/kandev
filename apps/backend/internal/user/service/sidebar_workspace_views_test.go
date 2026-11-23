@@ -243,3 +243,36 @@ func TestSidebarWorkspaceConcurrentWritesPreserveBothEntries(t *testing.T) {
 		t.Fatalf("concurrent update lost: %+v", entries)
 	}
 }
+
+func TestSidebarWorkspaceChangedGroupingDraftDisclosurePersists(t *testing.T) {
+	svc, repo, _ := sidebarService(t)
+	req := sidebarPatch(t, `{"SidebarViewState":{"workspace_id":"a","views_upsert":[{"id":"legacy","name":"Tag","group":"plugin:tags:tags","collapsed_groups":["tag"]}],"draft":{"base_view_id":"legacy","filters":[],"sort":{"key":"title","direction":"asc"},"group":"plugin:tags:multi-tags","collapsed_groups":["multi"]}}}`)
+	if _, err := svc.UpdateUserSettings(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := svc.GetUserSettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []models.SidebarWorkspaceState{
+		reloaded.SidebarViewsByWorkspace["a"], repo.snapshot().SidebarViewsByWorkspace["a"],
+	} {
+		if state.Draft == nil || state.Draft.Group != "plugin:tags:multi-tags" {
+			t.Fatalf("changed-group draft missing: %+v", state.Draft)
+		}
+		raw, err := json.Marshal(state.Draft)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wire map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			t.Fatal(err)
+		}
+		if string(wire["collapsed_groups"]) != `["multi"]` {
+			t.Fatalf("draft disclosure lost: %s", raw)
+		}
+		if len(state.Views[0].CollapsedGroups) != 1 || state.Views[0].CollapsedGroups[0] != "tag" {
+			t.Fatalf("draft changed saved base: %+v", state.Views[0])
+		}
+	}
+}

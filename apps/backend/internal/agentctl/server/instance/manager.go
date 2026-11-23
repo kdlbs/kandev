@@ -18,7 +18,9 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpurl"
 	"github.com/kandev/kandev/internal/common/netutil"
+	"github.com/kandev/kandev/internal/common/ownershipperiod"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
@@ -213,8 +215,9 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		zap.String("workspace", req.WorkspacePath))
 
 	return &CreateResponse{
-		ID:   inst.ID,
-		Port: inst.Port,
+		ID:              inst.ID,
+		Port:            inst.Port,
+		ScopedMCPRoutes: inst.ScopedMCPRoutes,
 	}, nil
 }
 
@@ -255,6 +258,11 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 	id := req.ID
 	if id == "" {
 		id = uuid.New().String()
+	}
+	if req.ScopedMCPRoutes {
+		if err := mcpurl.ValidateInstanceID(id); err != nil {
+			return nil, errors.New("scoped built-in MCP requires a valid instance ID")
+		}
 	}
 	if _, exists := m.instances[id]; exists {
 		return nil, fmt.Errorf("instance with ID %s already exists", id)
@@ -313,6 +321,10 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 			return nil, nil, nil, fmt.Errorf("instance %s delivery journal unavailable: %w", id, journalErr)
 		}
 	}
+	if req.OfflineBudget > 0 {
+		procMgr.StartOfflineBudget(req.OfflineBudget)
+		m.warnBudgetExceedsReapers(id, req.OfflineBudget)
+	}
 	// Wire retained-outcome recording (AC-EXECUTORS-SURVIVAL-004) before
 	// anything that could reach Start(): this manager satisfies
 	// process.TurnOutcomeRecorder via RetainTurnOutcome, and nothing can start
@@ -338,18 +350,19 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 
 	// Create instance up-front so the activity middleware can reference it.
 	inst := &Instance{
-		ID:            id,
-		Port:          port,
-		lease:         bundle.lease,
-		Status:        "running",
-		WorkspacePath: req.WorkspacePath,
-		AgentCommand:  agentCmd,
-		Env:           req.Env,
-		CreatedAt:     time.Now(),
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		manager:       procMgr,
-		listenerDone:  make(chan struct{}),
+		ID:              id,
+		ScopedMCPRoutes: instanceCfg.ScopedMCPRoutes,
+		Port:            port,
+		lease:           bundle.lease,
+		Status:          "running",
+		WorkspacePath:   req.WorkspacePath,
+		AgentCommand:    agentCmd,
+		Env:             req.Env,
+		CreatedAt:       time.Now(),
+		SessionID:       req.SessionID,
+		TaskID:          req.TaskID,
+		manager:         procMgr,
+		listenerDone:    make(chan struct{}),
 	}
 	inst.MarkActivity()
 
@@ -380,6 +393,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 	autoStart := req.AutoStart
 	return &config.InstanceOverrides{
 		InstanceID:                   id,
+		ScopedMCPRoutes:              req.ScopedMCPRoutes,
 		Protocol:                     agent.Protocol(req.Protocol),
 		AgentCommand:                 agentCmd,
 		WorkDir:                      req.WorkspacePath,
@@ -828,4 +842,21 @@ func (m *Manager) stopReaperOnce() {
 		close(m.reaperStop)
 	})
 	m.reaperWG.Wait()
+}
+
+// warnBudgetExceedsReapers logs when the offline budget cannot elapse before
+// the unowned or idle reaper ends the instance. The unowned reaper runs only
+// when agent survival is enabled, so the unowned check is gated on it.
+func (m *Manager) warnBudgetExceedsReapers(id string, budget time.Duration) {
+	if m.config.AgentSurvivalEnabled {
+		unowned, _ := ownershipperiod.Resolve(m.config.UnownedPeriod, m.config.IdleTimeout)
+		if budget >= unowned {
+			m.logger.Warn("offline budget is not shorter than the unowned period; the instance may be reaped first",
+				zap.String("instance_id", id), zap.Duration("offline_budget", budget), zap.Duration("unowned_period", unowned))
+		}
+	}
+	if m.config.IdleTimeout > 0 && budget >= m.config.IdleTimeout {
+		m.logger.Warn("offline budget is not shorter than the idle timeout; the instance may be reaped first",
+			zap.String("instance_id", id), zap.Duration("offline_budget", budget), zap.Duration("idle_timeout", m.config.IdleTimeout))
+	}
 }

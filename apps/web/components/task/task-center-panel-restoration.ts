@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  shouldOpenFilePreview,
+  previewFileState,
+  canOfferViewerAfterReadFailure,
+} from "@/lib/plugins/file-viewer-selection";
+
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import {
@@ -57,6 +63,10 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
       const index = nextIndex++;
       const savedTab = savedTabs[index];
       try {
+        if (shouldOpenFilePreview(savedTab.path)) {
+          loadedTabs[index] = installFileEditorTab(previewFileState(savedTab.path, savedTab.repo));
+          continue;
+        }
         const response = await requestFileContent(client, sessionId, savedTab.path, savedTab.repo);
         const hash = await calculateHash(response.content);
         loadedTabs[index] = installFileEditorTab({
@@ -75,7 +85,9 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
               : undefined,
         });
       } catch {
-        /* skip failed tabs */
+        if (canOfferViewerAfterReadFailure(savedTab.path)) {
+          loadedTabs[index] = installFileEditorTab(previewFileState(savedTab.path, savedTab.repo));
+        }
       }
     }
   };

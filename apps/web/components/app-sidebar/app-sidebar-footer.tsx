@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import Link from "@/components/routing/app-link";
 import { useTranslation } from "react-i18next";
 import { useRouter, usePathname } from "@/lib/routing/client-router";
@@ -35,6 +37,7 @@ import { useConnectionIssueCopy } from "../app-status-bar/connection-status-item
 import type { ConnectionIssueSeverity } from "@/lib/types/connection";
 import { SIDEBAR_ITEM_ACTIVE } from "./app-sidebar-constants";
 import { useSettingsReturnHref } from "@/components/settings/settings-navigation-provider";
+import { PromptConflictIndicator } from "@/components/settings/prompt-conflict-indicator";
 
 type AppSidebarFooterProps = {
   collapsed: boolean;
@@ -53,6 +56,8 @@ type FooterIconButtonProps = {
   active?: boolean;
   current?: boolean;
   showLabel?: boolean;
+  /** Attention marker drawn over the icon's corner, e.g. unresolved conflicts. */
+  indicator?: ReactNode;
 };
 
 function FooterIconButton({
@@ -65,6 +70,7 @@ function FooterIconButton({
   active,
   current,
   showLabel = false,
+  indicator,
 }: FooterIconButtonProps) {
   const buttonProps = {
     variant: "ghost" as const,
@@ -84,6 +90,7 @@ function FooterIconButton({
           active && "rotate-180 text-foreground",
         )}
       />
+      {indicator}
     </>
   );
 
@@ -384,6 +391,7 @@ export function AppSidebarFooter({
         onClick={toggleSettings}
         active={settingsMode}
         testId="sidebar-settings-gear"
+        indicator={<PromptConflictIndicator className="absolute left-4 top-1" />}
       />
       {statsDestination && (
         <FooterIconButton

@@ -84,7 +84,7 @@ adding a wake reason cannot quietly exempt it from the ceiling.
   `legacyRunReason*` block; (c) the run-reason constant block in
   `internal/office/shared/runreasons.go`; (d) the `WakeReason*` constant block
   in `internal/office/routing/types.go`, which declares three of
-  `AC-OFFICE-BUDGET-007.4`'s seven unattended literals under a doc comment
+  `AC-OFFICE-BUDGET-007.4`'s unattended literals under a doc comment
   stating that its values must stay in sync with the scheduler constants;
   (e) the constant block in `internal/runs/commentkeys` declaring
   `TaskCommentReason`, a live run reason declared outside `internal/office`;
@@ -128,7 +128,10 @@ adding a wake reason cannot quietly exempt it from the ceiling.
 - **AC-OFFICE-BUDGET-007.4:** The explicit unattended list
   `AC-OFFICE-BUDGET-007.3` tests against shall be exactly: `agent_error`,
   `budget_alert`, `heartbeat`, `queue_run`, `routine_dispatch`,
-  `routine_dispatch_cron`, `routine_trigger`. `queue_run` is the workflow
+  `routine_dispatch_cron`, `routine_trigger`, `task_blocker_failed`.
+  `task_blocker_failed` is a system escalation of a failed blocker
+  ([blocker terminal policy](blocker-terminal-policy.md)), so like
+  `agent_error` it classifies as unattended. `queue_run` is the workflow
   engine's fallback reason for a `queue_run` action that configures no
   explicit reason and whose triggering event carries no trigger name
   (`internal/office/shared.RunReasonQueueRun`); its cause is generic by

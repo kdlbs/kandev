@@ -446,6 +446,38 @@ describe("ChangesPanelBody Git status presentation", () => {
     renderPanel(true);
     expect(screen.getByText(EMPTY_MESSAGE)).toBeTruthy();
   });
+
+  it("shows root files instead of the empty state and opens them without a repository", () => {
+    const onEditFile = vi.fn();
+    render(
+      <TooltipProvider>
+        <StateProvider>
+          <OwnedChangesPanelBody
+            {...panelProps()}
+            hasAnything={false}
+            hasCommits={false}
+            onEditFile={onEditFile}
+            gitStatus={{ ...panelProps().gitStatus, membershipReady: true, showEmpty: true }}
+          />
+          <StoreCapture />
+        </StateProvider>
+      </TooltipProvider>,
+    );
+    setContext(...TASK_A_CONTEXT);
+    act(() => {
+      appStore.getState().setWorkspaceRootFiles("environment-a", {
+        supported: true,
+        files: [{ path: "dashboard.json", size: 12, modified_at: "2026-11-19T10:00:00Z" }],
+        truncated: false,
+        destinations: [],
+      });
+    });
+
+    expect(screen.getByTestId("changes-workspace-root-files")).toBeTruthy();
+    expect(screen.queryByText(EMPTY_MESSAGE)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "dashboard.json" }));
+    expect(onEditFile).toHaveBeenCalledWith("dashboard.json", undefined);
+  });
 });
 
 describe("ChangesPanelBody inline request retirement", () => {

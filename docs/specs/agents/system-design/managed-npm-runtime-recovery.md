@@ -116,6 +116,14 @@ The repair operation uses `managedruntime.RemoveNpxExecutionTree`. This helper
 derives the `_npx` key from the trusted package specification. Its descriptor
 walk rejects symbolic links and path replacement races.
 
+On Windows the cache root, the execution-tree inventory, and the repair lock's
+configuration file are opened through `winpath.OpenDirectoryPath`
+(`AC-AGENTS-MANAGED-RUNTIME-RECOVERY-002.6`). It resolves the object-manager
+drive-letter link once at the volume root and opens every component below it
+relative to its parent without following links, rejecting any reparse point. The
+[worktree recovery design](../../tasks/system-design/worktree-metadata-recovery.md#windows-no-follow-directory-walk)
+describes the shared walk.
+
 The endpoint requires the existing agentctl bearer token and instance identity.
 It accepts one exact stable package specification. It returns no host path or
 raw npm output.

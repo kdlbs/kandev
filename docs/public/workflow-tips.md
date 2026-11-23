@@ -9,6 +9,8 @@ A workflow is an ordered set of steps for tasks in one workspace. A workflow can
 
 Configure Kanban workflows in **Settings → Workspaces → select a workspace → Workflows**. You need a workspace first; steps which start agents also need a healthy agent profile and a usable executor profile. Use a template when its prompts fit your process. Use **Custom** when you only need columns or want to build the automation yourself.
 
+The page opens in the **Compact** view, which shows each workflow as one row with its steps, step count, and agent profile. Select a row to open its editor, which holds **Export**, **Duplicate**, and **Delete Workflow**. Collapsing a row keeps unsaved changes for **Save changes**. Choose **Detailed** above the list to show every editor at once. The browser remembers the view you choose.
+
 Workflow prompts run with the selected executor's filesystem, credentials, and network access. Do not place tokens in prompt text, and give the agent only the access that workflow needs. Workflow settings use Kandev's current local backend trust boundary; protect any network-exposed installation as described in [Run as a Service](run-as-a-service.md).
 
 > Workflow definitions can be copied between workspaces with [Workflow Import / Export](workflow-import-export.md), or reconciled from a repository with [Workflow Sync](workflow-sync.md).

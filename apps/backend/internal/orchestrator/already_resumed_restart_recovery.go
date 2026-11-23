@@ -60,7 +60,7 @@ func (s *Service) finishAlreadyResumedRestartRecovery(ctx context.Context, input
 	}
 	if err == nil {
 		if session, readErr := s.repo.GetTaskSession(ownerCtx, inputs.session.ID); readErr == nil && session != nil {
-			s.publishTaskSessionStateChanged(ownerCtx, session.TaskID, session.ID, session.State, session.State, session.ErrorMessage, &session.UpdatedAt, session)
+			s.publishTaskSessionStateChanged(ownerCtx, session.TaskID, session.ID, inputs.session.State, session.State, session.ErrorMessage, &session.UpdatedAt, session)
 		}
 	}
 	return err == nil, err

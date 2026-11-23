@@ -11,6 +11,8 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+const cleanupPhysicalIdentityUnavailable = "physical_identity_unavailable"
+
 func (s *Service) captureCleanupHeadOIDsForMode(ctx context.Context, worktrees []*worktree.Worktree, options DeleteTaskOptions) (map[string]string, map[string]string, error) {
 	if options.retainsWorkspace() {
 		return nil, nil, nil
@@ -33,7 +35,7 @@ func (s *Service) captureCleanupHeadOIDsForMode(ctx context.Context, worktrees [
 			if !recoverableDeleteInspection(ctx, err) {
 				return nil, nil, err
 			}
-			failures[wt.ID] = "physical_identity_unavailable"
+			failures[wt.ID] = cleanupPhysicalIdentityUnavailable
 			continue
 		}
 		for id, head := range captured {

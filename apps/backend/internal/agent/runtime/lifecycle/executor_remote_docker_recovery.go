@@ -95,6 +95,9 @@ func (r *RemoteDockerExecutor) attachRemoteDockerRecord(
 	session *remoteDockerSession,
 ) (*ExecutorInstance, *agentctl.Client, RecoveryCandidateOutcome) {
 	if outcome := verifyLiveRemoteDockerContainer(ctx, session.dockerClient, containerID); outcome != "" {
+		if outcome == RecoveryOutcomeNoMatchingInstance {
+			return nil, nil, RecoveryOutcomeRecordedResourceAbsent
+		}
 		return nil, nil, outcome
 	}
 	control, outcome := r.remoteDockerControl(ctx, req, record.SessionID, containerID, session.endpoints)
@@ -127,6 +130,9 @@ func verifyLiveRemoteDockerContainer(
 ) RecoveryCandidateOutcome {
 	containerInfo, err := client.GetContainerInfo(ctx, containerID)
 	if err != nil {
+		if ctx.Err() != nil {
+			return RecoveryOutcomeUnknown
+		}
 		if errdefs.IsNotFound(err) {
 			return RecoveryOutcomeNoMatchingInstance
 		}
@@ -135,13 +141,17 @@ func verifyLiveRemoteDockerContainer(
 	if containerInfo == nil || containerInfo.ID != containerID {
 		return RecoveryOutcomeUnknown
 	}
-	if containerInfo.State != containerStateRunning {
-		return RecoveryOutcomeNoMatchingInstance
-	}
 	if ctx.Err() != nil {
 		return RecoveryOutcomeUnknown
 	}
-	return ""
+	switch containerInfo.State {
+	case containerStateRunning:
+		return ""
+	case containerStateExited:
+		return RecoveryOutcomeNoMatchingInstance
+	default:
+		return RecoveryOutcomeUnknown
+	}
 }
 
 func (r *RemoteDockerExecutor) remoteDockerControl(
@@ -181,7 +191,7 @@ func (r *RemoteDockerExecutor) authenticateRemoteDockerInstance(
 	if err != nil {
 		return nil, nil, "", RecoveryOutcomeUnknown
 	}
-	client := newRemoteDockerRecoveryClient(r, req, host, port, token)
+	client := newRemoteDockerRecoveryClient(r, req, host, port, token, info.ScopedMCPRoutes)
 	if err := client.Health(ctx); err != nil {
 		if !isAgentctlAuthError(err) || req.BootstrapNonce == "" {
 			client.Close()
@@ -194,7 +204,7 @@ func (r *RemoteDockerExecutor) authenticateRemoteDockerInstance(
 		}
 		client.Close()
 		info, token = newInfo, newToken
-		client = newRemoteDockerRecoveryClient(r, req, host, port, token)
+		client = newRemoteDockerRecoveryClient(r, req, host, port, token, info.ScopedMCPRoutes)
 	}
 	status, err := client.GetStatus(ctx)
 	if err != nil && isAgentctlAuthError(err) && req.BootstrapNonce != "" && token == req.AuthToken {
@@ -205,14 +215,14 @@ func (r *RemoteDockerExecutor) authenticateRemoteDockerInstance(
 		}
 		client.Close()
 		info, token = newInfo, newToken
-		client = newRemoteDockerRecoveryClient(r, req, host, port, token)
+		client = newRemoteDockerRecoveryClient(r, req, host, port, token, info.ScopedMCPRoutes)
 		status, err = client.GetStatus(ctx)
 	}
 	if err != nil || status == nil {
 		client.Close()
 		return nil, nil, "", RecoveryOutcomeUnknown
 	}
-	if !status.IsAgentRunning() {
+	if !status.IsAgentRunning() && status.AgentStatus != agentProcessStatusStopped {
 		client.Close()
 		return nil, nil, "", RecoveryOutcomeNoMatchingInstance
 	}
@@ -247,10 +257,12 @@ func newRemoteDockerRecoveryClient(
 	host string,
 	port int,
 	token string,
+	scopedMCPRoutes bool,
 ) *agentctl.Client {
 	return agentctl.NewClient(host, port, r.logger,
 		agentctl.WithExecutionID(remoteDockerAgentctlInstanceID(req)),
-		agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(token))
+		agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(token),
+		agentctl.WithBuiltinMCPScopedRoutes(scopedMCPRoutes))
 }
 
 // remoteDockerAgentctlInstanceID is the actual agentctl instance inside the

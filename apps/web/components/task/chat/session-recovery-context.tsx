@@ -12,6 +12,7 @@ import { useTaskLaunchErrorContext } from "../task-launch-error-context";
 import { usePendingSessionRecovery } from "@/hooks/domains/session/session-recovery-pending";
 import { useSessionRecoveryGuidance } from "@/hooks/domains/session/use-session-recovery-guidance";
 import { matchingAutomaticRecovery } from "@/lib/session-recovery-presentation";
+import { readAgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
 import { invalidateSessionRecoveryGuidance } from "@/lib/session/session-recovery-guidance";
 import { lastAgentErrorStamp, readLastAgentError } from "@/lib/session-last-agent-error";
 
@@ -23,6 +24,8 @@ type RecoveryContext = {
 };
 const Context = createContext<RecoveryContext | null>(null);
 const EMPTY_SESSION_ITEMS: Record<string, TaskSession> = {};
+const RESTORATION_REQUEST_BASELINE_LIMIT = 128;
+const restorationRequestBaselines = new Map<string, string | null>();
 
 export function SessionRecoveryProvider({
   session,
@@ -46,13 +49,28 @@ export function SessionRecoveryProvider({
   const lastPending = useLastPendingRecovery(pending, recoveryKey);
   const previous = useRef<ActiveSessionRecovery | null>(null);
   const selected = useCurrentRecovery(session, messages, enabled);
-  const { automaticRecovery, guidanceModel } = useRequestLocalGuidance(taskId, session);
+  const { automaticRecovery, guidanceModel, guidanceSubmissionId } = useRequestLocalGuidance(
+    taskId,
+    session,
+  );
   const retainPending = retainRecovery(enabled, session, previous.current);
-  const requestLocalModel = requestLocalRecoveryModel(session?.id, automaticRecovery);
-  const model =
-    selected ??
-    guidanceModel ??
-    chooseRecoveryModel(null, retainPending, previous.current, requestLocalModel);
+  const committedRestoration = committedDeliveryRestoration(session);
+  const newRecoveryRequest = useIsNewRequestAfterRestoration(
+    recoveryKey,
+    committedRestoration,
+    automaticRecovery,
+  );
+  const model = selectRecoveryModel({
+    selected,
+    restoration: committedRestoration,
+    isNewRequest: newRecoveryRequest,
+    guidanceModel,
+    guidanceSubmissionId,
+    sessionId: session?.id,
+    automaticRecovery,
+    retainPending,
+    previousModel: previous.current,
+  });
   previous.current = model;
   const presentedModel = model ? { ...model, loading: messagesLoading } : null;
   return (
@@ -69,6 +87,104 @@ export function SessionRecoveryProvider({
       {children}
     </Context.Provider>
   );
+}
+
+function committedDeliveryRestoration(session: TaskSession | null | undefined) {
+  if (!session) return null;
+  const recovery = readAgentDeliveryRecovery(session.metadata);
+  return recovery?.phase === "restored" &&
+    Array.isArray(session.session_recovery_blocks) &&
+    session.session_recovery_blocks.length === 0
+    ? recovery
+    : null;
+}
+
+function selectRecoveryModel({
+  selected,
+  restoration,
+  isNewRequest,
+  guidanceModel,
+  guidanceSubmissionId,
+  sessionId,
+  automaticRecovery,
+  retainPending,
+  previousModel,
+}: {
+  selected: ActiveSessionRecovery | null;
+  restoration: ReturnType<typeof committedDeliveryRestoration>;
+  isNewRequest: boolean;
+  guidanceModel: ActiveSessionRecovery | null;
+  guidanceSubmissionId: string | undefined;
+  sessionId: string | undefined;
+  automaticRecovery: ReturnType<typeof matchingAutomaticRecovery>;
+  retainPending: boolean;
+  previousModel: ActiveSessionRecovery | null;
+}): ActiveSessionRecovery | null {
+  const selectedModel = recoveryModelBelongsToSubmission(selected, restoration?.submissionId)
+    ? null
+    : selected;
+  const currentGuidanceModel =
+    restoration && guidanceSubmissionId === restoration.submissionId ? null : guidanceModel;
+  const requestLocalModel =
+    restoration && !isNewRequest ? null : requestLocalRecoveryModel(sessionId, automaticRecovery);
+  const historicalModel = recoveryModelBelongsToSubmission(previousModel, restoration?.submissionId)
+    ? null
+    : previousModel;
+  const retainedPreviousModel =
+    restoration && !isNewRequest && historicalModel?.requestLocal ? null : historicalModel;
+
+  return (
+    selectedModel ??
+    currentGuidanceModel ??
+    chooseRecoveryModel(null, retainPending, retainedPreviousModel, requestLocalModel)
+  );
+}
+
+function recoveryModelBelongsToSubmission(
+  model: ActiveSessionRecovery | null,
+  submissionId: string | undefined,
+): boolean {
+  if (!model || !submissionId) return false;
+  const metadataSubmissionId =
+    model.metadata && "delivery_submission_id" in model.metadata
+      ? model.metadata.delivery_submission_id
+      : undefined;
+  return (
+    model.error?.deliverySubmissionId === submissionId || metadataSubmissionId === submissionId
+  );
+}
+
+function useIsNewRequestAfterRestoration(
+  recoveryKey: string,
+  restoration: ReturnType<typeof committedDeliveryRestoration>,
+  automaticRecovery: ReturnType<typeof matchingAutomaticRecovery>,
+): boolean {
+  const requestIdentity = automaticRecovery?.requestIdentity;
+  const requestKey = requestIdentity
+    ? `${requestIdentity.taskId}\u0000${requestIdentity.sessionId}\u0000${requestIdentity.generation}\u0000${requestIdentity.attemptId}`
+    : null;
+  const restorationKey = restoration
+    ? `${restoration.incarnationId}\u0000${restoration.harnessGeneration}\u0000${restoration.submissionId}`
+    : null;
+  const baselineRequestKey = restorationKey
+    ? rememberRestorationRequestBaseline(`${recoveryKey}\u0000${restorationKey}`, requestKey)
+    : null;
+  return Boolean(restorationKey && requestKey && baselineRequestKey !== requestKey);
+}
+
+function rememberRestorationRequestBaseline(key: string, requestKey: string | null): string | null {
+  if (restorationRequestBaselines.has(key)) {
+    const baseline = restorationRequestBaselines.get(key) ?? null;
+    restorationRequestBaselines.delete(key);
+    restorationRequestBaselines.set(key, baseline);
+    return baseline;
+  }
+  if (restorationRequestBaselines.size >= RESTORATION_REQUEST_BASELINE_LIMIT) {
+    const oldestKey = restorationRequestBaselines.keys().next().value;
+    if (oldestKey !== undefined) restorationRequestBaselines.delete(oldestKey);
+  }
+  restorationRequestBaselines.set(key, requestKey);
+  return requestKey;
 }
 
 function useRequestLocalGuidance(taskId: string | null, session: TaskSession | null | undefined) {
@@ -96,6 +212,7 @@ function useRequestLocalGuidance(taskId: string | null, session: TaskSession | n
   return {
     automaticRecovery,
     guidanceModel: session && entry ? continuationGuidanceModel(session.id) : null,
+    guidanceSubmissionId: entry?.identity.deliverySubmissionId,
   };
 }
 

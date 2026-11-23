@@ -76,6 +76,7 @@ func (h *WorkspaceFileHandlers) refreshRecoveryArtifactExclusions(
 // RegisterHandlers registers workspace file handlers with the dispatcher
 func (h *WorkspaceFileHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorkspaceFileTreeGet, h.wsGetFileTree)
+	d.RegisterFunc(ws.ActionWorkspaceRootFilesList, h.wsListWorkspaceRootFiles)
 	d.RegisterFunc(ws.ActionWorkspaceFileContentGet, h.wsGetFileContent)
 	d.RegisterFunc(ws.ActionWorkspaceFileContentGetRef, h.wsGetFileContentAtRef)
 	d.RegisterFunc(ws.ActionWorkspaceFileContentUpdate, h.wsUpdateFileContent)
@@ -84,6 +85,36 @@ func (h *WorkspaceFileHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorkspaceFileRename, h.wsRenameFile)
 	d.RegisterFunc(ws.ActionWorkspaceFilesSearch, h.wsSearchFiles)
 	d.RegisterFunc(ws.ActionWorkspaceContentSearch, h.wsSearchContent)
+}
+
+func (h *WorkspaceFileHandlers) wsListWorkspaceRootFiles(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	execution, err := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session: "+err.Error(), nil)
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
+	}
+	if err := h.refreshRecoveryArtifactExclusions(ctx, req.SessionID, client); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Workspace artifact filter could not be refreshed", nil)
+	}
+	listing, err := client.ListWorkspaceRootFiles(ctx)
+	if err != nil {
+		h.logger.Error("failed to list workspace root files", zap.Error(err), zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to list workspace root files: %v", err), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, listing)
 }
 
 // wsGetFileTree handles workspace.tree.get action

@@ -282,6 +282,15 @@ func assertWorkspacePlacementLegacyDefaults(t *testing.T, repo *Repository) {
 }
 
 func TestMigrateTasksRebuildAddsInitialWorkspaceLayout(t *testing.T) {
+	for _, grade := range []string{"", "work"} {
+		t.Run("existing grade="+grade, func(t *testing.T) {
+			testMigrateTasksRebuildAddsInitialWorkspaceLayout(t, grade)
+		})
+	}
+}
+
+func testMigrateTasksRebuildAddsInitialWorkspaceLayout(t *testing.T, grade string) {
+	t.Helper()
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -323,6 +332,14 @@ func TestMigrateTasksRebuildAddsInitialWorkspaceLayout(t *testing.T) {
 	`, "task-workspace-placement-rebuild", "Rebuilt task", now, now); err != nil {
 		t.Fatalf("insert legacy task row: %v", err)
 	}
+	if grade != "" {
+		if _, err := repo.db.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN execution_grade TEXT NOT NULL DEFAULT ''`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.db.ExecContext(ctx, `UPDATE tasks SET execution_grade = ?`, grade); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := repo.db.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
 		t.Fatalf("restore foreign keys: %v", err)
 	}
@@ -335,6 +352,13 @@ func TestMigrateTasksRebuildAddsInitialWorkspaceLayout(t *testing.T) {
 	}
 	if layout != "" {
 		t.Fatalf("rebuilt task initial workspace layout = %q, want empty", layout)
+	}
+	var storedGrade string
+	if err := repo.db.GetContext(ctx, &storedGrade, `SELECT execution_grade FROM tasks WHERE id = ?`, "task-workspace-placement-rebuild"); err != nil {
+		t.Fatal(err)
+	}
+	if storedGrade != grade {
+		t.Fatalf("rebuilt task execution grade = %q, want %q", storedGrade, grade)
 	}
 }
 

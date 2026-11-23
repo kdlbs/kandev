@@ -78,6 +78,9 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	lock := s.lifecycleLocks.lockFor(result.Manifest.ID)
 	lock.Lock()
 	defer lock.Unlock()
+	captureLock := s.formatterLifecycleLock(result.Manifest.ID)
+	captureLock.Lock()
+	defer captureLock.Unlock()
 	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
 	if (hadOldRec && len(oldRec.ExecutorProviders) > 0) || len(result.Manifest.ExecutorProviders) > 0 {
 		s.closeExecutorProviderAdmission(result.Manifest.ID)
@@ -406,10 +409,14 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	captureLock := s.formatterLifecycleLock(id)
+	captureLock.Lock()
+	defer captureLock.Unlock()
 	rec, err := s.Get(id)
 	if err != nil {
 		return err
 	}
+	s.filePreviewGrantStore().revokeInstallation(rec.InstallationID)
 	if len(rec.ExecutorProviders) > 0 {
 		s.closeExecutorProviderAdmission(id)
 		defer s.reopenExecutorProviderAdmissionIfActive(id)
@@ -469,6 +476,7 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		return err
 	}
 	s.registry.Remove(id)
+	s.notifySidebarGroupingCatalog(id)
 	s.deletePluginState(id)
 	s.notifyDeliverer()
 	s.notifyAgentToolCatalogChanged()

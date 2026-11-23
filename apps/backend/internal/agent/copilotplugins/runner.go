@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kandev/kandev/internal/agent/proctree"
 )
 
 const (
@@ -76,20 +78,20 @@ func (r ExecRunner) Run(ctx context.Context, argv []string, env map[string]strin
 func runCommand(ctx context.Context, cmd *exec.Cmd, stdout, stderr *limitedBuffer) (CommandResult, error) {
 	var (
 		treeMu sync.Mutex
-		tree   commandTree
+		tree   proctree.Tree
 	)
 	cmd.Cancel = func() error {
 		treeMu.Lock()
 		current := tree
 		treeMu.Unlock()
-		current.kill(cmd)
+		current.Kill(cmd)
 		return nil
 	}
-	prepareCommandTree(cmd)
+	proctree.Prepare(cmd)
 	if err := cmd.Start(); err != nil {
 		return CommandResult{ExitCode: -1}, fmt.Errorf("start copilot plugin inventory: %w", err)
 	}
-	captured, captureErr := captureCommandTree(cmd)
+	captured, captureErr := proctree.Capture(cmd)
 	if captureErr != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
@@ -105,7 +107,7 @@ func runCommand(ctx context.Context, cmd *exec.Cmd, stdout, stderr *limitedBuffe
 	treeMu.Lock()
 	committedTree := tree
 	treeMu.Unlock()
-	committedTree.kill(cmd)
+	committedTree.Kill(cmd)
 	exitCode := -1
 	if cmd.ProcessState != nil {
 		exitCode = cmd.ProcessState.ExitCode()

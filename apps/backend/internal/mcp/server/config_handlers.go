@@ -143,7 +143,7 @@ func (s *Server) registerConfigWorkflowStepTools() {
 		mcp.NewTool("reorder_workflow_steps_kandev",
 			mcp.WithDescription("Reorder workflow steps by providing the full ordered list of step IDs."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
-			mcp.WithArray("step_ids", mcp.Required(), mcp.Description("Ordered list of step IDs defining the new order")),
+			mcp.WithArray("step_ids", mcp.Required(), mcp.Description("Ordered list of step IDs defining the new order"), mcp.Items(map[string]any{typeKey: stringType})),
 		),
 		s.wrapHandler("reorder_workflow_steps_kandev", s.reorderWorkflowStepsHandler()),
 	)
@@ -229,7 +229,7 @@ func (s *Server) registerConfigPromptTools() {
 	s.registerConfigPromptWriteTools()
 	listTool := mcp.NewToolWithRawSchema(
 		"list_shared_prompts_kandev",
-		"List saved prompts without their content. Each summary includes the prompt name, whether it is built in, and its UTF-8 content size.",
+		"List saved prompts without their content. Each summary includes the prompt name, whether it is built in, its source (manual, sync for a prompt synced from the prompt repository, or override for a local override of one), whether it has an unresolved conflict with the repository, editing guidance to relay to the user, and its UTF-8 content size.",
 		json.RawMessage(`{"type":"object","properties":{}}`),
 	)
 	// NewToolWithRawSchema does not accept option functions, so set annotations directly.

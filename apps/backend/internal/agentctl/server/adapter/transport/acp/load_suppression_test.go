@@ -61,6 +61,38 @@ func TestLoadSuppression_MessageEventsAreSuppressed(t *testing.T) {
 	}
 }
 
+func TestCodexMCPStartupWarningPassesDuringOwnedLoad(t *testing.T) {
+	a := newTestAdapterForAgent(codexAgentID)
+	t.Cleanup(func() { _ = a.Close() })
+	a.mu.Lock()
+	a.sessionID = "session"
+	a.isLoadingSession = true
+	a.loadingSessionID = "session"
+	a.mu.Unlock()
+
+	a.handleACPUpdate(codexMCPStartupNotification(
+		t, "mcp_startup.server.550e8400-e29b-41d4-a716-446655440002", "mcp__server__startup",
+	), 0)
+	staleReport := codexMCPStartupNotification(
+		t, "mcp_startup.server.550e8400-e29b-41d4-a716-446655440003", "mcp__server__startup",
+	)
+	staleReport.SessionId = "stale-session"
+	a.handleACPUpdate(staleReport, 0)
+	a.handleACPUpdate(makeNotification("session", acp.SessionUpdate{
+		ToolCall: &acp.SessionUpdateToolCall{
+			ToolCallId: "replayed-tool", Title: "Read", Kind: acp.ToolKindRead, Status: acp.ToolCallStatusCompleted,
+		},
+	}), 0)
+
+	events := drainEvents(a)
+	if len(events) != 1 {
+		t.Fatalf("owned startup report and replay suppression produced %d events, want only one warning: %+v", len(events), events)
+	}
+	if events[0].Type != streams.EventTypeMCPStartupWarning || events[0].SessionID != "session" {
+		t.Fatalf("load report event = %+v, want an owned startup warning", events[0])
+	}
+}
+
 func TestLoadSuppression_AvailableCommandsPassThroughDuringLoad(t *testing.T) {
 	a := newTestAdapter()
 	a.mu.Lock()

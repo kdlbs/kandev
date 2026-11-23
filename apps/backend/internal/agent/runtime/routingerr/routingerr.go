@@ -204,37 +204,61 @@ func Classify(in Input) *Error {
 	if observedAt.IsZero() {
 		observedAt = time.Now()
 	}
-	if e.ResetHint == nil && (e.Code == CodeQuotaLimited || e.Code == CodeRateLimited) {
-		// Providers such as codex state the retry time only in the human
-		// notice, not in a structured field. Deriving it here lets every
-		// consumer (short retry, circuit breaker) honor it uniformly.
-		text := in.Stderr + "\n" + in.Stdout
-		if ruleUsesScopedTextReset(e.ClassifierRule) {
-			// The new notice rules reject fenced examples, so their reset
-			// hints must come from the unfenced line that classified, not
-			// from unrelated prose elsewhere in the diagnostic bundle.
-			if scoped, ok := providerRuleMatchedLine(in.ProviderID, e.ClassifierRule, text); ok {
-				text = scoped
-			} else {
-				text = ""
-			}
-		}
-		hint := parseResetHintAt(text, observedAt)
-		if hint == nil && (e.ClassifierRule == ruleClaudeSessionLimit ||
-			e.ClassifierRule == ruleClaudeFiveHourLimit) {
-			hint = parseResetClockHintAt(text, observedAt)
-			e.ResetHintInferred = hint != nil
-		}
-		if hint != nil {
-			e.ResetHint = hint
-		}
-	}
+	inferTextResetHint(in, e, observedAt)
 	if e.ResetHint == nil && e.ClassifierRule == RuleOpenCodeCapacityAdmission {
 		// A capacity hint is a floor for the host's nominal delay, never a
 		// replacement. Only the line that matched the signature can supply it.
 		e.ResetHint = parseOpenCodeCapacityResetHintAt(in.Stderr+"\n"+in.Stdout, observedAt)
 	}
 	return e
+}
+
+func inferTextResetHint(in Input, e *Error, observedAt time.Time) {
+	if e.ResetHint != nil || (e.Code != CodeQuotaLimited && e.Code != CodeRateLimited) {
+		return
+	}
+	// Providers such as codex state the retry time only in the human notice,
+	// not in a structured field. Deriving it here lets every consumer honor it.
+	text := in.Stderr + "\n" + in.Stdout
+	var ok bool
+	text, ok = resetHintSourceText(in, e, text)
+	if !ok {
+		return
+	}
+	hint := parseResetHintAt(text, observedAt)
+	if hint == nil && (e.ClassifierRule == ruleClaudeSessionLimit ||
+		e.ClassifierRule == ruleClaudeFiveHourLimit) {
+		hint = parseResetClockHintAt(text, observedAt)
+		e.ResetHintInferred = hint != nil
+	}
+	if hint == nil && (e.ClassifierRule == ruleDevinFreeModelRateLimit || isStructuredDevinRateLimit(in, e)) {
+		// Devin states its reset as "(at 12:01 UTC)": a clock without a
+		// date. The notice's relative duration disambiguates the day, so
+		// the hint is inferred for the occurrence closest to it.
+		hint = parseResetAtClockHintAt(text, observedAt)
+		e.ResetHintInferred = hint != nil
+	}
+	if hint != nil {
+		e.ResetHint = hint
+	}
+}
+
+func resetHintSourceText(in Input, e *Error, text string) (string, bool) {
+	if ruleUsesScopedTextReset(e.ClassifierRule) {
+		// These notice rules reject fenced examples, so their reset hints must
+		// come from the unfenced line that classified, not unrelated prose.
+		return providerRuleMatchedLine(in.ProviderID, e.ClassifierRule, text)
+	}
+	if isStructuredDevinRateLimit(in, e) {
+		// A structured 429 keeps its classification, but a matching Devin
+		// notice can still provide the reset clock that the response omits.
+		return providerRuleMatchedLine(in.ProviderID, ruleDevinFreeModelRateLimit, text)
+	}
+	return text, true
+}
+
+func isStructuredDevinRateLimit(in Input, e *Error) bool {
+	return in.ProviderID == providerDevinACP && e.Code == CodeRateLimited && e.ClassifierRule == ruleHTTP429
 }
 
 func classify(in Input) *Error {

@@ -16,6 +16,7 @@ import {
 import { buildSessionViewActions } from "./session-runtime-view-actions";
 import { buildSessionGitCheckoutActions } from "./session-runtime-git-checkout-actions";
 import { buildBackgroundWorkActions } from "./session-runtime-background-work";
+import { buildSessionConfigurationFeedbackActions } from "./session-configuration-feedback";
 import {
   buildUserShellActions,
   migrateUserShellScopes,
@@ -55,6 +56,7 @@ function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: stri
   delete state.sessionMode.bySessionId[sessionId];
   delete state.agentCapabilities.bySessionId[sessionId];
   delete state.sessionModels.bySessionId[sessionId];
+  delete state.configurationFeedback.bySessionId[sessionId];
   delete state.sessionMcpStatus.bySessionId[sessionId];
   delete state.promptUsage.bySessionId[sessionId];
   delete state.usageInvalidation.bySessionId[sessionId];
@@ -95,6 +97,7 @@ function purgeEnvScopedRuntime(state: SessionRuntimeSliceState, envKey: string) 
   delete state.gitStatus.refreshByEnvironmentId?.[envKey];
   delete state.gitStatus.refreshByEnvironmentRepo?.[envKey];
   delete state.gitStatus.inventoryByEnvironment?.[envKey];
+  delete state.workspaceRootFiles.byEnvironmentId[envKey];
   delete state.sessionCommits.byEnvironmentId[envKey];
   delete state.sessionCommits.loading[envKey];
   delete state.sessionCommits.refetchTrigger[envKey];
@@ -140,6 +143,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionMode: { bySessionId: {} },
   agentCapabilities: { bySessionId: {} },
   sessionModels: { bySessionId: {} },
+  configurationFeedback: { bySessionId: {} },
   sessionMcpStatus: { bySessionId: {} },
   promptUsage: { bySessionId: {} },
   usageInvalidation: { bySessionId: {} },
@@ -159,6 +163,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionPollMode: { bySessionId: {} },
   embeddedVscodeSupport: { bySessionId: {} },
   workspaceFilesRefresh: { bySessionId: {} },
+  workspaceRootFiles: { byEnvironmentId: {} },
   workspaceRestoration: { byEnvironmentId: {} },
   backgroundWork: {
     workloadsBySessionId: {},
@@ -472,6 +477,7 @@ function buildGitStatusCleanupActions(set: SliceSet<SessionRuntimeSlice>) {
 export const createSessionRuntimeSlice: SliceCreator<SessionRuntimeSlice> = (set) => ({
   ...defaultSessionRuntimeState,
   ...buildTerminalShellProcessActions(set),
+  ...buildSessionConfigurationFeedbackActions(set),
   // Returns whether the git state meaningfully changed so callers (the WS
   // handler) can decide to invalidate derived caches without re-running the
   // expensive deep comparison themselves. The comparison walks every file's
@@ -509,6 +515,11 @@ export const createSessionRuntimeSlice: SliceCreator<SessionRuntimeSlice> = (set
     set((draft) => {
       draft.workspaceFilesRefresh.bySessionId[sessionId] =
         (draft.workspaceFilesRefresh.bySessionId[sessionId] ?? 0) + 1;
+    }),
+  setWorkspaceRootFiles: (environmentId, files) =>
+    set((draft) => {
+      if (!environmentId) return;
+      draft.workspaceRootFiles.byEnvironmentId[environmentId] = files;
     }),
   clearLegacyGitStatusEntry: (sessionId) =>
     set((draft) => {

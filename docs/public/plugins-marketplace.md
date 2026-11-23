@@ -47,6 +47,19 @@ native plugin installation. Canvas installation is workspace-scoped and is
 available to an authorized workspace user. Native plugin management remains
 administrator-scoped.
 
+### Find a viewer for a file
+
+A file without a supported preview offers **Find viewer plugin**. This opens Browse
+with a file-type filter, such as `stl`. Only the extension is used for discovery;
+Kandev does not send the filename, path, or file content to the catalog source.
+Select the filter chip to clear it. Format badges such as `.stl` come from the
+package's declared formats. **File viewers** and **3D** are general categories;
+they do not establish support for a particular format.
+
+Install a viewer explicitly, then return to the file. An installed viewer must
+be enabled and ready. A catalog with no matching declaration can return no
+results even when a plugin description mentions that format.
+
 ### Browse and install
 
 Open **Settings > Plugins > Browse**. Each plugin shows as a card with its
@@ -253,8 +266,11 @@ a PR that lists it.
    Keep `id` equal to your manifest `id` and unique in the file, and name your
    release package `<id>-<version>.tar.gz` to match, so the index resolves the
    right asset. `categories` here are free-form curation tags for catalog
-   filtering (not the manifest's category enum). `featured` is a maintainer-only
-   pin; leave it out of submissions. The pointer-list shape is defined by
+   filtering (not the manifest's category enum). The catalog combines them with
+   the categories from the release manifest and removes duplicates. This lets
+   maintainers add labels without changing the released package. `featured` is
+   a maintainer-only pin; leave it out of submissions. The pointer-list shape
+   is defined by
    [`plugin-registry/schema.json`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json).
    The catalog attributes the listing to the owner in `repo`. Your manifest
    `author` stays your own declaration and appears on the installed plugin's
