@@ -117,6 +117,7 @@ function IdentityLinkList({
           </div>
           <Button
             variant="outline"
+            data-testid={`plugin-identity-link-revoke-${link.id}`}
             className={controlSizingClassName("standard", TOUCH_TARGET)}
             disabled={busy}
             onClick={() => onRevoke(link.id)}
