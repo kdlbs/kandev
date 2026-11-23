@@ -1572,16 +1572,24 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 	}
 
 	event = m.handleAgentEventState(execution, event)
-	// Startup can use cached provider defaults while the previous confirmed
-	// model remains visible until the new execution applies its settings.
-	if event.Type == streams.EventTypeSessionModels &&
-		event.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored &&
-		execution.deliveryStartupSnapshot() != nil && !execution.isSessionInitialized() {
-		if settled, _ := event.Data["config_options_settled"].(bool); !settled {
-			return
-		}
+	if shouldDeferStartupSessionModels(execution, event) {
+		return
 	}
 	m.eventPublisher.publishAgentStreamEventWithAttempt(execution, event, attemptID)
+}
+
+func shouldDeferStartupSessionModels(execution *AgentExecution, event agentctl.AgentEvent) bool {
+	if event.Type != streams.EventTypeSessionModels ||
+		event.SessionSettingsPolicy == streams.SessionSettingsPolicyProviderRestored ||
+		execution.deliveryStartupSnapshot() == nil {
+		return false
+	}
+	if settled, _ := event.Data["config_options_settled"].(bool); settled {
+		return false
+	}
+	// The stream can deliver a setup snapshot after the execution becomes ready.
+	return !execution.isSessionInitialized() ||
+		agentEventDataString(event.Data, streams.ConfigOptionsSourceKey) == streams.ConfigOptionsSourceSessionSetup
 }
 
 func (m *Manager) handleCodexMCPStartupWarningEvent(
@@ -1742,7 +1750,7 @@ func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentct
 			CurrentModelID: event.CurrentModelID,
 			Models:         event.SessionModels,
 			ConfigOptions:  event.ConfigOptions,
-			ConfigSource:   agentEventDataString(event.Data, "config_options_source"),
+			ConfigSource:   agentEventDataString(event.Data, streams.ConfigOptionsSourceKey),
 			ConfigID:       agentEventDataString(event.Data, "config_options_config_id"),
 		})
 		if settled {

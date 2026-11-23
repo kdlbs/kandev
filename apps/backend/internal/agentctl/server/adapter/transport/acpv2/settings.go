@@ -74,8 +74,15 @@ func (a *Adapter) setOption(ctx context.Context, id, category, value string) (st
 			break
 		}
 	}
+	var data map[string]any
+	if result.Confirmed {
+		data = map[string]any{
+			streams.ConfigOptionsSourceKey: "provider_response",
+			"config_options_config_id":     result.ConfigID,
+		}
+	}
 	a.project(func(batch *eventBatch) {
-		a.projectSettings(reply.ConfigOptions, streams.SessionSettingsPolicyFromContext(ctx), batch)
+		a.projectSettings(reply.ConfigOptions, streams.SessionSettingsPolicyFromContext(ctx), data, batch)
 	})
 	return result, nil
 }
@@ -114,7 +121,9 @@ func configValue(option streams.ConfigOption, value string) (wire.ConfigValue, e
 	return nil, errors.New("invalid ACP v2 config value")
 }
 
-func (a *Adapter) projectSettings(options []wire.SessionConfigOption, policy streams.SessionSettingsPolicy, batch *eventBatch) {
+func (a *Adapter) projectSettings(
+	options []wire.SessionConfigOption, policy streams.SessionSettingsPolicy, data map[string]any, batch *eventBatch,
+) {
 	a.settings = nil
 	for _, wireOption := range options {
 		if option := projectConfigOption(wireOption); option.ID != "" && option.Type != "" {
@@ -126,7 +135,7 @@ func (a *Adapter) projectSettings(options []wire.SessionConfigOption, policy str
 	event := streams.AgentEvent{
 		Type: streams.EventTypeSessionModels, SessionID: string(a.session), SessionSettingsPolicy: policy,
 		SessionSettingsGeneration: a.revision, CurrentModelID: model.CurrentValue, SessionModels: sessionModels(model),
-		ConfigOptions: slices.Clone(a.settings),
+		ConfigOptions: slices.Clone(a.settings), Data: data,
 	}
 	batch.add(event)
 	if mode.ID == "" {

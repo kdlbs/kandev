@@ -147,7 +147,7 @@ func (a *Adapter) commitAttachment(
 			policy = streams.SessionSettingsPolicyFromContext(ctx)
 		}
 		batch.add(streams.AgentEvent{Type: streams.EventTypeSessionStatus, SessionID: string(session), SessionStatus: status})
-		a.projectSettings(options, policy, batch)
+		a.projectSettings(options, policy, map[string]any{streams.ConfigOptionsSourceKey: streams.ConfigOptionsSourceSessionSetup}, batch)
 		a.projectCommands(commands, batch)
 		for _, update := range attach.live {
 			a.projectUpdate(update, batch)

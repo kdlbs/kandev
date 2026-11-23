@@ -81,6 +81,12 @@ Guard the submission generation during delayed prompt and permission replies.
 - The ACP v2 race suite passed ten consecutive runs. A full event queue leaves
   cancellation available and preserves event order. An idle update without a
   stop reason records an unknown outcome and keeps the runtime available.
+- The lifecycle and adapter race tests passed three runs for late setup
+  snapshots and confirmed configuration responses. The regression first
+  reproduced a default snapshot published after the execution became ready.
+- Chromium preserved the two configured model labels throughout three
+  multi-session restart runs. The same scenario reproduced the late
+  provider default before the publication fix.
 - Native question tests cover identity across a stream reconnect and cancel
   only the bundle for the originating request.
 - SQLite projection tests passed for whole-message replacement and clear.

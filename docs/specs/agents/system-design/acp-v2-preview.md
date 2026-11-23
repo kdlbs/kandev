@@ -78,6 +78,10 @@ The native Codex app-server protocol has its own factory branch.
 - Read setup config options by `configId` and use the typed discriminator
   when applying a model or mode change. Handle auth methods by `methodId`.
   Auth errors use the existing sign-in route for the configured provider.
+- Cache setup settings internally while strict startup applies the session's
+  configuration. Publish the settled settings even if the setup snapshot
+  arrives after the execution becomes ready. Provider-restored sessions
+  continue to publish the restored configuration.
 - Bind one active foreground submission at a time. Keep the Kandev submission
   ID stable and use it as the v2 `idempotencyKey` when available.
   Correlate the reply and user message update by session and `messageId`.

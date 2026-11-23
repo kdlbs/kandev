@@ -369,7 +369,8 @@ func TestWireAdvertisedMCPAndTypedConfig(t *testing.T) {
 	require.Equal(t, streams.MCPAttachmentEvidenceDelivered, fixture.event(streams.EventTypeMCPAttachment).MCPAttachment.Kind)
 	require.Equal(t, streams.MCPAttachmentEvidenceSessionAccepted, fixture.event(streams.EventTypeMCPAttachment).MCPAttachment.Kind)
 	fixture.event(streams.EventTypeSessionStatus)
-	fixture.event(streams.EventTypeSessionModels)
+	setup := fixture.event(streams.EventTypeSessionModels)
+	require.Equal(t, streams.ConfigOptionsSourceSessionSetup, setup.Data[streams.ConfigOptionsSourceKey])
 	require.Equal(t, "ask", fixture.event(streams.EventTypeSessionMode).CurrentModeID)
 	done = asyncCall(func() error {
 		_, err := fixture.adapter.SetMode(fixture.ctx, "plan")
@@ -381,7 +382,9 @@ func TestWireAdvertisedMCPAndTypedConfig(t *testing.T) {
 	require.Equal(t, "plan", request.Params["value"])
 	fixture.reply(request, map[string]any{"configOptions": fixtureOptions("plan")})
 	require.NoError(t, fixture.wait(done))
-	fixture.event(streams.EventTypeSessionModels)
+	confirmed := fixture.event(streams.EventTypeSessionModels)
+	require.Equal(t, "provider_response", confirmed.Data[streams.ConfigOptionsSourceKey])
+	require.Equal(t, "provider-mode", confirmed.Data["config_options_config_id"])
 	require.Equal(t, "plan", fixture.event(streams.EventTypeSessionMode).CurrentModeID)
 }
 
