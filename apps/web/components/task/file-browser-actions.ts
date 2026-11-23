@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  shouldOpenFilePreview,
+  previewFileState,
+  canOfferViewerAfterReadFailure,
+} from "@/lib/plugins/file-viewer-selection";
+
 import { useEffect, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileTree, requestFileContent } from "@/lib/ws/workspace-files";
@@ -138,15 +144,20 @@ export async function fetchAndOpenFile(
   options: FetchAndOpenFileOptions = {},
 ) {
   const { repo, signal } = options;
+  const cancelled = () => signal?.aborted;
   try {
-    if (signal?.aborted) return;
+    if (cancelled()) return;
     const client = getWebSocketClient();
     if (!client) return;
+    if (shouldOpenFilePreview(path)) {
+      onOpenFile(previewFileState(path, repo));
+      return;
+    }
     const response: FileContentResponse = await requestFileContent(client, sessionId, path, repo);
-    if (signal?.aborted) return;
+    if (cancelled()) return;
     const { calculateHash } = await import("@/lib/utils/file-diff");
     const hash = await calculateHash(response.content);
-    if (signal?.aborted) return;
+    if (cancelled()) return;
     const name = path.split("/").pop() || path;
     onOpenFile({
       path,
@@ -160,7 +171,11 @@ export async function fetchAndOpenFile(
       resolvedPath: response.resolved_path,
     });
   } catch (error) {
-    if (signal?.aborted) return;
+    if (cancelled()) return;
+    if (canOfferViewerAfterReadFailure(path)) {
+      onOpenFile(previewFileState(path, repo));
+      return;
+    }
     const reason = error instanceof Error ? error.message : t("common:unknownError");
     toast({ title: t("task:failedToOpenFile"), description: reason, variant: "error" });
   }

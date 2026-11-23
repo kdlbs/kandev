@@ -5,13 +5,14 @@ import { useAppStore } from "@/components/state-provider";
 import { useSidebarMultiSelect } from "@/hooks/use-sidebar-multi-select";
 import {
   computeMixedWorkflowSelection,
-  flattenVisibleTaskIds,
   sortIdsByVisibleOrder,
   type GroupedSidebarList,
 } from "@/lib/sidebar/apply-view";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import type { TaskActionOptions } from "@/hooks/use-task-actions";
+import { flattenVisibleSidebarTasks } from "@/lib/sidebar/visible-task-order";
+import type { MultiSelectOccurrence } from "@/hooks/task-multi-select-state";
 
 type BulkConfirmState = { ids: string[]; executorTypes: Array<string | null | undefined> };
 
@@ -76,6 +77,7 @@ export function useSelectionHandlers(args: {
   unpinTasks: (ids: string[]) => void;
   pinnedTaskIds: string[];
   visibleTaskIds: string[];
+  visibleTaskOccurrences: MultiSelectOccurrence[];
   movableSelectedIds: Set<string>;
   workflowIdByTaskId?: ReadonlyMap<string, string>;
   selectionScopeKey?: string;
@@ -86,6 +88,7 @@ export function useSelectionHandlers(args: {
     unpinTasks,
     pinnedTaskIds,
     visibleTaskIds,
+    visibleTaskOccurrences,
     movableSelectedIds,
     workflowIdByTaskId,
     selectionScopeKey,
@@ -111,8 +114,9 @@ export function useSelectionHandlers(args: {
 
   // Stable ref so TaskSwitcher's React.memo isn't defeated by a fresh closure.
   const onSelectTaskRange = useCallback(
-    (taskId: string) => selectRange(taskId, visibleTaskIds),
-    [selectRange, visibleTaskIds],
+    (taskId: string, occurrenceKey?: string) =>
+      selectRange(taskId, visibleTaskOccurrences, occurrenceKey),
+    [selectRange, visibleTaskOccurrences],
   );
 
   // Bulk move in rendered order so a backward range selection isn't scrambled at
@@ -204,8 +208,8 @@ export function useSidebarSelection({
   const archiveDialog = useBulkConfirmDialog(selectedTaskDetails, multiSelect.bulkArchive);
   const deleteDialog = useBulkConfirmDialog(selectedTaskDetails, multiSelect.bulkDelete);
 
-  const visibleTaskIds = useMemo(
-    () => flattenVisibleTaskIds(grouped, collapsedGroups, collapsedSubtaskParents),
+  const { taskIds: visibleTaskIds, occurrences: visibleTaskOccurrences } = useMemo(
+    () => flattenVisibleSidebarTasks(grouped, collapsedGroups, collapsedSubtaskParents),
     [grouped, collapsedGroups, collapsedSubtaskParents],
   );
 
@@ -223,6 +227,7 @@ export function useSidebarSelection({
     unpinTasks,
     pinnedTaskIds,
     visibleTaskIds,
+    visibleTaskOccurrences,
     movableSelectedIds,
     workflowIdByTaskId: selectedWorkflowByTaskId,
     selectionScopeKey,

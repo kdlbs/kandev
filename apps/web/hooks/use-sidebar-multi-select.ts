@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useState, type Dispatch } from "react";
+import { useTaskMultiSelectStore } from "./use-task-multi-select";
 import {
   INITIAL_STATE,
   multiSelectReducer,
-  useTaskMultiSelectStore,
-} from "./use-task-multi-select";
+  type MultiSelectOccurrence,
+} from "./task-multi-select-state";
 import { useTaskActions, type TaskActionOptions } from "./use-task-actions";
 import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "./use-task-removal";
 import { useTaskWorkflowMove } from "./use-task-workflow-move";
@@ -154,13 +155,14 @@ export function useSidebarMultiSelect(workspaceId: string | null) {
   }, [workspaceId]);
 
   const toggleSelect = useCallback(
-    (taskId: string) => dispatch({ type: "toggle_select", taskId }),
+    (taskId: string, occurrenceKey?: string) =>
+      dispatch({ type: "toggle_select", taskId, occurrenceKey }),
     [],
   );
 
   const selectRange = useCallback(
-    (taskId: string, orderedIds: string[]) =>
-      dispatch({ type: "select_range", taskId, orderedIds }),
+    (taskId: string, orderedOccurrences: MultiSelectOccurrence[], occurrenceKey?: string) =>
+      dispatch({ type: "select_occurrence_range", taskId, orderedOccurrences, occurrenceKey }),
     [],
   );
 

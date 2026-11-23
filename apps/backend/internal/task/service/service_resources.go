@@ -2317,6 +2317,9 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 	if err := s.requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
 		return nil, err
 	}
+	if err := validateOfflineBudgetConfig(req.Config); err != nil {
+		return nil, err
+	}
 	if executor.Type == models.ExecutorTypePluginRemote {
 		return s.createPluginExecutorProfile(ctx, executor, req)
 	}
@@ -2381,6 +2384,11 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	profile.OwnershipIntent = intent
 	if executorProfileOwnershipOnly(req) {
 		return s.saveExecutorProfileOwnership(ctx, profile, req)
+	}
+	if req.Config != nil {
+		if err := validateOfflineBudgetConfig(req.Config); err != nil {
+			return nil, err
+		}
 	}
 	if executor.Type == models.ExecutorTypePluginRemote {
 		return s.updatePluginExecutorProfile(ctx, profile, executor, req)

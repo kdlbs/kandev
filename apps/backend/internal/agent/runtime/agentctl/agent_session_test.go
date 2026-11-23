@@ -385,6 +385,147 @@ func TestAgentSessionSetters_SendExpectedActionAndPayload(t *testing.T) {
 	}
 }
 
+func TestAgentSessionConfigurationSettersReturnCorrelatedResult(t *testing.T) {
+	tests := []struct {
+		name     string
+		response map[string]any
+		call     func(*Client) (streams.ConfigurationResult, error)
+		want     streams.ConfigurationResult
+	}{
+		{
+			name:     "model clamp",
+			response: map[string]any{"requested": "model-requested", "effective": "model-effective", "confirmed": true},
+			call: func(c *Client) (streams.ConfigurationResult, error) {
+				return c.SetModelWithResult(context.Background(), "model-requested")
+			},
+			want: streams.ConfigurationResult{Requested: "model-requested", Effective: "model-effective", Confirmed: true},
+		},
+		{
+			name: "config option clamp",
+			response: map[string]any{
+				"config_id": "reasoning_effort", "requested": "high", "effective": "medium", "confirmed": true,
+			},
+			call: func(c *Client) (streams.ConfigurationResult, error) {
+				return c.SetConfigOptionWithResult(context.Background(), "reasoning_effort", "high")
+			},
+			want: streams.ConfigurationResult{
+				ConfigID: "reasoning_effort", Requested: "high", Effective: "medium", Confirmed: true,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := captureStreamRequest(t, okResponse(tc.response))
+			got, err := tc.call(c)
+			if err != nil {
+				t.Fatalf("setter: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("configuration result = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAgentSessionConfigOptionResultIsRequestedOnlyForPickerPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		call       func(*Client) error
+		wantResult bool
+		wantPolicy streams.SessionSettingsPolicy
+	}{
+		{
+			name: "legacy setter keeps strict error response",
+			call: func(c *Client) error {
+				return c.SetConfigOption(context.Background(), "codex_mode", "plan")
+			},
+		},
+		{
+			name: "provider-restored error-only setter keeps strict error response",
+			call: func(c *Client) error {
+				return c.SetConfigOptionWithPolicy(context.Background(), "codex_mode", "plan", streams.SessionSettingsPolicyProviderRestored)
+			},
+			wantPolicy: streams.SessionSettingsPolicyProviderRestored,
+		},
+		{
+			name: "picker result setter receives unconfirmed evidence",
+			call: func(c *Client) error {
+				result, err := c.SetConfigOptionWithResult(context.Background(), "codex_mode", "plan")
+				if err != nil {
+					return err
+				}
+				if result != (streams.ConfigurationResult{ConfigID: "codex_mode", Requested: "plan"}) {
+					return errors.New("picker result did not preserve unconfirmed mode evidence")
+				}
+				return nil
+			},
+			wantResult: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, captured := captureStreamRequest(t, func(msg ws.Message) *ws.Message {
+				var payload struct {
+					IncludeConfigurationResult bool                          `json:"include_configuration_result"`
+					SessionSettingsPolicy      streams.SessionSettingsPolicy `json:"session_settings_policy"`
+				}
+				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+					t.Fatalf("decode request payload: %v", err)
+				}
+				if payload.IncludeConfigurationResult {
+					return okResponse(map[string]any{"config_id": "codex_mode", "requested": "plan"})(msg)
+				}
+				resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "requested mode was not confirmed by the agent", nil)
+				return resp
+			})
+
+			err := tt.call(c)
+			if tt.wantResult && err != nil {
+				t.Fatalf("picker result setter: %v", err)
+			}
+			if !tt.wantResult && (err == nil || !strings.Contains(err.Error(), "requested mode was not confirmed")) {
+				t.Fatalf("legacy setter error = %v, want strict mode confirmation error", err)
+			}
+			var payload struct {
+				IncludeConfigurationResult bool                          `json:"include_configuration_result"`
+				SessionSettingsPolicy      streams.SessionSettingsPolicy `json:"session_settings_policy"`
+			}
+			if err := json.Unmarshal(captured().Payload, &payload); err != nil {
+				t.Fatalf("decode captured request: %v", err)
+			}
+			if payload.IncludeConfigurationResult != tt.wantResult {
+				t.Fatalf("include_configuration_result = %t, want %t", payload.IncludeConfigurationResult, tt.wantResult)
+			}
+			if payload.SessionSettingsPolicy != tt.wantPolicy {
+				t.Fatalf("session_settings_policy = %q, want %q", payload.SessionSettingsPolicy, tt.wantPolicy)
+			}
+		})
+	}
+}
+
+func TestAgentSessionConfigOptionErrorDistinguishesRejectionFromUncertainty(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		code       string
+		wantPrefix string
+	}{
+		{name: "explicit rejection", code: ws.ErrorCodeValidation, wantPrefix: "set config option failed:"},
+		{name: "ambiguous provider failure", code: ws.ErrorCodeInternalError, wantPrefix: "set config option outcome uncertain:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := captureStreamRequest(t, func(msg ws.Message) *ws.Message {
+				resp, _ := ws.NewError(msg.ID, msg.Action, tc.code, "provider response", nil)
+				return resp
+			})
+			_, err := c.SetConfigOptionWithResult(context.Background(), "reasoning_effort", "high")
+			if err == nil || !strings.HasPrefix(err.Error(), tc.wantPrefix) {
+				t.Fatalf("set config option error = %v, want prefix %q", err, tc.wantPrefix)
+			}
+		})
+	}
+}
+
 func TestAgentSessionSetters_SurfaceStreamErrorFrames(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -404,7 +545,7 @@ func TestAgentSessionSetters_SurfaceStreamErrorFrames(t *testing.T) {
 		{
 			name:    "set config option",
 			call:    func(c *Client) error { return c.SetConfigOption(context.Background(), "c", "v") },
-			wantErr: "set config option failed: mode not supported",
+			wantErr: "set config option outcome uncertain: mode not supported",
 		},
 		{
 			name:    "authenticate",

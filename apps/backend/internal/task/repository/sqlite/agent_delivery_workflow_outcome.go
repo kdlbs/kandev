@@ -68,7 +68,8 @@ func validAgentDeliveryWorkflowNoOp(taskID string, effect *models.AgentDeliveryE
 	if effect.EffectKey != "workflow.on_turn_complete:"+effect.TurnID {
 		return false
 	}
-	return effect.Outcome == "no_automatic_transition" || effect.Outcome == "not_required"
+	return effect.Outcome == "no_automatic_transition" || effect.Outcome == "not_required" ||
+		effect.Outcome == models.DeliveryWorkflowOutcomeStoppedRecovery
 }
 
 func hasExactAgentDeliveryTerminalIdentity(effect *models.AgentDeliveryEffect) bool {
@@ -101,6 +102,9 @@ func (r *Repository) requireWorkflowOutcomeSourceTx(
 		if effect.WorkflowPolicyUpdatedAt != nil {
 			return errAgentDeliveryWorkflowSourceChanged
 		}
+		return nil
+	}
+	if effect.Outcome == models.DeliveryWorkflowOutcomeStoppedRecovery {
 		return nil
 	}
 	if effect.WorkflowPolicyUpdatedAt == nil {

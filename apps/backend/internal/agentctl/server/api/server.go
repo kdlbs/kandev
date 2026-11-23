@@ -4,7 +4,6 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"io"
 	"net/http"
 	"net/http/pprof"
@@ -25,8 +24,10 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/opencode"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/internal/system/metrics"
@@ -139,6 +140,8 @@ func (s *Server) setupRoutes() {
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
 		api.GET("/agent/launch-wrapper", s.handleLaunchWrapper)
+		api.POST("/agent/opencode/credentials", s.handleOpenCodeCredentials)
+		api.GET("/agent/opencode/credentials", s.handleOpenCodeCredentialStatus)
 		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/agent/background-work/action", s.handleBackgroundWorkAction)
 		api.POST("/start", s.handleStart)
@@ -191,6 +194,9 @@ func (s *Server) setupRoutes() {
 		api.GET("/workspace/tree", s.handleFileTree)
 		api.GET("/workspace/root-files", s.handleWorkspaceRootFiles)
 		api.GET("/workspace/image-preview", s.handleQuestionImage)
+		api.POST("/workspace/file-preview/prepare", s.handlePrepareFilePreview)
+		api.POST("/workspace/file-preview/read", s.handleReadFilePreview)
+		api.POST("/workspace/file-preview/cancel", s.handleCancelFilePreview)
 		api.GET("/workspace/file/content", s.handleFileContent)
 		api.GET("/workspace/file/content-at-ref", s.handleFileContentAtRef)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
@@ -539,6 +545,7 @@ func (s *Server) handleStart(c *gin.Context) {
 
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
+	OpenCodeRuntime opencode.Runtime   `json:"opencode_runtime,omitzero"`
 	LaunchWrapper   launchwrapper.Spec `json:"launch_wrapper,omitzero"`
 	Command         string             `json:"command"`
 	AgentArgs       optionalArgs       `json:"agent_args"`
@@ -614,17 +621,7 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	var configureErr error
-	switch {
-	case req.ReplaceEnv && req.InstallContext != nil:
-		configureErr = s.procMgr.ConfigureWithEnvironmentAndProjectDeliveryAndInstallContext(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.InstallContext, req.LaunchWrapper)
-	case req.ReplaceEnv:
-		configureErr = s.procMgr.ConfigureWithEnvironmentAndProjectDelivery(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.LaunchWrapper)
-	case req.InstallContext != nil:
-		configureErr = s.procMgr.ConfigureWithProjectDeliveryAndInstallContext(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.InstallContext, req.LaunchWrapper)
-	default:
-		configureErr = s.procMgr.ConfigureWithProjectDelivery(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.LaunchWrapper)
-	}
+	configureErr := s.procMgr.ConfigureRuntime(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ReplaceEnv, req.ProjectMCPDelivery, req.InstallContext, req.OpenCodeRuntime, req.LaunchWrapper)
 	if configureErr != nil {
 		s.logger.Error("failed to configure agent",
 			append(s.agentConfigureFailureFields(configureErr), zap.Error(configureErr))...)

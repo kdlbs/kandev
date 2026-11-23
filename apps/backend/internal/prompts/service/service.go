@@ -50,6 +50,12 @@ const (
 	maxPromptReferenceCandidateContentBytes = 16 << 20
 )
 
+// Saved-prompt size limits, in bytes after whitespace trimming.
+const (
+	MaxPromptNameBytes    = maxPromptNameBytes
+	MaxPromptContentBytes = maxPromptContentBytes
+)
+
 func NewService(repo promptstore.Repository) *Service {
 	return &Service{repo: repo}
 }
@@ -167,6 +173,9 @@ func (s *Service) UpdatePromptAtRevision(
 	if err != nil {
 		return nil, err
 	}
+	if prompt.IsSynced() {
+		return nil, ErrPromptSyncManaged
+	}
 	if expectedUpdatedAt != nil && !prompt.UpdatedAt.Equal(*expectedUpdatedAt) {
 		return nil, promptstore.ErrPromptWriteRejected
 	}
@@ -207,6 +216,13 @@ func (s *Service) DeletePrompt(ctx context.Context, promptID string) error {
 	if promptID == "" {
 		return ErrInvalidPrompt
 	}
+	existing, err := s.repo.GetPromptByID(ctx, promptID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if existing.IsSynced() {
+		return ErrPromptSyncManaged
+	}
 	if err := s.repo.DeletePrompt(ctx, promptID); err != nil {
 		return err
 	}
@@ -235,6 +251,20 @@ func (s *Service) ResolvePromptReferences(ctx context.Context, content string) (
 	if !strings.Contains(content, "@") {
 		return nil, nil
 	}
+	trie, err := s.loadReferenceTrie(ctx)
+	if err != nil {
+		return nil, err
+	}
+	expansions := make([]PromptReferenceExpansion, 0)
+	if err := collectPromptReferences(content, trie, map[string]bool{}, map[string]bool{}, &expansions, 0); err != nil {
+		return nil, err
+	}
+	return expansions, nil
+}
+
+// loadReferenceTrie builds the reference-matching trie over the current
+// saved prompts within the reference candidate budgets.
+func (s *Service) loadReferenceTrie(ctx context.Context) (*promptReferenceTrieNode, error) {
 	prompts, truncated, err := s.repo.ListPromptsForReferenceExpansion(
 		ctx,
 		maxPromptReferenceNames,
@@ -266,11 +296,7 @@ func (s *Service) ResolvePromptReferences(ctx context.Context, content string) (
 	if validPromptCount > maxPromptReferenceNames {
 		return nil, ErrPromptReferenceLimit
 	}
-	expansions := make([]PromptReferenceExpansion, 0)
-	if err := collectPromptReferences(content, trie, map[string]bool{}, map[string]bool{}, &expansions, 0); err != nil {
-		return nil, err
-	}
-	return expansions, nil
+	return trie, nil
 }
 
 type promptReferenceTrieNode struct {

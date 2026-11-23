@@ -30,6 +30,7 @@ import (
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/mcpurl"
+	"github.com/kandev/kandev/internal/common/opencode"
 	"github.com/kandev/kandev/internal/common/sshlaunch"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -301,6 +302,7 @@ type InstanceConfig struct {
 
 	// AgentArgs is the parsed command (derived from AgentCommand)
 	AgentArgs             []string
+	OpenCodeRuntime       opencode.Runtime   `json:"opencode_runtime,omitzero"`
 	LaunchWrapper         launchwrapper.Spec `json:"launch_wrapper,omitzero"`
 	LaunchWrapperRequired bool               `json:"launch_wrapper_required,omitempty"`
 

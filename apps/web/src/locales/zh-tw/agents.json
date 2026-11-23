@@ -324,6 +324,7 @@
   "modelOptionsAuthenticationRequired": "請登入此代理程式以載入模型選項。",
   "modelOptionsResolutionFailed": "無法載入模型選項。",
   "modelRequiredForAllProfiles": "所有設定都需要模型。",
+  "claudeExactModelAliasConflict": "請在「啟動模型」中選擇完整的模型 ID，或從環境變數中移除 {{envVar}}。",
   "modelSettings": "模型設定",
   "moveDynamicCandidateDown": "下移候選設定",
   "moveDynamicCandidateUp": "上移候選設定",

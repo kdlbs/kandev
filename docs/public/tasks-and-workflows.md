@@ -162,6 +162,23 @@ otherwise, review the current assignment and form choices before deciding whethe
 to retry. A multi-task selection keeps the separate bulk workflow action and does
 not support per-task profile mappings.
 
+## Read a task's step history
+
+Scripts and external tools can read who moved a task between workflow steps, and how, without reading Kandev's database:
+
+```text
+GET /api/v1/tasks/:id/step-transitions?limit=50&cursor=
+```
+
+The response lists the task's recorded moves oldest first. Each item has `id`, the source and destination `*_workflow_id`, `*_workflow_step_id`, and current `*_workflow_step_name`, plus `trigger`, `actor_kind`, `actor_id`, and `occurred_at`.
+
+- `trigger` says what moved the task, for example `manual_move` (a person on the board or the move API), `mcp_move` (an agent tool), or `engine_transition` (a workflow step action).
+- `actor_kind` is `human`, `agent`, `system`, `integration`, or `unknown`. `actor_id` is the user ID, session ID, or watch ID, or `null`. For REST moves, `human` means the request used a user credential. An API client can use a user credential too, so this value does not identify the board UI.
+- A removed step, or a step in another workspace, keeps its ID with a `null` name. The task-creation record (`trigger` `task_created`) has no source step.
+- `limit` defaults to 50 and is capped at 200. While `has_more` is `true`, pass `next_cursor` as `cursor` to read the next page.
+
+The read needs the same workspace access as opening the task; an unknown or inaccessible task returns `404`. History starts when Kandev began recording step transitions and is never reconstructed for older moves.
+
 ## Find a task from its conversation
 
 Open `Cmd/Ctrl+K` and enter a phrase from a user message or an assistant reply.
@@ -641,7 +658,9 @@ When you send the first message from Chat on a prepared task, Kandev keeps the t
 
 After a completed turn, Kandev can show a changed-files card below the agent reply. The card summarizes repository changes captured between that turn's start and end.
 
-For new accounts, this preference is off. Existing saved preferences are unchanged. To change it, open **Settings > General**. Under **Chat preferences**, set **Show changed files after each turn**, then select **Save**.
+This preference is on by default. If you saved a choice, Kandev uses that choice.
+
+To change it, open **Settings > Preferences > Task Behavior > Conversation**. Set **Show changed files after each turn**, then select **Save changes**.
 
 Each card uses retained data for that turn. Later edits, commits, or branch changes do not rewrite it. Select **Open diff** to review the full turn. Select a file row to open its historical diff. On a phone, the diff opens in a full-height drawer.
 
@@ -806,6 +825,20 @@ only when the session has confirmed that mode. A command can also show its
 advertised argument hint, such as `/goal`'s supported arguments. These labels
 and hints describe the command; they do not apply it until you send the draft.
 Pasted rich text does not create a command chip; Kandev uses its visible plain text.
+
+In task Chat, confirmed changes appear in one muted system message, such as
+“Changed model `Sonnet`, mode `Plan`.” Changes before the next turn share that
+message, with the latest result for each setting. Unconfirmed changes appear
+in red with a message that explains the outcome.
+
+Settings you choose before the agent starts appear as “Saved … for agent
+startup.” When the agent starts, later changes appear in a new message.
+
+A supported configuration command such as `/model <id>` can also report the
+setting that the agent applied. Kandev shows that result beneath the command
+for a short time. If the agent does not report a clear change, the message
+says that the requested setting could not be confirmed. Reloading the page
+clears these feedback messages.
 
 ## Recover from provider errors
 
@@ -1099,6 +1132,31 @@ When tasks are grouped, expand **Group by** and use **Indent grouped tasks** to 
 Expand **Task row** in sidebar filters to choose the details shown below each title and the value on the right. Choose **Nothing** on the right to hide change-request status icons; pull request numbers remain available as a separate detail. The task actions menu remains available.
 
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
+
+An active plugin can add **Plugin groupings** to the saved-view selector. On a
+phone, open the navigation menu's **Tasks** section and tap **Plugin groupings**;
+the same chooser is available in the task switcher. Selecting a grouping creates
+a normal saved view or reuses its unchanged generated view. Save or discard an
+existing draft before selecting one. Renamed/custom views are not overwritten.
+
+Plugin grouping covers all authorized matching roots before pagination, not just
+the currently loaded page. A root with multiple values appears in each matching
+colored group, with its subtasks beneath each occurrence. **Untagged** contains
+roots without a value. The footer reports unique tasks separately from pages of
+display occurrences; repeated rows still navigate, select, and act on the same
+task. Group collapse belongs to the saved workspace view, while subtask collapse
+applies to the canonical task.
+
+Changing a draft's grouping starts its groups expanded. Collapse choices made
+in that preview belong to the draft: **Discard** leaves the saved view unchanged,
+while **Save** and **Save as** retain the preview's choices. A copied view's
+collapse choices remain independent of its source.
+
+If the plugin is disabled, unavailable, or returns an incomplete classification,
+the saved view remains selected with its original grouping. Enable the plugin,
+use **Retry**, or choose another view. Recovery restores the grouping without
+rewriting your settings. This is separate from plugin Sort/Group choices in the
+main **List** view, which still apply only to its loaded page.
 
 Views already covered by the current homepage data appear immediately, without
 another sidebar request. Larger covered views also page through the data already

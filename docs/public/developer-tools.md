@@ -74,8 +74,10 @@ restart the backend after you change it.
 ## Use CLI passthrough on a phone
 
 Open a task running in CLI passthrough mode. Its connected terminal shows the
-same navigation keys as a task terminal: **Ctrl**, **Shift**, **^C**, **^D**,
-**Esc**, **Tab**, arrows, and other terminal keys. Swipe the row to reach more keys.
+same navigation keys as a task terminal: **Esc**, arrows, **Enter**, and
+**Tab**, followed by **Ctrl**, **Shift**, **^C**, **^D**, and other terminal
+keys. A horizontal swipe icon shows that the row scrolls. Swipe the row to reach
+more keys.
 
 Tap **Ctrl** once to modify the next input, twice to keep it enabled, and again
 to turn it off. **Shift** followed by **Tab** sends reverse Tab. Keys go directly
@@ -113,12 +115,13 @@ is running and a green dot when a reply is ready to read. Terminal tabs do not
 contribute to this activity indicator.
 
 On a phone, Quick Terminal includes the same shortcut row as a task terminal:
-**Ctrl**, **Shift**, **^C**, **^D**, **Esc**, **Tab**, navigation keys, and symbols.
-Swipe the row to reach more keys. Tap **^C** to interrupt a command. Tap a modifier
-once for the next input, twice to keep it enabled, and again to turn it off.
-Shortcuts target the selected terminal and keep the keyboard focused. The row
-stays above the on-screen keyboard. Modifiers reset when you switch terminal
-tabs or close the view.
+**Esc**, navigation keys, **Enter**, and **Tab**, followed by **Ctrl**, **Shift**,
+**^C**, **^D**, and symbols. A horizontal swipe icon shows that the row scrolls.
+Swipe the row to reach more keys. Tap **Enter** to run a command or **^C** to
+interrupt it. Tap a modifier once for the next input, twice to keep it enabled,
+and again to turn it off. Shortcuts target the selected terminal and keep the
+keyboard focused. The row stays above the on-screen keyboard. Modifiers reset
+when you switch terminal tabs or close the view.
 
 ### Recover a Quick Terminal
 

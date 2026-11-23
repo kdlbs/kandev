@@ -10,6 +10,8 @@ import type { AvailableCommand } from "@/lib/state/slices/session-runtime/types"
 import type { Message } from "@/lib/types/http";
 import { sessionId, taskId } from "@/lib/types/http";
 
+const MOCK_SMART = "Mock Smart";
+
 function userMessage(turnId: string, content: string): Message {
   return {
     id: `user-${turnId}`,
@@ -98,6 +100,56 @@ describe("computeEmptyTurnNotice", () => {
     expect(computeEmptyTurnNotice(baseInput({ hadOutput: undefined }))).toBeNull();
   });
 
+  it("shows an owned backend receipt before the initiating message finishes loading", () => {
+    const notice = computeEmptyTurnNotice(
+      baseInput({
+        messages: [],
+        configuration_result: {
+          status: "applied",
+          config_id: "primary_model",
+          requested: MOCK_SMART,
+          effective: MOCK_SMART,
+          confirmed: true,
+        },
+      }),
+    );
+    expect(notice?.metadata?.variant).toBe("configuration_command_feedback");
+  });
+
+  it("does not show an incomplete command receipt", () => {
+    expect(
+      computeEmptyTurnNotice(
+        baseInput({
+          messages: [],
+          configuration_result: {
+            status: "applied",
+            requested: MOCK_SMART,
+            effective: MOCK_SMART,
+            confirmed: true,
+          },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("accepts a provider-specific model option ID for /model receipts", () => {
+    const notice = computeEmptyTurnNotice(
+      baseInput({
+        messages: [userMessage("turn-1", "/model model-b")],
+        configuration_result: {
+          status: "applied",
+          config_id: "primary_model",
+          requested: "Model B",
+          effective: "Model B",
+          confirmed: true,
+        },
+      }),
+    );
+    expect(notice?.metadata?.variant).toBe("configuration_command_feedback");
+  });
+});
+
+describe("computeEmptyTurnNotice presentation", () => {
   it("returns null on quick-chat / config-chat surfaces", () => {
     expect(computeEmptyTurnNotice(baseInput({ isEphemeralSurface: true }))).toBeNull();
   });

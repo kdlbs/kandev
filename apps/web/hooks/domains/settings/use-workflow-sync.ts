@@ -19,20 +19,18 @@ import type {
   WorkflowSyncSetConfigRequest,
 } from "@/lib/types/workflow-sync";
 import { PUBLIC_GITHUB_HOST } from "@/lib/github/host";
-import { buildGitHubRepoUrl, parseGitHubRepoUrl } from "@/lib/utils/github-repo-url";
-import { parseGitLabProjectUrl } from "@/lib/utils/gitlab-repo-url";
+import {
+  DEFAULT_WORKFLOWS_PATH,
+  displayUrl,
+  formForProvider,
+  formFromUrl,
+  repoFormFromConfig,
+  repoSyncPayload,
+  repoUrlInvalid,
+  type RepoSyncFormState,
+} from "@/lib/settings/repo-sync-form";
 
-export type WorkflowSyncFormState = {
-  github_host: string;
-  provider: WorkflowSyncProvider;
-  repo_owner: string;
-  repo_name: string;
-  project_path: string;
-  branch: string;
-  path: string;
-  interval_seconds: number;
-  poll_enabled: boolean;
-};
+export type WorkflowSyncFormState = RepoSyncFormState;
 
 const DEFAULT_FORM: WorkflowSyncFormState = {
   github_host: PUBLIC_GITHUB_HOST,
@@ -41,51 +39,13 @@ const DEFAULT_FORM: WorkflowSyncFormState = {
   repo_name: "",
   project_path: "",
   branch: "main",
-  path: ".kandev/workflows",
+  path: DEFAULT_WORKFLOWS_PATH,
   interval_seconds: 300,
   poll_enabled: true,
 };
 
 function configToForm(cfg: WorkflowSyncConfig | null): WorkflowSyncFormState {
-  if (!cfg) return DEFAULT_FORM;
-  return {
-    provider: cfg.provider,
-    github_host: cfg.provider === "gitlab" ? "" : (cfg.github_host ?? PUBLIC_GITHUB_HOST),
-    repo_owner: cfg.repo_owner,
-    repo_name: cfg.repo_name,
-    project_path: cfg.project_path,
-    branch: cfg.branch,
-    path: cfg.path,
-    interval_seconds: cfg.interval_seconds,
-    poll_enabled: cfg.poll_enabled,
-  };
-}
-
-// displayUrl redisplays only the repo identity (owner/repo, or GitLab
-// project_path) — never branch or directory. Branch and directory are their
-// own directly-editable fields (see BranchField/DirectoryField in the
-// dialog), specifically because a branch name can itself contain slashes
-// (e.g. "features/my-ticket"), which makes splitting a combined
-// project+branch+path string ambiguous by construction — no client-side
-// parse can always get it right. Baking branch/path back into this field
-// would let it silently disagree with the authoritative Branch/Directory
-// fields after a direct edit.
-function displayUrl(
-  form: Pick<
-    WorkflowSyncFormState,
-    "provider" | "repo_owner" | "repo_name" | "project_path" | "github_host"
-  >,
-): string {
-  if (form.provider === "gitlab") {
-    return form.project_path;
-  }
-  return form.repo_owner
-    ? buildGitHubRepoUrl({ owner: form.repo_owner, repo: form.repo_name, host: form.github_host })
-    : "";
-}
-
-function parseRepoUrl(provider: WorkflowSyncProvider, value: string, host?: string) {
-  return provider === "gitlab" ? parseGitLabProjectUrl(value) : parseGitHubRepoUrl(value, host);
+  return cfg ? repoFormFromConfig(cfg) : DEFAULT_FORM;
 }
 
 // Background refresh so the status banner picks up new poller results
@@ -136,36 +96,6 @@ function draftFromConfig(cfg: WorkflowSyncConfig | null): WorkflowSyncDraft {
   return { form, url: displayUrl(form) };
 }
 
-function formFromUrl(
-  form: WorkflowSyncFormState,
-  url: string,
-  configuredHost?: string,
-): WorkflowSyncFormState {
-  const parsed =
-    parseRepoUrl(form.provider, url, configuredHost) ??
-    parseRepoUrl(form.provider, url, form.github_host);
-  if (!parsed) return form;
-  if (form.provider === "gitlab" && "projectPath" in parsed) {
-    return {
-      ...form,
-      project_path: parsed.projectPath,
-      branch: parsed.branch ?? form.branch,
-      path: parsed.path ?? form.path,
-    };
-  }
-  if (form.provider === "github" && "owner" in parsed) {
-    return {
-      ...form,
-      github_host: parsed.host ?? PUBLIC_GITHUB_HOST,
-      repo_owner: parsed.owner,
-      repo_name: parsed.repo,
-      branch: parsed.branch ?? form.branch,
-      path: parsed.path ?? form.path,
-    };
-  }
-  return form;
-}
-
 function useWorkflowSyncForm(lifetime: WorkflowSyncLifetime, configuredHost?: string) {
   const [draft, setDraft] = useState<WorkflowSyncDraft>(() => draftFromConfig(null));
   const latest = useRef(draft);
@@ -206,17 +136,7 @@ function useWorkflowSyncForm(lifetime: WorkflowSyncLifetime, configuredHost?: st
   const setProvider = useCallback(
     (provider: WorkflowSyncProvider) => {
       if (!lifetime.active) return;
-      publish({
-        url: "",
-        form: {
-          ...latest.current.form,
-          provider,
-          github_host: provider === "gitlab" ? "" : (configuredHost ?? PUBLIC_GITHUB_HOST),
-          repo_owner: "",
-          repo_name: "",
-          project_path: "",
-        },
-      });
+      publish({ url: "", form: formForProvider(latest.current.form, provider, configuredHost) });
     },
     [configuredHost, lifetime, publish],
   );
@@ -243,10 +163,7 @@ function useWorkflowSyncForm(lifetime: WorkflowSyncLifetime, configuredHost?: st
   );
 
   const { form, url } = draft;
-  const urlInvalid =
-    !!url.trim() &&
-    !parseRepoUrl(form.provider, url, configuredHost) &&
-    !parseRepoUrl(form.provider, url, form.github_host);
+  const urlInvalid = repoUrlInvalid(form, url, configuredHost);
   return { draft, form, url, urlInvalid, update, setUrlInput, setProvider, reset, acknowledgeSave };
 }
 
@@ -363,28 +280,6 @@ export function useWorkflowSync(workspaceId: string) {
 
 export type WorkflowSyncController = ReturnType<typeof useWorkflowSync>;
 
-function savePayload(form: WorkflowSyncFormState): WorkflowSyncSetConfigRequest {
-  return form.provider === "gitlab"
-    ? {
-        provider: "gitlab",
-        project_path: form.project_path.trim(),
-        branch: form.branch.trim(),
-        path: form.path.trim(),
-        interval_seconds: form.interval_seconds,
-        poll_enabled: form.poll_enabled,
-      }
-    : {
-        provider: "github",
-        github_host: form.github_host,
-        repo_owner: form.repo_owner.trim(),
-        repo_name: form.repo_name.trim(),
-        branch: form.branch.trim(),
-        path: form.path.trim(),
-        interval_seconds: form.interval_seconds,
-        poll_enabled: form.poll_enabled,
-      };
-}
-
 type WorkflowSyncActionDeps = Omit<InitialLoadDeps, "setLoading"> & {
   workspaceId: string;
   draft: WorkflowSyncDraft;
@@ -418,7 +313,7 @@ function useWorkflowSyncActions({
       lifetime.saving = ticket;
       setSaving(true);
       try {
-        const payload = savePayload(draft.form);
+        const payload: WorkflowSyncSetConfigRequest = repoSyncPayload(draft.form);
         const saved = await setWorkflowSyncConfig(payload, { workspaceId });
         if (lifetime.active) {
           setConfig(saved);

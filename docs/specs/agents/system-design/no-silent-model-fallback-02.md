@@ -76,6 +76,26 @@ Extend `ModelFallbackSection` and `ModelFallbackSettingsShell`:
   regenerate pseudo. Do not publish copy that describes every auto=false profile
   as strict or promises a configured fallback is always the final alternative.
 
+### Claude save error
+
+For AC-AGENTS-NO-SILENT-MODEL-FALLBACK-001.11, handle the typed error in
+`agentSettingsRequest`, shared by `createAgentProfileAction`,
+`updateAgentProfileAction`, and `createAgentAction`. When an `ApiError` has
+code `claude_exact_model_alias_conflict`, translate its message at request
+time with `t` from `@/lib/i18n`. Use `agents:claudeExactModelAliasConflict`
+and pass `ANTHROPIC_MODEL` as the `envVar` interpolation value. Rethrow the
+error with its status, code, and body intact.
+
+The create and edit toasts already show the error message in their
+description. They keep the draft visible and direct the user to Start model
+or Environment Variables. Add the key to the seven shipped locale catalogs
+and regenerate the pseudo locale.
+
+Desktop and phone use their existing profile editor, Save control, and toast
+viewport. The same message wraps on a phone and clears the safe area through
+the existing toast layout. The user can return to the existing model picker
+or environment controls and retry Save. Test this on both viewports.
+
 ## Mobile contract
 
 Nearest shipped exemplar: `ModelFallbackSettingsShell` with `FallbackOptionHelp`.

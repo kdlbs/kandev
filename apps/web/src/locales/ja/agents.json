@@ -272,6 +272,7 @@
   "fallbackNext": "フォールバック: next",
   "fallbackModel": "フォールバック: {{model}}",
   "modelRequiredForAllProfiles": "すべてのプロフィールにモデル必須。",
+  "claudeExactModelAliasConflict": "開始モデルで完全なモデル ID を選択するか、環境変数から {{envVar}} を削除してください。",
   "noAuthHintLogin": "サインインするには Open terminal をクリック、その後更新。",
   "noAuthHintNotInstalled": "エージェント CLI をインストールし、その後 Refresh をクリック。",
   "noAuthHintShell": "シェル起動するには Open terminal をクリック、エージェントのサインインコマンドを実行し、その後更新。",

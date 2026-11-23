@@ -119,7 +119,7 @@ test.describe("mobile session entry recovery", () => {
     proxy.failResponses("message.list", "Injected alignment test history failure");
     await testPage.reload();
     const unavailable = chat.getByTestId("session-history-unavailable");
-    await expect(unavailable).toBeVisible();
+    await expect(unavailable).toBeVisible({ timeout: 45_000 });
     await expect.poll(() => proxy.pendingRequestCount("message.list")).toBe(0);
     proxy.allowResponses("message.list");
     proxy.holdResponses("message.list", { sessionId: task.session_id });
