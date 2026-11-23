@@ -213,6 +213,11 @@ Editing a saved schedule starts the new definition at its first occurrence after
 
 Clearing the expression stops automatic runs. Entering a non-empty expression later starts from that later save.
 
+An automation can be enabled while its schedule trigger is disabled. In Run
+detail, select **Turn on schedule** to enable only the trigger without changing
+its schedule. If the current schedule has a missed occurrence, it can run once
+on the next scheduler check.
+
 <DocsVideo
   webm="./media/feature-guides/scheduled-workflow-automation.webm"
   mp4="./media/feature-guides/scheduled-workflow-automation.mp4"

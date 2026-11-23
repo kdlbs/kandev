@@ -50,25 +50,30 @@ export function useAutomationActivity(automationId: string) {
   const [loading, setLoading] = useState(Boolean(automationId));
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef(0);
+  const activeAutomationIdRef = useRef(automationId);
+  activeAutomationIdRef.current = automationId;
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback((): Promise<void> => {
+    if (activeAutomationIdRef.current !== automationId) return Promise.resolve();
     const requestId = ++requestRef.current;
     if (!automationId) {
       setLoading(false);
-      return;
+      return Promise.resolve();
     }
     setLoading(true);
     // One await for both: the header needs the schedule and the activity list
     // needs the runs, and a page that renders half of itself first reflows
     // under the reader.
-    Promise.all([
+    return Promise.all([
       getAutomation(automationId),
       listAutomationRuns(automationId, AUTOMATION_RUNS_LIMIT),
       getAutomationSummary(automationId),
     ])
       .then(
         ([automation, runs, summary]: [Automation, AutomationRun[], AutomationSummary | null]) => {
-          if (requestRef.current !== requestId) return;
+          if (requestRef.current !== requestId || activeAutomationIdRef.current !== automationId) {
+            return;
+          }
           setLoaded({
             automationId,
             automation,
@@ -79,12 +84,16 @@ export function useAutomationActivity(automationId: string) {
         },
       )
       .catch((err: unknown) => {
-        if (requestRef.current !== requestId) return;
+        if (requestRef.current !== requestId || activeAutomationIdRef.current !== automationId) {
+          return;
+        }
         setLoaded({ automationId, automation: null, runs: EMPTY_RUNS, openRuns: 0 });
         setError(err instanceof Error ? err.message : t("automations:failedToLoadThisAutomation"));
       })
       .finally(() => {
-        if (requestRef.current !== requestId) return;
+        if (requestRef.current !== requestId || activeAutomationIdRef.current !== automationId) {
+          return;
+        }
         setLoading(false);
       });
   }, [automationId]);

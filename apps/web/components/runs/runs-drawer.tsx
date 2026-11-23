@@ -31,6 +31,7 @@ export function RunsDrawer({
   selectedRunId,
   onSelect,
   openRuns,
+  onEnableSchedule,
 }: {
   automation: Automation;
   runs: AutomationRun[];
@@ -38,6 +39,7 @@ export function RunsDrawer({
   onSelect: (run: AutomationRun) => void;
   /** Feeds the run-detail panel's next-firing line. */
   openRuns: number;
+  onEnableSchedule?: (triggerId: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
   // Controlled, because picking a run only changes a query parameter — the page
@@ -90,6 +92,7 @@ export function RunsDrawer({
         <RunDetailDisclosure
           automation={automation}
           openRuns={openRuns}
+          onEnableSchedule={onEnableSchedule}
           className="shrink-0 px-1.5 pt-2"
         />
         <div className="max-h-[60vh] overflow-y-auto px-1.5 pb-6">

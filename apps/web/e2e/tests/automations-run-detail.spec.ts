@@ -309,6 +309,54 @@ test.describe("Automation run composer", () => {
   });
 });
 
+test.describe("Automation schedule trigger recovery", () => {
+  test("turns on a disabled schedule from Run detail and keeps its saved definition", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { automation } = await seedRunWithConversation(apiClient, seedData, "Schedule Recovery");
+    const future = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    const cronExpression = `17 3 ${future.getUTCDate()} ${future.getUTCMonth() + 1} *`;
+    const trigger = await apiClient.seedTrigger({
+      automationId: automation.id,
+      type: "scheduled",
+      config: { cron_expression: cronExpression, timezone: "UTC" },
+      enabled: false,
+    });
+    await openRunView(testPage, automation.id);
+
+    const rail = testPage.getByTestId("runs-rail");
+    await rail.getByTestId("run-detail-toggle").click();
+    const nextRun = rail.getByTestId("run-detail-next-run");
+    await expect(nextRun).toContainText("Schedule trigger is switched off");
+    await rail.getByTestId("enable-schedule-action").click();
+    await expect(nextRun).not.toContainText("Schedule trigger is switched off", {
+      timeout: 15_000,
+    });
+    await expect(nextRun).not.toContainText("No schedule");
+
+    const saved = await apiClient.wsRequest<{
+      triggers: Array<{ id: string; enabled: boolean; config: Record<string, unknown> }>;
+    }>("automation.get", { id: automation.id });
+    expect(saved.triggers.find((entry) => entry.id === trigger.id)).toMatchObject({
+      id: trigger.id,
+      enabled: true,
+      config: { cron_expression: cronExpression, timezone: "UTC" },
+    });
+
+    await testPage.reload();
+    await expect(testPage.getByTestId("runs-rail")).toBeVisible({ timeout: 15_000 });
+    await testPage.getByTestId("runs-rail").getByTestId("run-detail-toggle").click();
+    await expect(
+      testPage.getByTestId("runs-rail").getByTestId("enable-schedule-action"),
+    ).toHaveCount(0);
+    await expect(
+      testPage.getByTestId("runs-rail").getByTestId("run-detail-next-run"),
+    ).not.toContainText("Schedule trigger is switched off");
+  });
+});
+
 /**
  * The amber "Paused" note in the topbar.
  *
