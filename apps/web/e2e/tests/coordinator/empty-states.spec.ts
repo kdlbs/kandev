@@ -104,6 +104,17 @@ test.describe("Coordinator missing/empty/failure states", () => {
     await expect(empty).toContainText("Nothing needs you. That is the working state.");
     await expect(empty).toContainText("0 cards are running.");
     await expect(empty.getByRole("link", { name: "See what is running" })).toBeVisible();
+
+    const goal = testPage.getByTestId("goal-note");
+    await expect(goal).toBeVisible();
+    const strip = await testPage.getByTestId("coordinator-count-strip").boundingBox();
+    expect(strip).not.toBeNull();
+    for (const section of [goal, empty]) {
+      const box = await section.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeCloseTo(strip!.x, 0);
+      expect(box!.width).toBeCloseTo(strip!.width, 0);
+    }
   });
 
   test("a failed stalls read shows the per-input banner and recovers on Try again (AC .007.3, .007.5)", async ({

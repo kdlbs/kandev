@@ -24,6 +24,38 @@ async function expectNoHorizontalScroll(testPage: import("@playwright/test").Pag
 }
 
 test.describe("Coordinator screens on a phone viewport", () => {
+  test("the Goal and empty state fit the Needs you screen", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+      name: "Mobile Empty State Coordinator",
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
+    });
+    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+
+    const goal = testPage.getByTestId("goal-note");
+    const empty = testPage.getByTestId("empty-needs-you-state");
+    await expect(goal.getByRole("link", { name: "Set a goal" })).toBeVisible();
+    const workingLink = empty.getByRole("link", { name: "See what is running" });
+    await expect(workingLink).toBeVisible();
+    const strip = await testPage.getByTestId("coordinator-count-strip").boundingBox();
+    expect(strip).not.toBeNull();
+    for (const section of [goal, empty]) {
+      const box = await section.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeCloseTo(strip!.x, 0);
+      expect(box!.width).toBeCloseTo(strip!.width, 0);
+    }
+    await expectNoHorizontalScroll(testPage);
+    await workingLink.tap();
+    await expect(testPage.getByTestId("queue-group-list")).toBeVisible();
+  });
+
   test("Needs you stacks in one column with 44px touch targets, no horizontal scroll and a pinned count strip (AC .008.1)", async ({
     testPage,
     apiClient,
