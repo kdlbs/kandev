@@ -3479,16 +3479,18 @@ type TaskPlan struct {
 
 // TaskPlanComment is pending user feedback attached to the current task plan.
 type TaskPlanComment struct {
-	ID           string    `json:"id"`
-	TaskID       string    `json:"task_id"`
-	PlanID       string    `json:"plan_id"`
-	Body         string    `json:"body"`
-	SelectedText string    `json:"selected_text"`
-	AnchorFrom   int       `json:"anchor_from"`
-	AnchorTo     int       `json:"anchor_to"`
-	Version      int64     `json:"version"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	AttachmentIDs []string               `json:"-"`
+	Attachments   []v1.MessageAttachment `json:"attachments,omitempty"`
+	ID            string                 `json:"id"`
+	TaskID        string                 `json:"task_id"`
+	PlanID        string                 `json:"plan_id"`
+	Body          string                 `json:"body"`
+	SelectedText  string                 `json:"selected_text"`
+	AnchorFrom    int                    `json:"anchor_from"`
+	AnchorTo      int                    `json:"anchor_to"`
+	Version       int64                  `json:"version"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
 // TaskPlanCommentSnapshot is the authoritative pending-comment collection for a plan.
@@ -3834,10 +3836,11 @@ type TaskMessageAttachment struct {
 }
 
 const (
-	AttachmentStateStaged  = "staged"
-	AttachmentStateClaimed = "claimed"
-	AttachmentStateExpired = "expired"
-	AttachmentStateDeleted = "deleted"
+	AttachmentStateStaged      = "staged"
+	AttachmentStateClaimed     = "claimed"
+	AttachmentStatePlanComment = "plan_comment"
+	AttachmentStateExpired     = "expired"
+	AttachmentStateDeleted     = "deleted"
 )
 
 // SessionFileReview tracks per-file review state within a session

@@ -1954,6 +1954,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 
 // MessageAttachment represents an image or file attachment for agent prompts.
 type MessageAttachment struct {
+	CommentID    string
 	AttachmentID string // file-backed descriptor ID; Data is empty for staged files
 	Type         string // "image", "audio", or "resource"
 	Data         string // base64-encoded data

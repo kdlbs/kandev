@@ -211,6 +211,8 @@
   "attachmentSizeKb": "({{size}} ĶƁ)",
   "attachmentsCanTotalUpTo": "Àţţàćĥḿēńţś ćàń ţōţàĺ ũƥ ţō {{bytes}}.",
   "addFiles": "Àďď ƒĩĺēś",
+  "commentAttachments": "Ćōḿḿēńţ ƒĩĺēś",
+  "commentAttachmentsHint": "Àţţàćĥ śćŕēēńśĥōţś ōŕ ƒĩĺēś ţō ţĥĩś ćōḿḿēńţ.",
   "answerAttachments": "Àńśŵēŕ ƒĩĺēś",
   "answerAttachmentsHint": "Àţţàćĥ śćŕēēńśĥōţś ōŕ ƒĩĺēś ţō ţĥĩś àńśŵēŕ.",
   "answerAttachmentsLimit": "Ũƥ ţō {{maxFiles}} ƒĩĺēś, {{maxSize}} ţōţàĺ.",

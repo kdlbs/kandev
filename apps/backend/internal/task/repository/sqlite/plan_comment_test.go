@@ -124,7 +124,7 @@ func TestPlanCommentSchemaReplaysOnLegacyDatabase(t *testing.T) {
 		t.Fatalf("seed plan: %v", err)
 	}
 
-	if _, err := db.Exec(`DROP TABLE task_plan_comments`); err != nil {
+	if _, err := db.Exec(`DROP TABLE task_plan_comment_attachments; DROP TABLE task_plan_comments`); err != nil {
 		t.Fatalf("drop new comment table: %v", err)
 	}
 	if _, err := db.Exec(`ALTER TABLE task_plans DROP COLUMN comments_revision`); err != nil {
@@ -132,6 +132,9 @@ func TestPlanCommentSchemaReplaysOnLegacyDatabase(t *testing.T) {
 	}
 	if err := repo.initPlansSchema(); err != nil {
 		t.Fatalf("initialize plan children on legacy schema: %v", err)
+	}
+	if err := repo.initAttachmentsSchema(); err != nil {
+		t.Fatalf("initialize feedback attachment schema: %v", err)
 	}
 	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("migrate legacy schema: %v", err)

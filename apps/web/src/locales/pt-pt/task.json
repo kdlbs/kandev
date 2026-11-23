@@ -180,6 +180,8 @@
   "attachmentSizeKb": "({{size}} KB)",
   "attachmentsCanTotalUpTo": "Os anexos podem totalizar até {{bytes}}.",
   "addFiles": "Adicionar ficheiros",
+  "commentAttachments": "Ficheiros do comentário",
+  "commentAttachmentsHint": "Anexe capturas de ecrã ou ficheiros a este comentário.",
   "answerAttachments": "Ficheiros da resposta",
   "answerAttachmentsHint": "Anexe capturas de ecrã ou ficheiros a esta resposta.",
   "answerAttachmentsLimit": "Até {{maxFiles}} ficheiros, {{maxSize}} no total.",

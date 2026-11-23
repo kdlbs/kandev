@@ -482,6 +482,7 @@ export type TaskPlanComment = {
   selected_text: string;
   anchor_from: number;
   anchor_to: number;
+  attachments?: import("@/lib/services/session-launch-service").MessageAttachment[];
   version: number;
   created_at: string;
   updated_at: string;

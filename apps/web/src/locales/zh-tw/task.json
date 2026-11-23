@@ -180,6 +180,8 @@
   "attachmentSizeKb": "({{size}} KB)",
   "attachmentsCanTotalUpTo": "附件總大小最多 {{bytes}}。",
   "addFiles": "新增檔案",
+  "commentAttachments": "評論檔案",
+  "commentAttachmentsHint": "為此評論附加截圖或檔案。",
   "answerAttachments": "回答檔案",
   "answerAttachmentsHint": "為此回答附加截圖或檔案。",
   "answerAttachmentsLimit": "最多 {{maxFiles}} 個檔案，總計 {{maxSize}}。",
