@@ -372,7 +372,7 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 
 	// Enrich new PRs with provider details because search results can omit
 	// branch information and head repository identity.
-	s.enrichPRDetails(ctx, resolved.Client, newPRs)
+	newPRs = s.enrichPRDetails(ctx, resolved.Client, newPRs)
 
 	s.logger.Debug("review watch check complete",
 		zap.String("watch_id", watch.ID),
@@ -531,10 +531,12 @@ func repoFilterToQualifier(repo RepoFilter) string {
 }
 
 // enrichPRDetails fetches full PR details for search results missing branch
-// information or head repository identity.
-func (s *Service) enrichPRDetails(ctx context.Context, client Client, prs []*PR) {
+// information or head repository identity and returns PRs ready to publish.
+func (s *Service) enrichPRDetails(ctx context.Context, client Client, prs []*PR) []*PR {
+	ready := make([]*PR, 0, len(prs))
 	for _, pr := range prs {
 		if pr.HeadBranch != "" && pr.BaseBranch != "" && pr.HeadRepoOwner != "" && pr.HeadRepoName != "" {
+			ready = append(ready, pr)
 			continue
 		}
 		s.logger.Debug("enriching PR with full details (missing required review metadata)",
@@ -542,11 +544,11 @@ func (s *Service) enrichPRDetails(ctx context.Context, client Client, prs []*PR)
 			zap.Int("pr_number", pr.Number))
 
 		if err := requireGitHubOperationCurrent(ctx); err != nil {
-			return
+			return ready
 		}
 		full, err := client.GetPR(ctx, pr.RepoOwner, pr.RepoName, pr.Number)
 		if err != nil {
-			s.logger.Warn("failed to fetch full PR details, review metadata will remain incomplete",
+			s.logger.Warn("failed to fetch full PR details, deferring review PR until a later poll",
 				zap.String("repo", pr.RepoOwner+"/"+pr.RepoName),
 				zap.Int("pr_number", pr.Number),
 				zap.Error(err))
@@ -573,7 +575,9 @@ func (s *Service) enrichPRDetails(ctx context.Context, client Client, prs []*PR)
 		pr.BaseRepoName = full.BaseRepoName
 		pr.BaseDefaultBranch = full.BaseDefaultBranch
 		pr.MaintainerCanModify = full.MaintainerCanModify
+		ready = append(ready, pr)
 	}
+	return ready
 }
 
 // ListUserOrgs returns the authenticated user's orgs, prepending their own username.

@@ -50,6 +50,9 @@ const mocks = vi.hoisted(() => {
       },
     },
     settingsAgents: { items: [] },
+    turns: { bySession: {} },
+    quickChat: { sessions: [] },
+    recordSessionConfigurationFeedback: vi.fn(),
     taskSessions: {
       items: {
         [sessionId]: {

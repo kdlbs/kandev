@@ -51,7 +51,10 @@ vi.mock("@/hooks/domains/session/use-base-branch-by-repo", () => ({
 vi.mock("@/hooks/domains/github/use-task-pr", () => ({
   useActiveTaskPR: () => null,
 }));
-vi.mock("@/components/state-provider", () => ({ useAppStore: () => null }));
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: () => null,
+  useOptionalAppStore: () => null,
+}));
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),
 }));

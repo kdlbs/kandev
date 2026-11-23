@@ -11,6 +11,7 @@ import {
   usePopoverComposer,
   useSurfaceComment,
 } from "./surface-parts";
+import { CommentAttachmentControl } from "./comment-attachment-control";
 import type { SelectionCommentSurfaceProps } from "./surface-types";
 
 export type SelectionCommentComposerProps = Omit<
@@ -23,14 +24,24 @@ export function useCommentComposerState(props: SelectionCommentComposerProps) {
   const { editingComment, draftComment, onDraftChange, onDelete, onClose } = props;
   const [comment, setComment] = useSurfaceComment(editingComment, draftComment, onDraftChange);
   const onAddAndRun = editingComment ? undefined : props.onAddAndRun;
+  const attachments = props.attachmentController;
+  const blockSubmit = () => Boolean(props.addDisabled) || (attachments && !attachments.canSubmit());
+  const onAdd: typeof props.onAdd = (text, selected) => {
+    if (blockSubmit()) return false;
+    return attachments
+      ? props.onAdd(text, selected, attachments.descriptors)
+      : props.onAdd(text, selected);
+  };
+  const run: typeof props.onAddAndRun =
+    onAddAndRun &&
+    ((text, selected) => {
+      if (blockSubmit() || props.runDisabledReason) return false;
+      return attachments
+        ? onAddAndRun(text, selected, attachments.descriptors)
+        : onAddAndRun(text, selected);
+    });
   const { isDeleting, deleteComment } = useCommentDelete(onDelete, onClose);
-  const composer = usePopoverComposer(
-    comment,
-    props.selectedText,
-    props.onAdd,
-    onClose,
-    onAddAndRun,
-  );
+  const composer = usePopoverComposer(comment, props.selectedText, onAdd, onClose, run);
   return {
     ...composer,
     comment,
@@ -38,7 +49,11 @@ export function useCommentComposerState(props: SelectionCommentComposerProps) {
     onAddAndRun,
     isDeleting,
     deleteComment,
-    isDisabled: composer.isDisabled || isDeleting || Boolean(props.addDisabled),
+    isDisabled:
+      composer.isDisabled ||
+      isDeleting ||
+      Boolean(props.addDisabled) ||
+      attachments?.ready === false,
     mutationPending: isCommentMutationPending(composer.isSubmitting, isDeleting),
   };
 }
@@ -74,6 +89,21 @@ export function CommentComposerBody({
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+  const actions = (
+    <PopoverActions
+      hideShortcuts={Boolean(props.attachmentController)}
+      isEditing={!!props.editingComment}
+      isDisabled={state.isDisabled}
+      onSubmit={() => void state.handleSubmit()}
+      onSubmitAndRun={state.onAddAndRun ? () => void state.handleSubmitAndRun() : undefined}
+      onDelete={deleteComment ? () => void deleteComment() : undefined}
+      onCancel={props.onCancel}
+      addButtonTestId={props.addButtonTestId}
+      runButtonTestId={props.runButtonTestId}
+      runDisabledReason={props.runDisabledReason}
+      mutationPending={state.mutationPending}
+    />
+  );
   return (
     <>
       <ComposerEvidence evidence={props.evidence} previewText={state.previewText} />
@@ -81,6 +111,7 @@ export function CommentComposerBody({
         ref={textareaRef}
         value={state.comment}
         onChange={(event) => state.setComment(event.target.value)}
+        onPaste={props.attachmentController?.handlePaste}
         onKeyDown={state.handleKeyDown}
         disabled={state.isSubmitting || state.isDeleting}
         placeholder={t("task:addYourCommentOrInstruction")}
@@ -94,18 +125,18 @@ export function CommentComposerBody({
         canRun={Boolean(state.onAddAndRun)}
         className="mt-2 text-xs"
       />
-      <PopoverActions
-        isEditing={!!props.editingComment}
-        isDisabled={state.isDisabled}
-        onSubmit={() => void state.handleSubmit()}
-        onSubmitAndRun={state.onAddAndRun ? () => void state.handleSubmitAndRun() : undefined}
-        onDelete={deleteComment ? () => void deleteComment() : undefined}
-        onCancel={props.onCancel}
-        addButtonTestId={props.addButtonTestId}
-        runButtonTestId={props.runButtonTestId}
-        runDisabledReason={props.runDisabledReason}
-        mutationPending={state.mutationPending}
-      />
+      <div className="mt-2">
+        {props.attachmentController ? (
+          <CommentAttachmentControl
+            controller={props.attachmentController}
+            disabled={state.mutationPending}
+          >
+            {actions}
+          </CommentAttachmentControl>
+        ) : (
+          actions
+        )}
+      </div>
     </>
   );
 }

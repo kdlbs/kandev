@@ -92,7 +92,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		eventExecutionID,
 		payload.Data.PromptGeneration,
 	) {
-		s.cancelClarificationWatchdogsForSession(payload.SessionID, eventType, payload)
+		if eventType != streams.EventTypeMCPStartupWarning {
+			s.cancelClarificationWatchdogsForSession(payload.SessionID, eventType, payload)
+		}
 		s.logger.Debug("ignoring stream event for execution outside cancellation identity",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID),
@@ -134,6 +136,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		if eventType != streams.EventTypeUsageObservation {
 			return
 		}
+	}
+	if eventType == streams.EventTypeMCPStartupWarning {
+		s.handleCodexMCPStartupWarning(ctx, payload, eventExecutionID)
+		return
 	}
 	switch eventType {
 	case streams.EventTypeMessageChunk:
@@ -503,6 +509,9 @@ func (s *Service) completeTurnForStreamEvent(
 	var capturedTurnID string
 	if len(capturedTurnIDs) > 0 {
 		capturedTurnID = capturedTurnIDs[0]
+	}
+	if capturedTurnID != "" && payload.Data != nil && payload.Data.TurnID == capturedTurnID {
+		ctx = withConfigurationCommandResult(ctx, payload.Data.ConfigurationCommandResult)
 	}
 	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, payload.TaskID, payload.SessionID, capturedTurnID)
 	if capturedTurnID != "" {
@@ -3791,9 +3800,10 @@ func emptyTurnCompletionFromPayload(payload *lifecycle.AgentStreamEventPayload) 
 			ExecutionProfileID: payload.ExecutionProfileID,
 			PromptGeneration:   payload.Data.PromptGeneration,
 		},
-		stopReason:     extractStopReason(payload),
-		isError:        extractCompleteIsError(payload),
-		completeOutput: completeFrameCarriesOutput(payload),
+		stopReason:                 extractStopReason(payload),
+		isError:                    extractCompleteIsError(payload),
+		completeOutput:             completeFrameCarriesOutput(payload),
+		configurationCommandResult: payload.Data.ConfigurationCommandResult,
 	}
 }
 

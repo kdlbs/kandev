@@ -133,6 +133,7 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	if pluginsSvc != nil {
 		boundary := &workspaceCollaborationBoundary{enabled: cfg.Features.WorkspaceCollaboration, store: repos.Task}
 		pluginsSvc.SetHostCallContextPolicy(boundary.enabled, boundary.validatePluginCall)
+		taskSvc.SetSidebarGroupingResolver(pluginsSvc)
 	}
 
 	services := assembleServices(managedRuntimeSelections, core, providers, integrations)
@@ -1792,6 +1793,7 @@ func recordPluginStores(ctx context.Context, tracker *requiredstores.Tracker, in
 		"plugin-state",
 		"plugin-instance-state",
 		"plugin-user-state",
+		"plugin-command-receipts",
 	} {
 		if err := recordRequiredStore(ctx, tracker, id, initErrors[id]); err != nil {
 			failures = append(failures, err)

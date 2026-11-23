@@ -10,6 +10,20 @@ import type { MessageUpdateScheduler } from "@/lib/ws/handlers/messages";
 
 const debug = createDebugLogger("session:turns");
 
+function markQuickChatTurnUnseen(
+  store: StoreApi<AppState>,
+  sessionId: string,
+  completedAt: string | undefined,
+  wasCompleted: boolean,
+) {
+  const quickChat = store.getState().quickChat;
+  const session = quickChat.sessions.find((item) => item.sessionId === sessionId);
+  if (!session || quickChat.isOpen || wasCompleted) return;
+  if (!completedAt || store.getState().recordQuickChatSettled(sessionId, completedAt)) {
+    store.getState().markQuickChatUnseenIdle(sessionId, session.workspaceId);
+  }
+}
+
 /** Marks in-flight tool-call messages complete/errored when a turn completes. */
 function completePendingToolCalls(store: StoreApi<AppState>, sessionId: string): void {
   const messages = store.getState().messages.bySession[sessionId];
@@ -111,24 +125,7 @@ export function registerTurnsHandlers(
           payload.metadata,
           payload.updated_at,
         );
-      const quickChat = store.getState().quickChat;
-      const quickChatSession = quickChat.sessions.find(
-        (session) => session.sessionId === payload.session_id,
-      );
-      if (quickChatSession && !quickChat.isOpen && !wasCompleted) {
-        // Share the settled ledger with the state_changed path so a replay of
-        // the same completion (reconnect, delayed event) cannot re-mark after
-        // the user already saw the dot. completed_at is the stable identity of
-        // this completion; a missing value falls through to the mark.
-        if (
-          !payload.completed_at ||
-          store.getState().recordQuickChatSettled(payload.session_id, payload.completed_at)
-        ) {
-          store
-            .getState()
-            .markQuickChatUnseenIdle(payload.session_id, quickChatSession.workspaceId);
-        }
-      }
+      markQuickChatTurnUnseen(store, payload.session_id, payload.completed_at, wasCompleted);
       // Surface a notice when the turn finished with no agent output.
       maybeEmitEmptyTurnNotice(store, payload);
 

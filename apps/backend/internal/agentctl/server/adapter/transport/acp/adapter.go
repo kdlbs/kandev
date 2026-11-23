@@ -157,6 +157,7 @@ type Adapter struct {
 	// backgroundWorkEnabled is the effective shared background-work feature
 	// value resolved by the backend for this launch.
 	backgroundWorkEnabled bool
+	claudeShellOutput     *claudeShellOutputFollower
 
 	// Normalizer for converting tool data to NormalizedPayload
 	normalizer *Normalizer
@@ -238,6 +239,12 @@ type Adapter struct {
 	// AvailableCommandsUpdate is NOT suppressed — it may arrive after the replay as a
 	// "ready" signal, and the last one always wins in the frontend.
 	isLoadingSession bool
+	// Session creation buffers startup reports until the provider's returned ID is bound.
+	sessionCreationPending        bool
+	pendingSessionStartupWarnings []AgentEvent
+	// loadingSessionID identifies the restore owner before the binding barrier
+	// publishes it as sessionID.
+	loadingSessionID string
 	loadReplayPlan   *acp.SessionUpdatePlan
 
 	// nativeGeneration identifies the current native conversation within this
@@ -320,7 +327,8 @@ type Adapter struct {
 
 	// Available models from the most recent session creation/load.
 	// Used by SetModel to validate the requested model exists.
-	availableModels []modelInfo
+	availableModels            []modelInfo
+	availableCommandsBySession map[string][]streams.AvailableCommand
 
 	// usageBySession tracks the latest and previously consumed cumulative
 	// `usage_update` samples. codex-acp DOES emit a typed per-turn usage
@@ -450,6 +458,7 @@ type promptTurnState struct {
 	providerErrorCh              chan openCodeStderrDiagnostic
 	promptGeneration             uint64
 	evidenceMu                   sync.Mutex
+	configurationCommand         *configurationCommandTracker
 	codexSystemError             bool
 	codexCapacity                bool
 	codexUsageLimit              *streams.ProviderError
@@ -616,6 +625,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		lifetimeCancel:                    cancel,
 		closedCh:                          make(chan struct{}),
 	}
+	a.claudeShellOutput = newClaudeShellOutputFollower(ctx, a.sendUpdate)
 	a.shellSnapshotTimer = time.NewTimer(shellSnapshotInterval)
 	a.shellSnapshotTimer.Stop()
 	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
@@ -919,15 +929,29 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 	defer a.updateEmitMu.Unlock()
 	a.flushShellSnapshotLocked()
 	a.shellSnapshots = shellSnapshotState{}
-	a.sendUpdateNow(event)
+	if a.sendUpdateNow(event) {
+		a.activateClaudeShellOutputForEvent(event)
+	}
 }
 
-func (a *Adapter) sendUpdateNow(event AgentEvent) {
+func (a *Adapter) activateClaudeShellOutputForEvent(event AgentEvent) {
+	if a.claudeShellOutput == nil || event.Type != streams.EventTypeToolUpdate || event.NormalizedPayload == nil {
+		return
+	}
+	background := event.NormalizedPayload.BackgroundWork()
+	if background == nil || background.Kind != streams.BackgroundWorkKindShell || background.WorkID == "" ||
+		background.Ended || background.Capabilities == nil || background.Capabilities.Output != "stream" {
+		return
+	}
+	a.claudeShellOutput.activate(event.SessionID, background.WorkID)
+}
+
+func (a *Adapter) sendUpdateNow(event AgentEvent) bool {
 	event = streams.PrepareToolEvent(event)
 	a.mu.RLock()
 	if a.closed {
 		a.mu.RUnlock()
-		return
+		return false
 	}
 	updatesCh := a.updatesCh
 	lifetimeCtx := a.lifetimeCtx
@@ -946,10 +970,13 @@ func (a *Adapter) sendUpdateNow(event AgentEvent) {
 
 	select {
 	case updatesCh <- event:
+		return true
 	case <-closedCh:
+		return false
 	case <-lifetimeCtx.Done():
 		// Shutdown cancels the wait. The event is intentionally discarded after
 		// the adapter has become terminal; no later transcript can be applied.
+		return false
 	}
 }
 
@@ -999,6 +1026,10 @@ func (a *Adapter) Close() error {
 	a.cancelAllAsyncTurnCompletes()
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
+	}
+	if a.claudeShellOutput != nil {
+		a.claudeShellOutput.clear()
+		a.claudeShellOutput.wait()
 	}
 
 	// A successful reset returns before its best-effort session/close request,

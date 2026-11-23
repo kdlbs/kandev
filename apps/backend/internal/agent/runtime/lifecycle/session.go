@@ -716,8 +716,8 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	if err := sm.applyStartupSessionMode(ctx, execution, result.SessionID, requestedMode, thinkingConfigID, thinkingModelState, runtimeMode != ""); err != nil {
 		return err
 	}
-	execution.setSessionInitialized(true)
 	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID, providerDefaultConfig)
+	execution.setSessionInitialized(true)
 	sm.publishWorkflowSessionConfigFailures(execution, result.SessionID, runtimeFailures)
 
 	// Send the task prompt if provided, or mark the execution as ready.
@@ -1390,7 +1390,7 @@ func convertAttachments(attachments []MessageAttachment) []v1.MessageAttachment 
 	result := make([]v1.MessageAttachment, 0, len(attachments))
 	for _, att := range attachments {
 		result = append(result, v1.MessageAttachment{
-			AttachmentID: att.AttachmentID,
+			CommentID: att.CommentID, AttachmentID: att.AttachmentID,
 			Type:         att.Type,
 			Data:         att.Data,
 			MimeType:     att.MimeType,
@@ -2187,6 +2187,15 @@ func (sm *SessionManager) materializeAttachments(
 	execution *AgentExecution,
 	attachments []v1.MessageAttachment,
 ) ([]v1.MessageAttachment, error) {
+	return sm.materializeAttachmentsForSession(ctx, execution, execution.ACPSessionID, attachments)
+}
+
+func (sm *SessionManager) materializeAttachmentsForSession(
+	ctx context.Context,
+	execution *AgentExecution,
+	materializationSessionID string,
+	attachments []v1.MessageAttachment,
+) ([]v1.MessageAttachment, error) {
 	if len(attachments) == 0 {
 		return attachments, nil
 	}
@@ -2198,7 +2207,7 @@ func (sm *SessionManager) materializeAttachments(
 		if sm.attachmentReader == nil {
 			return nil, fmt.Errorf("attachment %q cannot be delivered: attachment storage is unavailable", attachment.AttachmentID)
 		}
-		if execution.ACPSessionID == "" {
+		if materializationSessionID == "" {
 			return nil, fmt.Errorf("attachment %q cannot be delivered: ACP session is not ready", attachment.AttachmentID)
 		}
 		reader, name, mimeType, sizeBytes, err := sm.attachmentReader.OpenClaimed(
@@ -2214,7 +2223,7 @@ func (sm *SessionManager) materializeAttachments(
 		}
 		materialized, materializeErr := client.MaterializeAttachment(
 			ctx,
-			execution.ACPSessionID,
+			materializationSessionID,
 			attachment.AttachmentID,
 			name,
 			mimeType,
@@ -2233,6 +2242,9 @@ func (sm *SessionManager) materializeAttachments(
 			return nil, fmt.Errorf("materialize attachment %q: agentctl returned no filename", attachment.AttachmentID)
 		}
 		result[i].Name = materialized.Name
+		if attachment.CommentID != "" {
+			result[i].Name = name
+		}
 		result[i].MimeType = mimeType
 		result[i].SizeBytes = sizeBytes
 		result[i].Path = materialized.Path
@@ -2438,12 +2450,15 @@ func (sm *SessionManager) callAgentctlPrompt(
 	steer bool,
 	submissionID string,
 ) error {
+	prompt, attachments, err := v1.RenderCommentFiles(prompt, attachments)
+	if err != nil {
+		return &agentctl.RequestNotSentError{Err: err}
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
 		return &agentctl.RequestNotSentError{Err: fmt.Errorf("execution %q has no agentctl client", execution.ID)}
 	}
-	var err error
 	if steer {
 		if submissionID != "" {
 			err = client.PromptSteerWithSubmissionID(ctx, prompt, attachments, promptGeneration, submissionID)

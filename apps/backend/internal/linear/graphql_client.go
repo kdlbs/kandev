@@ -314,6 +314,31 @@ const issueFragment = `
 	project { id name url description }
 `
 
+// issueRelationsPageSize bounds how many inverse relations a search fetches
+// per issue. A search returns up to 100 issues, and Linear multiplies nested
+// connection sizes into the query complexity, so this stays small; an issue
+// with more relations is reported as truncated.
+const issueRelationsPageSize = 25
+
+// issueBlockersFragment adds the relations that point at an issue. A relation
+// of type "blocks" in this list names an issue that blocks it.
+var issueBlockersFragment = fmt.Sprintf(`
+	inverseRelations(first: %d) {
+		nodes { type issue { identifier state { type } } }
+		pageInfo { hasNextPage }
+	}
+`, issueRelationsPageSize)
+
+type issueRelationNode struct {
+	Type  string `json:"type"`
+	Issue struct {
+		Identifier string `json:"identifier"`
+		State      struct {
+			Type string `json:"type"`
+		} `json:"state"`
+	} `json:"issue"`
+}
+
 type issueNode struct {
 	ID          string `json:"id"`
 	Identifier  string `json:"identifier"`
@@ -349,6 +374,12 @@ type issueNode struct {
 		URL         string `json:"url"`
 		Description string `json:"description"`
 	} `json:"project"`
+	InverseRelations *struct {
+		Nodes    []issueRelationNode `json:"nodes"`
+		PageInfo struct {
+			HasNextPage bool `json:"hasNextPage"`
+		} `json:"pageInfo"`
+	} `json:"inverseRelations"`
 }
 
 func issueNodeToIssue(n *issueNode) LinearIssue {
@@ -384,6 +415,26 @@ func issueNodeToIssue(n *issueNode) LinearIssue {
 		out.ProjectURL = n.Project.URL
 		out.ProjectSummary = n.Project.Description
 	}
+	if n.InverseRelations != nil {
+		out.Blockers = blockersFromRelations(n.InverseRelations.Nodes)
+		out.BlockersTruncated = n.InverseRelations.PageInfo.HasNextPage
+	}
+	return out
+}
+
+// blockersFromRelations keeps the inverse relations of type "blocks", which
+// name the issues that block the issue they were read from.
+func blockersFromRelations(nodes []issueRelationNode) []LinearIssueBlocker {
+	var out []LinearIssueBlocker
+	for _, rel := range nodes {
+		if rel.Type != "blocks" {
+			continue
+		}
+		out = append(out, LinearIssueBlocker{
+			Identifier: rel.Issue.Identifier,
+			StateType:  rel.Issue.State.Type,
+		})
+	}
 	return out
 }
 
@@ -395,7 +446,7 @@ func stateCategory(stateType string) string {
 		return "new"
 	case "started":
 		return "indeterminate"
-	case "completed", "canceled":
+	case stateTypeCompleted, "canceled":
 		return "done"
 	default:
 		return "new"
@@ -509,6 +560,17 @@ query SearchIssues($filter: IssueFilter, $first: Int!, $after: String) {
 	}
 }`
 
+// searchIssuesWithBlockersQuery is searchIssuesQuery plus each issue's
+// blockers. It is used only when the filter sets RequireBlockersDone, so other
+// searches keep their query cost.
+var searchIssuesWithBlockersQuery = `
+query SearchIssues($filter: IssueFilter, $first: Int!, $after: String) {
+	issues(filter: $filter, first: $first, after: $after, orderBy: updatedAt) {
+		nodes {` + issueFragment + issueBlockersFragment + `}
+		pageInfo { hasNextPage endCursor }
+	}
+}`
+
 type searchIssuesData struct {
 	Issues struct {
 		Nodes    []issueNode `json:"nodes"`
@@ -534,8 +596,12 @@ func (c *GraphQLClient) SearchIssues(ctx context.Context, filter SearchFilter, p
 	if pageToken != "" {
 		vars["after"] = pageToken
 	}
+	query := searchIssuesQuery
+	if filter.RequireBlockersDone {
+		query = searchIssuesWithBlockersQuery
+	}
 	var data searchIssuesData
-	if err := c.do(ctx, searchIssuesQuery, vars, &data); err != nil {
+	if err := c.do(ctx, query, vars, &data); err != nil {
 		return nil, err
 	}
 	out := &SearchResult{
@@ -670,6 +736,9 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 	}
 	if len(f.ProjectIDs) > 0 {
 		out["project"] = map[string]interface{}{"id": map[string]interface{}{"in": f.ProjectIDs}}
+	}
+	if len(f.IssueIDs) > 0 {
+		out["id"] = map[string]interface{}{"in": f.IssueIDs}
 	}
 	if f.CreatorID != "" {
 		out["creator"] = map[string]interface{}{"id": map[string]interface{}{"eq": f.CreatorID}}

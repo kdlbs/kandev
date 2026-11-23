@@ -47,6 +47,19 @@ native plugin installation. Canvas installation is workspace-scoped and is
 available to an authorized workspace user. Native plugin management remains
 administrator-scoped.
 
+### Find a viewer for a file
+
+A file without a supported preview offers **Find viewer plugin**. This opens Browse
+with a file-type filter, such as `stl`. Only the extension is used for discovery;
+Kandev does not send the filename, path, or file content to the catalog source.
+Select the filter chip to clear it. Format badges such as `.stl` come from the
+package's declared formats. **File viewers** and **3D** are general categories;
+they do not establish support for a particular format.
+
+Install a viewer explicitly, then return to the file. An installed viewer must
+be enabled and ready. A catalog with no matching declaration can return no
+results even when a plugin description mentions that format.
+
 ### Browse and install
 
 Open **Settings > Plugins > Browse**. Each plugin shows as a card with its

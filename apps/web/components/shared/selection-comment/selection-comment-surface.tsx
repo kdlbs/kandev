@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import { useDrag } from "@/hooks/use-drag-offset";
 import { cn } from "@/lib/utils";
 import { floatingBounds, placeFloatingRect } from "@/components/task/floating-selection-position";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import {
   CommentMutationMessages,
@@ -25,7 +26,13 @@ import {
   usePopoverDismiss,
   useViewportResizeRender,
 } from "./surface-parts";
-import { CommentComposerBody, useCommentComposerState } from "./selection-comment-composer";
+import {
+  CommentComposerBody,
+  useCommentComposerState,
+  type CommentComposerState,
+} from "./selection-comment-composer";
+import { CommentAttachmentControl } from "./comment-attachment-control";
+import { useCommentAttachments } from "./use-comment-attachments";
 import type { SelectionCommentSurfaceProps } from "./surface-types";
 
 export type { SelectionCommentSurfaceProps } from "./surface-types";
@@ -97,9 +104,11 @@ function DesktopSurfaceHeader({
   );
 }
 
-function DesktopSelectionCommentSurface(props: SelectionCommentSurfaceProps) {
+type SurfaceProps = SelectionCommentSurfaceProps & { state: CommentComposerState };
+
+function DesktopSelectionCommentSurface(props: SurfaceProps) {
   const { position, portalContainer, onClose, testId, contextLabel, animated = true } = props;
-  const state = useCommentComposerState(props);
+  const { state } = props;
   const popoverRef = useRef<HTMLDivElement>(null);
   const { offset, onMouseDown } = useDrag();
   const placement = useDesktopPlacement(position, portalContainer, popoverRef);
@@ -130,10 +139,10 @@ function DesktopSelectionCommentSurface(props: SelectionCommentSurfaceProps) {
   );
 }
 
-function SelectionCommentDrawer(props: SelectionCommentSurfaceProps) {
+function SelectionCommentDrawer(props: SurfaceProps) {
   const { t } = useTranslation();
   const { selectedText, onClose, editingComment, testId, contextLabel, evidence } = props;
-  const state = useCommentComposerState(props);
+  const { state } = props;
   const { deleteComment } = state;
   const requestClose = useMutationProtectedClose(onClose, state.mutationPending);
 
@@ -141,7 +150,7 @@ function SelectionCommentDrawer(props: SelectionCommentSurfaceProps) {
     <Drawer open onOpenChange={(open) => !open && requestClose()}>
       <DrawerContent
         className="z-[60] max-h-[82dvh] pb-[calc(1rem+env(safe-area-inset-bottom))]"
-        data-testid={testId ?? "plan-comment-drawer"}
+        data-testid={props.drawerTestId ?? testId ?? "plan-comment-drawer"}
         data-selection-comment-surface=""
       >
         <SurfaceDrawerHeader
@@ -154,6 +163,7 @@ function SelectionCommentDrawer(props: SelectionCommentSurfaceProps) {
           <Textarea
             value={state.comment}
             onChange={(event) => state.setComment(event.target.value)}
+            onPaste={props.attachmentController?.handlePaste}
             onKeyDown={state.handleKeyDown}
             disabled={state.isSubmitting || state.isDeleting}
             placeholder={t("task:addYourCommentOrInstruction")}
@@ -168,21 +178,38 @@ function SelectionCommentDrawer(props: SelectionCommentSurfaceProps) {
             canRun={Boolean(state.onAddAndRun)}
             className="mb-3 text-xs"
           />
-          <DrawerActions
-            isEditing={Boolean(editingComment)}
-            disabled={state.isDisabled}
-            mutationPending={state.mutationPending}
-            onSubmit={() => void state.handleSubmit()}
-            onSubmitAndRun={state.onAddAndRun ? () => void state.handleSubmitAndRun() : undefined}
-            onDelete={editingComment && deleteComment ? () => void deleteComment() : undefined}
-            onCancel={props.onCancel}
-            addButtonTestId={props.addButtonTestId}
-            runButtonTestId={props.runButtonTestId}
-            runDisabledReason={props.runDisabledReason}
-          />
+          {wrapAttachmentActions(
+            props,
+            state.mutationPending,
+            <DrawerActions
+              isEditing={Boolean(editingComment)}
+              disabled={state.isDisabled}
+              mutationPending={state.mutationPending}
+              onSubmit={() => void state.handleSubmit()}
+              onSubmitAndRun={state.onAddAndRun ? () => void state.handleSubmitAndRun() : undefined}
+              onDelete={editingComment && deleteComment ? () => void deleteComment() : undefined}
+              onCancel={props.onCancel}
+              addButtonTestId={props.addButtonTestId}
+              runButtonTestId={props.runButtonTestId}
+              runDisabledReason={props.runDisabledReason}
+            />,
+          )}
         </div>
       </DrawerContent>
     </Drawer>
+  );
+}
+
+function wrapAttachmentActions(
+  props: SelectionCommentSurfaceProps,
+  pending: boolean,
+  actions: import("react").ReactNode,
+) {
+  if (!props.attachmentController) return actions;
+  return (
+    <CommentAttachmentControl controller={props.attachmentController} disabled={pending}>
+      {actions}
+    </CommentAttachmentControl>
   );
 }
 
@@ -281,10 +308,17 @@ function DrawerActions({
  * Drawer with a coarse pointer.
  */
 export function SelectionCommentSurface(props: SelectionCommentSurfaceProps) {
-  const useDrawer = useTouchDrawer();
+  const touch = useTouchDrawer();
+  const { isMobile } = useResponsiveBreakpoint();
+  const useDrawer = touch || (isMobile && !!props.attachmentOptions);
+  const controller = useCommentAttachments(props.attachmentOptions);
+  const attachmentController =
+    props.attachmentController ?? (props.attachmentOptions ? controller : undefined);
+  const state = useCommentComposerState({ ...props, attachmentController });
+  const surface = { ...props, attachmentController, state };
   return useDrawer ? (
-    <SelectionCommentDrawer {...props} />
+    <SelectionCommentDrawer {...surface} />
   ) : (
-    <DesktopSelectionCommentSurface {...props} />
+    <DesktopSelectionCommentSurface {...surface} />
   );
 }

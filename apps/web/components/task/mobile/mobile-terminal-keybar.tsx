@@ -13,6 +13,7 @@ import { useShellModifiersStore } from "@/lib/terminal/shell-modifiers";
 import { KEYS, KeybarButton, ModifierButton } from "./mobile-terminal-keybar-helpers";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { IconArrowsLeftRight } from "@tabler/icons-react";
 
 export type MobileTerminalKeybarProps = {
   sessionId: string | null | undefined;
@@ -27,6 +28,83 @@ export type MobileTerminalKeybarProps = {
 
 /** Includes 44px touch targets, vertical padding, and the top border. */
 export const KEYBAR_HEIGHT_PX = 58;
+const INITIAL_NAVIGATION_KEY_COUNT = 7;
+
+type MobileTerminalKeybarControlsProps = {
+  ctrl: { latched: boolean; sticky: boolean };
+  shift: { latched: boolean; sticky: boolean };
+  onCtrlTap: () => void;
+  onShiftTap: () => void;
+  onSend: (data: string, key?: string) => void;
+};
+
+function MobileTerminalKeybarControls({
+  ctrl,
+  shift,
+  onCtrlTap,
+  onShiftTap,
+  onSend,
+}: MobileTerminalKeybarControlsProps) {
+  const { t } = useTranslation();
+  const renderKey = (key: (typeof KEYS)[number]) => (
+    <KeybarButton
+      key={key.id}
+      id={key.id}
+      ariaLabel={t(key.ariaLabelKey)}
+      onTap={() => onSend(key.seq, key.id)}
+    >
+      {key.label}
+    </KeybarButton>
+  );
+
+  return (
+    <div className="flex w-full items-center gap-1">
+      <div
+        data-testid="mobile-terminal-keybar-scroller"
+        className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto px-2 py-1.5"
+      >
+        {KEYS.slice(0, INITIAL_NAVIGATION_KEY_COUNT).map(renderKey)}
+        <ModifierButton
+          id="ctrl"
+          label={t("task:ctrl")}
+          ariaLabel={t("task:control")}
+          state={ctrl}
+          onTap={onCtrlTap}
+        />
+        <ModifierButton
+          id="shift"
+          label={t("task:shift")}
+          ariaLabel={t("task:shift")}
+          state={shift}
+          onTap={onShiftTap}
+        />
+        <KeybarButton
+          id="ctrl-c"
+          ariaLabel={t("task:controlC")}
+          onTap={() => onSend(KEY_SEQUENCES.ctrlC)}
+          variant="destructive"
+        >
+          ^C
+        </KeybarButton>
+        <KeybarButton
+          id="ctrl-d"
+          ariaLabel={t("task:controlD")}
+          onTap={() => onSend(KEY_SEQUENCES.ctrlD)}
+        >
+          ^D
+        </KeybarButton>
+        {KEYS.slice(INITIAL_NAVIGATION_KEY_COUNT).map(renderKey)}
+      </div>
+      <span
+        data-testid="keybar-scroll-cue"
+        className="flex w-5 shrink-0 items-center justify-center text-muted-foreground"
+        aria-hidden="true"
+      >
+        <IconArrowsLeftRight className="size-4" aria-hidden="true" />
+      </span>
+    </div>
+  );
+}
 
 export function MobileTerminalKeybar({
   sessionId,
@@ -36,7 +114,6 @@ export function MobileTerminalKeybar({
   onSend,
   onFocus = refocusXtermTextarea,
 }: MobileTerminalKeybarProps) {
-  const { t } = useTranslation();
   const send = useShellKeySender(sessionId);
   const { keyboardOpen, viewportBottom } = useVisualViewportOffset();
   const ctrl = useShellModifiersStore((s) => s.ctrl);
@@ -81,47 +158,13 @@ export function MobileTerminalKeybar({
       )}
       style={{ ...(inline ? {} : position), height: `${KEYBAR_HEIGHT_PX}px` }}
     >
-      <div className="flex w-full gap-1 overflow-x-auto px-2 py-1.5">
-        <ModifierButton
-          id="ctrl"
-          label={t("task:ctrl")}
-          ariaLabel={t("task:control")}
-          state={ctrl}
-          onTap={onCtrlTap}
-        />
-        <ModifierButton
-          id="shift"
-          label={t("task:shift")}
-          ariaLabel={t("task:shift")}
-          state={shift}
-          onTap={onShiftTap}
-        />
-        <KeybarButton
-          id="ctrl-c"
-          ariaLabel={t("task:controlC")}
-          onTap={() => tapSend(KEY_SEQUENCES.ctrlC)}
-          variant="destructive"
-        >
-          ^C
-        </KeybarButton>
-        <KeybarButton
-          id="ctrl-d"
-          ariaLabel={t("task:controlD")}
-          onTap={() => tapSend(KEY_SEQUENCES.ctrlD)}
-        >
-          ^D
-        </KeybarButton>
-        {KEYS.map((key) => (
-          <KeybarButton
-            key={key.id}
-            id={key.id}
-            ariaLabel={t(key.ariaLabelKey)}
-            onTap={() => tapSend(key.seq, key.id)}
-          >
-            {key.label}
-          </KeybarButton>
-        ))}
-      </div>
+      <MobileTerminalKeybarControls
+        ctrl={ctrl}
+        shift={shift}
+        onCtrlTap={onCtrlTap}
+        onShiftTap={onShiftTap}
+        onSend={tapSend}
+      />
     </div>
   );
 }

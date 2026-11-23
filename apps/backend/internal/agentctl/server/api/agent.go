@@ -1735,7 +1735,12 @@ func (s *Server) adapterAction(
 
 	if err := action(agentAdapter); err != nil {
 		s.logger.Error(msg.Action+" failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		code := ws.ErrorCodeInternalError
+		var rejected *streams.SessionConfigurationRejectedError
+		if errors.As(err, &rejected) {
+			code = ws.ErrorCodeValidation
+		}
+		resp, _ := ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 		return resp
 	}
 
@@ -1747,22 +1752,38 @@ func (s *Server) handleWSSetModel(ctx context.Context, msg *ws.Message) *ws.Mess
 	var req struct {
 		ModelID string `json:"model_id"`
 	}
-	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+	var result streams.ConfigurationResult
+	resultSupported := false
+	resp := s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
 		ms, ok := a.(adapter.ModelSettableAdapter)
 		if !ok {
 			return fmt.Errorf("agent does not support model switching")
 		}
+		if resultSetter, ok := a.(adapter.ModelConfigurationResultAdapter); ok {
+			resultSupported = true
+			var err error
+			result, err = resultSetter.SetModelWithResult(ctx, req.ModelID)
+			return err
+		}
 		return ms.SetModel(ctx, req.ModelID)
 	})
+	if resp.Type == ws.MessageTypeError || !resultSupported {
+		return resp
+	}
+	settled, _ := ws.NewResponse(msg.ID, msg.Action, result)
+	return settled
 }
 
 func (s *Server) handleWSSetConfigOption(ctx context.Context, msg *ws.Message) *ws.Message {
 	var req struct {
-		ConfigID              string                        `json:"config_id"`
-		Value                 string                        `json:"value"`
-		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
+		ConfigID                   string                        `json:"config_id"`
+		Value                      string                        `json:"value"`
+		SessionSettingsPolicy      streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
+		IncludeConfigurationResult bool                          `json:"include_configuration_result,omitempty"`
 	}
-	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+	var result streams.ConfigurationResult
+	resultSupported := false
+	resp := s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
 		policy := req.SessionSettingsPolicy
 		if policy == "" {
 			policy = streams.SessionSettingsPolicyStrict
@@ -1774,8 +1795,21 @@ func (s *Server) handleWSSetConfigOption(ctx context.Context, msg *ws.Message) *
 		if !ok {
 			return fmt.Errorf("agent does not support set_config_option")
 		}
+		if req.IncludeConfigurationResult {
+			if resultSetter, ok := a.(adapter.ConfigOptionResultAdapter); ok {
+				resultSupported = true
+				var err error
+				result, err = resultSetter.SetConfigOptionWithResult(streams.WithSessionSettingsPolicy(ctx, policy), req.ConfigID, req.Value)
+				return err
+			}
+		}
 		return cs.SetConfigOption(streams.WithSessionSettingsPolicy(ctx, policy), req.ConfigID, req.Value)
 	})
+	if resp.Type == ws.MessageTypeError || !resultSupported {
+		return resp
+	}
+	settled, _ := ws.NewResponse(msg.ID, msg.Action, result)
+	return settled
 }
 
 func (s *Server) handleWSAuthenticate(ctx context.Context, msg *ws.Message) *ws.Message {

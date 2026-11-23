@@ -47,6 +47,7 @@ export type MessageAttachment = {
   name?: string;
   size_bytes?: number;
   delivery_mode?: "prompt" | "path";
+  comment_id?: string;
 };
 
 export type ChatInputContainerHandle = {

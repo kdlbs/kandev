@@ -9,6 +9,7 @@ import { WorkflowSyncStatusCard } from "@/components/settings/workflow-sync-stat
 import { PromptSyncDialog } from "@/components/settings/prompt-sync-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { usePromptSync } from "@/hooks/domains/settings/use-prompt-sync";
+import { PROMPT_SYNC_RATE_LIMIT_ERROR_CODE } from "@/lib/types/prompt-sync";
 
 const TEST_ID_PREFIX = "prompt-sync";
 
@@ -63,6 +64,11 @@ export function PromptSyncSection() {
           config={sync.config}
           syncing={sync.syncing}
           onSyncNow={sync.handleSyncNow}
+          errorMessage={
+            sync.config.last_error_class === PROMPT_SYNC_RATE_LIMIT_ERROR_CODE
+              ? t("settings:promptSyncQuotaUnavailable")
+              : undefined
+          }
           testIdPrefix={TEST_ID_PREFIX}
           actions={configureButton}
         />

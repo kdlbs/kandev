@@ -24,15 +24,15 @@ async function waitForOpeningModelTurn(apiClient: ApiClient, taskId: string, ses
 
 /**
  * Verifies the chat-input model selector's failure path:
- * when the backend rejects a model change, the UI shows a toast carrying the
- * backend error message and the trigger label reverts to the previous model.
+ * when a model request fails without structured outcome evidence, the UI
+ * shows unconfirmed feedback and keeps the last confirmed trigger label.
  *
  * mock-agent exposes "model" as a config option, so changing the model goes
  * through POST /set-config-option. Agents without a model config option use
  * POST /set-model — both routes are stubbed for resilience.
  */
 test.describe("Chat model selector — RPC failure", () => {
-  test("shows error toast and reverts trigger label when model change fails", async ({
+  test("shows inline uncertainty and keeps the confirmed trigger label", async ({
     testPage,
     apiClient,
     seedData,
@@ -105,13 +105,17 @@ test.describe("Chat model selector — RPC failure", () => {
     await expect(smartRow).toBeVisible({ timeout: 5_000 });
     await smartRow.click();
 
-    const toast = testPage
-      .getByTestId("toast-message")
-      .filter({ hasText: "Failed to change model" });
-    await expect(toast).toBeVisible({ timeout: 5_000 });
-    await expect(toast).toContainText(backendErrorMessage);
+    const feedback = session
+      .activeChat()
+      .locator(".chat-message-list")
+      .getByTestId("session-configuration-feedback");
+    await expect(feedback).toBeVisible({ timeout: 5_000 });
+    await expect(feedback).toHaveAttribute("role", "status");
+    await expect(feedback).toContainText("Could not confirm");
+    await expect(feedback).toContainText(backendErrorMessage);
+    await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
 
-    // After revert the trigger label should match the original (model + extras).
+    // An ambiguous failure cannot replace the trigger's last confirmed label.
     await expect(trigger).toContainText("Mock Fast", { timeout: 5_000 });
     await expect(trigger).not.toContainText("Mock Smart");
   });

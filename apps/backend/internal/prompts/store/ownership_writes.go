@@ -90,13 +90,13 @@ func (r *sqliteRepository) AdoptPromptAsSynced(ctx context.Context, seen *models
 		seen.ID, models.PromptSourceManual, seen.Name, seen.Content)
 }
 
-// SetOverrideRepositoryContent records the current repository version of an
-// override. It writes only when the version changed.
-func (r *sqliteRepository) SetOverrideRepositoryContent(ctx context.Context, id, content string) (bool, error) {
+// SetOverrideRepositoryFile records the current file path and repository
+// version of an override. It writes only when either value changed.
+func (r *sqliteRepository) SetOverrideRepositoryFile(ctx context.Context, id, sourcePath, content string) (bool, error) {
 	return r.execChanged(ctx, `
-		UPDATE custom_prompts SET alternate_content = ?
-		WHERE id = ? AND source = ? AND alternate_content <> ?
-	`, content, id, models.PromptSourceOverride, content)
+		UPDATE custom_prompts SET source_path = ?, alternate_content = ?
+		WHERE id = ? AND source = ? AND (source_path <> ? OR alternate_content <> ?)
+	`, sourcePath, content, id, models.PromptSourceOverride, sourcePath, content)
 }
 
 // ClearOverrideConflict records that the user keeps an adopted override.
@@ -111,7 +111,7 @@ func (r *sqliteRepository) ClearOverrideConflict(ctx context.Context, id string)
 // whose file left the source; the override and its content stay.
 func (r *sqliteRepository) DetachOverride(ctx context.Context, id string) (bool, error) {
 	return r.execChanged(ctx, `
-		UPDATE custom_prompts SET conflict = 0, alternate_content = '', updated_at = ?
+		UPDATE custom_prompts SET conflict = 0, alternate_content = '', source_path = '', updated_at = ?
 		WHERE id = ? AND source = ? AND (conflict = 1 OR alternate_content <> '')
 	`, time.Now().UTC(), id, models.PromptSourceOverride)
 }

@@ -50,7 +50,7 @@ No Git command runs on this path. Workspace root files never enter
 | Runtime agentctl client | `ListWorkspaceRootFiles(ctx)`. |
 | Backend WS handler (`internal/agent/handlers/workspace_file_handlers.go`) | Action `workspace.root_files.list` keyed by `session_id`. Uses `GetOrEnsureExecution` like `workspace.tree.get`. |
 | Web store and hook | `workspaceRootFiles.byEnvironmentId[envId]` in the session-runtime slice. `useWorkspaceRootFiles(sessionId)` in `hooks/domains/session/` fetches the list, then refetches on file-change notifications. |
-| Changes UI | An **Outside repositories** section rendered by `ChangesPanelBody`, shared by desktop and phone, plus a destination dialog for the move action. |
+| Changes UI | `ChangesPanelRootFiles` renders the **Outside repositories** group. `ChangesPanelBody` shares it across desktop and phone. The move action uses a destination dialog. |
 
 ## Data and contracts
 
@@ -150,21 +150,51 @@ staging call is made.
 
 ### Frontend
 
-- `ChangesPanelBody` renders `<ChangesRootFilesSection>` after the working-tree
-  timeline when `supported && files.length > 0`. When the timeline would
-  render `EmptyChangesPanel` but root files exist, the section replaces the
-  empty state (`AC-TASKS-WORKSPACE-ROOT-FILES-001.1`). The section is inside
-  the single `ChangesPanelBody` scroller. Because the phone sheet also mounts
-  `ChangesPanelBody`, both views share it.
-- Rows show the file icon and root-relative path. Activating a row calls the
-  panel's existing `onEditFile(path)` with no repository. That is the same
-  root-scoped file open that chat uses (`AC-TASKS-WORKSPACE-ROOT-FILES-002.1`).
-- Fine pointer: a row action menu with **Open** and **Move to repository…**.
-  Coarse pointer: the same items in the touch row's existing menu. Below
-  640px, the shared DropdownMenu renders as a bottom sheet. Touch rows and the
-  dialog's radio rows are at least 44px.
-- A truncation note appears below the list when `truncated` is true.
-- All copy is localized in seven locales in the `task` namespace (`src/locales/<locale>/task.json`).
+`ChangesPanelBody` renders `ChangesPanelRootFiles` after the Git timeline in
+the same scroller when the workspace is ready and the supported listing has
+files. Root files take the place of the clean empty state when the timeline
+has no content (`AC-TASKS-WORKSPACE-ROOT-FILES-001.1`).
+
+The root group and `ChangesRepositoryTimelineRow` share the header disclosure
+button and align it at the same inset. The button shows the label, count,
+chevron, and `aria-expanded`.
+`ChangesPanelRootFiles` owns its group and directory disclosure state. Use
+the panel's `contextKey` to reset that state when the task or environment
+changes. Store directory choices by full root-relative path so they survive
+listing refreshes and group toggles. When the group is collapsed, render the
+header and count. When it is expanded, show the rows and the truncation note
+if `truncated` is true (`AC-TASKS-WORKSPACE-ROOT-FILES-001.4`, `.6`).
+
+Read `userSettings.changesPanelLayout`, as the Git timeline does. In Tree
+layout, `buildChangesTree` and `flattenChangesTree` accept files with a `path`
+and retain each file's original type. `TreeDirRow` renders folder labels and
+toggles. The root group shares the file icon and name presentation with the
+corresponding Git file row. In List layout, the same presentation includes
+the folder prefix (`AC-TASKS-WORKSPACE-ROOT-FILES-001.7`).
+
+The group reads `WorkspaceRootFile` entries directly. A file button opens the
+root-relative path through `onEditFile(path, undefined)`, which is the same
+root-scoped editor action that chat uses. The row menu offers **Open** and
+offers **Move to repository** when an active session and destinations exist.
+Repository context menus and Git actions attach to Git rows only. The existing
+localized labels cover the group and both actions
+(`AC-TASKS-WORKSPACE-ROOT-FILES-002.1`, `AC-TASKS-WORKSPACE-ROOT-FILES-003.1`).
+
+#### Phone layout
+
+The task's bottom navigation opens the full-height Changes view. The
+repository group in `MobileChangesPanel` supplies the nearby header and folder
+pattern. The tree sits inline in `changes-panel-scroll-owner`, so users can
+browse nested paths in one vertical view. The mobile task layout handles
+viewport height and clearance above the bottom navigation.
+
+A file tap opens the existing mobile file viewer. A separate visible overflow
+button opens the existing `DropdownMenu` for temporary actions. Below 640px,
+the menu uses the shared bottom-sheet presentation. Give the group toggle,
+folder toggles, file buttons, and overflow buttons at least 44px hit areas for
+phone or coarse-pointer input. Bound indentation and wrap long file names
+within the file row to keep the overflow button reachable
+(`AC-TASKS-WORKSPACE-ROOT-FILES-001.8`).
 
 ## Failure and recovery
 

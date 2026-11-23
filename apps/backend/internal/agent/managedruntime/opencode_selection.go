@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/Masterminds/semver/v3"
+	"github.com/kandev/kandev/internal/common/opencode"
 )
 
 const openCodeSelectionKey = "managed_runtime.opencode.selection"
 
 const (
-	OpenCodeV1Package = "opencode-ai"
-	OpenCodeV2Package = "@opencode/cli"
+	OpenCodeV1Package = opencode.PackageV1
+	OpenCodeV2Package = opencode.PackageV2
 )
 
 var (
@@ -19,18 +22,18 @@ var (
 	ErrOpenCodeSelectionRevisionConflict = errors.New("OpenCode runtime selection revision conflict")
 )
 
-type OpenCodeFamily string
+type OpenCodeFamily = opencode.Family
 
 const (
-	OpenCodeFamilyV1 OpenCodeFamily = "v1"
-	OpenCodeFamilyV2 OpenCodeFamily = "v2"
+	OpenCodeFamilyV1 = opencode.FamilyV1
+	OpenCodeFamilyV2 = opencode.FamilyV2
 )
 
-type OpenCodeSource string
+type OpenCodeSource = opencode.Source
 
 const (
-	OpenCodeSourceManaged OpenCodeSource = "managed"
-	OpenCodeSourceNative  OpenCodeSource = "native"
+	OpenCodeSourceManaged = opencode.SourceManaged
+	OpenCodeSourceNative  = opencode.SourceNative
 )
 
 // OpenCodeSelection is the install-wide OpenCode distribution choice. The
@@ -182,15 +185,34 @@ func (s *Store) reconcileOpenCodeDefault(
 		return selection, nil
 	}
 	updated := selection
-	// A new reviewed default replaces an older imported default and clears its
-	// version override so the selected family follows the shipped runtime.
-	updated.SelectedVersion = ""
+	// A new reviewed default replaces an older imported default. A version
+	// override pinned NEWER than the new default survives the advance; empty,
+	// equal, older, or malformed overrides are cleared so the selected family
+	// follows the shipped runtime.
+	if !openCodeOverrideNewerThanDefault(updated.SelectedVersion, currentDefault) {
+		updated.SelectedVersion = ""
+	}
 	updated.AppliedDefaultVersion = currentDefault
 	updated.Revision++
 	if err := s.SaveOpenCodeSelection(ctx, selection.Revision, updated); err != nil {
 		return OpenCodeSelection{}, fmt.Errorf("reconcile OpenCode family default: %w", err)
 	}
 	return updated, nil
+}
+
+func openCodeOverrideNewerThanDefault(selected, currentDefault string) bool {
+	if selected == "" {
+		return false
+	}
+	parsedSelected, err := semver.StrictNewVersion(selected)
+	if err != nil {
+		return false
+	}
+	parsedDefault, err := semver.StrictNewVersion(currentDefault)
+	if err != nil {
+		return false
+	}
+	return parsedSelected.GreaterThan(parsedDefault)
 }
 
 func (s *Store) cleanupLegacyOpenCodeSelection(ctx context.Context) error {

@@ -228,11 +228,14 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 			return "", err
 		}
 	}
-	if err := client.ConfigureAgentWithProjectDelivery(
+	if err := client.ConfigureAgentRuntimeWithProjectDelivery(
 		ctx, execution.AgentCommand, execution.AgentArgs, env,
-		execution.ContinueCommand, execution.ContinueArgs, delivery, execution.LaunchWrapper,
+		execution.ContinueCommand, execution.ContinueArgs, delivery, execution.OpenCodeRuntime, execution.LaunchWrapper,
 	); err != nil {
 		return "", fmt.Errorf("configure agent after Kubernetes restart: %w", err)
+	}
+	if err := m.provisionOpenCodeCredentials(ctx, execution, client); err != nil {
+		return "", err
 	}
 	if _, err := client.Start(ctx); err != nil {
 		return "", fmt.Errorf("start agent after Kubernetes restart: %w", err)

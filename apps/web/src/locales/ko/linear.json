@@ -132,6 +132,8 @@
   "query": "쿼리",
   "queryHelp": "제목과 설명을 아우르는 자유 텍스트 일치 (선택 사항).",
   "queryPlaceholder": "인증 버그",
+  "requireBlockersDone": "차단 이슈가 완료된 이슈만 시작",
+  "requireBlockersDoneHelp": "일치한 각 이슈는 이를 차단하는 모든 Linear 이슈가 완료될 때까지 대기합니다. 취소된 차단 이슈가 있어도 계속 대기합니다.",
   "reEnableItInSettings": "설정에서 다시 활성화하세요",
   "refresh": "새로 고침",
   "removeConfiguration": "구성 제거",

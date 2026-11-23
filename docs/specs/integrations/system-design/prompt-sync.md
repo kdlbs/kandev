@@ -104,47 +104,28 @@ HTTP, WS, or MCP.
 
 ### Local overrides
 
-`Source` gains a third value, `"override"`: a local copy of a synced prompt
-that keeps its row ID, name, content, and `source_path`. Overrides follow the
-manual rules for operator and agent writes; the store's operator, agent, and
-delete guards check `source <> 'sync'` instead of `source = 'manual'`.
+An override uses `source='override'` and keeps the prompt ID and name.
+Operator and agent write guards use `source <> 'sync'`, so overrides
+follow the manual editing rules.
 
-- Ownership transitions live in `store/ownership_writes.go`. Each is one
-  `UPDATE ... WHERE id = ? AND source = ?` statement that reports whether a
-  row changed: `RevertOverride` (`override -> sync`, used by sync when the
-  user chose the repository version), `AdoptPromptAsOverride` and
-  `AdoptPromptAsSynced` (`manual -> override|sync`, also guarded by the name
-  and content the sync read), `ClearOverrideConflict`,
-  and `RestoreSyncedPrompt` (`sync -> manual`).
-- The operator's Local | Repository choice is saved by
-  `SavePromptVersions(ctx, id, from, to PromptVersions)`: one `UPDATE` that
-  writes `source`, `content`, `alternate_content`, and `conflict = 0`, guarded
-  by the full pre-image (`source`, `content`, `alternate_content`) and by
-  `source IN ('sync', 'override')`, so a concurrent sync or edit and a manual
-  prompt are never written.
-- `Service.SavePromptVersions(ctx, id, VersionSave{UseLocal, LocalContent,
-  ExpectedUpdatedAt})` reads the prompt, rejects one that is neither synced
-  nor an override (`ErrPromptNotLinked`), an obsolete `ExpectedUpdatedAt`
-  (`ErrPromptWriteRejected`), and an empty or oversized local version
-  (`ErrInvalidPrompt`). It splits the row into local and repository versions,
-  applies the edited local version, and writes the chosen one in use with the
-  other kept (`nextVersions`; a missing version falls back to the one that
-  exists). A guard miss is reported as `ErrPromptWriteRejected`.
-- `promptsync.Service.SaveVersions` runs it under the service lock and
-  requires configuration-management authority via
-  `PUT /api/v1/prompt-sync/prompts/:id/versions` (`{use_local, local_content?,
-  expected_updated_at?}`; 400 invalid, 404 missing, 409 not linked or stale).
-  Choosing the repository version uses the stored version at once and runs no
-  sync; the next sync refreshes it.
-- Prompt DTOs carry `alternate_content` so the editor can show the version
-  the switch selects before anything is saved.
-- In `ApplySyncedPrompts`, a desired file whose name matches an override is
-  left alone and added to `SyncApplyResult.Overridden` (not to warnings),
-  unless the user chose the repository version for it. A vanished file never
-  deletes an override because only synced rows are candidates. Overrides
-  count as survivors for the reference closure.
-- `ReleaseSyncedPrompts` releases `sync` and `override` rows to `manual`,
-  keeping current content and clearing `alternate_content` and `conflict`.
+- Ownership transitions in `store/ownership_writes.go` guard on row ID
+  and source. Adoption also checks the name and content that sync read.
+- `Service.SavePromptVersions` rejects an unlinked prompt
+  (`ErrPromptNotLinked`), a stale `ExpectedUpdatedAt`, or invalid local
+  text (`ErrInvalidPrompt`). `nextVersions` uses the existing text when
+  a local copy is absent. The store updates source, both versions, and
+  conflict in one statement.
+  The statement checks the prior source and both versions to guard against
+  concurrent changes. A guard miss returns `ErrPromptWriteRejected`.
+- `promptsync.Service.SaveVersions` uses the service lock.
+  `PUT /api/v1/prompt-sync/prompts/:id/versions` requires configuration
+  management. It takes `{use_local, local_content?, expected_updated_at?}`.
+  It returns 400 for invalid input, 404 for a missing prompt, and 409 for
+  a prompt that cannot accept the choice. A Repository save uses the stored
+  version. The next sync refreshes it.
+- Prompt DTOs include `alternate_content` so the editor can preview both
+  versions. Sync reports matching local overrides in `Overridden`. Their
+  local text survives removal and participates in reference checks.
 
 ### Name conflicts
 
@@ -181,8 +162,9 @@ sync never deletes them.
   `applySyncedFile` treats the choice as `ChoiceRepository`, and
   `findConflicts` skips it.
 - When an override's file leaves the source, the vanished-file pass calls
-  `DetachOverride`, which clears its conflict and repository version and
-  keeps it (AC-INTEGRATIONS-PROMPT-SYNC-008.7).
+  `DetachOverride` (AC-INTEGRATIONS-PROMPT-SYNC-008.7). The guarded update
+  clears `conflict`, `alternate_content`, and `source_path` on the same row.
+  The existing detach guard and revision update apply to this write.
 - `SyncResult` adds `conflicts` and `restored`. A run that leaves a conflict
   is not `unchanged`.
 
@@ -205,11 +187,15 @@ so the empty string is unambiguous.
 - An override with empty `alternate_content` (file left the source) has no
   repository version: `SavePromptVersions` rejects Repository with
   `ErrNoRepositoryVersion` (409), and the row shows "Removed from repository"
-  instead of the switch (`hasRepositoryVersion`).
+  instead of the switch (`hasRepositoryVersion`). The HTTP, boot payload,
+  and MCP projections return an empty path for such an override, including
+  older detached rows that still store an old path.
 - `UpdateSyncedPrompt` leaves `alternate_content` alone. For every override
-  whose file is present, `ApplySyncedPrompts` calls
-  `SetOverrideRepositoryContent`, which writes only when the version changed
-  (AC-INTEGRATIONS-PROMPT-SYNC-009.3).
+  with a valid matching file, `ApplySyncedPrompts` records its repository
+  version and path in one guarded update (AC-INTEGRATIONS-PROMPT-SYNC-009.3).
+  A path-only change is sufficient to write and publish a prompt update.
+  The repository refresh uses the existing revision policy for local edits.
+  Invalid and duplicate names follow the existing freeze rules.
 - In the vanished-file pass, a synced prompt with a kept copy, or a built-in
   prompt, goes through `RestoreSyncedPrompt` (back to `manual`, kept copy
   restored) instead of the reference check and `DeleteSyncedPrompt`. It is
@@ -242,6 +228,8 @@ so the empty string is unambiguous.
 - MCP list and read results add `conflict` and `edit_guidance` (from
   `promptdto.EditGuidance`) for synced prompts and overrides. Agent writes to
   overrides use the agent write guard, which leaves `conflict` unchanged.
+  For a detached override, guidance identifies the local text in use and
+  explains that the file is absent.
 - No MCP tool overrides, reverts, or resolves. The `update_shared_prompt`
   and `list_shared_prompts` tool descriptions say that only the user switches
   a prompt to Local. A server test asserts that no tool name on any surface
@@ -304,31 +292,30 @@ caller.
 
 ## Control flow
 
-```text
-POST /prompt-sync/sync ─┐
-Poller (60s tick) ──────┼─► promptsync.Service.Sync (install lock)
-                        │     1. load config, check due/suspended (automatic only)
-                        │     1a. credential workspace must exist, else suspend
-                        │     2. bind GitHub host for workspace_id (GitHub)
-                        │     3. reposync.List(source) (GitHub ≥1,000 entries → fail) → *.md files
-                        │     4. reposync.Get each file (too large → freeze it; other error → fail run)
-                        │     5. parse files → desired{name→content,path}, frozen names, warnings
-                        │     6. workflow repo ListPromptReferenceTexts → texts
-                        │     7. prompts.ApplySyncedPrompts(desired, frozen, texts)
-                        │     8. UnresolvedPromptReferences over every remaining synced prompt
-                        └─►   9. record status, return result
-```
+One service mutex serializes runs, version saves, configuration writes,
+and removal. **Sync now** and removal authorize the loaded configuration
+under that mutex. Sync uses the authorized snapshot for fetch and apply.
 
-One process-wide mutex serializes sync runs, config saves, and removal,
-mirroring the per-workspace lock in Workflow Sync. **Sync now** and removal read
-and authorize the configuration under that mutex, and the run uses that same
-snapshot rather than reloading it, so a concurrent save cannot substitute a
-workspace the caller was never checked against. The GitHub apply step runs
-inside `CommitWorkspaceGitHubHost`, so files fetched under a replaced
-connection cannot be applied. Automatic runs use the GitHub background work
-class with non-blocking admission, so the service lock never waits for quota.
-A deferred run is not a failure; the next tick retries it. Manual runs keep
-blocking admission.
+1. Load the configuration. For automatic sync, check the schedule and
+   suspension status.
+2. Check the credential workspace and bind the GitHub connection if used.
+3. List and read the files through `reposync.Reader`. Parse the files into
+   desired versions, frozen names, and warnings.
+4. Read workflow references. Apply the desired versions through
+   `ApplySyncedPrompts`. Check remaining synced prompts for unresolved
+   references. For GitHub, `CommitWorkspaceGitHubHost` guards this step
+   against connection replacement.
+5. Record status and return the result.
+
+Automatic GitHub runs use non-blocking background admission. A deferred
+run leaves failure status intact and retries on the next tick.
+
+Manual GitHub runs opt in to `WithNonBlockingGitHubAdmission` in
+`syncLocked` (AC-INTEGRATIONS-PROMPT-SYNC-001.6). An opted-in interactive
+request returns `AdmissionWaitError` when quota blocks it. This applies to
+the listing and each download. The error carries the retry boundary and
+distinguishes a quota block from cancellation. An admitted request uses
+its normal transport deadline. The source check fetches outside the lock.
 
 ### Prompt file parsing
 
@@ -410,7 +397,13 @@ list, the `unchanged` flag, and the stored status match the current output
   a failure. Prompt rows already written by that run stay written. The next
   run reconciles them, and because each write is guarded by ownership, a
   partial run cannot touch manual prompts.
-- All stored errors pass through `reposync.SafeErrorMessage`.
+- Prompt Sync sanitizes stored errors through `safeErrorMessage`.
+  This helper delegates to `reposync.SafeErrorMessage` for provider errors.
+- A local interactive GitHub quota block ends the fetch before apply.
+  The transient retry policy uses `AdmissionWaitError.RetryAt`.
+  Prompt Sync reuses `github.RateLimitErrorCode` in the sync response's
+  `error_code` and the existing `last_error_class` status field.
+  The HTTP 200 envelope carries the configuration and a safe retry message.
 
 ## Persistence
 
@@ -449,46 +442,36 @@ list, the `unchanged` flag, and the stored status match the current output
 
 ## Frontend
 
-- `lib/types/http.ts`: `CustomPrompt` gains `source` and `source_path`. A new
-  `lib/types/prompt-sync.ts` and API client functions in
-  `lib/api/domains/settings-api.ts` cover the four routes.
-- Pure form logic shared by Workflow Sync and Prompt Sync (link parsing,
-  provider switching, payloads, validation) lives in
-  `lib/settings/repo-sync-form.ts`. The fields (provider tabs, repository
-  link, branch and directory, polling) live in
-  `components/settings/repo-sync-fields.tsx` and the removal confirmation in
-  `repo-sync-removal-actions.tsx`, both parameterized by a test-ID prefix.
-  `WorkflowSyncStatusCard` takes `testIdPrefix` and extra `actions`, and
-  Prompt Sync reuses it. Workflow Sync renders identically.
+- Types are in `lib/types/prompt-sync.ts` and `lib/types/http.ts`. Requests
+  use `lib/api/domains/prompt-sync-api.ts`. Both sync features share
+  `repo-sync-form.ts`, `RepoSyncFields`, the removal controls, and
+  `WorkflowSyncStatusCard`.
 - `hooks/domains/settings/use-prompt-sync.ts` owns the configuration, draft,
   and actions. `prompt-sync-section.tsx` is a settings group above the prompt
   list: **Set up** when unconfigured, otherwise the shared status card with
   **Configure** and **Sync now**. `prompt-sync-dialog.tsx`
   holds a workspace select (credential workspace) plus the shared fields, and
   **Save** and **Remove sync** with inline or mobile confirmation.
-- `PromptVersionControl` (`prompt-override-controls.tsx`) wraps the review
-  step's exported `VersionSwitch`, so rows and review steps share one
-  `Local | switch | Repository` control (on is the repository version; 44px
-  hit area on coarse pointers). It is the first child of each linked row's
-  `prompt-row-trailing` group. Every row is a `PromptListItem`. Page state
-  (`use-prompts-page.ts`) holds open rows, `PromptDrafts` (only edits that
-  differ from the saved prompt, each with the revision of its first edit)
-  and `PendingVersions` (`withChoice` keeps only differing choices), all
-  keyed by prompt ID, so any number of rows can be open, switched and
-  edited. Switching never opens or closes a row. On Repository the eye
-  shows `PromptRepositoryView` read-only with the file note; on Local (and
-  for manual prompts) **Edit** shows the editable `PromptEditForm` (name
-  only for manual prompts). A row with an edit or switch shows an
-  "Unsaved" badge. **Save** runs `planPromptSaves`: one `savePromptVersions`
-  per switched or edited linked prompt (edit and starting revision ride
-  along) and `updatePrompt` per edited manual prompt, in list order; each
-  written prompt closes and leaves the maps, so a failure keeps only what is
-  unsaved. **Reset** clears both maps and closes the rows they touched.
-  A draft whose prompt left the list stays dirty, is named by
-  `PromptOrphanedDraftsNotice`, and Save recreates it (`orphanedDrafts`).
-  Synced rows add `PromptSyncedBadge` and no delete; overrides add
-  `PromptOverrideBadge` and, while conflicted, `PromptConflictBadge`. The
-  status card lists overridden prompt names separately from warnings.
+- Prompt Sync translates the GitHub rate-limit message in the existing
+  toast and status card. The same **Sync now** action retries on desktop
+  and phone.
+- `PromptVersionControl` shares `VersionSwitch` with the review step.
+  It is the first trailing control and has a 44px coarse-pointer target.
+  The Repository choice uses the read-only `PromptRepositoryView` and
+  the file note. The Local choice uses `PromptEditForm`. A version choice
+  preserves each row's open or closed state. The list displays ownership,
+  conflict, and unsaved badges as applicable.
+- `use-prompts-page.ts` keys open rows, drafts, and pending choices by
+  prompt ID. `planPromptSaves` sends `savePromptVersions` for a changed
+  linked prompt and `updatePrompt` for a changed manual prompt. Each
+  write carries the draft's starting revision. A successful write closes
+  the row and clears its draft. Reset clears pending edits and closes
+  their rows.
+  `PromptOrphanedDraftsNotice` lists drafts whose rows disappeared. Save
+  recreates those prompts.
+- For a detached override, the badge tooltip describes the remaining local
+  version. The inline "Removed from repository" status and Edit control give
+  the outcome on desktop and phone without opening the tooltip.
 - The prompt editor uses the dark Monaco theme in every app theme. Read-only
   editors (`SettingsPromptEditor` with `readOnly`) set `data-read-only` and
   a dashed frame; `app/globals.css` lifts their surface to a lighter dark

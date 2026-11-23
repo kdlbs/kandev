@@ -1,3 +1,4 @@
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import { useCallback, useEffect, useMemo, useState, useRef, type RefObject } from "react";
 import type { ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { EditorView, gutter, GutterMarker, ViewPlugin, type ViewUpdate } from "@codemirror/view";
@@ -462,7 +463,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   });
 
   const createCommentFromSelection = useCallback(
-    (annotation: string): DiffComment | null => {
+    (annotation: string, attachments?: MessageAttachment[]): DiffComment | null => {
       if (!textSelection || !sessionId) return null;
       const comment: DiffComment = {
         id: `${path}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -475,6 +476,7 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
         side: "additions",
         codeContent: textSelection.text,
         text: annotation,
+        ...(attachments?.length && { attachments }),
         createdAt: new Date().toISOString(),
         status: "pending",
       };
@@ -490,8 +492,8 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   );
 
   const handleCommentSubmit = useCallback(
-    (annotation: string) => {
-      const comment = createCommentFromSelection(annotation);
+    (annotation: string, _selected?: string, attachments?: MessageAttachment[]) => {
+      const comment = createCommentFromSelection(annotation, attachments);
       if (comment) {
         toast({
           title: t("editors:commentAdded"),
@@ -503,8 +505,8 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   );
 
   const handleCommentSubmitAndRun = useCallback(
-    async (annotation: string) => {
-      const comment = createCommentFromSelection(annotation);
+    async (annotation: string, _selected?: string, attachments?: MessageAttachment[]) => {
+      const comment = createCommentFromSelection(annotation, attachments);
       if (comment) {
         try {
           const { queued } = await runComment(comment);
@@ -543,14 +545,15 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   );
 
   const handleUpdateComment = useCallback(
-    (commentId: string, text: string) => {
-      updateComment(commentId, { text });
+    (commentId: string, text: string, attachments?: MessageAttachment[]) => {
+      const updates = { text, ...(attachments && { attachments }) };
+      updateComment(commentId, updates);
       setCommentView((view) => {
         if (!view) return view;
         return {
           ...view,
           comments: view.comments.map((comment) =>
-            comment.id === commentId ? { ...comment, text } : comment,
+            comment.id === commentId ? { ...comment, ...updates } : comment,
           ),
         };
       });
@@ -564,6 +567,8 @@ export function useCodeMirrorEditorState(opts: UseCodeMirrorEditorStateOpts) {
   }, []);
 
   return {
+    attachmentTaskId: sessionId ? activeTaskId : null,
+    commentScope: JSON.stringify([activeTaskId, sessionId, repo, path]),
     touch,
     wrapEnabled,
     setWrapEnabled,
