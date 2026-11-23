@@ -3,6 +3,8 @@ import { getBackendConfig } from "@/lib/config";
 import type {
   PluginCapabilityApproval,
   PluginCapabilityApprovalContext,
+  PluginIdentityLink,
+  PluginIdentityLinkCode,
   PluginRecord,
   PluginSettings,
   RevokePluginCapabilityApprovalInput,
@@ -264,6 +266,44 @@ export async function revokePluginCapabilityApproval(
         body: JSON.stringify(input),
       },
     },
+  );
+}
+
+// listPluginIdentityLinks returns the caller's external accounts linked
+// through this plugin; scope "all" returns every link and requires an admin.
+export async function listPluginIdentityLinks(
+  pluginId: string,
+  scope: "own" | "all",
+  options?: ApiRequestOptions,
+): Promise<PluginIdentityLink[]> {
+  const query = scope === "all" ? "?scope=all" : "";
+  const response = await fetchJson<{ links?: PluginIdentityLink[] }>(
+    `${BASE}/${encodeURIComponent(pluginId)}/identity-links${query}`,
+    options,
+  );
+  return response.links ?? [];
+}
+
+// createPluginIdentityLinkCode issues a single-use code that links the
+// external account presenting it, through this plugin, to the caller.
+export async function createPluginIdentityLinkCode(
+  pluginId: string,
+  options?: ApiRequestOptions,
+): Promise<PluginIdentityLinkCode> {
+  return fetchJson<PluginIdentityLinkCode>(
+    `${BASE}/${encodeURIComponent(pluginId)}/identity-links/codes`,
+    { ...options, init: { ...(options?.init ?? {}), method: "POST" } },
+  );
+}
+
+export async function revokePluginIdentityLink(
+  pluginId: string,
+  linkId: string,
+  options?: ApiRequestOptions,
+): Promise<void> {
+  await fetchJson<void>(
+    `${BASE}/${encodeURIComponent(pluginId)}/identity-links/${encodeURIComponent(linkId)}`,
+    { ...options, init: { ...(options?.init ?? {}), method: "DELETE" } },
   );
 }
 
