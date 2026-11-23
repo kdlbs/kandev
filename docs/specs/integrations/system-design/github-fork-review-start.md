@@ -92,13 +92,16 @@ available while the task waits.
 ## Task open
 
 `EnsureSession` is the passive task-open entry point. When it has no session to
-return and would start an agent because the workflow step auto-starts, it first
-checks the marker. If the task carries `fork_pr_requires_manual_start`, it does
-not call `LaunchSession`. It returns a successful response with no session ID,
-source `awaiting_manual_start`, activation disposition `suppressed`, and
-activation reason `fork_pr_manual_start`. It does not fall back to a
-workspace-only prepare. That would launch the executor environment, and the
-setup script would run against fork-controlled files.
+return and the task carries `fork_pr_requires_manual_start`, a passive
+`session_open` request without an explicit automatic start (unset or false)
+does not call `LaunchSession`, regardless of the resolved workflow intent. It
+returns a successful response with no session ID, source `awaiting_manual_start`,
+activation disposition `suppressed`, and activation reason
+`fork_pr_manual_start`. It does not fall back to a workspace-only prepare. That
+would launch the executor environment, and the setup script would run against
+fork-controlled files. Step-derived automatic starts from other sources are
+also suppressed. An explicit `auto_start: true` continues to reach the central
+`StartTask` rejection.
 
 The web client treats the response like any other session-less ensure result.
 The task page shows no error card, and the user starts the agent through the
@@ -116,7 +119,7 @@ creation and launch behavior therefore remains unchanged for fork PR links.
 Backend tests cover search-result enrichment through review event creation,
 deferral of PRs whose detail read failed until a later successful poll,
 same-repository auto-start tokens, fork and missing-head identity suppression,
-session-less task open for marked tasks in auto-start steps,
+session-less passive task open for marked tasks in prepare and auto-start steps,
 both review-watch auto-start paths, rejection at the central automatic launch
 boundary, and successful manual start. Existing browser tests continue to
 prove manual PR-link launch from a fork head.

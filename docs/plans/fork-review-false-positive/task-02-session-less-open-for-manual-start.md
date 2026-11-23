@@ -17,17 +17,22 @@ system_design:
 
 ## Summary
 
-Opening a task marked `fork_pr_requires_manual_start` in an auto-start step
-returns no session instead of an error. Manual start still works.
+Opening a task marked `fork_pr_requires_manual_start` from a passive session
+open returns no session without preparing its workspace, in any workflow step.
+Explicit automatic starts still reach the central rejection. Manual start
+still works.
 
 ## Change
 
-In `EnsureSession` (`internal/orchestrator/session_ensure.go`), when
-`intent == IntentStart` and `taskRequiresManualForkPRStart(task)` is true,
-return without calling `LaunchSession`. Return `Success: true`, no session ID,
-`Source: "awaiting_manual_start"`, and `ActivationDisposition:
-activationDispositionSuppressed`. Add `"awaiting_manual_start"` to the
-`source` union in `apps/web/lib/services/session-launch-service.ts`.
+In `EnsureSession` (`internal/orchestrator/session_ensure.go`), suppress a
+marked task's passive `session_open` request unless it explicitly requests an
+automatic start, regardless of the resolved workflow intent. Also suppress
+step-derived automatic starts from other sources. Return `Success: true`, no
+session ID, `Source: "awaiting_manual_start"`, and
+`ActivationDisposition: activationDispositionSuppressed`. An explicit
+`AutoStart: true` continues through to the central `StartTask` rejection. Add
+`"awaiting_manual_start"` to the `source` union in
+`apps/web/lib/services/session-launch-service.ts`.
 
 ## Out of scope
 
@@ -37,10 +42,11 @@ Changing the `StartTask` guard. A UI notice.
 ## Steps
 
 1. In the new file `internal/orchestrator/session_ensure_fork_review_test.go`,
-   seed a marked task in a step that has `OnEnterAutoStartAgent`, using the
-   same setup as `TestAutoStart_ForkReviewWaitsForManualStart`. Call
-   `EnsureSession`, then assert that it returns no error, creates no sessions,
-   and makes no `LaunchAgent` call. Confirm that the test fails first.
+   seed a marked task in an auto-start step and another in a prepare step.
+   Call `EnsureSession` with passive session-open options, including explicit
+   `AutoStart: false`, then assert each returns no error, creates no sessions,
+   and makes no `LaunchAgent` call. Confirm that the prepare-step test fails
+   first.
 2. Add the guard and the TS literal.
 
 ## Verification
@@ -53,16 +59,22 @@ cd apps && pnpm --filter @kandev/web typecheck
 
 ## Results
 
-The regression failed first with `fork pull request review requires a manual
-start`. After the change, opening the marked task returns the expected
-session-less response and does not create a session or call `LaunchAgent`.
-An explicit `AutoStart: true` still reaches the central launch guard and
-returns `errForkPRManualStartRequired` without creating a session or calling
-`LaunchAgent`. Existing coverage confirms manual start still launches the
-fork review task.
+The auto-start regression failed first with `fork pull request review requires
+a manual start`. The prepare-step regression failed first after creating a
+session and launching workspace preparation. After the change, passive
+session-open requests in prepare and auto-start steps return the expected
+session-less response for unset and false `AutoStart`, without creating a
+session or calling `LaunchAgent`. An explicit `AutoStart: true` still reaches
+the central launch guard and returns `errForkPRManualStartRequired` without
+creating a session or calling `LaunchAgent`. Existing coverage confirms manual
+start still launches the fork review task.
 
 Passed:
 
 - `go -C apps/backend test -trimpath ./internal/orchestrator -run 'TestEnsureSession_ForkReview|TestAutoStart_ForkReview' -count=1`
-- `bash scripts/lint-go-changed apps/backend/internal/orchestrator/session_ensure.go apps/backend/internal/orchestrator/session_ensure_fork_review_test.go`
+- `go -C apps/backend test -trimpath ./internal/github -run 'TestCheckReviewWatch' -count=1`
+- `bash scripts/lint-go-changed apps/backend/internal/github/service_reviews.go apps/backend/internal/github/service_reviews_test.go apps/backend/internal/orchestrator/session_ensure.go apps/backend/internal/orchestrator/session_ensure_fork_review_test.go`
+- `(cd apps/backend && go build -trimpath ./cmd/kandev)`
 - `cd apps && pnpm --filter @kandev/web typecheck`
+- `python3 scripts/list-docs.py validate`
+- `python3 scripts/lint-spec-files.py --all`

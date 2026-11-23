@@ -123,7 +123,10 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 		intent = IntentStart
 		source = "created_start"
 	}
-	if intent == IntentStart && o.AutoStart == nil && taskRequiresManualForkPRStart(task) {
+	passiveForkReviewOpen := o.ActivationSource == LaunchActivationSourceSessionOpen &&
+		(o.AutoStart == nil || !*o.AutoStart)
+	stepDerivedForkReviewStart := intent == IntentStart && o.AutoStart == nil
+	if taskRequiresManualForkPRStart(task) && (passiveForkReviewOpen || stepDerivedForkReviewStart) {
 		return &EnsureSessionResponse{
 			Success:               true,
 			TaskID:                taskID,

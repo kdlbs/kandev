@@ -39,7 +39,8 @@ describes both corrections.
    (`apps/backend/internal/orchestrator/session_ensure.go`) chooses
    `IntentStart` with `AutoStart=true`. The central `StartTask` guard then
    returns `errForkPRManualStartRequired`, and the web client shows that error
-   on every open.
+   on every open. In prepare steps, the passive open instead created a session
+   and launched workspace setup against fork-controlled files.
 
 Reproduction: the previous assertions in `service_reviews_test.go` encoded the
 bug by expecting an event after a failed or nil detail read. A temporary
@@ -53,8 +54,9 @@ orchestrator test confirmed the rest: empty head identity →
 ### In scope
 
 - Skip publishing a review PR until its detail read succeeds.
-- Make `EnsureSession` return no session, instead of an error, for marked
-  tasks in auto-start steps.
+- Make passive `EnsureSession` opens return no session for marked tasks in any
+  workflow step, without launching workspace setup. Keep explicit automatic
+  starts on the central `StartTask` rejection path.
 - Add the matching TypeScript source literal.
 - One regression test per work order.
 
@@ -66,8 +68,7 @@ orchestrator test confirmed the rest: empty head identity →
 - Preparing a workspace for marked tasks. Preparing the workspace runs the
   setup script on fork-controlled files.
 - A new fork notice or banner, which would need new localized copy.
-- Changing the passive prepare behavior for marked tasks in steps that do not
-  auto-start.
+- Changing explicit prepare requests outside passive `session_open` calls.
 
 ## Work orders
 
@@ -88,20 +89,20 @@ The work orders are independent. Implement them in order in one session.
 
 Both work orders are complete. Detail lookup failures and nil responses now
 defer review task creation until a later successful poll. Marked review tasks
-in auto-start steps open without a session or workspace preparation and remain
-available for an explicit manual start.
+open without a session or workspace preparation for passive opens in prepare
+and auto-start steps, and remain available for an explicit manual start.
 
 ## Verification
 
 ```bash
 go -C apps/backend test -trimpath ./internal/github -run 'TestCheckReviewWatch' -count=1
 go -C apps/backend test -trimpath ./internal/orchestrator -run 'TestAutoStart_ForkReview|TestEnsureSession_ForkReview' -count=1
-bash scripts/lint-go-changed apps/backend/internal/github/service_reviews.go apps/backend/internal/github/service_reviews_test.go
-bash scripts/lint-go-changed apps/backend/internal/orchestrator/session_ensure.go apps/backend/internal/orchestrator/session_ensure_fork_review_test.go
-cd apps/backend && go build -trimpath ./cmd/kandev
-cd apps && pnpm --filter @kandev/web typecheck
+bash scripts/lint-go-changed apps/backend/internal/github/service_reviews.go apps/backend/internal/github/service_reviews_test.go apps/backend/internal/orchestrator/session_ensure.go apps/backend/internal/orchestrator/session_ensure_fork_review_test.go
+(cd apps/backend && go build -trimpath ./cmd/kandev)
+(cd apps && pnpm --filter @kandev/web typecheck)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 ```
 
-All listed commands passed.
+All listed commands passed, including the prepare-step passive-open regression
+and the explicit `AutoStart: false` session-open case.

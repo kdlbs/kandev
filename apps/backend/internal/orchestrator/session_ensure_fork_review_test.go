@@ -98,3 +98,73 @@ func TestEnsureSession_ForkReviewAwaitsManualStart(t *testing.T) {
 		t.Fatalf("LaunchAgent calls = %d, want 0", got)
 	}
 }
+
+// @covers AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.6
+func TestEnsureSession_ForkReviewPrepareStepPassiveOpenAwaitsManualStart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "task-fork-review-prepare-open"
+	const stepID = "step-fork-review-prepare-open"
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf1", Name: "Review", Position: 0,
+	}
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &taskmodels.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &taskmodels.Task{
+		ID: taskID, WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: stepID,
+		Title: "Review fork PR", State: v1.TaskStateInProgress,
+		Metadata: map[string]interface{}{
+			taskmodels.MetaKeyAgentProfileID:            testAgentProfileID,
+			taskmodels.MetaKeyForkPRRequiresManualStart: true,
+		},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{
+		ID: taskID, State: v1.TaskStateInProgress,
+		Metadata: map[string]interface{}{
+			taskmodels.MetaKeyAgentProfileID:            testAgentProfileID,
+			taskmodels.MetaKeyForkPRRequiresManualStart: true,
+		},
+	}
+	var launchCalls atomic.Int32
+	agentManager := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalls.Add(1)
+			return &executor.LaunchAgentResponse{AgentExecutionID: "unexpected-launch"}, nil
+		},
+	}
+	service := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentManager)
+
+	for _, autoStart := range []*bool{nil, new(bool)} {
+		response, err := service.EnsureSession(ctx, taskID, EnsureSessionOptions{
+			AutoStart: autoStart, ActivationSource: LaunchActivationSourceSessionOpen,
+		})
+		if err != nil {
+			t.Fatalf("EnsureSession(AutoStart=%v): %v", autoStart, err)
+		}
+		if response == nil || response.SessionID != "" || response.Source != "awaiting_manual_start" {
+			t.Fatalf("EnsureSession(AutoStart=%v) = %+v, want session-less manual-start response", autoStart, response)
+		}
+	}
+	sessions, err := repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("sessions after passive opens = %d, want 0", len(sessions))
+	}
+	if got := launchCalls.Load(); got != 0 {
+		t.Fatalf("LaunchAgent calls = %d, want 0", got)
+	}
+}
