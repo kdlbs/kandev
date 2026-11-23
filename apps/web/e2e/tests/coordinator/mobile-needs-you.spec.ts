@@ -10,8 +10,13 @@
 // kept separate so it can be dropped independently of this file's coverage.
 import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { waitForSessionState } from "../../helpers/session";
-import { linkToCoordinator, linkToCoordinatorNeedsYou } from "../../../lib/coordinator/links";
+import {
+  linkToCoordinator,
+  linkToCoordinatorNeedsYou,
+  linkToCoordinatorQueue,
+} from "../../../lib/coordinator/links";
 
 const MIN_TOUCH_TARGET_PX = 44;
 
@@ -36,7 +41,12 @@ test.describe("Coordinator screens on a phone viewport", () => {
       task_agent_profile_id: seedData.agentProfileId,
       task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
-    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+    watchWs(testPage);
+    const [goalResponse] = await Promise.all([
+      waitForHttp(testPage, "GET", new RegExp(`/coordinators/${coordinator.id}/goal$`)),
+      testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id)),
+    ]);
+    expect(goalResponse.ok()).toBe(true);
 
     const goal = testPage.getByTestId("goal-note");
     const empty = testPage.getByTestId("empty-needs-you-state");
@@ -52,7 +62,10 @@ test.describe("Coordinator screens on a phone viewport", () => {
       expect(box!.width).toBeCloseTo(strip!.width, 0);
     }
     await expectNoHorizontalScroll(testPage);
-    await workingLink.tap();
+    await Promise.all([
+      testPage.waitForURL(linkToCoordinatorQueue(seedData.workspaceId, coordinator.id, "working")),
+      workingLink.tap(),
+    ]);
     await expect(testPage.getByTestId("queue-group-list")).toBeVisible();
   });
 

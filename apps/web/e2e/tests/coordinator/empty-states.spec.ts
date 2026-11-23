@@ -2,6 +2,7 @@
 // missing/empty/failure states (docs/specs/coordinator/requirements/needs-you.md,
 // #routes-and-sidebar, #failure-and-recovery).
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { linkToCoordinator, linkToCoordinatorNeedsYou } from "../../../lib/coordinator/links";
 
 test.describe("Coordinator missing/empty/failure states", () => {
@@ -97,7 +98,12 @@ test.describe("Coordinator missing/empty/failure states", () => {
       task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
-    await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
+    watchWs(testPage);
+    const [goalResponse] = await Promise.all([
+      waitForHttp(testPage, "GET", new RegExp(`/coordinators/${coordinator.id}/goal$`)),
+      testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id)),
+    ]);
+    expect(goalResponse.ok()).toBe(true);
 
     const empty = testPage.getByTestId("empty-needs-you-state");
     await expect(empty).toBeVisible();
