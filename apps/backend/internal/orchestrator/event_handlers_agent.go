@@ -1988,7 +1988,8 @@ func (s *Service) executeQueuedMessageWithReservation(
 	promptContent := queuedMessagePromptContent(queuedMsg)
 	var promptReferenceContext string
 	var preparedPromptContent *string
-	if isQueuedWorkflowAutoStart(queuedMsg) {
+	moveInstructions, _ := queuedMsg.Metadata[metaKeyWorkflowMoveInstructions].(bool)
+	if isQueuedWorkflowAutoStart(queuedMsg) || moveInstructions {
 		// Resolve workflow aliases at the drain boundary, before persistence.
 		// Recovery must carry this exact server-generated context because the
 		// shared saved definition can change while PromptAgent is in flight.
