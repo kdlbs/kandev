@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +26,11 @@ func terminalExitUpdates(updates []recordedUpdate) []map[string]any {
 }
 
 func TestClaudeBackgroundTerminalFixtureEmitsCapturedShape(t *testing.T) {
+	tempRoot := t.TempDir()
+	tempDir := filepath.Join(tempRoot, "temp with spaces")
+	require.NoError(t, os.MkdirAll(tempDir, 0o700))
+	t.Setenv("TMPDIR", tempDir)
+
 	e, updater := newTestEmitter()
 	emitClaudeBackgroundTerminalFixture(e, "/claude-background-terminal 10ms 10ms")
 
@@ -42,6 +50,29 @@ func TestClaudeBackgroundTerminalFixtureEmitsCapturedShape(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, string(launchToolCalls[0].ToolCallId), terminalInfo["terminal_id"])
 
+	var outputPaths []string
+	for _, update := range updater.getUpdates() {
+		result := update.notification.Update.ToolCallUpdate
+		if result == nil {
+			continue
+		}
+		raw, ok := result.RawOutput.(map[string]any)
+		if !ok {
+			continue
+		}
+		output, _ := raw["output"].(string)
+		if !strings.Contains(output, "Output is being written to: ") {
+			continue
+		}
+		path := mockClaudeBackgroundShellOutputPath(string(e.sid), string(launchToolCalls[len(outputPaths)].ToolCallId))
+		require.Contains(t, output, "Output is being written to: "+path)
+		outputPaths = append(outputPaths, path)
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		require.True(t, info.Mode().IsRegular())
+	}
+	require.Len(t, outputPaths, 2, "each detached shell launch names its own output file")
+
 	require.Eventually(t, func() bool {
 		return len(terminalExitUpdates(updater.getUpdates())) == 2
 	}, 2*time.Second, 10*time.Millisecond)
@@ -57,6 +88,11 @@ func TestClaudeBackgroundTerminalFixtureEmitsCapturedShape(t *testing.T) {
 	require.Contains(t, exits[1], "signal")
 	require.Nil(t, exits[1]["exit_code"])
 	require.Nil(t, exits[1]["signal"])
+	firstOutput, err := os.ReadFile(outputPaths[0])
+	require.NoError(t, err)
+	require.Contains(t, string(firstOutput), "Mock test suite started")
+	require.Contains(t, string(firstOutput), "Mock test suite is still running")
+	require.Contains(t, string(firstOutput), "Mock test suite finished")
 }
 
 func TestMockClaudeBridgeAgentInfoRequiresVerifiedVersion(t *testing.T) {

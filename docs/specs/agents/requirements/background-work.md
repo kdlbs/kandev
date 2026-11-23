@@ -143,6 +143,7 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-010.7:** When Claude reports matching terminal evidence for a tracked Monitor, only that Monitor shall leave the running count. Its history shall retain the reported outcome and its original session and turn, including after foreground idle and prompt handoff.
 - **AC-AGENTS-BACKGROUND-WORK-010.8:** When Claude registers an active Monitor, the composer chip above chat shall count it. The running-work summary shall identify it as a Monitor. Its active status shall survive foreground idle, prompt completion, handoff, and page reload while the same runtime retains the watch.
 - **AC-AGENTS-BACKGROUND-WORK-010.9:** When a terminal workload observation matches a Monitor transcript tool call by session and source-call ID, that card shall stop showing a watching state. Each sibling card shall reflect only its own matching workload, including after reload.
+- **AC-AGENTS-BACKGROUND-WORK-010.10:** When a verified Claude bridge's detached-shell launch result names that job's output file in the current session, users shall see its output live and after it ends in the shared bounded viewer. Without a valid file, output shall stay unavailable. Controls, transcript, turns, and settlement shall not change.
 
 The [OpenCode continuity design](../system-design/background-work-opencode.md)
 owns full provider continuity. The
