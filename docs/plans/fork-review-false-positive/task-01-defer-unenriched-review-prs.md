@@ -51,7 +51,10 @@ poll" and "nil detail response defers PR until a later successful poll" in
 
 ```bash
 go -C apps/backend test -trimpath ./internal/github -run 'TestCheckReviewWatch' -count=1
-bash scripts/lint-go-changed apps/backend/internal/github/service_reviews.go apps/backend/internal/github/service_reviews_test.go
+go -C apps/backend test -trimpath ./internal/github -run 'TestEnterpriseWatchDelayedResultsFenceHostAndGeneration|TestEnterpriseWatchPublicationUsesCapturedGeneration' -count=1
+go -C apps/backend test -trimpath ./internal/orchestrator -run 'TestReviewWatchSearchResultIdentityControlsAutoStart' -count=1
+go -C apps/backend test -trimpath ./internal/github ./internal/orchestrator -count=1
+bash scripts/lint-go-changed apps/backend/internal/github/service_reviews.go apps/backend/internal/github/service_reviews_test.go apps/backend/internal/github/enterprise_watch_fences_test.go apps/backend/internal/orchestrator/session_ensure.go apps/backend/internal/orchestrator/session_ensure_fork_review_test.go apps/backend/internal/orchestrator/event_handlers_github_review_test.go
 ```
 
 ## Results
@@ -60,9 +63,17 @@ The regression failed first for both failed and nil detail responses because
 the watch returned one PR. After the change, the test confirms neither response
 publishes a PR, and a later successful poll enriches and publishes it. The
 retry assertions use a small scenario struct and event capture so the test does
-not pass an event pointer-to-pointer through an eight-argument helper.
+not pass an event pointer-to-pointer through an eight-argument helper. The
+orchestrator identity test now expects a failed detail read to emit no event,
+while a successful response with missing head identity remains fail-closed.
+Enterprise review-watch fence fixtures return complete PR details for their
+positive controls. The full GitHub and orchestrator packages pass with these
+updates.
 
 Passed:
 
 - `go -C apps/backend test -trimpath ./internal/github -run 'TestCheckReviewWatch' -count=1`
-- `bash scripts/lint-go-changed apps/backend/internal/github/service_reviews.go apps/backend/internal/github/service_reviews_test.go`
+- `go -C apps/backend test -trimpath ./internal/github -run 'TestEnterpriseWatchDelayedResultsFenceHostAndGeneration|TestEnterpriseWatchPublicationUsesCapturedGeneration' -count=1`
+- `go -C apps/backend test -trimpath ./internal/orchestrator -run 'TestReviewWatchSearchResultIdentityControlsAutoStart' -count=1`
+- `go -C apps/backend test -trimpath ./internal/github ./internal/orchestrator -count=1`
+- `bash scripts/lint-go-changed apps/backend/internal/github/service_reviews.go apps/backend/internal/github/service_reviews_test.go apps/backend/internal/github/enterprise_watch_fences_test.go apps/backend/internal/orchestrator/session_ensure.go apps/backend/internal/orchestrator/session_ensure_fork_review_test.go apps/backend/internal/orchestrator/event_handlers_github_review_test.go`

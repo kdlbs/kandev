@@ -53,7 +53,9 @@ Changing the `StartTask` guard. A UI notice.
 
 ```bash
 go -C apps/backend test -trimpath ./internal/orchestrator -run 'TestEnsureSession_ForkReview|TestAutoStart_ForkReview' -count=1
-bash scripts/lint-go-changed apps/backend/internal/orchestrator/session_ensure.go apps/backend/internal/orchestrator/session_ensure_fork_review_test.go
+go -C apps/backend test -trimpath ./internal/github -run 'TestCheckReviewWatch' -count=1
+go -C apps/backend test -trimpath ./internal/github ./internal/orchestrator -count=1
+bash scripts/lint-go-changed apps/backend/internal/github/service_reviews.go apps/backend/internal/github/service_reviews_test.go apps/backend/internal/github/enterprise_watch_fences_test.go apps/backend/internal/orchestrator/session_ensure.go apps/backend/internal/orchestrator/session_ensure_fork_review_test.go apps/backend/internal/orchestrator/event_handlers_github_review_test.go
 cd apps && pnpm --filter @kandev/web typecheck
 ```
 
@@ -73,7 +75,8 @@ Passed:
 
 - `go -C apps/backend test -trimpath ./internal/orchestrator -run 'TestEnsureSession_ForkReview|TestAutoStart_ForkReview' -count=1`
 - `go -C apps/backend test -trimpath ./internal/github -run 'TestCheckReviewWatch' -count=1`
-- `bash scripts/lint-go-changed apps/backend/internal/github/service_reviews.go apps/backend/internal/github/service_reviews_test.go apps/backend/internal/orchestrator/session_ensure.go apps/backend/internal/orchestrator/session_ensure_fork_review_test.go`
+- `go -C apps/backend test -trimpath ./internal/github ./internal/orchestrator -count=1`
+- `bash scripts/lint-go-changed apps/backend/internal/github/service_reviews.go apps/backend/internal/github/service_reviews_test.go apps/backend/internal/github/enterprise_watch_fences_test.go apps/backend/internal/orchestrator/session_ensure.go apps/backend/internal/orchestrator/session_ensure_fork_review_test.go apps/backend/internal/orchestrator/event_handlers_github_review_test.go`
 - `(cd apps/backend && go build -trimpath ./cmd/kandev)`
 - `cd apps && pnpm --filter @kandev/web typecheck`
 - `python3 scripts/list-docs.py validate`
