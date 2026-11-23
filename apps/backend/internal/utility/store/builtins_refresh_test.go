@@ -7,7 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	utilcfg "github.com/kandev/kandev/config/utilityagents"
+	"github.com/kandev/kandev/internal/testutil"
 )
 
 const enhancePromptAgentID = "builtin-enhance-prompt"
@@ -178,5 +181,42 @@ func TestRefreshBuiltinPromptAfterProfileOnlyUpdate(t *testing.T) {
 	}
 	if refreshed.AgentProfileID != "profile-1" || refreshed.ProfileBindingState != "explicit" {
 		t.Fatalf("profile binding changed during prompt refresh: (%q, %q)", refreshed.AgentProfileID, refreshed.ProfileBindingState)
+	}
+}
+
+func TestRefreshUneditedBuiltinPromptPostgresSchemaReplay(t *testing.T) {
+	dsn := testutil.PostgresDSNFromEnv(t)
+	const customized = enhancePromptV1 + "\nKeep the response short."
+	for _, tc := range []struct {
+		name, stored, want string
+	}{
+		{name: "shipped", stored: enhancePromptV1, want: utilcfg.Get("enhance-prompt")},
+		{name: "customized", stored: customized, want: customized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testutil.OpenIsolatedPostgres(t, dsn)
+			repo, err := newSQLiteRepositoryWithDB(db, db)
+			require.NoError(t, err)
+			ctx := t.Context()
+			agent, err := repo.GetAgentByID(ctx, enhancePromptAgentID)
+			require.NoError(t, err)
+			agent.Prompt = tc.stored
+			agent.AgentProfileID = "test-profile"
+			agent.ProfileBindingState = "explicit"
+			require.NoError(t, repo.UpdateAgent(ctx, agent))
+			before, err := repo.GetAgentByID(ctx, enhancePromptAgentID)
+			require.NoError(t, err)
+			require.Equal(t, tc.stored, before.Prompt)
+			require.Equal(t, "test-profile", before.AgentProfileID)
+			require.Equal(t, "explicit", before.ProfileBindingState)
+			before.Prompt = tc.want
+			for range 2 {
+				replayed, err := newSQLiteRepositoryWithDB(db, db)
+				require.NoError(t, err)
+				after, err := replayed.GetAgentByID(ctx, enhancePromptAgentID)
+				require.NoError(t, err)
+				require.Equal(t, before, after)
+			}
+		})
 	}
 }
