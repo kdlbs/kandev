@@ -35,8 +35,8 @@ and the existing 44 px touch geometry.
   Check both neighbors before changing the component.
 - Replace the unconditional 44 px desktop sizing expectation with responsive
   geometry checks. Use the neighboring Chat animations switch as the desktop
-  exemplar. Remove the chart-only wrapper minimum and scope the chart
-  switch's touch geometry to `max-md` or a coarse primary pointer.
+  exemplar. Remove the chart-only wrapper minimum. Share responsive classes
+  that apply touch sizing below 768 px or with a coarse pointer.
 - Use the mobile chart motion save case to check touch target size and
   containment. Add a coarse-pointer width above 768 px to exercise the other
   touch sizing condition.
@@ -52,7 +52,7 @@ Chart motion logic, setting state, localization, and other settings rows.
    768 px.
 2. The chart switch measures at least 44 × 44 px in each touch context.
    Check a 767 px fine-pointer window, a 390 px touch viewport, and a
-   900 px coarse-pointer viewport.
+   900 px coarse-pointer viewport. All tracks also align at 767 px.
    Resizing preserves the switch value. The phone row stays inside the viewport.
 3. The chart preference still saves on this device and persists after reload.
 
@@ -105,6 +105,9 @@ Remove the temporary config after the checks.
 
 - `apps/web/components/settings/rich-output-motion-settings-card.tsx`
 - `apps/web/components/settings/rich-output-motion-settings-card.test.tsx`
+- `apps/web/components/settings/chat-motion-settings-card.tsx`
+- `apps/web/components/settings/image-preview-defaults-settings.tsx`
+- `apps/web/components/settings/settings-control.ts`
 - `apps/web/e2e/tests/settings/settings-manual-save.spec.ts`
 - `apps/web/e2e/tests/settings/mobile-general-settings.spec.ts`
 

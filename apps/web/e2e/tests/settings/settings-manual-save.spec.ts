@@ -64,18 +64,23 @@ test.describe("Settings manual save", () => {
     const chat = testPage.getByRole("switch", { name: "Chat animations" });
     const imagePreviews = testPage.getByRole("switch", { name: "Show image previews by default" });
     // @covers AC-UI-SETTINGS-COMPOSITION-001.1
-    for (const width of [1440, 768]) {
+    const appearanceSwitches = [toggle, chat, imagePreviews];
+    for (const [width, height] of [
+      [1440, "28px"],
+      [768, "28px"],
+      [767, "44px"],
+    ] as const) {
       await testPage.setViewportSize({ width, height: 900 });
       const [chartRight, chatRight, imageRight] = await Promise.all(
-        [toggle, chat, imagePreviews].map(switchTrackRight),
+        appearanceSwitches.map(switchTrackRight),
       );
       expect(chartRight).toBeCloseTo(chatRight, 1);
       expect(chartRight).toBeCloseTo(imageRight, 1);
-      await expect(toggle).toHaveCSS("height", "28px");
+      await Promise.all(
+        appearanceSwitches.map((control) => expect(control).toHaveCSS("height", height)),
+      );
     }
 
-    await testPage.setViewportSize({ width: 767, height: 900 });
-    await expect(toggle).toHaveCSS("height", "44px");
     await expect(toggle).toHaveCSS("width", "44px");
     await expect(toggle).toBeChecked();
     await testPage.setViewportSize({ width: 1440, height: 900 });

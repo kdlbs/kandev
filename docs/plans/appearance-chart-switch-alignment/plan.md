@@ -32,11 +32,10 @@ buttons and a 4 px track inset on fine-pointer desktop. The rows align the
 buttons at their right edges, so the chart track sits 4 px farther left.
 The chart row also applies a 44 px minimum to its control wrapper at all widths.
 
-Use the neighboring Chat animations switch as the desktop sizing reference.
-Apply the chart switch's 44 px dimensions and matching track inset below
-768 px or when the primary pointer is coarse. Let `SettingsRow` supply the
-responsive wrapper minimum. Keep the existing row, switch primitive, label,
-and save integration.
+Use the Chat animations switch as the desktop sizing reference. Share the
+responsive classes across all three Appearance switches. Apply the 44 px
+dimensions and matching track inset below 768 px or with a coarse pointer.
+Let `SettingsRow` supply the responsive wrapper minimum.
 
 The phone entry point stays at Preferences → Appearance. The existing
 Appearance preference group is the mobile exemplar. Labels and descriptions
@@ -72,7 +71,7 @@ when Playwright covers the responsive geometry.
 ## E2E tests
 
 - `chromium`, `settings-manual-save.spec.ts`. Compare the rendered track edges
-  and button heights. Check the chart switch at 767 px and 768 px with a fine
+  and button heights. Check all three switches at 767 px and 768 px with a fine
   pointer. Keep the device save and reload assertions.
   Covers `AC-UI-SETTINGS-COMPOSITION-001.1`,
   `AC-UI-CONTROL-SIZING-001.3`, and `AC-UI-CONTROL-SIZING-001.5`.
