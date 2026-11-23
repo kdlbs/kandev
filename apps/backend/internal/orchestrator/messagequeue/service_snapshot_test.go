@@ -38,7 +38,7 @@ func TestSnapshotProjectsIdentityAndEffectiveAutoMergePolicy(t *testing.T) {
 	service := NewService(repository, 7, logger.Default())
 	identity := QueueSessionIdentity{TaskID: "task", SessionID: "session", SessionIncarnationID: "incarnation"}
 	seedQueueSessionIdentity(t, repository, identity)
-	service.SetAutoMergePolicy(true, 8)
+	service.SetGlobalAutoMergePolicy(AutoMergePolicy{Enabled: true, Revision: 8})
 	if _, err := service.SetSessionAutoMerge(context.Background(), identity, false); err != nil {
 		t.Fatalf("set session Auto-merge: %v", err)
 	}

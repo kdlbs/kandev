@@ -6,6 +6,19 @@
  * see lib/api/client.ts fetchJson).
  */
 
+import type { BackendMessage } from "./backend-message";
+
+export type PluginBackendMessageMap = {
+  "plugin.sidebar-grouping.updated": BackendMessage<
+    "plugin.sidebar-grouping.updated",
+    {
+      catalog?: boolean;
+      plugin_id?: string;
+      workspace_id?: string;
+    }
+  >;
+};
+
 export type PluginStatus = "registered" | "active" | "error" | "disabled" | "uninstalled";
 
 export interface PluginCapabilities {
@@ -25,6 +38,13 @@ export interface PluginWebhook {
    * values override either default. See docs/public/plugins-manifest.md. */
   access?: "public" | "authenticated";
   max_body_bytes?: number;
+}
+
+export interface PluginSidebarGrouping {
+  id: string;
+  label: string;
+  label_key?: string;
+  action: string;
 }
 
 export interface PluginUIPage {
@@ -53,7 +73,14 @@ export interface PluginKeybinding {
   allow_in_editor?: boolean;
 }
 
+export interface PluginFileViewerDeclaration {
+  id: string;
+  title: string;
+  extensions: string[];
+}
+
 export interface PluginUISection {
+  file_viewers?: PluginFileViewerDeclaration[];
   pages?: PluginUIPage[];
   bundle?: string;
   styles?: string[];
@@ -88,6 +115,7 @@ export interface PluginRecord {
   /** Manifest-owned repository providers, serialized by the plugin API. */
   repository_providers?: string[];
   webhooks?: PluginWebhook[];
+  sidebar_groupings?: PluginSidebarGrouping[];
   config_schema?: Record<string, unknown>;
   ui?: PluginUISection;
   status: PluginStatus;
@@ -208,6 +236,7 @@ export interface MarketplacePermissions {
  * marketplace.CatalogEntry.
  */
 export interface MarketplaceEntry {
+  file_extensions?: string[];
   id: string;
   kind?: "plugin" | "canvas";
   name: string;

@@ -37,4 +37,6 @@ Available tools:
 - message_task_kandev: Send a prompt to an existing task session.{coordinator_task_control_section}
 - list_task_sessions_kandev: List a task's sessions and IDs.
 
+Calls wait offline. Do not poll; end turn at budget.
+
 IMPORTANT: Use these tools when instructed; do not skip them.

@@ -219,3 +219,13 @@ it("reuses free restoration slots while preserving order and skipping failures",
   ]);
   expect(loaded?.every((tab) => tab.repo === "docs" && tab.renderedPreview)).toBe(true);
 });
+it("restores read-failure discovery tabs while skipping source-file read failures", async () => {
+  mockGetWebSocketClient.mockReturnValue(CLIENT);
+  mockRequestFileContent.mockRejectedValue(Error("read limit"));
+  const tabs = await loadSavedFileTabs(SESSION_ID, [
+    { path: "model.obj", name: "model.obj", pinned: true },
+    { path: "source.ts", name: "source.ts", pinned: true },
+  ]);
+  expect(tabs).toHaveLength(1);
+  expect(tabs?.[0]).toMatchObject({ path: "model.obj", previewOnly: true, content: "" });
+});

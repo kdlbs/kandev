@@ -58,6 +58,7 @@ import (
 	// JIRA integration
 	jirapkg "github.com/kandev/kandev/internal/jira"
 	linearpkg "github.com/kandev/kandev/internal/linear"
+	"github.com/kandev/kandev/internal/promptsync"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
 	workflowsyncpkg "github.com/kandev/kandev/internal/workflowsync"
 
@@ -991,6 +992,11 @@ func startAgentInfrastructure(
 		startup.AfterReady(ctx, func() { workflowSyncPoller.Start(ctx) })
 		addRuntimeCleanup(func() error { workflowSyncPoller.Stop(); return nil })
 		log.Info("Workflow sync poller started")
+	}
+	if services.PromptSync != nil {
+		promptSyncPoller := promptsync.NewPoller(services.PromptSync, log)
+		startup.AfterReady(ctx, func() { promptSyncPoller.Start(ctx) })
+		addRuntimeCleanup(func() error { promptSyncPoller.Stop(); return nil })
 	}
 
 	// Start Office config sync poller: periodically pulls agent/skill/

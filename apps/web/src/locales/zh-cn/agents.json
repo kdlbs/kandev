@@ -324,6 +324,7 @@
   "modelOptionsAuthenticationRequired": "请登录此智能体以加载模型选项。",
   "modelOptionsResolutionFailed": "无法加载模型选项。",
   "modelRequiredForAllProfiles": "所有配置都需要模型。",
+  "claudeExactModelAliasConflict": "请在“启动模型”中选择完整的模型 ID，或从环境变量中移除 {{envVar}}。",
   "modelSettings": "模型设置",
   "moveDynamicCandidateDown": "下移候选配置",
   "moveDynamicCandidateUp": "上移候选配置",

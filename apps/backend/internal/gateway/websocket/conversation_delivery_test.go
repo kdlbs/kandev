@@ -13,6 +13,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -138,6 +139,9 @@ func TestConversationDeliveryProjectsSafeCoreTurnMetadataAndCompletion(t *testin
 		UserID: "user-1", Epoch: "epoch-1",
 	}
 	hadOutput := false
+	configurationResult := &streams.ConfigurationCommandResult{
+		Status: "applied", ConfigID: "model", Requested: "Mock Smart", Effective: "Mock Smart", Confirmed: true,
+	}
 	turn := &models.Turn{
 		ID: "turn-core", TaskSessionID: "session-1", TaskID: "task-1",
 		Metadata: map[string]any{
@@ -146,6 +150,59 @@ func TestConversationDeliveryProjectsSafeCoreTurnMetadataAndCompletion(t *testin
 			"internal":                              "private turn state",
 		},
 	}
+	hub.BroadcastConversationMutation(&models.ConversationMutationReceipt{
+		SessionID: "session-1", BaseRevision: 1, Revision: 2, Complete: true,
+		Operations: []models.ConversationMutationOperation{{
+			Kind: models.ConversationMutationUpsert, Entity: models.ConversationEntityTurn,
+			ID: turn.ID, SessionID: turn.TaskSessionID, TaskID: turn.TaskID,
+			Turn: turn, HadOutput: &hadOutput, ConfigurationCommandResult: configurationResult,
+		}},
+	})
+
+	var frame ws.Message
+	if err := json.Unmarshal(<-client.send, &frame); err != nil {
+		t.Fatalf("decode changed frame: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(frame.Payload, &payload); err != nil {
+		t.Fatalf("decode changed payload: %v", err)
+	}
+	operation := payload["operations"].([]any)[0].(map[string]any)
+	projected := operation["turn"].(map[string]any)
+	if projected["had_output"] != false {
+		t.Fatalf("core turn had_output = %#v, want false", projected["had_output"])
+	}
+	if got := operation["configuration_result"].(map[string]any); got["requested"] != "Mock Smart" || got["confirmed"] != true {
+		t.Fatalf("core turn configuration_result = %#v, want live command result", got)
+	}
+	metadata := projected["metadata"].(map[string]any)
+	if metadata[models.TurnMetaKeyRuntimeConfigSnapshot] == nil {
+		t.Fatal("core turn dropped runtime configuration metadata")
+	}
+	if _, ok := metadata[models.TurnMetaKeyPromptDispatchPending]; ok {
+		t.Fatal("core turn exposed prompt-dispatch metadata")
+	}
+	if _, ok := metadata["internal"]; ok {
+		t.Fatal("core turn exposed private metadata")
+	}
+}
+
+func TestConversationDeliveryBufferedCoreTurnOmitsTransientConfigurationResult(t *testing.T) {
+	hub := NewHub(ws.NewDispatcher(), testLogger())
+	client := NewClient("conversation-client", authn.Identity{UserID: "user-1"}, nil, hub, testLogger())
+	hub.clients[client] = true
+	client.conversationSubscriptions["scope-1"] = conversationSubscription{
+		ScopeID: "scope-1", SessionID: "session-1", ConsumerKind: conversationConsumerCore,
+		UserID: "user-1", Epoch: "epoch-1",
+	}
+	result := &streams.ConfigurationCommandResult{
+		Status: "applied", ConfigID: "model", Requested: "requested", Effective: "effective", Confirmed: true,
+	}
+	turn := &models.Turn{
+		ID: "turn-buffered", TaskSessionID: "session-1", TaskID: "task-1",
+		Metadata: map[string]any{"configuration_result": result},
+	}
+	hadOutput := false
 	hub.BroadcastConversationMutation(&models.ConversationMutationReceipt{
 		SessionID: "session-1", BaseRevision: 1, Revision: 2, Complete: true,
 		Operations: []models.ConversationMutationOperation{{
@@ -164,19 +221,17 @@ func TestConversationDeliveryProjectsSafeCoreTurnMetadataAndCompletion(t *testin
 		t.Fatalf("decode changed payload: %v", err)
 	}
 	operation := payload["operations"].([]any)[0].(map[string]any)
+	if _, exists := operation["configuration_result"]; exists {
+		t.Fatal("buffered Core turn receipt exposed a transient configuration result")
+	}
 	projected := operation["turn"].(map[string]any)
-	if projected["had_output"] != false {
-		t.Fatalf("core turn had_output = %#v, want false", projected["had_output"])
+	if _, exists := projected["configuration_result"]; exists {
+		t.Fatal("buffered Core turn exposed a transient configuration result")
 	}
-	metadata := projected["metadata"].(map[string]any)
-	if metadata[models.TurnMetaKeyRuntimeConfigSnapshot] == nil {
-		t.Fatal("core turn dropped runtime configuration metadata")
-	}
-	if _, ok := metadata[models.TurnMetaKeyPromptDispatchPending]; ok {
-		t.Fatal("core turn exposed prompt-dispatch metadata")
-	}
-	if _, ok := metadata["internal"]; ok {
-		t.Fatal("core turn exposed private metadata")
+	if metadata, ok := projected["metadata"].(map[string]any); ok {
+		if _, exists := metadata["configuration_result"]; exists {
+			t.Fatal("buffered Core turn metadata exposed a transient configuration result")
+		}
 	}
 }
 

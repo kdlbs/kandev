@@ -1009,17 +1009,19 @@ func TestResolveScriptCommandErrors(t *testing.T) {
 	}
 }
 
-func TestSetSessionRuntimeConfigOverridesPersistWithoutRunningAgent(t *testing.T) {
+func TestSessionConfigurationFeedbackPickerHTTP(t *testing.T) {
 	tests := []struct {
 		name       string
 		path       string
 		body       string
+		requested  string
 		assertions func(*testing.T, models.SessionRuntimeConfig, map[string]interface{})
 	}{
 		{
-			name: "model",
-			path: "/api/v1/task-sessions/session-idle/set-model",
-			body: `{"model_id":"claude-opus-4-8"}`,
+			name:      "model",
+			path:      "/api/v1/task-sessions/session-idle/set-model",
+			body:      `{"model_id":"claude-opus-4-8"}`,
+			requested: "claude-opus-4-8",
 			assertions: func(t *testing.T, cfg models.SessionRuntimeConfig, _ map[string]interface{}) {
 				t.Helper()
 				if cfg.Model != "claude-opus-4-8" {
@@ -1028,9 +1030,10 @@ func TestSetSessionRuntimeConfigOverridesPersistWithoutRunningAgent(t *testing.T
 			},
 		},
 		{
-			name: "dynamic model option",
-			path: "/api/v1/task-sessions/session-idle/set-config-option",
-			body: `{"config_id":"model","value":"claude-opus-4-8"}`,
+			name:      "dynamic model option",
+			path:      "/api/v1/task-sessions/session-idle/set-config-option",
+			body:      `{"config_id":"model","value":"claude-opus-4-8"}`,
+			requested: "claude-opus-4-8",
 			assertions: func(t *testing.T, cfg models.SessionRuntimeConfig, _ map[string]interface{}) {
 				t.Helper()
 				if cfg.Model != "claude-opus-4-8" || cfg.ConfigOptions["model"] != "claude-opus-4-8" {
@@ -1039,9 +1042,10 @@ func TestSetSessionRuntimeConfigOverridesPersistWithoutRunningAgent(t *testing.T
 			},
 		},
 		{
-			name: "mode",
-			path: "/api/v1/task-sessions/session-idle/set-mode",
-			body: `{"mode_id":"acceptEdits"}`,
+			name:      "mode",
+			path:      "/api/v1/task-sessions/session-idle/set-mode",
+			body:      `{"mode_id":"acceptEdits"}`,
+			requested: "acceptEdits",
 			assertions: func(t *testing.T, cfg models.SessionRuntimeConfig, metadata map[string]interface{}) {
 				t.Helper()
 				if cfg.Mode != "acceptEdits" || metadata[models.SessionMetaKeySessionMode] != "acceptEdits" {
@@ -1095,11 +1099,69 @@ func TestSetSessionRuntimeConfigOverridesPersistWithoutRunningAgent(t *testing.T
 			if resp.Code != http.StatusOK {
 				t.Fatalf("expected idle session update to succeed, got %d: %s", resp.Code, resp.Body.String())
 			}
+			var response struct {
+				ConfigurationResult struct {
+					Status    string `json:"status"`
+					Requested string `json:"requested"`
+					Confirmed bool   `json:"confirmed"`
+				} `json:"configuration_result"`
+			}
+			if err := json.Unmarshal(resp.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if response.ConfigurationResult.Status != "saved_for_launch" ||
+				response.ConfigurationResult.Requested != tt.requested ||
+				response.ConfigurationResult.Confirmed {
+				t.Fatalf("configuration result = %+v, want saved_for_launch for %q", response.ConfigurationResult, tt.requested)
+			}
 			cfg, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata)
 			if !ok {
 				t.Fatalf("expected persisted runtime config overrides, got %+v", session.Metadata)
 			}
 			tt.assertions(t, cfg, session.Metadata)
+		})
+	}
+}
+
+func TestSessionConfigurationFeedbackStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		result lifecycle.SessionConfigurationResult
+		live   bool
+		want   string
+	}{
+		{
+			name: "saved for launch",
+			want: "saved_for_launch",
+		},
+		{
+			name:   "live value without evidence",
+			result: lifecycle.SessionConfigurationResult{ExecutionID: "exec-1"},
+			live:   true,
+			want:   "unconfirmed",
+		},
+		{
+			name: "provider confirmation",
+			result: lifecycle.SessionConfigurationResult{
+				Requested: "model-requested", Effective: "model-effective", Confirmed: true, ExecutionID: "exec-1",
+			},
+			live: true,
+			want: "applied",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := newSessionConfigurationFeedback("model", "model-requested", tt.result, tt.live)
+			if got.Status != tt.want {
+				t.Fatalf("status = %q, want %q", got.Status, tt.want)
+			}
+			if tt.live && got.ExecutionID != "exec-1" {
+				t.Fatalf("execution_id = %q, want exec-1", got.ExecutionID)
+			}
+			if got.Confirmed != tt.result.Confirmed || got.Effective != tt.result.Effective {
+				t.Fatalf("feedback = %+v, does not preserve provider result %+v", got, tt.result)
+			}
 		})
 	}
 }

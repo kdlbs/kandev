@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -67,7 +68,10 @@ func validateRemoteRecoverySnapshot(snapshot *RemoteRecoverySnapshot, record *mo
 	if err := validateRemoteRecoverySnapshotEligibility(snapshot); err != nil {
 		return err
 	}
-	return validateRemoteRecoverySnapshotSession(snapshot)
+	if err := validateRemoteRecoverySnapshotSession(snapshot); err != nil {
+		return err
+	}
+	return nil
 }
 
 func validateRemoteRecoverySnapshotIdentity(snapshot *RemoteRecoverySnapshot, record *models.ExecutorRunning) error {
@@ -119,9 +123,28 @@ func validateRemoteRecoverySnapshotSession(snapshot *RemoteRecoverySnapshot) err
 	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
 		return fmt.Errorf("remote recovery session is terminal: %s", snapshot.SessionState)
 	case models.TaskSessionStateFailed:
-		if !snapshot.RecoverySourcePresent {
+		if !snapshot.RecoverySourcePresent && !remoteRecoveryNeedsStoppedAgentProof(snapshot) {
 			return fmt.Errorf("failed remote recovery session has no pending delivery proof")
 		}
+	}
+	return nil
+}
+
+func remoteRecoveryNeedsStoppedAgentProof(snapshot *RemoteRecoverySnapshot) bool {
+	if snapshot == nil || snapshot.SessionState != models.TaskSessionStateFailed || snapshot.RecoverySourcePresent {
+		return false
+	}
+	return snapshot.Runtime == string(agentruntime.RuntimeRemoteDocker) ||
+		snapshot.Runtime == string(agentruntime.RuntimePluginRemote)
+}
+
+func validateFailedRemoteRecoveryAgentProof(snapshot *RemoteRecoverySnapshot, instance *ExecutorInstance) error {
+	if !remoteRecoveryNeedsStoppedAgentProof(snapshot) {
+		return nil
+	}
+	if instance == nil || instance.agentSessionAssociation == nil ||
+		instance.agentSessionAssociation.AgentStatus != agentProcessStatusStopped {
+		return errors.New("failed remote recovery without delivery proof requires an authenticated stopped agent")
 	}
 	return nil
 }

@@ -20,3 +20,20 @@ type TransitionGroup struct {
 	ToStepID   *string
 	Count      int64
 }
+
+// StepTransitionRecord is one recorded movement of a task with its
+// attribution, for callers authorized to read the task's workspace. Step names
+// are resolved from current workflow steps and are nil for a removed step.
+type StepTransitionRecord struct {
+	ID                   int64
+	FromWorkflowID       *string
+	FromWorkflowStepID   *string
+	FromWorkflowStepName *string
+	ToWorkflowID         *string
+	ToWorkflowStepID     *string
+	ToWorkflowStepName   *string
+	Trigger              string
+	ActorKind            string
+	ActorID              *string
+	OccurredAt           time.Time
+}

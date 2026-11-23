@@ -5,6 +5,7 @@ import (
 
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -28,7 +29,8 @@ type emptyTurnCompletion struct {
 	// completeOutput is set when the completion frame itself carries assistant
 	// output (message text or plan content) that the ordinary completion path
 	// persists.
-	completeOutput bool
+	completeOutput             bool
+	configurationCommandResult *streams.ConfigurationCommandResult
 }
 
 // routeDynamicEmptyTurn counts a normal end_turn completion with no assistant
@@ -81,7 +83,8 @@ func (s *Service) emptyTurnCompletionAdmissible(
 	if session == nil || s.profileExecutionResolver == nil || completion.data.SessionID == "" {
 		return false
 	}
-	if streamGuard == nil || !streamGuard.locked || s.isCancelInFlight(completion.data.SessionID) {
+	if streamGuard == nil || !streamGuard.locked || s.isCancelInFlight(completion.data.SessionID) ||
+		completion.configurationCommandResult != nil {
 		return false
 	}
 	return completion.stopReason == stopReasonEndTurn && !completion.isError

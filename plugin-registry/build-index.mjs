@@ -535,8 +535,10 @@ export async function buildEntry(
       ...new Set([
         ...(manifest.categories ?? []),
         ...(spec.categories ?? []),
+        ...(verified?.file_extensions?.length ? ["File viewers"] : []),
       ]),
     ],
+    file_extensions: verified?.file_extensions ?? [],
     icon_url: iconUrl,
     repo_url: presentation.repo_url || canonicalRepoURL,
     version: version || null,

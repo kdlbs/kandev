@@ -203,7 +203,7 @@ type QueueIdentityAutoRunController interface {
 
 // QueueAutoMergeController persists and resolves per-session automatic-merge policy.
 type QueueAutoMergeController interface {
-	SetSessionAutoMerge(context.Context, messagequeue.QueueSessionIdentity, bool) (messagequeue.AutoMergePolicy, error)
+	SetSessionAutoMerge(context.Context, messagequeue.QueueSessionIdentity, bool) (messagequeue.SessionPolicyResult, error)
 }
 
 // QueueEditLeaseController owns target-bound queued-message edit leases.
