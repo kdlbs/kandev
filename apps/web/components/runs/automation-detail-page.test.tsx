@@ -66,7 +66,7 @@ vi.mock("sonner", () => ({
 // The editor is a settings-shell component with its own data fetching; this
 // page's contract is that it mounts on the Configure tab and nowhere else.
 vi.mock("@/components/automations/automation-editor", () => ({
-  AutomationEditor: () => <div data-testid={AUTOMATION_EDITOR} />,
+  AutomationEditor: () => <input data-testid={AUTOMATION_EDITOR} defaultValue="Nightly drift" />,
 }));
 
 // The transcript is the task chat stack. This suite is about which run the page
@@ -313,6 +313,39 @@ describe("AutomationDetailPage schedule recovery", () => {
     );
     expect(mocks.updateTrigger).toHaveBeenNthCalledWith(2, "trigger-1", { enabled: true });
     expect(screen.queryByTestId("enable-schedule-error")).toBeNull();
+  });
+});
+
+describe("AutomationDetailPage Configure draft recovery", () => {
+  it("keeps a Configure draft mounted when a pending recovery refresh fails", async () => {
+    mocks.getAutomation
+      .mockResolvedValueOnce(disabledScheduleAutomation())
+      .mockRejectedValueOnce(new Error("activity refresh failed"));
+    let resolveUpdate!: (value: { updated: boolean }) => void;
+    const updatePromise = new Promise<{ updated: boolean }>((resolve) => {
+      resolveUpdate = resolve;
+    });
+    mocks.updateTrigger.mockReturnValueOnce(updatePromise);
+
+    const view = render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+    fireEvent.click(await screen.findByTestId(DETAIL_TOGGLE));
+    fireEvent.click(screen.getByTestId(ENABLE_SCHEDULE));
+    await waitFor(() => expect(mocks.updateTrigger).toHaveBeenCalledTimes(1));
+
+    view.rerender(<AutomationDetailPage automationId={AUTOMATION_ID} tab="configure" />);
+    const editor = await screen.findByTestId(AUTOMATION_EDITOR);
+    fireEvent.change(editor, { target: { value: "unsaved automation name" } });
+
+    await act(async () => {
+      resolveUpdate({ updated: true });
+      await updatePromise;
+    });
+
+    await screen.findByTestId("automation-error");
+    expect(screen.getByTestId(AUTOMATION_EDITOR)).toBe(editor);
+    expect((screen.getByTestId(AUTOMATION_EDITOR) as HTMLInputElement).value).toBe(
+      "unsaved automation name",
+    );
   });
 });
 

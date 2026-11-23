@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   getAutomation,
   getAutomationSummary,
@@ -51,7 +51,10 @@ export function useAutomationActivity(automationId: string) {
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef(0);
   const activeAutomationIdRef = useRef(automationId);
-  activeAutomationIdRef.current = automationId;
+
+  useLayoutEffect(() => {
+    activeAutomationIdRef.current = automationId;
+  }, [automationId]);
 
   const refresh = useCallback((): Promise<void> => {
     if (activeAutomationIdRef.current !== automationId) return Promise.resolve();
@@ -87,7 +90,11 @@ export function useAutomationActivity(automationId: string) {
         if (requestRef.current !== requestId || activeAutomationIdRef.current !== automationId) {
           return;
         }
-        setLoaded({ automationId, automation: null, runs: EMPTY_RUNS, openRuns: 0 });
+        setLoaded((current) =>
+          current.automationId === automationId && current.automation
+            ? current
+            : { automationId, automation: null, runs: EMPTY_RUNS, openRuns: 0 },
+        );
         setError(err instanceof Error ? err.message : t("automations:failedToLoadThisAutomation"));
       })
       .finally(() => {

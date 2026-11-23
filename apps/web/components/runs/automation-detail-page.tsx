@@ -390,7 +390,7 @@ export function AutomationDetailPage({
   const { isMobile } = useResponsiveBreakpoint();
 
   const selected = selectRun(runs, runId);
-  const show = !error && !foreign && automation;
+  const show = !foreign && automation;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">

@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "../fixtures/test-base";
 import type { ApiClient } from "../helpers/api-client";
 import { expectControlHeight } from "../helpers/control-sizing";
+import { watchWs } from "../helpers/causal-waits";
 import { AutomationsPage } from "../pages/automations-page";
 
 /**
@@ -324,13 +325,18 @@ test.describe("Automation schedule trigger recovery", () => {
       config: { cron_expression: cronExpression, timezone: "UTC" },
       enabled: false,
     });
+    const watcher = watchWs(testPage);
     await openRunView(testPage, automation.id);
 
     const rail = testPage.getByTestId("runs-rail");
     await rail.getByTestId("run-detail-toggle").click();
     const nextRun = rail.getByTestId("run-detail-next-run");
     await expect(nextRun).toContainText("Schedule trigger is switched off");
+    const scheduleUpdate = watcher.waitForResponse("automation.trigger.update", {
+      requestWhere: (payload) => payload.id === trigger.id,
+    });
     await rail.getByTestId("enable-schedule-action").click();
+    await scheduleUpdate;
     await expect(nextRun).not.toContainText("Schedule trigger is switched off", {
       timeout: 15_000,
     });

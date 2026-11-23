@@ -85,17 +85,27 @@ Assert the status updates live and after reload. Check the saved trigger ID,
 cron, timezone, and enabled flag with `automation.get`. Check the button's
 touch height with a 14px root font and drawer containment on the phone.
 
-Run from the repository root. The phone check reuses the desktop build.
+Run from the repository root. These commands passed for this implementation.
+The phone check reuses the desktop E2E build.
 
 ```bash
-pnpm --dir apps/web test components/runs/automation-detail-page.test.tsx
-(cd apps/backend && go test -trimpath ./internal/automation -run '^(TestScheduledTriggerUpdate_DisabledAndEmpty|TestCronScheduler_UnchangedScheduleCatchUp)$' -count=1)
-pnpm --dir apps/web i18n:pseudo
-pnpm --dir apps/web i18n:check
-pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/automations-run-detail.spec.ts -- --grep 'schedule trigger recovery'
-pnpm --dir apps/web e2e:run --host --shards 1 --no-build --project mobile-chrome tests/mobile-automation-detail.spec.ts -- --grep 'schedule trigger recovery'
-node scripts/validate-public-docs.mjs
-git diff --check
+pnpm --dir apps/web test components/runs/automation-detail-page.test.tsx # passed: 29 tests
+pnpm --dir apps/web test components/runs/use-automation-activity.test.ts # passed: 9 tests
+pnpm --dir apps/web run typecheck # passed
+pnpm --dir apps/web run lint # passed
+pnpm --dir apps/web run build # passed
+pnpm --dir apps/web i18n:pseudo # passed: 37 namespaces, 13994 messages
+pnpm --dir apps/web run i18n:check # passed
+pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/automations-run-detail.spec.ts -- --grep 'schedule trigger recovery' # passed: 1 test
+pnpm --dir apps/web e2e:run --host --shards 1 --no-build --project mobile-chrome tests/mobile-automation-detail.spec.ts -- --grep 'schedule trigger recovery' # passed: 1 test; 44px minimum with 14px root font
+(cd apps/backend && go test -trimpath ./internal/automation -run '^(TestScheduledTriggerUpdate_DisabledAndEmpty|TestCronScheduler_UnchangedScheduleCatchUp)$' -count=1) # passed
+python3 scripts/list-docs.py validate # passed: 463 decisions and 2098 specifications
+python3 scripts/lint-spec-files.py --all # passed
+node --test scripts/validate-public-docs.test.mjs # passed: 63 tests
+node scripts/validate-public-docs.mjs # passed: 56 published pages
+pnpm --dir apps/web exec prettier --check components/runs/automation-detail-page.test.tsx components/runs/automation-detail-page.tsx components/runs/use-automation-activity.ts e2e/tests/automations-run-detail.spec.ts e2e/tests/mobile-automation-detail.spec.ts # passed
+pnpm --dir apps/web exec prettier --check ../../docs/plans/automation-schedule-trigger-recovery/task-01-enable-schedule.md # passed
+git diff --check # passed
 ```
 
 ## Files likely touched
@@ -127,11 +137,11 @@ The existing scheduler can admit a missed occurrence when a schedule resumes.
 
 ## Results
 
-The unit regression failed before implementation because Run detail had no
-schedule action. It covers the partial trigger update, write-in-progress
-state, visible failure, retry, refreshed saved status, a stale A write after B
-loads, and the Activity-only action scope. The focused page test passes
-(28 tests).
+The page tests cover the recovery action, write-in-progress state, visible
+failure and retry, refreshed saved status, a deferred A write after B loads,
+the Activity-only action scope, and an unsaved Configure draft across a failed
+post-enable refresh. The page suite passes (29 tests). The activity hook suite
+passes (9 tests); its manual refresh test awaits the asynchronous `act` scope.
 
 The targeted Go scheduler tests pass. Desktop E2E passes after the managed
 runner builds production assets; mobile E2E passes against that build and
