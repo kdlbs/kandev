@@ -24,16 +24,16 @@ type messageKey struct {
 }
 
 func (a *Adapter) handleUpdate(_ context.Context, notification wire.UpdateSessionNotification) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.ctx.Err() != nil {
-		return nil
-	}
-	if attach := a.attach; attach != nil {
-		a.stageUpdate(attach, notification)
-	} else {
-		a.projectUpdate(notification)
-	}
+	a.project(func(batch *eventBatch) {
+		if a.ctx.Err() != nil {
+			return
+		}
+		if attach := a.attach; attach != nil {
+			a.stageUpdate(attach, notification)
+		} else {
+			a.projectUpdate(notification, batch)
+		}
+	})
 	return nil
 }
 
@@ -47,39 +47,40 @@ func (a *Adapter) stageUpdate(attach *sessionAttachment, notification wire.Updat
 		close(attach.replay)
 		return
 	}
-	a.projectEntity(&attach.state, attach.session, notification, false)
+	a.projectEntity(&attach.state, attach.session, notification, nil)
 }
 
-func (a *Adapter) projectUpdate(notification wire.UpdateSessionNotification) {
+func (a *Adapter) projectUpdate(notification wire.UpdateSessionNotification, batch *eventBatch) {
 	if notification.SessionID == a.session {
 		switch update := notification.Update.Value.(type) {
 		case *wire.StateUpdate:
-			a.observeForeground(update)
+			a.observeForeground(update, batch)
 			return
 		case *wire.ConfigOptionUpdate:
-			a.publishSettings(update.ConfigOptions, "")
+			a.projectSettings(update.ConfigOptions, "", batch)
 			return
 		case *wire.AvailableCommandsUpdate:
-			a.publishCommands(update.AvailableCommands)
+			a.projectCommands(update.AvailableCommands, batch)
 			return
 		case *wire.UsageUpdate:
-			a.publishUsage(update)
+			a.projectUsage(update, batch)
 			return
 		case *wire.PlanUpdate:
-			a.publishPlan(update.Plan)
+			a.projectPlan(update.Plan, batch)
 			return
 		}
 	}
-	a.projectEntity(&a.state, a.session, notification, true)
+	a.projectEntity(&a.state, a.session, notification, batch)
 }
 
-func (a *Adapter) projectEntity(state *projection, root wire.SessionID, notification wire.UpdateSessionNotification, live bool) {
+func (a *Adapter) projectEntity(state *projection, root wire.SessionID, notification wire.UpdateSessionNotification, batch *eventBatch) {
 	session := notification.SessionID
 	parent := state.children[session]
 	if root == "" || (session != root && parent == "") {
 		return
 	}
 	event := streams.AgentEvent{SessionID: string(root), ParentToolCallID: parent}
+	live := batch != nil
 	if live && a.turn != nil {
 		event.PromptGeneration = a.turn.generation
 		event.DeliverySubmissionID = a.turn.submissionID
@@ -88,12 +89,12 @@ func (a *Adapter) projectEntity(state *projection, root wire.SessionID, notifica
 	switch update := notification.Update.Value.(type) {
 	case *wire.MessageChunk:
 		key := makeMessageKey(session, update.MessageID, update.Kind)
-		projected = a.projectMessage(state, key, []wire.ContentBlock{update.Content}, true, &event, live)
+		projected = a.projectMessage(state, key, []wire.ContentBlock{update.Content}, true, &event, batch)
 	case *wire.MessageUpdate:
 		key := makeMessageKey(session, update.MessageID, update.Kind)
 		if update.Content.IsSet() {
 			content, _ := update.Content.Get()
-			projected = a.projectMessage(state, key, content, false, &event, live)
+			projected = a.projectMessage(state, key, content, false, &event, batch)
 		}
 	case *wire.ToolCallUpdate:
 		projected = a.projectTool(state, session, *update, nil, &event, live)
@@ -107,7 +108,7 @@ func (a *Adapter) projectEntity(state *projection, root wire.SessionID, notifica
 		projected = state.projectSubagent(session, update, &event, live)
 	}
 	if projected {
-		a.emit(event)
+		batch.add(event)
 	}
 }
 
@@ -116,7 +117,7 @@ func makeMessageKey(session wire.SessionID, id wire.MessageID, kind wire.Session
 }
 
 func (a *Adapter) projectMessage(
-	state *projection, key messageKey, content []wire.ContentBlock, appendChunk bool, event *streams.AgentEvent, live bool,
+	state *projection, key messageKey, content []wire.ContentBlock, appendChunk bool, event *streams.AgentEvent, batch *eventBatch,
 ) bool {
 	if key.id == "" {
 		return false
@@ -131,13 +132,13 @@ func (a *Adapter) projectMessage(
 		state.messages[key] = content
 	}
 	if key.kind == wire.UpdateUserMessage {
-		if live && !known && a.turn != nil && key.session == a.turn.session && a.turn.userMessage == "" {
+		if batch != nil && !known && a.turn != nil && key.session == a.turn.session && a.turn.userMessage == "" {
 			a.turn.userMessage = string(key.id)
-			a.settleTurn(a.turn)
+			a.settleTurn(a.turn, batch)
 		}
 		return false
 	}
-	if !live {
+	if batch == nil {
 		return false
 	}
 	return setMessageEvent(key, oldBlocks, content, appendChunk, event)
@@ -182,7 +183,7 @@ func entityID[T ~string](session wire.SessionID, id T) string {
 	return strconv.Quote(string(session)) + ":" + string(id)
 }
 
-func (a *Adapter) observeForeground(update *wire.StateUpdate) {
+func (a *Adapter) observeForeground(update *wire.StateUpdate, batch *eventBatch) {
 	turn := a.turn
 	if turn == nil {
 		return
@@ -192,15 +193,15 @@ func (a *Adapter) observeForeground(update *wire.StateUpdate) {
 	if turn.active {
 		a.signalTurnStarted(turn)
 	}
-	a.settleTurn(turn)
+	a.settleTurn(turn, batch)
 }
 
-func (a *Adapter) publishUsage(update *wire.UsageUpdate) {
+func (a *Adapter) projectUsage(update *wire.UsageUpdate, batch *eventBatch) {
 	if update.Size == 0 {
 		return
 	}
 	used := min(update.Used, update.Size)
-	a.emit(streams.AgentEvent{
+	batch.add(streams.AgentEvent{
 		Type: streams.EventTypeContextWindow, SessionID: string(a.session),
 		ContextWindowUsed: int64(used), ContextWindowSize: int64(update.Size),
 		ContextWindowRemaining: int64(update.Size - used),
@@ -208,7 +209,7 @@ func (a *Adapter) publishUsage(update *wire.UsageUpdate) {
 	})
 }
 
-func (a *Adapter) publishPlan(plan wire.Plan) {
+func (a *Adapter) projectPlan(plan wire.Plan, batch *eventBatch) {
 	event := streams.AgentEvent{Type: streams.EventTypePlan, SessionID: string(a.session)}
 	switch plan.Type {
 	case "items":
@@ -222,5 +223,5 @@ func (a *Adapter) publishPlan(plan wire.Plan) {
 	default:
 		return
 	}
-	a.emit(event)
+	batch.add(event)
 }

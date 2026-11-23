@@ -53,7 +53,7 @@ From `kdlbs-kandev/apps/backend`:
 
 ```bash
 go test -trimpath ./internal/agentctl/server/adapter/... ./internal/agentctl/server/process -count=1
-go test -trimpath -race ./internal/agentctl/server/adapter/transport/acpv2 -count=1
+go test -trimpath -race ./internal/agentctl/server/adapter/transport/acpv2 -count=10
 ```
 
 ## Files and dependencies
@@ -78,6 +78,9 @@ Guard the submission generation during delayed prompt and permission replies.
   HTTP MCP delivery evidence, child IDs, and replay.
 - Wire tests verify that partial updates preserve tool file locations and
   subagent details. Explicit null values clear those fields.
+- The ACP v2 race suite passed ten consecutive runs. A full event queue leaves
+  cancellation available and preserves event order. An idle update without a
+  stop reason records an unknown outcome and keeps the runtime available.
 - Native question tests cover identity across a stream reconnect and cancel
   only the bundle for the originating request.
 - SQLite projection tests passed for whole-message replacement and clear.

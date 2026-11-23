@@ -43,11 +43,11 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 	if err != nil {
 		return a.rejectPrompt(turn, err)
 	}
-	a.mu.Lock()
-	turn.acknowledge(string(reply.MessageID))
-	a.signalTurnStarted(turn)
-	a.settleTurn(turn)
-	a.mu.Unlock()
+	a.project(func(batch *eventBatch) {
+		turn.acknowledge(string(reply.MessageID))
+		a.signalTurnStarted(turn)
+		a.settleTurn(turn, batch)
+	})
 	select {
 	case <-turn.done:
 		return turn.result
@@ -112,19 +112,19 @@ func (a *Adapter) signalTurnStarted(turn *promptTurn) {
 }
 
 func (a *Adapter) loseAcceptedTurn(turn *promptTurn, message string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.turn == turn {
-		a.blocked = true
-		a.finishTurn(turn, string(wire.StopReasonError), message, false)
-	}
+	a.project(func(batch *eventBatch) {
+		if a.turn == turn {
+			a.blocked = true
+			finishTurn(turn, string(wire.StopReasonError), message, false, batch)
+		}
+	})
 	return turn.result
 }
 
-func (a *Adapter) settleTurn(turn *promptTurn) {
+func (a *Adapter) settleTurn(turn *promptTurn, batch *eventBatch) {
 	if turn.userMessage != "" && turn.messageID != "" && turn.userMessage != turn.messageID {
 		a.blocked = true
-		a.finishTurn(turn, string(wire.StopReasonError), "ACP v2 acknowledged a different user message", false)
+		finishTurn(turn, string(wire.StopReasonError), "ACP v2 acknowledged a different user message", false, batch)
 		return
 	}
 	if !turn.settled() {
@@ -132,16 +132,16 @@ func (a *Adapter) settleTurn(turn *promptTurn) {
 	}
 	switch wire.StopReason(turn.stopReason) {
 	case wire.StopReasonError:
-		a.finishTurn(turn, turn.stopReason, "ACP v2 agent reported a foreground error", true)
+		finishTurn(turn, turn.stopReason, "ACP v2 agent reported a foreground error", true, batch)
 	case wire.StopReasonEndTurn, wire.StopReasonCancelled, wire.StopReasonRefusal, wire.StopReasonMaxTokens, wire.StopReasonMaxTurnRequests:
-		a.finishTurn(turn, turn.stopReason, "", false)
+		finishTurn(turn, turn.stopReason, "", false, batch)
 	default:
-		a.finishTurn(turn, "unknown", "ACP v2 foreground stopped with an unknown outcome", true)
+		finishTurn(turn, "unknown", "ACP v2 foreground stopped with an unknown outcome", true, batch)
 	}
 }
 
-// finishTurn runs with mu held after earlier notifications project their deltas.
-func (a *Adapter) finishTurn(turn *promptTurn, reason, message string, retain bool) {
+// finishTurn ends callbacks while keeping the turn reserved until its terminal event is enqueued.
+func finishTurn(turn *promptTurn, reason, message string, retain bool, batch *eventBatch) {
 	event := streams.AgentEvent{
 		Type: streams.EventTypeComplete, SessionID: string(turn.session), OperationID: turn.messageID,
 		PromptGeneration: turn.generation, DeliverySubmissionID: turn.submissionID,
@@ -154,10 +154,10 @@ func (a *Adapter) finishTurn(turn *promptTurn, reason, message string, retain bo
 		}
 		turn.result = &streams.ReportedPromptFailure{Message: message}
 	}
-	a.emit(event)
+	batch.add(event)
+	batch.settled = turn
+	turn.terminal = true
 	turn.cancel()
-	a.turn = nil
-	close(turn.done)
 }
 
 func (a *Adapter) Cancel(ctx context.Context) error {
@@ -181,7 +181,7 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 	}
 	defer a.release()
 	a.mu.Lock()
-	current := a.turn == turn
+	current := a.turn == turn && !turn.terminal
 	a.mu.Unlock()
 	if !current {
 		return nil

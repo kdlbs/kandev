@@ -86,7 +86,9 @@ The native Codex app-server protocol has its own factory branch.
   progress, a pending user action, and completion. Publish the terminal
   event once after earlier deltas clear the update queue. Preserve explicit
   failure and cancellation reasons. If the stop reason is missing or unknown,
-  record that the turn stopped with an unknown outcome.
+  record that the turn stopped with an unknown outcome and keep the runtime
+  available for the next turn. Release the state lock before waiting for
+  ordered event delivery so cancellation and callbacks can still inspect state.
 - Scope message and tool updates to their session and entity ID. An omitted
   field preserves the value, `null` clears it, and chunks append to it.
   Keep the latest whole-message or tool snapshot for projection and replay.

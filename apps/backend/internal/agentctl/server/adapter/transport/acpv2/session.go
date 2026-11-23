@@ -134,24 +134,25 @@ func (a *Adapter) commitAttachment(
 	ctx context.Context, attach *sessionAttachment, session wire.SessionID,
 	options []wire.SessionConfigOption, commands []wire.AvailableCommand, resume bool,
 ) wire.SessionID {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	previous := a.session
-	a.session = session
-	a.state = attach.state
-	a.attach = nil
-	status := streams.SessionStatusNew
-	var policy streams.SessionSettingsPolicy
-	if resume {
-		status = streams.SessionStatusResumed
-		policy = streams.SessionSettingsPolicyFromContext(ctx)
-	}
-	a.emit(streams.AgentEvent{Type: streams.EventTypeSessionStatus, SessionID: string(session), SessionStatus: status})
-	a.publishSettings(options, policy)
-	a.publishCommands(commands)
-	for _, update := range attach.live {
-		a.projectUpdate(update)
-	}
+	var previous wire.SessionID
+	a.project(func(batch *eventBatch) {
+		previous = a.session
+		a.session = session
+		a.state = attach.state
+		a.attach = nil
+		status := streams.SessionStatusNew
+		var policy streams.SessionSettingsPolicy
+		if resume {
+			status = streams.SessionStatusResumed
+			policy = streams.SessionSettingsPolicyFromContext(ctx)
+		}
+		batch.add(streams.AgentEvent{Type: streams.EventTypeSessionStatus, SessionID: string(session), SessionStatus: status})
+		a.projectSettings(options, policy, batch)
+		a.projectCommands(commands, batch)
+		for _, update := range attach.live {
+			a.projectUpdate(update, batch)
+		}
+	})
 	return previous
 }
 

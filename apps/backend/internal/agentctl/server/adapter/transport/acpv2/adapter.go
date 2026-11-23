@@ -28,6 +28,8 @@ type Adapter struct {
 	emitMu  sync.RWMutex
 	updates chan streams.AgentEvent
 
+	// projectMu keeps projected events ordered across state changes and channel delivery.
+	projectMu sync.Mutex
 	// commands serializes setup and configuration RPCs with prompt admission.
 	// Notifications and server requests use mu and can run during those RPCs.
 	commands chan struct{}
@@ -200,6 +202,33 @@ func (a *Adapter) OwnsPromptDisconnect() bool {
 }
 
 func (*Adapter) SanitizeStderrLine(string) (string, bool) { return "", false }
+
+type eventBatch struct {
+	events  []streams.AgentEvent
+	settled *promptTurn
+}
+
+func (b *eventBatch) add(event streams.AgentEvent) {
+	b.events = append(b.events, event)
+}
+
+func (a *Adapter) project(update func(*eventBatch)) {
+	a.projectMu.Lock()
+	defer a.projectMu.Unlock()
+	var batch eventBatch
+	a.mu.Lock()
+	update(&batch)
+	a.mu.Unlock()
+	for _, event := range batch.events {
+		a.emit(event)
+	}
+	if turn := batch.settled; turn != nil {
+		a.mu.Lock()
+		a.turn = nil
+		close(turn.done)
+		a.mu.Unlock()
+	}
+}
 
 func (a *Adapter) emit(event streams.AgentEvent) {
 	a.emitMu.RLock()

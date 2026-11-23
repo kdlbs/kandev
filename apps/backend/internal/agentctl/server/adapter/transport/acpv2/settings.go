@@ -74,9 +74,9 @@ func (a *Adapter) setOption(ctx context.Context, id, category, value string) (st
 			break
 		}
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.publishSettings(reply.ConfigOptions, streams.SessionSettingsPolicyFromContext(ctx))
+	a.project(func(batch *eventBatch) {
+		a.projectSettings(reply.ConfigOptions, streams.SessionSettingsPolicyFromContext(ctx), batch)
+	})
 	return result, nil
 }
 
@@ -114,7 +114,7 @@ func configValue(option streams.ConfigOption, value string) (wire.ConfigValue, e
 	return nil, errors.New("invalid ACP v2 config value")
 }
 
-func (a *Adapter) publishSettings(options []wire.SessionConfigOption, policy streams.SessionSettingsPolicy) {
+func (a *Adapter) projectSettings(options []wire.SessionConfigOption, policy streams.SessionSettingsPolicy, batch *eventBatch) {
 	a.settings = nil
 	for _, wireOption := range options {
 		if option := projectConfigOption(wireOption); option.ID != "" && option.Type != "" {
@@ -128,7 +128,7 @@ func (a *Adapter) publishSettings(options []wire.SessionConfigOption, policy str
 		SessionSettingsGeneration: a.revision, CurrentModelID: model.CurrentValue, SessionModels: sessionModels(model),
 		ConfigOptions: slices.Clone(a.settings),
 	}
-	a.emit(event)
+	batch.add(event)
 	if mode.ID == "" {
 		return
 	}
@@ -141,7 +141,7 @@ func (a *Adapter) publishSettings(options []wire.SessionConfigOption, policy str
 			ID: choice.Value, Name: choice.Name, Description: choice.Description,
 		})
 	}
-	a.emit(event)
+	batch.add(event)
 }
 
 func projectConfigOption(option wire.SessionConfigOption) streams.ConfigOption {
@@ -190,7 +190,7 @@ func sessionModels(option streams.ConfigOption) []streams.SessionModelInfo {
 	return models
 }
 
-func (a *Adapter) publishCommands(commands []wire.AvailableCommand) {
+func (a *Adapter) projectCommands(commands []wire.AvailableCommand, batch *eventBatch) {
 	if commands == nil {
 		return
 	}
@@ -198,5 +198,5 @@ func (a *Adapter) publishCommands(commands []wire.AvailableCommand) {
 	for _, command := range commands {
 		out = append(out, streams.AvailableCommand{Name: command.Name, Description: command.Description})
 	}
-	a.emit(streams.AgentEvent{Type: streams.EventTypeAvailableCommands, SessionID: string(a.session), AvailableCommands: out})
+	batch.add(streams.AgentEvent{Type: streams.EventTypeAvailableCommands, SessionID: string(a.session), AvailableCommands: out})
 }
