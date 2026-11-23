@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "@/lib/types/http";
+import { defaultFeatureFlags } from "@/lib/state/slices/features/types";
 import {
   buildGroupedRenderItems,
   insertLastAgentErrorItem,
@@ -29,6 +30,7 @@ const priorTranscriptMessage = {
 
 const appStoreState = {
   connection: { status: "connected" },
+  features: { ...defaultFeatureFlags },
   kanbanMulti: { snapshots: {} },
   kanban: { workflowId: null, tasks: [], steps: [] },
   sidebarArchivedTasks: { itemsByWorkspaceId: {} },

@@ -162,3 +162,12 @@ The disabled startup leaves the async service, routes, and notification
 subjects absent. The shared Inbox rejects async sidecar writes. Task deletion
 now purges async rows in the repository transaction, independent of the
 optional service.
+
+The first CI run on `caadf1fdb79` found two catalog assertions that still
+counted the opt-in tools when off. `TestServerModeTask_ToolCount` now expects
+44 tools and `TestServerSetProvidersNotifiesInitializedSessionOnceWithCompleteTools`
+expects 43 after a GitLab-only rebuild. The enabled profile keeps its
+explicit catalog tests. The catalog, provider rebuild, and logged-count tests
+passed in 0.080s after the fixture update.
+`(cd apps/backend && go test -race ./internal/mcp/server -count=1)` passed
+in 38.951s. Scoped Go lint on `server_test.go` reported 0 issues.

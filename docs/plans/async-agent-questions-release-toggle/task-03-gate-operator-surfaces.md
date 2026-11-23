@@ -203,3 +203,17 @@ Documentation coverage preflight found 17 covered work orders on the PR.
 `git diff --check` passed. Desktop and phone captures show the off setting
 and the enabled answer flows. [PR #4980](https://github.com/kdlbs/kandev/pull/4980)
 contains the rollout guidance, captures, and CI for the delivered changes.
+
+The first CI run on `caadf1fdb79` found missing feature state in the launch
+error, last prompt, and empty Inbox test stores. All three test stores now
+use the shared feature defaults. The combined focused run passed 19 tests
+in 4.02s:
+
+```bash
+(cd apps/web && pnpm exec vitest run \
+  components/needs-you-inbox/needs-you-inbox-empty-state.test.tsx \
+  components/task/task-chat-panel.last-prompt.test.tsx \
+  components/task/task-chat-panel.launch-error.test.tsx)
+```
+
+Prettier on the three test files, web typecheck, and `git diff --check` passed.
