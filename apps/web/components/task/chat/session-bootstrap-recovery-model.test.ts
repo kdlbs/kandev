@@ -369,3 +369,52 @@ describe("buildRecoveryCardModel request-local failures", () => {
     expect(JSON.stringify(model)).not.toContain("private");
   });
 });
+
+it("preserves thinking failure evidence without permission labels", () => {
+  const model = buildRecoveryCardModel({
+    error: error([
+      {
+        operation: "start",
+        code: "thinking_level_mismatch",
+        reason: "effective_mismatch",
+        requested_setting: "medium",
+        effective_setting: "off",
+        setting_source: "agent_profile",
+        prompt_not_sent: true,
+      },
+    ]),
+    manualFailure: null,
+    manualError: null,
+    recoveryNotice: null,
+    translate,
+    agentDisplayName: "Pi",
+  });
+  expect(model.titleKey).toBe("task:sessionBootstrapThinkingFailedTitle");
+  expect(model.primaryCause?.requested_setting).toBe("medium");
+  expect(model.primaryCause?.effective_setting).toBe("off");
+  expect(model.noPromptSent).toBe(true);
+  expect(model.freshStartWarning).toBe(true);
+});
+
+it("keeps a stronger thinking source in recovery evidence", () => {
+  const model = buildRecoveryCardModel({
+    error: error([
+      {
+        operation: "start",
+        code: "thinking_level_unavailable",
+        reason: "requested_not_advertised",
+        requested_setting: "high",
+        setting_source: "session_override",
+        prompt_not_sent: true,
+      },
+    ]),
+    manualFailure: null,
+    manualError: null,
+    recoveryNotice: null,
+    translate,
+    agentDisplayName: "Pi",
+  });
+  expect(model.primaryCause?.setting_source).toBe("session_override");
+  expect(model.noPromptSent).toBe(true);
+  expect(model.summary).toContain("ThinkingUnavailable");
+});

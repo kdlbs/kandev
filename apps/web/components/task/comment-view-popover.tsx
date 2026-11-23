@@ -1,5 +1,7 @@
 "use client";
 
+import { AttachmentLinks } from "@/components/shared/attachment-links";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import { useRef, useState, useCallback } from "react";
 import { IconEdit, IconTrash, IconGripHorizontal } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -11,9 +13,10 @@ import { useTranslation } from "react-i18next";
 
 type CommentViewPopoverProps = {
   comments: ReviewComment[];
+  taskId?: string | null;
   position: { x: number; y: number };
   onDelete: (commentId: string) => void;
-  onUpdate?: (commentId: string, text: string) => void;
+  onUpdate?: (commentId: string, text: string, attachments?: MessageAttachment[]) => void;
   onClose: () => void;
 };
 
@@ -23,6 +26,7 @@ function formatLineRange(start: number, end: number) {
 
 function CommentItem({
   comment,
+  taskId,
   onDelete,
   onUpdate,
   isEditing,
@@ -30,16 +34,17 @@ function CommentItem({
   onCancelEdit,
 }: {
   comment: ReviewComment;
+  taskId?: string | null;
   onDelete: (id: string) => void;
-  onUpdate?: (id: string, text: string) => void;
+  onUpdate?: (id: string, text: string, attachments?: MessageAttachment[]) => void;
   isEditing: boolean;
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
 }) {
   const { t } = useTranslation();
   const handleUpdate = useCallback(
-    (text: string) => {
-      onUpdate?.(comment.id, text);
+    (text: string, attachments?: MessageAttachment[]) => {
+      onUpdate?.(comment.id, text, attachments);
       onCancelEdit();
     },
     [comment.id, onCancelEdit, onUpdate],
@@ -80,6 +85,7 @@ function CommentItem({
       </div>
       {isEditing ? (
         <CommentForm
+          attachmentOptions={taskId ? { taskId, initial: comment.attachments } : undefined}
           initialContent={comment.text}
           onSubmit={handleUpdate}
           onCancel={onCancelEdit}
@@ -95,6 +101,7 @@ function CommentItem({
           <p className="text-xs text-foreground leading-relaxed whitespace-pre-wrap">
             {comment.text}
           </p>
+          <AttachmentLinks attachments={comment.attachments} />
         </>
       )}
     </div>
@@ -103,6 +110,7 @@ function CommentItem({
 
 export function CommentViewPopover({
   comments,
+  taskId,
   position,
   onDelete,
   onUpdate,
@@ -137,6 +145,7 @@ export function CommentViewPopover({
           <CommentItem
             key={comment.id}
             comment={comment}
+            taskId={taskId}
             onDelete={onDelete}
             onUpdate={onUpdate}
             isEditing={editingCommentId === comment.id}

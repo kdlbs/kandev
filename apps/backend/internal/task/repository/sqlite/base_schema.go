@@ -1153,6 +1153,12 @@ func (r *Repository) initAttachmentsSchema() error {
 		ON task_message_attachments(owner_id, state, expires_at);
 	CREATE INDEX IF NOT EXISTS idx_task_message_attachments_scope
 		ON task_message_attachments(workspace_id, task_id, session_id, state);
+	CREATE TABLE IF NOT EXISTS task_plan_comment_attachments (
+		comment_id TEXT NOT NULL REFERENCES task_plan_comments(id) ON DELETE CASCADE,
+		attachment_id TEXT NOT NULL UNIQUE REFERENCES task_message_attachments(id) ON DELETE CASCADE,
+		position INTEGER NOT NULL,
+		PRIMARY KEY (comment_id, position)
+	);
 	CREATE TABLE IF NOT EXISTS task_creation_attachments (
 		task_id TEXT NOT NULL,
 		attachment_id TEXT NOT NULL,

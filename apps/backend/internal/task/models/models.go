@@ -1317,6 +1317,10 @@ func decodeAgentErrorCauses(raw json.RawMessage) []AgentErrorCause {
 		decodeOptionalErrorCauseString(fields, "attempted_model", &cause.AttemptedModel)
 		decodeOptionalErrorCauseString(fields, "requested_mode", &cause.RequestedMode)
 		decodeOptionalErrorCauseString(fields, "effective_mode", &cause.EffectiveMode)
+		decodeOptionalErrorCauseString(fields, "requested_setting", &cause.RequestedSetting)
+		decodeOptionalErrorCauseString(fields, "effective_setting", &cause.EffectiveSetting)
+		decodeOptionalErrorCauseString(fields, "setting_config_id", &cause.SettingConfigID)
+		decodeOptionalErrorCauseString(fields, "setting_source", &cause.SettingSource)
 		decodeOptionalErrorCauseString(fields, "runtime_version", &cause.RuntimeVersion)
 		if value, ok := fields["prompt_not_sent"]; ok {
 			var promptNotSent bool
@@ -2209,6 +2213,9 @@ const (
 	// PermissionActorCoordinatorUnattended marks a denial made by the backend
 	// for a coordinator's unattended turn, where no person is present.
 	PermissionActorCoordinatorUnattended PermissionResolutionActorKind = "coordinator_unattended"
+	// PermissionActorLinkedIdentity marks a Kandev user who decided on an
+	// external surface linked to their account, relayed by a plugin.
+	PermissionActorLinkedIdentity PermissionResolutionActorKind = "linked_identity"
 )
 
 type PermissionResolutionSource string
@@ -2225,6 +2232,9 @@ const (
 	// PermissionSourceCoordinatorWake identifies a denial made during a
 	// coordinator wake's unattended turn.
 	PermissionSourceCoordinatorWake PermissionResolutionSource = "coordinator_wake"
+	// PermissionSourcePlugin identifies a response a plugin relayed with a
+	// receipt minted for a linked Kandev user.
+	PermissionSourcePlugin PermissionResolutionSource = "plugin"
 )
 
 type PermissionResolutionResult string
@@ -3473,16 +3483,18 @@ type TaskPlan struct {
 
 // TaskPlanComment is pending user feedback attached to the current task plan.
 type TaskPlanComment struct {
-	ID           string    `json:"id"`
-	TaskID       string    `json:"task_id"`
-	PlanID       string    `json:"plan_id"`
-	Body         string    `json:"body"`
-	SelectedText string    `json:"selected_text"`
-	AnchorFrom   int       `json:"anchor_from"`
-	AnchorTo     int       `json:"anchor_to"`
-	Version      int64     `json:"version"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	AttachmentIDs []string               `json:"-"`
+	Attachments   []v1.MessageAttachment `json:"attachments,omitempty"`
+	ID            string                 `json:"id"`
+	TaskID        string                 `json:"task_id"`
+	PlanID        string                 `json:"plan_id"`
+	Body          string                 `json:"body"`
+	SelectedText  string                 `json:"selected_text"`
+	AnchorFrom    int                    `json:"anchor_from"`
+	AnchorTo      int                    `json:"anchor_to"`
+	Version       int64                  `json:"version"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
 // TaskPlanCommentSnapshot is the authoritative pending-comment collection for a plan.
@@ -3828,10 +3840,11 @@ type TaskMessageAttachment struct {
 }
 
 const (
-	AttachmentStateStaged  = "staged"
-	AttachmentStateClaimed = "claimed"
-	AttachmentStateExpired = "expired"
-	AttachmentStateDeleted = "deleted"
+	AttachmentStateStaged      = "staged"
+	AttachmentStateClaimed     = "claimed"
+	AttachmentStatePlanComment = "plan_comment"
+	AttachmentStateExpired     = "expired"
+	AttachmentStateDeleted     = "deleted"
 )
 
 // SessionFileReview tracks per-file review state within a session

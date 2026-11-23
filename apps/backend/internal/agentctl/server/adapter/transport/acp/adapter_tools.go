@@ -780,6 +780,14 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	supplemental := toolCallUpdateSupplemental(tcu)
 	pluginPromptGeneration := promptGeneration
 	agentName, agentVersion := a.connectedAgentIdentity()
+	outputPath, outputPathValid := "", false
+	if a.backgroundWorkEnabled && status == toolStatusComplete &&
+		verifiedClaudeTerminalBridge(a.agentID, agentName, agentVersion) {
+		outputPath, outputPathValid = claudeShellOutputPath(
+			normalizeFinalShellResult(tcu.RawOutput).stdout,
+			sessionID,
+		)
+	}
 
 	a.mu.Lock()
 	if a.isStaleClaudeNativeToolFrameLocked(sessionID) {
@@ -866,6 +874,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	// view rather than getting clobbered by the rawOutput string.
 	recognizedShellUpdate := false
 	var claudeTerminalObservation *streams.WorkloadRunObservation
+	claudeOutputFinishID := ""
 	if payload != nil && payload.Kind() == streams.ToolKindShellExec {
 		recognizedShellUpdate = a.normalizer.NormalizeShellToolUpdate(payload, tcu.Meta, convertedContents, tcu.RawOutput)
 		a.normalizer.confirmBackgroundLaunch(payload, tcu.RawOutput)
@@ -875,6 +884,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 			background := payload.BackgroundWork()
 			payload.SetBackgroundWorkIdentity(background.Kind, toolCallID, background.Detached, background.Ended)
 		}
+		a.registerClaudeShellOutputLocked(sessionID, payload, outputPath, outputPathValid)
 		a.recordOpenCodePluginClaimLocked(string(tcu.ToolCallId), pluginPromptGeneration, payload)
 		if claudeBackgroundTerminalExit(
 			a.agentID, agentName, agentVersion, tcu.Meta, toolCallID, payload,
@@ -884,6 +894,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 			claudeTerminalObservation = claudeBackgroundTerminalObservation(
 				payload, emittedToolCallID, time.Now().UTC(),
 			)
+			claudeOutputFinishID = background.WorkID
 		}
 	} else if tcu.RawOutput != nil && payload != nil && !isTrackedMonitor {
 		result := tcu.RawOutput
@@ -911,6 +922,9 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	if shellExitCode != nil && payload != nil && payload.ShellExec() != nil {
 		if background := payload.BackgroundWork(); background != nil && background.Kind == streams.BackgroundWorkKindShell {
 			payload.SetBackgroundWorkIdentity(background.Kind, background.WorkID, background.Detached, true)
+			if verifiedClaudeTerminalBridge(a.agentID, agentName, agentVersion) {
+				claudeOutputFinishID = background.WorkID
+			}
 		}
 	}
 	if claudeTerminalObservation != nil {
@@ -991,6 +1005,9 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	}
 	emittedPayload := cloneSubagentPayload(payload)
 	a.mu.Unlock()
+	if claudeOutputFinishID != "" && a.claudeShellOutput != nil {
+		a.claudeShellOutput.finish(sessionID, claudeOutputFinishID)
+	}
 	earlyMonitorSettlement.sendBackgroundWork(a)
 	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
 
@@ -1048,6 +1065,32 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		ToolCallContents:  convertedContents,
 		BackgroundWork:    selectWorkloadObservation(claudeTerminalObservation, claudeMonitorObservation),
 	}
+}
+
+// registerClaudeShellOutputLocked registers a validated Claude output file and
+// advertises streaming for its verified detached shell workload.
+func (a *Adapter) registerClaudeShellOutputLocked(
+	sessionID string,
+	payload *streams.NormalizedPayload,
+	outputPath string,
+	outputPathValid bool,
+) bool {
+	if !outputPathValid || outputPath == "" || payload == nil || a.claudeShellOutput == nil ||
+		a.sessionID != sessionID || !payload.IsDetachedBackgroundLaunch() || !payload.IsVerifiedBackgroundWork() {
+		return false
+	}
+	background := payload.BackgroundWork()
+	if background == nil || background.WorkID == "" ||
+		!a.claudeShellOutput.follow(sessionID, background.WorkID, outputPath) {
+		return false
+	}
+	capabilities := streams.InspectionOnlyWorkloadCapabilities()
+	if background.Capabilities != nil {
+		capabilities = *background.Capabilities
+	}
+	capabilities.Output = "stream"
+	payload.SetBackgroundWorkCapabilities(capabilities)
+	return true
 }
 
 func (a *Adapter) enrichSubagentResultLocked(

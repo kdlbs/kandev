@@ -650,5 +650,9 @@
   "runtimeUpdatePreviewRequestError": "无法检查此更新：{{error}}",
   "runtimeUpdatePreviewUnavailable": "无法验证此更新是否可用于批量更新。请使用“管理版本”。",
   "runtimeUpdatePreviewChanged": "运行时或目标版本已更改。请重新检查更新。",
-  "runtimeUpdatePreviewIndividual": "此运行时需要单独更新。请使用“管理版本”。"
+  "runtimeUpdatePreviewIndividual": "此运行时需要单独更新。请使用“管理版本”。",
+  "thinkingLevel": "思考级别",
+  "useProviderDefault": "使用提供商默认值",
+  "thinkingLevelUnavailable": "{{value}}（不可用）",
+  "editProfile": "编辑配置文件"
 }

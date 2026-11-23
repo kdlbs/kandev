@@ -147,3 +147,8 @@ AC-PLUGINS-FILE-VIEWERS-001.6 now uses the shared plugin viewer in rich output.
 The implementation record documents the host changes, template recipe, and
 77 focused tests plus desktop/phone packaged-STL checks. This extends Task 02
 and Task 04 without a second viewer registration or rich-output schema change.
+
+## Follow-up for supported files
+
+[Task 03](task-03-marketplace-discovery.md#supported-file-regression) owns the
+editor discovery bar correction. The correction passed focused component, desktop, and mobile tests.

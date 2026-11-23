@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1140,51 +1140,11 @@ func (r *Resolver) resolveClarificationEventContext(ctx context.Context, pending
 		out.TaskID = msgs[0].TaskID
 	}
 	if len(out.Questions) == 0 {
-		out.Questions = questionsFromMessages(msgs)
+		out.Questions = bundleQuestions(msgs)
 		out.QuestionSummary = formatQuestionSummary(out.Questions)
 	}
 
 	return out, nil
-}
-
-// questionsFromMessages reconstructs a Question slice from persisted
-// clarification messages, ordered by metadata.question_index so the rebuilt
-// summary matches the bundle the agent originally sent. Used as a fallback
-// when the in-store request has been cleaned up but the persisted metadata
-// still carries the original question text. Unlike bundleQuestions
-// (bundle_question.go), used for validation and answer application, this
-// does not parse options: it feeds only the resume-summary text.
-func questionsFromMessages(msgs []*taskmodels.Message) []Question {
-	sorted := make([]*taskmodels.Message, len(msgs))
-	copy(sorted, msgs)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return questionIndexFromMetadata(sorted[i].Metadata) < questionIndexFromMetadata(sorted[j].Metadata)
-	})
-	out := make([]Question, 0, len(sorted))
-	for _, m := range sorted {
-		out = append(out, questionFromMessageMetadata(m.Metadata))
-	}
-	return out
-}
-
-func questionFromMessageMetadata(meta map[string]any) Question {
-	q := Question{ID: stringFromMetadata(meta, metaQuestionIDKey)}
-	qData, ok := meta[metaQuestionKey].(map[string]any)
-	if !ok {
-		return q
-	}
-	if v, ok := qData["prompt"].(string); ok {
-		q.Prompt = v
-	}
-	if v, ok := qData["title"].(string); ok {
-		q.Title = v
-	}
-	if q.ID == "" {
-		if v, ok := qData["id"].(string); ok {
-			q.ID = v
-		}
-	}
-	return q
 }
 
 func questionIndexFromMetadata(meta map[string]any) int {
@@ -1230,7 +1190,7 @@ func buildAnswerSummary(questions []Question, answers []Answer, rejected bool, r
 		return "User provided no specific answer."
 	}
 	if len(questions) <= 1 && len(answers) == 1 {
-		return formatSingleAnswer(answers[0])
+		return formatSingleAnswer(answers[0], questionForAnswer(questions, answers[0]))
 	}
 
 	answersByID := make(map[string]Answer, len(answers))
@@ -1244,36 +1204,77 @@ func buildAnswerSummary(questions []Question, answers []Answer, rejected bool, r
 		if !ok {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("A%d: %s", i+1, formatAnswerBody(ans)))
+		parts = append(parts, fmt.Sprintf("A%d: %s", i+1, formatAnswerBody(ans, &q)))
 	}
 	if len(parts) == 0 {
 		// No matches by id — fall back to positional formatting so we still
 		// surface the answers rather than silently dropping them.
 		for i, a := range answers {
-			parts = append(parts, fmt.Sprintf("A%d: %s", i+1, formatAnswerBody(a)))
+			parts = append(parts, fmt.Sprintf("A%d: %s", i+1, formatAnswerBody(a, nil)))
 		}
 	}
 	return strings.Join(parts, "\n")
 }
 
-func formatSingleAnswer(a Answer) string {
+func questionForAnswer(questions []Question, answer Answer) *Question {
+	for i := range questions {
+		if questions[i].ID != "" && questions[i].ID == answer.QuestionID {
+			return &questions[i]
+		}
+	}
+	return nil
+}
+
+func formatSingleAnswer(a Answer, question *Question) string {
 	if a.CustomText != "" {
 		return withAnswerEvidence(fmt.Sprintf("User answered: %s", a.CustomText), a)
 	}
 	if len(a.SelectedOptions) > 0 {
-		return withAnswerEvidence(fmt.Sprintf("User selected: %v", a.SelectedOptions), a)
+		return withAnswerEvidence(fmt.Sprintf("User selected: %s", formatSelectedOptions(a, question)), a)
 	}
 	return "User provided no specific answer."
 }
 
-func formatAnswerBody(a Answer) string {
+func formatAnswerBody(a Answer, question *Question) string {
 	body := "(no answer)"
 	if a.CustomText != "" {
 		body = a.CustomText
 	} else if len(a.SelectedOptions) > 0 {
-		body = fmt.Sprintf("%v", a.SelectedOptions)
+		body = formatSelectedOptions(a, question)
 	}
 	return withAnswerEvidence(body, a)
+}
+
+func formatSelectedOptions(answer Answer, question *Question) string {
+	selected := make([]string, 0, len(answer.SelectedOptions))
+	for _, optionID := range answer.SelectedOptions {
+		label, found := selectedOptionLabel(question, answer, optionID)
+		if found {
+			selected = append(selected, strconv.Quote(label)+" ("+optionID+")")
+			continue
+		}
+		selected = append(selected, optionID)
+	}
+	return "[" + strings.Join(selected, ", ") + "]"
+}
+
+func selectedOptionLabel(question *Question, answer Answer, optionID string) (string, bool) {
+	if question == nil || question.ID == "" || question.ID != answer.QuestionID || optionID == "" {
+		return "", false
+	}
+	var label string
+	matches := 0
+	for _, option := range question.Options {
+		if option.ID != optionID {
+			continue
+		}
+		matches++
+		label = option.Label
+		if matches > 1 {
+			return "", false
+		}
+	}
+	return label, matches == 1 && label != ""
 }
 
 // withAnswerEvidence appends attached file names and region annotations.

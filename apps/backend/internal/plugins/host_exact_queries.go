@@ -551,7 +551,9 @@ func (h *pluginHost) GetInteraction(ctx context.Context, q pluginsdk.ExactIntera
 		return pluginsdk.ExactInteractionObservation{}, pluginsdk.HostReadReceipt{}, status.Error(codes.NotFound, "interaction was not found")
 	}
 	dto := interactionModelToDTO(model)
-	return pluginsdk.ExactInteractionObservation{Interaction: dto, ResourceVersion: digestPublicValue(dto), ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)}, singleReadReceipt(identity, q.RequestID), nil
+	version := digestPublicValue(dto)
+	h.attributeInteraction(ctx, &dto)
+	return pluginsdk.ExactInteractionObservation{Interaction: dto, ResourceVersion: version, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)}, singleReadReceipt(identity, q.RequestID), nil
 }
 
 //nolint:cyclop,funlen,gocognit // The page applies approval scope, redaction, and cursor rules to message data.

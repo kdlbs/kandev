@@ -10,6 +10,7 @@ import { useTaskPlan } from "@/hooks/domains/session/use-task-plan";
 import { usePlanDraft } from "@/hooks/domains/session/use-plan-draft";
 import { TaskPlanSaveErrorBanner } from "./task-plan-save-error-banner";
 import { useAppStore } from "@/components/state-provider";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import { SelectionCommentSurface } from "@/components/shared/selection-comment/selection-comment-surface";
 import { usePlanComments } from "@/hooks/domains/comments/use-plan-comments";
 import {
@@ -332,9 +333,7 @@ export function usePlanSelectionCommentActions({
 }) {
   const [runError, setRunError] = useState<string | null>(null);
   const savedRunCommentRef = useRef<{
-    owner: string;
-    selection: string;
-    body: string;
+    key: string;
     comment: PlanComment;
   } | null>(null);
   const ownerIdentity = `${commentState.snapshot?.task_id ?? ""}:${commentState.snapshot?.plan_id ?? ""}`;
@@ -348,10 +347,17 @@ export function usePlanSelectionCommentActions({
   }, [ownerIdentity]);
 
   const addCommentAndApplyMark = useCallback(
-    async (comment: string, selectedText: string) => {
+    async (comment: string, selectedText: string, attachments?: MessageAttachment[]) => {
       const from = textSelection?.from;
       const to = textSelection?.to;
-      const saved = await commentState.handleAddComment(comment, selectedText, from, to);
+      const ids = attachments?.flatMap((attachment) => attachment.attachment_id ?? []);
+      const saved = await commentState.handleAddComment(
+        comment,
+        selectedText,
+        from,
+        to,
+        ...(ids ? [ids] : []),
+      );
       if (saved && editor && !editor.isDestroyed && from != null && to != null) {
         editor
           .chain()
@@ -365,35 +371,37 @@ export function usePlanSelectionCommentActions({
   );
 
   const handleAdd = useCallback(
-    async (comment: string, selectedText: string) => {
+    async (comment: string, selectedText: string, attachments?: MessageAttachment[]) => {
       setRunError(null);
-      return Boolean(await addCommentAndApplyMark(comment, selectedText));
+      return Boolean(await addCommentAndApplyMark(comment, selectedText, attachments));
     },
     [addCommentAndApplyMark],
   );
 
   const handleAddAndRun = useCallback(
-    async (comment: string, selectedText: string) => {
+    async (comment: string, selectedText: string, attachments?: MessageAttachment[]) => {
       setRunError(null);
+      const key = JSON.stringify([
+        ownerIdentity,
+        selectionIdentity,
+        comment.trim(),
+        attachments?.map((attachment) => attachment.attachment_id) ?? [],
+      ]);
       const previous = savedRunCommentRef.current;
       const current = previous
         ? commentState.comments.find((candidate) => candidate.id === previous.comment.id)
         : null;
       let saved =
-        previous?.owner === ownerIdentity &&
-        previous.selection === selectionIdentity &&
-        previous.body === comment.trim() &&
+        previous?.key === key &&
         (current == null ||
           (current.version === previous.comment.version && current.text === previous.comment.text))
           ? (current ?? previous.comment)
           : null;
       if (!saved) {
-        saved = await addCommentAndApplyMark(comment, selectedText);
+        saved = await addCommentAndApplyMark(comment, selectedText, attachments);
         if (!saved) return false;
         savedRunCommentRef.current = {
-          owner: ownerIdentity,
-          selection: selectionIdentity,
-          body: comment.trim(),
+          key,
           comment: saved,
         };
       }
@@ -443,7 +451,7 @@ function PlanSelectionPopoverWrapper({
 
   if (!textSelection) return null;
   const editingComment = commentState.editingCommentId
-    ? commentState.comments.find((c) => c.id === commentState.editingCommentId)?.text
+    ? commentState.comments.find((c) => c.id === commentState.editingCommentId)
     : undefined;
   const onDelete = commentState.editingCommentId
     ? async () => {
@@ -455,12 +463,14 @@ function PlanSelectionPopoverWrapper({
     : undefined;
   return (
     <SelectionCommentSurface
+      key={`${taskId}:${commentState.snapshot?.plan_id}:${editingComment?.id ?? ""}:${textSelection.from}:${textSelection.to}:${textSelection.text}`}
+      attachmentOptions={taskId ? { taskId, initial: editingComment?.attachments } : undefined}
       selectedText={textSelection.text}
       position={textSelection.position}
       onAdd={handleAdd}
       onAddAndRun={editingComment ? undefined : handleAddAndRun}
       onClose={onClose}
-      editingComment={editingComment}
+      editingComment={editingComment?.text}
       onDelete={onDelete}
       errorMessage={runError || commentState.mutationError}
       runDisabledReason={runDisabledReason}

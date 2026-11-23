@@ -2141,6 +2141,7 @@ func registerSecondaryRoutes(
 			p.services.Plugins.SetHumanInteractionResponseAuthorizer(func(ctx context.Context, workspaceID string) error {
 				return p.services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeSessionControl)
 			})
+			p.services.Plugins.SetLinkedUserResolver(pluginLinkedUserResolver(p.authSvc, p.services.User))
 		}
 		plugins.RegisterRoutes(
 			p.router,

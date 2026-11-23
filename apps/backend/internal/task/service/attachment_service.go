@@ -246,7 +246,7 @@ func (s *AttachmentService) Open(ctx context.Context, ownerID, id string) (*mode
 		if attachment.OwnerID != ownerID {
 			return nil, nil, ErrAttachmentForbidden
 		}
-	case models.AttachmentStateClaimed:
+	case models.AttachmentStateClaimed, models.AttachmentStatePlanComment:
 		if attachment.TaskID == "" || s.authorizeTask == nil {
 			return nil, nil, ErrAttachmentForbidden
 		}
@@ -412,6 +412,9 @@ func (s *AttachmentService) Delete(ctx context.Context, ownerID, id string) erro
 	}
 	if attachment.State != models.AttachmentStateStaged {
 		return ErrAttachmentClaimConflict
+	}
+	if err := s.repo.ExpireStagedMessageAttachment(ctx, id, ownerID); err != nil {
+		return err
 	}
 	if err := s.removeBytes(attachment); err != nil {
 		return err

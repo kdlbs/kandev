@@ -271,6 +271,9 @@ func mockSessionConfigOptions() []acp.SessionConfigOption {
 }
 
 func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
+	if os.Getenv("KANDEV_MOCK_PI_THINKING") == "true" {
+		return mockPiThinkingOptions(model)
+	}
 	modelCat := acp.SessionConfigOptionCategoryModel
 	modeCat := acp.SessionConfigOptionCategoryMode
 	thoughtCat := acp.SessionConfigOptionCategoryThoughtLevel
