@@ -64,9 +64,10 @@ Use ACP v2 for supported local agents.
 From `kdlbs-kandev/apps/backend`:
 
 ```bash
-go test -trimpath ./internal/runtimeflags ./internal/common/config ./internal/profiles -count=1
-go test -trimpath ./internal/agent/runtime/lifecycle ./internal/agentctl/server/instance ./internal/agentctl/server/process -count=1
+GOWORK=off go test -trimpath ./internal/runtimeflags ./internal/common/config ./internal/profiles ./internal/agent/runtime/lifecycle ./internal/agentctl/server/instance -count=1
 ```
+
+Run the process suite from [work order 02](task-02-agentctl-session-lifecycle.md).
 
 From `kdlbs-kandev/apps`:
 
@@ -75,13 +76,38 @@ pnpm install --frozen-lockfile
 pnpm --filter @kandev/web test -- lib/state/slices/features/features-contract.test.ts
 ```
 
-From `kdlbs-kandev/apps/web` after adding the scripted peer and test:
+Use these commands to build the browser test artifacts in `kdlbs-kandev`.
 
 ```bash
-pnpm e2e:run --host --project chromium -- e2e/tests/chat/acp-v2-preview.spec.ts e2e/tests/settings/feature-toggles-restart.spec.ts
-pnpm e2e:run --host --project mobile-chrome -- e2e/tests/settings/mobile-feature-toggles-restart.spec.ts
+GOWORK=off make -C apps/backend build-kandev build-agentctl build-mock-agent build-e2e-delivery-fixture build-e2e-send-now-fixture e2e-plugin-package
+pnpm --dir apps --filter @kandev/web build:e2e
+```
+
+Run the browser and frontend checks from `kdlbs-kandev/apps/web`.
+
+```bash
+GOWORK=off pnpm e2e:run --host --no-build --project chromium -- e2e/tests/chat/acp-v2-preview.spec.ts e2e/tests/settings/feature-toggles-restart.spec.ts --retries=0
+GOWORK=off pnpm e2e:run --host --no-build --project mobile-chrome -- e2e/tests/settings/mobile-feature-toggles-restart.spec.ts --retries=0
 pnpm run typecheck
 pnpm run lint
+pnpm run i18n:check
+```
+
+Run the lint, documentation, and diff checks from `kdlbs-kandev`.
+
+```bash
+GOWORK=off bash scripts/lint-go-changed \
+  apps/backend/internal/agent/runtime/lifecycle/manager_events.go \
+  apps/backend/internal/agent/runtime/lifecycle/manager_message_snapshot_test.go \
+  apps/backend/internal/agentctl/server/adapter/adapter.go \
+  apps/backend/internal/agentctl/server/api/agent.go \
+  apps/backend/internal/agentctl/server/api/agent_initialize_protocol_test.go \
+  apps/backend/internal/agentctl/server/process/acp_preview.go
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+git diff --check origin/main
 ```
 
 ## Files and dependencies
@@ -104,11 +130,22 @@ Use the existing feature settings catalog for all supported locales.
   without duplication, and reopened the saved ID over v1 through agentctl
   with the loopback model fixture.
 - Desktop Playwright tests covered ACP v1 prompts, cancellation, and restart
-  resume. The preview chat streamed a reply before cancellation and restored
-  the same native ID over v2 after restart. It reopened the same ID over v1
-  after rollback.
-- Phone Playwright tests covered the ACP v2 opt-in and the existing restart
-  control.
-- The frontend feature contract tests, type check, lint, and locale checks passed.
-- Go lint passed for the full change, including new files. Specification and
-  public documentation validation passed.
+  resume. All six Chromium qualification tests passed. The preview chat
+  streamed a reply before cancellation and restored the same native ID over
+  v2 after restart. It reopened the same ID over v1 after rollback.
+- Both phone qualification tests passed. The desktop and phone tests confirm
+  that the saved opt-in survives a reload and still requires a restart.
+- `pnpm install --frozen-lockfile` completed with the existing lockfile.
+- All ten frontend feature contract tests passed.
+- The backend and fixture builds passed.
+- `pnpm --dir apps --filter @kandev/web build:e2e` passed.
+- `pnpm run typecheck` passed.
+- `pnpm run lint` passed.
+- `pnpm run i18n:check` passed.
+- The backend packages in the review fix passed Go lint in the commit hook.
+  The full PR scope exceeded the local lint timeout.
+- `python3 scripts/list-docs.py validate` passed.
+- `python3 scripts/lint-spec-files.py --all` passed.
+- All 63 public documentation validator tests passed.
+- The public documentation validator checked 56 pages successfully.
+- `git diff --check origin/main` passed.

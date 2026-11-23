@@ -132,6 +132,14 @@ type SessionCapabilityProvider interface {
 	SupportsSessionLoad() bool
 }
 
+// ACPProtocolVersion returns the adapter's reported ACP version, or zero if unavailable.
+func ACPProtocolVersion(adpt AgentAdapter) uint16 {
+	if reporter, ok := adpt.(interface{ ACPProtocolVersion() uint16 }); ok {
+		return reporter.ACPProtocolVersion()
+	}
+	return 0
+}
+
 // SessionOperationAuthMethodsProvider exposes the initialize method snapshot
 // for a typed session-operation failure response.
 type SessionOperationAuthMethodsProvider interface {

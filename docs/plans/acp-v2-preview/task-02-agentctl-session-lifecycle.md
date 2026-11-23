@@ -52,8 +52,12 @@ The product entry points and retention across a toggle reversal are in order 03.
 From `kdlbs-kandev/apps/backend`:
 
 ```bash
-go test -trimpath ./internal/agentctl/server/adapter/... ./internal/agentctl/server/process -count=1
-go test -trimpath -race ./internal/agentctl/server/adapter/transport/acpv2 -count=10
+GOWORK=off go test -trimpath ./internal/agentctl/server/adapter/... ./internal/agentctl/server/process ./internal/agentctl/server/api -count=1
+GOWORK=off go test -trimpath ./internal/task/repository/sqlite ./internal/orchestrator \
+  -run 'Test(CanonicalMessageSnapshotsReplaceAndClear|StreamingMessagePublishesCanonicalClearAndPreservesLegacyAppend)$' -count=1
+GOWORK=off go test -trimpath -race ./internal/agentctl/server/adapter/transport/acpv2 -count=10
+GOWORK=off go test -trimpath -race ./internal/agent/runtime/lifecycle ./internal/agentctl/server/api \
+  -run 'Test(CanonicalMessageReplacementPreservesPromptGeneration|WSInitializeReportsProtocolFromInitializedAdapter|NativeUserInputBridgeKeepsIdentityOnRetryAndCancel)$' -count=10
 ```
 
 ## Files and dependencies
@@ -87,8 +91,11 @@ Guard the submission generation during delayed prompt and permission replies.
 - Chromium preserved the two configured model labels throughout three
   multi-session restart runs. The same scenario reproduced the late
   provider default before the publication fix.
-- Native question tests cover identity across a stream reconnect and cancel
-  only the bundle for the originating request.
-- SQLite projection tests passed for whole-message replacement and clear.
-  An orchestrator test verifies live notification of that clear and the
-  existing behavior for legacy append events.
+- The adapter, process manager, and agentctl API suites passed.
+- The focused SQLite and orchestrator tests passed. They cover whole-message
+  replacement, notification of an empty replacement, and legacy append events.
+- The lifecycle and API regressions passed ten runs with the race detector.
+  Canonical message replacements keep their prompt generation. Initialize
+  returns the protocol version from the adapter that supplies agent info.
+  Native questions keep their identity across a reconnect and cancel only the
+  bundle for the originating request.

@@ -906,12 +906,12 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
-	adapter, generationCurrent := s.procMgr.GetAdapterForGeneration(req.ProcessGeneration)
+	agentAdapter, generationCurrent := s.procMgr.GetAdapterForGeneration(req.ProcessGeneration)
 	if !generationCurrent {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent process generation changed before initialization", nil)
 		return resp
 	}
-	if adapter == nil {
+	if agentAdapter == nil {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
 	}
@@ -924,7 +924,7 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 		return resp
 	}
 
-	adapter, generation, err := s.procMgr.InitializeAdapter(ctx, adapter, req.ProcessGeneration)
+	agentAdapter, generation, err := s.procMgr.InitializeAdapter(ctx, agentAdapter, req.ProcessGeneration)
 	if err != nil {
 		s.logger.Error("initialize failed", zap.Error(err))
 		var details map[string]any
@@ -939,16 +939,13 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 
 	// Get agent info after successful initialization
 	var agentInfoResp *AgentInfoResponse
-	if info := adapter.GetAgentInfo(); info != nil {
+	if info := agentAdapter.GetAgentInfo(); info != nil {
 		agentInfoResp = &AgentInfoResponse{
 			Name:    info.Name,
 			Version: info.Version,
 		}
 	}
-	if capabilities, ok := adapter.(interface {
-		SupportsSessionResume() bool
-		SupportsSessionLoad() bool
-	}); ok {
+	if capabilities, ok := agentAdapter.(adapter.SessionCapabilityProvider); ok {
 		if agentInfoResp == nil {
 			agentInfoResp = &AgentInfoResponse{}
 		}
@@ -959,7 +956,7 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, InitializeResponse{
 		Success:            true,
 		AgentInfo:          agentInfoResp,
-		ACPProtocolVersion: s.procMgr.ACPProtocolVersion(),
+		ACPProtocolVersion: adapter.ACPProtocolVersion(agentAdapter),
 		ProcessGeneration:  generation,
 		DurableDelivery: &DurableDeliveryInfo{
 			Version:    deliveryCapability.Version,

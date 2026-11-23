@@ -163,6 +163,9 @@ func (m *Manager) publishCanonicalMessageSnapshot(execution *AgentExecution, eve
 	}
 	m.flushStreamCoalescer(execution)
 	trackCanonicalResponseAttemptMessage(execution, event.CanonicalMessageID, event.CanonicalMessageAppend)
+	if event.PromptGeneration == 0 {
+		event.PromptGeneration = execution.promptGenerationSnapshot()
+	}
 	m.publishStreamingContentNowWithProjection(
 		execution, eventType, event.CanonicalMessageID, text, event.CanonicalMessageAppend,
 		event.AttemptID, true, false, event.PromptGeneration, decodeCanonicalConversationReceipt(event.CanonicalConversationReceipt),

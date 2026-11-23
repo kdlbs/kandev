@@ -22,11 +22,7 @@ func (m *Manager) requestedACPProtocolVersion() uint16 {
 }
 
 func (m *Manager) ACPProtocolVersion() uint16 {
-	reporter, ok := m.GetAdapter().(interface{ ACPProtocolVersion() uint16 })
-	if !ok {
-		return 0
-	}
-	return reporter.ACPProtocolVersion()
+	return adapter.ACPProtocolVersion(m.GetAdapter())
 }
 
 func (m *Manager) publishProcessExitError(event adapter.AgentEvent) {

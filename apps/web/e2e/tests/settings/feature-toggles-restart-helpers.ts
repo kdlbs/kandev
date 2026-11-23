@@ -41,7 +41,9 @@ export async function saveAcpV2RestartOverride(page: Page, touch: boolean) {
   try {
     await activate(save);
     await expect(settings.getByText("Restart required", { exact: true })).toBeVisible();
+    await page.reload();
     await expect(toggle).toBeChecked();
+    await expect(settings.getByText("Restart required", { exact: true })).toBeVisible();
   } finally {
     const useDefault = card.getByRole("button", { name: "Use default", exact: true });
     if (await useDefault.isEnabled()) {

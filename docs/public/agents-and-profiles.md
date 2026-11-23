@@ -70,9 +70,13 @@ The preview covers structured task chat on local and worktree executors.
 Use a managed Claude ACP 0.109.0 or 0.109.1 bridge, or a managed Codex ACP
 2.8.0 or 2.9.0 bridge. Sign in locally or configure the provider's API key.
 
-To return to ACP v1, disable the toggle and restart Kandev. If an ACP v2
-process survives the restart, you can read its history, answer pending
-requests, and stop it. Reconnect the session to send new prompts over v1.
+To return to ACP v1, disable **ACP v2 preview** in Feature Toggles and restart
+Kandev. If the environment locks the toggle, set `KANDEV_FEATURES_ACP_V2` to
+`false` and restart Kandev. If you remove the variable, restart Kandev to unlock
+the toggle. Disable any saved opt-in and restart again.
+
+If an ACP v2 process survives the restart, you can read its history, answer
+pending requests, and stop it. Reconnect the session to send new prompts over v1.
 Kandev reports a restore error if the agent cannot reopen the saved conversation.
 
 ## Codex app-server (experimental)

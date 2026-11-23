@@ -54,6 +54,8 @@ envelope, or returns a version-negotiation error that explicitly offers v1.
 Stop and join the first subprocess. Use the original launch snapshot to start one
 fresh process and send full v1 client capabilities. Propagate ambiguous envelopes,
 transport errors, and post-handshake failures through the normal error path.
+Report the selected ACP version from the adapter that supplies agent info for
+the initialize response's process generation.
 
 ## Go wire boundary
 
@@ -96,6 +98,8 @@ The native Codex app-server protocol has its own factory branch.
 - Scope message and tool updates to their session and entity ID. An omitted
   field preserves the value, `null` clears it, and chunks append to it.
   Keep the latest whole-message or tool snapshot for projection and replay.
+  Preserve the prompt generation on each projected message replacement.
+  Resolve an omitted generation from the execution at publication.
   Route reported child sessions under the parent with their own IDs.
   Skip well-formed future update variants and keep later updates flowing.
 - Use `session/cancel` for a foreground interrupt. The terminal state
