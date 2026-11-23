@@ -176,6 +176,60 @@ func TestClaudeShellOutputFollowerEmitsProgressWithoutNewline(t *testing.T) {
 	}
 }
 
+func TestClaudeShellOutputFollowerActivationDoesNotWaitForSend(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	sendStarted := make(chan struct{})
+	releaseSend := make(chan struct{})
+	pollDone := make(chan struct{})
+	follower := newClaudeShellOutputFollower(ctx, func(AgentEvent) {
+		close(sendStarted)
+		<-releaseSend
+	})
+	follower.interval = time.Hour
+	t.Cleanup(func() {
+		follower.clear()
+		follower.wait()
+	})
+
+	path := filepath.Join(t.TempDir(), "session-claude", "tasks", "blocked-send.output")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte("output\n"), 0o600))
+	require.True(t, follower.follow("session-claude", "work-blocked-send", path))
+	require.True(t, follower.activate("session-claude", "work-blocked-send"))
+
+	go func() {
+		follower.pollOnce()
+		close(pollDone)
+	}()
+	select {
+	case <-sendStarted:
+	case <-time.After(time.Second):
+		t.Fatal("poller did not reach the blocked send")
+	}
+
+	activationDone := make(chan bool, 1)
+	go func() {
+		activationDone <- follower.activate("session-claude", "work-blocked-send")
+	}()
+	select {
+	case activated := <-activationDone:
+		if !activated {
+			close(releaseSend)
+			<-pollDone
+			t.Fatal("activation failed while the job remained active")
+		}
+	case <-time.After(time.Second):
+		close(releaseSend)
+		<-pollDone
+		<-activationDone
+		t.Fatal("activation waited for send to release the job mutex")
+	}
+
+	close(releaseSend)
+	<-pollDone
+}
+
 func TestClaudeShellOutputFollowerCapsGrowthBetweenPolls(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)

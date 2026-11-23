@@ -143,3 +143,10 @@ issues; `make -C apps/backend build`, specification validation, spec lint, and
 `pnpm e2e:run tests/task/claude-background-shell-output.spec.ts` passes with
 the viewer observing output appended while the job is still running, before
 terminal frames are released.
+
+PR fixup (lock ordering): the blocked-send activation regression failed before
+the fix and passes with the full ACP race suite. Output events are now built
+under the job state lock and sent after it is released; a per-job delivery lock
+preserves read and event order, including the final chunk. Changed-Go lint
+reports zero issues, documentation validation succeeds, and all specification
+files pass lint.

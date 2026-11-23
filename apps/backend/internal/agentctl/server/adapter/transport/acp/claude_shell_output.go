@@ -87,6 +87,7 @@ func claudeShellOutputPathFromLine(line string) (string, bool) {
 
 type claudeShellOutputJob struct {
 	mu               sync.Mutex
+	sendMu           sync.Mutex
 	active           atomic.Bool
 	sessionID        string
 	workID           string
@@ -190,11 +191,7 @@ func (f *claudeShellOutputFollower) finish(sessionID, workID string) {
 	if job == nil {
 		return
 	}
-	job.mu.Lock()
-	if job.ready {
-		f.readJobLocked(job, true)
-	}
-	job.mu.Unlock()
+	f.readAndSend(job, true)
 }
 
 func (f *claudeShellOutputFollower) clear() {
@@ -275,33 +272,43 @@ func (f *claudeShellOutputFollower) pollOnce() {
 	}
 	f.mu.Unlock()
 	for _, job := range jobs {
-		job.mu.Lock()
-		if job.active.Load() {
-			f.readJobLocked(job, false)
-		}
-		job.mu.Unlock()
+		f.readAndSend(job, false)
 	}
 }
 
-func (f *claudeShellOutputFollower) readJobLocked(job *claudeShellOutputJob, final bool) {
+func (f *claudeShellOutputFollower) readAndSend(job *claudeShellOutputJob, final bool) {
+	job.sendMu.Lock()
+	defer job.sendMu.Unlock()
+	job.mu.Lock()
+	var event *AgentEvent
+	if !final || job.ready {
+		event = f.readJobLocked(job, final)
+	}
+	job.mu.Unlock()
+	if event != nil {
+		f.send(*event)
+	}
+}
+
+func (f *claudeShellOutputFollower) readJobLocked(job *claudeShellOutputJob, final bool) *AgentEvent {
 	if !final && !job.active.Load() {
-		return
+		return nil
 	}
 	file, size, ok := f.openOutputFile(job)
 	if !ok {
-		return
+		return nil
 	}
 	defer func() {
 		_ = file.Close()
 	}()
 	if !job.ready {
 		f.observeOutputSize(job, size, false)
-		return
+		return nil
 	}
 	if !f.observeOutputSize(job, size, final) {
-		return
+		return nil
 	}
-	f.emitAvailableOutput(job, file, size, final)
+	return f.emitAvailableOutput(job, file, size, final)
 }
 
 func (f *claudeShellOutputFollower) openOutputFile(job *claudeShellOutputJob) (*os.File, int64, bool) {
@@ -351,9 +358,9 @@ func (f *claudeShellOutputFollower) emitAvailableOutput(
 	file *os.File,
 	size int64,
 	final bool,
-) {
+) *AgentEvent {
 	if size == job.offset {
-		return
+		return nil
 	}
 	start := job.offset
 	truncated := false
@@ -365,7 +372,7 @@ func (f *claudeShellOutputFollower) emitAvailableOutput(
 	read, err := file.ReadAt(data, start)
 	if (err != nil && !errors.Is(err, io.EOF)) || read != len(data) {
 		f.remove(job)
-		return
+		return nil
 	}
 	if truncated {
 		skipped := 0
@@ -378,14 +385,14 @@ func (f *claudeShellOutputFollower) emitAvailableOutput(
 	}
 	complete := completeUTF8PrefixLength(data)
 	if complete == 0 {
-		return
+		return nil
 	}
 	if !final && !job.active.Load() {
-		return
+		return nil
 	}
 	chunk := strings.ToValidUTF8(string(data[:complete]), "\uFFFD")
 	job.offset = start + int64(complete)
-	f.send(AgentEvent{
+	event := &AgentEvent{
 		Type:      streams.EventTypeBackgroundWorkOutput,
 		SessionID: job.sessionID,
 		BackgroundWorkOutput: &streams.WorkloadOutputChunk{
@@ -396,8 +403,9 @@ func (f *claudeShellOutputFollower) emitAvailableOutput(
 			Truncated: truncated,
 			Stream:    "stdout",
 		},
-	})
+	}
 	job.outputOffset += int64(len(chunk))
+	return event
 }
 
 func completeUTF8PrefixLength(data []byte) int {

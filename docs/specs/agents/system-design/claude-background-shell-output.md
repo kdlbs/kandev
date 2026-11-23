@@ -105,6 +105,10 @@ when the native session changes.
 - **Ordering.** Queue the launch update before activating its output follower.
   Chunks use `a.sendUpdate`, so the launch observation precedes its first
   chunk. A terminal observation follows the final read.
+- **Lock scope.** A per-job delivery lock serializes each read through event
+  delivery so output offsets and final chunks stay ordered. Release the job
+  state lock before calling `a.sendUpdate`, because its activation hook reads
+  the same job state.
 
 The worst case is bounded: one goroutine and 20 `stat` calls every 2 s per
 adapter, at most 200 KiB per file read, and every followed job leaves the map
@@ -143,6 +147,8 @@ the phone detail. No web or locale change is required.
 - Unit: emit progress without a newline, cap a large growth between polls,
   carry a split UTF-8 rune to the next poll, and keep offsets consistent after
   JSON replaces malformed UTF-8.
+- Concurrency: block output delivery while activating the same job and verify
+  activation completes before delivery resumes.
 - Unit, with an injected clock: an unchanged file is not read; activated and
   unactivated jobs idle for 30 minutes leave the map; a 21st job keeps
   `Output: "none"`; the poller goroutine exits when the map empties.
