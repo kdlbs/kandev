@@ -808,9 +808,10 @@ preference is saved on this device and applies when a card has no retained
 Show/Hide choice. You can always select **Preview**, then click or tap the
 visible image to open the larger dialog.
 Other files load only after you select
-**Preview**. **Open file** uses the native desktop or mobile viewer. If the
-workspace disappears, the report remains and the file preview reports that it
-is unavailable.
+**Preview**. For a text preview, select **Hide preview**, then **Preview** to
+read the current workspace contents. **Open file** uses the native desktop or
+mobile viewer. If the workspace disappears, the report remains and the file
+preview reports that it is unavailable.
 
 Historical version 1 reports still render, including their stored CSV snapshots.
 New version 1 calls are rejected with guidance to refresh tool discovery and
