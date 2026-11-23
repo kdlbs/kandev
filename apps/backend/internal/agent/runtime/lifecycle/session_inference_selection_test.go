@@ -185,19 +185,20 @@ func TestSessionInferenceReturnsManagedRuntimeSelectionError(t *testing.T) {
 	}
 }
 
-type emptyCommandCopilot struct{ *agents.CopilotACP }
+type emptyCommandOpenCode struct{ *agents.OpenCodeACP }
 
-func (a *emptyCommandCopilot) ID() string { return "empty-command-copilot" }
-
-func (a *emptyCommandCopilot) BuildCommand(agents.CommandOptions) agents.Command {
+func (a *emptyCommandOpenCode) BuildCommand(agents.CommandOptions) agents.Command {
 	return agents.Command{}
 }
 
 func TestSessionInferenceRejectsEmptyBuiltCommand(t *testing.T) {
-	copilot := &emptyCommandCopilot{CopilotACP: agents.NewCopilotACP()}
-	harness := newInferenceHarness(t, nil, copilot)
+	openCode := &emptyCommandOpenCode{OpenCodeACP: agents.NewOpenCodeACP()}
+	harness := newInferenceHarness(t, nil)
+	if err := harness.manager.registry.Replace(openCode); err != nil {
+		t.Fatalf("replace OpenCode agent: %v", err)
+	}
 
-	_, err := harness.manager.ExecuteInferencePrompt(t.Context(), "session-1", copilot.ID(), "", "hi")
+	_, err := harness.manager.ExecuteInferencePrompt(t.Context(), "session-1", openCode.ID(), "", "hi")
 	if err == nil || !strings.Contains(err.Error(), "agent command cannot be empty") {
 		t.Fatalf("ExecuteInferencePrompt error = %v, want an empty-command validation error", err)
 	}
