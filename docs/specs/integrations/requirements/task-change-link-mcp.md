@@ -109,6 +109,9 @@ without me editing task records by hand.
 - **AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-003.3:** Stale associations shall remain removable after repository detachment.
   Removal events shall describe committed deletion only. Failed replacement shall report original failure, compensation failure, and known remaining associations.
   When remaining state cannot be read, the response shall identify that uncertainty.
+- **AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-003.4:** The management tool shall describe `repository_id` as a Kandev repository ID.
+  When an authorized `link` call supplies an ID that matches no repository attached to the target task, the tool shall return a validation error that names `repository_id`.
+  The tool shall reject the call before contacting the provider or writing an association.
 
 ### REQ-INTEGRATIONS-TASK-CHANGE-LINK-MCP-004: Target automation explicitly
 
@@ -155,5 +158,6 @@ No new provider, database migration, or generic provider persistence framework i
 
 ## Implementation Plans
 
+- [Repository ID validation for MCP links](../../../plans/mcp-change-request-repository-id/plan.md).
 - [Provider-neutral change request tools](../../../plans/provider-neutral-change-request-mcp/plan.md): the implementation package.
 - [Merged association delivery](../../../plans/manage-task-pr-and-m/plan.md): historical baseline, completed in PR #3506.
