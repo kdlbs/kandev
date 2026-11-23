@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  shouldOpenFilePreview,
+  previewFileState,
+  canOfferViewerAfterReadFailure,
+} from "@/lib/plugins/file-viewer-selection";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   isFileRenameRetargeting,
@@ -151,6 +157,10 @@ async function loadRestoredTab(
   const { activeSessionId, activeSessionIdRef, setFileState } = params;
   try {
     const itemId = buildRepoScopedItemId(savedTab.path, savedTab.repo);
+    if (shouldOpenFilePreview(savedTab.path)) {
+      setFileState(itemId, previewFileState(savedTab.path, savedTab.repo));
+      return true;
+    }
     const response = await requestFileContent(
       client,
       activeSessionId,
@@ -176,7 +186,15 @@ async function loadRestoredTab(
           : undefined,
     });
   } catch {
-    /* useFileLoader will retry when executor is ready */
+    if (!isRestoreWriteCurrent(_restoredSessionId, activeSessionId, activeSessionIdRef))
+      return false;
+    if (canOfferViewerAfterReadFailure(savedTab.path)) {
+      setFileState(
+        buildRepoScopedItemId(savedTab.path, savedTab.repo),
+        previewFileState(savedTab.path, savedTab.repo),
+      );
+    }
+    // Other files retain the existing loader retry behavior.
   }
   return true;
 }

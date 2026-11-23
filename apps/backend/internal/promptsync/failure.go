@@ -15,6 +15,8 @@ import (
 // credential workspace.
 const errorClassWorkspaceMissing = "credential_workspace_missing"
 
+const quotaUnavailableMessage = "GitHub quota is temporarily unavailable"
+
 func (s *Service) failureDirective(cfg *Config, syncErr error) reposync.FailureDirective {
 	if errors.Is(syncErr, ErrCredentialWorkspaceMissing) {
 		return reposync.FailureDirective{
@@ -23,19 +25,26 @@ func (s *Service) failureDirective(cfg *Config, syncErr error) reposync.FailureD
 			CircuitClass: authcircuit.FailureClassConfig,
 		}
 	}
-	return reposync.BuildFailureDirective(reposync.FailureInput{
+	directive := reposync.BuildFailureDirective(reposync.FailureInput{
 		Provider:            cfg.Provider,
 		IntervalSeconds:     cfg.IntervalSeconds,
 		ConsecutiveFailures: cfg.ConsecutiveFailures,
 		Circuit:             cfg.circuitState(),
 		GenericMessage:      genericFailureMessage,
 	}, syncErr, s.now().UTC(), s.jitter)
+	if errors.Is(syncErr, github.ErrGitHubAdmissionWaitRequired) {
+		directive.Class = github.RateLimitErrorCode
+	}
+	return directive
 }
 
 // ownMessages are this package's errors whose text is safe to show as is.
 var ownMessages = []error{ErrCredentialWorkspaceMissing, ErrListingIncomplete}
 
 func safeErrorMessage(err error) string {
+	if errors.Is(err, github.ErrGitHubAdmissionWaitRequired) {
+		return quotaUnavailableMessage
+	}
 	for _, own := range ownMessages {
 		if errors.Is(err, own) {
 			return own.Error()
@@ -46,6 +55,9 @@ func safeErrorMessage(err error) string {
 
 // safeStoredMessage keeps only the exact safe summaries this package writes.
 func safeStoredMessage(message string) string {
+	if message == quotaUnavailableMessage {
+		return message
+	}
 	for _, own := range ownMessages {
 		if message == own.Error() {
 			return message

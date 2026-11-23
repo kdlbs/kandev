@@ -9,6 +9,7 @@
 export const KEY_SEQUENCES = {
   esc: "\x1b",
   tab: "\t",
+  enter: "\r",
   up: "\x1b[A",
   down: "\x1b[B",
   right: "\x1b[C",

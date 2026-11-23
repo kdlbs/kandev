@@ -186,7 +186,7 @@ func (s *Service) applyToOverride(
 	case current.Conflict:
 		result.Conflicts = append(result.Conflicts, file.Name)
 	}
-	recorded, err := s.repo.SetOverrideRepositoryContent(ctx, current.ID, file.Content)
+	recorded, err := s.repo.SetOverrideRepositoryFile(ctx, current.ID, file.Path, file.Content)
 	if err != nil {
 		return err
 	}

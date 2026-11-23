@@ -826,6 +826,20 @@ advertised argument hint, such as `/goal`'s supported arguments. These labels
 and hints describe the command; they do not apply it until you send the draft.
 Pasted rich text does not create a command chip; Kandev uses its visible plain text.
 
+In task Chat, confirmed changes appear in one muted system message, such as
+“Changed model `Sonnet`, mode `Plan`.” Changes before the next turn share that
+message, with the latest result for each setting. Unconfirmed changes appear
+in red with a message that explains the outcome.
+
+Settings you choose before the agent starts appear as “Saved … for agent
+startup.” When the agent starts, later changes appear in a new message.
+
+A supported configuration command such as `/model <id>` can also report the
+setting that the agent applied. Kandev shows that result beneath the command
+for a short time. If the agent does not report a clear change, the message
+says that the requested setting could not be confirmed. Reloading the page
+clears these feedback messages.
+
 ## Recover from provider errors
 
 ### Connection loss
@@ -1118,6 +1132,31 @@ When tasks are grouped, expand **Group by** and use **Indent grouped tasks** to 
 Expand **Task row** in sidebar filters to choose the details shown below each title and the value on the right. Choose **Nothing** on the right to hide change-request status icons; pull request numbers remain available as a separate detail. The task actions menu remains available.
 
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
+
+An active plugin can add **Plugin groupings** to the saved-view selector. On a
+phone, open the navigation menu's **Tasks** section and tap **Plugin groupings**;
+the same chooser is available in the task switcher. Selecting a grouping creates
+a normal saved view or reuses its unchanged generated view. Save or discard an
+existing draft before selecting one. Renamed/custom views are not overwritten.
+
+Plugin grouping covers all authorized matching roots before pagination, not just
+the currently loaded page. A root with multiple values appears in each matching
+colored group, with its subtasks beneath each occurrence. **Untagged** contains
+roots without a value. The footer reports unique tasks separately from pages of
+display occurrences; repeated rows still navigate, select, and act on the same
+task. Group collapse belongs to the saved workspace view, while subtask collapse
+applies to the canonical task.
+
+Changing a draft's grouping starts its groups expanded. Collapse choices made
+in that preview belong to the draft: **Discard** leaves the saved view unchanged,
+while **Save** and **Save as** retain the preview's choices. A copied view's
+collapse choices remain independent of its source.
+
+If the plugin is disabled, unavailable, or returns an incomplete classification,
+the saved view remains selected with its original grouping. Enable the plugin,
+use **Retry**, or choose another view. Recovery restores the grouping without
+rewriting your settings. This is separate from plugin Sort/Group choices in the
+main **List** view, which still apply only to its loaded page.
 
 Views already covered by the current homepage data appear immediately, without
 another sidebar request. Larger covered views also page through the data already

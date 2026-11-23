@@ -4,215 +4,19 @@ Scoped guidance for `apps/backend/internal/agentctl/`. Higher-level backend arch
 
 ## API Groups
 
-agentctl exposes these route groups (see `server/api/`):
-- `/health`, `/info`, `/status`, `/runtime/storage` - Health, status, and the read-only executor filesystem advisory
-- `/instances/*` - Multi-instance management
-- `/processes/*` - Agent subprocess management (start/stop)
-- `/agent/configure`, `/agent/stream` - Agent configuration and event streaming
-- `/lsp/stream` - Task-host language-server stdio/WebSocket bridge
-- `/git/*` - Git operations (status, commit, push, pull, rebase, stage, create PR, etc.)
-- `/shell/*` - Shell session management
-- `/workspace/*` - File operations, search, tree
-- `/vscode/*` - VS Code integration proxy
-
-The **control server** (`server/api/control_server.go`) is a separate router from
-the per-instance ones above, and it owns the agent-survival surface:
-- `/identity` - opaque per-launch server identity, advertised capability set,
-  and this server's own resolved unowned period. Unauthenticated, because it is
-  what decides whether to authenticate. It therefore carries no filesystem path.
-- `/ownership/prove` - challenge/response proving this process holds the
-  credential the caller's record names. Also unauthenticated, for the same
-  reason, and safe because a proof is a keyed digest over a caller-chosen
-  challenge and cannot be inverted to the credential. Derivation is shared with
-  the backend through `internal/common/ownershipproof`.
-- `/api/v1/ownership/claim`, `/rotate`, `/confirm`, `/shutdown`, `/details` -
-  the authenticated ownership operations (`claim` is the renewal an owning
-  backend repeats on a cadence derived from the unowned period), plus the
-  filesystem paths kept off `/identity`.
-
-Auth on that router is `controlCredentialAuth`, which has three tiers rather
-than on/off. `/health`, `/auth/handshake`, `/identity`, and `/ownership/prove`
-are exempt entirely. The paths in `adoptionOnlyPaths` (`rotate`, `shutdown`)
-additionally accept the **superseded** credential until the rotation that
-replaced it is confirmed, so a backend that crashed mid-rotation can still
-adopt. Every other authenticated route accepts only the current credential.
-
-## Multi-repository Git and review payloads
-
-Preserve the repository-scoped fields `repository_name`, `base_ref`, and
-`is_submodule` in aggregate results; nested submodule comparisons stay anchored
-to the parent gitlink. The focused contract tests are in
-`server/api/git_multi_repo_review_test.go`.
-
-## Pull request creation (`server/process/git_pr_providers.go`)
-
-`GitOperator.CreatePR` picks a host CLI from `origin`:
-
-| Remote host | CLI | Notes |
-|-------------|-----|-------|
-| `github.com`, `*.github.com` | `gh pr create` | Requires `gh` on `PATH` (included in the Kandev Docker image). |
-| `gitlab.com`, configured self-managed host | `glab mr create` or REST v4 | `KANDEV_GITLAB_HOST` binds detection/auth to the workspace origin. `GITLAB_TOKEN` is used only for that exact host; the REST fallback resolves the project default branch and reuses an existing open source/target MR on retry. |
-| Other hosts | — | Returns an unsupported-remote error. Plugin-owned providers, such as Azure Repos through `kandev-plugin-azure-devops`, create pull requests through the plugin's `createChangeRequest` callback or agent tools, not agentctl. |
-
-GitHub PR and GitLab MR URLs trigger backend association callbacks. The web UI keeps a session-scoped pending URL so the changes panel hides the create action after any successful provider response.
+For agentctl API, Git operations, or pull request creation, read [API guidance](API-GUIDANCE.md).
 
 ## Adapter Model
 
-Protocol adapters in `server/adapter/transport/` normalize different agent CLIs:
-- `AgentAdapter` interface defines `Connect()`, `Initialize()`, `NewSession()`, `LoadSession()`, `Prompt()`, `Cancel()`, `Updates()`, `Close()`, among others
-- Transports: `acp`, `codexappserver` (native Codex app-server), and `shared` (cross-transport helpers). The native Codex transport is experimental and uses the versioned schema under `pkg/codexappserver/schema/`; do not infer support for other native provider protocols from its protocol types.
-- `process.Manager` owns subprocess, wires stdio to adapter
-- `NewAdapter` in `server/adapter/factory.go` selects the adapter by protocol (`agent.Protocol`), not by agent type; agent identity and CLI-specific config come from Go constructors in `internal/agent/agents/`, registered by `internal/agent/registry.Registry.LoadDefaults()`
-
-The `acp` transport is split by concern across `adapter_*.go` files: `adapter.go` (core/lifecycle), `adapter_session.go` (initialize/new/load/resume/close), `adapter_prompt.go` (prompt/cancel), `adapter_updates.go` (`session/update` notification fan-out), `adapter_tools.go` (`convertToolCallUpdate` / `convertToolCallResultUpdate` -> normalized payloads), `adapter_permissions.go`, and `adapter_helpers.go`. Agent-specific ACP extensions use the package-private `acpDialect` function table in `dialect.go`; keep observed wire translation in `dialect_<agent>.go`. Dialect hooks return normalized data or request descriptions and never receive `*Adapter` or execute RPCs. Shared capability normalization used by both live sessions and utility probes belongs in `internal/agentctl/acpcompat/`. Tool-call conversion lives in `adapter_tools.go`, not `adapter.go`. See ADR-0043. Session lifecycle transitions are serialized: `NewSession`, `LoadSession`, and `ResetSession` (`session/new` plus the `closeSupersededSessionLocked` cleanup) each run under `Adapter.sessionTransitionMu`, because agentctl dispatches WS requests to the adapter without serialization; any new path that writes `a.sessionID` must hold that mutex for the whole transition, not just the write.
-
-**Prompt handoff and steering are negotiated, not named.** Both the foreground-idle handoff (ADR-0049) and mid-turn steering (ADR-2026-08-04) gate on the agent's `initialize` advertisement `agentCapabilities._meta.claudeCode.promptQueueing`, read once in `prompt_queueing.go` and cached on the adapter — never on `agentID`. A steer transfers the existing prompt-gate token to a human successor while the predecessor `session/prompt` is still open (`adapter_prompt_cancel.go: handOffTurnLocked`), reusing the generation-keyed completion attribution and background-work protection built for handoff. Steering is exposed via the optional `adapter.SteerablePrompter` interface (`PromptSteer` / `SupportsSteering`), so non-steering transports need no change. Delivery is opportunistic: the advertisement asserts the agent accepts a concurrent prompt, not that it folds it — both outcomes must be correct.
-
-### Grok ACP dialect (`dialect_grok.go`)
-
-Grok exposes some model, config, and usage surfaces through implementation-specific ACP metadata. Its dialect normalizes them in the backend so shared ACP paths and the frontend stay provider-agnostic:
-
-| Grok wire | Kandev shape |
-|---|---|
-| Legacy `models` catalog | model `ConfigOption` used by generic frontend selectors |
-| Model `_meta.supportsReasoningEffort` / `reasoningEfforts` / `reasoningEffort` | gated `reasoning_effort` select with category `thought_level` |
-| `SetConfigOption(model, …)` or `(reasoning_effort, …)` | Grok has **no** `session/set_config_option`. Rewrite both to `session/set_model` (effort keeps current modelId + `_meta.reasoningEffort`; model switch may carry prior effort in meta when still supported). Frontend always uses set_config_option when a model ConfigOption exists. |
-| Mid-session `MODEL_SWITCH_INCOMPATIBLE_AGENT` | return Grok's actionable error; user starts a new session explicitly |
-| Notification `_meta.totalTokens` + model `_meta.totalContextTokens` | `EventTypeContextWindow` (used/size/remaining). Compaction may decrease used; clear used on model switch. |
-| Prompt `_meta.usage` | input/output/cache/total plus `reasoningTokens` as `PromptUsage.ThoughtTokens`; sibling flat fields are not whole-turn totals |
-
-Grok ACP currently exposes neither per-turn cost nor subscription quota/reset values. Do not estimate them or treat the optional subscription tier label as usage data.
+For agent adapters and dialects, read [adapter guidance](ADAPTERS.md).
 
 ## ACP Protocol
 
-JSON-RPC 2.0 over stdin/stdout between agentctl and agent process. Requests: `initialize`, `session/new`, `session/load`, `session/resume`, `session/prompt`, `session/cancel`, `session/close`. Notifications: `session/update` with types `message_chunk`, `tool_call`, `tool_update`, `complete`, `error`, `permission_request`, `context_window`.
-
-The adapter prefers advertised `session/resume` for any agent to restore the saved conversation without replaying its history. Both resume and load responses preserve typed configuration and legacy model state. If an agent advertises resume but returns method-not-found, the adapter uses `session/load` only when advertised and the context is still active. Other errors preserve the saved identity. Restore traces contain separate `session.resume` and `session.load` spans for the actual requests.
-
-OpenCode v1 and v2 share the `opencode-acp` identity and can access the same session database. For OpenCode only, a failed restore never falls back to `session/new`, including a recognized missing-session response. Preserve the native session ID and return the load error to the existing Kandev session.
-
-### Native prompt suggestions (Claude)
-
-`supports_prompt_suggestions` is effective enablement; the optional
-`native_prompt_suggestions_supported` is support alone (nil = unknown) and must
-never enable the composer. `dialect_claude_prompt_suggestions.go` accepts
-literal `_meta.claudeCode.promptSuggestions: true`, or, when absent, only the
-exact official bridge `@agentclientprotocol/claude-agent-acp` `0.81.2` or
-`0.100.0` with `promptQueueing: true`; false or malformed denies support, and names,
-namespaces, queueing, and models never qualify. Supported sessions configure
-new/load/resume with `claudeCode.options.promptSuggestions` plus the requested
-raw `prompt_suggestion` filter; `adapter_prompt_suggestion.go` owns window and
-origin handling. Failed or same-ID transitions keep the prior window ambiguous.
-Design: `docs/specs/agents/system-design/native-prompt-suggestion-capability.md`.
-
-### ACP permission identity and injected MCP approval
-
-The ACP client preserves `ToolCall.Name` and `ToolCall.Meta` on the internal
-permission request. The Claude dialect reads `_meta.claudeCode.toolName` only
-for Claude frames and uses an exact qualified title fallback only when both
-identity fields are absent and the ACP kind is `other`. Malformed or
-conflicting identity data stays in the normal permission path. Other provider
-dialects must not inherit this title fallback without a tested wire contract.
-
-The process manager may automatically select an offered allow-once, then
-allow-always option for any qualified tool on the host-injected Kandev MCP
-server when blanket approval is off. It requires the internal construction
-provenance marker and the exact current-port HTTP or SSE server entry. This
-server-wide provider-layer rule includes destructive Kandev tools; MCP
-authentication, task/session authorization, questions, and workflow gates stay
-separate. Shell, file, third-party, ambiguous, malformed, and unqualified
-requests keep the pending permission flow. Internal identity fields are not
-part of permission snapshots or stream events.
-
-The flattened `mcp__server__tool` parser accepts only one unambiguous `__`
-separator. It rejects delimiter collisions, adjacent underscores at the
-boundary, and additional `__` sequences in the tool suffix. This prevents a
-server such as `kandev__external` from being read as the reserved `kandev`
-server. Tool names with these ambiguous forms keep the pending flow.
-
-### ACP frame debug logging (`adapter/transport/shared/acplog.go`)
-
-When `KANDEV_DEBUG_AGENT_MESSAGES=true` (on by default in the **dev** profile), the ACP adapter dumps every raw + normalized frame to **per-session** JSONL files:
-
-- Files: `raw-{protocol}-{agentID}-{sessionID}.jsonl` and `normalized-{protocol}-{agentID}-{sessionID}.jsonl` (the `raw-`/`normalized-` prefix + `.jsonl` suffix is a contract with the reader in `internal/debug`).
-- Dir resolution: `KANDEV_DEBUG_LOG_DIR` (explicit override) → `<KANDEV_HOME_DIR>/logs/acp` (honors dev/e2e isolation — `KANDEV_HOME_DIR` is already the Kandev root, so no extra `.kandev` segment) → `~/.kandev/logs/acp/` → process CWD.
-- One kept-open buffered writer + dedicated mutex per session (no global lock on the hot path); rotates on a per-file byte cap.
-- A `shared.Janitor` (owned by `cmd/agentctl/main.go run()`, `Start`/`Stop`) flushes periodically and prunes oldest-by-mtime first, enforcing a total-file cap and an age cap so an always-on dev session can't fill the disk. It also closes idle writers so handles don't leak.
-- Age and count pruning check the active writer registry and unlink under the same manager lock used by writer registration. This protects only active segments held by this agentctl process; rotated segments and files open in another agentctl sharing the directory are not protected. Active segments still count toward the count limit, so the directory can exceed it only when those open segments alone exceed the limit.
-- Agent subprocesses never inherit these settings. `launchwrapper.IsAgentDebugSetting` defines the set (`KANDEV_DEBUG_AGENT_MESSAGES`, `KANDEV_DEBUG_LOG_DIR`, `KANDEV_DEBUG_ACP_*`), and agent config, utility probes, and ACP `terminal/create` remove it, including explicit per-instance and terminal overrides. The owning agentctl reads its own process environment, so its logging is unaffected. The `acp` test package's `TestMain` points the registry at a temporary directory and exits before tests run if that directory cannot be created.
-- Dev-only live tail of a stuck session from an in-memory ring buffer (zero disk growth): `GET /api/v1/debug/acp/{session}?n=200`.
-
-Env knobs (all optional): `KANDEV_DEBUG_ACP_MAX_FILES` (default 200), `KANDEV_DEBUG_ACP_RETENTION_HOURS` (default 48), `KANDEV_DEBUG_ACP_MAX_FILE_BYTES` (default 8 MiB).
-
-**PRIVACY / PERF:** frames carry the full prompt, file, and tool-call content. Keep this strictly behind the debug flag and local-dev-scoped — never enable in a shared/production deployment. When agentctl runs inside a Docker executor the files land *inside the container*, so this is meant for standalone/dev.
-
-### Recognizing agent-specific ACP meta-tagged tools
-
-`claude-agent-acp` tags certain tool calls with `_meta.claudeCode.toolName` (e.g. `Monitor`, `ScheduleWakeup`, `Agent` for subagents) and may carry results in `_meta.claudeCode.toolResponse`. `codex-acp` reports collaboration and subagent lifecycle through legacy `_meta.codex` or the 2.x structured `rawInput` envelope. Keep normalization, correlation, and capacity evidence on the shared Codex wire interpreter; explicit legacy metadata remains authoritative. Spawn fallback requires the exact `spawnAgent` title plus the structured sender/receiver/state fields, never a title alone. These are normalized into typed `streams.NormalizedPayload` kinds in `server/adapter/transport/acp/`. The established pattern is a defensive untyped-map recognizer, typed normalized data, and sibling tests. Shared recognized tools live in files such as `monitor.go`, `wakeup.go`, and `subagent.go`; agent-scoped wire translation belongs in `dialect_<agent>.go` (for example `dialect_codex.go`). `convertToolCallUpdate` stashes `title`/`Meta` into the normalizer args; result enrichment happens in `convertToolCallResultUpdate`. Don't inline detection in `adapter.go`. Detection can also be cross-agent: common subagent recognition keys off Claude's `_meta`, OpenCode's tool `title`, Cursor's `rawInput._toolName`, and Auggie's title prefix.
-
-### Subagent tool-call nesting: what each agent emits
-
-Kandev renders subagents (the `Task` tool) as cards and *wants* to nest each subagent's internal tool calls under its card (via `parent_tool_call_id`, see `tool-subagent-message.tsx`). Reality differs per agent — verified from captured `~/.kandev/logs/acp/` frames of a "spawn 3 subagents that each run `sleep 30`" prompt:
-
-| Agent | Subagent-internal tool calls | Nestable? |
-|---|---|---|
-| **Claude** | emitted on the parent session, each tagged with **`_meta.claudeCode.parentToolUseId`** = the parent Task tool_call's id | **Yes** — `parentToolUseID()` reads it in `adapter_tools.go` and sets `AgentEvent.ParentToolCallID`, which becomes the message's `parent_tool_call_id` and nests under the card |
-| **Codex** | **not emitted over ACP**; spawn/start signals use legacy `_meta.codex.collaboration` / `_meta.codex.subagent` or the 2.x structured input equivalents, while `wait` and `closeAgent` report child status and results through `rawInput.agentsStates` | No — spawn/start signals render through `subagent_task`, and completed wait/close reports update that existing card; these reports do not attest background liveness, and there are no child internal tool calls to attach |
-| **Copilot** | emitted on the parent session with `_meta["github.com/copilot"].agentId`; parent calls report `agent_type`, `name`, `description`, `prompt`, and `mode` in `rawInput` | Yes, when the child ID matches a background launch or exactly one open foreground card has no child binding; ambiguous calls remain top-level |
-| **Cursor** | **not emitted over ACP at all** (Task `tool_call_update` carries only `{durationMs, isBackground}`) | No — no child data exists |
-| **OpenCode** | emitted into a **separate child ACP session** (the `metadata.sessionId` we store as `SubagentTaskPayload.ChildSessionID`) | Not yet — they never reach the parent stream; would require merging that child session via the stored `child_session_id` |
-
-Claude is the one that supports nested child tools today: `claude-agent-acp` (since PR #859) sets `_meta.claudeCode.parentToolUseId` on a subagent's internal calls, and its value already equals the parent Task tool_call id — so it maps straight onto our `parent_tool_call_id`. Codex reports child status and results for presentation cards, but it does not emit child tool calls or typed background-work provenance. Cursor exposes nothing to nest. OpenCode needs a Kandev-side child-session merge. (Top-level `parentToolCallId` is NOT in the ACP schema — `_meta` is the spec-compliant carrier.)
+When changing or debugging ACP handling, read [ACP protocol guidance](ACP-PROTOCOL.md).
 
 ## Process-group cleanup and `RequiresProcessKill`
 
-All ACP agents are launched in their own process group, and shutdown must not
-report success while any process in that group is still alive. Some agents —
-notably `opencode acp` — keep their HTTP server and an MCP child tree alive after
-stdin EOF. For those agents, closing stdin on shutdown is not useful; the process
-group has to be killed immediately so the MCP children don't re-parent to init
-and leak (GH issue #1247).
-
-The "skip graceful wait" signal flows agent → adapter → process manager via a
-single bool:
-
-1. `agents.RuntimeConfig.RequiresProcessKill` (set `true` on `OpenCodeACP`).
-2. The lifecycle executors copy it into `agentctl.CreateInstanceRequest.RequiresProcessKill`.
-3. `instance.Manager` stores it on `config.InstanceConfig.RequiresProcessKill`.
-4. `process.Manager.buildAdapterConfig` forwards it into `adapter.Config` → `shared.Config`.
-5. `acp.Adapter.RequiresProcessKill()` returns `cfg.RequiresProcessKill`.
-6. On shutdown, `process.Manager.killProcessGroupIfRequired` consults the adapter and, when true, sends SIGKILL to the whole pgid via `killProcessGroup` (`syscall.Kill(-pid, SIGKILL)` on Unix).
-
-`RequiresProcessKill: false` does **not** mean children may be left running. It
-only allows the normal graceful path first (stdin close, adapter close, process
-wait). After the command leader exits, `waitForProcessExit` still checks the
-agent process group and sends SIGTERM/SIGKILL if descendants remain. If `Stop(ctx)`
-times out, it also re-runs the pgid SIGKILL fallback.
-
-Non-agent protocol subprocesses must use the same ownership path. LSP servers
-start through `process.Manager.StartPipedProcess`, which exposes stdin/stdout to
-the bridge while registering the command with `ProcessRunner`; instance teardown
-then closes admission and reaps the full process tree on Unix and Windows.
-LSP auto-install work holds `Manager.BeginOwnedOperation`; npm and Go installer
-commands run through `Manager.CombinedOutput`, so teardown cancels downloads,
-drains cache mutations, and reaps installer descendants before resources are
-released.
-
-When consuming `exec.Cmd.StdoutPipe` or `StderrPipe`, start the command before
-reading and finish every reader before calling `cmd.Wait`; `Wait` closes the
-pipes after the command exits. Prefer `CombinedOutput` when separate streaming
-is not required, and test cancellation with output large enough to exercise
-pipe backpressure so a reader/Wait ordering mistake cannot deadlock teardown.
-When wait and draining must proceed concurrently, use an explicitly owned
-`os.Pipe` assigned to `cmd.Stderr`, close the parent writer after `Start`, join
-the reader with `Wait`, and bound or close the reader on timeout so stderr is
-not lost or left blocking teardown.
-Lifecycle callbacks that publish process state must complete before releasing
-readiness waiters for that same process boundary; test callback-before-waiter
-ordering.
-
-To add another agent that needs immediate kill instead of graceful stdin close:
-set `RequiresProcessKill: true` in its `Runtime()` config.
+For subprocess termination and cleanup, read [process cleanup guidance](PROCESS-CLEANUP.md).
 
 ## Permission auto-approval has one carrier
 
@@ -241,30 +45,7 @@ drains in-flight cleanup and retries retained bundles before returning.
 
 ## Env stripping for credential-mode agents (`StripEnv`)
 
-Some agents check environment variables to decide their credential mode. For example, `devin acp` checks `ACP_BACKEND`: when set (any value, including empty), it requires protocol-level `authenticate` and refuses local credentials; when unset, it falls back to reading `~/.local/share/devin/credentials.toml` directly. Kandev (which may inherit `ACP_BACKEND` from Windsurf Next) needs the fall-back path, so the variable must be **absent** from the child environment — not just empty.
-
-The strip list flows agent → instance config → process manager via a single slice, mirroring `RequiresProcessKill`:
-
-1. `agents.RuntimeConfig.StripEnv` (set `[]string{"ACP_BACKEND"}` on `DevinACP`).
-2. The lifecycle executors copy it into `agentctl.CreateInstanceRequest.StripEnv`.
-3. `instance.Manager` stores it on `config.InstanceConfig.StripEnv`.
-4. `process.Manager.buildAdapterConfig` iterates the list and calls `utility.RemoveEnvEntry` on `m.cfg.AgentEnv` before that env is used to spawn child processes.
-
-For the one-shot probe/inference path, the strip list is derived from `Runtime().StripEnv` via the shared `agents.StripEnvFor` helper — it is not an independent field on `InferenceConfig`. The derived value is propagated through `InferenceConfigDTO.StripEnv` and applied by `utility.sanitizeEnvForAgent` before spawning the ephemeral subprocess.
-
-To add another agent that needs env vars stripped: set `StripEnv: []string{"VAR_NAME"}` in its `Runtime()` — that's all.
-
-**Agent environment snapshot:** `process.Manager` snapshots `cfg.AgentEnv` at
-construction. Tracker Git must not re-read ambient `os.Environ()` at execution
-time. Install command gates/shims and `KANDEV_TEST_*` variables before manager
-construction, or pass an explicit copied `AgentEnv` snapshot; helpers that create
-managers should accept that snapshot so fixtures cannot become stale.
-
-**SSH command shapes:** SSH option rewriting may preserve only direct OpenSSH
-commands, including quoted executable paths. Do not insert options after the
-first shell word for env/assignment/exec prefixes or custom/plink wrappers;
-unsupported shapes must use a documented safe default or fail closed. Cover
-direct, quoted, prefixed, and custom forms with focused tests.
+For credential-mode environments, Tracker Git environment snapshots, or SSH command rewriting, read [environment stripping guidance](ENV-STRIPPING.md).
 
 ## Idle-instance reaper (`KANDEV_ACP_IDLE_TIMEOUT`)
 

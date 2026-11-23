@@ -465,6 +465,10 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 }
 
 func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData {
+	configurationResult := event.ConfigurationCommandResult
+	if event.Recovered {
+		configurationResult = nil
+	}
 	return &AgentStreamEventData{
 		Type:                             event.Type,
 		ACPSessionID:                     event.SessionID,
@@ -486,6 +490,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		SessionSettingsPolicy:            event.SessionSettingsPolicy,
 		SessionSettingsGeneration:        event.SessionSettingsGeneration,
 		PromptGeneration:                 event.PromptGeneration,
+		ConfigurationCommandResult:       configurationResult,
 		RetractedMessageIDs:              append([]string(nil), event.RetractedMessageIDs...),
 		TurnID:                           event.TurnID,
 		Data:                             event.Data,

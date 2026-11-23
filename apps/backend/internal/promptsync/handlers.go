@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/github"
 	promptdto "github.com/kandev/kandev/internal/prompts/dto"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
@@ -147,6 +148,9 @@ func runResponse(cfg *Config, result *SyncResult, syncErr error) gin.H {
 	response := gin.H{"config": cfg}
 	if syncErr != nil {
 		response["error"] = safeErrorMessage(syncErr)
+		if errors.Is(syncErr, github.ErrGitHubAdmissionWaitRequired) {
+			response["error_code"] = github.RateLimitErrorCode
+		}
 	}
 	if result != nil {
 		response["result"] = result

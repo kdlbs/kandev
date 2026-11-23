@@ -1,4 +1,11 @@
 {
+  "pluginGroupingSection": "插件分组",
+  "pluginGroupingUnavailable": "此插件分组不可用或不完整。请重试、启用插件或选择其他视图。",
+  "pluginGroupingUnavailableLabel": "{{name}}（不可用）",
+  "pluginGroupUntagged": "无标签",
+  "pluginGroupDescription": "对完整任务视图进行分组，然后分页。",
+  "pluginPageStatus_one": "{{count}} 个不同任务。第 {{page}} 页，共 {{total}} 页（按显示次数分页）。",
+  "pluginPageStatus_other": "{{count}} 个不同任务。第 {{page}} 页，共 {{total}} 页（按显示次数分页）。",
   "taskViews": "任务视图",
   "archivedLoadFailed": "无法加载已归档任务",
   "collapseAllBranches": "全部折叠",

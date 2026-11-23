@@ -1,6 +1,6 @@
 //go:build !windows
 
-package passthroughconfig
+package filelock
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func openPassthroughMCPFileLock(path string) (*os.File, error) {
+func openLockFile(path string) (*os.File, error) {
 	fd, err := unix.Open(path, unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, err
@@ -17,7 +17,7 @@ func openPassthroughMCPFileLock(path string) (*os.File, error) {
 	file := os.NewFile(uintptr(fd), path)
 	if file == nil {
 		_ = unix.Close(fd)
-		return nil, fmt.Errorf("create passthrough MCP lock handle for %q", path)
+		return nil, fmt.Errorf("create lock handle")
 	}
 	info, err := file.Stat()
 	if err != nil {
@@ -26,12 +26,12 @@ func openPassthroughMCPFileLock(path string) (*os.File, error) {
 	}
 	if !info.Mode().IsRegular() {
 		_ = file.Close()
-		return nil, fmt.Errorf("passthrough MCP lock path %q is not a regular file", path)
+		return nil, fmt.Errorf("lock path is not a regular file")
 	}
 	return file, nil
 }
 
-func tryLockPassthroughMCPFile(file *os.File) (bool, error) {
+func tryLockFile(file *os.File) (bool, error) {
 	err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 	if err == unix.EWOULDBLOCK || err == unix.EAGAIN {
 		return false, nil
@@ -39,6 +39,6 @@ func tryLockPassthroughMCPFile(file *os.File) (bool, error) {
 	return err == nil, err
 }
 
-func unlockPassthroughMCPFile(file *os.File) error {
+func unlockFile(file *os.File) error {
 	return unix.Flock(int(file.Fd()), unix.LOCK_UN)
 }

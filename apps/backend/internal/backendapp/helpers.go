@@ -1581,6 +1581,9 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	)
 	payload.RouteData = routeData
 	payload.Plugins = bootActivePlugins(p)
+	if canLoadTaskDetailFallback(req, p.authSvc) && p.services != nil && p.services.Plugins != nil {
+		payload.SidebarGroupings = p.services.Plugins.SidebarGroupingCatalog()
+	}
 	payload.InterimSettingsInterlockToken = p.interimSettingsInterlockToken
 	if err := webapp.NormalizeBootPayloadGraph(&payload); err != nil {
 		if p.log != nil {
@@ -1617,6 +1620,9 @@ func bootActivePlugins(p routeParams) []webapp.ActivePluginPayload {
 			Name:      rec.DisplayName,
 			BundleURL: pluginBundleURL(rec),
 			StyleURLs: pluginStyleURLs(rec),
+		}
+		for _, viewer := range rec.UI.FileViewers {
+			entry.FileViewers = append(entry.FileViewers, webapp.FileViewerPayload{ID: viewer.ID, Title: viewer.Title, Extensions: append([]string(nil), viewer.Extensions...)})
 		}
 		if rec.RepositoryProviders != nil {
 			providerIDs := make([]string, len(rec.RepositoryProviders))
@@ -2127,6 +2133,8 @@ func registerSecondaryRoutes(
 		conversationReaders := make([]plugins.ConversationReader, 0, 1)
 		if p.services.Task != nil {
 			conversationReaders = append(conversationReaders, p.services.Task)
+			p.services.Plugins.SetFilePreviewWorkspaceAuthorizer(p.services.Task.AuthorizeWorkspaceAccess)
+			wirePluginFilePreviews(p)
 			p.services.Plugins.SetCapabilityApprovalWorkspaceAuthorizer(func(ctx context.Context, workspaceID string) error {
 				return p.services.Task.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage)
 			})

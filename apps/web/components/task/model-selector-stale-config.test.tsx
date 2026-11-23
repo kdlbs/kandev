@@ -33,6 +33,9 @@ const mocks = vi.hoisted(() => {
     sessionModels: { bySessionId: {} as Record<string, SessionModelsEntry | undefined> },
     settingsAgents: { items: [] as Agent[] },
     taskSessions: { items: {} as Record<string, TaskSession> },
+    turns: { bySession: {} },
+    quickChat: { sessions: [] },
+    recordSessionConfigurationFeedback: vi.fn(),
     sessionAgentctl: {
       itemsBySessionId: {} as Record<string, { status?: string; agentExecutionId?: string }>,
     },

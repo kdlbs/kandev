@@ -5,6 +5,7 @@ import {
   memo,
   type ComponentPropsWithoutRef,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -26,6 +27,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionMode } from "@/lib/api/domains/session-api";
+import { usePickerConfigurationFeedback } from "@/components/task/session-configuration-feedback";
 import { cn } from "@/lib/utils";
 import { prioritizeSelectedOption } from "@/lib/utils/selector-options";
 import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
@@ -47,6 +49,10 @@ type ModeSelectorProps = {
   sessionId: string | null;
   triggerClassName?: string;
 };
+
+function translateModeLabel(t: ReturnType<typeof useTranslation>["t"]) {
+  return t("task:agentPermissionMode");
+}
 
 function resolveSnapshotMode(snapshot: unknown): string | null {
   if (!snapshot || typeof snapshot !== "object") return null;
@@ -280,7 +286,7 @@ function MobileModeSelector({
       <MobilePickerSheet
         open={open}
         onOpenChange={setOpen}
-        title={t("task:agentPermissionMode")}
+        title={translateModeLabel(t)}
         description={t("task:availableModes")}
         contentTestId="session-mode-picker-scroll"
         onCloseAutoFocus={(event) => {
@@ -387,63 +393,87 @@ function useModeSelectorDropdownState() {
   };
 }
 
-export const ModeSelector = memo(function ModeSelector({
-  sessionId,
-  triggerClassName,
-}: ModeSelectorProps) {
-  const { t } = useTranslation();
-  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
-  const modeState = useModeSelectorState(sessionId);
-  const { dropdownOpen, tooltipOpen, handleDropdownOpenChange, handleTooltipOpenChange } =
-    useModeSelectorDropdownState();
-
-  const handleModeChange = useCallback(
+function useModeChangeHandler(
+  sessionId: string | null,
+  feedback: ReturnType<typeof usePickerConfigurationFeedback>,
+  label: string,
+) {
+  return useCallback(
     async (modeId: string) => {
       if (!sessionId) return;
+      const feedbackId = feedback.begin();
+      const change = { configId: "mode", label, requested: modeId };
       try {
-        await setSessionMode(sessionId, modeId);
-      } catch (err) {
-        console.error("[ModeSelector] set-mode API failed:", err);
+        const response = await setSessionMode(sessionId, modeId);
+        feedback.showChanges(feedbackId, [{ ...change, result: response.configuration_result }]);
+      } catch (error) {
+        feedback.showChanges(feedbackId, [{ ...change, error }]);
       }
     },
-    [sessionId],
+    [feedback, label, sessionId],
   );
+}
 
-  if (!sessionId || !modeState) {
-    return null;
-  }
+function resolveModeTooltipLabel({
+  modeState,
+  requestedName,
+  displayName,
+  defaultLabel,
+  t,
+}: {
+  modeState: ModeSelectorState;
+  requestedName?: string;
+  displayName: string;
+  defaultLabel: string;
+  t: ReturnType<typeof useTranslation>["t"];
+}) {
+  if (!requestedName) return defaultLabel;
+  return modeState.currentModeId
+    ? t("task:sessionModeNotApplied", { requested: requestedName, effective: displayName })
+    : t("task:sessionModeUnconfirmed", { requested: requestedName });
+}
 
-  const currentMode = modeState.availableModes.find((m) => m.id === modeState.currentModeId);
+function resolveModeDisplayNames(
+  modeState: ModeSelectorState,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  const currentMode = modeState.availableModes.find((mode) => mode.id === modeState.currentModeId);
   const displayName = currentMode?.name || modeState.currentModeId || t("common:unknown");
-  // Set only when the agent did not end up in the requested mode. Showing the
-  // effective mode alone would be truthful but silent about the mismatch.
+  // Show a request name only when the agent did not reach the requested mode.
   const requestedName = modeState.requestedModeId
-    ? (modeState.availableModes.find((m) => m.id === modeState.requestedModeId)?.name ??
+    ? (modeState.availableModes.find((mode) => mode.id === modeState.requestedModeId)?.name ??
       formatModeName(modeState.requestedModeId))
     : undefined;
+  return { displayName, requestedName };
+}
 
-  if (isMobile || !isFinePointer) {
-    return (
-      <MobileModeSelector
-        modeState={modeState}
-        displayName={displayName}
-        requestedName={requestedName}
-        triggerClassName={triggerClassName}
-        onModeChange={handleModeChange}
-      />
-    );
-  }
-
-  let tooltipLabel = t("task:agentPermissionMode");
-  if (requestedName) {
-    tooltipLabel = modeState.currentModeId
-      ? t("task:sessionModeNotApplied", { requested: requestedName, effective: displayName })
-      : t("task:sessionModeUnconfirmed", { requested: requestedName });
-  }
-
+function DesktopModeSelector({
+  modeState,
+  displayName,
+  requestedName,
+  triggerClassName,
+  tooltipLabel,
+  dropdownOpen,
+  tooltipOpen,
+  onDropdownOpenChange,
+  onTooltipOpenChange,
+  onModeChange,
+}: {
+  modeState: ModeSelectorState;
+  displayName: string;
+  requestedName?: string;
+  triggerClassName?: string;
+  tooltipLabel: string;
+  dropdownOpen: boolean;
+  tooltipOpen: boolean;
+  onDropdownOpenChange: (open: boolean) => void;
+  onTooltipOpenChange: (open: boolean) => void;
+  onModeChange: (modeId: string) => void;
+}) {
+  const { t } = useTranslation();
   return (
-    <DropdownMenu open={dropdownOpen} onOpenChange={handleDropdownOpenChange}>
-      <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
+    <DropdownMenu open={dropdownOpen} onOpenChange={onDropdownOpenChange}>
+      <Tooltip open={tooltipOpen} onOpenChange={onTooltipOpenChange}>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <ModeSelectorTrigger
@@ -460,7 +490,7 @@ export const ModeSelector = memo(function ModeSelector({
         {modeState.availableModes.map((mode) => (
           <DropdownMenuItem
             key={mode.id}
-            onClick={() => handleModeChange(mode.id)}
+            onClick={() => onModeChange(mode.id)}
             className={cn(
               "relative min-h-11 cursor-pointer border border-transparent pr-7 sm:min-h-8",
               mode.id === modeState.currentModeId &&
@@ -480,5 +510,66 @@ export const ModeSelector = memo(function ModeSelector({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+export const ModeSelector = memo(function ModeSelector({
+  sessionId,
+  triggerClassName,
+}: ModeSelectorProps) {
+  const { t } = useTranslation();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const feedback = usePickerConfigurationFeedback(sessionId, "mode");
+  const modeState = useModeSelectorState(sessionId);
+  const { dropdownOpen, tooltipOpen, handleDropdownOpenChange, handleTooltipOpenChange } =
+    useModeSelectorDropdownState();
+
+  useEffect(() => {
+    if (!sessionId || !modeState) {
+      handleDropdownOpenChange(false);
+    }
+  }, [handleDropdownOpenChange, modeState, sessionId]);
+
+  const handleModeChange = useModeChangeHandler(sessionId, feedback, translateModeLabel(t));
+
+  if (!sessionId || !modeState) {
+    return null;
+  }
+
+  const { displayName, requestedName } = resolveModeDisplayNames(modeState, t);
+
+  if (isMobile || !isFinePointer) {
+    return (
+      <MobileModeSelector
+        modeState={modeState}
+        displayName={displayName}
+        requestedName={requestedName}
+        triggerClassName={triggerClassName}
+        onModeChange={handleModeChange}
+      />
+    );
+  }
+
+  const tooltipLabel = resolveModeTooltipLabel({
+    modeState,
+    requestedName,
+    displayName,
+    defaultLabel: translateModeLabel(t),
+    t,
+  });
+
+  return (
+    <DesktopModeSelector
+      modeState={modeState}
+      displayName={displayName}
+      requestedName={requestedName}
+      triggerClassName={triggerClassName}
+      tooltipLabel={tooltipLabel}
+      dropdownOpen={dropdownOpen}
+      tooltipOpen={tooltipOpen}
+      onDropdownOpenChange={handleDropdownOpenChange}
+      onTooltipOpenChange={handleTooltipOpenChange}
+      onModeChange={handleModeChange}
+    />
   );
 });

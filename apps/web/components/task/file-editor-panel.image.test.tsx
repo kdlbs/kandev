@@ -65,6 +65,11 @@ vi.mock("@/hooks/domains/session/use-session-git-status", () => ({
   useSessionGitStatus: () => undefined,
 }));
 
+vi.mock("./plugin-file-preview", () => ({
+  PluginFilePreview: () => <div data-testid="plugin-preview" />,
+}));
+import { pluginRegistry } from "@/lib/plugins/registry";
+
 import { FileEditorPanel } from "./file-editor-panel";
 
 const PREVIEW_PANEL_ID = "preview:file-editor";
@@ -191,4 +196,27 @@ describe("FileEditorPanel image preview", () => {
       "/tmp/task-root",
     );
   });
+});
+
+it("switches a restored unloaded tab when its viewer registers", () => {
+  act(() => useDockviewStore.getState().clearFileStates());
+  const plugin = "late-file-viewer";
+  try {
+    render(
+      <TooltipProvider>
+        <FileEditorPanel panelId={PREVIEW_PANEL_ID} params={{ path: "part.shape" }} />
+      </TooltipProvider>,
+    );
+    expect(screen.queryByTestId("plugin-preview")).toBeNull();
+    act(() => {
+      pluginRegistry.setDeclaredFileViewers(plugin, [
+        { id: "shape", title: "Shape", extensions: ["shape"] },
+      ]);
+      pluginRegistry.forPlugin(plugin).registerFileViewer({ id: "shape", Component: () => null });
+      pluginRegistry.markPluginReady(plugin, 1);
+    });
+    expect(screen.getByTestId("plugin-preview")).toBeTruthy();
+  } finally {
+    act(() => pluginRegistry.unregisterPlugin(plugin));
+  }
 });

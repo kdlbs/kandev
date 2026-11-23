@@ -1,6 +1,10 @@
 /* eslint-disable max-lines -- WebSocketClient intentionally owns one connection's complete request, subscription, and reconnect lifecycle. */
 
-import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend";
+import type {
+  BackendMessageMap,
+  BackendMessageType,
+  ConfigurationCommandResult,
+} from "@/lib/types/backend";
 import type { ConversationChangedPayload } from "@/lib/types/session-events";
 import type { ConnectionStatus } from "@/lib/types/connection";
 import { generateUUID } from "@/lib/utils";
@@ -163,6 +167,7 @@ type CoreConversationOperation = {
   id: string;
   message?: Record<string, unknown>;
   turn?: Record<string, unknown>;
+  configuration_result?: ConfigurationCommandResult;
 };
 
 function coreTurnAction(operation: CoreConversationOperation): BackendMessageType {
@@ -223,6 +228,9 @@ function projectCoreTurnOperation(
       route_generation: turn.route_generation,
       metadata: turn.metadata,
       had_output: turn.had_output,
+      ...(operation.configuration_result
+        ? { configuration_result: operation.configuration_result }
+        : {}),
     });
   }
   return { action: coreTurnAction(operation), payload };
@@ -940,6 +948,14 @@ export class WebSocketClient {
       );
       return;
     }
+    this.projectCoreConversationChange(parsed, stream);
+  }
+
+  private projectCoreConversationChange(
+    parsed: ParsedCoreConversationChange,
+    stream: CoreSessionStream,
+  ) {
+    const { sessionId } = parsed;
     if (!parsed.valid) return;
     const validPayload = parsed.payload as ConversationChangedPayload;
     if (!stream.ready || stream.needsHydration || stream.projectionPaused) {

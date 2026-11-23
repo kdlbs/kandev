@@ -404,6 +404,10 @@ type ModeResult struct {
 	Confirmed bool   `json:"confirmed"`
 }
 
+// ConfigurationResult is an ACP config option result returned by the
+// correlated setter response.
+type ConfigurationResult = streams.ConfigurationResult
+
 // Applied reports whether the agent confirmed the exact requested mode.
 func (r ModeResult) Applied() bool {
 	return r.Confirmed && r.Effective == r.Requested
@@ -444,29 +448,50 @@ func (c *Client) SetMode(ctx context.Context, sessionID, modeID string) (ModeRes
 
 // SetModel changes the agent's model via the agent WebSocket stream.
 func (c *Client) SetModel(ctx context.Context, modelID string) error {
+	_, err := c.SetModelWithResult(ctx, modelID)
+	return err
+}
+
+// SetModelWithResult reads the effective model from the correlated setter
+// response. Older agentctl peers return no such evidence and remain
+// unconfirmed.
+func (c *Client) SetModelWithResult(ctx context.Context, modelID string) (streams.ConfigurationResult, error) {
+	result := streams.ConfigurationResult{Requested: modelID}
 	payload := struct {
 		ModelID string `json:"model_id"`
 	}{ModelID: modelID}
 
 	resp, err := c.sendStreamRequest(ctx, "agent.session.set_model", payload)
 	if err != nil {
-		return fmt.Errorf("set model request failed: %w", err)
+		return result, fmt.Errorf("set model request failed: %w", err)
 	}
 
 	if resp.Type == ws.MessageTypeError {
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
-			return fmt.Errorf("set model failed: unable to parse error")
+			return result, fmt.Errorf("set model failed: unable to parse error")
 		}
-		return fmt.Errorf("set model failed: %s", errPayload.Message)
+		return result, fmt.Errorf("set model failed: %s", errPayload.Message)
 	}
 
-	return nil
+	if err := resp.ParsePayload(&result); err != nil {
+		return streams.ConfigurationResult{Requested: modelID}, nil
+	}
+	if result.Requested == "" {
+		result.Requested = modelID
+	}
+	return result, nil
 }
 
 // SetConfigOption sets a session config option via the agent WebSocket stream.
 func (c *Client) SetConfigOption(ctx context.Context, configID, value string) error {
 	return c.SetConfigOptionWithPolicy(ctx, configID, value, streams.SessionSettingsPolicyStrict)
+}
+
+// SetConfigOptionWithResult returns only the value present in the correlated
+// setter response. A missing value stays unconfirmed.
+func (c *Client) SetConfigOptionWithResult(ctx context.Context, configID, value string) (streams.ConfigurationResult, error) {
+	return c.SetConfigOptionWithPolicyResult(ctx, configID, value, streams.SessionSettingsPolicyStrict)
 }
 
 // SetConfigOptionWithPolicy applies a startup config option and carries its
@@ -476,32 +501,69 @@ func (c *Client) SetConfigOptionWithPolicy(
 	configID, value string,
 	policy streams.SessionSettingsPolicy,
 ) error {
+	_, err := c.setConfigOption(ctx, configID, value, policy, false)
+	return err
+}
+
+// SetConfigOptionWithPolicyResult applies a config option and returns any
+// provider-reported value from that exact response.
+func (c *Client) SetConfigOptionWithPolicyResult(
+	ctx context.Context,
+	configID, value string,
+	policy streams.SessionSettingsPolicy,
+) (streams.ConfigurationResult, error) {
+	return c.setConfigOption(ctx, configID, value, policy, true)
+}
+
+func (c *Client) setConfigOption(
+	ctx context.Context,
+	configID, value string,
+	policy streams.SessionSettingsPolicy,
+	includeConfigurationResult bool,
+) (streams.ConfigurationResult, error) {
+	result := streams.ConfigurationResult{ConfigID: configID, Requested: value}
 	if policy != streams.SessionSettingsPolicyStrict && policy != streams.SessionSettingsPolicyProviderRestored {
-		return fmt.Errorf("unsupported session settings policy %q", policy)
+		return result, fmt.Errorf("unsupported session settings policy %q", policy)
 	}
 	payload := struct {
-		ConfigID              string                        `json:"config_id"`
-		Value                 string                        `json:"value"`
-		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
-	}{ConfigID: configID, Value: value}
+		ConfigID                   string                        `json:"config_id"`
+		Value                      string                        `json:"value"`
+		SessionSettingsPolicy      streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
+		IncludeConfigurationResult bool                          `json:"include_configuration_result,omitempty"`
+	}{ConfigID: configID, Value: value, IncludeConfigurationResult: includeConfigurationResult}
 	if policy != streams.SessionSettingsPolicyStrict {
 		payload.SessionSettingsPolicy = policy
 	}
 
 	resp, err := c.sendStreamRequest(ctx, "agent.session.set_config_option", payload)
 	if err != nil {
-		return fmt.Errorf("set config option request failed: %w", err)
+		return result, fmt.Errorf("set config option request failed: %w", err)
 	}
 
 	if resp.Type == ws.MessageTypeError {
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
-			return fmt.Errorf("set config option failed: unable to parse error")
+			return result, fmt.Errorf("set config option failed: unable to parse error")
 		}
-		return fmt.Errorf("set config option failed: %s", errPayload.Message)
+		if errPayload.Code == ws.ErrorCodeValidation {
+			return result, fmt.Errorf("set config option failed: %s", errPayload.Message)
+		}
+		return result, fmt.Errorf("set config option outcome uncertain: %s", errPayload.Message)
 	}
 
-	return nil
+	if !includeConfigurationResult {
+		return result, nil
+	}
+	if err := resp.ParsePayload(&result); err != nil {
+		return streams.ConfigurationResult{ConfigID: configID, Requested: value}, nil
+	}
+	if result.ConfigID == "" {
+		result.ConfigID = configID
+	}
+	if result.Requested == "" {
+		result.Requested = value
+	}
+	return result, nil
 }
 
 // Authenticate triggers authentication for a given auth method via the agent WebSocket stream.

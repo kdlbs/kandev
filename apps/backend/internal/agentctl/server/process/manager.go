@@ -36,6 +36,7 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/opencode"
 	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/startupdiag"
@@ -127,6 +128,8 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
+	filePreviewOnce          sync.Once
+	filePreviews             *filePreviewPool
 	processManagerID         string
 	questionImageWorkDir     string
 	questionImageOnce        sync.Once
@@ -370,6 +373,9 @@ type Manager struct {
 	turnOutcomeRecorder      TurnOutcomeRecorder
 	turnOutcomeInstanceID    string
 	startMu                  sync.Mutex
+	credentialImport         bool // guarded by startMu
+	credentialImportBlocked  bool // guarded by startMu; held after uncertain process cleanup
+	credentialStoreLock      *os.File
 	startOperationMu         sync.Mutex
 	admissionMu              sync.Mutex
 	admissionCount           int
@@ -968,6 +974,9 @@ func (m *Manager) submissionForGeneration(generation uint64) string {
 }
 
 func (m *Manager) deliverySubmissionIDForEvent(update adapter.AgentEvent) string {
+	if update.Type == streams.EventTypeMCPStartupWarning {
+		return ""
+	}
 	active := m.activeDeliverySubmissionID()
 	m.deliveryPromptMu.Lock()
 	defer m.deliveryPromptMu.Unlock()
@@ -2317,6 +2326,9 @@ func (m *Manager) startWithGeneration(
 ) (uint64, error) {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
+	if m.credentialImport {
+		return 0, errors.New("OpenCode credential import is in progress")
+	}
 	release, err := m.admitStart()
 	if err != nil {
 		return 0, err
@@ -3000,7 +3012,7 @@ func lookupEnvValue(env []string, key string) string {
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
 func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, nil, nil, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, nil, nil, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithEnvironment sets the agent command and replaces the complete
@@ -3008,39 +3020,48 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 // instance variables that are absent from env remain available to the agent.
 // This must be called before Start() if the instance was created without a command.
 func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, nil, nil, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, nil, nil, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithProjectDelivery sets the agent command together with
 // execution-bound project delivery evidence. A missing record clears any
 // previous evidence so a new configuration cannot inherit it by omission.
 func (m *Manager) ConfigureWithProjectDelivery(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, delivery, nil, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, delivery, nil, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithProjectDeliveryAndInstallContext adds authenticated installer
 // provenance for reusable managed npm repairs.
 func (m *Manager) ConfigureWithProjectDeliveryAndInstallContext(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, delivery, installContext, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, delivery, installContext, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithEnvironmentAndProjectDelivery combines complete environment
 // replacement with execution-bound project delivery evidence.
 func (m *Manager) ConfigureWithEnvironmentAndProjectDelivery(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, nil, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, nil, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithEnvironmentAndProjectDeliveryAndInstallContext combines
 // complete environment replacement with authenticated installer provenance.
 func (m *Manager) ConfigureWithEnvironmentAndProjectDeliveryAndInstallContext(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, installContext, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, delivery, installContext, opencode.Runtime{}, wrapper...)
 }
 
-func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, wrapper ...launchwrapper.Spec) error {
+// ConfigureRuntime atomically carries resolved runtime identity with launch
+// configuration.
+func (m *Manager) ConfigureRuntime(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, runtime opencode.Runtime, wrapper launchwrapper.Spec) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, replaceEnv, delivery, installContext, runtime, wrapper)
+}
+
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, delivery *types.ProjectMCPDelivery, installContext *types.ManagedRuntimeInstallContext, runtime opencode.Runtime, wrapper ...launchwrapper.Spec) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
+	if m.credentialImport {
+		return errors.New("OpenCode credential import is in progress")
+	}
 
-	if m.Status() == StatusRunning || m.Status() == StatusStarting {
+	if m.commandActive() {
 		return ErrConfigureWhileRunning
 	}
 
@@ -3080,15 +3101,13 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	m.cfg.AgentCommand = command
 	m.cfg.AgentCommandConfigured = true
 	m.cfg.AgentArgs = args
+	m.cfg.OpenCodeRuntime = runtime
 	m.cfg.LaunchWrapper = launchwrapper.Profile(spec.Argv)
 	m.cfg.LaunchWrapperRequired = !spec.IsZero()
 	m.cfg.ProjectMCPDelivery = acceptedDelivery
 
 	// Store continue command for one-shot adapters
-	if continueArgsPresent {
-		m.cfg.ContinueCommand = continueCommand
-		m.cfg.ContinueArgs = continueArgs
-	} else if continueCommand != "" {
+	if continueArgsPresent || continueCommand != "" {
 		m.cfg.ContinueCommand = continueCommand
 		m.cfg.ContinueArgs = continueArgs
 	}
@@ -3123,6 +3142,11 @@ func configuredContinueArgs(continueArgs []string, present bool, command string)
 		return nil, fmt.Errorf("invalid continue command: %w", err)
 	}
 	return parsed, nil
+}
+
+func (m *Manager) commandActive() bool {
+	status := m.Status()
+	return status == StatusRunning || status == StatusStarting || status == StatusStopping
 }
 
 type installedManagedGitTools struct {

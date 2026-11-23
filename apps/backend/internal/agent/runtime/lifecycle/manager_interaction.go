@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -30,6 +31,8 @@ const (
 	freshSessionModelStatePoll      = 10 * time.Millisecond
 	resetAgentContextRequestTimeout = 10 * time.Second
 )
+
+var ErrSessionConfigurationModelChanged = errors.New("session model changed before configuration retry")
 
 // WasSessionInitialized reports whether the execution completed ACP session setup.
 // Returns false if the execution is not found or init hasn't completed.
@@ -540,38 +543,80 @@ func (m *Manager) escalateStuckCancel(
 // Always uses the execution's current ACPSessionID rather than the caller's copy,
 // which may be stale during startup/restart when the session is being re-initialized.
 func (m *Manager) SetSessionMode(ctx context.Context, executionID, _ string, modeID string) error {
+	_, err := m.SetSessionModeWithResult(ctx, executionID, modeID)
+	return err
+}
+
+// SessionConfigurationResult is scoped to the execution that handled the live
+// mutation. Confirmed is true only when the setter's correlated result carried
+// an effective value.
+type SessionConfigurationResult struct {
+	ConfigID    string `json:"config_id,omitempty"`
+	Requested   string `json:"requested"`
+	Effective   string `json:"effective,omitempty"`
+	Confirmed   bool   `json:"confirmed"`
+	ExecutionID string `json:"execution_id,omitempty"`
+}
+
+func configurationResultForExecution(
+	executionID string,
+	result agentctlclient.ConfigurationResult,
+) SessionConfigurationResult {
+	return SessionConfigurationResult{
+		ConfigID: result.ConfigID, Requested: result.Requested, Effective: result.Effective,
+		Confirmed: result.Confirmed, ExecutionID: executionID,
+	}
+}
+
+func (m *Manager) SetSessionModeWithResult(
+	ctx context.Context,
+	executionID string,
+	modeID string,
+) (SessionConfigurationResult, error) {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
-		return fmt.Errorf("execution %q not found", executionID)
+		return SessionConfigurationResult{ConfigID: "mode", Requested: modeID}, fmt.Errorf("execution %q not found", executionID)
 	}
+	unknown := SessionConfigurationResult{ConfigID: "mode", Requested: modeID, ExecutionID: execution.ID}
 	operationRelease, err := execution.acquireContextResetOperation(ctx)
 	if err != nil {
-		return err
+		return unknown, err
 	}
 	defer operationRelease()
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
-		return fmt.Errorf("execution %q has no agentctl client", executionID)
+		return unknown, fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
-		return fmt.Errorf("execution %q ACP session is not ready", executionID)
+		return unknown, fmt.Errorf("execution %q ACP session is not ready", execution.ID)
 	}
 	result, err := client.SetMode(ctx, execution.ACPSessionID, modeID)
 	if err != nil {
-		return err
+		return unknown, err
 	}
 	m.reportModeOutcome(execution, result)
-	return nil
+	return SessionConfigurationResult{
+		ConfigID: "mode", Requested: result.Requested, Effective: result.Effective,
+		Confirmed: result.Confirmed, ExecutionID: execution.ID,
+	}, nil
 }
 
 // SetSessionModeBySessionID changes the session mode for a running agent by session ID.
 func (m *Manager) SetSessionModeBySessionID(ctx context.Context, sessionID, modeID string) error {
+	_, err := m.SetSessionModeBySessionIDWithResult(ctx, sessionID, modeID)
+	return err
+}
+
+func (m *Manager) SetSessionModeBySessionIDWithResult(
+	ctx context.Context,
+	sessionID, modeID string,
+) (SessionConfigurationResult, error) {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
-		return fmt.Errorf("no agent running for session %q", sessionID)
+		return SessionConfigurationResult{ConfigID: "mode", Requested: modeID}, fmt.Errorf("no agent running for session %q", sessionID)
 	}
-	return m.SetSessionMode(ctx, execution.ID, execution.ACPSessionID, modeID)
+	return m.SetSessionModeWithResult(ctx, execution.ID, modeID)
 }
 
 // ForkSessionBySessionID forks a completed provider turn in the live native
@@ -599,13 +644,24 @@ func (m *Manager) ForkSessionBySessionID(ctx context.Context, sessionID, provide
 // baked into the launch — so the override is persisted on the execution and
 // the PTY is relaunched so the next process picks up the new --model.
 func (m *Manager) SetSessionModel(ctx context.Context, executionID, modelID string) error {
+	_, err := m.SetSessionModelWithResult(ctx, executionID, modelID)
+	return err
+}
+
+func (m *Manager) SetSessionModelWithResult(
+	ctx context.Context,
+	executionID, modelID string,
+) (SessionConfigurationResult, error) {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
-		return fmt.Errorf("execution %q not found", executionID)
+		return SessionConfigurationResult{ConfigID: "model", Requested: modelID}, fmt.Errorf("execution %q not found", executionID)
 	}
+	execution.sessionConfigurationMu.Lock()
+	defer execution.sessionConfigurationMu.Unlock()
+	unknown := SessionConfigurationResult{ConfigID: "model", Requested: modelID, ExecutionID: execution.ID}
 	operationRelease, err := execution.acquireContextResetOperation(ctx)
 	if err != nil {
-		return err
+		return unknown, err
 	}
 
 	if execution.PassthroughProcessID != "" {
@@ -613,28 +669,40 @@ func (m *Manager) SetSessionModel(ctx context.Context, executionID, modelID stri
 			exec.setMetadataValue(MetadataKeyModelOverride, modelID)
 		}); err != nil {
 			operationRelease()
-			return fmt.Errorf("failed to persist model override for execution %q: %w", executionID, err)
+			return unknown, fmt.Errorf("failed to persist model override for execution %q: %w", executionID, err)
 		}
 		operationRelease()
-		return m.RestartAgentProcess(ctx, executionID)
+		return unknown, m.RestartAgentProcess(ctx, executionID)
 	}
 	defer operationRelease()
 
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
-		return fmt.Errorf("execution %q has no agentctl client", executionID)
+		return unknown, fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
-	return client.SetModel(ctx, modelID)
+	result, err := client.SetModelWithResult(ctx, modelID)
+	if err != nil {
+		return unknown, err
+	}
+	return configurationResultForExecution(execution.ID, result), nil
 }
 
 // SetSessionModelBySessionID changes the session model for a running agent by session ID.
 func (m *Manager) SetSessionModelBySessionID(ctx context.Context, sessionID, modelID string) error {
+	_, err := m.SetSessionModelBySessionIDWithResult(ctx, sessionID, modelID)
+	return err
+}
+
+func (m *Manager) SetSessionModelBySessionIDWithResult(
+	ctx context.Context,
+	sessionID, modelID string,
+) (SessionConfigurationResult, error) {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
-		return fmt.Errorf("no agent running for session %q", sessionID)
+		return SessionConfigurationResult{ConfigID: "model", Requested: modelID}, fmt.Errorf("no agent running for session %q", sessionID)
 	}
-	return m.SetSessionModel(ctx, execution.ID, modelID)
+	return m.SetSessionModelWithResult(ctx, execution.ID, modelID)
 }
 
 // SetSessionConfigOption changes an ACP session config option for a running agent.
@@ -643,20 +711,65 @@ func (m *Manager) SetSessionConfigOption(ctx context.Context, executionID, confi
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	_, err := m.applySessionConfigOption(ctx, execution, configID, value, false, "")
+	return err
+}
+
+func (m *Manager) SetSessionConfigOptionWithResult(
+	ctx context.Context,
+	executionID, configID, value string,
+) (SessionConfigurationResult, error) {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return SessionConfigurationResult{ConfigID: configID, Requested: value}, fmt.Errorf("execution %q not found", executionID)
+	}
+	return m.applySessionConfigOption(ctx, execution, configID, value, true, "")
+}
+
+func (m *Manager) applySessionConfigOption(
+	ctx context.Context,
+	execution *AgentExecution,
+	configID, value string,
+	includeResult bool,
+	expectedModelID string,
+) (SessionConfigurationResult, error) {
+	execution.sessionConfigurationMu.Lock()
+	defer execution.sessionConfigurationMu.Unlock()
+	unknown := SessionConfigurationResult{ConfigID: configID, Requested: value, ExecutionID: execution.ID}
 	operationRelease, err := execution.acquireContextResetOperation(ctx)
 	if err != nil {
-		return err
+		return unknown, err
 	}
 	defer operationRelease()
+	if expectedModelID != "" {
+		modelState := execution.GetModelState()
+		if modelState == nil || modelState.CurrentModelID != expectedModelID {
+			actual := ""
+			if modelState != nil {
+				actual = modelState.CurrentModelID
+			}
+			return unknown, fmt.Errorf("%w: expected %q, found %q", ErrSessionConfigurationModelChanged, expectedModelID, actual)
+		}
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
-		return fmt.Errorf("execution %q has no agentctl client", executionID)
+		return unknown, fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
 	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
-		return fmt.Errorf("execution %q ACP session is not ready", executionID)
+		return unknown, fmt.Errorf("execution %q ACP session is not ready", execution.ID)
 	}
-	return client.SetConfigOption(ctx, configID, value)
+	if includeResult {
+		result, err := client.SetConfigOptionWithResult(ctx, configID, value)
+		if err != nil {
+			return unknown, err
+		}
+		return configurationResultForExecution(execution.ID, result), nil
+	}
+	if err := client.SetConfigOption(ctx, configID, value); err != nil {
+		return unknown, err
+	}
+	return unknown, nil
 }
 
 // SetSessionConfigOptionBySessionID changes an ACP session config option by task session ID.
@@ -665,7 +778,30 @@ func (m *Manager) SetSessionConfigOptionBySessionID(ctx context.Context, session
 	if !exists {
 		return fmt.Errorf("no agent running for session %q", sessionID)
 	}
-	return m.SetSessionConfigOption(ctx, execution.ID, configID, value)
+	_, err := m.applySessionConfigOption(ctx, execution, configID, value, false, "")
+	return err
+}
+
+func (m *Manager) SetSessionConfigOptionBySessionIDWithResult(
+	ctx context.Context,
+	sessionID, configID, value string,
+) (SessionConfigurationResult, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return SessionConfigurationResult{ConfigID: configID, Requested: value}, fmt.Errorf("no agent running for session %q", sessionID)
+	}
+	return m.applySessionConfigOption(ctx, execution, configID, value, true, "")
+}
+
+func (m *Manager) SetSessionConfigOptionBySessionIDWithExpectedModelWithResult(
+	ctx context.Context,
+	sessionID, configID, value, expectedModelID string,
+) (SessionConfigurationResult, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return SessionConfigurationResult{ConfigID: configID, Requested: value}, fmt.Errorf("no agent running for session %q", sessionID)
+	}
+	return m.applySessionConfigOption(ctx, execution, configID, value, true, expectedModelID)
 }
 
 // AuthenticateBySessionID triggers authentication for a given auth method on the agent.
@@ -1981,6 +2117,7 @@ func (m *Manager) resetAgentRestartState(executionID string, preparation agentRe
 		exec.AgentArgs = commands.args
 		exec.ContinueArgs = commands.continueArgs
 		exec.LaunchWrapper = commands.wrapper
+		exec.OpenCodeRuntime = commands.openCodeRuntime
 		if preparation.copilotPluginArgsPrepared {
 			exec.setRuntimeEnvironment(preparation.runtimeEnvironment)
 		}
@@ -3555,6 +3692,9 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 		return agentCommands{}, err
 	}
 	commands := newAgentCommands(args, continueArgs)
+	commands.openCodeRuntime = managedruntime.OpenCodeRuntime{
+		Family: opts.ManagedRuntimeFamily, Source: opts.ManagedRuntimeSource, Version: opts.ManagedRuntimeVersion,
+	}
 	commands.wrapper = launchwrapper.Profile(commandPrefixTokens)
 	return commands, nil
 }

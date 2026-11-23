@@ -142,7 +142,8 @@ Pending ownership and successful reattachment remain distinct. Reconciliation ob
 An old activity timestamp and an absent local attachment do not prove that a remote agent stopped. Recovery and settlement recheck the exact pending owner at their mutation boundary; no elapsed outage duration permits abandoning its turn.
 The existing remote-status loop retries a bounded, rotating set of records on its normal tick, with a deadline for each attempt. Shutdown cancels and joins the loop.
 Each attempt validates the durable execution, task, session, and environment before attachment and again before tracking. Stop, archive, cleanup, and ownership changes fence a stale attempt.
-Successful attachment shares startup's authenticated evidence and replay path. It clears pending recovery only after tracking succeeds.
+A surviving agent uses the same authenticated evidence and replay path in each attempt. Its pending recovery clears after tracking succeeds.
+An authenticated stopped agent in a retained environment uses the [stopped-agent disposition](durable-restart-reconciliation.md#stopped-agent-in-a-retained-remote-environment).
 An idle peer also requires a bounded, cancellable updates-stream connection before recovery-guard release and availability publication.
 A connection-attempt signal alone does not prove readiness; the idle adopted client must have its updates socket connected.
 An ordinary user message accepted during retryable reconciliation enters the existing durable queue with its recorded message and turn identity.

@@ -988,10 +988,13 @@ export type SidebarTaskQuery = {
   };
   group: string;
   collapsed_group_keys: string[];
+  disclosure_view_id?: string;
   collapsed_task_ids: string[];
   page: number;
   page_size: number;
   locale: string;
+  grouping_revision?: string;
+  grouping_generation?: string;
 };
 
 export type SidebarTaskPageEntry = {
@@ -1000,6 +1003,7 @@ export type SidebarTaskPageEntry = {
   task?: Task;
   group_key?: string;
   group_label?: string;
+  group_color?: string;
   workflow_name?: string;
   workflow_id?: string;
   workflow_step_id?: string;
@@ -1026,6 +1030,9 @@ export type SidebarTaskPageResponse = {
   total_visible_tasks: number;
   has_previous: boolean;
   has_next: boolean;
+  grouping_revision?: string;
+  grouping_generation?: string;
+  grouping_keys?: string[];
   entries: SidebarTaskPageEntry[];
 };
 
