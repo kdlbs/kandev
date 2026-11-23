@@ -1,6 +1,6 @@
 ---
 created: 2026-11-23
-status: done
+status: implemented
 requirements:
   - REQ-INTEGRATIONS-TASK-CHANGE-LINK-MCP-001
   - REQ-INTEGRATIONS-TASK-CHANGE-LINK-MCP-003
@@ -78,8 +78,9 @@ The [work order](task-01-validate-link-repository-id.md) lists the exact command
   ID control linked successfully.
 - The existing management tests in the work order's Go command passed in all
   three packages on main.
-- Specification catalog validation, specification lint, and the PR
-  documentation coverage preflight passed for the fix package.
+- `python3 scripts/list-docs.py validate` passed, validating 461 decisions and
+  2,093 specifications. `python3 scripts/lint-spec-files.py --all` passed.
+- The PR documentation coverage preflight passed for the fix package.
 
 - `TestManageTaskChangeRequestLinkRepositoryIDValidation` failed before the
   fix because slug and unattached IDs returned the generic mutation message.

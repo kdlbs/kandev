@@ -74,6 +74,8 @@ After the correction, run the regression with the existing management tests:
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/backendapp ./internal/mcp/handlers ./internal/mcp/server -run '^(TestManageTaskChangeRequest|TestTaskChangeCoordinator|TestTaskChangeLinkMCPSingleUser|TestTaskChangeManagementDispatches|TestTaskChangeRequestProtocolCatalogAndCallAcrossProtocolEras)' -count=1)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
 git diff --check
 make -C apps/backend build
 ```
@@ -125,5 +127,12 @@ Verification passed:
 
 - Work-order management tests in `internal/backendapp`, `internal/mcp/handlers`,
   and `internal/mcp/server`.
-- Public-doc validation tests and published-page validation.
+- `node --test scripts/validate-public-docs.test.mjs` passed: 63 tests.
+- `node scripts/validate-public-docs.mjs` passed: 56 published pages.
+- `python3 scripts/list-docs.py validate` passed, validating 461 decisions and
+  2,093 specifications.
+- `python3 scripts/lint-spec-files.py --all` passed.
 - Changed-file Go lint, `make -C apps/backend build`, and `git diff --check`.
+
+The public MCP reference also documents when the management tool is available
+and how to restore it before removing a stale association.

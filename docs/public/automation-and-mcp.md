@@ -474,9 +474,15 @@ number.
 
 For a new `link`, use the Kandev ID in `repositories[].repository_id` from
 `list_tasks_kandev`. The repository must be attached to the target task. An
-unmatched ID returns a validation error for `repository_id`. For `unlink`, use
-the repository ID from the stored association; unlink can still remove that
-association after the repository is detached.
+unmatched ID returns a validation error for `repository_id`.
+
+For `unlink`, use the repository ID from the stored association. Unlink can
+remove that association after its repository is detached. The management tool
+is available only in task-mode sessions whose calling task has at least one
+attached GitHub or GitLab repository. If the calling task has none, attach a
+supported repository and start or resume its task session to restore the tool.
+Then unlink the target task's association with its stored provider, repository
+ID, and request number.
 
 For example:
 
