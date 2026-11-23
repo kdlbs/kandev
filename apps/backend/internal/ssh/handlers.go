@@ -430,10 +430,7 @@ func (h *Handler) probeRemotePlatform(
 }
 
 func readinessShellForRequest(shell string, platform lifecycle.SSHRemotePlatform) string {
-	if trimmed := strings.TrimSpace(shell); trimmed != "" {
-		return trimmed
-	}
-	return lifecycle.SSHDefaultShellForPlatform(platform)
+	return lifecycle.SSHCompatibleShell(shell, platform)
 }
 
 // resolveSSHTarget looks up the executor by id and projects its config

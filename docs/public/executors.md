@@ -661,7 +661,7 @@ SSH is implemented as a separate remote connection per session. Kandev uploads a
 
 - Linux `amd64`/`arm64`, macOS `amd64`/`arm64`, or Windows x64 (`windows/amd64`);
 - SSH public-key authentication and SFTP;
-- `bash` on Linux, `zsh` on macOS, or `powershell` on Windows by default, or a compatible configured login shell (on Windows, only `powershell` or `pwsh`);
+- `bash` on Linux, `zsh` on macOS, or `powershell` on Windows by default, or a compatible configured login shell (on Windows, only `powershell` or `pwsh`; on Linux and macOS, a PowerShell shell fails the launch);
 - TCP forwarding enabled by `sshd` and enough `MaxSessions` capacity;
 - the selected agent command already installed and visible to a login shell;
 - writable remote home and adequate disk/process capacity.
@@ -682,7 +682,7 @@ Kandev starts `agentctl.exe` through WMI. Windows OpenSSH ends every process tha
 On a Windows host:
 
 - The default shell is `powershell`; choose `pwsh` in the connection's shell setting to use PowerShell 7. Any other saved shell, including `cmd`, Git Bash, MSYS2, and Cygwin, fails the launch before preparation.
-- Profile prepare and cleanup scripts run as PowerShell. An empty prepare script uses Kandev's Windows default, which clones or reuses the task checkout and selects the Kandev branch.
+- Profile prepare and cleanup scripts run as PowerShell. An empty prepare script uses Kandev's Windows default, which clones or reuses the task checkout and selects the Kandev branch, or the branch or pull request you chose for the task.
 - Kandev keeps its files under `%USERPROFILE%\.kandev`. The helper is `bin\agentctl.exe`, and task directories are under `tasks\`.
 - A helper upgrade renames a running `agentctl.exe` aside, so sessions that still use the old helper keep running.
 - Stop forcibly ends the controller's process tree, because Windows has no graceful stop signal. The next controller start removes the temporary files that a stopped controller left in `%TEMP%`.

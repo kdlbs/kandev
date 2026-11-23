@@ -194,6 +194,9 @@ func ensureWindowsRemoteTaskDir(ctx context.Context, client *ssh.Client, workdir
 	if err != nil {
 		return "", err
 	}
+	if !isWindowsRemotePath(root) {
+		return "", fmt.Errorf("ssh: workdir root %q is not an absolute Windows path; use a drive path such as C:\\kandev, a UNC path, or a path under ~", workdirRoot)
+	}
 	taskDir := joinWindowsRemotePath(root, "tasks", taskDirName)
 	script := fmt.Sprintf("[System.IO.Directory]::CreateDirectory(%s) | Out-Null", powerShellQuote(taskDir))
 	if _, _, err := runPowerShell(ctx, client, defaultWindowsLoginShell, script, false); err != nil {
@@ -522,43 +525,6 @@ func (t *windowsCmdTokenizer) consumeDoubleQuotedBackslashes(line string, start 
 	}
 	t.cur.WriteString(strings.Repeat(`\`, bs))
 	return i - 1
-}
-
-func stopRemoteWindowsAgentctl(ctx context.Context, client *ssh.Client, sessionDir string, pid int) error {
-	_, stderr, err := runPowerShell(ctx, client, defaultWindowsLoginShell, remoteWindowsAgentctlStopScript(sessionDir, pid), false)
-	if err != nil {
-		if trimmed := strings.TrimSpace(stderr); trimmed != "" {
-			return fmt.Errorf("%w (stderr: %s)", err, trimmed)
-		}
-		return err
-	}
-	return nil
-}
-
-func remoteWindowsAgentctlStopScript(sessionDir string, pid int) string {
-	cleanSessionDir := cleanWindowsRemotePath(sessionDir)
-	removeSnippet := removeWindowsRemoteDirScript(cleanSessionDir)
-	if pid <= 0 {
-		return removeSnippet
-	}
-	script := fmt.Sprintf(`$targetPid = %[1]d
-$proc = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
-if ($null -ne $proc -and -not $proc.HasExited) {
-  Invoke-KandevNative { & taskkill.exe /PID $targetPid /T /F *>$null }
-  try { Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue } catch {}
-  for ($attempt = 0; $attempt -lt %[2]d; $attempt++) {
-    $check = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
-    if ($null -eq $check -or $check.HasExited) { break }
-    Start-Sleep -Milliseconds 100
-  }
-  $still = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
-  if ($null -ne $still -and -not $still.HasExited) {
-    [Console]::Error.WriteLine("remote Windows agentctl pid $targetPid is still running")
-    exit 1
-  }
-}
-%[3]s`, pid, sshAgentctlStopPollAttempts, removeSnippet)
-	return script
 }
 
 func removeWindowsRemoteDirScript(cleanDir string) string {

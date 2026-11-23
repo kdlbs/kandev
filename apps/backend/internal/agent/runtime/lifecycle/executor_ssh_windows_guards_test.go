@@ -159,3 +159,18 @@ func TestSSHWindowsSkipsPOSIXAuthSetupScripts(t *testing.T) {
 		t.Fatalf("POSIX auth setup script ran on a Windows host: %v", commands)
 	}
 }
+
+// The PowerShell scripts exist only for Windows hosts, so a Linux or macOS
+// profile saved with a PowerShell shell fails before any preparation.
+// @covers AC-EXECUTORS-SSH-WINDOWS-001.4
+func TestSSHPOSIXLaunchRejectsPowerShellShell(t *testing.T) {
+	for _, platform := range []SSHRemotePlatform{{GOOS: "linux", GOARCH: "amd64"}, {GOOS: "darwin", GOARCH: "arm64"}} {
+		for _, shell := range []string{"pwsh", "powershell", "/usr/bin/pwsh"} {
+			req := &ExecutorCreateRequest{Metadata: map[string]interface{}{MetadataKeySSHShell: shell}}
+			err := validateSSHWindowsLaunch(req, platform)
+			if !errors.Is(err, errSSHPowerShellRequiresWindows) || !strings.Contains(err.Error(), shell) {
+				t.Errorf("validateSSHWindowsLaunch(%s, shell=%q) = %v, want a PowerShell-on-POSIX rejection naming the shell", platform.GOOS, shell, err)
+			}
+		}
+	}
+}

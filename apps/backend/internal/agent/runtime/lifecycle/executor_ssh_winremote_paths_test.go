@@ -196,12 +196,12 @@ func TestSSHWindowsMaterializeSkillManifestTaskDir(t *testing.T) {
 	}
 	var sawSkill bool
 	for p, body := range ws.written {
-		if strings.HasPrefix(p, "/C:/Users/Kandev User/.kandev/tasks/task-1/.claude/skills/") && strings.HasSuffix(p, "/SKILL.md") {
+		if strings.HasPrefix(p, `C:\Users\Kandev User\.kandev\tasks\task-1\.claude\skills\`) && strings.HasSuffix(p, `\SKILL.md`) {
 			sawSkill = body == "# Deploy skill\n"
 		}
 	}
 	if !sawSkill {
-		t.Fatalf("expected Windows SFTP skill write under /C:/..., got %#v", ws.written)
+		t.Fatalf("expected the skill under the Windows task directory, got %#v", ws.written)
 	}
 }
 
@@ -223,4 +223,42 @@ func TestSSHWindowsCreateInstanceRequestJournalPathSeparator(t *testing.T) {
 	if posixCreate.DurableJournalPath != wantPosixJournal {
 		t.Fatalf("POSIX DurableJournalPath = %q, want %q", posixCreate.DurableJournalPath, wantPosixJournal)
 	}
+}
+
+// A root that is neither a drive, UNC, nor home-relative path would become a
+// relative directory under the SSH working directory, so it fails first.
+// @covers AC-EXECUTORS-SSH-WINDOWS-001.7
+func TestSSHWindowsTaskDirRejectsNonWindowsWorkdirRoot(t *testing.T) {
+	for _, root := range []string{"/srv/kandev", "kandev", `D:kandev`} {
+		server := newFakeSSHServer(t, func(string, string) sshExecResult {
+			t.Errorf("root %q must be rejected before any remote command", root)
+			return sshOK
+		})
+		_, err := ensureWindowsRemoteTaskDir(context.Background(), server.dial(t), root, "task-1")
+		if err == nil || !strings.Contains(err.Error(), root) {
+			t.Errorf("ensureWindowsRemoteTaskDir(%q) error = %v, want a rejection naming the root", root, err)
+		}
+	}
+}
+
+// Skill files for a UNC task directory stay under that share. Paths keep the
+// Windows form until the SFTP boundary, so the leading \\ is never collapsed.
+func TestSSHWindowsMaterializeSkillManifestUNCTaskDir(t *testing.T) {
+	manifestBytes, err := json.Marshal(skill.Manifest{
+		ProjectSkillDir: ".claude/skills",
+		Skills:          []skill.Skill{{Slug: "win-deploy", Content: "# Deploy skill\n"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := &recordingSkillWorkspace{}
+	if err := materializeSSHSkillManifest(context.Background(), ws, `\\srv\share\kandev\tasks\task-1`, string(manifestBytes)); err != nil {
+		t.Fatalf("materializeSSHSkillManifest with a UNC taskDir: %v", err)
+	}
+	for p := range ws.written {
+		if strings.HasPrefix(p, `\\srv\share\kandev\tasks\task-1\.claude\skills\`) && strings.HasSuffix(p, `\SKILL.md`) {
+			return
+		}
+	}
+	t.Fatalf("expected the skill under the UNC task directory, got %#v", ws.written)
 }

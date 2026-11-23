@@ -102,7 +102,12 @@ and `pwsh` for Windows hosts. It probes through `Get-Command` under PowerShell.
 `isPowerShellShell`. Any other shell fails with a typed error that names the
 saved shell and `powershell`/`pwsh`. That check prevents a POSIX branch from
 receiving Windows paths. The same pre-preparation check rejects
-`ssh_passthrough` launches on Windows hosts.
+`ssh_passthrough` launches on Windows hosts. In the other direction, a Linux or
+macOS host whose saved shell is `powershell` or `pwsh` fails with
+`errSSHPowerShellRequiresWindows`, because every generated PowerShell script
+targets Windows. `SSHCompatibleShell` applies the same pairing to the agent
+readiness probe: it ignores a saved shell the platform cannot run and probes
+with the platform default.
 
 ## PowerShell command transport
 
@@ -170,6 +175,13 @@ that can reach either host family dispatch explicitly, as
 
 `-ExecutionPolicy Bypass` applies only to that process. It permits the profile
 dot-source under a restrictive policy and changes no machine or user policy.
+The loader runs `Set-StrictMode -Off` after the profile, so a profile that
+enables strict mode cannot turn an omitted envelope property into an error.
+
+`powerShellQuote` produces single-quoted literals and doubles every character
+PowerShell accepts as a single quote: U+0027, U+2018, U+2019, U+201A, and
+U+201B. This matches `CodeGeneration.EscapeSingleQuotedStringContent`, so a
+path or Git identity typed with a typographic apostrophe stays data.
 
 ## Helper upload and remote layout
 
@@ -209,13 +221,27 @@ layout from `AC-EXECUTORS-SSH-WINDOWS-001.7`.
 `defaultWindowsSSHPrepareScript` in `executor_ssh_windows_scripts.go` is the
 PowerShell counterpart of `defaultSSHPrepareScript`.
 `isBuiltinPOSIXSSHPrepareScript` maps a stored built-in POSIX script to the
-Windows default. `windowsBranchCheckoutPostlude` appends the managed branch
-checkout. The Windows placeholder providers quote values with `powerShellQuote`.
+Windows default. `withWindowsBranchCheckout` is the PowerShell form of
+`withBranchCheckout`. Without an explicit selection it appends the best-effort
+generated-branch postlude. A selected pull request or branch is materialized
+strictly before repository setup, as
+[repository branch resolution](repository-branch-resolution.md) requires: a
+fetch into `refs/kandev/selected-checkout`, a branch at that commit, and a
+verified `HEAD`. A failure exits preparation. For a pull request, the provider
+credential is removed from the prepare process before repository setup. The
+Windows placeholder providers quote values with `powerShellQuote`.
+`ensureWindowsRemoteTaskDir` rejects a workdir root that does not expand to a
+drive or UNC path.
 
 `verifyWindowsPrimaryCheckout`, `buildSSHCleanupInvocation`, and
 `sshWindowsRemoteContributionScript` provide the PowerShell paths for checkout
 verification, cleanup, and contribution setup. All of them use the envelope
-transport and `redactSSHScriptOutput`.
+transport and `redactSSHScriptOutput`. The contribution script follows the POSIX
+branch selection: it keeps a current branch that tracks the contribution branch
+and contains the head, checks out an existing branch without resetting it, and
+otherwise picks a non-colliding `-kandev-<suffix>[-N]` branch. Push identity
+conflicts fail, for the contribution remote and for the contribution
+destination. Identity comparisons are case-sensitive, as on POSIX hosts.
 
 `gitCredentialHelperCommand` creates the managed helper value
 `!'C:/Users/<user>/.kandev/bin/agentctl.exe' git-credential`. Git for Windows
@@ -278,9 +304,14 @@ the log to recover the control port.
 
 ## Stop, identity, orphan sweep, and reconciliation
 
-`remoteWindowsAgentctlStopCommand` terminates the recorded PID with
-`taskkill /T /F`, falls back to `Stop-Process -Force`, and polls for exit.
-After the process exits, it removes the session directory with bounded retries.
+Every Windows stop runs `windowsOwnedAgentctlKillScript`. In the same script
+that signals the PID, it reads `Win32_Process` and continues only when the
+process is `agentctl.exe` with `--workdir "<task dir>"`. Otherwise it leaves
+the process running. An owned controller is terminated with
+`taskkill /T /F`, then `Stop-Process -Force`, and the script polls for exit.
+`stopRemoteWindowsAgentctl` derives the task directory from the session layout
+`<task dir>\.kandev\sessions\<id>` and refuses a PID it cannot verify. A
+tracked stop then removes the session directory with bounded retries.
 Before a persisted-record stop, `verifyRemoteWindowsAgentctlIdentity` reads the
 PID's `Win32_Process.CommandLine`. `remoteWindowsAgentctlCommandLineMatches`
 then requires the recorded `--workdir` value under Win32 argument parsing and
@@ -290,8 +321,10 @@ PID. When the command line does not match, the stop signals nothing.
 `sshWindowsOrphanInventoryCommand` lists `agentctl.exe` processes with
 `Get-CimInstance Win32_Process` and reads pidfiles below the tasks root.
 `parseSSHWindowsOrphanInventory` produces the shared `sshOrphanInventory`, so
-classification uses the POSIX rules. `stopSSHWindowsOrphanProcess` rechecks the
-command line before forced tree termination.
+classification uses the POSIX rules. `stopSSHWindowsOrphanProcess` uses the
+same in-script identity check. It removes the session directory only when no
+live `agentctl.exe` serves the task and the pidfile is absent or still names
+the stopped PID.
 
 The `agentctl ssh-reconcile` command on non-Linux builds returns
 `ReasonUnsupportedIdentity`. `runRemoteWindowsSSHReconcile` invokes it through

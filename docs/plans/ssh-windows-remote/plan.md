@@ -98,10 +98,12 @@ real-host validation matrix from task 06 and links the requirement and design.
 | 7 | [07 Task terminal under ConPTY](task-07-windows-task-terminal.md) | 06 | B |
 | 8 | [08 Resume managed processes by handle](task-08-windows-managed-process-resume.md) | 06 | B |
 | 8 | [09 Shim sweep and excluded-port retry](task-09-windows-shim-sweep-and-port-retry.md) | 06 | B |
+| 9 | [10 Review fixes](task-10-review-fixes.md) | 07, 08, 09 | A (release verifier), B (the rest) |
 
 Waves 1 through 6 are sequential. Each of those work orders changes code that
 the next one tests. Tasks 07 through 09 resolve the findings from task 06's
-real-host matrix and do not depend on each other.
+real-host matrix and do not depend on each other. Task 10 fixes the findings of a local review of
+the finished branch.
 
 ## Lifecycle evidence
 
@@ -109,9 +111,9 @@ real-host matrix and do not depend on each other.
 | --- | --- | --- | --- |
 | Restart and recovery | `001.12` | A live controller is reattached without replacement | `TestSSHWindowsBackendShutdownPreservesAgentctlAndResumeReconnects`, `TestSSHWindowsRecoverInstancesDetailedReattachesAndDiscoversControlPort`; real host (task 06) |
 | Confirmed absence | `001.12` | An exited controller clears its metadata and follows replacement | `TestSSHWindowsResumeClearsMetadataWhenRemoteProcessExited` |
-| Stale owner and PID reuse | `001.13` | A reused PID without the recorded workdir survives | `TestSSHWindowsPersistedStopVerifiesIdentityAndGuardsSessionDir`; Windows-native identity test (task 05) |
+| Stale owner and PID reuse | `001.13` | A reused PID without the recorded workdir survives, on tracked, persisted, and orphan stops | `TestSSHWindowsPersistedStopVerifiesIdentityAndGuardsSessionDir`, `TestSSHWindowsStopGatesKillOnTaskIdentityInOneScript`, `TestSSHWindowsExecStopLeavesReusedPidRunning`; real host (task 10) |
 | Concurrent work | `001.6` | Helper replacement does not stop a running session | New SFTP rename-aside test (task 03); Windows-native running-image test (task 05) |
-| Orphan ownership | `001.14` | Only proven orphans stop | `TestSSHWindowsOrphanSweepInventoriesAndStopsOrphanedAgentctl`; Windows-native inventory test (task 05) |
+| Orphan ownership | `001.14` | Only proven orphans stop, and a re-claimed session directory survives | `TestSSHWindowsOrphanSweepInventoriesAndStopsOrphanedAgentctl`, `TestSSHWindowsOrphanStopGuardsSessionDir`; Windows-native inventory test (task 05); real host (task 10) |
 | Channel close | `001.11` | The controller survives its launch channel | Real-host probe (F11); Windows-native survival test (task 04); real-host H3 (task 06) |
 | Entry paths | `001.1`, `.3` | Connection test, shell probe, and launch use one detection path | `TestSSHWindowsDetectRemoteInfoFallsBackToPowerShell`, `TestSSHWindowsShellProbeOffersOnlyPowerShell`, `TestSSHWindowsCreateInstancePowerShellEndToEnd` |
 

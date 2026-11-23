@@ -270,14 +270,15 @@ func TestSSHWindowsPersistedStopVerifiesIdentityAndGuardsSessionDir(t *testing.T
 				return sshFail("expected PowerShell: " + command)
 			}
 			switch {
+			case strings.Contains(script, "$targetPid = 4242") && strings.Contains(script, "taskkill.exe /PID $targetPid /T /F"):
+				// The kill is gated on the task identity inside the same script.
+				killed = strings.Contains(script, `$workdirNeedle = '--workdir "' + 'C:\Users\Kandev User\.kandev\tasks\task-1' + '"'`)
+				removed = strings.Contains(script, "Remove-Item -LiteralPath")
+				return sshOK
 			case strings.Contains(script, "Win32_Process"):
 				return sshOut(`CMDLINE:"C:\Users\Kandev User\.kandev\bin\agentctl.exe" --workdir "C:\Users\Kandev User\.kandev\tasks\task-1"` + "\r\n")
 			case strings.Contains(script, "DIR_MISSING"):
 				return sshOut("PID:4242\r\n")
-			case strings.Contains(script, "$targetPid = 4242") && strings.Contains(script, "taskkill.exe /PID $targetPid /T /F"):
-				killed = true
-				removed = strings.Contains(script, "Remove-Item -LiteralPath")
-				return sshOK
 			default:
 				return sshFail("unexpected PowerShell script: " + script)
 			}
@@ -422,11 +423,10 @@ func TestSSHWindowsOrphanSweepInventoriesAndStopsOrphanedAgentctl(t *testing.T) 
 				"PROC\t7788\t100\t\"C:\\Users\\Kandev User\\.kandev\\bin\\agentctl.exe\" --workdir \"C:\\Users\\Kandev User\\.kandev\\tasks\\task-archived-win\"\r\n" +
 					"PIDFILE\ttask-archived-win\tsess-orphan\t7788\r\n",
 			)
-		case strings.Contains(script, "Win32_Process -Filter 'ProcessId = 7788'"):
-			return sshOut("CMDLINE:\"C:\\Users\\Kandev User\\.kandev\\bin\\agentctl.exe\" --workdir \"C:\\Users\\Kandev User\\.kandev\\tasks\\task-archived-win\"\r\n")
 		case strings.Contains(script, "$targetPid = 7788") && strings.Contains(script, "taskkill.exe /PID $targetPid /T /F"):
-			stoppedPID = true
-			removedSessionDir = strings.Contains(script, `C:\Users\Kandev User\.kandev\tasks\task-archived-win\.kandev\sessions\sess-orphan`)
+			stoppedPID = strings.Contains(script, `'--workdir "' + 'C:\Users\Kandev User\.kandev\tasks\task-archived-win' + '"'`)
+			removedSessionDir = strings.Contains(script, `C:\Users\Kandev User\.kandev\tasks\task-archived-win\.kandev\sessions\sess-orphan`) &&
+				strings.Contains(script, "$sessionPid -eq [string]$targetPid")
 			return sshOK
 		default:
 			return sshFail("unexpected PowerShell script: " + script)

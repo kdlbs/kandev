@@ -638,6 +638,20 @@ func SSHDefaultShellForPlatform(platform SSHRemotePlatform) string {
 	}
 }
 
+// SSHCompatibleShell returns shell when the host platform can run it, and the
+// platform default otherwise: Windows runs only PowerShell, and Linux and macOS
+// run only POSIX login shells. An unknown platform keeps the saved shell.
+func SSHCompatibleShell(shell string, platform SSHRemotePlatform) string {
+	trimmed := strings.TrimSpace(shell)
+	if trimmed == "" {
+		return SSHDefaultShellForPlatform(platform)
+	}
+	if platform.GOOS != "" && isWindowsRemotePlatform(platform) != isPowerShellShell(trimmed) {
+		return SSHDefaultShellForPlatform(platform)
+	}
+	return trimmed
+}
+
 // WrapLoginShell wraps cmd in `${shell} -lc '<cmd>'` so commands run under a
 // POSIX login shell that has sourced the user's profile. Windows hosts use the
 // PowerShell envelope transport instead (runPowerShell).

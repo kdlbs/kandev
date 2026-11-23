@@ -39,6 +39,29 @@ func TestReadinessShellForRequest(t *testing.T) {
 			name: "unknown defaults to bash",
 			want: "bash",
 		},
+		{
+			name:     "windows ignores a saved POSIX shell",
+			shell:    "bash",
+			platform: lifecycle.SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"},
+			want:     "powershell",
+		},
+		{
+			name:     "windows keeps pwsh",
+			shell:    "pwsh",
+			platform: lifecycle.SSHRemotePlatform{GOOS: "windows", GOARCH: "amd64"},
+			want:     "pwsh",
+		},
+		{
+			name:     "linux ignores a saved PowerShell shell",
+			shell:    "pwsh",
+			platform: lifecycle.SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"},
+			want:     "bash",
+		},
+		{
+			name:  "unknown platform keeps the saved shell",
+			shell: "pwsh",
+			want:  "pwsh",
+		},
 	}
 
 	for _, tc := range cases {

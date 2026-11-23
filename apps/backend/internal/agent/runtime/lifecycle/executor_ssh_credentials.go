@@ -400,10 +400,16 @@ func (u *sshFileUploader) WriteFile(_ context.Context, remotePath string, data [
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("sftp: close %s: %w", sftpPath, err)
 	}
-	if err := c.Chmod(sftpPath, mode); err != nil && !isSFTPOpUnsupported(err) {
+	if err := c.Chmod(sftpPath, mode); err != nil && !sftpChmodFailureTolerated(remotePath, err) {
 		return fmt.Errorf("sftp: chmod %s: %w", sftpPath, err)
 	}
 	return nil
+}
+
+// sftpChmodFailureTolerated reports whether a file may keep its default mode:
+// Win32-OpenSSH cannot apply POSIX modes, but a Linux or macOS host must.
+func sftpChmodFailureTolerated(remotePath string, err error) bool {
+	return isWindowsRemotePath(remotePath) && isSFTPOpUnsupported(err)
 }
 
 func (u *sshFileUploader) RemoveAll(ctx context.Context, target string) error {

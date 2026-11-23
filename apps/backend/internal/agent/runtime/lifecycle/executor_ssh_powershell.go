@@ -47,6 +47,7 @@ if ($__kEnvelope.login) {
   if ($PROFILE -and (Test-Path -LiteralPath $PROFILE)) {
     try { . $PROFILE *>$null } catch {}
   }
+  Set-StrictMode -Off
   $ErrorActionPreference = 'Stop'
 }
 function Invoke-KandevNative {
@@ -134,8 +135,18 @@ func runPowerShellEnvelopeBounded(
 	return runSSHCommandStdinBounded(ctx, client, cmd.line, strings.NewReader(cmd.stdin), maxStdout)
 }
 
+// powerShellSingleQuoteEscaper doubles every character PowerShell accepts as a
+// single quote, matching CodeGeneration.EscapeSingleQuotedStringContent.
+var powerShellSingleQuoteEscaper = strings.NewReplacer(
+	"'", "''",
+	"‘", "‘‘",
+	"’", "’’",
+	"‚", "‚‚",
+	"‛", "‛‛",
+)
+
 func powerShellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+	return "'" + powerShellSingleQuoteEscaper.Replace(s) + "'"
 }
 
 func isPowerShellShell(shell string) bool {
