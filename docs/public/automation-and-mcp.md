@@ -470,7 +470,15 @@ Use `manage_task_change_request_kandev` with `operation` set to `link`, `unlink`
 or `replace`. Every mutation needs `task_id`, `provider` (`github` or `gitlab`),
 the canonical `repository_id`, and a positive request number. A number by itself
 is rejected, so a fork and its canonical repository can safely have the same
-number. For example:
+number.
+
+For a new `link`, use the Kandev ID in `repositories[].repository_id` from
+`list_tasks_kandev`. The repository must be attached to the target task. An
+unmatched ID returns a validation error for `repository_id`. For `unlink`, use
+the repository ID from the stored association; unlink can still remove that
+association after the repository is detached.
+
+For example:
 
 ```json
 {

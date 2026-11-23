@@ -402,7 +402,7 @@ func (c taskChangeLinkCoordinator) taskRepository(ctx context.Context, taskID, r
 		}
 		return task, repo, nil
 	}
-	return nil, nil, fmt.Errorf("repository not found for task")
+	return nil, nil, mcp.ErrTaskChangeRepositoryNotAttached
 }
 
 func githubChangeURL(host, owner, name string, number int) (string, error) {
