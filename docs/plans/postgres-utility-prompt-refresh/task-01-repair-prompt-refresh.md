@@ -57,7 +57,7 @@ Use a disposable PostgreSQL DSN in `KANDEV_TEST_POSTGRES_DSN`. Confirm the
 PostgreSQL test executes and passes rather than skipping.
 
 ```sh
-: `${KANDEV_TEST_POSTGRES_DSN:?Set a disposable PostgreSQL DSN}`
+: "${KANDEV_TEST_POSTGRES_DSN:?Set a disposable PostgreSQL DSN}"
 (
   cd apps/backend
   go test -trimpath -tags fts5 -race -count=1 -v \
