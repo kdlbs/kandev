@@ -88,11 +88,13 @@ and no `background_work_output` event is sent.
 ## Verification
 
 ```bash
+(cd apps && pnpm install --frozen-lockfile)
 (cd apps/backend && go test -trimpath -race ./internal/agentctl/server/adapter/transport/acp/... -run 'ClaudeBackgroundShellOutput|ClaudeShellOutputPath|ClaudeShellOutputFollower|ClaudeBackgroundTerminal' -count=1)
 (cd apps/backend && go test -trimpath ./internal/agentctl/server/adapter/transport/acp/... ./cmd/mock-agent/... -count=1)
-bash scripts/lint-go-changed <changed-go-files>
+bash scripts/lint-go-changed apps/backend/cmd/mock-agent/claude_background_terminal_fixture.go apps/backend/cmd/mock-agent/claude_background_terminal_fixture_test.go apps/backend/internal/agentctl/server/adapter/transport/acp/adapter.go apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_tools.go apps/backend/internal/agentctl/server/adapter/transport/acp/dialect_claude_terminal.go apps/backend/internal/agentctl/server/adapter/transport/acp/normalize.go apps/backend/internal/agentctl/server/adapter/transport/acp/claude_shell_output.go apps/backend/internal/agentctl/server/adapter/transport/acp/claude_shell_output_test.go apps/backend/internal/agentctl/server/adapter/transport/acp/claude_background_terminal_test.go apps/backend/internal/task/service/background_work_test.go
+(cd apps/backend && go test -trimpath ./internal/task/service -run '^TestBackgroundWorkOutputMergeUsesJSONDeliveredUTF8Offsets$' -count=1)
 make -C apps/backend build
-(cd apps && pnpm --filter @kandev/web exec playwright test e2e/tests/task/claude-background-shell-output.spec.ts)
+(cd apps/web && pnpm e2e:run tests/task/claude-background-shell-output.spec.ts)
 python3 scripts/list-docs.py validate && python3 scripts/lint-spec-files.py --all
 git diff --check
 ```

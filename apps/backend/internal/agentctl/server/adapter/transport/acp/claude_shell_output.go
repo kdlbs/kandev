@@ -92,8 +92,10 @@ type claudeShellOutputJob struct {
 	workID           string
 	path             string
 	offset           int64
+	outputOffset     int64
 	lastObservedSize int64
 	lastGrowth       time.Time
+	ready            bool
 	existed          bool
 }
 
@@ -150,6 +152,28 @@ func (f *claudeShellOutputFollower) follow(sessionID, workID, path string) bool 
 	return true
 }
 
+func (f *claudeShellOutputFollower) activate(sessionID, workID string) bool {
+	if f == nil {
+		return false
+	}
+	f.mu.Lock()
+	job := f.jobs[claudeShellOutputKey(sessionID, workID)]
+	f.mu.Unlock()
+	if job == nil {
+		return false
+	}
+	job.mu.Lock()
+	activated := job.active.Load()
+	if activated {
+		job.ready = true
+	}
+	job.mu.Unlock()
+	if activated {
+		f.signalPoller()
+	}
+	return activated
+}
+
 func (f *claudeShellOutputFollower) finish(sessionID, workID string) {
 	if f == nil {
 		return
@@ -167,7 +191,9 @@ func (f *claudeShellOutputFollower) finish(sessionID, workID string) {
 		return
 	}
 	job.mu.Lock()
-	f.readJobLocked(job, true)
+	if job.ready {
+		f.readJobLocked(job, true)
+	}
 	job.mu.Unlock()
 }
 
@@ -268,6 +294,10 @@ func (f *claudeShellOutputFollower) readJobLocked(job *claudeShellOutputJob, fin
 	defer func() {
 		_ = file.Close()
 	}()
+	if !job.ready {
+		f.observeOutputSize(job, size, false)
+		return
+	}
 	if !f.observeOutputSize(job, size, final) {
 		return
 	}
@@ -353,7 +383,7 @@ func (f *claudeShellOutputFollower) emitAvailableOutput(
 	if !final && !job.active.Load() {
 		return
 	}
-	chunk := data[:complete]
+	chunk := strings.ToValidUTF8(string(data[:complete]), "\uFFFD")
 	job.offset = start + int64(complete)
 	f.send(AgentEvent{
 		Type:      streams.EventTypeBackgroundWorkOutput,
@@ -361,12 +391,13 @@ func (f *claudeShellOutputFollower) emitAvailableOutput(
 		BackgroundWorkOutput: &streams.WorkloadOutputChunk{
 			SessionID: job.sessionID,
 			WorkID:    job.workID,
-			Chunk:     string(chunk),
-			Offset:    start,
+			Chunk:     chunk,
+			Offset:    job.outputOffset,
 			Truncated: truncated,
 			Stream:    "stdout",
 		},
 	})
+	job.outputOffset += int64(len(chunk))
 }
 
 func completeUTF8PrefixLength(data []byte) int {

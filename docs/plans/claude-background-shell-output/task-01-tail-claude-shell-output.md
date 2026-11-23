@@ -36,10 +36,12 @@ the desktop and phone viewers show it live and after exit.
   - `claudeShellOutputFollower`: a per-adapter map of followed jobs and at
     most one poller goroutine, running only while the map is non-empty. Every
     2 s it stats each file and reads only grown files, capped to the last
-    200 KiB of unread bytes. Emit to the last complete UTF-8 rune, without
-    waiting for a newline; carry a split trailing rune to the next poll.
-    Limits: 20 followed jobs, 30 minutes without growth, file gone/shrunk/non-
-    regular. The clock is injectable for tests.
+    200 KiB of unread bytes. Gate output until the matching launch update is
+    queued; jobs that never activate still expire after 30 minutes without
+    growth. Emit to the last complete UTF-8 rune, normalize malformed UTF-8,
+    and count offsets in delivered output bytes. Do not wait for a newline;
+    carry a split trailing rune to the next poll. Limits: 20 followed jobs,
+    file gone/shrunk/non-regular. The clock is injectable for tests.
 - `acp/adapter.go`: own the follower for the adapter lifetime and stop it
   during adapter close. The follower starts its poller when a job is registered.
 - `acp/adapter_tools.go`: where the verified launch gets its `WorkID`, validate
@@ -68,16 +70,17 @@ code, locales, feature flags, and resuming reads after restart.
 ## Acceptance
 
 1. `TestClaudeBackgroundShellOutputStreamsFromLaunchFile`: a verified 0.109.0
-   launch advertises `Output: "stream"` and sends the file's output; the final
-   chunk precedes the terminal observation. It fails before the change.
+   launch advertises `Output: "stream"`, its update is queued before the first
+   output chunk, and the final chunk precedes the terminal observation.
 2. `TestClaudeShellOutputPath`: both launch sentences pass with a path that
    contains spaces; repeated separators are cleaned; relative, foreign-session,
    wrong-shape, and non-regular paths keep `Output: "none"`.
 3. Follower tests emit progress without a newline, cap growth beyond 200 KiB
-   between polls, and carry a split UTF-8 rune to the next poll.
-4. `TestClaudeShellOutputFollowerLimits`: an unchanged file is not read, a job
-   idle for 30 minutes is dropped, a 21st job keeps `Output: "none"`, and the
-   poller goroutine exits when no job remains.
+   between polls, carry a split UTF-8 rune to the next poll, and keep output
+   offsets consistent after JSON replaces malformed UTF-8.
+4. Follower limit tests cover an unchanged file, 30-minute expiry for activated
+   and unactivated jobs, a 21st job keeping `Output: "none"`, and poller exit
+   when no job remains.
 5. The desktop E2E opens live detail, appends more output, observes it before
    releasing terminal frames, then verifies retained output after exit.
 6. The existing desktop and mobile terminal-exit E2Es pass with the updated
@@ -86,13 +89,15 @@ code, locales, feature flags, and resuming reads after restart.
 
 ## TDD and verification
 
-Write the failing regression test first and confirm it fails because no output
-event is sent and output is `none`.
+Write regression tests first and confirm the launch-order and unactivated-job
+tests fail against the implementation without their fixes.
 
 ```bash
+(cd apps && pnpm install --frozen-lockfile)
 (cd apps/backend && go test -trimpath -race ./internal/agentctl/server/adapter/transport/acp/... -run 'ClaudeBackgroundShellOutput|ClaudeShellOutputPath|ClaudeShellOutputFollower|ClaudeBackgroundTerminal' -count=1)
 (cd apps/backend && go test -trimpath ./internal/agentctl/server/adapter/transport/acp/... ./cmd/mock-agent/... -count=1)
-bash scripts/lint-go-changed <changed-go-files>
+bash scripts/lint-go-changed apps/backend/cmd/mock-agent/claude_background_terminal_fixture.go apps/backend/cmd/mock-agent/claude_background_terminal_fixture_test.go apps/backend/internal/agentctl/server/adapter/transport/acp/adapter.go apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_tools.go apps/backend/internal/agentctl/server/adapter/transport/acp/dialect_claude_terminal.go apps/backend/internal/agentctl/server/adapter/transport/acp/normalize.go apps/backend/internal/agentctl/server/adapter/transport/acp/claude_shell_output.go apps/backend/internal/agentctl/server/adapter/transport/acp/claude_shell_output_test.go apps/backend/internal/agentctl/server/adapter/transport/acp/claude_background_terminal_test.go apps/backend/internal/task/service/background_work_test.go
+(cd apps/backend && go test -trimpath ./internal/task/service -run '^TestBackgroundWorkOutputMergeUsesJSONDeliveredUTF8Offsets$' -count=1)
 make -C apps/backend build
 (cd apps/web && pnpm run build:e2e)
 (cd apps && pnpm --filter @kandev/web exec playwright test e2e/tests/task/claude-background-shell-output.spec.ts e2e/tests/task/claude-background-terminal-exit.spec.ts)
@@ -107,6 +112,7 @@ git diff --check
 
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/claude_shell_output.go` (new)
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/claude_shell_output_test.go` (new)
+- `apps/backend/internal/agentctl/server/adapter/transport/acp/claude_background_terminal_test.go`
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_tools.go`
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter.go`
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/dialect_claude_terminal.go`
@@ -115,6 +121,7 @@ git diff --check
 - `apps/backend/cmd/mock-agent/claude_background_terminal_fixture_test.go`
 - `apps/web/e2e/tests/task/claude-background-terminal-exit.helpers.ts`
 - `apps/web/e2e/tests/task/claude-background-shell-output.spec.ts` (new)
+- `apps/backend/internal/task/service/background_work_test.go`
 
 ## Results
 
@@ -125,3 +132,14 @@ Desktop output and terminal-exit E2Es pass; the Pixel 5 terminal-exit and
 retained-output E2Es pass. The web build and all three required E2E fixture
 builds pass. Specification validation, spec lint, Prettier, `gofmt`, and
 `git diff --check` pass.
+
+PR fixup verification: the focused ACP race suite and full ACP/mock-agent
+package tests pass after adding launch-queue activation, expiry for jobs that
+never activate, and bounded event waits in the cancellation test. The service
+regression test confirms JSON-delivered replacement characters and normalized
+byte offsets merge without losing later output. Changed-Go lint reports zero
+issues; `make -C apps/backend build`, specification validation, spec lint, and
+`git diff --check` pass. `pnpm install --frozen-lockfile` succeeds, and
+`pnpm e2e:run tests/task/claude-background-shell-output.spec.ts` passes with
+the viewer observing output appended while the job is still running, before
+terminal frames are released.

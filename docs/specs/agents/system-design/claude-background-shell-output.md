@@ -78,17 +78,21 @@ when the native session changes.
   goroutine.
 - **Start.** When the verified launch receives its workload ID and the path is
   valid, add the job to the map, start the poller if needed, and set its
-  capability to `Output: "stream"`. The poll interval gives the launch update
-  time to enter the update stream before the first read. When 20 jobs are
-  already followed, the new job is not added and keeps `Output: "none"`.
+  capability to `Output: "stream"`. Keep the job gated until its matching
+  launch update has been queued; then activate it. Jobs that never activate
+  still track file growth and expire after 30 minutes without growth. When 20
+  jobs are already followed, the new job is not added and keeps
+  `Output: "none"`.
 - **Poll.** Every 2 s, `os.Stat` each followed file. Only a file whose size
   grew is read. Read at most the last 200 KiB of unread data, skipping older
   bytes and marking the chunk `Truncated` when needed. Align a skipped start
-  and the emitted end to complete UTF-8 runes, then send one
-  `background_work_output` event with `WorkID`, `Offset`, and `Chunk`. Emit
-  progress without waiting for a newline. A split trailing rune remains unread
-  and completes on a later poll. The task service's offset merge and 200 KiB
-  retention handle the rest.
+  and the emitted end to complete UTF-8 runes, then replace malformed input
+  with U+FFFD before sending one `background_work_output` event. Keep the file
+  cursor separate from the emitted stream offset: `Offset` counts bytes in the
+  normalized UTF-8 chunks delivered to the task service. Emit progress without
+  waiting for a newline. A split trailing rune remains unread and completes on
+  a later poll. The task service's offset merge and 200 KiB retention handle
+  the rest.
 - **Stop following a job** when any of these happens:
   - its verified terminal exit arrives: read the final bounded unread window,
     send it before the terminal observation, then remove it;
@@ -98,8 +102,9 @@ when the native session changes.
     file;
   - the native session is replaced or the adapter closes, which drops the
     whole map.
-- **Ordering.** Chunks use `a.sendUpdate`, which serializes with the tool
-  update stream, so the launch observation precedes its first chunk.
+- **Ordering.** Queue the launch update before activating its output follower.
+  Chunks use `a.sendUpdate`, so the launch observation precedes its first
+  chunk. A terminal observation follows the final read.
 
 The worst case is bounded: one goroutine and 20 `stat` calls every 2 s per
 adapter, at most 200 KiB per file read, and every followed job leaves the map
@@ -136,10 +141,11 @@ the phone detail. No web or locale change is required.
   stream output, sends ordered chunks, and sends the final chunk before the
   terminal observation.
 - Unit: emit progress without a newline, cap a large growth between polls,
-  and carry a split UTF-8 rune to the next poll.
-- Unit, with an injected clock: an unchanged file is not read; a job idle for
-  30 minutes leaves the map; a 21st job keeps `Output: "none"`; the poller
-  goroutine exits when the map empties.
+  carry a split UTF-8 rune to the next poll, and keep offsets consistent after
+  JSON replaces malformed UTF-8.
+- Unit, with an injected clock: an unchanged file is not read; activated and
+  unactivated jobs idle for 30 minutes leave the map; a 21st job keeps
+  `Output: "none"`; the poller goroutine exits when the map empties.
 - E2E: after the live detail opens, the mock-agent appends output and the
   viewer displays it before terminal frames are released; it also retains
   output after exit.

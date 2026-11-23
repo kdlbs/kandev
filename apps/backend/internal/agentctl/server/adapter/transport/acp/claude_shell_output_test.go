@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ func TestClaudeBackgroundShellOutputStreamsFromLaunchFile(t *testing.T) {
 	a.agentInfo.Version = verifiedClaudeTerminalBridgeCurrentVersion
 	a.backgroundWorkEnabled = true
 	a.normalizer = NewNormalizerWithBackgroundWork(claudeAgentID, true)
+	a.claudeShellOutput.interval = time.Hour
 
 	toolCallID := "toolu_background_output"
 	outputPath := filepath.Join(t.TempDir(), "session-claude", "tasks", "task-output.output")
@@ -50,11 +52,16 @@ func TestClaudeBackgroundShellOutputStreamsFromLaunchFile(t *testing.T) {
 	require.NotNil(t, launch.NormalizedPayload.BackgroundWork().Capabilities)
 	require.Equal(t, "stream", launch.NormalizedPayload.BackgroundWork().Capabilities.Output)
 
-	a.sendUpdate(*launch)
-	queuedLaunch := <-a.updatesCh
-	require.Equal(t, streams.EventTypeToolUpdate, queuedLaunch.Type)
 	a.claudeShellOutput.pollOnce()
-	liveOutput := <-a.updatesCh
+	require.Zero(t, len(a.updatesCh), "shell output must wait until its launch update is queued")
+
+	a.sendUpdate(*launch)
+	a.claudeShellOutput.pollOnce()
+	require.Eventually(t, func() bool { return len(a.updatesCh) >= 2 }, time.Second, time.Millisecond,
+		"the delayed consumer should have both the launch and first output event queued")
+	queuedLaunch := receiveClaudeShellAgentEvent(t, a.updatesCh)
+	require.Equal(t, streams.EventTypeToolUpdate, queuedLaunch.Type)
+	liveOutput := receiveClaudeShellAgentEvent(t, a.updatesCh)
 	require.Equal(t, streams.EventTypeBackgroundWorkOutput, liveOutput.Type)
 	require.Equal(t, toolCallID, liveOutput.BackgroundWorkOutput.WorkID)
 	require.Equal(t, int64(0), liveOutput.BackgroundWorkOutput.Offset)
@@ -64,8 +71,8 @@ func TestClaudeBackgroundShellOutputStreamsFromLaunchFile(t *testing.T) {
 	terminal := a.convertToolCallResultUpdate("session-claude", claudeTerminalExitUpdate(toolCallID, nil, nil))
 	require.NotNil(t, terminal)
 	a.sendUpdate(*terminal)
-	finalOutput := <-a.updatesCh
-	terminalEvent := <-a.updatesCh
+	finalOutput := receiveClaudeShellAgentEvent(t, a.updatesCh)
+	terminalEvent := receiveClaudeShellAgentEvent(t, a.updatesCh)
 	require.Equal(t, streams.EventTypeBackgroundWorkOutput, finalOutput.Type)
 	require.Equal(t, int64(len("live output\n")), finalOutput.BackgroundWorkOutput.Offset)
 	require.Equal(t, "final output", finalOutput.BackgroundWorkOutput.Chunk)
@@ -158,6 +165,7 @@ func TestClaudeShellOutputFollowerEmitsProgressWithoutNewline(t *testing.T) {
 	content := "progress 10%\rprogress 20%\r"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	require.True(t, follower.follow("session-claude", "work-progress", path))
+	require.True(t, follower.activate("session-claude", "work-progress"))
 	follower.pollOnce()
 
 	select {
@@ -184,6 +192,7 @@ func TestClaudeShellOutputFollowerCapsGrowthBetweenPolls(t *testing.T) {
 	initial := "started\n"
 	require.NoError(t, os.WriteFile(path, []byte(initial), 0o600))
 	require.True(t, follower.follow("session-claude", "work-growth", path))
+	require.True(t, follower.activate("session-claude", "work-growth"))
 	follower.pollOnce()
 	require.Equal(t, initial, receiveClaudeShellOutputEvent(t, events).Chunk)
 
@@ -192,7 +201,7 @@ func TestClaudeShellOutputFollowerCapsGrowthBetweenPolls(t *testing.T) {
 	follower.pollOnce()
 	chunk := receiveClaudeShellOutputEvent(t, events)
 	require.True(t, chunk.Truncated)
-	require.Equal(t, int64(len(content)-claudeShellOutputMaxBytes), chunk.Offset)
+	require.Equal(t, int64(len(initial)), chunk.Offset)
 	require.LessOrEqual(t, len(chunk.Chunk), claudeShellOutputMaxBytes)
 	require.Equal(t, strings.Repeat("x", claudeShellOutputMaxBytes-1)+"\n", chunk.Chunk)
 }
@@ -213,6 +222,7 @@ func TestClaudeShellOutputFollowerCarriesSplitUTF8Rune(t *testing.T) {
 	partial := []byte("status \xe2\x82")
 	require.NoError(t, os.WriteFile(path, partial, 0o600))
 	require.True(t, follower.follow("session-claude", "work-utf8", path))
+	require.True(t, follower.activate("session-claude", "work-utf8"))
 	follower.pollOnce()
 	first := receiveClaudeShellOutputEvent(t, events)
 	require.Equal(t, "status ", first.Chunk)
@@ -224,6 +234,43 @@ func TestClaudeShellOutputFollowerCarriesSplitUTF8Rune(t *testing.T) {
 	second := receiveClaudeShellOutputEvent(t, events)
 	require.Equal(t, "€ done", second.Chunk)
 	require.Equal(t, int64(len("status ")), second.Offset)
+}
+
+func TestClaudeShellOutputFollowerKeepsJSONOffsetsConsistentForInvalidUTF8(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	events := make(chan AgentEvent, 2)
+	follower := newClaudeShellOutputFollower(ctx, func(event AgentEvent) { events <- event })
+	follower.interval = time.Hour
+	t.Cleanup(func() {
+		follower.clear()
+		follower.wait()
+	})
+
+	path := filepath.Join(t.TempDir(), "session-claude", "tasks", "invalid-utf8.output")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte{0xff, 'A'}, 0o600))
+	require.True(t, follower.follow("session-claude", "work-invalid-utf8", path))
+	require.True(t, follower.activate("session-claude", "work-invalid-utf8"))
+	follower.pollOnce()
+	first := jsonRoundTripClaudeOutput(t, receiveClaudeShellOutputEvent(t, events))
+	require.Equal(t, "\uFFFDA", first.Chunk)
+	require.Zero(t, first.Offset)
+
+	require.NoError(t, os.WriteFile(path, []byte{0xff, 'A', 'B'}, 0o600))
+	follower.pollOnce()
+	second := jsonRoundTripClaudeOutput(t, receiveClaudeShellOutputEvent(t, events))
+	require.Equal(t, "B", second.Chunk)
+	require.Equal(t, first.Offset+int64(len(first.Chunk)), second.Offset)
+}
+
+func jsonRoundTripClaudeOutput(t *testing.T, chunk *streams.WorkloadOutputChunk) *streams.WorkloadOutputChunk {
+	t.Helper()
+	encoded, err := json.Marshal(chunk)
+	require.NoError(t, err)
+	var delivered streams.WorkloadOutputChunk
+	require.NoError(t, json.Unmarshal(encoded, &delivered))
+	return &delivered
 }
 
 func receiveClaudeShellOutputEvent(t *testing.T, events <-chan AgentEvent) *streams.WorkloadOutputChunk {
@@ -257,9 +304,10 @@ func TestClaudeShellOutputFollowerLimits(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(firstPath), 0o700))
 	require.NoError(t, os.WriteFile(firstPath, []byte("first output\n"), 0o600))
 	require.True(t, follower.follow("session-claude", "work-0", firstPath))
+	require.True(t, follower.activate("session-claude", "work-0"))
 	done := follower.done
 	follower.pollOnce()
-	require.Equal(t, "first output\n", (<-events).BackgroundWorkOutput.Chunk)
+	require.Equal(t, "first output\n", receiveClaudeShellOutputEvent(t, events).Chunk)
 	follower.pollOnce()
 	require.Empty(t, events, "an unchanged file must not emit the same bytes again")
 
@@ -283,6 +331,41 @@ func TestClaudeShellOutputFollowerLimits(t *testing.T) {
 	}
 }
 
+func TestClaudeShellOutputFollowerExpiresUnactivatedJobs(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	events := make(chan AgentEvent, 1)
+	follower := newClaudeShellOutputFollower(ctx, func(event AgentEvent) { events <- event })
+	follower.interval = time.Hour
+	var now atomic.Int64
+	now.Store(time.Now().UnixNano())
+	follower.now = func() time.Time { return time.Unix(0, now.Load()) }
+	t.Cleanup(func() {
+		cancel()
+		follower.clear()
+		follower.wait()
+	})
+
+	path := filepath.Join(t.TempDir(), "session-claude", "tasks", "unactivated.output")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte("not yet visible\n"), 0o600))
+	require.True(t, follower.follow("session-claude", "work-unactivated", path))
+	done := follower.done
+
+	follower.pollOnce()
+	require.Empty(t, events, "output must wait for the launch update")
+	now.Add(int64(31 * time.Minute))
+	follower.pollOnce()
+	follower.mu.Lock()
+	remaining := len(follower.jobs)
+	follower.mu.Unlock()
+	require.Zero(t, remaining, "a job without a launch update must still expire")
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("the poller should exit after an unactivated job expires")
+	}
+}
+
 func TestClaudeShellOutputFollowerTruncatesInitialRead(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -293,12 +376,26 @@ func TestClaudeShellOutputFollowerTruncatesInitialRead(t *testing.T) {
 	content := strings.Repeat("x", claudeShellOutputMaxBytes+1024) + "\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	require.True(t, follower.follow("session-claude", "work-large", path))
+	require.True(t, follower.activate("session-claude", "work-large"))
 	follower.pollOnce()
-	chunk := (<-events).BackgroundWorkOutput
-	start := len(content) - claudeShellOutputMaxBytes
+	chunk := receiveClaudeShellOutputEvent(t, events)
 	require.True(t, chunk.Truncated)
-	require.Equal(t, int64(start), chunk.Offset)
-	require.Equal(t, content[start:], chunk.Chunk)
+	require.Zero(t, chunk.Offset)
+	require.Equal(t, content[len(content)-claudeShellOutputMaxBytes:], chunk.Chunk)
 	follower.clear()
 	follower.wait()
+}
+
+func receiveClaudeShellAgentEvent(t *testing.T, events <-chan AgentEvent) AgentEvent {
+	t.Helper()
+	select {
+	case event, ok := <-events:
+		if !ok {
+			t.Fatal("Claude shell output event channel closed unexpectedly")
+		}
+		return event
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Claude shell output update")
+		return AgentEvent{}
+	}
 }

@@ -26,6 +26,11 @@ func terminalExitUpdates(updates []recordedUpdate) []map[string]any {
 }
 
 func TestClaudeBackgroundTerminalFixtureEmitsCapturedShape(t *testing.T) {
+	tempRoot := t.TempDir()
+	tempDir := filepath.Join(tempRoot, "temp with spaces")
+	require.NoError(t, os.MkdirAll(tempDir, 0o700))
+	t.Setenv("TMPDIR", tempDir)
+
 	e, updater := newTestEmitter()
 	emitClaudeBackgroundTerminalFixture(e, "/claude-background-terminal 10ms 10ms")
 
@@ -59,12 +64,9 @@ func TestClaudeBackgroundTerminalFixtureEmitsCapturedShape(t *testing.T) {
 		if !strings.Contains(output, "Output is being written to: ") {
 			continue
 		}
-		path := strings.Fields(strings.SplitN(output, "Output is being written to: ", 2)[1])[0]
+		path := mockClaudeBackgroundShellOutputPath(string(e.sid), string(launchToolCalls[len(outputPaths)].ToolCallId))
+		require.Contains(t, output, "Output is being written to: "+path)
 		outputPaths = append(outputPaths, path)
-		jobDir := filepath.Dir(filepath.Dir(path))
-		t.Cleanup(func() {
-			require.NoError(t, os.RemoveAll(jobDir))
-		})
 		info, err := os.Stat(path)
 		require.NoError(t, err)
 		require.True(t, info.Mode().IsRegular())

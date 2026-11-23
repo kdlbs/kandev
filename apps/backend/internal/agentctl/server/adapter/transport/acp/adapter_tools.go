@@ -884,18 +884,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 			background := payload.BackgroundWork()
 			payload.SetBackgroundWorkIdentity(background.Kind, toolCallID, background.Detached, background.Ended)
 		}
-		if outputPathValid && a.sessionID == sessionID && payload.IsDetachedBackgroundLaunch() &&
-			payload.IsVerifiedBackgroundWork() {
-			background := payload.BackgroundWork()
-			if background != nil && background.WorkID != "" && a.claudeShellOutput.follow(sessionID, background.WorkID, outputPath) {
-				capabilities := streams.InspectionOnlyWorkloadCapabilities()
-				if background.Capabilities != nil {
-					capabilities = *background.Capabilities
-				}
-				capabilities.Output = "stream"
-				payload.SetBackgroundWorkCapabilities(capabilities)
-			}
-		}
+		a.registerClaudeShellOutputLocked(sessionID, payload, outputPath, outputPathValid)
 		a.recordOpenCodePluginClaimLocked(string(tcu.ToolCallId), pluginPromptGeneration, payload)
 		if claudeBackgroundTerminalExit(
 			a.agentID, agentName, agentVersion, tcu.Meta, toolCallID, payload,
@@ -1076,6 +1065,32 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		ToolCallContents:  convertedContents,
 		BackgroundWork:    selectWorkloadObservation(claudeTerminalObservation, claudeMonitorObservation),
 	}
+}
+
+// registerClaudeShellOutputLocked registers a validated Claude output file and
+// advertises streaming for its verified detached shell workload.
+func (a *Adapter) registerClaudeShellOutputLocked(
+	sessionID string,
+	payload *streams.NormalizedPayload,
+	outputPath string,
+	outputPathValid bool,
+) bool {
+	if !outputPathValid || outputPath == "" || payload == nil || a.claudeShellOutput == nil ||
+		a.sessionID != sessionID || !payload.IsDetachedBackgroundLaunch() || !payload.IsVerifiedBackgroundWork() {
+		return false
+	}
+	background := payload.BackgroundWork()
+	if background == nil || background.WorkID == "" ||
+		!a.claudeShellOutput.follow(sessionID, background.WorkID, outputPath) {
+		return false
+	}
+	capabilities := streams.InspectionOnlyWorkloadCapabilities()
+	if background.Capabilities != nil {
+		capabilities = *background.Capabilities
+	}
+	capabilities.Output = "stream"
+	payload.SetBackgroundWorkCapabilities(capabilities)
+	return true
 }
 
 func (a *Adapter) enrichSubagentResultLocked(
