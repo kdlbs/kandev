@@ -14,6 +14,7 @@ const (
 	toolStatusRunning   = "running"
 	toolStatusCompleted = "completed"
 	toolStatusError     = "error"
+	toolLocationPathKey = "path"
 )
 
 func applyPatch[T any](previous *acp.Optional[T], patch acp.Optional[T]) {
@@ -74,6 +75,7 @@ func (a *Adapter) setToolEvent(
 	title, _ := tool.Title.Get()
 	kind, _ := tool.Kind.Get()
 	status, hasStatus := tool.Status.Get()
+	locations, _ := tool.Locations.Get()
 	rawInput, _ := tool.RawInput.Get()
 	rawOutput, _ := tool.RawOutput.Get()
 	meta, _ := tool.Meta.Get()
@@ -82,10 +84,21 @@ func (a *Adapter) setToolEvent(
 	_ = json.Unmarshal(rawInput, &input)
 	_ = json.Unmarshal(rawOutput, &output)
 	_ = json.Unmarshal(meta, &metadata)
-	normalizer := legacy.NewNormalizer(a.cfg.AgentID)
-	payload := normalizer.NormalizeToolCall(name, map[string]any{
+	args := map[string]any{
 		"title": title, "kind": kind, "raw_input": input, "_meta": metadata,
-	})
+	}
+	if len(locations) != 0 {
+		locationArgs := make([]map[string]any, len(locations))
+		for i, location := range locations {
+			locationArgs[i] = map[string]any{toolLocationPathKey: location.Path}
+			if location.Line != nil {
+				locationArgs[i]["line"] = *location.Line
+			}
+		}
+		args["locations"] = locationArgs
+	}
+	normalizer := legacy.NewNormalizer(a.cfg.AgentID)
+	payload := normalizer.NormalizeToolCall(name, args)
 	if output != nil {
 		normalizer.NormalizeToolResult(payload, output)
 	}
@@ -148,12 +161,20 @@ func (p *projection) projectSubagent(parent wire.SessionID, update *wire.Subagen
 		id = entityID(parent, "subagent:"+string(update.SessionID))
 		p.bindChild(update.SessionID, id)
 	}
+	if p.subagents == nil {
+		p.subagents = make(map[wire.SessionID]wire.SubagentUpdate)
+	}
+	snapshot := p.subagents[update.SessionID]
+	applyPatch(&snapshot.Title, update.Title)
+	applyPatch(&snapshot.Description, update.Description)
+	applyPatch(&snapshot.State, update.State)
+	p.subagents[update.SessionID] = snapshot
 	if !live {
 		return false
 	}
-	title, _ := update.Title.Get()
-	description, _ := update.Description.Get()
-	status, _ := update.State.Get()
+	title, _ := snapshot.Title.Get()
+	description, _ := snapshot.Description.Get()
+	status, _ := snapshot.State.Get()
 	event.Type, event.ToolCallID, event.ToolName, event.ToolTitle = toolEventType(known), id, "Task", title
 	event.NormalizedPayload = streams.NewSubagentTask(title, description, "")
 	switch status.State {

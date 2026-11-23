@@ -59,3 +59,58 @@ func TestWireToolPatchesPreserveMissingFieldsAndClearNull(t *testing.T) {
 	require.Empty(t, end.ToolCallContents)
 	require.Equal(t, "completed", end.ToolStatus)
 }
+
+func TestWireToolLocationsSupplyFilePaths(t *testing.T) {
+	fixture := newWireFixture(t)
+	fixture.initialize()
+	fixture.newSession(fixtureSession)
+	const location = "/workspace/example.go"
+	fixture.update(fixtureSession, map[string]any{
+		"sessionUpdate": "tool_call_update", "toolCallId": "edit-file",
+		"name": "edit", "kind": "edit",
+		"rawInput":  map[string]any{"old_str_1": "before", "new_str_1": "after"},
+		"locations": []any{map[string]any{"path": location, "line": 4}},
+	})
+	start := fixture.event(streams.EventTypeToolCall)
+	require.Equal(t, location, start.NormalizedPayload.ModifyFile().FilePath)
+
+	fixture.update(fixtureSession, map[string]any{
+		"sessionUpdate": "tool_call_update", "toolCallId": "edit-file", "status": toolStatusCompleted,
+	})
+	completed := fixture.event(streams.EventTypeToolUpdate)
+	require.Equal(t, location, completed.NormalizedPayload.ModifyFile().FilePath)
+
+	fixture.update(fixtureSession, map[string]any{
+		"sessionUpdate": "tool_call_update", "toolCallId": "edit-file", "locations": nil,
+	})
+	cleared := fixture.event(streams.EventTypeToolUpdate)
+	require.Empty(t, cleared.NormalizedPayload.ModifyFile().FilePath)
+}
+
+func TestWireSubagentPatchesPreserveMissingFieldsAndClearNull(t *testing.T) {
+	fixture := newWireFixture(t)
+	fixture.initialize()
+	fixture.newSession(fixtureSession)
+	fixture.update(fixtureSession, map[string]any{
+		"sessionUpdate": "subagent_update", "sessionId": "child",
+		"title": "Inspect files", "description": "Find the entry point",
+	})
+	start := fixture.event(streams.EventTypeToolCall)
+	fixture.update(fixtureSession, map[string]any{
+		"sessionUpdate": "subagent_update", "sessionId": "child",
+		"state": map[string]any{"state": "idle"},
+	})
+	completed := fixture.event(streams.EventTypeToolUpdate)
+	require.Equal(t, start.ToolCallID, completed.ToolCallID)
+	require.Equal(t, "Inspect files", completed.ToolTitle)
+	require.Equal(t, "Find the entry point", completed.NormalizedPayload.SubagentTask().Prompt)
+	require.Equal(t, toolStatusCompleted, completed.ToolStatus)
+
+	fixture.update(fixtureSession, map[string]any{
+		"sessionUpdate": "subagent_update", "sessionId": "child", "description": nil,
+	})
+	cleared := fixture.event(streams.EventTypeToolUpdate)
+	require.Equal(t, completed.ToolTitle, cleared.ToolTitle)
+	require.Empty(t, cleared.NormalizedPayload.SubagentTask().Prompt)
+	require.Equal(t, toolStatusCompleted, cleared.ToolStatus)
+}

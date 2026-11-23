@@ -14,6 +14,7 @@ type projection struct {
 	tools     map[string]wire.ToolCallUpdate
 	terminals map[string]terminalState
 	children  map[wire.SessionID]string
+	subagents map[wire.SessionID]wire.SubagentUpdate
 }
 
 type messageKey struct {

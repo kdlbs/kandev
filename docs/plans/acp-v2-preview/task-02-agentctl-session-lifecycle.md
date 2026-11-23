@@ -76,6 +76,8 @@ Guard the submission generation during delayed prompt and permission replies.
 - Wire fixtures cover acknowledgement ordering, cancellation, accepted
   failure, uncertain acceptance, request-scoped replies, typed configuration,
   HTTP MCP delivery evidence, child IDs, and replay.
+- Wire tests verify that partial updates preserve tool file locations and
+  subagent details. Explicit null values clear those fields.
 - Native question tests cover identity across a stream reconnect and cancel
   only the bundle for the originating request.
 - SQLite projection tests passed for whole-message replacement and clear.
