@@ -126,3 +126,47 @@ func TestClaudeBackgroundTerminalProjection(t *testing.T) {
 	require.Nil(t, first.ExitCode)
 	require.Equal(t, int64(2), first.Revision)
 }
+
+// @covers AC-AGENTS-BACKGROUND-WORK-010.6
+func TestCancelledPendingShellProjectsEndedState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID, sessionID = "task-cancelled-shell", "session-cancelled-shell"
+	seedSession(t, repo, taskID, sessionID, "step1")
+	taskService := taskservice.NewService(
+		taskservice.Repos{BackgroundWork: repo}, nil, testLogger(), taskservice.RepositoryDiscoveryConfig{},
+	)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.backgroundWorkObserver = taskService
+
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	launch := streams.WorkloadRunObservation{
+		SessionID: sessionID, WorkID: "toolu_pending", Kind: streams.WorkloadKindShell,
+		Title: "Pending shell", State: streams.RunStateRunning, SourceCallID: "toolu_pending",
+		StartedAt: &startedAt,
+	}
+	feedBackgroundWorkObservation(svc, taskID, sessionID, &launch)
+
+	normalized := streams.NewShellExec("sleep 30", "", "Pending shell", 0, true)
+	normalized.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "", true, true)
+	finishedAt := time.Now().UTC()
+	ended := streams.WorkloadRunObservation{
+		SessionID: sessionID, WorkID: "toolu_pending", Kind: streams.WorkloadKindShell,
+		Title: "Pending shell", State: streams.RunStateEnded, SourceCallID: "toolu_pending",
+		FinishedAt: &finishedAt,
+	}
+	svc.recordBackgroundWorkObservationFromToolPayload(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID: taskID, SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type: streams.EventTypeToolUpdate, ToolCallID: "toolu_pending", ToolStatus: "cancelled",
+			Normalized: normalized, BackgroundWork: &ended,
+		},
+	})
+
+	projected, err := repo.GetBackgroundWorkload(ctx, sessionID, "toolu_pending")
+	require.NoError(t, err)
+	require.NotNil(t, projected)
+	require.Equal(t, string(streams.RunStateEnded), projected.State)
+	require.Nil(t, projected.ExitCode)
+	require.NotNil(t, projected.FinishedAt)
+}

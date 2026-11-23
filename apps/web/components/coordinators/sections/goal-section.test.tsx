@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import type { Goal, GoalResponse } from "@/lib/api/domains/coordinator-api";
 
@@ -137,6 +137,102 @@ describe("GoalSection", () => {
     fireEvent.click(set);
     await waitFor(() => expect(putMock).toHaveBeenCalled());
     expect(putMock.mock.calls[0][2]).toEqual({ name: "Ship", due_on: null, criteria: [] });
+  });
+
+  // @covers AC-COORDINATOR-GOALS-001.9
+  it("keeps the first goal name edit after load", async () => {
+    let finishInitialLoad: ((value: GoalResponse) => void) | undefined;
+    getMock.mockReturnValueOnce(
+      new Promise<GoalResponse>((resolve) => {
+        finishInitialLoad = resolve;
+      }),
+    );
+    getMock.mockResolvedValue(response(goal({ name: "Ship" })));
+    putMock.mockResolvedValue(goal({ name: "Ship" }));
+    renderSection();
+    expect(screen.getByTestId("goal-loading")).toBeTruthy();
+
+    const actEnvironment = globalThis as typeof globalThis & {
+      IS_REACT_ACT_ENVIRONMENT?: boolean;
+    };
+    const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
+    let observed: { name: string; setEnabled: boolean } | null = null;
+    let completeProbe: (() => void) | undefined;
+    const probeComplete = new Promise<void>((resolve) => {
+      completeProbe = resolve;
+    });
+    const observer = new MutationObserver(() => {
+      const input = document.querySelector<HTMLInputElement>('[data-testid="goal-name"]');
+      if (!input || input.disabled) return;
+
+      observer.disconnect();
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      if (!setter) throw new Error("Native input value setter is unavailable");
+      setter.call(input, "Ship");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          const submit = document.querySelector<HTMLButtonElement>('[data-testid="goal-set"]');
+          observed = { name: input.value, setEnabled: submit !== null && !submit.disabled };
+          completeProbe?.();
+        });
+      });
+    });
+
+    onTestFinished(() => {
+      observer.disconnect();
+      actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+    });
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+      if (!finishInitialLoad) throw new Error("Initial goal read was not created");
+      finishInitialLoad(response(null));
+      await probeComplete;
+      expect(observed).toEqual({ name: "Ship", setEnabled: true });
+
+      fireEvent.click(screen.getByTestId("goal-set"));
+      await waitFor(() =>
+        expect(putMock).toHaveBeenCalledExactlyOnceWith("ws", "c", {
+          name: "Ship",
+          due_on: null,
+          criteria: [],
+        }),
+      );
+    } finally {
+      observer.disconnect();
+      actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+    }
+  });
+});
+
+describe("GoalSection probe cleanup", () => {
+  it("cleans up goal probe resources when its completion promise stays pending", () => {
+    const actEnvironment = globalThis as typeof globalThis & {
+      IS_REACT_ACT_ENVIRONMENT?: boolean;
+    };
+    const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
+    // Keep the probe pending and let the test finish without awaiting it.
+    const probeComplete = new Promise<void>(() => {});
+    let probeSettled = false;
+    void probeComplete.then(() => {
+      probeSettled = true;
+    });
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(document.body, { childList: true });
+
+    onTestFinished(() => {
+      observer.disconnect();
+      actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+
+      const marker = document.createElement("div");
+      document.body.append(marker);
+      expect(observer.takeRecords()).toHaveLength(0);
+      marker.remove();
+      expect(actEnvironment.IS_REACT_ACT_ENVIRONMENT).toBe(previousActEnvironment);
+      expect(probeSettled).toBe(false);
+    });
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
   });
 });
 

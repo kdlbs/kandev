@@ -72,7 +72,7 @@ func sidebarSelectedTreeCTEs(query models.SidebarTaskViewQuery, page sidebarPage
 		visible = ` WHERE tree.id NOT IN (SELECT id FROM hidden_tasks)`
 	}
 	return `, selected_members AS (
-		SELECT member.id FROM root_members member JOIN selected_roots root ON root.id = member.root_id
+		SELECT DISTINCT member.id FROM root_members member JOIN selected_roots root ON root.id = member.root_id
 	), ranked_children AS (
 		SELECT v.id, v.workflow_id, v.workflow_step_id, v.parent_id,
 			ROW_NUMBER() OVER (PARTITION BY v.parent_id ORDER BY ` + page.order + `) AS sibling_order
@@ -106,7 +106,7 @@ func sidebarPageResultCTEs(group string) string {
 	}
 	return `, page_group_starts AS (` + groupStarts + `
 	), page_subtask_walk(ancestor_id, descendant_id) AS (
-		SELECT page.id, page.id FROM page_window page
+		SELECT DISTINCT page.id, page.id FROM page_window page
 		UNION ALL
 		SELECT walk.ancestor_id, child.id FROM page_subtask_walk walk
 		JOIN filtered child ON child.parent_id = walk.descendant_id

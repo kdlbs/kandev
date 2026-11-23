@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  shouldOpenFilePreview,
+  previewFileState,
+  canOfferViewerAfterReadFailure,
+} from "@/lib/plugins/file-viewer-selection";
 import type { MutableRefObject } from "react";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { buildRepoScopedItemId, PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
@@ -69,7 +74,15 @@ export async function fetchFileEditorState({
     (activeRequestRef.current?.fileKey === requestToken.fileKey &&
       activeRequestRef.current.generation === requestToken.generation);
   const isCurrent = () => activeSessionIdRef.current === sessionId && requestMatches();
-  const response = await requestFileContent(client, sessionId, filePath, repo);
+  if (shouldOpenFilePreview(filePath)) return isCurrent() ? previewFileState(filePath, repo) : null;
+  let response: FileContentResponse;
+  try {
+    response = await requestFileContent(client, sessionId, filePath, repo);
+  } catch (error) {
+    if (canOfferViewerAfterReadFailure(filePath))
+      return isCurrent() ? previewFileState(filePath, repo) : null;
+    throw error;
+  }
   if (!isCurrent()) return null;
   const state = await buildFileEditorState(filePath, response, repo);
   if (!isCurrent()) return null;

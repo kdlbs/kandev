@@ -47,7 +47,7 @@ func FromPrompt(prompt *models.Prompt) PromptDTO {
 		Builtin:          prompt.Builtin,
 		AllowAgentEdits:  AgentEditable(prompt),
 		Source:           Source(prompt),
-		SourcePath:       prompt.SourcePath,
+		SourcePath:       RepositoryPath(prompt),
 		Conflict:         prompt.Conflict,
 		AlternateContent: prompt.AlternateContent,
 		CreatedAt:        prompt.CreatedAt.UTC().Format(time.RFC3339),
@@ -67,6 +67,8 @@ func EditGuidance(prompt *models.Prompt) string {
 	switch {
 	case prompt.IsSynced():
 		return "Synced from the prompt repository and read-only. Only the user can make it editable: switch it to Local in Settings > Prompts and save. Agents cannot change that setting."
+	case prompt.IsOverride() && prompt.AlternateContent == "":
+		return "Only the local version remains in use because the repository file is no longer available. It is still editable. If a matching file returns, Prompt Sync will restore the repository version. Only the user can switch versions in Settings > Prompts."
 	case prompt.IsOverride() && prompt.Conflict:
 		return "A local version that conflicts with the repository file of the same name. Edits change the local version, which is in use. Only the user can resolve the conflict, in Settings > Prompts."
 	case prompt.IsOverride():
@@ -74,6 +76,15 @@ func EditGuidance(prompt *models.Prompt) string {
 	default:
 		return ""
 	}
+}
+
+// RepositoryPath returns a linked repository path, hiding stale metadata from
+// detached overrides that predate path clearing.
+func RepositoryPath(prompt *models.Prompt) string {
+	if prompt.IsOverride() && prompt.AlternateContent == "" {
+		return ""
+	}
+	return prompt.SourcePath
 }
 
 // Source returns the prompt's ownership, defaulting to manual.

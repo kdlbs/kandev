@@ -319,3 +319,23 @@ it.each(["current", "replaced"])(
     mocks.sessionId = "sess-1";
   },
 );
+it("restores a discovery preview when a non-source file cannot be read", async () => {
+  mocks.requestFileContent.mockReset();
+  mocks.resetDockState();
+  mocks.sessionId = "restore-preview-fallback";
+  mocks.savedTabs = [{ path: "model.obj", name: "model.obj" }];
+  mocks.requestFileContent.mockRejectedValue(Error("read limit"));
+  const view = renderHook(() => useFileEditors());
+  try {
+    await waitFor(() =>
+      expect(mocks.getDockState().openFiles.get("model.obj")).toMatchObject({
+        previewOnly: true,
+        content: "",
+      }),
+    );
+  } finally {
+    view.unmount();
+    mocks.savedTabs = [];
+    mocks.sessionId = "sess-1";
+  }
+});

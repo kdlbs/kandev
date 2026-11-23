@@ -53,6 +53,7 @@ const (
 // Manager manages agent instance lifecycles
 type Manager struct {
 	// Installed before launch consumers start.
+	openCodeCredentialSource     openCodeCredentialSource
 	preparedExecutionUsageReader func(context.Context, *utility.UsagePreviewRequest) *usage.ExecutionUsageReport
 	providerUsageLimits          bool
 	inferenceConsumer            agentctl.InferenceConsumer
@@ -550,6 +551,7 @@ func NewManager(
 	}
 
 	mgr := &Manager{
+		openCodeCredentialSource:       captureOpenCodeCredentialSource(),
 		registry:                       reg,
 		eventBus:                       eventBus,
 		executorRegistry:               executorRegistry,

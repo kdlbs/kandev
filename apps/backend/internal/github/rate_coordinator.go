@@ -15,7 +15,10 @@ import (
 
 // ErrBackgroundAdmissionDeferred marks a background request that should be
 // requeued instead of waiting inside an execution worker.
-var ErrBackgroundAdmissionDeferred = errors.New("background provider admission deferred")
+var (
+	ErrBackgroundAdmissionDeferred = errors.New("background provider admission deferred")
+	ErrGitHubAdmissionWaitRequired = errors.New("github provider admission wait required")
+)
 
 const (
 	rateLimitBlockSecondary          = "observed_secondary_rate_limit"
@@ -175,8 +178,8 @@ func WithGitHubWorkClass(ctx context.Context, class WorkClass) context.Context {
 	return context.WithValue(ctx, workClassContextKey{}, class)
 }
 
-// WithNonBlockingGitHubAdmission asks background GitHub clients to return a
-// deferred-admission error instead of blocking the caller.
+// WithNonBlockingGitHubAdmission asks GitHub clients to return a typed
+// admission error instead of waiting for provider quota.
 func WithNonBlockingGitHubAdmission(ctx context.Context) context.Context {
 	return context.WithValue(ctx, nonBlockingAdmissionContextKey{}, true)
 }
@@ -321,13 +324,18 @@ func (a *RateAdmission) retryBoundary(
 		return secondary.RetryAt, secondary.RetrySource
 	case rateLimitBlockPrimary, rateLimitBlockPrimaryReserve:
 		primary := a.principal.tracker.PrimaryRetry(resource)
+		snapshot, known := a.principal.tracker.Snapshot(resource)
+		if reason == rateLimitBlockPrimary && !primary.RetryAt.After(now) &&
+			(!known || !primaryRateExhausted(snapshot)) {
+			return time.Time{}, RetrySourceNone
+		}
 		if primary.RetryAt.After(now) {
-			if snapshot, known := a.principal.tracker.Snapshot(resource); known && snapshot.ResetAt.After(primary.RetryAt) {
+			if known && snapshot.ResetAt.After(primary.RetryAt) {
 				return snapshot.ResetAt, RetrySourcePrimaryReset
 			}
 			return primary.RetryAt, primary.RetrySource
 		}
-		if snapshot, known := a.principal.tracker.Snapshot(resource); known {
+		if known {
 			if snapshot.ResetAt.After(now) {
 				if primary.RetryAt.After(snapshot.ResetAt) {
 					return primary.RetryAt, primary.RetrySource
@@ -423,6 +431,12 @@ func (a *RateAdmission) waitForProviderWindow(ctx context.Context, resource Reso
 		if wait <= 0 {
 			return func() {}, nil
 		}
+		if nonBlockingGitHubAdmission(ctx) {
+			if err := ctx.Err(); err != nil {
+				return nil, a.interactiveWaitError(resource, err)
+			}
+			return nil, a.interactiveWaitError(resource, ErrGitHubAdmissionWaitRequired)
+		}
 		if err := waitForAdmissionChange(ctx, wait, trackerChanged, nil); err != nil {
 			if ctx.Err() != nil {
 				return nil, a.interactiveWaitError(resource, ctx.Err())
@@ -435,12 +449,18 @@ func (a *RateAdmission) waitForProviderWindow(ctx context.Context, resource Reso
 func (a *RateAdmission) interactiveWaitError(resource Resource, cause error) error {
 	now := time.Now().UTC()
 	reason := rateLimitBlockProviderRetry
-	if secondary := a.principal.tracker.Secondary(resource); secondary.RetryAt.After(now) {
-		reason = rateLimitBlockSecondary
-	} else if snapshot, known := a.principal.tracker.Snapshot(resource); known && primaryRateExhausted(snapshot) {
-		reason = rateLimitBlockPrimary
+	var retryAt time.Time
+	var retrySource RetrySource
+	primaryAt, primarySource := a.retryBoundary(resource, rateLimitBlockPrimary, now, 0)
+	secondary := a.principal.tracker.Secondary(resource)
+	switch {
+	case secondary.RetryAt.After(now) && !primaryAt.After(secondary.RetryAt):
+		reason, retryAt, retrySource = rateLimitBlockSecondary, secondary.RetryAt, secondary.RetrySource
+	case primaryAt.After(now):
+		reason, retryAt, retrySource = rateLimitBlockPrimary, primaryAt, primarySource
+	default:
+		retryAt, retrySource = a.retryBoundary(resource, reason, now, a.principal.tracker.WaitDuration(resource))
 	}
-	retryAt, retrySource := a.retryBoundary(resource, reason, now, a.principal.tracker.WaitDuration(resource))
 	return &AdmissionWaitError{
 		Resource: resource, RetryAt: retryAt, RetrySource: retrySource,
 		Reason: reason, Cause: cause,

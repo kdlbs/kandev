@@ -19,39 +19,53 @@ that composer's submission contract.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-CLI-MOBILE-PASSTHROUGH-NAV-001` | Components and input ownership; Responsive composition; Lifecycle and failure; Verification |
+| `REQ-CLI-MOBILE-PASSTHROUGH-NAV-001` | Components and input ownership, shared key bar, responsive composition, lifecycle and failure, verification |
 
 ## Components and input ownership
 
-Main at recovery includes `AgentTerminalInput` and a fixed footer bar from
-PR #4521. Preserve that component's desktop branch and the toolbar's ended-session
-recovery rendering. Replace its phone branch with the recovered local-socket
-implementation and remove the duplicate passthrough footer bar. Task-shell
-footer navigation remains unchanged.
-
-The phone branch stays inside `PassthroughToolbar`.
-It owns its xterm instance, current socket, one `onData` subscription, and
-terminal-specific focus/send callbacks. Use `PassthroughTerminal`'s existing
-`onXtermReady`, `onWsReady`, `manualInputRouting`, and `disableWebgl` props.
+The phone branch of `AgentTerminalInput` stays inside `PassthroughToolbar`.
+`MobileAgentTerminal` owns its xterm instance, current socket, one `onData`
+subscription, and terminal-specific focus/send callbacks. It uses
+`PassthroughTerminal`'s `onXtermReady`, `onWsReady`, `manualInputRouting`,
+and `disableWebgl` props.
 `manualInputRouting` makes AttachAddon receive-only: the wrapper owns outbound
 `onData` input, so modifier transformations cannot also send an unmodified copy.
 The wrapper remains mounted when composer/comments visibility changes; hiding
 the bar must not reconnect the agent socket.
 
-Move the existing `sendPtyInput` helper and tests from
-`components/settings/pty-terminal-input.*` to `lib/terminal/send-pty-input.*`,
-then update `PtyTerminalView` to import that same implementation. The helper
-already checks socket readiness, applies `applyShellModifiers`, encodes UTF-8,
-and consumes latched modifiers after send. Preserve its current behavior.
-Both bar taps and the phone terminal's `onData` use this helper. Apply modifiers
-only while the phone controls own input. Hidden controls leave native text unchanged. Use the actual current socket, never `sendShellInput`,
-`useShellKeySender`, or the global active-shell registry. No backend changes.
+Both bar taps and the phone terminal's `onData` call
+`lib/terminal/send-pty-input.ts` with the current agent socket. The helper checks
+readiness, applies `applyShellModifiers`, and sends UTF-8 bytes. It consumes
+latched modifiers after sending. Modifier transforms apply while the phone
+controls own input. `PtyTerminalView` uses the same helper with its host PTY.
 
-Pass `inline`, `onSend`, and `onFocus` to `MobileTerminalKeybar`. Its fallback
-sender is never selected for this consumer. Focus the owned xterm textarea
-synchronously on tap, using the existing prevent-default pointer behavior.
-Keep `KEY_SEQUENCES`, control order, translated labels, and shared styling.
-Do not add a second key map, modifier store, or bar component.
+The phone agent passes `inline`, `onSend`, and `onFocus` to
+`MobileTerminalKeybar`. A tap focuses the owned xterm textarea synchronously
+using `KeybarButton`'s prevent-default pointer behavior. The task-shell footer
+uses the bar's session-scoped sender. Quick Terminal supplies local callbacks
+through `PtyTerminalView`.
+
+## Shared key bar
+
+Use one key order for the inline and fixed bars. Place Esc, Up, Down, Left,
+Right, Enter, and Tab first. Follow them with Ctrl, Shift, Ctrl+C, Ctrl+D,
+and the existing Home, End, page, and symbol keys.
+
+Put Enter in the shared key map with `KEY_SEQUENCES.enter` set to `"\r"`.
+This matches the byte xterm sends for an unmodified physical Enter. Use the
+existing key button with the return glyph and a translated accessible name.
+The existing sender delivers that byte to the selected terminal. Shell
+arrow taps continue through the existing cursor-mode-aware sender.
+
+Keep the strip as a native horizontal scroller. The phone bar is shown
+below 768 CSS pixels. Its 20 keys require at least 880 CSS pixels before
+spacing, so the strip always overflows in phone layout.
+
+Put one fixed horizontal swipe icon in a narrow gutter beside the strip.
+The icon indicates the scroll axis at any scroll position. Hide it from
+assistive technology because it is decorative. Keep the full touch area of
+each key within the strip and confirm that Up, Down, and Enter fit at 375 CSS
+pixels. Use the same icon and placement for the inline bar and fixed footer.
 
 ## Responsive composition
 
@@ -120,6 +134,12 @@ Run phone and desktop regressions and inspect keyboard-open/closed captures.
 Record real iPhone Safari and Android Chrome focus/keyboard smoke evidence when
 available; emulated viewport changes do not prove OS keyboard behavior.
 
+For AC-CLI-MOBILE-PASSTHROUGH-NAV-001.9 and .10, measure the three menu keys
+against the strip before the first tap, which may auto-scroll in Playwright.
+Check that the swipe cue is visible and a trailing key remains reachable.
+Exercise Enter in each of the three terminals to cover delivery in .2 and .11.
+
 ## Related delivery
 
 - [Implementation plan](../../../plans/mobile-passthrough-navigation/plan.md).
+- [Key bar fix plan](../../../plans/mobile-terminal-keybar-discoverability/plan.md).

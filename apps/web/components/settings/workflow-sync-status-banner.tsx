@@ -105,6 +105,8 @@ type WorkflowSyncStatusCardProps = {
   config: RepoSyncStatus;
   syncing: boolean;
   onSyncNow: () => void;
+  /** A domain-specific localized error for the shared status card. */
+  errorMessage?: string;
   /** Prefix for test IDs; Prompt Sync reuses this card. */
   testIdPrefix?: string;
   /** Extra actions rendered beside Sync now. */
@@ -121,6 +123,7 @@ export function WorkflowSyncStatusCard({
   config,
   syncing,
   onSyncNow,
+  errorMessage,
   testIdPrefix = "workflow-sync",
   actions,
 }: WorkflowSyncStatusCardProps) {
@@ -167,7 +170,9 @@ export function WorkflowSyncStatusCard({
       </div>
       <MetadataLine config={config} />
       {state === "failed" && (
-        <p className="text-xs text-destructive">{config.last_error || t("workflows:syncFailed")}</p>
+        <p className="text-xs text-destructive">
+          {errorMessage || config.last_error || t("workflows:syncFailed")}
+        </p>
       )}
       <WarningsAlert warnings={config.last_warnings ?? []} testIdPrefix={testIdPrefix} />
     </div>

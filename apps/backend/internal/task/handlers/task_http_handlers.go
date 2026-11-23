@@ -179,7 +179,7 @@ func (h *TaskHandlers) writeWorkspaceSourceError(c *gin.Context, err error) {
 	status := workspaceSourceHTTPStatus(err)
 	if status == http.StatusInternalServerError {
 		h.logger.Error("attach workspace sources failed", zap.Error(err))
-		c.JSON(status, gin.H{"error": "request failed"})
+		c.JSON(status, gin.H{"error": requestFailedMessage})
 		return
 	}
 	c.JSON(status, gin.H{"error": err.Error()})

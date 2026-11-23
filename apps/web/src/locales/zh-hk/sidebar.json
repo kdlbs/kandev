@@ -1,4 +1,11 @@
 {
+  "pluginGroupingSection": "外掛程式分組",
+  "pluginGroupingUnavailable": "此外掛程式分組不可用或不完整。請重試、啓用外掛程式或選擇其他視圖。",
+  "pluginGroupingUnavailableLabel": "{{name}}（不可用）",
+  "pluginGroupUntagged": "無標籤",
+  "pluginGroupDescription": "對完整任務視圖進行分組，然後分頁。",
+  "pluginPageStatus_one": "{{count}} 個不同任務。第 {{page}} 頁，共 {{total}} 頁（按顯示次數分頁）。",
+  "pluginPageStatus_other": "{{count}} 個不同任務。第 {{page}} 頁，共 {{total}} 頁（按顯示次數分頁）。",
   "taskViews": "任務視圖",
   "archivedLoadFailed": "無法載入已歸檔任務",
   "collapseAllBranches": "全部摺疊",

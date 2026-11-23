@@ -239,6 +239,12 @@ type Adapter struct {
 	// AvailableCommandsUpdate is NOT suppressed — it may arrive after the replay as a
 	// "ready" signal, and the last one always wins in the frontend.
 	isLoadingSession bool
+	// Session creation buffers startup reports until the provider's returned ID is bound.
+	sessionCreationPending        bool
+	pendingSessionStartupWarnings []AgentEvent
+	// loadingSessionID identifies the restore owner before the binding barrier
+	// publishes it as sessionID.
+	loadingSessionID string
 	loadReplayPlan   *acp.SessionUpdatePlan
 
 	// nativeGeneration identifies the current native conversation within this
@@ -321,7 +327,8 @@ type Adapter struct {
 
 	// Available models from the most recent session creation/load.
 	// Used by SetModel to validate the requested model exists.
-	availableModels []modelInfo
+	availableModels            []modelInfo
+	availableCommandsBySession map[string][]streams.AvailableCommand
 
 	// usageBySession tracks the latest and previously consumed cumulative
 	// `usage_update` samples. codex-acp DOES emit a typed per-turn usage
@@ -451,6 +458,7 @@ type promptTurnState struct {
 	providerErrorCh              chan openCodeStderrDiagnostic
 	promptGeneration             uint64
 	evidenceMu                   sync.Mutex
+	configurationCommand         *configurationCommandTracker
 	codexSystemError             bool
 	codexCapacity                bool
 	codexUsageLimit              *streams.ProviderError

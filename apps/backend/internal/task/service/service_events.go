@@ -1216,6 +1216,10 @@ func projectConversationReceipt(receipt *models.ConversationMutationReceipt) *mo
 			hadOutput := *operation.HadOutput
 			copyOperation.HadOutput = &hadOutput
 		}
+		if operation.ConfigurationCommandResult != nil {
+			result := *operation.ConfigurationCommandResult
+			copyOperation.ConfigurationCommandResult = &result
+		}
 		projected.Operations = append(projected.Operations, copyOperation)
 	}
 	return projected
