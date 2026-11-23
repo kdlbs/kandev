@@ -65,6 +65,7 @@ At each source layer, an explicit selection under the advertised thinking ID win
 Then apply the existing precedence between sources. Do not let a lower-source canonical value beat a higher-source legacy alias.
 Read compatibility is pure: preserve stored values, original-config baselines, attribution, and historical snapshots.
 On profile creation or an explicit update to thinking settings, store Pi's thinking intent under the bridge's stable `thought_level` ID and clear the duplicate mode alias. At runtime, use the option ID advertised by the active session when available.
+A legacy PATCH that supplies only `mode` sets or clears the saved thinking level. If the same PATCH supplies a canonical thinking value, that value takes precedence.
 
 **Use provider default** in the profile editor submits `mode: ""` and an updated config map without the thinking override. It preserves unrelated options and the selected model.
 Test actual PATCH omission/empty handling: an omitted mode field is not a clear operation. Generic sanitization that drops blank map values must not accidentally retain a stored value during merge.
