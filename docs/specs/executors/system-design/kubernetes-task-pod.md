@@ -29,6 +29,7 @@ server or copying a sibling's execution identity.
 | Requirement | Implementation boundary |
 | --- | --- |
 | `REQ-EXECUTORS-KUBERNETES-TASK-POD-001` | Durable ownership, attach/recovery, cleanup, and projection below |
+| `AC-EXECUTORS-KUBERNETES-TASK-POD-001.11` | Session cache storage |
 
 ## Durable ownership
 
@@ -119,6 +120,42 @@ credentials with their providers; stopping one session cannot undo exposure.
 Use separate tasks with appropriately isolated executor policies when agents
 must not share trust. Regression coverage verifies distinct profiles and
 credentials use one pod without overwriting each other's launch settings.
+
+## Session cache storage
+
+The `kandev-auth` volume at `/run/kandev` is a memory-backed `emptyDir`, and
+each task-owned session's `HOME` lives under `/run/kandev/sessions/<hash>/home`.
+Tool defaults such as npm's `~/.npm` (including the `npx` `_npx` store) and
+`~/.cache` therefore consume node memory, once per session, and survive session
+stop while the pod is retained.
+
+`kubernetesSessionEnvironment` assigns task-scoped cache defaults on the
+disk-backed `kandev-runtime` volume, which every task pod already mounts at
+`/opt/kandev` and which Pod templates cannot shadow:
+
+| Variable | Default |
+| --- | --- |
+| `NPM_CONFIG_CACHE`, `npm_config_cache` | `/opt/kandev/cache/npm` |
+| `XDG_CACHE_HOME` | `/opt/kandev/cache/xdg` |
+
+A default is skipped when the executor profile environment (`req.Env`) provides
+a non-empty value for that variable. npm cache keys are matched
+case-insensitively, so any spelling counts; empty values receive the disk
+default. Pod template `env` is not inspected: the session environment overrides
+it, so a template-level cache path is replaced by another disk-backed path,
+and operators who need a specific path set it in the profile environment. The
+defaults reach preparation
+through the bootstrap auth file and agent subprocesses through agentctl
+configuration, because both consume the same session environment.
+
+The cache is shared by every session in the pod. That is consistent with the
+task trust boundary above, and npm and XDG cache consumers tolerate concurrent
+use. Because `kandev-runtime` already exists in retained pods, new sessions in
+an existing task pod use the disk cache without recreating the pod. Caches that
+earlier sessions wrote into their tmpfs homes are not migrated or deleted; pod
+recreation or task cleanup reclaims them. HOME, auth files, CLI configuration
+and conversation state stay in the memory-backed session home. Legacy
+session-owned pods keep their current environment.
 
 ## Managed Git environment handoff
 

@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "sdk_version": "0.3.0",
-  "host_release": "0.102.0",
-  "min_kandev_version": "0.102.0",
+  "sdk_version": "0.4.0",
+  "host_release": "0.103.0",
+  "min_kandev_version": "0.103.0",
   "api_versions": [
     1,
     2

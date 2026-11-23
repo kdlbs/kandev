@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { closeModelConfigSheetIfOpen } from "../../helpers/model-config-sheet";
+import { holdCancellationSettlement } from "../../helpers/cancellation-observation";
 import { assertNoHorizontalOverflow } from "../../helpers/session-stream-overload";
 import { seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { waitForFiniteAnimations } from "../../helpers/animations";
@@ -328,6 +329,7 @@ test("keeps native model, cancellation and attachment controls usable by touch",
   const original = await captureThreadSettings(apiClient);
   try {
     const task = await startPresentationThread(apiClient, seedData, "Touch agent controls");
+    const cancellation = await holdCancellationSettlement(testPage);
     await seedThreadPresentation(apiClient, { layout: "grid", autoHideComposer: true });
     await testPage.goto("/threads");
     const tile = testPage.getByTestId(`thread-column-${task.id}`);
@@ -342,10 +344,17 @@ test("keeps native model, cancellation and attachment controls usable by touch",
     const cancel = tile.getByTestId("cancel-agent-button");
     await expect(cancel).toBeVisible();
     expect((await cancel.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    await cancel.tap();
-    await expect(cancel).toBeDisabled();
-    await expect(editor).toBeVisible();
+    cancellation.arm(task.session_id!);
+    try {
+      await cancel.tap();
+      await expect.poll(cancellation.pendingObserved).toBe(true);
+      await expect(cancel).toBeDisabled();
+      await expect(editor).toBeVisible();
+    } finally {
+      cancellation.release();
+    }
     await expect(cancel).toBeHidden({ timeout: 15_000 });
+    await expect(tile.getByText("Turn cancelled by user", { exact: true })).toBeVisible();
     await tile.locator('input[type="file"]').setInputFiles({
       name: "touch-notes.txt",
       mimeType: "text/plain",

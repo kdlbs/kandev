@@ -1,4 +1,11 @@
 {
+  "pluginGroupingSection": "Plugin groupings",
+  "pluginGroupingUnavailable": "This plugin grouping is unavailable or incomplete. Retry, enable the plugin, or choose another view.",
+  "pluginGroupingUnavailableLabel": "{{name}} (unavailable)",
+  "pluginGroupUntagged": "Untagged",
+  "pluginGroupDescription": "Group the complete task view before pagination.",
+  "pluginPageStatus_one": "{{count}} unique task. Page {{page}} of {{total}} (occurrences).",
+  "pluginPageStatus_other": "{{count}} unique tasks. Page {{page}} of {{total}} (occurrences).",
   "taskViews": "Task views",
   "archivedLoadFailed": "Archived tasks could not be loaded",
   "collapseAllBranches": "Collapse all",

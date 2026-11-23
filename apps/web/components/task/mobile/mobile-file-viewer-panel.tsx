@@ -1,5 +1,7 @@
 "use client";
 
+import { FileViewerOptions } from "../file-viewer-options";
+import { PluginFilePreview } from "../plugin-file-preview";
 import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -116,7 +118,9 @@ function MobileViewerBody({
   };
 }) {
   let viewerContent: ReactNode;
-  if (viewerKind === "image") {
+  if (file.previewOnly && sessionId) {
+    viewerContent = <PluginFilePreview path={file.path} repo={file.repo} sessionId={sessionId} />;
+  } else if (viewerKind === "image") {
     viewerContent = (
       <FileImageViewer path={file.path} content={file.content} worktreePath={worktreePath} />
     );
@@ -156,13 +160,15 @@ function MobileViewerBody({
     );
   } else {
     viewerContent = (
-      <MobileTextFileContent
-        file={file}
-        worktreePath={worktreePath}
-        sessionId={sessionId}
-        taskId={taskId}
-        repositoryId={repositoryId}
-      />
+      <FileViewerOptions path={file.path} repo={file.repo} sessionId={sessionId}>
+        <MobileTextFileContent
+          file={file}
+          worktreePath={worktreePath}
+          sessionId={sessionId}
+          taskId={taskId}
+          repositoryId={repositoryId}
+        />
+      </FileViewerOptions>
     );
   }
 
@@ -233,7 +239,7 @@ function MobileFileViewerHeader({
             repositoryName={file.repo}
             size="touch"
           />
-          <FileViewerDownloadButton onDownload={onDownload} />
+          <FileViewerDownloadButton onDownload={file.previewOnly ? undefined : onDownload} />
           {canPreview && (
             <Button
               variant="ghost"
@@ -328,7 +334,7 @@ export function MobileFileViewerPanel({
         previewKind={previewKind}
         renderedPreview={renderedPreview}
         htmlPreview={htmlPreview}
-        onDownload={onDownload}
+        onDownload={file.previewOnly ? undefined : onDownload}
         onPreviewHtml={publishCurrentHtmlPreview}
         onPreviewMarkdown={() => setRenderedPreview(true)}
         onClose={onClose}

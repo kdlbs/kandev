@@ -20,6 +20,28 @@ Do not put long task workflows here. Move those into skills.
 
 Use scoped `AGENTS.md` files near code they describe. The closest scoped file should carry the detailed convention.
 
+Keep rules that apply to every task in the root file. Keep subtree-wide rules
+in the relevant scoped file. Do not move an always-on safety or workflow rule
+behind a topic-specific reading trigger.
+
+For conditional detail, first check for an existing skill, specification, or
+reference. Keep one authoritative copy. If a new reference is needed, place it
+near its owning subsystem and link it from the applicable instruction file.
+State when the agent must read it. Keep the reference focused on that topic and
+use short, direct instructions. Preserve security, ownership, recovery, and
+compatibility invariants when removing background or historical detail.
+
+When moving guidance, check that relative links still resolve. Update links and
+reading triggers at the same time. Check that existing links to headings still
+point to the intended instructions. Do not rely on a linked reference being
+loaded automatically.
+
+Codex selects `AGENTS.override.md` before `AGENTS.md` in the same directory;
+the override replaces that directory's file rather than extending it. Do not
+introduce an override as a way to bypass shared instructions or the budget.
+The 28 KiB lint budget applies to the selected root-to-leaf instruction chain,
+not to each file separately. See `validation.md` for the check and its limits.
+
 ## CLAUDE.md
 
 Claude Code reads `CLAUDE.md`, not `AGENTS.md`. If the repo uses `AGENTS.md` as source of truth, create a lightweight `CLAUDE.md` that imports it:

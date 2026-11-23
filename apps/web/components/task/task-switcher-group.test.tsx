@@ -7,18 +7,26 @@ import { GroupHeader } from "./task-switcher-group";
 
 afterEach(cleanup);
 
+function renderGroupHeader(props: Parameters<typeof GroupHeader>[0]) {
+  return render(
+    <StateProvider>
+      <ToastProvider>
+        <GroupHeader {...props} />
+      </ToastProvider>
+    </StateProvider>,
+  );
+}
+
 it("announces collapse and preserves the continued-page count", () => {
   const toggle = vi.fn();
-  render(
-    <GroupHeader
-      label="Review"
-      groupKey="REVIEW"
-      count={125}
-      isCollapsed
-      isContinuation
-      onToggle={toggle}
-    />,
-  );
+  renderGroupHeader({
+    label: "Review",
+    groupKey: "REVIEW",
+    count: 125,
+    isCollapsed: true,
+    isContinuation: true,
+    onToggle: toggle,
+  });
   const button = screen.getByRole("button");
   expect(button.getAttribute("aria-expanded")).toBe("false");
   expect(button.textContent).toContain("125");
@@ -37,15 +45,13 @@ it.each([
   "future-state",
   "repository-name",
 ])("renders the %s header with only the collapse icon", (groupKey) => {
-  render(
-    <GroupHeader
-      label={groupKey}
-      groupKey={groupKey}
-      count={3}
-      isCollapsed={false}
-      onToggle={() => {}}
-    />,
-  );
+  renderGroupHeader({
+    label: groupKey,
+    groupKey,
+    count: 3,
+    isCollapsed: false,
+    onToggle: () => {},
+  });
   const button = screen.getByRole("button");
   expect(button.getAttribute("aria-expanded")).toBe("true");
   expect(button.textContent).toContain(groupKey);

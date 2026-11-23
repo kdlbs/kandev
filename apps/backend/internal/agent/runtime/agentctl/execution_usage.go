@@ -10,10 +10,11 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agent/usage"
+	"github.com/kandev/kandev/internal/common/opencode"
 )
 
 func (c *Client) ConfigureAgentWithUsage(ctx context.Context, command string, args []string, env map[string]string, continueCommand string, continueArgs []string, policy *usage.ExecutionUsagePolicy) error {
-	return c.configureAgent(ctx, command, args, env, continueCommand, continueArgs, false, policy, nil, nil)
+	return c.configureAgent(ctx, command, args, env, continueCommand, continueArgs, false, nil, nil, opencode.Runtime{}, policy)
 }
 
 func (c *Client) ReadExecutionUsage(ctx context.Context, model string) (*usage.ExecutionUsageReport, error) {

@@ -18,10 +18,16 @@ type fakeGitHub struct {
 	reposync.GitHubClientProvider
 	files       map[string]string
 	listErr     error
+	quotaErr    error
 	fingerprint string
 	binds       int
 	commits     int
 	lists       int
+	listStarted chan struct{}
+	listRelease <-chan struct{}
+	blockedPath string
+	getStarted  chan struct{}
+	getRelease  <-chan struct{}
 }
 
 func (f *fakeGitHub) BindWorkspaceGitHubHost(ctx context.Context, _, _ string) (context.Context, error) {
@@ -36,6 +42,11 @@ func (f *fakeGitHub) CommitWorkspaceGitHubHost(ctx context.Context, _ string, fn
 
 func (f *fakeGitHub) ListRepoDirectoryForWorkspace(_ context.Context, _, _, _, path, _ string) ([]github.RepoContentEntry, error) {
 	f.lists++
+	if f.listStarted != nil {
+		close(f.listStarted)
+		<-f.listRelease
+		return nil, f.quotaErr
+	}
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -47,6 +58,11 @@ func (f *fakeGitHub) ListRepoDirectoryForWorkspace(_ context.Context, _, _, _, p
 }
 
 func (f *fakeGitHub) GetRepoFileContentForWorkspace(_ context.Context, _, _, _, path, _ string) ([]byte, error) {
+	if path == f.blockedPath {
+		close(f.getStarted)
+		<-f.getRelease
+		return nil, f.quotaErr
+	}
 	return []byte(f.files[path[len(DefaultPath)+1:]]), nil
 }
 

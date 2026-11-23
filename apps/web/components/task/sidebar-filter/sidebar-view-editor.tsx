@@ -23,6 +23,8 @@ import { SidebarSettingsDisclosure } from "./sidebar-settings-disclosure";
 import { AutomaticColorSettings } from "./automatic-color-settings";
 import { ViewHeaderRow } from "./view-manager";
 import { sidebarSortRules } from "@/lib/sidebar/sidebar-sort-chain";
+import { usePluginRegistry } from "@/lib/plugins/registry";
+import { isSidebarPluginGrouping } from "@/lib/sidebar/sidebar-plugin-grouping";
 
 export type SidebarViewEditorCurrent = {
   filters: FilterClause[];
@@ -55,6 +57,17 @@ export function SidebarViewEditor({
   onRemoveClause,
 }: Props) {
   const { t } = useTranslation();
+  const registry = usePluginRegistry();
+  const provider = registry.getSidebarGroupings().find((item) => item.reference === current.group);
+  let groupSummary: string;
+  if (isSidebarPluginGrouping(current.group)) {
+    groupSummary = provider
+      ? provider.label
+      : t("sidebar:pluginGroupingUnavailableLabel", { name: current.group });
+    if (provider?.labelKey) groupSummary = t(provider.labelKey, { defaultValue: provider.label });
+  } else {
+    groupSummary = t(GROUP_SUMMARY_KEYS[current.group]);
+  }
   const sortSummary = t("task:sortChainSummary", {
     rules: sidebarSortRules(current.sort)
       .map((rule) => {
@@ -99,7 +112,7 @@ export function SidebarViewEditor({
       </SidebarSettingsDisclosure>
       <SidebarSettingsDisclosure
         title={t("task:groupBy")}
-        summary={t(GROUP_SUMMARY_KEYS[current.group])}
+        summary={groupSummary}
         testId="sidebar-group-settings"
         className="border-b"
         contentClassName="pt-1"

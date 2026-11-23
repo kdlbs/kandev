@@ -157,6 +157,32 @@ func TestBootstrapOpenCodeReconcilesOnlyTheAdoptedFamilyDefault(t *testing.T) {
 	}
 }
 
+func TestBootstrapOpenCodePreservesNewerOverrideAcrossDefaultAdvance(t *testing.T) {
+	settings := &memorySettings{}
+	store := NewStore(settings)
+	first := OpenCodeSelection{
+		SchemaVersion:         1,
+		Family:                OpenCodeFamilyV2,
+		Source:                OpenCodeSourceManaged,
+		Package:               "@opencode/cli",
+		SelectedVersion:       "2.2.1",
+		AppliedDefaultVersion: "2.0.18",
+		Revision:              1,
+	}
+	if err := store.SaveOpenCodeSelection(context.Background(), 0, first); err != nil {
+		t.Fatalf("SaveOpenCodeSelection: %v", err)
+	}
+	defaults := testOpenCodeDefaults()
+	defaults.V2Version = "2.1.0"
+	selection, err := store.BootstrapOpenCode(context.Background(), defaults, OpenCodeBootstrapEvidence{NativeFamily: OpenCodeFamilyV1})
+	if err != nil {
+		t.Fatalf("BootstrapOpenCode: %v", err)
+	}
+	if selection.SelectedVersion != "2.2.1" || selection.AppliedDefaultVersion != "2.1.0" || selection.Revision != 2 {
+		t.Fatalf("reconciled selection = %+v, want override 2.2.1 preserved with default 2.1.0 at revision 2", selection)
+	}
+}
+
 func TestSaveOpenCodeSelectionRejectsStaleRevision(t *testing.T) {
 	store := NewStore(&memorySettings{})
 	selection := OpenCodeSelection{

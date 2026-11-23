@@ -562,9 +562,10 @@ For the additive notification formatter extension, see the
 [notification content formatter contract](../plans/plugins/PLUGIN-API.md#notification-content-formatters).
 It covers the optional Go interface, provider-scoped management envelope,
 owner-isolated editor slot, immutable snapshots, activation CAS, cancellation,
-and default fallback. The source prepares SDK `0.3.0` for the next Stable
-release. Wait for verified host and SDK publication before using this extension
-in a released plugin. The release stamps its host floor into `sdk-release.json`;
+and default fallback. The source prepares SDK `0.4.0`, which adds the complete
+sidebar grouping contract, for the next Stable release. Wait for verified host
+and SDK publication before using this extension in a released plugin. The
+release stamps its host floor into `sdk-release.json`;
 the metadata alone does not establish public availability.
 
 The guide summarizes the contract for discovery. These files remain the source
@@ -3936,6 +3937,77 @@ registry.registerTaskListFacet({
 });
 ```
 
+### Complete saved-sidebar groupings
+
+Use a manifest `sidebar_groupings` declaration when classification must cover
+the complete sidebar view before its 100-row page boundary. This is a backend
+contract, not a `registerTaskListFacet` option. It works without a browser bundle.
+Declare `min_kandev_version: "0.103.0"` or later. This unreleased floor excludes
+Stable 0.102.0, which lacks the contract. Until a supporting release ships, use
+a matching development checkout and do not publish the package.
+
+```yaml
+min_kandev_version: "0.103.0"
+actions:
+  - key: "sidebar-labels"
+    scope: "workspace"
+    access: "authenticated"
+    max_body_bytes: 16
+sidebar_groupings:
+  - id: "labels"
+    label: "Labels"
+    label_key: "plugin:labels"
+    action: "sidebar-labels"
+```
+
+The host authorizes the workspace and invokes the supervised action with an
+empty object body, verified actor/workspace context, and a five-second deadline.
+Return a complete classification of the plugin's shared workspace data:
+
+```json
+{
+  "version": 1,
+  "revision": "stable-classification-revision",
+  "complete": true,
+  "groups": [{"id": "ready", "label": "Ready", "color": "#22aa66"}],
+  "memberships": [{"task_id": "task-id", "group_id": "ready"}]
+}
+```
+
+- Keep revisions stable while classification is unchanged. Change them when a
+  value's label/color or task membership changes.
+- Include both arrays even when empty. Never truncate a snapshot or infer
+  completeness from the browser's loaded tasks.
+- Limits are 1 MiB for the existing action response, 1,000 group values, and
+  10,000 membership pairs before deduplication. Exceeding a limit must fail,
+  not return partial success.
+- Recognized JSON field names use the exact canonical spelling shown above
+  and occur once, including fields inside each group or membership object.
+  Duplicate fields or case-folded aliases make the snapshot unavailable.
+  Unrelated extension metadata does not change classification.
+- IDs, labels, revision, and task IDs are nonblank UTF-8 text without control
+  characters, at most 256 bytes each. Group IDs are unique. Colors, when present,
+  are `#RRGGBB`. Every membership names a declared group; duplicate pairs collapse.
+- Memberships never grant access. The host joins only authorized, filtered
+  workspace roots, ignores foreign/deleted task IDs, and repeats each complete
+  root tree in its matching groups. Unclassified roots appear in **Untagged**.
+- Successful Host state writes/deletes invalidate declared providers using
+  plugin/workspace identity only. Catalog and reconnect events fence old
+  generations; state values are never broadcast.
+
+The selector creates a normal personal workspace view with
+`group: "plugin:<plugin-id>:<grouping-id>"`. An unchanged generated view is reused;
+renamed/custom views, drafts, and the 50-view limit retain their protections.
+Disabled, failed, or incomplete providers keep the saved reference and show
+unavailable/retry recovery, never an empty classification fallback.
+
+The Go SDK exports `SidebarGroupingSnapshot`, `SidebarGroupingValue`,
+`SidebarGroupingMembership`, and `DecodeSidebarGroupingSnapshot`. Browser SDK
+snapshot/provider types describe the same wire contract; plugins do not register
+these providers through the browser registry. The separate `/tasks` facet remains
+page-local and unchanged.
+
+
 ## Build, package, install, and test
 
 ### Plugin repository
@@ -4053,3 +4125,89 @@ repackaging.
 
 Related: [Plugins](plugins.md), [Plugin manifest reference](plugins-manifest.md),
 [Plugin marketplace](plugins-marketplace.md), and [Extending Kandev](extending-kandev.md).
+
+## File viewer plugins
+
+A native UI plugin can register a viewer for formats declared in its manifest:
+
+```yaml
+ui:
+  bundle: /ui/index.js
+  file_viewers:
+    - id: stl
+      title: STL viewer
+      extensions: [stl]
+```
+
+```ts
+registry.registerFileViewer({ id: "stl", Component: Viewer });
+```
+
+`Viewer` receives `file` metadata (`name`, `sizeBytes`, `generation`) and
+`readBytes(signal)`. It receives no file-path or URL read API. Registration must
+match an installed manifest declaration. Built-in previews retain priority.
+Use `file.generation` to reset work when the host selects a new preview.
+
+Kandev owns file access and the external-file prompt. Use the file handle supplied
+to the viewer. Do not read a selected path through a separate webhook, Host
+request, or backend process to bypass a denied or pending preview. Paths refer to
+the selected local or remote execution environment, including its user home.
+
+External file previews default to **Ask** in the plugin's host settings. **Allow**
+permits authorized external files for the current user and workspace. **Deny**
+blocks them. **Preview once** applies to one file selection and revision; it does
+not change the persistent setting. A changed policy, file, execution, or plugin
+can invalidate a pending preview. Handle rejection without automatic retries.
+
+Native plugins remain trusted code. This setting controls the supported preview
+flow; it is not an operating-system or browser sandbox. It grants no new OS
+permissions. Do not claim that a worker provides a security sandbox.
+
+The host limits each file to 64 MiB and each transfer to 30 seconds. One viewer
+owns the preview reservation in a browser page at a time. Parse off the UI thread, bound
+allocations before parsing, and terminate parsing after 10 seconds. The STL viewer
+also limits models to 1,000,000 triangles. Release requests, workers, listeners,
+observers, animation frames, geometry, materials, and renderers on unmount.
+Never retain model bytes in plugin storage or log paths, model headers, or content.
+
+A model format may have no physical units. The STL viewer displays dimensions
+and grid spacing in **model units**.
+
+The file-viewer contract is under development. Before publishing a viewer,
+set its minimum host version to the release that first includes this contract and
+use the corresponding released SDK. The standalone STL package in this work is
+for development testing, not a release for older hosts.
+
+### Reuse viewers in rich file previews
+
+A single `registerFileViewer({ id, Component })` registration serves both file
+panels and rich output `FilePreview` cards. Declare formats in `ui.file_viewers`;
+do not register a separate chat renderer. Kandev selects the viewer, supplies
+admitted bytes, and owns external-file approval in both surfaces. Built-in
+previews and source-editor defaults retain priority.
+
+Agents use the existing version 2 rich-output catalog:
+
+```json
+{"version":2,"catalog_version":1,"title":"Model","spec":{"root":"model","elements":{"model":{"type":"FilePreview","props":{"path":"models/part.stl"},"children":[]}}}}
+```
+
+Use workspace-relative paths and supply `repo` when the task has multiple
+repositories. A symlink outside the repository follows Ask/Allow/Deny. Agents
+cannot grant permission, supply renderer code, or override the viewer choice.
+Cards render the current file, not a saved model snapshot. Installed matching
+viewers expand automatically; unavailable formats retain preview/discovery
+controls. Multiple eligible viewers require the normal Open with choice.
+
+Design the component for both a full file panel and a bounded chat card. Use
+container resize observation, touch-sized controls, keyboard focus, and no
+page-wide gesture handlers. Chat scrolling remains available outside the model
+viewport. Collapse and scrolling out of view unmount the viewer and abort its
+work. Re-expansion uses a fresh selection and repeats external approval when
+required. Plugin unload and session changes also release resources. Persist
+only UI metadata, never file bytes or permission receipts.
+
+The shared host currently permits one live plugin preview per browser. Other
+visible cards can show Busy; collapse the active card and retry the other one.
+No additional plugin capability or MCP schema field is needed. Follow the
+plugin template's opt-in `recipes/file-viewer` example for read/disposal wiring.
