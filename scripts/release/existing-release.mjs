@@ -18,6 +18,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import {
+  REMOTE_HELPERS,
   parseManifest,
   verifyRemoteHelperBundle,
 } from "./remote-helper-assets.mjs";
@@ -25,6 +26,7 @@ import { gunzipSync } from "node:zlib";
 import { verifiedFingerprint } from "./sdk-artifact.mjs";
 
 const execute = promisify(execFile);
+const remoteHelperAssets = new Set(REMOTE_HELPERS.map(({ asset }) => asset));
 const repository = "kdlbs/kandev";
 const optionalUpdater = (name) =>
   name === "latest.json" ||
@@ -204,7 +206,7 @@ async function verifySizeReport(directory, assets, compact) {
       ([name]) =>
         /^kandev-(?:linux|macos|windows)-(?:x64|arm64)(?:-full)?\.(?:tar\.gz|zip)$/.test(
           name,
-        ) || /^agentctl-(?:linux|darwin)-(?:amd64|arm64)\.gz$/.test(name),
+        ) || remoteHelperAssets.has(name),
     ),
   );
   const report = await readFile(

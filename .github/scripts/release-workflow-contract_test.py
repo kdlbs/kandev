@@ -468,6 +468,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "linux/arm64/0",
             "darwin/amd64/0",
             "darwin/arm64/0",
+            "windows/amd64/0",
             "linux/amd64/1",
             "linux/arm64/1",
             "darwin/amd64/1",
