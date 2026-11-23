@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   createWorkspaceRootFilesFixture,
+  deepRootFilePath,
+  DEEP_TREE_LEVEL_COUNT,
   expectRootFileUnstagedInRepository,
   expectWorkspaceRootFileContents,
   moveRootFileToSecondRepository,
@@ -119,6 +121,69 @@ test("opens and moves workspace root files without staging or overwriting", asyn
     `${WORKSPACE_ROOT_NESTED_FILE_CONTENT}\n`,
   );
   await expectRootFileUnstagedInRepository(repoPaths, gitEnv, 1, WORKSPACE_ROOT_NESTED_FILE_PATH);
+});
+
+test("keeps deep outside-file actions inside the desktop Changes panel", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  const watcher = watchWs(testPage);
+  const { session, sessionId } = await createWorkspaceRootFilesFixture({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    watcher,
+    includeDeepTree: true,
+  });
+  await setChangesPanelLayout(testPage, "tree");
+
+  const initialListing = watcher.waitForResponse("workspace.root_files.list", {
+    requestWhere: (payload) => payload.session_id === sessionId,
+  });
+  await session.clickTab("Changes");
+  await initialListing;
+
+  const rootFiles = session.changes.getByTestId("changes-workspace-root-files");
+  const deepestFilePath = deepRootFilePath(DEEP_TREE_LEVEL_COUNT);
+  const deepestFile = rootFiles.getByTestId(
+    `workspace-root-file-row-${deepestFilePath.replaceAll("/", "-")}`,
+  );
+  const openButton = deepestFile.getByRole("button", { name: deepestFilePath });
+  const fileName = deepestFile.getByTestId("changes-file-name");
+  const overflowButton = deepestFile.getByRole("button", { name: "Show more actions" });
+  const scrollOwner = testPage.getByTestId("changes-panel-scroll-owner");
+  await overflowButton.scrollIntoViewIfNeeded();
+
+  const [scrollOwnerBox, openButtonBox, fileNameBox, overflowButtonBox] = await Promise.all([
+    scrollOwner.boundingBox(),
+    openButton.boundingBox(),
+    fileName.boundingBox(),
+    overflowButton.boundingBox(),
+  ]);
+  expect(scrollOwnerBox).not.toBeNull();
+  expect(openButtonBox).not.toBeNull();
+  expect(fileNameBox).not.toBeNull();
+  expect(overflowButtonBox).not.toBeNull();
+  expect(fileNameBox!.width).toBeGreaterThan(0);
+  expect(fileNameBox!.x).toBeGreaterThanOrEqual(scrollOwnerBox!.x - 2);
+  expect(fileNameBox!.x + fileNameBox!.width).toBeLessThanOrEqual(
+    scrollOwnerBox!.x + scrollOwnerBox!.width + 2,
+  );
+  expect(openButtonBox!.x).toBeGreaterThanOrEqual(scrollOwnerBox!.x - 2);
+  expect(openButtonBox!.x + openButtonBox!.width).toBeLessThanOrEqual(
+    scrollOwnerBox!.x + scrollOwnerBox!.width + 2,
+  );
+  expect(overflowButtonBox!.x).toBeGreaterThanOrEqual(scrollOwnerBox!.x - 2);
+  expect(overflowButtonBox!.x + overflowButtonBox!.width).toBeLessThanOrEqual(
+    scrollOwnerBox!.x + scrollOwnerBox!.width + 2,
+  );
+
+  await overflowButton.click();
+  await expect(testPage.getByRole("menuitem", { name: "Open", exact: true })).toBeVisible();
 });
 
 test("matches repository headers and file names in both Changes layouts", async ({

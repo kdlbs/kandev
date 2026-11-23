@@ -254,7 +254,7 @@ function RootFileOpenButton({
   indentPx: number;
   onEditFile: ChangesPanelRootFilesProps["onEditFile"];
 }) {
-  const rowIndentPx = touchMode ? Math.min(indentPx, 24) : indentPx;
+  const rowIndentPx = Math.min(indentPx, 24);
   return (
     <button
       type="button"

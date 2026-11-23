@@ -153,3 +153,9 @@ and lint. Desktop browser checks passed (4 tests); the phone root-file browser
 flow and Git worktree context-menu browser check passed. Public-doc validation
 passed (63 tests and 56 pages); specification validation and lint passed.
 `git diff --check` passed.
+
+Follow-up review remediation caps fine-pointer root-file indentation, adds a
+desktop deep-path visibility and action check, updates the 767px folder-row
+target assertion, and splits the public move guidance into short steps. The
+focused desktop E2E, component tests, web typecheck and lint, public-doc
+validation, and specification validation passed.

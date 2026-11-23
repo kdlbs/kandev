@@ -115,9 +115,15 @@ and the Git worktree context-menu browser check passed. Public-doc validation
 passed (63 tests and 56 pages); spec validation and lint passed. `git diff
 --check` passed.
 
+Follow-up review remediation caps fine-pointer root-file indentation, verifies
+deep desktop file-name and action bounds, updates the narrow viewport row-size
+expectation, and splits the public move guidance into short steps. The focused
+desktop E2E, component tests, typecheck, lint, and documentation validators
+passed.
+
 ## Risks
 
 - Two folders can contain files with the same name. Open and Move use the
   full path, even when the row label uses the name alone.
-- Long names and deep indentation can push the overflow control out of view
-  on phones. Measure the control inside the panel with a nested path.
+- Very deep paths can consume horizontal space. Root-file indentation is capped
+  on desktop and phone, and browser checks cover nested controls.
