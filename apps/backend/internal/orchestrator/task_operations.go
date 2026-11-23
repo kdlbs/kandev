@@ -1946,9 +1946,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		}
 	}
 
-	// Use provided prompt, fall back to task description
+	// A move that skips the step prompt also skips the task description fallback.
 	effectivePrompt := prompt
-	if effectivePrompt == "" {
+	if effectivePrompt == "" && (opts.EntryOptions == nil || !opts.EntryOptions.SkipStepPrompt) {
 		effectivePrompt = task.Description
 	}
 

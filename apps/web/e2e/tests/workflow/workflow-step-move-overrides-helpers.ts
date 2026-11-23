@@ -17,46 +17,52 @@ export async function selectMoveSavedPrompt(
   input: "keyboard" | "mouse" | "touch",
 ) {
   const prompt = await apiClient.createPrompt("move-review-checklist", SAVED_PROMPT_CONTENT);
-  const editor = page.getByRole("textbox", { name: "One-time instructions" });
-  const prefix = `${MOVE_INSTRUCTIONS} Follow `;
-  await editor.fill(prefix);
-  const form = editor.locator(
-    'xpath=ancestor::*[@data-slot="context-menu-sub-content" or @data-slot="popover-content"][1]',
-  );
-  const initialHeight = input === "touch" ? null : await form.evaluate((node) => node.offsetHeight);
-  await editor.pressSequentially("@");
-  if (initialHeight !== null) {
-    const dropdown = page.getByTestId("mention-menu");
-    await expect(dropdown.getByRole("option").first()).toBeVisible();
-    await expect
-      .poll(async () => {
-        const [menu, field, height] = await Promise.all([
-          dropdown.boundingBox(),
-          editor.boundingBox(),
-          form.evaluate((node) => node.offsetHeight),
-        ]);
-        return { height, above: Boolean(menu && field && menu.y + menu.height <= field.y) };
-      })
-      .toEqual({ height: initialHeight, above: true });
-  }
-  await editor.pressSequentially("move-review");
-  const option = page.getByRole("option", { name: prompt.name, exact: true });
-  await expect(option).toBeVisible();
-  if (input === "touch") {
-    expect((await option.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-    await option.tap();
-  } else if (input === "keyboard") {
-    await editor.press("Escape");
-    await expect(option).toBeHidden();
-    await editor.pressSequentially("-");
+  try {
+    const editor = page.getByRole("textbox", { name: "One-time instructions" });
+    const prefix = `${MOVE_INSTRUCTIONS} Follow `;
+    await editor.fill(prefix);
+    const form = editor.locator(
+      'xpath=ancestor::*[@data-slot="context-menu-sub-content" or @data-slot="popover-content"][1]',
+    );
+    const initialHeight =
+      input === "touch" ? null : await form.evaluate((node) => node.offsetHeight);
+    await editor.pressSequentially("@");
+    if (initialHeight !== null) {
+      const dropdown = page.getByTestId("mention-menu");
+      await expect(dropdown.getByRole("option").first()).toBeVisible();
+      await expect
+        .poll(async () => {
+          const [menu, field, height] = await Promise.all([
+            dropdown.boundingBox(),
+            editor.boundingBox(),
+            form.evaluate((node) => node.offsetHeight),
+          ]);
+          return { height, above: Boolean(menu && field && menu.y + menu.height <= field.y) };
+        })
+        .toEqual({ height: initialHeight, above: true });
+    }
+    await editor.pressSequentially("move-review");
+    const option = page.getByRole("option", { name: prompt.name, exact: true });
     await expect(option).toBeVisible();
-    await editor.press("Enter");
-  } else {
-    await option.click();
+    if (input === "touch") {
+      expect((await option.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await option.tap();
+    } else if (input === "keyboard") {
+      await editor.press("Escape");
+      await expect(option).toBeHidden();
+      await editor.pressSequentially("-");
+      await expect(option).toBeVisible();
+      await editor.press("Enter");
+    } else {
+      await option.click();
+    }
+    await expect(option).toBeHidden();
+    await expect(editor.getByTestId("custom-prompt-mention")).toContainText(`@${prompt.name}`);
+    return { id: prompt.id, instructions: `${prefix}@${prompt.name}` };
+  } catch (error) {
+    await apiClient.deletePrompt(prompt.id).catch(() => undefined);
+    throw error;
   }
-  await expect(option).toBeHidden();
-  await expect(editor.getByTestId("custom-prompt-mention")).toContainText(`@${prompt.name}`);
-  return { id: prompt.id, instructions: `${prefix}@${prompt.name}` };
 }
 
 export async function expectMoveSavedPromptDelivered(apiClient: ApiClient, sessionId: string) {

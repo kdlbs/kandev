@@ -132,8 +132,8 @@ export const TaskPromptReferenceEditor = forwardRef<
     if (event.key === "Escape" && mention.isOpen) {
       event.preventDefault();
       event.stopPropagation();
-      mention.closeMenu();
       if (promptSuggestions && editor) reconcilePromptReferences(editor, promptNames);
+      mention.closeMenu();
       requestAnimationFrame(() => editorInputRef.current?.focus());
       return;
     }
@@ -249,11 +249,11 @@ function useTaskPromptTiptap({
           return false;
         },
         blur: () => {
-          if (promptSuggestions) mentionRef.current?.closeMenu();
           const currentEditor = editorRef.current;
           if (currentEditor && !currentEditor.isDestroyed) {
             reconcilePromptReferences(currentEditor, promptNames);
           }
+          if (promptSuggestions) mentionRef.current?.closeMenu();
           onBlurRef.current?.();
           return false;
         },

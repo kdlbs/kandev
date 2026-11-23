@@ -31,6 +31,7 @@ func TestMoveInstructionSavedPromptFreshLaunch(t *testing.T) {
 		{name: "composed", hasStep: true},
 		{name: "skip step", skipStep: true, hasStep: true},
 		{name: "direct fallback"},
+		{name: "skip step without a loaded step", skipStep: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -44,6 +45,10 @@ func TestMoveInstructionSavedPromptFreshLaunch(t *testing.T) {
 
 			repo := setupTestRepo(t)
 			seedTaskWithoutSession(t, repo, "task1", stepID)
+			dbTask, err := repo.GetTask(ctx, "task1")
+			require.NoError(t, err)
+			dbTask.Description = "fallback description"
+			require.NoError(t, repo.UpdateTask(ctx, dbTask))
 			taskRepo := newMockTaskRepo()
 			taskRepo.tasks["task1"] = &v1.Task{
 				ID: "task1", Title: "Task", Description: "fallback description", State: v1.TaskStateInProgress,
@@ -64,7 +69,7 @@ func TestMoveInstructionSavedPromptFreshLaunch(t *testing.T) {
 			messages := &mockMessageCreator{}
 			svc.messageCreator = messages
 
-			_, err = svc.startTask(ctx, "task1", "profile1", "", "", "", "fallback description",
+			_, err = svc.startTask(ctx, "task1", "profile1", "", "", "", "",
 				stepID, false, true, nil, startTaskOptions{EntryOptions: &workflowmove.EntryOptions{
 					Instructions: moveSavedPromptInstructions, SkipStepPrompt: tc.skipStep,
 				}})
@@ -79,6 +84,8 @@ func TestMoveInstructionSavedPromptFreshLaunch(t *testing.T) {
 			if tc.skipStep {
 				require.NotContains(t, dispatched, durablePrompt)
 				require.NotContains(t, dispatched, "fallback description")
+			} else if !tc.hasStep {
+				require.Contains(t, dispatched, "fallback description")
 			}
 			if tc.hasStep {
 				require.Equal(t, durablePrompt, stepGetter.steps[stepID].Prompt)
@@ -104,6 +111,7 @@ func TestMoveInstructionSavedPromptQueuedHandoff(t *testing.T) {
 
 	agentMgr := &mockAgentManager{isAgentRunning: true, promptDone: make(chan struct{})}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.messageQueue = newSQLiteQueueForTaskRepo(t, repo)
 	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.promptExpander = prompts
 	messages := &mockMessageCreator{}

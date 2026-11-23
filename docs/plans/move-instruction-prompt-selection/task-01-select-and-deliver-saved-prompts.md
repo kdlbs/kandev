@@ -166,6 +166,7 @@ See [plan risks](plan.md#risks).
   files. Type checking, localization checks, and scoped frontend lint passed.
 - The targeted orchestrator tests passed. They verified fresh, deferred, and
   queued delivery, task-title composition, and literal passthrough input.
+  The queued handoff test uses SQLite for enqueue and drain.
 - Desktop Chromium passed 11 Playwright tests. Mobile Chrome passed six.
   Both runs checked selection and delivery through the two requested entry
   points. The phone run also checked drawer containment and touch targets.
@@ -178,3 +179,6 @@ See [plan risks](plan.md#risks).
 After the desktop placement correction, 48 focused frontend tests passed.
 Two desktop browser tests verified dropdown placement and stable form height.
 Two phone browser tests verified selection in the drawer.
+
+After review fixes, 49 focused frontend tests, four desktop browser tests,
+two phone browser tests, and the targeted orchestrator suite passed.
