@@ -25,14 +25,13 @@ export function RichOutputMotionSettingsCard({
       controlId="animate-rich-output-charts"
       touchTarget="switch"
       controlWrapperTestId="rich-output-motion-toggle-row"
-      controlWrapperClassName="min-h-11"
       control={
         <Switch
           id="animate-rich-output-charts"
           checked={enabled}
           onCheckedChange={onChange}
           data-settings-dirty={isDirty}
-          className="data-[state=checked]:bg-transparent data-[state=unchecked]:bg-transparent dark:data-[state=unchecked]:bg-transparent data-[size=default]:h-11 data-[size=default]:w-11 cursor-pointer shrink-0 p-2 before:absolute before:left-2 before:top-1/2 before:h-[16.6px] before:w-7 before:-translate-y-1/2 before:rounded-full before:bg-input before:content-[''] data-[state=checked]:before:bg-primary dark:data-[state=unchecked]:before:bg-input/80 [&_[data-slot=switch-thumb]]:z-10"
+          className="data-[state=checked]:bg-transparent data-[state=unchecked]:bg-transparent dark:data-[state=unchecked]:bg-transparent data-[size=default]:h-7 data-[size=default]:w-9 max-md:data-[size=default]:h-11 max-md:data-[size=default]:w-11 [@media(pointer:coarse)]:data-[size=default]:h-11 [@media(pointer:coarse)]:data-[size=default]:w-11 cursor-pointer shrink-0 p-1 max-md:p-2 [@media(pointer:coarse)]:p-2 before:absolute before:left-1 max-md:before:left-2 [@media(pointer:coarse)]:before:left-2 before:top-1/2 before:h-[16.6px] before:w-7 before:-translate-y-1/2 before:rounded-full before:bg-input before:content-[''] data-[state=checked]:before:bg-primary dark:data-[state=unchecked]:before:bg-input/80 [&_[data-slot=switch-thumb]]:z-10"
         />
       }
     />
