@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	utilcfg "github.com/kandev/kandev/config/utilityagents"
+	"github.com/kandev/kandev/internal/testutil"
 )
 
 const enhancePromptAgentID = "builtin-enhance-prompt"
@@ -178,5 +179,69 @@ func TestRefreshBuiltinPromptAfterProfileOnlyUpdate(t *testing.T) {
 	}
 	if refreshed.AgentProfileID != "profile-1" || refreshed.ProfileBindingState != "explicit" {
 		t.Fatalf("profile binding changed during prompt refresh: (%q, %q)", refreshed.AgentProfileID, refreshed.ProfileBindingState)
+	}
+}
+
+// Covers AC-AGENTS-UTILITY-AGENT-PROFILES-002.3.
+func TestRefreshUneditedBuiltinPromptPostgresSchemaReplay(t *testing.T) {
+	const customizedPrompt = enhancePromptV1 + "\n\nKeep the response under three sentences."
+	cases := []struct {
+		name         string
+		storedPrompt string
+		wantPrompt   string
+	}{
+		{name: "shipped", storedPrompt: enhancePromptV1, wantPrompt: utilcfg.Get("enhance-prompt")},
+		{name: "customized", storedPrompt: customizedPrompt, wantPrompt: customizedPrompt},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+			repo, err := newSQLiteRepositoryWithDB(database, database)
+			if err != nil {
+				t.Fatalf("initial schema init: %v", err)
+			}
+
+			ctx := context.Background()
+			agent, err := repo.GetAgentByID(ctx, enhancePromptAgentID)
+			if err != nil {
+				t.Fatalf("read builtin: %v", err)
+			}
+			agent.Prompt = tc.storedPrompt
+			agent.Name = "Enhanced prompt"
+			agent.Description = "preserved description"
+			agent.Model = "preserved-model"
+			agent.AgentProfileID = "profile-1"
+			agent.ProfileBindingState = "explicit"
+			agent.Enabled = true
+			if err := repo.UpdateAgent(ctx, agent); err != nil {
+				t.Fatalf("update stored prompt and metadata: %v", err)
+			}
+			updated, err := repo.GetAgentByID(ctx, enhancePromptAgentID)
+			if err != nil {
+				t.Fatalf("read updated builtin: %v", err)
+			}
+
+			for replay := range 2 {
+				replayed, err := newSQLiteRepositoryWithDB(database, database)
+				if err != nil {
+					t.Fatalf("schema replay %d: %v", replay+1, err)
+				}
+				got, err := replayed.GetAgentByID(ctx, enhancePromptAgentID)
+				if err != nil {
+					t.Fatalf("read builtin after replay %d: %v", replay+1, err)
+				}
+				if got.Prompt != tc.wantPrompt {
+					t.Fatalf("prompt after replay %d = %q, want %q", replay+1, got.Prompt, tc.wantPrompt)
+				}
+				if got.Name != updated.Name || got.Description != updated.Description ||
+					got.AgentID != updated.AgentID || got.Model != updated.Model ||
+					got.AgentProfileID != updated.AgentProfileID ||
+					got.ProfileBindingState != updated.ProfileBindingState ||
+					got.Builtin != updated.Builtin || got.Enabled != updated.Enabled ||
+					!got.CreatedAt.Equal(updated.CreatedAt) || !got.UpdatedAt.Equal(updated.UpdatedAt) {
+					t.Fatalf("agent metadata changed after replay %d: got %+v, want unchanged from %+v", replay+1, got, updated)
+				}
+			}
+		})
 	}
 }

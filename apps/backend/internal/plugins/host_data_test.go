@@ -1141,6 +1141,7 @@ func TestPluginHost_Messages_SucceedsAndStripsSystemContent(t *testing.T) {
 			Content:       "<kandev-system>secret prompt</kandev-system>Please summarize yesterday.",
 			Type:          taskmodels.MessageTypeMessage,
 			CreatedAt:     created,
+			Metadata:      map[string]interface{}{"source": "plugin:discord"},
 		},
 		{
 			ID:            "m2",
@@ -1151,6 +1152,7 @@ func TestPluginHost_Messages_SucceedsAndStripsSystemContent(t *testing.T) {
 			Content:       "Here is the summary.",
 			Type:          "", // empty type must default to "message"
 			CreatedAt:     created.Add(time.Minute),
+			Metadata:      map[string]interface{}{"source": 42}, // non-string source is not provenance
 		},
 	}
 
@@ -1177,6 +1179,9 @@ func TestPluginHost_Messages_SucceedsAndStripsSystemContent(t *testing.T) {
 	}
 	if msgs[0].CreatedAt != "2026-07-20T09:30:00Z" {
 		t.Fatalf("created_at = %q, want RFC3339", msgs[0].CreatedAt)
+	}
+	if msgs[0].Source != "plugin:discord" || msgs[1].Source != "" {
+		t.Fatalf("sources = %q/%q, want plugin:discord and empty", msgs[0].Source, msgs[1].Source)
 	}
 	if info == nil || info.HasMore {
 		t.Fatalf("PageInfo = %+v, want HasMore=false", info)

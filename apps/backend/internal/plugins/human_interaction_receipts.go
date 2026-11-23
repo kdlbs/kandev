@@ -40,6 +40,13 @@ type humanInteractionResponseReceipt struct {
 	HumanActor, WorkspaceID, InteractionID, ResourceVersion string
 	Kind, PayloadDigest                                     string
 	ExpiresAt                                               time.Time
+	// Delegation is set on a receipt minted for a linked Kandev user. Only the
+	// installation that requested it can consume it.
+	Delegation *receiptDelegation
+}
+
+type receiptDelegation struct {
+	InstallationID, LinkID, Provider, Subject, UserDisplayName string
 }
 
 type humanInteractionResponseReceiptStore struct {
@@ -64,7 +71,6 @@ func exactHumanResponseDigest(kind string, in HumanInteractionResponse) string {
 	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
-//nolint:cyclop // Receipt admission binds the human response, interaction version, and expiry.
 func (s *Service) IssueHumanInteractionResponseReceipt(
 	ctx context.Context,
 	humanActor, workspaceID, interactionID, expectedResourceVersion string,
@@ -74,30 +80,43 @@ func (s *Service) IssueHumanInteractionResponseReceipt(
 		expectedResourceVersion == "" || (response.Kind != string(taskmodels.InteractionKindPermission) && response.Kind != string(taskmodels.InteractionKindClarification)) {
 		return HumanInteractionResponseReceipt{}, ErrHumanInteractionResponseInvalid
 	}
-	source := s.interactionData
-	if source == nil || s.taskData == nil || s.humanInteractionReceipts == nil {
+	if s.humanInteractionReceipts == nil {
 		return HumanInteractionResponseReceipt{}, ErrHumanInteractionResponseUnavailable
 	}
-	interaction, err := source.GetInteraction(ctx, interactionID)
+	version, err := s.pendingInteractionVersion(ctx, workspaceID, interactionID, expectedResourceVersion, response.Kind)
 	if err != nil {
 		return HumanInteractionResponseReceipt{}, err
 	}
-	if interaction == nil || interaction.Status != taskmodels.InteractionStatusPending || string(interaction.Kind) != response.Kind {
-		return HumanInteractionResponseReceipt{}, ErrHumanInteractionNotPending
+	return s.humanInteractionReceipts.issue(humanActor, workspaceID, interactionID, version, response, nil)
+}
+
+// pendingInteractionVersion verifies that an interaction of kind is pending
+// in workspaceID at the observed version and returns that version.
+func (s *Service) pendingInteractionVersion(ctx context.Context, workspaceID, interactionID, expectedResourceVersion, kind string) (string, error) {
+	source := s.interactionData
+	if source == nil || s.taskData == nil {
+		return "", ErrHumanInteractionResponseUnavailable
+	}
+	interaction, err := source.GetInteraction(ctx, interactionID)
+	if err != nil {
+		return "", err
+	}
+	if interaction == nil || interaction.Status != taskmodels.InteractionStatusPending || string(interaction.Kind) != kind {
+		return "", ErrHumanInteractionNotPending
 	}
 	task, err := s.taskData.GetTask(ctx, interaction.TaskID)
 	if err != nil || task == nil || task.WorkspaceID != workspaceID {
-		return HumanInteractionResponseReceipt{}, ErrHumanInteractionWorkspaceMismatch
+		return "", ErrHumanInteractionWorkspaceMismatch
 	}
 	version := digestPublicValue(interactionModelToDTO(interaction))
 	if version != expectedResourceVersion {
-		return HumanInteractionResponseReceipt{}, ErrHumanInteractionVersionChanged
+		return "", ErrHumanInteractionVersionChanged
 	}
-	return s.humanInteractionReceipts.issue(humanActor, workspaceID, interactionID, version, response)
+	return version, nil
 }
 
 func (s *humanInteractionResponseReceiptStore) issue(
-	humanActor, workspaceID, interactionID, version string, response HumanInteractionResponse,
+	humanActor, workspaceID, interactionID, version string, response HumanInteractionResponse, delegation *receiptDelegation,
 ) (HumanInteractionResponseReceipt, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -115,13 +134,23 @@ func (s *humanInteractionResponseReceiptStore) issue(
 	s.entries[id] = humanInteractionResponseReceipt{
 		HumanActor: humanActor, WorkspaceID: workspaceID, InteractionID: interactionID,
 		ResourceVersion: version, Kind: response.Kind, PayloadDigest: exactHumanResponseDigest(response.Kind, response),
-		ExpiresAt: expires,
+		ExpiresAt: expires, Delegation: delegation,
 	}
 	return HumanInteractionResponseReceipt{ID: id, InteractionID: interactionID, ResourceVersion: version, ExpiresAt: expires.Format(time.RFC3339Nano)}, nil
 }
 
+// discard removes a receipt that was minted but could not be recorded.
+func (s *humanInteractionResponseReceiptStore) discard(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.entries, id)
+}
+
+// consume removes and returns a receipt that matches the exact command. A
+// delegated receipt presented by another installation is removed and
+// rejected.
 func (s *humanInteractionResponseReceiptStore) consume(
-	id, workspaceID, interactionID, version, kind string, response HumanInteractionResponse,
+	id, installationID, workspaceID, interactionID, version, kind string, response HumanInteractionResponse,
 ) (humanInteractionResponseReceipt, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -129,7 +158,7 @@ func (s *humanInteractionResponseReceiptStore) consume(
 	if !found {
 		return humanInteractionResponseReceipt{}, false
 	}
-	if !record.ExpiresAt.After(s.now()) {
+	if !record.ExpiresAt.After(s.now()) || (record.Delegation != nil && record.Delegation.InstallationID != installationID) {
 		delete(s.entries, id)
 		return humanInteractionResponseReceipt{}, false
 	}

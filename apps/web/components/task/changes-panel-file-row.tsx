@@ -26,6 +26,7 @@ import type { OpenDiffOptions } from "@/lib/state/diff-target-types";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TouchFileRowContent } from "./changes-panel-touch-file-row";
+import { ChangesPanelFileFolder, ChangesPanelFileName } from "./changes-panel-file-name";
 
 const splitPath = (path: string) => {
   const lastSlash = path.lastIndexOf("/");
@@ -228,12 +229,8 @@ function DesktopFileRowContent({
         <SymlinkIndicator isSymlink={file.isSymlink} />
         <button type="button" className="min-w-0 text-left cursor-pointer" title={file.path}>
           <p className="flex text-foreground text-xs min-w-0">
-            {showFolder && (
-              <span className="text-foreground/60 truncate min-w-0 [flex-shrink:9999]">
-                {folder}/
-              </span>
-            )}
-            <span className="font-medium text-foreground truncate min-w-0">{name}</span>
+            {showFolder && <ChangesPanelFileFolder folder={folder} trailingSlash />}
+            <ChangesPanelFileName name={name} />
           </p>
         </button>
       </div>

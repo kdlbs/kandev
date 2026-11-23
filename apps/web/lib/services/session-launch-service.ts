@@ -111,6 +111,7 @@ export type EnsureSessionResponse = {
     | "created_prepare"
     | "created_start"
     | "skipped_terminal_pr"
+    | "awaiting_manual_start"
     | "queued"
     | "existing_queued";
   newly_created: boolean;
