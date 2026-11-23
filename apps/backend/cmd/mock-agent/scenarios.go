@@ -748,6 +748,9 @@ func walkthroughDemoArgs() map[string]interface{} {
 // writeWalkthroughFile writes content and commits it, then (when changed is
 // non-empty) leaves an uncommitted modification so the file appears in review.
 func writeWalkthroughFile(e *emitter, runGitCmd func(args ...string) error, prefix, path, base, changed string) bool {
+	if changed == "" && walkthroughFileIsClean(runGitCmd, path, base) {
+		return true
+	}
 	if err := os.WriteFile(path, []byte(base), 0o644); err != nil {
 		e.text(prefix + ": write base failed: " + err.Error())
 		return false
@@ -792,7 +795,7 @@ func setupWalkthroughFiles(e *emitter, prefix string) bool {
 	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_c.txt",
 		"line 1: C\nline 2: BASE\n", "line 1: C\nline 2: WALKTHROUGH_CHANGE_C\n")
 	const baseContent = "line 1: WALKTHROUGH_UNCHANGED\nline 2: seeded on main\n"
-	if !walkthroughBaseIsClean(runGitCmd, baseContent) {
+	if !walkthroughFileIsClean(runGitCmd, "walkthrough_base.txt", baseContent) {
 		_ = runGitCmd("rm", "--force", "walkthrough_base.txt")
 		_ = runGitCmd("commit", "-m", "cleanup walkthrough base fixture")
 		ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_base.txt", baseContent, "")
@@ -800,13 +803,13 @@ func setupWalkthroughFiles(e *emitter, prefix string) bool {
 	return ok
 }
 
-func walkthroughBaseIsClean(runGitCmd func(args ...string) error, expectedContent string) bool {
-	content, err := os.ReadFile("walkthrough_base.txt")
+func walkthroughFileIsClean(runGitCmd func(args ...string) error, path, expectedContent string) bool {
+	content, err := os.ReadFile(path)
 	return err == nil &&
 		string(content) == expectedContent &&
-		runGitCmd("ls-files", "--error-unmatch", "walkthrough_base.txt") == nil &&
-		runGitCmd("diff", "--quiet", "--", "walkthrough_base.txt") == nil &&
-		runGitCmd("diff", "--cached", "--quiet", "--", "walkthrough_base.txt") == nil
+		runGitCmd("ls-files", "--error-unmatch", path) == nil &&
+		runGitCmd("diff", "--quiet", "--", path) == nil &&
+		runGitCmd("diff", "--cached", "--quiet", "--", path) == nil
 }
 
 func emitWalkthroughTour(e *emitter, doneText string) {
@@ -843,8 +846,6 @@ func scenarioWalkthroughRequested(e *emitter) {
 	emitWalkthroughTour(e, "walkthrough-request complete: 5-step tour emitted")
 }
 
-// scenarioWalkthroughBasic creates changed files, then emits a 5-step code
-// walkthrough over them via the show_walkthrough_kandev MCP tool.
 func scenarioWalkthroughFirstRange(e *emitter) {
 	const path = "walkthrough_range.txt"
 	const prefix = "walkthrough-first-range"
@@ -868,6 +869,8 @@ func scenarioWalkthroughFirstRange(e *emitter) {
 	e.text(prefix + " complete")
 }
 
+// scenarioWalkthroughBasic creates changed files, then emits a 5-step code
+// walkthrough over them via the show_walkthrough_kandev MCP tool.
 func scenarioWalkthroughBasic(e *emitter) {
 	fixedDelay(50)
 	if !setupWalkthroughFiles(e, "walkthrough-basic") {

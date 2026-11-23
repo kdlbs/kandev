@@ -63,6 +63,7 @@ with the existing step controls. See the [full preview](plan.md#ascii-ui-preview
 From the repository root:
 
 ```bash
+pnpm --dir apps install --frozen-lockfile
 pnpm --dir apps/web test components/editors/monaco/use-monaco-walkthrough-range.test.ts
 scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --project chromium tests/review/walkthrough.spec.ts -- --grep 'reveals the first Monaco range on open'
 scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome tests/review/mobile-walkthrough.spec.ts -- --grep 'opens the walkthrough as a bottom-sheet panel'
