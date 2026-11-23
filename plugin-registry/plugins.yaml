@@ -89,6 +89,9 @@ plugins:
     previews:
       - url: https://raw.githubusercontent.com/sharifndlovu123/kandev-canvas-step-history/54699d12ca21d259430ea82bacb3ad195a7a8307/preview.png
         alt: Step History canvas showing the workflow path, per-step visit counts, and chronological transition history for a task
+  - id: kandev-plugin-stl
+    repo: kdlbs/kandev-plugin-stl
+    categories: [3D]
 # Example entry (copy, uncomment, and fill in when adding a plugin):
 #
 # plugins:
