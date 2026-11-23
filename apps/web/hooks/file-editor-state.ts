@@ -3,7 +3,7 @@
 import {
   shouldOpenFilePreview,
   previewFileState,
-  canOfferViewerAfterReadFailure,
+  canFindViewerForFileType,
 } from "@/lib/plugins/file-viewer-selection";
 import type { MutableRefObject } from "react";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
@@ -79,7 +79,7 @@ export async function fetchFileEditorState({
   try {
     response = await requestFileContent(client, sessionId, filePath, repo);
   } catch (error) {
-    if (canOfferViewerAfterReadFailure(filePath))
+    if (canFindViewerForFileType(filePath))
       return isCurrent() ? previewFileState(filePath, repo) : null;
     throw error;
   }

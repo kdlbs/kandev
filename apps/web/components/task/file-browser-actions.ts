@@ -3,7 +3,7 @@
 import {
   shouldOpenFilePreview,
   previewFileState,
-  canOfferViewerAfterReadFailure,
+  canFindViewerForFileType,
 } from "@/lib/plugins/file-viewer-selection";
 
 import { useEffect, useRef } from "react";
@@ -172,7 +172,7 @@ export async function fetchAndOpenFile(
     });
   } catch (error) {
     if (cancelled()) return;
-    if (canOfferViewerAfterReadFailure(path)) {
+    if (canFindViewerForFileType(path)) {
       onOpenFile(previewFileState(path, repo));
       return;
     }
