@@ -8,8 +8,32 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
+
+// resolveSessionInferenceCommand builds a session-bound inference command from
+// the same managed runtime selection a task launch on that execution uses.
+func (m *Manager) resolveSessionInferenceCommand(ctx context.Context, ia agents.InferenceAgent, execution *AgentExecution) (agents.Command, error) {
+	cfg := ia.InferenceConfig()
+	ag, ok := ia.(agents.Agent)
+	if !ok {
+		return cfg.Command, nil
+	}
+	if _, managed := ag.(agents.ManagedNPMRuntimeAgent); !managed {
+		return cfg.Command, nil
+	}
+	opts, err := m.resolveManagedRuntimeCommandOptions(ctx, execution.RuntimeName, ag)
+	if err != nil {
+		return agents.Command{}, err
+	}
+	opts.Runtime = execution.RuntimeName
+	opts.PreferNativeBinary = m.preferNativeBinary(ag, execution.RuntimeName, execution.MetadataSnapshot())
+	if execution.RuntimeName != "" && execution.RuntimeName != agentruntime.RuntimeStandalone && ag.ID() == agents.OpenCodeACPAgentID {
+		opts.PreferNativeBinary = false
+	}
+	return ag.BuildCommand(opts), nil
+}
 
 // ErrInferenceAgentIDRequired is returned when ExecuteInferencePrompt is called
 // without an agent ID. Callers should treat this as a client validation error
@@ -52,6 +76,11 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		return nil, fmt.Errorf("agentctl client not available for session %s", sessionID)
 	}
 
+	command, err := m.resolveSessionInferenceCommand(ctx, ia, execution)
+	if err != nil {
+		return nil, fmt.Errorf("resolve inference command: %w", err)
+	}
+
 	// Build request with inference config. StripEnv is derived from
 	// Runtime().StripEnv via agents.StripEnvFor, not declared separately.
 	req := &utility.PromptRequest{
@@ -60,7 +89,7 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		Model:   model,
 		InferenceConfig: &utility.InferenceConfigDTO{
 			Protocol:        cfg.Protocol,
-			Command:         cfg.Command.Args(),
+			Command:         command.Args(),
 			ModelFlag:       cfg.ModelFlag.Args(),
 			WorkDir:         execution.WorkspacePath,
 			StripEnv:        agents.StripEnvFor(ia),
@@ -144,13 +173,17 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 	if providerKey != "" && providerKeyEnvVar != "" {
 		env[providerKeyEnvVar] = providerKey // profile-declared provider key wins
 	}
+	command, err := m.resolveSessionInferenceCommand(ctx, ia, execution)
+	if err != nil {
+		return nil, fmt.Errorf("resolve inference command: %w", err)
+	}
 	autoApprove := profile.AutoApprove
 	return client.InferencePrompt(ctx, &utility.PromptRequest{
 		Prompt: prompt, AgentID: agentName, Model: profile.Model, Mode: profile.Mode,
 		AutoApprovePermissions: &autoApprove,
 		InferenceConfig: &utility.InferenceConfigDTO{
 			Protocol: cfg.Protocol,
-			Command:  cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,
+			Command:  command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, LaunchWrapper: launchwrapper.Profile(prefix),
 			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
 		},
