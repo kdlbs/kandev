@@ -96,6 +96,16 @@ func TestMoveInstructionSavedPromptFreshLaunch(t *testing.T) {
 
 // @covers AC-TASKS-SAVED-PROMPT-DELIVERY-001.17
 func TestMoveInstructionSavedPromptQueuedHandoff(t *testing.T) {
+	t.Run("managed", func(t *testing.T) {
+		testMoveInstructionSavedPromptQueuedHandoff(t, false)
+	})
+	t.Run("persisted passthrough", func(t *testing.T) {
+		testMoveInstructionSavedPromptQueuedHandoff(t, true)
+	})
+}
+
+func testMoveInstructionSavedPromptQueuedHandoff(t *testing.T, persistedPassthrough bool) {
+	t.Helper()
 	ctx := context.Background()
 	prompts := newPromptServiceForLaunchFallbackTest(t)
 	_, err := prompts.CreatePrompt(ctx, "review-checklist", moveSavedPromptDefinition)
@@ -106,6 +116,7 @@ func TestMoveInstructionSavedPromptQueuedHandoff(t *testing.T) {
 	require.NoError(t, err)
 	session.State = models.TaskSessionStateWaitingForInput
 	session.AgentExecutionID = "exec-1"
+	session.IsPassthrough = persistedPassthrough
 	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
 	require.NoError(t, repo.UpdateTaskSession(ctx, session))
 
@@ -134,6 +145,10 @@ func TestMoveInstructionSavedPromptQueuedHandoff(t *testing.T) {
 	require.Len(t, messages.userMessages, 1)
 	require.Equal(t, messages.userMessages[0].content, dispatched)
 	require.NotContains(t, dispatched, "Durable review instructions.")
+	if persistedPassthrough {
+		require.Equal(t, workflowmove.WrapInstructions(moveSavedPromptInstructions), dispatched)
+		return
+	}
 	assertMoveSavedPromptDelivered(t, dispatched)
 }
 
