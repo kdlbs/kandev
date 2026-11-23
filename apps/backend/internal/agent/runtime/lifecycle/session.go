@@ -64,6 +64,7 @@ func (e *PendingDispatchedPromptTimeoutError) Error() string {
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
+	acpV2Enabled             bool
 	executorAdmission        func(context.Context, string, string, string) (context.Context, error)
 	logger                   *logger.Logger
 	eventPublisher           *EventPublisher
@@ -1998,6 +1999,9 @@ func (sm *SessionManager) sendPrompt(
 		}
 	}()
 	var admissionErr error
+	if err := sm.acpPromptAdmission(execution); err != nil {
+		return nil, err
+	}
 	ctx, admissionErr = sm.admitExecutorPrompt(ctx, execution)
 	if admissionErr != nil {
 		return nil, admissionErr
@@ -2413,6 +2417,9 @@ func (sm *SessionManager) callAgentctlPrompt(
 	defer releaseClient()
 	if client == nil {
 		return &agentctl.RequestNotSentError{Err: fmt.Errorf("execution %q has no agentctl client", execution.ID)}
+	}
+	if err := sm.acpClientPromptAdmission(client); err != nil {
+		return &agentctl.RequestNotSentError{Err: err}
 	}
 	var err error
 	if steer {

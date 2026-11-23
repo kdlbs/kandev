@@ -359,6 +359,10 @@ type McpServerConfig struct {
 
 // Config holds configuration for creating adapters
 type Config struct {
+	// ACPProtocolVersion requests a specific wire version for an ACP launch.
+	// Zero uses the legacy v1 transport.
+	ACPProtocolVersion uint16
+
 	// WorkDir is the working directory for the agent
 	WorkDir string
 

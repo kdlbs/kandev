@@ -724,6 +724,22 @@ func (m *Manager) buildAgentCommandWithContext(
 	runtime agentruntime.Runtime,
 	preferNative bool,
 ) (agentCommands, error) {
+	options, err := m.resolveManagedRuntimeCommandOptions(ctx, runtime, agentConfig)
+	if err != nil {
+		return agentCommands{}, err
+	}
+	return m.buildAgentCommandWithRuntimeOptions(ctx, req, profileInfo, agentConfig, runtime, preferNative, options)
+}
+
+func (m *Manager) buildAgentCommandWithRuntimeOptions(
+	ctx context.Context,
+	req *LaunchRequest,
+	profileInfo *AgentProfileInfo,
+	agentConfig agents.Agent,
+	runtime agentruntime.Runtime,
+	preferNative bool,
+	managedRuntimeOptions agents.CommandOptions,
+) (agentCommands, error) {
 	model := ""
 	autoApprove := false
 	permissionValues := make(map[string]bool)
@@ -749,10 +765,6 @@ func (m *Manager) buildAgentCommandWithContext(
 		model = req.ModelOverride
 	}
 	cliFlagTokens = appendRouteOverrideFlags(cliFlagTokens, req)
-	managedRuntimeOptions, err := m.resolveManagedRuntimeCommandOptions(ctx, runtime, agentConfig)
-	if err != nil {
-		return agentCommands{}, err
-	}
 	// Only pass SessionID (for --resume flag) if the agent supports recovery.
 	// Agents with CanRecover=false (e.g. Auggie) use history context injection instead.
 	sessionID := req.ACPSessionID
@@ -1557,6 +1569,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		BootstrapNonce:                   m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		AgentctlStartupConfig:            agentctlStartupConfigForExecutor(m.agentctlStartupConfig, reqWithWorktree.ExecutorType),
 		OpenCodePluginRuntime:            openCodePluginRuntimeFor(agentConfig, pluginRuntimeOptions, m.agentctlStartupConfig.OpenCodePluginEnabled),
+		ManagedRuntimeVersion:            pluginRuntimeOptions.ManagedRuntimeVersion,
 		OnProgress:                       onProgress,
 		RemoteContributions:              remoteContributions,
 		ContributionDestinations:         contributionDestinations,
@@ -1567,6 +1580,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		ManagedRuntimeInstallerEnvDigest: reqWithWorktree.ManagedRuntimeInstallerEnvDigest,
 		ManagedRuntimeOwnerUserID:        reqWithWorktree.ManagedRuntimeOwnerUserID,
 	}
+	execReq.PreferACPV2 = m.prefersACPV2(reqWithWorktree, execReq, rt.Name())
 	if reqWithWorktree.ExecutorType == string(models.ExecutorTypePluginRemote) {
 		if err := m.preparePluginExecutorLaunch(ctx, execReq, metadata, reqWithWorktree.TaskEnvironmentID); err != nil {
 			return nil, nil, nil, err
@@ -2120,8 +2134,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if !agentConfig.Enabled() {
 			return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
 		}
-		preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execution.MetadataSnapshot())
-		cmds, err := m.buildAgentCommandWithContext(sharedCtx, req, profileInfo, agentConfig, execution.RuntimeName, preferNative)
+		cmds, preferACPV2, err := m.buildPromotedAgentCommand(sharedCtx, req, profileInfo, agentConfig, execution)
 		if err != nil {
 			return nil, err
 		}
@@ -2134,6 +2147,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		execution.ContinueArgs = cmds.continueArgs
 		execution.LaunchWrapper = cmds.wrapper
 		execution.OpenCodeRuntime = cmds.openCodeRuntime
+		execution.preferACPV2 = preferACPV2
 		execution.ExecutionProfileID = executionProfileID(req)
 		if profileInfo != nil {
 			execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
@@ -2671,12 +2685,13 @@ func (m *Manager) buildExecutionFromInstance(
 		execution.isResumedSession = true
 	}
 	execution.IsPassthrough = req.IsPassthrough
+	execution.preferACPV2 = execReq.PreferACPV2
 	m.populateLaunchTurnChangeCheckouts(ctx, execution)
 	// Use the resolved runtime (set from rt.Name() above), matching
 	// promoteWorkspaceExecution's call site rather than re-deriving from the
 	// requested ExecutorType.
 	preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execReq.Metadata)
-	cmds, err := m.buildAgentCommandWithContext(ctx, req, profileInfo, agentConfig, execution.RuntimeName, preferNative)
+	cmds, err := m.buildExecutionAgentCommand(ctx, req, execReq, profileInfo, agentConfig, execution.RuntimeName, preferNative)
 	if err != nil {
 		return nil, err
 	}
@@ -2687,6 +2702,17 @@ func (m *Manager) buildExecutionFromInstance(
 	execution.LaunchWrapper = cmds.wrapper
 	execution.OpenCodeRuntime = cmds.openCodeRuntime
 	return execution, nil
+}
+
+func (m *Manager) buildExecutionAgentCommand(
+	ctx context.Context, req *LaunchRequest, execReq *ExecutorCreateRequest, profile *AgentProfileInfo,
+	agentConfig agents.Agent, runtime agentruntime.Runtime, preferNative bool,
+) (agentCommands, error) {
+	if execReq.PreferACPV2 {
+		return m.buildAgentCommandWithRuntimeOptions(ctx, req, profile, agentConfig, runtime, false,
+			agents.CommandOptions{ManagedRuntimeVersion: execReq.ManagedRuntimeVersion})
+	}
+	return m.buildAgentCommandWithContext(ctx, req, profile, agentConfig, runtime, preferNative)
 }
 
 // registerAndPublishExecution does the post-spawn lockstep dance: track in the
@@ -3375,7 +3401,7 @@ func (m *Manager) configureAndStartAgentWithPreparedArgsAndPreparation(
 		// provenance, so keep the private/ordinary path.
 		installContext = nil
 	}
-	if err := client.ConfigureAgentRuntimeWithProjectDeliveryAndInstallContext(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, installContext, execution.OpenCodeRuntime, execution.LaunchWrapper); err != nil {
+	if err := client.ConfigureAgentRuntimeWithProjectDeliveryAndInstallContext(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, delivery, installContext, execution.OpenCodeRuntime, execution.LaunchWrapper, execution.preferACPV2); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 

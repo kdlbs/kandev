@@ -2,9 +2,14 @@
 
 Protocol adapters in `server/adapter/transport/` normalize different agent CLIs:
 - `AgentAdapter` interface defines `Connect()`, `Initialize()`, `NewSession()`, `LoadSession()`, `Prompt()`, `Cancel()`, `Updates()`, `Close()`, among others
-- Transports: `acp`, `codexappserver` (native Codex app-server), and `shared` (cross-transport helpers). The native Codex transport is experimental and uses the versioned schema under `pkg/codexappserver/schema/`; do not infer support for other native provider protocols from its protocol types.
+- Transports include `acp` (v1), `acpv2` (Preview), `codexappserver` (native Codex app-server), and `shared` (cross-transport helpers). The native Codex transport is experimental and uses the versioned schema under `pkg/codexappserver/schema/`.
 - `process.Manager` owns subprocess, wires stdio to adapter
 - `NewAdapter` in `server/adapter/factory.go` selects the adapter by protocol (`agent.Protocol`), not by agent type; agent identity and CLI-specific config come from Go constructors in `internal/agent/agents/`, registered by `internal/agent/registry.Registry.LoadDefaults()`
+
+The ACP factory uses the authenticated launch preference to choose a version.
+After a validated legacy initialize response, the process manager joins the
+first subprocess before opening a fresh ACP v1 connection. See the
+[ACP v2 preview design](../../../../docs/specs/agents/system-design/acp-v2-preview.md).
 
 The `acp` transport is split by concern across `adapter_*.go` files: `adapter.go` (core/lifecycle), `adapter_session.go` (initialize/new/load/resume/close), `adapter_prompt.go` (prompt/cancel), `adapter_updates.go` (`session/update` notification fan-out), `adapter_tools.go` (`convertToolCallUpdate` / `convertToolCallResultUpdate` -> normalized payloads), `adapter_permissions.go`, and `adapter_helpers.go`. Agent-specific ACP extensions use the package-private `acpDialect` function table in `dialect.go`; keep observed wire translation in `dialect_<agent>.go`. Dialect hooks return normalized data or request descriptions and never receive `*Adapter` or execute RPCs. Shared capability normalization used by both live sessions and utility probes belongs in `internal/agentctl/acpcompat/`. Tool-call conversion lives in `adapter_tools.go`, not `adapter.go`. See ADR-0043. Session lifecycle transitions are serialized: `NewSession`, `LoadSession`, and `ResetSession` (`session/new` plus the `closeSupersededSessionLocked` cleanup) each run under `Adapter.sessionTransitionMu`, because agentctl dispatches WS requests to the adapter without serialization; any new path that writes `a.sessionID` must hold that mutex for the whole transition, not just the write.
 

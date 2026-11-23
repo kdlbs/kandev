@@ -33,6 +33,8 @@ type RunConfig struct {
 	// CaptureStderr controls whether child stderr lines are recorded into
 	// the JSONL. Default: false (written to our stderr as plain lines).
 	CaptureStderr bool
+	// ProtocolVersion defaults to 1 when omitted.
+	ProtocolVersion int
 	// ClientCapabilities adds protocol client capabilities to initialize.
 	ClientCapabilities map[string]any
 	// AIRCapabilities advertises the named AIR extension capabilities in the
@@ -94,6 +96,12 @@ type Runner struct {
 func NewRunner(ctx context.Context, jsonlPath string, cfg RunConfig) (*Runner, error) {
 	if len(cfg.Command) == 0 {
 		return nil, errors.New("command is empty")
+	}
+	if cfg.ProtocolVersion == 0 {
+		cfg.ProtocolVersion = 1
+	}
+	if cfg.ProtocolVersion != 1 && cfg.ProtocolVersion != 2 {
+		return nil, fmt.Errorf("unsupported ACP protocol version %d", cfg.ProtocolVersion)
 	}
 
 	rec, err := NewRecorder(jsonlPath)
@@ -473,6 +481,7 @@ func (r *Runner) routeResponse(frame Frame) bool {
 
 func (r *Runner) readLoop() {
 	defer r.readLoopWG.Done()
+	defer r.closeOOB()
 	for {
 		frame, err := r.framer.Read()
 		if err != nil {
