@@ -52,6 +52,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"subagent-controls":                    scenarioSubagentControls,
 	"review-cumulative-setup":              scenarioReviewCumulativeSetup,
 	"walkthrough-setup":                    scenarioWalkthroughSetup,
+	"walkthrough-first-range":              scenarioWalkthroughFirstRange,
 	"walkthrough-basic":                    scenarioWalkthroughBasic,
 	"walkthrough-reemit":                   scenarioWalkthroughReemit,
 	"walkthrough-reemit-second":            scenarioWalkthroughReemitSecond,
@@ -844,6 +845,29 @@ func scenarioWalkthroughRequested(e *emitter) {
 
 // scenarioWalkthroughBasic creates changed files, then emits a 5-step code
 // walkthrough over them via the show_walkthrough_kandev MCP tool.
+func scenarioWalkthroughFirstRange(e *emitter) {
+	const path = "walkthrough_range.txt"
+	const prefix = "walkthrough-first-range"
+	wd, err := os.Getwd()
+	if err != nil {
+		e.text(prefix + ": getwd failed: " + err.Error())
+		return
+	}
+	content := strings.Repeat("Context line\n", 152) + "First anchor\nSecond anchor\n" +
+		strings.Repeat("Context line\n", 100)
+	if !writeWalkthroughFile(e, makeGitRunner(wd), prefix, path, content, "") {
+		return
+	}
+	if _, err := e.callMCPTool("kandev-walkthroughs", "show_walkthrough_kandev", wtArgs("Editor range tour",
+		wtStep("First range", path, "Read the two anchors.", 153, 154),
+		wtStep("File start", path, "Read the file start.", 1, 2),
+	)); err != nil {
+		e.text(prefix + ": emit failed: " + err.Error())
+		return
+	}
+	e.text(prefix + " complete")
+}
+
 func scenarioWalkthroughBasic(e *emitter) {
 	fixedDelay(50)
 	if !setupWalkthroughFiles(e, "walkthrough-basic") {
