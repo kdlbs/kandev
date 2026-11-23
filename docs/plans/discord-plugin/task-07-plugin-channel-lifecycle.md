@@ -5,7 +5,15 @@ status: pending
 wave: 3
 depends_on: ["06-plugin-gateway-provisioning"]
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-INTEGRATIONS-DISCORD-003
+acceptance_criteria:
+  - AC-INTEGRATIONS-DISCORD-003.1
+  - AC-INTEGRATIONS-DISCORD-003.2
+  - AC-INTEGRATIONS-DISCORD-003.3
+  - AC-INTEGRATIONS-DISCORD-003.4
+system_design:
+  - ../../specs/integrations/system-design/discord.md
 ---
 
 # Task 07: Task channel lifecycle

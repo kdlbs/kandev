@@ -5,7 +5,13 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-PLUGINS-CHAT-BRIDGE-HOST-001
+acceptance_criteria:
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-001.1
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-001.2
+system_design:
+  - ../../specs/plugins/system-design/chat-bridge-host-controls.md
 ---
 
 # Task 01: ADR for plugin task control from external chat surfaces

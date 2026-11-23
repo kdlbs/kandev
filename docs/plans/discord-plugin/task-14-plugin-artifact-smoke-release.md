@@ -5,7 +5,14 @@ status: pending
 wave: 7
 depends_on: ["10-plugin-inbound-delivery", "12-plugin-permission-approvals", "13-plugin-settings-card", "04-host-plugin-docs"]
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-INTEGRATIONS-DISCORD-010
+acceptance_criteria:
+  - AC-INTEGRATIONS-DISCORD-010.1
+  - AC-INTEGRATIONS-DISCORD-010.2
+  - AC-INTEGRATIONS-DISCORD-010.3
+system_design:
+  - ../../specs/integrations/system-design/discord.md
 ---
 
 # Task 14: Artifact smoke and release

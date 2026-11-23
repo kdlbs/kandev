@@ -1,12 +1,29 @@
 ---
 status: draft
+system: integrations
+requirements:
+  - REQ-INTEGRATIONS-DISCORD-001
+  - REQ-INTEGRATIONS-DISCORD-002
+  - REQ-INTEGRATIONS-DISCORD-003
+  - REQ-INTEGRATIONS-DISCORD-004
+  - REQ-INTEGRATIONS-DISCORD-005
+  - REQ-INTEGRATIONS-DISCORD-006
+  - REQ-INTEGRATIONS-DISCORD-007
+  - REQ-INTEGRATIONS-DISCORD-008
+  - REQ-INTEGRATIONS-DISCORD-009
+  - REQ-INTEGRATIONS-DISCORD-010
 created: 2026-11-21
-owner: tbd
+owners:
+  - Fclem
 ---
 
-# Discord Task Channels (plugin `kandev-plugin-discord`)
+# Discord Task Channels System Design (plugin `kandev-plugin-discord`)
 
-Implementation plan: [`plan.md`](../../plans/discord-plugin/plan.md).
+Behavior and acceptance criteria are in
+`docs/specs/integrations/requirements/discord.md`. The Host contract the plugin
+relies on is in `docs/specs/plugins/system-design/chat-bridge-host-controls.md`.
+
+Implementation plan: [`plan.md`](../../../plans/discord-plugin/plan.md).
 
 Plugin repository: [`Fclem/kandev-plugin-discord`](https://github.com/Fclem/kandev-plugin-discord).
 
@@ -216,7 +233,7 @@ ui: { bundle: /ui/bundle.js }   # plugin-settings quick-setup card
 Decided by the maintainers on
 [#5420](https://github.com/kdlbs/kandev/issues/5420#issuecomment-7083766483)
 and recorded in
-[ADR 2026-11-22-plugin-external-chat-task-control](../../decisions/2026-11-22-plugin-external-chat-task-control.md).
+[ADR 2026-11-22-plugin-external-chat-task-control](../../../decisions/2026-11-22-plugin-external-chat-task-control.md).
 
 1. **`CancelTurn`.** Interrupt the current turn without stopping the session,
    matching WebSocket `agent.cancel` and `orchestrator.Service.CancelAgent`.

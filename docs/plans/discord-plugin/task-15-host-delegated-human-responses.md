@@ -5,7 +5,26 @@ status: done
 wave: 3
 depends_on: ["01-host-control-rpcs-adr"]
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-PLUGINS-CHAT-BRIDGE-HOST-004
+  - REQ-PLUGINS-CHAT-BRIDGE-HOST-005
+acceptance_criteria:
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-004.1
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-004.2
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-004.3
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-004.4
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-004.5
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-004.6
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-004.7
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-005.1
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-005.2
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-005.3
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-005.4
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-005.5
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-005.6
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-005.7
+system_design:
+  - ../../specs/plugins/system-design/chat-bridge-host-controls.md
 ---
 
 # Task 15: Human responses from linked Kandev users

@@ -5,7 +5,15 @@ status: pending
 wave: 5
 depends_on: ["06-plugin-gateway-provisioning", "02-host-control-rpcs"]
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-INTEGRATIONS-DISCORD-007
+acceptance_criteria:
+  - AC-INTEGRATIONS-DISCORD-007.1
+  - AC-INTEGRATIONS-DISCORD-007.2
+  - AC-INTEGRATIONS-DISCORD-007.3
+  - AC-INTEGRATIONS-DISCORD-007.4
+system_design:
+  - ../../specs/integrations/system-design/discord.md
 ---
 
 # Task 11: `/status` and `/stop`

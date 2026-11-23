@@ -5,7 +5,13 @@ status: done
 wave: 5
 depends_on: ["02-host-control-rpcs", "15-host-delegated-human-responses", "16-host-step-approval-rpcs", "17-host-message-source"]
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-PLUGINS-CHAT-BRIDGE-HOST-008
+acceptance_criteria:
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-008.1
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-008.2
+system_design:
+  - ../../specs/plugins/system-design/chat-bridge-host-controls.md
 ---
 
 # Task 04: Public plugin docs

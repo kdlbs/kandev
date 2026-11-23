@@ -5,7 +5,16 @@ status: done
 wave: 2
 depends_on: ["01-host-control-rpcs-adr"]
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-PLUGINS-CHAT-BRIDGE-HOST-002
+acceptance_criteria:
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-002.1
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-002.2
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-002.3
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-002.4
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-002.5
+system_design:
+  - ../../specs/plugins/system-design/chat-bridge-host-controls.md
 ---
 
 # Task 02: `CancelTurn` exact execution command

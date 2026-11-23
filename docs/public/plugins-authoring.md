@@ -1742,7 +1742,8 @@ fields and fences but only interrupts the current turn, like the native Stop
 button in a chat: the session ends `WAITING_FOR_INPUT` and stays promptable,
 and queued messages are paused instead of sent. It returns `APPLIED` with `cancelled=true`
 when a running or starting turn was interrupted and `NO_CHANGE` when no turn
-was active. `RecoverSession` currently
+was active. If the observed turn ends and another starts before the
+cancellation is applied, it returns `CONFLICT` and leaves the new turn running. `RecoverSession` currently
 supports only `resume` for an execution-less interrupted session and uses the
 normal orchestrator launch path. `CancelPendingTaskTransition` requires the
 exact transition ID and resource version. Commands return typed outcomes such
@@ -1808,8 +1809,11 @@ account, so a plugin can never answer under a name of its choosing.
 2. The plugin settings page shows a **Linked chat accounts** card. A Kandev
    user generates a link code there (single-use, ten minutes) and sends it to
    your plugin, for example `/link ABCD-EFGH-JKMN`. Redeem it with
-   `LinkExternalIdentity`, passing the external provider and account ID. A
-   later link of the same account or the same user replaces the earlier one.
+   `LinkExternalIdentity`, passing the external provider and account ID. The
+   call is denied with `missing_capability_approval` until a workspace grants
+   `host.v2.write:human_responses`, and the code stays valid so you can retry
+   after the grant. A later link of the same account or the same user replaces
+   the earlier one.
    Users revoke their own links on that card and admins revoke any link;
    uninstalling the plugin removes them.
 3. When a linked person decides, request a receipt for that account and the

@@ -7,7 +7,7 @@
 ## Context
 
 Chat-bridge plugins such as
-[`kandev-plugin-discord`](../specs/integrations/discord.md) map an external
+[`kandev-plugin-discord`](../specs/integrations/system-design/discord.md) map an external
 conversation (a Discord channel) to a Kandev task. They mirror agent output,
 deliver chat messages to the task, and let operators stop work, answer agent
 permission requests, and approve workflow review steps from chat. The request

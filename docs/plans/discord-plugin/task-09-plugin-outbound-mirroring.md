@@ -5,7 +5,15 @@ status: pending
 wave: 4
 depends_on: ["07-plugin-channel-lifecycle", "17-host-message-source"]
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-INTEGRATIONS-DISCORD-005
+acceptance_criteria:
+  - AC-INTEGRATIONS-DISCORD-005.1
+  - AC-INTEGRATIONS-DISCORD-005.2
+  - AC-INTEGRATIONS-DISCORD-005.3
+  - AC-INTEGRATIONS-DISCORD-005.4
+system_design:
+  - ../../specs/integrations/system-design/discord.md
 ---
 
 # Task 09: Kandev → Discord mirroring

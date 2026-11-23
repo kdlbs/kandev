@@ -5,7 +5,13 @@ status: cancelled
 wave: 2
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-PLUGINS-CHAT-BRIDGE-HOST-003
+acceptance_criteria:
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-003.1
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-003.2
+system_design:
+  - ../../specs/plugins/system-design/chat-bridge-host-controls.md
 ---
 
 # Task 03: Strip `raw_content` from plugin event deliveries

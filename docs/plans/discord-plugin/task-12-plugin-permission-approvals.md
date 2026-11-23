@@ -5,7 +5,16 @@ status: pending
 wave: 6
 depends_on: ["11-plugin-status-stop-commands", "09-plugin-outbound-mirroring", "15-host-delegated-human-responses", "16-host-step-approval-rpcs"]
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-INTEGRATIONS-DISCORD-008
+acceptance_criteria:
+  - AC-INTEGRATIONS-DISCORD-008.1
+  - AC-INTEGRATIONS-DISCORD-008.2
+  - AC-INTEGRATIONS-DISCORD-008.3
+  - AC-INTEGRATIONS-DISCORD-008.4
+  - AC-INTEGRATIONS-DISCORD-008.5
+system_design:
+  - ../../specs/integrations/system-design/discord.md
 ---
 
 # Task 12: Approvals (permission requests and workflow review steps)

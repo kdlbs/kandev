@@ -5,7 +5,14 @@ status: pending
 wave: 4
 depends_on: ["07-plugin-channel-lifecycle"]
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-INTEGRATIONS-DISCORD-004
+acceptance_criteria:
+  - AC-INTEGRATIONS-DISCORD-004.1
+  - AC-INTEGRATIONS-DISCORD-004.2
+  - AC-INTEGRATIONS-DISCORD-004.3
+system_design:
+  - ../../specs/integrations/system-design/discord.md
 ---
 
 # Task 08: Reconciler

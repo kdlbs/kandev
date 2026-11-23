@@ -5,7 +5,14 @@ status: pending
 wave: 5
 depends_on: ["08-plugin-reconciler", "09-plugin-outbound-mirroring"]
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-INTEGRATIONS-DISCORD-006
+acceptance_criteria:
+  - AC-INTEGRATIONS-DISCORD-006.1
+  - AC-INTEGRATIONS-DISCORD-006.2
+  - AC-INTEGRATIONS-DISCORD-006.3
+system_design:
+  - ../../specs/integrations/system-design/discord.md
 ---
 
 # Task 10: Discord → Kandev delivery

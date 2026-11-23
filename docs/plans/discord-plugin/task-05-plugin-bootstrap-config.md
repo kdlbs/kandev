@@ -5,7 +5,14 @@ status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-INTEGRATIONS-DISCORD-001
+acceptance_criteria:
+  - AC-INTEGRATIONS-DISCORD-001.1
+  - AC-INTEGRATIONS-DISCORD-001.2
+  - AC-INTEGRATIONS-DISCORD-001.3
+system_design:
+  - ../../specs/integrations/system-design/discord.md
 ---
 
 # Task 05: Config parsing and Discord API seam

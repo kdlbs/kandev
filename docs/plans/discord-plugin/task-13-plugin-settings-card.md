@@ -5,7 +5,14 @@ status: in_progress
 wave: 6
 depends_on: ["06-plugin-gateway-provisioning"]
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-INTEGRATIONS-DISCORD-009
+acceptance_criteria:
+  - AC-INTEGRATIONS-DISCORD-009.1
+  - AC-INTEGRATIONS-DISCORD-009.2
+  - AC-INTEGRATIONS-DISCORD-009.3
+system_design:
+  - ../../specs/integrations/system-design/discord.md
 ---
 
 # Task 13: Quick-setup settings card with connection test

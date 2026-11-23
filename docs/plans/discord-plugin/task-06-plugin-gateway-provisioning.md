@@ -5,7 +5,14 @@ status: pending
 wave: 2
 depends_on: ["05-plugin-bootstrap-config"]
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-INTEGRATIONS-DISCORD-002
+acceptance_criteria:
+  - AC-INTEGRATIONS-DISCORD-002.1
+  - AC-INTEGRATIONS-DISCORD-002.2
+  - AC-INTEGRATIONS-DISCORD-002.3
+system_design:
+  - ../../specs/integrations/system-design/discord.md
 ---
 
 # Task 06: Gateway lifecycle and guild provisioning

@@ -5,7 +5,17 @@ status: done
 wave: 4
 depends_on: ["01-host-control-rpcs-adr", "15-host-delegated-human-responses"]
 plan: "plan.md"
-spec: "../../specs/integrations/discord.md"
+requirements:
+  - REQ-PLUGINS-CHAT-BRIDGE-HOST-006
+acceptance_criteria:
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-006.1
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-006.2
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-006.3
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-006.4
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-006.5
+  - AC-PLUGINS-CHAT-BRIDGE-HOST-006.6
+system_design:
+  - ../../specs/plugins/system-design/chat-bridge-host-controls.md
 ---
 
 # Task 16: Workflow step approval RPCs

@@ -592,10 +592,10 @@ administration commands, subject to their separate Host v2 workspace grants.
 `interactions` enables exact responses subject to a separate human response
 receipt from an authenticated user with session-control access. The legacy v1
 interaction response methods return `PermissionDenied` because they cannot
-carry that receipt or an observed revision. `human_responses` lets the plugin
-redeem account link codes (`LinkExternalIdentity`) and, with the separate
-`host.v2.write:human_responses` workspace grant, request receipts for the
-Kandev user linked to an external account (`RequestHumanResponseReceipt`);
+carry that receipt or an observed revision. `human_responses`, with the separate
+`host.v2.write:human_responses` workspace grant, lets the plugin redeem account
+link codes (`LinkExternalIdentity`) and request receipts for the Kandev user
+linked to an external account (`RequestHumanResponseReceipt`);
 the settings page of a plugin that declares it shows a "Linked chat accounts"
 card. `managed_agent_conversations`
 enables exact lifecycle, enqueue, cancellation, and immediate-dispatch writes,
