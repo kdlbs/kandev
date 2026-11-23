@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
-import { attachCommentFile } from "../../helpers/comment-attachment";
 import { readMockACPTrace } from "../../helpers/transient-turn-runtime-continuity";
 import {
   openSeededAgentReply,
@@ -47,10 +46,66 @@ test("agent receives readable file evidence beside selected output", async ({
       await testPage.getByTestId("agent-message-comment-trigger").click();
       const form = testPage.getByTestId("agent-message-comment-popover");
       await form.getByRole("textbox").fill(example.feedback);
-      await attachCommentFile(testPage, form, "output-evidence.txt", example.bytes);
-      await form.getByTestId("agent-message-comment-add").click();
+      const trigger = form.getByTestId("comment-attachment-trigger");
+      const manager = testPage.getByTestId("comment-attachment-manager");
+      const add = form.getByTestId("agent-message-comment-add");
+      await expect
+        .poll(async () => {
+          const [paperclip, action] = await Promise.all([trigger.boundingBox(), add.boundingBox()]);
+          if (!paperclip || !action) return Infinity;
+          return Math.abs(paperclip.y + paperclip.height / 2 - action.y - action.height / 2);
+        })
+        .toBeLessThanOrEqual(1);
+      await expect(manager).toBeHidden();
+      await trigger.click();
+      await expect(manager.getByText("Comment files", { exact: true })).toBeVisible();
+      await expect(manager.getByText("Attach screenshots or files to this comment.")).toBeVisible();
+      const chooser = testPage.waitForEvent("filechooser");
+      await manager.getByRole("button", { name: "Add files" }).click();
+      await (
+        await chooser
+      ).setFiles({
+        name: "output-evidence.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from(example.bytes),
+      });
+      await expect(manager.getByTestId("comment-attachment-row")).toHaveAttribute(
+        "data-status",
+        "ready",
+      );
+      if (example === examples[0]) {
+        await form.getByTestId("comment-attachment-input").setInputFiles({
+          name: "screenshot.png",
+          mimeType: "image/png",
+          buffer: Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+            "base64",
+          ),
+        });
+        await expect(manager.locator('[data-status="ready"]')).toHaveCount(2);
+      }
+      await testPage.keyboard.press("Escape");
+      await expect(manager).toBeHidden();
+      await expect(form).toBeVisible();
+      await expect(trigger).toBeFocused();
+      await add.click();
       await expect(form).not.toBeVisible();
     }
+    await testPage.getByRole("button", { name: "2 message comments", exact: true }).hover();
+    await expect(testPage.getByRole("link", { name: "output-evidence.txt" })).toHaveCount(2);
+    const image = testPage.getByRole("button", { name: /^Image \(\d+ B\)$/ });
+    await expect(image).toBeVisible();
+    await expect
+      .poll(() => image.locator("img").evaluate((img) => (img as HTMLImageElement).naturalWidth))
+      .toBe(1);
+    await image.click();
+    const viewer = testPage.getByRole("dialog", { name: "Image preview" });
+    await viewer.getByRole("button", { name: "Actual size" }).click();
+    await expect(viewer.getByRole("button", { name: "Actual size" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await testPage.keyboard.press("Escape");
     const instruction = "Read both comment files.";
     await session.sendMessageViaButton(instruction);
     await expect

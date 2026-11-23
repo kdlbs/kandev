@@ -87,7 +87,22 @@ test.describe("Agent message comments on mobile", () => {
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await drawer.getByTestId("agent-message-comment-input").fill("Run with this correction.");
+    const attachmentTrigger = drawer.getByTestId("comment-attachment-trigger");
+    await expectTouchTarget(attachmentTrigger);
+    await attachmentTrigger.tap();
+    const manager = testPage.getByTestId("comment-attachment-manager");
+    await expect(manager).toBeVisible();
+    await expectTouchTarget(manager.getByRole("button", { name: "Add files" }));
     const attachmentId = await attachCommentFile(testPage, drawer, "reply-note.txt");
+    await expect(manager.getByTestId("comment-attachment-row")).toHaveAttribute(
+      "data-status",
+      "ready",
+    );
+    await testPage.keyboard.press("Escape");
+    await expect(manager).toBeHidden();
+    await expect(drawer.getByTestId("agent-message-comment-input")).toHaveValue(
+      "Run with this correction.",
+    );
     await runButton.click();
 
     await expect(drawer).not.toBeVisible({ timeout: 15_000 });

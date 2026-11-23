@@ -1,5 +1,6 @@
 "use client";
 
+import { AttachmentLinks } from "@/components/shared/attachment-links";
 import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import { useRef, useState, useCallback } from "react";
 import { IconEdit, IconTrash, IconGripHorizontal } from "@tabler/icons-react";
@@ -100,6 +101,7 @@ function CommentItem({
           <p className="text-xs text-foreground leading-relaxed whitespace-pre-wrap">
             {comment.text}
           </p>
+          <AttachmentLinks attachments={comment.attachments} />
         </>
       )}
     </div>

@@ -191,6 +191,8 @@
   "attachmentSizeKb": "({{size}} KB)",
   "attachmentsCanTotalUpTo": "첨부 파일은 최대 {{bytes}}까지 가능합니다.",
   "addFiles": "파일 추가",
+  "commentAttachments": "댓글 파일",
+  "commentAttachmentsHint": "이 댓글에 스크린샷이나 파일을 첨부하세요.",
   "answerAttachments": "답변 파일",
   "answerAttachmentsHint": "이 답변에 스크린샷이나 파일을 첨부하세요.",
   "answerAttachmentsLimit": "최대 {{maxFiles}}개 파일, 총 {{maxSize}}.",

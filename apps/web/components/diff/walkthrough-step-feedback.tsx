@@ -1,5 +1,6 @@
 "use client";
 
+import { AttachmentLinks } from "@/components/shared/attachment-links";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconMessageCircle } from "@tabler/icons-react";
@@ -37,6 +38,7 @@ export function WalkthroughCommentList({ comments }: { comments: WalkthroughComm
             data-status={comment.status}
           >
             <p className="whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">{comment.text}</p>
+            <AttachmentLinks attachments={comment.attachments} />
             <span className="mt-1 block text-xs text-muted-foreground">
               {comment.status === "sent"
                 ? t("diff:walkthroughSubmitted")

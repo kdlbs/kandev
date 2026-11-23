@@ -145,7 +145,13 @@ describe("DiffViewer comment editing", () => {
     const updated: DiffComment = {
       ...original,
       attachments: [
-        { attachment_id: "file", type: "resource", mime_type: "text/plain", delivery_mode: "path" },
+        {
+          attachment_id: "file",
+          name: "line-note.txt",
+          type: "resource",
+          mime_type: "text/plain",
+          delivery_mode: "path",
+        },
       ],
     };
     view.rerender(
@@ -157,6 +163,9 @@ describe("DiffViewer comment editing", () => {
           ?.metadata.comment?.attachments,
       ).toEqual(updated.attachments),
     );
+    const link = screen.getByRole("link", { name: "line-note.txt" });
+    expect(link.getAttribute("href")).toContain("/file");
+    expect(screen.queryByPlaceholderText(COMMENT_PLACEHOLDER)).toBeNull();
   });
 
   it("submits edited text from the inline comment form", async () => {

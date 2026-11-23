@@ -211,6 +211,8 @@
   "attachmentSizeKb": "({{size}} KB)",
   "attachmentsCanTotalUpTo": "添付ファイル合計は最大 {{bytes}} まで。",
   "addFiles": "ファイルを追加",
+  "commentAttachments": "コメントのファイル",
+  "commentAttachmentsHint": "このコメントにスクリーンショットやファイルを添付します。",
   "answerAttachments": "回答ファイル",
   "answerAttachmentsHint": "この回答にスクリーンショットやファイルを添付します。",
   "answerAttachmentsLimit": "最大 {{maxFiles}} ファイル、合計 {{maxSize}}。",

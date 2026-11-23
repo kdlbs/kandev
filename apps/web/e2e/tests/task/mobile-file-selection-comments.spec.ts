@@ -165,9 +165,15 @@ test.describe("File selection comments on mobile", () => {
         });
         expect(fs.readFileSync(diskPath, "utf8")).toContain(CODE_SELECTION_QUOTE);
         await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
-        await expect(
-          session.activeChat().getByText(`${fileName} (1)`, { exact: true }),
-        ).toBeVisible();
+        const commentPreview = session.activeChat().getByRole("button", {
+          name: `${fileName} (1)`,
+          exact: true,
+        });
+        await commentPreview.tap();
+        const link = testPage.getByRole("link", { name: "line-note.txt" });
+        await expect(link).toBeVisible();
+        await expect(link).toHaveAttribute("href", new RegExp(attachmentId));
+        expect((await link.boundingBox())?.height).toBeGreaterThanOrEqual(44);
       } finally {
         await restoreSelectionCommentVisualViewport(testPage);
         fs.rmSync(diskPath, { force: true });

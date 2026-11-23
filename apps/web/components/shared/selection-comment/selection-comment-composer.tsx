@@ -125,16 +125,18 @@ export function CommentComposerBody({
         canRun={Boolean(state.onAddAndRun)}
         className="mt-2 text-xs"
       />
-      {props.attachmentController ? (
-        <CommentAttachmentControl
-          controller={props.attachmentController}
-          disabled={state.mutationPending}
-        >
-          {actions}
-        </CommentAttachmentControl>
-      ) : (
-        actions
-      )}
+      <div className="mt-2">
+        {props.attachmentController ? (
+          <CommentAttachmentControl
+            controller={props.attachmentController}
+            disabled={state.mutationPending}
+          >
+            {actions}
+          </CommentAttachmentControl>
+        ) : (
+          actions
+        )}
+      </div>
     </>
   );
 }

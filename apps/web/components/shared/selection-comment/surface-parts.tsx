@@ -253,7 +253,7 @@ export function PopoverActions({
   const { t } = useTranslation();
   const splitAction = Boolean(onSubmitAndRun && !isEditing);
   return (
-    <div className="mt-2 flex items-center justify-between">
+    <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
         <span className={cn("text-[10px] text-muted-foreground/70", hideShortcuts && "hidden")}>
           {isEditing ? t("task:cmdEnterToUpdate") : t("task:cmdEnterToAdd")}

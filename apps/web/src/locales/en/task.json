@@ -211,6 +211,8 @@
   "attachmentSizeKb": "({{size}} KB)",
   "attachmentsCanTotalUpTo": "Attachments can total up to {{bytes}}.",
   "addFiles": "Add files",
+  "commentAttachments": "Comment files",
+  "commentAttachmentsHint": "Attach screenshots or files to this comment.",
   "answerAttachments": "Answer files",
   "answerAttachmentsHint": "Attach screenshots or files to this answer.",
   "answerAttachmentsLimit": "Up to {{maxFiles}} files, {{maxSize}} total.",

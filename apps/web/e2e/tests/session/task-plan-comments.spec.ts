@@ -137,6 +137,11 @@ test.describe("task-owned plan comments", () => {
     await session.waitForLoad();
     await waitForStableActiveSession(testPage, secondary.id);
     await expect(session.activeChat().getByText("1 plan comment", { exact: true })).toBeVisible();
+    await session.activeChat().getByRole("button", { name: "1 plan comment", exact: true }).hover();
+    await expect(testPage.getByRole("link", { name: "plan-note.txt" })).toHaveAttribute(
+      "href",
+      new RegExp(attachmentId),
+    );
     const beforeSend = await readSessionMessageIdsContaining(apiClient, secondary.id, sendComment);
     await session.sendMessage("Apply the selected feedback here");
 

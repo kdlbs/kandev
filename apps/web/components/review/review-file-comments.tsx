@@ -1,5 +1,6 @@
 "use client";
 
+import { AttachmentLinks } from "@/components/shared/attachment-links";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useOptionalAppStore } from "@/components/state-provider";
@@ -105,6 +106,7 @@ function FileCommentCard({
           <div className="[&>.markdown-body]:font-mono! [&>.markdown-body]:text-xs! [&>.markdown-body]:leading-relaxed [&_p]:my-0">
             <MarkdownComment content={comment.text} />
           </div>
+          <AttachmentLinks attachments={comment.attachments} />
         </>
       )}
     </div>

@@ -52,6 +52,10 @@ export async function exerciseWalkthroughFeedback(page: Page, card: Locator, ws:
   await expect(
     card.getByTestId("walkthrough-comment").filter({ hasText: "Draft for step one" }),
   ).toHaveAttribute("data-status", "sent");
+  await expect(card.getByRole("link", { name: "step-note.txt" })).toHaveAttribute(
+    "href",
+    new RegExp(attachmentId),
+  );
   await expect(card.getByRole("textbox")).toHaveCount(0);
   await expect(trigger).toContainText("(2)");
   if ((page.viewportSize()?.width ?? 1280) < 768) {
