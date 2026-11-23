@@ -650,5 +650,9 @@
   "runtimeUpdatePreviewRequestError": "이 업데이트를 확인하지 못했습니다: {{error}}",
   "runtimeUpdatePreviewUnavailable": "이 업데이트를 일괄 업데이트용으로 검증하지 못했습니다. 버전 관리를 사용하세요.",
   "runtimeUpdatePreviewChanged": "런타임 또는 대상 버전이 변경되었습니다. 업데이트를 다시 확인하세요.",
-  "runtimeUpdatePreviewIndividual": "이 런타임은 개별적으로 업데이트해야 합니다. 버전 관리를 사용하세요."
+  "runtimeUpdatePreviewIndividual": "이 런타임은 개별적으로 업데이트해야 합니다. 버전 관리를 사용하세요.",
+  "thinkingLevel": "사고 수준",
+  "useProviderDefault": "공급자 기본값 사용",
+  "thinkingLevelUnavailable": "{{value}} (사용 불가)",
+  "editProfile": "프로필 편집"
 }

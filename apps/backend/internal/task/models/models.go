@@ -1317,6 +1317,10 @@ func decodeAgentErrorCauses(raw json.RawMessage) []AgentErrorCause {
 		decodeOptionalErrorCauseString(fields, "attempted_model", &cause.AttemptedModel)
 		decodeOptionalErrorCauseString(fields, "requested_mode", &cause.RequestedMode)
 		decodeOptionalErrorCauseString(fields, "effective_mode", &cause.EffectiveMode)
+		decodeOptionalErrorCauseString(fields, "requested_setting", &cause.RequestedSetting)
+		decodeOptionalErrorCauseString(fields, "effective_setting", &cause.EffectiveSetting)
+		decodeOptionalErrorCauseString(fields, "setting_config_id", &cause.SettingConfigID)
+		decodeOptionalErrorCauseString(fields, "setting_source", &cause.SettingSource)
 		decodeOptionalErrorCauseString(fields, "runtime_version", &cause.RuntimeVersion)
 		if value, ok := fields["prompt_not_sent"]; ok {
 			var promptNotSent bool

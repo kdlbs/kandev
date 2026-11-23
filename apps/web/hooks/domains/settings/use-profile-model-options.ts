@@ -80,7 +80,7 @@ export function useProfileModelOptions({
     resolution.matchingOptionState,
   );
   const needsReconciliation = shouldReconcileOptions(
-    onChange,
+    profileReconciliationHandler(agentName, onChange),
     hasUserSelectedModel,
     resolution.matchingOptionState,
     profile,
@@ -418,4 +418,8 @@ function shouldReconcileOptions(
   if (!onChange || !hasUserSelectedModel || optionState?.status !== "ok") return false;
   const nextValues = reconcileConfigOptionValues(profile.config_options, configOptions);
   return JSON.stringify(nextValues) !== JSON.stringify(profile.config_options ?? {});
+}
+
+function profileReconciliationHandler(agentName: string, onChange: ModelOptionsInput["onChange"]) {
+  return agentName === "pi-acp" ? undefined : onChange;
 }

@@ -650,5 +650,9 @@
   "runtimeUpdatePreviewRequestError": "Ćōũĺďń'ţ ćĥēćķ ţĥĩś ũƥďàţē: {{error}}",
   "runtimeUpdatePreviewUnavailable": "Ţĥĩś ũƥďàţē ćōũĺďń'ţ ƀē vēŕĩƒĩēď ƒōŕ ƀũĺķ ũƥďàţĩńĝ. Ũśē Ḿàńàĝē vēŕśĩōńś.",
   "runtimeUpdatePreviewChanged": "Ţĥē ŕũńţĩḿē ōŕ ţàŕĝēţ vēŕśĩōń ćĥàńĝēď. Ćĥēćķ ƒōŕ ũƥďàţēś àĝàĩń.",
-  "runtimeUpdatePreviewIndividual": "Ţĥĩś ŕũńţĩḿē ńēēďś ţō ƀē ũƥďàţēď ĩńďĩvĩďũàĺĺŷ. Ũśē Ḿàńàĝē vēŕśĩōńś."
+  "runtimeUpdatePreviewIndividual": "Ţĥĩś ŕũńţĩḿē ńēēďś ţō ƀē ũƥďàţēď ĩńďĩvĩďũàĺĺŷ. Ũśē Ḿàńàĝē vēŕśĩōńś.",
+  "thinkingLevel": "Ţĥĩńķĩńĝ ĺēvēĺ",
+  "useProviderDefault": "Ũśē ƥŕōvĩďēŕ ďēƒàũĺţ",
+  "thinkingLevelUnavailable": "{{value}} (ũńàvàĩĺàƀĺē)",
+  "editProfile": "Ēďĩţ ƥŕōƒĩĺē"
 }
